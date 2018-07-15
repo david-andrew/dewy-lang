@@ -1,0 +1,678 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>lab3</title><meta name="generator" content="MATLAB 9.2"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2017-11-11"><meta name="DC.source" content="lab3.m"><style type="text/css">
+html,body,div,span,applet,object,iframe,h1,h2,h3,h4,h5,h6,p,blockquote,pre,a,abbr,acronym,address,big,cite,code,del,dfn,em,font,img,ins,kbd,q,s,samp,small,strike,strong,sub,sup,tt,var,b,u,i,center,dl,dt,dd,ol,ul,li,fieldset,form,label,legend,table,caption,tbody,tfoot,thead,tr,th,td{margin:0;padding:0;border:0;outline:0;font-size:100%;vertical-align:baseline;background:transparent}body{line-height:1}ol,ul{list-style:none}blockquote,q{quotes:none}blockquote:before,blockquote:after,q:before,q:after{content:'';content:none}:focus{outine:0}ins{text-decoration:none}del{text-decoration:line-through}table{border-collapse:collapse;border-spacing:0}
+
+html { min-height:100%; margin-bottom:1px; }
+html body { height:100%; margin:0px; font-family:Arial, Helvetica, sans-serif; font-size:10px; color:#000; line-height:140%; background:#fff none; overflow-y:scroll; }
+html body td { vertical-align:top; text-align:left; }
+
+h1 { padding:0px; margin:0px 0px 25px; font-family:Arial, Helvetica, sans-serif; font-size:1.5em; color:#d55000; line-height:100%; font-weight:normal; }
+h2 { padding:0px; margin:0px 0px 8px; font-family:Arial, Helvetica, sans-serif; font-size:1.2em; color:#000; font-weight:bold; line-height:140%; border-bottom:1px solid #d6d4d4; display:block; }
+h3 { padding:0px; margin:0px 0px 5px; font-family:Arial, Helvetica, sans-serif; font-size:1.1em; color:#000; font-weight:bold; line-height:140%; }
+
+a { color:#005fce; text-decoration:none; }
+a:hover { color:#005fce; text-decoration:underline; }
+a:visited { color:#004aa0; text-decoration:none; }
+
+p { padding:0px; margin:0px 0px 20px; }
+img { padding:0px; margin:0px 0px 20px; border:none; }
+p img, pre img, tt img, li img, h1 img, h2 img { margin-bottom:0px; } 
+
+ul { padding:0px; margin:0px 0px 20px 23px; list-style:square; }
+ul li { padding:0px; margin:0px 0px 7px 0px; }
+ul li ul { padding:5px 0px 0px; margin:0px 0px 7px 23px; }
+ul li ol li { list-style:decimal; }
+ol { padding:0px; margin:0px 0px 20px 0px; list-style:decimal; }
+ol li { padding:0px; margin:0px 0px 7px 23px; list-style-type:decimal; }
+ol li ol { padding:5px 0px 0px; margin:0px 0px 7px 0px; }
+ol li ol li { list-style-type:lower-alpha; }
+ol li ul { padding-top:7px; }
+ol li ul li { list-style:square; }
+
+.content { font-size:1.2em; line-height:140%; padding: 20px; }
+
+pre, code { font-size:12px; }
+tt { font-size: 1.2em; }
+pre { margin:0px 0px 20px; }
+pre.codeinput { padding:10px; border:1px solid #d3d3d3; background:#f7f7f7; }
+pre.codeoutput { padding:10px 11px; margin:0px 0px 20px; color:#4c4c4c; }
+pre.error { color:red; }
+
+@media print { pre.codeinput, pre.codeoutput { word-wrap:break-word; width:100%; } }
+
+span.keyword { color:#0000FF }
+span.comment { color:#228B22 }
+span.string { color:#A020F0 }
+span.untermstring { color:#B20000 }
+span.syscmd { color:#B28C00 }
+
+.footer { width:auto; padding:10px 0px; margin:25px 0px 0px; border-top:1px dotted #878787; font-size:0.8em; line-height:140%; font-style:italic; color:#878787; text-align:left; float:none; }
+.footer p { margin:0px; }
+.footer a { color:#878787; }
+.footer a:hover { color:#878787; text-decoration:underline; }
+.footer a:visited { color:#878787; }
+
+table th { padding:7px 5px; text-align:left; vertical-align:middle; border: 1px solid #d6d4d4; font-weight:bold; }
+table td { padding:7px 5px; text-align:left; vertical-align:top; border:1px solid #d6d4d4; }
+
+
+
+
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#2">Setup</a></li><li><a href="#3">Part 3 a) Forward Kinematic Map Verification</a></li><li><a href="#4">Part 3 b) Body Jacobian Verification</a></li><li><a href="#5">Part 3 c) Manipulability Measure Verification</a></li><li><a href="#6">Part 3 d) Twist from g Transform Verification</a></li><li><a href="#7">Part 3 e) Resolved Rate Controller Test Validation</a></li></ul></div><pre class="codeinput"><span class="comment">% main driver script for lab3</span>
+
+<span class="comment">%%%%%BEFORE LAUNCHING THIS SCRIPT%%%%%%%%%</span>
+<span class="comment">% hide 'base_link' and 'tool0' and show 'base' and 'ee_link' in rviz</span>
+<span class="comment">% 'base' is the spactial frame, and 'ee_link' is the tool frame</span>
+</pre><h2 id="2">Setup</h2><pre class="codeinput">clear
+clc
+close <span class="string">all</span>
+
+
+rosshutdown
+rosinit
+ur5 = ur5_interface();
+
+<span class="comment">%redefine base frame position based off of construction</span>
+<span class="comment">%the ur5 configuration from assignment 4 number 2 is defined as gst0</span>
+tf_frame(<span class="string">'base_link'</span>, <span class="string">'base'</span>, [ROTZ(pi/2) [0 0 0.0892]'; 0 0 0 0]);
+pause(1)
+</pre><pre class="codeoutput">Shutting down global node /matlab_global_node_88464 with NodeURI http://david-MSI-Desktop:36653/
+The value of the ROS_MASTER_URI environment variable, http://localhost:11311, will be used to connect to the ROS master.
+Initializing global node /matlab_global_node_63998 with NodeURI http://david-MSI-Desktop:42983/
+Shutting down global node /matlab_global_node_63998 with NodeURI http://david-MSI-Desktop:42983/
+The value of the ROS_MASTER_URI environment variable, http://localhost:11311, will be used to connect to the ROS master.
+Initializing global node /matlab_global_node_30715 with NodeURI http://david-MSI-Desktop:33987/
+</pre><h2 id="3">Part 3 a) Forward Kinematic Map Verification</h2><pre class="codeinput">fprintf(<span class="string">'\n\nBeginning testing of ur5FwdKin() function:\n'</span>)
+
+<span class="keyword">for</span> i = 1:4
+
+    <span class="comment">%generate a rigid transform in the space</span>
+    <span class="keyword">while</span> true
+        q = [rand(1,6)*2*pi - pi]'; <span class="comment">%generate joint values within limits</span>
+        q(2) = -rand * pi;           <span class="comment">%force q2 to be positive so that it doesnt intersect the floor</span>
+
+        <span class="comment">%tf_frame('base', 'Forward_Kinematics', ur5FwdKin(joints - ur5.home));</span>
+
+        g = ur5FwdKin(q - ur5.home);
+
+        <span class="keyword">if</span> g(3,4) &gt; 0.1 <span class="comment">%check to make sure g is above the floor</span>
+            <span class="keyword">break</span>
+        <span class="keyword">end</span>
+    <span class="keyword">end</span>
+
+
+
+    fwdKinToolFrame = tf_frame(<span class="string">'base'</span>,<span class="string">'fwdKinToolFrame'</span>,eye(4));
+    fwdKinToolFrame.move_frame(<span class="string">'base'</span>,g);
+
+
+    <span class="comment">%for generating screenshots</span>
+    <span class="comment">%pause</span>
+
+    <span class="comment">%make sure to hide tool0 and show ee_link</span>
+    ur5.move_joints(q, 7);
+    pause(7.1)
+    err = norm(ur5.get_current_transformation(<span class="string">'base'</span>,<span class="string">'ee_link'</span>) - g);
+    fprintf(<span class="string">'\terror between current position and forward map is %d\n'</span>, err);
+
+<span class="keyword">end</span>
+
+fprintf(<span class="string">'Finished testing of ur5FwdKin() function.\n\n'</span>)
+</pre><pre class="codeoutput">
+
+Beginning testing of ur5FwdKin() function:
+	error between current position and forward map is 4.753129e-04
+	error between current position and forward map is 4.318107e-04
+	error between current position and forward map is 2.887373e-04
+	error between current position and forward map is 4.099708e-04
+Finished testing of ur5FwdKin() function.
+
+</pre><h2 id="4">Part 3 b) Body Jacobian Verification</h2><pre class="codeinput">fprintf(<span class="string">'Beginning testing of ur5BodyJacobian() function:\n'</span>)
+
+<span class="keyword">for</span> i = 1:10
+    <span class="comment">%generate random valid joints</span>
+    q = [rand(1,6)*2*pi - pi]';
+
+    g = ur5FwdKin(q);           <span class="comment">%tranform at q</span>
+    J = ur5BodyJacobian(q);     <span class="comment">%jacobain at q</span>
+    Japprox = zeros(6,6);       <span class="comment">%matrix for jacobian approximation</span>
+
+
+    e = eye(6);    <span class="comment">%easy access to standard basis vectors in R^6</span>
+
+    <span class="keyword">for</span> i = 1:6
+        ei = e(:,i);    <span class="comment">%get the current basis vector</span>
+        dgdq_i = 1/2/epsilon * ( ur5FwdKin(q + epsilon*ei) - ur5FwdKin(q - epsilon*ei) );
+        xi_hat = rigid_inverse(g)*dgdq_i;
+
+        <span class="comment">%twistify xi_hat, and insert into jacobian approximation</span>
+        Japprox(:,i) = vee(xi_hat);
+
+    <span class="keyword">end</span>
+
+    err = norm(J - Japprox);
+    fprintf(<span class="string">'\terror between Jacobian and central difference approximation is %d\n'</span>, err);
+
+<span class="keyword">end</span>
+
+
+fprintf(<span class="string">'Finished testing of ur5BodyJacobian() function.\n\n'</span>)
+</pre><pre class="codeoutput">Beginning testing of ur5BodyJacobian() function:
+	error between Jacobian and central difference approximation is 2.559420e-06
+	error between Jacobian and central difference approximation is 5.275562e-06
+	error between Jacobian and central difference approximation is 2.000121e-06
+	error between Jacobian and central difference approximation is 3.264981e-06
+	error between Jacobian and central difference approximation is 1.955514e-06
+	error between Jacobian and central difference approximation is 2.977764e-06
+	error between Jacobian and central difference approximation is 3.819921e-06
+	error between Jacobian and central difference approximation is 4.913408e-06
+	error between Jacobian and central difference approximation is 3.514969e-06
+	error between Jacobian and central difference approximation is 2.115468e-06
+Finished testing of ur5BodyJacobian() function.
+
+</pre><h2 id="5">Part 3 c) Manipulability Measure Verification</h2><pre class="codeinput"><span class="comment">%generate a q value that is not near a singularity</span>
+<span class="keyword">while</span> true
+    q = [rand(1,6)*2*pi - pi]';
+    <span class="keyword">if</span> manipulability(ur5BodyJacobian(q), <span class="string">'invcond'</span>) &gt; 0.01
+        <span class="keyword">break</span>
+    <span class="keyword">end</span>
+<span class="keyword">end</span>
+
+<span class="comment">%set the joints to a singular configuration (q3 = 0)</span>
+q(3) = 0;
+
+pts = 100;   <span class="comment">%how many points to plot</span>
+
+sigmamin = zeros(pts,1);
+detjac = zeros(pts,1);
+invcond = zeros(pts,1);
+
+i = 1;                          <span class="comment">%keep track of index</span>
+theta = -pi/4:pi/2/(pts-1):pi/4;    <span class="comment">%range to vary q3 over</span>
+<span class="keyword">for</span> q3 = theta
+    q(3) = q3;
+    sigmamin(i) = manipulability(ur5BodyJacobian(q), <span class="string">'sigmamin'</span>);
+    detjac(i) = manipulability(ur5BodyJacobian(q), <span class="string">'detjac'</span>);
+    invcond(i) = manipulability(ur5BodyJacobian(q), <span class="string">'invcond'</span>);
+
+    i = i + 1;  <span class="comment">%update to next index</span>
+<span class="keyword">end</span>
+
+figure
+plot(theta, sigmamin)
+title(<span class="string">'Minimum Sigma Near Singularity'</span>)
+xlabel(<span class="string">'q3 angle (radians)'</span>)
+ylabel(<span class="string">'manipulability'</span>)
+
+figure
+plot(theta, detjac)
+title(<span class="string">'Jacobian Determinant Near Singularity'</span>)
+xlabel(<span class="string">'q3 angle (radians)'</span>)
+ylabel(<span class="string">'manipulability'</span>)
+
+figure
+plot(theta, invcond)
+title(<span class="string">'Inverse of Condition Number Near Singularity'</span>)
+xlabel(<span class="string">'q3 angle (radians)'</span>)
+ylabel(<span class="string">'manipulability'</span>)
+</pre><img vspace="5" hspace="5" src="lab3_01.png" alt=""> <img vspace="5" hspace="5" src="lab3_02.png" alt=""> <img vspace="5" hspace="5" src="lab3_03.png" alt=""> <h2 id="6">Part 3 d) Twist from g Transform Verification</h2><pre class="codeinput">fprintf(<span class="string">'Beginning testing of getXi() function:\n'</span>)
+
+<span class="keyword">for</span> i = 1:24
+
+
+    <span class="comment">%generate a random twist</span>
+    xi = [( rand(3,1)-0.5 ) * 2; ( rand(3,1)-0.5 ) * 2*pi];
+
+    <span class="comment">%occasionally force pure translation or pure rotation twists</span>
+    <span class="keyword">if</span> mod(i,3) == 0 xi(1:3) = 0; <span class="keyword">end</span>
+    <span class="keyword">if</span> mod(i,3) == 1 xi(4:6) = 0; <span class="keyword">end</span>
+
+
+    g = expm(wedge(xi));
+    xi_comp = getXi(g);
+
+    colinear = norm(proj(xi, xi_comp) - xi_comp);   <span class="comment">%are xi and xi_comp colinear</span>
+    same_dir = dot(proj(xi, xi_comp), xi) &gt; 0;      <span class="comment">%are xi and xi_comp pointing in the same direction</span>
+
+    <span class="comment">%compute twist angle, and correct for if xi and xi_comp are pointing opposite</span>
+    <span class="keyword">if</span> same_dir
+        angle_diff = norm(xi) - norm(xi_comp);
+    <span class="keyword">else</span>
+        angle_diff = 2*pi - norm(xi) - norm(xi_comp);
+
+    <span class="keyword">end</span>
+
+
+
+    <span class="comment">%display warnings if the returned values are different</span>
+    <span class="keyword">if</span> colinear &gt; epsilon
+        warning(<span class="string">'Returned non-colinear twist'</span>)
+    <span class="keyword">elseif</span> angle_diff &gt; epsilon
+        warning(<span class="string">'different twist angle returned.'</span>)
+
+    <span class="keyword">end</span>
+
+
+    fprintf(<span class="string">'\terror between input and computed twist is %d\n'</span>, max(colinear,angle_diff));
+
+
+<span class="keyword">end</span>
+
+fprintf(<span class="string">'\nthe instances where err is large are caused by the rotations occuring around axes rotated by 180 degrees.\n'</span>)
+fprintf(<span class="string">'I account for this with planer and pure rotation, but haven''t figured out how to do so for general twists\n\n'</span>)
+
+fprintf(<span class="string">'Finished testing of getXi() function\n\n'</span>)
+</pre><pre class="codeoutput">Beginning testing of getXi() function:
+	error between input and computed twist is 2.775558e-17
+Warning: Returned non-colinear twist 
+	error between input and computed twist is 1.290590e+00
+	error between input and computed twist is 1.332268e-15
+	error between input and computed twist is 0
+Warning: Returned non-colinear twist 
+	error between input and computed twist is 4.648989e-01
+	error between input and computed twist is 2.220446e-15
+	error between input and computed twist is 0
+	error between input and computed twist is 4.422836e-15
+	error between input and computed twist is 4.440892e-16
+	error between input and computed twist is 0
+	error between input and computed twist is 1.387779e-16
+	error between input and computed twist is 1.190159e-13
+	error between input and computed twist is 0
+	error between input and computed twist is 7.791361e-16
+	error between input and computed twist is 4.965068e-16
+	error between input and computed twist is 0
+Warning: Returned non-colinear twist 
+	error between input and computed twist is 3.994852e-01
+	error between input and computed twist is 1.110223e-15
+	error between input and computed twist is 0
+	error between input and computed twist is 1.776357e-15
+	error between input and computed twist is 2.719480e-16
+	error between input and computed twist is 1.110223e-16
+	error between input and computed twist is 3.390841e-16
+	error between input and computed twist is 2.155663e-15
+
+the instances where err is large are caused by the rotations occuring around axes rotated by 180 degrees.
+I account for this with planer and pure rotation, but haven't figured out how to do so for general twists
+
+Finished testing of getXi() function
+
+</pre><h2 id="7">Part 3 e) Resolved Rate Controller Test Validation</h2><pre class="codeinput">fprintf(<span class="string">'Beginning testing of ur5RRcontrol() function.\n'</span>)
+
+K = 0.1;    <span class="comment">% gain for controller</span>
+
+<span class="keyword">while</span> true
+
+    fprintf(<span class="string">'\tAttempting RR control\n'</span>)
+
+    <span class="comment">%move the ur5 to a start configuration with good manipulability</span>
+    <span class="keyword">if</span> manipulability(ur5BodyJacobian(force_get_current_joints(ur5) - ur5.home), <span class="string">'invcond'</span>) &lt; 0.01
+        <span class="comment">%move the ur5 from the singular starting position</span>
+        ur5.move_joints(ur5.home + rand(6,1), 5)
+        <span class="keyword">while</span> true
+            jstart = rand(6,1)*2*pi - pi;
+            gs = ur5FwdKin(jstart);
+
+            <span class="comment">%ensure selected transform is above the ground, not over the center,</span>
+            <span class="comment">%and not (nearly) singular</span>
+            <span class="keyword">if</span> gs(3,4) &gt; 0.1 &amp; sqrt(gs(2,4)^2 + gs(1,4)^2) &gt; 0.1 &amp; <span class="keyword">...</span>
+                    manipulability(ur5BodyJacobian(jstart), <span class="string">'invcond'</span>) &gt; 0.01
+                <span class="keyword">break</span>
+            <span class="keyword">end</span>
+        <span class="keyword">end</span>
+    pause(5)
+    <span class="keyword">end</span>
+
+
+
+    <span class="comment">%generate a goal transform to move to</span>
+    <span class="keyword">while</span> true
+        jfinal = rand(6,1)*2*pi - pi;
+        jfinal(2) = -rand*pi;   <span class="comment">%force the transform to be above the ground</span>
+        gf = ur5FwdKin(jfinal);
+
+        <span class="comment">%ensure selected transform is above the ground, not over the center,</span>
+        <span class="comment">%and not (nearly) singular</span>
+        <span class="keyword">if</span> gf(3,4) &gt; 0.1 &amp; sqrt(gf(2,4)^2 + gf(1,4)^2) &gt; 0.3 &amp; <span class="keyword">...</span>
+                manipulability(ur5BodyJacobian(jfinal), <span class="string">'invcond'</span>) &gt; 0.01
+            <span class="keyword">break</span>
+        <span class="keyword">end</span>
+    <span class="keyword">end</span>
+
+    <span class="comment">%display the goal frame in rvis</span>
+    Frame_goal = tf_frame(<span class="string">'base'</span>, <span class="string">'Goal'</span>, gf);
+    pause(0.3)
+
+
+    <span class="comment">%drive the arm to the goal transform</span>
+    finalerr = ur5RRcontrol(gf, K, ur5);
+
+    <span class="keyword">if</span> finalerr ~= -1
+        fprintf(<span class="string">'final distance to goal: %0.2f cm\n'</span>, finalerr);
+        <span class="keyword">break</span>   <span class="comment">% exit loop on successful completion</span>
+    <span class="keyword">else</span>
+        fprintf(<span class="string">'encountered singularity on trajectory. Retrying\n'</span>)
+        <span class="comment">%stay in loop if unsuccessful</span>
+        pause(5)
+    <span class="keyword">end</span>
+
+
+<span class="keyword">end</span>
+
+
+
+
+<span class="comment">%demonstrate end at a singularity</span>
+fprintf(<span class="string">'\n\tAttempting controller while starting at a singularity\n'</span>)
+
+jstart = ur5.home;   <span class="comment">% start at a singularity</span>
+ur5.move_joints(jstart, 5)
+pause(5.1)
+
+jfinal = rand(6,1)*2*pi - pi;   <span class="comment">% end position</span>
+
+
+gf = ur5FwdKin(jfinal);
+ur5RRcontrol(gf, K, ur5);   <span class="comment">%this should necessarily fail</span>
+
+
+fprintf(<span class="string">'Finished testing of ur5RRcontrol() function\n\n'</span>)
+</pre><pre class="codeoutput">Beginning testing of ur5RRcontrol() function.
+	Attempting RR control
+final distance to goal: 0.96 cm
+
+	Attempting controller while starting at a singularity
+Warning: UR5 is near a singularity. Resetting ur5 position and exiting
+RRcontroller. 
+Finished testing of ur5RRcontrol() function
+
+</pre><p class="footer"><br><a href="http://www.mathworks.com/products/matlab/">Published with MATLAB&reg; R2017a</a><br></p></div><!--
+##### SOURCE BEGIN #####
+% main driver script for lab3
+
+%%%%%BEFORE LAUNCHING THIS SCRIPT%%%%%%%%%
+% hide 'base_link' and 'tool0' and show 'base' and 'ee_link' in rviz
+% 'base' is the spactial frame, and 'ee_link' is the tool frame
+
+
+
+%% Setup
+
+clear
+clc
+close all
+
+
+rosshutdown
+rosinit
+ur5 = ur5_interface();
+
+%redefine base frame position based off of construction
+%the ur5 configuration from assignment 4 number 2 is defined as gst0
+tf_frame('base_link', 'base', [ROTZ(pi/2) [0 0 0.0892]'; 0 0 0 0]);
+pause(1)
+
+%% Part 3 a) Forward Kinematic Map Verification
+
+fprintf('\n\nBeginning testing of ur5FwdKin() function:\n')
+
+for i = 1:4
+
+    %generate a rigid transform in the space
+    while true
+        q = [rand(1,6)*2*pi - pi]'; %generate joint values within limits
+        q(2) = -rand * pi;           %force q2 to be positive so that it doesnt intersect the floor
+
+        %tf_frame('base', 'Forward_Kinematics', ur5FwdKin(joints - ur5.home));
+
+        g = ur5FwdKin(q - ur5.home);
+
+        if g(3,4) > 0.1 %check to make sure g is above the floor
+            break
+        end
+    end
+
+
+
+    fwdKinToolFrame = tf_frame('base','fwdKinToolFrame',eye(4));
+    fwdKinToolFrame.move_frame('base',g);
+
+
+    %for generating screenshots
+    %pause
+
+    %make sure to hide tool0 and show ee_link
+    ur5.move_joints(q, 7);
+    pause(7.1)
+    err = norm(ur5.get_current_transformation('base','ee_link') - g);
+    fprintf('\terror between current position and forward map is %d\n', err);
+
+end
+
+fprintf('Finished testing of ur5FwdKin() function.\n\n')
+
+
+%% Part 3 b) Body Jacobian Verification
+fprintf('Beginning testing of ur5BodyJacobian() function:\n')
+
+for i = 1:10
+    %generate random valid joints
+    q = [rand(1,6)*2*pi - pi]';
+
+    g = ur5FwdKin(q);           %tranform at q
+    J = ur5BodyJacobian(q);     %jacobain at q
+    Japprox = zeros(6,6);       %matrix for jacobian approximation
+
+
+    e = eye(6);    %easy access to standard basis vectors in R^6
+
+    for i = 1:6
+        ei = e(:,i);    %get the current basis vector
+        dgdq_i = 1/2/epsilon * ( ur5FwdKin(q + epsilon*ei) - ur5FwdKin(q - epsilon*ei) );
+        xi_hat = rigid_inverse(g)*dgdq_i;
+
+        %twistify xi_hat, and insert into jacobian approximation
+        Japprox(:,i) = vee(xi_hat);
+
+    end
+
+    err = norm(J - Japprox);
+    fprintf('\terror between Jacobian and central difference approximation is %d\n', err);
+    
+end
+
+
+fprintf('Finished testing of ur5BodyJacobian() function.\n\n')
+
+
+%% Part 3 c) Manipulability Measure Verification
+
+%generate a q value that is not near a singularity
+while true
+    q = [rand(1,6)*2*pi - pi]';
+    if manipulability(ur5BodyJacobian(q), 'invcond') > 0.01
+        break
+    end
+end
+
+%set the joints to a singular configuration (q3 = 0)
+q(3) = 0;
+
+pts = 100;   %how many points to plot
+
+sigmamin = zeros(pts,1);
+detjac = zeros(pts,1);
+invcond = zeros(pts,1);
+
+i = 1;                          %keep track of index
+theta = -pi/4:pi/2/(pts-1):pi/4;    %range to vary q3 over
+for q3 = theta
+    q(3) = q3;
+    sigmamin(i) = manipulability(ur5BodyJacobian(q), 'sigmamin');
+    detjac(i) = manipulability(ur5BodyJacobian(q), 'detjac');
+    invcond(i) = manipulability(ur5BodyJacobian(q), 'invcond');
+    
+    i = i + 1;  %update to next index
+end
+
+figure
+plot(theta, sigmamin)
+title('Minimum Sigma Near Singularity')
+xlabel('q3 angle (radians)')
+ylabel('manipulability')
+
+figure
+plot(theta, detjac)
+title('Jacobian Determinant Near Singularity')
+xlabel('q3 angle (radians)')
+ylabel('manipulability')
+
+figure
+plot(theta, invcond)
+title('Inverse of Condition Number Near Singularity')
+xlabel('q3 angle (radians)')
+ylabel('manipulability')
+
+
+
+%% Part 3 d) Twist from g Transform Verification
+fprintf('Beginning testing of getXi() function:\n')
+
+for i = 1:24
+
+
+    %generate a random twist
+    xi = [( rand(3,1)-0.5 ) * 2; ( rand(3,1)-0.5 ) * 2*pi];
+    
+    %occasionally force pure translation or pure rotation twists
+    if mod(i,3) == 0 xi(1:3) = 0; end
+    if mod(i,3) == 1 xi(4:6) = 0; end
+
+    
+    g = expm(wedge(xi));
+    xi_comp = getXi(g);
+    
+    colinear = norm(proj(xi, xi_comp) - xi_comp);   %are xi and xi_comp colinear
+    same_dir = dot(proj(xi, xi_comp), xi) > 0;      %are xi and xi_comp pointing in the same direction
+    
+    %compute twist angle, and correct for if xi and xi_comp are pointing opposite
+    if same_dir
+        angle_diff = norm(xi) - norm(xi_comp);
+    else
+        angle_diff = 2*pi - norm(xi) - norm(xi_comp);
+        
+    end
+    
+    
+    
+    %display warnings if the returned values are different
+    if colinear > epsilon
+        warning('Returned non-colinear twist')
+    elseif angle_diff > epsilon
+        warning('different twist angle returned.')
+        
+    end
+    
+    
+    fprintf('\terror between input and computed twist is %d\n', max(colinear,angle_diff));
+    
+
+end
+
+fprintf('\nthe instances where err is large are caused by the rotations occuring around axes rotated by 180 degrees.\n')
+fprintf('I account for this with planer and pure rotation, but haven''t figured out how to do so for general twists\n\n')
+
+fprintf('Finished testing of getXi() function\n\n')
+
+
+%% Part 3 e) Resolved Rate Controller Test Validation
+
+fprintf('Beginning testing of ur5RRcontrol() function.\n')
+
+K = 0.1;    % gain for controller
+
+while true
+
+    fprintf('\tAttempting RR control\n')
+    
+    %move the ur5 to a start configuration with good manipulability
+    if manipulability(ur5BodyJacobian(force_get_current_joints(ur5) - ur5.home), 'invcond') < 0.01
+        %move the ur5 from the singular starting position
+        ur5.move_joints(ur5.home + rand(6,1), 5)
+        while true
+            jstart = rand(6,1)*2*pi - pi;
+            gs = ur5FwdKin(jstart);
+
+            %ensure selected transform is above the ground, not over the center,  
+            %and not (nearly) singular
+            if gs(3,4) > 0.1 & sqrt(gs(2,4)^2 + gs(1,4)^2) > 0.1 & ... 
+                    manipulability(ur5BodyJacobian(jstart), 'invcond') > 0.01
+                break
+            end
+        end
+    pause(5)
+    end
+
+
+
+    %generate a goal transform to move to
+    while true
+        jfinal = rand(6,1)*2*pi - pi;
+        jfinal(2) = -rand*pi;   %force the transform to be above the ground
+        gf = ur5FwdKin(jfinal);
+
+        %ensure selected transform is above the ground, not over the center,  
+        %and not (nearly) singular
+        if gf(3,4) > 0.1 & sqrt(gf(2,4)^2 + gf(1,4)^2) > 0.3 & ... 
+                manipulability(ur5BodyJacobian(jfinal), 'invcond') > 0.01
+            break
+        end
+    end
+
+    %display the goal frame in rvis
+    Frame_goal = tf_frame('base', 'Goal', gf);
+    pause(0.3)
+
+
+    %drive the arm to the goal transform
+    finalerr = ur5RRcontrol(gf, K, ur5);
+
+    if finalerr ~= -1
+        fprintf('final distance to goal: %0.2f cm\n', finalerr);
+        break   % exit loop on successful completion
+    else
+        fprintf('encountered singularity on trajectory. Retrying\n')
+        %stay in loop if unsuccessful
+        pause(5)
+    end
+
+
+end
+
+
+
+
+%demonstrate end at a singularity
+fprintf('\n\tAttempting controller while starting at a singularity\n')
+
+jstart = ur5.home;   % start at a singularity
+ur5.move_joints(jstart, 5)
+pause(5.1)
+
+jfinal = rand(6,1)*2*pi - pi;   % end position
+
+
+gf = ur5FwdKin(jfinal);
+ur5RRcontrol(gf, K, ur5);   %this should necessarily fail
+
+
+fprintf('Finished testing of ur5RRcontrol() function\n\n')
+##### SOURCE END #####
+--></body></html>

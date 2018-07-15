@@ -1,0 +1,25 @@
+/{
+By listing the first six prime numbers: 2, 3, 5, 7, 11, and 13, we can see that the 6th prime is 13.
+
+What is the 10,001st prime number?
+}/
+
+primes = [2 3].sll
+
+main
+{
+    candidate = 3   //potential value to add to the primes list
+    
+    #loop1 loop primes.length <? 10001
+    {
+        candidate += 2
+        loop p in primes
+            if candidate % p =? 0 continue #loop1
+            
+        primes.append(candidate)
+        
+        
+    }
+    
+    print(primes[-0])
+}

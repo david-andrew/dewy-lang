@@ -1,0 +1,103 @@
+//notes about the standard library
+
+/{
+About this file:
+
+everything in dewy will be provided to the user as files.
+the standard library will be a set of files, which are in general automatically invoked during runtime
+
+below is a list with partial/full implementations of the stl functions
+also included will be attributes that are to be specified by the standard library, e.g. base, or units
+
+}/
+
+/{
+how to use the standard library
+
+unlike languages where standard library items have to be imported manually, dewy handles this automatically.
+In order to not bog programs down, by default nothing is imported from the standard library
+only when a program calls a stdlib function/etc. will the functionality be imported
+dewy compilers will automatically recognize which functions/etc. from the standard library are used, and import them
+
+e.g. if you have a program that uses math functionality, dewy will import the necessary functions from the math stdlib files
+}/
+main()
+{
+    x = rand(real32, 0, 1)
+    y = sin(2*pi radians * x)
+}
+
+/{
+the compiler will automatically import the functions "rand()" and "sin()" as well as the math literal "pi"
+
+the way this will be accomplished is that every time the standard library is updated/compiled/(?) an element list will be created/updated
+every time a program is compiled, matching items in the list encountered in the code tell the compiler to include that element
+-this can be done by either 1) for every unknown element, checking if it exists within the stdlib element list
+-or 2) for each element in the stdlib element list, performing a search of the source to see if any instances are found
+the second way is will take longer to perform, especially if the stdlib element list is particularly long, but it is a safer bet
+the first way might be good though because the user could define custom functions/etc. from user packages that they would want to overwrite the defaults from the stdlib
+-this should throw a warning that tells the user that an overwrite has occured
+
+In addition to automatically importing stdlib elements, also have a way for automatically importing user packages
+-this should be accomplished simply by having an "usrlib" folder next to the "stdlib" folder
+-any user written functions in usrlib would be handled the same way as the standard library
+-i.e. an usrlib element list would be created and maintained, and the same element checking would be performed at compile time
+}/
+
+
+/{
+Stndard options:
+
+in addition to a standard library contained in the stdlib folder, there will be an additional file containing a standard set of options to use when running dewy programs
+
+standard options include:
+"real_comparison_epsilon"
+-this is how close two float values have to be to be considered the same
+-i.e. if the comparison "val =? 123.456" is made, then the question is rephrased as "|val - 123.456| <=? real_comparison_epsilon"
+-may need a slightly different definition that compares the underlying bits rather than the raw value due to the non-uniformity of floating point values
+
+"base number digits"
+-this is the set of symbols/digits that make up a base
+-base 10 will probably be fixed, but other bases can be modified
+-additional other bases that aren't default can be specified
+-e.g. base 12 could be set to [0 1 2 3 4 5 6 7 8 9 X Z]
+-my base 12 will probably be something like [A B C D E F G H I J K L]
+}/
+
+
+/{
+units:
+
+base units will be the proposed updated version of the S.I. units.
+base units will be defined by their respective cosmological constants
+-note that this definition probably doesn't need to be included in the implementation
+values in program will be stored as a multiple of the base units
+conversions will be defined relative to S.I. units
+
+units:
+[length]						meter
+[mass]							kilogram
+[time]							second
+[electric current]				ampere
+[thermodynamic temperature]		kelvin
+[amount of substance]			mol
+[luminous intensity]			candela
+
+
+Included units:
+S.I. Units (base units)
+United States Customary Units
+
+possible additional units:
+Imperial units
+natural units - see: https://en.wikipedia.org/wiki/Natural_units
+dewy units - my base 12 units system, where all units would be on the human scale
+- all units would be derived from natural units, and would be a power of the original natural unit
+- e.g. the mass base unit would be something like #12_10^20 * the mass of an electron
+
+
+unit conversion will be handled with functions
+>> USC(10 kg)
+	22.0462 lbm
+
+}/

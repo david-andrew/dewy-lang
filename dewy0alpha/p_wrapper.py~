@@ -1,0 +1,11 @@
+from scanner import Scanner
+from parser import Parser
+
+
+while True:
+    string = input(">>> ")
+    print(Parser.print_tree2(Parser.split_by_lowest_precedence(Scanner(string).scan())))
+    #p = Parser(Scanner(string).scan())
+    #p.parse()
+    #print(str(p))
+    

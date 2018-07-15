@@ -1,0 +1,301 @@
+// function headers specify for each input argument whether the argument is copied or passed
+
+
+some_function(int a, uint b, real c, string d, some_object e, ptr f)
+{
+	a += 1
+	b -= 2
+	c = a/b					//this should be float division
+							// a(/)b maybe something like this for int division
+	d = "random text"
+	e = new some_object()	//maybe change the way that new objects are initialized
+	@f = 10 				//the variable f pointed probably was an int. not sure if want to restrict things like that...
+							//need to figure out the mechanics of pointers, and possibly pointer types
+	f -> new uint64			//if we wanted to point to an existing variable, we'd maybe say f -> @a
+	
+	status = 1				//this is instead of returning 1 for function success
+	
+	return					//end of function. If no value is to be returned, a return statement is optional
+}
+
+
+different_function(int @a, uint @b, real @c, string @d, some_object @e, ptr @f)
+{
+	a += 1
+	b -= 2
+	c = a/b
+	d = "random text"
+	e = new some_object()
+	@f = 451
+	f -> new uint64
+	
+	status = 1
+}
+
+
+//the function named main is always run in a file. no python "if __name__== 'main'" 
+//also main probably won't have the argument parenthesis "()" of a normal function
+//potentially, if a file is run without main, the whole file is executed like a script
+main
+{
+	//note that all variable declarations without a size specification default to 32-bit
+	//e.g. "int apple" is equivalent to "int32 apple"
+
+	int apricot = 10
+	uint bananan = 20
+	real coconut = 12.345e-123
+	string doughnut = "this is a string"
+	some_object elephant = new some_object()
+	ptr falcon -> new int	//not sure if this is a good pointer initializer
+	@falcon = 245
+	
+	//only copies of variables are passed to this function
+	//thus none of the variables passed are modified
+	//the int @falcon is changed to be equal to 10 by this function
+	some_function(apricot, bananan, coconut, doughnut, elephant, falcon)
+	
+	//the actual variables are passed to this function
+	//thus all of the variables passed are modified
+	//in addition, the old address of @falcon is now equal to 451
+	different_function(apricot, bananan, coconut, doughnut, elephant, falcon)
+	
+	
+	
+}
+
+
+
+
+//THINGS TO CONSIDER FOR THE FUTURE:
+//(also the following is written in interpreter format)
+
+
+/{
+function pointers
+c pointers are too difficult to read. and frankly, this is the result of not having strong support for lists
+
+to alleviate this, dewy will separate functionality by having the useful parts of pointers, and implementing strong list functionality
+
+e.g. if i have the following functions:
+>>> red() { return "red" }
+>>> orange() { return "orange" }
+>>> green() { return "green" }
+>>> blue() { return "blue" }
+>>> purple() { return "purple" }
+
+then i can declare
+>>> func a -> orange
+and then I can call
+>>> print(@a())
+   
+   orange
+   
+>>> if [a ->? green] 
+...{ print("a points to green().") }
+...else
+...{ print("a does not point to green().") }
+
+	a does not point to green().
+  
+  
+I can also make an array of functions:
+>>> func[] b -> [red, orange, green, blue, purple]		//note that commas are unnecessary when declaring an array
+>>> loop [color in b, int i = 0, i++] { print( "function at " + i + " is: " + @color() ) }
+
+   function at 0 is red
+   function at 1 is orange
+   function at 2 is green
+   function at 3 is blue
+   function at 4 is purple
+
+}/
+
+
+
+
+/{
+pointers and pointer notation (also function pointer notation)
+
+declaring a pointer uses the following notation
+
+>> ptr a -> real64
+declares a pointer named "a" which points to a 64-bit real number
+
+>> ptr b ->->-> cplx128
+declares a pointer to a pointer to a pointer to a 128-bit complex number
+this is probably shorthand for:
+>> ptr b -> ptr -> ptr -> cplx128
+
+to access the data in the pointer, "@" is used.
+literally "data at pointer"
+>> @a = 15.67
+>> @@@b = 123.42 + 987.54i
+
+
+
+
+simular notation is used for functions
+>> func apple -> foo
+>> @apple()				//this calls foo()
+
+
+
+
+}/
+
+
+
+
+
+
+/{
+notes about boolean operators
+
+>> a and b
+is the boolean and between the numbers a, as well as b 
+the result is a number the length of the longest number's size
+
+conditionals expect a boolean as input
+>> if [a =? b] { /{do something}/ }
+=? returns a boolean value
+
+>> if [a and b] { /{do something else}/ }
+this will only work if both a, and b are boolean values
+if they are integers, then "a and b" returns the boolean and over each bit
+if they are a different type, "a and b" throws an error
+
+the same is true for all other boolean operators
+or, xor, and, nand, nor, xnor, not
+||, x||, &&,  !&&,  !||, x!||, ! (maybe leave most of these unimplementd... they're too confusing to read!)
+
+the one exception is the "not" or "!" operator
+which can also be used as a conditional via "not?" or "!?"
+
+if you want to use an entire integer as a boolean for a conditional
+then you must cast the integer as a boolean, or use a comparison
+
+int c = 45, d = 72
+if [((c and d) to bool)] { /{do a different something else}/ } //(Need a better notation for casting)
+
+
+
+}/
+
+
+
+
+/{
+math data types and precisions
+
+Basic Types
+natural:		uint (nat?) (both?)
+integer:		int
+real number:	real
+complex number:	cplx
+quaternion?:	quat
+
+
+Basic Precisions
+8-bit
+16-bit
+32-bit
+64-bit
+128-bit
+256-bit
+_big
+
+Special Type
+boolean:		bool
+boolean has 1-bit precision
+
+to declare a value, specify a type, and append the precision
+>> int64 apple = 3674168168
+>> real128 banana = 1234.567e890
+
+ignoring the precision assumes 32-bit precision
+>> int peach = -5435	//this is an int32
+>> real pear = 98.76e54	//this is a real32
+
+for complex numbers and quaternions, the precision specifies the precision of each component
+>> cplx64 num = 4169 + 7524i	//the real and imaginary part are both separate real64s
+
+
+arbitrary precision types are specified with the suffix_big
+>> uint_big = #2_0101010100110101110100110010010101
+>> int_big = #16_38A4574E09028D6FE831770F6
+>> float_big = #64_MjgwNDc3Mzg2NzE2NjYyNTE1OTk2NjMwMTUxNDE0.SBwZXJzZXZlcmFuY2Ugb2YgZGVsaWdodCBpbiB0aGUgY29ud
+
+also note that bases other than 10 can be used as input
+the base is specified with the #<base>_ prefix
+e.g. 
+- base 8 (octal) is #8_
+- base 13 is #13_
+- base 16 (HEX) is #16_
+
+bases with prespecified digits are as follows
+binary		0 1
+octal		0 1 2 3 4 5 6 7
+base 12		0 1 2 3 4 5 6 7 8 9 A B
+HEX			0 1 2 3 4 5 6 7 8 9 A B C D E F
+base64		A B C D E F G H I J K L M N O P Q R S T U V W X Y Z a b c d e f g h i j k l m n o p q r s t u v w x y z 0 1 2 3 4 5 6 7 8 9 + / ("+" and "/" may need to change)
+- base64 may not be possible as each individual character has to not be an operator used in dewy. or it may require UTF-8 characters
+
+if a non-standard/undefined base is used, then 0-9 A-Z a-z ... will be assumed as the order. anything larger than that will throw an error
+maximum base size will probably be much less than 256 
+
+the actual specification of the base digits is done in a standard library file and can be altered by the user should they choose
+alternatively, there should be a declaration that temporarily overwrites the specification for the duration of some block
+
+numbers without the prefix are assumed to be base 10 (#10_)
+
+
+}/
+
+
+
+
+/{
+operator precedence:
+
+there will be minimal operator precedence. Only precedence which is inherently obvious will be used.
+in all other situations, precedence will be defined by the user with parenthesis
+otherwise, an error will be thrown (or maybe it will follow a rule, like right to left. probably not though)
+
+}/
+
+
+
+
+
+/{
+note on auto printing:
+in matlab, lines that don't end in ";" are printed out if they return a value
+
+instead of modifying each line to specify whether something is printed automatically,
+dewy will have a block that specifies this:
+
+print 
+{
+	//anything in here will be printed if a value is returned
+	int a = 35
+	real b = 654.543
+	a + b
+}
+
+which would print
+>> a = 35
+>> b = 654.543
+>> a + b = 689.543
+
+This has scope problems though, because a and b only existed in the print scope...
+
+
+alternatively, it might be specified with a tag like:
+
+echo on
+
+//anything in here is printed
+
+echo off
+
+}/

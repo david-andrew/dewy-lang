@@ -1,0 +1,114 @@
+/{
+	The idea of a block (inline) function is that it is essentially code that is copied into a certain location
+	
+	if you have a section or block of code that you are repeatedly rewriting, copy the block function outside of the main execution and have the code insert it into every instance in the current scope
+	
+	block functions take no arguements and have no returns. they simply run the literal code copied from the block
+	
+	
+}/
+
+
+//Motivation from Rust Dewy compiler
+//notice how working with different data types has almost identical code
+/{
+	(&Token::Integer(x), &Token::Integer(y)) =>
+            {
+                if let Token::OpMath(ref op) = token_stack[1]
+                {
+                    let result = match *op
+                    {
+                        OpType::Add => x+y,
+                        OpType::Subtract => x-y,
+                        OpType::Multiply => x*y,
+                        OpType::Divide => x/y,
+                        OpType::Modulus => x%y,
+                        OpType::Power => x.pow(y as u32),
+                        _ => {println!("Unrecognized Math Operation: {:?}", op); continue;},//panic!("Unrecognized Math Operation: {:?}", op),
+                    };
+                    
+                    println!("{}", result);
+                }
+            }
+            
+            (&Token::Real(x), &Token::Real(y)) =>
+            {
+                if let Token::OpMath(ref op) = token_stack[1]
+                {
+                    let result = match *op
+                    {
+                        OpType::Add => x+y,
+                        OpType::Subtract => x-y,
+                        OpType::Multiply => x*y,
+                        OpType::Divide => x/y,
+                        OpType::Modulus => x%y,
+                        OpType::Power => x.powf(y),
+                        _ => {println!("Unrecognized Math Operation: {:?}", op); continue;},
+                    };
+                    
+                    println!("{}", result);
+                }
+            }
+			
+}/
+
+
+//example translated into dewy
+//would like to have rustesque match style statments, but for now, simple if
+main {
+	if token[0] =? int and token[2] =? int
+	{
+		x = token[0], op = token[1], y = token[2]	//compiler should be able to figure it out without the commas...?
+		result = mathops
+		/{need something to specify within same scope?}/
+	}
+
+	else if token[0] =? real and token[2] =? real
+	{
+		x = token[0], op = token[1], y = token[2]
+		result = mathops
+	}
+
+	else if token[0] =? real and token[2] =? int
+	{
+		x = token[0], op = token[1], y = real token[2]
+		result = mathops
+	}
+	
+	else if token[0] =? int and token[2] =? real
+	{
+		x = token[0] as real, op = token[1], y = token[2]
+		result = mathops
+	}
+}
+
+mathops
+{
+	if op =? addition return x+y				//assuming enums declared for the token types?
+	else if op =? subtraction return x-y	
+	else if op =? multiplication return x*y		//can we remove the brackets for single line if statements?
+	else if op =? division return x/y
+	else if op =? exponental return x^y
+	else if op =? modulus return x%y
+}
+
+//this is also demonstrating expressions with returns based on flow control
+
+//random thought/idea -> =? can be value, type or unit, and it checks the correct aspect of a number
+{
+	apple = int 5 kg
+	
+	apple =? 5		//returns true
+	apple =? 10		//returns false
+	apple =? int	//returns true
+	apple =? real	//returns false
+	apple =? kg		//returns true
+	apple =? meters	//return false
+	
+	//another misc. note
+	//units should not have a single reserved word, but rather multiple to match all english uses of them
+	//e.g. the S.I. unit for [Length] (meters) could be specified by "m" "meter" "meters"
+	//prefixes probably shouldn't mix case, so "km" and "kilometer" are allowed while "kmeter" and "kilom" are not
+}
+
+

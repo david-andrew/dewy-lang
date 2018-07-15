@@ -1,0 +1,26 @@
+/{
+A palindromic number reads the same both ways. The largest palindrome made from the product of two 2-digit numbers is 9009 = 91 × 99.
+
+Find the largest palindrome made from the product of two 3-digit numbers.
+}/
+
+main
+{
+    loop i in 999:900 
+        #loop2 loop j in 999:900
+        {
+            digits = [i*j].digits
+            
+            //end is a value in context of the array digits
+            loop (left in digits[:end/2 as int], right in digits.reverse[:end/2 as int])
+            //for indexing from end of arrays, digits[end] and digits[-0] will return the last element. -0 might potentially be just replaced with the equivalent positive array index, but then that would be confusing... digits[-0/2] =? digits[end/2]
+                if left not? right continue #loop2
+                
+            print(i*j)
+            
+            //break all //breaks out of all loops to the highest scope (main in this case)
+            exit    //could also use "quit"
+            
+        }
+            
+}
