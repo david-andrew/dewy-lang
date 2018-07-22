@@ -536,10 +536,19 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and '-' not in sys.argv[1]: #input file mode
 
         filename = sys.argv[1]
-        tokens = Scanner(open(filename, 'r').read).scan()
-        p = Parser(tokens)
-        p.parse()
-        print(str(p))
+        with open(filename, 'r') as file:
+            lines = file.readlines()
+            for line in lines:
+                tokens = Scanner(line).scan()
+                p = Parser(tokens)
+                p.parse()
+                print(str(p))
+                
+        # tokens = Scanner(open(filename, 'r').read()).scan()
+        # for t in tokens: print(t)
+        # p = Parser(tokens)
+        # p.parse()
+        # print(str(p))
 
     else:  #interpretor mode
         print('dewy0alpha Interpretor')
