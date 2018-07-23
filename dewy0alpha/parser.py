@@ -45,38 +45,15 @@ class Parser:
 
         #make a units parsing passes
         self.tokens = Parser.insert_explicit_unit_ops(self.tokens) #any occurrentces of num unit or unit unit become explicitely num*unit and unit*unit
-<<<<<<< HEAD
         self.tokens = Parser.raise_unit_precedence(self.tokens) #convert all multiply and divides between units to higher precedence versions of each operation. This ensures that units will be combined before general math is done on surrounding numbers
-=======
-        # for t in self.tokens: print(t)
-        # print('')
-
-        self.tokens = Parser.raise_unit_precedence(self.tokens) #convert all multiply and divides between units to higher precedence versions of each operation. This ensures that units will be combined before general math is done on surrounding numbers
-        # for t in self.tokens: print(t)
-        # print('')
-
-        #selfcombine_units() #convert any strings of unit tokens into a single token with a proper unit
-        #selfcombine_numbers_with_units() #combine all numbers and adjacent units into physical numbers
-        self.parse_physical_numbers() #any occurrences of numbers (esp in scientific notation) into physical numbers
-        # for t in self.tokens: print(t)
-        # print('')
-
-
-
-        #self.parse_units() #convert all units into the class unit
->>>>>>> c3d73de369b21c473d648dd7c58da64f82747adf
-
-
         #selfcombine_units() #convert any strings of unit tokens into a single token with a proper unit #Don't need anymore because units operations have proper precedence
         #selfcombine_numbers_with_units() #combine all numbers and adjacent units into physical numbers #also don't need because this is handled during the normal ast generation
         self.parse_physical_numbers() #any occurrences of numbers (esp in scientific notation) into physical numbers
 
         #self.parse_units() #convert all units into the class unit
-        #print('tokens before parsing:\n' + str(self.tokens))
 
         #parse by passing tokens through the split by precedence function
         self.ast = Parser.split_by_lowest_precedence(self.tokens)
-        print(self.ast)
 
 
     def parse_physical_numbers(self):
