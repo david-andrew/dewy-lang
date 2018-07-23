@@ -542,7 +542,7 @@ class PhysicalNumber:
         if isinstance(power, (int, float, complex)):
             return self ** PhysicalNumber(1,power,Unit())
 
-        if power.unit.is_unitless: #unitless
+        if power.unit.is_unitless(): #unitless
             power = power.value * 10 ** power.exponent
             if power == 0:
                 return PhysicalNumber(value=1, exponent=0, unit=Unit())
@@ -552,7 +552,7 @@ class PhysicalNumber:
                 unit = (self.unit ** power).unit
                 return PhysicalNumber(value=num, exponent=exponent, unit=unit)
         else:
-            raise ValueError('Cannot perform operation ' + str(self) + '^' + str(power) + '. Exponent must be unitless, but has unit ' + str(power.unit))
+            raise ValueError('Cannot perform operation ' + str(self) + '^ (' + str(power) + '). Exponent must be unitless, but has unit ' + str(power.unit))
 
     def __rpow__(self, other):
         if type(other) == Unit:
