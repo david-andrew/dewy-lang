@@ -12,11 +12,11 @@ import traceback
 
 class Parser:
 
-    precedence = {'+':1, '-':1, '*':2, '/':2, '%':2, '^':3, 'm':10, 'd':10} #m, d are unit precedent level multiply/divide
+    precedence = {'+':1, '-':1, '*':2, '/':2, '%':2, '^':4, 'm':3, 'd':3} #m, d, e are unit precedent level multiply/divide/exponent
     default_val = {' ':-1, '+':0, '-':0, '*':1, '/':1, '%':0, '^':-1, 'm':1, 'd':1} #-1 indicates it returns itself
-    op_class = { 1:('+', '-'), 2:('*', '/', '%'), 3:('^', 'log'), 10:('m','d')}
-    unit_op_encode = {'*':'m', '/':'d', '%':'o', '^':'p'} #for the higher precedence of unit operations
-    unit_op_decode = {'m':'*', 'd':'/', 'o':'%', 'p':'^'}
+    op_class = { 1:('+', '-'), 2:('*', '/', '%'), 4:('^', 'log'), 3:('m','d')}
+    unit_op_encode = {'*':'m', '/':'d'}#, '%':'o', '^':'p'} #for the higher precedence of unit operations
+    unit_op_decode = {'m':'*', 'd':'/'}#, 'o':'%', 'p':'^'}
     #don't need a defualt class, as it is just the firt op in the list of op classes
 	
     #m/d indicates unit multiply/divide
@@ -45,16 +45,19 @@ class Parser:
 
         #make a units parsing passes
         self.tokens = Parser.insert_explicit_unit_ops(self.tokens) #any occurrentces of num unit or unit unit become explicitely num*unit and unit*unit
-        #selfcombine_units() #convert any strings of unit tokens into a single token with a proper unit
-        #selfcombine_numbers_with_units() #combine all numbers and adjacent units into physical numbers
+        self.tokens = Parser.raise_unit_precedence(self.tokens) #convert all multiply and divides between units to higher precedence versions of each operation. This ensures that units will be combined before general math is done on surrounding numbers
+
+
+        #selfcombine_units() #convert any strings of unit tokens into a single token with a proper unit #Don't need anymore because units operations have proper precedence
+        #selfcombine_numbers_with_units() #combine all numbers and adjacent units into physical numbers #also don't need because this is handled during the normal ast generation
         self.parse_physical_numbers() #any occurrences of numbers (esp in scientific notation) into physical numbers
+
         #self.parse_units() #convert all units into the class unit
-
-
         #print('tokens before parsing:\n' + str(self.tokens))
 
         #parse by passing tokens through the split by precedence function
         self.ast = Parser.split_by_lowest_precedence(self.tokens)
+
 
     def parse_physical_numbers(self):
         #look into handling scientific notation, if not already handled in the 
@@ -305,6 +308,7 @@ class Parser:
     
     @staticmethod
     def insert_explicit_unit_ops(tokens):
+        #replaces any instances of a unit next to a number as the unit times that number. e.g. 10 kg becomes 10 * kg
         i = 0
         while i + 1 < len(tokens):
             if tokens[i].type == Scanner.number or tokens[i].type == Scanner.unit:
@@ -317,19 +321,35 @@ class Parser:
 
 
     @staticmethod
-    def WIP_insert_explicit_unit_ops(tokens):
+    def raise_unit_precedence(tokens):
+        #convert any multiply and divide ops between units into higher precedence versions of the operations
         i = 0
         while i + 1 < len(tokens):
-            if tokens[i].type == Scanner.number or tokens[i].type == Scanner.unit:
-                if tokens[i+1].type == Scanner.unit:
-                    tokens.insert(i+1, Token(Scanner.operation, 'm')) #was "*" but "u" indicates higher precedence multiply for units
-                    i+=1
-                elif i+2 < len(tokens) and tokens[i+1] == Scanner.operation and tokens[i+1].value in Parser.unit_op_encode and tokens[i+2].type == Scanner.unit:                    
-                    tokens[i+1].value = Parser.unit_op_encode[tokens[i+1].value]
-                    i+=2
+            t = tokens[i]
+            if t.type == Scanner.operation and t.value in Parser.unit_op_encode:                #check if current value is either the * or / operation
+                if tokens[i-1].type == Scanner.unit or tokens[i-1].type == Scanner.number:      #previous item must be either a unit or number
+                    if tokens[i+1].type == Scanner.unit:                                        #confirm that the next item is a unit
+                        tokens[i] = Token(Scanner.operation, Parser.unit_op_encode[t.value])    #replace with a higher precedent version of the operation
             i+=1
 
         return tokens
+
+            
+
+    # @staticmethod
+    # def WIP_insert_explicit_unit_ops(tokens):
+    #     i = 0
+    #     while i + 1 < len(tokens):
+    #         if tokens[i].type == Scanner.number or tokens[i].type == Scanner.unit:
+    #             if tokens[i+1].type == Scanner.unit:
+    #                 tokens.insert(i+1, Token(Scanner.operation, 'm')) #was "*" but "u" indicates higher precedence multiply for units
+    #                 i+=1
+    #             elif i+2 < len(tokens) and tokens[i+1] == Scanner.operation and tokens[i+1].value in Parser.unit_op_encode and tokens[i+2].type == Scanner.unit:                    
+    #                 tokens[i+1].value = Parser.unit_op_encode[tokens[i+1].value]
+    #                 i+=2
+    #         i+=1
+
+    #     return tokens
 
 
 
@@ -537,15 +557,14 @@ if __name__ == "__main__":
 
         filename = sys.argv[1]
         with open(filename, 'r') as file:
-            lines = file.readlines()
+            lines = [s for s in file.readlines() if s != '\n'] #handle any blank lines
             for line in lines:
                 tokens = Scanner(line).scan()
                 p = Parser(tokens)
                 p.parse()
                 print(str(p))
-                
+
         # tokens = Scanner(open(filename, 'r').read()).scan()
-        # for t in tokens: print(t)
         # p = Parser(tokens)
         # p.parse()
         # print(str(p))

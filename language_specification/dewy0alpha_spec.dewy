@@ -14,7 +14,7 @@ Boolean math operations:
 -and						[and]
 -or							[or]
 -xor						[xor]
--not						[not] or? [!]
+-not						[not]
 -nand						[nand]
 -nor						[nor]
 -xnor						[xnor]
@@ -35,12 +35,12 @@ i.e. unsigned integers are logically shifted, and signed integers are arithmetic
 (rotate no/through carry operations will be separate symbol)
 
 Comparison operators:
--equality					[=?] or? [is?]
--inequality					[not?] or? [!?]
--greater than				[>?]
--greater than/equal			[>=?]
--less than					[<?]
--less than/equal			[<=?]
+-equality					[=?]
+-inequality					[not?] or [not =?]
+-greater than				[>?] or [not <=?]
+-greater than/equal			[>=?] or [not <?]
+-less than					[<?] or [not >=?]
+-less than/equal			[<=?] or [not >?]
 
 
 Input values will be able to be integer or real.
@@ -110,9 +110,7 @@ The interpreter should recognize mismatches in units. Mismatches can only occur 
 
 Another concept that I want to handle in the interpreter and the language as a whole is significant figures
 -when specifying numbers, the precisions is recorded
--mathematical operations follow the rules of significant figures. The numerical reprisentation is the same technically, but an extra marker will track how many digits are significant
-
-
+-mathematical operations follow the rules of significant figures. The numerical reprisentation is the same technically, but an extra marker will track how many digits are significant, or provide an interval for the certainty of the number. In the language, this should be something optional that the user turns on for a given variable
 -eventually want to be able to capture error propigation in computation. probably won't include this in the interpreter though
 
 Also want to handle how printing works differently from rust
