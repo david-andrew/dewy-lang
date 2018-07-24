@@ -136,7 +136,13 @@ class Scanner:
             if self.eat_brace():
                 continue
 
-            if self.eat_operation():
+            if self.eat_logical_operation():
+                continue
+
+            if self.eat_bitshift_operation():
+                continue
+
+            if self.eat_math_operation():
                 continue
 
             if self.eat_identifier():
@@ -337,7 +343,24 @@ class Scanner:
         return False
 
 
-    def eat_operation(self):    #math operations
+    def eat_logical_operation(self):
+        for op in ['and', 'or', 'xor', 'not', 'nand', 'nor', 'xnor']:
+            if op == self.text[0:len(op)] and not self.text[len(op)].isalnum():
+                self.tokens.append(Token(Scanner.operation, self.text[0:len(op)]))
+                self.text = self.text[len(op):]
+                return True
+        return False
+
+
+    def eat_bitshift_operation(self):
+        for op in ['<<<!', '!>>>', '<<<', '>>>', '<<', '>>']:
+            if op == self.text[0:len(op)]:
+                self.tokens.append(Token(Scanner.operation, self.text[0:len(op)]))
+                self.text = self.text[len(op):]
+                return True
+        return False
+
+    def eat_math_operation(self):    #math operations
         if self.text[0] in '+-*/%^':
             self.tokens.append(Token(Scanner.operation, self.text[0]))
             self.text = self.text[1:]

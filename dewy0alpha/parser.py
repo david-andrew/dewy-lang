@@ -12,9 +12,22 @@ import traceback
 
 class Parser:
 
-    precedence = {'+':1, '-':1, '*':2, '/':2, '%':2, '^':4, 'm':3, 'd':3} #m, d, e are unit precedent level multiply/divide/exponent
+    op_class = {1:('and', 'or', 'xor', 'not', 'nand', 'nor', 'xnor'), 2:('!>>>', '<<<!', '>>>', '<<<', '>>', '<<'), 3:('+', '-'), 4:('*', '/', '%'), 5:('m','d'), 6:('^', 'log')}
+    #precedence = {'+':3, '-':3, '*':4, '/':4, '%':4, '^':6, 'm':5, 'd':5,  #m, d, e are unit precedent level multiply/divide/exponent
+    #'!>>>':2, '<<<!':2, '>>>':2, '<<<':2, '>>':2, '<<':2, 
+    #'and':1, 'or':1, 'xor':1, 'not':1, 'nand':1, 'nor':1, 'xnor':1} 
+    
+    precedence = {}; 
+    for level in op_class:
+        for op in op_class[level]:
+            precedence[op] = level
+
     default_val = {' ':-1, '+':0, '-':0, '*':1, '/':1, '%':0, '^':-1, 'm':1, 'd':1} #-1 indicates it returns itself
-    op_class = { 1:('+', '-'), 2:('*', '/', '%'), 4:('^', 'log'), 3:('m','d')}
+    
+    
+    print(precedence)
+    print(op_class)
+
     unit_op_encode = {'*':'m', '/':'d'}#, '%':'o', '^':'p'} #for the higher precedence of unit operations
     unit_op_decode = {'m':'*', 'd':'/'}#, 'o':'%', 'p':'^'}
     #don't need a defualt class, as it is just the firt op in the list of op classes
@@ -94,6 +107,14 @@ class Parser:
 
     
     @staticmethod
+    def create_ast(tokens):
+        #Turn the list of tokens into an abstract syntax tree.
+        #returns a node containing the tree.
+        #This should be recusively called to build up a full ast
+        
+        pass
+
+    @staticmethod
     def split_by_lowest_precedence(tokens):
         #split the list of tokens into a node with an op type and a list of nodes or terminal values
 
@@ -105,7 +126,7 @@ class Parser:
 
         # #these should only be hit when the input is exactly a single token, or a token list without any operations for splitting
         if len(tokens) == 1 or Parser.check_for_operations(tokens) == False:
-            n = Node(operands=tokens, op_list=['+'])
+            n = Old_Chain_Node(operands=tokens, op_list=['+'])
             #print(n) #temporary
             return n
 
@@ -133,7 +154,7 @@ class Parser:
             #         #Token(Scanner.parenthesis, self.text[0])
 
 
-            if tokens[end].type == Scanner.operation and Parser.precedence[tokens[end].value[0]] == delimit:
+            if tokens[end].type == Scanner.operation and Parser.precedence[tokens[end].value] == delimit:
                 split_list.append(tokens[start:end])
                 op_list.append(cur_op)
                 cur_op = tokens[end].value
@@ -181,7 +202,7 @@ class Parser:
                 assert(len(val) == 1) #there should be only a single value here
                 operands.append(val[0])
 
-        return Node(Parser.op_class[delimit], operands, op_list)
+        return Old_Chain_Node(Parser.op_class[delimit], operands, op_list)
 
         #for l, o in zip(split_lists, op_list):
         #    print(str(o) + ' ' + str(l))
@@ -198,10 +219,12 @@ class Parser:
         """Find the operator that is the lowest precedence in the given list of tokens"""
         i = 0
         lowest_precedence = 1000 #infinity
+        print('tokens: ')
+        for t in tokens: print(t)
         while i < len(tokens):
             cur = tokens[i]
-            if cur.type == Scanner.operation and Parser.precedence[cur.value[0]] < lowest_precedence:
-                lowest_precedence = Parser.precedence[cur.value[0]]
+            if cur.type == Scanner.operation and Parser.precedence[cur.value] < lowest_precedence:
+                lowest_precedence = Parser.precedence[cur.value]
             elif cur.type == Scanner.parenthesis and cur.value == '(': #skip to matching close parenthesis
                 i += Parser.find_matching_pair(tokens[i:])
             i+=1
@@ -350,7 +373,9 @@ class Parser:
 
 
 
-class Node:
+class Old_Chain_Node:
+
+    operators = ['+', '-', '*', '/']
 
     def __init__(self, op_class=('+', '-'), operands=[], op_list=[]):
         self.op_class = op_class      #class of operations, e.g. (+-) (*/%) (^)
@@ -384,7 +409,7 @@ class Node:
 
         for val, op in zip(self.operands, self.op_list):
             s = s + op + ' ' #s.append('(' + op + ') ')
-            if type(val) == Node:
+            if type(val) == Old_Chain_Node:
                 temp = str(val) #potentially insert a tab at the start
                 i = 0
                 while i < len(temp):
@@ -406,7 +431,7 @@ class Node:
         if len(self.operands) == 1:
             op = self.op_list[0]
             v = self.operands[0]
-            if type(v) == Node:
+            if type(v) == Old_Chain_Node:
                 v = v.evaluate()
             elif type(v) == Token and (v.type == Scanner.number or v.type == Scanner.unit):
                 v = v.value
@@ -429,7 +454,7 @@ class Node:
 
 
         for op, v in zip(self.op_list, self.operands):
-            if type(v) == Node:
+            if type(v) == Old_Chain_Node:
                 v = v.evaluate()
             elif type(v) == Token and (v.type == Scanner.number or v.type == Scanner.unit):
                 v = v.value
@@ -487,7 +512,7 @@ class Node:
         for op, val in zip(self.op_list, self.operands):
                 
             #unpack the current value
-            if type(val) == Node:
+            if type(val) == Old_Chain_Node:
                 v = val.evaluate()
             else:
                 if len(val) > 1:
@@ -546,7 +571,83 @@ class Node:
 
 
         return result
-        
+
+
+
+class Unary_Node:
+    """Node in the AST for unary operations"""
+
+    operators = ['not']
+
+    def __init__(self, op, expr):#, type, val=None, lhs=None, rhs=None):
+        self.op = op
+        self.expr = expr
+
+    def __str__(self):
+        pass
+
+    def __repr__(self):
+        pass
+
+    def evaluate(self):
+        #only acceptable type for this is "not"
+        pass
+
+
+class Chain_Node:
+    """Node in the AST for chainable unary operations"""
+
+    operators = ['+', '-', '*', '/']
+
+    def __init__(self):
+        pass
+
+    def __str__(self):
+        pass
+
+    def __repr__(self):
+        pass
+
+    def evaluate(self):
+        pass
+
+
+class Binary_Node:
+    """Node in the AST for binary operations"""
+
+    operators = ['%', '^', 'and', 'or', 'xor', 'nand', 'nor', 'xnor', 
+    '<<', '>>', '<<<', '>>>', '<<<!', '!>>>', '=?', 'not?', '>?', '>=?', '>?', '>=?', 'in?']
+
+    def __init__(self, op, lhs, rhs):
+        self.op = op
+        self.lhs = lhs
+        self.rhs = rhs
+
+    def __str__(self):
+        pass
+
+    def __repr__(self):
+        pass
+
+    def evaluate(self):
+        pass
+
+
+class Leaf_Node:
+    """Single atomic values in the AST"""
+
+    def __init__(self, value):
+        self.value = value
+
+    def __str__(self):
+        pass
+
+    def __repr__(self):
+        pass
+
+    def evaluate(self):
+        return self.value
+
 
 
 if __name__ == "__main__":
