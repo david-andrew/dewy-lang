@@ -89,7 +89,8 @@ class Parser:
         print(self.tokens)
         self.ast = Parser.create_ast(self.tokens)  #Parser.old_split_by_lowest_precedence(self.tokens)
 
-        quit()
+        print(self.ast)
+
 
     def parse_physical_numbers(self):
         #look into handling scientific notation, if not already handled in the 
@@ -769,7 +770,11 @@ class Binary_Node:
         self.rhs = rhs
 
     def __str__(self):
-        pass
+        s = '(' + self.op.value + ')\n'
+        lstring = str(self.lhs)
+        rstring = str(self.rhs)
+
+        return '(' + self.op.value + ')\n' + tab_multiline_string(str(self.lhs)) + '\n' + tab_multiline_string(str(self.rhs)) + '\n'
 
     def __repr__(self):
         pass
@@ -793,6 +798,16 @@ class Leaf_Node:
     def evaluate(self):
         return self.value
 
+
+def tab_multiline_string(string):
+    insert = '|   '
+    string = insert + string
+    i = len(insert)
+    while i < len(string):
+        if string[i] == '\n':
+            string = string[0:i+1] + insert + string[i+1:]
+        i = i + 1
+    return string
 
 
 if __name__ == "__main__":
