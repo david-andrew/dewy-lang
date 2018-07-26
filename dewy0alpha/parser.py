@@ -12,7 +12,20 @@ import traceback
 
 class Parser:
 
-    op_class = {1:('and', 'or', 'xor', 'not', 'nand', 'nor', 'xnor'), 2:('!>>>', '<<<!', '>>>', '<<<', '>>', '<<'), 3:('+', '-'), 4:('*', '/', '%'), 5:('m','d'), 6:('^', 'log')}
+    op_class = { #all operations for each precedence level
+        0:('=?', 'not?', '>?', '>=?', '>?', '>=?', 'in?'),
+        1:('and', 'or', 'xor', 'not', 'nand', 'nor', 'xnor'),
+        2:('!>>>', '<<<!', '>>>', '<<<', '>>', '<<'),
+        3:('+', '-'),
+        4:('*', '/', '%'),
+        5:('m','d'), #unit versions of divide (d) and multiply (m), bind more tightly than normal arithmetic
+        6:('^')
+    }
+
+    left_to_right = True; right_to_left = False #enums for associativity direction of operations
+    
+    op_class_associativity = {0:left_to_right, 1:left_to_right, 2:right_to_left, 3:left_to_right, 4:left_to_right, 5:left_to_right, 6:right_to_left}
+    
     #precedence = {'+':3, '-':3, '*':4, '/':4, '%':4, '^':6, 'm':5, 'd':5,  #m, d, e are unit precedent level multiply/divide/exponent
     #'!>>>':2, '<<<!':2, '>>>':2, '<<<':2, '>>':2, '<<':2, 
     #'and':1, 'or':1, 'xor':1, 'not':1, 'nand':1, 'nor':1, 'xnor':1} 
@@ -22,7 +35,7 @@ class Parser:
         for op in op_class[level]:
             precedence[op] = level
 
-    default_val = {' ':-1, '+':0, '-':0, '*':1, '/':1, '%':0, '^':-1, 'm':1, 'd':1} #-1 indicates it returns itself
+    default_val = {'+':0, '-':0, '*':1, '/':1, 'm':1, 'd':1} #any operation that can be unary/chained (e.g. 5--2), what is the assumed value to the left of the op (5-(0-2))
     
     
     print(precedence)
@@ -50,8 +63,15 @@ class Parser:
     def parse(self):
         #clean up passes on the tokens
         #combine multi-operations into a single token (probably not operation type?, or have all the ops be separate from the first one
-        self.tokens = Parser.combine_multi_ops(self.tokens)
-
+        #self.tokens = Parser.combine_multi_ops(self.tokens) ####NEED TO ADJUST -> instead of storing list into the single token, should figure out the equivalent operations and leave them as is
+        ############----DO SOON---############## I think the way to handle this is as follows:
+        # for every op sequence next to a number,
+        # for the inner most op to the outer most op
+        # insert default value, op, number and then wrap that part in parenthesis. 
+        # e.g. 5----2 would become 5-(0-(0-(0-2))) =  -> though technically should collapse all of the -'s to a single +
+        # e.g. 4/--/2 would become 4/(0-(0-(1/2)))
+        # e.g. 3^-+-2 would become 3^(0-(0+(0-2)))
+        # this way, we shouldn't have to handle cases where the left or right is an empty array from the split tokens (except for the unary 'not' case)
 
         #ensure that every parenthesis has a matching pair
         Parser.match_all_parenthesis(self.tokens)
@@ -66,8 +86,10 @@ class Parser:
         #self.parse_units() #convert all units into the class unit
 
         #parse by passing tokens through the split by precedence function
-        self.ast = Parser.split_by_lowest_precedence(self.tokens)
+        print(self.tokens)
+        self.ast = Parser.create_ast(self.tokens)  #Parser.old_split_by_lowest_precedence(self.tokens)
 
+        quit()
 
     def parse_physical_numbers(self):
         #look into handling scientific notation, if not already handled in the 
@@ -87,7 +109,7 @@ class Parser:
               
                 #modify the token reference to contain the correct physical number in its place
                 token.value = PhysicalNumber(value, 0, Unit(None,None))
-                token.format = 'PhysicalNumber'
+                #token.format = 'PhysicalNumber'
             
             #FOR TESTING?
             #don't have any unit types, only physical numbers
@@ -112,10 +134,134 @@ class Parser:
         #returns a node containing the tree.
         #This should be recusively called to build up a full ast
         
-        pass
+        #remove (potentially multiple) layers of parenthesis enclosing the entire function
+        tokens = Parser.remove_outer_parenthesis(tokens)
+
+        if len(tokens) == 1:
+            #base case single value
+            return Leaf_Node(tokens[0].value)
+
+
+        precedence = Parser.find_lowest_precedence(tokens)
+        associativity = Parser.op_class_associativity[precedence]
+
+        lhs, op, rhs = Parser.split_by_lowest_precedence(tokens, precedence, associativity)
+
+        print('\nlhs:\n' + str(lhs))
+        print('\nop: ' + str(op))
+        print('\nrhs:\n' + str(rhs))
+
+        if op.value in Binary_Node.operators:
+            return Binary_Node(lhs=Parser.create_ast(lhs), op=op, rhs=Parser.create_ast(rhs))
+        elif op.value in Unary_Node.operators:
+            assert(len(lhs) == 0)
+            return Unary_Node(op=op, expr=rhs)
+        else:
+            raise ValueError('Unknown operation encountered. Found: ' + str(op))
+        # if associativity == Parser.left_to_right: #means that the leafs in the tree start from the right of the token list (i.e. reversed)
+        #     split_list.reverse() # need to be carefult to make sure values are inserted in the right order
+        #     pass
+
+        # #debug statements
+        # for i in split_list: print(str(i) + '\n')
+        # # print()
+        # # for i in op_list: print(str(i) + '\n')
+
+
+        # for i in range(1,len(split_list),2): #index sits on each operation, with left and right being the children nodes to be made
+        #     op = split_list[i].value
+        #     if op in Unary_Node.operators:
+        #         pass
+        #     elif op in Binary_Node.operators:
+        #         pass
+        #     elif op in Chain_Node.operators:
+        #         pass      
+        #     else:
+        #         raise ValueError('Unknown operation encountered. Found ' + str(op))
+
+
+
+        # pass
+
+    # @staticmethod
+    # def split_by_precedence(tokens, precedence=-1):
+    #     """Given a list of tokens, returns a list of lists of tokens delimited by the operations"""
+    #     if precedence == -1: #if none is specified, the lowest is used
+    #         precedence = Parser.find_lowest_precedence(tokens)
+        
+    #     split_list = [] #list of list of tokens delimited by the operator with precedence precedence
+    #     sub_list = []   #temporary list for building sections of split_list
+    #     #op_list = []    #list of the operators for each list of tokens in the list. the ith op comes after the ith token list
+        
+    #     for t in tokens:
+    #         if t.type == Scanner.operation and Parser.precedence[t.value] == precedence:
+    #             split_list += [sub_list] + [t]; 
+    #             sub_list = []
+    #         else:
+    #             sub_list += [t]
+        
+    #     split_list += [sub_list] #add any leftovers (or empty) from the list of tokens
+
+    #     return split_list
 
     @staticmethod
-    def split_by_lowest_precedence(tokens):
+    def split_by_lowest_precedence(tokens, precedence=-1, associativity=left_to_right):
+        """Split the tokens list into a left-hand-side, operation, and right-hand-side"""
+        if precedence == -1:
+            precedence = Parser.find_lowest_precedence(tokens)
+
+        #find the index of the operation that is the delimiter (right-most for left_to_right, and left-most for right_to_left)
+        if associativity == Parser.right_to_left:
+            tokens.reverse()
+
+        index = -1
+        matched = False
+
+        for t in tokens:
+            index += 1
+            if t.type == Scanner.operation and Parser.precedence[t.value] == precedence:
+                matched = True
+                break
+
+        if not matched:
+            raise ValueError('No operation with precedence (' + str(precedence) + ') in list of tokens.\nTokens: ' + str(tokens))
+
+        print('split index is: ' + str(index))
+
+        #create the left and right-hand side token lists to return with the operation based on the associativity direction 
+        if associativity == Parser.right_to_left:
+            rhs = tokens[0:index]
+            op = tokens[index]
+            lhs = tokens[index+1:]
+        else:
+            lhs = tokens[0:index]
+            op = tokens[index]
+            rhs = tokens[index+1:]
+
+
+        return lhs, op, rhs
+
+    # @staticmethod
+    # def get_lowest_associative(tokens, precedence, associativity=Parser.left_to_right):
+    #     """Return the index of first operator with the specified precedence in the list"""
+    #     if associativity == Parser.left_to_right:
+    #         tokens.reverse()
+
+    #     index = -1
+
+    #     for i, t in zip(range(len(tokens)), tokens):
+    #         if t.type == Scanner.operation and Parser.precedence[t.value] == precedence:
+    #             index = i
+    #             break
+
+    #     if associativity == Parser.left_to_right:
+    #         index = len(tokens) - index
+
+    #     return index
+
+
+    @staticmethod
+    def old_split_by_lowest_precedence(tokens):
         #split the list of tokens into a node with an op type and a list of nodes or terminal values
 
         # if len(tokens) == 0:
@@ -196,7 +342,7 @@ class Parser:
         operands = []
         for val in split_list:
             if Parser.check_for_operations(val):
-                operands.append(Parser.split_by_lowest_precedence(val))
+                operands.append(Parser.old_split_by_lowest_precedence(val))
             else:
                 val = Parser.remove_outer_parenthesis(val)
                 assert(len(val) == 1) #there should be only a single value here
@@ -219,8 +365,8 @@ class Parser:
         """Find the operator that is the lowest precedence in the given list of tokens"""
         i = 0
         lowest_precedence = 1000 #infinity
-        print('tokens: ')
-        for t in tokens: print(t)
+        # print('tokens: ')
+        # for t in tokens: print(t)
         while i < len(tokens):
             cur = tokens[i]
             if cur.type == Scanner.operation and Parser.precedence[cur.value] < lowest_precedence:
@@ -594,29 +740,28 @@ class Unary_Node:
         pass
 
 
-class Chain_Node:
-    """Node in the AST for chainable unary operations"""
+# class Chain_Node:
+#     """Node in the AST for chainable unary operations"""
 
-    operators = ['+', '-', '*', '/']
+#     operators = ['+', '-', '*', '/']
 
-    def __init__(self):
-        pass
+#     def __init__(self):
+#         pass
 
-    def __str__(self):
-        pass
+#     def __str__(self):
+#         pass
 
-    def __repr__(self):
-        pass
+#     def __repr__(self):
+#         pass
 
-    def evaluate(self):
-        pass
+#     def evaluate(self):
+#         pass
 
 
 class Binary_Node:
     """Node in the AST for binary operations"""
 
-    operators = ['%', '^', 'and', 'or', 'xor', 'nand', 'nor', 'xnor', 
-    '<<', '>>', '<<<', '>>>', '<<<!', '!>>>', '=?', 'not?', '>?', '>=?', '>?', '>=?', 'in?']
+    operators = ['%', '^', 'and', 'or', 'xor', 'nand', 'nor', 'xnor', '<<', '>>', '<<<', '>>>', '<<<!', '!>>>', '=?', 'not?', '>?', '>=?', '>?', '>=?', 'in?', '+', '-', '*', '/', 'd', 'm']
 
     def __init__(self, op, lhs, rhs):
         self.op = op
@@ -640,10 +785,10 @@ class Leaf_Node:
         self.value = value
 
     def __str__(self):
-        pass
+        return str(self.value)
 
     def __repr__(self):
-        pass
+        return repr(self.value)
 
     def evaluate(self):
         return self.value
