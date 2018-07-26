@@ -38,8 +38,8 @@ class Parser:
     default_val = {'+':0, '-':0, '*':1, '/':1, 'm':1, 'd':1} #any operation that can be unary/chained (e.g. 5--2), what is the assumed value to the left of the op (5-(0-2))
     
     
-    print(precedence)
-    print(op_class)
+    # print(precedence)
+    # print(op_class)
 
     unit_op_encode = {'*':'m', '/':'d'}#, '%':'o', '^':'p'} #for the higher precedence of unit operations
     unit_op_decode = {'m':'*', 'd':'/'}#, 'o':'%', 'p':'^'}
@@ -86,10 +86,10 @@ class Parser:
         #self.parse_units() #convert all units into the class unit
 
         #parse by passing tokens through the split by precedence function
-        print(self.tokens)
+        # print(self.tokens)
         self.ast = Parser.create_ast(self.tokens)  #Parser.old_split_by_lowest_precedence(self.tokens)
 
-        print(self.ast)
+        # print(self.ast)
 
 
     def parse_physical_numbers(self):
@@ -138,19 +138,17 @@ class Parser:
         #remove (potentially multiple) layers of parenthesis enclosing the entire function
         tokens = Parser.remove_outer_parenthesis(tokens)
 
-        if len(tokens) == 1:
-            #base case single value
-            return Leaf_Node(tokens[0].value)
-
+        if len(tokens) == 0: raise ValueError('encountered empty tokens list for AST') #this should never occur, cause everything should be preset to not have empty #return Leaf_Node(None)             #empty lhs
+        if len(tokens) == 1: return Leaf_Node(tokens[0].value)  #single value lhs
 
         precedence = Parser.find_lowest_precedence(tokens)
         associativity = Parser.op_class_associativity[precedence]
 
         lhs, op, rhs = Parser.split_by_lowest_precedence(tokens, precedence, associativity)
 
-        print('\nlhs:\n' + str(lhs))
-        print('\nop: ' + str(op))
-        print('\nrhs:\n' + str(rhs))
+        # print('\nlhs:\n' + str(lhs))
+        # print('\nop: ' + str(op))
+        # print('\nrhs:\n' + str(rhs))
 
         if op.value in Binary_Node.operators:
             return Binary_Node(lhs=Parser.create_ast(lhs), op=op, rhs=Parser.create_ast(rhs))
@@ -212,7 +210,7 @@ class Parser:
             precedence = Parser.find_lowest_precedence(tokens)
 
         #find the index of the operation that is the delimiter (right-most for left_to_right, and left-most for right_to_left)
-        if associativity == Parser.right_to_left:
+        if associativity == Parser.left_to_right:
             tokens.reverse()
 
         index = -1
@@ -227,13 +225,13 @@ class Parser:
         if not matched:
             raise ValueError('No operation with precedence (' + str(precedence) + ') in list of tokens.\nTokens: ' + str(tokens))
 
-        print('split index is: ' + str(index))
+        # print('split index is: ' + str(index))
 
         #create the left and right-hand side token lists to return with the operation based on the associativity direction 
-        if associativity == Parser.right_to_left:
-            rhs = tokens[0:index]
+        if associativity == Parser.left_to_right:
+            rhs = tokens[0:index]; rhs.reverse()
             op = tokens[index]
-            lhs = tokens[index+1:]
+            lhs = tokens[index+1:]; lhs.reverse()
         else:
             lhs = tokens[0:index]
             op = tokens[index]
@@ -770,17 +768,74 @@ class Binary_Node:
         self.rhs = rhs
 
     def __str__(self):
-        s = '(' + self.op.value + ')\n'
-        lstring = str(self.lhs)
-        rstring = str(self.rhs)
-
         return '(' + self.op.value + ')\n' + tab_multiline_string(str(self.lhs)) + '\n' + tab_multiline_string(str(self.rhs)) + '\n'
 
     def __repr__(self):
-        pass
+        return '(' + self.op.value + ')\n' + tab_multiline_string(repr(self.lhs)) + '\n' + tab_multiline_string(repr(self.rhs)) + '\n'
+
 
     def evaluate(self):
-        pass
+        op = self.op.value
+        lhs = self.lhs
+        rhs = self.rhs
+
+        if op == '%': return lhs.evaluate() % rhs.evaluate()
+        elif op == '^': return lhs.evaluate() ** rhs.evaluate()
+        elif op == '+': return lhs.evaluate() + rhs.evaluate()
+        elif op == '-': return lhs.evaluate() - rhs.evaluate()
+        elif op == '*': return lhs.evaluate() * rhs.evaluate()
+        elif op == '/': return lhs.evaluate() / rhs.evaluate()
+        elif op == 'd': return lhs.evaluate() / rhs.evaluate()
+        elif op == 'm': return lhs.evaluate() * rhs.evaluate()
+        elif op == '<<': return lhs.evaluate() << rhs.evaluate()
+        elif op == '>>': return lhs.evaluate() >> rhs.evaluate()
+        elif op == '<<<': return NotImplemented #lhs.evaluate() ** rhs.evaluate()
+        elif op == '>>>': return NotImplemented #lhs.evaluate() ** rhs.evaluate()
+        elif op == '<<<!': return NotImplemented #lhs.evaluate() ** rhs.evaluate()        
+        elif op == '!>>>': return NotImplemented #lhs.evaluate() ** rhs.evaluate()
+        elif op == '=?': return lhs.evaluate() == rhs.evaluate()
+        elif op == 'not?': return lhs.evaluate() != rhs.evaluate()
+        elif op == '>?': return lhs.evaluate() > rhs.evaluate()
+        elif op == '>=?': return lhs.evaluate() >= rhs.evaluate()
+        elif op == '<?': return lhs.evaluate() < rhs.evaluate()
+        elif op == '<=?': return lhs.evaluate() <= rhs.evaluate()
+        elif op == 'in?': return lhs.evaluate() in rhs.evaluate()
+        elif op in ['and', 'or', 'xor', 'nand', 'nor', 'xnor']: # for short circuiting, there should be checking for if the rhs returns a boolean as well
+            lhs = lhs.evaluate()
+            if isinstance(lhs, bool):
+                #Short Circuit
+                #insert some sort of check to confirm the output width of rhs is also a boolean
+                if op == 'and' and not lhs: return lhs
+                elif op == 'or' and lhs: return lhs
+                elif op == 'nand' and not lhs: return not lhs
+                elif op == 'nor' and lhs: return not lhs
+
+            else:
+                rhs = rhs.evaluate()
+                if isinstance(lhs, bool) and isinstance(rhs, bool):
+                    if op == 'and': return lhs and rhs
+                    elif op == 'or': return lhs or rhs
+                    elif op == 'xor': return lhs != rhs
+                    elif op == 'nand': return not (lhs and rhs)
+                    elif op == 'nor': return not (lhs or rhs)
+                    elif op == 'xnor': return not (lhs != rhs)
+
+                else:
+                    #verify that we are operating on ints first -> real values should throw an error
+                    if isinstance(lhs, bool): lhs = int(lhs) #convert booleans to integers for bitwise operation
+                    if isinstance(rhs, bool): rhs = int(rhs)
+
+                    if op == 'and': return lhs & rhs
+                    elif op == 'or': return lhs | rhs
+                    elif op == 'xor': return lhs ^ rhs
+                    elif op == 'nand': return ~ (lhs & rhs)
+                    elif op == 'nor': return ~ (lhs | rhs)
+                    elif op == 'xnor': return ~ (lhs ^ rhs)
+
+            raise ValueError('None of the booleans returned...\nlhs: ' + str(lhs) + '\nrhs: ' + str(rhs))
+
+
+
 
 
 class Leaf_Node:
