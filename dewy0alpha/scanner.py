@@ -20,6 +20,7 @@ class Scanner:
     comment = 'comment'
     whitespace = 'whitespace'
     number = 'number'
+    boolean = 'boolean'
     operation = 'operation'
     unit = 'unit'
     parenthesis = 'parenthesis'
@@ -122,6 +123,9 @@ class Scanner:
                 continue
 
             if self.eat_number():
+                continue
+
+            if self.eat_boolean():
                 continue
 
             if self.eat_unit():
@@ -304,6 +308,15 @@ class Scanner:
         #        pass
         pass
 
+    def eat_boolean(self):
+        bools = ['true', 'false']
+        for word in bools:
+            if self.text[:len(word)] == word and not self.text[len(word)].isalnum():
+                self.tokens.append(Token(Scanner.boolean, True if word == 'true' else False))
+                self.text = self.text[len(word):]
+                return True
+        return False
+
 
     def eat_unit(self):
         check = Unit.match_units(self.text)  #SI unit token
@@ -319,7 +332,6 @@ class Scanner:
             
 
     def eat_parenthesis(self):  #parenthesis tokens
-
         if self.text[0] in '()':
             self.tokens.append(Token(Scanner.parenthesis, self.text[0]))
             self.text = self.text[1:]
@@ -392,7 +404,7 @@ class Token:
         #do something to initialize the token
         self.type = type
         self.value = value
-        self.format = format
+        self.format = format #what is this for?
         
 
     def __str__(self):

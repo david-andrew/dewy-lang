@@ -574,6 +574,40 @@ class PhysicalNumber:
     # def __invert__(self):
     #     raise NotImplementedError('')
 
+    def __lshift__(self, other):
+        if self.is_integer() and other.is_integer():
+            return PhysicalNumber(self.value << other.value, exponent=0, unit=Unit())
+        else:
+            raise ValueError('Tried to << non-unitless numbers: ' + str(self) + ' << ' + str(other))
+
+    def __rshift__(self, other):
+        if self.is_integer() and other.is_integer():
+            return PhysicalNumber(self.value >> other.value, exponent=0, unit=Unit())
+        else:
+            raise ValueError('Tried to >> non-unitless numbers: ' + str(self) + ' >> ' + str(other))
+    
+    def __and__(self, other):
+        if self.is_integer() and other.is_integer():
+            return PhysicalNumber(self.value & other.value, 0, Unit())
+        else:
+            raise ValueError('Tried to AND non-unitless numbers: ' + str(self) + ' and ' + str(other))
+
+    def __or__(self, other):
+        if self.is_integer() and other.is_integer():
+            return PhysicalNumber(self.value | other.value, 0, Unit())
+        else:
+            raise ValueError('Tried to OR non-unitless numbers: ' + str(self) + ' or ' + str(other))
+
+    def __xor__(self, other):
+        if self.is_integer() and other.is_integer():
+            return PhysicalNumber(self.value ^ other.value, 0, Unit())
+        else:
+            raise ValueError('Tried to XOR non-unitless numbers: ' + str(self) + ' xor ' + str(other))
+
+    def __invert__(self):
+        if self.is_integer():
+            return PhysicalNumber(~self.value, 0, Unit())
+
     def __eq__(self, other):
         raise NotImplementedError('== is not yet implemented for physical numbers')
         # if self.unit == other.unit:
@@ -608,5 +642,7 @@ class PhysicalNumber:
     def __repr__(self):
         return 'PhysicalNumber(value={}, exponent={} unit={})'.format(self.value, self.exponent, repr(self.unit))
 
+    def is_integer(self):
+        return isinstance(self.value, int) and self.exponent == 0 and self.unit.is_unitless()
 
 #class Unit -> defined in unit.py
