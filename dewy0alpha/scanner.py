@@ -140,6 +140,9 @@ class Scanner:
             if self.eat_brace():
                 continue
 
+            if self.eat_comparison_operation():
+                continue
+
             if self.eat_logical_operation():
                 continue
 
@@ -352,6 +355,15 @@ class Scanner:
             self.tokens.append(Token(Scanner.brace, self.text[0]))
             self.text = self.text[1:]
             return True
+        return False
+
+
+    def eat_comparison_operation(self):
+        for op in ['=?', 'not?', '>?', '>=?', '>?', '>=?', 'in?']:
+            if op == self.text[:len(op)]:
+                self.tokens.append(Token(Scanner.operation, self.text[:len(op)]))
+                self.text = self.text[len(op):]
+                return True
         return False
 
 

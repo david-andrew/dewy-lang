@@ -897,7 +897,7 @@ class Binary_Node:
         elif op == '>=?': return lhs.evaluate() >= rhs.evaluate()
         elif op == '<?': return lhs.evaluate() < rhs.evaluate()
         elif op == '<=?': return lhs.evaluate() <= rhs.evaluate()
-        elif op == 'in?': return lhs.evaluate() in rhs.evaluate()
+        elif op == 'in?': return NotImplemented #lhs.evaluate() in rhs.evaluate()
         elif op in ['and', 'or', 'xor', 'nand', 'nor', 'xnor']: # for short circuiting, there should be checking for if the rhs returns a boolean as well
             lhs = lhs.evaluate()
             if isinstance(lhs, bool):

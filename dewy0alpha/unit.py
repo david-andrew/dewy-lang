@@ -498,7 +498,12 @@ class PhysicalNumber:
         elif isinstance(other, (int, float, complex)):
             other = PhysicalNumber(other, 0, Unit(None,None)) 
 
-        raise NotImplementedError('% is not yet implemented for physical numbers')
+        #self and other are both physical numbers
+        if self.unit.is_unitless() and other.unit.is_unitless():
+            return (self.value * 10**self.exponent) % (other.value * 10**other.exponent)
+        else:
+            raise NotImplementedError('Attempted to mod (%) numbers with units: ' + str(self) + ' % ' + str(other) + '.\nThis will probably be implemented in the future.')
+        #raise NotImplementedError('% is not yet implemented for physical numbers')
         # unit = self.unit % other.unit
         # if type(unit) == PhysicalNumber:
         #     num = self.value % (other.value * unit.value)
