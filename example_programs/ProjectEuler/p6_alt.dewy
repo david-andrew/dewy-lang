@@ -15,8 +15,8 @@ Find the difference between the sum of the squares of the first one hundred natu
 main
 {
     //any overflow is seamlessly handled by the compiler
-    sum_squares = sum([i^2 loop i in 1:100])
-    square_sum = sum(1:100)^2
+    sum_squares = [i^2 loop i in 1:100].sum
+    square_sum = (1:100).sum^2
     
     print(sum_squares - square_sum)
 }

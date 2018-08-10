@@ -1,0 +1,306 @@
+//run this program with a full dewy interpreter to determine if it is working
+
+//list the functions to run
+functions = 
+[
+    @twelve_days_of_christmas
+    @FizzBuzz
+    @FizzBuzzBazzFoo
+    @sum_squares1
+    @sum_squares2
+    @sum_multiples
+    @prime_factors
+    @compute_primes(1000) //compute the first 1000 primes
+    @compute_primes_alt(1000)
+    @compute_pi(1000) //compute the first 1000 digits of pi
+]
+
+//run all of the functions
+loop f in functions
+{
+    print('Function: ' + @f.name)   //is the @ necessary? I think technically it's optional... e.g. calling .name on a function returns the name, and calling .name on a handle also returns the name. I think stylistically, calling .name on a handle is better
+    f()                             //run the function. technically the () isn't needed, but stylistically, it should be there
+    print('\n\n')                   // 3 newlines
+}
+
+
+
+
+//Function implementations
+
+twelve_days_of_christmas() = 
+{
+    //Print out the lyrics to the twelve days of christmas
+
+    gifts = //keys should be guaranteed to remain in the order they're added. though perhaps that should only be guaranteed so long as no elements are removed... perhaps ordering can be a setting/parameter that is turned off by default for performance
+    [
+        "first" -> "A partridge in a pear tree"
+        "second" -> "Two turtle doves"
+        "third" -> "Three french hens"
+        "fourth" -> "Four calling birds"
+        "fifth" -> "Five golden rings"
+        "sixth" -> "Six geese a laying"
+        "seventh" -> "Seven swams a swimming"
+        "eighth" -> "Eight maids a milkin"
+        "ninth" -> "Nine ladies dancing"
+        "tenth" -> "Ten lords a-leaping"
+        "eleventh" -> "Eleven pipers piping"
+        "twelfth" -> "Twelve drummers drumming"
+    ]
+
+    start = "On the "
+    middle = " day of Christmas,\nMy true love gave to me\n"
+
+    loop day in gifts
+    {
+        print(start + day + middle)
+        loop day_num, gift in gifts.keys, gifts.values
+        {
+            if day not? "first" and day_num =? "first"
+                print("And" + gift.lowercase) //And a partridge in a pear tree
+            else
+                print(gift)
+        }
+    }
+}
+
+
+FizzBuzz() = 
+{
+    words = [3 -> "Fizz" 5 -> "Buzz"] // 7->"Bazz"]
+
+    loop i in 1:100
+    {
+        say = i .% words.keys .=? 0     //elementwise operation of % and =? //returns truth table
+        if words.keys[say].length >? 0
+        {
+            loop word in words[words.keys[say]]
+                printf(word)
+        }
+        else printf(i)
+        print()
+    }
+}
+
+//alternate implementation using match
+FizzBuzzBazzFoo() = 
+{
+    loop i in 1:100
+        match i%3, i%5, i%7, i%11   //want to be able to vectorize the input like i .% [3 5 7 11] as args. but need better syntax
+        {
+            0, _, _, _ {printf('Fizz') continue}
+            _, 0, _, _ {printf('Buzz') continue}
+            _, _, 0, _ {printf('Bazz') continue}
+            _, _, _, 0 printf('Foo')
+            not? 0, not? 0, not? 0, not? 0 printf(i) //there should be a keyword for none matched
+        }
+        print()
+}
+
+
+sum_squares1() = 
+{
+    //any overflow is seamlessly handled by the compiler
+    sum_squares = [i^2 loop i in 1:100].sum
+    square_sum = (1:100).sum^2
+    
+    print(sum_squares - square_sum)
+}
+
+
+//ability to do summations in expressions
+sum_squares2()
+{
+    sum_squares = 1^2 + 2^2 + 3^2 + ... + 100^2
+    square_sum = (1 + 2 + 3 + ... + 100)^2
+
+    print(sum_squares - square_sum)
+}
+
+
+
+
+sum_multiples() =
+{
+    //Project Euler Problem 1
+    /{
+        If we list all the natural numbers below 10 that are multiples of 3 or 5, we get 3, 5, 6 and 9. The sum of these multiples is 23.
+        Find the sum of all the multiples of 3 or 5 below 1000.
+    }/
+
+    //the less specific you are, the slower it will run
+    //this is because it will do more work in the background to make the interface nice for the user
+    //e.g. no datatype will scale to fit as much data as needed
+    
+    sum = 0     // least specific
+    
+    loop i in 1:1000-1
+        if (i%3 * i%5) =? 0 //either a multiple of 3 or 5
+            sum+=i
+
+    print(sum)
+}
+
+
+
+
+
+prime_factors() =
+{
+    /{
+    The prime factors of 13195 are 5, 7, 13 and 29.
+
+    What is the largest prime factor of the number 600851475143 ?
+    }/
+
+    goal = 600851475143
+    
+    primes = doublylinkedlist[2 3] //doubly linked list (generic sized object, space can adjust for larger values)
+    //example empty init [].dll(uint64) makes a doubly linked list fileled with uint64's
+    //uint.fit(goal) -> returns uint64, the smallest uint that goal will fit within
+    //uint.fit(goal^0.5) returns uint32
+    
+    //primes.append([2 3])
+
+    #loop1 loop i in [5 7 ... goal^/2]   //count by 2 starting from 5 up to sqrt(goal)
+    {
+        loop p in primes
+            if i % p =? 0 continue #loop1 //continue the loop governed by i
+        
+        primes.append(i)
+    }
+    
+    print(primes[-0])
+    
+    //note that while arrays can be set to be indexed with arbitrary start and end indices, if an index is accessed using +value or -value (e.g. primes[+10] or primes[-12]), the indexing is forced to be zero // actually this is no longer true. if indexing is not 0 based, then all values up to the first legal index are simply out of bounds for both + and - indexing. e.g. a = int[10:20], then a[10] is the first element, a[-10] is the last element, and any number < 10 or > 20 is out of bounds 
+    //i.e. if primes was set to start at 1, primes[+0] will return the first element, even if primes[0] would throw an error
+    //indexing with a '+' indicates indexing from the start. indexing with a '-' indicates indexing from the end
+    //the index value i means the ith value precisely, none of this in between mumbo jumbo.
+    //e.g. if you want the last 10 elements in a = 0:20, then a[-9:-0]
+    //"start" and "end" can be used to refer to indices +0 and -0 respectively. e.g. it is legal to say a[end-9:end-0], and calling a[-9:-0] implicitely includes the "end"s
+
+}
+
+
+compute_primes(n) = 
+{
+    //compute and print the first n prime numbers
+    if n <? 1 throw ValueError('there is no [n]th prime') //should it be [n] or [@n]. because integers are used to refer to the list of parameters, any identifier can unambiguously be used to specify a variable
+    if n =? 1 {print([2]) return}
+    if n =? 2 {print([2 3]) return}
+
+    primes = doublylinkedlist[2 3]
+
+    #outer loop candidate in [5 7 ...] //infinite list counting by 2s
+    {
+        #inner loop p in primes
+        {
+            if candidate % p =? 0 continue #outer
+        }
+        primes.append(candidate)
+        if primes.length =? n break #outer
+    }
+    print(primes)
+}
+
+
+compute_primes_alt(uint n)
+{
+    match n
+    {
+        0 throw ValueError('there is no 0th prime')
+        1 {print([2]) return}
+        2 {print([2 3]) return}
+        _
+        {
+            primes = doublylinkedlist[2 3]
+            
+            #outer loop candidate in [5 7 ...]
+            {
+                loop p in primes if candidate % p =? 0 continue #outer
+                primes.append(candidate)
+                if primes.length =? n break #outer
+            }
+            print(primes)
+        }
+    }
+}
+
+
+//To-Do: implement a verification algorithm for checking the value of pi (see the first answer of the stack overflow below)
+//https://stackoverflow.com/questions/14283270/how-do-i-determine-whether-my-calculation-of-pi-is-accurate
+//Naive direct implementation of https://pi2e.ch/blog/2016/07/30/the-chudnovsky-formula/ 
+compute_pi(n) = 
+{
+    //this needs some way to specifiy the precision of pi in the calculation (i.e. need to be able to say we want n digits of precision for all calculations)
+
+    //Chudnovsky's formula converges at a steady 14.18 digits per term (Exact value is: Log(151931373056000)/Log(10) = 14.181647462725477655...) 
+
+    iterations = ceiling(n / 14.181647462725477655) // the Chudnovsky Formula converges at a rate of about 14 digits per iteration
+    num pi = 0 //what if we also had a type dec for something like python's decimal class
+    pi.precision = n //set the number of digits of precision for pi
+    
+    
+    //single-line madness for generating pi
+    //pi = (10005^/2 / 4270934400 * [(-1)^k * (6*k)!/((k!)^3*(3*k)!) * ((13591409 + 545140134*k)/640320^(3*k)) loop k in 0:iterations].sum)^-1
+
+    loop k in 0:iterations
+    {
+        pi += (-1)^k * (6*k)!/((k!)^3*(3*k)!) * ((13591409 + 545140134*k)/640320^(3*k))
+    }
+
+    pi = (10005^/2 / 4270934400 * pi)^-1
+
+    print(pi.string[:n]) //print the first n digits of computed value
+}
+
+//currently needs more work converting from python to dewy
+//need to be able to specify arbitrary precision for the real values. perhaps the plain num type is equivalent to python's decimal type, and you can specify the precision you want
+//see: https://pi2e.ch/blog/2016/07/30/the-chudnovsky-formula/
+//also: http://www.numberworld.org/y-cruncher/
+
+/{ NAIVE COPY OF PYTHON IMPLEMENTATION
+compute_pi(n) =
+{
+    //compute pi to n digits
+    precision = n //need to use this
+    iterations = 70 //need to figure out what this does. I think it's the number of iterations for the precision
+
+    K, M, L, X, S = 6, 1, 13581409, 1, 13591408
+    loop k in 1:iterations
+    {
+        M = ((K^3 - 16*K) * M / k^3) as int //apparentfly floating point division is faster than integer division
+        L += 545140134
+        X *= -262537412640768000
+        S += M * L / X
+        K += 12
+    }
+    pi = 426880 * sqrt(10005) / S
+    print(pi.string[:n-1]) //print first n digits of pi
+}
+/}
+
+// Python implementation of computation of pi
+/{
+from decimal import Decimal as Dec, getcontext as gc
+
+def PI(maxK=70, prec=1008, disp=1007): # parameter defaults chosen to gain 1000+ digits within a few seconds
+    gc().prec = prec
+    K, M, L, X, S = 6, 1, 13581409, 1, 13591408 
+    for k in range(1, maxK+1):
+        M = (K**3 - 16*K) * M // k**3 
+        L += 545140134
+        X *= -262537412640768000
+        S += Dec(M * L) / X
+        K += 12
+    pi = 426880 * Dec(10005).sqrt() / S
+    pi = Dec(str(pi)[:disp]) # drop few digits of precision for accuracy
+    print("PI(maxK=%d iterations, gc().prec=%d, disp=%d digits) =\n%s" % (maxK, prec, disp, pi))
+    return pi
+
+Pi = PI()
+print("\nFor greater precision and more digits (takes a few extra seconds) - Try")
+print("Pi = PI(317,4501,4500)") 
+print("Pi = PI(353,5022,5020)")
+
+}/

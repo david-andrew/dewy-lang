@@ -385,7 +385,7 @@ class Scanner:
         return False
 
     def eat_math_operation(self):    #math operations
-        if self.text[0] in '+-*/%^':
+        if self.text[0] in '+-*/%^!':
             self.tokens.append(Token(Scanner.operation, self.text[0]))
             self.text = self.text[1:]
             return True
