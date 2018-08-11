@@ -238,12 +238,14 @@ compute_pi(n) =
 
     iterations = ceiling(n / 14.181647462725477655) // the Chudnovsky Formula converges at a rate of about 14 digits per iteration
     num pi = 0 //what if we also had a type dec for something like python's decimal class
-    pi.precision = n //set the number of digits of precision for pi
+    pi.precision = n //set the number of digits of precision for pi -> I think this will result in our version of a decimal representation
     
     
-    //single-line madness for generating pi
+    //single-line madness for generating pi. This might have problems maintaining the precision specified... hard to tell
     //pi = (10005^/2 / 4270934400 * [(-1)^k * (6*k)!/((k!)^3*(3*k)!) * ((13591409 + 545140134*k)/640320^(3*k)) loop k in 0:iterations].sum)^-1
 
+    //what if we procedurally increase the precision of pi so that only as much precision as is needed at each step is used
+    //e.g. inside the loop, pi.precision += 14.181647462725477655
     loop k in 0:iterations
     {
         pi += (-1)^k * (6*k)!/((k!)^3*(3*k)!) * ((13591409 + 545140134*k)/640320^(3*k))
