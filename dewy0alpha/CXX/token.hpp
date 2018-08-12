@@ -14,10 +14,12 @@ class Token
 public:
     enum token_type 
     {                   // Examples
-        comment,        // '//'
+        comment,        // '//' or '/{ }/'
         whitespace,     // ' '
+        keyword,        // 'loop', 'set', 'transmute', etc.
         number,         // '5'
-        boolean,        // 'true'
+        boolean,        // 'true' 'false'
+        str_literal,    // "string example" or 'string example'
         operation,      // '+'
         opchain,        // '^/'
         unit,           // 'kg'
@@ -34,9 +36,11 @@ public:
     {
         {comment, "comment"},
         {whitespace, "whitespace"},
+        {keyword, "keyword"},
         {number, "number"},
         {boolean, "boolean"},
-        {operation, "operation"},
+        {str_literal, "string"},
+        {operation, "operation"}, //should be operator, but that is a C++ reserved word
         {opchain, "opchain"},
         {unit, "unit"},
         {separator, "separator"},
@@ -53,11 +57,12 @@ public:
     string str();
     //To-Do: write a method for getting a string from the token i.e. cout << Token() works properly. see: https://stackoverflow.com/questions/5171739/tostring-override-in-c
 
-
-
-private:
+    //public so anything working with tokens can see what's inside
     token_type type;
     string value;
+
+//private: //nothing is private
+    
 
 };
 
