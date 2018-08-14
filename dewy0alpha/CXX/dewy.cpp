@@ -5,7 +5,7 @@
 //other optional command line arguments (to be determined)
 #include <fstream>
 #include "scanner.cpp"
-//#include "parser.cpp"
+#include "parser.cpp"
 //#include "interpreter.cpp"
 //#include "compiler.cpp"
 #include "utilities.cpp"
