@@ -73,6 +73,7 @@ vector<Token> Scanner::scan(string input)
         if (eat_brackets()) continue;
         if (eat_operator()) continue;
         if (eat_keyword()) continue;
+        if (eat_hashtag()) continue;
         if (eat_identifier()) continue;
 
         //nothing was eaten this loop
@@ -475,6 +476,27 @@ bool Scanner::eat_keyword()
     }
     return false;
 
+}
+
+bool Scanner::eat_hashtag()
+{
+    if (text[0] == '#')
+    {
+        int i = 1;
+        while (i < text.length() && in(text[i], alphanumeric_characters)) i++;
+        if (i>1)
+        {
+            tokens.push_back(Token(Token::hashtag, text.substr(0, i)));
+            text = text.substr(i, text.length()-i);
+            return true;
+        }
+        else
+        {
+            cout << "Error: hashtag must have an identifier" << endl;
+            return false;//throw 10;
+        }
+    }
+    return false;
 }
 
 void Scanner::remove_generic_token(Token::token_type type)

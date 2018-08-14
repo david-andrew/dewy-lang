@@ -27,6 +27,7 @@ public:
         parenthesis,    // '()'
         bracket,        // '{}'
         brace,          // '[]'
+        hashtag,        //  '#outerloop'
         identifier,     // 'var_name'
         eof,
     };
@@ -47,6 +48,7 @@ public:
         {parenthesis, "parenthesis"},
         {bracket, "bracket"},
         {brace, "brace"},
+        {hashtag, "hashtag"},
         {identifier, "identifier"},
         {eof, "eof"}
     };

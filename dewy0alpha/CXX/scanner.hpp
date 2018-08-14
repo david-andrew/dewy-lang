@@ -43,6 +43,8 @@ private:
 
     bool eat_keyword();
 
+    bool eat_hashtag();
+
     //others to be added
     //bool eat_conditional();
     //bool eat_separator(); //e.g. ',' and ';'
@@ -93,14 +95,14 @@ public:
     vector<string> question_operators = {"=?", "not?", ">?", ">=?", "<?", "<=?", "in?" , "?"};
     vector<string> assignment_operators = {"="};
     vector<string> dictionary_operators = {"<->", "->", "<-"};
-    vector<string> handle_operators = {"@", "#"}; //reference handles, and hashtags
+    vector<string> handle_operators = {"@"};//, "#"}; //reference handles, and hashtags. hashtags come with the identifier, while handles are an operation on an identifier
     vector<string> list_operators = {":", "..."};
     vector<string> separators = {",", ";"};
     vector<string> dot_operators = {"."};
     vector<string> matrix_operators = {"`"}; //transpose operator
 
     vector<string> boolean_literals = {"true", "false"};
-    vector<string> keywords = {"if", "else", "loop", "continue", "break", "match", "return", "in", "as", "transmute", "set", "settings", "yield", "pass"}; //others to be added
+    vector<string> keywords = {"if", "else", "loop", "continue", "break", "match", "return", "in", "as", "transmute", "set", "settings", "yield", "pass", "run", "exit", "const"}; //others to be added
     vector<string> datatypes = {"int", "uint", "real", "complex", "quaternion", "bool", "dec"};
     vector<string> datasizes = {"1", "2", "4", "8", "16", "32", "64", "128", "256"}; //note that not all sizes can match all datatypes. arbitrary precision is gained by not specifying a size
     //vector<string> short_base_units = {}; //this should go in the units class
