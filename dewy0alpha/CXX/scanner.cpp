@@ -206,7 +206,7 @@ bool can_ignore_case(string digits)
 int scan_digits(string text, string &num, int &i, string digits)
 {
     bool ignore_case = can_ignore_case(digits); //base 64 cannot ignore case. Unless otherwise set, all others can ignore case.
-    if (i<text.length() && !in(text[0], digits, ignore_case)) return false; //numbers must start with one of their digits. no underscores unless base 64
+    if (i<text.length() && !in(text[i], digits, ignore_case)) return false; //numbers must start with one of their digits. no underscores unless base 64
     
     //find the end index of all digits in the given text, starting at index i
     //append each digit (non '_') onto the string num
@@ -245,7 +245,6 @@ bool Scanner::eat_generic_number(string digits, string prefix, bool prefixed)
     //this updates num and i by reference
     scan_digits(text, num, i, digits);
 
-
     //check for decimal point and fractional component
     if (i < text.length() && text[i] == '.')
     {
@@ -282,17 +281,37 @@ bool Scanner::eat_generic_number(string digits, string prefix, bool prefixed)
             }
 
             scan_digits(text, tentative, temp_i, digits);
-            if (temp_i > (i + (has_space)? 3 : 1)) //apparently not scientific notation 
+
+            //check for decimal point and fractional component in the exponent of the number
+            if (temp_i < text.length() && text[temp_i] == '.')
+            {
+                //even more tentative decimal section after exponent section
+                int temp_temp_i = temp_i;
+                temp_temp_i++;
+                string tentative_tentative = "."; //string for holding the possible additions to the number
+                scan_digits(text, tentative_tentative, temp_temp_i, digits);
+                if (temp_temp_i > temp_i+1)
+                {
+                    //add the new section onto the tentative string
+                    tentative.append(tentative_tentative);
+                    temp_i = temp_temp_i;
+                } //else don't commit changes
+            }
+
+
+            if (temp_i > (i + (has_space? 3 : 1))) //is actually scientific notation 
             {
                 //commit the tentative changes
                 num.append(tentative);
                 i = temp_i;
+
+                
             }
         }
     }
 
     //if we actually have a number (i.e. scanned more than 0 digits, and the following text is not alphanumeric)
-    if ((i > (prefixed)? 2 : 0) && (i >= text.length() || !in(text[i], alphanumeric_characters)))
+    if ((i > (prefixed? 2 : 0)) && (i >= text.length() || !in(text[i], alphanumeric_characters)))
     {
         tokens.push_back(Token(Token::number, num));
         text = text.substr(i, text.length()-i);
