@@ -1,3 +1,8 @@
+#ifndef SCANNER_CPP
+#define SCANNER_CPP
+
+
+
 #include "scanner.hpp"
 #include "utilities.cpp"
 #include "token.cpp"
@@ -89,7 +94,7 @@ vector<Token> Scanner::scan(string input)
     //merge any whitespace based delimits (namely loop{do} vs {do}loop vs {do}loop{do})
     //delimit_whitespace();
 
-    remove_generic_token(Token::whitespace);    //remove whitespace tokens
+    remove_generic_token(Token::whitespace);    //remove whitespace tokens. may need to replace newlines with a special token so that insert_explicit_unit_ops knows that adjacent numbers are actually in different lines
     remove_generic_token(Token::comment);       //remove comment tokens
 
     return tokens;
@@ -511,3 +516,10 @@ void Scanner::remove_generic_token(Token::token_type type)
             i++;
     }
 }
+
+
+
+
+
+
+#endif

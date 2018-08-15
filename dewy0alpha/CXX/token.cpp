@@ -1,3 +1,7 @@
+#ifndef TOKEN_CPP
+#define TOKEN_CPP
+
+
 #include "token.hpp"
 
 //To-Do: add support for tokens containing custom classes that the parser creates
@@ -46,3 +50,6 @@ ostream & operator<<(ostream &Str, vector<Token> &v)
 	Str << "]";
 	return Str;
 }
+
+
+#endif

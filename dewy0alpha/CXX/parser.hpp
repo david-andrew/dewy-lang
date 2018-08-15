@@ -2,7 +2,7 @@
 #define PARSER_HPP
 
 #include "token.hpp"
-//#include "AST.hpp"
+#include "ast.hpp"
 #include <string>
 #include <vector>
 #include <map>
@@ -22,11 +22,12 @@ private:
 	void tokanize_operation_chains();
 	void raise_unit_precedence();
 	//void parse_physical_numbers();
-	void create_ast();
+	static AST create_ast(vector<Token> tvec);
+	static vector<AST> create_ast_vec(vector<Token> tvec);
 
 public:
 	Parser();
-	//AST parse(vector<Token> input);
+	vector<AST> parse(vector<Token> input);
 	void interpreter(); //uses Scanner.cpp
 
 

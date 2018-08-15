@@ -50,11 +50,20 @@ int main(int argc, char* argv[])
 	        else if (equals(arg, "-v"))
 	        	verbose = true;
 	        else
+	        {
 	        	filename = argv[i]; //filename is the only other possible option
+	        	//test to see if the file exists
+	        	if (!exists(filename))
+	        	{
+	        		cout << "Error: file \"" << filename << "\" does not exist" << endl;
+	        		return 1;
+	        	}
+	        }
 	    }
 
 	    if (filename != NULL)
 	    {
+	    	//read the contents of the file
 	    	ifstream f(filename);
 	    	stringstream buffer;
 	    	buffer << f.rdbuf();
@@ -91,7 +100,26 @@ int main(int argc, char* argv[])
 		
 		case 1: //parser mode
 		{
-			//To-Do: implement the parser
+			Scanner s = Scanner();
+			Parser p = Parser();
+
+			if (contents.length() != 0)
+			{
+				vector<Token> tokens;
+				vector<AST> trees;
+				try
+				{
+					tokens = s.scan(contents);
+					trees = p.parse(tokens);
+				}
+				catch (int e) {}
+				for (AST s : trees)
+					cout << s << endl;
+			}
+			else
+			{
+				p.interpreter();
+			}
 			break;
 		}
 

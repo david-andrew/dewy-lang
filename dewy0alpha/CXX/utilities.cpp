@@ -100,4 +100,38 @@ bool right(char sub, string whole, bool ignore_case=false)
 // 	return i >= str.length() || isalnum(str[i]); //call c++ al
 // }
 
+
+bool exists(char* filename)
+{
+	//check if a file exists
+	ifstream ifile(filename);
+	return (bool) ifile;
+}
+
+bool exists(string filename)
+{
+	//std::string wrapper for checking if a file exists
+	return exists(filename.c_str());
+}
+
+
+string tab_multiline_string(string s)
+{
+	//return s with ever single line indented by 4 spaces
+	string insert = "|   "; //vertical bar helps distinguish different branches of the AST
+	s = insert + s;
+	int i = insert.length();
+	while (i < s.length())
+	{
+		if (s[i] == '\n') //insert the tab after every newline
+		{
+			s = s.substr(0,i+1) + insert + s.substr(i+1, s.length()-i-1);
+		}
+		i++;
+
+	}
+	return s;
+}
+
+
 #endif
