@@ -1,0 +1,37 @@
+//There may be a problem with the syntax for defining function vs calling functions
+
+class foo(a) = 
+{ 
+	A=a 
+	baz() = {}
+}
+
+//definition of the function
+bar(a) = { return foo(a) }
+
+a=10
+//call to the function, assigning it's result to foo(a)
+//this doesn't really make sense though...
+//I think this can only be a redefinition of the function bar(a)
+//i.e. this isn't allowed according to the rule defined below
+bar(a) = { return foo(a) }
+
+//if you want to reassign a parameter in the class
+bar(a).@baz() = { return foo(a) }
+//actually I think this would look like this:
+@(bar(a).baz()) = { return foo(a) }
+//actually, I think both of these do different things. The first one gives a handle to the actual baz() function in the class, while the second one gives a handle to whatever baz returns
+//perhaps the notation of the first could be reworked as
+@bar(a).baz() = { return foo(a) }
+//this requires that . has higher precedence than @, though I think that's not unreasonable. though I think it's still not clear that baz is handled, and not evaluated, which the original shows well...
+
+
+
+
+
+/{ The Verdict
+	I've decided that functions can be redefined in general, but may not be redefined in the same scope in which they were defined. Functionse are avialable in the entire scope in which they are defined (i.e. their even available before the actual definition). Hence any redefinition of a function must be in a child scope (otherwise it will be a new function definition)
+
+	Also, 
+
+}/

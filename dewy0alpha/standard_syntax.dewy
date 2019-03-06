@@ -1,0 +1,202 @@
+/{
+    This file defines the standard syntax of the dewy language using the built-in macro language    
+    The macro language works like Extended Backus–Naur form (EBNF) in that you can define sequences of tokens that build up various syntax
+    For more details, see: https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form
+    <TODO, work on how EBNF tokens translate to actual code rules...>
+    I'm thinking that all of these objects are parsed into JSON like format, which can then be accessed in the same way as a json
+    -> this means there ought to be some way to make elements that are named that can be referred to dictionary index-like?
+
+    I'm thinking that #defining something twice overwrites the original definition. This way a person could e.g. change the digits of a base.
+    I think you probably need to be careful with this though....
+
+    I THINK A GOOD EXERCISE WILL BE FINISHING A BASIC INTERPRETER/COMPILER (doesn't need to be dewy) AND THEN USING THE LESSONS FROM THERE TO DEFINE THE MACRO LANGUAGE
+
+    look into standardizing all the base names with either '-nary' or '-imal' or something else
+}/
+
+
+
+//note that #define doesn't make the compiler match for it, rather it just makes a rule entry for it. only if it is called via something like #tokanize or #parse or #evaluate? will it actually be searched for
+//I'm thinking that if #tokanize is used to convert things into tokans, that they should all be at the end in the order that they need to be checked in, so as to not skip anything
+
+//[DONE] consider removing #define, and having it be directly #identifier = rule;
+//problem is, how can hashtags not be required to have the semicolon? perhaps if there's no '=' sign, then no semicolon, because that's only part of the rule
+
+//base 2
+#binary_digit = '0' | '1';
+#binary_prefix = '0B' | '0b';
+#binary = #binary_prefix, #binary_digit, {#binary_digit | '_'};
+
+//base 3
+//#define ternary_digit = '0' | '1' | '2';
+//#define balanced_ternary_digit = 'T' | '0' | '1';
+
+//base 4
+#quaternary_digit = '0' | '1' | '2' | '3';
+#quaternary_prefix = '0Q' | '0q';
+#quaternary = #quaternary_prefix, #quaternary_digit, {#quaternary_digit | '_'};
+
+//base 6
+#seximal_digit = '0' | '1' | '2' | '3' | '4' | '5';
+#seximal_prefix = '0S' | '0s';
+#seximal = #seximal_prefix, #seximal_digit, {#seximal_digit | '_'};
+
+//base 8
+#octal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7';
+#octal_prefix = '0O' | '0o';
+#octal = #octal_prefix, #octal_digit, {#octal_digit | '_'};
+
+//base 10
+#decimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
+#decimal_prefix = '0D' | '0d'; //obviously optional
+#decimal = [#decimal_prefix], #decimal_digit, {#decimal_digit | '_'};
+
+//base 12
+#dozenal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | ('X' | 'x') | ('E' | 'e');
+#dozenal_prefix = '0Z' | '0z';
+#dozenal = #dozenal_prefix, #dozenal_digit, {#dozenal_digit | '_'};
+
+//base 16
+#hexadecimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' 
+    | ('A' | 'a') | ('B' | 'b') | ('C' | 'c') | ('D' | 'd') | ('E' | 'e') | ('F' | 'f');
+#hexadecimal_prefix = '0X' | '0x';
+#hexadecimal = #hexadecimal_prefix, #hexadecimal_digit, {#hexadecimal_digit | '_'};
+
+//base 32
+#duotrigesimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' 
+    | ('A' | 'a') | ('B' | 'b') | ('C' | 'c') | ('D' | 'd') | ('E' | 'e') | ('F' | 'f')
+    | ('G' | 'g') | ('H' | 'h') | ('I' | 'i') | ('J' | 'j') | ('K' | 'k') | ('L' | 'l')
+    | ('M' | 'm') | ('N' | 'n') | ('O' | 'o') | ('P' | 'p') | ('Q' | 'q') | ('R' | 'R')
+    | ('S' | 's') | ('T' | 't') | ('U' | 'u') | ('V' | 'v');
+#duotrigesimal_prefix = '0U' | '0u';
+#duotrigesimal = #duotrigesimal_prefix, #duotrigesimal_digit, {#duotrigesimal_digit | '_'};
+
+//base 36
+#hexatridecimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
+    | ('A' | 'a') | ('B' | 'b') | ('C' | 'c') | ('D' | 'd') | ('E' | 'e') | ('F' | 'f')
+    | ('G' | 'g') | ('H' | 'h') | ('I' | 'i') | ('J' | 'j') | ('K' | 'k') | ('L' | 'l')
+    | ('M' | 'm') | ('N' | 'n') | ('O' | 'o') | ('P' | 'p') | ('Q' | 'q') | ('R' | 'R')
+    | ('S' | 's') | ('T' | 't') | ('U' | 'u') | ('V' | 'v') | ('W' | 'w') | ('X' | 'x')
+    | ('Y' | 'y') | ('Z' | 'z');
+#hexatridecimal_prefix = '0R' | '0r';
+#hexatridecimal = #hexatridecimal_prefix, #hexatridecimal_digit, {#hexatridecimal_digit | '_'};
+
+//base 64
+//[DONE] consider changing the last 2 digits used here to something else, e.g. !, &, $, so that the syntax used by @, and the number separator '_' can interop easily
+#tetrasexagesimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
+    | 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j'
+    | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't'
+    | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' | 'A' | 'B' | 'C' | 'D'
+    | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N'
+    | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X'
+    | 'Y' | 'Z' | '!' | '?';
+#tetrasexagesimal_prefix = '0T' | '0t';
+#tetrasexagesimal = #tetrasexagesimal_prefix, #tetrasexagesimal_digit, {#tetrasexagesimal_digit | '_'};
+
+
+
+
+
+//defining integers in each base
+#binary_integer           = ['-'], #binary;
+#quaternary_integer       = ['-'], #quaternary;
+#seximal_integer          = ['-'], #seximal;
+#octal_integer            = ['-'], #octal;
+#decimal_integer          = ['-'], #decimal;
+#dozenal_integer          = ['-'], #dozenal;
+#hexadecimal_integer      = ['-'], #hexadecimal;
+#duotrigesimal_integer    = ['-'], #duotrigesimal;
+#hexatridecimal_integer   = ['-'], #hexatridecimal;
+#tetrasexagesimal_integer = ['-'], #tetrasexagesimal;
+
+#integer = #binary_integer | #quaternary_integer | #seximal_integer | #octal_integer | #decimal_integer
+    | #dozenal_integer | #hexadecimal_integer | #duotrigesimal_integer | #hexatridecimal_integer | #tetrasexagesimal_integer;
+
+
+//defining floats in each base. Note that the later bases require a space between the exponent identifier and the number/mantissa
+#exponent = 'e' | 'E'
+#binary_float           = #binary_integer,           '.', [{' '},      #exponent, {' '},      #binary_integer, ['.',           #binary]]
+#quaternary_float       = #quaternary_integer,       '.', [{' '},      #exponent, {' '},      #quaternary_integer, ['.',       #quaternary]]
+#seximal_float          = #seximal_integer,          '.', [{' '},      #exponent, {' '},      #seximal_integer, ['.',          #seximal]]
+#octal_float            = #octal_integer,            '.', [{' '},      #exponent, {' '},      #octal_integer, ['.',            #octal]]
+#decimal_float          = #decimal_integer,          '.', [{' '},      #exponent, {' '},      #decimal_integer, ['.',          #decimal]]
+#dozenal_float          = #dozenal_integer,          '.', [' ', {' '}, #exponent, ' ', {' '}, #dozenal_integer, ['.',          #dozenal]]
+#hexadecimal_float      = #hexadecimal_integer,      '.', [' ', {' '}, #exponent, ' ', {' '}, #hexadecimal_integer, ['.',      #hexadecimal]]
+#duotrigesimal_float    = #duotrigesimal_integer,    '.', [' ', {' '}, #exponent, ' ', {' '}, #duotrigesimal_integer, ['.',    #duotrigesimal]]
+#hexatridecimal_float   = #hexatridecimal_integer,   '.', [' ', {' '}, #exponent, ' ', {' '}, #hexatridecimal_integer, ['.',   #hexatridecimal]]
+#tetrasexagesimal_float = #tetrasexagesimal_integer, '.', [' ', {' '}, #exponent, ' ', {' '}, #tetrasexagesimal_integer, ['.', #tetrasexagesimal]]
+
+#float = #binary_float | #quaternary_float | #seximal_float | #octal_float | #decimal_float
+    | #dozenal_float | #hexadecimal_float | #duotrigesimal_float | #hexatridecimal_float | #tetrasexagesimal_float;
+
+//this one will probably be hardcoded into the language
+//#define token = '`', {? any sequence characters except backticks ?}, '`';
+
+//is there some way to specify case/ignore case for the name one?
+#yotta_symbol = 'Y'; #yotto_name = 'yotta'; //where ignore_case would be hardcoded into the compiler?
+#zetta_symbol = 'Z'; #zetta_name = 'zetta';
+#exa_symbol   = 'E'; #exa_name   = 'exa';
+#peta_symbol  = 'P'; #peta_name  = 'peta';
+#tera_symbol  = 'T'; #tera_name  = 'tera';
+#giga_symbol  = 'G'; #giga_name  = 'giga';
+#mega_symbol  = 'M'; #mega_name  = 'mega'; 
+#kilo_symbol  = 'k'; #kilo_name  = 'kilo';
+#centi_symbol = 'c'; #centi_name = 'centi';
+#milli_symbol = 'm'; #milli_name = 'milli';
+#micro_symbol = 'u' | 'μ'; #micro_name = 'micro';
+#nano_symbol  = 'n'; #nano_name  = 'nano';
+#pico_symbol  = 'p'; #pico_name  = 'pico';
+#femto_symbol = 'f'; #femto_name = 'femto';
+#atto_symbol  = 'a'; #atto_name  = 'atto';
+#zepto_symbol = 'z'; #zepto_name = 'zepto';
+#yocto_symbol = 'y'; #yocto_name = 'yocto';
+
+#prefix_symbol = #yotta_symbol | #zetta_symbol | #exa_symbol | #peta_symbol | #tera_symbol | #giga_symbol | #mega_symbol | #kilo_symbol
+    | #centi_symbol | #milli_symbol | #micro_symbol | #nano_symbol | #pico_symbol | #femto_symbol | #atto_symbol | #zepto_symbol | #yocto_symbol;
+#prefix_name = #yotta_name | #zetta_name | #exa_name | #peta_name | #tera_name | #giga_name | #mega_name | #kilo_name
+    | #centi_name | #milli_name | #micro_name | #nano_name | #pico_name | #femto_name | #atto_name | #zepto_name | #yocto_name;
+ 
+
+#gram_symbol    = 'g';   #gram_name    = 'gram';             #gram_plural    = 'grams';
+#metre_symbol   = 'm';   #metre_name   = 'meter' | 'metre';  #metre_plural   = 'meters' | 'metres';
+#second_symbol  = 's';   #second_name  = 'second';           #second_plural  = 'seconds';
+#ampere_symbol  = 'A';   #ampere_name  = 'ampere' | 'amp';   #ampere_plural  = 'amperes' | 'amps';
+#kelvin_symbol  = 'K';   #kelvin_name  = 'kelvin';           //kelvin is the plural of kelvin. (may include anyways though...)
+#mole_symbol    = 'mol'; #mole_name    = 'mole' | 'mol';     #mole_plural    = 'moles' | 'mols'; //mol is weird because it's symbol can also be it's written out name, i.e. Gmol gigamol, gigamols, gigamole, gigamoles   
+#candela_symbol = 'cd';  #candela_name = 'candela';          #candela_plural = 'candelas'; 
+
+#unit_symbol = #gram_symbol | #metre_symbol | #second_symbol | #ampere_symbol | #kelvin_symbol | #mole_symbol | #candela_symbol;
+#unit_name = #gram_name | #metre_name | #second_name | #ampere_name | #kelvin_name | #mole_name | #candela_name;
+#unit_plural = #gram_plural | #metre_plural | #second_plural | #ampere_plural | #mole_plural | #candela_plural; //kelvin does not have a plural form
+
+//define how units can be combined
+#unit = ([#prefix_symbol], #unit_symbol) | #ignore_case ([#prefix_name], (#unit_name | #unit_plural)); //#ignore_case is hardcoded into the compiler, and operates on the next step in the rule, and allows lower or uppercase to be matched. need to be careful about how this deals with non-ascii encodings
+
+
+//to do, finish this
+#reserved_word = #ignore_case ('loop' | 'if' | 'else' | 'return' | 'in' | 'as' | 'transmute' | 'continue' | 'break' | 'exit' | 'quit' | 'yield' | 'constant' | 'symbol')
+#operators = ;
+#punctuation = ;
+
+//define identifiers
+#lowercase_letter = 'a'| 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' 
+    | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z';
+#uppercase_letter = 'A'| 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' 
+    | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z';
+
+#identifier = (#uppercase_letter | #lowercase_letter), {#uppercase_letter | #lowercase_letter | #decimal_digit | '_' | '!' | '&' | '?' }; //no '$' in identifiers because they're for interpolation
+//standard style for function names will be to use '!' for mutators, and '?' for returning expressions, and '?!' or '!?' for mutations that also return expressions
+//e.g. obj.is_active?() and obj.activate!() might respectively return a bool, and mutate the object.
+//e.g. queue.pop!?() will both mutate the queue and return a value
+//standard style will probably also be to use the parenthesis for zero argument functions, but it is not necessary [I'm not sure about this rule...]
+//i.e. obj.is_active? and obj.is_active?() both call the function
+
+
+
+
+
+
+//step where the compiler is told to search for each pattern in sequence
+
+#tokanize #unit
+#tokanize #identifier //tell the compiler to match for these

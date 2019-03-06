@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
 
 using namespace std;
 
@@ -13,6 +14,8 @@ class Parser
 {
 private:
 	vector<Token> tokens;
+	vector<AST*> lines;
+	//Note that ASTs are stored as pointers, and will need to be deleted at the end of the program. should iterate through the entire vector of ASTs and call delete on each. Each AST should implement Delete to call delete on it's sub ASTs
 	//AST ast; //abstract syntax tree
 
 	//internal methods
@@ -22,12 +25,37 @@ private:
 	void tokanize_operation_chains();
 	void raise_unit_precedence();
 	//void parse_physical_numbers();
-	static AST create_ast(vector<Token> tvec);
-	static vector<AST> create_ast_vec(vector<Token> tvec);
+
+	//create a symbol table out of all of the different scopes
+	//probably will need to be updated after the fact
+	void create_symbol_table();
+
+	bool eat_assignment();
+	bool eat_array();
+	bool eat_handle(); //may be variable, or function, may be partially evaluated function, may be anonymous function
+	bool eat_loop();
+	bool eat_if();
+	bool eat_match();
+	bool eat_else();
+	bool eat_function_call();
+	bool eat_binary_op();
+	bool eat_unary_op();
+	bool eat_function_definition();
+	bool eat_dictionary();
+	bool eat_run();
+	bool eat_interval();
+	bool eat_block();
+
+
+
+
+	
+	static AST* create_ast(vector<Token> tvec);
+	static vector<AST*> create_ast_vec(vector<Token> tvec);
 
 public:
 	Parser();
-	vector<AST> parse(vector<Token> input);
+	vector<AST*> parse(vector<Token> input);
 	void interpreter(); //uses Scanner.cpp
 
 

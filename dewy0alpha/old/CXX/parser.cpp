@@ -14,6 +14,7 @@
 //#include "functionAST.cpp"
 
 
+
 Parser::Parser()
 {
 	//create the precedence map from the op_class map
@@ -34,28 +35,28 @@ Parser::Parser()
 
 
 	///////stuff for testing/////////
-	vector<AST*> asts;
+	// vector<AST*> asts;
 
-	// asts.push_back(new IntegerAST(7864876,32));
-	// cout << "string: " << asts[0]->str() << endl;
+	// // asts.push_back(new IntegerAST(7864876,32));
+	// // cout << "string: " << asts[0]->str() << endl;
 
-	IntegerAST i1 = IntegerAST(836836,32);
-	IntegerAST i2 = IntegerAST(465,16,true);
-	IntegerAST i3 = IntegerAST(43453546, 64);
-	BinaryAST bin1 = BinaryAST(&i1, "+", &i2);
-	BinaryAST bin2 = BinaryAST(&i3, "*", &bin1);
+	// IntegerAST* i1 = new IntegerAST(836836,32);
+	// IntegerAST* i2 = new IntegerAST(465,16,true);
+	// IntegerAST* i3 = new IntegerAST(43453546, 64);
+	// BinaryAST* bin1 = new BinaryAST(i1, "+", i2);
+	// //BinaryAST bin2 = BinaryAST(&i3, "*", &bin1);
 
-	asts.push_back(&i1);
-	asts.push_back(&i2);
-	asts.push_back(&i3);
-	asts.push_back(&bin1);
-	asts.push_back(&bin2);
+	// asts.push_back(i1);
+	// //asts.push_back(&i2);
+	// //asts.push_back(&i3);
+	// //asts.push_back(&bin1);
+	// //asts.push_back(&bin2);
 
 	
-	for (AST* t : asts)
-	{
-		cout << *t << endl << endl;
-	}
+	// for (AST* t : asts)//auto t=asts.begin(); t!=asts.end(); ++t)
+	// {
+	// 	cout << *t << endl << endl;
+	// }
 
 
 
@@ -68,7 +69,7 @@ void Parser::interpreter()
 
 	string input;
 	vector<Token> tokanized_input;
-	vector<AST> output;
+	vector<AST*> output;
 
 	Scanner s = Scanner();
 
@@ -94,19 +95,51 @@ void Parser::interpreter()
 		try
 		{
 			output = parse(tokanized_input);
-			for (AST t : output)
+			for (auto t=output.begin(); t!=output.end(); ++t)
 			{
-				cout << t << endl;
+				cout << *t << endl;
 			}
 		}
 		catch (int e) {} //let the context display the error
 	}
 }
 
-vector<AST> Parser::parse(vector<Token> tokens)
+vector<AST*> Parser::parse(vector<Token> tvec)
 {
-	vector<AST> trees = vector<AST>();
-	return trees;
+	//vector<AST*> trees;// = vector<AST>();
+	tokens = tvec;
+	lines = vector<AST*>();
+
+	if (!match_all_parenthesis())
+	{
+		cout << "Error: token stream has unmatched parenthesis" << endl;
+		return lines;
+	}
+
+	//not running until units are implemented in the scanner
+	//insert explicit multiplication between adjacent unit/unit, and number/unit
+	//insert_explicit_unit_ops(); //requires the unit be on the same line as adjacent. remove all whitespace after this
+
+	//convert any 'not' next to an op into the equivalent negative operator
+	fold_logical_not_operators();
+
+	//convert any instances of successive operations into an operation chain
+	tokanize_operation_chains();
+
+	//convert any multiplication/division between units to higher precedence versions of the operations
+	raise_unit_precedence();
+
+
+	// while (tokens.size() > 0) 
+	// {
+	// 	//vectors to hold the next line, and the remaining tokens
+	// 	//vector<Token> line = eat_next_line();
+
+	// 	//for now we are assuming that we are already looking at a single statement
+	// 	//AST* statement = create_ast(left);
+	// }
+
+	return lines;
 }
 
 
@@ -156,7 +189,7 @@ void Parser::raise_unit_precedence()
 
 
 //this may actually need a pair method. This one creates just ASTs, and the other one creates the vector of ASTs using this one
-AST Parser::create_ast(vector<Token> tvec)
+AST* Parser::create_ast(vector<Token> tvec)
 {
 	//recursive function for generating an abstract syntax tree from a list of tokens
 	cout << "create_ast() is not yet implemented" << endl;

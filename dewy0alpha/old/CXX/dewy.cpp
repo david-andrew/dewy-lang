@@ -106,15 +106,15 @@ int main(int argc, char* argv[])
 			if (contents.length() != 0)
 			{
 				vector<Token> tokens;
-				vector<AST> trees;
+				vector<AST*> trees;
 				try
 				{
 					tokens = s.scan(contents);
 					trees = p.parse(tokens);
 				}
 				catch (int e) {}
-				for (AST s : trees)
-					cout << s << endl;
+				for (auto t=trees.begin(); t!=trees.end(); ++t)
+					cout << *t << endl;
 			}
 			else
 			{
