@@ -1,15 +1,52 @@
 /{
+    DewySpeak Standard Syntax Definition
+    #Author = "David Samson"
+    #Date = "12019-03-06"
+
     This file defines the standard syntax of the dewy language using the built-in macro language    
-    The macro language works like Extended Backus–Naur form (EBNF) in that you can define sequences of tokens that build up various syntax
+    The macro language is a slightly modified version of Extended Backus-Naur form (EBNF). Changes were made to accomdate embedding EBNF in the DewySpeak Language.
+
+    The following changes are made/restrictions imposed:
+    1. meta-identifiers have a restriction on thier form*
+    2. EBNF comments are not included. Instead Dewy style comments (// and /{} /) may be used, as this is still Dewy source code [TODO, fix syntax highlighting so that you can embed comments, i.e. be able to remove the space]
+    3. The definition of a rule can be extended by including a rule in the body of its redefinition. Basic updates would be:
+       -> #rule = #rule | new_rules; can be used to include another option
+       -> #rule = #rule - new_rules; can be used to subtract from the options
+       -> #rule = num * #rule; can be used to duplicate the rule
+       -> #rule = #rule, new_rules; can be used to append to the rule
+       Additionally any other appearance of #rule in the body will update the definition
+       -> e.g. #rule = {#rule | "A"}-; would redefine a rule so that #rule or "A" could occur in a sequence of 1 or more. (note that in EBNF, "{something}-" means a sequence of at least 1, because it subtracts the empty option from the sequence)
+    4. The special symbol sequence "? ... ?" may be ignored as ? are important for identifiers
+
+    *Rules for macro identifiers:
+    Basically the same as the rules for normal Dewy identifiers, except, they must start with a '#' symbol
+    Here's the EBNF definition:
+    #number = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
+    #letter = 'A' | 'B' | 'C' | 'D' | 'E' | ... | 'v' | 'w' | 'x' | 'y' | 'z' |;  //include unicode characters?
+    #symbol = '~' | '!' | '@' | '#' | '$' | '&' | '_' | '?'; //include '‽' as well?
+    #identifier = '#', #letter, {#letter | #number | #symbol}
+
     For more details, see: https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form
-    <TODO, work on how EBNF tokens translate to actual code rules...>
-    I'm thinking that all of these objects are parsed into JSON like format, which can then be accessed in the same way as a json
+    Full EBNF specification: http://standards.iso.org/ittf/PubliclyAvailableStandards/s026153_ISO_IEC_14977_1996(E).zip
+
+    The way the macro language works while parsing Dewy source code is that tokens are parsed sequentially according to rules
+    - All rules defined by macros are evaluated first
+    - Rules hardcoded into the compiler are evaluated second
+    The purpose of this is so that the entire language can be defined via the macro language, and any hardcoded rules can be superceded by macro rules
+
+    <TODO, write out explanation of EBNF and compiler compiler rules>
+    
+    <TODO, work on how EBNF tokens translate to actual code rules...> i.e. the "compiler compiler" or compiler generator
+    -> basically need to read about compiler compilers, e.g. YACC, and see how they work
+    -> My first guess would be that all of these objects are parsed into JSON like format, which can then be accessed in the same way as a json
     -> this means there ought to be some way to make elements that are named that can be referred to dictionary index-like?
 
-    I'm thinking that #defining something twice overwrites the original definition. This way a person could e.g. change the digits of a base.
-    I think you probably need to be careful with this though....
+    I'm thinking that #defining something twice overwrites the original definition. This way a person could e.g. change the digits of a base. This can also be used to extend the definition of something, e.g. #identifier = #identifier | new_rules; or #identifier = #identifier, new_rules; or #identifier = num * #identifier; or #identifier = #identifier - exclusions;
+    I think that in general, if the compiler detects that something is being overwritten, the default warnings will be issued if the override is of something from a different source file.
+    -> If the source file is the same, then there probably doesn't need to be an error about the override 
+    
 
-    I THINK A GOOD EXERCISE WILL BE FINISHING A BASIC INTERPRETER/COMPILER (doesn't need to be dewy) AND THEN USING THE LESSONS FROM THERE TO DEFINE THE MACRO LANGUAGE
+    I think a good exercise will be finishing a basic interpreter/compiler (doesn't need to be dewy) and then using the lessons from there to define the macro language
 
     look into standardizing all the base names with either '-nary' or '-imal' or something else
 }/
@@ -23,7 +60,7 @@
 //problem is, how can hashtags not be required to have the semicolon? perhaps if there's no '=' sign, then no semicolon, because that's only part of the rule
 
 
-#ignore_case = ? hard code ignore case into the compiler ?
+//#ignore_case = ? hard code ignore case into the compiler ?
 //any other hardcoded macros defined here
 
 //base 2
@@ -136,6 +173,33 @@
 //this one will probably be hardcoded into the language
 //#define token = '`', {? any sequence characters except backticks ?}, '`';
 
+
+
+
+//Attempt to parse based on how yacc/lex method works
+//there needs to be a step that sanitizes the tokens into the llvm format though, i.e. no underscores, or any conversions that are needed...
+//perhaps there could be a definition for pure integer where anything that is of that type has been sanitized...
+
+//defining addition for integers and floats: //I think somehow whitespace ought to be sanitized before this step
+#addition = (#integer, {#whitespace}, '+', {#whitespace}, #integer := llvm.int_add(#0, #4))
+        | (#float, {#whitespace}, '+', {#whitespace}, #float := llvm.float_add(#0, #4));
+
+#subtraction = //definition of subtraction
+#multiplication = //definition of multiplication
+//etc.
+
+//start building up the rules for the AST
+#expression = #addition | #subtraction | #multiplication | #division | /{etc.}/;
+#function = #identifier, '(', {[#type],#identifier}, ')', '=', (#expression | #statement | #block); //then need to define how function calls work... e.g. llvm function def?
+#block = '{', {#statement | #expression}, '}'
+
+//my problem with this definition, is I want to be able to define dispatch for the various types, though 
+//also it still isn't clear how things are sanitized into data
+//there definitely needs to be some sort of programatic way to combine the different tokens, with possibly multiple steps
+//I do like the syntax though of using := to define the irreducable rule, and then using #0, #1, #2, ... etc. to refer to the n'th token. though what about optionals and sequences?
+//I also do like how it still is basically using EBNF to define how the parse tree looks
+
+
 //is there some way to specify case/ignore case for the name one?
 #yotta_symbol = 'Y'; #yotto_name = 'yotta'; //where ignore_case would be hardcoded into the compiler?
 #zetta_symbol = 'Z'; #zetta_name = 'zetta';
@@ -182,21 +246,24 @@
 #operators = ;
 #punctuation = ;
 
-//define identifiers
+//define identifiers. I've decided to be a bit more lax about identifiers, even allowing them to contain @ and #
 #lowercase_letter = 'a'| 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' 
     | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z';
 #uppercase_letter = 'A'| 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' 
     | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z';
+#symbols = '~' | '!' | '@' | '#' | '$' | '&' | '_' | '?'; 
 
-#identifier = (#uppercase_letter | #lowercase_letter), {#uppercase_letter | #lowercase_letter | #decimal_digit | '_' | '!' | '&' | '?' }; //no '$' in identifiers because they're for interpolation
+#identifier = (#uppercase_letter | #lowercase_letter), {#uppercase_letter | #lowercase_letter | #decimal_digit | #symbols };
+
+
 //standard style for function names will be to use '!' for mutators, and '?' for returning expressions, and '?!' or '!?' for mutations that also return expressions
 //e.g. obj.is_active?() and obj.activate!() might respectively return a bool, and mutate the object.
-//e.g. queue.pop!?() will both mutate the queue and return a value
+//e.g. queue.pop!?() or queue.pop‽() will both mutate the queue and return a value
 //standard style will probably also be to use the parenthesis for zero argument functions, but it is not necessary [I'm not sure about this rule...]
 //i.e. obj.is_active? and obj.is_active?() both call the function
 
 
-
+#macro_identifier = '#', #identifier;
 
 
 
