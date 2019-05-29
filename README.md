@@ -1,7 +1,7 @@
 # DewySpeak
 DewySpeak (Dewy for short) is a programming language that I am developing. The main goal I have for this language is to create a language that is the perfect language that I would want to use. Dewy is a general purpose programming language with a focus on engineering.
 
-Important features of the language
+## Language Features
 * first class physical units (e.g. length, time, mass, temperature, etc.)
 * first class functions (as well as many concepts borrowed from functional programming)
     * partial function evalutation
@@ -19,7 +19,8 @@ Important features of the language
 * (planned) simple unified package management system akin to ckan
 * (probably) lots of other things...
 
+## Language Examples
+A decent example of the language can be found at: `/DewySpeak/language_ideas/example_programs/language_benchmark.dewy`. Since the first compiler has yet to be completed, there are probably inconsistencies with this and the actual language.
 
-To see a decent example of the language, see `/DewySpeak/language_ideas/example_programs/language_benchmark.dewy`. At the moment, this source file is a benchmark for the compiler to test that most of the features of the language work properly.
-
+## Trello Project
 For more information about the current state of the project, see the DewySpeak Trello: https://trello.com/b/YYsedENy/dewyspeak
