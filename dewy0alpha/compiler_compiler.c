@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "utilities.c"
 
 //string manipulation functions;
 //strcpy(s1,s2); Copies string s2 into string s1.
@@ -24,10 +25,37 @@ enum EBNF_state
     special,
 };
 
+
+//possible token types
+enum EBNF_token_types
+{
+    EBNF_identifier,
+    single_quote_string,
+    double_quote_string,
+    comma,
+    semicolon,
+    vertical_bar,
+    minus,
+    equals_sign,
+    parenthesis,
+    bracket,
+    brace,
+    whitespace,
+};
+
+//individual tokens that appear in an EBNF rule
+struct EBNF_token
+{
+    enum EBNF_token_types type;
+    char* content;
+};
+
 //for rule in macro_rules:
 //  attempt to match
 //for rule in hard_rules:
 //  attempt to match
+
+
 
 
 char* read_file(char* filename)
@@ -47,6 +75,45 @@ char* read_file(char* filename)
     return string;
 }
 
+char* remove_comments(char* source)
+{    
+    printf("Removing comments from source string...\n");
+
+    size_t length = strlen(source);
+    char* head = source;
+    char* processed = malloc(length * sizeof(char));     //potentially entire space used
+    size_t copied = 0;
+    
+    do
+    {
+        //check if start of line comment, and if so skip to end of line
+        if (source - head + 1 < length && *source == '/' && *(source + 1) ==  '/')
+        {
+            while(*++source != '\n' && *source != 0); //scan until the line break (or end of string)
+            continue;
+        }
+
+        // //check if start of block comment, and if so, skip to end of block (keeping track of internal block comments)
+        // if (source - head + 1 < length && *cource == '/' && *(source + 1) == '{')
+        // {
+        //     int stack = 1;  //monitor internal opening and closing blocks.
+        //     while (stack != 0)
+        //     {
+
+        //     }
+        // }
+
+        // putchar(*source);
+        // printf("%d ", *source);
+        processed[copied++] = *source; //copy the current character
+    }
+    while (*source++);
+
+    // while(*processed++) putchar(*processed);
+    processed[copied] = 0; //add final null-terminator to copied string
+    return processed;
+}
+
 int main(int argc, char* argv[])
 {
     //test to see if we can read the command line args
@@ -63,6 +130,8 @@ int main(int argc, char* argv[])
     }
 
     char* source = read_file(argv[1]); //fopen(argv[1], "r");
+    source = remove_comments(source);
+    // source = remove_whitespace(source);
     printf("Contents of source file:\n%s\n",source);
     printf("length of string: %lu\n", strlen(source));
 
