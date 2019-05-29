@@ -9,6 +9,7 @@ DewySpeak (Dewy for short) is a programming language that I am developing. The m
 * simple, easty-to-read, elegant syntax
 * optional type system with type inference
 * rust-style memory safety gurantees
+    * suitable for realtime applications
 * powerful meta-programming capabilities 
     * ability to arbitrily add or modify language syntax
     * compiler-compiler uses meta-programming to add all features of the language (meaning compiler implementations are extremely simple/lightweight)
