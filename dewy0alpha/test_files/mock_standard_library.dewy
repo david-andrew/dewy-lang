@@ -1,0 +1,20 @@
+#whitespace = { ' ' | '\n' | '\r' | '\t' | '\f' | '\v' }-;#tokanize #whitespace
+
+#single_line_comment='//',{#wildcard},('\n'|#EOF);
+#tokanize #single_line_comment
+//the above allows the language to tokanize single-line comments. 
+//comments are not recognized before the above definition, and would cause the compiler to throw a syntax error
+
+//whitespace is defined first so that the program can recognize whitespace that occurs outside of EBNF rules
+
+//define block comments, with allowences for internally nested block comments
+#block_comment = '/{',{#wildcard | #multi_line_comment},'}/';
+#tokanize #block_comment
+
+/{
+    list of predefined tokens:
+    - #wildcard: any character (need to be careful with utf-8 representation, and read whole characters rather than just single bytes)
+    - #EOF: end of file
+    - #whitespace: all possible whitespace characters. This will most likely be predefined b/c ebnf uses (ignores) whitespace. Otherwise would have to define it first as in above
+    - #tokenize: tells the compiler to add a new token rule for the specified hashtag
+}/

@@ -1,43 +1,104 @@
 //helper functions for managing strings and so forth in compiler compiler
-
 #ifndef UTILITIES_C
 #define UTILITIES_C
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+
+//forward declare all functions
+int clamp(int x, int min, int max);
+size_t dewy_index(int index, int length);
+char* substr(char* string, int start, int stop);
+char* clone(char* string);
+char* concatenate(char* left, char* right);
+char* read_file(char* filename);
+
+
 /**
-    return a substring according to python string slicing rules
+    clamp an integer to a range
+*/
+int clamp(int x, int min, int max)
+{
+    if (x < min) x = min;
+    else if (x > max) x = max;
+    return x;
+}
+
+/**
+    convert a Dewy style index to a size_t according to Dewy indexing rules for slicing
+*/
+size_t dewy_index(int index, int length)
+{
+    index = (index < 0) ? length + index : index;   //if negative, use end relative indexing 
+    // printf("dewy index: %d\n", clamp(index, 0, length - 1));
+    return (size_t) clamp(index, 0, length - 1);    //clamp the index to the range of the array length
+}
+
+/**
+    return a substring according to dewy string slicing rules
 */
 char* substr(char* string, int start, int stop)
 {
     size_t length = strlen(string);
-    size_t start_idx = start, stop_idx = stop;
-    
-    //set up substring indices
-    //TODO->handle case when start/stop are longer than length
-    if (start < 0) start_idx = length - start;  //python end-relative indexing
-    if (stop < 0) stop_idx = length - stop;     //python end-relative indexing
-    if (start_idx > length) start_idx = length; //out of bounds copies up to length of string
-    if (stop_idx > length) stop_idx = length;   //out of bounds copies up to length of string
+    size_t start_idx = dewy_index(start, length);
+    size_t stop_idx = dewy_index(stop, length);
 
     //compute length of substring
-    size_t substr_length = stop_idx - start_idx;
-    
-    //if no substring length, return empty string
-    if (substr_length == 0)
-    {
-        return "";
-    }
+    size_t substr_length = (start_idx < stop_idx) ? stop_idx - start_idx : 0;
+    // printf("substring length: %d\n", substr_length);
 
-    //otherwise perform copy
+    //perform copy
     char* substr = malloc((substr_length + 1) * sizeof(char));
-    for (size_t i = start_idx; i < stop_idx; i++)
+    char* ptr = substr;
+    for (size_t i = start_idx; i <= stop_idx; i++)
     {
-        *substr++ = string[i];
+        *ptr++ = string[i];
     }
-    *substr = 0; //add null terminator to end of string
-
+    *ptr = 0; //add null terminator to end of string
     return substr;
+}
+
+/**
+    get a copy of a string
+*/
+char* clone(char* string)
+{
+    char* copy = malloc(strlen(string) * sizeof(char));
+    char* ptr = copy;
+    while ((*ptr++ = *string++));
+    return copy;
+}
+
+/**
+    concatenate 2 strings together
+*/
+char* concatenate(char* left, char* right)
+{
+    char* combined = malloc((strlen(left) + strlen(right)) * sizeof(char));
+    char* ptr = combined;
+    while ((*ptr++ = *left++));
+    ptr--;  //remove null terminator from left string
+    while ((*ptr++ = *right++));
+    return combined;
+}
+
+char* read_file(char* filename)
+{
+    //see: https://stackoverflow.com/questions/14002954/c-programming-how-to-read-the-whole-file-contents-into-a-buffer
+    FILE *f = fopen(filename, "rb");
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
+
+    char *string = malloc(fsize + 1);
+    fread(string, fsize, 1, f);
+    fclose(f);
+
+    string[fsize] = 0;
+
+    return string;
 }
 
 

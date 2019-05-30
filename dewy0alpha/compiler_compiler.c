@@ -7,6 +7,11 @@
 #include <string.h>
 #include "utilities.c"
 
+#include <limits.h>
+#define START 0     //start of an array
+#define END INT_MAX //end of an array (when sanitized via dewy_index() or as a substring)
+
+
 //string manipulation functions;
 //strcpy(s1,s2); Copies string s2 into string s1.
 //strcat(s1,s2); Concatenates string s2 onto the end of string s1.
@@ -57,24 +62,6 @@ struct EBNF_token
 
 
 
-
-char* read_file(char* filename)
-{
-    //see: https://stackoverflow.com/questions/14002954/c-programming-how-to-read-the-whole-file-contents-into-a-buffer
-    FILE *f = fopen(filename, "rb");
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
-
-    char *string = malloc(fsize + 1);
-    fread(string, fsize, 1, f);
-    fclose(f);
-
-    string[fsize] = 0;
-
-    return string;
-}
-
 char* remove_comments(char* source)
 {    
     printf("Removing comments from source string...\n");
@@ -90,6 +77,7 @@ char* remove_comments(char* source)
         if (source - head + 1 < length && *source == '/' && *(source + 1) ==  '/')
         {
             while(*++source != '\n' && *source != 0); //scan until the line break (or end of string)
+            source--;   //don't eat the newline
             continue;
         }
 
@@ -134,5 +122,6 @@ int main(int argc, char* argv[])
     // source = remove_whitespace(source);
     printf("Contents of source file:\n%s\n",source);
     printf("length of string: %lu\n", strlen(source));
+    // printf("Substring test: %s\n", substr(source, START, END));
 
 }

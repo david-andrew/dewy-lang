@@ -1,0 +1,46 @@
+//The goal of this file is to sequentially build out the aspects of the compiler compiler
+//All rules are borrowed from standard syntax
+
+//1) rule for identifying decimal digits
+#decimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
+#decimal_prefix = '0D' | '0d'; //obviously optional
+#decimal_natural = [#decimal_prefix], (#decimal_digit, {#decimal_digit | '_'});
+
+
+//test if compiler can identify decimal digit
+0
+0d
+0d4868576
+
+
+//2) rules for identifying decimal exponential number
+
+//capture rules:
+//1) all groups contained in [], {}, or ()
+//2) any #identifiers
+// others? should strings be captured?
+//captures are nested lists.
+//first capture is the entire sequence captured, followed by each subsequent capture in the top level
+//sub-captures are accessed by selecting the desired capture from the lists, and then selecting the sub-capture from that capture item
+//groupA or groupB will appear as a single capture item
+//optional groups that were not found will be null
+// 
+//#decimal_integer = ['-'], #decimal_natural;
+#decimal_rational = ([#decimal_natural], '.', [#decimal_natural])-'.';
+#decimal_floating_point = #decimal_rational, [('e'|'E'), ['-'], #decimal_rational];
+
+//3) rules for identifying identifiers
+#lowercase_letter = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' 
+    | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z';
+#uppercase_letter = 'A'| 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' 
+    | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z';
+#symbols = '~' | '!' | '@' | '#' | '$' | '&' | '_' | '?'; 
+
+#identifier = (#uppercase_letter | #lowercase_letter), {#uppercase_letter | #lowercase_letter | #decimal_digit | #symbols };
+
+//test if compiler can identify the identifier
+apple
+BaNaNaN
+apple&b@n@n@!
+Ra$pberry5?
+F&#!?_@
