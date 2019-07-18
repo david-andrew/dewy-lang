@@ -102,4 +102,77 @@ char* read_file(char* filename)
 }
 
 
+
+/*
+    Struct for Objects. 
+
+    Type indicates what type of object:
+    0 - Integer
+    1 - TBD
+    2 - TBD
+    ...
+
+*/
+typedef struct obj_struct
+{
+    int type;       //integer specifying what type of object.
+    size_t size;    //size of the data allocated for this object
+    void* data;     //data allocated for this object
+} Object;
+
+
+Object* Integer(int i)
+{
+
+    Object* I = malloc(sizeof(Object));
+    I->type = 0;
+    I->size = sizeof(int);
+    int* i_ptr = malloc(sizeof(int)); 
+    *i_ptr = i;
+    I->data = (void*)i_ptr;
+    return I;
+}
+
+
+
+void print(Object* obj)
+{
+    switch (obj->type)
+    {
+        case 0: //integer
+            printf("%d", *((int*)obj->data));
+            break;
+        //case 1:
+        //case 2:
+        //case 3:
+        //...
+        default:
+            printf("Unknown Type");
+            break;
+    }
+}
+
+
+char* tostr(Object* obj)
+{
+    switch (obj->type)
+    {
+        case 0:
+        {
+            char* buffer = malloc(sizeof(char)*21); // maximum int is 20 characters long: 18,446,744,073,709,551,615
+            sprintf(buffer, "%d", *((int*)obj->data));
+            return buffer;
+        } break;
+
+        
+
+        default:
+        { 
+            return "Unknown Type";
+        } break;
+    }
+}
+
+
+
 #endif

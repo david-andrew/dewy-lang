@@ -1,3 +1,5 @@
+//Dewy Compiler Compiler written in C. Should compile to dcc
+
 //This is an attempt to begin implementing the compiler compiler for Dewy in C
 //Initially this program is tasked with scanning the grammar specified, and creating a list of rules for said grammars
 //The scanning sequence is to scan for all macro rules first, and then scan for hardcoded rules
@@ -6,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "utilities.c"
+#include "compile_tools.c"
+#include "vector.c"
 
 #include <limits.h>
 #define START 0     //start of an array
@@ -20,40 +24,7 @@
 //strchr(s1, ch); Returns a pointer to the first occurrence of character ch in string s1.
 //strstr(s1, s2); Returns a pointer to the first occurrence of string s2 in string s1.
 
-enum EBNF_state
-{
-    first_quote,
-    second_quote,
-    group,
-    option,
-    repeat,
-    special,
-};
 
-
-//possible token types
-enum EBNF_token_types
-{
-    EBNF_identifier,
-    single_quote_string,
-    double_quote_string,
-    comma,
-    semicolon,
-    vertical_bar,
-    minus,
-    equals_sign,
-    parenthesis,
-    bracket,
-    brace,
-    whitespace,
-};
-
-//individual tokens that appear in an EBNF rule
-struct EBNF_token
-{
-    enum EBNF_token_types type;
-    char* content;
-};
 
 //for rule in macro_rules:
 //  attempt to match
@@ -124,4 +95,32 @@ int main(int argc, char* argv[])
     printf("length of string: %lu\n", strlen(source));
     // printf("Substring test: %s\n", substr(source, START, END));
 
+
+
+    //testing vector
+    vector* test = new_vector(sizeof(int));
+    printf("size of vector is %zu\n", test->length);
+    vector_print_int(test);
+
+    for (int i = 0; i < 100; i++)
+    {
+        vector_append(test, itemize_int(i));
+    }
+    printf("size of vector is %zu\n", test->length);
+    vector_print_int(test);
+
+    vector_clear(test);
+    printf("size of vector is %zu\n", test->length);
+    vector_print_int(test);
+    for (int i = 9; i >= 0; i--)
+    {
+        vector_append(test, itemize_int(i));
+    }
+    printf("size of vector is %zu\n", test->length);
+    vector_print_int(test);
+
+    Object* I = Integer(12);
+    I->type=10;
+    // printf("Integer [type %d, size %zu, value %i]\n", I->type, I->size, *((int*)(I->data)));
+    print(I);
 }
