@@ -6,12 +6,17 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
+#include <limits.h>
+
 #include "utilities.c"
 #include "compile_tools.c"
-#include "vector.c"
+#include "obj.c"
+#include "dict.c"
+#include "vect.c"
 
-#include <limits.h>
+
 #define START 0     //start of an array
 #define END INT_MAX //end of an array (when sanitized via dewy_index() or as a substring)
 
@@ -75,6 +80,7 @@ char* remove_comments(char* source)
 
 int main(int argc, char* argv[])
 {
+    /*
     //test to see if we can read the command line args
     // for (int i = 0; i < argc; i++)
     // {
@@ -121,6 +127,46 @@ int main(int argc, char* argv[])
 
     Object* I = Integer(12);
     I->type=10;
+    */
+
     // printf("Integer [type %d, size %zu, value %i]\n", I->type, I->size, *((int*)(I->data)));
-    print(I);
+    // print(I);
+    // printf("\nsizeof(int) = %zu\n", sizeof(int));
+    // printf("sizeof(unsigned long) = %zu\n", sizeof(unsigned long));
+    // printf("sizeof(uint_fast32_t) = %zu\n", sizeof(uint_fast32_t));
+    // char* str = "apple";
+    // printf("hash of \"%s\" is %lu\n", str, djb2(str));
+    // printf("xor hash of \"%s\" is %lu\n", str, djb2a(str));
+    // printf("fnv hash of \"%s\" is %lu\n", str, fnv1a(str));
+
+
+    // char* strings[] = {"apple", "banana", "peach", "pineapple", "pear", "\0"};
+    // for (int i = 0; i < 6; i++) 
+    // {
+    //     // printf("djb2(%s) = %lu\n", strings[i], djb2(strings[i]));
+    //     // printf("djb2a(%s) = %lu\n", strings[i], djb2a(strings[i]));
+    //     printf("fnv1a(%s) = %lX\n", strings[i], fnv1a(strings[i]));
+
+
+    // }
+
+    // for (int64_t i = 0; i < 1000; i++)
+    // {
+    //     printf("fnv1a(%ld) = %lu\n", i, hash_int(i));
+    // }
+
+    dict* d = new_dict();
+    for (int i = -40; i < 40; i++)
+    {
+        dict_set(d, new_int(i), new_int(i));
+    }
+    // Object* apple = new_int(5);
+    // // dict_insert(d, new_int(5), new_int(5));
+    // dict_insert(d, new_int(5), new_int(8));    
+    // printf("apple in dict? %s\n", dict_contains(d, apple) ? "true" : "false");
+    // obj_print(apple);
+    // printf("\n");
+    dict_str(d);
+    dict_reset(d);
+    dict_free(d);
 }

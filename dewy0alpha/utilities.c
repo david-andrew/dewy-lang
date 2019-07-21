@@ -14,7 +14,11 @@ char* substr(char* string, int start, int stop);
 char* clone(char* string);
 char* concatenate(char* left, char* right);
 char* read_file(char* filename);
-
+uint64_t djb2(char* str);
+uint64_t djb2a(char* str);
+uint64_t fnv1a(char* str);
+uint64_t hash_uint(uint64_t val);
+uint64_t hash_int(int64_t val);
 
 /**
     clamp an integer to a range
@@ -102,77 +106,61 @@ char* read_file(char* filename)
 }
 
 
+//For a discussion on hashes: https://softwareengineering.stackexchange.com/questions/49550/which-hashing-algorithm-is-best-for-uniqueness-and-speed
 
-/*
-    Struct for Objects. 
-
-    Type indicates what type of object:
-    0 - Integer
-    1 - TBD
-    2 - TBD
-    ...
-
-*/
-typedef struct obj_struct
+// http://www.cse.yorku.ca/~oz/hash.html
+uint64_t djb2(char* str)
 {
-    int type;       //integer specifying what type of object.
-    size_t size;    //size of the data allocated for this object
-    void* data;     //data allocated for this object
-} Object;
-
-
-Object* Integer(int i)
-{
-
-    Object* I = malloc(sizeof(Object));
-    I->type = 0;
-    I->size = sizeof(int);
-    int* i_ptr = malloc(sizeof(int)); 
-    *i_ptr = i;
-    I->data = (void*)i_ptr;
-    return I;
-}
-
-
-
-void print(Object* obj)
-{
-    switch (obj->type)
+    uint64_t hash = 5381;
+    uint8_t c;
+    while ((c = *str++))
     {
-        case 0: //integer
-            printf("%d", *((int*)obj->data));
-            break;
-        //case 1:
-        //case 2:
-        //case 3:
-        //...
-        default:
-            printf("Unknown Type");
-            break;
+        hash = (hash << 5) + hash + c;
     }
+    return hash;
 }
 
-
-char* tostr(Object* obj)
+uint64_t djb2a(char* str)
 {
-    switch (obj->type)
+    uint64_t hash = 5381;
+    uint8_t c;
+    while ((c = *str++)) 
     {
-        case 0:
-        {
-            char* buffer = malloc(sizeof(char)*21); // maximum int is 20 characters long: 18,446,744,073,709,551,615
-            sprintf(buffer, "%d", *((int*)obj->data));
-            return buffer;
-        } break;
-
-        
-
-        default:
-        { 
-            return "Unknown Type";
-        } break;
+        hash = hash * 33 ^ c;
     }
+    return hash;
 }
 
 
+
+//Implementation of dictionary
+// https://stackoverflow.com/questions/327311/how-are-pythons-built-in-dictionaries-implemented
+uint64_t fnv1a(char* str)
+{
+    uint64_t hash = 14695981039346656037lu;
+    uint8_t c;
+    while ((c = *str++))
+    {
+        hash ^= c;
+        hash *= 1099511628211;
+    }
+    return hash;
+}
+
+uint64_t hash_int(int64_t val)
+{
+    return hash_uint(*((uint64_t*)&val));
+}
+uint64_t hash_uint(uint64_t val)
+{
+    uint64_t hash = 14695981039346656037lu;
+    uint8_t* v = (uint8_t*)&val;
+    for (int i = 0; i < 8; i++)
+    {
+        hash ^= *(v + i);
+        hash *= 1099511628211; 
+    }
+    return hash;
+}
 
 #endif
