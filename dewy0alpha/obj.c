@@ -12,7 +12,10 @@
     Type indicates what type of object:
     0 - Integer
     1 - Unsigned Integer
-    2 - TBD string?
+    2 - TBD string
+    3 - TBD vect
+    4 - TBD dict
+    5 - TBD EBNF_token
     ...
 
 */

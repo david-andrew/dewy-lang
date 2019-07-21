@@ -224,7 +224,7 @@ void dict_repr(dict* d)
 
 void dict_str(dict* d)
 {
-    printf("{");
+    printf("[");
     int items = 0;
     for(int i = 0; i < d->capacity; i++)
     {
@@ -235,7 +235,7 @@ void dict_str(dict* d)
             obj_print(e.key); printf("-> "); obj_print(e.value);
         }
     }
-    printf("}\n");
+    printf("]\n");
 }
 
 

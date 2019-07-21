@@ -155,6 +155,7 @@ int main(int argc, char* argv[])
     //     printf("fnv1a(%ld) = %lu\n", i, hash_int(i));
     // }
 
+    printf("Dictionary Tests:\n");
     dict* d = new_dict();
     for (int i = -40; i < 40; i++)
     {
@@ -169,4 +170,12 @@ int main(int argc, char* argv[])
     dict_str(d);
     dict_reset(d);
     dict_free(d);
+
+    printf("Vector Tests:\n");
+    vect* v = new_vect();
+    for (int i = 0; i < 100; i++)
+    {
+        vect_insert(v, new_int(i), 0);
+    }
+    vect_str(v);
 }
