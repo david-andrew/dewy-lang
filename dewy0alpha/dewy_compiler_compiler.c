@@ -171,11 +171,16 @@ int main(int argc, char* argv[])
     dict_reset(d);
     dict_free(d);
 
-    printf("Vector Tests:\n");
+    printf("\nVector Tests:\n");
     vect* v = new_vect();
-    for (int i = 0; i < 100; i++)
+    for (int i = 0; i < 8; i++)
     {
-        vect_insert(v, new_int(i), 0);
+        vect_append(v, new_int(i));
     }
+    for (int i = 8; i < 16; i++)
+    {
+        vect_prepend(v, new_int(i));
+    }
+    vect_insert(v, new_int(-7), 8);
     vect_str(v);
 }

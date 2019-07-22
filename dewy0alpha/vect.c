@@ -21,9 +21,10 @@
 //as in any situation, you can choose to move the size with fewer elements to make room
 //the only drawback is implementing is more complicated, and you have to be very careful about keeping track of the start/end of the vector
 
-
+//ArrayList Implemented as am Deque
 typedef struct vect_struct 
 {
+    size_t head;
     size_t size;
     size_t capacity;
     obj** list;
@@ -52,7 +53,7 @@ void vect_str(vect* v);
 vect* new_vect()
 {
     vect* v_ptr = malloc(sizeof(vect));
-    vect v = {0, DEFAULT_VECT_CAPACITY, malloc(DEFAULT_VECT_CAPACITY * sizeof(obj))};
+    vect v = {0, 0, DEFAULT_VECT_CAPACITY, calloc(DEFAULT_VECT_CAPACITY, sizeof(obj))};
     *v_ptr = v;
     return v_ptr;
 }
@@ -67,29 +68,117 @@ size_t vect_capacity(vect* v)
     return v->capacity;
 }
 
+// bool vect_resize(vect* v, size_t new_size)
+// {
+//     if (new_size < v->size) //won't have room for all elements
+//     {
+//         printf("ERROR: resize failed. new size is not large enough to accomodate elements in vector\n");
+//         return false;
+//     }
+//     obj** new_list = realloc(v->list, new_size * sizeof(obj*));
+//     if (new_list == NULL) //realloc failed 
+//     {
+//         printf("ERROR: resize failed. realloc returned NULL\n");
+//         return false;
+//     }
+    
+//     //if any elements wrapped around, they need to be moved to the end of the list
+//     if (v->head != 0)
+//     {
+
+//     }
+
+//     v->capacity = new_size;
+//     v->list = new_list;
+//     return true;
+    
+// }
+
+
+// bool vect_resize(vect* v, size_t new_size)
+// {
+//     printf("RESIZING VECTOR\n----before-----\n");
+//     vect_repr(v);
+//     if (new_size < v->size)
+//     {
+//         printf("ERROR: resize failed. new size is not large enough to accomodate elements in vector\n");
+//         return false;
+//     }
+
+//     obj** new_list = realloc(v->list, new_size * sizeof(obj*));
+//     if (new_list == NULL) //realloc failed 
+//     {
+//         printf("ERROR: resize failed. realloc returned NULL\n");
+//         return false;
+//     }
+
+//     //copy wrapped around elements
+//     if (v->head + v->size > v->capacity) //if elements wrappend around
+//     {
+//         obj** destination = new_list + v->head + new_size - v->capacity;
+//         obj** source = new_list + v->head;
+//         size_t num_bytes = (v->capacity - v->head) * sizeof(obj*);
+//         printf("memove: dest=%d, src=%d, num=%zu\n", destination, source, num_bytes);
+//         memmove(destination, source, num_bytes);
+//         v->head = v->head + new_size - v->capacity;
+
+//         //for debugging. remove when completely working
+//         memset(source, 0, num_bytes);
+//         //destination is location of head + size delta:     v->list + v->head + new_size - v->capacity
+//         //source is location of head:                       v->list + v->head
+//         //num bytes is amount from head to capacity:        v->capacity - v->head
+//     }
+
+//     v->capacity = new_size;
+//     v->list = new_list;
+//     printf("----after----\n");
+//     vect_repr(v);
+//     return true;
+// }
+
 bool vect_resize(vect* v, size_t new_size)
 {
-    if (new_size < v->size) //won't have room for all elements
+    if (new_size < v->size)
     {
         printf("ERROR: resize failed. new size is not large enough to accomodate elements in vector\n");
         return false;
     }
-    obj** new_list = realloc(v->list, new_size * sizeof(obj*));
-    if (new_list == NULL) //realloc failed 
+
+    obj** new_list = calloc(new_size, sizeof(obj));
+    if (new_list == NULL) //calloc failed 
     {
-        printf("ERROR: resize failed. realloc returned NULL\n");
+        printf("ERROR: resize failed. calloc returned NULL\n");
         return false;
     }
-    else 
+
+    //copy all elements from the old list into the new list
+    for (int i = 0; i < v->size; i++)
     {
-        v->capacity = new_size;
-        v->list = new_list;
-        return true;
+        new_list[i] = v->list[(v->head + i) % v->capacity];
     }
+
+    //update vector information
+    free(v->list);
+    v->list = new_list;
+    v->capacity = new_size;
+    v->head = 0;
+    return true;
+
 }
 
+
+
+//TODO->reimplement to use memmove instead of a for loop, as that will be faster.
+//it's more complicated to implement though...
+//current implementation: http://opendatastructures.org/ods-java/2_4_ArrayDeque_Fast_Deque_O.html
+
+//BUGS
+//prepending and appending work fine. inserting in the middle causes problems
+//presumable off-by-one errors that occur during shift left or shift right
 bool vect_insert(vect* v, obj* item, size_t index)
 {
+    // printf("INSERTING at index %zu. size=%zu, capacity=%zu\n", index, v->size, v->capacity);
+    
     if (index > v->size)
     {
         printf("ERROR: cannot insert at index=%zu for vector of size=%zu\n", index, v->size);
@@ -103,30 +192,48 @@ bool vect_insert(vect* v, obj* item, size_t index)
         }
     }
 
-    //compute the range of elements to shift
-    size_t to_shift = v->size - index;
-    if (to_shift > 0)
+    //move elements to make room for the insertion
+    if (index <= v->size / 2) 
     {
-        memmove(v->list + index + 1, v->list + index, to_shift * sizeof(obj*));
+        v->head = v->head == 0 ? v->capacity - 1 : v->head - 1; //adjust the location of the head index left
+        for (int i = 0; i < (int)index - 1; i++) //move elements to the right of the insertion point
+        {
+            v->list[(v->head + i) % v->capacity] = v->list[(v->head + i + 1) % v->capacity];
+        }
     }
-    //insert the value into the newly free space
-    v->list[index] = item;
+    else
+    {
+        for (int i = (int)v->size - 1; i >= (int)index; i--) //move elements to the left of the insertion point
+        {
+            v->list[(v->head + i + 1) % v->capacity] = v->list[(v->head + i) % v->capacity];
+        }
+    }
+
+    //assign the item to the newly free index
+    v->list[(v->head + index) % v->capacity] = item;
     v->size++;
     return true;
 }
+
+
 
 bool vect_append(vect* v, obj* item)
 {
     return vect_insert(v, item, v->size);
 }
 
+bool vect_prepend(vect* v, obj* item)
+{
+    return vect_insert(v, item, 0);
+}
+
 
 void vect_repr(vect* v)
 {
     printf("Vector\n");
-    for (int i = 0; i < v->size; i++) 
+    for (int i = 0; i < v->capacity; i++) 
     {
-        printf("@%d: ", i); obj_print(v->list[i]); printf("\n");
+        printf("@%d: ", i); fflush(stdout); obj_print(v->list[i]); printf("%s\n", (v->head == i ? "    (HEAD)" : ""));
     }
 }
 
@@ -137,7 +244,7 @@ void vect_str(vect* v)
     for (int i = 0; i < v->size; i++)
     {
         if (i != 0) { printf(", "); }
-        obj_print(v->list[i]);
+        obj_print(v->list[(v->head + i) % v->capacity]);
     }
     printf("]\n");
 }
