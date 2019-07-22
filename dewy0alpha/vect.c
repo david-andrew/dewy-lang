@@ -38,10 +38,12 @@ bool vect_resize(vect* v, size_t new_size);
 bool vect_insert(vect* v, obj* item, size_t index);
 //bool vect_multi_insert(vect* v, vect* items, size_t index);
 bool vect_append(vect* v, obj* item);
+bool vect_prepend(vect* v, obj* item);
 //bool vect_multi_append(vect* v, vect* items);
+//bool vect_multi_prepend(vect* v, vect* items);
 bool vect_set(vect* v, obj* item, size_t index);
 bool vect_contains(vect* v, obj* item);
-// size_t vect_find(vect* v, obj* item);
+bool vect_find(vect* v, obj* item, size_t* index);
 obj* vect_get(vect* v, size_t index);
 obj* vect_remove(vect* v, size_t index);
 void vect_reset(vect* v);
@@ -86,7 +88,7 @@ bool vect_resize(vect* v, size_t new_size)
     //copy all elements from the old list into the new list
     for (int i = 0; i < v->size; i++)
     {
-        new_list[i] = v->list[(v->head + i) % v->capacity];
+        new_list[i] = vect_get(v, i);//v->list[(v->head + i) % v->capacity];
     }
 
     //update vector information
@@ -125,7 +127,7 @@ bool vect_insert(vect* v, obj* item, size_t index)
     }
 
     //move elements to make room for the insertion
-    if (index <= v->size / 2) 
+    if (index < v->size / 2) 
     {
         v->head = v->head == 0 ? v->capacity - 1 : v->head - 1; //adjust the location of the head index left
         for (int i = 0; i < (int)index; i++) //move elements to the right of the insertion point
@@ -159,6 +161,82 @@ bool vect_prepend(vect* v, obj* item)
     return vect_insert(v, item, 0);
 }
 
+bool vect_set(vect* v, obj* item, size_t index)
+{
+    if (index >= v->size)
+    {
+        printf("ERROR: cannot set index=%zu in vector of size=%zu\n", index, v->size);
+        return false;
+    }
+    v->list[(v->head + index) % v->capacity] = item;
+    return true;
+}
+
+bool vect_contains(vect* v, obj* item)
+{
+    size_t index;
+    return vect_find(v, item, &index);
+}
+
+bool vect_find(vect* v, obj* item, size_t* index)
+{
+    for (int i = 0; i < v->size; i++)
+    {
+        if (obj_equals(vect_get(v, i), item))
+        {
+            *index = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+obj* vect_get(vect* v, size_t index)
+{
+    if (index >= v->size)
+    {
+        printf("ERROR: attempted to access index=%zu for vector of size=%zu\n", index, v->size);
+        return NULL;
+    }
+    return v->list[(v->head + index) % v->capacity];
+}
+
+obj* vect_remove(vect* v, size_t index)
+{
+    if (index >= v->size) 
+    {
+        printf("ERROR: cannot remove element at index=%zu for vector of size=%zu\n", index, v->size);
+        return NULL;
+    }
+    obj* item = vect_get(v, index);
+    if (index < v->size / 2)
+    {
+        for (int i = index; i > 0; i--)
+        {
+            v->list[(v->head + i) % v->capacity] = v->list[(v->head + i - 1) % v->capacity];
+        }
+        v->list[v->head] = NULL;
+        v->head = (v->head + 1) % v->capacity;
+    }
+    else
+    {
+        for (int i = index; i < (int)v->size - 1; i++)
+        {
+            v->list[(v->head + i) % v->capacity] = v->list[(v->head + i + 1) % v->capacity];
+        }
+    }
+    v->size--;
+    // if (v->size < 4 * v->capacity) { vect_resize(v, v->size/2); }
+
+    return item;
+}
+
+// void vect_reset(vect* v)
+// {}
+
+// void vect_free(vect* v)
+// {}
+
 
 void vect_repr(vect* v)
 {
@@ -176,7 +254,7 @@ void vect_str(vect* v)
     for (int i = 0; i < v->size; i++)
     {
         if (i != 0) { printf(", "); }
-        obj_print(v->list[(v->head + i) % v->capacity]);
+        obj_print(vect_get(v, i));
     }
     printf("]\n");
 }

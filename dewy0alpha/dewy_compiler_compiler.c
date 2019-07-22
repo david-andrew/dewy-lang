@@ -173,15 +173,20 @@ int main(int argc, char* argv[])
 
     printf("\nVector Tests:\n");
     vect* v = new_vect();
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < 80; i++)
     {
         vect_append(v, new_int(i));
     }
-    for (int i = 8; i < 16; i++)
+    for (int i = 8; i < 160; i++)
     {
         vect_prepend(v, new_int(i));
     }
     vect_str(v);
-    vect_insert(v, new_int(-42), 20);    
+
+    for (int i = 225; i >= 5; i--) 
+    {
+        vect_remove(v, i);
+    }
+    // vect_insert(v, new_int(-42), 10);    
     vect_str(v);
 }

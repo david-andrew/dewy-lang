@@ -112,6 +112,10 @@ uint64_t obj_hash(obj* o)
 
 int64_t obj_compare(obj* left, obj* right)
 {
+        
+    if (left == NULL && right == NULL) { return true; }
+    if (left == NULL || right == NULL) { return false;}
+    
     switch (left->type) //undefined behavior if left and right aren't the same type
     {
         case 0: return *((int64_t*)left->data) - *((int64_t*)right->data);
@@ -119,7 +123,6 @@ int64_t obj_compare(obj* left, obj* right)
         //other cases
         //...
         default: printf("WARNING: object of type \"%d\" hasn't been implemented\n", left->type); return 0;
-
     }
 }
 
