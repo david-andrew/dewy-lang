@@ -181,6 +181,7 @@ int main(int argc, char* argv[])
     {
         vect_prepend(v, new_int(i));
     }
-    vect_insert(v, new_int(-7), 8);
+    vect_str(v);
+    vect_insert(v, new_int(-42), 20);    
     vect_str(v);
 }
