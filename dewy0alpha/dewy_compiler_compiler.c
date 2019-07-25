@@ -40,6 +40,8 @@
 
 char* remove_comments(char* source)
 {    
+    //For now we assume that any instance of // or /{ }/ is a comment, regardless of context.
+    //in the future, we need to be able to distinguish // inside of strings and other contexts
     printf("Removing comments from source string...\n");
 
     size_t length = strlen(source);
@@ -58,7 +60,7 @@ char* remove_comments(char* source)
         }
 
         // //check if start of block comment, and if so, skip to end of block (keeping track of internal block comments)
-        // if (source - head + 1 < length && *cource == '/' && *(source + 1) == '{')
+        // if (source - head + 1 < length && *source == '/' && *(source + 1) == '{')
         // {
         //     int stack = 1;  //monitor internal opening and closing blocks.
         //     while (stack != 0)
@@ -80,7 +82,7 @@ char* remove_comments(char* source)
 
 int main(int argc, char* argv[])
 {
-    /*
+    
     //test to see if we can read the command line args
     // for (int i = 0; i < argc; i++)
     // {
@@ -100,93 +102,4 @@ int main(int argc, char* argv[])
     printf("Contents of source file:\n%s\n",source);
     printf("length of string: %lu\n", strlen(source));
     // printf("Substring test: %s\n", substr(source, START, END));
-
-
-
-    //testing vector
-    vector* test = new_vector(sizeof(int));
-    printf("size of vector is %zu\n", test->length);
-    vector_print_int(test);
-
-    for (int i = 0; i < 100; i++)
-    {
-        vector_append(test, itemize_int(i));
-    }
-    printf("size of vector is %zu\n", test->length);
-    vector_print_int(test);
-
-    vector_clear(test);
-    printf("size of vector is %zu\n", test->length);
-    vector_print_int(test);
-    for (int i = 9; i >= 0; i--)
-    {
-        vector_append(test, itemize_int(i));
-    }
-    printf("size of vector is %zu\n", test->length);
-    vector_print_int(test);
-
-    Object* I = Integer(12);
-    I->type=10;
-    */
-
-    // printf("Integer [type %d, size %zu, value %i]\n", I->type, I->size, *((int*)(I->data)));
-    // print(I);
-    // printf("\nsizeof(int) = %zu\n", sizeof(int));
-    // printf("sizeof(unsigned long) = %zu\n", sizeof(unsigned long));
-    // printf("sizeof(uint_fast32_t) = %zu\n", sizeof(uint_fast32_t));
-    // char* str = "apple";
-    // printf("hash of \"%s\" is %lu\n", str, djb2(str));
-    // printf("xor hash of \"%s\" is %lu\n", str, djb2a(str));
-    // printf("fnv hash of \"%s\" is %lu\n", str, fnv1a(str));
-
-
-    // char* strings[] = {"apple", "banana", "peach", "pineapple", "pear", "\0"};
-    // for (int i = 0; i < 6; i++) 
-    // {
-    //     // printf("djb2(%s) = %lu\n", strings[i], djb2(strings[i]));
-    //     // printf("djb2a(%s) = %lu\n", strings[i], djb2a(strings[i]));
-    //     printf("fnv1a(%s) = %lX\n", strings[i], fnv1a(strings[i]));
-
-
-    // }
-
-    // for (int64_t i = 0; i < 1000; i++)
-    // {
-    //     printf("fnv1a(%ld) = %lu\n", i, hash_int(i));
-    // }
-
-    printf("Dictionary Tests:\n");
-    dict* d = new_dict();
-    for (int i = -40; i < 40; i++)
-    {
-        dict_set(d, new_int(i), new_int(i));
-    }
-    // Object* apple = new_int(5);
-    // // dict_insert(d, new_int(5), new_int(5));
-    // dict_insert(d, new_int(5), new_int(8));    
-    // printf("apple in dict? %s\n", dict_contains(d, apple) ? "true" : "false");
-    // obj_print(apple);
-    // printf("\n");
-    dict_str(d);
-    dict_reset(d);
-    dict_free(d);
-
-    printf("\nVector Tests:\n");
-    vect* v = new_vect();
-    for (int i = 0; i < 80; i++)
-    {
-        vect_append(v, new_int(i));
-    }
-    for (int i = 8; i < 160; i++)
-    {
-        vect_prepend(v, new_int(i));
-    }
-    vect_str(v);
-
-    for (int i = 225; i >= 5; i--) 
-    {
-        vect_remove(v, i);
-    }
-    // vect_insert(v, new_int(-42), 10);    
-    vect_str(v);
 }

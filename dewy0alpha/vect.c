@@ -55,7 +55,7 @@ void vect_str(vect* v);
 vect* new_vect()
 {
     vect* v_ptr = malloc(sizeof(vect));
-    vect v = {0, 0, DEFAULT_VECT_CAPACITY, calloc(DEFAULT_VECT_CAPACITY, sizeof(obj))};
+    vect v = {0, 0, DEFAULT_VECT_CAPACITY, calloc(DEFAULT_VECT_CAPACITY, sizeof(obj*))};
     *v_ptr = v;
     return v_ptr;
 }
@@ -231,11 +231,28 @@ obj* vect_remove(vect* v, size_t index)
     return item;
 }
 
-// void vect_reset(vect* v)
-// {}
+void vect_reset(vect* v)
+{
+    //free the contents of the vector
+    for (int i = 0; i < v->size; i++)
+    {
+        obj_free(vect_get(v, i));
+    }
+    free(v->list);
+    v->size = 0;
+    v->capacity = DEFAULT_VECT_CAPACITY;
+    v->list = calloc(DEFAULT_VECT_CAPACITY, sizeof(obj));
+}
 
-// void vect_free(vect* v)
-// {}
+void vect_free(vect* v)
+{
+    for (int i = 0; i < v->size; i++)
+    {
+        obj_free(vect_get(v, i));
+    }
+    free(v->list);
+    free(v);
+}
 
 
 void vect_repr(vect* v)
