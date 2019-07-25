@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 
 
 //forward declare all functions
@@ -14,6 +15,14 @@ char* substr(char* string, int start, int stop);
 char* clone(char* string);
 char* concatenate(char* left, char* right);
 char* read_file(char* filename);
+
+bool is_identifier_char(char c);
+bool is_identifier_symbol_char(char c);
+bool is_alpha_char(char c);
+bool is_num_char(char c);
+bool is_alphanum_char(char c);
+bool is_whitespace_char(char c);
+
 uint64_t djb2(char* str);
 uint64_t djb2a(char* str);
 uint64_t fnv1a(char* str);
@@ -103,6 +112,43 @@ char* read_file(char* filename)
     string[fsize] = 0;
 
     return string;
+}
+
+
+bool is_identifier_char(char c)
+{
+    //valid identifier characters are
+    //ABCDEFGHIJKLMNOPQRSTUVWXYZ
+    //abcdefghijklmnopqrstuvwxyz
+    //1234567890
+    //~!@#$&_?
+    return is_alphanum_char(c) || is_identifier_symbol_char(c);
+}
+
+bool is_identifier_symbol_char(char c)
+{
+    return c == '~' || c == '@' || c == '#' || c == '$' || c == '&' || c == '_' || c == '?';
+}
+
+bool is_alpha_char(char c)
+{
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+}
+
+bool is_num_char(char c)
+{
+    return c >= 48 && c <= 57;
+}
+
+bool is_alphanum_char(char c)
+{
+    return is_alpha_char(c) || is_num_char(c);
+}
+
+bool is_whitespace_char(char c)
+{
+    //whitespace includes tab (0x09), line feed (0x0A), line tab (0x0B), form feed (0x0C), carriage return (0x0D), and space (0x20)
+    return c == 0x09 || c == 0x0A || c == 0x0B || c == 0x0C || c == 0x0D || c == 0x20;
 }
 
 

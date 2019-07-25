@@ -37,49 +37,6 @@
 //  attempt to match
 
 
-
-char* remove_comments(char* source)
-{    
-    //For now we assume that any instance of // or /{ }/ is a comment, regardless of context.
-    //in the future, we need to be able to distinguish // inside of strings and other contexts
-    printf("Removing comments from source string...\n");
-
-    size_t length = strlen(source);
-    char* head = source;
-    char* processed = malloc(length * sizeof(char));     //potentially entire space used
-    size_t copied = 0;
-    
-    do
-    {
-        //check if start of line comment, and if so skip to end of line
-        if (source - head + 1 < length && *source == '/' && *(source + 1) ==  '/')
-        {
-            while(*++source != '\n' && *source != 0); //scan until the line break (or end of string)
-            source--;   //don't eat the newline
-            continue;
-        }
-
-        // //check if start of block comment, and if so, skip to end of block (keeping track of internal block comments)
-        // if (source - head + 1 < length && *source == '/' && *(source + 1) == '{')
-        // {
-        //     int stack = 1;  //monitor internal opening and closing blocks.
-        //     while (stack != 0)
-        //     {
-
-        //     }
-        // }
-
-        // putchar(*source);
-        // printf("%d ", *source);
-        processed[copied++] = *source; //copy the current character
-    }
-    while (*source++);
-
-    // while(*processed++) putchar(*processed);
-    processed[copied] = 0; //add final null-terminator to copied string
-    return processed;
-}
-
 int main(int argc, char* argv[])
 {
     
@@ -102,4 +59,30 @@ int main(int argc, char* argv[])
     printf("Contents of source file:\n%s\n",source);
     printf("length of string: %lu\n", strlen(source));
     // printf("Substring test: %s\n", substr(source, START, END));
+
+
+    char* head = source; //keep track of the head of the file
+
+    vect* tokens = new_vect();
+
+    while (*source) //while we haven't reached the null terminator
+    {
+        // printf("source on pass: %s\n", source);
+        obj* token = EBNF_scan(&source);
+        if (token)
+        {
+            vect_append(tokens, token);
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    vect_str(tokens);
+    remove_whitespace(tokens);
+    vect_str(tokens);
+    // vect_free(tokens);
+
+    free(head);
 }

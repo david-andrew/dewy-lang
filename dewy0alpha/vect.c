@@ -46,6 +46,7 @@ bool vect_contains(vect* v, obj* item);
 bool vect_find(vect* v, obj* item, size_t* index);
 obj* vect_get(vect* v, size_t index);
 obj* vect_remove(vect* v, size_t index);
+void vect_delete(vect* v, size_t index);
 void vect_reset(vect* v);
 void vect_free(vect* v);
 void vect_repr(vect* v);
@@ -224,11 +225,22 @@ obj* vect_remove(vect* v, size_t index)
         {
             v->list[(v->head + i) % v->capacity] = v->list[(v->head + i + 1) % v->capacity];
         }
+        v->list[(v->head + v->size - 1) % v->capacity] = NULL;
     }
     v->size--;
     // if (v->size < 4 * v->capacity) { vect_resize(v, v->size/2); }
 
     return item;
+}
+
+//remove and free an element from the vector
+void vect_delete(vect* v, size_t index)
+{
+    obj* item = vect_remove(v, index);
+    if (item != NULL) 
+    {
+        free(item);
+    }
 }
 
 void vect_reset(vect* v)
