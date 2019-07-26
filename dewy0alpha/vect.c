@@ -41,6 +41,13 @@ bool vect_append(vect* v, obj* item);
 bool vect_prepend(vect* v, obj* item);
 //bool vect_multi_append(vect* v, vect* items);
 //bool vect_multi_prepend(vect* v, vect* items);
+bool vect_push(vect* v, obj* item);
+obj* vect_pop(vect* v);
+obj* vect_peek(vect* v);
+
+bool vect_enqueue(vect* v, obj* item);
+obj* vect_dequeue(vect* v);
+
 bool vect_set(vect* v, obj* item, size_t index);
 bool vect_contains(vect* v, obj* item);
 bool vect_find(vect* v, obj* item, size_t* index);
@@ -162,6 +169,34 @@ bool vect_prepend(vect* v, obj* item)
     return vect_insert(v, item, 0);
 }
 
+bool vect_push(vect* v, obj* item) 
+{
+    return vect_append(v, item);
+}
+
+obj* vect_pop(vect* v) 
+{
+    return v->size > 0 ? vect_remove(v, v->size - 1) : NULL;
+}
+
+obj* vect_peek(vect* v)
+{
+    return v->size > 0 ? vect_get(v, v->size - 1) : NULL;
+}
+
+bool vect_enqueue(vect* v, obj* item)
+{
+    return vect_prepend(v, item);
+}
+
+obj* vect_dequeue(vect* v)
+{
+    return v->size > 0 ? vect_remove(v, v->size - 1) : NULL;
+}
+
+
+
+
 bool vect_set(vect* v, obj* item, size_t index)
 {
     if (index >= v->size)
@@ -239,7 +274,7 @@ void vect_delete(vect* v, size_t index)
     obj* item = vect_remove(v, index);
     if (item != NULL) 
     {
-        free(item);
+        obj_free(item);
     }
 }
 

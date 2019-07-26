@@ -36,8 +36,8 @@ bool obj_equals(obj* left, obj* right);
 //forward declaration for defined in other files.
 //implementation in compile_tools.c
 // typedef struct EBNF_tokens EBNF_token;
-typedef enum EBNF_token_types EBNF_token_type;
-obj* new_EBNF_token(EBNF_token_type type, char* content);
+typedef enum token_types token_type;
+obj* new_token(token_type type, char* content);
 void EBNF_str(obj* o);
 
 obj* new_int(int64_t i)

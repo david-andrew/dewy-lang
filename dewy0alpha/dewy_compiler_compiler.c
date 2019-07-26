@@ -11,7 +11,7 @@
 #include <limits.h>
 
 #include "utilities.c"
-#include "compile_tools.c"
+#include "scanner.c"
 #include "obj.c"
 #include "dict.c"
 #include "vect.c"
@@ -54,10 +54,10 @@ int main(int argc, char* argv[])
     }
 
     char* source = read_file(argv[1]); //fopen(argv[1], "r");
-    source = remove_comments(source);
+    // source = remove_comments(source);
     // source = remove_whitespace(source);
-    printf("Contents of source file:\n%s\n",source);
-    printf("length of string: %lu\n", strlen(source));
+    // printf("Contents of source file:\n%s\n",source);
+    // printf("length of string: %lu\n", strlen(source));
     // printf("Substring test: %s\n", substr(source, START, END));
 
 
@@ -68,8 +68,8 @@ int main(int argc, char* argv[])
     while (*source) //while we haven't reached the null terminator
     {
         // printf("source on pass: %s\n", source);
-        obj* token = EBNF_scan(&source);
-        if (token)
+        obj* token = scan(&source);
+        if (token != NULL)
         {
             vect_append(tokens, token);
         }
@@ -79,7 +79,9 @@ int main(int argc, char* argv[])
         }
     }
 
-    vect_str(tokens);
+    if (!*source) printf("successfully scanned source text\n");
+
+    // vect_str(tokens);
     remove_whitespace(tokens);
     vect_str(tokens);
     // vect_free(tokens);
