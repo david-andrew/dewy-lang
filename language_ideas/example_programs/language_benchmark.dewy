@@ -1,5 +1,7 @@
 //run this program with a full dewy interpreter to determine if it is working
 
+#forward_declare_functions //something like this macro to go through the script and collect all function declarations before execution
+
 //list the functions to run
 functions = 
 [
@@ -28,11 +30,11 @@ loop f in functions
 
 //Function implementations
 
-twelve_days_of_christmas() = 
+twelve_days_of_christmas = @() //function literal with no arguments
 {
     //Print out the lyrics to the twelve days of christmas
 
-    gifts = //keys should be guaranteed to remain in the order they're added. though perhaps that should only be guaranteed so long as no elements are removed... perhaps ordering can be a setting/parameter that is turned off by default for performance
+    gifts = //standard dictionary implementation will maintain key entry order. see: https://mail.python.org/pipermail/python-dev/2012-December/123028.html
     [
         "first" -> "A partridge in a pear tree"
         "second" -> "Two turtle doves"
@@ -48,16 +50,13 @@ twelve_days_of_christmas() =
         "twelfth" -> "Twelve drummers drumming"
     ]
 
-    start = "On the "
-    middle = " day of Christmas,\nMy true love gave to me\n"
-
     loop day in gifts
     {
-        print(start + day + middle)
+        print("On the {day} day of Christmas,\nMy true love gave to me\n") //string interpolation
         loop day_num, gift in gifts.keys, gifts.values
         {
             if day not? "first" and day_num =? "first"
-                print("And" + gift.lowercase) //And a partridge in a pear tree
+                print("And {gift.lowercase}") //And a partridge in a pear tree
             else
                 print(gift)
         }
@@ -65,7 +64,7 @@ twelve_days_of_christmas() =
 }
 
 
-FizzBuzz() = 
+FizzBuzz = @()
 {
     words = [3 -> "Fizz" 5 -> "Buzz"] // 7->"Bazz"]
 
@@ -83,7 +82,7 @@ FizzBuzz() =
 }
 
 //alternate implementation using match
-FizzBuzzBazzFoo() = 
+FizzBuzzBazzFoo = @()
 {
     loop i in 1:100
         match i%3, i%5, i%7, i%11   //want to be able to vectorize the input like i .% [3 5 7 11] as args. but need better syntax
@@ -98,10 +97,10 @@ FizzBuzzBazzFoo() =
 }
 
 
-sum_squares1() = 
+sum_squares1 = @()
 {
     //any overflow is seamlessly handled by the compiler
-    sum_squares = [i^2 loop i in 1:100].sum
+    sum_squares = [i^2 loop i in 1:100].sum  //TBD maybe have the ordering be [loop i in 1:100 i^2] to match normal loop ordering
     square_sum = (1:100).sum^2
     
     print(sum_squares - square_sum)
@@ -109,7 +108,7 @@ sum_squares1() =
 
 
 //ability to do summations in expressions
-sum_squares2()
+sum_squares2 = @()
 {
     sum_squares = 1^2 + 2^2 + 3^2 + ... + 100^2
     square_sum = (1 + 2 + 3 + ... + 100)^2
@@ -120,7 +119,7 @@ sum_squares2()
 
 
 
-sum_multiples() =
+sum_multiples = @()
 {
     //Project Euler Problem 1
     /{
@@ -135,17 +134,20 @@ sum_multiples() =
     sum = 0     // least specific
     
     loop i in 1:1000-1
-        if (i%3 * i%5) =? 0 //either a multiple of 3 or 5
+        if (i%3)*(i%5) =? 0 //either a multiple of 3 or 5
             sum+=i
 
     print(sum)
 }
 
+//alternate version. uses flipped (relative to python) position for item inserted into array
+//print([loop i in 1:1000-1 if (i%3)*(i%5) =? 0 i].sum)
 
 
 
 
-prime_factors() =
+
+prime_factors = @()
 {
     /{
     The prime factors of 13195 are 5, 7, 13 and 29.
@@ -155,7 +157,9 @@ prime_factors() =
 
     goal = 600851475143
     
-    primes = doublylinkedlist[2 3] //doubly linked list (generic sized object, space can adjust for larger values)
+    primes = doublylinkedlist(@[2 3]) //doubly linked list (generic sized object, space can adjust for larger values)
+    //@[] notation i think should be a handle to a list generator, so that time isn't wasted converting it to another format
+    //BELOW STUFF WILL PROBABLY BE REMOVED:
     //example empty init [].dll(uint64) makes a doubly linked list fileled with uint64's
     //uint.fit(goal) -> returns uint64, the smallest uint that goal will fit within
     //uint.fit(goal^0.5) returns uint32
@@ -182,7 +186,7 @@ prime_factors() =
 }
 
 
-compute_primes(n) = 
+compute_primes = @(n) //function literal that takes a single parameter `n`
 {
     //compute and print the first n prime numbers
     if n <? 1 throw ValueError('there is no [n]th prime') //should it be [n] or [@n]. because integers are used to refer to the list of parameters, any identifier can unambiguously be used to specify a variable
@@ -204,7 +208,7 @@ compute_primes(n) =
 }
 
 
-compute_primes_alt(uint n)
+compute_primes_alt = @(uint n) //parameter must be of type uint or more specific
 {
     match n
     {
@@ -230,7 +234,7 @@ compute_primes_alt(uint n)
 //To-Do: implement a verification algorithm for checking the value of pi (see the first answer of the stack overflow below)
 //https://stackoverflow.com/questions/14283270/how-do-i-determine-whether-my-calculation-of-pi-is-accurate
 //Naive direct implementation of https://pi2e.ch/blog/2016/07/30/the-chudnovsky-formula/ 
-compute_pi(n) = 
+compute_pi = @(n)
 {
     //this needs some way to specifiy the precision of pi in the calculation (i.e. need to be able to say we want n digits of precision for all calculations)
 
