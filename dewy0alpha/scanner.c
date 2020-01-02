@@ -22,6 +22,7 @@ typedef enum scanner_states
     scan_EBNF_rule,
 } scanner_state;
 
+//TODO->convert this to a stack for the scanner state
 scanner_state scan_state = scan_root;
 
 //possible token types
@@ -158,7 +159,7 @@ obj* match_hashtag(char** src)
         while (is_identifier_char((*src)[i])) { i++; }
         obj* t = new_token(hashtag, substr(*src, 0, i-1));
         *src += i;
-        if (true)//(strcmp(((token*)t->data)->content, "#ebnf") == 0) 
+        if (strcmp(((token*)t->data)->content, "#ebnf") == 0) 
         {
             scan_state = scan_EBNF_rule; //update scan state for start of ebnf rule 
         }
