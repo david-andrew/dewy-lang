@@ -10,7 +10,8 @@ functions =
     @FizzBuzzBazzFoo
     @sum_squares1
     @sum_squares2
-    @sum_multiples
+    @sum_multiples1
+    @sum_multiples2
     @prime_factors
     @compute_primes(1000) //compute the first 1000 primes
     @compute_primes_alt(1000)
@@ -20,7 +21,7 @@ functions =
 //run all of the functions
 loop f in functions
 {
-    print('Function: ' + @f.name)   //is the @ necessary? I think technically it's optional... e.g. calling .name on a function returns the name, and calling .name on a handle also returns the name. I think stylistically, calling .name on a handle is better
+    print('Function: {@f.name}')    //@ is necessary so that the function isn't called, because otherwise we would be calling .name on the result of f()
     f()                             //run the function. technically the () isn't needed, but stylistically, it should be there
     print('\n\n')                   // 3 newlines
 }
@@ -30,59 +31,55 @@ loop f in functions
 
 //Function implementations
 
-twelve_days_of_christmas = @() //function literal with no arguments
+twelve_days_of_christmas = @() -> //function literal with no arguments
 {
     //Print out the lyrics to the twelve days of christmas
-
-    gifts = //standard dictionary implementation will maintain key entry order. see: https://mail.python.org/pipermail/python-dev/2012-December/123028.html
+    days = ["first" "second" "third" "fourth" "fifth" "sixth" "seventh" "eighth" "ninth" "tenth" "eleventh" "twelfth"]
+    gifts =
     [
-        "first" -> "A partridge in a pear tree"
-        "second" -> "Two turtle doves"
-        "third" -> "Three french hens"
-        "fourth" -> "Four calling birds"
-        "fifth" -> "Five golden rings"
-        "sixth" -> "Six geese a laying"
-        "seventh" -> "Seven swams a swimming"
-        "eighth" -> "Eight maids a milkin"
-        "ninth" -> "Nine ladies dancing"
-        "tenth" -> "Ten lords a-leaping"
-        "eleventh" -> "Eleven pipers piping"
-        "twelfth" -> "Twelve drummers drumming"
+        "A partridge in a pear tree"
+        "Two turtle doves"
+        "Three french hens"
+        "Four calling birds"
+        "Five golden rings"
+        "Six geese a laying"
+        "Seven swams a swimming"
+        "Eight maids a milkin"
+        "Nine ladies dancing"
+        "Ten lords a-leaping"
+        "Eleven pipers piping"
+        "Twelve drummers drumming"
     ]
 
-    loop day in gifts
+    loop i, day in #iteration, days
     {
-        print("On the {day} day of Christmas,\nMy true love gave to me\n") //string interpolation
-        loop day_num, gift in gifts.keys, gifts.values
+        print("On the {day} day of Christmas, my true love gave to me") //string interpolation
+        loop j, gift in #iteration, gifts[0:i].reversed 
         {
-            if day not? "first" and day_num =? "first"
-                print("And {gift.lowercase}") //And a partridge in a pear tree
-            else
-                print(gift)
+            if j not =? i print("{gift},")
+            else print("{if i is? 0 'And {gift.lowercase}' else '{gift}'}.\n") //example of nested string interpolation
         }
     }
 }
 
 
-FizzBuzz = @()
+FizzBuzz = @() ->
 {
-    words = [3 -> "Fizz" 5 -> "Buzz"] // 7->"Bazz"]
+    words = [3 -> "Fizz" 5 -> "Buzz"] // 7->"Bazz"] //example of a dictionary
 
     loop i in 1:100
     {
         say = i .% words.keys .=? 0     //elementwise operation of % and =? //returns truth table
         if words.keys[say].length >? 0
-        {
-            loop word in words[words.keys[say]]
-                printf(word)
-        }
+            loop word in words[words.keys[say]]  //note that indentation doesn't actually matter here.
+                printf(word)                     //each conditional happens to have only a single line, hence no need for {}s
         else printf(i)
-        print()
+        print() //print newline
     }
 }
 
 //alternate implementation using match
-FizzBuzzBazzFoo = @()
+FizzBuzzBazzFoo = @() ->
 {
     loop i in 1:100
         match i%3, i%5, i%7, i%11   //want to be able to vectorize the input like i .% [3 5 7 11] as args. but need better syntax
@@ -97,10 +94,10 @@ FizzBuzzBazzFoo = @()
 }
 
 
-sum_squares1 = @()
+sum_squares1 = @() ->
 {
     //any overflow is seamlessly handled by the compiler
-    sum_squares = [i^2 loop i in 1:100].sum  //TBD maybe have the ordering be [loop i in 1:100 i^2] to match normal loop ordering
+    sum_squares = [loop i in 1:100 i^2].sum
     square_sum = (1:100).sum^2
     
     print(sum_squares - square_sum)
@@ -108,9 +105,9 @@ sum_squares1 = @()
 
 
 //ability to do summations in expressions
-sum_squares2 = @()
+sum_squares2 = @() ->
 {
-    sum_squares = 1^2 + 2^2 + 3^2 + ... + 100^2
+    sum_squares = 1^2 + 2^2 + 3^2 + ... + 100^2  //this syntax may change, or perhaps even be removed
     square_sum = (1 + 2 + 3 + ... + 100)^2
 
     print(sum_squares - square_sum)
@@ -118,8 +115,7 @@ sum_squares2 = @()
 
 
 
-
-sum_multiples = @()
+sum_multiples1 = @() ->
 {
     //Project Euler Problem 1
     /{
@@ -140,14 +136,12 @@ sum_multiples = @()
     print(sum)
 }
 
-//alternate version. uses flipped (relative to python) position for item inserted into array
-//print([loop i in 1:1000-1 if (i%3)*(i%5) =? 0 i].sum)
+
+//example of an even shorter version of sum multiples
+sum_multiples2 = @() -> { print([loop i in 1:1000-1 if (i%3)*(i%5) =? 0 i].sum) }
 
 
-
-
-
-prime_factors = @()
+prime_factors = @() ->
 {
     /{
     The prime factors of 13195 are 5, 7, 13 and 29.
@@ -159,6 +153,7 @@ prime_factors = @()
     
     primes = doublylinkedlist(@[2 3]) //doubly linked list (generic sized object, space can adjust for larger values)
     //@[] notation i think should be a handle to a list generator, so that time isn't wasted converting it to another format
+    //also doubly linked list is probably unnecessary here, since the regular list type is amortized O(1) for appending
     //BELOW STUFF WILL PROBABLY BE REMOVED:
     //example empty init [].dll(uint64) makes a doubly linked list fileled with uint64's
     //uint.fit(goal) -> returns uint64, the smallest uint that goal will fit within
@@ -166,7 +161,7 @@ prime_factors = @()
     
     //primes.append([2 3])
 
-    #loop1 loop i in [5 7 ... goal^/2]   //count by 2 starting from 5 up to sqrt(goal)
+    #loop1 loop i in [5 7 ... goal^/2]   //count by 2 starting from 5 up to sqrt(goal). also probably will add a root operator, e.g. \|4 for sqrt(4), and 3\|8 for cuberoot(8), and so forth
     {
         loop p in primes
             if i % p =? 0 continue #loop1 //continue the loop governed by i
@@ -174,7 +169,8 @@ prime_factors = @()
         primes.append(i)
     }
     
-    print(primes[-0])
+    print(primes[-0])  //TODO->come up with better method to access last element, b/c -0 will probably just evaluate to 0. perhaps use -1? or something else
+    //since this is a doubly linked list, there probably would be a method like primes.last
     
     //note that while arrays can be set to be indexed with arbitrary start and end indices, if an index is accessed using +value or -value (e.g. primes[+10] or primes[-12]), the indexing is forced to be zero // actually this is no longer true. if indexing is not 0 based, then all values up to the first legal index are simply out of bounds for both + and - indexing. e.g. a = int[10:20], then a[10] is the first element, a[-10] is the last element, and any number < 10 or > 20 is out of bounds 
     //i.e. if primes was set to start at 1, primes[+0] will return the first element, even if primes[0] would throw an error
@@ -186,14 +182,14 @@ prime_factors = @()
 }
 
 
-compute_primes = @(n) //function literal that takes a single parameter `n`
+compute_primes = @(n) -> //function literal that takes a single parameter `n`
 {
     //compute and print the first n prime numbers
-    if n <? 1 throw ValueError('there is no [n]th prime') //should it be [n] or [@n]. because integers are used to refer to the list of parameters, any identifier can unambiguously be used to specify a variable
+    if n <? 1 throw ValueError('there is no {n}th prime')
     if n =? 1 {print([2]) return}
     if n =? 2 {print([2 3]) return}
 
-    primes = doublylinkedlist[2 3]
+    primes = doublylinkedlist(@[2 3])  //in this case a regular builtin list would be fine for smallish primes, since append has an amortized O(1)
 
     #outer loop candidate in [5 7 ...] //infinite list counting by 2s
     {
@@ -208,16 +204,16 @@ compute_primes = @(n) //function literal that takes a single parameter `n`
 }
 
 
-compute_primes_alt = @(uint n) //parameter must be of type uint or more specific
+compute_primes_alt = @(uint n) -> //parameter must be of type uint or more specific
 {
     match n
     {
         0 throw ValueError('there is no 0th prime')
         1 {print([2]) return}
         2 {print([2 3]) return}
-        _
+        _ //catch all
         {
-            primes = doublylinkedlist[2 3]
+            primes = doublylinkedlist(@[2 3])
             
             #outer loop candidate in [5 7 ...]
             {
@@ -234,7 +230,7 @@ compute_primes_alt = @(uint n) //parameter must be of type uint or more specific
 //To-Do: implement a verification algorithm for checking the value of pi (see the first answer of the stack overflow below)
 //https://stackoverflow.com/questions/14283270/how-do-i-determine-whether-my-calculation-of-pi-is-accurate
 //Naive direct implementation of https://pi2e.ch/blog/2016/07/30/the-chudnovsky-formula/ 
-compute_pi = @(n)
+compute_pi = @(n) ->
 {
     //this needs some way to specifiy the precision of pi in the calculation (i.e. need to be able to say we want n digits of precision for all calculations)
 
@@ -249,7 +245,7 @@ compute_pi = @(n)
     //pi = (10005^/2 / 4270934400 * [(-1)^k * (6*k)!/((k!)^3*(3*k)!) * ((13591409 + 545140134*k)/640320^(3*k)) loop k in 0:iterations].sum)^-1
 
     //what if we procedurally increase the precision of pi so that only as much precision as is needed at each step is used
-    //e.g. inside the loop, pi.precision += 14.181647462725477655
+    //e.g. inside the loop, pi.precision += 14.181647462725477655. Probably doable with a fixed point type number
     loop k in 0:iterations
     {
         pi += (-1)^k * (6*k)!/((k!)^3*(3*k)!) * ((13591409 + 545140134*k)/640320^(3*k))
