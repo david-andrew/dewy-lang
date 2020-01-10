@@ -13,45 +13,53 @@ TODO->clean this up, and verify that it is still correct
 
 **logical and bitwise operations**
 (note that these are logical if both operands are boolean, otherwise they are bitwise and operate on as many bits as the size of the largest operand)
-`and` both are true
-`or` either are true
-`xor` exactly one is true
-`not` invert (unary)
-`nand` either is false
-`nor` both are false
-`xnor` both are false or both are true
+- `and` both are true
+- `or` either are true
+- `xor` exactly one is true
+- `not` invert (unary)
+- `nand` either is false
+- `nor` both are false
+- `xnor` both are false or both are true
 
 **bit-shift operations**
-`<<<!` rotate left through carry bit
-`!>>>` rotate right through carry bit
-`<<<` rotate left no carry bit
-`>>>` rotate right no carry bit
-`<<` shift left (arithmetic and logical are the same for left-shift) 
-`>>` shift right (arithmetic vs logical determined by whether signed or unsigned)
+- `<<<!` rotate left through carry bit
+- `!>>>` rotate right through carry bit
+- `<<<` rotate left no carry bit
+- `>>>` rotate right no carry bit
+- `<<` shift left (arithmetic and logical are the same for left-shift) 
+- `>>` shift right (arithmetic vs logical determined by whether signed or unsigned)
 
 **boolean returning operations**
-`=?` equal
-`not?` not equal
-`>?` greater than
-`>=?` greater than or equal
-`<?` less than
-`<=?` less than or equal
-`in?` is a member of
+- `=?` equal
+- `not?` not equal
+- `>?` greater than
+- `>=?` greater than or equal
+- `<?` less than
+- `<=?` less than or equal
+- `in?` is a member of
 
+**Special Operators**
+- `<=>` spaceship (three-way comparison)
 
-**colon operator** or **list operator**
-`;` creates a list/sequence
+**colon operator** or **list creator operator**
+- `:` creates a list/sequence
 
 **dictionary pointers**
-`->` indicates the left expression points to the right expression in the dictionary
-`<-` reverses the order, making the right expression the key, and the left the value
-`<->` indicates that left is inserted as a key that points to right, and right is inserted as a key that points to left
+- `->` indicates the left expression points to the right expression in the dictionary
+- `<-` reverses the order, making the right expression the key, and the left the value
+- `<->` indicates that left is inserted as a key that points to right, and right is inserted as a key that points to left
+
+**Function pointer**
+- `=>` used for declaring a function literal
 
 **handle operator**
-`@` return a handle to the function or variable
-
+- `@` return a handle to the function or variable
+- `@?` (probably) check if two references are point to the same thing
+ 
 **Assignment operators**
-`=` assign the value of
+- `=` assign the value of
+
+## Notes
 
 any of the logical/bitwise operators, as well as the boolean returning operators can be preceeded by `not` which will then cause the inverse of the operation to be returned. e.g. `not and` is equivalent to `nand`, `not <?` is equivalent to `>=?`, etc.
 

@@ -22,8 +22,9 @@ loop i in 0:20
 You can also check if a value falls within a specified range
 
 ```dewy
-5 in? [1:5]  //returns true
-5 in? (1:5)  //returns false
+5 in? [1:5]         //returns true
+5 in? (1:5)         //returns false
+3.1415 in? (1:5)    //returns true 
 ```
 
 Additionally you can construct more complex ranges by using arithmetic on basic ranges
