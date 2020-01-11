@@ -1,0 +1,629 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>The Dewy Programming Language</title>
+        
+        <meta name="robots" content="noindex" />
+        
+
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link href="https://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,600italic,700italic,800italic,400,300,600,700,800" rel="stylesheet" type="text/css">
+        <link href="https://fonts.googleapis.com/css?family=Source+Code+Pro:500" rel="stylesheet" type="text/css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        
+
+        
+    </head>
+    <body>
+        <!-- Provide site root to javascript -->
+        <script type="text/javascript">
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script type="text/javascript">
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script type="text/javascript">
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script type="text/javascript">
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div id="sidebar-scrollbox" class="sidebar-scrollbox">
+                <ol class="chapter"><li class="expanded affix "><a href="ch00-00-introduction.html">Introduction</a></li><li class="expanded affix "><a href="ch00-01-features-list.html">Features List</a></li><li class="expanded "><a href="ch01-00-getting-started.html"><strong aria-hidden="true">1.</strong> Getting Started</a></li><li><ol class="section"><li class="expanded "><a href="ch01-01-installation.html"><strong aria-hidden="true">1.1.</strong> Installation</a></li><li class="expanded "><a href="ch01-02-hello-world.html"><strong aria-hidden="true">1.2.</strong> Hello, World!</a></li><li class="expanded "><a href="ch01-03-hello-many-worlds.html"><strong aria-hidden="true">1.3.</strong> Hello, Many Worlds!</a></li></ol></li><li class="expanded "><a href="chxx-features.html"><strong aria-hidden="true">2.</strong> Language Features</a></li><li><ol class="section"><li class="expanded "><a href="units.html"><strong aria-hidden="true">2.1.</strong> Units</a></li><li class="expanded "><a href="string-interpolation.html"><strong aria-hidden="true">2.2.</strong> String Interpolation</a></li><li class="expanded "><a href="basic-data-types.html"><strong aria-hidden="true">2.3.</strong> Basic Data Types</a></li><li class="expanded "><a href="container-types.html"><strong aria-hidden="true">2.4.</strong> Container Types</a></li><li class="expanded "><a href="range-types.html"><strong aria-hidden="true">2.5.</strong> Range Types</a></li><li class="expanded "><a href="function-types.html"><strong aria-hidden="true">2.6.</strong> Function Types</a></li><li class="expanded "><a href="operators.html"><strong aria-hidden="true">2.7.</strong> Operators</a></li><li class="expanded "><a href="number-bases.html"><strong aria-hidden="true">2.8.</strong> Number Bases</a></li><li class="expanded "><a href="basic-math.html"><strong aria-hidden="true">2.9.</strong> Basic Math</a></li><li class="expanded "><a href="linear-algebra.html"><strong aria-hidden="true">2.10.</strong> Linear Algebra</a></li><li class="expanded "><a href="functional-programming.html"><strong aria-hidden="true">2.11.</strong> Functional Programming</a></li><li class="expanded "><a href="meta-programming.html"><strong aria-hidden="true">2.12.</strong> Meta Programming</a></li></ol></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                
+                <div id="menu-bar" class="menu-bar">
+                    <div id="menu-bar-sticky-container">
+                        <div class="left-buttons">
+                            <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                                <i class="fa fa-bars"></i>
+                            </button>
+                            <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                                <i class="fa fa-paint-brush"></i>
+                            </button>
+                            <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                                <li role="none"><button role="menuitem" class="theme" id="light">Light (default)</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                            </ul>
+                            
+                            <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                                <i class="fa fa-search"></i>
+                            </button>
+                            
+                        </div>
+
+                        <h1 class="menu-title">The Dewy Programming Language</h1>
+
+                        <div class="right-buttons">
+                            <a href="print.html" title="Print this book" aria-label="Print this book">
+                                <i id="print-button" class="fa fa-print"></i>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </div>
+
+                
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" name="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+                
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script type="text/javascript">
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1><a class="header" href="#introduction" id="introduction">Introduction</a></h1>
+<p>Welcome to the Dewy Programming Language Book. This book covers all aspects of the language, including syntax, style, the standard library, examples, etc. </p>
+<p><strong>Please note that this book and the language are still VERY work in progress. The book is still missing many chapters, and there is currently no complete functioning implementation of the language.</strong> Feel free to check back later, or pester the author about progress**</p>
+<h2><a class="header" href="#what-is-dewy" id="what-is-dewy">What is Dewy</a></h2>
+<p>The Dewy Programming Language (also called DewySpeak or simply Dewy) is a simple yet powerful general purpose language designed with engineering applications in mind. I began developing Dewy when I became frustrated at the lack of a single language containing many of the high level engineering features I frequently use, without sacrificing speed and efficiency. Think the functionality and ease of use of matlab or python combined with the speed of a compiled language like C or Rust</p>
+<h1><a class="header" href="#features-list" id="features-list">Features List</a></h1>
+<p>This page lists (TODO and will link to) all (TODO currently non-exhaustive) of the features built into Dewy. (TODO order the list to match the book's chapters)</p>
+<ul>
+<li>string interpolation</li>
+<li>physical unit literals</li>
+<li>map literals (map implemented as Python map) (i.e. dictionaries)</li>
+<li>bidirectional maps (using <code>&lt;-&gt;</code>)</li>
+<li>vector literals (vector implemented as double ended quite)</li>
+<li>sets (not sure if there's a good literal notation for sets) (implemented similarly to maps)</li>
+<li>matrix math</li>
+<li>function literals + first class functions</li>
+<li>partially evaluated functions</li>
+<li>multi-variable returns</li>
+<li>range literals with specifiable inclusive/exclusive bounds</li>
+<li>type inference</li>
+<li>rust-esque memory management (more permissive)</li>
+<li>explicit copy vs reference semantics</li>
+<li>(maybe) lazy evaluation</li>
+<li>plain English binary/Boolean operators
+<ul>
+<li>also binary and Boolean operators are the same keywords</li>
+</ul>
+</li>
+<li>compiled via compiler compiler and language specification written in EBNF-like macro language
+<ul>
+<li>GLR parser generator to allow for easy language extension</li>
+</ul>
+</li>
+<li>multi-scope break/continue</li>
+<li>well defined scope semantics</li>
+<li>enums</li>
+<li>token literals (may replace enums)</li>
+<li>c interoperation</li>
+<li>syntax blocks (e.g. you could have a block that is in C, or a block that allows for set notation to be used natively. Think like how you can have a JavaScript block in html) (wouldn't it be funny if you could run basically any other language in the syntax blocks, and have them interoperate)</li>
+<li>llvm and maybe direct to machine code compilation</li>
+<li>composite arithmetic operators (e.g. <code>n^/2 = n^(1/2)</code>)</li>
+<li>optional/named function parameters</li>
+<li>list/map/set comprehension or generators</li>
+<li>in general, highly unified syntax (e.g. ternary is a consequence of blocks and conditionals, or objects and functions and blocks are basically the same thing)</li>
+<li>transpose operator as <code>'</code> (probably)</li>
+<li>extremely permissive identifier names (allows <code>&amp;$@?!</code> in an identifier along with normal identifier letters/numbers. Might also include <code>#</code> as well, but TBD)</li>
+<li>walrus operator (from python 3.8)</li>
+<li>positional-only and keyword-only arguments</li>
+<li>rational datatype</li>
+<li>multithreading (default safe using rust-like memory management)</li>
+<li>JavaScript style function generators (see mdn docs) (possible in regular functions using <code>yield</code> keyword. Probably also mix with hastags to enter functions at arbitrary points)</li>
+<li>all dewy versions are backwards compatible, OR if an incompatible change must be introduced, the language will automatically provide a converted version of the file to the user. None of this python2 vs python2 BS</li>
+</ul>
+<h1><a class="header" href="#getting-started" id="getting-started">Getting Started</a></h1>
+<p><strong>Currently there is no complete version of the language ready for use.</strong> It is the goal of the author to complete an MVP of the language in the near future, from which a complete version can be developed.</p>
+<h1><a class="header" href="#installation" id="installation">Installation</a></h1>
+<p><strong>As mentioned, there is no implementation of the language ready for installation.</strong> When the MVP is complete, the planned installation methods will include prebuilt binaries, along with C source code for building from scratch. Additionally, it is planned to provide some form of online interpreter that people can use to test the language</p>
+<h2><a class="header" href="#verify-install" id="verify-install">Verify Install</a></h2>
+<p>When you do have the language properly installed, you should be able to verify that it works like so:</p>
+<pre><code class="language-bash">$ dewy -v
+dewy0alpha (version 0.0.1) 
+</code></pre>
+<h1><a class="header" href="#hello-world" id="hello-world">Hello, World!</a></h1>
+<p>Printing &quot;Hello, World!&quot; is super simple in Dewy. Assuming you've got everything set up, and can invoke the language from the command line, here's how to run your first Dewy program.</p>
+<h2><a class="header" href="#put-your-code-in-a-directory" id="put-your-code-in-a-directory">Put Your Code in a Directory</a></h2>
+<p>It's probably a good idea to put your code in a dedicated directory.</p>
+<pre><code class="language-bash">$ mdkir ~/code
+$ cd code
+$ mdkir hello_world
+$ cd hello_world
+</code></pre>
+<h2><a class="header" href="#write-the-source-code" id="write-the-source-code">Write the Source Code</a></h2>
+<p>Next we'll create the source file. In a text editor of your choosing, create a file called <code>hello.dewy</code>. For example, I like using sublime, which can be invoked from the command line:</p>
+<pre><code class="language-bash">$ subl hello.dewy
+</code></pre>
+<p>Then in the text editor, enter the following code</p>
+<pre><code class="language-dewy">printn('Hello, World!')
+</code></pre>
+<p>This code invokes the <code>printn</code> function with the string <code>'Hello, World!'</code>. <code>printn</code> is a commonly used function which prints the specified text to the terminal, followed by a newline.</p>
+<p>When you are done in the text editor, save and close the file.</p>
+<h2><a class="header" href="#run-the-code" id="run-the-code">Run the Code</a></h2>
+<p>Running a dewy file is as simple as invoking the file with the <code>dewy</code> command</p>
+<pre><code class="language-bash">$ dewy hello.dewy
+</code></pre>
+<p>Which should print <code>Hello, World!</code> in the terminal. Note that in addition to printing that string, a new executable file named <code>hello</code> has appeared in the directory</p>
+<pre><code class="language-bash">$ ls
+hello.dewy hello
+</code></pre>
+<p>This is because Dewy is a compiled language. Calling the <code>dewy</code> command on a source file will compile that file into an executable (the <code>hello</code> file in this case), and then run that executable. </p>
+<p>If you would instead like to separately compile, and then execute your code, you may do the following:</p>
+<pre><code class="language-bash">$ dewyc hello.dewy  #compile the file
+$ ./hello           #execute the compiled file
+</code></pre>
+<h1><a class="header" href="#hello-many-worlds" id="hello-many-worlds">Hello, Many Worlds!</a></h1>
+<p>This chapter contains equivalent Hello World programs for a variety of different domains. This might be split into several sections involving the standard library</p>
+<p>(TODO) Examples will probably include:</p>
+<ul>
+<li>GUI -&gt; how to create a window with Hello, World!</li>
+<li>Graphics -&gt; how to draw a triangle</li>
+<li>Sound -&gt; how to play a sin wave through the speakers</li>
+<li>Machine Learning -&gt; how to train a simple MLP</li>
+<li>etc.</li>
+</ul>
+<h1><a class="header" href="#language-features" id="language-features">Language Features</a></h1>
+<p>Each subsequent section explains a different facet of the language.</p>
+<h1><a class="header" href="#units" id="units">Units</a></h1>
+<p>Dewy was designed from day 1 to include physical units such as kilogram, meter, second. </p>
+<h2><a class="header" href="#a-simple-example" id="a-simple-example">A Simple Example</a></h2>
+<p>Using units is quite straightforward, as they can be included in just about any regular math expression</p>
+<pre><code class="language-dewy">mass = 10 kg
+velocity = 30 m/s
+energy = 1/2 * mass * velocity^2
+</code></pre>
+<p>The <code>energy</code> variable now contains a value of <code>9000 joules</code>.</p>
+<h2><a class="header" href="#todo-rest-of-units-features--examples" id="todo-rest-of-units-features--examples">(TODO-&gt;rest of units features + examples)</a></h2>
+<h1><a class="header" href="#string-interpolation" id="string-interpolation">String Interpolation</a></h1>
+<p>Including variable values inside of a string is handled with string interpolation. </p>
+<pre><code class="language-dewy">my_age = 24
+my_string = 'I am {my_age} years old'
+printn(my_string)
+</code></pre>
+<p>which will print the string <code>I am 24 years old</code>. Any arbitrary expression can be contained inside of the curly braces. For expressions that are not a string by default, the <code>.string()</code> method will be called on them to get the string version.</p>
+<h1><a class="header" href="#basic-data-types" id="basic-data-types">Basic Data Types</a></h1>
+<h2><a class="header" href="#numeric" id="numeric">Numeric</a></h2>
+<p>Numeric data is what it sounds like, values that represent a number</p>
+<h3><a class="header" href="#numbers" id="numbers">Numbers</a></h3>
+<p>Numbers are the base case for numerical values, with each subsequent type being a more specific / restricted version of the number class.</p>
+<pre><code class="language-dewy">my_number = 10
+</code></pre>
+<h3><a class="header" href="#integers" id="integers">Integers</a></h3>
+<p>Integers are numbers that do not contain any decimal component. By default, integers can be arbitrarily large, but fixed width integers are also possible</p>
+<pre><code class="language-dewy">my_int = -12 as int
+my_int32 = 42 as int32
+
+my_uint = 15 as uint
+my_uint64 = 2001 as uint64
+</code></pre>
+<p>The full list of integer types includes</p>
+<ul>
+<li><strong>int</strong>: Arbitrary precision signed integer</li>
+<li><strong>int8</strong>: 8-bit signed integer. range = [-128:127]</li>
+<li><strong>int16</strong>: 16-bit signed integer. range = []</li>
+<li><strong>int32</strong>: 32-bit signed integer. range = []</li>
+<li><strong>int64</strong>: 64-bit signed integer. range = []</li>
+<li><strong>(maybe) int128</strong>: 128-bit signed integer. range = []</li>
+<li><strong>uint</strong>: arbitrary precision unsigned integer</li>
+<li><strong>uint8</strong>: 8-bit unsigned integer. range = [0:255]</li>
+<li><strong>uint16</strong>: 16-bit unsigned integer. range = []</li>
+<li><strong>uint32</strong>: 32-bit unsigned integer. range = []</li>
+<li><strong>uint64</strong>: 64-bit unsigned integer. range = []</li>
+<li><strong>(maybe) uint128</strong>: 128-bit unsigned integer. range = []</li>
+</ul>
+<h3><a class="header" href="#real" id="real">Real</a></h3>
+<p>Real numbers are positive and negative numbers that can have a decimal component to them. The default real will be stored as a <code>float64</code> i.e. a 64-bit floating point number, but other widths (and potentially arbitrary precision) are possible</p>
+<pre><code class="language-dewy">my_real = 3.1415
+my_real32 = 54.54 as real32
+my_real64 = 233.511534 as real64
+</code></pre>
+<h3><a class="header" href="#boolean" id="boolean">Boolean</a></h3>
+<p>Standard true/false type</p>
+<pre><code class="language-dewy">my_bool = true
+</code></pre>
+<h3><a class="header" href="#complex" id="complex">Complex</a></h3>
+<p>complex numbers</p>
+<pre><code class="language-dewy">my_complex0 = \|2 + \|2i  //TBD if this syntax will remain
+my_complex1 = complex(2^/2, 2^/2)
+my_complex2 = complex(1, 45 degrees)
+</code></pre>
+<h3><a class="header" href="#quaternions" id="quaternions">Quaternions</a></h3>
+<p>Quaternions</p>
+<h2><a class="header" href="#misc" id="misc">MISC.</a></h2>
+<p>Other datatypes (probably include on this page)</p>
+<ul>
+<li>strings</li>
+<li>symbolics</li>
+<li>units</li>
+<li>types</li>
+<li>enums or tokens</li>
+</ul>
+<h1><a class="header" href="#container-types" id="container-types">Container Types</a></h1>
+<p>Container types are things like arrays, dictionaries, and sets. all containers are specified using square brackets <code>[]</code>, while the contents (or other factors) determine the type of container</p>
+<h2><a class="header" href="#arrays" id="arrays">Arrays</a></h2>
+<p>An array is simple a list of values inside a container</p>
+<pre><code class="language-dewy">my_array = [0 1 2 3 'apple' 'banana' 'peach' true]
+printn(my_array[3])  //prints '3'
+</code></pre>
+<p>Note that values do not need commas to separate them. Also arrays can contain objects of different types, though arrays as only a single type will be more efficient. Arrays are 0-indexed (with potentially the option to set an arbitrary index)</p>
+<h2><a class="header" href="#dictionaries" id="dictionaries">Dictionaries</a></h2>
+<p>A dictionary is a list of key-value pairs</p>
+<pre><code class="language-dewy">my_dictionary = [
+    'apple' -&gt; 10
+    'banana' -&gt; 15
+    'peach' -&gt; 3
+    'pear' -&gt; 6
+]
+printn(my_dictionary['peach'])  //prints '3'
+</code></pre>
+<p>Again note the lack of a need for comma separation. (Potentially may add an option for using <code>&lt;-</code> arrows in addition to <code>-&gt;</code> arrows, esp. b/c of <code>&lt;-&gt;</code> arrows)</p>
+<p>Additionally if you wish, you can define a bi-directional dictionary using a double-ended arrow:</p>
+<pre><code class="language-dewy">my_bidictionary = [
+    0 &lt;-&gt; 'zero'
+    1 &lt;-&gt; 'one'
+    'two' &lt;-&gt; 2
+    3 &lt;-&gt; 'three'
+]
+printn(my_bidictionary['three'])  //prints '3'
+printn(my_bidictionary[3])        //prints 'three'
+</code></pre>
+<p>Note that to create an actual bidictionary, every arrow must by double-ended. As new elements are added, the bidictionary will maintain the bidirectional links between each element. Regular dictionaries will not maintin such links.</p>
+<h2><a class="header" href="#sets" id="sets">Sets</a></h2>
+<p>A set is an unordered collection of elements. (TODO:determine set notation.)</p>
+<p>For now, sets will probably be declared like so</p>
+<pre><code class="language-dewy">my_set = Set([0 1 2 3 'apple' 'banana' 'peach' true])
+print(3 in? my_set)  //prints 'true'
+print('pear' in? my_set)  //prints 'false'
+</code></pre>
+<h1><a class="header" href="#range-types" id="range-types">Range Types</a></h1>
+<p>Ranges allow you to describe a range of numbers</p>
+<p>Inclusive and exclusive bounds on a range can be specified with <code>[]</code> i.e. open bounds, and <code>()</code> i.e. closed bounds. If no bounds are included, then the default is open bounds</p>
+<pre><code class="language-dewy">range1 = 1:5    // 1 2 3 4 5
+range2 = (1:5)  // 2 3 4
+range3 = (1:5]  // 2 3 4 5
+range4 = [1:5)  // 1 2 3 4
+range5 = [1:5]  // 1 2 3 4 5
+</code></pre>
+<p>Ranges are a convenient way to loop a specified number of times. The following prints <code>AppleBanana</code> 21 times</p>
+<pre><code class="language-dewy">loop i in 0:20
+    printn('AppleBanana')
+</code></pre>
+<p>You can also check if a value falls within a specified range</p>
+<pre><code class="language-dewy">5 in? [1:5]         //returns true
+5 in? (1:5)         //returns false
+3.1415 in? (1:5)    //returns true 
+</code></pre>
+<p>Additionally you can construct more complex ranges by using arithmetic on basic ranges</p>
+<pre><code class="language-dewy">complex_range = [1:5] + (15:20)
+loop i in complex_range
+    printn(i)           //prints 1 2 3 4 5 16 17 18 19
+7 in? complex_range     //returns false
+16 in? complex_range    //returns true
+</code></pre>
+<p>The same range as above can be constructed using subtraction</p>
+<pre><code class="language-dewy">complex_range = [1:20) - (5:15]
+</code></pre>
+<h1><a class="header" href="#function-types" id="function-types">Function Types</a></h1>
+<p>Functions are first class citizens in Dewy. In fact many concepts from functional programming are included in Dewy, as they frequently allow for cleaner and more concise code.</p>
+<h2><a class="header" href="#function-literals" id="function-literals">Function Literals</a></h2>
+<p>To create a function, simply bind a function literal to a variable</p>
+<pre><code class="language-dewy">my_function = () =&gt; 
+{ 
+    printn('You called my function!') 
+}
+
+my_function()  //calls the function
+</code></pre>
+<p>In the above example, the function takes no input arguments, and doesn't return any values. Instead is simply prints a string to the terminal</p>
+<p>Here's an example that takes two arguments</p>
+<pre><code class="language-dewy">pythag_length = (a, b) =&gt; 
+{ 
+    return (a^2 + b^2)^/2
+}
+</code></pre>
+<p>In fact we can simplify the above function's declaration quite a bit via syntactic sugar</p>
+<pre><code class="language-dewy">pythag_length = (a, b) =&gt; (a^2 + b^2)^/2
+</code></pre>
+<p>(TBD:currently debating if a single argument can omit the parenthesis) e.g.</p>
+<pre><code class="language-dewy">abs = (x) =&gt; if x &lt;? 0 -x else x
+abs = x =&gt; if x &lt;? 0 -x else x
+</code></pre>
+<p>With this, we're probably gonna start running into syntax collisions with declarations inside of dictionaries...</p>
+<h1><a class="header" href="#operators" id="operators">Operators</a></h1>
+<p>TODO-&gt;clean this up, and verify that it is still correct</p>
+<p><strong>Basic Math Operations</strong></p>
+<ul>
+<li><code>+</code> plus</li>
+<li><code>-</code> minus</li>
+<li><code>*</code> multiply</li>
+<li><code>/</code> divide</li>
+<li><code>%</code> modulus</li>
+<li><code>^</code> exponent</li>
+<li><code>\|</code> square or n root e.g. <code>\|25 = 5</code> and <code>3\|64 = 4</code></li>
+</ul>
+<p><strong>logical and bitwise operations</strong>
+(note that these are logical if both operands are boolean, otherwise they are bitwise and operate on as many bits as the size of the largest operand)</p>
+<ul>
+<li><code>and</code> both are true</li>
+<li><code>or</code> either are true</li>
+<li><code>xor</code> exactly one is true</li>
+<li><code>not</code> invert (unary)</li>
+<li><code>nand</code> either is false</li>
+<li><code>nor</code> both are false</li>
+<li><code>xnor</code> both are false or both are true</li>
+</ul>
+<p><strong>bit-shift operations</strong></p>
+<ul>
+<li><code>&lt;&lt;&lt;!</code> rotate left through carry bit</li>
+<li><code>!&gt;&gt;&gt;</code> rotate right through carry bit</li>
+<li><code>&lt;&lt;&lt;</code> rotate left no carry bit</li>
+<li><code>&gt;&gt;&gt;</code> rotate right no carry bit</li>
+<li><code>&lt;&lt;</code> shift left (arithmetic and logical are the same for left-shift) </li>
+<li><code>&gt;&gt;</code> shift right (arithmetic vs logical determined by whether signed or unsigned)</li>
+</ul>
+<p><strong>boolean returning operations</strong></p>
+<ul>
+<li><code>=?</code> equal</li>
+<li><code>not?</code> not equal</li>
+<li><code>&gt;?</code> greater than</li>
+<li><code>&gt;=?</code> greater than or equal</li>
+<li><code>&lt;?</code> less than</li>
+<li><code>&lt;=?</code> less than or equal</li>
+<li><code>in?</code> is a member of</li>
+</ul>
+<p><strong>Special Operators</strong></p>
+<ul>
+<li><code>&lt;=&gt;</code> spaceship (three-way comparison)</li>
+</ul>
+<p><strong>colon operator</strong> or <strong>list creator operator</strong></p>
+<ul>
+<li><code>:</code> creates a list/sequence</li>
+</ul>
+<p><strong>dictionary pointers</strong></p>
+<ul>
+<li><code>-&gt;</code> indicates the left expression points to the right expression in the dictionary</li>
+<li><code>&lt;-</code> reverses the order, making the right expression the key, and the left the value</li>
+<li><code>&lt;-&gt;</code> indicates that left is inserted as a key that points to right, and right is inserted as a key that points to left</li>
+</ul>
+<p><strong>Function pointer</strong></p>
+<ul>
+<li><code>=&gt;</code> used for declaring a function literal</li>
+</ul>
+<p><strong>handle operator</strong></p>
+<ul>
+<li><code>@</code> return a handle to the function or variable</li>
+<li><code>@?</code> (probably) check if two references are point to the same thing</li>
+</ul>
+<p><strong>Assignment operators</strong></p>
+<ul>
+<li><code>=</code> assign the value of</li>
+</ul>
+<h2><a class="header" href="#notes" id="notes">Notes</a></h2>
+<p>any of the logical/bitwise operators, as well as the boolean returning operators can be preceeded by <code>not</code> which will then cause the inverse of the operation to be returned. e.g. <code>not and</code> is equivalent to <code>nand</code>, <code>not &lt;?</code> is equivalent to <code>&gt;=?</code>, etc.</p>
+<p>any of these operations can be appended with an <code>=</code> sign to make them into an assignment (this probably excludes <code>@</code> and <code>!</code> and any other unary operators)
+e.g. </p>
+<pre><code>a += 5  //is equivalent to a = a + 5
+a &lt;?= 5  //is equivalent to a = a &lt;? 5
+a !&gt;&gt;&gt;= 5  //is equivalent to a = a !&gt;&gt;&gt; 5
+a xor= false  //is equivalent to a = a xor false
+</code></pre>
+<p>Can the <code>=</code> sign be (optionally) separated from the operation? e.g. <code>+=</code> is equivalent to <code>+ =</code>, <code>xor=</code> is equivalent to <code>xor =</code>, etc. I think it should be allowed in this case, so long as the first operator is in a single piece</p>
+<p>This should also probably work with element-wise operations where each element in the list is updated according to the operation (can be done in parallel)</p>
+<p>the elementwise operator <code>.</code> can be prepended to any operation to make it be performed on each element in a vector/matrix/tensor/etc. 
+e.g. </p>
+<pre><code>//find the prime factors of 20
+a = [2 3 5 7 11 13 17 19]  //primes up to 20
+mods = 20 .% a  //returns [0 2 0 6 9 7 3 1]
+is_factor = mods .=? 0 //returns [true false true false false false false]
+p_factors = a[is_factor] //returns [2 5]
+
+//above in a single line
+p_factors = [2 3 5 7 11 13 17 19][20 .% [2 3 5 7 11 13 17 19] =? 0]
+
+//though it's probably cleaner in 2 lines
+primes = [2 3 5 7 11 13 17 19]
+p_factors = primes[20 .% primes =? 0]
+</code></pre>
+<p>This works if either the either first operand is a list, or the second is a list, or both are lists with the exact same shape</p>
+<p>The current precedence levels for the operations are as follows:</p>
+<pre><code>precedence_levels = 
+[
+    0 -&gt; [ '=' ]  //assignmnent (also += &lt;?= xor= etc.)
+    1 -&gt; [ 'and' 'or' 'xor' 'not' 'nand' 'nor' 'xnor' ]  // 'not' might actually be inserted in between 7 and 8 as it's a unary operator
+    2 -&gt; [ '=?' 'not?' '&gt;?' '&gt;=?' '&lt;?' '&lt;=?' 'in?' ]
+    3 -&gt; [ '!&gt;&gt;&gt;' '&lt;&lt;&lt;!' '&gt;&gt;&gt;' '&lt;&lt;&lt;' '&gt;&gt;' '&lt;&lt;' ]
+    4 -&gt; [ '+' '-' ]
+    5 -&gt; [ '*' '/' '%' ]
+    6 -&gt; [ 'm' 'd' ]  //unit versions of divide (d) and multiply (m), bind more tightly than normal arithmetic. You can't actually use these in the language
+    7 -&gt; [ '^' ]
+    8 -&gt; [ ':' ]  //list maker e.g. 1:10. This probably should be much lower, i.e. between 1 and 2, or 2 and 3
+    9 -&gt; [ '!' ]
+    10 -&gt; [ 'a.b' 'a()' 'a[]' ]  //attribute access e.g. some_obj.value
+    11 -&gt; [ '@' ]  //11 might actually swap with 10
+    12 -&gt; [ 'if' ]  //ternary if
+    13 -&gt; [ '()' ]  //parenthesis groupings
+    14 -&gt; [ '{}' ]  //block grouping
+]
+</code></pre>
+<p>If we add a three-way comparison operator, it goes between levels 0 and 1. Also any multi-operators e.g. <code>100^/2</code> for sqrt, or <code>5+-1</code>, etc. have a precedence at the level of the first operator in the chain (i.e. all following operators have no effect on the precedence).
+Also any instances of elementwise operators (e.g. <code>.+</code> <code>.=</code> <code>.xor</code> etc.) are at the level of precedence as the operator they're attached to. Assignment operators on the other hand are all at the same level, regardless of the type of operator they're attached to (e.g. <code>+=</code> <code>&lt;?=</code> <code>&lt;&lt;=</code> <code>nand=</code> etc.)</p>
+<h1><a class="header" href="#numbers-and-bases" id="numbers-and-bases">Numbers and Bases</a></h1>
+<p>literal numbers in various bases can be specified using prefixes before the number</p>
+<ul>
+<li><strong>Binary</strong>: <code>0b</code> with digits <code>01</code></li>
+<li><strong>Quaternary</strong>: <code>0q</code> with digits <code>0123</code></li>
+<li><strong>Seximal</strong>: <code>0s</code> with digits <code>012345</code></li>
+<li><strong>Octal</strong>: <code>0o</code> with digits <code>01234567</code></li>
+<li><strong>Decimal</strong>: <code>0d</code> with digits <code>0123456789</code> (only needed when the default base is set to something other than 10)</li>
+<li><strong>Dozenal</strong>: <code>0z</code> with digits <code>0123456789XE</code></li>
+<li><strong>Hexidecimal</strong>: <code>0x</code> with digits <code>0123456789ABCDEF</code></li>
+<li><strong>Duotrigesimal</strong>: <code>0u</code> with digits <code>0123456789ABCDEFGHIJKLMNOPQRSTUV</code></li>
+<li><strong>Tetrasexagesimal</strong>: <code>0t</code> with digits <code>0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ@_</code> (which is the encoding bash uses)</li>
+</ul>
+<p><a href="https://en.wikipedia.org/wiki/List_of_numeral_systems">Base names</a>, and 
+<a href="https://en.wikipedia.org/wiki/Senary">Seximal</a></p>
+<h2><a class="header" href="#examples" id="examples">Examples</a></h2>
+<h1><a class="header" href="#basic-math" id="basic-math">Basic Math</a></h1>
+<h1><a class="header" href="#linear-algebra" id="linear-algebra">Linear Algebra</a></h1>
+<h1><a class="header" href="#functional-programming" id="functional-programming">Functional Programming</a></h1>
+<h1><a class="header" href="#meta-programming" id="meta-programming">Meta Programming</a></h1>
+<p>An interesting feature of the language is that it doesn't use a normal compiler. Instead the language is described using the meta language, and this description is used to build the compiler from what is known as a compiler compiler. The meta language makes it incredibly easy to add brand new features to the language, such as new syntax and so forth.</p>
+<p>The meta language bears much similarity to <a href="https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form">Extended Backus-Naur form</a>.</p>
+<p>(random stuff to include)</p>
+<ul>
+<li>GLR parser for easier meta programming</li>
+<li>meta language syntax + examples</li>
+<li>etc. TBD</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                        
+
+                        
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                
+
+                
+            </nav>
+
+        </div>
+
+        
+
+        
+
+        
+        
+        
+        <script type="text/javascript">
+            window.playpen_copyable = true;
+        </script>
+        
+
+        
+
+        
+        <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
+        
+
+        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
+        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+
+        <!-- Custom JS scripts -->
+        
+
+        
+        
+        <script type="text/javascript">
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+        
+        
+
+    </body>
+</html>

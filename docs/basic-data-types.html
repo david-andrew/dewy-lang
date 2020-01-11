@@ -1,0 +1,276 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Basic Data Types - The Dewy Programming Language</title>
+        
+
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link href="https://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,600italic,700italic,800italic,400,300,600,700,800" rel="stylesheet" type="text/css">
+        <link href="https://fonts.googleapis.com/css?family=Source+Code+Pro:500" rel="stylesheet" type="text/css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        
+
+        
+    </head>
+    <body>
+        <!-- Provide site root to javascript -->
+        <script type="text/javascript">
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script type="text/javascript">
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script type="text/javascript">
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script type="text/javascript">
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div id="sidebar-scrollbox" class="sidebar-scrollbox">
+                <ol class="chapter"><li class="expanded affix "><a href="ch00-00-introduction.html">Introduction</a></li><li class="expanded affix "><a href="ch00-01-features-list.html">Features List</a></li><li class="expanded "><a href="ch01-00-getting-started.html"><strong aria-hidden="true">1.</strong> Getting Started</a></li><li><ol class="section"><li class="expanded "><a href="ch01-01-installation.html"><strong aria-hidden="true">1.1.</strong> Installation</a></li><li class="expanded "><a href="ch01-02-hello-world.html"><strong aria-hidden="true">1.2.</strong> Hello, World!</a></li><li class="expanded "><a href="ch01-03-hello-many-worlds.html"><strong aria-hidden="true">1.3.</strong> Hello, Many Worlds!</a></li></ol></li><li class="expanded "><a href="chxx-features.html"><strong aria-hidden="true">2.</strong> Language Features</a></li><li><ol class="section"><li class="expanded "><a href="units.html"><strong aria-hidden="true">2.1.</strong> Units</a></li><li class="expanded "><a href="string-interpolation.html"><strong aria-hidden="true">2.2.</strong> String Interpolation</a></li><li class="expanded "><a href="basic-data-types.html" class="active"><strong aria-hidden="true">2.3.</strong> Basic Data Types</a></li><li class="expanded "><a href="container-types.html"><strong aria-hidden="true">2.4.</strong> Container Types</a></li><li class="expanded "><a href="range-types.html"><strong aria-hidden="true">2.5.</strong> Range Types</a></li><li class="expanded "><a href="function-types.html"><strong aria-hidden="true">2.6.</strong> Function Types</a></li><li class="expanded "><a href="operators.html"><strong aria-hidden="true">2.7.</strong> Operators</a></li><li class="expanded "><a href="number-bases.html"><strong aria-hidden="true">2.8.</strong> Number Bases</a></li><li class="expanded "><a href="basic-math.html"><strong aria-hidden="true">2.9.</strong> Basic Math</a></li><li class="expanded "><a href="linear-algebra.html"><strong aria-hidden="true">2.10.</strong> Linear Algebra</a></li><li class="expanded "><a href="functional-programming.html"><strong aria-hidden="true">2.11.</strong> Functional Programming</a></li><li class="expanded "><a href="meta-programming.html"><strong aria-hidden="true">2.12.</strong> Meta Programming</a></li></ol></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                
+                <div id="menu-bar" class="menu-bar">
+                    <div id="menu-bar-sticky-container">
+                        <div class="left-buttons">
+                            <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                                <i class="fa fa-bars"></i>
+                            </button>
+                            <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                                <i class="fa fa-paint-brush"></i>
+                            </button>
+                            <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                                <li role="none"><button role="menuitem" class="theme" id="light">Light (default)</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                                <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                            </ul>
+                            
+                            <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                                <i class="fa fa-search"></i>
+                            </button>
+                            
+                        </div>
+
+                        <h1 class="menu-title">The Dewy Programming Language</h1>
+
+                        <div class="right-buttons">
+                            <a href="print.html" title="Print this book" aria-label="Print this book">
+                                <i id="print-button" class="fa fa-print"></i>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </div>
+
+                
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" name="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+                
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script type="text/javascript">
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1><a class="header" href="#basic-data-types" id="basic-data-types">Basic Data Types</a></h1>
+<h2><a class="header" href="#numeric" id="numeric">Numeric</a></h2>
+<p>Numeric data is what it sounds like, values that represent a number</p>
+<h3><a class="header" href="#numbers" id="numbers">Numbers</a></h3>
+<p>Numbers are the base case for numerical values, with each subsequent type being a more specific / restricted version of the number class.</p>
+<pre><code class="language-dewy">my_number = 10
+</code></pre>
+<h3><a class="header" href="#integers" id="integers">Integers</a></h3>
+<p>Integers are numbers that do not contain any decimal component. By default, integers can be arbitrarily large, but fixed width integers are also possible</p>
+<pre><code class="language-dewy">my_int = -12 as int
+my_int32 = 42 as int32
+
+my_uint = 15 as uint
+my_uint64 = 2001 as uint64
+</code></pre>
+<p>The full list of integer types includes</p>
+<ul>
+<li><strong>int</strong>: Arbitrary precision signed integer</li>
+<li><strong>int8</strong>: 8-bit signed integer. range = [-128:127]</li>
+<li><strong>int16</strong>: 16-bit signed integer. range = []</li>
+<li><strong>int32</strong>: 32-bit signed integer. range = []</li>
+<li><strong>int64</strong>: 64-bit signed integer. range = []</li>
+<li><strong>(maybe) int128</strong>: 128-bit signed integer. range = []</li>
+<li><strong>uint</strong>: arbitrary precision unsigned integer</li>
+<li><strong>uint8</strong>: 8-bit unsigned integer. range = [0:255]</li>
+<li><strong>uint16</strong>: 16-bit unsigned integer. range = []</li>
+<li><strong>uint32</strong>: 32-bit unsigned integer. range = []</li>
+<li><strong>uint64</strong>: 64-bit unsigned integer. range = []</li>
+<li><strong>(maybe) uint128</strong>: 128-bit unsigned integer. range = []</li>
+</ul>
+<h3><a class="header" href="#real" id="real">Real</a></h3>
+<p>Real numbers are positive and negative numbers that can have a decimal component to them. The default real will be stored as a <code>float64</code> i.e. a 64-bit floating point number, but other widths (and potentially arbitrary precision) are possible</p>
+<pre><code class="language-dewy">my_real = 3.1415
+my_real32 = 54.54 as real32
+my_real64 = 233.511534 as real64
+</code></pre>
+<h3><a class="header" href="#boolean" id="boolean">Boolean</a></h3>
+<p>Standard true/false type</p>
+<pre><code class="language-dewy">my_bool = true
+</code></pre>
+<h3><a class="header" href="#complex" id="complex">Complex</a></h3>
+<p>complex numbers</p>
+<pre><code class="language-dewy">my_complex0 = \|2 + \|2i  //TBD if this syntax will remain
+my_complex1 = complex(2^/2, 2^/2)
+my_complex2 = complex(1, 45 degrees)
+</code></pre>
+<h3><a class="header" href="#quaternions" id="quaternions">Quaternions</a></h3>
+<p>Quaternions</p>
+<h2><a class="header" href="#misc" id="misc">MISC.</a></h2>
+<p>Other datatypes (probably include on this page)</p>
+<ul>
+<li>strings</li>
+<li>symbolics</li>
+<li>units</li>
+<li>types</li>
+<li>enums or tokens</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                        
+                            <a rel="prev" href="string-interpolation.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+                        
+
+                        
+                            <a rel="next" href="container-types.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+                        
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                
+                    <a href="string-interpolation.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+                
+
+                
+                    <a href="container-types.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+                
+            </nav>
+
+        </div>
+
+        
+
+        
+
+        
+        
+        
+        <script type="text/javascript">
+            window.playpen_copyable = true;
+        </script>
+        
+
+        
+
+        
+        <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
+        
+
+        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
+        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+
+        <!-- Custom JS scripts -->
+        
+
+        
+
+    </body>
+</html>
