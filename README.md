@@ -1,6 +1,9 @@
 # DewySpeak
 DewySpeak (Dewy for short) is a programming language that I am developing. The main goal I have for this language is to create a language that is the perfect language that I would want to use. Dewy is a general purpose programming language with a focus on engineering.
 
+## Language Documentation
+Currently incomplete documentation is available at: https://david-andrew.github.io/DewySpeak/
+
 ## Language Features
 * first class physical units (e.g. length, time, mass, temperature, etc.)
 * first class functions (as well as many concepts borrowed from functional programming)
