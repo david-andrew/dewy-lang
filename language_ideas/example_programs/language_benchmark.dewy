@@ -1,32 +1,33 @@
 //run this program with a full dewy interpreter to determine if it is working
 
-#forward_declare_functions //something like this macro to go through the script and collect all function declarations before execution
+//the main macro runs this block after the end of this file has been executed (similar to normal main entry points)
+//this allows all functions and other values declared later in the file to be available at the start
+//TBD if this only runs when the file is the main file being called, or if it always runs, just last
+#main {
+    //list the functions to run
+    functions = 
+    [
+        @twelve_days_of_christmas
+        @FizzBuzz
+        @FizzBuzzBazzFoo
+        @sum_squares1
+        @sum_squares2
+        @sum_multiples1
+        @sum_multiples2
+        @prime_factors
+        @compute_primes(1000) //compute the first 1000 primes. this is a partial function evaluation
+        @compute_primes_alt(1000)
+        @compute_pi(1000) //compute the first 1000 digits of pi
+    ]
 
-//list the functions to run
-functions = 
-[
-    @twelve_days_of_christmas
-    @FizzBuzz
-    @FizzBuzzBazzFoo
-    @sum_squares1
-    @sum_squares2
-    @sum_multiples1
-    @sum_multiples2
-    @prime_factors
-    @compute_primes(1000) //compute the first 1000 primes
-    @compute_primes_alt(1000)
-    @compute_pi(1000) //compute the first 1000 digits of pi
-]
-
-//run all of the functions
-loop f in functions
-{
-    print('Function: {@f.name}')    //@ is necessary so that the function isn't called, because otherwise we would be calling .name on the result of f()
-    f()                             //run the function. technically the () isn't needed, but stylistically, it should be there
-    print('\n\n')                   // 3 newlines
+    //run all of the functions
+    loop f in functions
+    {
+        print('Function: {@f.name}')    //@ is necessary so that the function isn't called, because otherwise we would be calling .name on the result of f()
+        f()                             //run the function. technically the () isn't needed, but stylistically, it should be there
+        print('\n\n')                   // 3 newlines
+    }
 }
-
-
 
 
 //Function implementations
