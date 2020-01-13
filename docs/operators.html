@@ -158,7 +158,6 @@
 <li><code>/</code> divide</li>
 <li><code>%</code> modulus</li>
 <li><code>^</code> exponent</li>
-<li><code>\|</code> square or n root e.g. <code>\|25 = 5</code> and <code>3\|64 = 4</code></li>
 </ul>
 <p><strong>logical and bitwise operations</strong>
 (note that these are logical if both operands are boolean, otherwise they are bitwise and operate on as many bits as the size of the largest operand)</p>
@@ -215,7 +214,8 @@
 </ul>
 <p><strong>Assignment operators</strong></p>
 <ul>
-<li><code>=</code> assign the value of</li>
+<li><code>=</code> binds the righthand expression to the lefthand identifier as a statement (i.e. nothing is returned)</li>
+<li><code>:=</code> (walrus operator) same as normal assignment operator, but also returns the righthand side as an expression available for use</li>
 </ul>
 <h2><a class="header" href="#notes" id="notes">Notes</a></h2>
 <p>any of the logical/bitwise operators, as well as the boolean returning operators can be preceeded by <code>not</code> which will then cause the inverse of the operation to be returned. e.g. <code>not and</code> is equivalent to <code>nand</code>, <code>not &lt;?</code> is equivalent to <code>&gt;=?</code>, etc.</p>

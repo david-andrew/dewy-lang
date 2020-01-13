@@ -9,7 +9,6 @@ TODO->clean this up, and verify that it is still correct
 - `/` divide
 - `%` modulus
 - `^` exponent
-- `\|` square or n root e.g. `\|25 = 5` and `3\|64 = 4`
 
 **logical and bitwise operations**
 (note that these are logical if both operands are boolean, otherwise they are bitwise and operate on as many bits as the size of the largest operand)
@@ -57,7 +56,9 @@ TODO->clean this up, and verify that it is still correct
 - `@?` (probably) check if two references are point to the same thing
  
 **Assignment operators**
-- `=` assign the value of
+- `=` binds the righthand expression to the lefthand identifier as a statement (i.e. nothing is returned)
+- `:=` (walrus operator) same as normal assignment operator, but also returns the righthand side as an expression available for use
+
 
 ## Notes
 
