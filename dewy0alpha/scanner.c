@@ -335,7 +335,7 @@ obj* match_block_comment(char** src)
         }
         else //reached null terminator without closing all nested comments
         {
-            printf("ERROR: reached the end of input while scanning 'multiline comment");
+            printf("ERROR: reached the end of input while scanning 'multiline comment\n");
         }
     }
     return NULL;
