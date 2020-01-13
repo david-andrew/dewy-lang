@@ -38,6 +38,25 @@ The full list of integer types includes
  - **uint64**: 64-bit unsigned integer. range = []
  - **(maybe) uint128**: 128-bit unsigned integer. range = []
 
+### Fixed Point
+Fixed point will be stored as two integers, `digits` and `shift` where the value is `digits * 10^shift`
+
+TBD on the syntax for declaring a fixed point number. likely to be a function call e.g. 
+
+```dewy
+my_fixed_point = fixed_point(3141592, -6)
+```
+
+
+### Rational
+Rational numbers are stored as two integers, the `numerator` and the `denominator`, where the value is `numerator / denominator`
+
+TBD on the syntax for declaring a rational number. likely to be a function call e.g.
+
+```dewy
+my_rational = rational(22, 7) //rational approximation of pi
+```
+
 
 ### Real
 
@@ -62,7 +81,7 @@ my_bool = true
 complex numbers
 
 ```dewy
-my_complex0 = \|2 + \|2i  //TBD if this syntax will remain
+my_complex0 = 2^/2 + 2i^/2  //TBD if imaginary numbers can be declared as such
 my_complex1 = complex(2^/2, 2^/2)
 my_complex2 = complex(1, 45 degrees)
 ```

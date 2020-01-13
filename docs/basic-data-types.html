@@ -178,6 +178,16 @@ my_uint64 = 2001 as uint64
 <li><strong>uint64</strong>: 64-bit unsigned integer. range = []</li>
 <li><strong>(maybe) uint128</strong>: 128-bit unsigned integer. range = []</li>
 </ul>
+<h3><a class="header" href="#fixed-point" id="fixed-point">Fixed Point</a></h3>
+<p>Fixed point will be stored as two integers, <code>digits</code> and <code>shift</code> where the value is <code>digits * 10^shift</code></p>
+<p>TBD on the syntax for declaring a fixed point number. likely to be a function call e.g. </p>
+<pre><code class="language-dewy">my_fixed_point = fixed_point(3141592, -6)
+</code></pre>
+<h3><a class="header" href="#rational" id="rational">Rational</a></h3>
+<p>Rational numbers are stored as two integers, the <code>numerator</code> and the <code>denominator</code>, where the value is <code>numerator / denominator</code></p>
+<p>TBD on the syntax for declaring a rational number. likely to be a function call e.g.</p>
+<pre><code class="language-dewy">my_rational = rational(22, 7) //rational approximation of pi
+</code></pre>
 <h3><a class="header" href="#real" id="real">Real</a></h3>
 <p>Real numbers are positive and negative numbers that can have a decimal component to them. The default real will be stored as a <code>float64</code> i.e. a 64-bit floating point number, but other widths (and potentially arbitrary precision) are possible</p>
 <pre><code class="language-dewy">my_real = 3.1415
@@ -190,7 +200,7 @@ my_real64 = 233.511534 as real64
 </code></pre>
 <h3><a class="header" href="#complex" id="complex">Complex</a></h3>
 <p>complex numbers</p>
-<pre><code class="language-dewy">my_complex0 = \|2 + \|2i  //TBD if this syntax will remain
+<pre><code class="language-dewy">my_complex0 = 2^/2 + 2i^/2  //TBD if imaginary numbers can be declared as such
 my_complex1 = complex(2^/2, 2^/2)
 my_complex2 = complex(1, 45 degrees)
 </code></pre>
