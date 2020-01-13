@@ -377,7 +377,8 @@ print(3 in? my_set)  //prints 'true'
 print('pear' in? my_set)  //prints 'false'
 </code></pre>
 <h1><a class="header" href="#range-types" id="range-types">Range Types</a></h1>
-<p>Ranges allow you to describe a range of numbers</p>
+<h2><a class="header" href="#numeric-ranges" id="numeric-ranges">Numeric ranges</a></h2>
+<p>Numeric ranges allow you to describe a range of real numbers</p>
 <p>Inclusive and exclusive bounds on a range can be specified with <code>[]</code> i.e. open bounds, and <code>()</code> i.e. closed bounds. If no bounds are included, then the default is open bounds</p>
 <pre><code class="language-dewy">range1 = 1:5    // 1 2 3 4 5
 range2 = (1:5)  // 2 3 4
@@ -404,6 +405,21 @@ loop i in complex_range
 <p>The same range as above can be constructed using subtraction</p>
 <pre><code class="language-dewy">complex_range = [1:20) - (5:15]
 </code></pre>
+<h2><a class="header" href="#ordinal-ranges" id="ordinal-ranges">Ordinal Ranges</a></h2>
+<p>Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.</p>
+<p>For example, the following range captures all characters in the range from <code>'a'</code> to <code>'z'</code> inclusive</p>
+<pre><code>ord_range = 'a':'z'
+</code></pre>
+<p>All alpahbetical characters might be represented like so</p>
+<pre><code>alpha_range = 'a':'z' + 'A':'Z'
+ascii_range = 'A':'z' //this would include extra characters like '[\]^_{|}' etc.
+</code></pre>
+<p>But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this</p>
+<pre><code>word_range = 'apple':'zebra'
+'panda' in? word_range  //returns true
+</code></pre>
+<p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>. NOTE that this is distinct from every dictionary word in that range, as it will include many many gibberish words. </p>
+<p>TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. <code>'apple2'</code> should come before <code>'apple10'</code>), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used</p>
 <h1><a class="header" href="#function-types" id="function-types">Function Types</a></h1>
 <p>Functions are first class citizens in Dewy. In fact many concepts from functional programming are included in Dewy, as they frequently allow for cleaner and more concise code.</p>
 <h2><a class="header" href="#function-literals" id="function-literals">Function Literals</a></h2>

@@ -1,6 +1,8 @@
 # Range Types
 
-Ranges allow you to describe a range of numbers
+## Numeric ranges
+
+Numeric ranges allow you to describe a range of real numbers
 
 Inclusive and exclusive bounds on a range can be specified with `[]` i.e. open bounds, and `()` i.e. closed bounds. If no bounds are included, then the default is open bounds
 
@@ -42,3 +44,32 @@ The same range as above can be constructed using subtraction
 ```dewy
 complex_range = [1:20) - (5:15]
 ```
+
+
+## Ordinal Ranges
+
+Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.
+
+For example, the following range captures all characters in the range from `'a'` to `'z'` inclusive
+
+```
+ord_range = 'a':'z'
+```
+
+All alpahbetical characters might be represented like so
+
+```
+alpha_range = 'a':'z' + 'A':'Z'
+ascii_range = 'A':'z' //this would include extra characters like '[\]^_{|}' etc.
+```
+
+But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this
+
+```
+word_range = 'apple':'zebra'
+'panda' in? word_range  //returns true
+```
+
+which would create a range that consists of every possible 5 letter combination starting from the word `'apple'` and iterating through to the word `'zebra'`. NOTE that this is distinct from every dictionary word in that range, as it will include many many gibberish words. 
+
+TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. `'apple2'` should come before `'apple10'`), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used
