@@ -20,6 +20,7 @@ typedef enum scanner_states
 {
     scan_root,
     scan_EBNF_rule,
+    scan_peek,
 } scanner_state;
 
 //TODO->convert this to a stack for the scanner state
@@ -54,7 +55,7 @@ typedef struct tokens
 
 //forward declare functions for ebnf parsing
 obj* new_EBNF_token(token_type type, char* content);
-obj* EBNF_scan(char** src);
+obj* scan(char** src);
 void EBNF_str(obj* o);
 obj* match_hashtag(char** src);
 // obj* match_EBNF_identifier(char** src);
@@ -72,6 +73,8 @@ obj* match_whitespace(char** src);
 // obj* match_comment(char** src);
 obj* match_line_comment(char** src);
 obj* match_block_comment(char** src);
+
+bool peek_char(char** src, char c);
 
 
 // void remove_whitespace(vect* v);
@@ -122,7 +125,7 @@ obj* scan(char** src)
     {
         obj* t;
         
-        if (scan_state == scan_EBNF_rule)
+        if (scan_state == scan_EBNF_rule || scan_state == scan_peek)
         {
             // t = match_EBNF_identifier(src);             if (t != NULL) return t;
             t = match_hashtag(src);                     if (t != NULL) return t;
@@ -137,7 +140,7 @@ obj* scan(char** src)
             t = match_EBNF_bracket(src);                if (t != NULL) return t;
             t = match_EBNF_brace(src);                  if (t != NULL) return t;
         }
-        else if (scan_state == scan_root)
+        if (scan_state == scan_root || scan_state == scan_peek)
         {
             t = match_hashtag(src);                     if (t != NULL) return t;
     
@@ -154,6 +157,8 @@ obj* scan(char** src)
     return NULL;
 }
 
+// obj* peek()
+
 obj* match_hashtag(char** src)
 {
     if ((*src)[0] == '#' && is_alpha_char((*src)[1]))
@@ -167,7 +172,10 @@ obj* match_hashtag(char** src)
         // {
         //     scan_state = scan_EBNF_rule; //update scan state for start of ebnf rule 
         // }
-        scan_state = scan_EBNF_rule; //TODO->this should check the list of currently known hashtags. if not in the list, change mode
+        // if (peek_char(src, '=')) 
+        {
+            scan_state = scan_EBNF_rule; //TODO->this should check the list of currently known hashtags. if not in the list, change mode
+        }
         return t;
     }
     return NULL;
@@ -276,19 +284,6 @@ obj* match_whitespace(char** src)
     return is_whitespace_char(*src[0]) ? new_token(whitespace, substr((*src)++, 0, 0)) : NULL;
 }
 
-// obj* match_comment(char** src)
-// {
-//     obj* t;
-
-//     t = match_line_comment(src);
-//     if (t != NULL) return t;
-
-//     t = match_block_comment(src);
-//     if (t != NULL) return t;
-
-//     return NULL;
-// }
-
 obj* match_line_comment(char** src)
 {
     if ((*src)[0] == '/' && (*src)[1] == '/') //match for single line comments
@@ -341,23 +336,6 @@ obj* match_block_comment(char** src)
     return NULL;
 }
 
-// void remove_whitespace(vect* v)
-// {
-//     int i = 0;
-//     while (i < v->size)
-//     {
-//         token* t = (token*)vect_get(v, i)->data;
-//         if (t->type == whitespace) 
-//         {
-//             vect_delete(v, i);
-//         }
-//         else
-//         {
-//             i++;
-//         }
-//     }
-// }
-
 void remove_token_type(vect* v, token_type type)
 {
     int i = 0;
@@ -368,47 +346,29 @@ void remove_token_type(vect* v, token_type type)
     }
 }
 
-// char* remove_comments(char* source)
-// {    
-//     //For now we assume that any instance of // or /{ }/ is a comment, regardless of context.
-//     //in the future, we need to be able to distinguish // inside of strings and other contexts
-//     printf("Removing comments from source string...\n");
+//check if the next non-whitespace and non-comment character matches the specified character
+bool peek_char(char** src, char c)
+{
+    char** head = src;
+    obj* o;
+    scanner_state saved_scan_state = scan_state; //save a copy of the current scanner state
 
-//     size_t length = strlen(source);
-//     char* head = source;
-//     char* processed = malloc(length * sizeof(char));     //potentially entire space used
-//     size_t copied = 0;
-    
-//     do
-//     {
-//         //check if start of line comment, and if so skip to end of line
-//         if (source - head + 1 < length && *source == '/' && *(source + 1) ==  '/')
-//         {
-//             while(*++source != '\n' && *source != 0); //scan until the line break (or end of string)
-//             source--;   //don't eat the newline
-//             continue;
-//         }
+    scan_state = scan_peek;
 
-//         // //check if start of block comment, and if so, skip to end of block (keeping track of internal block comments)
-//         // if (source - head + 1 < length && *source == '/' && *(source + 1) == '{')
-//         // {
-//         //     int stack = 1;  //monitor internal opening and closing blocks.
-//         //     while (stack != 0)
-//         //     {
+    while ((*head)[0] != 0)
+    {
+        if ((o = scan(head)))
+        {
+            token* t = (token*)o->data;
+            if (t->type != whitespace && t->type != comment)
+            {
+                scan_state = saved_scan_state;
+                return t->content[0] == c;
+            }
+        }
+    }
+    return false;
+}
 
-//         //     }
-//         // }
-
-//         // putchar(*source);
-//         // printf("%d ", *source);
-//         processed[copied++] = *source; //copy the current character
-//     }
-//     while (*source++);
-
-//     // while(*processed++) putchar(*processed);
-//     processed[copied] = 0; //add final null-terminator to copied string
-//     free(head);            //release the no longer used version
-//     return processed;
-// }
 
 #endif

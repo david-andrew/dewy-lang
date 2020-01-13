@@ -82,11 +82,11 @@ int main(int argc, char* argv[])
     if (!*source) printf("successfully scanned source text\n");
 
     remove_token_type(tokens, whitespace);
-    vect_str(tokens);
+    // vect_str(tokens);
     remove_token_type(tokens, comment);
     // remove_whitespace(tokens);
     // remove_comments(tokens);
-    // vect_str(tokens);
+    vect_str(tokens);
     // vect_free(tokens);
 
     free(head);
