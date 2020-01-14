@@ -69,7 +69,7 @@ loop i in [0:4]/4 { print('{i} ') }
 loop i in [0:4]*0.25 { print('{i} ') }
 ```
 
-Both of which will print `'0 0.25 0.5 0.75 1'`
+Both of which will print `'0 0.25 0.5 0.75 1 '`
 
 ## Ordinal Ranges
 
