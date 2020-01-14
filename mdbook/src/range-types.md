@@ -45,6 +45,27 @@ The same range as above can be constructed using subtraction
 complex_range = [1:20) - (5:15]
 ```
 
+### Ranges in loops
+
+Ranges are commonly used in conjunction with loops
+
+```
+loop i in 0:5 { print('{i} ') }
+```
+
+The above will print `0 1 2 3 4 5 `. And to iterate over a list in reverse, you can simply reverse the range
+
+```
+loop i in range 5:0 { print('{i} ') }
+```
+
+This prints `5 4 3 2 1 0 `. To use non-integers for looping, probably use `linspace()`/`logspace()`. Considering a syntax as follows for ranges that are non-integer
+
+```
+loop i in [0:4]/4 { print('{i} ') }
+```
+
+Which prints `'0 0.25 0.5 0.75 1'`
 
 ## Ordinal Ranges
 
