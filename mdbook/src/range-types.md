@@ -62,10 +62,14 @@ loop i in range 5:0 { print('{i} ') }
 This prints `5 4 3 2 1 0 `. To use non-integers for looping, probably use `linspace()`/`logspace()`. Considering a syntax as follows for ranges that are non-integer
 
 ```
+//division version
 loop i in [0:4]/4 { print('{i} ') }
+
+//multiplication version
+loop i in [0:4]*0.25 { print('{i} ') }
 ```
 
-Which prints `'0 0.25 0.5 0.75 1'`
+Both of which will print `'0 0.25 0.5 0.75 1'`
 
 ## Ordinal Ranges
 

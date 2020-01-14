@@ -413,9 +413,13 @@ loop i in complex_range
 <pre><code>loop i in range 5:0 { print('{i} ') }
 </code></pre>
 <p>This prints <code>5 4 3 2 1 0 </code>. To use non-integers for looping, probably use <code>linspace()</code>/<code>logspace()</code>. Considering a syntax as follows for ranges that are non-integer</p>
-<pre><code>loop i in [0:4]/4 { print('{i} ') }
+<pre><code>//division version
+loop i in [0:4]/4 { print('{i} ') }
+
+//multiplication version
+loop i in [0:4]*0.25 { print('{i} ') }
 </code></pre>
-<p>Which prints <code>'0 0.25 0.5 0.75 1'</code></p>
+<p>Both of which will print <code>'0 0.25 0.5 0.75 1'</code></p>
 <h2><a class="header" href="#ordinal-ranges" id="ordinal-ranges">Ordinal Ranges</a></h2>
 <p>Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.</p>
 <p>For example, the following range captures all characters in the range from <code>'a'</code> to <code>'z'</code> inclusive</p>
