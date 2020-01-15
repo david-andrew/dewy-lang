@@ -20,6 +20,7 @@ typedef enum scanner_states
 {
     scan_root,
     scan_EBNF_rule,
+    scan_meta_func,
     scan_peek,
 } scanner_state;
 
@@ -43,6 +44,7 @@ typedef enum token_types
     EBNF_brace,
     whitespace,
     comment,
+    meta_parenthesis,
 } token_type;
 
 //individual tokens that appear in an EBNF rule
@@ -58,7 +60,6 @@ obj* new_EBNF_token(token_type type, char* content);
 obj* scan(char** src);
 void EBNF_str(obj* o);
 obj* match_hashtag(char** src);
-// obj* match_EBNF_identifier(char** src);
 obj* match_EBNF_single_quote_string(char** src);
 obj* match_EBNF_double_quote_string(char** src);
 obj* match_EBNF_comma(char** src);
@@ -69,10 +70,12 @@ obj* match_EBNF_equals_sign(char** src);
 obj* match_EBNF_parenthesis(char** src);
 obj* match_EBNF_bracket(char** src);
 obj* match_EBNF_brace(char** src);
+
 obj* match_whitespace(char** src);
-// obj* match_comment(char** src);
 obj* match_line_comment(char** src);
 obj* match_block_comment(char** src);
+
+obj* match_meta_parenthesis(char** src);
 
 bool peek_char(char** src, char c);
 
@@ -114,6 +117,7 @@ void EBNF_str(obj* o)
         case EBNF_brace: printf("EBNF_brace"); break;
         case whitespace: printf("whitespace"); break;
         case comment: printf("comment"); break;
+        case meta_parenthesis: printf("meta_parenthesis"); break;
     }
     printf(": `%s`", t->content);
 }
@@ -146,6 +150,13 @@ obj* scan(char** src)
     
             //TODO->match constructed rules here
         }
+        if (scan_state == scan_meta_func || scan_state == scan_peek)
+        {
+            //TBD what exactly is allowed inside of a meta function call. for now we are only allowing meta-identifiers
+            //potentially allow {} blocks, inside of which, normal dewy expressions can be called, just like string interpolation
+            t = match_meta_parenthesis(src);            if (t != NULL) return t;
+            t = match_hashtag(src);                     if (t != NULL) return t;
+        }
         
         //in all cases, match for whitespace or comments
         t = match_whitespace(src);                      if (t != NULL) return t;
@@ -168,13 +179,14 @@ obj* match_hashtag(char** src)
         while (is_identifier_char((*src)[i])) { i++; }
         obj* t = new_token(hashtag, substr(*src, 0, i-1));
         *src += i;
-        // if (strcmp(((token*)t->data)->content, "#ebnf") == 0) 
-        // {
-        //     scan_state = scan_EBNF_rule; //update scan state for start of ebnf rule 
-        // }
-        // if (peek_char(src, '=')) 
+
+        if (peek_char(src, '='))   //if the next char (allowing spaces and comments) is an equals, this is the definition of an ebnf rule
         {
-            scan_state = scan_EBNF_rule; //TODO->this should check the list of currently known hashtags. if not in the list, change mode
+            scan_state = scan_EBNF_rule;
+        }
+        else if ((*src)[0] == '(') //if the next char (no spaces or comments) is a parenthesis, this is a meta-function call
+        {
+            scan_state = scan_meta_func;
         }
         return t;
     }
@@ -336,6 +348,13 @@ obj* match_block_comment(char** src)
     return NULL;
 }
 
+//meta parenthesis follow a meta-identifier and indicate a meta-function call
+obj* match_meta_parenthesis(char** src)
+{
+    return *src[0] == '(' || *src[0] == ')' ? new_token(meta_parenthesis, substr((*src)++, 0, 0)) : NULL;
+}
+
+
 void remove_token_type(vect* v, token_type type)
 {
     int i = 0;
@@ -349,15 +368,16 @@ void remove_token_type(vect* v, token_type type)
 //check if the next non-whitespace and non-comment character matches the specified character
 bool peek_char(char** src, char c)
 {
-    char** head = src;
+    char* head = *src;       //pointer to the head of the src string
+    char** head_ptr = &head; //new pointer to the pointer to the head of the string. so that peek() doesn't modify src
     obj* o;
     scanner_state saved_scan_state = scan_state; //save a copy of the current scanner state
 
     scan_state = scan_peek;
 
-    while ((*head)[0] != 0)
+    while ((*head_ptr)[0] != 0)
     {
-        if ((o = scan(head)))
+        if ((o = scan(head_ptr)))
         {
             token* t = (token*)o->data;
             if (t->type != whitespace && t->type != comment)
