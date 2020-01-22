@@ -12,11 +12,14 @@
     Type indicates what type of object:
     0 - Integer
     1 - Unsigned Integer
-    2 - TBD string
-    3 - TBD vect
-    4 - TBD dict
-    5 - TBD EBNF_token
-    ...
+
+    TBD types:
+    # - vect
+    # - dict
+    # - set
+    # - tokens
+    # - string
+
 
 */
 typedef struct obj_struct
@@ -28,6 +31,9 @@ typedef struct obj_struct
 
 obj* new_int(int64_t i);
 obj* new_uint(uint64_t u);
+//obj* new_string();
+//obj* new_etc();
+obj* obj_copy(obj* o);
 void obj_print(obj* o);
 uint64_t obj_hash(obj* o);
 int64_t obj_compare(obj* left, obj* right);
@@ -60,6 +66,35 @@ obj* new_uint(uint64_t u)
     *u_ptr = u;
     U->data = (void*)u_ptr;
     return U;
+}
+
+//recursive deep copy of an object
+//TODO->look into maintining a dictionary of pointers so that the deep copy can handle cyclical objects
+obj* obj_copy(obj* o)
+{
+    obj* copy = malloc(sizeof(obj));
+    copy->type = o->type;
+    copy->size = o->size;
+    switch (o->type)
+    {
+        case 0: //copy int64
+        {
+            int64_t* copy_ptr = malloc(sizeof(int64_t));
+            *copy_ptr = *((int64_t*)o->data);
+            copy->data = (void*)copy_ptr;
+            break;
+        }
+        case 1: //copy uint64
+        {
+            uint64_t* copy_ptr = malloc(sizeof(uint64_t));
+            *copy_ptr = *((uint64_t*)o->data);
+            copy->data = (void*)copy_ptr;
+            break;
+        }
+        //TODO->other data types copy procedure
+    }
+
+    return copy;
 }
 
 
