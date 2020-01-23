@@ -31,8 +31,12 @@ typedef struct obj_struct
 
 obj* new_int(int64_t i);
 obj* new_uint(uint64_t u);
+//These should probably go in their specific implementation file
+//obj* new_vect();
+//obj* new_dict();
+//obj* new_set();
 //obj* new_string();
-//obj* new_etc();
+//obj* new_token(); //already implemented?
 obj* obj_copy(obj* o);
 void obj_print(obj* o);
 uint64_t obj_hash(obj* o);
@@ -91,7 +95,8 @@ obj* obj_copy(obj* o)
             copy->data = (void*)copy_ptr;
             break;
         }
-        //TODO->other data types copy procedure
+        //TODO->other data types copy procedure. 
+        //dict, set, and vect should all call obj_copy() on each of their elements, thus performing a deep copy
     }
 
     return copy;

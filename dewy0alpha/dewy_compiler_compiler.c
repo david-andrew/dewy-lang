@@ -54,8 +54,6 @@ int main(int argc, char* argv[])
     }
 
     char* source = read_file(argv[1]); //fopen(argv[1], "r");
-    // source = remove_comments(source);
-    // source = remove_whitespace(source);
     // printf("Contents of source file:\n%s\n",source);
     // printf("length of string: %lu\n", strlen(source));
     // printf("Substring test: %s\n", substr(source, START, END));

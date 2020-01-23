@@ -6,4 +6,25 @@
 #my_rule = 'apple';
 #second_rule = [#my_rule], /{comment block in expr}/ 'peach' | 'pineapple';
 
-#add_scan_rule(#second_rule)
+#lex(#second_rule) //I think #lex can handle multiple rules at once, e.g. #lex(#second_rule #decimal #units)
+
+//raw text that should be understood by the lexer
+applepeach
+applepineapple
+peach
+pineapple
+
+
+//base 10
+#decimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
+#decimal_prefix = '0D' | '0d'; //obviously optional
+#decimal = [#decimal_prefix], #decimal_digit, {#decimal_digit | '_'};
+
+#lex(#decimal)
+//TODO->list out examples of integers to scan
+
+
+
+//TODO->insert definition for scanning units
+//TODO->#lex(#units)
+//TODO->list examples of units to scan
