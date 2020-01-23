@@ -32,9 +32,9 @@ void set_str(set* S);
 
 set* new_set()
 {
-    set* s = malloc(sizeof(set));
-    s->d = new_dict(); //create the wrapped dictionary
-    return s;
+    set* S = malloc(sizeof(set));
+    S->d = new_dict(); //create the wrapped dictionary
+    return S;
 }
 
 size_t set_size(set* S) 
