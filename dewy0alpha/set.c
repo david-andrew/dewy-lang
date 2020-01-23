@@ -23,6 +23,7 @@ bool set_contains(set* S, obj* item);
 set* set_copy(set* S);
 set* set_union(set* A, set* B);
 set* set_intersect(set* A, set* B);
+bool set_equals(set* A, set* B);
 void set_reset(set* S);
 void set_free(set* S);
 void set_repr(set* S);
@@ -107,6 +108,26 @@ set* set_intersect(set* A, set* B)
         }
     }
     return S;
+}
+
+bool set_equals(set* A, set* B)
+{
+    //check if sizes are different
+    if (set_size(A) != set_size(B)) return false;
+
+    //check if each element in A is in B. Since sizes are the same, and sets don't have duplicates, this will indicate equality
+    for (int i = 0; i < set_capacity(A); i++)
+    {
+        dict_entry e = A->d->table[i];
+        if (e.hash != 0 || e.key != NULL)
+        {
+            if (!set_contains(B, e.key))
+            {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 void set_reset(set* s)
