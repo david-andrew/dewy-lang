@@ -5,6 +5,7 @@
 
 #include "obj.c"
 #include "vect.c"
+#include "set.c"
 
 enum EBNF_state
 {
