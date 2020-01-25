@@ -26,6 +26,10 @@ my_set = $['item1' 'item2' 'item3' 'etc']
 my_set = ['item1' \ 'item2' \ 'item3' \]
 ```
 
+```dewy
+my_set = ['item1'-- 'item2'-- 'item3'--]
+```
+
 
 ## Places whitespace isn't allowed
 
