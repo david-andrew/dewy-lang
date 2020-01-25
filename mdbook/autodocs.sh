@@ -5,7 +5,7 @@
 #push docs updates to git
 function git_push() {
     git add ../docs ../mdbook
-    git commit -m "automatic update to docs on $(date)"
+    git commit #-m "automatic update to docs on $(date)"
     git push
 }
 
