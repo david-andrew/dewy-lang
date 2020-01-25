@@ -7,6 +7,17 @@
 #include "vect.c"
 #include "set.c"
 
+/* 
+TODO stuff
+
+Possible EBNF extensions
+- literal hex characters instead of strings, e.g. #special_chars = 0x00 | 0x01 | 0x02 | ... | 0x10; //etc.
+- flag for making a repeated section require at least 1 occurance. probably + added to end of a repeat
+- flags for making strings case insensitive
+- look into other conveniences from regex
+
+*/
+
 enum EBNF_state
 {
     first_quote,
