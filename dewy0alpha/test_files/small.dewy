@@ -28,3 +28,15 @@ pineapple
 //TODO->insert definition for scanning units
 //TODO->#lex(#units)
 //TODO->list examples of units to scan
+
+//TODO-> determine flag syntax for things like ignore case. probably has to be on a per string basis?, or we need to adjust the AST after we build it, based on flags applied to children nodes
+#reserved_word = #ignore_case ('loop' | 'if' | 'else' | 'return' | 'in' | 'as' | 'transmute' | 'continue' | 'break' | 'exit' | 'quit' | 'yield' | 'constant' | 'symbol')
+
+//define identifiers. I've decided to be a bit more lax about identifiers, even allowing them to contain @ and #
+#lowercase_letter = 'a'| 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' 
+    | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z';
+#uppercase_letter = 'A'| 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' 
+    | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z';
+#symbols = '~' | '!' | '@' | '#' | '$' | '&' | '_' | '?'; 
+
+#identifier = (#uppercase_letter | #lowercase_letter), {#uppercase_letter | #lowercase_letter | #decimal_digit | #symbols };

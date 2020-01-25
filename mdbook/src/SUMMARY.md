@@ -24,4 +24,5 @@
     - [Functional Programming](functional-programming.md)
     - [Meta Programming](meta-programming.md)
     - [Flow Control](flow-control.md)
+    - [One Loop to Rule them All](loops.md)
 
