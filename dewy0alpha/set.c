@@ -130,28 +130,28 @@ bool set_equals(set* A, set* B)
     return true;
 }
 
-void set_reset(set* s)
+void set_reset(set* S)
 {
-    dict_reset(s->d);
+    dict_reset(S->d);
 }
 
-void set_free(set* s)
+void set_free(set* S)
 {
-    dict_free(s->d);
+    dict_free(S->d);
 }
 
-void set_repr(set* s)
+void set_repr(set* S)
 {
-    dict_repr(s->d);
+    dict_repr(S->d);
 }
 
-void set_str(set* s)
+void set_str(set* S)
 {
     printf("[");
     int items = 0; //keep track of if more than 0 have been printed, for commas
-    for (int i = 0; i < set_capacity(s); i++)
+    for (int i = 0; i < set_capacity(S); i++)
     {
-        dict_entry e = s->d->table[i];
+        dict_entry e = S->d->table[i];
         if (e.hash != 0 || e.key != NULL)
         {
             if (items++ != 0) { printf(", "); }

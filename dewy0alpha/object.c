@@ -46,9 +46,10 @@ bool obj_equals(obj* left, obj* right);
 //forward declaration for defined in other files.
 //implementation in compile_tools.c
 // typedef struct meta_tokens meta_token;
-typedef enum token_types token_type;
-obj* new_token(token_type type, char* content);
-void meta_str(obj* o);
+// typedef enum token_types token_type;
+// obj* new_token(token_type type, char* content);
+typedef struct tokens token;
+void token_str(token* t);
 
 obj* new_int(int64_t i)
 {
@@ -116,7 +117,7 @@ void obj_print(obj* o)
         case 1: printf("%lu", *((uint64_t*)o->data)); break;
         //other cases
         //...
-        case 5: meta_str(o); break;
+        case 5: token_str((token*)o->data); break;
         default: printf("WARNING: object of type \"%d\" hasn't been implemented\n", o->type); break;
     }
 }
@@ -159,9 +160,11 @@ uint64_t obj_hash(obj* o)
 
 int64_t obj_compare(obj* left, obj* right)
 {
-        
-    if (left == NULL && right == NULL) { return true; }
-    if (left == NULL || right == NULL) { return false;}
+    //TODO->check these.
+    //handle case where either or both are null
+    if (left == NULL && right == NULL) { return 0; } //both null means both equal
+    else if (left == NULL) { return -1; } //left only null means left comes first
+    else if (right == NULL) { return 1; } //right only null means right comes first
     
     switch (left->type) //undefined behavior if left and right aren't the same type
     {
@@ -181,7 +184,7 @@ bool obj_equals(obj* left, obj* right)
 
 void obj_free(obj* o)
 {
-    //TBD any object specific freeing that needs to happen
+    //TBD any object specific freeing that needs to happen. e.g. vects/dicts/sets need to call their specific version of free
     free(o->data);
     free(o);
 }

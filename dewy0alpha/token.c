@@ -32,7 +32,7 @@ typedef struct tokens
 } token;
 
 obj* new_token(token_type type, char* content);
-void meta_str(obj* o);
+void token_str(token* t);
 
 
 obj* new_token(token_type type, char* content)
@@ -47,9 +47,11 @@ obj* new_token(token_type type, char* content)
     return T;
 }
 
-void meta_str(obj* o)
+//print out a string for each token type
+//perhaps we could require that this passes a token* instead of an obj*
+void token_str(token* t)//(obj* o)
 {
-    token* t = (token*)o->data;
+    // token* t = (token*)o->data;
     switch (t->type)
     {
         case hashtag: printf("hashtag"); break; //hashtag not allowed in this state
