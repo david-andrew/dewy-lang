@@ -12,6 +12,7 @@
 
 #include "utilities.c"
 #include "scanner.c"
+#include "parser.c"
 #include "obj.c"
 #include "dict.c"
 #include "vect.c"
@@ -39,13 +40,6 @@
 
 int main(int argc, char* argv[])
 {
-    
-    //test to see if we can read the command line args
-    // for (int i = 0; i < argc; i++)
-    // {
-    //     printf("Argument %d is %s\n", i, argv[i]);
-    // }
-
     //print error if no file specified for parsing
     if (argc < 2) 
     {
@@ -53,39 +47,40 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    char* source = read_file(argv[1]); //fopen(argv[1], "r");
-    // printf("Contents of source file:\n%s\n",source);
-    // printf("length of string: %lu\n", strlen(source));
-    // printf("Substring test: %s\n", substr(source, START, END));
+    //load the source file into a string, and keep a copy of the head of the file
+    char* source = read_file(argv[1]);
+    char* head = source;
 
-
-    char* head = source; //keep track of the head of the file
-
+    //set up structures for the sequence of scanning/parsing
     vect* tokens = new_vect();
+    //probably todo, make a context variable that holds symbol table + rules being lexed + other stuff
+    dict* meta_symbols = new_dict();
 
     while (*source) //while we haven't reached the null terminator
     {
-        // printf("source on pass: %s\n", source);
+        //scan the source for the next token
         obj* token = scan(&source);
-        if (token != NULL)
-        {
-            vect_append(tokens, token);
-        }
-        else
-        {
-            break;
-        }
+
+        //if no tokens were able to be read, exit the loop
+        if (token == NULL) break;
+        
+        //save the token that was scanned
+        vect_append(tokens, token);
+
+        //if parsable sequence exists in current tokens vector
+        update_meta_symbols(meta_symbols, tokens);
+
     }
 
     if (!*source) printf("successfully scanned source text\n");
 
     remove_token_type(tokens, whitespace);
-    // vect_str(tokens);
     remove_token_type(tokens, comment);
     // remove_whitespace(tokens);
     // remove_comments(tokens);
     vect_str(tokens);
     // vect_free(tokens);
+    // dict_free(symbols);
 
     free(head);
 }
