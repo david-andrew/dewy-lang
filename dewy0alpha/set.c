@@ -142,12 +142,23 @@ void set_free(set* s)
 
 void set_repr(set* s)
 {
-    //TODO
+    dict_repr(s->d);
 }
 
 void set_str(set* s)
 {
-    //TODO
+    printf("[");
+    int items = 0; //keep track of if more than 0 have been printed, for commas
+    for (int i = 0; i < set_capacity(s); i++)
+    {
+        dict_entry e = s->d->table[i];
+        if (e.hash != 0 || e.key != NULL)
+        {
+            if (items++ != 0) { printf(", "); }
+            obj_print(e.key);
+        }
+    }
+    printf("]\n");
 }
 
 

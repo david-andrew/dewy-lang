@@ -16,17 +16,20 @@ Possible EBNF extensions
 - flags for making strings case insensitive
 - look into other conveniences from regex
 
+change all instances of "EBNF" to "meta"
+- for "match_meta_parenthesis" -> "match_meta_function_parenthesis" or something like that
+
 */
 
-enum EBNF_state
-{
-    first_quote,
-    second_quote,
-    group,
-    option,
-    repeat,
-    special,
-};
+// enum EBNF_state
+// {
+//     first_quote,
+//     second_quote,
+//     group,
+//     option,
+//     repeat,
+//     special,
+// };
 
 typedef enum scanner_states 
 {
