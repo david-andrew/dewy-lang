@@ -25,5 +25,6 @@
     - [Meta Programming](meta-programming.md)
     - [Flow Control](flow-control.md)
     - [One Loop to Rule them All](loops.md)
+    - [Blocks, Statements, and Expressions](blocks-statements-expressions.md)
 - [WIP/Misc. Ideas](wipmisc.md)
 
