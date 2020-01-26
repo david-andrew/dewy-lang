@@ -65,7 +65,7 @@ int main(int argc, char* argv[])
         if (token == NULL) break;
         
         //save the token that was scanned
-        vect_append(tokens, token);
+        vect_enqueue(tokens, token);
 
         //if parsable sequence exists in current tokens vector
         update_meta_symbols(meta_symbols, tokens);
@@ -76,9 +76,7 @@ int main(int argc, char* argv[])
 
     remove_token_type(tokens, whitespace);
     remove_token_type(tokens, comment);
-    // remove_whitespace(tokens);
-    // remove_comments(tokens);
-    vect_str(tokens);
+    // vect_str(tokens);
     // vect_free(tokens);
     // dict_free(symbols);
 

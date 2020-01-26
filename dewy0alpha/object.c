@@ -184,9 +184,30 @@ bool obj_equals(obj* left, obj* right)
 
 void obj_free(obj* o)
 {
-    //TBD any object specific freeing that needs to happen. e.g. vects/dicts/sets need to call their specific version of free
-    free(o->data);
-    free(o);
+    if (o != NULL)
+    {
+        //TODO->any object specific freeing that needs to happen. e.g. vects/dicts/sets need to call their specific version of free
+        switch (o->type)
+        {
+            case 0: { break; } //nothing special for unsigned integers
+            case 1: { break; } //nothing special for signed integers
+            //other cases
+            //...
+            case 5:
+            { 
+                //TODO->token free 
+                break; 
+            }
+            default: 
+            { 
+                printf("WARNING: object of type \"%d\" hasn't been implemented\n", o->type); 
+                break;
+            }
+        }
+
+        free(o->data);
+        free(o);
+    }
 }
 
 #endif

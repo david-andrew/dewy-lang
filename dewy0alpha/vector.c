@@ -173,16 +173,25 @@ obj* vect_peek(vect* v)
     return v->size > 0 ? vect_get(v, v->size - 1) : NULL;
 }
 
+// bool vect_enqueue(vect* v, obj* item)
+// {
+//     return vect_prepend(v, item);
+// }
+
+// obj* vect_dequeue(vect* v)
+// {
+//     return v->size > 0 ? vect_remove(v, v->size - 1) : NULL;
+// }
+
 bool vect_enqueue(vect* v, obj* item)
 {
-    return vect_prepend(v, item);
+    return vect_append(v, item);
 }
 
 obj* vect_dequeue(vect* v)
 {
-    return v->size > 0 ? vect_remove(v, v->size - 1) : NULL;
+    return v->size > 0 ? vect_remove(v, 0) : NULL;
 }
-
 
 
 
