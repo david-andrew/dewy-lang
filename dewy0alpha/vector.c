@@ -1,27 +1,16 @@
-#ifndef VECT_C
-#define VECT_C
+#ifndef VECTOR_C
+#define VECTOR_C
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 
 #include "utilities.c"
-#include "obj.c"
+#include "object.c"
 
 #define DEFAULT_VECT_CAPACITY 8
 
-//TODO-> look into reimplementing the vector as an array queue
-//new elements can be inserted at the start or end with O(1)
-//keep track of the start of the vector, and size.
-//appending simply places after the last element
-//prepending places befor the first element
-//use modulus for out of bounds. so prepending to -1 would put the element at the location size - 1
-//this way insertions would only cost when applied to the middle of the vector
-//and then any insertion will only be forced to copy at most half of the elements
-//as in any situation, you can choose to move the size with fewer elements to make room
-//the only drawback is implementing is more complicated, and you have to be very careful about keeping track of the start/end of the vector
-
-//ArrayList Implemented as am Deque
+//ArrayList Implemented as an ArrayDeque
 typedef struct vect_struct 
 {
     size_t head;

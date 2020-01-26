@@ -1,5 +1,5 @@
-#ifndef OBJ_C
-#define OBJ_C
+#ifndef OBJECT_C
+#define OBJECT_C
 
 #include <stdbool.h>
 #include "utilities.c"

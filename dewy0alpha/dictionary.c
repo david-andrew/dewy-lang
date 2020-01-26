@@ -1,12 +1,12 @@
-#ifndef DICT_C
-#define DICT_C
+#ifndef DICTIONARY_C
+#define DICTIONARY_C
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 
 #include "utilities.c"
-#include "obj.c"
+#include "object.c"
 
 #define DEFAULT_DICT_CAPACITY 8
 #define MAX_LOAD 2 / 3

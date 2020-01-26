@@ -1,12 +1,10 @@
 #include "stdio.h"
 #include "string.h"
 #include "assert.h"
-#include "vect.c"
-#include "dict.c"
+#include "vector.c"
+#include "dictionary.c"
 #include "set.c"
-
-#include "scanner.c" //so that obj.c has access to EBNF_string().
-//TODO->make it so this isn't necessary? consider making a third file with common stuff?
+#include "token.c"
 
 //TODO->set up alias to run this with valgrind?
 

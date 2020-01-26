@@ -6,8 +6,8 @@
 #include <stdbool.h>
 
 #include "utilities.c"
-#include "obj.c"
-#include "dict.c"
+#include "object.c"
+#include "dictionary.c"
 
 typedef struct set_struct
 {

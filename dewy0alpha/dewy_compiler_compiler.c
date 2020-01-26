@@ -13,9 +13,9 @@
 #include "utilities.c"
 #include "scanner.c"
 #include "parser.c"
-#include "obj.c"
-#include "dict.c"
-#include "vect.c"
+#include "object.c"
+#include "dictionary.c"
+#include "vector.c"
 
 
 #define START 0     //start of an array

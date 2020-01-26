@@ -3,9 +3,10 @@
 
 #include <stdio.h>
 
-#include "obj.c"
-#include "vect.c"
+#include "object.c"
+#include "vector.c"
 #include "set.c"
+#include "token.c"
 
 /* 
 TODO stuff
@@ -15,6 +16,8 @@ Possible EBNF/meta extensions
 - flag for making a repeated section require at least 1 occurance. probably + added to end of a repeat
 - flags for making strings case insensitive
 - look into other conveniences from regex
+
+Break out Token struct into a separate file along with meta_str(),
 
 */
 
@@ -30,38 +33,9 @@ typedef enum scanner_states
 //TODO->convert this to a stack for the scanner state
 scanner_state scan_state = scan_root;
 
-//possible token types
-typedef enum token_types
-{
-    hashtag,
-    meta_identifier,
-    meta_single_quote_string,
-    meta_double_quote_string,
-    meta_comma,
-    meta_semicolon,
-    meta_vertical_bar,
-    meta_minus,
-    meta_equals_sign,
-    meta_parenthesis,
-    meta_bracket,
-    meta_brace,
-    whitespace,
-    comment,
-    meta_meta_parenthesis,
-} token_type;
-
-//individual tokens that appear in a meta rule
-typedef struct tokens
-{
-    token_type type;
-    char* content;
-} token;
-
 
 //forward declare functions for meta parsing
-obj* new_meta_token(token_type type, char* content);
 obj* scan(char** src);
-void meta_str(obj* o);
 obj* match_hashtag(char** src);
 obj* match_meta_single_quote_string(char** src);
 obj* match_meta_double_quote_string(char** src);
@@ -73,57 +47,15 @@ obj* match_meta_equals_sign(char** src);
 obj* match_meta_parenthesis(char** src);
 obj* match_meta_bracket(char** src);
 obj* match_meta_brace(char** src);
-
 obj* match_whitespace(char** src);
 obj* match_line_comment(char** src);
 obj* match_block_comment(char** src);
-
 obj* match_meta_meta_parenthesis(char** src);
-
 bool peek_char(char** src, char c);
-
-
 // void remove_whitespace(vect* v);
 // void remove_comments(vect* v);
 void remove_token_type(vect* v, token_type type);
 
-
-// obj* new_meta_token(meta_token* t)
-obj* new_token(token_type type, char* content)
-{
-    obj* T = malloc(sizeof(obj));
-    T->type = 5;
-    T->size = sizeof(token);
-    token* t_ptr = malloc(sizeof(token));
-    token t = {type, content};
-    *t_ptr = t;
-    T->data = (void*)t_ptr;
-    return T;
-}
-
-void meta_str(obj* o)
-{
-    token* t = (token*)o->data;
-    switch (t->type)
-    {
-        case hashtag: printf("hashtag"); break; //hashtag not allowed in this state
-        case meta_identifier: printf("meta_identifier"); break;
-        case meta_single_quote_string: printf("meta_single-string"); break;
-        case meta_double_quote_string: printf("meta_double-string"); break;
-        case meta_comma: printf("meta_comma"); break;
-        case meta_semicolon: printf("meta_semicolon"); break;
-        case meta_vertical_bar: printf("meta_vertical-bar"); break;
-        case meta_minus: printf("meta_minus"); break;
-        case meta_equals_sign: printf("meta_equals"); break;
-        case meta_parenthesis: printf("meta_parenthesis"); break;
-        case meta_bracket: printf("meta_bracket"); break;
-        case meta_brace: printf("meta_brace"); break;
-        case whitespace: printf("whitespace"); break;
-        case comment: printf("comment"); break;
-        case meta_meta_parenthesis: printf("meta_meta_parenthesis"); break;
-    }
-    printf(": `%s`", t->content);
-}
 
 //scan for a single token
 obj* scan(char** src)
@@ -195,20 +127,6 @@ obj* match_hashtag(char** src)
     }
     return NULL;
 }
-
-// obj* match_meta_identifier(char** src)
-// {
-//     if (is_alpha_char((*src)[0]))
-//     {
-//         //scan to end of identifier
-//         int i = 1;
-//         while (is_identifier_char((*src)[i])) { i++; }
-//         obj* t = new_token(meta_identifier, substr(*src, 0, i-1));
-//         *src += i;
-//         return t;        
-//     }
-//     return NULL;
-// }
 
 obj* match_meta_single_quote_string(char** src) 
 {
@@ -351,13 +269,14 @@ obj* match_block_comment(char** src)
     return NULL;
 }
 
-//meta parenthesis follow a meta-identifier and indicate a meta-function call
+//meta-meta parenthesis follow a meta-identifier and indicate a meta-function call
+//could this potentially be combined with the regular meta parenthesis, that matches inside of meta rules?
 obj* match_meta_meta_parenthesis(char** src)
 {
     return *src[0] == '(' || *src[0] == ')' ? new_token(meta_meta_parenthesis, substr((*src)++, 0, 0)) : NULL;
 }
 
-
+//remove all instances of a specific token type from a vector of tokens
 void remove_token_type(vect* v, token_type type)
 {
     int i = 0;

@@ -3,9 +3,9 @@
 
 #include <stdio.h>
 
-#include "obj.c"
-#include "vect.c"
-#include "dict.c"
+#include "object.c"
+#include "vector.c"
+#include "dictionary.c"
 #include "set.c"
 
 #include "scanner.c"
