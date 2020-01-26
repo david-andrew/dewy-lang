@@ -26,6 +26,14 @@ int main(int argc, char* argv[])
         if (strcmp(argv[i], "-v") == 0 ) test_vects = true;
     }
 
+    //if none indicated, test everything
+    if (!(test_vects || test_dicts || test_sets))
+    {
+        test_vects = true;
+        test_dicts = true;
+        test_sets = true;
+    }
+
     printf("Beginning test suit...\n\n");
     if (test_vects)
     {
