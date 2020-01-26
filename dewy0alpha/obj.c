@@ -45,10 +45,10 @@ bool obj_equals(obj* left, obj* right);
 
 //forward declaration for defined in other files.
 //implementation in compile_tools.c
-// typedef struct EBNF_tokens EBNF_token;
+// typedef struct meta_tokens meta_token;
 typedef enum token_types token_type;
 obj* new_token(token_type type, char* content);
-void EBNF_str(obj* o);
+void meta_str(obj* o);
 
 obj* new_int(int64_t i)
 {
@@ -116,7 +116,7 @@ void obj_print(obj* o)
         case 1: printf("%lu", *((uint64_t*)o->data)); break;
         //other cases
         //...
-        case 5: EBNF_str(o); break;
+        case 5: meta_str(o); break;
         default: printf("WARNING: object of type \"%d\" hasn't been implemented\n", o->type); break;
     }
 }
@@ -143,7 +143,7 @@ void obj_print(obj* o)
 
 
 
-// uint64_t EBNF_token_hash(obj* o);//forward declare
+// uint64_t meta_token_hash(obj* o);//forward declare
 uint64_t obj_hash(obj* o) 
 {
     switch (o->type)
@@ -152,7 +152,7 @@ uint64_t obj_hash(obj* o)
         case 1: return hash_uint(*((uint64_t*)o->data));
         //other cases
         //...
-        // case 5: return EBNF_token_hash(o);
+        // case 5: return meta_token_hash(o);
         default: printf("WARNING: object of type \"%d\" hasn't been implemented\n", o->type); return 0;
     }
 }
