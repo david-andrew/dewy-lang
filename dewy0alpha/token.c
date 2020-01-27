@@ -8,17 +8,17 @@
 typedef enum token_types
 {
     hashtag,
-    meta_identifier,
-    meta_single_quote_string,
-    meta_double_quote_string,
+    // meta_identifier,
+    meta_single_quote_string, //TODO->merge these into a single meta_quote_string
+    meta_double_quote_string, //TODO->merge these into a single meta_quote_string
     meta_comma,
     meta_semicolon,
     meta_vertical_bar,
     meta_minus,
     meta_equals_sign,
-    meta_parenthesis,
-    meta_bracket,
-    meta_brace,
+    meta_parenthesis,   //TODO->break out into opening and closing
+    meta_bracket,       //TODO->same...
+    meta_brace,         //TODO->same...
     whitespace,
     comment,
     meta_meta_parenthesis,
@@ -55,7 +55,7 @@ void token_str(token* t)//(obj* o)
     switch (t->type)
     {
         case hashtag: printf("hashtag"); break; //hashtag not allowed in this state
-        case meta_identifier: printf("meta_identifier"); break;
+        // case meta_identifier: printf("meta_identifier"); break;
         case meta_single_quote_string: printf("meta_single-string"); break;
         case meta_double_quote_string: printf("meta_double-string"); break;
         case meta_comma: printf("meta_comma"); break;

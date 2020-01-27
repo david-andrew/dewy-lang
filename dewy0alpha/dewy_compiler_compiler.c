@@ -55,6 +55,7 @@ int main(int argc, char* argv[])
     vect* tokens = new_vect();
     //probably todo, make a context variable that holds symbol table + rules being lexed + other stuff
     dict* meta_symbols = new_dict();
+    dict* meta_rules = new_dict();
 
     while (*source) //while we haven't reached the null terminator
     {
@@ -69,13 +70,20 @@ int main(int argc, char* argv[])
 
         //if parsable sequence exists in current tokens vector
         update_meta_symbols(meta_symbols, tokens);
+        create_lex_rule(meta_rules, tokens);
 
     }
 
     if (!*source) printf("successfully scanned source text\n");
 
+
     remove_token_type(tokens, whitespace);
     remove_token_type(tokens, comment);
+    if (vect_size(tokens) != 0)
+    {
+        printf("ERROR: failed to parse all tokens scanned\n");
+        vect_str(tokens);
+    }
     // vect_str(tokens);
     // vect_free(tokens);
     // dict_free(symbols);
