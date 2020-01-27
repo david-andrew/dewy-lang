@@ -33,11 +33,11 @@ In fact we can simplify the above function's declaration quite a bit via syntact
 pythag_length = (a, b) => (a^2 + b^2)^/2
 ```
 
-(TBD:currently debating if a single argument can omit the parenthesis) e.g.
+TODO->decide if a single argument can omit the parenthesis e.g.
 
 ```dewy
 abs = (x) => if x <? 0 -x else x
 abs = x => if x <? 0 -x else x
 ```
 
-With this, we're probably gonna start running into syntax collisions with declarations inside of dictionaries...
+TODO->Originally I had the syntax be `@(args) => {}`, but I'm thinking that we can actually probably omit the `@` because as an operator, it doesn't really make sense here. TODO is to make a final decision on this
