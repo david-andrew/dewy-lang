@@ -5,9 +5,18 @@
 #include "utilities.c"
 
 
-//TODO->name the method each WARNING occurs in
 
-// typedef enum obj_types { Integer, UInteger } Type; //TODO->replace with this type
+//TODO->replace type with this type
+typedef enum obj_types 
+{ 
+    Integer_t, 
+    UInteger_t,
+    String_t,
+    Token_t,
+    Vector_t,
+    Dictionary_t,
+    Set_t 
+} obj_type;
 
 /*
     Struct for Objects. 
@@ -26,9 +35,10 @@
 
 
 */
+
 typedef struct obj_struct
 {
-    int type;       //integer specifying what type of object.
+    obj_type type;       //integer specifying what type of object.
     size_t size;    //size of the data allocated for this object
     void* data;     //data allocated for this object
 } obj;
@@ -79,7 +89,7 @@ size_t set_size(set* S);
 obj* new_int(int64_t i)
 {
     obj* I = malloc(sizeof(obj));
-    I->type = 0;
+    I->type = Integer_t;
     I->size = sizeof(int64_t);
     int64_t* i_ptr = malloc(sizeof(int64_t)); 
     *i_ptr = i;
@@ -90,7 +100,7 @@ obj* new_int(int64_t i)
 obj* new_uint(uint64_t u)
 {
     obj* U = malloc(sizeof(obj));
-    U->type = 1;
+    U->type = UInteger_t;
     U->size = sizeof(uint64_t);
     uint64_t* u_ptr = malloc(sizeof(uint64_t));
     *u_ptr = u;
@@ -108,7 +118,7 @@ obj* new_uint(uint64_t u)
 obj* new_string(char* s)
 {
     obj* S = malloc(sizeof(obj));
-    S->type = 2;
+    S->type = String_t;
     S->size = strlen(s);
     S->data = (void*)s;
     return S;
@@ -131,13 +141,13 @@ size_t obj_size(obj* o)
     if (o == NULL) { return 0; }
     switch (o->type)
     {
-        case 0: return o->size;
-        case 1: return o->size;
-        case 2: return o->size;
-        case 3: return o->size; //TBD if token should be sized this way
-        case 4: return vect_size((vect*)o->data);
-        case 5: return dict_size((dict*)o->data);
-        case 6: return set_size((set*)o->data);
+        case Integer_t: return o->size;
+        case UInteger_t: return o->size;
+        case String_t: return o->size;
+        case Token_t: return o->size; //TBD if token should be sized this way
+        case Vector_t: return vect_size((vect*)o->data);
+        case Dictionary_t: return dict_size((dict*)o->data);
+        case Set_t: return set_size((set*)o->data);
         default: 
         {
             printf("WARNING obj_size() is not implemented for object of type \"%d\"\n", o->type);
@@ -156,29 +166,33 @@ obj* obj_copy(obj* o)
     copy->size = o->size;
     switch (o->type)
     {
-        case 0: //copy int64
+        case Integer_t: //copy int64
         {
             int64_t* copy_ptr = malloc(sizeof(int64_t));
             *copy_ptr = *((int64_t*)o->data);
             copy->data = (void*)copy_ptr;
             break;
         }
-        case 1: //copy uint64
+        case UInteger_t: //copy uint64
         {
             uint64_t* copy_ptr = malloc(sizeof(uint64_t));
             *copy_ptr = *((uint64_t*)o->data);
             copy->data = (void*)copy_ptr;
             break;
         }
-        case 2: //copy string
+        case String_t: //copy string
         {
             char** copy_ptr = malloc(o->size + sizeof(char));
             strcpy(*((char**)o->data), *copy_ptr);
             copy->data = (void*)copy_ptr;
             break;
         }
-        //TODO->other data types copy procedure. 
-        //dict, set, and vect should all call obj_copy() on each of their elements, thus performing a deep copy
+        //TODO->other data types copy procedure.
+        //dict, set, and vect should all call their respective copy, which calls obj_copy() on each of their elements, thus performing a deep copy
+        // case Token_t:{}
+        // case Vector_t: {}
+        // case Dictionary_t: {}
+        // case Set_t: {}
     
         default: printf("WARNING, obj_copy() is not implemented for object of type \"%d\"\n", o->type); break;
     }
@@ -196,13 +210,13 @@ void obj_print(obj* o)
     }
     switch (o->type)
     {
-        case 0: printf("%ld", *((int64_t*)o->data)); break;
-        case 1: printf("%lu", *((uint64_t*)o->data)); break;
-        case 2: printf("%s", *((char**)o->data));
-        case 3: token_str((token*)o->data); break;
-        case 4: vect_str((vect*)o->data);
-        // case 5: dict_str((dict*)o->data);
-        // case 6: set_str((set*)o->data);
+        case Integer_t: printf("%ld", *((int64_t*)o->data)); break;
+        case UInteger_t: printf("%lu", *((uint64_t*)o->data)); break;
+        case String_t: printf("%s", *((char**)o->data));
+        case Token_t: token_str((token*)o->data); break;
+        case Vector_t: vect_str((vect*)o->data);
+        // case Dictionary_t: dict_str((dict*)o->data);
+        // case Set_t: set_str((set*)o->data);
         default: printf("WARNING: obj_print() is not implemented for object of type \"%d\"\n", o->type); break;
     }
 }
@@ -216,13 +230,13 @@ uint64_t obj_hash(obj* o)
     if (o == NULL) { return 0; }
     switch (o->type)
     {
-        case 0: return hash_int(*((int64_t*)o->data));
-        case 1: return hash_uint(*((uint64_t*)o->data));
-        case 2: return fnv1a(*((char**)o->data));
-        // case 3: return meta_token_hash(o);
-        case 4: return vect_hash((vect*)o->data);
-        // case 5: return dict_hash((dict*)o->data);
-        // case 6: return set_hash((set*)o->data);
+        case Integer_t: return hash_int(*((int64_t*)o->data));
+        case UInteger_t: return hash_uint(*((uint64_t*)o->data));
+        case String_t: return fnv1a(*((char**)o->data));
+        // case Token_t: return meta_token_hash(o);
+        case Vector_t: return vect_hash((vect*)o->data);
+        // case Dictionary_t: return dict_hash((dict*)o->data);
+        // case Set_t: return set_hash((set*)o->data);
         default: printf("WARNING: obj_hash() is not implemented for object of type \"%d\"\n", o->type); return 0;
     }
 }
@@ -243,13 +257,13 @@ int64_t obj_compare(obj* left, obj* right)
 
     switch (left->type)
     {
-        case 0: return *((int64_t*)left->data) - *((int64_t*)right->data);
-        case 1: return *((uint64_t*)left->data) - *((uint64_t*)right->data);
-        case 2: return strcmp(*((char**)left->data), *((char**)right->data));
-        // case 3: return token_compare((token*)left->data, (token*)right->data);
-        case 4: return vect_compare((vect*)left->data, (vect*)right->data);
-        // case 5: return dict_compare((dict*)left->data, (dict*)right->data);
-        // case 6: return set_compare((set*)left->data, (set*)right->data);
+        case Integer_t: return *((int64_t*)left->data) - *((int64_t*)right->data);
+        case UInteger_t: return *((uint64_t*)left->data) - *((uint64_t*)right->data);
+        case String_t: return strcmp(*((char**)left->data), *((char**)right->data));
+        // case Token_t: return token_compare((token*)left->data, (token*)right->data);
+        case Vector_t: return vect_compare((vect*)left->data, (vect*)right->data);
+        // case Dictionary_t: return dict_compare((dict*)left->data, (dict*)right->data);
+        // case Set_t: return set_compare((set*)left->data, (set*)right->data);
         default: printf("WARNING: obj_compare() is not implemented for object of type \"%d\"\n", left->type); return 0;
     }
 }
@@ -267,13 +281,13 @@ void obj_free(obj* o)
         //handle freeing of o->data
         switch (o->type)
         {
-            case 0: free(o->data); break;  //free uint pointer
-            case 1: free(o->data); break;  //free int pointer
-            case 2: free(o->data); break;  //free the string
-            case 3: token_free((token*)o->data); break; 
-            case 4: vect_free((vect*)o->data);
-            // case 5: dict_free((dict*)o->data);
-            // case 6: set_free((set*)o->data);
+            case Integer_t: free(o->data); break;  //free uint pointer
+            case UInteger_t: free(o->data); break;  //free int pointer
+            case String_t: free(o->data); break;  //free the string
+            case Token_t: token_free((token*)o->data); break; 
+            case Vector_t: vect_free((vect*)o->data);
+            // case Dictionary_t: dict_free((dict*)o->data);
+            // case Set_t: set_free((set*)o->data);
             default: printf("WARNING: obj_free() is not implemented for object of type \"%d\"\n", o->type); break;
         }
 

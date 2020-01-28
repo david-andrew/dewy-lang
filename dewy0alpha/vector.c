@@ -47,6 +47,7 @@ obj* vect_remove(vect* v, size_t index);
 void vect_delete(vect* v, size_t index);
 void vect_reset(vect* v);
 void vect_free(vect* v);
+// vect* vect_copy(vect* v);
 int64_t vect_compare(vect* left, vect* right);
 uint64_t vect_hash(vect* v);
 void vect_repr(vect* v);
@@ -64,7 +65,7 @@ vect* new_vect()
 obj* new_vect_obj()
 {
     obj* V = malloc(sizeof(obj));
-    V->type = 4;
+    V->type = Vector_t;
     V->size = 0; //size needs to be determined on a per call basis
     vect* v = new_vect();
     V->data = (void*)v;

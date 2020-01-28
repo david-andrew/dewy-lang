@@ -17,7 +17,6 @@ typedef struct set_struct
 set* new_set();
 obj* new_set_obj();
 size_t set_size(set* S);
-size_t set_obj_size(void* S);
 size_t set_capacity(set* S);
 bool set_add(set* S, obj* item);
 // bool set_remove(set* s, obj* item);
@@ -42,7 +41,7 @@ set* new_set()
 obj* new_set_obj()
 {
     obj* S = malloc(sizeof(obj));
-    S->type = 6;
+    S->type = Set_t;
     S->size = 0; //size needs to be determined on a per call basis
     set* s = new_set();
     S->data = (void*)s;
