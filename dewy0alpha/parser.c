@@ -135,7 +135,7 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens)
     //store the rule_identifier and the rule_body into the symbol table
     //TODO->need to set up obj* for string, or ability to hash tokens
     //TODO->for now, should probably check if the rule is alredy present, as it will be overwritten. in the future, you should be able to update rules, by inserting the original into anywhere it's referenced in the new one
-    printf("%s -> \n", rule_identifier->content);
+    printf("%s -> ", rule_identifier->content);
     vect_str(rule_body);
     printf("\n");
     //TODO->store the rule_identifier and the rule_body into the symbol table

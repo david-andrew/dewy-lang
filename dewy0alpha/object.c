@@ -4,6 +4,9 @@
 #include <stdbool.h>
 #include "utilities.c"
 
+
+//TODO->name the method each WARNING occurs in
+
 // typedef enum obj_types { Integer, UInteger } Type; //TODO->replace with this type
 
 /*
@@ -12,13 +15,13 @@
     Type indicates what type of object:
     0 - Integer
     1 - Unsigned Integer
+    2 - String
+    3 - Token //TODO->convert to 3
 
     TBD types:
     # - vect
     # - dict
     # - set
-    # - tokens
-    # - string
 
 
 */
@@ -31,11 +34,12 @@ typedef struct obj_struct
 
 obj* new_int(int64_t i);
 obj* new_uint(uint64_t u);
+obj* new_string(char* s);
+obj* new_ustr(char* s);
 //These should probably go in their specific implementation file
 //obj* new_vect();
 //obj* new_dict();
 //obj* new_set();
-//obj* new_string();
 //obj* new_token(); //already implemented?
 obj* obj_copy(obj* o);
 void obj_print(obj* o);
@@ -73,6 +77,33 @@ obj* new_uint(uint64_t u)
     return U;
 }
 
+
+/*
+    Create a new string object, from an allocated string
+
+    @param char* s: a HEAP-ALLOCATED pointer to a string. free() will be called on this string at the end of its life
+    @return obj* S: an object containing our string
+*/
+obj* new_string(char* s)
+{
+    obj* S = malloc(sizeof(obj));
+    S->type = 2;
+    S->size = strlen(s);
+    S->data = (void*)s;
+    // char** s_ptr = malloc(sizeof(char*));
+    // *s_ptr = s;
+    return S;
+}
+
+/*
+    Create a new string object from a non-allocated string
+*/
+obj* new_ustr(char* s)
+{
+    char* s_copy = clone(s);
+
+}
+
 //recursive deep copy of an object
 //TODO->look into maintining a dictionary of pointers so that the deep copy can handle cyclical objects
 obj* obj_copy(obj* o)
@@ -96,8 +127,17 @@ obj* obj_copy(obj* o)
             copy->data = (void*)copy_ptr;
             break;
         }
+        case 2: //copy string
+        {
+            char** copy_ptr = malloc(o->size + sizeof(char));
+            strcpy(*((char**)o->data), *copy_ptr);
+            copy->data = (void*)copy_ptr;
+            break;
+        }
         //TODO->other data types copy procedure. 
         //dict, set, and vect should all call obj_copy() on each of their elements, thus performing a deep copy
+    
+        default: printf("WARNING, obj_copy() is not implemented for object of type \"%d\"\n", o->type); break;
     }
 
     return copy;
@@ -115,10 +155,11 @@ void obj_print(obj* o)
     {
         case 0: printf("%ld", *((int64_t*)o->data)); break;
         case 1: printf("%lu", *((uint64_t*)o->data)); break;
+        case 2: printf("%s", *((char**)o->data));
         //other cases
         //...
-        case 5: token_str((token*)o->data); break;
-        default: printf("WARNING: object of type \"%d\" hasn't been implemented\n", o->type); break;
+        case 3: token_str((token*)o->data); break;
+        default: printf("WARNING: obj_print() is not implemented for object of type \"%d\"\n", o->type); break;
     }
 }
 
@@ -151,10 +192,11 @@ uint64_t obj_hash(obj* o)
     {
         case 0: return hash_int(*((int64_t*)o->data));
         case 1: return hash_uint(*((uint64_t*)o->data));
+        case 2: return fnv1a(*((char**)o->data));
         //other cases
         //...
-        // case 5: return meta_token_hash(o);
-        default: printf("WARNING: object of type \"%d\" hasn't been implemented\n", o->type); return 0;
+        // case 3: return meta_token_hash(o);
+        default: printf("WARNING: obj_hash() is not implemented for object of type \"%d\"\n", o->type); break;
     }
 }
 
@@ -170,9 +212,10 @@ int64_t obj_compare(obj* left, obj* right)
     {
         case 0: return *((int64_t*)left->data) - *((int64_t*)right->data);
         case 1: return *((uint64_t*)left->data) - *((uint64_t*)right->data);
+        case 2: return strcmp(*((char**)left->data), *((char**)right->data));
         //other cases
         //...
-        default: printf("WARNING: object of type \"%d\" hasn't been implemented\n", left->type); return 0;
+        default: printf("WARNING: obj_compare() is not implemented for object of type \"%d\"\n", left->type); break;
     }
 }
 
@@ -189,20 +232,33 @@ void obj_free(obj* o)
         //TODO->any object specific freeing that needs to happen. e.g. vects/dicts/sets need to call their specific version of free
         switch (o->type)
         {
-            case 0: { break; } //nothing special for unsigned integers
-            case 1: { break; } //nothing special for signed integers
+            case 0: 
+            { 
+                free(o->data);  //free uint pointer
+
+                break; 
+            }
+            case 1: 
+            { 
+                free(o->data);  //free int pointer
+                break; 
+            }
+            case 2:
+            {
+                //free the string, then the pointer to the string
+                char** s = (char**)o->data;
+                free(*s);
+                free(s);
+                break;
+            }
             //other cases
             //...
-            case 5:
+            case 3:
             { 
                 //TODO->token free 
                 break; 
             }
-            default: 
-            { 
-                printf("WARNING: object of type \"%d\" hasn't been implemented\n", o->type); 
-                break;
-            }
+        default: printf("WARNING: obj_free() is not implemented for object of type \"%d\"\n", o->type); break;
         }
 
         free(o->data);

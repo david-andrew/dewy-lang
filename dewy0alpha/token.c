@@ -38,7 +38,7 @@ void token_str(token* t);
 obj* new_token(token_type type, char* content)
 {
     obj* T = malloc(sizeof(obj));
-    T->type = 5;
+    T->type = 3;
     T->size = sizeof(token);
     token* t_ptr = malloc(sizeof(token));
     token t = {type, content};

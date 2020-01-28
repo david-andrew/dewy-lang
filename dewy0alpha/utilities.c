@@ -79,10 +79,16 @@ char* substr(char* string, int start, int stop)
 */
 char* clone(char* string)
 {
-    char* copy = malloc(strlen(string) * sizeof(char));
-    char* ptr = copy;
-    while ((*ptr++ = *string++));
+    size_t size = (strlen(string) + 1) * sizeof(char);
+    char* copy = malloc(size);
+    memcpy((void*)copy, (void*)string, size);
     return copy;
+
+    //slower version
+    // char* copy = malloc((strlen(string) + 1) * sizeof(char));
+    // char* ptr = copy;
+    // while ((*ptr++ = *string++));
+    // return copy;
 }
 
 /**
