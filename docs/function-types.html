@@ -169,11 +169,58 @@ my_function()  //calls the function
 <p>In fact we can simplify the above function's declaration quite a bit via syntactic sugar</p>
 <pre><code class="language-dewy">pythag_length = (a, b) =&gt; (a^2 + b^2)^/2
 </code></pre>
-<p>TODO-&gt;decide if a single argument can omit the parenthesis e.g.</p>
-<pre><code class="language-dewy">abs = (x) =&gt; if x &lt;? 0 -x else x
-abs = x =&gt; if x &lt;? 0 -x else x
+<p>In fact, if we have exactly one argument, we can omit the parenthesis around the argument list</p>
+<pre><code class="language-dewy">abs = x =&gt; if x &lt;? 0 -x else x
+</code></pre>
+<p>Note that zero arguments require an empty pair of parenthesis, in order to be parsed correctly</p>
+<pre><code class="language-dewy">foo = () =&gt; printl('bar')
 </code></pre>
 <p>TODO-&gt;Originally I had the syntax be <code>@(args) =&gt; {}</code>, but I'm thinking that we can actually probably omit the <code>@</code> because as an operator, it doesn't really make sense here. TODO is to make a final decision on this</p>
+<h2><a class="header" href="#calling-functions" id="calling-functions">Calling functions</a></h2>
+<p>TODO</p>
+<ul>
+<li>calling a function with name, parenthesis, and args</li>
+<li>functions with no arguments can omit the parenthesis</li>
+</ul>
+<h2><a class="header" href="#optional-name-only-and-positional-only-arguments" id="optional-name-only-and-positional-only-arguments">Optional, Name-only and Positional-only Arguments</a></h2>
+<p>TODO</p>
+<ul>
+<li>also explain about overwriting previously specified arguments (e.g. from partial evaluation, or in the same call)</li>
+</ul>
+<h2><a class="header" href="#scope-capture" id="scope-capture">Scope Capture</a></h2>
+<p>TODO</p>
+<ul>
+<li>what variables are available to a function's body</li>
+</ul>
+<h2><a class="header" href="#partial-function-evaluation" id="partial-function-evaluation">Partial Function Evaluation</a></h2>
+<p>First note that if you want to pass a function around as an object, you need to get a handle to the function using the <code>@</code> (&quot;handle&quot;) operator.</p>
+<pre><code class="language-dewy">my_func = () =&gt; printl('foo')
+
+reference_to_my_func = @my_func
+</code></pre>
+<p>If you don't include the <code>@</code> operator, then the evaluation of the right-hand side would be stored into the left side</p>
+<pre><code class="language-dewy">reference_to_my_func = my_func  //this doesn't work
+</code></pre>
+<p>what happens is <code>my_func</code> prints out &quot;foo&quot; to the command line, and then since it returns no value, <code>reference_to_my_func</code> is <code>undefined</code>. If <code>my_func</code> required arguments, we'd actually get a compilation error at this point, as we essentially are trying to call my_func without an arguments.</p>
+<pre><code class="language-dewy">another_func = (a, b, c, x) =&gt; a^2*x + b*x + c
+
+good_reference = @another_func
+bad_reference = another_func  //this causes a compilation error
+</code></pre>
+<p>Now, using the <code>@</code> operator, we can not only create a new reference to an existing function, but we can also <strong>apply arguments to the reference</strong>. What this means is we can fix the value of given arguments, allowing us to create a new function.</p>
+<pre><code class="language-dewy">sum = (a, b) =&gt; a + b   //simple addition function
+add5 = @sum(5)          //partially evaluate sum with a=5
+</code></pre>
+<p>Here we've created a new function <code>add5</code> which takes a single argument, and return the result of that argument plus 5.</p>
+<pre><code class="language-dewy">add5(24)        //returns 29
+add5(-7)        //returns -2
+
+thirtyseven = @add5(32) //new function that takes 0 arguments
+thirtyseven()   //returns 37
+</code></pre>
+<p>TODO-&gt;explain about overwriting arguments</p>
+<pre><code class="language-dewy">new_sum = (x, y) =&gt; thirtyseven(a=x, b=y)
+</code></pre>
 
                     </main>
 
