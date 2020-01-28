@@ -21,7 +21,9 @@ typedef struct vect_struct
 
 
 vect* new_vect();
+obj* new_vect_obj();
 size_t vect_size(vect* v);
+size_t vect_obj_size(void* v);
 size_t vect_capacity(vect* v);
 bool vect_resize(vect* v, size_t new_size);
 bool vect_insert(vect* v, obj* item, size_t index);
@@ -45,6 +47,8 @@ obj* vect_remove(vect* v, size_t index);
 void vect_delete(vect* v, size_t index);
 void vect_reset(vect* v);
 void vect_free(vect* v);
+int64_t vect_compare(vect* left, vect* right);
+uint64_t vect_hash(vect* v);
 void vect_repr(vect* v);
 void vect_str(vect* v);
 
@@ -55,6 +59,16 @@ vect* new_vect()
     vect v = {0, 0, DEFAULT_VECT_CAPACITY, calloc(DEFAULT_VECT_CAPACITY, sizeof(obj*))};
     *v_ptr = v;
     return v_ptr;
+}
+
+obj* new_vect_obj()
+{
+    obj* V = malloc(sizeof(obj));
+    V->type = 4;
+    V->size = 0; //size needs to be determined on a per call basis
+    vect* v = new_vect();
+    V->data = (void*)v;
+    return V;
 }
 
 size_t vect_size(vect* v)
@@ -297,6 +311,50 @@ void vect_free(vect* v)
     }
     free(v->list);
     free(v);
+}
+
+
+int64_t vect_compare(vect* left, vect* right)
+{
+    //handle if either or both are null
+    if (left == NULL && right == NULL) { return 0; }
+    else if (left == NULL) { return -1; }
+    else if (right == NULL) { return 1; }
+
+    if (vect_size(left) != vect_size(right))
+    {
+        return vect_size(left) - vect_size(right); //smaller vectors sort earlier than larger ones
+    }
+
+    //check each element in sequence for equality. if not equal, return as compareto value
+    for (int i = 0; i < vect_size(left); i++) 
+    {
+        int64_t result = obj_compare(vect_get(left, i), vect_get(right, i));
+        if (result) { return result; }
+    }
+
+    //all objects were equal, so return 0, indicating left equals right
+    return 0;
+}
+
+/*
+    Reimplementation of fnv1a for vectors of elements
+*/
+uint64_t vect_hash(vect* v)
+{
+    if (v == NULL) { return 0; }
+    uint64_t hash = 14695981039346656037lu;
+    for (int i = 0; i < v->size; i++)
+    {
+        uint64_t h = obj_hash(vect_get(v, i));  //hash the i'th object
+        uint8_t* bytes = (uint8_t*)&h;          //convert the hash to an array of bytes
+        for (int j = 0; j < 8; j++)             //roll each of the bytes into the big hash
+        {
+            hash ^= *(bytes + j);               //j'th byte from hash
+            hash *= 1099511628211; 
+        }
+    }
+    return hash;
 }
 
 

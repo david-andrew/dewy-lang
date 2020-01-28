@@ -28,7 +28,9 @@ typedef struct dict_struct
 
 
 dict* new_dict();
+obj* new_dict_obj();
 size_t dict_size(dict* d);
+size_t dict_obj_size(void* d);
 size_t dict_capacity(dict* d);
 bool dict_set(dict* d, obj* key, obj* value);
 bool dict_resize(dict* d, size_t new_size);
@@ -47,6 +49,16 @@ dict* new_dict()
     dict d = {0, DEFAULT_DICT_CAPACITY, calloc(DEFAULT_DICT_CAPACITY, sizeof(dict_entry))};
     *d_ptr = d;
     return d_ptr;
+}
+
+obj* new_dict_obj()
+{
+    obj* D = malloc(sizeof(obj));
+    D->type = 5;
+    D->size = 0; //size needs to be determined on a per call basis
+    dict* d = new_dict();
+    D->data = (void*)d;
+    return D;
 }
 
 size_t dict_size(dict* d)

@@ -33,6 +33,7 @@ typedef struct tokens
 
 obj* new_token(token_type type, char* content);
 void token_str(token* t);
+void token_free(token* t);
 
 
 obj* new_token(token_type type, char* content)
@@ -71,6 +72,12 @@ void token_str(token* t)//(obj* o)
         case meta_meta_parenthesis: printf("meta_meta_parenthesis"); break;
     }
     printf(": `%s`", t->content);
+}
+
+void token_free(token* t)
+{
+    free(t->content);
+    free(t);
 }
 
 

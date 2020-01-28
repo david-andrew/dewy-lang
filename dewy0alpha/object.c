@@ -16,12 +16,13 @@
     0 - Integer
     1 - Unsigned Integer
     2 - String
-    3 - Token //TODO->convert to 3
+    3 - Token
+    4 - Vector
+    5 - Dictionary
+    6 - Set
 
     TBD types:
-    # - vect
-    # - dict
-    # - set
+    # - AST?
 
 
 */
@@ -41,19 +42,39 @@ obj* new_ustr(char* s);
 //obj* new_dict();
 //obj* new_set();
 //obj* new_token();
+size_t obj_size(obj* o);
 obj* obj_copy(obj* o);
 void obj_print(obj* o);
 uint64_t obj_hash(obj* o);
 int64_t obj_compare(obj* left, obj* right);
 bool obj_equals(obj* left, obj* right);
 
-//forward declaration for defined in other files.
-//implementation in compile_tools.c
-// typedef struct meta_tokens meta_token;
-// typedef enum token_types token_type;
-// obj* new_token(token_type type, char* content);
+////// FORWARD DECLARATIONS ////////
+
+//forward declare token type + methods used here
 typedef struct tokens token;
 void token_str(token* t);
+void token_free(token* t);
+
+//forward declare vect type + methods used here
+typedef struct vect_struct vect;
+size_t vect_size(vect* v);
+uint64_t vect_hash(vect* v); 
+int64_t vect_compare(vect* left, vect* right); 
+void vect_free(vect* v);
+void vect_str(vect* v);
+// vect_copy
+
+//forward declare dict type + methods used here
+typedef struct dict_struct dict;
+size_t dict_size(dict* d);
+
+//forward declare set type + methods used here
+typedef struct set_struct set;
+size_t set_size(set* S);
+
+//dict_hash, dict_compare, dict_free
+//set_hash, set_compare, set_free
 
 obj* new_int(int64_t i)
 {
@@ -101,10 +122,35 @@ obj* new_ustr(char* s)
     return new_string(clone(s));
 }
 
+
+/*
+    get the current size of the object's data
+*/
+size_t obj_size(obj* o)
+{
+    if (o == NULL) { return 0; }
+    switch (o->type)
+    {
+        case 0: return o->size;
+        case 1: return o->size;
+        case 2: return o->size;
+        case 3: return o->size; //TBD if token should be sized this way
+        case 4: return vect_size((vect*)o->data);
+        case 5: return dict_size((dict*)o->data);
+        case 6: return set_size((set*)o->data);
+        default: 
+        {
+            printf("WARNING obj_size() is not implemented for object of type \"%d\"\n", o->type);
+            return 0;
+        }
+    }
+}
+
 //recursive deep copy of an object
 //TODO->look into maintining a dictionary of pointers so that the deep copy can handle cyclical objects
 obj* obj_copy(obj* o)
 {
+    if (o == NULL) { return NULL; }
     obj* copy = malloc(sizeof(obj));
     copy->type = o->type;
     copy->size = o->size;
@@ -153,47 +199,31 @@ void obj_print(obj* o)
         case 0: printf("%ld", *((int64_t*)o->data)); break;
         case 1: printf("%lu", *((uint64_t*)o->data)); break;
         case 2: printf("%s", *((char**)o->data));
-        //other cases
-        //...
         case 3: token_str((token*)o->data); break;
+        case 4: vect_str((vect*)o->data);
+        // case 5: dict_str((dict*)o->data);
+        // case 6: set_str((set*)o->data);
         default: printf("WARNING: obj_print() is not implemented for object of type \"%d\"\n", o->type); break;
     }
 }
 
-
-//DO NOT USE - WILL CAUSE MEMORY LEAKS IF NOT CAREFUL
-// char* tostr(Object* obj)
-// {
-//     switch (obj->type)
-//     {
-//         case 0:
-//         {
-//             char* buffer = malloc(sizeof(char)*21); // maximum int is 20 characters long: 18,446,744,073,709,551,615
-//             sprintf(buffer, "%ld", *((int64_t*)obj->data));
-//             return buffer;
-//         } break;
-
-//         default:
-//         { 
-//             return "Unknown Type";
-//         } break;
-//     }
-// }
 
 
 
 // uint64_t meta_token_hash(obj* o);//forward declare
 uint64_t obj_hash(obj* o) 
 {
+    if (o == NULL) { return 0; }
     switch (o->type)
     {
         case 0: return hash_int(*((int64_t*)o->data));
         case 1: return hash_uint(*((uint64_t*)o->data));
         case 2: return fnv1a(*((char**)o->data));
-        //other cases
-        //...
         // case 3: return meta_token_hash(o);
-        default: printf("WARNING: obj_hash() is not implemented for object of type \"%d\"\n", o->type); break;
+        case 4: return vect_hash((vect*)o->data);
+        // case 5: return dict_hash((dict*)o->data);
+        // case 6: return set_hash((set*)o->data);
+        default: printf("WARNING: obj_hash() is not implemented for object of type \"%d\"\n", o->type); return 0;
     }
 }
 
@@ -205,14 +235,22 @@ int64_t obj_compare(obj* left, obj* right)
     else if (left == NULL) { return -1; } //left only null means left comes first
     else if (right == NULL) { return 1; } //right only null means right comes first
     
-    switch (left->type) //undefined behavior if left and right aren't the same type
+    //if the objects are of different type, order by type value
+    if (left->type != right->type)
+    {
+        return left->type - right->type;
+    }
+
+    switch (left->type)
     {
         case 0: return *((int64_t*)left->data) - *((int64_t*)right->data);
         case 1: return *((uint64_t*)left->data) - *((uint64_t*)right->data);
         case 2: return strcmp(*((char**)left->data), *((char**)right->data));
-        //other cases
-        //...
-        default: printf("WARNING: obj_compare() is not implemented for object of type \"%d\"\n", left->type); break;
+        // case 3: return token_compare((token*)left->data, (token*)right->data);
+        case 4: return vect_compare((vect*)left->data, (vect*)right->data);
+        // case 5: return dict_compare((dict*)left->data, (dict*)right->data);
+        // case 6: return set_compare((set*)left->data, (set*)right->data);
+        default: printf("WARNING: obj_compare() is not implemented for object of type \"%d\"\n", left->type); return 0;
     }
 }
 
@@ -221,40 +259,24 @@ bool obj_equals(obj* left, obj* right)
     return obj_compare(left, right) == 0;
 }
 
-
 void obj_free(obj* o)
 {
     if (o != NULL)
     {
         //TODO->any object specific freeing that needs to happen. e.g. vects/dicts/sets need to call their specific version of free
+        //handle freeing of o->data
         switch (o->type)
         {
-            case 0: 
-            { 
-                free(o->data);  //free uint pointer
-                break; 
-            }
-            case 1: 
-            { 
-                free(o->data);  //free int pointer
-                break; 
-            }
-            case 2:
-            {
-                free(o->data);  //free the string
-                break;
-            }
-            //other cases
-            //...
-            case 3:
-            { 
-                //TODO->token free 
-                break; 
-            }
-        default: printf("WARNING: obj_free() is not implemented for object of type \"%d\"\n", o->type); break;
+            case 0: free(o->data); break;  //free uint pointer
+            case 1: free(o->data); break;  //free int pointer
+            case 2: free(o->data); break;  //free the string
+            case 3: token_free((token*)o->data); break; 
+            case 4: vect_free((vect*)o->data);
+            // case 5: dict_free((dict*)o->data);
+            // case 6: set_free((set*)o->data);
+            default: printf("WARNING: obj_free() is not implemented for object of type \"%d\"\n", o->type); break;
         }
 
-        free(o->data);
         free(o);
     }
 }
