@@ -40,7 +40,7 @@ obj* new_ustr(char* s);
 //obj* new_vect();
 //obj* new_dict();
 //obj* new_set();
-//obj* new_token(); //already implemented?
+//obj* new_token();
 obj* obj_copy(obj* o);
 void obj_print(obj* o);
 uint64_t obj_hash(obj* o);
@@ -90,8 +90,6 @@ obj* new_string(char* s)
     S->type = 2;
     S->size = strlen(s);
     S->data = (void*)s;
-    // char** s_ptr = malloc(sizeof(char*));
-    // *s_ptr = s;
     return S;
 }
 
@@ -100,8 +98,7 @@ obj* new_string(char* s)
 */
 obj* new_ustr(char* s)
 {
-    char* s_copy = clone(s);
-
+    return new_string(clone(s));
 }
 
 //recursive deep copy of an object
@@ -235,7 +232,6 @@ void obj_free(obj* o)
             case 0: 
             { 
                 free(o->data);  //free uint pointer
-
                 break; 
             }
             case 1: 
@@ -245,10 +241,7 @@ void obj_free(obj* o)
             }
             case 2:
             {
-                //free the string, then the pointer to the string
-                char** s = (char**)o->data;
-                free(*s);
-                free(s);
+                free(o->data);  //free the string
                 break;
             }
             //other cases
