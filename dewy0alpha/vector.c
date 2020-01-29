@@ -7,6 +7,7 @@
 
 #include "utilities.c"
 #include "object.c"
+#include "dictionary.c"
 
 #define DEFAULT_VECT_CAPACITY 8
 
@@ -46,8 +47,9 @@ obj* vect_get(vect* v, size_t index);
 obj* vect_remove(vect* v, size_t index);
 void vect_delete(vect* v, size_t index);
 void vect_reset(vect* v);
+vect* vect_copy(vect* src, vect* dest);
+vect* vect_obj_copy(vect* v, dict* refs);
 void vect_free(vect* v);
-// vect* vect_copy(vect* v);
 int64_t vect_compare(vect* left, vect* right);
 uint64_t vect_hash(vect* v);
 void vect_repr(vect* v);
@@ -303,6 +305,34 @@ void vect_reset(vect* v)
     v->capacity = DEFAULT_VECT_CAPACITY;
     v->list = calloc(DEFAULT_VECT_CAPACITY, sizeof(obj));
 }
+
+
+vect* vect_copy(vect* src, vect* dest)
+{
+    for (int i = 0; i < vect_size(src); i++)
+    {
+        vect_append(dest, obj_copy(vect_get(src, i)));
+    }
+    return dest;
+}
+
+vect* vect_obj_copy(vect* v, dict* refs)
+{
+    vect* copy = new_vect();
+    for (int i = 0; i < vect_size(v); i++)
+    {
+        obj* item = vect_get(v, i);
+
+        //if a reference doesn't yet exist for the copy, create a copy, otherwise use the existing reference
+        if (!dict_contains(refs, item))
+        {
+            dict_set(refs, item, obj_copy_inner(item, refs));
+        }
+        vect_append(copy, dict_get(refs, item));
+    }
+    return copy;
+}
+
 
 void vect_free(vect* v)
 {

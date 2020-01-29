@@ -6,7 +6,6 @@
 
 
 
-//TODO->replace type with this type
 typedef enum obj_types 
 { 
     Integer_t, 
@@ -15,33 +14,51 @@ typedef enum obj_types
     Token_t,
     Vector_t,
     Dictionary_t,
-    Set_t 
+    Set_t,
+    //AST_t
 } obj_type;
 
-/*
-    Struct for Objects. 
-
-    Type indicates what type of object:
-    0 - Integer
-    1 - Unsigned Integer
-    2 - String
-    3 - Token
-    4 - Vector
-    5 - Dictionary
-    6 - Set
-
-    TBD types:
-    # - AST?
-
-
-*/
 
 typedef struct obj_struct
 {
-    obj_type type;       //integer specifying what type of object.
+    obj_type type;  //integer specifying what type of object.
     size_t size;    //size of the data allocated for this object
     void* data;     //data allocated for this object
 } obj;
+
+
+////// FORWARD DECLARATIONS ////////
+
+//forward declare dict type + methods used here
+typedef struct dict_struct dict;
+size_t dict_size(dict* d);
+dict* new_dict();
+obj* dict_get(dict* d, obj* key);
+bool dict_set(dict* d, obj* key, obj* value);
+void dict_free_table_only(dict* d);
+
+
+//forward declare vect type + methods used here
+typedef struct vect_struct vect;
+size_t vect_size(vect* v);
+uint64_t vect_hash(vect* v); 
+int64_t vect_compare(vect* left, vect* right); 
+void vect_free(vect* v);
+void vect_str(vect* v);
+// vect* vect_copy(vect* src, vect* dest);
+vect* vect_obj_copy(vect* v, dict* refs);
+
+//forward declare set type + methods used here
+typedef struct set_struct set;
+size_t set_size(set* S);
+
+//forward declare token type + methods used here
+typedef struct tokens token;
+void token_str(token* t);
+void token_free(token* t);
+
+
+
 
 obj* new_int(int64_t i);
 obj* new_uint(uint64_t u);
@@ -52,36 +69,24 @@ obj* new_ustr(char* s);
 //obj* new_dict();
 //obj* new_set();
 //obj* new_token();
+//obj* new_ast();
 size_t obj_size(obj* o);
 obj* obj_copy(obj* o);
+obj* obj_copy_inner(obj* o, dict* refs);
 void obj_print(obj* o);
 uint64_t obj_hash(obj* o);
 int64_t obj_compare(obj* left, obj* right);
 bool obj_equals(obj* left, obj* right);
 
-////// FORWARD DECLARATIONS ////////
 
-//forward declare token type + methods used here
-typedef struct tokens token;
-void token_str(token* t);
-void token_free(token* t);
 
-//forward declare vect type + methods used here
-typedef struct vect_struct vect;
-size_t vect_size(vect* v);
-uint64_t vect_hash(vect* v); 
-int64_t vect_compare(vect* left, vect* right); 
-void vect_free(vect* v);
-void vect_str(vect* v);
-// vect_copy
 
-//forward declare dict type + methods used here
-typedef struct dict_struct dict;
-size_t dict_size(dict* d);
 
-//forward declare set type + methods used here
-typedef struct set_struct set;
-size_t set_size(set* S);
+
+
+
+
+
 
 //dict_hash, dict_compare, dict_free
 //set_hash, set_compare, set_free
@@ -157,11 +162,29 @@ size_t obj_size(obj* o)
 }
 
 //recursive deep copy of an object
-//TODO->look into maintining a dictionary of pointers so that the deep copy can handle cyclical objects
+//TODO->swap over to maintining a dictionary of pointers so that the deep copy can handle cyclical objects
+//dict points from old pointer to new pointer, and if an istance is requested to be copied that already exists, simply substitute the existing pointer
 obj* obj_copy(obj* o)
 {
+    dict* refs = new_dict();
+    obj* copy = obj_copy_inner(o, refs);
+    
+    //free the refs dictionary without touching any of the references
+    dict_free_table_only(refs);
+    return copy;
+}
+
+obj* obj_copy_inner(obj* o, dict* refs)
+{
     if (o == NULL) { return NULL; }
-    obj* copy = malloc(sizeof(obj));
+    
+    obj* copy;
+
+    //check if we already copied this object (i.e. cyclical references
+    if ((copy = dict_get(refs, o))) { return copy; }
+    
+    //construct the copy object
+    copy = malloc(sizeof(obj));
     copy->type = o->type;
     copy->size = o->size;
     switch (o->type)
@@ -187,18 +210,87 @@ obj* obj_copy(obj* o)
             copy->data = (void*)copy_ptr;
             break;
         }
-        //TODO->other data types copy procedure.
-        //dict, set, and vect should all call their respective copy, which calls obj_copy() on each of their elements, thus performing a deep copy
-        // case Token_t:{}
-        // case Vector_t: {}
-        // case Dictionary_t: {}
-        // case Set_t: {}
-    
-        default: printf("WARNING, obj_copy() is not implemented for object of type \"%d\"\n", o->type); break;
+        // case Token_t:
+        // {
+        //     copy->data = (void*)token_obj_copy((token*)o->data, refs);
+        //     break;
+
+        // }
+        case Vector_t: 
+        {
+            copy->data = (void*)vect_obj_copy((vect*)o->data, refs);
+            break;
+        }
+        // case Dictionary_t: 
+        // {
+        //     copy->data = (void*)dict_obj_copy((dict*)o->data, refs);
+        //     break;
+        // }
+        // case Set_t: 
+        // {
+        //     copy->data = (void*)set_obj_copy((set*)o->data, refs);
+        // }
+        default: 
+        {
+            printf("WARNING, obj_copy() is not implemented for object of type \"%d\"\n", o->type); 
+            copy->data = NULL;
+            break;
+        }
     }
 
+    //save a copy of this object's reference into refs, and return the object
+    dict_set(refs, o, copy);
     return copy;
 }
+
+
+//TODO->remove this for version that can handle cyclic copy
+// obj* obj_copy(obj* o)
+// {
+//     if (o == NULL) { return NULL; }
+//     obj* copy = malloc(sizeof(obj));
+//     copy->type = o->type;
+//     copy->size = o->size;
+//     switch (o->type)
+//     {
+//         case Integer_t: //copy int64
+//         {
+//             int64_t* copy_ptr = malloc(sizeof(int64_t));
+//             *copy_ptr = *((int64_t*)o->data);
+//             copy->data = (void*)copy_ptr;
+//             break;
+//         }
+//         case UInteger_t: //copy uint64
+//         {
+//             uint64_t* copy_ptr = malloc(sizeof(uint64_t));
+//             *copy_ptr = *((uint64_t*)o->data);
+//             copy->data = (void*)copy_ptr;
+//             break;
+//         }
+//         case String_t: //copy string
+//         {
+//             char** copy_ptr = malloc(o->size + sizeof(char));
+//             strcpy(*((char**)o->data), *copy_ptr);
+//             copy->data = (void*)copy_ptr;
+//             break;
+//         }
+//         //TODO->other data types copy procedure.
+//         //dict, set, and vect should all call their respective copy, which calls obj_copy() on each of their elements, thus performing a deep copy
+//         // case Token_t:{}
+//         // case Vector_t: 
+//         // {
+//         //     obj* copy = new_vect_obj();
+//         //     vect_copy((vect*)o->data, (vect*)copy->data);
+//         //     break;
+//         // }
+//         // case Dictionary_t: {}
+//         // case Set_t: {}
+    
+//         default: printf("WARNING, obj_copy() is not implemented for object of type \"%d\"\n", o->type); break;
+//     }
+
+//     return copy;
+// }
 
 
 void obj_print(obj* o)
@@ -285,9 +377,9 @@ void obj_free(obj* o)
             case UInteger_t: free(o->data); break;  //free int pointer
             case String_t: free(o->data); break;  //free the string
             case Token_t: token_free((token*)o->data); break; 
-            case Vector_t: vect_free((vect*)o->data);
-            // case Dictionary_t: dict_free((dict*)o->data);
-            // case Set_t: set_free((set*)o->data);
+            case Vector_t: vect_free((vect*)o->data); break;
+            // case Dictionary_t: dict_free((dict*)o->data); break;
+            // case Set_t: set_free((set*)o->data); break;
             default: printf("WARNING: obj_free() is not implemented for object of type \"%d\"\n", o->type); break;
         }
 

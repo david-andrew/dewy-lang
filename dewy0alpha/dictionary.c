@@ -30,7 +30,6 @@ typedef struct dict_struct
 dict* new_dict();
 obj* new_dict_obj();
 size_t dict_size(dict* d);
-size_t dict_obj_size(void* d);
 size_t dict_capacity(dict* d);
 bool dict_set(dict* d, obj* key, obj* value);
 bool dict_resize(dict* d, size_t new_size);
@@ -38,6 +37,7 @@ bool dict_contains(dict* d, obj* key);
 obj* dict_get(dict* d, obj* key);
 void dict_reset(dict* d);
 void dict_free(dict* d);
+void dict_free_except_values(dict* refs);
 void dict_repr(dict* d);
 void dict_str(dict* d);
 
@@ -54,7 +54,7 @@ dict* new_dict()
 obj* new_dict_obj()
 {
     obj* D = malloc(sizeof(obj));
-    D->type = 5;
+    D->type = Dictionary_t;
     D->size = 0; //size needs to be determined on a per call basis
     dict* d = new_dict();
     D->data = (void*)d;
@@ -211,8 +211,11 @@ void dict_free(dict* d)
         dict_entry e = d->table[i];
         if (e.hash != 0 && e.key != NULL) //if this isn't an empty slot, insert into the new dictionary
         {
+            if (e.key != e.value) //if the key and value are the same pointer, only free once
+            { 
+                obj_free(e.value); 
+            }
             obj_free(e.key);
-            obj_free(e.value);
         }
     }
 
@@ -220,6 +223,14 @@ void dict_free(dict* d)
     free(d->table);
     free(d);
 }
+
+void dict_free_table_only(dict* d)
+{
+    //free memory of table
+    free(d->table);
+    free(d);
+}
+
 
 void dict_repr(dict* d) 
 {

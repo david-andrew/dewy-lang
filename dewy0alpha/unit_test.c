@@ -76,11 +76,12 @@ int dict_tests()
 int set_tests()
 {    
     set* S0 = new_set();
+
     set_add(S0, new_uint(5));
     set_add(S0, new_uint(4738));
     set_add(S0, new_uint(10));
     set_add(S0, new_uint(13));
-
+    
     obj* i0 = new_uint(5);
     obj* i1 = new_uint(4738);
     obj* i2 = new_uint(10);
@@ -132,7 +133,6 @@ int set_tests()
     assert(set_contains(S3, i4));
     assert(set_contains(S3, i5));
 
-
     //create a set identical to S0, and check equality
     set* S4 = new_set();
     set_add(S4, i0);
@@ -152,6 +152,7 @@ int set_tests()
     set_str(S2);
     set_str(S3);
     set_str(S4);
+
 
     //TODO->free all variables
     //may need to modify dict delete to check if key and value are the same pointer
