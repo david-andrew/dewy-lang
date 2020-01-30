@@ -37,7 +37,7 @@ bool dict_contains(dict* d, obj* key);
 obj* dict_get(dict* d, obj* key);
 void dict_reset(dict* d);
 void dict_free(dict* d);
-void dict_free_except_values(dict* refs);
+void dict_free_table_only(dict* d);
 void dict_repr(dict* d);
 void dict_str(dict* d);
 
@@ -56,8 +56,9 @@ obj* new_dict_obj()
     obj* D = malloc(sizeof(obj));
     D->type = Dictionary_t;
     D->size = 0; //size needs to be determined on a per call basis
-    dict* d = new_dict();
-    D->data = (void*)d;
+    dict** d_ptr = malloc(sizeof(dict*));
+    *d_ptr = new_dict();
+    D->data = (void*)d_ptr;
     return D;
 }
 
@@ -122,7 +123,7 @@ bool dict_set(dict* d, obj* key, obj* value)
     }
 
     uint64_t hash = obj_hash(key);
-    dict_entry e = {hash, key, value};
+    dict_entry e = (dict_entry){.hash=hash, .key=key, .value=value};
     size_t address = hash % d->capacity;
     size_t offset = 0;
     
@@ -255,7 +256,7 @@ void dict_str(dict* d)
         if (e.hash != 0 || e.key != NULL)
         {
             if (items++ != 0) { printf(", "); }
-            obj_print(e.key); printf("-> "); obj_print(e.value);
+            obj_print(e.key); printf(" -> "); obj_print(e.value);
         }
     }
     printf("]\n");

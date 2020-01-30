@@ -37,20 +37,23 @@ scanner_state scan_state = scan_root;
 //forward declare functions for meta parsing
 obj* scan(char** src);
 obj* match_hashtag(char** src);
-obj* match_meta_single_quote_string(char** src);
-obj* match_meta_double_quote_string(char** src);
+obj* match_meta_string(char** src);
+// obj* match_meta_double_quote_string(char** src);
 obj* match_meta_comma(char** src);
 obj* match_meta_semicolon(char** src);
 obj* match_meta_vertical_bar(char** src);
 obj* match_meta_minus(char** src);
 obj* match_meta_equals_sign(char** src);
-obj* match_meta_parenthesis(char** src);
-obj* match_meta_bracket(char** src);
-obj* match_meta_brace(char** src);
+obj* match_meta_left_parenthesis(char** src);
+obj* match_meta_right_parenthesis(char** src);
+obj* match_meta_left_bracket(char** src);
+obj* match_meta_right_bracket(char** src);
+obj* match_meta_left_brace(char** src);
+obj* match_meta_right_brace(char** src);
 obj* match_whitespace(char** src);
 obj* match_line_comment(char** src);
 obj* match_block_comment(char** src);
-obj* match_meta_meta_parenthesis(char** src);
+// obj* match_meta_meta_parenthesis(char** src);
 bool peek_char(char** src, char c);
 // void remove_whitespace(vect* v);
 // void remove_comments(vect* v);
@@ -68,16 +71,19 @@ obj* scan(char** src)
         {
             // t = match_meta_identifier(src);             if (t != NULL) return t;
             t = match_hashtag(src);                     if (t != NULL) return t;
-            t = match_meta_single_quote_string(src);    if (t != NULL) return t;
-            t = match_meta_double_quote_string(src);    if (t != NULL) return t;
+            t = match_meta_string(src);                 if (t != NULL) return t;
+            // t = match_meta_double_quote_string(src);    if (t != NULL) return t;
             t = match_meta_comma(src);                  if (t != NULL) return t;
             t = match_meta_semicolon(src);              if (t != NULL) return t;
             t = match_meta_vertical_bar(src);           if (t != NULL) return t;
             t = match_meta_minus(src);                  if (t != NULL) return t;
             t = match_meta_equals_sign(src);            if (t != NULL) return t;
-            t = match_meta_parenthesis(src);            if (t != NULL) return t;
-            t = match_meta_bracket(src);                if (t != NULL) return t;
-            t = match_meta_brace(src);                  if (t != NULL) return t;
+            t = match_meta_left_parenthesis(src);       if (t != NULL) return t;
+            t = match_meta_right_parenthesis(src);      if (t != NULL) return t;
+            t = match_meta_left_bracket(src);           if (t != NULL) return t;
+            t = match_meta_right_bracket(src);          if (t != NULL) return t;
+            t = match_meta_left_brace(src);             if (t != NULL) return t;
+            t = match_meta_right_brace(src);            if (t != NULL) return t;
         }
         if (scan_state == scan_root || scan_state == scan_peek)
         {
@@ -89,7 +95,8 @@ obj* scan(char** src)
         {
             //TBD what exactly is allowed inside of a meta function call. for now we are only allowing meta-identifiers
             //potentially allow {} blocks, inside of which, normal dewy expressions can be called, just like string interpolation
-            t = match_meta_meta_parenthesis(src);            if (t != NULL) return t;
+            t = match_meta_left_parenthesis(src);       if (t != NULL) return t;
+            t = match_meta_right_parenthesis(src);      if (t != NULL) return t;
             t = match_hashtag(src);                     if (t != NULL) return t;
         }
         
@@ -115,60 +122,66 @@ obj* match_hashtag(char** src)
         obj* t = new_token(hashtag, substr(*src, 0, i-1));
         *src += i;
 
-        if (peek_char(src, '='))   //if the next char (allowing spaces and comments) is an equals, this is the definition of a meta rule
+        //if we were scanning root, change the state based on the type of character following the hashtag
+        if (scan_state == scan_root)
         {
-            scan_state = scan_meta_rule;
-        }
-        else if ((*src)[0] == '(') //if the next char (no spaces or comments) is a parenthesis, this is a meta-function call
-        {
-            scan_state = scan_meta_func;
+            if (peek_char(src, '=')) //if the next char (allowing spaces and comments) is an equals, this is the definition of a meta rule
+            {
+                scan_state = scan_meta_rule;
+            }
+            else if ((*src)[0] == '(') //if the next char (no spaces or comments) is a parenthesis, this is a meta-function call
+            {
+                scan_state = scan_meta_func;
+            }
         }
         return t;
     }
     return NULL;
 }
 
-obj* match_meta_single_quote_string(char** src) 
+obj* match_meta_string(char** src) 
 {
-    if ((*src)[0] == '\'')
+    char quote; //store the type of quote, single (') or double (")
+    if ((quote = (*src)[0]) == '\'' || (quote = (*src)[0]) == '"')
+    // if ((*src)[0] == '\'')
     {
-        //scan for matching \' to close the string, or null terminator, which indicates unclosed string
+        //scan for matching \' or \" to close the string, or null terminator, which indicates unclosed string
         int i = 1;
-        while ((*src)[i] != 0 && (*src)[i] != '\'') { i++; }
-        if ((*src)[i] == '\'') 
+        while ((*src)[i] != 0 && (*src)[i] != quote) { i++; }
+        if ((*src)[i] == quote) 
         {
-            obj* t = new_token(meta_single_quote_string, substr(*src, 0, i));
+            obj* t = new_token(meta_string, substr(*src, 0, i));
             *src += i + 1;
             return t;
         }
         else 
         {
-            printf("ERROR: reached the end of input while scanning 'single-quote string'\n");
+            printf("ERROR: reached the end of input while scanning 'meta string'\n");
         }
     }
     return NULL;
 }
 
-obj* match_meta_double_quote_string(char** src) 
-{
-        if ((*src)[0] == '"')
-    {
-        //scan for matching \' to close the string, or null terminator, which indicates unclosed string
-        int i = 1;
-        while ((*src)[i] != 0 && (*src)[i] != '"') { i++; }
-        if ((*src)[i] == '"') 
-        {
-            obj* t = new_token(meta_double_quote_string, substr(*src, 0, i));
-            *src += i + 1;
-            return t;
-        }
-        else 
-        {
-            printf("ERROR: reached the end of input while scanning 'double-quote string'\n");
-        }
-    }
-    return NULL;
-}
+// obj* match_meta_double_quote_string(char** src) 
+// {
+//         if ((*src)[0] == '"')
+//     {
+//         //scan for matching \' to close the string, or null terminator, which indicates unclosed string
+//         int i = 1;
+//         while ((*src)[i] != 0 && (*src)[i] != '"') { i++; }
+//         if ((*src)[i] == '"') 
+//         {
+//             obj* t = new_token(meta_double_quote_string, substr(*src, 0, i));
+//             *src += i + 1;
+//             return t;
+//         }
+//         else 
+//         {
+//             printf("ERROR: reached the end of input while scanning 'double-quote string'\n");
+//         }
+//     }
+//     return NULL;
+// }
 
 obj* match_meta_comma(char** src) 
 {
@@ -197,19 +210,36 @@ obj* match_meta_equals_sign(char** src)
     return *src[0] == '=' ? new_token(meta_equals_sign, substr((*src)++, 0, 0)) : NULL;
 }
 
-obj* match_meta_parenthesis(char** src) 
+obj* match_meta_left_parenthesis(char** src) 
 {
-    return *src[0] == '(' || *src[0] == ')' ? new_token(meta_parenthesis, substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '(' ? new_token(meta_left_parenthesis, substr((*src)++, 0, 0)) : NULL;
 }
 
-obj* match_meta_bracket(char** src) 
+obj* match_meta_right_parenthesis(char** src) 
 {
-    return *src[0] == '{' || *src[0] == '}' ? new_token(meta_bracket, substr((*src)++, 0, 0)) : NULL;
+    obj* t = *src[0] == ')' ? new_token(meta_right_parenthesis, substr((*src)++, 0, 0)) : NULL;
+    if (t != NULL && scan_state == scan_meta_func) { scan_state = scan_root; } //update current scanner state if the end of a meta_function was reached
+    return t;
 }
 
-obj* match_meta_brace(char** src) 
+obj* match_meta_left_bracket(char** src) 
 {
-    return *src[0] == '[' || *src[0] == ']' ? new_token(meta_brace, substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '{' ? new_token(meta_left_bracket, substr((*src)++, 0, 0)) : NULL;
+}
+
+obj* match_meta_right_bracket(char** src) 
+{
+    return *src[0] == '}' ? new_token(meta_right_bracket, substr((*src)++, 0, 0)) : NULL;
+}
+
+obj* match_meta_left_brace(char** src) 
+{
+    return *src[0] == '[' ? new_token(meta_left_brace, substr((*src)++, 0, 0)) : NULL;
+}
+
+obj* match_meta_right_brace(char** src) 
+{
+    return *src[0] == ']' ? new_token(meta_right_brace, substr((*src)++, 0, 0)) : NULL;
 }
 
 obj* match_whitespace(char** src) 
@@ -271,10 +301,10 @@ obj* match_block_comment(char** src)
 
 //meta-meta parenthesis follow a meta-identifier and indicate a meta-function call
 //could this potentially be combined with the regular meta parenthesis, that matches inside of meta rules?
-obj* match_meta_meta_parenthesis(char** src)
-{
-    return *src[0] == '(' || *src[0] == ')' ? new_token(meta_meta_parenthesis, substr((*src)++, 0, 0)) : NULL;
-}
+// obj* match_meta_meta_parenthesis(char** src)
+// {
+//     return *src[0] == '(' || *src[0] == ')' ? new_token(meta_meta_parenthesis, substr((*src)++, 0, 0)) : NULL;
+// }
 
 //remove all instances of a specific token type from a vector of tokens
 void remove_token_type(vect* v, token_type type)

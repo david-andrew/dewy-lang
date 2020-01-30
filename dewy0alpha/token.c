@@ -9,19 +9,26 @@ typedef enum token_types
 {
     hashtag,
     // meta_identifier,
-    meta_single_quote_string, //TODO->merge these into a single meta_quote_string
-    meta_double_quote_string, //TODO->merge these into a single meta_quote_string
+    // meta_single_quote_string, //TODO->merge these into a single meta_quote_string
+    // meta_double_quote_string, //TODO->merge these into a single meta_quote_string
+    meta_string,
     meta_comma,
     meta_semicolon,
     meta_vertical_bar,
     meta_minus,
     meta_equals_sign,
-    meta_parenthesis,   //TODO->break out into opening and closing
-    meta_bracket,       //TODO->same...
-    meta_brace,         //TODO->same...
+    // meta_parenthesis,   //TODO->break out into opening and closing
+    meta_left_parenthesis,
+    meta_right_parenthesis,
+    meta_left_bracket,
+    meta_right_bracket,
+    meta_left_brace,
+    meta_right_brace,
+    // meta_bracket,       //TODO->same...
+    // meta_brace,         //TODO->same...
     whitespace,
     comment,
-    meta_meta_parenthesis,
+    // meta_meta_parenthesis,
 } token_type;
 
 //individual tokens that appear in a meta rule
@@ -57,19 +64,22 @@ void token_str(token* t)//(obj* o)
     {
         case hashtag: printf("hashtag"); break; //hashtag not allowed in this state
         // case meta_identifier: printf("meta_identifier"); break;
-        case meta_single_quote_string: printf("meta_single-string"); break;
-        case meta_double_quote_string: printf("meta_double-string"); break;
+        case meta_string: printf("meta_string"); break;
+        // case meta_double_quote_string: printf("meta_double-string"); break;
         case meta_comma: printf("meta_comma"); break;
         case meta_semicolon: printf("meta_semicolon"); break;
-        case meta_vertical_bar: printf("meta_vertical-bar"); break;
+        case meta_vertical_bar: printf("meta_vertical_bar"); break;
         case meta_minus: printf("meta_minus"); break;
         case meta_equals_sign: printf("meta_equals"); break;
-        case meta_parenthesis: printf("meta_parenthesis"); break;
-        case meta_bracket: printf("meta_bracket"); break;
-        case meta_brace: printf("meta_brace"); break;
+        case meta_left_parenthesis: printf("meta_left_parenthesis"); break;
+        case meta_right_parenthesis: printf("meta_right_parenthesis"); break;
+        case meta_left_bracket: printf("meta_left_bracket"); break;
+        case meta_right_bracket: printf("meta_right_bracket"); break;
+        case meta_left_brace: printf("meta_left_brace"); break;
+        case meta_right_brace: printf("meta_right_brace"); break;
         case whitespace: printf("whitespace"); break;
         case comment: printf("comment"); break;
-        case meta_meta_parenthesis: printf("meta_meta_parenthesis"); break;
+        // case meta_meta_parenthesis: printf("meta_meta_parenthesis"); break;
     }
     printf(": `%s`", t->content);
 }

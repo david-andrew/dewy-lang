@@ -76,6 +76,8 @@ int main(int argc, char* argv[])
 
     if (!*source) printf("successfully scanned source text\n");
 
+    printf("rules scanned:\n");
+    dict_str(meta_symbols);
 
     remove_token_type(tokens, whitespace);
     remove_token_type(tokens, comment);

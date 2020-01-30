@@ -110,7 +110,7 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens)
     }
 
     //first token in the tokens stream should be the meta_identifier
-    token* rule_identifier = (token*)vect_dequeue(tokens)->data;
+    token* rule_identifier_token = (token*)vect_dequeue(tokens)->data;
 
     //collect together all tokens from head to tail and store in the symbol table, as a vect
     vect* rule_body = new_vect();
@@ -135,9 +135,26 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens)
     //store the rule_identifier and the rule_body into the symbol table
     //TODO->need to set up obj* for string, or ability to hash tokens
     //TODO->for now, should probably check if the rule is alredy present, as it will be overwritten. in the future, you should be able to update rules, by inserting the original into anywhere it's referenced in the new one
-    printf("%s -> ", rule_identifier->content);
-    vect_str(rule_body);
-    printf("\n");
+
+
+    // printf("%s -> ", rule_identifier_token->content);
+    // vect_str(rule_body);
+    // printf("\n");
+
+    char* rule_identifier = clone(rule_identifier_token->content);
+    free(rule_identifier_token);
+    obj* id = new_string(rule_identifier);
+    obj* rule = vect_obj_wrap(rule_body);
+    // obj_print(id);
+    // printf("%s", *((char**)id->data));
+    // printf(" -> ");
+    // obj_print(rule);
+    // printf("\n");
+
+    dict_set(meta_symbols, id, rule);
+    // printf("returned from dict_set\n");
+    // dict_str(meta_symbols);
+    // printf("\n");
     //TODO->store the rule_identifier and the rule_body into the symbol table
 }
 
@@ -157,7 +174,7 @@ void create_lex_rule(dict* meta_rules, vect* tokens)
     int tail_idx = head_idx + 1;
     if (tail_idx >= vect_size(tokens)) { return; }
     token* tail = (token*)vect_get(tokens, tail_idx)->data;
-    if (tail->type != meta_meta_parenthesis || strcmp(tail->content, "(") != 0) 
+    if (tail->type != meta_left_parenthesis) 
     { 
         printf("ERROR: #lex keyword followed by non-parenthesis token [");
         token_str(tail);
@@ -166,16 +183,16 @@ void create_lex_rule(dict* meta_rules, vect* tokens)
     }
 
     //get the index of the closing parenthesis
-    tail_idx = get_next_token_type(tokens, meta_meta_parenthesis, tail_idx+1);
+    tail_idx = get_next_token_type(tokens, meta_right_parenthesis, tail_idx+1);
     if (tail_idx < 0) { return; }
 
     //verify that it is a closing parenthesis
-    tail = (token*)vect_get(tokens, tail_idx)->data;
-    if (strcmp(tail->content, ")") != 0)
-    {
-        printf("ERROR: #lex function encountered an opening parenthesis \"(\" in the body\n");
-        return;
-    }
+    // tail = (token*)vect_get(tokens, tail_idx)->data;
+    // if (strcmp(tail->content, ")") != 0)
+    // {
+    //     printf("ERROR: #lex function encountered an opening parenthesis \"(\" in the body\n");
+    //     return;
+    // }
 
     //free all tokens up to the start of the rule (as they should be whitespace and comments)
     for (int i = 0; i < head_idx; i++)
