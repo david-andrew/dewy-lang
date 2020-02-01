@@ -357,6 +357,7 @@ int64_t obj_compare(obj* left, obj* right)
 
 bool obj_equals(obj* left, obj* right)
 {
+    //TODO->make this call equals directly for sets/dictionaries, as compare will be inefficient
     return obj_compare(left, right) == 0;
 }
 
