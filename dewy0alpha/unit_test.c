@@ -81,7 +81,7 @@ int set_tests()
     set_add(S0, new_uint(4738));
     set_add(S0, new_uint(10));
     set_add(S0, new_uint(13));
-    
+
     obj* i0 = new_uint(5);
     obj* i1 = new_uint(4738);
     obj* i2 = new_uint(10);
@@ -147,11 +147,11 @@ int set_tests()
     assert(set_contains(S4, i2));
 
     //print out all the sets we made
-    set_str(S0);
-    set_str(S1);
-    set_str(S2);
-    set_str(S3);
-    set_str(S4);
+    set_str(S0); printf("\n");
+    set_str(S1); printf("\n");
+    set_str(S2); printf("\n");
+    set_str(S3); printf("\n");
+    set_str(S4); printf("\n");
 
 
     //TODO->free all variables

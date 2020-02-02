@@ -17,7 +17,7 @@ typedef struct set_struct
 set* new_set();
 obj* new_set_obj();
 size_t set_size(set* S);
-size_t set_capacity(set* S);
+// size_t set_capacity(set* S);
 bool set_add(set* S, obj* item);
 // bool set_remove(set* s, obj* item);
 bool set_contains(set* S, obj* item);
@@ -54,10 +54,10 @@ size_t set_size(set* S)
     return dict_size(S->d); 
 }
 
-size_t set_capacity(set* S) 
-{ 
-    return dict_capacity(S->d); 
-}
+// size_t set_capacity(set* S) 
+// { 
+//     return dict_capacity(S->d); 
+// }
 
 bool set_add(set* S, obj* item)
 {
@@ -81,24 +81,17 @@ set* set_union(set* A, set* B)
     set* S = new_set();
 
     //This part could be replaced with `S = set_copy(A);`
-    for (int i = 0; i < set_capacity(A); i++ )
+    for (int i = 0; i < set_size(A); i++)
     {
-        dict_entry e = A->d->table[i];
-        if (e.hash != 0 || e.key != NULL)
-        {
-            set_add(S, obj_copy(e.key)); //add a copy of the element to the union set
-        }
+        dict_entry e = A->d->entries[i];
+        set_add(S, obj_copy(e.key)); //add a copy of the element to the union set
     }
-
-    for (int i = 0; i < set_capacity(B); i++)
+    for (int i = 0; i < set_size(B); i++)
     {
-        dict_entry e = B->d->table[i];
-        if (e.hash != 0 || e.key != NULL)
+        dict_entry e = B->d->entries[i];        
+        if (!set_contains(S, e.key)) //only add an element if it wasn't in the first list (so that we don't try to add duplicates)
         {
-            if (!set_contains(S, e.key)) //only add an element if it wasn't in the first list (so that we don't try to add duplicates)
-            {
-                set_add(S, obj_copy(e.key));
-            }
+            set_add(S, obj_copy(e.key));
         }
     }
 
@@ -108,15 +101,12 @@ set* set_union(set* A, set* B)
 set* set_intersect(set* A, set* B)
 {
     set* S = new_set();
-    for (int i = 0; i < set_capacity(A); i++)
+    for (int i = 0; i < set_size(A); i++)
     {
-        dict_entry e = A->d->table[i];
-        if (e.hash != 0 || e.key != NULL)
+        dict_entry e = A->d->entries[i];
+        if (set_contains(B, e.key)) //only if both A and B have the item
         {
-            if (set_contains(B, e.key)) //only if both A and B have the item
-            {
-                set_add(S, obj_copy(e.key));
-            }
+            set_add(S, obj_copy(e.key));
         }
     }
     return S;
@@ -128,15 +118,12 @@ bool set_equals(set* A, set* B)
     if (set_size(A) != set_size(B)) return false;
 
     //check if each element in A is in B. Since sizes are the same, and sets don't have duplicates, this will indicate equality
-    for (int i = 0; i < set_capacity(A); i++)
+    for (int i = 0; i < set_size(A); i++)
     {
-        dict_entry e = A->d->table[i];
-        if (e.hash != 0 || e.key != NULL)
+        dict_entry e = A->d->entries[i];
+        if (!set_contains(B, e.key))
         {
-            if (!set_contains(B, e.key))
-            {
-                return false;
-            }
+            return false;
         }
     }
     return true;
@@ -154,23 +141,36 @@ void set_free(set* S)
 
 void set_repr(set* S)
 {
-    dict_repr(S->d);
-}
+    dict* d = S->d;
+    //print out all elements in the set (dictionary) indices table and entries vector
+    printf("set:\nindices = [");
+    for (int i = 0; i < d->icapacity; i++)
+    {
+        if (i != 0) printf(", ");
+        if (d->indices[i] == EMPTY) printf("None");
+        else printf("%zu", d->indices[i]);
+    }
+    printf("]\nentries = [");
+    for (int i = 0; i < d->size; i++)
+    {
+        if (i != 0) printf(",\n           ");
+        dict_entry e = d->entries[i];
+        printf("[%lu, ", e.hash);
+        obj_print(e.key);
+        printf("]");
+    }
+    printf("]\n");}
 
 void set_str(set* S)
 {
-    printf("[");
-    int items = 0; //keep track of if more than 0 have been printed, for commas
-    for (int i = 0; i < set_capacity(S); i++)
+    printf("{");
+    for (int i = 0; i < set_size(S); i++)
     {
-        dict_entry e = S->d->table[i];
-        if (e.hash != 0 || e.key != NULL)
-        {
-            if (items++ != 0) { printf(", "); }
-            obj_print(e.key);
-        }
+        dict_entry e = S->d->entries[i];
+        if (i != 0) printf(", ");
+        obj_print(e.key);
     }
-    printf("]\n");
+    printf("}");
 }
 
 

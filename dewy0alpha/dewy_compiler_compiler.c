@@ -77,14 +77,14 @@ int main(int argc, char* argv[])
     if (!*source) printf("successfully scanned source text\n");
 
     printf("rules scanned:\n");
-    dict_str(meta_symbols);
+    dict_str(meta_symbols); printf("\n");
 
     remove_token_type(tokens, whitespace);
     remove_token_type(tokens, comment);
     if (vect_size(tokens) != 0)
     {
         printf("ERROR: failed to parse all tokens scanned\n");
-        vect_str(tokens);
+        vect_str(tokens); printf("\n");
     }
     // vect_str(tokens);
     // vect_free(tokens);

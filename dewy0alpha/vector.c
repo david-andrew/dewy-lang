@@ -423,7 +423,7 @@ void vect_str(vect* v)
         if (i != 0) { printf(", "); }
         obj_print(vect_get(v, i));
     }
-    printf("]\n");
+    printf("]");
 }
 
 

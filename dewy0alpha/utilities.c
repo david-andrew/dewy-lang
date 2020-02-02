@@ -30,6 +30,9 @@ uint64_t fnv1a(char* str);
 uint64_t hash_uint(uint64_t val);
 uint64_t hash_int(int64_t val);
 
+uint64_t lfsr64_next(uint64_t curr);
+uint64_t lfsr64_prev(uint64_t curr);
+
 /**
     clamp an integer to a range
 */
@@ -215,5 +218,24 @@ uint64_t hash_uint(uint64_t val)
     }
     return hash;
 }
+
+
+/**
+    return the next value in the 64-bit lfsr sequence
+*/
+uint64_t lfsr64_next(uint64_t curr)
+{
+    return curr >> 1 | (curr ^ curr >> 1 ^ curr >> 3 ^ curr >> 4) << 63;
+}
+
+/**
+    return the previous value in the 64-bit lfsr sequence
+*/
+uint64_t lfsr64_prev(uint64_t curr)
+{
+    return curr << 1 | ((curr >> 63 ^ curr ^ curr >> 2 ^ curr >> 3) & 0x1);
+}
+
+
 
 #endif
