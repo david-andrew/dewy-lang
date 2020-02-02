@@ -8,27 +8,20 @@
 typedef enum token_types
 {
     hashtag,
-    // meta_identifier,
-    // meta_single_quote_string, //TODO->merge these into a single meta_quote_string
-    // meta_double_quote_string, //TODO->merge these into a single meta_quote_string
     meta_string,
     meta_comma,
     meta_semicolon,
     meta_vertical_bar,
     meta_minus,
     meta_equals_sign,
-    // meta_parenthesis,   //TODO->break out into opening and closing
     meta_left_parenthesis,
     meta_right_parenthesis,
     meta_left_bracket,
     meta_right_bracket,
     meta_left_brace,
     meta_right_brace,
-    // meta_bracket,       //TODO->same...
-    // meta_brace,         //TODO->same...
     whitespace,
     comment,
-    // meta_meta_parenthesis,
 } token_type;
 
 //individual tokens that appear in a meta rule
@@ -81,7 +74,7 @@ void token_str(token* t)//(obj* o)
         case comment: printf("comment"); break;
         // case meta_meta_parenthesis: printf("meta_meta_parenthesis"); break;
     }
-    printf(": `%s`", t->content);
+    printf(" `%s`", t->content);
 }
 
 void token_free(token* t)
