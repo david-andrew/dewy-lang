@@ -327,18 +327,6 @@ void dict_free_table_only(dict* d)
 }
 
 
-// void dict_repr(dict* d) 
-// {
-//     //print out all elements in the dictionary
-//     // printf("dictionary:\n");
-//     for (int i = 0; i < d->capacity; i++)
-//     {
-//         dict_entry e = d->table[i];
-//         printf("@%d: {%lu, ", i, e.hash); obj_print(e.key); printf(", "); obj_print(e.value); printf("}\n");
-//     }
-//     // printf("\n");
-
-// }
 void dict_repr(dict* d)
 {
     //print out all elements in the dictionary indices table and entries vector
@@ -364,21 +352,6 @@ void dict_repr(dict* d)
 }
 
 
-// void dict_str(dict* d)
-// {
-//     printf("[");
-//     int items = 0;
-//     for(int i = 0; i < d->capacity; i++)
-//     {
-//         dict_entry e = d->table[i];
-//         if (e.hash != 0 || e.key != NULL)
-//         {
-//             if (items++ != 0) { printf(", "); }
-//             obj_print(e.key); printf(" -> "); obj_print(e.value);
-//         }
-//     }
-//     printf("]\n");
-// }
 void dict_str(dict* d)
 {
     printf("[");
