@@ -36,7 +36,8 @@ dict* new_dict();
 obj* dict_get(dict* d, obj* key);
 bool dict_set(dict* d, obj* key, obj* value);
 void dict_free_table_only(dict* d);
-
+void dict_str(dict* d);
+// dict* dict_obj_copy(dict* d, dict* refs);
 
 //forward declare vect type + methods used here
 typedef struct vect_struct vect;
@@ -51,6 +52,10 @@ vect* vect_obj_copy(vect* v, dict* refs);
 //forward declare set type + methods used here
 typedef struct set_struct set;
 size_t set_size(set* S);
+// uint64_t set_hash(set* S);
+// void set_free(set* S);
+void set_str(set* S);
+// set* set_obj_copy(set* S, dict* refs);
 
 //forward declare token type + methods used here
 typedef struct tokens token;
@@ -302,8 +307,8 @@ void obj_print(obj* o)
         case String_t: printf("%s", *((char**)o->data)); break;
         case Token_t: token_str((token*)o->data); break;
         case Vector_t: vect_str(*(vect**)o->data); break;
-        // case Dictionary_t: dict_str((dict*)o->data);
-        // case Set_t: set_str((set*)o->data);
+        case Dictionary_t: dict_str(*(dict**)o->data); break;
+        case Set_t: set_str(*(set**)o->data); break;
         default: printf("WARNING: obj_print() is not implemented for object of type \"%d\"\n", o->type); break;
     }
 }
