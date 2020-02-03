@@ -11,7 +11,7 @@
 
 #define DEFAULT_VECT_CAPACITY 8
 
-//ArrayList Implemented as an ArrayDeque
+//ArrayList Implemented as an ArrayDeque. see: http://opendatastructures.org/ods-java/2_4_ArrayDeque_Fast_Deque_O.html
 typedef struct vect_struct 
 {
     size_t head;
