@@ -9,6 +9,7 @@
 typedef enum obj_types 
 { 
     Boolean_t,
+    Character_t,
     Integer_t, 
     UInteger_t,
     String_t,
@@ -66,6 +67,7 @@ void token_free(token* t);
 
 
 obj* new_bool(bool b);
+obj* new_char(uint32_t c); //unicode characters
 obj* new_int(int64_t i);
 obj* new_uint(uint64_t u);
 obj* new_string(char* s);
@@ -97,6 +99,17 @@ obj* new_bool(bool b)
     *b_ptr = b;
     B->data = (void*)b_ptr;
     return B;
+}
+
+obj* new_char(uint32_t c)
+{
+    obj* C = malloc(sizeof(obj));
+    C->type = Character_t;
+    C->size = sizeof(uint32_t);
+    uint32_t* c_ptr = malloc(sizeof(uint32_t));
+    *c_ptr = c;
+    C->data = (void*)c_ptr;
+    return C;
 }
 
 obj* new_int(int64_t i)
@@ -157,6 +170,7 @@ size_t obj_size(obj* o)
     switch (o->type)
     {
         case Boolean_t: return o->size;
+        case Character_t: return o->size;
         case Integer_t: return o->size;
         case UInteger_t: return o->size;
         case String_t: return o->size;
@@ -204,6 +218,13 @@ obj* obj_copy_inner(obj* o, dict* refs)
         {
             bool* copy_ptr = malloc(sizeof(bool));
             *copy_ptr = *((bool*)o->data);
+            copy->data = (void*)copy_ptr;
+            break;
+        }
+        case Character_t: //copy a unicode character
+        {
+            uint32_t* copy_ptr = malloc(sizeof(uint32_t));
+            *copy_ptr = *((uint32_t*)o->data);
             copy->data = (void*)copy_ptr;
             break;
         }
@@ -274,6 +295,7 @@ void obj_print(obj* o)
     switch (o->type)
     {
         case Boolean_t: printf(*((bool*)o->data) ? "true" : "false"); break;
+        case Character_t: put_unicode(*((uint32_t*)o->data)); break;
         case Integer_t: printf("%ld", *((int64_t*)o->data)); break;
         case UInteger_t: printf("%lu", *((uint64_t*)o->data)); break;
         case String_t: printf("%s", *((char**)o->data)); break;

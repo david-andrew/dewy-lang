@@ -1,6 +1,7 @@
-#include "stdio.h"
-#include "string.h"
-#include "assert.h"
+#include <stdio.h>
+#include <string.h>
+#include <assert.h>
+
 #include "vector.c"
 #include "dictionary.c"
 #include "set.c"
@@ -180,6 +181,28 @@ int misc_tests()
     printf("  fnv1a(false) = %lu\n", hash_bool(false));
     printf("  fnv1a(42) = %lu\n", hash_uint(42));
 
+    printf("\nunicode print test\n  ");
+    put_unicode(0x24);  //$
+    printf(", ");
+    
+    put_unicode(0xA2);  //¢
+    printf(", ");
+
+    put_unicode(0x0939);  //ह
+    printf(", ");
+
+    put_unicode(0x20AC);  //€
+    printf(", ");
+
+    put_unicode(0xD55C);  //한
+    printf(", ");
+
+    put_unicode(0x10348);  //𐍈
+    printf("\n");
+
+    //Other tests
+
+    printf("\n");
 
     return 0;
 }

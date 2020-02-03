@@ -245,4 +245,48 @@ uint64_t lfsr64_prev(uint64_t curr)
 
 
 
+/**
+    print the unicode character to the terminal as UTF-8
+*/
+void put_unicode(uint32_t c)
+{
+    if (c < 0x80)                               //0xxxxxxx
+    {
+        char b0 = c & 0x7F;                     //c & 0b01111111
+        putchar(b0);
+    }
+    else if (c < 0x800)                         //110xxxxx 10xxxxxx
+    {
+        uint8_t b0 = (c & 0x3F) | 0x80;         //c & 0b10111111
+        uint8_t b1 = (c >> 6 & 0xDF) | 0xC0;    //c >> 6 & 0b11011111
+        putchar(*((char*)&b1));
+        putchar(*((char*)&b0));
+    } 
+    else if (c < 0x10000)                       //1110xxxx 10xxxxxx 10xxxxxx
+    {
+        uint8_t b0 = (c & 0x3F) | 0x80;         //c & 0b10111111
+        uint8_t b1 = (c >> 6 & 0x3F) | 0x80;    //c >> 6 & 0b10111111
+        uint8_t b2 = (c >> 12 & 0x0F) | 0xE0;   //c >> 12 & 0b11101111
+        putchar(*((char*)&b2));
+        putchar(*((char*)&b1));
+        putchar(*((char*)&b0));
+    }
+    else if (c < 0x001FFFFF)                    //11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+    {
+        uint8_t b0 = (c & 0x3F) | 0x80;         //c & 0b10111111
+        uint8_t b1 = (c >> 6 & 0x3F) | 0x80;    //c >> 6 & 0b10111111
+        uint8_t b2 = (c >> 12 & 0x3F) | 0x80;   //c >> 12 & 0b10111111
+        uint8_t b3 = (c >> 18 & 0x07) | 0xF0;   //c >> 18 & 0b11110111
+        putchar(*((char*)&b3));
+        putchar(*((char*)&b2));
+        putchar(*((char*)&b1));
+        putchar(*((char*)&b0));
+    }
+    else
+    {
+        printf("ERROR: invalid unicode codepoint \"%u\"\n", c);
+    }
+}
+
+
 #endif

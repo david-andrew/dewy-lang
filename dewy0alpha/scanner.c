@@ -38,7 +38,6 @@ scanner_state scan_state = scan_root;
 obj* scan(char** src);
 obj* match_hashtag(char** src);
 obj* match_meta_string(char** src);
-// obj* match_meta_double_quote_string(char** src);
 obj* match_meta_comma(char** src);
 obj* match_meta_semicolon(char** src);
 obj* match_meta_vertical_bar(char** src);
@@ -53,10 +52,7 @@ obj* match_meta_right_brace(char** src);
 obj* match_whitespace(char** src);
 obj* match_line_comment(char** src);
 obj* match_block_comment(char** src);
-// obj* match_meta_meta_parenthesis(char** src);
 bool peek_char(char** src, char c);
-// void remove_whitespace(vect* v);
-// void remove_comments(vect* v);
 void remove_token_type(vect* v, token_type type);
 
 
@@ -69,10 +65,8 @@ obj* scan(char** src)
         
         if (scan_state == scan_meta_rule || scan_state == scan_peek)
         {
-            // t = match_meta_identifier(src);             if (t != NULL) return t;
             t = match_hashtag(src);                     if (t != NULL) return t;
             t = match_meta_string(src);                 if (t != NULL) return t;
-            // t = match_meta_double_quote_string(src);    if (t != NULL) return t;
             t = match_meta_comma(src);                  if (t != NULL) return t;
             t = match_meta_semicolon(src);              if (t != NULL) return t;
             t = match_meta_vertical_bar(src);           if (t != NULL) return t;
@@ -110,7 +104,6 @@ obj* scan(char** src)
     return NULL;
 }
 
-// obj* peek()
 
 obj* match_hashtag(char** src)
 {
