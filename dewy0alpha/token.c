@@ -39,7 +39,7 @@ void token_free(token* t);
 obj* new_token(token_type type, char* content)
 {
     obj* T = malloc(sizeof(obj));
-    T->type = 3;
+    T->type = Token_t;
     T->size = sizeof(token);
     token* t_ptr = malloc(sizeof(token));
     token t = {type, content};
@@ -49,16 +49,12 @@ obj* new_token(token_type type, char* content)
 }
 
 //print out a string for each token type
-//perhaps we could require that this passes a token* instead of an obj*
-void token_str(token* t)//(obj* o)
+void token_str(token* t)
 {
-    // token* t = (token*)o->data;
     switch (t->type)
     {
         case hashtag: printf("hashtag"); break; //hashtag not allowed in this state
-        // case meta_identifier: printf("meta_identifier"); break;
         case meta_string: printf("meta_string"); break;
-        // case meta_double_quote_string: printf("meta_double-string"); break;
         case meta_comma: printf("meta_comma"); break;
         case meta_semicolon: printf("meta_semicolon"); break;
         case meta_vertical_bar: printf("meta_vertical_bar"); break;
@@ -72,7 +68,6 @@ void token_str(token* t)//(obj* o)
         case meta_right_brace: printf("meta_right_brace"); break;
         case whitespace: printf("whitespace"); break;
         case comment: printf("comment"); break;
-        // case meta_meta_parenthesis: printf("meta_meta_parenthesis"); break;
     }
     printf(" `%s`", t->content);
 }

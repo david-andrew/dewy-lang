@@ -211,12 +211,19 @@ uint64_t hash_uint(uint64_t val)
 {
     uint64_t hash = 14695981039346656037lu;
     uint8_t* v = (uint8_t*)&val;
-    for (int i = 0; i < 8; i++)
+    for (int i = 7; i >= 0; i--) //loop from least significant to most significant
     {
         hash ^= *(v + i);
         hash *= 1099511628211; 
     }
     return hash;
+}
+
+
+uint64_t hash_bool(bool val)
+{
+    //cast the bool to a 64-bit 0 or 1, and return it's hash
+    return hash_uint((uint64_t)val);
 }
 
 

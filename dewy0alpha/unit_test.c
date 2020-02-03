@@ -12,18 +12,21 @@
 int vect_tests();
 int dict_tests();
 int set_tests();
+int misc_tests();
 
 int main(int argc, char* argv[])
 {
     bool test_sets = false, 
         test_dicts = false, 
-        test_vects = false;
+        test_vects = false,
+        test_misc = false;
 
     for (int i = 0; i < argc; i++)
     {
         if (strcmp(argv[i], "-s") == 0 ) test_sets = true;
         if (strcmp(argv[i], "-d") == 0 ) test_dicts = true;
         if (strcmp(argv[i], "-v") == 0 ) test_vects = true;
+        if (strcmp(argv[i], "-m") == 0 ) test_misc = true;
     }
 
     //if none indicated, test everything
@@ -32,6 +35,7 @@ int main(int argc, char* argv[])
         test_vects = true;
         test_dicts = true;
         test_sets = true;
+        test_misc = true;
     }
 
     printf("Beginning test suit...\n\n");
@@ -55,6 +59,12 @@ int main(int argc, char* argv[])
         set_tests();
         printf("Done\n\n");
 
+    }
+    if (test_misc)
+    {
+        printf("Running misc. tests...\n");
+        misc_tests();
+        printf("Done\n\n");
     }
     printf("Completed test suit.\n");
 }
@@ -156,6 +166,20 @@ int set_tests()
 
     //TODO->free all variables
     //may need to modify dict delete to check if key and value are the same pointer
+
+    return 0;
+}
+
+int misc_tests()
+{
+    //check fnv1a zero hash
+    printf("fnv1a hash tests:\n");
+    uint64_t zero_hash = 15378589119836260406lu;
+    printf("  fnv1a(%lu) = %lu\n", zero_hash, hash_uint(zero_hash));
+    printf("  fnv1a(true) = %lu\n", hash_bool(true));
+    printf("  fnv1a(false) = %lu\n", hash_bool(false));
+    printf("  fnv1a(42) = %lu\n", hash_uint(42));
+
 
     return 0;
 }

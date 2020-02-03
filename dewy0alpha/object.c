@@ -8,6 +8,7 @@
 
 typedef enum obj_types 
 { 
+    Boolean_t,
     Integer_t, 
     UInteger_t,
     String_t,
@@ -64,7 +65,7 @@ void token_free(token* t);
 
 
 
-
+obj* new_bool(bool b);
 obj* new_int(int64_t i);
 obj* new_uint(uint64_t u);
 obj* new_string(char* s);
@@ -86,6 +87,17 @@ bool obj_equals(obj* left, obj* right);
 
 //dict_hash, dict_compare, dict_free
 //set_hash, set_compare, set_free
+
+obj* new_bool(bool b)
+{
+    obj* B = malloc(sizeof(obj));
+    B->type = Boolean_t;
+    B->size = sizeof(bool);
+    bool* b_ptr = malloc(sizeof(bool));
+    *b_ptr = b;
+    B->data = (void*)b_ptr;
+    return B;
+}
 
 obj* new_int(int64_t i)
 {
@@ -144,6 +156,7 @@ size_t obj_size(obj* o)
     if (o == NULL) { return 0; }
     switch (o->type)
     {
+        case Boolean_t: return o->size;
         case Integer_t: return o->size;
         case UInteger_t: return o->size;
         case String_t: return o->size;
@@ -187,6 +200,13 @@ obj* obj_copy_inner(obj* o, dict* refs)
     copy->size = o->size;
     switch (o->type)
     {
+        case Boolean_t: //copy boolean
+        {
+            bool* copy_ptr = malloc(sizeof(bool));
+            *copy_ptr = *((bool*)o->data);
+            copy->data = (void*)copy_ptr;
+            break;
+        }
         case Integer_t: //copy int64
         {
             int64_t* copy_ptr = malloc(sizeof(int64_t));
@@ -221,12 +241,12 @@ obj* obj_copy_inner(obj* o, dict* refs)
             copy->data = (void*)copy_ptr;
             break;
         }
-        // case Dictionary_t: 
+        // case Dictionary_t: //TODO->set up dict copy that uses refs
         // {
         //     copy->data = (void*)dict_obj_copy((dict*)o->data, refs);
         //     break;
         // }
-        // case Set_t: 
+        // case Set_t: //TODO->set up set copy that uses refs
         // {
         //     copy->data = (void*)set_obj_copy((set*)o->data, refs);
         // }
@@ -244,55 +264,6 @@ obj* obj_copy_inner(obj* o, dict* refs)
 }
 
 
-//TODO->remove this for version that can handle cyclic copy
-// obj* obj_copy(obj* o)
-// {
-//     if (o == NULL) { return NULL; }
-//     obj* copy = malloc(sizeof(obj));
-//     copy->type = o->type;
-//     copy->size = o->size;
-//     switch (o->type)
-//     {
-//         case Integer_t: //copy int64
-//         {
-//             int64_t* copy_ptr = malloc(sizeof(int64_t));
-//             *copy_ptr = *((int64_t*)o->data);
-//             copy->data = (void*)copy_ptr;
-//             break;
-//         }
-//         case UInteger_t: //copy uint64
-//         {
-//             uint64_t* copy_ptr = malloc(sizeof(uint64_t));
-//             *copy_ptr = *((uint64_t*)o->data);
-//             copy->data = (void*)copy_ptr;
-//             break;
-//         }
-//         case String_t: //copy string
-//         {
-//             char** copy_ptr = malloc(o->size + sizeof(char));
-//             strcpy(*((char**)o->data), *copy_ptr);
-//             copy->data = (void*)copy_ptr;
-//             break;
-//         }
-//         //TODO->other data types copy procedure.
-//         //dict, set, and vect should all call their respective copy, which calls obj_copy() on each of their elements, thus performing a deep copy
-//         // case Token_t:{}
-//         // case Vector_t: 
-//         // {
-//         //     obj* copy = new_vect_obj();
-//         //     vect_copy((vect*)o->data, (vect*)copy->data);
-//         //     break;
-//         // }
-//         // case Dictionary_t: {}
-//         // case Set_t: {}
-    
-//         default: printf("WARNING, obj_copy() is not implemented for object of type \"%d\"\n", o->type); break;
-//     }
-
-//     return copy;
-// }
-
-
 void obj_print(obj* o)
 {
     if (o == NULL) 
@@ -302,6 +273,7 @@ void obj_print(obj* o)
     }
     switch (o->type)
     {
+        case Boolean_t: printf(*((bool*)o->data) ? "true" : "false"); break;
         case Integer_t: printf("%ld", *((int64_t*)o->data)); break;
         case UInteger_t: printf("%lu", *((uint64_t*)o->data)); break;
         case String_t: printf("%s", *((char**)o->data)); break;
@@ -322,6 +294,7 @@ uint64_t obj_hash(obj* o)
     if (o == NULL) { return 0; }
     switch (o->type)
     {
+        case Boolean_t: return hash_bool(*((bool*)o->data));
         case Integer_t: return hash_int(*((int64_t*)o->data));
         case UInteger_t: return hash_uint(*((uint64_t*)o->data));
         case String_t: return fnv1a(*(char**)o->data);
@@ -349,6 +322,7 @@ int64_t obj_compare(obj* left, obj* right)
 
     switch (left->type)
     {
+        case Boolean_t: return *((bool*)left->data) - *((bool*)right->data); //this works because bool is a macro for int
         case Integer_t: return *((int64_t*)left->data) - *((int64_t*)right->data);
         case UInteger_t: return *((uint64_t*)left->data) - *((uint64_t*)right->data);
         case String_t: return strcmp(*((char**)left->data), *((char**)right->data));
@@ -374,6 +348,7 @@ void obj_free(obj* o)
         //handle freeing of o->data
         switch (o->type)
         {
+            case Boolean_t: free(o->data); break;   //free boolean pointer
             case Integer_t: free(o->data); break;   //free uint pointer
             case UInteger_t: free(o->data); break;  //free int pointer
             case String_t:                          //free the string
@@ -393,7 +368,6 @@ void obj_free(obj* o)
             // case Set_t: set_free((set*)o->data); break;
             default: printf("WARNING: obj_free() is not implemented for object of type \"%d\"\n", o->type); break;
         }
-
         free(o);
     }
 }
