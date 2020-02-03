@@ -191,6 +191,8 @@ uint64_t djb2a(char* str)
 
 //Implementation of dictionary
 // https://stackoverflow.com/questions/327311/how-are-pythons-built-in-dictionaries-implemented
+
+//http://www.isthe.com/chongo/tech/comp/fnv/
 uint64_t fnv1a(char* str)
 {
     uint64_t hash = 14695981039346656037lu;

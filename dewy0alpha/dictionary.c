@@ -19,7 +19,9 @@
 #define NONZERO_HASH 0xDEADBEEF
 
 
-//Dictionary based on python implementation: https://mail.python.org/pipermail/python-dev/2012-December/123028.html
+//Implementation of dictionary based on python's implementaion
+//https://stackoverflow.com/questions/327311/how-are-pythons-built-in-dictionaries-implemented
+//https://mail.python.org/pipermail/python-dev/2012-December/123028.html
 
 
 //structure for (hash,key,value) tuples, i.e. a single entry in a dictionary
