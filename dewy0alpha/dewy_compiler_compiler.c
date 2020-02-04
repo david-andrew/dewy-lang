@@ -6,16 +6,15 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-// #include <stdint.h>
 #include <string.h>
 #include <limits.h>
 
-#include "utilities.c"
-#include "scanner.c"
-#include "parser.c"
-#include "object.c"
-#include "dictionary.c"
-#include "vector.c"
+#include "utilities.h"
+#include "scanner.h"
+#include "parser.h"
+#include "object.h"
+#include "dictionary.h"
+#include "vector.h"
 
 
 #define START 0     //start of an array

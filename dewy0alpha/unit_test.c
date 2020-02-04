@@ -2,10 +2,12 @@
 #include <string.h>
 #include <assert.h>
 
-#include "vector.c"
-#include "dictionary.c"
-#include "set.c"
-#include "token.c"
+#include "vector.h"
+#include "dictionary.h"
+#include "set.h"
+#include "token.h"
+#include "utilities.h"
+// #include "mast.c"
 
 //TODO->set up alias to run this with valgrind?
 
@@ -74,13 +76,13 @@ int main(int argc, char* argv[])
 
 int vect_tests()
 {
-    vect* v0 = new_vect();
+    // vect* v0 = new_vect();
     return 0;
 }
 
 int dict_tests()
 {
-    dict* d0 = new_dict();
+    // dict* d0 = new_dict();
     return 0;
 }
 

@@ -3,32 +3,19 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
-#include "object.c"
-#include "vector.c"
-#include "dictionary.c"
-#include "set.c"
-
-#include "scanner.c"
-
-
-//TODO
-// typedef struct parser_context_struct
-// {
-//     dict* meta_symbols;
-//     dict* meta_rules;
-//     //other context stuff
-// } parser_context;
+#include "parser.h"
+#include "object.h"
+#include "vector.h"
+#include "dictionary.h"
+#include "set.h"
+#include "scanner.h"
+#include "utilities.h"
 
 
-//definitions for the AST
 
 
-//forward declarations
-int get_next_real_token(vect* tokens, int i);
-int get_next_token_type(vect* tokens, token_type type, int i);
-void update_meta_symbols(dict* meta_symbols, vect* tokens);
-void create_lex_rule(dict* meta_rules, vect* tokens);
 
 //returns the index of the next non-whitespace and non-comment token.
 //returns -1 if none are present in the vector

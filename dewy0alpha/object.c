@@ -1,94 +1,62 @@
 #ifndef OBJECT_C
 #define OBJECT_C
 
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <stddef.h>
 #include <stdbool.h>
-#include "utilities.c"
+#include <stdint.h>
+
+#include "object.h"
+#include "utilities.h"
+#include "dictionary.h"
+#include "vector.h"
+#include "set.h"
+#include "token.h"
 
 
 
-typedef enum obj_types 
-{ 
-    Boolean_t,
-    Character_t,
-    Integer_t, 
-    UInteger_t,
-    String_t,
-    Token_t,
-    Vector_t,
-    Dictionary_t,
-    Set_t,
-    //AST_t
-} obj_type;
-
-
-typedef struct obj_struct
-{
-    obj_type type;  //integer specifying what type of object.
-    size_t size;    //size of the data allocated for this object
-    void* data;     //data allocated for this object
-} obj;
 
 
 ////// FORWARD DECLARATIONS ////////
 
 //forward declare dict type + methods used here
-typedef struct dict_struct dict;
-size_t dict_size(dict* d);
-dict* new_dict();
-obj* dict_get(dict* d, obj* key);
-bool dict_set(dict* d, obj* key, obj* value);
-void dict_free_table_only(dict* d);
-void dict_str(dict* d);
+// typedef struct dict_struct dict;
+// size_t dict_size(dict* d);
+// dict* new_dict();
+// obj* dict_get(dict* d, obj* key);
+// bool dict_set(dict* d, obj* key, obj* value);
+// void dict_free_table_only(dict* d);
+// void dict_str(dict* d);
 // dict* dict_obj_copy(dict* d, dict* refs);
 
 //forward declare vect type + methods used here
-typedef struct vect_struct vect;
-size_t vect_size(vect* v);
-uint64_t vect_hash(vect* v); 
-int64_t vect_compare(vect* left, vect* right); 
-void vect_free(vect* v);
-void vect_str(vect* v);
-// vect* vect_copy(vect* src, vect* dest);
-vect* vect_obj_copy(vect* v, dict* refs);
+// typedef struct vect_struct vect;
+// size_t vect_size(vect* v);
+// uint64_t vect_hash(vect* v); 
+// int64_t vect_compare(vect* left, vect* right); 
+// void vect_free(vect* v);
+// void vect_str(vect* v);
+// // vect* vect_copy(vect* src, vect* dest);
+// vect* vect_obj_copy(vect* v, dict* refs);
 
-//forward declare set type + methods used here
-typedef struct set_struct set;
-size_t set_size(set* S);
-// uint64_t set_hash(set* S);
-// void set_free(set* S);
-void set_str(set* S);
-// set* set_obj_copy(set* S, dict* refs);
+// //forward declare set type + methods used here
+// typedef struct set_struct set;
+// size_t set_size(set* S);
+// // uint64_t set_hash(set* S);
+// // void set_free(set* S);
+// void set_str(set* S);
+// // set* set_obj_copy(set* S, dict* refs);
 
-//forward declare token type + methods used here
-typedef struct tokens token;
-void token_str(token* t);
-void token_free(token* t);
-
-
-
-obj* new_bool(bool b);
-obj* new_char(uint32_t c); //unicode characters
-obj* new_int(int64_t i);
-obj* new_uint(uint64_t u);
-obj* new_string(char* s);
-obj* new_ustr(char* s);
-//These should probably go in their specific implementation file
-//obj* new_vect();
-//obj* new_dict();
-//obj* new_set();
-//obj* new_token();
-//obj* new_ast();
-size_t obj_size(obj* o);
-obj* obj_copy(obj* o);
-obj* obj_copy_inner(obj* o, dict* refs);
-void obj_print(obj* o);
-uint64_t obj_hash(obj* o);
-int64_t obj_compare(obj* left, obj* right);
-bool obj_equals(obj* left, obj* right);
+// //forward declare token type + methods used here
+// typedef struct tokens token;
+// void token_str(token* t);
+// void token_free(token* t);
 
 
-//dict_hash, dict_compare, dict_free
-//set_hash, set_compare, set_free
+
+
 
 obj* new_bool(bool b)
 {
