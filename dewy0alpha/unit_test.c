@@ -173,7 +173,7 @@ int set_tests()
 
 int misc_tests()
 {
-    //check fnv1a zero hash
+    //check fnv1a zero hash. zero hash comes from http://www.isthe.com/chongo/tech/comp/fnv/
     printf("fnv1a hash tests:\n");
     uint64_t zero_hash = 15378589119836260406lu;
     printf("  fnv1a(%lu) = %lu\n", zero_hash, hash_uint(zero_hash));
