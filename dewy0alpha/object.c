@@ -18,7 +18,10 @@ typedef enum obj_types
     Vector_t,
     Dictionary_t,
     Set_t,
-    //AST_t
+    ASTCat_t,
+    ASTOr_t,
+    ASTStar_t,
+    ASTLeaf_t,
 } obj_type;
 
 
@@ -50,7 +53,7 @@ int64_t vect_compare(vect* left, vect* right);
 void vect_free(vect* v);
 void vect_str(vect* v);
 // vect* vect_copy(vect* src, vect* dest);
-vect* vect_obj_copy(vect* v, dict* refs);
+vect* vect_copy_with_refs(vect* v, dict* refs);
 
 //forward declare set type + methods used here
 typedef struct set_struct set;
@@ -259,7 +262,7 @@ obj* obj_copy_inner(obj* o, dict* refs)
         case Vector_t: 
         {
             vect** copy_ptr = malloc(sizeof(vect*));
-            *copy_ptr = vect_obj_copy((vect*)o->data, refs);
+            *copy_ptr = vect_copy_with_refs((vect*)o->data, refs);
             copy->data = (void*)copy_ptr;
             break;
         }

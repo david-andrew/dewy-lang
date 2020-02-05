@@ -49,7 +49,7 @@ obj* vect_remove(vect* v, size_t index);
 void vect_delete(vect* v, size_t index);
 void vect_reset(vect* v);
 vect* vect_copy(vect* src, vect* dest);
-vect* vect_obj_copy(vect* v, dict* refs);
+vect* vect_copy_with_refs(vect* v, dict* refs);
 void vect_free(vect* v);
 int64_t vect_compare(vect* left, vect* right);
 uint64_t vect_hash(vect* v);
@@ -332,7 +332,7 @@ vect* vect_copy(vect* src, vect* dest)
     return dest;
 }
 
-vect* vect_obj_copy(vect* v, dict* refs)
+vect* vect_copy_with_refs(vect* v, dict* refs)
 {
     vect* copy = new_vect();
     for (int i = 0; i < vect_size(v); i++)

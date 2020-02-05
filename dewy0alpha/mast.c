@@ -52,6 +52,10 @@ typedef struct binary_ast_struct
 node_ast* new_node_ast(uint32_t c);
 unary_ast* new_unary_ast(obj* body);
 binary_ast* new_binary_ast(obj* left, obj* right);
+obj* new_ast_leaf_obj(uint32_t c);
+obj* new_ast_star_obj(obj* body);
+obj* new_ast_or_obj(obj* left, obj* right);
+obj* new_ast_cat_obj(obj* left, obj* right);
 //rest of the AST functions
 
 
@@ -106,5 +110,46 @@ binary_ast* new_binary_ast(obj* left, obj* right)
     return A;
 }
 
+
+obj* new_ast_leaf_obj(uint32_t c)
+{
+    obj* A = malloc(sizeof(obj));
+    A->type = ASTLeaf_t;
+    A->size = sizeof(uint32_t); //TODO->maybe this should be the number of utf-8 bytes?
+    node_ast** a_ptr = malloc(sizeof(node_ast*));
+    *a_ptr = new_node_ast(c);
+    A->data = (void*)a_ptr;
+    return A;
+}
+
+obj* new_ast_star_obj(obj* body)
+{
+    obj* A = malloc(sizeof(obj));
+    A->type = ASTStar_t;
+    A->size = 0; //this will be computed based on size of body
+    unary_ast** a_ptr = malloc(sizeof(unary_ast*));
+    *a_ptr = new_unary_ast(body);
+    A->data = (void*)a_ptr;
+    return A;
+}
+
+obj* new_ast_or_obj(obj* left, obj* right)
+{
+    obj* A = malloc(sizeof(obj));
+    A->type = ASTOr_t;
+    A->size = 0; //this will be computed based on size of body
+    binary_ast** a_ptr = malloc(sizeof(binary_ast*));
+    *a_ptr = new_binary_ast(left, right);
+    A->data = (void*)a_ptr;
+    return A;
+}
+
+obj* new_ast_cat_obj(obj* left, obj* right)
+{
+    //basically identical to an AST-Or node, just with type AST-Cat instead
+    obj* A = new_ast_or_obj(left, right);
+    A->type = ASTCat_t;
+    return A;
+}
 
 #endif
