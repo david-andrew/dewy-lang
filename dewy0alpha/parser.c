@@ -236,12 +236,22 @@ bool expand_rules(vect* tokens, dict* meta_rules)
 */
 obj* build_ast(vect* tokens)
 {
-    //if #rules in tokens, at current precedence level don't have memoized ASTs yet
-    //while (expand_rules(rule)){}
+    //precedence levels. There is no left/right associativity, so default to right
+    //groups: []  ()  {}
+    //concatenation: ,
+    //alternation: |
 
-    //get the index of the lowest precedence token
-    //if type is binary operator, build left and right trees from left and right side splits
-    //if type is unary group,
+    //note that groups should always have the opening at index 0, and closing at the last index in the token list
+
+    //perhaps check if tokens[0] is an opening, and then if closing pair is at vect_size(tokens)-1
+    //--->create ast from body tokens[1:#end-1], and wrap in ast of correct type
+    //   --->for (), call make_AST() on tokens[1:#end-1], and return that directly.
+    //   --->for {}, body is make_AST() on tokens[1:#end-1], wrap in an ASTStar_t, and return
+    //   --->for [], left is ASTLeaf_t epslilon, right is make_AST() on tokens[1:#end-1], wrap in ASTOr_t, and return
+
+    //if whole isn't wrapped by group, search for left-most | (or) operator, and build an ASTOr_t splitting left and right sides of the token vector
+    //if no | (or) operator, search for left-most , (cat) operator, and build ASTCat_t splitting left and right sides of the token vector
+    //if no , (cat) operator, we should have a single string?. construct a cat sequence from the string
     return NULL; 
 }
 
@@ -251,16 +261,9 @@ obj* build_ast(vect* tokens)
 */
 size_t get_lowest_precedence_index(vect* tokens)
 {
-    //precedence levels
-    //groups: []  ()  {}
-    //
-
-    //keep var for level of precedence
-    //scan through tokens, determine token with minimum precedence level.
-    //need to skip paren/bracket/brace pairs (still note precedence level of opening)
-    //once have min precedence level, determine if left or right associative
-    //if left associative, find left-most? instance of operator with determined precedence level
-    //else (right associative) find right-most? instance of operator with determined precedence level 
+    //this function might be unnecessary? based on direct checks described above.
+    //instead this might change into: int find_leftmost_token(vect* tokens, token_type type){}
+    //--->returns the index of the rightmost occurance of the specified token, or -1 if not found
     return 0;
 }
 
