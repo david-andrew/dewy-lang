@@ -1,6 +1,7 @@
 #ifndef OBJECT_C
 #define OBJECT_C
 
+#include <stdint.h>
 #include <stdbool.h>
 #include "utilities.c"
 
