@@ -33,6 +33,8 @@ uint64_t hash_int(int64_t val);
 uint64_t lfsr64_next(uint64_t curr);
 uint64_t lfsr64_prev(uint64_t curr);
 
+void put_unicode(uint32_t c);
+
 /**
     clamp an integer to a range
 */

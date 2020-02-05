@@ -32,7 +32,7 @@ typedef struct unary_ast_struct
     obj* body;
     obj* nullable;
     set* firstpos;
-    set* lastpos:
+    set* lastpos;
     set* followpos;
 } unary_ast;
 
@@ -45,7 +45,7 @@ typedef struct binary_ast_struct
     obj* right;
     obj* nullable;
     set* firstpos;
-    set* lastpos:
+    set* lastpos;
     set* followpos;
 } binary_ast;
 

@@ -58,6 +58,7 @@ bool dict_contains(dict* d, obj* key);
 obj* dict_get(dict* d, obj* key);
 void dict_reset(dict* d);
 void dict_free(dict* d);
+void dict_free_elements_only(dict* d);
 void dict_free_table_only(dict* d);
 void dict_repr(dict* d);
 void dict_str(dict* d);
@@ -239,11 +240,38 @@ bool dict_set(dict* d, obj* key, obj* value)
 
 
 
-
+/**
+    check if the dictionary has the specified key. 
+    replaced old version of "return dict_get(d, key) != NULL" because storing NULL as the value is a valid option (e.g. for sets)
+*/
 bool dict_contains(dict* d, obj* key)
 {
-    //check if the dictionary has the specified key
-    return dict_get(d, key) != NULL;
+    uint64_t hash = obj_hash(key);
+    size_t offset = hash != 0 ? hash : NONZERO_HASH;
+
+    while (true)
+    {
+        //check if slot is free, meaning no object to return
+        if (d->indices[(hash + offset) % d->icapacity] == EMPTY)            
+        {
+            return false;
+        }
+        else
+        {
+            //get the object currently in the non-free slot
+            dict_entry candidate = d->entries[d->indices[(hash + offset) % d->icapacity]];
+            
+            //if candidate has same hash and key as what we are looking for, return its value object
+            if (candidate.hash == hash && obj_equals(candidate.key, key))
+            {
+                return true;
+            }
+            else //probe to the next slot in the sequence                                                          
+            {
+                offset = lfsr64_next(offset);
+            }
+        }
+    }
 }
 
 
@@ -282,15 +310,16 @@ obj* dict_get(dict* d, obj* key)
 
 void dict_reset(dict* d)
 {
-    for (int i = 0; i < d->size; i++)
-    {
-        dict_entry e = d->entries[i];
-        if (e.key != e.value) //only if key and value are different object, free both
-        {
-            obj_free(e.key); 
-        }
-        obj_free(e.value);
-    }
+    // for (int i = 0; i < d->size; i++)
+    // {
+    //     dict_entry e = d->entries[i];
+    //     if (e.key != e.value && e.value != NULL) //only if key and value are different object, free both
+    //     {
+    //         obj_free(e.value); 
+    //     }
+    //     obj_free(e.key);
+    // }
+    dict_free_elements_only(d);
     free(d->indices);
     free(d->entries);
 
@@ -306,18 +335,33 @@ void dict_reset(dict* d)
 
 void dict_free(dict* d)
 {
+    // for (int i = 0; i < d->size; i++)
+    // {
+    //     dict_entry e = d->entries[i];
+    //     if (e.key != e.value && e.value != NULL) //only if key and value are different object, free both
+    //     {
+    //         obj_free(e.value); 
+    //     }
+    //     obj_free(e.key);
+    // }
+    // free(d->indices);
+    // free(d->entries);
+    // free(d);
+    dict_free_elements_only(d);
+    dict_free_table_only(d);
+}
+
+void dict_free_elements_only(dict* d)
+{
     for (int i = 0; i < d->size; i++)
     {
         dict_entry e = d->entries[i];
-        if (e.key != e.value) //only if key and value are different object, free both
+        if (e.key != e.value && e.value != NULL) //only if key and value are different object, free both
         {
-            obj_free(e.key); 
+            obj_free(e.value); 
         }
-        obj_free(e.value);
+        obj_free(e.key);
     }
-    free(d->indices);
-    free(d->entries);
-    free(d);
 }
 
 void dict_free_table_only(dict* d)

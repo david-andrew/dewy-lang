@@ -6,6 +6,7 @@
 #include "dictionary.c"
 #include "set.c"
 #include "token.c"
+#include "mast.c"
 
 //TODO->set up alias to run this with valgrind?
 

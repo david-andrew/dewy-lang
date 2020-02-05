@@ -61,7 +61,7 @@ size_t set_size(set* S)
 
 bool set_add(set* S, obj* item)
 {
-    return dict_set(S->d, item, item); //to store an item, use the item as the key
+    return dict_set(S->d, item, NULL); //to store an item, use the item as the key
 }
 
 bool set_contains(set* S, obj* item)
