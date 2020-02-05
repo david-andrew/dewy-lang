@@ -8,7 +8,30 @@
 #include <string.h>
 #include <stdbool.h>
 
-#include "utilities.h"
+
+//forward declare all functions
+int clamp(int x, int min, int max);
+size_t dewy_index(int index, int length);
+char* substr(char* string, int start, int stop);
+char* clone(char* string);
+char* concatenate(char* left, char* right);
+char* read_file(char* filename);
+
+bool is_identifier_char(char c);
+bool is_identifier_symbol_char(char c);
+bool is_alpha_char(char c);
+bool is_num_char(char c);
+bool is_alphanum_char(char c);
+bool is_whitespace_char(char c);
+
+uint64_t djb2(char* str);
+uint64_t djb2a(char* str);
+uint64_t fnv1a(char* str);
+uint64_t hash_uint(uint64_t val);
+uint64_t hash_int(int64_t val);
+
+uint64_t lfsr64_next(uint64_t curr);
+uint64_t lfsr64_prev(uint64_t curr);
 
 /**
     clamp an integer to a range
@@ -105,7 +128,10 @@ char* read_file(char* filename)
 bool is_identifier_char(char c)
 {
     //valid identifier characters are
-    //ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 1234567890 ~!@#$&_?
+    //ABCDEFGHIJKLMNOPQRSTUVWXYZ
+    //abcdefghijklmnopqrstuvwxyz
+    //1234567890
+    //~!@#$&_?
     return is_alphanum_char(c) || is_identifier_symbol_char(c);
 }
 
@@ -161,6 +187,10 @@ uint64_t djb2a(char* str)
     return hash;
 }
 
+
+
+//Implementation of dictionary
+// https://stackoverflow.com/questions/327311/how-are-pythons-built-in-dictionaries-implemented
 
 //http://www.isthe.com/chongo/tech/comp/fnv/
 uint64_t fnv1a(char* str)
