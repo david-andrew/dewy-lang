@@ -44,6 +44,7 @@ bool dict_set(dict* d, obj* key, obj* value);
 void dict_free_table_only(dict* d);
 void dict_str(dict* d);
 // dict* dict_obj_copy(dict* d, dict* refs);
+void dict_free(dict* d);
 
 //forward declare vect type + methods used here
 typedef struct vect_struct vect;
@@ -62,6 +63,8 @@ size_t set_size(set* S);
 // void set_free(set* S);
 void set_str(set* S);
 // set* set_obj_copy(set* S, dict* refs);
+bool set_equals(set* A, set* B);
+void set_free(set* S);
 
 //forward declare token type + methods used here
 typedef struct tokens token;
@@ -221,35 +224,35 @@ obj* obj_copy_inner(obj* o, dict* refs)
         case Boolean_t: //copy boolean
         {
             bool* copy_ptr = malloc(sizeof(bool));
-            *copy_ptr = *((bool*)o->data);
+            *copy_ptr = *(bool*)o->data;
             copy->data = (void*)copy_ptr;
             break;
         }
         case Character_t: //copy a unicode character
         {
             uint32_t* copy_ptr = malloc(sizeof(uint32_t));
-            *copy_ptr = *((uint32_t*)o->data);
+            *copy_ptr = *(uint32_t*)o->data;
             copy->data = (void*)copy_ptr;
             break;
         }
         case Integer_t: //copy int64
         {
             int64_t* copy_ptr = malloc(sizeof(int64_t));
-            *copy_ptr = *((int64_t*)o->data);
+            *copy_ptr = *(int64_t*)o->data;
             copy->data = (void*)copy_ptr;
             break;
         }
         case UInteger_t: //copy uint64
         {
             uint64_t* copy_ptr = malloc(sizeof(uint64_t));
-            *copy_ptr = *((uint64_t*)o->data);
+            *copy_ptr = *(uint64_t*)o->data;
             copy->data = (void*)copy_ptr;
             break;
         }
         case String_t: //copy string
         {
             char** copy_ptr = malloc(o->size + sizeof(char));
-            strcpy(*((char**)o->data), *copy_ptr);
+            strcpy(*(char**)o->data, *copy_ptr);
             copy->data = (void*)copy_ptr;
             break;
         }
@@ -262,7 +265,7 @@ obj* obj_copy_inner(obj* o, dict* refs)
         case Vector_t: 
         {
             vect** copy_ptr = malloc(sizeof(vect*));
-            *copy_ptr = vect_copy_with_refs((vect*)o->data, refs);
+            *copy_ptr = vect_copy_with_refs(*(vect**)o->data, refs);
             copy->data = (void*)copy_ptr;
             break;
         }
@@ -298,11 +301,11 @@ void obj_print(obj* o)
     }
     switch (o->type)
     {
-        case Boolean_t: printf(*((bool*)o->data) ? "true" : "false"); break;
-        case Character_t: put_unicode(*((uint32_t*)o->data)); break;
-        case Integer_t: printf("%ld", *((int64_t*)o->data)); break;
-        case UInteger_t: printf("%lu", *((uint64_t*)o->data)); break;
-        case String_t: printf("%s", *((char**)o->data)); break;
+        case Boolean_t: printf(*(bool*)o->data ? "true" : "false"); break;
+        case Character_t: put_unicode(*(uint32_t*)o->data); break;
+        case Integer_t: printf("%ld", *(int64_t*)o->data); break;
+        case UInteger_t: printf("%lu", *(uint64_t*)o->data); break;
+        case String_t: printf("%s", *(char**)o->data); break;
         case Token_t: token_str((token*)o->data); break;
         case Vector_t: vect_str(*(vect**)o->data); break;
         case Dictionary_t: dict_str(*(dict**)o->data); break;
@@ -320,9 +323,9 @@ uint64_t obj_hash(obj* o)
     if (o == NULL) { return 0; }
     switch (o->type)
     {
-        case Boolean_t: return hash_bool(*((bool*)o->data));
-        case Integer_t: return hash_int(*((int64_t*)o->data));
-        case UInteger_t: return hash_uint(*((uint64_t*)o->data));
+        case Boolean_t: return hash_bool(*(bool*)o->data);
+        case Integer_t: return hash_int(*(int64_t*)o->data);
+        case UInteger_t: return hash_uint(*(uint64_t*)o->data);
         case String_t: return fnv1a(*(char**)o->data);
         // case Token_t: return meta_token_hash(o);
         case Vector_t: return vect_hash(*(vect**)o->data);
@@ -348,10 +351,10 @@ int64_t obj_compare(obj* left, obj* right)
 
     switch (left->type)
     {
-        case Boolean_t: return *((bool*)left->data) - *((bool*)right->data); //this works because bool is a macro for int
-        case Integer_t: return *((int64_t*)left->data) - *((int64_t*)right->data);
-        case UInteger_t: return *((uint64_t*)left->data) - *((uint64_t*)right->data);
-        case String_t: return strcmp(*((char**)left->data), *((char**)right->data));
+        case Boolean_t: return *(bool*)left->data - *(bool*)right->data; //this works because bool is a macro for int
+        case Integer_t: return *(int64_t*)left->data - *(int64_t*)right->data;
+        case UInteger_t: return *(uint64_t*)left->data - *(uint64_t*)right->data;
+        case String_t: return strcmp(*(char**)left->data, *(char**)right->data);
         // case Token_t: return token_compare((token*)left->data, (token*)right->data);
         case Vector_t: return vect_compare(*(vect**)left->data, *(vect**)right->data);
         // case Dictionary_t: return dict_compare((dict*)left->data, (dict*)right->data);
@@ -362,8 +365,22 @@ int64_t obj_compare(obj* left, obj* right)
 
 bool obj_equals(obj* left, obj* right)
 {
+    //handle case where either or both are null
+    if (left == NULL && right == NULL) { return true; }         //both null means both equal
+    else if (left == NULL || right == NULL) { return false; }   //left or right only null means not equal
+    
+    //if the objects are of different type, then not equal
+    if (left->type != right->type) { return false; }
+
+    switch (left->type)
+    {
+        // case Dictionary_t: return dict_equals(*(dict**)left->data, *(dict**)right->data);
+        case Set_t: return set_equals(*(set**)left->data, *(set**)right->data);
+        default: return obj_compare(left, right) == 0;
+    }
+
     //TODO->make this call equals directly for sets/dictionaries, as compare will be inefficient
-    return obj_compare(left, right) == 0;
+    
 }
 
 void obj_free(obj* o)
@@ -379,7 +396,7 @@ void obj_free(obj* o)
             case UInteger_t: free(o->data); break;  //free int pointer
             case String_t:                          //free the string
             {
-                free(*((char**)o->data));
+                free(*(char**)o->data);
                 free(o->data);
                 break;
             }
@@ -390,8 +407,16 @@ void obj_free(obj* o)
                 free(o->data);
                 break;
             }
-            // case Dictionary_t: dict_free((dict*)o->data); break;
-            // case Set_t: set_free((set*)o->data); break;
+            case Dictionary_t:
+            { 
+                dict_free(*(dict**)o->data); 
+                break;
+            }
+            case Set_t:
+            {
+                set_free(*(set**)o->data); 
+                break;
+            }
             default: printf("WARNING: obj_free() is not implemented for object of type \"%d\"\n", o->type); break;
         }
         free(o);
