@@ -43,7 +43,7 @@ obj* dict_get(dict* d, obj* key);
 bool dict_set(dict* d, obj* key, obj* value);
 void dict_free_table_only(dict* d);
 void dict_str(dict* d);
-// dict* dict_obj_copy(dict* d, dict* refs);
+// dict* dict_copy_with_refs(dict* d, dict* refs);
 void dict_free(dict* d);
 
 //forward declare vect type + methods used here
@@ -53,16 +53,14 @@ uint64_t vect_hash(vect* v);
 int64_t vect_compare(vect* left, vect* right); 
 void vect_free(vect* v);
 void vect_str(vect* v);
-// vect* vect_copy(vect* src, vect* dest);
 vect* vect_copy_with_refs(vect* v, dict* refs);
 
 //forward declare set type + methods used here
 typedef struct set_struct set;
 size_t set_size(set* S);
 // uint64_t set_hash(set* S);
-// void set_free(set* S);
 void set_str(set* S);
-// set* set_obj_copy(set* S, dict* refs);
+// set* set_copy_with_refs(set* S, dict* refs);
 bool set_equals(set* A, set* B);
 void set_free(set* S);
 
@@ -74,17 +72,11 @@ void token_free(token* t);
 
 
 obj* new_bool(bool b);
-obj* new_char(uint32_t c); //unicode characters
+obj* new_char(uint32_t c);  //unicode characters
 obj* new_int(int64_t i);
 obj* new_uint(uint64_t u);
-obj* new_string(char* s);
-obj* new_ustr(char* s);
-//These should probably go in their specific implementation file
-//obj* new_vect();
-//obj* new_dict();
-//obj* new_set();
-//obj* new_token();
-//obj* new_ast();
+obj* new_string(char* s);   //new string from existing heap allocation
+obj* new_ustr(char* s);     //new string from scratch (e.g. from const char[])
 size_t obj_size(obj* o);
 obj* obj_copy(obj* o);
 obj* obj_copy_inner(obj* o, dict* refs);
