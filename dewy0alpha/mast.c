@@ -164,34 +164,35 @@ void print_ast(obj* node, int indent)
     {
         case ASTCat_t:
         {
-            for (int i=0; i<indent; i++) { printf("  "); }
+            for (int i=0; i<indent; i++) { printf(" - "); }
             binary_ast* A = *(binary_ast**)node->data;
-            printf(",\n");
+            printf("(+)\n");
             print_ast(A->left, indent+1);
             print_ast(A->right, indent+1);
             return;
         }
         case ASTOr_t:
         {
-            for (int i=0; i<indent; i++) { printf("  "); }
+            for (int i=0; i<indent; i++) { printf(" - "); }
             binary_ast* A = *(binary_ast**)node->data;
-            printf("|\n");
+            printf("(|)\n");
             print_ast(A->left, indent+1);
             print_ast(A->right, indent+1);
             return;
         }
         case ASTStar_t:
         {
-            for (int i=0; i<indent; i++) { printf("  "); }
+            for (int i=0; i<indent; i++) { printf(" - "); }
             unary_ast* A = *(unary_ast**)node->data;
-            printf("*\n");
+            printf("(*)\n");
             print_ast(A->body, indent+1);
             return;
         }
         case ASTLeaf_t:
         {
-            for (int i=0; i<indent; i++) { printf("  "); }
+            for (int i=0; i<indent; i++) { printf(" - "); }
             node_ast* A = *(node_ast**)node->data;
+            printf(" ");
             put_unicode(A->codepoint ? A->codepoint : 0x03F5); //print the character, or the ϵ symbol
             printf("\n");
             return;

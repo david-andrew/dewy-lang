@@ -393,26 +393,54 @@ int find_closing_pair(vect* tokens, int start)
 
 
 
+// obj* build_string_ast_obj(token* t)
+// {
+//     // assert(t->type == meta_string);
+//     char* str = t->content;
+
+//     if (!*str) { return new_ast_leaf_obj(0); }
+
+//     obj* root = new_ast_cat_obj(NULL, NULL);
+    
+//     obj* cur_obj = root;
+//     binary_ast* cur_ast;
+//     uint32_t c;
+//     while ((c = eat_utf8(&str)))
+//     {
+//         cur_ast = *(binary_ast**)cur_obj->data;
+//         cur_ast->left = new_ast_leaf_obj(c);
+//         cur_ast->right = new_ast_cat_obj(NULL, NULL);
+//         cur_obj = cur_ast->right; //update the current node to point to the new empty cat node
+//     }
+//     cur_ast->right = new_ast_leaf_obj(0); //make the final leaf node empty
+//     return root;
+// }
+
 obj* build_string_ast_obj(token* t)
 {
-    // assert(t->type == meta_string);
     char* str = t->content;
-
-    if (!*str) { return new_ast_leaf_obj(0); }
-
-    obj* root = new_ast_cat_obj(NULL, NULL);
     
+    //handle empty strings
+    if (!*str) { return new_ast_leaf_obj(0); }
+    
+    uint32_t cur_c = eat_utf8(&str);
+    uint32_t prev_c = cur_c;
+    if (!(cur_c = eat_utf8(&str))) { return new_ast_leaf_obj(prev_c); }
+
+    obj* root = new_ast_cat_obj(new_ast_leaf_obj(prev_c), NULL);
     obj* cur_obj = root;
     binary_ast* cur_ast;
-    uint32_t c;
-    while ((c = eat_utf8(&str)))
+    prev_c = cur_c;
+    while ((cur_c = eat_utf8(&str)))
     {
         cur_ast = *(binary_ast**)cur_obj->data;
-        cur_ast->left = new_ast_leaf_obj(c);
-        cur_ast->right = new_ast_cat_obj(NULL, NULL);
-        cur_obj = cur_ast->right; //update the current node to point to the new empty cat node
+        cur_ast->right = new_ast_cat_obj(new_ast_leaf_obj(prev_c), NULL);
+        prev_c = cur_c;
+        cur_obj = cur_ast->right;
     }
-    cur_ast->right = new_ast_leaf_obj(0); //make the final leaf node empty
+    //make the final leaf node the remaining character
+    cur_ast = *(binary_ast**)cur_obj->data;
+    cur_ast->right = new_ast_leaf_obj(prev_c);
     return root;
 }
 
