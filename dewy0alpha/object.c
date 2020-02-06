@@ -316,6 +316,7 @@ uint64_t obj_hash(obj* o)
     switch (o->type)
     {
         case Boolean_t: return hash_bool(*(bool*)o->data);
+        case Character_t: return hash_uint(*(uint32_t*)o->data);
         case Integer_t: return hash_int(*(int64_t*)o->data);
         case UInteger_t: return hash_uint(*(uint64_t*)o->data);
         case String_t: return fnv1a(*(char**)o->data);

@@ -24,6 +24,11 @@
 
 //definitions for the AST
 
+//rules for AST rule construction
+//everytime you see a rule, immediately put it in the symbol table under that name (allow overwrites)
+//if a #rule comes up, point to that rule's AST directly in the new AST being made
+//if a #rule comes up, and it isn't in the symbol table, it's an error. This prevents recursion
+
 
 //forward declarations
 int get_next_real_token(vect* tokens, int i);
@@ -33,7 +38,8 @@ void create_lex_rule(dict* meta_rules, vect* tokens);
 bool expand_rules(vect* tokens, dict* meta_rules);
 obj* build_ast(vect* tokens);
 size_t get_lowest_precedence_index(vect* tokens);
-size_t find_closing_pair(vect* tokens, size_t start);
+int find_closing_pair(vect* tokens, int start);
+obj* build_string_ast_obj(token* t);
 
 //returns the index of the next non-whitespace and non-comment token.
 //returns -1 if none are present in the vector
@@ -148,6 +154,14 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens)
     // dict_str(meta_symbols);
     // printf("\n");
     //TODO->store the rule_identifier and the rule_body into the symbol table
+
+
+
+
+    //build an AST out of the tokens list
+    obj* rule_ast = build_ast(rule_body);
+
+
 }
 
 //check if the token stream starts with #lex(#rule1 #rule2 ...), and create an (AST?) rule
@@ -252,6 +266,55 @@ obj* build_ast(vect* tokens)
     //if whole isn't wrapped by group, search for left-most | (or) operator, and build an ASTOr_t splitting left and right sides of the token vector
     //if no | (or) operator, search for left-most , (cat) operator, and build ASTCat_t splitting left and right sides of the token vector
     //if no , (cat) operator, we should have a single string?. construct a cat sequence from the string
+
+    //if tokens is empty (tbd if that is correct? I think it could be) return an empty node
+    if (vect_size(tokens) == 0) 
+    {
+        printf("ERROR?: build_ast() encountered empty tokens list. Returned empty leaf node...\n");
+        return new_ast_leaf_obj(0);  //an empty leaf node
+    }
+
+    //check for group wrap
+    if (find_closing_pair(tokens, 0) == vect_size(tokens) - 1)
+    {
+        token* t = (token*)vect_get(tokens, 0)->data;
+        if (t->type == meta_left_parenthesis)
+        {
+            //since parenthesis do nothing, simply construct a rule from their contents
+            printf("Stripping parenthesis from token rule\n");
+            obj_free(vect_dequeue(tokens)); //free first token (opening parenthesis)
+            obj_free(vect_pop(tokens));     //free last token (closing parenthesis)
+            return build_ast(tokens);       //return an ast of the body
+        }
+        else if (t->type == meta_left_brace)
+        {
+            printf("building a star node from tokens\n");
+            obj_free(vect_dequeue(tokens)); //free first token (opening brace)
+            obj_free(vect_pop(tokens));     //free last token (closing brace)
+            return new_ast_star_obj(build_ast(tokens));
+        }
+        else if (t->type == meta_left_bracket)
+        {
+            printf("building option node from tokens\n");            
+            obj_free(vect_dequeue(tokens)); //free first token (opening bracket)
+            obj_free(vect_pop(tokens));     //free last token (closing bracket)
+            return new_ast_or_obj(new_ast_leaf_obj(0), build_ast(tokens));
+        }
+    }
+
+    //search for the leftmost occurance of |
+    //if found, build or-node
+    //else search for leftmost occurance of ,
+    //if found, build cat-node
+    //else assert should have a single string
+    //build cat sequence from string
+    if (vect_size(tokens) == 1)
+    {
+        token* t = (token*)vect_get(tokens, 0)->data;
+        return build_string_ast_obj(t);
+    }
+
+
     return NULL; 
 }
 
@@ -271,7 +334,7 @@ size_t get_lowest_precedence_index(vect* tokens)
     return the index of the matching token pair for [], {}, ()
     will return 0 if no matching pair found
 */
-size_t find_closing_pair(vect* tokens, size_t start)
+int find_closing_pair(vect* tokens, int start)
 {
     obj* t = vect_get(tokens, start);
     token_type opening = ((token*)t->data)->type;
@@ -279,12 +342,12 @@ size_t find_closing_pair(vect* tokens, size_t start)
     switch (opening) //determine matching closing type based on opening type
     {
         case meta_left_brace: { closing = meta_right_brace; break; }
-        case meta_left_bracket: { closing = meta_right_brace; break; }
-        case meta_left_parenthesis: { closing = meta_right_brace; break; }
-        default: { printf("ERROR: find_closing_pair() called with non-pair type token (%d)\n", opening); return 0; }
+        case meta_left_bracket: { closing = meta_right_bracket; break; }
+        case meta_left_parenthesis: { closing = meta_right_parenthesis; break; }
+        default: { return -1; } //non-pair object called, has no "closing pair"
     }
     int stack = -1;
-    size_t stop = start + 1;
+    int stop = start + 1;
     while (stop < vect_size(tokens))
     {
         obj* t_obj = vect_get(tokens, stop);
@@ -298,7 +361,32 @@ size_t find_closing_pair(vect* tokens, size_t start)
     printf("ERROR: no matching pair found for token type (%d) in vector: ", opening);
     vect_str(tokens);
     printf("\n");
-    return 0;
+    return -1;
+}
+
+
+
+obj* build_string_ast_obj(token* t)
+{
+    // assert(t->type == meta_string);
+    char* str = t->content;
+
+    if (!*str) { return new_ast_leaf_obj(0); }
+
+    obj* root = new_ast_cat_obj(NULL, NULL);
+    
+    obj* cur_obj = root;
+    binary_ast* cur_ast;
+    uint32_t c;
+    while ((c = eat_utf8(&str)))
+    {
+        cur_ast = *(binary_ast**)cur_obj->data;
+        cur_ast->left = new_ast_leaf_obj(c);
+        cur_ast->right = new_ast_cat_obj(NULL, NULL);
+        cur_obj = cur_ast->right; //update the current node to point to the new empty cat node
+    }
+    cur_ast->right = new_ast_leaf_obj(0); //make the final leaf node empty
+    return root;
 }
 
 

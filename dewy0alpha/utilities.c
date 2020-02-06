@@ -34,6 +34,7 @@ uint64_t lfsr64_next(uint64_t curr);
 uint64_t lfsr64_prev(uint64_t curr);
 
 void put_unicode(uint32_t c);
+uint32_t eat_utf8(char** str_ptr);
 
 /**
     clamp an integer to a range
@@ -290,6 +291,70 @@ void put_unicode(uint32_t c)
     {
         printf("ERROR: invalid unicode codepoint \"%u\"\n", c);
     }
+}
+
+/**
+    detect the next utf-8 character in str_ptr, and return it as a 32-bit codepoint.
+    advance the str_ptr by the size of the detected utf-8 character
+*/
+uint32_t eat_utf8(char** str_ptr)
+{
+    uint8_t b0 = **str_ptr;
+    (*str_ptr)++;
+
+    if (!b0) //if this is a null terminator, return 0
+    { 
+        return 0; 
+    }
+    else if (b0 >> 7 == 0x00) //regular ascii character
+    { 
+        return b0; 
+    }
+    else if (b0 >> 5 == 0x06) //2 byte utf-8 character
+    {   
+        uint8_t b1 = **str_ptr;
+        (*str_ptr)++;
+        if (b1 >> 6 == 0x02)
+        {
+            return (b0 & 0x1F) << 6 | (b1 & 0x3F);
+        }
+    }
+    else if (b0 >> 4 == 0x0E) //3 byte utf-8 character
+    {
+        uint8_t b1 = **str_ptr;
+        (*str_ptr)++;
+        if (b1 >> 6 == 0x02)
+        {
+            uint8_t b2 = **str_ptr;
+            (*str_ptr)++;
+            if (b2 >> 6 == 0x02)
+            {
+                return (b0 & 0x0F) << 12 | (b1 & 0x3F) << 6 | (b2 & 0x3F);
+            }
+        }
+    }
+    else if (b0 >> 3 == 0x1E) //4 byte utf-8 character
+    {
+        uint8_t b1 = **str_ptr;
+        (*str_ptr)++;
+        if (b1 >> 6 == 0x02)
+        {
+            uint8_t b2 = **str_ptr;
+            (*str_ptr)++;
+            if (b2 >> 6 == 0x02)
+            {
+                uint8_t b3 = **str_ptr;
+                (*str_ptr)++;
+                if (b3 >> 6 == 0x02)
+                {
+                    return (b0 & 0x07) << 18 | (b1 & 0x3F) << 12 | (b2 & 0x3F) << 6 | (b3 & 0x3F);
+                }
+            }
+        }
+    }
+    
+    printf("ERROR: eat_utf8() found ill-formed utf-8 character\n");
+    return 0;
 }
 
 

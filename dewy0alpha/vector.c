@@ -25,7 +25,7 @@ vect* new_vect();
 obj* new_vect_obj();
 obj* vect_obj_wrap(vect* v);
 size_t vect_size(vect* v);
-size_t vect_obj_size(void* v);
+// size_t vect_obj_size(void* v);
 size_t vect_capacity(vect* v);
 bool vect_resize(vect* v, size_t new_size);
 bool vect_insert(vect* v, obj* item, size_t index);

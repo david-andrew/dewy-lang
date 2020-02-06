@@ -143,7 +143,7 @@ obj* match_meta_string(char** src)
         while ((*src)[i] != 0 && (*src)[i] != quote) { i++; }
         if ((*src)[i] == quote) 
         {
-            obj* t = new_token(meta_string, substr(*src, 0, i));
+            obj* t = new_token(meta_string, substr(*src, 1, i-1)); //ignore string quotes in string content
             *src += i + 1;
             return t;
         }
