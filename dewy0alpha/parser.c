@@ -36,7 +36,7 @@ int get_next_token_type(vect* tokens, token_type type, int i);
 void update_meta_symbols(dict* meta_symbols, vect* tokens);
 void create_lex_rule(dict* meta_rules, vect* tokens);
 bool expand_rules(vect* tokens, dict* meta_rules);
-obj* build_ast(vect* tokens);
+obj* build_ast(vect* tokens, dict* meta_symbols);
 size_t get_lowest_precedence_index(vect* tokens);
 int find_closing_pair(vect* tokens, int start);
 obj* build_string_ast_obj(token* t);
@@ -139,8 +139,16 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens)
     // printf("\n");
 
     char* rule_identifier = clone(rule_identifier_token->content);
-    free(rule_identifier_token);
     obj* id = new_string(rule_identifier);
+    free(rule_identifier_token);
+
+    //build an AST out of the tokens list
+    obj* rule_ast = build_ast(rule_body, meta_symbols);
+    printf("Adding rule: "); obj_print(id); printf(":\n");
+    ast_str(rule_ast);
+
+    dict_set(meta_symbols, id, rule_ast);
+
     // obj* rule = vect_obj_wrap(rule_body);
     // obj_print(id);
     // printf("%s", *((char**)id->data));
@@ -158,10 +166,7 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens)
 
 
 
-    //build an AST out of the tokens list
-    obj* rule_ast = build_ast(rule_body);
-    obj_print(id); printf(":\n");
-    ast_str(rule_ast);
+
 
 }
 
@@ -192,14 +197,6 @@ void create_lex_rule(dict* meta_rules, vect* tokens)
     //get the index of the closing parenthesis
     tail_idx = get_next_token_type(tokens, meta_right_parenthesis, tail_idx+1);
     if (tail_idx < 0) { return; }
-
-    //verify that it is a closing parenthesis
-    // tail = (token*)vect_get(tokens, tail_idx)->data;
-    // if (strcmp(tail->content, ")") != 0)
-    // {
-    //     printf("ERROR: #lex function encountered an opening parenthesis \"(\" in the body\n");
-    //     return;
-    // }
 
     //free all tokens up to the start of the rule (as they should be whitespace and comments)
     for (int i = 0; i < head_idx; i++)
@@ -249,7 +246,7 @@ bool expand_rules(vect* tokens, dict* meta_rules)
 /**
     Recursively construct an AST out of 
 */
-obj* build_ast(vect* tokens)
+obj* build_ast(vect* tokens, dict* meta_symbols)
 {
     //precedence levels. There is no left/right associativity, so default to right
     //groups: []  ()  {}
@@ -282,24 +279,21 @@ obj* build_ast(vect* tokens)
         if (t->type == meta_left_parenthesis)
         {
             //since parenthesis do nothing, simply construct a rule from their contents
-            // printf("Stripping parenthesis from token rule\n");
             obj_free(vect_dequeue(tokens)); //free first token (opening parenthesis)
             obj_free(vect_pop(tokens));     //free last token (closing parenthesis)
-            return build_ast(tokens);       //return an ast of the body
+            return build_ast(tokens, meta_symbols);       //return an ast of the body
         }
         else if (t->type == meta_left_bracket)
         {
-            // printf("building a star node from tokens\n");
             obj_free(vect_dequeue(tokens)); //free first token (opening brace)
             obj_free(vect_pop(tokens));     //free last token (closing brace)
-            return new_ast_star_obj(build_ast(tokens));
+            return new_ast_star_obj(build_ast(tokens, meta_symbols));
         }
         else if (t->type == meta_left_brace)
         {
-            // printf("building option node from tokens\n");            
             obj_free(vect_dequeue(tokens)); //free first token (opening bracket)
             obj_free(vect_pop(tokens));     //free last token (closing bracket)
-            return new_ast_or_obj(new_ast_leaf_obj(0), build_ast(tokens));
+            return new_ast_or_obj(new_ast_leaf_obj(0), build_ast(tokens, meta_symbols));
         }
     }
 
@@ -316,7 +310,7 @@ obj* build_ast(vect* tokens)
         obj_free(vect_dequeue(tokens));
         
         //recursively build the left and right side of the ast
-        return new_ast_or_obj(build_ast(left_tokens), build_ast(tokens));
+        return new_ast_or_obj(build_ast(left_tokens, meta_symbols), build_ast(tokens, meta_symbols));
     }
     else if ((split_idx = get_next_token_type(tokens, meta_comma, 0)) != -1)
     {
@@ -330,15 +324,35 @@ obj* build_ast(vect* tokens)
         obj_free(vect_dequeue(tokens));
 
         //recursively build the left and right side of the ast
-        return new_ast_cat_obj(build_ast(left_tokens), build_ast(tokens));
+        return new_ast_cat_obj(build_ast(left_tokens, meta_symbols), build_ast(tokens, meta_symbols));
     }
 
+    // assert(vect_size(tokens) == 1);
     //else assert should have a single string, or #rule
     //build cat sequence from string
     if (vect_size(tokens) == 1)
     {
         token* t = (token*)vect_get(tokens, 0)->data;
-        return build_string_ast_obj(t);
+        switch (t->type)
+        {
+            case meta_string: return build_string_ast_obj(t);
+            case hashtag: 
+            {
+                obj* id = new_string(clone(t->content));   
+                obj* ast; //reference to the hashtag's ast if it exists
+                if ((ast = dict_get(meta_symbols, id)))
+                {
+                    return ast;
+                }
+                printf("ERROR: hashtag (#%s) does not exist in the meta-symbol-table\n", t->content);
+                return new_ast_leaf_obj(0);
+            }
+            default: 
+            {
+                printf("ERROR: unrecognized token type (%d) when there should only be #rules and \"strings\"\n", t->type);
+                return new_ast_leaf_obj(0);
+            }
+        }
     }
 
 
@@ -392,30 +406,9 @@ int find_closing_pair(vect* tokens, int start)
 }
 
 
-
-// obj* build_string_ast_obj(token* t)
-// {
-//     // assert(t->type == meta_string);
-//     char* str = t->content;
-
-//     if (!*str) { return new_ast_leaf_obj(0); }
-
-//     obj* root = new_ast_cat_obj(NULL, NULL);
-    
-//     obj* cur_obj = root;
-//     binary_ast* cur_ast;
-//     uint32_t c;
-//     while ((c = eat_utf8(&str)))
-//     {
-//         cur_ast = *(binary_ast**)cur_obj->data;
-//         cur_ast->left = new_ast_leaf_obj(c);
-//         cur_ast->right = new_ast_cat_obj(NULL, NULL);
-//         cur_obj = cur_ast->right; //update the current node to point to the new empty cat node
-//     }
-//     cur_ast->right = new_ast_leaf_obj(0); //make the final leaf node empty
-//     return root;
-// }
-
+/**
+    construct a series of cat nodes representing a string of characters
+*/
 obj* build_string_ast_obj(token* t)
 {
     char* str = t->content;
