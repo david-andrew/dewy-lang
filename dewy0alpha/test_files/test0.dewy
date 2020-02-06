@@ -6,3 +6,10 @@
 #rule5 = ["A"] | "A", "B", "C" | {"pi" | "banana" };
 
 #nested = #rule1 | 'banana';
+
+#copy = 'this' | 'this' | 'that';
+#copy = #copy, 'other', {'other'};
+#copy = #copy | ['NEW'];
+
+#rule6 = "TESTING";
+#rule6 = [#rule6] | 'banana'; //This line produces a bug...

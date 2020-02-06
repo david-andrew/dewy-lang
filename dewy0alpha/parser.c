@@ -33,6 +33,7 @@
 //forward declarations
 int get_next_real_token(vect* tokens, int i);
 int get_next_token_type(vect* tokens, token_type type, int i);
+int get_level_first_token_type(vect* tokens, token_type type);
 void update_meta_symbols(dict* meta_symbols, vect* tokens);
 void create_lex_rule(dict* meta_rules, vect* tokens);
 bool expand_rules(vect* tokens, dict* meta_rules);
@@ -72,6 +73,38 @@ int get_next_token_type(vect* tokens, token_type type, int i)
     }
 
     //reached end without finding token of desired type
+    return -1;
+}
+
+/**
+    return the leftmost instance of the specified token type
+    skips over any (), {}, or [] groups contained in the vector
+*/
+int get_level_first_token_type(vect* tokens, token_type type)
+{
+    int i = 0;
+    while (i < vect_size(tokens))
+    {
+        token* t = (token*)vect_get(tokens, i)->data;
+        if (t->type == type) { return i; }
+        else if (t->type == meta_left_parenthesis || t->type == meta_left_bracket || t->type == meta_left_brace)
+        {
+            int j = find_closing_pair(tokens, i);
+            if (j > i) 
+            { 
+                i = j + 1; 
+                break; 
+            }
+            else 
+            { 
+                printf("ERROR: get_level_first_token_type() encountered an unpaired ");
+                obj_print(vect_get(tokens, i));
+                printf("\n");
+                return -1; 
+            }
+        }
+        else { i++; }
+    }
     return -1;
 }
 
@@ -298,7 +331,7 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
     }
 
     int split_idx;
-    if ((split_idx = get_next_token_type(tokens, meta_vertical_bar, 0)) != -1)
+    if ((split_idx = get_level_first_token_type(tokens, meta_vertical_bar)) != -1)
     {
         //split into or node of left and right tokens lists
         vect* left_tokens = new_vect();
@@ -312,7 +345,7 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
         //recursively build the left and right side of the ast
         return new_ast_or_obj(build_ast(left_tokens, meta_symbols), build_ast(tokens, meta_symbols));
     }
-    else if ((split_idx = get_next_token_type(tokens, meta_comma, 0)) != -1)
+    else if ((split_idx = get_level_first_token_type(tokens, meta_comma)) != -1)
     {
         //split into or node of left and right tokens lists
         vect* left_tokens = new_vect();
@@ -339,8 +372,10 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
             case hashtag: 
             {
                 obj* id = new_string(clone(t->content));   
-                obj* ast; //reference to the hashtag's ast if it exists
-                if ((ast = dict_get(meta_symbols, id)))
+                obj* ast = dict_get(meta_symbols, id); //reference to the hashtag's ast if it exists
+                obj_free(id);
+                obj_free(vect_dequeue(tokens)); //free the token with the id
+                if (ast != NULL)
                 {
                     return ast;
                 }
