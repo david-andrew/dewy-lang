@@ -56,6 +56,8 @@ obj* new_ast_leaf_obj(uint32_t c);
 obj* new_ast_star_obj(obj* body);
 obj* new_ast_or_obj(obj* left, obj* right);
 obj* new_ast_cat_obj(obj* left, obj* right);
+void ast_str(obj* root);
+void print_ast(obj* node, int indent);
 //rest of the AST functions
 
 
@@ -151,5 +153,52 @@ obj* new_ast_cat_obj(obj* left, obj* right)
     A->type = ASTCat_t;
     return A;
 }
+
+
+void ast_str(obj* root){ print_ast(root, 0); }
+
+void print_ast(obj* node, int indent)
+{
+    if (!node) { return; }
+    switch (node->type)
+    {
+        case ASTCat_t:
+        {
+            for (int i=0; i<indent; i++) { printf("  "); }
+            binary_ast* A = *(binary_ast**)node->data;
+            printf(",\n");
+            print_ast(A->left, indent+1);
+            print_ast(A->right, indent+1);
+            return;
+        }
+        case ASTOr_t:
+        {
+            for (int i=0; i<indent; i++) { printf("  "); }
+            binary_ast* A = *(binary_ast**)node->data;
+            printf("|\n");
+            print_ast(A->left, indent+1);
+            print_ast(A->right, indent+1);
+            return;
+        }
+        case ASTStar_t:
+        {
+            for (int i=0; i<indent; i++) { printf("  "); }
+            unary_ast* A = *(unary_ast**)node->data;
+            printf("*\n");
+            print_ast(A->body, indent+1);
+            return;
+        }
+        case ASTLeaf_t:
+        {
+            for (int i=0; i<indent; i++) { printf("  "); }
+            node_ast* A = *(node_ast**)node->data;
+            put_unicode(A->codepoint ? A->codepoint : 0x03F5); //print the character, or the ϵ symbol
+            printf("\n");
+            return;
+        }
+        default: { printf("ERROR: not an AST type (%d)\n", node->type); return; }
+    }
+}
+
 
 #endif

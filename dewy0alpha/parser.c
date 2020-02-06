@@ -141,7 +141,7 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens)
     char* rule_identifier = clone(rule_identifier_token->content);
     free(rule_identifier_token);
     obj* id = new_string(rule_identifier);
-    obj* rule = vect_obj_wrap(rule_body);
+    // obj* rule = vect_obj_wrap(rule_body);
     // obj_print(id);
     // printf("%s", *((char**)id->data));
     // printf(" -> ");
@@ -149,7 +149,7 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens)
     // printf("\n");
 
     //TODO->probably construct AST for rule here, and then store the AST in the meta symbol table
-    dict_set(meta_symbols, id, rule);
+    // dict_set(meta_symbols, id, rule);
     // printf("returned from dict_set\n");
     // dict_str(meta_symbols);
     // printf("\n");
@@ -160,7 +160,8 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens)
 
     //build an AST out of the tokens list
     obj* rule_ast = build_ast(rule_body);
-
+    obj_print(id); printf(":\n");
+    ast_str(rule_ast);
 
 }
 
@@ -281,32 +282,58 @@ obj* build_ast(vect* tokens)
         if (t->type == meta_left_parenthesis)
         {
             //since parenthesis do nothing, simply construct a rule from their contents
-            printf("Stripping parenthesis from token rule\n");
+            // printf("Stripping parenthesis from token rule\n");
             obj_free(vect_dequeue(tokens)); //free first token (opening parenthesis)
             obj_free(vect_pop(tokens));     //free last token (closing parenthesis)
             return build_ast(tokens);       //return an ast of the body
         }
-        else if (t->type == meta_left_brace)
+        else if (t->type == meta_left_bracket)
         {
-            printf("building a star node from tokens\n");
+            // printf("building a star node from tokens\n");
             obj_free(vect_dequeue(tokens)); //free first token (opening brace)
             obj_free(vect_pop(tokens));     //free last token (closing brace)
             return new_ast_star_obj(build_ast(tokens));
         }
-        else if (t->type == meta_left_bracket)
+        else if (t->type == meta_left_brace)
         {
-            printf("building option node from tokens\n");            
+            // printf("building option node from tokens\n");            
             obj_free(vect_dequeue(tokens)); //free first token (opening bracket)
             obj_free(vect_pop(tokens));     //free last token (closing bracket)
             return new_ast_or_obj(new_ast_leaf_obj(0), build_ast(tokens));
         }
     }
 
-    //search for the leftmost occurance of |
-    //if found, build or-node
-    //else search for leftmost occurance of ,
-    //if found, build cat-node
-    //else assert should have a single string
+    int split_idx;
+    if ((split_idx = get_next_token_type(tokens, meta_vertical_bar, 0)) != -1)
+    {
+        //split into or node of left and right tokens lists
+        vect* left_tokens = new_vect();
+
+        //remove all tokens up to split_idx from tokens and push into left_tokens
+        for (int i = 0; i < split_idx; i++) { vect_enqueue(left_tokens, vect_dequeue(tokens)); }
+        
+        //free the | (or) token
+        obj_free(vect_dequeue(tokens));
+        
+        //recursively build the left and right side of the ast
+        return new_ast_or_obj(build_ast(left_tokens), build_ast(tokens));
+    }
+    else if ((split_idx = get_next_token_type(tokens, meta_comma, 0)) != -1)
+    {
+        //split into or node of left and right tokens lists
+        vect* left_tokens = new_vect();
+        
+        //remove all tokens up to split_idx from tokens and push into left_tokens
+        for (int i = 0; i < split_idx; i++) { vect_enqueue(left_tokens, vect_dequeue(tokens)); }
+
+        //free the , (cat) token
+        obj_free(vect_dequeue(tokens));
+
+        //recursively build the left and right side of the ast
+        return new_ast_cat_obj(build_ast(left_tokens), build_ast(tokens));
+    }
+
+    //else assert should have a single string, or #rule
     //build cat sequence from string
     if (vect_size(tokens) == 1)
     {
