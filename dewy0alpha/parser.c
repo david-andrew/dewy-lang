@@ -93,7 +93,7 @@ int get_level_first_token_type(vect* tokens, token_type type)
             if (j > i) 
             { 
                 i = j + 1; 
-                break; 
+                continue; 
             }
             else 
             { 
