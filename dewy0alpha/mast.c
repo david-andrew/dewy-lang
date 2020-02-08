@@ -64,7 +64,8 @@ void ast_str(obj* node);
 bool ast_nullable(obj* node);
 set* ast_firstpos(obj* node);
 set* ast_lastpos(obj* node);
-set* ast_followpos(obj* node);
+set* ast_get_followpos(obj* node);
+void ast_set_followpos(obj* node, set* followpos);
 void ast_compute_followpos(obj* root);
 void ast_compute_followpos_cat(obj* cat_node, dict* id_to_node);
 void ast_compute_followpos_star(obj* star_node, dict* id_to_node);
@@ -215,7 +216,11 @@ void ast_repr_inner(obj* node, int indent)
             node_ast* A = *(node_ast**)node->data;
             printf(" ");
             put_unicode(A->codepoint ? A->codepoint : 0x2300); //print the character, or the ⌀ symbol
-            printf(" [id: %lu]\n", A->id);
+            printf(" [id: %lu, fp: ", A->id); 
+            // set_str(A->firstpos); printf(", lastpos: ");
+            // set_str(A->lastpos); printf(", followpos: ");
+            set_str(A->followpos); printf("]\n");
+            // printf(" [id: %lu]\n", A->id);
             return;
         }
         default: { printf("ERROR: not an AST type (%d)\n", node->type); return; }
@@ -224,7 +229,6 @@ void ast_repr_inner(obj* node, int indent)
 
 void ast_str(obj* node)
 {
-    // if (!node) { return; }
     assert(node != NULL);
     assert(node->type == ASTCat_t
         || node->type == ASTOr_t
@@ -236,7 +240,6 @@ void ast_str(obj* node)
         case ASTCat_t:
         {
             binary_ast* A = *(binary_ast**)node->data;
-            // printf("(");
             if (A->left->type != ASTOr_t)
             {
                 ast_str(A->left);
@@ -507,9 +510,95 @@ set* ast_lastpos(obj* node)
 
 /**
     return the followpos set of the current node. 
-    ensure that ast_compute_followpos has been called before this
+    
+    ensure that ast_compute_followpos() has been called before this, otherwise these may be incomplete
+    (unless in currently constructing followpos, which calls this in intermediate states)
 */
-// set* ast_followpos(obj* node){}
+set* ast_get_followpos(obj* node)
+{
+    assert(node != NULL);
+    assert(node->type == ASTCat_t
+        || node->type == ASTOr_t
+        || node->type == ASTStar_t
+        || node->type == ASTLeaf_t);
+
+    switch (node->type)
+    {
+        case ASTCat_t:
+        case ASTOr_t:
+        {
+            binary_ast* A = *(binary_ast**)node->data;
+            if (A->followpos == NULL) 
+            { 
+                A->followpos = new_set(); 
+            }
+            return A->followpos;
+        }
+        case ASTStar_t:
+        {
+            unary_ast* A = *(unary_ast**)node->data;
+            if (A->followpos == NULL) 
+            { 
+                A->followpos = new_set(); 
+            }
+            return A->followpos;
+        }
+        case ASTLeaf_t:
+        {
+            node_ast* A = *(node_ast**)node->data;
+            if (A->followpos == NULL) 
+            { 
+                A->followpos = new_set(); 
+            }
+            return A->followpos;
+        }
+        default: 
+        { 
+            printf("ERROR: ast_get_followpos() should not reach this point\n");
+            return NULL;
+        }
+    }
+}
+
+/**
+    set followpos in the ast node to point to the new value
+*/
+void ast_set_followpos(obj* node, set* followpos)
+{
+    assert(node != NULL);
+    assert(node->type == ASTCat_t
+        || node->type == ASTOr_t
+        || node->type == ASTStar_t
+        || node->type == ASTLeaf_t);
+
+    switch (node->type)
+    {
+        case ASTCat_t:
+        case ASTOr_t:
+        {
+            binary_ast* A = *(binary_ast**)node->data;
+            A->followpos = followpos;
+            return;
+        }
+        case ASTStar_t:
+        {
+            unary_ast* A = *(unary_ast**)node->data;
+            A->followpos = followpos;
+            return;
+        }
+        case ASTLeaf_t:
+        {
+            node_ast* A = *(node_ast**)node->data;
+            A->followpos = followpos;
+            return;
+        }
+        default: 
+        { 
+            printf("ERROR: ast_get_followpos() should not reach this point\n");
+            return;
+        }
+    }
+}
 
 /**
     compute the followpos set for every node in the ast
@@ -598,30 +687,45 @@ void ast_compute_followpos(obj* root)
     Compute followpos for each element in the cat node.
     
     "If n is a cat-node with left child c1 and right child c2 , 
-    then for every position i in lastpos(c1), all positions in firstpos(c2) are in followpos(i)."
+    then for every position i in lastpos(c1), all positions in firstpos(c2) are in followpos(i)"
 */
 void ast_compute_followpos_cat(obj* cat_node, dict* id_to_node)
 {
-    // vect* children = new_vect();
-    // ast_get_nodes_list(cat_node, children);
+    assert(cat_node->type == ASTCat_t);
+    binary_ast* A = *(binary_ast**)cat_node->data;
+    obj* left = A->left;
+    obj* right = A->right;
+    set* lastpos_left = ast_lastpos(left);
+    set* firstpos_right = ast_firstpos(right);
 
-    // vect_free_list_only(nodes_list);
+    for (int i = 0; i < set_size(lastpos_left); i++)
+    {
+        obj* node_i = dict_get(id_to_node, lastpos_left->d->entries[i].key);
+        set* followpos_i = ast_get_followpos(node_i);
+        ast_set_followpos(node_i, set_union(followpos_i, firstpos_right));
+        set_free(followpos_i); //free the now unused set
+    }
 }
 
 /**
     Compute followpos for each element in the star node.
 
-    If n is a star-node, and i is a position in lastpos(n), 
-    then all positions in firstpos(n) are in followpos(i);
+    "If n is a star-node, and i is a position in lastpos(n), 
+    then all positions in firstpos(n) are in followpos(i)"
 */
 void ast_compute_followpos_star(obj* star_node, dict* id_to_node)
 {
-    set* lastpos = ast_lastpos(star_node);
-    set* firstpos = ast_firstpos(star_node);
-    // vect* children = new_vect();
-    // ast_get_nodes_list(star_node, children);
+    assert(star_node->type == ASTStar_t);
+    set* lastpos_n = ast_lastpos(star_node);
+    set* firstpos_n = ast_firstpos(star_node);
 
-    // vect_free_list_only(nodes_list);
+    for (int i = 0; i < set_size(lastpos_n); i++)
+    {
+        obj* node_i = dict_get(id_to_node, lastpos_n->d->entries[i].key);
+        set* followpos_i = ast_get_followpos(node_i);
+        ast_set_followpos(node_i, set_union(followpos_i, firstpos_n));
+        set_free(followpos_i); //free the now unused set
+    }
 }
 
 

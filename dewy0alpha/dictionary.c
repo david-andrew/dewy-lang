@@ -56,7 +56,7 @@ uint64_t dict_find_empty_address(dict*, uint64_t hash);
 bool dict_set(dict* d, obj* key, obj* value);
 bool dict_contains(dict* d, obj* key);
 obj* dict_get(dict* d, obj* key);
-obj* dict_get_int_key(dict* d, uint64_t u);
+obj* dict_get_uint_key(dict* d, uint64_t u);
 void dict_reset(dict* d);
 void dict_free(dict* d);
 void dict_free_elements_only(dict* d);
