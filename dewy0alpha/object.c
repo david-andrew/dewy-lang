@@ -69,6 +69,11 @@ typedef struct tokens token;
 void token_str(token* t);
 void token_free(token* t);
 
+// typedef struct node_ast_struct node_ast;
+// typedef struct unary_ast_struct unary_ast;
+// typedef struct binary_ast_struct binary_ast;
+void ast_str(obj* node);
+
 
 
 obj* new_bool(bool b);
@@ -313,6 +318,10 @@ void obj_print(obj* o)
         case Vector_t: vect_str(*(vect**)o->data); break;
         case Dictionary_t: dict_str(*(dict**)o->data); break;
         case Set_t: set_str(*(set**)o->data); break;
+        case ASTLeaf_t:
+        case ASTStar_t:
+        case ASTOr_t:
+        case ASTCat_t: ast_str(o); break;
         default: printf("WARNING: obj_print() is not implemented for object of type \"%d\"\n", o->type); break;
     }
 }
