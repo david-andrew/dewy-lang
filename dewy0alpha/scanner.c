@@ -136,7 +136,6 @@ obj* match_meta_string(char** src)
 {
     char quote; //store the type of quote, single (') or double (")
     if ((quote = (*src)[0]) == '\'' || (quote = (*src)[0]) == '"')
-    // if ((*src)[0] == '\'')
     {
         //scan for matching \' or \" to close the string, or null terminator, which indicates unclosed string
         int i = 1;

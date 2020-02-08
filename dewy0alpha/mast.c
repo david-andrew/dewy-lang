@@ -526,8 +526,6 @@ void ast_compute_followpos(obj* root)
         obj* node = vect_get(nodes_list, i);
         assert(node != NULL);
         assert(node->type == ASTCat_t || node->type == ASTOr_t || node->type == ASTStar_t || node->type == ASTLeaf_t);
-        //If n is a cat-node with left child c1 and right child c2 , 
-        //then for every position i in lastpos(c1), all positions in firstpos(c2) are in followpos(i).
         if (node->type == ASTCat_t) 
         {
 
@@ -538,10 +536,31 @@ void ast_compute_followpos(obj* root)
         }
     }
 
-
-
     vect_free_list_only(nodes_list);
 }
+
+/**
+    Compute followpos for each element in the cat node.
+    
+    "If n is a cat-node with left child c1 and right child c2 , 
+    then for every position i in lastpos(c1), all positions in firstpos(c2) are in followpos(i)."
+*/
+void ast_compute_followpos_cat(obj* cat_node)
+{
+
+}
+
+/**
+    Compute followpos for each element in the star node.
+
+    If n is a star-node, and i is a position in lastpos(n), 
+    then all positions in firstpos(n) are in followpos(i);
+*/
+void ast_compute_followpos_star(obj* star_node)
+{
+
+}
+
 
 /**
     Recursively compute a list of all nodes in the AST.
