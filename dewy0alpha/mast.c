@@ -82,6 +82,7 @@ node_ast* new_node_ast(uint32_t c)
     node_ast* A = malloc(sizeof(node_ast));
     A->codepoint = c;
     A->id = 0;  //this will be uniqueified later //_ast_node_id_counter++; //assign a unique identifier
+
     if (c != 0) //if codepoint is not 0, then it is a non-null leaf
     {
         A->nullable = new_bool_ptr(false);
@@ -210,11 +211,15 @@ void ast_repr_inner(obj* node, int indent)
             node_ast* A = *(node_ast**)node->data;
             printf(" ");
             put_unicode(A->codepoint ? A->codepoint : 0x2300); //print the character, or the ⌀ symbol
-            printf(" [id: %lu, fp: ", A->id); 
-            // set_str(ast_firstpos(node)); printf(", lastpos: ");
-            // set_str(ast_lastpos(node)); printf(", followpos: ");
-            set_str(A->followpos); printf("]\n");
-            // printf(" [id: %lu]\n", A->id);
+            if (A->codepoint) 
+            {
+                printf(" [id: %lu, fp: ", A->id); 
+                // set_str(ast_firstpos(node)); printf(", lastpos: ");
+                // set_str(ast_lastpos(node)); printf(", followpos: ");
+                set_str(A->followpos); printf("]");
+                // printf(" [id: %lu]\n", A->id);
+            }
+            printf("\n");
             return;
         }
         default: { printf("ERROR: not an AST type (%d)\n", node->type); return; }

@@ -255,7 +255,7 @@ uint64_t lfsr64_prev(uint64_t curr)
 /**
     print the unicode character to the terminal as UTF-8
 
-    This function uses int8_t to guarantee that putchar receives single signed bytes
+    This function uses int8_t instead of uint8_t since putchar expects a signed value
 */
 void put_unicode(uint32_t c)
 {
