@@ -176,9 +176,12 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens)
 
     //build an AST out of the tokens list
     obj* rule_ast = build_ast(rule_body, meta_symbols);
-    printf("Adding rule: "); obj_print(id); printf(":\n");
-    ast_str(rule_ast);
-
+    // printf("Adding rule: "); 
+    obj_print(id); 
+    printf(" <- ");
+    // ast_repr(rule_ast); //print the full tree
+    ast_str(rule_ast); //print the expanded regex form of the rule
+    printf("\n");
     dict_set(meta_symbols, id, rule_ast);
 
     // obj* rule = vect_obj_wrap(rule_body);
