@@ -81,29 +81,20 @@ node_ast* new_node_ast(uint32_t c)
 {
     node_ast* A = malloc(sizeof(node_ast));
     A->codepoint = c;
-    A->id = 0; //this will be uniqueified later //_ast_node_id_counter++; //assign a unique identifier
+    A->id = 0;  //this will be uniqueified later //_ast_node_id_counter++; //assign a unique identifier
     if (c != 0) //if codepoint is not 0, then it is a non-null leaf
     {
         A->nullable = new_bool_ptr(false);
-        A->firstpos = NULL;
-        A->lastpos = NULL;
-        A->followpos = NULL;
-        // A->firstpos = new_set();
-        // set_add(A->firstpos, new_uint(A->id));  //firstpos contains only c
-        // A->lastpos = new_set();
-        // set_add(A->lastpos, new_uint(A->id));   //lastpos contains only c
-        // A->followpos = NULL;                    //followpos will be computed later once the tree is complete
     }
-    else    //otherwise this is an ϵ (epsilon), i.e. null leaf
+    else        //otherwise this is an ϵ (epsilon), i.e. null leaf
     {
         A->nullable = new_bool_ptr(true);       //the null char is by definition nullable
-        A->firstpos = NULL;
-        A->lastpos = NULL;
-        // A->firstpos = new_set();                //firstpos is by definition an empty set
-        // A->lastpos = new_set();                 //lastpos is by definition an empty set
-        A->followpos = NULL;                    //followpos will be computed later once the tree is complete
     }
 
+    //firstpos, lastpos, and followpos will all be calculated when the rule tree is complete
+    A->firstpos = NULL;
+    A->lastpos = NULL;
+    A->followpos = NULL;
     return A;
 }
 
