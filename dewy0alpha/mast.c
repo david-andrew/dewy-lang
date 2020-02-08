@@ -270,7 +270,7 @@ void ast_str(obj* node)
         case ASTLeaf_t:
         {
             node_ast* A = *(node_ast**)node->data;
-            put_unicode(A->codepoint ? A->codepoint : 0x03F5); //print the character, or the ϵ symbol
+            put_unicode(A->codepoint ? A->codepoint : 0x2205); //print the character, or the ϵ/∅ (0x03F5/0x2205) symbol
             return;
         }
         default: { printf("ERROR: not an AST type (%d)\n", node->type); return; }
