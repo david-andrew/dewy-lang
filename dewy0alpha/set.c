@@ -69,12 +69,16 @@ bool set_contains(set* S, obj* item)
     return dict_contains(S->d, item);
 }
 
-// set* set_copy(set* s)
-// {
-//     set* copy = malloc(sizeof(set));
-//     s->d = dict_copy(s->d); //TODO->implement this dict function
-//     return s;
-// }
+set* set_copy(set* S)
+{
+    set* copy = new_set();
+    for (int i = 0; i < set_size(S); i++)
+    {
+        dict_entry e = S->d->entries[i];
+        set_add(copy, e.key);
+    }
+    return copy;
+}
 
 set* set_union(set* A, set* B)
 {

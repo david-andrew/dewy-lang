@@ -72,6 +72,7 @@ void token_free(token* t);
 
 
 obj* new_bool(bool b);
+bool* new_bool_ptr(bool b);
 obj* new_char(uint32_t c);  //unicode characters
 obj* new_int(int64_t i);
 obj* new_uint(uint64_t u);
@@ -98,6 +99,16 @@ obj* new_bool(bool b)
     *b_ptr = b;
     B->data = (void*)b_ptr;
     return B;
+}
+
+/**
+    create a new pointer to a bool. lighter weight than an obj*
+*/
+bool* new_bool_ptr(bool b)
+{
+    bool* b_ptr = malloc(sizeof(bool));
+    *b_ptr = b;
+    return b_ptr;
 }
 
 obj* new_char(uint32_t c)

@@ -9,6 +9,8 @@
 #include "object.c"
 #include "set.c"
 
+#include <assert.h>
+
 //Meta Abstract Syntax Tree (MAST) definitions
 
 //represents a leaf node in the AST
@@ -17,7 +19,7 @@ typedef struct node_ast_struct
 {
     uint32_t codepoint; //any unicode character can be a leaf
     uint64_t id;        //keep track of the node ID. TODO->probably keep a dict that maps from ID to the AST obj...
-    obj* nullable;
+    bool* nullable;
     set* firstpos;
     set* lastpos;
     set* followpos;
@@ -30,7 +32,7 @@ typedef struct node_ast_struct
 typedef struct unary_ast_struct
 {
     obj* body;
-    obj* nullable;
+    bool* nullable;
     set* firstpos;
     set* lastpos;
     set* followpos;
@@ -43,7 +45,7 @@ typedef struct binary_ast_struct
 {
     obj* left;
     obj* right;
-    obj* nullable;
+    bool* nullable;
     set* firstpos;
     set* lastpos;
     set* followpos;
@@ -58,6 +60,13 @@ obj* new_ast_or_obj(obj* left, obj* right);
 obj* new_ast_cat_obj(obj* left, obj* right);
 void ast_str(obj* root);
 void print_ast(obj* node, int indent);
+bool ast_nullable(obj* node);
+set* ast_firstpos(obj* node);
+set* ast_lastpos(obj* node);
+set* ast_followpos(obj* node);
+vect* ast_get_nodes_list(obj* root);
+void ast_get_nodes_list_inner(obj* node, vect* nodes);
+
 //rest of the AST functions
 
 
@@ -71,19 +80,19 @@ node_ast* new_node_ast(uint32_t c)
     A->id = _ast_node_id_counter++; //assign a unique identifier
     if (c != 0) //if codepoint is not 0, then it is a non-null leaf
     {
-        A->nullable = new_bool(false);
+        A->nullable = new_bool_ptr(false);
         A->firstpos = new_set();
-        set_add(A->firstpos, new_char(c));  //firstpos contains only c
+        set_add(A->firstpos, new_uint(A->id));  //firstpos contains only c
         A->lastpos = new_set();
-        set_add(A->lastpos, new_char(c));   //lastpos contains only c
-        A->followpos = NULL;                //followpos will be computed later once the tree is complete
+        set_add(A->lastpos, new_uint(A->id));   //lastpos contains only c
+        A->followpos = NULL;                    //followpos will be computed later once the tree is complete
     }
     else    //otherwise this is an ϵ (epsilon), i.e. null leaf
     {
-        A->nullable = new_bool(true);   //the null char is by definition nullable
-        A->firstpos = new_set();        //firstpos is by definition an empty set
-        A->lastpos = new_set();         //lastpos is by definition an empty set
-        A->followpos = NULL;            //followpos will be computed later once the tree is complete
+        A->nullable = new_bool_ptr(true);       //the null char is by definition nullable
+        A->firstpos = new_set();                //firstpos is by definition an empty set
+        A->lastpos = new_set();                 //lastpos is by definition an empty set
+        A->followpos = NULL;                    //followpos will be computed later once the tree is complete
     }
 
     return A;
@@ -200,6 +209,233 @@ void print_ast(obj* node, int indent)
         default: { printf("ERROR: not an AST type (%d)\n", node->type); return; }
     }
 }
+
+//print out the regex form of the ast
+// void ast_compact_str(obj* root){}
+// void ast_compact_print()
+
+bool ast_nullable(obj* node)
+{
+    assert(node != NULL);
+    assert(node->type == ASTCat_t
+        || node->type == ASTOr_t
+        || node->type == ASTStar_t
+        || node->type == ASTLeaf_t);
+
+    switch (node->type)
+    {
+        case ASTLeaf_t:
+        {
+            //nullable(A) = A->codepoint != 0. This was preset when A was made
+            node_ast* A = *(node_ast**)node->data;
+            return *A->nullable;
+        }
+        
+        case ASTCat_t:
+        {
+            binary_ast* A = *(binary_ast**)node->data;
+            if (A->nullable == NULL)
+            {
+                //nullable(A) = nullable(left) and nullable(right)
+                bool nullable = ast_nullable(A->left) && ast_nullable(A->right);
+                A->nullable = new_bool_ptr(nullable);
+            }
+            return *A->nullable;
+        }
+        
+        case ASTOr_t:
+        {
+            binary_ast* A = *(binary_ast**)node->data;
+            if (A->nullable == NULL)
+            {
+                //nullable(A) = nullable(left) or nullable(right)
+                bool nullable = ast_nullable(A->left) || ast_nullable(A->right);
+                A->nullable = new_bool_ptr(nullable);
+            }
+            return *A->nullable;
+        }
+        
+        case ASTStar_t:
+        {
+            unary_ast* A = *(unary_ast**)node->data;
+            if (A->nullable == NULL)
+            {
+                //star nodes are nullable by definition
+                bool nullable = true;
+                A->nullable = new_bool_ptr(nullable);
+                return nullable;
+            }
+            return *A->nullable;
+        }
+        
+        default:
+        {
+            printf("ERROR reached end of nullable function, which should be impossible\n");
+            return true;
+        }
+    }
+}
+
+set* ast_firstpos(obj* node)
+{
+    assert(node != NULL);
+    assert(node->type == ASTCat_t
+        || node->type == ASTOr_t
+        || node->type == ASTStar_t
+        || node->type == ASTLeaf_t);
+
+    switch (node->type)
+    {
+        case ASTLeaf_t:
+        {
+            //firstpos is preset for leaf nodes
+            node_ast* A = *(node_ast**)node->data;
+            return A->firstpos;
+        }
+        
+        case ASTCat_t:
+        {
+            binary_ast* A = *(binary_ast**)node->data;
+            if (A->firstpos == NULL)
+            {
+                if (ast_nullable(A->left))
+                {
+                    //firstpos(A) = firstpos(left) U firstpos(right)
+                    A->firstpos = set_union(ast_firstpos(A->left), ast_firstpos(A->right));
+                }
+                else 
+                {
+                    //firstpos(A) = firstpos(left)
+                    A->firstpos = set_copy(ast_firstpos(A->left));
+                }
+            }
+            return A->firstpos;
+        }
+        
+        case ASTOr_t:
+        {
+            binary_ast* A = *(binary_ast**)node->data;
+            if (A->firstpos == NULL)
+            {
+                //firstpos(A) = firstpos(left) U firstpos(right)
+                A->firstpos = set_union(ast_firstpos(A->left), ast_firstpos(A->right));
+            }
+            return A->firstpos;
+        }
+        
+        case ASTStar_t:
+        {
+            unary_ast* A = *(unary_ast**)node->data;
+            if (A->firstpos == NULL)
+            {
+                //firstpos(A) = firstpos(left)
+                A->firstpos = set_copy(ast_firstpos(A->body));
+            }
+            return A->firstpos;
+        }
+        
+        default:
+        {
+            printf("ERROR reached end of firstpos function, which should be impossible\n");
+            return NULL;
+        }
+    }
+}
+
+//lastpos is firstpos with left and right swapped
+set* ast_lastpos(obj* node)
+{
+    assert(node != NULL);
+    assert(node->type == ASTCat_t
+        || node->type == ASTOr_t
+        || node->type == ASTStar_t
+        || node->type == ASTLeaf_t);
+
+    switch (node->type)
+    {
+        case ASTLeaf_t:
+        {
+            //lastpos is preset for leaf nodes
+            node_ast* A = *(node_ast**)node->data;
+            return A->lastpos;
+        }
+        
+        case ASTCat_t:
+        {
+            binary_ast* A = *(binary_ast**)node->data;
+            if (A->lastpos == NULL)
+            {
+                if (ast_nullable(A->right))
+                {
+                    //lastpos(A) = lastpos(left) U lastpos(right)
+                    A->lastpos = set_union(ast_lastpos(A->left), ast_lastpos(A->right));
+                }
+                else 
+                {
+                    //lastpos(A) = lastpos(right)
+                    A->lastpos = set_copy(ast_lastpos(A->right));
+                }
+            }
+            return A->lastpos;
+        }
+        
+        case ASTOr_t:
+        {
+            binary_ast* A = *(binary_ast**)node->data;
+            if (A->lastpos == NULL)
+            {
+                //lastpos(A) = lastpos(left) U lastpos(right)
+                A->lastpos = set_union(ast_lastpos(A->left), ast_lastpos(A->right));
+            }
+            return A->lastpos;
+        }
+        
+        case ASTStar_t:
+        {
+            unary_ast* A = *(unary_ast**)node->data;
+            if (A->lastpos == NULL)
+            {
+                //lastpos(A) = lastpos(left)
+                A->lastpos = set_copy(ast_lastpos(A->body));
+            }
+            return A->lastpos;
+        }
+        
+        default:
+        {
+            printf("ERROR reached end of lastpos function, which should be impossible\n");
+            return NULL;
+        }
+    }
+}
+
+// set* ast_followpos(obj* node){}
+// void ast_compute_followpos(obj* root){}
+
+/**
+    Return a list of all nodes in the AST
+*/
+vect* ast_get_nodes_list(obj* root)
+{
+    vect* nodes_list = new_vect();
+    ast_get_nodes_list_inner(root, nodes_list);
+    return nodes_list;
+}
+
+// void ast_get_nodes_list_inner(obj* node, vect* nodes_list)
+// {
+//     assert(node != NULL);
+//     assert(node->type == ASTCat_t
+//         || node->type == ASTOr_t
+//         || node->type == ASTStar_t
+//         || node->type == ASTLeaf_t);
+
+//     switch (node->type)
+//     {
+//         case ASTLeaf_t:
+// }
+
+
 
 
 #endif

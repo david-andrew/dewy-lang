@@ -4,31 +4,20 @@
 //1) rule for identifying decimal digits
 #decimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
 #decimal_prefix = '0D' | '0d'; //obviously optional
-#decimal_natural = [#decimal_prefix], (#decimal_digit, {#decimal_digit | '_'});
+#decimal_digit_string = #decimal_digits, {#decimal_digit | '_'};
+#decimal_natural = [#decimal_prefix], #decimal_digit_string;
 
 
 //test if compiler can identify decimal digit
-#add_scan_rule(/{comment inside of meta-function call}/ #decimal_natural  )
+#lex(/{comment inside of meta-function call}/ #decimal_natural  )
 //0
 //0d
 //0d4868576
 
 
 //2) rules for identifying decimal exponential number
-
-//capture rules:
-//1) all groups contained in [], {}, or ()
-//2) any #identifiers
-// others? should strings be captured?
-//captures are nested lists.
-//first capture is the entire sequence captured, followed by each subsequent capture in the top level
-//sub-captures are accessed by selecting the desired capture from the lists, and then selecting the sub-capture from that capture item
-//groupA or groupB will appear as a single capture item
-//optional groups that were not found will be null
-// 
-//#decimal_integer = ['-'], #decimal_natural;
-#decimal_rational = ([#decimal_natural], '.', [#decimal_natural])-'.';
-#decimal_floating_point = #decimal_rational, [('e'|'E'), ['-'], #decimal_rational];
+#decimal_rational = #decimal_natural, '.', #decimal_digit_string;
+#decimal_floating_point = #decimal_rational, [('e'|'E'), ['-'|'+'], #decimal_rational];
 
 //3) rules for identifying identifiers
 #lowercase_letter = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' 

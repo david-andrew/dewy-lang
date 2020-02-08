@@ -93,7 +93,6 @@ int get_level_first_token_type(vect* tokens, token_type type)
             if (j > i) 
             { 
                 i = j + 1; 
-                continue; 
             }
             else 
             { 
@@ -374,12 +373,13 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
                 obj* id = new_string(clone(t->content));   
                 obj* ast = dict_get(meta_symbols, id); //reference to the hashtag's ast if it exists
                 obj_free(id);
-                obj_free(vect_dequeue(tokens)); //free the token with the id
                 if (ast != NULL)
                 {
+                    obj_free(vect_dequeue(tokens)); //free the token with the id
                     return ast;
                 }
-                printf("ERROR: hashtag (#%s) does not exist in the meta-symbol-table\n", t->content);
+                printf("ERROR: hashtag (%s) does not exist in the meta-symbol-table\n", t->content);
+                obj_free(vect_dequeue(tokens)); //free the token with the id
                 return new_ast_leaf_obj(0);
             }
             default: 
