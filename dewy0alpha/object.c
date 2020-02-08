@@ -310,7 +310,7 @@ void obj_print(obj* o)
     switch (o->type)
     {
         case Boolean_t: printf(*(bool*)o->data ? "true" : "false"); break;
-        case Character_t: put_unicode(*(uint32_t*)o->data); break;
+        case Character_t: unicode_str(*(uint32_t*)o->data); break;//put_unicode(*(uint32_t*)o->data); break;
         case Integer_t: printf("%ld", *(int64_t*)o->data); break;
         case UInteger_t: printf("%lu", *(uint64_t*)o->data); break;
         case String_t: printf("%s", *(char**)o->data); break;

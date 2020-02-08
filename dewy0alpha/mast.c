@@ -192,6 +192,7 @@ void ast_repr_inner(obj* node, int indent)
         {
             binary_ast* A = *(binary_ast**)node->data;
             printf("(+)\n");
+            // printf("(+) [fp: "); set_str(A->followpos); printf("]\n");
             ast_repr_inner(A->left, indent+1);
             ast_repr_inner(A->right, indent+1);
             return;
@@ -200,6 +201,7 @@ void ast_repr_inner(obj* node, int indent)
         {
             binary_ast* A = *(binary_ast**)node->data;
             printf("(|)\n");
+            // printf("(|) [fp: "); set_str(A->followpos); printf("]\n");
             ast_repr_inner(A->left, indent+1);
             ast_repr_inner(A->right, indent+1);
             return;
@@ -208,6 +210,7 @@ void ast_repr_inner(obj* node, int indent)
         {
             unary_ast* A = *(unary_ast**)node->data;
             printf("(*)\n");
+            // printf("(*) [fp: "); set_str(A->followpos); printf("]\n");
             ast_repr_inner(A->body, indent+1);
             return;
         }
@@ -217,8 +220,8 @@ void ast_repr_inner(obj* node, int indent)
             printf(" ");
             put_unicode(A->codepoint ? A->codepoint : 0x2300); //print the character, or the ⌀ symbol
             printf(" [id: %lu, fp: ", A->id); 
-            // set_str(A->firstpos); printf(", lastpos: ");
-            // set_str(A->lastpos); printf(", followpos: ");
+            // set_str(ast_firstpos(node)); printf(", lastpos: ");
+            // set_str(ast_lastpos(node)); printf(", followpos: ");
             set_str(A->followpos); printf("]\n");
             // printf(" [id: %lu]\n", A->id);
             return;

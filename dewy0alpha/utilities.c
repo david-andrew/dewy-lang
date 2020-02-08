@@ -35,6 +35,8 @@ uint64_t lfsr64_prev(uint64_t curr);
 
 void put_unicode(uint32_t c);
 uint32_t eat_utf8(char** str_ptr);
+void unicode_str(uint32_t c);
+
 
 /**
     clamp an integer to a range
@@ -355,6 +357,25 @@ uint32_t eat_utf8(char** str_ptr)
     
     printf("ERROR: eat_utf8() found ill-formed utf-8 character\n");
     return 0;
+}
+
+/**
+    print the unicode character, or a special character for specific inputs
+*/
+void unicode_str(uint32_t c)
+{
+    if (c == 0)                 //null character. represents an empty string/set
+    {
+        put_unicode(0x2300);    // ⌀ (diameter symbol)
+    }
+    else if (c == 0x19)         //end of medium ascii code. represents the end of a meta-rule
+    {
+        put_unicode(0x237F);    // ⍿ (vertical line with middle dot)
+    }
+    else                        //any other unicode character
+    {
+        put_unicode(c);
+    }
 }
 
 
