@@ -422,18 +422,39 @@ vect* ast_get_nodes_list(obj* root)
     return nodes_list;
 }
 
-// void ast_get_nodes_list_inner(obj* node, vect* nodes_list)
-// {
-//     assert(node != NULL);
-//     assert(node->type == ASTCat_t
-//         || node->type == ASTOr_t
-//         || node->type == ASTStar_t
-//         || node->type == ASTLeaf_t);
+void ast_get_nodes_list_inner(obj* node, vect* nodes_list)
+{
+    assert(node != NULL);
+    assert(node->type == ASTCat_t
+        || node->type == ASTOr_t
+        || node->type == ASTStar_t
+        || node->type == ASTLeaf_t);
 
-//     switch (node->type)
-//     {
-//         case ASTLeaf_t:
-// }
+    vect_append(nodes_list, node);
+
+    switch (node->type)
+    {
+        case ASTLeaf_t: 
+        {
+            //no further nodes to add
+            return;
+        }
+        case ASTCat_t:
+        case ASTOr_t:
+        {
+            binary_ast* A = *(binary_ast**)node->data;
+            ast_get_nodes_list_inner(A->left, nodes_list);
+            ast_get_nodes_list_inner(A->right, nodes_list);
+            return;
+        }
+        case ASTStar_t:
+        {
+            unary_ast* A = *(unary_ast**)node->data;
+            ast_get_nodes_list_inner(A->body, nodes_list);
+            return;
+        }
+    }
+}
 
 
 
