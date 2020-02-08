@@ -66,6 +66,8 @@ set* ast_firstpos(obj* node);
 set* ast_lastpos(obj* node);
 set* ast_followpos(obj* node);
 void ast_compute_followpos(obj* root);
+void ast_compute_followpos_cat(obj* cat_node, dict* id_to_node);
+void ast_compute_followpos_star(obj* star_node, dict* id_to_node);
 void ast_get_nodes_list(obj* node, vect* nodes);
 obj* ast_copy(obj* node);
 void ast_uniqueify_ids(vect* nodes_list);
@@ -521,22 +523,75 @@ void ast_compute_followpos(obj* root)
     //ensure that every node has a unique id
     ast_uniqueify_ids(nodes_list);
 
+    //set up a map from each node's id to its own reference
+    dict* id_to_node = new_dict();
     for (int i = 0; i < vect_size(nodes_list); i++)
     {
         obj* node = vect_get(nodes_list, i);
-        assert(node != NULL);
-        assert(node->type == ASTCat_t || node->type == ASTOr_t || node->type == ASTStar_t || node->type == ASTLeaf_t);
-        if (node->type == ASTCat_t) 
+        if (node->type == ASTLeaf_t)
         {
-
+            node_ast* A = *(node_ast**)node->data;
+            dict_set(id_to_node, new_uint(A->id), node);
         }
-        else if (node->type == ASTStar_t)
-        {
+    }
 
+    //for every node in the list of nodes, handle computing followpos
+    for (int i = 0; i < vect_size(nodes_list); i++)
+    {
+        obj* node = vect_get(nodes_list, i);
+        switch (node->type)
+        {
+            case ASTCat_t:
+            {
+                binary_ast* A = *(binary_ast**)node->data;
+                if (A->followpos == NULL) 
+                { 
+                    A->followpos = new_set(); 
+                }
+                ast_compute_followpos_cat(node, id_to_node);
+                break;
+            }
+            case ASTStar_t:
+            {
+                unary_ast* A = *(unary_ast**)node->data;
+                if (A->followpos == NULL) 
+                { 
+                    A->followpos = new_set(); 
+                }
+                ast_compute_followpos_star(node, id_to_node);
+                break;
+            }
+            case ASTOr_t:
+            {
+                binary_ast* A = *(binary_ast**)node->data;
+                if (A->followpos == NULL) 
+                { 
+                    A->followpos = new_set(); 
+                }
+                break;
+            }
+            case ASTLeaf_t: 
+            {
+                node_ast* A = *(node_ast**)node->data;
+                if (A->followpos == NULL) 
+                { 
+                    A->followpos = new_set(); 
+                }
+                break;
+            }
+            default:
+            {
+                printf("ERROR reached end of ast_compute_followpos() function, which should be impossible\n");
+                break;
+            }
         }
     }
 
     vect_free_list_only(nodes_list);
+
+    //instead, set each obj value to NULL,
+    //and then regular dict_free(id_to_node);
+    // dict_free_except_values(id_to_node);
 }
 
 /**
@@ -545,9 +600,12 @@ void ast_compute_followpos(obj* root)
     "If n is a cat-node with left child c1 and right child c2 , 
     then for every position i in lastpos(c1), all positions in firstpos(c2) are in followpos(i)."
 */
-void ast_compute_followpos_cat(obj* cat_node)
+void ast_compute_followpos_cat(obj* cat_node, dict* id_to_node)
 {
+    // vect* children = new_vect();
+    // ast_get_nodes_list(cat_node, children);
 
+    // vect_free_list_only(nodes_list);
 }
 
 /**
@@ -556,9 +614,14 @@ void ast_compute_followpos_cat(obj* cat_node)
     If n is a star-node, and i is a position in lastpos(n), 
     then all positions in firstpos(n) are in followpos(i);
 */
-void ast_compute_followpos_star(obj* star_node)
+void ast_compute_followpos_star(obj* star_node, dict* id_to_node)
 {
+    set* lastpos = ast_lastpos(star_node);
+    set* firstpos = ast_firstpos(star_node);
+    // vect* children = new_vect();
+    // ast_get_nodes_list(star_node, children);
 
+    // vect_free_list_only(nodes_list);
 }
 
 
