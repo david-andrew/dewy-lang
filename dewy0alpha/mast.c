@@ -65,34 +65,39 @@ bool ast_nullable(obj* node);
 set* ast_firstpos(obj* node);
 set* ast_lastpos(obj* node);
 set* ast_followpos(obj* node);
-vect* ast_get_nodes_list(obj* root);
-void ast_get_nodes_list_inner(obj* node, vect* nodes);
-
-//rest of the AST functions
+void ast_compute_followpos(obj* root);
+void ast_get_nodes_list(obj* node, vect* nodes);
+obj* ast_copy(obj* node);
+void ast_uniqueify_ids(vect* nodes_list);
 
 
 //global int to give each leaf node a unique identifier
-uint64_t _ast_node_id_counter = 0;
+// uint64_t _ast_node_id_counter = 0;
 
 node_ast* new_node_ast(uint32_t c)
 {
     node_ast* A = malloc(sizeof(node_ast));
     A->codepoint = c;
-    A->id = _ast_node_id_counter++; //assign a unique identifier
+    A->id = 0; //this will be uniqueified later //_ast_node_id_counter++; //assign a unique identifier
     if (c != 0) //if codepoint is not 0, then it is a non-null leaf
     {
         A->nullable = new_bool_ptr(false);
-        A->firstpos = new_set();
-        set_add(A->firstpos, new_uint(A->id));  //firstpos contains only c
-        A->lastpos = new_set();
-        set_add(A->lastpos, new_uint(A->id));   //lastpos contains only c
-        A->followpos = NULL;                    //followpos will be computed later once the tree is complete
+        A->firstpos = NULL;
+        A->lastpos = NULL;
+        A->followpos = NULL;
+        // A->firstpos = new_set();
+        // set_add(A->firstpos, new_uint(A->id));  //firstpos contains only c
+        // A->lastpos = new_set();
+        // set_add(A->lastpos, new_uint(A->id));   //lastpos contains only c
+        // A->followpos = NULL;                    //followpos will be computed later once the tree is complete
     }
     else    //otherwise this is an ϵ (epsilon), i.e. null leaf
     {
         A->nullable = new_bool_ptr(true);       //the null char is by definition nullable
-        A->firstpos = new_set();                //firstpos is by definition an empty set
-        A->lastpos = new_set();                 //lastpos is by definition an empty set
+        A->firstpos = NULL;
+        A->lastpos = NULL;
+        // A->firstpos = new_set();                //firstpos is by definition an empty set
+        // A->lastpos = new_set();                 //lastpos is by definition an empty set
         A->followpos = NULL;                    //followpos will be computed later once the tree is complete
     }
 
@@ -207,8 +212,8 @@ void ast_repr_inner(obj* node, int indent)
         {
             node_ast* A = *(node_ast**)node->data;
             printf(" ");
-            put_unicode(A->codepoint ? A->codepoint : 0x03F5); //print the character, or the ϵ symbol
-            printf("\n");
+            put_unicode(A->codepoint ? A->codepoint : 0x2300); //print the character, or the ⌀ symbol
+            printf(" [id: %lu]\n", A->id);
             return;
         }
         default: { printf("ERROR: not an AST type (%d)\n", node->type); return; }
@@ -252,25 +257,32 @@ void ast_str(obj* node)
         case ASTOr_t:
         {
             binary_ast* A = *(binary_ast**)node->data;
-            // printf("(");
             ast_str(A->left);
             printf(" | ");
             ast_str(A->right);
-            // printf(")");
             return;
         }
         case ASTStar_t:
         {
             unary_ast* A = *(unary_ast**)node->data;
-            printf("(");
-            ast_str(A->body);
-            printf(")*");
+            if (A->body->type == ASTCat_t || A->body->type == ASTOr_t)
+            {
+                printf("("); ast_str(A->body); printf(")*");
+            }
+            else if (A->body->type == ASTLeaf_t)
+            {
+                ast_str(A->body); printf("*");
+            }
+            else //ASTStar_t is idempotent, i.e. A** = A*
+            {
+                ast_str(A->body);
+            }
             return;
         }
         case ASTLeaf_t:
         {
             node_ast* A = *(node_ast**)node->data;
-            put_unicode(A->codepoint ? A->codepoint : 0x2205); //print the character, or the ϵ/∅ (0x03F5/0x2205) symbol
+            put_unicode(A->codepoint ? A->codepoint : 0x2300); //print the character, or the ⌀ (0x2300) symbol
             return;
         }
         default: { printf("ERROR: not an AST type (%d)\n", node->type); return; }
@@ -355,8 +367,16 @@ set* ast_firstpos(obj* node)
     {
         case ASTLeaf_t:
         {
-            //firstpos is preset for leaf nodes
             node_ast* A = *(node_ast**)node->data;
+            if (A->firstpos == NULL)
+            {
+                A->firstpos = new_set();
+                if (A->codepoint != 0) //if not empty character, firspos will contain only c
+                {
+                    set_add(A->firstpos, new_uint(A->id));
+                }
+                //else firstpos will be the empty set
+            }
             return A->firstpos;
         }
         
@@ -422,8 +442,15 @@ set* ast_lastpos(obj* node)
     {
         case ASTLeaf_t:
         {
-            //lastpos is preset for leaf nodes
             node_ast* A = *(node_ast**)node->data;
+            if (A->lastpos == NULL)
+            {
+                A->lastpos = new_set();
+                if (A->codepoint != 0)
+                {
+                    set_add(A->lastpos, new_uint(A->id));
+                }
+            }
             return A->lastpos;
         }
         
@@ -476,20 +503,53 @@ set* ast_lastpos(obj* node)
     }
 }
 
+/**
+    return the followpos set of the current node. 
+    ensure that ast_compute_followpos has been called before this
+*/
 // set* ast_followpos(obj* node){}
-// void ast_compute_followpos(obj* root){}
 
 /**
-    Return a list of all nodes in the AST
+    compute the followpos set for every node in the ast
 */
-vect* ast_get_nodes_list(obj* root)
+void ast_compute_followpos(obj* root)
 {
+    //get all nodes in the AST in list form
     vect* nodes_list = new_vect();
-    ast_get_nodes_list_inner(root, nodes_list);
-    return nodes_list;
+    ast_get_nodes_list(root, nodes_list);
+
+    //ensure that every node has a unique id
+    ast_uniqueify_ids(nodes_list);
+
+    for (int i = 0; i < vect_size(nodes_list); i++)
+    {
+        obj* node = vect_get(nodes_list, i);
+        assert(node != NULL);
+        assert(node->type == ASTCat_t || node->type == ASTOr_t || node->type == ASTStar_t || node->type == ASTLeaf_t);
+        //If n is a cat-node with left child c1 and right child c2 , 
+        //then for every position i in lastpos(c1), all positions in firstpos(c2) are in followpos(i).
+        if (node->type == ASTCat_t) 
+        {
+
+        }
+        else if (node->type == ASTStar_t)
+        {
+
+        }
+    }
+
+
+
+    vect_free_list_only(nodes_list);
 }
 
-void ast_get_nodes_list_inner(obj* node, vect* nodes_list)
+/**
+    Recursively compute a list of all nodes in the AST.
+
+    @param node is the current node in the tree
+    @param nodes_list is the list to store a reference to all nodes in
+*/
+void ast_get_nodes_list(obj* node, vect* nodes_list)
 {
     assert(node != NULL);
     assert(node->type == ASTCat_t
@@ -511,19 +571,79 @@ void ast_get_nodes_list_inner(obj* node, vect* nodes_list)
         case ASTOr_t:
         {
             binary_ast* A = *(binary_ast**)node->data;
-            ast_get_nodes_list_inner(A->left, nodes_list);
-            ast_get_nodes_list_inner(A->right, nodes_list);
+            ast_get_nodes_list(A->left, nodes_list);
+            ast_get_nodes_list(A->right, nodes_list);
             return;
         }
         case ASTStar_t:
         {
             unary_ast* A = *(unary_ast**)node->data;
-            ast_get_nodes_list_inner(A->body, nodes_list);
+            ast_get_nodes_list(A->body, nodes_list);
             return;
         }
         default:
         {
             printf("ERROR reached end of ast_get_nodes_list_inner() function, which should be impossible\n");
+        }
+    }
+}
+
+
+obj* ast_copy(obj* node)
+{
+    assert(node != NULL);
+    assert(node->type == ASTCat_t
+        || node->type == ASTOr_t
+        || node->type == ASTStar_t
+        || node->type == ASTLeaf_t);
+
+    switch (node->type)
+    {
+        case ASTLeaf_t: 
+        {
+            node_ast* A = *(node_ast**)node->data;
+            return new_ast_leaf_obj(A->codepoint);
+        }
+        case ASTCat_t:
+        {
+            binary_ast* A = *(binary_ast**)node->data;
+            return new_ast_cat_obj(ast_copy(A->left), ast_copy(A->right));
+        }
+        case ASTOr_t:
+        {
+            binary_ast* A = *(binary_ast**)node->data;
+            return new_ast_or_obj(ast_copy(A->left), ast_copy(A->right));
+        }
+        case ASTStar_t:
+        {
+            unary_ast* A = *(unary_ast**)node->data;
+            return new_ast_star_obj(ast_copy(A->body));
+        }
+        default:
+        {
+            printf("ERROR reached end of ast_get_nodes_list_inner() function, which should be impossible\n");
+            return NULL;
+        }
+    }
+}
+
+void ast_uniqueify_ids(vect* nodes_list)
+{
+    for (uint64_t i = 0; i < vect_size(nodes_list); i++)
+    {
+        obj* node = vect_get(nodes_list, i);
+
+        assert(node != NULL);
+        assert(node->type == ASTCat_t
+            || node->type == ASTOr_t
+            || node->type == ASTStar_t
+            || node->type == ASTLeaf_t);
+
+        //only leaf nodes have IDs. Reassign so that ID is unique
+        if (node->type == ASTLeaf_t)
+        {
+            node_ast* A = *(node_ast**)node->data;
+            A->id = i;
         }
     }
 }

@@ -38,7 +38,7 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens);
 void create_lex_rule(dict* meta_rules, vect* tokens);
 bool expand_rules(vect* tokens, dict* meta_rules);
 obj* build_ast(vect* tokens, dict* meta_symbols);
-size_t get_lowest_precedence_index(vect* tokens);
+// size_t get_lowest_precedence_index(vect* tokens);
 int find_closing_pair(vect* tokens, int start);
 obj* build_string_ast_obj(token* t);
 
@@ -176,11 +176,13 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens)
 
     //build an AST out of the tokens list
     obj* rule_ast = build_ast(rule_body, meta_symbols);
+    // ast_uniqueify_ids(rule_ast);
+    ast_compute_followpos(rule_ast);
     // printf("Adding rule: "); 
     obj_print(id); 
     printf(" -> ");
-    // ast_repr(rule_ast); //print the full tree
-    ast_str(rule_ast); //print the expanded regex form of the rule
+    printf("\n");ast_repr(rule_ast); //print the full tree
+    // ast_str(rule_ast); //print the expanded regex form of the rule
     printf("\n");
     dict_set(meta_symbols, id, rule_ast);
 
@@ -379,7 +381,7 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
                 if (ast != NULL)
                 {
                     obj_free(vect_dequeue(tokens)); //free the token with the id
-                    return ast;
+                    return ast_copy(ast);
                 }
                 printf("ERROR: hashtag (%s) does not exist in the meta-symbol-table\n", t->content);
                 obj_free(vect_dequeue(tokens)); //free the token with the id
@@ -393,7 +395,7 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
         }
     }
 
-
+    printf("ERROR: reached the end of build_ast(), which indicates a syntax error\n");
     return NULL; 
 }
 
@@ -401,13 +403,13 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
     return the index of the token with the lowest precedence
     if least precedence operator is a pair, e.g. [], {}, (), return the index of the left side
 */
-size_t get_lowest_precedence_index(vect* tokens)
-{
-    //this function might be unnecessary? based on direct checks described above.
-    //instead this might change into: int find_leftmost_token(vect* tokens, token_type type){}
-    //--->returns the index of the rightmost occurance of the specified token, or -1 if not found
-    return 0;
-}
+// size_t get_lowest_precedence_index(vect* tokens)
+// {
+//     //this function might be unnecessary? based on direct checks described above.
+//     //instead this might change into: int find_leftmost_token(vect* tokens, token_type type){}
+//     //--->returns the index of the rightmost occurance of the specified token, or -1 if not found
+//     return 0;
+// }
 
 /**
     return the index of the matching token pair for [], {}, ()

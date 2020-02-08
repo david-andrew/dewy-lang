@@ -51,6 +51,7 @@ void vect_reset(vect* v);
 vect* vect_copy(vect* src, vect* dest);
 vect* vect_copy_with_refs(vect* v, dict* refs);
 void vect_free(vect* v);
+void vect_free_list_only(vect* v);
 int64_t vect_compare(vect* left, vect* right);
 uint64_t vect_hash(vect* v);
 void vect_repr(vect* v);
@@ -356,6 +357,15 @@ void vect_free(vect* v)
     {
         obj_free(vect_get(v, i));
     }
+    free(v->list);
+    free(v);
+}
+
+/**
+    Free the vector container without touching its objects
+*/
+void vect_free_list_only(vect* v)
+{
     free(v->list);
     free(v);
 }

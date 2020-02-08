@@ -155,27 +155,6 @@ obj* match_meta_string(char** src)
     return NULL;
 }
 
-// obj* match_meta_double_quote_string(char** src) 
-// {
-//         if ((*src)[0] == '"')
-//     {
-//         //scan for matching \' to close the string, or null terminator, which indicates unclosed string
-//         int i = 1;
-//         while ((*src)[i] != 0 && (*src)[i] != '"') { i++; }
-//         if ((*src)[i] == '"') 
-//         {
-//             obj* t = new_token(meta_double_quote_string, substr(*src, 0, i));
-//             *src += i + 1;
-//             return t;
-//         }
-//         else 
-//         {
-//             printf("ERROR: reached the end of input while scanning 'double-quote string'\n");
-//         }
-//     }
-//     return NULL;
-// }
-
 obj* match_meta_comma(char** src) 
 {
     return *src[0] == ',' ? new_token(meta_comma, substr((*src)++, 0, 0)) : NULL;
