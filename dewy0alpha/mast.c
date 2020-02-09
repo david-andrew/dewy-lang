@@ -72,6 +72,7 @@ void ast_compute_followpos_star(obj* star_node, dict* id_to_node);
 void ast_get_nodes_list(obj* node, vect* nodes);
 obj* ast_copy(obj* node);
 void ast_uniqueify_ids(vect* nodes_list);
+obj* get_transition_key(uint64_t id, uint32_t codepoint);
 
 
 //global int to give each leaf node a unique identifier
@@ -853,6 +854,20 @@ dict* ast_generate_rule_table(obj* root)
     //TODO->need to come up with a good method for the keys. perhaps make a new obj type
     //alternative is a table that uses strings for the keys? 
     return NULL;
+}
+
+
+/**
+    create a unique integer from a set ID and a char codepoint
+
+    Note that codepoints are by definition up to 2^21 - 1
+    So the codepoint will take 21 bits of the 64-bit key
+    and the id will take the remaining 43 bits
+    (this restricts ids to be less than 2^43, or 8,796,093,022,208)
+*/
+obj* get_transition_key(uint64_t id, uint32_t codepoint)
+{
+    return new_uint((id << 21) | (codepoint & 0x001FFFFF));
 }
 
 
