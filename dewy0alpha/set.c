@@ -15,8 +15,8 @@ typedef struct set_struct
 } set;
 
 set* new_set();
-obj* new_set_obj();
-obj* set_obj_wrap(set* s);
+obj* new_set_obj(set* s);
+// obj* set_obj_wrap(set* s);
 size_t set_size(set* S);
 // size_t set_capacity(set* S);
 bool set_add(set* S, obj* item);
@@ -39,27 +39,16 @@ set* new_set()
     return S;
 }
 
-obj* new_set_obj()
+/**
+    Create a new set wrapped in an obj. points to s if it isn't null, else a new set
+*/
+obj* new_set_obj(set* s)
 {
     obj* S = malloc(sizeof(obj));
     S->type = Set_t;
     S->size = 0; //size needs to be determined on a per call basis
     set** s_ptr = malloc(sizeof(set*));
-    *s_ptr = new_set();
-    S->data = (void*)s_ptr;
-    return S;
-}
-
-/**
-    Wrap a set* inside of an obj*
-*/
-obj* set_obj_wrap(set* s)
-{
-    obj* S = malloc(sizeof(obj));
-    S->type = Set_t;
-    S->size = 0;
-    set** s_ptr = malloc(sizeof(set*));
-    *s_ptr = s;
+    *s_ptr = s != NULL ? s : new_set();
     S->data = (void*)s_ptr;
     return S;
 }

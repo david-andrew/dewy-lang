@@ -22,10 +22,8 @@ typedef struct vect_struct
 
 
 vect* new_vect();
-obj* new_vect_obj();
-obj* vect_obj_wrap(vect* v);
+obj* new_vect_obj(vect* v);
 size_t vect_size(vect* v);
-// size_t vect_obj_size(void* v);
 size_t vect_capacity(vect* v);
 bool vect_resize(vect* v, size_t new_size);
 bool vect_insert(vect* v, obj* item, size_t index);
@@ -66,30 +64,21 @@ vect* new_vect()
     return v_ptr;
 }
 
-obj* new_vect_obj()
+/*
+    Create a vector object. points to v if it isn't null, else points to a new vect
+*/
+obj* new_vect_obj(vect* v)
 {
     obj* V = malloc(sizeof(obj));
     V->type = Vector_t;
     V->size = 0; //size needs to be determined on a per call basis
     vect** v_ptr = malloc(sizeof(vect*));
-    *v_ptr = new_vect();
+    *v_ptr = v != NULL ? v : new_vect();
     V->data = (void*)v_ptr;
     return V;
 }
 
-/*
-    Create a vector object from an existing vect*
-*/
-obj* vect_obj_wrap(vect* v)
-{
-    obj* V = malloc(sizeof(obj));
-    V->type = Vector_t;
-    V->size = 0;
-    vect** v_ptr = malloc(sizeof(vect*));
-    *v_ptr = v;
-    V->data = (void*)v_ptr;
-    return V;
-}
+
 
 size_t vect_size(vect* v)
 {

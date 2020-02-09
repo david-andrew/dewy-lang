@@ -48,7 +48,7 @@ typedef struct dict_struct
 
 
 dict* new_dict();
-obj* new_dict_obj();
+obj* new_dict_obj(dict* d);
 size_t dict_size(dict* d);
 size_t dict_indices_capacity(dict* d);
 size_t dict_entries_capacity(dict* d);
@@ -86,15 +86,15 @@ dict* new_dict()
 }
 
 /**
-    creates a new dict* wrapped in an object
+    creates a new dict* wrapped in an object. points to d if d isn't null, else points to a new dict
 */
-obj* new_dict_obj()
+obj* new_dict_obj(dict* d)
 {
     obj* D = malloc(sizeof(obj));
     D->type = Dictionary_t;
     D->size = 0; //size needs to be determined on a per call basis
     dict** d_ptr = malloc(sizeof(dict*));
-    *d_ptr = new_dict();
+    *d_ptr = d != NULL ? d : new_dict();
     D->data = (void*)d_ptr;
     return D;
 }
