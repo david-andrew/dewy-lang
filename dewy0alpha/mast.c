@@ -850,10 +850,10 @@ void ast_uniqueify_ids(vect* nodes_list)
 */
 dict* ast_generate_rule_table(obj* root)
 {
-    //augment the AST with the special ⍿ (end of medium) delimiter
-    obj* augmented_rule = new_ast_cat_obj(root, new_ast_leaf_obj(AUGMENT_CHAR));
+    //augment the AST with the special AUGMENT_CHAR delimiter
+    obj* augment = new_ast_cat_obj(root, new_ast_leaf_obj(AUGMENT_CHAR));
     printf("augmented rule: ");
-    obj_print(augmented_rule);
+    obj_print(augment);
     printf("\n");
 
     //ensure nodes have unique id's and compute followpos. 
@@ -861,17 +861,40 @@ dict* ast_generate_rule_table(obj* root)
     vect* nodes_list = ast_get_nodes_list(root, NULL);             
     ast_uniqueify_ids(nodes_list);                          
     dict* id_to_node = ast_get_ids_to_nodes(nodes_list);
-    ast_compute_followpos(augmented_rule, nodes_list, id_to_node);
+    ast_compute_followpos(augment, nodes_list, id_to_node);
 
-    //Dstates is represented by a set with an index marker for identifying which states have been "marked"
-    set* states = new_set();
+    //Dstates is represented by a dict with an index marker for identifying which states have been "marked"
+    dict* states = new_dict();
     int marker = 0;
 
     //Dtran is represented by a dict that maps from id-codepoint pairs to the following state id
     dict* trans_table = new_dict();
 
-    
+    //add the set firstpos(root) to states
+    dict_set(states, new_set_obj(ast_firstpos(augment)), new_uint(0));
 
+    while (marker < dict_size(states))
+    {
+        //get the set S from our dict of sets, at index [marker], and its S_id
+        obj* S_obj = states->entries[marker].key;
+        obj* S_id_obj = dict_get(states, S_obj);
+        set* S = *(set**)S_obj->data;
+        uint64_t S_id = *(uint64_t*)S_id_obj->data;
+        marker++;
+
+        //create a dict* symbol_to_nodes that maps from every codepoint in S to a vect of the nodes in S that have that codepoint
+        //for every input symbol a in symbol_to_nodes
+        // {
+        //     U is the union of follopos of all states in symbol_to_nodes[a]
+        //     if U not in states
+        //         dict_set(states, U, new_uint(dict_size(states))); //automatically unmarked since it's added to the end
+        //     //NEED TO GET U_id somehow. easy if just added... probably turn states into a dict that maps from set to set_id
+        //     U_id_obj = dict_get(states, U);
+        //     uint64_t U_id = *(uint64_t*)U_id_obj->data;
+        //     dict_set(trans_table, get_transition_key(S_id, a), U_id);
+        // }
+
+    }
 
 
     return NULL;
