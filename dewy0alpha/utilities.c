@@ -370,9 +370,9 @@ void unicode_str(uint32_t c)
     {
         put_unicode(0x2300);    // ⌀ (diameter symbol)
     }
-    else if (c == 0x19)         //end of medium ascii code. represents the end of a meta-rule
+    else if (c == 0x1F)         //unit separater ascii code. represents the end of a meta-rule
     {
-        put_unicode(0x237F);    // ⍿ (vertical line with middle dot)
+        put_unicode(0x22D5);    // ⋕ (equal and parallel to)
     }
     else                        //any other unicode character
     {

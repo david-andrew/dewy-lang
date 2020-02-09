@@ -286,7 +286,8 @@ void ast_str(obj* node)
         case ASTLeaf_t:
         {
             node_ast* A = *(node_ast**)node->data;
-            put_unicode(A->codepoint ? A->codepoint : 0x2300); //print the character, or the ⌀ (0x2300) symbol
+            // put_unicode(A->codepoint ? A->codepoint : 0x2300); //print the character, or the ⌀ (0x2300) symbol
+            unicode_str(A->codepoint);
             return;
         }
         default: { printf("ERROR: not an AST type (%d)\n", node->type); return; }
@@ -831,6 +832,27 @@ void ast_uniqueify_ids(vect* nodes_list)
             A->id = i;
         }
     }
+}
+
+
+/**
+    Create a rule table consisting of state-character pairs mapping to next states
+*/
+dict* ast_generate_rule_table(obj* root)
+{
+    // obj_print(root);
+
+    //augment the AST with the special ⍿ (end of medium) delimiter
+    obj* augmented_rule = new_ast_cat_obj(root, new_ast_leaf_obj(0x1F));
+    printf("augmented rule: ");
+    obj_print(augmented_rule);
+    printf("\n");
+
+    ast_compute_followpos(augmented_rule);
+
+    //TODO->need to come up with a good method for the keys. perhaps make a new obj type
+    //alternative is a table that uses strings for the keys? 
+    return NULL;
 }
 
 

@@ -5,9 +5,11 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <assert.h>
 
 #include "utilities.c"
 #include "object.c"
+#include "token.c"
 
 #define DEFAULT_DICT_CAPACITY 8
 #define MAX_LOAD 2 / 3
@@ -57,6 +59,7 @@ bool dict_set(dict* d, obj* key, obj* value);
 bool dict_contains(dict* d, obj* key);
 obj* dict_get(dict* d, obj* key);
 obj* dict_get_uint_key(dict* d, uint64_t u);
+obj* dict_get_hashtag_key(dict* d, obj* hashtag_obj);
 void dict_reset(dict* d);
 void dict_free(dict* d);
 void dict_free_elements_only(dict* d);
@@ -317,6 +320,32 @@ obj* dict_get_uint_key(dict* d, uint64_t u)
     obj* value = dict_get(d, key);
     obj_free(key);
     return value;
+}
+
+// /**
+    
+// */
+// void dict_set_hashtag_key(dict* d, obj* hashtag, obj* value)
+// {
+
+// }
+
+obj* dict_get_hashtag_key(dict* d, obj* hashtag_obj)
+{
+    assert(hashtag_obj->type == Token_t);
+    //create a string object key from the token
+    token* hashtag_token = (token*)hashtag_obj->data;
+    char* identifier = clone(hashtag_token->content);
+    obj* key = new_string(identifier);
+
+    //get the value from the dict using the string key
+    obj* value = dict_get(d, key);
+    
+    //free the key before we return 
+    obj_free(key);
+
+    return value;
+
 }
 
 

@@ -69,8 +69,8 @@ int main(int argc, char* argv[])
         vect_enqueue(tokens, token);
 
         //if parsable sequence exists in current tokens vector
-        update_meta_symbols(meta_symbols, tokens);
-        create_lex_rule(meta_rules, tokens);
+        update_meta_symbols(tokens, meta_symbols);
+        create_lex_rule(tokens, meta_symbols, meta_rules);
 
     }
 

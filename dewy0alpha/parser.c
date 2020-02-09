@@ -34,11 +34,9 @@
 int get_next_real_token(vect* tokens, int i);
 int get_next_token_type(vect* tokens, token_type type, int i);
 int get_level_first_token_type(vect* tokens, token_type type);
-void update_meta_symbols(dict* meta_symbols, vect* tokens);
-void create_lex_rule(dict* meta_rules, vect* tokens);
-bool expand_rules(vect* tokens, dict* meta_rules);
+void update_meta_symbols(vect* tokens, dict* meta_symbols);
+void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_rules);
 obj* build_ast(vect* tokens, dict* meta_symbols);
-// size_t get_lowest_precedence_index(vect* tokens);
 int find_closing_pair(vect* tokens, int start);
 obj* build_string_ast_obj(token* t);
 
@@ -108,7 +106,7 @@ int get_level_first_token_type(vect* tokens, token_type type)
 }
 
 
-void update_meta_symbols(dict* meta_symbols, vect* tokens)
+void update_meta_symbols(vect* tokens, dict* meta_symbols)
 {
     //get the index of the first non-whitespace/comment token
     int head_idx = get_next_real_token(tokens, 0);
@@ -160,55 +158,26 @@ void update_meta_symbols(dict* meta_symbols, vect* tokens)
     //free the meta_equals sign at the start of the rule body
     obj_free(vect_dequeue(rule_body));
 
-
-    //store the rule_identifier and the rule_body into the symbol table
-    //TODO->need to set up obj* for string, or ability to hash tokens
-    //TODO->for now, should probably check if the rule is alredy present, as it will be overwritten. in the future, you should be able to update rules, by inserting the original into anywhere it's referenced in the new one
-
-
-    // printf("%s -> ", rule_identifier_token->content);
-    // vect_str(rule_body);
-    // printf("\n");
-
+    //create an entry in the symbol table that points to the AST for this rule
     char* rule_identifier = clone(rule_identifier_token->content);
     obj* id = new_string(rule_identifier);
     free(rule_identifier_token);
 
     //build an AST out of the tokens list
     obj* rule_ast = build_ast(rule_body, meta_symbols);
-    // ast_uniqueify_ids(rule_ast);
-    ast_compute_followpos(rule_ast);
-    // printf("Adding rule: "); 
-    obj_print(id); 
-    printf(" -> ");
-    printf("\n");ast_repr(rule_ast); //print the full tree
-    // ast_str(rule_ast); //print the expanded regex form of the rule
-    printf("\n");
     dict_set(meta_symbols, id, rule_ast);
 
-    // obj* rule = vect_obj_wrap(rule_body);
-    // obj_print(id);
-    // printf("%s", *((char**)id->data));
+    // ast_compute_followpos(rule_ast);
+    // printf("Adding rule: "); 
+    // obj_print(id); 
     // printf(" -> ");
-    // obj_print(rule);
+    // printf("\n");ast_repr(rule_ast); //print the full tree
+    // ast_str(rule_ast); //print the expanded regex form of the rule
     // printf("\n");
-
-    //TODO->probably construct AST for rule here, and then store the AST in the meta symbol table
-    // dict_set(meta_symbols, id, rule);
-    // printf("returned from dict_set\n");
-    // dict_str(meta_symbols);
-    // printf("\n");
-    //TODO->store the rule_identifier and the rule_body into the symbol table
-
-
-
-
-
-
 }
 
 //check if the token stream starts with #lex(#rule1 #rule2 ...), and create an (AST?) rule
-void create_lex_rule(dict* meta_rules, vect* tokens)
+void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_rules)
 {
     //get the index of the first non-whitespace/comment token
     int head_idx = get_next_real_token(tokens, 0);
@@ -257,28 +226,36 @@ void create_lex_rule(dict* meta_rules, vect* tokens)
     remove_token_type(lex_rules, whitespace);
     remove_token_type(lex_rules, comment);
 
-    //TODO->construct ASTs for the rules
-    //TODO->conversion/algorithm for scanning the rules
-    //TODO->send the rules into the scanner
-    //for now simply print out the rules to be lexed
     printf("Adding scanner rules: ");
     vect_str(lex_rules);
+    printf("\n");
 
-    //TODO->determine if we expand rules greedily or lazily 
-    //for rule in lex_rules
-    //  create ast from expanded rule
+    for (int i = 0; i < vect_size(lex_rules); i++)
+    {
+        obj* hashtag_obj = vect_get(lex_rules, i);
+        // token* rule_identifier_token = *(token*)rule_identifier_obj->data;
+        // char* rule_identifier = clone(rule_identifier_token->content);
+        // obj* id = new_string(rule_identifier);
+
+        // //get the AST out of the tokens list
+        // obj* rule_ast = dict_get(meta_symbols, id);
+        // obj_free(rule_identifier_token);
+        // obj_free(id);
+
+        obj* rule_ast = dict_get_hashtag_key(meta_symbols, hashtag_obj);
+
+        //create a transition table for the rule
+        dict* rule_table = ast_generate_rule_table(rule_ast);
+        
+        //insert the rule_table into some bigger list of things to scan for...
+    }
+
+    //free all the tokens from lex rules which is no longer being used
+    vect_free(lex_rules);
 
     printf("\n");
 }
 
-
-/**
-    replace any instances of #rule with the 
-*/
-bool expand_rules(vect* tokens, dict* meta_rules)
-{
-    return false;
-}
 
 /**
     Recursively construct an AST out of 
@@ -399,17 +376,6 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
     return NULL; 
 }
 
-/**
-    return the index of the token with the lowest precedence
-    if least precedence operator is a pair, e.g. [], {}, (), return the index of the left side
-*/
-// size_t get_lowest_precedence_index(vect* tokens)
-// {
-//     //this function might be unnecessary? based on direct checks described above.
-//     //instead this might change into: int find_leftmost_token(vect* tokens, token_type type){}
-//     //--->returns the index of the rightmost occurance of the specified token, or -1 if not found
-//     return 0;
-// }
 
 /**
     return the index of the matching token pair for [], {}, ()
