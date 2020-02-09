@@ -66,7 +66,7 @@ set* ast_firstpos(obj* node);
 set* ast_lastpos(obj* node);
 set* ast_get_followpos(obj* node);
 void ast_set_followpos(obj* node, set* followpos);
-void ast_compute_followpos(obj* root);
+void ast_compute_followpos(obj* root, vect* nodes_list, dict* id_to_node);
 void ast_compute_followpos_cat(obj* cat_node, dict* id_to_node);
 void ast_compute_followpos_star(obj* star_node, dict* id_to_node);
 vect* ast_get_nodes_list(obj* node, vect* nodes);
@@ -605,18 +605,8 @@ void ast_set_followpos(obj* node, set* followpos)
 /**
     compute the followpos set for every node in the ast
 */
-void ast_compute_followpos(obj* root)
+void ast_compute_followpos(obj* root, vect* nodes_list, dict* id_to_node)
 {
-    //get all nodes in the AST in list form
-    vect* nodes_list = ast_get_nodes_list(root, NULL);
-
-    //ensure that every node has a unique id
-    ast_uniqueify_ids(nodes_list);
-
-    //set up a map from each node's id to its own reference
-    dict* id_to_node = ast_get_ids_to_nodes(nodes_list);
-
-
     //for every node in the list of nodes, handle computing followpos
     for (int i = 0; i < vect_size(nodes_list); i++)
     {
@@ -866,7 +856,12 @@ dict* ast_generate_rule_table(obj* root)
     obj_print(augmented_rule);
     printf("\n");
 
-    ast_compute_followpos(augmented_rule);
+    //ensure nodes have unique id's and compute followpos. 
+    //also get copies of 1) a list of all nodes (nodes_list) and 2) a map from node ids to their reference (id_to_node)
+    vect* nodes_list = ast_get_nodes_list(root, NULL);             
+    ast_uniqueify_ids(nodes_list);                          
+    dict* id_to_node = ast_get_ids_to_nodes(nodes_list);
+    ast_compute_followpos(augmented_rule, nodes_list, id_to_node);
 
     //Dstates is represented by a set with an index marker for identifying which states have been "marked"
     set* states = new_set();
@@ -875,7 +870,7 @@ dict* ast_generate_rule_table(obj* root)
     //Dtran is represented by a dict that maps from id-codepoint pairs to the following state id
     dict* trans_table = new_dict();
 
-
+    
 
 
 
