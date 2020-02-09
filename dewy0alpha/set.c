@@ -26,6 +26,7 @@ set* set_copy(set* S);
 set* set_union(set* A, set* B);
 set* set_intersect(set* A, set* B);
 bool set_equals(set* A, set* B);
+uint64_t set_hash(set* S);
 void set_reset(set* S);
 void set_free(set* S);
 void set_repr(set* S);
@@ -135,6 +136,22 @@ bool set_equals(set* A, set* B)
         }
     }
     return true;
+}
+
+/**
+    Create a hash representing the given set object.
+
+    NOT secure. simply adds all hashes together for the set's objects
+*/
+uint64_t set_hash(set* S)
+{
+    uint64_t hash = hash_uint(Set_t); //hash the type identifier for a set. this ensures it's not 0 if set is empty
+    for (int i = 0; i < set_size(S); i++)
+    {
+        dict_entry e = S->d->entries[i];
+        hash += obj_hash(e.key);
+    }
+    return hash;
 }
 
 void set_reset(set* S)

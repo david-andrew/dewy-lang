@@ -165,6 +165,17 @@ int set_tests()
     set_str(S3); printf("\n");
     set_str(S4); printf("\n");
 
+    set* S5 = new_set(); //empty set
+
+    printf("Testing set hash:\n");
+    printf("hash("); set_str(S0); printf(") = %lu\n", set_hash(S0));
+    printf("hash("); set_str(S1); printf(") = %lu\n", set_hash(S1));
+    printf("hash("); set_str(S2); printf(") = %lu\n", set_hash(S2));
+    printf("hash("); set_str(S3); printf(") = %lu\n", set_hash(S3));
+    printf("hash("); set_str(S4); printf(") = %lu\n", set_hash(S4));
+    printf("hash("); set_str(S5); printf(") = %lu\n", set_hash(S5));
+
+
 
     //TODO->free all variables
     //may need to modify dict delete to check if key and value are the same pointer

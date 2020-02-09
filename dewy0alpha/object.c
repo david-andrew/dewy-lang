@@ -58,7 +58,7 @@ vect* vect_copy_with_refs(vect* v, dict* refs);
 //forward declare set type + methods used here
 typedef struct set_struct set;
 size_t set_size(set* S);
-// uint64_t set_hash(set* S);
+uint64_t set_hash(set* S);
 void set_str(set* S);
 // set* set_copy_with_refs(set* S, dict* refs);
 bool set_equals(set* A, set* B);
@@ -343,7 +343,7 @@ uint64_t obj_hash(obj* o)
         // case Token_t: return meta_token_hash(o);
         case Vector_t: return vect_hash(*(vect**)o->data);
         // case Dictionary_t: return dict_hash((dict*)o->data);
-        // case Set_t: return set_hash((set*)o->data);
+        case Set_t: return set_hash(*(set**)o->data);
         default: printf("WARNING: obj_hash() is not implemented for object of type \"%d\"\n", o->type); return 0;
     }
 }
