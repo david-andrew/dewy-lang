@@ -8,6 +8,8 @@
 #include <string.h>
 #include <stdbool.h>
 
+#define AUGMENT_CHAR 0x200000 //first invalid codepoint (2^21)
+
 
 //forward declare all functions
 int clamp(int x, int min, int max);
@@ -370,7 +372,7 @@ void unicode_str(uint32_t c)
     {
         put_unicode(0x2300);    // ⌀ (diameter symbol)
     }
-    else if (c == 0x1F)         //unit separater ascii code. represents the end of a meta-rule
+    else if (c == AUGMENT_CHAR) // represents the end of a meta-rule
     {
         put_unicode(0x22D5);    // ⋕ (equal and parallel to)
     }

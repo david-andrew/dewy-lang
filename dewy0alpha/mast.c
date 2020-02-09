@@ -843,7 +843,7 @@ dict* ast_generate_rule_table(obj* root)
     // obj_print(root);
 
     //augment the AST with the special ⍿ (end of medium) delimiter
-    obj* augmented_rule = new_ast_cat_obj(root, new_ast_leaf_obj(0x1F));
+    obj* augmented_rule = new_ast_cat_obj(root, new_ast_leaf_obj(AUGMENT_CHAR));
     printf("augmented rule: ");
     obj_print(augmented_rule);
     printf("\n");
