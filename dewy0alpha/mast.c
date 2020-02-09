@@ -69,7 +69,8 @@ void ast_set_followpos(obj* node, set* followpos);
 void ast_compute_followpos(obj* root);
 void ast_compute_followpos_cat(obj* cat_node, dict* id_to_node);
 void ast_compute_followpos_star(obj* star_node, dict* id_to_node);
-void ast_get_nodes_list(obj* node, vect* nodes);
+vect* ast_get_nodes_list(obj* node, vect* nodes);
+dict* ast_get_ids_to_nodes(vect* nodes_list);
 obj* ast_copy(obj* node);
 void ast_uniqueify_ids(vect* nodes_list);
 obj* get_transition_key(uint64_t id, uint32_t codepoint);
@@ -607,23 +608,14 @@ void ast_set_followpos(obj* node, set* followpos)
 void ast_compute_followpos(obj* root)
 {
     //get all nodes in the AST in list form
-    vect* nodes_list = new_vect();
-    ast_get_nodes_list(root, nodes_list);
+    vect* nodes_list = ast_get_nodes_list(root, NULL);
 
     //ensure that every node has a unique id
     ast_uniqueify_ids(nodes_list);
 
     //set up a map from each node's id to its own reference
-    dict* id_to_node = new_dict();
-    for (int i = 0; i < vect_size(nodes_list); i++)
-    {
-        obj* node = vect_get(nodes_list, i);
-        if (node->type == ASTLeaf_t)
-        {
-            node_ast* A = *(node_ast**)node->data;
-            dict_set(id_to_node, new_uint(A->id), node);
-        }
-    }
+    dict* id_to_node = ast_get_ids_to_nodes(nodes_list);
+
 
     //for every node in the list of nodes, handle computing followpos
     for (int i = 0; i < vect_size(nodes_list); i++)
@@ -684,6 +676,7 @@ void ast_compute_followpos(obj* root)
     // dict_free_except_values(id_to_node);
 }
 
+
 /**
     Compute followpos for each element in the cat node.
     
@@ -736,13 +729,18 @@ void ast_compute_followpos_star(obj* star_node, dict* id_to_node)
     @param node is the current node in the tree
     @param nodes_list is the list to store a reference to all nodes in
 */
-void ast_get_nodes_list(obj* node, vect* nodes_list)
+vect* ast_get_nodes_list(obj* node, vect* nodes_list)
 {
     assert(node != NULL);
     assert(node->type == ASTCat_t
         || node->type == ASTOr_t
         || node->type == ASTStar_t
         || node->type == ASTLeaf_t);
+
+    if (nodes_list == NULL) //if this is the first call, create the nodeslist vector
+    {
+        nodes_list = new_vect();
+    }
 
     //add this node to the list
     vect_append(nodes_list, node);
@@ -752,7 +750,7 @@ void ast_get_nodes_list(obj* node, vect* nodes_list)
         case ASTLeaf_t: 
         {
             //no further nodes to add
-            return;
+            return nodes_list;
         }
         case ASTCat_t:
         case ASTOr_t:
@@ -760,19 +758,40 @@ void ast_get_nodes_list(obj* node, vect* nodes_list)
             binary_ast* A = *(binary_ast**)node->data;
             ast_get_nodes_list(A->left, nodes_list);
             ast_get_nodes_list(A->right, nodes_list);
-            return;
+            return nodes_list;
         }
         case ASTStar_t:
         {
             unary_ast* A = *(unary_ast**)node->data;
             ast_get_nodes_list(A->body, nodes_list);
-            return;
+            return nodes_list;
         }
         default:
         {
             printf("ERROR reached end of ast_get_nodes_list_inner() function, which should be impossible\n");
+            return NULL;
         }
     }
+}
+
+
+/**
+    Create a map from each node's id to its reference in the AST
+*/
+dict* ast_get_ids_to_nodes(vect* nodes_list)
+{
+    //set up a map from each node's id to its own reference
+    dict* id_to_node = new_dict();
+    for (int i = 0; i < vect_size(nodes_list); i++)
+    {
+        obj* node = vect_get(nodes_list, i);
+        if (node->type == ASTLeaf_t)
+        {
+            node_ast* A = *(node_ast**)node->data;
+            dict_set(id_to_node, new_uint(A->id), node);
+        }
+    }
+    return id_to_node;
 }
 
 
@@ -841,8 +860,6 @@ void ast_uniqueify_ids(vect* nodes_list)
 */
 dict* ast_generate_rule_table(obj* root)
 {
-    // obj_print(root);
-
     //augment the AST with the special ⍿ (end of medium) delimiter
     obj* augmented_rule = new_ast_cat_obj(root, new_ast_leaf_obj(AUGMENT_CHAR));
     printf("augmented rule: ");
@@ -851,8 +868,17 @@ dict* ast_generate_rule_table(obj* root)
 
     ast_compute_followpos(augmented_rule);
 
-    //TODO->need to come up with a good method for the keys. perhaps make a new obj type
-    //alternative is a table that uses strings for the keys? 
+    //Dstates is represented by a set with an index marker for identifying which states have been "marked"
+    set* states = new_set();
+    int marker = 0;
+
+    //Dtran is represented by a dict that maps from id-codepoint pairs to the following state id
+    dict* trans_table = new_dict();
+
+
+
+
+
     return NULL;
 }
 

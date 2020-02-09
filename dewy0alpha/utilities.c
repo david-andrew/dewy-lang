@@ -374,7 +374,7 @@ void unicode_str(uint32_t c)
     }
     else if (c == AUGMENT_CHAR) // represents the end of a meta-rule
     {
-        put_unicode(0x22D5);    // ⋕ (equal and parallel to)
+        put_unicode(0x1F596);    // 🖖 (vulcan salute). easy to spot character
     }
     else                        //any other unicode character
     {
