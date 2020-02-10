@@ -74,6 +74,7 @@ dict* ast_get_ids_to_nodes(vect* nodes_list);
 obj* ast_copy(obj* node);
 void ast_uniqueify_ids(vect* nodes_list);
 obj* ast_get_transition_key(uint64_t id, uint32_t codepoint);
+void ast_print_trans_table(dict* trans_table);
 dict* ast_get_symbol_to_ids(set* S, dict* id_to_node);
 
 
@@ -859,7 +860,7 @@ dict* ast_generate_rule_table(obj* root)
     dict* id_to_node = ast_get_ids_to_nodes(nodes_list);
     ast_compute_followpos(augment, nodes_list, id_to_node);
 
-    ast_repr(augment); printf("\n");
+    // ast_repr(augment); printf("\n");
     // set* firstpos = ast_firstpos(augment);
     // printf("rule firstpos: "); set_str(firstpos); printf("\n");
 
@@ -900,7 +901,7 @@ dict* ast_generate_rule_table(obj* root)
                 obj* node_obj = dict_get(id_to_node, id_obj);
                 U = set_union_equals(U, ast_get_followpos(node_obj));
             }
-            printf("next states on \""); unicode_str(codepoint); printf("\" -> "); set_str(U); printf("\n");
+            // printf("next states on \""); unicode_str(codepoint); printf("\" -> "); set_str(U); printf("\n");
 
 
             // if U not in states, create a new entry for it
@@ -916,8 +917,10 @@ dict* ast_generate_rule_table(obj* root)
 
     }
 
-    printf("trans table:\n"); dict_str(trans_table); printf("\n");
+    printf("states: "); dict_str(states); printf("\n");
+    printf("trans table: "); ast_print_trans_table(trans_table); printf("\n");
 
+    printf("\n");
     vect_free_list_only(nodes_list);
 
     //instead, set each obj value to NULL,
@@ -938,9 +941,29 @@ dict* ast_generate_rule_table(obj* root)
 */
 obj* ast_get_transition_key(uint64_t id, uint32_t codepoint)
 {
-    return new_uint((id << 21) | (codepoint & 0x001FFFFF));
+    uint64_t key = (id << 21) | (codepoint & 0x001FFFFF);
+    // printf("id: %lu, char: '", id); unicode_str(codepoint); printf("', key: %lu\n", key);
+    return new_uint(key);
 }
 
+/**
+    print out the transition table in a more readable format
+*/
+void ast_print_trans_table(dict* trans_table)
+{
+    printf("[");
+    for (int i = 0; i < dict_size(trans_table); i++)
+    {
+        if (i != 0) printf(", ");
+        uint64_t key = *(uint64_t*)trans_table->entries[i].key->data;
+        uint64_t id = key >> 21;
+        uint32_t codepoint = (key & 0x001FFFFF);
+        printf("(%lu, '", id); unicode_str(codepoint); printf("')");
+        printf(" -> ");
+        obj_print(trans_table->entries[i].value);
+    }
+    printf("]");
+}
 
 /**
     return a map from every codepoint to the nodes that have that codepoint
@@ -982,7 +1005,7 @@ dict* ast_get_symbol_to_ids(set* S, dict* id_to_node)
         vect_append(*(vect**)id_list->data, new_uint(id));
     }
 
-    printf("symbol_to_ids: "); dict_str(symbol_to_ids); printf("\n");
+    // printf("symbol_to_ids: "); dict_str(symbol_to_ids); printf("\n");
     return symbol_to_ids;
 }
 
