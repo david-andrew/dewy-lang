@@ -859,7 +859,7 @@ dict* ast_generate_rule_table(obj* root)
     dict* id_to_node = ast_get_ids_to_nodes(nodes_list);
     ast_compute_followpos(augment, nodes_list, id_to_node);
 
-    // ast_repr(augment); printf("\n");
+    ast_repr(augment); printf("\n");
     // set* firstpos = ast_firstpos(augment);
     // printf("rule firstpos: "); set_str(firstpos); printf("\n");
 
@@ -885,17 +885,29 @@ dict* ast_generate_rule_table(obj* root)
         //create a dict* symbol_to_nodes that maps from every codepoint in S to a vect of the nodes in S that have that codepoint
         dict* symbol_to_ids = ast_get_symbol_to_ids(S, id_to_node);
 
-
         //for every input symbol a in symbol_to_ids
-        // {
-        //     U is the union of follopos of all states in symbol_to_ids[a]
-        //     if U not in states
-        //         dict_set(states, U, new_uint(dict_size(states))); //automatically unmarked since it's added to the end
-        //     //NEED TO GET U_id somehow. easy if just added... probably turn states into a dict that maps from set to set_id
-        //     U_id_obj = dict_get(states, U);
-        //     uint64_t U_id = *(uint64_t*)U_id_obj->data;
-        //     dict_set(trans_table, get_transition_key(S_id, a), U_id);
-        // }
+        for (int i = 0; i < dict_size(symbol_to_ids); i++)
+        {
+            //U is the union of follopos of all states in symbol_to_ids[a]
+            set* U = new_set();
+
+            vect* ids_list = *(vect**)symbol_to_ids->entries[i].value->data;
+            obj* codepoint = symbol_to_ids->entries[i].key;
+            for (int j = 0; j < vect_size(ids_list); j++) 
+            {
+                // for each id, U = U union followpos(id) 
+                obj* id_obj = vect_get(ids_list, j);
+                obj* node_obj = dict_get(id_to_node, id_obj);
+                U = set_union_equals(U, ast_get_followpos(node_obj));
+            }
+            printf("next states on \""); obj_print(codepoint); printf("\" -> "); set_str(U); printf("\n");
+
+            // if U not in states
+            //     dict_set(states, U, new_uint(dict_size(states))); //automatically unmarked since it's added to the end
+            // U_id_obj = dict_get(states, U);
+            // uint64_t U_id = *(uint64_t*)U_id_obj->data;
+            // dict_set(trans_table, get_transition_key(S_id, a), U_id);
+        }
 
     }
 
@@ -960,6 +972,8 @@ dict* ast_get_symbol_to_ids(set* S, dict* id_to_node)
         {
             obj_free(codepoint); //the vect already exists, so free the key that is no longer being used
         }
+
+        //add this node's id into the list mapped by to by the codepoint
         vect_append(*(vect**)id_list->data, new_uint(id));
     }
 

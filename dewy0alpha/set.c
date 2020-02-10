@@ -24,6 +24,7 @@ bool set_add(set* S, obj* item);
 bool set_contains(set* S, obj* item);
 set* set_copy(set* S);
 set* set_union(set* A, set* B);
+set* set_union_equals(set* A, set* B);
 set* set_intersect(set* A, set* B);
 bool set_equals(set* A, set* B);
 uint64_t set_hash(set* S);
@@ -105,6 +106,17 @@ set* set_union(set* A, set* B)
     }
 
     return S;
+}
+
+/**
+    convenience method for reassigning a variable with the result of a union
+    set* A will be freed. union(A, B) will be returned
+*/
+set* set_union_equals(set* A, set* B)
+{
+    set* U = set_union(A, B);
+    set_free(A);
+    return U;
 }
 
 set* set_intersect(set* A, set* B)
