@@ -895,9 +895,11 @@ dict* ast_generate_rule_table(obj* root)
 
             vect* ids_list = *(vect**)symbol_to_ids->entries[i].value->data;
             uint32_t codepoint = *(uint32_t*)symbol_to_ids->entries[i].key->data;
-            if (codepoint == 0)
+            
+            if (codepoint == AUGMENT_CHAR) //skip all AUGMENT_CHAR instances, as we don't actually want them in the transition table
             {
-                printf("Encountered 0 codepoint in create trans table\n");
+                set_free(U);
+                continue;
             }
 
             for (int j = 0; j < vect_size(ids_list); j++) 
