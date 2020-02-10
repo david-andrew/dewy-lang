@@ -246,8 +246,7 @@ void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_rules)
 
         if (rule_ast == NULL)
         {
-            printf("ERROR: attempted to lex nonexistent rule ("); obj_print(hashtag_obj); printf("). Skipping rule...\n");
-            // printf("ERROR: attempted to lex nonexistent identifier (%s). Skipping\n", ((token*)hashtag_obj->data)->content);
+            printf("ERROR: attempted to lex nonexistent rule ("); obj_print(hashtag_obj); printf("). Skipping...\n");
             continue;
         }
 

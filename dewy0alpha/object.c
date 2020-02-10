@@ -310,7 +310,7 @@ void obj_print(obj* o)
     switch (o->type)
     {
         case Boolean_t: printf(*(bool*)o->data ? "true" : "false"); break;
-        case Character_t: unicode_str(*(uint32_t*)o->data); break;//put_unicode(*(uint32_t*)o->data); break;
+        case Character_t: unicode_str(*(uint32_t*)o->data); break;
         case Integer_t: printf("%ld", *(int64_t*)o->data); break;
         case UInteger_t: printf("%lu", *(uint64_t*)o->data); break;
         case String_t: printf("%s", *(char**)o->data); break;
@@ -364,7 +364,8 @@ int64_t obj_compare(obj* left, obj* right)
 
     switch (left->type)
     {
-        case Boolean_t: return *(bool*)left->data - *(bool*)right->data; //this works because bool is a macro for int
+        case Boolean_t: return *(bool*)left->data - *(bool*)right->data;    //this works because bool is a macro for int
+        case Character_t: return *(uint32_t*)left->data - *(uint32_t*)right->data;
         case Integer_t: return *(int64_t*)left->data - *(int64_t*)right->data;
         case UInteger_t: return *(uint64_t*)left->data - *(uint64_t*)right->data;
         case String_t: return strcmp(*(char**)left->data, *(char**)right->data);

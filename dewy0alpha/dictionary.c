@@ -324,27 +324,27 @@ obj* dict_get_uint_key(dict* d, uint64_t u)
     return value;
 }
 
-/**
-    convenience method for easily accessing a dict value with a codepoint (uint32_t) key
-*/
-obj* dict_get_codepoint_key(dict* d, uint32_t c)
-{
-    obj* key = new_char(c);
-    obj* value = dict_get(d, key);
-    obj_free(key);
-    return value;
-}
+// /**
+//     convenience method for easily accessing a dict value with a codepoint (uint32_t) key
+// */
+// obj* dict_get_codepoint_key(dict* d, uint32_t c)
+// {
+//     obj* key = new_char(c);
+//     printf("called get codepoint key with "); obj_print(key); printf("\n");
+//     obj* value = dict_get(d, key);
+//     obj_free(key);
+//     return value;
+// }
 
-/**
-    convenience method for easily accessing a dict value with a codepoint (uint32_t) key
-*/
-bool dict_set_codepoint_key(dict* d, uint32_t c, obj* value)
-{
-    obj* key = new_char(c);
-    bool result = dict_set(d, key, value);
-    obj_free(key);
-    return result;
-}
+// /**
+//     convenience method for easily accessing a dict value with a codepoint (uint32_t) key
+// */
+// bool dict_set_codepoint_key(dict* d, uint32_t c, obj* value)
+// {
+//     obj* key = new_char(c);
+//     printf("called set codepoint key with "); obj_print(key); printf("\n");
+//     return dict_set(d, key, value);
+// }
 
 // /**
     

@@ -859,9 +859,9 @@ dict* ast_generate_rule_table(obj* root)
     dict* id_to_node = ast_get_ids_to_nodes(nodes_list);
     ast_compute_followpos(augment, nodes_list, id_to_node);
 
-    ast_repr(augment); printf("\n");
-    set* firstpos = ast_firstpos(augment);
-    printf("rule firstpos: "); set_str(firstpos); printf("\n");
+    // ast_repr(augment); printf("\n");
+    // set* firstpos = ast_firstpos(augment);
+    // printf("rule firstpos: "); set_str(firstpos); printf("\n");
 
     //Dstates is represented by a dict with an index marker for identifying which states have been "marked"
     dict* states = new_dict();
@@ -886,9 +886,9 @@ dict* ast_generate_rule_table(obj* root)
         dict* symbol_to_ids = ast_get_symbol_to_ids(S, id_to_node);
 
 
-        //for every input symbol a in symbol_to_nodes
+        //for every input symbol a in symbol_to_ids
         // {
-        //     U is the union of follopos of all states in symbol_to_nodes[a]
+        //     U is the union of follopos of all states in symbol_to_ids[a]
         //     if U not in states
         //         dict_set(states, U, new_uint(dict_size(states))); //automatically unmarked since it's added to the end
         //     //NEED TO GET U_id somehow. easy if just added... probably turn states into a dict that maps from set to set_id
@@ -934,30 +934,36 @@ dict* ast_get_symbol_to_ids(set* S, dict* id_to_node)
 
     for (int i = 0; i < set_size(S); i++)
     {
+        //get the id of the current node
         obj* id_obj = S->d->entries[i].key;
+        assert(id_obj != NULL);
         assert(id_obj->type == UInteger_t);
-        obj* node_obj = dict_get(id_to_node, id_obj);
-        printf("id: "); obj_print(id_obj); printf(", node: "); obj_print(node_obj); printf("\n");
+        uint64_t id = *(uint64_t*)id_obj->data;
 
-        // printf("hi\n");
-        // obj* node_obj = dict_get(id_to_node, id_obj);
-        // printf("hi0\n");
-        // assert(id_obj != NULL);
-        // obj_print(id_obj); printf("\n");
-        // uint64_t id = *(uint64_t*)id_obj->data;
-        // assert(node_obj->type == ASTLeaf_t);
-        // printf("hi2\n");
-        // node_ast* node = *(node_ast**)node_obj->data;
-        // printf("hi3\n");
-        // obj* id_list = dict_get_codepoint_key(symbol_to_ids, node->codepoint);
-        // if (id_list == NULL)
-        // {
-        //     id_list = new_vect_obj(NULL);
-        //     dict_set_codepoint_key(symbol_to_ids, node->codepoint, id_list);
-        // }
-        // vect_append(*(vect**)id_list->data, new_uint(id));
+        //get the actual node based on its id
+        obj* node_obj = dict_get(id_to_node, id_obj);        
+        assert(node_obj->type == ASTLeaf_t);
+        node_ast* node = *(node_ast**)node_obj->data;
+        
+        //create a codepoint key based on the node's codepoint
+        obj* codepoint = new_char(node->codepoint);
+        
+        //if this codepoint isn't in symbol_to_ids, create an empty vect at that codepoint
+        obj* id_list = dict_get(symbol_to_ids, codepoint);
+        if (id_list == NULL)
+        {
+            id_list = new_vect_obj(NULL);
+            dict_set(symbol_to_ids, codepoint, id_list);
+            //don't free codepoint here because it's being used as the key in the dict
+        } 
+        else 
+        {
+            obj_free(codepoint); //the vect already exists, so free the key that is no longer being used
+        }
+        vect_append(*(vect**)id_list->data, new_uint(id));
     }
 
+    printf("symbol_to_ids: "); dict_str(symbol_to_ids); printf("\n");
     return symbol_to_ids;
 }
 
