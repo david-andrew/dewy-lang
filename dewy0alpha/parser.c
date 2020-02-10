@@ -244,6 +244,13 @@ void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_rules)
 
         obj* rule_ast = dict_get_hashtag_key(meta_symbols, hashtag_obj);
 
+        if (rule_ast == NULL)
+        {
+            printf("ERROR: attempted to lex nonexistent rule ("); obj_print(hashtag_obj); printf("). Skipping rule...\n");
+            // printf("ERROR: attempted to lex nonexistent identifier (%s). Skipping\n", ((token*)hashtag_obj->data)->content);
+            continue;
+        }
+
         //create a transition table for the rule
         dict* rule_table = ast_generate_rule_table(rule_ast);
         

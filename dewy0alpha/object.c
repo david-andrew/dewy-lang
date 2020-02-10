@@ -405,6 +405,7 @@ void obj_free(obj* o)
         switch (o->type)
         {
             case Boolean_t: free(o->data); break;   //free boolean pointer
+            case Character_t: free(o->data); break; //free character (uint32)
             case Integer_t: free(o->data); break;   //free uint pointer
             case UInteger_t: free(o->data); break;  //free int pointer
             case String_t:                          //free the string

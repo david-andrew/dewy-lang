@@ -73,7 +73,8 @@ vect* ast_get_nodes_list(obj* node, vect* nodes);
 dict* ast_get_ids_to_nodes(vect* nodes_list);
 obj* ast_copy(obj* node);
 void ast_uniqueify_ids(vect* nodes_list);
-obj* get_transition_key(uint64_t id, uint32_t codepoint);
+obj* ast_get_transition_key(uint64_t id, uint32_t codepoint);
+dict* ast_get_symbol_to_ids(set* S, dict* id_to_node);
 
 
 //global int to give each leaf node a unique identifier
@@ -212,13 +213,13 @@ void ast_repr_inner(obj* node, int indent)
         {
             node_ast* A = *(node_ast**)node->data;
             printf(" ");
-            put_unicode(A->codepoint ? A->codepoint : 0x2300); //print the character, or the ⌀ symbol
+            unicode_str(A->codepoint ? A->codepoint : 0x2300); //print the character, or the ⌀ symbol
             if (A->codepoint) 
             {
                 printf(" [id: %lu, fp: ", A->id); 
                 // set_str(ast_firstpos(node)); printf(", lastpos: ");
                 // set_str(ast_lastpos(node)); printf(", followpos: ");
-                set_str(A->followpos); printf("]");
+                set_str(ast_get_followpos(node)); printf("]");
                 // printf(" [id: %lu]\n", A->id);
             }
             printf("\n");
@@ -658,12 +659,6 @@ void ast_compute_followpos(obj* root, vect* nodes_list, dict* id_to_node)
             }
         }
     }
-
-    vect_free_list_only(nodes_list);
-
-    //instead, set each obj value to NULL,
-    //and then regular dict_free(id_to_node);
-    // dict_free_except_values(id_to_node);
 }
 
 
@@ -856,12 +851,17 @@ dict* ast_generate_rule_table(obj* root)
     obj_print(augment);
     printf("\n");
 
+
     //ensure nodes have unique id's and compute followpos. 
     //also get copies of 1) a list of all nodes (nodes_list) and 2) a map from node ids to their reference (id_to_node)
-    vect* nodes_list = ast_get_nodes_list(root, NULL);             
+    vect* nodes_list = ast_get_nodes_list(augment, NULL);             
     ast_uniqueify_ids(nodes_list);                          
     dict* id_to_node = ast_get_ids_to_nodes(nodes_list);
     ast_compute_followpos(augment, nodes_list, id_to_node);
+
+    ast_repr(augment); printf("\n");
+    set* firstpos = ast_firstpos(augment);
+    printf("rule firstpos: "); set_str(firstpos); printf("\n");
 
     //Dstates is represented by a dict with an index marker for identifying which states have been "marked"
     dict* states = new_dict();
@@ -870,7 +870,7 @@ dict* ast_generate_rule_table(obj* root)
     //Dtran is represented by a dict that maps from id-codepoint pairs to the following state id
     dict* trans_table = new_dict();
 
-    //add the set firstpos(root) to states
+    //add the set firstpos(augment) to states
     dict_set(states, new_set_obj(ast_firstpos(augment)), new_uint(0));
 
     while (marker < dict_size(states))
@@ -883,6 +883,9 @@ dict* ast_generate_rule_table(obj* root)
         marker++;
 
         //create a dict* symbol_to_nodes that maps from every codepoint in S to a vect of the nodes in S that have that codepoint
+        dict* symbol_to_ids = ast_get_symbol_to_ids(S, id_to_node);
+
+
         //for every input symbol a in symbol_to_nodes
         // {
         //     U is the union of follopos of all states in symbol_to_nodes[a]
@@ -897,6 +900,13 @@ dict* ast_generate_rule_table(obj* root)
     }
 
 
+
+    vect_free_list_only(nodes_list);
+
+    //instead, set each obj value to NULL,
+    //and then regular dict_free(id_to_node);
+    // dict_free_except_values(id_to_node);
+
     return NULL;
 }
 
@@ -909,11 +919,47 @@ dict* ast_generate_rule_table(obj* root)
     and the id will take the remaining 43 bits
     (this restricts ids to be less than 2^43, or 8,796,093,022,208)
 */
-obj* get_transition_key(uint64_t id, uint32_t codepoint)
+obj* ast_get_transition_key(uint64_t id, uint32_t codepoint)
 {
     return new_uint((id << 21) | (codepoint & 0x001FFFFF));
 }
 
+
+/**
+    return a map from every codepoint to the nodes that have that codepoint
+*/
+dict* ast_get_symbol_to_ids(set* S, dict* id_to_node)
+{
+    dict* symbol_to_ids = new_dict();
+
+    for (int i = 0; i < set_size(S); i++)
+    {
+        obj* id_obj = S->d->entries[i].key;
+        assert(id_obj->type == UInteger_t);
+        obj* node_obj = dict_get(id_to_node, id_obj);
+        printf("id: "); obj_print(id_obj); printf(", node: "); obj_print(node_obj); printf("\n");
+
+        // printf("hi\n");
+        // obj* node_obj = dict_get(id_to_node, id_obj);
+        // printf("hi0\n");
+        // assert(id_obj != NULL);
+        // obj_print(id_obj); printf("\n");
+        // uint64_t id = *(uint64_t*)id_obj->data;
+        // assert(node_obj->type == ASTLeaf_t);
+        // printf("hi2\n");
+        // node_ast* node = *(node_ast**)node_obj->data;
+        // printf("hi3\n");
+        // obj* id_list = dict_get_codepoint_key(symbol_to_ids, node->codepoint);
+        // if (id_list == NULL)
+        // {
+        //     id_list = new_vect_obj(NULL);
+        //     dict_set_codepoint_key(symbol_to_ids, node->codepoint, id_list);
+        // }
+        // vect_append(*(vect**)id_list->data, new_uint(id));
+    }
+
+    return symbol_to_ids;
+}
 
 
 
