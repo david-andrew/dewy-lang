@@ -892,7 +892,7 @@ dict* ast_generate_rule_table(obj* root)
             set* U = new_set();
 
             vect* ids_list = *(vect**)symbol_to_ids->entries[i].value->data;
-            obj* codepoint = symbol_to_ids->entries[i].key;
+            uint32_t codepoint = *(uint32_t*)symbol_to_ids->entries[i].key->data;
             for (int j = 0; j < vect_size(ids_list); j++) 
             {
                 // for each id, U = U union followpos(id) 
@@ -900,18 +900,23 @@ dict* ast_generate_rule_table(obj* root)
                 obj* node_obj = dict_get(id_to_node, id_obj);
                 U = set_union_equals(U, ast_get_followpos(node_obj));
             }
-            printf("next states on \""); obj_print(codepoint); printf("\" -> "); set_str(U); printf("\n");
+            printf("next states on \""); unicode_str(codepoint); printf("\" -> "); set_str(U); printf("\n");
 
-            // if U not in states
-            //     dict_set(states, U, new_uint(dict_size(states))); //automatically unmarked since it's added to the end
-            // U_id_obj = dict_get(states, U);
-            // uint64_t U_id = *(uint64_t*)U_id_obj->data;
-            // dict_set(trans_table, get_transition_key(S_id, a), U_id);
+
+            // if U not in states, create a new entry for it
+            obj* U_obj = new_set_obj(U);
+            if (!dict_contains(states, U_obj))
+            {
+                dict_set(states, U_obj, new_uint(dict_size(states))); //automatically unmarked since it's added to the end
+            }
+            obj* U_id_obj = dict_get(states, U_obj);
+            uint64_t U_id = *(uint64_t*)U_id_obj->data;
+            dict_set(trans_table, ast_get_transition_key(S_id, codepoint), U_id_obj);
         }
 
     }
 
-
+    printf("trans table:\n"); dict_str(trans_table); printf("\n");
 
     vect_free_list_only(nodes_list);
 
