@@ -847,8 +847,9 @@ void ast_uniqueify_ids(vect* nodes_list)
 dict* ast_generate_rule_table(obj* root)
 {
     //augment the AST with the special AUGMENT_CHAR delimiter
-    obj* augment = new_ast_cat_obj(root, new_ast_leaf_obj(AUGMENT_CHAR));
-    printf("augmented rule: ");
+    obj* goal_node = new_ast_leaf_obj(AUGMENT_CHAR);
+    obj* augment = new_ast_cat_obj(root, goal_node);
+    printf("\naugmented rule: ");
     obj_print(augment);
     printf("\n");
 
@@ -894,6 +895,11 @@ dict* ast_generate_rule_table(obj* root)
 
             vect* ids_list = *(vect**)symbol_to_ids->entries[i].value->data;
             uint32_t codepoint = *(uint32_t*)symbol_to_ids->entries[i].key->data;
+            if (codepoint == 0)
+            {
+                printf("Encountered 0 codepoint in create trans table\n");
+            }
+
             for (int j = 0; j < vect_size(ids_list); j++) 
             {
                 // for each id, U = U union followpos(id) 
@@ -917,15 +923,34 @@ dict* ast_generate_rule_table(obj* root)
 
     }
 
-    printf("states: "); dict_str(states); printf("\n");
-    printf("trans table: "); ast_print_trans_table(trans_table); printf("\n");
+    //compute the goal states based on which sets of node ids contain the goal's id
+    set* accepting_states = new_set();
+    obj* goal_id_obj = new_uint((*(node_ast**)goal_node->data)->id);
+    for (int i = 0; i < dict_size(states); i++)
+    {
+        set* state_ids = *(set**)states->entries[i].key->data;
+        if (set_contains(state_ids, goal_id_obj))
+        {
+            obj* state_id_obj = states->entries[i].value;
+            set_add(accepting_states, obj_copy(state_id_obj));
+        }
+    }
 
-    printf("\n");
+
     vect_free_list_only(nodes_list);
 
     //instead, set each obj value to NULL,
     //and then regular dict_free(id_to_node);
     // dict_free_except_values(id_to_node);
+
+    // printf("\n");
+    printf("goal node id: %lu\n", (*(node_ast**)goal_node->data)->id);
+    printf("goal states: "); set_str(accepting_states); printf("\n");
+    printf("states: "); dict_str(states); printf("\n");
+    printf("trans table: "); ast_print_trans_table(trans_table); printf("\n");
+    printf("\n\n");
+
+
 
     return NULL;
 }

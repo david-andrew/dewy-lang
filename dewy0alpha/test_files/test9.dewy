@@ -19,6 +19,10 @@
 #decimal_rational = #decimal_natural, '.', #decimal_digit_string;
 #decimal_floating_point = #decimal_rational, [('e'|'E'), ['-'|'+'], #decimal_rational];
 
+#lex(#decimal_floating_point)
+
+//examples of floats to scan
+
 //3) rules for identifying identifiers
 #lowercase_letter = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' 
     | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z';
@@ -28,6 +32,7 @@
 
 #identifier = (#uppercase_letter | #lowercase_letter), {#uppercase_letter | #lowercase_letter | #decimal_digit | #symbols };
 
+#lex(#identifier)
 //test if compiler can identify the identifier
 //apple
 //BaNaNaN
