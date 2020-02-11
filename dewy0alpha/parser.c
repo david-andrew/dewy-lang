@@ -251,7 +251,9 @@ void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_rules)
         }
 
         //create a transition table for the rule
-        dict* rule_table = ast_generate_rule_table(rule_ast);
+        set* accepting_states;
+        dict* trans_table;
+        ast_generate_trans_table(rule_ast, &accepting_states, &trans_table);
         
         //insert the rule_table into some bigger list of things to scan for...
     }

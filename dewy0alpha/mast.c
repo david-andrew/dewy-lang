@@ -73,6 +73,7 @@ vect* ast_get_nodes_list(obj* node, vect* nodes);
 dict* ast_get_ids_to_nodes(vect* nodes_list);
 obj* ast_copy(obj* node);
 void ast_uniqueify_ids(vect* nodes_list);
+void ast_generate_trans_table(obj* root, set** ret_accepting_states, dict** ret_trans_table);
 obj* ast_get_transition_key(uint64_t id, uint32_t codepoint);
 void ast_print_trans_table(dict* trans_table);
 dict* ast_get_symbol_to_ids(set* S, dict* id_to_node);
@@ -844,7 +845,7 @@ void ast_uniqueify_ids(vect* nodes_list)
 /**
     Create a rule table consisting of state-character pairs mapping to next states
 */
-dict* ast_generate_rule_table(obj* root)
+void ast_generate_trans_table(obj* root, set** ret_accepting_states, dict** ret_trans_table)
 {
     //augment the AST with the special AUGMENT_CHAR delimiter
     obj* goal_node = new_ast_leaf_obj(AUGMENT_CHAR);
@@ -952,9 +953,8 @@ dict* ast_generate_rule_table(obj* root)
     printf("trans table: "); ast_print_trans_table(trans_table); printf("\n");
     printf("\n\n");
 
-
-
-    return NULL;
+    *ret_trans_table = trans_table;
+    *ret_accepting_states = accepting_states;
 }
 
 
