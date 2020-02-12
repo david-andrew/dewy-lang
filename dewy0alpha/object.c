@@ -259,8 +259,8 @@ obj* obj_copy_inner(obj* o, dict* refs)
         }
         case String_t: //copy string
         {
-            char** copy_ptr = malloc(o->size + sizeof(char));
-            strcpy(*(char**)o->data, *copy_ptr);
+            char** copy_ptr = malloc(sizeof(char*));
+            *copy_ptr = clone(*(char**)o->data);
             copy->data = (void*)copy_ptr;
             break;
         }

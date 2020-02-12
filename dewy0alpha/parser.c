@@ -35,7 +35,8 @@ int get_next_real_token(vect* tokens, int i);
 int get_next_token_type(vect* tokens, token_type type, int i);
 int get_level_first_token_type(vect* tokens, token_type type);
 void update_meta_symbols(vect* tokens, dict* meta_symbols);
-void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_rules);
+void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_tables, dict* meta_accepts);
+void dynamic_scan(char** source, dict* meta_tables, dict* meta_accepts);
 obj* build_ast(vect* tokens, dict* meta_symbols);
 int find_closing_pair(vect* tokens, int start);
 obj* build_string_ast_obj(token* t);
@@ -94,9 +95,7 @@ int get_level_first_token_type(vect* tokens, token_type type)
             }
             else 
             { 
-                printf("ERROR: get_level_first_token_type() encountered an unpaired ");
-                obj_print(vect_get(tokens, i));
-                printf("\n");
+                printf("ERROR: get_level_first_token_type() encountered an unpaired "); obj_print(vect_get(tokens, i)); printf("\n");
                 return -1; 
             }
         }
@@ -166,18 +165,10 @@ void update_meta_symbols(vect* tokens, dict* meta_symbols)
     //build an AST out of the tokens list
     obj* rule_ast = build_ast(rule_body, meta_symbols);
     dict_set(meta_symbols, id, rule_ast);
-
-    // ast_compute_followpos(rule_ast);
-    // printf("Adding rule: "); 
-    // obj_print(id); 
-    // printf(" -> ");
-    // printf("\n");ast_repr(rule_ast); //print the full tree
-    // ast_str(rule_ast); //print the expanded regex form of the rule
-    // printf("\n");
 }
 
 //check if the token stream starts with #lex(#rule1 #rule2 ...), and create an (AST?) rule
-void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_rules)
+void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_tables, dict* meta_accepts)
 {
     //get the index of the first non-whitespace/comment token
     int head_idx = get_next_real_token(tokens, 0);
@@ -233,15 +224,6 @@ void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_rules)
     for (int i = 0; i < vect_size(lex_rules); i++)
     {
         obj* hashtag_obj = vect_get(lex_rules, i);
-        // token* rule_identifier_token = *(token*)rule_identifier_obj->data;
-        // char* rule_identifier = clone(rule_identifier_token->content);
-        // obj* id = new_string(rule_identifier);
-
-        // //get the AST out of the tokens list
-        // obj* rule_ast = dict_get(meta_symbols, id);
-        // obj_free(rule_identifier_token);
-        // obj_free(id);
-
         obj* rule_ast = dict_get_hashtag_key(meta_symbols, hashtag_obj);
 
         if (rule_ast == NULL)
@@ -251,18 +233,53 @@ void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_rules)
         }
 
         //create a transition table for the rule
-        set* accepting_states;
-        dict* trans_table;
-        ast_generate_trans_table(rule_ast, &accepting_states, &trans_table);
+        set* accepts;
+        dict* table;
+        ast_generate_trans_table(rule_ast, &accepts, &table);
         
-        //insert the rule_table into some bigger list of things to scan for...
+        //create references to the transition table and accepting states for this rule
+        obj* identifier = new_ustr(((token*)hashtag_obj->data)->content);
+        // printf("adding "); obj_print(identifier); printf(" to tables and accepts dictionaries\n");
+        dict_set(meta_tables, obj_copy(identifier), new_dict_obj(table));
+        dict_set(meta_accepts, obj_copy(identifier), new_set_obj(accepts));
+        obj_free(identifier);
     }
 
     //free all the tokens from lex rules which is no longer being used
     vect_free(lex_rules);
-
-    printf("\n");
 }
+
+
+/**
+    Scan the source text file using the dynamically parsed meta rules
+*/
+void dynamic_scan(char** source_ptr, dict* meta_tables, dict* meta_accepts)
+{
+    assert(dict_size(meta_tables) == dict_size(meta_accepts));
+    if (dict_size(meta_tables) == 0) { return; }
+
+    printf("dynamic scan with rules: \n");    
+
+    for (int i = dict_size(meta_tables) - 1; i >= 0; i--)
+    {
+        char* src = *source_ptr; //make a copy of the char* ptr so that we don't update the original
+        
+        obj* identifier = meta_tables->entries[i].key;
+        dict* table = *(dict**)meta_tables->entries[i].value->data;
+        set* accepts = *(set**)meta_accepts->entries[i].value->data;
+        
+        obj_print(identifier); printf("\n");
+        printf("transitions: "); ast_print_trans_table(table); printf("\n");
+        printf("accept states: "); set_str(accepts); printf("\n");
+        printf("\n");
+    }
+}
+
+
+/**
+    attempt to scan a single rule
+*/
+// int dynamic_scan_inner(char** source)
 
 
 /**

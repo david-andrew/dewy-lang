@@ -100,7 +100,7 @@ obj* scan(char** src)
         t = match_block_comment(src);                   if (t != NULL) return t;
     }
 
-    printf("ERROR: no token was recognized on input `%s`\n", *src);
+    printf("ERROR: no token was recognized on input:\n```\n%s\n```\n", *src);
     return NULL;
 }
 

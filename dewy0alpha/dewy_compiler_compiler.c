@@ -55,7 +55,8 @@ int main(int argc, char* argv[])
     vect* tokens = new_vect();
     //probably todo, make a context variable that holds symbol table + rules being lexed + other stuff
     dict* meta_symbols = new_dict();
-    dict* meta_rules = new_dict();
+    dict* meta_tables = new_dict();
+    dict* meta_accepts = new_dict();
 
     while (*source) //while we haven't reached the null terminator
     {
@@ -70,7 +71,11 @@ int main(int argc, char* argv[])
 
         //if parsable sequence exists in current tokens vector
         update_meta_symbols(tokens, meta_symbols);
-        create_lex_rule(tokens, meta_symbols, meta_rules);
+        create_lex_rule(tokens, meta_symbols, meta_tables, meta_accepts);
+
+        //this would produce dynamic tokens
+        dynamic_scan(&source, meta_tables, meta_accepts);
+
 
     }
 
