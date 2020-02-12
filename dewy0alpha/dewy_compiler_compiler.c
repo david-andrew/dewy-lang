@@ -78,10 +78,10 @@ int main(int argc, char* argv[])
         create_lex_rule(tokens, meta_symbols, meta_tables, meta_accepts);
     }
 
-    if (!*source) printf("successfully scanned source text\n");
+    // if (!*source) printf("successfully scanned all source text\n");
 
-    printf("rules scanned:\n");
-    dict_str(meta_symbols); printf("\n");
+    // printf("rules scanned:\n");
+    // dict_str(meta_symbols); printf("\n");
 
     remove_token_type(tokens, whitespace);
     remove_token_type(tokens, comment);
@@ -95,4 +95,27 @@ int main(int argc, char* argv[])
     // dict_free(symbols);
 
     free(head);
+
+
+    //enter into a loop that scans for text according to the rules that were specified
+    printf("\n\nEnter text to see if it matches a rule\n");
+    char input[1024];
+    while (true)
+    {
+        fgets(input, 1024, stdin);
+        char* copy = input;
+        
+        //remove trailing newline
+        char* pos;
+        if ((pos=strchr(input, '\n')) != NULL) { *pos = '\0'; }
+        
+        if (!dynamic_scan(&copy, meta_tables, meta_accepts))
+        {
+            printf("\"%s\" doesn't match\n\n", input);
+        }
+        else 
+        {
+            printf("\n");
+        }
+    }
 }

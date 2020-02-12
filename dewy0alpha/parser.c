@@ -219,9 +219,9 @@ void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_tables, dict* 
     remove_token_type(lex_rules, whitespace);
     remove_token_type(lex_rules, comment);
 
-    printf("Adding scanner rules: ");
-    vect_str(lex_rules);
-    printf("\n");
+    // printf("Adding scanner rules: ");
+    // vect_str(lex_rules);
+    // printf("\n");
 
     for (int i = 0; i < vect_size(lex_rules); i++)
     {
@@ -245,6 +245,10 @@ void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_tables, dict* 
         dict_set(meta_tables, obj_copy(identifier), new_dict_obj(table));
         dict_set(meta_accepts, obj_copy(identifier), new_set_obj(accepts));
         obj_free(identifier);
+
+
+        printf("added %s = ", ((token*)hashtag_obj->data)->content); ast_str(rule_ast); printf("\n");
+
     }
 
     //free all the tokens from lex rules which is no longer being used
@@ -277,7 +281,7 @@ bool dynamic_scan(char** source, dict* meta_tables, dict* meta_accepts)
         char* scanned = dynamic_scan_inner(source, table, accepts);
         if (scanned != NULL)
         {
-            printf(""); obj_print(identifier); printf(": %s\n", scanned);
+            printf("scanned "); obj_print(identifier); printf(": %s\n", scanned);
             free(scanned); //probably do something with this...
             return true;
         }

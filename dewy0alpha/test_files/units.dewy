@@ -1,0 +1,42 @@
+#yotta_symbol = 'Y'; #yotta_name = 'yotta';
+#zetta_symbol = 'Z'; #zetta_name = 'zetta';
+#exa_symbol   = 'E'; #exa_name   = 'exa';
+#peta_symbol  = 'P'; #peta_name  = 'peta';
+#tera_symbol  = 'T'; #tera_name  = 'tera';
+#giga_symbol  = 'G'; #giga_name  = 'giga';
+#mega_symbol  = 'M'; #mega_name  = 'mega'; 
+#kilo_symbol  = 'k'; #kilo_name  = 'kilo';
+#centi_symbol = 'c'; #centi_name = 'centi';
+#milli_symbol = 'm'; #milli_name = 'milli';
+#micro_symbol = 'u' | 'μ'; #micro_name = 'micro';
+#nano_symbol  = 'n'; #nano_name  = 'nano';
+#pico_symbol  = 'p'; #pico_name  = 'pico';
+#femto_symbol = 'f'; #femto_name = 'femto';
+#atto_symbol  = 'a'; #atto_name  = 'atto';
+#zepto_symbol = 'z'; #zepto_name = 'zepto';
+#yocto_symbol = 'y'; #yocto_name = 'yocto';
+
+
+#prefix_symbol = #yotta_symbol | #zetta_symbol | #exa_symbol | #peta_symbol | #tera_symbol | #giga_symbol | #mega_symbol | #kilo_symbol | #centi_symbol | #milli_symbol | #micro_symbol | #nano_symbol | #pico_symbol | #femto_symbol | #atto_symbol | #zepto_symbol | #yocto_symbol;
+
+#prefix_name = #yotta_name | #zetta_name | #exa_name | #peta_name | #tera_name | #giga_name | #mega_name | #kilo_name | #centi_name | #milli_name | #micro_name | #nano_name | #pico_name | #femto_name | #atto_name | #zepto_name | #yocto_name;
+
+#gram_symbol    = 'g';   #gram_name    = 'gram';             #gram_plural    = 'grams';
+#metre_symbol   = 'm';   #metre_name   = 'meter' | 'metre';  #metre_plural   = 'meters' | 'metres';
+#second_symbol  = 's';   #second_name  = 'second';           #second_plural  = 'seconds';
+#ampere_symbol  = 'A';   #ampere_name  = 'ampere' | 'amp';   #ampere_plural  = 'amperes' | 'amps';
+#kelvin_symbol  = 'K';   #kelvin_name  = 'kelvin';           //kelvin is the plural of kelvin. (may include anyways though...)
+#mole_symbol    = 'mol'; #mole_name    = 'mole' | 'mol';     #mole_plural    = 'moles' | 'mols'; //mol is weird because it's symbol can also be it's written out name, i.e. Gmol gigamol, gigamols, gigamole, gigamoles   
+#candela_symbol = 'cd';  #candela_name = 'candela';          #candela_plural = 'candelas'; 
+
+#unit_symbol = #gram_symbol | #metre_symbol | #second_symbol | #ampere_symbol | #kelvin_symbol | #mole_symbol | #candela_symbol;
+#unit_name = #gram_name | #metre_name | #second_name | #ampere_name | #kelvin_name | #mole_name | #candela_name;
+#unit_plural = #gram_plural | #metre_plural | #second_plural | #ampere_plural | #mole_plural | #candela_plural; //kelvin does not have a plural form
+
+
+//define how units can be combined
+//#unit = ([#prefix_symbol], #unit_symbol) | #ignore_case ([#prefix_name], (#unit_name | #unit_plural)); //#ignore_case is hardcoded into the compiler, and operates on the next step in the rule, and allows lower or uppercase to be matched. need to be careful about how this deals with non-ascii encodings
+
+#unit = ([#prefix_symbol], #unit_symbol) | ([#prefix_name], (#unit_name | #unit_plural));
+
+#lex(#unit)
