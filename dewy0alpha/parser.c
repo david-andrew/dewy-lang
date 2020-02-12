@@ -36,7 +36,9 @@ int get_next_token_type(vect* tokens, token_type type, int i);
 int get_level_first_token_type(vect* tokens, token_type type);
 void update_meta_symbols(vect* tokens, dict* meta_symbols);
 void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_tables, dict* meta_accepts);
-void dynamic_scan(char** source, dict* meta_tables, dict* meta_accepts);
+bool dynamic_scan(char** source, dict* meta_tables, dict* meta_accepts);
+char* dynamic_scan_inner(char** source, dict* table, set* accepts);
+obj* get_next_state(dict* table, obj* state, uint32_t codepoint);
 obj* build_ast(vect* tokens, dict* meta_symbols);
 int find_closing_pair(vect* tokens, int start);
 obj* build_string_ast_obj(token* t);
@@ -253,33 +255,96 @@ void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_tables, dict* 
 /**
     Scan the source text file using the dynamically parsed meta rules
 */
-void dynamic_scan(char** source_ptr, dict* meta_tables, dict* meta_accepts)
+bool dynamic_scan(char** source, dict* meta_tables, dict* meta_accepts)
 {
     assert(dict_size(meta_tables) == dict_size(meta_accepts));
-    if (dict_size(meta_tables) == 0) { return; }
+    if (dict_size(meta_tables) == 0) { return false; }
 
-    printf("dynamic scan with rules: \n");    
+    // printf("dynamic scan with rules: \n");    
 
     for (int i = dict_size(meta_tables) - 1; i >= 0; i--)
     {
-        char* src = *source_ptr; //make a copy of the char* ptr so that we don't update the original
         
         obj* identifier = meta_tables->entries[i].key;
         dict* table = *(dict**)meta_tables->entries[i].value->data;
         set* accepts = *(set**)meta_accepts->entries[i].value->data;
         
-        obj_print(identifier); printf("\n");
-        printf("transitions: "); ast_print_trans_table(table); printf("\n");
-        printf("accept states: "); set_str(accepts); printf("\n");
-        printf("\n");
+        // obj_print(identifier); printf("\n");
+        // printf("transitions: "); ast_print_trans_table(table); printf("\n");
+        // printf("accept states: "); set_str(accepts); printf("\n");
+        // printf("\n");
+
+        char* scanned = dynamic_scan_inner(source, table, accepts);
+        if (scanned != NULL)
+        {
+            printf(""); obj_print(identifier); printf(": %s\n", scanned);
+            free(scanned); //probably do something with this...
+            return true;
+        }
     }
+    return false;
 }
 
 
 /**
-    attempt to scan a single rule
+    attempt to scan a single rule. return the number of characters for the rule found, or 0 if none found
 */
-// int dynamic_scan_inner(char** source)
+char* dynamic_scan_inner(char** source, dict* table, set* accepts)
+{
+    //make a copy of the char* ptr so that we don't update the original, unless we complete the scan
+    char* src_next = *source;
+    char* src;
+
+    //initial state is always 0
+    obj* state_next = new_uint(0);
+    obj* state;
+
+    //keep a copy of the first state so we can free it when we're done
+    obj* init_state_copy = state_next;
+
+    //keep track of characters scanned
+    int count = 0;
+
+    while (true)
+    {
+        src = src_next;
+        state = state_next;
+        uint32_t codepoint = eat_utf8(&src_next);
+        state_next = get_next_state(table, state, codepoint);
+        if (state_next == NULL) { break; }
+        count++;
+    }
+
+
+    char* scanned = NULL;
+    
+    //check if we ended in an accepting state, and scanned at least 1 token
+    if (set_contains(accepts, state) && count > 0)
+    {
+        //update the original string to point to the end of what we found
+        scanned = substr(*source, 0, src - *source - 1);
+
+        //update the original source string to now point past what was scanned
+        *source = src;
+    } 
+    
+    //free the original object for state 0 we made
+    obj_free(init_state_copy);        
+
+    //string does not match
+    return scanned;        
+}
+
+/**
+    return the next transition state
+*/
+obj* get_next_state(dict* table, obj* state, uint32_t codepoint)
+{
+    obj* transition_key = ast_get_transition_key(*(uint64_t*)state->data, codepoint);
+    obj* next_state = dict_get(table, transition_key);
+    obj_free(transition_key);
+    return next_state;
+}
 
 
 /**

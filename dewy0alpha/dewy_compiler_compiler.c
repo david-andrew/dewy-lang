@@ -60,6 +60,10 @@ int main(int argc, char* argv[])
 
     while (*source) //while we haven't reached the null terminator
     {
+        //this would produce dynamic tokens. TODO->update this...
+        //don't try to scan for meta tokens unless we can't scan for any regular tokens
+        if (dynamic_scan(&source, meta_tables, meta_accepts)) { continue; }
+
         //scan the source for the next token
         obj* token = scan(&source);
 
@@ -72,11 +76,6 @@ int main(int argc, char* argv[])
         //if parsable sequence exists in current tokens vector
         update_meta_symbols(tokens, meta_symbols);
         create_lex_rule(tokens, meta_symbols, meta_tables, meta_accepts);
-
-        //this would produce dynamic tokens
-        dynamic_scan(&source, meta_tables, meta_accepts);
-
-
     }
 
     if (!*source) printf("successfully scanned source text\n");

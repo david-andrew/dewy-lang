@@ -850,9 +850,9 @@ void ast_generate_trans_table(obj* root, set** ret_accepting_states, dict** ret_
     //augment the AST with the special AUGMENT_CHAR delimiter
     obj* goal_node = new_ast_leaf_obj(AUGMENT_CHAR);
     obj* augment = new_ast_cat_obj(root, goal_node);
-    printf("\naugmented rule: ");
-    obj_print(augment);
-    printf("\n");
+    // printf("\naugmented rule: ");
+    // obj_print(augment);
+    // printf("\n");
 
 
     //ensure nodes have unique id's and compute followpos. 
@@ -947,12 +947,13 @@ void ast_generate_trans_table(obj* root, set** ret_accepting_states, dict** ret_
     // dict_free_except_values(id_to_node);
 
     // printf("\n");
-    printf("goal node id: %lu\n", (*(node_ast**)goal_node->data)->id);
-    printf("goal states: "); set_str(accepting_states); printf("\n");
-    printf("states: "); dict_str(states); printf("\n");
-    printf("trans table: "); ast_print_trans_table(trans_table); printf("\n");
-    printf("\n\n");
+    // printf("goal node id: %lu\n", (*(node_ast**)goal_node->data)->id);
+    // printf("goal states: "); set_str(accepting_states); printf("\n");
+    // printf("states: "); dict_str(states); printf("\n");
+    // printf("trans table: "); ast_print_trans_table(trans_table); printf("\n");
+    // printf("\n\n");
 
+    //set the return values to the table and accepting states generated
     *ret_trans_table = trans_table;
     *ret_accepting_states = accepting_states;
 }
