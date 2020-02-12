@@ -247,7 +247,7 @@ void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_tables, dict* 
         obj_free(identifier);
 
 
-        printf("added %s = ", ((token*)hashtag_obj->data)->content); ast_str(rule_ast); printf("\n");
+        printf("%s = ", ((token*)hashtag_obj->data)->content); ast_str(rule_ast); printf("\n");
 
     }
 
@@ -281,7 +281,7 @@ bool dynamic_scan(char** source, dict* meta_tables, dict* meta_accepts)
         char* scanned = dynamic_scan_inner(source, table, accepts);
         if (scanned != NULL)
         {
-            printf("scanned "); obj_print(identifier); printf(": %s\n", scanned);
+            /*printf("scanned ");*/ obj_print(identifier); printf("(%s)\n", scanned);
             free(scanned); //probably do something with this...
             return true;
         }

@@ -10,14 +10,13 @@
 
 //test if compiler can identify decimal digit
 #lex(/{comment inside of meta-function call}/ #decimal_natural  )
-//0
-//0d
-//0d4868576
+0
+0d4868576
 
 
 //2) rules for identifying decimal exponential number
 #decimal_rational = #decimal_natural, '.', #decimal_digit_string;
-#decimal_floating_point = #decimal_rational, [('e'|'E'), ['-'|'+'], #decimal_rational];
+#decimal_floating_point = (#decimal_rational | #decimal_natural), [('e'|'E'), ['-'|'+'], (#decimal_rational | #decimal_natural)];
 
 #lex(#decimal_floating_point)
 
@@ -34,8 +33,8 @@
 
 #lex(#identifier)
 //test if compiler can identify the identifier
-//apple
-//BaNaNaN
-//apple&b@n@n@!
-//Ra$pberry5?
-//F&#!?_@
+apple
+BaNaNaN
+apple&b@n@n@!
+Ra$pberry5?
+F&#!?_@
