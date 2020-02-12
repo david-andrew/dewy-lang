@@ -60,11 +60,39 @@
 //TODO make case insensitive
 #reserved_word = 'loop' | 'if' | 'else' | 'return' | 'in' | 'as' | 'transmute' | 'continue' | 'break' | 'exit' | 'quit' | 'yield' | 'constant' | 'symbol';
 
+//6) strings (without interpolation
+#whitespace = ' ';
+#string_content = { #lowercase_letter | #uppercase_letter | #symbols | #decimal_digit | #whitespace };
+#string = ('"', #string_content, '"') | ("'", #string_content, "'");
+
+//7) number and string ranges
+#number_range = #decimal_number, {#whitespace}, ':', {#whitespace}, #decimal_number;
+#string_range = #string, {#whitespace}, ':', {#whitespace}, #string;
+#range = #number_range | #string_range;
+
+//8) bodyless function
+#function = 
+    #identifier, 
+    {#whitespace}, 
+    '=', 
+    {#whitespace}, 
+    ( 
+        #identifier | 
+        ('(', [{{#whitespace}, #identifier, {#whitespace}, ','}, {#whitespace}, #identifier], ')') 
+    ),
+    {#whitespace}, 
+    '=>', 
+    {#whitespace}, 
+    ('{}' | '()');
+
 
 #lex(#identifier)
 #lex(#unit) //needs to be after identifier so that it will be checked first
 #lex(#reserved_word)
 #lex(#decimal_number)
+#lex(#string)
+#lex(#range)
+#lex(#function)
 
-#lex(#hashtag) //TODO->this needs to ignore reserved hashtags, like #lex
+//#lex(#hashtag) //TODO->this needs to ignore reserved hashtags, like #lex
 
