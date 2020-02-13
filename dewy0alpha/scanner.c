@@ -38,6 +38,7 @@ scanner_state scan_state = scan_root;
 obj* scan(char** src);
 obj* match_hashtag(char** src);
 obj* match_meta_string(char** src);
+obj* match_meta_hex_number(char** src);
 obj* match_meta_comma(char** src);
 obj* match_meta_semicolon(char** src);
 obj* match_meta_vertical_bar(char** src);
@@ -67,6 +68,7 @@ obj* scan(char** src)
         {
             t = match_hashtag(src);                     if (t != NULL) return t;
             t = match_meta_string(src);                 if (t != NULL) return t;
+            t = match_meta_hex_number(src);             if (t != NULL) return t;
             t = match_meta_comma(src);                  if (t != NULL) return t;
             t = match_meta_semicolon(src);              if (t != NULL) return t;
             t = match_meta_vertical_bar(src);           if (t != NULL) return t;
@@ -150,6 +152,20 @@ obj* match_meta_string(char** src)
         {
             printf("ERROR: reached the end of input while scanning 'meta string'\n");
         }
+    }
+    return NULL;
+}
+
+obj* match_meta_hex_number(char** src)
+{
+    //if the sequence starts with 0x or 0X followed by at least 1 hex digit
+    if ((*src)[0] == '0' && ((*src)[1] == 'x' || (*src)[1] == 'X') && is_hex_digit((*src)[2]))
+    {
+        int i = 2;
+        while(is_hex_digit((*src)[i++]));
+        obj* t = new_token(meta_hex_number, substr((*src), 2, i-2)); //skip the 0x prefix, and stop before the end of the number
+        *src += i - 1;
+        return t;
     }
     return NULL;
 }

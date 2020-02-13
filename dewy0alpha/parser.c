@@ -458,6 +458,10 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
                 obj_free(vect_dequeue(tokens)); //free the token with the id
                 return new_ast_leaf_obj(0);
             }
+            case meta_hex_number:
+            {
+                printf("parsing hex string 0x%s as %lu\n", t->content, parse_hex(t->content));
+            }
             default: 
             {
                 printf("ERROR: unrecognized token type (%d) when there should only be #rules and \"strings\"\n", t->type);

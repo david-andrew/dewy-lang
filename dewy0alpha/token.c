@@ -9,6 +9,7 @@ typedef enum token_types
 {
     hashtag,
     meta_string,
+    meta_hex_number,
     meta_comma,
     meta_semicolon,
     meta_vertical_bar,
@@ -55,6 +56,7 @@ void token_str(token* t)
     {
         case hashtag: printf("hashtag"); break; //hashtag not allowed in this state
         case meta_string: printf("meta_string"); break;
+        case meta_hex_number: printf("meta_hex_number"); break;
         case meta_comma: printf("meta_comma"); break;
         case meta_semicolon: printf("meta_semicolon"); break;
         case meta_vertical_bar: printf("meta_vertical_bar"); break;

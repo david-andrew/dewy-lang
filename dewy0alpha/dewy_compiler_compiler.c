@@ -109,6 +109,7 @@ int main(int argc, char* argv[])
         char* pos;
         if ((pos=strchr(input, '\n')) != NULL) { *pos = '\0'; }
         
+        //TODO->have this scan until there is nothing left, or nothing matches...
         if (!dynamic_scan(&copy, meta_tables, meta_accepts))
         {
             printf("\"%s\" doesn't match\n\n", input);
