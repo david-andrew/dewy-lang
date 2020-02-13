@@ -83,7 +83,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div id="sidebar-scrollbox" class="sidebar-scrollbox">
-                <ol class="chapter"><li class="expanded affix "><a href="ch00-00-introduction.html">Introduction</a></li><li class="expanded affix "><a href="ch00-01-features-list.html">Features List</a></li><li class="expanded "><a href="ch01-00-getting-started.html"><strong aria-hidden="true">1.</strong> Getting Started</a></li><li><ol class="section"><li class="expanded "><a href="ch01-01-installation.html"><strong aria-hidden="true">1.1.</strong> Installation</a></li><li class="expanded "><a href="ch01-02-hello-world.html"><strong aria-hidden="true">1.2.</strong> Hello, World!</a></li><li class="expanded "><a href="ch01-03-hello-many-worlds.html"><strong aria-hidden="true">1.3.</strong> Hello, Many Worlds!</a></li></ol></li><li class="expanded "><a href="chxx-features.html"><strong aria-hidden="true">2.</strong> Language Features</a></li><li><ol class="section"><li class="expanded "><a href="units.html"><strong aria-hidden="true">2.1.</strong> Units</a></li><li class="expanded "><a href="string-interpolation.html"><strong aria-hidden="true">2.2.</strong> String Interpolation</a></li><li class="expanded "><a href="basic-data-types.html"><strong aria-hidden="true">2.3.</strong> Basic Data Types</a></li><li class="expanded "><a href="container-types.html"><strong aria-hidden="true">2.4.</strong> Container Types</a></li><li class="expanded "><a href="range-types.html"><strong aria-hidden="true">2.5.</strong> Range Types</a></li><li class="expanded "><a href="function-types.html"><strong aria-hidden="true">2.6.</strong> Function Types</a></li><li class="expanded "><a href="operators.html"><strong aria-hidden="true">2.7.</strong> Operators</a></li><li class="expanded "><a href="number-bases.html"><strong aria-hidden="true">2.8.</strong> Number Bases</a></li><li class="expanded "><a href="basic-math.html"><strong aria-hidden="true">2.9.</strong> Basic Math</a></li><li class="expanded "><a href="linear-algebra.html"><strong aria-hidden="true">2.10.</strong> Linear Algebra</a></li><li class="expanded "><a href="functional-programming.html"><strong aria-hidden="true">2.11.</strong> Functional Programming</a></li><li class="expanded "><a href="meta-programming.html"><strong aria-hidden="true">2.12.</strong> Meta Programming</a></li><li class="expanded "><a href="flow-control.html"><strong aria-hidden="true">2.13.</strong> Flow Control</a></li><li class="expanded "><a href="loops.html"><strong aria-hidden="true">2.14.</strong> One Loop to Rule them All</a></li><li class="expanded "><a href="blocks-statements-expressions.html"><strong aria-hidden="true">2.15.</strong> Blocks, Statements, and Expressions</a></li></ol></li><li class="expanded "><a href="wipmisc.html"><strong aria-hidden="true">3.</strong> WIP/Misc. Ideas</a></li></ol>
+                <ol class="chapter"><li class="expanded affix "><a href="ch00-00-introduction.html">Introduction</a></li><li class="expanded affix "><a href="ch00-01-features-list.html">Features List</a></li><li class="expanded "><a href="ch01-00-getting-started.html"><strong aria-hidden="true">1.</strong> Getting Started</a></li><li><ol class="section"><li class="expanded "><a href="ch01-01-installation.html"><strong aria-hidden="true">1.1.</strong> Installation</a></li><li class="expanded "><a href="ch01-02-hello-world.html"><strong aria-hidden="true">1.2.</strong> Hello, World!</a></li><li class="expanded "><a href="ch01-03-hello-many-worlds.html"><strong aria-hidden="true">1.3.</strong> Hello, Many Worlds!</a></li></ol></li><li class="expanded "><a href="chxx-features.html"><strong aria-hidden="true">2.</strong> Language Features</a></li><li><ol class="section"><li class="expanded "><a href="units.html"><strong aria-hidden="true">2.1.</strong> Units</a></li><li class="expanded "><a href="string-interpolation.html"><strong aria-hidden="true">2.2.</strong> String Interpolation</a></li><li class="expanded "><a href="basic-data-types.html"><strong aria-hidden="true">2.3.</strong> Basic Data Types</a></li><li class="expanded "><a href="container-types.html"><strong aria-hidden="true">2.4.</strong> Container Types</a></li><li class="expanded "><a href="range-types.html"><strong aria-hidden="true">2.5.</strong> Range Types</a></li><li class="expanded "><a href="function-types.html"><strong aria-hidden="true">2.6.</strong> Function Types</a></li><li class="expanded "><a href="operators.html"><strong aria-hidden="true">2.7.</strong> Operators</a></li><li class="expanded "><a href="number-bases.html"><strong aria-hidden="true">2.8.</strong> Number Bases</a></li><li class="expanded "><a href="basic-math.html"><strong aria-hidden="true">2.9.</strong> Basic Math</a></li><li class="expanded "><a href="linear-algebra.html"><strong aria-hidden="true">2.10.</strong> Linear Algebra</a></li><li class="expanded "><a href="functional-programming.html"><strong aria-hidden="true">2.11.</strong> Functional Programming</a></li><li class="expanded "><a href="meta-programming.html"><strong aria-hidden="true">2.12.</strong> Meta Programming</a></li><li class="expanded "><a href="flow-control.html"><strong aria-hidden="true">2.13.</strong> Flow Control</a></li><li class="expanded "><a href="loops.html"><strong aria-hidden="true">2.14.</strong> One Loop to Rule them All</a></li><li class="expanded "><a href="blocks-statements-expressions.html"><strong aria-hidden="true">2.15.</strong> Blocks, Statements, and Expressions</a></li><li class="expanded "><a href="meta-syntax.html"><strong aria-hidden="true">2.16.</strong> Meta Syntax</a></li></ol></li><li class="expanded "><a href="wipmisc.html"><strong aria-hidden="true">3.</strong> WIP/Misc. Ideas</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -1028,6 +1028,78 @@ interpolation = 'string with the expression {my_expression}'
 <li>blocks for functions</li>
 <li>turning a block into an object</li>
 <li>scopes on <code>{}</code> vs <code>()</code> blocks</li>
+</ul>
+<h1><a class="header" href="#meta-syntax" id="meta-syntax">Meta Syntax</a></h1>
+<p>One of the interesting features of Dewy is that all regular features of the language are bootstrapped out of a much simpler meta language. Using the meta language, you can do anything from define new operators, to (more stuff...), to modifying the syntax rules of the language.</p>
+<p>Meta-Dewy as it is called, is basically a modified version of <a href="https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form">Extended Backus-Naur Form</a>, with some added features</p>
+<h2><a class="header" href="#hashtags-and-lex-rules" id="hashtags-and-lex-rules">Hashtags and Lex Rules</a></h2>
+<p>The simplest aspect of Meta-Dewy is the concept of a hashtag</p>
+<pre><code class="language-dewy">#my_hashtag
+</code></pre>
+<p>Hashtags are used as identifiers for meta rules, which are used to describe the syntax of the language</p>
+<pre><code class="language-dewy">#digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
+</code></pre>
+<p>This rule defines how a single digit is any of the numbers from <code>0-9</code>. Note that all rules must end with a semicolon. Because the meta language is simpler than Dewy itself, it doesn't contain as many quality of life features.</p>
+<p>Lets say we want to define a new number system, say using chinese character. we would build up the rules for numbers like so</p>
+<pre><code class="language-dewy">#ch_digit = '零' | '一' | '二' | '三' | '四' | '五' | '六' | '七' | '八' | '九';
+#ch_digit_string = #ch_digit, {#ch_digit};
+</code></pre>
+<p>The first rule defines the individual digits to be used, and then the second rule defines a digit string as a sequence of at least 1 digit, concatenated together with a sequence of zero or more digits after it.</p>
+<p>Now if we want to be able to write out chinese numbers in our code, we need to the the compiler to include this new rule in the list of rules it uses to define the language. this is accomplished by using the reserved <code>#lex</code> hashtag function. Note that the hashtag function does not end with a semicolon. </p>
+<pre><code class="language-dewy">#lex( #ch_digit_string )
+</code></pre>
+<p>From now on, the compiler will recognize any sequences of chinese digits as a digit string, and store them in a token which can be used later.</p>
+<h3><a class="header" href="#more-examples-of-rules" id="more-examples-of-rules">More Examples of Rules</a></h3>
+<p>These examples come directly from the rules used to build the syntax of Dewy up from nothing</p>
+<h4><a class="header" href="#decimal-number-rules" id="decimal-number-rules">Decimal Number Rules</a></h4>
+<pre><code class="language-dewy">#decimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
+#decimal_prefix = '0D' | '0d'; //obviously optional
+#decimal_digit_string = #decimal_digit, {#decimal_digit | '_'};
+#decimal_natural = [#decimal_prefix], #decimal_digit_string;
+#decimal_rational = #decimal_natural, '.', #decimal_digit_string;
+#decimal_floating_point = (#decimal_rational | #decimal_natural), [('e'|'E'), ['-'|'+'], (#decimal_rational | #decimal_natural)];
+
+//combine all into a single rule. This is actually not necessary, and will probably make parsing slightly more verbose...
+#decimal_number = #decimal_natural | #decimal_rational | #decimal_floating_point;
+</code></pre>
+<p>These will identifier numbers like </p>
+<pre><code class="language-dewy">//TODO-&gt;examples of numbers that can be scanned by these rules
+</code></pre>
+<h4><a class="header" href="#identifiers-and-hashtags" id="identifiers-and-hashtags">Identifiers and Hashtags</a></h4>
+<pre><code class="language-dewy">#lowercase_letter = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' 
+    | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z';
+#uppercase_letter = 'A'| 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' 
+    | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z';
+#symbols = '~' | '!' | '@' | '#' | '$' | '&amp;' | '_' | '?'; 
+
+#identifier = (#uppercase_letter | #lowercase_letter | '_'), {#uppercase_letter | #lowercase_letter | #decimal_digit | #symbols };
+
+#hashtag = '#', #identifier;
+</code></pre>
+<p>and some examples</p>
+<pre><code class="language-dewy">//TODO
+</code></pre>
+<h4><a class="header" href="#reserved-words" id="reserved-words">Reserved Words</a></h4>
+<pre><code class="language-dewy">#reserved_word = 'loop' | 'if' | 'else' | 'return' | 'in' | 'as' | 'transmute' | 'continue' | 'break' | 'exit' | 'quit' | 'yield' | 'constant' | 'symbol';
+</code></pre>
+<p>which match those words exactly. (TODO-&gt;note syntax for case insensitive)</p>
+<h4><a class="header" href="#simple-strings" id="simple-strings">Simple Strings</a></h4>
+<p>These are strings that ignore any string interpolation</p>
+<pre><code class="language-dewy">#whitespace = ' '; //TODO-&gt;other whitespace via hex codes
+#string_content = { #lowercase_letter | #uppercase_letter | #symbols | #decimal_digit | #whitespace };
+#string = ('&quot;', #string_content, '&quot;') | (&quot;'&quot;, #string_content, &quot;'&quot;);
+</code></pre>
+<h3><a class="header" href="#calling-lex-with-multiple-rules" id="calling-lex-with-multiple-rules">Calling #lex with Multiple Rules</a></h3>
+<p>The <code>#lex</code> hashtag can be called with multiple rules at a time, so that it is easy to add many rules to the compiler all at once. For example, to tell the compiler to scan for each of the rules we just described</p>
+<pre><code class="language-dewy">#lex(#identifier #reserved_word #decimal_number #string)
+</code></pre>
+<p>Each rule must simply be separated with whitespace. And the body of the <code>#lex</code> function call must only contain hashtags</p>
+<h2><a class="header" href="#parsing-rules" id="parsing-rules">Parsing Rules</a></h2>
+<p>TODO-&gt;how is meaning derived from defined rules...</p>
+<ul>
+<li>Parse rule syntax</li>
+<li>action backends, e.g. interpreter, llvm, C source, etc.</li>
+<li>writing backends in C</li>
 </ul>
 <h1><a class="header" href="#wipmisc-ideas" id="wipmisc-ideas">WIP/Misc. Ideas</a></h1>
 <h2><a class="header" href="#set-literal-notation" id="set-literal-notation">Set literal notation</a></h2>

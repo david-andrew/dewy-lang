@@ -26,5 +26,6 @@
     - [Flow Control](flow-control.md)
     - [One Loop to Rule them All](loops.md)
     - [Blocks, Statements, and Expressions](blocks-statements-expressions.md)
+    - [Meta Syntax](meta-syntax.md)
 - [WIP/Misc. Ideas](wipmisc.md)
 
