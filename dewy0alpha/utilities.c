@@ -340,7 +340,7 @@ void put_unicode(uint32_t c)
         putchar(b1);
         putchar(b0);
     }
-    else if (c < 0x001FFFFF)                    //11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+    else if (c <= 0x001FFFFF)                    //11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
     {
         int8_t b0 = (c & 0x3F) | 0x80;          //c & 0b10111111
         int8_t b1 = (c >> 6 & 0x3F) | 0x80;     //c >> 6 & 0b10111111
