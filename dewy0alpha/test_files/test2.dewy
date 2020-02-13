@@ -5,4 +5,14 @@
 #lex(#rule1)
 
 
-#rule3 = 0x12345;
+
+#rule4 = 0X54 0X68 0X65 0X20 0X71 0X75 0X69 0X63 0X6B 0X20 0X62 0X72 0X6F 0X77 0X6E 0X20 0X1f98A 0X20 0X6A 0X75 0X6D 0X70 0X73 0X20 0X6F 0X76 0X65 0X72 0X20 0X31 0X33 0X20 0X6C 0X61 0X7A 0X79 0X20 0X1F436 0X2E;
+#lex(#rule4)
+
+
+#rule5 = 'testing' 0X1f98A 'banana' 'pear';
+#lex(#rule5)
+
+//testing what happens if we try to specify a null character in the rule
+#rule6 = 0X1f98A 0x00 0X1f98A;
+#lex(#rule6)

@@ -34,6 +34,7 @@
 int get_next_real_token(vect* tokens, int i);
 int get_next_token_type(vect* tokens, token_type type, int i);
 int get_level_first_token_type(vect* tokens, token_type type);
+int get_level_first_adjacent(vect* tokens);
 void update_meta_symbols(vect* tokens, dict* meta_symbols);
 void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_tables, dict* meta_accepts);
 bool dynamic_scan(char** source, dict* meta_tables, dict* meta_accepts);
@@ -103,6 +104,40 @@ int get_level_first_token_type(vect* tokens, token_type type)
         }
         else { i++; }
     }
+    return -1;
+}
+
+//find two expressions that are next to each other
+//TODO->this is still a pretty weak function implementation
+//will probably break things
+int get_level_first_adjacent(vect* tokens)
+{
+    if (vect_size(tokens) <= 1) { return -1; }
+
+    int i;
+
+    if ((i = get_next_real_token(tokens, 0)) != -1 && get_next_real_token(tokens, i+1) != -1)
+    {
+        token* t = (token*)vect_get(tokens, i)->data;
+        if (t->type == hashtag || t->type == meta_string || t->type == meta_hex_number)
+        {
+            return i + 1;
+        }
+        else if (t->type == meta_left_parenthesis || t->type == meta_left_bracket || t->type == meta_left_brace)
+        {
+            int j = find_closing_pair(tokens, i);
+            if (j > i) 
+            { 
+                return j + 1; 
+            }
+            else 
+            { 
+                printf("ERROR: get_level_first_token_type() encountered an unpaired "); obj_print(vect_get(tokens, 0)); printf("\n");
+                return -1; 
+            }
+        }
+    }
+
     return -1;
 }
 
@@ -434,6 +469,18 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
         //recursively build the left and right side of the ast
         return new_ast_cat_obj(build_ast(left_tokens, meta_symbols), build_ast(tokens, meta_symbols));
     }
+    else if ((split_idx = get_level_first_adjacent(tokens)) != -1)
+    {
+        //split into or node of left and right tokens lists
+        vect* left_tokens = new_vect();
+        
+        //remove all tokens up to split_idx from tokens and push into left_tokens
+        for (int i = 0; i < split_idx; i++) { vect_enqueue(left_tokens, vect_dequeue(tokens)); }
+
+        //recursively build the left and right side of the ast
+        return new_ast_cat_obj(build_ast(left_tokens, meta_symbols), build_ast(tokens, meta_symbols));
+    }
+
 
     // assert(vect_size(tokens) == 1);
     //else assert should have a single string, or #rule
@@ -443,7 +490,12 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
         token* t = (token*)vect_get(tokens, 0)->data;
         switch (t->type)
         {
-            case meta_string: return build_string_ast_obj(t);
+            case meta_string:
+            {
+                obj* ast = build_string_ast_obj(t);
+                obj_free(vect_dequeue(tokens));
+                return ast;
+            }
             case hashtag: 
             {
                 obj* id = new_string(clone(t->content));   
@@ -460,7 +512,9 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
             }
             case meta_hex_number:
             {
-                printf("parsing hex string 0x%s as %lu\n", t->content, parse_hex(t->content));
+                obj* ast = new_ast_leaf_obj(parse_hex(t->content));
+                obj_free(vect_dequeue(tokens));
+                return ast;
             }
             default: 
             {
