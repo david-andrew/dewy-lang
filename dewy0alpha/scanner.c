@@ -42,7 +42,7 @@ obj* match_meta_hex_number(char** src);
 obj* match_meta_comma(char** src);
 obj* match_meta_semicolon(char** src);
 obj* match_meta_vertical_bar(char** src);
-obj* match_meta_minus(char** src);
+// obj* match_meta_minus(char** src);
 obj* match_meta_equals_sign(char** src);
 obj* match_meta_left_parenthesis(char** src);
 obj* match_meta_right_parenthesis(char** src);
@@ -72,7 +72,7 @@ obj* scan(char** src)
             t = match_meta_comma(src);                  if (t != NULL) return t;
             t = match_meta_semicolon(src);              if (t != NULL) return t;
             t = match_meta_vertical_bar(src);           if (t != NULL) return t;
-            t = match_meta_minus(src);                  if (t != NULL) return t;
+            // t = match_meta_minus(src);                  if (t != NULL) return t;
             t = match_meta_equals_sign(src);            if (t != NULL) return t;
             t = match_meta_left_parenthesis(src);       if (t != NULL) return t;
             t = match_meta_right_parenthesis(src);      if (t != NULL) return t;
@@ -187,10 +187,10 @@ obj* match_meta_vertical_bar(char** src)
     return *src[0] == '|' ? new_token(meta_vertical_bar, substr((*src)++, 0, 0)) : NULL;
 }
 
-obj* match_meta_minus(char** src) 
-{
-    return *src[0] == '-' ? new_token(meta_minus, substr((*src)++, 0, 0)) : NULL;
-}
+// obj* match_meta_minus(char** src) 
+// {
+//     return *src[0] == '-' ? new_token(meta_minus, substr((*src)++, 0, 0)) : NULL;
+// }
 
 obj* match_meta_equals_sign(char** src) 
 {

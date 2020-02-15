@@ -13,7 +13,7 @@ typedef enum token_types
     meta_comma,
     meta_semicolon,
     meta_vertical_bar,
-    meta_minus,
+    // meta_minus,
     meta_equals_sign,
     meta_left_parenthesis,
     meta_right_parenthesis,
@@ -60,7 +60,7 @@ void token_str(token* t)
         case meta_comma: printf("meta_comma"); break;
         case meta_semicolon: printf("meta_semicolon"); break;
         case meta_vertical_bar: printf("meta_vertical_bar"); break;
-        case meta_minus: printf("meta_minus"); break;
+        // case meta_minus: printf("meta_minus"); break;
         case meta_equals_sign: printf("meta_equals"); break;
         case meta_left_parenthesis: printf("meta_left_parenthesis"); break;
         case meta_right_parenthesis: printf("meta_right_parenthesis"); break;

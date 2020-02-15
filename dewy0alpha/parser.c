@@ -132,7 +132,7 @@ int get_level_first_adjacent(vect* tokens)
             }
             else 
             { 
-                printf("ERROR: get_level_first_token_type() encountered an unpaired "); obj_print(vect_get(tokens, 0)); printf("\n");
+                printf("ERROR: get_level_first_adjacent() encountered an unpaired "); obj_print(vect_get(tokens, i)); printf("\n");
                 return -1; 
             }
         }
@@ -393,7 +393,7 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
 {
     //precedence levels. There is no left/right associativity, so default to right
     //groups: []  ()  {}
-    //concatenation: ,
+    //concatenation: , and ' ' (i.e. space)
     //alternation: |
 
     //note that groups should always have the opening at index 0, and closing at the last index in the token list

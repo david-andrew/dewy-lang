@@ -68,7 +68,9 @@
 //7) number and string ranges
 #number_range = #decimal_number, {#whitespace}, ':', {#whitespace}, #decimal_number;
 #string_range = #string, {#whitespace}, ':', {#whitespace}, #string;
-#range = #number_range | #string_range;
+#range_body = #number_range | #string_range;
+#range = (('(' | '['), {#whitespace}, #range_body, {#whitespace}, (')' | ']')) | #range_body;
+
 
 //8) bodyless function
 #function = 
