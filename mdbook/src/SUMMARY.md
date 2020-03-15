@@ -16,6 +16,7 @@
     - [Basic Data Types](basic-data-types.md)
     - [Container Types](container-types.md)
     - [Range Types](range-types.md)
+    - [Object Types](object-types.md)
     - [Function Types](function-types.md)
     - [Operators](operators.md)
     - [Number Bases](number-bases.md)
