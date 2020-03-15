@@ -226,24 +226,24 @@ printl(substring2) //prints 's is a st'
 printl(substring3) //prints ' is a str'
 </code></pre>
 <p>Note that all ranges used to index sequences must be integer ranges</p>
-<p>Lastly, you can specify that a range starts from the beginning of the sequence, or continues to the end of the sequence using the special <code>_</code> (underscore) identifier</p>
+<p>Lastly, you can specify that a range continues to the end of the sequence using the special <code>_</code> (underscore) identifier. paired with <code>0</code> to select from the start of the string, you can select from sequences relative to both the start and end bounds.</p>
 <pre><code>full_string = 'this is a string'
 
 substring_to_end = full_string[3:_]
 printl(substring_to_end) //prints 's is a string'
 
-substring_from_start = full_string[_:12]
+substring_from_start = full_string[0:12]
 printl(substring_from_start) //prints 'this is a str'
 
-whole_string = full_string[_:_] //selects the whole string
+whole_string = full_string[0:_] //selects the whole string
 </code></pre>
-<p>TBD on how inclusive/exclusive works with <code>_</code>. I'm inclined to think the underscore ignores inclusive/exclusive, and always selects the first/last element.</p>
 <p>Also potentially can <code>_</code> be combined with math to select points near the endpoints? </p>
 <pre><code>arr[_]     // last element
 arr[_-1]   // second to last element
 arr[5:_-3] // 5th element to 4th to last element
 arr[_-3:_] // 4th to last element to last element
 </code></pre>
+<p>TBD on how inclusive/exclusive works with <code>_</code>. I'm inclined to think that <code>_</code> is equivalent to the index of the last element, in which case exclusive bounds would exclude the last element. This mirrors how exclusive bounds would work for the first element being specified as zero. e.g. <code>arr[(0:_)]</code> would select all elements except for the first and last. This also makes the most sense/is the least complicated with introducing arithmetic into the range values</p>
 
                     </main>
 

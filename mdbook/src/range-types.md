@@ -126,7 +126,7 @@ printl(substring3) //prints ' is a str'
 
 Note that all ranges used to index sequences must be integer ranges
 
-Lastly, you can specify that a range starts from the beginning of the sequence, or continues to the end of the sequence using the special `_` (underscore) identifier
+Lastly, you can specify that a range continues to the end of the sequence using the special `_` (underscore) identifier. paired with `0` to select from the start of the string, you can select from sequences relative to both the start and end bounds.
 
 ```
 full_string = 'this is a string'
@@ -134,13 +134,11 @@ full_string = 'this is a string'
 substring_to_end = full_string[3:_]
 printl(substring_to_end) //prints 's is a string'
 
-substring_from_start = full_string[_:12]
+substring_from_start = full_string[0:12]
 printl(substring_from_start) //prints 'this is a str'
 
-whole_string = full_string[_:_] //selects the whole string
+whole_string = full_string[0:_] //selects the whole string
 ```
-
-TBD on how inclusive/exclusive works with `_`. I'm inclined to think the underscore ignores inclusive/exclusive, and always selects the first/last element.
 
 Also potentially can `_` be combined with math to select points near the endpoints? 
 
@@ -151,3 +149,4 @@ arr[5:_-3] // 5th element to 4th to last element
 arr[_-3:_] // 4th to last element to last element
 ```
 
+TBD on how inclusive/exclusive works with `_`. I'm inclined to think that `_` is equivalent to the index of the last element, in which case exclusive bounds would exclude the last element. This mirrors how exclusive bounds would work for the first element being specified as zero. e.g. `arr[(0:_)]` would select all elements except for the first and last. This also makes the most sense/is the least complicated with introducing arithmetic into the range values
