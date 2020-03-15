@@ -435,6 +435,43 @@ ascii_range = 'A':'z' //this would include extra characters like '[\]^_{|}' etc.
 </code></pre>
 <p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>. NOTE that this is distinct from every dictionary word in that range, as it will include many many gibberish words. </p>
 <p>TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. <code>'apple2'</code> should come before <code>'apple10'</code>), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used</p>
+<h2><a class="header" href="#indexing-sequences" id="indexing-sequences">Indexing Sequences</a></h2>
+<p>ranges can be used to select values from a sequence. For example, say we want a substring we can do thw following</p>
+<pre><code class="language-dewy">full_string = 'this is a string'
+
+substring = full_string[3:12]
+printl(substring) //prints 's is a str'
+</code></pre>
+<p>This works for any sequence type. Note that the default range is inclusive (indicated by array indexing using square brackets). If you want to have exclusive bounds, simply wrap the range in parenthesis/brackets</p>
+<pre><code>full_string = 'this is a string'
+
+substring1 = full_string[(3:12)]
+substring2 = full_string[[3:12)]
+substring3 = full_string[(3:12]]
+
+printl(substring1) //prints ' is a st'
+printl(substring2) //prints 's is a st'
+printl(substring3) //prints ' is a str'
+</code></pre>
+<p>Note that all ranges used to index sequences must be integer ranges</p>
+<p>Lastly, you can specify that a range starts from the beginning of the sequence, or continues to the end of the sequence using the special <code>_</code> (underscore) identifier</p>
+<pre><code>full_string = 'this is a string'
+
+substring_to_end = full_string[3:_]
+printl(substring_to_end) //prints 's is a string'
+
+substring_from_start = full_string[_:12]
+printl(substring_from_start) //prints 'this is a str'
+
+whole_string = full_string[_:_] //selects the whole string
+</code></pre>
+<p>TBD on how inclusive/exclusive works with <code>_</code>. I'm inclined to think the underscore ignores inclusive/exclusive, and always selects the first/last element.</p>
+<p>Also potentially can <code>_</code> be combined with math to select points near the endpoints? </p>
+<pre><code>arr[_]     // last element
+arr[_-1]   // second to last element
+arr[5:_-3] // 5th element to 4th to last element
+arr[_-3:_] // 4th to last element to last element
+</code></pre>
 <h1><a class="header" href="#function-types" id="function-types">Function Types</a></h1>
 <p>Functions are first class citizens in Dewy. In fact many concepts from functional programming are included in Dewy, as they frequently allow for cleaner and more concise code.</p>
 <h2><a class="header" href="#function-literals" id="function-literals">Function Literals</a></h2>

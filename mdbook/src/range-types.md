@@ -98,3 +98,56 @@ word_range = 'apple':'zebra'
 which would create a range that consists of every possible 5 letter combination starting from the word `'apple'` and iterating through to the word `'zebra'`. NOTE that this is distinct from every dictionary word in that range, as it will include many many gibberish words. 
 
 TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. `'apple2'` should come before `'apple10'`), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used
+
+## Indexing Sequences
+
+ranges can be used to select values from a sequence. For example, say we want a substring we can do thw following
+
+```dewy
+full_string = 'this is a string'
+
+substring = full_string[3:12]
+printl(substring) //prints 's is a str'
+```
+
+This works for any sequence type. Note that the default range is inclusive (indicated by array indexing using square brackets). If you want to have exclusive bounds, simply wrap the range in parenthesis/brackets
+
+```
+full_string = 'this is a string'
+
+substring1 = full_string[(3:12)]
+substring2 = full_string[[3:12)]
+substring3 = full_string[(3:12]]
+
+printl(substring1) //prints ' is a st'
+printl(substring2) //prints 's is a st'
+printl(substring3) //prints ' is a str'
+```
+
+Note that all ranges used to index sequences must be integer ranges
+
+Lastly, you can specify that a range starts from the beginning of the sequence, or continues to the end of the sequence using the special `_` (underscore) identifier
+
+```
+full_string = 'this is a string'
+
+substring_to_end = full_string[3:_]
+printl(substring_to_end) //prints 's is a string'
+
+substring_from_start = full_string[_:12]
+printl(substring_from_start) //prints 'this is a str'
+
+whole_string = full_string[_:_] //selects the whole string
+```
+
+TBD on how inclusive/exclusive works with `_`. I'm inclined to think the underscore ignores inclusive/exclusive, and always selects the first/last element.
+
+Also potentially can `_` be combined with math to select points near the endpoints? 
+
+```
+arr[_]     // last element
+arr[_-1]   // second to last element
+arr[5:_-3] // 5th element to 4th to last element
+arr[_-3:_] // 4th to last element to last element
+```
+
