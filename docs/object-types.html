@@ -182,7 +182,35 @@ my_obj.p2  //returns 'pi'
     }
 }
 </code></pre>
-<p>TBD on if there will be a <code>this</code> parameter, or if you just directly refer to parameters inside of the scope of the object. I think it may make sense to not have a <code>this</code>, as objects are really just a series of bindings in a shared scope. This does have implications for lazy vs eager loading of variables that are captured in functions--this implies that parameters are lazily loaded, thus allowing any changes in object parameters to be reflected by the change in output from the function. Otherwise if externally referenced parameters were frozen in functions, then the example <code>func</code> from above would only ever have the initial values of <code>p1</code> and <code>p2</code>. TBD on how <code>param1</code> and <code>param2</code> would work in the body of the function--they would probably just be frozen to the values they had when they were passed in</p>
+<p>There will not be any sort of <code>this</code> or <code>self</code> parameter as in other languages to access an objects members from within itself/any contained functions. Instead because the functions are at the same scope as the declaration of the objects members, those members are available to the function. </p>
+<p>Note that here there is a meaningful distinction between referencing and copying a parameter within the function body.</p>
+<pre><code>//shorthand constructor declaration
+my_class0 = (param1) =&gt; {
+    p1 = param1
+    func = () =&gt; printl('p1 is {p1}')
+}
+
+my_class1 = (param1) =&gt; {
+    p1 = param1
+    func = () =&gt; printl('p1 is {@p1}')
+}
+
+my_obj0 = my_class0('apple')
+my_obj1 = my_class1('apple')
+
+my_obj0.func  //prints 'p1 is apple'
+my_obj1.func  //prints 'p1 is apple'
+
+//change the member data for each object
+my_obj0.p1 = 'pie'
+my_obj1.p1 = 'pie'
+
+//re-call func to see how the output changes
+my_obj0.func  //prints 'p1 is apple'
+my_obj1.func  //prints 'p1 is pie'
+
+</code></pre>
+<p>notice how when <code>func</code> doesn't reference the parameters using <code>@</code> that their original value gets printed, while using <code>@</code> means that the new updated value is used. This is because in the first instance, the parameters in the function are copied, while the second instance references the live parameter in the object scope.</p>
 
                     </main>
 
