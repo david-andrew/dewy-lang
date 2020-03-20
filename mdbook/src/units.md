@@ -24,8 +24,8 @@ The `energy` variable now contains a value of `9000 joules`.
 Abbreviations are written inside of brackes `[]`. Also note that abbreviated units are case sensitive, while written out units are case insensitive (and the same is true for prefixes). TODO->write out all the unit conversion
 
 #### Mass [M]
-`[g]`, `gram`, `grams` (note that the base unit is `kg`/`kilograms`)
-`[lb]`, `[lbm]` `pound`, `pounds`, `pound-mass`, `pounds-mass`
+`[g]`, `gram`, `grams` (note that the base unit is `kg`/`kilograms`)  
+`[lb]`, `[lbm]` `pound`, `pounds`, `pound-mass`, `pounds-mass`  
 `slug`, `slugs`
 
 #### Length [L]
@@ -94,10 +94,52 @@ Abbreviations are written inside of brackes `[]`. Also note that abbreviated uni
 #### Inductance
 `[H]`, `henry`, `henries`, `henrys`
 
-## Volume
+#### Relative Temperature
+`[°C]`, `celsius`, `degrees-celsius`  
+`[°F]`, `fahrenheit`, `degrees-fahrenheit`
+
+#### Luminous Flux
+`[lm]`, `lumen`, `lumens`
+
+#### Illuminance
+`[lx]`, `lux`, `luxes`
+
+#### Radioactivity (Decays per unit time)
+`[Bq]`, `becquerel`, `becquerels`
+
+#### Absorbed Dose (of Ionizing Radiation)
+`[Gy]`, `gray`, `grays`
+
+#### Equivalent Dose (of Ionising Radiation)
+`[Sv]`, `sievert`, `sieverts`
+
+#### catalytic activity
+`[kat]`, `katal`, `katals`
+
+(TODO->all other units + weird units. e.g. drops)
 
 ### SI Prefixes
 Note that SI prefixes only work for SI base and derived units (and a few exceptions noted below). 
 
 Also note that the abbreviated forms of prefixes may only be combined with abbreviated units, and written out prefixes may only be combined with written out units. E.g. `kilograms` and `kg` are valid, but `kgrams` and `kilog` are invalid.
 
+10^24 = `[Y]`, `yotta`  
+10^21 = `[Z]`, `zetta`  
+10^18 = `[E]`, `exa`   
+10^15 = `[P]`, `peta`  
+10^12 = `[T]`, `tera`  
+10^9 = `[G]`, `giga`  
+10^6 = `[M]`, `mega`  
+10^3 = `[k]`, `kilo`  
+10^2 = `[h]`, `hecto`  
+10^1 = `[da]`, `deca`  
+10^−1 = `[d]`, `deci`   
+10^−2 = `[c]`, `centi`  
+10^−3 = `[m]`, `milli`  
+10^−6 = `[μ]`, `[u]`, `micro`  
+10^−9 = `[n]`, `nano`  
+10^−12 = `[p]`, `pico`  
+10^−15 = `[f]`, `femto`  
+10^−18 = `[a]`, `atto`  
+10^−21 = `[z]`, `zepto`  
+10^−24 = `[y]`, `yocto`  
