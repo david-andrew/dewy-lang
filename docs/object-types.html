@@ -148,14 +148,14 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1><a class="header" href="#object-types" id="object-types">Object Types</a></h1>
+                        <h1><a class="header" href="#object-and-class-types" id="object-and-class-types">Object and Class Types</a></h1>
 <h2><a class="header" href="#todo" id="todo">TODO</a></h2>
-<p>Object types are basically just blocks of code bound to a variable</p>
-<pre><code>my_obj = {
+<p>Object types are basically just containers containing assigments of variables and functions</p>
+<pre><code>my_obj = [
     a = 'apple'
     b = 'banana'
     c = 'cat'
-}
+]
 </code></pre>
 <p>You can access the members of the object using the <code>.</code> accessor</p>
 <pre><code>my_obj.a  //returns 'apple'
@@ -163,10 +163,10 @@ my_obj.c  //returns 'cat'
 </code></pre>
 <p>To create an object constructor (like many languages have classes that you can instantiate) we create a function that returns an object</p>
 <pre><code>constructor = (param1, param2) =&gt; {
-    return {
+    return [
         p1 = param1
         p2 = param2
-    }
+    ]
 }
 
 my_obj = constructor(42, 'pi')
@@ -175,25 +175,25 @@ my_obj.p2  //returns 'pi'
 </code></pre>
 <p>You can also store functions inside of objects, allowing objects to completely cover regular object behaviors from other languages</p>
 <pre><code>constructor = (param1, param2) =&gt; {
-    return {
+    return [
         p1 = param1
         p2 = param2
         func = () =&gt; printl('p1 is {p1} and p2 is {p2}') 
-    }
+    ]
 }
 </code></pre>
 <p>There will not be any sort of <code>this</code> or <code>self</code> parameter as in other languages to access an objects members from within itself/any contained functions. Instead because the functions are at the same scope as the declaration of the objects members, those members are available to the function. </p>
 <p>Note that here there is a meaningful distinction between referencing and copying a parameter within the function body.</p>
 <pre><code>//shorthand constructor declaration
-my_class0 = (param1) =&gt; {
+my_class0 = (param1) =&gt; [
     p1 = param1
     func = () =&gt; printl('p1 is {p1}')
-}
+]
 
-my_class1 = (param1) =&gt; {
+my_class1 = (param1) =&gt; [
     p1 = param1
     func = () =&gt; printl('p1 is {@p1}')
-}
+]
 
 my_obj0 = my_class0('apple')
 my_obj1 = my_class1('apple')

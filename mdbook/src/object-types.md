@@ -1,16 +1,16 @@
-# Object Types
+# Object and Class Types
 
 
 ## TODO
 
-Object types are basically just blocks of code bound to a variable
+Object types are basically just containers containing assigments of variables and functions
 
 ```
-my_obj = {
+my_obj = [
     a = 'apple'
     b = 'banana'
     c = 'cat'
-}
+]
 ```
 
 You can access the members of the object using the `.` accessor
@@ -26,10 +26,10 @@ To create an object constructor (like many languages have classes that you can i
 
 ```
 constructor = (param1, param2) => {
-    return {
+    return [
         p1 = param1
         p2 = param2
-    }
+    ]
 }
 
 my_obj = constructor(42, 'pi')
@@ -41,11 +41,11 @@ You can also store functions inside of objects, allowing objects to completely c
 
 ```
 constructor = (param1, param2) => {
-    return {
+    return [
         p1 = param1
         p2 = param2
         func = () => printl('p1 is {p1} and p2 is {p2}') 
-    }
+    ]
 }
 ```
 
@@ -55,15 +55,15 @@ Note that here there is a meaningful distinction between referencing and copying
 
 ```
 //shorthand constructor declaration
-my_class0 = (param1) => {
+my_class0 = (param1) => [
     p1 = param1
     func = () => printl('p1 is {p1}')
-}
+]
 
-my_class1 = (param1) => {
+my_class1 = (param1) => [
     p1 = param1
     func = () => printl('p1 is {@p1}')
-}
+]
 
 my_obj0 = my_class0('apple')
 my_obj1 = my_class1('apple')

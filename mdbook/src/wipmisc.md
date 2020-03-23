@@ -14,6 +14,7 @@ my_set = [.'item1' .'item2' .'item3' .'etc']
 
 ```dewy
 my_set = Set['item1' 'item2' 'item3' 'etc']
+my_set = #set['item1' 'item2' 'item3' 'etc'] //or using hashtags
 ```
 
 `$` before a list literal
@@ -28,6 +29,19 @@ my_set = ['item1' \ 'item2' \ 'item3' \]
 
 ```dewy
 my_set = ['item1'-- 'item2'-- 'item3'--]
+```
+
+tilde before each item
+
+```dewy
+my_set = [~'item1' ~'item2' ~'item3' ~'etc']
+```
+
+
+replace array new row punctuator `;` with `|` and then use `;` for set items. I think this sort of fits with how `;` is an expression surpresser, so it is sort of like surpressing the regular ability to access the items, but idk if it makes sense, b/c what if you want to make an array, but you need to perform some calculations that also happen to express a value (e.g. a function call that returns an unused value). Then how would you surpress the output of the function call without making the result look like a set item?
+
+```dewy
+my_set = ['item1'; 'item2'; 'item2'; ]
 ```
 
 

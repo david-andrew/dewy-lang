@@ -156,6 +156,7 @@
 </code></pre>
 <p><code>Set</code> before a list literal</p>
 <pre><code class="language-dewy">my_set = Set['item1' 'item2' 'item3' 'etc']
+my_set = #set['item1' 'item2' 'item3' 'etc'] //or using hashtags
 </code></pre>
 <p><code>$</code> before a list literal</p>
 <pre><code class="language-dewy">my_set = $['item1' 'item2' 'item3' 'etc']
@@ -163,6 +164,12 @@
 <pre><code class="language-dewy">my_set = ['item1' \ 'item2' \ 'item3' \]
 </code></pre>
 <pre><code class="language-dewy">my_set = ['item1'-- 'item2'-- 'item3'--]
+</code></pre>
+<p>tilde before each item</p>
+<pre><code class="language-dewy">my_set = [~'item1' ~'item2' ~'item3' ~'etc']
+</code></pre>
+<p>replace array new row punctuator <code>;</code> with <code>|</code> and then use <code>;</code> for set items. I think this sort of fits with how <code>;</code> is an expression surpresser, so it is sort of like surpressing the regular ability to access the items, but idk if it makes sense, b/c what if you want to make an array, but you need to perform some calculations that also happen to express a value (e.g. a function call that returns an unused value). Then how would you surpress the output of the function call without making the result look like a set item?</p>
+<pre><code class="language-dewy">my_set = ['item1'; 'item2'; 'item2'; ]
 </code></pre>
 <h2><a class="header" href="#places-whitespace-isnt-allowed" id="places-whitespace-isnt-allowed">Places whitespace isn't allowed</a></h2>
 <p>Basically these won't necessarily result in a syntax error, but they do not mean what the user might think they mean. Most of the time they should throw an error, but sometimes there are other constructs that they could be referring to</p>
