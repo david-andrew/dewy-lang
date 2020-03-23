@@ -6,8 +6,8 @@
 function git_push() {
     git add ../docs ../mdbook
     printf "\nPlease enter commit message: "
-    read msg
-    git commit -m "$msg. automatic update to docs on $(date)" #TODO->figure out how to let this write my own commit message
+    read msg #TODO->check if empty, and if so, print old docs message "automatic update to docs on $(date)" 
+    git commit -m "$msg"
     git push
 }
 
