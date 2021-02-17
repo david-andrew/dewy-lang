@@ -1,0 +1,40 @@
+#cd into src/compiler?
+
+# #current completed step is simple lexer
+# dewy: dewy_compiler_compiler.c types.o types.h
+#     clang -o dewy types.o dewy_compiler_compiler.c
+
+
+utilities.o: utilities.c utilities.h
+    clang -c -o utilities.o utilities.c
+
+object.o: object.c object.h types.h utilities.o
+    clang -c -o object.o object.c utilities.o
+
+token.o: token.c token.h object.o
+    clang -c -o token.o token.c object.o
+
+dictionary.o: dictionary.c dictionary.h types.h object.o utilities.o token.o 
+    clang -c -o dictionary.o
+
+vector.o: vector.c vector.h types.h object.o dictionary.o utilities.o
+    clang -c -o vector.o object.o dictionary.o utilities.o
+    
+set.o: set.c set.h types.h object.o dictionary.o utilities.o
+    clang -c -o set.o object.o dictionary.o utilities.o
+
+mast.o: mast.c mast.h types.h object.o utilities.o set.o
+    clang -c -o mast.o object.o utilities.o set.o
+
+scanner.o: scanner.c scanner.h types.h object.o token.o vector.o set.o token.o
+    clang -c -o scanner.o object.o token.o vector.o set.o token.o
+
+parser.o: parser.c parser.h types.h object.o token.o vector.o dictionary.o set.o mast.o scanner.o
+    clang -c -o parser.o object.o token.o vector.o dictionary.o set.o mast.o scanner.o
+
+unit_test: unit_test.c types.h vector.o dictionary.o set.c token.o mast.o
+    clang -c -o unit_test vector.o dictionary.o set.c token.o mast.o
+    ./unit_test
+
+dewy_compiler_compiler: dewy_compiler_compiler.c types.h utilities.o scanner.o parser.o object.o dictionary.o vector.o
+    clang -c -o dcc utilities.o scanner.o parser.o object.o dictionary.o vector.o

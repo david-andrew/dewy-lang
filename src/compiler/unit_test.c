@@ -2,11 +2,16 @@
 #include <string.h>
 #include <assert.h>
 
-#include "vector.c"
-#include "dictionary.c"
-#include "set.c"
-#include "token.c"
-#include "mast.c"
+#include "vector.h"
+#include "dictionary.h"
+#include "set.h"
+#include "token.h"
+#include "mast.h"
+// #include "vector.c"
+// #include "dictionary.c"
+// #include "set.c"
+// #include "token.c"
+// #include "mast.c"
 
 //TODO->set up alias to run this with valgrind?
 

@@ -7,9 +7,14 @@
 #include <string.h>
 #include <assert.h>
 
-#include "utilities.c"
-#include "object.c"
-#include "token.c"
+#include "utilities.h"
+#include "object.h"
+#include "token.h"
+// #include "utilities.c"
+// #include "object.c"
+// #include "token.c"
+
+#include "dictionary.h"
 
 #define DEFAULT_DICT_CAPACITY 8
 #define MAX_LOAD 2 / 3
@@ -27,47 +32,6 @@
 //https://mail.python.org/pipermail/python-dev/2012-December/123028.html
 
 
-//structure for (hash,key,value) tuples, i.e. a single entry in a dictionary
-typedef struct dict_entry_struct 
-{
-    uint64_t hash;
-    obj* key;
-    obj* value;
-} dict_entry;
-
-//structure for dictionary object. preferred to pass dict* rather than dict
-typedef struct dict_struct
-{
-    size_t size;
-    size_t icapacity;
-    size_t ecapacity;
-    size_t* indices;
-    dict_entry* entries;
-} dict;
-
-
-
-dict* new_dict();
-obj* new_dict_obj(dict* d);
-size_t dict_size(dict* d);
-size_t dict_indices_capacity(dict* d);
-size_t dict_entries_capacity(dict* d);
-bool dict_resize_indices(dict* d, size_t new_size);
-bool dict_resize_entries(dict* d, size_t new_size);
-uint64_t dict_find_empty_address(dict*, uint64_t hash);
-bool dict_set(dict* d, obj* key, obj* value);
-bool dict_contains(dict* d, obj* key);
-obj* dict_get(dict* d, obj* key);
-obj* dict_get_uint_key(dict* d, uint64_t u);
-obj* dict_get_codepoint_key(dict* d, uint32_t c);
-bool dict_set_codepoint_key(dict* d, uint32_t c, obj* value);
-obj* dict_get_hashtag_key(dict* d, obj* hashtag_obj);
-void dict_reset(dict* d);
-void dict_free(dict* d);
-void dict_free_elements_only(dict* d);
-void dict_free_table_only(dict* d);
-void dict_repr(dict* d);
-void dict_str(dict* d);
 
 /*
     create an empty dictionary

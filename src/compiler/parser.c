@@ -3,15 +3,18 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <assert.h>
 
-#include "object.c"
-#include "token.c"
-#include "vector.c"
-#include "dictionary.c"
-#include "set.c"
-#include "mast.c"
-#include "scanner.c"
-
+#include "utilities.h"
+#include "object.h"
+#include "token.h"
+#include "vector.h"
+#include "dictionary.h"
+#include "set.h"
+#include "mast.h"
+#include "scanner.h"
+#include "parser.h"
 
 //TODO
 // typedef struct parser_context_struct
@@ -30,19 +33,6 @@
 //if a #rule comes up, and it isn't in the symbol table, it's an error. This prevents recursion
 
 
-//forward declarations
-int get_next_real_token(vect* tokens, int i);
-int get_next_token_type(vect* tokens, token_type type, int i);
-int get_level_first_token_type(vect* tokens, token_type type);
-int get_level_first_adjacent(vect* tokens);
-void update_meta_symbols(vect* tokens, dict* meta_symbols);
-void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_tables, dict* meta_accepts);
-bool dynamic_scan(char** source, dict* meta_tables, dict* meta_accepts);
-char* dynamic_scan_inner(char** source, dict* table, set* accepts);
-obj* get_next_state(dict* table, obj* state, uint32_t codepoint);
-obj* build_ast(vect* tokens, dict* meta_symbols);
-int find_closing_pair(vect* tokens, int start);
-obj* build_string_ast_obj(token* t);
 
 //returns the index of the next non-whitespace and non-comment token.
 //returns -1 if none are present in the vector
