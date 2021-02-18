@@ -10,18 +10,10 @@
 #include "utilities.h"
 #include "object.h"
 #include "token.h"
-// #include "utilities.c"
-// #include "object.c"
-// #include "token.c"
-
 #include "dictionary.h"
 
 #define DEFAULT_DICT_CAPACITY 8
 #define MAX_LOAD 2 / 3
-
-//representation for an empty value in the dict indices table.
-//since we only have pure ints, we say the max value (which probably won't be used) is EMPTY
-#define EMPTY SIZE_MAX
 
 //constant to assign to hashes that are 0, so that the lfsr algorithm doesn't get stuck at 0
 #define NONZERO_HASH 0xDEADBEEF

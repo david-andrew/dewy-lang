@@ -1,7 +1,13 @@
 #ifndef PARSER_H
 #define PARSER_H
 
-#include "types.h"
+#include <stdint.h>
+
+#include "object.h"
+#include "dictionary.h"
+#include "vector.h"
+#include "set.h"
+#include "token.h"
 
 int get_next_real_token(vect* tokens, int i);
 int get_next_token_type(vect* tokens, token_type type, int i);

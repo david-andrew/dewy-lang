@@ -1,7 +1,43 @@
 #ifndef OBJECT_H
 #define OBJECT_H
 
-#include "types.h"
+#include <stdint.h>
+#include <stdbool.h>
+
+//// Object structs and typedefs ////
+
+/** 
+    Enum for each of the different types object types that exist
+*/
+typedef enum obj_types 
+{ 
+    Boolean_t,
+    Character_t,
+    Integer_t, 
+    UInteger_t,
+    String_t,
+    Token_t,
+    Vector_t,
+    Dictionary_t,
+    Set_t,
+    ASTCat_t,
+    ASTOr_t,
+    ASTStar_t,
+    ASTLeaf_t,
+} obj_type;
+
+/**
+    Struct/type declaration for generic objects
+*/
+typedef struct obj_struct
+{
+    obj_type type;  //integer specifying what type of object.
+    size_t size;    //size of the data allocated for this object
+    void* data;     //data allocated for this object
+} obj;
+
+// forward declare so we can use dict here
+typedef struct dict_struct dict;
 
 //// Object Init Functions ////
 

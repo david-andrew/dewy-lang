@@ -8,10 +8,6 @@
 #include "utilities.h"
 #include "object.h"
 #include "dictionary.h"
-// #include "utilities.c"
-// #include "object.c"
-// #include "dictionary.c"
-
 #include "vector.h"
 
 #define DEFAULT_VECT_CAPACITY 8

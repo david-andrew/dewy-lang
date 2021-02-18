@@ -6,7 +6,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-// #include <stdint.h>
 #include <string.h>
 #include <limits.h>
 
@@ -16,13 +15,6 @@
 #include "object.h"
 #include "dictionary.h"
 #include "vector.h"
-// #include "utilities.c"
-// #include "scanner.c"
-// #include "parser.c"
-// #include "object.c"
-// #include "dictionary.c"
-// #include "vector.c"
-
 
 #define START 0     //start of an array
 #define END INT_MAX //end of an array (when sanitized via dewy_index() or as a substring)

@@ -16,68 +16,6 @@
 #include "mast.h"
 
 
-// ////// FORWARD DECLARATIONS ////////
-
-// //forward declare dict type + methods used here
-// typedef struct dict_struct dict;
-// size_t dict_size(dict* d);
-// dict* new_dict();
-// obj* dict_get(dict* d, obj* key);
-// bool dict_set(dict* d, obj* key, obj* value);
-// void dict_free_table_only(dict* d);
-// void dict_str(dict* d);
-// // dict* dict_copy_with_refs(dict* d, dict* refs);
-// void dict_free(dict* d);
-
-// //forward declare vect type + methods used here
-// typedef struct vect_struct vect;
-// size_t vect_size(vect* v);
-// uint64_t vect_hash(vect* v); 
-// int64_t vect_compare(vect* left, vect* right); 
-// void vect_free(vect* v);
-// void vect_str(vect* v);
-// vect* vect_copy_with_refs(vect* v, dict* refs);
-
-// //forward declare set type + methods used here
-// typedef struct set_struct set;
-// size_t set_size(set* S);
-// uint64_t set_hash(set* S);
-// void set_str(set* S);
-// // set* set_copy_with_refs(set* S, dict* refs);
-// bool set_equals(set* A, set* B);
-// void set_free(set* S);
-
-// //forward declare token type + methods used here
-// typedef struct tokens token;
-// void token_str(token* t);
-// void token_free(token* t);
-
-// // typedef struct node_ast_struct node_ast;
-// // typedef struct unary_ast_struct unary_ast;
-// // typedef struct binary_ast_struct binary_ast;
-// void ast_str(obj* node);
-
-
-
-// obj* new_bool(bool b);
-// bool* new_bool_ptr(bool b);
-// obj* new_char(uint32_t c);  //unicode characters
-// obj* new_int(int64_t i);
-// obj* new_uint(uint64_t u);
-// obj* new_string(char* s);   //new string from existing heap allocation
-// obj* new_ustr(char* s);     //new string from scratch (e.g. from const char[])
-// size_t obj_size(obj* o);
-// obj* obj_copy(obj* o);
-// obj* obj_copy_inner(obj* o, dict* refs);
-// void obj_print(obj* o);
-// uint64_t obj_hash(obj* o);
-// int64_t obj_compare(obj* left, obj* right);
-// bool obj_equals(obj* left, obj* right);
-
-
-//dict_hash, dict_compare, dict_free
-//set_hash, set_compare, set_free
-
 obj* new_bool(bool b)
 {
     obj* B = malloc(sizeof(obj));

@@ -1,7 +1,9 @@
 #ifndef UTILITIES_H
 #define UTILITIES_H
 
-#include "types.h"
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 #define AUGMENT_CHAR 0x200000 //first invalid codepoint (2^21)
 

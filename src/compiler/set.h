@@ -1,7 +1,20 @@
 #ifndef SET_H
 #define SET_H
 
-#include "types.h"
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+#include "object.h"
+#include "dictionary.h"
+
+/**
+    Struct/type declaration for sets. Currently just wraps dictionary. TODO->have dedicated type
+*/
+typedef struct set_struct
+{
+    dict* d; //a set is just a wrapper around a dict
+} set;
 
 set* new_set();
 obj* new_set_obj(set* s);

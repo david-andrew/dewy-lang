@@ -1,11 +1,37 @@
 #ifndef DICTIONARY_H
 #define DICTIONARY_H
 
-#include "types.h"
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+#include "object.h"
 
 //representation for an empty value in the dict indices table.
 //since we only have pure ints, we say the max value (which probably won't be used) is EMPTY
 #define EMPTY SIZE_MAX
+
+/**
+    Struct/type declaration for (hash,key,value) tuples, i.e. a single entry in a dictionary
+*/
+typedef struct dict_entry_struct 
+{
+    uint64_t hash;
+    obj* key;
+    obj* value;
+} dict_entry;
+
+/**
+    Struct/type declaration for dictionary
+*/
+typedef struct dict_struct
+{
+    size_t size;
+    size_t icapacity;
+    size_t ecapacity;
+    size_t* indices;
+    dict_entry* entries;
+} dict;
 
 dict* new_dict();
 obj* new_dict_obj(dict* d);

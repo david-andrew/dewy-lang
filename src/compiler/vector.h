@@ -1,7 +1,25 @@
 #ifndef VECTOR_H
 #define VECTOR_H
 
-#include "types.h"
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+#include "object.h"
+#include "dictionary.h"
+
+/**
+    Struct/type declaration for 1D lists of objects. Implemented as an ArrayDeque. 
+    see: http://opendatastructures.org/ods-java/2_4_ArrayDeque_Fast_Deque_O.html
+*/
+typedef struct vect_struct 
+{
+    size_t head;
+    size_t size;
+    size_t capacity;
+    obj** list;
+} vect;
+
 
 vect* new_vect();
 obj* new_vect_obj(vect* v);

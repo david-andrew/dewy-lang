@@ -1,7 +1,10 @@
 #ifndef SCANNER_H
 #define SCANNER_H
 
-#include "types.h"
+#include "object.h"
+#include "dictionary.h"
+#include "vector.h"
+#include "token.h"
 
 typedef enum scanner_states 
 {

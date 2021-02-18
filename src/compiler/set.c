@@ -8,11 +8,6 @@
 #include "utilities.h"
 #include "object.h"
 #include "dictionary.h"
-
-// #include "utilities.c"
-// #include "object.c"
-// #include "dictionary.c"
-
 #include "set.h"
 
 

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <assert.h>
 
 #include "utilities.h"
 #include "object.h"
@@ -12,7 +13,6 @@
 #include "set.h"
 #include "mast.h"
 
-#include <assert.h>
 
 //Meta Abstract Syntax Tree (MAST) definitions
 
