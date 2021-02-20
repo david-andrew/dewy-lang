@@ -7,10 +7,6 @@
 
 #include "object.h"
 
-//representation for an empty value in the dict indices table.
-//since we only have pure ints, we say the max value (which probably won't be used) is EMPTY
-#define EMPTY SIZE_MAX
-
 /**
     Struct/type declaration for (hash,key,value) tuples, i.e. a single entry in a dictionary
 */
