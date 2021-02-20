@@ -24,7 +24,9 @@ Currently incomplete documentation is available at: https://david-andrew.github.
 * (probably) lots of other things...
 
 ## Language Examples
-A decent example of the language can be found at: `/DewySpeak/language_ideas/example_programs/language_benchmark.dewy`. Since the first compiler has yet to be completed, there are probably inconsistencies with this and the actual language.
+A decent example of the language can be found at: `DewySpeak/resources/language_ideas/example_programs/language_benchmark.dewy`. 
+
+Since the first compiler has yet to be completed, there are probably inconsistencies with this and the actual language.
 
 ## Trello Project
 For more information about the current state of the project, see the DewySpeak Trello: https://trello.com/b/YYsedENy/dewyspeak
