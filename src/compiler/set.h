@@ -6,33 +6,47 @@
 #include <stdbool.h>
 
 #include "object.h"
-#include "dictionary.h"
 
-/**
-    Struct/type declaration for sets. Currently just wraps dictionary. TODO->have dedicated type
-*/
+//struct for each row of the set object. Mirrors dictionary, but with just value instead of key+value
+typedef struct set_entry_struct
+{
+    uint64_t hash;
+    obj* item;
+} set_entry;
+
+//struct for the set object
 typedef struct set_struct
 {
-    dict* d; //a set is just a wrapper around a dict
+    size_t size;
+    size_t icapacity;
+    size_t ecapacity;
+    size_t* indices;
+    set_entry* entries;
 } set;
 
 set* new_set();
 obj* new_set_obj(set* s);
 // obj* set_obj_wrap(set* s);
-size_t set_size(set* S);
-// size_t set_capacity(set* S);
-bool set_add(set* S, obj* item);
+size_t set_size(set* s);
+size_t set_indices_capacity(set* s);
+size_t set_entries_capacity(set* s);
+bool set_resize_indices(set* s, size_t new_size);
+bool set_resize_entries(set* s, size_t new_size);
+uint64_t set_find_empty_address(set* s, uint64_t hash);
+bool set_add(set* s, obj* item);
 // bool set_remove(set* s, obj* item);
-bool set_contains(set* S, obj* item);
-set* set_copy(set* S);
-set* set_union(set* A, set* B);
-set* set_union_equals(set* A, set* B);
-set* set_intersect(set* A, set* B);
-bool set_equals(set* A, set* B);
-uint64_t set_hash(set* S);
-void set_reset(set* S);
-void set_free(set* S);
-void set_repr(set* S);
-void set_str(set* S);
+bool set_contains(set* s, obj* item);
+set* set_copy(set* s);
+set* set_union(set* a, set* b);
+set* set_union_equals(set* a, set* b);
+set* set_intersect(set* a, set* b);
+bool set_equals(set* a, set* b);
+uint64_t set_hash(set* s);
+void set_reset(set* s);
+void set_free(set* s);
+void set_free_elements_only(set* s);
+void set_free_table_only(set* s);
+void set_repr(set* s);
+void set_str(set* s);
 
 #endif

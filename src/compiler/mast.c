@@ -623,7 +623,7 @@ void ast_compute_followpos_cat(obj* cat_node, dict* id_to_node)
 
     for (int i = 0; i < set_size(lastpos_left); i++)
     {
-        obj* node_i = dict_get(id_to_node, lastpos_left->d->entries[i].key);
+        obj* node_i = dict_get(id_to_node, lastpos_left->entries[i].item);
         set* followpos_i = ast_get_followpos(node_i);
         ast_set_followpos(node_i, set_union(followpos_i, firstpos_right));
         set_free(followpos_i); //free the now unused set
@@ -644,7 +644,7 @@ void ast_compute_followpos_star(obj* star_node, dict* id_to_node)
 
     for (int i = 0; i < set_size(lastpos_n); i++)
     {
-        obj* node_i = dict_get(id_to_node, lastpos_n->d->entries[i].key);
+        obj* node_i = dict_get(id_to_node, lastpos_n->entries[i].item);
         set* followpos_i = ast_get_followpos(node_i);
         ast_set_followpos(node_i, set_union(followpos_i, firstpos_n));
         set_free(followpos_i); //free the now unused set
@@ -945,7 +945,7 @@ dict* ast_get_symbol_to_ids(set* S, dict* id_to_node)
     for (int i = 0; i < set_size(S); i++)
     {
         //get the id of the current node
-        obj* id_obj = S->d->entries[i].key;
+        obj* id_obj = S->entries[i].item;
         assert(id_obj != NULL);
         assert(id_obj->type == UInteger_t);
         uint64_t id = *(uint64_t*)id_obj->data;

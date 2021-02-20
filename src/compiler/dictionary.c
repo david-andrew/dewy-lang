@@ -18,6 +18,10 @@
 //constant to assign to hashes that are 0, so that the lfsr algorithm doesn't get stuck at 0
 #define NONZERO_HASH 0xDEADBEEF
 
+//representation for an empty value in the dict indices table.
+//since we only have pure ints, we say the max value (which probably won't be used) is EMPTY
+#define EMPTY SIZE_MAX
+
 
 //Implementation of dictionary based on python's implementaion
 //https://stackoverflow.com/questions/327311/how-are-pythons-built-in-dictionaries-implemented
@@ -177,7 +181,7 @@ bool dict_set(dict* d, obj* key, obj* value)
             d->indices[(hash + offset) % d->icapacity] = index;                     //set the value at this address in indices to be index
             d->entries[index] = e;                                                  //set the next entry (i.e. at index) in entries to be our new entry
             d->size++;
-            break;
+            return true;
         }
         else
         {
@@ -188,16 +192,13 @@ bool dict_set(dict* d, obj* key, obj* value)
             {
                 size_t index = d->indices[(hash + offset) % d->icapacity];          //get the index of the item to overwrite in the entries vector
                 d->entries[index] = e;                                              //overwrite the existing entry
-                break;
-            }
-            else                                                                    //else probe to the next slot in the sequence
-            {
-                offset = lfsr64_next(offset);
+                return true;
             }
         }
-    }
 
-    return true;
+        //else probe to the next slot in the sequence
+        offset = lfsr64_next(offset);
+    }
 }
 
 
@@ -228,11 +229,10 @@ bool dict_contains(dict* d, obj* key)
             {
                 return true;
             }
-            else //probe to the next slot in the sequence                                                          
-            {
-                offset = lfsr64_next(offset);
-            }
         }
+
+        //probe to the next slot in the sequence
+        offset = lfsr64_next(offset);
     }
 }
 
@@ -261,11 +261,10 @@ obj* dict_get(dict* d, obj* key)
             {
                 return candidate.value;
             }
-            else //probe to the next slot in the sequence                                                          
-            {
-                offset = lfsr64_next(offset);
-            }
         }
+
+        //probe to the next slot in the sequence
+        offset = lfsr64_next(offset);
     }
 }
 
@@ -310,6 +309,7 @@ obj* dict_get_uint_key(dict* d, uint64_t u)
 
 // }
 
+//TODO->move to token.c
 obj* dict_get_hashtag_key(dict* d, obj* hashtag_obj)
 {
     assert(hashtag_obj->type == Token_t);
