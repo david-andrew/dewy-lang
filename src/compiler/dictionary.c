@@ -109,8 +109,8 @@ bool dict_resize_indices(dict* d, size_t new_size)
     for (size_t i = 0; i < d->size; i++)
     {
         //TODO->if/when we add ability to remove values from a dicitonary, this should skip over those
-        uint64_t hash = obj_hash(d->entries[i].key);
-        uint64_t address = dict_find_empty_address(d, hash);
+        // uint64_t hash = obj_hash(d->entries[i].key);
+        uint64_t address = dict_get_indices_probe(d, d->entries[i].key); //dict_find_empty_address(d, d->entries[i].hash);
         d->indices[address] = i;
     }
     return true;
@@ -138,18 +138,50 @@ bool dict_resize_entries(dict* d, size_t new_size)
     return true;
 }
 
-uint64_t dict_find_empty_address(dict* d, uint64_t hash)
+
+//TODO->consider making this function resize the dict if it is full? Because otherwise it would enter an infinite loop
+/**
+    return the index in the indices table that this key maps to. Location is either empty, or has the same key already.
+*/
+size_t dict_get_indices_probe(dict* d, obj* key)
 {
+    //hash used to find initial probe into indices table
+    uint64_t hash = obj_hash(key);
+
     //guarantee that the starting offset is non-zero, as the lfsr will get stuck if given 0
-    uint64_t offset = hash != 0 ? hash : NONZERO_HASH;
-    while (d->indices[(hash + offset) % d->icapacity] != EMPTY)
+    size_t offset = hash != 0 ? hash : NONZERO_HASH;
+
+    //search for either an empty slot, or a slot with the same key
+    while (true)
     {
+        size_t probe = (hash + offset) % d->icapacity;      //current probe index in indices table
+        size_t index = d->indices[probe];                       //index we're looking at in the entries table 
+
+        //if slot is free, or dict has same key, then we've found our slot
+        if (index == EMPTY || d->entries[index].hash == hash && obj_equals(d->entries[index].key, key))
+        {
+            return probe;
+        }
+
+        //probe to the next slot in the sequence by changing the offset
         offset = lfsr64_next(offset);
     }
-    return (hash + offset) % d->icapacity;
 }
 
 
+/**
+    get the index of the key in the dictionary's entries array or EMPTY if the key is not present.
+ */
+size_t dict_get_entries_index(dict*d, obj* key)
+{
+    size_t probe = dict_get_indices_probe(d, key);
+    return d->indices[probe];
+}
+
+
+/**
+    insert the key value pair into the dictionary. If key already in dict, overwrite existing entry.
+*/ 
 bool dict_set(dict* d, obj* key, obj* value)
 {
     //check if the dict indices & entries tables needs to be resized. for now, return failure for too many entries;
@@ -168,72 +200,36 @@ bool dict_set(dict* d, obj* key, obj* value)
         }
     }
 
-    //construct a dict_entry to be inserted
     uint64_t hash = obj_hash(key);
-    dict_entry e = (dict_entry){.hash=hash, .key=key, .value=value};
 
-    size_t offset = hash != 0 ? hash : NONZERO_HASH;                                //ensure we start with a non-zero offset
-    while (true)
+    //find the assigned slot for this key
+    size_t probe = dict_get_indices_probe(d, key);
+    size_t index = d->indices[probe];
+    
+    if (index != EMPTY) //key already found, so overwrite entry
     {
-        if (d->indices[(hash + offset) % d->icapacity] == EMPTY)                    //check if slot is free
-        {
-            size_t index = d->size;                                                 //index of entry in list of entries is end of the list
-            d->indices[(hash + offset) % d->icapacity] = index;                     //set the value at this address in indices to be index
-            d->entries[index] = e;                                                  //set the next entry (i.e. at index) in entries to be our new entry
-            d->size++;
-            return true;
-        }
-        else
-        {
-            //get the object currently in the non-free slot
-            dict_entry candidate = d->entries[d->indices[(hash + offset) % d->icapacity]];
-            
-            if (candidate.hash == e.hash && obj_equals(candidate.key, e.key))       //if candidate has same hash and key as what is currently in the dictionary
-            {
-                size_t index = d->indices[(hash + offset) % d->icapacity];          //get the index of the item to overwrite in the entries vector
-                d->entries[index] = e;                                              //overwrite the existing entry
-                return true;
-            }
-        }
-
-        //else probe to the next slot in the sequence
-        offset = lfsr64_next(offset);
+        d->entries[index].key = key;
+        d->entries[index].value = value;
+    } 
+    else //create a new entry for the key + object 
+    {
+        index = d->size;
+        d->indices[probe] = index;
+        d->entries[index] = (dict_entry){.hash=hash, .key=key, .value=value};
+        d->size++;
     }
+
+    return true;
 }
 
 
-
 /**
-    check if the dictionary has the specified key. 
-    replaced old version of "return dict_get(d, key) != NULL" because storing NULL as the value is a valid option (e.g. for sets)
+    check if the dictionary has the specified key.
 */
 bool dict_contains(dict* d, obj* key)
 {
-    uint64_t hash = obj_hash(key);
-    size_t offset = hash != 0 ? hash : NONZERO_HASH;
-
-    while (true)
-    {
-        //check if slot is free, meaning no object to return
-        if (d->indices[(hash + offset) % d->icapacity] == EMPTY)            
-        {
-            return false;
-        }
-        else
-        {
-            //get the object currently in the non-free slot
-            dict_entry candidate = d->entries[d->indices[(hash + offset) % d->icapacity]];
-            
-            //if candidate has same hash and key as what we are looking for, return its value object
-            if (candidate.hash == hash && obj_equals(candidate.key, key))
-            {
-                return true;
-            }
-        }
-
-        //probe to the next slot in the sequence
-        offset = lfsr64_next(offset);
-    }
+    size_t i = dict_get_entries_index(d, key);
+    return i != EMPTY;
 }
 
 
@@ -241,32 +237,10 @@ bool dict_contains(dict* d, obj* key)
 //basically it should be guaranteed that dictionaries will never be full!
 obj* dict_get(dict* d, obj* key)
 {
-    uint64_t hash = obj_hash(key);
-    size_t offset = hash != 0 ? hash : NONZERO_HASH;
-
-    while (true)
-    {
-        //check if slot is free, meaning no object to return
-        if (d->indices[(hash + offset) % d->icapacity] == EMPTY)            
-        {
-            return NULL;
-        }
-        else
-        {
-            //get the object currently in the non-free slot
-            dict_entry candidate = d->entries[d->indices[(hash + offset) % d->icapacity]];
-            
-            //if candidate has same hash and key as what we are looking for, return its value object
-            if (candidate.hash == hash && obj_equals(candidate.key, key))
-            {
-                return candidate.value;
-            }
-        }
-
-        //probe to the next slot in the sequence
-        offset = lfsr64_next(offset);
-    }
+    size_t i = dict_get_entries_index(d, key);
+    return i == EMPTY ? NULL : d->entries[i].value;
 }
+
 
 /**
     convenience method for easily accessing a dict value with a uint64_t key

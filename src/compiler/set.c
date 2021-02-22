@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -18,6 +19,7 @@
 
 //representation for an empty item in the set indices table.
 //since we only have pure ints, we say the max value (which probably won't be used) is EMPTY
+//also allows us to initialize the indices array using memset with -1
 #define EMPTY SIZE_MAX
 
 // Implementation of Set is basically identical to dictionary's implementation
@@ -33,7 +35,7 @@ set* new_set()
         .indices = malloc(DEFAULT_SET_CAPACITY * sizeof(size_t)),   //pointer to the indices table
         .entries = calloc(DEFAULT_SET_CAPACITY, sizeof(set_entry))  //pointer to the entries vector
     };
-    memset(s.indices, -1, s.icapacity * sizeof(ssize_t));
+    memset(s.indices, UCHAR_MAX, s.icapacity * sizeof(size_t));     //set every byte to 255, which expands `EMPTY` for every size_t in the array
     *s_ptr = s;
     return s_ptr;
 }
@@ -177,6 +179,41 @@ bool set_add(set* s, obj* item)
     return true;
 }
 
+
+/**
+    get the index in the entries array of the given item, or EMPTY if not found
+*/
+size_t set_get_index(set* s, obj* item)
+{
+    uint64_t hash = obj_hash(item);
+    size_t offset = hash != 0 ? hash : NONZERO_HASH;
+
+    while (true)
+    {
+        //current index to look at in the entries table
+        size_t i = s->indices[(hash + offset) % s->icapacity];
+
+        //check if slot is free, meaning no object to return
+        if (i == EMPTY)            
+        {
+            return EMPTY;
+        }
+        else
+        {
+            //get the object currently in the non-free slot
+            set_entry candidate = s->entries[i];
+            
+            //if candidate has same hash and item as what we are looking for, return true
+            if (candidate.hash == hash && obj_equals(candidate.item, item))
+            {
+                return true;
+            }
+        }
+
+        //probe to the next slot in the sequence
+        offset = lfsr64_next(offset);
+    }
+}
 
 /**
     check if the set contains the specified item. 
