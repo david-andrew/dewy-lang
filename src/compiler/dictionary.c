@@ -29,9 +29,9 @@
 
 
 
-/*
-    create an empty dictionary
-*/
+/**
+ * create an empty dictionary
+ */
 dict* new_dict()
 {
     dict* d_ptr = malloc(sizeof(dict));
@@ -48,8 +48,8 @@ dict* new_dict()
 }
 
 /**
-    creates a new dict* wrapped in an object. points to d if d isn't null, else points to a new dict
-*/
+ * creates a new dict* wrapped in an object. points to d if d isn't null, else points to a new dict
+ */
 obj* new_dict_obj(dict* d)
 {
     obj* D = malloc(sizeof(obj));
@@ -62,29 +62,33 @@ obj* new_dict_obj(dict* d)
 }
 
 /**
-    returns the number of elements in a dictionary
-*/
+ * returns the number of elements in a dictionary
+ */
 size_t dict_size(dict* d)
 {
     return d->size;
 }
 
 /**
-    returns the capacity of the indices table in a dictionary
-*/
+ * returns the capacity of the indices table in a dictionary
+ */
 size_t dict_indices_capacity(dict* d)
 {
     return d->icapacity;
 }
 
 /**
-    returns the capacity of the entries vector in a dictionary
-*/
+ * returns the capacity of the entries vector in a dictionary
+ */
 size_t dict_entries_capacity(dict* d)
 {
     return d->ecapacity;
 }
 
+
+/**
+ * resize the indices table in the dict struct according to the new size.
+ */
 bool dict_resize_indices(dict* d, size_t new_size)
 {
     //check if the new dictionary is large enough for all the elements in the old dictionary
@@ -109,13 +113,15 @@ bool dict_resize_indices(dict* d, size_t new_size)
     for (size_t i = 0; i < d->size; i++)
     {
         //TODO->if/when we add ability to remove values from a dicitonary, this should skip over those
-        // uint64_t hash = obj_hash(d->entries[i].key);
         uint64_t address = dict_get_indices_probe(d, d->entries[i].key); //dict_find_empty_address(d, d->entries[i].hash);
         d->indices[address] = i;
     }
     return true;
 }
 
+/**
+ * resize the entries array in the dictionary according to the new size.
+ */
 bool dict_resize_entries(dict* d, size_t new_size)
 {
     if (d->size > new_size)
@@ -141,8 +147,8 @@ bool dict_resize_entries(dict* d, size_t new_size)
 
 //TODO->consider making this function resize the dict if it is full? Because otherwise it would enter an infinite loop
 /**
-    return the index in the indices table that this key maps to. Location is either empty, or has the same key already.
-*/
+ *  return the index in the indices table that this key maps to. Location is either empty, or has the same key already.
+ */
 size_t dict_get_indices_probe(dict* d, obj* key)
 {
     //hash used to find initial probe into indices table
@@ -170,7 +176,7 @@ size_t dict_get_indices_probe(dict* d, obj* key)
 
 
 /**
-    get the index of the key in the dictionary's entries array or EMPTY if the key is not present.
+ *  get the index of the key in the dictionary's entries array or EMPTY if the key is not present.
  */
 size_t dict_get_entries_index(dict*d, obj* key)
 {
@@ -180,8 +186,8 @@ size_t dict_get_entries_index(dict*d, obj* key)
 
 
 /**
-    insert the key value pair into the dictionary. If key already in dict, overwrite existing entry.
-*/ 
+ *  insert the key value pair into the dictionary. If key already in dict, overwrite existing entry.
+ */ 
 bool dict_set(dict* d, obj* key, obj* value)
 {
     //check if the dict indices & entries tables needs to be resized. for now, return failure for too many entries;
@@ -224,8 +230,8 @@ bool dict_set(dict* d, obj* key, obj* value)
 
 
 /**
-    check if the dictionary has the specified key.
-*/
+ * check if the dictionary has the specified key.
+ */
 bool dict_contains(dict* d, obj* key)
 {
     size_t i = dict_get_entries_index(d, key);
@@ -243,8 +249,8 @@ obj* dict_get(dict* d, obj* key)
 
 
 /**
-    convenience method for easily accessing a dict value with a uint64_t key
-*/
+ *  convenience method for easily accessing a dict value with a uint64_t key
+ */
 obj* dict_get_uint_key(dict* d, uint64_t u)
 {
     obj* key = new_uint(u);

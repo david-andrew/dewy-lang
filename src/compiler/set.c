@@ -24,7 +24,9 @@
 
 // Implementation of Set is basically identical to dictionary's implementation
 
-
+/**
+ * Create an empty set.
+ */
 set* new_set()
 {
     set* s_ptr = malloc(sizeof(set));
@@ -41,8 +43,8 @@ set* new_set()
 }
 
 /**
-    Create a new set wrapped in an obj. points to s if it isn't null, else a new set
-*/
+ * Create a new set wrapped in an obj. points to s if it isn't null, else a new set
+ */
 obj* new_set_obj(set* s)
 {
     obj* S = malloc(sizeof(obj));
@@ -55,7 +57,7 @@ obj* new_set_obj(set* s)
 }
 
 /**
-    returns the number of elements in the set
+ * returns the number of elements in the set
  */
 size_t set_size(set* s) 
 { 
@@ -63,21 +65,24 @@ size_t set_size(set* s)
 }
 
 /**
-    returns the capacity of the indices table in a set
-*/
+ * returns the capacity of the indices table in a set
+ */
 size_t set_indices_capacity(set* s)
 {
     return s->icapacity;
 }
 
 /**
-    returns the capacity of the entries vector in a set
-*/
+ * returns the capacity of the entries vector in a set
+ */
 size_t set_entries_capacity(set* s)
 {
     return s->ecapacity;
 }
 
+/**
+ * 
+ */
 bool set_resize_indices(set* s, size_t new_size)
 {
     //check if the new set is large enough for all the elements in the old set
@@ -102,13 +107,15 @@ bool set_resize_indices(set* s, size_t new_size)
     for (size_t i = 0; i < s->size; i++)
     {
         //TODO->if/when we add ability to remove items from a set, this should skip over those
-        uint64_t hash = obj_hash(s->entries[i].item);
-        uint64_t address = set_find_empty_address(s, hash);
+        uint64_t address = set_get_indices_probe(s, s->entries[i].item);
         s->indices[address] = i;
     }
     return true;
 }
 
+/**
+ * 
+ */
 bool set_resize_entries(set* s, size_t new_size)
 {
     if (s->size > new_size)
@@ -131,24 +138,50 @@ bool set_resize_entries(set* s, size_t new_size)
     return true;
 }
 
-uint64_t set_find_empty_address(set* s, uint64_t hash)
+/**
+ * 
+ */
+size_t set_get_indices_probe(set* s, obj* item)
 {
+    //hash used to find initial probe into indices table
+    uint64_t hash = obj_hash(item);
+
     //guarantee that the starting offset is non-zero, as the lfsr will get stuck if given 0
-    uint64_t offset = hash != 0 ? hash : NONZERO_HASH;
-    while (s->indices[(hash + offset) % s->icapacity] != EMPTY)
+    size_t offset = hash != 0 ? hash : NONZERO_HASH;
+
+    //search for either an empty slot, or a slot with the same key
+    while (true)
     {
+        size_t probe = (hash + offset) % s->icapacity;      //current probe index in indices table
+        size_t index = s->indices[probe];                   //index we're looking at in the entries table 
+
+        //if slot is free, or set has same item, then we've found our slot
+        if (index == EMPTY || s->entries[index].hash == hash && obj_equals(s->entries[index].item, item))
+        {
+            return probe;
+        }
+
+        //probe to the next slot in the sequence by changing the offset
         offset = lfsr64_next(offset);
     }
-    return (hash + offset) % s->icapacity;
 }
 
+
+/**
+ * get the index of the key in the set's entries array or EMPTY if the key is not present.
+ */
+size_t set_get_entries_index(set* s, obj* item)
+{
+    size_t probe = set_get_indices_probe(s, item);
+    return s->indices[probe];
+}
+
+
+/**
+ * Insert a new object into the set if it is not already there
+ */
 bool set_add(set* s, obj* item)
 {
-    //check if this object is already in the set. No need to insert if already there
-    if (set_contains(s, item))
-    {
-        return true;
-    }
 
     //check if the set indices & entries tables needs to be resized. for now, return failure for too many entries;
     if (s->size >= s->icapacity * MAX_LOAD) 
@@ -166,87 +199,42 @@ bool set_add(set* s, obj* item)
         }
     }
 
-    //construct a set_entry to be inserted
-    uint64_t hash = obj_hash(item);
-    set_entry e = (set_entry){.hash=hash, .item=item};
 
-    //get an empty address, and insert the new item
-    uint64_t address = set_find_empty_address(s, hash);
-    size_t index = s->size;                             //index of entry in list of entries is end of the list
-    s->indices[address] = index;                        //set the item at this address in indices to be index
-    s->entries[index] = e;                              //set the next entry (i.e. at index) in entries to be our new entry
-    s->size++;
+    uint64_t hash = obj_hash(item);
+
+    //find the assigned slot for this item
+    size_t probe = set_get_indices_probe(s, item);
+    size_t index = s->indices[probe];
+
+    if (index != EMPTY) //item already in set, so overwrite entry (potentially unnecessary...)
+    {
+        s->entries[index].item = item;
+    }
+    else //create a new entry for the item in the set
+    {
+        index = s->size;
+        s->indices[probe] = index;
+        s->entries[index] = (set_entry){.hash=hash, .item=item};
+        s->size++;
+    }
+
     return true;
 }
 
 
 /**
-    get the index in the entries array of the given item, or EMPTY if not found
-*/
-size_t set_get_index(set* s, obj* item)
-{
-    uint64_t hash = obj_hash(item);
-    size_t offset = hash != 0 ? hash : NONZERO_HASH;
-
-    while (true)
-    {
-        //current index to look at in the entries table
-        size_t i = s->indices[(hash + offset) % s->icapacity];
-
-        //check if slot is free, meaning no object to return
-        if (i == EMPTY)            
-        {
-            return EMPTY;
-        }
-        else
-        {
-            //get the object currently in the non-free slot
-            set_entry candidate = s->entries[i];
-            
-            //if candidate has same hash and item as what we are looking for, return true
-            if (candidate.hash == hash && obj_equals(candidate.item, item))
-            {
-                return true;
-            }
-        }
-
-        //probe to the next slot in the sequence
-        offset = lfsr64_next(offset);
-    }
-}
-
-/**
-    check if the set contains the specified item. 
-*/
+ * check if the set contains the specified item. 
+ */
 bool set_contains(set* s, obj* item)
 {
-    uint64_t hash = obj_hash(item);
-    size_t offset = hash != 0 ? hash : NONZERO_HASH;
-
-    while (true)
-    {
-        //check if slot is free, meaning no object to return
-        if (s->indices[(hash + offset) % s->icapacity] == EMPTY)            
-        {
-            return false;
-        }
-        else
-        {
-            //get the object currently in the non-free slot
-            set_entry candidate = s->entries[s->indices[(hash + offset) % s->icapacity]];
-            
-            //if candidate has same hash and item as what we are looking for, return true
-            if (candidate.hash == hash && obj_equals(candidate.item, item))
-            {
-                return true;
-            }
-        }
-
-        //probe to the next slot in the sequence
-        offset = lfsr64_next(offset);
-    }
+    size_t i = set_get_entries_index(s, item);
+    return i != EMPTY;
 }
 
+
+/**
+ * 
+ */
 set* set_copy(set* s)
 {
     set* copy = new_set();
@@ -258,6 +246,10 @@ set* set_copy(set* s)
     return copy;
 }
 
+
+/**
+ * 
+ */
 set* set_union(set* a, set* b)
 {
     set* u = new_set();
@@ -281,9 +273,9 @@ set* set_union(set* a, set* b)
 }
 
 /**
-    convenience method for reassigning a variable with the result of a union
-    set* A will be freed. union(A, B) will be returned
-*/
+ * convenience method for reassigning a variable with the result of a union
+ * set* a will be freed. union(a, b) will be returned
+ */
 set* set_union_equals(set* a, set* b)
 {
     set* u = set_union(a, b);
@@ -305,6 +297,10 @@ set* set_intersect(set* a, set* b)
     return x;
 }
 
+
+/**
+ * 
+ */
 bool set_equals(set* a, set* b)
 {
     //check if sizes are different
@@ -323,10 +319,9 @@ bool set_equals(set* a, set* b)
 }
 
 /**
-    Create a hash representing the given set object.
-
-    NOT secure. simply adds all hashes together for the set's objects
-*/
+ * Create a hash representing the given set object.
+ * NOT SECURE, simply adds all hashes together for the set's objects
+ */
 uint64_t set_hash(set* s)
 {
     uint64_t hash = hash_uint(Set_t); //hash the type identifier for a set. this ensures it's not 0 if set is empty
@@ -338,6 +333,9 @@ uint64_t set_hash(set* s)
     return hash;
 }
 
+/**
+ * 
+ */
 void set_reset(set* s)
 {
     set_free_elements_only(s);
@@ -353,12 +351,20 @@ void set_reset(set* s)
     s->ecapacity = DEFAULT_SET_CAPACITY;                            //capacity of the entries vector
 }
 
+
+/**
+ * 
+ */
 void set_free(set* s)
 {
     set_free_elements_only(s);
     set_free_table_only(s);
 }
 
+
+/**
+ * 
+ */
 void set_free_elements_only(set* s)
 {
     for (int i = 0; i < s->size; i++)
@@ -368,6 +374,10 @@ void set_free_elements_only(set* s)
     }
 }
 
+
+/**
+ * 
+ */
 void set_free_table_only(set* s)
 {
     //free the set + indices table and entry vector.
@@ -377,6 +387,10 @@ void set_free_table_only(set* s)
     free(s);
 }
 
+
+/**
+ * 
+ */
 void set_repr(set* s)
 {
     //print out all elements in the set indices table and entries vector
@@ -399,6 +413,10 @@ void set_repr(set* s)
     printf("]\n");
 }
 
+
+/**
+ * 
+ */
 void set_str(set* s)
 {
     printf("{");
