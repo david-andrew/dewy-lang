@@ -10,9 +10,10 @@
 #include "utilities.h"
 
 #define DEFAULT_CHARSET_CAPACITY 8
+#define MAX_UNICODE_POINT 0x10FFFF
 
 /**
- * 
+ * Return a new (empty) unicode character set.
  */
 charset* new_charset()
 {
@@ -26,9 +27,15 @@ charset* new_charset()
     return s_ptr;
 }
 
+//something like this, perhaps in the scanner/parser class?
+// /**
+//  * 
+//  */
+// charset* new_charset_from_tokens(vect* tokens){}
+
 
 /**
- * 
+ * Construct an object wrapped unicode character set. If s == NULL, return an empty charset obj.
  */
 obj* new_charset_obj(charset* s)
 {
@@ -43,7 +50,7 @@ obj* new_charset_obj(charset* s)
 
 
 /**
- * 
+ * Insert the given unicode range into the character set.
  */
 bool charset_add_range(charset* s, urange r)
 {
@@ -69,10 +76,7 @@ bool charset_add_range(charset* s, urange r)
     //resize if out of space
     if (s->size == s->capacity)
     {
-        if (!(charset_resize(s, s->capacity * 2)))
-        {
-            return false;
-        }
+        charset_resize(s, s->capacity * 2);
     }
 
     //append the range to the end of the charset, and then rectify
@@ -80,6 +84,20 @@ bool charset_add_range(charset* s, urange r)
     s->size++;
     charset_rectify(s);
     return true;
+}
+
+
+/**
+ * Push a unicode range to the charset without checking anything
+ */
+void charset_add_range_unchecked(charset* s, urange r)
+{
+    if (s->size == s->capacity)
+    {
+        charset_resize(s, s->size * 2);
+    }
+    s->ranges[s->size] = r;
+    s->size++;
 }
 
 
@@ -115,28 +133,27 @@ uint64_t charset_length(charset* s)
 
 
 /**
- * 
+ * Expand or contract the size of the array holding the unicode ranges.
  */
-bool charset_resize(charset* s, size_t new_size)
+void charset_resize(charset* s, size_t new_size)
 {
     if (s->size > new_size)
     {
         printf("ERROR: charset resize failed. new size is not large enough to accomodate elements in charset\n");
-        return false;
+        exit(1);
     }
 
     urange* new_ranges = malloc(new_size * sizeof(urange));
     if (new_ranges == NULL)
     {
         printf("ERROR: memory allocation for resized charset ranges failed\n");
-        return false;
+        exit(1);
     }
 
     memcpy(new_ranges, s->ranges, s->size * sizeof(urange));
     free(s->ranges);
     s->ranges = new_ranges;
     s->capacity = new_size;
-    return true;
 }
 
 
@@ -199,11 +216,11 @@ void charset_condense(charset* s)
     s->ranges = new_ranges;
     s->size = j + 1;
 
-    // if (s->size < s->capacity / 2)
-    // {
-    //     charset_resize(s, s->capacity / 2);
-    // }
-
+    //if charset is small enough, resize to take up less space
+    if (s->size < s->capacity / 2)
+    {
+        charset_resize(s, s->capacity / 2);
+    }
 }
 
 
@@ -212,7 +229,29 @@ void charset_condense(charset* s)
  */
 charset* charset_compliment(charset* s)
 {
+    uint32_t left = 0;
 
+    charset* compliment = new_charset();
+
+    for (int i = 0; i < s->size; i++)
+    {
+        urange r = s->ranges[i];
+        if (r.start > left)  //push range left-(r.start-1) to compliment
+        {
+            charset_add_range_unchecked(compliment, (urange){.start=left, .stop=r.start-1});
+        }
+        left = r.stop + 1;
+    }
+
+    //if anything remaining in big range, push to charset
+    if (left < MAX_UNICODE_POINT)
+    {
+        charset_add_range_unchecked(compliment, (urange){.start=left, .stop=MAX_UNICODE_POINT});
+    }
+
+    charset_rectify(compliment);
+
+    return compliment;
 }
 
 
@@ -308,6 +347,12 @@ bool charset_contains_r(charset* s, urange r)
 }
 
 
+// bool urange_contains_c(urange r, uint32_t c)
+// {
+//     return (r.start <= c && c <= r.stop) || (r.stop <= c && c <= r.start);
+// }
+
+
 /**
  * 
  */
@@ -335,6 +380,14 @@ void charset_repr(charset* s)
 
 }
 
+
+/**
+ * 
+ */
+void charset_free(charset* s)
+{
+    //TODO
+}
 
 
 #endif

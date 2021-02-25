@@ -1,3 +1,6 @@
+all: dewy_compiler_compiler.o  utilities.o object.o token.o dictionary.o vector.o  set.o mast.o scanner.o parser.o charset.o item.o
+ 
+
 #current completed step is simple lexer
 dewy: dewy_compiler_compiler.o  utilities.o object.o token.o dictionary.o vector.o  set.o mast.o scanner.o parser.o
 	clang -o dewy dewy_compiler_compiler.o utilities.o object.o token.o dictionary.o vector.o  set.o mast.o scanner.o parser.o

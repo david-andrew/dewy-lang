@@ -29,7 +29,7 @@ bool charset_add_range(charset* s, urange r);
 size_t charset_size(charset* s);
 size_t charset_capacity(charset* s);
 uint64_t charset_length(charset* s);
-bool charset_resize(charset* s, size_t new_size);
+void charset_resize(charset* s, size_t new_size);
 int urange_compare(const void* a, const void* b);
 void charset_rectify(charset* s);
 void charset_sort(charset* s);
