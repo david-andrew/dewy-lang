@@ -8,14 +8,14 @@
 #include "object.h"
 
 //struct for each row of the set object. Mirrors dictionary, but with just value instead of key+value
-typedef struct set_entry_struct
+typedef struct
 {
     uint64_t hash;
     obj* item;
 } set_entry;
 
 //struct for the set object
-typedef struct set_struct
+typedef struct
 {
     size_t size;
     size_t icapacity;

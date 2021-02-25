@@ -17,7 +17,7 @@
 #include "parser.h"
 
 //TODO
-// typedef struct parser_context_struct
+// typedef struct
 // {
 //     dict* meta_symbols;
 //     dict* meta_rules;

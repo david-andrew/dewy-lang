@@ -9,7 +9,7 @@
 /** 
     Enum for each of the different types object types that exist
 */
-typedef enum obj_types 
+typedef enum 
 { 
     Boolean_t,
     Character_t,
@@ -29,7 +29,7 @@ typedef enum obj_types
 /**
     Struct/type declaration for generic objects
 */
-typedef struct obj_struct
+typedef struct
 {
     obj_type type;  //integer specifying what type of object.
     size_t size;    //size of the data allocated for this object

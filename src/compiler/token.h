@@ -6,7 +6,7 @@
 /**
     Enum/type declaration for each possible token type for reading syntax rules
 */
-typedef enum token_types
+typedef enum
 {
     hashtag,
     meta_string,
@@ -29,7 +29,7 @@ typedef enum token_types
 /**
     Struct/type declaration for tokens for lexer/parser
 */
-typedef struct tokens
+typedef struct
 {
     token_type type;
     char* content;

@@ -12,7 +12,7 @@
     Struct/type declaration for 1D lists of objects. Implemented as an ArrayDeque. 
     see: http://opendatastructures.org/ods-java/2_4_ArrayDeque_Fast_Deque_O.html
 */
-typedef struct vect_struct 
+typedef struct
 {
     size_t head;
     size_t size;

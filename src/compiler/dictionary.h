@@ -10,7 +10,7 @@
 /**
     Struct/type declaration for (hash,key,value) tuples, i.e. a single entry in a dictionary
 */
-typedef struct dict_entry_struct 
+typedef struct 
 {
     uint64_t hash;
     obj* key;
@@ -20,7 +20,7 @@ typedef struct dict_entry_struct
 /**
     Struct/type declaration for dictionary
 */
-typedef struct dict_struct
+typedef struct dict_struct //struct needs a name so it can be forward declared in object.h
 {
     size_t size;
     size_t icapacity;

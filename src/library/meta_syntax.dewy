@@ -6,7 +6,7 @@
 
 #eps = \x3f5;                                               // ϵ indicates empty charset. equivalent to '[]'
 #wschars = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000];
-#ws = #wschars;                                             //optional whitespace sequence
+#ws = #wschars*;                                            //optional whitespace sequence
 #any = '\\' [uUxX];                                         // \U, \u, \X, or \x used to indicate any unicode character
 #hex = '\\' [uUxX] [0-9a-fA-F]+;                            // hex number literal. Basically skipping the number part makes it #any
 #charsetchar = \U - [\x2D\x5B\x5D];                         // characters allowed in a set are any unicode excluding '-', '[', or ']'

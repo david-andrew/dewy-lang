@@ -6,7 +6,7 @@
 #include "vector.h"
 #include "token.h"
 
-typedef enum scanner_states 
+typedef enum 
 {
     scan_root,
     scan_meta_rule,
