@@ -21,6 +21,12 @@ vector.o: vector.c vector.h
 set.o: set.c set.h
 	clang -c -o set.o set.c
 
+charset.o: charset.c charset.h
+	clang -c -o charset.o charset.c
+
+item.o: item.c item.h
+	clang -c -o item.o item.c
+
 mast.o: mast.c mast.h
 	clang -c -o mast.o mast.c
 

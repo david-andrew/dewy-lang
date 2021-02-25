@@ -13,6 +13,7 @@ typedef enum
 { 
     Boolean_t,
     Character_t,
+    CharSet_t,
     Integer_t, 
     UInteger_t,
     String_t,

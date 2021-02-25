@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "object.h"
+
 typedef struct
 {
     uint32_t start;
@@ -19,9 +21,29 @@ typedef struct
     size_t capacity;
 } charset;
 
-// charset* add_range(charset* s, urange r);
+
+
+charset* new_charset();
+obj* new_charset_obj(charset* s);
+bool charset_add_range(charset* s, urange r);
+size_t charset_size(charset* s);
+size_t charset_capacity(charset* s);
+uint64_t charset_length(charset* s);
+bool charset_resize(charset* s, size_t new_size);
+int urange_compare(const void* a, const void* b);
+void charset_rectify(charset* s);
 void charset_sort(charset* s);
-bool charset_contains(charset* s, uint32_t c);
+void charset_condense(charset* s);
+charset* charset_compliment(charset* s);
+charset* charset_diff(charset* a, charset* b);
+charset* charset_intersect(charset* a, charset* b);
+charset* charset_union(charset* a, charset* b);
+int charset_get_c_index(charset* s, uint32_t c);
+bool charset_contains_c(charset* s, uint32_t c);
+bool charset_contains_r(charset* s, urange r);
+void charset_str(charset* s);
+void charset_repr(charset* s);
+
 
 
 

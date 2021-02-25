@@ -27,7 +27,6 @@
 #star = #expr '*';                                          // zero or more
 #plus = #expr '+';                                          // one or more
 #option = #expr '?';                                        // optional
-#setoption = #set '?';                                      // option of a set. equivalent to #set | ϵ
 #compliment = #set '~'                                      // compliment of. equivalent to #any - #set
 
 //implicit operators
@@ -41,7 +40,7 @@
 #or = #expr '|' #expr;                                      // left or right
 
 //syntax constructs
-#set = #eps | #char | #hex | #charset | #hexset | #setoption | #compliment | #diff | #intersect | #union;
+#set = #eps | #char | #hex | #charset | #hexset | #compliment | #diff | #intersect | #union;
 #expr = #set | #group | #capture | #string | #star | #plus | #option | #cat | #or | #identifier;
 #identifier = '#' [a-zA-Z0-9!@#$?~&_]*;
 #rule = #identifier '=' #expr ';';
