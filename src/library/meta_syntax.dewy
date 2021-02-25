@@ -1,0 +1,86 @@
+//http://www.engr.mun.ca/~theo/Courses/fm/pub/context-free.pdf
+//https://www.w3.org/TR/xml/#sec-notation
+//https://en.wikipedia.org/wiki/Whitespace_character
+
+//Most of these should be purely character sets...
+
+#eps = \x3f5;                                               // ϵ indicates empty charset. equivalent to '[]'
+#wschars = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000];
+#ws = #wschars;                                             //optional whitespace sequence
+#any = '\\' [uUxX];                                         // \U, \u, \X, or \x used to indicate any unicode character
+#hex = '\\' [uUxX] [0-9a-fA-F]+;                            // hex number literal. Basically skipping the number part makes it #any
+#charsetchar = \U - [\x2D\x5B\x5D];                         // characters allowed in a set are any unicode excluding '-', '[', or ']'
+//#charsetchar = \U - [\-\[\]];                             // alternate formulation of #charsetchar
+#charset = '[' (#charsetchar ('-' #charsetchar)? )* ']';    // set of chars specified literally. Cannot contain '-', '[', or ']' as they have functions
+#hexset = '[' (#hex ('-' #hex)? )* ']';                     // set of chars specified by hex codepoints
+
+//paired grouping operators
+#group = '(' #expr ')';                                     // group together/force precedence
+#capture = '{' #expr '}';                                   // group to capture
+#char = '"' (\U - '"' | #escape) '"';                       // single character
+#char = "'" (\U - "'" | #escape) "'";                       // single character
+#string = '"' (\U - '"' | #escape)* '"';                    // "" string of characters
+#string = "'" (\U - "'" | #escape)* "'";                    // '' string of characters
+#escape = '\\' \U;                                          // an escape character. Recognized escaped characters are \n \r \t. All others simply put the literal char being escaped
+
+//post operators
+#star = #expr '*';                                          // zero or more
+#plus = #expr '+';                                          // one or more
+#option = #expr '?';                                        // optional
+#setoption = #set '?';                                      // option of a set. equivalent to #set | ϵ
+#compliment = #set '~'                                      // compliment of. equivalent to #any - #set
+
+//implicit operators
+#cat = #expr #expr+;                                        // concatenate left and right
+
+//binary operators
+#diff = #set '-' #set;                                      // left but not right. TBD if only for charsets... could modify parser to allow for #expr here, where if both sides are matched, then it doesn't match...
+#intersect = #set '&' #set;                                 // intersect of left and right
+#union = #set | #set;                                       // union of left and right
+
+#or = #expr '|' #expr;                                      // left or right
+
+//syntax constructs
+#set = #eps | #char | #hex | #charset | #hexset | #setoption | #compliment | #diff | #intersect | #union;
+#expr = #set | #group | #capture | #string | #star | #plus | #option | #cat | #or | #identifier;
+#identifier = '#' [a-zA-Z0-9!@#$?~&_]*;
+#rule = #identifier '=' #expr ';';
+
+#update_parser_table(#start_symbol)
+
+
+
+
+//e.g. 
+#bare_range = #expr ':' #expr;
+#range = #bare_range | '([' #bare_range ')]';
+
+/{
+Precedence levels
+3 - group
+3 - capture
+3 - hexset/charset []
+
+4 - star
+4 - plus
+4 - option
+4 - compliment
+5 - diff
+5 - intersect
+5 - union
+
+7 - concatenation
+
+
+8 - or
+
+
+
+#what about restrictions / disambiguation filters?
+- follow (no follow | must follow)
+- reject
+- prefer
+- precedence level + associativity
+
+
+}/

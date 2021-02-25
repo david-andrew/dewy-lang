@@ -164,7 +164,7 @@ size_t dict_get_indices_probe(dict* d, obj* key)
         size_t index = d->indices[probe];                       //index we're looking at in the entries table 
 
         //if slot is free, or dict has same key, then we've found our slot
-        if (index == EMPTY || d->entries[index].hash == hash && obj_equals(d->entries[index].key, key))
+        if (index == EMPTY || (d->entries[index].hash == hash && obj_equals(d->entries[index].key, key)))
         {
             return probe;
         }

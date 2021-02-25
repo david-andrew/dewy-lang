@@ -156,7 +156,7 @@ size_t set_get_indices_probe(set* s, obj* item)
         size_t index = s->indices[probe];                   //index we're looking at in the entries table 
 
         //if slot is free, or set has same item, then we've found our slot
-        if (index == EMPTY || s->entries[index].hash == hash && obj_equals(s->entries[index].item, item))
+        if (index == EMPTY || (s->entries[index].hash == hash && obj_equals(s->entries[index].item, item)))
         {
             return probe;
         }
