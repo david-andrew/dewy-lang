@@ -29,7 +29,7 @@ charset* new_charset()
 
 
 /**
- * Construct an object wrapped unicode character set. If s == NULL, return an empty charset obj.
+ * Construct an object wrapped unicode character set. If `s == NULL`, return an empty charset obj.
  */
 obj* new_charset_obj(charset* s)
 {
@@ -88,6 +88,7 @@ size_t charset_capacity(charset* s)
     return s->capacity;
 }
 
+
 /**
  * counts the total width of all unicode ranges contained in the character set.
  */
@@ -127,7 +128,6 @@ void charset_resize(charset* s, size_t new_size)
 }
 
 
-
 /**
  * comparison function for use in qsort for sorting an array of unicode ranges.
  */
@@ -163,7 +163,6 @@ void charset_reduce(charset* s)
     size_t new_capacity = s->size;
     urange* new_ranges = malloc(new_capacity * sizeof(urange));
 
-    
     //reducing algorithm
     int j = 0;
     new_ranges[j] = s->ranges[0];
@@ -201,7 +200,7 @@ void charset_reduce(charset* s)
 
 
 /**
- * return a charset that is the compliment of s
+ * Return a charset that is the compliment of `s`.
  */
 charset* charset_compliment(charset* s)
 {
@@ -232,7 +231,7 @@ charset* charset_compliment(charset* s)
 
 
 /**
- * Return the difference of a and b, i.e. only elements in a, and not in b will be kept.
+ * Return `a - b`, i.e. only elements in `a` and not in `b` will be kept.
  */
 charset* charset_diff(charset* a, charset* b)
 {
@@ -273,7 +272,7 @@ charset* charset_diff(charset* a, charset* b)
 
 
 /**
- * 
+ * Return `a & b`, i.e. only elements in both `a` and `b` are kept.
  */
 charset* charset_intersect(charset* a, charset* b)
 {
@@ -376,7 +375,7 @@ int charset_get_c_index(charset* s, uint32_t c)
 
 
 /**
- * return whether or not the charset contains the unicode character
+ * Return whether or not the charset contains the unicode character.
  */
 bool charset_contains_c(charset* s, uint32_t c)
 {
@@ -385,7 +384,7 @@ bool charset_contains_c(charset* s, uint32_t c)
 
 
 /**
- * return whether or not the unicode range is contained within the charset
+ * Return whether or not the unicode range is contained within the charset.
  */
 bool charset_contains_r(charset* s, urange r)
 {
