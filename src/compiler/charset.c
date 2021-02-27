@@ -12,6 +12,7 @@
 #define DEFAULT_CHARSET_CAPACITY 8
 #define MAX_UNICODE_POINT 0x10FFFF
 
+
 /**
  * Return a new (empty) unicode character set.
  */
@@ -25,12 +26,6 @@ charset* new_charset()
     };
     return s;
 }
-
-//something like this, perhaps in the scanner/parser class?
-// /**
-//  * 
-//  */
-// charset* new_charset_from_tokens(vect* tokens){}
 
 
 /**
@@ -59,7 +54,6 @@ void charset_add_range(charset* s, urange r)
     //append the range to the end of the charset, and then convert to reduced form
     charset_add_range_unchecked(s, r);
     charset_reduce(s);
-
 }
 
 
@@ -145,16 +139,6 @@ int urange_compare(const void* a, const void* b)
 }
 
 
-// /**
-//  * return a charset with sorted and maximally combined ranges.
-//  */
-// void charset_rectify(charset* s)
-// {
-//     charset_sort(s);
-//     charset_condense(s);
-// }
-
-
 /**
  * sort all of the unicode ranges in the character set.
  */
@@ -165,7 +149,7 @@ void charset_sort(charset* s)
 
 
 /**
- * conbine any intesecting ranges so that we have the minimal number of ranges to represent the set.
+ * Sort and combine any intesecting ranges so that we have the minimal number of ranges to represent the set.
  */
 void charset_reduce(charset* s)
 {
@@ -243,20 +227,46 @@ charset* charset_compliment(charset* s)
         charset_add_range_unchecked(compliment, (urange){.start=left, .stop=MAX_UNICODE_POINT});
     }
 
-    // charset_reduce(compliment); //TODO->maybe unnecessary?
-
     return compliment;
 }
 
 
 /**
- * 
+ * Return the difference of a and b, i.e. only elements in a, and not in b will be kept.
  */
 charset* charset_diff(charset* a, charset* b)
 {
+    //new charset to hold the result
     charset* diff = new_charset();
 
-    //TODO->diff algorithm;
+    //current index into b->ranges
+    size_t j = 0;
+    
+    //for each range in a
+    for (size_t i = 0; i < a->size; i++)
+    {        
+        //current ranges we're looking at. bj to be assigned on next line
+        urange ai = a->ranges[i], bj;
+
+        //skip all ranges in b that come completely before ai
+        while (j < b->size && (bj = b->ranges[j]).stop < ai.start) { j++; }
+
+        if (j == b->size || ai.stop < bj.start) //no more b ranges, or ai comes completely before bj
+        {
+            charset_add_range_unchecked(diff, ai);
+        }
+        else //otherwise ai and bj intersect
+        {
+            //determine the bounds for the portion of ai not intersecting bj
+            uint32_t start = urange_contains_c(bj, ai.start) ? bj.stop + 1 : ai.start;
+            uint32_t stop = urange_contains_c(bj, ai.stop) ? bj.start - 1 : ai.stop;
+            
+            if (start <= stop) //if this is false, then bj completely encompassed ai
+            {
+                charset_add_range_unchecked(diff, (urange){.start=start, .stop=stop});
+            }
+        }
+    }
 
     return diff;
 }
@@ -267,9 +277,30 @@ charset* charset_diff(charset* a, charset* b)
  */
 charset* charset_intersect(charset* a, charset* b)
 {
+    //new charset to hold the result
     charset* intersect = new_charset();
 
-    //TODO->intersect algorithm
+    //current index into b->ranges
+    size_t j = 0;
+
+    //for each range in a
+    for (size_t i = 0; i < a->size; i++)
+    {
+        //current ranges we're looking at. bj to be assigned on next line
+        urange ai = a->ranges[i], bj;
+
+        //skip all ranges in b that come completely before ai
+        while (j < b->size && (bj = b->ranges[j]).stop < ai.start) { j++; }
+
+        if (j == b->size) break;            //no more b ranges
+        if (ai.stop < bj.start) continue;   //ai comes completely before bj, i.e. no intersection
+
+        //determine the bounds for the portion of ai not intersecting bj
+        uint32_t start = ai.start > bj.start ? ai.start : bj.start;
+        uint32_t stop = ai.stop < bj.stop ? ai.stop : bj.stop;
+
+        charset_add_range_unchecked(intersect, (urange){.start=start, .stop=stop});
+    }
 
     return intersect;
 }
@@ -361,6 +392,14 @@ bool charset_contains_r(charset* s, urange r)
     int i0 = charset_get_c_index(s, r.start);
     int i1 = charset_get_c_index(s, r.stop);
     return (i0 == i1 && i0 >= 0);
+}
+
+/**
+ * Check if the unicode character falls withing the given range.
+ */
+bool urange_contains_c(urange r, uint32_t c)
+{
+    return r.start <= c && c <= r.stop;
 }
 
 
