@@ -103,6 +103,42 @@ char* read_file(char* filename)
 }
 
 
+/**
+ * Convert the contents of a file to a unicode (uint32_t) string.
+ * See: https://stackoverflow.com/questions/14002954/c-programming-how-to-read-the-whole-file-contents-into-a-buffer
+ * TODO->make more efficient such that `unicode` is exactly the size of the number of unicode characters instead of ascii characters.
+ */
+uint32_t* read_unicode_file(char* filename)
+{
+    //open the file
+    FILE *f = fopen(filename, "rb");
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
+
+    //copy file to normal char* string
+    char* string = malloc(fsize + 1);
+    fread(string, fsize, 1, f);
+    fclose(f);
+
+    //put null terminator at the end
+    string[fsize] = 0;
+
+    //create a uint32_t string to hold unicode characters
+    uint32_t* unicode = malloc(fsize + 1 * sizeof(uint32_t));
+
+    //copy the string into the unicode array
+    uint32_t* c = unicode;          //pointer to current unicode character
+    char* s = string;               //pointer to current char character
+    while (*c++ = eat_utf8(&s));    //copy until null terminator reached
+
+    //free the original string
+    free(string);
+
+    return unicode;
+}
+
+
 bool is_identifier_char(char c)
 {
     //valid identifier characters are
@@ -384,6 +420,22 @@ uint32_t eat_utf8(char** str_ptr)
     
     printf("ERROR: eat_utf8() found ill-formed utf-8 character\n");
     return 0;
+}
+
+
+/**
+ * Return the unicode character at the given index in the utf8 string. `str_ptr` is not modified.
+ */
+uint32_t peek_unicode(char** str_ptr, size_t index)
+{
+    char* str = *str_ptr;
+    char** str_ptr_copy = &str;
+    uint32_t c;
+    for (size_t i = 0; i <= index; i++)
+    {
+        c = eat_utf8(str_ptr_copy);
+    }
+    return c;
 }
 
 /**

@@ -51,19 +51,19 @@ size_t vect_capacity(vect* v)
     return v->capacity;
 }
 
-bool vect_resize(vect* v, size_t new_size)
+void vect_resize(vect* v, size_t new_size)
 {
     if (new_size < v->size)
     {
         printf("ERROR: resize failed. new size is not large enough to accomodate elements in vector\n");
-        return false;
+        exit(1);
     }
 
     obj** new_list = calloc(new_size, sizeof(obj));
     if (new_list == NULL) //calloc failed 
     {
         printf("ERROR: resize failed. calloc returned NULL\n");
-        return false;
+        exit(1);
     }
 
     //copy all elements from the old list into the new list
@@ -77,8 +77,6 @@ bool vect_resize(vect* v, size_t new_size)
     v->list = new_list;
     v->capacity = new_size;
     v->head = 0;
-    return true;
-
 }
 
 
@@ -90,21 +88,18 @@ bool vect_resize(vect* v, size_t new_size)
 //BUGS
 //prepending and appending work fine. inserting in the middle causes problems
 //presumable off-by-one errors that occur during shift left or shift right
-bool vect_insert(vect* v, obj* item, size_t index)
+void vect_insert(vect* v, obj* item, size_t index)
 {
     // printf("INSERTING at index %zu. size=%zu, capacity=%zu\n", index, v->size, v->capacity);
     
     if (index > v->size)
     {
         printf("ERROR: cannot insert at index=%zu for vector of size=%zu\n", index, v->size);
-        return false;
+        exit(1);
     }
     if (v->size == v->capacity)
     {
-        if (!vect_resize(v, v->capacity * 2))
-        {
-            return false;
-        }
+        vect_resize(v, v->capacity * 2);
     }
 
     //move elements to make room for the insertion
@@ -127,24 +122,23 @@ bool vect_insert(vect* v, obj* item, size_t index)
     //assign the item to the newly free index
     v->list[(v->head + index) % v->capacity] = item;
     v->size++;
-    return true;
 }
 
 
 
-bool vect_append(vect* v, obj* item)
+void vect_append(vect* v, obj* item)
 {
-    return vect_insert(v, item, v->size);
+    vect_insert(v, item, v->size);
 }
 
-bool vect_prepend(vect* v, obj* item)
+void vect_prepend(vect* v, obj* item)
 {
-    return vect_insert(v, item, 0);
+    vect_insert(v, item, 0);
 }
 
-bool vect_push(vect* v, obj* item) 
+void vect_push(vect* v, obj* item) 
 {
-    return vect_append(v, item);
+    vect_append(v, item);
 }
 
 obj* vect_pop(vect* v) 
@@ -167,9 +161,9 @@ obj* vect_peek(vect* v)
 //     return v->size > 0 ? vect_remove(v, v->size - 1) : NULL;
 // }
 
-bool vect_enqueue(vect* v, obj* item)
+void vect_enqueue(vect* v, obj* item)
 {
-    return vect_append(v, item);
+    vect_append(v, item);
 }
 
 obj* vect_dequeue(vect* v)
@@ -179,15 +173,14 @@ obj* vect_dequeue(vect* v)
 
 
 
-bool vect_set(vect* v, obj* item, size_t index)
+void vect_set(vect* v, obj* item, size_t index)
 {
     if (index >= v->size)
     {
         printf("ERROR: cannot set index=%zu in vector of size=%zu\n", index, v->size);
-        return false;
+        exit(1);
     }
     v->list[(v->head + index) % v->capacity] = item;
-    return true;
 }
 
 bool vect_contains(vect* v, obj* item)

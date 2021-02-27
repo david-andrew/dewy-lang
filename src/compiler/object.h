@@ -17,7 +17,7 @@ typedef enum
     Integer_t, 
     UInteger_t,
     String_t,
-    Token_t,
+    MetaToken_t,
     Vector_t,
     Dictionary_t,
     Set_t,

@@ -43,6 +43,7 @@ uint64_t parse_hex(char* str);
 uint64_t hex_digit_to_value(char c);
 void put_unicode(uint32_t c);
 uint32_t eat_utf8(char** str_ptr);
+uint32_t peek_unicode(char** str_ptr, size_t index);
 void unicode_str(uint32_t c);
 void ascii_or_hex_str(uint32_t c);
 

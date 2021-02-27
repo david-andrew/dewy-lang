@@ -9,7 +9,7 @@
 
 #include "utilities.h"
 #include "object.h"
-#include "token.h"
+#include "metatoken.h"
 #include "dictionary.h"
 
 #define DEFAULT_DICT_CAPACITY 8
@@ -89,20 +89,20 @@ size_t dict_entries_capacity(dict* d)
 /**
  * resize the indices table in the dict struct according to the new size.
  */
-bool dict_resize_indices(dict* d, size_t new_size)
+void dict_resize_indices(dict* d, size_t new_size)
 {
     //check if the new dictionary is large enough for all the elements in the old dictionary
     if (d->size > new_size * MAX_LOAD) 
     {
         printf("ERROR: dict indices resize failed. new capacity is too small for elements of dict\n");
-        return false;
+        exit(1);
     }
 
     size_t* new_indices = malloc(new_size * sizeof(size_t));
     if (new_indices == NULL)
     {
         printf("ERROR: memory allocation for resized dict indices failed\n");
-        return false;
+        exit(1);
     }
     free(d->indices);           //free the old array of indices
     d->indices = new_indices;   //store the new array of indices into the dict
@@ -116,32 +116,30 @@ bool dict_resize_indices(dict* d, size_t new_size)
         uint64_t address = dict_get_indices_probe(d, d->entries[i].key); //dict_find_empty_address(d, d->entries[i].hash);
         d->indices[address] = i;
     }
-    return true;
 }
 
 /**
  * resize the entries array in the dictionary according to the new size.
  */
-bool dict_resize_entries(dict* d, size_t new_size)
+void dict_resize_entries(dict* d, size_t new_size)
 {
     if (d->size > new_size)
     {
         printf("ERROR: dict entries resize failed. new capacity too small for elements of dict\n");
-        return false;
+        exit(1);
     }
 
     dict_entry* new_entries = malloc(new_size * sizeof(dict_entry));
     if (new_entries == NULL)
     {
         printf("ERROR: memory allocation for resized dict entries failed\n");
-        return false;
+        exit(1);
     }
 
     memcpy(new_entries, d->entries, d->size * sizeof(dict_entry));
     free(d->entries);
     d->entries = new_entries;
     d->ecapacity = new_size;
-    return true;
 }
 
 
@@ -188,22 +186,16 @@ size_t dict_get_entries_index(dict*d, obj* key)
 /**
  *  insert the key value pair into the dictionary. If key already in dict, overwrite existing entry.
  */ 
-bool dict_set(dict* d, obj* key, obj* value)
+void dict_set(dict* d, obj* key, obj* value)
 {
     //check if the dict indices & entries tables needs to be resized. for now, return failure for too many entries;
     if (d->size >= d->icapacity * MAX_LOAD) 
     {
-        if (!dict_resize_indices(d, d->icapacity * 2)) //if resize fails, return false
-        {
-            return false;
-        }
+        dict_resize_indices(d, d->icapacity * 2);
     }
     if (d->size >= d->ecapacity)
     {
-        if (!dict_resize_entries(d, d->ecapacity * 2))
-        {
-            return false;
-        }
+        dict_resize_entries(d, d->ecapacity * 2);
     }
 
     uint64_t hash = obj_hash(key);
@@ -224,8 +216,6 @@ bool dict_set(dict* d, obj* key, obj* value)
         d->entries[index] = (dict_entry){.hash=hash, .key=key, .value=value};
         d->size++;
     }
-
-    return true;
 }
 
 
@@ -292,9 +282,9 @@ obj* dict_get_uint_key(dict* d, uint64_t u)
 //TODO->move to token.c
 obj* dict_get_hashtag_key(dict* d, obj* hashtag_obj)
 {
-    assert(hashtag_obj->type == Token_t);
+    assert(hashtag_obj->type == MetaToken_t);
     //create a string object key from the token
-    token* hashtag_token = (token*)hashtag_obj->data;
+    metatoken* hashtag_token = (metatoken*)hashtag_obj->data;
     char* identifier = clone(hashtag_token->content);
     obj* key = new_string(identifier);
 

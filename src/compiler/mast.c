@@ -302,7 +302,7 @@ bool ast_nullable(obj* node)
         default:
         {
             printf("ERROR reached end of nullable function, which should be impossible\n");
-            return true;
+            exit(1);
         }
     }
 }
@@ -376,7 +376,7 @@ set* ast_firstpos(obj* node)
         default:
         {
             printf("ERROR reached end of firstpos function, which should be impossible\n");
-            return NULL;
+            exit(1);
         }
     }
 }
@@ -450,7 +450,7 @@ set* ast_lastpos(obj* node)
         default:
         {
             printf("ERROR reached end of lastpos function, which should be impossible\n");
-            return NULL;
+            exit(1);
         }
     }
 }
@@ -502,7 +502,7 @@ set* ast_get_followpos(obj* node)
         default: 
         { 
             printf("ERROR: ast_get_followpos() should not reach this point\n");
-            return NULL;
+            exit(1);
         }
     }
 }
@@ -542,7 +542,7 @@ void ast_set_followpos(obj* node, set* followpos)
         default: 
         { 
             printf("ERROR: ast_get_followpos() should not reach this point\n");
-            return;
+            exit(1);
         }
     }
 }
@@ -599,7 +599,7 @@ void ast_compute_followpos(obj* root, vect* nodes_list, dict* id_to_node)
             default:
             {
                 printf("ERROR reached end of ast_compute_followpos() function, which should be impossible\n");
-                break;
+                exit(1);
             }
         }
     }
@@ -698,7 +698,7 @@ vect* ast_get_nodes_list(obj* node, vect* nodes_list)
         default:
         {
             printf("ERROR reached end of ast_get_nodes_list_inner() function, which should be impossible\n");
-            return NULL;
+            exit(1);
         }
     }
 }
@@ -757,7 +757,7 @@ obj* ast_copy(obj* node)
         default:
         {
             printf("ERROR reached end of ast_get_nodes_list_inner() function, which should be impossible\n");
-            return NULL;
+            exit(1);
         }
     }
 }

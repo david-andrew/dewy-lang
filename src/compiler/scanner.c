@@ -7,7 +7,7 @@
 #include "object.h"
 #include "vector.h"
 #include "set.h"
-#include "token.h"
+#include "metatoken.h"
 #include "scanner.h"
 
 /* 
@@ -37,12 +37,21 @@ obj* scan(char** src)
         if (scan_state == scan_meta_rule || scan_state == scan_peek)
         {
             t = match_hashtag(src);                     if (t != NULL) return t;
+            t = match_meta_char(src);                   if (t != NULL) return t;
             t = match_meta_string(src);                 if (t != NULL) return t;
             t = match_meta_hex_number(src);             if (t != NULL) return t;
-            t = match_meta_comma(src);                  if (t != NULL) return t;
+            t = match_meta_escape(src);                 if (t != NULL) return t;
+            t = match_meta_charsetchar(src);            if (t != NULL) return t;
+            t = match_meta_anyset(src);                 if (t != NULL) return t;
+            t = match_meta_epsilon(src);                if (t != NULL) return t;
+            t = match_meta_ampersand(src);              if (t != NULL) return t;
+            t = match_meta_star(src);                   if (t != NULL) return t;
+            t = match_meta_plus(src);                   if (t != NULL) return t;
+            t = match_meta_question_mark(src);          if (t != NULL) return t;
+            t = match_meta_tilde(src);                  if (t != NULL) return t;
             t = match_meta_semicolon(src);              if (t != NULL) return t;
             t = match_meta_vertical_bar(src);           if (t != NULL) return t;
-            // t = match_meta_minus(src);                  if (t != NULL) return t;
+            t = match_meta_minus(src);                  if (t != NULL) return t;
             t = match_meta_equals_sign(src);            if (t != NULL) return t;
             t = match_meta_left_parenthesis(src);       if (t != NULL) return t;
             t = match_meta_right_parenthesis(src);      if (t != NULL) return t;
@@ -104,6 +113,37 @@ obj* match_hashtag(char** src)
     return NULL;
 }
 
+obj* match_meta_char(char** src)
+{
+    char quote; //store the type of quote, single (') or double (")
+    if ((quote = (*src)[0]) == '\'' || quote == '"')
+    {
+        if ((*src)[1] == '\\')
+        {
+            uint32_t c = peek_unicode(src, 2);
+            if (peek_unicode(src, 3) == quote)
+            {
+                obj* t = new_metatoken(meta_char, unicode_substr(*src, 1, 2));
+                eat_utf8(src);
+                eat_utf8(src);
+                eat_utf8(src);
+                eat_utf8(src);
+                return t;
+            }
+        }
+        else
+        {
+
+        }
+        //check for escape characters
+        //check for quote immediately after
+
+        //check for normal characters
+        //check for quote immediately after
+    }
+}
+
+//TODO->need to update to handle escape characters as well as unicode inputs
 obj* match_meta_string(char** src) 
 {
     char quote; //store the type of quote, single (') or double (")
@@ -140,10 +180,10 @@ obj* match_meta_hex_number(char** src)
     return NULL;
 }
 
-obj* match_meta_comma(char** src) 
-{
-    return *src[0] == ',' ? new_token(meta_comma, substr((*src)++, 0, 0)) : NULL;
-}
+// obj* match_meta_comma(char** src) 
+// {
+//     return *src[0] == ',' ? new_token(meta_comma, substr((*src)++, 0, 0)) : NULL;
+// }
 
 obj* match_meta_semicolon(char** src) 
 {
@@ -264,12 +304,12 @@ obj* match_block_comment(char** src)
 // }
 
 //remove all instances of a specific token type from a vector of tokens
-void remove_token_type(vect* v, token_type type)
+void remove_token_type(vect* v, metatoken_type type)
 {
     int i = 0;
     while (i < v->size)
     {
-        token* t = (token*)vect_get(v, i)->data;
+        metatoken* t = (metatoken*)vect_get(v, i)->data;
         t->type == type ? vect_delete(v, i) : i++;
     }
 }
@@ -288,7 +328,7 @@ bool peek_char(char** src, char c)
     {
         if ((o = scan(head_ptr)))
         {
-            token* t = (token*)o->data;
+            metatoken* t = (metatoken*)o->data;
             if (t->type != whitespace && t->type != comment)
             {
                 scan_state = saved_scan_state;

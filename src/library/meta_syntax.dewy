@@ -7,7 +7,7 @@
 #eps = \x3f5;                                               // ϵ indicates empty element, i.e. nullable
 #wschars = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000];
 #ws = #wschars*;                                            //optional whitespace sequence
-#any = '\\' [uUxX];                                         // \U, \u, \X, or \x used to indicate any unicode character
+#anyset = '\\' [uUxX];                                      // \U, \u, \X, or \x used to indicate any unicode character
 #hex = '\\' [uUxX] [0-9a-fA-F]+;                            // hex number literal. Basically skipping the number part makes it #any
 #charsetchar = \U - [\-\[\]] - #ws;                         // characters allowed in a set are any unicode excluding '-', '[', or ']', and whitespace
 #item = #charsetchar | #escape | #hex;                      // items that make up character sets, i.e. raw chars, escape chars, or hex chars
@@ -16,11 +16,11 @@
 //paired grouping operators
 #group = '(' #ws #expr #ws ')';                             // group together/force precedence
 #capture = '{' #ws #expr #ws '}';                           // group to capture
-#char = '"' (\U - '"' | #escape) '"';                       // single character
-#char = "'" (\U - "'" | #escape) "'";                       // single character
+#char = '"' (\U - '"' | #escape) '"';                       // "" single character
+#char = "'" (\U - "'" | #escape) "'";                       // '' single character
 #string = '"' (\U - '"' | #escape)* '"';                    // "" string of characters
 #string = "'" (\U - "'" | #escape)* "'";                    // '' string of characters
-#escape = '\\' (\U - [uUxX]);                               // an escape character. Recognized escaped characters are \n \r \t \v \b \f \a. All others just put the second character literally. Common literals include \\ \' \" \[ \] \-
+#escape = '\\' \U;                                          // an escape character. Recognized escaped characters are \n \r \t \v \b \f \a. All others just put the second character literally. Common literals include \\ \' \" \[ \] \-
 
 //post operators
 #star = #expr #ws '*';                                      // zero or more
@@ -39,9 +39,9 @@
 #or = #expr #ws '|' #ws #expr;                              // left or right
 
 //syntax constructs
-#set = #any | #char | #hex | #charset | #hexset | #compliment | #diff | #intersect | #union;
+#set = #anyset | #char | #hex | #charset | #hexset | #compliment | #diff | #intersect | #union;
 #expr = #eps | #set | #group | #capture | #string | #star | #plus | #option | #cat | #or | #identifier;
-#identifier = '#' [a-zA-Z0-9!@#$?&_]*;
+#identifier = '#' [a-zA-Z0-9~!@#$&_?]+;
 #rule = #identifier #ws '=' #ws #expr #ws ';';
 #start_symbol = (#ws #rule)* #ws;
 

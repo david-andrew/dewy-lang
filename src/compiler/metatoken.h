@@ -1,5 +1,5 @@
-#ifndef TOKEN_H
-#define TOKEN_H
+#ifndef METATOKEN_H
+#define METATOKEN_H
 
 #include "object.h"
 
@@ -9,12 +9,21 @@
 typedef enum
 {
     hashtag,
+    meta_char,
     meta_string,
     meta_hex_number,
-    meta_comma,
+    meta_escape,
+    meta_charsetchar,
+    meta_anyset,
+    meta_epsilon,
+    meta_ampersand,
+    meta_star,
+    meta_plus,
+    meta_question_mark,
+    meta_tilde,
     meta_semicolon,
     meta_vertical_bar,
-    // meta_minus,
+    meta_minus,
     meta_equals_sign,
     meta_left_parenthesis,
     meta_right_parenthesis,
@@ -24,22 +33,23 @@ typedef enum
     meta_right_brace,
     whitespace,
     comment,
-} token_type;
+} metatoken_type;
 
 /**
     Struct/type declaration for tokens for lexer/parser
 */
 typedef struct
 {
-    token_type type;
-    char* content;
-} token;
+    metatoken_type type;
+    // char* content;
+    uint32_t* content;
+} metatoken;
 
 
-obj* new_token(token_type type, char* content); //TODO->replace with below versions
+obj* new_metatoken(metatoken_type type, char* content); //TODO->replace with below versions
 //token* new_token(token_type, char* content)
 //obj* new_token_obj(token* t);
-void token_str(token* t);
-void token_free(token* t);
+void metatoken_str(metatoken* t);
+void metatoken_free(metatoken* t);
 
 #endif

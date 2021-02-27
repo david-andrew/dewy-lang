@@ -83,20 +83,20 @@ size_t set_entries_capacity(set* s)
 /**
  * 
  */
-bool set_resize_indices(set* s, size_t new_size)
+void set_resize_indices(set* s, size_t new_size)
 {
     //check if the new set is large enough for all the elements in the old set
     if (s->size > new_size * MAX_LOAD) 
     {
         printf("ERROR: set indices resize failed. new capacity is too small for elements of set\n");
-        return false;
+        exit(1);
     }
 
     size_t* new_indices = malloc(new_size * sizeof(size_t));
     if (new_indices == NULL)
     {
         printf("ERROR: memory allocation for resized set indices failed\n");
-        return false;
+        exit(1);
     }
     free(s->indices);           //free the old array of indices
     s->indices = new_indices;   //store the new array of indices into the set
@@ -110,32 +110,30 @@ bool set_resize_indices(set* s, size_t new_size)
         uint64_t address = set_get_indices_probe(s, s->entries[i].item);
         s->indices[address] = i;
     }
-    return true;
 }
 
 /**
  * 
  */
-bool set_resize_entries(set* s, size_t new_size)
+void set_resize_entries(set* s, size_t new_size)
 {
     if (s->size > new_size)
     {
         printf("ERROR: set entries resize failed. new capacity too small for elements of set\n");
-        return false;
+        exit(1);
     }
 
     set_entry* new_entries = malloc(new_size * sizeof(set_entry));
     if (new_entries == NULL)
     {
         printf("ERROR: memory allocation for resized set entries failed\n");
-        return false;
+        exit(1);
     }
 
     memcpy(new_entries, s->entries, s->size * sizeof(set_entry));
     free(s->entries);
     s->entries = new_entries;
     s->ecapacity = new_size;
-    return true;
 }
 
 /**
@@ -180,25 +178,18 @@ size_t set_get_entries_index(set* s, obj* item)
 /**
  * Insert a new object into the set if it is not already there
  */
-bool set_add(set* s, obj* item)
+void set_add(set* s, obj* item)
 {
 
     //check if the set indices & entries tables needs to be resized. for now, return failure for too many entries;
     if (s->size >= s->icapacity * MAX_LOAD) 
     {
-        if (!set_resize_indices(s, s->icapacity * 2)) //if resize fails, return false
-        {
-            return false;
-        }
+        set_resize_indices(s, s->icapacity * 2);
     }
     if (s->size >= s->ecapacity)
     {
-        if (!set_resize_entries(s, s->ecapacity * 2))
-        {
-            return false;
-        }
+        set_resize_entries(s, s->ecapacity * 2);
     }
-
 
     uint64_t hash = obj_hash(item);
 
@@ -217,8 +208,6 @@ bool set_add(set* s, obj* item)
         s->entries[index] = (set_entry){.hash=hash, .item=item};
         s->size++;
     }
-
-    return true;
 }
 
 

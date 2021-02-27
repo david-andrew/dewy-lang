@@ -12,7 +12,7 @@
 #include "vector.h"
 #include "dictionary.h"
 #include "set.h"
-#include "token.h"
+#include "metatoken.h"
 #include "mast.h"
 
 
@@ -110,7 +110,7 @@ size_t obj_size(obj* o)
         case Integer_t: return o->size;
         case UInteger_t: return o->size;
         case String_t: return o->size;
-        case Token_t: return o->size; //TBD if token should be sized this way
+        case MetaToken_t: return o->size; //TBD if token should be sized this way
         case Vector_t: return vect_size(*(vect**)o->data);
         case Dictionary_t: return dict_size(*(dict**)o->data);
         case Set_t: return set_size(*(set**)o->data);
@@ -185,7 +185,7 @@ obj* obj_copy_inner(obj* o, dict* refs)
             copy->data = (void*)copy_ptr;
             break;
         }
-        // case Token_t:
+        // case MetaToken_t:
         // {
         //     copy->data = (void*)token_obj_copy((token*)o->data, refs);
         //     break;
@@ -235,7 +235,7 @@ void obj_print(obj* o)
         case Integer_t: printf("%ld", *(int64_t*)o->data); break;
         case UInteger_t: printf("%lu", *(uint64_t*)o->data); break;
         case String_t: printf("%s", *(char**)o->data); break;
-        case Token_t: token_str((token*)o->data); break;
+        case MetaToken_t: token_str((metatoken*)o->data); break;
         case Vector_t: vect_str(*(vect**)o->data); break;
         case Dictionary_t: dict_str(*(dict**)o->data); break;
         case Set_t: set_str(*(set**)o->data); break;
@@ -261,7 +261,7 @@ uint64_t obj_hash(obj* o)
         case Integer_t: return hash_int(*(int64_t*)o->data);
         case UInteger_t: return hash_uint(*(uint64_t*)o->data);
         case String_t: return fnv1a(*(char**)o->data);
-        // case Token_t: return meta_token_hash(o);
+        // case MetaToken_t: return meta_token_hash(o);
         case Vector_t: return vect_hash(*(vect**)o->data);
         // case Dictionary_t: return dict_hash((dict*)o->data);
         case Set_t: return set_hash(*(set**)o->data);
@@ -290,7 +290,7 @@ int64_t obj_compare(obj* left, obj* right)
         case Integer_t: return *(int64_t*)left->data - *(int64_t*)right->data;
         case UInteger_t: return *(uint64_t*)left->data - *(uint64_t*)right->data;
         case String_t: return strcmp(*(char**)left->data, *(char**)right->data);
-        // case Token_t: return token_compare((token*)left->data, (token*)right->data);
+        // case MetaToken_t: return token_compare((token*)left->data, (token*)right->data);
         case Vector_t: return vect_compare(*(vect**)left->data, *(vect**)right->data);
         // case Dictionary_t: return dict_compare((dict*)left->data, (dict*)right->data);
         // case Set_t: return set_compare((set*)left->data, (set*)right->data);
@@ -336,7 +336,7 @@ void obj_free(obj* o)
                 free(o->data);
                 break;
             }
-            case Token_t: token_free((token*)o->data); break; 
+            case MetaToken_t: token_free((metatoken*)o->data); break; 
             case Vector_t: 
             {
                 vect_free(*(vect**)o->data); 
