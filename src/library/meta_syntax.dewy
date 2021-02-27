@@ -4,14 +4,14 @@
 
 //Most of these should be purely character sets...
 
-#eps = \x3f5;                                               // ϵ indicates empty charset, i.e. nothing matches
+#eps = \x3f5;                                               // ϵ indicates empty element, i.e. nullable
 #wschars = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000];
 #ws = #wschars*;                                            //optional whitespace sequence
 #any = '\\' [uUxX];                                         // \U, \u, \X, or \x used to indicate any unicode character
 #hex = '\\' [uUxX] [0-9a-fA-F]+;                            // hex number literal. Basically skipping the number part makes it #any
-#charsetchar = \U - [\-\[\]] | #escape;                     // characters allowed in a set are any unicode excluding '-', '[', or ']'
-#charset = '[' (#charsetchar ('-' #charsetchar)? )* ']';    // set of chars specified literally. Cannot contain '-', '[', or ']' as they have functions
-#hexset = '[' (#ws #hex (#ws '-' #ws #hex)? #ws)* ']';      // set of chars specified by hex codepoints
+#charsetchar = \U - [\-\[\]] - #ws;                         // characters allowed in a set are any unicode excluding '-', '[', or ']', and whitespace
+#item = #charsetchar | #escape | #hex;                      // items that make up character sets, i.e. raw chars, escape chars, or hex chars
+#charset = '[' (#ws #item (#ws '-' #ws #item)? #ws)* ']';   // set of chars specified literally. Whitespace is ignored, and must be escaped.
 
 //paired grouping operators
 #group = '(' #ws #expr #ws ')';                             // group together/force precedence
@@ -41,8 +41,9 @@
 //syntax constructs
 #set = #any | #char | #hex | #charset | #hexset | #compliment | #diff | #intersect | #union;
 #expr = #eps | #set | #group | #capture | #string | #star | #plus | #option | #cat | #or | #identifier;
-#identifier = '#' [a-zA-Z0-9!@#$?~&_]*;
-#rule = #identifier '=' #expr ';';
+#identifier = '#' [a-zA-Z0-9!@#$?&_]*;
+#rule = #identifier #ws '=' #ws #expr #ws ';';
+#start_symbol = (#ws #rule)* #ws;
 
 #update_parser_table(#start_symbol)
 
