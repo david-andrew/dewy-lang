@@ -17,14 +17,13 @@
  */
 charset* new_charset()
 {
-    charset* s_ptr = malloc(sizeof(charset));
-    charset s = {
+    charset* s = malloc(sizeof(charset));
+    *s = (charset){
         .ranges=calloc(DEFAULT_CHARSET_CAPACITY, sizeof(urange)), 
         .size=0, 
         .capacity=DEFAULT_CHARSET_CAPACITY
     };
-    *s_ptr = s;
-    return s_ptr;
+    return s;
 }
 
 //something like this, perhaps in the scanner/parser class?
@@ -52,38 +51,15 @@ obj* new_charset_obj(charset* s)
 /**
  * Insert the given unicode range into the character set.
  */
-bool charset_add_range(charset* s, urange r)
+void charset_add_range(charset* s, urange r)
 {
     //ensure range is well ordered
     r = r.start <= r.stop ? r : (urange){.start=r.stop, .stop=r.start};
 
-    //if charset already has range, then we're done
-    if (charset_contains_r(s, r)) { return true; }
-    
-    //check if r intersects any existing ranges, and if so, extend them
-    int i;
-    if ((i = charset_get_c_index(s, r.start)) >= 0)
-    {
-        s->ranges[i].stop = r.stop;
-        return true;
-    }
-    else if ((i = charset_get_c_index(s, r.stop)) >= 0)
-    {
-        s->ranges[i].start = r.start;
-        return true;
-    }
-    
-    //resize if out of space
-    if (s->size == s->capacity)
-    {
-        charset_resize(s, s->capacity * 2);
-    }
+    //append the range to the end of the charset, and then convert to reduced form
+    charset_add_range_unchecked(s, r);
+    charset_reduce(s);
 
-    //append the range to the end of the charset, and then rectify
-    s->ranges[s->size] = r;
-    s->size++;
-    charset_rectify(s);
-    return true;
 }
 
 
@@ -169,14 +145,14 @@ int urange_compare(const void* a, const void* b)
 }
 
 
-/**
- * return a charset with sorted and maximally combined ranges.
- */
-void charset_rectify(charset* s)
-{
-    charset_sort(s);
-    charset_condense(s);
-}
+// /**
+//  * return a charset with sorted and maximally combined ranges.
+//  */
+// void charset_rectify(charset* s)
+// {
+//     charset_sort(s);
+//     charset_condense(s);
+// }
 
 
 /**
@@ -191,30 +167,46 @@ void charset_sort(charset* s)
 /**
  * conbine any intesecting ranges so that we have the minimal number of ranges to represent the set.
  */
-void charset_condense(charset* s)
+void charset_reduce(charset* s)
 {
+    //if 1 or less ranges, then charset is already reduced
     if (s->size <= 1) { return; }
 
-    urange* new_ranges = malloc(s->size * sizeof(urange));
+    //ensure the charset is sorted before redusing
+    charset_sort(s);
+
+    //create new range list for holding reduced ranges. Make large enough to hold up to same number of elements.
+    size_t new_capacity = s->size;
+    urange* new_ranges = malloc(new_capacity * sizeof(urange));
+
+    
+    //reducing algorithm
     int j = 0;
     new_ranges[j] = s->ranges[0];
 
     for (int i = 1; i < s->size; i++)
     {
-        if (new_ranges[j].stop >= s->ranges[i].start)
+        //if next range falls within current range being reduced
+        if (s->ranges[i].start <= new_ranges[j].stop + 1)
         {
-            new_ranges[j].stop = s->ranges[i].stop;
+            //if next range is farther right than current range, replace right end
+            if (new_ranges[j].stop < s->ranges[i].stop)
+            {
+                new_ranges[j].stop = s->ranges[i].stop; 
+            }
         }
-        else
+        else //set the next range as the range being reduced
         {
             j++;
             new_ranges[j] = s->ranges[i];
         }
     }
 
+    //replace s->ranges with new_ranges
     free(s->ranges);
     s->ranges = new_ranges;
     s->size = j + 1;
+    s->capacity = new_capacity;
 
     //if charset is small enough, resize to take up less space
     if (s->size < s->capacity / 2)
@@ -229,27 +221,29 @@ void charset_condense(charset* s)
  */
 charset* charset_compliment(charset* s)
 {
-    uint32_t left = 0;
-
+    //charset to hold compliment
     charset* compliment = new_charset();
 
+    //compliment algorithm
+    uint32_t left = 0;
     for (int i = 0; i < s->size; i++)
     {
         urange r = s->ranges[i];
-        if (r.start > left)  //push range left-(r.start-1) to compliment
+        if (left < r.start)
         {
+            //push range left-(r.start-1) to compliment
             charset_add_range_unchecked(compliment, (urange){.start=left, .stop=r.start-1});
         }
         left = r.stop + 1;
     }
 
     //if anything remaining in big range, push to charset
-    if (left < MAX_UNICODE_POINT)
+    if (left <= MAX_UNICODE_POINT)
     {
         charset_add_range_unchecked(compliment, (urange){.start=left, .stop=MAX_UNICODE_POINT});
     }
 
-    charset_rectify(compliment);
+    // charset_reduce(compliment); //TODO->maybe unnecessary?
 
     return compliment;
 }
@@ -260,7 +254,11 @@ charset* charset_compliment(charset* s)
  */
 charset* charset_diff(charset* a, charset* b)
 {
+    charset* diff = new_charset();
 
+    //TODO->diff algorithm;
+
+    return diff;
 }
 
 
@@ -269,35 +267,54 @@ charset* charset_diff(charset* a, charset* b)
  */
 charset* charset_intersect(charset* a, charset* b)
 {
+    charset* intersect = new_charset();
 
+    //TODO->intersect algorithm
+
+    return intersect;
 }
 
 
 /**
- * 
+ * Create a new charset including all ranges from `a` and `b`.
  */
 charset* charset_union(charset* a, charset* b)
 {
+    charset* onion = new_charset();
 
+    for (int i = 0; i < a->size; i++)
+    {
+        charset_add_range_unchecked(onion, a->ranges[i]);
+    }
+    for (int i = 0; i < b->size; i++)
+    {
+        charset_add_range_unchecked(onion, b->ranges[i]);
+    }
+
+    charset_reduce(onion);
+
+    return onion;
 }
 
 
-// /**
-//  * Get the index of the charset ranges that contains unicode character `c`.
-//  * If no range is found, return -1
-//  */
-// int charset_get_c_index(charset* s, uint32_t c)
-// {
-//     for (int i = 0; i < s->size; i++)
-//     {
-//         if (s->ranges[i].start <= c && c <= s->ranges[i].stop)
-//         {
-//             return i;
-//         }
-//     }
-//     return -1;
-// }
-
+/**
+ * Determine whether two charsets are equivalent. Assumes `a` and `b` are in reduced form.
+ */
+bool charset_equals(charset* a, charset* b)
+{
+    if (a->size != b->size)
+    {
+        return false;
+    }
+    for (int i = 0; i < a->size; i++)
+    {
+        if (a->ranges[i].start != b->ranges[i].start || a->ranges[i].stop != b->ranges[i].stop)
+        {
+            return false;
+        }
+    }
+    return true;
+}
 
 /**
  * Get the index of the charset ranges that contains unicode character `c`.
@@ -328,7 +345,7 @@ int charset_get_c_index(charset* s, uint32_t c)
 
 
 /**
- * return whether or not the charset contains the 
+ * return whether or not the charset contains the unicode character
  */
 bool charset_contains_c(charset* s, uint32_t c)
 {
@@ -337,7 +354,7 @@ bool charset_contains_c(charset* s, uint32_t c)
 
 
 /**
- * 
+ * return whether or not the unicode range is contained within the charset
  */
 bool charset_contains_r(charset* s, urange r)
 {
@@ -347,46 +364,54 @@ bool charset_contains_r(charset* s, urange r)
 }
 
 
-// bool urange_contains_c(urange r, uint32_t c)
-// {
-//     return (r.start <= c && c <= r.stop) || (r.stop <= c && c <= r.start);
-// }
-
-
 /**
- * 
+ * Print out a string representation of the charset.
  */
 void charset_str(charset* s)
 {
     printf("[");
     for (int i = 0; i < s->size; i++)
     {
-        put_unicode(s->ranges[i].start);
+        ascii_or_hex_str(s->ranges[i].start);
         if (s->ranges[i].stop != s->ranges[i].start)
         {
             printf("-");
-            put_unicode(s->ranges[i].stop);
+            ascii_or_hex_str(s->ranges[i].stop);
         }
+        if (i + 1 <= s->size - 1) printf(" ");
     }
     printf("]");
 }
 
 
 /**
- * 
+ * Print a representation of the internal state of the charset.
  */
 void charset_repr(charset* s)
 {
-
+    printf("charset = [");  
+    if (s->size > 0) printf("\n");  
+    for (int i = 0; i < s->size; i++)
+    {
+        urange r = s->ranges[i];
+        printf("  \\x%X", r.start);
+        if (r.start != r.stop)
+        {
+            printf("-\\x%X", r.stop);
+        }
+        if (i + 1 <= s->size - 1) printf(",");
+        printf("\n");
+    }
+    printf("]\n");
 }
 
-
 /**
- * 
+ * Free all of a charset object's memory allocations.
  */
 void charset_free(charset* s)
 {
-    //TODO
+    free(s->ranges);
+    free(s);
 }
 
 

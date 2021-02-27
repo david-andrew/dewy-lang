@@ -25,7 +25,8 @@ typedef struct
 
 charset* new_charset();
 obj* new_charset_obj(charset* s);
-bool charset_add_range(charset* s, urange r);
+void charset_add_range(charset* s, urange r);
+void charset_add_range_unchecked(charset* s, urange r);
 size_t charset_size(charset* s);
 size_t charset_capacity(charset* s);
 uint64_t charset_length(charset* s);
@@ -33,7 +34,7 @@ void charset_resize(charset* s, size_t new_size);
 int urange_compare(const void* a, const void* b);
 void charset_rectify(charset* s);
 void charset_sort(charset* s);
-void charset_condense(charset* s);
+void charset_reduce(charset* s);
 charset* charset_compliment(charset* s);
 charset* charset_diff(charset* a, charset* b);
 charset* charset_intersect(charset* a, charset* b);
@@ -43,6 +44,7 @@ bool charset_contains_c(charset* s, uint32_t c);
 bool charset_contains_r(charset* s, urange r);
 void charset_str(charset* s);
 void charset_repr(charset* s);
+void charset_free(charset* s);
 
 
 

@@ -405,5 +405,14 @@ void unicode_str(uint32_t c)
     }
 }
 
+/**
+ * Print out the character or hex value of the given char.
+ */
+void ascii_or_hex_str(uint32_t c)
+{
+    if (0x21 <= c && c <= 0x7E) put_unicode(c);
+    else printf("\\x%X", c);
+}
+
 
 #endif
