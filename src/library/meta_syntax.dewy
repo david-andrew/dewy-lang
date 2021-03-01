@@ -4,11 +4,13 @@
 
 //Most of these should be purely character sets...
 
-#eps = \x3f5;                                               // ϵ indicates empty element, i.e. nullable
-#wschars = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000];
-#ws = #wschars*;                                            //optional whitespace sequence
+#eps = \x3f5 | '\\e';                                       // ϵ or \e indicates empty element, i.e. nullable
+//#wschars = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000]; //ascii + unicode whitespace chars
+#wschars = [\x9-\xD\x20];                                   // ascii whitespace characters
+#ws = #wschars*;                                            // optional whitespace sequence
 #anyset = '\\' [uUxX];                                      // \U, \u, \X, or \x used to indicate any unicode character
 #hex = '\\' [uUxX] [0-9a-fA-F]+;                            // hex number literal. Basically skipping the number part makes it #any
+#number = [0-9]+;                                           // decimal number literal. Used to indicate # of repetitions
 #charsetchar = \U - [\-\[\]] - #ws;                         // characters allowed in a set are any unicode excluding '-', '[', or ']', and whitespace
 #item = #charsetchar | #escape | #hex;                      // items that make up character sets, i.e. raw chars, escape chars, or hex chars
 #charset = '[' (#ws #item (#ws '-' #ws #item)? #ws)* ']';   // set of chars specified literally. Whitespace is ignored, and must be escaped.
@@ -18,14 +20,15 @@
 #capture = '{' #ws #expr #ws '}';                           // group to capture
 #char = '"' (\U - '"' | #escape) '"';                       // "" single character
 #char = "'" (\U - "'" | #escape) "'";                       // '' single character
-#string = '"' (\U - '"' | #escape)* '"';                    // "" string of characters
-#string = "'" (\U - "'" | #escape)* "'";                    // '' string of characters
+#string = '"' (\U - '"' | #escape)2* '"';                   // "" string of characters
+#string = "'" (\U - "'" | #escape)2* "'";                   // '' string of characters
 #escape = '\\' \U;                                          // an escape character. Recognized escaped characters are \n \r \t \v \b \f \a. All others just put the second character literally. Common literals include \\ \' \" \[ \] \-
 
 //post operators
-#star = #expr #ws '*';                                      // zero or more
-#plus = #expr #ws '+';                                      // one or more
+#star = #expr #ws (#number)? '*';                           // zero or (number or more)
+#plus = #expr #ws (#number)? '+';                           // (number or one) or more 
 #option = #expr #ws '?';                                    // optional
+#count = #expr #ws #number;                                 // exactly number of
 #compliment = #set #ws '~'                                  // compliment of. equivalent to #any - #set
 
 //implicit operators
@@ -36,19 +39,30 @@
 #intersect = #set #ws '&' #ws #set;                         // intersect of left and right
 #union = #set #ws | #ws #set;                               // union of left and right
 
-#or = #expr #ws '|' #ws #expr;                              // left or right
+#or = (#expr #ws '|' #ws #expr) - #union;                   // left or right. TODO->update restriction syntax that it excludes #union.
 
 //syntax constructs
 #set = #anyset | #char | #hex | #charset | #hexset | #compliment | #diff | #intersect | #union;
-#expr = #eps | #set | #group | #capture | #string | #star | #plus | #option | #cat | #or | #identifier;
-#identifier = '#' [a-zA-Z0-9~!@#$&_?]+;
-#rule = #identifier #ws '=' #ws #expr #ws ';';
+#expr = #eps | #set | #group | #capture | #string | #star | #plus | #option | #count | #cat | #or | #identifier;
+#hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*;
+#rule = #hashtag #ws '=' #ws #expr #ws ';';
 #start_symbol = (#ws #rule)* #ws;
 
 #update_parser_table(#start_symbol)
 
 
+/{Interesting notes
 
+`(A)2 +` or `((A)2)+` indicates A exactly 2, 4, 6, 8, ... times
+while `(A)2+` indicates A exactly 2, 3, 4, 5, ... times. 
+Style says you should add the parenthesis. or perhaps remove the whitespace option, i.e. `(A)2 +` == `(A)2+` 
+Also `(A)2 *` indicates A exactly 0, 2, 4, 6, ... times
+
+`A+?` is the same as `A*`. Same with `(A)2+?` and `(A)2*`
+
+`(A)5+` indicates 5 or more of `A` while `(A)5*` indicates 0 or 5 or more of `A`
+
+}/
 
 //e.g. 
 #bare_range = #expr ':' #expr;

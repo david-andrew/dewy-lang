@@ -34,9 +34,9 @@ size_t dewy_index(int index, int length)
 /**
     return a substring according to dewy string slicing rules
 */
-char* substr(char* string, int start, int stop)
+char* substr(char* str, int start, int stop)
 {
-    size_t length = strlen(string);
+    size_t length = strlen(str);
     size_t start_idx = dewy_index(start, length);
     size_t stop_idx = dewy_index(stop, length);
 
@@ -49,9 +49,65 @@ char* substr(char* string, int start, int stop)
     char* ptr = substr;
     for (size_t i = start_idx; i <= stop_idx; i++)
     {
-        *ptr++ = string[i];
+        *ptr++ = str[i];
     }
     *ptr = 0; //add null terminator to end of string
+    return substr;
+}
+
+/**
+ * Return a unicode substring converted from the given utf8 string.
+ * Indices index the unicode output string, not the utf8 input string.
+ * Does not use Dewy slicing rules, only positive in bounds indices.
+ * `stop` and `start` bounds are inclusive
+ */
+uint32_t* unicode_substr(char* str, int start, int stop)
+{
+    //unicode string length (includes chars at start and stop)
+    size_t length = stop - start + 1;
+
+    //allocate uint32_t string with room for null terminator at the end
+    uint32_t* substr = malloc((length + 1) * sizeof(uint32_t));
+
+    //copy pointer for assigning each character
+    uint32_t* ptr = substr;
+
+    //throw away everything up to the start of the substring
+    for (int i = 0; i < start; i++)
+    {
+        eat_utf8(&str);
+    }
+    //copy the substring to our unicode array
+    for (int i = 0; i < length; i++)
+    {
+        *ptr++ = eat_utf8(&str);
+    }
+    *ptr = 0; //null terminator at the end of the string
+
+    return substr;
+}
+
+
+/**
+ * Return a unicode string converted from the given utf8 string.
+ * Indices index the utf8 input string, not unicode output string.
+ * Does not use Dewy slicing rules, only positive in bounds indices.
+ * `stop` and `start` bounds are inclusive
+ */
+uint32_t* utf8_substr(char* str, int start, int stop)
+{
+    //get the utf8 substring
+    char* raw_str = substr(str, start, stop);
+
+    //compute number of unicode characters in string
+    size_t length = utf8_length(raw_str);
+
+    //get the unicode version of the string by taking a unicode substring of the whole length
+    uint32_t* substr = unicode_substr(raw_str, 0, length-1);
+    
+    //free the temporary raw string
+    free(raw_str);
+
     return substr;
 }
 
@@ -85,6 +141,14 @@ char* concatenate(char* left, char* right)
     return combined;
 }
 
+//TODO->convert this to read file directly char by char, rather than copy into my own buffer
+//what about multiple files though?
+/*
+    int c; // note: int, not char, required to handle EOF
+    while ((c = fgetc(fp)) != EOF) { // standard C I/O file reading loop
+       putchar(c);
+    }
+*/
 char* read_file(char* filename)
 {
     //see: https://stackoverflow.com/questions/14002954/c-programming-how-to-read-the-whole-file-contents-into-a-buffer
@@ -103,40 +167,40 @@ char* read_file(char* filename)
 }
 
 
-/**
- * Convert the contents of a file to a unicode (uint32_t) string.
- * See: https://stackoverflow.com/questions/14002954/c-programming-how-to-read-the-whole-file-contents-into-a-buffer
- * TODO->make more efficient such that `unicode` is exactly the size of the number of unicode characters instead of ascii characters.
- */
-uint32_t* read_unicode_file(char* filename)
-{
-    //open the file
-    FILE *f = fopen(filename, "rb");
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
+// /**
+//  * Convert the contents of a file to a unicode (uint32_t) string.
+//  * See: https://stackoverflow.com/questions/14002954/c-programming-how-to-read-the-whole-file-contents-into-a-buffer
+//  * TODO->make more efficient such that `unicode` is exactly the size of the number of unicode characters instead of ascii characters.
+//  */
+// uint32_t* read_unicode_file(char* filename)
+// {
+//     //open the file
+//     FILE *f = fopen(filename, "rb");
+//     fseek(f, 0, SEEK_END);
+//     long fsize = ftell(f);
+//     fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
 
-    //copy file to normal char* string
-    char* string = malloc(fsize + 1);
-    fread(string, fsize, 1, f);
-    fclose(f);
+//     //copy file to normal char* string
+//     char* string = malloc(fsize + 1);
+//     fread(string, fsize, 1, f);
+//     fclose(f);
 
-    //put null terminator at the end
-    string[fsize] = 0;
+//     //put null terminator at the end
+//     string[fsize] = 0;
 
-    //create a uint32_t string to hold unicode characters
-    uint32_t* unicode = malloc(fsize + 1 * sizeof(uint32_t));
+//     //create a uint32_t string to hold unicode characters
+//     uint32_t* unicode = malloc(fsize + 1 * sizeof(uint32_t));
 
-    //copy the string into the unicode array
-    uint32_t* c = unicode;          //pointer to current unicode character
-    char* s = string;               //pointer to current char character
-    while (*c++ = eat_utf8(&s));    //copy until null terminator reached
+//     //copy the string into the unicode array
+//     uint32_t* c = unicode;          //pointer to current unicode character
+//     char* s = string;               //pointer to current char character
+//     while (*c++ = eat_utf8(&s));    //copy until null terminator reached
 
-    //free the original string
-    free(string);
+//     //free the original string
+//     free(string);
 
-    return unicode;
-}
+//     return unicode;
+// }
 
 
 bool is_identifier_char(char c)
@@ -151,39 +215,48 @@ bool is_identifier_char(char c)
 
 bool is_identifier_symbol_char(char c)
 {
-    return c == '~' || c == '@' || c == '#' || c == '$' || c == '&' || c == '_' || c == '?';
+    return c == '~' || c == '!' || c == '@' || c == '#' || c == '$' || c == '&' || c == '_' || c == '?';
 }
 
 bool is_alpha_char(char c)
 {
-    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 }
 
-bool is_num_char(char c)
+bool is_dec_digit(char c)
 {
-    return c >= 48 && c <= 57;
+    return c >= '0' && c <= '9';
 }
 
 bool is_alphanum_char(char c)
 {
-    return is_alpha_char(c) || is_num_char(c);
+    return is_alpha_char(c) || is_dec_digit(c);
 }
 
 
 bool is_upper_hex_letter(char c)
 {
-    return c >= 65 && c <= 70;
+    return c >= 'A' && c <= 'F';
 }
 
 bool is_lower_hex_letter(char c)
 {
-    return c >= 97 && c <= 102;
+    return c >= 'a' && c <= 'f';
 }
 
 // returns true if character is a hexidecimal digit (both uppercase or lowercase valid)
 bool is_hex_digit(char c)
 {
-    return is_num_char(c) || is_upper_hex_letter(c) || is_lower_hex_letter(c);
+    return is_dec_digit(c) || is_upper_hex_letter(c) || is_lower_hex_letter(c);
+}
+
+/**
+ * Determines if the character is the escape char for starting hex numbers
+ * Hex numbers can be \x#, \X#, \u#, or \U#.
+ */
+bool is_hex_escape(char c)
+{
+    return c == 'x' || c == 'X' || c == 'u' || c == 'U';
 }
 
 
@@ -191,6 +264,16 @@ bool is_whitespace_char(char c)
 {
     //whitespace includes tab (0x09), line feed (0x0A), line tab (0x0B), form feed (0x0C), carriage return (0x0D), and space (0x20)
     return c == 0x09 || c == 0x0A || c == 0x0B || c == 0x0C || c == 0x0D || c == 0x20;
+}
+
+
+/**
+ * Determine if the character is a legal charset character
+ * #charsetchar = \U - [\-\[\]] - #ws;
+ */
+bool is_charset_char(uint32_t c)
+{
+    return !is_whitespace_char((char)c) && !(c == '-' || c == '[' || c == ']');
 }
 
 
@@ -297,17 +380,17 @@ uint64_t parse_hex(char* str)
 
 uint64_t hex_digit_to_value(char c)
 {
-    if (is_num_char(c)) 
+    if (is_dec_digit(c)) 
     { 
-        return c - 48; 
+        return c - '0'; 
     }
     else if (is_upper_hex_letter(c))
     {
-        return c - 55;
+        return c - 'A' + 10;
     }
     else if (is_lower_hex_letter(c))
     {
-        return c - 87;
+        return c - 'a' + 10;
     }
     printf("ERROR: character %c is not a hex digit\n", c);
     return 0;
@@ -426,7 +509,7 @@ uint32_t eat_utf8(char** str_ptr)
 /**
  * Return the unicode character at the given index in the utf8 string. `str_ptr` is not modified.
  */
-uint32_t peek_unicode(char** str_ptr, size_t index)
+uint32_t peek_unicode(char** str_ptr, size_t index, size_t* delta)
 {
     char* str = *str_ptr;
     char** str_ptr_copy = &str;
@@ -435,11 +518,22 @@ uint32_t peek_unicode(char** str_ptr, size_t index)
     {
         c = eat_utf8(str_ptr_copy);
     }
+    if (delta != NULL) *delta = *str_ptr_copy - *str_ptr;
     return c;
 }
 
 /**
-    print the unicode character, or a special character for specific inputs
+ * Compute the unicode length of the given utf8 string.
+ */
+size_t utf8_length(char* str)
+{
+    size_t i = 0;
+    while (eat_utf8(&str)) { i++; };
+    return i;
+}
+
+/**
+    print the unicode character, or a special character for some special inputs
 */
 void unicode_str(uint32_t c)
 {

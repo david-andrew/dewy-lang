@@ -1,8 +1,7 @@
-#ifndef SCANNER_H
-#define SCANNER_H
+#ifndef METASCANNER_H
+#define METASCANNER_H
 
 #include "object.h"
-// #include "dictionary.h"
 #include "vector.h"
 #include "metatoken.h"
 
@@ -12,7 +11,7 @@ typedef enum
     scan_meta_rule,
     scan_meta_func,
     scan_peek,
-} scanner_state;
+} metascanner_state;
 
 
 //forward declare functions for meta parsing
@@ -21,9 +20,10 @@ obj* match_hashtag(char** src);
 obj* match_meta_char(char** src);
 obj* match_meta_string(char** src);
 obj* match_meta_hex_number(char** src);
+obj* match_meta_dec_number(char** src);
 obj* match_meta_escape(char** src);
 obj* match_meta_charsetchar(char** src);
-obj* match_meta_any(char** src);
+obj* match_meta_anyset(char** src);
 obj* match_meta_epsilon(char** src);
 obj* match_meta_ampersand(char** src);
 obj* match_meta_star(char** src);
@@ -43,7 +43,7 @@ obj* match_meta_right_brace(char** src);
 obj* match_whitespace(char** src);
 obj* match_line_comment(char** src);
 obj* match_block_comment(char** src);
-bool peek_char(char** src, char c);
+bool peek_char(char** src, uint32_t c);
 void remove_token_type(vect* v, metatoken_type type);
 
 #endif

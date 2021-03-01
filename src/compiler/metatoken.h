@@ -12,6 +12,7 @@ typedef enum
     meta_char,
     meta_string,
     meta_hex_number,
+    meta_dec_number,
     meta_escape,
     meta_charsetchar,
     meta_anyset,
@@ -41,14 +42,13 @@ typedef enum
 typedef struct
 {
     metatoken_type type;
-    // char* content;
     uint32_t* content;
 } metatoken;
 
 
-obj* new_metatoken(metatoken_type type, char* content); //TODO->replace with below versions
-//token* new_token(token_type, char* content)
-//obj* new_token_obj(token* t);
+obj* new_metatoken(metatoken_type type, uint32_t* content); //TODO->replace with below versions
+//token* new_metatoken(token_type, uint32_t* content)
+//obj* new_metatoken_obj(token* t);
 void metatoken_str(metatoken* t);
 void metatoken_free(metatoken* t);
 

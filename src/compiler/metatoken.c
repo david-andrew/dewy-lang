@@ -5,18 +5,18 @@
 #include <stdlib.h>
 
 #include "metatoken.h"
+#include "utilities.h"
 
 /**
  * 
  */
-obj* new_metatoken(metatoken_type type, char* content)
+obj* new_metatoken(metatoken_type type, uint32_t* content)
 {
     obj* T = malloc(sizeof(obj));
     T->type = MetaToken_t;
     T->size = sizeof(metatoken);
     metatoken* t_ptr = malloc(sizeof(metatoken));
-    metatoken t = {type, content};
-    *t_ptr = t;
+    *t_ptr = (metatoken){.type=type, .content=content};
     T->data = (void*)t_ptr;
     return T;
 }
@@ -32,6 +32,7 @@ void token_str(metatoken* t)
         case meta_char: printf("meta_char"); break;
         case meta_string: printf("meta_string"); break;
         case meta_hex_number: printf("meta_hex_number"); break;
+        case meta_dec_number: printf("meta_dec_number"); break;
         case meta_escape: printf("meta_escape"); break;
         case meta_charsetchar: printf("meta_charsetchar"); break;
         case meta_anyset: printf("meta_anyset"); break;
@@ -54,7 +55,12 @@ void token_str(metatoken* t)
         case whitespace: printf("whitespace"); break;
         case comment: printf("comment"); break;
     }
-    printf(" `%s`", t->content);
+    // printf(" `%s`", t->content);
+    printf(" `");
+    uint32_t c;
+    uint32_t* c_ptr = t->content;
+    while ((c = *c_ptr++)) { put_unicode(c); }
+    printf("`");
 }
 
 void token_free(metatoken* t)
