@@ -459,7 +459,7 @@ obj* match_meta_escape(char** src)
  * Match a character inside a charset.
  * Implicitly exclude escapes, hex and whitespace by scanning for them first.
  * 
- * #charsetchar = \U - [\-\[\]] - #ws; 
+ * #charsetchar = \U - [\-\[\]] - #wschar; 
  */
 obj* match_meta_charset_char(char** src)
 {
