@@ -49,9 +49,9 @@ scan_fn rule_funcs[] = {
     match_meta_left_parenthesis,
     match_meta_right_parenthesis,
     match_meta_left_bracket, 
-    /*right bracket only matched inside charset_body*/
+    match_meta_right_bracket,
     match_meta_left_brace,
-    match_meta_right_brace,
+    /*right brace only matched inside charset_body*/
 };
 
 //rules to scan in the body of a charset
@@ -63,7 +63,7 @@ scan_fn charset_funcs[] = {
     match_meta_escape,
     match_meta_minus,
     match_meta_charset_char,
-    match_meta_right_bracket,
+    match_meta_right_brace,
 };
 
 //rules for the body of a single quote '' string
@@ -330,7 +330,6 @@ obj* match_meta_single_quote_char(char** src)
     //any single char except for '\''. Also implicitly exclude '\\' "//" "/{"
     if ((*src)[0] != 0 && (*src)[0] != '\'')
     {
-        uint32_t c = eat_utf8(src);
         obj* t = new_metatoken(meta_single_quote_char, unicode_char_to_str(eat_utf8(src)));
         return t;
     }
@@ -451,6 +450,7 @@ obj* match_meta_escape(char** src)
 {
     if ((*src)[0] == '\\' && (*src)[1] != 0)
     {
+        (*src)++;   //skip escape backslash
         obj* t = new_metatoken(meta_escape, unicode_char_to_str(eat_utf8(src)));
         return t;
     }
@@ -682,11 +682,20 @@ obj* match_meta_right_brace(char** src)
 /**
  * Match ascii whitespace characters which will be ignored by the meta scanner/parser.
  * 
- * #wschars = [\x9-\xD\x20];
+ * #wschar = [\x9-\xD\x20];
+ * #ws = #wschar*;
  */
 obj* match_whitespace(char** src) 
 {
-    return is_whitespace_char(*src[0]) ? new_metatoken(whitespace, unicode_substr((*src)++, 0, 0)) : NULL;
+    size_t i = 0;
+    while (is_whitespace_char((*src)[i])) { i++; }
+    if (i > 0)
+    {
+        obj* t = new_metatoken(whitespace, unicode_substr(*src, 0, i-1));
+        *src += i;
+        return t;
+    }
+    return NULL;
 }
 
 
