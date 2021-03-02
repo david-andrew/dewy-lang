@@ -10,67 +10,221 @@
 #include "metascanner.h"
 
 
+//function pointer type for token scan functions
+typedef obj* (*scan_fn)(char**);
 
-//inital state is root of source code
-metascanner_state scan_state = scan_root;
+//macro to get the length of each of the function arrays
+#define len(A) sizeof(A) / sizeof(scan_fn)
+
+//tokens to scan for before entering any meta syntax context
+scan_fn root_funcs[] = {
+    match_hashtag,
+    match_whitespace,
+    match_line_comment,
+    match_block_comment,
+};
+
+//rules to scan while reading a meta rule
+scan_fn rule_funcs[] = {
+    match_hashtag,
+    match_meta_char,
+    match_meta_single_quote,
+    match_meta_double_quote,
+    match_meta_hex_number,
+    match_meta_dec_number,
+    match_meta_anyset,
+    match_meta_epsilon,
+    match_meta_ampersand,
+    match_meta_star,
+    match_meta_plus,
+    match_meta_question_mark,
+    match_meta_tilde,
+    match_meta_semicolon,
+    match_meta_vertical_bar,
+    match_meta_minus,
+    match_meta_equals_sign,
+    match_meta_left_parenthesis,
+    match_meta_right_parenthesis,
+    match_meta_left_bracket, 
+    /*right bracket only matched inside charset_body*/
+    match_meta_left_brace,
+    match_meta_right_brace,
+};
+
+//rules to scan in the body of a charset
+scan_fn charset_funcs[] = {
+    match_whitespace,
+    match_line_comment,
+    match_block_comment,
+    match_meta_hex_number,
+    match_meta_escape,
+    match_meta_minus,
+    match_meta_charset_char,
+    match_meta_right_bracket,
+};
+
+//rules for the body of a single quote '' string
+scan_fn single_quote_string_funcs[] = {
+    match_line_comment,
+    match_block_comment,
+    match_meta_escape,
+    match_meta_single_quote,
+    match_meta_single_quote_char,
+};
+
+//rules for the body of a double quote "" string
+scan_fn double_quote_string_funcs[] = {
+    match_line_comment,
+    match_block_comment,
+    match_meta_escape,
+    match_meta_double_quote_char,
+    match_meta_double_quote,
+};
+
+//rules to scan inside meta function calls
+scan_fn metafunc_body_funcs[] = {
+    //TBD what exactly is allowed inside of a meta function call. for now we are only allowing meta-identifiers
+    //potentially allow {} blocks, inside of which, normal dewy expressions can be called, just like string interpolation    
+    match_meta_left_parenthesis,
+    match_meta_right_parenthesis,
+    match_hashtag,
+};
+
+//rules that are read (and ignored) while scanning for the next character
+scan_fn scan_peek_funcs[] = {
+    match_whitespace,
+    match_line_comment,
+    match_block_comment,
+};
+
+
+
+//save the lengths of each of these arrays
+// const size_t root_funcs_length = sizeof(root_funcs) / sizeof(scan_fn);
+// const size_t rule_funcs_length = sizeof(rule_funcs) / sizeof(scan_fn);
+// const size_t charset_funcs_length = sizeof(charset_funcs) / sizeof(scan_fn);
+// const size_t single_quote_string_funcs_length = sizeof(single_quote_string_funcs) / sizeof(scan_fn);
+// const size_t double_quote_string_funcs_length = sizeof(double_quote_string_funcs) / sizeof(scan_fn);
+// const size_t metafunc_body_funcs_length = sizeof(metafunc_body_funcs) / sizeof(scan_fn);
+// const size_t scan_peek_funcs_length = sizeof(scan_peek_funcs) / sizeof(scan_fn);
+
+
+//Singleton stack for storing the state of the metascanner
+vect* metascanner_state_stack = NULL;
 
 
 /**
- * Scan for a single token based on the current `scan_state`.
+ * Initialize (if needed) and return the state stack singleton
+ */
+vect* get_metascanner_state_stack()
+{
+    if (!metascanner_state_stack)
+    {
+        metascanner_state_stack = new_vect();
+        vect_push(metascanner_state_stack, new_uint((uint64_t)scan_root));
+    }
+    return metascanner_state_stack;
+}
+
+
+/**
+ * Get the top state on the stack, without modifying the stack.
+ */
+metascanner_state peek_metascanner_state()
+{
+    vect* stack = get_metascanner_state_stack();
+    obj* o = vect_peek(stack);
+    return (metascanner_state)*(uint64_t*)o->data;
+}
+
+
+/**
+ * Push a new state to the top of the stack.
+ */
+void push_metascanner_state(metascanner_state state)
+{
+    vect* stack = get_metascanner_state_stack();
+    vect_push(stack, new_uint((uint64_t)state));
+}
+
+
+/**
+ * Remove and return the top state on the stack.
+ */
+metascanner_state pop_metascanner_state()
+{
+    vect* stack = get_metascanner_state_stack();
+    obj* o = vect_pop(stack);
+    metascanner_state state = (metascanner_state)*(uint64_t*)o->data;
+    obj_free(o);
+    return state;
+}
+
+
+/**
+ * Free the singleton metascanner state stack.
+ */
+void free_metascanner_state_stack()
+{
+    if (metascanner_state_stack) //ensure not NULL
+    {
+        vect_free(metascanner_state_stack);
+        metascanner_state_stack = NULL;
+    }
+}
+
+
+/**
+ * Scan for a single token based on the state on top of the stack.
  */
 obj* scan(char** src)
 {
     if (*src) //check if any string left to scan
     {
+        //for each possible state, scan for the corresponding tokens
+        metascanner_state state = peek_metascanner_state();
         obj* t;
 
-        //TODO->reorder these to make sure everything gets hit correctly
-        if (scan_state == scan_meta_rule || scan_state == scan_peek)
-        {
-            t = match_hashtag(src);                     if (t != NULL) return t;
-            t = match_meta_char(src);                   if (t != NULL) return t;
-            t = match_meta_string(src);                 if (t != NULL) return t;
-            t = match_meta_hex_number(src);             if (t != NULL) return t;
-            t = match_meta_dec_number(src);             if (t != NULL) return t;
-            t = match_meta_anyset(src);                 if (t != NULL) return t;
-            t = match_meta_escape(src);                 if (t != NULL) return t;
-            t = match_meta_charsetchar(src);            if (t != NULL) return t;
-            t = match_meta_epsilon(src);                if (t != NULL) return t;
-            t = match_meta_ampersand(src);              if (t != NULL) return t;
-            t = match_meta_star(src);                   if (t != NULL) return t;
-            t = match_meta_plus(src);                   if (t != NULL) return t;
-            t = match_meta_question_mark(src);          if (t != NULL) return t;
-            t = match_meta_tilde(src);                  if (t != NULL) return t;
-            t = match_meta_semicolon(src);              if (t != NULL) return t;
-            t = match_meta_vertical_bar(src);           if (t != NULL) return t;
-            t = match_meta_minus(src);                  if (t != NULL) return t;
-            t = match_meta_equals_sign(src);            if (t != NULL) return t;
-            t = match_meta_left_parenthesis(src);       if (t != NULL) return t;
-            t = match_meta_right_parenthesis(src);      if (t != NULL) return t;
-            t = match_meta_left_bracket(src);           if (t != NULL) return t;
-            t = match_meta_right_bracket(src);          if (t != NULL) return t;
-            t = match_meta_left_brace(src);             if (t != NULL) return t;
-            t = match_meta_right_brace(src);            if (t != NULL) return t;
-        }
-        if (scan_state == scan_root || scan_state == scan_peek)
-        {
-            t = match_hashtag(src);                     if (t != NULL) return t;
-    
-            //TODO->match constructed rules here
-        }
-        if (scan_state == scan_meta_func || scan_state == scan_peek)
-        {
-            //TBD what exactly is allowed inside of a meta function call. for now we are only allowing meta-identifiers
-            //potentially allow {} blocks, inside of which, normal dewy expressions can be called, just like string interpolation
-            t = match_meta_left_parenthesis(src);       if (t != NULL) return t;
-            t = match_meta_right_parenthesis(src);      if (t != NULL) return t;
-            t = match_hashtag(src);                     if (t != NULL) return t;
-        }
+        if (state == scan_root)
+            for (size_t i = 0; i < len(root_funcs); i++)
+                if ((t = root_funcs[i](src)))
+                    return t;
         
-        //in all cases, match for whitespace or comments
-        t = match_whitespace(src);                      if (t != NULL) return t;
-        t = match_line_comment(src);                    if (t != NULL) return t;
-        t = match_block_comment(src);                   if (t != NULL) return t;
+        if (state == scan_meta_rule)
+            for (size_t i = 0; i < len(rule_funcs); i++)
+                if ((t = rule_funcs[i](src))) 
+                    return t;
+
+        if (state == scan_charset_body)
+            for (size_t i = 0; i < len(charset_funcs); i++)
+                if ((t = charset_funcs[i](src))) 
+                    return t;
+                
+        if (state == scan_single_quote_string_body)
+            for (size_t i = 0; i < len(single_quote_string_funcs); i++)
+                if ((t = single_quote_string_funcs[i](src)))
+                    return t;
+        
+        if (state == scan_double_quote_string_body)
+            for (size_t i = 0; i < len(double_quote_string_funcs); i++)
+                if ((t = double_quote_string_funcs[i](src)))
+                    return t;
+       
+        if (state == scan_metafunc_body)
+            for (size_t i = 0; i < len(metafunc_body_funcs); i++)
+                if ((t = metafunc_body_funcs[i](src)))
+                    return t;
+
+        //Scan until run out of whitespace and comments.
+        //if all peek functions fail, that means the next char should be non-ignorable
+        if (state == scan_peek)
+        {
+            for (size_t i = 0; i < len(scan_peek_funcs); i++)
+                if ((t = scan_peek_funcs[i](src)))
+                    return t;
+            
+            return NULL;
+        }
     }
 
     printf("ERROR: no token was recognized on input:\n```\n%s\n```\n", *src);
@@ -94,15 +248,17 @@ obj* match_hashtag(char** src)
         *src += i;
 
         //if we were scanning root, change the state based on the type of character following the hashtag
-        if (scan_state == scan_root)
+        metascanner_state state = peek_metascanner_state();
+        if (state == scan_root)
         {
-            if (peek_char(src, '=')) //if the next char (allowing spaces and comments) is an equals, this is the definition of a meta rule
+            // uint32_t c = get_peek_char(src);
+            if (get_peek_char(src) == '=') //if the next char (allowing spaces and comments) is an equals, this is the definition of a meta rule
             {
-                scan_state = scan_meta_rule;
+                push_metascanner_state(scan_meta_rule);
             }
             else if ((*src)[0] == '(') //if the next char (no spaces or comments) is a parenthesis, this is a meta-function call
             {
-                scan_state = scan_meta_func;
+                push_metascanner_state(scan_metafunc_body);
             }
         }
         return t;
@@ -148,35 +304,170 @@ obj* match_meta_char(char** src)
 
 
 /**
- * A string of 0, or 2 or more characters enclosed in '' or "".
- * Strings of length 1 are implicitly ignored by calling match_meta_char() first.
+ * Match a single quote character (initializing/ending a single quote string body)
+ * Implicitely don't match for meta_char (i.e. length 1 string) by calling match_meta_char() first
  * 
- * #string = '"' (\U - '"' | #escape)2* '"';
- * #string = "'" (\U - "'" | #escape)2* "'";
+ * #single_quote = '\'';
  */
-obj* match_meta_string(char** src) 
+obj* match_meta_single_quote(char** src)
 {
-    char quote; //store the type of quote, single (') or double (")
-    if ((quote = (*src)[0]) == '\'' || quote == '"')
+    obj* t = *src[0] == '\'' ? new_metatoken(meta_single_quote, unicode_substr((*src)++, 0, 0)) : NULL;
+    if (t != NULL)
     {
-        //scan for matching \' or \" to close the string, or null terminator, which indicates unclosed string
-        //also continue scan if the character before closing quote is a '\\' which indicates escape char
-        int i = 1;
-        while ((*src)[i] != 0 && ((*src)[i] != quote || (*src)[i-1] == '\\')) { i++; }
-        if ((*src)[i] == quote)
-        {
-            //since string needs to be in unicode, but we scanned chars, use utf8_substr to convert
-            obj* t = new_metatoken(meta_string, utf8_substr(*src, 1, i-1)); //ignore string quotes in string content
-            *src += i + 1;
-            return t;
-        }
-        else 
-        {
-            printf("ERROR: reached the end of input while scanning 'meta string'\n");
-        }
+        metascanner_state state = peek_metascanner_state();
+        if (state == scan_meta_rule) { push_metascanner_state(scan_single_quote_string_body); }
+        else if (state == scan_single_quote_string_body) { pop_metascanner_state(); }
+        //else peek (or error?)
+    }
+    return t;
+}
+
+/**
+ * Match single char contained in a single quote string.
+ * Implicetly don't match for comments or escapes by matching those rules first.
+ * 
+ * #single_quote_char = \U - '\'';
+ */
+obj* match_meta_single_quote_char(char** src)
+{
+    //any single char except for '\''. Also implicitly exclude '\\' "//" "/{"
+    if ((*src)[0] != 0 && (*src)[0] != '\'')
+    {
+        uint32_t c = eat_utf8(src);
+        obj* t = new_metatoken(meta_single_quote_char, unicode_char_to_str(eat_utf8(src)));
+        return t;
     }
     return NULL;
 }
+
+
+
+/**
+ * Match a double quote character (initializing/ending a double quote string body)
+ * 
+ * #double_quote = '"';
+ */
+obj* match_meta_double_quote(char** src)
+{
+    obj* t = *src[0] == '"' ? new_metatoken(meta_double_quote, unicode_substr((*src)++, 0, 0)) : NULL;
+    if (t != NULL)
+    {
+        metascanner_state state = peek_metascanner_state();
+        if (state == scan_meta_rule) { push_metascanner_state(scan_double_quote_string_body); }
+        else if (state == scan_double_quote_string_body) { pop_metascanner_state(); }
+        //else peek (or error?)
+    }
+    return t;
+}
+
+
+/**
+ * Match single char contained in a double quote string.
+ * Implicetly don't match for comments or escapes by matching those rules first.
+ * 
+ * #double_quote_char = \U - '"';
+ */
+obj* match_meta_double_quote_char(char** src)
+{
+    //any single char except for '"'. Also implicitly exclude '\\' "//" "/{"
+    if ((*src)[0] != 0 && (*src)[0] != '"')
+    {
+        uint32_t c = eat_utf8(src);
+        obj* t = new_metatoken(meta_double_quote_char, unicode_char_to_str(eat_utf8(src)));
+        return t;
+    }
+    return NULL;
+}
+
+
+// /**
+//  * A string of 0, or 2 or more characters enclosed in '' or "".
+//  * Strings of length 1 are implicitly ignored by calling match_meta_char() first.
+//  * 
+//  * #string = '"' (\U - '"' | #escape)2* '"';
+//  * #string = "'" (\U - "'" | #escape)2* "'";
+//  */
+// obj* match_meta_string(char** src) 
+// {
+//     char quote; //store the type of quote, single (') or double (")
+//     if ((quote = (*src)[0]) == '\'' || quote == '"')
+//     {
+//         //scan for matching \' or \" to close the string, or null terminator, which indicates unclosed string
+//         //also continue scan if the character before closing quote is a '\\' which indicates escape char
+//         int i = 1;
+//         while ((*src)[i] != 0 && ((*src)[i] != quote || (*src)[i-1] == '\\')) { i++; }
+//         if ((*src)[i] == quote)
+//         {
+//             //since string needs to be in unicode, but we scanned chars, use utf8_substr to convert
+//             obj* t = new_metatoken(meta_string, utf8_substr(*src, 1, i-1)); //ignore string quotes in string content
+//             *src += i + 1;
+//             return t;
+//         }
+//         else 
+//         {
+//             printf("ERROR: reached the end of input while scanning 'meta string'\n");
+//         }
+//     }
+//     return NULL;
+// }
+
+
+// /**
+//  * Match a unicode character set, i.e. individual characters and character ranges.
+//  * Characters allowed are all unicode excluding '-', '[', or ']', and whitespace (whitespace is ignored).
+//  * Also can contain escaped characters, and hex numbers.
+//  * 
+//  * #charsetchar = \U - [\-\[\]] - #ws;
+//  * #escape = '\\' \U;
+//  * #item = #charsetchar | #escape | #hex;
+//  * #charset = '[' (#ws #item (#ws '-' #ws #item)? #ws)* ']';
+//  */
+// obj* match_meta_charset(char** src)
+// {
+//     if ((*src)[0] == '[') //beginning of a charset
+//     {
+//         size_t i = 0;
+//         char* head = *src + 1;
+//         // char** head_ptr = &head;
+//         while (head[i] != 0)
+//         {
+//             if (is_whitespace_char(head[i]))
+//             {
+//                 i++;
+//                 continue;
+//             }
+//             if (head[i] == '\\' && is_hex_escape(head[i+1] && is_hex_digit(head[i+2])))
+//             {
+//                 i+=2;
+//                 while (is_hex_digit(head[i])) i++;
+//                 continue;
+//             }
+//             //if whitespace delta++ continue
+//             //if hex delta++ continue
+//             //if escape delta++ continue
+//             //if charsetchar delta++ continue
+//             //if minus delta++ continue
+//             break;
+//         }
+//         //assert that last element is closing bracket ]
+//         //LOOP
+//         //match for whitespace
+//         //match for hex   
+//         //match for escapes
+//         //match for any charset chars
+//         //match for minus
+
+//     }
+
+//     // size_t delta;
+//     // if (is_charset_char(peek_unicode(src, 0, &delta)))
+//     // {
+//     //     obj* t = new_metatoken(meta_charsetchar, unicode_substr(*src, 0, 1));
+//     //     *src += delta;
+//     //     return t;
+//     // }
+//     // return NULL;
+// }
 
 
 /**
@@ -253,10 +544,7 @@ obj* match_meta_escape(char** src)
 {
     if ((*src)[0] == '\\' && (*src)[1] != 0)
     {
-        size_t delta;
-        peek_unicode(src, 1, &delta);
-        obj* t = new_metatoken(meta_escape, unicode_substr(*src, 0, 1));
-        src += delta;
+        obj* t = new_metatoken(meta_escape, unicode_char_to_str(eat_utf8(src)));
         return t;
     }
     return NULL;
@@ -264,20 +552,15 @@ obj* match_meta_escape(char** src)
 
 
 /**
- * Match characters allowed in a set, i.e. any unicode excluding '-', '[', or ']', and whitespace
+ * Match a character inside a charset.
+ * Implicitly exclude escapes, hex and whitespace by scanning for them first.
  * 
- * #charsetchar = \U - [\-\[\]] - #ws;
+ * #charsetchar = \U - [\-\[\]] - #ws; 
  */
-obj* match_meta_charsetchar(char** src)
+obj* match_meta_charset_char(char** src)
 {
-    size_t delta;
-    if (is_charset_char(peek_unicode(src, 0, &delta)))
-    {
-        obj* t = new_metatoken(meta_charsetchar, unicode_substr(*src, 0, 1));
-        *src += delta;
-        return t;
-    }
-    return NULL;
+    //even though (*src)[0] is ascii while charset_char is unicode, is_charset_char works by excluding only certain ascii.
+    return (is_charset_char((*src)[0])) ? new_metatoken(meta_charset_char, unicode_char_to_str(eat_utf8(src))) : NULL;
 }
 
 
@@ -288,11 +571,9 @@ obj* match_meta_charsetchar(char** src)
  */
 obj* match_meta_epsilon(char** src)
 {
-    size_t delta;
     if (peek_unicode(src, 0, NULL) == 0x3f5) //0x3f5 = 'ϵ'
     {
-        obj* t = new_metatoken(meta_epsilon, unicode_substr(*src, 0, 1));
-        *src += delta;
+        obj* t = new_metatoken(meta_epsilon, unicode_char_to_str(eat_utf8(src)));
         return t;
     }
     else if ((*src)[0] == '\\' && (*src)[1] == 'e')
@@ -306,9 +587,9 @@ obj* match_meta_epsilon(char** src)
 
 
 /**
- * Main usage of ampersand is as intersect operator
+ * Match for an ampersand '&' used to take the intersect of charsets.
  * 
- * #intersect = #set #ws '&' #ws #set;
+ * #ampersand = '&';
  */
 obj* match_meta_ampersand(char** src)
 {
@@ -317,7 +598,9 @@ obj* match_meta_ampersand(char** src)
 
 
 /**
+ * Match for a star '*' used to indicate 0 or more elements.
  * 
+ * #star = '*';
  */
 obj* match_meta_star(char** src)
 {
@@ -326,7 +609,9 @@ obj* match_meta_star(char** src)
 
 
 /**
+ * Match for a plus '+' used to indicate 1 or more elements.
  * 
+ * #plus = '+';
  */
 obj* match_meta_plus(char** src)
 {
@@ -335,7 +620,9 @@ obj* match_meta_plus(char** src)
 
 
 /**
+ * Match for a question mark '?' used to indicate an optional element.
  * 
+ * #question_mark = '?';
  */
 obj* match_meta_question_mark(char** src)
 {
@@ -344,7 +631,9 @@ obj* match_meta_question_mark(char** src)
 
 
 /**
+ * Match for a tiled '~' used to indicate the compliment of a charset.
  * 
+ * #tiled = '~';
  */
 obj* match_meta_tilde(char** src)
 {
@@ -353,67 +642,152 @@ obj* match_meta_tilde(char** src)
 
 
 /**
+ * Match for a semicolon ';' used to delimit the end of a meta rule;
  * 
+ * #semicolon = ';';
  */
 obj* match_meta_semicolon(char** src) 
 {
     obj* t = *src[0] == ';' ? new_metatoken(meta_semicolon, unicode_substr((*src)++, 0, 0)) : NULL;
-    if (t != NULL) { scan_state = scan_root; } //update current scanner state for end of meta rule
+    if (t != NULL && peek_metascanner_state() == scan_meta_rule) 
+    {
+        pop_metascanner_state();
+        //peek_metascanner_state should == scan_root...
+    }
     return t;
 }
 
+
+/**
+ * Match for vertical bar '|' used to indicate charset union, or choice between left and right expression.
+ * 
+ * #vertical_bar = '|';
+ */
 obj* match_meta_vertical_bar(char** src) 
 {
     return *src[0] == '|' ? new_metatoken(meta_vertical_bar, unicode_substr((*src)++, 0, 0)) : NULL;
 }
 
+
+/**
+ * Match for minus '-' used to indicate charset difference (or potentially expression exclusions).
+ * 
+ * #minus = '-';
+ */
 obj* match_meta_minus(char** src) 
 {
     return *src[0] == '-' ? new_metatoken(meta_minus, unicode_substr((*src)++, 0, 0)) : NULL;
 }
 
+
+/**
+ * Match for equals sign '=' used to bind a meta rule to a hashtag identifier.
+ * 
+ * #equals_sign = '=';
+ */
 obj* match_meta_equals_sign(char** src) 
 {
     return *src[0] == '=' ? new_metatoken(meta_equals_sign, unicode_substr((*src)++, 0, 0)) : NULL;
 }
 
+
+/**
+ * Match for left parenthesis '(' used to group an expression, or start a meta function call.
+ * 
+ * #left_parenthesis = '(';
+ */
 obj* match_meta_left_parenthesis(char** src) 
 {
     return *src[0] == '(' ? new_metatoken(meta_left_parenthesis, unicode_substr((*src)++, 0, 0)) : NULL;
 }
 
+
+/**
+ * Match for right parenthesis ')' used to group an expression, or end a meta function call.
+ * 
+ * #right_parenthesis = ')';
+ */
 obj* match_meta_right_parenthesis(char** src) 
 {
     obj* t = *src[0] == ')' ? new_metatoken(meta_right_parenthesis, unicode_substr((*src)++, 0, 0)) : NULL;
-    if (t != NULL && scan_state == scan_meta_func) { scan_state = scan_root; } //update current scanner state if the end of a meta_function was reached
+    if (t != NULL && peek_metascanner_state() == scan_metafunc_body)
+    { 
+        pop_metascanner_state();  //return to previous context (scan_root) after meta function call closed
+    }
     return t;
 }
 
+
+/**
+ * Match for left bracket '{' used to create expression capture groups.
+ * 
+ * #left_bracket = '{';
+ */
 obj* match_meta_left_bracket(char** src) 
 {
     return *src[0] == '{' ? new_metatoken(meta_left_bracket, unicode_substr((*src)++, 0, 0)) : NULL;
 }
 
+
+/**
+ * Match for right bracket '}' used to close capture groups.
+ * 
+ * #right_bracket = '}';
+ */
 obj* match_meta_right_bracket(char** src) 
 {
     return *src[0] == '}' ? new_metatoken(meta_right_bracket, unicode_substr((*src)++, 0, 0)) : NULL;
 }
 
+
+/**
+ * Match for left brace '[' used to start a new charset literal.
+ * 
+ * #left_brace = '[';
+ */
 obj* match_meta_left_brace(char** src) 
 {
-    return *src[0] == '[' ? new_metatoken(meta_left_brace, unicode_substr((*src)++, 0, 0)) : NULL;
+    obj* t = *src[0] == '[' ? new_metatoken(meta_left_brace, unicode_substr((*src)++, 0, 0)) : NULL;
+    if (t != NULL && peek_metascanner_state() == scan_meta_rule)
+    { 
+        push_metascanner_state(scan_charset_body); //enter charset context for body
+    }
+    return t;
 }
 
+
+/**
+ * Match for right brace ']' used to close a charset literal.
+ * 
+ * #right_brace = ']';
+ */
 obj* match_meta_right_brace(char** src) 
 {
-    return *src[0] == ']' ? new_metatoken(meta_right_brace, unicode_substr((*src)++, 0, 0)) : NULL;
+    obj* t = *src[0] == ']' ? new_metatoken(meta_right_brace, unicode_substr((*src)++, 0, 0)) : NULL;
+    if (t != NULL && peek_metascanner_state() == scan_charset_body)
+    { 
+        pop_metascanner_state(); //switch back to previous context (scan_meta_rule) after charset closed.
+    }
+    return t;
 }
 
+
+/**
+ * Match ascii whitespace characters which will be ignored by the meta scanner/parser.
+ * 
+ * #wschars = [\x9-\xD\x20];
+ */
 obj* match_whitespace(char** src) 
 {
     return is_whitespace_char(*src[0]) ? new_metatoken(whitespace, unicode_substr((*src)++, 0, 0)) : NULL;
 }
 
+
+/**
+ * Match for a single line comment, which will be ignored by the meta scanner/parser
+ * 
+ * #line_comment = '//' \U* '\n';
+ */
 obj* match_line_comment(char** src)
 {
     if ((*src)[0] == '/' && (*src)[1] == '/') //match for single line comments
@@ -429,9 +803,14 @@ obj* match_line_comment(char** src)
     return NULL;
 }
 
-//TODO->need to redo b/c we are tracking instances of nested brackets.
-//  basically, need to iterate through escape chars / normal chars 1 at a time, so that
-//  if we see a `/{` we know that the `/` belongs to the `{` and not something before, e.g. a `\\`
+
+/**
+ * Match for a block comment, which will be ignored by the meta scanner/parser
+ * Block comments allow for properly nested block comments, such that the comment
+ * only closes onces a matching closing '}/' exists for every opening '/{'.
+ * 
+ * #block_comment = '/{' (#block_comment | \U)* '}/';
+ */
 obj* match_block_comment(char** src) 
 {
     if ((*src)[0] == '/' && (*src)[1] == '{') //match for multiline comment
@@ -439,7 +818,7 @@ obj* match_block_comment(char** src)
         int stack = 1; //keep track of nesting of comments. should be 0 if all opened comments are closed
         int i = 2;
         while ((*src)[i] != 0 && stack != 0) //while not end of input, and not all comments have been closed
-        {
+        {   
             //search for opening and closing comment symbols
             if ((*src)[i] == '}' && (*src)[i+1] == '/') //closing comment
             {
@@ -469,13 +848,11 @@ obj* match_block_comment(char** src)
     return NULL;
 }
 
-//meta-meta parenthesis follow a meta-identifier and indicate a meta-function call
-//could this potentially be combined with the regular meta parenthesis, that matches inside of meta rules?
-// obj* match_meta_meta_parenthesis(char** src)
-// {
-//     return *src[0] == '(' || *src[0] == ')' ? new_metatoken(meta_meta_parenthesis, substr((*src)++, 0, 0)) : NULL;
-// }
 
+
+/**
+ * Remove the specified type of token from the vector of tokens.
+ */
 //remove all instances of a specific token type from a vector of tokens
 void remove_token_type(vect* v, metatoken_type type)
 {
@@ -487,56 +864,34 @@ void remove_token_type(vect* v, metatoken_type type)
     }
 }
 
+
+/**
+ * Peek at the next character after whitespace and comments
+ */
 //check if the next non-whitespace and non-comment character matches the specified character
-bool peek_char(char** src, uint32_t c)
+//TODO->probably redo this so it can handle if there's no explicitly identified character next
+uint32_t get_peek_char(char** src)
 {
-    char* head = *src;       //pointer to the head of the src string
-    char** head_ptr = &head; //new pointer to the pointer to the head of the string. so that peek() doesn't modify src
+    //separate pointers from src so peek doesn't modify it
+    char* head = *src;
+    char** head_ptr = &head;
+
+    //set context to peek
+    push_metascanner_state(scan_peek);
+
+    //capture each scanned object since they need to be freed
     obj* o;
-    metascanner_state saved_scan_state = scan_state; //save a copy of the current scanner state
 
-    scan_state = scan_peek;
+    //scan through until no more comment/whitespace tokens are returned
+    while ((*head_ptr)[0] != 0 && (o = scan(head_ptr))) { obj_free(o); }
 
-    while ((*head_ptr)[0] != 0)
-    {
-        if ((o = scan(head_ptr)))
-        {
-            metatoken* t = (metatoken*)o->data;
-            if (t->type != whitespace && t->type != comment)
-            {
-                scan_state = saved_scan_state;
-                return t->content[0] == c;
-            }
-        }
-    }
-    return false;
+    //return to the previous context
+    pop_metascanner_state();
+
+    return peek_unicode(head_ptr, 0, NULL);
 }
 
 
-//check if the next non-whitespace and non-comment character matches the specified character
-bool peek_type(char** src, metatoken_type type)
-{
-    char* head = *src;       //pointer to the head of the src string
-    char** head_ptr = &head; //new pointer to the pointer to the head of the string. so that peek() doesn't modify src
-    obj* o;
-    metascanner_state saved_scan_state = scan_state; //save a copy of the current scanner state
-
-    scan_state = scan_peek;
-
-    while ((*head_ptr)[0] != 0)
-    {
-        if ((o = scan(head_ptr)))
-        {
-            metatoken* t = (metatoken*)o->data;
-            if (t->type != whitespace && t->type != comment)
-            {
-                scan_state = saved_scan_state;
-                return t->type == type;
-            }
-        }
-    }
-    return false;
-}
 
 
 

@@ -33,8 +33,9 @@ void token_str(metatoken* t)
         case meta_string: printf("meta_string"); break;
         case meta_hex_number: printf("meta_hex_number"); break;
         case meta_dec_number: printf("meta_dec_number"); break;
-        case meta_escape: printf("meta_escape"); break;
-        case meta_charsetchar: printf("meta_charsetchar"); break;
+        // case meta_escape: printf("meta_escape"); break;
+        // case meta_charsetchar: printf("meta_charsetchar"); break;
+        case meta_charset: printf("meta_charset"); break;
         case meta_anyset: printf("meta_anyset"); break;
         case meta_epsilon: printf("meta_epsilon"); break;
         case meta_ampersand: printf("meta_ampersand"); break;

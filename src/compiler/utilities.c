@@ -273,7 +273,7 @@ bool is_whitespace_char(char c)
  */
 bool is_charset_char(uint32_t c)
 {
-    return !is_whitespace_char((char)c) && !(c == '-' || c == '[' || c == ']');
+    return !(c == 0) && !is_whitespace_char((char)c) && !(c == '-' || c == '[' || c == ']');
 }
 
 
@@ -503,6 +503,18 @@ uint32_t eat_utf8(char** str_ptr)
     
     printf("ERROR: eat_utf8() found ill-formed utf-8 character\n");
     return 0;
+}
+
+
+/**
+ * Return an allocated null terminated unicode string containing the given character.
+ */
+uint32_t* unicode_char_to_str(uint32_t c)
+{
+    uint32_t* str = malloc(2*sizeof(uint32_t));
+    str[0] = c;
+    str[1] = 0;
+    return str;
 }
 
 

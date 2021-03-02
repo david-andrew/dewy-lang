@@ -49,6 +49,7 @@ void put_unicode(uint32_t c);
 uint32_t eat_utf8(char** str_ptr);
 uint32_t peek_unicode(char** str_ptr, size_t index, size_t* delta);
 size_t utf8_length(char* str);
+uint32_t* unicode_char_to_str(uint32_t c);
 void unicode_str(uint32_t c);
 void ascii_or_hex_str(uint32_t c);
 
