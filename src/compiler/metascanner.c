@@ -26,6 +26,9 @@ scan_fn root_funcs[] = {
 
 //rules to scan while reading a meta rule
 scan_fn rule_funcs[] = {
+    match_whitespace,
+    match_line_comment,
+    match_block_comment,
     match_hashtag,
     match_meta_char,
     match_meta_single_quote,
@@ -390,7 +393,7 @@ obj* match_meta_hex_number(char** src)
 
         //Because hex is only ascii, can take unicode_substr directly. Skip prefix of hex number
         obj* t = new_metatoken(meta_hex_number, unicode_substr((*src), 2, i));
-        *src += i;
+        *src += i + 1;
         return t;
     }
     return NULL;
@@ -413,7 +416,7 @@ obj* match_meta_dec_number(char** src)
 
         //Because decimal number is ascii only, can take unicode_substr directly
         obj* t = new_metatoken(meta_dec_number, unicode_substr((*src), 0, i));
-        *src += i;
+        *src += i + 1;
         return t;
     }
     return NULL;
@@ -699,8 +702,9 @@ obj* match_line_comment(char** src)
         //scan through comment to either a newline or null terminator character
         int i = 2;
         while ((*src)[i] != 0 && (*src)[i] != '\n') { i++; }
-        if ((*src)[i] == 0) { i -= 1; } //if null terminator, don't include in comment token
-        obj* t = new_metatoken(comment, utf8_substr(*src, 0, i));
+        // i -= 1; //remove newline or null terminator at the end
+        // if ((*src)[i] == 0) { i -= 1; } //if null terminator, don't include in comment token
+        obj* t = new_metatoken(comment, utf8_substr(*src, 0, i-1));
         *src += i + 1;
         return t;
     }
@@ -773,7 +777,6 @@ void remove_token_type(vect* v, metatoken_type type)
  * Peek at the next character after whitespace and comments
  */
 //check if the next non-whitespace and non-comment character matches the specified character
-//TODO->probably redo this so it can handle if there's no explicitly identified character next
 uint32_t get_peek_char(char** src)
 {
     //separate pointers from src so peek doesn't modify it

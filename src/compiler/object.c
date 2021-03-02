@@ -88,6 +88,17 @@ obj* new_string(char* s)
     return S;
 }
 
+obj* new_unicode_string(uint32_t* s)
+{
+    obj* S = malloc(sizeof(obj));
+    S->type = UnicodeString_t;
+    S->size = unicode_strlen(s);
+    uint32_t** s_ptr = malloc(sizeof(uint32_t*));
+    *s_ptr = s;
+    S->data = (void*)s_ptr;
+    return S;
+}
+
 /*
     Create a new string object from a non-allocated string
 */
@@ -235,7 +246,7 @@ void obj_print(obj* o)
         case Integer_t: printf("%ld", *(int64_t*)o->data); break;
         case UInteger_t: printf("%lu", *(uint64_t*)o->data); break;
         case String_t: printf("%s", *(char**)o->data); break;
-        case MetaToken_t: token_str((metatoken*)o->data); break;
+        case MetaToken_t: metatoken_str((metatoken*)o->data); break;
         case Vector_t: vect_str(*(vect**)o->data); break;
         case Dictionary_t: dict_str(*(dict**)o->data); break;
         case Set_t: set_str(*(set**)o->data); break;
@@ -336,7 +347,7 @@ void obj_free(obj* o)
                 free(o->data);
                 break;
             }
-            case MetaToken_t: token_free((metatoken*)o->data); break; 
+            case MetaToken_t: metatoken_free((metatoken*)o->data); break; 
             case Vector_t: 
             {
                 vect_free(*(vect**)o->data); 

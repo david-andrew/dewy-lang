@@ -26,7 +26,7 @@ obj* new_metatoken(metatoken_type type, uint32_t* content)
 /**
  * Print out a string for each token type.
  */
-void token_str(metatoken* t)
+void metatoken_str(metatoken* t)
 {
     switch (t->type)
     {
@@ -60,14 +60,14 @@ void token_str(metatoken* t)
         printenum(whitespace)
         printenum(comment)
     }
-    printf(" `");
+    printf("```\n");
     uint32_t c;
     uint32_t* c_ptr = t->content;
     while ((c = *c_ptr++)) { put_unicode(c); }
-    printf("`");
+    printf("\n```\n");
 }
 
-void token_free(metatoken* t)
+void metatoken_free(metatoken* t)
 {
     free(t->content);
     free(t);

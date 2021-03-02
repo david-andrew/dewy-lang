@@ -14,6 +14,8 @@ char* substr(char* str, int start, int stop);
 uint32_t* unicode_substr(char* str, int start, int stop);
 uint32_t* utf8_substr(char* str, int start, int stop);
 char* clone(char* string);
+size_t unicode_strlen(uint32_t* string);
+uint32_t* clone_unicode(uint32_t* string);
 char* concatenate(char* left, char* right);
 char* read_file(char* filename);
 

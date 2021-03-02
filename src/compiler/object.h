@@ -17,6 +17,7 @@ typedef enum
     Integer_t, 
     UInteger_t,
     String_t,
+    UnicodeString_t,
     MetaToken_t,
     Vector_t,
     Dictionary_t,
@@ -48,6 +49,7 @@ obj* new_char(uint32_t c);
 obj* new_int(int64_t i);
 obj* new_uint(uint64_t u);
 obj* new_string(char* s);       //new string object, from an allocated string
+obj* new_unicode_string(uint32_t* s);
 obj* new_ustr(char* s);         //new string object from a non-allocated string
 
 

@@ -285,8 +285,8 @@ obj* dict_get_hashtag_key(dict* d, obj* hashtag_obj)
     assert(hashtag_obj->type == MetaToken_t);
     //create a string object key from the token
     metatoken* hashtag_token = (metatoken*)hashtag_obj->data;
-    char* identifier = clone(hashtag_token->content);
-    obj* key = new_string(identifier);
+    uint32_t* identifier = clone_unicode(hashtag_token->content);
+    obj* key = new_unicode_string(identifier);
 
     //get the value from the dict using the string key
     obj* value = dict_get(d, key);

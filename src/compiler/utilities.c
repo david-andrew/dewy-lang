@@ -128,6 +128,28 @@ char* clone(char* string)
     // return copy;
 }
 
+size_t unicode_strlen(uint32_t* string)
+{
+    size_t length = 0;
+    while (string[length]) { length++; }
+    return length;
+}
+
+/**
+ * Clone a null terminated unicode string.
+ */
+uint32_t* clone_unicode(uint32_t* string)
+{
+    //get length of string
+    size_t length = unicode_strlen(string);
+
+    //perform copy
+    uint32_t* copy = malloc((length + 1) * sizeof(uint32_t));
+    uint32_t* ptr = copy;
+    while ((*ptr++ = *string++));
+    return copy;
+}
+
 /**
     concatenate 2 strings together
 */
