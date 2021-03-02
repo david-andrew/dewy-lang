@@ -85,6 +85,9 @@ scan_fn double_quote_string_funcs[] = {
 scan_fn metafunc_body_funcs[] = {
     //TBD what exactly is allowed inside of a meta function call. for now we are only allowing meta-identifiers
     //potentially allow {} blocks, inside of which, normal dewy expressions can be called, just like string interpolation    
+    match_whitespace,
+    match_line_comment,
+    match_block_comment,
     match_meta_left_parenthesis,
     match_meta_right_parenthesis,
     match_hashtag,
@@ -97,16 +100,6 @@ scan_fn scan_peek_funcs[] = {
     match_block_comment,
 };
 
-
-
-//save the lengths of each of these arrays
-// const size_t root_funcs_length = sizeof(root_funcs) / sizeof(scan_fn);
-// const size_t rule_funcs_length = sizeof(rule_funcs) / sizeof(scan_fn);
-// const size_t charset_funcs_length = sizeof(charset_funcs) / sizeof(scan_fn);
-// const size_t single_quote_string_funcs_length = sizeof(single_quote_string_funcs) / sizeof(scan_fn);
-// const size_t double_quote_string_funcs_length = sizeof(double_quote_string_funcs) / sizeof(scan_fn);
-// const size_t metafunc_body_funcs_length = sizeof(metafunc_body_funcs) / sizeof(scan_fn);
-// const size_t scan_peek_funcs_length = sizeof(scan_peek_funcs) / sizeof(scan_fn);
 
 
 //Singleton stack for storing the state of the metascanner
@@ -322,6 +315,7 @@ obj* match_meta_single_quote(char** src)
     return t;
 }
 
+
 /**
  * Match single char contained in a single quote string.
  * Implicetly don't match for comments or escapes by matching those rules first.
@@ -378,96 +372,6 @@ obj* match_meta_double_quote_char(char** src)
     }
     return NULL;
 }
-
-
-// /**
-//  * A string of 0, or 2 or more characters enclosed in '' or "".
-//  * Strings of length 1 are implicitly ignored by calling match_meta_char() first.
-//  * 
-//  * #string = '"' (\U - '"' | #escape)2* '"';
-//  * #string = "'" (\U - "'" | #escape)2* "'";
-//  */
-// obj* match_meta_string(char** src) 
-// {
-//     char quote; //store the type of quote, single (') or double (")
-//     if ((quote = (*src)[0]) == '\'' || quote == '"')
-//     {
-//         //scan for matching \' or \" to close the string, or null terminator, which indicates unclosed string
-//         //also continue scan if the character before closing quote is a '\\' which indicates escape char
-//         int i = 1;
-//         while ((*src)[i] != 0 && ((*src)[i] != quote || (*src)[i-1] == '\\')) { i++; }
-//         if ((*src)[i] == quote)
-//         {
-//             //since string needs to be in unicode, but we scanned chars, use utf8_substr to convert
-//             obj* t = new_metatoken(meta_string, utf8_substr(*src, 1, i-1)); //ignore string quotes in string content
-//             *src += i + 1;
-//             return t;
-//         }
-//         else 
-//         {
-//             printf("ERROR: reached the end of input while scanning 'meta string'\n");
-//         }
-//     }
-//     return NULL;
-// }
-
-
-// /**
-//  * Match a unicode character set, i.e. individual characters and character ranges.
-//  * Characters allowed are all unicode excluding '-', '[', or ']', and whitespace (whitespace is ignored).
-//  * Also can contain escaped characters, and hex numbers.
-//  * 
-//  * #charsetchar = \U - [\-\[\]] - #ws;
-//  * #escape = '\\' \U;
-//  * #item = #charsetchar | #escape | #hex;
-//  * #charset = '[' (#ws #item (#ws '-' #ws #item)? #ws)* ']';
-//  */
-// obj* match_meta_charset(char** src)
-// {
-//     if ((*src)[0] == '[') //beginning of a charset
-//     {
-//         size_t i = 0;
-//         char* head = *src + 1;
-//         // char** head_ptr = &head;
-//         while (head[i] != 0)
-//         {
-//             if (is_whitespace_char(head[i]))
-//             {
-//                 i++;
-//                 continue;
-//             }
-//             if (head[i] == '\\' && is_hex_escape(head[i+1] && is_hex_digit(head[i+2])))
-//             {
-//                 i+=2;
-//                 while (is_hex_digit(head[i])) i++;
-//                 continue;
-//             }
-//             //if whitespace delta++ continue
-//             //if hex delta++ continue
-//             //if escape delta++ continue
-//             //if charsetchar delta++ continue
-//             //if minus delta++ continue
-//             break;
-//         }
-//         //assert that last element is closing bracket ]
-//         //LOOP
-//         //match for whitespace
-//         //match for hex   
-//         //match for escapes
-//         //match for any charset chars
-//         //match for minus
-
-//     }
-
-//     // size_t delta;
-//     // if (is_charset_char(peek_unicode(src, 0, &delta)))
-//     // {
-//     //     obj* t = new_metatoken(meta_charsetchar, unicode_substr(*src, 0, 1));
-//     //     *src += delta;
-//     //     return t;
-//     // }
-//     // return NULL;
-// }
 
 
 /**
