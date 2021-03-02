@@ -30,12 +30,14 @@ void token_str(metatoken* t)
     {
         case hashtag: printf("hashtag"); break; //hashtag not allowed in this state
         case meta_char: printf("meta_char"); break;
-        case meta_string: printf("meta_string"); break;
+        case meta_single_quote: printf("meta_single_quote"); break;
+        case meta_single_quote_char: printf("meta_single_quote_char"); break;
+        case meta_double_quote: printf("meta_double_quote"); break;
+        case meta_double_quote_char: printf("meta_double_quote_char"); break;
         case meta_hex_number: printf("meta_hex_number"); break;
         case meta_dec_number: printf("meta_dec_number"); break;
-        // case meta_escape: printf("meta_escape"); break;
-        // case meta_charsetchar: printf("meta_charsetchar"); break;
-        case meta_charset: printf("meta_charset"); break;
+        case meta_escape: printf("meta_escape"); break;
+        case meta_charset_char: printf("meta_charset_char"); break;
         case meta_anyset: printf("meta_anyset"); break;
         case meta_epsilon: printf("meta_epsilon"); break;
         case meta_ampersand: printf("meta_ampersand"); break;

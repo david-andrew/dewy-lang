@@ -10,7 +10,6 @@ typedef enum
 {
     hashtag,
     meta_char,
-    // meta_string,
     meta_single_quote,
     meta_single_quote_char,
     meta_double_quote,
@@ -19,7 +18,6 @@ typedef enum
     meta_dec_number,
     meta_escape,
     meta_charset_char,
-    // meta_charset,
     meta_anyset,
     meta_epsilon,
     meta_ampersand,
