@@ -41,10 +41,10 @@ char* substr(char* str, int start, int stop)
     size_t stop_idx = dewy_index(stop, length);
 
     //compute length of substring
-    size_t substr_length = (start_idx < stop_idx) ? stop_idx - start_idx : 0;
+    size_t substr_length = (start_idx < stop_idx) ? stop_idx - start_idx + 1 : 0;
     // printf("substring length: %d\n", substr_length);
 
-    //perform copy
+    //perform copy. Leave room for null terminator at the end
     char* substr = malloc((substr_length + 1) * sizeof(char));
     char* ptr = substr;
     for (size_t i = start_idx; i <= stop_idx; i++)
@@ -103,12 +103,12 @@ uint32_t* utf8_substr(char* str, int start, int stop)
     size_t length = utf8_length(raw_str);
 
     //get the unicode version of the string by taking a unicode substring of the whole length
-    uint32_t* substr = unicode_substr(raw_str, 0, length-1);
+    uint32_t* s = unicode_substr(raw_str, 0, length-1);
     
     //free the temporary raw string
     free(raw_str);
 
-    return substr;
+    return s;
 }
 
 /**

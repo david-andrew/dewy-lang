@@ -711,10 +711,9 @@ obj* match_line_comment(char** src)
         //scan through comment to either a newline or null terminator character
         int i = 2;
         while ((*src)[i] != 0 && (*src)[i] != '\n') { i++; }
-        // i -= 1; //remove newline or null terminator at the end
-        // if ((*src)[i] == 0) { i -= 1; } //if null terminator, don't include in comment token
-        obj* t = new_metatoken(comment, utf8_substr(*src, 0, i-1));
-        *src += i + 1;
+        obj* t = new_metatoken(comment, utf8_substr(*src, 0, i-1)); //don't include null terminator or newline
+        *src += i;
+        if ((*src)[0] != 0) { (*src)++; } //if not at null terminator, progress past newline
         return t;
     }
     return NULL;
@@ -753,8 +752,8 @@ obj* match_block_comment(char** src)
         if (stack == 0) //check to make sure all nested comments were closed
         {
             //return token
-            obj* t = new_metatoken(comment, utf8_substr(*src, 0, i));
-            *src += i + 1;
+            obj* t = new_metatoken(comment, utf8_substr(*src, 0, i-1));
+            *src += i;
             return t;
         }
         else //reached null terminator without closing all nested comments

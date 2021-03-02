@@ -60,11 +60,11 @@ void metatoken_str(metatoken* t)
         printenum(whitespace)
         printenum(comment)
     }
-    printf("```\n");
+    printf("(`");
     uint32_t c;
     uint32_t* c_ptr = t->content;
     while ((c = *c_ptr++)) { put_unicode(c); }
-    printf("\n```\n");
+    printf("`)\n");
 }
 
 void metatoken_free(metatoken* t)
