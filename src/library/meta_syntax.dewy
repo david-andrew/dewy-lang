@@ -7,8 +7,8 @@
 #eps = \x3f5 | '\\e';                                       // ϵ or \e indicates empty element, i.e. nullable
 //#wschar = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000]; //ascii + unicode whitespace chars
 #wschar = [\x9-\xD\x20];                                    // ascii whitespace characters.
-#line_comment = '//' \U* '\n';                              // single line comment
-#block_comment = '/{' (#block_comment | \U)* '}/';          // block comment, with allowed nested block comments.
+#line_comment = '/' '/' \U* '\n';                           // single line comment
+#block_comment = '/' '{' (#block_comment | \U)* '}/';          // block comment, with allowed nested block comments.
 #ws = #wschar*;                                             // optional whitespace sequence
 #anyset = '\\' [uUxX];                                      // \U, \u, \X, or \x used to indicate any unicode character
 #hex = '\\' [uUxX] [0-9a-fA-F]+;                            // hex number literal. Basically skipping the number part makes it #any
