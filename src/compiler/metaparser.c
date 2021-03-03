@@ -1,5 +1,5 @@
-#ifndef PARSER_C
-#define PARSER_C
+#ifndef METAPARSER_C
+#define METAPARSER_C
 
 #include <stdio.h>
 #include <string.h>
@@ -8,13 +8,13 @@
 
 #include "utilities.h"
 #include "object.h"
-#include "token.h"
+#include "metatoken.h"
 #include "vector.h"
 #include "dictionary.h"
 #include "set.h"
 #include "mast.h"
-#include "scanner.h"
-#include "parser.h"
+#include "metascanner.h"
+#include "metaparser.h"
 
 //TODO
 // typedef struct
@@ -42,7 +42,7 @@ int get_next_real_token(vect* tokens, int i)
     //if the current token isn't whitespace or a comment, return its index
     while (i < vect_size(tokens))
     {
-        token* t = (token*)vect_get(tokens, i)->data;
+        metatoken* t = (metatoken*)vect_get(tokens, i)->data;
         if (t->type != whitespace && t->type != comment) { return i; }
         i++;
     }
@@ -53,13 +53,13 @@ int get_next_real_token(vect* tokens, int i)
 
 //return the index of the first occurance of the specified token type.
 //returns -1 if not present in the vector
-int get_next_token_type(vect* tokens, token_type type, int i)
+int get_next_token_type(vect* tokens, metatoken_type type, int i)
 {
     //while we haven't reached the end of the tokens stream
     //if the current token is the desired type, return its index
     while (i < vect_size(tokens))
     {
-        token* t = (token*)vect_get(tokens, i)->data;
+        metatoken* t = (metatoken*)vect_get(tokens, i)->data;
         if (t->type == type) { return i; }
         i++;
     }
@@ -72,12 +72,12 @@ int get_next_token_type(vect* tokens, token_type type, int i)
     return the leftmost instance of the specified token type
     skips over any (), {}, or [] groups contained in the vector
 */
-int get_level_first_token_type(vect* tokens, token_type type)
+int get_level_first_token_type(vect* tokens, metatoken_type type)
 {
     int i = 0;
     while (i < vect_size(tokens))
     {
-        token* t = (token*)vect_get(tokens, i)->data;
+        metatoken* t = (metatoken*)vect_get(tokens, i)->data;
         if (t->type == type) { return i; }
         else if (t->type == meta_left_parenthesis || t->type == meta_left_bracket || t->type == meta_left_brace)
         {
@@ -108,8 +108,8 @@ int get_level_first_adjacent(vect* tokens)
 
     if ((i = get_next_real_token(tokens, 0)) != -1 && get_next_real_token(tokens, i+1) != -1)
     {
-        token* t = (token*)vect_get(tokens, i)->data;
-        if (t->type == hashtag || t->type == meta_string || t->type == meta_hex_number)
+        metatoken* t = (metatoken*)vect_get(tokens, i)->data;
+        if (t->type == hashtag || /*t->type == meta_string ||*/ t->type == meta_hex_number)
         {
             return i + 1;
         }
@@ -139,7 +139,7 @@ void update_meta_symbols(vect* tokens, dict* meta_symbols)
     if (head_idx < 0) { return; }
  
     //if the first token isn't a hashtag then this isn't a meta-rule
-    token* head = (token*)vect_get(tokens, head_idx)->data;
+    metatoken* head = (metatoken*)vect_get(tokens, head_idx)->data;
     if (head->type != hashtag) { return; }
         
     //get the index of the next real token
@@ -147,13 +147,13 @@ void update_meta_symbols(vect* tokens, dict* meta_symbols)
     if (tail_idx < 0) { return; }
 
     //if the next token isn't a meta_equals_sign this isn't a meta-rule
-    token* tail = (token*)vect_get(tokens, tail_idx)->data;
+    metatoken* tail = (metatoken*)vect_get(tokens, tail_idx)->data;
     if (tail->type != meta_equals_sign) { return; }
 
     //search for the first occurance of a semicolon
     tail_idx = get_next_token_type(tokens, meta_semicolon, tail_idx+1);
     if (tail_idx < 0) { return; }
-    tail = (token*)vect_get(tokens, tail_idx)->data;
+    tail = (metatoken*)vect_get(tokens, tail_idx)->data;
     // assert(tail->type == meta_semicolon);
 
     //free all tokens up to the start of the rule (as they should be whitespace and comments)
@@ -163,7 +163,7 @@ void update_meta_symbols(vect* tokens, dict* meta_symbols)
     }
 
     //first token in the tokens stream should be the meta_identifier
-    token* rule_identifier_token = (token*)vect_dequeue(tokens)->data;
+    metatoken* rule_identifier_token = (metatoken*)vect_dequeue(tokens)->data;
 
     //collect together all tokens from head to tail and store in the symbol table, as a vect
     vect* rule_body = new_vect();
@@ -202,14 +202,14 @@ void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_tables, dict* 
     if (head_idx < 0) { return; }
 
     //if the first token isn't the #lex hashtag then this isn't a call to #lex()
-    token* head = (token*)vect_get(tokens, head_idx)->data;
+    metatoken* head = (metatoken*)vect_get(tokens, head_idx)->data;
     if (head->type != hashtag) { return; }
     if (strcmp(head->content, "#lex") != 0) { return; }
 
     //if the next token isn't an opening "(" meta_meta_parenthesis this isn't a call to #lex()
     int tail_idx = head_idx + 1;
     if (tail_idx >= vect_size(tokens)) { return; }
-    token* tail = (token*)vect_get(tokens, tail_idx)->data;
+    metatoken* tail = (metatoken*)vect_get(tokens, tail_idx)->data;
     if (tail->type != meta_left_parenthesis) 
     { 
         printf("ERROR: #lex keyword followed by non-parenthesis token [");
@@ -265,14 +265,14 @@ void create_lex_rule(vect* tokens, dict* meta_symbols, dict* meta_tables, dict* 
         ast_generate_trans_table(rule_ast, &accepts, &table);
         
         //create references to the transition table and accepting states for this rule
-        obj* identifier = new_ustr(((token*)hashtag_obj->data)->content);
+        obj* identifier = new_ustr(((metatoken*)hashtag_obj->data)->content);
         // printf("adding "); obj_print(identifier); printf(" to tables and accepts dictionaries\n");
         dict_set(meta_tables, obj_copy(identifier), new_dict_obj(table));
         dict_set(meta_accepts, obj_copy(identifier), new_set_obj(accepts));
         obj_free(identifier);
 
 
-        printf("%s = ", ((token*)hashtag_obj->data)->content); ast_str(rule_ast); printf("\n");
+        printf("%s = ", ((metatoken*)hashtag_obj->data)->content); ast_str(rule_ast); printf("\n");
 
     }
 
@@ -408,7 +408,7 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
     //check for group wrap
     if (find_closing_pair(tokens, 0) == vect_size(tokens) - 1)
     {
-        token* t = (token*)vect_get(tokens, 0)->data;
+        metatoken* t = (metatoken*)vect_get(tokens, 0)->data;
         if (t->type == meta_left_parenthesis)
         {
             //since parenthesis do nothing, simply construct a rule from their contents
@@ -445,20 +445,20 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
         //recursively build the left and right side of the ast
         return new_ast_or_obj(build_ast(left_tokens, meta_symbols), build_ast(tokens, meta_symbols));
     }
-    else if ((split_idx = get_level_first_token_type(tokens, meta_comma)) != -1)
-    {
-        //split into or node of left and right tokens lists
-        vect* left_tokens = new_vect();
+    // else if ((split_idx = get_level_first_token_type(tokens, meta_comma)) != -1)
+    // {
+    //     //split into or node of left and right tokens lists
+    //     vect* left_tokens = new_vect();
         
-        //remove all tokens up to split_idx from tokens and push into left_tokens
-        for (int i = 0; i < split_idx; i++) { vect_enqueue(left_tokens, vect_dequeue(tokens)); }
+    //     //remove all tokens up to split_idx from tokens and push into left_tokens
+    //     for (int i = 0; i < split_idx; i++) { vect_enqueue(left_tokens, vect_dequeue(tokens)); }
 
-        //free the , (cat) token
-        obj_free(vect_dequeue(tokens));
+    //     //free the , (cat) token
+    //     obj_free(vect_dequeue(tokens));
 
-        //recursively build the left and right side of the ast
-        return new_ast_cat_obj(build_ast(left_tokens, meta_symbols), build_ast(tokens, meta_symbols));
-    }
+    //     //recursively build the left and right side of the ast
+    //     return new_ast_cat_obj(build_ast(left_tokens, meta_symbols), build_ast(tokens, meta_symbols));
+    // }
     else if ((split_idx = get_level_first_adjacent(tokens)) != -1)
     {
         //split into or node of left and right tokens lists
@@ -477,15 +477,15 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
     //build cat sequence from string
     if (vect_size(tokens) == 1)
     {
-        token* t = (token*)vect_get(tokens, 0)->data;
+        metatoken* t = (metatoken*)vect_get(tokens, 0)->data;
         switch (t->type)
         {
-            case meta_string:
-            {
-                obj* ast = build_string_ast_obj(t);
-                obj_free(vect_dequeue(tokens));
-                return ast;
-            }
+            // case meta_string:
+            // {
+            //     obj* ast = build_string_ast_obj(t);
+            //     obj_free(vect_dequeue(tokens));
+            //     return ast;
+            // }
             case hashtag: 
             {
                 obj* id = new_string(clone(t->content));   
@@ -526,8 +526,8 @@ obj* build_ast(vect* tokens, dict* meta_symbols)
 int find_closing_pair(vect* tokens, int start)
 {
     obj* t = vect_get(tokens, start);
-    token_type opening = ((token*)t->data)->type;
-    token_type closing;
+    metatoken_type opening = ((metatoken*)t->data)->type;
+    metatoken_type closing;
     switch (opening) //determine matching closing type based on opening type
     {
         case meta_left_brace: { closing = meta_right_brace; break; }
@@ -540,7 +540,7 @@ int find_closing_pair(vect* tokens, int start)
     while (stop < vect_size(tokens))
     {
         obj* t_obj = vect_get(tokens, stop);
-        token* t = (token*)t_obj->data;
+        metatoken* t = (metatoken*)t_obj->data;
         if (t->type == opening) { stack--; }
         else if (t->type == closing) { stack++; }
         if (stack == 0) { return stop; }
@@ -557,7 +557,7 @@ int find_closing_pair(vect* tokens, int start)
 /**
     construct a series of cat nodes representing a string of characters
 */
-obj* build_string_ast_obj(token* t)
+obj* build_string_ast_obj(metatoken* t)
 {
     char* str = t->content;
     
