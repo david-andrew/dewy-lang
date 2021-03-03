@@ -100,5 +100,37 @@ Precedence levels
 - prefer
 - precedence level + associativity
 
+//// Raw-ish syntax for rnglr tree filters ////
 
+//Follow restriction (e.g. force longest matched identifier)
+#I = [A-Za-z][A-Za-z0-9_]*;
+#I -/- [A-Za-z0-9_]; //also follow restriction could be whole strings/longer
+
+//Reject filter (e.g. reserved words are not identifiers)
+#I = [A-Za-z][A-Za-z0-9_]*;
+#I = "public"{reject};
+
+//prefer / avoid filters (i.e. multiple ambiguous overlapping trees, which to prefer/avoid )
+#I = [A-Za-z][A-Za-z0-9_]*;
+#I = "public"{prefer}
+
+//priority filter (i.e. precedence and associativity)
+#E = #E '->' #E{right} > #E = #E "or" #E{left};
+
+
+//// Proposed alterations of each ////
+
+//Follow restriction
+#I = [A-Za-z][A-Za-z0-9_]* -/- [A-Za-z0-9_];
+#rule = #body_expr / #non_follow_expr;
+
+//Reject filter
+#I = [A-Za-z][A-Za-z0-9_]* - "public";
+#rule = #body_expr - #reject_expr;
+
+//prefer/avoid filter
+//TODO...
+
+//priority filter
+//TODO...
 }/

@@ -39,10 +39,16 @@ metascanner.o: metascanner.c metascanner.h
 parser.o: parser.c parser.h
 	clang -c -o parser.o parser.c
 
-test: unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o mast.o
-	clang -o unit_test unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o mast.o
-	./unit_test
-	rm unit_test
+unit_test.o: unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o mast.o charset.o metascanner.o
+	clang -o unit_test.o unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o mast.o charset.o metascanner.o
+
+test: unit_test.o
+	./unit_test.o
+	rm unit_test.o
+
+valgrind_test: unit_test.o
+	valgrind ./unit_test.o
+	rm unit_test.o
 
 dewy_compiler_compiler.o: dewy_compiler_compiler.c
 	clang -c -o dewy_compiler_compiler.o dewy_compiler_compiler.c
