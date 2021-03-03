@@ -67,7 +67,6 @@ int dict_tests()
 int set_tests()
 {   
     #define I(v) new_int(v)
-    // #define U(v) new_uint(v)
 
     set* S0 = new_set();
 
@@ -75,12 +74,6 @@ int set_tests()
     set_add(S0, I(4738));
     set_add(S0, I(10));
     set_add(S0, I(13));
-
-    // obj* i0 = new_uint(5);
-    // obj* i1 = new_uint(4738);
-    // obj* i2 = new_uint(10);
-    // obj* i3 = new_uint(13);
-    // obj* i4 = new_uint(42);
 
     //check that all members added are in the set
     #define assert_contains(S, v, r) {      \
@@ -108,12 +101,6 @@ int set_tests()
     assert_contains(S1, 13, true)
     assert_contains(S1, 42, true)
     assert_contains(S1, 546876, true)
-    // assert(!set_contains(S1, i0));
-    // assert(!set_contains(S1, i1));
-    // assert(set_contains(S1, i2));
-    // assert(set_contains(S1, i3));
-    // assert(set_contains(S1, i4));
-    // assert(set_contains(S1, i5));
 
     //S0 should be different from S1
     assert(!set_equals(S0, S1));
@@ -129,12 +116,6 @@ int set_tests()
     assert_contains(S2, 13, true)
     assert_contains(S2, 42, false)
     assert_contains(S2, 546876, false)
-    // assert(!set_contains(S2, i0));
-    // assert(!set_contains(S2, i1));
-    // assert(set_contains(S2, i2));
-    // assert(set_contains(S2, i3));
-    // assert(!set_contains(S2, i4));
-    // assert(!set_contains(S2, i5));
 
     //check the values from the union
     assert_contains(S3, 5, true)
@@ -143,12 +124,6 @@ int set_tests()
     assert_contains(S3, 13, true)
     assert_contains(S3, 42, true)
     assert_contains(S3, 546876, true)
-    // assert(set_contains(S3, i0));
-    // assert(set_contains(S3, i1));
-    // assert(set_contains(S3, i2));
-    // assert(set_contains(S3, i3));
-    // assert(set_contains(S3, i4));
-    // assert(set_contains(S3, i5));
 
     //create a set identical to S0, and check equality
     set* S4 = new_set();
