@@ -21,16 +21,25 @@ int main(int argc, char* argv[])
     char* head = source;
 
     //set up structures for the sequence of scanning/parsing
-    // vect* tokens = new_vect();
+    vect* tokens = new_vect();
 
     obj* t = NULL;
 
     while (*head != 0 && (t = scan(&head)) != NULL)
     {
-        metatoken_str((metatoken*)t->data);
-        obj_free(t);
+        vect_push(tokens, t);
     }
 
+    remove_token_type(tokens, whitespace);
+    remove_token_type(tokens, comment);
+
+    for (size_t i = 0; i < vect_size(tokens); i++)
+    {
+        t = vect_get(tokens, i);
+        metatoken_str((metatoken*)t->data);
+    }
+
+    vect_free(tokens);
     free(source);
     free_metascanner_state_stack();
 }

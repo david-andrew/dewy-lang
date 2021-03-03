@@ -50,8 +50,11 @@ valgrind_test: unit_test.o
 	valgrind ./unit_test.o
 	rm unit_test.o
 
+scratch:
+	clang scratch.c charset.c utilities.c metatoken.c metascanner.c vector.c object.c set.c dictionary.c mast.c
+
 dewy_compiler_compiler.o: dewy_compiler_compiler.c
 	clang -c -o dewy_compiler_compiler.o dewy_compiler_compiler.c
 
 clean:
-	rm -rf *.o unit_test dewy
+	rm -rf *.o unit_test dewy a.out

@@ -1,6 +1,7 @@
 #ifndef OBJECT_H
 #define OBJECT_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
