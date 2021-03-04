@@ -43,6 +43,7 @@ bool charset_equals(charset* a, charset* b);
 int charset_get_c_index(charset* s, uint32_t c);
 bool charset_contains_c(charset* s, uint32_t c);
 bool charset_contains_r(charset* s, urange r);
+bool charset_contains_charset(charset* superset, charset* subset);
 bool urange_contains_c(urange r, uint32_t c);
 void charset_str(charset* s);
 void charset_repr(charset* s);

@@ -394,6 +394,21 @@ bool charset_contains_r(charset* s, urange r)
 }
 
 /**
+ * Determine if `superset` is an actual superset of the `subset` charset
+ * i.e. does `superset` contain all unicode characters in `subset`
+ */
+bool charset_contains_charset(charset* superset, charset* subset)
+{
+    for (size_t i = 0; i < subset->size; i++)
+    {
+        if (!charset_contains_r(superset, subset->ranges[i]))
+            return false;
+    }
+    return true;
+}
+
+
+/**
  * Check if the unicode character falls withing the given range.
  */
 bool urange_contains_c(urange r, uint32_t c)
