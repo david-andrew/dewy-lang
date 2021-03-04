@@ -23,10 +23,11 @@ typedef enum
     Vector_t,
     Dictionary_t,
     Set_t,
-    ASTCat_t,
-    ASTOr_t,
-    ASTStar_t,
-    ASTLeaf_t,
+    MetaAST_t,
+    // ASTCat_t,
+    // ASTOr_t,
+    // ASTStar_t,
+    // ASTLeaf_t,
 } obj_type;
 
 /**
