@@ -1,0 +1,419 @@
+/{ 
+NOTES:
+- every #hashtag gets a unique integer ID
+- every production rule gets a unique integer ID
+---> `|` separates different production rules for the same #hashtag,
+      so each of those gets their own ID 
+- every grouping in a production gets converted to an internal rule
+---> tbd but should probably check for existing rules that match the internal rule...
+- all strings ought to be combined completely, allowing for arbitrary length lookahead (up to length of string)
+---> need to handle cases where GOTO(, substring), i.e. check all strings for possibility of matching substring
+---> also what about charsets where a character in the set starts off a substring we're checking? should probably split up into separate GOTOs, 1 for character in string, 1 for rest of charset
+
+Generating item sets
+Generate first item set:
+1. Pick augmented start rule to execute
+2. put dot at left of start rule production
+3. add rules/productions to get closure of rules with dot next to a #hashtag
+4. repeat 3. until no more rules/productions added
+5. add this item set to the list of item sets (i.e. this is the first, I0)
+
+Generate GOTO item sets
+6.  start with I# = I0
+7.  for every rule/production in I# that has a dot left of a terminal
+8.    GOTO(I#, terminal) (i.e. progress the dot past all rules in I# with that terminal)
+9.      compute the closure for all rules in this new item set
+10.     add this item set to the list of item sets
+11. for every rule/production in I# that has a dot left of a non-terminal
+12.   GOTO(I#, nonterminal) (i.e. progress the dot past all rules in I# with that nonterminal)
+13.     compute the closure for all rules in this new item set
+14.     add this item set to the list of item sets
+15. for every rule/production in I# that has a dot left of a nullable non-terminal/terminal
+16.    GOTO(I#, ϵ) (i.e. progress past all nullable sections in the rule. if multiple concatenated are nullable, copy rule with dot after each nullable)
+17.      compute the closure for all rules in this new item set
+18.      add this item set to the list of item sets
+19. set I# to the next item set, and go back to 7.
+
+
+}/
+
+
+#eps = \x3f5;
+#eps = 'ϵ';
+#eps = '\\e';
+#wschar = [\x9-\xD\x20];
+#line_comment = '/' '/' (\U - '\n')* '\n';
+#block_string = \U* - \U* '}/';
+#block_comment = '/' '{' #__0* '}/';
+#__0 = #block_comment;
+#__0 = #block_string;
+#ws = #__1*;
+#__1 = #wschar;
+#__1 = #line_comment;
+#__1 = #block_comment;
+#anyset = '\\' [uUxX];
+#hex = '\\' [uUxX] [0-9a-fA-F]+;
+#number = [0-9]+;
+#charsetchar = \U - [\-\[\]] - #wschar;
+#item = #charsetchar;
+#item = #escape;
+#item = #hex;
+#charset = '[' #__2* ']';
+#__2 = #ws #item #__3? #ws;
+#__3 = #ws '-' #ws #item;
+#group = '(' #ws #expr #ws ')';
+#capture = '{' #ws #expr #ws '}';
+#char = '"' #__4 '"';
+#__4 = \U - '"';
+#__4 = #escape;
+#char = "'" #__5 "'";
+#__5 = \U - "'";
+#__5 = #escape;
+#string = '"' (#__4)2* '"';
+#string = "'" (#__5)2* "'";
+#escape = '\\' \U;
+#star = #expr #ws (#number)? #ws '*';
+#plus = #expr #ws (#number)? #ws '+';
+#option = #expr #ws '?';
+#count = #expr #ws #number;
+#compliment = #set #ws '~';
+#cat = #expr #__6+;
+#__6 = #ws #expr;
+#diff = #set #ws '-' #ws #set;
+#intersect = #set #ws '&' #ws #set;
+#union = #set #ws '|' #ws #set;
+#or = #__7 - #union;
+#__7 = #expr #ws '|' #ws #expr;
+#set = #anyset;
+#set = #char;
+#set = #hex;
+#set = #charset;
+#set = #compliment;
+#set = #diff;
+#set = #intersect;
+#set = #union;
+#expr = #eps;
+#expr = #set;
+#expr = #group;
+#expr = #capture;
+#expr = #string;
+#expr = #star;
+#expr = #plus;
+#expr = #option;
+#expr = #count;
+#expr = #cat;
+#expr = #or;
+#expr = #hashtag;
+#hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*;
+#rule = #hashtag #ws '=' #ws #expr #ws ';';
+#start_symbol = #__8+ #ws;
+#__8 = #ws #rule
+#augmented_start_symbol = #start_symbol;
+
+
+
+--------------------------------------------------
+////////
+//I0 = START(#augmented_start_symbol)
+#augmented_start_symbol = .#start_symbol
+--closure--
+#start_symbol = .#__8+ #ws
+#__8 = .#ws #rule
+#ws = .#__1*
+#__1 = .#wschar
+#__1 = .#line_comment
+#__1 = .#block_comment
+#wschar = .[\x9-\xD\x20]
+#line_comment = .'/' '/' (\U - '\n')* '\n'
+#block_comment = .'/' '{' #__0* '}/'
+
+//I1 = GOTO(I0, [\x9-\xD\x20])
+#wschar = [\x9-\xD\x20].
+
+//I2 = GOTO(I0, #wschar)
+#__1 = #wschar.
+
+//I3 = GOTO(I0, #__1)
+#ws = #__1*. 
+#ws = .#__1*
+--closure--
+#__1 = .#wschar
+#wschar = .[\x9-\xD\x20]
+
+//I4 = GOTO(I0, #ws)
+#__8 = #ws .#rule
+--closure--
+#rule = .#hashtag #ws '=' #ws #expr #ws ';'
+#hashtag = .'#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*
+
+//I5 = GOTO(I0, '/')
+#line_comment = '/' .'/' (\U - '\n')* '\n'
+#block_comment = '/' .'{' #__0* '}/'
+
+//I6 = GOTO(I0, #start_symbol)
+#augmented_start_symbol = #start_symbol. //Accepting state if end of input
+
+//I7 = GOTO(I0, #__8)
+#start_symbol = #__8+ .#ws
+#start_symbol = .#__8+ #ws
+--closure--
+#__8 = .#ws #rule
+#ws = .#__1*
+#__1 = .#wschar 
+#__1 = .#line_comment 
+#__1 = .#block_comment
+#wschar = .[\x9-\xD\x20]
+#line_comment = .'/' '/' (\U - '\n')* '\n'
+#block_comment = .'/' '{' #__0* '}/'
+
+//I8 = GOTO(I0, #line_comment)
+#__1 = #line_comment.
+
+//I9 = GOTO(I0, #block_comment)
+#__1 = #block_comment.
+
+//I10 = GOTO(I0, ϵ)
+#ws = #__1*.
+
+////////
+//I3 = GOTO(I3, #__1)           // existing item set
+//I2 = GOTO(I3, #wschar)        // existing item set
+//I1 = GOTO(I3, [\x9-\xD\x20])  // existing item set
+
+////////
+//I11 = GOTO(I4, #rule)
+#__8 = #ws #rule.
+
+//I12 = GOTO(I4, #hashtag)
+#rule = #hashtag .#ws '=' #ws #expr #ws ';'
+--closure--
+#ws = .#__1* 
+#__1 = .#wschar
+#__1 = .#line_comment
+#__1 = .#block_comment
+#wschar = .[\x9-\xD\x20]
+#line_comment = .'/' '/' (\U - '\n')* '\n'
+#block_comment = .'/' '{' #__0* '}/'
+
+//I13 = GOTO(I4, '#')
+#hashtag = '#' .[a-zA-Z] [a-zA-Z0-9~!@#$&_?]*
+
+////////
+//I14 = GOTO(I5, '/')
+#line_comment = '/' '/' .(\U - '\n')* '\n'
+
+//I15 = GOTO(I5, '{')
+#block_comment = '/' '{' .#__0* '}/'
+--closure--
+#__0 = .#block_comment
+#__0 = .#block_string
+#block_string = .\U* - ♢\U* '}/'
+
+////////
+//I16 = GOTO(I7, #ws)
+#start_symbol = #__8+ #ws.
+#__8 = #ws .#rule
+--closure--
+#rule = .#hashtag #ws '=' #ws #expr #ws ';'
+#hashtag = .'#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*
+
+//I7 = GOTO(I7, #__8)           // existing item set
+//I17 = GOTO(I7, #__1)
+#ws = #__1*.
+#ws = .#__1*
+--closure--
+#__1 = .#wschar 
+#__1 = .#line_comment 
+#__1 = .#block_comment
+#wschar = .[\x9-\xD\x20]
+#line_comment = .'/' '/' (\U - '\n')* '\n'
+#block_comment = .'/' '{' #__0* '}/'
+
+//I2 = GOTO(I7, #wschar)        // existing item set
+//I8 = GOTO(I7, #line_comment)  // existing item set
+//I9 = GOTO(I7, #block_comment) // existing item set
+//I1 = GOTO(I7, [\x9-\xD\x20])  // existing item set
+//I5 = GOTO(I7, '/')            // existing item set
+//I10 = GOTO(I7, ϵ)             // existing item set
+
+////////
+//I18 = GOTO(I12, #ws)
+#rule = #hashtag #ws .'=' #ws #expr #ws ';'
+
+//I10 = GOTO(I12, #__1)         // existing item set
+//I2 = GOTO(I12, #wschar)       // existing item set
+//I8 = GOTO(I12, #line_comment) // existing item set
+//I9 = GOTO(I12, #block_comment)// existing item set
+//I1 = GOTO(I12, [\x9-\xD\x20]) // existing item set
+//I5 = GOTO(I12, '/')           // existing item set
+//I10 = GOTO(I12, ϵ)            // existing item set
+
+////////
+//I19 = GOTO(I13, [a-zA-Z])
+#hashtag = '#' [a-zA-Z] .[a-zA-Z0-9~!@#$&_?]*
+
+////////
+//I20 = GOTO(I14, (\U - '\n'))
+#line_comment = '/' '/' (\U - '\n')* .'\n'
+#line_comment = '/' '/' .(\U - '\n')* '\n'
+
+///////
+//I21 = GOTO(I15, #__0)
+#block_comment = '/' '{' #__0* .'}/'
+#block_comment = '/' '{' .#__0* '}/'
+--closure--
+#__0 = .#block_comment
+#__0 = .#block_string
+#block_comment = .'/' '{' #__0* '}/'
+#block_string = .\U* - ♢\U* '}/'
+
+
+//I22 = GOTO(I15, #block_comment)
+#__0 = #block_comment.
+
+//I23 = GOTO(I15, #block_string)
+#__0 = #block_string.
+
+//I24 = GOTO(I15, \U)
+#block_string = \U*. - \U* ♢'}/'
+#block_string = .\U* - \U* ♢'}/'
+#block_string = \U*. - ♢\U* '}/'
+#block_string = .\U* - ♢\U* '}/'
+
+////////
+//I11 = GOTO(I16, #rule)        // existing item set
+//I12 = GOTO(I16, #hashtag)     // existing item set
+//I13 = GOTO(I16, '#')          // existing item set
+
+////////
+//I17 = GOTO(I17, #__1)         // existing item set
+//I2 = GOTO(I17, #wschar)       // existing item set
+//I8 = GOTO(I17, #line_comment) // existing item set
+//I9 = GOTO(I17, #block_comment)// existing item set
+//I1 = GOTO(I17, [\x9-\xD\x20]) // existing item set
+//I5 = GOTO(I17, '/')           // existing item set
+//I10 = GOTO(I17, ϵ)            // existing item set
+
+////////
+//I25 = GOTO(I18, '=')
+#rule = #hashtag #ws '=' .#ws #expr #ws ';'
+--closure--
+#ws = .#__1* 
+#__1 = .#wschar
+#__1 = .#line_comment
+#__1 = .#block_comment
+#wschar = .[\x9-\xD\x20]
+#line_comment = .'/' '/' (\U - '\n')* '\n'
+#block_comment = .'/' '{' #__0* '}/'
+
+////////
+//I26 = GOTO(I19, [a-zA-Z0-9~!@#$&_?])
+#hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*.
+#hashtag = '#' [a-zA-Z] .[a-zA-Z0-9~!@#$&_?]*
+
+//I27 = GOTO(I19, ϵ)
+#hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*.
+
+////////
+//I28 = GOTO(I20, '\n')
+#line_comment = '/' '/' (\U - '\n')* '\n'.
+
+//I20 = GOTO(I20, (\U - '\n'))  // existing item set
+
+////////
+//I29 = GOTO(I21, '}/')
+#block_comment = '/' '{' #__0* '}/'.
+
+//I21 = GOTO(I21, #__0)         // existing item set
+//I22 = GOTO(I21, #block_comment)   // existing item set
+//I23 = GOTO(I21, #block_string)    // existing item set
+
+//I30 = GOTO(I21, '/')
+#block_comment = '/' .'{' #__0* '}/'
+#block_string = \U*. - \U* ♢'}/'
+#block_string = .\U* - \U* ♢'}/'
+#block_string = \U*. - ♢\U* '}/'
+#block_string = .\U* - ♢\U* '}/'
+
+
+#block_comment = '/' '{' #__0* .'}/'
+#block_comment = '/' '{' .#__0* '}/'
+#__0 = .#block_comment
+#__0 = .#block_string
+#block_comment = .'/' '{' #__0* '}/'
+#block_string = .\U* - ♢\U* '}/'
+
+
+
+//I# = start(#expr)
+#expr =
+    .#eps
+    .#group
+    .#capture 
+    .#string
+    .#star
+    .#plus
+    .#option
+    .#count
+    .#cat
+    .#or
+    .#hashtag
+    .#set
+#eps =
+    .\x3f5
+    .'ϵ'
+    .'\\' 'e'
+#group = 
+    .'(' #ws #expr #ws ')'
+#capture =
+    .'{' #ws #expr #ws '}'
+#string = 
+    .'"' (\U - '"' | #escape)2* '"'
+    ."'" (\U - "'" | #escape)2* "'"
+#star =
+    .#expr #ws (#number)? #ws '*'
+#plus =
+    .#expr #ws (#number)? #ws '+'
+#option =
+    .#expr #ws '?'
+#count =
+    .#expr #ws #number
+#cat =
+    .#expr (#ws #expr)+
+#or =
+    .#_0 - <>#union
+#_0 =
+    .#expr #ws '|' #ws #expr
+#hashtag =
+    .'#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*
+#set =
+    .#anyset
+    .#char
+    .#hex
+    .#charset
+    .#compliment
+    .#diff
+    .#intersect
+    .#union
+#union =
+    .#set #ws '|' #ws #set
+#anyset = 
+    .'\\' [uUxX]
+#char =
+    .'"' (\U - '"' | #escape) '"'
+    ."'" (\U - "'" | #escape) "'"
+#hex =
+    .'\\' [uUxX] [0-9a-fA-F]+
+#charset =
+    .'[' (#ws #item (#ws '-' #ws #item)? #ws)* ']'
+#compliment = 
+    .#set #ws '~'
+#diff = 
+    .#set #ws '-' #ws #set
+#intersect = 
+    .#set #ws '&' #ws #set
+
+
+
+
+//I# = Goto(I0, 

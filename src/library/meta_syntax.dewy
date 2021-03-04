@@ -4,12 +4,13 @@
 
 //Most of these should be purely character sets...
 
-#eps = \x3f5 | 'ϵ' | '\\e';                                       // ϵ or \e indicates empty element, i.e. nullable
+#eps = \x3f5 | 'ϵ' | '\\e';                                 // ϵ or \e indicates empty element, i.e. nullable
 //#wschar = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000]; //ascii + unicode whitespace chars
 #wschar = [\x9-\xD\x20];                                    // ascii whitespace characters.
-#line_comment = '/' '/' \U* '\n';                           // single line comment
-#block_comment = '/' '{' (#block_comment | \U)* '}/';          // block comment, with allowed nested block comments.
-#ws = #wschar*;                                             // optional whitespace sequence
+#line_comment = '/' '/' (\U - '\n')* '\n';                  // single line comment
+#block_string = \U* - \U* '}/'                              // inside of a block comment. Cannot end with block comment delimiter
+#block_comment = '/' '{' (#block_comment | #block_string)* '}/';       // block comment, with allowed nested block comments
+#ws = (#wschar | #line_comment | #block_comment)*;          // optional whitespace sequence
 #anyset = '\\' [uUxX];                                      // \U, \u, \X, or \x used to indicate any unicode character
 #hex = '\\' [uUxX] [0-9a-fA-F]+;                            // hex number literal. Basically skipping the number part makes it #any
 #number = [0-9]+;                                           // decimal number literal. Used to indicate # of repetitions
@@ -55,17 +56,21 @@
 
 /{Interesting notes
 
-`((A)2)+` indicates A exactly 2, 4, 6, 8, ... times
-while `(A)2+` indicates A exactly 2, 3, 4, 5, ... times. 
-Also `((A)2)*` indicates A exactly 0, 2, 4, 6, ... times
+`((A)2)+` indicates `A` exactly 2, 4, 6, 8, ... times
+while `(A)2+` indicates `A` exactly 2, 3, 4, 5, ... times
+Also `((A)2)*` indicates `A` exactly 0, 2, 4, 6, ... times
+`(A)5+ - (A)11+` indicates repeat `A` exactly 5 to 10 times
 
 `A+?` is the same as `A*`. Same with `(A)2+?` and `(A)2*`
+Also `A?` is equivalent to (and represented internally as) `A | ϵ`
+Also meaning that `A*` is represented as `A+ | ϵ`
 
 `(A)5+` indicates 5 or more of `A` while `(A)5*` indicates 0 or 5 or more of `A`
 
 all expressions that reduce to a #set are combined / treated as a single unicode character set
 
 all whitespace in charsets must either be escaped or in hex
+
 
 }/
 
@@ -132,5 +137,7 @@ Precedence levels
 //TODO...
 
 //priority filter
-//TODO...
+//for precedence level, I think we'll have `<` `>` and they go in place of `|` 
+//TODO->what about associativity direction?
+
 }/
