@@ -9,6 +9,10 @@ NOTES:
 - all strings ought to be combined completely, allowing for arbitrary length lookahead (up to length of string)
 ---> need to handle cases where GOTO(, substring), i.e. check all strings for possibility of matching substring
 ---> also what about charsets where a character in the set starts off a substring we're checking? should probably split up into separate GOTOs, 1 for character in string, 1 for rest of charset
+--->DEFINITELY though it's easier to just scan 1 character at a time....don't have to worry about any of that stuff, means easier to write parser
+- if there's a GOTO(, ϵ) in a diff rule, how should the diamond behave? should it only skip over nullables, or should it also leave a copy in its original space?
+- probably need to also reduce any diff rules such that the diff is between precisely two internal #hashtags, rather than more complicated sub rules
+
 
 Generating item sets
 Generate first item set:
@@ -40,11 +44,11 @@ Generate GOTO item sets
 
 #eps = \x3f5;
 #eps = 'ϵ';
-#eps = '\\e';
+#eps = '\\' 'e';
 #wschar = [\x9-\xD\x20];
 #line_comment = '/' '/' (\U - '\n')* '\n';
-#block_string = \U* - \U* '}/';
-#block_comment = '/' '{' #__0* '}/';
+#block_string = \U* - \U* '}' '/';
+#block_comment = '/' '{' #__0* '}' '/';
 #__0 = #block_comment;
 #__0 = #block_string;
 #ws = #__1*;
@@ -125,7 +129,7 @@ Generate GOTO item sets
 #__1 = .#block_comment
 #wschar = .[\x9-\xD\x20]
 #line_comment = .'/' '/' (\U - '\n')* '\n'
-#block_comment = .'/' '{' #__0* '}/'
+#block_comment = .'/' '{' #__0* '}' '/'
 
 //I1 = GOTO(I0, [\x9-\xD\x20])
 #wschar = [\x9-\xD\x20].
@@ -148,7 +152,7 @@ Generate GOTO item sets
 
 //I5 = GOTO(I0, '/')
 #line_comment = '/' .'/' (\U - '\n')* '\n'
-#block_comment = '/' .'{' #__0* '}/'
+#block_comment = '/' .'{' #__0* '}' '/'
 
 //I6 = GOTO(I0, #start_symbol)
 #augmented_start_symbol = #start_symbol. //Accepting state if end of input
@@ -164,7 +168,7 @@ Generate GOTO item sets
 #__1 = .#block_comment
 #wschar = .[\x9-\xD\x20]
 #line_comment = .'/' '/' (\U - '\n')* '\n'
-#block_comment = .'/' '{' #__0* '}/'
+#block_comment = .'/' '{' #__0* '}' '/'
 
 //I8 = GOTO(I0, #line_comment)
 #__1 = #line_comment.
@@ -193,7 +197,7 @@ Generate GOTO item sets
 #__1 = .#block_comment
 #wschar = .[\x9-\xD\x20]
 #line_comment = .'/' '/' (\U - '\n')* '\n'
-#block_comment = .'/' '{' #__0* '}/'
+#block_comment = .'/' '{' #__0* '}' '/'
 
 //I13 = GOTO(I4, '#')
 #hashtag = '#' .[a-zA-Z] [a-zA-Z0-9~!@#$&_?]*
@@ -203,11 +207,11 @@ Generate GOTO item sets
 #line_comment = '/' '/' .(\U - '\n')* '\n'
 
 //I15 = GOTO(I5, '{')
-#block_comment = '/' '{' .#__0* '}/'
+#block_comment = '/' '{' .#__0* '}' '/'
 --closure--
 #__0 = .#block_comment
 #__0 = .#block_string
-#block_string = .\U* - ♢\U* '}/'
+#block_string = .\U* - ♢\U* '}' '/'
 
 ////////
 //I16 = GOTO(I7, #ws)
@@ -227,7 +231,7 @@ Generate GOTO item sets
 #__1 = .#block_comment
 #wschar = .[\x9-\xD\x20]
 #line_comment = .'/' '/' (\U - '\n')* '\n'
-#block_comment = .'/' '{' #__0* '}/'
+#block_comment = .'/' '{' #__0* '}' '/'
 
 //I2 = GOTO(I7, #wschar)        // existing item set
 //I8 = GOTO(I7, #line_comment)  // existing item set
@@ -259,13 +263,13 @@ Generate GOTO item sets
 
 ///////
 //I21 = GOTO(I15, #__0)
-#block_comment = '/' '{' #__0* .'}/'
-#block_comment = '/' '{' .#__0* '}/'
+#block_comment = '/' '{' #__0* .'}' '/'
+#block_comment = '/' '{' .#__0* '}' '/'
 --closure--
 #__0 = .#block_comment
 #__0 = .#block_string
-#block_comment = .'/' '{' #__0* '}/'
-#block_string = .\U* - ♢\U* '}/'
+#block_comment = .'/' '{' #__0* '}' '/'
+#block_string = .\U* - ♢\U* '}' '/'
 
 
 //I22 = GOTO(I15, #block_comment)
@@ -275,10 +279,10 @@ Generate GOTO item sets
 #__0 = #block_string.
 
 //I24 = GOTO(I15, \U)
-#block_string = \U*. - \U* ♢'}/'
-#block_string = .\U* - \U* ♢'}/'
-#block_string = \U*. - ♢\U* '}/'
-#block_string = .\U* - ♢\U* '}/'
+#block_string = \U*. - \U* ♢'}' '/'
+#block_string = .\U* - \U* ♢'}' '/'
+#block_string = \U*. - ♢\U* '}' '/'
+#block_string = .\U* - ♢\U* '}' '/'
 
 ////////
 //I11 = GOTO(I16, #rule)        // existing item set
@@ -304,7 +308,7 @@ Generate GOTO item sets
 #__1 = .#block_comment
 #wschar = .[\x9-\xD\x20]
 #line_comment = .'/' '/' (\U - '\n')* '\n'
-#block_comment = .'/' '{' #__0* '}/'
+#block_comment = .'/' '{' #__0* '}' '/'
 
 ////////
 //I26 = GOTO(I19, [a-zA-Z0-9~!@#$&_?])
@@ -321,99 +325,45 @@ Generate GOTO item sets
 //I20 = GOTO(I20, (\U - '\n'))  // existing item set
 
 ////////
-//I29 = GOTO(I21, '}/')
-#block_comment = '/' '{' #__0* '}/'.
+//I29 = GOTO(I21, '}')
+#block_comment = '/' '{' #__0* '}' .'/'
 
-//I21 = GOTO(I21, #__0)         // existing item set
+//I21 = GOTO(I21, #__0)             // existing item set
 //I22 = GOTO(I21, #block_comment)   // existing item set
 //I23 = GOTO(I21, #block_string)    // existing item set
 
 //I30 = GOTO(I21, '/')
-#block_comment = '/' .'{' #__0* '}/'
-#block_string = \U*. - \U* ♢'}/'
-#block_string = .\U* - \U* ♢'}/'
-#block_string = \U*. - ♢\U* '}/'
-#block_string = .\U* - ♢\U* '}/'
+#block_comment = '/' .'{' #__0* '}' '/'
+#block_string = \U*. - \U* ♢'}' '/'
+#block_string = .\U* - \U* ♢'}' '/'
+#block_string = \U*. - ♢\U* '}' '/'
+#block_string = .\U* - ♢\U* '}' '/'
 
+//I4 = GOTO(I21, \U - '/')          //existing item set
 
-#block_comment = '/' '{' #__0* .'}/'
-#block_comment = '/' '{' .#__0* '}/'
-#__0 = .#block_comment
-#__0 = .#block_string
-#block_comment = .'/' '{' #__0* '}/'
-#block_string = .\U* - ♢\U* '}/'
+//I31 = GOTO(I21, ϵ)
+#block_comment = '/' '{' #__0* .'}' '/'
+#block_string = \U*. - \U* ♢'}' '/'
 
+////////
+//I32 = GOTO(I24, \U - '}')
+#block_string = \U*. - \U* '}' '/'
+#block_string = .\U* - \U* '}' '/'
+#block_string = .\U* - \U* ♢'}' '/'
+#block_string = \U*. - \U* ♢'}' '/'
+#block_string = .\U* - ♢\U* '}' '/'
+#block_string = \U*. - ♢\U* '}' '/'
 
+//I33 = GOTO(I24, '}')
+#block_string = \U*. - \U* '}' ♢'/'
+#block_string = .\U* - \U* '}' ♢'/'
+#block_string = \U*. - \U* ♢'}' '/'
+#block_string = .\U* - \U* ♢'}' '/'
+#block_string = \U*. - ♢\U* '}' '/'
+#block_string = .\U* - ♢\U* '}' '/'
 
-//I# = start(#expr)
-#expr =
-    .#eps
-    .#group
-    .#capture 
-    .#string
-    .#star
-    .#plus
-    .#option
-    .#count
-    .#cat
-    .#or
-    .#hashtag
-    .#set
-#eps =
-    .\x3f5
-    .'ϵ'
-    .'\\' 'e'
-#group = 
-    .'(' #ws #expr #ws ')'
-#capture =
-    .'{' #ws #expr #ws '}'
-#string = 
-    .'"' (\U - '"' | #escape)2* '"'
-    ."'" (\U - "'" | #escape)2* "'"
-#star =
-    .#expr #ws (#number)? #ws '*'
-#plus =
-    .#expr #ws (#number)? #ws '+'
-#option =
-    .#expr #ws '?'
-#count =
-    .#expr #ws #number
-#cat =
-    .#expr (#ws #expr)+
-#or =
-    .#_0 - <>#union
-#_0 =
-    .#expr #ws '|' #ws #expr
-#hashtag =
-    .'#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*
-#set =
-    .#anyset
-    .#char
-    .#hex
-    .#charset
-    .#compliment
-    .#diff
-    .#intersect
-    .#union
-#union =
-    .#set #ws '|' #ws #set
-#anyset = 
-    .'\\' [uUxX]
-#char =
-    .'"' (\U - '"' | #escape) '"'
-    ."'" (\U - "'" | #escape) "'"
-#hex =
-    .'\\' [uUxX] [0-9a-fA-F]+
-#charset =
-    .'[' (#ws #item (#ws '-' #ws #item)? #ws)* ']'
-#compliment = 
-    .#set #ws '~'
-#diff = 
-    .#set #ws '-' #ws #set
-#intersect = 
-    .#set #ws '&' #ws #set
+//I# = GOTO(I24, ϵ)
+#block_string = \U*. - \U* ♢'}' '/'
 
-
-
-
-//I# = Goto(I0, 
+////////
+//I# = GOTO(I25, )
