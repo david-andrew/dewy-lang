@@ -4,7 +4,7 @@
 
 //Most of these should be purely character sets...
 
-#eps = \x3f5 | 'ϵ' | '\\e';                                 // ϵ or \e indicates empty element, i.e. nullable
+#eps = 'ϵ' | '\\e' | "''" | '""';                           // ϵ, \e, '', or "" indicates empty element, i.e. nullable
 //#wschar = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000]; //ascii + unicode whitespace chars
 #wschar = [\x9-\xD\x20];                                    // ascii whitespace characters.
 #line_comment = '/' '/' (\U - '\n')* '\n';                  // single line comment
@@ -12,8 +12,8 @@
 #block_comment = '/' '{' (#block_comment | #block_string)* '}/';       // block comment, with allowed nested block comments
 #ws = (#wschar | #line_comment | #block_comment)*;          // optional whitespace sequence
 #anyset = '\\' [uUxX];                                      // \U, \u, \X, or \x used to indicate any unicode character
-#hex = '\\' [uUxX] [0-9a-fA-F]+;                            // hex number literal. Basically skipping the number part makes it #any
-#number = [0-9]+;                                           // decimal number literal. Used to indicate # of repetitions
+#hex = '\\' [uUxX] [0-9a-fA-F]+ -/- [0-9a-fA-F];            // hex number literal. Basically skipping the number part makes it #any
+#number = [0-9]+ -/- [0-9];                                 // decimal number literal. Used to indicate # of repetitions
 #charsetchar = \U - [\-\[\]] - #wschar;                     // characters allowed in a set are any unicode excluding '-', '[', or ']', and whitespace
 #item = #charsetchar | #escape | #hex;                      // items that make up character sets, i.e. raw chars, escape chars, or hex chars
 #charset = '[' (#ws #item (#ws '-' #ws #item)? #ws)* ']';   // set of chars specified literally. Whitespace is ignored, and must be escaped.
@@ -21,11 +21,12 @@
 //paired grouping operators
 #group = '(' #ws #expr #ws ')';                             // group together/force precedence
 #capture = '{' #ws #expr #ws '}';                           // group to capture
-#char = '"' (\U - '"' | #escape) '"';                       // "" single character
-#char = "'" (\U - "'" | #escape) "'";                       // '' single character
-#string = '"' (\U - '"' | #escape)2* '"';                   // "" string of characters
-#string = "'" (\U - "'" | #escape)2* "'";                   // '' string of characters
-#escape = '\\' \U;                                          // an escape character. Recognized escaped characters are \n \r \t \v \b \f \a. All others just put the second character literally. Common literals include \\ \' \" \[ \] \-
+#char = '"' (\U - '"' | #escape | #hex) '"';                // "" single character
+#char = "'" (\U - "'" | #escape | #hex) "'";                // '' single character
+#string = '"' (\U - '"' | #escape | #hex)2+ '"';            // "" string of 2+ characters
+#string = "'" (\U - "'" | #escape | #hex)2+ "'";            // '' string of 2+ characters
+#escape = '\\' \U;                                          // an escape character. Recognized escaped characters are \n \r \t \v \b \f \a. 
+                                                            // all others just put the second character literally. Common literals include \\ \' \" \[ \] \-
 
 //post operators
 #star = #expr #ws (#number)? #ws '*';                       // zero or (number or more)
@@ -47,7 +48,7 @@
 //syntax constructs
 #set = #anyset | #char | #hex | #charset | #compliment | #diff | #intersect | #union;
 #expr = #eps | #set | #group | #capture | #string | #star | #plus | #option | #count | #cat | #or | #identifier;
-#hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*;
+#hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]* -/- [a-zA-Z0-9~!@#$&_?];
 #rule = #hashtag #ws '=' #ws #expr #ws ';';
 #start_symbol = (#ws #rule)* #ws;
 
@@ -64,6 +65,7 @@ Also `((A)2)*` indicates `A` exactly 0, 2, 4, 6, ... times
 `A+?` is the same as `A*`. Same with `(A)2+?` and `(A)2*`
 Also `A?` is equivalent to (and represented internally as) `A | ϵ`
 Also meaning that `A*` is represented as `A+ | ϵ`
+`rule = A+` `__A = __A A | ϵ`, `rule = __A A`?
 
 `(A)5+` indicates 5 or more of `A` while `(A)5*` indicates 0 or 5 or more of `A`
 

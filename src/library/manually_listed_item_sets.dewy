@@ -13,6 +13,16 @@ NOTES:
 - if there's a GOTO(, ϵ) in a diff rule, how should the diamond behave? should it only skip over nullables, or should it also leave a copy in its original space?
 - probably need to also reduce any diff rules such that the diff is between precisely two internal #hashtags, rather than more complicated sub rules
 
+- for handling reject (i.e. #rule1 - #rule2) basically each item can also have restrictions appended to it. In this case the restriction would be that you may only reduce #rule1 if reducable #rule2 is not in the item set
+---> handle this as an extra field for each item, listing a single rule number that represents the reject. For rejecting multiple rules, simply combine them into a compound rule with `|` and reject the compound rule
+---> reject rules should propagate mostly normally, but they should be marked as rejects (e.g. a bool for normal vs rejects)
+
+- follow restrictions I think should be handled as longer rules that can then be reduced earlier if the restriction is abided
+---> e.g. #rule = #A -/- #B, where we treat `-/-` as cat, and only accept the rule (reducing at the end of #A) if #B is to be rejected at any point
+---> if #B makes it to the end, then we reject the whole thing
+
+- CLOSURES NEED TO INCLUDE SKIPPING NULLABLE RULES!
+
 
 Generating item sets
 Generate first item set:
@@ -327,6 +337,10 @@ Generate GOTO item sets
 ////////
 //I29 = GOTO(I21, '}')
 #block_comment = '/' '{' #__0* '}' .'/'
+#block_string = \U*. - \U* ♢'}' '/'
+#block_string = .\U* - \U* ♢'}' '/'
+#block_string = \U*. - ♢\U* '}' '/'
+#block_string = .\U* - ♢\U* '}' '/'
 
 //I21 = GOTO(I21, #__0)             // existing item set
 //I22 = GOTO(I21, #block_comment)   // existing item set
@@ -349,10 +363,10 @@ Generate GOTO item sets
 //I32 = GOTO(I24, \U - '}')
 #block_string = \U*. - \U* '}' '/'
 #block_string = .\U* - \U* '}' '/'
-#block_string = .\U* - \U* ♢'}' '/'
 #block_string = \U*. - \U* ♢'}' '/'
-#block_string = .\U* - ♢\U* '}' '/'
+#block_string = .\U* - \U* ♢'}' '/'
 #block_string = \U*. - ♢\U* '}' '/'
+#block_string = .\U* - ♢\U* '}' '/'
 
 //I33 = GOTO(I24, '}')
 #block_string = \U*. - \U* '}' ♢'/'
@@ -362,8 +376,320 @@ Generate GOTO item sets
 #block_string = \U*. - ♢\U* '}' '/'
 #block_string = .\U* - ♢\U* '}' '/'
 
-//I# = GOTO(I24, ϵ)
+//I34 = GOTO(I24, ϵ)
 #block_string = \U*. - \U* ♢'}' '/'
 
 ////////
-//I# = GOTO(I25, )
+//I35 = GOTO(I25, #ws)
+#rule = #hashtag #ws '=' #ws .#expr #ws ';'
+--closure--
+#expr = .#eps
+#expr = .#set
+#expr = .#group
+#expr = .#capture
+#expr = .#string
+#expr = .#star
+#expr = .#plus
+#expr = .#option
+#expr = .#count
+#expr = .#cat
+#expr = .#or
+#expr = .#hashtag
+#eps = .\x3f5
+#eps = .'ϵ'
+#eps = .'\\' 'e'
+#set = .#anyset
+#set = .#char
+#set = .#hex
+#set = .#charset
+#set = .#compliment
+#set = .#diff
+#set = .#intersect
+#set = .#union
+#group = .'(' #ws #expr #ws ')'
+#capture = .'{' #ws #expr #ws '}'
+#string = .'"' (#__4)2* '"'
+#string = ."'" (#__5)2* "'"
+#star = .#expr #ws (#number)? #ws '*'
+#plus = .#expr #ws (#number)? #ws '+'
+#option = .#expr #ws '?'
+#count = .#expr #ws #number
+#cat = .#expr #__6+
+#or = .#__7 - ♢#union
+#hashtag = .'#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*
+#anyset = .'\\' [uUxX]
+#char = .'"' #__4 '"'
+#char = ."'" #__5 "'"
+#hex = .'\\' [uUxX] [0-9a-fA-F]+
+#charset = .'[' #__2* ']'
+#compliment = .#set #ws '~'
+#diff = .#set #ws '-' #ws #set
+#intersect = .#set #ws '&' #ws #set
+#union = .#set #ws '|' #ws #set
+#__7 = .#expr #ws '|' #ws #expr
+
+//I17 = GOTO(I25, #__1)         // existing item set
+//I2 = GOTO(I25, #wschar)       // existing item set
+//I8 = GOTO(I25, #line_comment) // existing item set
+//I9 = GOTO(I25, #block_comment)// existing item set
+//I1 = GOTO(I25, [\x9-\xD\x20]) // existing item set
+//I5 = GOTO(I25, '/')           // existing item set
+//I10 = GOTO(I25, ϵ)            // existing item set
+
+////////
+//I26 = GOTO(I26, [a-zA-Z0-9~!@#$&_?])      // existing item set
+//I27 = GOTO(I26, ϵ)                        // existing item set
+
+////////
+//I36 = GOTO(I29, '/')
+#block_comment = '/' '{' #__0* '}' '/'.
+#block_string = \U*. - \U* '}' '/'
+#block_string = .\U* - \U* '}' '/'
+#block_string = \U*. - \U* ♢'}' '/'
+#block_string = .\U* - \U* ♢'}' '/'
+#block_string = \U*. - ♢\U* '}' '/'
+#block_string = .\U* - ♢\U* '}' '/'
+
+//I33 = GOTO(I29, '}')                      // existing item set
+//I32 = GOTO(I29, \U - [/}])                // existing item set
+
+//I37 = GOTO(I29, ϵ)
+#block_string = \U*. - \U* '}' '/'
+#block_string = \U*. - \U* ♢'}' '/'
+
+////////
+//I38 = GOTO(I30, '{')
+#block_comment = '/' '{' .#__0* '}' '/'
+#block_string = \U*. - \U* '}' ♢'/'
+#block_string = .\U* - \U* '}' ♢'/'
+#block_string = \U*. - \U* ♢'}' '/'
+#block_string = .\U* - \U* ♢'}' '/'
+#block_string = \U*. - ♢\U* '}' '/'
+--closure--
+#__0 = .#block_comment
+#__0 = .#block_string
+#block_comment = .'/' '{' #__0* '}' '/'
+#block_string = .\U* - ♢\U* '}' '/'
+
+//I32 = GOTO(I30, \U - '{')     // existing item set
+
+//I39 = GOTO(I30, ϵ)
+#block_string = \U*. - \U* '}' '/'
+#block_string = \U*. - \U*♢ '}' '/'
+
+
+////////
+//I40 = GOTO(I31, '}')
+#block_comment = '/' '{' #__0* '}' .'/'
+
+////////
+//I41 = GOTO(I32, '}')
+#block_string = \U*. - \U* '}' '/'
+#block_string = .\U* - \U* '}' '/'
+#block_string = \U*. - \U* '}' ♢'/'
+#block_string = .\U* - \U* '}' ♢'/'
+#block_string = \U*. - \U* ♢'}' '/'
+#block_string = .\U* - \U* ♢'}' '/'
+#block_string = \U*. - ♢\U* '}' '/'
+#block_string = .\U* - ♢\U* '}' '/'
+
+//I32 = GOTO(I32, \U - '}')     // existing item set
+//I37 = GOTO(I32, ϵ)            // existing item set
+
+///////
+//I41 = GOTO(I33, '/')          // existing item set
+//I41 = GOTO(I33, '}')          // existing item set
+//I32 = GOTO(I33, \U - [/}])    // existing item set
+//I37 = GOTO(I33, ϵ)            // existing item set
+
+////////
+//I42 = GOTO(I35, #expr)
+#rule = #hashtag #ws '=' #ws #expr .#ws ';'
+#star = #expr .#ws (#number)? #ws '*'
+#plus = #expr .#ws (#number)? #ws '+'
+#option = #expr .#ws '?'
+#count = #expr .#ws #number
+#cat = #expr .#__6+
+#__7 = #expr .#ws '|' #ws #expr
+--closure--
+#ws = .#__1*
+#__6 = .#ws #expr
+#__1 = .#wschar
+#__1 = .#line_comment
+#__1 = .#block_comment
+#wschar = .[\x9-\xD\x20]
+#line_comment = .'/' '/' (\U - '\n')* '\n'
+#block_comment = .'/' '{' #__0* '}' '/'
+
+//I43 = GOTO(I35, #eps)
+#expr = #eps.
+
+//I44 = GOTO(I35, #set)
+#expr = #set.
+
+//I45 = GOTO(I35, #group)
+#expr = #group.
+
+//I46 = GOTO(I35, #capture)
+#expr = #capture.
+
+//I47 = GOTO(I35, #string)
+#expr = #string.
+
+//I48 = GOTO(I35, #star)
+#expr = #star.
+
+//I49 = GOTO(I35, #plus)
+#expr = #plus.
+
+//I50 = GOTO(I35, #option)
+#expr = #option.
+
+//I51 = GOTO(I35, #count)
+#expr = #count.
+
+//I52 = GOTO(I35, #cat)
+#expr = #cat.
+
+//I53 = GOTO(I35, #or)
+#expr = #or.
+
+//I54 = GOTO(I35, #hashtag)
+#expr = #hashtag.
+
+//I55 = GOTO(I35, #anyset)
+#set = #anyset.
+
+//I56 = GOTO(I35, #char)
+#set = #char.
+
+//I57 = GOTO(I35, #hex)
+#set = #hex.
+
+//I58 = GOTO(I35, #charset)
+#set = #charset.
+
+//I59 = GOTO(I35, #compliment)
+#set = #compliment.
+
+//I60 = GOTO(I35, #diff)
+#set = #diff.
+
+//I61 = GOTO(I35, #intersect)
+#set = #intersect.
+
+//I62 = GOTO(I35, #union)
+#set = #union.
+
+//I63 = GOTO(I35, #__7)
+#or = #__7. - #union
+
+//I# = GOTO(I35, 'ϵ') //merges with \x3f5
+#eps = 'ϵ'.
+
+//I# = GOTO(I35, '\\')
+#eps = '\\' .'e'
+#anyset = '\\' .[uUxX]
+#hex = '\\' .[uUxX] [0-9a-fA-F]+
+
+//I# = GOTO(I35, '(')
+#group = '(' .#ws #expr #ws ')'
+--closure--
+#ws = .#__1* 
+#__1 = .#wschar
+#__1 = .#line_comment
+#__1 = .#block_comment
+#wschar = .[\x9-\xD\x20]
+#line_comment = .'/' '/' (\U - '\n')* '\n'
+#block_comment = .'/' '{' #__0* '}' '/'
+
+//I# = GOTO(I35, '{')
+#capture = '{' .#ws #expr #ws '}'
+--closure--
+#ws = .#__1* 
+#__1 = .#wschar
+#__1 = .#line_comment
+#__1 = .#block_comment
+#wschar = .[\x9-\xD\x20]
+#line_comment = .'/' '/' (\U - '\n')* '\n'
+#block_comment = .'/' '{' #__0* '}' '/'
+
+//I# = GOTO(I35, '"')
+#string = '"' .(#__4)2* '"'
+#char = '"' .#__4 '"'
+--closure--
+#__4 = .\U - '"'
+#__4 = .#escape
+#escape = .'\\' \U
+
+
+//I# = GOTO(I35, "'")
+#string = "'" .(#__5)2* "'"
+#char = "'" .#__5 "'"
+--closure--
+#__5 = .\U - "'"
+#__5 = .#escape
+#escape = .'\\' \U
+
+//I# = GOTO(I35, '#')
+#hashtag = '#' .[a-zA-Z] [a-zA-Z0-9~!@#$&_?]*
+
+//I# = GOTO(I35, '[')
+#charset = '[' .#__2* ']'
+--closure--
+#__2 = .#ws #item #__3? #ws
+#ws = .#__1* 
+#__1 = .#wschar
+#__1 = .#line_comment
+#__1 = .#block_comment
+#wschar = .[\x9-\xD\x20]
+#line_comment = .'/' '/' (\U - '\n')* '\n'
+#block_comment = .'/' '{' #__0* '}' '/'
+
+
+#rule = #hashtag #ws '=' #ws .#expr #ws ';'
+--closure--
+#expr = .#eps
+#expr = .#set
+#expr = .#group
+#expr = .#capture
+#expr = .#string
+#expr = .#star
+#expr = .#plus
+#expr = .#option
+#expr = .#count
+#expr = .#cat
+#expr = .#or
+#expr = .#hashtag
+#eps = .\x3f5
+#eps = .'ϵ'
+#eps = .'\\' 'e'
+#set = .#anyset
+#set = .#char
+#set = .#hex
+#set = .#charset
+#set = .#compliment
+#set = .#diff
+#set = .#intersect
+#set = .#union
+#group = .'(' #ws #expr #ws ')'
+#capture = .'{' #ws #expr #ws '}'
+#string = .'"' (#__4)2* '"'
+#string = ."'" (#__5)2* "'"
+#star = .#expr #ws (#number)? #ws '*'
+#plus = .#expr #ws (#number)? #ws '+'
+#option = .#expr #ws '?'
+#count = .#expr #ws #number
+#cat = .#expr #__6+
+#or = .#__7 - ♢#union
+#hashtag = .'#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*
+#anyset = .'\\' [uUxX]
+#char = .'"' #__4 '"'
+#char = ."'" #__5 "'"
+#hex = .'\\' [uUxX] [0-9a-fA-F]+
+#charset = .'[' #__2* ']'
+#compliment = .#set #ws '~'
+#diff = .#set #ws '-' #ws #set
+#intersect = .#set #ws '&' #ws #set
+#union = .#set #ws '|' #ws #set
+#__7 = .#expr #ws '|' #ws #expr
