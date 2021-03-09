@@ -1,4 +1,4 @@
-all: dewy_compiler_compiler.o  utilities.o object.o token.o dictionary.o vector.o  set.o mast.o scanner.o parser.o charset.o item.o
+all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o mast.o metascanner.o metaparser.o charset.o item.o
  
 
 #current completed step is simple lexer
@@ -36,8 +36,8 @@ mast.o: mast.c mast.h
 metascanner.o: metascanner.c metascanner.h
 	clang -c -o metascanner.o metascanner.c
 
-parser.o: parser.c parser.h
-	clang -c -o parser.o parser.c
+metaparser.o: metaparser.c metaparser.h
+	clang -c -o metaparser.o metaparser.c
 
 unit_test.o: unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o mast.o charset.o metascanner.o
 	clang -o unit_test.o unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o mast.o charset.o metascanner.o

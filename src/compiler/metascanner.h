@@ -26,7 +26,7 @@ void free_metascanner_state_stack();
 
 obj* scan(char** src);
 obj* match_hashtag(char** src);
-obj* match_meta_char(char** src);
+// obj* match_meta_char(char** src);
 obj* match_meta_single_quote(char** src);
 obj* match_meta_single_quote_char(char** src);
 obj* match_meta_double_quote(char** src);

@@ -10,8 +10,8 @@
 #include <limits.h>
 
 #include "utilities.h"
-#include "scanner.h"
-#include "parser.h"
+#include "metascanner.h"
+#include "metaparser.h"
 #include "object.h"
 #include "dictionary.h"
 #include "vector.h"

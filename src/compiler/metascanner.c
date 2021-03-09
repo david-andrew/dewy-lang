@@ -29,14 +29,14 @@ scan_fn rule_funcs[] = {
     match_whitespace,
     match_line_comment,
     match_block_comment,
+    match_meta_epsilon,
     match_hashtag,
-    match_meta_char,
+    // match_meta_char,
     match_meta_single_quote,
     match_meta_double_quote,
     match_meta_hex_number,
     match_meta_dec_number,
     match_meta_anyset,
-    match_meta_epsilon,
     match_meta_ampersand,
     match_meta_star,
     match_meta_plus,
@@ -70,6 +70,7 @@ scan_fn charset_funcs[] = {
 scan_fn single_quote_string_funcs[] = {
     match_line_comment,
     match_block_comment,
+    match_meta_hex_number,
     match_meta_escape,
     match_meta_single_quote,
     match_meta_single_quote_char,
@@ -79,6 +80,7 @@ scan_fn single_quote_string_funcs[] = {
 scan_fn double_quote_string_funcs[] = {
     match_line_comment,
     match_block_comment,
+    match_meta_hex_number,
     match_meta_escape,
     match_meta_double_quote_char,
     match_meta_double_quote,
@@ -263,40 +265,40 @@ obj* match_hashtag(char** src)
 }
 
 
-/**
- * A single character (or escaped character) enclosed in "" or ''
- * 
- * #char = '"' (\U - '"' | #escape) '"';
- * #char = "'" (\U - "'" | #escape) "'";
- */
-obj* match_meta_char(char** src)
-{
-    char quote; //store the type of quote, single (') or double (")
-    if ((quote = (*src)[0]) == '\'' || quote == '"')
-    {
-        if ((*src)[1] == '\\') //indicates an escape char
-        {
-            size_t delta;
-            if (peek_unicode(src, 3, &delta) == quote)
-            {
-                obj* t = new_metatoken(meta_char, unicode_substr(*src, 1, 2));
-                *src += delta;
-                return t;
-            }
-        }
-        else
-        {
-            size_t delta;
-            if (peek_unicode(src, 2, &delta) == quote)
-            {
-                obj* t = new_metatoken(meta_char, unicode_substr(*src, 1, 1));
-                *src += delta;
-                return t;
-            }
-        }
-    }
-    return NULL;
-}
+// /**
+//  * A single character (or escaped character) enclosed in "" or ''
+//  * 
+//  * #char = '"' (\U - '"' | #escape) '"';
+//  * #char = "'" (\U - "'" | #escape) "'";
+//  */
+// obj* match_meta_char(char** src)
+// {
+//     char quote; //store the type of quote, single (') or double (")
+//     if ((quote = (*src)[0]) == '\'' || quote == '"')
+//     {
+//         if ((*src)[1] == '\\') //indicates an escape char
+//         {
+//             size_t delta;
+//             if (peek_unicode(src, 3, &delta) == quote)
+//             {
+//                 obj* t = new_metatoken(meta_char, unicode_substr(*src, 1, 2));
+//                 *src += delta;
+//                 return t;
+//             }
+//         }
+//         else
+//         {
+//             size_t delta;
+//             if (peek_unicode(src, 2, &delta) == quote)
+//             {
+//                 obj* t = new_metatoken(meta_char, unicode_substr(*src, 1, 1));
+//                 *src += delta;
+//                 return t;
+//             }
+//         }
+//     }
+//     return NULL;
+// }
 
 
 /**
@@ -330,7 +332,7 @@ obj* match_meta_single_quote_char(char** src)
     //any single char except for '\''. Also implicitly exclude '\\' "//" "/{"
     if ((*src)[0] != 0 && (*src)[0] != '\'')
     {
-        obj* t = new_metatoken(meta_single_quote_char, unicode_char_to_str(eat_utf8(src)));
+        obj* t = new_metatoken(meta_char, unicode_char_to_str(eat_utf8(src)));
         return t;
     }
     return NULL;
@@ -369,7 +371,7 @@ obj* match_meta_double_quote_char(char** src)
     if ((*src)[0] != 0 && (*src)[0] != '"')
     {
         uint32_t c = eat_utf8(src);
-        obj* t = new_metatoken(meta_double_quote_char, unicode_char_to_str(eat_utf8(src)));
+        obj* t = new_metatoken(meta_char, unicode_char_to_str(eat_utf8(src)));
         return t;
     }
     return NULL;
@@ -474,7 +476,7 @@ obj* match_meta_charset_char(char** src)
 /**
  * `ϵ` or `\e` indicates empty element, i.e. nullable
  * 
- * #eps = \x3f5 | '\\e';
+ * #eps = \x3f5 | '\\e' | "''" | '""';
  */
 obj* match_meta_epsilon(char** src)
 {
@@ -483,7 +485,9 @@ obj* match_meta_epsilon(char** src)
         obj* t = new_metatoken(meta_epsilon, unicode_char_to_str(eat_utf8(src)));
         return t;
     }
-    else if ((*src)[0] == '\\' && (*src)[1] == 'e')
+    else if (((*src)[0] == '\\' && (*src)[1] == 'e')
+          || ((*src)[0] == '"'  && (*src)[1] == '"')
+          || ((*src)[0] == '\'' && (*src)[1] == '\''))
     {
         obj* t = new_metatoken(meta_epsilon, unicode_substr(*src, 0, 2));
         *src += 1;

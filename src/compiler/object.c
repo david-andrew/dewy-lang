@@ -250,10 +250,10 @@ void obj_print(obj* o)
         case Vector_t: vect_str(*(vect**)o->data); break;
         case Dictionary_t: dict_str(*(dict**)o->data); break;
         case Set_t: set_str(*(set**)o->data); break;
-        case ASTLeaf_t:
-        case ASTStar_t:
-        case ASTOr_t:
-        case ASTCat_t: ast_str(o); break;
+        // case ASTLeaf_t:
+        // case ASTStar_t:
+        // case ASTOr_t:
+        // case ASTCat_t: ast_str(o); break;
         default: printf("WARNING: obj_print() is not implemented for object of type \"%d\"\n", o->type); break;
     }
 }
