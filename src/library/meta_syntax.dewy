@@ -12,8 +12,8 @@
 #block_comment = '/' '{' (#block_comment | #block_string)* '}/';       // block comment, with allowed nested block comments
 #ws = (#wschar | #line_comment | #block_comment)*;          // optional whitespace sequence
 #anyset = '\\' [uUxX];                                      // \U, \u, \X, or \x used to indicate any unicode character
-#hex = '\\' [uUxX] [0-9a-fA-F]+ -/- [0-9a-fA-F];            // hex number literal. Basically skipping the number part makes it #any
-#number = [0-9]+ -/- [0-9];                                 // decimal number literal. Used to indicate # of repetitions
+#hex = '\\' [uUxX] [0-9a-fA-F]+ / [0-9a-fA-F];              // hex number literal. Basically skipping the number part makes it #any
+#number = [0-9]+ / [0-9];                                   // decimal number literal. Used to indicate # of repetitions
 #charsetchar = \U - [\-\[\]] - #wschar;                     // characters allowed in a set are any unicode excluding '-', '[', or ']', and whitespace
 #item = #charsetchar | #escape | #hex;                      // items that make up character sets, i.e. raw chars, escape chars, or hex chars
 #charset = '[' (#ws #item (#ws '-' #ws #item)? #ws)* ']';   // set of chars specified literally. Whitespace is ignored, and must be escaped.
@@ -48,7 +48,7 @@
 //syntax constructs
 #set = #anyset | #char | #hex | #charset | #compliment | #diff | #intersect | #union;
 #expr = #eps | #set | #group | #capture | #string | #star | #plus | #option | #count | #cat | #or | #identifier;
-#hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]* -/- [a-zA-Z0-9~!@#$&_?];
+#hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]* / [a-zA-Z0-9~!@#$&_?];
 #rule = #hashtag #ws '=' #ws #expr #ws ';';
 #start_symbol = (#ws #rule)* #ws;
 
@@ -128,7 +128,7 @@ Precedence levels
 //// Proposed alterations of each ////
 
 //Follow restriction
-#I = [A-Za-z][A-Za-z0-9_]* -/- [A-Za-z0-9_];
+#I = [A-Za-z][A-Za-z0-9_]* / [A-Za-z0-9_];
 #rule = #body_expr / #non_follow_expr;
 
 //Reject filter

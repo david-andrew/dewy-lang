@@ -51,19 +51,19 @@ Notes:
 #anyset = '\\' [uUxX]
 
 
-//#hex = '\\' [uUxX] [0-9a-fA-F]+
+//#hex = '\\' [uUxX] [0-9a-fA-F]+ / [0-9a-fA-F]
 #__8 = [0-9a-fA-F]
 #__9 = #__8 #__9
 #__9 = ϵ
 #hex = '\\' [uUxX] #__8 #__9
+#hex / [0-9a-fA-F]
 
-
-//#number = [0-9]+
+//#number = [0-9]+ / [0-9]
 #__10 = [0-9]
 #__11 = #__10 #__11
 #__11 = ϵ
 #number = #__10 #__11
-
+#number / [0-9]
 
 //#charsetchar = \U - [\-\[\]] - #wschar
 #charsetchar = \U - [\-\[\]] - #wschar
@@ -192,11 +192,12 @@ Notes:
 #expr = #identifier
 
 
-//#hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*
+//#hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]* / [a-zA-Z0-9~!@#$&_?]
 #__24 = [a-zA-Z0-9~!@#$&_?]
 #__25 = #__24 #__25
 #__25 = ϵ
 #hashtag = '#' [a-zA-Z] #__25
+#hashtag / [a-zA-Z0-9~!@#$&_?]
 
 
 //#rule = #hashtag #ws '=' #ws #expr #ws ';'
