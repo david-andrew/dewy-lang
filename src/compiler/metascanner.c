@@ -454,8 +454,8 @@ obj* match_meta_epsilon(char** src)
           || ((*src)[0] == '"'  && (*src)[1] == '"')
           || ((*src)[0] == '\'' && (*src)[1] == '\''))
     {
-        obj* t = new_metatoken(meta_epsilon, unicode_substr(*src, 0, 2));
-        *src += 1;
+        obj* t = new_metatoken(meta_epsilon, unicode_substr(*src, 0, 1));
+        *src += 2;
         return t;
     }
     return NULL;
