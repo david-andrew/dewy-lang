@@ -31,7 +31,6 @@ scan_fn rule_funcs[] = {
     match_block_comment,
     match_meta_epsilon,
     match_hashtag,
-    // match_meta_char,
     match_meta_single_quote,
     match_meta_double_quote,
     match_meta_hex_number,
@@ -45,6 +44,9 @@ scan_fn rule_funcs[] = {
     match_meta_semicolon,
     match_meta_vertical_bar,
     match_meta_minus,
+    match_meta_forward_slash,
+    match_meta_greater_than,
+    match_meta_less_than,
     match_meta_equals_sign,
     match_meta_left_parenthesis,
     match_meta_right_parenthesis,
@@ -265,42 +267,6 @@ obj* match_hashtag(char** src)
 }
 
 
-// /**
-//  * A single character (or escaped character) enclosed in "" or ''
-//  * 
-//  * #char = '"' (\U - '"' | #escape) '"';
-//  * #char = "'" (\U - "'" | #escape) "'";
-//  */
-// obj* match_meta_char(char** src)
-// {
-//     char quote; //store the type of quote, single (') or double (")
-//     if ((quote = (*src)[0]) == '\'' || quote == '"')
-//     {
-//         if ((*src)[1] == '\\') //indicates an escape char
-//         {
-//             size_t delta;
-//             if (peek_unicode(src, 3, &delta) == quote)
-//             {
-//                 obj* t = new_metatoken(meta_char, unicode_substr(*src, 1, 2));
-//                 *src += delta;
-//                 return t;
-//             }
-//         }
-//         else
-//         {
-//             size_t delta;
-//             if (peek_unicode(src, 2, &delta) == quote)
-//             {
-//                 obj* t = new_metatoken(meta_char, unicode_substr(*src, 1, 1));
-//                 *src += delta;
-//                 return t;
-//             }
-//         }
-//     }
-//     return NULL;
-// }
-
-
 /**
  * Match a single quote character (initializing/ending a single quote string body)
  * Implicitely don't match for meta_char (i.e. length 1 string) by calling match_meta_char() first
@@ -370,7 +336,6 @@ obj* match_meta_double_quote_char(char** src)
     //any single char except for '"'. Also implicitly exclude '\\' "//" "/{"
     if ((*src)[0] != 0 && (*src)[0] != '"')
     {
-        uint32_t c = eat_utf8(src);
         obj* t = new_metatoken(meta_char, unicode_char_to_str(eat_utf8(src)));
         return t;
     }
@@ -588,6 +553,39 @@ obj* match_meta_vertical_bar(char** src)
 obj* match_meta_minus(char** src) 
 {
     return *src[0] == '-' ? new_metatoken(meta_minus, unicode_substr((*src)++, 0, 0)) : NULL;
+}
+
+
+/**
+ * Match forward slash '/' used to indicate follow restriction, i.e. expressions that may not follow.
+ * 
+ * #forward_slash = '/';
+ */
+obj* match_meta_forward_slash(char** src)
+{
+    return *src[0] == '/' ? new_metatoken(meta_forward_slash, unicode_substr((*src)++, 0, 0)) : NULL;
+}
+
+
+/**
+ * Match greater than '>' used to indicate the left expression has higher precedence than the right expression.
+ * 
+ * #greater_than = '>';
+ */
+obj* match_meta_greater_than(char** src)
+{
+    return *src[0] == '>' ? new_metatoken(meta_greater_than, unicode_substr((*src)++, 0, 0)) : NULL;
+}
+
+
+/**
+ * Match less than '<' used to indicate the left expression has lower precedence than the right expressions.
+ * 
+ * #less_than = '<';
+ */
+obj* match_meta_less_than(char** src)
+{
+    return *src[0] == '<' ? new_metatoken(meta_less_than, unicode_substr((*src)++, 0, 0)) : NULL;
 }
 
 
