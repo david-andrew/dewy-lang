@@ -146,6 +146,20 @@ Precedence levels
 
 //priority filter
 //for precedence level, I think we'll have `<` `>` and they go in place of `|` 
-//TODO->what about associativity direction?
+//associativity is handled via exclusion
 
+//defining expressions
+#addition = #expr '+' #expr - #addition;                // left associativity
+#subtraction = #expr '-' #expr - #subtraction;          // left associativity
+#multiplication = #expr '*' #expr - #multiplication;    // left associativity
+#division = #expr '/' #expr - #division;                // left associativity
+#exponential = #expr - #exponential '^' #expr;          // right associativity
+#value = [0-9]+ ('.' [0-9]+)? ([eE] [+\-]? [0-9]+ ('.' [0-9]+)?)? / [0-9];
+
+//setting precedence levels
+#expr = #exponential > #multiplication | #division > #addition | #subtraction;
+#expr = #value; //precedence doesn't really matter here, but this acts just like an `| #value` on the end of the previous production
+
+#addition = #expr '+' #expr - #addition;        //left associativity
+#exponential = #expr - #exponential '^' #expr;  //right associativity
 }/
