@@ -16,7 +16,7 @@
 #number = [0-9]+ / [0-9];                                   // decimal number literal. Used to indicate # of repetitions
 #charsetchar = \U - [\-\[\]] - #wschar;                     // characters allowed in a set are any unicode excluding '-', '[', or ']', and whitespace
 #item = #charsetchar | #escape | #hex;                      // items that make up character sets, i.e. raw chars, escape chars, or hex chars
-#charset = '[' (#ws #item (#ws '-' #ws #item)? #ws)* ']';   // set of chars specified literally. Whitespace is ignored, and must be escaped.
+#charset = '[' (#ws #item (#ws '-' #ws #item)? #ws)+ ']';   // set of chars specified literally. Whitespace is ignored, and must be escaped.
 
 //paired grouping operators
 #group = '(' #ws #expr #ws ')';                             // group together/force precedence
@@ -38,21 +38,27 @@
 //implicit operators
 #cat = #expr (#ws #expr)+;                                  // concatenate left and right
 
-//binary operators
-#diff = #set #ws '-' #ws #set;                              // left but not right. TBD if only for charsets... could modify parser to allow for #expr here, where if both sides are matched, then it doesn't match...
+//binary expr operators
+#or = (#expr #ws '|' #ws #expr) - #union;                   // left or right expression
+#reject = (#expr #ws '-' #ws #expr) - #diff;                // reduce left expression only if it is not also the right expression
+#nofollow = #expr #ws '/' #ws #expr;                        // reduce left expression only if not followed by right expression
+#greaterthan = #expr #ws '>' #ws #expr;                     // left expression has higher precedence than right expression
+#lessthan = #expr #ws '<' #ws #expr;                        // left expression has lower precedence than right expression
+
+//binary set operators
+#diff = #set #ws '-' #ws #set;                              // everything in left that is not in right
 #intersect = #set #ws '&' #ws #set;                         // intersect of left and right
 #union = #set #ws '|' #ws #set;                             // union of left and right
-
-#or = (#expr #ws '|' #ws #expr) - #union;                   // left or right. TODO->update restriction syntax that it excludes #union.
 
 //syntax constructs
 #set = #anyset | #char | #hex | #charset | #compliment | #diff | #intersect | #union;
 #expr = #eps | #set | #group | #capture | #string | #star | #plus | #option | #count | #cat | #or | #identifier;
 #hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]* / [a-zA-Z0-9~!@#$&_?];
 #rule = #hashtag #ws '=' #ws #expr #ws ';';
-#start_symbol = (#ws #rule)* #ws;
+#grammar = (#ws #rule)* #ws;
+#start = #grammar;
 
-#update_parser_table(#start_symbol)
+#update_parser_table(#start)
 
 
 /{Interesting notes
