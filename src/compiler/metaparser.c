@@ -11,7 +11,9 @@ set* metaparser_bodies;
 set* metaparser_charsets;
 
 
-
+/**
+ * Initialize any internal objects used by the metaparser.
+ */
 void initialize_metaparser()
 {
     metaparser_heads = new_set();
@@ -19,6 +21,10 @@ void initialize_metaparser()
     metaparser_charsets = new_set();
 }
 
+
+/**
+ * Free any initialized objects used by the metaparser.
+ */
 void release_metaparser()
 {
     #define safe_free(A) if(A) { set_free(A); A = NULL; }
@@ -33,9 +39,10 @@ void release_metaparser()
  * Try to scan for a rule in the current list of tokens. 
  * Returns `true` if a rule was successfully parsed.
  */
-bool update_meta_symbols(vect* tokens)
+bool parse_next_meta_rule(vect* tokens)
 {
     //TODO
+    return false;
 }
 
 

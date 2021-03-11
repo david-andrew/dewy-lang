@@ -1,8 +1,8 @@
 #ifndef METAPARSER_H
 #define METAPARSER_H
 
-
-#include "set.h"
+#include "vector.h"
+// #include "set.h"
 
 /**
  * Productions are #head = #body
@@ -37,7 +37,7 @@
 
 void initialize_metaparser();
 void release_metaparser();
-
+bool parse_next_meta_rule(vect* tokens);
 
 
 
