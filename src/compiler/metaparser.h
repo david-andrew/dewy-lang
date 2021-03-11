@@ -19,8 +19,8 @@
  * 
  * 
  * Higher level sequencing
- * -> item sets
- * -> rnglr table
+ * -> compute all item sets from all rules
+ * -> compute rnglr table
  * ---> closure + goto + first
  * 
  * 
@@ -33,6 +33,10 @@
  *   lookahead::charset
  * }
  */
+
+
+void initialize_metaparser();
+void release_metaparser();
 
 
 

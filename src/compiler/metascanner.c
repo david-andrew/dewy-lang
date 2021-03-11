@@ -114,16 +114,25 @@ vect* metascanner_state_stack = NULL;
 
 
 /**
- * Initialize (if needed) and return the state stack singleton
+ * Initialize any internal objects used in the metascanner
  */
-vect* get_metascanner_state_stack()
+void initialize_metascanner()
 {
-    if (!metascanner_state_stack)
+    metascanner_state_stack = new_vect();
+    vect_push(metascanner_state_stack, new_uint((uint64_t)scan_root));
+}
+
+
+/**
+ * Free any initialized objects used in the metascanner
+ */
+void release_metascanner()
+{
+    if (metascanner_state_stack) //ensure not NULL
     {
-        metascanner_state_stack = new_vect();
-        vect_push(metascanner_state_stack, new_uint((uint64_t)scan_root));
+        vect_free(metascanner_state_stack);
+        metascanner_state_stack = NULL;
     }
-    return metascanner_state_stack;
 }
 
 
@@ -132,8 +141,7 @@ vect* get_metascanner_state_stack()
  */
 metascanner_state peek_metascanner_state()
 {
-    vect* stack = get_metascanner_state_stack();
-    obj* o = vect_peek(stack);
+    obj* o = vect_peek(metascanner_state_stack);
     return (metascanner_state)*(uint64_t*)o->data;
 }
 
@@ -143,8 +151,7 @@ metascanner_state peek_metascanner_state()
  */
 void push_metascanner_state(metascanner_state state)
 {
-    vect* stack = get_metascanner_state_stack();
-    vect_push(stack, new_uint((uint64_t)state));
+    vect_push(metascanner_state_stack, new_uint((uint64_t)state));
 }
 
 
@@ -153,24 +160,10 @@ void push_metascanner_state(metascanner_state state)
  */
 metascanner_state pop_metascanner_state()
 {
-    vect* stack = get_metascanner_state_stack();
-    obj* o = vect_pop(stack);
+    obj* o = vect_pop(metascanner_state_stack);
     metascanner_state state = (metascanner_state)*(uint64_t*)o->data;
     obj_free(o);
     return state;
-}
-
-
-/**
- * Free the singleton metascanner state stack.
- */
-void free_metascanner_state_stack()
-{
-    if (metascanner_state_stack) //ensure not NULL
-    {
-        vect_free(metascanner_state_stack);
-        metascanner_state_stack = NULL;
-    }
 }
 
 

@@ -18,11 +18,11 @@ typedef enum
 
 
 //forward declare functions for meta parsing
-vect* get_metascanner_state_stack();
+void initialize_metascanner();
+void release_metascanner();
 metascanner_state peek_metascanner_state();
 void push_metascanner_state(metascanner_state state);
 metascanner_state pop_metascanner_state();
-void free_metascanner_state_stack();
 
 obj* scan(char** src);
 obj* match_hashtag(char** src);

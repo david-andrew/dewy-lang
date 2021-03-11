@@ -6,6 +6,7 @@
 #include "utilities.h"
 #include "metatoken.h"
 #include "metascanner.h"
+#include "metaparser.h"
 
 int main(int argc, char* argv[])
 {
@@ -21,8 +22,9 @@ int main(int argc, char* argv[])
     char* head = source;
 
     //set up structures for the sequence of scanning/parsing
+    initialize_metascanner();
+    initialize_metaparser();
     vect* tokens = new_vect();
-
     obj* t = NULL;
 
     while (*head != 0 && (t = scan(&head)) != NULL)
@@ -41,5 +43,6 @@ int main(int argc, char* argv[])
 
     vect_free(tokens);
     free(source);
-    free_metascanner_state_stack();
+    release_metascanner();
+    release_metaparser();
 }
