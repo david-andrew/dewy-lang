@@ -38,6 +38,9 @@
 void initialize_metaparser();
 void release_metaparser();
 bool parse_next_meta_rule(vect* tokens);
+int get_next_real_metatoken(vect* tokens, int i);
+int get_next_metatoken_type(vect* tokens, metatoken_type type, int i);
+
 
 
 

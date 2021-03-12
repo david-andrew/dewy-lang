@@ -55,12 +55,14 @@ int main(int argc, char* argv[])
 int vect_tests()
 {
     vect* v0 = new_vect();
+    vect_free(v0);
     return 0;
 }
 
 int dict_tests()
 {
     dict* d0 = new_dict();
+    dict_free(d0);
     return 0;
 }
 
@@ -135,8 +137,8 @@ int set_tests()
     assert(set_equals(S0, S4));
 
     //try adding a value again
-    obj* i10 = I(10);
-    set_add(S4, i10);
+    // obj* i10 = I(10);
+    // set_add(S4, i10);
     assert_contains(S4, 10, true);
     // obj_free(i10); //free the object that wasn't added
     //TODO->can't free i10 b/c it gets inserted, and the original is removed...
@@ -214,7 +216,7 @@ int metascanner_tests()
 
     //set up structures for the sequence of scanning/parsing
     // vect* tokens = new_vect();
-
+    initialize_metascanner();
     obj* t;
 
     while (*head != 0 && (t = scan(&head)) != NULL)
@@ -224,7 +226,7 @@ int metascanner_tests()
     }
 
     free(source);
-    free_metascanner_state_stack();
+    release_metascanner();
 
     return 0;
 }

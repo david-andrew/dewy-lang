@@ -333,40 +333,65 @@ void obj_free(obj* o)
 {
     if (o != NULL)
     {
+        #define safe_free(A) if (A != NULL) free(A);
+
         //TODO->any object specific freeing that needs to happen. e.g. vects/dicts/sets need to call their specific version of free
         //handle freeing of o->data
         switch (o->type)
         {
-            case Boolean_t: free(o->data); break;   //free boolean pointer
-            case Character_t: free(o->data); break; //free character (uint32)
-            case Integer_t: free(o->data); break;   //free uint pointer
-            case UInteger_t: free(o->data); break;  //free int pointer
-            case String_t:                          //free the string
+            case Boolean_t: safe_free(o->data); break;      //free boolean pointer
+            case Character_t: safe_free(o->data); break;    //free character (uint32)
+            case Integer_t: safe_free(o->data); break;      //free uint pointer
+            case UInteger_t: safe_free(o->data); break;     //free int pointer
+            case String_t:
             {
-                free(*(char**)o->data);
-                free(o->data);
+                safe_free(*(char**)o->data);                //free string itself
+                free(o->data);                         //free pointer to the string
                 break;
             }
             case MetaToken_t: metatoken_free((metatoken*)o->data); break; 
             case Vector_t: 
             {
-                vect_free(*(vect**)o->data); 
-                free(o->data);
+                vect_free(*(vect**)o->data);                //free vector itself
+                free(o->data);                         //free pointer to the vector
                 break;
             }
             case Dictionary_t:
             { 
-                dict_free(*(dict**)o->data); 
+                dict_free(*(dict**)o->data);                //free the dict itself
+                free(o->data);                         //free pointer to the dict
                 break;
             }
             case Set_t:
             {
-                set_free(*(set**)o->data); 
+                set_free(*(set**)o->data);                  //free the set itself
+                free(o->data);                         //free pointer to the set
                 break;
             }
             default: printf("WARNING: obj_free() is not implemented for object of type \"%d\"\n", o->type); break;
         }
         free(o);
+    }
+}
+
+/**
+ * Get the void* data from inside an obj*, and free he obj* container.
+ * If the object does not match the specified type, throw an error.
+ */
+void* obj_free_keep_inner(obj* o, obj_type type)
+{
+    if (o->type == type)
+    {
+        void* data = o->data;
+        free(o);
+        return data;
+    }
+    else
+    {
+        printf("ERROR: attempted to obj_free_keep_inner() on an incorrect type:\n");
+        obj_print(o);
+        printf("Expected type {%d}\n", type);
+        exit(1);
     }
 }
 

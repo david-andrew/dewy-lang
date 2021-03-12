@@ -74,6 +74,24 @@ void metatoken_free(metatoken* t)
     free(t);
 }
 
+void metatoken_obj_free(obj* t)
+{
+    //free the metatoken if it's not NULL
+    metatoken* t_ptr = (metatoken*)t->data;
+    if (t_ptr != NULL) { metatoken_free(t_ptr); }
+
+    //free object container
+    free(t);
+
+    // obj* T = malloc(sizeof(obj));
+    // T->type = MetaToken_t;
+    // T->size = sizeof(metatoken);
+    // metatoken* t_ptr = malloc(sizeof(metatoken));
+    // *t_ptr = (metatoken){.type=type, .content=content};
+    // T->data = (void*)t_ptr;
+    // return T;
+}
+
 
 
 #endif

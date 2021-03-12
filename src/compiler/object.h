@@ -24,10 +24,6 @@ typedef enum
     Dictionary_t,
     Set_t,
     MetaAST_t,
-    // ASTCat_t,
-    // ASTOr_t,
-    // ASTStar_t,
-    // ASTLeaf_t,
 } obj_type;
 
 /**
@@ -65,6 +61,7 @@ uint64_t obj_hash(obj* o) ;
 int64_t obj_compare(obj* left, obj* right);
 bool obj_equals(obj* left, obj* right);
 void obj_free(obj* o);
+void* obj_free_keep_inner(obj* o, obj_type type);
 
 
 

@@ -8,6 +8,9 @@
 #include "metascanner.h"
 #include "metaparser.h"
 
+//should whitespace be automatically filtered from token sequences
+#define FILTER_WHITESPACE 1 //0 for false
+
 int main(int argc, char* argv[])
 {
     //print error if no file specified for parsing
@@ -29,11 +32,23 @@ int main(int argc, char* argv[])
 
     while (*head != 0 && (t = scan(&head)) != NULL)
     {
-        vect_push(tokens, t);
+        #if FILTER_WHITESPACE
+            metatoken_type type = ((metatoken*)t->data)->type;
+            if (type != whitespace && type != comment)
+            {
+                vect_push(tokens, t);
+            }
+            else
+            {
+                obj_free(t);
+            }
+        #else
+            vect_push(tokens, t);
+        #endif
     }
 
-    remove_token_type(tokens, whitespace);
-    remove_token_type(tokens, comment);
+    // remove_token_type(tokens, whitespace);
+    // remove_token_type(tokens, comment);
 
     for (size_t i = 0; i < vect_size(tokens); i++)
     {
