@@ -135,6 +135,25 @@ size_t unicode_strlen(uint32_t* string)
     return length;
 }
 
+
+/**
+ * Compare two unicode strings. 
+ * Identical algorithm to normal char* strcmp.
+ */
+int64_t unicode_strcmp(uint32_t* left, uint32_t* right)
+{
+    uint32_t l, r;
+    do
+    {
+        l = *left++;
+        r = *right++;
+        if (l == 0) break;
+    }
+    while (l == r);
+    return l - r;
+}
+
+
 /**
  * Clone a null terminated unicode string.
  */
@@ -610,9 +629,15 @@ void ascii_or_hex_str(uint32_t c)
 
 void unicode_string_str(uint32_t* s)
 {
-    putchar('"');
     uint32_t c;
     while ((c = *s++)) put_unicode(c);
+}
+
+void unicode_string_repr(uint32_t* s)
+{    
+    // putchar('"');
+    printf("U\"");
+    unicode_string_str(s);
     putchar('"');
 }
 

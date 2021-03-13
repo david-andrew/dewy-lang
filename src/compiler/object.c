@@ -247,7 +247,7 @@ int64_t obj_compare(obj* left, obj* right)
         case Integer_t: return *(int64_t*)left->data - *(int64_t*)right->data;
         case UInteger_t: return *(uint64_t*)left->data - *(uint64_t*)right->data;
         case String_t: return strcmp((char*)left->data, (char*)right->data);
-        // case UnicodeString_t: return unicode_string_compare((uint32_t*)left->data, (uint32_t*)right->data);
+        case UnicodeString_t: return unicode_strcmp((uint32_t*)left->data, (uint32_t*)right->data);
         // case MetaToken_t: return metatoken_compare((metatoken*)left->data, (metatoken*)right->data);
         case Vector_t: return vect_compare((vect*)left->data, (vect*)right->data);
         // case Dictionary_t: return dict_compare((dict*)left->data, (dict*)right->data);

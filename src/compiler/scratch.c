@@ -9,7 +9,7 @@
 #include "metaparser.h"
 
 //should whitespace be automatically filtered from token sequences
-#define FILTER_WHITESPACE 1 //0 for false
+#define FILTER_WHITESPACE 1 //1 for true, 0 for false
 
 int main(int argc, char* argv[])
 {
@@ -47,13 +47,16 @@ int main(int argc, char* argv[])
         #endif
     }
 
-    // remove_token_type(tokens, whitespace);
-    // remove_token_type(tokens, comment);
+    while (parse_next_meta_rule(tokens));
 
-    for (size_t i = 0; i < vect_size(tokens); i++)
+    if (vect_size(tokens) > 0)
     {
-        t = vect_get(tokens, i);
-        metatoken_str((metatoken*)t->data);
+        printf("unparsed tokens:\n");
+        for (size_t i = 0; i < vect_size(tokens); i++)
+        {
+            t = vect_get(tokens, i);
+            metatoken_str((metatoken*)t->data);
+        }
     }
 
     vect_free(tokens);

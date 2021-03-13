@@ -54,6 +54,7 @@ metatoken* new_metatoken(metatoken_type type, uint32_t* content);
 obj* new_metatoken_obj(metatoken_type type, uint32_t* content);
 metatoken* metatoken_copy(metatoken* t);
 void metatoken_str(metatoken* t);
+void metatoken_repr(metatoken* t);
 void metatoken_free(metatoken* t);
 
 #endif

@@ -38,8 +38,15 @@
 void initialize_metaparser();
 void release_metaparser();
 bool parse_next_meta_rule(vect* tokens);
+obj* metaparser_create_body(vect* body_tokens);
+bool is_metatoken_i_type(vect* tokens, int i, metatoken_type type);
 int get_next_real_metatoken(vect* tokens, int i);
 int get_next_metatoken_type(vect* tokens, metatoken_type type, int i);
+size_t metaparser_add_head(obj* head);
+obj* metaparser_get_head(size_t i);
+size_t metaparser_add_body(obj* body);
+vect* metaparser_get_body(size_t i);
+void metaparser_join(size_t head_idx, size_t body_idx);
 
 
 

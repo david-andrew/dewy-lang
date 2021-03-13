@@ -1,16 +1,22 @@
 #ifndef METAPARSER_C
 #define METAPARSER_C
 
+#include <stdio.h>
+
 #include "vector.h"
 #include "set.h"
 #include "metatoken.h"
 #include "metascanner.h"
 #include "metaparser.h"
+#include "utilities.h"
 
 
-set* metaparser_heads;
-set* metaparser_bodies;
-set* metaparser_charsets;
+set* metaparser_heads;      //set of all production nonterminals 
+set* metaparser_bodies;     //set of all production strings
+set* metaparser_charsets;   //set of all terminals (i.e. charsets) in all productions
+
+//join table
+vect* metaparser_join_table;
 
 
 /**
@@ -21,6 +27,7 @@ void initialize_metaparser()
     metaparser_heads = new_set();
     metaparser_bodies = new_set();
     metaparser_charsets = new_set();
+    metaparser_join_table = new_vect();
 }
 
 
@@ -29,10 +36,10 @@ void initialize_metaparser()
  */
 void release_metaparser()
 {
-    #define safe_free(A) if(A) { set_free(A); A = NULL; }
-    safe_free(metaparser_heads)
-    safe_free(metaparser_bodies)
-    safe_free(metaparser_charsets)
+    set_free(metaparser_heads);
+    set_free(metaparser_bodies);
+    set_free(metaparser_charsets);
+    vect_free(metaparser_join_table);
 }
 
 
@@ -43,70 +50,82 @@ void release_metaparser()
  */
 bool parse_next_meta_rule(vect* tokens)
 {
-    return false;
+    //get index of first non-whitespace/comment token, and check if hashtag
+    int start_idx = get_next_real_metatoken(tokens, 0);
+    if (!is_metatoken_i_type(tokens, start_idx, hashtag)) { return false; }
 
-    //get the index of the first non-whitespace/comment token. meta-rule expects a hashtag
-    int head_idx = get_next_real_metatoken(tokens, 0);
-    if (head_idx < 0){ return false; }
-    metatoken* head = (metatoken*)vect_get(tokens, head_idx)->data;
-    if (head->type != hashtag) { return false; }
-
-    //get the index of the next real token. meta-rule expects a meta_equals_sign
-    int tail_idx = get_next_real_metatoken(tokens, head_idx+1);
-    if (tail_idx < 0) { return false; }
-    metatoken* tail = (metatoken*)vect_get(tokens, tail_idx)->data;
-    if (tail->type != meta_equals_sign) { return false; }
+    //get index of next real token, and check if meta_equals_sign
+    int stop_idx = get_next_real_metatoken(tokens, start_idx+1);
+    if (!is_metatoken_i_type(tokens, stop_idx, meta_equals_sign)) { return false; }
 
     //search for the first occurance of a semicolon
-    tail_idx = get_next_metatoken_type(tokens, meta_semicolon, tail_idx+1);
-    if (tail_idx < 0) { return false; }
-    tail = (metatoken*)vect_get(tokens, tail_idx)->data;
+    stop_idx = get_next_metatoken_type(tokens, meta_semicolon, stop_idx+1);
+    if (stop_idx < 0) { return false; }
 
     //free all tokens up to the start of the rule (as they should be whitespace and comments)
-    for (int i = 0; i < head_idx; i++) { obj_free(vect_dequeue(tokens)); }
+    for (int i = 0; i < start_idx; i++) { obj_free(vect_dequeue(tokens)); }
 
-    //first token in the tokens stream should be the meta_identifier
-    metatoken* rule_identifier_token = (metatoken*)obj_free_keep_inner(vect_dequeue(tokens), MetaToken_t);
+    //first token in the tokens stream is the meta_identifier
+    metatoken* rule_identifier_token = obj_free_keep_inner(vect_dequeue(tokens), MetaToken_t);
 
-    //collect together all tokens from head to tail and store in the symbol table, as a vect
-    vect* rule_body = new_vect();
-    
-    //store all the tokens for the rule into the rule_body vector
-    //dequeued identifier already. Skip all comments/whitespace and stop before semicolon
-    for (int i = head_idx+1; i < tail_idx; i++)
+    //collect all tokens after identifier to tail that form the production body
+    vect* body_tokens = new_vect();
+    for (int i = start_idx+1; i <= stop_idx; i++)
     {
+        //keep token only if non-whitespace/comment
         obj* t = vect_dequeue(tokens);
         metatoken_type type = ((metatoken*)t->data)->type;
-        if (type != whitespace && type != comment)
-        {
-            vect_enqueue(rule_body, t);
-        }
-        else
-        {
-            obj_free(t);
-        }
+        if (type != whitespace && type != comment) { vect_enqueue(body_tokens, t); }
+        else { obj_free(t); }
     }
 
-    //free the semicolon at the end of the rule
-    obj_free(vect_dequeue(tokens));
+    //free delimiter tokens from body
+    obj_free(vect_dequeue(body_tokens));    // equals sign at start
+    obj_free(vect_pop(body_tokens));        // semicolon at end
 
-    //free the meta_equals sign at the start of the rule body
-    obj_free(vect_dequeue(rule_body));
+    //TODO->uncomment when the following are implemented
+    // metaparser_create_body(body_tokens)
+    // metaparser_add_head(head)
+    // metaparser_add_body(body)
+    // metaparser_join(head_idx, body_idx)
+    /*
+    //create the head from the rule_identifier_token
+    obj* head = new_unicode_string_obj(rule_identifier_token->content);
+    free(rule_identifier_token);
 
+    //recursively create the rule body for this production
+    obj* body = metaparser_create_body(body_tokens);
+    vect_free(body_tokens);
 
-    //TODO->add this rule to the parse table
-    return false;
+    //insert the head and body into their respective sets
+    size_t head_idx = metaparser_add_head(head);
+    size_t body_idx = metaparser_add_body(body);
 
-    // //create an entry in the symbol table that points to the AST for this rule
-    // char* rule_identifier = clone(rule_identifier_token->content);
-    // obj* id = new_string(rule_identifier);
-    // free(rule_identifier_token);
+    //link the head to the body in the join table
+    metaparser_join(head_idx, body_idx);
 
-    // //build an AST out of the tokens list
-    // obj* rule_ast = build_ast(rule_body, meta_symbols);
-    // dict_set(meta_symbols, id, rule_ast);
+    return true;
+    */
 
+    //for now just print out the rule head + body
+    unicode_string_str(rule_identifier_token->content);
+    printf(" = ");
+    for (size_t i = 0; i < vect_size(body_tokens); i++)
+    {
+        metatoken* t = vect_get(body_tokens, i)->data;
+        metatoken_str(t);
+    }
+
+    printf(";\n");
+
+    metatoken_free(rule_identifier_token);
+    vect_free(body_tokens);
+
+    return true;
 }
+
+
+obj* metaparser_create_body(vect* rule_body_tokens){}
 
 
 /**
@@ -147,6 +166,13 @@ int get_next_metatoken_type(vect* tokens, metatoken_type type, int i)
     return -1;
 }
 
+bool is_metatoken_i_type(vect* tokens, int i, metatoken_type type)
+{
+    if (i < 0 || vect_size(tokens) < i){ return false; }
+    metatoken* t = vect_get(tokens, i)->data;
+    return t->type == type;
+}
+
 
 // /**
 //  * Return the index of the end of the next rule in the tokens vector
@@ -157,6 +183,13 @@ int get_next_metatoken_type(vect* tokens, metatoken_type type, int i)
 // }
 
 
+size_t metaparser_add_head(obj* head){}
+obj* metaparser_get_head(size_t i){}
+
+size_t metaparser_add_body(obj* body){}
+vect* metaparser_get_body(size_t i){}
+
+void metaparser_join(size_t head_idx, size_t body_idx){}
 
 
 

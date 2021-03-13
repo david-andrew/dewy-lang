@@ -38,11 +38,54 @@ metatoken* metatoken_copy(metatoken* t)
     return new_metatoken(t->type, clone_unicode(t->content));
 }
 
-
 /**
- * Print out a string for each token type.
+ * Print out a string for each token type
  */
 void metatoken_str(metatoken* t)
+{
+    switch (t->type)
+    {
+        case hashtag:
+        case meta_char:
+        case meta_single_quote:
+        case meta_double_quote:
+        case meta_dec_number:
+        case meta_charset_char:
+        case meta_ampersand:
+        case meta_star:
+        case meta_plus:
+        case meta_question_mark:
+        case meta_tilde:
+        case meta_semicolon:
+        case meta_left_parenthesis:
+        case meta_right_parenthesis:
+        case meta_left_bracket:
+        case meta_right_bracket:
+        case meta_left_brace:
+        case meta_right_brace:
+        case whitespace:
+        case comment:
+            unicode_string_str(t->content); break;
+
+        //special cases for printing
+        case meta_escape: printf("\\"); unicode_string_str(t->content); break;
+        case meta_epsilon: printf("ϵ"); break;
+        case meta_anyset: printf("U"); break;
+        case meta_hex_number: printf("\\X"); unicode_string_str(t->content); break;
+        case meta_vertical_bar: printf(" | "); break;
+        case meta_minus: printf("-"); break;
+        case meta_forward_slash: printf(" / "); break;
+        case meta_greater_than: printf(" > "); break;
+        case meta_less_than: printf(" < "); break;
+        case meta_equals_sign: printf(" = "); break;
+    }
+}
+
+
+/**
+ * Print out a string representation for each token type
+ */
+void metatoken_repr(metatoken* t)
 {
     #define printenum(A) case A: printf(#A); break;
 
@@ -80,9 +123,7 @@ void metatoken_str(metatoken* t)
         printenum(comment)
     }
     printf("(`");
-    uint32_t c;
-    uint32_t* c_ptr = t->content;
-    while ((c = *c_ptr++)) { put_unicode(c); }
+    unicode_string_str(t->content);
     printf("`)\n");
 }
 

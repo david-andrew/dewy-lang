@@ -8,7 +8,7 @@
 //#wschar = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000]; //ascii + unicode whitespace chars
 #wschar = [\x9-\xD\x20];                                    // ascii whitespace characters.
 #line_comment = '/' '/' (\U - '\n')* '\n';                  // single line comment
-#block_string = \U* - \U* '}/'                              // inside of a block comment. Cannot end with block comment delimiter
+#block_string = \U* - \U* '}/';                             // inside of a block comment. Cannot end with block comment delimiter
 #block_comment = '/' '{' (#block_comment | #block_string)* '}/';       // block comment, with allowed nested block comments
 #ws = (#wschar | #line_comment | #block_comment)*;          // optional whitespace sequence
 #anyset = '\\' [uUxX];                                      // \U, \u, \X, or \x used to indicate any unicode character
@@ -33,7 +33,7 @@
 #plus = #expr #ws (#number)? #ws '+';                       // (number or one) or more 
 #option = #expr #ws '?';                                    // optional
 #count = #expr #ws #number;                                 // exactly number of
-#compliment = #set #ws '~'                                  // compliment of. equivalent to #any - #set
+#compliment = #set #ws '~';                                 // compliment of. equivalent to #any - #set
 
 //implicit operators
 #cat = #expr (#ws #expr)+;                                  // concatenate left and right
