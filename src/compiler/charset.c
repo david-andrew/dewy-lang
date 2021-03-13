@@ -20,9 +20,9 @@ charset* new_charset()
 {
     charset* s = malloc(sizeof(charset));
     *s = (charset){
-        .ranges=calloc(DEFAULT_CHARSET_CAPACITY, sizeof(urange)), 
-        .size=0, 
-        .capacity=DEFAULT_CHARSET_CAPACITY
+        .ranges = calloc(DEFAULT_CHARSET_CAPACITY, sizeof(urange)), 
+        .size = 0, 
+        .capacity = DEFAULT_CHARSET_CAPACITY
     };
     return s;
 }
@@ -33,12 +33,9 @@ charset* new_charset()
  */
 obj* new_charset_obj(charset* s)
 {
+    if (s == NULL) s = new_charset();
     obj* S = malloc(sizeof(obj));
-    S->type = CharSet_t;
-    S->size = 0;
-    charset** s_ptr = malloc(sizeof(charset*));
-    *s_ptr = s != NULL ? s : new_charset();
-    S->data = (void*)s_ptr;
+    *S = (obj){.type=CharSet_t, .data=s};
     return S;
 }
 

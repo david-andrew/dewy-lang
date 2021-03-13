@@ -47,12 +47,9 @@ set* new_set()
  */
 obj* new_set_obj(set* s)
 {
+    if (s == NULL) s = new_set();
     obj* S = malloc(sizeof(obj));
-    S->type = Set_t;
-    S->size = 0; //size needs to be determined on a per call basis
-    set** s_ptr = malloc(sizeof(set*));
-    *s_ptr = s != NULL ? s : new_set();
-    S->data = (void*)s_ptr;
+    *S = (obj){.type=Set_t, .data=s};
     return S;
 }
 

@@ -19,10 +19,14 @@
 
 vect* new_vect()
 {
-    vect* v_ptr = malloc(sizeof(vect));
-    vect v = {0, 0, DEFAULT_VECT_CAPACITY, calloc(DEFAULT_VECT_CAPACITY, sizeof(obj*))};
-    *v_ptr = v;
-    return v_ptr;
+    vect* v = malloc(sizeof(vect));
+    *v = (vect){
+        .head = 0, 
+        .size = 0, 
+        .capacity = DEFAULT_VECT_CAPACITY, 
+        .list = calloc(DEFAULT_VECT_CAPACITY, sizeof(obj*))
+    };
+    return v;
 }
 
 /*
@@ -30,12 +34,9 @@ vect* new_vect()
 */
 obj* new_vect_obj(vect* v)
 {
+    if (v == NULL) v = new_vect();
     obj* V = malloc(sizeof(obj));
-    V->type = Vector_t;
-    V->size = 0; //size needs to be determined on a per call basis
-    vect** v_ptr = malloc(sizeof(vect*));
-    *v_ptr = v != NULL ? v : new_vect();
-    V->data = (void*)v_ptr;
+    *V = (obj){.type=Vector_t, .data=v};
     return V;
 }
 
@@ -59,7 +60,7 @@ void vect_resize(vect* v, size_t new_size)
         exit(1);
     }
 
-    obj** new_list = calloc(new_size, sizeof(obj));
+    obj** new_list = calloc(new_size, sizeof(obj*));
     if (new_list == NULL) //calloc failed 
     {
         printf("ERROR: resize failed. calloc returned NULL\n");
@@ -286,7 +287,7 @@ vect* vect_copy_with_refs(vect* v, dict* refs)
         //if a reference doesn't yet exist for the copy, create a copy, otherwise use the existing reference
         if (!dict_contains(refs, item))
         {
-            dict_set(refs, item, obj_copy_inner(item, refs));
+            dict_set(refs, item, obj_copy_with_refs(item, refs));
         }
         vect_append(copy, dict_get(refs, item));
     }

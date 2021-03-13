@@ -68,7 +68,7 @@ int dict_tests()
 
 int set_tests()
 {   
-    #define I(v) new_int(v)
+    #define I(v) new_int_obj(v)
 
     set* S0 = new_set();
 

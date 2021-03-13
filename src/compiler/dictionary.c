@@ -34,17 +34,16 @@
  */
 dict* new_dict()
 {
-    dict* d_ptr = malloc(sizeof(dict));
-    dict d = {
+    dict* d = malloc(sizeof(dict));
+    *d = (dict){
         .size = 0,                                                      //initial elements in the dictionary (i.e. none)
         .icapacity = DEFAULT_DICT_CAPACITY,                             //initial capacity of the indices table
         .ecapacity = DEFAULT_DICT_CAPACITY,                             //initial capacity of the entries vector
         .indices = malloc(DEFAULT_DICT_CAPACITY * sizeof(size_t)),      //pointer to the indices table
         .entries = calloc(DEFAULT_DICT_CAPACITY, sizeof(dict_entry))    //pointer to the entries vector
     };
-    memset(d.indices, -1, d.icapacity * sizeof(size_t));                //set all values to show as "empty"
-    *d_ptr = d;
-    return d_ptr;
+    memset(d->indices, -1, d->icapacity * sizeof(size_t));              //set all values to show as "empty"
+    return d;
 }
 
 /**
@@ -52,12 +51,9 @@ dict* new_dict()
  */
 obj* new_dict_obj(dict* d)
 {
+    if (d == NULL) d = new_dict();
     obj* D = malloc(sizeof(obj));
-    D->type = Dictionary_t;
-    D->size = 0; //size needs to be determined on a per call basis
-    dict** d_ptr = malloc(sizeof(dict*));
-    *d_ptr = d != NULL ? d : new_dict();
-    D->data = (void*)d_ptr;
+    *D = (obj){.type=Dictionary_t, .data=d};
     return D;
 }
 
@@ -243,7 +239,7 @@ obj* dict_get(dict* d, obj* key)
  */
 obj* dict_get_uint_key(dict* d, uint64_t u)
 {
-    obj* key = new_uint(u);
+    obj* key = new_uint_obj(u);
     obj* value = dict_get(d, key);
     obj_free(key);
     return value;
@@ -279,37 +275,28 @@ obj* dict_get_uint_key(dict* d, uint64_t u)
 
 // }
 
-//TODO->move to token.c
-obj* dict_get_hashtag_key(dict* d, obj* hashtag_obj)
-{
-    assert(hashtag_obj->type == MetaToken_t);
-    //create a string object key from the token
-    metatoken* hashtag_token = (metatoken*)hashtag_obj->data;
-    uint32_t* identifier = clone_unicode(hashtag_token->content);
-    obj* key = new_unicode_string(identifier);
+// //TODO->move to token.c
+// obj* dict_get_hashtag_key(dict* d, obj* hashtag_obj)
+// {
+//     assert(hashtag_obj->type == MetaToken_t);
+//     //create a string object key from the token
+//     metatoken* hashtag_token = (metatoken*)hashtag_obj->data;
+//     uint32_t* identifier = clone_unicode(hashtag_token->content);
+//     obj* key = new_unicode_string(identifier);
 
-    //get the value from the dict using the string key
-    obj* value = dict_get(d, key);
+//     //get the value from the dict using the string key
+//     obj* value = dict_get(d, key);
     
-    //free the key before we return 
-    obj_free(key);
+//     //free the key before we return 
+//     obj_free(key);
 
-    return value;
+//     return value;
 
-}
+// }
 
 
 void dict_reset(dict* d)
 {
-    // for (int i = 0; i < d->size; i++)
-    // {
-    //     dict_entry e = d->entries[i];
-    //     if (e.key != e.value && e.value != NULL) //only if key and value are different object, free both
-    //     {
-    //         obj_free(e.value); 
-    //     }
-    //     obj_free(e.key);
-    // }
     dict_free_elements_only(d);
     free(d->indices);
     free(d->entries);
@@ -326,18 +313,6 @@ void dict_reset(dict* d)
 
 void dict_free(dict* d)
 {
-    // for (int i = 0; i < d->size; i++)
-    // {
-    //     dict_entry e = d->entries[i];
-    //     if (e.key != e.value && e.value != NULL) //only if key and value are different object, free both
-    //     {
-    //         obj_free(e.value); 
-    //     }
-    //     obj_free(e.key);
-    // }
-    // free(d->indices);
-    // free(d->entries);
-    // free(d);
     dict_free_elements_only(d);
     dict_free_table_only(d);
 }

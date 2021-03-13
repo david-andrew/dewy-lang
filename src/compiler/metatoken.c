@@ -7,27 +7,45 @@
 #include "metatoken.h"
 #include "utilities.h"
 
-#define printenum(A) case A: printf(#A); break;
 
 /**
- * Create an object holding a token of the specified type.
+ * Create a metatoken with the given `type` and `content`
  */
-obj* new_metatoken(metatoken_type type, uint32_t* content)
+metatoken* new_metatoken(metatoken_type type, uint32_t* content)
 {
+    metatoken* t = malloc(sizeof(metatoken));
+    *t = (metatoken){.type=type, .content=content};
+    return t;
+}
+
+/**
+ * Create an object holding a token of the specified `type` and `content`
+ */
+obj* new_metatoken_obj(metatoken_type type, uint32_t* content)
+{
+    metatoken* t = new_metatoken(type, content);
     obj* T = malloc(sizeof(obj));
-    T->type = MetaToken_t;
-    T->size = sizeof(metatoken);
-    metatoken* t_ptr = malloc(sizeof(metatoken));
-    *t_ptr = (metatoken){.type=type, .content=content};
-    T->data = (void*)t_ptr;
+    *T = (obj){.type=MetaToken_t, .data=t};
     return T;
 }
+
+
+/**
+ * Create a copy of the metatoken
+ */
+metatoken* metatoken_copy(metatoken* t)
+{
+    return new_metatoken(t->type, clone_unicode(t->content));
+}
+
 
 /**
  * Print out a string for each token type.
  */
 void metatoken_str(metatoken* t)
 {
+    #define printenum(A) case A: printf(#A); break;
+
     switch (t->type)
     {
         printenum(hashtag)
@@ -70,26 +88,11 @@ void metatoken_str(metatoken* t)
 
 void metatoken_free(metatoken* t)
 {
-    free(t->content);
-    free(t);
-}
-
-void metatoken_obj_free(obj* t)
-{
-    //free the metatoken if it's not NULL
-    metatoken* t_ptr = (metatoken*)t->data;
-    if (t_ptr != NULL) { metatoken_free(t_ptr); }
-
-    //free object container
-    free(t);
-
-    // obj* T = malloc(sizeof(obj));
-    // T->type = MetaToken_t;
-    // T->size = sizeof(metatoken);
-    // metatoken* t_ptr = malloc(sizeof(metatoken));
-    // *t_ptr = (metatoken){.type=type, .content=content};
-    // T->data = (void*)t_ptr;
-    // return T;
+    if (t != NULL)
+    {
+        free(t->content);
+        free(t);
+    }
 }
 
 

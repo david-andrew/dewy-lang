@@ -325,10 +325,6 @@ uint64_t djb2a(char* str)
 }
 
 
-
-//Implementation of dictionary
-// https://stackoverflow.com/questions/327311/how-are-pythons-built-in-dictionaries-implemented
-
 //http://www.isthe.com/chongo/tech/comp/fnv/
 uint64_t fnv1a(char* str)
 {
@@ -338,6 +334,24 @@ uint64_t fnv1a(char* str)
     {
         hash ^= c;
         hash *= 1099511628211;
+    }
+    return hash;
+}
+
+//TODO->consider converting back to utf8 for hash?
+uint64_t unicode_fnv1a(uint32_t* str)
+{
+    uint64_t hash = 14695981039346656037lu;
+    uint32_t codepoint;
+    while ((codepoint = *str++))
+    {
+        //reinterpret the codepoint as 4 bytes
+        uint8_t* c = (uint8_t*)&codepoint; 
+        for (int i = 3; i >= 0; i--)    //loop from least to most significant
+        {
+            hash ^= *(c + i);
+            hash *= 1099511628211;
+        }
     }
     return hash;
 }
@@ -569,7 +583,7 @@ size_t utf8_length(char* str)
 /**
     print the unicode character, or a special character for some special inputs
 */
-void unicode_str(uint32_t c)
+void unicode_char_str(uint32_t c)
 {
     if (c == 0)                 //null character. represents an empty string/set
     {
@@ -592,6 +606,14 @@ void ascii_or_hex_str(uint32_t c)
 {
     if (0x21 <= c && c <= 0x7E) put_unicode(c);
     else printf("\\x%X", c);
+}
+
+void unicode_string_str(uint32_t* s)
+{
+    putchar('"');
+    uint32_t c;
+    while ((c = *s++)) put_unicode(c);
+    putchar('"');
 }
 
 

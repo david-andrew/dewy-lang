@@ -8,8 +8,8 @@
 //// Object structs and typedefs ////
 
 /** 
-    Enum for each of the different types object types that exist
-*/
+ * Enum for each of the different types object types that exist
+ */
 typedef enum 
 { 
     Boolean_t,
@@ -23,16 +23,14 @@ typedef enum
     Vector_t,
     Dictionary_t,
     Set_t,
-    MetaAST_t,
 } obj_type;
 
 /**
-    Struct/type declaration for generic objects
-*/
+ * Struct/type declaration for generic objects
+ */
 typedef struct
 {
     obj_type type;  //integer specifying what type of object.
-    size_t size;    //size of the data allocated for this object
     void* data;     //data allocated for this object
 } obj;
 
@@ -41,21 +39,28 @@ typedef struct dict_struct dict;
 
 //// Object Init Functions ////
 
-obj* new_bool(bool b);
-bool* new_bool_ptr(bool b);     //lighter weight than obj* of bool
-obj* new_char(uint32_t c);
-obj* new_int(int64_t i);
-obj* new_uint(uint64_t u);
-obj* new_string(char* s);       //new string object, from an allocated string
-obj* new_unicode_string(uint32_t* s);
-obj* new_ustr(char* s);         //new string object from a non-allocated string
+//light weight primitive pointer allocations.
+//can use instead of obj* if needed
+bool* new_bool(bool b);
+uint32_t* new_char(uint32_t c);
+int64_t* new_int(int64_t i);
+uint64_t* new_uint(uint64_t u);
+
+//full obj* wrapped objects
+obj* new_bool_obj(bool b);
+obj* new_char_obj(uint32_t c);
+obj* new_int_obj(int64_t i);
+obj* new_uint_obj(uint64_t u);
+obj* new_string_obj(char* s);                   //new string object from an allocated string
+obj* new_string_obj_copy(char* s);              //new string object from a non-allocated string
+obj* new_unicode_string_obj(uint32_t* s);
 
 
 //// Utility Functions ////
 
 size_t obj_size(obj* o);
 obj* obj_copy(obj* o);
-obj* obj_copy_inner(obj* o, dict* refs);
+obj* obj_copy_with_refs(obj* o, dict* refs);
 void obj_print(obj* o);
 uint64_t obj_hash(obj* o) ;
 int64_t obj_compare(obj* left, obj* right);

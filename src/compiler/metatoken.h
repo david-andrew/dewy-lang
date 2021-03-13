@@ -4,8 +4,8 @@
 #include "object.h"
 
 /**
-    Enum/type declaration for each possible token type for reading syntax rules
-*/
+ * Enum/type declaration for each possible token type for reading syntax rules
+ */
 typedef enum
 {
     hashtag,
@@ -41,8 +41,8 @@ typedef enum
 } metatoken_type;
 
 /**
-    Struct/type declaration for tokens for lexer/parser
-*/
+ * Struct/type declaration for tokens for lexer/parser
+ */
 typedef struct
 {
     metatoken_type type;
@@ -50,9 +50,9 @@ typedef struct
 } metatoken;
 
 
-obj* new_metatoken(metatoken_type type, uint32_t* content); //TODO->replace with below versions
-//token* new_metatoken(token_type, uint32_t* content)
-//obj* new_metatoken_obj(token* t);
+metatoken* new_metatoken(metatoken_type type, uint32_t* content);
+obj* new_metatoken_obj(metatoken_type type, uint32_t* content);
+metatoken* metatoken_copy(metatoken* t);
 void metatoken_str(metatoken* t);
 void metatoken_free(metatoken* t);
 

@@ -36,6 +36,7 @@ bool is_charset_char(uint32_t c);
 uint64_t djb2(char* str);
 uint64_t djb2a(char* str);
 uint64_t fnv1a(char* str);
+uint64_t unicode_fnv1a(uint32_t* str);
 uint64_t hash_uint(uint64_t val);
 uint64_t hash_int(int64_t val);
 uint64_t hash_bool(bool val);
@@ -52,7 +53,8 @@ uint32_t eat_utf8(char** str_ptr);
 uint32_t peek_unicode(char** str_ptr, size_t index, size_t* delta);
 size_t utf8_length(char* str);
 uint32_t* unicode_char_to_str(uint32_t c);
-void unicode_str(uint32_t c);
+void unicode_char_str(uint32_t c);
 void ascii_or_hex_str(uint32_t c);
+void unicode_string_str(uint32_t* s);
 
 #endif
