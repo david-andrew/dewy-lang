@@ -44,18 +44,18 @@ void vect_prepend(vect* v, obj* item);
 void vect_push(vect* v, obj* item);
 obj* vect_pop(vect* v);
 obj* vect_peek(vect* v);
-
 void vect_enqueue(vect* v, obj* item);
 obj* vect_dequeue(vect* v);
-
 void vect_set(vect* v, obj* item, size_t index);
+vect* vect_merge(vect* left, vect* right);
+vect* vect_merge_copy(vect* left, vect* right);
 bool vect_contains(vect* v, obj* item);
 bool vect_find(vect* v, obj* item, size_t* index);
 obj* vect_get(vect* v, size_t index);
 obj* vect_remove(vect* v, size_t index);
 void vect_delete(vect* v, size_t index);
 void vect_reset(vect* v);
-vect* vect_copy(vect* src, vect* dest);
+vect* vect_copy(vect* v);
 vect* vect_copy_with_refs(vect* v, dict* refs);
 void vect_free(vect* v);
 void vect_free_list_only(vect* v);

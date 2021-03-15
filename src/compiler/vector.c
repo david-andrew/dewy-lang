@@ -184,6 +184,60 @@ void vect_set(vect* v, obj* item, size_t index)
     v->list[(v->head + index) % v->capacity] = item;
 }
 
+
+/**
+ * Merge two vectors while freeing the input left/right inputs.
+ */
+vect* vect_merge(vect* left, vect* right)
+{
+    //vect to hold merge result
+    vect* merge = new_vect();
+    
+    //resize merge if not big enough to hold all data. ensure size is power of 2
+    size_t min_size = vect_size(left) + vect_size(right);
+    if (merge->capacity < min_size)
+    {
+        size_t size = DEFAULT_VECT_CAPACITY;
+        while (size < min_size) { size *= 2; }
+        vect_resize(merge, size);
+    }
+    
+    // pull items in order from each vector into the merge vector
+    while (vect_size(left) > 0) { vect_enqueue(merge, vect_dequeue(left)); }
+    while (vect_size(right) > 0) { vect_enqueue(merge, vect_dequeue(right)); }
+    
+    //free empty left/right vectors
+    vect_free(left);
+    vect_free(right);
+
+    return merge;
+}
+
+
+/**
+ * Merge two vectors without modifying the input left/right inputs
+ */
+vect* vect_merge_copy(vect* left, vect* right)
+{
+    //vect to hold merge result
+    vect* merge = new_vect();
+    
+    //resize merge if not big enough to hold all data. ensure size is power of 2
+    size_t min_size = vect_size(left) + vect_size(right);
+    if (merge->capacity < min_size)
+    {
+        size_t size = DEFAULT_VECT_CAPACITY;
+        while (size < min_size) { size *= 2; }
+        vect_resize(merge, size);
+    }
+    
+    // pull items in order from each vector into the merge vector. copy items so that left/right not modified
+    for (size_t i = 0; i < vect_size(left); i++) { vect_enqueue(merge, obj_copy(vect_get(left, i))); }
+    for (size_t i = 0; i < vect_size(right); i++) { vect_enqueue(merge, obj_copy(vect_get(right, i))); }
+    
+    return merge;
+}
+
 bool vect_contains(vect* v, obj* item)
 {
     size_t index;
@@ -268,13 +322,14 @@ void vect_reset(vect* v)
 }
 
 
-vect* vect_copy(vect* src, vect* dest)
+vect* vect_copy(vect* v)
 {
-    for (int i = 0; i < vect_size(src); i++)
+    vect* copy = new_vect();
+    for (int i = 0; i < vect_size(v); i++)
     {
-        vect_append(dest, obj_copy(vect_get(src, i)));
+        vect_append(copy, obj_copy(vect_get(v, i)));
     }
-    return dest;
+    return copy;
 }
 
 vect* vect_copy_with_refs(vect* v, dict* refs)

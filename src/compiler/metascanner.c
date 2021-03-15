@@ -11,13 +11,11 @@
 
 
 //function pointer type for token scan functions
-typedef obj* (*scan_fn)(char**);
+typedef obj* (*metascan_fn)(char**);
 
-//macro to get the length of each of the function arrays
-#define len(A) sizeof(A) / sizeof(scan_fn)
 
 //tokens to scan for before entering any meta syntax context
-scan_fn root_funcs[] = {
+metascan_fn root_funcs[] = {
     match_hashtag,
     match_whitespace,
     match_line_comment,
@@ -25,7 +23,7 @@ scan_fn root_funcs[] = {
 };
 
 //rules to scan while reading a meta rule
-scan_fn rule_funcs[] = {
+metascan_fn rule_funcs[] = {
     match_whitespace,
     match_line_comment,
     match_block_comment,
@@ -57,7 +55,7 @@ scan_fn rule_funcs[] = {
 };
 
 //rules to scan in the body of a charset
-scan_fn charset_funcs[] = {
+metascan_fn charset_funcs[] = {
     match_whitespace,
     match_line_comment,
     match_block_comment,
@@ -69,7 +67,7 @@ scan_fn charset_funcs[] = {
 };
 
 //rules for the body of a single quote '' string
-scan_fn single_quote_string_funcs[] = {
+metascan_fn single_quote_string_funcs[] = {
     match_line_comment,
     match_block_comment,
     match_meta_hex_number,
@@ -79,7 +77,7 @@ scan_fn single_quote_string_funcs[] = {
 };
 
 //rules for the body of a double quote "" string
-scan_fn double_quote_string_funcs[] = {
+metascan_fn double_quote_string_funcs[] = {
     match_line_comment,
     match_block_comment,
     match_meta_hex_number,
@@ -89,7 +87,7 @@ scan_fn double_quote_string_funcs[] = {
 };
 
 //rules to scan inside meta function calls
-scan_fn metafunc_body_funcs[] = {
+metascan_fn metafunc_body_funcs[] = {
     //TBD what exactly is allowed inside of a meta function call. for now we are only allowing meta-identifiers
     //potentially allow {} blocks, inside of which, normal dewy expressions can be called, just like string interpolation    
     match_whitespace,
@@ -101,7 +99,7 @@ scan_fn metafunc_body_funcs[] = {
 };
 
 //rules that are read (and ignored) while scanning for the next character
-scan_fn scan_peek_funcs[] = {
+metascan_fn scan_peek_funcs[] = {
     match_whitespace,
     match_line_comment,
     match_block_comment,
@@ -172,6 +170,9 @@ metascanner_state pop_metascanner_state()
  */
 obj* scan(char** src)
 {
+    //macro to get the length of each of the function arrays
+    #define len(A) sizeof(A) / sizeof(metascan_fn)
+
     if (*src) //check if any string left to scan
     {
         //for each possible state, scan for the corresponding tokens

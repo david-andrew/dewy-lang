@@ -20,9 +20,11 @@ typedef enum
     String_t,
     UnicodeString_t,
     MetaToken_t,
+    MetaItem_t,
     Vector_t,
     Dictionary_t,
     Set_t,
+    JoinRow_t,
 } obj_type;
 
 /**

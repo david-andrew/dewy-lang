@@ -52,7 +52,8 @@
 
 //syntax constructs
 #set = #anyset | #char | #hex | #charset | #compliment | #diff | #intersect | #union;
-#expr = #eps | #set | #group | #capture | #string | #star | #plus | #option | #count | #cat | #or | #identifier;
+#expr = #eps | #set | #group | #capture | #string | #star | #plus | #option | #count 
+    | #cat | #or | #greaterthan | #lessthan | #reject | #nofollow | #identifier;
 #hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]* / [a-zA-Z0-9~!@#$&_?];
 #rule = #hashtag #ws '=' #ws #expr #ws ';';
 #grammar = (#ws #rule)* #ws;
@@ -88,23 +89,35 @@ all whitespace in charsets must either be escaped or in hex
 
 /{
 Precedence levels
-3 - group
-3 - capture
-3 - hexset/charset []
+//TODO...
+//probably no associativity to worry about
 
-4 - star
-4 - plus
-4 - option
-4 - compliment
-5 - diff
-5 - intersect
-5 - union
+0 - group
+0 - capture
+0 - charset
+0 - string
+0 - anyset
+0 - eps
+0 - hex
 
-7 - concatenation
+1 - star
+1 - plus
+1 - option
+1 - compliment
+1 - count
 
+2 - concatenation
 
-8 - or
+3 - diff
+3 - intersect
+3 - union
+3 - reject
 
+4 - or
+4 - greater than
+4 - less than
+
+5  - nofollow
 
 
 #what about restrictions / disambiguation filters?

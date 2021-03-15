@@ -152,6 +152,7 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
             copy->data = metatoken_copy((metatoken*)o->data);
             break;
         }
+        // case MetaSymbol_t:{ break; }
         case Vector_t: 
         {
             copy->data = vect_copy_with_refs((vect*)o->data, refs);
@@ -189,15 +190,17 @@ void obj_print(obj* o)
     {
         case Boolean_t: printf(*(bool*)o->data ? "true" : "false"); break;
         case Character_t: unicode_char_str(*(uint32_t*)o->data); break;
-        case CharSet_t: charset_str((charset*)o->data);
+        case CharSet_t: charset_str(o->data);
         case Integer_t: printf("%ld", *(int64_t*)o->data); break;
         case UInteger_t: printf("%lu", *(uint64_t*)o->data); break;
-        case String_t: printf("%s", (char*)o->data); break;
-        case UnicodeString_t: unicode_string_str((uint32_t*)o->data); break;
-        case MetaToken_t: metatoken_str((metatoken*)o->data); break;
-        case Vector_t: vect_str((vect*)o->data); break;
-        case Dictionary_t: dict_str((dict*)o->data); break;
-        case Set_t: set_str((set*)o->data); break;
+        case String_t: printf("%s", o->data); break;
+        case UnicodeString_t: unicode_string_str(o->data); break;
+        case MetaToken_t: metatoken_str(o->data); break;
+        // case MetaItem_t: metaitem_str(o->data); break;
+        case Vector_t: vect_str(o->data); break;
+        case Dictionary_t: dict_str(o->data); break;
+        case Set_t: set_str(o->data); break;
+        // case JoinRow_t: joinrow_str(o->data); break;
         default: printf("WARNING: obj_print() is not implemented for object of type \"%d\"\n", o->type); break;
     }
 }
@@ -212,16 +215,17 @@ uint64_t obj_hash(obj* o)
     {
         case Boolean_t: return hash_bool(*(bool*)o->data);
         case Character_t: return hash_uint(*(uint32_t*)o->data);
-        // case CharSet_t: return hash_charset((charset*)o->data);
+        // case CharSet_t: return hash_charset(o->data);
         case Integer_t: return hash_int(*(int64_t*)o->data);
         case UInteger_t: return hash_uint(*(uint64_t*)o->data);
-        case String_t: return fnv1a((char*)o->data);
-        case UnicodeString_t: return unicode_fnv1a((uint32_t*)o->data);
+        case String_t: return fnv1a(o->data);
+        case UnicodeString_t: return unicode_fnv1a(o->data);
         // case MetaToken_t: return metatoken_hash((metatoken*)o->data);
-        case Vector_t: return vect_hash((vect*)o->data);
-        // case Dictionary_t: return dict_hash((dict*)o->data);
-        case Set_t: return set_hash((set*)o->data);
-        default: printf("WARNING: obj_hash() is not implemented for object of type \"%d\"\n", o->type); return 0;
+        // case MetaSymbol_t: return metasymbol_hash(o->data);
+        case Vector_t: return vect_hash(o->data);
+        // case Dictionary_t: return dict_hash(o->data);
+        case Set_t: return set_hash(o->data);
+        default: printf("WARNING: obj_hash() is not implemented for object of type \"%d\"\n", o->type); exit(1);
     }
 }
 
@@ -252,7 +256,7 @@ int64_t obj_compare(obj* left, obj* right)
         case Vector_t: return vect_compare((vect*)left->data, (vect*)right->data);
         // case Dictionary_t: return dict_compare((dict*)left->data, (dict*)right->data);
         // case Set_t: return set_compare((set*)left->data, (set*)right->data);
-        default: printf("WARNING: obj_compare() is not implemented for object of type \"%d\"\n", left->type); return 0;
+        default: printf("WARNING: obj_compare() is not implemented for object of type \"%d\"\n", left->type); exit(1);
     }
 }
 
@@ -298,7 +302,11 @@ void obj_free(obj* o)
             case Dictionary_t: dict_free((dict*)o->data); break;
             case Set_t: set_free((set*)o->data); break;
             
-            default: printf("WARNING: obj_free() is not implemented for object of type \"%d\"\n", o->type); break;
+            default: 
+                printf("WARNING: obj_free() is not implemented for object of type \"%d\"\ncontents:\n", o->type); 
+                obj_print(o); 
+                printf("\n");
+                exit(1);
         }
         free(o);
     }
