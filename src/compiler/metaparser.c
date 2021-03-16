@@ -51,32 +51,49 @@ void release_metaparser()
 
 
 //function pointer type for token scan functions
-typedef metaast* (*metaparse_fn)(vect* body_tokens);
+typedef metaast* (*metaparse_fn)(vect* tokens);
 
 //tokens to scan for before entering any meta syntax context
-metaparse_fn metaparser_match_funcs[] = {
-    //TODO->include everything we're scanning for that creates a node...
+metaparse_fn metaparser_match_all_funcs[] = {
     parse_meta_eps,
     parse_meta_char,
     parse_meta_string,
     parse_meta_charset,
     parse_meta_anyset,
     parse_meta_hex,
-    // parse_meta_star,
-    // parse_meta_plus,
-    // parse_meta_option,
-    // parse_meta_count,
-    // parse_meta_compliment,
-    // parse_meta_cat,
-    
-    //unimplemented
-    // parse_meta_or,
+    parse_meta_identifier,
+    parse_meta_star,
+    parse_meta_plus,
+    parse_meta_option,
+    parse_meta_count,
+    parse_meta_compliment,
+    parse_meta_cat,
+    parse_meta_or,
+    parse_meta_group,
+    parse_meta_capture,
 
-    //implement when doing srnglr filters
-    // parse_meta_greater_than,
-    // parse_meta_less_than,
-    // parse_meta_reject,
-    // parse_meta_nofollow,
+    //special expressions for srnglr filters
+    parse_meta_greaterthan,
+    parse_meta_lessthan,
+    parse_meta_reject,
+    parse_meta_nofollow,
+};
+
+metaparse_fn metaparser_match_single_unit_funcs[] = {
+    parse_meta_eps,
+    parse_meta_char,
+    parse_meta_string,
+    parse_meta_charset,
+    parse_meta_anyset,
+    parse_meta_hex,
+    parse_meta_identifier,
+    parse_meta_star,
+    parse_meta_plus,
+    parse_meta_option,
+    parse_meta_count,
+    parse_meta_compliment,
+    parse_meta_group,
+    parse_meta_capture,
 };
 
 
@@ -188,9 +205,9 @@ metaast* metaparser_build_metaast(vect* body_tokens)
 {
     #define len(A) sizeof(A) / sizeof(metaparse_fn)
     metaast* match;
-    for (size_t i = 0; i < len(metaparser_match_funcs); i++)
+    for (size_t i = 0; i < len(metaparser_match_all_funcs); i++)
     {
-        if ((match = metaparser_match_funcs[i](body_tokens)))
+        if ((match = metaparser_match_all_funcs[i](body_tokens)))
         {
             return match;
         }
@@ -201,7 +218,7 @@ metaast* metaparser_build_metaast(vect* body_tokens)
 
 
 /**
- * Recursively construct the grammar symbol string from the given vect* of tokens.
+ * Recursively construct the grammar symbol string from the given a meta-ast.
  * all heads, bodies, and charsets are inserted into their respective metaparser set.
  * additionally, corresponding join table entries are also created.
  * Calls vect_free(rule_body_tokens) at the end of the func.
@@ -210,178 +227,8 @@ metaast* metaparser_build_metaast(vect* body_tokens)
  */
 vect* metaparser_create_body(obj* head, metaast* body_ast)
 {
-    
-
-    // //determine what indices the parser may be split at
-    // vect* split_idxs = metaparser_get_split_idxs(body_tokens);
-    // vect* body;
-    // if (vect_size(split_idxs) == 0)
-    // {
-    //     //recursively construct the body with all the tokens
-    //     body = metaparser_parse_single_body(head, body_tokens);
-    // }
-    // else
-    // {
-        
-    //     vect* delimiters = new_vect();
-    //     int offset = 0;
-    //     for (int i = 0; i < vect_size(split_idxs); i++)
-    //     {
-
-    //     }
-    // }
-
-    // vect_free(split_idxs);
-
-
-
-    // //determine if the tokens can be split into sub components
-    // int split_idx = metaparser_get_split_idx(body_tokens);
-
-    // //a vector containing integers that map to the index of either charsets, or nonterminal identifiers.
-    // vect* body;
-
-    // //construct body for splitable vs non-splitable token sequences
-    // if (split_idx < 0)
-    // {
-    //     //recursively construct the body with all the tokens
-    //     body = metaparser_parse_single_body(head, body_tokens);
-    // }
-    // else
-    // {
-    //     //split the tokens at the delimiter
-    //     vect* left_body_tokens = new_vect();
-    //     for (int i = 0; i < split_idx - 1; i++) { vect_enqueue(left_body_tokens, vect_dequeue(body_tokens)); }
-    //     metatoken* delimiter = obj_free_keep_inner(vect_dequeue(body_tokens), MetaToken_t);
-
-    //     //TODO->depending on delimiter, obj* sub_head = NULL; //use instead of head for building
-
-    //     //recursively build the bodies of the split left and right portions
-    //     vect* left_body = metaparser_create_body(NULL, left_body_tokens);
-    //     vect* right_body = metaparser_create_body(NULL, body_tokens);
-
-    //     //merge the left and right bodies according to the delimiter
-    //     body = metaparser_merge_left_right_body(head, left_body, right_body, delimiter);
-    // }
-
-
-    // //determine identifier that maps to this body. if this is a subcomponent of a rule, 
-    // //then try to use an existing identifier for this exact single production.
-    // //if no identical production exists, then generate a new anonymous identifier.
-    // //if head is predefined (i.e. top level user specified rule), then use the given head, 
-    // //regardless of if it may be duplicating an existing rule.
-    // //this is so the user can correctly refer to it in other rules.
-    // if (head == NULL)
-    // {
-    //     head = metaparser_get_production_head(body);
-    //     if (head == NULL)
-    //     {
-    //         head = metaparser_get_anonymous_rule_head();
-    //     }
-    // }
-
-    // size_t head_idx = metaparser_add_head(head);
-    // size_t body_idx = metaparser_add_body(body);
-    // metaparser_join(head_idx, body_idx);
-
-    // //cleanup
-    // vect_free(body_tokens);
-
-    // return body;
+    return NULL;
 }
-
-
-// /**
-//  * Find the indeces of the tokens that split the sub components of the rule body.
-//  * If no delimiters are found at the lowest level of precedence, then -1 is returned.
-//  * Delimiting tokens include `|`, `<`, `>`, `-`, '/' , '&'
-//  */
-// int metaparser_get_split_idxs(vect* rule_body_tokens)
-// {
-//     //skip parenthesis (), brackets {}, braces [], strings ""/'',  
-// }
-
-
-// /**
-//  * Parse a single meta grammar object. this includes: 
-//  * eps, string/char, charset, anyset, hex, number, star, plus, option, count, compliment, or cat
-//  */
-// vect* metaparser_parse_single_body(obj* head, vect* body_tokens)
-// {
-//     //macro to get the length of each of the function arrays
-//     #define len(A) sizeof(A) / sizeof(metaparse_fn)
-
-//     vect* body;
-//     for (size_t i = 0; i < len(metaparser_match_funcs); i++)
-//     {    
-//         // if ((body = metaparser_match_funcs[i](body_tokens)))
-//         // {
-//         //     //check if body already exists in metaparser_bodies
-//         //     //if yes, use existing version's index in bodies
-//         //     //else create a new entry
-//         //     //if head is null, create anonymous identifier for it (if no entry exists yet)
-//         // }
-//     }
-
-//     printf("ERROR: reached end of parse single body with input:\n - head = ");
-//     obj_print(head);
-//     printf("\n - body = ");
-//     vect_str(body);
-//     printf("\n");
-//     exit(1);
-// }
-
-
-// /**
-//  * 
-//  */
-// vect* metaparser_merge_left_right_body(obj* head, vect* left_body, vect* right_body, metatoken* delimiter)
-// {
-//     //if left and right are both charsets, and the split delimiter is a charset operator, then merge both into a single charset
-//     //TODO->this needs to create a body from the charset
-//     if ((metaparser_is_body_charset(left_body) && metaparser_is_body_charset(right_body)) && 
-//         (delimiter->type == meta_minus || delimiter->type == meta_ampersand || delimiter->type == meta_vertical_bar))
-//     {
-//         charset* left = vect_dequeue(left_body)->data;
-//         charset* right = vect_dequeue(right_body)->data;
-//         charset* merge;
-//         switch (delimiter->type)
-//         {
-//             case meta_minus: merge = charset_diff(left, right); break;
-//             case meta_ampersand: merge = charset_intersect(left, right); break;
-//             case meta_vertical_bar: merge = charset_union(left, right); break;
-//             default:
-//                 printf("ERROR: unknown delimiter {"); 
-//                 metatoken_str(delimiter); 
-//                 printf("} for charset binary operation\n"); 
-//                 exit(1);
-//         }
-
-//         //reuse vect for the combined charset output
-//         vect* merge_vect = left_body;
-//         vect_enqueue(merge_vect, new_charset_obj(merge));
-
-//         //free up old objects
-//         vect_free(right_body);
-//         charset_free(left);
-//         charset_free(right);
-
-//         return merge_vect;
-//     }
-
-//     //otherwise handle normal merge
-//     //TODO
-// }
-
-
-/**
- * Check if the body vect contains exactly one charset.
- */
-bool metaparser_is_body_charset(vect* body)
-{
-    return vect_size(body) == 1 && vect_get(body, 0)->type == CharSet_t;
-}
-
 
 /**
  * Return the uint32_t codepoint specified by the token, depending on its type.
@@ -401,197 +248,6 @@ uint32_t metaparser_extract_char_from_token(metatoken* t)
             exit(1);
     }
 }
-
-
-
-/**
- * Attempt to parse an epsilone from the tokens list.
- * Returns `metaast*` if eps found, else `NULL`
- */
-metaast* parse_meta_eps(vect* tokens)
-{
-    if (vect_size(tokens) == 1)
-    {
-        metatoken* t = vect_get(tokens, 0)->data;
-        if (t->type == meta_epsilon)
-        {
-            vect_free(tokens);
-            return new_metaast_null_node(metaast_eps);
-        }
-    }
-    return NULL;
-}
-
-
-/**
- * 
- */
-metaast* parse_meta_char(vect* tokens)
-{
-    if (vect_size(tokens) == 3)
-    {
-        metatoken* t0 = vect_get(tokens, 0)->data; 
-        metatoken* t1 = vect_get(tokens, 1)->data; 
-        metatoken* t2 = vect_get(tokens, 2)->data;
-        if ((t0->type == meta_single_quote && t2->type == meta_single_quote) 
-        || (t0->type == meta_double_quote && t2->type == meta_double_quote))
-        {
-            if (t1->type == meta_char || t1->type == meta_escape || t1->type == meta_hex_number)
-            {
-                uint32_t c = metaparser_extract_char_from_token(t1);
-                charset* C = new_charset();
-                charset_add_char(C, c);
-                vect_free(tokens);
-                return new_metaast_charset_node(metaast_charset, C);
-            }
-        }
-    }
-    return NULL;
-}
-
-
-/**
- * 
- */
-metaast* parse_meta_string(vect* tokens)
-{
-    const size_t size = vect_size(tokens);
-    if (size >= 4) //strings must have at least 2 inner characters (and 2 quotes)
-    {
-        //if starts & ends with a quote
-        metatoken* t0 = vect_get(tokens, 0)->data;
-        metatoken* tf = vect_get(tokens, size-1)->data;
-        if ((t0->type == meta_single_quote && tf->type == meta_single_quote) 
-        || (t0->type == meta_double_quote && tf->type == meta_double_quote))
-        {   
-            //iterate through the characters in the string (stopping before the last is a quote)
-            for (size_t i = 1; i < size - 1; i++)
-            {
-                //strings may only contain chars, hex numbers and escapes
-                metatoken* t = vect_get(tokens, i)->data;
-                if (t->type != meta_char && t->type != meta_hex_number && t->type != meta_escape)
-                {
-                    return NULL;
-                }
-            }
-
-            //length of string is vect size - 2 quote tokens
-            const size_t len = size - 2;
-
-            //allocate room for all characters + null terminater
-            uint32_t* string = malloc((len + 1) * sizeof(uint32_t));
-            
-            //insert each char from the tokens list into the string
-            for (size_t i = 0; i < len; i++)
-            {
-                metatoken* t = vect_get(tokens, i+1)->data;
-                uint32_t c = metaparser_extract_char_from_token(t);
-                string[i] = c;
-            }
-            string[len] = 0; //null terminator at the end
-            
-            vect_free(tokens);
-            return new_metaast_string_node(metaast_string, string);
-        }
-    }
-    return NULL;
-}
-
-
-/**
- * 
- */
-metaast* parse_meta_charset(vect* tokens)
-{
-    const size_t size = vect_size(tokens);
-    return NULL;
-}
-
-
-/**
- * 
- */
-metaast* parse_meta_anyset(vect* tokens)
-{
-    if (vect_size(tokens) == 1)
-    {
-        metatoken* t = vect_get(tokens, 0)->data;
-        if (t->type == meta_anyset)
-        {
-            //create anyset by taking compliment of an empty set
-            charset* nullset = new_charset();
-            charset* anyset = charset_compliment(nullset);
-            charset_free(nullset);
-            vect_free(tokens);
-            return new_metaast_charset_node(metaast_charset, anyset);
-        }
-    }
-    return NULL;
-}
-
-
-/**
- * 
- */
-metaast* parse_meta_hex(vect* tokens)
-{
-    return NULL;
-}
-
-
-/**
- * 
- */
-metaast* parse_meta_star(vect* tokens)
-{
-    return NULL;
-}
-
-
-/**
- * 
- */
-metaast* parse_meta_plus(vect* tokens)
-{
-    return NULL;
-}
-
-
-/**
- * 
- */
-metaast* parse_meta_option(vect* tokens)
-{
-    return NULL;
-}
-
-
-/**
- * 
- */
-metaast* parse_meta_count(vect* tokens)
-{
-    return NULL;
-}
-
-
-/**
- * 
- */
-metaast* parse_meta_compliment(vect* tokens)
-{
-    return NULL;
-}
-
-
-/**
- * 
- */
-metaast* parse_meta_cat(vect* tokens)
-{
-    return NULL;
-}
-
 
 
 /**
@@ -640,13 +296,384 @@ bool is_metatoken_i_type(vect* tokens, int i, metatoken_type type)
 }
 
 
-// /**
-//  * Return the index of the end of the next rule in the tokens vector
-//  */
-// size_t get_next_rule_boundary(vect* tokens, size_t start)
-// {
+/**
+ * Attempt to parse an epsilone from the tokens list.
+ * If matches, tokens will be freed, else returns NULL.
+ * 
+ * #eps = 'ϵ' | '\\e' | "''" | '""';
+ */
+metaast* parse_meta_eps(vect* tokens)
+{
+    if (vect_size(tokens) == 1)
+    {
+        metatoken* t = vect_get(tokens, 0)->data;
+        if (t->type == meta_epsilon)
+        {
+            vect_free(tokens);
+            return new_metaast_null_node(metaast_eps);
+        }
+    }
+    return NULL;
+}
 
-// }
+
+/**
+ * Attempt to parse a char (i.e. length 1 string) from the tokens list.
+ * If matches, tokens will be freed, else returns NULL.
+ * 
+ * #char = '"' (\U - '"' | #escape | #hex) '"';
+ * #char = "'" (\U - "'" | #escape | #hex) "'"; 
+ */
+metaast* parse_meta_char(vect* tokens)
+{
+    if (vect_size(tokens) == 3)
+    {
+        metatoken* t0 = vect_get(tokens, 0)->data; 
+        metatoken* t1 = vect_get(tokens, 1)->data; 
+        metatoken* t2 = vect_get(tokens, 2)->data;
+        if ((t0->type == meta_single_quote && t2->type == meta_single_quote) 
+        || (t0->type == meta_double_quote && t2->type == meta_double_quote))
+        {
+            if (t1->type == meta_char || t1->type == meta_escape || t1->type == meta_hex_number)
+            {
+                uint32_t c = metaparser_extract_char_from_token(t1);
+                charset* cs = new_charset();
+                charset_add_char(cs, c);
+                vect_free(tokens);
+                return new_metaast_charset_node(metaast_charset, cs);
+            }
+        }
+    }
+    return NULL;
+}
+
+
+/**
+ * Attempt to parse a string from the tokens list.
+ * If matches, tokens will be freed, else returns NULL.
+ * 
+ * #string = '"' (\U - '"' | #escape | #hex)2+ '"';
+ * #string = "'" (\U - "'" | #escape | #hex)2+ "'";
+ */
+metaast* parse_meta_string(vect* tokens)
+{
+    const size_t size = vect_size(tokens);
+    if (size >= 4) //strings must have at least 2 inner characters (and 2 quotes)
+    {
+        //if starts & ends with a quote
+        metatoken* t0 = vect_get(tokens, 0)->data;
+        metatoken* tf = vect_get(tokens, size-1)->data;
+        if ((t0->type == meta_single_quote && tf->type == meta_single_quote) 
+        || (t0->type == meta_double_quote && tf->type == meta_double_quote))
+        {   
+            //iterate through the characters in the string (stopping before the last is a quote)
+            for (size_t i = 1; i < size - 1; i++)
+            {
+                //strings may only contain chars, hex numbers and escapes
+                metatoken* t = vect_get(tokens, i)->data;
+                if (t->type != meta_char && t->type != meta_hex_number && t->type != meta_escape)
+                {
+                    return NULL;
+                }
+            }
+
+            //length of string is vect size - 2 quote tokens
+            const size_t len = size - 2;
+
+            //allocate room for all characters + null terminater
+            uint32_t* string = malloc((len + 1) * sizeof(uint32_t));
+            
+            //insert each char from the tokens list into the string
+            for (size_t i = 0; i < len; i++)
+            {
+                metatoken* t = vect_get(tokens, i+1)->data;
+                uint32_t c = metaparser_extract_char_from_token(t);
+                string[i] = c;
+            }
+            string[len] = 0; //null terminator at the end
+            
+            vect_free(tokens);
+            return new_metaast_string_node(metaast_string, string);
+        }
+    }
+    return NULL;
+}
+
+
+/**
+ * Attempt to parse a charset from the tokens list.
+ * If matches, tokens will be freed, else returns NULL.
+ * 
+ * #item = (\U - [\-\[\]] - #wschar) | #escape | #hex;
+ * #charset = '[' (#ws #item (#ws '-' #ws #item)? #ws)+ ']';
+ */
+metaast* parse_meta_charset(vect* tokens)
+{
+    //check starts/ends with []
+    //if content size is 0, then throw error
+    // const size_t size = vect_size(tokens);
+    return NULL;
+}
+
+
+/**
+ * Attempt to parse an anyset from the tokens list
+ * If matches, tokens will be freed, else returns NULL.
+ * 
+ * #anyset = '\\' [uUxX];
+ */
+metaast* parse_meta_anyset(vect* tokens)
+{
+    if (vect_size(tokens) == 1)
+    {
+        metatoken* t = vect_get(tokens, 0)->data;
+        if (t->type == meta_anyset)
+        {
+            //create anyset by taking compliment of an empty set
+            charset* nullset = new_charset();
+            charset* anyset = charset_compliment(nullset);
+            charset_free(nullset);
+            vect_free(tokens);
+            return new_metaast_charset_node(metaast_charset, anyset);
+        }
+    }
+    return NULL;
+}
+
+
+/**
+ * Attempt to parse a hex literal character from the tokens list.
+ * If matches, tokens will be freed, else returns NULL.
+ * 
+ * #hex = '\\' [uUxX] [0-9a-fA-F]+ / [0-9a-fA-F];
+ */
+metaast* parse_meta_hex(vect* tokens)
+{
+    if (vect_size(tokens) == 1)
+    {
+        metatoken* t = vect_get(tokens, 0)->data;
+        if (t->type == meta_hex_number)
+        {
+            uint32_t c = metaparser_extract_char_from_token(t);
+            charset* cs = new_charset();
+            charset_add_char(cs, c);
+            vect_free(tokens);
+            return new_metaast_charset_node(metaast_charset, cs);
+        }
+    }
+    return NULL;
+}
+
+
+/**
+ * Attempt to parse a hashtag expression from the tokens list.
+ * If matches, tokens will be freed, else returns NULL.
+ * 
+ * #hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]* / [a-zA-Z0-9~!@#$&_?];
+ */
+metaast* parse_meta_identifier(vect* tokens)
+{
+    if (vect_size(tokens) == 1)
+    {
+        metatoken* t = vect_get(tokens, 0)->data;
+        if (t->type == hashtag)
+        {
+            //free the token without touching the hashtag string
+            t = obj_free_keep_inner(vect_pop(tokens), MetaToken_t);            
+            uint32_t* tag = t->content;
+            free(t);
+            vect_free(tokens);
+            return new_metaast_string_node(metaast_identifier, tag);
+        }
+    }
+    return NULL;
+}
+
+
+/**
+ * 
+ */
+metaast* parse_meta_star(vect* tokens)
+{
+    //check ends with a star
+    //check for optional number before that
+    //check that rest of tokens is a single unit
+    size_t size = vect_size(tokens);
+    if (size > 1)
+    {
+        metatoken* t0 = vect_get(tokens, size - 1)->data;
+        if (t0->type == meta_star)
+        {
+            size_t expr_size = size - 1;
+            uint64_t count = 0;
+
+            //check for optional count right before star
+            if (size > 2) 
+            {
+                metatoken* t1 = vect_get(tokens, size - 2)->data;
+                if (t1->type == meta_dec_number)
+                {
+                    count = parse_unicode_dec(t1->content);
+                    expr_size -= 1;
+                }
+            }
+
+            //store the tokens for the star expression, in case inner match fails
+            vect* star_tokens = new_vect();
+            for (size_t i = 0; i < size - expr_size; i++)
+            {
+                vect_push(star_tokens, vect_pop(tokens));
+            }
+
+            //attempt to parse the inner expression
+            #define len(A) sizeof(A) / sizeof(metaparse_fn)
+            metaast* inner = NULL;
+            for (size_t i = 0; i < len(metaparser_match_single_unit_funcs); i++)
+            {
+                if ((inner = metaparser_match_single_unit_funcs[i](tokens)))
+                {
+                    //matched a star expression
+                    vect_free(star_tokens);
+                    return new_metaast_repeat_node(metaast_star, count, inner);
+                }
+            }
+            
+            //restore the tokens vector with the tokens from the star expression
+            for (size_t i = 0; i < size - expr_size; i++) 
+            { 
+                vect_push(tokens, vect_pop(star_tokens));
+            }
+            vect_free(star_tokens);
+            
+        }
+    }
+    return NULL;
+}
+
+
+/**
+ * 
+ */
+metaast* parse_meta_plus(vect* tokens)
+{
+    //check ends with a plus
+    //check for optional number before that
+    //check that rest of tokens is a single unit
+    return NULL;
+}
+
+
+/**
+ * 
+ */
+metaast* parse_meta_option(vect* tokens)
+{
+    //check ends with a question mark
+    //check that rest of tokens is a single unit
+    return NULL;
+}
+
+
+/**
+ * 
+ */
+metaast* parse_meta_count(vect* tokens)
+{
+    //check ends with a number
+    //check that rest of tokens is a single unit
+    return NULL;
+}
+
+
+/**
+ * 
+ */
+metaast* parse_meta_compliment(vect* tokens)
+{
+    //check ends with a tilde
+    //check that rest of tokens is a single unit
+    return NULL;
+}
+
+
+/**
+ * 
+ */
+metaast* parse_meta_cat(vect* tokens)
+{
+    //determine that lowest precedence operator is cat
+    return NULL;
+}
+
+/**
+ * 
+ */
+metaast* parse_meta_or(vect* tokens)
+{
+    //determine that lowest precedence operator is or
+    return NULL;
+}
+
+
+/**
+ * 
+ */
+metaast* parse_meta_group(vect* tokens)
+{
+    //determine that matching parenthesis is last token in vector
+    return NULL;
+}
+
+
+/**
+ * 
+ */
+metaast* parse_meta_capture(vect* tokens)
+{
+    //determine that matching bracket is last token in vector
+    return NULL;
+}
+
+
+/**
+ * 
+ */
+metaast* parse_meta_greaterthan(vect* tokens)
+{
+    //determine that lowest precedence operator is greaterthan
+    return NULL;
+}
+
+
+/**
+ * 
+ */
+metaast* parse_meta_lessthan(vect* tokens)
+{
+    //determine that lowest precedence operator is lessthan
+    return NULL;
+}
+
+
+/**
+ * 
+ */
+metaast* parse_meta_reject(vect* tokens)
+{
+    //determine that lowest precedence operator is reject
+    return NULL;
+}
+
+
+/**
+ * 
+ */
+metaast* parse_meta_nofollow(vect* tokens)
+{
+    //determine that lowest precedence operator is nofollow
+    return NULL;
+}
+
 
 
 size_t metaparser_add_head(obj* head){}

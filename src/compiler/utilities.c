@@ -446,8 +446,8 @@ uint64_t parse_hex(char* str)
 
 
 /**
-    Read a hex string and convert to an unsigned integer
-*/
+ * Read a hex string and convert to an unsigned integer
+ */
 uint64_t parse_unicode_hex(uint32_t* str)
 {
     size_t len = unicode_strlen(str);
@@ -480,6 +480,38 @@ uint64_t hex_digit_to_value(char c)
     printf("ERROR: character %c is not a hex digit\n", c);
     return 0;
 }
+
+
+/**
+ * Read a decimal string, and convert to an unsigned integer.
+ */
+uint64_t parse_unicode_dec(uint32_t* str)
+{
+    size_t len = unicode_strlen(str);
+    uint64_t pow = 1;
+    uint64_t val = 0;
+    for (int64_t i = len - 1; i >= 0; i--)
+    {
+        val += dec_digit_to_value(str[i]) * pow;
+        pow *= 10;
+    }
+    return val;
+}
+
+
+/**
+ * Convert a decimal digit to its numerical value
+ */
+uint64_t dec_digit_to_value(char c)
+{
+    if (is_dec_digit(c))
+    {
+        return c - '0';
+    }
+    printf("ERROR: character %c is not a decimal digit\n", c);
+    return 0;
+}
+
 
 /**
     print the unicode character to the terminal as UTF-8
