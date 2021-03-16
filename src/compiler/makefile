@@ -1,9 +1,9 @@
-all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o mast.o metascanner.o metaparser.o charset.o item.o
+all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o metaast.o metascanner.o metaparser.o charset.o item.o
  
 
 #current completed step is simple lexer
-dewy: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o mast.o metascanner.o parser.o
-	clang -o dewy dewy_compiler_compiler.o utilities.o object.o metatoken.o dictionary.o vector.o  set.o mast.o metascanner.o parser.o
+dewy: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o metaast.o metascanner.o parser.o
+	clang -o dewy dewy_compiler_compiler.o utilities.o object.o metatoken.o dictionary.o vector.o  set.o metaast.o metascanner.o parser.o -lm
 
 
 utilities.o: utilities.c utilities.h
@@ -30,8 +30,8 @@ charset.o: charset.c charset.h
 item.o: item.c item.h
 	clang -c -o item.o item.c
 
-mast.o: mast.c mast.h
-	clang -c -o mast.o mast.c
+metaast.o: metaast.c metaast.h
+	clang -c -o metaast.o metaast.c
 
 metascanner.o: metascanner.c metascanner.h
 	clang -c -o metascanner.o metascanner.c
@@ -39,8 +39,8 @@ metascanner.o: metascanner.c metascanner.h
 metaparser.o: metaparser.c metaparser.h
 	clang -c -o metaparser.o metaparser.c
 
-unit_test.o: unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o mast.o charset.o metascanner.o
-	clang -o unit_test.o unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o mast.o charset.o metascanner.o
+unit_test.o: unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o metaast.o charset.o metascanner.o
+	clang -o unit_test.o unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o metaast.o charset.o metascanner.o -lm
 
 test: unit_test.o
 	./unit_test.o
@@ -51,7 +51,7 @@ valgrind_test: unit_test.o
 	rm unit_test.o
 
 scratch:
-	clang scratch.c charset.c utilities.c metatoken.c metascanner.c metaparser.c vector.c object.c set.c dictionary.c mast.c
+	clang scratch.c charset.c utilities.c metatoken.c metascanner.c metaparser.c vector.c object.c set.c dictionary.c metaast.c -lm -g
 
 dewy_compiler_compiler.o: dewy_compiler_compiler.c
 	clang -c -o dewy_compiler_compiler.o dewy_compiler_compiler.c

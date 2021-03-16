@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include <charset.h>
+#include "charset.h"
 
 
 //used to represent the initial metasyntax read in by the parser
@@ -14,18 +14,18 @@ Node struct map:
 
     NULL (i.e. empty node)
     - metaast_eps
-    - metaast_anyset
     
     metaast_string_node
     - metaast_string
     - metaast_identifier
 
-    metaast_char_node
-    - metaast_char
-    - metaast_hex (doesn't have it's own enum type name since identical in function to char)
-
     metaast_charset_node
     - metaast_charset
+    (don't have their own type name since identical in function to charset)
+    // metaast_anyset
+    // metaast_char
+    // metaast_hex
+
 
     metaast_repeat_node
     - metaast_star
@@ -46,7 +46,6 @@ Node struct map:
     metaast_sequence_node
     - metaast_cat
     - metaast_or
-
 */
 
 
@@ -68,16 +67,18 @@ typedef enum {
     metaast_identifier,
 
     //set specific node types
-    metaast_anyset,
-    metaast_char,           //also includes hex literals
+    // metaast_anyset,
+    // metaast_char,           
+    // metaast_hex,
     metaast_charset,
     metaast_compliment,
     metaast_intersect
-} metaast_types;
+} metaast_type;
 
 
+// \e uses this directly with node=NULL
 typedef struct {
-    metaast_types type;
+    metaast_type type;
     void* node;
 } metaast;
 
@@ -103,6 +104,7 @@ typedef struct {
 
 //A B C D, A | B | C | D
 typedef struct {
+    size_t size;
     metaast* sequence; //array of metaast
 } metaast_sequence_node;
 
@@ -114,16 +116,32 @@ typedef struct {
 } metaast_binary_op_node;
 
 
-// 'A', \X65
-typedef struct {
-    uint32_t c;
-} metaast_char_node;
-
-
-// [a-zA-Z]
+// [a-zA-Z],  'A',  \X65,  \U
 typedef struct {
     charset* c;
 } metaast_charset_node;
 
+
+//create meta-ast objects
+metaast* new_metaast(metaast_type type, void* node);
+metaast* new_metaast_null_node(metaast_type type);
+metaast* new_metaast_string_node(metaast_type type, uint32_t* string);
+metaast* new_metaast_repeat_node(metaast_type type, uint64_t count, metaast* inner);
+metaast* new_metaast_unary_op_node(metaast_type type, metaast* inner);
+metaast* new_metaast_sequence_node(metaast_type type, size_t size, metaast* sequence); //sequence is array of metaast
+metaast* new_metaast_binary_op_node(metaast_type type, metaast* left, metaast* right);
+metaast* new_metaast_charset_node(metaast_type type, charset* c);
+
+//free meta-ast objects
+void metaast_free(metaast* ast);
+
+//constant folding contents of meta-ast
+bool metaast_fold_constant(metaast* ast);
+bool metaast_fold_charsets(metaast* ast);
+bool metaast_fold_strings(metaast* ast);
+void metaast_str(metaast* ast);
+void metaast_str_inner(metaast* ast, int level);
+void metaast_repr(metaast* ast);
+void metaast_repr_inner(metaast* ast, int level);
 
 #endif

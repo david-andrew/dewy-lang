@@ -2,7 +2,7 @@
 #define METAPARSER_H
 
 #include "vector.h"
-// #include "set.h"
+#include "metaast.h"
 
 /**
  * Productions are #head = #body
@@ -39,23 +39,24 @@ obj* metaparser_get_anonymous_rule_head();
 void initialize_metaparser();
 void release_metaparser();
 bool parse_next_meta_rule(vect* tokens);
-vect* metaparser_create_body(obj* head, vect* body_tokens);
+metaast* metaparser_build_metaast(vect* body_tokens);
+vect* metaparser_create_body(obj* head, metaast* body_ast);
 int metaparser_get_split_idx(vect* rule_body_tokens);
 vect* metaparser_parse_single_body(obj* head, vect* body_tokens);
 vect* metaparser_merge_left_right_body(obj* head, vect* left_body, vect* right_body, metatoken* delimiter);
 bool metaparser_is_body_charset(vect* body);
-vect* parse_meta_eps(obj* head, vect* body_tokens);
-vect* parse_meta_char(obj* head, vect* body_tokens);
-vect* parse_meta_string(obj* head, vect* body_tokens);
-vect* parse_meta_charset(obj* head, vect* body_tokens);
-vect* parse_meta_anyset(obj* head, vect* body_tokens);
-vect* parse_meta_hex(obj* head, vect* body_tokens);
-vect* parse_meta_star(obj* head, vect* body_tokens);
-vect* parse_meta_plus(obj* head, vect* body_tokens);
-vect* parse_meta_option(obj* head, vect* body_tokens);
-vect* parse_meta_count(obj* head, vect* body_tokens);
-vect* parse_meta_compliment(obj* head, vect* body_tokens);
-vect* parse_meta_cat(obj* head, vect* body_tokens);
+metaast* parse_meta_eps(vect* tokens);
+metaast* parse_meta_char(vect* tokens);
+metaast* parse_meta_string(vect* tokens);
+metaast* parse_meta_charset(vect* tokens);
+metaast* parse_meta_anyset(vect* tokens);
+metaast* parse_meta_hex(vect* tokens);
+metaast* parse_meta_star(vect* tokens);
+metaast* parse_meta_plus(vect* tokens);
+metaast* parse_meta_option(vect* tokens);
+metaast* parse_meta_count(vect* tokens);
+metaast* parse_meta_compliment(vect* tokens);
+metaast* parse_meta_cat(vect* tokens);
 int get_next_real_metatoken(vect* tokens, int i);
 int get_next_metatoken_type(vect* tokens, metatoken_type type, int i);
 bool is_metatoken_i_type(vect* tokens, int i, metatoken_type type);

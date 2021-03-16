@@ -20,6 +20,8 @@ uint32_t* clone_unicode(uint32_t* string);
 char* concatenate(char* left, char* right);
 char* read_file(char* filename);
 
+void repeat_str(char* str, size_t times);
+
 //parsing helper functions
 bool is_identifier_char(char c);
 bool is_identifier_symbol_char(char c);
@@ -48,6 +50,7 @@ uint64_t lfsr64_prev(uint64_t curr);
 
 //scanning/printing functions
 uint64_t parse_hex(char* str);
+uint64_t parse_unicode_hex(uint32_t* str);
 uint64_t hex_digit_to_value(char c);
 void put_unicode(uint32_t c);
 uint32_t eat_utf8(char** str_ptr);
@@ -57,5 +60,6 @@ uint32_t* unicode_char_to_str(uint32_t c);
 void unicode_char_str(uint32_t c);
 void ascii_or_hex_str(uint32_t c);
 void unicode_string_str(uint32_t* s);
+uint32_t escape_to_unicode(uint32_t c);
 
 #endif

@@ -41,6 +41,15 @@ obj* new_charset_obj(charset* s)
 
 
 /**
+ * Insert the given unicode character into the charset.
+ */
+void charset_add_char(charset* s, uint32_t c)
+{
+    charset_add_range(s, (urange){.start=c, .stop=c});
+}
+
+
+/**
  * Insert the given unicode range into the character set.
  */
 void charset_add_range(charset* s, urange r)

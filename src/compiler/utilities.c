@@ -244,6 +244,17 @@ char* read_file(char* filename)
 // }
 
 
+/**
+ * Print the given string `times` times.
+ */
+void repeat_str(char* str, size_t times)
+{
+    for (size_t i = 0; i < times; i++)
+    {
+        printf("%s", str);
+    }
+}
+
 bool is_identifier_char(char c)
 {
     //valid identifier characters are
@@ -422,16 +433,35 @@ uint64_t lfsr64_prev(uint64_t curr)
 */
 uint64_t parse_hex(char* str)
 {
-    int len = strlen(str);
+    size_t len = strlen(str);
     uint64_t pow = 1;
     uint64_t val = 0;
-    for (int i = len - 1; i >= 0; i--)
+    for (size_t i = len - 1; i >= 0; i--)
     {
         val += hex_digit_to_value(str[i]) * pow;
         pow *= 16;
     }
     return val;
 }
+
+
+/**
+    Read a hex string and convert to an unsigned integer
+*/
+uint64_t parse_unicode_hex(uint32_t* str)
+{
+    size_t len = unicode_strlen(str);
+    uint64_t pow = 1;
+    uint64_t val = 0;
+    for (int64_t i = len - 1; i >= 0; i--)
+    {
+        val += hex_digit_to_value(str[i]) * pow;
+        pow *= 16;
+    }
+    return val;
+}
+
+
 
 uint64_t hex_digit_to_value(char c)
 {
@@ -641,5 +671,29 @@ void unicode_string_repr(uint32_t* s)
     putchar('"');
 }
 
+
+/**
+ * Return the literal unicode represented by the escape char
+ * Recognized escaped characters are \n \r \t \v \b \f and \a
+ * all others just put the second character literally 
+ * Common such literals include \\ \' \" \[ \] and \-
+ */
+uint32_t escape_to_unicode(uint32_t c)
+{
+    switch (c)
+    {
+        // recognized escape characters
+        case 'a': return 0x7;   // bell
+        case 'b': return 0x8;   // backspace
+        case 't': return 0x9;   // tab
+        case 'n': return 0xA;   // new line
+        case 'v': return 0xB;   // vertical tab
+        case 'f': return 0xC;   // form feed
+        case 'r': return 0xD;   // carriage return
+        
+        // non-recognized escapes return the literal character
+        default: return c;
+    }
+}
 
 #endif

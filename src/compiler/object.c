@@ -13,8 +13,7 @@
 #include "dictionary.h"
 #include "set.h"
 #include "metatoken.h"
-#include "mast.h"
-
+#include "charset.h"
 
 
 /**
