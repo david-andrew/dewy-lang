@@ -152,7 +152,7 @@ bool parse_next_meta_rule(vect* tokens)
     obj_free(vect_dequeue(body_tokens));    // equals sign at start
     obj_free(vect_pop(body_tokens));        // semicolon at end
     
-    printf("vect of body tokens: "); vect_str(body_tokens); printf("\n");
+    printf("tokens: "); vect_str(body_tokens); printf("\n");
 
     //create the head from the rule_identifier_token
     obj* head = new_unicode_string_obj(rule_identifier_token->content);
@@ -475,17 +475,20 @@ metaast* parse_meta_string(vect* tokens)
                 }
             }
 
+            //length of string is vect size - 2 quote tokens
+            const size_t len = size - 2;
+
             //allocate room for all characters + null terminater
-            uint32_t* string = malloc((size - 1) * sizeof(uint32_t));
+            uint32_t* string = malloc((len + 1) * sizeof(uint32_t));
             
             //insert each char from the tokens list into the string
-            for (size_t i = 1; i < size - 1; i++)
+            for (size_t i = 0; i < len; i++)
             {
-                metatoken* t = vect_get(tokens, i)->data;
+                metatoken* t = vect_get(tokens, i+1)->data;
                 uint32_t c = metaparser_extract_char_from_token(t);
-                string[i-1] = c;
+                string[i] = c;
             }
-            string[size-2] = 0; //null terminator at the end
+            string[len] = 0; //null terminator at the end
             
             vect_free(tokens);
             return new_metaast_string_node(metaast_string, string);
@@ -515,12 +518,11 @@ metaast* parse_meta_anyset(vect* tokens)
         metatoken* t = vect_get(tokens, 0)->data;
         if (t->type == meta_anyset)
         {
-            vect_free(tokens);
-
             //create anyset by taking compliment of an empty set
             charset* nullset = new_charset();
             charset* anyset = charset_compliment(nullset);
             charset_free(nullset);
+            vect_free(tokens);
             return new_metaast_charset_node(metaast_charset, anyset);
         }
     }

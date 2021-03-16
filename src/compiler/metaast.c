@@ -277,46 +277,41 @@ void metaast_repr_inner(metaast* ast, int level)
     metaast_type_repr(ast->type);
     switch (ast->type)
     {
-        printf("a");
+
         case metaast_string: 
         case metaast_identifier:
         {
             metaast_string_node* node = ast->node;
-            printf("\n");
-            repeat_str("  ", level + 1);
-            unicode_string_str(node->string);
-            printf("\n");
+            printf("(`"); unicode_string_str(node->string); printf("`)\n");
             break;
         }
-        printf("b");
+        
         case metaast_charset:
         {
             metaast_charset_node* node = ast->node;
-            printf("\n");
-            repeat_str("  ", level + 1);
-            charset_str(node->c);
-            printf("\n");
+            charset_str(node->c); printf("\n");
             break;
         }
-        printf("c");
+        
         case metaast_star:
         case metaast_plus:
         case metaast_count:
         {
             metaast_repeat_node* node = ast->node;
-            printf("{count=%"PRIu64"}\n", node->count);
+            printf("{\n");
+            repeat_str("  ", level + 1); printf("count=%"PRIu64"\n", node->count);
             metaast_repr_inner(node->inner, level + 1);
-            printf("\n");
+            repeat_str("  ", level); printf("}\n");
             break;
         }
-        printf("d");
+        
         case metaast_option:
         case metaast_compliment:
         {
             metaast_unary_op_node* node = ast->node;
-            printf("\n");
+            printf("{\n");
             metaast_repr_inner(node->inner, level + 1);
-            printf("\n");
+            repeat_str("  ", level); printf("}\n");
             break;
         }
         
@@ -327,10 +322,10 @@ void metaast_repr_inner(metaast* ast, int level)
         case metaast_intersect:
         {
             metaast_binary_op_node* node = ast->node;
-            printf("\n");
+            printf("{\n");
             metaast_repr_inner(node->left, level + 1);
             metaast_repr_inner(node->right, level + 1);
-            printf("\n");
+            repeat_str("  ", level); printf("}\n");
             break;
         }
         
@@ -338,22 +333,19 @@ void metaast_repr_inner(metaast* ast, int level)
         case metaast_or:
         {
             metaast_sequence_node* node = ast->node;
-            printf("\n");
+            printf("{\n");
             for (size_t i = 0; i < node->size; i++)
             {
                 metaast_repr_inner(node->sequence + i, level + 1);
             }
-            printf("\n");
+            repeat_str("  ", level); printf("}\n");
             break;
         }
 
         //free container only
         case metaast_eps:
         {
-            printf("\n");
-            repeat_str("  ", level + 1);
-            put_unicode(0x03F5);
-            printf("\n");
+            printf("("); put_unicode(0x03F5); printf(")\n");
             break;
         }
     }
