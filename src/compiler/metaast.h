@@ -104,7 +104,7 @@ typedef struct {
 typedef struct {
     size_t size;
     size_t capacity;
-    metaast* sequence; //array of metaast
+    metaast** sequence; //array of metaast
 } metaast_sequence_node;
 
 
@@ -127,11 +127,12 @@ metaast* new_metaast_null_node(metaast_type type);
 metaast* new_metaast_string_node(metaast_type type, uint32_t* string);
 metaast* new_metaast_repeat_node(metaast_type type, uint64_t count, metaast* inner);
 metaast* new_metaast_unary_op_node(metaast_type type, metaast* inner);
-metaast* new_metaast_sequence_node(metaast_type type, size_t size, size_t capacity, metaast* sequence); //sequence is array of metaast
+metaast* new_metaast_sequence_node(metaast_type type, size_t size, size_t capacity, metaast** sequence); //sequence is array of metaast
 metaast* new_metaast_binary_op_node(metaast_type type, metaast* left, metaast* right);
 metaast* new_metaast_charset_node(metaast_type type, charset* c);
 
 void metaast_sequence_append(metaast* sequence, metaast* ast);
+void metaast_sequence_resize(metaast_sequence_node* node, size_t new_capacity);
 
 //free meta-ast objects
 void metaast_free(metaast* ast);

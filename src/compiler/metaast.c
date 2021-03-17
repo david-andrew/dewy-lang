@@ -5,10 +5,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <inttypes.h>
+#include <string.h>
 
 #include "metaast.h"
 #include "utilities.h"
 
+#define DEFAULT_METAAST_SEQUENCE_SIZE 8
 
 /**
  * Create a new meta-ast of `type` containing `node`
@@ -71,9 +73,16 @@ metaast* new_metaast_unary_op_node(metaast_type type, metaast* inner)
 /**
  * Create a new sequence of meta-ast nodes.
  * Used for either a sequence of node concatenations, or "|" alternates.
+ * If sequence is NULL, creates an empty sequence.
  */
-metaast* new_metaast_sequence_node(metaast_type type, size_t size, size_t capacity, metaast* sequence)
+metaast* new_metaast_sequence_node(metaast_type type, size_t size, size_t capacity, metaast** sequence)
 {
+    if (sequence == NULL) 
+    {
+        size = 0;
+        capacity = DEFAULT_METAAST_SEQUENCE_SIZE;
+        sequence = malloc(capacity * sizeof(metaast*));
+    }
     metaast_sequence_node* node = malloc(sizeof(metaast_sequence_node));
     *node = (metaast_sequence_node){.size=size, .capacity=capacity, .sequence=sequence};
     return new_metaast(type, node);
@@ -109,7 +118,32 @@ metaast* new_metaast_charset_node(metaast_type type, charset* c)
  */
 void metaast_sequence_append(metaast* sequence, metaast* ast)
 {
+    metaast_sequence_node* node = sequence->node;
+    if (node->size == node->capacity)
+    {
+        metaast_sequence_resize(node, node->capacity * 2);
+    }
 
+    //insert the ast struct into the sequence
+    node->sequence[node->size] = ast;
+    node->size++;
+}
+
+/**
+ * Resize the metaast* array contained in the sequence node.
+ */
+void metaast_sequence_resize(metaast_sequence_node* node, size_t new_capacity)
+{
+    if (new_capacity < node->size)
+    {
+        printf("ERROR: cannot resize metaast_sequence_node to be smaller than current size\n");
+        exit(1);
+    }
+
+    metaast** new_sequence = malloc(new_capacity * sizeof(metaast*));
+    memcpy(new_sequence, node->sequence, node->size * sizeof(metaast*));
+    free(node->sequence);
+    node->sequence = new_sequence;
 }
 
 
@@ -172,6 +206,10 @@ void metaast_free(metaast* ast)
         case metaast_or:
         {
             metaast_sequence_node* node = ast->node;
+            for (size_t i = 0; i < node->size; i++)
+            {
+                metaast_free(node->sequence[i]);
+            }
             free(node->sequence);
             break;
         }
@@ -347,7 +385,7 @@ void metaast_repr_inner(metaast* ast, int level)
             printf("{\n");
             for (size_t i = 0; i < node->size; i++)
             {
-                metaast_repr_inner(node->sequence + i, level + 1);
+                metaast_repr_inner(node->sequence[i], level + 1);
             }
             repeat_str("  ", level); printf("}\n");
             break;
