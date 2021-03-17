@@ -140,6 +140,7 @@ void metaast_free(metaast* ast)
         
         case metaast_option:
         case metaast_compliment:
+        case metaast_capture:
         {
             metaast_unary_op_node* node = ast->node;
             metaast_free(node->inner);
@@ -227,7 +228,7 @@ void metaast_type_repr(metaast_type type)
     switch (type)
     {
         printenum(metaast_eps)
-        // printenum(metaast_capture)     //FUTURE USE
+        printenum(metaast_capture)
         printenum(metaast_string)
         printenum(metaast_star)
         printenum(metaast_plus)
@@ -307,6 +308,7 @@ void metaast_repr_inner(metaast* ast, int level)
         
         case metaast_option:
         case metaast_compliment:
+        case metaast_capture:
         {
             metaast_unary_op_node* node = ast->node;
             printf("{\n");

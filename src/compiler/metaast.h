@@ -35,6 +35,7 @@ Node struct map:
     metaast_unary_op_node
     - metaast_option
     - metaast_compliment
+    - metaast_capture
 
     metaast_binary_op_node
     - metaast_greaterthan
@@ -52,7 +53,7 @@ Node struct map:
 typedef enum {
     //general expression node types
     metaast_eps,
-    // metaast_capture,     //FUTURE USE
+    metaast_capture,
     metaast_string,
     metaast_star,
     metaast_plus,
@@ -67,10 +68,7 @@ typedef enum {
     metaast_identifier,
 
     //set specific node types
-    // metaast_anyset,
-    // metaast_char,           
-    // metaast_hex,
-    metaast_charset,
+    metaast_charset,        //covers char, hex, charset, and anyset
     metaast_compliment,
     metaast_intersect
 } metaast_type;

@@ -330,7 +330,8 @@ int metaparser_find_matching_pair(vect* tokens, metatoken_type left, metatoken_t
     {
         metatoken* t = vect_get(tokens, idx)->data;
 
-        //check for right first, to handle cases where left==right
+        //check for right first, to correctly handle cases where left==right
+        //e.g. for quote pairs (""), individual quotes (") cannot be nested, so first one found is the match
         if (t->type == right) { stack--; }
         else if (t->type == left) { stack++; }
         if (stack == 0)
@@ -699,7 +700,10 @@ metaast* parse_meta_option(vect* tokens)
 
 
 /**
+ * Attempt to parse a count expression from the tokens list.
+ * if matches, tokens will be freed, else returns NULL.
  * 
+ * #count = #expr #ws #number;
  */
 metaast* parse_meta_count(vect* tokens)
 {
@@ -736,7 +740,10 @@ metaast* parse_meta_count(vect* tokens)
 
 
 /**
+ * Attempt to parse a compliment expression from the tokens list.
+ * if matches, tokens will be freed, else returns NULL.
  * 
+ * #compliment = #set #ws '~';
  */
 metaast* parse_meta_compliment(vect* tokens)
 {
@@ -790,21 +797,89 @@ metaast* parse_meta_or(vect* tokens)
 
 
 /**
+ * Attempt to match a group expression from the tokens list.
+ * if matches, tokens will be freed, else returns NULL.
  * 
+ * #group = '(' #ws #expr #ws ')';
  */
 metaast* parse_meta_group(vect* tokens)
 {
-    //determine that matching parenthesis is last token in vector
+    size_t size = vect_size(tokens);
+    if (size > 2)
+    {
+        metatoken* t = vect_get(tokens, 0)->data;
+        if (t->type == meta_left_parenthesis)
+        {
+            //if last token is matching parenthesis, then this is a group expression
+            if (metaparser_find_matching_pair(tokens, meta_left_parenthesis, meta_right_parenthesis, 0) == size - 1)
+            {
+                obj_free(vect_dequeue(tokens)); //free left parenthesis
+                obj_free(vect_pop(tokens));     //free right parenthesis
+
+                //search for matching inner rule
+                metaast* inner = NULL;
+                for (size_t i = 0; i < metaparse_fn_len(metaparser_match_all_funcs); i++)
+                {
+                    if ((inner = metaparser_match_all_funcs[i](tokens)))
+                    {
+                        return inner;
+                    }
+                }
+
+                // //otherwise the parse failed
+                // //TODO->this should probably return NULL/pass off to the error handler at this point?
+                printf("ERROR: inner tokens of parenthesis group do not form a valid expression.\n");
+                vect_str(tokens);
+                printf("\n");
+                vect_free(tokens);
+                exit(1);
+            }
+        }
+    }
     return NULL;
 }
 
 
 /**
+ * Attempt to match a capture group expression from the tokens list.
+ * if matches, tokens will be freed, else returns NULL.
  * 
+ * #capture = '{' #ws #expr #ws '}';
  */
 metaast* parse_meta_capture(vect* tokens)
 {
-    //determine that matching bracket is last token in vector
+    size_t size = vect_size(tokens);
+    if (size > 2)
+    {
+        metatoken* t = vect_get(tokens, 0)->data;
+        if (t->type == meta_left_bracket)
+        {
+            //if last token is matching parenthesis, then this is a capture group expression
+            if (metaparser_find_matching_pair(tokens, meta_left_bracket, meta_right_bracket, 0) == size - 1)
+            {
+                obj_free(vect_dequeue(tokens)); //free left bracket
+                obj_free(vect_pop(tokens));     //free right bracket
+
+                //search for matching inner rule
+                metaast* inner = NULL;
+                for (size_t i = 0; i < metaparse_fn_len(metaparser_match_all_funcs); i++)
+                {
+                    if ((inner = metaparser_match_all_funcs[i](tokens)))
+                    {
+                        return new_metaast_unary_op_node(metaast_capture, inner);
+                    }
+                }
+
+                //otherwise the parse failed
+                //TODO->this should probably return NULL/pass off to the error handler at this point?
+                printf("ERROR: inner tokens of capture group do not form a valid expression.\n");
+                vect_str(tokens);
+                printf("\n");
+                vect_free(tokens);
+                exit(1);
+            }
+        }
+    }
     return NULL;
 }
 
