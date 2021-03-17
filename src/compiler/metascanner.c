@@ -390,7 +390,16 @@ obj* match_meta_dec_number(char** src)
  */
 obj* match_meta_anyset(char** src)
 {
-    if ((*src)[0] == '\\' && is_hex_escape((*src)[1]))
+    size_t delta;
+    uint32_t peek = peek_unicode(src, 0, &delta);
+    if (peek == 'U' || peek == 'V' || peek == 0x3be) // 0x3be = 'ξ'
+    {
+
+        obj* t = new_metatoken_obj(meta_anyset, unicode_substr(*src, 0, 0));
+        *src += delta;
+        return t;
+    }
+    else if ((*src)[0] == '\\' && is_hex_escape((*src)[1]))
     {
         obj* t = new_metatoken_obj(meta_anyset, unicode_substr((*src), 0, 1));
         *src += 2;
