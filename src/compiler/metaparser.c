@@ -53,6 +53,9 @@ void release_metaparser()
 //function pointer type for token scan functions
 typedef metaast* (*metaparse_fn)(vect* tokens);
 
+#define metaparse_fn_len(A) sizeof(A) / sizeof(metaparse_fn)
+
+
 //tokens to scan for before entering any meta syntax context
 metaparse_fn metaparser_match_all_funcs[] = {
     parse_meta_eps,
@@ -184,7 +187,8 @@ bool parse_next_meta_rule(vect* tokens)
 
     obj_print(head);
     printf(" = ");
-    if (body_ast == NULL) { printf("NULL"); } else { metaast_repr(body_ast); }
+    if (body_ast == NULL) { printf("NULL"); vect_free(body_tokens); } 
+    else { metaast_repr(body_ast); }
     printf("\n");
     obj_free(head);
 
@@ -203,16 +207,15 @@ bool parse_next_meta_rule(vect* tokens)
  */
 metaast* metaparser_build_metaast(vect* body_tokens)
 {
-    #define len(A) sizeof(A) / sizeof(metaparse_fn)
     metaast* match;
-    for (size_t i = 0; i < len(metaparser_match_all_funcs); i++)
+    for (size_t i = 0; i < metaparse_fn_len(metaparser_match_all_funcs); i++)
     {
         if ((match = metaparser_match_all_funcs[i](body_tokens)))
         {
             return match;
         }
     }
-    printf("no matching rule...\n");
+    printf("no matching rule for "); vect_str(body_tokens); printf("\n");
     return NULL;
 }
 
@@ -293,6 +296,50 @@ bool is_metatoken_i_type(vect* tokens, int i, metatoken_type type)
     if (i < 0 || vect_size(tokens) < i){ return false; }
     metatoken* t = vect_get(tokens, i)->data;
     return t->type == type;
+}
+
+
+/**
+ * Return the index of the matching pair token in the token string.
+ * e.g. used to find a matching closing parenthesis, starting at an opening parenthesis.
+ * Starts scanning from start_idx, which must be of type `left`.
+ * Function is formulated so that left/right can be the same type.
+ * 
+ * If no match is found, returns -1
+ */
+int metaparser_find_matching_pair(vect* tokens, metatoken_type left, metatoken_type right, size_t start_idx)
+{
+    if (start_idx >= vect_size(tokens))
+    {
+        printf("ERROR: specified start_idx past the end of tokens in find_matching_pair()\n");
+        exit(1);
+    }
+    metatoken* t0 = vect_get(tokens, start_idx)->data;
+    if (t0->type != left)
+    {
+        printf("ERROR: expected token at start_idx to be of type %"PRIu64" but found %"PRIu64"\n", left, t0->type);
+        exit(1);
+    }
+
+    //keep track of nested pairs. start with 1, i.e. already opened first pair.
+    uint64_t stack = 1;
+
+    //scan through for the matching pair
+    int idx = start_idx + 1;
+    while (idx < vect_size(tokens))
+    {
+        metatoken* t = vect_get(tokens, idx)->data;
+
+        //check for right first, to handle cases where left==right
+        if (t->type == right) { stack--; }
+        else if (t->type == left) { stack++; }
+        if (stack == 0)
+        {
+            return idx;
+        }
+        idx++;
+    }
+    return -1;
 }
 
 
@@ -491,23 +538,25 @@ metaast* parse_meta_identifier(vect* tokens)
 
 
 /**
+ * Attempt to parse a star expression from the tokens list.
+ * if matches, tokens will be freed, else returns NULL.
  * 
+ * #star = #expr #ws (#number)? #ws '*';
  */
 metaast* parse_meta_star(vect* tokens)
 {
     //check ends with a star
-    //check for optional number before that
-    //check that rest of tokens is a single unit
     size_t size = vect_size(tokens);
     if (size > 1)
     {
         metatoken* t0 = vect_get(tokens, size - 1)->data;
         if (t0->type == meta_star)
         {
+            //keep track of the size of the inner expression
             size_t expr_size = size - 1;
-            uint64_t count = 0;
 
-            //check for optional count right before star
+            //check for optional count right before star. otherwise default is 0
+            uint64_t count = 0;
             if (size > 2) 
             {
                 metatoken* t1 = vect_get(tokens, size - 2)->data;
@@ -526,9 +575,8 @@ metaast* parse_meta_star(vect* tokens)
             }
 
             //attempt to parse the inner expression
-            #define len(A) sizeof(A) / sizeof(metaparse_fn)
             metaast* inner = NULL;
-            for (size_t i = 0; i < len(metaparser_match_single_unit_funcs); i++)
+            for (size_t i = 0; i < metaparse_fn_len(metaparser_match_single_unit_funcs); i++)
             {
                 if ((inner = metaparser_match_single_unit_funcs[i](tokens)))
                 {
@@ -552,24 +600,100 @@ metaast* parse_meta_star(vect* tokens)
 
 
 /**
+ * Attempt to parse a plus expression from the tokens list.
+ * if matches, tokens will be freed, else returns NULL.
  * 
+ * #plus = #expr #ws (#number)? #ws '+';
  */
 metaast* parse_meta_plus(vect* tokens)
 {
     //check ends with a plus
-    //check for optional number before that
-    //check that rest of tokens is a single unit
+    size_t size = vect_size(tokens);
+    if (size > 1)
+    {
+        metatoken* t0 = vect_get(tokens, size - 1)->data;
+        if (t0->type == meta_plus)
+        {
+            //keep track of the size of the inner expression
+            size_t expr_size = size - 1;
+
+            //check for optional count right before plus. otherwise default is 1
+            uint64_t count = 1;
+            if (size > 2) 
+            {
+                metatoken* t1 = vect_get(tokens, size - 2)->data;
+                if (t1->type == meta_dec_number)
+                {
+                    count = parse_unicode_dec(t1->content);
+                    expr_size -= 1;
+                }
+            }
+
+            //store the tokens for the star expression, in case inner match fails
+            vect* plus_tokens = new_vect();
+            for (size_t i = 0; i < size - expr_size; i++)
+            {
+                vect_push(plus_tokens, vect_pop(tokens));
+            }
+
+            //attempt to parse the inner expression
+            metaast* inner = NULL;
+            for (size_t i = 0; i < metaparse_fn_len(metaparser_match_single_unit_funcs); i++)
+            {
+                if ((inner = metaparser_match_single_unit_funcs[i](tokens)))
+                {
+                    //matched a plus expression
+                    vect_free(plus_tokens);
+                    return new_metaast_repeat_node(metaast_plus, count, inner);
+                }
+            }
+            
+            //restore the tokens vector with the tokens from the plus expression
+            for (size_t i = 0; i < size - expr_size; i++) 
+            { 
+                vect_push(tokens, vect_pop(plus_tokens));
+            }
+            vect_free(plus_tokens);
+        }
+    }
     return NULL;
 }
 
 
 /**
+ * Attempt to parse an option expression from the tokens list.
+ * if matches, tokens will be freed, else returns NULL.
  * 
+ * #option = #expr #ws '?';
  */
 metaast* parse_meta_option(vect* tokens)
 {
     //check ends with a question mark
-    //check that rest of tokens is a single unit
+    size_t size = vect_size(tokens);
+    if (size > 1)
+    {
+        metatoken* t0 = vect_get(tokens, size - 1)->data;
+        if (t0->type == meta_question_mark)
+        {
+            //store the tokens for the star expression, in case inner match fails
+            obj* question_mark_token_obj = vect_pop(tokens);
+
+            //attempt to parse the inner expression
+            metaast* inner = NULL;
+            for (size_t i = 0; i < metaparse_fn_len(metaparser_match_single_unit_funcs); i++)
+            {
+                if ((inner = metaparser_match_single_unit_funcs[i](tokens)))
+                {
+                    //matched an option expression
+                    obj_free(question_mark_token_obj);
+                    return new_metaast_unary_op_node(metaast_option, inner);
+                }
+            }
+            
+            //restore the tokens vector with the question mark token
+            vect_push(tokens, question_mark_token_obj);
+        }
+    }
     return NULL;
 }
 
@@ -580,7 +704,33 @@ metaast* parse_meta_option(vect* tokens)
 metaast* parse_meta_count(vect* tokens)
 {
     //check ends with a number
-    //check that rest of tokens is a single unit
+    size_t size = vect_size(tokens);
+    if (size > 1)
+    {
+        metatoken* t0 = vect_get(tokens, size - 1)->data;
+        if (t0->type == meta_dec_number)
+        {
+            //store the tokens for the star expression, in case inner match fails
+            obj* number_token_obj = vect_pop(tokens);
+
+            //attempt to parse the inner expression
+            metaast* inner = NULL;
+            for (size_t i = 0; i < metaparse_fn_len(metaparser_match_single_unit_funcs); i++)
+            {
+                if ((inner = metaparser_match_single_unit_funcs[i](tokens)))
+                {
+                    //matched a count expression
+                    metatoken* t = number_token_obj->data;
+                    uint64_t count = parse_unicode_dec(t->content);
+                    obj_free(number_token_obj);
+                    return new_metaast_repeat_node(metaast_count, count, inner);
+                }
+            }
+            
+            //restore the tokens vector with the question mark token
+            vect_push(tokens, number_token_obj);
+        }
+    }
     return NULL;
 }
 
@@ -591,7 +741,31 @@ metaast* parse_meta_count(vect* tokens)
 metaast* parse_meta_compliment(vect* tokens)
 {
     //check ends with a tilde
-    //check that rest of tokens is a single unit
+    size_t size = vect_size(tokens);
+    if (size > 1)
+    {
+        metatoken* t0 = vect_get(tokens, size - 1)->data;
+        if (t0->type == meta_tilde)
+        {
+            //store the tokens for the star expression, in case inner match fails
+            obj* tilde_token_obj = vect_pop(tokens);
+
+            //attempt to parse the inner expression
+            metaast* inner = NULL;
+            for (size_t i = 0; i < metaparse_fn_len(metaparser_match_single_unit_funcs); i++)
+            {
+                if ((inner = metaparser_match_single_unit_funcs[i](tokens)))
+                {
+                    //matched a compliment expression
+                    obj_free(tilde_token_obj);
+                    return new_metaast_unary_op_node(metaast_compliment, inner);
+                }
+            }
+            
+            //restore the tokens vector with the question mark token
+            vect_push(tokens, tilde_token_obj);
+        }
+    }
     return NULL;
 }
 

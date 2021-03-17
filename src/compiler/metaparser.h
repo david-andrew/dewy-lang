@@ -15,6 +15,7 @@ uint32_t metaparser_extract_char_from_token(metatoken* t);
 int get_next_real_metatoken(vect* tokens, int i);
 int get_next_metatoken_type(vect* tokens, metatoken_type type, int i);
 bool is_metatoken_i_type(vect* tokens, int i, metatoken_type type);
+int metaparser_find_matching_pair(vect* tokens, metatoken_type left, metatoken_type right, size_t start_idx);
 
 metaast* parse_meta_eps(vect* tokens);
 metaast* parse_meta_char(vect* tokens);
