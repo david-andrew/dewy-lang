@@ -182,7 +182,7 @@ bool parse_next_meta_rule(vect* tokens)
     // for (int i = 0; i < vect_size(body_tokens); i++) { metatoken_repr(vect_get(body_tokens, i)->data); }
 
     //create an AST from the tokens, and combine all charset expressions
-    metaast* body_ast = metaparser_build_metaast(body_tokens);
+    metaast* body_ast = parse_meta_expr(body_tokens);
     while (metaast_fold_constant(body_ast));
 
     obj_print(head);
@@ -202,20 +202,23 @@ bool parse_next_meta_rule(vect* tokens)
 
 
 /**
- * Create a meta-ast from the list of tokens.
- * Body tokens will be freed by the matching rules.
+ * Attempt to parse a meta expression from all possible expression types.
+ * If matches, `tokens` will be freed, else returns NULL. 
  */
-metaast* metaparser_build_metaast(vect* body_tokens)
+metaast* parse_meta_expr(vect* tokens)
 {
-    metaast* match;
+    //search for matching inner rule
+    metaast* expr = NULL;
     for (size_t i = 0; i < metaparse_fn_len(metaparser_match_all_funcs); i++)
     {
-        if ((match = metaparser_match_all_funcs[i](body_tokens)))
+        if ((expr = metaparser_match_all_funcs[i](tokens)))
         {
-            return match;
+            return expr;
         }
     }
-    printf("no matching rule for "); vect_str(body_tokens); printf("\n");
+
+    //otherwise the parse failed
+    printf("ERROR: no valid expression for "); vect_str(tokens); printf("\n");
     return NULL;
 }
 
@@ -232,6 +235,7 @@ vect* metaparser_create_body(obj* head, metaast* body_ast)
 {
     return NULL;
 }
+
 
 /**
  * Return the uint32_t codepoint specified by the token, depending on its type.
@@ -782,7 +786,28 @@ metaast* parse_meta_compliment(vect* tokens)
  */
 metaast* parse_meta_cat(vect* tokens)
 {
-    //determine that lowest precedence operator is cat
+    // // verify top level expression contains no lower precedence operators
+    // if (metaparser_is_current_precedence(tokens, metaast_cat))
+    // {
+    //     //create empty sequence metaast object
+    //     metaast* sequence = new_metaast_sequence_node(metaast_cat, 0, 0, NULL);
+    //     while (vect_size(tokens) > 0)
+    //     {
+    //         vect* expr_tokens = new_vect();
+    //         size_t end_idx = metaparser_scan_to_end_of_unit(tokens, 0);
+    //         for (int i = 0; i <= end_idx; i++)
+    //         {
+    //             vect_enqueue(expr_tokens, vect_dequeue(tokens));
+    //         }
+
+    //         metaast* expr = parse_meta_expr(tokens);
+    //         if (expr == NULL)
+    //         {
+    //             printf("ERROR");
+    //         }
+
+    //     }
+    // }
     return NULL;
 }
 
@@ -791,6 +816,10 @@ metaast* parse_meta_cat(vect* tokens)
  */
 metaast* parse_meta_or(vect* tokens)
 {
+    // if (vect_size(tokens) > 2)
+    // {
+
+    // }
     //determine that lowest precedence operator is or
     return NULL;
 }
@@ -815,24 +844,8 @@ metaast* parse_meta_group(vect* tokens)
             {
                 obj_free(vect_dequeue(tokens)); //free left parenthesis
                 obj_free(vect_pop(tokens));     //free right parenthesis
-
-                //search for matching inner rule
-                metaast* inner = NULL;
-                for (size_t i = 0; i < metaparse_fn_len(metaparser_match_all_funcs); i++)
-                {
-                    if ((inner = metaparser_match_all_funcs[i](tokens)))
-                    {
-                        return inner;
-                    }
-                }
-
-                // //otherwise the parse failed
-                // //TODO->this should probably return NULL/pass off to the error handler at this point?
-                printf("ERROR: inner tokens of parenthesis group do not form a valid expression.\n");
-                vect_str(tokens);
-                printf("\n");
-                vect_free(tokens);
-                exit(1);
+                
+                return parse_meta_expr(tokens);
             }
         }
     }
@@ -860,23 +873,11 @@ metaast* parse_meta_capture(vect* tokens)
                 obj_free(vect_dequeue(tokens)); //free left bracket
                 obj_free(vect_pop(tokens));     //free right bracket
 
-                //search for matching inner rule
-                metaast* inner = NULL;
-                for (size_t i = 0; i < metaparse_fn_len(metaparser_match_all_funcs); i++)
+                metaast* inner = parse_meta_expr(tokens);
+                if (inner != NULL)
                 {
-                    if ((inner = metaparser_match_all_funcs[i](tokens)))
-                    {
-                        return new_metaast_unary_op_node(metaast_capture, inner);
-                    }
+                    return new_metaast_unary_op_node(metaast_capture, inner);
                 }
-
-                //otherwise the parse failed
-                //TODO->this should probably return NULL/pass off to the error handler at this point?
-                printf("ERROR: inner tokens of capture group do not form a valid expression.\n");
-                vect_str(tokens);
-                printf("\n");
-                vect_free(tokens);
-                exit(1);
             }
         }
     }

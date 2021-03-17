@@ -70,7 +70,7 @@ void metatoken_str(metatoken* t)
         //special cases for printing
         case meta_escape: printf("\\"); unicode_string_str(t->content); break;
         case meta_epsilon: printf("ϵ"); break;
-        case meta_anyset: printf("\\U"); break;
+        case meta_anyset: printf("ξ"); break;
         case meta_hex_number: printf("\\x"); unicode_string_str(t->content); break;
         case meta_vertical_bar: printf(" | "); break;
         case meta_minus: printf("-"); break;

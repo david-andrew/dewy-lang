@@ -72,10 +72,10 @@ metaast* new_metaast_unary_op_node(metaast_type type, metaast* inner)
  * Create a new sequence of meta-ast nodes.
  * Used for either a sequence of node concatenations, or "|" alternates.
  */
-metaast* new_metaast_sequence_node(metaast_type type, size_t size, metaast* sequence)
+metaast* new_metaast_sequence_node(metaast_type type, size_t size, size_t capacity, metaast* sequence)
 {
     metaast_sequence_node* node = malloc(sizeof(metaast_sequence_node));
-    *node = (metaast_sequence_node){.size=size, .sequence=sequence};
+    *node = (metaast_sequence_node){.size=size, .capacity=capacity, .sequence=sequence};
     return new_metaast(type, node);
 }
 
@@ -101,6 +101,15 @@ metaast* new_metaast_charset_node(metaast_type type, charset* c)
     metaast_charset_node* node = malloc(sizeof(metaast_charset_node));
     *node = (metaast_charset_node){.c=c};
     return new_metaast(type, node);
+}
+
+
+/**
+ * Append the given `ast` to the `sequence` of meta-asts.
+ */
+void metaast_sequence_append(metaast* sequence, metaast* ast)
+{
+
 }
 
 
@@ -223,7 +232,7 @@ bool metaast_fold_strings(metaast* ast)
 
 void metaast_type_repr(metaast_type type)
 {
-    #define printenum(A) case A: printf(#A); break;
+    #define printenum(A) case A: printf(#A + 8); break; //+8 to skip "metaast_" in enum name
 
     switch (type)
     {
