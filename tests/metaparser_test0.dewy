@@ -148,4 +148,16 @@
 #cat1 = ("string"*) "banana"+;
 #cat2 = {ϵ}+ \x123 #identifier 123;
 #cat3 = 'a' ' ' 'b' 'u' 'n' 'c' 'h' ' ' 'o' 'f' ' ' 'i' 'n' 'd' 'i' 'v' 'i' 'd' 'u' 'a' 'l' ' ' 'c' 'h' 'a' 'r' 'a' 'c' 't' 'e' 'r' 's';
-#cat4 = (((ξ \x1) (\x2 \x3))(\x4 \x5)) \x6 ξξ;
+#cat4 = (((ξ \x1) (\x2 \x3)) (\x4 \x5)) \x6 ξξ;
+
+#error = (ξ \x1 \x2 \x3 \x4 \x5 \x6 ξξ ;
+
+
+//testing charsets
+#charset0 = [abcdefgilmnprt];
+#charset1 = [A-Za-z0-9];
+#charset2 = [a-zA-Z0-9~!@#$&_?];
+#charset3 = [a - zA- Z0-9 ~!@ #$&
+_?];
+#wschar = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000];
+#charset4 = [uUxX] [0-9a-fA-F]+ [VUξ] \U [\-\[\]];

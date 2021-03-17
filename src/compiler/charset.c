@@ -434,10 +434,10 @@ void charset_str(charset* s)
         ascii_or_hex_str(s->ranges[i].start);
         if (s->ranges[i].stop != s->ranges[i].start)
         {
-            printf("-");
+            //only print dash on ranges larger than 2
+            if (s->ranges[i].stop - s->ranges[i].start > 1) { printf("-"); }
             ascii_or_hex_str(s->ranges[i].stop);
         }
-        if (i + 1 <= s->size - 1) printf(" ");
     }
     printf("]");
 }

@@ -250,6 +250,7 @@ uint32_t metaparser_extract_char_from_token(metatoken* t)
     switch (t->type)
     {
         case meta_char: return *t->content;
+        case meta_charset_char: return *t->content;
         case meta_escape: return escape_to_unicode(*t->content);
         case meta_hex_number: return parse_unicode_hex(t->content);
         default: 
@@ -409,8 +410,14 @@ int metaparser_scan_to_end_of_unit(vect* tokens, size_t start_idx)
         case meta_left_brace:
         {
             idx = metaparser_find_matching_pair(tokens, t->type, start_idx);
-            if (idx < 0) { idx = -1; }
-            else { idx += 1; }
+            if (idx < 0) 
+            { 
+                printf("ERROR: unpaired left-most token: ");
+                metatoken_repr(t);
+                printf("\n");
+                return idx;
+            }
+            idx += 1;
             break;
         }
 
@@ -642,9 +649,48 @@ metaast* parse_meta_string(vect* tokens)
  */
 metaast* parse_meta_charset(vect* tokens)
 {
-    //check starts/ends with []
-    //if content size is 0, then throw error
-    // const size_t size = vect_size(tokens);
+    if (vect_size(tokens) > 1)
+    {
+        metatoken* t = vect_get(tokens, 0)->data;
+        if (t->type == meta_left_brace)
+        {
+            if (metaparser_find_matching_pair(tokens, meta_left_brace, 0) == vect_size(tokens) - 1)
+            {
+                charset* cs = new_charset();
+
+                //sequentially scan through the tokens in the charset body
+                size_t idx = 1;
+                while (idx < vect_size(tokens) - 1)
+                {
+                    uint32_t c0 = metaparser_extract_char_from_token(vect_get(tokens, idx)->data);
+                    idx++;
+                    
+                    //minus indicates a range, otherwise a single character
+                    if (((metatoken*)vect_get(tokens, idx)->data)->type != meta_minus)
+                    {
+                        charset_add_char(cs, c0);
+                    }
+                    else
+                    {
+                        idx++;
+                        uint32_t cf = metaparser_extract_char_from_token(vect_get(tokens, idx)->data);
+                        idx++;
+                        charset_add_range(cs, (urange){.start=c0, .stop=cf});
+                    }
+                } 
+
+                if (charset_size(cs) == 0)
+                {
+                    printf("ERROR: charset must contain at least 1 item\n.");
+                    charset_free(cs);
+                    return NULL;
+                }
+
+                vect_free(tokens);
+                return new_metaast_charset_node(metaast_charset, cs);
+            }
+        }
+    }
     return NULL;
 }
 
@@ -963,7 +1009,10 @@ metaast* parse_meta_compliment(vect* tokens)
 
 
 /**
+ * Attempt to match a concatenation sequence expression from the tokens list.
+ * if matches, tokens is freed, else returns NULL.
  * 
+ * #cat = #expr (#ws #expr)+;
  */
 metaast* parse_meta_cat(vect* tokens)
 {
@@ -995,7 +1044,7 @@ metaast* parse_meta_cat(vect* tokens)
         for (int i = 0; i < count; i++)
         {
             idx = metaparser_scan_to_end_of_unit(tokens, 0);
-            vect* expr_tokens = new_vect();
+            vect* expr_tokens = new_vect(); //will be freed by parse_meta_expr()
             for (int j = 0; j < idx; j++)
             {
                 vect_enqueue(expr_tokens, vect_dequeue(tokens));
@@ -1003,15 +1052,19 @@ metaast* parse_meta_cat(vect* tokens)
             metaast* expr = parse_meta_expr_restricted(expr_tokens, parse_meta_cat);
             sequence[i] = expr;
         }
-        
-        vect_free(tokens);
+
+        vect_free(tokens); //should be empty
         return new_metaast_sequence_node(metaast_cat, count, count, sequence);
     }
     return NULL;
 }
 
 /**
+ * Attempt to parse an or sequence expression from the list of tokens.
+ * if matches, tokens will be freed, else returns NULL.
  * 
+ * #or = (#expr #ws '|' #ws #expr) - #union;
+ * #set #ws '|' #ws #set;
  */
 metaast* parse_meta_or(vect* tokens)
 {
