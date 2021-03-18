@@ -71,7 +71,7 @@ typedef enum {
     //set specific node types
     metaast_charset,        //covers char, hex, charset, and anyset
     metaast_compliment,
-    metaast_intersect
+    metaast_intersect,
 } metaast_type;
 
 
@@ -165,11 +165,10 @@ metaast* metaast_parse_binary_op(vect* tokens, metatoken_type optype);
 
 //parsing helper functions
 int metaast_find_matching_pair(vect* tokens, metatoken_type left, size_t start_idx);
+bool metaast_is_type_single_unit(metaast_type type);
 int metaast_scan_to_end_of_unit(vect* tokens, size_t start_idx);
 metaast_type metaast_get_token_ast_type(metatoken_type type);
 uint64_t metaast_get_type_precedence_level(metaast_type type);
-// bool metaast_is_type_current_precedence(vect* tokens, metaast_type type);
-
 
 //free meta-ast objects
 void metaast_free(metaast* ast);
@@ -181,7 +180,8 @@ bool metaast_fold_strings(metaast* ast);
 
 
 void metaast_str(metaast* ast);
-void metaast_str_inner(metaast* ast, int level);
+void metaast_str_inner(metaast* ast, metaast_type parent);
+bool metaast_str_inner_check_needs_parenthesis(metaast_type parent, metaast_type inner);
 void metaast_repr(metaast* ast);
 void metaast_repr_inner(metaast* ast, int level);
 

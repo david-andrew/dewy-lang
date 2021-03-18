@@ -352,6 +352,16 @@ bool charset_equals(charset* a, charset* b)
     return true;
 }
 
+
+/**
+ * Determine if the given charset is the anyset, i.e. all unicode characters.
+ */
+bool charset_is_anyset(charset* s)
+{
+    return s->size == 1 && s->ranges[0].start == 0 && s->ranges[0].stop == MAX_UNICODE_POINT;
+}
+
+
 /**
  * Get the index of the charset ranges that contains unicode character `c`.
  * If no range is found, return -1.

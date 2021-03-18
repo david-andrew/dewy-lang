@@ -11,6 +11,8 @@
 #include "metaast.h"
 #include "utilities.h"
 
+#define METAAST_NO_PARENT_TYPE (metaast_type)12345
+
 
 //functions for all scannable rules 
 metaast_parse_fn metaast_all_rule_funcs[] = {
@@ -956,6 +958,30 @@ int metaast_find_matching_pair(vect* tokens, metatoken_type left, size_t start_i
 
 
 /**
+ * Determine if the given meta-ast type is a single unit
+ */
+bool metaast_is_type_single_unit(metaast_type type)
+{
+    switch (type)
+    {
+        case metaast_eps:
+        case metaast_string:
+        case metaast_charset:
+        case metaast_identifier:
+        case metaast_star:
+        case metaast_plus:
+        case metaast_option:
+        case metaast_count:
+        case metaast_compliment:
+        case metaast_capture:
+            return true;    
+    
+        default: return false;
+    }
+}
+
+
+/**
  * Return the first index after the end of the expression starting at the given start index.
  * Returns -1 if unable to scan past expression.
  */
@@ -1246,15 +1272,181 @@ void metaast_type_repr(metaast_type type)
 /**
  * Print out a string for the given meta-ast
  */
-void metaast_str(metaast* ast) { metaast_str_inner(ast, 0); }
+void metaast_str(metaast* ast) { metaast_str_inner(ast, METAAST_NO_PARENT_TYPE); }
 
 
 /**
  * Inner recursive function for printing out the meta-ast string.
  */
-void metaast_str_inner(metaast* ast, int level)
+void metaast_str_inner(metaast* ast, metaast_type parent)
 {
+    //wrap a print statement in left/right symbols. 
+    //this version allows for alternate on condition == false
+    #define wrap_print_alt(condition, inner, alt, left_str, right_str)   \
+    if (condition)                                              \
+    {                                                           \
+        printf(left_str); inner; printf(right_str);             \
+    }                                                           \
+    else                                                        \
+    {                                                           \
+        alt;                                                    \
+    }
 
+    //normal version where the same inner is either wrapped or not
+    #define wrap_print(condition, inner, left_str, right_str)   \
+        wrap_print_alt(condition, inner, inner, left_str, right_str)
+
+    switch (ast->type)
+    {
+
+        case metaast_string:
+        case metaast_identifier:
+        {
+            metaast_string_node* node = ast->node;
+            //if string, wrap in quotes, else print without
+            wrap_print(ast->type == metaast_string, unicode_string_str(node->string), "\"", "\"")
+            break;
+        }
+        
+        case metaast_charset:
+        {
+            metaast_charset_node* node = ast->node;
+            
+            //print special character for the anyset
+            if (charset_is_anyset(node->c))
+                put_unicode(0x3BE);
+            else
+                charset_str(node->c);
+            break;
+        }
+        
+        case metaast_star:
+        case metaast_plus:
+        case metaast_count:
+        {
+            metaast_repeat_node* node = ast->node;
+            
+            //check if inner needs to be wrapped in parenthesis
+            wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, node->inner->type), 
+                metaast_str_inner(node->inner, ast->type),
+                "(", ")"
+            )
+
+            //repeat symbol(s) after the expression
+            if (ast->type == metaast_star)
+            {
+                //star shows count iff > 0
+                if (node->count > 0) { printf("%"PRIu64, node->count); }
+                printf("*");
+            }
+            else if (ast->type == metaast_plus)
+            {
+                //plus shows count iff > 1
+                if (node->count > 1) { printf("%"PRIu64, node->count); }
+                printf("+");
+            }
+            else
+            {
+                printf("%"PRIu64, node->count);
+            }
+            break;
+        }
+        
+        case metaast_option:
+        case metaast_compliment:
+        case metaast_capture:
+        {
+            metaast_unary_op_node* node = ast->node;
+            
+            //check if the inner expression needs to be wrapped in parenthesis.
+            //alternatively capture nodes are wrapped in their own brackets
+            wrap_print_alt(metaast_str_inner_check_needs_parenthesis(ast->type, node->inner->type),
+                metaast_str_inner(node->inner, ast->type),
+                wrap_print(ast->type == metaast_capture, metaast_str_inner(node->inner, ast->type), "{", "}"),
+                "(", ")"
+            )
+            if (ast->type == metaast_option) { printf("?"); }
+            else if (ast->type == metaast_compliment) { printf("~"); }
+            break;
+        }
+        
+        case metaast_or:
+        case metaast_greaterthan:
+        case metaast_lessthan:
+        case metaast_reject:
+        case metaast_nofollow:
+        case metaast_intersect:
+        {
+            metaast_binary_op_node* node = ast->node;
+
+            //print left node (wrap in parenthesis if needed)
+            wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, node->left->type),
+                metaast_str_inner(node->left, ast->type),
+                "(", ")"
+            )
+
+            //print operator
+            if (ast->type == metaast_or) printf(" | ");
+            else if (ast->type == metaast_greaterthan) printf(" > ");
+            else if (ast->type == metaast_lessthan) printf(" < ");
+            else if (ast->type == metaast_reject) printf(" - ");
+            else if (ast->type == metaast_nofollow) printf(" / ");
+            
+            //print right node (wrap in parenthesis if needed)
+            wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, node->right->type),
+                metaast_str_inner(node->right, ast->type),
+                "(", ")"
+            )
+
+            break;
+        }
+        
+        case metaast_cat:
+        {
+            metaast_sequence_node* node = ast->node;
+            
+            //print the cat sequence, and wrap in parenthesis if needed
+            wrap_print(
+                metaast_str_inner_check_needs_parenthesis(ast->type, metaast_cat),
+                for (size_t i = 0; i < node->size; i++)
+                {
+                    metaast* inner = node->sequence[i];
+                    
+                    //check if the inner expression needs to be wrapped in parenthesis
+                    wrap_print(metaast_str_inner_check_needs_parenthesis(metaast_cat, inner->type),
+                        metaast_str_inner(inner, ast->type),
+                        "(", ")"
+                    )
+
+                    //print a space between elements (skip last since no elements follow)
+                    if (i < node->size - 1) { printf(" "); }
+                },
+                "(", ")"
+            )
+            break;
+        }
+
+        //free container only
+        case metaast_eps:
+        {
+            put_unicode(0x03F5);
+            break;
+        }
+    }
+}
+
+bool metaast_str_inner_check_needs_parenthesis(metaast_type parent, metaast_type inner)
+{
+    //top level doesn't need parenthesis
+    if (parent == METAAST_NO_PARENT_TYPE) return false;
+    
+    //special cases that need them
+    if ((parent == metaast_star || parent == metaast_plus) && inner == metaast_count) return true;
+    if ((parent == metaast_option || parent == metaast_compliment) && inner == metaast_identifier) return true;
+    
+    if (metaast_is_type_single_unit(inner)) return false;
+    if (metaast_get_type_precedence_level(parent) >= metaast_get_type_precedence_level(inner)) return false;
+    return true;
 }
 
 

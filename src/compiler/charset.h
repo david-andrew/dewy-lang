@@ -41,6 +41,7 @@ charset* charset_diff(charset* a, charset* b);
 charset* charset_intersect(charset* a, charset* b);
 charset* charset_union(charset* a, charset* b);
 bool charset_equals(charset* a, charset* b);
+bool charset_is_anyset(charset* s);
 int charset_get_c_index(charset* s, uint32_t c);
 bool charset_contains_c(charset* s, uint32_t c);
 bool charset_contains_r(charset* s, urange r);

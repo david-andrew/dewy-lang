@@ -122,7 +122,7 @@ bool parse_next_meta_rule(vect* tokens)
     obj_free(vect_dequeue(body_tokens));    // equals sign at start
     obj_free(vect_pop(body_tokens));        // semicolon at end
     
-    printf("tokens: "); vect_str(body_tokens); printf("\n");
+    // printf("tokens: "); vect_str(body_tokens); printf("\n");
 
     //create the head from the rule_identifier_token
     obj* head = new_unicode_string_obj(rule_identifier_token->content);
@@ -138,7 +138,7 @@ bool parse_next_meta_rule(vect* tokens)
     obj_print(head);
     printf(" = ");
     if (body_ast == NULL) { printf("NULL"); vect_free(body_tokens); } 
-    else { metaast_repr(body_ast); }
+    else { metaast_str(body_ast); }
     printf("\n");
     obj_free(head);
 
