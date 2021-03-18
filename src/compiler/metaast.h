@@ -163,6 +163,14 @@ metaast* metaast_parse_nofollow(vect* tokens);
 metaast* metaast_parse_binary_op(vect* tokens, metatoken_type optype);
 
 
+//parsing helper functions
+int metaast_find_matching_pair(vect* tokens, metatoken_type left, size_t start_idx);
+int metaast_scan_to_end_of_unit(vect* tokens, size_t start_idx);
+metaast_type metaast_get_token_ast_type(metatoken_type type);
+uint64_t metaast_get_type_precedence_level(metaast_type type);
+// bool metaast_is_type_current_precedence(vect* tokens, metaast_type type);
+
+
 //free meta-ast objects
 void metaast_free(metaast* ast);
 

@@ -2,6 +2,7 @@
 #define METATOKEN_H
 
 #include "object.h"
+#include "vector.h"
 
 /**
  * Enum/type declaration for each possible token type for reading syntax rules
@@ -53,6 +54,15 @@ typedef struct
 metatoken* new_metatoken(metatoken_type type, uint32_t* content);
 obj* new_metatoken_obj(metatoken_type type, uint32_t* content);
 metatoken* metatoken_copy(metatoken* t);
+
+int metatoken_get_next_real_token(vect* tokens, int i);
+int metatoken_get_next_token_of_type(vect* tokens, metatoken_type type, int i);
+bool metatoken_is_token_i_of_type(vect* tokens, int i, metatoken_type type);
+
+metatoken_type metatoken_get_matching_pair_type(metatoken_type left);
+uint32_t metatoken_extract_char_from_token(metatoken* t);
+bool metatoken_is_type_bin_op(metatoken_type type);
+
 void metatoken_str(metatoken* t);
 void metatoken_repr(metatoken* t);
 void metatoken_free(metatoken* t);

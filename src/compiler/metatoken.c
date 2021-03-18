@@ -38,6 +38,116 @@ metatoken* metatoken_copy(metatoken* t)
     return new_metatoken(t->type, clone_unicode(t->content));
 }
 
+
+/**
+ * Return the index of the next non whitespace/comment token
+ */
+int metatoken_get_next_real_token(vect* tokens, int i)
+{
+    //while we haven't reached the end of the token stream
+    //if the current token isn't whitespace or a comment, return its index
+    while (i < vect_size(tokens))
+    {
+        metatoken* t = (metatoken*)vect_get(tokens, i)->data;
+        if (t->type != whitespace && t->type != comment) { return i; }
+        i++;
+    }
+
+    //reached end without finding a real token
+    return -1;
+}
+
+
+/**
+ * return the index of the first occurance of the specified token type.
+ * returns -1 if not present in the vector
+ */
+int metatoken_get_next_token_of_type(vect* tokens, metatoken_type type, int i)
+{
+    //while we haven't reached the end of the tokens stream
+    //if the current token is the desired type, return its index
+    while (i < vect_size(tokens))
+    {
+        metatoken* t = (metatoken*)vect_get(tokens, i)->data;
+        if (t->type == type) { return i; }
+        i++;
+    }
+
+    //reached end without finding token of desired type
+    return -1;
+}
+
+bool metatoken_is_token_i_of_type(vect* tokens, int i, metatoken_type type)
+{
+    if (i < 0 || vect_size(tokens) < i){ return false; }
+    metatoken* t = vect_get(tokens, i)->data;
+    return t->type == type;
+}
+
+
+/**
+ * Return the type of metatoken that matches the given left pair token.
+ * Pairs are '' "" () {} [].
+ */
+metatoken_type metatoken_get_matching_pair_type(metatoken_type left)
+{
+    switch (left)
+    {
+        case meta_single_quote: return meta_single_quote;
+        case meta_double_quote: return meta_double_quote;
+        case meta_left_parenthesis: return meta_right_parenthesis;
+        case meta_left_bracket: return meta_right_bracket;
+        case meta_left_brace: return meta_right_brace;
+    
+        default:
+            printf("ERROR: token type %u has no matching pair type", left);
+            exit(1);
+    }
+}
+
+
+/**
+ * Return the uint32_t codepoint specified by the token, depending on its type.
+ * Token must be either a meta_char, meta_escape, or meta_hex_number
+ */
+uint32_t metatoken_extract_char_from_token(metatoken* t)
+{
+    switch (t->type)
+    {
+        case meta_char: return *t->content;
+        case meta_charset_char: return *t->content;
+        case meta_escape: return escape_to_unicode(*t->content);
+        case meta_hex_number: return parse_unicode_hex(t->content);
+        default: 
+            printf("ERROR: attempted to extract char from non-char token: ");
+            metatoken_repr(t);
+            printf("\n");
+            exit(1);
+    }
+}
+
+
+/**
+ * Determine whether the given token type is a binary operator separator.
+ */
+bool metatoken_is_type_bin_op(metatoken_type type)
+{
+    switch (type)
+    {
+        case meta_minus:
+        case meta_forward_slash:
+        case meta_ampersand:
+        case meta_vertical_bar:
+        case meta_greater_than:
+        case meta_less_than:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+
 /**
  * Print out a string for each token type
  */

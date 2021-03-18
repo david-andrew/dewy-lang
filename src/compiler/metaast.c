@@ -10,7 +10,7 @@
 #include "metatoken.h"
 #include "metaast.h"
 #include "utilities.h"
-#include "metaparser.h"
+// #include "metaparser.h"
 
 
 //functions for all scannable rules 
@@ -225,7 +225,7 @@ metaast* metaast_parse_char(vect* tokens)
         {
             if (t1->type == meta_char || t1->type == meta_escape || t1->type == meta_hex_number)
             {
-                uint32_t c = metaparser_extract_char_from_token(t1);
+                uint32_t c = metatoken_extract_char_from_token(t1);
                 charset* cs = new_charset();
                 charset_add_char(cs, c);
                 vect_free(tokens);
@@ -276,7 +276,7 @@ metaast* metaast_parse_string(vect* tokens)
             for (size_t i = 0; i < len; i++)
             {
                 metatoken* t = vect_get(tokens, i+1)->data;
-                uint32_t c = metaparser_extract_char_from_token(t);
+                uint32_t c = metatoken_extract_char_from_token(t);
                 string[i] = c;
             }
             string[len] = 0; //null terminator at the end
@@ -303,7 +303,7 @@ metaast* metaast_parse_charset(vect* tokens)
         metatoken* t = vect_get(tokens, 0)->data;
         if (t->type == meta_left_brace)
         {
-            if (metaparser_find_matching_pair(tokens, meta_left_brace, 0) == vect_size(tokens) - 1)
+            if (metaast_find_matching_pair(tokens, meta_left_brace, 0) == vect_size(tokens) - 1)
             {
                 charset* cs = new_charset();
 
@@ -311,7 +311,7 @@ metaast* metaast_parse_charset(vect* tokens)
                 size_t idx = 1;
                 while (idx < vect_size(tokens) - 1)
                 {
-                    uint32_t c0 = metaparser_extract_char_from_token(vect_get(tokens, idx)->data);
+                    uint32_t c0 = metatoken_extract_char_from_token(vect_get(tokens, idx)->data);
                     idx++;
                     
                     //minus indicates a range, otherwise a single character
@@ -322,7 +322,7 @@ metaast* metaast_parse_charset(vect* tokens)
                     else
                     {
                         idx++;
-                        uint32_t cf = metaparser_extract_char_from_token(vect_get(tokens, idx)->data);
+                        uint32_t cf = metatoken_extract_char_from_token(vect_get(tokens, idx)->data);
                         idx++;
                         charset_add_range(cs, (urange){.start=c0, .stop=cf});
                     }
@@ -382,7 +382,7 @@ metaast* metaast_parse_hex(vect* tokens)
         metatoken* t = vect_get(tokens, 0)->data;
         if (t->type == meta_hex_number)
         {
-            uint32_t c = metaparser_extract_char_from_token(t);
+            uint32_t c = metatoken_extract_char_from_token(t);
             charset* cs = new_charset();
             charset_add_char(cs, c);
             vect_free(tokens);
@@ -670,7 +670,7 @@ metaast* metaast_parse_cat(vect* tokens)
     int count = 0;
     while (idx < vect_size(tokens))
     {
-        idx = metaparser_scan_to_end_of_unit(tokens, idx);
+        idx = metaast_scan_to_end_of_unit(tokens, idx);
         if (idx < 0) { return NULL; }
         
         //check if token at end of expression is a binary operator
@@ -678,7 +678,7 @@ metaast* metaast_parse_cat(vect* tokens)
         if (idx < vect_size(tokens))
         {
             metatoken* t = vect_get(tokens, idx)->data;
-            if (metaparser_is_token_bin_op(t->type))            {
+            if (metatoken_is_type_bin_op(t->type))            {
                 return NULL;
             }
         }
@@ -692,7 +692,7 @@ metaast* metaast_parse_cat(vect* tokens)
         idx = 0;
         for (int i = 0; i < count; i++)
         {
-            idx = metaparser_scan_to_end_of_unit(tokens, 0);
+            idx = metaast_scan_to_end_of_unit(tokens, 0);
             vect* expr_tokens = new_vect(); //will be freed by metaast_parse_expr()
             for (int j = 0; j < idx; j++)
             {
@@ -737,7 +737,7 @@ metaast* metaast_parse_group(vect* tokens)
         if (t->type == meta_left_parenthesis)
         {
             //if last token is matching parenthesis, then this is a group expression
-            if (metaparser_find_matching_pair(tokens, meta_left_parenthesis, 0) == size - 1)
+            if (metaast_find_matching_pair(tokens, meta_left_parenthesis, 0) == size - 1)
             {
                 obj_free(vect_dequeue(tokens)); //free left parenthesis
                 obj_free(vect_pop(tokens));     //free right parenthesis
@@ -765,7 +765,7 @@ metaast* metaast_parse_capture(vect* tokens)
         if (t->type == meta_left_bracket)
         {
             //if last token is matching parenthesis, then this is a capture group expression
-            if (metaparser_find_matching_pair(tokens, meta_left_bracket, 0) == size - 1)
+            if (metaast_find_matching_pair(tokens, meta_left_bracket, 0) == size - 1)
             {
                 obj_free(vect_dequeue(tokens)); //free left bracket
                 obj_free(vect_pop(tokens));     //free right bracket
@@ -823,27 +823,27 @@ metaast* metaast_parse_nofollow(vect* tokens)
  */
 metaast* metaast_parse_binary_op(vect* tokens, metatoken_type optype)
 {
-    metaast_type asttype = metaparser_get_token_ast_type(optype);
+    metaast_type asttype = metaast_get_token_ast_type(optype);
 
     // verify top level expression contains no lower precedence operators
     int idx = 0;
-    const uint64_t op_precedence = metaparser_get_type_precedence_level(asttype);
+    const uint64_t op_precedence = metaast_get_type_precedence_level(asttype);
     
     //keep track of location of the `|` which will split the tokens list
     int split_idx = -1;
 
     while (idx < vect_size(tokens))
     {
-        idx = metaparser_scan_to_end_of_unit(tokens, idx);
+        idx = metaast_scan_to_end_of_unit(tokens, idx);
         if (idx < 0) { return NULL; }
         
         //check if token at end of expression is a binary operator, and has equal or higher precedence than this one
         if (idx < vect_size(tokens))
         {
             metatoken* t = vect_get(tokens, idx)->data;
-            if (metaparser_is_token_bin_op(t->type))
+            if (metatoken_is_type_bin_op(t->type))
             {
-                uint64_t level = metaparser_get_type_precedence_level(metaparser_get_token_ast_type(t->type));
+                uint64_t level = metaast_get_type_precedence_level(metaast_get_token_ast_type(t->type));
                 if (level == op_precedence)
                 {
                     split_idx = idx;
@@ -894,6 +894,192 @@ metaast* metaast_parse_binary_op(vect* tokens, metatoken_type optype)
         }
     }
     return NULL;
+}
+
+
+/**
+ * Return the index of the matching pair token in the token string.
+ * e.g. used to find a matching closing parenthesis, starting at an opening parenthesis.
+ * Starts scanning from start_idx, which must be of type `left`.
+ * Function is formulated so that left/right can be the same type.
+ * 
+ * If no match is found, returns -1
+ */
+int metaast_find_matching_pair(vect* tokens, metatoken_type left, size_t start_idx)
+{
+    metatoken_type right = metatoken_get_matching_pair_type(left);
+    if (start_idx >= vect_size(tokens))
+    {
+        printf("ERROR: specified start_idx past the end of tokens in find_matching_pair()\n");
+        exit(1);
+    }
+    metatoken* t0 = vect_get(tokens, start_idx)->data;
+    if (t0->type != left)
+    {
+        printf("ERROR: expected token at start_idx to be of type %u but found %u\n", left, t0->type);
+        exit(1);
+    }
+
+    //keep track of nested pairs. start with 1, i.e. already opened first pair.
+    uint64_t stack = 1;
+
+    //scan through for the matching pair
+    int idx = start_idx + 1;
+    while (idx < vect_size(tokens))
+    {
+        metatoken* t = vect_get(tokens, idx)->data;
+
+        //check for right first, to correctly handle cases where left==right
+        //e.g. for quote pairs (""), individual quotes (") cannot be nested, so first one found is the match
+        if (t->type == right) { stack--; }
+        else if (t->type == left) { stack++; }
+        if (stack == 0)
+        {
+            return idx;
+        }
+        idx++;
+    }
+    return -1;
+}
+
+
+/**
+ * Return the first index after the end of the expression starting at the given start index.
+ * Returns -1 if unable to scan past expression.
+ */
+int metaast_scan_to_end_of_unit(vect* tokens, size_t start_idx)
+{
+    if (vect_size(tokens) <= start_idx)
+    {
+        printf("ERROR: start index for scanning to end of unit is past the end of tokens array\n");
+        exit(1);
+    }
+    int idx = start_idx;
+    metatoken* t = vect_get(tokens, start_idx)->data;
+    
+    //scan through first part of the expression
+    switch (t->type)
+    {
+        // length 1 expressions
+        case hashtag:
+        case meta_hex_number:
+        case meta_anyset:
+        case meta_epsilon:
+        {
+            idx += 1;
+            break;
+        }
+
+        // matching pair expressions
+        case meta_single_quote:
+        case meta_double_quote:
+        case meta_left_parenthesis:
+        case meta_left_bracket:
+        case meta_left_brace:
+        {
+            idx = metaast_find_matching_pair(tokens, t->type, start_idx);
+            if (idx < 0) 
+            { 
+                printf("ERROR: unpaired left-most token: ");
+                metatoken_repr(t);
+                printf("\n");
+                return idx;
+            }
+            idx += 1;
+            break;
+        }
+
+        // all other types not allowed to start an expression
+        default: idx = -1;
+    }
+
+    if (idx < 0)
+    {
+        printf("ERROR: could not scan past expression because of illegal left-most token: ");
+        metatoken_repr(t);
+        printf("\n");
+        return idx;
+    }
+
+    //scan optional suffixes to the expression
+    while (idx < vect_size(tokens))
+    {
+        // get next token
+        t = vect_get(tokens, idx)->data;
+        
+        // if any of the allowable suffixes, increment and start over
+        if (t->type == meta_dec_number) { idx++; continue; } 
+        if (t->type == meta_star) { idx++; continue; } 
+        if (t->type == meta_plus) { idx++; continue; } 
+        if (t->type == meta_question_mark) { idx++; continue; } 
+        if (t->type == meta_tilde) { idx++; continue; } 
+        
+        // non-suffix type encountered
+        break;
+    }
+    return idx;
+}
+
+
+/**
+ * Return the corresponding meta-ast type for the given separater token type.
+ * type is expcted to be a binary operator separator.
+ */
+metaast_type metaast_get_token_ast_type(metatoken_type type)
+{
+    switch (type)
+    {
+        case meta_minus: return metaast_reject;
+        case meta_forward_slash: return metaast_nofollow;
+        case meta_ampersand: return metaast_intersect;
+        case meta_vertical_bar: return metaast_or;
+        case meta_greater_than: return metaast_greaterthan;
+        case meta_less_than: return metaast_lessthan;
+
+        default:
+            printf("ERROR: metatoken type %u is not a binary operator\n", type);
+            exit(1);
+    }
+}
+
+
+/**
+ * Return the precedence level of the given meta-ast operator.
+ * Lower value indicates higher precedence, i.e. tighter coupling.
+ */
+uint64_t metaast_get_type_precedence_level(metaast_type type)
+{
+    switch (type)
+    {
+        /*metaast_group would be level 0*/
+        case metaast_capture:
+        /*technically not operators*/
+        case metaast_identifier:
+        case metaast_charset:
+        case metaast_string:
+        case metaast_eps:
+            return 0;
+
+        case metaast_star:
+        case metaast_plus:
+        case metaast_count:
+        case metaast_option:
+        case metaast_compliment:
+            return 1;
+
+        case metaast_cat:
+            return 2;
+
+        case metaast_reject:
+        case metaast_nofollow:
+        case metaast_intersect:
+            return 3;
+
+        case metaast_or:
+        case metaast_greaterthan:
+        case metaast_lessthan:
+            return 4;
+    }
 }
 
 
