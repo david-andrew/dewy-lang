@@ -1068,61 +1068,78 @@ metaast* parse_meta_cat(vect* tokens)
  */
 metaast* parse_meta_or(vect* tokens)
 {
-    // // verify top level expression contains no lower precedence operators
-    // int idx = 0;
-    // int count = 0;
-    // uint64_t cur_precedence = 0;
-    // uint64_t or_precedence = metaparser_get_type_precedence_level(metaast_or);
+    // verify top level expression contains no lower precedence operators
+    int idx = 0;
+    uint64_t cur_precedence = 0;
+    const uint64_t or_precedence = metaparser_get_type_precedence_level(metaast_or);
     
-    // //keep track of locations of operators of same precedence
-    // vect* split_idxs = new_vect();
+    //keep track of location of the `|` which will split the tokens list
+    int split_idx = -1;
 
-    // while (idx < vect_size(tokens))
-    // {
-    //     idx = metaparser_scan_to_end_of_unit(tokens, idx);
-    //     if (idx < 0) { return NULL; }
+    while (idx < vect_size(tokens))
+    {
+        idx = metaparser_scan_to_end_of_unit(tokens, idx);
+        if (idx < 0) { return NULL; }
         
-    //     //check if token at end of expression is a binary operator
-    //     //all bin ops have lower precedence than cat, so we parse them first
-    //     if (idx < vect_size(tokens))
-    //     {
-    //         metatoken* t = vect_get(tokens, idx)->data;
-    //         if (metaparser_is_token_bin_op(t->type))
-    //         {
-    //             uint64_t level = metaparser_get_type_precedence_level(metaparser_get_token_ast_type(t->type));
-    //             if (level > cur_precedence)
-    //             { cur_precedence = level; }
+        //check if token at end of expression is a binary operator, and has equal or higher precedence than this one
+        if (idx < vect_size(tokens))
+        {
+            metatoken* t = vect_get(tokens, idx)->data;
+            if (metaparser_is_token_bin_op(t->type))
+            {
+                uint64_t level = metaparser_get_type_precedence_level(metaparser_get_token_ast_type(t->type));
+                if (level >= cur_precedence)
+                { 
+                    cur_precedence = level;
+                    split_idx = idx; 
+                }
 
-    //             //record the index if this is an operator of the correct level of precedence
-    //             if (level == or_precedence)
-    //             {
-    //                 vect_push(split_idxs, new_int(idx));
-    //             }
-    //         }
-    //     }
-    //     // count++;
-    // }
+                //even lower precedence operator will be parsed first
+                if (cur_precedence > or_precedence)
+                {
+                    return NULL;
+                }
 
-    // if (count > 1)
-    // {
-    //     //build the sequenc of expressions to cat
-    //     metaast** sequence = malloc(count * sizeof(metaast*));
-    //     idx = 0;
-    //     for (int i = 0; i < count; i++)
-    //     {
-    //         idx = metaparser_scan_to_end_of_unit(tokens, 0);
-    //         vect* expr_tokens = new_vect(); //will be freed by parse_meta_expr()
-    //         for (int j = 0; j < idx; j++)
-    //         {
-    //             vect_enqueue(expr_tokens, vect_dequeue(tokens));
-    //         }
-    //         metaast* expr = parse_meta_expr_restricted(expr_tokens, parse_meta_cat);
-    //         sequence[i] = expr;
-    //     }
+                idx++;
+            }
+        }
+    }
 
-    //     vect_free(tokens); //should be empty
-    //     return new_metaast_sequence_node(metaast_cat, count, count, sequence);
-    // }
+    if (split_idx > 0)
+    {
+        //check if the token at the split index is the right operator
+        metatoken* t = vect_get(tokens, split_idx)->data;
+        
+        //record the index if this is an operator of the correct level of precedence
+        if (t->type == meta_vertical_bar)
+        {
+            vect* left_tokens = new_vect();
+            for (int i = 0; i < split_idx; i++)
+            {
+                vect_enqueue(left_tokens, vect_dequeue(tokens));
+            }
+            obj_free(vect_dequeue(tokens)); //free the split operator token
+
+            metaast* left = parse_meta_expr(left_tokens);
+            if (left != NULL)
+            {
+                metaast* right = parse_meta_expr(tokens);
+                if (right != NULL)
+                {
+                    return new_metaast_binary_op_node(metaast_or, left, right);
+                }
+                else
+                {
+                    printf("ERROR: binary op right AST returned NULL\n");
+                    metaast_free(left);
+                }
+            }
+            else
+            {
+                printf("ERROR: binary op left AST returned NULL\n");
+            }
+        }
+    }
     return NULL;
 }
 
