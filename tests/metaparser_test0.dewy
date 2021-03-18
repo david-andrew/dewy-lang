@@ -167,3 +167,10 @@ _?];
 #or0 = "A" | "B";
 #or1 = ξ | ϵ;
 #or2 = "A" ξ | ϵ | #or1* [A-Za-z0-9]+;
+
+//testing reject
+#reject0 = ξ - [A-Za-Z0-9];
+#reject1 = ξ - [A-Za-Z0-9] | ϵ;
+#reject1 = ξ* - [A-Za-z0-9]* - "apple" | ϵ;
+#reject1 = ξ - [A-Za-z0-9] - "q";
+#reject1 = ξ - ([A-Za-z0-9] - "q");

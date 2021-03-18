@@ -49,6 +49,8 @@ metaast* parse_meta_greaterthan(vect* tokens);
 metaast* parse_meta_lessthan(vect* tokens);
 metaast* parse_meta_reject(vect* tokens);
 metaast* parse_meta_nofollow(vect* tokens);
+metaast* parse_meta_binary_op(vect* tokens, metatoken_type optype);
+
 
 size_t metaparser_add_head(obj* head);
 obj* metaparser_get_head(size_t i);
