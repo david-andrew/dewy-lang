@@ -1054,7 +1054,7 @@ metaast* parse_meta_cat(vect* tokens)
         }
 
         vect_free(tokens); //should be empty
-        return new_metaast_sequence_node(metaast_cat, count, count, sequence);
+        return new_metaast_sequence_node(metaast_cat, count, sequence);
     }
     return NULL;
 }
@@ -1068,11 +1068,61 @@ metaast* parse_meta_cat(vect* tokens)
  */
 metaast* parse_meta_or(vect* tokens)
 {
-    // if (vect_size(tokens) > 2)
-    // {
+    // // verify top level expression contains no lower precedence operators
+    // int idx = 0;
+    // int count = 0;
+    // uint64_t cur_precedence = 0;
+    // uint64_t or_precedence = metaparser_get_type_precedence_level(metaast_or);
+    
+    // //keep track of locations of operators of same precedence
+    // vect* split_idxs = new_vect();
 
+    // while (idx < vect_size(tokens))
+    // {
+    //     idx = metaparser_scan_to_end_of_unit(tokens, idx);
+    //     if (idx < 0) { return NULL; }
+        
+    //     //check if token at end of expression is a binary operator
+    //     //all bin ops have lower precedence than cat, so we parse them first
+    //     if (idx < vect_size(tokens))
+    //     {
+    //         metatoken* t = vect_get(tokens, idx)->data;
+    //         if (metaparser_is_token_bin_op(t->type))
+    //         {
+    //             uint64_t level = metaparser_get_type_precedence_level(metaparser_get_token_ast_type(t->type));
+    //             if (level > cur_precedence)
+    //             { cur_precedence = level; }
+
+    //             //record the index if this is an operator of the correct level of precedence
+    //             if (level == or_precedence)
+    //             {
+    //                 vect_push(split_idxs, new_int(idx));
+    //             }
+    //         }
+    //     }
+    //     // count++;
     // }
-    //determine that lowest precedence operator is or
+
+    // if (count > 1)
+    // {
+    //     //build the sequenc of expressions to cat
+    //     metaast** sequence = malloc(count * sizeof(metaast*));
+    //     idx = 0;
+    //     for (int i = 0; i < count; i++)
+    //     {
+    //         idx = metaparser_scan_to_end_of_unit(tokens, 0);
+    //         vect* expr_tokens = new_vect(); //will be freed by parse_meta_expr()
+    //         for (int j = 0; j < idx; j++)
+    //         {
+    //             vect_enqueue(expr_tokens, vect_dequeue(tokens));
+    //         }
+    //         metaast* expr = parse_meta_expr_restricted(expr_tokens, parse_meta_cat);
+    //         sequence[i] = expr;
+    //     }
+
+    //     vect_free(tokens); //should be empty
+    //     return new_metaast_sequence_node(metaast_cat, count, count, sequence);
+    // }
     return NULL;
 }
 

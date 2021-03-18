@@ -38,6 +38,7 @@ Node struct map:
     - metaast_capture
 
     metaast_binary_op_node
+    - metaast_or
     - metaast_greaterthan
     - metaast_lessthan
     - metaast_reject
@@ -46,7 +47,6 @@ Node struct map:
 
     metaast_sequence_node
     - metaast_cat
-    - metaast_or
 */
 
 
@@ -100,15 +100,15 @@ typedef struct {
 } metaast_unary_op_node;
 
 
-//A B C D, A | B | C | D
+//A B C D
 typedef struct {
     size_t size;
-    size_t capacity;
+    // size_t capacity;
     metaast** sequence; //array of metaast
 } metaast_sequence_node;
 
 
-// C > D,  E < F,  G - H,  I / J,  K & L
+// A | B,  C > D,  E < F,  G - H,  I / J,  K & L
 typedef struct {
     metaast* left;
     metaast* right;
@@ -127,7 +127,7 @@ metaast* new_metaast_null_node(metaast_type type);
 metaast* new_metaast_string_node(metaast_type type, uint32_t* string);
 metaast* new_metaast_repeat_node(metaast_type type, uint64_t count, metaast* inner);
 metaast* new_metaast_unary_op_node(metaast_type type, metaast* inner);
-metaast* new_metaast_sequence_node(metaast_type type, size_t size, size_t capacity, metaast** sequence); //sequence is array of metaast
+metaast* new_metaast_sequence_node(metaast_type type, size_t size, /*size_t capacity,*/ metaast** sequence); //sequence is array of metaast
 metaast* new_metaast_binary_op_node(metaast_type type, metaast* left, metaast* right);
 metaast* new_metaast_charset_node(metaast_type type, charset* c);
 
