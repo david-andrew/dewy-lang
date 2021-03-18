@@ -5,17 +5,10 @@
 #include "metaast.h"
 
 
-//function pointer type for token scan functions
-typedef metaast* (*metaparse_fn)(vect* tokens);
-#define metaparse_fn_len(A) sizeof(A) / sizeof(metaparse_fn)
-
-
 obj* metaparser_get_anonymous_rule_head();
 void initialize_metaparser();
 void release_metaparser();
 bool parse_next_meta_rule(vect* tokens);
-metaast* parse_meta_expr(vect* tokens);
-metaast* parse_meta_expr_restricted(vect* tokens, metaparse_fn skip);
 vect* metaparser_create_body(obj* head, metaast* body_ast);
 uint32_t metaparser_extract_char_from_token(metatoken* t);
 int get_next_real_metatoken(vect* tokens, int i);
@@ -28,28 +21,6 @@ bool metaparser_is_token_bin_op(metatoken_type type);
 metaast_type metaparser_get_token_ast_type(metatoken_type type);
 uint64_t metaparser_get_type_precedence_level(metaast_type type);
 bool metaparser_is_type_current_precedence(vect* tokens, metaast_type type);
-
-metaast* parse_meta_eps(vect* tokens);
-metaast* parse_meta_char(vect* tokens);
-metaast* parse_meta_string(vect* tokens);
-metaast* parse_meta_charset(vect* tokens);
-metaast* parse_meta_anyset(vect* tokens);
-metaast* parse_meta_hex(vect* tokens);
-metaast* parse_meta_identifier(vect* tokens);
-metaast* parse_meta_star(vect* tokens);
-metaast* parse_meta_plus(vect* tokens);
-metaast* parse_meta_option(vect* tokens);
-metaast* parse_meta_count(vect* tokens);
-metaast* parse_meta_compliment(vect* tokens);
-metaast* parse_meta_cat(vect* tokens);
-metaast* parse_meta_or(vect* tokens);
-metaast* parse_meta_group(vect* tokens);
-metaast* parse_meta_capture(vect* tokens);
-metaast* parse_meta_greaterthan(vect* tokens);
-metaast* parse_meta_lessthan(vect* tokens);
-metaast* parse_meta_reject(vect* tokens);
-metaast* parse_meta_nofollow(vect* tokens);
-metaast* parse_meta_binary_op(vect* tokens, metatoken_type optype);
 
 
 size_t metaparser_add_head(obj* head);

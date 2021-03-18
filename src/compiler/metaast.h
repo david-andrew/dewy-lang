@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "vector.h"
 #include "charset.h"
 
 
@@ -121,6 +122,11 @@ typedef struct {
 } metaast_charset_node;
 
 
+//function pointer type for token scan functions
+typedef metaast* (*metaast_parse_fn)(vect* tokens);
+#define metaast_parse_fn_len(A) sizeof(A) / sizeof(metaast_parse_fn)
+
+
 //create meta-ast objects
 metaast* new_metaast(metaast_type type, void* node);
 metaast* new_metaast_null_node(metaast_type type);
@@ -131,8 +137,31 @@ metaast* new_metaast_sequence_node(metaast_type type, size_t size, /*size_t capa
 metaast* new_metaast_binary_op_node(metaast_type type, metaast* left, metaast* right);
 metaast* new_metaast_charset_node(metaast_type type, charset* c);
 
-void metaast_sequence_append(metaast* sequence, metaast* ast);
-void metaast_sequence_resize(metaast_sequence_node* node, size_t new_capacity);
+//construct nodes from input tokens
+metaast* metaast_parse_expr(vect* tokens);
+metaast* metaast_parse_expr_restricted(vect* tokens, metaast_parse_fn skip);
+metaast* metaast_parse_eps(vect* tokens);
+metaast* metaast_parse_char(vect* tokens);
+metaast* metaast_parse_string(vect* tokens);
+metaast* metaast_parse_charset(vect* tokens);
+metaast* metaast_parse_anyset(vect* tokens);
+metaast* metaast_parse_hex(vect* tokens);
+metaast* metaast_parse_identifier(vect* tokens);
+metaast* metaast_parse_star(vect* tokens);
+metaast* metaast_parse_plus(vect* tokens);
+metaast* metaast_parse_option(vect* tokens);
+metaast* metaast_parse_count(vect* tokens);
+metaast* metaast_parse_compliment(vect* tokens);
+metaast* metaast_parse_cat(vect* tokens);
+metaast* metaast_parse_or(vect* tokens);
+metaast* metaast_parse_group(vect* tokens);
+metaast* metaast_parse_capture(vect* tokens);
+metaast* metaast_parse_greaterthan(vect* tokens);
+metaast* metaast_parse_lessthan(vect* tokens);
+metaast* metaast_parse_reject(vect* tokens);
+metaast* metaast_parse_nofollow(vect* tokens);
+metaast* metaast_parse_binary_op(vect* tokens, metatoken_type optype);
+
 
 //free meta-ast objects
 void metaast_free(metaast* ast);
