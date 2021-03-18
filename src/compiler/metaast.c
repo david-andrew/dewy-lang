@@ -10,7 +10,6 @@
 #include "metatoken.h"
 #include "metaast.h"
 #include "utilities.h"
-// #include "metaparser.h"
 
 
 //functions for all scannable rules 
@@ -710,7 +709,7 @@ metaast* metaast_parse_cat(vect* tokens)
 
 
 /**
- * Attempt to parse an or sequence expression from the list of tokens.
+ * Attempt to parse an or binary op expression from the list of tokens.
  * if matches, tokens will be freed, else returns NULL.
  * 
  * #or = (#expr #ws '|' #ws #expr) - #union;
@@ -783,7 +782,10 @@ metaast* metaast_parse_capture(vect* tokens)
 
 
 /**
+ * Attempt to parse a greaterthan binary op expression from the list of tokens.
+ * if matches, tokens will be freed, else returns NULL.
  * 
+ * #greaterthan = #expr #ws '>' #ws #expr;
  */
 metaast* metaast_parse_greaterthan(vect* tokens)
 {
@@ -792,7 +794,10 @@ metaast* metaast_parse_greaterthan(vect* tokens)
 
 
 /**
+ * Attempt to parse a lessthan binary op expression from the list of tokens.
+ * if matches, tokens will be freed, else returns NULL.
  * 
+ * #lessthan = #expr #ws '<' #ws #expr;
  */
 metaast* metaast_parse_lessthan(vect* tokens)
 {
@@ -801,7 +806,11 @@ metaast* metaast_parse_lessthan(vect* tokens)
 
 
 /**
+ * Attempt to parse a reject/diff binary op expression from the list of tokens.
+ * if matches, tokens will be freed, else returns NULL.
  * 
+ * #reject = (#expr #ws '-' #ws #expr) - #diff;
+ * #diff = #set #ws '-' #ws #set;
  */
 metaast* metaast_parse_reject(vect* tokens)
 {
@@ -810,7 +819,10 @@ metaast* metaast_parse_reject(vect* tokens)
 
 
 /**
+ * Attempt to parse a nofollow binary op expression from the list of tokens.
+ * if matches, tokens will be freed, else returns NULL.
  * 
+ * #nofollow = #expr #ws '/' #ws #expr;
  */
 metaast* metaast_parse_nofollow(vect* tokens)
 {
