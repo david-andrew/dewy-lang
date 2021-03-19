@@ -11,6 +11,8 @@ size_t ustring_len(uint32_t* string);
 int64_t ustring_cmp(uint32_t* left, uint32_t* right);
 uint32_t* ustring_clone(uint32_t* string);
 uint64_t ustring_hash(uint32_t* str);
+uint64_t dec_digit_to_value(char c);
+uint64_t hex_digit_to_value(char c);
 uint64_t ustring_parse_hex(uint32_t* str);
 uint64_t ustring_parse_dec(uint32_t* str);
 uint64_t ustring_parse_base(uint32_t* str, uint64_t base, uint64_t (*base_digit_to_value)(char));

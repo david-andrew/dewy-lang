@@ -166,6 +166,80 @@ metascanner_state pop_metascanner_state()
 }
 
 
+bool is_identifier_char(char c)
+{
+    //valid identifier characters are
+    //ABCDEFGHIJKLMNOPQRSTUVWXYZ
+    //abcdefghijklmnopqrstuvwxyz
+    //1234567890
+    //~!@#$&_?
+    return is_alphanum_char(c) || is_identifier_symbol_char(c);
+}
+
+bool is_identifier_symbol_char(char c)
+{
+    return c == '~' || c == '!' || c == '@' || c == '#' || c == '$' || c == '&' || c == '_' || c == '?';
+}
+
+bool is_alpha_char(char c)
+{
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+bool is_dec_digit(char c)
+{
+    return c >= '0' && c <= '9';
+}
+
+bool is_alphanum_char(char c)
+{
+    return is_alpha_char(c) || is_dec_digit(c);
+}
+
+
+bool is_upper_hex_letter(char c)
+{
+    return c >= 'A' && c <= 'F';
+}
+
+bool is_lower_hex_letter(char c)
+{
+    return c >= 'a' && c <= 'f';
+}
+
+// returns true if character is a hexidecimal digit (both uppercase or lowercase valid)
+bool is_hex_digit(char c)
+{
+    return is_dec_digit(c) || is_upper_hex_letter(c) || is_lower_hex_letter(c);
+}
+
+/**
+ * Determines if the character is the escape char for starting hex numbers
+ * Hex numbers can be \x#, \X#, \u#, or \U#.
+ */
+bool is_hex_escape(char c)
+{
+    return c == 'x' || c == 'X' || c == 'u' || c == 'U';
+}
+
+
+bool is_whitespace_char(char c)
+{
+    //whitespace includes tab (0x09), line feed (0x0A), line tab (0x0B), form feed (0x0C), carriage return (0x0D), and space (0x20)
+    return c == 0x09 || c == 0x0A || c == 0x0B || c == 0x0C || c == 0x0D || c == 0x20;
+}
+
+
+/**
+ * Determine if the character is a legal charset character
+ * #charsetchar = \U - [\-\[\]] - #ws;
+ */
+bool is_charset_char(uint32_t c)
+{
+    return !(c == 0) && !is_whitespace_char((char)c) && !(c == '-' || c == '[' || c == ']');
+}
+
+
 /**
  * Scan for a single token based on the state on top of the stack.
  */

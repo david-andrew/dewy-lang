@@ -12,24 +12,7 @@ char* substr(char* str, int start, int stop);
 char* clone(char* string);
 char* concatenate(char* left, char* right);
 char* read_file(char* filename);
-
 void repeat_str(char* str, size_t times);
-
-//parsing helper functions
-bool is_identifier_char(char c);
-bool is_identifier_symbol_char(char c);
-bool is_alpha_char(char c);
-bool is_dec_digit(char c);
-bool is_alphanum_char(char c);
-bool is_upper_hex_letter(char c);
-bool is_lower_hex_letter(char c);
-bool is_hex_digit(char c);
-bool is_hex_escape(char c);
-bool is_whitespace_char(char c);
-bool is_charset_char(uint32_t c);
-uint64_t parse_hex(char* str);
-uint64_t dec_digit_to_value(char c);
-uint64_t hex_digit_to_value(char c);
 
 //hash functions
 uint64_t djb2(char* str);

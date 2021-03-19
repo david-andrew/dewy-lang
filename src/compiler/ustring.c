@@ -6,6 +6,7 @@
 
 #include "ustring.h"
 #include "utilities.h"
+#include "metascanner.h"
 
 
 #define AUGMENT_CHAR 0x200000 //first invalid codepoint (2^21)
@@ -132,6 +133,42 @@ uint64_t ustring_hash(uint32_t* str)
         }
     }
     return hash;
+}
+
+
+/**
+ * Convert the hex digit to its numerical value
+ */
+uint64_t hex_digit_to_value(char c)
+{
+    if (is_dec_digit(c)) 
+    { 
+        return c - '0'; 
+    }
+    else if (is_upper_hex_letter(c))
+    {
+        return c - 'A' + 10;
+    }
+    else if (is_lower_hex_letter(c))
+    {
+        return c - 'a' + 10;
+    }
+    printf("ERROR: character %c is not a hex digit\n", c);
+    return 0;
+}
+
+
+/**
+ * Convert a decimal digit to its numerical value
+ */
+uint64_t dec_digit_to_value(char c)
+{
+    if (is_dec_digit(c))
+    {
+        return c - '0';
+    }
+    printf("ERROR: character %c is not a decimal digit\n", c);
+    return 0;
 }
 
 
