@@ -14,6 +14,7 @@
 #include "metaparser.h"
 #include "metaast.h"
 #include "utilities.h"
+#include "ustring.h"
 
 
 /**

@@ -9,6 +9,7 @@
 
 #include "object.h"
 #include "utilities.h"
+#include "ustring.h"
 #include "vector.h"
 #include "dictionary.h"
 #include "set.h"

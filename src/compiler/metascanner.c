@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "utilities.h"
+#include "ustring.h"
 #include "object.h"
 #include "vector.h"
 #include "metatoken.h"

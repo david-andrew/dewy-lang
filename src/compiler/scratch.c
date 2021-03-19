@@ -4,6 +4,7 @@
 
 #include "charset.h"
 #include "utilities.h"
+#include "ustring.h"
 #include "metatoken.h"
 #include "metascanner.h"
 #include "metaparser.h"

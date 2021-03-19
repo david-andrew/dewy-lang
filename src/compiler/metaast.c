@@ -10,6 +10,7 @@
 #include "metatoken.h"
 #include "metaast.h"
 #include "utilities.h"
+#include "ustring.h"
 
 #define METAAST_NO_PARENT_TYPE (metaast_type)12345
 

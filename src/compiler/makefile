@@ -27,6 +27,9 @@ set.o: set.c set.h
 charset.o: charset.c charset.h
 	clang -c -o charset.o charset.c
 
+ustring.o: ustring.c ustring.h
+	clang -c -o ustring.o ustring.c
+
 item.o: item.c item.h
 	clang -c -o item.o item.c
 
@@ -39,8 +42,8 @@ metascanner.o: metascanner.c metascanner.h
 metaparser.o: metaparser.c metaparser.h
 	clang -c -o metaparser.o metaparser.c
 
-unit_test.o: unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o metaast.o charset.o metascanner.o
-	clang -o unit_test.o unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o metaast.o charset.o metascanner.o -lm
+unit_test.o: unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o metaast.o charset.o ustring.o metascanner.o
+	clang -o unit_test.o unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o metaast.o charset.o ustring.o metascanner.o -lm
 
 test: unit_test.o
 	./unit_test.o
@@ -51,7 +54,7 @@ valgrind_test: unit_test.o
 	rm unit_test.o
 
 scratch:
-	clang scratch.c charset.c utilities.c metatoken.c metascanner.c metaparser.c vector.c object.c set.c dictionary.c metaast.c -lm -g
+	clang scratch.c ustring.c charset.c utilities.c metatoken.c metascanner.c metaparser.c vector.c object.c set.c dictionary.c metaast.c -lm -g
 
 dewy_compiler_compiler.o: dewy_compiler_compiler.c
 	clang -c -o dewy_compiler_compiler.o dewy_compiler_compiler.c

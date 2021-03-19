@@ -6,6 +6,7 @@
 
 #include "metatoken.h"
 #include "utilities.h"
+#include "ustring.h"
 
 
 /**
