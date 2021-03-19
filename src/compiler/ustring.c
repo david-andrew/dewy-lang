@@ -7,6 +7,10 @@
 #include "ustring.h"
 #include "utilities.h"
 
+
+#define AUGMENT_CHAR 0x200000 //first invalid codepoint (2^21)
+
+
 /**
  * Return a unicode substring converted from the given utf8 string.
  * Indices index the unicode output string, not the utf8 input string.

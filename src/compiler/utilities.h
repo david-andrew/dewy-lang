@@ -5,8 +5,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define AUGMENT_CHAR 0x200000 //first invalid codepoint (2^21)
-
 //mostly string functions
 int clamp(int x, int min, int max);
 size_t dewy_index(int index, int length);
