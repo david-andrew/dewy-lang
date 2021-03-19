@@ -10,6 +10,7 @@ uint32_t* ustring_utf8_substr(char* str, int start, int stop);
 size_t ustring_len(uint32_t* string);
 int64_t ustring_cmp(uint32_t* left, uint32_t* right);
 uint32_t* ustring_clone(uint32_t* string);
+uint64_t unicode_fnv1a(uint32_t* str);
 uint64_t ustring_parse_hex(uint32_t* str);
 uint64_t ustring_parse_dec(uint32_t* str);
 uint64_t ustring_parse_base(uint32_t* str, uint64_t base, uint64_t (*base_digit_to_value)(char));
@@ -22,6 +23,7 @@ void unicode_str(uint32_t c);
 void unicode_ascii_or_hex_str(uint32_t c);
 void ustring_str(uint32_t* s);
 uint32_t escape_to_unicode(uint32_t c);
+
 
 
 #endif

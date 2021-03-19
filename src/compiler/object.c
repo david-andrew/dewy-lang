@@ -219,7 +219,7 @@ uint64_t obj_hash(obj* o)
         case Integer_t: return hash_int(*(int64_t*)o->data);
         case UInteger_t: return hash_uint(*(uint64_t*)o->data);
         case String_t: return fnv1a(o->data);
-        case UnicodeString_t: return unicode_fnv1a(o->data);
+        case UnicodeString_t: return ustring_hash(o->data);
         // case MetaToken_t: return metatoken_hash((metatoken*)o->data);
         // case MetaSymbol_t: return metasymbol_hash(o->data);
         case Vector_t: return vect_hash(o->data);

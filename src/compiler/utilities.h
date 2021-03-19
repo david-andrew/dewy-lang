@@ -35,7 +35,6 @@ uint64_t hex_digit_to_value(char c);
 uint64_t djb2(char* str);
 uint64_t djb2a(char* str);
 uint64_t fnv1a(char* str);
-uint64_t unicode_fnv1a(uint32_t* str);
 uint64_t hash_uint(uint64_t val);
 uint64_t hash_int(int64_t val);
 uint64_t hash_bool(bool val);
