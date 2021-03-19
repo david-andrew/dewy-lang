@@ -1211,7 +1211,12 @@ bool metaast_fold_constant(metaast* ast)
 {
     if (metaast_fold_charsets(ast)) { return true; }
     if (metaast_fold_strings(ast)) { return true; }
-    /*any other constant folding here...*/
+    /*
+        any other constant folding here...
+        e.g. ?? is idempotent, i.e. if option node's inner is option, remove a layer
+        
+    */
+
 
     return false;
 }
@@ -1443,7 +1448,8 @@ bool metaast_str_inner_check_needs_parenthesis(metaast_type parent, metaast_type
     //special cases that need them
     if ((parent == metaast_star || parent == metaast_plus) && inner == metaast_count) return true;
     if ((parent == metaast_option || parent == metaast_compliment) && inner == metaast_identifier) return true;
-    
+    if (parent == metaast_count && (inner == metaast_count || inner == metaast_identifier)) return true;
+
     if (metaast_is_type_single_unit(inner)) return false;
     if (metaast_get_type_precedence_level(parent) >= metaast_get_type_precedence_level(inner)) return false;
     return true;
