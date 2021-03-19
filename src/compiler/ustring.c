@@ -17,7 +17,7 @@
  * Does not use Dewy slicing rules, only positive in bounds indices.
  * `stop` and `start` bounds are inclusive
  */
-uint32_t* unicode_substr(char* str, int start, int stop)
+uint32_t* ustring_charstar_substr(char* str, int start, int stop)
 {
     //unicode string length (includes chars at start and stop)
     size_t length = stop - start + 1;
@@ -50,7 +50,7 @@ uint32_t* unicode_substr(char* str, int start, int stop)
  * Does not use Dewy slicing rules, only positive in bounds indices.
  * `stop` and `start` bounds are inclusive
  */
-uint32_t* utf8_substr(char* str, int start, int stop)
+uint32_t* ustring_utf8_substr(char* str, int start, int stop)
 {
     //get the utf8 substring
     char* raw_str = substr(str, start, stop);
@@ -59,7 +59,7 @@ uint32_t* utf8_substr(char* str, int start, int stop)
     size_t length = utf8_length(raw_str);
 
     //get the unicode version of the string by taking a unicode substring of the whole length
-    uint32_t* s = unicode_substr(raw_str, 0, length-1);
+    uint32_t* s = ustring_charstar_substr(raw_str, 0, length-1);
     
     //free the temporary raw string
     free(raw_str);
@@ -71,7 +71,7 @@ uint32_t* utf8_substr(char* str, int start, int stop)
 /**
  * Return the length of the unicode string (not including the null terminater)
  */
-size_t unicode_strlen(uint32_t* string)
+size_t ustring_len(uint32_t* string)
 {
     size_t length = 0;
     while (string[length]) { length++; }
@@ -83,7 +83,7 @@ size_t unicode_strlen(uint32_t* string)
  * Compare two unicode strings. 
  * Identical algorithm to normal char* strcmp.
  */
-int64_t unicode_strcmp(uint32_t* left, uint32_t* right)
+int64_t ustring_cmp(uint32_t* left, uint32_t* right)
 {
     uint32_t l, r;
     do
@@ -100,10 +100,10 @@ int64_t unicode_strcmp(uint32_t* left, uint32_t* right)
 /**
  * Clone a null terminated unicode string.
  */
-uint32_t* clone_unicode(uint32_t* string)
+uint32_t* ustring_clone(uint32_t* string)
 {
     //get length of string
-    size_t length = unicode_strlen(string);
+    size_t length = ustring_len(string);
 
     //perform copy
     uint32_t* copy = malloc((length + 1) * sizeof(uint32_t));
@@ -116,32 +116,32 @@ uint32_t* clone_unicode(uint32_t* string)
 /**
  * Read a hex string and convert to an unsigned integer
  */
-uint64_t parse_unicode_hex(uint32_t* str)
+uint64_t ustring_parse_hex(uint32_t* str)
 {
-    return parse_unicode_base(str, 16);
+    return ustring_parse_base(str, 16, hex_digit_to_value);
 }
 
 
 /**
  * Read a decimal string, and convert to an unsigned integer.
  */
-uint64_t parse_unicode_dec(uint32_t* str)
+uint64_t ustring_parse_dec(uint32_t* str)
 {
-    return parse_unicode_base(str, 10);
+    return ustring_parse_base(str, 10, dec_digit_to_value);
 }
 
 
 /**
  * Generic number parser for arbitrary base.
  */
-uint64_t parse_unicode_base(uint32_t* str, uint64_t base)
+uint64_t ustring_parse_base(uint32_t* str, uint64_t base, uint64_t (*base_digit_to_value)(char))
 {
-    size_t len = unicode_strlen(str);
+    size_t len = ustring_len(str);
     uint64_t pow = 1;
     uint64_t val = 0;
     for (int64_t i = len - 1; i >= 0; i--)
     {
-        val += dec_digit_to_value(str[i]) * pow;
+        val += base_digit_to_value(str[i]) * pow;
         pow *= base;
     }
     return val;
@@ -262,7 +262,7 @@ uint32_t eat_utf8(char** str_ptr)
 /**
  * Return an allocated null terminated unicode string containing the given character.
  */
-uint32_t* unicode_char_to_str(uint32_t c)
+uint32_t* ustring_from_unicode(uint32_t c)
 {
     uint32_t* str = malloc(2*sizeof(uint32_t));
     str[0] = c;
@@ -301,7 +301,7 @@ size_t utf8_length(char* str)
 /**
     print the unicode character, or a special character for some special inputs
 */
-void unicode_char_str(uint32_t c)
+void unicode_str(uint32_t c)
 {
     if (c == 0)                 //null character. represents an empty string/set
     {
@@ -321,14 +321,14 @@ void unicode_char_str(uint32_t c)
 /**
  * Print out the character or hex value of the given char.
  */
-void ascii_or_hex_str(uint32_t c)
+void unicode_ascii_or_hex_str(uint32_t c)
 {
     if (0x21 <= c && c <= 0x7E) put_unicode(c);
     else printf("\\x%X", c);
 }
 
 
-void unicode_string_str(uint32_t* s)
+void ustring_str(uint32_t* s)
 {
     uint32_t c;
     while ((c = *s++)) put_unicode(c);
@@ -339,7 +339,7 @@ void unicode_string_repr(uint32_t* s)
 {    
     // putchar('"');
     printf("U\"");
-    unicode_string_str(s);
+    ustring_str(s);
     putchar('"');
 }
 

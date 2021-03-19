@@ -189,12 +189,12 @@ void obj_print(obj* o)
     switch (o->type)
     {
         case Boolean_t: printf(*(bool*)o->data ? "true" : "false"); break;
-        case Character_t: unicode_char_str(*(uint32_t*)o->data); break;
+        case Character_t: unicode_str(*(uint32_t*)o->data); break;
         case CharSet_t: charset_str(o->data);
         case Integer_t: printf("%ld", *(int64_t*)o->data); break;
         case UInteger_t: printf("%lu", *(uint64_t*)o->data); break;
         case String_t: printf("%s", o->data); break;
-        case UnicodeString_t: unicode_string_str(o->data); break;
+        case UnicodeString_t: ustring_str(o->data); break;
         case MetaToken_t: metatoken_str(o->data); break;
         // case MetaItem_t: metaitem_str(o->data); break;
         case Vector_t: vect_str(o->data); break;
@@ -251,7 +251,7 @@ int64_t obj_compare(obj* left, obj* right)
         case Integer_t: return *(int64_t*)left->data - *(int64_t*)right->data;
         case UInteger_t: return *(uint64_t*)left->data - *(uint64_t*)right->data;
         case String_t: return strcmp((char*)left->data, (char*)right->data);
-        case UnicodeString_t: return unicode_strcmp((uint32_t*)left->data, (uint32_t*)right->data);
+        case UnicodeString_t: return ustring_cmp((uint32_t*)left->data, (uint32_t*)right->data);
         // case MetaToken_t: return metatoken_compare((metatoken*)left->data, (metatoken*)right->data);
         case Vector_t: return vect_compare((vect*)left->data, (vect*)right->data);
         // case Dictionary_t: return dict_compare((dict*)left->data, (dict*)right->data);

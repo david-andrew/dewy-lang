@@ -445,7 +445,7 @@ metaast* metaast_parse_star(vect* tokens)
                 metatoken* t1 = vect_get(tokens, size - 2)->data;
                 if (t1->type == meta_dec_number)
                 {
-                    count = parse_unicode_dec(t1->content);
+                    count = ustring_parse_dec(t1->content);
                     expr_size -= 1;
                 }
             }
@@ -507,7 +507,7 @@ metaast* metaast_parse_plus(vect* tokens)
                 metatoken* t1 = vect_get(tokens, size - 2)->data;
                 if (t1->type == meta_dec_number)
                 {
-                    count = parse_unicode_dec(t1->content);
+                    count = ustring_parse_dec(t1->content);
                     expr_size -= 1;
                 }
             }
@@ -607,7 +607,7 @@ metaast* metaast_parse_count(vect* tokens)
                 {
                     //matched a count expression
                     metatoken* t = number_token_obj->data;
-                    uint64_t count = parse_unicode_dec(t->content);
+                    uint64_t count = ustring_parse_dec(t->content);
                     obj_free(number_token_obj);
                     return new_metaast_repeat_node(metaast_count, count, inner);
                 }
@@ -1310,7 +1310,7 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
         {
             metaast_string_node* node = ast->node;
             //if string, wrap in quotes, else print without
-            wrap_print(ast->type == metaast_string, unicode_string_str(node->string), "\"", "\"")
+            wrap_print(ast->type == metaast_string, ustring_str(node->string), "\"", "\"")
             break;
         }
         
@@ -1477,7 +1477,7 @@ void metaast_repr_inner(metaast* ast, int level)
         case metaast_identifier:
         {
             metaast_string_node* node = ast->node;
-            printf("(`"); unicode_string_str(node->string); printf("`)\n");
+            printf("(`"); ustring_str(node->string); printf("`)\n");
             break;
         }
         

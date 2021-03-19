@@ -73,7 +73,7 @@ obj* metaparser_get_anonymous_rule_head()
     sprintf(num_str, "#__%"PRIu64, metaparser_anonymous_rule_count);
 
     //convert to unicode string (wrapped in obj*), and cleanup char* version
-    obj* head = new_unicode_string_obj(utf8_substr(num_str, 0, width-1));
+    obj* head = new_unicode_string_obj(ustring_utf8_substr(num_str, 0, width-1));
     free(num_str);
 
     //increment the counter. Increment by 2 so it matches indices in metaparser_bodies.

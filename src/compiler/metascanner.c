@@ -239,7 +239,7 @@ obj* match_hashtag(char** src)
         //scan to end of identifier
         int i = 2;
         while (is_identifier_char((*src)[i])) { i++; }
-        obj* t = new_metatoken_obj(hashtag, unicode_substr(*src, 0, i-1));
+        obj* t = new_metatoken_obj(hashtag, ustring_charstar_substr(*src, 0, i-1));
         *src += i;
 
         //if we were scanning root, change the state based on the type of character following the hashtag
@@ -270,7 +270,7 @@ obj* match_hashtag(char** src)
  */
 obj* match_meta_single_quote(char** src)
 {
-    obj* t = *src[0] == '\'' ? new_metatoken_obj(meta_single_quote, unicode_substr((*src)++, 0, 0)) : NULL;
+    obj* t = *src[0] == '\'' ? new_metatoken_obj(meta_single_quote, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
     if (t != NULL)
     {
         metascanner_state state = peek_metascanner_state();
@@ -293,7 +293,7 @@ obj* match_meta_single_quote_char(char** src)
     //any single char except for '\''. Also implicitly exclude '\\' "//" "/{"
     if ((*src)[0] != 0 && (*src)[0] != '\'')
     {
-        obj* t = new_metatoken_obj(meta_char, unicode_char_to_str(eat_utf8(src)));
+        obj* t = new_metatoken_obj(meta_char, ustring_from_unicode(eat_utf8(src)));
         return t;
     }
     return NULL;
@@ -308,7 +308,7 @@ obj* match_meta_single_quote_char(char** src)
  */
 obj* match_meta_double_quote(char** src)
 {
-    obj* t = *src[0] == '"' ? new_metatoken_obj(meta_double_quote, unicode_substr((*src)++, 0, 0)) : NULL;
+    obj* t = *src[0] == '"' ? new_metatoken_obj(meta_double_quote, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
     if (t != NULL)
     {
         metascanner_state state = peek_metascanner_state();
@@ -331,7 +331,7 @@ obj* match_meta_double_quote_char(char** src)
     //any single char except for '"'. Also implicitly exclude '\\' "//" "/{"
     if ((*src)[0] != 0 && (*src)[0] != '"')
     {
-        obj* t = new_metatoken_obj(meta_char, unicode_char_to_str(eat_utf8(src)));
+        obj* t = new_metatoken_obj(meta_char, ustring_from_unicode(eat_utf8(src)));
         return t;
     }
     return NULL;
@@ -352,8 +352,8 @@ obj* match_meta_hex_number(char** src)
         int i = 2;
         while(is_hex_digit((*src)[i+1])) { i++; }
 
-        //Because hex is only ascii, can take unicode_substr directly. Skip prefix of hex number
-        obj* t = new_metatoken_obj(meta_hex_number, unicode_substr((*src), 2, i));
+        //Because hex is only ascii, can take ustring_charstar_substr directly. Skip prefix of hex number
+        obj* t = new_metatoken_obj(meta_hex_number, ustring_charstar_substr((*src), 2, i));
         *src += i + 1;
         return t;
     }
@@ -375,8 +375,8 @@ obj* match_meta_dec_number(char** src)
         int i = 0;
         while(is_dec_digit((*src)[i+1])) { i++; }
 
-        //Because decimal number is ascii only, can take unicode_substr directly
-        obj* t = new_metatoken_obj(meta_dec_number, unicode_substr((*src), 0, i));
+        //Because decimal number is ascii only, can take ustring_charstar_substr directly
+        obj* t = new_metatoken_obj(meta_dec_number, ustring_charstar_substr((*src), 0, i));
         *src += i + 1;
         return t;
     }
@@ -395,12 +395,12 @@ obj* match_meta_anyset(char** src)
     if (peek == 'U' || peek == 'V' || peek == 0x3be) // 0x3be = 'ξ'
     {
 
-        obj* t = new_metatoken_obj(meta_anyset, unicode_char_to_str(eat_utf8(src)));
+        obj* t = new_metatoken_obj(meta_anyset, ustring_from_unicode(eat_utf8(src)));
         return t;
     }
     else if ((*src)[0] == '\\' && is_hex_escape((*src)[1]))
     {
-        obj* t = new_metatoken_obj(meta_anyset, unicode_substr((*src), 0, 1));
+        obj* t = new_metatoken_obj(meta_anyset, ustring_charstar_substr((*src), 0, 1));
         *src += 2;
         return t;
     }
@@ -420,7 +420,7 @@ obj* match_meta_escape(char** src)
     if ((*src)[0] == '\\' && (*src)[1] != 0)
     {
         (*src)++;   //skip escape backslash
-        obj* t = new_metatoken_obj(meta_escape, unicode_char_to_str(eat_utf8(src)));
+        obj* t = new_metatoken_obj(meta_escape, ustring_from_unicode(eat_utf8(src)));
         return t;
     }
     return NULL;
@@ -436,7 +436,7 @@ obj* match_meta_escape(char** src)
 obj* match_meta_charset_char(char** src)
 {
     //even though (*src)[0] is ascii while charset_char is unicode, is_charset_char works by excluding only certain ascii.
-    return (is_charset_char((*src)[0])) ? new_metatoken_obj(meta_charset_char, unicode_char_to_str(eat_utf8(src))) : NULL;
+    return (is_charset_char((*src)[0])) ? new_metatoken_obj(meta_charset_char, ustring_from_unicode(eat_utf8(src))) : NULL;
 }
 
 
@@ -449,14 +449,14 @@ obj* match_meta_epsilon(char** src)
 {
     if (peek_unicode(src, 0, NULL) == 0x3f5) //0x3f5 = 'ϵ'
     {
-        obj* t = new_metatoken_obj(meta_epsilon, unicode_char_to_str(eat_utf8(src)));
+        obj* t = new_metatoken_obj(meta_epsilon, ustring_from_unicode(eat_utf8(src)));
         return t;
     }
     else if (((*src)[0] == '\\' && (*src)[1] == 'e')
           || ((*src)[0] == '"'  && (*src)[1] == '"')
           || ((*src)[0] == '\'' && (*src)[1] == '\''))
     {
-        obj* t = new_metatoken_obj(meta_epsilon, unicode_substr(*src, 0, 1));
+        obj* t = new_metatoken_obj(meta_epsilon, ustring_charstar_substr(*src, 0, 1));
         *src += 2;
         return t;
     }
@@ -471,7 +471,7 @@ obj* match_meta_epsilon(char** src)
  */
 obj* match_meta_ampersand(char** src)
 {
-    return *src[0] == '&' ? new_metatoken_obj(meta_ampersand, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '&' ? new_metatoken_obj(meta_ampersand, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -482,7 +482,7 @@ obj* match_meta_ampersand(char** src)
  */
 obj* match_meta_star(char** src)
 {
-    return *src[0] == '*' ? new_metatoken_obj(meta_star, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '*' ? new_metatoken_obj(meta_star, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -493,7 +493,7 @@ obj* match_meta_star(char** src)
  */
 obj* match_meta_plus(char** src)
 {
-    return *src[0] == '+' ? new_metatoken_obj(meta_plus, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '+' ? new_metatoken_obj(meta_plus, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -504,7 +504,7 @@ obj* match_meta_plus(char** src)
  */
 obj* match_meta_question_mark(char** src)
 {
-    return *src[0] == '?' ? new_metatoken_obj(meta_question_mark, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '?' ? new_metatoken_obj(meta_question_mark, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -515,7 +515,7 @@ obj* match_meta_question_mark(char** src)
  */
 obj* match_meta_tilde(char** src)
 {
-    return *src[0] == '~' ? new_metatoken_obj(meta_tilde, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '~' ? new_metatoken_obj(meta_tilde, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -526,7 +526,7 @@ obj* match_meta_tilde(char** src)
  */
 obj* match_meta_semicolon(char** src) 
 {
-    obj* t = *src[0] == ';' ? new_metatoken_obj(meta_semicolon, unicode_substr((*src)++, 0, 0)) : NULL;
+    obj* t = *src[0] == ';' ? new_metatoken_obj(meta_semicolon, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
     if (t != NULL && peek_metascanner_state() == scan_meta_rule) 
     {
         pop_metascanner_state();
@@ -543,7 +543,7 @@ obj* match_meta_semicolon(char** src)
  */
 obj* match_meta_vertical_bar(char** src) 
 {
-    return *src[0] == '|' ? new_metatoken_obj(meta_vertical_bar, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '|' ? new_metatoken_obj(meta_vertical_bar, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -554,7 +554,7 @@ obj* match_meta_vertical_bar(char** src)
  */
 obj* match_meta_minus(char** src) 
 {
-    return *src[0] == '-' ? new_metatoken_obj(meta_minus, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '-' ? new_metatoken_obj(meta_minus, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -565,7 +565,7 @@ obj* match_meta_minus(char** src)
  */
 obj* match_meta_forward_slash(char** src)
 {
-    return *src[0] == '/' ? new_metatoken_obj(meta_forward_slash, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '/' ? new_metatoken_obj(meta_forward_slash, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -576,7 +576,7 @@ obj* match_meta_forward_slash(char** src)
  */
 obj* match_meta_greater_than(char** src)
 {
-    return *src[0] == '>' ? new_metatoken_obj(meta_greater_than, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '>' ? new_metatoken_obj(meta_greater_than, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -587,7 +587,7 @@ obj* match_meta_greater_than(char** src)
  */
 obj* match_meta_less_than(char** src)
 {
-    return *src[0] == '<' ? new_metatoken_obj(meta_less_than, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '<' ? new_metatoken_obj(meta_less_than, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -598,7 +598,7 @@ obj* match_meta_less_than(char** src)
  */
 obj* match_meta_equals_sign(char** src) 
 {
-    return *src[0] == '=' ? new_metatoken_obj(meta_equals_sign, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '=' ? new_metatoken_obj(meta_equals_sign, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -609,7 +609,7 @@ obj* match_meta_equals_sign(char** src)
  */
 obj* match_meta_left_parenthesis(char** src) 
 {
-    return *src[0] == '(' ? new_metatoken_obj(meta_left_parenthesis, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '(' ? new_metatoken_obj(meta_left_parenthesis, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -620,7 +620,7 @@ obj* match_meta_left_parenthesis(char** src)
  */
 obj* match_meta_right_parenthesis(char** src) 
 {
-    obj* t = *src[0] == ')' ? new_metatoken_obj(meta_right_parenthesis, unicode_substr((*src)++, 0, 0)) : NULL;
+    obj* t = *src[0] == ')' ? new_metatoken_obj(meta_right_parenthesis, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
     if (t != NULL && peek_metascanner_state() == scan_metafunc_body)
     { 
         pop_metascanner_state();  //return to previous context (scan_root) after meta function call closed
@@ -636,7 +636,7 @@ obj* match_meta_right_parenthesis(char** src)
  */
 obj* match_meta_left_bracket(char** src) 
 {
-    return *src[0] == '{' ? new_metatoken_obj(meta_left_bracket, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '{' ? new_metatoken_obj(meta_left_bracket, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -647,7 +647,7 @@ obj* match_meta_left_bracket(char** src)
  */
 obj* match_meta_right_bracket(char** src) 
 {
-    return *src[0] == '}' ? new_metatoken_obj(meta_right_bracket, unicode_substr((*src)++, 0, 0)) : NULL;
+    return *src[0] == '}' ? new_metatoken_obj(meta_right_bracket, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 
@@ -658,7 +658,7 @@ obj* match_meta_right_bracket(char** src)
  */
 obj* match_meta_left_brace(char** src) 
 {
-    obj* t = *src[0] == '[' ? new_metatoken_obj(meta_left_brace, unicode_substr((*src)++, 0, 0)) : NULL;
+    obj* t = *src[0] == '[' ? new_metatoken_obj(meta_left_brace, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
     if (t != NULL && peek_metascanner_state() == scan_meta_rule)
     { 
         push_metascanner_state(scan_charset_body); //enter charset context for body
@@ -674,7 +674,7 @@ obj* match_meta_left_brace(char** src)
  */
 obj* match_meta_right_brace(char** src) 
 {
-    obj* t = *src[0] == ']' ? new_metatoken_obj(meta_right_brace, unicode_substr((*src)++, 0, 0)) : NULL;
+    obj* t = *src[0] == ']' ? new_metatoken_obj(meta_right_brace, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
     if (t != NULL && peek_metascanner_state() == scan_charset_body)
     { 
         pop_metascanner_state(); //switch back to previous context (scan_meta_rule) after charset closed.
@@ -695,7 +695,7 @@ obj* match_whitespace(char** src)
     while (is_whitespace_char((*src)[i])) { i++; }
     if (i > 0)
     {
-        obj* t = new_metatoken_obj(whitespace, unicode_substr(*src, 0, i-1));
+        obj* t = new_metatoken_obj(whitespace, ustring_charstar_substr(*src, 0, i-1));
         *src += i;
         return t;
     }
@@ -715,7 +715,7 @@ obj* match_line_comment(char** src)
         //scan through comment to either a newline or null terminator character
         int i = 2;
         while ((*src)[i] != 0 && (*src)[i] != '\n') { i++; }
-        obj* t = new_metatoken_obj(comment, utf8_substr(*src, 0, i-1)); //don't include null terminator or newline
+        obj* t = new_metatoken_obj(comment, ustring_utf8_substr(*src, 0, i-1)); //don't include null terminator or newline
         *src += i;
         if ((*src)[0] != 0) { (*src)++; } //if not at null terminator, progress past newline
         return t;
@@ -756,7 +756,7 @@ obj* match_block_comment(char** src)
         if (stack == 0) //check to make sure all nested comments were closed
         {
             //return token
-            obj* t = new_metatoken_obj(comment, utf8_substr(*src, 0, i-1));
+            obj* t = new_metatoken_obj(comment, ustring_utf8_substr(*src, 0, i-1));
             *src += i;
             return t;
         }

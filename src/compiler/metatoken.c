@@ -36,7 +36,7 @@ obj* new_metatoken_obj(metatoken_type type, uint32_t* content)
  */
 metatoken* metatoken_copy(metatoken* t)
 {
-    return new_metatoken(t->type, clone_unicode(t->content));
+    return new_metatoken(t->type, ustring_clone(t->content));
 }
 
 
@@ -118,7 +118,7 @@ uint32_t metatoken_extract_char_from_token(metatoken* t)
         case meta_char: return *t->content;
         case meta_charset_char: return *t->content;
         case meta_escape: return escape_to_unicode(*t->content);
-        case meta_hex_number: return parse_unicode_hex(t->content);
+        case meta_hex_number: return ustring_parse_hex(t->content);
         default: 
             printf("ERROR: attempted to extract char from non-char token: ");
             metatoken_repr(t);
@@ -176,13 +176,13 @@ void metatoken_str(metatoken* t)
         case meta_right_brace:
         case whitespace:
         case comment:
-            unicode_string_str(t->content); break;
+            ustring_str(t->content); break;
 
         //special cases for printing
-        case meta_escape: printf("\\"); unicode_string_str(t->content); break;
+        case meta_escape: printf("\\"); ustring_str(t->content); break;
         case meta_epsilon: printf("ϵ"); break;
         case meta_anyset: printf("ξ"); break;
-        case meta_hex_number: printf("\\x"); unicode_string_str(t->content); break;
+        case meta_hex_number: printf("\\x"); ustring_str(t->content); break;
         case meta_vertical_bar: printf(" | "); break;
         case meta_minus: printf("-"); break;
         case meta_forward_slash: printf(" / "); break;
@@ -234,7 +234,7 @@ void metatoken_repr(metatoken* t)
         printenum(comment)
     }
     printf("(`");
-    unicode_string_str(t->content);
+    ustring_str(t->content);
     printf("`)\n");
 }
 

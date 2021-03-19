@@ -281,7 +281,7 @@ obj* dict_get_uint_key(dict* d, uint64_t u)
 //     assert(hashtag_obj->type == MetaToken_t);
 //     //create a string object key from the token
 //     metatoken* hashtag_token = (metatoken*)hashtag_obj->data;
-//     uint32_t* identifier = clone_unicode(hashtag_token->content);
+//     uint32_t* identifier = ustring_clone(hashtag_token->content);
 //     obj* key = new_unicode_string(identifier);
 
 //     //get the value from the dict using the string key
