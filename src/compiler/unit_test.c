@@ -10,7 +10,6 @@
 #include "set.h"
 #include "metatoken.h"
 #include "charset.h"
-#include "mast.h"
 #include "metascanner.h"
 
 //TODO->set up alias to run this with valgrind?
