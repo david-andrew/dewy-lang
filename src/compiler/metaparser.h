@@ -9,7 +9,10 @@ obj* metaparser_get_anonymous_rule_head();
 void initialize_metaparser();
 void release_metaparser();
 bool parse_next_meta_rule(vect* tokens);
-vect* metaparser_create_body(obj* head, metaast* body_ast);
+bool metaparser_is_valid_rule(vect* tokens);
+obj* metaparser_get_rule_head(vect* tokens);
+vect* metaparser_get_rule_body(vect* tokens);
+// vect* metaparser_create_body(obj* head, metaast* body_ast);
 
 size_t metaparser_add_head(obj* head);
 obj* metaparser_get_head(size_t i);

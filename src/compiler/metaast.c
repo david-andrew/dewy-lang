@@ -14,6 +14,10 @@
 
 #define METAAST_NO_PARENT_TYPE (metaast_type)12345
 
+/**
+ * Set to true when an error occurs during a parse, so the rest of the parse can abort.
+ */
+bool metaast_parse_error_occurred = false;
 
 //functions for all scannable rules 
 metaast_parse_fn metaast_all_rule_funcs[] = {
@@ -172,18 +176,36 @@ metaast* metaast_parse_expr_restricted(vect* tokens, metaast_parse_fn skip)
 {
     //search for matching inner rule
     metaast* expr = NULL;
+    metaast_parse_error_occurred = false;
     for (size_t i = 0; i < metaast_parse_fn_len(metaast_all_rule_funcs); i++)
     {
+        //if specified, skip the matching rule when it comes up
         if (metaast_all_rule_funcs[i] == skip) { continue; }
+
+        //if the current rule returns an ast, then success
         if ((expr = metaast_all_rule_funcs[i](tokens)))
         {
             return expr;
         }
+
+        //stop attempting to parse more rules if an error definitely occurred
+        if (metaast_parse_error_occurred){ break; }
     }
 
     //otherwise the parse failed
     printf("ERROR: no valid expression for "); vect_str(tokens); printf("\n");
+    metaast_parse_error();
     return NULL;
+}
+
+
+/**
+ * Called when an error occurs during parsing.
+ * TODO->add more functionality, e.g. displaying where in source the error was detected.
+ */
+void metaast_parse_error(/*more args to be added*/)
+{
+    metaast_parse_error_occurred = true;
 }
 
 
@@ -333,6 +355,7 @@ metaast* metaast_parse_charset(vect* tokens)
                 if (charset_size(cs) == 0)
                 {
                     printf("ERROR: charset must contain at least 1 item\n.");
+                    metaast_parse_error();
                     charset_free(cs);
                     return NULL;
                 }
@@ -899,12 +922,16 @@ metaast* metaast_parse_binary_op(vect* tokens, metatoken_type optype)
                 else
                 {
                     printf("ERROR: binary op right AST returned NULL\n");
+                    metaast_parse_error();
                     metaast_free(left);
+                    return NULL;
                 }
             }
             else
             {
                 printf("ERROR: binary op left AST returned NULL\n");
+                metaast_parse_error();
+                return NULL;
             }
         }
     }
@@ -925,13 +952,13 @@ int metaast_find_matching_pair(vect* tokens, metatoken_type left, size_t start_i
     metatoken_type right = metatoken_get_matching_pair_type(left);
     if (start_idx >= vect_size(tokens))
     {
-        printf("ERROR: specified start_idx past the end of tokens in find_matching_pair()\n");
+        printf("BUG ERROR: specified start_idx past the end of tokens in find_matching_pair()\n");
         exit(1);
     }
     metatoken* t0 = vect_get(tokens, start_idx)->data;
     if (t0->type != left)
     {
-        printf("ERROR: expected token at start_idx to be of type %u but found %u\n", left, t0->type);
+        printf("BUG ERROR: expected token at start_idx to be of type %u but found %u\n", left, t0->type);
         exit(1);
     }
 
@@ -1022,6 +1049,7 @@ int metaast_scan_to_end_of_unit(vect* tokens, size_t start_idx)
                 printf("ERROR: unpaired left-most token: ");
                 metatoken_repr(t);
                 printf("\n");
+                metaast_parse_error();
                 return idx;
             }
             idx += 1;
@@ -1037,6 +1065,7 @@ int metaast_scan_to_end_of_unit(vect* tokens, size_t start_idx)
         printf("ERROR: could not scan past expression because of illegal left-most token: ");
         metatoken_repr(t);
         printf("\n");
+        metaast_parse_error();
         return idx;
     }
 

@@ -139,6 +139,7 @@ metaast* new_metaast_charset_node(metaast_type type, charset* c);
 
 //construct nodes from input tokens
 metaast* metaast_parse_expr(vect* tokens);
+void metaast_parse_error();
 metaast* metaast_parse_expr_restricted(vect* tokens, metaast_parse_fn skip);
 metaast* metaast_parse_eps(vect* tokens);
 metaast* metaast_parse_char(vect* tokens);

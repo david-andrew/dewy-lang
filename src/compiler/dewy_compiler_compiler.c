@@ -1,120 +1,171 @@
-//Dewy Compiler Compiler written in C. Should compile to dcc
+/**
+ * How to use:
+ * 
+ * dewy [-s] [-a] [-p] [--verbose] infile
+ * 
+ * -s scanner
+ * -a ast
+ * -p parser
+ * 
+ * --verbose prints out repr instead of str
+ * 
+ */
 
-//This is an attempt to begin implementing the compiler compiler for Dewy in C
-//Initially this program is tasked with scanning the grammar specified, and creating a list of rules for said grammars
-//The scanning sequence is to scan for all macro rules first, and then scan for hardcoded rules
-
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
-#include <limits.h>
 
 #include "utilities.h"
-#include "metascanner.h"
-#include "metaparser.h"
 #include "object.h"
-#include "dictionary.h"
 #include "vector.h"
-
-#define START 0     //start of an array
-#define END INT_MAX //end of an array (when sanitized via dewy_index() or as a substring)
-
-
-//string manipulation functions;
-//strcpy(s1,s2); Copies string s2 into string s1.
-//strcat(s1,s2); Concatenates string s2 onto the end of string s1.
-//strlen(s1); Returns the length of string s1.
-//strcmp(s1, s2); Returns 0 if s1 and s2 are the same; less than 0 if s1<s2; greater than 0 if s1>s2.
-//strchr(s1, ch); Returns a pointer to the first occurrence of character ch in string s1.
-//strstr(s1, s2); Returns a pointer to the first occurrence of string s2 in string s1.
+#include "metatoken.h"
+#include "metascanner.h"
+#include "metaast.h"
+#include "metaparser.h"
 
 
+#define run(ID, cmd, source, verbose) {     \
+    bool display_##ID = false;              \
+    /*if no run commands given, run all*/   \
+    if (argc < 3 || (verbose && argc < 4))  \
+        display_##ID = true;                \
+    for (int i = 0; i < argc; i++)          \
+        if (strcmp(argv[i], #cmd) == 0)     \
+            display_##ID = true;            \
+    if (display_##ID) {                     \
+        printf(#ID" output:\n");            \
+        run_##ID(source, verbose);          \
+        printf("\n\n");                     \
+    }                                       \
+}
 
-//for rule in macro_rules:
-//  attempt to match
-//for rule in hard_rules:
-//  attempt to match
+//forward declare run functions
+void run_scanner(char* source, bool verbose);
+void run_ast(char* source, bool verbose);
+void run_parser(char* source, bool verbose);
 
 
 int main(int argc, char* argv[])
 {
-    //print error if no file specified for parsing
-    if (argc < 2) 
+    //determin if verbose option is set
+    bool verbose = false;
+    for (int i = 0; i < argc; i++)
+        if (strcmp(argv[i], "--verbose") == 0) 
+            verbose = true;
+
+    if (argc < 2)
     {
         printf("Error: you must specify a file to read\n");
         return 1;
     }
 
-    //load the source file into a string, and keep a copy of the head of the file
-    char* source = read_file(argv[1]);
-    char* head = source;
+    //load the source file into a string
+    char* source = read_file(argv[argc-1]);
 
+    run(scanner, -s, source, verbose)
+    run(ast, -a, source, verbose)
+    run(parser, -p, source, verbose)
+
+    free(source);
+
+    return 0;
+}
+
+
+/**
+ * Run the input through the scanning process.
+ */
+void run_scanner(char* source, bool verbose)
+{
     //set up structures for the sequence of scanning/parsing
+    initialize_metascanner();
     vect* tokens = new_vect();
-    //probably todo, make a context variable that holds symbol table + rules being lexed + other stuff
-    dict* meta_symbols = new_dict();
-    dict* meta_tables = new_dict();
-    dict* meta_accepts = new_dict();
+    obj* t = NULL;
 
-    while (*source) //while we haven't reached the null terminator
+    while (*source != 0 && (t = scan(&source)) != NULL)
     {
-        //this would produce dynamic tokens. TODO->update this...
-        //don't try to scan for meta tokens unless we can't scan for any regular tokens
-        if (dynamic_scan(&source, meta_tables, meta_accepts)) { continue; }
-
-        //scan the source for the next token
-        obj* token = scan(&source);
-
-        //if no tokens were able to be read, exit the loop
-        if (token == NULL) break;
-        
-        //save the token that was scanned
-        vect_enqueue(tokens, token);
-
-        //if parsable sequence exists in current tokens vector
-        update_meta_symbols(tokens, meta_symbols);
-        create_lex_rule(tokens, meta_symbols, meta_tables, meta_accepts);
+        vect_push(tokens, t);
     }
 
-    // if (!*source) printf("successfully scanned all source text\n");
-
-    // printf("rules scanned:\n");
-    // dict_str(meta_symbols); printf("\n");
-
-    remove_token_type(tokens, whitespace);
-    remove_token_type(tokens, comment);
-    if (vect_size(tokens) != 0)
+    for (size_t i = 0; i < vect_size(tokens); i++)
     {
-        printf("ERROR: failed to parse all tokens scanned\n");
-        vect_str(tokens); printf("\n");
+        t = vect_get(tokens, i);
+        verbose ? metatoken_repr((metatoken*)t->data) : metatoken_str((metatoken*)t->data);
     }
-    // vect_str(tokens);
-    // vect_free(tokens);
-    // dict_free(symbols);
 
-    free(head);
+    vect_free(tokens);
+    release_metascanner();
+}
 
 
-    //enter into a loop that scans for text according to the rules that were specified
-    printf("\n\nEnter text to see if it matches a rule\n");
-    char input[1024];
-    while (true)
+/**
+ * Run the input through the ast building phase.
+ */
+void run_ast(char* source, bool verbose)
+{
+    //set up structures for the sequence of scanning/parsing
+    initialize_metascanner();
+    vect* tokens = new_vect();
+    obj* t = NULL;
+
+    while (*source != 0 && (t = scan(&source)) != NULL)
     {
-        fgets(input, 1024, stdin);
-        char* copy = input;
-        
-        //remove trailing newline
-        char* pos;
-        if ((pos=strchr(input, '\n')) != NULL) { *pos = '\0'; }
-        
-        //TODO->have this scan until there is nothing left, or nothing matches...
-        if (!dynamic_scan(&copy, meta_tables, meta_accepts))
+        vect_push(tokens, t);
+    }
+    
+    //while tokens still contains real tokens
+    while (metatoken_get_next_real_token(tokens, 0) > 0)
+    {
+        if (!metaparser_is_valid_rule(tokens)) { break; }
+
+        obj* head = metaparser_get_rule_head(tokens);
+        vect* body_tokens = metaparser_get_rule_body(tokens);
+        metaast* body_ast = metaast_parse_expr(body_tokens);
+        while (metaast_fold_constant(body_ast));
+
+        //print the output
+        obj_print(head);
+        if (body_ast != NULL)
         {
-            printf("\"%s\" doesn't match\n\n", input);
+            printf(" = ");
+            if (verbose) 
+            { 
+                metaast_repr(body_ast); 
+            } 
+            else 
+            { 
+                metaast_str(body_ast); printf("\n");
+            }
+            metaast_free(body_ast);
         }
-        else 
+        else
         {
-            printf("\n");
+            printf(" = NULL\n");
+            vect_free(body_tokens);
+        }
+        obj_free(head);
+    }
+
+    if (metatoken_get_next_real_token(tokens, 0) > 0)
+    {
+        printf("unparsed tokens:\n");
+        for (size_t i = 0; i < vect_size(tokens); i++)
+        {
+            t = vect_get(tokens, i);
+            metatoken_str((metatoken*)t->data);
         }
     }
+
+    vect_free(tokens);
+    release_metascanner();
+}
+
+
+/**
+ * Run the input through the parser item building phase.
+ */
+void run_parser(char* source, bool verbose)
+{
+    printf("TODO->run_parser() is not yet implemented...\n");
 }

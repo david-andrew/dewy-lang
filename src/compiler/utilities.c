@@ -98,6 +98,11 @@ char* read_file(char* filename)
 {
     //see: https://stackoverflow.com/questions/14002954/c-programming-how-to-read-the-whole-file-contents-into-a-buffer
     FILE *f = fopen(filename, "rb");
+    if (f == NULL)
+    {
+        printf("ERROR: could not open file at %s\n", filename);
+        exit(1);
+    }
     fseek(f, 0, SEEK_END);
     long fsize = ftell(f);
     fseek(f, 0, SEEK_SET);  /* same as rewind(f); */

@@ -57,7 +57,7 @@ metatoken* metatoken_copy(metatoken* t);
 
 int metatoken_get_next_real_token(vect* tokens, int i);
 int metatoken_get_next_token_of_type(vect* tokens, metatoken_type type, int i);
-bool metatoken_is_token_i_of_type(vect* tokens, int i, metatoken_type type);
+bool metatoken_is_i_of_type(vect* tokens, int i, metatoken_type type);
 
 metatoken_type metatoken_get_matching_pair_type(metatoken_type left);
 uint32_t metatoken_extract_char_from_token(metatoken* t);

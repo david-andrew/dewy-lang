@@ -90,80 +90,160 @@ obj* metaparser_get_anonymous_rule_head()
  */
 bool parse_next_meta_rule(vect* tokens)
 {
-    //get index of first non-whitespace/comment token, and check if hashtag
-    int start_idx = metatoken_get_next_real_token(tokens, 0);
-    if (!metatoken_is_token_i_of_type(tokens, start_idx, hashtag)) { return false; }
+    if (!metaparser_is_valid_rule(tokens)) { return false; }
 
-    //get index of next real token, and check if meta_equals_sign
-    int stop_idx = metatoken_get_next_real_token(tokens, start_idx+1);
-    if (!metatoken_is_token_i_of_type(tokens, stop_idx, meta_equals_sign)) { return false; }
-
-    //search for the first occurance of a semicolon
-    stop_idx = metatoken_get_next_token_of_type(tokens, meta_semicolon, stop_idx+1);
-    if (stop_idx < 0) { return false; }
-
-    //free all tokens up to the start of the rule (as they should be whitespace and comments)
-    for (int i = 0; i < start_idx; i++) { obj_free(vect_dequeue(tokens)); }
-
-    //first token in the tokens stream is the meta_identifier
-    metatoken* rule_identifier_token = obj_free_keep_inner(vect_dequeue(tokens), MetaToken_t);
-
-    //collect all tokens after identifier to tail that form the production body
-    vect* body_tokens = new_vect();
-    for (int i = start_idx+1; i <= stop_idx; i++)
-    {
-        //keep token only if non-whitespace/comment
-        obj* t = vect_dequeue(tokens);
-        metatoken_type type = ((metatoken*)t->data)->type;
-        if (type != whitespace && type != comment) { vect_enqueue(body_tokens, t); }
-        else { obj_free(t); }
-    }
-
-    //free delimiter tokens from body
-    obj_free(vect_dequeue(body_tokens));    // equals sign at start
-    obj_free(vect_pop(body_tokens));        // semicolon at end
-    
-    // printf("tokens: "); vect_str(body_tokens); printf("\n");
-
-    //create the head from the rule_identifier_token
-    obj* head = new_unicode_string_obj(rule_identifier_token->content);
-    free(rule_identifier_token);
-
-    // printf("Rule\n");
-    // for (int i = 0; i < vect_size(body_tokens); i++) { metatoken_repr(vect_get(body_tokens, i)->data); }
-
-    //create an AST from the tokens, and combine all charset expressions
+    obj* head = metaparser_get_rule_head(tokens);
+    vect* body_tokens = metaparser_get_rule_body(tokens);
     metaast* body_ast = metaast_parse_expr(body_tokens);
     while (metaast_fold_constant(body_ast));
 
-    obj_print(head);
-    printf(" = ");
-    if (body_ast == NULL) { printf("NULL"); vect_free(body_tokens); } 
-    else { metaast_str(body_ast); }
-    printf("\n");
-    obj_free(head);
+    //TODO
+    //metaparser_insert_ast(head, body_ast); //recursively convert to sentences + insert into grammar table
 
-    //recursively translate the AST into CFG production bodies
-    // metaparser_create_body(head, body_ast);
-    if (body_ast) //TODO->take out later
-    metaast_free(body_ast);
+    //TEMPORARY
+    if (body_ast != NULL)
+    {
+        obj_print(head);
+        printf(" = ");
+        metaast_str(body_ast);
+        printf("\n");
+        metaast_free(body_ast);
+    }
+    else
+    {   
+        obj_print(head);
+        printf(" body tokens returned NULL\n");
+        vect_free(body_tokens);
+    }
+
+    obj_free(head);
+    return true;
+}
+
+/**
+ * Verify that the stream of tokens is valid syntax for a rule
+ * #rule = #identifier #ws '=' #ws #expr #ws ';';
+ */
+bool metaparser_is_valid_rule(vect* tokens)
+{
+    //shortest rule is 4 tokens: #id '=' <expr> ;
+    if (vect_size(tokens) == 0) 
+    { 
+        printf("ERROR: cannot parse rule from empty tokens list\n");
+        return false; 
+    }
+    
+    //scan for head
+    int i = metatoken_get_next_real_token(tokens, 0);
+    if (i < 0 || !metatoken_is_i_of_type(tokens, i, hashtag))
+    {
+        printf("ERROR: no identifier found at start of meta rule\n");
+        return false;
+    }
+    
+    //scan for equals sign
+    i = metatoken_get_next_real_token(tokens, i+1);
+    if (i < 0 || !metatoken_is_i_of_type(tokens, i, meta_equals_sign))
+    {
+        printf("ERROR: no equals sign found following identifier in meta rule\n");
+        return false;
+    }
+
+    //scan for ending semicolon
+    i = metatoken_get_next_token_of_type(tokens, meta_semicolon, i+1);
+    if (i < 0)
+    {
+        printf("ERROR: no semicolon found to close meta rule\n");
+        return false;
+    }
 
     return true;
 }
 
 
 /**
- * Recursively construct the grammar symbol string from the given a meta-ast.
- * all heads, bodies, and charsets are inserted into their respective metaparser set.
- * additionally, corresponding join table entries are also created.
- * Calls vect_free(rule_body_tokens) at the end of the func.
- * `head` is the identifier being used for the rule body being constructed.
- * `head` may optionally be NULL, in which case the compiler will come up with a name for the rule
+ * Return the identifier starting the meta rule.
+ * Frees any whitespace/comment tokens before the identifier.
+ * Expects metaparser_is_valid_rule() to have been called first.
  */
-vect* metaparser_create_body(obj* head, metaast* body_ast)
+obj* metaparser_get_rule_head(vect* tokens)
 {
-    return NULL;
+    while (vect_size(tokens) > 0)
+    {
+        obj* t_obj = vect_dequeue(tokens);
+        metatoken* t = t_obj->data;
+        if (t->type == whitespace || t->type == comment)
+        {
+            obj_free(t_obj);
+        }
+        else if (t->type == hashtag)
+        {
+            return t_obj;
+        }
+        else //this should never occur if metaparser_is_valid_rule() was called first
+        {
+            printf("BUG ERROR: expecting identifier at start of rule, when found: "); 
+            metatoken_repr(t); 
+            printf("\nEnsure metaparser_is_valid_rule() was called before this function\n");
+            exit(1);
+        }
+    }
+    printf("BUG ERROR: tokens list contains no real tokens\n");
+    printf("Ensure metaparser_is_valid_rule() was called before this function\n");
+    exit(1);
 }
+
+
+/**
+ * returns the body tokens for the meta rule.
+ * Frees any whitespace/comment tokens before the identifier.
+ * Expects metaparser_is_valid_rule(), and then metaparser_get_rule_head()
+ * to have been called first.
+ */
+vect* metaparser_get_rule_body(vect* tokens)
+{
+    vect* body_tokens = new_vect();
+    while (vect_size(tokens) > 0)
+    {
+        obj* t_obj = vect_dequeue(tokens);
+        metatoken* t = t_obj->data;
+
+        //skip all whitespace
+        if (t->type == whitespace || t->type == comment)
+        {
+            obj_free(t_obj);
+        }
+        //semicolon means finished collecting body tokens
+        else if (t->type == meta_semicolon)
+        {
+            obj_free(vect_dequeue(body_tokens));    // equals sign at start
+            obj_free(t_obj);                        // semicolon
+            return body_tokens;
+        }
+        else 
+        {
+            vect_enqueue(body_tokens, t_obj);
+        }
+    }
+    printf("BUG ERROR: expected semicolon at end of rule\n");
+    printf("Ensure metaparser_is_valid_rule() was called before this function\n");
+    exit(1);
+}
+
+
+
+// /**
+//  * Recursively construct the grammar symbol string from the given a meta-ast.
+//  * all heads, bodies, and charsets are inserted into their respective metaparser set.
+//  * additionally, corresponding join table entries are also created.
+//  * Calls vect_free(rule_body_tokens) at the end of the func.
+//  * `head` is the identifier being used for the rule body being constructed.
+//  * `head` may optionally be NULL, in which case the compiler will come up with a name for the rule
+//  */
+// vect* metaparser_create_body(obj* head, metaast* body_ast)
+// {
+//     return NULL;
+// }
 
 
 

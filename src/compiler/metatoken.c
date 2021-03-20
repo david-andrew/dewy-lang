@@ -78,7 +78,7 @@ int metatoken_get_next_token_of_type(vect* tokens, metatoken_type type, int i)
     return -1;
 }
 
-bool metatoken_is_token_i_of_type(vect* tokens, int i, metatoken_type type)
+bool metatoken_is_i_of_type(vect* tokens, int i, metatoken_type type)
 {
     if (i < 0 || vect_size(tokens) < i){ return false; }
     metatoken* t = vect_get(tokens, i)->data;
@@ -235,7 +235,7 @@ void metatoken_repr(metatoken* t)
     }
     printf("(`");
     ustring_str(t->content);
-    printf("`)\n");
+    printf("`)");
 }
 
 void metatoken_free(metatoken* t)
