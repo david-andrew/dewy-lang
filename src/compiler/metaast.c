@@ -1279,7 +1279,7 @@ bool metaast_fold_strings(metaast* ast)
 
 void metaast_type_repr(metaast_type type)
 {
-    #define printenum(A) case A: printf(#A + 8); break; //+8 to skip "metaast_" in enum name
+    #define printenum(A) case A: printf(&#A[8]); break; //+8 to skip "metaast_" in enum name
 
     switch (type)
     {

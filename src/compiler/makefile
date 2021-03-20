@@ -1,4 +1,4 @@
-all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o metaast.o metascanner.o metaparser.o charset.o item.o
+all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o metaast.o metascanner.o metaparser.o charset.o metaitem.o
  
 
 #current completed step is simple lexer
@@ -30,8 +30,8 @@ charset.o: charset.c charset.h
 ustring.o: ustring.c ustring.h
 	clang -c -o ustring.o ustring.c
 
-item.o: item.c item.h
-	clang -c -o item.o item.c
+metaitem.o: metaitem.c metaitem.h
+	clang -c -o metaitem.o metaitem.c
 
 metaast.o: metaast.c metaast.h
 	clang -c -o metaast.o metaast.c
