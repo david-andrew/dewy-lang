@@ -161,6 +161,7 @@ metaast* metaast_parse_greaterthan(vect* tokens);
 metaast* metaast_parse_lessthan(vect* tokens);
 metaast* metaast_parse_reject(vect* tokens);
 metaast* metaast_parse_nofollow(vect* tokens);
+metaast* metaast_parse_intersect(vect* tokens);
 metaast* metaast_parse_binary_op(vect* tokens, metatoken_type optype);
 
 

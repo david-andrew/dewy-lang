@@ -35,6 +35,7 @@ metaast_parse_fn metaast_all_rule_funcs[] = {
     metaast_parse_compliment,
     metaast_parse_cat,
     metaast_parse_or,
+    metaast_parse_intersect,
     metaast_parse_group,
     metaast_parse_capture,
 
@@ -855,6 +856,17 @@ metaast* metaast_parse_nofollow(vect* tokens)
     return metaast_parse_binary_op(tokens, meta_forward_slash);
 }
 
+/**
+ * Attempt to parse an intersect binary op expression from the list of tokens.
+ * if matches, tokens will be freed, else returns NULL.
+ * 
+ * #intersect = #set #ws '&' #ws #set;
+ */
+metaast* metaast_parse_intersect(vect* tokens)
+{
+    return metaast_parse_binary_op(tokens, meta_ampersand);
+}
+
 
 /**
  * Process for matching a single binary operator expression.
@@ -1527,6 +1539,7 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
             else if (ast->type == metaast_lessthan) printf(" < ");
             else if (ast->type == metaast_reject) printf(" - ");
             else if (ast->type == metaast_nofollow) printf(" / ");
+            else if (ast->type == metaast_intersect) printf(" & ");
             
             //print right node (wrap in parenthesis if needed)
             wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, node->right->type),
