@@ -136,6 +136,21 @@ void charset_resize(charset* s, size_t new_size)
 
 
 /**
+ * Return a copy of the given charset.
+ */
+charset* charset_clone(charset* s)
+{
+    charset* copy = new_charset();
+    for (int i = 0; i < s->size; i++)
+    {
+        charset_add_range_unchecked(copy, s->ranges[i]);
+    }
+    charset_reduce(copy); //TODO->probably can take out since s should already be reduced...
+    return copy;
+}
+
+
+/**
  * comparison function for use in qsort for sorting an array of unicode ranges.
  */
 int urange_compare(const void* a, const void* b)

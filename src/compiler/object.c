@@ -75,18 +75,6 @@ obj* new_string_obj_copy(char* s)
 
 
 /**
- * Create a new unicode string object from an allocated uint32_t*.
- * free() will be called on the string at the end of its life.
- */
-obj* new_unicode_string_obj(uint32_t* s)
-{
-    obj* S = malloc(sizeof(obj));
-    *S = (obj){.type=UnicodeString_t, .data=s};
-    return S;
-}
-
-
-/**
  * Recursive deep copy of an object.
  * refs dict is used to ensure all objects are duplicated only once
  */
@@ -147,6 +135,11 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
             copy->data = clone((char*)o->data);
             break;
         }
+        case UnicodeString_t: //copy unicode string
+        {
+            copy->data = ustring_clone((uint32_t*)o->data);
+            break;
+        }
         case MetaToken_t:
         {
             copy->data = metatoken_copy((metatoken*)o->data);
@@ -190,7 +183,7 @@ void obj_print(obj* o)
     {
         case Boolean_t: printf(*(bool*)o->data ? "true" : "false"); break;
         case Character_t: unicode_str(*(uint32_t*)o->data); break;
-        case CharSet_t: charset_str(o->data);
+        case CharSet_t: charset_str(o->data); break;
         case Integer_t: printf("%ld", *(int64_t*)o->data); break;
         case UInteger_t: printf("%lu", *(uint64_t*)o->data); break;
         case String_t: printf("%s", o->data); break;
@@ -200,7 +193,7 @@ void obj_print(obj* o)
         case Vector_t: vect_str(o->data); break;
         case Dictionary_t: dict_str(o->data); break;
         case Set_t: set_str(o->data); break;
-        // case JoinRow_t: joinrow_str(o->data); break;
+        case Epsilon_t: put_unicode(0x3F5); break;
         default: printf("WARNING: obj_print() is not implemented for object of type \"%d\"\n", o->type); break;
     }
 }
@@ -225,6 +218,7 @@ uint64_t obj_hash(obj* o)
         case Vector_t: return vect_hash(o->data);
         // case Dictionary_t: return dict_hash(o->data);
         case Set_t: return set_hash(o->data);
+        case Epsilon_t: return 123456; //pick random hash for epsilon singleton
         default: printf("WARNING: obj_hash() is not implemented for object of type \"%d\"\n", o->type); exit(1);
     }
 }
@@ -256,6 +250,7 @@ int64_t obj_compare(obj* left, obj* right)
         case Vector_t: return vect_compare((vect*)left->data, (vect*)right->data);
         // case Dictionary_t: return dict_compare((dict*)left->data, (dict*)right->data);
         // case Set_t: return set_compare((set*)left->data, (set*)right->data);
+        case Epsilon_t: return 0; //all epsilons are equal
         default: printf("WARNING: obj_compare() is not implemented for object of type \"%d\"\n", left->type); exit(1);
     }
 }
@@ -273,6 +268,7 @@ bool obj_equals(obj* left, obj* right)
     {
         // case Dictionary_t: return dict_equals((dict*)left->data, (dict*)right->data);
         case Set_t: return set_equals((set*)left->data, (set*)right->data);
+        case Epsilon_t: return true;    //all epsilons are equal
         default: return obj_compare(left, right) == 0;
     }
 
@@ -288,13 +284,19 @@ void obj_free(obj* o)
         //handle freeing of o->data
         switch (o->type)
         {
+            //objects with no inner allocated data
+            case Epsilon_t: 
+                break;
+            
             //Simple objects with no nested data can be freed with free(o->data)
             case Boolean_t:
             case Character_t:
             case Integer_t:
             case UInteger_t:
             case String_t:
-            case UnicodeString_t: free(o->data); break;
+            case UnicodeString_t: 
+                free(o->data); 
+                break;
 
             //Objects with nested datastructures must free their inner contents first
             case MetaToken_t: metatoken_free((metatoken*)o->data); break; 

@@ -24,7 +24,7 @@ typedef enum
     Vector_t,
     Dictionary_t,
     Set_t,
-    JoinRow_t,
+    Epsilon_t,
 } obj_type;
 
 /**
@@ -55,7 +55,6 @@ obj* new_int_obj(int64_t i);
 obj* new_uint_obj(uint64_t u);
 obj* new_string_obj(char* s);                   //new string object from an allocated string
 obj* new_string_obj_copy(char* s);              //new string object from a non-allocated string
-obj* new_unicode_string_obj(uint32_t* s);
 
 
 //// Utility Functions ////

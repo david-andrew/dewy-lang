@@ -28,6 +28,8 @@ dict* metaparser_heads;     //map of all production nonterminals to a set of cor
 dict* metaparser_bodies;    //map of all production strings to a set of all corresponding heads
 set* metaparser_charsets;   //set of all terminals (i.e. charsets) in all productions
 
+dict* metaparser_ast_cache; //map from metaast to identifiers for the sentence that matches that ast
+
 
 /**
  * Initialize all global data structures used by metaparser.
@@ -73,11 +75,11 @@ obj* metaparser_get_anonymous_rule_head()
     sprintf(num_str, "#__%"PRIu64, metaparser_anonymous_rule_count);
 
     //convert to unicode string (wrapped in obj*), and cleanup char* version
-    obj* head = new_unicode_string_obj(ustring_utf8_substr(num_str, 0, width-1));
+    obj* head = new_ustring_obj(ustring_utf8_substr(num_str, 0, width-1));
     free(num_str);
 
-    //increment the counter. Increment by 2 so it matches indices in metaparser_bodies.
-    metaparser_anonymous_rule_count += 2;
+    //increment the counter
+    metaparser_anonymous_rule_count++;
     
     return head;
 }
@@ -110,7 +112,7 @@ bool parse_next_meta_rule(vect* tokens)
     while (metaast_fold_constant(&body_ast));
 
     //recursively convert to sentences + insert into grammar table
-    // return metaparser_insert_rule(head, body_ast); 
+    return metaparser_insert_rule_ast(head, body_ast); 
     return true;
 
     // //TEMPORARY
@@ -245,18 +247,274 @@ vect* metaparser_get_rule_body(vect* tokens)
 
 
 
-// /**
-//  * Recursively construct the grammar symbol string from the given a meta-ast.
-//  * all heads, bodies, and charsets are inserted into their respective metaparser set.
-//  * additionally, corresponding join table entries are also created.
-//  * Calls vect_free(rule_body_tokens) at the end of the func.
-//  * `head` is the identifier being used for the rule body being constructed.
-//  * `head` may optionally be NULL, in which case the compiler will come up with a name for the rule
-//  */
-// vect* metaparser_create_body(obj* head, metaast* body_ast)
-// {
-//     return NULL;
-// }
+/**
+ * Recursively construct the grammar symbol string from the given a meta-ast.
+ * all heads, bodies, and charsets are inserted into the metaparser grammar table.
+ * `head` may optionally be NULL, (e.g. for when the parser is handling anonymous expressions)
+ * in which case the compiler will come up with a name for the rule.
+ * Returns the identifier for the rule inserted. Note that the returned identifier is owned by the 
+ * grammar table, and must be copied if it is to be used by another process (e.g. other rule sentences).
+ */
+
+
+//FOR NOW WE'LL JUST PRINT OUT WHAT WE WOULD DO...
+obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
+{
+    //list of sentences for this rule
+    vect* heads = new_vect();
+    vect* bodies = new_vect();
+    
+    // //check if an equivalent ast has already been inserted into the grammar table
+    // obj* body_ast_obj = new_metaast_obj(body_ast);
+    // if (dict_contains(metaparser_ast_cache, body_ast_obj))
+    // {
+    //     obj* body_id = dict_get(metaparser_ast_cache, body_ast_obj);
+    //     vect* sentence = new_vect();
+    //     vect_append(sentence, obj_copy(body_id));
+    //     vect_append(bodies, new_vect_obj(sentence));
+    // }
+    // else
+
+    if (head == NULL)
+    {
+        head = metaparser_get_anonymous_rule_head();
+    }
+    
+    switch (body_ast->type)
+    {
+        // Base case (non-recursive) rules
+        case metaast_eps:
+        {
+            //create a length 1 sentence (vector) containing only epsilon
+            vect* sentence = new_vect();
+            vect_append(sentence, new_epsilon_obj());
+
+            //push this sentence to the list of all sentences for this rule
+            vect_append(heads, head);
+            vect_append(bodies, new_vect_obj(sentence));
+            break;
+        }
+        case metaast_identifier:
+        {
+            metaast_string_node* node = body_ast->node;
+            vect* sentence = new_vect();
+            vect_append(sentence, new_ustring_obj(ustring_clone(node->string)));
+            vect_append(heads, head);
+            vect_append(bodies, new_vect_obj(sentence));
+            break;
+        }
+        case metaast_charset:
+        {
+            metaast_charset_node* node = body_ast->node;
+            vect* sentence = new_vect();
+            vect_append(sentence, new_charset_obj(charset_clone(node->c)));
+            
+            vect_append(heads, head);
+            vect_append(bodies, new_vect_obj(sentence));
+            break;
+        }
+        case metaast_string:
+        {
+            metaast_string_node* node = body_ast->node;
+            vect* sentence = new_vect();
+            uint32_t* s = node->string;
+            uint32_t c;
+            while ((c = *s++))
+            {
+                charset* cs = new_charset();
+                charset_add_char(cs, c);
+                vect_append(sentence, new_charset_obj(cs));
+            }
+            
+            //push this sentence to the list of all sentences for this rule
+            vect_append(heads, head);
+            vect_append(bodies, new_vect_obj(sentence));
+            break;
+        }
+
+        // Recursive rules that need to compute the nested sentences
+        case metaast_star:
+        case metaast_plus:
+        {
+            metaast_repeat_node* node = body_ast->node;
+            
+            //get the identifier for the inner node
+            obj* inner_head = obj_copy(metaparser_insert_rule_ast(NULL, node->inner));
+
+            //build the sentence
+            if (node->count == 0 || (node->count == 1 && body_ast->type == metaast_star))
+            {
+                //simple star
+                //#A* => 
+                //(#A)0* =>
+                //(#A)1* =>
+                //(#A)0+ =>
+                //  #A 
+                //  #__0 = #A #__0;
+                //  #__0 = ϵ;
+                
+
+                //#__0 = #A #__0
+                vect* sentence0 = new_vect();
+                vect_append(sentence0, inner_head);
+                vect_append(sentence0, head);
+
+                //#__0 = ϵ
+                vect* sentence1 = new_vect();
+                vect_append(sentence1, new_epsilon_obj());
+
+                //save everything to the heads & bodies lists
+                vect_append(heads, head);
+                vect_append(bodies, new_vect_obj(sentence0));
+                
+                vect_append(heads, head);
+                vect_append(bodies, new_vect_obj(sentence1));
+            }
+            else
+            {
+                //complex plus
+                //(#A)N+ =>
+                //  #A;
+                //  #__0 = #A #__0;
+                //  #__0 = ϵ;
+                //  #__1 = #A #A #A ... #A #__0; //... N times
+                
+                //complex star
+                //(#A)N* =>
+                //  #A;
+                //  #__0 = #A #__0;
+                //  #__0 = ϵ;
+                //  #__1 = #A #A #A ... #A #__0; //... N times
+                //  #__1 = ϵ;
+
+
+                //  #__0 = #A #__0
+                obj* head1 = metaparser_get_anonymous_rule_head();
+                vect* sentence0 = new_vect();
+                vect_append(sentence0, inner_head);
+                vect_append(sentence0, head1);
+
+                //  #__0 = ϵ;
+                vect* sentence1 = new_vect();
+                vect_append(sentence1, new_epsilon_obj());
+
+                //  #__1 = #A #A #A ... #A #__0; //... N times
+                vect* sentence2 = new_vect();
+                for (int i = 0; i < node->count; i++)
+                {
+                    vect_append(sentence2, inner_head);
+                }
+                vect_append(sentence2, head1);
+
+
+                vect_append(heads, head1);
+                vect_append(bodies, new_vect_obj(sentence0));
+
+                vect_append(heads, head1);
+                vect_append(bodies, new_vect_obj(sentence1));
+
+                vect_append(heads, head);
+                vect_append(bodies, new_vect_obj(sentence2));
+
+
+                //create complex plus
+                if (body_ast->type == metaast_star)
+                {
+                    vect* sentence3 = new_vect();
+                    vect_append(sentence3, new_epsilon_obj());
+                    vect_append(heads, head);
+                    vect_append(bodies, new_vect_obj(sentence3));
+                }
+            }
+            break;
+        }
+        case metaast_count:
+        {
+            metaast_repeat_node* node = body_ast->node;
+            obj* inner_head = obj_copy(metaparser_insert_rule_ast(NULL, node->inner));
+
+            if (node->count == 0)
+            {
+                //(#A)0 => ϵ;
+                printf("WARNING: ("); obj_print(inner_head); printf(")0 is equivalent to ϵ\n"
+                "Did you mean `("); obj_print(inner_head); printf(")*` ?\n");
+                vect* sentence = new_vect();
+                vect_append(sentence, new_epsilon_obj());
+                vect_append(heads, head);
+                vect_append(bodies, new_vect_obj(sentence));
+            }
+            else
+            {
+                //(#A)N =>
+                //  #__0 = #A #A #A ... #A; //... N times
+                vect* sentence = new_vect();
+                for (int i = 0; i < node->count; i++)
+                {
+                    vect_append(sentence, inner_head);
+                }
+                vect_append(heads, head);
+                vect_append(bodies, new_vect_obj(sentence));
+            }
+            break;
+        }
+        // case metaast_option:
+        // case metaast_cat:
+        // case metaast_or:
+        
+        
+        //TODO->filters/other extensions of the parser
+        // case metaast_greaterthan:
+        // case metaast_lessthan:
+        // case metaast_reject:
+        // case metaast_nofollow:
+        // case metaast_capture:
+
+
+        //ERROR->should not allow, or come up with semantics for
+        //e.g. (#A)~ => ξ* - #A
+        // case metaast_compliment:
+
+
+        //should be an error since this only makes sense for charsets
+        // metaast_intersect,
+    }
+
+    // obj_free_keep_inner(body_ast_obj, MetaAST_t);
+    
+    //insert the list of body sentences for this head into the grammar table
+    //if head == NULL, the parser will create an anonymous identifier for the rule
+    // head = metaparser_insert_rule_sentences(head, bodies);
+
+
+    //print out the meta rule
+    if (vect_size(bodies) != vect_size(heads)){ printf("ERROR heads and bodies should be the same size!\n"); exit(1); }
+    for (size_t i = 0; i < vect_size(bodies); i++)
+    {
+        obj* head = vect_get(heads, i);
+        obj_print(head);
+        printf(" = ");
+        vect* sentence = vect_get(bodies, i)->data;
+        for (size_t j = 0; j < vect_size(sentence); j++)
+        {
+            obj_print(vect_get(sentence, j));
+            if (j < vect_size(sentence) - 1) { printf(" "); }
+        }
+        printf("\n");
+    }
+
+    return head;
+}
+
+
+/**
+ * Insert the rule into the metaparser grammar table if it does not already exist.
+ * Otherwise make use of the existing definition of the rule.
+ */
+bool metaparser_insert_rule_sentences(obj* head, vect* bodies)
+{
+
+}
+
 
 
 
@@ -268,6 +526,16 @@ vect* metaparser_get_body(size_t i){}
 
 void metaparser_join(size_t head_idx, size_t body_idx){}
 
+
+/**
+ * Create a new object representing an epsilon
+ */
+obj* new_epsilon_obj()
+{
+    obj* e = malloc(sizeof(obj));
+    *e = (obj){.type=Epsilon_t, .data=NULL};
+    return e;
+}
 
 
 #endif

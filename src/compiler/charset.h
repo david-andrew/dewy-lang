@@ -32,6 +32,7 @@ size_t charset_size(charset* s);
 size_t charset_capacity(charset* s);
 uint64_t charset_length(charset* s);
 void charset_resize(charset* s, size_t new_size);
+charset* charset_clone(charset* s);
 int urange_compare(const void* a, const void* b);
 void charset_rectify(charset* s);
 void charset_sort(charset* s);

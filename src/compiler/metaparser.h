@@ -12,7 +12,8 @@ bool parse_next_meta_rule(vect* tokens);
 bool metaparser_is_valid_rule(vect* tokens);
 obj* metaparser_get_rule_head(vect* tokens);
 vect* metaparser_get_rule_body(vect* tokens);
-bool metaparser_insert_rule(obj* head, metaast* body_ast);
+obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast);
+bool metaparser_insert_rule_sentences(obj* head, vect* body);
 
 size_t metaparser_add_head(obj* head);
 obj* metaparser_get_head(size_t i);
@@ -20,7 +21,7 @@ size_t metaparser_add_body(obj* body);
 vect* metaparser_get_body(size_t i);
 void metaparser_join(size_t head_idx, size_t body_idx);
 
-
+obj* new_epsilon_obj();
 
 
 #endif

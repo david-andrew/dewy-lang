@@ -176,6 +176,56 @@ void run_ast(char* source, bool verbose)
  * Run the input through the parser item building phase.
  */
 void run_parser(char* source, bool verbose)
-{
-    printf("TODO->run_parser() is not yet implemented...\n");
+{    
+    //set up structures for the sequence of scanning/parsing
+    initialize_metascanner();
+    // initialize_metaparser();
+    vect* tokens = new_vect();
+    obj* t = NULL;
+
+    //get all tokens
+    while (*source != 0 && (t = scan(&source)) != NULL)
+    {
+        vect_push(tokens, t);
+    }
+    
+    //parse rules until we get stuck
+    while (metatoken_get_next_real_token(tokens, 0) >= 0)
+    {
+        if (!metaparser_is_valid_rule(tokens)) { break; }
+
+        obj* head = metaparser_get_rule_head(tokens);
+        vect* body_tokens = metaparser_get_rule_body(tokens);
+        metaast* body_ast = metaast_parse_expr(body_tokens);
+
+        //apply ast reductions if possible
+        if (body_ast != NULL)
+        {
+            //count if any reductions were performed
+            int reductions = 0;
+            while ((metaast_fold_constant(&body_ast)) && ++reductions);
+        
+            //attempt to convert metaast into sentential form
+            metaparser_insert_rule_ast(head, body_ast); 
+        }
+
+        //free up ast objects
+        body_ast == NULL ? vect_free(body_tokens) : metaast_free(body_ast);
+        obj_free(head);
+    }
+
+    //print out any unparsed input
+    if (metatoken_get_next_real_token(tokens, 0) >= 0)
+    {
+        printf("unparsed tokens:\n");
+        for (size_t i = 0; i < vect_size(tokens); i++)
+        {
+            t = vect_get(tokens, i);
+            metatoken_str((metatoken*)t->data);
+        }
+    }
+
+    vect_free(tokens);
+    release_metascanner();
+    // release_metaparser();
 }

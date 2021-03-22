@@ -4,7 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "object.h"
 
+
+obj* new_ustring_obj(uint32_t* s);
 uint32_t* ustring_charstar_substr(char* str, int start, int stop);
 uint32_t* ustring_utf8_substr(char* str, int start, int stop);
 size_t ustring_len(uint32_t* string);

@@ -13,6 +13,18 @@
 
 
 /**
+ * Create a new unicode string object from an allocated uint32_t*.
+ * free() will be called on the string at the end of its life.
+ */
+obj* new_ustring_obj(uint32_t* s)
+{
+    obj* S = malloc(sizeof(obj));
+    *S = (obj){.type=UnicodeString_t, .data=s};
+    return S;
+}
+
+
+/**
  * Return a unicode substring converted from the given utf8 string.
  * Indices index the unicode output string, not the utf8 input string.
  * Does not use Dewy slicing rules, only positive in bounds indices.
