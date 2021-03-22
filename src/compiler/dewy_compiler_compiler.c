@@ -115,7 +115,7 @@ void run_ast(char* source, bool verbose)
     }
     
     //while tokens still contains real tokens
-    while (metatoken_get_next_real_token(tokens, 0) > 0)
+    while (metatoken_get_next_real_token(tokens, 0) >= 0)
     {
         if (!metaparser_is_valid_rule(tokens)) { break; }
 
@@ -157,7 +157,7 @@ void run_ast(char* source, bool verbose)
     }
 
     //print out any unparsed input
-    if (metatoken_get_next_real_token(tokens, 0) > 0)
+    if (metatoken_get_next_real_token(tokens, 0) >= 0)
     {
         printf("unparsed tokens:\n");
         for (size_t i = 0; i < vect_size(tokens); i++)
