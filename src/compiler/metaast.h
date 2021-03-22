@@ -175,9 +175,9 @@ uint64_t metaast_get_type_precedence_level(metaast_type type);
 void metaast_free(metaast* ast);
 
 //constant folding contents of meta-ast
-bool metaast_fold_constant(metaast* ast);
-bool metaast_fold_charsets(metaast* ast);
-bool metaast_fold_strings(metaast* ast);
+bool metaast_fold_constant(metaast** ast_ptr);
+bool metaast_fold_charsets(metaast** ast_ptr);
+bool metaast_fold_strings(metaast** ast_ptr);
 
 
 void metaast_str(metaast* ast);

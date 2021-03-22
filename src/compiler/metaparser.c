@@ -90,34 +90,47 @@ obj* metaparser_get_anonymous_rule_head()
  */
 bool parse_next_meta_rule(vect* tokens)
 {
+    //check for head, equals sign, and semicolon
     if (!metaparser_is_valid_rule(tokens)) { return false; }
 
+    //construct head and body for the rule
     obj* head = metaparser_get_rule_head(tokens);
     vect* body_tokens = metaparser_get_rule_body(tokens);
     metaast* body_ast = metaast_parse_expr(body_tokens);
-    while (metaast_fold_constant(body_ast));
 
-    //TODO
-    //metaparser_insert_ast(head, body_ast); //recursively convert to sentences + insert into grammar table
-
-    //TEMPORARY
-    if (body_ast != NULL)
+    //failed to parse body into ast
+    if (body_ast == NULL)
     {
-        obj_print(head);
-        printf(" = ");
-        metaast_str(body_ast);
-        printf("\n");
-        metaast_free(body_ast);
-    }
-    else
-    {   
-        obj_print(head);
-        printf(" body tokens returned NULL\n");
         vect_free(body_tokens);
+        obj_free(head);
+        return false;
     }
 
-    obj_free(head);
+    //reduce any constant expressions in the ast (e.g. charset operations)
+    while (metaast_fold_constant(&body_ast));
+
+    //recursively convert to sentences + insert into grammar table
+    // return metaparser_insert_rule(head, body_ast); 
     return true;
+
+    // //TEMPORARY
+    // if (body_ast != NULL)
+    // {
+    //     obj_print(head);
+    //     printf(" = ");
+    //     metaast_str(body_ast);
+    //     printf("\n");
+    //     metaast_free(body_ast);
+    // }
+    // else
+    // {   
+    //     obj_print(head);
+    //     printf(" body tokens returned NULL\n");
+    //     vect_free(body_tokens);
+    // }
+
+    // obj_free(head);
+    // return true;
 }
 
 /**

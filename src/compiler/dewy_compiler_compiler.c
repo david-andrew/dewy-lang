@@ -122,31 +122,41 @@ void run_ast(char* source, bool verbose)
         obj* head = metaparser_get_rule_head(tokens);
         vect* body_tokens = metaparser_get_rule_body(tokens);
         metaast* body_ast = metaast_parse_expr(body_tokens);
-        while (metaast_fold_constant(body_ast));
 
-        //print the output
+        // printf("before node reductions\n");
         obj_print(head);
         if (body_ast != NULL)
         {
             printf(" = ");
-            if (verbose) 
-            { 
-                metaast_repr(body_ast); 
-            } 
-            else 
-            { 
-                metaast_str(body_ast); printf("\n");
-            }
-            metaast_free(body_ast);
+            if (verbose) { metaast_repr(body_ast); } 
+            else { metaast_str(body_ast); printf("\n"); }
         }
-        else
+        else { printf(" = NULL\n"); }
+
+        //apply ast reductions if possible
+        if (body_ast != NULL)
         {
-            printf(" = NULL\n");
-            vect_free(body_tokens);
+            //count if any reductions were performed
+            int reductions = 0;
+            while ((metaast_fold_constant(&body_ast)) && ++reductions);
+
+            //if applied any reductions, print them out
+            if (reductions > 0)
+            {
+                printf("REDUCED AST: ");
+                obj_print(head);
+                printf(" = ");
+                if (verbose) { metaast_repr(body_ast); } 
+                else { metaast_str(body_ast); printf("\n"); }
+            }
         }
+
+        //free up ast objects
+        body_ast == NULL ? vect_free(body_tokens) : metaast_free(body_ast);
         obj_free(head);
     }
 
+    //print out any unparsed input
     if (metatoken_get_next_real_token(tokens, 0) > 0)
     {
         printf("unparsed tokens:\n");

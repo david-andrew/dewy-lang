@@ -1237,13 +1237,13 @@ void metaast_free(metaast* ast)
  * Returns `true` if folding occurred, else `false`.
  * Repeat until returns `false` to ensure all constants are folded. 
  */
-bool metaast_fold_constant(metaast* ast)
+bool metaast_fold_constant(metaast** ast_ptr)
 {
-    if (metaast_fold_charsets(ast)) { return true; }
-    if (metaast_fold_strings(ast)) { return true; }
+    if (metaast_fold_charsets(ast_ptr)) { return true; }
+    if (metaast_fold_strings(ast_ptr)) { return true; }
     /*
         any other constant folding here...
-        e.g. ?? is idempotent, i.e. if option node's inner is option, remove a layer
+        e.g. if something is idempotent, e.g. if option node's inner is option, remove a layer
         
     */
 
@@ -1258,10 +1258,111 @@ bool metaast_fold_constant(metaast* ast)
  * Returns `true` if any folding occurred, else `false`.
  * Repeat until returns `false` to ensure all charsets are folded.
  */
-bool metaast_fold_charsets(metaast* ast)
+bool metaast_fold_charsets(metaast** ast_ptr)
 {
-    return false;
+    metaast* ast = *ast_ptr;
+
+    //recursively descend down the tree looking for charset expressions to fold
+    switch (ast->type)
+    {
+        //single expressions that can't be reduced
+        case metaast_eps:
+        case metaast_string:
+        case metaast_identifier:
+        case metaast_charset:
+            return false;
+
+        //non-charset operator nodes that we recurse further into
+        case metaast_star:
+        case metaast_plus:
+        case metaast_count:
+        {
+            metaast_repeat_node* node = ast->node;
+            return metaast_fold_charsets(&node->inner);
+        }
+        case metaast_option:
+        case metaast_capture:
+        {
+            metaast_unary_op_node* node = ast->node;
+            return metaast_fold_charsets(&node->inner);
+        }
+        case metaast_greaterthan:
+        case metaast_lessthan:
+        case metaast_nofollow:
+        {
+            metaast_binary_op_node* node = ast->node;
+            bool left = metaast_fold_charsets(&node->left);
+            bool right = metaast_fold_charsets(&node->right);
+            return left || right;
+        }
+        case metaast_cat:
+        {
+            bool folded = false;
+            metaast_sequence_node* node = ast->node;
+            for (size_t i = 0; i < node->size; i++)
+            {
+                folded = metaast_fold_charsets(&node->sequence[i]) || folded;
+            }
+            return folded;
+        }
+
+        //possible charset operator nodes (but may not be charset at top level)
+        case metaast_compliment:
+        {
+            metaast_unary_op_node* node = ast->node;
+            if (node->inner->type == metaast_charset)
+            {
+                metaast_charset_node* inner_node = node->inner->node;
+                
+                //apply the compliment operator
+                charset* compliment = charset_compliment(inner_node->c);
+
+                //free the old node and replace with the new node
+                metaast_free(ast);
+                *ast_ptr = new_metaast_charset_node(metaast_charset, compliment);
+
+                return true;
+            }
+            else
+            {   
+                //normal recurse further down the tree
+                return metaast_fold_charsets(&node->inner);
+            }
+        }
+        case metaast_intersect:
+        case metaast_or:
+        case metaast_reject:
+        {
+            metaast_binary_op_node* node = ast->node;
+            if (node->left->type == metaast_charset && node->right->type == metaast_charset)
+            {
+                metaast_charset_node* left_node = node->left->node;
+                metaast_charset_node* right_node = node->right->node;
+                charset* result;
+                
+                //apply the specific operator to the left and right charset
+                if (ast->type == metaast_intersect) { result = charset_intersect(left_node->c, right_node->c); }
+                else if (ast->type == metaast_or) { result = charset_union(left_node->c, right_node->c); }
+                else /*(ast->type == metaast_reject)*/ { result = charset_diff(left_node->c, right_node->c); }
+
+                //free the old node and replace with a new charset node
+                metaast_free(ast);
+                *ast_ptr = new_metaast_charset_node(metaast_charset, result);
+                
+                return true;
+            }
+            else
+            {
+                //normal recurse further down the tree
+                bool left = metaast_fold_charsets(&node->left);
+                bool right = metaast_fold_charsets(&node->right);
+                return left || right;
+            }
+        }
+    }
 }
+
+
 
 
 /**
@@ -1270,7 +1371,7 @@ bool metaast_fold_charsets(metaast* ast)
  * Returns `true` if any folding occurred, else `false`.
  * Repeat until returns `false` to ensure all strings are folded.
  */
-bool metaast_fold_strings(metaast* ast)
+bool metaast_fold_strings(metaast** ast_ptr)
 {
     return false;
 }
