@@ -242,37 +242,12 @@ charset* charset_compliment(charset* s)
  */
 charset* charset_diff(charset* a, charset* b)
 {
-    //new charset to hold the result
-    charset* diff = new_charset();
-
-    //current index into b->ranges
-    size_t j = 0;
+    //perform diff using set algebra: a - b = a & b~
+    charset* b_prime = charset_compliment(b);
+    charset* diff = charset_intersect(a, b_prime);
     
-    //for each range in a
-    for (size_t i = 0; i < a->size; i++)
-    {        
-        //current ranges we're looking at. bj to be assigned on next line
-        urange ai = a->ranges[i], bj;
-
-        //skip all ranges in b that come completely before ai
-        while (j < b->size && (bj = b->ranges[j]).stop < ai.start) { j++; }
-
-        if (j == b->size || ai.stop < bj.start) //no more b ranges, or ai comes completely before bj
-        {
-            charset_add_range_unchecked(diff, ai);
-        }
-        else //otherwise ai and bj intersect
-        {
-            //determine the bounds for the portion of ai not intersecting bj
-            uint32_t start = urange_contains_c(bj, ai.start) ? bj.stop + 1 : ai.start;
-            uint32_t stop = urange_contains_c(bj, ai.stop) ? bj.start - 1 : ai.stop;
-            
-            if (start <= stop) //if this is false, then bj completely encompassed ai
-            {
-                charset_add_range_unchecked(diff, (urange){.start=start, .stop=stop});
-            }
-        }
-    }
+    //free intermediate charset
+    charset_free(b_prime);
 
     return diff;
 }
@@ -283,30 +258,16 @@ charset* charset_diff(charset* a, charset* b)
  */
 charset* charset_intersect(charset* a, charset* b)
 {
-    //new charset to hold the result
-    charset* intersect = new_charset();
-
-    //current index into b->ranges
-    size_t j = 0;
-
-    //for each range in a
-    for (size_t i = 0; i < a->size; i++)
-    {
-        //current ranges we're looking at. bj to be assigned on next line
-        urange ai = a->ranges[i], bj;
-
-        //skip all ranges in b that come completely before ai
-        while (j < b->size && (bj = b->ranges[j]).stop < ai.start) { j++; }
-
-        if (j == b->size) break;            //no more b ranges
-        if (ai.stop < bj.start) continue;   //ai comes completely before bj, i.e. no intersection
-
-        //determine the bounds for the portion of ai not intersecting bj
-        uint32_t start = ai.start > bj.start ? ai.start : bj.start;
-        uint32_t stop = ai.stop < bj.stop ? ai.stop : bj.stop;
-
-        charset_add_range_unchecked(intersect, (urange){.start=start, .stop=stop});
-    }
+    //perform intersect using set algebra: a & b = (a~ | b~)~
+    charset* a_prime = charset_compliment(a);
+    charset* b_prime = charset_compliment(b);
+    charset* prime_union = charset_union(a_prime, b_prime);
+    charset* intersect = charset_compliment(prime_union);
+    
+    //free intermediate charsets
+    charset_free(a_prime);
+    charset_free(b_prime);
+    charset_free(prime_union);
 
     return intersect;
 }

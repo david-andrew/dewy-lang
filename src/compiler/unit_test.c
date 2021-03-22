@@ -311,9 +311,16 @@ int charset_tests()
 
 
     charset* d_s0_s1 = charset_diff(s0, s1);
-    printf("\n\nstr s0 - s1:\n");
+    printf("\n\nstr s0 - s1:\n");    
     charset_str(d_s0_s1);
-    
+
+    printf("\nanyset diff test\n");
+    charset* anyset = new_charset(); charset_add_range(anyset, (urange){.start=0, .stop=0x10FFFF});
+    charset* newline = new_charset(); charset_add_char(newline, '\n');
+    charset* anydiff = charset_diff(anyset, newline);
+    charset_repr(anyset); printf("(-)\n"); charset_repr(newline);
+    printf("  = "); charset_repr(anydiff); printf("\n");     
+
     charset* d_s1_s0 = charset_diff(s1, s0);
     printf("\n\nstr s1 - s0:\n");
     charset_str(d_s1_s0);
@@ -336,6 +343,9 @@ int charset_tests()
     charset_free(d_s0_s1);
     charset_free(d_s1_s0);
     charset_free(i_s0_s1);
+    charset_free(anyset);
+    charset_free(newline);
+    charset_free(anydiff);
 
     return 0;
 }
