@@ -242,7 +242,7 @@ charset* charset_compliment(charset* s)
  */
 charset* charset_diff(charset* a, charset* b)
 {
-    //perform diff using set algebra: a - b = a & b~
+    //perform diff using set algebra: a - b => a & b~
     charset* b_prime = charset_compliment(b);
     charset* diff = charset_intersect(a, b_prime);
     
@@ -258,7 +258,7 @@ charset* charset_diff(charset* a, charset* b)
  */
 charset* charset_intersect(charset* a, charset* b)
 {
-    //perform intersect using set algebra: a & b = (a~ | b~)~
+    //perform intersect using set algebra: a & b => (a~ | b~)~
     charset* a_prime = charset_compliment(a);
     charset* b_prime = charset_compliment(b);
     charset* prime_union = charset_union(a_prime, b_prime);
