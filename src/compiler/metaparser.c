@@ -513,20 +513,22 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
         
         
         //TODO->filters/other extensions of the parser
-        // case metaast_greaterthan:
-        // case metaast_lessthan:
-        // case metaast_reject:
-        // case metaast_nofollow:
-        // case metaast_capture:
-
+        case metaast_greaterthan:
+        case metaast_lessthan:
+        case metaast_reject:
+        case metaast_nofollow:
+        case metaast_capture:
+            printf("ERROR: < > - / and {} have not yet been implemented\n");
+            break;
 
         //ERROR->should not allow, or come up with semantics for
         //e.g. (#A)~ => ξ* - #A
-        // case metaast_compliment:
-
-
         //should be an error since this only makes sense for charsets
-        // metaast_intersect,
+        case metaast_compliment:
+        case metaast_intersect:
+            printf("ERROR: compliment/intersect is only applicable to charsets. There are (currently) no semantics for what compliment means for a regular grammar production");
+            break;
+
     }
 
     // obj_free_keep_inner(body_ast_obj, MetaAST_t);
