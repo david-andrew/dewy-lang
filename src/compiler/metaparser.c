@@ -496,18 +496,24 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
             obj* left_head = metaparser_get_symbol_or_anonymous(head, body_ast->type, node->left);
             obj* right_head = metaparser_get_symbol_or_anonymous(head, body_ast->type, node->right);
 
-            vect* sentence0 = new_vect();
-            vect_append(sentence0, left_head);
+            //only insert the heads into the production if they are different from the current head
+            //same head indicates more levels of nested or nodes
+            if (!obj_equals(left_head, head))
+            {
+                vect* sentence0 = new_vect();
+                vect_append(sentence0, left_head);
 
-            vect* sentence1 = new_vect();
-            vect_append(sentence1, right_head);
+                vect_append(heads, head);
+                vect_append(bodies, new_vect_obj(sentence0));
+            }
+            if (!obj_equals(right_head, head))
+            {
+                vect* sentence1 = new_vect();
+                vect_append(sentence1, right_head);
 
-            vect_append(heads, head);
-            vect_append(bodies, new_vect_obj(sentence0));
-
-            vect_append(heads, head);
-            vect_append(bodies, new_vect_obj(sentence1));
-
+                vect_append(heads, head);
+                vect_append(bodies, new_vect_obj(sentence1));
+            }
             break;
         }
         
