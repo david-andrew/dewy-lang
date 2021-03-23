@@ -185,15 +185,18 @@ obj* metaparser_get_rule_head(vect* tokens)
 {
     while (vect_size(tokens) > 0)
     {
-        obj* t_obj = vect_dequeue(tokens);
-        metatoken* t = t_obj->data;
+        // obj* t_obj = vect_dequeue(tokens);
+        // metatoken* t = t_obj->data;
+        metatoken* t = obj_free_keep_inner(vect_dequeue(tokens), MetaToken_t);
         if (t->type == whitespace || t->type == comment)
         {
-            obj_free(t_obj);
+            metatoken_free(t);
         }
         else if (t->type == hashtag)
         {
-            return t_obj;
+            obj* head = new_ustring_obj(ustring_clone(t->content));
+            metatoken_free(t);
+            return head;
         }
         else //this should never occur if metaparser_is_valid_rule() was called first
         {
@@ -338,7 +341,7 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
             metaast_repeat_node* node = body_ast->node;
             
             //get the identifier for the inner node
-            obj* inner_head = metaparser_get_symbol_or_anonymous(node->inner);
+            obj* inner_head = metaparser_get_symbol_or_anonymous(head, body_ast->type, node->inner);
 
             //build the sentence
             if (node->count == 0 || (node->count == 1 && body_ast->type == metaast_star))
@@ -429,7 +432,7 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
         case metaast_count:
         {
             metaast_repeat_node* node = body_ast->node;
-            obj* inner_head = metaparser_get_symbol_or_anonymous(node->inner);
+            obj* inner_head = metaparser_get_symbol_or_anonymous(head, body_ast->type, node->inner);
 
             if (node->count == 0)
             {
@@ -458,7 +461,7 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
         case metaast_option:
         {
             metaast_unary_op_node* node = body_ast->node;
-            obj* inner_head = metaparser_get_symbol_or_anonymous(node->inner);
+            obj* inner_head = metaparser_get_symbol_or_anonymous(head, body_ast->type, node->inner);
 
             vect* sentence0 = new_vect();
             vect_append(sentence0, inner_head);
@@ -480,7 +483,7 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
             vect* sentence = new_vect();
             for (size_t i = 0; i < node->size; i++)
             {
-                obj* head_i = metaparser_get_symbol_or_anonymous(node->sequence[i]);
+                obj* head_i = metaparser_get_symbol_or_anonymous(head, body_ast->type, node->sequence[i]);
                 vect_append(sentence, head_i);
             }
             vect_append(heads, head);
@@ -490,8 +493,8 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
         case metaast_or:
         {
             metaast_binary_op_node* node = body_ast->node;
-            obj* left_head = metaparser_get_symbol_or_anonymous(node->left);
-            obj* right_head = metaparser_get_symbol_or_anonymous(node->right);
+            obj* left_head = metaparser_get_symbol_or_anonymous(head, body_ast->type, node->left);
+            obj* right_head = metaparser_get_symbol_or_anonymous(head, body_ast->type, node->right);
 
             vect* sentence0 = new_vect();
             vect_append(sentence0, left_head);
@@ -559,7 +562,7 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
  * If ast is not a symbol node (i.e. identifier or charset), then the ast will be inserted
  * into the grammar tables.
  */
-obj* metaparser_get_symbol_or_anonymous(metaast* ast)
+obj* metaparser_get_symbol_or_anonymous(obj* parent_head, metaast_type parent_type, metaast* ast)
 {
     if (ast->type == metaast_identifier)
     {    
@@ -570,6 +573,11 @@ obj* metaparser_get_symbol_or_anonymous(metaast* ast)
     {
         metaast_charset_node* node = ast->node;
         return new_charset_obj(charset_clone(node->c));
+    }
+    else if (parent_type == metaast_or)
+    {   
+        //special case, all nested or nodes use the same head
+        return obj_copy(metaparser_insert_rule_ast(parent_head, ast));
     }
     else
     {

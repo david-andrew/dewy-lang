@@ -220,6 +220,35 @@ uint64_t ustring_parse_base(uint32_t* str, uint64_t base, uint64_t (*base_digit_
 
 
 /**
+ * Returns true if the codepoint is visually printable to the terminal.
+ * Excludes whitespace and other unidentifiable characters, which should
+ * instead be printed as escaped hex values.
+ */
+bool is_printable_unicode(uint32_t c)
+{
+    if (c < '!') return false;
+    else if (c < 0x7F) return  true;
+    else if (c < 0xA1) return false;
+    else if (c < 0x250) return true;
+    //TODO->more in these contiguous ranges...
+    
+    //specific known good ranges
+    else if (c >= 0x370 && c <= 0x3FF) return true;
+
+    //printable ranges
+    //0x21-0x7E     printable ascii
+    //0xA1-0xFF     latin-1
+    //0x100-0x17f   latin extended
+    //0x180-0x24f   pinyin
+    
+
+    //0x370-0x3ff   greek
+
+    return false;
+}
+
+
+/**
     print the unicode character to the terminal as UTF-8
 
     This function uses int8_t instead of uint8_t since putchar expects a signed value
@@ -395,6 +424,16 @@ void unicode_str(uint32_t c)
 void unicode_ascii_or_hex_str(uint32_t c)
 {
     if (0x21 <= c && c <= 0x7E) put_unicode(c);
+    else printf("\\x%X", c);
+}
+
+
+/**
+ * Print out the unicode character if it is a printable character.
+ */
+void printable_unicode_or_hex_str(uint32_t c)
+{
+    if (is_printable_unicode(c)) put_unicode(c);
     else printf("\\x%X", c);
 }
 

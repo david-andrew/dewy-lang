@@ -5,6 +5,8 @@ all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vec
 dewy: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o
 	clang -o dewy dewy_compiler_compiler.o utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o -lm
 
+debug:
+	clang -o dewy dewy_compiler_compiler.c utilities.c object.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c -lm -g
 
 utilities.o: utilities.c utilities.h
 	clang -c -o utilities.o utilities.c

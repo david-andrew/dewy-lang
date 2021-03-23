@@ -418,12 +418,12 @@ void charset_str(charset* s)
     printf("[");
     for (int i = 0; i < s->size; i++)
     {
-        unicode_ascii_or_hex_str(s->ranges[i].start);
+        printable_unicode_or_hex_str(s->ranges[i].start);
         if (s->ranges[i].stop != s->ranges[i].start)
         {
             //only print dash on ranges larger than 2
             if (s->ranges[i].stop - s->ranges[i].start > 1) { printf("-"); }
-            unicode_ascii_or_hex_str(s->ranges[i].stop);
+            printable_unicode_or_hex_str(s->ranges[i].stop);
         }
     }
     printf("]");

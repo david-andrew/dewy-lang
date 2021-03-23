@@ -188,7 +188,7 @@ void obj_print(obj* o)
         case UInteger_t: printf("%lu", *(uint64_t*)o->data); break;
         case String_t: printf("%s", o->data); break;
         case UnicodeString_t: ustring_str(o->data); break;
-        case MetaToken_t: metatoken_str(o->data); break;
+        case MetaToken_t: metatoken_repr(o->data); break;
         // case MetaItem_t: metaitem_str(o->data); break;
         case Vector_t: vect_str(o->data); break;
         case Dictionary_t: dict_str(o->data); break;
@@ -219,7 +219,7 @@ uint64_t obj_hash(obj* o)
         // case Dictionary_t: return dict_hash(o->data);
         case Set_t: return set_hash(o->data);
         case Epsilon_t: return 123456; //pick random hash for epsilon singleton
-        default: printf("WARNING: obj_hash() is not implemented for object of type \"%d\"\n", o->type); exit(1);
+        default: printf("WARNING: obj_hash() is not implemented for object of type \"%d\"\n", o->type); obj_print(o); exit(1);
     }
 }
 
