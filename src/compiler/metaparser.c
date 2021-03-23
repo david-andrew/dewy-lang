@@ -246,7 +246,6 @@ vect* metaparser_get_rule_body(vect* tokens)
 }
 
 
-
 /**
  * Recursively construct the grammar symbol string from the given a meta-ast.
  * all heads, bodies, and charsets are inserted into the metaparser grammar table.
@@ -339,7 +338,7 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
             metaast_repeat_node* node = body_ast->node;
             
             //get the identifier for the inner node
-            obj* inner_head = obj_copy(metaparser_insert_rule_ast(NULL, node->inner));
+            obj* inner_head = metaparser_get_symbol_or_anonymous(node->inner);
 
             //build the sentence
             if (node->count == 0 || (node->count == 1 && body_ast->type == metaast_star))
@@ -387,7 +386,6 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
                 //  #__1 = #A #A #A ... #A #__0; //... N times
                 //  #__1 = ϵ;
 
-
                 //  #__0 = #A #__0
                 obj* head1 = metaparser_get_anonymous_rule_head();
                 vect* sentence0 = new_vect();
@@ -431,7 +429,7 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
         case metaast_count:
         {
             metaast_repeat_node* node = body_ast->node;
-            obj* inner_head = obj_copy(metaparser_insert_rule_ast(NULL, node->inner));
+            obj* inner_head = metaparser_get_symbol_or_anonymous(node->inner);
 
             if (node->count == 0)
             {
@@ -457,9 +455,58 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
             }
             break;
         }
-        // case metaast_option:
-        // case metaast_cat:
-        // case metaast_or:
+        case metaast_option:
+        {
+            metaast_unary_op_node* node = body_ast->node;
+            obj* inner_head = metaparser_get_symbol_or_anonymous(node->inner);
+
+            vect* sentence0 = new_vect();
+            vect_append(sentence0, inner_head);
+
+            vect* sentence1 = new_vect();
+            vect_append(sentence1, new_epsilon_obj());
+
+            vect_append(heads, head);
+            vect_append(bodies, new_vect_obj(sentence0));
+
+            vect_append(heads, head);
+            vect_append(bodies, new_vect_obj(sentence1));
+
+            break;
+        }
+        case metaast_cat:
+        {
+            metaast_sequence_node* node = body_ast->node;
+            vect* sentence = new_vect();
+            for (size_t i = 0; i < node->size; i++)
+            {
+                obj* head_i = metaparser_get_symbol_or_anonymous(node->sequence[i]);
+                vect_append(sentence, head_i);
+            }
+            vect_append(heads, head);
+            vect_append(bodies, new_vect_obj(sentence));
+            break;
+        }
+        case metaast_or:
+        {
+            metaast_binary_op_node* node = body_ast->node;
+            obj* left_head = metaparser_get_symbol_or_anonymous(node->left);
+            obj* right_head = metaparser_get_symbol_or_anonymous(node->right);
+
+            vect* sentence0 = new_vect();
+            vect_append(sentence0, left_head);
+
+            vect* sentence1 = new_vect();
+            vect_append(sentence1, right_head);
+
+            vect_append(heads, head);
+            vect_append(bodies, new_vect_obj(sentence0));
+
+            vect_append(heads, head);
+            vect_append(bodies, new_vect_obj(sentence1));
+
+            break;
+        }
         
         
         //TODO->filters/other extensions of the parser
@@ -507,13 +554,38 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
 
 
 /**
- * Insert the rule into the metaparser grammar table if it does not already exist.
- * Otherwise make use of the existing definition of the rule.
+ * For a nested ast rule, if the nested rule is an identifier/charset,
+ * return that, otherwise return the generated anonymous name of the nested rule.
+ * If ast is not a symbol node (i.e. identifier or charset), then the ast will be inserted
+ * into the grammar tables.
  */
-bool metaparser_insert_rule_sentences(obj* head, vect* bodies)
+obj* metaparser_get_symbol_or_anonymous(metaast* ast)
 {
-
+    if (ast->type == metaast_identifier)
+    {    
+        metaast_string_node* node = ast->node;
+        return new_ustring_obj(ustring_clone(node->string));
+    }
+    else if (ast->type == metaast_charset)
+    {
+        metaast_charset_node* node = ast->node;
+        return new_charset_obj(charset_clone(node->c));
+    }
+    else
+    {
+        return obj_copy(metaparser_insert_rule_ast(NULL, ast));
+    }
 }
+
+
+// /**
+//  * Insert the rule into the metaparser grammar table if it does not already exist.
+//  * Otherwise make use of the existing definition of the rule.
+//  */
+// bool metaparser_insert_rule_sentences(obj* head, vect* bodies)
+// {
+
+// }
 
 
 
