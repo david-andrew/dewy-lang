@@ -48,6 +48,8 @@ bool charset_contains_c(charset* s, uint32_t c);
 bool charset_contains_r(charset* s, urange r);
 bool charset_contains_charset(charset* superset, charset* subset);
 bool urange_contains_c(urange r, uint32_t c);
+bool is_charset_escape(uint32_t c);
+void charset_char_str(uint32_t c);
 void charset_str(charset* s);
 void charset_repr(charset* s);
 void charset_free(charset* s);

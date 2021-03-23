@@ -411,6 +411,40 @@ bool urange_contains_c(urange r, uint32_t c)
 
 
 /**
+ * Returns true if c is a character that needs to be escaped in a charset,
+ * i.e. `[`, `-`, or `]`
+ */
+bool is_charset_escape(uint32_t c)
+{
+    return c == '[' || c == '-' || c == ']' || c == '\\'; 
+}
+
+/**
+ * print out the given charset char as either a literal, an escape char or a hex value.
+ */
+void charset_char_str(uint32_t c)
+{
+    if (is_unicode_escape(c))
+    { 
+        printf("\\");
+        put_unicode(unicode_to_escape(c));
+    }
+    else if (is_charset_escape(c))
+    {
+        printf("\\");
+        put_unicode(c);
+    }
+    else if (is_printable_unicode(c))
+    {
+        put_unicode(c);
+    }
+    else 
+    {
+        printf("\\x%X", c);
+    }
+}
+
+/**
  * Print out a string representation of the charset.
  */
 void charset_str(charset* s)
@@ -418,12 +452,12 @@ void charset_str(charset* s)
     printf("[");
     for (int i = 0; i < s->size; i++)
     {
-        printable_unicode_or_hex_str(s->ranges[i].start);
+        charset_char_str(s->ranges[i].start);
         if (s->ranges[i].stop != s->ranges[i].start)
         {
             //only print dash on ranges larger than 2
             if (s->ranges[i].stop - s->ranges[i].start > 1) { printf("-"); }
-            printable_unicode_or_hex_str(s->ranges[i].stop);
+            charset_char_str(s->ranges[i].stop);
         }
     }
     printf("]");

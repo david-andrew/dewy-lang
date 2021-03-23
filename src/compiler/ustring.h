@@ -30,6 +30,8 @@ void unicode_ascii_or_hex_str(uint32_t c);
 void unicode_str(uint32_t c);
 void ustring_str(uint32_t* s);
 uint32_t escape_to_unicode(uint32_t c);
+uint32_t unicode_to_escape(uint32_t c);
+bool is_unicode_escape(uint32_t c);
 
 
 #endif

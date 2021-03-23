@@ -1385,6 +1385,10 @@ bool metaast_fold_charsets(metaast** ast_ptr)
  */
 bool metaast_fold_strings(metaast** ast_ptr)
 {
+    //things to fold:
+    //- strings contained within cat sequences
+    //- cat sequences contained within cat sequences
+    
     return false;
 }
 

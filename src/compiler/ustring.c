@@ -433,8 +433,19 @@ void unicode_ascii_or_hex_str(uint32_t c)
  */
 void printable_unicode_or_hex_str(uint32_t c)
 {
-    if (is_printable_unicode(c)) put_unicode(c);
-    else printf("\\x%X", c);
+    if (is_printable_unicode(c))
+    {
+        put_unicode(c);
+    }
+    else if (is_unicode_escape(c))
+    { 
+        printf("\\");
+        put_unicode(unicode_to_escape(c));
+    }
+    else 
+    {
+        printf("\\x%X", c);
+    }
 }
 
 
@@ -476,6 +487,38 @@ uint32_t escape_to_unicode(uint32_t c)
         // non-recognized escapes return the literal character
         default: return c;
     }
+}
+
+/**
+ * Return the escape char represented by the literal unicode.
+ * Recognized escaped characters are \n \r \t \v \b \f and \a
+ * all others are not escape chars, and their value is simply returned.
+ */
+uint32_t unicode_to_escape(uint32_t c)
+{
+    switch (c)
+    {
+        // recognized escape characters
+        case 0x7: return 'a';   // bell
+        case 0x8: return 'b';   // backspace
+        case 0x9: return 't';   // tab
+        case 0xA: return 'n';   // new line
+        case 0xB: return 'v';   // vertical tab
+        case 0xC: return 'f';   // form feed
+        case 0xD: return 'r';   // carriage return
+        
+        // non-recognized escapes return the literal character
+        default: return c;
+    }
+}
+
+
+/**
+ * Returns true if the given unicode character can be printed as an escape character.
+ */
+bool is_unicode_escape(uint32_t c)
+{
+    return unicode_to_escape(c) != c;
 }
 
 #endif
