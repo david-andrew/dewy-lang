@@ -32,6 +32,13 @@
     look into standardizing all the base names with either '-nary' or '-imal' or something else
 }/
 
+// Skippable tokens
+#wschar = [\x9-\xD\x20];                                    // ascii whitespace characters.
+#line_comment = '/' '/' (\U - '\n')* '\n';                  // single line comment
+#block_string = \U* - \U* '}/';                             // inside of a block comment. Cannot end with block comment delimiter
+#block_comment = '/' '{' (#block_comment | #block_string)* '}/';       // block comment, with allowed nested block comments
+#ws = #wschar | #line_comment | #block_comment;             // single skippable token. To get a whitespace sequence, use #ws* or #ws+
+
 
 // Number strings of various bases
 
@@ -80,16 +87,16 @@
 #tetrasexagesimal_string = #tetrasexagesimal_prefix [0-9A-Za-z!?]. ([0-9A-Za-z!?]. | '_')*;
 
 //convert all integer strings to decimal for easy use by the backend
-#integer_string = #binary_string. => binary_string_to_decimal(@.0)
-#integer_string = #quaternary_string. => quaternary_string_to_decimal(@.0)
-#integer_string = #seximal_string. => seximal_string_to_decimal(@.0)
-#integer_string = #octal_string. => octal_string_to_decimal(@.0)
+#integer_string = #binary_string. => binary_string_to_decimal($0)
+#integer_string = #quaternary_string. => quaternary_string_to_decimal($0)
+#integer_string = #seximal_string. => seximal_string_to_decimal($0)
+#integer_string = #octal_string. => octal_string_to_decimal($0)
 #integer_string = #decimal_string.; //needs no conversion
-#integer_string = #dozenal_string. => dozenal_string_to_decimal(@.0)
-#integer_string = #hexadecimal_string. => hexadecimal_string_to_decimal(@.0)
-#integer_string = #duotrigesimal_string. => duotrigesimal_string_to_decimal(@.0)
-#integer_string = #hexatridecimal_string. => hexatridecimal_string_to_decimal(@.0)
-#integer_string = #tetrasexagesimal_string. => tetrasexagesimal_string_to_decimal(@.0)
+#integer_string = #dozenal_string. => dozenal_string_to_decimal($0)
+#integer_string = #hexadecimal_string. => hexadecimal_string_to_decimal($0)
+#integer_string = #duotrigesimal_string. => duotrigesimal_string_to_decimal($0)
+#integer_string = #hexatridecimal_string. => hexatridecimal_string_to_decimal($0)
+#integer_string = #tetrasexagesimal_string. => tetrasexagesimal_string_to_decimal($0)
 
 //define integer and float literals
 #integer_literal = '-'? #integer_string;
@@ -98,16 +105,16 @@
 
 
 //defining floats in each base. Note that the later bases require a space between the exponent identifier and the number/mantissa
-#binary_float           = #binary_integer.           ('.' #binary_string.)?           ([Ee] #binary_integer.           ('.' #binary_string.)?)?           - decimal_integer;
-#quaternary_float       = #quaternary_integer.       ('.' #quaternary_string.)?       ([Ee] #quaternary_integer.       ('.' #quaternary_string.)?)?       - quaternary_integer;
-#seximal_float          = #seximal_integer.          ('.' #seximal_string.)?          ([Ee] #seximal_integer.          ('.' #seximal_string.)?)?          - seximal_integer;
-#octal_float            = #octal_integer.            ('.' #octal_string.)?            ([Ee] #octal_integer.            ('.' #octal_string.)?)?            - octal_integer;
-#decimal_float          = #decimal_integer.          ('.' #decimal_string.)?          ([Ee] #decimal_integer.          ('.' #decimal_string.)?)?          - decimal_integer;
-//#dozenal_float          = #dozenal_integer.          ('.' #dozenal_string.)?          ([Ee] #dozenal_integer.          ('.' #dozenal_string.)?)?          - dozenal_integer;
-//#hexidecimal_float      = #hexidecimal_integer.      ('.' #hexidecimal_string.)?      ([Ee] #hexidecimal_integer.      ('.' #hexidecimal_string.)?)?      - hexidecimal_integer;
-//#duotrigesimal_float    = #duotrigesimal_integer.    ('.' #duotrigesimal_string.)?    ([Ee] #duotrigesimal_integer.    ('.' #duotrigesimal_string.)?)?    - duotrigesimal_integer;
-//#hexatridecimal_float   = #hexatridecimal_integer.   ('.' #hexatridecimal_string.)?   ([Ee] #hexatridecimal_integer.   ('.' #hexatridecimal_string.)?)?   - hexatridecimal_integer;
-//#tetrasexagesimal_float = #tetrasexagesimal_integer. ('.' #tetrasexagesimal_string.)? ([Ee] #tetrasexagesimal_integer. ('.' #tetrasexagesimal_string.)?)? - tetrasexagesimal_integer;
+#binary_float           = #binary_integer.           ('.' #binary_string.)?           (#ws* [Ee] #ws* #binary_integer.           ('.' #binary_string.)?)?           - decimal_integer;
+#quaternary_float       = #quaternary_integer.       ('.' #quaternary_string.)?       (#ws* [Ee] #ws* #quaternary_integer.       ('.' #quaternary_string.)?)?       - quaternary_integer;
+#seximal_float          = #seximal_integer.          ('.' #seximal_string.)?          (#ws* [Ee] #ws* #seximal_integer.          ('.' #seximal_string.)?)?          - seximal_integer;
+#octal_float            = #octal_integer.            ('.' #octal_string.)?            (#ws* [Ee] #ws* #octal_integer.            ('.' #octal_string.)?)?            - octal_integer;
+#decimal_float          = #decimal_integer.          ('.' #decimal_string.)?          (#ws* [Ee] #ws* #decimal_integer.          ('.' #decimal_string.)?)?          - decimal_integer;
+#dozenal_float          = #dozenal_integer.          ('.' #dozenal_string.)?          (#ws+ [Ee] #ws+ #dozenal_integer.          ('.' #dozenal_string.)?)?          - dozenal_integer;
+#hexidecimal_float      = #hexidecimal_integer.      ('.' #hexidecimal_string.)?      (#ws+ [Ee] #ws+ #hexidecimal_integer.      ('.' #hexidecimal_string.)?)?      - hexidecimal_integer;
+#duotrigesimal_float    = #duotrigesimal_integer.    ('.' #duotrigesimal_string.)?    (#ws+ [Ee] #ws+ #duotrigesimal_integer.    ('.' #duotrigesimal_string.)?)?    - duotrigesimal_integer;
+#hexatridecimal_float   = #hexatridecimal_integer.   ('.' #hexatridecimal_string.)?   (#ws+ [Ee] #ws+ #hexatridecimal_integer.   ('.' #hexatridecimal_string.)?)?   - hexatridecimal_integer;
+#tetrasexagesimal_float = #tetrasexagesimal_integer. ('.' #tetrasexagesimal_string.)? (#ws+ [Ee] #ws+ #tetrasexagesimal_integer. ('.' #tetrasexagesimal_string.)?)? - tetrasexagesimal_integer;
 
 #float = #binary_float | #quaternary_float | #seximal_float | #octal_float | #decimal_float
     | #dozenal_float | #hexadecimal_float | #duotrigesimal_float | #hexatridecimal_float | #tetrasexagesimal_float;

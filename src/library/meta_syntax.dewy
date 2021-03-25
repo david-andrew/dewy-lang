@@ -7,28 +7,28 @@
 #eps = 'ϵ' | '\\e' | "''" | '""';                           // ϵ, \e, '', or "" indicates empty element, i.e. nullable
 //#wschar = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000]; //ascii + unicode whitespace chars
 #wschar = [\x9-\xD\x20];                                    // ascii whitespace characters.
-#line_comment = '/' '/' (\U - '\n')* '\n';                  // single line comment
-#block_string = \U* - \U* '}/';                             // inside of a block comment. Cannot end with block comment delimiter
+#line_comment = '/' '/' (ξ - '\n')* '\n';                   // single line comment
+#block_string = ξ* - ξ* '}/';                               // inside of a block comment. Cannot end with block comment delimiter
 #block_comment = '/' '{' (#block_comment | #block_string)* '}/';       // block comment, with allowed nested block comments
 #ws = (#wschar | #line_comment | #block_comment)*;          // optional whitespace sequence
 #anyset = '\\' [uUxX] | [VUξ];                              // V, U, ξ, \U, \u, \X, or \x used to indicate any unicode character
 #hex = '\\' [uUxX] [0-9a-fA-F]+ / [0-9a-fA-F];              // hex number literal. Basically skipping the number part makes it #any
 #number = [0-9]+ / [0-9];                                   // decimal number literal. Used to indicate # of repetitions
-#charsetchar = \U - [\-\[\]] - #wschar;                     // characters allowed in a set are any unicode excluding '-', '[', or ']', and whitespace
+#charsetchar = ξ - [\-\[\]] - #wschar;                      // characters allowed in a set are any unicode excluding '-', '[', or ']', and whitespace
 #item = #charsetchar | #escape | #hex;                      // items that make up character sets, i.e. raw chars, escape chars, or hex chars
 #charset = '[' (#ws #item (#ws '-' #ws #item)? #ws)+ ']';   // set of chars specified literally. Whitespace is ignored, and must be escaped.
 
 //paired grouping operators
 #group = '(' #ws #expr #ws ')';                             // group together/force precedence
-#capture = '{' #ws #expr #ws '}';                           // group to capture
-#char = '"' (\U - '"' | #escape | #hex) '"';                // "" single character
-#char = "'" (\U - "'" | #escape | #hex) "'";                // '' single character
-#string = '"' (\U - '"' | #escape | #hex)2+ '"';            // "" string of 2+ characters
-#string = "'" (\U - "'" | #escape | #hex)2+ "'";            // '' string of 2+ characters
-#escape = '\\' \U;                                          // an escape character. Recognized escaped characters are \n \r \t \v \b \f \a. 
+#char = '"' (ξ - '"' | #escape | #hex) '"';                 // "" single character
+#char = "'" (ξ - "'" | #escape | #hex) "'";                 // '' single character
+#string = '"' (ξ - '"' | #escape | #hex)2+ '"';             // "" string of 2+ characters
+#string = "'" (ξ - "'" | #escape | #hex)2+ "'";             // '' string of 2+ characters
+#escape = '\\' ξ;                                           // an escape character. Recognized escaped characters are \n \r \t \v \b \f \a. 
                                                             // all others just put the second character literally. Common literals include \\ \' \" \[ \] \-
 
 //post operators
+#capture = #expr #ws '.';                                   // group to capture
 #star = #expr #ws (#number)? #ws '*';                       // zero or (number or more)
 #plus = #expr #ws (#number)? #ws '+';                       // (number or one) or more 
 #option = #expr #ws '?';                                    // optional
