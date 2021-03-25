@@ -307,17 +307,6 @@ vect* metaparser_get_rule_body(vect* tokens)
 //FOR NOW WE'LL JUST PRINT OUT WHAT WE WOULD DO...
 uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 {   
-    // //check if an equivalent ast has already been inserted into the grammar table
-    // obj* body_ast_obj = new_metaast_obj(body_ast);
-    // if (dict_contains(metaparser_ast_cache, body_ast_obj))
-    // {
-    //     obj* body_id = dict_get(metaparser_ast_cache, body_ast_obj);
-    //     vect* sentence = new_vect();
-    //     vect_append(sentence, obj_copy(body_id));
-    //     vect_append(bodies, new_vect_obj(sentence));
-    // }
-    // else
-
     switch (body_ast->type)
     {
         // Base case (non-recursive) rules
@@ -393,7 +382,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             uint32_t c;
             while ((c = *s++))
             {
-                obj* cs_obj = new_charset_obj(new_charset());
+                obj* cs_obj = new_charset_obj(NULL);
                 charset_add_char(cs_obj->data, c);
                 uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
                 vect_append(sentence, new_uint_obj(terminal_idx));
@@ -417,7 +406,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             metaast_repeat_node* node = body_ast->node;
             
             //get the identifier for the inner node
-            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(head_idx, body_ast->type, node->inner);
+            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(node->inner);
 
             //build the sentence
             if (node->count == 0 || (node->count == 1 && body_ast->type == metaast_star))
@@ -488,7 +477,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
 
             metaast_repeat_node* node = body_ast->node;
-            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(head_idx, body_ast->type, node->inner);
+            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(node->inner);
 
             if (node->count == 0)
             {
@@ -519,7 +508,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
 
             metaast_unary_op_node* node = body_ast->node;
-            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(head_idx, body_ast->type, node->inner);
+            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(node->inner);
 
             //#head = #A ? =>
             //  #head = #A
@@ -591,7 +580,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
                     //all other types of ast are represented by an anonymous identifier
                     default: 
                     {
-                        uint64_t head_i_idx = metaparser_get_symbol_or_anonymous(head_idx, body_ast->type, node->sequence[i]);
+                        uint64_t head_i_idx = metaparser_get_symbol_or_anonymous(node->sequence[i]);
                         vect_append(sentence, new_uint_obj(head_i_idx));
                         break;
                     }
@@ -613,25 +602,9 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             //  #rule = #B
 
             metaast_binary_op_node* node = body_ast->node;
-            uint64_t left_head_idx = metaparser_get_symbol_or_anonymous(head_idx, body_ast->type, node->left);
-            uint64_t right_head_idx = metaparser_get_symbol_or_anonymous(head_idx, body_ast->type, node->right);
+            metaparser_insert_or_inner_rule_ast(head_idx, node->left);
+            metaparser_insert_or_inner_rule_ast(head_idx, node->right);
 
-            //only insert the heads into the production if they are not also or nodes
-            //or nodes return the parent head, which we don't want to insert into the body for nested or nodes
-            if (node->left->type != metaast_or)
-            {
-                vect* sentence0 = new_vect();
-                vect_append(sentence0, new_uint_obj(left_head_idx));
-                uint64_t sentence0_idx = metaparser_add_body(sentence0);
-                metaparser_add_production(head_idx, sentence0_idx);
-            }
-            if (node->right->type != metaast_or)
-            {
-                vect* sentence1 = new_vect();
-                vect_append(sentence1, new_uint_obj(right_head_idx));
-                uint64_t sentence1_idx = metaparser_add_body(sentence1);
-                metaparser_add_production(head_idx, sentence1_idx);
-            }
             break;
         }
         
@@ -660,36 +633,61 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 
 
 /**
- * For a nested ast rule, if the nested rule is an identifier/charset,
- * return that, otherwise return the generated anonymous name of the nested rule.
- * If ast is not a symbol node (i.e. identifier or charset), then the ast will be inserted
- * into the grammar tables.
+ * For a nested ast rule, if the nested rule is a symbol (i.e. identifier or charset), 
+ * return its symbol index. Otherwise generate an anonymous identifier by inserting the ast
+ * with a NULL parent head, and then return the index of the anonymous identifier.
  */
-uint64_t metaparser_get_symbol_or_anonymous(uint64_t parent_head_idx, metaast_type parent_type, metaast* ast)
+uint64_t metaparser_get_symbol_or_anonymous(metaast* ast)
 {
-    //TODO->can we take this one out too? also handled by the general case...
     if (ast->type == metaast_identifier)
     {    
         metaast_string_node* node = ast->node;
         obj* nonterminal = new_ustring_obj(ustring_clone(node->string));
         return metaparser_add_symbol(nonterminal);
     }
-    //TODO->can we take this one out? shouldn't it be handled correctly by the general case?
     else if (ast->type == metaast_charset)
     {
         metaast_charset_node* node = ast->node;
         obj* terminal = new_charset_obj(charset_clone(node->c));
         return metaparser_add_symbol(terminal);
     }
-    else if (parent_type == metaast_or)
-    {   
-        //special case, all nested or nodes use the same head
-        return metaparser_insert_rule_ast(parent_head_idx, ast);
-    }
     else
     {
-        //all other cases, insert an anonymous expression
+        //all other cases, insert an anonymous expression, and return its head
         return metaparser_insert_rule_ast(NULL_SYMBOL_INDEX, ast);
+    }
+}
+
+
+/**
+ * Insert the ast at the same level as the parent ast.
+ * e.g. or nodes insert children with the same head as the parent.
+ * If the inner node needs an anonymous head, that head is returned,
+ * else NULL_SYMBOL_INDEX is returned. This means the ast reused the parents head, and does not need to
+ * ruther be inserted into the grammar tables
+ * 
+ * NOTE: Parent is expected to be an or node (as no other node types insert children at the same level)
+ */
+void metaparser_insert_or_inner_rule_ast(uint64_t parent_head_idx, metaast* ast)
+{
+    //case where the inner node reuses the parent index
+    if (ast->type == metaast_or || ast->type == metaast_eps || ast->type == metaast_identifier 
+    || ast->type == metaast_charset || ast->type == metaast_string || ast->type == metaast_cat)
+    {
+        //insert the inner as itself, using the parent's head
+        metaparser_insert_rule_ast(parent_head_idx, ast);
+    }
+    else //inner node needs to create an anonymous head which the parent adds as a sentence
+    {
+        uint64_t anonymous_idx = metaparser_insert_rule_ast(NULL_SYMBOL_INDEX, ast);
+        
+        //create a sentence containing just the anonymous rule
+        vect* sentence = new_vect();
+        vect_append(sentence, new_uint_obj(anonymous_idx));
+        uint64_t body_idx = metaparser_add_body(sentence);
+
+        //create the production by adding the sentence to the parent head
+        metaparser_add_production(parent_head_idx, body_idx);
     }
 }
 

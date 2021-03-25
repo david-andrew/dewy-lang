@@ -14,7 +14,8 @@ bool metaparser_is_valid_rule(vect* tokens);
 obj* metaparser_get_rule_head(vect* tokens);
 vect* metaparser_get_rule_body(vect* tokens);
 uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast);
-uint64_t metaparser_get_symbol_or_anonymous(uint64_t parent_head_idx, metaast_type parent_type, metaast* ast);
+uint64_t metaparser_get_symbol_or_anonymous( metaast* ast);
+void metaparser_insert_or_inner_rule_ast(uint64_t parent_head_idx, metaast* ast);
 
 bool metaparser_insert_rule_sentences(obj* head, vect* body);
 
