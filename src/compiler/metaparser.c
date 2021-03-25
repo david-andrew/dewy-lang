@@ -142,24 +142,38 @@ bool parse_next_meta_rule(vect* tokens)
 //TODO->convert this to indexing into the symbols & bodies sets
 void print_grammar_tables()
 {
-    //print out all symbols
-    printf("symbols:\n"); 
-    for (uint64_t i = 0; i < set_size(metaparser_symbols); i++)
-    {
-        printf("%"PRIu64": ", i); obj_print(metaparser_get_symbol(i)); printf("\n");
-    }
+    // //print out all symbols
+    // printf("symbols:\n"); 
+    // for (uint64_t i = 0; i < set_size(metaparser_symbols); i++)
+    // {
+    //     printf("%"PRIu64": ", i); obj_print(metaparser_get_symbol(i)); printf("\n");
+    // }
 
     //print out the table of rules TODO->have this directly print out the whole head/production properly instead of printing out the indices
     if (vect_size(metaparser_production_bodies) != vect_size(metaparser_production_heads)){ printf("ERROR heads and bodies should be the same size!\n"); exit(1); }
     for (size_t i = 0; i < vect_size(metaparser_production_bodies); i++)
     {
-        obj* head = vect_get(metaparser_production_heads, i);
+        uint64_t* head_idx = vect_get(metaparser_production_heads, i)->data;
+        obj* head = metaparser_get_symbol(*head_idx);
+
         obj_print(head);
         printf(" = ");
-        vect* sentence = vect_get(metaparser_production_bodies, i)->data;
+
+        uint64_t* body_idx = vect_get(metaparser_production_bodies, i)->data;
+        vect* sentence = metaparser_get_body(*body_idx);
+
+        //length 0 sentence is epsilon
+        if (vect_size(sentence) == 0)
+        {
+            printf("ϵ");
+        }
+
+        //normal print out each symbol in the sentence
         for (size_t j = 0; j < vect_size(sentence); j++)
         {
-            obj_print(vect_get(sentence, j));
+            uint64_t* symbol_idx = vect_get(sentence, j)->data;
+            obj* symbol = metaparser_get_symbol(*symbol_idx);
+            obj_print(symbol);
             if (j < vect_size(sentence) - 1) { printf(" "); }
         }
         printf("\n");
@@ -479,10 +493,10 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             if (node->count == 0)
             {
                 //#head = (#A)0 => ϵ;  //this is probably a typo on the user's part...
-                printf("WARNING: ("); metaast_str(body_ast); printf(")0 is equivalent to ϵ\n"
-                "Did you mean `("); metaast_str(body_ast); printf(")*`"
-                " or `("); metaast_str(body_ast); printf(")+`"
-                " or `("); metaast_str(body_ast); printf(")N` where N > 1 ?\n");
+                printf("WARNING: "); metaast_str(body_ast); printf(" is equivalent to ϵ\n"
+                "Did you mean `("); metaast_str(node->inner); printf(")*`"
+                " or `("); metaast_str(node->inner); printf(")+`"
+                " or `("); metaast_str(node->inner); printf(")N` where N > 1 ?\n");
                 metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
             }
             else

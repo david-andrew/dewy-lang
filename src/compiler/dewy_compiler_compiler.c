@@ -195,6 +195,7 @@ void run_parser(char* source, bool verbose)
         if (!metaparser_is_valid_rule(tokens)) { break; }
 
         obj* head = metaparser_get_rule_head(tokens);
+        uint64_t head_idx = metaparser_add_symbol(head);
         vect* body_tokens = metaparser_get_rule_body(tokens);
         metaast* body_ast = metaast_parse_expr(body_tokens);
 
@@ -206,7 +207,8 @@ void run_parser(char* source, bool verbose)
             while ((metaast_fold_constant(&body_ast)) && ++reductions);
         
             //attempt to convert metaast into sentential form
-            metaparser_insert_rule_ast(head, body_ast); 
+            
+            metaparser_insert_rule_ast(head_idx, body_ast); 
         }
 
         //free up ast objects
