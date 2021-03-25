@@ -194,9 +194,9 @@ void set_add(set* s, obj* item)
     size_t probe = set_get_indices_probe(s, item);
     size_t index = s->indices[probe];
 
-    if (index != EMPTY) //item already in set, so overwrite entry (potentially unnecessary...)
+    if (index != EMPTY) //item already in set, so delete the new copy (since set owns the data added)
     {
-        s->entries[index].item = item;
+        obj_free(item);
     }
     else //create a new entry for the item in the set
     {
