@@ -207,7 +207,7 @@ uint64_t obj_hash(obj* o)
     {
         case Boolean_t: return hash_bool(*(bool*)o->data);
         case Character_t: return hash_uint(*(uint32_t*)o->data);
-        // case CharSet_t: return hash_charset(o->data);
+        case CharSet_t: return charset_hash(o->data);
         case Integer_t: return hash_int(*(int64_t*)o->data);
         case UInteger_t: return hash_uint(*(uint64_t*)o->data);
         case String_t: return fnv1a(o->data);
@@ -265,6 +265,7 @@ bool obj_equals(obj* left, obj* right)
     {
         // case Dictionary_t: return dict_equals((dict*)left->data, (dict*)right->data);
         case Set_t: return set_equals((set*)left->data, (set*)right->data);
+        case CharSet_t: return charset_equals(left->data, right->data);
         default: return obj_compare(left, right) == 0;
     }
 

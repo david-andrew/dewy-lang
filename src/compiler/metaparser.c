@@ -129,7 +129,9 @@ bool parse_next_meta_rule(vect* tokens)
     while (metaast_fold_constant(&body_ast));
 
     //recursively convert to sentences + insert into grammar table
-    return metaparser_insert_rule_ast(head, body_ast); 
+
+    uint64_t head_idx = metaparser_add_symbol(head);
+    metaparser_insert_rule_ast(head_idx, body_ast); 
     return true;
 }
 
@@ -724,7 +726,7 @@ obj* metaparser_get_symbol(uint64_t i)
 uint64_t metaparser_add_body(vect* body)
 {
     obj* body_obj = new_vect_obj(body);
-    uint64_t body_idx = set_add_return_index(body_obj);
+    uint64_t body_idx = set_add_return_index(metaparser_bodies, body_obj);
     return body_idx;
 }
 
@@ -734,7 +736,8 @@ uint64_t metaparser_add_body(vect* body)
  */
 vect* metaparser_get_body(uint64_t i)
 {
-    return set_get_at_index(metaparser_bodies, i);
+    obj* body_obj = set_get_at_index(metaparser_bodies, i);
+    return body_obj->data; //TODO->add error checking... could be null, could also be not a vect...
 }
 
 
