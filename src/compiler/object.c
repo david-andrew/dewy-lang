@@ -303,9 +303,10 @@ void obj_free(obj* o)
             case Vector_t: vect_free((vect*)o->data); break;
             case Dictionary_t: dict_free((dict*)o->data); break;
             case Set_t: set_free((set*)o->data); break;
+            case CharSet_t: charset_free((charset*)o->data); break;
             
             default: 
-                printf("WARNING: obj_free() is not implemented for object of type \"%d\"\ncontents:\n", o->type); 
+                printf("WARNING: obj_free() is not implemented for object of type \"%d\"\ncontents: ", o->type); 
                 obj_print(o); 
                 printf("\n");
                 exit(1);

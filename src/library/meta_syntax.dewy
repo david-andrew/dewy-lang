@@ -83,8 +83,10 @@ all whitespace in charsets must either be escaped or in hex
 
 }/
 
-//e.g. 
-#bare_range = #expr ':' #expr;
+//e.g. the range expression in dewy
+//range has no associativity, i.e. subexpressions may not be ranges themselves
+
+#bare_range = #expr - #range ':' #expr - #range;
 #range = #bare_range | [(\[] #bare_range [)\]];
 
 /{

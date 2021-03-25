@@ -24,7 +24,6 @@ typedef enum
     Vector_t,
     Dictionary_t,
     Set_t,
-    Epsilon_t,
 } obj_type;
 
 /**

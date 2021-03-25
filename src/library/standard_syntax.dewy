@@ -1,34 +1,15 @@
 /{
     DewySpeak Standard Syntax Definition
     #Author = "David Samson"
-    #Date = "12019-03-06"
+    #Created = "12019-03-06"
 
     This file defines the standard syntax of the dewy language using the built-in macro language    
-    The macro language is a slightly modified version of ISO Extended Backus-Naur form (EBNF). Changes were made to accomdate embedding EBNF in the DewySpeak Language.
+    The macro language is a modifier version of the W3 grammar notation here: https://www.w3.org/TR/2006/REC-xml11-20060816/#sec-notation
+    
+    The full specification is written out in `./src/library/meta_syntax.dewy`
 
-    The following changes are made/restrictions imposed:
-    1. meta-identifiers have a restriction on thier form*
-    2. EBNF comments are not included. Instead Dewy style comments (// and /{} /) may be used, as this is still Dewy source code [TODO, fix sublime syntax highlighting so that you can embed comments, i.e. be able to remove the space]
-    3. The definition of a rule can be extended by including a rule in the body of its redefinition. Basic updates would be:
-       -> #rule = #rule | new_rules; can be used to include another option
-       -> #rule = #rule - new_rules; can be used to subtract from the options
-       -> #rule = num * #rule; can be used to duplicate the rule
-       -> #rule = #rule, new_rules; can be used to append to the rule
-       Additionally any other appearance of #rule in the body will update the definition
-       -> e.g. #rule = {#rule | "A"}-; would redefine a rule so that #rule or "A" could occur in a sequence of 1 or more. (note that in EBNF, "{something}-" means a sequence of at least 1, because it subtracts the empty option from the sequence)
-    4. The special symbol sequence "? ... ?" may be ignored as ? are important for identifiers
-
-    *Rules for macro identifiers:
-    Basically the same as the rules for normal Dewy identifiers, except, they must start with a '#' symbol
-    Here's the EBNF definition:
-    #number = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
-    #letter = 'A' | 'B' | 'C' | 'D' | 'E' | ... | 'v' | 'w' | 'x' | 'y' | 'z' |;  //include unicode characters?
-    #symbol = '~' | '!' | '@' | '#' | '$' | '&' | '_' | '?'; //include '‽' as well?
-    #identifier = '#', #letter, {#letter | #number | #symbol}
-
-    For more details, see: https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form
-    Full EBNF specification: http://standards.iso.org/ittf/PubliclyAvailableStandards/s026153_ISO_IEC_14977_1996(E).zip
-
+    TODO->this stuff will probably change... e.g. probably will have a hand written pure meta-syntax parser, and then define Dewy to include a metasyntax with the same syntax as the manual implementation. This allows the SRNGLR parser to handle Dewy vs Meta in context.
+    <OLD>
     The way the macro language works while parsing Dewy source code is that tokens are parsed sequentially according to rules
     - All rules defined by macros are evaluated first
     - Rules hardcoded into the compiler are evaluated second
@@ -52,126 +33,86 @@
 }/
 
 
-
-//note that #define doesn't make the compiler match for it, rather it just makes a rule entry for it. only if it is called via something like #tokanize or #parse or #evaluate? will it actually be searched for
-//I'm thinking that if #tokanize is used to convert things into tokans, that they should all be at the end in the order that they need to be checked in, so as to not skip anything
-
-//[DONE] consider removing #define, and having it be directly #identifier = rule;
-//problem is, how can hashtags not be required to have the semicolon? perhaps if there's no '=' sign, then no semicolon, because that's only part of the rule
-
-
-//#ignore_case = ? hard code ignore case into the compiler ?
-//any other hardcoded macros defined here
+// Number strings of various bases
 
 //base 2
-#binary_digit = '0' | '1';
-#binary_prefix = '0B' | '0b';
-#binary = #binary_prefix, #binary_digit, {#binary_digit | '_'};
+#binary_prefix = '0' [Bb];
+#binary_string = #binary_prefix [01]. ([01]. | '_')*;
 
 //base 3
 //#define ternary_digit = '0' | '1' | '2';
 //#define balanced_ternary_digit = 'T' | '0' | '1';
 
 //base 4
-#quaternary_digit = '0' | '1' | '2' | '3';
-#quaternary_prefix = '0Q' | '0q';
-#quaternary = #quaternary_prefix, #quaternary_digit, {#quaternary_digit | '_'};
+#quaternary_prefix = '0' [Qq];
+#quaternary_string = #quaternary_prefix [0-3]. ([0-3]. | '_')*;
 
 //base 6
-#seximal_digit = '0' | '1' | '2' | '3' | '4' | '5';
-#seximal_prefix = '0S' | '0s';
-#seximal = #seximal_prefix, #seximal_digit, {#seximal_digit | '_'};
+#seximal_prefix = '0' [Ss];
+#seximal_string = #seximal_prefix [0-5]. ([0-5]. | '_')*;
 
 //base 8
-#octal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7';
-#octal_prefix = '0O' | '0o';
-#octal = #octal_prefix, #octal_digit, {#octal_digit | '_'};
+#octal_prefix = '0' [Oo];
+#octal_string = #octal_prefix [0-7]. ([0-7]. | '_')*;
 
 //base 10
-#decimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
-#decimal_prefix = '0D' | '0d'; //obviously optional
-#decimal = [#decimal_prefix], #decimal_digit, {#decimal_digit | '_'};
+#decimal_prefix = '0' [Dd]; //obviously optional
+#decimal_string = #decimal_prefix ? [0-9]. ([0-9]. | '_')*;
 
 //base 12
-#dozenal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | ('X' | 'x') | ('E' | 'e');
-#dozenal_prefix = '0Z' | '0z';
-#dozenal = #dozenal_prefix, #dozenal_digit, {#dozenal_digit | '_'};
+#dozenal_prefix = '0' [Zz];
+#dozenal_string = #dozenal_prefix [0-9XxEe]. ([0-9XxEe]. | '_')*;
 
 //base 16
-#hexadecimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' 
-    | ('A' | 'a') | ('B' | 'b') | ('C' | 'c') | ('D' | 'd') | ('E' | 'e') | ('F' | 'f');
-#hexadecimal_prefix = '0X' | '0x';
-#hexadecimal = #hexadecimal_prefix, #hexadecimal_digit, {#hexadecimal_digit | '_'};
+#hexadecimal_prefix = '0' [Xx];
+#hexadecimal_string = #hexadecimal_prefix [0-9A-Fa-f]. ([0-9A-Fa-f]. | '_')*;
 
 //base 32
-#duotrigesimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' 
-    | ('A' | 'a') | ('B' | 'b') | ('C' | 'c') | ('D' | 'd') | ('E' | 'e') | ('F' | 'f')
-    | ('G' | 'g') | ('H' | 'h') | ('I' | 'i') | ('J' | 'j') | ('K' | 'k') | ('L' | 'l')
-    | ('M' | 'm') | ('N' | 'n') | ('O' | 'o') | ('P' | 'p') | ('Q' | 'q') | ('R' | 'R')
-    | ('S' | 's') | ('T' | 't') | ('U' | 'u') | ('V' | 'v');
-#duotrigesimal_prefix = '0U' | '0u';
-#duotrigesimal = #duotrigesimal_prefix, #duotrigesimal_digit, {#duotrigesimal_digit | '_'};
+#duotrigesimal_prefix = '0' [Uu];
+#duotrigesimal_string = #duotrigesimal_prefix [0-9A-Va-v]. ([0-9A-Va-v] | '_')*;
 
 //base 36
-#hexatridecimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
-    | ('A' | 'a') | ('B' | 'b') | ('C' | 'c') | ('D' | 'd') | ('E' | 'e') | ('F' | 'f')
-    | ('G' | 'g') | ('H' | 'h') | ('I' | 'i') | ('J' | 'j') | ('K' | 'k') | ('L' | 'l')
-    | ('M' | 'm') | ('N' | 'n') | ('O' | 'o') | ('P' | 'p') | ('Q' | 'q') | ('R' | 'R')
-    | ('S' | 's') | ('T' | 't') | ('U' | 'u') | ('V' | 'v') | ('W' | 'w') | ('X' | 'x')
-    | ('Y' | 'y') | ('Z' | 'z');
-#hexatridecimal_prefix = '0R' | '0r';
-#hexatridecimal = #hexatridecimal_prefix, #hexatridecimal_digit, {#hexatridecimal_digit | '_'};
+#hexatridecimal_prefix = '0' [Rr];
+#hexatridecimal_string = #hexatridecimal_prefix [0-9A-Za-z]. ([0-9A-Za-z]. | '_')*;
 
 //base 64
-//[DONE] consider changing the last 2 digits used here to something else, e.g. !, &, $, so that the syntax used by @, and the number separator '_' can interop easily
-#tetrasexagesimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
-    | 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j'
-    | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't'
-    | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' | 'A' | 'B' | 'C' | 'D'
-    | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N'
-    | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X'
-    | 'Y' | 'Z' | '!' | '?';
-#tetrasexagesimal_prefix = '0T' | '0t';
-#tetrasexagesimal = #tetrasexagesimal_prefix, #tetrasexagesimal_digit, {#tetrasexagesimal_digit | '_'};
+#tetrasexagesimal_prefix = '0' [Tt];
+#tetrasexagesimal_string = #tetrasexagesimal_prefix [0-9A-Za-z!?]. ([0-9A-Za-z!?]. | '_')*;
 
+//convert all integer strings to decimal for easy use by the backend
+#integer_string = #binary_string. => binary_string_to_decimal(@.0)
+#integer_string = #quaternary_string. => quaternary_string_to_decimal(@.0)
+#integer_string = #seximal_string. => seximal_string_to_decimal(@.0)
+#integer_string = #octal_string. => octal_string_to_decimal(@.0)
+#integer_string = #decimal_string.; //needs no conversion
+#integer_string = #dozenal_string. => dozenal_string_to_decimal(@.0)
+#integer_string = #hexadecimal_string. => hexadecimal_string_to_decimal(@.0)
+#integer_string = #duotrigesimal_string. => duotrigesimal_string_to_decimal(@.0)
+#integer_string = #hexatridecimal_string. => hexatridecimal_string_to_decimal(@.0)
+#integer_string = #tetrasexagesimal_string. => tetrasexagesimal_string_to_decimal(@.0)
 
+//define integer and float literals
+#integer_literal = '-'? #integer_string;
+//#float_literal = #integer_literal. ('.' #integer_string.)? ([Ee] #integer_literal. ('.' #integer_literal.)?)?
 
-
-
-//defining integers in each base
-#binary_integer           = ['-'], #binary;
-#quaternary_integer       = ['-'], #quaternary;
-#seximal_integer          = ['-'], #seximal;
-#octal_integer            = ['-'], #octal;
-#decimal_integer          = ['-'], #decimal;
-#dozenal_integer          = ['-'], #dozenal;
-#hexadecimal_integer      = ['-'], #hexadecimal;
-#duotrigesimal_integer    = ['-'], #duotrigesimal;
-#hexatridecimal_integer   = ['-'], #hexatridecimal;
-#tetrasexagesimal_integer = ['-'], #tetrasexagesimal;
-
-#integer = #binary_integer | #quaternary_integer | #seximal_integer | #octal_integer | #decimal_integer
-    | #dozenal_integer | #hexadecimal_integer | #duotrigesimal_integer | #hexatridecimal_integer | #tetrasexagesimal_integer;
 
 
 //defining floats in each base. Note that the later bases require a space between the exponent identifier and the number/mantissa
-#exponent = 'e' | 'E'
-#binary_float           = #binary_integer,           '.', [{' '},      #exponent, {' '},      #binary_integer, ['.',           #binary]]
-#quaternary_float       = #quaternary_integer,       '.', [{' '},      #exponent, {' '},      #quaternary_integer, ['.',       #quaternary]]
-#seximal_float          = #seximal_integer,          '.', [{' '},      #exponent, {' '},      #seximal_integer, ['.',          #seximal]]
-#octal_float            = #octal_integer,            '.', [{' '},      #exponent, {' '},      #octal_integer, ['.',            #octal]]
-#decimal_float          = #decimal_integer,          '.', [{' '},      #exponent, {' '},      #decimal_integer, ['.',          #decimal]]
-#dozenal_float          = #dozenal_integer,          '.', [' ', {' '}, #exponent, ' ', {' '}, #dozenal_integer, ['.',          #dozenal]]
-#hexadecimal_float      = #hexadecimal_integer,      '.', [' ', {' '}, #exponent, ' ', {' '}, #hexadecimal_integer, ['.',      #hexadecimal]]
-#duotrigesimal_float    = #duotrigesimal_integer,    '.', [' ', {' '}, #exponent, ' ', {' '}, #duotrigesimal_integer, ['.',    #duotrigesimal]]
-#hexatridecimal_float   = #hexatridecimal_integer,   '.', [' ', {' '}, #exponent, ' ', {' '}, #hexatridecimal_integer, ['.',   #hexatridecimal]]
-#tetrasexagesimal_float = #tetrasexagesimal_integer, '.', [' ', {' '}, #exponent, ' ', {' '}, #tetrasexagesimal_integer, ['.', #tetrasexagesimal]]
+#binary_float           = #binary_integer.           ('.' #binary_string.)?           ([Ee] #binary_integer.           ('.' #binary_string.)?)?           - decimal_integer;
+#quaternary_float       = #quaternary_integer.       ('.' #quaternary_string.)?       ([Ee] #quaternary_integer.       ('.' #quaternary_string.)?)?       - quaternary_integer;
+#seximal_float          = #seximal_integer.          ('.' #seximal_string.)?          ([Ee] #seximal_integer.          ('.' #seximal_string.)?)?          - seximal_integer;
+#octal_float            = #octal_integer.            ('.' #octal_string.)?            ([Ee] #octal_integer.            ('.' #octal_string.)?)?            - octal_integer;
+#decimal_float          = #decimal_integer.          ('.' #decimal_string.)?          ([Ee] #decimal_integer.          ('.' #decimal_string.)?)?          - decimal_integer;
+//#dozenal_float          = #dozenal_integer.          ('.' #dozenal_string.)?          ([Ee] #dozenal_integer.          ('.' #dozenal_string.)?)?          - dozenal_integer;
+//#hexidecimal_float      = #hexidecimal_integer.      ('.' #hexidecimal_string.)?      ([Ee] #hexidecimal_integer.      ('.' #hexidecimal_string.)?)?      - hexidecimal_integer;
+//#duotrigesimal_float    = #duotrigesimal_integer.    ('.' #duotrigesimal_string.)?    ([Ee] #duotrigesimal_integer.    ('.' #duotrigesimal_string.)?)?    - duotrigesimal_integer;
+//#hexatridecimal_float   = #hexatridecimal_integer.   ('.' #hexatridecimal_string.)?   ([Ee] #hexatridecimal_integer.   ('.' #hexatridecimal_string.)?)?   - hexatridecimal_integer;
+//#tetrasexagesimal_float = #tetrasexagesimal_integer. ('.' #tetrasexagesimal_string.)? ([Ee] #tetrasexagesimal_integer. ('.' #tetrasexagesimal_string.)?)? - tetrasexagesimal_integer;
 
 #float = #binary_float | #quaternary_float | #seximal_float | #octal_float | #decimal_float
     | #dozenal_float | #hexadecimal_float | #duotrigesimal_float | #hexatridecimal_float | #tetrasexagesimal_float;
 
-//this one will probably be hardcoded into the language
-//#define token = '`', {? any sequence characters except backticks ?}, '`';
+//#define token = '`' (ξ - '`') '`';
 
 
 
@@ -180,7 +121,12 @@
 //there needs to be a step that sanitizes the tokens into the llvm format though, i.e. no underscores, or any conversions that are needed...
 //perhaps there could be a definition for pure integer where anything that is of that type has been sanitized...
 
-//defining addition for integers and floats: //I think somehow whitespace ought to be sanitized before this step
+//defining addition for integers and floats
+//todo->handle nested addition expressions and associativity...
+#integer_addition = #decimal_integer. #ws '+' #ws #decimal_integer. { 
+    llvm.int_add(#0, #1)
+};
+
 #addition = (#integer, {#whitespace}, '+', {#whitespace}, #integer := llvm.int_add(#0, #4))
         | (#float, {#whitespace}, '+', {#whitespace}, #float := llvm.float_add(#0, #4));
 
@@ -271,3 +217,7 @@
 
 #tokanize #unit
 #tokanize #identifier //tell the compiler to match for these
+
+
+#assignment_expr = #identifier #ws '=' #ws #expr;
+//#function_literal_expr = (args...) => #expr | '{' #expr* '}'

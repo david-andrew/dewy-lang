@@ -24,11 +24,20 @@
  * i.e. real_head_idx = head_idx / 2 <=> real_head_idx * 2 + 1 = head_idx
  * i.e. real_body_idx = body_idx / 2 <=> real_body_idx * 2 + 1 = body_idx
  */
-dict* metaparser_heads;     //map of all production nonterminals to a set of corresponding bodies 
-dict* metaparser_bodies;    //map of all production strings to a set of all corresponding heads
-set* metaparser_charsets;   //set of all terminals (i.e. charsets) in all productions
+// dict* metaparser_heads;     //map of all production nonterminals to a set of corresponding bodies 
+// dict* metaparser_bodies;    //map of all production strings to a set of all corresponding heads
+// set* metaparser_charsets;   //set of all terminals (i.e. charsets) in all productions
 
 dict* metaparser_ast_cache; //map from metaast to identifiers for the sentence that matches that ast
+
+// vect* metaparser_heads;
+// vect* metaparser_bodies;
+
+set* metaparser_symbols;
+set* metaparser_bodies;
+vect* metaparser_production_heads;
+vect* metaparser_production_bodies;
+
 
 
 /**
@@ -36,9 +45,11 @@ dict* metaparser_ast_cache; //map from metaast to identifiers for the sentence t
  */
 void initialize_metaparser()
 {
-    metaparser_heads = new_dict();
-    metaparser_bodies = new_dict();
-    metaparser_charsets = new_set();
+    // metaparser_heads = new_dict();
+    // metaparser_bodies = new_dict();
+    // metaparser_charsets = new_set();
+    // metaparser_heads = new_vect();
+    // metaparser_bodies = new_vect();
 }
 
 
@@ -47,9 +58,11 @@ void initialize_metaparser()
  */
 void release_metaparser()
 {
-    dict_free(metaparser_heads);
-    dict_free(metaparser_bodies);
-    set_free(metaparser_charsets);
+    // dict_free(metaparser_heads);
+    // dict_free(metaparser_bodies);
+    // set_free(metaparser_charsets);
+    vect_free(metaparser_heads);
+    vect_free(metaparser_bodies);
 }
 
 
@@ -114,25 +127,25 @@ bool parse_next_meta_rule(vect* tokens)
     //recursively convert to sentences + insert into grammar table
     return metaparser_insert_rule_ast(head, body_ast); 
     return true;
+}
 
-    // //TEMPORARY
-    // if (body_ast != NULL)
-    // {
-    //     obj_print(head);
-    //     printf(" = ");
-    //     metaast_str(body_ast);
-    //     printf("\n");
-    //     metaast_free(body_ast);
-    // }
-    // else
-    // {   
-    //     obj_print(head);
-    //     printf(" body tokens returned NULL\n");
-    //     vect_free(body_tokens);
-    // }
-
-    // obj_free(head);
-    // return true;
+void print_grammar_tables()
+{
+    //print out the meta rule
+    if (vect_size(metaparser_bodies) != vect_size(metaparser_heads)){ printf("ERROR heads and bodies should be the same size!\n"); exit(1); }
+    for (size_t i = 0; i < vect_size(metaparser_bodies); i++)
+    {
+        obj* head = vect_get(metaparser_heads, i);
+        obj_print(head);
+        printf(" = ");
+        vect* sentence = vect_get(metaparser_bodies, i)->data;
+        for (size_t j = 0; j < vect_size(sentence); j++)
+        {
+            obj_print(vect_get(sentence, j));
+            if (j < vect_size(sentence) - 1) { printf(" "); }
+        }
+        printf("\n");
+    }
 }
 
 /**
@@ -262,9 +275,9 @@ vect* metaparser_get_rule_body(vect* tokens)
 //FOR NOW WE'LL JUST PRINT OUT WHAT WE WOULD DO...
 obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
 {
-    //list of sentences for this rule
-    vect* heads = new_vect();
-    vect* bodies = new_vect();
+    //rename for easier use
+    vect* heads = metaparser_heads;
+    vect* bodies = metaparser_bodies;
     
     // //check if an equivalent ast has already been inserted into the grammar table
     // obj* body_ast_obj = new_metaast_obj(body_ast);
@@ -347,14 +360,9 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
             if (node->count == 0 || (node->count == 1 && body_ast->type == metaast_star))
             {
                 //simple star
-                //#A* => 
-                //(#A)0* =>
-                //(#A)1* =>
-                //(#A)0+ =>
-                //  #A 
+                //#A* | (#A)0* | (#A)1* | (#A)0+ =>
                 //  #__0 = #A #__0;
                 //  #__0 = ϵ;
-                
 
                 //#__0 = #A #__0
                 vect* sentence0 = new_vect();
@@ -376,14 +384,12 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
             {
                 //complex plus
                 //(#A)N+ =>
-                //  #A;
                 //  #__0 = #A #__0;
                 //  #__0 = ϵ;
                 //  #__1 = #A #A #A ... #A #__0; //... N times
                 
                 //complex star
                 //(#A)N* =>
-                //  #A;
                 //  #__0 = #A #__0;
                 //  #__0 = ϵ;
                 //  #__1 = #A #A #A ... #A #__0; //... N times
@@ -407,7 +413,7 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
                 }
                 vect_append(sentence2, head1);
 
-
+                //insert productions
                 vect_append(heads, head1);
                 vect_append(bodies, new_vect_obj(sentence0));
 
@@ -417,8 +423,7 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
                 vect_append(heads, head);
                 vect_append(bodies, new_vect_obj(sentence2));
 
-
-                //create complex plus
+                //convert from plus to star by making the last rule optional
                 if (body_ast->type == metaast_star)
                 {
                     vect* sentence3 = new_vect();
@@ -463,6 +468,10 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
             metaast_unary_op_node* node = body_ast->node;
             obj* inner_head = metaparser_get_symbol_or_anonymous(head, body_ast->type, node->inner);
 
+            //#A ? =>
+            //  #__0 = #A
+            //  #__0 = ϵ
+            
             vect* sentence0 = new_vect();
             vect_append(sentence0, inner_head);
 
@@ -479,6 +488,7 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
         }
         case metaast_cat:
         {
+            //#A #B => #A #B
             metaast_sequence_node* node = body_ast->node;
             vect* sentence = new_vect();
             for (size_t i = 0; i < node->size; i++)
@@ -492,13 +502,17 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
         }
         case metaast_or:
         {
+            //#rule = #A | #B =>
+            //  #rule = #A
+            //  #rule = #B
+
             metaast_binary_op_node* node = body_ast->node;
             obj* left_head = metaparser_get_symbol_or_anonymous(head, body_ast->type, node->left);
             obj* right_head = metaparser_get_symbol_or_anonymous(head, body_ast->type, node->right);
 
-            //only insert the heads into the production if they are different from the current head
-            //same head indicates more levels of nested or nodes
-            if (!obj_equals(left_head, head))
+            //only insert the heads into the production if they are not also or nodes
+            //or nodes return the parent head, which we don't want to insert into the body for nested or nodes
+            if (node->left->type != metaast_or)
             {
                 vect* sentence0 = new_vect();
                 vect_append(sentence0, left_head);
@@ -506,7 +520,7 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
                 vect_append(heads, head);
                 vect_append(bodies, new_vect_obj(sentence0));
             }
-            if (!obj_equals(right_head, head))
+            if (node->right->type != metaast_or)
             {
                 vect* sentence1 = new_vect();
                 vect_append(sentence1, right_head);
@@ -544,21 +558,21 @@ obj* metaparser_insert_rule_ast(obj* head, metaast* body_ast)
     // head = metaparser_insert_rule_sentences(head, bodies);
 
 
-    //print out the meta rule
-    if (vect_size(bodies) != vect_size(heads)){ printf("ERROR heads and bodies should be the same size!\n"); exit(1); }
-    for (size_t i = 0; i < vect_size(bodies); i++)
-    {
-        obj* head = vect_get(heads, i);
-        obj_print(head);
-        printf(" = ");
-        vect* sentence = vect_get(bodies, i)->data;
-        for (size_t j = 0; j < vect_size(sentence); j++)
-        {
-            obj_print(vect_get(sentence, j));
-            if (j < vect_size(sentence) - 1) { printf(" "); }
-        }
-        printf("\n");
-    }
+    // //print out the meta rule
+    // if (vect_size(bodies) != vect_size(heads)){ printf("ERROR heads and bodies should be the same size!\n"); exit(1); }
+    // for (size_t i = 0; i < vect_size(bodies); i++)
+    // {
+    //     obj* head = vect_get(heads, i);
+    //     obj_print(head);
+    //     printf(" = ");
+    //     vect* sentence = vect_get(bodies, i)->data;
+    //     for (size_t j = 0; j < vect_size(sentence); j++)
+    //     {
+    //         obj_print(vect_get(sentence, j));
+    //         if (j < vect_size(sentence) - 1) { printf(" "); }
+    //     }
+    //     printf("\n");
+    // }
 
     return head;
 }

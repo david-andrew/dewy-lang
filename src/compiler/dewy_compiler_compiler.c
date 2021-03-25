@@ -179,7 +179,7 @@ void run_parser(char* source, bool verbose)
 {    
     //set up structures for the sequence of scanning/parsing
     initialize_metascanner();
-    // initialize_metaparser();
+    initialize_metaparser();
     vect* tokens = new_vect();
     obj* t = NULL;
 
@@ -211,8 +211,10 @@ void run_parser(char* source, bool verbose)
 
         //free up ast objects
         body_ast == NULL ? vect_free(body_tokens) : metaast_free(body_ast);
-        obj_free(head);
+        // obj_free(head);
     }
+
+    print_grammar_tables();
 
     //print out any unparsed input
     if (metatoken_get_next_real_token(tokens, 0) >= 0)
@@ -227,5 +229,5 @@ void run_parser(char* source, bool verbose)
 
     vect_free(tokens);
     release_metascanner();
-    // release_metaparser();
+    release_metaparser();
 }
