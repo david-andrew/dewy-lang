@@ -697,48 +697,54 @@ uint64_t metaparser_get_eps_body_idx()
 
 
 /**
- * 
+ * Insert the symbol into the symbol set, and return its index.
+ * Symbols already in the set are freed.
  */
 uint64_t metaparser_add_symbol(obj* symbol)
 {
-
+    uint64_t symbol_idx = set_add_return_index(metaparser_symbols, symbol);
+    return symbol_idx;
 }
 
 
 
 /**
- * 
+ * Return the symbol at index i of the symbol set.
  */
 obj* metaparser_get_symbol(uint64_t i)
 {
-
+    return set_get_at_index(metaparser_symbols, i);
 }
 
 
 /**
- * 
+ * Insert the body into the bodies set, and return its index.
+ * Bodies already in the set are freed.
  */
 uint64_t metaparser_add_body(vect* body)
 {
-
+    obj* body_obj = new_vect_obj(body);
+    uint64_t body_idx = set_add_return_index(body_obj);
+    return body_idx;
 }
 
 
 /**
- * 
+ * Return the body at index i of the bodies set.
  */
 vect* metaparser_get_body(uint64_t i)
 {
-
+    return set_get_at_index(metaparser_bodies, i);
 }
 
 
 /**
- * 
+ * Create a production entry for the grammer in the production heads and bodies vectors.
  */
 void metaparser_add_production(uint64_t head_idx, uint64_t body_idx)
 {
-
+    vect_append(metaparser_production_heads, new_uint_obj(head_idx));
+    vect_append(metaparser_production_bodies, new_uint_obj(body_idx));
 }
 
 

@@ -209,6 +209,48 @@ void set_add(set* s, obj* item)
 
 
 /**
+ * Insert the object into the set, and return the index that the object was inserted at.
+ */
+size_t set_add_return_index(set* s, obj* item)
+{
+    size_t index;
+    if (set_contains(s, item))
+    {
+        //get the index of the already inserted object
+        size_t probe = set_get_indices_probe(s, item);
+        index = s->indices[probe];
+
+        //since already inserted, free the duplicate
+        obj_free(item);
+    }
+    else
+    {
+        //normal insertion. object will be at the end of the list of objects
+        index = s->size;
+        set_add(s, item);
+    }
+    return index;
+}
+
+
+/**
+ * Return the object at the i'th index of the set's underlying object list.
+ * Essentially allows the set to act also like an array of objects.
+ */
+obj* set_get_at_index(set* s, size_t i)
+{
+    if (i < set_size(s)) 
+    {
+        return s->entries[i].item;
+    }
+    else
+    {
+        return NULL;
+    }
+}
+
+
+/**
  * check if the set contains the specified item. 
  */
 bool set_contains(set* s, obj* item)
