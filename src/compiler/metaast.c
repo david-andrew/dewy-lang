@@ -568,6 +568,44 @@ metaast* metaast_parse_plus(vect* tokens)
 
 
 /**
+ * Attempt to match a capture group expression from the tokens list.
+ * if matches, tokens will be freed, else returns NULL.
+ * 
+ * #capture = #expr #ws '.';
+ */
+metaast* metaast_parse_capture(vect* tokens)
+{
+    //check ends with a period
+    size_t size = vect_size(tokens);
+    if (size > 1)
+    {
+        metatoken* t0 = vect_get(tokens, size - 1)->data;
+        if (t0->type == meta_period)
+        {
+            //store the tokens for the star expression, in case inner match fails
+            obj* period_token_obj = vect_pop(tokens);
+
+            //attempt to parse the inner expression
+            metaast* inner = NULL;
+            for (size_t i = 0; i < metaast_parse_fn_len(metaast_single_unit_rule_funcs); i++)
+            {
+                if ((inner = metaast_single_unit_rule_funcs[i](tokens)))
+                {
+                    //matched an option expression
+                    obj_free(period_token_obj);
+                    return new_metaast_unary_op_node(metaast_capture, inner);
+                }
+            }
+            
+            //restore the tokens vector with the question mark token
+            vect_push(tokens, period_token_obj);
+        }
+    }
+    return NULL;
+}
+
+
+/**
  * Attempt to parse an option expression from the tokens list.
  * if matches, tokens will be freed, else returns NULL.
  * 
@@ -769,38 +807,6 @@ metaast* metaast_parse_group(vect* tokens)
                 obj_free(vect_pop(tokens));     //free right parenthesis
                 
                 return metaast_parse_expr(tokens);
-            }
-        }
-    }
-    return NULL;
-}
-
-
-/**
- * Attempt to match a capture group expression from the tokens list.
- * if matches, tokens will be freed, else returns NULL.
- * 
- * #capture = '{' #ws #expr #ws '}';
- */
-metaast* metaast_parse_capture(vect* tokens)
-{
-    size_t size = vect_size(tokens);
-    if (size > 2)
-    {
-        metatoken* t = vect_get(tokens, 0)->data;
-        if (t->type == meta_left_bracket)
-        {
-            //if last token is matching parenthesis, then this is a capture group expression
-            if (metaast_find_matching_pair(tokens, meta_left_bracket, 0) == size - 1)
-            {
-                obj_free(vect_dequeue(tokens)); //free left bracket
-                obj_free(vect_pop(tokens));     //free right bracket
-
-                metaast* inner = metaast_parse_expr(tokens);
-                if (inner != NULL)
-                {
-                    return new_metaast_unary_op_node(metaast_capture, inner);
-                }
             }
         }
     }
@@ -1091,7 +1097,8 @@ int metaast_scan_to_end_of_unit(vect* tokens, size_t start_idx)
         if (t->type == meta_dec_number) { idx++; continue; } 
         if (t->type == meta_star) { idx++; continue; } 
         if (t->type == meta_plus) { idx++; continue; } 
-        if (t->type == meta_question_mark) { idx++; continue; } 
+        if (t->type == meta_period) { idx++; continue; }
+        if (t->type == meta_question_mark) { idx++; continue; }
         if (t->type == meta_tilde) { idx++; continue; } 
         
         // non-suffix type encountered
@@ -1132,7 +1139,6 @@ uint64_t metaast_get_type_precedence_level(metaast_type type)
     switch (type)
     {
         /*metaast_group would be level 0*/
-        case metaast_capture:
         /*technically not operators*/
         case metaast_identifier:
         case metaast_charset:
@@ -1143,6 +1149,7 @@ uint64_t metaast_get_type_precedence_level(metaast_type type)
         case metaast_star:
         case metaast_plus:
         case metaast_count:
+        case metaast_capture:
         case metaast_option:
         case metaast_compliment:
             return 1;
@@ -1512,13 +1519,19 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
             
             //check if the inner expression needs to be wrapped in parenthesis.
             //alternatively capture nodes are wrapped in their own brackets
-            wrap_print_alt(metaast_str_inner_check_needs_parenthesis(ast->type, node->inner->type),
-                metaast_str_inner(node->inner, ast->type),
-                wrap_print(ast->type == metaast_capture, metaast_str_inner(node->inner, ast->type), "{", "}"),
+            wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, node->inner->type), 
+                metaast_str_inner(node->inner, ast->type), 
                 "(", ")"
             )
+            
+            // wrap_print_alt(metaast_str_inner_check_needs_parenthesis(ast->type, node->inner->type),
+            //     metaast_str_inner(node->inner, ast->type),
+            //     wrap_print(ast->type == metaast_capture, metaast_str_inner(node->inner, ast->type), "{", "}"),
+            //     "(", ")"
+            // )
             if (ast->type == metaast_option) { printf("?"); }
             else if (ast->type == metaast_compliment) { printf("~"); }
+            else if (ast->type == metaast_capture) { printf("."); }
             break;
         }
         

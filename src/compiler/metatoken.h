@@ -20,6 +20,7 @@ typedef enum
     meta_anyset,
     meta_epsilon,
     meta_ampersand,
+    meta_period,
     meta_star,
     meta_plus,
     meta_question_mark,

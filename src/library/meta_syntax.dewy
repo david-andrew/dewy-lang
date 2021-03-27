@@ -24,6 +24,7 @@
 #char = "'" (ξ - "'" | #escape | #hex) "'";                 // '' single character
 #string = '"' (ξ - '"' | #escape | #hex)2+ '"';             // "" string of 2+ characters
 #string = "'" (ξ - "'" | #escape | #hex)2+ "'";             // '' string of 2+ characters
+#nocasestring = "{" (ξ - [{}] | #escape | #hex)+ "}";       // {} string of 1+ characters, where case is ignored in each character
 #escape = '\\' ξ;                                           // an escape character. Recognized escaped characters are \n \r \t \v \b \f \a. 
                                                             // all others just put the second character literally. Common literals include \\ \' \" \[ \] \-
 
@@ -96,7 +97,6 @@ Precedence levels
 
 //0 - identifier
 0 - group
-0 - capture
 //0 - charset
 //0 - string
 //0 - anyset
@@ -105,6 +105,7 @@ Precedence levels
 
 1 - star
 1 - plus
+1 - capture
 1 - option
 1 - compliment
 1 - count
@@ -121,6 +122,7 @@ Precedence levels
 4 - greater than
 4 - less than
 
+5 - semantic (i.e. `=>`)
 
 
 #what about restrictions / disambiguation filters?

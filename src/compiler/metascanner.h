@@ -51,6 +51,7 @@ obj* match_meta_escape(char** src);
 obj* match_meta_charset_char(char** src);
 obj* match_meta_epsilon(char** src);
 obj* match_meta_ampersand(char** src);
+obj* match_meta_period(char** src);
 obj* match_meta_star(char** src);
 obj* match_meta_plus(char** src);
 obj* match_meta_question_mark(char** src);

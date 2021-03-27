@@ -36,6 +36,7 @@ metascan_fn rule_funcs[] = {
     match_meta_dec_number,
     match_meta_anyset,
     match_meta_ampersand,
+    match_meta_period,
     match_meta_star,
     match_meta_plus,
     match_meta_question_mark,
@@ -546,6 +547,17 @@ obj* match_meta_epsilon(char** src)
 obj* match_meta_ampersand(char** src)
 {
     return *src[0] == '&' ? new_metatoken_obj(meta_ampersand, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
+}
+
+
+/**
+ * Match for a period '.' used to indicate capture of a rule.
+ * 
+ * #period = '.';
+ */
+obj* match_meta_period(char** src)
+{
+    return *src[0] == '.' ? new_metatoken_obj(meta_period, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 

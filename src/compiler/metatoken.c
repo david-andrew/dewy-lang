@@ -163,6 +163,7 @@ void metatoken_str(metatoken* t)
         case meta_dec_number:
         case meta_charset_char:
         case meta_ampersand:
+        case meta_period:
         case meta_star:
         case meta_plus:
         case meta_question_mark:
@@ -213,6 +214,7 @@ void metatoken_repr(metatoken* t)
         printenum(meta_anyset)
         printenum(meta_epsilon)
         printenum(meta_ampersand)
+        printenum(meta_period)
         printenum(meta_star)
         printenum(meta_plus)
         printenum(meta_question_mark)
