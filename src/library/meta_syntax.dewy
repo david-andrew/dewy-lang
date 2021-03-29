@@ -22,9 +22,9 @@
 #group = '(' #ws #expr #ws ')';                             // group together/force precedence
 #char = '"' (ξ - '"' | #escape | #hex) '"';                 // "" single character
 #char = "'" (ξ - "'" | #escape | #hex) "'";                 // '' single character
+#caseless_char = "{" (ξ - [{}] | #escape | #hex) "}";       // {} single character where case is ignored
 #string = '"' (ξ - '"' | #escape | #hex)2+ '"';             // "" string of 2+ characters
 #string = "'" (ξ - "'" | #escape | #hex)2+ "'";             // '' string of 2+ characters
-#caseless_char = "{" (ξ - [{}] | #escape | #hex) "}";       // {} single character where case is ignored
 #caseless_string = "{" (ξ - [{}] | #escape | #hex)2+ "}";   // {} string of 2+ characters where case is ignored for each character
 #escape = '\\' ξ;                                           // an escape character. Recognized escaped characters are \n \r \t \v \b \f \a. 
                                                             // all others just put the second character literally. Common literals include \\ \' \" \[ \] \-
@@ -53,8 +53,8 @@
 #union = #set #ws '|' #ws #set;                             // union of left and right
 
 //syntax constructs
-#set = #anyset | #char | #hex | #charset | #compliment | #diff | #intersect | #union;
-#expr = #eps | #set | #group | #capture | #string | #star | #plus | #option | #count 
+#set = #anyset | #char | #caseless_char | #hex | #charset | #compliment | #diff | #intersect | #union;
+#expr = #eps | #set | #group | #capture | #string | #caseless_string | #star | #plus | #option | #count 
     | #cat | #or | #greaterthan | #lessthan | #reject | #nofollow | #identifier;
 #hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]* / [a-zA-Z0-9~!@#$&_?];
 #rule = #hashtag #ws '=' #ws #expr #ws ';';

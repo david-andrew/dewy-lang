@@ -659,11 +659,19 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         
         //TODO->filters/other extensions of the parser
         case metaast_greaterthan:
+            printf("ERROR: Cannot generate CFG sentence as greater than `>` operator has not yet been implemented\n");
+            break;
         case metaast_lessthan:
+            printf("ERROR: Cannot generate CFG sentence as less than `<` operator has not yet been implemented\n");
+            break;
         case metaast_reject:
+            printf("ERROR: Cannot generate CFG sentence as reject `-` operator has not yet been implemented\n");
+            break;
         case metaast_nofollow:
+            printf("ERROR: Cannot generate CFG sentence as no follow `/` operator has not yet been implemented\n");
+            break;
         case metaast_capture:
-            printf("ERROR: < > - / and {} have not yet been implemented\n");
+            printf("ERROR: Cannot generate CFG sentence as capture `.` operator has not yet been implemented\n");
             break;
 
         //ERROR->should not allow, or come up with semantics for
@@ -671,7 +679,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         //should be an error since this only makes sense for charsets
         case metaast_compliment:
         case metaast_intersect:
-            printf("ERROR: compliment/intersect is only applicable to charsets. There are (currently) no semantics for what compliment means for a regular grammar production");
+            printf("ERROR: compliment/intersect is only applicable to charsets. There are (currently) no semantics for what they mean for a regular grammar production");
             break;
 
     }
