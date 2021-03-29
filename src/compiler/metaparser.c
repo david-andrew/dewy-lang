@@ -395,6 +395,36 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             metaparser_add_production(head_idx, body_idx);
             break;
         }
+        case metaast_caseless:
+        {
+            //crete an anonymous head if it wasn't provided
+            head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
+
+            //create a sentence for the string
+            vect* sentence = new_vect();
+
+            //insert upper and lowercase versions of each character from the string into the sentence
+            metaast_string_node* node = body_ast->node;
+            uint32_t* s = node->string;
+            uint32_t c;
+            while ((c = *s++))
+            {
+                uint32_t upper, lower;
+                unicode_upper_and_lower(c, &upper, &lower);
+                obj* cs_obj = new_charset_obj(NULL);
+                charset_add_char(cs_obj->data, upper);
+                charset_add_char(cs_obj->data, lower);
+                uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
+                vect_append(sentence, new_uint_obj(terminal_idx));
+            }
+            
+            //insert the sentence into the bodies set
+            uint64_t body_idx = metaparser_add_body(sentence);
+
+            //push this sentence to the list of all sentences for this rule
+            metaparser_add_production(head_idx, body_idx);
+            break;
+        }
 
         // Recursive rules that need to compute the nested sentences
         case metaast_star:

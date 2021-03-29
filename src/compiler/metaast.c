@@ -23,7 +23,9 @@ bool metaast_parse_error_occurred = false;
 metaast_parse_fn metaast_all_rule_funcs[] = {
     metaast_parse_eps,
     metaast_parse_char,
+    metaast_parse_caseless_char,
     metaast_parse_string,
+    metaast_parse_caseless_string,
     metaast_parse_charset,
     metaast_parse_anyset,
     metaast_parse_hex,
@@ -50,7 +52,9 @@ metaast_parse_fn metaast_all_rule_funcs[] = {
 metaast_parse_fn metaast_single_unit_rule_funcs[] = {
     metaast_parse_eps,
     metaast_parse_char,
+    metaast_parse_caseless_char,
     metaast_parse_string,
+    metaast_parse_caseless_string,
     metaast_parse_charset,
     metaast_parse_anyset,
     metaast_parse_hex,
@@ -263,6 +267,44 @@ metaast* metaast_parse_char(vect* tokens)
 
 
 /**
+ * Attempt to parse a caseless char (i.e. length 1 caseless) from the tokens list.
+ * If matches, tokens will be freed, else returns NULL.
+ * 
+ * #caseless_char = "{" (ξ - [{}] | #escape | #hex) "}";
+ */
+metaast* metaast_parse_caseless_char(vect* tokens)
+{
+    if (vect_size(tokens) == 3)
+    {
+        metatoken* t0 = vect_get(tokens, 0)->data; 
+        metatoken* t1 = vect_get(tokens, 1)->data; 
+        metatoken* t2 = vect_get(tokens, 2)->data;
+        if (t0->type == meta_left_bracket && t2->type == meta_right_bracket)
+        {
+            if (t1->type == meta_char || t1->type == meta_escape || t1->type == meta_hex_number)
+            {
+                //get the codepoint saved in the token
+                uint32_t c = metatoken_extract_char_from_token(t1);
+
+                //get the uppercase and lowercase for the codepoint
+                //TODO->should probably cache upper and lower?
+                uint32_t lower, upper;
+                unicode_upper_and_lower(c, &upper, &lower);
+
+                //create a charset containing upper and lower
+                charset* cs = new_charset();
+                charset_add_char(cs, upper);
+                charset_add_char(cs, lower);
+                vect_free(tokens);
+                return new_metaast_charset_node(metaast_charset, cs);
+            }
+        }
+    }
+    return NULL;
+}
+
+
+/**
  * Attempt to parse a string from the tokens list.
  * If matches, tokens will be freed, else returns NULL.
  * 
@@ -313,6 +355,55 @@ metaast* metaast_parse_string(vect* tokens)
     return NULL;
 }
 
+
+/**
+ * Attempt to parse a caseless string from the tokens list.
+ * If matches, tokens will be freed, else returns NULL.
+ * 
+ * 
+ */
+metaast* metaast_parse_caseless_string(vect* tokens)
+{
+    const size_t size = vect_size(tokens);
+    if (size >= 4) //strings must have at least 2 inner characters (and 2 quotes)
+    {
+        //if starts & ends with a quote
+        metatoken* t0 = vect_get(tokens, 0)->data;
+        metatoken* tf = vect_get(tokens, size-1)->data;
+        if (t0->type == meta_left_bracket && tf->type == meta_right_bracket)
+        {
+            //iterate through the characters in the string (stopping before the last is a quote)
+            for (size_t i = 1; i < size - 1; i++)
+            {
+                //strings may only contain chars, hex numbers and escapes
+                metatoken* t = vect_get(tokens, i)->data;
+                if (t->type != meta_char && t->type != meta_hex_number && t->type != meta_escape)
+                {
+                    return NULL;
+                }
+            }
+
+            //length of string is vect size - 2 quote tokens
+            const size_t len = size - 2;
+
+            //allocate room for all characters + null terminater
+            uint32_t* string = malloc((len + 1) * sizeof(uint32_t));
+            
+            //insert each char from the tokens list into the string
+            for (size_t i = 0; i < len; i++)
+            {
+                metatoken* t = vect_get(tokens, i+1)->data;
+                uint32_t c = metatoken_extract_char_from_token(t);
+                string[i] = c;
+            }
+            string[len] = 0; //null terminator at the end
+            
+            vect_free(tokens);
+            return new_metaast_string_node(metaast_caseless, string);
+        }
+    }
+    return NULL;
+}
 
 /**
  * Attempt to parse a charset from the tokens list.
@@ -1143,6 +1234,7 @@ uint64_t metaast_get_type_precedence_level(metaast_type type)
         case metaast_identifier:
         case metaast_charset:
         case metaast_string:
+        case metaast_caseless:
         case metaast_eps:
             return 0;
 
@@ -1181,6 +1273,7 @@ void metaast_free(metaast* ast)
         // free specific inner components of nodes
         
         case metaast_string:
+        case metaast_caseless:
         case metaast_identifier:
         {
             metaast_string_node* node = ast->node;
@@ -1287,6 +1380,7 @@ bool metaast_fold_charsets(metaast** ast_ptr)
         //single expressions that can't be reduced
         case metaast_eps:
         case metaast_string:
+        case metaast_caseless:
         case metaast_identifier:
         case metaast_charset:
             return false;
@@ -1410,6 +1504,7 @@ void metaast_type_repr(metaast_type type)
         printenum(metaast_eps)
         printenum(metaast_capture)
         printenum(metaast_string)
+        printenum(metaast_caseless)
         printenum(metaast_star)
         printenum(metaast_plus)
         printenum(metaast_option)
@@ -1459,11 +1554,19 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
     {
 
         case metaast_string:
+        case metaast_caseless:
         case metaast_identifier:
         {
             metaast_string_node* node = ast->node;
-            //if string, wrap in quotes, else print without
-            wrap_print(ast->type == metaast_string, ustring_str(node->string), "\"", "\"")
+            //if string, wrap in quotes, else if caseless, wrap in brackets, else print without
+            wrap_print_alt(ast->type == metaast_string,
+                ustring_str(node->string),
+                wrap_print(ast->type == metaast_caseless, ustring_str(node->string), "{", "}"),
+                "\"", "\""
+            )
+            // char* left = ast->type == metaast_string ? "\"" : "{";
+            // char* right = ast->type == metaast_string ? "\"" : "}";
+            // wrap_print(ast->type == metaast_string, ustring_str(node->string), left, right)
             break;
         }
         
@@ -1633,7 +1736,8 @@ void metaast_repr_inner(metaast* ast, int level)
     switch (ast->type)
     {
 
-        case metaast_string: 
+        case metaast_string:
+        case metaast_caseless:
         case metaast_identifier:
         {
             metaast_string_node* node = ast->node;

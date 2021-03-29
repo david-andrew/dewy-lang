@@ -56,6 +56,7 @@ typedef enum {
     metaast_eps,
     metaast_capture,
     metaast_string,
+    metaast_caseless,
     metaast_star,
     metaast_plus,
     metaast_option,
@@ -143,7 +144,9 @@ void metaast_parse_error();
 metaast* metaast_parse_expr_restricted(vect* tokens, metaast_parse_fn skip);
 metaast* metaast_parse_eps(vect* tokens);
 metaast* metaast_parse_char(vect* tokens);
+metaast* metaast_parse_caseless_char(vect* tokens);
 metaast* metaast_parse_string(vect* tokens);
+metaast* metaast_parse_caseless_string(vect* tokens);
 metaast* metaast_parse_charset(vect* tokens);
 metaast* metaast_parse_anyset(vect* tokens);
 metaast* metaast_parse_hex(vect* tokens);

@@ -4,7 +4,7 @@
 
 //Most of these should be purely character sets...
 
-#eps = 'ϵ' | '\\e' | "''" | '""';                           // ϵ, \e, '', or "" indicates empty element, i.e. nullable
+#eps = 'ϵ' | '\\e' | "''" | '""' | "{}";                    // ϵ, \e, '', "", or {} indicates empty element, i.e. nullable
 //#wschar = [\x9-\xD\x20\x85\xA0\x1680\x2000-\x200A\x2028\x2029\x202F\x205F\x3000]; //ascii + unicode whitespace chars
 #wschar = [\x9-\xD\x20];                                    // ascii whitespace characters.
 #line_comment = '/' '/' (ξ - '\n')* '\n';                   // single line comment
@@ -24,7 +24,8 @@
 #char = "'" (ξ - "'" | #escape | #hex) "'";                 // '' single character
 #string = '"' (ξ - '"' | #escape | #hex)2+ '"';             // "" string of 2+ characters
 #string = "'" (ξ - "'" | #escape | #hex)2+ "'";             // '' string of 2+ characters
-#nocasestring = "{" (ξ - [{}] | #escape | #hex)+ "}";       // {} string of 1+ characters, where case is ignored in each character
+#caseless_char = "{" (ξ - [{}] | #escape | #hex) "}";       // {} single character where case is ignored
+#caseless_string = "{" (ξ - [{}] | #escape | #hex)2+ "}";   // {} string of 2+ characters where case is ignored for each character
 #escape = '\\' ξ;                                           // an escape character. Recognized escaped characters are \n \r \t \v \b \f \a. 
                                                             // all others just put the second character literally. Common literals include \\ \' \" \[ \] \-
 

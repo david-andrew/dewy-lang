@@ -88,6 +88,16 @@ metascan_fn double_quote_string_funcs[] = {
     match_meta_double_quote,
 };
 
+//rules for the body of a caseless {} string
+metascan_fn caseless_string_funcs[] = {
+    match_line_comment,
+    match_block_comment,
+    match_meta_hex_number,
+    match_meta_escape,
+    match_meta_caseless_char,
+    match_meta_right_bracket,
+};
+
 //rules to scan inside meta function calls
 metascan_fn metafunc_body_funcs[] = {
     //TBD what exactly is allowed inside of a meta function call. for now we are only allowing meta-identifiers
@@ -246,44 +256,62 @@ bool is_charset_char(uint32_t c)
  */
 obj* scan(char** src)
 {
-    //macro to get the length of each of the function arrays
-    #define len(A) sizeof(A) / sizeof(metascan_fn)
-
     if (*src) //check if any string left to scan
     {
         //for each possible state, scan for the corresponding tokens
         metascanner_state state = peek_metascanner_state();
         obj* t;
 
-        if (state == scan_root)
-            for (size_t i = 0; i < len(root_funcs); i++)
-                if ((t = root_funcs[i](src)))
-                    return t;
-        
-        if (state == scan_meta_rule)
-            for (size_t i = 0; i < len(rule_funcs); i++)
-                if ((t = rule_funcs[i](src))) 
-                    return t;
+        //macro to get the length of each of the function arrays
+        #define len(A) sizeof(A) / sizeof(metascan_fn)
+        #define scan_for(scan_state, funcs)                 \
+            if (state == scan_state)                        \
+                for (size_t i = 0; i < len(funcs); i++)     \
+                    if ((t = funcs[i](src)))                \
+                        return t;
 
-        if (state == scan_charset_body)
-            for (size_t i = 0; i < len(charset_funcs); i++)
-                if ((t = charset_funcs[i](src))) 
-                    return t;
-                
-        if (state == scan_single_quote_string_body)
-            for (size_t i = 0; i < len(single_quote_string_funcs); i++)
-                if ((t = single_quote_string_funcs[i](src)))
-                    return t;
+        scan_for(scan_root, root_funcs)
+        scan_for(scan_meta_rule, rule_funcs)
+        scan_for(scan_charset_body, charset_funcs)
+        scan_for(scan_single_quote_string_body, single_quote_string_funcs)
+        scan_for(scan_double_quote_string_body, double_quote_string_funcs)
+        scan_for(scan_caseless_string_body, caseless_string_funcs)
+        scan_for(scan_metafunc_body, metafunc_body_funcs)
+
+        // if (state == scan_root)
+        //     for (size_t i = 0; i < len(root_funcs); i++)
+        //         if ((t = root_funcs[i](src)))
+        //             return t;
         
-        if (state == scan_double_quote_string_body)
-            for (size_t i = 0; i < len(double_quote_string_funcs); i++)
-                if ((t = double_quote_string_funcs[i](src)))
-                    return t;
+        // if (state == scan_meta_rule)
+        //     for (size_t i = 0; i < len(rule_funcs); i++)
+        //         if ((t = rule_funcs[i](src))) 
+        //             return t;
+
+        // if (state == scan_charset_body)
+        //     for (size_t i = 0; i < len(charset_funcs); i++)
+        //         if ((t = charset_funcs[i](src))) 
+        //             return t;
+                
+        // if (state == scan_single_quote_string_body)
+        //     for (size_t i = 0; i < len(single_quote_string_funcs); i++)
+        //         if ((t = single_quote_string_funcs[i](src)))
+        //             return t;
+        
+        // if (state == scan_double_quote_string_body)
+        //     for (size_t i = 0; i < len(double_quote_string_funcs); i++)
+        //         if ((t = double_quote_string_funcs[i](src)))
+        //             return t;
+
+        // if (state == scan_caseless_string_body)
+        //     for (size_t i = 0; i < len(caseless_string_funcs); i++)
+        //         if ((t = caseless_string_funcs[i](src)))
+        //             return t;
        
-        if (state == scan_metafunc_body)
-            for (size_t i = 0; i < len(metafunc_body_funcs); i++)
-                if ((t = metafunc_body_funcs[i](src)))
-                    return t;
+        // if (state == scan_metafunc_body)
+        //     for (size_t i = 0; i < len(metafunc_body_funcs); i++)
+        //         if ((t = metafunc_body_funcs[i](src)))
+        //             return t;
 
         //Scan until run out of whitespace and comments.
         //if all peek functions fail, that means the next char should be non-ignorable
@@ -414,6 +442,23 @@ obj* match_meta_double_quote_char(char** src)
 
 
 /**
+ * Match a single char contained in a caseless string.
+ * Implicitely don't match for comments or escapes by matching those rules first.
+ * 
+ * #caseless_char = \U - [{}];
+ */
+obj* match_meta_caseless_char(char** src)
+{
+    //any single char except for [{}]. Also implicitly exclude '\\' "//" "/{"
+    if ((*src)[0] != 0 && (*src)[0] != '{' && (*src)[0] != '}')
+    {
+        obj* t = new_metatoken_obj(meta_char, ustring_from_unicode(eat_utf8(src)));
+        return t;
+    }
+    return NULL;
+}
+
+/**
  * Hex number literal.
  * 
  * #hex = '\\' [uUxX] [0-9a-fA-F]+;
@@ -529,7 +574,8 @@ obj* match_meta_epsilon(char** src)
     }
     else if (((*src)[0] == '\\' && (*src)[1] == 'e')
           || ((*src)[0] == '"'  && (*src)[1] == '"')
-          || ((*src)[0] == '\'' && (*src)[1] == '\''))
+          || ((*src)[0] == '\'' && (*src)[1] == '\'')
+          || ((*src)[0] == '{'  && (*src)[1] == '}'))
     {
         obj* t = new_metatoken_obj(meta_epsilon, ustring_charstar_substr(*src, 0, 1));
         *src += 2;
@@ -722,7 +768,13 @@ obj* match_meta_right_parenthesis(char** src)
  */
 obj* match_meta_left_bracket(char** src) 
 {
-    return *src[0] == '{' ? new_metatoken_obj(meta_left_bracket, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
+    obj* t = *src[0] == '{' ? new_metatoken_obj(meta_left_bracket, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
+    if (t != NULL)
+    {
+        metascanner_state state = peek_metascanner_state();
+        if (state == scan_meta_rule) { push_metascanner_state(scan_caseless_string_body); }
+    }
+    return t;
 }
 
 
@@ -733,7 +785,13 @@ obj* match_meta_left_bracket(char** src)
  */
 obj* match_meta_right_bracket(char** src) 
 {
-    return *src[0] == '}' ? new_metatoken_obj(meta_right_bracket, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
+    obj* t = *src[0] == '}' ? new_metatoken_obj(meta_right_bracket, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
+    if (t != NULL)
+    {
+        metascanner_state state = peek_metascanner_state();
+        if (state == scan_caseless_string_body) { pop_metascanner_state(); }
+    }
+    return t;
 }
 
 

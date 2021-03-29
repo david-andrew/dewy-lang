@@ -32,6 +32,8 @@ void ustring_str(uint32_t* s);
 uint32_t escape_to_unicode(uint32_t c);
 uint32_t unicode_to_escape(uint32_t c);
 bool is_unicode_escape(uint32_t c);
-
+uint32_t unicode_to_upper(uint32_t c);
+uint32_t unicode_to_lower(uint32_t c);
+bool unicode_upper_and_lower(uint32_t c, uint32_t* uppercase, uint32_t* lowercase);
 
 #endif

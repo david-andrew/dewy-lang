@@ -12,6 +12,7 @@ typedef enum
     scan_charset_body,
     scan_single_quote_string_body,
     scan_double_quote_string_body,
+    scan_caseless_string_body,
     scan_metafunc_body,
     scan_peek,
 } metascanner_state;
@@ -44,6 +45,7 @@ obj* match_meta_single_quote(char** src);
 obj* match_meta_single_quote_char(char** src);
 obj* match_meta_double_quote(char** src);
 obj* match_meta_double_quote_char(char** src);
+obj* match_meta_caseless_char(char** src);
 obj* match_meta_hex_number(char** src);
 obj* match_meta_dec_number(char** src);
 obj* match_meta_anyset(char** src);
