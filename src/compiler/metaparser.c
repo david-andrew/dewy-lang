@@ -583,6 +583,24 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
                         }
                         break;
                     }
+                    
+                    case metaast_caseless: 
+                    { 
+                        metaast_string_node* inner_i_node = inner_i_ast->node;
+                        uint32_t* s = inner_i_node->string;
+                        uint32_t c;
+                        while ((c = *s++))
+                        {                            
+                            uint32_t upper, lower;
+                            unicode_upper_and_lower(c, &upper, &lower);
+                            obj* cs_obj = new_charset_obj(new_charset());
+                            charset_add_char(cs_obj->data, upper);
+                            charset_add_char(cs_obj->data, lower);                            
+                            uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
+                            vect_append(sentence, new_uint_obj(terminal_idx));
+                        }
+                        break;
+                    }
 
                     //insert the charset into the parent sentence
                     case metaast_charset: 
