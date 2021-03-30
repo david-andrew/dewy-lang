@@ -202,7 +202,12 @@ void dict_set(dict* d, obj* key, obj* value)
     
     if (index != EMPTY) //key already found, so overwrite entry
     {
-        d->entries[index].key = key;
+        //free one of the duplicate key, and the old entry
+        //newest key is freed to minimize fragmentation?
+        obj_free(key);
+        obj_free(d->entries[index].value);
+
+        //insert the new object into the entry
         d->entries[index].value = value;
     } 
     else //create a new entry for the key + object 
@@ -225,6 +230,19 @@ bool dict_contains(dict* d, obj* key)
 }
 
 
+/**
+ * Convenience method to check if a dict contains a value with a uint64_t key
+ * Minimizes allocations by using stack allocated obj instead of obj*
+ * since key will be thrown away.
+ */
+bool dict_contains_uint_key(dict* d, uint64_t u)
+{
+    obj key = (obj){.type=UInteger_t, .data=&u};
+    bool result = dict_contains(d, &key);
+    return result;
+}
+
+
 //TODO->I think this has a bug where a full dictionary will cause an infinite loop if the key is not in the dictionary.
 //basically it should be guaranteed that dictionaries will never be full!
 obj* dict_get(dict* d, obj* key)
@@ -235,13 +253,14 @@ obj* dict_get(dict* d, obj* key)
 
 
 /**
- *  convenience method for easily accessing a dict value with a uint64_t key
+ * Convenience method for easily accessing a dict value with a uint64_t key
+ * Minimized allocations by using a stack allocated obj/uint instead of obj* since
+ * key will be thrown away.
  */
 obj* dict_get_uint_key(dict* d, uint64_t u)
 {
-    obj* key = new_uint_obj(u);
-    obj* value = dict_get(d, key);
-    obj_free(key);
+    obj key = (obj){.type=UInteger_t, .data=&u};
+    obj* value = dict_get(d, &key);
     return value;
 }
 

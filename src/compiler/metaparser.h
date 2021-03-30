@@ -9,6 +9,7 @@ uint64_t metaparser_get_anonymous_rule_head();
 void initialize_metaparser();
 void release_metaparser();
 bool parse_next_meta_rule(vect* tokens);
+void print_grammar_tables_raw();
 void print_grammar_tables();
 bool metaparser_is_valid_rule(vect* tokens);
 obj* metaparser_get_rule_head(vect* tokens);

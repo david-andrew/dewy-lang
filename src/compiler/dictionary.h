@@ -40,6 +40,7 @@ size_t dict_get_indices_probe(dict* d, obj* key);
 size_t dict_get_entries_index(dict*d, obj* key);
 void dict_set(dict* d, obj* key, obj* value);
 bool dict_contains(dict* d, obj* key);
+bool dict_contains_uint_key(dict* d, uint64_t u);
 obj* dict_get(dict* d, obj* key);
 obj* dict_get_uint_key(dict* d, uint64_t u);
 obj* dict_get_codepoint_key(dict* d, uint32_t c);

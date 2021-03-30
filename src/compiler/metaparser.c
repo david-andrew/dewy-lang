@@ -21,24 +21,16 @@
 
 /**
  * Global data structures used to manage all meta grammar rules.
- * body vects are a sequence of uint indices refering to either heads or charsets.
- * heads are referred to by odd indices, while charsets are referred to by even indices.
- * i.e. real_head_idx = head_idx / 2 <=> real_head_idx * 2 + 1 = head_idx
- * i.e. real_body_idx = body_idx / 2 <=> real_body_idx * 2 + 1 = body_idx
+ * Symbols are either an identifier or a charset. 
+ * Bodies are vects of uint indices indicating symbols from the symbols list.
+ * Productions are a map from the head index (in the symbols list) to a list of 
+ * indices indicating which body vectors apply to that head.
  */
-// dict* metaparser_heads;     //map of all production nonterminals to a set of corresponding bodies 
-// dict* metaparser_bodies;    //map of all production strings to a set of all corresponding heads
-// set* metaparser_charsets;   //set of all terminals (i.e. charsets) in all productions
+set* metaparser_symbols;        //list of all symbols used in production bodies.
+set* metaparser_bodies;         //list of each production body.
+dict* metaparser_productions;   //map from head to production bodies.
 
-dict* metaparser_ast_cache; //map from metaast to identifiers for the sentence that matches that ast
-
-// vect* metaparser_heads;
-// vect* metaparser_bodies;
-
-set* metaparser_symbols;
-set* metaparser_bodies;
-vect* metaparser_production_heads;
-vect* metaparser_production_bodies;
+//convenience variable for the frequently used epsilon production body.
 uint64_t metaparser_eps_body_idx = NULL_SYMBOL_INDEX;
 
 
@@ -50,8 +42,7 @@ void initialize_metaparser()
 {
     metaparser_symbols = new_set();
     metaparser_bodies = new_set();
-    metaparser_production_heads = new_vect();
-    metaparser_production_bodies = new_vect();
+    metaparser_productions = new_dict();
 }
 
 
@@ -62,8 +53,7 @@ void release_metaparser()
 {
     set_free(metaparser_symbols);
     set_free(metaparser_bodies);
-    vect_free(metaparser_production_heads);
-    vect_free(metaparser_production_bodies);
+    dict_free(metaparser_productions);
 }
 
 
@@ -137,46 +127,68 @@ bool parse_next_meta_rule(vect* tokens)
 
 
 /**
- * 
+ * Print out the raw contents of the grammar tables. 
+ * i.e. prints the symbols list with each symbols indices,
+ * Prints the bodies list with each body containing indices of symbols
+ * Prints the productions dictionary which contains head symbol indices
+ * pointing to the list of indices of bodies for that head.
  */
-//TODO->convert this to indexing into the symbols & bodies sets
-void print_grammar_tables()
+void print_grammar_tables_raw()
 {
-    // //print out all symbols
-    // printf("symbols:\n"); 
-    // for (uint64_t i = 0; i < set_size(metaparser_symbols); i++)
-    // {
-    //     printf("%"PRIu64": ", i); obj_print(metaparser_get_symbol(i)); printf("\n");
-    // }
-
-    //print out the table of rules TODO->have this directly print out the whole head/production properly instead of printing out the indices
-    if (vect_size(metaparser_production_bodies) != vect_size(metaparser_production_heads)){ printf("ERROR heads and bodies should be the same size!\n"); exit(1); }
-    for (size_t i = 0; i < vect_size(metaparser_production_bodies); i++)
+    //print out all symbols, bodies
+    printf("symbols:\n"); 
+    for (uint64_t i = 0; i < set_size(metaparser_symbols); i++)
     {
-        uint64_t* head_idx = vect_get(metaparser_production_heads, i)->data;
+        printf("%"PRIu64": ", i); obj_print(metaparser_get_symbol(i)); printf("\n");
+    }
+    printf("\nbodies:\n");
+    for (uint64_t i = 0; i < set_size(metaparser_bodies); i++)
+    {
+        printf("%"PRIu64": ", i); vect_str(metaparser_get_body(i)); printf("\n");
+    }
+    printf("\nproductions:\n");
+    dict_str(metaparser_productions);
+}
+
+/**
+ * Print out the contents of the grammar tables, converting indices to their corresponding values
+ */
+void print_grammar_tables()
+{       
+    for (size_t i = 0; i < dict_size(metaparser_productions); i++)
+    {
+        //get head string
+        uint64_t* head_idx = metaparser_productions->entries[i].key->data;
         obj* head = metaparser_get_symbol(*head_idx);
 
-        obj_print(head);
-        printf(" = ");
-
-        uint64_t* body_idx = vect_get(metaparser_production_bodies, i)->data;
-        vect* sentence = metaparser_get_body(*body_idx);
-
-        //length 0 sentence is epsilon
-        if (vect_size(sentence) == 0)
+        //get bodies indices set, and print a production line for each body 
+        set* bodies = metaparser_productions->entries[i].value->data;
+        for (size_t j = 0; j < set_size(bodies); j++)
         {
-            printf("ϵ");
+            //print head
+            obj_print(head);
+            printf(" = ");
+            
+            //get the body for this production
+            uint64_t* body_idx = bodies->entries[j].item->data;
+            vect* sentence = metaparser_get_body(*body_idx);
+            
+            //print out the contents of this body
+            if (vect_size(sentence) == 0) 
+            {
+                //length 0 sentence is just epsilon
+                printf("ϵ");
+            }
+            for (size_t k = 0; k < vect_size(sentence); k++)
+            {
+                //normal print out each symbol in the sentence
+                uint64_t* symbol_idx = vect_get(sentence, k)->data;
+                obj* symbol = metaparser_get_symbol(*symbol_idx);
+                obj_print(symbol);
+                if (k < vect_size(sentence) - 1) { printf(" "); }
+            }
+            printf("\n");
         }
-
-        //normal print out each symbol in the sentence
-        for (size_t j = 0; j < vect_size(sentence); j++)
-        {
-            uint64_t* symbol_idx = vect_get(sentence, j)->data;
-            obj* symbol = metaparser_get_symbol(*symbol_idx);
-            obj_print(symbol);
-            if (j < vect_size(sentence) - 1) { printf(" "); }
-        }
-        printf("\n");
     }
 }
 
@@ -814,8 +826,23 @@ vect* metaparser_get_body(uint64_t i)
  */
 void metaparser_add_production(uint64_t head_idx, uint64_t body_idx)
 {
-    vect_append(metaparser_production_heads, new_uint_obj(head_idx));
-    vect_append(metaparser_production_bodies, new_uint_obj(body_idx));
+    //create a new entry containing the head if it doesn't exist
+    if (!dict_contains_uint_key(metaparser_productions, head_idx))
+    {
+        dict_set(metaparser_productions, new_uint_obj(head_idx), new_set_obj(NULL));
+    }
+
+    //get the set containing the list of bodies for this head
+    obj* bodies_obj = dict_get_uint_key(metaparser_productions, head_idx);
+    if (bodies_obj->type != Set_t)
+    {
+        printf("ERROR: metaparser_productions should only point to vectors. Instead found type %d\n", bodies_obj->type);
+        exit(1);
+    }
+    set* bodies = bodies_obj->data;
+
+    //insert the production body into the set
+    set_add(bodies, new_uint_obj(body_idx));
 }
 
 
