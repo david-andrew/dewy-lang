@@ -9,9 +9,6 @@
 #include "metascanner.h"
 
 
-#define AUGMENT_CHAR 0x200000 //first invalid codepoint (2^21)
-
-
 /**
  * Create a new unicode string object from an allocated uint32_t*.
  * free() will be called on the string at the end of its life.

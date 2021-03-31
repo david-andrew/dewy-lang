@@ -2,6 +2,7 @@
 #define METAPARSER_H
 
 #include "vector.h"
+#include "set.h"
 #include "metaast.h"
 
 
@@ -23,8 +24,10 @@ bool metaparser_insert_rule_sentences(obj* head, vect* body);
 uint64_t metaparser_get_eps_body_idx();
 uint64_t metaparser_add_symbol(obj* symbol);
 obj* metaparser_get_symbol(uint64_t i);
+bool metaparser_is_symbol_terminal(uint64_t symbol_idx);
 uint64_t metaparser_add_body(vect* body);
 vect* metaparser_get_body(uint64_t i);
 void metaparser_add_production(uint64_t head_idx, uint64_t body_idx);
+set* metaparser_get_production_bodies(uint64_t head_idx);
 
 #endif

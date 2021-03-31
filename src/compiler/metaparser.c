@@ -800,6 +800,17 @@ obj* metaparser_get_symbol(uint64_t i)
 
 
 /**
+ * Determine whether the symbol at the given index is a terminal or non-terminal.
+ * Charsets are terminals, while identifiers (UnicodeString_t) are non-terminals.
+ */
+bool metaparser_is_symbol_terminal(uint64_t symbol_idx)
+{
+    obj* symbol = metaparser_get_symbol(symbol_idx);
+    return symbol->type == CharSet_t;
+}
+
+
+/**
  * Insert the body into the bodies set, and return its index.
  * Bodies already in the set are freed.
  */
@@ -843,6 +854,22 @@ void metaparser_add_production(uint64_t head_idx, uint64_t body_idx)
 
     //insert the production body into the set
     set_add(bodies, new_uint_obj(body_idx));
+}
+
+
+/**
+ * Return the set of production bodies for the given head.
+ */
+set* metaparser_get_production_bodies(uint64_t head_idx)
+{
+    obj* bodies_obj = dict_get_uint_key(metaparser_productions, head_idx);
+    if (bodies_obj == NULL)
+    {
+        //print out the head symbol too...
+        printf("ERROR: no production bodies exist for head "); obj_print(metaparser_get_symbol(head_idx)); printf("\n");
+        return NULL;
+    }
+    return bodies_obj->data;
 }
 
 

@@ -11,8 +11,6 @@
 #include "ustring.h"
 
 #define DEFAULT_CHARSET_CAPACITY 8
-#define MAX_UNICODE_POINT 0x10FFFF
-
 
 /**
  * Return a new (empty) unicode character set.

@@ -5,6 +5,7 @@
 
 #include "vector.h"
 #include "charset.h"
+#include "metatoken.h"
 
 
 //used to represent the initial metasyntax read in by the parser
