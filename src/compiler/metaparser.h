@@ -22,6 +22,7 @@ void metaparser_insert_or_inner_rule_ast(uint64_t parent_head_idx, metaast* ast)
 bool metaparser_insert_rule_sentences(obj* head, vect* body);
 
 uint64_t metaparser_get_eps_body_idx();
+uint64_t metaparser_get_endmarker_symbol_idx();
 uint64_t metaparser_add_symbol(obj* symbol);
 obj* metaparser_get_symbol(uint64_t i);
 bool metaparser_is_symbol_terminal(uint64_t symbol_idx);

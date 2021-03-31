@@ -28,6 +28,20 @@ charset* new_charset()
 
 
 /**
+ * Return a charset containing the special endmarker terminal `$` using 0x200000.
+ * Care must be taken when dealing with this charset, as 0x200000 is not a valid 
+ * unicode code point, and may cause undefined behavior.
+ * Essentially the charset returned from this funciton should be treated as immutable.
+ */
+charset* charset_get_endmarker()
+{
+    charset* endmarker = new_charset();
+    charset_add_char(endmarker, UNICODE_ENDMARKER_POINT);
+    return endmarker;
+}
+
+
+/**
  * Construct an object wrapped unicode character set. If `s == NULL`, return an empty charset obj.
  */
 obj* new_charset_obj(charset* s)
@@ -435,6 +449,10 @@ void charset_char_str(uint32_t c)
     else if (is_printable_unicode(c))
     {
         put_unicode(c);
+    }
+    else if (c == UNICODE_ENDMARKER_POINT)
+    {
+        printf("$");
     }
     else 
     {

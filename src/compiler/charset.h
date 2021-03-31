@@ -24,6 +24,7 @@ typedef struct
 
 
 charset* new_charset();
+charset* charset_get_endmarker();
 obj* new_charset_obj(charset* s);
 void charset_add_char(charset* s, uint32_t c);
 void charset_add_range(charset* s, urange r);

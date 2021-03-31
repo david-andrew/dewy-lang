@@ -261,7 +261,7 @@ bool set_contains(set* s, obj* item)
 
 
 /**
- * 
+ * Return a copy of the set
  */
 set* set_copy(set* s)
 {
@@ -269,7 +269,7 @@ set* set_copy(set* s)
     for (int i = 0; i < set_size(s); i++)
     {
         set_entry e = s->entries[i];
-        set_add(copy, e.item); //TODO->deep copy? alsmost certainly need to fix?
+        set_add(copy, obj_copy(e.item)); //TODO->deep copy? alsmost certainly need to fix?
     }
     return copy;
 }

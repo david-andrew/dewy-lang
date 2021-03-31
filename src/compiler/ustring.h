@@ -9,7 +9,7 @@
 
 
 #define MAX_UNICODE_POINT 0x10FFFF
-#define AUGMENT_CHAR 0x200000 //first invalid codepoint (2^21), represents end of input
+#define UNICODE_ENDMARKER_POINT 0x200000 //first invalid codepoint (2^21), represents end of input
 
 
 obj* new_ustring_obj(uint32_t* s);

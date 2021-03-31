@@ -108,4 +108,80 @@ fset* srnglr_first_of_string(slice* string)
 }
 
 
+/**
+ * 
+ */
+set* srnglr_closure(set* kernel)
+{
+    set* closure = set_copy(kernel);
+
+    size_t prev_num_items;
+    do 
+    {
+        prev_num_items = set_size(closure);
+        /*
+        for (each item [A->α•Bβ, a] in closure)
+        {
+            for (each production B->γ in metaparser_productions) //i.e each production with head B
+            {
+                for (each terminal b in FIRST(βa))
+                {
+                    add [B->•γ] to closure
+                }
+            }
+        } 
+        */
+    } while (prev_num_items < set_size(closure));
+
+    return closure;
+}
+
+
+/**
+ * 
+ */
+set* srnglr_goto(set* itemset, uint64_t symbol_idx)
+{
+    set* gotoset = new_set();
+    /*
+    for (each item [A->α•Xβ, a] in itemset) where X is metaparser_symbols[symbol_idx]
+    {
+        add item [A->αX•β, a] to gotoset
+    }
+    */
+    return gotoset;
+}
+
+
+/**
+ * 
+ */
+set* srnglr_generate_grammar_itemsets()
+{
+    set* itemsets = new_set();
+
+    size_t prev_num_itemsets;
+    do 
+    {
+        prev_num_itemsets = set_size(itemsets);
+        /*
+        for (each set of items I in itemsets)
+        {
+            for (each grammar symbol X in metaparser_symbols)
+            {
+                if (GOTO(I, X) is not empty, and not in itemsets) //can skip second check since set ensures duplicates are not added
+                {
+                    add GOTO(I, X) to itemsets
+                }
+            }
+        }
+        */
+    }
+    while (prev_num_itemsets < set_size(itemsets));
+
+    return itemsets;
+}
+
+
+
 #endif

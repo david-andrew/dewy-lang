@@ -404,7 +404,7 @@ void unicode_str(uint32_t c)
     {
         put_unicode(0x2300);    // ⌀ (diameter symbol)
     }
-    else if (c == AUGMENT_CHAR) // represents the end of a meta-rule
+    else if (c == UNICODE_ENDMARKER_POINT) // represents the end of a meta-rule
     {
         put_unicode(0x1F596);    // 🖖 (vulcan salute). easy to spot character
     }

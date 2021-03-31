@@ -30,8 +30,9 @@ set* metaparser_symbols;        //list of all symbols used in production bodies.
 set* metaparser_bodies;         //list of each production body.
 dict* metaparser_productions;   //map from head to production bodies.
 
-//convenience variable for the frequently used epsilon production body.
+//convenience variables for the frequently used epsilon production body, and $ endmarker terminal.
 uint64_t metaparser_eps_body_idx = NULL_SYMBOL_INDEX;
+uint64_t metaparser_endmarker_symbol_idx = NULL_SYMBOL_INDEX;
 
 
 
@@ -775,6 +776,20 @@ uint64_t metaparser_get_eps_body_idx()
         metaparser_eps_body_idx = metaparser_add_body(epsilon);
     }
     return metaparser_eps_body_idx;
+}
+
+/**
+ * Return the symbol index of the endmarker terminal $.
+ */
+uint64_t metaparser_get_endmarker_symbol_idx()
+{
+    if (metaparser_endmarker_symbol_idx == NULL_SYMBOL_INDEX)
+    {
+        //endmarker terminal is represented as a special charset containing 0x200000
+        charset* endmarker = charset_get_endmarker();
+        metaparser_endmarker_symbol_idx = metaparser_add_symbol(new_charset_obj(endmarker));
+    }
+    return metaparser_endmarker_symbol_idx;
 }
 
 
