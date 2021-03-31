@@ -15,6 +15,7 @@
 #include "set.h"
 #include "metatoken.h"
 #include "charset.h"
+#include "metaitem.h"
 
 
 /**
@@ -189,7 +190,7 @@ void obj_print(obj* o)
         case String_t: printf("%s", o->data); break;
         case UnicodeString_t: ustring_str(o->data); break;
         case MetaToken_t: metatoken_repr(o->data); break;
-        // case MetaItem_t: metaitem_str(o->data); break;
+        case MetaItem_t: metaitem_str(o->data); break;
         case Vector_t: vect_str(o->data); break;
         case Dictionary_t: dict_str(o->data); break;
         case Set_t: set_str(o->data); break;
@@ -213,7 +214,7 @@ uint64_t obj_hash(obj* o)
         case String_t: return fnv1a(o->data);
         case UnicodeString_t: return ustring_hash(o->data);
         // case MetaToken_t: return metatoken_hash((metatoken*)o->data);
-        // case MetaSymbol_t: return metasymbol_hash(o->data);
+        case MetaItem_t: return metaitem_hash(o->data);
         case Vector_t: return vect_hash(o->data);
         // case Dictionary_t: return dict_hash(o->data);
         case Set_t: return set_hash(o->data);
@@ -266,6 +267,7 @@ bool obj_equals(obj* left, obj* right)
         // case Dictionary_t: return dict_equals((dict*)left->data, (dict*)right->data);
         case Set_t: return set_equals((set*)left->data, (set*)right->data);
         case CharSet_t: return charset_equals(left->data, right->data);
+        case MetaItem_t: return metaitem_equals(left->data, right->data);
         default: return obj_compare(left, right) == 0;
     }
 
@@ -297,6 +299,7 @@ void obj_free(obj* o)
             case Dictionary_t: dict_free((dict*)o->data); break;
             case Set_t: set_free((set*)o->data); break;
             case CharSet_t: charset_free((charset*)o->data); break;
+            case MetaItem_t: metaitem_free((metaitem*)o->data); break;
             
             default: 
                 printf("WARNING: obj_free() is not implemented for object of type \"%d\"\ncontents: ", o->type); 

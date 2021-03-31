@@ -15,9 +15,13 @@ typedef struct {
 } metaitem;
 
 
-metaitem* new_metaitem(uint64_t head_idx, uint64_t body_idx, uint64_t position, uint64_t lookahead_idx);
+metaitem* new_metaitem(uint64_t head_idx, uint64_t production_idx, uint64_t position, uint64_t lookahead_idx);
 obj* new_metaitem_obj(metaitem* i);
+void metaitem_str(metaitem* item);
+void metaitem_repr(metaitem* i);
 void metaitem_free(metaitem* i);
+uint64_t metaitem_hash(metaitem* i);
+bool metaitem_equals(metaitem* left, metaitem* right);
 
 
 

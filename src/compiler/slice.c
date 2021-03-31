@@ -34,7 +34,7 @@ obj* slice_get(slice* s, size_t i)
         //get the item from the contained vect
         return vect_get(s->v, s->start+i);
     }
-    else if (s->lookahead != NULL && i == slice_size(s))
+    else if (s->lookahead != NULL && i == slice_size(s) - 1)
     {
         //get the "appended" lookahead item
         return s->lookahead;

@@ -465,7 +465,8 @@ void charset_char_str(uint32_t c)
  */
 void charset_str(charset* s)
 {
-    printf("[");
+    bool single_char = s->size == 1 && s->ranges[0].start == s->ranges[0].stop;
+    if (!single_char) { printf("["); }
     for (int i = 0; i < s->size; i++)
     {
         charset_char_str(s->ranges[i].start);
@@ -476,7 +477,7 @@ void charset_str(charset* s)
             charset_char_str(s->ranges[i].stop);
         }
     }
-    printf("]");
+    if (!single_char) { printf("]"); }
 }
 
 
