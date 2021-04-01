@@ -257,10 +257,6 @@ set* srnglr_generate_grammar_itemsets()
     set* kernel = new_set();
     metaitem* start_item = new_metaitem(start_idx, 0, 0, metaparser_get_endmarker_symbol_idx());
     set_add(kernel, new_metaitem_obj(start_item));
-    ///////DEBUG////////
-    print_grammar_tables_raw();
-    printf("kernel to close: "); set_str(kernel); printf("\n");
-    //////END DEBUG/////
     set* start_set = srnglr_closure(kernel);
 
     set* itemsets = new_set();
