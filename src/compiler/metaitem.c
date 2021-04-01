@@ -10,6 +10,7 @@
 #include "slice.h"
 #include "fset.h"
 #include "srnglr.h"
+#include "utilities.h"
 
 
 /**
@@ -121,24 +122,9 @@ void metaitem_free(metaitem* i)
  */
 uint64_t metaitem_hash(metaitem* item)
 {
-    uint64_t hash = 14695981039346656037lu;
     uint64_t components[] = {item->head_idx, item->production_idx, item->position, item->lookahead_idx};
-    
-    //loop through each of the 4 uint64_t's in the metaitem
-    for (size_t i = 0; i < 4; i++)
-    {
-        //reinterpret the uint64_t as 8 bytes
-        uint64_t component = components[i];
-        uint8_t* bytes = (uint8_t*)&component;
 
-        //hash combine byte into the hash
-        for (int j = 7; j >= 0; j--)
-        {
-            hash ^= bytes[j];
-            hash *= 1099511628211;
-        }
-    }
-    return hash;
+    return hash_uint_sequence(components, sizeof(components) / sizeof(uint64_t));
 }
 
 

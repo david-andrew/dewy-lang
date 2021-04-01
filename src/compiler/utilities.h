@@ -20,6 +20,7 @@ uint64_t djb2a(char* str);
 uint64_t fnv1a(char* str);
 uint64_t hash_uint(uint64_t val);
 uint64_t hash_int(int64_t val);
+uint64_t hash_uint_sequence(uint64_t* seq, size_t n);
 uint64_t hash_bool(bool val);
 
 //rng functions

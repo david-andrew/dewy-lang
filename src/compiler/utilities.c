@@ -186,6 +186,31 @@ uint64_t hash_uint(uint64_t val)
 }
 
 
+/**
+ * Hash the sequence of uint64_t's using a modified version of fnv1a.
+ */
+uint64_t hash_uint_sequence(uint64_t* seq, size_t n)
+{
+    uint64_t hash = 14695981039346656037lu;
+
+    //loop through each of the uint64_t's in the sequence
+    for (size_t i = 0; i < n; i++)
+    {
+        //reinterpret the uint64_t as 8 bytes
+        uint64_t val = seq[i];
+        uint8_t* bytes = (uint8_t*)&val;
+
+        //hash combine byte into the hash
+        for (int j = 7; j >= 0; j--)
+        {
+            hash ^= bytes[j];
+            hash *= 1099511628211;
+        }
+    }
+    return hash;
+}
+
+
 uint64_t hash_bool(bool val)
 {
     //cast the bool to a 64-bit 0 or 1, and return it's hash
