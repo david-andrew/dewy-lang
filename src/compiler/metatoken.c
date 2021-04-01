@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <inttypes.h>
 
 #include "metatoken.h"
 #include "utilities.h"
@@ -118,7 +119,15 @@ uint32_t metatoken_extract_char_from_token(metatoken* t)
         case meta_char: return *t->content;
         case meta_charset_char: return *t->content;
         case meta_escape: return escape_to_unicode(*t->content);
-        case meta_hex_number: return ustring_parse_hex(t->content);
+        case meta_hex_number:
+            uint32_t c = ustring_parse_hex(t->content);
+            if (c > MAX_UNICODE_POINT)
+            {
+                printf("ERROR: codepoint of %"PRIu32" is larger than the maximum unicode codepoint %"PRIu32"\n");
+                return 0;
+            }
+            return c;
+
         default: 
             printf("ERROR: attempted to extract char from non-char token: ");
             metatoken_repr(t);

@@ -7,6 +7,9 @@
 
 #include "metaitem.h"
 #include "metaparser.h"
+#include "slice.h"
+#include "fset.h"
+#include "srnglr.h"
 
 
 /**
@@ -38,6 +41,33 @@ obj* new_metaitem_obj(metaitem* i)
 
 
 /**
+ * Returns whether the metaitem is in an accepting state,
+ * i.e. if the position is at the end of the list of body symbols.
+ * Additionally, an item is accepting if the remaining string is nullable.
+ */
+bool metaitem_is_accept(metaitem* i)
+{
+    // get the body for this item
+    vect* body = metaparser_get_production_body(i->head_idx, i->production_idx);
+    
+    if (i->position == vect_size(body))
+    {
+        //normal accept, when position is at end of body
+        return true;
+    }
+    else
+    {
+        //check if the remaining portion of the string is nullable
+        slice right_string = (slice){.v=body, .start=i->position, .stop=vect_size(body), .lookahead=NULL};
+        fset* first = srnglr_first_of_string(&right_string);
+        bool nullable = first->nullable;
+        fset_free(first);
+        return nullable;
+    }
+}
+
+
+/**
  * Print out a string displaying the metaitem.
  */
 void metaitem_str(metaitem* item)
@@ -65,7 +95,15 @@ void metaitem_str(metaitem* item)
  */
 void metaitem_repr(metaitem* i)
 {
-    printf("metaitem{head_idx: %"PRIu64", production_idx: %"PRIu64", position: %"PRIu64", lookahead_idx: %"PRIu64"}", i->head_idx, i->production_idx, i->position, i->lookahead_idx);
+    printf("metaitem{head_idx: %"PRIu64
+        ", production_idx: %"PRIu64
+        ", position: %"PRIu64
+        ", lookahead_idx: %"PRIu64"}",
+        i->head_idx, 
+        i->production_idx, 
+        i->position, 
+        i->lookahead_idx
+    );
 }
 
 

@@ -17,6 +17,7 @@ typedef struct {
 
 metaitem* new_metaitem(uint64_t head_idx, uint64_t production_idx, uint64_t position, uint64_t lookahead_idx);
 obj* new_metaitem_obj(metaitem* i);
+bool metaitem_is_accept(metaitem* i);
 void metaitem_str(metaitem* item);
 void metaitem_repr(metaitem* i);
 void metaitem_free(metaitem* i);
