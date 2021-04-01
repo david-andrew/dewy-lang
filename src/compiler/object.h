@@ -21,6 +21,10 @@ typedef enum
     UnicodeString_t,
     MetaToken_t,
     MetaItem_t,
+    GotoKey_t,
+    Push_t,
+    Reduction_t,
+    Accept_t,
     Vector_t,
     Dictionary_t,
     Set_t,
@@ -58,7 +62,7 @@ obj* new_string_obj_copy(char* s);              //new string object from a non-a
 
 //// Utility Functions ////
 
-size_t obj_size(obj* o);
+// size_t obj_size(obj* o);
 obj* obj_copy(obj* o);
 obj* obj_copy_with_refs(obj* o, dict* refs);
 void obj_print(obj* o);

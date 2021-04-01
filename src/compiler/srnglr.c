@@ -2,6 +2,7 @@
 #define SRNGLR_C
 
 #include <stdio.h>
+#include <inttypes.h>
 
 #include "srnglr.h"
 #include "slice.h"
@@ -9,6 +10,66 @@
 #include "metaparser.h"
 #include "metaitem.h"
 #include "slice.h"
+
+
+
+
+/**
+ * Create a new object representing a push action.
+ */
+obj* new_push_obj(uint64_t p)
+{
+    obj* P = malloc(sizeof(obj));
+    *P = (obj){.type=Push_t, .data=new_uint(p)};
+    return P;
+}
+
+
+/**
+ * Print out a string representing the push action.
+ */
+void push_str(uint64_t p)
+{
+    printf("P%"PRIu64, p);
+}
+
+
+/**
+ * Print out the internal representation of the push action.
+ */
+void push_repr(uint64_t p)
+{
+    printf("Push{%"PRIu64"}", p);
+}
+
+
+/**
+ * Create a new accept action wrapped object.
+ */
+obj* new_accept_obj()
+{
+    obj* A = malloc(sizeof(obj));
+    *A = (obj){.type=Accept_t, .data=NULL};
+    return A;
+}
+
+
+/**
+ * Print out a string representing the accept action.
+ */
+void accept_str()
+{
+    printf("acc");
+}
+
+
+/**
+ * print out a more verbose representation of the accept action.
+ */
+void accept_repr()
+{
+    printf("accept{}");
+}
 
 
 /*
