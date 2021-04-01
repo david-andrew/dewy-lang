@@ -81,6 +81,8 @@ void run_compiler(char* source, bool verbose, bool scanner, bool ast, bool parse
     //set up structures for the sequence of scanning/parsing
     initialize_metascanner();
     initialize_metaparser();
+    initialize_srnglr();
+
     vect* tokens = new_vect();
     obj* t = NULL;
 
@@ -163,6 +165,7 @@ void run_compiler(char* source, bool verbose, bool scanner, bool ast, bool parse
     set_free(itemsets);
     release_metascanner();
     release_metaparser();
+    release_srnglr();
 }
 
 
@@ -225,6 +228,11 @@ void print_grammar(set* itemsets)
     }
 
     // set_str(itemsets); //lazy print all
+
+    dict* srnglr_table = srnglr_get_table();
+    printf("srnglr_table\n");
+    dict_str(srnglr_table);
+    printf("\n\n");
 }
 
 

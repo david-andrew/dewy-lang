@@ -4,14 +4,39 @@
 #include <stdio.h>
 #include <inttypes.h>
 
+#include "dictionary.h"
 #include "srnglr.h"
 #include "slice.h"
 #include "fset.h"
 #include "metaparser.h"
 #include "metaitem.h"
 #include "slice.h"
+#include "gotokey.h"
+// #include "reduction.h"
+
+/**
+ * Global data structure for storing the srnglr parse table
+ * maps from GotoKey_t to sets containing Push_t, Reduction_t, or Accept_t.
+ */
+dict* srnglr_table;
 
 
+/**
+ * Initialize global srnglr data structures.
+ */
+void initialize_srnglr()
+{
+    srnglr_table = new_dict();
+}
+
+
+/**
+ * Free global srnglr data structures.
+ */
+void release_srnglr()
+{
+    dict_free(srnglr_table);
+}
 
 
 /**
@@ -330,10 +355,10 @@ set* srnglr_generate_grammar_itemsets()
         size_t prev_num_itemsets = set_size(itemsets);
         
         //loop through each itemset in the set of itemsets
-        for (size_t i = 0; i < set_size(itemsets); i++)
+        for (size_t itemset_idx = 0; itemset_idx < set_size(itemsets); itemset_idx++)
         {
             //current itemset
-            set* itemset = itemsets->entries[i].item->data;
+            set* itemset = itemsets->entries[itemset_idx].item->data;
             
             //loop through each symbol in the grammar
             for (uint64_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
@@ -342,7 +367,8 @@ set* srnglr_generate_grammar_itemsets()
                 if (set_size(gotoset) > 0)
                 {
                     //set add handles duplicates
-                    set_add(itemsets, new_set_obj(gotoset));
+                    uint64_t goto_idx = set_add_return_index(itemsets, new_set_obj(gotoset));
+                    srnglr_insert_push(itemset_idx, symbol_idx, goto_idx);
                 }
                 else
                 {
@@ -358,6 +384,39 @@ set* srnglr_generate_grammar_itemsets()
 
     return itemsets;
 }
+
+
+dict* srnglr_get_table()
+{
+    return srnglr_table;
+}
+
+/**
+ * Add a Push_t item to the srnglr table.
+ */
+void srnglr_insert_push(uint64_t state_idx, uint64_t symbol_idx, uint64_t goto_idx)
+{
+    //create a static key object (for retrieving the set in the dict)
+    gotokey static_key = (gotokey){.state_idx=state_idx, .symbol_idx=symbol_idx};
+    obj static_key_obj = (obj){.type=GotoKey_t, .data=&static_key};
+
+    //check if the srnglr table has a set for the given key
+    if (!dict_contains(srnglr_table, &static_key_obj))
+    {
+        //create a new entry for this key
+        gotokey* key = new_gotokey(state_idx, symbol_idx);
+        dict_set(srnglr_table, new_gotokey_obj(key), new_set_obj(NULL));
+    }
+
+    //get the set at this key
+    set* actions = dict_get(srnglr_table, &static_key_obj)->data;
+
+    //insert the push action to the set
+    set_add(actions, new_push_obj(goto_idx));
+}
+
+void srnglr_insert_reduction();
+void srnglr_insert_accept();
 
 
 

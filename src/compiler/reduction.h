@@ -6,8 +6,8 @@
 #include "object.h"
 
 typedef struct {
-    uint64_t head_idx;
-    uint64_t length;
+    uint64_t head_idx;      //non-terminal to reduce
+    uint64_t length;        //length of the reduction
 } reduction;
 
 reduction* new_reduction(uint64_t head_idx, uint64_t length);

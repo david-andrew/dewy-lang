@@ -6,8 +6,8 @@
 #include "object.h"
 
 typedef struct {
-    uint64_t state_idx;
-    uint64_t symbol_idx;
+    uint64_t state_idx;     //state row in the table
+    uint64_t symbol_idx;    //symbol column in the table
 } gotokey;
 
 gotokey* new_gotokey(uint64_t state_idx, uint64_t symbol_idx);
