@@ -59,8 +59,8 @@ bool metaitem_is_accept(metaitem* i)
     else
     {
         //check if the remaining portion of the string is nullable
-        slice right_string = (slice){.v=body, .start=i->position, .stop=vect_size(body), .lookahead=NULL};
-        fset* first = srnglr_first_of_string(&right_string);
+        slice remaining = (slice){.v=body, .start=i->position, .stop=vect_size(body), .lookahead=NULL};
+        fset* first = srnglr_first_of_string(&remaining);
         bool nullable = first->nullable;
         fset_free(first);
         return nullable;

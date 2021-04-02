@@ -12,7 +12,7 @@
 #include "metaitem.h"
 #include "slice.h"
 #include "gotokey.h"
-// #include "reduction.h"
+#include "reduction.h"
 
 /**
  * Global data structure for storing the srnglr parse table
@@ -84,7 +84,7 @@ obj* new_accept_obj()
  */
 void accept_str()
 {
-    printf("acc");
+    printf("ACCEPT");
 }
 
 
@@ -350,6 +350,7 @@ set* srnglr_generate_grammar_itemsets()
 
     set* symbols = metaparser_get_symbols();
 
+    //Generate all itemsets + GOTO actions
     while (true)
     {
         size_t prev_num_itemsets = set_size(itemsets);
@@ -382,19 +383,50 @@ set* srnglr_generate_grammar_itemsets()
         if (prev_num_itemsets == set_size(itemsets)) { break; }
     }
 
+    //insert reduction/accept actions into the table
+    for (size_t state_idx = 0; state_idx < set_size(itemsets); state_idx++)
+    {
+        set* itemset = itemsets->entries[state_idx].item->data;
+
+        //check each item in the itemset
+        for (size_t j = 0; j < set_size(itemset); j++)
+        {
+            metaitem* item = itemset->entries[j].item->data;
+            if (metaitem_is_accept(item))
+            {
+                //check if special head
+                if (item->head_idx == metaparser_get_start_symbol_idx())
+                {
+                    //this is an accepting state
+                    srnglr_insert_accept(state_idx, item->lookahead_idx);
+                }
+                else
+                {
+                    //otherwise normal reduction
+                    srnglr_insert_reduction(state_idx, item->lookahead_idx, item->head_idx, item->position);
+                }
+            }
+        }
+    }
+
     return itemsets;
 }
 
 
+/**
+ * Return the parser table (mainly used by external functions).
+ */
 dict* srnglr_get_table()
 {
     return srnglr_table;
 }
 
+
 /**
- * Add a Push_t item to the srnglr table.
+ * Return the action set for the given state, symbol pair in the parser table.
+ * If no set exists, an empty set is created at that index, and returned.
  */
-void srnglr_insert_push(uint64_t state_idx, uint64_t symbol_idx, uint64_t goto_idx)
+set* srnglr_get_table_actions(uint64_t state_idx, uint64_t symbol_idx)
 {
     //create a static key object (for retrieving the set in the dict)
     gotokey static_key = (gotokey){.state_idx=state_idx, .symbol_idx=symbol_idx};
@@ -411,12 +443,45 @@ void srnglr_insert_push(uint64_t state_idx, uint64_t symbol_idx, uint64_t goto_i
     //get the set at this key
     set* actions = dict_get(srnglr_table, &static_key_obj)->data;
 
+    return actions;
+}
+
+
+/**
+ * Add a Push_t item to the srnglr table.
+ */
+void srnglr_insert_push(uint64_t state_idx, uint64_t symbol_idx, uint64_t goto_idx)
+{
+    //get the actions set for this state, symbol pair
+    set* actions = srnglr_get_table_actions(state_idx, symbol_idx);
+
     //insert the push action to the set
     set_add(actions, new_push_obj(goto_idx));
 }
 
-void srnglr_insert_reduction();
-void srnglr_insert_accept();
+
+/**
+ * Add a reduction action to the srnglr table.
+ */
+void srnglr_insert_reduction(uint64_t state_idx, uint64_t symbol_idx, uint64_t head_idx, uint64_t length)
+{
+    //get the actions set for this state, symbol pair
+    set* actions = srnglr_get_table_actions(state_idx, symbol_idx);
+
+    //create a reduction and add to the actions set.
+    reduction* r = new_reduction(head_idx, length);
+    set_add(actions, new_reduction_obj(r));
+}
+
+
+void srnglr_insert_accept(uint64_t state_idx, uint64_t symbol_idx)
+{
+    //get the actions set for this state, symbol pair
+    set* actions = srnglr_get_table_actions(state_idx, symbol_idx);
+
+    //insert an accept action to the set
+    set_add(actions, new_accept_obj());
+}
 
 
 

@@ -229,6 +229,7 @@ void print_grammar(set* itemsets)
 
     // set_str(itemsets); //lazy print all
 
+    //TODO->move to next function
     dict* srnglr_table = srnglr_get_table();
     printf("srnglr_table\n");
     dict_str(srnglr_table);
