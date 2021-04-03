@@ -13,6 +13,7 @@ typedef struct {
 reduction* new_reduction(uint64_t head_idx, uint64_t length);
 obj* new_reduction_obj(reduction* r);
 void reduction_str(reduction* r);
+int reduction_strlen(reduction* r);
 void reduction_repr(reduction* r);
 bool reduction_equals(reduction* left, reduction* right);
 uint64_t reduction_hash(reduction* r);

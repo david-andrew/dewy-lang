@@ -8,6 +8,7 @@
 #include "reduction.h"
 #include "metaparser.h"
 #include "utilities.h"
+#include "ustring.h"
 
 
 /**
@@ -42,6 +43,20 @@ void reduction_str(reduction* r)
     obj_print(head);
     printf(", %"PRIu64")", r->length);
 }
+
+
+/**
+ * Return the printed width of the rnglr reduction action's string representation.
+ */
+int reduction_strlen(reduction* r)
+{
+    int width = 0;
+    obj* head = metaparser_get_symbol(r->head_idx);
+    width += ustring_len(head->data);
+    width += snprintf("", 0, "R(, %"PRIu64")", r->length);
+    return width;
+}
+
 
 
 /**

@@ -460,6 +460,32 @@ void charset_char_str(uint32_t c)
     }
 }
 
+
+/**
+ * Return the print width of the charset char to be printed.
+ */
+int charset_char_strlen(uint32_t c)
+{
+    int width;
+    if (is_unicode_escape(c) || is_charset_escape(c))
+    { 
+        //unicode character with an escape slash
+        width = 2;
+    }
+    else if (is_printable_unicode(c) || c == UNICODE_ENDMARKER_POINT)
+    {
+        //single normal unicode character
+        width = 1;
+    }
+    else 
+    {
+        //compute the width of the hex char to be printed
+        width = snprintf("", 0, "\\x%X", c);
+    }
+    return width;
+}
+
+
 /**
  * Print out a string representation of the charset.
  */
@@ -478,6 +504,28 @@ void charset_str(charset* s)
         }
     }
     if (!single_char) { printf("]"); }
+}
+
+
+/**
+ * Determine the number of characters that would be printed by the charset
+ */
+int charset_strlen(charset* s)
+{
+    int length = 0;
+    bool single_char = s->size == 1 && s->ranges[0].start == s->ranges[0].stop;
+    if (!single_char) { length += 2; } //for starting/ending []
+    for (int i = 0; i < s->size; i++)
+    {
+        length += charset_char_strlen(s->ranges[i].start);
+        if (s->ranges[i].stop != s->ranges[i].start)
+        {
+            //only print dash on ranges larger than 2
+            if (s->ranges[i].stop - s->ranges[i].start > 1) { length += 1; } //for dash in range
+            length += charset_char_strlen(s->ranges[i].stop);
+        }
+    }
+    return length;
 }
 
 

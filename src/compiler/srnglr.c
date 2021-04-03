@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <inttypes.h>
+#include <string.h>
 
 #include "dictionary.h"
 #include "srnglr.h"
@@ -15,9 +16,10 @@
 #include "reduction.h"
 
 /**
- * Global data structure for storing the srnglr parse table
+ * Global data structures for storing the srnglr item sets and parse table
  * maps from GotoKey_t to sets containing Push_t, Reduction_t, or Accept_t.
  */
+set* srnglr_itemsets;
 dict* srnglr_table;
 
 
@@ -26,6 +28,7 @@ dict* srnglr_table;
  */
 void initialize_srnglr()
 {
+    srnglr_itemsets = new_set();
     srnglr_table = new_dict();
 }
 
@@ -35,6 +38,7 @@ void initialize_srnglr()
  */
 void release_srnglr()
 {
+    set_free(srnglr_itemsets);
     dict_free(srnglr_table);
 }
 
@@ -56,6 +60,15 @@ obj* new_push_obj(uint64_t p)
 void push_str(uint64_t p)
 {
     printf("P%"PRIu64, p);
+}
+
+
+/**
+ * Return the printed width of the push action.
+ */
+int push_strlen(uint64_t p)
+{
+    return snprintf("", 0, "P%"PRIu64, p);
 }
 
 
@@ -85,6 +98,15 @@ obj* new_accept_obj()
 void accept_str()
 {
     printf("ACCEPT");
+}
+
+
+/**
+ * Return the printed width of the accept action.
+ */
+int accept_strlen()
+{
+    return strlen("ACCEPT");
 }
 
 
@@ -334,7 +356,7 @@ set* srnglr_goto(set* itemset, uint64_t symbol_idx)
  *     }
  * } while no new itemsets were added
  */
-set* srnglr_generate_grammar_itemsets()
+void srnglr_generate_grammar_itemsets()
 {
     //get the symbol for the augmented start rule from the grammar
     uint64_t start_idx = metaparser_get_start_symbol_idx();
@@ -345,21 +367,21 @@ set* srnglr_generate_grammar_itemsets()
     set_add(kernel, new_metaitem_obj(start_item));
     set* start_set = srnglr_closure(kernel);
 
-    set* itemsets = new_set();
-    set_add(itemsets, new_set_obj(start_set));
+    //add the first itemset to the (global) list of itemsets
+    set_add(srnglr_itemsets, new_set_obj(start_set));
 
     set* symbols = metaparser_get_symbols();
 
     //Generate all itemsets + GOTO actions
     while (true)
     {
-        size_t prev_num_itemsets = set_size(itemsets);
+        size_t prev_num_itemsets = set_size(srnglr_itemsets);
         
         //loop through each itemset in the set of itemsets
-        for (size_t itemset_idx = 0; itemset_idx < set_size(itemsets); itemset_idx++)
+        for (size_t itemset_idx = 0; itemset_idx < set_size(srnglr_itemsets); itemset_idx++)
         {
             //current itemset
-            set* itemset = itemsets->entries[itemset_idx].item->data;
+            set* itemset = srnglr_itemsets->entries[itemset_idx].item->data;
             
             //loop through each symbol in the grammar
             for (uint64_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
@@ -368,7 +390,7 @@ set* srnglr_generate_grammar_itemsets()
                 if (set_size(gotoset) > 0)
                 {
                     //set add handles duplicates
-                    uint64_t goto_idx = set_add_return_index(itemsets, new_set_obj(gotoset));
+                    uint64_t goto_idx = set_add_return_index(srnglr_itemsets, new_set_obj(gotoset));
                     srnglr_insert_push(itemset_idx, symbol_idx, goto_idx);
                 }
                 else
@@ -380,13 +402,13 @@ set* srnglr_generate_grammar_itemsets()
         }
 
         //itemsets is complete if no new itemsets were added
-        if (prev_num_itemsets == set_size(itemsets)) { break; }
+        if (prev_num_itemsets == set_size(srnglr_itemsets)) { break; }
     }
 
     //insert reduction/accept actions into the table
-    for (size_t state_idx = 0; state_idx < set_size(itemsets); state_idx++)
+    for (size_t state_idx = 0; state_idx < set_size(srnglr_itemsets); state_idx++)
     {
-        set* itemset = itemsets->entries[state_idx].item->data;
+        set* itemset = srnglr_itemsets->entries[state_idx].item->data;
 
         //check each item in the itemset
         for (size_t j = 0; j < set_size(itemset); j++)
@@ -408,8 +430,15 @@ set* srnglr_generate_grammar_itemsets()
             }
         }
     }
+}
 
-    return itemsets;
+
+/**
+ * Return the itemsets (mainly used by external functions).
+ */
+set* srnglr_get_itemsets()
+{
+    return srnglr_itemsets;
 }
 
 
