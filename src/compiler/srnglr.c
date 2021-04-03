@@ -648,7 +648,7 @@ void srnglr_print_table()
 
             obj* symbol = metaparser_get_symbol(symbol_idx);
             putchar(' '); 
-            obj_print(symbol);
+            obj_str(symbol);
             putchar(' ');
 
             uint64_t remaining = column_widths[1 + column_idx] - cell_widths[1 + column_idx];
@@ -697,7 +697,7 @@ void srnglr_print_table()
                 for (size_t i = 0; i < set_size(actions); i++)
                 {
                     obj* action = actions->entries[i].item;
-                    obj_print(action);
+                    obj_str(action);
                     if (i < set_size(actions) - 1) { printf(", "); }
                 }
             }

@@ -435,7 +435,7 @@ void set_repr(set* s)
         if (i != 0) printf(",\n           ");
         set_entry e = s->entries[i];
         printf("[%lu, ", e.hash);
-        obj_print(e.item);
+        obj_str(e.item);
         printf("]");
     }
     printf("]\n");
@@ -452,7 +452,7 @@ void set_str(set* s)
     {
         set_entry e = s->entries[i];
         if (i != 0) printf(", ");
-        obj_print(e.item);
+        obj_str(e.item);
     }
     printf("}");
 }

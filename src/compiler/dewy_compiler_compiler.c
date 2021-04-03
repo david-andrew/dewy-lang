@@ -137,7 +137,7 @@ void run_compiler(char* source, bool verbose, bool scanner, bool ast, bool parse
     if (parser)
     {
         printf("METAPARSER OUTPUT:\n");
-        print_parser();
+        print_parser(verbose);
         printf("\n\n");
     }
 
@@ -198,7 +198,7 @@ void print_scanner(vect* tokens, bool verbose)
 void print_ast(uint64_t head_idx, metaast* body_ast, bool verbose)
 {
     obj* head = metaparser_get_symbol(head_idx);
-    obj_print(head);
+    obj_str(head);
     if (body_ast != NULL)
     {
         printf(" = ");
@@ -212,9 +212,9 @@ void print_ast(uint64_t head_idx, metaast* body_ast, bool verbose)
 /**
  * Print the output of the CFG covnersion step
  */
-void print_parser()
+void print_parser(bool verbose)
 {
-    print_grammar_tables();
+    verbose ? metaparser_productions_repr() : metaparser_productions_str();
 }
 
 

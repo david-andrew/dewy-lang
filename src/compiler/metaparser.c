@@ -135,13 +135,13 @@ bool parse_next_meta_rule(vect* tokens)
  * Prints the productions dictionary which contains head symbol indices
  * pointing to the list of indices of bodies for that head.
  */
-void print_grammar_tables_raw()
+void metaparser_productions_repr()
 {
     //print out all symbols, bodies
     printf("symbols:\n"); 
     for (uint64_t i = 0; i < set_size(metaparser_symbols); i++)
     {
-        printf("%"PRIu64": ", i); obj_print(metaparser_get_symbol(i)); printf("\n");
+        printf("%"PRIu64": ", i); obj_str(metaparser_get_symbol(i)); printf("\n");
     }
     printf("\nbodies:\n");
     for (uint64_t i = 0; i < set_size(metaparser_bodies); i++)
@@ -156,7 +156,7 @@ void print_grammar_tables_raw()
 /**
  * Print out the contents of the grammar tables, converting indices to their corresponding values
  */
-void print_grammar_tables()
+void metaparser_productions_str()
 {       
     for (size_t i = 0; i < dict_size(metaparser_productions); i++)
     {
@@ -169,7 +169,7 @@ void print_grammar_tables()
         for (size_t j = 0; j < set_size(bodies); j++)
         {
             //print head
-            obj_print(head);
+            obj_str(head);
             printf(" -> ");
             
             //get the body for this production
@@ -187,7 +187,7 @@ void print_grammar_tables()
                 //normal print out each symbol in the sentence
                 uint64_t* symbol_idx = vect_get(sentence, k)->data;
                 obj* symbol = metaparser_get_symbol(*symbol_idx);
-                obj_print(symbol);
+                obj_str(symbol);
                 if (k < vect_size(sentence) - 1) { printf(" "); }
             }
             printf("\n");
@@ -924,7 +924,7 @@ set* metaparser_get_production_bodies(uint64_t head_idx)
     if (bodies_obj == NULL)
     {
         //print out the head symbol too...
-        printf("ERROR: no production bodies exist for head "); obj_print(metaparser_get_symbol(head_idx)); printf("\n");
+        printf("ERROR: no production bodies exist for head "); obj_str(metaparser_get_symbol(head_idx)); printf("\n");
         return NULL;
     }
     return bodies_obj->data;

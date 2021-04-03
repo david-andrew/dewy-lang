@@ -77,17 +77,17 @@ void metaitem_str(metaitem* item)
     vect* body = metaparser_get_production_body(item->head_idx, item->production_idx);
     obj* lookahead = metaparser_get_symbol(item->lookahead_idx);
 
-    printf("["); obj_print(head); printf(" = ");
+    printf("["); obj_str(head); printf(" = ");
     for (size_t i = 0; i <= vect_size(body); i++)
     {
         if (i == item->position) { printf("•"); }
         if (i == vect_size(body)) { break; };
         uint64_t* symbol_idx = vect_get(body, i)->data;
         obj* symbol = metaparser_get_symbol(*symbol_idx);
-        obj_print(symbol);
+        obj_str(symbol);
         if (i < vect_size(body) - 1) { printf(" "); }
     }
-    printf(", "); obj_print(lookahead); printf("]");
+    printf(", "); obj_str(lookahead); printf("]");
 }
 
 

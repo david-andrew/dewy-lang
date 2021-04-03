@@ -40,7 +40,7 @@ void reduction_str(reduction* r)
 {
     printf("R(");
     obj* head = metaparser_get_symbol(r->head_idx);
-    obj_print(head);
+    obj_str(head);
     printf(", %"PRIu64")", r->length);
 }
 

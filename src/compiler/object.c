@@ -176,7 +176,7 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
 }
 
 
-void obj_print(obj* o)
+void obj_str(obj* o)
 {
     if (o == NULL) 
     { 
@@ -201,9 +201,29 @@ void obj_print(obj* o)
         case Vector_t: vect_str(o->data); break;
         case Dictionary_t: dict_str(o->data); break;
         case Set_t: set_str(o->data); break;
-        default: printf("WARNING: obj_print() is not implemented for object of type \"%d\"\n", o->type); break;
+        default: printf("WARNING: obj_str() is not implemented for object of type \"%d\"\n", o->type); break;
     }
 }
+
+
+/**
+ * Return the width of the given object when printed out to stdout.
+ * Counts unicode characters as 1 unit instead of utf-8 characters.
+ */
+int obj_strlen(obj* o)
+{
+    if (o == NULL) { return strlen("NULL"); }
+
+    switch (o->type)
+    {
+        case UnicodeString_t: return ustring_len(o->data);
+        case CharSet_t: return charset_strlen(o->data);
+    
+        default:
+            printf("WARNING: obj_strlen() is not implementede for object of type \"%d\"\n", o->type); exit(1);
+    }
+}
+
 
 
 
@@ -229,7 +249,7 @@ uint64_t obj_hash(obj* o)
         case Vector_t: return vect_hash(o->data);
         // case Dictionary_t: return dict_hash(o->data);
         case Set_t: return set_hash(o->data);
-        default: printf("WARNING: obj_hash() is not implemented for object of type \"%d\"\n", o->type); obj_print(o); exit(1);
+        default: printf("WARNING: obj_hash() is not implemented for object of type \"%d\"\n", o->type); obj_str(o); exit(1);
     }
 }
 
@@ -324,7 +344,7 @@ void obj_free(obj* o)
 
             default: 
                 printf("WARNING: obj_free() is not implemented for object of type \"%d\"\ncontents: ", o->type); 
-                obj_print(o); 
+                obj_str(o); 
                 printf("\n");
                 exit(1);
         }
@@ -347,7 +367,7 @@ void* obj_free_keep_inner(obj* o, obj_type type)
     else
     {
         printf("ERROR: attempted to obj_free_keep_inner() on an incorrect type:\n");
-        obj_print(o);
+        obj_str(o);
         printf("Expected type {%d}\n", type);
         exit(1);
     }

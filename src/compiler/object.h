@@ -65,7 +65,8 @@ obj* new_string_obj_copy(char* s);              //new string object from a non-a
 // size_t obj_size(obj* o);
 obj* obj_copy(obj* o);
 obj* obj_copy_with_refs(obj* o, dict* refs);
-void obj_print(obj* o);
+void obj_str(obj* o);
+int obj_strlen(obj* o);
 uint64_t obj_hash(obj* o) ;
 int64_t obj_compare(obj* left, obj* right);
 bool obj_equals(obj* left, obj* right);

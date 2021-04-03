@@ -419,7 +419,7 @@ void vect_repr(vect* v)
     printf("Vector\n");
     for (int i = 0; i < v->capacity; i++) 
     {
-        printf("@%d: ", i); fflush(stdout); obj_print(v->list[i]); printf("%s\n", (v->head == i ? "    (HEAD)" : ""));
+        printf("@%d: ", i); fflush(stdout); obj_str(v->list[i]); printf("%s\n", (v->head == i ? "    (HEAD)" : ""));
     }
 }
 
@@ -430,7 +430,7 @@ void vect_str(vect* v)
     for (int i = 0; i < v->size; i++)
     {
         if (i != 0) { printf(", "); }
-        obj_print(vect_get(v, i));
+        obj_str(vect_get(v, i));
     }
     printf("]");
 }

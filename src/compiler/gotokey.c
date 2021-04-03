@@ -39,7 +39,7 @@ void gotokey_str(gotokey* k)
 {
     printf("(I%"PRIu64", ", k->state_idx);
     obj* symbol = metaparser_get_symbol(k->symbol_idx);
-    obj_print(symbol); printf(")");
+    obj_str(symbol); printf(")");
 }
 
 

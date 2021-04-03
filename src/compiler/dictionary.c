@@ -270,7 +270,7 @@ obj* dict_get_uint_key(dict* d, uint64_t u)
 // obj* dict_get_codepoint_key(dict* d, uint32_t c)
 // {
 //     obj* key = new_char(c);
-//     printf("called get codepoint key with "); obj_print(key); printf("\n");
+//     printf("called get codepoint key with "); obj_str(key); printf("\n");
 //     obj* value = dict_get(d, key);
 //     obj_free(key);
 //     return value;
@@ -282,7 +282,7 @@ obj* dict_get_uint_key(dict* d, uint64_t u)
 // bool dict_set_codepoint_key(dict* d, uint32_t c, obj* value)
 // {
 //     obj* key = new_char(c);
-//     printf("called set codepoint key with "); obj_print(key); printf("\n");
+//     printf("called set codepoint key with "); obj_str(key); printf("\n");
 //     return dict_set(d, key, value);
 // }
 
@@ -375,9 +375,9 @@ void dict_repr(dict* d)
         if (i != 0) printf(",\n           ");
         dict_entry e = d->entries[i];
         printf("[%lu, ", e.hash);
-        obj_print(e.key);
+        obj_str(e.key);
         printf(", ");
-        obj_print(e.value);
+        obj_str(e.value);
         printf("]");
     }
     printf("]\n");
@@ -390,9 +390,9 @@ void dict_str(dict* d)
     for (int i = 0; i < d->size; i++)
     {
         if (i != 0) printf(", ");
-        obj_print(d->entries[i].key);
+        obj_str(d->entries[i].key);
         printf(" -> ");
-        obj_print(d->entries[i].value);
+        obj_str(d->entries[i].value);
     }
     printf("]");
 }
