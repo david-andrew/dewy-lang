@@ -21,6 +21,8 @@ typedef enum
     UnicodeString_t,
     MetaToken_t,
     MetaItem_t,
+    Slice_t,
+    FSet_t,
     GotoKey_t,
     Push_t,
     Reduction_t,

@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "slice.h"
+#include "utilities.h"
 
 
 /**
@@ -21,6 +22,17 @@ slice* new_slice(vect* v, size_t start, size_t stop, obj* lookahead)
     slice* s = malloc(sizeof(slice));
     *s = (slice){.v=v, .start=start, .stop=stop, .lookahead=lookahead};
     return s;
+}
+
+
+/**
+ * Return a slice wrapped in object.
+ */
+obj* new_slice_obj(slice* s)
+{
+    obj* S = malloc(sizeof(obj));
+    *S = (obj){.type=Slice_t, .data=s};
+    return S;
 }
 
 
@@ -66,6 +78,75 @@ size_t slice_size(slice* s)
 void slice_free(slice* s)
 {
     free(s);
+}
+
+
+/**
+ * Print out the slice as if it were a normal vector
+ */
+void slice_str(slice* s)
+{
+    printf("[");
+    for (size_t i = 0; i < slice_size(s); i++)
+    {
+        obj_str(slice_get(s, i));
+        if (i < slice_size(s) - 1) { printf(", "); }
+    }
+    printf("]");
+}
+
+
+/**
+ * Return a copy of the slice. 
+ * Note copy still points to same vector/lookahead as original.
+ */
+slice* slice_copy(slice* s)
+{
+    return new_slice(s->v, s->start, s->stop, s->lookahead);
+}
+
+
+/**
+ * Return a copy of the slice as if it were a normal vector.
+ */
+vect* slice_copy_to_vect(slice* s)
+{
+    vect* copy = new_vect();
+    for (size_t i = 0; i < slice_size(s); i++)
+    {
+        vect_append(copy, obj_copy(slice_get(s, i)));
+    }
+    return copy;
+}
+
+
+/**
+ * Hash the components of the slice together.
+ */
+uint64_t slice_hash(slice* s)
+{
+    uint64_t* hashes = malloc(sizeof(uint64_t) * slice_size(s));
+    for (size_t i = 0; i < slice_size(s); i++)
+    {
+        hashes[i] = obj_hash(slice_get(s, i));
+    }
+    uint64_t hash = hash_uint_sequence(hashes, slice_size(s));
+    free(hashes);
+    return hash;
+}
+
+
+/**
+ * Determine if two slices are identical.
+ */
+bool slice_equals(slice* left, slice* right)
+{
+    if (slice_size(left) != slice_size(right)) { return false; }
+    for (size_t i = 0; i < slice_size(left); i++)
+    {
+        if (!obj_equals(slice_get(left, i), slice_get(right, i))) { return false; }
+    }
+    return true;
 }
 
 

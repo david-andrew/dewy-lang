@@ -242,6 +242,8 @@ uint64_t obj_hash(obj* o)
         case UnicodeString_t: return ustring_hash(o->data);
         // case MetaToken_t: return metatoken_hash((metatoken*)o->data);
         case MetaItem_t: return metaitem_hash(o->data);
+        case Slice_t: return slice_hash(o->data);
+        // case FSet_t: return fset_hash(o->data);
         case GotoKey_t: return gotokey_hash(o->data);
         case Push_t: return hash_uint(*(uint64_t*)o->data);
         case Reduction_t: return reduction_hash(o->data);
@@ -299,6 +301,8 @@ bool obj_equals(obj* left, obj* right)
         case Set_t: return set_equals((set*)left->data, (set*)right->data);
         case CharSet_t: return charset_equals(left->data, right->data);
         case MetaItem_t: return metaitem_equals(left->data, right->data);
+        case Slice_t: return slice_equals(left->data, right->data);
+        //case FSet_t: return fset_equals(left->data, right->data);
         case GotoKey_t: return gotokey_equals(left->data, right->data);
         case Push_t: return *(uint64_t*)left->data == *(uint64_t*)right->data;
         case Reduction_t: return reduction_equals(left->data, right->data);
@@ -336,6 +340,8 @@ void obj_free(obj* o)
             case Set_t: set_free((set*)o->data); break;
             case CharSet_t: charset_free((charset*)o->data); break;
             case MetaItem_t: metaitem_free((metaitem*)o->data); break;
+            case Slice_t: slice_free(o->data); break;
+            case FSet_t: fset_free(o->data); break;
             case GotoKey_t: gotokey_free(o->data); break;
             case Reduction_t: reduction_free(o->data); break;
 

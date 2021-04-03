@@ -18,6 +18,19 @@ fset* new_fset()
 
 
 /**
+ * Create a new fset wrapped in obj.
+ * If s is null, an empty set is created.
+ */
+obj* new_fset_obj(fset* s)
+{
+    if (s == NULL) { s = new_fset(); }
+    obj* S = malloc(sizeof(obj));
+    *S = (obj){.type=FSet_t, .data=s};
+    return S;
+}
+
+
+/**
  * Add the object to the fset.
  */
 void fset_add(fset* s, obj* o)
@@ -62,6 +75,19 @@ void fset_free(fset* s)
     set_free(s->terminals);
     free(s);
 }
+
+
+/**
+ * Return a copy of the fset.
+ */
+fset* fset_copy(fset* s)
+{
+    fset* copy = malloc(sizeof(fset));
+    copy->terminals = set_copy(s->terminals);
+    copy->nullable = s->nullable;
+    return copy;
+}
+
 
 
 #endif

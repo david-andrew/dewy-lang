@@ -15,8 +15,14 @@ typedef struct {
 } slice;
 
 slice* new_slice(vect* v, size_t start, size_t stop, obj* lookahead);
+obj* new_slice_obj(slice* s);
 obj* slice_get(slice* s, size_t i);
 size_t slice_size(slice* s);
 void slice_free(slice* s); //doesn't touch v's data
+void slice_str(slice* s);
+slice* slice_copy(slice* s);
+vect* slice_copy_to_vect(slice* s);
+uint64_t slice_hash(slice* s);
+bool slice_equals(slice* left, slice* right);
 
 #endif

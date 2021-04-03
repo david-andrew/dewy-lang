@@ -22,6 +22,7 @@
  */
 set* srnglr_itemsets;
 dict* srnglr_table;
+dict* srnglr_first_string_cache; //cache the results from first of string
 
 
 /**
@@ -31,6 +32,7 @@ void initialize_srnglr()
 {
     srnglr_itemsets = new_set();
     srnglr_table = new_dict();
+    srnglr_first_string_cache = new_dict();
 }
 
 
@@ -41,6 +43,7 @@ void release_srnglr()
 {
     set_free(srnglr_itemsets);
     dict_free(srnglr_table);
+    dict_free(srnglr_first_string_cache);
 }
 
 
@@ -196,6 +199,17 @@ fset* srnglr_first_of_symbol(uint64_t symbol_idx)
  */
 fset* srnglr_first_of_string(slice* string)
 {
+    //check the cache to see if this was already computed
+    {
+        obj cache_key = (obj){.type=Slice_t, .data=string};
+        if (dict_contains(srnglr_first_string_cache, &cache_key))
+        {
+            fset* cached = dict_get(srnglr_first_string_cache, &cache_key)->data;
+            return fset_copy(cached);
+        }
+    }
+
+    printf("first of string: "); slice_str(string); printf("\n");
     fset* result = new_fset();
 
     if (slice_size(string) == 0)
@@ -222,6 +236,11 @@ fset* srnglr_first_of_string(slice* string)
         }
     }
 
+    //cache the result
+    obj* cache_key = new_slice_obj(slice_copy(string));
+    obj* cache_value = new_fset_obj(fset_copy(result));
+    dict_set(srnglr_first_string_cache, cache_key, cache_value);
+    
     return result;
 }
 
