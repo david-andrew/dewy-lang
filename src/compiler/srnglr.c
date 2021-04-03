@@ -7,6 +7,7 @@
 
 #include "dictionary.h"
 #include "srnglr.h"
+#include "ustring.h"
 #include "slice.h"
 #include "fset.h"
 #include "metaparser.h"
@@ -503,6 +504,9 @@ void srnglr_insert_reduction(uint64_t state_idx, uint64_t symbol_idx, uint64_t h
 }
 
 
+/**
+ * Add an accept action to the srnglr table.
+ */
 void srnglr_insert_accept(uint64_t state_idx, uint64_t symbol_idx)
 {
     //get the actions set for this state, symbol pair
@@ -512,6 +516,208 @@ void srnglr_insert_accept(uint64_t state_idx, uint64_t symbol_idx)
     set_add(actions, new_accept_obj());
 }
 
+
+/**
+ * Print out the itemsets generated for this grammar
+ */
+void srnglr_print_itemsets()
+{
+    for (size_t i = 0; i < set_size(srnglr_itemsets); i++)
+    {
+        set* itemset = srnglr_itemsets->entries[i].item->data;
+        printf("I%zu:\n", i);
+        for (size_t j = 0; j < set_size(itemset); j++)
+        {
+            metaitem* item = itemset->entries[j].item->data;
+            printf("  "); metaitem_str(item); printf("\n");
+        }
+        printf("\n");
+    }
+}
+
+
+/**
+ * Print out the srnglr table as a properly formatted table.
+ */
+void srnglr_print_table()
+{
+    set* symbols = metaparser_get_symbols();
+
+    //compute number of rows in table. this doesn't include the header row
+    size_t num_rows = set_size(srnglr_itemsets);
+
+    //compute the number of columns in the table
+    size_t num_columns = 0;
+    bool* symbols_used = calloc(set_size(symbols), sizeof(bool)); //track whether we've seen a given symbol
+    for (size_t i = 0; i < dict_size(srnglr_table); i++)
+    {
+        gotokey* key = srnglr_table->entries[i].key->data;
+        
+        //check if we haven't seen this symbol yet
+        if (!symbols_used[key->symbol_idx])
+        {
+            symbols_used[key->symbol_idx] = true;
+            num_columns++;
+        }
+    }
+
+    //allocate grid to keep track of the print width of each cell (including headers) in the table
+    uint64_t* cell_widths = calloc((num_rows + 1) * (num_columns + 1), sizeof(uint64_t));
+    
+    //check the widths of each column header
+    {
+        size_t column_idx = 0;
+        for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+        {
+            if (!symbols_used[symbol_idx]) continue;
+
+            obj* symbol = metaparser_get_symbol(symbol_idx);
+            uint64_t width = symbol->type == CharSet_t ? charset_strlen(symbol->data) : ustring_len(symbol->data);
+
+            //save the width into the widths matrix
+            cell_widths[column_idx + 1] = width;
+
+            column_idx++;
+        }
+    }
+
+    //check the widths of each state number
+    for (uint64_t state_idx = 0; state_idx < num_rows; state_idx++)
+    {
+        cell_widths[(num_columns + 1) * (state_idx + 1)] = snprintf("", 0, "%"PRIu64, state_idx);
+    }
+
+    //check the widths of each cell in that column
+    {
+        size_t column_idx = 0;
+        for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+        {
+            if (!symbols_used[symbol_idx]) continue;
+
+            for (size_t state_idx = 0; state_idx < set_size(srnglr_itemsets); state_idx++)
+            {
+                //get the set of actions for this coordinate in the table
+                gotokey key = (gotokey){.state_idx=state_idx, .symbol_idx=symbol_idx};
+                obj key_obj = (obj){.type=GotoKey_t, .data=&key};
+                if (dict_contains(srnglr_table, &key_obj))
+                {
+                    set* actions = dict_get(srnglr_table, &key_obj)->data;
+                    uint64_t width = 0;
+                    for (size_t i = 0; i < set_size(actions); i++)
+                    {
+                        obj* action = actions->entries[i].item;
+                        if (action->type == Push_t){ width += push_strlen(*(uint64_t*)action->data); }
+                        else if (action->type == Reduction_t) { width += reduction_strlen(action->data); }
+                        else if (action->type == Accept_t) { width += accept_strlen(); }
+                        else { printf("ERROR: unknown action object type %u\n", action->type); }
+
+                        if (i < set_size(actions) - 1) { width += 2; } //space for ", " between elements
+                    }
+
+                    // if (column_widths[column_idx] < width) { column_widths[column_idx] = width; }
+                    cell_widths[(num_columns + 1) * (state_idx + 1) + column_idx + 1] = width;
+                }
+            }
+            column_idx++;
+        }
+    }
+
+
+    //using the cell widths, compute the max column widths
+    uint64_t* column_widths = calloc((num_columns + 1), sizeof(uint64_t));
+    for (size_t i = 0; i < num_rows + 1; i++)
+    {
+        for (size_t j = 0; j < num_columns + 1; j++)
+        {
+            if (column_widths[j] < cell_widths[(num_columns + 1) * i + j])
+            {
+                column_widths[j] = cell_widths[(num_columns + 1) * i + j];
+            } 
+        }
+    }
+
+
+    //print the table header
+    for (int i = 0; i < column_widths[0] + 2; i++) { putchar(' '); }
+    printf("│");    
+    {
+        size_t column_idx = 0;
+        for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+        {
+            if (!symbols_used[symbol_idx]) continue;
+
+            obj* symbol = metaparser_get_symbol(symbol_idx);
+            putchar(' '); 
+            obj_print(symbol);
+            putchar(' ');
+
+            uint64_t remaining = column_widths[1 + column_idx] - cell_widths[1 + column_idx];
+            for (int i = 0; i < remaining; i++) { putchar(' '); }
+
+            column_idx++;
+        }
+    }
+    printf("\n");
+
+    //print the divider row
+    for (int i = 0; i < column_widths[0] + 2; i++) { printf("─"); }
+    printf("┼");
+    for (size_t j = 1; j < num_columns + 1; j++)
+        for (int i = 0; i < column_widths[j] + 2; i++)
+            printf("─"); 
+    
+    printf("\n");
+    
+    //print the body of the table    
+    for (size_t state_idx = 0; state_idx < set_size(srnglr_itemsets); state_idx++)
+    {
+        //print out the state number
+        putchar(' ');
+        printf("%zu", state_idx);
+        putchar(' ');
+        uint64_t remaining = column_widths[0] - cell_widths[(num_columns + 1) * (state_idx + 1)];
+        for (int i = 0; i < remaining; i++) { putchar(' '); }
+        printf("│");
+
+        //print out the contents of each column in this row
+        size_t column_idx = 0;
+        for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+        {
+            if (!symbols_used[symbol_idx]) continue;
+
+            putchar(' ');
+
+            //get the set of actions for this coordinate in the table
+            gotokey key = (gotokey){.state_idx=state_idx, .symbol_idx=symbol_idx};
+            obj key_obj = (obj){.type=GotoKey_t, .data=&key};
+            if (dict_contains(srnglr_table, &key_obj))
+            {
+                set* actions = dict_get(srnglr_table, &key_obj)->data;                
+                
+                for (size_t i = 0; i < set_size(actions); i++)
+                {
+                    obj* action = actions->entries[i].item;
+                    obj_print(action);
+                    if (i < set_size(actions) - 1) { printf(", "); }
+                }
+            }
+
+            putchar(' ');
+
+            uint64_t remaining = column_widths[column_idx + 1] - cell_widths[(num_columns + 1) * (state_idx + 1) + column_idx + 1];
+            for (int i = 0; i < remaining; i++) { putchar(' '); }
+
+            column_idx++;
+        }
+        printf("\n");
+    }
+    printf("\n");
+
+
+    free(symbols_used);
+    free(cell_widths);
+    free(column_widths);
+}
 
 
 #endif

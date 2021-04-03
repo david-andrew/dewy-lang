@@ -8,7 +8,7 @@
 #include "set.h"
 
 
-void run_compiler(char* source, bool verbose, bool scanner, bool ast, bool parser, bool grammar, bool table, bool raw_table);
+void run_compiler(char* source, bool verbose, bool scanner, bool ast, bool parser, bool grammar, bool table);
 void print_scanner(vect* tokens, bool verbose);
 void print_ast(uint64_t head_idx, metaast* body_ast, bool verbose);
 void print_parser();

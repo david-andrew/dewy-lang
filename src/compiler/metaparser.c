@@ -170,7 +170,7 @@ void print_grammar_tables()
         {
             //print head
             obj_print(head);
-            printf(" = ");
+            printf(" -> ");
             
             //get the body for this production
             uint64_t* body_idx = bodies->entries[j].item->data;

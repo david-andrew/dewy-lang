@@ -35,6 +35,9 @@ void srnglr_insert_push(uint64_t state_idx, uint64_t symbol_idx, uint64_t goto_i
 void srnglr_insert_reduction(uint64_t state_idx, uint64_t symbol_idx, uint64_t head_idx, uint64_t length);
 void srnglr_insert_accept(uint64_t state_idx, uint64_t symbol_idx);
 
+//print functions
+void srnglr_print_itemsets();
+void srnglr_print_table();
 
 
 
