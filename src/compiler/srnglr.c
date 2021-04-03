@@ -200,14 +200,16 @@ fset* srnglr_first_of_symbol(uint64_t symbol_idx)
 fset* srnglr_first_of_string(slice* string)
 {
     //check the cache to see if this was already computed
+    
+    // obj cache_key = (obj){.type=Slice_t, .data=string};
+    obj* cache_key = new_vect_obj(slice_copy_to_vect(string));
+    if (dict_contains(srnglr_first_string_cache, cache_key))
     {
-        obj cache_key = (obj){.type=Slice_t, .data=string};
-        if (dict_contains(srnglr_first_string_cache, &cache_key))
-        {
-            fset* cached = dict_get(srnglr_first_string_cache, &cache_key)->data;
-            return fset_copy(cached);
-        }
+        fset* cached = dict_get(srnglr_first_string_cache, cache_key)->data;
+        obj_free(cache_key);
+        return fset_copy(cached);
     }
+    
 
     printf("first of string: "); slice_str(string); printf("\n");
     fset* result = new_fset();
@@ -237,7 +239,7 @@ fset* srnglr_first_of_string(slice* string)
     }
 
     //cache the result
-    obj* cache_key = new_slice_obj(slice_copy(string));
+    // obj* cache_key = new_slice_obj(slice_copy(string));
     obj* cache_value = new_fset_obj(fset_copy(result));
     dict_set(srnglr_first_string_cache, cache_key, cache_value);
     
