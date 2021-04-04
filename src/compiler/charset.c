@@ -569,24 +569,21 @@ void charset_free(charset* s)
  */
 uint64_t charset_hash(charset* s)
 {
-    uint64_t hash = 14695981039346656037lu;
+    //create a uint64_t list of data in the charset
+    uint64_t* values = malloc(sizeof(uint64_t) * charset_size(s));
     for (size_t i = 0; i < charset_size(s); i++)
     {
-        //create a length 2 array so we don't have to duplicate the inner loop
-        uint32_t bounds[] = {s->ranges[i].start, s->ranges[i].stop};
-
-        for (size_t j = 0; j < 2; j++)
-        {
-            //reinterpret the codepoint as 4 bytes
-            uint32_t bound = bounds[j];
-            uint8_t* c = (uint8_t*)&bound;
-            for (int i = 3; i >= 0; i--)    //loop from least to most significant
-            {
-                hash ^= *(c + i);
-                hash *= 1099511628211;
-            }
-        }
+        //merge start/stop uint32_t into a single uint64_t
+        uint64_t val = 0;
+        val += s->ranges[i].start;
+        val <<= 32;
+        val += s->ranges[i].stop;
+        values[i] = val;
     }
+
+    //hash the sequence and return the result
+    uint64_t hash = hash_uint_sequence(values, charset_size(s));
+    free(values);
     return hash;
 }
 
