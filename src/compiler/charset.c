@@ -434,7 +434,7 @@ bool is_charset_escape(uint32_t c)
 /**
  * print out the given charset char as either a literal, an escape char or a hex value.
  */
-void charset_char_str(uint32_t c)
+void charset_char_str(uint32_t c, bool single_char)
 {
     if (is_unicode_escape(c))
     { 
@@ -443,7 +443,7 @@ void charset_char_str(uint32_t c)
     }
     else if (is_charset_escape(c))
     {
-        printf("\\");
+        if (!single_char) { printf("\\"); }
         put_unicode(c);
     }
     else if (is_printable_unicode(c))
@@ -464,13 +464,17 @@ void charset_char_str(uint32_t c)
 /**
  * Return the print width of the charset char to be printed.
  */
-int charset_char_strlen(uint32_t c)
+int charset_char_strlen(uint32_t c, bool single_char)
 {
     int width;
-    if (is_unicode_escape(c) || is_charset_escape(c))
+    if (is_unicode_escape(c))
     { 
         //unicode character with an escape slash
         width = 2;
+    }
+    else if (is_charset_escape(c))
+    {
+        width = single_char ? 1 : 2;
     }
     else if (is_printable_unicode(c) || c == UNICODE_ENDMARKER_POINT)
     {
@@ -495,12 +499,12 @@ void charset_str(charset* s)
     if (!single_char) { printf("["); }
     for (int i = 0; i < s->size; i++)
     {
-        charset_char_str(s->ranges[i].start);
+        charset_char_str(s->ranges[i].start, single_char);
         if (s->ranges[i].stop != s->ranges[i].start)
         {
             //only print dash on ranges larger than 2
             if (s->ranges[i].stop - s->ranges[i].start > 1) { printf("-"); }
-            charset_char_str(s->ranges[i].stop);
+            charset_char_str(s->ranges[i].stop, single_char);
         }
     }
     if (!single_char) { printf("]"); }
@@ -517,12 +521,12 @@ int charset_strlen(charset* s)
     if (!single_char) { length += 2; } //for starting/ending []
     for (int i = 0; i < s->size; i++)
     {
-        length += charset_char_strlen(s->ranges[i].start);
+        length += charset_char_strlen(s->ranges[i].start, single_char);
         if (s->ranges[i].stop != s->ranges[i].start)
         {
             //only print dash on ranges larger than 2
             if (s->ranges[i].stop - s->ranges[i].start > 1) { length += 1; } //for dash in range
-            length += charset_char_strlen(s->ranges[i].stop);
+            length += charset_char_strlen(s->ranges[i].stop, single_char);
         }
     }
     return length;
