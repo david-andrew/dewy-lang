@@ -393,23 +393,22 @@ int64_t vect_compare(vect* left, vect* right)
     return 0;
 }
 
-/*
-    Reimplementation of fnv1a for vectors of elements
-*/
+
+/**
+ * Hash the sequence of elements in the vector.
+ */
 uint64_t vect_hash(vect* v)
 {
-    if (v == NULL) { return 0; }
-    uint64_t hash = 14695981039346656037lu;
-    for (int i = 0; i < v->size; i++)
+    //get a list of hashes for each element in the vector
+    uint64_t* hashes = malloc(sizeof(uint64_t) * vect_size(v));
+    for (size_t i = 0; i < vect_size(v); i++)
     {
-        uint64_t h = obj_hash(vect_get(v, i));  //hash the i'th object
-        uint8_t* bytes = (uint8_t*)&h;          //convert the hash to an array of bytes
-        for (int j = 0; j < 8; j++)             //roll each of the bytes into the big hash
-        {
-            hash ^= *(bytes + j);               //j'th byte from hash
-            hash *= 1099511628211; 
-        }
+        hashes[i] = obj_hash(vect_get(v, i));
     }
+
+    //hash the sequence together
+    uint64_t hash = hash_uint_sequence(hashes, vect_size(v));
+    free(hashes);
     return hash;
 }
 
