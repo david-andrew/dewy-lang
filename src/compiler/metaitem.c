@@ -77,7 +77,7 @@ void metaitem_str(metaitem* item)
     vect* body = metaparser_get_production_body(item->head_idx, item->production_idx);
     obj* lookahead = metaparser_get_symbol(item->lookahead_idx);
 
-    printf("["); obj_str(head); printf(" = ");
+    printf("["); obj_str(head); printf(" -> ");
     for (size_t i = 0; i <= vect_size(body); i++)
     {
         if (i == item->position) { printf("•"); }

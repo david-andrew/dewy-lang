@@ -21,6 +21,9 @@ void accept_repr();
 void initialize_srnglr();
 void release_srnglr();
 
+void srnglr_compute_symbol_firsts();
+size_t srnglr_count_firsts_size();
+
 fset* srnglr_first_of_symbol(uint64_t symbol_idx);
 fset* srnglr_first_of_string(slice* string);
 

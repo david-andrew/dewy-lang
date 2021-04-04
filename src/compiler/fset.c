@@ -2,8 +2,10 @@
 #define FSET_C
 
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "fset.h"
+#include "metaparser.h"
 
 
 /**
@@ -40,7 +42,7 @@ void fset_add(fset* s, obj* o)
 
 
 /**
- * Merge right into left, and free left set. 
+ * Merge right into left, and free right set. 
  * If do_nullable is true, also merges nullable 
  * from both sets (i.e. nullable = left->nullable || right->nullable)
  */
@@ -86,6 +88,27 @@ fset* fset_copy(fset* s)
     copy->terminals = set_copy(s->terminals);
     copy->nullable = s->nullable;
     return copy;
+}
+
+
+/**
+ * Print out a string representation of the fset.
+ */
+void fset_str(fset* s)
+{
+    printf("{");
+    for (size_t i = 0; i < set_size(s->terminals); i++)
+    {
+        uint64_t* symbol_idx = s->terminals->entries[i].item->data;
+        obj_str(metaparser_get_symbol(*symbol_idx));
+        if (i < set_size(s->terminals) - 1) { printf(", "); }
+    }
+    if (s->nullable)
+    {
+        if (set_size(s->terminals) > 0) { printf(", "); }
+        printf("ϵ");
+    }
+    printf("}");
 }
 
 

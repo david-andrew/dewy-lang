@@ -18,11 +18,13 @@
 
 /**
  * Global data structures for storing the srnglr item sets and parse table
- * maps from GotoKey_t to sets containing Push_t, Reduction_t, or Accept_t.
+ * itemsets holds all itemsets (i.e. tables states) generated from the grammar.
+ * table maps from GotoKey_t to sets containing Push_t, Reduction_t, or Accept_t.
+ * symbol_firsts maps (implicitly) from symbol_idx's to corresponding first sets.
  */
 set* srnglr_itemsets;
 dict* srnglr_table;
-dict* srnglr_first_string_cache; //cache the results from first of string
+vect* srnglr_symbol_firsts;
 
 
 /**
@@ -32,7 +34,7 @@ void initialize_srnglr()
 {
     srnglr_itemsets = new_set();
     srnglr_table = new_dict();
-    srnglr_first_string_cache = new_dict();
+    srnglr_symbol_firsts = new_vect();
 }
 
 
@@ -43,7 +45,7 @@ void release_srnglr()
 {
     set_free(srnglr_itemsets);
     dict_free(srnglr_table);
-    dict_free(srnglr_first_string_cache);
+    vect_free(srnglr_symbol_firsts);
 }
 
 
@@ -123,6 +125,83 @@ void accept_repr()
 }
 
 
+
+/**
+ * Compute all first sets for each symbol in the grammar.
+ */
+void srnglr_compute_symbol_firsts()
+{
+    //ensure that the endmarker symbol has been added to the metaparser. TODO->move this into the intialization of the metaparser?
+    metaparser_get_endmarker_symbol_idx();
+
+    //create empty fsets for each symbol in the grammar
+    set* symbols = metaparser_get_symbols();
+    for (size_t i = 0; i < set_size(symbols); i++)
+    {
+        vect_append(srnglr_symbol_firsts, new_fset_obj(NULL));
+    }
+
+    //update each set until no new changes occur
+    size_t count;
+    do
+    {
+        count = srnglr_count_firsts_size();
+        // printf("firsts:\n"); vect_str(srnglr_symbol_firsts); printf("\n");
+
+        //for each symbol
+        for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+        {
+            fset* symbol_fset = vect_get(srnglr_symbol_firsts, symbol_idx)->data;
+            if (metaparser_is_symbol_terminal(symbol_idx))
+            {
+                fset_add(symbol_fset, new_uint_obj(symbol_idx));
+                symbol_fset->nullable = false;
+            }
+            else
+            {
+                set* bodies = metaparser_get_production_bodies(symbol_idx);
+                for (size_t production_idx = 0; production_idx < set_size(bodies); production_idx++)
+                {
+                    vect* body = metaparser_get_production_body(symbol_idx, production_idx);
+                    
+                    //for each element in body, get its fset, and merge into this one. stop if non-nullable
+                    for (size_t i = 0; i < vect_size(body); i++)
+                    {
+                        uint64_t* body_symbol_idx = vect_get(body, i)->data;
+                        fset* body_symbol_fset = vect_get(srnglr_symbol_firsts, *body_symbol_idx)->data;
+                        fset_union_into(symbol_fset, fset_copy(body_symbol_fset), true);
+                        if (!body_symbol_fset->nullable) { break; }
+                    }
+
+                    //epsilon strings add epsilon to fset
+                    if (vect_size(body) == 0)
+                    {
+                        symbol_fset->nullable = true;
+                    }
+                }
+            }
+        }
+    }
+    while(count < srnglr_count_firsts_size());
+
+    printf("completed firsts\n"); vect_str(srnglr_symbol_firsts); printf("\n");
+}
+
+
+/**
+ * Helper function to count the total number of elements in all first sets 
+ */
+size_t srnglr_count_firsts_size()
+{
+    size_t count = 0;
+    for (size_t i = 0; i < vect_size(srnglr_symbol_firsts); i++)
+    {
+        fset* s = vect_get(srnglr_symbol_firsts, i)->data;
+        count += set_size(s->terminals) + s->nullable;
+    }
+    return count;
+}
+
 /*
 def first_of_symbol(X)
     if X is terminal 
@@ -150,68 +229,12 @@ def first_of_string(string = X1 X2 ... Xn)
     return result
 */
 
-/**
- * Compute the first set for the given individual symbol.
- */
-fset* srnglr_first_of_symbol(uint64_t symbol_idx)
-{
-    //set to hold result
-    fset* result = new_fset();
-    
-    if (metaparser_is_symbol_terminal(symbol_idx))
-    {
-        fset_add(result, new_uint_obj(symbol_idx));
-        result->nullable = false;
-        return result;
-    }
-    else //handle non-terminal identifier
-    {
-        //get all production bodies for this non-terminal
-        set* bodies = metaparser_get_production_bodies(symbol_idx);
-        if (bodies == NULL)
-        {
-            //Error, but return nullable empty set so that the parser doesn't get stuck...
-            //TODO->convert to a critical error that crashes the parser...but need to free allocated memory...
-            exit(1);
-        }
-
-        //for each production body
-        for (size_t i = 0; i < set_size(bodies); i++)
-        {
-            vect* body = metaparser_get_production_body(symbol_idx, i);
-            slice string = (slice){ //stack allocate to minimize short lived heap objects
-                .v=body, 
-                .start=0, 
-                .stop=vect_size(body), 
-                .lookahead=NULL
-            };
-            fset* first_i = srnglr_first_of_string(&string);
-            fset_union_into(result, first_i, true); //handles freeing first_i. also merge nullable
-        }
-    }
-
-    return result;
-}
-
 
 /**
  * Compute the first set for the given string of symbols.
  */
 fset* srnglr_first_of_string(slice* string)
 {
-    //check the cache to see if this was already computed
-    
-    // obj cache_key = (obj){.type=Slice_t, .data=string};
-    obj* cache_key = new_vect_obj(slice_copy_to_vect(string));
-    if (dict_contains(srnglr_first_string_cache, cache_key))
-    {
-        fset* cached = dict_get(srnglr_first_string_cache, cache_key)->data;
-        obj_free(cache_key);
-        return fset_copy(cached);
-    }
-    
-
-    printf("first of string: "); slice_str(string); printf("\n");
     fset* result = new_fset();
 
     if (slice_size(string) == 0)
@@ -225,9 +248,9 @@ fset* srnglr_first_of_string(slice* string)
         for (size_t i = 0; i < slice_size(string); i++)
         {
             uint64_t* symbol_idx = slice_get(string, i)->data;
-            fset* first_i = srnglr_first_of_symbol(*symbol_idx);
+            fset* first_i = vect_get(srnglr_symbol_firsts, *symbol_idx)->data;
             bool nullable = first_i->nullable;
-            fset_union_into(result, first_i, false); //merge first of symbol into result. Don't merge nullable
+            fset_union_into(result, fset_copy(first_i), false); //merge first of symbol into result. Don't merge nullable
             if (i == slice_size(string) - 1 && nullable)
             {
                 result->nullable = true;
@@ -237,11 +260,6 @@ fset* srnglr_first_of_string(slice* string)
             if (!nullable){ break; }
         }
     }
-
-    //cache the result
-    // obj* cache_key = new_slice_obj(slice_copy(string));
-    obj* cache_value = new_fset_obj(fset_copy(result));
-    dict_set(srnglr_first_string_cache, cache_key, cache_value);
     
     return result;
 }
@@ -382,6 +400,9 @@ void srnglr_generate_grammar_itemsets()
 {
     //get the symbol for the augmented start rule from the grammar
     uint64_t start_idx = metaparser_get_start_symbol_idx();
+
+    //precompute all first sets for each grammar symbol
+    srnglr_compute_symbol_firsts();
 
     //create the first itemset by taking closure on the start rule
     set* kernel = new_set();

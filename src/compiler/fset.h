@@ -17,6 +17,7 @@ void fset_add(fset* s, obj* o);
 void fset_union_into(fset* left, fset* right, bool do_nullable); //merge right into left, frees right, handles nullable
 void fset_free(fset* s);
 fset* fset_copy(fset* s);
+void fset_str(fset* s);
 
 
 

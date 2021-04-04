@@ -194,6 +194,7 @@ void obj_str(obj* o)
         case UnicodeString_t: ustring_str(o->data); break;
         case MetaToken_t: metatoken_repr(o->data); break;
         case MetaItem_t: metaitem_str(o->data); break;
+        case FSet_t: fset_str(o->data); break;
         case GotoKey_t: gotokey_str(o->data); break;
         case Push_t: push_str(*(uint64_t*)o->data); break;
         case Reduction_t: reduction_str(o->data); break;
