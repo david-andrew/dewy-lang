@@ -16,10 +16,11 @@
 #E = '(' #T ')' | #T;
 
 //terms (numbers/identifiers)
-//technically these are ambiguous, but the rnglr parser can handle automatically. 
+//technically these are ambiguous, but the rnglr parser can handle automatically in this grammar.
+//i.e. an LR(1) parser would report a shift/reduce conflict, but rnglr applies both in parallel.
 //to make actually unambiguous, need to remove the +/* from the rules
 #T = #N | #I;
 #N = [0-9]+;
 #I = [A-Za-z_] [A-Za-z0-9!@%&_?]*;
 //#N = [0-9];       // unambiguous -> every number is 1 digit
-//#I = [A-Za-z]    // unambiguous -> every identifier is a single letter
+//#I = [A-Za-z]     // unambiguous -> every identifier is a single letter
