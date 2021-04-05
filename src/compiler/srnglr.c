@@ -141,43 +141,46 @@ void srnglr_compute_symbol_firsts()
         vect_append(srnglr_symbol_firsts, new_fset_obj(NULL));
     }
 
-    //update each set until no new changes occur
+    //compute firsts for all terminal symbols, since the fset is just the symbol itself.
+    for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+    {
+        if (!metaparser_is_symbol_terminal(symbol_idx)) { continue; }
+        fset* symbol_fset = vect_get(srnglr_symbol_firsts, symbol_idx)->data;
+        fset_add(symbol_fset, new_uint_obj(symbol_idx));
+        symbol_fset->nullable = false;
+    }
+
+    //compute first for all non-terminal symbols. update each set until no new changes occur
     size_t count;
     do
     {
+        //keep track of if any sets got larger (i.e. by adding new terminals to any fset's)
         count = srnglr_count_firsts_size();
-        // printf("firsts:\n"); vect_str(srnglr_symbol_firsts); printf("\n");
 
-        //for each symbol
+        //for each non-terminal symbol
         for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
         {
-            fset* symbol_fset = vect_get(srnglr_symbol_firsts, symbol_idx)->data;
-            if (metaparser_is_symbol_terminal(symbol_idx))
-            {
-                fset_add(symbol_fset, new_uint_obj(symbol_idx));
-                symbol_fset->nullable = false;
-            }
-            else
-            {
-                set* bodies = metaparser_get_production_bodies(symbol_idx);
-                for (size_t production_idx = 0; production_idx < set_size(bodies); production_idx++)
-                {
-                    vect* body = metaparser_get_production_body(symbol_idx, production_idx);
-                    
-                    //for each element in body, get its fset, and merge into this one. stop if non-nullable
-                    for (size_t i = 0; i < vect_size(body); i++)
-                    {
-                        uint64_t* body_symbol_idx = vect_get(body, i)->data;
-                        fset* body_symbol_fset = vect_get(srnglr_symbol_firsts, *body_symbol_idx)->data;
-                        fset_union_into(symbol_fset, fset_copy(body_symbol_fset), true);
-                        if (!body_symbol_fset->nullable) { break; }
-                    }
+            if (metaparser_is_symbol_terminal(symbol_idx)) { continue; }
 
-                    //epsilon strings add epsilon to fset
-                    if (vect_size(body) == 0)
-                    {
-                        symbol_fset->nullable = true;
-                    }
+            fset* symbol_fset = vect_get(srnglr_symbol_firsts, symbol_idx)->data;            
+            set* bodies = metaparser_get_production_bodies(symbol_idx);
+            for (size_t production_idx = 0; production_idx < set_size(bodies); production_idx++)
+            {
+                vect* body = metaparser_get_production_body(symbol_idx, production_idx);
+                
+                //for each element in body, get its fset, and merge into this one. stop if non-nullable
+                for (size_t i = 0; i < vect_size(body); i++)
+                {
+                    uint64_t* body_symbol_idx = vect_get(body, i)->data;
+                    fset* body_symbol_fset = vect_get(srnglr_symbol_firsts, *body_symbol_idx)->data;
+                    fset_union_into(symbol_fset, fset_copy(body_symbol_fset), true);
+                    if (!body_symbol_fset->nullable) { break; }
+                }
+
+                //epsilon strings add epsilon to fset
+                if (vect_size(body) == 0)
+                {
+                    symbol_fset->nullable = true;
                 }
             }
         }
