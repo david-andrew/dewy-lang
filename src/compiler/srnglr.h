@@ -40,6 +40,7 @@ void srnglr_insert_accept(uint64_t state_idx, uint64_t symbol_idx);
 
 //print functions
 void srnglr_print_itemsets();
+void srnglr_print_firsts();
 void srnglr_print_table();
 
 

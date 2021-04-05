@@ -452,7 +452,7 @@ void charset_char_str(uint32_t c, bool single_char)
     }
     else if (c == UNICODE_ENDMARKER_POINT)
     {
-        printf("$");
+        printf("#$");
     }
     else 
     {
@@ -467,7 +467,7 @@ void charset_char_str(uint32_t c, bool single_char)
 int charset_char_strlen(uint32_t c, bool single_char)
 {
     int width;
-    if (is_unicode_escape(c))
+    if (is_unicode_escape(c) || c == UNICODE_ENDMARKER_POINT)
     { 
         //unicode character with an escape slash
         width = 2;
@@ -476,7 +476,7 @@ int charset_char_strlen(uint32_t c, bool single_char)
     {
         width = single_char ? 1 : 2;
     }
-    else if (is_printable_unicode(c) || c == UNICODE_ENDMARKER_POINT)
+    else if (is_printable_unicode(c))
     {
         //single normal unicode character
         width = 1;

@@ -183,8 +183,6 @@ void srnglr_compute_symbol_firsts()
         }
     }
     while(count < srnglr_count_firsts_size());
-
-    printf("completed firsts\n"); vect_str(srnglr_symbol_firsts); printf("\n");
 }
 
 
@@ -575,6 +573,23 @@ void srnglr_print_itemsets()
         }
         printf("\n");
     }
+}
+
+
+/**
+ * Print out the first sets generated for each head in the grammar.
+ */
+void srnglr_print_firsts()
+{
+    for (size_t symbol_idx = 0; symbol_idx < vect_size(srnglr_symbol_firsts); symbol_idx++)
+    {
+        // if (metaparser_is_symbol_terminal(symbol_idx)) { continue; }
+        obj_str(metaparser_get_symbol(symbol_idx));
+        printf(" -> ");
+        obj_str(vect_get(srnglr_symbol_firsts, symbol_idx));
+        printf("\n");
+    }
+    printf("\n");
 }
 
 
