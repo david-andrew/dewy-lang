@@ -98,10 +98,28 @@ int64_t ustring_cmp(uint32_t* left, uint32_t* right)
     uint32_t l, r;
     do
     {
-        l = *left++;
-        r = *right++;
+        l = *left++; r = *right++;
         if (l == 0) break;
     }
+    while (l == r);
+    return l - r;
+}
+
+
+/**
+ * Compare a unicode string to a char* string.
+ * Identical to ustring_cmp(), just that it handles
+ * `right` as a char*. This means that `left` would need to be 
+ * ascii only for it to possibly match `right`
+ */
+int64_t ustring_charstar_cmp(uint32_t* left, char* right)
+{
+    uint32_t l; char r;
+    do 
+    {
+        l = *left++; r = *right++;
+        if (l == 0) break;
+    } 
     while (l == r);
     return l - r;
 }

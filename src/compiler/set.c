@@ -245,7 +245,8 @@ obj* set_get_at_index(set* s, size_t i)
     }
     else
     {
-        return NULL;
+        printf("ERROR: attempted to get set item from index %zu in set of size %zu\n", i, set_size(s));
+        exit(1);
     }
 }
 

@@ -828,9 +828,29 @@ uint64_t metaparser_get_endmarker_symbol_idx()
  */
 uint64_t metaparser_get_start_symbol_idx()
 {
+    //check if start symbol not set yet
     if (metaparser_start_symbol_idx == NULL_SYMBOL_INDEX)
     {
-        metaparser_set_start_symbol(NULL_SYMBOL_INDEX);
+        //if can't find a start symbol, tell parser to use the first non-terminal.
+        uint64_t start_symbol_idx = NULL_SYMBOL_INDEX;
+
+        //check for any rules labelled exactly `#start`
+        set* symbols = metaparser_get_symbols();
+        for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+        {
+            if (metaparser_is_symbol_terminal(symbol_idx)) { continue; }
+            uint32_t* terminal = metaparser_get_symbol(symbol_idx)->data;
+
+            //found #start non-terminal
+            if (ustring_charstar_cmp(terminal, "#start") == 0)
+            {
+                start_symbol_idx = symbol_idx;
+                break;
+            }
+        }
+
+        //set the start symbol using either the found #start rule, or NULL
+        metaparser_set_start_symbol(start_symbol_idx);
     }
     return metaparser_start_symbol_idx;
 }
@@ -947,9 +967,11 @@ vect* metaparser_get_production_body(uint64_t head_idx, uint64_t production_idx)
  * Create an augmented production to be used by the grammar during parsing.
  * start_symbol_idx may be NULL_SYMBOL_INDEX, in which case, the first non-terminal
  * in metaparser_symbols will be used as the start rule.
+ * If provided `start_symbol_idx` is a suitable augmented start symbol, then use that as is.
  */
 void metaparser_set_start_symbol(uint64_t start_symbol_idx)
 {
+    //if not given an index, select the first non-terminal as the start symbol
     if (start_symbol_idx == NULL_SYMBOL_INDEX)
     {
         if (set_size(metaparser_symbols) == 0)
@@ -965,7 +987,23 @@ void metaparser_set_start_symbol(uint64_t start_symbol_idx)
         }
     }
 
-    //create a new production S' -> S for the augmented grammar
+    //check if we need an augmented head, or we can just use the start rule
+    set* bodies = metaparser_get_production_bodies(start_symbol_idx);
+    if (set_size(bodies) == 1)
+    {
+        vect* body = metaparser_get_production_body(start_symbol_idx, 0);
+        if (vect_size(body) == 1)
+        {
+            uint64_t* symbol_idx = vect_get(body, 0)->data;
+            if (!metaparser_is_symbol_terminal(*symbol_idx))
+            {
+                metaparser_start_symbol_idx = start_symbol_idx;
+                return;
+            }
+        }
+    }
+    
+    //Otherwise, create a new production S' -> S for the augmented grammar
     uint64_t augmented_head_idx = metaparser_get_anonymous_rule_head();
     vect* augmented_body = new_vect();
     vect_append(augmented_body, new_uint_obj(start_symbol_idx));

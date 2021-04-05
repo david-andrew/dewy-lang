@@ -17,6 +17,7 @@ uint32_t* ustring_charstar_substr(char* str, int start, int stop);
 uint32_t* ustring_utf8_substr(char* str, int start, int stop);
 size_t ustring_len(uint32_t* string);
 int64_t ustring_cmp(uint32_t* left, uint32_t* right);
+int64_t ustring_charstar_cmp(uint32_t* left, char* right);
 uint32_t* ustring_clone(uint32_t* string);
 uint64_t ustring_hash(uint32_t* str);
 uint64_t dec_digit_to_value(char c);

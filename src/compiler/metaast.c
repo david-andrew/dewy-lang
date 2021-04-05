@@ -1748,7 +1748,7 @@ void metaast_repr_inner(metaast* ast, int level)
         case metaast_charset:
         {
             metaast_charset_node* node = ast->node;
-            charset_str(node->c); printf("\n");
+            printf("("); charset_str(node->c); printf(")\n");
             break;
         }
         
