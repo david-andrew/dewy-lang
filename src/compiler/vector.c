@@ -16,22 +16,35 @@
 
 
 
-
+/**
+ * Create a new vector with the default amount of capacity (8)
+ */
 vect* new_vect()
+{
+    return new_vect_with_capacity(DEFAULT_VECT_CAPACITY);
+}
+
+
+/**
+ * Create a new vector with the amount of capacity specified.
+ */
+//TODO->perhaps we should ensure that the init_capacity is a power of 2?
+vect* new_vect_with_capacity(size_t init_capacity)
 {
     vect* v = malloc(sizeof(vect));
     *v = (vect){
         .head = 0, 
         .size = 0, 
-        .capacity = DEFAULT_VECT_CAPACITY, 
-        .list = calloc(DEFAULT_VECT_CAPACITY, sizeof(obj*))
+        .capacity = init_capacity, 
+        .list = calloc(init_capacity, sizeof(obj*))
     };
     return v;
 }
 
-/*
-    Create a vector object. points to v if it isn't null, else points to a new vect
-*/
+
+/**
+ * Create a vector object. points to v if it isn't null, else points to a new vect
+ */
 obj* new_vect_obj(vect* v)
 {
     if (v == NULL) v = new_vect();
@@ -41,17 +54,28 @@ obj* new_vect_obj(vect* v)
 }
 
 
-
+/**
+ * Get the number of elements in the vector.
+ */
 size_t vect_size(vect* v)
 {
     return v->size;
 }
 
+
+/**
+ * Get the amount of space the vector has allocated 
+ * for new elements, before it needs to be resized.
+ */
 size_t vect_capacity(vect* v)
 {
     return v->capacity;
 }
 
+
+/**
+ * Reallocate the vector so that it has the new specified amount of capacity.
+ */
 void vect_resize(vect* v, size_t new_size)
 {
     if (new_size < v->size)
@@ -70,7 +94,7 @@ void vect_resize(vect* v, size_t new_size)
     //copy all elements from the old list into the new list
     for (int i = 0; i < v->size; i++)
     {
-        new_list[i] = vect_get(v, i);//v->list[(v->head + i) % v->capacity];
+        new_list[i] = vect_get(v, i);
     }
 
     //update vector information
@@ -152,16 +176,6 @@ obj* vect_peek(vect* v)
     return v->size > 0 ? vect_get(v, v->size - 1) : NULL;
 }
 
-// bool vect_enqueue(vect* v, obj* item)
-// {
-//     return vect_prepend(v, item);
-// }
-
-// obj* vect_dequeue(vect* v)
-// {
-//     return v->size > 0 ? vect_remove(v, v->size - 1) : NULL;
-// }
-
 void vect_enqueue(vect* v, obj* item)
 {
     vect_append(v, item);
@@ -173,7 +187,7 @@ obj* vect_dequeue(vect* v)
 }
 
 
-
+//TODO->should probably free the current item at the index
 void vect_set(vect* v, obj* item, size_t index)
 {
     if (index >= v->size)

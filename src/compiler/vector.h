@@ -31,6 +31,7 @@ typedef struct
 
 
 vect* new_vect();
+vect* new_vect_with_capacity(size_t size_hint);
 obj* new_vect_obj(vect* v);
 size_t vect_size(vect* v);
 size_t vect_capacity(vect* v);
