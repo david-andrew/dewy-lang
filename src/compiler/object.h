@@ -27,6 +27,8 @@ typedef enum
     Push_t,
     Reduction_t,
     Accept_t,
+    GSSEdge_t,
+    //SPPFNode_t?
     Vector_t,
     Dictionary_t,
     Set_t,

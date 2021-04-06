@@ -1,12 +1,12 @@
-all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o metaast.o metascanner.o metaparser.o charset.o metaitem.o fset.o slice.o gotokey.o reduction.o srnglr.o
+all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o metaast.o metascanner.o metaparser.o charset.o metaitem.o fset.o slice.o gotokey.o reduction.o gss.o sppf.o srnglr.o
  
 
 #current completed step is simple lexer
-dewy: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o metaitem.o fset.o slice.o gotokey.o reduction.o srnglr.o
-	clang -o dewy dewy_compiler_compiler.o utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o metaitem.o fset.o slice.o gotokey.o reduction.o srnglr.o -lm
+dewy: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o metaitem.o fset.o slice.o gotokey.o reduction.o gss.o sppf.o srnglr.o
+	clang -o dewy dewy_compiler_compiler.o utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o metaitem.o fset.o slice.o gotokey.o reduction.o gss.o sppf.o srnglr.o -lm
 
 debug:
-	clang -o dewy dewy_compiler_compiler.c utilities.c object.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c metaitem.c fset.c slice.c gotokey.c reduction.c srnglr.c -lm -g
+	clang -o dewy dewy_compiler_compiler.c utilities.c object.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c metaitem.c fset.c slice.c gotokey.c reduction.c gss.c sppf.c srnglr.c -lm -g
 
 utilities.o: utilities.c utilities.h
 	clang -c -o utilities.o utilities.c
@@ -53,8 +53,14 @@ slice.o: slice.c slice.h
 gotokey.o: gotokey.c gotokey.h
 	clang -c -o gotokey.o gotokey.c
 
-reduction.o:  reduction.c reduction.h
+reduction.o: reduction.c reduction.h
 	clang -c -o reduction.o reduction.c
+
+gss.o: gss.c gss.h
+	clang -c -o gss.o gss.c
+
+sppf.o: sppf.c sppf.h
+	clang -c -o sppf.o sppf.c
 
 srnglr.o: srnglr.c srnglr.h
 	clang -c -o srnglr.o srnglr.c
