@@ -542,6 +542,38 @@ set* srnglr_get_table_actions(uint64_t state_idx, uint64_t symbol_idx)
 
 
 /**
+ * Get the set of all actions that corresponds to the given state and input character.
+ * Since a single input character can match multiple grammar symbols, merge the action
+ * sets from each cell that matches the (state, input) pair.
+ */
+set* srnglr_get_merged_table_actions(uint64_t state_idx, uint32_t c)
+{
+    //interpret null terminator as the endmarker symbol #$
+    if (c == 0){ c = UNICODE_ENDMARKER_POINT; }
+
+    //set to merge actions into
+    set* actions = new_set();
+
+    set* symbols = metaparser_get_symbols();
+    for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+    {        
+        //characters can only match terminals (i.e. charsets)
+        if (!metaparser_is_symbol_terminal(symbol_idx)) { continue; }
+
+        //if the character is a member of the symbol charset
+        charset* terminal = metaparser_get_symbol(symbol_idx)->data;
+        if (charset_contains_c(terminal, c))
+        {
+            //merge in the actions for this cell
+            set* cell_actions = srnglr_get_table_actions(state_idx, symbol_idx);
+            set_union_into(actions, set_copy(cell_actions));
+        }
+    }
+    return actions;
+}
+
+
+/**
  * Add a Push_t item to the srnglr table.
  */
 void srnglr_insert_push(uint64_t state_idx, uint64_t symbol_idx, uint64_t goto_idx)
@@ -580,6 +612,60 @@ void srnglr_insert_accept(uint64_t state_idx, uint64_t symbol_idx)
     set_add(actions, new_accept_obj());
 }
 
+
+/**
+ * Parse an input string according to the preparsed grammar.
+ * Implementation 1 is pulled directly from rnglr paper.
+ * Returns whether or not the parse was successful.
+ */
+bool srnglr_parser(uint32_t* src)
+{
+    //length 0 input is only a successful parse if table includes accept at state 0, with #$ lookahead
+    if (src[0] == 0)
+    {
+        uint64_t endmarker_idx = metaparser_get_endmarker_symbol_idx();
+        set* actions = srnglr_get_table_actions(0, endmarker_idx);
+        for (size_t i = 0; i < set_size(actions); i++)
+        {
+            if (actions->entries[i].item->type == Accept_t) { return true; }
+        }
+        return false;
+    }
+
+    //normal parse process
+
+    //create the start node, and insert into the GSS
+    gss_add_node(GSS, 0, 0);
+    set* actions = srnglr_get_merged_table_actions(0, src[0]);
+    for (size_t i = 0; i < set_size(actions); i++)
+    {
+        obj* action = actions->entries[i].item;
+        if (action->type == Push_t)
+        {
+            uint64_t k = *(uint64_t*)action->data;
+            //add (0, k) to Q
+            
+        }
+    }
+}
+
+
+/**
+ * Reducer subroutine from rnglr parsing process
+ */
+void srnglr_reducer(size_t i, uint32_t* src)
+{
+
+}
+
+
+/**
+ * Shifter subroutien from rnglr parsing process
+ */
+void srnglr_shifter(size_t i, uint32_t* src)
+{
+
+}
 
 /**
  * Print out the itemsets generated for this grammar

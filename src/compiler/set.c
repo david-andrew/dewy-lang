@@ -301,6 +301,27 @@ set* set_union(set* a, set* b)
     return u;
 }
 
+
+/**
+ * Merge right set `b` into left set `a`, and free `b`.
+ */
+void set_union_into(set* a, set* b)
+{
+    //insert each item of right into left
+    for (size_t i = 0; i < set_size(b); i++)
+    {
+        obj* item = b->entries[i].item;
+        if (!set_contains(a, item))
+        {
+            set_add(a, obj_copy(item));
+        }
+    }
+    
+    //free right set
+    set_free(b);
+}
+
+
 /**
  * convenience method for reassigning a variable with the result of a union
  * set* a will be freed. union(a, b) will be returned

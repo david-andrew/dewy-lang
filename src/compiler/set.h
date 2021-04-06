@@ -41,6 +41,7 @@ obj* set_get_at_index(set* s, size_t i);
 bool set_contains(set* s, obj* item);
 set* set_copy(set* s);
 set* set_union(set* a, set* b);
+void set_union_into(set* a, set* b);
 set* set_union_equals(set* a, set* b);
 set* set_intersect(set* a, set* b);
 bool set_equals(set* a, set* b);

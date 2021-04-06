@@ -21,6 +21,33 @@ gss* new_gss(size_t size_hint)
     return g;
 }
 
+/**
+ * Get a specific set of nodes from the GSS.
+ * Handles allocating empty sets if they do not exist yet.
+ */
+set* gss_get_nodes_set(gss* g, size_t nodes_idx)
+{
+    //create empty sets up to the requested one, if they don't exist yet.
+    while (vect_size(g->nodes) <= nodes_idx)
+    {
+        vect_append(g->nodes, new_set_obj(NULL));
+    }
+
+    //return the requested set.
+    return vect_get(g->nodes, nodes_idx)->data;
+}
+
+
+/**
+ * Insert a node into the GSS.
+ */
+void gss_add_node(gss* g, size_t nodes_idx, uint64_t state)
+{
+    set* U = gss_get_nodes_set(g, nodes_idx);
+    obj* v = new_uint_obj(state);
+    set_add(U, v);
+}
+
 
 /**
  * Print out a string representation of the GSS.

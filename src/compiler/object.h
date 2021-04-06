@@ -17,6 +17,7 @@ typedef enum
     CharSet_t,
     Integer_t, 
     UInteger_t,
+    UIntNTuple_t,
     String_t,
     UnicodeString_t,
     MetaToken_t,
