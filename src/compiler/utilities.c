@@ -133,7 +133,7 @@ size_t read_unicode_file(char* filename, uint32_t** destination)
     while (eat_utf8(&c)) { unicode_length++; }
 
     //create a uint32_t string to hold unicode characters
-    *destination = malloc(unicode_length + 1 * sizeof(uint32_t));
+    *destination = malloc((unicode_length + 1) * sizeof(uint32_t));
 
     //copy the string into the unicode array
     uint32_t* u = *destination;     //pointer to current unicode character

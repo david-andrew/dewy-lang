@@ -29,7 +29,7 @@ void gss_str(gss* g)
 {
     printf("GSS Nodes:\n");
     vect_str(g->nodes);
-    printf("GSS Edges:\n");
+    printf("\nGSS Edges:\n");
     set_str(g->edges);
     printf("\n");
 }

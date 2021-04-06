@@ -21,6 +21,7 @@
 
 #include "utilities.h"
 #include "object.h"
+#include "ustring.h"
 #include "metatoken.h"
 #include "metascanner.h"
 #include "metaparser.h"
@@ -192,7 +193,16 @@ void run_compiler_compiler(char* source, bool verbose, bool scanner, bool ast, b
  */
 void run_compiler(uint32_t* source, bool compile, bool forest)
 {
+    if (compile)
+    {
+        printf("INPUT SOURCE:\n```\n");
+        ustring_str(source);
+        printf("\n```\n\n");
 
+        printf("INPUT GRAPH STRUCTURED STACK:\n");
+        print_compiler();
+        printf("\n\n");
+    }
 }
 
 
@@ -257,4 +267,13 @@ void print_grammar()
 void print_table()
 {
     srnglr_print_table();
+}
+
+
+/**
+ * Print out the GSS generated during parsing of the input.
+ */
+void print_compiler()
+{
+    srnglr_print_gss();
 }

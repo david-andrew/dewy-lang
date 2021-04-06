@@ -119,6 +119,7 @@ obj* new_accept_obj()
 
 
 /**
+void srnglr_print_gss();
  * Print out a string representing the accept action.
  */
 void accept_str()
@@ -797,6 +798,11 @@ void srnglr_print_table()
     free(symbols_used);
     free(cell_widths);
     free(column_widths);
+}
+
+void srnglr_print_gss()
+{
+    gss_str(GSS);
 }
 
 
