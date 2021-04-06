@@ -15,6 +15,7 @@
 #include "slice.h"
 #include "gotokey.h"
 #include "reduction.h"
+#include "gss.h"
 
 /**
  * Global data structures for storing the srnglr item sets and parse table
@@ -26,15 +27,28 @@ set* srnglr_itemsets;
 dict* srnglr_table;
 vect* srnglr_symbol_firsts;
 
+//vectors used during SRNGLR parsing
+vect* srnglr_R;
+vect* srnglr_Q;
+vect* srnglr_Qp;
+
+gss* GSS;
+// sppf* SPPF = NULL;
 
 /**
  * Initialize global srnglr data structures.
  */
-void initialize_srnglr()
+void initialize_srnglr(size_t input_size)
 {
     srnglr_itemsets = new_set();
     srnglr_table = new_dict();
     srnglr_symbol_firsts = new_vect();
+
+    srnglr_R = new_vect();
+    srnglr_Q = new_vect();
+    srnglr_Qp = new_vect();
+
+    GSS = new_gss(input_size);
 }
 
 
@@ -46,6 +60,12 @@ void release_srnglr()
     set_free(srnglr_itemsets);
     dict_free(srnglr_table);
     vect_free(srnglr_symbol_firsts);
+
+    vect_free(srnglr_R);
+    vect_free(srnglr_Q);
+    vect_free(srnglr_Qp);
+
+    if (GSS != NULL) { gss_free(GSS); } 
 }
 
 

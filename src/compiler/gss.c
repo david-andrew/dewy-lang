@@ -1,6 +1,8 @@
 #ifndef GSS_C
 #define GSS_C
 
+#include <stdio.h>
+
 #include "gss.h"
 #include "utilities.h"
 
@@ -25,12 +27,16 @@ gss* new_gss(size_t size_hint)
  */
 void gss_str(gss* g)
 {
-
+    printf("GSS Nodes:\n");
+    vect_str(g->nodes);
+    printf("GSS Edges:\n");
+    set_str(g->edges);
+    printf("\n");
 }
 
 
 /**
- * 
+ * Free the GSS's allocated memory. 
  */
 void gss_free(gss* g)
 {
@@ -45,7 +51,7 @@ void gss_free(gss* g)
  */
 void gss_idx_str(gss_idx* i)
 {
-
+    printf("(%zu, %zu)", i->nodes_idx, i->node_idx);
 }
 
 
@@ -107,7 +113,7 @@ bool gss_edge_equals(gss_edge* left, gss_edge* right)
  */
 void gss_edge_str(gss_edge* e)
 {
-
+    printf("["); gss_idx_str(&e->parent); printf(" -> "); gss_idx_str(&e->child); printf("]");
 }
 
 

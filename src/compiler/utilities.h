@@ -11,7 +11,8 @@ size_t dewy_index(int index, int length);
 char* substr(char* str, int start, int stop);
 char* clone(char* string);
 char* concatenate(char* left, char* right);
-char* read_file(char* filename);
+size_t read_file(char* filename, char** destination);
+size_t read_unicode_file(char* filename, uint32_t** destination);
 void repeat_str(char* str, size_t times);
 
 //hash functions

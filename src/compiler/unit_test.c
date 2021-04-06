@@ -210,7 +210,7 @@ int misc_tests()
 int metascanner_tests()
 {
     //load the source file into a string, and keep a copy of the head of the file
-    char* source = read_file("../../tests/test_syntax.dewy");
+    char* source; read_file("../../tests/test_syntax.dewy", &source);
     char* head = source;
 
     //set up structures for the sequence of scanning/parsing

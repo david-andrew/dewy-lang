@@ -25,28 +25,33 @@
 #include "srnglr.h"
 #include "dewy_compiler_compiler.h"
 
-#define match_argv(var, val)            \
-{                                       \
-    var = false;                        \
-    for (size_t i = 0; i < argc; i++)   \
-        if (strcmp(argv[i], #val) == 0) \
-            var = true;                 \
+#define match_argv(var, val)                \
+{                                           \
+    var = false;                            \
+    for (size_t i = 0; i < argc - 2; i++)   \
+        if (strcmp(argv[i], #val) == 0)     \
+            var = true;                     \
 }
 
-char* grammar_file; //save a reference to the grammar file
+// char* grammar_file; //save a reference to the grammar file
 // char* input_file; //future stuff
 
 int main(int argc, char* argv[])
 {
-    if (argc < 2)
+    if (argc < 3)
     {
-        printf("Error: you must specify a file to read\n");
+        printf("Error: you must specify a grammar file and a source file\n");
+        printf("Usage: dewy [-s] [-a] [-p] [-g] [-t] [--verbose] grammar_file input_file");
         return 1;
     }
 
     //load the source file into a string
-    grammar_file = argv[argc-1];
-    char* source = read_file(grammar_file);
+    char* grammar_file_path = argv[argc-2];
+    char* input_file_path = argv[argc-1];
+    char* grammar_source;
+    size_t grammar_size = read_file(grammar_file_path, &grammar_source);
+    uint32_t* input_source;
+    size_t input_size = read_unicode_file(input_file_path, &input_source);
 
     bool scanner, ast, parser, grammar, table, verbose;
     match_argv(scanner, -s)
@@ -66,9 +71,20 @@ int main(int argc, char* argv[])
         table = true;
     }
 
-    run_compiler(source, verbose, scanner, ast, parser, grammar, table);
+    //set up structures for the sequence of scanning/parsing
+    initialize_metascanner();
+    initialize_metaparser();
+    initialize_srnglr(input_size);
 
-    free(source);
+    run_compiler_compiler(grammar_source, verbose, scanner, ast, parser, grammar, table);
+    run_compiler(input_source);
+
+    free(grammar_source);
+    free(input_source);
+
+    release_metascanner();
+    release_metaparser();
+    release_srnglr();
 
     return 0;
 }
@@ -78,13 +94,8 @@ int main(int argc, char* argv[])
  * Run all steps in the compiler, and print out the intermediate results if the 
  * corresponding bool is true. If verbose is true, print out more structure info.
  */
-void run_compiler(char* source, bool verbose, bool scanner, bool ast, bool parser, bool grammar, bool table)
+void run_compiler_compiler(char* source, bool verbose, bool scanner, bool ast, bool parser, bool grammar, bool table)
 {
-    //set up structures for the sequence of scanning/parsing
-    initialize_metascanner();
-    initialize_metaparser();
-    initialize_srnglr();
-
     vect* tokens = new_vect();
     obj* t = NULL;
 
@@ -171,9 +182,15 @@ void run_compiler(char* source, bool verbose, bool scanner, bool ast, bool parse
     }
 
     vect_free(tokens);
-    release_metascanner();
-    release_metaparser();
-    release_srnglr();
+}
+
+
+/**
+ * Parse the input file according to the input grammar.
+ */
+void run_compiler(uint32_t* source)
+{
+
 }
 
 

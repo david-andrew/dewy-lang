@@ -18,7 +18,7 @@ void accept_repr();
 
 
 //srnglr functions
-void initialize_srnglr();
+void initialize_srnglr(size_t input_size);
 void release_srnglr();
 
 void srnglr_compute_symbol_firsts();
@@ -37,6 +37,8 @@ set* srnglr_get_table_actions(uint64_t state_idx, uint64_t symbol_idx);
 void srnglr_insert_push(uint64_t state_idx, uint64_t symbol_idx, uint64_t goto_idx);
 void srnglr_insert_reduction(uint64_t state_idx, uint64_t symbol_idx, uint64_t head_idx, uint64_t length);
 void srnglr_insert_accept(uint64_t state_idx, uint64_t symbol_idx);
+
+void srnglr_parse_input(uint32_t* src, size_t length);
 
 //print functions
 void srnglr_print_itemsets();

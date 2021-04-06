@@ -22,7 +22,7 @@ int main(int argc, char* argv[])
     }
 
     //load the source file into a string, and keep a copy of the head of the file
-    char* source = read_file(argv[1]);
+    char* source; read_file(argv[1], &source);
     char* head = source;
 
     //set up structures for the sequence of scanning/parsing

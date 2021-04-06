@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "utilities.h"
+#include "ustring.h"
 
 
 /**
@@ -94,7 +95,7 @@ char* concatenate(char* left, char* right)
        putchar(c);
     }
 */
-char* read_file(char* filename)
+size_t read_file(char* filename, char** destination)
 {
     //see: https://stackoverflow.com/questions/14002954/c-programming-how-to-read-the-whole-file-contents-into-a-buffer
     FILE *f = fopen(filename, "rb");
@@ -107,13 +108,42 @@ char* read_file(char* filename)
     long fsize = ftell(f);
     fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
 
-    char *string = malloc(fsize + 1);
-    fread(string, fsize, 1, f);
+    *destination = malloc(fsize + 1);
+    fread(*destination, fsize, 1, f);
     fclose(f);
 
-    string[fsize] = 0;
+    (*destination)[fsize] = 0;
 
-    return string;
+    return fsize;
+}
+
+
+/**
+ * Convert the contents of a file to a unicode (uint32_t) string.
+ */
+size_t read_unicode_file(char* filename, uint32_t** destination)
+{
+    //get the normal char* version of the file content
+    char* cstr;
+    read_file(filename, &cstr);
+
+    //count out the number of unicode characters in the file string
+    size_t unicode_length = 0;
+    char* c = cstr;
+    while (eat_utf8(&c)) { unicode_length++; }
+
+    //create a uint32_t string to hold unicode characters
+    *destination = malloc(unicode_length + 1 * sizeof(uint32_t));
+
+    //copy the string into the unicode array
+    uint32_t* u = *destination;     //pointer to current unicode character
+    c = cstr;                       //pointer to current char character
+    while ((*u++ = eat_utf8(&c)));    //copy until null terminator reached
+
+    //free the original file string
+    free(cstr);
+
+    return unicode_length;
 }
 
 
