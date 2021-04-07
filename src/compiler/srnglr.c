@@ -724,14 +724,18 @@ void srnglr_reducer(size_t i, uint32_t* src)
     uint64_t symbol_idx = t->items[2];
     uint64_t length = t->items[3];
     gss_idx v_idx = (gss_idx){.nodes_idx=nodes_idx, .node_idx=node_idx};
-    set* reachable = gss_get_reachable(GSS, &v_idx, length > 0 ? length - 1 : 0);
+    vect* reachable = gss_get_reachable(GSS, &v_idx, length > 0 ? length - 1 : 0);
 
-    for (size_t i = 0; i < set_size(reachable); i++)
+    for (size_t i = 0; i < vect_size(reachable); i++)
     {
-        gss_idx* u_idx = reachable->entries[i].item->data;
+        gss_idx* u_idx = vect_get(reachable, i)->data;
         uint64_t state = gss_get_node_state(GSS, u_idx->nodes_idx, u_idx->node_idx);
+        
         //TODO...
     }
+
+    //gss_get_reachable() returns an allocated set that needs to be freed
+    vect_free(reachable);
     
 }
 

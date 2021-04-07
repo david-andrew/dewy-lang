@@ -167,7 +167,11 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
             copy->data = NULL;
             break;
         }
-        // case MetaSymbol_t:{ break; }
+        case GSSIndex_t:
+        {
+            gss_idx* i = o->data;
+            copy->data = gss_idx_copy(i);
+        }
         case Vector_t: 
         {
             copy->data = vect_copy_with_refs((vect*)o->data, refs);

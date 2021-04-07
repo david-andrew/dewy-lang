@@ -30,10 +30,11 @@ void gss_add_node(gss* g, size_t nodes_idx, uint64_t state);
 void gss_str(gss* g);
 void gss_free(gss* g);
 
-set* gss_get_reachable(gss* g, gss_idx* root, size_t length);
+vect* gss_get_reachable(gss* g, gss_idx* root_idx, size_t length);
 
 //GSS edge functions
 gss_idx* new_gss_idx(size_t nodes_idx, size_t node_idx);
+gss_idx* gss_idx_copy(gss_idx* i);
 obj* new_gss_idx_obj(gss_idx* i);
 void gss_idx_free(gss_idx* i); 
 uint64_t gss_idx_hash(gss_idx* i);

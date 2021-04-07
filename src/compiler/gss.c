@@ -92,9 +92,54 @@ void gss_free(gss* g)
  * Perform a breadth first search from the root to find all nodes
  * that are the specified length away from the root.
  */
-set* gss_get_reachable(gss* g, gss_idx* root, size_t length)
+vect* gss_get_reachable(gss* g, gss_idx* root_idx, size_t length)
 {
-    
+    //BFS data structures. Queue will contain desired nodes at the end of search.
+    vect* queue = new_vect();
+    set* discovered = new_set();
+
+    //initialize the BFS structures with the root
+    set_add(discovered, new_gss_idx_obj(gss_idx_copy(root_idx)));
+    vect_enqueue(queue, new_gss_idx_obj(gss_idx_copy(root_idx)));
+
+    //keep track of current depth + number of nodes at that depth
+    uint64_t current_depth = 0;
+    uint64_t current_nodes = 1;
+
+    while (vect_size(queue) > 0 && current_depth < length)
+    {
+        //get the next node, and it's children
+        obj* idx = vect_dequeue(queue);
+        vect* children = dict_get(g->edges, idx)->data;
+
+        for (size_t i = 0; i < vect_size(children); i++)
+        {
+            obj* child_idx = vect_get(children, i);
+            if (!set_contains(discovered, child_idx))
+            {
+                set_add(discovered, obj_copy(child_idx));
+                vect_enqueue(queue, obj_copy(child_idx));
+            }
+        }
+
+        //done with this node
+        obj_free(idx);
+
+        //keep track of how many nodes still at the current depth
+        current_nodes--;
+        if (current_nodes == 0)
+        {
+            //increase depth and reset current nodes
+            current_depth++;
+            current_nodes = vect_size(queue);
+        }
+    }
+
+    //cleanup 
+    set_free(discovered);
+
+    //queue should contain all nodes at the desired length from root
+    return queue;
 }
 
 
@@ -106,6 +151,15 @@ gss_idx* new_gss_idx(size_t nodes_idx, size_t node_idx)
     gss_idx* i = malloc(sizeof(gss_idx));
     *i = (gss_idx){.nodes_idx=nodes_idx, .node_idx=node_idx};
     return i;
+}
+
+
+/**
+ * Return an allocated copy of the gss_idx.
+ */
+gss_idx* gss_idx_copy(gss_idx* i)
+{
+    return new_gss_idx(i->nodes_idx, i->node_idx);
 }
 
 
