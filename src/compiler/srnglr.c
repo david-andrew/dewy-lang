@@ -543,6 +543,24 @@ set* srnglr_get_table_actions(uint64_t state_idx, uint64_t symbol_idx)
 
 
 /**
+ * Return the single push action in the table cell if it exists.
+ * Otherwise return NULL.
+ */
+obj* srnglr_get_table_push(uint64_t state_idx, uint64_t symbol_idx)
+{
+    set* actions = srnglr_get_table_actions(state_idx, symbol_idx);
+    for (size_t i = 0; i < set_size(actions); i++)
+    {
+        if (set_get_at_index(actions, i)->type == Push_t)
+        {
+            return set_get_at_index(actions, i);
+        }
+    }
+    return NULL;
+}
+
+
+/**
  * Get the set of all actions that corresponds to the given state and input character.
  * Since a single input character can match multiple grammar symbols, merge the action
  * sets from each cell that matches the (state, input) pair.
@@ -729,8 +747,11 @@ void srnglr_reducer(size_t i, uint32_t* src)
     for (size_t i = 0; i < vect_size(reachable); i++)
     {
         gss_idx* u_idx = vect_get(reachable, i)->data;
-        uint64_t state = gss_get_node_state(GSS, u_idx->nodes_idx, u_idx->node_idx);
-        
+        uint64_t state_idx = gss_get_node_state(GSS, u_idx->nodes_idx, u_idx->node_idx);
+        obj* push_obj = srnglr_get_table_push(state_idx, symbol_idx);
+        if (push_obj == NULL) { continue; }
+        uint64_t push = *(uint64_t*)push_obj->data;
+        //if there is a node w in Ui with label push {}
         //TODO...
     }
 

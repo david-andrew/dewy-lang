@@ -27,6 +27,7 @@ gss* new_gss(size_t size_hint);
 set* gss_get_nodes_set(gss* g, size_t nodes_idx);
 uint64_t gss_get_node_state(gss* g, size_t nodes_idx, size_t node_idx);
 void gss_add_node(gss* g, size_t nodes_idx, uint64_t state);
+void gss_add_edge(gss* g, gss_idx* parent, gss_idx* child);
 void gss_str(gss* g);
 void gss_free(gss* g);
 
@@ -40,7 +41,6 @@ void gss_idx_free(gss_idx* i);
 uint64_t gss_idx_hash(gss_idx* i);
 bool gss_idx_equals(gss_idx* left, gss_idx* right);
 void gss_idx_str(gss_idx* i);
-
 
 
 #endif

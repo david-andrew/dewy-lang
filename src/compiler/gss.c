@@ -65,6 +65,28 @@ void gss_add_node(gss* g, size_t nodes_idx, uint64_t state)
 
 
 /**
+ * Add a new edge to the GSS.
+ * `parent` and `child` are not modified by this function.
+ */
+void gss_add_edge(gss* g, gss_idx* parent, gss_idx* child)
+{
+    //edges dictionary key
+    // obj* parent_obj = new_gss_idx_obj(parent);
+    obj parent_obj = (obj){.type=GSSIndex_t, .data=parent};
+
+    //create an empty set for children if none exists yet
+    if (!dict_contains(g->edges, &parent_obj))
+    {
+        dict_set(g->edges, obj_copy(&parent_obj), new_set_obj(NULL));
+    }
+
+    //get the children indices set, and insert the child index
+    set* children_idxs = dict_get(g->edges, &parent_obj)->data;
+    set_add(children_idxs, new_gss_idx_obj(gss_idx_copy(child)));
+}
+
+
+/**
  * Print out a string representation of the GSS.
  */
 void gss_str(gss* g)
