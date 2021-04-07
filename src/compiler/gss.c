@@ -16,7 +16,7 @@ gss* new_gss(size_t size_hint)
     gss* g = malloc(sizeof(gss));
     *g = (gss){
         .nodes = new_vect_with_capacity(size_hint),
-        .edges = new_set()
+        .edges = new_dict()
     };
     return g;
 }
@@ -72,7 +72,7 @@ void gss_str(gss* g)
     printf("GSS Nodes:\n");
     vect_str(g->nodes);
     printf("\nGSS Edges:\n");
-    set_str(g->edges);
+    dict_str(g->edges);
     printf("\n");
 }
 
@@ -83,9 +83,78 @@ void gss_str(gss* g)
 void gss_free(gss* g)
 {
     vect_free(g->nodes);
-    set_free(g->edges);
+    dict_free(g->edges);
     free(g);
 }
+
+
+/**
+ * Perform a breadth first search from the root to find all nodes
+ * that are the specified length away from the root.
+ */
+set* gss_get_reachable(gss* g, gss_idx* root, size_t length)
+{
+    
+}
+
+
+/**
+ * Return a GSS index structure.
+ */
+gss_idx* new_gss_idx(size_t nodes_idx, size_t node_idx)
+{
+    gss_idx* i = malloc(sizeof(gss_idx));
+    *i = (gss_idx){.nodes_idx=nodes_idx, .node_idx=node_idx};
+    return i;
+}
+
+
+/**
+ * Return a GSS index wrapped in an object.
+ */
+obj* new_gss_idx_obj(gss_idx* i)
+{
+    obj* I = malloc(sizeof(obj));
+    *I = (obj){.type=GSSIndex_t, .data=i};
+    return I;
+}
+
+
+/**
+ * Free the GSS edge structure.
+ */
+void gss_idx_free(gss_idx* i)
+{
+    free(i);
+}
+
+
+/**
+ * Hash the data contained in the gss edge
+ */
+uint64_t gss_idx_hash(gss_idx* i)
+{
+    uint64_t data[] = {i->nodes_idx, i->node_idx};
+    return hash_uint_sequence(data, sizeof(data) / sizeof(uint64_t));
+}
+
+
+/**
+ * Determine if two GSS edges are equal.
+ */
+bool gss_idx_equals(gss_idx* left, gss_idx* right)
+{
+    return left->nodes_idx == right->nodes_idx && left->node_idx == right->node_idx;
+}
+
+
+// /**
+//  * Print out a string representation of the GSS edge.
+//  */
+// void gss_edge_str(gss_edge* e)
+// {
+//     printf("["); gss_idx_str(&e->parent); printf(" -> "); gss_idx_str(&e->child); printf("]");
+// }
 
 
 /**
@@ -94,68 +163,6 @@ void gss_free(gss* g)
 void gss_idx_str(gss_idx* i)
 {
     printf("(%zu, %zu)", i->nodes_idx, i->node_idx);
-}
-
-
-/**
- * Return a GSS edge structure.
- */
-gss_edge* new_gss_edge(gss_idx parent, gss_idx child)
-{
-    gss_edge* e = malloc(sizeof(gss_edge));
-    *e = (gss_edge){.parent=parent, .child=child};
-    return e;
-}
-
-
-/**
- * Return a GSS edge wrapped in an object.
- */
-obj* new_gss_edge_obj(gss_edge* e)
-{
-    obj* E = malloc(sizeof(obj));
-    *E = (obj){.type=GSSEdge_t, .data=e};
-    return E;
-}
-
-
-/**
- * Free the GSS edge structure.
- */
-void gss_edge_free(gss_edge* e)
-{
-    free(e);
-}
-
-
-/**
- * Hash the data contained in the gss edge
- */
-uint64_t gss_edge_hash(gss_edge* e)
-{
-    uint64_t data[] = {e->parent.nodes_idx, e->parent.node_idx, e->child.nodes_idx, e->child.node_idx};
-    return hash_uint_sequence(data, sizeof(data) / sizeof(uint64_t));
-}
-
-
-/**
- * Determine if two GSS edges are equal.
- */
-bool gss_edge_equals(gss_edge* left, gss_edge* right)
-{
-    return left->parent.nodes_idx == right->parent.nodes_idx
-        && left->parent.node_idx == right->parent.node_idx
-        && left->child.nodes_idx == right->child.nodes_idx
-        && left->child.node_idx == right->child.node_idx;
-}
-
-
-/**
- * Print out a string representation of the GSS edge.
- */
-void gss_edge_str(gss_edge* e)
-{
-    printf("["); gss_idx_str(&e->parent); printf(" -> "); gss_idx_str(&e->child); printf("]");
 }
 
 

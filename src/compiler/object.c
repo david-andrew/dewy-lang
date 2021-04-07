@@ -218,7 +218,7 @@ void obj_str(obj* o)
         case Push_t: push_str(*(uint64_t*)o->data); break;
         case Reduction_t: reduction_str(o->data); break;
         case Accept_t: accept_str(); break;
-        case GSSEdge_t: gss_edge_str(o->data); break;
+        case GSSIndex_t: gss_idx_str(o->data); break;
         case Vector_t: vect_str(o->data); break;
         case Dictionary_t: dict_str(o->data); break;
         case Set_t: set_str(o->data); break;
@@ -270,7 +270,7 @@ uint64_t obj_hash(obj* o)
         case Push_t: return hash_uint(*(uint64_t*)o->data);
         case Reduction_t: return reduction_hash(o->data);
         case Accept_t: return hash_uint(0);
-        case GSSEdge_t: return gss_edge_hash(o->data);
+        case GSSIndex_t: return gss_idx_hash(o->data);
         case Vector_t: return vect_hash(o->data);
         // case Dictionary_t: return dict_hash(o->data);
         case Set_t: return set_hash(o->data);
@@ -331,7 +331,7 @@ bool obj_equals(obj* left, obj* right)
         case Push_t: return *(uint64_t*)left->data == *(uint64_t*)right->data;
         case Reduction_t: return reduction_equals(left->data, right->data);
         case Accept_t: return true; //accepts have no internal data
-        case GSSEdge_t: return gss_edge_equals(left->data, right->data);
+        case GSSIndex_t: return gss_idx_equals(left->data, right->data);
         default: return obj_compare(left, right) == 0;
     }
 
@@ -370,7 +370,7 @@ void obj_free(obj* o)
             case FSet_t: fset_free(o->data); break;
             case GotoKey_t: gotokey_free(o->data); break;
             case Reduction_t: reduction_free(o->data); break;
-            case GSSEdge_t: gss_edge_free(o->data);
+            case GSSIndex_t: gss_idx_free(o->data);
 
             //objects with no internal data
             case Accept_t: break;

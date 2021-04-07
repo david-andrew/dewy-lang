@@ -10,8 +10,8 @@
 
 // Graph Structured Stack
 typedef struct {
-    vect* nodes;
-    set* edges;
+    vect* nodes;    //vect<set<uint64>>
+    dict* edges;    //dict<gss_idx, gss_idx>
 } gss;
 
 
@@ -22,13 +22,6 @@ typedef struct {
 } gss_idx;
 
 
-// edges in the GSS
-typedef struct {
-    gss_idx parent;
-    gss_idx child;
-} gss_edge;
-
-
 //GSS functions
 gss* new_gss(size_t size_hint);
 set* gss_get_nodes_set(gss* g, size_t nodes_idx);
@@ -37,18 +30,15 @@ void gss_add_node(gss* g, size_t nodes_idx, uint64_t state);
 void gss_str(gss* g);
 void gss_free(gss* g);
 
-//GSS node functions?
-//TBD if we need any special methods for gss_idx, or they only live in gss_edge
-//gss_idx* new_gss_idx(size_t nodes_idx, size_t node_idx);
-void gss_idx_str(gss_idx* i);
+set* gss_get_reachable(gss* g, gss_idx* root, size_t length);
 
 //GSS edge functions
-gss_edge* new_gss_edge(gss_idx parent, gss_idx child);
-obj* new_gss_edge_obj(gss_edge* e);
-void gss_edge_free(gss_edge* e); 
-uint64_t gss_edge_hash(gss_edge* e);
-bool gss_edge_equals(gss_edge* left, gss_edge* right);
-void gss_edge_str(gss_edge* e);
+gss_idx* new_gss_idx(size_t nodes_idx, size_t node_idx);
+obj* new_gss_idx_obj(gss_idx* i);
+void gss_idx_free(gss_idx* i); 
+uint64_t gss_idx_hash(gss_idx* i);
+bool gss_idx_equals(gss_idx* left, gss_idx* right);
+void gss_idx_str(gss_idx* i);
 
 
 
