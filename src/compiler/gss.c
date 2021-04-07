@@ -39,6 +39,21 @@ set* gss_get_nodes_set(gss* g, size_t nodes_idx)
 
 
 /**
+ * Return the state label of the node at the given coordinates.
+ */
+uint64_t gss_get_node_state(gss* g, size_t nodes_idx, size_t node_idx)
+{
+    set* nodes = gss_get_nodes_set(g, nodes_idx);
+    if (node_idx >= set_size(nodes))
+    {
+        printf("ERROR: no GSS node at index (%zu, %zu)\n", nodes_idx, node_idx);
+        exit(1);
+    }
+    return *(uint64_t*)nodes->entries[node_idx].item->data;
+}
+
+
+/**
  * Insert a node into the GSS.
  */
 void gss_add_node(gss* g, size_t nodes_idx, uint64_t state)

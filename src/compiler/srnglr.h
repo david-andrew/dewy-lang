@@ -38,6 +38,7 @@ set* srnglr_get_merged_table_actions(uint64_t state_idx, uint32_t c);
 void srnglr_insert_push(uint64_t state_idx, uint64_t symbol_idx, uint64_t goto_idx);
 void srnglr_insert_reduction(uint64_t state_idx, uint64_t symbol_idx, uint64_t head_idx, uint64_t length);
 void srnglr_insert_accept(uint64_t state_idx, uint64_t symbol_idx);
+bool srnglr_is_accepting_state(uint64_t state_idx);
 
 bool srnglr_parser(uint32_t* src);
 void srnglr_reducer(size_t i, uint32_t* src);

@@ -151,6 +151,22 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
             copy->data = metatoken_copy((metatoken*)o->data);
             break;
         }
+        case Push_t:
+        {
+            copy->data = new_uint(*(uint64_t*)o->data);
+            break;
+        }
+        case Reduction_t:
+        {
+            reduction* r = o->data;
+            copy->data = new_reduction(r->head_idx, r->length);
+            break;
+        }
+        case Accept_t:
+        {
+            copy->data = NULL;
+            break;
+        }
         // case MetaSymbol_t:{ break; }
         case Vector_t: 
         {

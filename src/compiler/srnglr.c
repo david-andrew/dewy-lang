@@ -5,6 +5,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "tuple.h"
 #include "dictionary.h"
 #include "srnglr.h"
 #include "ustring.h"
@@ -614,6 +615,27 @@ void srnglr_insert_accept(uint64_t state_idx, uint64_t symbol_idx)
 
 
 /**
+ * Determine if the given state is an accepting state,
+ * i.e. it's lookahead is the endmarker, and it contains
+ * an accept action.
+ */
+bool srnglr_is_accepting_state(uint64_t state_idx)
+{
+    uint64_t endmarker_idx = metaparser_get_endmarker_symbol_idx();
+    set* actions = srnglr_get_table_actions(state_idx, endmarker_idx);
+    for (size_t i = 0; i < set_size(actions); i++)
+    {
+        obj* action = actions->entries[i].item;
+        if (action->type == Accept_t)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+
+/**
  * Parse an input string according to the preparsed grammar.
  * Implementation 1 is pulled directly from rnglr paper.
  * Returns whether or not the parse was successful.
@@ -634,19 +656,60 @@ bool srnglr_parser(uint32_t* src)
 
     //normal parse process
 
-    //create the start node, and insert into the GSS
+    //create the start node (v0), and insert into the GSS
     gss_add_node(GSS, 0, 0);
+
+    //initialize Q and R based on first input character.
     set* actions = srnglr_get_merged_table_actions(0, src[0]);
     for (size_t i = 0; i < set_size(actions); i++)
     {
         obj* action = actions->entries[i].item;
         if (action->type == Push_t)
         {
+            //add (v0, k) to Q. v0 is represented as (0,0) i.e. (nodes_idx, node_idx)
             uint64_t k = *(uint64_t*)action->data;
-            //add (0, k) to Q
-            
+            tuple* t = new_tuple(3, 0, 0, k);
+            vect_enqueue(srnglr_Q, new_tuple_obj(t));
+        }
+        else if (action->type == Reduction_t)
+        {
+            //if reduction is length 0
+            reduction* r = action->data;
+            if (r->length == 0)
+            {
+                //add (v0, X, 0) to R. v0 is represented as (0,0), i.e. (nodes_idx, node_idx)
+                tuple* t = new_tuple(4, 0, 0, r->head_idx, 0);
+                vect_enqueue(srnglr_R, new_tuple_obj(t));
+            }
         }
     }
+
+    //merged table creates a new allocation that needs to be freed
+    set_free(actions);
+
+    size_t d = ustring_len(src);
+    for (size_t i = 0; i < d; i++)
+    {
+        if (set_size(gss_get_nodes_set(GSS, i)) == 0) { break; }
+        while (vect_size(srnglr_R) > 0)
+        {
+            srnglr_reducer(i, src);
+        }
+        srnglr_shifter(i, src);
+    }
+
+    //check if an accept state is in the final set Ud
+    set* Ud = gss_get_nodes_set(GSS, d);
+    for (size_t i = 0; i < set_size(Ud); i++)
+    {
+        uint64_t* state = Ud->entries[i].item->data;
+        if (srnglr_is_accepting_state(*state))
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 
@@ -655,7 +718,21 @@ bool srnglr_parser(uint32_t* src)
  */
 void srnglr_reducer(size_t i, uint32_t* src)
 {
+    tuple* t = vect_dequeue(srnglr_R)->data;
+    size_t nodes_idx = t->items[0];
+    size_t node_idx = t->items[1];
+    uint64_t symbol_idx = t->items[2];
+    uint64_t length = t->items[3];
+    gss_idx v_idx = (gss_idx){.nodes_idx=nodes_idx, .node_idx=node_idx};
+    set* reachable = gss_get_reachable(GSS, &v_idx, length > 0 ? length - 1 : 0);
 
+    for (size_t i = 0; i < set_size(reachable); i++)
+    {
+        gss_idx* u_idx = reachable->entries[i].item->data;
+        uint64_t state = gss_get_node_state(GSS, u_idx->nodes_idx, u_idx->node_idx);
+        //TODO...
+    }
+    
 }
 
 

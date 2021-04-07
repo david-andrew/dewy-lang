@@ -55,7 +55,7 @@ void tuple_str(tuple* t)
     for (size_t i = 0; i < t->n; i++)
     {
         printf("%"PRIu64, t->items[i]);
-        if (t < t->n - 1) { printf(", "); }
+        if (i < t->n - 1) { printf(", "); }
     }
     printf(")");
 }

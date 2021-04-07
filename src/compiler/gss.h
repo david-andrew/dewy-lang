@@ -32,6 +32,7 @@ typedef struct {
 //GSS functions
 gss* new_gss(size_t size_hint);
 set* gss_get_nodes_set(gss* g, size_t nodes_idx);
+uint64_t gss_get_node_state(gss* g, size_t nodes_idx, size_t node_idx);
 void gss_add_node(gss* g, size_t nodes_idx, uint64_t state);
 void gss_str(gss* g);
 void gss_free(gss* g);
