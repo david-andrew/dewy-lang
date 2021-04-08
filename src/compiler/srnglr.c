@@ -865,7 +865,7 @@ void srnglr_shifter(size_t i, uint32_t* src)
                     if (action->type == Push_t)
                     {
                         uint64_t h = *(uint64_t*)action->data;
-                        tuple* t = new_tuple(3, w_idx->nodes_idx, w_idx->node_idx);
+                        tuple* t = new_tuple(3, w_idx->nodes_idx, w_idx->node_idx, h);
                         vect_append(Qp, new_tuple_obj(t));
                     }
                     else if (action->type == Reduction_t)
