@@ -704,9 +704,8 @@ bool srnglr_parser(uint32_t* src)
     set_free(actions);
 
     size_t d = ustring_len(src);
-    // printf("GSS at start\n"); gss_str(GSS); printf("R: "); vect_str(srnglr_R); printf(", Q: "); vect_str(srnglr_Q); printf("\n\n");
 
-    for (size_t i = 0; i < d; i++)
+    for (size_t i = 0; i <= d; i++)
     {
         if (set_size(gss_get_nodes_set(GSS, i)) == 0) { break; }
         while (vect_size(srnglr_R) > 0)
@@ -714,7 +713,6 @@ bool srnglr_parser(uint32_t* src)
             srnglr_reducer(i, src);
         }
         srnglr_shifter(i, src);
-        // printf("GSS after %zu\n", i); gss_str(GSS); printf("R: "); vect_str(srnglr_R); printf(", Q: "); vect_str(srnglr_Q); printf("\n\n");
     }
 
     //check if an accept state is in the final set Ud
@@ -823,7 +821,7 @@ void srnglr_reducer(size_t i, uint32_t* src)
  */
 void srnglr_shifter(size_t i, uint32_t* src)
 {
-    if (src[i+1] != 0) //i.e. we're not on the last input
+    if (src[i] != 0) //i.e. we're not on the last input
     {
         vect* Qp = new_vect(); //Q' for intermediate push
         while (vect_size(srnglr_Q) > 0)

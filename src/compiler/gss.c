@@ -138,8 +138,6 @@ vect* gss_get_reachable(gss* g, gss_idx* root_idx, size_t length)
     set_free(discovered);
 
     //queue should contain all nodes at the desired length from root
-    printf("BFS RESULTS: "); gss_idx_str(root_idx); printf(", l=%zu\n", length);  
-    gss_str(g); printf("queue: "); vect_str(queue); printf("\n\n");
     return queue;
 }
 
