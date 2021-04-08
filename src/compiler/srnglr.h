@@ -34,7 +34,7 @@ void srnglr_generate_grammar_itemsets();
 set* srnglr_get_itemsets();
 dict* srnglr_get_table();
 set* srnglr_get_table_actions(uint64_t state_idx, uint64_t symbol_idx);
-obj* srnglr_get_table_push(uint64_t state_idx, uint64_t symbol_idx);
+uint64_t* srnglr_get_table_push(uint64_t state_idx, uint64_t symbol_idx);
 set* srnglr_get_merged_table_actions(uint64_t state_idx, uint32_t c);
 void srnglr_insert_push(uint64_t state_idx, uint64_t symbol_idx, uint64_t goto_idx);
 void srnglr_insert_reduction(uint64_t state_idx, uint64_t symbol_idx, uint64_t head_idx, uint64_t length);

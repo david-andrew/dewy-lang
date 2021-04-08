@@ -54,59 +54,36 @@ uint64_t gss_get_node_state(gss* g, size_t nodes_idx, size_t node_idx)
 
 
 /**
- * Insert a node into the GSS.
+ * Check Ui in the GSS for a node with the given state label.
+ * i.e. is there a node in the set at `nodes_idx` with label `state_idx`.
+ * If none found, returns NULL.
  */
-void gss_add_node(gss* g, size_t nodes_idx, uint64_t state)
+gss_idx* gss_get_node_with_label(gss* g, size_t nodes_idx, uint64_t state_idx)
 {
-    set* U = gss_get_nodes_set(g, nodes_idx);
-    obj* v = new_uint_obj(state);
-    set_add(U, v);
-}
-
-
-/**
- * Add a new edge to the GSS.
- * `parent` and `child` are not modified by this function.
- */
-void gss_add_edge(gss* g, gss_idx* parent, gss_idx* child)
-{
-    //edges dictionary key
-    // obj* parent_obj = new_gss_idx_obj(parent);
-    obj parent_obj = (obj){.type=GSSIndex_t, .data=parent};
-
-    //create an empty set for children if none exists yet
-    if (!dict_contains(g->edges, &parent_obj))
+    set* nodes = gss_get_nodes_set(g, nodes_idx);
+    obj state_idx_obj = (obj){.type=UInteger_t, .data=&state_idx};
+    size_t node_idx = set_get_entries_index(nodes, &state_idx_obj);
+    if (!set_is_index_empty(node_idx))
     {
-        dict_set(g->edges, obj_copy(&parent_obj), new_set_obj(NULL));
+        return new_gss_idx(nodes_idx, node_idx);
     }
-
-    //get the children indices set, and insert the child index
-    set* children_idxs = dict_get(g->edges, &parent_obj)->data;
-    set_add(children_idxs, new_gss_idx_obj(gss_idx_copy(child)));
+    return NULL;
 }
 
 
 /**
- * Print out a string representation of the GSS.
+ * Check if there is an edge in the GSS between the given indices.
  */
-void gss_str(gss* g)
+bool gss_does_edge_exist(gss* g, gss_idx* parent, gss_idx* child)
 {
-    printf("GSS Nodes:\n");
-    vect_str(g->nodes);
-    printf("\nGSS Edges:\n");
-    dict_str(g->edges);
-    printf("\n");
-}
-
-
-/**
- * Free the GSS's allocated memory. 
- */
-void gss_free(gss* g)
-{
-    vect_free(g->nodes);
-    dict_free(g->edges);
-    free(g);
+    obj parent_obj = (obj){.type=GSSIndex_t, .data=parent};
+    obj* children = dict_get(g->edges, &parent_obj);
+    if (children != NULL)
+    {
+        obj child_obj = (obj){.type=GSSIndex_t, .data=child};
+        return set_contains(children->data, &child_obj);
+    }
+    return false;
 }
 
 
@@ -162,6 +139,63 @@ vect* gss_get_reachable(gss* g, gss_idx* root_idx, size_t length)
 
     //queue should contain all nodes at the desired length from root
     return queue;
+}
+
+
+/**
+ * Insert a node into the GSS.
+ */
+void gss_add_node(gss* g, size_t nodes_idx, uint64_t state)
+{
+    set* U = gss_get_nodes_set(g, nodes_idx);
+    obj* v = new_uint_obj(state);
+    set_add(U, v);
+}
+
+
+/**
+ * Add a new edge to the GSS.
+ * `parent` and `child` are not modified by this function.
+ */
+void gss_add_edge(gss* g, gss_idx* parent, gss_idx* child)
+{
+    //edges dictionary key
+    // obj* parent_obj = new_gss_idx_obj(parent);
+    obj parent_obj = (obj){.type=GSSIndex_t, .data=parent};
+
+    //create an empty set for children if none exists yet
+    if (!dict_contains(g->edges, &parent_obj))
+    {
+        dict_set(g->edges, obj_copy(&parent_obj), new_set_obj(NULL));
+    }
+
+    //get the children indices set, and insert the child index
+    set* children_idxs = dict_get(g->edges, &parent_obj)->data;
+    set_add(children_idxs, new_gss_idx_obj(gss_idx_copy(child)));
+}
+
+
+/**
+ * Print out a string representation of the GSS.
+ */
+void gss_str(gss* g)
+{
+    printf("GSS Nodes:\n");
+    vect_str(g->nodes);
+    printf("\nGSS Edges:\n");
+    dict_str(g->edges);
+    printf("\n");
+}
+
+
+/**
+ * Free the GSS's allocated memory. 
+ */
+void gss_free(gss* g)
+{
+    vect_free(g->nodes);
+    dict_free(g->edges);
+    free(g);
 }
 
 

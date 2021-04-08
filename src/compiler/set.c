@@ -173,6 +173,15 @@ size_t set_get_entries_index(set* s, obj* item)
 
 
 /**
+ * Determine whether the given index is an empty index
+ */
+bool set_is_index_empty(size_t index)
+{
+    return index == EMPTY;
+}
+
+
+/**
  * Insert a new object into the set if it is not already there
  */
 void set_add(set* s, obj* item)

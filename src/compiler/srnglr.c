@@ -546,14 +546,14 @@ set* srnglr_get_table_actions(uint64_t state_idx, uint64_t symbol_idx)
  * Return the single push action in the table cell if it exists.
  * Otherwise return NULL.
  */
-obj* srnglr_get_table_push(uint64_t state_idx, uint64_t symbol_idx)
+uint64_t* srnglr_get_table_push(uint64_t state_idx, uint64_t symbol_idx)
 {
     set* actions = srnglr_get_table_actions(state_idx, symbol_idx);
     for (size_t i = 0; i < set_size(actions); i++)
     {
         if (set_get_at_index(actions, i)->type == Push_t)
         {
-            return set_get_at_index(actions, i);
+            return set_get_at_index(actions, i)->data;
         }
     }
     return NULL;
@@ -748,16 +748,70 @@ void srnglr_reducer(size_t i, uint32_t* src)
     {
         gss_idx* u_idx = vect_get(reachable, i)->data;
         uint64_t state_idx = gss_get_node_state(GSS, u_idx->nodes_idx, u_idx->node_idx);
-        obj* push_obj = srnglr_get_table_push(state_idx, symbol_idx);
-        if (push_obj == NULL) { continue; }
-        uint64_t push = *(uint64_t*)push_obj->data;
-        //if there is a node w in Ui with label push {}
-        //TODO...
+        uint64_t* l = srnglr_get_table_push(state_idx, symbol_idx);
+        if (l == NULL) { continue; }
+        
+        gss_idx* w_idx = gss_get_node_with_label(GSS, i, *l);
+        if (w_idx != NULL)
+        {
+            if (!gss_does_edge_exist(GSS, w_idx, u_idx))
+            {
+                gss_add_edge(GSS, w_idx, u_idx);
+                if (length != 0)
+                {
+                    set* actions = srnglr_get_merged_table_actions(*l, src[i+1]);
+                    for (size_t j = 0; j < set_size(actions); j++)
+                    {
+                        obj* action = set_get_at_index(actions, j);
+                        if (action->type == Reduction_t)
+                        {
+                            reduction* r = action->data;
+                            if (r->length > 0)
+                            {
+                                tuple* t = new_tuple(4, u_idx->nodes_idx, u_idx->node_idx, r->head_idx, r->length);
+                                vect_append(srnglr_R, new_tuple_obj(t));
+                            }
+                        }
+                    }
+                    set_free(actions);
+                }
+            }
+        }
+        else
+        {
+            //create a new node, and edge from w back to u
+            gss_add_node(GSS, i, *l);
+            gss_add_edge(GSS, w_idx, u_idx);
+            set* actions = srnglr_get_merged_table_actions(*l, src[i+1]);
+            for (size_t j = 0; j < set_size(actions); j++)
+            {
+                obj* action = set_get_at_index(actions, j);
+                if (action->type == Push_t)
+                {
+                    uint64_t* h = action->data;
+                    tuple* t = new_tuple(3, w_idx->nodes_idx, w_idx->node_idx, *h);
+                    vect_append(srnglr_Q, new_tuple_obj(t));
+                }
+                else if (action->type == Reduction_t)
+                {
+                    reduction* r = action->data;
+                    if (r->length == 0)
+                    {
+                        tuple* t = new_tuple(4, w_idx->nodes_idx, w_idx->node_idx, r->head_idx, 0);
+                        vect_append(srnglr_R, new_tuple_obj(t));
+                    }
+                    else if (length != 0)
+                    {
+                        tuple* t = new_tuple(4, u_idx->nodes_idx, u_idx->node_idx, r->head_idx, r->length);
+                        vect_append(srnglr_R, new_tuple_obj(t));
+                    }
+                }
+            }
+            set_free(actions); 
+        }
+        gss_idx_free(w_idx);
     }
-
-    //gss_get_reachable() returns an allocated set that needs to be freed
     vect_free(reachable);
-    
 }
 
 

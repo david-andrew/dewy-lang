@@ -34,6 +34,7 @@ void set_resize_indices(set* s, size_t new_size);
 void set_resize_entries(set* s, size_t new_size);
 size_t set_get_indices_probe(set* s, obj* item);
 size_t set_get_entries_index(set* s, obj* item);
+bool set_is_index_empty(size_t index);
 void set_add(set* s, obj* item);
 size_t set_add_return_index(set* s, obj* item);
 obj* set_get_at_index(set* s, size_t i);
