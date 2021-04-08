@@ -747,9 +747,9 @@ void srnglr_reducer(size_t i, uint32_t* src)
     //collect a list of all reachable nodes from v
     vect* reachable = gss_get_reachable(GSS, &v_idx, length > 0 ? length - 1 : 0);
 
-    for (size_t i = 0; i < vect_size(reachable); i++)
+    for (size_t j = 0; j < vect_size(reachable); j++)
     {
-        gss_idx* u_idx = vect_get(reachable, i)->data;
+        gss_idx* u_idx = vect_get(reachable, j)->data;
         uint64_t state_idx = gss_get_node_state(GSS, u_idx->nodes_idx, u_idx->node_idx);
         uint64_t* l = srnglr_get_table_push(state_idx, symbol_idx);
         if (l == NULL) { continue; }
