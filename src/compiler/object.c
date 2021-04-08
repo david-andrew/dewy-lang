@@ -171,6 +171,7 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
         {
             gss_idx* i = o->data;
             copy->data = gss_idx_copy(i);
+            break;
         }
         case Vector_t: 
         {

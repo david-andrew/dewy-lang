@@ -31,7 +31,6 @@ vect* srnglr_symbol_firsts;
 //vectors used during SRNGLR parsing
 vect* srnglr_R;
 vect* srnglr_Q;
-vect* srnglr_Qp;
 
 gss* GSS;
 // sppf* SPPF = NULL;
@@ -47,7 +46,6 @@ void initialize_srnglr(size_t input_size)
 
     srnglr_R = new_vect();
     srnglr_Q = new_vect();
-    srnglr_Qp = new_vect();
 
     GSS = new_gss(input_size);
 }
@@ -64,7 +62,6 @@ void release_srnglr()
 
     vect_free(srnglr_R);
     vect_free(srnglr_Q);
-    vect_free(srnglr_Qp);
 
     if (GSS != NULL) { gss_free(GSS); } 
 }
@@ -675,7 +672,8 @@ bool srnglr_parser(uint32_t* src)
     //normal parse process
 
     //create the start node (v0), and insert into the GSS
-    gss_add_node(GSS, 0, 0);
+    gss_idx* v0_idx = gss_add_node(GSS, 0, 0);
+    gss_idx_free(v0_idx); //free the unused index returned by gss_add_node()
 
     //initialize Q and R based on first input character.
     set* actions = srnglr_get_merged_table_actions(0, src[0]);
@@ -736,12 +734,14 @@ bool srnglr_parser(uint32_t* src)
  */
 void srnglr_reducer(size_t i, uint32_t* src)
 {
-    tuple* t = vect_dequeue(srnglr_R)->data;
-    size_t nodes_idx = t->items[0];
-    size_t node_idx = t->items[1];
+    //remove and unpack a 3-tuple from R
+    tuple* t = obj_free_keep_inner(vect_dequeue(srnglr_R), UIntNTuple_t);
+    gss_idx v_idx = (gss_idx){.nodes_idx=t->items[0], .node_idx=t->items[1]};
     uint64_t symbol_idx = t->items[2];
     uint64_t length = t->items[3];
-    gss_idx v_idx = (gss_idx){.nodes_idx=nodes_idx, .node_idx=node_idx};
+    tuple_free(t);
+    
+    //collect a list of all reachable nodes from v
     vect* reachable = gss_get_reachable(GSS, &v_idx, length > 0 ? length - 1 : 0);
 
     for (size_t i = 0; i < vect_size(reachable); i++)
@@ -780,7 +780,7 @@ void srnglr_reducer(size_t i, uint32_t* src)
         else
         {
             //create a new node, and edge from w back to u
-            gss_add_node(GSS, i, *l);
+            w_idx = gss_add_node(GSS, i, *l);
             gss_add_edge(GSS, w_idx, u_idx);
             set* actions = srnglr_get_merged_table_actions(*l, src[i+1]);
             for (size_t j = 0; j < set_size(actions); j++)
@@ -820,7 +820,77 @@ void srnglr_reducer(size_t i, uint32_t* src)
  */
 void srnglr_shifter(size_t i, uint32_t* src)
 {
-
+    if (src[i+1] != 0) //i.e. we're not on the last input
+    {
+        vect* Qp = new_vect(); //Q' for intermediate push
+        while (vect_size(srnglr_Q) > 0)
+        {            
+            //remove and unpack a tuple from Q
+            tuple* t = obj_free_keep_inner(vect_dequeue(srnglr_Q), UIntNTuple_t);
+            gss_idx v_idx = (gss_idx){.nodes_idx=t->items[0], .node_idx=t->items[1]};
+            uint64_t k = t->items[2];
+            tuple_free(t);
+            
+            gss_idx* w_idx = gss_get_node_with_label(GSS, i+1, k);
+            if (w_idx != NULL)
+            {
+                //create an edge from w to v
+                gss_add_edge(GSS, w_idx, &v_idx);
+                set* actions = srnglr_get_merged_table_actions(k, src[i+2]);
+                for (size_t j = 0; j < set_size(actions); j++)
+                {
+                    obj* action = set_get_at_index(actions, j);
+                    if (action->type == Reduction_t)
+                    {
+                        reduction* r = action->data;
+                        if (r->length != 0)
+                        {
+                            tuple* t = new_tuple(4, v_idx.nodes_idx, v_idx.node_idx, r->head_idx, r->length);
+                            vect_append(srnglr_R, new_tuple_obj(t));
+                        }
+                    }
+                }
+                set_free(actions);
+            }
+            else
+            {
+                //create a node w in Ui with label k, and edge from w to v
+                w_idx = gss_add_node(GSS, i+1, k);
+                gss_add_edge(GSS, w_idx, &v_idx);
+                // uint64_t* h = srnglr_get_table_push()
+                set* actions = srnglr_get_merged_table_actions(k, src[i+2]);
+                for (size_t j = 0; j < set_size(actions); j++)
+                {
+                    obj* action = set_get_at_index(actions, j);
+                    if (action->type == Push_t)
+                    {
+                        uint64_t h = *(uint64_t*)action->data;
+                        tuple* t = new_tuple(3, w_idx->nodes_idx, w_idx->node_idx);
+                        vect_append(Qp, new_tuple_obj(t));
+                    }
+                    else if (action->type == Reduction_t)
+                    {
+                        reduction* r = action->data;
+                        if (r->length != 0)
+                        {
+                            tuple* t = new_tuple(4, v_idx.nodes_idx, v_idx.node_idx, r->head_idx, r->length);
+                            vect_append(srnglr_R, new_tuple_obj(t));
+                        }
+                        else
+                        {
+                            tuple* t = new_tuple(4, w_idx->nodes_idx, w_idx->node_idx, r->head_idx, r->length);
+                            vect_append(srnglr_R, new_tuple_obj(t));
+                        }
+                    }
+                }
+                set_free(actions);
+            }
+            gss_idx_free(w_idx);
+        }
+        //copy Q' into Q
+        while (vect_size(Qp) > 0) { vect_append(srnglr_Q, vect_dequeue(Qp)); }
+        vect_free(Qp);
+    }
 }
 
 /**

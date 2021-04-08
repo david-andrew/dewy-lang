@@ -201,7 +201,7 @@ void run_compiler(uint32_t* source, bool compile, bool forest)
         ustring_str(source);
         printf("\n```\n\n");
 
-        printf("INPUT GRAPH STRUCTURED STACK:\n");
+        printf("GRAPH STRUCTURED STACK:\n");
         print_compiler();
         printf("\n\n");
     }

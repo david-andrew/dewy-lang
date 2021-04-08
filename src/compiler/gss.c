@@ -109,11 +109,11 @@ vect* gss_get_reachable(gss* g, gss_idx* root_idx, size_t length)
     {
         //get the next node, and it's children
         obj* idx = vect_dequeue(queue);
-        vect* children = dict_get(g->edges, idx)->data;
+        set* children = dict_get(g->edges, idx)->data;
 
-        for (size_t i = 0; i < vect_size(children); i++)
+        for (size_t i = 0; i < set_size(children); i++)
         {
-            obj* child_idx = vect_get(children, i);
+            obj* child_idx = set_get_at_index(children, i);
             if (!set_contains(discovered, child_idx))
             {
                 set_add(discovered, obj_copy(child_idx));
@@ -145,11 +145,12 @@ vect* gss_get_reachable(gss* g, gss_idx* root_idx, size_t length)
 /**
  * Insert a node into the GSS.
  */
-void gss_add_node(gss* g, size_t nodes_idx, uint64_t state)
+gss_idx* gss_add_node(gss* g, size_t nodes_idx, uint64_t state)
 {
     set* U = gss_get_nodes_set(g, nodes_idx);
     obj* v = new_uint_obj(state);
-    set_add(U, v);
+    size_t node_idx = set_add_return_index(U, v);
+    return new_gss_idx(nodes_idx, node_idx);
 }
 
 
