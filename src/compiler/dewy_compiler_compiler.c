@@ -193,7 +193,7 @@ void run_compiler_compiler(char* source, bool verbose, bool scanner, bool ast, b
  */
 void run_compiler(uint32_t* source, bool compile, bool forest)
 {
-    srnglr_parser(source);
+    bool result = srnglr_parser(source);
 
     if (compile)
     {
@@ -204,6 +204,8 @@ void run_compiler(uint32_t* source, bool compile, bool forest)
         printf("GRAPH STRUCTURED STACK:\n");
         print_compiler();
         printf("\n\n");
+    
+        printf("PARSE RESULT:\n%s\n\n", result ? "success" : "failure");
     }
 }
 

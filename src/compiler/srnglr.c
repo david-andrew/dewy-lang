@@ -704,6 +704,8 @@ bool srnglr_parser(uint32_t* src)
     set_free(actions);
 
     size_t d = ustring_len(src);
+    // printf("GSS at start\n"); gss_str(GSS); printf("R: "); vect_str(srnglr_R); printf(", Q: "); vect_str(srnglr_Q); printf("\n\n");
+
     for (size_t i = 0; i < d; i++)
     {
         if (set_size(gss_get_nodes_set(GSS, i)) == 0) { break; }
@@ -712,6 +714,7 @@ bool srnglr_parser(uint32_t* src)
             srnglr_reducer(i, src);
         }
         srnglr_shifter(i, src);
+        // printf("GSS after %zu\n", i); gss_str(GSS); printf("R: "); vect_str(srnglr_R); printf(", Q: "); vect_str(srnglr_Q); printf("\n\n");
     }
 
     //check if an accept state is in the final set Ud
@@ -759,7 +762,7 @@ void srnglr_reducer(size_t i, uint32_t* src)
                 gss_add_edge(GSS, w_idx, u_idx);
                 if (length != 0)
                 {
-                    set* actions = srnglr_get_merged_table_actions(*l, src[i+1]);
+                    set* actions = srnglr_get_merged_table_actions(*l, src[i]);
                     for (size_t j = 0; j < set_size(actions); j++)
                     {
                         obj* action = set_get_at_index(actions, j);
@@ -782,7 +785,7 @@ void srnglr_reducer(size_t i, uint32_t* src)
             //create a new node, and edge from w back to u
             w_idx = gss_add_node(GSS, i, *l);
             gss_add_edge(GSS, w_idx, u_idx);
-            set* actions = srnglr_get_merged_table_actions(*l, src[i+1]);
+            set* actions = srnglr_get_merged_table_actions(*l, src[i]);
             for (size_t j = 0; j < set_size(actions); j++)
             {
                 obj* action = set_get_at_index(actions, j);
@@ -836,7 +839,7 @@ void srnglr_shifter(size_t i, uint32_t* src)
             {
                 //create an edge from w to v
                 gss_add_edge(GSS, w_idx, &v_idx);
-                set* actions = srnglr_get_merged_table_actions(k, src[i+2]);
+                set* actions = srnglr_get_merged_table_actions(k, src[i+1]);
                 for (size_t j = 0; j < set_size(actions); j++)
                 {
                     obj* action = set_get_at_index(actions, j);
@@ -858,7 +861,8 @@ void srnglr_shifter(size_t i, uint32_t* src)
                 w_idx = gss_add_node(GSS, i+1, k);
                 gss_add_edge(GSS, w_idx, &v_idx);
                 // uint64_t* h = srnglr_get_table_push()
-                set* actions = srnglr_get_merged_table_actions(k, src[i+2]);
+                set* actions = srnglr_get_merged_table_actions(k, src[i+1]);
+                // printf("actions for (%"PRIu64", ", k); put_unicode(src[i+1]); printf("): "); set_str(actions); printf("\n");
                 for (size_t j = 0; j < set_size(actions); j++)
                 {
                     obj* action = set_get_at_index(actions, j);
