@@ -1,20 +1,22 @@
 //ambiguous example grammar for numeric expressions 
 
 //parenthesis
-#E = '(' #E ')';
+#E = '(' #ws* #E #ws* ')';
 
 //addition/subtraction
-#E = #E [+\-] #E;
+#E = #E #ws* [+\-] #ws* #E;
 
 //multiplication/division
-#E = #E [*/] #E;
+#E = #E #ws* [*/] #ws* #E;
 
 //exponentiation
-#E = #E '^' #E;
+#E = #E #ws* '^' #ws* #E;
 
 //terms (numbers/identifiers)
 #E = #N | #I;
 #N = [0-9]+;
 #I = [A-Za-z_] [A-Za-z0-9!@%&_?]*;
 
-#start = #E;
+#ws = [\n\x20];
+
+#start = (#ws* #E)+;
