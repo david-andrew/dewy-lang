@@ -4,6 +4,7 @@
 //shared packed parse forest data structure for storing the parse trees generated
 
 #include "vector.h"
+#include "dictionary.h"
 
 //nodes are represented by two types of lists. 
 //normal lists, list out the plain string that makes up the node, e.g. node1, node2, ... etc.

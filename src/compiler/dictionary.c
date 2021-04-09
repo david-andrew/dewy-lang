@@ -9,7 +9,6 @@
 
 #include "utilities.h"
 #include "object.h"
-#include "metatoken.h"
 #include "dictionary.h"
 
 #define DEFAULT_DICT_CAPACITY 8
