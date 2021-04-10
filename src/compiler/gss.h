@@ -28,6 +28,8 @@ uint64_t gss_get_node_state(gss* g, size_t nodes_idx, size_t node_idx);
 gss_idx* gss_get_node_with_label(gss* g, size_t nodes_idx, uint64_t state_idx);
 bool gss_does_edge_exist(gss* g, gss_idx* parent, gss_idx* child);
 vect* gss_get_reachable(gss* g, gss_idx* root_idx, size_t length);
+vect* gss_get_all_paths(gss* g, gss_idx* root_idx, size_t length);
+void gss_get_all_paths_inner(gss* g, size_t length, vect* stack, vect* paths);
 gss_idx* gss_add_node(gss* g, size_t nodes_idx, uint64_t state);
 void gss_add_edge(gss* g, gss_idx* parent, gss_idx* child);
 void gss_str(gss* g);

@@ -143,6 +143,65 @@ vect* gss_get_reachable(gss* g, gss_idx* root_idx, size_t length)
 
 
 /**
+ * Return a list of paths of length from the root node in the GSS.
+ */
+vect* gss_get_all_paths(gss* g, gss_idx* root_idx, size_t length)
+{
+    //keep track of all paths generated
+    vect* paths = new_vect();
+
+    //create a stack to hold the current path, and add the first node in the path
+    vect* stack = new_vect();
+    obj root_idx_obj = (obj){.type=GSSIndex_t, .data=root_idx};
+    vect_push(stack, &root_idx_obj);
+
+    gss_get_all_paths_inner(g, length, stack, paths);
+
+    //recurse down to length l
+    //at each length l node, copy the stack into the paths vector
+
+    //remove the root_idx obj from the stack (since it's not allocated) before we free the stack
+    vect_pop(stack);
+    vect_free(stack);
+
+    return paths;
+}
+
+
+/**
+ * Helper function for recursively generating all paths.
+ * All stack objects are owned by other structures, hence
+ * no need to free when popped.
+ */
+void gss_get_all_paths_inner(gss* g, size_t length, vect* stack, vect* paths)
+{
+    if (length == 0)
+    {
+        //add a copy of the stack to paths, and then pop the current element of the top
+        vect_append(paths, new_vect_obj(vect_copy(stack)));
+        vect_pop(stack);
+    }
+    else
+    {
+        //recursively call this function on each child
+        obj* parent = vect_peek(stack);
+
+        obj* children_obj = dict_get(g->edges, parent);
+        if (children_obj != NULL)
+        {
+            set* children = children_obj->data;
+            for (size_t i = 0; i < set_size(children); i++)
+            {
+                obj* child_obj = set_get_at_index(children, i);
+                vect_push(stack, child_obj);
+                gss_get_all_paths_inner(g, length - 1, stack, paths);
+            }
+        }
+    }
+}
+
+
+/**
  * Insert a node into the GSS.
  */
 gss_idx* gss_add_node(gss* g, size_t nodes_idx, uint64_t state)

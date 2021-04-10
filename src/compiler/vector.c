@@ -150,37 +150,63 @@ void vect_insert(vect* v, obj* item, size_t index)
 }
 
 
-
+/**
+ * Add an element to the end of the vect.
+ */
 void vect_append(vect* v, obj* item)
 {
     vect_insert(v, item, v->size);
 }
 
+
+/**
+ * Add an element to the front of the vect.
+ */
 void vect_prepend(vect* v, obj* item)
 {
     vect_insert(v, item, 0);
 }
 
+
+/**
+ * Add an element to the end of the vect (i.e. top of the stack).
+ */
 void vect_push(vect* v, obj* item) 
 {
     vect_append(v, item);
 }
 
+
+/**
+ * Remove the last element of the vect (i.e. top of the stack) and return it.
+ */
 obj* vect_pop(vect* v) 
 {
     return v->size > 0 ? vect_remove(v, v->size - 1) : NULL;
 }
 
+
+/**
+ * Return the last element in the vect (i.e. top of the stack) without modifying the vect.
+ */
 obj* vect_peek(vect* v)
 {
     return v->size > 0 ? vect_get(v, v->size - 1) : NULL;
 }
 
+
+/**
+ * Add an element to the end of the vect (i.e. end of the queue).
+ */
 void vect_enqueue(vect* v, obj* item)
 {
     vect_append(v, item);
 }
 
+
+/**
+ * Remove the first element of the vect (i.e. start of the queue), and return it.
+ */
 obj* vect_dequeue(vect* v)
 {
     return v->size > 0 ? vect_remove(v, 0) : NULL;
