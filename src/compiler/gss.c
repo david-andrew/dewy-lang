@@ -155,14 +155,16 @@ vect* gss_get_all_paths(gss* g, gss_idx* root_idx, size_t length)
     obj root_idx_obj = (obj){.type=GSSIndex_t, .data=root_idx};
     vect_push(stack, &root_idx_obj);
 
+    //compute algorithm
     gss_get_all_paths_inner(g, length, stack, paths);
 
-    //recurse down to length l
-    //at each length l node, copy the stack into the paths vector
-
-    //remove the root_idx obj from the stack (since it's not allocated) before we free the stack
-    vect_pop(stack);
+    //remove any remaining elements from the stack before freeing, since the stack doesn't own any of its objects
+    while (vect_size(stack) > 0) { vect_pop(stack); }
     vect_free(stack);
+
+    printf("compute all paths:\n");
+    vect_str(paths);
+    printf("\n");
 
     return paths;
 }
@@ -177,9 +179,8 @@ void gss_get_all_paths_inner(gss* g, size_t length, vect* stack, vect* paths)
 {
     if (length == 0)
     {
-        //add a copy of the stack to paths, and then pop the current element of the top
+        //add a copy of the stack to paths
         vect_append(paths, new_vect_obj(vect_copy(stack)));
-        vect_pop(stack);
     }
     else
     {
@@ -198,6 +199,9 @@ void gss_get_all_paths_inner(gss* g, size_t length, vect* stack, vect* paths)
             }
         }
     }
+
+    // pop the current element of the top
+    vect_pop(stack);
 }
 
 
