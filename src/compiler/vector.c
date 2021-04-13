@@ -333,7 +333,6 @@ obj* vect_remove(vect* v, size_t index)
         v->list[(v->head + v->size - 1) % v->capacity] = NULL;
     }
     v->size--;
-    // if (v->size < 4 * v->capacity) { vect_resize(v, v->size/2); }
 
     return item;
 }
