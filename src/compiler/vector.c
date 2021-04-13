@@ -106,17 +106,17 @@ void vect_resize(vect* v, size_t new_size)
 
 
 
+/**
+ * Insert an element into the vector at the specified index.
+ */
 //TODO->reimplement to use memmove instead of a for loop, as that will be faster.
 //it's more complicated to implement though...
 //current implementation: http://opendatastructures.org/ods-java/2_4_ArrayDeque_Fast_Deque_O.html
-
 //BUGS
 //prepending and appending work fine. inserting in the middle causes problems
 //presumable off-by-one errors that occur during shift left or shift right
 void vect_insert(vect* v, obj* item, size_t index)
-{
-    // printf("INSERTING at index %zu. size=%zu, capacity=%zu\n", index, v->size, v->capacity);
-    
+{    
     if (index > v->size)
     {
         printf("ERROR: cannot insert at index=%zu for vector of size=%zu\n", index, v->size);
@@ -337,14 +337,13 @@ obj* vect_remove(vect* v, size_t index)
     return item;
 }
 
-//remove and free an element from the vector
+
+/**
+ * remove and free an element from the vector
+ */
 void vect_delete(vect* v, size_t index)
 {
-    obj* item = vect_remove(v, index);
-    if (item != NULL) 
-    {
-        obj_free(item);
-    }
+    obj_free(vect_remove(v, index));
 }
 
 void vect_reset(vect* v)

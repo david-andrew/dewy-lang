@@ -40,6 +40,7 @@ new_primitive(new_int, int64_t)
 new_primitive(new_uint, uint64_t)
 // new_primitive(new_pointer, void*)
 
+
 /**
  * Object wrapped versions of a primitive.
  */
@@ -93,6 +94,7 @@ obj* obj_copy(obj* o)
     dict_free_table_only(refs);
     return copy;
 }
+
 
 /**
  * Inner recursive deep copy of an object.
@@ -199,6 +201,9 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
 }
 
 
+/**
+ * Print out a string representation of the object and any inner data.
+ */
 void obj_str(obj* o)
 {
     if (o == NULL) 
@@ -251,9 +256,9 @@ int obj_strlen(obj* o)
 }
 
 
-
-
-
+/**
+ * Compute a hash of the given object and it's contained data.
+ */
 uint64_t obj_hash(obj* o) 
 {
     if (o == NULL) { return 0; }
@@ -274,7 +279,7 @@ uint64_t obj_hash(obj* o)
         case GotoKey_t: return gotokey_hash(o->data);
         case Push_t: return hash_uint(*(uint64_t*)o->data);
         case Reduction_t: return reduction_hash(o->data);
-        case Accept_t: return hash_uint(0);
+        case Accept_t: return hash_uint(Accept_t);
         case GSSIndex_t: return gss_idx_hash(o->data);
         case Vector_t: return vect_hash(o->data);
         // case Dictionary_t: return dict_hash(o->data);
@@ -283,6 +288,13 @@ uint64_t obj_hash(obj* o)
     }
 }
 
+
+/**
+ * Return a number indicating the ordering of two objects.
+ * negative number indicates left occurs before right, 
+ * positive number indicates right occurs before left.
+ * Handles NULL left or right gracefully.
+ */
 int64_t obj_compare(obj* left, obj* right)
 {
     //TODO->check these.
@@ -314,6 +326,12 @@ int64_t obj_compare(obj* left, obj* right)
     }
 }
 
+
+/**
+ * Check if two objects are semantically identical.
+ * If a compare function is not implemented for the given type, 
+ * then falls back on obj_compare() == 0 for equality.
+ */
 bool obj_equals(obj* left, obj* right)
 {
     //handle case where either or both are null
@@ -344,6 +362,11 @@ bool obj_equals(obj* left, obj* right)
     
 }
 
+
+/**
+ * Free the object and all it's contained data.
+ * Gracefully handles case where obj == NULL
+ */
 void obj_free(obj* o)
 {
     if (o != NULL)
@@ -388,6 +411,7 @@ void obj_free(obj* o)
         free(o);
     }
 }
+
 
 /**
  * Get the void* data from inside an obj*, and free the obj* container.
