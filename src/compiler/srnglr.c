@@ -744,6 +744,7 @@ void srnglr_reducer(size_t i, uint32_t* src)
     
     //collect a list of all reachable nodes from v
     vect* reachable = gss_get_reachable(GSS, &v_idx, length > 0 ? length - 1 : 0);
+    vect_free(gss_get_all_paths(GSS, &v_idx, length > 0 ? length - 1 : 0)); //DEBUG
 
     for (size_t j = 0; j < vect_size(reachable); j++)
     {
