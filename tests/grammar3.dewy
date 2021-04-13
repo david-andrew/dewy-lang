@@ -1,26 +1,19 @@
 //example grammar for numeric expressions 
 //based on https://cs.stackexchange.com/a/47904
 
-//addition/subtraction
-#S = #S '+' '(' #A ')' | #S '+' #A;
-#S = #S '-' '(' #A ')' | #S '-' #A;
-#S = '(' #A ')' | #A;
+//addition/subtraction (left associative)
+#S = #S '+' #A | #S '-' #A | #A;
 
-//multiplication/division
-#A = #A '*' '(' #E ')' | #A '*' #E;
-#A = #A '/' '(' #E ')' | #A '/' #E;
-#A = '(' #E ')' | #E;
+//multiplication/division (left associative)
+#A = #A '*' #E | #A '/' #E | #E;
 
-//exponentiation
-#E = '(' #T ')' '^' #E | #T '^' #E;
-#E = '(' #T ')' | #T;
+//exponentiation (right associative)
+#E = #T '^' #E | #T;
 
-//terms (numbers/identifiers)
-//technically these are ambiguous, but the rnglr parser can handle automatically in this grammar.
-//i.e. an LR(1) parser would report a shift/reduce conflict, but rnglr applies both in parallel.
-//to make actually unambiguous, need to remove the +/* from the rules
-#T = #N | #I;
+//terms (numbers/identifiers/groups)
+//technically these are ambiguous without a longest match filter, but this particular grammer works out,
+//since the rnglr algorithms can do actions in parallel, only the longest match will remain at the end.
+#T = #N | #I | #G;
 #N = [0-9]+;
 #I = [A-Za-z_] [A-Za-z0-9!@%&_?]*;
-//#N = [0-9];       // unambiguous -> every number is 1 digit
-//#I = [A-Za-z]     // unambiguous -> every identifier is a single letter
+#G = '(' #S ')';
