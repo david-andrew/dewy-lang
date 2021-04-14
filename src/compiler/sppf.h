@@ -10,24 +10,24 @@
 
 
 typedef struct {
-    dict* nodes;    //map<sppf_node, child_list_idx | vect<child_list_idx> | NULL>      //where child_list_idx is uint64_t. NULL is for leaf and nullable nodes
-    set* children;  //set<vect<child_node_idx>>                                         //where child_node_idx is uint64_t
-    // dict* edge_node_map; //map<gss_edge, sppf_node_idx> from GSS edges to nodes in the SPPF
+    dict* nodes;            //map<sppf_node, child_list_idx | vect<child_list_idx> | NULL>      where child_list_idx is uint64_t. NULL is for leaf and nullable nodes
+    set* children;          //set<vect<child_node_idx>>                                         where child_node_idx is uint64_t
+    dict* gss_sppf_map;     //map<gss_edge, sppf_node_idx> from GSS edges to nodes in the SPPF
 } sppf;
 
 typedef enum {
-    leaf,
-    nullable,
-    inner,          //includes both normal and packed nodes
- } sppf_type;
+    sppf_leaf,
+    sppf_nullable,
+    sppf_inner,             //includes both normal and packed nodes
+ } sppf_node_type;
 
 typedef struct {
-    sppf_type type;
+    sppf_node_type type;
     union {
-        uint64_t leaf;       //index in source of the terminal character
-        uint64_t nullable;   //index in the sppf_nodes dict of the specific nullable node
+        uint64_t leaf;      //index in source of the terminal character
+        uint64_t nullable;  //index in the sppf_nodes dict of the specific nullable node
         struct {
-            uint64_t head_idx;
+            uint64_t head_idx;  //symbol index of the rule head being reduced
             // uint64_t production_idx?;    //for future use
             uint64_t source_start_idx; 
             uint64_t source_end_idx;

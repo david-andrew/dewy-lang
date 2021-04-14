@@ -21,6 +21,8 @@ void accept_repr();
 void initialize_srnglr(size_t input_size);
 void release_srnglr();
 
+uint32_t* srnglr_get_input_source();
+
 void srnglr_compute_symbol_firsts();
 size_t srnglr_count_firsts_size();
 

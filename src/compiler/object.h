@@ -29,7 +29,7 @@ typedef enum
     Reduction_t,
     Accept_t,
     GSSIndex_t,
-    //SPPFNode_t?
+    SPPFNode_t,
     Vector_t,
     Dictionary_t,
     Set_t,

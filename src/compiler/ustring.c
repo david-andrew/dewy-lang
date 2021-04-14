@@ -414,21 +414,31 @@ size_t utf8_length(char* str)
 
 
 /**
-    print the unicode character, or a special character for some special inputs
-*/
+ * print the unicode character or a representation of the character.
+ * Also allows for the non-unicode codepoint of 0x200000 which represents
+ * the end of an input string.
+ */
 void unicode_str(uint32_t c)
 {
-    if (c == 0)                 //null character. represents an empty string/set
-    {
-        put_unicode(0x2300);    // ⌀ (diameter symbol)
+    if (is_unicode_escape(c))
+    { 
+        //print as symbolic escape (i.e. \n, \t, \b, etc.)
+        printf("\\"); put_unicode(unicode_to_escape(c));
     }
-    else if (c == UNICODE_ENDMARKER_POINT) // represents the end of a meta-rule
+    else if (is_printable_unicode(c))
     {
-        put_unicode(0x1F596);    // 🖖 (vulcan salute). easy to spot character
-    }
-    else                        //any other unicode character
-    {
+        //print character literally
         put_unicode(c);
+    }
+    else if (c == UNICODE_ENDMARKER_POINT)
+    {
+        //special non-unicode character for end of input
+        printf("#$");
+    }
+    else 
+    {
+        //print as hex escape
+        printf("\\x%X", c);
     }
 }
 

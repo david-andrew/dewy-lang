@@ -35,6 +35,9 @@ vect* srnglr_Q;
 gss* GSS;
 // sppf* SPPF = NULL;
 
+//copy of the input source being read by the parser.
+uint32_t* srnglr_input_source;
+
 /**
  * Initialize global srnglr data structures.
  */
@@ -143,6 +146,15 @@ void accept_repr()
     printf("accept{}");
 }
 
+
+/**
+ * Return a copy of the pointer to the current input source text.
+ * May be used by other components to get characters from the text.
+ */
+uint32_t* srnglr_get_input_source()
+{
+    return srnglr_input_source;
+}
 
 
 /**
@@ -657,6 +669,9 @@ bool srnglr_is_accepting_state(uint64_t state_idx)
  */
 bool srnglr_parser(uint32_t* src)
 {
+    //cache a copy of the input source
+    srnglr_input_source = src;
+    
     //length 0 input is only a successful parse if table includes accept at state 0, with #$ lookahead
     if (src[0] == 0)
     {
