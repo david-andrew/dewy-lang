@@ -468,21 +468,20 @@ int64_t vect_compare(vect* left, vect* right)
 
 
 /**
+ * Lambda function used by hash_uint_sequence, 
+ * for retrieving values from the vector as a sequence.
+ */
+uint64_t vect_hash_getval(void* v, size_t i)
+{
+    return obj_hash(vect_get((vect*)v, i));
+}
+
+/**
  * Hash the sequence of elements in the vector.
  */
 uint64_t vect_hash(vect* v)
 {
-    //get a list of hashes for each element in the vector
-    uint64_t* hashes = malloc(sizeof(uint64_t) * vect_size(v));
-    for (size_t i = 0; i < vect_size(v); i++)
-    {
-        hashes[i] = obj_hash(vect_get(v, i));
-    }
-
-    //hash the sequence together
-    uint64_t hash = hash_uint_sequence(hashes, vect_size(v));
-    free(hashes);
-    return hash;
+    return hash_uint_lambda_sequence(v, vect_size(v), vect_hash_getval);
 }
 
 

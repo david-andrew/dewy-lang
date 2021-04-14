@@ -99,8 +99,10 @@ uint64_t sppf_node_hash(sppf_node* n)
         case sppf_leaf: return hash_uint(n->node.leaf);
         case sppf_nullable: return hash_uint(n->node.nullable);
         case sppf_inner:
+        {
             uint64_t seq[] = {n->node.inner.head_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx};
             return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
+        }
     }
 }
 

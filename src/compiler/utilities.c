@@ -199,20 +199,33 @@ uint64_t fnv1a(char* str)
 }
 
 
+/**
+ * Return a hash of the signed integer value.
+ */
 uint64_t hash_int(int64_t val)
 {
-    return hash_uint(*((uint64_t*)&val));
+    //pretend the int is a uint
+    return hash_uint(*(uint64_t*)&val);
 }
+
+
+/**
+ * Return a hash of the unsigned integer value.
+ */
 uint64_t hash_uint(uint64_t val)
 {
-    uint64_t hash = 14695981039346656037lu;
-    uint8_t* v = (uint8_t*)&val;
-    for (int i = 7; i >= 0; i--) //loop from least significant to most significant
-    {
-        hash ^= *(v + i);
-        hash *= 1099511628211; 
-    }
-    return hash;
+    //present the uint as a length 1 uint sequence
+    return hash_uint_sequence(&val, 1);
+}
+
+
+/**
+ * Identity function for passing into hash_uint_lambda_sequence.
+ * Returns the i'th value in the uint64_t sequence, without modification.
+ */
+uint64_t utilities_identity_getval(void* seq, size_t i)
+{
+    return ((uint64_t*)seq)[i];
 }
 
 
@@ -221,13 +234,23 @@ uint64_t hash_uint(uint64_t val)
  */
 uint64_t hash_uint_sequence(uint64_t* seq, size_t n)
 {
+    return hash_uint_lambda_sequence(seq, n, utilities_identity_getval);
+}
+
+
+/**
+ * Return a hash of the sequence, using the provided function to retrieve values
+ * for elements in the sequence
+ */
+uint64_t hash_uint_lambda_sequence(void* seq, size_t n, uint64_t (*getval)(void*, size_t))
+{
     uint64_t hash = 14695981039346656037lu;
 
     //loop through each of the uint64_t's in the sequence
     for (size_t i = 0; i < n; i++)
     {
         //reinterpret the uint64_t as 8 bytes
-        uint64_t val = seq[i];
+        uint64_t val = getval(seq, i);
         uint8_t* bytes = (uint8_t*)&val;
 
         //hash combine byte into the hash
@@ -241,6 +264,9 @@ uint64_t hash_uint_sequence(uint64_t* seq, size_t n)
 }
 
 
+/**
+ * Return a hash of the boolean value.
+ */
 uint64_t hash_bool(bool val)
 {
     //cast the bool to a 64-bit 0 or 1, and return it's hash
@@ -249,16 +275,16 @@ uint64_t hash_bool(bool val)
 
 
 /**
-    return the next value in the 64-bit lfsr sequence
-*/
+ * return the next value in the 64-bit lfsr sequence
+ */
 uint64_t lfsr64_next(uint64_t curr)
 {
     return curr >> 1 | (curr ^ curr >> 1 ^ curr >> 3 ^ curr >> 4) << 63;
 }
 
 /**
-    return the previous value in the 64-bit lfsr sequence
-*/
+ * return the previous value in the 64-bit lfsr sequence
+ */
 uint64_t lfsr64_prev(uint64_t curr)
 {
     return curr << 1 | ((curr >> 63 ^ curr ^ curr >> 2 ^ curr >> 3) & 0x1);
