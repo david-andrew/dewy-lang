@@ -15,6 +15,8 @@ size_t read_file(char* filename, char** destination);
 size_t read_unicode_file(char* filename, uint32_t** destination);
 void repeat_str(char* str, size_t times);
 
+bool is_system_little_endian();
+
 //hash functions
 uint64_t djb2(char* str);
 uint64_t djb2a(char* str);

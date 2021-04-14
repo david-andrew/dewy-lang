@@ -578,76 +578,55 @@ uint32_t unicode_to_lower(uint32_t c)
 
 
 /**
- * Parse UnicodeData.txt to find the line for the given codepoint, for case conversion
+ * read in unicode_cases.bin, and find the line for the given codepoint for case conversion.
  * Sets the corresponding lowercase and uppercase codepoint if they exist.
  * Otherwise upercase and lowercase are set to the input c.
- * Results returned from this function should be cached since they are expensive to parse.
  * Returns true if successfully found codepoint, else false.
  */
 bool unicode_upper_and_lower(uint32_t c, uint32_t* uppercase, uint32_t* lowercase)
 {
-    //file pointer + var to hold each character read in
-    FILE* f = fopen("unicode_cases.txt", "r");
-    int ch;
+    #define NUM_UNICODE_SWAPPABLE 2620                  //number of unicode characters that have upper/lowercase versions
+    #define TABLE_WIDTH 3                               //3 uint32's for every entry
 
-    //arrays to hold hex digits read in. length 7 to fit maximum codepoint 10FFFF, + null terminator 
-    uint32_t codepoint_arr[7];
-    uint32_t lowercase_arr[7];
-    uint32_t uppercase_arr[7];
-    
-    while (true)
-    {
+    //select file version that matches system's endianess
+    bool le = is_system_little_endian();
+    char* path = le ? "unicode_cases_le.bin" : "unicode_cases_be.bin";
 
-        //scan through the first hex number in the line
-        size_t i = 0;
-        while ((ch = fgetc(f)) != EOF && ch != ':')
-        {
-            codepoint_arr[i++] = ch;
-        }
-        if (ch == EOF) { break; }
-        codepoint_arr[i] = 0; //null terminator at the end of the string
-        uint32_t codepoint = ustring_parse_hex(codepoint_arr);
-
-        //not the character we want, so scan till next line
-        if (codepoint < c)
-        {
-            while ((ch = fgetc(f)) != EOF && ch != '\n');
-            if (ch == EOF) { break; }
-            continue;
-        }
-        else if (codepoint > c) { break; } //indicates no entry for the given codepoint
-
-
-        //scan through the second codepoint which indicates the uppercase for this codepoint
-        i = 0;
-        while ((ch = fgetc(f)) != EOF && ch != ':')
-        {
-            uppercase_arr[i++] = ch;
-        }
-        if (ch == EOF) { break; }
-        uppercase_arr[i] = 0; //null terminator
-        *uppercase = ustring_parse_hex(uppercase_arr);
-
-        //scan through the third codepoint which indicates the lowercase for this codepoint
-        i = 0;
-        while ((ch = fgetc(f)) != EOF && ch != '\n')
-        {
-            uppercase_arr[i++] = ch;
-        }
-        // if (ch == EOF) { break; }
-        uppercase_arr[i] = 0; //null terminator
-        *lowercase = ustring_parse_hex(uppercase_arr);
-
-        fclose(f);
-        return true;
-    }
-
-    //default case is set both upper and lower to the input char
-    *uppercase = c;
-    *lowercase = c;
+    //read file into an array
+    uint32_t table[NUM_UNICODE_SWAPPABLE * TABLE_WIDTH];
+    FILE *f = fopen(path,"rb");
+    fread(table, sizeof(uint32_t), sizeof(table) / sizeof(uint32_t), f);
     fclose(f);
+
+    //binary search to find the character we want
+    int start = 0;
+    int end = NUM_UNICODE_SWAPPABLE - 1;
+    while (end >= start) {
+
+        //get the current codepoint
+        int i = (start + end) / 2;
+        uint32_t codepoint = table[i * TABLE_WIDTH];
+
+        //check if found desired codepoint else adjust search range
+        if (codepoint > c)
+        {
+            end = i - 1;
+        }
+        else if (codepoint < c)
+        {
+            start = i + 1;
+        }
+        else
+        {
+            //store the lower/uppercase values from the table
+            *lowercase = table[i * TABLE_WIDTH + 1];
+            *uppercase = table[i * TABLE_WIDTH + 2];
+            return true;
+        }
+    }
     return false;
 }
+
 
 
 #endif

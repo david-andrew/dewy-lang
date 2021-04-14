@@ -159,6 +159,17 @@ void repeat_str(char* str, size_t times)
 }
 
 
+/**
+ * Determine the endianess of the system.
+ * Returns true for little-endian, else false for big-endian.
+ */
+bool is_system_little_endian()
+{
+    const int i = 1;
+    return *(char*)&i == 1;
+}
+
+
 //For a discussion on hashes: https://softwareengineering.stackexchange.com/questions/49550/which-hashing-algorithm-is-best-for-uniqueness-and-speed
 
 // http://www.cse.yorku.ca/~oz/hash.html
