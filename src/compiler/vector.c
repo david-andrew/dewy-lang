@@ -12,8 +12,8 @@
 
 #define DEFAULT_VECT_CAPACITY 8
 
-//ArrayList Implemented as an ArrayDeque. see: http://opendatastructures.org/ods-java/2_4_ArrayDeque_Fast_Deque_O.html
-
+//ArrayList Implemented as an ArrayDeque
+//see: http://opendatastructures.org/ods-java/2_4_ArrayDeque_Fast_Deque_O.html
 
 
 /**
@@ -213,16 +213,16 @@ obj* vect_dequeue(vect* v)
 }
 
 
-//TODO->should probably free the current item at the index
-void vect_set(vect* v, obj* item, size_t index)
-{
-    if (index >= v->size)
-    {
-        printf("ERROR: cannot set index=%zu in vector of size=%zu\n", index, v->size);
-        exit(1);
-    }
-    v->list[(v->head + index) % v->capacity] = item;
-}
+// //TODO->should probably free the current item at the index, or at least return it
+// void vect_set(vect* v, obj* item, size_t index)
+// {
+//     if (index >= v->size)
+//     {
+//         printf("ERROR: cannot set index=%zu in vector of size=%zu\n", index, v->size);
+//         exit(1);
+//     }
+//     v->list[(v->head + index) % v->capacity] = item;
+// }
 
 
 /**
@@ -314,7 +314,7 @@ obj* vect_get(vect* v, size_t index)
     if (index >= v->size)
     {
         printf("ERROR: attempted to access index=%zu for vector of size=%zu\n", index, v->size);
-        return NULL;
+        exit(1);
     }
     return v->list[(v->head + index) % v->capacity];
 }
@@ -328,7 +328,7 @@ obj* vect_remove(vect* v, size_t index)
     if (index >= v->size) 
     {
         printf("ERROR: cannot remove element at index=%zu for vector of size=%zu\n", index, v->size);
-        return NULL;
+        exit(1);
     }
     obj* item = vect_get(v, index);
     if (index < v->size / 2)
@@ -364,21 +364,26 @@ void vect_delete(vect* v, size_t index)
 
 
 /**
- * Reset the contents of the vector, as if it was a newly allocated vector.
+ * Reset the contents of the vector, as if it was a newly allocated vector,
+ * but retain the currently allocated array for objects.
  */
-//TODO->consider having this keep the same v->list allocation to save allocations
-//just reset the head location
 void vect_reset(vect* v)
 {
     //free the contents of the vector
-    for (int i = 0; i < v->size; i++)
+    for (size_t i = 0; i < v->size; i++)
     {
         obj_free(vect_get(v, i));
     }
-    free(v->list);
+    
+    //ensure all elements of the list are zeroed out
+    for (size_t i = 0; i < v->capacity; i++)
+    {
+        v->list[i] = NULL;
+    }
+
+    //reset the size and head
     v->size = 0;
-    v->capacity = DEFAULT_VECT_CAPACITY;
-    v->list = calloc(DEFAULT_VECT_CAPACITY, sizeof(obj));
+    v->head = 0;
 }
 
 
@@ -476,6 +481,7 @@ uint64_t vect_hash_getval(void* v, size_t i)
     return obj_hash(vect_get((vect*)v, i));
 }
 
+
 /**
  * Hash the sequence of elements in the vector.
  */
@@ -511,15 +517,6 @@ void vect_str(vect* v)
     }
     printf("]");
 }
-
-
-
-
-
-
-
-
-
 
 
 
