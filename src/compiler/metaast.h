@@ -77,51 +77,21 @@ typedef enum {
 } metaast_type;
 
 
+//forward declare so we can reference inside the struct itself
+typedef struct metaast_struct metaast;
+
 // \e uses this directly with node=NULL
-typedef struct {
+typedef struct metaast_struct {
     metaast_type type;
-    void* node;
+    union {
+        uint32_t* string;                                       // "strings", #identifiers
+        struct {uint64_t count; metaast* inner;} repeat;        // A*, A+, (A)5
+        struct {metaast* inner;} unary;                         // A?, A~
+        struct {size_t size; metaast** elements;} sequence;     // A B C D
+        struct {metaast* left; metaast* right;} binary;         // A | B,  C > D,  E < F,  G - H,  I / J,  K & L
+        charset* cs;                                            // [a-zA-Z],  'A',  \X65,  \U
+    } node;
 } metaast;
-
-
-//"strings", #identifiers
-typedef struct {
-    uint32_t* string;
-} metaast_string_node;
-
-
-//A*, A+, (A)5
-typedef struct {
-    uint64_t count;
-    metaast* inner;
-} metaast_repeat_node;
-
-
-//A?, A~
-typedef struct {
-    metaast* inner;
-} metaast_unary_op_node;
-
-
-//A B C D
-typedef struct {
-    size_t size;
-    // size_t capacity;
-    metaast** sequence; //array of metaast
-} metaast_sequence_node;
-
-
-// A | B,  C > D,  E < F,  G - H,  I / J,  K & L
-typedef struct {
-    metaast* left;
-    metaast* right;
-} metaast_binary_op_node;
-
-
-// [a-zA-Z],  'A',  \X65,  \U
-typedef struct {
-    charset* c;
-} metaast_charset_node;
 
 
 //function pointer type for token scan functions
@@ -130,14 +100,14 @@ typedef metaast* (*metaast_parse_fn)(vect* tokens);
 
 
 //create meta-ast objects
-metaast* new_metaast(metaast_type type, void* node);
+// metaast* new_metaast(metaast_type type, void* node);
 metaast* new_metaast_null_node(metaast_type type);
 metaast* new_metaast_string_node(metaast_type type, uint32_t* string);
 metaast* new_metaast_repeat_node(metaast_type type, uint64_t count, metaast* inner);
 metaast* new_metaast_unary_op_node(metaast_type type, metaast* inner);
-metaast* new_metaast_sequence_node(metaast_type type, size_t size, /*size_t capacity,*/ metaast** sequence); //sequence is array of metaast
+metaast* new_metaast_sequence_node(metaast_type type, size_t size, metaast** elements);
 metaast* new_metaast_binary_op_node(metaast_type type, metaast* left, metaast* right);
-metaast* new_metaast_charset_node(metaast_type type, charset* c);
+metaast* new_metaast_charset_node(metaast_type type, charset* cs);
 
 //construct nodes from input tokens
 metaast* metaast_parse_expr(vect* tokens);

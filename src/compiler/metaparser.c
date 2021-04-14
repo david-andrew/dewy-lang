@@ -337,8 +337,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         case metaast_identifier:
         {
             //get the symbol index of the identifier
-            metaast_string_node* node = body_ast->node;
-            obj* nonterminal = new_ustring_obj(ustring_clone(node->string));
+            obj* nonterminal = new_ustring_obj(ustring_clone(body_ast->node.string));
             uint64_t nonterminal_idx = metaparser_add_symbol(nonterminal);
             
             //if head is defined, then create a whole production with a sentence containing just the identifier
@@ -371,8 +370,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             vect* sentence = new_vect();
 
             //insert the terminal into the sentence
-            metaast_charset_node* node = body_ast->node;
-            obj* terminal = new_charset_obj(charset_clone(node->c));
+            obj* terminal = new_charset_obj(charset_clone(body_ast->node.cs));
             uint64_t terminal_idx = metaparser_add_symbol(terminal);
             vect_append(sentence, new_uint_obj(terminal_idx));
 
@@ -392,8 +390,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             vect* sentence = new_vect();
 
             //insert each character from the string into the sentence
-            metaast_string_node* node = body_ast->node;
-            uint32_t* s = node->string;
+            uint32_t* s = body_ast->node.string;
             uint32_t c;
             while ((c = *s++))
             {
@@ -419,8 +416,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             vect* sentence = new_vect();
 
             //insert upper and lowercase versions of each character from the string into the sentence
-            metaast_string_node* node = body_ast->node;
-            uint32_t* s = node->string;
+            uint32_t* s = body_ast->node.string;
             uint32_t c;
             while ((c = *s++))
             {
@@ -447,14 +443,12 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         {
             //crete an anonymous head if it wasn't provided
             head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
-
-            metaast_repeat_node* node = body_ast->node;
             
             //get the identifier for the inner node
-            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(node->inner);
+            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.repeat.inner);
 
             //build the sentence
-            if (node->count == 0 || (node->count == 1 && body_ast->type == metaast_star))
+            if (body_ast->node.repeat.count == 0 || (body_ast->node.repeat.count == 1 && body_ast->type == metaast_star))
             {
                 //simple star
                 //#head = #A* | (#A)0* | (#A)1* | (#A)0+ =>
@@ -499,7 +493,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 
                 //  #head = #A #A #A ... #A #__0; //... N times
                 vect* sentence2 = new_vect();
-                for (int i = 0; i < node->count; i++)
+                for (int i = 0; i < body_ast->node.repeat.count; i++)
                 {
                     vect_append(sentence2, new_uint_obj(inner_head_idx));
                 }
@@ -521,16 +515,15 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             //crete an anonymous head if it wasn't provided
             head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
 
-            metaast_repeat_node* node = body_ast->node;
-            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(node->inner);
+            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.repeat.inner);
 
-            if (node->count == 0)
+            if (body_ast->node.repeat.count == 0)
             {
                 //#head = (#A)0 => ϵ;  //this is probably a typo on the user's part...
                 printf("WARNING: "); metaast_str(body_ast); printf(" is equivalent to ϵ\n"
-                "Did you mean `("); metaast_str(node->inner); printf(")*`"
-                " or `("); metaast_str(node->inner); printf(")+`"
-                " or `("); metaast_str(node->inner); printf(")N` where N > 1 ?\n");
+                "Did you mean `("); metaast_str(body_ast->node.repeat.inner); printf(")*`"
+                " or `("); metaast_str(body_ast->node.repeat.inner); printf(")+`"
+                " or `("); metaast_str(body_ast->node.repeat.inner); printf(")N` where N > 1 ?\n");
                 metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
             }
             else
@@ -538,7 +531,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
                 //#head = (#A)N =>
                 //  #head = #A #A #A ... #A; //... N times
                 vect* sentence = new_vect();
-                for (int i = 0; i < node->count; i++)
+                for (int i = 0; i < body_ast->node.repeat.count; i++)
                 {
                     vect_append(sentence, new_uint_obj(inner_head_idx));
                 }
@@ -552,8 +545,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             //crete an anonymous head if it wasn't provided
             head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
 
-            metaast_unary_op_node* node = body_ast->node;
-            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(node->inner);
+            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.unary.inner);
 
             //#head = #A ? =>
             //  #head = #A
@@ -576,18 +568,16 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
 
             //#head = #A #B => #A #B  //cat is already in CFG format. TODO->handle cat with strings/charsets/identifiers/epsilon...
-            metaast_sequence_node* node = body_ast->node;
             vect* sentence = new_vect();
-            for (size_t i = 0; i < node->size; i++)
+            for (size_t i = 0; i < body_ast->node.sequence.size; i++)
             {
-                metaast* inner_i_ast = node->sequence[i];
+                metaast* inner_i_ast = body_ast->node.sequence.elements[i];
                 switch (inner_i_ast->type)
                 {
                     //insert each char of the string into the parent sentence
                     case metaast_string: 
                     { 
-                        metaast_string_node* inner_i_node = inner_i_ast->node;
-                        uint32_t* s = inner_i_node->string;
+                        uint32_t* s = inner_i_ast->node.string;
                         uint32_t c;
                         while ((c = *s++))
                         {
@@ -601,8 +591,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
                     
                     case metaast_caseless: 
                     { 
-                        metaast_string_node* inner_i_node = inner_i_ast->node;
-                        uint32_t* s = inner_i_node->string;
+                        uint32_t* s = inner_i_ast->node.string;
                         uint32_t c;
                         while ((c = *s++))
                         {                            
@@ -620,8 +609,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
                     //insert the charset into the parent sentence
                     case metaast_charset: 
                     {
-                        metaast_charset_node* inner_i_node = inner_i_ast->node;
-                        obj* cs_obj = new_charset_obj(charset_clone(inner_i_node->c));
+                        obj* cs_obj = new_charset_obj(charset_clone(inner_i_ast->node.cs));
                         uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
                         vect_append(sentence, new_uint_obj(terminal_idx));
                         break;
@@ -630,8 +618,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
                     //insert the identifier into the parent sentence
                     case metaast_identifier:
                     {
-                        metaast_string_node* inner_i_node = inner_i_ast->node;
-                        obj* identifier = new_ustring_obj(ustring_clone(inner_i_node->string));
+                        obj* identifier = new_ustring_obj(ustring_clone(inner_i_ast->node.string));
                         uint64_t identifier_idx = metaparser_add_symbol(identifier);
                         vect_append(sentence, new_uint_obj(identifier_idx));
                         break;
@@ -643,7 +630,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
                     //all other types of ast are represented by an anonymous identifier
                     default: 
                     {
-                        uint64_t head_i_idx = metaparser_get_symbol_or_anonymous(node->sequence[i]);
+                        uint64_t head_i_idx = metaparser_get_symbol_or_anonymous(body_ast->node.sequence.elements[i]);
                         vect_append(sentence, new_uint_obj(head_i_idx));
                         break;
                     }
@@ -664,9 +651,8 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             //  #rule = #A
             //  #rule = #B
 
-            metaast_binary_op_node* node = body_ast->node;
-            metaparser_insert_or_inner_rule_ast(head_idx, node->left);
-            metaparser_insert_or_inner_rule_ast(head_idx, node->right);
+            metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.left);
+            metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.right);
 
             break;
         }
@@ -712,14 +698,12 @@ uint64_t metaparser_get_symbol_or_anonymous(metaast* ast)
 {
     if (ast->type == metaast_identifier)
     {    
-        metaast_string_node* node = ast->node;
-        obj* nonterminal = new_ustring_obj(ustring_clone(node->string));
+        obj* nonterminal = new_ustring_obj(ustring_clone(ast->node.string));
         return metaparser_add_symbol(nonterminal);
     }
     else if (ast->type == metaast_charset)
     {
-        metaast_charset_node* node = ast->node;
-        obj* terminal = new_charset_obj(charset_clone(node->c));
+        obj* terminal = new_charset_obj(charset_clone(ast->node.cs));
         return metaparser_add_symbol(terminal);
     }
     else

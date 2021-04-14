@@ -70,24 +70,14 @@ metaast_parse_fn metaast_single_unit_rule_funcs[] = {
 
 
 /**
- * Create a new meta-ast of `type` containing `node`
- * Node may be either a pointer to a metaast_<type>_node, or NULL
- */
-metaast* new_metaast(metaast_type type, void* node)
-{
-    metaast* ast = malloc(sizeof(metaast));
-    *ast = (metaast){.type=type, .node=node};
-    return ast;
-}
-
-
-/**
  * Create a new meta-ast node with no node content.
  * Used for eps nodes.
  */
 metaast* new_metaast_null_node(metaast_type type)
 {
-    return new_metaast(type, NULL);
+    metaast* ast = malloc(sizeof(metaast));
+    *ast = (metaast){.type=type};
+    return ast;
 }
 
 
@@ -97,9 +87,9 @@ metaast* new_metaast_null_node(metaast_type type)
  */
 metaast* new_metaast_string_node(metaast_type type, uint32_t* string)
 {
-    metaast_string_node* node = malloc(sizeof(metaast_string_node));
-    *node = (metaast_string_node){.string=string};
-    return new_metaast(type, node);
+    metaast* ast = malloc(sizeof(metaast));
+    *ast = (metaast){.type=type, .node.string=string};
+    return ast;
 }
 
 
@@ -109,9 +99,9 @@ metaast* new_metaast_string_node(metaast_type type, uint32_t* string)
  */
 metaast* new_metaast_repeat_node(metaast_type type, uint64_t count, metaast* inner)
 {
-    metaast_repeat_node* node = malloc(sizeof(metaast_repeat_node));
-    *node = (metaast_repeat_node){.count=count, .inner=inner};
-    return new_metaast(type, node);
+    metaast* ast = malloc(sizeof(metaast));
+    *ast = (metaast){.type=type, .node.repeat={.count=count, .inner=inner}};
+    return ast;
 }
 
 
@@ -121,9 +111,9 @@ metaast* new_metaast_repeat_node(metaast_type type, uint64_t count, metaast* inn
  */
 metaast* new_metaast_unary_op_node(metaast_type type, metaast* inner)
 {
-    metaast_unary_op_node* node = malloc(sizeof(metaast_unary_op_node));
-    *node = (metaast_unary_op_node){.inner=inner};
-    return new_metaast(type, node);
+    metaast* ast = malloc(sizeof(metaast));
+    *ast = (metaast){.type=type, .node.unary.inner=inner};
+    return ast;
 }
 
 
@@ -132,11 +122,11 @@ metaast* new_metaast_unary_op_node(metaast_type type, metaast* inner)
  * Used for either a sequence of node concatenations, or "|" alternates.
  * If sequence is NULL, creates an empty sequence.
  */
-metaast* new_metaast_sequence_node(metaast_type type, size_t size,/* size_t capacity,*/ metaast** sequence)
+metaast* new_metaast_sequence_node(metaast_type type, size_t size, metaast** elements)
 {
-    metaast_sequence_node* node = malloc(sizeof(metaast_sequence_node));
-    *node = (metaast_sequence_node){.size=size, /*.capacity=capacity,*/ .sequence=sequence};
-    return new_metaast(type, node);
+    metaast* ast = malloc(sizeof(metaast));
+    *ast = (metaast){.type=type, .node.sequence={.size=size, .elements=elements}};
+    return ast;
 }
 
 
@@ -146,9 +136,9 @@ metaast* new_metaast_sequence_node(metaast_type type, size_t size,/* size_t capa
  */
 metaast* new_metaast_binary_op_node(metaast_type type, metaast* left, metaast* right)
 {
-    metaast_binary_op_node* node = malloc(sizeof(metaast_binary_op_node));
-    *node = (metaast_binary_op_node){.left=left, .right=right};
-    return new_metaast(type, node);
+    metaast* ast = malloc(sizeof(metaast));
+    *ast = (metaast){.type=type, .node.binary={.left=left, .right=right}};
+    return ast;
 }
 
 
@@ -156,11 +146,11 @@ metaast* new_metaast_binary_op_node(metaast_type type, metaast* left, metaast* r
  * Create a new meta-ast containing a charset.
  * Represents normal charsets, hex literals, length 1 strings, and the anyset.
  */
-metaast* new_metaast_charset_node(metaast_type type, charset* c)
+metaast* new_metaast_charset_node(metaast_type type, charset* cs)
 {
-    metaast_charset_node* node = malloc(sizeof(metaast_charset_node));
-    *node = (metaast_charset_node){.c=c};
-    return new_metaast(type, node);
+    metaast* ast = malloc(sizeof(metaast));
+    *ast = (metaast){.type=type, .node.cs=cs};
+    return ast;
 }
 
 
@@ -1270,21 +1260,19 @@ void metaast_free(metaast* ast)
 
     switch (ast->type)
     {
-        // free specific inner components of nodes
+        // free allocated inner components of nodes
         
         case metaast_string:
         case metaast_caseless:
         case metaast_identifier:
         {
-            metaast_string_node* node = ast->node;
-            free(node->string);
+            free(ast->node.string);
             break;
         }
         
         case metaast_charset:
         {
-            metaast_charset_node* node = ast->node;
-            charset_free(node->c);
+            charset_free(ast->node.cs);
             break;
         }
         
@@ -1292,8 +1280,7 @@ void metaast_free(metaast* ast)
         case metaast_plus:
         case metaast_count:
         {
-            metaast_repeat_node* node = ast->node;
-            metaast_free(node->inner);
+            metaast_free(ast->node.repeat.inner);
             break;
         }
         
@@ -1301,8 +1288,7 @@ void metaast_free(metaast* ast)
         case metaast_compliment:
         case metaast_capture:
         {
-            metaast_unary_op_node* node = ast->node;
-            metaast_free(node->inner);
+            metaast_free(ast->node.unary.inner);
             break;
         }
         
@@ -1313,33 +1299,26 @@ void metaast_free(metaast* ast)
         case metaast_nofollow:
         case metaast_intersect:
         {
-            metaast_binary_op_node* node = ast->node;
-            metaast_free(node->left);
-            metaast_free(node->right);
+            metaast_free(ast->node.binary.left);
+            metaast_free(ast->node.binary.right);
             break;
         }
         
         case metaast_cat:
         {
-            metaast_sequence_node* node = ast->node;
-            for (size_t i = 0; i < node->size; i++)
+            for (size_t i = 0; i < ast->node.sequence.size; i++)
             {
-                metaast_free(node->sequence[i]);
+                metaast_free(ast->node.sequence.elements[i]);
             }
-            free(node->sequence);
+            free(ast->node.sequence.elements);
             break;
         }
 
-        //free container only
+        //no allocated inner components
         case metaast_eps: break;
     }
 
-    //NULL indicates eps node, which allocated no node
-    if (ast->node != NULL)
-    { 
-        free(ast->node); 
-    }
-    
+    //free the container    
     free(ast);
 }
 
@@ -1390,31 +1369,27 @@ bool metaast_fold_charsets(metaast** ast_ptr)
         case metaast_plus:
         case metaast_count:
         {
-            metaast_repeat_node* node = ast->node;
-            return metaast_fold_charsets(&node->inner);
+            return metaast_fold_charsets(&ast->node.repeat.inner);
         }
         case metaast_option:
         case metaast_capture:
         {
-            metaast_unary_op_node* node = ast->node;
-            return metaast_fold_charsets(&node->inner);
+            return metaast_fold_charsets(&ast->node.unary.inner);
         }
         case metaast_greaterthan:
         case metaast_lessthan:
         case metaast_nofollow:
         {
-            metaast_binary_op_node* node = ast->node;
-            bool left = metaast_fold_charsets(&node->left);
-            bool right = metaast_fold_charsets(&node->right);
+            bool left = metaast_fold_charsets(&ast->node.binary.left);
+            bool right = metaast_fold_charsets(&ast->node.binary.right);
             return left || right;
         }
         case metaast_cat:
         {
             bool folded = false;
-            metaast_sequence_node* node = ast->node;
-            for (size_t i = 0; i < node->size; i++)
+            for (size_t i = 0; i < ast->node.sequence.size; i++)
             {
-                folded = metaast_fold_charsets(&node->sequence[i]) || folded;
+                folded = metaast_fold_charsets(&ast->node.sequence.elements[i]) || folded;
             }
             return folded;
         }
@@ -1422,13 +1397,10 @@ bool metaast_fold_charsets(metaast** ast_ptr)
         //possible charset operator nodes (but may not be charset at top level)
         case metaast_compliment:
         {
-            metaast_unary_op_node* node = ast->node;
-            if (node->inner->type == metaast_charset)
-            {
-                metaast_charset_node* inner_node = node->inner->node;
-                
+            if (ast->node.unary.inner->type == metaast_charset)
+            {                
                 //apply the compliment operator
-                charset* compliment = charset_compliment(inner_node->c);
+                charset* compliment = charset_compliment(ast->node.unary.inner->node.cs);
 
                 //free the old node and replace with the new node
                 metaast_free(ast);
@@ -1439,24 +1411,23 @@ bool metaast_fold_charsets(metaast** ast_ptr)
             else
             {   
                 //normal recurse further down the tree
-                return metaast_fold_charsets(&node->inner);
+                return metaast_fold_charsets(&ast->node.unary.inner);
             }
         }
         case metaast_intersect:
         case metaast_or:
         case metaast_reject:
         {
-            metaast_binary_op_node* node = ast->node;
-            if (node->left->type == metaast_charset && node->right->type == metaast_charset)
+            metaast* left = ast->node.binary.left;
+            metaast* right = ast->node.binary.right;
+            if (left->type == metaast_charset && right->type == metaast_charset)
             {
-                metaast_charset_node* left_node = node->left->node;
-                metaast_charset_node* right_node = node->right->node;
                 charset* result;
                 
                 //apply the specific operator to the left and right charset
-                if (ast->type == metaast_intersect) { result = charset_intersect(left_node->c, right_node->c); }
-                else if (ast->type == metaast_or) { result = charset_union(left_node->c, right_node->c); }
-                else /*(ast->type == metaast_reject)*/ { result = charset_diff(left_node->c, right_node->c); }
+                if (ast->type == metaast_intersect) { result = charset_intersect(left->node.cs, right->node.cs); }
+                else if (ast->type == metaast_or) { result = charset_union(left->node.cs, right->node.cs); }
+                else /*(ast->type == metaast_reject)*/ { result = charset_diff(left->node.cs, right->node.cs); }
 
                 //free the old node and replace with a new charset node
                 metaast_free(ast);
@@ -1467,8 +1438,8 @@ bool metaast_fold_charsets(metaast** ast_ptr)
             else
             {
                 //normal recurse further down the tree
-                bool left = metaast_fold_charsets(&node->left);
-                bool right = metaast_fold_charsets(&node->right);
+                bool left = metaast_fold_charsets(&ast->node.binary.left);
+                bool right = metaast_fold_charsets(&ast->node.binary.right);
                 return left || right;
             }
         }
@@ -1557,28 +1528,22 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
         case metaast_caseless:
         case metaast_identifier:
         {
-            metaast_string_node* node = ast->node;
             //if string, wrap in quotes, else if caseless, wrap in brackets, else print without
             wrap_print_alt(ast->type == metaast_string,
-                ustring_str(node->string),
-                wrap_print(ast->type == metaast_caseless, ustring_str(node->string), "{", "}"),
+                ustring_str(ast->node.string),
+                wrap_print(ast->type == metaast_caseless, ustring_str(ast->node.string), "{", "}"),
                 "\"", "\""
             )
-            // char* left = ast->type == metaast_string ? "\"" : "{";
-            // char* right = ast->type == metaast_string ? "\"" : "}";
-            // wrap_print(ast->type == metaast_string, ustring_str(node->string), left, right)
+            
             break;
         }
         
         case metaast_charset:
-        {
-            metaast_charset_node* node = ast->node;
-            
-            //print special character for the anyset
-            if (charset_is_anyset(node->c))
-                put_unicode(0x3BE);
-            else
-                charset_str(node->c);
+        {            
+            //print special character for the anyset. TODO->consider moving this into charset_str()
+            if (charset_is_anyset(ast->node.cs)) { put_unicode(0x3BE); }
+            else { charset_str(ast->node.cs); }
+
             break;
         }
         
@@ -1586,11 +1551,9 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
         case metaast_plus:
         case metaast_count:
         {
-            metaast_repeat_node* node = ast->node;
-            
             //check if inner needs to be wrapped in parenthesis
-            wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, node->inner->type), 
-                metaast_str_inner(node->inner, ast->type),
+            wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, ast->node.repeat.inner->type), 
+                metaast_str_inner(ast->node.repeat.inner, ast->type),
                 "(", ")"
             )
 
@@ -1598,19 +1561,20 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
             if (ast->type == metaast_star)
             {
                 //star shows count iff > 0
-                if (node->count > 0) { printf("%"PRIu64, node->count); }
+                if (ast->node.repeat.count > 0) { printf("%"PRIu64, ast->node.repeat.count); }
                 printf("*");
             }
             else if (ast->type == metaast_plus)
             {
                 //plus shows count iff > 1
-                if (node->count > 1) { printf("%"PRIu64, node->count); }
+                if (ast->node.repeat.count > 1) { printf("%"PRIu64, ast->node.repeat.count); }
                 printf("+");
             }
             else
             {
-                printf("%"PRIu64, node->count);
+                printf("%"PRIu64, ast->node.repeat.count);
             }
+            
             break;
         }
         
@@ -1618,23 +1582,18 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
         case metaast_compliment:
         case metaast_capture:
         {
-            metaast_unary_op_node* node = ast->node;
-            
             //check if the inner expression needs to be wrapped in parenthesis.
             //alternatively capture nodes are wrapped in their own brackets
-            wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, node->inner->type), 
-                metaast_str_inner(node->inner, ast->type), 
+            wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, ast->node.unary.inner->type), 
+                metaast_str_inner(ast->node.unary.inner, ast->type), 
                 "(", ")"
             )
-            
-            // wrap_print_alt(metaast_str_inner_check_needs_parenthesis(ast->type, node->inner->type),
-            //     metaast_str_inner(node->inner, ast->type),
-            //     wrap_print(ast->type == metaast_capture, metaast_str_inner(node->inner, ast->type), "{", "}"),
-            //     "(", ")"
-            // )
+
+            //print symbol after node
             if (ast->type == metaast_option) { printf("?"); }
             else if (ast->type == metaast_compliment) { printf("~"); }
             else if (ast->type == metaast_capture) { printf("."); }
+
             break;
         }
         
@@ -1645,11 +1604,9 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
         case metaast_nofollow:
         case metaast_intersect:
         {
-            metaast_binary_op_node* node = ast->node;
-
             //print left node (wrap in parenthesis if needed)
-            wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, node->left->type),
-                metaast_str_inner(node->left, ast->type),
+            wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, ast->node.binary.left->type),
+                metaast_str_inner(ast->node.binary.left, ast->type),
                 "(", ")"
             )
 
@@ -1662,8 +1619,8 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
             else if (ast->type == metaast_intersect) printf(" & ");
             
             //print right node (wrap in parenthesis if needed)
-            wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, node->right->type),
-                metaast_str_inner(node->right, ast->type),
+            wrap_print(metaast_str_inner_check_needs_parenthesis(ast->type, ast->node.binary.right->type),
+                metaast_str_inner(ast->node.binary.right, ast->type),
                 "(", ")"
             )
 
@@ -1672,14 +1629,14 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
         
         case metaast_cat:
         {
-            metaast_sequence_node* node = ast->node;
+            // metaast_sequence_node* node = ast->node;
             
             //print the cat sequence, and wrap in parenthesis if needed
             wrap_print(
                 metaast_str_inner_check_needs_parenthesis(ast->type, metaast_cat),
-                for (size_t i = 0; i < node->size; i++)
+                for (size_t i = 0; i < ast->node.sequence.size; i++)
                 {
-                    metaast* inner = node->sequence[i];
+                    metaast* inner = ast->node.sequence.elements[i];
                     
                     //check if the inner expression needs to be wrapped in parenthesis
                     wrap_print(metaast_str_inner_check_needs_parenthesis(metaast_cat, inner->type),
@@ -1688,7 +1645,7 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
                     )
 
                     //print a space between elements (skip last since no elements follow)
-                    if (i < node->size - 1) { printf(" "); }
+                    if (i < ast->node.sequence.size - 1) { printf(" "); }
                 },
                 "(", ")"
             )
@@ -1740,15 +1697,13 @@ void metaast_repr_inner(metaast* ast, int level)
         case metaast_caseless:
         case metaast_identifier:
         {
-            metaast_string_node* node = ast->node;
-            printf("(`"); ustring_str(node->string); printf("`)\n");
+            printf("(`"); ustring_str(ast->node.string); printf("`)\n");
             break;
         }
         
         case metaast_charset:
         {
-            metaast_charset_node* node = ast->node;
-            printf("("); charset_str(node->c); printf(")\n");
+            printf("("); charset_str(ast->node.cs); printf(")\n");
             break;
         }
         
@@ -1756,10 +1711,9 @@ void metaast_repr_inner(metaast* ast, int level)
         case metaast_plus:
         case metaast_count:
         {
-            metaast_repeat_node* node = ast->node;
             printf("{\n");
-            repeat_str("  ", level + 1); printf("count=%"PRIu64"\n", node->count);
-            metaast_repr_inner(node->inner, level + 1);
+            repeat_str("  ", level + 1); printf("count=%"PRIu64"\n", ast->node.repeat.count);
+            metaast_repr_inner(ast->node.repeat.inner, level + 1);
             repeat_str("  ", level); printf("}\n");
             break;
         }
@@ -1768,9 +1722,8 @@ void metaast_repr_inner(metaast* ast, int level)
         case metaast_compliment:
         case metaast_capture:
         {
-            metaast_unary_op_node* node = ast->node;
             printf("{\n");
-            metaast_repr_inner(node->inner, level + 1);
+            metaast_repr_inner(ast->node.unary.inner, level + 1);
             repeat_str("  ", level); printf("}\n");
             break;
         }
@@ -1782,21 +1735,19 @@ void metaast_repr_inner(metaast* ast, int level)
         case metaast_nofollow:
         case metaast_intersect:
         {
-            metaast_binary_op_node* node = ast->node;
             printf("{\n");
-            metaast_repr_inner(node->left, level + 1);
-            metaast_repr_inner(node->right, level + 1);
+            metaast_repr_inner(ast->node.binary.left, level + 1);
+            metaast_repr_inner(ast->node.binary.right, level + 1);
             repeat_str("  ", level); printf("}\n");
             break;
         }
         
         case metaast_cat:
         {
-            metaast_sequence_node* node = ast->node;
             printf("{\n");
-            for (size_t i = 0; i < node->size; i++)
+            for (size_t i = 0; i < ast->node.sequence.size; i++)
             {
-                metaast_repr_inner(node->sequence[i], level + 1);
+                metaast_repr_inner(ast->node.sequence.elements[i], level + 1);
             }
             repeat_str("  ", level); printf("}\n");
             break;
