@@ -278,12 +278,20 @@ vect* vect_merge_copy(vect* left, vect* right)
     return merge;
 }
 
+
+/**
+ * Determine if the vector contains the specified item.
+ */
 bool vect_contains(vect* v, obj* item)
 {
     size_t index;
     return vect_find(v, item, &index);
 }
 
+
+/**
+ * Find the specified item in the vector.
+ */
 bool vect_find(vect* v, obj* item, size_t* index)
 {
     for (int i = 0; i < v->size; i++)
@@ -297,6 +305,10 @@ bool vect_find(vect* v, obj* item, size_t* index)
     return false;
 }
 
+
+/**
+ * Get the element at the specified index in the vector.
+ */
 obj* vect_get(vect* v, size_t index)
 {
     if (index >= v->size)
@@ -307,6 +319,10 @@ obj* vect_get(vect* v, size_t index)
     return v->list[(v->head + index) % v->capacity];
 }
 
+
+/**
+ * Remove and return the element at the specified index from the vector.
+ */
 obj* vect_remove(vect* v, size_t index)
 {
     if (index >= v->size) 
@@ -346,6 +362,12 @@ void vect_delete(vect* v, size_t index)
     obj_free(vect_remove(v, index));
 }
 
+
+/**
+ * Reset the contents of the vector, as if it was a newly allocated vector.
+ */
+//TODO->consider having this keep the same v->list allocation to save allocations
+//just reset the head location
 void vect_reset(vect* v)
 {
     //free the contents of the vector
@@ -360,6 +382,9 @@ void vect_reset(vect* v)
 }
 
 
+/**
+ * Return a deep copy of the vector, and all contained objects.
+ */
 vect* vect_copy(vect* v)
 {
     vect* copy = new_vect();
@@ -370,6 +395,10 @@ vect* vect_copy(vect* v)
     return copy;
 }
 
+
+/**
+ * Return a copy of the vector, making use of the references dict to handle cycles in the deep copy.
+ */
 vect* vect_copy_with_refs(vect* v, dict* refs)
 {
     vect* copy = new_vect();
@@ -388,6 +417,9 @@ vect* vect_copy_with_refs(vect* v, dict* refs)
 }
 
 
+/**
+ * Free the vector and all objects contained within.
+ */
 void vect_free(vect* v)
 {
     for (int i = 0; i < v->size; i++)
@@ -399,8 +431,8 @@ void vect_free(vect* v)
 }
 
 /**
-    Free the vector container without touching its objects
-*/
+ * Free the vector container without touching its objects
+ */
 void vect_free_list_only(vect* v)
 {
     free(v->list);
@@ -408,6 +440,9 @@ void vect_free_list_only(vect* v)
 }
 
 
+/**
+ * Return a number indicating the relative ordering of two vectors
+ */
 int64_t vect_compare(vect* left, vect* right)
 {
     //handle if either or both are null
@@ -451,6 +486,9 @@ uint64_t vect_hash(vect* v)
 }
 
 
+/**
+ * Print out the internal representation of the vector
+ */
 void vect_repr(vect* v)
 {
     printf("Vector\n");
@@ -461,6 +499,9 @@ void vect_repr(vect* v)
 }
 
 
+/**
+ * Print a string representing the vector and it's internal objects.
+ */
 void vect_str(vect* v)
 {
     printf("[");
