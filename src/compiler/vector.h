@@ -61,6 +61,7 @@ vect* vect_copy_with_refs(vect* v, dict* refs);
 void vect_free(vect* v);
 void vect_free_list_only(vect* v);
 int64_t vect_compare(vect* left, vect* right);
+bool vect_equals(vect* left, vect* right);
 uint64_t vect_hash(vect* v);
 void vect_repr(vect* v);
 void vect_str(vect* v);

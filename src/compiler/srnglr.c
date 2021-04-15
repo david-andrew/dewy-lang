@@ -17,6 +17,7 @@
 #include "gotokey.h"
 #include "reduction.h"
 #include "gss.h"
+#include "sppf.h"
 
 /**
  * Global data structures for storing the srnglr item sets and parse table
@@ -206,6 +207,11 @@ void srnglr_compute_symbol_firsts()
                     fset* body_symbol_fset = vect_get(srnglr_symbol_firsts, *body_symbol_idx)->data;
                     fset_union_into(symbol_fset, fset_copy(body_symbol_fset), true);
                     if (!body_symbol_fset->nullable) { break; }
+                    if (i == vect_size(body) - 1)
+                    {
+                        //create the nullable sppf node for this symbol
+                        sppf_get_nullable_symbol_node_idx(symbol_idx);
+                    }
                 }
 
                 //epsilon strings add epsilon to fset

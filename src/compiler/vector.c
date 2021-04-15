@@ -473,6 +473,15 @@ int64_t vect_compare(vect* left, vect* right)
 
 
 /**
+ * Determine if two vectors are equal
+ */
+bool vect_equals(vect* left, vect* right)
+{
+    return vect_compare(left, right) == 0;
+}
+
+
+/**
  * Lambda function used by hash_uint_sequence, 
  * for retrieving values from the vector as a sequence.
  */
