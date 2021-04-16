@@ -11,6 +11,15 @@
 
 
 /**
+ * Create a stack allocated GOTO key.
+ */
+inline gotokey gotokey_struct(uint64_t state_idx, uint64_t symbol_idx)
+{
+    return (gotokey){.state_idx=state_idx, .symbol_idx=symbol_idx};
+}
+
+
+/**
  * Create a new GOTO key for indexing into an RNGLR parse table.
  */
 gotokey* new_gotokey(uint64_t state_idx, uint64_t symbol_idx)

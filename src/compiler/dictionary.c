@@ -236,7 +236,7 @@ bool dict_contains(dict* d, obj* key)
  */
 bool dict_contains_uint_key(dict* d, uint64_t u)
 {
-    obj key = (obj){.type=UInteger_t, .data=&u};
+    obj key = obj_struct(UInteger_t, &u);
     bool result = dict_contains(d, &key);
     return result;
 }
@@ -258,7 +258,7 @@ obj* dict_get(dict* d, obj* key)
  */
 obj* dict_get_uint_key(dict* d, uint64_t u)
 {
-    obj key = (obj){.type=UInteger_t, .data=&u};
+    obj key = obj_struct(UInteger_t, &u);
     obj* value = dict_get(d, &key);
     return value;
 }

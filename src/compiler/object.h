@@ -67,7 +67,7 @@ obj* new_string_obj_copy(char* s);              //new string object from a non-a
 
 //// Utility Functions ////
 
-// size_t obj_size(obj* o);
+obj obj_struct(obj_type type, void* data);
 obj* obj_copy(obj* o);
 obj* obj_copy_with_refs(obj* o, dict* refs);
 void obj_str(obj* o);

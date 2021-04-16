@@ -37,6 +37,7 @@ void gss_free(gss* g);
 
 
 //GSS edge functions
+gss_idx gss_idx_struct(size_t nodes_idx, size_t node_idx);
 gss_idx* new_gss_idx(size_t nodes_idx, size_t node_idx);
 gss_idx* gss_idx_copy(gss_idx* i);
 obj* new_gss_idx_obj(gss_idx* i);

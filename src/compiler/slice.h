@@ -14,6 +14,7 @@ typedef struct {
     obj* lookahead;
 } slice;
 
+slice slice_struct(vect* v, size_t start, size_t stop, obj* lookahead);
 slice* new_slice(vect* v, size_t start, size_t stop, obj* lookahead);
 obj* new_slice_obj(slice* s);
 obj* slice_get(slice* s, size_t i);

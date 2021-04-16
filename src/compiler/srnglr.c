@@ -362,13 +362,8 @@ set* srnglr_closure(set* kernel)
             if (!metaparser_is_symbol_terminal(*symbol_idx))
             {
                 //get the lookahead symbols for this item
-                obj cur_lookahead = (obj){.type=UInteger_t, .data=&item->lookahead_idx};
-                slice remaining = (slice){
-                    .v = item_body,
-                    .start = item->position + 1,
-                    .stop = vect_size(item_body),
-                    .lookahead = &cur_lookahead
-                };
+                obj cur_lookahead = obj_struct(UInteger_t, &item->lookahead_idx);
+                slice remaining = slice_struct(item_body, item->position + 1, vect_size(item_body), &cur_lookahead);
                 fset* lookaheads = srnglr_first_of_string(&remaining);
                 
                 //add new items for each body, for each lookahead
@@ -554,8 +549,8 @@ dict* srnglr_get_table()
 set* srnglr_get_table_actions(uint64_t state_idx, uint64_t symbol_idx)
 {
     //create a static key object (for retrieving the set in the dict)
-    gotokey static_key = (gotokey){.state_idx=state_idx, .symbol_idx=symbol_idx};
-    obj static_key_obj = (obj){.type=GotoKey_t, .data=&static_key};
+    gotokey static_key = gotokey_struct(state_idx, symbol_idx);
+    obj static_key_obj = obj_struct(GotoKey_t, &static_key);
 
     //check if the srnglr table has a set for the given key
     if (!dict_contains(srnglr_table, &static_key_obj))
@@ -773,7 +768,7 @@ void srnglr_reducer(size_t i, uint32_t* src)
 {
     //remove and unpack a 3-tuple from R
     tuple* t = obj_free_keep_inner(vect_dequeue(srnglr_R), UIntNTuple_t);
-    gss_idx v_idx = (gss_idx){.nodes_idx=t->items[0], .node_idx=t->items[1]};
+    gss_idx v_idx = gss_idx_struct(t->items[0], t->items[1]);
     uint64_t symbol_idx = t->items[2];
     uint64_t length = t->items[3];
     tuple_free(t);
@@ -865,7 +860,7 @@ void srnglr_shifter(size_t i, uint32_t* src)
         {            
             //remove and unpack a tuple from Q
             tuple* t = obj_free_keep_inner(vect_dequeue(srnglr_Q), UIntNTuple_t);
-            gss_idx v_idx = (gss_idx){.nodes_idx=t->items[0], .node_idx=t->items[1]};
+            gss_idx v_idx = gss_idx_struct(t->items[0], t->items[1]);
             uint64_t k = t->items[2];
             tuple_free(t);
             
@@ -1029,8 +1024,8 @@ void srnglr_print_table()
             for (size_t state_idx = 0; state_idx < set_size(srnglr_itemsets); state_idx++)
             {
                 //get the set of actions for this coordinate in the table
-                gotokey key = (gotokey){.state_idx=state_idx, .symbol_idx=symbol_idx};
-                obj key_obj = (obj){.type=GotoKey_t, .data=&key};
+                gotokey key = gotokey_struct(state_idx, symbol_idx);
+                obj key_obj = obj_struct(GotoKey_t, &key);
                 if (dict_contains(srnglr_table, &key_obj))
                 {
                     set* actions = dict_get(srnglr_table, &key_obj)->data;
@@ -1120,8 +1115,8 @@ void srnglr_print_table()
             putchar(' ');
 
             //get the set of actions for this coordinate in the table
-            gotokey key = (gotokey){.state_idx=state_idx, .symbol_idx=symbol_idx};
-            obj key_obj = (obj){.type=GotoKey_t, .data=&key};
+            gotokey key = gotokey_struct(state_idx, symbol_idx);
+            obj key_obj = obj_struct(GotoKey_t, &key);
             if (dict_contains(srnglr_table, &key_obj))
             {
                 set* actions = dict_get(srnglr_table, &key_obj)->data;                

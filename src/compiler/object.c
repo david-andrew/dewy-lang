@@ -83,6 +83,16 @@ obj* new_string_obj_copy(char* s)
 
 
 /**
+ * Return an obj struct for an object of the specified type containing the given data.
+ * This is mainly for generating static versions of short lived objects to minimize heap allocations.
+ */
+inline obj obj_struct(obj_type type, void* data)
+{
+    return (obj){.type=type, .data=data};
+}
+
+
+/**
  * Recursive deep copy of an object.
  * refs dict is used to ensure all objects are duplicated only once
  */
@@ -174,6 +184,11 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
         {
             gss_idx* i = o->data;
             copy->data = gss_idx_copy(i);
+            break;
+        }
+        case SPPFNode_t:
+        {
+            copy->data = sppf_node_copy(o->data);
             break;
         }
         case Vector_t: 

@@ -8,6 +8,20 @@
 
 
 /**
+ * Return a stack allocated slice struct.
+ */
+inline slice slice_struct(vect* v, size_t start, size_t stop, obj* lookahead)
+{
+    if (start > vect_size(v) || stop > vect_size(v))
+    {
+        printf("ERROR: slice indices %zu:%zu out of bounds for vect with size %zu\n", start, stop, vect_size(v));
+        exit(1);
+    }
+    return (slice){.v=v, .start=start, .stop=stop, .lookahead=lookahead};
+}
+
+
+/**
  * Return a new slice object for viewing a subset of a vector.
  * Lookahead is an optional terminal index object that will be treated as 
  * appended to the end of the slice. if lookahead is null, it is ignored.

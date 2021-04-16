@@ -34,7 +34,7 @@ sppf* new_sppf()
 uint64_t sppf_add_node(sppf* s, sppf_node* node)
 {
     //check if the object is in the set already
-    obj node_obj = (obj){.type=SPPFNode_t, .data=node};
+    obj node_obj = obj_struct(SPPFNode_t, node);
     uint64_t index = set_get_entries_index(s->nodes, &node_obj);
     
     //if the object is not in the set, add it, and update the index
@@ -70,7 +70,7 @@ void sppf_add_node_with_children(sppf* s, sppf_node* node, vect* children)
 uint64_t sppf_add_children(sppf* s, vect* children)
 {
     //check if the object is in the set already
-    obj children_obj = (obj){.type=Vector_t, .data=children};
+    obj children_obj = obj_struct(Vector_t, children);
     uint64_t index = set_get_entries_index(s->children, &children_obj);
     
     //if the object is not in the set, add it, and update the index
@@ -93,8 +93,8 @@ uint64_t sppf_add_children(sppf* s, vect* children)
  */
 void sppf_connect_node_to_children(sppf* s, uint64_t node_idx, uint64_t children_idx)
 {
-    obj node_idx_obj = (obj){.type=UInteger_t, .data=&node_idx};
-    obj children_idx_obj = (obj){.type=UInteger_t, .data=&children_idx};
+    obj node_idx_obj = obj_struct(UInteger_t, &node_idx);
+    obj children_idx_obj = obj_struct(UInteger_t, &children_idx);
 
     if (!dict_contains(s->edges, &node_idx_obj))
     {
@@ -136,14 +136,17 @@ uint64_t sppf_add_leaf_node(sppf* s, uint64_t source_idx)
  */
 uint64_t sppf_add_nullable_symbol_node(sppf* s, uint64_t symbol_idx)
 {
-    sppf_node* symbol_node = new_sppf_nullable_symbol_node(symbol_idx);
-    obj* symbol_node_obj = new_sppf_node_obj(symbol_node);
-    
-    //add the node to the SPPF
-    uint64_t node_idx = set_add_return_index(s->nodes, symbol_node_obj);
+    sppf_node symbol_node = sppf_node_struct(sppf_nullable_symbol, (sppf_node_union){.nullable_symbol=symbol_idx});
+    obj symbol_node_obj = obj_struct(SPPFNode_t, &symbol_node);
 
-    //link this node with existing children list that points to just epsilon
-    sppf_connect_node_to_children(s, node_idx, SPPF_ROOT_EPSILON_CHILDREN_IDX);
+    if (!set_contains(s->nodes, &symbol_node_obj))
+    {
+        //add the node to the SPPF
+        uint64_t node_idx = set_add_return_index(s->nodes, obj_copy(&symbol_node_obj));
+
+        //link this node with existing children list that points to just epsilon
+        sppf_connect_node_to_children(s, node_idx, SPPF_ROOT_EPSILON_CHILDREN_IDX);
+    }
 }
 
 
@@ -210,6 +213,15 @@ void sppf_str(sppf* s)
     printf("\nSPPF edges:\n");
     dict_str(s->edges);
     printf("\n");
+}
+
+
+/**
+ * Create a stack allocated SPPF node.
+ */
+inline sppf_node sppf_node_struct(sppf_node_type type, sppf_node_union node)
+{
+    return (sppf_node){.type=type, .node=node};
 }
 
 
@@ -293,6 +305,25 @@ uint64_t sppf_node_hash(sppf_node* n)
             uint64_t seq[] = {n->node.inner.head_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx};
             return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
         }
+    }
+}
+
+
+/**
+ * Return a copy of the SPPF node
+ */
+sppf_node* sppf_node_copy(sppf_node* n)
+{
+    switch (n->type)
+    {
+        case sppf_nullable_symbol: return new_sppf_nullable_symbol_node(n->node.nullable_symbol);
+        case sppf_nullable_string:
+        {
+            slice nullable_part = slice_struct(n->node.nullable_string, 0, vect_size(n->node.nullable_string), NULL);
+            return new_sppf_nullable_string_node(&nullable_part);
+        }
+        case sppf_leaf: return new_sppf_leaf_node(n->node.leaf);
+        case sppf_inner: return new_sppf_inner_node(n->node.inner.head_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx);
     }
 }
 

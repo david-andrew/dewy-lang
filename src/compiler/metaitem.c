@@ -59,7 +59,7 @@ bool metaitem_is_accept(metaitem* i)
     else
     {
         //check if the remaining portion of the string is nullable
-        slice remaining = (slice){.v=body, .start=i->position, .stop=vect_size(body), .lookahead=NULL};
+        slice remaining = slice_struct(body, i->position, vect_size(body), NULL);
         fset* first = srnglr_first_of_string(&remaining);
         bool nullable = first->nullable;
         fset_free(first);

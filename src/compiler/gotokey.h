@@ -10,6 +10,7 @@ typedef struct {
     uint64_t symbol_idx;    //symbol column in the table
 } gotokey;
 
+gotokey gotokey_struct(uint64_t state_idx, uint64_t symbol_idx);
 gotokey* new_gotokey(uint64_t state_idx, uint64_t symbol_idx);
 obj* new_gotokey_obj(gotokey* k);
 void gotokey_str(gotokey* k);

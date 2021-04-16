@@ -24,19 +24,21 @@ typedef enum {
     sppf_inner,             //includes both normal and packed nodes
  } sppf_node_type;
 
+typedef union {
+    uint64_t leaf;                      //index in source of the terminal character
+    uint64_t nullable_symbol;           //index in the sppf_nodes dict of the specific nullable node
+    vect* nullable_string;              //string containing the symbol indices of the nullable parts
+    struct {
+        uint64_t head_idx;              //symbol index of the rule head being reduced
+        // uint64_t production_idx?;    //for future use
+        uint64_t source_start_idx; 
+        uint64_t source_end_idx;
+    } inner;
+} sppf_node_union;
+
 typedef struct {
     sppf_node_type type;
-    union {
-        uint64_t leaf;                      //index in source of the terminal character
-        uint64_t nullable_symbol;           //index in the sppf_nodes dict of the specific nullable node
-        vect* nullable_string;              //string containing the symbol indices of the nullable parts
-        struct {
-            uint64_t head_idx;              //symbol index of the rule head being reduced
-            // uint64_t production_idx?;    //for future use
-            uint64_t source_start_idx; 
-            uint64_t source_end_idx;
-        } inner;
-    } node;
+    sppf_node_union node;
 } sppf_node;
 
 
@@ -57,12 +59,14 @@ uint64_t sppf_add_inner_node(sppf* s, uint64_t head_idx, uint64_t source_start_i
 void sppf_free(sppf* s);
 void sppf_str(sppf* s);
 
+sppf_node sppf_node_struct(sppf_node_type type, sppf_node_union node);
 sppf_node* new_sppf_leaf_node(uint64_t source_idx);
 sppf_node* new_sppf_nullable_symbol_node(uint64_t symbol_idx);
 sppf_node* new_sppf_nullable_string_node(slice* nullable_part);
 sppf_node* new_sppf_inner_node(uint64_t head_idx, uint64_t source_start_idx, uint64_t source_end_idx);
 obj* new_sppf_node_obj(sppf_node* n);
 uint64_t sppf_node_hash(sppf_node* n);
+sppf_node* sppf_node_copy(sppf_node* n);
 bool sppf_node_equals(sppf_node* left, sppf_node* right);
 void sppf_node_str(sppf_node* n);
 void sppf_node_repr(sppf_node* n);

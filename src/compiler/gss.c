@@ -61,7 +61,7 @@ uint64_t gss_get_node_state(gss* g, size_t nodes_idx, size_t node_idx)
 gss_idx* gss_get_node_with_label(gss* g, size_t nodes_idx, uint64_t state_idx)
 {
     set* nodes = gss_get_nodes_set(g, nodes_idx);
-    obj state_idx_obj = (obj){.type=UInteger_t, .data=&state_idx};
+    obj state_idx_obj = obj_struct(UInteger_t, &state_idx);
     size_t node_idx = set_get_entries_index(nodes, &state_idx_obj);
     if (!set_is_index_empty(node_idx))
     {
@@ -76,11 +76,11 @@ gss_idx* gss_get_node_with_label(gss* g, size_t nodes_idx, uint64_t state_idx)
  */
 bool gss_does_edge_exist(gss* g, gss_idx* parent, gss_idx* child)
 {
-    obj parent_obj = (obj){.type=GSSIndex_t, .data=parent};
+    obj parent_obj = obj_struct(GSSIndex_t, parent);
     obj* children = dict_get(g->edges, &parent_obj);
     if (children != NULL)
     {
-        obj child_obj = (obj){.type=GSSIndex_t, .data=child};
+        obj child_obj = obj_struct(GSSIndex_t,child);
         return set_contains(children->data, &child_obj);
     }
     return false;
@@ -152,7 +152,7 @@ vect* gss_get_all_paths(gss* g, gss_idx* root_idx, size_t length)
 
     //create a stack to hold the current path, and add the first node in the path
     vect* stack = new_vect();
-    obj root_idx_obj = (obj){.type=GSSIndex_t, .data=root_idx};
+    obj root_idx_obj = obj_struct(GSSIndex_t, root_idx);
     vect_push(stack, &root_idx_obj);
 
     //compute algorithm
@@ -229,8 +229,7 @@ gss_idx* gss_add_node(gss* g, size_t nodes_idx, uint64_t state)
 void gss_add_edge(gss* g, gss_idx* parent, gss_idx* child)
 {
     //edges dictionary key
-    // obj* parent_obj = new_gss_idx_obj(parent);
-    obj parent_obj = (obj){.type=GSSIndex_t, .data=parent};
+    obj parent_obj = obj_struct(GSSIndex_t, parent);
 
     //create an empty set for children if none exists yet
     if (!dict_contains(g->edges, &parent_obj))
@@ -265,6 +264,15 @@ void gss_free(gss* g)
     vect_free(g->nodes);
     dict_free(g->edges);
     free(g);
+}
+
+
+/**
+ * Return a stack allocated GSS index.
+ */
+inline gss_idx gss_idx_struct(size_t nodes_idx, size_t node_idx)
+{
+    return (gss_idx){.nodes_idx=nodes_idx, .node_idx=node_idx};
 }
 
 
