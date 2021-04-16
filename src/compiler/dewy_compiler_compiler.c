@@ -280,4 +280,5 @@ void print_table()
 void print_compiler()
 {
     srnglr_print_gss();
+    srnglr_print_sppf();
 }

@@ -2,13 +2,13 @@
 //based on https://cs.stackexchange.com/a/47904
 
 //addition/subtraction (left associative)
-#S = #S #w* '+' #w* #A | #S #w* '-' #w* #A | #A;
+#S = #S #ws '+' #ws #A | #S #ws '-' #ws #A | #A;
 
 //multiplication/division (left associative)
-#A = #A #w* '*' #w* #E | #A #w* '/' #w* #E | #E;
+#A = #A #ws '*' #ws #E | #A #ws '/' #ws #E | #E;
 
 //exponentiation (right associative)
-#E = #T #w* '^' #w* #E | #T;
+#E = #T #ws '^' #ws #E | #T;
 
 //terms (numbers/identifiers/groups)
 //technically these are ambiguous without a longest match filter, but this particular grammer works out,
@@ -16,8 +16,10 @@
 #T = #N | #I | #G;
 #N = [0-9]+;
 #I = [A-Za-z_] [A-Za-z0-9!@%&_?]*;
-#G = '(' #w* #S #w* ')';
+#G = '(' #ws #S #ws ')';
 
 //optional whitespace
 #w = [\x20\n];
-#start = (#w* #S)+ #w*;
+#ws = #w*; //for now since meta-syntax engine has a bug where it doesn't reuse anonymous rules for the same expression.
+#wp = #w+;
+#start = (#ws #S)+ #ws;

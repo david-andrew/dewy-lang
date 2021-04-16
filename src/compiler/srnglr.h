@@ -53,6 +53,7 @@ void srnglr_print_itemsets();
 void srnglr_print_firsts();
 void srnglr_print_table();
 void srnglr_print_gss();
+void srnglr_print_sppf();
 
 
 

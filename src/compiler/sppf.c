@@ -12,6 +12,10 @@
 #include "metaparser.h"
 
 
+uint64_t SPPF_ROOT_EPSILON_IDX;             //sppf->nodes[0] is the empty epsilon node
+uint64_t SPPF_ROOT_EPSILON_CHILDREN_IDX;    //index of the children vector that points to the epsilon vector
+
+
 /**
  * Create a new Shared Packed Parse Forest.
  */
@@ -21,33 +25,6 @@ sppf* new_sppf()
     *s = (sppf){.nodes=new_set(), .edges=new_dict(), .children=new_set()};
     return s;
 }
-
-
-// /**
-//  * Add a node and its (possibly NULL) children to the sppf.
-//  * Does not modify `node` or `children_indices`
-//  */
-// uint64_t sppf_add_node(sppf* s, sppf_node* node, vect* children_indices)
-// {
-//     //get the index of the children list from the set of children lists
-//     obj children_indices_obj = (obj){.type=Vector_t, .data=children_indices};
-//     uint64_t children_idx = !set_contains(s->children, &children_indices_obj) ? 
-//         set_add_return_index(s->children, obj_copy(&children_indices_obj)) :
-//         set_get_entries_index(s->children, &children_indices_obj);
-//     obj children_idx_obj = (obj){.type=UInteger_t, .data=&children_idx};
-
-//     //if the node doesn't exist in the dictionary, add it.
-//     obj node_obj = (obj){.type=SPPFNode_t, .data=node};
-//     if (!dict_contains(s->nodes, &node_obj))
-//     {
-//         return dict_set_return_index(s->nodes, obj_copy(&node_obj), obj_copy(&children_idx_obj));
-//     }
-//     else
-//     {
-//         uint64_t index = 
-//     }
-// }
-
 
 
 /**
@@ -155,11 +132,18 @@ uint64_t sppf_add_leaf_node(sppf* s, uint64_t source_idx)
 
 
 /**
- * 
+ * Insert a nullable node for a single non-terminal symbol.
  */
 uint64_t sppf_add_nullable_symbol_node(sppf* s, uint64_t symbol_idx)
 {
+    sppf_node* symbol_node = new_sppf_nullable_symbol_node(symbol_idx);
+    obj* symbol_node_obj = new_sppf_node_obj(symbol_node);
+    
+    //add the node to the SPPF
+    uint64_t node_idx = set_add_return_index(s->nodes, symbol_node_obj);
 
+    //link this node with existing children list that points to just epsilon
+    sppf_connect_node_to_children(s, node_idx, SPPF_ROOT_EPSILON_CHILDREN_IDX);
 }
 
 
@@ -169,6 +153,27 @@ uint64_t sppf_add_nullable_symbol_node(sppf* s, uint64_t symbol_idx)
 uint64_t sppf_add_nullable_string_node(sppf* s, slice* nullable_part)
 {
 
+}
+
+
+/**
+ * Set the first node in the SPPF to be the root epsilon node.
+ */
+void sppf_add_root_epsilon(sppf* s)
+{
+    //manually create epsilon node, which contains an empty vector.
+    sppf_node* eps_node = malloc(sizeof(sppf_node));
+    *eps_node = (sppf_node){.type=sppf_nullable_string, .node.nullable_string=new_vect()};
+
+    //add the node to the nodes set, and update the index of the root epsilon
+    obj* eps_node_obj = new_sppf_node_obj(eps_node);
+    SPPF_ROOT_EPSILON_IDX = set_add_return_index(s->nodes, eps_node_obj);
+
+    //add a children entry that points to just the root epsilon node
+    vect* eps_children = new_vect();
+    vect_append(eps_children, new_uint_obj(SPPF_ROOT_EPSILON_IDX));
+    obj* eps_children_obj = new_vect_obj(eps_children);
+    SPPF_ROOT_EPSILON_CHILDREN_IDX = set_add_return_index(s->children, eps_children_obj);
 }
 
 
@@ -190,6 +195,21 @@ void sppf_free(sppf* s)
     dict_free(s->edges);
     set_free(s->children);
     free(s);
+}
+
+
+/**
+ * Print out a string representation of the SPPF
+ */
+void sppf_str(sppf* s)
+{
+    printf("SPPF Nodes:\n");
+    set_str(s->nodes);
+    printf("\nSPPF Children:\n");
+    set_str(s->children);
+    printf("\nSPPF edges:\n");
+    dict_str(s->edges);
+    printf("\n");
 }
 
 

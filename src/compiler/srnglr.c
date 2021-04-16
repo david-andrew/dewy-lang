@@ -34,7 +34,7 @@ vect* srnglr_R;
 vect* srnglr_Q;
 
 gss* GSS;
-// sppf* SPPF = NULL;
+sppf* SPPF;
 
 //copy of the input source being read by the parser.
 uint32_t* srnglr_input_source;
@@ -52,6 +52,7 @@ void initialize_srnglr(size_t input_size)
     srnglr_Q = new_vect();
 
     GSS = new_gss(input_size);
+    SPPF = new_sppf();
 }
 
 
@@ -68,6 +69,7 @@ void release_srnglr()
     vect_free(srnglr_Q);
 
     if (GSS != NULL) { gss_free(GSS); } 
+    if (SPPF != NULL) { sppf_free(SPPF); }
 }
 
 
@@ -160,11 +162,16 @@ uint32_t* srnglr_get_input_source()
 
 /**
  * Compute all first sets for each symbol in the grammar.
+ * Additionally for any nullable symbols, create epsilon nodes for them
+ * in the SPPF
  */
 void srnglr_compute_symbol_firsts()
 {
     //ensure that the endmarker symbol has been added to the metaparser. TODO->move this into the intialization of the metaparser?
     metaparser_get_endmarker_symbol_idx();
+    
+    //ensure the sppf has the root epsilon defined
+    sppf_add_root_epsilon(SPPF);
 
     //create empty fsets for each symbol in the grammar
     set* symbols = metaparser_get_symbols();
@@ -207,11 +214,6 @@ void srnglr_compute_symbol_firsts()
                     fset* body_symbol_fset = vect_get(srnglr_symbol_firsts, *body_symbol_idx)->data;
                     fset_union_into(symbol_fset, fset_copy(body_symbol_fset), true);
                     if (!body_symbol_fset->nullable) { break; }
-                    if (i == vect_size(body) - 1)
-                    {
-                        //create the nullable sppf node for this symbol
-                        sppf_get_nullable_symbol_node_idx(symbol_idx);
-                    }
                 }
 
                 //epsilon strings add epsilon to fset
@@ -223,6 +225,19 @@ void srnglr_compute_symbol_firsts()
         }
     }
     while(count < srnglr_count_firsts_size());
+
+    //add all nullable non-terminals as nodes to the SPPF
+    for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+    {
+        if (metaparser_is_symbol_terminal(symbol_idx)) { continue; }
+
+        fset* symbol_fset = vect_get(srnglr_symbol_firsts, symbol_idx)->data;
+        if (symbol_fset->nullable)
+        {
+            //add the nullable symbol to the SPPF
+            sppf_add_nullable_symbol_node(SPPF, symbol_idx);
+        }
+    }
 }
 
 
@@ -1139,6 +1154,11 @@ void srnglr_print_table()
 void srnglr_print_gss()
 {
     gss_str(GSS);
+}
+
+void srnglr_print_sppf()
+{
+    sppf_str(SPPF);
 }
 
 

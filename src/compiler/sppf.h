@@ -51,13 +51,15 @@ uint64_t sppf_add_nullable_symbol_node(sppf* s, uint64_t symbol_idx);
 // uint64_t sppf_get_nullable_symbol_node_idx(sppf* s, uint64_t symbol_idx);
 uint64_t sppf_add_nullable_string_node(sppf* s, slice* nullable_part);
 // uint64_t sppf_get_nullable_string_node_idx(sppf* s, slice* nullable_part);
+void sppf_add_root_epsilon(sppf* s);
 uint64_t sppf_add_inner_node(sppf* s, uint64_t head_idx, uint64_t source_start_idx, uint64_t source_end_idx, vect* children_indices);
 // uint64_t sppf_get_inner_node_idx(sppf* s, uint64_t head_idx, uint64_t source_start_idx, uint64_t source_end_idx);
 void sppf_free(sppf* s);
+void sppf_str(sppf* s);
 
 sppf_node* new_sppf_leaf_node(uint64_t source_idx);
 sppf_node* new_sppf_nullable_symbol_node(uint64_t symbol_idx);
-sppf_node* new_sppf_nullabl_string_node(vect* nullable_part);
+sppf_node* new_sppf_nullable_string_node(slice* nullable_part);
 sppf_node* new_sppf_inner_node(uint64_t head_idx, uint64_t source_start_idx, uint64_t source_end_idx);
 obj* new_sppf_node_obj(sppf_node* n);
 uint64_t sppf_node_hash(sppf_node* n);
