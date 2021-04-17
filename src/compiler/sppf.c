@@ -159,7 +159,6 @@ uint64_t sppf_add_nullable_symbol_node(sppf* s, uint64_t symbol_idx)
 uint64_t sppf_add_nullable_string_node(sppf* s, slice* nullable_part)
 {
     vect nullable_part_vect = slice_vect_view_struct(nullable_part);
-    printf("nullable part vect: "); vect_str(&nullable_part_vect); printf("\n");
     sppf_node nullable_node = sppf_node_struct(sppf_nullable, (sppf_node_union){.nullable=&nullable_part_vect});
     obj nullable_node_obj = obj_struct(SPPFNode_t, &nullable_node);
     if (!set_contains(s->nodes, &nullable_node_obj))
@@ -177,7 +176,6 @@ uint64_t sppf_add_nullable_string_node(sppf* s, slice* nullable_part)
             vect nullable_string = (vect){.capacity=1, .head=0, .size=1, .list=&list_head_obj};
             sppf_node nullable_head_node = sppf_node_struct(sppf_nullable, (sppf_node_union){.nullable=&nullable_string});
             obj nullable_head_node_obj = obj_struct(SPPFNode_t, &nullable_head_node);
-            printf("static children vect: "); obj_str(&nullable_head_node_obj); printf("\n");
 
             //add the idx of the child head to the list of children indices
             uint64_t child_head_idx = set_get_entries_index(s->nodes, &nullable_head_node_obj);
