@@ -142,50 +142,64 @@ uint64_t sppf_add_nullable_symbol_node(sppf* s, uint64_t symbol_idx)
     sppf_node symbol_node = sppf_node_struct(sppf_nullable, (sppf_node_union){.nullable=&nullable_string});
     obj symbol_node_obj = obj_struct(SPPFNode_t, &symbol_node);
 
-    if (!set_contains(s->nodes, &symbol_node_obj))
+    //check if the node already exists
+    if (set_contains(s->nodes, &symbol_node_obj))
     {
-        //add the node to the SPPF
-        uint64_t node_idx = set_add_return_index(s->nodes, obj_copy(&symbol_node_obj));
-
-        //link this node with existing children list that points to just epsilon
-        sppf_connect_node_to_children(s, node_idx, SPPF_ROOT_EPSILON_CHILDREN_IDX);
+        return set_get_entries_index(s->nodes, &symbol_node_obj);
     }
+
+    //add the node to the SPPF, and link with children list that points to just epsilon
+    uint64_t node_idx = set_add_return_index(s->nodes, obj_copy(&symbol_node_obj));
+    sppf_connect_node_to_children(s, node_idx, SPPF_ROOT_EPSILON_CHILDREN_IDX);
+
+    return node_idx;
 }
 
 
 /**
- * 
+ * Insert a nullable node into the SPPF. 
+ * The nullable part is a vector if nullable non-terminal symbols.
+ * Connects this node to the corresponding nullable children node.
+ * Returns the index of the SPPF node created/found.
  */
 uint64_t sppf_add_nullable_string_node(sppf* s, slice* nullable_part)
 {
     vect nullable_part_vect = slice_vect_view_struct(nullable_part);
     sppf_node nullable_node = sppf_node_struct(sppf_nullable, (sppf_node_union){.nullable=&nullable_part_vect});
     obj nullable_node_obj = obj_struct(SPPFNode_t, &nullable_node);
-    if (!set_contains(s->nodes, &nullable_node_obj))
+    
+    //check if the node already exists
+    if (set_contains(s->nodes, &nullable_node_obj))
     {
-        uint64_t node_idx = set_add_return_index(s->nodes, obj_copy(&nullable_node_obj));
-
-        //construct children
-        vect* children = new_vect();
-        for (size_t i = 0; i < slice_size(nullable_part); i++)
-        {
-            uint64_t* head_idx = slice_get(nullable_part, i)->data;
-
-            //create a stack allocated vect with just the symbol idx, then create stack allocated node with vect
-            obj head_idx_obj = obj_struct(UInteger_t, head_idx); obj* list_head_obj = &head_idx_obj;
-            vect nullable_string = (vect){.capacity=1, .head=0, .size=1, .list=&list_head_obj};
-            sppf_node nullable_head_node = sppf_node_struct(sppf_nullable, (sppf_node_union){.nullable=&nullable_string});
-            obj nullable_head_node_obj = obj_struct(SPPFNode_t, &nullable_head_node);
-
-            //add the idx of the child head to the list of children indices
-            uint64_t child_head_idx = set_get_entries_index(s->nodes, &nullable_head_node_obj);
-            vect_append(children, new_uint_obj(child_head_idx));
-        }
-
-        //add the children vect to the set of children, and connect to the node
-        uint64_t children_idx = sppf_add_children(s, children);
-        sppf_connect_node_to_children(s, node_idx, children_idx);
+        return set_get_entries_index(s->nodes, &nullable_node_obj);
     }
+
+    //save the index of the node inserted
+    uint64_t node_idx = set_add_return_index(s->nodes, obj_copy(&nullable_node_obj));
+
+    //construct children
+    vect* children = new_vect();
+    for (size_t i = 0; i < slice_size(nullable_part); i++)
+    {
+        uint64_t* head_idx = slice_get(nullable_part, i)->data;
+
+        //create a stack allocated vect with just the symbol idx, then create stack allocated node with vect
+        obj head_idx_obj = obj_struct(UInteger_t, head_idx); obj* list_head_obj = &head_idx_obj;
+        vect nullable_string = (vect){.capacity=1, .head=0, .size=1, .list=&list_head_obj};
+        sppf_node nullable_head_node = sppf_node_struct(sppf_nullable, (sppf_node_union){.nullable=&nullable_string});
+        obj nullable_head_node_obj = obj_struct(SPPFNode_t, &nullable_head_node);
+
+        //add the idx of the child head to the list of children indices
+        uint64_t child_head_idx = set_get_entries_index(s->nodes, &nullable_head_node_obj);
+        vect_append(children, new_uint_obj(child_head_idx));
+    }
+
+    //add the children vect to the set of children, and connect to the node
+    uint64_t children_idx = sppf_add_children(s, children);
+    sppf_connect_node_to_children(s, node_idx, children_idx);
+
+    return node_idx;
+    
 }
 
 
@@ -274,7 +288,7 @@ sppf_node* new_sppf_nullable_symbol_node(uint64_t symbol_idx)
     sppf_node* n = malloc(sizeof(sppf_node));
     vect* string = new_vect();
     vect_append(string, new_uint_obj(symbol_idx));
-    *n = (sppf_node){.type=sppf_nullable, .node.nullable=new_vect_obj(string)};
+    *n = (sppf_node){.type=sppf_nullable, .node.nullable=new_vect(string)};
     return n;
 }
 
