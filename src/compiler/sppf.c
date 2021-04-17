@@ -136,7 +136,10 @@ uint64_t sppf_add_leaf_node(sppf* s, uint64_t source_idx)
  */
 uint64_t sppf_add_nullable_symbol_node(sppf* s, uint64_t symbol_idx)
 {
-    sppf_node symbol_node = sppf_node_struct(sppf_nullable_symbol, (sppf_node_union){.nullable_symbol=symbol_idx});
+    //create a stack allocated vect with just the symbol idx, then create stack allocated node with vect
+    obj symbol_idx_obj = obj_struct(UInteger_t, &symbol_idx); obj* list_head_obj = &symbol_idx_obj;
+    vect nullable_string = (vect){.capacity=1, .head=0, .size=1, .list=&list_head_obj};
+    sppf_node symbol_node = sppf_node_struct(sppf_nullable, (sppf_node_union){.nullable=&nullable_string});
     obj symbol_node_obj = obj_struct(SPPFNode_t, &symbol_node);
 
     if (!set_contains(s->nodes, &symbol_node_obj))
@@ -157,7 +160,7 @@ uint64_t sppf_add_nullable_string_node(sppf* s, slice* nullable_part)
 {
     vect nullable_part_vect = slice_vect_view_struct(nullable_part);
     printf("nullable part vect: "); vect_str(&nullable_part_vect); printf("\n");
-    sppf_node nullable_node = sppf_node_struct(sppf_nullable_string, (sppf_node_union){.nullable_string=&nullable_part_vect});
+    sppf_node nullable_node = sppf_node_struct(sppf_nullable, (sppf_node_union){.nullable=&nullable_part_vect});
     obj nullable_node_obj = obj_struct(SPPFNode_t, &nullable_node);
     if (!set_contains(s->nodes, &nullable_node_obj))
     {
@@ -168,11 +171,20 @@ uint64_t sppf_add_nullable_string_node(sppf* s, slice* nullable_part)
         for (size_t i = 0; i < slice_size(nullable_part); i++)
         {
             uint64_t* head_idx = slice_get(nullable_part, i)->data;
-            sppf_node nullable_head_node = sppf_node_struct(sppf_nullable_symbol, (sppf_node_union){.nullable_symbol=*head_idx});
+
+            //create a stack allocated vect with just the symbol idx, then create stack allocated node with vect
+            obj head_idx_obj = obj_struct(UInteger_t, head_idx); obj* list_head_obj = &head_idx_obj;
+            vect nullable_string = (vect){.capacity=1, .head=0, .size=1, .list=&list_head_obj};
+            sppf_node nullable_head_node = sppf_node_struct(sppf_nullable, (sppf_node_union){.nullable=&nullable_string});
             obj nullable_head_node_obj = obj_struct(SPPFNode_t, &nullable_head_node);
+            printf("static children vect: "); obj_str(&nullable_head_node_obj); printf("\n");
+
+            //add the idx of the child head to the list of children indices
             uint64_t child_head_idx = set_get_entries_index(s->nodes, &nullable_head_node_obj);
             vect_append(children, new_uint_obj(child_head_idx));
         }
+
+        //add the children vect to the set of children, and connect to the node
         uint64_t children_idx = sppf_add_children(s, children);
         sppf_connect_node_to_children(s, node_idx, children_idx);
     }
@@ -186,7 +198,7 @@ void sppf_add_root_epsilon(sppf* s)
 {
     //manually create epsilon node, which contains an empty vector.
     sppf_node* eps_node = malloc(sizeof(sppf_node));
-    *eps_node = (sppf_node){.type=sppf_nullable_string, .node.nullable_string=new_vect()};
+    *eps_node = (sppf_node){.type=sppf_nullable, .node.nullable=new_vect()};
 
     //add the node to the nodes set, and update the index of the root epsilon
     obj* eps_node_obj = new_sppf_node_obj(eps_node);
@@ -262,7 +274,9 @@ sppf_node* new_sppf_leaf_node(uint64_t source_idx)
 sppf_node* new_sppf_nullable_symbol_node(uint64_t symbol_idx)
 {
     sppf_node* n = malloc(sizeof(sppf_node));
-    *n = (sppf_node){.type=sppf_nullable_symbol, .node.nullable_symbol=symbol_idx};
+    vect* string = new_vect();
+    vect_append(string, new_uint_obj(symbol_idx));
+    *n = (sppf_node){.type=sppf_nullable, .node.nullable=new_vect_obj(string)};
     return n;
 }
 
@@ -273,7 +287,7 @@ sppf_node* new_sppf_nullable_symbol_node(uint64_t symbol_idx)
 sppf_node* new_sppf_nullable_string_node(slice* nullable_part)
 {
     sppf_node* n = malloc(sizeof(sppf_node));
-    *n = (sppf_node){.type=sppf_nullable_string, .node.nullable_string=slice_copy_to_vect(nullable_part)};
+    *n = (sppf_node){.type=sppf_nullable, .node.nullable=slice_copy_to_vect(nullable_part)};
     return n;
 }
 
@@ -318,8 +332,7 @@ uint64_t sppf_node_hash(sppf_node* n)
     switch (n->type)
     {
         case sppf_leaf: return hash_uint(n->node.leaf);
-        case sppf_nullable_symbol: return hash_uint(n->node.nullable_symbol);
-        case sppf_nullable_string: return vect_hash(n->node.nullable_string);
+        case sppf_nullable: return vect_hash(n->node.nullable);
         case sppf_inner:
         {
             uint64_t seq[] = {n->node.inner.head_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx};
@@ -336,10 +349,9 @@ sppf_node* sppf_node_copy(sppf_node* n)
 {
     switch (n->type)
     {
-        case sppf_nullable_symbol: return new_sppf_nullable_symbol_node(n->node.nullable_symbol);
-        case sppf_nullable_string:
+        case sppf_nullable:
         {
-            slice nullable_part = slice_struct(n->node.nullable_string, 0, vect_size(n->node.nullable_string), NULL);
+            slice nullable_part = slice_struct(n->node.nullable, 0, vect_size(n->node.nullable), NULL);
             return new_sppf_nullable_string_node(&nullable_part);
         }
         case sppf_leaf: return new_sppf_leaf_node(n->node.leaf);
@@ -358,8 +370,7 @@ bool sppf_node_equals(sppf_node* left, sppf_node* right)
     switch (left->type)
     {
         case sppf_leaf: return left->node.leaf == right->node.leaf;
-        case sppf_nullable_symbol: return left->node.nullable_symbol == right->node.nullable_symbol;
-        case sppf_nullable_string: return vect_equals(left->node.nullable_string, right->node.nullable_string);
+        case sppf_nullable: return vect_equals(left->node.nullable, right->node.nullable);
         case sppf_inner: 
             return left->node.inner.head_idx == right->node.inner.head_idx
                 && left->node.inner.source_start_idx == right->node.inner.source_start_idx
@@ -382,21 +393,15 @@ void sppf_node_str(sppf_node* n)
             printf(", %"PRIu64, n->node.leaf); 
             break;
         }
-        case sppf_nullable_symbol:
-        {
-            obj* symbol = metaparser_get_symbol(n->node.nullable_symbol); 
-            printf("ϵ: "); obj_str(symbol); 
-            break;
-        }
-        case sppf_nullable_string:
+        case sppf_nullable:
         {
             printf("ϵ: ");
-            for (size_t i = 0; i < vect_size(n->node.nullable_string); i++)
+            for (size_t i = 0; i < vect_size(n->node.nullable); i++)
             {
-                uint64_t* symbol_idx = vect_get(n->node.nullable_string, i)->data;
+                uint64_t* symbol_idx = vect_get(n->node.nullable, i)->data;
                 obj* symbol = metaparser_get_symbol(*symbol_idx);
                 obj_str(symbol);
-                if (i < vect_size(n->node.nullable_string) - 1){ printf(", "); }
+                if (i < vect_size(n->node.nullable) - 1){ printf(", "); }
             }
             break;
         }
@@ -419,8 +424,7 @@ void sppf_node_repr(sppf_node* n)
     switch (n->type)
     {
         case sppf_leaf: printf("sppf_leaf{%"PRIu64"}", n->node.leaf); break;
-        case sppf_nullable_symbol: printf("sppf_nullable_symbol{ϵ%"PRIu64"}", n->node.nullable_symbol); break;
-        case sppf_nullable_string: printf("sppf_nullable_string{ϵ"); vect_str(n->node.nullable_string); printf("}"); break;
+        case sppf_nullable: printf("sppf_nullable{ϵ"); vect_str(n->node.nullable); printf("}"); break;
         case sppf_inner:
             printf("sppf_inner{%"PRIu64", %"PRIu64", %"PRIu64"}", 
                 n->node.inner.head_idx, 
@@ -438,9 +442,9 @@ void sppf_node_repr(sppf_node* n)
 void sppf_node_free(sppf_node* n)
 {
     //only potential inner allocation is for nullable strings
-    if (n->type == sppf_nullable_string)
+    if (n->type == sppf_nullable)
     {
-        vect_free(n->node.nullable_string);
+        vect_free(n->node.nullable);
     }
 
     //free the node container

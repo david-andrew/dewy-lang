@@ -19,15 +19,13 @@ typedef struct {
 
 typedef enum {
     sppf_leaf,
-    sppf_nullable_symbol,
-    sppf_nullable_string,
+    sppf_nullable,
     sppf_inner,             //includes both normal and packed nodes
  } sppf_node_type;
 
 typedef union {
     uint64_t leaf;                      //index in source of the terminal character
-    uint64_t nullable_symbol;           //index in the sppf_nodes dict of the specific nullable node
-    vect* nullable_string;              //string containing the symbol indices of the nullable parts
+    vect* nullable;              //string containing the symbol indices of the nullable parts
     struct {
         uint64_t head_idx;              //symbol index of the rule head being reduced
         // uint64_t production_idx?;    //for future use
