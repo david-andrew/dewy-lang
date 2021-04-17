@@ -172,7 +172,7 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
         case Reduction_t:
         {
             reduction* r = o->data;
-            copy->data = new_reduction(r->head_idx, r->length);
+            copy->data = new_reduction(r->head_idx, r->length, r->nullable_idx);
             break;
         }
         case Accept_t:

@@ -14,10 +14,10 @@
 /**
  * Create a new rnglr reduction marker for the parser table.
  */
-reduction* new_reduction(uint64_t head_idx, uint64_t length)
+reduction* new_reduction(uint64_t head_idx, uint64_t length, uint64_t nullable_idx)
 {
     reduction* r = malloc(sizeof(reduction));
-    *r = (reduction){.head_idx=head_idx, .length=length};
+    *r = (reduction){.head_idx=head_idx, .length=length, .nullable_idx=nullable_idx};
     return r;
 }
 
@@ -41,7 +41,7 @@ void reduction_str(reduction* r)
     printf("R(");
     obj* head = metaparser_get_symbol(r->head_idx);
     obj_str(head);
-    printf(", %"PRIu64")", r->length);
+    printf(", %"PRIu64", %"PRIu64")", r->length, r->nullable_idx);
 }
 
 
@@ -53,7 +53,7 @@ int reduction_strlen(reduction* r)
     int width = 0;
     obj* head = metaparser_get_symbol(r->head_idx);
     width += ustring_len(head->data);
-    width += snprintf("", 0, "R(, %"PRIu64")", r->length);
+    width += snprintf("", 0, "R(, %"PRIu64", %"PRIu64")", r->length, r->nullable_idx);
     return width;
 }
 
@@ -64,7 +64,7 @@ int reduction_strlen(reduction* r)
  */
 void reduction_repr(reduction* r)
 {
-    printf("reduction{head_idx: %"PRIu64", length: %"PRIu64"}", r->head_idx, r->length);
+    printf("reduction{head_idx: %"PRIu64", length: %"PRIu64", nullable_idx: %"PRIu64"}", r->head_idx, r->length, r->nullable_idx);
 }
 
 
@@ -73,7 +73,7 @@ void reduction_repr(reduction* r)
  */
 bool reduction_equals(reduction* left, reduction* right)
 {
-    return left->length == right->length && left->head_idx == right->head_idx;
+    return left->length == right->length && left->head_idx == right->head_idx && left->nullable_idx == right->nullable_idx;
 }
 
 
@@ -82,7 +82,7 @@ bool reduction_equals(reduction* left, reduction* right)
  */
 uint64_t reduction_hash(reduction* r)
 {
-    uint64_t seq[] = {r->length, r->head_idx};
+    uint64_t seq[] = {r->length, r->head_idx, r->nullable_idx};
     return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
 }
 
