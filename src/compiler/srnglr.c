@@ -35,7 +35,6 @@ vect* srnglr_Q;
 
 gss* GSS;
 sppf* SPPF;
-dict* GSS_to_SPPF;
 
 //copy of the input source being read by the parser.
 uint32_t* srnglr_input_source;
@@ -54,7 +53,6 @@ void initialize_srnglr(size_t input_size)
 
     GSS = new_gss(input_size);
     SPPF = new_sppf();
-    GSS_to_SPPF = new_dict();
 }
 
 
@@ -72,7 +70,6 @@ void release_srnglr()
 
     gss_free(GSS); 
     sppf_free(SPPF);
-    dict_free(GSS_to_SPPF);
 }
 
 

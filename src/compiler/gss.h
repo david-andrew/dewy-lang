@@ -9,8 +9,9 @@
 
 // Graph Structured Stack
 typedef struct {
-    vect* nodes;    //vect<set<uint64>>
-    dict* edges;    //dict<gss_idx, gss_idx>
+    vect* nodes;        //vect<set<uint64>>
+    dict* edges;        //dict<gss_idx, gss_idx>
+    vect* edge_labels;  //vect<uint64> where the i'th value is the SPPF node that goes to 
 } gss;
 
 
