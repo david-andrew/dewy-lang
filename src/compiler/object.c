@@ -186,6 +186,12 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
             copy->data = gss_idx_copy(i);
             break;
         }
+        case GSSEdge_t:
+        {
+            gss_edge* e = o->data;
+            copy->data = new_gss_edge(e->parent, e->child);
+            break;
+        }
         case SPPFNode_t:
         {
             copy->data = sppf_node_copy(o->data);
@@ -245,6 +251,7 @@ void obj_str(obj* o)
         case Reduction_t: reduction_str(o->data); break;
         case Accept_t: accept_str(); break;
         case GSSIndex_t: gss_idx_str(o->data); break;
+        case GSSEdge_t: gss_edge_str(o->data); break;
         case SPPFNode_t: sppf_node_str(o->data); break;
         case Vector_t: vect_str(o->data); break;
         case Dictionary_t: dict_str(o->data); break;
@@ -298,6 +305,7 @@ uint64_t obj_hash(obj* o)
         case Reduction_t: return reduction_hash(o->data);
         case Accept_t: return hash_uint(Accept_t);
         case GSSIndex_t: return gss_idx_hash(o->data);
+        case GSSEdge_t: return gss_edge_hash(o->data);
         case SPPFNode_t: return sppf_node_hash(o->data);
         case Vector_t: return vect_hash(o->data);
         // case Dictionary_t: return dict_hash(o->data);
@@ -373,6 +381,7 @@ bool obj_equals(obj* left, obj* right)
         case Reduction_t: return reduction_equals(left->data, right->data);
         case Accept_t: return true; //accepts have no internal data
         case GSSIndex_t: return gss_idx_equals(left->data, right->data);
+        case GSSEdge_t: return gss_edge_equals(left->data, right->data);
         case SPPFNode_t: return sppf_node_equals(left->data, right->data);
         default: return obj_compare(left, right) == 0;
     }
@@ -418,6 +427,7 @@ void obj_free(obj* o)
             case GotoKey_t: gotokey_free(o->data); break;
             case Reduction_t: reduction_free(o->data); break;
             case GSSIndex_t: gss_idx_free(o->data); break;
+            case GSSEdge_t: gss_edge_free(o->data); break;
             case SPPFNode_t: sppf_node_free(o->data); break;
 
             //objects with no internal data

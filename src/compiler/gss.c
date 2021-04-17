@@ -335,13 +335,7 @@ bool gss_idx_equals(gss_idx* left, gss_idx* right)
 }
 
 
-// /**
-//  * Print out a string representation of the GSS edge.
-//  */
-// void gss_edge_str(gss_edge* e)
-// {
-//     printf("["); gss_idx_str(&e->parent); printf(" -> "); gss_idx_str(&e->child); printf("]");
-// }
+
 
 
 /**
@@ -350,6 +344,74 @@ bool gss_idx_equals(gss_idx* left, gss_idx* right)
 void gss_idx_str(gss_idx* i)
 {
     printf("(%zu, %zu)", i->nodes_idx, i->node_idx);
+}
+
+
+/**
+ * Return a stack allocated GSS edge
+ */
+inline gss_edge gss_edge_struct(gss_idx parent, gss_idx child)
+{
+    return (gss_edge){.parent=parent, .child=child};
+}
+
+
+/**
+ * Create a new GSS edge
+ */
+gss_edge* new_gss_edge(gss_idx parent, gss_idx child)
+{
+    gss_edge* e = malloc(sizeof(gss_edge));
+    *e = gss_edge_struct(parent, child);
+    return e;
+}
+
+
+/**
+ * Return a GSS edge wrapped in an object.
+ */
+obj* new_gss_edge_obj(gss_edge* e)
+{
+    obj* E = malloc(sizeof(obj));
+    *E = obj_struct(GSSEdge_t, e);
+    return E;
+}
+
+
+/**
+ * Free a GSS edge's allocated data
+ */
+void gss_edge_free(gss_edge* e)
+{
+    free(e);
+}
+
+
+/**
+ * Return a hash of the GSS edge
+ */
+uint64_t gss_edge_hash(gss_edge* e)
+{
+    uint64_t seq[] = {e->parent.nodes_idx, e->parent.node_idx, e->child.nodes_idx, e->child.node_idx};
+    return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
+}
+
+
+/**
+ * Determine if two GSS edges are equivalent
+ */
+bool gss_edge_equals(gss_edge* left, gss_edge* right)
+{
+    return gss_idx_equals(&left->parent, &right->parent) && gss_idx_equals(&left->child, &right->child);
+}
+
+
+/**
+ * Print out a string representation of the GSS edge.
+ */
+void gss_edge_str(gss_edge* e)
+{
+    printf("["); gss_idx_str(&e->parent); printf(" -> "); gss_idx_str(&e->child); printf("]");
 }
 
 
