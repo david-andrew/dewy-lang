@@ -517,6 +517,15 @@ void srnglr_generate_grammar_itemsets()
                 {
                     //otherwise normal reduction
                     srnglr_insert_reduction(state_idx, item->lookahead_idx, item->head_idx, item->position);
+                    
+                    //determine if nullable head needs to be inserted as a nullable node in the SPPF.
+                    //Only create strings for 2 or more symbols
+                    vect* body = metaparser_get_production_body(item->head_idx, item->production_idx);
+                    if (item->position < vect_size(body) && vect_size(body) - item->position > 1)
+                    {
+                        slice requlred_part = slice_struct(body, item->position, vect_size(body), NULL);
+                        sppf_add_nullable_string_node(SPPF, &requlred_part);
+                    }
                 }
             }
         }

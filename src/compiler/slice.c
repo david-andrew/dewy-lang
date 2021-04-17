@@ -22,6 +22,28 @@ inline slice slice_struct(vect* v, size_t start, size_t stop, obj* lookahead)
 
 
 /**
+ * Return a static vect view of the slice.
+ * Only works for slices where lookahead=NULL
+ * Returned vect should be treated as immutable,
+ * and is only valid for as long as the vect inside
+ * the slice is valid.
+ */
+inline vect slice_vect_view_struct(slice* s)
+{
+    if (s->lookahead != NULL)
+    {
+        printf("ERROR: cannot create a vect view of a slice that contains a lookahead value\n");
+        exit(1);
+    }
+    // printf("vect view vect: "); vect_str(s->v); printf("\n");
+    // vect_repr(s->v);
+    // printf("capacity: %zu, head: %zu, size: %zu, start: %zu, stop: %zu\n", s->v->capacity, s->v->head, s->v->size, s->start, s->stop);
+    return (vect){.capacity=s->v->capacity, .head=(s->v->head + s->start) % s->v->capacity, .list=s->v->list, .size=s->stop - s->start};
+}
+
+
+
+/**
  * Return a new slice object for viewing a subset of a vector.
  * Lookahead is an optional terminal index object that will be treated as 
  * appended to the end of the slice. if lookahead is null, it is ignored.

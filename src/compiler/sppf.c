@@ -155,7 +155,27 @@ uint64_t sppf_add_nullable_symbol_node(sppf* s, uint64_t symbol_idx)
  */
 uint64_t sppf_add_nullable_string_node(sppf* s, slice* nullable_part)
 {
+    vect nullable_part_vect = slice_vect_view_struct(nullable_part);
+    printf("nullable part vect: "); vect_str(&nullable_part_vect); printf("\n");
+    sppf_node nullable_node = sppf_node_struct(sppf_nullable_string, (sppf_node_union){.nullable_string=&nullable_part_vect});
+    obj nullable_node_obj = obj_struct(SPPFNode_t, &nullable_node);
+    if (!set_contains(s->nodes, &nullable_node_obj))
+    {
+        uint64_t node_idx = set_add_return_index(s->nodes, obj_copy(&nullable_node_obj));
 
+        //construct children
+        vect* children = new_vect();
+        for (size_t i = 0; i < slice_size(nullable_part); i++)
+        {
+            uint64_t* head_idx = slice_get(nullable_part, i)->data;
+            sppf_node nullable_head_node = sppf_node_struct(sppf_nullable_symbol, (sppf_node_union){.nullable_symbol=*head_idx});
+            obj nullable_head_node_obj = obj_struct(SPPFNode_t, &nullable_head_node);
+            uint64_t child_head_idx = set_get_entries_index(s->nodes, &nullable_head_node_obj);
+            vect_append(children, new_uint_obj(child_head_idx));
+        }
+        uint64_t children_idx = sppf_add_children(s, children);
+        sppf_connect_node_to_children(s, node_idx, children_idx);
+    }
 }
 
 
