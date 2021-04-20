@@ -20,15 +20,6 @@ typedef struct
     obj** list;
 } vect;
 
-// //lightweight integer vector
-// typedef struct
-// {
-//     size_t head;
-//     size_t size;
-//     size_t capacity;
-//     int64_t* list;
-// } ivect;
-
 
 vect* new_vect();
 vect* new_vect_with_capacity(size_t size_hint);

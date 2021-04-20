@@ -25,6 +25,9 @@ dictionary.o: dictionary.c dictionary.h object.h utilities.h
 
 vector.o: vector.c vector.h object.h dictionary.h utilities.h
 	clang -c -o vector.o vector.c
+
+parray.o: parray.c parray.h object.h utilities.h
+	clang -c -o parray.o parray.c
 	
 set.o: set.c set.h object.h utilities.h
 	clang -c -o set.o set.c
