@@ -206,7 +206,7 @@ int64_t name##_array_compare(name##_array* left, name##_array* right)           
     return 0;                                                                                                               \
 }                                                                                                                           \
 bool name##_array_equals(name##_array* left, name##_array* right) { return name##_array_compare(left, right) == 0; }        \
-uint64_t name##_array_hash_getval(void* v, size_t i) { return hashcast name##_array_get((name##_array*)v, i); }          \
+uint64_t name##_array_hash_getval(void* v, size_t i) { return hashcast(name##_array_get((name##_array*)v, i)); }            \
 uint64_t name##_array_hash(name##_array* v) { return hash_uint_lambda_sequence(v, name##_array_size(v), name##_array_hash_getval); }  \
 void name##_array_repr(name##_array* v)                                                                                     \
 {                                                                                                                           \
@@ -229,9 +229,15 @@ void name##_array_str(name##_array* v)                                          
     printf("]");                                                                                                            \
 }                                                                                                                           \
 
+//hash int/uint simply by reading off value as uint
+#define uint64_hashcast(v) v
+#define int64_hashcast(v) *(uint64_t*)v
 
-parray_implementation(uint64_t, UInt64Array_t, uint64, PRIu64, (uint64_t))
-parray_implementation(int64_t, Int64Array_t, int64, PRIi64, *(uint64_t*))
-parray_implementation(double, DoubleArray_t, double, "f", (uint64_t))
+//hash doubles by shifting decimal place several spots, and then rounding to int
+#define double_hashcast(v) (uint64_t) (v * 1000)
+
+parray_implementation(uint64_t, UInt64Array_t, uint64, PRIu64, uint64_hashcast)
+parray_implementation(int64_t, Int64Array_t, int64, PRIi64, int64_hashcast)
+parray_implementation(double, DoubleArray_t, double, "f", double_hashcast)
 
 #endif
