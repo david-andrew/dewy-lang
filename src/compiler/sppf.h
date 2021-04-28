@@ -14,7 +14,7 @@ typedef struct {
     set* nodes;             //set<sppf_node>
     dict* edges;            //map<node_idx, children_idx | vect<children_idx>>
     set* children;          //set<vect<node_idx>>
-    // dict* gss_sppf_map;     //map<gss_edge, sppf_node_idx> from GSS edges to nodes in the SPPF
+    dict* gss_sppf_map;     //map<gss_edge, sppf_node_idx> from GSS edges to nodes in the SPPF
 } sppf;
 
 typedef enum {
