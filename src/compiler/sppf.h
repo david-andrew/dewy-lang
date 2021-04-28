@@ -28,7 +28,8 @@ typedef union {
     vect* nullable;              //string containing the symbol indices of the nullable parts
     struct {
         uint64_t head_idx;              //symbol index of the rule head being reduced
-        // uint64_t production_idx?;    //for future use
+        bool packed;
+        union {uint64_t index; vect* indices} production;    //for future use. normal inner nodes use index, while packed nodes use indices to label each possible child's production
         uint64_t source_start_idx; 
         uint64_t source_end_idx;
     } inner;
