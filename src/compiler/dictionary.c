@@ -17,9 +17,9 @@
 //constant to assign to hashes that are 0, so that the lfsr algorithm doesn't get stuck at 0
 #define NONZERO_HASH 0xDEADBEEF
 
-//representation for an empty value in the dict indices table.
-//since we only have pure ints, we say the max value (which probably won't be used) is EMPTY
+//representation for empty/deleted values in the dict indices table. Uses large values likely never to be used.
 #define EMPTY SIZE_MAX
+#define DELETED EMPTY - 1
 
 
 //Implementation of dictionary based on python's implementaion
@@ -312,6 +312,39 @@ obj* dict_get_uint_key(dict* d, uint64_t u)
 
 // }
 
+
+// /**
+//  * 
+//  */
+// void dict_delete(dict* d, obj* key)
+// {
+
+// }
+
+// /**
+//  * Clear all deleted spaces and reinsert all elements.
+//  */
+// void dict_refresh(dict* d)
+// {
+//     //clear out the current indices array
+//     for (size_t i = 0; i < d->icapacity; i++)
+//     {
+//         d->indices[i] = EMPTY;
+//     }
+
+//     //remove empty rows from the entries vect...
+
+//     //reinsert each key into the indices array
+//     for (size_t i = 0; i < d->size; i++)
+//     {
+//         obj* key = d->entries[i].key;
+//         uint64_t hash = obj_hash(key);
+
+//         //find the new slot for this key and update
+//         size_t probe = dict_get_indices_probe(d, key);
+//         d->indices[probe] = i;
+//     }
+// }
 
 void dict_reset(dict* d)
 {
