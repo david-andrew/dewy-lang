@@ -513,7 +513,7 @@ void srnglr_generate_grammar_itemsets()
                     //this is an accepting state
                     srnglr_insert_accept(state_idx, item->lookahead_idx);
                 }
-                else
+                else //otherwise normal reduction
                 {
                     //determine the value for `f`  i.e. which nullable sentence is left in the item being reduced. 0 -> ϵ
                     uint64_t nullable_idx = 0;
@@ -526,8 +526,8 @@ void srnglr_generate_grammar_itemsets()
                         nullable_idx = sppf_add_nullable_string_node(SPPF, &requlred_part);
                     }
 
-                    //otherwise normal reduction
-                    srnglr_insert_reduction(state_idx, item->lookahead_idx, item->head_idx, item->position, nullable_idx);
+                    
+                    srnglr_insert_reduction(state_idx, item->lookahead_idx, item->head_idx, item->production_idx, item->position, nullable_idx);
                 }
             }
         }
@@ -644,13 +644,13 @@ void srnglr_insert_push(uint64_t state_idx, uint64_t symbol_idx, uint64_t goto_i
 /**
  * Add a reduction action to the srnglr table.
  */
-void srnglr_insert_reduction(uint64_t state_idx, uint64_t symbol_idx, uint64_t head_idx, uint64_t length, uint64_t nullable_idx)
+void srnglr_insert_reduction(uint64_t state_idx, uint64_t symbol_idx, uint64_t head_idx, uint64_t production_idx, uint64_t length, uint64_t nullable_idx)
 {
     //get the actions set for this state, symbol pair
     set* actions = srnglr_get_table_actions(state_idx, symbol_idx);
 
     //create a reduction and add to the actions set.
-    reduction* r = new_reduction(head_idx, length, nullable_idx);
+    reduction* r = new_reduction(head_idx, production_idx, length, nullable_idx);
     set_add(actions, new_reduction_obj(r));
 }
 

@@ -7,11 +7,12 @@
 
 typedef struct {
     uint64_t head_idx;      //non-terminal to reduce
+    uint64_t production_idx;//production of non-terminal being reduced
     uint64_t length;        //length of the reduction
     uint64_t nullable_idx;  //index of the nullable SPPF node for this reduction (0 if not right-nullable)
 } reduction;
 
-reduction* new_reduction(uint64_t head_idx, uint64_t length, uint64_t nullable_idx);
+reduction* new_reduction(uint64_t head_idx, uint64_t production_idx, uint64_t length, uint64_t nullable_idx);
 obj* new_reduction_obj(reduction* r);
 void reduction_str(reduction* r);
 int reduction_strlen(reduction* r);
