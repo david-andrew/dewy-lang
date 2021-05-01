@@ -22,7 +22,7 @@ uint64_t SPPF_ROOT_EPSILON_CHILDREN_IDX;    //index of the children vector that 
 sppf* new_sppf()
 {
     sppf* s = malloc(sizeof(sppf));
-    *s = (sppf){.nodes=new_set(), .edges=new_dict(), .children=new_set()};
+    *s = (sppf){.nodes=new_set(), .edges=new_dict(), .children=new_set(), .gss_sppf_map=new_dict()};
     return s;
 }
 
@@ -241,6 +241,7 @@ void sppf_free(sppf* s)
     set_free(s->nodes);
     dict_free(s->edges);
     set_free(s->children);
+    dict_free(s->gss_sppf_map);
     free(s);
 }
 
@@ -256,6 +257,8 @@ void sppf_str(sppf* s)
     set_str(s->children);
     printf("\nSPPF edges:\n");
     dict_str(s->edges);
+    printf("\nGSS-SPPF map:\n");
+    dict_str(s->gss_sppf_map);
     printf("\n");
 }
 
@@ -309,13 +312,14 @@ sppf_node* new_sppf_nullable_string_node(slice* nullable_part)
  * or a packed list of lists of children nodes.
  * (inner nodes themselves don't contain the children, just header info)
  */
-sppf_node* new_sppf_inner_node(uint64_t head_idx, uint64_t source_start_idx, uint64_t source_end_idx)
+sppf_node* new_sppf_inner_node(uint64_t head_idx, uint64_t body_idx, uint64_t source_start_idx, uint64_t source_end_idx)
 {
     sppf_node* n = malloc(sizeof(sppf_node));
     *n = (sppf_node){
         .type=sppf_leaf, 
         .node.inner={
-            .head_idx=head_idx, 
+            .head_idx=head_idx,
+            .body_idx=body_idx,
             .source_start_idx=source_start_idx, 
             .source_end_idx=source_end_idx
         }
@@ -347,7 +351,8 @@ uint64_t sppf_node_hash(sppf_node* n)
         case sppf_nullable: return vect_hash(n->node.nullable);
         case sppf_inner:
         {
-            uint64_t seq[] = {n->node.inner.head_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx};
+            //sequence of uints to hash
+            uint64_t seq[] = {n->node.inner.head_idx, n->node.inner.body_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx};
             return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
         }
     }
@@ -367,7 +372,7 @@ sppf_node* sppf_node_copy(sppf_node* n)
             return new_sppf_nullable_string_node(&nullable_part);
         }
         case sppf_leaf: return new_sppf_leaf_node(n->node.leaf);
-        case sppf_inner: return new_sppf_inner_node(n->node.inner.head_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx);
+        case sppf_inner: return new_sppf_inner_node(n->node.inner.head_idx, n->node.inner.body_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx);
     }
 }
 
@@ -385,6 +390,7 @@ bool sppf_node_equals(sppf_node* left, sppf_node* right)
         case sppf_nullable: return vect_equals(left->node.nullable, right->node.nullable);
         case sppf_inner: 
             return left->node.inner.head_idx == right->node.inner.head_idx
+                && left->node.inner.body_idx == right->node.inner.body_idx 
                 && left->node.inner.source_start_idx == right->node.inner.source_start_idx
                 && left->node.inner.source_end_idx == right->node.inner.source_end_idx;
     }
@@ -420,7 +426,7 @@ void sppf_node_str(sppf_node* n)
         case sppf_inner:
         {
             obj_str(metaparser_get_symbol(n->node.inner.head_idx));
-            printf(", %"PRIu64", %"PRIu64, n->node.inner.source_start_idx, n->node.inner.source_end_idx);
+            printf(":%"PRIu64", %"PRIu64"-%"PRIu64, n->node.inner.body_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx);
             break;
         }
     }
@@ -438,8 +444,9 @@ void sppf_node_repr(sppf_node* n)
         case sppf_leaf: printf("sppf_leaf{%"PRIu64"}", n->node.leaf); break;
         case sppf_nullable: printf("sppf_nullable{ϵ"); vect_str(n->node.nullable); printf("}"); break;
         case sppf_inner:
-            printf("sppf_inner{%"PRIu64", %"PRIu64", %"PRIu64"}", 
-                n->node.inner.head_idx, 
+            printf("sppf_inner{%"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64"}", 
+                n->node.inner.head_idx,
+                n->node.inner.body_idx,
                 n->node.inner.source_start_idx, 
                 n->node.inner.source_end_idx
             );

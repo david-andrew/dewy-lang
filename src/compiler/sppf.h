@@ -25,11 +25,10 @@ typedef enum {
 
 typedef union {
     uint64_t leaf;                      //index in source of the terminal character
-    vect* nullable;              //string containing the symbol indices of the nullable parts
+    vect* nullable;                     //string containing the symbol indices of the nullable parts
     struct {
         uint64_t head_idx;              //symbol index of the rule head being reduced
-        bool packed;
-        union {uint64_t index; vect* indices;} production;    //for future use. normal inner nodes use index, while packed nodes use indices to label each possible child's production
+        uint64_t body_idx;              //for future use. index of the rule body being reduced
         uint64_t source_start_idx; 
         uint64_t source_end_idx;
     } inner;
@@ -62,7 +61,7 @@ sppf_node sppf_node_struct(sppf_node_type type, sppf_node_union node);
 sppf_node* new_sppf_leaf_node(uint64_t source_idx);
 sppf_node* new_sppf_nullable_symbol_node(uint64_t symbol_idx);
 sppf_node* new_sppf_nullable_string_node(slice* nullable_part);
-sppf_node* new_sppf_inner_node(uint64_t head_idx, uint64_t source_start_idx, uint64_t source_end_idx);
+sppf_node* new_sppf_inner_node(uint64_t head_idx, uint64_t body_idx, uint64_t source_start_idx, uint64_t source_end_idx);
 obj* new_sppf_node_obj(sppf_node* n);
 uint64_t sppf_node_hash(sppf_node* n);
 sppf_node* sppf_node_copy(sppf_node* n);
