@@ -1,21 +1,23 @@
-# Dewy
-Dewy is a general purpose programming language with a focus on engineering. For now, the main goal is to make my ideal language.
+# The Dewy Programming Language
+Dewy is a general purpose programming language with a focus on engineering. 
+
+For now, the main goal is to make my ideal language.
 
 ## Try it out
 Thus far, only the compiler-compiler is even runnable. To run the compiler compiler
 
     $ cd src/compiler
-    $ make dewy
+    $ make dewy #alternatively `make debug`
     $ ./dewy path/to/grammar/file path/to/source/file
 
 The project includes several test grammar/source file pairs in DewySpeak/tests/. e.g. an simple expression grammar/source could be run like so
 
     $ ./dewy ../../tests/grammar3.dewy ../../tests/source3.dewy
 
-Note that the compiler-compiler is still buggy, and can/will crash on incorrect grammar specifications. Additionally, the parse-forest build step of the parse is still in development, so at the moment, the parser only outputs whether or not a given input source is valid for the given grammar (accept/reject).
+Note that the compiler-compiler is still buggy, and can/will crash on incorrect grammar specifications (though source files shouldn't be able to cause crashes). Additionally, the steps to build the parse-forest are still in development, so at the moment, the parser only outputs whether or not a given input source is valid for the given grammar (accept/reject).
 
 ## Language Documentation
-Currently incomplete documentation is available at: https://david-andrew.github.io/Dewy/
+Currently incomplete documentation is available at: https://david-andrew.github.io/dewy/
 
 ## Language Features
 * first class physical units (e.g. length, time, mass, temperature, etc.)
