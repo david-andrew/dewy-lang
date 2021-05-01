@@ -1,4 +1,4 @@
-# DewySpeak
+# Dewy
 Dewy is a general purpose programming language with a focus on engineering. For now, the main goal is to make my ideal language.
 
 ## Try it out
@@ -15,7 +15,7 @@ The project includes several test grammar/source file pairs in DewySpeak/tests/.
 Note that the compiler-compiler is still buggy, and can/will crash on incorrect grammar specifications. Additionally, the parse-forest build step of the parse is still in development, so at the moment, the parser only outputs whether or not a given input source is valid for the given grammar (accept/reject).
 
 ## Language Documentation
-Currently incomplete documentation is available at: https://david-andrew.github.io/DewySpeak/
+Currently incomplete documentation is available at: https://david-andrew.github.io/Dewy/
 
 ## Language Features
 * first class physical units (e.g. length, time, mass, temperature, etc.)
@@ -37,7 +37,7 @@ Currently incomplete documentation is available at: https://david-andrew.github.
 * (probably) lots of other things...
 
 ## Language Examples
-An out of date example of the language can be found at [DewySpeak/resources/example_programs/language_benchmark.dewy](https://github.com/david-andrew/DewySpeak/blob/master/resources/language_ideas/example_programs/language_benchmark.dewy)
+An out of date example of the language can be found in [language_benchmark.dewy](resources/language_ideas/example_programs/language_benchmark.dewy)
 
 TODO->write better examples.
 
