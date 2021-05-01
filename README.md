@@ -1,5 +1,18 @@
 # DewySpeak
-DewySpeak (Dewy for short) is a programming language that I am developing. The main goal I have for this language is to create a language that is the perfect language that I would want to use. Dewy is a general purpose programming language with a focus on engineering.
+Dewy is a general purpose programming language with a focus on engineering. For now, the main goal is to make my ideal language.
+
+## Try it out
+Thus far, only the compiler-compiler is even runnable. To run the compiler compiler
+
+    $ cd src/compiler
+    $ make dewy
+    $ ./dewy path/to/grammar/file path/to/source/file
+
+The project includes several test grammar/source file pairs in DewySpeak/tests/. e.g. an simple expression grammar/source could be run like so
+
+    $ ./dewy ../../tests/grammar3.dewy ../../tests/source3.dewy
+
+Note that the compiler-compiler is still buggy, and can/will crash on incorrect grammar specifications. Additionally, the parse-forest build step of the parse is still in development, so at the moment, the parser only outputs whether or not a given input source is valid for the given grammar (accept/reject).
 
 ## Language Documentation
 Currently incomplete documentation is available at: https://david-andrew.github.io/DewySpeak/
@@ -24,9 +37,9 @@ Currently incomplete documentation is available at: https://david-andrew.github.
 * (probably) lots of other things...
 
 ## Language Examples
-A decent example of the language can be found at: `DewySpeak/resources/language_ideas/example_programs/language_benchmark.dewy`. 
+An out of date example of the language can be found at [DewySpeak/resources/example_programs/language_benchmark.dewy](https://github.com/david-andrew/DewySpeak/blob/master/resources/language_ideas/example_programs/language_benchmark.dewy)
 
-Since the first compiler has yet to be completed, there are probably inconsistencies with this and the actual language.
+TODO->write better examples.
 
 ## Trello Project
 For more information about the current state of the project, see the DewySpeak Trello: https://trello.com/b/YYsedENy/dewyspeak
