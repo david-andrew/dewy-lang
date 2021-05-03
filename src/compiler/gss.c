@@ -56,18 +56,16 @@ uint64_t gss_get_node_state(gss* g, size_t nodes_idx, size_t node_idx)
 /**
  * Check Ui in the GSS for a node with the given state label.
  * i.e. is there a node in the set at `nodes_idx` with label `state_idx`.
- * If none found, returns NULL.
+ * Returns the node_idx if found or not found. In the case of not found, 
+ * node_idx will be equal to the set EMPTY value
  */
-gss_idx* gss_get_node_with_label(gss* g, size_t nodes_idx, uint64_t state_idx)
+gss_idx gss_get_node_with_label(gss* g, size_t nodes_idx, uint64_t state_idx)
 {
     set* nodes = gss_get_nodes_set(g, nodes_idx);
     obj state_idx_obj = obj_struct(UInteger_t, &state_idx);
     size_t node_idx = set_get_entries_index(nodes, &state_idx_obj);
-    if (!set_is_index_empty(node_idx))
-    {
-        return new_gss_idx(nodes_idx, node_idx);
-    }
-    return NULL;
+    
+    return gss_idx_struct(nodes_idx, node_idx);
 }
 
 
@@ -213,12 +211,12 @@ void gss_get_all_paths_inner(gss* g, size_t length, vect* stack, vect* paths)
 /**
  * Insert a node into the GSS.
  */
-gss_idx* gss_add_node(gss* g, size_t nodes_idx, uint64_t state)
+gss_idx gss_add_node(gss* g, size_t nodes_idx, uint64_t state)
 {
     set* U = gss_get_nodes_set(g, nodes_idx);
     obj* v = new_uint_obj(state);
     size_t node_idx = set_add_return_index(U, v);
-    return new_gss_idx(nodes_idx, node_idx);
+    return gss_idx_struct(nodes_idx, node_idx);
 }
 
 

@@ -8,100 +8,146 @@
 
 #include "tuple.h"
 #include "utilities.h"
+#include "metaparser.h"
 
 
 /**
- * Create a new n-tuple given a list of the elements it should contain.
+ * Create a new qtuple for the srnglr_Q vector
  */
-tuple* new_tuple(size_t n, ...)
-{   
-    //set up variadic args
-    va_list args;
-    va_start(args, n);
-
-    //build the tuple
-    tuple* t = malloc(sizeof(tuple));
-    uint64_t* items = malloc(sizeof(uint64_t) * n);
-    for (size_t i = 0; i < n; i++)
-    {
-        items[i] = va_arg(args, uint64_t);
-    }
-    *t = (tuple){.n=n, .items=items};
-
-    //close variadic args
-    va_end(args);
-    
+qtuple* new_qtuple(gss_idx v_idx, uint64_t k)
+{
+    qtuple* t = malloc(sizeof(qtuple));
+    *t = (qtuple){.v_idx=v_idx, .k=k};
     return t;
 }
 
 
 /**
- * Create a new tuple wrapped in an object.
+ * Create a new qtuple wrapped in an object.
  */
-obj* new_tuple_obj(tuple* t)
+obj* new_qtuple_obj(qtuple* t)
 {
     obj* T = malloc(sizeof(obj));
-    *T = (obj){.type=UIntNTuple_t, .data=t};
+    *T = (obj){.type=QTuple_t, .data=t};
     return T;
 }
 
 
 /**
- * Print out the tuple.
+ * Print out the qtuple.
  */
-void tuple_str(tuple* t)
+void qtuple_str(qtuple* t)
 {
-    printf("(");
-    for (size_t i = 0; i < t->n; i++)
-    {
-        printf("%"PRIu64, t->items[i]);
-        if (i < t->n - 1) { printf(", "); }
-    }
-    printf(")");
+    printf("{v_idx: "); gss_idx_str(&t->v_idx); printf(", k: %"PRIu64"}", t->k);
 }
 
 
 /**
- * Print the internal representation of the tuple.
+ * Print the internal representation of the qtuple.
  */
-void tuple_repr(tuple* t)
+void qtuple_repr(qtuple* t) { printf("qtuple"); qtuple_str(t);}
+
+
+/**
+ * Free the allocated memory for the qtuple.
+ */
+void qtuple_free(qtuple* t) { free(t); }
+
+
+// /**
+//  * Determine if two qtuples are equal.
+//  */
+// bool qtuple_equals(qtuple* left, qtuple* right)
+// {
+//     return gss_idx_equals(&left->v_idx, &right->v_idx) && left->k == right->k;
+// }
+
+
+// /**
+//  * get a hash of the elements in the qtuple.
+//  */
+// uint64_t qtuple_hash(qtuple* t)
+// {
+//     uint64_t seq[] = {t->v_idx.nodes_idx, t->v_idx.node_idx, t->k};
+//     return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
+// }
+
+
+/**
+ * Create a new rtuple for the srnglr_R vector
+ */
+rtuple* new_rtuple(gss_idx v_idx, uint64_t head_idx, uint64_t body_idx, uint64_t length, uint64_t nullable_idx, uint64_t y_idx)
 {
-    printf("tuple{n=%zu"
-    ", items=", t->n); tuple_str(t); printf("}");
+    //build the tuple
+    rtuple* t = malloc(sizeof(rtuple));
+    *t = (rtuple){
+        .v_idx=v_idx,
+        .head_idx=head_idx,
+        .body_idx=body_idx,
+        .length=length,
+        .nullable_idx=nullable_idx,
+        .y_idx=y_idx
+    };
+    return t;
+}
+
+/**
+ * Create a new rtuple wrapped in an object.
+ */
+obj* new_rtuple_obj(rtuple* t)
+{
+    obj* T = malloc(sizeof(obj));
+    *T = (obj){.type=RTuple_t, .data=t};
+    return T;
 }
 
 
 /**
- * Free the allocated memory for the tuple.
+ * Print out the rtuple.
  */
-void tuple_free(tuple* t)
+void rtuple_str(rtuple* t)
 {
-    free(t->items);
-    free(t);
+    printf("{v_idx: "); gss_idx_str(&t->v_idx);
+    printf(", ");
+    obj_str(metaparser_get_symbol(t->head_idx));
+    printf(": %"PRIu64", m: %"PRIu64", f: %"PRIu64", y_idx: %"PRIu64"}", t->body_idx, t->length, t->nullable_idx, t->y_idx);
 }
 
 
 /**
- * Determine if two tuples are equal.
+ * Print the internal representation of the rtuple.
  */
-bool tuple_equals(tuple* left, tuple* right)
-{
-    if (left->n != right->n) { return false; }
-    for (size_t i = 0; i < left->n; i++)
-    {
-        if (left->items[i] != right->items[i]) { return false; }
-    }
-    return true;
-}
+void rtuple_repr(rtuple* t) { printf("rtuple"); rtuple_str(t); }
 
 
 /**
- * get a hash of the elements in the tuple.
+ * Free the allocated memory for the rtuple.
  */
-uint64_t tuple_hash(tuple* t)
-{
-    return hash_uint_sequence(t->items, t->n);
-}
+void rtuple_free(rtuple* t) { free(t); }
+
+
+// /**
+//  * Determine if two rtuples are equal.
+//  */
+// bool rtuple_equals(rtuple* left, rtuple* right)
+// {
+//     return gss_idx_equals(&left->v_idx, &right->v_idx) 
+//         && left->head_idx == right->head_idx
+//         && left->body_idx == right->body_idx
+//         && left->length == right->length
+//         && left->nullable_idx == right->nullable_idx
+//         && left->y_idx == right->nullable_idx;
+// }
+
+
+// /**
+//  * get a hash of the elements in the tuple.
+//  */
+// uint64_t rtuple_hash(rtuple* t)
+// {
+//     uint64_t seq[] = {t->v_idx.nodes_idx, t->v_idx.node_idx, t->head_idx, t->body_idx, t->length, t->nullable_idx, t->y_idx};
+//     return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
+// }
 
 
 #endif

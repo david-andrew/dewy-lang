@@ -240,7 +240,7 @@ void obj_str(obj* o)
         case CharSet_t: charset_str(o->data); break;
         case Integer_t: printf("%ld", *(int64_t*)o->data); break;
         case UInteger_t: printf("%lu", *(uint64_t*)o->data); break;
-        case UIntNTuple_t: tuple_str(o->data); break;
+        // case UIntNTuple_t: tuple_str(o->data); break;
         case String_t: printf("%s", o->data); break;
         case UnicodeString_t: ustring_str(o->data); break;
         case MetaToken_t: metatoken_repr(o->data); break;
@@ -293,7 +293,7 @@ uint64_t obj_hash(obj* o)
         case CharSet_t: return charset_hash(o->data);
         case Integer_t: return hash_int(*(int64_t*)o->data);
         case UInteger_t: return hash_uint(*(uint64_t*)o->data);
-        case UIntNTuple_t: return tuple_hash(o->data);
+        // case UIntNTuple_t: return tuple_hash(o->data);
         case String_t: return fnv1a(o->data);
         case UnicodeString_t: return ustring_hash(o->data);
         // case MetaToken_t: return metatoken_hash((metatoken*)o->data);
@@ -369,7 +369,7 @@ bool obj_equals(obj* left, obj* right)
 
     switch (left->type)
     {
-        case UIntNTuple_t: return tuple_equals(left->data, right->data);
+        // case UIntNTuple_t: return tuple_equals(left->data, right->data);
         // case Dictionary_t: return dict_equals((dict*)left->data, (dict*)right->data);
         case Set_t: return set_equals((set*)left->data, (set*)right->data);
         case CharSet_t: return charset_equals(left->data, right->data);
@@ -415,7 +415,9 @@ void obj_free(obj* o)
                 break;
 
             //Objects with nested datastructures must free their inner contents first
-            case UIntNTuple_t: tuple_free(o->data); break;
+            // case UIntNTuple_t: tuple_free(o->data); break;
+            case QTuple_t: qtuple_free(o->data); break;
+            case RTuple_t: rtuple_free(o->data); break;
             case MetaToken_t: metatoken_free((metatoken*)o->data); break; 
             case Vector_t: vect_free((vect*)o->data); break;
             case Dictionary_t: dict_free((dict*)o->data); break;
