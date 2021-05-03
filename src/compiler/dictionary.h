@@ -52,6 +52,8 @@ obj* dict_get_hashtag_key(dict* d, obj* hashtag_obj);
 void dict_reset(dict* d);
 void dict_free(dict* d);
 void dict_free_elements_only(dict* d);
+void dict_free_keys_only(dict* d);
+void dict_free_values_only(dict* d);
 void dict_free_table_only(dict* d);
 void dict_repr(dict* d);
 void dict_str(dict* d);

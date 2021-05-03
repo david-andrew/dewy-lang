@@ -53,6 +53,7 @@ void name##_array_str(name##_array* v);                                     \
 
 //Declare primitive type headers
 parray_header(uint64_t, uint64)
+parray_header(bool, bool)
 parray_header(int64_t, int64)
 parray_header(double, double)
 // parray_header(void*, ptr)

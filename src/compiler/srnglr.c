@@ -779,23 +779,23 @@ void srnglr_reducer(size_t i, uint32_t* src)
 {
     //remove and unpack a 5-tuple from R
     tuple* t = obj_free_keep_inner(vect_dequeue(srnglr_R), UIntNTuple_t);
-    gss_idx v_idx = gss_idx_struct(t->items[0], t->items[1]);
-    uint64_t symbol_idx = t->items[2];
-    // uint64_t production_idx = t->items[3];   //future use. index of the production for this reduction
-    uint64_t length = t->items[4];
-    // uint64_t nullable_idx = t->items[5];     //future use. index of the nullable sppf node for this reduction
-    // uint64_t y_idx = t->items[6];            //future use. index of the sppf node for the first edge in the gss path for this reduction
+    gss_idx v_idx = gss_idx_struct(t->items[0], t->items[1]);   //index of the GSS node the reduction applies to
+    uint64_t head_idx = t->items[2];                            //index of the symbol being reduced
+    uint64_t body_idx = t->items[3];                            //future use (SRNGLR filters?). index of the production for this reduction
+    uint64_t length = t->items[4];                              //length of the reduction
+    uint64_t nullable_idx = t->items[5];                        //index of the sppf node representing any right-nulled terms for this reduction
+    uint64_t y_idx = t->items[6];                               //index of the sppf node for the first edge in the gss path for this reduction
     tuple_free(t);
     
     //collect a list of all reachable nodes from v
-    vect* reachable = gss_get_reachable(GSS, &v_idx, length > 0 ? length - 1 : 0);
-    vect_free(gss_get_all_paths(GSS, &v_idx, length > 0 ? length - 1 : 0)); //DEBUG
+    vect* reachable = gss_get_reachable(GSS, &v_idx, length > 0 ? length - 1 : 0); //TODO->replace with next line
+    vect* paths = gss_get_all_paths(GSS, &v_idx, length > 0 ? length - 1 : 0);
 
     for (size_t j = 0; j < vect_size(reachable); j++)
     {
         gss_idx* u_idx = vect_get(reachable, j)->data;
         uint64_t state_idx = gss_get_node_state(GSS, u_idx->nodes_idx, u_idx->node_idx);
-        uint64_t* l = srnglr_get_table_push(state_idx, symbol_idx);
+        uint64_t* l = srnglr_get_table_push(state_idx, head_idx);
         if (l == NULL) { continue; }
         
         gss_idx* w_idx = gss_get_node_with_label(GSS, i, *l);
@@ -860,7 +860,8 @@ void srnglr_reducer(size_t i, uint32_t* src)
         }
         gss_idx_free(w_idx);
     }
-    vect_free(reachable);
+    vect_free(reachable); //TODO->replace with next line
+    vect_free(paths);
 }
 
 
@@ -953,11 +954,42 @@ void srnglr_shifter(size_t i, uint32_t* src)
 
 /**
  * Add_children subroutine from rnglr parsing process.
- * z_partial should be an inner node. updates the source_end_idx based on the children nodes.
- * then inserts the completed z into the SPPF, and assigns the children.
- * The index of z in the SPPF nodes set is returned.
+ * z should be an inner node.
  */
-uint64_t srnglr_add_children(sppf_node* z_partial, vect* path, uint64_t nullable_idx){}
+void srnglr_add_children(uint64_t z_idx, vect* path, uint64_t nullable_idx)
+{
+    if (nullable_idx != 0)
+    {
+        vect_append(path, new_uint_obj(nullable_idx));
+    }
+    obj* path_obj = new_vect_obj(path);
+    uint64_t new_children_idx = set_add_return_index(SPPF->children, path_obj);
+    
+    obj z_idx_obj = obj_struct(UInteger_t, &z_idx);
+
+    //get the children for this node
+    obj* children = dict_get(SPPF->edges, &z_idx_obj);
+    if (children->type == UInteger_t)  //non-packed node
+    {
+        uint64_t* children_idx = children->data;
+        
+        //if the child to add is not the current children index, create a packed node with both indices
+        if (*children_idx != new_children_idx)
+        {
+            uint64_t entry_idx = dict_get_entries_index(SPPF->edges, &z_idx_obj);
+            set* children_set = new_set();
+            set_add(children_set, children);
+            set_add(children_set, new_uint_obj(new_children_idx));
+            SPPF->edges->entries[entry_idx].value = new_set_obj(children_set);
+        }
+    }
+    else //type == Set_t //packed node
+    {
+        //insert the new index into the list of children lists (set handle duplicates)
+        set* children_set = children->data;
+        set_add(children_set, new_uint_obj(new_children_idx));
+    }
+}
 
 
 /**
@@ -1186,7 +1218,7 @@ void srnglr_print_gss()
 
 void srnglr_print_sppf()
 {
-    sppf_str(SPPF);
+    sppf_repr(SPPF);
 }
 
 

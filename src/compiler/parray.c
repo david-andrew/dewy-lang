@@ -231,12 +231,15 @@ void name##_array_str(name##_array* v)                                          
 
 //hash int/uint simply by reading off value as uint
 #define uint64_hashcast(v) v
+#define bool_hashcast(v) (uint64_t)v
 #define int64_hashcast(v) *(uint64_t*)v
 
 //hash doubles by shifting decimal place several spots, and then rounding to int
 #define double_hashcast(v) (uint64_t) (v * 1000)
 
+//TODO->instead of print specifier, pass a whole print function
 parray_implementation(uint64_t, UInt64Array_t, uint64, PRIu64, uint64_hashcast)
+parray_implementation(bool, BoolArray_t, bool, "d", bool_hashcast)
 parray_implementation(int64_t, Int64Array_t, int64, PRIi64, int64_hashcast)
 parray_implementation(double, DoubleArray_t, double, "f", double_hashcast)
 

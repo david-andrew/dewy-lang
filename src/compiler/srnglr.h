@@ -47,7 +47,7 @@ bool srnglr_is_accepting_state(uint64_t state_idx);
 bool srnglr_parser(uint32_t* src);
 void srnglr_reducer(size_t i, uint32_t* src);
 void srnglr_shifter(size_t i, uint32_t* src);
-uint64_t srnglr_add_children(sppf_node* z_partial, vect* path, uint64_t nullable_idx);
+void srnglr_add_children(uint64_t z_idx, vect* path, uint64_t nullable_idx);
 
 
 //print functions

@@ -21,6 +21,7 @@ int64_t ustring_charstar_cmp(uint32_t* left, char* right);
 uint32_t* ustring_clone(uint32_t* string);
 uint64_t ustring_hash(uint32_t* str);
 uint64_t dec_digit_to_value(char c);
+uint64_t dec_num_digits(uint64_t n);
 uint64_t hex_digit_to_value(char c);
 uint64_t ustring_parse_hex(uint32_t* str);
 uint64_t ustring_parse_dec(uint32_t* str);

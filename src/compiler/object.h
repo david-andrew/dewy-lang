@@ -33,6 +33,7 @@ typedef enum
     SPPFNode_t,
     Vector_t,
     UInt64Array_t,
+    BoolArray_t,
     Int64Array_t,
     DoubleArray_t,
     //other PrimitiveArray_t types...

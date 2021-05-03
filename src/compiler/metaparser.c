@@ -3,7 +3,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
 #include <inttypes.h>
 
 #include "vector.h"
@@ -74,7 +73,7 @@ uint64_t metaparser_anonymous_rule_count = 1;
 uint64_t metaparser_get_anonymous_rule_head()
 {
     //determine the string width of the number
-    size_t width = ceil(log10(metaparser_anonymous_rule_count + 1));
+    size_t width = dec_num_digits(metaparser_anonymous_rule_count);
     width += 4; //room for `#__` at start and null terminator at end
     
     //create a normal char* that will be the head

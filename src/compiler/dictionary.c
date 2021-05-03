@@ -381,6 +381,41 @@ void dict_free_elements_only(dict* d)
     }
 }
 
+
+/**
+ * Free only the key objects in the dict without touching the values or table.
+ */
+void dict_free_keys_only(dict* d)
+{
+    for (int i = 0; i < d->size; i++)
+    {
+        dict_entry e = d->entries[i];
+        if (e.key != NULL)
+        {
+            obj_free(e.key);
+            e.key = NULL;
+        }
+    }
+}
+
+/**
+ * Free only the values objects in the dict without touching the keys or table.
+ */
+void dict_free_values_only(dict* d)
+{
+    for (int i = 0; i < d->size; i++)
+    {
+        dict_entry e = d->entries[i];
+        if (e.value != NULL)
+        {
+            obj_free(e.value);
+            e.value = NULL;
+        }
+    }
+}
+
+
+
 void dict_free_table_only(dict* d)
 {
     //free memory of indices table and entry vectory.

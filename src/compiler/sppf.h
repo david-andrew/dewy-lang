@@ -8,13 +8,15 @@
 #include "slice.h"
 #include "dictionary.h"
 #include "set.h"
+#include "parray.h"
 
 
 typedef struct {
     set* nodes;             //set<sppf_node>
-    dict* edges;            //map<node_idx, children_idx | vect<children_idx>>
+    dict* edges;            //map<node_idx, children_idx | set<children_idx>>
     set* children;          //set<vect<node_idx>>
     dict* gss_sppf_map;     //map<gss_edge, sppf_node_idx> from GSS edges to nodes in the SPPF
+    uint64_t root_idx;      //index of the root node in the SPPF
 } sppf;
 
 typedef enum {
@@ -55,7 +57,12 @@ void sppf_add_root_epsilon(sppf* s);
 uint64_t sppf_add_inner_node(sppf* s, uint64_t head_idx, uint64_t source_start_idx, uint64_t source_end_idx, vect* children_indices);
 // uint64_t sppf_get_inner_node_idx(sppf* s, uint64_t head_idx, uint64_t source_start_idx, uint64_t source_end_idx);
 void sppf_free(sppf* s);
+void sppf_repr(sppf* s);
 void sppf_str(sppf* s);
+void sppf_str_visit_nodes(sppf* s, bool* cyclic, uint64_t* num_lines);
+void sppf_str_visit_nodes_inner(sppf* s, uint64_t node_idx, bool* cyclic, uint64_t* num_lines, set* visited);
+void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, uint64_array* draw_stack, bool continue_line, uint64_t* line_num, uint64_t line_num_width, dict* refs);
+void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, uint64_array* draw_stack, bool continue_line);
 
 sppf_node sppf_node_struct(sppf_node_type type, sppf_node_union node);
 sppf_node* new_sppf_leaf_node(uint64_t source_idx);

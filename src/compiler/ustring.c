@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 
 #include "ustring.h"
 #include "utilities.h"
@@ -196,6 +197,20 @@ uint64_t dec_digit_to_value(char c)
     }
     printf("ERROR: character %c is not a decimal digit\n", c);
     return 0;
+}
+
+
+/**
+ * Determine the number of characters required to print the decimal number.
+ * Only accepts positive integers.
+ */
+uint64_t dec_num_digits(uint64_t n)
+{
+    //handle 0 separately since log10(0 + 1) = 0
+    if (n == 0) { return 1; }
+
+    //log10 & ceil to count digits
+    return (uint64_t)ceil(log10(n + 1));
 }
 
 
