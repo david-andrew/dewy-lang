@@ -52,6 +52,18 @@ uint64_t sppf_add_node(sppf* s, sppf_node* node)
 
 
 /**
+ * Label the GSS edge with the SPPF node, using the map in the SPPF.
+ * edge is not modified by this function.
+ */
+void sppf_label_gss_edge(sppf* s, gss_idx* parent, gss_idx* child, uint64_t node_idx)
+{
+    obj* edge_obj = new_gss_edge_obj(new_gss_edge(*parent, *child));
+    obj* node_idx_obj = new_uint_obj(node_idx);
+    dict_set(s->gss_sppf_map, edge_obj, node_idx_obj);
+}
+
+
+/**
  * Add a node + children to the SPPF. If the node already exists with children,
  * a packed node is create.
  */

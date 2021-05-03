@@ -8,6 +8,7 @@
 #include "slice.h"
 #include "dictionary.h"
 #include "set.h"
+#include "gss.h"
 #include "parray.h"
 
 
@@ -44,6 +45,7 @@ typedef struct {
 
 sppf* new_sppf();
 uint64_t sppf_add_node(sppf* s, sppf_node* node);
+void sppf_label_gss_edge(sppf* s, gss_idx* parent, gss_idx* child, uint64_t node_idx);
 void sppf_add_node_with_children(sppf* s, sppf_node* node, vect* children);
 uint64_t sppf_add_children(sppf* s, vect* children);
 void sppf_connect_node_to_children(sppf* s, uint64_t node_idx, uint64_t children_idx);

@@ -803,8 +803,10 @@ void srnglr_reducer(size_t i, uint32_t* src)
         {
             if (!gss_does_edge_exist(GSS, w_idx, u_idx)) //TODO->if the edge exists, still need to add the reduciton tuple, but need to grab existing z.
             {
+                //create an edge from w to u with label z
                 gss_add_edge(GSS, w_idx, u_idx); //TODO->should probably return the SPPF node z here...
-                //e.g. `sppf_node* z = gss_add_edge(GSS, SPPF, w_idx, u_idx);`
+                sppf_label_gss_edge(SPPF, w_idx, u_idx, 0); //TODO->get the correct z_idx
+
                 if (length != 0)
                 {
                     set* actions = srnglr_get_merged_table_actions(*l, src[i]);
@@ -827,10 +829,11 @@ void srnglr_reducer(size_t i, uint32_t* src)
         }
         else
         {
-            //create a new node, and edge from w back to u
+            //create a new node, and edge from w to u with label z
             w_idx = gss_add_node(GSS, i, *l);
             gss_add_edge(GSS, w_idx, u_idx); //TODO->this should also generate SPPF node z
-            //e.g. `sppf_node* z = gss_add_edge(GSS, SPPF, w_idx, u_idx);`
+            sppf_label_gss_edge(SPPF, w_idx, u_idx, 0); //TODO->get the correct z_idx
+
             set* actions = srnglr_get_merged_table_actions(*l, src[i]);
             for (size_t j = 0; j < set_size(actions); j++)
             {
@@ -890,9 +893,11 @@ void srnglr_shifter(size_t i, uint32_t* src)
             gss_idx* w_idx = gss_get_node_with_label(GSS, i+1, k);
             if (w_idx != NULL)
             {
-                //create an edge from w to v
-                gss_add_edge(GSS, w_idx, &v_idx); //TODO->need to map from edge to sppf node index
-                //e.g. `gss_add_edge(GSS, w_idx, &v_idx, z_idx);`
+                //create an edge from w to v, and lable with z
+                gss_add_edge(GSS, w_idx, &v_idx);
+                sppf_label_gss_edge(SPPF, w_idx, &v_idx, z_idx);
+
+                //loop through all reductionsm
                 set* actions = srnglr_get_merged_table_actions(k, src[i+1]);
                 for (size_t j = 0; j < set_size(actions); j++)
                 {
@@ -911,9 +916,11 @@ void srnglr_shifter(size_t i, uint32_t* src)
             }
             else
             {
-                //create a node w in Ui with label k, and edge from w to v
+                //create a node w in Ui with label k, and edge from w to v with label z
                 w_idx = gss_add_node(GSS, i+1, k);
                 gss_add_edge(GSS, w_idx, &v_idx);
+                sppf_label_gss_edge(SPPF, w_idx, &v_idx, z_idx);
+
                 // uint64_t* h = srnglr_get_table_push()
                 set* actions = srnglr_get_merged_table_actions(k, src[i+1]);
                 // printf("actions for (%"PRIu64", ", k); put_unicode(src[i+1]); printf("): "); set_str(actions); printf("\n");
