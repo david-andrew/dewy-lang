@@ -169,7 +169,7 @@ vect* gss_get_all_paths(gss* g, gss_idx* root_idx, size_t length)
         vect_str(path);
         printf("\n");
     }
-    printf("\n");
+    // printf("\n");
 
     return paths;
 }

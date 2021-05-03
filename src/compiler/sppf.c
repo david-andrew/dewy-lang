@@ -64,6 +64,26 @@ void sppf_label_gss_edge(sppf* s, gss_idx* parent, gss_idx* child, uint64_t node
 
 
 /**
+ * Return the list of SPPF nodes that make up the given path in the GSS
+ */
+vect* sppf_get_path_labels(sppf* s, vect* path)
+{
+    vect* labels = new_vect();
+    for (size_t i = vect_size(path) - 1; i > 0; i--)
+    {
+        gss_idx* parent = vect_get(path, i-1)->data;
+        gss_idx* child = vect_get(path, i)->data;
+        gss_edge edge = gss_edge_struct(*parent, *child);
+        obj edge_obj = obj_struct(GSSEdge_t, &edge);
+        obj* label = dict_get(s->gss_sppf_map, &edge_obj);
+        vect_append(labels, obj_copy(label));
+    }
+    printf("labels for path ("); vect_str(path); printf("): "); vect_str(labels); printf("\n\n");
+    return labels;
+}
+
+
+/**
  * Add a node + children to the SPPF. If the node already exists with children,
  * a packed node is create.
  */
@@ -416,8 +436,14 @@ sppf_node* new_sppf_nullable_string_node(slice* nullable_part)
 sppf_node* new_sppf_inner_node(uint64_t head_idx, uint64_t body_idx, uint64_t source_start_idx, uint64_t source_end_idx)
 {
     sppf_node* n = malloc(sizeof(sppf_node));
-    *n = (sppf_node){
-        .type=sppf_leaf, 
+    *n = sppf_inner_node_struct(head_idx, body_idx, source_start_idx, source_end_idx);
+    return n;
+}
+
+sppf_node sppf_inner_node_struct(uint64_t head_idx, uint64_t body_idx, uint64_t source_start_idx, uint64_t source_end_idx)
+{
+    sppf_node n = (sppf_node){
+        .type=sppf_inner, 
         .node.inner={
             .head_idx=head_idx,
             .body_idx=body_idx,
@@ -508,8 +534,9 @@ void sppf_node_str(sppf_node* n)
     {
         case sppf_leaf: 
         {
+            printf("`");
             unicode_str(srnglr_get_input_source()[n->node.leaf]);
-            printf(", %"PRIu64, n->node.leaf); 
+            printf("`, %"PRIu64, n->node.leaf); 
             break;
         }
         case sppf_nullable:

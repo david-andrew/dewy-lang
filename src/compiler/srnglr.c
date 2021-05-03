@@ -787,17 +787,42 @@ void srnglr_reducer(size_t i, uint32_t* src)
     uint64_t y_idx = t->items[6];                               //index of the sppf node for the first edge in the gss path for this reduction
     tuple_free(t);
     
-    //collect a list of all reachable nodes from v
-    vect* reachable = gss_get_reachable(GSS, &v_idx, length > 0 ? length - 1 : 0); //TODO->replace with next line
+    //collect a list of all paths of given length from v
     vect* paths = gss_get_all_paths(GSS, &v_idx, length > 0 ? length - 1 : 0);
 
-    for (size_t j = 0; j < vect_size(reachable); j++)
+    for (size_t j = 0; j < vect_size(paths); j++)
     {
-        gss_idx* u_idx = vect_get(reachable, j)->data;
+        vect* path = vect_get(paths, j)->data;
+        gss_idx* u_idx = vect_get(path, vect_size(path) - 1)->data; //last node on the path
+
+        vect* labels = sppf_get_path_labels(SPPF, path); //TODO->this may be backwards?
+        uint64_t z_idx = 9999123456; //todo, remove ` = 0` part
+        if (length == 0)
+        {
+            z_idx = nullable_idx;
+            vect_free(labels);
+        }
+        else
+        {
+            vect_append(labels, new_uint_obj(y_idx));
+            
+            //check if node z (X, c, i) exists, and if not, create one
+            sppf_node z = sppf_inner_node_struct(head_idx, body_idx, u_idx->nodes_idx, i);
+            obj z_obj = obj_struct(SPPFNode_t, &z);
+            z_idx = set_get_entries_index(SPPF->nodes, &z_obj);
+            if (set_is_index_empty(z_idx))
+            {
+                z_idx = set_add_return_index(SPPF->nodes, obj_copy(&z_obj));
+            }
+
+            srnglr_add_children(z_idx, labels, nullable_idx);
+        }
+
+        //TODO->adjust this part to match SPPF generator part
+
         uint64_t state_idx = gss_get_node_state(GSS, u_idx->nodes_idx, u_idx->node_idx);
         uint64_t* l = srnglr_get_table_push(state_idx, head_idx);
         if (l == NULL) { continue; }
-        
         gss_idx* w_idx = gss_get_node_with_label(GSS, i, *l);
         if (w_idx != NULL)
         {
@@ -805,7 +830,7 @@ void srnglr_reducer(size_t i, uint32_t* src)
             {
                 //create an edge from w to u with label z
                 gss_add_edge(GSS, w_idx, u_idx); //TODO->should probably return the SPPF node z here...
-                sppf_label_gss_edge(SPPF, w_idx, u_idx, 0); //TODO->get the correct z_idx
+                sppf_label_gss_edge(SPPF, w_idx, u_idx, z_idx); //TODO->get the correct z_idx
 
                 if (length != 0)
                 {
@@ -818,7 +843,7 @@ void srnglr_reducer(size_t i, uint32_t* src)
                             reduction* r = action->data;
                             if (r->length > 0)
                             {
-                                tuple* t = new_tuple(7, u_idx->nodes_idx, u_idx->node_idx, r->head_idx, r->production_idx, r->length, r->nullable_idx, /*for now skip sppf node z to add here*/0);
+                                tuple* t = new_tuple(7, u_idx->nodes_idx, u_idx->node_idx, r->head_idx, r->production_idx, r->length, r->nullable_idx, z_idx);
                                 vect_append(srnglr_R, new_tuple_obj(t));
                             }
                         }
@@ -832,7 +857,7 @@ void srnglr_reducer(size_t i, uint32_t* src)
             //create a new node, and edge from w to u with label z
             w_idx = gss_add_node(GSS, i, *l);
             gss_add_edge(GSS, w_idx, u_idx); //TODO->this should also generate SPPF node z
-            sppf_label_gss_edge(SPPF, w_idx, u_idx, 0); //TODO->get the correct z_idx
+            sppf_label_gss_edge(SPPF, w_idx, u_idx, z_idx); //TODO->get the correct z_idx
 
             set* actions = srnglr_get_merged_table_actions(*l, src[i]);
             for (size_t j = 0; j < set_size(actions); j++)
@@ -854,7 +879,7 @@ void srnglr_reducer(size_t i, uint32_t* src)
                     }
                     else if (length != 0)
                     {
-                        tuple* t = new_tuple(7, u_idx->nodes_idx, u_idx->node_idx, r->head_idx, r->production_idx, r->length, /*z_idx would go here*/0);
+                        tuple* t = new_tuple(7, u_idx->nodes_idx, u_idx->node_idx, r->head_idx, r->production_idx, r->length, r->nullable_idx, z_idx);
                         vect_append(srnglr_R, new_tuple_obj(t));
                     }
                 }
@@ -863,7 +888,7 @@ void srnglr_reducer(size_t i, uint32_t* src)
         }
         gss_idx_free(w_idx);
     }
-    vect_free(reachable); //TODO->replace with next line
+    // vect_free(reachable); //TODO->replace with next line
     vect_free(paths);
 }
 
@@ -970,13 +995,18 @@ void srnglr_add_children(uint64_t z_idx, vect* path, uint64_t nullable_idx)
         vect_append(path, new_uint_obj(nullable_idx));
     }
     obj* path_obj = new_vect_obj(path);
+    printf("adding children to %"PRIu64": ", z_idx); vect_str(path); printf("\n");
     uint64_t new_children_idx = set_add_return_index(SPPF->children, path_obj);
     
     obj z_idx_obj = obj_struct(UInteger_t, &z_idx);
 
     //get the children for this node
     obj* children = dict_get(SPPF->edges, &z_idx_obj);
-    if (children->type == UInteger_t)  //non-packed node
+    if (children == NULL)
+    {
+        dict_set(SPPF->edges, new_uint_obj(z_idx), new_uint_obj(new_children_idx));
+    }
+    else if (children->type == UInteger_t)  //non-packed node
     {
         uint64_t* children_idx = children->data;
         
