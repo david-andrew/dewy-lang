@@ -690,6 +690,28 @@ bool srnglr_is_accepting_state(uint64_t state_idx)
 
 
 /**
+ * Get the nullable SPPF node that is the start symbol.
+ * If no such node exists, returns the set* EMPTY index value.
+ */
+uint64_t srnglr_get_epsilon_start_idx()
+{
+    uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
+    for (uint64_t i = 0; i < set_size(SPPF->nodes); i++)
+    {
+        sppf_node* node = set_get_at_index(SPPF->nodes, i)->data;
+        if (node->type != sppf_nullable) { break; } //nullable nodes are at the start
+        if (vect_size(node->node.nullable) != 1) { continue; } //node should have only a single symbol in it
+        uint64_t* symbol_idx = vect_get(node->node.nullable, 0)->data;
+        if (*symbol_idx == start_symbol_idx)
+        {
+            return i;
+        }
+    }
+    return (uint64_t)-1;
+}
+
+
+/**
  * Parse an input string according to the preparsed grammar.
  * Implementation 1 is pulled directly from rnglr paper.
  * Returns whether or not the parse was successful.
@@ -706,7 +728,12 @@ bool srnglr_parser(uint32_t* src)
         set* actions = srnglr_get_table_actions(0, endmarker_idx);
         for (size_t i = 0; i < set_size(actions); i++)
         {
-            if (actions->entries[i].item->type == Accept_t) { return true; }
+            if (actions->entries[i].item->type == Accept_t)
+            { 
+                //set the root index and indicate successful parse
+                SPPF->root_idx = srnglr_get_epsilon_start_idx();
+                return true;
+            }
         }
         return false;
     }
@@ -763,6 +790,11 @@ bool srnglr_parser(uint32_t* src)
         uint64_t* state = Ud->entries[i].item->data;
         if (srnglr_is_accepting_state(*state))
         {
+            //set the root node as the node that labels the GSS edge from this node to v0
+            gss_edge accepting_edge = (gss_edge){.parent={d, i}, .child={0, 0}};
+            obj accepting_edge_obj = obj_struct(GSSEdge_t, &accepting_edge);
+            uint64_t* root_idx = dict_get(SPPF->gss_sppf_map, &accepting_edge_obj)->data;
+            SPPF->root_idx = *root_idx;
             return true;
         }
     }

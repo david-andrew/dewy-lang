@@ -40,6 +40,7 @@ typedef union {
 typedef struct {
     sppf_node_type type;
     sppf_node_union node;
+    //bool alive;   //future. probably used to mark nodes that have been filtered by the SPPF algorithm
 } sppf_node;
 
 
@@ -54,12 +55,13 @@ uint64_t sppf_add_nullable_symbol_node(sppf* s, uint64_t symbol_idx);
 uint64_t sppf_add_nullable_string_node(sppf* s, slice* nullable_part);
 void sppf_add_root_epsilon(sppf* s);
 void sppf_free(sppf* s);
+
 void sppf_repr(sppf* s);
 void sppf_str(sppf* s);
 void sppf_str_visit_nodes(sppf* s, bool* cyclic, uint64_t* num_lines);
 void sppf_str_visit_nodes_inner(sppf* s, uint64_t node_idx, bool* cyclic, uint64_t* num_lines, set* visited);
-void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, uint64_array* draw_stack, bool continue_line, uint64_t* line_num, uint64_t line_num_width, dict* refs);
-void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, uint64_array* draw_stack, bool continue_line);
+void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, bool continue_line, uint64_t* line_num, uint64_t line_num_width, dict* refs);
+void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, bool continue_line);
 
 sppf_node sppf_node_struct(sppf_node_type type, sppf_node_union node);
 sppf_node* new_sppf_leaf_node(uint64_t source_idx);

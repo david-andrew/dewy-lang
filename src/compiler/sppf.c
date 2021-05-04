@@ -271,12 +271,12 @@ void sppf_str(sppf* s)
     sppf_str_visit_nodes(s, &cyclic, &num_lines);
 
     //used to keep track of drawing lines in the tree
-    uint64_array* draw_stack = new_uint64_array();
+    bool_array* open_levels = new_bool_array();
     
     if (!cyclic)
     {
         // Print out a non-cyclic SPPF //
-        sppf_str_noncyclic_inner(s, s->root_idx, draw_stack, false);
+        sppf_str_noncyclic_inner(s, s->root_idx, open_levels, false);
     }
     else
     {
@@ -286,15 +286,15 @@ void sppf_str(sppf* s)
         dict* refs = new_dict();                            //map from SPPF nodes to the line they start on
 
         //recursively print the SPPF, with line numbers, and reference pointers
-        sppf_str_cyclic_inner(s, s->root_idx, draw_stack, false, &line_num, line_num_width, refs);
+        sppf_str_cyclic_inner(s, s->root_idx, open_levels, false, &line_num, line_num_width, refs);
 
         //free the dict/array. Don't touch the keys since they are owned by the SPPF.
         dict_free_values_only(refs);
         dict_free_table_only(refs);
     }
 
-    //free the lines stack
-    uint64_array_free(draw_stack);
+    //cleanup
+    bool_array_free(open_levels);
 }
 
 
@@ -333,7 +333,7 @@ void sppf_str_visit_nodes_inner(sppf* s, uint64_t node_idx, bool* cyclic, uint64
  * Takes the current node being printed, level of indentation, current line number,
  * and a map of all nodes already printed and the line they occur on.
  */
-void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, uint64_array* draw_stack, bool continue_line, uint64_t* line_num, uint64_t line_num_width, dict* refs)
+void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, bool continue_line, uint64_t* line_num, uint64_t line_num_width, dict* refs)
 {
 
 }
@@ -343,7 +343,7 @@ void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, uint64_array* draw_stack,
  * Inner helper function for printing out a non-cycle-containing SPPF.
  * Prints starting from the given node, at the given indentation level.
  */
-void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, uint64_array* draw_stack, bool continue_line)
+void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, bool continue_line)
 {
 
 }
@@ -362,7 +362,7 @@ void sppf_repr(sppf* s)
     dict_str(s->edges);
     printf("\nGSS-SPPF map:\n");
     dict_str(s->gss_sppf_map);
-    printf("\n");
+    printf("\nSPPF root node index: %"PRIu64"\n", s->root_idx);
 }
 
 
