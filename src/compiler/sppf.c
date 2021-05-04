@@ -78,7 +78,7 @@ vect* sppf_get_path_labels(sppf* s, vect* path)
         obj* label = dict_get(s->gss_sppf_map, &edge_obj);
         vect_append(labels, obj_copy(label));
     }
-    printf("labels for path ("); vect_str(path); printf("): "); vect_str(labels); printf("\n\n");
+    // printf("labels for path ("); vect_str(path); printf("): "); vect_str(labels); printf("\n\n");
     return labels;
 }
 
@@ -154,13 +154,13 @@ void sppf_connect_node_to_children(sppf* s, uint64_t node_idx, uint64_t children
 }
 
 
-/**
- * 
- */
-uint64_t sppf_add_leaf_node(sppf* s, uint64_t source_idx)
-{
+// /**
+//  * 
+//  */
+// uint64_t sppf_add_leaf_node(sppf* s, uint64_t source_idx)
+// {
 
-}
+// }
 
 
 /**
@@ -256,13 +256,13 @@ void sppf_add_root_epsilon(sppf* s)
 }
 
 
-/**
- * 
- */
-uint64_t sppf_add_inner_node(sppf* s, uint64_t head_idx, uint64_t source_start_idx, uint64_t source_end_idx, vect* children_indices)
-{
+// /**
+//  * 
+//  */
+// uint64_t sppf_add_inner_node(sppf* s, uint64_t head_idx, uint64_t source_start_idx, uint64_t source_end_idx, vect* children_indices)
+// {
 
-}
+// }
 
 
 /**

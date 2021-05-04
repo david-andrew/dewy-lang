@@ -801,9 +801,6 @@ void srnglr_reducer(size_t i, uint32_t* src)
         }
         else
         {
-            vect* labels = sppf_get_path_labels(SPPF, path);
-            vect_append(labels, new_uint_obj(y_idx));
-            
             //check if node z (X, c, i) exists, and if not, create one
             sppf_node z = sppf_inner_node_struct(head_idx, body_idx, u_idx->nodes_idx, i);
             obj z_obj = obj_struct(SPPFNode_t, &z);
@@ -813,15 +810,13 @@ void srnglr_reducer(size_t i, uint32_t* src)
                 z_idx = set_add_return_index(SPPF->nodes, obj_copy(&z_obj));
             }
 
+            //add the children for this reduction to the children of z
+            vect* labels = sppf_get_path_labels(SPPF, path);
+            vect_append(labels, new_uint_obj(y_idx));
             srnglr_add_children(z_idx, labels, nullable_idx);
         }
 
-
-        //let k be the label of u, and let push l belong to Table(k, X)
-
-
-        //TODO->adjust this part to match SPPF generator part
-
+        //let k (state_idx) be the label of u, and let push l belong to Table(k, X)
         uint64_t state_idx = gss_get_node_state(GSS, u_idx->nodes_idx, u_idx->node_idx);
         uint64_t* l = srnglr_get_table_push(state_idx, head_idx);
         if (l == NULL) { continue; }
@@ -832,8 +827,8 @@ void srnglr_reducer(size_t i, uint32_t* src)
             if (!gss_does_edge_exist(GSS, &w_idx, u_idx)) //TODO->if the edge exists, still need to add the reduciton tuple, but need to grab existing z.
             {
                 //create an edge from w to u with label z
-                gss_add_edge(GSS, &w_idx, u_idx); //TODO->should probably return the SPPF node z here...
-                sppf_label_gss_edge(SPPF, &w_idx, u_idx, z_idx); //TODO->get the correct z_idx
+                gss_add_edge(GSS, &w_idx, u_idx);
+                sppf_label_gss_edge(SPPF, &w_idx, u_idx, z_idx);
 
                 if (length != 0)
                 {
@@ -859,8 +854,8 @@ void srnglr_reducer(size_t i, uint32_t* src)
         {
             //create a new node, and edge from w to u with label z
             w_idx = gss_add_node(GSS, i, *l);
-            gss_add_edge(GSS, &w_idx, u_idx); //TODO->this should also generate SPPF node z
-            sppf_label_gss_edge(SPPF, &w_idx, u_idx, z_idx); //TODO->get the correct z_idx
+            gss_add_edge(GSS, &w_idx, u_idx);
+            sppf_label_gss_edge(SPPF, &w_idx, u_idx, z_idx);
 
             set* actions = srnglr_get_merged_table_actions(*l, src[i]);
             for (size_t j = 0; j < set_size(actions); j++)
@@ -890,7 +885,6 @@ void srnglr_reducer(size_t i, uint32_t* src)
             set_free(actions); 
         }
     }
-    // vect_free(reachable); //TODO->replace with next line
     vect_free(paths);
 }
 
@@ -989,37 +983,38 @@ void srnglr_shifter(size_t i, uint32_t* src)
  */
 void srnglr_add_children(uint64_t z_idx, vect* path, uint64_t nullable_idx)
 {
+    //if this was a right-nulled reduction, append preconstructed nullable SPPF node
     if (nullable_idx != 0)
     {
         vect_append(path, new_uint_obj(nullable_idx));
     }
     obj* path_obj = new_vect_obj(path);
-    printf("adding children to %"PRIu64": ", z_idx); vect_str(path); printf("\n");
-    uint64_t new_children_idx = set_add_return_index(SPPF->children, path_obj);
-    
-    obj z_idx_obj = obj_struct(UInteger_t, &z_idx);
 
-    //get the children for this node
+    //insert the children vector into the set of SPPF children
+    uint64_t new_children_idx = set_add_return_index(SPPF->children, path_obj);
+
+    //add an entry for these children to the node z
+    obj z_idx_obj = obj_struct(UInteger_t, &z_idx);
     obj* children = dict_get(SPPF->edges, &z_idx_obj);
-    if (children == NULL)
+    if (children == NULL)  //z has no children so far
     {
         dict_set(SPPF->edges, new_uint_obj(z_idx), new_uint_obj(new_children_idx));
     }
-    else if (children->type == UInteger_t)  //non-packed node
+    else if (children->type == UInteger_t)  //z is a non-packed node
     {
-        uint64_t* children_idx = children->data;
+        //check if the node already has these children
+        uint64_t children_idx = *(uint64_t*)children->data;
+        if (children_idx == new_children_idx) { return; } //entry already exists
         
-        //if the child to add is not the current children index, create a packed node with both indices
-        if (*children_idx != new_children_idx)
-        {
-            uint64_t entry_idx = dict_get_entries_index(SPPF->edges, &z_idx_obj);
-            set* children_set = new_set();
-            set_add(children_set, children);
-            set_add(children_set, new_uint_obj(new_children_idx));
-            SPPF->edges->entries[entry_idx].value = new_set_obj(children_set);
-        }
+        //create a packed node with both indices
+        uint64_t entry_idx = dict_get_entries_index(SPPF->edges, &z_idx_obj);
+        set* children_set = new_set();
+        set_add(children_set, children);
+        set_add(children_set, new_uint_obj(new_children_idx));
+        SPPF->edges->entries[entry_idx].value = new_set_obj(children_set);
+        
     }
-    else //type == Set_t //packed node
+    else //type == Set_t  //z is a packed node
     {
         //insert the new index into the list of children lists (set handle duplicates)
         set* children_set = children->data;

@@ -160,15 +160,6 @@ vect* gss_get_all_paths(gss* g, gss_idx* root_idx, size_t length)
     while (vect_size(stack) > 0) { vect_pop(stack); }
     vect_free(stack);
 
-    printf("compute all length %zu paths from ", length); gss_idx_str(root_idx); printf("\n");
-    for (size_t i = 0; i < vect_size(paths); i++)
-    {
-        vect* path = vect_get(paths, i)->data;
-        vect_str(path);
-        printf("\n");
-    }
-    // printf("\n");
-
     return paths;
 }
 
