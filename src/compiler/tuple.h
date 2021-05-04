@@ -8,7 +8,7 @@
 
 typedef struct {
     gss_idx v_idx;          //GSS node to apply shift to
-    uint64_t k;             //label of new GSS node to create as parent of v
+    uint64_t state_idx;     //label of new GSS node to create as parent of v
 } qtuple;
 
 typedef struct {
@@ -20,7 +20,7 @@ typedef struct {
     uint64_t y_idx;         //SPPF node that labels the first edge in the reduction path in the GSS
 } rtuple;
 
-qtuple* new_qtuple(gss_idx v_idx, uint64_t k);
+qtuple* new_qtuple(gss_idx v_idx, uint64_t state_idx);
 obj* new_qtuple_obj(qtuple* t);
 void qtuple_str(qtuple* t);
 void qtuple_repr(qtuple* t);

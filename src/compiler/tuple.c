@@ -14,10 +14,10 @@
 /**
  * Create a new qtuple for the srnglr_Q vector
  */
-qtuple* new_qtuple(gss_idx v_idx, uint64_t k)
+qtuple* new_qtuple(gss_idx v_idx, uint64_t state_idx)
 {
     qtuple* t = malloc(sizeof(qtuple));
-    *t = (qtuple){.v_idx=v_idx, .k=k};
+    *t = (qtuple){.v_idx=v_idx, .state_idx=state_idx};
     return t;
 }
 
@@ -38,7 +38,7 @@ obj* new_qtuple_obj(qtuple* t)
  */
 void qtuple_str(qtuple* t)
 {
-    printf("{v_idx: "); gss_idx_str(&t->v_idx); printf(", k: %"PRIu64"}", t->k);
+    printf("{v_idx: "); gss_idx_str(&t->v_idx); printf(", state_idx: %"PRIu64"}", t->state_idx);
 }
 
 
@@ -59,7 +59,7 @@ void qtuple_free(qtuple* t) { free(t); }
 //  */
 // bool qtuple_equals(qtuple* left, qtuple* right)
 // {
-//     return gss_idx_equals(&left->v_idx, &right->v_idx) && left->k == right->k;
+//     return gss_idx_equals(&left->v_idx, &right->v_idx) && left->state_idx == right->state_idx;
 // }
 
 
@@ -68,7 +68,7 @@ void qtuple_free(qtuple* t) { free(t); }
 //  */
 // uint64_t qtuple_hash(qtuple* t)
 // {
-//     uint64_t seq[] = {t->v_idx.nodes_idx, t->v_idx.node_idx, t->k};
+//     uint64_t seq[] = {t->v_idx.nodes_idx, t->v_idx.node_idx, t->state_idx};
 //     return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
 // }
 

@@ -723,9 +723,9 @@ bool srnglr_parser(uint32_t* src)
         obj* action = actions->entries[i].item;
         if (action->type == Push_t)
         {
-            //add (v0, k) to Q. v0 is represented as (0,0) i.e. (nodes_idx, node_idx)
-            uint64_t k = *(uint64_t*)action->data;
-            qtuple* t = new_qtuple(v0_idx, k);
+            //add (v0, k) to Q where k is the state index of the push action
+            uint64_t state_idx = *(uint64_t*)action->data;
+            qtuple* t = new_qtuple(v0_idx, state_idx);
             vect_enqueue(srnglr_Q, new_qtuple_obj(t));
         }
         else if (action->type == Reduction_t)
@@ -794,15 +794,14 @@ void srnglr_reducer(size_t i, uint32_t* src)
         vect* path = vect_get(paths, j)->data;
         gss_idx* u_idx = vect_get(path, vect_size(path) - 1)->data; //last node on the path
 
-        vect* labels = sppf_get_path_labels(SPPF, path);
         uint64_t z_idx;
         if (length == 0)
         {
             z_idx = nullable_idx;
-            vect_free(labels);
         }
         else
         {
+            vect* labels = sppf_get_path_labels(SPPF, path);
             vect_append(labels, new_uint_obj(y_idx));
             
             //check if node z (X, c, i) exists, and if not, create one
@@ -816,6 +815,10 @@ void srnglr_reducer(size_t i, uint32_t* src)
 
             srnglr_add_children(z_idx, labels, nullable_idx);
         }
+
+
+        //let k be the label of u, and let push l belong to Table(k, X)
+
 
         //TODO->adjust this part to match SPPF generator part
 
@@ -911,10 +914,10 @@ void srnglr_shifter(size_t i, uint32_t* src)
             //remove and unpack a tuple from Q
             qtuple* t = obj_free_keep_inner(vect_dequeue(srnglr_Q), QTuple_t);
             gss_idx v_idx = t->v_idx;
-            uint64_t k = t->k;
+            uint64_t state_idx = t->state_idx;
             qtuple_free(t);
             
-            gss_idx w_idx = gss_get_node_with_label(GSS, i+1, k);
+            gss_idx w_idx = gss_get_node_with_label(GSS, i+1, state_idx);
             if (!set_is_index_empty(w_idx.node_idx))
             {
                 //create an edge from w to v, and lable with z
@@ -922,7 +925,7 @@ void srnglr_shifter(size_t i, uint32_t* src)
                 sppf_label_gss_edge(SPPF, &w_idx, &v_idx, z_idx);
 
                 //loop through all reductionsm
-                set* actions = srnglr_get_merged_table_actions(k, src[i+1]);
+                set* actions = srnglr_get_merged_table_actions(state_idx, src[i+1]);
                 for (size_t j = 0; j < set_size(actions); j++)
                 {
                     obj* action = set_get_at_index(actions, j);
@@ -940,14 +943,12 @@ void srnglr_shifter(size_t i, uint32_t* src)
             }
             else
             {
-                //create a node w in Ui with label k, and edge from w to v with label z
-                w_idx = gss_add_node(GSS, i+1, k);
+                //create a node w in Ui with label k (state_idx), and edge from w to v with label z
+                w_idx = gss_add_node(GSS, i+1, state_idx);
                 gss_add_edge(GSS, &w_idx, &v_idx);
                 sppf_label_gss_edge(SPPF, &w_idx, &v_idx, z_idx);
 
-                // uint64_t* h = srnglr_get_table_push()
-                set* actions = srnglr_get_merged_table_actions(k, src[i+1]);
-                // printf("actions for (%"PRIu64", ", k); put_unicode(src[i+1]); printf("): "); set_str(actions); printf("\n");
+                set* actions = srnglr_get_merged_table_actions(state_idx, src[i+1]);
                 for (size_t j = 0; j < set_size(actions); j++)
                 {
                     obj* action = set_get_at_index(actions, j);
