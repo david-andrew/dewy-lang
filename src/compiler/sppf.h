@@ -60,8 +60,9 @@ void sppf_repr(sppf* s);
 void sppf_str(sppf* s);
 void sppf_str_visit_nodes(sppf* s, bool* cyclic, uint64_t* num_lines);
 void sppf_str_visit_nodes_inner(sppf* s, uint64_t node_idx, bool* cyclic, uint64_t* num_lines, set* visited);
-void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, bool continue_line, uint64_t* line_num, uint64_t line_num_width, dict* refs);
-void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, bool continue_line);
+void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, uint64_t* line_num, uint64_t line_num_width, dict* refs);
+void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels);
+void sppf_str_print_tree_lines(bool_array* open_levels);
 
 sppf_node sppf_node_struct(sppf_node_type type, sppf_node_union node);
 sppf_node* new_sppf_leaf_node(uint64_t source_idx);
@@ -74,6 +75,7 @@ uint64_t sppf_node_hash(sppf_node* n);
 sppf_node* sppf_node_copy(sppf_node* n);
 bool sppf_node_equals(sppf_node* left, sppf_node* right);
 void sppf_node_str(sppf_node* n);
+void sppf_node_str_inner(sppf_node* n, bool wrap);
 void sppf_node_repr(sppf_node* n);
 void sppf_node_free(sppf_node* n);
 

@@ -270,13 +270,18 @@ void sppf_str(sppf* s)
     bool cyclic; uint64_t num_lines;
     sppf_str_visit_nodes(s, &cyclic, &num_lines);
 
+    //DEBUG
+    printf("SPPF cylic: %s, num_lines: %"PRIu64"\n", cyclic ? "true" : "false", num_lines);
+    // printf("DEBUG setting num lines to 10000\n");
+    // num_lines = 10000;  //hardcode for now since doesn't appear to be correct...
+
     //used to keep track of drawing lines in the tree
     bool_array* open_levels = new_bool_array();
     
     if (!cyclic)
     {
         // Print out a non-cyclic SPPF //
-        sppf_str_noncyclic_inner(s, s->root_idx, open_levels, false);
+        sppf_str_noncyclic_inner(s, s->root_idx, open_levels);
     }
     else
     {
@@ -286,7 +291,7 @@ void sppf_str(sppf* s)
         dict* refs = new_dict();                            //map from SPPF nodes to the line they start on
 
         //recursively print the SPPF, with line numbers, and reference pointers
-        sppf_str_cyclic_inner(s, s->root_idx, open_levels, false, &line_num, line_num_width, refs);
+        sppf_str_cyclic_inner(s, s->root_idx, open_levels, &line_num, line_num_width, refs);
 
         //free the dict/array. Don't touch the keys since they are owned by the SPPF.
         dict_free_values_only(refs);
@@ -306,7 +311,7 @@ void sppf_str_visit_nodes(sppf* s, bool* cyclic, uint64_t* num_lines)
 {
     //set initial values for cyclic/num_lines
     *cyclic = false;
-    *num_lines = 0;
+    *num_lines = 1; //start at 1 for line of root node (not counted by recursive algorithm)
 
     //set of nodes visited already
     set* visited = new_set();
@@ -324,7 +329,59 @@ void sppf_str_visit_nodes(sppf* s, bool* cyclic, uint64_t* num_lines)
  */
 void sppf_str_visit_nodes_inner(sppf* s, uint64_t node_idx, bool* cyclic, uint64_t* num_lines, set* visited)
 {
+    //get the current node being looked at
+    obj* current_node_obj = set_get_at_index(s->nodes, node_idx);
+    sppf_node* current_node = current_node_obj->data;
+    
+    //handle non-inner nodes
+    if (current_node->type == sppf_leaf || current_node->type == sppf_nullable) { return; }
 
+    // regular inner node //
+    //check if we already expanded this node
+    if (set_contains(visited, current_node_obj))
+    {
+        *cyclic = true;     //mark that we found a cycle
+        return;
+    }
+
+    //mark this node as visited
+    set_add(visited, current_node_obj);
+
+    //expand the children for this node
+    obj node_idx_obj = obj_struct(UInteger_t, &node_idx);
+    obj* children = dict_get(s->edges, &node_idx_obj);
+    if (children == NULL)
+    {
+        return; //no children to expand for this node
+    }
+    else if (children->type == UInteger_t)  //node is a non-packed node
+    {
+        //expand each child normally
+        uint64_t children_idx = *(uint64_t*)children->data;
+        vect* children_vect = set_get_at_index(s->children, children_idx)->data;
+        for (size_t i = 0; i < vect_size(children_vect); i++)
+        {
+            *num_lines += 1; //line for printing the child's head
+            uint64_t child_idx = *(uint64_t*)vect_get(children_vect, i)->data;
+            sppf_str_visit_nodes_inner(s, child_idx, cyclic, num_lines, visited);
+        }
+    }
+    else //type == Set_t  //node is a packed node
+    {
+        //for each list of children, expand each child (noting that the first child of each list has continue_line=true)
+        set* packed_children_set = children->data;
+        for (size_t i = 0; i < set_size(packed_children_set); i++)
+        {
+            uint64_t children_idx = *(uint64_t*)set_get_at_index(packed_children_set, i)->data;
+            vect* children_vect = set_get_at_index(s->children, children_idx)->data;
+            for (size_t j = 0; j < vect_size(children_vect); j++)
+            {
+                *num_lines += 1; //line for printing the child's head
+                uint64_t child_idx = *(uint64_t*)vect_get(children_vect, j)->data;
+                sppf_str_visit_nodes_inner(s, child_idx, cyclic, num_lines, visited);
+            }
+        }
+    }
 }
 
 
@@ -333,7 +390,7 @@ void sppf_str_visit_nodes_inner(sppf* s, uint64_t node_idx, bool* cyclic, uint64
  * Takes the current node being printed, level of indentation, current line number,
  * and a map of all nodes already printed and the line they occur on.
  */
-void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, bool continue_line, uint64_t* line_num, uint64_t line_num_width, dict* refs)
+void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, uint64_t* line_num, uint64_t line_num_width, dict* refs)
 {
 
 }
@@ -343,9 +400,78 @@ void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, 
  * Inner helper function for printing out a non-cycle-containing SPPF.
  * Prints starting from the given node, at the given indentation level.
  */
-void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, bool continue_line)
+void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels)
 {
+    //get the current node being looked at
+    obj* current_node_obj = set_get_at_index(s->nodes, node_idx);
+    sppf_node* current_node = current_node_obj->data;
+    
+    //handle outer nodes
+    if (current_node->type == sppf_leaf || current_node->type == sppf_nullable)
+    { 
+        //print node on single line & continue
+        sppf_node_str(current_node);
+        printf("\n");
+        return; 
+    }
 
+    //expand the children for this node
+    obj node_idx_obj = obj_struct(UInteger_t, &node_idx);
+    obj* children = dict_get(s->edges, &node_idx_obj);
+    if (children == NULL)
+    {
+        return; //no children to expand for this node
+    }
+    else if (children->type == UInteger_t)  //node is a non-packed node
+    {
+        //expand each child normally
+        uint64_t children_idx = *(uint64_t*)children->data;
+        vect* children_vect = set_get_at_index(s->children, children_idx)->data;
+        /*print the tree lines?*/
+        bool_array_push(open_levels, true); //indicate that the next level is open
+        for (size_t i = 0; i < vect_size(children_vect); i++)
+        {
+            if (i == vect_size(children_vect) - 1)
+            {
+                bool_array_pop(open_levels);
+                bool_array_push(open_levels, false);
+            }
+            //print the open levels lines for this child
+            /*TODO...*/ 
+            uint64_t child_idx = *(uint64_t*)vect_get(children_vect, i)->data;
+            sppf_str_noncyclic_inner(s, child_idx, open_levels);
+        }
+        bool_array_pop(open_levels);
+    }
+    else //type == Set_t  //node is a packed node
+    {
+        //for each list of children, expand each child (noting that the first child of each list has continue_line=true)
+        set* packed_children_set = children->data;
+        for (size_t i = 0; i < set_size(packed_children_set); i++)
+        {
+            uint64_t children_idx = *(uint64_t*)set_get_at_index(packed_children_set, i)->data;
+            vect* children_vect = set_get_at_index(s->children, children_idx)->data;
+            for (size_t j = 0; j < vect_size(children_vect); j++)
+            {
+                /*open levels?*/
+                uint64_t child_idx = *(uint64_t*)vect_get(children_vect, j)->data;
+                sppf_str_noncyclic_inner(s, child_idx, open_levels);
+            }
+        }
+    }
+}
+
+
+/**
+ * Print out the lines in the tree based on which levels are currently being expanded.
+ */
+void sppf_str_print_tree_lines(bool_array* open_levels)
+{
+    for (size_t i = 0; i < bool_array_size(open_levels); i++)
+    {
+        printf(bool_array_get(open_levels, i) ? "│" : " ");
+        printf("   ");
+    }
 }
 
 
@@ -511,7 +637,16 @@ bool sppf_node_equals(sppf_node* left, sppf_node* right)
  */
 void sppf_node_str(sppf_node* n)
 {
-    printf("(");
+    sppf_node_str_inner(n, true);
+}
+
+
+/**
+ * Inner version of printing a node that allows option of not wrapping in parenthesis
+ */
+void sppf_node_str_inner(sppf_node* n, bool wrap)
+{
+    if (wrap) { printf("("); }
     switch (n->type)
     {
         case sppf_leaf: 
@@ -540,7 +675,7 @@ void sppf_node_str(sppf_node* n)
             break;
         }
     }
-    printf(")");
+    if (wrap) { printf(")"); }
 }
 
 
