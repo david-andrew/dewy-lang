@@ -154,15 +154,6 @@ void sppf_connect_node_to_children(sppf* s, uint64_t node_idx, uint64_t children
 }
 
 
-// /**
-//  * 
-//  */
-// uint64_t sppf_add_leaf_node(sppf* s, uint64_t source_idx)
-// {
-
-// }
-
-
 /**
  * Insert a nullable node for a single non-terminal symbol.
  */
@@ -254,15 +245,6 @@ void sppf_add_root_epsilon(sppf* s)
     obj* eps_children_obj = new_vect_obj(eps_children);
     SPPF_ROOT_EPSILON_CHILDREN_IDX = set_add_return_index(s->children, eps_children_obj);
 }
-
-
-// /**
-//  * 
-//  */
-// uint64_t sppf_add_inner_node(sppf* s, uint64_t head_idx, uint64_t source_start_idx, uint64_t source_end_idx, vect* children_indices)
-// {
-
-// }
 
 
 /**
