@@ -63,6 +63,7 @@ void sppf_str_visit_nodes_inner(sppf* s, uint64_t node_idx, bool* cyclic, uint64
 void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, uint64_t* line_num, uint64_t line_num_width, dict* refs);
 void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels);
 void sppf_str_print_tree_lines(bool_array* open_levels);
+void sppf_str_print_line_num(uint64_t line_num, uint64_t line_num_width);
 
 sppf_node sppf_node_struct(sppf_node_type type, sppf_node_union node);
 sppf_node* new_sppf_leaf_node(uint64_t source_idx);

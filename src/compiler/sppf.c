@@ -272,8 +272,6 @@ void sppf_str(sppf* s)
 
     //DEBUG
     printf("SPPF cylic: %s, num_lines: %"PRIu64"\n", cyclic ? "true" : "false", num_lines);
-    // printf("DEBUG setting num lines to 10000\n");
-    // num_lines = 10000;  //hardcode for now since doesn't appear to be correct...
 
     //used to keep track of drawing lines in the tree
     bool_array* open_levels = new_bool_array();
@@ -290,6 +288,9 @@ void sppf_str(sppf* s)
         size_t line_num_width = dec_num_digits(num_lines);  //amount of space needed to print the line numbers
         dict* refs = new_dict();                            //map from SPPF nodes to the line they start on
 
+        //print the first line number
+        sppf_str_print_line_num(line_num, line_num_width);
+        
         //recursively print the SPPF, with line numbers, and reference pointers
         sppf_str_cyclic_inner(s, s->root_idx, open_levels, &line_num, line_num_width, refs);
 
@@ -392,7 +393,157 @@ void sppf_str_visit_nodes_inner(sppf* s, uint64_t node_idx, bool* cyclic, uint64
  */
 void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, uint64_t* line_num, uint64_t line_num_width, dict* refs)
 {
+    //get the current node being looked at
+    obj* current_node_obj = set_get_at_index(s->nodes, node_idx);
+    sppf_node* current_node = current_node_obj->data;
+    
+    //handle outer nodes
+    if (current_node->type == sppf_leaf || current_node->type == sppf_nullable)
+    { 
+        //print node on single line & continue
+        sppf_node_str2(current_node); printf("\n");
+        return; 
+    }
 
+    // regular inner node //
+    //check if we already expanded this node
+    obj* ref_line_obj = dict_get(refs, current_node_obj);
+    if (ref_line_obj != NULL)
+    {
+        //print out the ref line
+        uint64_t ref_line = *(uint64_t*)ref_line_obj->data;
+        printf("@%"PRIu64"\n", ref_line);
+        return;
+    }
+
+    //mark this node as visited
+    dict_set(refs, current_node_obj, new_uint_obj(*line_num));
+
+    //expand the children for this node
+    obj node_idx_obj = obj_struct(UInteger_t, &node_idx);
+    obj* children = dict_get(s->edges, &node_idx_obj);
+    if (children == NULL)
+    {
+        return; //no children to expand for this node
+    }
+    else if (children->type == UInteger_t)  //node is a non-packed node
+    {
+        //print the node head
+        sppf_node_str2(current_node); printf("\n");
+
+        //expand each child normally
+        uint64_t children_idx = *(uint64_t*)children->data;
+        vect* children_vect = set_get_at_index(s->children, children_idx)->data;
+        const uint64_t num_children = vect_size(children_vect);
+        for (size_t i = 0; i < num_children; i++)
+        {
+            //update/print the line number
+            *line_num += 1;
+            sppf_str_print_line_num(*line_num, line_num_width);
+
+            //print lines for previous levels
+            sppf_str_print_tree_lines(open_levels);
+
+            //print the lines for the child + update open levels
+            printf("%s── ", i == num_children - 1 ? "└" : "├");
+            bool_array_push(open_levels, i != num_children - 1);
+
+            //expand the child
+            uint64_t child_idx = *(uint64_t*)vect_get(children_vect, i)->data;
+            sppf_str_cyclic_inner(s, child_idx, open_levels, line_num, line_num_width, refs);
+
+            //reset open levels from this child
+            bool_array_pop(open_levels);
+        }
+    }
+    else //type == Set_t  //node is a packed node
+    {
+        //print the node head inside packed braces
+        printf("["); sppf_node_str2(current_node); printf("]\n");
+
+        //for each list of children, expand each child (noting that the first child of each list has continue_line=true)
+        set* packed_children_set = children->data;
+        const uint64_t num_packs = set_size(packed_children_set);
+        for (size_t i = 0; i < num_packs; i++)
+        {
+            //update/print the line number
+            *line_num += 1;
+            sppf_str_print_line_num(*line_num, line_num_width);
+
+            //print lines for previous levels
+            sppf_str_print_tree_lines(open_levels);
+
+            //print the lines for the child + update open levels
+            printf("%s───", i == num_packs - 1 ? "└" : "├");
+            bool_array_push(open_levels, i != num_packs - 1);
+                
+
+            uint64_t children_idx = *(uint64_t*)set_get_at_index(packed_children_set, i)->data;
+            vect* children_vect = set_get_at_index(s->children, children_idx)->data;
+            const uint64_t num_children = vect_size(children_vect);
+            for (size_t j = 0; j < num_children; j++)
+            {
+                if (j != 0)
+                {
+                    //update/print the line number
+                    *line_num += 1;
+                    sppf_str_print_line_num(*line_num, line_num_width);
+
+                    //print lines for previous levels
+                    sppf_str_print_tree_lines(open_levels);
+                }
+
+                //options are first one ┬, middle one ├, last one └, only one ─
+                //first if j == 0 && num_children > 1
+                //only one if j == 0 && num_children == 1
+                //middle if j > 0 && j < num_children - 1
+                //last if j > 0 && j == num_children - 1
+                char* branch_type;
+                bool open_level;
+                if (j == 0)
+                {
+                    if (num_children == 1)
+                    {
+                        branch_type = "─";
+                        open_level = false;
+                    }
+                    else
+                    {
+                        branch_type = "┬";
+                        open_level = true;
+
+                    }
+                }
+                else
+                {
+                    if (j == num_children - 1)
+                    {
+                        branch_type = "└";
+                        open_level = false;
+                    }
+                    else
+                    {
+                        branch_type = "├";
+                        open_level = true;
+                    }
+                }
+
+                printf("%s── ", branch_type);
+                bool_array_push(open_levels, open_level);
+
+
+
+                uint64_t child_idx = *(uint64_t*)vect_get(children_vect, j)->data;
+                sppf_str_cyclic_inner(s, child_idx, open_levels, line_num, line_num_width, refs);
+
+                //reset open levels from this child
+                bool_array_pop(open_levels);
+            }
+
+            //reset open levels from this pack 
+            bool_array_pop(open_levels);
+        }
+    }
 }
 
 
@@ -468,7 +619,13 @@ void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_level
             vect* children_vect = set_get_at_index(s->children, children_idx)->data;
             const uint64_t num_children = vect_size(children_vect);
             for (size_t j = 0; j < num_children; j++)
-            {                
+            {
+                if (j != 0)
+                {
+                    //print lines for previous levels
+                    sppf_str_print_tree_lines(open_levels);
+                }
+
                 //options are first one ┬, middle one ├, last one └, only one ─
                 //first if j == 0 && num_children > 1
                 //only one if j == 0 && num_children == 1
@@ -534,6 +691,19 @@ void sppf_str_print_tree_lines(bool_array* open_levels)
         printf("   ");
     }
 }
+
+
+/**
+ * Print out the line number + padding while printing an SPPF
+ */
+void sppf_str_print_line_num(uint64_t line_num, uint64_t line_num_width)
+{
+    //print line number with any padding needed
+    uint64_t padding = line_num_width - dec_num_digits(line_num);
+    for (size_t i = 0; i < padding; i++){ printf(" "); }
+    printf("%"PRIu64" ", line_num);
+}
+
 
 
 /**

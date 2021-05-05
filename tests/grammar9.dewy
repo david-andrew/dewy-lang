@@ -1,18 +1,13 @@
-//ambiguous example grammar for numeric expressions 
-
-//parenthesis
 #E = '(' #E ')';
-
-//addition/subtraction
 #E = #E [+\-] #E;
-
-//multiplication/division
 #E = #E [*/] #E;
-
-//exponentiation
 #E = #E '^' #E;
-
-//terms (numbers/identifiers)
 #E = [0-9];
 
-#start = #E;
+#F = '(' #F ')';
+#F = #F [+\-] #F;
+#F = #F [*/] #F;
+#F = #F '^' #F;
+#F = [0-9];
+
+#start = #E | #F;
