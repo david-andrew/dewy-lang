@@ -410,8 +410,7 @@ void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_level
     if (current_node->type == sppf_leaf || current_node->type == sppf_nullable)
     { 
         //print node on single line & continue
-        sppf_node_str(current_node);
-        printf("\n");
+        sppf_node_str2(current_node); printf("\n");
         return; 
     }
 
@@ -424,39 +423,101 @@ void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_level
     }
     else if (children->type == UInteger_t)  //node is a non-packed node
     {
+        //print the node head
+        sppf_node_str2(current_node); printf("\n");
+
         //expand each child normally
         uint64_t children_idx = *(uint64_t*)children->data;
         vect* children_vect = set_get_at_index(s->children, children_idx)->data;
-        /*print the tree lines?*/
-        bool_array_push(open_levels, true); //indicate that the next level is open
-        for (size_t i = 0; i < vect_size(children_vect); i++)
+        const uint64_t num_children = vect_size(children_vect);
+        for (size_t i = 0; i < num_children; i++)
         {
-            if (i == vect_size(children_vect) - 1)
-            {
-                bool_array_pop(open_levels);
-                bool_array_push(open_levels, false);
-            }
-            //print the open levels lines for this child
-            /*TODO...*/ 
+            //print lines for previous levels
+            sppf_str_print_tree_lines(open_levels);
+
+            //print the lines for the child + update open levels
+            printf("%s── ", i == num_children - 1 ? "└" : "├");
+            bool_array_push(open_levels, i != num_children - 1);
+
+            //expand the child
             uint64_t child_idx = *(uint64_t*)vect_get(children_vect, i)->data;
             sppf_str_noncyclic_inner(s, child_idx, open_levels);
+
+            //reset open levels from this child
+            bool_array_pop(open_levels);
         }
-        bool_array_pop(open_levels);
     }
     else //type == Set_t  //node is a packed node
     {
+        //print the node head inside packed braces
+        printf("["); sppf_node_str2(current_node); printf("]\n");
+
         //for each list of children, expand each child (noting that the first child of each list has continue_line=true)
         set* packed_children_set = children->data;
-        for (size_t i = 0; i < set_size(packed_children_set); i++)
+        const uint64_t num_packs = set_size(packed_children_set);
+        for (size_t i = 0; i < num_packs; i++)
         {
+            //print lines for previous levels
+            sppf_str_print_tree_lines(open_levels);
+
+            //print the lines for the child + update open levels
+            printf("%s───", i == num_packs - 1 ? "└" : "├");
+            bool_array_push(open_levels, i != num_packs - 1);
+
             uint64_t children_idx = *(uint64_t*)set_get_at_index(packed_children_set, i)->data;
             vect* children_vect = set_get_at_index(s->children, children_idx)->data;
-            for (size_t j = 0; j < vect_size(children_vect); j++)
-            {
-                /*open levels?*/
+            const uint64_t num_children = vect_size(children_vect);
+            for (size_t j = 0; j < num_children; j++)
+            {                
+                //options are first one ┬, middle one ├, last one └, only one ─
+                //first if j == 0 && num_children > 1
+                //only one if j == 0 && num_children == 1
+                //middle if j > 0 && j < num_children - 1
+                //last if j > 0 && j == num_children - 1
+                char* branch_type;
+                bool open_level;
+                if (j == 0)
+                {
+                    if (num_children == 1)
+                    {
+                        branch_type = "─";
+                        open_level = false;
+                    }
+                    else
+                    {
+                        branch_type = "┬";
+                        open_level = true;
+
+                    }
+                }
+                else
+                {
+                    if (j == num_children - 1)
+                    {
+                        branch_type = "└";
+                        open_level = false;
+                    }
+                    else
+                    {
+                        branch_type = "├";
+                        open_level = true;
+                    }
+                }
+
+                printf("%s── ", branch_type);
+                bool_array_push(open_levels, open_level);
+
+
+
                 uint64_t child_idx = *(uint64_t*)vect_get(children_vect, j)->data;
                 sppf_str_noncyclic_inner(s, child_idx, open_levels);
+
+                //reset open levels from this child
+                bool_array_pop(open_levels);
             }
+
+            //reset open levels from this pack 
+            bool_array_pop(open_levels);
         }
     }
 }
@@ -637,16 +698,7 @@ bool sppf_node_equals(sppf_node* left, sppf_node* right)
  */
 void sppf_node_str(sppf_node* n)
 {
-    sppf_node_str_inner(n, true);
-}
-
-
-/**
- * Inner version of printing a node that allows option of not wrapping in parenthesis
- */
-void sppf_node_str_inner(sppf_node* n, bool wrap)
-{
-    if (wrap) { printf("("); }
+    printf("(");
     switch (n->type)
     {
         case sppf_leaf: 
@@ -675,7 +727,43 @@ void sppf_node_str_inner(sppf_node* n, bool wrap)
             break;
         }
     }
-    if (wrap) { printf(")"); }
+    printf(")");
+}
+
+
+/**
+ * version of sppf_node_str used for printing nodes when printing the whole SPPF tree
+ */
+void sppf_node_str2(sppf_node* n)
+{
+    switch (n->type)
+    {
+        case sppf_leaf: 
+        {
+            // printf("`");
+            unicode_str(srnglr_get_input_source()[n->node.leaf]);
+            // printf("`, %"PRIu64, n->node.leaf); 
+            break;
+        }
+        case sppf_nullable:
+        {
+            printf("ϵ: ");
+            for (size_t i = 0; i < vect_size(n->node.nullable); i++)
+            {
+                uint64_t* symbol_idx = vect_get(n->node.nullable, i)->data;
+                obj* symbol = metaparser_get_symbol(*symbol_idx);
+                obj_str(symbol);
+                if (i < vect_size(n->node.nullable) - 1){ printf(" "); }
+            }
+            break;
+        }
+        case sppf_inner:
+        {
+            obj_str(metaparser_get_symbol(n->node.inner.head_idx));
+            printf(":%"PRIu64, n->node.inner.body_idx);
+            break;
+        }
+    }
 }
 
 

@@ -75,7 +75,7 @@ uint64_t sppf_node_hash(sppf_node* n);
 sppf_node* sppf_node_copy(sppf_node* n);
 bool sppf_node_equals(sppf_node* left, sppf_node* right);
 void sppf_node_str(sppf_node* n);
-void sppf_node_str_inner(sppf_node* n, bool wrap);
+void sppf_node_str2(sppf_node* n);
 void sppf_node_repr(sppf_node* n);
 void sppf_node_free(sppf_node* n);
 
