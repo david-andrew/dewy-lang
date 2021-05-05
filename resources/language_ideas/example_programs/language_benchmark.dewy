@@ -33,7 +33,7 @@
 
 //Function implementations
 
-twelve_days_of_christmas = @() -> //function literal with no arguments
+twelve_days_of_christmas = () => //function literal with no arguments
 {
     //Print out the lyrics to the twelve days of christmas
     days = ["first" "second" "third" "fourth" "fifth" "sixth" "seventh" "eighth" "ninth" "tenth" "eleventh" "twelfth"]
@@ -65,7 +65,7 @@ twelve_days_of_christmas = @() -> //function literal with no arguments
 }
 
 
-FizzBuzz = @() ->
+FizzBuzz = () =>
 {
     words = [3 -> "Fizz" 5 -> "Buzz"] // 7->"Bazz"] //example of a dictionary
 
@@ -81,7 +81,7 @@ FizzBuzz = @() ->
 }
 
 //alternate implementation using match
-FizzBuzzBazzFoo = @() ->
+FizzBuzzBazzFoo = () =>
 {
     loop i in 1:100
         match i%3, i%5, i%7, i%11   //want to be able to vectorize the input like i .% [3 5 7 11] as args. but need better syntax
@@ -96,10 +96,10 @@ FizzBuzzBazzFoo = @() ->
 }
 
 
-sum_squares1 = @() ->
+sum_squares1 = () =>
 {
     //any overflow is seamlessly handled by the compiler
-    sum_squares = [loop i in 1:100 i^2].sum
+    sum_squares = ((1:100).^2).sum
     square_sum = (1:100).sum^2
     
     print(sum_squares - square_sum)
@@ -107,7 +107,7 @@ sum_squares1 = @() ->
 
 
 //ability to do summations in expressions
-sum_squares2 = @() ->
+sum_squares2 = () =>
 {
     sum_squares = 1^2 + 2^2 + 3^2 + ... + 100^2  //this syntax may change, or perhaps even be removed
     square_sum = (1 + 2 + 3 + ... + 100)^2
@@ -117,7 +117,7 @@ sum_squares2 = @() ->
 
 
 
-sum_multiples1 = @() ->
+sum_multiples1 = () =>
 {
     //Project Euler Problem 1
     /{
@@ -139,30 +139,22 @@ sum_multiples1 = @() ->
 }
 
 
-//example of an even shorter version of sum multiples
-sum_multiples2 = @() -> { print([loop i in 1:1000-1 if (i%3)*(i%5) =? 0 i].sum) }
+//example of shorter versions of sum multiples
+sum_multiples2 = () => { print([loop i in 1:1000-1 if (i%3)*(i%5) =? 0 i].sum) }
+sum_multiples3 = () => { print((1:1000-1).filter((i) => (i%3)*(i%5) =? 0).sum) }
 
 
-prime_factors = @() ->
+prime_factors = () =>
 {
     /{
     The prime factors of 13195 are 5, 7, 13 and 29.
-
-    What is the largest prime factor of the number 600851475143 ?
+    What is the largest prime factor of the number 600851475143?
     }/
 
     goal = 600851475143
     
-    primes = doublylinkedlist(@[2 3]) //doubly linked list (generic sized object, space can adjust for larger values)
-    //@[] notation i think should be a handle to a list generator, so that time isn't wasted converting it to another format
-    //also doubly linked list is probably unnecessary here, since the regular list type is amortized O(1) for appending
-    //BELOW STUFF WILL PROBABLY BE REMOVED:
-    //example empty init [].dll(uint64) makes a doubly linked list fileled with uint64's
-    //uint.fit(goal) -> returns uint64, the smallest uint that goal will fit within
-    //uint.fit(goal^0.5) returns uint32
-    
-    //primes.append([2 3])
-
+    //create a list of primes up to the square root of goal
+    primes = doublylinkedlist[2 3] //doubly linked list
     #loop1 loop i in [5 7 ... goal^/2]   //count by 2 starting from 5 up to sqrt(goal). also probably will add a root operator, e.g. \|4 for sqrt(4), and 3\|8 for cuberoot(8), and so forth
     {
         loop p in primes
@@ -171,8 +163,7 @@ prime_factors = @() ->
         primes.append(i)
     }
     
-    print(primes[-0])  //TODO->come up with better method to access last element, b/c -0 will probably just evaluate to 0. perhaps use -1? or something else
-    //since this is a doubly linked list, there probably would be a method like primes.last
+    print(primes[end]) //since this is a doubly linked list, there probably would be a method like primes.last
     
     //note that while arrays can be set to be indexed with arbitrary start and end indices, if an index is accessed using +value or -value (e.g. primes[+10] or primes[-12]), the indexing is forced to be zero // actually this is no longer true. if indexing is not 0 based, then all values up to the first legal index are simply out of bounds for both + and - indexing. e.g. a = int[10:20], then a[10] is the first element, a[-10] is the last element, and any number < 10 or > 20 is out of bounds 
     //i.e. if primes was set to start at 1, primes[+0] will return the first element, even if primes[0] would throw an error
@@ -184,14 +175,14 @@ prime_factors = @() ->
 }
 
 
-compute_primes = @(n) -> //function literal that takes a single parameter `n`
+compute_primes = (n) => //function literal that takes a single parameter `n`
 {
     //compute and print the first n prime numbers
     if n <? 1 throw ValueError('there is no {n}th prime')
     if n =? 1 {print([2]) return}
     if n =? 2 {print([2 3]) return}
 
-    primes = doublylinkedlist(@[2 3])  //in this case a regular builtin list would be fine for smallish primes, since append has an amortized O(1)
+    primes = doublylinkedlist[2 3]  //in this case a regular builtin list would be fine for smallish primes, since append has an amortized O(1)
 
     #outer loop candidate in [5 7 ...] //infinite list counting by 2s
     {
@@ -206,7 +197,7 @@ compute_primes = @(n) -> //function literal that takes a single parameter `n`
 }
 
 
-compute_primes_alt = @(uint n) -> //parameter must be of type uint or more specific
+compute_primes_alt = (uint n) => //parameter must be of type uint or more specific
 {
     match n
     {
@@ -232,7 +223,7 @@ compute_primes_alt = @(uint n) -> //parameter must be of type uint or more speci
 //To-Do: implement a verification algorithm for checking the value of pi (see the first answer of the stack overflow below)
 //https://stackoverflow.com/questions/14283270/how-do-i-determine-whether-my-calculation-of-pi-is-accurate
 //Naive direct implementation of https://pi2e.ch/blog/2016/07/30/the-chudnovsky-formula/ 
-compute_pi = @(n) ->
+compute_pi = (n) =>
 {
     //this needs some way to specifiy the precision of pi in the calculation (i.e. need to be able to say we want n digits of precision for all calculations)
 
