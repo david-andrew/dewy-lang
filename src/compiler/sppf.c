@@ -880,7 +880,7 @@ void sppf_node_str(sppf_node* n)
         }
         case sppf_nullable:
         {
-            printf("ϵ: ");
+            printf(vect_size(n->node.nullable) > 0 ? "ϵ: " : "ϵ");
             for (size_t i = 0; i < vect_size(n->node.nullable); i++)
             {
                 uint64_t* symbol_idx = vect_get(n->node.nullable, i)->data;
@@ -918,7 +918,7 @@ void sppf_node_str2(sppf_node* n)
         }
         case sppf_nullable:
         {
-            printf("ϵ: ");
+            printf(vect_size(n->node.nullable) > 0 ? "ϵ: " : "ϵ");
             for (size_t i = 0; i < vect_size(n->node.nullable); i++)
             {
                 uint64_t* symbol_idx = vect_get(n->node.nullable, i)->data;

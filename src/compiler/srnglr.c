@@ -1281,7 +1281,7 @@ void srnglr_print_gss()
 
 void srnglr_print_sppf()
 {
-    sppf_repr(SPPF);
+    // sppf_repr(SPPF);
     sppf_str(SPPF);
 }
 
