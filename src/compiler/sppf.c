@@ -785,7 +785,7 @@ sppf_node sppf_inner_node_struct(uint64_t head_idx, uint64_t body_idx, uint64_t 
         .type=sppf_inner, 
         .node.inner={
             .head_idx=head_idx,
-            .body_idx=body_idx,
+            // .body_idx=body_idx,
             .source_start_idx=source_start_idx, 
             .source_end_idx=source_end_idx
         }
@@ -818,7 +818,7 @@ uint64_t sppf_node_hash(sppf_node* n)
         case sppf_inner:
         {
             //sequence of uints to hash
-            uint64_t seq[] = {n->node.inner.head_idx, n->node.inner.body_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx};
+            uint64_t seq[] = {n->node.inner.head_idx, /*n->node.inner.body_idx,*/ n->node.inner.source_start_idx, n->node.inner.source_end_idx};
             return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
         }
     }
@@ -838,7 +838,7 @@ sppf_node* sppf_node_copy(sppf_node* n)
             return new_sppf_nullable_string_node(&nullable_part);
         }
         case sppf_leaf: return new_sppf_leaf_node(n->node.leaf);
-        case sppf_inner: return new_sppf_inner_node(n->node.inner.head_idx, n->node.inner.body_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx);
+        case sppf_inner: return new_sppf_inner_node(n->node.inner.head_idx, /*n->node.inner.body_idx,*/0, n->node.inner.source_start_idx, n->node.inner.source_end_idx);
     }
 }
 
@@ -856,7 +856,7 @@ bool sppf_node_equals(sppf_node* left, sppf_node* right)
         case sppf_nullable: return vect_equals(left->node.nullable, right->node.nullable);
         case sppf_inner: 
             return left->node.inner.head_idx == right->node.inner.head_idx
-                && left->node.inner.body_idx == right->node.inner.body_idx 
+                // && left->node.inner.body_idx == right->node.inner.body_idx 
                 && left->node.inner.source_start_idx == right->node.inner.source_start_idx
                 && left->node.inner.source_end_idx == right->node.inner.source_end_idx;
     }
@@ -893,7 +893,8 @@ void sppf_node_str(sppf_node* n)
         case sppf_inner:
         {
             obj_str(metaparser_get_symbol(n->node.inner.head_idx));
-            printf(":%"PRIu64", %"PRIu64"-%"PRIu64, n->node.inner.body_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx);
+            // printf(":%"PRIu64", %"PRIu64"-%"PRIu64, n->node.inner.body_idx, n->node.inner.source_start_idx, n->node.inner.source_end_idx);
+            printf(", %"PRIu64"-%"PRIu64, /*n->node.inner.body_idx,*/ n->node.inner.source_start_idx, n->node.inner.source_end_idx);
             break;
         }
     }
@@ -930,7 +931,7 @@ void sppf_node_str2(sppf_node* n)
         case sppf_inner:
         {
             obj_str(metaparser_get_symbol(n->node.inner.head_idx));
-            printf(":%"PRIu64, n->node.inner.body_idx);
+            // printf(":%"PRIu64, n->node.inner.body_idx);
             break;
         }
     }
@@ -947,9 +948,14 @@ void sppf_node_repr(sppf_node* n)
         case sppf_leaf: printf("sppf_leaf{%"PRIu64"}", n->node.leaf); break;
         case sppf_nullable: printf("sppf_nullable{ϵ"); vect_str(n->node.nullable); printf("}"); break;
         case sppf_inner:
-            printf("sppf_inner{%"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64"}", 
+            // printf("sppf_inner{%"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64"}", 
+            //     n->node.inner.head_idx,
+            //     n->node.inner.body_idx,
+            //     n->node.inner.source_start_idx, 
+            //     n->node.inner.source_end_idx
+            // );
+            printf("sppf_inner{%"PRIu64", %"PRIu64", %"PRIu64"}", 
                 n->node.inner.head_idx,
-                n->node.inner.body_idx,
                 n->node.inner.source_start_idx, 
                 n->node.inner.source_end_idx
             );

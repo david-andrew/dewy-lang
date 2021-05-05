@@ -31,7 +31,7 @@ typedef union {
     vect* nullable;                     //string containing the symbol indices of the nullable parts
     struct {
         uint64_t head_idx;              //symbol index of the rule head being reduced
-        uint64_t body_idx;              //for future use. index of the rule body being reduced
+        // uint64_t body_idx;              //for future use. index of the rule body being reduced
         uint64_t source_start_idx; 
         uint64_t source_end_idx;
     } inner;
