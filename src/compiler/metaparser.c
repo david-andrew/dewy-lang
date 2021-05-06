@@ -56,6 +56,8 @@ void complete_metaparser()
     metaparser_get_eps_body_idx();
     metaparser_get_endmarker_symbol_idx();
     metaparser_get_start_symbol_idx();
+
+    //TODO->check to ensure that every identifier has at least 1 body, and return error if not...
 }
 
 
@@ -928,6 +930,7 @@ void metaparser_add_production(uint64_t head_idx, uint64_t body_idx)
 
 /**
  * Return the set of production bodies for the given head index.
+ * Returns null if no bodies are found.
  */
 set* metaparser_get_production_bodies(uint64_t head_idx)
 {

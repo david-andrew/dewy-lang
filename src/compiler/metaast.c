@@ -165,7 +165,8 @@ metaast* metaast_parse_expr(vect* tokens)
 
 /**
  * Attempt to parse a meta expression from all possible expression types, excluding `skip`
- * If matches, `tokens` will be freed, else returns NULL. 
+ * `tokens` will be freed, 
+ * if parsed, returns the corresponding metaast, else returns NULL. 
  */
 metaast* metaast_parse_expr_restricted(vect* tokens, metaast_parse_fn skip)
 {
@@ -190,6 +191,7 @@ metaast* metaast_parse_expr_restricted(vect* tokens, metaast_parse_fn skip)
     //otherwise the parse failed
     printf("ERROR: no valid expression for "); vect_str(tokens); printf("\n");
     metaast_parse_error();
+    vect_free(tokens);
     return NULL;
 }
 

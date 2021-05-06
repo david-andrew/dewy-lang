@@ -276,7 +276,7 @@ void sppf_str(sppf* s)
     sppf_str_visit_nodes(s, &cyclic, &num_lines);
 
     //DEBUG
-    printf("SPPF cylic: %s, num_lines: %"PRIu64"\n", cyclic ? "true" : "false", num_lines);
+    // printf("SPPF cylic: %s, num_lines: %"PRIu64"\n", cyclic ? "true" : "false", num_lines);
 
     //used to keep track of drawing lines in the tree
     bool_array* open_levels = new_bool_array();

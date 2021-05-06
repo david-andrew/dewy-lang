@@ -79,9 +79,11 @@ int main(int argc, char* argv[])
     initialize_metaparser();
     initialize_srnglr(input_size);
 
-    run_compiler_compiler(grammar_source, verbose, scanner, ast, parser, grammar, table);
-    run_compiler(input_source, compile, forest);
+    if (!run_compiler_compiler(grammar_source, verbose, scanner, ast, parser, grammar, table)) { goto cleanup; }
+    if (!run_compiler(input_source, compile, forest)) { goto cleanup; }
 
+
+cleanup:
     free(grammar_source);
     free(input_source);
 
@@ -96,23 +98,35 @@ int main(int argc, char* argv[])
 /**
  * Run all steps in the compiler, and print out the intermediate results if the 
  * corresponding bool is true. If verbose is true, print out more structure info.
+ * returns whether or not compiler_compiler step completed successfully
  */
-void run_compiler_compiler(char* source, bool verbose, bool scanner, bool ast, bool parser, bool grammar, bool table)
+bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool ast, bool parser, bool grammar, bool table)
 {
     vect* tokens = new_vect();
     obj* t = NULL;
+
+
 
     //SCANNER STEP: collect all tokens from raw text
     while (*source != 0 && (t = scan(&source)) != NULL)
     {
         vect_push(tokens, t);
     }
-    if (scanner) 
+    if (scanner)        //print scanning result
     {
         printf("METASCANNER OUTPUT:\n");
         print_scanner(tokens, verbose);
         printf("\n\n");
     }
+    if (*source != 0)   //check for errors scanning
+    {
+        printf("ERROR: metascanner failed\n");
+        printf("unscanned source:\n```\n%s\n```\n\n", source);
+        vect_free(tokens);
+        return false;
+    }
+
+
 
     //AST & PARSER STEP: build ASTs from tokens, and then convert to CFG sentences
     if (ast) { printf("METAAST OUTPUT:\n"); }
@@ -140,14 +154,34 @@ void run_compiler_compiler(char* source, bool verbose, bool scanner, bool ast, b
             }
         
             //attempt to convert metaast into sentential form
-            metaparser_insert_rule_ast(head_idx, body_ast); 
+            metaparser_insert_rule_ast(head_idx, body_ast);
+        }
+        else //error while constructing tree
+        {
+            vect_free(tokens);
+            return false;
         }
 
-        //free up ast objects
-        body_ast == NULL ? vect_free(body_tokens) : metaast_free(body_ast);
+        //free up ast objects. TODO->insert ast objects into cache...
+        if(body_ast != NULL) { metaast_free(body_ast); }
     }
+
+
+    //error if any unparsed (non-whitespace/comment) meta tokens
+    if (metatoken_get_next_real_token(tokens, 0) >= 0)
+    {
+        printf("ERROR: metaparser failed\n");
+        printf("unparsed tokens:\n");
+        print_scanner(tokens, verbose);
+        printf("\n\n");
+        vect_free(tokens);
+        return false;
+    }
+
     //finalize the metaparser before running the rnglr processes
     complete_metaparser();
+    vect_free(tokens);
+
 
     if (ast) { printf("\n\n"); }
 
@@ -157,6 +191,7 @@ void run_compiler_compiler(char* source, bool verbose, bool scanner, bool ast, b
         print_parser(verbose);
         printf("\n\n");
     }
+
 
     //GRAMMAR ITEMSET STEP: generate the itemsets for the grammar
     srnglr_generate_grammar_itemsets();
@@ -175,26 +210,15 @@ void run_compiler_compiler(char* source, bool verbose, bool scanner, bool ast, b
         printf("\n\n");
     }
 
-    //print out any unparsed input and tokens
-    if (*source != 0) 
-    { 
-        printf("UNSCANNED SOURCE:\n```\n%s\n```\n\n", source);
-    }
-    if (metatoken_get_next_real_token(tokens, 0) >= 0)
-    {
-        printf("UNPARSED TOKENS:\n");
-        print_scanner(tokens, verbose);
-        printf("\n\n");
-    }
 
-    vect_free(tokens);
+    return true;
 }
 
 
 /**
  * Parse the input file according to the input grammar.
  */
-void run_compiler(uint32_t* source, bool compile, bool forest)
+bool run_compiler(uint32_t* source, bool compile, bool forest)
 {
     bool result = srnglr_parser(source);
 
@@ -204,12 +228,13 @@ void run_compiler(uint32_t* source, bool compile, bool forest)
         ustring_str(source);
         printf("\n```\n\n");
 
-        printf("GRAPH STRUCTURED STACK:\n");
+        printf("PARSE RESULT:\n%s\n\n", result ? "success" : "failure");
         print_compiler();
         printf("\n\n");
     
-        printf("PARSE RESULT:\n%s\n\n", result ? "success" : "failure");
     }
+
+    return result;
 }
 
 
