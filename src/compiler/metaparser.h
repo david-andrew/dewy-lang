@@ -8,6 +8,7 @@
 
 uint64_t metaparser_get_anonymous_rule_head();
 void initialize_metaparser();
+void complete_metaparser();
 void release_metaparser();
 bool parse_next_meta_rule(vect* tokens);
 void metaparser_productions_repr();

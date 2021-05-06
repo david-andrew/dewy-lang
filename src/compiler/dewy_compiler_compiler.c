@@ -146,6 +146,9 @@ void run_compiler_compiler(char* source, bool verbose, bool scanner, bool ast, b
         //free up ast objects
         body_ast == NULL ? vect_free(body_tokens) : metaast_free(body_ast);
     }
+    //finalize the metaparser before running the rnglr processes
+    complete_metaparser();
+
     if (ast) { printf("\n\n"); }
 
     if (parser)

@@ -49,6 +49,17 @@ void initialize_metaparser()
 
 
 /**
+ * functions to finalize the state of the metaparser before continuing to later steps of parsing.
+ */
+void complete_metaparser()
+{
+    metaparser_get_eps_body_idx();
+    metaparser_get_endmarker_symbol_idx();
+    metaparser_get_start_symbol_idx();
+}
+
+
+/**
  * Free up all global data structures used by metaparser.
  */
 void release_metaparser()
@@ -316,9 +327,6 @@ vect* metaparser_get_rule_body(vect* tokens)
  * Returns the identifier for the rule inserted. Note that the returned identifier is owned by the 
  * grammar table, and must be copied if it is to be used by another process (e.g. other rule sentences).
  */
-
-
-//FOR NOW WE'LL JUST PRINT OUT WHAT WE WOULD DO...
 uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 {   
     switch (body_ast->type)

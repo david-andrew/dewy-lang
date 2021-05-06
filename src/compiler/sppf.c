@@ -18,11 +18,16 @@ uint64_t SPPF_ROOT_EPSILON_CHILDREN_IDX;    //index of the children vector that 
 
 /**
  * Create a new Shared Packed Parse Forest.
+ * Adds an initial root epsilon node to the forest
  */
 sppf* new_sppf()
 {
     sppf* s = malloc(sizeof(sppf));
     *s = (sppf){.nodes=new_set(), .edges=new_dict(), .children=new_set(), .gss_sppf_map=new_dict(), .root_idx=0};
+    
+    //initialize the SPPF with a single root epsilone at index 0
+    sppf_add_root_epsilon(s);
+
     return s;
 }
 

@@ -166,13 +166,7 @@ uint32_t* srnglr_get_input_source()
  * in the SPPF
  */
 void srnglr_compute_symbol_firsts()
-{
-    //ensure that the endmarker symbol has been added to the metaparser. TODO->move this into the intialization of the metaparser?
-    metaparser_get_endmarker_symbol_idx();
-    
-    //ensure the sppf has the root epsilon defined
-    sppf_add_root_epsilon(SPPF);
-
+{   
     //create empty fsets for each symbol in the grammar
     set* symbols = metaparser_get_symbols();
     for (size_t i = 0; i < set_size(symbols); i++)
