@@ -161,9 +161,6 @@ bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool ast, b
             vect_free(tokens);
             return false;
         }
-
-        //free up ast objects. TODO->insert ast objects into cache...
-        if(body_ast != NULL) { metaast_free(body_ast); }
     }
 
 

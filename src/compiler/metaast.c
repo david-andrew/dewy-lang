@@ -155,6 +155,17 @@ metaast* new_metaast_charset_node(metaast_type type, charset* cs)
 
 
 /**
+ * Create a new metaast wrapped in an object
+ */
+obj* new_metaast_obj(metaast* ast)
+{
+    obj* AST = malloc(sizeof(obj));
+    *AST = obj_struct(MetaAST_t, ast);
+    return AST;
+}
+
+
+/**
  * Attempt to parse a meta expression from all possible expression types
  * If matches, `tokens` will be freed, else returns NULL. 
  */
@@ -1259,7 +1270,32 @@ uint64_t metaast_get_type_precedence_level(metaast_type type)
  */
 void metaast_free(metaast* ast)
 {
+    metaast_free_with_refs(ast, NULL);
+}
 
+
+/**
+ * Free the metaast while ensuring that node addresses in set have not been freed
+ * ignores refs if refs is NULL
+ */
+void metaast_free_with_refs(metaast* ast, set* refs)
+{
+    //check if this ast was freed already
+    if (refs != NULL)
+    {
+        obj ref_obj = obj_struct(Pointer_t, ast);
+        if (set_contains(refs, &ref_obj))
+        { 
+            return; 
+        }
+        else 
+        { 
+            //add the pointer to this ast into the set of freed ASTs
+            set_add(refs, new_ptr_obj(ast)); 
+        }
+    }
+
+    //run the free process on the node
     switch (ast->type)
     {
         // free allocated inner components of nodes
@@ -1282,7 +1318,7 @@ void metaast_free(metaast* ast)
         case metaast_plus:
         case metaast_count:
         {
-            metaast_free(ast->node.repeat.inner);
+            metaast_free_with_refs(ast->node.repeat.inner, refs);
             break;
         }
         
@@ -1290,7 +1326,7 @@ void metaast_free(metaast* ast)
         case metaast_compliment:
         case metaast_capture:
         {
-            metaast_free(ast->node.unary.inner);
+            metaast_free_with_refs(ast->node.unary.inner, refs);
             break;
         }
         
@@ -1301,8 +1337,8 @@ void metaast_free(metaast* ast)
         case metaast_nofollow:
         case metaast_intersect:
         {
-            metaast_free(ast->node.binary.left);
-            metaast_free(ast->node.binary.right);
+            metaast_free_with_refs(ast->node.binary.left, refs);
+            metaast_free_with_refs(ast->node.binary.right, refs);
             break;
         }
         
@@ -1310,7 +1346,7 @@ void metaast_free(metaast* ast)
         {
             for (size_t i = 0; i < ast->node.sequence.size; i++)
             {
-                metaast_free(ast->node.sequence.elements[i]);
+                metaast_free_with_refs(ast->node.sequence.elements[i], refs);
             }
             free(ast->node.sequence.elements);
             break;
@@ -1654,7 +1690,6 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
             break;
         }
 
-        //free container only
         case metaast_eps:
         {
             put_unicode(0x03F5);
@@ -1755,7 +1790,6 @@ void metaast_repr_inner(metaast* ast, int level)
             break;
         }
 
-        //free container only
         case metaast_eps:
         {
             printf("("); put_unicode(0x03F5); printf(")\n");
@@ -1763,5 +1797,142 @@ void metaast_repr_inner(metaast* ast, int level)
         }
     }
 }
+
+
+/**
+ * Determine if two meta-ASTs are equal
+ */
+bool metaast_equals(metaast* left, metaast* right)
+{
+    if (left->type != right->type) { return false; }
+
+    switch (left->type)
+    {
+
+        case metaast_string:
+        case metaast_caseless:
+        case metaast_identifier:
+        {
+            return ustring_cmp(left->node.string, right->node.string) == 0;
+        }
+        
+        case metaast_charset:
+        {
+            return charset_equals(left->node.cs, right->node.cs);
+        }
+        
+        case metaast_star:
+        case metaast_plus:
+        case metaast_count:
+        {
+            if (left->node.repeat.count != right->node.repeat.count) { return false; }
+            return metaast_equals(left->node.repeat.inner, right->node.repeat.inner);
+        }
+        
+        case metaast_option:
+        case metaast_compliment:
+        case metaast_capture:
+        {
+            return metaast_equals(left->node.unary.inner, right->node.unary.inner);
+        }
+        
+        case metaast_or:
+        case metaast_greaterthan:
+        case metaast_lessthan:
+        case metaast_reject:
+        case metaast_nofollow:
+        case metaast_intersect:
+        {
+            return metaast_equals(left->node.binary.left, right->node.binary.right) && metaast_equals(left->node.binary.right, right->node.binary.right);
+        }
+        
+        case metaast_cat:
+        {
+            if (left->node.sequence.size != right->node.sequence.size) { return false; }
+            for (size_t i = 0; i < left->node.sequence.size; i++)
+            {
+                if (!metaast_equals(left->node.sequence.elements[i], right->node.sequence.elements[i]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        case metaast_eps:
+        {
+            return true;
+        }
+    }
+}
+
+
+/**
+ * Compute a hash of the given meta-AST
+ */
+uint64_t metaast_hash(metaast* ast)
+{
+    switch (ast->type)
+    {
+        case metaast_string:
+        case metaast_caseless:
+        case metaast_identifier:
+        {
+            return ustring_hash(ast->node.string) + ast->type;
+        }
+        
+        case metaast_charset:
+        {
+            return charset_hash(ast->node.cs) + ast->type;;
+        }
+        
+        case metaast_star:
+        case metaast_plus:
+        case metaast_count:
+        {
+            uint64_t seq[] = {ast->type, ast->node.repeat.count, metaast_hash(ast->node.repeat.inner)};
+            return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
+        }
+        
+        case metaast_option:
+        case metaast_compliment:
+        case metaast_capture:
+        {
+            return metaast_hash(ast->node.unary.inner) + ast->type;
+        }
+        
+        case metaast_or:
+        case metaast_greaterthan:
+        case metaast_lessthan:
+        case metaast_reject:
+        case metaast_nofollow:
+        case metaast_intersect:
+        {
+            uint64_t seq[] = {ast->type, metaast_hash(ast->node.binary.left), metaast_hash(ast->node.binary.right)};
+            return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
+        }
+        
+        case metaast_cat:
+        {
+            return hash_uint_lambda_sequence(ast, ast->node.sequence.size + 1, metaast_hash_sequence_getval);
+        }
+
+        case metaast_eps:
+        {
+            return ast->type;
+        }
+    }
+}
+
+
+/**
+ * Lambda function for hashing a metaast sequence
+ */
+uint64_t metaast_hash_sequence_getval(void* seq, size_t i)
+{
+    metaast* ast = (metaast*)seq;
+    return i == 0 ? ast->type : metaast_hash(ast->node.sequence.elements[i-1]);
+}
+
 
 #endif

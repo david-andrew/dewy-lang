@@ -3,7 +3,9 @@
 
 #include <stdint.h>
 
+#include "object.h"
 #include "vector.h"
+#include "set.h"
 #include "charset.h"
 #include "metatoken.h"
 
@@ -108,6 +110,7 @@ metaast* new_metaast_unary_op_node(metaast_type type, metaast* inner);
 metaast* new_metaast_sequence_node(metaast_type type, size_t size, metaast** elements);
 metaast* new_metaast_binary_op_node(metaast_type type, metaast* left, metaast* right);
 metaast* new_metaast_charset_node(metaast_type type, charset* cs);
+obj* new_metaast_obj(metaast* ast);
 
 //construct nodes from input tokens
 metaast* metaast_parse_expr(vect* tokens);
@@ -148,6 +151,7 @@ uint64_t metaast_get_type_precedence_level(metaast_type type);
 
 //free meta-ast objects
 void metaast_free(metaast* ast);
+void metaast_free_with_refs(metaast* ast, set* refs);
 
 //constant folding contents of meta-ast
 bool metaast_fold_constant(metaast** ast_ptr);
@@ -160,5 +164,10 @@ void metaast_str_inner(metaast* ast, metaast_type parent);
 bool metaast_str_inner_check_needs_parenthesis(metaast_type parent, metaast_type inner);
 void metaast_repr(metaast* ast);
 void metaast_repr_inner(metaast* ast, int level);
+
+bool metaast_equals(metaast* left, metaast* right);
+uint64_t metaast_hash(metaast* ast);
+uint64_t metaast_hash_sequence_getval(void* seq, size_t i);
+
 
 #endif

@@ -17,6 +17,7 @@ typedef enum
     CharSet_t,
     Integer_t, 
     UInteger_t,
+    Pointer_t,
     // UIntNTuple_t,
     QTuple_t,
     RTuple_t,
@@ -24,6 +25,7 @@ typedef enum
     UnicodeString_t,
     MetaToken_t,
     MetaItem_t,
+    MetaAST_t,
     Slice_t,
     FSet_t,
     GotoKey_t,
@@ -71,7 +73,7 @@ obj* new_int_obj(int64_t i);
 obj* new_uint_obj(uint64_t u);
 obj* new_string_obj(char* s);                   //new string object from an allocated string
 obj* new_string_obj_copy(char* s);              //new string object from a non-allocated string
-
+obj* new_ptr_obj(void* ptr);
 
 //// Utility Functions ////
 

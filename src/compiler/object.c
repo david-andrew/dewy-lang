@@ -15,6 +15,7 @@
 #include "dictionary.h"
 #include "set.h"
 #include "metatoken.h"
+#include "metaast.h"
 #include "charset.h"
 #include "metaitem.h"
 #include "gotokey.h"
@@ -56,6 +57,18 @@ new_primitive_obj(new_bool, bool, Boolean_t)
 new_primitive_obj(new_char, uint32_t, Character_t)
 new_primitive_obj(new_int, int64_t, Integer_t)
 new_primitive_obj(new_uint, uint64_t, UInteger_t)
+
+
+/**
+ * Create a new pointer object.
+ * Note that the pointer itself is unmanaged, and will not be freed at the end of the lifetime.
+ */
+obj* new_ptr_obj(void* p)
+{
+    obj* P = malloc(sizeof(obj));
+    *P = obj_struct(Pointer_t, p);
+    return P;
+}
 
 
 /**
@@ -240,11 +253,13 @@ void obj_str(obj* o)
         case CharSet_t: charset_str(o->data); break;
         case Integer_t: printf("%ld", *(int64_t*)o->data); break;
         case UInteger_t: printf("%lu", *(uint64_t*)o->data); break;
+        case Pointer_t: printf("%p", o->data); break;
         // case UIntNTuple_t: tuple_str(o->data); break;
         case String_t: printf("%s", o->data); break;
         case UnicodeString_t: ustring_str(o->data); break;
         case MetaToken_t: metatoken_repr(o->data); break;
         case MetaItem_t: metaitem_str(o->data); break;
+        case MetaAST_t: metaast_str(o->data); break;
         case FSet_t: fset_str(o->data); break;
         case GotoKey_t: gotokey_str(o->data); break;
         case Push_t: push_str(*(uint64_t*)o->data); break;
@@ -293,11 +308,13 @@ uint64_t obj_hash(obj* o)
         case CharSet_t: return charset_hash(o->data);
         case Integer_t: return hash_int(*(int64_t*)o->data);
         case UInteger_t: return hash_uint(*(uint64_t*)o->data);
+        case Pointer_t: return hash_uint((uintptr_t)o->data); 
         // case UIntNTuple_t: return tuple_hash(o->data);
         case String_t: return fnv1a(o->data);
         case UnicodeString_t: return ustring_hash(o->data);
         // case MetaToken_t: return metatoken_hash((metatoken*)o->data);
         case MetaItem_t: return metaitem_hash(o->data);
+        case MetaAST_t: return metaast_hash(o->data);
         case Slice_t: return slice_hash(o->data);
         // case FSet_t: return fset_hash(o->data);
         case GotoKey_t: return gotokey_hash(o->data);
@@ -341,6 +358,7 @@ int64_t obj_compare(obj* left, obj* right)
         case Character_t: return *(uint32_t*)left->data - *(uint32_t*)right->data;
         // case CharSet_t: return charset_compare((charset*)left->data, (charset*)right->data);
         case Integer_t: return *(int64_t*)left->data - *(int64_t*)right->data;
+        case Pointer_t: return (intptr_t)left->data - (intptr_t)right->data;
         case UInteger_t: return *(uint64_t*)left->data - *(uint64_t*)right->data;
         case String_t: return strcmp((char*)left->data, (char*)right->data);
         case UnicodeString_t: return ustring_cmp((uint32_t*)left->data, (uint32_t*)right->data);
@@ -374,6 +392,7 @@ bool obj_equals(obj* left, obj* right)
         case Set_t: return set_equals((set*)left->data, (set*)right->data);
         case CharSet_t: return charset_equals(left->data, right->data);
         case MetaItem_t: return metaitem_equals(left->data, right->data);
+        case MetaAST_t: return metaast_equals(left->data, right->data);
         case Slice_t: return slice_equals(left->data, right->data);
         //case FSet_t: return fset_equals(left->data, right->data);
         case GotoKey_t: return gotokey_equals(left->data, right->data);
@@ -432,8 +451,10 @@ void obj_free(obj* o)
             case GSSEdge_t: gss_edge_free(o->data); break;
             case SPPFNode_t: sppf_node_free(o->data); break;
 
-            //objects with no internal data
-            case Accept_t: break;
+            //objects with no (owned) internal data
+            case Pointer_t:
+            case Accept_t: 
+                break;
 
             default: 
                 printf("WARNING: obj_free() is not implemented for object of type \"%d\""

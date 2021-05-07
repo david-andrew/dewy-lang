@@ -29,6 +29,8 @@
 set* metaparser_symbols;        //list of all symbols used in production bodies.
 set* metaparser_bodies;         //list of each production body.
 dict* metaparser_productions;   //map from head to production bodies.
+dict* metaparser_ast_cache;     //map<metaast*, body_idx>. care must be taken while freeing this object.
+vect* metaparser_unused_ast_cache; //vect containing all ASTs not inserted into the cache
 
 //convenience variables for the frequently used epsilon production body, and $ endmarker terminal.
 uint64_t metaparser_eps_body_idx = NULL_SYMBOL_INDEX;
@@ -45,6 +47,8 @@ void initialize_metaparser()
     metaparser_symbols = new_set();
     metaparser_bodies = new_set();
     metaparser_productions = new_dict();
+    metaparser_ast_cache = new_dict();
+    metaparser_unused_ast_cache = new_vect();
 }
 
 
@@ -69,6 +73,34 @@ void release_metaparser()
     set_free(metaparser_symbols);
     set_free(metaparser_bodies);
     dict_free(metaparser_productions);
+
+    metaparser_free_ast_cache();
+}
+
+
+/**
+ * Special process to free the ast cache since trees may share children
+ */
+void metaparser_free_ast_cache()
+{
+    //free all the ASTs, maintaining a reference set to ensure nodes aren't double freed
+    set* refs = new_set();
+    for (size_t i = 0; i < dict_size(metaparser_ast_cache); i++)
+    {
+        metaast* ast = obj_free_keep_inner(metaparser_ast_cache->entries[i].key, MetaAST_t);
+        metaast_free_with_refs(ast, refs);
+    }
+    while (vect_size(metaparser_unused_ast_cache) > 0)
+    {
+        metaast* ast = obj_free_keep_inner(vect_pop(metaparser_unused_ast_cache), MetaAST_t);
+        metaast_free_with_refs(ast, refs);
+    }
+
+    set_free(refs);
+
+    dict_free_values_only(metaparser_ast_cache);
+    dict_free_table_only(metaparser_ast_cache);
+    vect_free(metaparser_unused_ast_cache);
 }
 
 
@@ -331,6 +363,23 @@ vect* metaparser_get_rule_body(vect* tokens)
  */
 uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 {   
+    //check if this AST is in the cache already
+    // obj cache_key_struct = obj_struct(MetaAST_t, body_ast);
+    // obj* cache_key_obj = &cache_key_struct;
+    obj* cache_key_obj = new_metaast_obj(body_ast);
+    obj* cache_value_obj = dict_get(metaparser_ast_cache, cache_key_obj);
+    if (cache_value_obj != NULL)
+    {
+        // metaast_free(body_ast);
+        vect_append(metaparser_unused_ast_cache, cache_key_obj);
+        return *(uint64_t*)cache_value_obj->data;
+    }
+    else
+    {
+        //create the key for the AST cache
+        // cache_key_obj = new_metaast_obj(body_ast);
+    }
+
     switch (body_ast->type)
     {
         // Base case (non-recursive) rules
@@ -694,6 +743,9 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 
     }
 
+    //save this AST to the cache
+    dict_set(metaparser_ast_cache, cache_key_obj, new_uint_obj(head_idx));
+    
     return head_idx;
 }
 
