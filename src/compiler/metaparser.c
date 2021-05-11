@@ -363,6 +363,9 @@ vect* metaparser_get_rule_body(vect* tokens)
  */
 uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 {   
+    //determine if this is an anonymous rule, or user named rule
+    bool anonymous = head_idx == NULL_SYMBOL_INDEX;
+    
     //check if this AST is in the cache already
     obj* cache_key_obj = new_metaast_obj(body_ast);
     obj* cache_value_obj = dict_get(metaparser_ast_cache, cache_key_obj);
@@ -375,7 +378,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         uint64_t body_idx = *(uint64_t*)cache_value_obj->data;
 
         //if not an anonymous expression, create a production using the precached body
-        if (head_idx != NULL_SYMBOL_INDEX)
+        if (!anonymous)
         {
             metaparser_add_production(head_idx, body_idx);
         }
@@ -389,7 +392,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         case metaast_eps:
         {
             //crete an anonymous head if it wasn't provided
-            head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
             //create a production for the head index pointing to the epsilon body index
             metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
@@ -403,7 +406,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             
             //if head is defined, then create a whole production with a sentence containing just the identifier
             //otherwise this is an inner expression reference to the identifier where we can skip the redundant sentence
-            if (head_idx != NULL_SYMBOL_INDEX)
+            if (!anonymous)
             {
                 //create a sentence with the identifier in it
                 vect* sentence = new_vect();
@@ -425,7 +428,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         case metaast_charset:
         {
             //crete an anonymous head if it wasn't provided
-            head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
             //create a sentence containing just the charset
             vect* sentence = new_vect();
@@ -445,7 +448,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         case metaast_string:
         {
             //crete an anonymous head if it wasn't provided
-            head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
             //create a sentence for the string
             vect* sentence = new_vect();
@@ -471,7 +474,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         case metaast_caseless:
         {
             //crete an anonymous head if it wasn't provided
-            head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
             //create a sentence for the string
             vect* sentence = new_vect();
@@ -503,7 +506,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         case metaast_plus:
         {
             //crete an anonymous head if it wasn't provided
-            head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
             
             //get the identifier for the inner node
             uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.repeat.inner);
@@ -574,7 +577,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         case metaast_count:
         {
             //crete an anonymous head if it wasn't provided
-            head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
             uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.repeat.inner);
 
@@ -604,7 +607,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         case metaast_option:
         {
             //crete an anonymous head if it wasn't provided
-            head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
             uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.unary.inner);
 
@@ -626,7 +629,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         case metaast_cat:
         {
             //crete an anonymous head if it wasn't provided
-            head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
             //#head = #A #B => #A #B  //cat is already in CFG format. TODO->handle cat with strings/charsets/identifiers/epsilon...
             vect* sentence = new_vect();
@@ -706,7 +709,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         case metaast_or:
         {
             //crete an anonymous head if it wasn't provided
-            head_idx = head_idx == NULL_SYMBOL_INDEX ? metaparser_get_anonymous_rule_head() : head_idx;
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
             //#rule = #A | #B =>
             //  #rule = #A
@@ -746,9 +749,15 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 
     }
 
-    //save this AST to the cache
-    dict_set(metaparser_ast_cache, cache_key_obj, new_uint_obj(head_idx));
-    
+    //if anonymous rule, save this AST to the cache, else save the cache_key for later deletion
+    if (anonymous)
+    {
+        dict_set(metaparser_ast_cache, cache_key_obj, new_uint_obj(head_idx));
+    }
+    else
+    {
+        vect_append(metaparser_unused_ast_cache, cache_key_obj);
+    }
     return head_idx;
 }
 
