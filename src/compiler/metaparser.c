@@ -364,20 +364,23 @@ vect* metaparser_get_rule_body(vect* tokens)
 uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 {   
     //check if this AST is in the cache already
-    // obj cache_key_struct = obj_struct(MetaAST_t, body_ast);
-    // obj* cache_key_obj = &cache_key_struct;
     obj* cache_key_obj = new_metaast_obj(body_ast);
     obj* cache_value_obj = dict_get(metaparser_ast_cache, cache_key_obj);
     if (cache_value_obj != NULL)
     {
-        // metaast_free(body_ast);
+        //save the unused key obj to be freed later
         vect_append(metaparser_unused_ast_cache, cache_key_obj);
-        return *(uint64_t*)cache_value_obj->data;
-    }
-    else
-    {
-        //create the key for the AST cache
-        // cache_key_obj = new_metaast_obj(body_ast);
+
+        //get the cached body index
+        uint64_t body_idx = *(uint64_t*)cache_value_obj->data;
+
+        //if not an anonymous expression, create a production using the precached body
+        if (head_idx != NULL_SYMBOL_INDEX)
+        {
+            metaparser_add_production(head_idx, body_idx);
+        }
+        
+        return body_idx;
     }
 
     switch (body_ast->type)
