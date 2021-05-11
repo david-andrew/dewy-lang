@@ -12,9 +12,9 @@ Thus far, only the compiler-compiler is even runnable. To run the compiler compi
 
 The project includes several test grammar/source file pairs in DewySpeak/tests/. e.g. an simple expression grammar/source could be run like so
 
-    $ ./dewy ../../tests/grammar3.dewy ../../tests/source3.dewy
+    $ ./dewy ../../tests/grammar8.dewy ../../tests/source8.dewy
 
-Note that the compiler-compiler is still buggy, and can/will crash on incorrect grammar specifications (though source files shouldn't be able to cause crashes). Additionally, the steps to build the parse-forest are still in development, so at the moment, the parser only outputs whether or not a given input source is valid for the given grammar (accept/reject).
+Note that the compiler-compiler is still in development, and can/will crash on incorrect grammar specifications (better error handling coming soon™), though source files shouldn't be able to cause crashes.
 
 ## Language Documentation
 Currently incomplete documentation is available at: https://david-andrew.github.io/dewy/
@@ -34,7 +34,7 @@ Currently incomplete documentation is available at: https://david-andrew.github.
 * (planned) extremely fast
 * (planned) batteries included, i.e. common data structures, algorithms, libraries, etc. (will be) included
 * guranteed syntax stability, backwards compatibility, etc.
-    * Once version 0 is released, If it runs on version 0, it will run on the latest version
+    * Once version 1 is released, If it runs on some version, it will run on all future versions
 * (planned) simple unified package management system akin to ckan
 * (probably) lots of other things...
 
