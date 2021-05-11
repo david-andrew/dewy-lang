@@ -839,7 +839,7 @@ void srnglr_reducer(size_t i, uint32_t* src)
             //add the children for this reduction to the children of z
             vect* labels = sppf_get_path_labels(SPPF, path);
             vect_append(labels, new_uint_obj(y_idx));
-            srnglr_add_children(z_idx, labels, nullable_idx);
+            srnglr_add_children(z_idx, labels, body_idx, nullable_idx);
         }
 
         //let k (state_idx) be the label of u, and let push l belong to Table(k, X)
@@ -1007,7 +1007,7 @@ void srnglr_shifter(size_t i, uint32_t* src)
  * Add_children subroutine from rnglr parsing process.
  * z should be an inner node.
  */
-void srnglr_add_children(uint64_t z_idx, vect* path, uint64_t nullable_idx)
+void srnglr_add_children(uint64_t z_idx, vect* path, uint64_t body_idx, uint64_t nullable_idx)
 {
     //if this was a right-nulled reduction, append preconstructed nullable SPPF node
     if (nullable_idx != 0)
@@ -1020,32 +1020,7 @@ void srnglr_add_children(uint64_t z_idx, vect* path, uint64_t nullable_idx)
     uint64_t new_children_idx = set_add_return_index(SPPF->children, path_obj);
 
     //add an entry for these children to the node z
-    obj z_idx_obj = obj_struct(UInteger_t, &z_idx);
-    obj* children = dict_get(SPPF->edges, &z_idx_obj);
-    if (children == NULL)  //z has no children so far
-    {
-        dict_set(SPPF->edges, new_uint_obj(z_idx), new_uint_obj(new_children_idx));
-    }
-    else if (children->type == UInteger_t)  //z is a non-packed node
-    {
-        //check if the node already has these children
-        uint64_t children_idx = *(uint64_t*)children->data;
-        if (children_idx == new_children_idx) { return; } //entry already exists
-        
-        //create a packed node with both indices
-        uint64_t entry_idx = dict_get_entries_index(SPPF->edges, &z_idx_obj);
-        set* children_set = new_set();
-        set_add(children_set, children);
-        set_add(children_set, new_uint_obj(new_children_idx));
-        SPPF->edges->entries[entry_idx].value = new_set_obj(children_set);
-        
-    }
-    else //type == Set_t  //z is a packed node
-    {
-        //insert the new index into the list of children lists (set handle duplicates)
-        set* children_set = children->data;
-        set_add(children_set, new_uint_obj(new_children_idx));
-    }
+    sppf_connect_node_to_children(SPPF, z_idx, body_idx, new_children_idx);
 }
 
 

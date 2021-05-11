@@ -48,7 +48,7 @@ uint64_t srnglr_get_epsilon_start_idx();
 bool srnglr_parser(uint32_t* src);
 void srnglr_reducer(size_t i, uint32_t* src);
 void srnglr_shifter(size_t i, uint32_t* src);
-void srnglr_add_children(uint64_t z_idx, vect* path, uint64_t nullable_idx);
+void srnglr_add_children(uint64_t z_idx, vect* path, uint64_t body_idx, uint64_t nullable_idx);
 
 
 //print functions

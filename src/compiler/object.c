@@ -268,6 +268,7 @@ void obj_str(obj* o)
         case GSSIndex_t: gss_idx_str(o->data); break;
         case GSSEdge_t: gss_edge_str(o->data); break;
         case SPPFNode_t: sppf_node_str(o->data); break;
+        case SPPFEdge_t: sppf_edge_str(o->data); break;
         case Vector_t: vect_str(o->data); break;
         case Dictionary_t: dict_str(o->data); break;
         case Set_t: set_str(o->data); break;
@@ -450,6 +451,7 @@ void obj_free(obj* o)
             case GSSIndex_t: gss_idx_free(o->data); break;
             case GSSEdge_t: gss_edge_free(o->data); break;
             case SPPFNode_t: sppf_node_free(o->data); break;
+            case SPPFEdge_t: sppf_edge_free(o->data); break;
 
             //objects with no (owned) internal data
             case Pointer_t:

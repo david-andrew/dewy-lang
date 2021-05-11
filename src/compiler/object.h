@@ -35,6 +35,7 @@ typedef enum
     GSSIndex_t,
     GSSEdge_t,
     SPPFNode_t,
+    SPPFEdge_t,
     Vector_t,
     UInt64Array_t,
     BoolArray_t,

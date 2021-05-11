@@ -96,7 +96,7 @@ void sppf_add_node_with_children(sppf* s, sppf_node* node, vect* children)
 {
     uint64_t node_idx = sppf_add_node(s, node);
     uint64_t children_idx = sppf_add_children(s, children);
-    sppf_connect_node_to_children(s, node_idx, children_idx);
+    sppf_connect_node_to_children(s, node_idx, -1, children_idx);
 }
 
 
@@ -127,35 +127,43 @@ uint64_t sppf_add_children(sppf* s, vect* children)
 /**
  * Indicate in the SPPF that the given node has the given children.
  * If the node already has children, then a packed node is created.
+ * body_idx indicates which production this reduction node represents.
+ * For nullable nodes, body_idx may be set to (uint64_t)-1
  */
-void sppf_connect_node_to_children(sppf* s, uint64_t node_idx, uint64_t children_idx)
+void sppf_connect_node_to_children(sppf* s, uint64_t node_idx, uint64_t body_idx, uint64_t children_idx)
 {
+    //get the (possibly NULL) children object for this node
     obj node_idx_obj = obj_struct(UInteger_t, &node_idx);
-    obj children_idx_obj = obj_struct(UInteger_t, &children_idx);
-
-    if (!dict_contains(s->edges, &node_idx_obj))
-    {
-        dict_set(s->edges, obj_copy(&node_idx_obj), obj_copy(&children_idx_obj));
-        return;
-    }
-
-    //an entry exists already
-    obj* children_obj = dict_get(s->edges, &node_idx_obj);
+    obj* children = dict_get(s->edges, &node_idx_obj);    
     
-    //for vector simply append the children_idx_obj to the vector
-    if (children_obj->type == Vector_t)
+    //node has no children so far, so create a new non-packed entry
+    if (children == NULL)  
     {
-        vect* packed_node = children_obj->data;
-        vect_append(packed_node, obj_copy(&children_idx_obj));
-        return;
+        sppf_edge* edge = new_sppf_nonpacked_edge(body_idx, children_idx);
+        dict_set(s->edges, new_uint_obj(node_idx), new_sppf_edge_obj(edge));
     }
+    else //handle edge object that already exists
+    {
+        sppf_edge* edge = children->data;
 
-    //otherwise, need to replace the current UInteger_t type with a vector
-    size_t index = dict_get_entries_index(s->edges, &node_idx_obj);
-    vect* packed_node = new_vect();
-    vect_append(packed_node, children_obj);
-    vect_append(packed_node, obj_copy(&children_idx_obj));
-    s->edges->entries[index].value = new_vect_obj(packed_node);    
+        //if already packed, and simply insert the new children index
+        if (edge->packed)
+        {
+            set_add(edge->children.indices, new_uint_obj(children_idx));
+        }
+        else //handle non-packed node
+        {
+            //check if the non-packed node already has the children to be added
+            if (edge->children.index == children_idx) { return; }
+
+            //convert non-packed to a packed node
+            edge->packed = true;
+            set* children_set = new_set();
+            set_add(children_set, new_uint_obj(edge->children.index));
+            set_add(children_set, new_uint_obj(children_idx));
+            edge->children.indices = children_set;
+        }
+    } 
 }
 
 
@@ -178,7 +186,7 @@ uint64_t sppf_add_nullable_symbol_node(sppf* s, uint64_t symbol_idx)
 
     //add the node to the SPPF, and link with children list that points to just epsilon
     uint64_t node_idx = set_add_return_index(s->nodes, obj_copy(&symbol_node_obj));
-    sppf_connect_node_to_children(s, node_idx, SPPF_ROOT_EPSILON_CHILDREN_IDX);
+    sppf_connect_node_to_children(s, node_idx, -1, SPPF_ROOT_EPSILON_CHILDREN_IDX);
 
     return node_idx;
 }
@@ -224,10 +232,9 @@ uint64_t sppf_add_nullable_string_node(sppf* s, slice* nullable_part)
 
     //add the children vect to the set of children, and connect to the node
     uint64_t children_idx = sppf_add_children(s, children);
-    sppf_connect_node_to_children(s, node_idx, children_idx);
+    sppf_connect_node_to_children(s, node_idx, -1, children_idx);
 
-    return node_idx;
-    
+    return node_idx;    
 }
 
 
@@ -270,13 +277,9 @@ void sppf_free(sppf* s)
  */
 void sppf_str(sppf* s)
 {
-
     //determine if the sppf is cyclic, and count the number of lines to be used
     bool cyclic; uint64_t num_lines;
     sppf_str_visit_nodes(s, &cyclic, &num_lines);
-
-    //DEBUG
-    // printf("SPPF cylic: %s, num_lines: %"PRIu64"\n", cyclic ? "true" : "false", num_lines);
 
     //used to keep track of drawing lines in the tree
     bool_array* open_levels = new_bool_array();
@@ -353,18 +356,24 @@ void sppf_str_visit_nodes_inner(sppf* s, uint64_t node_idx, bool* cyclic, uint64
     //mark this node as visited
     set_add(visited, current_node_obj);
 
-    //expand the children for this node
+
+    // expand the children for this node //
     obj node_idx_obj = obj_struct(UInteger_t, &node_idx);
+    
     obj* children = dict_get(s->edges, &node_idx_obj);
     if (children == NULL)
     {
         return; //no children to expand for this node
     }
-    else if (children->type == UInteger_t)  //node is a non-packed node
+
+    //extract the edge object for the children
+    sppf_edge* edge = children->data;
+    
+    //expand non-packed node
+    if (!edge->packed)
     {
         //expand each child normally
-        uint64_t children_idx = *(uint64_t*)children->data;
-        vect* children_vect = set_get_at_index(s->children, children_idx)->data;
+        vect* children_vect = set_get_at_index(s->children, edge->children.index)->data;
         for (size_t i = 0; i < vect_size(children_vect); i++)
         {
             *num_lines += 1; //line for printing the child's head
@@ -372,13 +381,12 @@ void sppf_str_visit_nodes_inner(sppf* s, uint64_t node_idx, bool* cyclic, uint64
             sppf_str_visit_nodes_inner(s, child_idx, cyclic, num_lines, visited);
         }
     }
-    else //type == Set_t  //node is a packed node
+    else //expand packed node
     {
-        //for each list of children, expand each child (noting that the first child of each list has continue_line=true)
-        set* packed_children_set = children->data;
-        for (size_t i = 0; i < set_size(packed_children_set); i++)
+        //for each list of children, expand each child
+        for (size_t i = 0; i < set_size(edge->children.indices); i++)
         {
-            uint64_t children_idx = *(uint64_t*)set_get_at_index(packed_children_set, i)->data;
+            uint64_t children_idx = *(uint64_t*)set_get_at_index(edge->children.indices, i)->data;
             vect* children_vect = set_get_at_index(s->children, children_idx)->data;
             for (size_t j = 0; j < vect_size(children_vect); j++)
             {
@@ -406,7 +414,7 @@ void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, 
     if (current_node->type == sppf_leaf || current_node->type == sppf_nullable)
     { 
         //print node on single line & continue
-        sppf_node_str2(current_node); printf("\n");
+        sppf_node_str2(current_node, -1); printf("\n");
         return; 
     }
 
@@ -431,14 +439,17 @@ void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, 
     {
         return; //no children to expand for this node
     }
-    else if (children->type == UInteger_t)  //node is a non-packed node
+
+    //extract the edge for these children
+    sppf_edge* edge = children->data;
+
+    if (!edge->packed)
     {
         //print the node head
-        sppf_node_str2(current_node); printf("\n");
+        sppf_node_str2(current_node, edge->body_idx); printf("\n");
 
         //expand each child normally
-        uint64_t children_idx = *(uint64_t*)children->data;
-        vect* children_vect = set_get_at_index(s->children, children_idx)->data;
+        vect* children_vect = set_get_at_index(s->children, edge->children.index)->data;
         const uint64_t num_children = vect_size(children_vect);
         for (size_t i = 0; i < num_children; i++)
         {
@@ -464,11 +475,11 @@ void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, 
     else //type == Set_t  //node is a packed node
     {
         //print the node head inside packed braces
-        printf("["); sppf_node_str2(current_node); printf("]\n");
+        printf("["); sppf_node_str2(current_node, edge->body_idx); printf("]\n");
 
         //for each list of children, expand each child (noting that the first child of each list has continue_line=true)
-        set* packed_children_set = children->data;
-        const uint64_t num_packs = set_size(packed_children_set);
+        // set* packed_children_set = children->data;
+        const uint64_t num_packs = set_size(edge->children.indices);
         for (size_t i = 0; i < num_packs; i++)
         {
             //update/print the line number
@@ -483,7 +494,7 @@ void sppf_str_cyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_levels, 
             bool_array_push(open_levels, i != num_packs - 1);
                 
 
-            uint64_t children_idx = *(uint64_t*)set_get_at_index(packed_children_set, i)->data;
+            uint64_t children_idx = *(uint64_t*)set_get_at_index(edge->children.indices, i)->data;
             vect* children_vect = set_get_at_index(s->children, children_idx)->data;
             const uint64_t num_children = vect_size(children_vect);
             for (size_t j = 0; j < num_children; j++)
@@ -566,7 +577,7 @@ void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_level
     if (current_node->type == sppf_leaf || current_node->type == sppf_nullable)
     { 
         //print node on single line & continue
-        sppf_node_str2(current_node); printf("\n");
+        sppf_node_str2(current_node, -1); printf("\n");
         return; 
     }
 
@@ -577,14 +588,15 @@ void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_level
     {
         return; //no children to expand for this node
     }
-    else if (children->type == UInteger_t)  //node is a non-packed node
+    sppf_edge* edge = children->data;
+
+    if (!edge->packed)  //node is a non-packed node
     {
         //print the node head
-        sppf_node_str2(current_node); printf("\n");
+        sppf_node_str2(current_node, edge->body_idx); printf("\n");
 
         //expand each child normally
-        uint64_t children_idx = *(uint64_t*)children->data;
-        vect* children_vect = set_get_at_index(s->children, children_idx)->data;
+        vect* children_vect = set_get_at_index(s->children, edge->children.index)->data;
         const uint64_t num_children = vect_size(children_vect);
         for (size_t i = 0; i < num_children; i++)
         {
@@ -606,11 +618,10 @@ void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_level
     else //type == Set_t  //node is a packed node
     {
         //print the node head inside packed braces
-        printf("["); sppf_node_str2(current_node); printf("]\n");
+        printf("["); sppf_node_str2(current_node, edge->body_idx); printf("]\n");
 
         //for each list of children, expand each child (noting that the first child of each list has continue_line=true)
-        set* packed_children_set = children->data;
-        const uint64_t num_packs = set_size(packed_children_set);
+        const uint64_t num_packs = set_size(edge->children.indices);
         for (size_t i = 0; i < num_packs; i++)
         {
             //print lines for previous levels
@@ -620,7 +631,7 @@ void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_level
             printf("%s───", i == num_packs - 1 ? "└" : "├");
             bool_array_push(open_levels, i != num_packs - 1);
 
-            uint64_t children_idx = *(uint64_t*)set_get_at_index(packed_children_set, i)->data;
+            uint64_t children_idx = *(uint64_t*)set_get_at_index(edge->children.indices, i)->data;
             vect* children_vect = set_get_at_index(s->children, children_idx)->data;
             const uint64_t num_children = vect_size(children_vect);
             for (size_t j = 0; j < num_children; j++)
@@ -669,8 +680,7 @@ void sppf_str_noncyclic_inner(sppf* s, uint64_t node_idx, bool_array* open_level
                 printf("%s── ", branch_type);
                 bool_array_push(open_levels, open_level);
 
-
-
+                //expand the current child
                 uint64_t child_idx = *(uint64_t*)vect_get(children_vect, j)->data;
                 sppf_str_noncyclic_inner(s, child_idx, open_levels);
 
@@ -709,6 +719,23 @@ void sppf_str_print_line_num(uint64_t line_num, uint64_t line_num_width)
     printf("%"PRIu64" ", line_num);
 }
 
+
+/**
+ * Print out a string representation for an SPPF edge object
+ */
+void sppf_edge_str(sppf_edge* e)
+{
+    printf("SPPF edge{body_idx: %"PRIu64", children: ", e->body_idx);
+    if (e->packed)
+    {
+        set_str(e->children.indices);
+    }
+    else
+    {
+        printf("{%"PRIu64"}", e->children.index);
+    }
+    printf("}");
+}
 
 
 /**
@@ -784,6 +811,10 @@ sppf_node* new_sppf_inner_node(uint64_t head_idx, uint64_t body_idx, uint64_t so
     return n;
 }
 
+
+/**
+ * Create the struct for the data of an SPPF inner node.
+ */
 sppf_node sppf_inner_node_struct(uint64_t head_idx, uint64_t body_idx, uint64_t source_start_idx, uint64_t source_end_idx)
 {
     sppf_node n = (sppf_node){
@@ -805,8 +836,32 @@ sppf_node sppf_inner_node_struct(uint64_t head_idx, uint64_t body_idx, uint64_t 
 obj* new_sppf_node_obj(sppf_node* n)
 {
     obj* N = malloc(sizeof(obj));
-    *N = (obj){.type=SPPFNode_t, .data=n};
+    *N = obj_struct(SPPFNode_t, n);
     return N;
+}
+
+
+/**
+ * Create a new non-packed SPPF edge object. Can later be transformed into a 
+ * packed node by changing edge->packed = true, and replacing child_idx with a
+ * set of indices for the children.
+ */
+sppf_edge* new_sppf_nonpacked_edge(uint64_t body_idx, uint64_t child_idx)
+{
+    sppf_edge* e = malloc(sizeof(sppf_edge));
+    *e = (sppf_edge){.packed=false, .body_idx=body_idx, .children.index=child_idx};
+    return e;
+}
+
+
+/**
+ * Create a new SPPF edge wrapped in an object
+ */
+obj* new_sppf_edge_obj(sppf_edge* e)
+{
+    obj* E = malloc(sizeof(obj));
+    *E = obj_struct(SPPFEdge_t, e);
+    return E;
 }
 
 
@@ -908,9 +963,10 @@ void sppf_node_str(sppf_node* n)
 
 
 /**
- * version of sppf_node_str used for printing nodes when printing the whole SPPF tree
+ * version of sppf_node_str used for printing nodes when printing the whole SPPF tree.
+ * body_idx is only used for inner nodes, and may be (uint64_t)-1 otherwise
  */
-void sppf_node_str2(sppf_node* n)
+void sppf_node_str2(sppf_node* n, uint64_t body_idx)
 {
     switch (n->type)
     {
@@ -936,7 +992,7 @@ void sppf_node_str2(sppf_node* n)
         case sppf_inner:
         {
             obj_str(metaparser_get_symbol(n->node.inner.head_idx));
-            // printf(":%"PRIu64, n->node.inner.body_idx);
+            printf(":%"PRIu64, body_idx);
             break;
         }
     }
@@ -984,6 +1040,18 @@ void sppf_node_free(sppf_node* n)
     free(n);
 }
 
+
+/**
+ * Release allocated resources for the SPPF edge.
+ */
+void sppf_edge_free(sppf_edge* e)
+{
+    if (e->packed)
+    {
+        set_free(e->children.indices);
+    }
+    free(e);
+}
 
 
 
