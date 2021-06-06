@@ -783,7 +783,7 @@ sppf_node* new_sppf_nullable_symbol_node(uint64_t symbol_idx)
     sppf_node* n = malloc(sizeof(sppf_node));
     vect* string = new_vect();
     vect_append(string, new_uint_obj(symbol_idx));
-    *n = (sppf_node){.type=sppf_nullable, .node.nullable=new_vect(string)};
+    *n = (sppf_node){.type=sppf_nullable, .node.nullable=string};
     return n;
 }
 
