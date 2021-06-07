@@ -1003,6 +1003,7 @@ set* metaparser_get_production_bodies(uint64_t head_idx)
     {
         //print out the head symbol too...
         printf("ERROR: no production bodies exist for head "); obj_str(metaparser_get_symbol(head_idx)); printf("\n");
+        exit(1);
         return NULL;
     }
     return bodies_obj->data;

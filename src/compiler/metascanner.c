@@ -2,6 +2,7 @@
 #define METASCANNER_C
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "utilities.h"
 #include "ustring.h"
@@ -326,6 +327,7 @@ obj* scan(char** src)
     }
 
     printf("ERROR: no token was recognized on input:\n```\n%s\n```\n", *src);
+    exit(1);
     return NULL;
 }
 
