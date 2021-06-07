@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <inttypes.h>
 
 #include "object.h"
 #include "tuple.h"
@@ -251,11 +252,11 @@ void obj_str(obj* o)
         case Boolean_t: printf(*(bool*)o->data ? "true" : "false"); break;
         case Character_t: unicode_str(*(uint32_t*)o->data); break;
         case CharSet_t: charset_str(o->data); break;
-        case Integer_t: printf("%ld", *(int64_t*)o->data); break;
-        case UInteger_t: printf("%lu", *(uint64_t*)o->data); break;
+        case Integer_t: printf("%"PRId64, *(int64_t*)o->data); break;
+        case UInteger_t: printf("%"PRIu64, *(uint64_t*)o->data); break;
         case Pointer_t: printf("%p", o->data); break;
         // case UIntNTuple_t: tuple_str(o->data); break;
-        case String_t: printf("%s", o->data); break;
+        case String_t: printf("%s", (char*)o->data); break;
         case UnicodeString_t: ustring_str(o->data); break;
         case MetaToken_t: metatoken_repr(o->data); break;
         case MetaItem_t: metaitem_str(o->data); break;

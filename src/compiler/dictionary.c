@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <assert.h>
+#include <inttypes.h>
 
 #include "utilities.h"
 #include "object.h"
@@ -441,7 +442,7 @@ void dict_repr(dict* d)
     {
         if (i != 0) printf(",\n           ");
         dict_entry e = d->entries[i];
-        printf("[%lu, ", e.hash);
+        printf("[%"PRIu64", ", e.hash);
         obj_str(e.key);
         printf(", ");
         obj_str(e.value);

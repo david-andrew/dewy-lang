@@ -2,6 +2,7 @@
 #define GSS_C
 
 #include <stdio.h>
+#include <inttypes.h>
 
 #include "gss.h"
 #include "utilities.h"
@@ -332,7 +333,7 @@ bool gss_idx_equals(gss_idx* left, gss_idx* right)
  */
 void gss_idx_str(gss_idx* i)
 {
-    printf("(%zu, %zu)", i->nodes_idx, i->node_idx);
+    printf("(%"PRIu64", %"PRIu64")", i->nodes_idx, i->node_idx);
 }
 
 

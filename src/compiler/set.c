@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "utilities.h"
 #include "object.h"
@@ -465,7 +466,7 @@ void set_repr(set* s)
     {
         if (i != 0) printf(",\n           ");
         set_entry e = s->entries[i];
-        printf("[%lu, ", e.hash);
+        printf("[%"PRIu64", ", e.hash);
         obj_str(e.item);
         printf("]");
     }
