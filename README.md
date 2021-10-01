@@ -16,6 +16,12 @@ The project includes several test grammar/source file pairs in DewySpeak/tests/.
 
 Note that the compiler-compiler is still in development, and can/will crash on incorrect grammar specifications (better error handling coming soon™), though source files shouldn't be able to cause crashes.
 
+To run source text directly, you can use here strings like so
+
+    $ ./dewy /path/to/grammar/file /dev/stdin <<< 'source text'
+
+note that this will always add a newline to the end of the source text
+
 ## Language Documentation
 Currently incomplete documentation is available at: https://david-andrew.github.io/dewy/
 
