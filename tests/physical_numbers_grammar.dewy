@@ -39,7 +39,13 @@
 #unit = (#prefix_symbol ? #unit_symbol) | (#prefix_name ? (#unit_name | #unit_plural));
 
 
-#physical_number = #float (' '? #unit)?;
+// expressions for units
+#unit_expr = #A;
+#A = #A ' '* '*' ' '* #B | #A ' '* '/' ' '* #B | #B | #A ' '* #B | #B;
+#B = #C ' '* '^' ' '* #int | #C;
+#C = #unit | '(' ' '* #unit_expr ' '* ')';
+
+#physical_number = #float (' '? #unit_expr)?;
 
 
 #start = (#physical_number | #unit) '\n'?;
