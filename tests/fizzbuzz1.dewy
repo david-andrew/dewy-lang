@@ -1,0 +1,18 @@
+taps = [3 -> 'Fizz' 5 -> 'Buzz' /{7 -> 'Bazz' 11 -> 'Bar'}/]
+range = [0:100)
+
+//indexing at [, :] and [:,] adds singleton dimensions
+word_bools = range[, :] .% taps.keys[:,] .=? 0
+
+// ` means transpose, which behaves like python's zip()
+words_grid = [taps.values word_bools]`.map(
+    [word bools] => bools.map(b => if b word else '')
+)
+
+raw_lines = word_grid`.map(line_words => line_words.join(''))
+
+lines = [raw_lines range]`.map(
+    (raw_line, i) => if raw_line.length =? 0 '{i}' else raw_line
+)
+
+lines.join('\n') |> printl

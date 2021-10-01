@@ -1,0 +1,95 @@
+//example dewy grammar. missing many features, including types
+//TODO-> case insensitive keywords, 
+
+//whitespace
+#s = [\x20\x9] | #block_comment;//non-newline containing whitespace (newlines in the block comment are ignored)
+#ws = [\x20\x9\n\xD];           //whitespace characters
+#w = #ws | #comment;            //any text ignored by compiler
+#comment = #line_comment | #block_comment;
+#line_comment = '/' '/' (ξ - '\n')* '\n';
+#block_comment = '/' '{' ((ξ - '}') | ('}' (ξ - '/')))* '}/';
+
+
+//expressions and statements
+#expr = #id | #int | #bool | #str | #box | #fn | #range | #bool_bin_expr | #math_bin_expr | #broadcast_bin_expr | #assign_expr | #in_expr | #loop_expr | #do_loop_expr | #do_loop_do_expr 
+| #if_expr | #call | #member | #index | #scope | #noscope;
+
+#stmnt = #assign_stmnt | #break_stmnt | #continue_stmnt;
+
+//literal expressions
+#id = [a-zA-Z~!$&_?] [a-zA-Z0-9~!@#$&_?]*;
+#hashtag = '#' #id;
+
+#int = [0-9]*;
+
+#bool = 'true' | 'false';
+
+#str = "'" #sngl_str "'";
+#str = '"' #dbl_str '"';
+#esc = '\\' ξ;
+#interp = '{' #w* #expr #w* '}';
+#sngl_str = ((ξ - [\\'{}]) | #esc | #interp)*;
+#dbl_str = ((ξ - [\\"{}]) | #esc | #interp)*;
+
+#box = #obj | #arr | #map | #bimap | #set;
+#obj = '[' #w* (#assign_stmnt #w*)* ']';
+#arr = '[' #w* (#expr #w*)* ']';
+#map = '[' #w* (#expr #w* '->' #w* #expr #w*)* ']';
+#bimap = '[' #w* (#expr #w* '<->' #w* #expr #w*)* ']';
+#set = 'set[' #w* (#expr #w*)* ']'; //set syntax still work in progress
+
+#fn = #fn_args #w* '=>' #w* (#expr | #stmnt);
+#fn_args = #id | '(' #w* (#id #w* (',' #w* #id #w*)*)? ')';
+
+#range = #range_inner | [(\[] #w* #range_inner #w* [)\]];
+#range_inner = #expr #w* ':' #w* #expr; //should exclude range expressions in the future
+
+//composed expressions and statements
+
+#bool_bin_op = 'in?' | '=?' | '>?' | '<?' | '>=?' | '<=?' | '≥?' | '≤?';
+#bool_bin_expr = #expr #w* ('not?' #w*)? #bool_bin_op #w* #expr;
+
+#math_bin_op = [+\-/%^];
+#math_bin_expr = #expr #w* #math_bin_op #w* #expr;
+
+#broadcast_bin_expr = #expr #w* '.' (#math_bin_op | (('not?' #w*)? #bool_bin_op)) #w* #expr;
+
+
+#assign_stmnt = (#id | #unpack_struct) #w* '=' #w* #expr;
+#assign_expr = '(' #w* #assign_stmnt #w* ')';
+
+#unpack_struct = '[' #w* (#id | #unpack_struct) #w* (',' #w* (#id | #unpack_struct) #w*)* ']';
+
+#in_expr = (#id | #unpack_struct) #w* 'in' #w* #expr;
+
+
+#return_stmnt = 'return' (#s* #expr)?;
+#express_stmnt = 'express' (#s* #expr)?;
+
+#break_stmnt = 'break' (#s* #hashtag)?;
+#continue_stmnt = 'continue' (#s* #hashtag)?;
+
+#loop_expr = 'loop' #w* #expr #w* #expr;
+#do_loop_expr = #expr #w* 'do' #w* 'loop' #w* #expr;
+#do_loop_do_expr = #expr #w* 'do' #w* 'loop' #w* 'do' #w* #expr #w* #expr;
+
+#if_expr = 'if' #w* #expr #w* #expr (#w* 'else' #w* #expr)?;
+#call = #expr '(' #w* (#expr #w* (',' #w* #expr #w*)*)? ')';
+#member = #expr #w* '.' #id;
+#index = #expr '[' #w* (#idx #w* (',' #w* #idx #w*)*)? ']';
+
+//special expressions that can be used inside of an index[] for a given dimension.
+#idx = #int | #range | #idx_range | ϵ;
+#idx_range = (#expr | #end_idx_expr)? ':' (#expr | #end_idx_expr)?;
+#end_idx_expr = 'end' (#w* [+\-] #w* #expr)?;
+
+//groupings (similar to wrapping expressions in parenthesis, but more general)
+#scope = '{' #context '}';
+#noscope = '(' #context ')';
+
+//basically the body of any context, e.g. a whole script, conditional block, etc.
+#context = #w* ((#expr | #stmnt) #w*)*;
+
+
+
+#start = #context;
