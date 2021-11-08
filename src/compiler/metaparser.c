@@ -736,8 +736,25 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
 
     //TODO->filters/other extensions of the parser
     case metaast_greaterthan:
+        // {
+        //     //crete an anonymous head if it wasn't provided
+        //     head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
+
+        //     //#rule = #A > #B =>
+        //     // #rule = #A
+        //     // #rule = #B
+        //     // insert special case of #A > #B in the grammar
+
+        //     metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.left);
+        //     metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.right);
+
+        //     //set the precedence of #A > #B in the special precedence table
+        //     metaparser_set_rule_precedence
+
+        // }
         printf("ERROR: Cannot generate CFG sentence as greater than `>` operator has not yet been implemented\n");
         break;
+
     case metaast_lessthan:
         printf("ERROR: Cannot generate CFG sentence as less than `<` operator has not yet been implemented\n");
         break;
