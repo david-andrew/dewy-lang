@@ -188,6 +188,11 @@ bool is_identifier_char(char c)
     return is_alphanum_char(c) || is_identifier_symbol_char(c);
 }
 
+bool is_hashtag_identifier_char(char c)
+{
+    return is_alphanum_char(c) || c == '_';
+}
+
 bool is_identifier_symbol_char(char c)
 {
     return c == '~' || c == '!' || c == '@' || c == '#' || c == '$' || c == '&' || c == '_' || c == '?';
@@ -335,7 +340,7 @@ obj* scan(char** src)
 /**
  * Used as identifiers in meta syntax rules.
  * 
- * #hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]*;
+ * #hashtag = '#' [a-zA-Z] [a-zA-Z0-9_]*;
  */
 obj* match_hashtag(char** src)
 {
@@ -343,7 +348,7 @@ obj* match_hashtag(char** src)
     {
         //scan to end of identifier
         int i = 2;
-        while (is_identifier_char((*src)[i])) { i++; }
+        while (is_hashtag_identifier_char((*src)[i])) { i++; }
         obj* t = new_metatoken_obj(hashtag, ustring_charstar_substr(*src, 0, i-1));
         *src += i;
 

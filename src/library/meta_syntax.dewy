@@ -56,7 +56,7 @@
 #set = #anyset | #char | #caseless_char | #hex | #charset | #compliment | #diff | #intersect | #union;
 #expr = #eps | #set | #group | #capture | #string | #caseless_string | #star | #plus | #option | #count 
     | #cat | #or | #greaterthan | #lessthan | #reject | #nofollow | #identifier;
-#hashtag = '#' [a-zA-Z] [a-zA-Z0-9~!@#$&_?]* / [a-zA-Z0-9~!@#$&_?];
+#hashtag = '#' [a-zA-Z] [a-zA-Z0-9_]* / [a-zA-Z0-9_];
 #rule = #hashtag #ws '=' #ws #expr #ws ';';
 #grammar = (#ws #rule)* #ws;
 #start = #grammar;

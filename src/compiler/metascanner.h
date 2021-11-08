@@ -27,6 +27,7 @@ metascanner_state pop_metascanner_state();
 
 //helper functions
 bool is_identifier_char(char c);
+bool is_hashtag_identifier_char(char c);
 bool is_identifier_symbol_char(char c);
 bool is_alpha_char(char c);
 bool is_dec_digit(char c);
