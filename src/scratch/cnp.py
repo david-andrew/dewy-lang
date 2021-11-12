@@ -121,15 +121,15 @@ def PrintCode(slot: Slot):
     #X ::= α Y• β:
 
     if (len(slot.item.body) == 0):
-        print(f'Υ := Υ ∪ {{({slot.head} ::= {eps}, cI, cI, cI)}}')
+        print(f'    Υ := Υ ∪ {{({slot.head} ::= {eps}, cI, cI, cI)}}')
     elif isinstance(slot.item[slot.item.dot - 1], Terminal):
-        print(f'    bsrAdd({slot}, cU, cI, cI + 1)')
-        print(f'    cI += 1')
+        print(f'        bsrAdd({slot}, cU, cI, cI + 1)')
+        print(f'        cI += 1')
     else:
         assert(isinstance(slot.item[slot.item.dot - 1], NonTerminal))
-        print(f'    call({slot}, cU, cI)')
-        print(f'    goto L0')
-        print(f'{slot.head} ::= {slot.item}:')
+        print(f'        call({slot}, cU, cI)')
+        print(f'        goto L0')
+        print(f'    {slot.head} ::= {slot.item}:')
 
 
 
@@ -164,29 +164,45 @@ if __name__ == '__main__':
 
 
 
-    #for now, fill out the CNP template for just a single alternative in a single rule
+    # fill out the CNP template according to the description in the paper
+    print(f'''m = len(input)
+I = [c for c in input] + [$]
+u0 = CRF_Node(S, 0)
+U = ∅
+R = ∅
+P = ∅
+Υ = ∅
+ntAdd(S, 0)
+while len(R) > 0:
+    L, cU, cI = R.pop() #remove a descriptor (L, k, j) from R
+    goto L
+    ''')
     for rule in rules:
         head = rule.head
         for body in rule.bodies:
             slot = Slot(head, Item(body, 0))
-            print(f'{slot}:') #print the first label
+            print(f'    {slot}:') #print the first label
             slot.item.advance()
             while True: #while not at end of item
-                # print(f'    Code({slot})')
                 PrintCode(slot)
                 if slot.item.at_end():
                     break
-                print(f'    if not testSelect(I[cI], {head}, {body[slot.item.dot:]}):')
-                print(f'        goto L0')
+                print(f'        if not testSelect(I[cI], {head}, {body[slot.item.dot:]}):')
+                print(f'            goto L0')
                 slot.item.advance()
-            print(f'    if I[cI] ∈ follow({head}):')
-            print(f'        rtn({head}, cU , cI) ')
-            print(f'    goto L0')
+            print(f'        if I[cI] ∈ follow({head}):')
+            print(f'            rtn({head}, cU , cI) ')
+            print(f'        goto L0')
+    print(f'''
+if (for some α and l, (S ::= α, 0, l, m) ∈ Υ):
+    report success
+else:
+    report failure
+    ''')
 
 
 
 
 
-
-
-    # pdb.set_trace()
+    ##now we are going to adjust/rewrite the above process so that it can be computed on a per-slot basis
+    
