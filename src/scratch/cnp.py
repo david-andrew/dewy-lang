@@ -126,7 +126,7 @@ def PrintCode(slot: Slot):
     #X ::= α Y• β:
 
     if (len(slot.item.body) == 0):
-        print(f'    Υ := Υ ∪ {{({slot.head} ::= {eps}, cI, cI, cI)}}')
+        print(f'        Υ := Υ ∪ {{({slot.head} ::= {eps}, cI, cI, cI)}}')
     elif isinstance(slot.item[slot.item.dot - 1], Terminal):
         print(f'        bsrAdd({slot}, cU, cI, cI + 1)')
         print(f'        cI += 1')
@@ -179,6 +179,7 @@ if __name__ == '__main__':
     A = NonTerminal('A')
     B = NonTerminal('B')
     C = NonTerminal('C')
+    D = NonTerminal('D')
 
     ACaB = Sentence([A, C, 'a', B])
     ABaa = Sentence([A, B, 'a', 'a'])
@@ -187,13 +188,16 @@ if __name__ == '__main__':
     bB = Sentence(['b', B])
     b = Sentence(['b'])
     bC = Sentence(['b', C])
+    ABCDAaA = Sentence([A, B, C, D, 'a', A])
+    empty = Sentence([])
 
     #create the rules
     rules = [
-        Rule(S, [ACaB, ABaa]),
+        Rule(S, [ACaB, ABaa, ABCDAaA, ]),
         Rule(A, [aA, a]),
         Rule(B, [bB, b]),
-        Rule(C, [bC, b])
+        Rule(C, [bC, b]),
+        Rule(D, [empty])
     ]
 
 
@@ -220,14 +224,17 @@ while len(R) > 0:
         for body in rule.bodies:
             slot = Slot(head, Item(body, 0))
             print(f'    {slot}:') #print the first label
-            slot.item.advance()
-            while True: #while not at end of item
+            if slot.item.at_end():
                 PrintCode(slot)
-                if slot.item.at_end():
-                    break
-                print(f'        if not testSelect(I[cI], {head}, {body[slot.item.dot:]}):')
-                print(f'            goto L0')
+            else:
                 slot.item.advance()
+                while True: #while not at end of item
+                    PrintCode(slot)
+                    if slot.item.at_end():
+                        break
+                    print(f'        if not testSelect(I[cI], {head}, {body[slot.item.dot:]}):')
+                    print(f'            goto L0')
+                    slot.item.advance()
             print(f'        if I[cI] ∈ follow({head}):')
             print(f'            rtn({head}, cU, cI)')
             print(f'        goto L0')
@@ -299,8 +306,13 @@ else:
 
     #write the current contents of the buffer to the terminal and a file
     out2 = buf.getvalue()
-
+    
     sys.stdout = sys.__stdout__
+
+    #check if the strings produced the same output
+    if out1 != out2:
+        print('different strings produced by two approaches')
+
     with open('CNP1.txt', 'w') as f:
         f.write(out1)
     with open('CNP2.txt', 'w') as f:
