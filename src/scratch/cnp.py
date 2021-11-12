@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Set, Optional, Union
+import sys
+from io import StringIO
 
 import pdb
 
@@ -135,6 +137,35 @@ def PrintCode(slot: Slot):
         print(f'    {slot.head} ::= {slot.item}:')
 
 
+def printLabelBody(label: Slot):
+    #copy the slot so we don't modify the original
+    originalLabel = label
+    label = Slot(label.head, Item(label.item.body, label.item.dot))
+    if label.item.dot == 0 and len(label.item.body) == 0:
+        print(f'        Υ := Υ ∪ {{({label.head} ::= {eps}, cI, cI, cI)}}')
+    else:
+        while not label.item.at_end() and isinstance(label.item[label.item.dot], Terminal):
+            if label.item.dot != 0:
+                print(f'        if not testSelect(I[cI], {label.head}, {label.item.body[label.item.dot:]}):')
+                print(f'            goto L0')
+            label.item.advance()
+            print(f'        bsrAdd({label}, cU, cI, cI + 1)')
+            print(f'        cI += 1')
+
+        if not label.item.at_end():
+            if label.item.dot != 0:
+                print(f'        if not testSelect(I[cI], {label.head}, {label.item.body[label.item.dot:]}):')
+                print(f'            goto L0')
+            label.item.advance()
+            print(f'        call({label}, cU, cI)')
+
+    if originalLabel.item.at_end() or label.item.at_end() and isinstance(label.item[label.item.dot - 1], Terminal):
+       print(f'        if I[cI] ∈ follow({label.head}):')
+       print(f'            rtn({label.head}, cU, cI)')
+    
+    print(f'        goto L0')
+
+
 
 if __name__ == '__main__':
     #create a simple example grammar
@@ -168,6 +199,10 @@ if __name__ == '__main__':
 
 
     # fill out the CNP template according to the description in the paper
+    #redirect stdout to a buffer so that it can be easily saved to a file
+    buf = StringIO()
+    sys.stdout = buf
+
     print(f'''m = len(input)
 I = [c for c in input] + [$]
 u0 = CRF_Node(S, 0)
@@ -194,7 +229,7 @@ while len(R) > 0:
                 print(f'            goto L0')
                 slot.item.advance()
             print(f'        if I[cI] ∈ follow({head}):')
-            print(f'            rtn({head}, cU , cI) ')
+            print(f'            rtn({head}, cU, cI)')
             print(f'        goto L0')
     print(f'''
 if (for some α and l, (S ::= α, 0, l, m) ∈ Υ):
@@ -204,11 +239,20 @@ else:
     ''')
 
 
+    #write the current contents of the buffer to the terminal and a file
+    out1 = buf.getvalue()
+
+    #reset the buffer
+    buf.seek(0)
+    buf.truncate()
+
+
+
 
 
 
     #now we are going to adjust/rewrite the above process so that it can be computed on a per-slot basis
-    
+    sys.stdout = buf
     #create the list of labels to be used by the CNP template
     labels = []
     for rule in rules:
@@ -230,5 +274,39 @@ else:
                     break
                 slot.item.advance()
 
+    #print out the CNP template for each rule, generating the rule body according to the label slot
+    print(f'''m = len(input)
+I = [c for c in input] + [$]
+u0 = CRF_Node(S, 0)
+U = ∅
+R = ∅
+P = ∅
+Υ = ∅
+ntAdd(S, 0)
+while len(R) > 0:
+    L, cU, cI = R.pop() #remove a descriptor (L, k, j) from R
+    goto L
+    ''')
+    for label in labels:
+        print(f'    {label}:')
+        printLabelBody(label)
+    print(f'''
+if (for some α and l, (S ::= α, 0, l, m) ∈ Υ):
+    report success
+else:
+    report failure
+    ''')
 
-    pdb.set_trace()
+    #write the current contents of the buffer to the terminal and a file
+    out2 = buf.getvalue()
+
+    sys.stdout = sys.__stdout__
+    with open('CNP1.txt', 'w') as f:
+        f.write(out1)
+    with open('CNP2.txt', 'w') as f:
+        f.write(out2)
+    # print(out1)
+    # print(out2)
+
+
+    # pdb.set_trace()
