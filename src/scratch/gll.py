@@ -66,6 +66,8 @@ class Item:
 
     #function for progressing the dot in the item
     def advance(self):
+        if (len(self.body) <= self.dot):
+            raise Exception(f'Cannot advance item ({self}), already at max position')
         self.dot += 1
 
 
