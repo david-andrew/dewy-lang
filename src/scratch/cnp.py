@@ -1,0 +1,192 @@
+#quick and dirty attempt to implement a scannerless GLL parser, which will inform developing the C implementation
+
+from dataclasses import dataclass
+from typing import List, Tuple, Dict, Set, Optional, Union
+
+import pdb
+
+Terminal = str
+
+@dataclass
+class NonTerminal:
+    name: str
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return self.name
+
+eps = 'ϵ'
+
+@dataclass
+class Sentence:
+    symbols: List[Terminal | NonTerminal]
+
+    #make slicing a sentence return a new sentence
+    def __getitem__(self, index):
+        s = self.symbols[index]
+        return Sentence(s) if isinstance(s, List) else s
+
+    def __str__(self):
+        return ''.join(str(x) for x in self.symbols)
+
+    def __repr__(self):
+        return str(self)
+
+    def __len__(self):
+        return len(self.symbols)
+
+    def __iter__(self):
+        return iter(self.symbols)
+
+
+@dataclass
+class Rule:
+    head: NonTerminal
+    bodies: List[Sentence]
+
+    def __str__(self):
+        return f'{self.head} ::= {" | ".join([str(b) for b in self.bodies])}'
+
+    def __repr__(self):
+        return str(self)
+
+    def __getitem__(self, index):
+        return self.bodies[index]
+
+
+@dataclass
+class Item:
+    body: Sentence
+    dot: int
+
+    def __getitem__(self, index):
+        return self.body[index]
+
+    #print the item with the unicode dot in the correct position in the sentence
+    def __str__(self):
+        return str(self.body[:self.dot]) + '•' + str(self.body[self.dot:])
+
+    def __repr__(self):
+        return str(self)
+
+    #function for progressing the dot in the item
+    def advance(self):
+        if (len(self.body) <= self.dot):
+            raise Exception(f'Cannot advance item ({self}), already at max position')
+        self.dot += 1
+    
+    #check if at the end of the item
+    def at_end(self):
+        return self.dot == len(self.body)
+
+    #iterate over the item by advancing the dot until at the end (return a new item at each step)
+    # def __iter__(self):
+    #     return Slot(self.body, self.dot)
+
+    # def __next__(self):
+    #     if self.at_end():
+    #         raise StopIteration
+    #     self.advance()
+    #     return self
+
+
+@dataclass
+class Slot:
+    head: NonTerminal
+    item: Item
+
+    def __getitem__(self, index):
+        return self.item[index]
+
+    def __str__(self):
+        return f'{self.head} ::= {self.item}'
+
+
+
+def PrintCode(slot: Slot):
+    #determine which type of slot
+    
+    #slot with empty body, `code(X ::= •)` prints: 
+    #    Υ := Υ ∪ {(X ::= ϵ, cI , cI , cI )}
+    
+    #slot with dot after a terminal, `code(X ::= α a• β)` prints:
+    #    bsrAdd(X ::= α a• β, cU, cI, cI + 1)
+    #    goto L0
+
+    #slot with dot after a nonterminal, `code(X ::= α Y• β)` prints:
+    #    call(X ::= α Y• β, cU, cI)
+    #    goto L0
+    #X ::= α Y• β:
+
+    if (len(slot.item.body) == 0):
+        print(f'Υ := Υ ∪ {{({slot.head} ::= {eps}, cI, cI, cI)}}')
+    elif isinstance(slot.item[slot.item.dot - 1], Terminal):
+        print(f'    bsrAdd({slot}, cU, cI, cI + 1)')
+        print(f'    cI += 1')
+    else:
+        assert(isinstance(slot.item[slot.item.dot - 1], NonTerminal))
+        print(f'    call({slot}, cU, cI)')
+        print(f'    goto L0')
+        print(f'{slot.head} ::= {slot.item}:')
+
+
+
+if __name__ == '__main__':
+    #create a simple example grammar
+    #S ::= ACaB | ABaa
+    #A ::= aA | a
+    #B ::= bB | b
+    #C ::= bC | b
+
+    #create the non-terminals
+    S = NonTerminal('S')
+    A = NonTerminal('A')
+    B = NonTerminal('B')
+    C = NonTerminal('C')
+
+    ACaB = Sentence([A, C, 'a', B])
+    ABaa = Sentence([A, B, 'a', 'a'])
+    aA = Sentence(['a', A])
+    a = Sentence(['a'])
+    bB = Sentence(['b', B])
+    b = Sentence(['b'])
+    bC = Sentence(['b', C])
+
+    #create the rules
+    rules = [
+        Rule(S, [ACaB, ABaa]),
+        Rule(A, [aA, a]),
+        Rule(B, [bB, b]),
+        Rule(C, [bC, b])
+    ]
+
+
+
+    #for now, fill out the CNP template for just a single alternative in a single rule
+    for rule in rules:
+        head = rule.head
+        for body in rule.bodies:
+            slot = Slot(head, Item(body, 0))
+            print(f'{slot}:') #print the first label
+            slot.item.advance()
+            while True: #while not at end of item
+                # print(f'    Code({slot})')
+                PrintCode(slot)
+                if slot.item.at_end():
+                    break
+                print(f'    if not testSelect(I[cI], {head}, {body[slot.item.dot:]}):')
+                print(f'        goto L0')
+                slot.item.advance()
+            print(f'    if I[cI] ∈ follow({head}):')
+            print(f'        rtn({head}, cU , cI) ')
+            print(f'    goto L0')
+
+
+
+
+
+
+
+    # pdb.set_trace()
