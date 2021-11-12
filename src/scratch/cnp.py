@@ -102,6 +102,9 @@ class Slot:
 
     def __str__(self):
         return f'{self.head} ::= {self.item}'
+    
+    def __repr__(self):
+        return str(self)
 
 
 
@@ -204,5 +207,28 @@ else:
 
 
 
-    ##now we are going to adjust/rewrite the above process so that it can be computed on a per-slot basis
+    #now we are going to adjust/rewrite the above process so that it can be computed on a per-slot basis
     
+    #create the list of labels to be used by the CNP template
+    labels = []
+    for rule in rules:
+        head = rule.head
+        for body in rule.bodies:
+            slot = Slot(head, Item(body, 0))
+            labels.append(Slot(slot.head, Item(slot.item.body, 0)))
+            
+
+            if len(slot.item.body) == 0:
+                continue
+            slot.item.advance()
+
+            #iterate over the slot, and insert a label for slots where the dot is after a NonTerminal
+            while True: #not slot.item.at_end():
+                if isinstance(slot.item[slot.item.dot - 1], NonTerminal):
+                    labels.append(Slot(slot.head, Item(slot.item.body, slot.item.dot)))
+                if slot.item.at_end():
+                    break
+                slot.item.advance()
+
+
+    pdb.set_trace()
