@@ -95,6 +95,17 @@ class Item:
 
 
 @dataclass
+class SubTerm:
+    head: NonTerminal | None
+    body: Sentence
+
+    def __str__(self):
+        return f'{self.head} ::= {self.body}' if self.head else str(self.body)
+
+    def __repr__(self):
+        return str(self)
+
+@dataclass
 class Slot:
     head: NonTerminal
     item: Item
@@ -165,6 +176,59 @@ def printLabelBody(label: Slot):
     
     print(f'        goto L0')
 
+
+#global sets
+# Y: Set[Tuple[SubTerm, int, int, int]] = set()
+
+#get the list of labels to be used in the CNP algorithm
+def getLabels(rules: List[Rule]):
+    labels = []
+    for rule in rules:
+        head = rule.head
+        for body in rule.bodies:
+            slot = Slot(head, Item(body, 0))
+            labels.append(Slot(slot.head, Item(slot.item.body, 0)))
+            
+            if len(slot.item.body) == 0:
+                continue
+
+            #iterate over the slot, and insert a label for slots where the dot is after a NonTerminal
+            while True:
+                slot.item.advance()
+                if isinstance(slot.item[slot.item.dot - 1], NonTerminal):
+                    labels.append(Slot(slot.head, Item(slot.item.body, slot.item.dot)))
+                if slot.item.at_end():
+                    break
+    return labels
+
+def handleLabel(label: Slot):
+    #copy the slot so we don't modify the original
+    originalLabel = label
+    label = Slot(label.head, Item(label.item.body, label.item.dot))
+    if label.item.dot == 0 and len(label.item.body) == 0:
+        global Y
+        print(f'        Υ := Υ ∪ {{({label.head} ::= {eps}, cI, cI, cI)}}')
+    else:
+        while not label.item.at_end() and isinstance(label.item[label.item.dot], Terminal):
+            if label.item.dot != 0:
+                print(f'        if not testSelect(I[cI], {label.head}, {label.item.body[label.item.dot:]}):')
+                print(f'            goto L0')
+            label.item.advance()
+            print(f'        bsrAdd({label}, cU, cI, cI + 1)')
+            print(f'        cI += 1')
+
+        if not label.item.at_end():
+            if label.item.dot != 0:
+                print(f'        if not testSelect(I[cI], {label.head}, {label.item.body[label.item.dot:]}):')
+                print(f'            goto L0')
+            label.item.advance()
+            print(f'        call({label}, cU, cI)')
+
+    if originalLabel.item.at_end() or label.item.at_end() and isinstance(label.item[label.item.dot - 1], Terminal):
+       print(f'        if I[cI] ∈ follow({label.head}):')
+       print(f'            rtn({label.head}, cU, cI)')
+    
+    print(f'        goto L0')
 
 
 if __name__ == '__main__':
@@ -255,31 +319,9 @@ else:
 
 
 
-
-
-
     #now we are going to adjust/rewrite the above process so that it can be computed on a per-slot basis
-    sys.stdout = buf
     #create the list of labels to be used by the CNP template
-    labels = []
-    for rule in rules:
-        head = rule.head
-        for body in rule.bodies:
-            slot = Slot(head, Item(body, 0))
-            labels.append(Slot(slot.head, Item(slot.item.body, 0)))
-            
-
-            if len(slot.item.body) == 0:
-                continue
-            slot.item.advance()
-
-            #iterate over the slot, and insert a label for slots where the dot is after a NonTerminal
-            while True: #not slot.item.at_end():
-                if isinstance(slot.item[slot.item.dot - 1], NonTerminal):
-                    labels.append(Slot(slot.head, Item(slot.item.body, slot.item.dot)))
-                if slot.item.at_end():
-                    break
-                slot.item.advance()
+    labels = getLabels(rules)
 
     #print out the CNP template for each rule, generating the rule body according to the label slot
     print(f'''m = len(input)
