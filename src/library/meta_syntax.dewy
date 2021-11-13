@@ -42,7 +42,9 @@
 
 //binary expr operators
 #or = (#expr #ws '|' #ws #expr) - #union;                   // left or right expression
+#and = (#expr #ws '&' #ws #expr) - #intersect;              // reduce if left and right expression match
 #reject = (#expr #ws '-' #ws #expr) - #diff;                // reduce left expression only if it is not also the right expression
+#noprecede = #expr #ws '\' #ws #expr;                       // reduce right expression only if it is not preceded by left expression
 #nofollow = #expr #ws '/' #ws #expr;                        // reduce left expression only if not followed by right expression
 #greaterthan = #expr #ws '>' #ws #expr;                     // left expression has higher precedence than right expression
 #lessthan = #expr #ws '<' #ws #expr;                        // left expression has lower precedence than right expression
