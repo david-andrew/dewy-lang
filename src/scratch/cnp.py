@@ -1,7 +1,7 @@
 #quick and dirty attempt to implement a scannerless GLL parser, which will inform developing the C implementation
 
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Set, Optional, Union
+from typing import List, Mapping, Tuple, Dict, Set, Optional, Union
 import sys
 from io import StringIO
 
@@ -120,6 +120,23 @@ class Slot:
         return str(self)
 
 
+CRFNode = Tuple[NonTerminal | Slot, int]
+class CRF:
+    """a digraph whose nodes are labelled (L, j) where L is either a nonterminal or a slot"""
+    def __init__(self):
+        self.nodeMap: Mapping[CRFNode, List[CRFNode]] = {}
+
+    def add_node(self, node: CRFNode):
+        if node not in self.nodeMap:
+            self.nodeMap[node] = []
+
+    def add_edge(self, from_node: CRFNode, to_node: CRFNode):
+        if from_node not in self.nodeMap:
+            self.nodeMap[from_node] = []
+        self.nodeMap[from_node].append(to_node)
+
+
+
 
 def PrintCode(slot: Slot):
     #determine which type of slot
@@ -178,7 +195,21 @@ def printLabelBody(label: Slot):
 
 
 #global sets
-# Y: Set[Tuple[SubTerm, int, int, int]] = set()
+P: Set[Tuple[NonTerminal, int, int]] = set()
+Y: Set[Tuple[SubTerm, int, int, int]] = set()
+Descriptor = Tuple[Slot, int, int]
+R: Set[Descriptor] = set()
+U: Set[Descriptor] = set()
+input_string = 'abaa'
+m: int = len(input_string)
+I: List[str | int] = [c for c in input_string] + [0]
+cI: int = -1
+cU: int = -1
+crf: CRF = CRF()
+
+#first/follow set. ϵ is represented by ''
+first: Dict[NonTerminal, Set[Terminal]] = {}
+follow: Dict[NonTerminal, Set[Terminal]] = {}
 
 #get the list of labels to be used in the CNP algorithm
 def getLabels(rules: List[Rule]):
@@ -187,43 +218,56 @@ def getLabels(rules: List[Rule]):
         head = rule.head
         for body in rule.bodies:
             slot = Slot(head, Item(body, 0))
-            labels.append(Slot(slot.head, Item(slot.item.body, 0)))
+            labels.append(Slot(head, Item(body, 0)))
 
             #iterate over the slot, and insert a label for slots where the dot is after a NonTerminal
             while not slot.item.at_end():
                 slot.item.advance()
                 if isinstance(slot.item[slot.item.dot - 1], NonTerminal):
-                    labels.append(Slot(slot.head, Item(slot.item.body, slot.item.dot)))
+                    labels.append(Slot(head, Item(body, slot.item.dot)))
     return labels
 
+def testSelect(c: str | int, head: NonTerminal, string: Sentence):
+    raise NotImplementedError
+
+def bsrAdd(slot: Slot, i: int, k: int, j: int):
+    raise NotImplementedError
+
+def call(slot: Slot, i: int, j: int):
+    raise NotImplementedError
+
+def rtn(head: NonTerminal, k: int, j: int):
+    raise NotImplementedError
+
+
 def handleLabel(label: Slot):
-    #copy the slot so we don't modify the original
+    global Y, U, R, I, cI, cU, crf
+
     originalLabel = label
     label = Slot(label.head, Item(label.item.body, label.item.dot))
+
     if label.item.dot == 0 and len(label.item.body) == 0:
-        global Y
-        print(f'        Υ := Υ ∪ {{({label.head} ::= {eps}, cI, cI, cI)}}')
+        Y.add((SubTerm(label.head, Sentence([])), cI, cI, cI))
     else:
         while not label.item.at_end() and isinstance(label.item[label.item.dot], Terminal):
             if label.item.dot != 0:
-                print(f'        if not testSelect(I[cI], {label.head}, {label.item.body[label.item.dot:]}):')
-                print(f'            goto L0')
+                if not testSelect(I[cI], label.head, label.item.body[label.item.dot:]):
+                    return
             label.item.advance()
-            print(f'        bsrAdd({label}, cU, cI, cI + 1)')
-            print(f'        cI += 1')
+            bsrAdd(label, cU, cI, cI + 1)
+            cI += 1
 
         if not label.item.at_end():
             if label.item.dot != 0:
-                print(f'        if not testSelect(I[cI], {label.head}, {label.item.body[label.item.dot:]}):')
-                print(f'            goto L0')
+                if not testSelect(I[cI], label.head, label.item.body[label.item.dot:]):
+                    return
             label.item.advance()
-            print(f'        call({label}, cU, cI)')
+            call(label, cU, cI)
 
     if originalLabel.item.at_end() or label.item.at_end() and isinstance(label.item[label.item.dot - 1], Terminal):
-       print(f'        if I[cI] ∈ follow({label.head}):')
-       print(f'            rtn({label.head}, cU, cI)')
+        if I[cI] in follow[label.head]:
+            rtn(label.head, cU, cI)
     
-    print(f'        goto L0')
 
 
 if __name__ == '__main__':
