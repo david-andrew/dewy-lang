@@ -11,11 +11,10 @@ typedef struct {
     uint64_t head_idx;          //key metaparser_productions
     uint64_t production_idx;    //index metaparser_productions[head_idx]
     uint64_t position;          //location of dot in item
-    uint64_t lookahead_idx;     //index metaparser_symbols
 } metaitem;
 
 
-metaitem* new_metaitem(uint64_t head_idx, uint64_t production_idx, uint64_t position, uint64_t lookahead_idx);
+metaitem* new_metaitem(uint64_t head_idx, uint64_t production_idx, uint64_t position);
 obj* new_metaitem_obj(metaitem* i);
 bool metaitem_is_accept(metaitem* i);
 void metaitem_str(metaitem* item);

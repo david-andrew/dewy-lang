@@ -20,10 +20,12 @@
 #include "charset.h"
 #include "metaitem.h"
 #include "gotokey.h"
-#include "reduction.h"
-#include "gss.h"
-#include "sppf.h"
-#include "srnglr.h"
+#include "fset.h"
+#include "slice.h"
+// #include "reduction.h"
+// #include "gss.h"
+// #include "sppf.h"
+// #include "srnglr.h"
 
 
 /**
@@ -178,39 +180,39 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
             copy->data = metatoken_copy((metatoken*)o->data);
             break;
         }
-        case Push_t:
-        {
-            copy->data = new_uint(*(uint64_t*)o->data);
-            break;
-        }
-        case Reduction_t:
-        {
-            reduction* r = o->data;
-            copy->data = new_reduction(r->head_idx, r->production_idx, r->length, r->nullable_idx);
-            break;
-        }
-        case Accept_t:
-        {
-            copy->data = NULL;
-            break;
-        }
-        case GSSIndex_t:
-        {
-            gss_idx* i = o->data;
-            copy->data = gss_idx_copy(i);
-            break;
-        }
-        case GSSEdge_t:
-        {
-            gss_edge* e = o->data;
-            copy->data = new_gss_edge(e->parent, e->child);
-            break;
-        }
-        case SPPFNode_t:
-        {
-            copy->data = sppf_node_copy(o->data);
-            break;
-        }
+        // case Push_t:
+        // {
+        //     copy->data = new_uint(*(uint64_t*)o->data);
+        //     break;
+        // }
+        // case Reduction_t:
+        // {
+        //     reduction* r = o->data;
+        //     copy->data = new_reduction(r->head_idx, r->production_idx, r->length, r->nullable_idx);
+        //     break;
+        // }
+        // case Accept_t:
+        // {
+        //     copy->data = NULL;
+        //     break;
+        // }
+        // case GSSIndex_t:
+        // {
+        //     gss_idx* i = o->data;
+        //     copy->data = gss_idx_copy(i);
+        //     break;
+        // }
+        // case GSSEdge_t:
+        // {
+        //     gss_edge* e = o->data;
+        //     copy->data = new_gss_edge(e->parent, e->child);
+        //     break;
+        // }
+        // case SPPFNode_t:
+        // {
+        //     copy->data = sppf_node_copy(o->data);
+        //     break;
+        // }
         case Vector_t: 
         {
             copy->data = vect_copy_with_refs((vect*)o->data, refs);
@@ -262,14 +264,14 @@ void obj_str(obj* o)
         case MetaItem_t: metaitem_str(o->data); break;
         case MetaAST_t: metaast_str(o->data); break;
         case FSet_t: fset_str(o->data); break;
-        case GotoKey_t: gotokey_str(o->data); break;
-        case Push_t: push_str(*(uint64_t*)o->data); break;
-        case Reduction_t: reduction_str(o->data); break;
-        case Accept_t: accept_str(); break;
-        case GSSIndex_t: gss_idx_str(o->data); break;
-        case GSSEdge_t: gss_edge_str(o->data); break;
-        case SPPFNode_t: sppf_node_str(o->data); break;
-        case SPPFEdge_t: sppf_edge_str(o->data); break;
+        // case GotoKey_t: gotokey_str(o->data); break;
+        // case Push_t: push_str(*(uint64_t*)o->data); break;
+        // case Reduction_t: reduction_str(o->data); break;
+        // case Accept_t: accept_str(); break;
+        // case GSSIndex_t: gss_idx_str(o->data); break;
+        // case GSSEdge_t: gss_edge_str(o->data); break;
+        // case SPPFNode_t: sppf_node_str(o->data); break;
+        // case SPPFEdge_t: sppf_edge_str(o->data); break;
         case Vector_t: vect_str(o->data); break;
         case Dictionary_t: dict_str(o->data); break;
         case Set_t: set_str(o->data); break;
@@ -319,13 +321,13 @@ uint64_t obj_hash(obj* o)
         case MetaAST_t: return metaast_hash(o->data);
         case Slice_t: return slice_hash(o->data);
         // case FSet_t: return fset_hash(o->data);
-        case GotoKey_t: return gotokey_hash(o->data);
-        case Push_t: return hash_uint(*(uint64_t*)o->data);
-        case Reduction_t: return reduction_hash(o->data);
-        case Accept_t: return hash_uint(Accept_t);
-        case GSSIndex_t: return gss_idx_hash(o->data);
-        case GSSEdge_t: return gss_edge_hash(o->data);
-        case SPPFNode_t: return sppf_node_hash(o->data);
+        // case GotoKey_t: return gotokey_hash(o->data);
+        // case Push_t: return hash_uint(*(uint64_t*)o->data);
+        // case Reduction_t: return reduction_hash(o->data);
+        // case Accept_t: return hash_uint(Accept_t);
+        // case GSSIndex_t: return gss_idx_hash(o->data);
+        // case GSSEdge_t: return gss_edge_hash(o->data);
+        // case SPPFNode_t: return sppf_node_hash(o->data);
         case Vector_t: return vect_hash(o->data);
         // case Dictionary_t: return dict_hash(o->data);
         case Set_t: return set_hash(o->data);
@@ -397,13 +399,13 @@ bool obj_equals(obj* left, obj* right)
         case MetaAST_t: return metaast_equals(left->data, right->data);
         case Slice_t: return slice_equals(left->data, right->data);
         //case FSet_t: return fset_equals(left->data, right->data);
-        case GotoKey_t: return gotokey_equals(left->data, right->data);
-        case Push_t: return *(uint64_t*)left->data == *(uint64_t*)right->data;
-        case Reduction_t: return reduction_equals(left->data, right->data);
-        case Accept_t: return true; //accepts have no internal data
-        case GSSIndex_t: return gss_idx_equals(left->data, right->data);
-        case GSSEdge_t: return gss_edge_equals(left->data, right->data);
-        case SPPFNode_t: return sppf_node_equals(left->data, right->data);
+        // case GotoKey_t: return gotokey_equals(left->data, right->data);
+        // case Push_t: return *(uint64_t*)left->data == *(uint64_t*)right->data;
+        // case Reduction_t: return reduction_equals(left->data, right->data);
+        // case Accept_t: return true; //accepts have no internal data
+        // case GSSIndex_t: return gss_idx_equals(left->data, right->data);
+        // case GSSEdge_t: return gss_edge_equals(left->data, right->data);
+        // case SPPFNode_t: return sppf_node_equals(left->data, right->data);
         default: return obj_compare(left, right) == 0;
     }
 
@@ -431,14 +433,14 @@ void obj_free(obj* o)
             case UInteger_t:
             case String_t:
             case UnicodeString_t:
-            case Push_t:
+            // case Push_t:
                 free(o->data); 
                 break;
 
             //Objects with nested datastructures must free their inner contents first
             // case UIntNTuple_t: tuple_free(o->data); break;
-            case QTuple_t: qtuple_free(o->data); break;
-            case RTuple_t: rtuple_free(o->data); break;
+            // case QTuple_t: qtuple_free(o->data); break;
+            // case RTuple_t: rtuple_free(o->data); break;
             case MetaToken_t: metatoken_free((metatoken*)o->data); break; 
             case Vector_t: vect_free((vect*)o->data); break;
             case Dictionary_t: dict_free((dict*)o->data); break;
@@ -447,16 +449,16 @@ void obj_free(obj* o)
             case MetaItem_t: metaitem_free((metaitem*)o->data); break;
             case Slice_t: slice_free(o->data); break;
             case FSet_t: fset_free(o->data); break;
-            case GotoKey_t: gotokey_free(o->data); break;
-            case Reduction_t: reduction_free(o->data); break;
-            case GSSIndex_t: gss_idx_free(o->data); break;
-            case GSSEdge_t: gss_edge_free(o->data); break;
-            case SPPFNode_t: sppf_node_free(o->data); break;
-            case SPPFEdge_t: sppf_edge_free(o->data); break;
+            // case GotoKey_t: gotokey_free(o->data); break;
+            // case Reduction_t: reduction_free(o->data); break;
+            // case GSSIndex_t: gss_idx_free(o->data); break;
+            // case GSSEdge_t: gss_edge_free(o->data); break;
+            // case SPPFNode_t: sppf_node_free(o->data); break;
+            // case SPPFEdge_t: sppf_edge_free(o->data); break;
 
             //objects with no (owned) internal data
             case Pointer_t:
-            case Accept_t: 
+            // case Accept_t: 
                 break;
 
             default: 

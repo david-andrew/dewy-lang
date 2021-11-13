@@ -4,6 +4,8 @@
 #include "vector.h"
 #include "set.h"
 #include "metaast.h"
+#include "fset.h"
+#include "slice.h"
 
 
 uint64_t metaparser_get_anonymous_rule_head();
@@ -38,6 +40,10 @@ void metaparser_add_production(uint64_t head_idx, uint64_t body_idx);
 set* metaparser_get_production_bodies(uint64_t head_idx);
 vect* metaparser_get_production_body(uint64_t head_idx, uint64_t production_idx);
 void metaparser_set_start_symbol(uint64_t symbol_idx);
-
+size_t metaparser_count_firsts_size();
+void metaparser_compute_symbol_firsts();
+vect* metaparser_get_symbol_firsts();
+fset* metaparser_first_of_symbol(uint64_t symbol_idx);
+fset* metaparser_first_of_string(slice *string);
 
 #endif

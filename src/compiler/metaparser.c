@@ -14,6 +14,8 @@
 #include "metaast.h"
 #include "utilities.h"
 #include "ustring.h"
+#include "fset.h"
+#include "slice.h"
 
 //used to mark unsigned integer indices as NULL.
 #define NULL_SYMBOL_INDEX (uint64_t) - 1
@@ -30,6 +32,7 @@ set *metaparser_bodies;            //list of each production body.
 dict *metaparser_productions;      //map from head to production bodies.
 dict *metaparser_ast_cache;        //map<metaast*, body_idx>. care must be taken while freeing this object.
 vect *metaparser_unused_ast_cache; //vect containing all ASTs not inserted into the cache
+vect *metaparser_symbol_firsts;    //vect containing the first set of each symbol.
 
 //convenience variables for the frequently used epsilon production body, and $ endmarker terminal.
 uint64_t metaparser_eps_body_idx = NULL_SYMBOL_INDEX;
@@ -46,6 +49,7 @@ void initialize_metaparser()
     metaparser_productions = new_dict();
     metaparser_ast_cache = new_dict();
     metaparser_unused_ast_cache = new_vect();
+    metaparser_symbol_firsts = new_vect();
 }
 
 /**
@@ -68,6 +72,7 @@ void release_metaparser()
     set_free(metaparser_symbols);
     set_free(metaparser_bodies);
     dict_free(metaparser_productions);
+    vect_free(metaparser_symbol_firsts);
 
     metaparser_free_ast_cache();
 }
@@ -1090,6 +1095,149 @@ void metaparser_set_start_symbol(uint64_t start_symbol_idx)
     uint64_t augmented_body_idx = metaparser_add_body(augmented_body);
     metaparser_add_production(augmented_head_idx, augmented_body_idx);
     metaparser_start_symbol_idx = augmented_head_idx;
+}
+
+
+/**
+ * Helper function to count the total number of elements in all first sets 
+ */
+size_t metaparser_count_firsts_size()
+{
+    size_t count = 0;
+    for (size_t i = 0; i < vect_size(metaparser_symbol_firsts); i++)
+    {
+        fset* s = vect_get(metaparser_symbol_firsts, i)->data;
+        count += set_size(s->terminals) + s->nullable;
+    }
+    return count;
+}
+
+
+/**
+ * Compute all first sets for each symbol in the grammar
+ */
+void metaparser_compute_symbol_firsts()
+{
+    set *symbols = metaparser_get_symbols();
+
+    //create empty fsets for each symbol in the grammar
+    for (size_t i = 0; i < set_size(symbols); i++)
+    {
+        vect_append(metaparser_symbol_firsts, new_fset_obj(NULL));
+    }
+
+    //compute firsts for all terminal symbols, since the fset is just the symbol itself.
+    for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+    {
+        if (!metaparser_is_symbol_terminal(symbol_idx))
+        {
+            continue;
+        }
+        fset *symbol_fset = vect_get(metaparser_symbol_firsts, symbol_idx)->data;
+        fset_add(symbol_fset, new_uint_obj(symbol_idx));
+        symbol_fset->nullable = false;
+    }
+
+    //compute first for all non-terminal symbols. update each set until no new changes occur
+    size_t count;
+    do
+    {
+        //keep track of if any sets got larger (i.e. by adding new terminals to any fset's)
+        count = metaparser_count_firsts_size();
+
+        //for each non-terminal symbol
+        for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+        {
+            if (metaparser_is_symbol_terminal(symbol_idx))
+            {
+                continue;
+            }
+
+            fset *symbol_fset = vect_get(metaparser_symbol_firsts, symbol_idx)->data;
+            set *bodies = metaparser_get_production_bodies(symbol_idx);
+            for (size_t production_idx = 0; production_idx < set_size(bodies); production_idx++)
+            {
+                vect *body = metaparser_get_production_body(symbol_idx, production_idx);
+
+                //for each element in body, get its fset, and merge into this one. stop if non-nullable
+                for (size_t i = 0; i < vect_size(body); i++)
+                {
+                    uint64_t *body_symbol_idx = vect_get(body, i)->data;
+                    fset *body_symbol_fset = vect_get(metaparser_symbol_firsts, *body_symbol_idx)->data;
+                    fset_union_into(symbol_fset, fset_copy(body_symbol_fset), true);
+                    if (!body_symbol_fset->nullable)
+                    {
+                        break;
+                    }
+                }
+
+                //epsilon strings add epsilon to fset
+                if (vect_size(body) == 0)
+                {
+                    symbol_fset->nullable = true;
+                }
+            }
+        }
+    } while (count < metaparser_count_firsts_size());
+}
+
+/**
+ * return the list of first sets for each symbol in the grammar.
+ */
+vect *metaparser_get_symbol_firsts()
+{
+    return metaparser_symbol_firsts;
+}
+
+
+/**
+ * return the first set for the given symbol
+ */
+fset* metaparser_first_of_symbol(uint64_t symbol_idx)
+{
+    return vect_get(metaparser_symbol_firsts, symbol_idx)->data;
+}
+
+
+/**
+ * Compute the first set for the given string of symbols.
+ * 
+ * symbol_first: vect<fset>
+ * returned set needs to be freed when done.
+ */
+fset *metaparser_first_of_string(slice *string)
+{
+    fset *result = new_fset();
+    vect *symbol_firsts = metaparser_get_symbol_firsts();
+
+    if (slice_size(string) == 0)
+    {
+        //empty string is nullable
+        result->nullable = true;
+    }
+    else
+    {
+        //handle each symbol in the string, until a non-nullable symbol is reached
+        for (size_t i = 0; i < slice_size(string); i++)
+        {
+            uint64_t *symbol_idx = slice_get(string, i)->data;
+            fset *first_i = vect_get(symbol_firsts, *symbol_idx)->data;
+            bool nullable = first_i->nullable;
+            fset_union_into(result, fset_copy(first_i), false); //merge first of symbol into result. Don't merge nullable
+            if (i == slice_size(string) - 1 && nullable)
+            {
+                result->nullable = true;
+            }
+
+            //only continue to next symbol if this symbol was nullable
+            if (!nullable)
+            {
+                break;
+            }
+        }
+    }
+
+    return result;
 }
 
 #endif

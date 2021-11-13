@@ -9,21 +9,20 @@
 #include "metaparser.h"
 #include "slice.h"
 #include "fset.h"
-#include "srnglr.h"
+// #include "srnglr.h"
 #include "utilities.h"
 
 
 /**
  * Create a new metaitem.
  */
-metaitem* new_metaitem(uint64_t head_idx, uint64_t production_idx, uint64_t position, uint64_t lookahead_idx)
+metaitem* new_metaitem(uint64_t head_idx, uint64_t production_idx, uint64_t position)
 {
     metaitem* i = malloc(sizeof(metaitem));
     *i = (metaitem){
         .head_idx=head_idx,
         .production_idx=production_idx,
         .position=position,
-        .lookahead_idx=lookahead_idx
     };
     return i;
 }
@@ -60,7 +59,7 @@ bool metaitem_is_accept(metaitem* i)
     {
         //check if the remaining portion of the string is nullable
         slice remaining = slice_struct(body, i->position, vect_size(body), NULL);
-        fset* first = srnglr_first_of_string(&remaining);
+        fset* first = metaparser_first_of_string(&remaining);
         bool nullable = first->nullable;
         fset_free(first);
         return nullable;
@@ -75,7 +74,6 @@ void metaitem_str(metaitem* item)
 {
     obj* head = metaparser_get_symbol(item->head_idx);
     vect* body = metaparser_get_production_body(item->head_idx, item->production_idx);
-    obj* lookahead = metaparser_get_symbol(item->lookahead_idx);
 
     printf("["); obj_str(head); printf(" -> ");
     for (size_t i = 0; i <= vect_size(body); i++)
@@ -87,7 +85,7 @@ void metaitem_str(metaitem* item)
         obj_str(symbol);
         if (i < vect_size(body) - 1) { printf(" "); }
     }
-    printf(", "); obj_str(lookahead); printf("]");
+    printf("]");
 }
 
 
@@ -98,12 +96,10 @@ void metaitem_repr(metaitem* i)
 {
     printf("metaitem{head_idx: %"PRIu64
         ", production_idx: %"PRIu64
-        ", position: %"PRIu64
-        ", lookahead_idx: %"PRIu64"}",
+        ", position: %"PRIu64"}",
         i->head_idx, 
         i->production_idx, 
-        i->position, 
-        i->lookahead_idx
+        i->position
     );
 }
 
@@ -122,7 +118,7 @@ void metaitem_free(metaitem* i)
  */
 uint64_t metaitem_hash(metaitem* item)
 {
-    uint64_t components[] = {item->head_idx, item->production_idx, item->position, item->lookahead_idx};
+    uint64_t components[] = {item->head_idx, item->production_idx, item->position};
 
     return hash_uint_sequence(components, sizeof(components) / sizeof(uint64_t));
 }
@@ -135,8 +131,7 @@ bool metaitem_equals(metaitem* left, metaitem* right)
 {
     return left->head_idx == right->head_idx 
         && left->production_idx == right->production_idx
-        && left->position == right->position
-        && left->lookahead_idx == right->lookahead_idx; 
+        && left->position == right->position;
 }
 
 

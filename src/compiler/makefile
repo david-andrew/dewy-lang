@@ -2,11 +2,11 @@ all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vec
  
 
 #current completed step is simple lexer
-dewy: dewy_compiler_compiler.o  utilities.o object.o tuple.o metatoken.o dictionary.o vector.o parray.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o metaitem.o fset.o slice.o gotokey.o reduction.o gss.o sppf.o srnglr.o
-	clang -o dewy dewy_compiler_compiler.o utilities.o object.o tuple.o metatoken.o dictionary.o vector.o parray.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o metaitem.o fset.o slice.o gotokey.o reduction.o gss.o sppf.o srnglr.o -lm
+dewy: dewy_compiler_compiler.o  utilities.o object.o tuple.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o metaitem.o fset.o slice.o gotokey.o reduction.o gss.o sppf.o srnglr.o
+	clang -o dewy dewy_compiler_compiler.o utilities.o object.o tuple.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o metaitem.o fset.o slice.o gotokey.o reduction.o gss.o sppf.o srnglr.o -lm
 
 debug:
-	clang -o dewy dewy_compiler_compiler.c utilities.c object.c tuple.c metatoken.c dictionary.c vector.c parray.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c metaitem.c fset.c slice.c gotokey.c reduction.c gss.c sppf.c srnglr.c -lm -g
+	clang -o dewy dewy_compiler_compiler.c utilities.c object.c tuple.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c metaitem.c fset.c slice.c gotokey.c reduction.c gss.c sppf.c srnglr.c -lm -g
 
 utilities.o: utilities.c utilities.h ustring.h
 	clang -c -o utilities.o utilities.c
@@ -25,9 +25,6 @@ dictionary.o: dictionary.c dictionary.h object.h utilities.h
 
 vector.o: vector.c vector.h object.h dictionary.h utilities.h
 	clang -c -o vector.o vector.c
-
-parray.o: parray.c parray.h object.h utilities.h
-	clang -c -o parray.o parray.c
 	
 set.o: set.c set.h object.h utilities.h
 	clang -c -o set.o set.c
