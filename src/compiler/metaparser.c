@@ -1,41 +1,41 @@
 #ifndef METAPARSER_C
 #define METAPARSER_C
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <inttypes.h>
 
-#include "vector.h"
-#include "set.h"
 #include "charset.h"
-#include "metatoken.h"
-#include "metascanner.h"
-#include "metaparser.h"
-#include "metaast.h"
-#include "utilities.h"
-#include "ustring.h"
 #include "fset.h"
+#include "metaast.h"
+#include "metaparser.h"
+#include "metascanner.h"
+#include "metatoken.h"
+#include "set.h"
 #include "slice.h"
+#include "ustring.h"
+#include "utilities.h"
+#include "vector.h"
 
-//used to mark unsigned integer indices as NULL.
+// used to mark unsigned integer indices as NULL.
 #define NULL_SYMBOL_INDEX (uint64_t) - 1
 
 /**
  * Global data structures used to manage all meta grammar rules.
- * Symbols are either an identifier or a charset. 
+ * Symbols are either an identifier or a charset.
  * Bodies are vects of uint indices indicating symbols from the symbols list.
- * Productions are a map from the head index (in the symbols list) to a list of 
+ * Productions are a map from the head index (in the symbols list) to a list of
  * indices indicating which body vectors apply to that head.
  */
-set* metaparser_symbols;           //list of all symbols used in production bodies.
-set* metaparser_bodies;            //list of each production body.
-dict* metaparser_productions;      //map from head to production bodies.
-dict* metaparser_ast_cache;        //map<metaast*, body_idx>. care must be taken while freeing this object.
-vect* metaparser_unused_ast_cache; //vect containing all ASTs not inserted into the cache
-vect* metaparser_symbol_firsts;    //vect containing the first set of each symbol.
-vect* metaparser_symbol_follows;   //vect containing the follow set of each symbol.
+set* metaparser_symbols;           // list of all symbols used in production bodies.
+set* metaparser_bodies;            // list of each production body.
+dict* metaparser_productions;      // map from head to production bodies.
+dict* metaparser_ast_cache;        // map<metaast*, body_idx>. care must be taken while freeing this object.
+vect* metaparser_unused_ast_cache; // vect containing all ASTs not inserted into the cache
+vect* metaparser_symbol_firsts;    // vect containing the first set of each symbol.
+vect* metaparser_symbol_follows;   // vect containing the follow set of each symbol.
 
-//convenience variables for the frequently used epsilon production body, and $ endmarker terminal.
+// convenience variables for the frequently used epsilon production body, and $ endmarker terminal.
 uint64_t metaparser_eps_body_idx = NULL_SYMBOL_INDEX;
 uint64_t metaparser_endmarker_symbol_idx = NULL_SYMBOL_INDEX;
 uint64_t metaparser_start_symbol_idx = NULL_SYMBOL_INDEX;
@@ -63,7 +63,7 @@ void complete_metaparser()
     metaparser_get_endmarker_symbol_idx();
     metaparser_get_start_symbol_idx();
 
-    //TODO->check to ensure that every identifier has at least 1 body, and return error if not...
+    // TODO->check to ensure that every identifier has at least 1 body, and return error if not...
 }
 
 /**
@@ -85,16 +85,16 @@ void release_metaparser()
  */
 void metaparser_free_ast_cache()
 {
-    //free all the ASTs, maintaining a reference set to ensure nodes aren't double freed
-    set *refs = new_set();
+    // free all the ASTs, maintaining a reference set to ensure nodes aren't double freed
+    set* refs = new_set();
     for (size_t i = 0; i < dict_size(metaparser_ast_cache); i++)
     {
-        metaast *ast = obj_free_keep_inner(metaparser_ast_cache->entries[i].key, MetaAST_t);
+        metaast* ast = obj_free_keep_inner(metaparser_ast_cache->entries[i].key, MetaAST_t);
         metaast_free_with_refs(ast, refs);
     }
     while (vect_size(metaparser_unused_ast_cache) > 0)
     {
-        metaast *ast = obj_free_keep_inner(vect_pop(metaparser_unused_ast_cache), MetaAST_t);
+        metaast* ast = obj_free_keep_inner(vect_pop(metaparser_unused_ast_cache), MetaAST_t);
         metaast_free_with_refs(ast, refs);
     }
 
@@ -117,46 +117,46 @@ uint64_t metaparser_anonymous_rule_count = 1;
  */
 uint64_t metaparser_get_anonymous_rule_head()
 {
-    //determine the string width of the number
+    // determine the string width of the number
     size_t width = dec_num_digits(metaparser_anonymous_rule_count);
-    width += 4; //room for `#__` at start and null terminator at end
+    width += 4; // room for `#__` at start and null terminator at end
 
-    //create a normal char* that will be the head
-    char *num_str = malloc(width * sizeof(char));
+    // create a normal char* that will be the head
+    char* num_str = malloc(width * sizeof(char));
     sprintf(num_str, "#__%" PRIu64, metaparser_anonymous_rule_count);
 
-    //convert to unicode string (wrapped in obj*), and cleanup char* version
-    obj *head = new_ustring_obj(ustring_utf8_substr(num_str, 0, width - 1));
+    // convert to unicode string (wrapped in obj*), and cleanup char* version
+    obj* head = new_ustring_obj(ustring_utf8_substr(num_str, 0, width - 1));
     free(num_str);
 
-    //increment the counter
+    // increment the counter
     metaparser_anonymous_rule_count++;
 
-    //insert head into metaparser_symbols, and return its index
+    // insert head into metaparser_symbols, and return its index
     uint64_t head_idx = metaparser_add_symbol(head);
 
     return head_idx;
 }
 
 /**
- * Try to scan for a rule in the current list of tokens. 
+ * Try to scan for a rule in the current list of tokens.
  * Returns `true` if a rule was successfully parsed.
  * Assumes that tokens may contain comments or whitespace.
  */
-bool parse_next_meta_rule(vect *tokens)
+bool parse_next_meta_rule(vect* tokens)
 {
-    //check for head, equals sign, and semicolon
+    // check for head, equals sign, and semicolon
     if (!metaparser_is_valid_rule(tokens))
     {
         return false;
     }
 
-    //construct head and body for the rule
-    obj *head = metaparser_get_rule_head(tokens);
-    vect *body_tokens = metaparser_get_rule_body(tokens);
-    metaast *body_ast = metaast_parse_expr(body_tokens);
+    // construct head and body for the rule
+    obj* head = metaparser_get_rule_head(tokens);
+    vect* body_tokens = metaparser_get_rule_body(tokens);
+    metaast* body_ast = metaast_parse_expr(body_tokens);
 
-    //failed to parse body into ast
+    // failed to parse body into ast
     if (body_ast == NULL)
     {
         vect_free(body_tokens);
@@ -164,18 +164,18 @@ bool parse_next_meta_rule(vect *tokens)
         return false;
     }
 
-    //reduce any constant expressions in the ast (e.g. charset operations)
+    // reduce any constant expressions in the ast (e.g. charset operations)
     while (metaast_fold_constant(&body_ast))
         ;
 
-    //recursively convert to sentences + insert into grammar table
+    // recursively convert to sentences + insert into grammar table
     uint64_t head_idx = metaparser_add_symbol(head);
     metaparser_insert_rule_ast(head_idx, body_ast);
     return true;
 }
 
 /**
- * Print out the raw contents of the grammar tables. 
+ * Print out the raw contents of the grammar tables.
  * i.e. prints the symbols list with each symbols indices,
  * Prints the bodies list with each body containing indices of symbols
  * Prints the productions dictionary which contains head symbol indices
@@ -183,7 +183,7 @@ bool parse_next_meta_rule(vect *tokens)
  */
 void metaparser_productions_repr()
 {
-    //print out all symbols, bodies
+    // print out all symbols, bodies
     printf("symbols:\n");
     for (uint64_t i = 0; i < set_size(metaparser_symbols); i++)
     {
@@ -210,33 +210,33 @@ void metaparser_productions_str()
 {
     for (size_t i = 0; i < dict_size(metaparser_productions); i++)
     {
-        //get head string
-        uint64_t *head_idx = metaparser_productions->entries[i].key->data;
-        obj *head = metaparser_get_symbol(*head_idx);
+        // get head string
+        uint64_t* head_idx = metaparser_productions->entries[i].key->data;
+        obj* head = metaparser_get_symbol(*head_idx);
 
-        //get bodies indices set, and print a production line for each body
-        set *bodies = metaparser_productions->entries[i].value->data;
+        // get bodies indices set, and print a production line for each body
+        set* bodies = metaparser_productions->entries[i].value->data;
         for (size_t j = 0; j < set_size(bodies); j++)
         {
-            //print head
+            // print head
             obj_str(head);
             printf(" -> ");
 
-            //get the body for this production
-            uint64_t *body_idx = bodies->entries[j].item->data;
-            vect *sentence = metaparser_get_body(*body_idx);
+            // get the body for this production
+            uint64_t* body_idx = bodies->entries[j].item->data;
+            vect* sentence = metaparser_get_body(*body_idx);
 
-            //print out the contents of this body
+            // print out the contents of this body
             if (vect_size(sentence) == 0)
             {
-                //length 0 sentence is just epsilon
+                // length 0 sentence is just epsilon
                 printf("ϵ");
             }
             for (size_t k = 0; k < vect_size(sentence); k++)
             {
-                //normal print out each symbol in the sentence
-                uint64_t *symbol_idx = vect_get(sentence, k)->data;
-                obj *symbol = metaparser_get_symbol(*symbol_idx);
+                // normal print out each symbol in the sentence
+                uint64_t* symbol_idx = vect_get(sentence, k)->data;
+                obj* symbol = metaparser_get_symbol(*symbol_idx);
                 obj_str(symbol);
                 if (k < vect_size(sentence) - 1)
                 {
@@ -252,16 +252,16 @@ void metaparser_productions_str()
  * Verify that the stream of tokens is valid syntax for a rule
  * #rule = #identifier #ws '=' #ws #expr #ws ';';
  */
-bool metaparser_is_valid_rule(vect *tokens)
+bool metaparser_is_valid_rule(vect* tokens)
 {
-    //shortest rule is 4 tokens: #id '=' <expr> ;
+    // shortest rule is 4 tokens: #id '=' <expr> ;
     if (vect_size(tokens) == 0)
     {
         printf("ERROR: cannot parse rule from empty tokens list\n");
         return false;
     }
 
-    //scan for head
+    // scan for head
     int i = metatoken_get_next_real_token(tokens, 0);
     if (i < 0 || !metatoken_is_i_of_type(tokens, i, hashtag))
     {
@@ -269,7 +269,7 @@ bool metaparser_is_valid_rule(vect *tokens)
         return false;
     }
 
-    //scan for equals sign
+    // scan for equals sign
     i = metatoken_get_next_real_token(tokens, i + 1);
     if (i < 0 || !metatoken_is_i_of_type(tokens, i, meta_equals_sign))
     {
@@ -277,7 +277,7 @@ bool metaparser_is_valid_rule(vect *tokens)
         return false;
     }
 
-    //scan for ending semicolon
+    // scan for ending semicolon
     i = metatoken_get_next_token_of_type(tokens, meta_semicolon, i + 1);
     if (i < 0)
     {
@@ -293,24 +293,24 @@ bool metaparser_is_valid_rule(vect *tokens)
  * Frees any whitespace/comment tokens before the identifier.
  * Expects metaparser_is_valid_rule() to have been called first.
  */
-obj *metaparser_get_rule_head(vect *tokens)
+obj* metaparser_get_rule_head(vect* tokens)
 {
     while (vect_size(tokens) > 0)
     {
         // obj* t_obj = vect_dequeue(tokens);
         // metatoken* t = t_obj->data;
-        metatoken *t = obj_free_keep_inner(vect_dequeue(tokens), MetaToken_t);
+        metatoken* t = obj_free_keep_inner(vect_dequeue(tokens), MetaToken_t);
         if (t->type == whitespace || t->type == comment)
         {
             metatoken_free(t);
         }
         else if (t->type == hashtag)
         {
-            obj *head = new_ustring_obj(ustring_clone(t->content));
+            obj* head = new_ustring_obj(ustring_clone(t->content));
             metatoken_free(t);
             return head;
         }
-        else //this should never occur if metaparser_is_valid_rule() was called first
+        else // this should never occur if metaparser_is_valid_rule() was called first
         {
             printf("BUG ERROR: expecting identifier at start of rule, when found: ");
             metatoken_repr(t);
@@ -329,20 +329,20 @@ obj *metaparser_get_rule_head(vect *tokens)
  * Expects metaparser_is_valid_rule(), and then metaparser_get_rule_head()
  * to have been called first.
  */
-vect *metaparser_get_rule_body(vect *tokens)
+vect* metaparser_get_rule_body(vect* tokens)
 {
-    vect *body_tokens = new_vect();
+    vect* body_tokens = new_vect();
     while (vect_size(tokens) > 0)
     {
-        obj *t_obj = vect_dequeue(tokens);
-        metatoken *t = t_obj->data;
+        obj* t_obj = vect_dequeue(tokens);
+        metatoken* t = t_obj->data;
 
-        //skip all whitespace
+        // skip all whitespace
         if (t->type == whitespace || t->type == comment)
         {
             obj_free(t_obj);
         }
-        //semicolon means finished collecting body tokens
+        // semicolon means finished collecting body tokens
         else if (t->type == meta_semicolon)
         {
             obj_free(vect_dequeue(body_tokens)); // equals sign at start
@@ -364,26 +364,26 @@ vect *metaparser_get_rule_body(vect *tokens)
  * all heads, bodies, and charsets are inserted into the metaparser grammar table.
  * `head` may optionally be NULL, (e.g. for when the parser is handling anonymous expressions)
  * in which case the compiler will come up with a name for the rule.
- * Returns the identifier for the rule inserted. Note that the returned identifier is owned by the 
+ * Returns the identifier for the rule inserted. Note that the returned identifier is owned by the
  * grammar table, and must be copied if it is to be used by another process (e.g. other rule sentences).
  */
-uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
+uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 {
-    //determine if this is an anonymous rule, or user named rule
+    // determine if this is an anonymous rule, or user named rule
     bool anonymous = head_idx == NULL_SYMBOL_INDEX;
 
-    //check if this AST is in the cache already
-    obj *cache_key_obj = new_metaast_obj(body_ast);
-    obj *cache_value_obj = dict_get(metaparser_ast_cache, cache_key_obj);
+    // check if this AST is in the cache already
+    obj* cache_key_obj = new_metaast_obj(body_ast);
+    obj* cache_value_obj = dict_get(metaparser_ast_cache, cache_key_obj);
     if (cache_value_obj != NULL)
     {
-        //save the unused key obj to be freed later
+        // save the unused key obj to be freed later
         vect_append(metaparser_unused_ast_cache, cache_key_obj);
 
-        //get the cached body index
-        uint64_t body_idx = *(uint64_t *)cache_value_obj->data;
+        // get the cached body index
+        uint64_t body_idx = *(uint64_t*)cache_value_obj->data;
 
-        //if not an anonymous expression, create a production using the precached body
+        // if not an anonymous expression, create a production using the precached body
         if (!anonymous)
         {
             metaparser_add_production(head_idx, body_idx);
@@ -397,107 +397,107 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
     // Base case (non-recursive) rules
     case metaast_eps:
     {
-        //crete an anonymous head if it wasn't provided
+        // crete an anonymous head if it wasn't provided
         head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
-        //create a production for the head index pointing to the epsilon body index
+        // create a production for the head index pointing to the epsilon body index
         metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
         break;
     }
     case metaast_identifier:
     {
-        //get the symbol index of the identifier
-        obj *nonterminal = new_ustring_obj(ustring_clone(body_ast->node.string));
+        // get the symbol index of the identifier
+        obj* nonterminal = new_ustring_obj(ustring_clone(body_ast->node.string));
         uint64_t nonterminal_idx = metaparser_add_symbol(nonterminal);
 
-        //if head is defined, then create a whole production with a sentence containing just the identifier
-        //otherwise this is an inner expression reference to the identifier where we can skip the redundant sentence
+        // if head is defined, then create a whole production with a sentence containing just the identifier
+        // otherwise this is an inner expression reference to the identifier where we can skip the redundant sentence
         if (!anonymous)
         {
-            //create a sentence with the identifier in it
-            vect *sentence = new_vect();
+            // create a sentence with the identifier in it
+            vect* sentence = new_vect();
             vect_append(sentence, new_uint_obj(nonterminal_idx));
 
-            //add the sentence to the grammar
+            // add the sentence to the grammar
             uint64_t body_idx = metaparser_add_body(sentence);
 
-            //insert the production
+            // insert the production
             metaparser_add_production(head_idx, body_idx);
         }
         else
         {
-            //assign this identifier the null head
+            // assign this identifier the null head
             head_idx = nonterminal_idx;
         }
         break;
     }
     case metaast_charset:
     {
-        //crete an anonymous head if it wasn't provided
+        // crete an anonymous head if it wasn't provided
         head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
-        //create a sentence containing just the charset
-        vect *sentence = new_vect();
+        // create a sentence containing just the charset
+        vect* sentence = new_vect();
 
-        //insert the terminal into the sentence
-        obj *terminal = new_charset_obj(charset_clone(body_ast->node.cs));
+        // insert the terminal into the sentence
+        obj* terminal = new_charset_obj(charset_clone(body_ast->node.cs));
         uint64_t terminal_idx = metaparser_add_symbol(terminal);
         vect_append(sentence, new_uint_obj(terminal_idx));
 
-        //add the sentence to the grammar
+        // add the sentence to the grammar
         uint64_t body_idx = metaparser_add_body(sentence);
 
-        //insert the production into the grammar
+        // insert the production into the grammar
         metaparser_add_production(head_idx, body_idx);
         break;
     }
     case metaast_string:
     {
-        //crete an anonymous head if it wasn't provided
+        // crete an anonymous head if it wasn't provided
         head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
-        //create a sentence for the string
-        vect *sentence = new_vect();
+        // create a sentence for the string
+        vect* sentence = new_vect();
 
-        //insert each character from the string into the sentence
-        uint32_t *s = body_ast->node.string;
+        // insert each character from the string into the sentence
+        uint32_t* s = body_ast->node.string;
         uint32_t c;
         while ((c = *s++))
         {
-            obj *cs_obj = new_charset_obj(NULL);
+            obj* cs_obj = new_charset_obj(NULL);
             charset_add_char(cs_obj->data, c);
             uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
             vect_append(sentence, new_uint_obj(terminal_idx));
         }
 
-        //insert the sentence into the bodies set
+        // insert the sentence into the bodies set
         uint64_t body_idx = metaparser_add_body(sentence);
 
-        //push this sentence to the list of all sentences for this rule
+        // push this sentence to the list of all sentences for this rule
         metaparser_add_production(head_idx, body_idx);
         break;
     }
     case metaast_caseless:
     {
-        //crete an anonymous head if it wasn't provided
+        // crete an anonymous head if it wasn't provided
         head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
-        //create a sentence for the string
-        vect *sentence = new_vect();
+        // create a sentence for the string
+        vect* sentence = new_vect();
 
-        //insert upper and lowercase versions of each character from the string into the sentence
-        uint32_t *s = body_ast->node.string;
+        // insert upper and lowercase versions of each character from the string into the sentence
+        uint32_t* s = body_ast->node.string;
         uint32_t c;
         while ((c = *s++))
         {
             uint32_t upper, lower;
-            obj *cs_obj = new_charset_obj(NULL);
+            obj* cs_obj = new_charset_obj(NULL);
             if (unicode_upper_and_lower(c, &upper, &lower))
             {
                 charset_add_char(cs_obj->data, upper);
                 charset_add_char(cs_obj->data, lower);
             }
-            else //character doesn't have upper/lowercase version, so add character as is
+            else // character doesn't have upper/lowercase version, so add character as is
             {
                 charset_add_char(cs_obj->data, c);
             }
@@ -505,10 +505,10 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
             vect_append(sentence, new_uint_obj(terminal_idx));
         }
 
-        //insert the sentence into the bodies set
+        // insert the sentence into the bodies set
         uint64_t body_idx = metaparser_add_body(sentence);
 
-        //push this sentence to the list of all sentences for this rule
+        // push this sentence to the list of all sentences for this rule
         metaparser_add_production(head_idx, body_idx);
         break;
     }
@@ -517,22 +517,22 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
     case metaast_star:
     case metaast_plus:
     {
-        //crete an anonymous head if it wasn't provided
+        // crete an anonymous head if it wasn't provided
         head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
-        //get the identifier for the inner node
+        // get the identifier for the inner node
         uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.repeat.inner);
 
-        //build the sentence
+        // build the sentence
         if (body_ast->node.repeat.count == 0 || (body_ast->node.repeat.count == 1 && body_ast->type == metaast_star))
         {
-            //simple star
+            // simple star
             //#head = #A* | (#A)0* | (#A)1* | (#A)0+ =>
             //  #head = #A #head;
             //  #head = ϵ;
 
             //#head = #A #head
-            vect *sentence0 = new_vect();
+            vect* sentence0 = new_vect();
             vect_append(sentence0, new_uint_obj(inner_head_idx));
             vect_append(sentence0, new_uint_obj(head_idx));
             uint64_t sentence0_idx = metaparser_add_body(sentence0);
@@ -543,13 +543,13 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
         }
         else
         {
-            //complex plus
+            // complex plus
             //#head = (#A)N+ =>
             //  #__0 = #A #__0;
             //  #__0 = ϵ;
             //  #head = #A #A #A ... #A #__0; //... N times
 
-            //complex star
+            // complex star
             //#head = (#A)N* =>
             //  #__0 = #A #__0;
             //  #__0 = ϵ;
@@ -558,7 +558,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
 
             //  #__0 = #A #__0
             uint64_t anonymous0_idx = metaparser_get_anonymous_rule_head();
-            vect *sentence0 = new_vect();
+            vect* sentence0 = new_vect();
             vect_append(sentence0, new_uint_obj(inner_head_idx));
             vect_append(sentence0, new_uint_obj(anonymous0_idx));
             uint64_t sentence0_idx = metaparser_add_body(sentence0);
@@ -568,7 +568,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
             metaparser_add_production(anonymous0_idx, metaparser_get_eps_body_idx());
 
             //  #head = #A #A #A ... #A #__0; //... N times
-            vect *sentence2 = new_vect();
+            vect* sentence2 = new_vect();
             for (int i = 0; i < body_ast->node.repeat.count; i++)
             {
                 vect_append(sentence2, new_uint_obj(inner_head_idx));
@@ -577,7 +577,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
             uint64_t sentence2_idx = metaparser_add_body(sentence2);
             metaparser_add_production(head_idx, sentence2_idx);
 
-            //convert from plus to star by making the last rule optional
+            // convert from plus to star by making the last rule optional
             if (body_ast->type == metaast_star)
             {
                 //  #head = ϵ;
@@ -588,7 +588,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
     }
     case metaast_count:
     {
-        //crete an anonymous head if it wasn't provided
+        // crete an anonymous head if it wasn't provided
         head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
         uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.repeat.inner);
@@ -614,7 +614,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
         {
             //#head = (#A)N =>
             //  #head = #A #A #A ... #A; //... N times
-            vect *sentence = new_vect();
+            vect* sentence = new_vect();
             for (int i = 0; i < body_ast->node.repeat.count; i++)
             {
                 vect_append(sentence, new_uint_obj(inner_head_idx));
@@ -626,7 +626,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
     }
     case metaast_option:
     {
-        //crete an anonymous head if it wasn't provided
+        // crete an anonymous head if it wasn't provided
         head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
         uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.unary.inner);
@@ -636,7 +636,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
         //  #head = ϵ
 
         //  #head = #A
-        vect *sentence0 = new_vect();
+        vect* sentence0 = new_vect();
         vect_append(sentence0, new_uint_obj(inner_head_idx));
         uint64_t sentence0_idx = metaparser_add_body(sentence0);
         metaparser_add_production(head_idx, sentence0_idx);
@@ -648,24 +648,25 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
     }
     case metaast_cat:
     {
-        //crete an anonymous head if it wasn't provided
+        // crete an anonymous head if it wasn't provided
         head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
-        //#head = #A #B => #A #B  //cat is already in CFG format. TODO->handle cat with strings/charsets/identifiers/epsilon...
-        vect *sentence = new_vect();
+        //#head = #A #B => #A #B  //cat is already in CFG format.
+        // TODO->handle cat with strings/charsets/identifiers/epsilon...
+        vect* sentence = new_vect();
         for (size_t i = 0; i < body_ast->node.sequence.size; i++)
         {
-            metaast *inner_i_ast = body_ast->node.sequence.elements[i];
+            metaast* inner_i_ast = body_ast->node.sequence.elements[i];
             switch (inner_i_ast->type)
             {
-            //insert each char of the string into the parent sentence
+            // insert each char of the string into the parent sentence
             case metaast_string:
             {
-                uint32_t *s = inner_i_ast->node.string;
+                uint32_t* s = inner_i_ast->node.string;
                 uint32_t c;
                 while ((c = *s++))
                 {
-                    obj *cs_obj = new_charset_obj(new_charset());
+                    obj* cs_obj = new_charset_obj(new_charset());
                     charset_add_char(cs_obj->data, c);
                     uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
                     vect_append(sentence, new_uint_obj(terminal_idx));
@@ -675,13 +676,13 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
 
             case metaast_caseless:
             {
-                uint32_t *s = inner_i_ast->node.string;
+                uint32_t* s = inner_i_ast->node.string;
                 uint32_t c;
                 while ((c = *s++))
                 {
                     uint32_t upper, lower;
                     unicode_upper_and_lower(c, &upper, &lower);
-                    obj *cs_obj = new_charset_obj(new_charset());
+                    obj* cs_obj = new_charset_obj(new_charset());
                     charset_add_char(cs_obj->data, upper);
                     charset_add_char(cs_obj->data, lower);
                     uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
@@ -690,31 +691,31 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
                 break;
             }
 
-            //insert the charset into the parent sentence
+            // insert the charset into the parent sentence
             case metaast_charset:
             {
-                obj *cs_obj = new_charset_obj(charset_clone(inner_i_ast->node.cs));
+                obj* cs_obj = new_charset_obj(charset_clone(inner_i_ast->node.cs));
                 uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
                 vect_append(sentence, new_uint_obj(terminal_idx));
                 break;
             }
 
-            //insert the identifier into the parent sentence
+            // insert the identifier into the parent sentence
             case metaast_identifier:
             {
-                obj *identifier = new_ustring_obj(ustring_clone(inner_i_ast->node.string));
+                obj* identifier = new_ustring_obj(ustring_clone(inner_i_ast->node.string));
                 uint64_t identifier_idx = metaparser_add_symbol(identifier);
                 vect_append(sentence, new_uint_obj(identifier_idx));
                 break;
             }
 
-            //literal epsilons are skipped in a cat node
+            // literal epsilons are skipped in a cat node
             case metaast_eps:
             {
                 break;
             }
 
-            //all other types of ast are represented by an anonymous identifier
+            // all other types of ast are represented by an anonymous identifier
             default:
             {
                 uint64_t head_i_idx = metaparser_get_symbol_or_anonymous(body_ast->node.sequence.elements[i]);
@@ -729,7 +730,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
     }
     case metaast_or:
     {
-        //crete an anonymous head if it wasn't provided
+        // crete an anonymous head if it wasn't provided
         head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
         //#rule = #A | #B =>
@@ -742,7 +743,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
         break;
     }
 
-    //TODO->filters/other extensions of the parser
+    // TODO->filters/other extensions of the parser
     case metaast_greaterthan:
         // {
         //     //crete an anonymous head if it wasn't provided
@@ -776,16 +777,17 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
         printf("ERROR: Cannot generate CFG sentence as capture `.` operator has not yet been implemented\n");
         break;
 
-    //ERROR->should not allow, or come up with semantics for
-    //e.g. (#A)~ => ξ* - #A
-    //should be an error since this only makes sense for charsets
+    // ERROR->should not allow, or come up with semantics for
+    // e.g. (#A)~ => ξ* - #A
+    // should be an error since this only makes sense for charsets
     case metaast_compliment:
     case metaast_intersect:
-        printf("ERROR: compliment/intersect is only applicable to charsets. There are (currently) no semantics for what they mean for a regular grammar production");
+        printf("ERROR: compliment/intersect is only applicable to charsets. There are (currently) no semantics for "
+               "what they mean for a regular grammar production");
         break;
     }
 
-    //if anonymous rule, save this AST to the cache, else save the cache_key for later deletion
+    // if anonymous rule, save this AST to the cache, else save the cache_key for later deletion
     if (anonymous)
     {
         dict_set(metaparser_ast_cache, cache_key_obj, new_uint_obj(head_idx));
@@ -798,25 +800,25 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast *body_ast)
 }
 
 /**
- * For a nested ast rule, if the nested rule is a symbol (i.e. identifier or charset), 
+ * For a nested ast rule, if the nested rule is a symbol (i.e. identifier or charset),
  * return its symbol index. Otherwise generate an anonymous identifier by inserting the ast
  * with a NULL parent head, and then return the index of the anonymous identifier.
  */
-uint64_t metaparser_get_symbol_or_anonymous(metaast *ast)
+uint64_t metaparser_get_symbol_or_anonymous(metaast* ast)
 {
     if (ast->type == metaast_identifier)
     {
-        obj *nonterminal = new_ustring_obj(ustring_clone(ast->node.string));
+        obj* nonterminal = new_ustring_obj(ustring_clone(ast->node.string));
         return metaparser_add_symbol(nonterminal);
     }
     else if (ast->type == metaast_charset)
     {
-        obj *terminal = new_charset_obj(charset_clone(ast->node.cs));
+        obj* terminal = new_charset_obj(charset_clone(ast->node.cs));
         return metaparser_add_symbol(terminal);
     }
     else
     {
-        //all other cases, insert an anonymous expression, and return its head
+        // all other cases, insert an anonymous expression, and return its head
         return metaparser_insert_rule_ast(NULL_SYMBOL_INDEX, ast);
     }
 }
@@ -827,27 +829,28 @@ uint64_t metaparser_get_symbol_or_anonymous(metaast *ast)
  * If the inner node needs an anonymous head, that head is returned,
  * else NULL_SYMBOL_INDEX is returned. This means the ast reused the parents head, and does not need to
  * ruther be inserted into the grammar tables
- * 
+ *
  * NOTE: Parent is expected to be an or node (as no other node types insert children at the same level)
  */
-void metaparser_insert_or_inner_rule_ast(uint64_t parent_head_idx, metaast *ast)
+void metaparser_insert_or_inner_rule_ast(uint64_t parent_head_idx, metaast* ast)
 {
-    //case where the inner node reuses the parent index
-    if (ast->type == metaast_or || ast->type == metaast_eps || ast->type == metaast_identifier || ast->type == metaast_charset || ast->type == metaast_string || ast->type == metaast_cat)
+    // case where the inner node reuses the parent index
+    if (ast->type == metaast_or || ast->type == metaast_eps || ast->type == metaast_identifier ||
+        ast->type == metaast_charset || ast->type == metaast_string || ast->type == metaast_cat)
     {
-        //insert the inner as itself, using the parent's head
+        // insert the inner as itself, using the parent's head
         metaparser_insert_rule_ast(parent_head_idx, ast);
     }
-    else //inner node needs to create an anonymous head which the parent adds as a sentence
+    else // inner node needs to create an anonymous head which the parent adds as a sentence
     {
         uint64_t anonymous_idx = metaparser_insert_rule_ast(NULL_SYMBOL_INDEX, ast);
 
-        //create a sentence containing just the anonymous rule
-        vect *sentence = new_vect();
+        // create a sentence containing just the anonymous rule
+        vect* sentence = new_vect();
         vect_append(sentence, new_uint_obj(anonymous_idx));
         uint64_t body_idx = metaparser_add_body(sentence);
 
-        //create the production by adding the sentence to the parent head
+        // create the production by adding the sentence to the parent head
         metaparser_add_production(parent_head_idx, body_idx);
     }
 }
@@ -855,37 +858,28 @@ void metaparser_insert_or_inner_rule_ast(uint64_t parent_head_idx, metaast *ast)
 /**
  * Return the set that stores all symbols generated by the metaparser.
  */
-set *metaparser_get_symbols()
-{
-    return metaparser_symbols;
-}
+set* metaparser_get_symbols() { return metaparser_symbols; }
 
 /**
  * Return the set that stores all bodies generated by the metaparser.
  */
-set *metaparser_get_bodies()
-{
-    return metaparser_bodies;
-}
+set* metaparser_get_bodies() { return metaparser_bodies; }
 
 /**
  * Return the map containing all productions generated by the metaparser.
  */
-dict *metaparser_get_productions()
-{
-    return metaparser_productions;
-}
+dict* metaparser_get_productions() { return metaparser_productions; }
 
 /**
  * Return the index of the epsilon rule.
  */
 uint64_t metaparser_get_eps_body_idx()
 {
-    //If no epsilon body has been added yet, create one
+    // If no epsilon body has been added yet, create one
     if (metaparser_eps_body_idx == NULL_SYMBOL_INDEX)
     {
-        //epsilon is represented by an empty vector
-        vect *epsilon = new_vect();
+        // epsilon is represented by an empty vector
+        vect* epsilon = new_vect();
         metaparser_eps_body_idx = metaparser_add_body(epsilon);
     }
     return metaparser_eps_body_idx;
@@ -898,38 +892,38 @@ uint64_t metaparser_get_endmarker_symbol_idx()
 {
     if (metaparser_endmarker_symbol_idx == NULL_SYMBOL_INDEX)
     {
-        //endmarker terminal is represented as a special charset containing 0x200000
-        charset *endmarker = charset_get_endmarker();
+        // endmarker terminal is represented as a special charset containing 0x200000
+        charset* endmarker = charset_get_endmarker();
         metaparser_endmarker_symbol_idx = metaparser_add_symbol(new_charset_obj(endmarker));
     }
     return metaparser_endmarker_symbol_idx;
 }
 
 /**
- * Get the index of the augmented start symbol for the grammar. 
+ * Get the index of the augmented start symbol for the grammar.
  * If no symbol has been set as the start symbol, use the first
  * non-terminal in metaparser_symbols and create the augmented rule
  * from that.
  */
 uint64_t metaparser_get_start_symbol_idx()
 {
-    //check if start symbol not set yet
+    // check if start symbol not set yet
     if (metaparser_start_symbol_idx == NULL_SYMBOL_INDEX)
     {
-        //if can't find a start symbol, tell parser to use the first non-terminal.
+        // if can't find a start symbol, tell parser to use the first non-terminal.
         uint64_t start_symbol_idx = NULL_SYMBOL_INDEX;
 
-        //check for any rules labelled exactly `#start`
-        set *symbols = metaparser_get_symbols();
+        // check for any rules labelled exactly `#start`
+        set* symbols = metaparser_get_symbols();
         for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
         {
             if (metaparser_is_symbol_terminal(symbol_idx))
             {
                 continue;
             }
-            uint32_t *terminal = metaparser_get_symbol(symbol_idx)->data;
+            uint32_t* terminal = metaparser_get_symbol(symbol_idx)->data;
 
-            //found #start non-terminal
+            // found #start non-terminal
             if (ustring_charstar_cmp(terminal, "#start") == 0)
             {
                 start_symbol_idx = symbol_idx;
@@ -937,7 +931,7 @@ uint64_t metaparser_get_start_symbol_idx()
             }
         }
 
-        //set the start symbol using either the found #start rule, or NULL
+        // set the start symbol using either the found #start rule, or NULL
         metaparser_set_start_symbol(start_symbol_idx);
     }
     return metaparser_start_symbol_idx;
@@ -947,7 +941,7 @@ uint64_t metaparser_get_start_symbol_idx()
  * Insert the symbol into the symbol set, and return its index.
  * Symbols already in the set are freed.
  */
-uint64_t metaparser_add_symbol(obj *symbol)
+uint64_t metaparser_add_symbol(obj* symbol)
 {
     uint64_t symbol_idx = set_add_return_index(metaparser_symbols, symbol);
     return symbol_idx;
@@ -956,10 +950,7 @@ uint64_t metaparser_add_symbol(obj *symbol)
 /**
  * Return the symbol at index i of the symbol set.
  */
-obj *metaparser_get_symbol(uint64_t i)
-{
-    return set_get_at_index(metaparser_symbols, i);
-}
+obj* metaparser_get_symbol(uint64_t i) { return set_get_at_index(metaparser_symbols, i); }
 
 /**
  * Determine whether the symbol at the given index is a terminal or non-terminal.
@@ -967,7 +958,7 @@ obj *metaparser_get_symbol(uint64_t i)
  */
 bool metaparser_is_symbol_terminal(uint64_t symbol_idx)
 {
-    obj *symbol = metaparser_get_symbol(symbol_idx);
+    obj* symbol = metaparser_get_symbol(symbol_idx);
     return symbol->type == CharSet_t;
 }
 
@@ -975,9 +966,9 @@ bool metaparser_is_symbol_terminal(uint64_t symbol_idx)
  * Insert the body into the bodies set, and return its index.
  * Bodies already in the set are freed.
  */
-uint64_t metaparser_add_body(vect *body)
+uint64_t metaparser_add_body(vect* body)
 {
-    obj *body_obj = new_vect_obj(body);
+    obj* body_obj = new_vect_obj(body);
     uint64_t body_idx = set_add_return_index(metaparser_bodies, body_obj);
     return body_idx;
 }
@@ -985,10 +976,10 @@ uint64_t metaparser_add_body(vect *body)
 /**
  * Return the body at index i of the bodies set.
  */
-vect *metaparser_get_body(uint64_t i)
+vect* metaparser_get_body(uint64_t i)
 {
-    obj *body_obj = set_get_at_index(metaparser_bodies, i);
-    return body_obj->data; //TODO->add error checking... could be null, could also be not a vect...
+    obj* body_obj = set_get_at_index(metaparser_bodies, i);
+    return body_obj->data; // TODO->add error checking... could be null, could also be not a vect...
 }
 
 /**
@@ -996,22 +987,22 @@ vect *metaparser_get_body(uint64_t i)
  */
 void metaparser_add_production(uint64_t head_idx, uint64_t body_idx)
 {
-    //create a new entry containing the head if it doesn't exist
+    // create a new entry containing the head if it doesn't exist
     if (!dict_contains_uint_key(metaparser_productions, head_idx))
     {
         dict_set(metaparser_productions, new_uint_obj(head_idx), new_set_obj(NULL));
     }
 
-    //get the set containing the list of bodies for this head
-    obj *bodies_obj = dict_get_uint_key(metaparser_productions, head_idx);
+    // get the set containing the list of bodies for this head
+    obj* bodies_obj = dict_get_uint_key(metaparser_productions, head_idx);
     if (bodies_obj->type != Set_t)
     {
         printf("ERROR: metaparser_productions should only point to vectors. Instead found type %d\n", bodies_obj->type);
         exit(1);
     }
-    set *bodies = bodies_obj->data;
+    set* bodies = bodies_obj->data;
 
-    //insert the production body into the set
+    // insert the production body into the set
     set_add(bodies, new_uint_obj(body_idx));
 }
 
@@ -1019,12 +1010,12 @@ void metaparser_add_production(uint64_t head_idx, uint64_t body_idx)
  * Return the set of production bodies for the given head index.
  * Returns null if no bodies are found.
  */
-set *metaparser_get_production_bodies(uint64_t head_idx)
+set* metaparser_get_production_bodies(uint64_t head_idx)
 {
-    obj *bodies_obj = dict_get_uint_key(metaparser_productions, head_idx);
+    obj* bodies_obj = dict_get_uint_key(metaparser_productions, head_idx);
     if (bodies_obj == NULL)
     {
-        //print out the head symbol too...
+        // print out the head symbol too...
         printf("ERROR: no production bodies exist for head ");
         obj_str(metaparser_get_symbol(head_idx));
         printf("\n");
@@ -1037,14 +1028,14 @@ set *metaparser_get_production_bodies(uint64_t head_idx)
 /**
  * Return a specific production body for the given head and body indices.
  */
-vect *metaparser_get_production_body(uint64_t head_idx, uint64_t production_idx)
+vect* metaparser_get_production_body(uint64_t head_idx, uint64_t production_idx)
 {
-    set *bodies = metaparser_get_production_bodies(head_idx);
+    set* bodies = metaparser_get_production_bodies(head_idx);
     if (bodies == NULL)
     {
         return NULL;
     }
-    uint64_t *body_idx = bodies->entries[production_idx].item->data;
+    uint64_t* body_idx = bodies->entries[production_idx].item->data;
     return metaparser_bodies->entries[*body_idx].item->data;
 }
 
@@ -1056,7 +1047,7 @@ vect *metaparser_get_production_body(uint64_t head_idx, uint64_t production_idx)
  */
 void metaparser_set_start_symbol(uint64_t start_symbol_idx)
 {
-    //if not given an index, select the first non-terminal as the start symbol
+    // if not given an index, select the first non-terminal as the start symbol
     if (start_symbol_idx == NULL_SYMBOL_INDEX)
     {
         if (set_size(metaparser_symbols) == 0)
@@ -1065,7 +1056,7 @@ void metaparser_set_start_symbol(uint64_t start_symbol_idx)
             return;
         }
 
-        //find the first non-terminal, and use that as the start symbol. This will likely always be 0...
+        // find the first non-terminal, and use that as the start symbol. This will likely always be 0...
         for (start_symbol_idx = 0; start_symbol_idx < set_size(metaparser_symbols); start_symbol_idx++)
         {
             if (!metaparser_is_symbol_terminal(start_symbol_idx))
@@ -1075,14 +1066,14 @@ void metaparser_set_start_symbol(uint64_t start_symbol_idx)
         }
     }
 
-    //check if we need an augmented head, or we can just use the start rule
-    set *bodies = metaparser_get_production_bodies(start_symbol_idx);
+    // check if we need an augmented head, or we can just use the start rule
+    set* bodies = metaparser_get_production_bodies(start_symbol_idx);
     if (set_size(bodies) == 1)
     {
-        vect *body = metaparser_get_production_body(start_symbol_idx, 0);
+        vect* body = metaparser_get_production_body(start_symbol_idx, 0);
         if (vect_size(body) == 1)
         {
-            uint64_t *symbol_idx = vect_get(body, 0)->data;
+            uint64_t* symbol_idx = vect_get(body, 0)->data;
             if (!metaparser_is_symbol_terminal(*symbol_idx))
             {
                 metaparser_start_symbol_idx = start_symbol_idx;
@@ -1091,18 +1082,17 @@ void metaparser_set_start_symbol(uint64_t start_symbol_idx)
         }
     }
 
-    //Otherwise, create a new production S' -> S for the augmented grammar
+    // Otherwise, create a new production S' -> S for the augmented grammar
     uint64_t augmented_head_idx = metaparser_get_anonymous_rule_head();
-    vect *augmented_body = new_vect();
+    vect* augmented_body = new_vect();
     vect_append(augmented_body, new_uint_obj(start_symbol_idx));
     uint64_t augmented_body_idx = metaparser_add_body(augmented_body);
     metaparser_add_production(augmented_head_idx, augmented_body_idx);
     metaparser_start_symbol_idx = augmented_head_idx;
 }
 
-
 /**
- * Helper function to count the total number of elements in all first sets 
+ * Helper function to count the total number of elements in all first sets
  */
 size_t metaparser_count_firsts_size()
 {
@@ -1115,40 +1105,39 @@ size_t metaparser_count_firsts_size()
     return count;
 }
 
-
 /**
  * Compute all first sets for each symbol in the grammar
  */
 void metaparser_compute_symbol_firsts()
 {
-    set *symbols = metaparser_get_symbols();
+    set* symbols = metaparser_get_symbols();
 
-    //create empty fsets for each symbol in the grammar
+    // create empty fsets for each symbol in the grammar
     for (size_t i = 0; i < set_size(symbols); i++)
     {
         vect_append(metaparser_symbol_firsts, new_fset_obj(NULL));
     }
 
-    //compute firsts for all terminal symbols, since the fset is just the symbol itself.
+    // compute firsts for all terminal symbols, since the fset is just the symbol itself.
     for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
     {
         if (!metaparser_is_symbol_terminal(symbol_idx))
         {
             continue;
         }
-        fset *symbol_fset = vect_get(metaparser_symbol_firsts, symbol_idx)->data;
+        fset* symbol_fset = vect_get(metaparser_symbol_firsts, symbol_idx)->data;
         fset_add(symbol_fset, new_uint_obj(symbol_idx));
         symbol_fset->nullable = false;
     }
 
-    //compute first for all non-terminal symbols. update each set until no new changes occur
+    // compute first for all non-terminal symbols. update each set until no new changes occur
     size_t count;
     do
     {
-        //keep track of if any sets got larger (i.e. by adding new terminals to any fset's)
+        // keep track of if any sets got larger (i.e. by adding new terminals to any fset's)
         count = metaparser_count_firsts_size();
 
-        //for each non-terminal symbol
+        // for each non-terminal symbol
         for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
         {
             if (metaparser_is_symbol_terminal(symbol_idx))
@@ -1156,17 +1145,17 @@ void metaparser_compute_symbol_firsts()
                 continue;
             }
 
-            fset *symbol_fset = vect_get(metaparser_symbol_firsts, symbol_idx)->data;
-            set *bodies = metaparser_get_production_bodies(symbol_idx);
+            fset* symbol_fset = vect_get(metaparser_symbol_firsts, symbol_idx)->data;
+            set* bodies = metaparser_get_production_bodies(symbol_idx);
             for (size_t production_idx = 0; production_idx < set_size(bodies); production_idx++)
             {
-                vect *body = metaparser_get_production_body(symbol_idx, production_idx);
+                vect* body = metaparser_get_production_body(symbol_idx, production_idx);
 
-                //for each element in body, get its fset, and merge into this one. stop if non-nullable
+                // for each element in body, get its fset, and merge into this one. stop if non-nullable
                 for (size_t i = 0; i < vect_size(body); i++)
                 {
-                    uint64_t *body_symbol_idx = vect_get(body, i)->data;
-                    fset *body_symbol_fset = vect_get(metaparser_symbol_firsts, *body_symbol_idx)->data;
+                    uint64_t* body_symbol_idx = vect_get(body, i)->data;
+                    fset* body_symbol_fset = vect_get(metaparser_symbol_firsts, *body_symbol_idx)->data;
                     fset_union_into(symbol_fset, fset_copy(body_symbol_fset), true);
                     if (!body_symbol_fset->nullable)
                     {
@@ -1174,7 +1163,7 @@ void metaparser_compute_symbol_firsts()
                     }
                 }
 
-                //epsilon strings add epsilon to fset
+                // epsilon strings add epsilon to fset
                 if (vect_size(body) == 0)
                 {
                     symbol_fset->nullable = true;
@@ -1187,52 +1176,45 @@ void metaparser_compute_symbol_firsts()
 /**
  * return the list of first sets for each symbol in the grammar.
  */
-vect *metaparser_get_symbol_firsts()
-{
-    return metaparser_symbol_firsts;
-}
-
+vect* metaparser_get_symbol_firsts() { return metaparser_symbol_firsts; }
 
 /**
  * return the first set for the given symbol
  */
-fset* metaparser_first_of_symbol(uint64_t symbol_idx)
-{
-    return vect_get(metaparser_symbol_firsts, symbol_idx)->data;
-}
-
+fset* metaparser_first_of_symbol(uint64_t symbol_idx) { return vect_get(metaparser_symbol_firsts, symbol_idx)->data; }
 
 /**
  * Compute the first set for the given string of symbols.
- * 
+ *
  * symbol_first: vect<fset>
  * returned set needs to be freed when done.
  */
-fset *metaparser_first_of_string(slice *string)
+fset* metaparser_first_of_string(slice* string)
 {
-    fset *result = new_fset();
-    vect *symbol_firsts = metaparser_get_symbol_firsts();
+    fset* result = new_fset();
+    vect* symbol_firsts = metaparser_get_symbol_firsts();
 
     if (slice_size(string) == 0)
     {
-        //empty string is nullable
+        // empty string is nullable
         result->nullable = true;
     }
     else
     {
-        //handle each symbol in the string, until a non-nullable symbol is reached
+        // handle each symbol in the string, until a non-nullable symbol is reached
         for (size_t i = 0; i < slice_size(string); i++)
         {
-            uint64_t *symbol_idx = slice_get(string, i)->data;
-            fset *first_i = vect_get(symbol_firsts, *symbol_idx)->data;
+            uint64_t* symbol_idx = slice_get(string, i)->data;
+            fset* first_i = vect_get(symbol_firsts, *symbol_idx)->data;
             bool nullable = first_i->nullable;
-            fset_union_into(result, fset_copy(first_i), false); //merge first of symbol into result. Don't merge nullable
+            fset_union_into(result, fset_copy(first_i),
+                            false); // merge first of symbol into result. Don't merge nullable
             if (i == slice_size(string) - 1 && nullable)
             {
                 result->nullable = true;
             }
 
-            //only continue to next symbol if this symbol was nullable
+            // only continue to next symbol if this symbol was nullable
             if (!nullable)
             {
                 break;
