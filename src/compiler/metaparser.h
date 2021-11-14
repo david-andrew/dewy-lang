@@ -1,12 +1,11 @@
 #ifndef METAPARSER_H
 #define METAPARSER_H
 
-#include "vector.h"
-#include "set.h"
-#include "metaast.h"
 #include "fset.h"
+#include "metaast.h"
+#include "set.h"
 #include "slice.h"
-
+#include "vector.h"
 
 uint64_t metaparser_get_anonymous_rule_head();
 void initialize_metaparser();
@@ -20,7 +19,7 @@ bool metaparser_is_valid_rule(vect* tokens);
 obj* metaparser_get_rule_head(vect* tokens);
 vect* metaparser_get_rule_body(vect* tokens);
 uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast);
-uint64_t metaparser_get_symbol_or_anonymous( metaast* ast);
+uint64_t metaparser_get_symbol_or_anonymous(metaast* ast);
 void metaparser_insert_or_inner_rule_ast(uint64_t parent_head_idx, metaast* ast);
 
 bool metaparser_insert_rule_sentences(obj* head, vect* body);
@@ -42,8 +41,11 @@ vect* metaparser_get_production_body(uint64_t head_idx, uint64_t production_idx)
 void metaparser_set_start_symbol(uint64_t symbol_idx);
 size_t metaparser_count_firsts_size();
 void metaparser_compute_symbol_firsts();
+void metaparser_compute_symbol_follows();
 vect* metaparser_get_symbol_firsts();
+vect* metaparser_get_symbol_follows();
 fset* metaparser_first_of_symbol(uint64_t symbol_idx);
-fset* metaparser_first_of_string(slice *string);
+fset* metaparser_first_of_string(slice* string);
+fset* metaparser_follow_of_symbol(uint64_t symbol_idx);
 
 #endif

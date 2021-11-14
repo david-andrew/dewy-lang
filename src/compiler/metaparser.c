@@ -27,12 +27,13 @@
  * Productions are a map from the head index (in the symbols list) to a list of 
  * indices indicating which body vectors apply to that head.
  */
-set *metaparser_symbols;           //list of all symbols used in production bodies.
-set *metaparser_bodies;            //list of each production body.
-dict *metaparser_productions;      //map from head to production bodies.
-dict *metaparser_ast_cache;        //map<metaast*, body_idx>. care must be taken while freeing this object.
-vect *metaparser_unused_ast_cache; //vect containing all ASTs not inserted into the cache
-vect *metaparser_symbol_firsts;    //vect containing the first set of each symbol.
+set* metaparser_symbols;           //list of all symbols used in production bodies.
+set* metaparser_bodies;            //list of each production body.
+dict* metaparser_productions;      //map from head to production bodies.
+dict* metaparser_ast_cache;        //map<metaast*, body_idx>. care must be taken while freeing this object.
+vect* metaparser_unused_ast_cache; //vect containing all ASTs not inserted into the cache
+vect* metaparser_symbol_firsts;    //vect containing the first set of each symbol.
+vect* metaparser_symbol_follows;   //vect containing the follow set of each symbol.
 
 //convenience variables for the frequently used epsilon production body, and $ endmarker terminal.
 uint64_t metaparser_eps_body_idx = NULL_SYMBOL_INDEX;
@@ -50,6 +51,7 @@ void initialize_metaparser()
     metaparser_ast_cache = new_dict();
     metaparser_unused_ast_cache = new_vect();
     metaparser_symbol_firsts = new_vect();
+    metaparser_symbol_follows = new_vect();
 }
 
 /**
@@ -73,6 +75,7 @@ void release_metaparser()
     set_free(metaparser_bodies);
     dict_free(metaparser_productions);
     vect_free(metaparser_symbol_firsts);
+    vect_free(metaparser_symbol_follows);
 
     metaparser_free_ast_cache();
 }

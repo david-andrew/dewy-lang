@@ -1,13 +1,13 @@
 /**
  * How to use:
  * 
- * ./dewy [-s] [-a] [-p] [-g] [-t] [-c] [--verbose] /grammar/file/path /input/file/path
+ * ./dewy [-s] [-a] [-p] [-g] [-l] [-c] [--verbose] /grammar/file/path /input/file/path
  * 
  * -s scanner
- * -a ast
- * -p parser
- * -g grammar itemsets (and first sets if --verbose)
- * -t grammar table
+ * -a (meta)ast
+ * -p (meta)parser
+ * -g grammar first/follow sets
+ * -l grammar labels
  * -c srnglr compiler
  * 
  * --verbose prints out repr instead of str
@@ -26,7 +26,6 @@
 #include "metascanner.h"
 #include "metaparser.h"
 #include "metaitem.h"
-// #include "srnglr.h"
 #include "dewy_compiler_compiler.h"
 
 #define match_argv(var, val)            \

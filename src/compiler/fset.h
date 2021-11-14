@@ -7,6 +7,7 @@
 typedef struct {
     set* terminals;
     bool nullable; //instead of representing ϵ as an obj, keep a separate boolean
+                   //for follow sets, nullable indicates whether the set can be followed by the end of the input $
 } fset;
 
 
