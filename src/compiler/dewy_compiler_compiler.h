@@ -14,8 +14,5 @@ void print_ast(uint64_t head_idx, metaast* body_ast, bool verbose);
 void print_parser(bool verbose);
 void print_grammar_first_sets();
 void print_grammar_follow_sets();
-// void print_grammar();
-// void print_table();
-// void print_compiler();
 
 #endif
