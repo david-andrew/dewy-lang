@@ -20,7 +20,8 @@ void parse(uint32_t* src);
 // internal helper functions for running the parser
 void parser_generate_labels();
 vect* parser_get_labels();
-void parser_at_label(slot* label);
+void parser_handle_label(slot* label);
+void parser_print_label(slot* label);
 
 bool parser_test_select(uint32_t c, uint64_t head, slice* string);
 void parser_bsrAdd(slot* slot, uint64_t i, uint64_t k, uint64_t j);

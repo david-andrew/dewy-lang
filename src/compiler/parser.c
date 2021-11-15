@@ -96,8 +96,65 @@ vect* parser_get_labels() { return parser_labels; }
 /**
  * perform the CNP parsing actions for the given label
  */
-void parser_at_label(slot* label)
+void parser_handle_label(slot* label)
 {
+    // keep track of the current position in the item without modifying the original
+    uint64_t dot = label->position;
+
+    vect* body = metaparser_get_production_body(label->head_idx, label->production_idx);
+    if (label->position == 0 && vect_size(body) == 0)
+    {
+        // Y.add((SubTerm(label.head, Sentence([])), cI, cI, cI))
+    }
+    else
+    {
+        while (dot < vect_size(body))
+        {
+            if (!metaparser_is_symbol_terminal(*(uint64_t*)vect_get(body, dot)->data)) { break; }
+            if (dot != 0)
+            {
+                slice s = slice_struct(body, dot, vect_size(body), NULL);
+                if (!parser_test_select(I[cI], label->head_idx, &s)) { return; }
+            }
+            dot++;
+
+            parser_bsrAdd(slot_copy(label), cU, cI, cI + 1);
+            cI++;
+        }
+
+        if (dot < vect_size(body))
+        {
+            if (dot != 0)
+            {
+                slice s = slice_struct(body, dot, vect_size(body), NULL);
+                if (!parser_test_select(I[cI], label->head_idx, &s)) { return; }
+            }
+            dot++;
+            parser_call(slot_copy(label), cU, cI);
+        }
+    }
+
+    if (label->position == vect_size(body) ||
+        (dot == vect_size(body) && metaparser_is_symbol_terminal(*(uint64_t*)vect_get(body, dot - 1)->data)))
+    {
+        // get the followset of the label head
+        fset* follow = metaparser_follow_of_symbol(label->head_idx);
+        if (fset_contains_c(follow, I[cI]))
+        {
+            parser_rtn(label->head_idx, cU, cI);
+            return;
+        }
+    }
+}
+
+/**
+ * print the CNP actions performed for the given label
+ */
+void parser_print_label(slot* label)
+{
+    slot_str(label);
+    printf("\n");
+
     // keep track of the current position in the item without modifying the original
     uint64_t dot = label->position;
 
