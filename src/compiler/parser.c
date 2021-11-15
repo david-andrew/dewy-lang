@@ -161,7 +161,6 @@ void parser_print_label(slot* label)
     vect* body = metaparser_get_production_body(label->head_idx, label->production_idx);
     if (label->position == 0 && vect_size(body) == 0)
     {
-        // Y.add((SubTerm(label.head, Sentence([])), cI, cI, cI))
         printf("    Y.add((SubTerm(label.head, Sentence([])), cI, cI, cI))\n");
     }
     else
@@ -172,24 +171,16 @@ void parser_print_label(slot* label)
             if (dot != 0)
             {
                 slice s = slice_struct(body, dot, vect_size(body), NULL);
-                // if (!parser_test_select(I[cI], label->head_idx, &s)) { return; }
-                {
-                    printf("    if (!parser_test_select(I[cI], ");
-                    obj_str(metaparser_get_symbol(label->head_idx));
-                    printf(", ");
-                    metaparser_print_body_slice(&s);
-                    printf("))\n        goto L0\n");
-                }
+                printf("    if (!parser_test_select(I[cI], ");
+                obj_str(metaparser_get_symbol(label->head_idx));
+                printf(", ");
+                metaparser_print_body_slice(&s);
+                printf("))\n        goto L0\n");
             }
             dot++;
-
-            // parser_bsrAdd(slot_copy(label), cU, cI, cI + 1);
-            // cI++;
-            {
-                printf("    parser_bsrAdd(");
-                slot_str(&(slot){label->head_idx, label->production_idx, dot});
-                printf(", cU, cI, cI + 1);\n    cI += 1\n");
-            }
+            printf("    parser_bsrAdd(");
+            slot_str(&(slot){label->head_idx, label->production_idx, dot});
+            printf(", cU, cI, cI + 1);\n    cI += 1\n");
         }
 
         if (dot < vect_size(body))
@@ -197,39 +188,22 @@ void parser_print_label(slot* label)
             if (dot != 0)
             {
                 slice s = slice_struct(body, dot, vect_size(body), NULL);
-                // if (!parser_test_select(I[cI], label->head_idx, &s)) { return; }
-                {
-                    printf("    if (!parser_test_select(I[cI], ");
-                    obj_str(metaparser_get_symbol(label->head_idx));
-                    printf(", ");
-                    metaparser_print_body_slice(&s);
-                    printf("))\n        goto L0\n");
-                }
+                printf("    if (!parser_test_select(I[cI], ");
+                obj_str(metaparser_get_symbol(label->head_idx));
+                printf(", ");
+                metaparser_print_body_slice(&s);
+                printf("))\n        goto L0\n");
             }
             dot++;
-            // parser_call(slot_copy(label), cU, cI);
-            {
-                printf("    parser_call(");
-                slot_str(&(slot){label->head_idx, label->production_idx, dot});
-                printf(", cU, cI);\n");
-            }
+            printf("    parser_call(");
+            slot_str(&(slot){label->head_idx, label->production_idx, dot});
+            printf(", cU, cI);\n");
         }
     }
 
     if (label->position == vect_size(body) ||
         (dot == vect_size(body) && metaparser_is_symbol_terminal(*(uint64_t*)vect_get(body, dot - 1)->data)))
     {
-        // get the followset of the label head
-        // fset* follow = metaparser_follow_of_symbol(label->head_idx);
-        // for (size_t i = 0; i < set_size(follow->terminals); i++)
-        // {
-        //     charset* symbol = set_get_at_index(follow->terminals, i)->data;
-        //     if (charset_contains_c(symbol, I[cI]) || I[cI] == 0 && follow->special)
-        //     {
-        //         parser_rtn(label->head_idx, cU, cI);
-        //         return;
-        //     }
-        // }
         printf("    if (I[cI] ∈ follow(");
         obj_str(metaparser_get_symbol(label->head_idx));
         printf("))\n        rtn(");
