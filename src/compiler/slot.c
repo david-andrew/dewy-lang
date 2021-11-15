@@ -1,24 +1,23 @@
-#ifndef METAITEM_C
-#define METAITEM_C
+#ifndef SLOT_C
+#define SLOT_C
 
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "fset.h"
-#include "metaitem.h"
 #include "metaparser.h"
 #include "slice.h"
-// #include "srnglr.h"
+#include "slot.h"
 #include "utilities.h"
 
 /**
- * Create a new metaitem.
+ * Create a new slot.
  */
-metaitem* new_metaitem(uint64_t head_idx, uint64_t production_idx, uint64_t position)
+slot* new_slot(uint64_t head_idx, uint64_t production_idx, uint64_t position)
 {
-    metaitem* i = malloc(sizeof(metaitem));
-    *i = (metaitem){
+    slot* i = malloc(sizeof(slot));
+    *i = (slot){
         .head_idx = head_idx,
         .production_idx = production_idx,
         .position = position,
@@ -27,22 +26,22 @@ metaitem* new_metaitem(uint64_t head_idx, uint64_t production_idx, uint64_t posi
 }
 
 /**
- * Create a new metaitem obj from an existing metaitem.
+ * Create a new slot obj from an existing slot.
  * i is expected to be non-null.
  */
-obj* new_metaitem_obj(metaitem* i)
+obj* new_slot_obj(slot* i)
 {
     obj* I = malloc(sizeof(obj));
-    *I = (obj){.type = MetaItem_t, .data = i};
+    *I = (obj){.type = Slot_t, .data = i};
     return I;
 }
 
 /**
- * Returns whether the metaitem is in an accepting state,
+ * Returns whether the slot is in an accepting state,
  * i.e. if the position is at the end of the list of body symbols.
  * Additionally, an item is accepting if the remaining string is nullable.
  */
-bool metaitem_is_accept(metaitem* i)
+bool slot_is_accept(slot* i)
 {
     // get the body for this item
     vect* body = metaparser_get_production_body(i->head_idx, i->production_idx);
@@ -64,9 +63,9 @@ bool metaitem_is_accept(metaitem* i)
 }
 
 /**
- * Print out a string displaying the metaitem.
+ * Print out a string displaying the slot.
  */
-void metaitem_str(metaitem* item)
+void slot_str(slot* item)
 {
     obj* head = metaparser_get_symbol(item->head_idx);
     vect* body = metaparser_get_production_body(item->head_idx, item->production_idx);
@@ -87,23 +86,23 @@ void metaitem_str(metaitem* item)
 }
 
 /**
- * Print out the internal representation of a metaitem.
+ * Print out the internal representation of a slot.
  */
-void metaitem_repr(metaitem* i)
+void slot_repr(slot* i)
 {
-    printf("metaitem{head_idx: %" PRIu64 ", production_idx: %" PRIu64 ", position: %" PRIu64 "}", i->head_idx,
+    printf("slot{head_idx: %" PRIu64 ", production_idx: %" PRIu64 ", position: %" PRIu64 "}", i->head_idx,
            i->production_idx, i->position);
 }
 
 /**
- * Free an allocated metaitem.
+ * Free an allocated slot.
  */
-void metaitem_free(metaitem* i) { free(i); }
+void slot_free(slot* i) { free(i); }
 
 /**
- * Compute the hash of the metaitem with a modified version of fnv1a.
+ * Compute the hash of the slot with a modified version of fnv1a.
  */
-uint64_t metaitem_hash(metaitem* item)
+uint64_t slot_hash(slot* item)
 {
     uint64_t components[] = {item->head_idx, item->production_idx, item->position};
 
@@ -111,9 +110,9 @@ uint64_t metaitem_hash(metaitem* item)
 }
 
 /**
- * Determine whether two metaitems are equal.
+ * Determine whether two slots are equal.
  */
-bool metaitem_equals(metaitem* left, metaitem* right)
+bool slot_equals(slot* left, slot* right)
 {
     return left->head_idx == right->head_idx && left->production_idx == right->production_idx &&
            left->position == right->position;

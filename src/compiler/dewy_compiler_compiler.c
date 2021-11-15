@@ -4,11 +4,11 @@
 #include <string.h>
 
 #include "dewy_compiler_compiler.h"
-#include "metaitem.h"
 #include "metaparser.h"
 #include "metascanner.h"
 #include "metatoken.h"
 #include "object.h"
+#include "slot.h"
 #include "ustring.h"
 #include "utilities.h"
 

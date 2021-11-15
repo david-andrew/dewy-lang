@@ -2,8 +2,8 @@ all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vec
 
 
 #current completed step is simple lexer
-dewy: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o metaitem.o fset.o slice.o
-	clang -o dewy dewy_compiler_compiler.o utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o metaitem.o fset.o slice.o -lm
+dewy: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o slot.o fset.o slice.o
+	clang -o dewy dewy_compiler_compiler.o utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o slot.o fset.o slice.o -lm
 
 debug:
 	clang -o dewy dewy_compiler_compiler.c utilities.c object.c tuple.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c metaitem.c fset.c slice.c gotokey.c reduction.c gss.c sppf.c srnglr.c -lm -g
@@ -11,7 +11,7 @@ debug:
 utilities.o: utilities.c utilities.h ustring.h
 	clang -c -o utilities.o utilities.c
 
-object.o: object.c object.h utilities.h ustring.h vector.h dictionary.h set.h metatoken.h charset.h metaitem.h
+object.o: object.c object.h utilities.h ustring.h vector.h dictionary.h set.h metatoken.h charset.h slot.h
 	clang -c -o object.o object.c
 
 metatoken.o: metatoken.c metatoken.h object.h vector.h utilities.h ustring.h
@@ -32,8 +32,8 @@ charset.o: charset.c charset.h object.h utilities.h ustring.h
 ustring.o: ustring.c ustring.h object.h utilities.h metascanner.h
 	clang -c -o ustring.o ustring.c
 
-metaitem.o: metaitem.c metaitem.h object.h set.h metaparser.h slice.h fset.h utilities.h
-	clang -c -o metaitem.o metaitem.c
+slot.o: slot.c slot.h object.h set.h metaparser.h slice.h fset.h utilities.h
+	clang -c -o slot.o slot.c
 
 metaast.o: metaast.c metaast.h vector.h charset.h metatoken.h utilities.h ustring.h
 	clang -c -o metaast.o metaast.c

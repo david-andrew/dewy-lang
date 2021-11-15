@@ -12,11 +12,11 @@
 #include "dictionary.h"
 #include "fset.h"
 #include "metaast.h"
-#include "metaitem.h"
 #include "metatoken.h"
 #include "object.h"
 #include "set.h"
 #include "slice.h"
+#include "slot.h"
 #include "ustring.h"
 #include "utilities.h"
 #include "vector.h"
@@ -194,7 +194,7 @@ void obj_str(obj* o)
         case String_t: printf("%s", (char*)o->data); break;
         case UnicodeString_t: ustring_str(o->data); break;
         case MetaToken_t: metatoken_repr(o->data); break;
-        case MetaItem_t: metaitem_str(o->data); break;
+        case Slot_t: slot_str(o->data); break;
         case MetaAST_t: metaast_str(o->data); break;
         case FSet_t: fset_str(o->data); break;
         case Vector_t: vect_str(o->data); break;
@@ -239,7 +239,7 @@ uint64_t obj_hash(obj* o)
         case String_t: return fnv1a(o->data);
         case UnicodeString_t: return ustring_hash(o->data);
         // case MetaToken_t: return metatoken_hash((metatoken*)o->data);
-        case MetaItem_t: return metaitem_hash(o->data);
+        case Slot_t: return slot_hash(o->data);
         case MetaAST_t: return metaast_hash(o->data);
         case Slice_t: return slice_hash(o->data);
         case Vector_t: return vect_hash(o->data);
@@ -314,7 +314,7 @@ bool obj_equals(obj* left, obj* right)
         // case Dictionary_t: return dict_equals((dict*)left->data, (dict*)right->data);
         case Set_t: return set_equals((set*)left->data, (set*)right->data);
         case CharSet_t: return charset_equals(left->data, right->data);
-        case MetaItem_t: return metaitem_equals(left->data, right->data);
+        case Slot_t: return slot_equals(left->data, right->data);
         case MetaAST_t: return metaast_equals(left->data, right->data);
         case Slice_t: return slice_equals(left->data, right->data);
         // case FSet_t: return fset_equals(left->data, right->data);
@@ -354,7 +354,7 @@ void obj_free(obj* o)
             case Dictionary_t: dict_free((dict*)o->data); break;
             case Set_t: set_free((set*)o->data); break;
             case CharSet_t: charset_free((charset*)o->data); break;
-            case MetaItem_t: metaitem_free((metaitem*)o->data); break;
+            case Slot_t: slot_free((slot*)o->data); break;
             case Slice_t: slice_free(o->data); break;
             case FSet_t: fset_free(o->data); break;
 
