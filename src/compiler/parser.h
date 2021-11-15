@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "object.h"
+#include "slice.h"
 #include "slot.h"
 #include "vector.h"
 
@@ -19,8 +20,9 @@ void parse(uint32_t* src);
 // internal helper functions for running the parser
 void parser_generate_labels();
 vect* parser_get_labels();
+void parser_at_label(slot* label);
 
-bool parser_test_select(uint32_t c, uint64_t head, uint64_t body);
+bool parser_test_select(uint32_t c, uint64_t head, slice* string);
 void parser_bsrAdd(slot* slot, uint64_t i, uint64_t k, uint64_t j);
 void parser_call(slot* slot, uint64_t i, uint64_t j);
 void parser_rtn(uint64_t head, uint64_t k, uint64_t j);
