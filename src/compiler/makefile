@@ -11,11 +11,8 @@ debug:
 utilities.o: utilities.c utilities.h ustring.h
 	clang -c -o utilities.o utilities.c
 
-object.o: object.c object.h tuple.h utilities.h ustring.h vector.h dictionary.h set.h metatoken.h charset.h metaitem.h gotokey.h reduction.h gss.h srnglr.h
+object.o: object.c object.h utilities.h ustring.h vector.h dictionary.h set.h metatoken.h charset.h metaitem.h
 	clang -c -o object.o object.c
-
-tuple.o: tuple.c tuple.h object.h utilities.h
-	clang -c -o tuple.o tuple.c
 
 metatoken.o: metatoken.c metatoken.h object.h vector.h utilities.h ustring.h
 	clang -c -o metatoken.o metatoken.c
@@ -52,21 +49,6 @@ fset.o: fset.c fset.h object.h set.h metaparser.h
 
 slice.o: slice.c slice.h vector.h utilities.h
 	clang -c -o slice.o slice.c
-
-gotokey.o: gotokey.c gotokey.h object.h metaparser.h utilities.h
-	clang -c -o gotokey.o gotokey.c
-
-reduction.o: reduction.c reduction.h object.h metaparser.h utilities.h ustring.h
-	clang -c -o reduction.o reduction.c
-
-gss.o: gss.c gss.h vector.h set.h utilities.h
-	clang -c -o gss.o gss.c
-
-sppf.o: sppf.c sppf.h
-	clang -c -o sppf.o sppf.c
-
-srnglr.o: srnglr.c srnglr.h set.h fset.h slice.h tuple.h dictionary.h ustring.h metaparser.h metaitem.h gotokey.h reduction.h gss.h
-	clang -c -o srnglr.o srnglr.c
 
 unit_test.o: unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o metaast.o charset.o ustring.o metascanner.o
 	clang -o unit_test.o unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o metaast.o charset.o ustring.o metascanner.o -lm
