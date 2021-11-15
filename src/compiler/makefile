@@ -44,7 +44,7 @@ metascanner.o: metascanner.c metascanner.h object.h vector.h metatoken.h utiliti
 metaparser.o: metaparser.c metaparser.h vector.h set.h metaast.h charset.h metatoken.h metascanner.h utilities.h ustring.h
 	clang -c -o metaparser.o metaparser.c
 
-fset.o: fset.c fset.h object.h set.h metaparser.h
+fset.o: fset.c fset.h object.h set.h metaparser.h charset.h
 	clang -c -o fset.o fset.c
 
 parser.o: parser.c parser.h object.h slot.h metaparser.h set.h vector.h

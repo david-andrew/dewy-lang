@@ -218,6 +218,7 @@ bool run_compiler(uint32_t* source, bool labels, bool forest)
             slot* label = vect_get(labels, i)->data;
             slot_str(label);
             printf("\n");
+            parser_at_label(label);
         }
         printf("\n\n");
     }

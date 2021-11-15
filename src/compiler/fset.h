@@ -22,5 +22,7 @@ void fset_str(fset* s);
 void fset_first_str(fset* s);
 void fset_follow_str(fset* s);
 void fset_str_inner(fset* s);
+// bool fset_contains_charset(fset* s, charset* cs);
+bool fset_contains_c(fset* s, uint32_t c);
 
 #endif
