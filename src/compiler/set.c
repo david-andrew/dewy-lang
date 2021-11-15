@@ -1,26 +1,26 @@
 #ifndef SET_C
 #define SET_C
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <inttypes.h>
 
-#include "utilities.h"
 #include "object.h"
 #include "set.h"
+#include "utilities.h"
 
 #define DEFAULT_SET_CAPACITY 8
 #define MAX_LOAD 2 / 3
 
-//constant to assign to hashes that are 0, so that the lfsr algorithm doesn't get stuck at 0
+// constant to assign to hashes that are 0, so that the lfsr algorithm doesn't get stuck at 0
 #define NONZERO_HASH 0xDEADBEEF
 
-//representation for an empty item in the set indices table.
-//since we only have pure ints, we say the max value (which probably won't be used) is EMPTY
-//also allows us to initialize the indices array using memset with -1
+// representation for an empty item in the set indices table.
+// since we only have pure ints, we say the max value (which probably won't be used) is EMPTY
+// also allows us to initialize the indices array using memset with -1
 #define EMPTY SIZE_MAX
 
 // Implementation of Set is basically identical to dictionary's implementation
@@ -32,13 +32,14 @@ set* new_set()
 {
     set* s_ptr = malloc(sizeof(set));
     set s = {
-        .size = 0,                                                  //initial elements in the set (i.e. none)
-        .icapacity = DEFAULT_SET_CAPACITY,                          //initial capacity of the indices table
-        .ecapacity = DEFAULT_SET_CAPACITY,                          //initial capacity of the entries vector
-        .indices = malloc(DEFAULT_SET_CAPACITY * sizeof(size_t)),   //pointer to the indices table
-        .entries = calloc(DEFAULT_SET_CAPACITY, sizeof(set_entry))  //pointer to the entries vector
+        .size = 0,                                                 // initial elements in the set (i.e. none)
+        .icapacity = DEFAULT_SET_CAPACITY,                         // initial capacity of the indices table
+        .ecapacity = DEFAULT_SET_CAPACITY,                         // initial capacity of the entries vector
+        .indices = malloc(DEFAULT_SET_CAPACITY * sizeof(size_t)),  // pointer to the indices table
+        .entries = calloc(DEFAULT_SET_CAPACITY, sizeof(set_entry)) // pointer to the entries vector
     };
-    memset(s.indices, UCHAR_MAX, s.icapacity * sizeof(size_t));     //set every byte to 255, which expands `EMPTY` for every size_t in the array
+    memset(s.indices, UCHAR_MAX,
+           s.icapacity * sizeof(size_t)); // set every byte to 255, which expands `EMPTY` for every size_t in the array
     *s_ptr = s;
     return s_ptr;
 }
@@ -50,41 +51,32 @@ obj* new_set_obj(set* s)
 {
     if (s == NULL) s = new_set();
     obj* S = malloc(sizeof(obj));
-    *S = (obj){.type=Set_t, .data=s};
+    *S = (obj){.type = Set_t, .data = s};
     return S;
 }
 
 /**
  * returns the number of elements in the set
  */
-size_t set_size(set* s) 
-{ 
-    return s->size; 
-}
+size_t set_size(set* s) { return s->size; }
 
 /**
  * returns the capacity of the indices table in a set
  */
-size_t set_indices_capacity(set* s)
-{
-    return s->icapacity;
-}
+size_t set_indices_capacity(set* s) { return s->icapacity; }
 
 /**
  * returns the capacity of the entries vector in a set
  */
-size_t set_entries_capacity(set* s)
-{
-    return s->ecapacity;
-}
+size_t set_entries_capacity(set* s) { return s->ecapacity; }
 
 /**
- * 
+ *
  */
 void set_resize_indices(set* s, size_t new_size)
 {
-    //check if the new set is large enough for all the elements in the old set
-    if (s->size > new_size * MAX_LOAD) 
+    // check if the new set is large enough for all the elements in the old set
+    if (s->size > new_size * MAX_LOAD)
     {
         printf("ERROR: set indices resize failed. new capacity is too small for elements of set\n");
         exit(1);
@@ -96,22 +88,22 @@ void set_resize_indices(set* s, size_t new_size)
         printf("ERROR: memory allocation for resized set indices failed\n");
         exit(1);
     }
-    free(s->indices);           //free the old array of indices
-    s->indices = new_indices;   //store the new array of indices into the set
+    free(s->indices);         // free the old array of indices
+    s->indices = new_indices; // store the new array of indices into the set
     s->icapacity = new_size;
-    memset(s->indices, -1, s->icapacity * sizeof(size_t));          //set all items to show as "empty"
+    memset(s->indices, -1, s->icapacity * sizeof(size_t)); // set all items to show as "empty"
 
-    //for each item in entries, insert it's index into the new indices
+    // for each item in entries, insert it's index into the new indices
     for (size_t i = 0; i < s->size; i++)
     {
-        //TODO->if/when we add ability to remove items from a set, this should skip over those
+        // TODO->if/when we add ability to remove items from a set, this should skip over those
         uint64_t address = set_get_indices_probe(s, s->entries[i].item);
         s->indices[address] = i;
     }
 }
 
 /**
- * 
+ *
  */
 void set_resize_entries(set* s, size_t new_size)
 {
@@ -135,33 +127,32 @@ void set_resize_entries(set* s, size_t new_size)
 }
 
 /**
- * 
+ *
  */
 size_t set_get_indices_probe(set* s, obj* item)
 {
-    //hash used to find initial probe into indices table
+    // hash used to find initial probe into indices table
     uint64_t hash = obj_hash(item);
 
-    //guarantee that the starting offset is non-zero, as the lfsr will get stuck if given 0
+    // guarantee that the starting offset is non-zero, as the lfsr will get stuck if given 0
     size_t offset = hash != 0 ? hash : NONZERO_HASH;
 
-    //search for either an empty slot, or a slot with the same key
+    // search for either an empty slot, or a slot with the same key
     while (true)
     {
-        size_t probe = (hash + offset) % s->icapacity;      //current probe index in indices table
-        size_t index = s->indices[probe];                   //index we're looking at in the entries table 
+        size_t probe = (hash + offset) % s->icapacity; // current probe index in indices table
+        size_t index = s->indices[probe];              // index we're looking at in the entries table
 
-        //if slot is free, or set has same item, then we've found our slot
+        // if slot is free, or set has same item, then we've found our slot
         if (index == EMPTY || (s->entries[index].hash == hash && obj_equals(s->entries[index].item, item)))
         {
             return probe;
         }
 
-        //probe to the next slot in the sequence by changing the offset
+        // probe to the next slot in the sequence by changing the offset
         offset = lfsr64_next(offset);
     }
 }
-
 
 /**
  * get the index of the key in the set's entries array or EMPTY if the key is not present.
@@ -172,15 +163,10 @@ size_t set_get_entries_index(set* s, obj* item)
     return s->indices[probe];
 }
 
-
 /**
  * Determine whether the given index is an empty index
  */
-bool set_is_index_empty(size_t index)
-{
-    return index == EMPTY;
-}
-
+bool set_is_index_empty(size_t index) { return index == EMPTY; }
 
 /**
  * Insert a new object into the set if it is not already there
@@ -188,35 +174,28 @@ bool set_is_index_empty(size_t index)
 void set_add(set* s, obj* item)
 {
 
-    //check if the set indices & entries tables needs to be resized. for now, return failure for too many entries;
-    if (s->size >= s->icapacity * MAX_LOAD) 
-    {
-        set_resize_indices(s, s->icapacity * 2);
-    }
-    if (s->size >= s->ecapacity)
-    {
-        set_resize_entries(s, s->ecapacity * 2);
-    }
+    // check if the set indices & entries tables needs to be resized. for now, return failure for too many entries;
+    if (s->size >= s->icapacity * MAX_LOAD) { set_resize_indices(s, s->icapacity * 2); }
+    if (s->size >= s->ecapacity) { set_resize_entries(s, s->ecapacity * 2); }
 
     uint64_t hash = obj_hash(item);
 
-    //find the assigned slot for this item
+    // find the assigned slot for this item
     size_t probe = set_get_indices_probe(s, item);
     size_t index = s->indices[probe];
 
-    if (index != EMPTY) //item already in set, so delete the new copy (since set owns the data added)
+    if (index != EMPTY) // item already in set, so delete the new copy (since set owns the data added)
     {
         obj_free(item);
     }
-    else //create a new entry for the item in the set
+    else // create a new entry for the item in the set
     {
         index = s->size;
         s->indices[probe] = index;
-        s->entries[index] = (set_entry){.hash=hash, .item=item};
+        s->entries[index] = (set_entry){.hash = hash, .item = item};
         s->size++;
     }
 }
-
 
 /**
  * Insert the object into the set, and return the index that the object was inserted at.
@@ -226,22 +205,21 @@ size_t set_add_return_index(set* s, obj* item)
     size_t index;
     if (set_contains(s, item))
     {
-        //get the index of the already inserted object
+        // get the index of the already inserted object
         size_t probe = set_get_indices_probe(s, item);
         index = s->indices[probe];
 
-        //since already inserted, free the duplicate
+        // since already inserted, free the duplicate
         obj_free(item);
     }
     else
     {
-        //normal insertion. object will be at the end of the list of objects
+        // normal insertion. object will be at the end of the list of objects
         index = s->size;
         set_add(s, item);
     }
     return index;
 }
-
 
 /**
  * Return the object at the i'th index of the set's underlying object list.
@@ -249,10 +227,7 @@ size_t set_add_return_index(set* s, obj* item)
  */
 obj* set_get_at_index(set* s, size_t i)
 {
-    if (i < set_size(s)) 
-    {
-        return s->entries[i].item;
-    }
+    if (i < set_size(s)) { return s->entries[i].item; }
     else
     {
         printf("ERROR: attempted to get set item from index %zu in set of size %zu\n", i, set_size(s));
@@ -260,16 +235,14 @@ obj* set_get_at_index(set* s, size_t i)
     }
 }
 
-
 /**
- * check if the set contains the specified item. 
+ * check if the set contains the specified item.
  */
 bool set_contains(set* s, obj* item)
 {
     size_t i = set_get_entries_index(s, item);
     return i != EMPTY;
 }
-
 
 /**
  * Return a copy of the set
@@ -280,29 +253,30 @@ set* set_copy(set* s)
     for (int i = 0; i < set_size(s); i++)
     {
         set_entry e = s->entries[i];
-        set_add(copy, obj_copy(e.item)); //TODO->deep copy? alsmost certainly need to fix?
+        set_add(copy, obj_copy(e.item)); // TODO->deep copy? alsmost certainly need to fix?
     }
     return copy;
 }
 
-
 /**
- * 
+ *
  */
 set* set_union(set* a, set* b)
 {
     set* u = new_set();
 
-    //This part could be replaced with `S = set_copy(A);` but would need to modify to do deep copy
+    // This part could be replaced with `S = set_copy(A);` but would need to modify to do deep copy
     for (int i = 0; i < set_size(a); i++)
     {
         set_entry e = a->entries[i];
-        set_add(u, obj_copy(e.item)); //add a copy of the element to the union set
+        set_add(u, obj_copy(e.item)); // add a copy of the element to the union set
     }
     for (int i = 0; i < set_size(b); i++)
     {
         set_entry e = b->entries[i];
-        if (!set_contains(u, e.item)) //only add an element if it wasn't in the first list (so that we don't try to add duplicates)
+        if (!set_contains(
+                u,
+                e.item)) // only add an element if it wasn't in the first list (so that we don't try to add duplicates)
         {
             set_add(u, obj_copy(e.item));
         }
@@ -311,26 +285,21 @@ set* set_union(set* a, set* b)
     return u;
 }
 
-
 /**
  * Merge right set `b` into left set `a`, and free `b`.
  */
 void set_union_into(set* a, set* b)
 {
-    //insert each item of right into left
+    // insert each item of right into left
     for (size_t i = 0; i < set_size(b); i++)
     {
         obj* item = b->entries[i].item;
-        if (!set_contains(a, item))
-        {
-            set_add(a, obj_copy(item));
-        }
+        if (!set_contains(a, item)) { set_add(a, obj_copy(item)); }
     }
-    
-    //free right set
+
+    // free right set
     set_free(b);
 }
-
 
 /**
  * convenience method for reassigning a variable with the result of a union
@@ -349,7 +318,7 @@ set* set_intersect(set* a, set* b)
     for (int i = 0; i < set_size(a); i++)
     {
         set_entry e = a->entries[i];
-        if (set_contains(b, e.item)) //only if both A and B have the item
+        if (set_contains(b, e.item)) // only if both A and B have the item
         {
             set_add(x, obj_copy(e.item));
         }
@@ -357,23 +326,20 @@ set* set_intersect(set* a, set* b)
     return x;
 }
 
-
 /**
- * 
+ *
  */
 bool set_equals(set* a, set* b)
 {
-    //check if sizes are different
+    // check if sizes are different
     if (set_size(a) != set_size(b)) return false;
 
-    //check if each element in A is in B. Since sizes are the same, and sets don't have duplicates, this will indicate equality
+    // check if each element in A is in B. Since sizes are the same, and sets don't have duplicates, this will indicate
+    // equality
     for (int i = 0; i < set_size(a); i++)
     {
         set_entry e = a->entries[i];
-        if (!set_contains(b, e.item))
-        {
-            return false;
-        }
+        if (!set_contains(b, e.item)) { return false; }
     }
     return true;
 }
@@ -384,7 +350,7 @@ bool set_equals(set* a, set* b)
  */
 uint64_t set_hash(set* s)
 {
-    uint64_t hash = hash_uint(Set_t); //hash the type identifier for a set. this ensures it's not 0 if set is empty
+    uint64_t hash = hash_uint(Set_t); // hash the type identifier for a set. this ensures it's not 0 if set is empty
     for (int i = 0; i < set_size(s); i++)
     {
         set_entry e = s->entries[i];
@@ -394,7 +360,7 @@ uint64_t set_hash(set* s)
 }
 
 /**
- * 
+ *
  */
 void set_reset(set* s)
 {
@@ -402,18 +368,17 @@ void set_reset(set* s)
     free(s->indices);
     free(s->entries);
 
-    //reset all parameters as if new set
-    s->indices = malloc(DEFAULT_SET_CAPACITY * sizeof(size_t));     //pointer to the indices table
-    s->entries = calloc(DEFAULT_SET_CAPACITY, sizeof(set_entry));   //pointer to the entries vector
-    memset(s->indices, -1, s->icapacity * sizeof(size_t));          //set all items to show as "empty"
-    s->size = 0;                                                    //number of items in the set
-    s->icapacity = DEFAULT_SET_CAPACITY;                            //capacity of the indices table
-    s->ecapacity = DEFAULT_SET_CAPACITY;                            //capacity of the entries vector
+    // reset all parameters as if new set
+    s->indices = malloc(DEFAULT_SET_CAPACITY * sizeof(size_t));   // pointer to the indices table
+    s->entries = calloc(DEFAULT_SET_CAPACITY, sizeof(set_entry)); // pointer to the entries vector
+    memset(s->indices, -1, s->icapacity * sizeof(size_t));        // set all items to show as "empty"
+    s->size = 0;                                                  // number of items in the set
+    s->icapacity = DEFAULT_SET_CAPACITY;                          // capacity of the indices table
+    s->ecapacity = DEFAULT_SET_CAPACITY;                          // capacity of the entries vector
 }
 
-
 /**
- * 
+ *
  */
 void set_free(set* s)
 {
@@ -421,9 +386,8 @@ void set_free(set* s)
     set_free_table_only(s);
 }
 
-
 /**
- * 
+ *
  */
 void set_free_elements_only(set* s)
 {
@@ -434,48 +398,46 @@ void set_free_elements_only(set* s)
     }
 }
 
-
 /**
- * 
+ *
  */
 void set_free_table_only(set* s)
 {
-    //free the set + indices table and entry vector.
-    //this is mainly used when you want all elements that were stored in the set to remain alive
+    // free the set + indices table and entry vector.
+    // this is mainly used when you want all elements that were stored in the set to remain alive
     free(s->indices);
     free(s->entries);
     free(s);
 }
 
-
 /**
- * 
+ *
  */
 void set_repr(set* s)
 {
-    //print out all elements in the set indices table and entries vector
+    // print out all elements in the set indices table and entries vector
     printf("set:\nindices = [");
     for (int i = 0; i < s->icapacity; i++)
     {
         if (i != 0) printf(", ");
         if (s->indices[i] == EMPTY) printf("None");
-        else printf("%zu", s->indices[i]);
+        else
+            printf("%zu", s->indices[i]);
     }
     printf("]\nentries = [");
     for (int i = 0; i < s->size; i++)
     {
         if (i != 0) printf(",\n           ");
         set_entry e = s->entries[i];
-        printf("[%"PRIu64", ", e.hash);
+        printf("[%" PRIu64 ", ", e.hash);
         obj_str(e.item);
         printf("]");
     }
     printf("]\n");
 }
 
-
 /**
- * 
+ *
  */
 void set_str(set* s)
 {
@@ -488,6 +450,5 @@ void set_str(set* s)
     }
     printf("}");
 }
-
 
 #endif

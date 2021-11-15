@@ -1,9 +1,9 @@
 #ifndef CHARSET_H
 #define CHARSET_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 #include "object.h"
 
@@ -13,15 +13,12 @@ typedef struct
     uint32_t stop;
 } urange;
 
-
 typedef struct
 {
     urange* ranges;
     size_t size;
     size_t capacity;
 } charset;
-
-
 
 charset* new_charset();
 charset* charset_get_endmarker();
@@ -58,8 +55,5 @@ void charset_repr(charset* s);
 void charset_free(charset* s);
 // int64_t charset_compare(charset* left, charset* right);
 uint64_t charset_hash(charset* s);
-
-
-
 
 #endif

@@ -76,21 +76,12 @@ void metaitem_str(metaitem* item)
     printf(" -> ");
     for (size_t i = 0; i <= vect_size(body); i++)
     {
-        if (i == item->position)
-        {
-            printf("•");
-        }
-        if (i == vect_size(body))
-        {
-            break;
-        };
+        if (i == item->position) { printf("•"); }
+        if (i == vect_size(body)) { break; };
         uint64_t* symbol_idx = vect_get(body, i)->data;
         obj* symbol = metaparser_get_symbol(*symbol_idx);
         obj_str(symbol);
-        if (i < vect_size(body) - 1)
-        {
-            printf(" ");
-        }
+        if (i < vect_size(body) - 1) { printf(" "); }
     }
     printf("]");
 }

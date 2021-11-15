@@ -1,15 +1,15 @@
 #ifndef VECTOR_H
 #define VECTOR_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
-#include "object.h"
 #include "dictionary.h"
+#include "object.h"
 
 /**
-    Struct/type declaration for 1D lists of objects. Implemented as an ArrayDeque. 
+    Struct/type declaration for 1D lists of objects. Implemented as an ArrayDeque.
     see: http://opendatastructures.org/ods-java/2_4_ArrayDeque_Fast_Deque_O.html
 */
 typedef struct
@@ -20,7 +20,6 @@ typedef struct
     obj** list;
 } vect;
 
-
 vect* new_vect();
 vect* new_vect_with_capacity(size_t size_hint);
 obj* new_vect_obj(vect* v);
@@ -28,11 +27,11 @@ size_t vect_size(vect* v);
 size_t vect_capacity(vect* v);
 void vect_resize(vect* v, size_t new_size);
 void vect_insert(vect* v, obj* item, size_t index);
-//bool vect_multi_insert(vect* v, vect* items, size_t index);
+// bool vect_multi_insert(vect* v, vect* items, size_t index);
 void vect_append(vect* v, obj* item);
 void vect_prepend(vect* v, obj* item);
-//bool vect_multi_append(vect* v, vect* items);
-//bool vect_multi_prepend(vect* v, vect* items);
+// bool vect_multi_append(vect* v, vect* items);
+// bool vect_multi_prepend(vect* v, vect* items);
 void vect_push(vect* v, obj* item);
 obj* vect_pop(vect* v);
 obj* vect_peek(vect* v);

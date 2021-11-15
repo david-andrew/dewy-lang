@@ -148,10 +148,7 @@ uint64_t metaparser_get_anonymous_rule_head()
 bool parse_next_meta_rule(vect* tokens)
 {
     // check for head, equals sign, and semicolon
-    if (!metaparser_is_valid_rule(tokens))
-    {
-        return false;
-    }
+    if (!metaparser_is_valid_rule(tokens)) { return false; }
 
     // construct head and body for the rule
     obj* head = metaparser_get_rule_head(tokens);
@@ -240,10 +237,7 @@ void metaparser_productions_str()
                 uint64_t* symbol_idx = vect_get(sentence, k)->data;
                 obj* symbol = metaparser_get_symbol(*symbol_idx);
                 obj_str(symbol);
-                if (k < vect_size(sentence) - 1)
-                {
-                    printf(" ");
-                }
+                if (k < vect_size(sentence) - 1) { printf(" "); }
             }
             printf("\n");
         }
@@ -302,10 +296,7 @@ obj* metaparser_get_rule_head(vect* tokens)
         // obj* t_obj = vect_dequeue(tokens);
         // metatoken* t = t_obj->data;
         metatoken* t = obj_free_keep_inner(vect_dequeue(tokens), MetaToken_t);
-        if (t->type == whitespace || t->type == comment)
-        {
-            metatoken_free(t);
-        }
+        if (t->type == whitespace || t->type == comment) { metatoken_free(t); }
         else if (t->type == hashtag)
         {
             obj* head = new_ustring_obj(ustring_clone(t->content));
@@ -340,10 +331,7 @@ vect* metaparser_get_rule_body(vect* tokens)
         metatoken* t = t_obj->data;
 
         // skip all whitespace
-        if (t->type == whitespace || t->type == comment)
-        {
-            obj_free(t_obj);
-        }
+        if (t->type == whitespace || t->type == comment) { obj_free(t_obj); }
         // semicolon means finished collecting body tokens
         else if (t->type == meta_semicolon)
         {
@@ -386,414 +374,410 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         uint64_t body_idx = *(uint64_t*)cache_value_obj->data;
 
         // if not an anonymous expression, create a production using the precached body
-        if (!anonymous)
-        {
-            metaparser_add_production(head_idx, body_idx);
-        }
+        if (!anonymous) { metaparser_add_production(head_idx, body_idx); }
 
         return body_idx;
     }
 
     switch (body_ast->type)
     {
-    // Base case (non-recursive) rules
-    case metaast_eps:
-    {
-        // crete an anonymous head if it wasn't provided
-        head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
-
-        // create a production for the head index pointing to the epsilon body index
-        metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
-        break;
-    }
-    case metaast_identifier:
-    {
-        // get the symbol index of the identifier
-        obj* nonterminal = new_ustring_obj(ustring_clone(body_ast->node.string));
-        uint64_t nonterminal_idx = metaparser_add_symbol(nonterminal);
-
-        // if head is defined, then create a whole production with a sentence containing just the identifier
-        // otherwise this is an inner expression reference to the identifier where we can skip the redundant sentence
-        if (!anonymous)
+        // Base case (non-recursive) rules
+        case metaast_eps:
         {
-            // create a sentence with the identifier in it
+            // crete an anonymous head if it wasn't provided
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
+
+            // create a production for the head index pointing to the epsilon body index
+            metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
+            break;
+        }
+        case metaast_identifier:
+        {
+            // get the symbol index of the identifier
+            obj* nonterminal = new_ustring_obj(ustring_clone(body_ast->node.string));
+            uint64_t nonterminal_idx = metaparser_add_symbol(nonterminal);
+
+            // if head is defined, then create a whole production with a sentence containing just the identifier
+            // otherwise this is an inner expression reference to the identifier where we can skip the redundant
+            // sentence
+            if (!anonymous)
+            {
+                // create a sentence with the identifier in it
+                vect* sentence = new_vect();
+                vect_append(sentence, new_uint_obj(nonterminal_idx));
+
+                // add the sentence to the grammar
+                uint64_t body_idx = metaparser_add_body(sentence);
+
+                // insert the production
+                metaparser_add_production(head_idx, body_idx);
+            }
+            else
+            {
+                // assign this identifier the null head
+                head_idx = nonterminal_idx;
+            }
+            break;
+        }
+        case metaast_charset:
+        {
+            // crete an anonymous head if it wasn't provided
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
+
+            // create a sentence containing just the charset
             vect* sentence = new_vect();
-            vect_append(sentence, new_uint_obj(nonterminal_idx));
+
+            // insert the terminal into the sentence
+            obj* terminal = new_charset_obj(charset_clone(body_ast->node.cs));
+            uint64_t terminal_idx = metaparser_add_symbol(terminal);
+            vect_append(sentence, new_uint_obj(terminal_idx));
 
             // add the sentence to the grammar
             uint64_t body_idx = metaparser_add_body(sentence);
 
-            // insert the production
+            // insert the production into the grammar
             metaparser_add_production(head_idx, body_idx);
+            break;
         }
-        else
+        case metaast_string:
         {
-            // assign this identifier the null head
-            head_idx = nonterminal_idx;
-        }
-        break;
-    }
-    case metaast_charset:
-    {
-        // crete an anonymous head if it wasn't provided
-        head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
+            // crete an anonymous head if it wasn't provided
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
-        // create a sentence containing just the charset
-        vect* sentence = new_vect();
+            // create a sentence for the string
+            vect* sentence = new_vect();
 
-        // insert the terminal into the sentence
-        obj* terminal = new_charset_obj(charset_clone(body_ast->node.cs));
-        uint64_t terminal_idx = metaparser_add_symbol(terminal);
-        vect_append(sentence, new_uint_obj(terminal_idx));
-
-        // add the sentence to the grammar
-        uint64_t body_idx = metaparser_add_body(sentence);
-
-        // insert the production into the grammar
-        metaparser_add_production(head_idx, body_idx);
-        break;
-    }
-    case metaast_string:
-    {
-        // crete an anonymous head if it wasn't provided
-        head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
-
-        // create a sentence for the string
-        vect* sentence = new_vect();
-
-        // insert each character from the string into the sentence
-        uint32_t* s = body_ast->node.string;
-        uint32_t c;
-        while ((c = *s++))
-        {
-            obj* cs_obj = new_charset_obj(NULL);
-            charset_add_char(cs_obj->data, c);
-            uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
-            vect_append(sentence, new_uint_obj(terminal_idx));
-        }
-
-        // insert the sentence into the bodies set
-        uint64_t body_idx = metaparser_add_body(sentence);
-
-        // push this sentence to the list of all sentences for this rule
-        metaparser_add_production(head_idx, body_idx);
-        break;
-    }
-    case metaast_caseless:
-    {
-        // crete an anonymous head if it wasn't provided
-        head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
-
-        // create a sentence for the string
-        vect* sentence = new_vect();
-
-        // insert upper and lowercase versions of each character from the string into the sentence
-        uint32_t* s = body_ast->node.string;
-        uint32_t c;
-        while ((c = *s++))
-        {
-            uint32_t upper, lower;
-            obj* cs_obj = new_charset_obj(NULL);
-            if (unicode_upper_and_lower(c, &upper, &lower))
+            // insert each character from the string into the sentence
+            uint32_t* s = body_ast->node.string;
+            uint32_t c;
+            while ((c = *s++))
             {
-                charset_add_char(cs_obj->data, upper);
-                charset_add_char(cs_obj->data, lower);
-            }
-            else // character doesn't have upper/lowercase version, so add character as is
-            {
+                obj* cs_obj = new_charset_obj(NULL);
                 charset_add_char(cs_obj->data, c);
+                uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
+                vect_append(sentence, new_uint_obj(terminal_idx));
             }
-            uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
-            vect_append(sentence, new_uint_obj(terminal_idx));
+
+            // insert the sentence into the bodies set
+            uint64_t body_idx = metaparser_add_body(sentence);
+
+            // push this sentence to the list of all sentences for this rule
+            metaparser_add_production(head_idx, body_idx);
+            break;
+        }
+        case metaast_caseless:
+        {
+            // crete an anonymous head if it wasn't provided
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
+
+            // create a sentence for the string
+            vect* sentence = new_vect();
+
+            // insert upper and lowercase versions of each character from the string into the sentence
+            uint32_t* s = body_ast->node.string;
+            uint32_t c;
+            while ((c = *s++))
+            {
+                uint32_t upper, lower;
+                obj* cs_obj = new_charset_obj(NULL);
+                if (unicode_upper_and_lower(c, &upper, &lower))
+                {
+                    charset_add_char(cs_obj->data, upper);
+                    charset_add_char(cs_obj->data, lower);
+                }
+                else // character doesn't have upper/lowercase version, so add character as is
+                {
+                    charset_add_char(cs_obj->data, c);
+                }
+                uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
+                vect_append(sentence, new_uint_obj(terminal_idx));
+            }
+
+            // insert the sentence into the bodies set
+            uint64_t body_idx = metaparser_add_body(sentence);
+
+            // push this sentence to the list of all sentences for this rule
+            metaparser_add_production(head_idx, body_idx);
+            break;
         }
 
-        // insert the sentence into the bodies set
-        uint64_t body_idx = metaparser_add_body(sentence);
-
-        // push this sentence to the list of all sentences for this rule
-        metaparser_add_production(head_idx, body_idx);
-        break;
-    }
-
-    // Recursive rules that need to compute the nested sentences
-    case metaast_star:
-    case metaast_plus:
-    {
-        // crete an anonymous head if it wasn't provided
-        head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
-
-        // get the identifier for the inner node
-        uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.repeat.inner);
-
-        // build the sentence
-        if (body_ast->node.repeat.count == 0 || (body_ast->node.repeat.count == 1 && body_ast->type == metaast_star))
+        // Recursive rules that need to compute the nested sentences
+        case metaast_star:
+        case metaast_plus:
         {
-            // simple star
-            //#head = #A* | (#A)0* | (#A)1* | (#A)0+ =>
-            //  #head = #A #head;
-            //  #head = ϵ;
+            // crete an anonymous head if it wasn't provided
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
-            //#head = #A #head
+            // get the identifier for the inner node
+            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.repeat.inner);
+
+            // build the sentence
+            if (body_ast->node.repeat.count == 0 ||
+                (body_ast->node.repeat.count == 1 && body_ast->type == metaast_star))
+            {
+                // simple star
+                //#head = #A* | (#A)0* | (#A)1* | (#A)0+ =>
+                //  #head = #A #head;
+                //  #head = ϵ;
+
+                //#head = #A #head
+                vect* sentence0 = new_vect();
+                vect_append(sentence0, new_uint_obj(inner_head_idx));
+                vect_append(sentence0, new_uint_obj(head_idx));
+                uint64_t sentence0_idx = metaparser_add_body(sentence0);
+                metaparser_add_production(head_idx, sentence0_idx);
+
+                //#head = ϵ
+                metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
+            }
+            else
+            {
+                // complex plus
+                //#head = (#A)N+ =>
+                //  #__0 = #A #__0;
+                //  #__0 = ϵ;
+                //  #head = #A #A #A ... #A #__0; //... N times
+
+                // complex star
+                //#head = (#A)N* =>
+                //  #__0 = #A #__0;
+                //  #__0 = ϵ;
+                //  #head = #A #A #A ... #A #__0; //... N times
+                //  #head = ϵ;
+
+                //  #__0 = #A #__0
+                uint64_t anonymous0_idx = metaparser_get_anonymous_rule_head();
+                vect* sentence0 = new_vect();
+                vect_append(sentence0, new_uint_obj(inner_head_idx));
+                vect_append(sentence0, new_uint_obj(anonymous0_idx));
+                uint64_t sentence0_idx = metaparser_add_body(sentence0);
+                metaparser_add_production(anonymous0_idx, sentence0_idx);
+
+                //  #__0 = ϵ;
+                metaparser_add_production(anonymous0_idx, metaparser_get_eps_body_idx());
+
+                //  #head = #A #A #A ... #A #__0; //... N times
+                vect* sentence2 = new_vect();
+                for (int i = 0; i < body_ast->node.repeat.count; i++)
+                {
+                    vect_append(sentence2, new_uint_obj(inner_head_idx));
+                }
+                vect_append(sentence2, new_uint_obj(anonymous0_idx));
+                uint64_t sentence2_idx = metaparser_add_body(sentence2);
+                metaparser_add_production(head_idx, sentence2_idx);
+
+                // convert from plus to star by making the last rule optional
+                if (body_ast->type == metaast_star)
+                {
+                    //  #head = ϵ;
+                    metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
+                }
+            }
+            break;
+        }
+        case metaast_count:
+        {
+            // crete an anonymous head if it wasn't provided
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
+
+            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.repeat.inner);
+
+            if (body_ast->node.repeat.count == 0)
+            {
+                //#head = (#A)0 => ϵ;  //this is probably a typo on the user's part...
+                printf("WARNING: ");
+                metaast_str(body_ast);
+                printf(" is equivalent to ϵ\n"
+                       "Did you mean `(");
+                metaast_str(body_ast->node.repeat.inner);
+                printf(")*`"
+                       " or `(");
+                metaast_str(body_ast->node.repeat.inner);
+                printf(")+`"
+                       " or `(");
+                metaast_str(body_ast->node.repeat.inner);
+                printf(")N` where N > 1 ?\n");
+                metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
+            }
+            else
+            {
+                //#head = (#A)N =>
+                //  #head = #A #A #A ... #A; //... N times
+                vect* sentence = new_vect();
+                for (int i = 0; i < body_ast->node.repeat.count; i++)
+                {
+                    vect_append(sentence, new_uint_obj(inner_head_idx));
+                }
+                uint64_t body_idx = metaparser_add_body(sentence);
+                metaparser_add_production(head_idx, body_idx);
+            }
+            break;
+        }
+        case metaast_option:
+        {
+            // crete an anonymous head if it wasn't provided
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
+
+            uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.unary.inner);
+
+            //#head = #A ? =>
+            //  #head = #A
+            //  #head = ϵ
+
+            //  #head = #A
             vect* sentence0 = new_vect();
             vect_append(sentence0, new_uint_obj(inner_head_idx));
-            vect_append(sentence0, new_uint_obj(head_idx));
             uint64_t sentence0_idx = metaparser_add_body(sentence0);
             metaparser_add_production(head_idx, sentence0_idx);
 
-            //#head = ϵ
+            //  #head = ϵ
             metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
+
+            break;
         }
-        else
+        case metaast_cat:
         {
-            // complex plus
-            //#head = (#A)N+ =>
-            //  #__0 = #A #__0;
-            //  #__0 = ϵ;
-            //  #head = #A #A #A ... #A #__0; //... N times
+            // crete an anonymous head if it wasn't provided
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
-            // complex star
-            //#head = (#A)N* =>
-            //  #__0 = #A #__0;
-            //  #__0 = ϵ;
-            //  #head = #A #A #A ... #A #__0; //... N times
-            //  #head = ϵ;
-
-            //  #__0 = #A #__0
-            uint64_t anonymous0_idx = metaparser_get_anonymous_rule_head();
-            vect* sentence0 = new_vect();
-            vect_append(sentence0, new_uint_obj(inner_head_idx));
-            vect_append(sentence0, new_uint_obj(anonymous0_idx));
-            uint64_t sentence0_idx = metaparser_add_body(sentence0);
-            metaparser_add_production(anonymous0_idx, sentence0_idx);
-
-            //  #__0 = ϵ;
-            metaparser_add_production(anonymous0_idx, metaparser_get_eps_body_idx());
-
-            //  #head = #A #A #A ... #A #__0; //... N times
-            vect* sentence2 = new_vect();
-            for (int i = 0; i < body_ast->node.repeat.count; i++)
-            {
-                vect_append(sentence2, new_uint_obj(inner_head_idx));
-            }
-            vect_append(sentence2, new_uint_obj(anonymous0_idx));
-            uint64_t sentence2_idx = metaparser_add_body(sentence2);
-            metaparser_add_production(head_idx, sentence2_idx);
-
-            // convert from plus to star by making the last rule optional
-            if (body_ast->type == metaast_star)
-            {
-                //  #head = ϵ;
-                metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
-            }
-        }
-        break;
-    }
-    case metaast_count:
-    {
-        // crete an anonymous head if it wasn't provided
-        head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
-
-        uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.repeat.inner);
-
-        if (body_ast->node.repeat.count == 0)
-        {
-            //#head = (#A)0 => ϵ;  //this is probably a typo on the user's part...
-            printf("WARNING: ");
-            metaast_str(body_ast);
-            printf(" is equivalent to ϵ\n"
-                   "Did you mean `(");
-            metaast_str(body_ast->node.repeat.inner);
-            printf(")*`"
-                   " or `(");
-            metaast_str(body_ast->node.repeat.inner);
-            printf(")+`"
-                   " or `(");
-            metaast_str(body_ast->node.repeat.inner);
-            printf(")N` where N > 1 ?\n");
-            metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
-        }
-        else
-        {
-            //#head = (#A)N =>
-            //  #head = #A #A #A ... #A; //... N times
+            //#head = #A #B => #A #B  //cat is already in CFG format.
+            // TODO->handle cat with strings/charsets/identifiers/epsilon...
             vect* sentence = new_vect();
-            for (int i = 0; i < body_ast->node.repeat.count; i++)
+            for (size_t i = 0; i < body_ast->node.sequence.size; i++)
             {
-                vect_append(sentence, new_uint_obj(inner_head_idx));
+                metaast* inner_i_ast = body_ast->node.sequence.elements[i];
+                switch (inner_i_ast->type)
+                {
+                    // insert each char of the string into the parent sentence
+                    case metaast_string:
+                    {
+                        uint32_t* s = inner_i_ast->node.string;
+                        uint32_t c;
+                        while ((c = *s++))
+                        {
+                            obj* cs_obj = new_charset_obj(new_charset());
+                            charset_add_char(cs_obj->data, c);
+                            uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
+                            vect_append(sentence, new_uint_obj(terminal_idx));
+                        }
+                        break;
+                    }
+
+                    case metaast_caseless:
+                    {
+                        uint32_t* s = inner_i_ast->node.string;
+                        uint32_t c;
+                        while ((c = *s++))
+                        {
+                            uint32_t upper, lower;
+                            unicode_upper_and_lower(c, &upper, &lower);
+                            obj* cs_obj = new_charset_obj(new_charset());
+                            charset_add_char(cs_obj->data, upper);
+                            charset_add_char(cs_obj->data, lower);
+                            uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
+                            vect_append(sentence, new_uint_obj(terminal_idx));
+                        }
+                        break;
+                    }
+
+                    // insert the charset into the parent sentence
+                    case metaast_charset:
+                    {
+                        obj* cs_obj = new_charset_obj(charset_clone(inner_i_ast->node.cs));
+                        uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
+                        vect_append(sentence, new_uint_obj(terminal_idx));
+                        break;
+                    }
+
+                    // insert the identifier into the parent sentence
+                    case metaast_identifier:
+                    {
+                        obj* identifier = new_ustring_obj(ustring_clone(inner_i_ast->node.string));
+                        uint64_t identifier_idx = metaparser_add_symbol(identifier);
+                        vect_append(sentence, new_uint_obj(identifier_idx));
+                        break;
+                    }
+
+                    // literal epsilons are skipped in a cat node
+                    case metaast_eps:
+                    {
+                        break;
+                    }
+
+                    // all other types of ast are represented by an anonymous identifier
+                    default:
+                    {
+                        uint64_t head_i_idx = metaparser_get_symbol_or_anonymous(body_ast->node.sequence.elements[i]);
+                        vect_append(sentence, new_uint_obj(head_i_idx));
+                        break;
+                    }
+                }
             }
             uint64_t body_idx = metaparser_add_body(sentence);
             metaparser_add_production(head_idx, body_idx);
+            break;
         }
-        break;
-    }
-    case metaast_option:
-    {
-        // crete an anonymous head if it wasn't provided
-        head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
-
-        uint64_t inner_head_idx = metaparser_get_symbol_or_anonymous(body_ast->node.unary.inner);
-
-        //#head = #A ? =>
-        //  #head = #A
-        //  #head = ϵ
-
-        //  #head = #A
-        vect* sentence0 = new_vect();
-        vect_append(sentence0, new_uint_obj(inner_head_idx));
-        uint64_t sentence0_idx = metaparser_add_body(sentence0);
-        metaparser_add_production(head_idx, sentence0_idx);
-
-        //  #head = ϵ
-        metaparser_add_production(head_idx, metaparser_get_eps_body_idx());
-
-        break;
-    }
-    case metaast_cat:
-    {
-        // crete an anonymous head if it wasn't provided
-        head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
-
-        //#head = #A #B => #A #B  //cat is already in CFG format.
-        // TODO->handle cat with strings/charsets/identifiers/epsilon...
-        vect* sentence = new_vect();
-        for (size_t i = 0; i < body_ast->node.sequence.size; i++)
+        case metaast_or:
         {
-            metaast* inner_i_ast = body_ast->node.sequence.elements[i];
-            switch (inner_i_ast->type)
-            {
-            // insert each char of the string into the parent sentence
-            case metaast_string:
-            {
-                uint32_t* s = inner_i_ast->node.string;
-                uint32_t c;
-                while ((c = *s++))
-                {
-                    obj* cs_obj = new_charset_obj(new_charset());
-                    charset_add_char(cs_obj->data, c);
-                    uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
-                    vect_append(sentence, new_uint_obj(terminal_idx));
-                }
-                break;
-            }
+            // crete an anonymous head if it wasn't provided
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
-            case metaast_caseless:
-            {
-                uint32_t* s = inner_i_ast->node.string;
-                uint32_t c;
-                while ((c = *s++))
-                {
-                    uint32_t upper, lower;
-                    unicode_upper_and_lower(c, &upper, &lower);
-                    obj* cs_obj = new_charset_obj(new_charset());
-                    charset_add_char(cs_obj->data, upper);
-                    charset_add_char(cs_obj->data, lower);
-                    uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
-                    vect_append(sentence, new_uint_obj(terminal_idx));
-                }
-                break;
-            }
+            //#rule = #A | #B =>
+            //  #rule = #A
+            //  #rule = #B
 
-            // insert the charset into the parent sentence
-            case metaast_charset:
-            {
-                obj* cs_obj = new_charset_obj(charset_clone(inner_i_ast->node.cs));
-                uint64_t terminal_idx = metaparser_add_symbol(cs_obj);
-                vect_append(sentence, new_uint_obj(terminal_idx));
-                break;
-            }
+            metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.left);
+            metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.right);
 
-            // insert the identifier into the parent sentence
-            case metaast_identifier:
-            {
-                obj* identifier = new_ustring_obj(ustring_clone(inner_i_ast->node.string));
-                uint64_t identifier_idx = metaparser_add_symbol(identifier);
-                vect_append(sentence, new_uint_obj(identifier_idx));
-                break;
-            }
-
-            // literal epsilons are skipped in a cat node
-            case metaast_eps:
-            {
-                break;
-            }
-
-            // all other types of ast are represented by an anonymous identifier
-            default:
-            {
-                uint64_t head_i_idx = metaparser_get_symbol_or_anonymous(body_ast->node.sequence.elements[i]);
-                vect_append(sentence, new_uint_obj(head_i_idx));
-                break;
-            }
-            }
+            break;
         }
-        uint64_t body_idx = metaparser_add_body(sentence);
-        metaparser_add_production(head_idx, body_idx);
-        break;
-    }
-    case metaast_or:
-    {
-        // crete an anonymous head if it wasn't provided
-        head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
-        //#rule = #A | #B =>
-        //  #rule = #A
-        //  #rule = #B
+        // TODO->filters/other extensions of the parser
+        case metaast_greaterthan:
+            // {
+            //     //crete an anonymous head if it wasn't provided
+            //     head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
-        metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.left);
-        metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.right);
+            //     //#rule = #A > #B =>
+            //     // #rule = #A
+            //     // #rule = #B
+            //     // insert special case of #A > #B in the grammar
 
-        break;
-    }
+            //     metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.left);
+            //     metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.right);
 
-    // TODO->filters/other extensions of the parser
-    case metaast_greaterthan:
-        // {
-        //     //crete an anonymous head if it wasn't provided
-        //     head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
+            //     //set the precedence of #A > #B in the special precedence table
+            //     metaparser_set_rule_precedence
 
-        //     //#rule = #A > #B =>
-        //     // #rule = #A
-        //     // #rule = #B
-        //     // insert special case of #A > #B in the grammar
+            // }
+            printf("ERROR: Cannot generate CFG sentence as greater than `>` operator has not yet been implemented\n");
+            break;
 
-        //     metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.left);
-        //     metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.right);
+        case metaast_lessthan:
+            printf("ERROR: Cannot generate CFG sentence as less than `<` operator has not yet been implemented\n");
+            break;
+        case metaast_reject:
+            printf("ERROR: Cannot generate CFG sentence as reject `-` operator has not yet been implemented\n");
+            break;
+        case metaast_nofollow:
+            printf("ERROR: Cannot generate CFG sentence as no follow `/` operator has not yet been implemented\n");
+            break;
+        case metaast_capture:
+            printf("ERROR: Cannot generate CFG sentence as capture `.` operator has not yet been implemented\n");
+            break;
 
-        //     //set the precedence of #A > #B in the special precedence table
-        //     metaparser_set_rule_precedence
-
-        // }
-        printf("ERROR: Cannot generate CFG sentence as greater than `>` operator has not yet been implemented\n");
-        break;
-
-    case metaast_lessthan:
-        printf("ERROR: Cannot generate CFG sentence as less than `<` operator has not yet been implemented\n");
-        break;
-    case metaast_reject:
-        printf("ERROR: Cannot generate CFG sentence as reject `-` operator has not yet been implemented\n");
-        break;
-    case metaast_nofollow:
-        printf("ERROR: Cannot generate CFG sentence as no follow `/` operator has not yet been implemented\n");
-        break;
-    case metaast_capture:
-        printf("ERROR: Cannot generate CFG sentence as capture `.` operator has not yet been implemented\n");
-        break;
-
-    // ERROR->should not allow, or come up with semantics for
-    // e.g. (#A)~ => ξ* - #A
-    // should be an error since this only makes sense for charsets
-    case metaast_compliment:
-    case metaast_intersect:
-        printf("ERROR: compliment/intersect is only applicable to charsets. There are (currently) no semantics for "
-               "what they mean for a regular grammar production");
-        break;
+        // ERROR->should not allow, or come up with semantics for
+        // e.g. (#A)~ => ξ* - #A
+        // should be an error since this only makes sense for charsets
+        case metaast_compliment:
+        case metaast_intersect:
+            printf("ERROR: compliment/intersect is only applicable to charsets. There are (currently) no semantics for "
+                   "what they mean for a regular grammar production");
+            break;
     }
 
     // if anonymous rule, save this AST to the cache, else save the cache_key for later deletion
-    if (anonymous)
-    {
-        dict_set(metaparser_ast_cache, cache_key_obj, new_uint_obj(head_idx));
-    }
+    if (anonymous) { dict_set(metaparser_ast_cache, cache_key_obj, new_uint_obj(head_idx)); }
     else
     {
         vect_append(metaparser_unused_ast_cache, cache_key_obj);
@@ -919,10 +903,7 @@ uint64_t metaparser_get_start_symbol_idx()
         set* symbols = metaparser_get_symbols();
         for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
         {
-            if (metaparser_is_symbol_terminal(symbol_idx))
-            {
-                continue;
-            }
+            if (metaparser_is_symbol_terminal(symbol_idx)) { continue; }
             uint32_t* terminal = metaparser_get_symbol(symbol_idx)->data;
 
             // found #start non-terminal
@@ -1033,10 +1014,7 @@ set* metaparser_get_production_bodies(uint64_t head_idx)
 vect* metaparser_get_production_body(uint64_t head_idx, uint64_t production_idx)
 {
     set* bodies = metaparser_get_production_bodies(head_idx);
-    if (bodies == NULL)
-    {
-        return NULL;
-    }
+    if (bodies == NULL) { return NULL; }
     uint64_t* body_idx = bodies->entries[production_idx].item->data;
     return metaparser_bodies->entries[*body_idx].item->data;
 }
@@ -1061,10 +1039,7 @@ void metaparser_set_start_symbol(uint64_t start_symbol_idx)
         // find the first non-terminal, and use that as the start symbol. This will likely always be 0...
         for (start_symbol_idx = 0; start_symbol_idx < set_size(metaparser_symbols); start_symbol_idx++)
         {
-            if (!metaparser_is_symbol_terminal(start_symbol_idx))
-            {
-                break;
-            }
+            if (!metaparser_is_symbol_terminal(start_symbol_idx)) { break; }
         }
     }
 
@@ -1117,18 +1092,12 @@ void metaparser_compute_symbol_firsts()
     set* symbols = metaparser_get_symbols();
 
     // create empty fsets for each symbol in the grammar
-    for (size_t i = 0; i < set_size(symbols); i++)
-    {
-        vect_append(metaparser_symbol_firsts, new_fset_obj(NULL));
-    }
+    for (size_t i = 0; i < set_size(symbols); i++) { vect_append(metaparser_symbol_firsts, new_fset_obj(NULL)); }
 
     // compute firsts for all terminal symbols, since the fset is just the symbol itself.
     for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
     {
-        if (!metaparser_is_symbol_terminal(symbol_idx))
-        {
-            continue;
-        }
+        if (!metaparser_is_symbol_terminal(symbol_idx)) { continue; }
         fset* symbol_fset = vect_get(metaparser_symbol_firsts, symbol_idx)->data;
         fset_add(symbol_fset, new_uint_obj(symbol_idx));
         symbol_fset->special = false;
@@ -1136,18 +1105,14 @@ void metaparser_compute_symbol_firsts()
 
     // compute first for all non-terminal symbols. update each set until no new changes occur
     size_t count;
-    do
-    {
+    do {
         // keep track of if any sets got larger (i.e. by adding new terminals to any fsets)
         count = metaparser_count_fsets_size(metaparser_symbol_firsts);
 
         // for each non-terminal symbol
         for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
         {
-            if (metaparser_is_symbol_terminal(symbol_idx))
-            {
-                continue;
-            }
+            if (metaparser_is_symbol_terminal(symbol_idx)) { continue; }
 
             fset* symbol_fset = vect_get(metaparser_symbol_firsts, symbol_idx)->data;
             set* bodies = metaparser_get_production_bodies(symbol_idx);
@@ -1161,17 +1126,11 @@ void metaparser_compute_symbol_firsts()
                     uint64_t* body_symbol_idx = vect_get(body, i)->data;
                     fset* body_symbol_fset = vect_get(metaparser_symbol_firsts, *body_symbol_idx)->data;
                     fset_union_into(symbol_fset, fset_copy(body_symbol_fset), true);
-                    if (!body_symbol_fset->special)
-                    {
-                        break;
-                    }
+                    if (!body_symbol_fset->special) { break; }
                 }
 
                 // epsilon strings add epsilon to fset
-                if (vect_size(body) == 0)
-                {
-                    symbol_fset->special = true;
-                }
+                if (vect_size(body) == 0) { symbol_fset->special = true; }
             }
         }
     } while (count < metaparser_count_fsets_size(metaparser_symbol_firsts));
@@ -1191,10 +1150,7 @@ void metaparser_compute_symbol_follows()
     set* symbols = metaparser_get_symbols();
 
     // first initialize fsets for each symbol in the grammar
-    for (size_t i = 0; i < set_size(symbols); i++)
-    {
-        vect_append(metaparser_symbol_follows, new_fset_obj(NULL));
-    }
+    for (size_t i = 0; i < set_size(symbols); i++) { vect_append(metaparser_symbol_follows, new_fset_obj(NULL)); }
 
     // 1. add $ to the follow set of the start symbol
     uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
@@ -1203,8 +1159,7 @@ void metaparser_compute_symbol_follows()
     // 2/3. add first of following substrings following terminals, and follow sets of rule heads
     dict* productions = metaparser_get_productions();
     size_t count;
-    do
-    {
+    do {
         // keep track of if any sets got larger (i.e. by adding new terminals to any fsets)
         count = metaparser_count_fsets_size(metaparser_symbol_follows);
 
@@ -1288,16 +1243,10 @@ fset* metaparser_first_of_string(slice* string)
             bool nullable = first_i->special;
             fset_union_into(result, fset_copy(first_i),
                             false); // merge first of symbol into result. Don't merge nullable
-            if (i == slice_size(string) - 1 && nullable)
-            {
-                result->special = true;
-            }
+            if (i == slice_size(string) - 1 && nullable) { result->special = true; }
 
             // only continue to next symbol if this symbol was nullable
-            if (!nullable)
-            {
-                break;
-            }
+            if (!nullable) { break; }
         }
     }
 
@@ -1314,17 +1263,11 @@ fset* metaparser_follow_of_symbol(uint64_t symbol_idx) { return vect_get(metapar
  */
 void metaparser_print_body_slice(slice* body)
 {
-    if (slice_size(body) == 0)
-    {
-        printf("ϵ");
-    }
+    if (slice_size(body) == 0) { printf("ϵ"); }
     for (size_t i = 0; i < slice_size(body); i++)
     {
         obj_str(metaparser_get_symbol(*(uint64_t*)(slice_get(body, i)->data)));
-        if (i != slice_size(body) - 1)
-        {
-            printf(" ");
-        }
+        if (i != slice_size(body) - 1) { printf(" "); }
     }
 }
 

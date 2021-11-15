@@ -6,7 +6,6 @@
 #include "slice.h"
 #include "utilities.h"
 
-
 /**
  * Return a stack allocated slice struct.
  */
@@ -17,9 +16,8 @@ inline slice slice_struct(vect* v, size_t start, size_t stop, obj* lookahead)
         printf("ERROR: slice indices %zu:%zu out of bounds for vect with size %zu\n", start, stop, vect_size(v));
         exit(1);
     }
-    return (slice){.v=v, .start=start, .stop=stop, .lookahead=lookahead};
+    return (slice){.v = v, .start = start, .stop = stop, .lookahead = lookahead};
 }
-
 
 /**
  * Return a static vect view of the slice.
@@ -37,15 +35,17 @@ inline vect slice_vect_view_struct(slice* s)
     }
     // printf("vect view vect: "); vect_str(s->v); printf("\n");
     // vect_repr(s->v);
-    // printf("capacity: %zu, head: %zu, size: %zu, start: %zu, stop: %zu\n", s->v->capacity, s->v->head, s->v->size, s->start, s->stop);
-    return (vect){.capacity=s->v->capacity, .head=(s->v->head + s->start) % s->v->capacity, .list=s->v->list, .size=s->stop - s->start};
+    // printf("capacity: %zu, head: %zu, size: %zu, start: %zu, stop: %zu\n", s->v->capacity, s->v->head, s->v->size,
+    // s->start, s->stop);
+    return (vect){.capacity = s->v->capacity,
+                  .head = (s->v->head + s->start) % s->v->capacity,
+                  .list = s->v->list,
+                  .size = s->stop - s->start};
 }
-
-
 
 /**
  * Return a new slice object for viewing a subset of a vector.
- * Lookahead is an optional terminal index object that will be treated as 
+ * Lookahead is an optional terminal index object that will be treated as
  * appended to the end of the slice. if lookahead is null, it is ignored.
  */
 slice* new_slice(vect* v, size_t start, size_t stop, obj* lookahead)
@@ -56,10 +56,9 @@ slice* new_slice(vect* v, size_t start, size_t stop, obj* lookahead)
         exit(1);
     }
     slice* s = malloc(sizeof(slice));
-    *s = (slice){.v=v, .start=start, .stop=stop, .lookahead=lookahead};
+    *s = (slice){.v = v, .start = start, .stop = stop, .lookahead = lookahead};
     return s;
 }
-
 
 /**
  * Return a slice wrapped in object.
@@ -67,10 +66,9 @@ slice* new_slice(vect* v, size_t start, size_t stop, obj* lookahead)
 obj* new_slice_obj(slice* s)
 {
     obj* S = malloc(sizeof(obj));
-    *S = (obj){.type=Slice_t, .data=s};
+    *S = (obj){.type = Slice_t, .data = s};
     return S;
 }
-
 
 /**
  * Get the object at position i in the slice.
@@ -79,22 +77,21 @@ obj* slice_get(slice* s, size_t i)
 {
     if ((s->lookahead == NULL && i < slice_size(s)) || (s->lookahead != NULL && i < slice_size(s) - 1))
     {
-        //get the item from the contained vect
-        return vect_get(s->v, s->start+i);
+        // get the item from the contained vect
+        return vect_get(s->v, s->start + i);
     }
     else if (s->lookahead != NULL && i == slice_size(s) - 1)
     {
-        //get the "appended" lookahead item
+        // get the "appended" lookahead item
         return s->lookahead;
     }
     else
     {
-        //out of bounds error
+        // out of bounds error
         printf("ERROR: attempted to get item at %zu of slice with size %zu\n", i, slice_size(s));
         exit(1);
     }
 }
-
 
 /**
  * Return the number of elements in the slice.
@@ -103,19 +100,14 @@ obj* slice_get(slice* s, size_t i)
  */
 size_t slice_size(slice* s)
 {
-    //if lookahead is included, size is 1 larger
+    // if lookahead is included, size is 1 larger
     return s->stop - s->start + (s->lookahead != NULL);
 }
-
 
 /**
  * Free the slice (without touching the original data vector).
  */
-void slice_free(slice* s)
-{
-    free(s);
-}
-
+void slice_free(slice* s) { free(s); }
 
 /**
  * Print out the slice as if it were a normal vector
@@ -131,16 +123,11 @@ void slice_str(slice* s)
     printf("]");
 }
 
-
 /**
- * Return a copy of the slice. 
+ * Return a copy of the slice.
  * Note copy still points to same vector/lookahead as original.
  */
-slice* slice_copy(slice* s)
-{
-    return new_slice(s->v, s->start, s->stop, s->lookahead);
-}
-
+slice* slice_copy(slice* s) { return new_slice(s->v, s->start, s->stop, s->lookahead); }
 
 /**
  * Return a copy of the slice as if it were a normal vector.
@@ -148,13 +135,9 @@ slice* slice_copy(slice* s)
 vect* slice_copy_to_vect(slice* s)
 {
     vect* copy = new_vect();
-    for (size_t i = 0; i < slice_size(s); i++)
-    {
-        vect_append(copy, obj_copy(slice_get(s, i)));
-    }
+    for (size_t i = 0; i < slice_size(s); i++) { vect_append(copy, obj_copy(slice_get(s, i))); }
     return copy;
 }
-
 
 /**
  * Hash the components of the slice together.
@@ -162,15 +145,11 @@ vect* slice_copy_to_vect(slice* s)
 uint64_t slice_hash(slice* s)
 {
     uint64_t* hashes = malloc(sizeof(uint64_t) * slice_size(s));
-    for (size_t i = 0; i < slice_size(s); i++)
-    {
-        hashes[i] = obj_hash(slice_get(s, i));
-    }
+    for (size_t i = 0; i < slice_size(s); i++) { hashes[i] = obj_hash(slice_get(s, i)); }
     uint64_t hash = hash_uint_sequence(hashes, slice_size(s));
     free(hashes);
     return hash;
 }
-
 
 /**
  * Determine if two slices are identical.
@@ -184,7 +163,5 @@ bool slice_equals(slice* left, slice* right)
     }
     return true;
 }
-
-
 
 #endif

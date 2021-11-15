@@ -48,8 +48,7 @@ dict* new_dict()
  */
 obj* new_dict_obj(dict* d)
 {
-    if (d == NULL)
-        d = new_dict();
+    if (d == NULL) d = new_dict();
     obj* D = malloc(sizeof(obj));
     *D = (obj){.type = Dictionary_t, .data = d};
     return D;
@@ -171,14 +170,8 @@ size_t dict_get_entries_index(dict* d, obj* key)
 void dict_set(dict* d, obj* key, obj* value)
 {
     // check if the dict indices & entries tables needs to be resized. for now, return failure for too many entries;
-    if (d->size >= d->icapacity * MAX_LOAD)
-    {
-        dict_resize_indices(d, d->icapacity * 2);
-    }
-    if (d->size >= d->ecapacity)
-    {
-        dict_resize_entries(d, d->ecapacity * 2);
-    }
+    if (d->size >= d->icapacity * MAX_LOAD) { dict_resize_indices(d, d->icapacity * 2); }
+    if (d->size >= d->ecapacity) { dict_resize_entries(d, d->ecapacity * 2); }
 
     uint64_t hash = obj_hash(key);
 
@@ -428,18 +421,15 @@ void dict_repr(dict* d)
     printf("dictionary:\nindices = [");
     for (int i = 0; i < d->icapacity; i++)
     {
-        if (i != 0)
-            printf(", ");
-        if (d->indices[i] == EMPTY)
-            printf("None");
+        if (i != 0) printf(", ");
+        if (d->indices[i] == EMPTY) printf("None");
         else
             printf("%zu", d->indices[i]);
     }
     printf("]\nentries = [");
     for (int i = 0; i < d->size; i++)
     {
-        if (i != 0)
-            printf(",\n           ");
+        if (i != 0) printf(",\n           ");
         dict_entry e = d->entries[i];
         printf("[%" PRIu64 ", ", e.hash);
         obj_str(e.key);
@@ -455,8 +445,7 @@ void dict_str(dict* d)
     printf("[");
     for (int i = 0; i < d->size; i++)
     {
-        if (i != 0)
-            printf(", ");
+        if (i != 0) printf(", ");
         obj_str(d->entries[i].key);
         printf(" -> ");
         obj_str(d->entries[i].value);

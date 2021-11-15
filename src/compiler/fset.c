@@ -23,10 +23,7 @@ fset* new_fset()
  */
 obj* new_fset_obj(fset* s)
 {
-    if (s == NULL)
-    {
-        s = new_fset();
-    }
+    if (s == NULL) { s = new_fset(); }
     obj* S = malloc(sizeof(obj));
     *S = (obj){.type = FSet_t, .data = s};
     return S;
@@ -55,10 +52,7 @@ void fset_union_into(fset* left, fset* right, bool do_nullable)
     }
 
     // merge ϵ from each set, if specified
-    if (do_nullable)
-    {
-        left->special = left->special || right->special;
-    }
+    if (do_nullable) { left->special = left->special || right->special; }
 
     // free right set
     fset_free(right);
@@ -91,10 +85,7 @@ void fset_str(fset* s)
 {
     printf("{");
     fset_str_inner(s);
-    if (s->special)
-    {
-        printf(set_size(s->terminals) > 0 ? ", ϵ/$" : "ϵ/$");
-    }
+    if (s->special) { printf(set_size(s->terminals) > 0 ? ", ϵ/$" : "ϵ/$"); }
     printf("}");
 }
 
@@ -105,10 +96,7 @@ void fset_first_str(fset* s)
 {
     printf("{");
     fset_str_inner(s);
-    if (s->special)
-    {
-        printf(set_size(s->terminals) > 0 ? ", ϵ" : "ϵ");
-    }
+    if (s->special) { printf(set_size(s->terminals) > 0 ? ", ϵ" : "ϵ"); }
     printf("}");
 }
 
@@ -119,10 +107,7 @@ void fset_follow_str(fset* s)
 {
     printf("{");
     fset_str_inner(s);
-    if (s->special)
-    {
-        printf(set_size(s->terminals) > 0 ? ", $" : "$");
-    }
+    if (s->special) { printf(set_size(s->terminals) > 0 ? ", $" : "$"); }
     printf("}");
 }
 
@@ -136,10 +121,7 @@ void fset_str_inner(fset* s)
     {
         uint64_t* symbol_idx = s->terminals->entries[i].item->data;
         obj_str(metaparser_get_symbol(*symbol_idx));
-        if (i < set_size(s->terminals) - 1)
-        {
-            printf(", ");
-        }
+        if (i < set_size(s->terminals) - 1) { printf(", "); }
     }
 }
 

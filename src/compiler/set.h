@@ -1,20 +1,20 @@
 #ifndef SET_H
 #define SET_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 #include "object.h"
 
-//struct for each row of the set object. Mirrors dictionary, but with just value instead of key+value
+// struct for each row of the set object. Mirrors dictionary, but with just value instead of key+value
 typedef struct
 {
     uint64_t hash;
     obj* item;
 } set_entry;
 
-//struct for the set object
+// struct for the set object
 typedef struct
 {
     size_t size;

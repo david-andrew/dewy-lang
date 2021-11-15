@@ -1,15 +1,14 @@
-//helper functions for managing strings and so forth in compiler compiler
+// helper functions for managing strings and so forth in compiler compiler
 #ifndef UTILITIES_C
 #define UTILITIES_C
 
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "utilities.h"
 #include "ustring.h"
-
+#include "utilities.h"
 
 /**
     clamp an integer to a range
@@ -17,7 +16,8 @@
 int clamp(int x, int min, int max)
 {
     if (x < min) x = min;
-    else if (x > max) x = max;
+    else if (x > max)
+        x = max;
     return x;
 }
 
@@ -26,9 +26,9 @@ int clamp(int x, int min, int max)
 */
 size_t dewy_index(int index, int length)
 {
-    index = (index < 0) ? length + index : index;   //if negative, use end relative indexing 
+    index = (index < 0) ? length + index : index; // if negative, use end relative indexing
     // printf("dewy index: %d\n", clamp(index, 0, length - 1));
-    return (size_t) clamp(index, 0, length - 1);    //clamp the index to the range of the array length
+    return (size_t)clamp(index, 0, length - 1); // clamp the index to the range of the array length
 }
 
 /**
@@ -40,21 +40,17 @@ char* substr(char* str, int start, int stop)
     size_t start_idx = dewy_index(start, length);
     size_t stop_idx = dewy_index(stop, length);
 
-    //compute length of substring
+    // compute length of substring
     size_t substr_length = (start_idx < stop_idx) ? stop_idx - start_idx + 1 : 0;
     // printf("substring length: %d\n", substr_length);
 
-    //perform copy. Leave room for null terminator at the end
+    // perform copy. Leave room for null terminator at the end
     char* substr = malloc((substr_length + 1) * sizeof(char));
     char* ptr = substr;
-    for (size_t i = start_idx; i <= stop_idx; i++)
-    {
-        *ptr++ = str[i];
-    }
-    *ptr = 0; //add null terminator to end of string
+    for (size_t i = start_idx; i <= stop_idx; i++) { *ptr++ = str[i]; }
+    *ptr = 0; // add null terminator to end of string
     return substr;
 }
-
 
 /**
     get a copy of a string
@@ -66,13 +62,12 @@ char* clone(char* string)
     memcpy((void*)copy, (void*)string, size);
     return copy;
 
-    //slower version
+    // slower version
     // char* copy = malloc((strlen(string) + 1) * sizeof(char));
     // char* ptr = copy;
     // while ((*ptr++ = *string++));
     // return copy;
 }
-
 
 /**
     concatenate 2 strings together
@@ -81,14 +76,16 @@ char* concatenate(char* left, char* right)
 {
     char* combined = malloc((strlen(left) + strlen(right)) * sizeof(char));
     char* ptr = combined;
-    while ((*ptr++ = *left++));
-    ptr--;  //remove null terminator from left string
-    while ((*ptr++ = *right++));
+    while ((*ptr++ = *left++))
+        ;
+    ptr--; // remove null terminator from left string
+    while ((*ptr++ = *right++))
+        ;
     return combined;
 }
 
-//TODO->convert this to read file directly char by char, rather than copy into my own buffer
-//what about multiple files though?
+// TODO->convert this to read file directly char by char, rather than copy into my own buffer
+// what about multiple files though?
 /*
     int c; // note: int, not char, required to handle EOF
     while ((c = fgetc(fp)) != EOF) { // standard C I/O file reading loop
@@ -97,8 +94,8 @@ char* concatenate(char* left, char* right)
 */
 size_t read_file(char* filename, char** destination)
 {
-    //see: https://stackoverflow.com/questions/14002954/c-programming-how-to-read-the-whole-file-contents-into-a-buffer
-    FILE *f = fopen(filename, "rb");
+    // see: https://stackoverflow.com/questions/14002954/c-programming-how-to-read-the-whole-file-contents-into-a-buffer
+    FILE* f = fopen(filename, "rb");
     if (f == NULL)
     {
         printf("ERROR: could not open file at %s\n", filename);
@@ -106,7 +103,7 @@ size_t read_file(char* filename, char** destination)
     }
     fseek(f, 0, SEEK_END);
     long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
+    fseek(f, 0, SEEK_SET); /* same as rewind(f); */
 
     *destination = malloc(fsize + 1);
     fread(*destination, fsize, 1, f);
@@ -117,47 +114,42 @@ size_t read_file(char* filename, char** destination)
     return fsize;
 }
 
-
 /**
  * Convert the contents of a file to a unicode (uint32_t) string.
  */
 size_t read_unicode_file(char* filename, uint32_t** destination)
 {
-    //get the normal char* version of the file content
+    // get the normal char* version of the file content
     char* cstr;
     read_file(filename, &cstr);
 
-    //count out the number of unicode characters in the file string
+    // count out the number of unicode characters in the file string
     size_t unicode_length = 0;
     char* c = cstr;
     while (eat_utf8(&c)) { unicode_length++; }
 
-    //create a uint32_t string to hold unicode characters
+    // create a uint32_t string to hold unicode characters
     *destination = malloc((unicode_length + 1) * sizeof(uint32_t));
 
-    //copy the string into the unicode array
-    uint32_t* u = *destination;     //pointer to current unicode character
-    c = cstr;                       //pointer to current char character
-    while ((*u++ = eat_utf8(&c)));    //copy until null terminator reached
+    // copy the string into the unicode array
+    uint32_t* u = *destination; // pointer to current unicode character
+    c = cstr;                   // pointer to current char character
+    while ((*u++ = eat_utf8(&c)))
+        ; // copy until null terminator reached
 
-    //free the original file string
+    // free the original file string
     free(cstr);
 
     return unicode_length;
 }
-
 
 /**
  * Print the given string `times` times.
  */
 void repeat_str(char* str, size_t times)
 {
-    for (size_t i = 0; i < times; i++)
-    {
-        printf("%s", str);
-    }
+    for (size_t i = 0; i < times; i++) { printf("%s", str); }
 }
-
 
 /**
  * Determine the endianess of the system.
@@ -169,18 +161,15 @@ bool is_system_little_endian()
     return *(char*)&i == 1;
 }
 
-
-//For a discussion on hashes: https://softwareengineering.stackexchange.com/questions/49550/which-hashing-algorithm-is-best-for-uniqueness-and-speed
+// For a discussion on hashes:
+// https://softwareengineering.stackexchange.com/questions/49550/which-hashing-algorithm-is-best-for-uniqueness-and-speed
 
 // http://www.cse.yorku.ca/~oz/hash.html
 uint64_t djb2(char* str)
 {
     uint64_t hash = 5381;
     uint8_t c;
-    while ((c = *str++))
-    {
-        hash = (hash << 5) + hash + c;
-    }
+    while ((c = *str++)) { hash = (hash << 5) + hash + c; }
     return hash;
 }
 
@@ -188,15 +177,11 @@ uint64_t djb2a(char* str)
 {
     uint64_t hash = 5381;
     uint8_t c;
-    while ((c = *str++)) 
-    {
-        hash = hash * 33 ^ c;
-    }
+    while ((c = *str++)) { hash = hash * 33 ^ c; }
     return hash;
 }
 
-
-//http://www.isthe.com/chongo/tech/comp/fnv/
+// http://www.isthe.com/chongo/tech/comp/fnv/
 uint64_t fnv1a(char* str)
 {
     uint64_t hash = 14695981039346656037lu;
@@ -209,36 +194,29 @@ uint64_t fnv1a(char* str)
     return hash;
 }
 
-
 /**
  * Return a hash of the signed integer value.
  */
 uint64_t hash_int(int64_t val)
 {
-    //pretend the int is a uint
+    // pretend the int is a uint
     return hash_uint(*(uint64_t*)&val);
 }
-
 
 /**
  * Return a hash of the unsigned integer value.
  */
 uint64_t hash_uint(uint64_t val)
 {
-    //present the uint as a length 1 uint sequence
+    // present the uint as a length 1 uint sequence
     return hash_uint_sequence(&val, 1);
 }
-
 
 /**
  * Identity function for passing into hash_uint_lambda_sequence.
  * Returns the i'th value in the uint64_t sequence, without modification.
  */
-uint64_t utilities_identity_getval(void* seq, size_t i)
-{
-    return ((uint64_t*)seq)[i];
-}
-
+uint64_t utilities_identity_getval(void* seq, size_t i) { return ((uint64_t*)seq)[i]; }
 
 /**
  * Hash the sequence of uint64_t's using a modified version of fnv1a.
@@ -248,7 +226,6 @@ uint64_t hash_uint_sequence(uint64_t* seq, size_t n)
     return hash_uint_lambda_sequence(seq, n, utilities_identity_getval);
 }
 
-
 /**
  * Return a hash of the sequence, using the provided function to retrieve values
  * for elements in the sequence
@@ -257,14 +234,14 @@ uint64_t hash_uint_lambda_sequence(void* seq, size_t n, uint64_t (*getval)(void*
 {
     uint64_t hash = 14695981039346656037lu;
 
-    //loop through each of the uint64_t's in the sequence
+    // loop through each of the uint64_t's in the sequence
     for (size_t i = 0; i < n; i++)
     {
-        //reinterpret the uint64_t as 8 bytes
+        // reinterpret the uint64_t as 8 bytes
         uint64_t val = getval(seq, i);
         uint8_t* bytes = (uint8_t*)&val;
 
-        //hash combine byte into the hash
+        // hash combine byte into the hash
         for (int j = 7; j >= 0; j--)
         {
             hash ^= bytes[j];
@@ -274,33 +251,23 @@ uint64_t hash_uint_lambda_sequence(void* seq, size_t n, uint64_t (*getval)(void*
     return hash;
 }
 
-
 /**
  * Return a hash of the boolean value.
  */
 uint64_t hash_bool(bool val)
 {
-    //cast the bool to a 64-bit 0 or 1, and return it's hash
+    // cast the bool to a 64-bit 0 or 1, and return it's hash
     return hash_uint((uint64_t)val);
 }
-
 
 /**
  * return the next value in the 64-bit lfsr sequence
  */
-uint64_t lfsr64_next(uint64_t curr)
-{
-    return curr >> 1 | (curr ^ curr >> 1 ^ curr >> 3 ^ curr >> 4) << 63;
-}
+uint64_t lfsr64_next(uint64_t curr) { return curr >> 1 | (curr ^ curr >> 1 ^ curr >> 3 ^ curr >> 4) << 63; }
 
 /**
  * return the previous value in the 64-bit lfsr sequence
  */
-uint64_t lfsr64_prev(uint64_t curr)
-{
-    return curr << 1 | ((curr >> 63 ^ curr ^ curr >> 2 ^ curr >> 3) & 0x1);
-}
-
-
+uint64_t lfsr64_prev(uint64_t curr) { return curr << 1 | ((curr >> 63 ^ curr ^ curr >> 2 ^ curr >> 3) & 0x1); }
 
 #endif

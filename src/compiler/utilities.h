@@ -1,11 +1,11 @@
 #ifndef UTILITIES_H
 #define UTILITIES_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
-//mostly string functions
+// mostly string functions
 int clamp(int x, int min, int max);
 size_t dewy_index(int index, int length);
 char* substr(char* str, int start, int stop);
@@ -17,7 +17,7 @@ void repeat_str(char* str, size_t times);
 
 bool is_system_little_endian();
 
-//hash functions
+// hash functions
 uint64_t djb2(char* str);
 uint64_t djb2a(char* str);
 uint64_t fnv1a(char* str);
@@ -27,9 +27,8 @@ uint64_t hash_uint_sequence(uint64_t* seq, size_t n);
 uint64_t hash_uint_lambda_sequence(void* seq, size_t n, uint64_t (*getval)(void*, size_t));
 uint64_t hash_bool(bool val);
 
-//rng functions
+// rng functions
 uint64_t lfsr64_next(uint64_t curr);
 uint64_t lfsr64_prev(uint64_t curr);
-
 
 #endif

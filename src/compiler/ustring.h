@@ -6,11 +6,8 @@
 
 #include "object.h"
 
-
-
 #define MAX_UNICODE_POINT 0x10FFFF
-#define UNICODE_ENDMARKER_POINT 0x200000 //first invalid codepoint (2^21), represents end of input
-
+#define UNICODE_ENDMARKER_POINT 0x200000 // first invalid codepoint (2^21), represents end of input
 
 obj* new_ustring_obj(uint32_t* s);
 uint32_t* ustring_charstar_substr(char* str, int start, int stop);

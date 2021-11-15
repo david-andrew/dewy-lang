@@ -1,11 +1,11 @@
 #ifndef METASCANNER_H
 #define METASCANNER_H
 
+#include "metatoken.h"
 #include "object.h"
 #include "vector.h"
-#include "metatoken.h"
 
-typedef enum 
+typedef enum
 {
     scan_root,
     scan_meta_rule,
@@ -17,15 +17,14 @@ typedef enum
     scan_peek,
 } metascanner_state;
 
-
-//forward declare functions for meta parsing
+// forward declare functions for meta parsing
 void initialize_metascanner();
 void release_metascanner();
 metascanner_state peek_metascanner_state();
 void push_metascanner_state(metascanner_state state);
 metascanner_state pop_metascanner_state();
 
-//helper functions
+// helper functions
 bool is_identifier_char(char c);
 bool is_hashtag_identifier_char(char c);
 bool is_identifier_symbol_char(char c);
@@ -39,7 +38,7 @@ bool is_hex_escape(char c);
 bool is_whitespace_char(char c);
 bool is_charset_char(uint32_t c);
 
-//token matching functions
+// token matching functions
 obj* scan(char** src);
 obj* match_hashtag(char** src);
 obj* match_meta_single_quote(char** src);
@@ -75,7 +74,6 @@ obj* match_meta_right_brace(char** src);
 obj* match_whitespace(char** src);
 obj* match_line_comment(char** src);
 obj* match_block_comment(char** src);
-
 
 void remove_token_type(vect* v, metatoken_type type);
 uint32_t get_peek_char(char** src);

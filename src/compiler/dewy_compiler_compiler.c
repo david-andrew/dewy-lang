@@ -20,8 +20,7 @@
 #define match_argv(var, val)                                                                                           \
     bool var = false;                                                                                                  \
     for (size_t i = 0; i < argc - 2; i++)                                                                              \
-        if (strcmp(argv[i], #val) == 0)                                                                                \
-            var = true;
+        if (strcmp(argv[i], #val) == 0) var = true;
 
 int main(int argc, char* argv[])
 {
@@ -77,8 +76,7 @@ int main(int argc, char* argv[])
     initialize_metascanner();
     initialize_metaparser();
 
-    if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, parser, grammar))
-        goto cleanup;
+    if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, parser, grammar)) goto cleanup;
 
     // if (!run_compiler(input_source, compile, forest))
     //     goto cleanup;
@@ -106,10 +104,7 @@ bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, 
     obj* t = NULL;
 
     // SCANNER STEP: collect all tokens from raw text
-    while (*source != 0 && (t = scan(&source)) != NULL)
-    {
-        vect_push(tokens, t);
-    }
+    while (*source != 0 && (t = scan(&source)) != NULL) { vect_push(tokens, t); }
     if (scanner) // print scanning result
     {
         printf("METASCANNER OUTPUT:\n");
@@ -125,25 +120,16 @@ bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, 
     }
 
     // MAST & PARSER STEP: build MASTs from tokens, and then convert to CFG sentences
-    if (mast)
-    {
-        printf("METAAST OUTPUT:\n");
-    }
+    if (mast) { printf("METAAST OUTPUT:\n"); }
     while (metatoken_get_next_real_token(tokens, 0) >= 0)
     {
-        if (!metaparser_is_valid_rule(tokens))
-        {
-            break;
-        }
+        if (!metaparser_is_valid_rule(tokens)) { break; }
 
         obj* head = metaparser_get_rule_head(tokens);
         uint64_t head_idx = metaparser_add_symbol(head);
         vect* body_tokens = metaparser_get_rule_body(tokens);
         metaast* body_ast = metaast_parse_expr(body_tokens);
-        if (mast)
-        {
-            print_ast(head_idx, body_ast, verbose);
-        }
+        if (mast) { print_ast(head_idx, body_ast, verbose); }
 
         // apply ast reductions if possible
         if (body_ast != NULL)
@@ -184,10 +170,7 @@ bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, 
     complete_metaparser();
     vect_free(tokens);
 
-    if (mast)
-    {
-        printf("\n\n");
-    }
+    if (mast) { printf("\n\n"); }
 
     if (parser)
     {
@@ -248,10 +231,7 @@ void print_scanner(vect* tokens, bool verbose)
     {
         metatoken* t = vect_get(tokens, i)->data;
         verbose ? metatoken_repr(t) : metatoken_str(t);
-        if (verbose && i < vect_size(tokens) - 1)
-        {
-            printf(" ");
-        } // space after each verbose token
+        if (verbose && i < vect_size(tokens) - 1) { printf(" "); } // space after each verbose token
         if (t->type == comment && t->content[1] == '/')
         {
             printf("\n");
@@ -269,10 +249,7 @@ void print_ast(uint64_t head_idx, metaast* body_ast, bool verbose)
     if (body_ast != NULL)
     {
         printf(" = ");
-        if (verbose)
-        {
-            metaast_repr(body_ast);
-        }
+        if (verbose) { metaast_repr(body_ast); }
         else
         {
             metaast_str(body_ast);
