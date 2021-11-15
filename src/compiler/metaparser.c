@@ -909,6 +909,7 @@ uint64_t metaparser_get_start_symbol_idx()
             // found #start non-terminal
             if (ustring_charstar_cmp(terminal, "#start") == 0)
             {
+                printf("found start symbol at %zu\n", symbol_idx);
                 start_symbol_idx = symbol_idx;
                 break;
             }

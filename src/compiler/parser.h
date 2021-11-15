@@ -9,6 +9,7 @@
 
 #include "object.h"
 #include "slot.h"
+#include "vector.h"
 
 // top level functions used by the main program
 void initialize_parser();
@@ -16,11 +17,12 @@ void release_parser();
 void parse(uint32_t* src);
 
 // internal helper functions for running the parser
-void generate_labels();
+void parser_generate_labels();
+vect* parser_get_labels();
 
-bool test_select(uint32_t c, uint64_t head, uint64_t body);
-void bsrAdd(slot* slot, uint64_t i, uint64_t k, uint64_t j);
-void call(slot* slot, uint64_t i, uint64_t j);
-void rtn(uint64_t head, uint64_t k, uint64_t j);
+bool parser_test_select(uint32_t c, uint64_t head, uint64_t body);
+void parser_bsrAdd(slot* slot, uint64_t i, uint64_t k, uint64_t j);
+void parser_call(slot* slot, uint64_t i, uint64_t j);
+void parser_rtn(uint64_t head, uint64_t k, uint64_t j);
 
 #endif

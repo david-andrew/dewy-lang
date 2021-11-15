@@ -8,6 +8,7 @@
 #include "metascanner.h"
 #include "metatoken.h"
 #include "object.h"
+#include "parser.h"
 #include "slot.h"
 #include "ustring.h"
 #include "utilities.h"
@@ -75,11 +76,10 @@ int main(int argc, char* argv[])
     // set up structures for the sequence of scanning/parsing
     initialize_metascanner();
     initialize_metaparser();
+    initialize_parser();
 
-    if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, parser, grammar)) goto cleanup;
-
-    // if (!run_compiler(input_source, compile, forest))
-    //     goto cleanup;
+    if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, parser, grammar)) { goto cleanup; }
+    if (!run_compiler(input_source, labels, forest)) { goto cleanup; }
 
 cleanup:
     free(grammar_source);
@@ -87,6 +87,7 @@ cleanup:
 
     release_metascanner();
     release_metaparser();
+    release_parser();
 
     printf("Completed running parser\n");
 
@@ -203,24 +204,43 @@ bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, 
 /**
  * Parse the input file according to the input grammar.
  */
-// bool run_compiler(uint32_t* source, bool compile, bool forest)
-// {
-//     bool result = srnglr_parser(source);
+bool run_compiler(uint32_t* source, bool labels, bool forest)
+{
+    parser_generate_labels();
 
-//     if (compile)
-//     {
-//         printf("INPUT SOURCE:\n```\n");
-//         ustring_str(source);
-//         printf("\n```\n\n");
+    if (labels)
+    {
+        printf("CNP LABELS:\n");
+        vect* labels = parser_get_labels();
 
-//         printf("PARSE RESULT:\n%s\n\n", result ? "success" : "failure");
-//         print_compiler();
-//         printf("\n\n");
+        for (size_t i = 0; i < vect_size(labels); i++)
+        {
+            slot* label = vect_get(labels, i)->data;
+            slot_str(label);
+            printf("\n");
+        }
+        printf("\n\n");
+    }
 
-//     }
+    return true;
 
-//     return result;
-// }
+    // print out the labels generated
+
+    // bool result = srnglr_parser(source);
+
+    // if (compile)
+    // {
+    //     printf("INPUT SOURCE:\n```\n");
+    //     ustring_str(source);
+    //     printf("\n```\n\n");
+
+    //     printf("PARSE RESULT:\n%s\n\n", result ? "success" : "failure");
+    //     print_compiler();
+    //     printf("\n\n");
+    // }
+
+    // return result;
+}
 
 /**
  * Print the output of the scanner step

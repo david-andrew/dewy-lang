@@ -2,8 +2,8 @@ all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vec
 
 
 #current completed step is simple lexer
-dewy: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o slot.o fset.o slice.o
-	clang -o dewy dewy_compiler_compiler.o utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o slot.o fset.o slice.o -lm
+dewy: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o slot.o fset.o slice.o parser.o
+	clang -o dewy dewy_compiler_compiler.o utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o slot.o fset.o slice.o parser.o -lm
 
 debug:
 	clang -o dewy dewy_compiler_compiler.c utilities.c object.c tuple.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c metaitem.c fset.c slice.c gotokey.c reduction.c gss.c sppf.c srnglr.c -lm -g
@@ -46,6 +46,9 @@ metaparser.o: metaparser.c metaparser.h vector.h set.h metaast.h charset.h metat
 
 fset.o: fset.c fset.h object.h set.h metaparser.h
 	clang -c -o fset.o fset.c
+
+parser.o: parser.c parser.h object.h slot.h metaparser.h set.h vector.h
+	clang -c -o parser.o parser.c
 
 slice.o: slice.c slice.h vector.h utilities.h
 	clang -c -o slice.o slice.c
