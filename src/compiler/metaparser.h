@@ -28,7 +28,7 @@ set* metaparser_get_symbols();
 set* metaparser_get_bodies();
 dict* metaparser_get_productions();
 uint64_t metaparser_get_eps_body_idx();
-uint64_t metaparser_get_endmarker_symbol_idx();
+// uint64_t metaparser_get_endmarker_symbol_idx();
 uint64_t metaparser_get_start_symbol_idx();
 uint64_t metaparser_add_symbol(obj* symbol);
 obj* metaparser_get_symbol(uint64_t i);
@@ -39,7 +39,7 @@ void metaparser_add_production(uint64_t head_idx, uint64_t body_idx);
 set* metaparser_get_production_bodies(uint64_t head_idx);
 vect* metaparser_get_production_body(uint64_t head_idx, uint64_t production_idx);
 void metaparser_set_start_symbol(uint64_t symbol_idx);
-size_t metaparser_count_firsts_size();
+size_t metaparser_count_fsets_size(vect* fsets);
 void metaparser_compute_symbol_firsts();
 void metaparser_compute_symbol_follows();
 vect* metaparser_get_symbol_firsts();
@@ -47,5 +47,7 @@ vect* metaparser_get_symbol_follows();
 fset* metaparser_first_of_symbol(uint64_t symbol_idx);
 fset* metaparser_first_of_string(slice* string);
 fset* metaparser_follow_of_symbol(uint64_t symbol_idx);
+void metaparser_print_body_slice(slice* body);
+void metaparser_print_body(vect* body);
 
 #endif

@@ -1,33 +1,30 @@
 #ifndef DICTIONARY_C
 #define DICTIONARY_C
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <string.h>
 #include <assert.h>
 #include <inttypes.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include "utilities.h"
-#include "object.h"
 #include "dictionary.h"
+#include "object.h"
+#include "utilities.h"
 
 #define DEFAULT_DICT_CAPACITY 8
 #define MAX_LOAD 2 / 3
 
-//constant to assign to hashes that are 0, so that the lfsr algorithm doesn't get stuck at 0
+// constant to assign to hashes that are 0, so that the lfsr algorithm doesn't get stuck at 0
 #define NONZERO_HASH 0xDEADBEEF
 
-//representation for empty/deleted values in the dict indices table. Uses large values likely never to be used.
+// representation for empty/deleted values in the dict indices table. Uses large values likely never to be used.
 #define EMPTY SIZE_MAX
 #define DELETED EMPTY - 1
 
-
-//Implementation of dictionary based on python's implementaion
-//https://stackoverflow.com/questions/327311/how-are-pythons-built-in-dictionaries-implemented
-//https://mail.python.org/pipermail/python-dev/2012-December/123028.html
-
-
+// Implementation of dictionary based on python's implementaion
+// https://stackoverflow.com/questions/327311/how-are-pythons-built-in-dictionaries-implemented
+// https://mail.python.org/pipermail/python-dev/2012-December/123028.html
 
 /**
  * create an empty dictionary
@@ -36,13 +33,13 @@ dict* new_dict()
 {
     dict* d = malloc(sizeof(dict));
     *d = (dict){
-        .size = 0,                                                      //initial elements in the dictionary (i.e. none)
-        .icapacity = DEFAULT_DICT_CAPACITY,                             //initial capacity of the indices table
-        .ecapacity = DEFAULT_DICT_CAPACITY,                             //initial capacity of the entries vector
-        .indices = malloc(DEFAULT_DICT_CAPACITY * sizeof(size_t)),      //pointer to the indices table
-        .entries = calloc(DEFAULT_DICT_CAPACITY, sizeof(dict_entry))    //pointer to the entries vector
+        .size = 0,                                                   // initial elements in the dictionary (i.e. none)
+        .icapacity = DEFAULT_DICT_CAPACITY,                          // initial capacity of the indices table
+        .ecapacity = DEFAULT_DICT_CAPACITY,                          // initial capacity of the entries vector
+        .indices = malloc(DEFAULT_DICT_CAPACITY * sizeof(size_t)),   // pointer to the indices table
+        .entries = calloc(DEFAULT_DICT_CAPACITY, sizeof(dict_entry)) // pointer to the entries vector
     };
-    memset(d->indices, -1, d->icapacity * sizeof(size_t));              //set all values to show as "empty"
+    memset(d->indices, -1, d->icapacity * sizeof(size_t)); // set all values to show as "empty"
     return d;
 }
 
@@ -51,44 +48,35 @@ dict* new_dict()
  */
 obj* new_dict_obj(dict* d)
 {
-    if (d == NULL) d = new_dict();
+    if (d == NULL)
+        d = new_dict();
     obj* D = malloc(sizeof(obj));
-    *D = (obj){.type=Dictionary_t, .data=d};
+    *D = (obj){.type = Dictionary_t, .data = d};
     return D;
 }
 
 /**
  * returns the number of elements in a dictionary
  */
-size_t dict_size(dict* d)
-{
-    return d->size;
-}
+size_t dict_size(dict* d) { return d->size; }
 
 /**
  * returns the capacity of the indices table in a dictionary
  */
-size_t dict_indices_capacity(dict* d)
-{
-    return d->icapacity;
-}
+size_t dict_indices_capacity(dict* d) { return d->icapacity; }
 
 /**
  * returns the capacity of the entries vector in a dictionary
  */
-size_t dict_entries_capacity(dict* d)
-{
-    return d->ecapacity;
-}
-
+size_t dict_entries_capacity(dict* d) { return d->ecapacity; }
 
 /**
  * resize the indices table in the dict struct according to the new size.
  */
 void dict_resize_indices(dict* d, size_t new_size)
 {
-    //check if the new dictionary is large enough for all the elements in the old dictionary
-    if (d->size > new_size * MAX_LOAD) 
+    // check if the new dictionary is large enough for all the elements in the old dictionary
+    if (d->size > new_size * MAX_LOAD)
     {
         printf("ERROR: dict indices resize failed. new capacity is too small for elements of dict\n");
         exit(1);
@@ -100,16 +88,17 @@ void dict_resize_indices(dict* d, size_t new_size)
         printf("ERROR: memory allocation for resized dict indices failed\n");
         exit(1);
     }
-    free(d->indices);           //free the old array of indices
-    d->indices = new_indices;   //store the new array of indices into the dict
+    free(d->indices);         // free the old array of indices
+    d->indices = new_indices; // store the new array of indices into the dict
     d->icapacity = new_size;
-    memset(d->indices, -1, d->icapacity * sizeof(size_t));          //set all values to show as "empty"
+    memset(d->indices, -1, d->icapacity * sizeof(size_t)); // set all values to show as "empty"
 
-    //for each item in entries, insert it's index into the new indices
+    // for each item in entries, insert it's index into the new indices
     for (size_t i = 0; i < d->size; i++)
     {
-        //TODO->if/when we add ability to remove values from a dicitonary, this should skip over those
-        uint64_t address = dict_get_indices_probe(d, d->entries[i].key); //dict_find_empty_address(d, d->entries[i].hash);
+        // TODO->if/when we add ability to remove values from a dicitonary, this should skip over those
+        uint64_t address =
+            dict_get_indices_probe(d, d->entries[i].key); // dict_find_empty_address(d, d->entries[i].hash);
         d->indices[address] = i;
     }
 }
@@ -138,54 +127,51 @@ void dict_resize_entries(dict* d, size_t new_size)
     d->ecapacity = new_size;
 }
 
-
-//TODO->consider making this function resize the dict if it is full? Because otherwise it would enter an infinite loop
+// TODO->consider making this function resize the dict if it is full? Because otherwise it would enter an infinite loop
 /**
  *  return the index in the indices table that this key maps to. Location is either empty, or has the same key already.
  */
 size_t dict_get_indices_probe(dict* d, obj* key)
 {
-    //hash used to find initial probe into indices table
+    // hash used to find initial probe into indices table
     uint64_t hash = obj_hash(key);
 
-    //guarantee that the starting offset is non-zero, as the lfsr will get stuck if given 0
+    // guarantee that the starting offset is non-zero, as the lfsr will get stuck if given 0
     size_t offset = hash != 0 ? hash : NONZERO_HASH;
 
-    //search for either an empty slot, or a slot with the same key
+    // search for either an empty slot, or a slot with the same key
     while (true)
     {
-        size_t probe = (hash + offset) % d->icapacity;      //current probe index in indices table
-        size_t index = d->indices[probe];                       //index we're looking at in the entries table 
+        size_t probe = (hash + offset) % d->icapacity; // current probe index in indices table
+        size_t index = d->indices[probe];              // index we're looking at in the entries table
 
-        //if slot is free, or dict has same key, then we've found our slot
+        // if slot is free, or dict has same key, then we've found our slot
         if (index == EMPTY || (d->entries[index].hash == hash && obj_equals(d->entries[index].key, key)))
         {
             return probe;
         }
 
-        //probe to the next slot in the sequence by changing the offset
+        // probe to the next slot in the sequence by changing the offset
         offset = lfsr64_next(offset);
     }
 }
 
-
 /**
  *  get the index of the key in the dictionary's entries array or EMPTY if the key is not present.
  */
-size_t dict_get_entries_index(dict*d, obj* key)
+size_t dict_get_entries_index(dict* d, obj* key)
 {
     size_t probe = dict_get_indices_probe(d, key);
     return d->indices[probe];
 }
 
-
 /**
  *  insert the key value pair into the dictionary. If key already in dict, overwrite existing entry.
- */ 
+ */
 void dict_set(dict* d, obj* key, obj* value)
 {
-    //check if the dict indices & entries tables needs to be resized. for now, return failure for too many entries;
-    if (d->size >= d->icapacity * MAX_LOAD) 
+    // check if the dict indices & entries tables needs to be resized. for now, return failure for too many entries;
+    if (d->size >= d->icapacity * MAX_LOAD)
     {
         dict_resize_indices(d, d->icapacity * 2);
     }
@@ -196,29 +182,47 @@ void dict_set(dict* d, obj* key, obj* value)
 
     uint64_t hash = obj_hash(key);
 
-    //find the assigned slot for this key
+    // find the assigned slot for this key
     size_t probe = dict_get_indices_probe(d, key);
     size_t index = d->indices[probe];
-    
-    if (index != EMPTY) //key already found, so overwrite entry
+
+    if (index != EMPTY) // key already found, so overwrite entry
     {
-        //free one of the duplicate key, and the old entry
-        //newest key is freed to minimize fragmentation?
+        // free one of the duplicate key, and the old entry
+        // newest key is freed to minimize fragmentation?
         obj_free(key);
         obj_free(d->entries[index].value);
 
-        //insert the new object into the entry
+        // insert the new object into the entry
         d->entries[index].value = value;
-    } 
-    else //create a new entry for the key + object 
+    }
+    else // create a new entry for the key + object
     {
         index = d->size;
         d->indices[probe] = index;
-        d->entries[index] = (dict_entry){.hash=hash, .key=key, .value=value};
+        d->entries[index] = (dict_entry){.hash = hash, .key = key, .value = value};
         d->size++;
     }
 }
 
+/**
+ * return the key and value at the index in the dictionary's entries array.
+ *
+ * key and value are returned via the pointers passed in
+ */
+void dict_get_at_index(dict* d, size_t i, obj* key, obj* value)
+{
+    if (i < dict_size(d))
+    {
+        *key = *d->entries[i].key;
+        *value = *d->entries[i].value;
+    }
+    else
+    {
+        printf("ERROR: attempted to get set item from index %zu in set of size %zu\n", i, dict_size(d));
+        exit(1);
+    }
+}
 
 /**
  * check if the dictionary has the specified key.
@@ -228,7 +232,6 @@ bool dict_contains(dict* d, obj* key)
     size_t i = dict_get_entries_index(d, key);
     return i != EMPTY;
 }
-
 
 /**
  * Convenience method to check if a dict contains a value with a uint64_t key
@@ -242,15 +245,13 @@ bool dict_contains_uint_key(dict* d, uint64_t u)
     return result;
 }
 
-
-//TODO->I think this has a bug where a full dictionary will cause an infinite loop if the key is not in the dictionary.
-//basically it should be guaranteed that dictionaries will never be full!
+// TODO->I think this has a bug where a full dictionary will cause an infinite loop if the key is not in the dictionary.
+// basically it should be guaranteed that dictionaries will never be full!
 obj* dict_get(dict* d, obj* key)
 {
     size_t i = dict_get_entries_index(d, key);
     return i == EMPTY ? NULL : d->entries[i].value;
 }
-
 
 /**
  * Convenience method for easily accessing a dict value with a uint64_t key
@@ -287,7 +288,7 @@ obj* dict_get_uint_key(dict* d, uint64_t u)
 // }
 
 // /**
-    
+
 // */
 // void dict_set_hashtag_key(dict* d, obj* hashtag, obj* value)
 // {
@@ -305,17 +306,16 @@ obj* dict_get_uint_key(dict* d, uint64_t u)
 
 //     //get the value from the dict using the string key
 //     obj* value = dict_get(d, key);
-    
-//     //free the key before we return 
+
+//     //free the key before we return
 //     obj_free(key);
 
 //     return value;
 
 // }
 
-
 // /**
-//  * 
+//  *
 //  */
 // void dict_delete(dict* d, obj* key)
 // {
@@ -353,15 +353,14 @@ void dict_reset(dict* d)
     free(d->indices);
     free(d->entries);
 
-    //reset all parameters as if new dictionary
-    d->indices = malloc(DEFAULT_DICT_CAPACITY * sizeof(size_t));    //pointer to the indices table
-    d->entries = calloc(DEFAULT_DICT_CAPACITY, sizeof(dict_entry)); //pointer to the entries vector
-    memset(d->indices, -1, d->icapacity * sizeof(size_t));          //set all values to show as "empty"
-    d->size = 0;                                                    //number of values in the dict
-    d->icapacity = DEFAULT_DICT_CAPACITY;                           //capacity of the indices table
-    d->ecapacity = DEFAULT_DICT_CAPACITY;                           //capacity of the entries vector
+    // reset all parameters as if new dictionary
+    d->indices = malloc(DEFAULT_DICT_CAPACITY * sizeof(size_t));    // pointer to the indices table
+    d->entries = calloc(DEFAULT_DICT_CAPACITY, sizeof(dict_entry)); // pointer to the entries vector
+    memset(d->indices, -1, d->icapacity * sizeof(size_t));          // set all values to show as "empty"
+    d->size = 0;                                                    // number of values in the dict
+    d->icapacity = DEFAULT_DICT_CAPACITY;                           // capacity of the indices table
+    d->ecapacity = DEFAULT_DICT_CAPACITY;                           // capacity of the entries vector
 }
-
 
 void dict_free(dict* d)
 {
@@ -374,14 +373,13 @@ void dict_free_elements_only(dict* d)
     for (int i = 0; i < d->size; i++)
     {
         dict_entry e = d->entries[i];
-        if (e.key != e.value && e.value != NULL) //only if key and value are different object, free both
+        if (e.key != e.value && e.value != NULL) // only if key and value are different object, free both
         {
-            obj_free(e.value); 
+            obj_free(e.value);
         }
         obj_free(e.key);
     }
 }
-
 
 /**
  * Free only the key objects in the dict without touching the values or table.
@@ -415,34 +413,35 @@ void dict_free_values_only(dict* d)
     }
 }
 
-
-
 void dict_free_table_only(dict* d)
 {
-    //free memory of indices table and entry vectory.
-    //this is mainly used when you want all elements that were stored in the dictionary to remain alive
+    // free memory of indices table and entry vectory.
+    // this is mainly used when you want all elements that were stored in the dictionary to remain alive
     free(d->indices);
     free(d->entries);
     free(d);
 }
 
-
 void dict_repr(dict* d)
 {
-    //print out all elements in the dictionary indices table and entries vector
+    // print out all elements in the dictionary indices table and entries vector
     printf("dictionary:\nindices = [");
     for (int i = 0; i < d->icapacity; i++)
     {
-        if (i != 0) printf(", ");
-        if (d->indices[i] == EMPTY) printf("None");
-        else printf("%zu", d->indices[i]);
+        if (i != 0)
+            printf(", ");
+        if (d->indices[i] == EMPTY)
+            printf("None");
+        else
+            printf("%zu", d->indices[i]);
     }
     printf("]\nentries = [");
     for (int i = 0; i < d->size; i++)
     {
-        if (i != 0) printf(",\n           ");
+        if (i != 0)
+            printf(",\n           ");
         dict_entry e = d->entries[i];
-        printf("[%"PRIu64", ", e.hash);
+        printf("[%" PRIu64 ", ", e.hash);
         obj_str(e.key);
         printf(", ");
         obj_str(e.value);
@@ -451,20 +450,18 @@ void dict_repr(dict* d)
     printf("]\n");
 }
 
-
 void dict_str(dict* d)
 {
     printf("[");
     for (int i = 0; i < d->size; i++)
     {
-        if (i != 0) printf(", ");
+        if (i != 0)
+            printf(", ");
         obj_str(d->entries[i].key);
         printf(" -> ");
         obj_str(d->entries[i].value);
     }
     printf("]");
 }
-
-
 
 #endif
