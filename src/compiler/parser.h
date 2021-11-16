@@ -23,9 +23,12 @@ vect* parser_get_labels();
 void parser_handle_label(slot* label);
 void parser_print_label(slot* label);
 
-bool parser_test_select(uint32_t c, uint64_t head, slice* string);
-void parser_bsrAdd(slot* slot, uint64_t i, uint64_t k, uint64_t j);
+// CNP support functions
+void parser_nt_add(uint64_t head_idx, uint64_t j);
+bool parser_test_select(uint32_t c, uint64_t head_idx, slice* string);
+void parser_dsc_add(slot* slot, uint64_t k, uint64_t j);
+void parser_return(uint64_t head_idx, uint64_t k, uint64_t j);
 void parser_call(slot* slot, uint64_t i, uint64_t j);
-void parser_rtn(uint64_t head, uint64_t k, uint64_t j);
+void parser_bsr_add(slot* slot, uint64_t i, uint64_t k, uint64_t j);
 
 #endif

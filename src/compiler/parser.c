@@ -118,7 +118,7 @@ void parser_handle_label(slot* label)
             }
             dot++;
 
-            parser_bsrAdd(slot_copy(label), cU, cI, cI + 1);
+            parser_bsr_add(slot_copy(label), cU, cI, cI + 1);
             cI++;
         }
 
@@ -141,7 +141,7 @@ void parser_handle_label(slot* label)
         fset* follow = metaparser_follow_of_symbol(label->head_idx);
         if (fset_contains_c(follow, I[cI]))
         {
-            parser_rtn(label->head_idx, cU, cI);
+            parser_return(label->head_idx, cU, cI);
             return;
         }
     }
@@ -178,7 +178,7 @@ void parser_print_label(slot* label)
                 printf("))\n        goto L0\n");
             }
             dot++;
-            printf("    parser_bsrAdd(");
+            printf("    parser_bsr_add(");
             slot_str(&(slot){label->head_idx, label->production_idx, dot});
             printf(", cU, cI, cI + 1);\n    cI += 1\n");
         }
@@ -213,9 +213,99 @@ void parser_print_label(slot* label)
     printf("    goto L0\n");
 }
 
-bool parser_test_select(uint32_t c, uint64_t head, slice* string) { return false; }
-void parser_bsrAdd(slot* slot, uint64_t i, uint64_t k, uint64_t j) {}
-void parser_call(slot* slot, uint64_t i, uint64_t j) {}
-void parser_rtn(uint64_t head, uint64_t k, uint64_t j) {}
+/**
+ * TODO->what is this function for?
+ */
+void parser_nt_add(uint64_t head_idx, uint64_t j)
+{
+    set* bodies = metaparser_get_production_bodies(head_idx);
+    for (size_t production_idx = 0; production_idx < set_size(bodies); production_idx++)
+    {
+        vect* body = set_get_at_index(bodies, production_idx)->data;
+        slice s = slice_struct(body, 0, vect_size(body), NULL);
+        if (parser_test_select(I[j], head_idx, &s)) { parser_dsc_add(&(slot){head_idx, production_idx, 0}, j, j); }
+    }
+}
+
+/**
+ * TODO->what is this function for?
+ */
+bool parser_test_select(uint32_t c, uint64_t head_idx, slice* string)
+{
+    fset* first = metaparser_first_of_string(string);
+    bool result = false;
+    if (fset_contains_c(first, c)) { result = true; }
+    else if (first->special)
+    {
+        fset* follow = metaparser_follow_of_symbol(head_idx);
+        if (fset_contains_c(follow, c)) { result = true; }
+    }
+
+    // free fset allocated by first of string
+    fset_free(first); // TODO->allocate all of these so that fset of string can return an owned fset
+                      // e.g. have first_of_string_memoized() which can only return strings seen in first_of_string()
+    return result;
+}
+
+/**
+ * TODO->what is this function for?
+ * creates a copy of the slot if it is to be inserted. Original is not modified.
+ */
+void parser_dsc_add(slot* slot, uint64_t k, uint64_t j)
+{
+    // TODO->convert the slot to a slot_idx
+    // create a static 3 tuple containing (slot, k, j)
+    // if tuple not in U, add copy(tuple) to U and R
+}
+
+/**
+ * TODO->what is this function for?
+ */
+void parser_return(uint64_t head_idx, uint64_t k, uint64_t j)
+{
+    // create static 3 tuple (head_idx, k, j)
+    // check if tuple not in P
+    // if not, add tuple to P
+    //   and for each child v of (head_idx, k) in the CRF
+    //     let (L, i) be the label of v
+    //     dsc_add(L, i, j)
+    //     bsr_add(L, i, k, j)
+}
+
+/**
+ * TODO->what is this function for?
+ */
+void parser_call(slot* slot, uint64_t i, uint64_t j)
+{
+    // suppose that L is Y ::= αX · β
+    // if there is no CRF node labelled (L, i) create one
+    // let u be the CRF node labelled (L, i)
+    // if there is no CRF node labelled (X, j) {
+    //   create a CRF node v labelled (X, j)
+    //   create an edge from v to u
+    //   ntAdd(X, j) }
+    // else { let v be the CRF node labelled (X, j)
+    //   if there is not an edge from v to u {
+    //     create an edge from v to u
+    //     for all ((X, j, h) ∈ P) {
+    //       dscAdd(L, i, h); bsrAdd(L, i, j, h) } } } }
+}
+
+/**
+ * TODO->what is this function for?
+ */
+void parser_bsr_add(slot* slot, uint64_t i, uint64_t k, uint64_t j)
+{
+    vect* body = metaparser_get_production_body(slot->head_idx, slot->production_idx);
+    if (vect_size(body) == slot->position)
+    {
+        // insert (head_idx, production_idx, i, k, j) into Y
+    }
+    else if (slot->position > 1)
+    {
+        // slice s = slice_struct(body, 0, slot->position, NULL);
+        // insert (s, i, k, j) into Y
+    }
+}
 
 #endif
