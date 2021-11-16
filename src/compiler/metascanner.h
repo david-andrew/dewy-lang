@@ -18,7 +18,7 @@ typedef enum
 } metascanner_state;
 
 // forward declare functions for meta parsing
-void initialize_metascanner();
+void allocate_metascanner();
 void release_metascanner();
 metascanner_state peek_metascanner_state();
 void push_metascanner_state(metascanner_state state);

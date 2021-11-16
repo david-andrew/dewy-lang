@@ -8,7 +8,7 @@
 #include "vector.h"
 
 uint64_t metaparser_get_anonymous_rule_head();
-void initialize_metaparser();
+void allocate_metaparser();
 void complete_metaparser();
 void release_metaparser();
 void metaparser_free_ast_cache();
@@ -39,15 +39,5 @@ void metaparser_add_production(uint64_t head_idx, uint64_t body_idx);
 set* metaparser_get_production_bodies(uint64_t head_idx);
 vect* metaparser_get_production_body(uint64_t head_idx, uint64_t production_idx);
 void metaparser_set_start_symbol(uint64_t symbol_idx);
-size_t metaparser_count_fsets_size(vect* fsets);
-void metaparser_compute_symbol_firsts();
-void metaparser_compute_symbol_follows();
-vect* metaparser_get_symbol_firsts();
-vect* metaparser_get_symbol_follows();
-fset* metaparser_first_of_symbol(uint64_t symbol_idx);
-fset* metaparser_first_of_string(slice* string);
-fset* metaparser_follow_of_symbol(uint64_t symbol_idx);
-void metaparser_print_body_slice(slice* body);
-void metaparser_print_body(vect* body);
 
 #endif

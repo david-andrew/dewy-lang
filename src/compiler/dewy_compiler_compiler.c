@@ -74,11 +74,13 @@ int main(int argc, char* argv[])
     }
 
     // set up structures for the sequence of scanning/parsing
-    initialize_metascanner();
-    initialize_metaparser();
-    initialize_parser();
+    allocate_metascanner();
+    allocate_metaparser();
+    allocate_parser();
 
     if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, parser, grammar)) { goto cleanup; }
+
+    initialize_parser();
     if (!run_compiler(input_source, labels, forest)) { goto cleanup; }
 
 cleanup:
@@ -291,7 +293,7 @@ void print_parser(bool verbose) { verbose ? metaparser_productions_repr() : meta
  */
 void print_grammar_first_sets()
 {
-    vect* firsts = metaparser_get_symbol_firsts();
+    vect* firsts = parser_get_symbol_firsts();
     for (int symbol_idx = 0; symbol_idx < vect_size(firsts); symbol_idx++)
     {
         obj* symbol = metaparser_get_symbol(symbol_idx);
@@ -308,7 +310,7 @@ void print_grammar_first_sets()
  */
 void print_grammar_follow_sets()
 {
-    vect* follows = metaparser_get_symbol_follows();
+    vect* follows = parser_get_symbol_follows();
     for (int symbol_idx = 0; symbol_idx < vect_size(follows); symbol_idx++)
     {
         obj* symbol = metaparser_get_symbol(symbol_idx);

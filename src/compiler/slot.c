@@ -7,6 +7,7 @@
 
 #include "fset.h"
 #include "metaparser.h"
+#include "parser.h"
 #include "slice.h"
 #include "slot.h"
 #include "utilities.h"
@@ -59,7 +60,7 @@ bool slot_is_accept(slot* s)
     {
         // check if the remaining portion of the string is nullable
         slice remaining = slice_struct(body, s->position, vect_size(body), NULL);
-        fset* first = metaparser_first_of_string(&remaining);
+        fset* first = parser_first_of_string(&remaining);
         bool nullable = first->special;
         fset_free(first);
         return nullable;

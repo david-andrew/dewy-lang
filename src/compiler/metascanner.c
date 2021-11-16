@@ -105,7 +105,7 @@ vect* metascanner_state_stack = NULL;
 /**
  * Initialize any internal objects used in the metascanner
  */
-void initialize_metascanner()
+void allocate_metascanner()
 {
     metascanner_state_stack = new_vect();
     vect_push(metascanner_state_stack, new_uint_obj((uint64_t)scan_root));

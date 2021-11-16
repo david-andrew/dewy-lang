@@ -14,6 +14,10 @@
  * Global data structures used by the parser
  * Slots are a head ::= rule, with a dot starting the rule, or following a non-terminals)
  */
+vect* parser_symbol_firsts;  // vect containing the first set of each symbol.
+vect* parser_symbol_follows; // vect containing the follow set of each symbol.
+// vect* parser_substrings;  // vect containing slices of all possible substrings
+// vect* parser_substring_firsts;
 vect* parser_labels;
 // TODO->come up with better names for these globals
 // set* P;
@@ -38,14 +42,25 @@ uint64_t cU;
 
 // Y, U, R, I, cI, cU, crf
 
-void initialize_parser()
+void allocate_parser()
 {
+    parser_symbol_firsts = new_vect();
+    parser_symbol_follows = new_vect();
     parser_labels = new_vect();
     // other initializations here
 }
 
+// TODO->change this to better name
+void initialize_parser(/*uint64_t source_length*/)
+{
+    parser_compute_symbol_firsts();
+    parser_compute_symbol_follows();
+}
+
 void release_parser()
 {
+    vect_free(parser_symbol_firsts);
+    vect_free(parser_symbol_follows);
     vect_free(parser_labels);
     // other frees here
 }
@@ -138,7 +153,7 @@ void parser_handle_label(slot* label)
         (dot == vect_size(body) && metaparser_is_symbol_terminal(*(uint64_t*)vect_get(body, dot - 1)->data)))
     {
         // get the followset of the label head
-        fset* follow = metaparser_follow_of_symbol(label->head_idx);
+        fset* follow = parser_follow_of_symbol(label->head_idx);
         if (fset_contains_c(follow, I[cI]))
         {
             parser_return(label->head_idx, cU, cI);
@@ -174,7 +189,7 @@ void parser_print_label(slot* label)
                 printf("    if (!parser_test_select(I[cI], ");
                 obj_str(metaparser_get_symbol(label->head_idx));
                 printf(", ");
-                metaparser_print_body_slice(&s);
+                parser_print_body_slice(&s);
                 printf("))\n        goto L0\n");
             }
             dot++;
@@ -191,7 +206,7 @@ void parser_print_label(slot* label)
                 printf("    if (!parser_test_select(I[cI], ");
                 obj_str(metaparser_get_symbol(label->head_idx));
                 printf(", ");
-                metaparser_print_body_slice(&s);
+                parser_print_body_slice(&s);
                 printf("))\n        goto L0\n");
             }
             dot++;
@@ -232,12 +247,12 @@ void parser_nt_add(uint64_t head_idx, uint64_t j)
  */
 bool parser_test_select(uint32_t c, uint64_t head_idx, slice* string)
 {
-    fset* first = metaparser_first_of_string(string);
+    fset* first = parser_first_of_string(string);
     bool result = false;
     if (fset_contains_c(first, c)) { result = true; }
     else if (first->special)
     {
-        fset* follow = metaparser_follow_of_symbol(head_idx);
+        fset* follow = parser_follow_of_symbol(head_idx);
         if (fset_contains_c(follow, c)) { result = true; }
     }
 
@@ -306,6 +321,218 @@ void parser_bsr_add(slot* slot, uint64_t i, uint64_t k, uint64_t j)
         // slice s = slice_struct(body, 0, slot->position, NULL);
         // insert (s, i, k, j) into Y
     }
+}
+
+/**
+ * Helper function to count the total number of elements in all first/follow sets
+ *
+ * fsets is either the array "metaparser_symbol_firsts" or "metaparser_symbol_follows"
+ */
+size_t parser_count_fsets_size(vect* fsets)
+{
+    size_t count = 0;
+    for (size_t i = 0; i < vect_size(fsets); i++)
+    {
+        fset* s = vect_get(fsets, i)->data;
+        count += set_size(s->terminals) + s->special;
+    }
+    return count;
+}
+
+/**
+ * Compute all first sets for each symbol in the grammar
+ */
+void parser_compute_symbol_firsts()
+{
+    set* symbols = metaparser_get_symbols();
+
+    // create empty fsets for each symbol in the grammar
+    for (size_t i = 0; i < set_size(symbols); i++) { vect_append(parser_symbol_firsts, new_fset_obj(NULL)); }
+
+    // compute firsts for all terminal symbols, since the fset is just the symbol itself.
+    for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+    {
+        if (!metaparser_is_symbol_terminal(symbol_idx)) { continue; }
+        fset* symbol_fset = vect_get(parser_symbol_firsts, symbol_idx)->data;
+        fset_add(symbol_fset, new_uint_obj(symbol_idx));
+        symbol_fset->special = false;
+    }
+
+    // compute first for all non-terminal symbols. update each set until no new changes occur
+    size_t count;
+    do {
+        // keep track of if any sets got larger (i.e. by adding new terminals to any fsets)
+        count = parser_count_fsets_size(parser_symbol_firsts);
+
+        // for each non-terminal symbol
+        for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+        {
+            if (metaparser_is_symbol_terminal(symbol_idx)) { continue; }
+
+            fset* symbol_fset = vect_get(parser_symbol_firsts, symbol_idx)->data;
+            set* bodies = metaparser_get_production_bodies(symbol_idx);
+            for (size_t production_idx = 0; production_idx < set_size(bodies); production_idx++)
+            {
+                vect* body = metaparser_get_production_body(symbol_idx, production_idx);
+
+                // for each element in body, get its fset, and merge into this one. stop if non-nullable
+                for (size_t i = 0; i < vect_size(body); i++)
+                {
+                    uint64_t* body_symbol_idx = vect_get(body, i)->data;
+                    fset* body_symbol_fset = vect_get(parser_symbol_firsts, *body_symbol_idx)->data;
+                    fset_union_into(symbol_fset, fset_copy(body_symbol_fset), true);
+                    if (!body_symbol_fset->special) { break; }
+                }
+
+                // epsilon strings add epsilon to fset
+                if (vect_size(body) == 0) { symbol_fset->special = true; }
+            }
+        }
+    } while (count < parser_count_fsets_size(parser_symbol_firsts));
+}
+
+/**
+ * Compute all follow sets for each symbol in the grammar
+ */
+void parser_compute_symbol_follows()
+{
+    // steps for computing follow sets:
+    // 1. place $ in FOLLOW(S) where S is the start symbol and $ is the input right endmarker
+    // 2. If there is a production A -> αBβ, then everything in FIRST(β) except ϵ is in FOLLOW(B)
+    // 3. if there is a production A -> αB, or a production A -> αBβ where FIRST(β) contains ϵ, then everything in
+    //    FOLLOW(A) is in FOLLOW(B)
+
+    set* symbols = metaparser_get_symbols();
+
+    // first initialize fsets for each symbol in the grammar
+    for (size_t i = 0; i < set_size(symbols); i++) { vect_append(parser_symbol_follows, new_fset_obj(NULL)); }
+
+    // 1. add $ to the follow set of the start symbol
+    uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
+    ((fset*)vect_get(parser_symbol_follows, start_symbol_idx)->data)->special = true;
+
+    // 2/3. add first of following substrings following terminals, and follow sets of rule heads
+    dict* productions = metaparser_get_productions();
+    size_t count;
+    do {
+        // keep track of if any sets got larger (i.e. by adding new terminals to any fsets)
+        count = parser_count_fsets_size(parser_symbol_follows);
+
+        for (size_t i = 0; i < dict_size(productions); i++)
+        {
+            obj head_idx_obj;
+            obj bodies_set_obj;
+            dict_get_at_index(productions, i, &head_idx_obj, &bodies_set_obj);
+            uint64_t head_idx = *(uint64_t*)head_idx_obj.data;
+            set* bodies = (set*)bodies_set_obj.data;
+
+            // for each production body
+            for (size_t body_idx = 0; body_idx < set_size(bodies); body_idx++)
+            {
+                vect* body = metaparser_get_production_body(head_idx, body_idx);
+
+                // for each element in body, get its fset, and merge into this one. stop if non-nullable
+                for (size_t i = 0; i < vect_size(body); i++)
+                {
+                    uint64_t* symbol_idx = vect_get(body, i)->data;
+
+                    // create a substring beta of the body from i + 1 to the end, and compute its first set
+                    slice beta = slice_struct(body, i + 1, vect_size(body), NULL);
+                    fset* beta_first = parser_first_of_string(&beta);
+                    bool nullable = beta_first->special; // save nullable status
+
+                    // get union first of beta into the follow set of the symbol (ignoring epsilon)
+                    fset* symbol_follow = vect_get(parser_symbol_follows, *symbol_idx)->data;
+                    fset_union_into(symbol_follow, beta_first, false); // beta_first gets freed here
+
+                    // if beta is nullable, add everything in follow set of head to follow set of the current terminal
+                    if (nullable)
+                    {
+                        fset* head_follow = vect_get(parser_symbol_follows, head_idx)->data;
+                        fset_union_into(symbol_follow, fset_copy(head_follow), true);
+                    }
+                }
+            }
+        }
+    } while (count < parser_count_fsets_size(parser_symbol_follows));
+}
+
+/**
+ * return the list of first sets for each symbol in the grammar.
+ */
+vect* parser_get_symbol_firsts() { return parser_symbol_firsts; }
+
+/**
+ * return the list of follow sets for each symbol in the grammar.
+ */
+vect* parser_get_symbol_follows() { return parser_symbol_follows; }
+
+/**
+ * return the first set for the given symbol
+ */
+fset* parser_first_of_symbol(uint64_t symbol_idx) { return vect_get(parser_symbol_firsts, symbol_idx)->data; }
+
+/**
+ * Compute the first set for the given string of symbols.
+ *
+ * symbol_first: vect<fset>
+ * returned set needs to be freed when done.
+ */
+fset* parser_first_of_string(slice* string)
+{
+    fset* result = new_fset();
+    vect* symbol_firsts = parser_get_symbol_firsts();
+
+    if (slice_size(string) == 0)
+    {
+        // empty string is nullable
+        result->special = true;
+    }
+    else
+    {
+        // handle each symbol in the string, until a non-nullable symbol is reached
+        for (size_t i = 0; i < slice_size(string); i++)
+        {
+            uint64_t* symbol_idx = slice_get(string, i)->data;
+            fset* first_i = vect_get(symbol_firsts, *symbol_idx)->data;
+            bool nullable = first_i->special;
+            fset_union_into(result, fset_copy(first_i),
+                            false); // merge first of symbol into result. Don't merge nullable
+            if (i == slice_size(string) - 1 && nullable) { result->special = true; }
+
+            // only continue to next symbol if this symbol was nullable
+            if (!nullable) { break; }
+        }
+    }
+
+    return result;
+}
+
+/**
+ * return the follow set for the given symbol
+ */
+fset* parser_follow_of_symbol(uint64_t symbol_idx) { return vect_get(parser_symbol_follows, symbol_idx)->data; }
+
+/**
+ * print out the string of symbols in the given production body slice.
+ */
+void parser_print_body_slice(slice* body)
+{
+    if (slice_size(body) == 0) { printf("ϵ"); }
+    for (size_t i = 0; i < slice_size(body); i++)
+    {
+        obj_str(metaparser_get_symbol(*(uint64_t*)(slice_get(body, i)->data)));
+        if (i != slice_size(body) - 1) { printf(" "); }
+    }
+}
+
+/**
+ * print out the string of symbols for the given production body.
+ */
+void parser_print_body(vect* body)
+{
+    slice body_slice = slice_struct(body, 0, vect_size(body), NULL);
+    parser_print_body_slice(&body_slice);
 }
 
 #endif
