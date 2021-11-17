@@ -97,6 +97,14 @@ uint64_t crf_cluster_node_hash(crf_cluster_node* node)
 }
 
 /**
+ * Determine if two cluster nodes are equal.
+ */
+bool crf_cluster_node_equals(crf_cluster_node* left, crf_cluster_node* right)
+{
+    return left->head_idx == right->head_idx && left->j == right->j;
+}
+
+/**
  * Free an allocated cluster node.
  */
 void free_crf_cluster_node(crf_cluster_node* node) { free(node); }
@@ -149,6 +157,15 @@ obj* crf_label_node_obj(crf_label_node* node)
     obj* N = malloc(sizeof(obj));
     *N = obj_struct(CRFLabelNode_t, node);
     return N;
+}
+
+/**
+ * Determine if two label nodes are equal.
+ */
+bool crf_label_node_equals(crf_label_node* left, crf_label_node* right)
+{
+    return left->label.head_idx == right->label.head_idx && left->label.production_idx == right->label.production_idx &&
+           left->label.dot == right->label.dot && left->j == right->j;
 }
 
 /**
@@ -214,6 +231,14 @@ obj* crf_edge_obj(crf_edge* edge)
     obj* E = malloc(sizeof(obj));
     *E = obj_struct(CRFEdge_t, edge);
     return E;
+}
+
+/**
+ * Determine if two edges are equal.
+ */
+bool crf_edge_equals(crf_edge* left, crf_edge* right)
+{
+    return left->cluster_node_idx == right->cluster_node_idx && left->label_node_idx == right->label_node_idx;
 }
 
 /**
