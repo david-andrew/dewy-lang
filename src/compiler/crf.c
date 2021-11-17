@@ -5,6 +5,9 @@
 
 // Call Return Forest
 
+/**
+ * Create a new call return forest.
+ */
 crf* new_crf()
 {
     crf* CRF = malloc(sizeof(crf));
@@ -12,6 +15,9 @@ crf* new_crf()
     return CRF;
 }
 
+/**
+ * Free a call return forest.
+ */
 void crf_free(crf* CRF)
 {
     dict_free(CRF->forest);

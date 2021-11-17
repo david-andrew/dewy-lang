@@ -63,6 +63,19 @@ parser_context* new_parser_context(uint32_t* src, uint64_t len)
 }
 
 /**
+ * Free a parser context
+ */
+void parser_context_free(parser_context* con)
+{
+    crf_free(con->CRF);
+    set_free(con->P);
+    set_free(con->Y);
+    set_free(con->R);
+    set_free(con->U);
+    free(con);
+}
+
+/**
  * Generate the list of labels (slots) used by the CNP algorithm for the current grammar
  */
 void parser_generate_labels()
