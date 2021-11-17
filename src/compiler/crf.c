@@ -1,7 +1,12 @@
 #ifndef CRF_C
 #define CRF_C
 
+#include <inttypes.h>
+#include <stdio.h>
+
 #include "crf.h"
+#include "metaparser.h"
+#include "parser.h"
 #include "utilities.h"
 
 // Call Return Forest
@@ -29,6 +34,26 @@ void crf_free(crf* CRF)
     set_free(CRF->label_nodes);
     set_free(CRF->edges);
     free(CRF);
+}
+
+/**
+ * Print out the string representation of a CRF
+ */
+void crf_str(crf* CRF)
+{
+    printf("CRF: [\n");
+    for (size_t i = 0; i < set_size(CRF->edges); i++)
+    {
+        crf_edge* edge = set_get_at_index(CRF->edges, i)->data;
+        crf_cluster_node* cluster_node = set_get_at_index(CRF->cluster_nodes, edge->cluster_node_idx)->data;
+        crf_label_node* label_node = set_get_at_index(CRF->label_nodes, edge->label_node_idx)->data;
+        printf("    ");
+        crf_cluster_node_str(cluster_node);
+        printf(" -> ");
+        crf_label_node_str(label_node);
+        printf("\n");
+    }
+    printf("]\n");
 }
 
 /**
@@ -77,6 +102,25 @@ uint64_t crf_cluster_node_hash(crf_cluster_node* node)
 void free_crf_cluster_node(crf_cluster_node* node) { free(node); }
 
 /**
+ * Print out the string representation of a cluster node.
+ */
+void crf_cluster_node_str(crf_cluster_node* node)
+{
+    obj* symbol = metaparser_get_symbol(node->head_idx);
+    printf("(");
+    obj_str(symbol);
+    printf(", %" PRIu64 ")", node->j);
+}
+
+/**
+ * Print out the internal representation of the cluster node.
+ */
+void crf_cluster_node_repr(crf_cluster_node* node)
+{
+    printf("(head_idx: %" PRIu64 ", j: %" PRIu64 ")", node->head_idx, node->j);
+}
+
+/**
  * Create a new label node.
  */
 crf_label_node* crf_new_label_node(slot label, uint64_t j)
@@ -122,6 +166,26 @@ uint64_t crf_label_node_hash(crf_label_node* node)
 void free_crf_label_node(crf_label_node* node) { free(node); }
 
 /**
+ * Print out the string representation of a label node.
+ */
+void crf_label_node_str(crf_label_node* node)
+{
+    printf("(");
+    slot_str(&node->label);
+    printf(", %" PRIu64 ")", node->j);
+}
+
+/**
+ * Print out the internal representation of the label node.
+ */
+void crf_label_node_repr(crf_label_node* node)
+{
+    printf("(label: ");
+    slot_repr(&node->label);
+    printf(", j: %" PRIu64 ")", node->j);
+}
+
+/**
  * Create a new edge.
  */
 crf_edge* crf_new_edge(uint64_t cluster_node_idx, uint64_t label_node_idx)
@@ -165,5 +229,22 @@ uint64_t crf_edge_hash(crf_edge* edge)
  * Free an allocated edge.
  */
 void free_crf_edge(crf_edge* edge) { free(edge); }
+
+/**
+ * Print out the string representation of an edge.
+ */
+void crf_edge_str(crf_edge* edge)
+{
+    printf("(%" PRIu64 " -> %" PRIu64 ")", edge->cluster_node_idx, edge->label_node_idx);
+}
+
+/**
+ * Print out the internal representation of the edge.
+ */
+void crf_edge_repr(crf_edge* edge)
+{
+    printf("(cluster_node_idx: %" PRIu64 ", label_node_idx: %" PRIu64 ")", edge->cluster_node_idx,
+           edge->label_node_idx);
+}
 
 #endif

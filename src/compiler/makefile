@@ -53,7 +53,7 @@ parser.o: parser.c parser.h object.h slot.h metaparser.h set.h vector.h slice.h 
 slice.o: slice.c slice.h vector.h utilities.h
 	clang -c -o slice.o slice.c
 
-crf.o: crf.c crf.h
+crf.o: crf.c crf.h object.h set.h slice.h slot.h metaparser.h parser.h utilities.h
 	clang -c -o crf.o crf.c
 
 bsr.o: bsr.c bsr.h
