@@ -9,11 +9,11 @@ typedef struct
 {
     uint64_t head_idx;       // key metaparser_productions
     uint64_t production_idx; // index metaparser_productions[head_idx]
-    uint64_t position;       // location of dot in item
+    uint64_t dot;            // location of dot in item
 } slot;
 
-slot slot_struct(uint64_t head_idx, uint64_t production_idx, uint64_t position);
-slot* new_slot(uint64_t head_idx, uint64_t production_idx, uint64_t position);
+slot slot_struct(uint64_t head_idx, uint64_t production_idx, uint64_t dot);
+slot* new_slot(uint64_t head_idx, uint64_t production_idx, uint64_t dot);
 obj* new_slot_obj(slot* s);
 bool slot_is_accept(slot* s);
 void slot_str(slot* s);

@@ -15,18 +15,18 @@
 /**
  * return the struct for a slot
  */
-slot slot_struct(uint64_t head_idx, uint64_t production_idx, uint64_t position)
+slot slot_struct(uint64_t head_idx, uint64_t production_idx, uint64_t dot)
 {
-    return (slot){.head_idx = head_idx, .production_idx = production_idx, .position = position};
+    return (slot){.head_idx = head_idx, .production_idx = production_idx, .dot = dot};
 }
 
 /**
  * Create a new slot.
  */
-slot* new_slot(uint64_t head_idx, uint64_t production_idx, uint64_t position)
+slot* new_slot(uint64_t head_idx, uint64_t production_idx, uint64_t dot)
 {
     slot* s = malloc(sizeof(slot));
-    *s = slot_struct(head_idx, production_idx, position);
+    *s = slot_struct(head_idx, production_idx, dot);
     return s;
 }
 
@@ -43,7 +43,7 @@ obj* new_slot_obj(slot* s)
 
 /**
  * Returns whether the slot is in an accepting state,
- * i.e. if the position is at the end of the list of body symbols.
+ * i.e. if the dot is at the end of the list of body symbols.
  * Additionally, an item is accepting if the remaining string is nullable.
  */
 bool slot_is_accept(slot* s)
@@ -51,15 +51,15 @@ bool slot_is_accept(slot* s)
     // get the body for this item
     vect* body = metaparser_get_production_body(s->head_idx, s->production_idx);
 
-    if (s->position == vect_size(body))
+    if (s->dot == vect_size(body))
     {
-        // normal accept, when position is at end of body
+        // normal accept, when dot is at end of body
         return true;
     }
     else
     {
         // check if the remaining portion of the string is nullable
-        slice remaining = slice_struct(body, s->position, vect_size(body), NULL);
+        slice remaining = slice_struct(body, s->dot, vect_size(body), NULL);
         fset* first = parser_first_of_string(&remaining);
         bool nullable = first->special;
         fset_free(first);
@@ -80,7 +80,7 @@ void slot_str(slot* s)
     printf(" -> ");
     for (size_t i = 0; i <= vect_size(body); i++)
     {
-        if (i == s->position) { printf("•"); }
+        if (i == s->dot) { printf("•"); }
         if (i == vect_size(body)) { break; };
         uint64_t* symbol_idx = vect_get(body, i)->data;
         obj* symbol = metaparser_get_symbol(*symbol_idx);
@@ -95,8 +95,8 @@ void slot_str(slot* s)
  */
 void slot_repr(slot* s)
 {
-    printf("slot{head_idx: %" PRIu64 ", production_idx: %" PRIu64 ", position: %" PRIu64 "}", s->head_idx,
-           s->production_idx, s->position);
+    printf("slot{head_idx: %" PRIu64 ", production_idx: %" PRIu64 ", dot: %" PRIu64 "}", s->head_idx, s->production_idx,
+           s->dot);
 }
 
 /**
@@ -119,7 +119,7 @@ slot* slot_copy(slot* s)
  */
 uint64_t slot_hash(slot* s)
 {
-    uint64_t components[] = {s->head_idx, s->production_idx, s->position};
+    uint64_t components[] = {s->head_idx, s->production_idx, s->dot};
 
     return hash_uint_sequence(components, sizeof(components) / sizeof(uint64_t));
 }
@@ -130,7 +130,7 @@ uint64_t slot_hash(slot* s)
 bool slot_equals(slot* left, slot* right)
 {
     return left->head_idx == right->head_idx && left->production_idx == right->production_idx &&
-           left->position == right->position;
+           left->dot == right->dot;
 }
 
 #endif

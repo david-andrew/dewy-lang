@@ -53,6 +53,12 @@ parser.o: parser.c parser.h object.h slot.h metaparser.h set.h vector.h
 slice.o: slice.c slice.h vector.h utilities.h
 	clang -c -o slice.o slice.c
 
+crf.o: crf.c crf.h
+	clang -c -o crf.o crf.c
+
+bsr.o: bsr.c bsr.h
+	clang -c -o bsr.o bsr.c
+
 unit_test.o: unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o metaast.o charset.o ustring.o metascanner.o
 	clang -o unit_test.o unit_test.c utilities.o object.o vector.o dictionary.o set.o metatoken.o metaast.o charset.o ustring.o metascanner.o -lm
 

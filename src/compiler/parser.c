@@ -90,9 +90,9 @@ void parser_generate_labels()
             vect_append(parser_labels, new_slot_obj(slot_copy(&s)));
 
             // iterate over the slot until the dot is at the end of the production
-            for (s.position = 1; s.position <= vect_size(body); s.position++)
+            for (s.dot = 1; s.dot <= vect_size(body); s.dot++)
             {
-                uint64_t* symbol_idx = vect_get(body, s.position - 1)->data;
+                uint64_t* symbol_idx = vect_get(body, s.dot - 1)->data;
                 // if the symbol before the dot is a non-terminal, add a new slot
                 if (!metaparser_is_symbol_terminal(*symbol_idx))
                 {
@@ -113,11 +113,11 @@ vect* parser_get_labels() { return parser_labels; }
  */
 void parser_handle_label(slot* label)
 {
-    // keep track of the current position in the item without modifying the original
-    uint64_t dot = label->position;
+    // keep track of the current dot in the item without modifying the original
+    uint64_t dot = label->dot;
 
     vect* body = metaparser_get_production_body(label->head_idx, label->production_idx);
-    if (label->position == 0 && vect_size(body) == 0)
+    if (label->dot == 0 && vect_size(body) == 0)
     {
         // Y.add((SubTerm(label.head, Sentence([])), cI, cI, cI))
     }
@@ -149,7 +149,7 @@ void parser_handle_label(slot* label)
         }
     }
 
-    if (label->position == vect_size(body) ||
+    if (label->dot == vect_size(body) ||
         (dot == vect_size(body) && metaparser_is_symbol_terminal(*(uint64_t*)vect_get(body, dot - 1)->data)))
     {
         // get the followset of the label head
@@ -170,11 +170,11 @@ void parser_print_label(slot* label)
     slot_str(label);
     printf("\n");
 
-    // keep track of the current position in the item without modifying the original
-    uint64_t dot = label->position;
+    // keep track of the current dot in the item without modifying the original
+    uint64_t dot = label->dot;
 
     vect* body = metaparser_get_production_body(label->head_idx, label->production_idx);
-    if (label->position == 0 && vect_size(body) == 0)
+    if (label->dot == 0 && vect_size(body) == 0)
     {
         printf("    Y.add((SubTerm(label.head, Sentence([])), cI, cI, cI))\n");
     }
@@ -216,7 +216,7 @@ void parser_print_label(slot* label)
         }
     }
 
-    if (label->position == vect_size(body) ||
+    if (label->dot == vect_size(body) ||
         (dot == vect_size(body) && metaparser_is_symbol_terminal(*(uint64_t*)vect_get(body, dot - 1)->data)))
     {
         printf("    if (I[cI] ∈ follow(");
@@ -312,13 +312,13 @@ void parser_call(slot* slot, uint64_t i, uint64_t j)
 void parser_bsr_add(slot* slot, uint64_t i, uint64_t k, uint64_t j)
 {
     vect* body = metaparser_get_production_body(slot->head_idx, slot->production_idx);
-    if (vect_size(body) == slot->position)
+    if (vect_size(body) == slot->dot)
     {
         // insert (head_idx, production_idx, i, k, j) into Y
     }
-    else if (slot->position > 1)
+    else if (slot->dot > 1)
     {
-        // slice s = slice_struct(body, 0, slot->position, NULL);
+        // slice s = slice_struct(body, 0, slot->dot, NULL);
         // insert (s, i, k, j) into Y
     }
 }
