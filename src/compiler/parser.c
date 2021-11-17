@@ -522,14 +522,16 @@ fset* parser_first_of_string(slice* string)
 }
 
 /**
- * Memoized call to first of string. Returned fset is owned by the memoizer, and should not be freed.
+ * Memoized call to first of string. Returned fset is owned by the memoizer dict, and should not be freed.
  */
 fset* parser_memo_first_of_string(slice* string)
 {
     // check if the slice is in the dictionary already
-    obj string_obj = {.type = Slice_t, .data = string};
     obj* result;
-    if ((result = dict_get(parser_substring_firsts_dict, &string_obj)) != NULL) { return result->data; }
+    if ((result = dict_get(parser_substring_firsts_dict, &(obj){.type = Slice_t, .data = string})) != NULL)
+    {
+        return result->data;
+    }
 
     // otherwise, compute the first set and add it to the dictionary
     fset* result_fset = parser_first_of_string(string);
