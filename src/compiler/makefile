@@ -1,4 +1,4 @@
-all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o metaast.o metascanner.o metaparser.o charset.o metaitem.o fset.o slice.o
+all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o metaast.o metascanner.o metaparser.o charset.o slot.o fset.o slice.o crf.o bsr.o
 
 
 #current completed step is simple lexer

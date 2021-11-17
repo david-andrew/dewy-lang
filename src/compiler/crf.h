@@ -30,4 +30,7 @@ typedef struct
     dict* forest; // map from node to vector containing indices of children
 } crf;
 
+crf* new_crf();
+void crf_free(crf* CRF);
+
 #endif

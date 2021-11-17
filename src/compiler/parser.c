@@ -19,38 +19,15 @@ vect* parser_symbol_follows; // vect containing the follow set of each symbol.
 // vect* parser_substrings;  // vect containing slices of all possible substrings
 // vect* parser_substring_firsts;
 vect* parser_labels;
-// TODO->come up with better names for these globals
-// set* P;
-// set* Y;
-// set* R;
-// set* U;
-uint32_t* I;
-uint64_t cI;
-uint64_t cU;
-// CRF* crf;
-// struct {
-//     vect* labels;
-//     set* P;
-//     set* Y;
-//     set* R;
-//     set* U;
-//     uint32_t* I;
-//     uint64_t cI;
-//     uint64_t cU;
-//     // CRF* crf;
-// } parser_context = {};
-
-// Y, U, R, I, cI, cU, crf
 
 void allocate_parser()
 {
     parser_symbol_firsts = new_vect();
     parser_symbol_follows = new_vect();
     parser_labels = new_vect();
-    // other initializations here
+    // other allocations here
 }
 
-// TODO->change this to better name
 void initialize_parser(/*uint64_t source_length*/)
 {
     parser_compute_symbol_firsts();
@@ -63,6 +40,26 @@ void release_parser()
     vect_free(parser_symbol_follows);
     vect_free(parser_labels);
     // other frees here
+}
+
+/**
+ * Create a new parser context
+ */
+parser_context* new_parser_context(uint32_t* src, uint64_t len)
+{
+    parser_context* con = malloc(sizeof(parser_context));
+    *con = (parser_context){
+        .I = src,
+        .m = len,
+        .cI = 0,
+        .cU = 0,
+        .CRF = new_crf(),
+        .P = new_set(),
+        .Y = new_set(),
+        .R = new_set(),
+        .U = new_set(),
+    };
+    return con;
 }
 
 /**
@@ -111,8 +108,13 @@ vect* parser_get_labels() { return parser_labels; }
 /**
  * perform the CNP parsing actions for the given label
  */
-void parser_handle_label(slot* label)
+void parser_handle_label(slot* label, parser_context* con)
 {
+    // pull out context variables
+    // uint32_t* I = context->I;
+    // uint64_t* cI = &context->cI; // pointer because it is modified by this function
+    // uint64_t cU = context->cU;
+
     // keep track of the current dot in the item without modifying the original
     uint64_t dot = label->dot;
 
@@ -129,12 +131,12 @@ void parser_handle_label(slot* label)
             if (dot != 0)
             {
                 slice s = slice_struct(body, dot, vect_size(body), NULL);
-                if (!parser_test_select(I[cI], label->head_idx, &s)) { return; }
+                if (!parser_test_select(con->I[con->cI], label->head_idx, &s)) { return; }
             }
             dot++;
 
-            parser_bsr_add(slot_copy(label), cU, cI, cI + 1);
-            cI++;
+            parser_bsr_add(slot_copy(label), con->cU, con->cI, con->cI + 1);
+            con->cI++;
         }
 
         if (dot < vect_size(body))
@@ -142,10 +144,10 @@ void parser_handle_label(slot* label)
             if (dot != 0)
             {
                 slice s = slice_struct(body, dot, vect_size(body), NULL);
-                if (!parser_test_select(I[cI], label->head_idx, &s)) { return; }
+                if (!parser_test_select(con->I[con->cI], label->head_idx, &s)) { return; }
             }
             dot++;
-            parser_call(slot_copy(label), cU, cI);
+            parser_call(slot_copy(label), con->cU, con->cI);
         }
     }
 
@@ -154,9 +156,9 @@ void parser_handle_label(slot* label)
     {
         // get the followset of the label head
         fset* follow = parser_follow_of_symbol(label->head_idx);
-        if (fset_contains_c(follow, I[cI]))
+        if (fset_contains_c(follow, con->I[con->cI]))
         {
-            parser_return(label->head_idx, cU, cI);
+            parser_return(label->head_idx, con->cU, con->cI);
             return;
         }
     }
@@ -231,14 +233,14 @@ void parser_print_label(slot* label)
 /**
  * TODO->what is this function for?
  */
-void parser_nt_add(uint64_t head_idx, uint64_t j)
+void parser_nt_add(uint64_t head_idx, uint64_t j, parser_context* con)
 {
     set* bodies = metaparser_get_production_bodies(head_idx);
     for (size_t production_idx = 0; production_idx < set_size(bodies); production_idx++)
     {
         vect* body = set_get_at_index(bodies, production_idx)->data;
         slice s = slice_struct(body, 0, vect_size(body), NULL);
-        if (parser_test_select(I[j], head_idx, &s)) { parser_dsc_add(&(slot){head_idx, production_idx, 0}, j, j); }
+        if (parser_test_select(con->I[j], head_idx, &s)) { parser_dsc_add(&(slot){head_idx, production_idx, 0}, j, j); }
     }
 }
 
