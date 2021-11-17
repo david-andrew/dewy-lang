@@ -58,6 +58,7 @@ vect* parser_get_symbol_firsts();
 vect* parser_get_symbol_follows();
 fset* parser_first_of_symbol(uint64_t symbol_idx);
 fset* parser_first_of_string(slice* string);
+fset* parser_memo_first_of_string(slice* string);
 fset* parser_follow_of_symbol(uint64_t symbol_idx);
 void parser_print_body_slice(slice* body);
 void parser_print_body(vect* body);

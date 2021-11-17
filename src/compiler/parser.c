@@ -17,13 +17,14 @@
 vect* parser_symbol_firsts;  // vect containing the first set of each symbol.
 vect* parser_symbol_follows; // vect containing the follow set of each symbol.
 // vect* parser_substrings;  // vect containing slices of all possible substrings
-// vect* parser_substring_firsts;
+dict* parser_substring_firsts_dict; // dict<slice, fset> which memoizes the first set of a substring
 vect* parser_labels;
 
 void allocate_parser()
 {
     parser_symbol_firsts = new_vect();
     parser_symbol_follows = new_vect();
+    parser_substring_firsts_dict = new_dict();
     parser_labels = new_vect();
     // other allocations here
 }
@@ -38,6 +39,7 @@ void release_parser()
 {
     vect_free(parser_symbol_firsts);
     vect_free(parser_symbol_follows);
+    dict_free(parser_substring_firsts_dict);
     vect_free(parser_labels);
     // other frees here
 }
@@ -262,19 +264,15 @@ void parser_nt_add(uint64_t head_idx, uint64_t j, parser_context* con)
  */
 bool parser_test_select(uint32_t c, uint64_t head_idx, slice* string)
 {
-    fset* first = parser_first_of_string(string);
-    bool result = false;
-    if (fset_contains_c(first, c)) { result = true; }
+    fset* first = parser_memo_first_of_string(string);
+    if (fset_contains_c(first, c)) { return true; }
     else if (first->special)
     {
         fset* follow = parser_follow_of_symbol(head_idx);
-        if (fset_contains_c(follow, c)) { result = true; }
+        if (fset_contains_c(follow, c)) { return true; }
     }
 
-    // free fset allocated by first of string
-    fset_free(first); // TODO->allocate all of these so that fset of string can return an owned fset
-                      // e.g. have first_of_string_memoized() which can only return strings seen in first_of_string()
-    return result;
+    return false;
 }
 
 /**
@@ -521,6 +519,23 @@ fset* parser_first_of_string(slice* string)
     }
 
     return result;
+}
+
+/**
+ * Memoized call to first of string. Returned fset is owned by the memoizer, and should not be freed.
+ */
+fset* parser_memo_first_of_string(slice* string)
+{
+    // check if the slice is in the dictionary already
+    obj string_obj = {.type = Slice_t, .data = string};
+    obj* result;
+    if ((result = dict_get(parser_substring_firsts_dict, &string_obj)) != NULL) { return result->data; }
+
+    // otherwise, compute the first set and add it to the dictionary
+    fset* result_fset = parser_first_of_string(string);
+    dict_set(parser_substring_firsts_dict, new_slice_obj(slice_copy(string)), new_fset_obj(result_fset));
+
+    return result_fset;
 }
 
 /**
