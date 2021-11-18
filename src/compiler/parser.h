@@ -34,8 +34,8 @@ typedef struct
 void allocate_parser();
 void initialize_parser();
 void release_parser();
-parser_context* new_parser_context(uint32_t* src, uint64_t len, uint64_t start_idx, bool whole_input);
-void parser_context_free(parser_context* con);
+parser_context parser_context_struct(uint32_t* src, uint64_t len, uint64_t start_idx, bool whole_input);
+void release_parser_context(parser_context* con);
 bool parser_parse(parser_context* con);
 
 // internal helper functions for running the parser

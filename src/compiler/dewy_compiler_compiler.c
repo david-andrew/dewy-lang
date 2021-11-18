@@ -227,33 +227,33 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
 
     // parse the input
     uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
-    parser_context* context = new_parser_context(source, length, start_symbol_idx, true);
-    bool success = parser_parse(context);
+    parser_context context = parser_context_struct(source, length, start_symbol_idx, true);
+    bool success = parser_parse(&context);
     printf(success ? "parse succeeded\n" : "parse failed\n");
 
     // print out the results of compilation
     if (crf)
     {
         printf("CRF OUTPUT:\n");
-        crf_str(context->CRF);
+        crf_str(context.CRF);
         printf("\n\n");
     }
 
     if (bsr)
     {
         // printf("BSR OUTPUT:\n");
-        // bsr_str(context->BSR);
+        // bsr_str(context.BSR);
         // printf("\n\n");
     }
 
     if (ast)
     {
         // printf("AST OUTPUT:\n");
-        // print_sppf_from_bsr(context->BSR);
+        // print_sppf_from_bsr(context.BSR);
         // printf("\n\n");
     }
 
-    parser_context_free(context);
+    release_parser_context(&context);
 
     return true;
 

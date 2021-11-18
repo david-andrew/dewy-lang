@@ -58,10 +58,9 @@ void release_parser()
 /**
  * Create a new parser context
  */
-parser_context* new_parser_context(uint32_t* src, uint64_t len, uint64_t start_idx, bool whole_input)
+inline parser_context parser_context_struct(uint32_t* src, uint64_t len, uint64_t start_idx, bool whole_input)
 {
-    parser_context* con = malloc(sizeof(parser_context));
-    *con = (parser_context){
+    parser_context con = (parser_context){
         .I = src,
         .m = len,
         .cI = 0,
@@ -79,9 +78,9 @@ parser_context* new_parser_context(uint32_t* src, uint64_t len, uint64_t start_i
 }
 
 /**
- * Free a parser context
+ * Free the allocated structures in a parser context
  */
-void parser_context_free(parser_context* con)
+void release_parser_context(parser_context* con)
 {
     crf_free(con->CRF);
     set_free(con->P);
@@ -89,7 +88,6 @@ void parser_context_free(parser_context* con)
     vect_free(con->R);
     set_free(con->U);
     set_free(con->results);
-    free(con);
 }
 
 /**
