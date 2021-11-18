@@ -18,9 +18,8 @@ crf* new_crf()
 {
     crf* CRF = malloc(sizeof(crf));
     *CRF = (crf){
-        .cluster_nodes = new_set(),
+        .cluster_nodes = new_dict(),
         .label_nodes = new_set(),
-        .edges = new_set(),
     };
     return CRF;
 }
@@ -30,9 +29,8 @@ crf* new_crf()
  */
 void crf_free(crf* CRF)
 {
-    set_free(CRF->cluster_nodes);
+    dict_free(CRF->cluster_nodes);
     set_free(CRF->label_nodes);
-    set_free(CRF->edges);
     free(CRF);
 }
 
@@ -42,16 +40,23 @@ void crf_free(crf* CRF)
 void crf_str(crf* CRF)
 {
     printf("CRF: [\n");
-    for (size_t i = 0; i < set_size(CRF->edges); i++)
+    for (size_t i = 0; i < dict_size(CRF->cluster_nodes); i++)
     {
-        crf_edge* edge = set_get_at_index(CRF->edges, i)->data;
-        crf_cluster_node* cluster_node = set_get_at_index(CRF->cluster_nodes, edge->cluster_node_idx)->data;
-        crf_label_node* label_node = set_get_at_index(CRF->label_nodes, edge->label_node_idx)->data;
+        obj cluster_node_obj, children_indices_obj;
+        dict_get_at_index(CRF->cluster_nodes, i, &cluster_node_obj, &children_indices_obj);
+        crf_cluster_node* cluster_node = cluster_node_obj.data;
         printf("    ");
         crf_cluster_node_str(cluster_node);
         printf(" -> ");
-        crf_label_node_str(label_node);
-        printf("\n");
+        vect* children_indices = children_indices_obj.data;
+        for (size_t j = 0; j < vect_size(children_indices); j++)
+        {
+            uint64_t* child_idx = vect_get(children_indices, j)->data;
+            crf_label_node* child_node = set_get_at_index(CRF->label_nodes, *child_idx)->data;
+            printf(j == 0 ? "" : "        ");
+            crf_label_node_str(child_node);
+            printf("\n");
+        }
     }
     printf("]\n");
 }
@@ -107,7 +112,7 @@ bool crf_cluster_node_equals(crf_cluster_node* left, crf_cluster_node* right)
 /**
  * Free an allocated cluster node.
  */
-void free_crf_cluster_node(crf_cluster_node* node) { free(node); }
+void crf_cluster_node_free(crf_cluster_node* node) { free(node); }
 
 /**
  * Print out the string representation of a cluster node.
@@ -180,7 +185,7 @@ uint64_t crf_label_node_hash(crf_label_node* node)
 /**
  * Free an allocated label node.
  */
-void free_crf_label_node(crf_label_node* node) { free(node); }
+void crf_label_node_free(crf_label_node* node) { free(node); }
 
 /**
  * Print out the string representation of a label node.
@@ -200,76 +205,6 @@ void crf_label_node_repr(crf_label_node* node)
     printf("(label: ");
     slot_repr(&node->label);
     printf(", j: %" PRIu64 ")", node->j);
-}
-
-/**
- * Create a new edge.
- */
-crf_edge* crf_new_edge(uint64_t cluster_node_idx, uint64_t label_node_idx)
-{
-    crf_edge* edge = malloc(sizeof(crf_edge));
-    *edge = crf_edge_struct(cluster_node_idx, label_node_idx);
-    return edge;
-}
-
-/**
- * Return a stack allocated struct for an edge.
- */
-crf_edge crf_edge_struct(uint64_t cluster_node_idx, uint64_t label_node_idx)
-{
-    return (crf_edge){
-        .cluster_node_idx = cluster_node_idx,
-        .label_node_idx = label_node_idx,
-    };
-}
-
-/**
- * Return an object wrapped edge.
- */
-obj* crf_edge_obj(crf_edge* edge)
-{
-    obj* E = malloc(sizeof(obj));
-    *E = obj_struct(CRFEdge_t, edge);
-    return E;
-}
-
-/**
- * Determine if two edges are equal.
- */
-bool crf_edge_equals(crf_edge* left, crf_edge* right)
-{
-    return left->cluster_node_idx == right->cluster_node_idx && left->label_node_idx == right->label_node_idx;
-}
-
-/**
- * return the hash value of an edge.
- */
-uint64_t crf_edge_hash(crf_edge* edge)
-{
-    uint64_t seq[] = {edge->cluster_node_idx, edge->label_node_idx};
-    return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
-}
-
-/**
- * Free an allocated edge.
- */
-void free_crf_edge(crf_edge* edge) { free(edge); }
-
-/**
- * Print out the string representation of an edge.
- */
-void crf_edge_str(crf_edge* edge)
-{
-    printf("(%" PRIu64 " -> %" PRIu64 ")", edge->cluster_node_idx, edge->label_node_idx);
-}
-
-/**
- * Print out the internal representation of the edge.
- */
-void crf_edge_repr(crf_edge* edge)
-{
-    printf("(cluster_node_idx: %" PRIu64 ", label_node_idx: %" PRIu64 ")", edge->cluster_node_idx,
-           edge->label_node_idx);
 }
 
 #endif

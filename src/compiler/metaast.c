@@ -8,7 +8,6 @@
 #include <string.h>
 
 #include "metaast.h"
-#include "metatoken.h"
 #include "ustring.h"
 #include "utilities.h"
 

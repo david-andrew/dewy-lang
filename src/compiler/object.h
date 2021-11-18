@@ -27,10 +27,10 @@ typedef enum
     FSet_t,
     CRFClusterNode_t,
     CRFLabelNode_t,
-    CRFEdge_t,
     Vector_t,
     Dictionary_t,
     Set_t,
+    ObjectTypesCount // count how many types of object there are
 } obj_type;
 
 /**

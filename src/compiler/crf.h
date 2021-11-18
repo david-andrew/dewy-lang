@@ -25,15 +25,8 @@ typedef struct
 
 typedef struct
 {
-    uint64_t cluster_node_idx;
-    uint64_t label_node_idx;
-} crf_edge;
-
-typedef struct
-{
-    set* cluster_nodes; // set<cluster_nodes>
-    set* label_nodes;   // set<label_nodes>
-    set* edges;         // set<edge>
+    dict* cluster_nodes; // dict<cluster_nodes, vect<children_indices>>
+    set* label_nodes;    // set<label_nodes>
 } crf;
 
 crf* new_crf();
@@ -44,7 +37,7 @@ crf_cluster_node crf_cluster_node_struct(uint64_t head_idx, uint64_t j);
 obj* crf_cluster_node_obj(crf_cluster_node* node);
 bool crf_cluster_node_equals(crf_cluster_node* left, crf_cluster_node* right);
 uint64_t crf_cluster_node_hash(crf_cluster_node* node);
-void free_crf_cluster_node(crf_cluster_node* node);
+void crf_cluster_node_free(crf_cluster_node* node);
 void crf_cluster_node_str(crf_cluster_node* node);
 void crf_cluster_node_repr(crf_cluster_node* node);
 crf_label_node* crf_new_label_node(slot label, uint64_t j);
@@ -52,16 +45,8 @@ crf_label_node crf_label_node_struct(slot label, uint64_t j);
 obj* crf_label_node_obj(crf_label_node* node);
 bool crf_label_node_equals(crf_label_node* left, crf_label_node* right);
 uint64_t crf_label_node_hash(crf_label_node* node);
-void free_crf_label_node(crf_label_node* node);
+void crf_label_node_free(crf_label_node* node);
 void crf_label_node_str(crf_label_node* node);
 void crf_label_node_repr(crf_label_node* node);
-crf_edge* crf_new_edge(uint64_t cluster_node_idx, uint64_t label_node_idx);
-crf_edge crf_edge_struct(uint64_t cluster_node_idx, uint64_t label_node_idx);
-obj* crf_edge_obj(crf_edge* edge);
-bool crf_edge_equals(crf_edge* left, crf_edge* right);
-uint64_t crf_edge_hash(crf_edge* edge);
-void free_crf_edge(crf_edge* edge);
-void crf_edge_str(crf_edge* edge);
-void crf_edge_repr(crf_edge* edge);
 
 #endif

@@ -35,7 +35,7 @@ ustring.o: ustring.c ustring.h object.h utilities.h metascanner.h
 slot.o: slot.c slot.h object.h set.h metaparser.h slice.h fset.h utilities.h
 	clang -c -o slot.o slot.c
 
-metaast.o: metaast.c metaast.h vector.h charset.h metatoken.h utilities.h ustring.h
+metaast.o: metaast.c metaast.h charset.h metatoken.h object.h set.h vector.h ustring.h utilities.h
 	clang -c -o metaast.o metaast.c
 
 metascanner.o: metascanner.c metascanner.h object.h vector.h metatoken.h utilities.h ustring.h 
