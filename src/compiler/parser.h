@@ -18,7 +18,7 @@ typedef struct
 {
     set* P;      //
     set* Y;      // set<bsr>
-    set* R;      //
+    vect* R;     // list of pending descriptors to handle. vect<(slot*, k, j)>
     set* U;      //
     crf* CRF;    // Call Return Forest
     uint32_t* I; // input source (null terminated)
@@ -27,13 +27,20 @@ typedef struct
     uint64_t cU; // TBD
 } parser_context;
 
+typedef struct
+{
+    slot L;
+    uint64_t k;
+    uint64_t j;
+} desc;
+
 // top level functions used by the main program
 void allocate_parser();
 void initialize_parser();
 void release_parser();
 parser_context* new_parser_context(uint32_t* src, uint64_t len);
 void parser_context_free(parser_context* con);
-void parser_parse(parser_context* con);
+bool parser_parse(parser_context* con);
 
 // internal helper functions for running the parser
 void parser_generate_labels();

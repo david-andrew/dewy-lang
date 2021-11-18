@@ -69,7 +69,7 @@ parser_context* new_parser_context(uint32_t* src, uint64_t len)
         .CRF = new_crf(),
         .P = new_set(),
         .Y = new_set(),
-        .R = new_set(),
+        .R = new_vect(),
         .U = new_set(),
     };
     return con;
@@ -83,7 +83,7 @@ void parser_context_free(parser_context* con)
     crf_free(con->CRF);
     set_free(con->P);
     set_free(con->Y);
-    set_free(con->R);
+    vect_free(con->R);
     set_free(con->U);
     free(con);
 }
@@ -91,12 +91,25 @@ void parser_context_free(parser_context* con)
 /**
  * Parse a given source string.
  */
-void parser_parse(parser_context* con)
+bool parser_parse(parser_context* con)
 {
     uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
     crf_cluster_node* u0 = crf_new_cluster_node(start_symbol_idx, 0);
     uint64_t node_idx = crf_add_cluster_node(con->CRF, u0);
     parser_nt_add(start_symbol_idx, 0, con);
+
+    while (vect_size(con->R) > 0)
+    {
+        // remove a descriptor (L,k,j) from R
+        desc* d = obj_free_keep_inner(vect_dequeue(con->R), Descriptor_t); // depth first parse
+        // desc* d = obj_free_keep_inner(vect_pop(con->R), Descriptor_t);  // (alternative) breadth first parse
+        con->cU = d->k;
+        con->cI = d->j;
+        parser_handle_label(&d->L, con);
+        // parser_desc_free(d);
+    }
+    // if (for some α and l, (S ::= α, 0, l, m) ∈ Υ) { report success }
+    // else { report failure }
 }
 
 /**
