@@ -25,7 +25,7 @@ typedef struct
 
 typedef struct
 {
-    dict* cluster_nodes; // dict<cluster_nodes, vect<children_indices>>
+    dict* cluster_nodes; // dict<cluster_nodes, set<children_indices>>
     set* label_nodes;    // set<label_nodes>
 } crf;
 

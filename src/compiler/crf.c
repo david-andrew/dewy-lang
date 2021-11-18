@@ -48,10 +48,10 @@ void crf_str(crf* CRF)
         printf("    ");
         crf_cluster_node_str(cluster_node);
         printf(" -> ");
-        vect* children_indices = children_indices_obj.data;
-        for (size_t j = 0; j < vect_size(children_indices); j++)
+        set* children_indices = children_indices_obj.data;
+        for (size_t j = 0; j < set_size(children_indices); j++)
         {
-            uint64_t* child_idx = vect_get(children_indices, j)->data;
+            uint64_t* child_idx = set_get_at_index(children_indices, j)->data;
             crf_label_node* child_node = set_get_at_index(CRF->label_nodes, *child_idx)->data;
             printf(j == 0 ? "" : "        ");
             crf_label_node_str(child_node);
