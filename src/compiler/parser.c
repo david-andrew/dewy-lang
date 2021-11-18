@@ -103,15 +103,14 @@ bool parser_parse(parser_context* con, bool whole)
     while (vect_size(con->R) > 0)
     {
         // remove a descriptor (L,k,j) from R. Descriptors are owned by U, so no need to free in here.
-        desc* d = obj_free_keep_inner(vect_dequeue(con->R), Descriptor_t); // depth first parse
-        // parser_desc* d = obj_free_keep_inner(vect_pop(con->R), Descriptor_t);  // (alternative) breadth first parse
+        desc* d = vect_dequeue(con->R)->data; // depth first parse
+        // desc* d = vect_pop(con->R)->data;  // (alternative) breadth first parse
         con->cU = d->k;
         con->cI = d->j;
         parser_handle_label(&d->L, con);
     }
-    // probably save a separate set of BSRs that are successful
-    // if (for some α and l, (S ::= α, 0, l, m) ∈ Υ) { return true; }
-    // else { return false; }
+    // if (set_size(con->roots) > 0) { return true } //if for some α and l, (S ::= α, 0, l, m) ∈ Υ, report success
+    // else { return false }
     return false;
 }
 
@@ -183,7 +182,7 @@ void parser_handle_label(slot* label, parser_context* con)
             }
             dot++;
 
-            parser_bsr_add(slot_copy(label), con->cU, con->cI, con->cI + 1, con);
+            parser_bsr_add(label, con->cU, con->cI, con->cI + 1, con);
             con->cI++;
         }
 
@@ -195,7 +194,7 @@ void parser_handle_label(slot* label, parser_context* con)
                 if (!parser_test_select(con->I[con->cI], label->head_idx, &s)) { return; }
             }
             dot++;
-            parser_call(slot_copy(label), con->cU, con->cI, con);
+            parser_call(label, con->cU, con->cI, con);
         }
     }
 
@@ -324,7 +323,7 @@ void parser_descriptor_add(slot* L, uint64_t k, uint64_t j, parser_context* con)
         desc* new_d = new_desc(L, k, j);
         obj* new_D = new_desc_obj(new_d);
         set_add(con->U, new_D);
-        // vect_enqueue(con->R, new_D); // new_D is owned by U, so when dequeued, it does not need to be freed
+        vect_enqueue(con->R, new_D); // new_D is owned by U, so when dequeued, it does not need to be freed
     }
 }
 
