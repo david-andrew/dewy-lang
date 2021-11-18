@@ -32,7 +32,7 @@ int main(int argc, char* argv[])
                " -s scanner\n"
                " -m (meta)ast\n"
                " -p parser CFG\n"
-               " -g grammar first/follow sets\n"
+               " -f first/follow sets\n"
                " -l grammar labels\n"
                " -c Call Return Forest\n"
                " -b Binary Subtree Representation"
@@ -55,7 +55,7 @@ int main(int argc, char* argv[])
     match_argv(scanner, -s);
     match_argv(mast, -m);
     match_argv(parser, -p);
-    match_argv(grammar, -g);
+    match_argv(fsets, -f);
     match_argv(labels, -l);
     match_argv(crf, -c);
     match_argv(bsr, -b);
@@ -63,12 +63,12 @@ int main(int argc, char* argv[])
     match_argv(verbose, --verbose);
 
     // if no sections specified, run all of them
-    if (!(scanner || mast || parser || grammar || labels || crf || bsr || ast))
+    if (!(scanner || mast || parser || fsets || labels || crf || bsr || ast))
     {
         scanner = true;
         mast = true;
         parser = true;
-        grammar = true;
+        fsets = true;
         labels = true;
         crf = true;
         bsr = true;
@@ -80,10 +80,10 @@ int main(int argc, char* argv[])
     allocate_metaparser();
     allocate_parser();
 
-    if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, parser, grammar)) { goto cleanup; }
+    if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, parser)) { goto cleanup; }
 
     initialize_parser();
-    if (!run_compiler(input_source, input_size, labels, crf, bsr, ast, verbose)) { goto cleanup; }
+    if (!run_compiler(input_source, input_size, fsets, labels, crf, bsr, ast, verbose)) { goto cleanup; }
 
 cleanup:
     free(grammar_source);
@@ -103,7 +103,7 @@ cleanup:
  * corresponding bool is true. If verbose is true, print out more structure info.
  * returns whether or not compiler_compiler step completed successfully
  */
-bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, bool parser, bool grammar)
+bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, bool parser)
 {
     vect* tokens = new_vect();
     obj* t = NULL;
@@ -184,16 +184,6 @@ bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, 
         printf("\n\n");
     }
 
-    // GRAMMAR FIRST/FOLLOW SET STEP
-    if (grammar)
-    {
-        printf("GRAMMAR FIRST SETS:\n");
-        print_grammar_first_sets();
-        printf("GRAMMAR FOLLOW SETS:\n");
-        print_grammar_follow_sets();
-        printf("\n\n");
-    }
-
     // SRNGLR TABLE: print out the generated srnglr table for the grammar
     // if (table)
     // {
@@ -208,8 +198,18 @@ bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, 
 /**
  * Parse the input file according to the input grammar.
  */
-bool run_compiler(uint32_t* source, size_t length, bool labels, bool crf, bool bsr, bool ast, bool verbose)
+bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool crf, bool bsr, bool ast, bool verbose)
 {
+    // GRAMMAR FIRST/FOLLOW SET STEP
+    if (fsets)
+    {
+        printf("GRAMMAR FIRST SETS:\n");
+        print_grammar_first_sets();
+        printf("GRAMMAR FOLLOW SETS:\n");
+        print_grammar_follow_sets();
+        printf("\n\n");
+    }
+
     parser_generate_labels();
 
     if (labels)

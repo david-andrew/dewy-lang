@@ -133,7 +133,8 @@ bool fset_contains_c(fset* s, uint32_t c)
 {
     for (size_t i = 0; i < set_size(s->terminals); i++)
     {
-        charset* symbol = set_get_at_index(s->terminals, i)->data;
+        uint64_t* symbol_idx = set_get_at_index(s->terminals, i)->data;
+        charset* symbol = metaparser_get_symbol(*symbol_idx)->data;
         if (charset_contains_c(symbol, c) || (c == 0 && s->special)) { return true; }
     }
     return false;

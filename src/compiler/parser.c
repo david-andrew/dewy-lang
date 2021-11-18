@@ -1,9 +1,9 @@
 #ifndef PARSER_C
 #define PARSER_C
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
-// #include <inttypes.h> // for PRIu64
 
 #include "charset.h"
 #include "metaparser.h"
@@ -268,11 +268,15 @@ void parser_print_label(slot* label)
 void parser_nt_add(uint64_t head_idx, uint64_t j, parser_context* con)
 {
     set* bodies = metaparser_get_production_bodies(head_idx);
-    for (size_t production_idx = 0; production_idx < set_size(bodies); production_idx++)
+    for (size_t body_idx = 0; body_idx < set_size(bodies); body_idx++)
     {
-        vect* body = set_get_at_index(bodies, production_idx)->data;
+        uint64_t* production_idx = set_get_at_index(bodies, body_idx)->data;
+        vect* body = metaparser_get_production_body(head_idx, body_idx);
         slice s = slice_struct(body, 0, vect_size(body), NULL);
-        if (parser_test_select(con->I[j], head_idx, &s)) { parser_dsc_add(&(slot){head_idx, production_idx, 0}, j, j); }
+        if (parser_test_select(con->I[j], head_idx, &s))
+        {
+            parser_dsc_add(&(slot){head_idx, *production_idx, 0}, j, j);
+        }
     }
 }
 
