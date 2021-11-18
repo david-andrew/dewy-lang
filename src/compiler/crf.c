@@ -219,4 +219,71 @@ void crf_label_node_repr(crf_label_node* node)
     printf(", j: %" PRIu64 ")", node->j);
 }
 
+/**
+ * Create a new crf action tuple.
+ */
+crf_action* crf_new_action(uint64_t head_idx, uint64_t k, uint64_t j)
+{
+    crf_action* action = malloc(sizeof(crf_action));
+    *action = crf_action_struct(head_idx, k, j);
+    return action;
+}
+
+/**
+ * return a crf action struct
+ */
+inline crf_action crf_action_struct(uint64_t head_idx, uint64_t k, uint64_t j)
+{
+    return (crf_action){
+        .head_idx = head_idx,
+        .k = k,
+        .j = j,
+    };
+}
+
+/**
+ * return an object wrapped crf action.
+ */
+obj* crf_action_obj(crf_action* action) { return new_obj(CRFAction_t, action); }
+
+/**
+ * Determine if two crf actions are equal.
+ */
+bool crf_action_equals(crf_action* left, crf_action* right)
+{
+    return left->head_idx == right->head_idx && left->k == right->k && left->j == right->j;
+}
+
+/**
+ * return the hash value of a crf action.
+ */
+uint64_t crf_action_hash(crf_action* action)
+{
+    uint64_t seq[] = {action->head_idx, action->k, action->j};
+    return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
+}
+
+/**
+ * Free an allocated crf action.
+ */
+void crf_action_free(crf_action* action) { free(action); }
+
+/**
+ * Print out the string representation of a crf action.
+ */
+void crf_action_str(crf_action* action)
+{
+    printf("(");
+    obj_str(metaparser_get_symbol(action->head_idx));
+    printf(", %" PRIu64 ", %" PRIu64 ")", action->k, action->j);
+}
+
+/**
+ * Print out the internal representation of the crf action.
+ */
+void crf_action_repr(crf_action* action)
+{
+    printf("(head_idx: %" PRIu64 ", k: %" PRIu64 ", j: %" PRIu64 ")", action->head_idx, action->k, action->j);
+}
+
 #endif

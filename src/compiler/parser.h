@@ -27,13 +27,6 @@ typedef struct
     uint64_t cU; // TBD
 } parser_context;
 
-typedef struct
-{
-    uint64_t head_idx;
-    uint64_t k;
-    uint64_t j;
-} crf_action;
-
 // top level functions used by the main program
 void allocate_parser();
 void initialize_parser();

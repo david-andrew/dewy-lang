@@ -29,6 +29,13 @@ typedef struct
     set* label_nodes;    // set<label_nodes>
 } crf;
 
+typedef struct
+{
+    uint64_t head_idx;
+    uint64_t k;
+    uint64_t j;
+} crf_action;
+
 crf* new_crf();
 void crf_free(crf* CRF);
 void crf_str(crf* CRF);
@@ -50,5 +57,13 @@ uint64_t crf_label_node_hash(crf_label_node* node);
 void crf_label_node_free(crf_label_node* node);
 void crf_label_node_str(crf_label_node* node);
 void crf_label_node_repr(crf_label_node* node);
+crf_action* crf_new_action(uint64_t head_idx, uint64_t k, uint64_t j);
+crf_action crf_action_struct(uint64_t head_idx, uint64_t k, uint64_t j);
+obj* crf_action_obj(crf_action* action);
+bool crf_action_equals(crf_action* left, crf_action* right);
+uint64_t crf_action_hash(crf_action* action);
+void crf_action_free(crf_action* action);
+void crf_action_str(crf_action* action);
+void crf_action_repr(crf_action* action);
 
 #endif
