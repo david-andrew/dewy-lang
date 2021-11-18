@@ -8,7 +8,7 @@
 #include "vector.h"
 
 bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, bool parser, bool grammar);
-bool run_compiler(uint32_t* source, bool labels, bool forest);
+bool run_compiler(uint32_t* source, size_t length, bool labels, bool forest);
 void print_scanner(vect* tokens, bool verbose);
 void print_ast(uint64_t head_idx, metaast* body_ast, bool verbose);
 void print_parser(bool verbose);

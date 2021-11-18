@@ -33,7 +33,7 @@ void initialize_parser();
 void release_parser();
 parser_context* new_parser_context(uint32_t* src, uint64_t len);
 void parser_context_free(parser_context* con);
-void parse(uint32_t* src);
+void parser_parse(parser_context* con);
 
 // internal helper functions for running the parser
 void parser_generate_labels();

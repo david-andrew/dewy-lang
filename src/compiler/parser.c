@@ -9,32 +9,43 @@
 #include "metaparser.h"
 #include "parser.h"
 #include "set.h"
+#include "ustring.h"
 
 /**
  * Global data structures used by the parser
  * Slots are a head ::= rule, with a dot starting the rule, or following a non-terminals)
  */
-vect* parser_symbol_firsts;  // vect containing the first set of each symbol.
-vect* parser_symbol_follows; // vect containing the follow set of each symbol.
-// vect* parser_substrings;  // vect containing slices of all possible substrings
+vect* parser_symbol_firsts;         // vect containing the first set of each symbol.
+vect* parser_symbol_follows;        // vect containing the follow set of each symbol.
 dict* parser_substring_firsts_dict; // dict<slice, fset> which memoizes the first set of a substring
 vect* parser_labels;
 
+/**
+ * Allocate global data structures used by the parser
+ */
 void allocate_parser()
 {
     parser_symbol_firsts = new_vect();
     parser_symbol_follows = new_vect();
     parser_substring_firsts_dict = new_dict();
     parser_labels = new_vect();
-    // other allocations here
 }
 
+/**
+ * Initialize any global data structures used by the parser.
+ *
+ * Note: this function should only be run after the complete_metaparser()
+ * has been called on a successful metaparse of a grammar.
+ */
 void initialize_parser(/*uint64_t source_length*/)
 {
     parser_compute_symbol_firsts();
     parser_compute_symbol_follows();
 }
 
+/**
+ * Free any global data structures used by the parser.
+ */
 void release_parser()
 {
     vect_free(parser_symbol_firsts);
@@ -75,6 +86,18 @@ void parser_context_free(parser_context* con)
     set_free(con->R);
     set_free(con->U);
     free(con);
+}
+
+/**
+ * Parse a given source string.
+ */
+void parser_parse(parser_context* con)
+{
+    // TODO: implement
+    printf("parser_parse() not implemented yet\n");
+    printf("source string: \"");
+    ustring_str(con->I);
+    printf("\"\n");
 }
 
 /**
@@ -125,11 +148,6 @@ vect* parser_get_labels() { return parser_labels; }
  */
 void parser_handle_label(slot* label, parser_context* con)
 {
-    // pull out context variables
-    // uint32_t* I = context->I;
-    // uint64_t* cI = &context->cI; // pointer because it is modified by this function
-    // uint64_t cU = context->cU;
-
     // keep track of the current dot in the item without modifying the original
     uint64_t dot = label->dot;
 

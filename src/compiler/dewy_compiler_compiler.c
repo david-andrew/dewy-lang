@@ -81,7 +81,7 @@ int main(int argc, char* argv[])
     if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, parser, grammar)) { goto cleanup; }
 
     initialize_parser();
-    if (!run_compiler(input_source, labels, forest)) { goto cleanup; }
+    if (!run_compiler(input_source, input_size, labels, forest)) { goto cleanup; }
 
 cleanup:
     free(grammar_source);
@@ -206,7 +206,7 @@ bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, 
 /**
  * Parse the input file according to the input grammar.
  */
-bool run_compiler(uint32_t* source, bool labels, bool forest)
+bool run_compiler(uint32_t* source, size_t length, bool labels, bool forest)
 {
     parser_generate_labels();
 
@@ -222,6 +222,12 @@ bool run_compiler(uint32_t* source, bool labels, bool forest)
         }
         printf("\n\n");
     }
+
+    // parse the input
+    parser_context* context = new_parser_context(source, length);
+    parser_parse(context);
+
+    parser_context_free(context);
 
     return true;
 
