@@ -34,9 +34,8 @@ int main(int argc, char* argv[])
                " -p parser CFG\n"
                " -g grammar first/follow sets\n"
                " -l grammar labels\n"
-               //    " -b Binary Subtree Representation BSR\n"
-               //    " -c Call Return Forest (CRF)\n"
-               " -f parse forest\n"
+               " -c Call Return Forest\n"
+               " -b Binary Subtree Representation"
                " -a ast\n"
                " --verbose prints out repr instead of str\n");
         return 1;
@@ -58,19 +57,22 @@ int main(int argc, char* argv[])
     match_argv(parser, -p);
     match_argv(grammar, -g);
     match_argv(labels, -l);
-    // match_argv(compile, -c);
-    match_argv(forest, -f);
+    match_argv(crf, -c);
+    match_argv(bsr, -b);
+    match_argv(ast, -a);
     match_argv(verbose, --verbose);
 
     // if no sections specified, run all of them
-    if (!(scanner || mast || parser || grammar || labels || forest))
+    if (!(scanner || mast || parser || grammar || labels || crf || bsr || ast))
     {
         scanner = true;
         mast = true;
         parser = true;
         grammar = true;
         labels = true;
-        forest = true;
+        crf = true;
+        bsr = true;
+        ast = true;
     }
 
     // set up structures for the sequence of scanning/parsing
@@ -81,7 +83,7 @@ int main(int argc, char* argv[])
     if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, parser, grammar)) { goto cleanup; }
 
     initialize_parser();
-    if (!run_compiler(input_source, input_size, labels, forest)) { goto cleanup; }
+    if (!run_compiler(input_source, input_size, labels, crf, bsr, ast, verbose)) { goto cleanup; }
 
 cleanup:
     free(grammar_source);
@@ -206,7 +208,7 @@ bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, 
 /**
  * Parse the input file according to the input grammar.
  */
-bool run_compiler(uint32_t* source, size_t length, bool labels, bool forest)
+bool run_compiler(uint32_t* source, size_t length, bool labels, bool crf, bool bsr, bool ast, bool verbose)
 {
     parser_generate_labels();
 
@@ -226,6 +228,28 @@ bool run_compiler(uint32_t* source, size_t length, bool labels, bool forest)
     // parse the input
     parser_context* context = new_parser_context(source, length);
     parser_parse(context);
+
+    // print out the results of compilation
+    if (crf)
+    {
+        printf("CRF OUTPUT:\n");
+        crf_str(context->CRF);
+        printf("\n\n");
+    }
+
+    if (bsr)
+    {
+        // printf("BSR OUTPUT:\n");
+        // bsr_str(context->BSR);
+        // printf("\n\n");
+    }
+
+    if (ast)
+    {
+        // printf("AST OUTPUT:\n");
+        // print_sppf_from_bsr(context->BSR);
+        // printf("\n\n");
+    }
 
     parser_context_free(context);
 
