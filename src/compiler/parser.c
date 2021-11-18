@@ -183,7 +183,7 @@ void parser_handle_label(slot* label, parser_context* con)
             }
             dot++;
 
-            parser_bsr_add(slot_copy(label), con->cU, con->cI, con->cI + 1);
+            parser_bsr_add(slot_copy(label), con->cU, con->cI, con->cI + 1, con);
             con->cI++;
         }
 
@@ -195,7 +195,7 @@ void parser_handle_label(slot* label, parser_context* con)
                 if (!parser_test_select(con->I[con->cI], label->head_idx, &s)) { return; }
             }
             dot++;
-            parser_call(slot_copy(label), con->cU, con->cI);
+            parser_call(slot_copy(label), con->cU, con->cI, con);
         }
     }
 
@@ -206,7 +206,7 @@ void parser_handle_label(slot* label, parser_context* con)
         fset* follow = parser_follow_of_symbol(label->head_idx);
         if (fset_contains_c(follow, con->I[con->cI]))
         {
-            parser_return(label->head_idx, con->cU, con->cI);
+            parser_return(label->head_idx, con->cU, con->cI, con);
             return;
         }
     }
@@ -279,25 +279,24 @@ void parser_print_label(slot* label)
 }
 
 /**
- * TODO->what is this function for?
+ * Add the nonterminal's productions to the list of pending process actions.
  */
 void parser_nonterminal_add(uint64_t head_idx, uint64_t j, parser_context* con)
 {
     set* bodies = metaparser_get_production_bodies(head_idx);
     for (size_t body_idx = 0; body_idx < set_size(bodies); body_idx++)
     {
-        uint64_t* production_idx = set_get_at_index(bodies, body_idx)->data;
         vect* body = metaparser_get_production_body(head_idx, body_idx);
         slice s = slice_struct(body, 0, vect_size(body), NULL);
         if (parser_test_select(con->I[j], head_idx, &s))
         {
-            parser_descriptor_add(&(slot){head_idx, *production_idx, 0}, j, j);
+            parser_descriptor_add(&(slot){head_idx, body_idx, 0}, j, j, con);
         }
     }
 }
 
 /**
- * TODO->what is this function for?
+ * Test if the current character can start the remaining production body, or follows the current production head.
  */
 bool parser_test_select(uint32_t c, uint64_t head_idx, slice* string)
 {
@@ -313,20 +312,26 @@ bool parser_test_select(uint32_t c, uint64_t head_idx, slice* string)
 }
 
 /**
- * TODO->what is this function for?
+ * Add a new process descriptor to the list of pending descriptors, if it is not already there.
  * creates a copy of the slot if it is to be inserted. Original is not modified.
  */
-void parser_descriptor_add(slot* slot, uint64_t k, uint64_t j)
+void parser_descriptor_add(slot* L, uint64_t k, uint64_t j, parser_context* con)
 {
-    // TODO->convert the slot to a slot_idx
-    // create a static 3 tuple containing (slot, k, j)
-    // if tuple not in U, add copy(tuple) to U and R
+    desc d = desc_struct(L, k, j);
+    obj D = obj_struct(Descriptor_t, &d);
+    if (!set_contains(con->U, &D))
+    {
+        desc* new_d = new_desc(L, k, j);
+        obj* new_D = new_desc_obj(new_d);
+        set_add(con->U, new_D);
+        // vect_enqueue(con->R, new_D); // new_D is owned by U, so when dequeued, it does not need to be freed
+    }
 }
 
 /**
- * TODO->what is this function for?
+ * Complete the process of parsing the given symbol.
  */
-void parser_return(uint64_t head_idx, uint64_t k, uint64_t j)
+void parser_return(uint64_t head_idx, uint64_t k, uint64_t j, parser_context* con)
 {
     // create static 3 tuple (head_idx, k, j)
     // check if tuple not in P
@@ -338,9 +343,9 @@ void parser_return(uint64_t head_idx, uint64_t k, uint64_t j)
 }
 
 /**
- * TODO->what is this function for?
+ * Initiate parsing actions for the given slot.
  */
-void parser_call(slot* slot, uint64_t i, uint64_t j)
+void parser_call(slot* slot, uint64_t i, uint64_t j, parser_context* con)
 {
     // suppose that L is Y ::= αX · β
     // if there is no CRF node labelled (L, i) create one
@@ -357,9 +362,9 @@ void parser_call(slot* slot, uint64_t i, uint64_t j)
 }
 
 /**
- * TODO->what is this function for?
+ * Insert a successfully parsed symbol into the set of BSRs.
  */
-void parser_bsr_add(slot* slot, uint64_t i, uint64_t k, uint64_t j)
+void parser_bsr_add(slot* slot, uint64_t i, uint64_t k, uint64_t j, parser_context* con)
 {
     vect* body = metaparser_get_production_body(slot->head_idx, slot->production_idx);
     if (vect_size(body) == slot->dot)
@@ -374,8 +379,7 @@ void parser_bsr_add(slot* slot, uint64_t i, uint64_t k, uint64_t j)
 }
 
 /**
- * Helper function to count the total number of elements in all first/follow sets
- *
+ * Helper function to count the total number of elements in all first/follow sets.
  * fsets is either the array "metaparser_symbol_firsts" or "metaparser_symbol_follows"
  */
 size_t parser_count_fsets_size(vect* fsets)

@@ -44,10 +44,10 @@ void parser_print_label(slot* label);
 // CNP support functions
 void parser_nonterminal_add(uint64_t head_idx, uint64_t j, parser_context* con);
 bool parser_test_select(uint32_t c, uint64_t head_idx, slice* string);
-void parser_descriptor_add(slot* slot, uint64_t k, uint64_t j);
-void parser_return(uint64_t head_idx, uint64_t k, uint64_t j);
-void parser_call(slot* slot, uint64_t i, uint64_t j);
-void parser_bsr_add(slot* slot, uint64_t i, uint64_t k, uint64_t j);
+void parser_descriptor_add(slot* L, uint64_t k, uint64_t j, parser_context* con);
+void parser_return(uint64_t head_idx, uint64_t k, uint64_t j, parser_context* con);
+void parser_call(slot* slot, uint64_t i, uint64_t j, parser_context* con);
+void parser_bsr_add(slot* slot, uint64_t i, uint64_t k, uint64_t j, parser_context* con);
 
 // first/follow set functions
 size_t parser_count_fsets_size(vect* fsets);
