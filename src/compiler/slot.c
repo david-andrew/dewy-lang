@@ -148,11 +148,52 @@ desc* new_desc(slot* L, uint64_t k, uint64_t j)
  * d is expected to be non-null.
  */
 obj* new_desc_obj(desc* d) { return new_obj(Descriptor_t, d); }
-void desc_str(desc* d);
-void desc_repr(desc* d);
-void desc_free(desc* d);
-desc* desc_copy(desc* d);
-uint64_t desc_hash(desc* d);
-bool desc_equals(desc* left, desc* right);
+
+/**
+ * Print out the string representation of a descriptor.
+ */
+void desc_str(desc* d)
+{
+    printf("(");
+    slot_str(&d->L);
+    printf(", %" PRIu64 ", %" PRIu64 ")", d->k, d->j);
+}
+
+/**
+ * Print out the internal representation of a descriptor.
+ */
+void desc_repr(desc* d)
+{
+    printf("desc{L: ");
+    slot_repr(&d->L);
+    printf(", k: %" PRIu64 ", j: %" PRIu64 "}", d->k, d->j);
+}
+
+/**
+ * Free an allocated descriptor.
+ */
+void desc_free(desc* d) { free(d); }
+
+/**
+ * Return a copy of the given descriptor.
+ */
+desc* desc_copy(desc* d) { return new_desc(&d->L, d->k, d->j); }
+
+/**
+ * Compute the hash of the descriptor
+ */
+uint64_t desc_hash(desc* d)
+{
+    uint64_t components[] = {slot_hash(&d->L), d->k, d->j};
+    return hash_uint_sequence(components, sizeof(components) / sizeof(uint64_t));
+}
+
+/**
+ * Check whether two descriptors are equal.
+ */
+bool desc_equals(desc* left, desc* right)
+{
+    return slot_equals(&left->L, &right->L) && left->k == right->k && left->j == right->j;
+}
 
 #endif

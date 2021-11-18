@@ -214,7 +214,7 @@ void crf_label_node_str(crf_label_node* node)
  */
 void crf_label_node_repr(crf_label_node* node)
 {
-    printf("(label: ");
+    printf("(L: ");
     slot_repr(&node->label);
     printf(", j: %" PRIu64 ")", node->j);
 }
