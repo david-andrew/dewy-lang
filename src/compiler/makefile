@@ -5,8 +5,8 @@ all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vec
 dewy: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o slot.o fset.o slice.o parser.o bsr.o crf.o
 	clang -o dewy dewy_compiler_compiler.o utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o slot.o fset.o slice.o parser.o bsr.o crf.o -lm
 
-# debug:
-# 	clang -o dewy dewy_compiler_compiler.c utilities.c object.c tuple.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c metaitem.c fset.c slice.c gotokey.c reduction.c gss.c sppf.c srnglr.c -lm -g
+debug:
+	clang -o dewy dewy_compiler_compiler.c utilities.c object.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c slot.c fset.c parser.c bsr.c crf.c slice.c -lm -g
 
 bsr.o: bsr.c bsr.h slice.h
 	clang -c -o bsr.o bsr.c
