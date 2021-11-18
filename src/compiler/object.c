@@ -54,12 +54,7 @@ new_primitive_obj(new_int, int64_t, Integer_t) new_primitive_obj(new_uint, uint6
  * Create a new pointer object.
  * Note that the pointer itself is unmanaged, and will not be freed at the end of the lifetime.
  */
-obj* new_ptr_obj(void* p)
-{
-    obj* P = malloc(sizeof(obj));
-    *P = obj_struct(Pointer_t, p);
-    return P;
-}
+obj* new_ptr_obj(void* p) { return new_obj(Pointer_t, p); }
 
 /**
  *  Create a new string object, from an allocated string
@@ -85,6 +80,16 @@ obj* new_string_obj_copy(char* s) { return new_string_obj(clone(s)); }
  * This is mainly for generating static versions of short lived objects to minimize heap allocations.
  */
 inline obj obj_struct(obj_type type, void* data) { return (obj){.type = type, .data = data}; }
+
+/**
+ * Return an allocated object containing the given data.
+ */
+obj* new_obj(obj_type type, void* data)
+{
+    obj* O = malloc(sizeof(obj));
+    *O = obj_struct(type, data);
+    return O;
+}
 
 /**
  * Recursive deep copy of an object.

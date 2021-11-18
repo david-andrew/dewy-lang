@@ -227,7 +227,8 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
 
     // parse the input
     parser_context* context = new_parser_context(source, length);
-    parser_parse(context);
+    bool success = parser_parse(context, true);
+    printf(success ? "parse succeeded\n" : "parse failed\n");
 
     // print out the results of compilation
     if (crf)

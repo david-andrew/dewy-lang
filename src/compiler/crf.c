@@ -107,12 +107,7 @@ inline crf_cluster_node crf_cluster_node_struct(uint64_t head_idx, uint64_t j)
 /**
  * Return an object wrapped cluster node.
  */
-obj* crf_cluster_node_obj(crf_cluster_node* node)
-{
-    obj* N = malloc(sizeof(obj));
-    *N = obj_struct(CRFClusterNode_t, node);
-    return N;
-}
+obj* crf_cluster_node_obj(crf_cluster_node* node) { return new_obj(CRFClusterNode_t, node); }
 
 /**
  * return the hash value of a cluster node.
@@ -168,7 +163,7 @@ crf_label_node* crf_new_label_node(slot label, uint64_t j)
 /**
  * Return a stack allocated struct for a label node.
  */
-crf_label_node crf_label_node_struct(slot label, uint64_t j)
+inline crf_label_node crf_label_node_struct(slot label, uint64_t j)
 {
     return (crf_label_node){
         .label = label,
@@ -179,12 +174,7 @@ crf_label_node crf_label_node_struct(slot label, uint64_t j)
 /**
  * Return an object wrapped label node.
  */
-obj* crf_label_node_obj(crf_label_node* node)
-{
-    obj* N = malloc(sizeof(obj));
-    *N = obj_struct(CRFLabelNode_t, node);
-    return N;
-}
+obj* crf_label_node_obj(crf_label_node* node) { return new_obj(CRFLabelNode_t, node); }
 
 /**
  * Determine if two label nodes are equal.

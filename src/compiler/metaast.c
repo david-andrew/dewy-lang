@@ -148,12 +148,7 @@ metaast* new_metaast_charset_node(metaast_type type, charset* cs)
 /**
  * Create a new metaast wrapped in an object
  */
-obj* new_metaast_obj(metaast* ast)
-{
-    obj* AST = malloc(sizeof(obj));
-    *AST = obj_struct(MetaAST_t, ast);
-    return AST;
-}
+obj* new_metaast_obj(metaast* ast) { return new_obj(MetaAST_t, ast); }
 
 /**
  * Attempt to parse a meta expression from all possible expression types

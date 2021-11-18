@@ -67,6 +67,7 @@ obj* new_ptr_obj(void* ptr);
 //// Utility Functions ////
 
 obj obj_struct(obj_type type, void* data);
+obj* new_obj(obj_type type, void* data);
 obj* obj_copy(obj* o);
 obj* obj_copy_with_refs(obj* o, dict* refs);
 void obj_str(obj* o);

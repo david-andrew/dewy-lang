@@ -29,13 +29,6 @@ typedef struct
 
 typedef struct
 {
-    slot L;
-    uint64_t k;
-    uint64_t j;
-} parser_desc;
-
-typedef struct
-{
     uint64_t head_idx;
     uint64_t k;
     uint64_t j;
@@ -47,7 +40,7 @@ void initialize_parser();
 void release_parser();
 parser_context* new_parser_context(uint32_t* src, uint64_t len);
 void parser_context_free(parser_context* con);
-bool parser_parse(parser_context* con);
+bool parser_parse(parser_context* con, bool whole);
 
 // internal helper functions for running the parser
 void parser_generate_labels();
@@ -56,9 +49,9 @@ void parser_handle_label(slot* label, parser_context* con);
 void parser_print_label(slot* label);
 
 // CNP support functions
-void parser_nt_add(uint64_t head_idx, uint64_t j, parser_context* con);
+void parser_nonterminal_add(uint64_t head_idx, uint64_t j, parser_context* con);
 bool parser_test_select(uint32_t c, uint64_t head_idx, slice* string);
-void parser_dsc_add(slot* slot, uint64_t k, uint64_t j);
+void parser_descriptor_add(slot* slot, uint64_t k, uint64_t j);
 void parser_return(uint64_t head_idx, uint64_t k, uint64_t j);
 void parser_call(slot* slot, uint64_t i, uint64_t j);
 void parser_bsr_add(slot* slot, uint64_t i, uint64_t k, uint64_t j);

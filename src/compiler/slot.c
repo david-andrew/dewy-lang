@@ -15,7 +15,7 @@
 /**
  * return the struct for a slot
  */
-slot slot_struct(uint64_t head_idx, uint64_t production_idx, uint64_t dot)
+inline slot slot_struct(uint64_t head_idx, uint64_t production_idx, uint64_t dot)
 {
     return (slot){.head_idx = head_idx, .production_idx = production_idx, .dot = dot};
 }
@@ -34,12 +34,7 @@ slot* new_slot(uint64_t head_idx, uint64_t production_idx, uint64_t dot)
  * Create a new slot obj from an existing slot.
  * s is expected to be non-null.
  */
-obj* new_slot_obj(slot* s)
-{
-    obj* S = malloc(sizeof(obj));
-    *S = (obj){.type = Slot_t, .data = s};
-    return S;
-}
+obj* new_slot_obj(slot* s) { return new_obj(Slot_t, s); }
 
 /**
  * Returns whether the slot is in an accepting state,
@@ -132,5 +127,32 @@ bool slot_equals(slot* left, slot* right)
     return left->head_idx == right->head_idx && left->production_idx == right->production_idx &&
            left->dot == right->dot;
 }
+
+/**
+ * return a struct for the parser process descriptor
+ */
+inline desc desc_struct(slot* L, uint64_t k, uint64_t j) { return (desc){.L = *L, .k = k, .j = j}; }
+
+/**
+ * create a new descriptor
+ */
+desc* new_desc(slot* L, uint64_t k, uint64_t j)
+{
+    desc* d = malloc(sizeof(desc));
+    *d = desc_struct(L, k, j);
+    return d;
+}
+
+/**
+ * create a new descriptor obj from an existing descriptor
+ * d is expected to be non-null.
+ */
+obj* new_desc_obj(desc* d) { return new_obj(Descriptor_t, d); }
+void desc_str(desc* d);
+void desc_repr(desc* d);
+void desc_free(desc* d);
+desc* desc_copy(desc* d);
+uint64_t desc_hash(desc* d);
+bool desc_equals(desc* left, desc* right);
 
 #endif

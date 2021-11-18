@@ -90,18 +90,20 @@ void parser_context_free(parser_context* con)
 
 /**
  * Parse a given source string.
+ * whole indicates whether the whole string must be consumed for a successful parse
+ *   Top level parses should set whole=true, but sub-parses may want whole=false
  */
-bool parser_parse(parser_context* con)
+bool parser_parse(parser_context* con, bool whole)
 {
     uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
     crf_cluster_node* u0 = crf_new_cluster_node(start_symbol_idx, 0);
     uint64_t node_idx = crf_add_cluster_node(con->CRF, u0);
-    parser_nt_add(start_symbol_idx, 0, con);
+    parser_nonterminal_add(start_symbol_idx, 0, con);
 
     while (vect_size(con->R) > 0)
     {
         // remove a descriptor (L,k,j) from R. Descriptors are owned by U, so no need to free in here.
-        parser_desc* d = obj_free_keep_inner(vect_dequeue(con->R), Descriptor_t); // depth first parse
+        desc* d = obj_free_keep_inner(vect_dequeue(con->R), Descriptor_t); // depth first parse
         // parser_desc* d = obj_free_keep_inner(vect_pop(con->R), Descriptor_t);  // (alternative) breadth first parse
         con->cU = d->k;
         con->cI = d->j;
@@ -110,6 +112,7 @@ bool parser_parse(parser_context* con)
     // probably save a separate set of BSRs that are successful
     // if (for some α and l, (S ::= α, 0, l, m) ∈ Υ) { return true; }
     // else { return false; }
+    return false;
 }
 
 /**
@@ -278,7 +281,7 @@ void parser_print_label(slot* label)
 /**
  * TODO->what is this function for?
  */
-void parser_nt_add(uint64_t head_idx, uint64_t j, parser_context* con)
+void parser_nonterminal_add(uint64_t head_idx, uint64_t j, parser_context* con)
 {
     set* bodies = metaparser_get_production_bodies(head_idx);
     for (size_t body_idx = 0; body_idx < set_size(bodies); body_idx++)
@@ -288,7 +291,7 @@ void parser_nt_add(uint64_t head_idx, uint64_t j, parser_context* con)
         slice s = slice_struct(body, 0, vect_size(body), NULL);
         if (parser_test_select(con->I[j], head_idx, &s))
         {
-            parser_dsc_add(&(slot){head_idx, *production_idx, 0}, j, j);
+            parser_descriptor_add(&(slot){head_idx, *production_idx, 0}, j, j);
         }
     }
 }
@@ -313,7 +316,7 @@ bool parser_test_select(uint32_t c, uint64_t head_idx, slice* string)
  * TODO->what is this function for?
  * creates a copy of the slot if it is to be inserted. Original is not modified.
  */
-void parser_dsc_add(slot* slot, uint64_t k, uint64_t j)
+void parser_descriptor_add(slot* slot, uint64_t k, uint64_t j)
 {
     // TODO->convert the slot to a slot_idx
     // create a static 3 tuple containing (slot, k, j)
