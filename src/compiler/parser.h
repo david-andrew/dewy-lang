@@ -16,24 +16,27 @@
 
 typedef struct
 {
-    set* P;      // set<crf_action>: set of CRF return actions represented as triples (X, k, j)
-    set* Y;      // set<bsr>: set of BSRs (X ::= μ, i, k, j) and (μ, i, k, j)
-    vect* R;     // vect<(slot, k, j)>: list of pending descriptors to handle.
-    set* U;      // set<(slot, k, j)>: set of all descriptors constructed so far.
-    crf* CRF;    // Call Return Forest
-    uint32_t* I; // input source (null terminated)
-    uint64_t m;  // length of the input
-    uint64_t cI; // current input index
-    uint64_t cU; // TBD
+    set* P;             // set<crf_action>: set of CRF return actions represented as triples (X, k, j)
+    set* Y;             // set<bsr>: set of BSRs (X ::= μ, i, k, j) and (μ, i, k, j)
+    vect* R;            // vect<(slot, k, j)>: list of pending descriptors to handle.
+    set* U;             // set<(slot, k, j)>: set of all descriptors constructed so far.
+    crf* CRF;           // Call Return Forest
+    uint32_t* I;        // input source (null terminated)
+    uint64_t m;         // length of the input
+    uint64_t cI;        // current input index
+    uint64_t cU;        // TBD
+    uint64_t start_idx; // index of the start symbol
+    bool whole_input;   // if true, require parse to consume the whole input
+    set* results;       // set<bsr> of all root nodes that successfully parsed the input
 } parser_context;
 
 // top level functions used by the main program
 void allocate_parser();
 void initialize_parser();
 void release_parser();
-parser_context* new_parser_context(uint32_t* src, uint64_t len);
+parser_context* new_parser_context(uint32_t* src, uint64_t len, uint64_t start_idx, bool whole_input);
 void parser_context_free(parser_context* con);
-bool parser_parse(parser_context* con, bool whole);
+bool parser_parse(parser_context* con);
 
 // internal helper functions for running the parser
 void parser_generate_labels();

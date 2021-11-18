@@ -226,8 +226,9 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
     }
 
     // parse the input
-    parser_context* context = new_parser_context(source, length);
-    bool success = parser_parse(context, true);
+    uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
+    parser_context* context = new_parser_context(source, length, start_symbol_idx, true);
+    bool success = parser_parse(context);
     printf(success ? "parse succeeded\n" : "parse failed\n");
 
     // print out the results of compilation

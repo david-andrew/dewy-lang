@@ -58,7 +58,7 @@ void release_parser()
 /**
  * Create a new parser context
  */
-parser_context* new_parser_context(uint32_t* src, uint64_t len)
+parser_context* new_parser_context(uint32_t* src, uint64_t len, uint64_t start_idx, bool whole_input)
 {
     parser_context* con = malloc(sizeof(parser_context));
     *con = (parser_context){
@@ -71,6 +71,9 @@ parser_context* new_parser_context(uint32_t* src, uint64_t len)
         .Y = new_set(),
         .R = new_vect(),
         .U = new_set(),
+        .whole_input = whole_input,
+        .start_idx = start_idx,
+        .results = new_set(),
     };
     return con;
 }
@@ -85,20 +88,18 @@ void parser_context_free(parser_context* con)
     set_free(con->Y);
     vect_free(con->R);
     set_free(con->U);
+    set_free(con->results);
     free(con);
 }
 
 /**
- * Parse a given source string.
- * whole indicates whether the whole string must be consumed for a successful parse
- *   Top level parses should set whole=true, but sub-parses may want whole=false
+ * Parse a given source string with the given context.
  */
-bool parser_parse(parser_context* con, bool whole)
+bool parser_parse(parser_context* con)
 {
-    uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
-    crf_cluster_node* u0 = crf_new_cluster_node(start_symbol_idx, 0);
+    crf_cluster_node* u0 = crf_new_cluster_node(con->start_idx, 0);
     uint64_t node_idx = crf_add_cluster_node(con->CRF, u0);
-    parser_nonterminal_add(start_symbol_idx, 0, con);
+    parser_nonterminal_add(con->start_idx, 0, con);
 
     while (vect_size(con->R) > 0)
     {
@@ -110,7 +111,6 @@ bool parser_parse(parser_context* con, bool whole)
         parser_handle_label(&d->L, con);
     }
     // if (set_size(con->roots) > 0) { return true } //if for some α and l, (S ::= α, 0, l, m) ∈ Υ, report success
-    // else { return false }
     return false;
 }
 
