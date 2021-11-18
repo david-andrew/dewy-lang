@@ -200,15 +200,17 @@ void dict_set(dict* d, obj* key, obj* value)
 
 /**
  * return the key and value at the index in the dictionary's entries array.
- *
- * key and value are returned via the pointers passed in
+ * key and value are returned via the pointers passed in.
+ * Returns whether the return values were set successfully.
  */
-void dict_get_at_index(dict* d, size_t i, obj* key, obj* value)
+bool dict_get_at_index(dict* d, size_t i, obj* key, obj* value)
 {
-    if (i < dict_size(d))
+    if (i == EMPTY) { return false; }
+    else if (i < dict_size(d))
     {
         *key = *d->entries[i].key;
         *value = *d->entries[i].value;
+        return true;
     }
     else
     {

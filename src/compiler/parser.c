@@ -93,11 +93,10 @@ void parser_context_free(parser_context* con)
  */
 void parser_parse(parser_context* con)
 {
-    // TODO: implement
-    printf("parser_parse() not implemented yet\n");
-    printf("source string: \"");
-    ustring_str(con->I);
-    printf("\"\n");
+    uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
+    crf_cluster_node* u0 = crf_new_cluster_node(start_symbol_idx, 0);
+    uint64_t node_idx = crf_add_cluster_node(con->CRF, u0);
+    parser_nt_add(start_symbol_idx, 0, con);
 }
 
 /**

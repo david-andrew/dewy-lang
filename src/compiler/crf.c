@@ -47,8 +47,8 @@ void crf_str(crf* CRF)
         crf_cluster_node* cluster_node = cluster_node_obj.data;
         printf("    ");
         crf_cluster_node_str(cluster_node);
-        printf(" -> ");
         set* children_indices = children_indices_obj.data;
+        printf(set_size(children_indices) > 0 ? " -> " : "\n");
         for (size_t j = 0; j < set_size(children_indices); j++)
         {
             uint64_t* child_idx = set_get_at_index(children_indices, j)->data;
@@ -60,6 +60,28 @@ void crf_str(crf* CRF)
     }
     printf("]\n");
 }
+
+/**
+ * Insert a cluster node into the call return forest.
+ */
+uint64_t crf_add_cluster_node(crf* CRF, crf_cluster_node* node)
+{
+    size_t node_idx = dict_get_entries_index(CRF->cluster_nodes, &(obj){.type = CRFClusterNode_t, .data = node});
+    obj k, v;
+    if (!dict_get_at_index(CRF->cluster_nodes, node_idx, &k, &v))
+    {
+        // create a new entry for this node
+        dict_set(CRF->cluster_nodes, crf_cluster_node_obj(node), new_set_obj(NULL));
+    }
+    else
+    {
+        // free the node as it already exists
+        crf_cluster_node_free(node);
+    }
+    return node_idx;
+}
+
+uint64_t crf_add_label_node(crf* CRF, crf_label_node* node, uint64_t parent_idx);
 
 /**
  * Create a new cluster node.

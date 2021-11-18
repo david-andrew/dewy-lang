@@ -32,6 +32,8 @@ typedef struct
 crf* new_crf();
 void crf_free(crf* CRF);
 void crf_str(crf* CRF);
+uint64_t crf_add_cluster_node(crf* CRF, crf_cluster_node* node);
+uint64_t crf_add_label_node(crf* CRF, crf_label_node* node, uint64_t parent_idx);
 crf_cluster_node* crf_new_cluster_node(uint64_t head_idx, uint64_t j);
 crf_cluster_node crf_cluster_node_struct(uint64_t head_idx, uint64_t j);
 obj* crf_cluster_node_obj(crf_cluster_node* node);
