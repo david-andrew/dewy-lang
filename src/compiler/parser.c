@@ -100,16 +100,16 @@ bool parser_parse(parser_context* con)
 
     while (vect_size(con->R) > 0)
     {
-        // remove a descriptor (L,k,j) from R
-        desc* d = obj_free_keep_inner(vect_dequeue(con->R), Descriptor_t); // depth first parse
-        // desc* d = obj_free_keep_inner(vect_pop(con->R), Descriptor_t);  // (alternative) breadth first parse
+        // remove a descriptor (L,k,j) from R. Descriptors are owned by U, so no need to free in here.
+        parser_desc* d = obj_free_keep_inner(vect_dequeue(con->R), Descriptor_t); // depth first parse
+        // parser_desc* d = obj_free_keep_inner(vect_pop(con->R), Descriptor_t);  // (alternative) breadth first parse
         con->cU = d->k;
         con->cI = d->j;
         parser_handle_label(&d->L, con);
-        // parser_desc_free(d);
     }
-    // if (for some α and l, (S ::= α, 0, l, m) ∈ Υ) { report success }
-    // else { report failure }
+    // probably save a separate set of BSRs that are successful
+    // if (for some α and l, (S ::= α, 0, l, m) ∈ Υ) { return true; }
+    // else { return false; }
 }
 
 /**

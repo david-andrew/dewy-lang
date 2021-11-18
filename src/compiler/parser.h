@@ -16,10 +16,10 @@
 
 typedef struct
 {
-    set* P;      //
-    set* Y;      // set<bsr>
-    vect* R;     // list of pending descriptors to handle. vect<(slot*, k, j)>
-    set* U;      //
+    set* P;      // set<crf_action>: set of CRF return actions represented as triples (X, k, j)
+    set* Y;      // set<bsr>: set of BSRs (X ::= μ, i, k, j) and (μ, i, k, j)
+    vect* R;     // vect<(slot, k, j)>: list of pending descriptors to handle.
+    set* U;      // set<(slot, k, j)>: set of all descriptors constructed so far.
     crf* CRF;    // Call Return Forest
     uint32_t* I; // input source (null terminated)
     uint64_t m;  // length of the input
@@ -32,7 +32,14 @@ typedef struct
     slot L;
     uint64_t k;
     uint64_t j;
-} desc;
+} parser_desc;
+
+typedef struct
+{
+    uint64_t head_idx;
+    uint64_t k;
+    uint64_t j;
+} crf_action;
 
 // top level functions used by the main program
 void allocate_parser();
