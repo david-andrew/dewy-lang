@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "charset.h"
 #include "fset.h"
 #include "metaparser.h"
 

@@ -9,6 +9,7 @@
 #include "metatoken.h"
 #include "object.h"
 #include "set.h"
+#include "ustring.h"
 #include "utilities.h"
 #include "vector.h"
 
@@ -213,7 +214,7 @@ int metascanner_tests()
 
     // set up structures for the sequence of scanning/parsing
     // vect* tokens = new_vect();
-    initialize_metascanner();
+    allocate_metascanner();
     obj* t;
 
     while (*head != 0 && (t = scan(&head)) != NULL)
