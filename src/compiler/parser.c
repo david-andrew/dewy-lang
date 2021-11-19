@@ -159,6 +159,9 @@ vect* parser_get_labels() { return parser_labels; }
  */
 void parser_handle_label(slot* label, parser_context* con)
 {
+    printf("handling label: ");
+    slot_str(label);
+    printf("\n");
     // keep track of the current dot in the item without modifying the original
     uint64_t dot = label->dot;
 
@@ -179,7 +182,7 @@ void parser_handle_label(slot* label, parser_context* con)
             }
             dot++;
 
-            parser_bsr_add(label, con->cU, con->cI, con->cI + 1, con);
+            parser_bsr_add(&(slot){label->head_idx, label->production_idx, dot}, con->cU, con->cI, con->cI + 1, con);
             con->cI++;
         }
 
@@ -191,7 +194,7 @@ void parser_handle_label(slot* label, parser_context* con)
                 if (!parser_test_select(con->I[con->cI], label->head_idx, &s)) { return; }
             }
             dot++;
-            parser_call(label, con->cU, con->cI, con);
+            parser_call(&(slot){label->head_idx, label->production_idx, dot}, con->cU, con->cI, con);
         }
     }
 
@@ -303,7 +306,6 @@ bool parser_test_select(uint32_t c, uint64_t head_idx, slice* string)
         fset* follow = parser_follow_of_symbol(head_idx);
         if (fset_contains_c(follow, c)) { return true; }
     }
-
     return false;
 }
 
@@ -338,19 +340,19 @@ void parser_return(uint64_t head_idx, uint64_t k, uint64_t j, parser_context* co
         obj* new_A = new_crf_action_obj(new_a);
         set_add(con->P, new_A);
 
-        // get the children of the crf_cluster_node (head_idx, k)
-        crf_cluster_node node = crf_cluster_node_struct(head_idx, k);
-        obj* children_set_obj = dict_get(con->CRF->cluster_nodes, &(obj){CRFClusterNode_t, &node});
-        if (children_set_obj != NULL)
-        {
-            set* children_set = children_set_obj->data;
-            for (size_t i = 0; i < set_size(children_set); i++)
-            {
-                crf_label_node* child = set_get_at_index(children_set, i)->data;
-                parser_descriptor_add(&child->label, child->j, j, con);
-                parser_bsr_add(&child->label, child->j, k, j, con);
-            }
-        }
+        //     // get the children of the crf_cluster_node (head_idx, k)
+        //     crf_cluster_node node = crf_cluster_node_struct(head_idx, k);
+        //     obj* children_set_obj = dict_get(con->CRF->cluster_nodes, &(obj){CRFClusterNode_t, &node});
+        //     if (children_set_obj != NULL)
+        //     {
+        //         set* children_set = children_set_obj->data;
+        //         for (size_t i = 0; i < set_size(children_set); i++)
+        //         {
+        //             crf_label_node* child = set_get_at_index(children_set, i)->data;
+        //             parser_descriptor_add(&child->label, child->j, j, con);
+        //             parser_bsr_add(&child->label, child->j, k, j, con);
+        //         }
+        //     }
     }
 }
 
@@ -372,15 +374,19 @@ void parser_call(slot* L, uint64_t i, uint64_t j, parser_context* con)
     //     for all ((X, j, h) ∈ P) {
     //       dscAdd(L, i, h); bsrAdd(L, i, j, h) } } } }
 
+    printf("call(");
+    slot_str(L);
+    printf(", %" PRIu64 ", %" PRIu64 ")\n", i, j);
+
+    // check to see if the CRF node labelled (L, i) exists. If not, create it.
+    crf_label_node u = crf_label_node_struct(L, i);
+    uint64_t u_idx = crf_add_label_node(con->CRF, &u); // crf_add_cluster_node(con->CRF, &u);
+
     // check to see if the dot is after a nonterminal
     if (L->dot == 0) { return; }
     vect* body = metaparser_get_production_body(L->head_idx, L->production_idx);
     uint64_t* X_idx = vect_get(body, L->dot - 1)->data;
     if (metaparser_is_symbol_terminal(*X_idx)) { return; }
-
-    // check to see if the CRF node labelled (L, i) exists. If not, create it.
-    crf_label_node u = crf_label_node_struct(L, i);
-    uint64_t u_idx = crf_add_label_node(con->CRF, &u); // crf_add_cluster_node(con->CRF, &u);
 
     // check to see if the CRF node labelled (X, j) exists
     crf_cluster_node v = crf_cluster_node_struct(*X_idx, j);

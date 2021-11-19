@@ -193,6 +193,11 @@ crf_label_node* new_crf_label_node(slot* label, uint64_t j)
 }
 
 /**
+ * return a copy of the given label node.
+ */
+crf_label_node* crf_label_node_copy(crf_label_node* node) { return new_crf_label_node(&node->label, node->j); }
+
+/**
  * Return a stack allocated struct for a label node.
  */
 inline crf_label_node crf_label_node_struct(slot* label, uint64_t j)
