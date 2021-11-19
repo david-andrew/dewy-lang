@@ -50,6 +50,7 @@ bool crf_cluster_node_equals(crf_cluster_node* left, crf_cluster_node* right);
 uint64_t crf_cluster_node_hash(crf_cluster_node* node);
 void crf_cluster_node_free(crf_cluster_node* node);
 void crf_cluster_node_str(crf_cluster_node* node);
+int crf_cluster_node_strlen(crf_cluster_node* node);
 void crf_cluster_node_repr(crf_cluster_node* node);
 crf_label_node* new_crf_label_node(slot* label, uint64_t j);
 crf_label_node* crf_label_node_copy(crf_label_node* node);

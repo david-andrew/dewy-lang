@@ -340,19 +340,20 @@ void parser_return(uint64_t head_idx, uint64_t k, uint64_t j, parser_context* co
         obj* new_A = new_crf_action_obj(new_a);
         set_add(con->P, new_A);
 
-        //     // get the children of the crf_cluster_node (head_idx, k)
-        //     crf_cluster_node node = crf_cluster_node_struct(head_idx, k);
-        //     obj* children_set_obj = dict_get(con->CRF->cluster_nodes, &(obj){CRFClusterNode_t, &node});
-        //     if (children_set_obj != NULL)
-        //     {
-        //         set* children_set = children_set_obj->data;
-        //         for (size_t i = 0; i < set_size(children_set); i++)
-        //         {
-        //             crf_label_node* child = set_get_at_index(children_set, i)->data;
-        //             parser_descriptor_add(&child->label, child->j, j, con);
-        //             parser_bsr_add(&child->label, child->j, k, j, con);
-        //         }
-        //     }
+        // get the children of the crf_cluster_node (head_idx, k)
+        crf_cluster_node node = crf_cluster_node_struct(head_idx, k);
+        obj* children_set_obj = dict_get(con->CRF->cluster_nodes, &(obj){CRFClusterNode_t, &node});
+        if (children_set_obj != NULL)
+        {
+            set* children_set = children_set_obj->data;
+            for (size_t i = 0; i < set_size(children_set); i++)
+            {
+                uint64_t* child_idx = set_get_at_index(children_set, i)->data;
+                crf_label_node* child = set_get_at_index(con->CRF->label_nodes, *child_idx)->data;
+                parser_descriptor_add(&child->label, child->j, j, con);
+                parser_bsr_add(&child->label, child->j, k, j, con);
+            }
+        }
     }
 }
 

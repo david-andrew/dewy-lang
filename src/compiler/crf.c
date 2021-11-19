@@ -47,13 +47,16 @@ void crf_str(crf* CRF)
         crf_cluster_node* cluster_node = cluster_node_obj.data;
         printf("    ");
         crf_cluster_node_str(cluster_node);
+        int strlen = crf_cluster_node_strlen(cluster_node);
         set* children_indices = children_indices_obj.data;
         printf(set_size(children_indices) > 0 ? " -> " : "\n");
         for (size_t j = 0; j < set_size(children_indices); j++)
         {
             uint64_t* child_idx = set_get_at_index(children_indices, j)->data;
             crf_label_node* child_node = set_get_at_index(CRF->label_nodes, *child_idx)->data;
-            printf(j == 0 ? "" : "        ");
+            if (j > 0)
+                for (int k = 0; k < strlen + 8; k++)
+                    putchar(' '); // 8 extra spaces for tab in front and space of the arrow
             crf_label_node_str(child_node);
             printf("\n");
         }
@@ -172,6 +175,17 @@ void crf_cluster_node_str(crf_cluster_node* node)
     printf("(");
     obj_str(symbol);
     printf(", %" PRIu64 ")", node->j);
+}
+
+/**
+ * Return the length of the string representation of a cluster node.
+ */
+int crf_cluster_node_strlen(crf_cluster_node* node)
+{
+    int length = 4; // for both parenthesis, the comma, and the space
+    length += obj_strlen(metaparser_get_symbol(node->head_idx));
+    length += snprintf(NULL, 0, "%" PRIu64, node->j);
+    return length;
 }
 
 /**
