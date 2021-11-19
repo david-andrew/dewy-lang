@@ -63,6 +63,7 @@ void crf_str(crf* CRF)
 
 /**
  * Insert a cluster node into the call return forest.
+ * Creates a copy of the node passed in
  */
 uint64_t crf_add_cluster_node(crf* CRF, crf_cluster_node* node)
 {
@@ -71,17 +72,40 @@ uint64_t crf_add_cluster_node(crf* CRF, crf_cluster_node* node)
     if (!dict_get_at_index(CRF->cluster_nodes, node_idx, &k, &v))
     {
         // create a new entry for this node
-        dict_set(CRF->cluster_nodes, new_crf_cluster_node_obj(node), new_set_obj(NULL));
-    }
-    else
-    {
-        // free the node as it already exists
-        crf_cluster_node_free(node);
+        node_idx = dict_set(CRF->cluster_nodes, obj_copy(&(obj){CRFClusterNode_t, node}), new_set_obj(NULL));
     }
     return node_idx;
 }
 
-uint64_t crf_add_label_node(crf* CRF, crf_label_node* node, uint64_t parent_idx);
+/**
+ * Insert a label node into the call return forest.
+ * Creates a copy of the node passed in
+ */
+uint64_t crf_add_label_node(crf* CRF, crf_label_node* node) //, uint64_t parent_idx)
+{
+    size_t node_idx = set_get_entries_index(CRF->label_nodes, &(obj){.type = CRFLabelNode_t, .data = node});
+    obj* v = set_get_at_index(CRF->label_nodes, node_idx);
+    if (v == NULL)
+    {
+        // create a new entry for this node
+        node_idx = set_add(CRF->label_nodes, obj_copy(&(obj){CRFLabelNode_t, node}));
+    }
+    return node_idx;
+}
+
+/**
+ * Insert an edge into the call return forest.
+ */
+void crf_add_edge(crf* CRF, uint64_t parent_idx, uint64_t child_idx)
+{
+    obj children_obj, k;
+    dict_get_at_index(CRF->cluster_nodes, parent_idx, &k, &children_obj);
+    set* children = children_obj.data;
+    if (!set_contains(children, &(obj){.type = UInteger_t, .data = &child_idx}))
+    {
+        set_add(children, new_uint_obj(child_idx));
+    }
+}
 
 /**
  * Create a new cluster node.
@@ -91,6 +115,14 @@ crf_cluster_node* new_crf_cluster_node(uint64_t head_idx, uint64_t j)
     crf_cluster_node* node = malloc(sizeof(crf_cluster_node));
     *node = crf_cluster_node_struct(head_idx, j);
     return node;
+}
+
+/**
+ * return a copy of the given cluster node
+ */
+crf_cluster_node* crf_cluster_node_copy(crf_cluster_node* node)
+{
+    return new_crf_cluster_node(node->head_idx, node->j);
 }
 
 /**
@@ -153,7 +185,7 @@ void crf_cluster_node_repr(crf_cluster_node* node)
 /**
  * Create a new label node.
  */
-crf_label_node* new_crf_label_node(slot label, uint64_t j)
+crf_label_node* new_crf_label_node(slot* label, uint64_t j)
 {
     crf_label_node* node = malloc(sizeof(crf_label_node));
     *node = crf_label_node_struct(label, j);
@@ -163,10 +195,10 @@ crf_label_node* new_crf_label_node(slot label, uint64_t j)
 /**
  * Return a stack allocated struct for a label node.
  */
-inline crf_label_node crf_label_node_struct(slot label, uint64_t j)
+inline crf_label_node crf_label_node_struct(slot* label, uint64_t j)
 {
     return (crf_label_node){
-        .label = label,
+        .label = *label,
         .j = j,
     };
 }

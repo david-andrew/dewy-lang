@@ -169,9 +169,10 @@ size_t set_get_entries_index(set* s, obj* item)
 bool set_is_index_empty(size_t index) { return index == EMPTY; }
 
 /**
- * Insert a new object into the set if it is not already there
+ * Insert a new object into the set if it is not already there.
+ * Returns the index in the set that the object was inserted at.
  */
-void set_add(set* s, obj* item)
+size_t set_add(set* s, obj* item)
 {
 
     // check if the set indices & entries tables needs to be resized. for now, return failure for too many entries;
@@ -195,29 +196,6 @@ void set_add(set* s, obj* item)
         s->entries[index] = (set_entry){.hash = hash, .item = item};
         s->size++;
     }
-}
-
-/**
- * Insert the object into the set, and return the index that the object was inserted at.
- */
-size_t set_add_return_index(set* s, obj* item)
-{
-    size_t index;
-    if (set_contains(s, item))
-    {
-        // get the index of the already inserted object
-        size_t probe = set_get_indices_probe(s, item);
-        index = s->indices[probe];
-
-        // since already inserted, free the duplicate
-        obj_free(item);
-    }
-    else
-    {
-        // normal insertion. object will be at the end of the list of objects
-        index = s->size;
-        set_add(s, item);
-    }
     return index;
 }
 
@@ -227,7 +205,11 @@ size_t set_add_return_index(set* s, obj* item)
  */
 obj* set_get_at_index(set* s, size_t i)
 {
-    if (i < set_size(s)) { return s->entries[i].item; }
+    if (i == EMPTY) { return NULL; }
+    else if (i < set_size(s))
+    {
+        return s->entries[i].item;
+    }
     else
     {
         printf("ERROR: attempted to get set item from index %zu in set of size %zu\n", i, set_size(s));

@@ -919,7 +919,7 @@ uint64_t metaparser_get_start_symbol_idx()
  */
 uint64_t metaparser_add_symbol(obj* symbol)
 {
-    uint64_t symbol_idx = set_add_return_index(metaparser_symbols, symbol);
+    uint64_t symbol_idx = set_add(metaparser_symbols, symbol);
     return symbol_idx;
 }
 
@@ -945,7 +945,7 @@ bool metaparser_is_symbol_terminal(uint64_t symbol_idx)
 uint64_t metaparser_add_body(vect* body)
 {
     obj* body_obj = new_vect_obj(body);
-    uint64_t body_idx = set_add_return_index(metaparser_bodies, body_obj);
+    uint64_t body_idx = set_add(metaparser_bodies, body_obj);
     return body_idx;
 }
 

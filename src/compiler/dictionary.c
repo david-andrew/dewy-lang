@@ -167,7 +167,7 @@ size_t dict_get_entries_index(dict* d, obj* key)
 /**
  *  insert the key value pair into the dictionary. If key already in dict, overwrite existing entry.
  */
-void dict_set(dict* d, obj* key, obj* value)
+size_t dict_set(dict* d, obj* key, obj* value)
 {
     // check if the dict indices & entries tables needs to be resized. for now, return failure for too many entries;
     if (d->size >= d->icapacity * MAX_LOAD) { dict_resize_indices(d, d->icapacity * 2); }
@@ -196,6 +196,7 @@ void dict_set(dict* d, obj* key, obj* value)
         d->entries[index] = (dict_entry){.hash = hash, .key = key, .value = value};
         d->size++;
     }
+    return index;
 }
 
 /**

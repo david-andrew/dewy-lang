@@ -162,6 +162,11 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
             copy->data = metatoken_copy((metatoken*)o->data);
             break;
         }
+        case CRFClusterNode_t:
+        {
+            copy->data = crf_cluster_node_copy((crf_cluster_node*)o->data);
+            break;
+        }
         case Vector_t:
         {
             copy->data = vect_copy_with_refs((vect*)o->data, refs);

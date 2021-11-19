@@ -95,8 +95,8 @@ void release_parser_context(parser_context* con)
  */
 bool parser_parse(parser_context* con)
 {
-    crf_cluster_node* u0 = new_crf_cluster_node(con->start_idx, 0);
-    uint64_t node_idx = crf_add_cluster_node(con->CRF, u0);
+    crf_cluster_node u0 = crf_cluster_node_struct(con->start_idx, 0);
+    uint64_t node_idx = crf_add_cluster_node(con->CRF, &u0);
     parser_nonterminal_add(con->start_idx, 0, con);
 
     while (vect_size(con->R) > 0)
@@ -357,7 +357,7 @@ void parser_return(uint64_t head_idx, uint64_t k, uint64_t j, parser_context* co
 /**
  * Initiate parsing actions for the given slot.
  */
-void parser_call(slot* slot, uint64_t i, uint64_t j, parser_context* con)
+void parser_call(slot* L, uint64_t i, uint64_t j, parser_context* con)
 {
     // suppose that L is Y ::= αX · β
     // if there is no CRF node labelled (L, i) create one
@@ -371,19 +371,51 @@ void parser_call(slot* slot, uint64_t i, uint64_t j, parser_context* con)
     //     create an edge from v to u
     //     for all ((X, j, h) ∈ P) {
     //       dscAdd(L, i, h); bsrAdd(L, i, j, h) } } } }
+
+    // check to see if the dot is after a nonterminal
+    if (L->dot == 0) { return; }
+    vect* body = metaparser_get_production_body(L->head_idx, L->production_idx);
+    uint64_t* X_idx = vect_get(body, L->dot - 1)->data;
+    if (metaparser_is_symbol_terminal(*X_idx)) { return; }
+
+    // check to see if the CRF node labelled (L, i) exists. If not, create it.
+    crf_label_node u = crf_label_node_struct(L, i);
+    uint64_t u_idx = crf_add_label_node(con->CRF, &u); // crf_add_cluster_node(con->CRF, &u);
+
+    // check to see if the CRF node labelled (X, j) exists
+    crf_cluster_node v = crf_cluster_node_struct(*X_idx, j);
+    uint64_t v_idx = dict_get_entries_index(con->CRF->cluster_nodes, &(obj){CRFClusterNode_t, &v});
+    obj v_obj, children_obj;
+    if (!dict_get_at_index(con->CRF->cluster_nodes, v_idx, &v_obj, &children_obj))
+    {
+        v_idx = crf_add_cluster_node(con->CRF, &v);
+        crf_add_edge(con->CRF, v_idx, u_idx);
+        parser_nonterminal_add(*X_idx, j, con);
+    }
+    else
+    {
+        set* children = children_obj.data;
+        if (!set_contains(children, &(obj){UInteger_t, &u_idx}))
+        {
+            crf_add_edge(con->CRF, v_idx, u_idx);
+            printf("forall (X, j, h) in P: ");
+            set_str(con->P);
+            printf("\n");
+        }
+    }
 }
 
 /**
  * Insert a successfully parsed symbol into the set of BSRs.
  */
-void parser_bsr_add(slot* slot, uint64_t i, uint64_t k, uint64_t j, parser_context* con)
+void parser_bsr_add(slot* L, uint64_t i, uint64_t k, uint64_t j, parser_context* con)
 {
-    vect* body = metaparser_get_production_body(slot->head_idx, slot->production_idx);
-    if (vect_size(body) == slot->dot)
+    vect* body = metaparser_get_production_body(L->head_idx, L->production_idx);
+    if (vect_size(body) == L->dot)
     {
         // insert (head_idx, production_idx, i, k, j) into Y
     }
-    else if (slot->dot > 1)
+    else if (L->dot > 1)
     {
         // slice s = slice_struct(body, 0, slot->dot, NULL);
         // insert (s, i, k, j) into Y

@@ -39,7 +39,7 @@ void dict_resize_indices(dict* d, size_t new_size);
 void dict_resize_entries(dict* d, size_t new_size);
 size_t dict_get_indices_probe(dict* d, obj* key);
 size_t dict_get_entries_index(dict* d, obj* key);
-void dict_set(dict* d, obj* key, obj* value);
+size_t dict_set(dict* d, obj* key, obj* value);
 bool dict_get_at_index(dict* d, size_t i, obj* key, obj* value);
 bool dict_contains(dict* d, obj* key);
 bool dict_contains_uint_key(dict* d, uint64_t u);
