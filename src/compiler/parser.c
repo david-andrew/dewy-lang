@@ -379,15 +379,15 @@ void parser_call(slot* L, uint64_t i, uint64_t j, parser_context* con)
     slot_str(L);
     printf(", %" PRIu64 ", %" PRIu64 ")\n", i, j);
 
-    // check to see if the CRF node labelled (L, i) exists. If not, create it.
-    crf_label_node u = crf_label_node_struct(L, i);
-    uint64_t u_idx = crf_add_label_node(con->CRF, &u); // crf_add_cluster_node(con->CRF, &u);
-
     // check to see if the dot is after a nonterminal
     if (L->dot == 0) { return; }
     vect* body = metaparser_get_production_body(L->head_idx, L->production_idx);
     uint64_t* X_idx = vect_get(body, L->dot - 1)->data;
     if (metaparser_is_symbol_terminal(*X_idx)) { return; }
+
+    // check to see if the CRF node labelled (L, i) exists. If not, create it.
+    crf_label_node u = crf_label_node_struct(L, i);
+    uint64_t u_idx = crf_add_label_node(con->CRF, &u); // crf_add_cluster_node(con->CRF, &u);
 
     // check to see if the CRF node labelled (X, j) exists
     crf_cluster_node v = crf_cluster_node_struct(*X_idx, j);

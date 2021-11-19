@@ -1036,29 +1036,31 @@ void metaparser_set_start_symbol(uint64_t start_symbol_idx)
         }
     }
 
-    // check if we need an augmented head, or we can just use the start rule
-    set* bodies = metaparser_get_production_bodies(start_symbol_idx);
-    if (set_size(bodies) == 1)
-    {
-        vect* body = metaparser_get_production_body(start_symbol_idx, 0);
-        if (vect_size(body) == 1)
-        {
-            uint64_t* symbol_idx = vect_get(body, 0)->data;
-            if (!metaparser_is_symbol_terminal(*symbol_idx))
-            {
-                metaparser_start_symbol_idx = start_symbol_idx;
-                return;
-            }
-        }
-    }
+    // new CNP algorithm doesn't require start symbol to have only a single body
+    metaparser_start_symbol_idx = start_symbol_idx;
+    // // check if we need an augmented head, or we can just use the start rule
+    // set* bodies = metaparser_get_production_bodies(start_symbol_idx);
+    // if (set_size(bodies) == 1)
+    // {
+    //     vect* body = metaparser_get_production_body(start_symbol_idx, 0);
+    //     if (vect_size(body) == 1)
+    //     {
+    //         uint64_t* symbol_idx = vect_get(body, 0)->data;
+    //         if (!metaparser_is_symbol_terminal(*symbol_idx))
+    //         {
+    //             metaparser_start_symbol_idx = start_symbol_idx;
+    //             return;
+    //         }
+    //     }
+    // }
 
-    // Otherwise, create a new production S' -> S for the augmented grammar
-    uint64_t augmented_head_idx = metaparser_get_anonymous_rule_head();
-    vect* augmented_body = new_vect();
-    vect_append(augmented_body, new_uint_obj(start_symbol_idx));
-    uint64_t augmented_body_idx = metaparser_add_body(augmented_body);
-    metaparser_add_production(augmented_head_idx, augmented_body_idx);
-    metaparser_start_symbol_idx = augmented_head_idx;
+    // // Otherwise, create a new production S' -> S for the augmented grammar
+    // uint64_t augmented_head_idx = metaparser_get_anonymous_rule_head();
+    // vect* augmented_body = new_vect();
+    // vect_append(augmented_body, new_uint_obj(start_symbol_idx));
+    // uint64_t augmented_body_idx = metaparser_add_body(augmented_body);
+    // metaparser_add_production(augmented_head_idx, augmented_body_idx);
+    // metaparser_start_symbol_idx = augmented_head_idx;
 }
 
 #endif

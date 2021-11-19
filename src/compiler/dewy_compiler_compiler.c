@@ -239,6 +239,16 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
         printf("\n\n");
     }
 
+    // TODO->have variable for other structures from context
+    {
+        printf("DESCRIPTOR SET:\n");
+        set_str(context.U);
+        printf("\n\n");
+        printf("ACTION SET:\n");
+        set_str(context.P);
+        printf("\n\n");
+    }
+
     if (bsr)
     {
         // printf("BSR OUTPUT:\n");
