@@ -273,68 +273,133 @@ void crf_label_node_repr(crf_label_node* node)
 /**
  * Create a new crf action tuple.
  */
-crf_action* new_crf_action(uint64_t head_idx, uint64_t k, uint64_t j)
+crf_action_head* new_crf_action_head(uint64_t head_idx, uint64_t k)
 {
-    crf_action* action = malloc(sizeof(crf_action));
-    *action = crf_action_struct(head_idx, k, j);
+    crf_action_head* action = malloc(sizeof(crf_action_head));
+    *action = crf_action_head_struct(head_idx, k);
     return action;
 }
 
 /**
+ * return a copy of the given crf action.
+ */
+crf_action_head* crf_action_head_copy(crf_action_head* node) { return new_crf_action_head(node->head_idx, node->k); }
+
+/**
  * return a crf action struct
  */
-inline crf_action crf_action_struct(uint64_t head_idx, uint64_t k, uint64_t j)
+inline crf_action_head crf_action_head_struct(uint64_t head_idx, uint64_t k)
 {
-    return (crf_action){
+    return (crf_action_head){
         .head_idx = head_idx,
         .k = k,
-        .j = j,
     };
 }
 
 /**
  * return an object wrapped crf action.
  */
-obj* new_crf_action_obj(crf_action* action) { return new_obj(CRFAction_t, action); }
+obj* new_crf_action_head_obj(crf_action_head* action) { return new_obj(CRFActionHead_t, action); }
 
 /**
  * Determine if two crf actions are equal.
  */
-bool crf_action_equals(crf_action* left, crf_action* right)
+bool crf_action_head_equals(crf_action_head* left, crf_action_head* right)
 {
-    return left->head_idx == right->head_idx && left->k == right->k && left->j == right->j;
+    return left->head_idx == right->head_idx && left->k == right->k;
 }
 
 /**
  * return the hash value of a crf action.
  */
-uint64_t crf_action_hash(crf_action* action)
+uint64_t crf_action_head_hash(crf_action_head* action)
 {
-    uint64_t seq[] = {action->head_idx, action->k, action->j};
+    uint64_t seq[] = {action->head_idx, action->k};
     return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
 }
 
 /**
  * Free an allocated crf action.
  */
-void crf_action_free(crf_action* action) { free(action); }
+void crf_action_head_free(crf_action_head* action) { free(action); }
 
 /**
  * Print out the string representation of a crf action.
  */
-void crf_action_str(crf_action* action)
+void crf_action_head_str(crf_action_head* action)
 {
     printf("(");
     obj_str(metaparser_get_symbol(action->head_idx));
-    printf(", %" PRIu64 ", %" PRIu64 ")", action->k, action->j);
+    printf(", %" PRIu64, action->k);
 }
 
 /**
  * Print out the internal representation of the crf action.
  */
-void crf_action_repr(crf_action* action)
+void crf_action_head_repr(crf_action_head* action)
 {
-    printf("(head_idx: %" PRIu64 ", k: %" PRIu64 ", j: %" PRIu64 ")", action->head_idx, action->k, action->j);
+    printf("(head_idx: %" PRIu64 ", k: %" PRIu64 ")", action->head_idx, action->k);
+}
+
+/**
+ * Check if an action is in the given action "set" (represented as a dict)
+ */
+bool crf_action_in_P(dict* P, crf_action_head* action, uint64_t j)
+{
+    // check if (X, k) is in P
+    obj* j_set_obj = dict_get(P, &(obj){.type = CRFActionHead_t, .data = action});
+    if (j_set_obj == NULL) return false;
+
+    // check if j is in the set returned by P[(X, k)]
+    set* j_set = j_set_obj->data;
+    return set_contains(j_set, &(obj){.type = UInteger_t, .data = &j});
+}
+
+/**
+ * Insert a new crf action into the given action "set" (represented as a dict)
+ */
+void crf_add_action_to_P(dict* P, crf_action_head* action, uint64_t j)
+{
+    // check if (X, k) is in P
+    obj* j_set_obj = dict_get(P, &(obj){.type = CRFActionHead_t, .data = action});
+    set* j_set;
+    if (j_set_obj == NULL)
+    {
+        j_set = new_set();
+        dict_set(P, obj_copy(&(obj){.type = CRFActionHead_t, .data = action}), new_set_obj(j_set));
+    }
+    else
+    {
+        j_set = j_set_obj->data;
+    }
+
+    // if j is not in the child set, add it
+    if (!set_contains(j_set, &(obj){.type = UInteger_t, .data = &j})) { set_add(j_set, new_uint_obj(j)); }
+}
+
+/**
+ * Print out the string representation of a crf action set.
+ */
+void crf_action_P_str(dict* P)
+{
+    printf("{");
+    for (size_t i = 0; i < dict_size(P); i++)
+    {
+        // crf_action_head* action =
+        obj k, v;
+        dict_get_at_index(P, i, &k, &v);
+        crf_action_head* action = k.data;
+        set* j_set = v.data;
+        for (size_t k = 0; k < set_size(j_set); k++)
+        {
+
+            crf_action_head_str(action);
+            uint64_t* j = set_get_at_index(j_set, k)->data;
+            printf(", %" PRIu64 ")", *j);
+            if (i < dict_size(P) - 1 || k < set_size(j_set) - 1) printf(", ");
+        }
+    }
+    printf("}");
 }
 
 #endif

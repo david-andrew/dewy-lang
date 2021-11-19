@@ -66,7 +66,7 @@ inline parser_context parser_context_struct(uint32_t* src, uint64_t len, uint64_
         .cI = 0,
         .cU = 0,
         .CRF = new_crf(),
-        .P = new_set(),
+        .P = new_dict(),
         .Y = new_set(),
         .R = new_vect(),
         .U = new_set(),
@@ -83,7 +83,7 @@ inline parser_context parser_context_struct(uint32_t* src, uint64_t len, uint64_
 void release_parser_context(parser_context* con)
 {
     crf_free(con->CRF);
-    set_free(con->P);
+    dict_free(con->P);
     set_free(con->Y);
     vect_free(con->R);
     set_free(con->U);
@@ -332,13 +332,16 @@ void parser_descriptor_add(slot* L, uint64_t k, uint64_t j, parser_context* con)
 void parser_return(uint64_t head_idx, uint64_t k, uint64_t j, parser_context* con)
 {
     // check if P already contains the action to be returned
-    crf_action a = crf_action_struct(head_idx, k, j);
-    obj A = obj_struct(CRFAction_t, &a);
-    if (!set_contains(con->P, &A))
+    crf_action_head a = crf_action_head_struct(head_idx, k);
+    // obj A = obj_struct(CRFActionHead_t, &a);
+    // if (!set_contains(con->P, &A))
+    if (!crf_action_in_P(con->P, &a, j))
     {
-        crf_action* new_a = new_crf_action(head_idx, k, j);
-        obj* new_A = new_crf_action_obj(new_a);
-        set_add(con->P, new_A);
+        // add the action to P
+        // crf_action* new_a = new_crf_action(head_idx, k, j);
+        // obj* new_A = new_crf_action_obj(new_a);
+        // set_add(con->P, new_A);
+        crf_add_action_to_P(con->P, &a, j);
 
         // get the children of the crf_cluster_node (head_idx, k)
         crf_cluster_node node = crf_cluster_node_struct(head_idx, k);
@@ -406,7 +409,7 @@ void parser_call(slot* L, uint64_t i, uint64_t j, parser_context* con)
         {
             crf_add_edge(con->CRF, v_idx, u_idx);
             printf("forall (X, j, h) in P: ");
-            set_str(con->P);
+            crf_action_P_str(con->P);
             printf("\n");
         }
     }

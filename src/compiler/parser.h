@@ -16,7 +16,7 @@
 
 typedef struct
 {
-    set* P;             // set<crf_action>: set of CRF return actions represented as triples (X, k, j)
+    dict* P;            // dict<(X, k), set<j>> where (X, k, j) is a crf_action
     set* Y;             // set<bsr>: set of BSRs (X ::= μ, i, k, j) and (μ, i, k, j)
     vect* R;            // vect<(slot, k, j)>: list of pending descriptors to handle.
     set* U;             // set<(slot, k, j)>: set of all descriptors constructed so far.

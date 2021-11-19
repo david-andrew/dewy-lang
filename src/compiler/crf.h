@@ -33,8 +33,14 @@ typedef struct
 {
     uint64_t head_idx;
     uint64_t k;
-    uint64_t j;
-} crf_action;
+    // uint64_t j; // j is represented outside of the action_head
+} crf_action_head;
+
+// actions are represented in the dict P as follows:
+// P[(X, k)] = {j}
+// i.e. (X, k) is a key in P and the value is a set of j1, j2, ..., jn,
+// making actions (X, k, j1), (X, k, j2), ..., (X, k, jn)
+// this allows easy lookup of actions by (X, k)
 
 crf* new_crf();
 void crf_free(crf* CRF);
@@ -61,13 +67,17 @@ uint64_t crf_label_node_hash(crf_label_node* node);
 void crf_label_node_free(crf_label_node* node);
 void crf_label_node_str(crf_label_node* node);
 void crf_label_node_repr(crf_label_node* node);
-crf_action* new_crf_action(uint64_t head_idx, uint64_t k, uint64_t j);
-crf_action crf_action_struct(uint64_t head_idx, uint64_t k, uint64_t j);
-obj* new_crf_action_obj(crf_action* action);
-bool crf_action_equals(crf_action* left, crf_action* right);
-uint64_t crf_action_hash(crf_action* action);
-void crf_action_free(crf_action* action);
-void crf_action_str(crf_action* action);
-void crf_action_repr(crf_action* action);
+crf_action_head* new_crf_action_head(uint64_t head_idx, uint64_t k);
+crf_action_head* crf_action_head_copy(crf_action_head* node);
+crf_action_head crf_action_head_struct(uint64_t head_idx, uint64_t k);
+obj* new_crf_action_head_obj(crf_action_head* action);
+bool crf_action_head_equals(crf_action_head* left, crf_action_head* right);
+uint64_t crf_action_head_hash(crf_action_head* action);
+void crf_action_head_free(crf_action_head* action);
+void crf_action_head_str(crf_action_head* action);
+void crf_action_head_repr(crf_action_head* action);
+bool crf_action_in_P(dict* P, crf_action_head* action, uint64_t j);
+void crf_add_action_to_P(dict* P, crf_action_head* action, uint64_t j);
+void crf_action_P_str(dict* P);
 
 #endif

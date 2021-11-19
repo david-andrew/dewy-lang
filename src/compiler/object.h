@@ -27,7 +27,7 @@ typedef enum
     FSet_t,
     CRFClusterNode_t,
     CRFLabelNode_t,
-    CRFAction_t,
+    CRFActionHead_t,
     Descriptor_t,
     Vector_t,
     Dictionary_t,

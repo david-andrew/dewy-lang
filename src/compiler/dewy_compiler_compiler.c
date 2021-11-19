@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "crf.h"
 #include "dewy_compiler_compiler.h"
 #include "metaparser.h"
 #include "metascanner.h"
@@ -245,7 +246,7 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
         set_str(context.U);
         printf("\n\n");
         printf("ACTION SET:\n");
-        set_str(context.P);
+        crf_action_P_str(context.P);
         printf("\n\n");
     }
 
