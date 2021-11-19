@@ -103,7 +103,7 @@ bool parser_parse(parser_context* con)
     {
         // remove a descriptor (L,k,j) from R. Descriptors are owned by U, so no need to free in here.
         desc* d = vect_dequeue(con->R)->data; // depth first parse
-        // desc* d = vect_pop(con->R)->data;  // (alternative) breadth first parse
+        // desc* d = vect_pop(con->R)->data; // (alternative) breadth first parse
         con->cU = d->k;
         con->cI = d->j;
         parser_handle_label(&d->L, con);
