@@ -15,6 +15,7 @@ void metaparser_free_ast_cache();
 bool parse_next_meta_rule(vect* tokens);
 void metaparser_productions_repr();
 void metaparser_productions_str();
+void metaparser_production_str(uint64_t head_idx, uint64_t production_idx);
 bool metaparser_is_valid_rule(vect* tokens);
 obj* metaparser_get_rule_head(vect* tokens);
 vect* metaparser_get_rule_body(vect* tokens);

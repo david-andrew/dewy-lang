@@ -29,6 +29,7 @@ typedef enum
     CRFLabelNode_t,
     CRFActionHead_t,
     Descriptor_t,
+    BSR_t,
     Vector_t,
     Dictionary_t,
     Set_t,

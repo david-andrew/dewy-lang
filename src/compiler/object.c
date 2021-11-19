@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bsr.h"
 #include "charset.h"
 #include "crf.h"
 #include "dictionary.h"
@@ -177,6 +178,11 @@ obj* obj_copy_with_refs(obj* o, dict* refs)
             copy->data = crf_action_head_copy((crf_action_head*)o->data);
             break;
         }
+        case BSR_t:
+        {
+            copy->data = bsr_copy((bsr*)o->data);
+            break;
+        }
         case Vector_t:
         {
             copy->data = vect_copy_with_refs((vect*)o->data, refs);
@@ -221,6 +227,7 @@ void obj_str(obj* o)
         case CRFClusterNode_t: crf_cluster_node_str(o->data); break;
         case CRFLabelNode_t: crf_label_node_str(o->data); break;
         case CRFActionHead_t: crf_action_head_str(o->data); break;
+        case BSR_t: bsr_str(o->data); break;
         case Descriptor_t: desc_str(o->data); break;
         case Vector_t: vect_str(o->data); break;
         case Dictionary_t: dict_str(o->data); break;
@@ -270,6 +277,7 @@ uint64_t obj_hash(obj* o)
         case CRFClusterNode_t: return crf_cluster_node_hash(o->data);
         case CRFLabelNode_t: return crf_label_node_hash(o->data);
         case CRFActionHead_t: return crf_action_head_hash(o->data);
+        case BSR_t: return bsr_hash(o->data);
         case Descriptor_t: return desc_hash(o->data);
         case Vector_t: return vect_hash(o->data);
         // case Dictionary_t: return dict_hash(o->data);
@@ -349,6 +357,7 @@ bool obj_equals(obj* left, obj* right)
         case CRFClusterNode_t: return crf_cluster_node_equals(left->data, right->data);
         case CRFLabelNode_t: return crf_label_node_equals(left->data, right->data);
         case CRFActionHead_t: return crf_action_head_equals(left->data, right->data);
+        case BSR_t: return bsr_equals(left->data, right->data);
         case Descriptor_t: return desc_equals(left->data, right->data);
         // case FSet_t: return fset_equals(left->data, right->data);
         default: return obj_compare(left, right) == 0;
@@ -393,6 +402,7 @@ void obj_free(obj* o)
             case CRFClusterNode_t: crf_cluster_node_free(o->data); break;
             case CRFLabelNode_t: crf_label_node_free(o->data); break;
             case CRFActionHead_t: crf_action_head_free(o->data); break;
+            case BSR_t: bsr_free(o->data); break;
             case Descriptor_t: desc_free(o->data); break;
 
             // objects with no (owned) internal data

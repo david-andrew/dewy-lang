@@ -203,36 +203,45 @@ void metaparser_productions_str()
     {
         // get head string
         uint64_t* head_idx = metaparser_productions->entries[i].key->data;
-        obj* head = metaparser_get_symbol(*head_idx);
 
         // get bodies indices set, and print a production line for each body
         set* bodies = metaparser_productions->entries[i].value->data;
         for (size_t j = 0; j < set_size(bodies); j++)
         {
-            // print head
-            obj_str(head);
-            printf(" -> ");
-
             // get the body for this production
             uint64_t* body_idx = bodies->entries[j].item->data;
-            vect* sentence = metaparser_get_body(*body_idx);
-
-            // print out the contents of this body
-            if (vect_size(sentence) == 0)
-            {
-                // length 0 sentence is just epsilon
-                printf("ϵ");
-            }
-            for (size_t k = 0; k < vect_size(sentence); k++)
-            {
-                // normal print out each symbol in the sentence
-                uint64_t* symbol_idx = vect_get(sentence, k)->data;
-                obj* symbol = metaparser_get_symbol(*symbol_idx);
-                obj_str(symbol);
-                if (k < vect_size(sentence) - 1) { printf(" "); }
-            }
+            metaparser_production_str(*head_idx, *body_idx);
             printf("\n");
         }
+    }
+}
+
+/**
+ * Print out a single production rule
+ */
+void metaparser_production_str(uint64_t head_idx, uint64_t body_idx)
+{
+    // print head
+    obj* head = metaparser_get_symbol(head_idx);
+    obj_str(head);
+    printf(" -> ");
+
+    // print body
+    vect* sentence = metaparser_get_body(body_idx);
+
+    // print out the contents of this body
+    if (vect_size(sentence) == 0)
+    {
+        // length 0 sentence is just epsilon
+        printf("ϵ");
+    }
+    for (size_t k = 0; k < vect_size(sentence); k++)
+    {
+        // normal print out each symbol in the sentence
+        uint64_t* symbol_idx = vect_get(sentence, k)->data;
+        obj* symbol = metaparser_get_symbol(*symbol_idx);
+        obj_str(symbol);
+        if (k < vect_size(sentence) - 1) { printf(" "); }
     }
 }
 
