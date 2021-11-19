@@ -23,7 +23,7 @@ To run source text directly, you can use here strings like so
 note that this will always add a newline to the end of the source text
 
 ## Language Documentation
-Currently incomplete documentation is available at: https://david-andrew.github.io/dewy/
+Currently incomplete documentation is available at: https://david-andrew.github.io/dewy-compiler-compiler/
 
 ## Language Features
 * first class physical units (e.g. length, time, mass, temperature, etc.)
