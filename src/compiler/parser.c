@@ -95,7 +95,7 @@ void release_parser_context(parser_context* con)
  */
 bool parser_parse(parser_context* con)
 {
-    crf_cluster_node* u0 = crf_new_cluster_node(con->start_idx, 0);
+    crf_cluster_node* u0 = new_crf_cluster_node(con->start_idx, 0);
     uint64_t node_idx = crf_add_cluster_node(con->CRF, u0);
     parser_nonterminal_add(con->start_idx, 0, con);
 
@@ -108,8 +108,7 @@ bool parser_parse(parser_context* con)
         con->cI = d->j;
         parser_handle_label(&d->L, con);
     }
-    // if (set_size(con->roots) > 0) { return true } //if for some α and l, (S ::= α, 0, l, m) ∈ Υ, report success
-    return false;
+    return set_size(con->results) > 0; // if for some α and l, (S ::= α, 0, l, m) ∈ Υ, report success
 }
 
 /**
@@ -330,13 +329,29 @@ void parser_descriptor_add(slot* L, uint64_t k, uint64_t j, parser_context* con)
  */
 void parser_return(uint64_t head_idx, uint64_t k, uint64_t j, parser_context* con)
 {
-    // create static 3 tuple (head_idx, k, j)
-    // check if tuple not in P
-    // if not, add tuple to P
-    //   and for each child v of (head_idx, k) in the CRF
-    //     let (L, i) be the label of v
-    //     dsc_add(L, i, j)
-    //     bsr_add(L, i, k, j)
+    // check if P already contains the action to be returned
+    crf_action a = crf_action_struct(head_idx, k, j);
+    obj A = obj_struct(CRFAction_t, &a);
+    if (!set_contains(con->P, &A))
+    {
+        crf_action* new_a = new_crf_action(head_idx, k, j);
+        obj* new_A = new_crf_action_obj(new_a);
+        set_add(con->P, new_A);
+
+        // get the children of the crf_cluster_node (head_idx, k)
+        crf_cluster_node node = crf_cluster_node_struct(head_idx, k);
+        obj* children_set_obj = dict_get(con->CRF->cluster_nodes, &(obj){CRFClusterNode_t, &node});
+        if (children_set_obj != NULL)
+        {
+            set* children_set = children_set_obj->data;
+            for (size_t i = 0; i < set_size(children_set); i++)
+            {
+                crf_label_node* child = set_get_at_index(children_set, i)->data;
+                parser_descriptor_add(&child->label, child->j, j, con);
+                parser_bsr_add(&child->label, child->j, k, j, con);
+            }
+        }
+    }
 }
 
 /**

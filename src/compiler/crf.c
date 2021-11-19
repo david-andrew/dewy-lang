@@ -71,7 +71,7 @@ uint64_t crf_add_cluster_node(crf* CRF, crf_cluster_node* node)
     if (!dict_get_at_index(CRF->cluster_nodes, node_idx, &k, &v))
     {
         // create a new entry for this node
-        dict_set(CRF->cluster_nodes, crf_cluster_node_obj(node), new_set_obj(NULL));
+        dict_set(CRF->cluster_nodes, new_crf_cluster_node_obj(node), new_set_obj(NULL));
     }
     else
     {
@@ -86,7 +86,7 @@ uint64_t crf_add_label_node(crf* CRF, crf_label_node* node, uint64_t parent_idx)
 /**
  * Create a new cluster node.
  */
-crf_cluster_node* crf_new_cluster_node(uint64_t head_idx, uint64_t j)
+crf_cluster_node* new_crf_cluster_node(uint64_t head_idx, uint64_t j)
 {
     crf_cluster_node* node = malloc(sizeof(crf_cluster_node));
     *node = crf_cluster_node_struct(head_idx, j);
@@ -107,7 +107,7 @@ inline crf_cluster_node crf_cluster_node_struct(uint64_t head_idx, uint64_t j)
 /**
  * Return an object wrapped cluster node.
  */
-obj* crf_cluster_node_obj(crf_cluster_node* node) { return new_obj(CRFClusterNode_t, node); }
+obj* new_crf_cluster_node_obj(crf_cluster_node* node) { return new_obj(CRFClusterNode_t, node); }
 
 /**
  * return the hash value of a cluster node.
@@ -153,7 +153,7 @@ void crf_cluster_node_repr(crf_cluster_node* node)
 /**
  * Create a new label node.
  */
-crf_label_node* crf_new_label_node(slot label, uint64_t j)
+crf_label_node* new_crf_label_node(slot label, uint64_t j)
 {
     crf_label_node* node = malloc(sizeof(crf_label_node));
     *node = crf_label_node_struct(label, j);
@@ -174,7 +174,7 @@ inline crf_label_node crf_label_node_struct(slot label, uint64_t j)
 /**
  * Return an object wrapped label node.
  */
-obj* crf_label_node_obj(crf_label_node* node) { return new_obj(CRFLabelNode_t, node); }
+obj* new_crf_label_node_obj(crf_label_node* node) { return new_obj(CRFLabelNode_t, node); }
 
 /**
  * Determine if two label nodes are equal.
@@ -222,7 +222,7 @@ void crf_label_node_repr(crf_label_node* node)
 /**
  * Create a new crf action tuple.
  */
-crf_action* crf_new_action(uint64_t head_idx, uint64_t k, uint64_t j)
+crf_action* new_crf_action(uint64_t head_idx, uint64_t k, uint64_t j)
 {
     crf_action* action = malloc(sizeof(crf_action));
     *action = crf_action_struct(head_idx, k, j);
@@ -244,7 +244,7 @@ inline crf_action crf_action_struct(uint64_t head_idx, uint64_t k, uint64_t j)
 /**
  * return an object wrapped crf action.
  */
-obj* crf_action_obj(crf_action* action) { return new_obj(CRFAction_t, action); }
+obj* new_crf_action_obj(crf_action* action) { return new_obj(CRFAction_t, action); }
 
 /**
  * Determine if two crf actions are equal.
