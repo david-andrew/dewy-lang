@@ -159,9 +159,9 @@ vect* parser_get_labels() { return parser_labels; }
  */
 void parser_handle_label(slot* label, parser_context* con)
 {
-    printf("handling label: ");
-    slot_str(label);
-    printf("\n");
+    // printf("handling label: ");
+    // slot_str(label);
+    // printf("\n");
     // keep track of the current dot in the item without modifying the original
     uint64_t dot = label->dot;
 
@@ -333,14 +333,9 @@ void parser_return(uint64_t head_idx, uint64_t k, uint64_t j, parser_context* co
 {
     // check if P already contains the action to be returned
     crf_action_head a = crf_action_head_struct(head_idx, k);
-    // obj A = obj_struct(CRFActionHead_t, &a);
-    // if (!set_contains(con->P, &A))
     if (!crf_action_in_P(con->P, &a, j))
     {
         // add the action to P
-        // crf_action* new_a = new_crf_action(head_idx, k, j);
-        // obj* new_A = new_crf_action_obj(new_a);
-        // set_add(con->P, new_A);
         crf_add_action_to_P(con->P, &a, j);
 
         // get the children of the crf_cluster_node (head_idx, k)
@@ -378,9 +373,9 @@ void parser_call(slot* L, uint64_t i, uint64_t j, parser_context* con)
     //     for all ((X, j, h) ∈ P) {
     //       dscAdd(L, i, h); bsrAdd(L, i, j, h) } } } }
 
-    printf("call(");
-    slot_str(L);
-    printf(", %" PRIu64 ", %" PRIu64 ")\n", i, j);
+    // printf("call(");
+    // slot_str(L);
+    // printf(", %" PRIu64 ", %" PRIu64 ")\n", i, j);
 
     // check to see if the dot is after a nonterminal
     if (L->dot == 0) { return; }
@@ -408,9 +403,20 @@ void parser_call(slot* L, uint64_t i, uint64_t j, parser_context* con)
         if (!set_contains(children, &(obj){UInteger_t, &u_idx}))
         {
             crf_add_edge(con->CRF, v_idx, u_idx);
-            printf("forall (X, j, h) in P: ");
-            crf_action_P_str(con->P);
-            printf("\n");
+
+            // get all actions in P that start with (X, j)
+            crf_action_head a = crf_action_head_struct(*X_idx, j);
+            obj* h_set_obj = dict_get(con->P, &(obj){CRFActionHead_t, &a});
+            if (h_set_obj != NULL)
+            {
+                set* h_set = h_set_obj->data;
+                for (size_t i = 0; i < set_size(h_set); i++)
+                {
+                    uint64_t* h = set_get_at_index(h_set, i)->data;
+                    parser_descriptor_add(L, i, *h, con);
+                    parser_bsr_add(L, i, j, *h, con);
+                }
+            }
         }
     }
 }
