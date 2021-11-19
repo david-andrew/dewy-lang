@@ -360,24 +360,7 @@ void parser_return(uint64_t head_idx, uint64_t k, uint64_t j, parser_context* co
  */
 void parser_call(slot* L, uint64_t i, uint64_t j, parser_context* con)
 {
-    // suppose that L is Y ::= αX · β
-    // if there is no CRF node labelled (L, i) create one
-    // let u be the CRF node labelled (L, i)
-    // if there is no CRF node labelled (X, j) {
-    //   create a CRF node v labelled (X, j)
-    //   create an edge from v to u
-    //   ntAdd(X, j) }
-    // else { let v be the CRF node labelled (X, j)
-    //   if there is not an edge from v to u {
-    //     create an edge from v to u
-    //     for all ((X, j, h) ∈ P) {
-    //       dscAdd(L, i, h); bsrAdd(L, i, j, h) } } } }
-
-    // printf("call(");
-    // slot_str(L);
-    // printf(", %" PRIu64 ", %" PRIu64 ")\n", i, j);
-
-    // check to see if the dot is after a nonterminal
+    // check to see if the dot is after a nonterminal. otherwise L is not of the form Y ::= αX · β
     if (L->dot == 0) { return; }
     vect* body = metaparser_get_production_body(L->head_idx, L->production_idx);
     uint64_t* X_idx = vect_get(body, L->dot - 1)->data;
@@ -412,6 +395,7 @@ void parser_call(slot* L, uint64_t i, uint64_t j, parser_context* con)
                 set* h_set = h_set_obj->data;
                 for (size_t i = 0; i < set_size(h_set); i++)
                 {
+                    // full action tuples are (X, j, h)
                     uint64_t* h = set_get_at_index(h_set, i)->data;
                     parser_descriptor_add(L, i, *h, con);
                     parser_bsr_add(L, i, j, *h, con);
