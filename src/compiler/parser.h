@@ -51,6 +51,7 @@ void parser_descriptor_add(slot* L, uint64_t k, uint64_t j, parser_context* con)
 void parser_return(uint64_t head_idx, uint64_t k, uint64_t j, parser_context* con);
 void parser_call(slot* L, uint64_t i, uint64_t j, parser_context* con);
 void parser_bsr_add(slot* L, uint64_t i, uint64_t k, uint64_t j, parser_context* con);
+void parser_bsr_add_helper(bsr* b, parser_context* con);
 
 // first/follow set functions
 size_t parser_count_fsets_size(vect* fsets);

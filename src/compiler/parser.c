@@ -52,7 +52,6 @@ void release_parser()
     vect_free(parser_symbol_follows);
     dict_free(parser_substring_firsts_dict);
     vect_free(parser_labels);
-    // other frees here
 }
 
 /**
@@ -159,16 +158,14 @@ vect* parser_get_labels() { return parser_labels; }
  */
 void parser_handle_label(slot* label, parser_context* con)
 {
-    // printf("handling label: ");
-    // slot_str(label);
-    // printf("\n");
     // keep track of the current dot in the item without modifying the original
     uint64_t dot = label->dot;
 
     vect* body = metaparser_get_production_body(label->head_idx, label->production_idx);
     if (label->dot == 0 && vect_size(body) == 0)
     {
-        // Y.add((SubTerm(label.head, Sentence([])), cI, cI, cI))
+        bsr* empty = new_prod_bsr(label->head_idx, label->production_idx, con->cI, con->cI, con->cI);
+        parser_bsr_add_helper(empty, con);
     }
     else
     {
@@ -414,11 +411,36 @@ void parser_bsr_add(slot* L, uint64_t i, uint64_t k, uint64_t j, parser_context*
     if (vect_size(body) == L->dot)
     {
         // insert (head_idx, production_idx, i, k, j) into Y
+        bsr b = new_prod_bsr_struct(L->head_idx, L->production_idx, i, k, j);
+        parser_bsr_add_helper(&b, con);
     }
     else if (L->dot > 1)
     {
-        // slice s = slice_struct(body, 0, slot->dot, NULL);
         // insert (s, i, k, j) into Y
+        slice s = slice_struct(body, 0, L->dot, NULL);
+        bsr b = new_str_bsr_struct(&s, i, k, j);
+        parser_bsr_add_helper(&b, con);
+    }
+}
+
+/**
+ * Insert the BSR into the BSR set, and save any success BSRs encountered
+ * Does not modify the original BSR b (it is copied).
+ */
+void parser_bsr_add_helper(bsr* b, parser_context* con)
+{
+    if (!set_contains(con->Y, &(obj){BSR_t, b}))
+    {
+        // insert the BSR into the BSR set
+        obj* b_obj = new_bsr_obj(bsr_copy(b));
+        uint64_t b_idx = set_add(con->Y, b_obj);
+
+        // check if the BSR matches a success BSR
+        if (b->type == prod_bsr && b->head_idx == con->start_idx && b->i == 0 && b->k == con->m)
+        {
+            // save the index of this success BSR
+            set_add(con->results, new_uint_obj(b_idx));
+        }
     }
 }
 
