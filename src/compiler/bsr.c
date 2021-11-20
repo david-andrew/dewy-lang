@@ -107,9 +107,10 @@ void bsr_str(bsr* b)
     //(X ::= α, i, k, j) for type prod_bsr
     //(α, i, k, j) for type str_bsr
     printf("(");
-    if (b->type == str_bsr) { metaparser_production_str(b->head_idx, b->production_idx); }
+    if (b->type == prod_bsr) { metaparser_production_str(b->head_idx, b->production_idx); }
     else
     {
+        if (slice_size(&b->substring) == 0) printf("ϵ");
         for (size_t i = 0; i < slice_size(&b->substring); i++)
         {
             if (i > 0) printf(" ");

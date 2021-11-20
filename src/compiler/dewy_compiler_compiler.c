@@ -230,7 +230,7 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
     uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
     parser_context context = parser_context_struct(source, length, start_symbol_idx, true);
     bool success = parser_parse(&context);
-    printf(success ? "parse succeeded\n" : "parse failed\n");
+    printf(success ? "parse succeeded\n\n" : "parse failed\n\n");
 
     // print out the results of compilation
     if (crf)
@@ -252,9 +252,23 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
 
     if (bsr)
     {
-        // printf("BSR OUTPUT:\n");
-        // bsr_str(context.BSR);
-        // printf("\n\n");
+        printf("BSR OUTPUT:\n");
+        printf("{");
+        for (size_t i = 0; i < set_size(context.Y); i++)
+        {
+            if (i > 0) printf(", ");
+            bsr_str(set_get_at_index(context.Y, i)->data);
+        }
+        printf("}\n\n");
+        printf("RESULTS BSRs:\n");
+        printf("{");
+        for (size_t i = 0; i < set_size(context.results); i++)
+        {
+            if (i > 0) printf(", ");
+            uint64_t* bsr_idx = set_get_at_index(context.results, i)->data;
+            bsr_str(set_get_at_index(context.Y, *bsr_idx)->data);
+        }
+        printf("}\n\n");
     }
 
     if (ast)
