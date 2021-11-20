@@ -229,8 +229,11 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
     // parse the input
     uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
     parser_context context = parser_context_struct(source, length, start_symbol_idx, true);
+    printf("PARSING INPUT:\n```\n");
+    ustring_str(source);
+    printf("\n```\n\n");
     bool success = parser_parse(&context);
-    printf(success ? "parse succeeded\n\n" : "parse failed\n\n");
+    printf(success ? "PARSE SUCCEEDED\n\n" : "PARSE FAILED\n\n");
 
     // print out the results of compilation
     if (crf)
