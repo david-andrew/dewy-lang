@@ -29,14 +29,15 @@ int main(int argc, char* argv[])
     if (argc < 3)
     {
         printf("Error: you must specify a grammar file and a source file\n");
-        printf("Usage: ./dewy [-s] [-m] [-p] [-g] [-l] [-f] [-a] [--verbose] /grammar/file/path /input/file/path"
+        printf("Usage: ./dewy [-s] [-m] [-p] [-g] [-l] [-f] [-a] [--verbose] /grammar/file/path /input/file/path\n"
                " -s scanner\n"
                " -m (meta)ast\n"
                " -p parser CFG\n"
                " -f first/follow sets\n"
                " -l grammar labels\n"
                " -c Call Return Forest\n"
-               " -b Binary Subtree Representation"
+               " -b Binary Subtree Representation\n"
+               " -r results BSR\n"
                " -a ast\n"
                " --verbose prints out repr instead of str\n");
         return 1;
@@ -60,11 +61,12 @@ int main(int argc, char* argv[])
     match_argv(labels, -l);
     match_argv(crf, -c);
     match_argv(bsr, -b);
+    match_argv(result, -r);
     match_argv(ast, -a);
     match_argv(verbose, --verbose);
 
     // if no sections specified, run all of them
-    if (!(scanner || mast || parser || fsets || labels || crf || bsr || ast))
+    if (!(scanner || mast || parser || fsets || labels || crf || bsr || result || ast))
     {
         scanner = true;
         mast = true;
@@ -73,6 +75,7 @@ int main(int argc, char* argv[])
         labels = true;
         crf = true;
         bsr = true;
+        result = true;
         ast = true;
     }
 
@@ -84,7 +87,7 @@ int main(int argc, char* argv[])
     if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, parser)) { goto cleanup; }
 
     initialize_parser();
-    if (!run_compiler(input_source, input_size, fsets, labels, crf, bsr, ast, verbose)) { goto cleanup; }
+    if (!run_compiler(input_source, input_size, fsets, labels, crf, bsr, result, ast, verbose)) { goto cleanup; }
 
 cleanup:
     free(grammar_source);
@@ -199,7 +202,8 @@ bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, 
 /**
  * Parse the input file according to the input grammar.
  */
-bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool crf, bool bsr, bool ast, bool verbose)
+bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool crf, bool bsr, bool result, bool ast,
+                  bool verbose)
 {
     // GRAMMAR FIRST/FOLLOW SET STEP
     if (fsets)
@@ -244,14 +248,15 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
     }
 
     // TODO->have variable for other structures from context
-    {
-        printf("DESCRIPTOR SET:\n");
-        set_str(context.U);
-        printf("\n\n");
-        printf("ACTION SET:\n");
-        crf_action_P_str(context.P);
-        printf("\n\n");
-    }
+
+    // {
+    //     printf("DESCRIPTOR SET:\n");
+    //     set_str(context.U);
+    //     printf("\n\n");
+    //     printf("ACTION SET:\n");
+    //     crf_action_P_str(context.P);
+    //     printf("\n\n");
+    // }
 
     if (bsr)
     {
@@ -263,6 +268,9 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
             bsr_str(set_get_at_index(context.Y, i)->data);
         }
         printf("}\n\n");
+    }
+    if (result)
+    {
         printf("RESULTS BSRs:\n");
         printf("{");
         for (size_t i = 0; i < set_size(context.results); i++)
