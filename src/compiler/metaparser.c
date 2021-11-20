@@ -172,7 +172,7 @@ bool parse_next_meta_rule(vect* tokens)
  * Prints the productions dictionary which contains head symbol indices
  * pointing to the list of indices of bodies for that head.
  */
-void metaparser_productions_repr()
+void metaparser_rules_repr()
 {
     // print out all symbols, bodies
     printf("symbols:\n");
@@ -197,12 +197,13 @@ void metaparser_productions_repr()
 /**
  * Print out the contents of the grammar tables, converting indices to their corresponding values
  */
-void metaparser_productions_str()
+void metaparser_rules_str()
 {
     for (size_t i = 0; i < dict_size(metaparser_productions); i++)
     {
         // get head string
         uint64_t* head_idx = metaparser_productions->entries[i].key->data;
+        obj* head = metaparser_get_symbol(*head_idx);
 
         // get bodies indices set, and print a production line for each body
         set* bodies = metaparser_productions->entries[i].value->data;
@@ -210,39 +211,52 @@ void metaparser_productions_str()
         {
             // get the body for this production
             uint64_t* body_idx = bodies->entries[j].item->data;
-            metaparser_production_str(*head_idx, *body_idx);
+
+            vect* body = metaparser_get_body(*body_idx);
+            metaparser_rule_str(head, body);
             printf("\n");
         }
     }
 }
 
 /**
- * Print out a single production rule
+ * Print out a single production rule, given the actual head and body objects
  */
-void metaparser_production_str(uint64_t head_idx, uint64_t body_idx)
+void metaparser_rule_str(obj* head, vect* body)
 {
-    // print head
-    obj* head = metaparser_get_symbol(head_idx);
+    // print head ->
     obj_str(head);
     printf(" -> ");
 
-    // print body
-    vect* sentence = metaparser_get_body(body_idx);
-
     // print out the contents of this body
-    if (vect_size(sentence) == 0)
+    if (vect_size(body) == 0)
     {
         // length 0 sentence is just epsilon
         printf("ϵ");
     }
-    for (size_t k = 0; k < vect_size(sentence); k++)
+    for (size_t k = 0; k < vect_size(body); k++)
     {
         // normal print out each symbol in the sentence
-        uint64_t* symbol_idx = vect_get(sentence, k)->data;
+        if (k > 0) printf(" ");
+        uint64_t* symbol_idx = vect_get(body, k)->data;
         obj* symbol = metaparser_get_symbol(*symbol_idx);
         obj_str(symbol);
-        if (k < vect_size(sentence) - 1) { printf(" "); }
     }
+}
+
+/**
+ * Print ouf a single production rule given the head index and it's corresponding production index
+ */
+void metaparser_production_str(uint64_t head_idx, uint64_t production_idx)
+{
+    // get the head symbol
+    obj* head = metaparser_get_symbol(head_idx);
+
+    // get the body set
+    vect* body = metaparser_get_production_body(head_idx, production_idx);
+    // set* bodies = metaparser_productions->entries[production_idx].value->data;
+
+    metaparser_rule_str(head, body);
 }
 
 /**
