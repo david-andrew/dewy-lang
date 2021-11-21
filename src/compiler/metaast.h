@@ -17,7 +17,6 @@ Node struct map:
 
     NULL (i.e. empty node)
     - metaast_eps
-    - metaast_dollar
 
     metaast_string_node
     - metaast_string
@@ -56,7 +55,6 @@ typedef enum
 {
     // general expression node types
     metaast_eps,
-    metaast_dollar,
     metaast_capture,
     metaast_string,
     metaast_caseless,
@@ -131,7 +129,6 @@ metaast* metaast_parse_expr(vect* tokens);
 void metaast_parse_error();
 metaast* metaast_parse_expr_restricted(vect* tokens, metaast_parse_fn skip);
 metaast* metaast_parse_eps(vect* tokens);
-metaast* metaast_parse_dollar(vect* tokens);
 metaast* metaast_parse_char(vect* tokens);
 metaast* metaast_parse_caseless_char(vect* tokens);
 metaast* metaast_parse_string(vect* tokens);

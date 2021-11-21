@@ -7,7 +7,6 @@
 #include "charset.h"
 #include "fset.h"
 #include "metaparser.h"
-#include "ustring.h"
 
 /**
  * Create a new empty fset (i.e. first/follow set).
@@ -132,13 +131,7 @@ void fset_str_inner(fset* s)
  */
 bool fset_contains_c(fset* s, uint32_t c)
 {
-    if (c == 0)
-    {
-        // EOF is represented in a followset either as s->special=true, or as a special terminal #$
-        if (s->special) return true;
-        uint64_t dollar_symbol_idx = metaparser_get_dollar_symbol_idx();
-        return set_contains(s->terminals, &(obj){.type = UInteger_t, .data = &dollar_symbol_idx});
-    }
+    if (c == 0) { return s->special; }
     for (size_t i = 0; i < set_size(s->terminals); i++)
     {
         uint64_t* symbol_idx = set_get_at_index(s->terminals, i)->data;

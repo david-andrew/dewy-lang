@@ -232,10 +232,7 @@ void obj_str(obj* o)
         case Vector_t: vect_str(o->data); break;
         case Dictionary_t: dict_str(o->data); break;
         case Set_t: set_str(o->data); break;
-        default:
-            printf("WARNING: obj_str() is not implemented for object of type \"%d\"\n", o->type);
-            exit(1);
-            break;
+        default: printf("WARNING: obj_str() is not implemented for object of type \"%d\"\n", o->type); exit(1);
     }
 }
 

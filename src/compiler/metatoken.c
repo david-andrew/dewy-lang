@@ -181,7 +181,6 @@ void metatoken_str(metatoken* t)
             break;
         case meta_epsilon: printf("ϵ"); break;
         case meta_anyset: printf("ξ"); break;
-        case meta_dollar: printf("#$"); break;
         case meta_hex_number:
             printf("\\x");
             ustring_str(t->content);
@@ -214,7 +213,6 @@ void metatoken_repr(metatoken* t)
         printenum(meta_escape);
         printenum(meta_charset_char);
         printenum(meta_anyset);
-        printenum(meta_dollar);
         printenum(meta_epsilon);
         printenum(meta_ampersand);
         printenum(meta_period);

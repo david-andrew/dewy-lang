@@ -18,7 +18,6 @@ typedef enum
     meta_escape,
     meta_charset_char,
     meta_anyset,
-    meta_dollar,
     meta_epsilon,
     meta_ampersand,
     meta_period,

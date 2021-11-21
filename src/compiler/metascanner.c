@@ -34,7 +34,6 @@ metascan_fn rule_funcs[] = {
     match_meta_hex_number,
     match_meta_dec_number,
     match_meta_anyset,
-    match_meta_dollar,
     match_meta_ampersand,
     match_meta_period,
     match_meta_star,
@@ -472,22 +471,6 @@ obj* match_meta_anyset(char** src)
     else if ((*src)[0] == '\\' && is_hex_escape((*src)[1]))
     {
         obj* t = new_metatoken_obj(meta_anyset, ustring_charstar_substr((*src), 0, 1));
-        *src += 2;
-        return t;
-    }
-    return NULL;
-}
-
-/**
- * #$ is a special character that matches for the end of the input.
- *
- * #dollar = '#$';
- */
-obj* match_meta_dollar(char** src)
-{
-    if ((*src)[0] == '#' && (*src)[1] == '$')
-    {
-        obj* t = new_metatoken_obj(meta_dollar, ustring_charstar_substr((*src), 0, 1));
         *src += 2;
         return t;
     }

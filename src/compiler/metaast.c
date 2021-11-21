@@ -21,7 +21,6 @@ bool metaast_parse_error_occurred = false;
 // functions for all scannable rules
 metaast_parse_fn metaast_all_rule_funcs[] = {
     metaast_parse_eps,
-    metaast_parse_dollar,
     metaast_parse_char,
     metaast_parse_caseless_char,
     metaast_parse_string,
@@ -50,10 +49,21 @@ metaast_parse_fn metaast_all_rule_funcs[] = {
 
 // functions for scanning rules that can be operands in a binary op
 metaast_parse_fn metaast_single_unit_rule_funcs[] = {
-    metaast_parse_eps,     metaast_parse_dollar,          metaast_parse_char,       metaast_parse_caseless_char,
-    metaast_parse_string,  metaast_parse_caseless_string, metaast_parse_charset,    metaast_parse_anyset,
-    metaast_parse_hex,     metaast_parse_identifier,      metaast_parse_star,       metaast_parse_plus,
-    metaast_parse_option,  metaast_parse_count,           metaast_parse_compliment, metaast_parse_group,
+    metaast_parse_eps,
+    metaast_parse_char,
+    metaast_parse_caseless_char,
+    metaast_parse_string,
+    metaast_parse_caseless_string,
+    metaast_parse_charset,
+    metaast_parse_anyset,
+    metaast_parse_hex,
+    metaast_parse_identifier,
+    metaast_parse_star,
+    metaast_parse_plus,
+    metaast_parse_option,
+    metaast_parse_count,
+    metaast_parse_compliment,
+    metaast_parse_group,
     metaast_parse_capture,
 };
 
@@ -198,26 +208,6 @@ metaast* metaast_parse_eps(vect* tokens)
         {
             vect_free(tokens);
             return new_metaast_null_node(metaast_eps);
-        }
-    }
-    return NULL;
-}
-
-/**
- * Attempt to parse a dollar (#$) from the tokens list.
- * If matches, tokens will be freed, else returns NULL.
- *
- * #dollar = '#$';
- */
-metaast* metaast_parse_dollar(vect* tokens)
-{
-    if (vect_size(tokens) == 1)
-    {
-        metatoken* t = vect_get(tokens, 0)->data;
-        if (t->type == meta_dollar)
-        {
-            vect_free(tokens);
-            return new_metaast_null_node(metaast_dollar);
         }
     }
     return NULL;
@@ -1049,7 +1039,6 @@ int metaast_scan_to_end_of_unit(vect* tokens, size_t start_idx)
         case hashtag:
         case meta_hex_number:
         case meta_anyset:
-        case meta_dollar:
         case meta_epsilon:
         {
             idx += 1;
@@ -1166,8 +1155,7 @@ uint64_t metaast_get_type_precedence_level(metaast_type type)
         case metaast_charset:
         case metaast_string:
         case metaast_caseless:
-        case metaast_eps:
-        case metaast_dollar: return 0;
+        case metaast_eps: return 0;
 
         case metaast_star:
         case metaast_plus:
@@ -1269,8 +1257,7 @@ void metaast_free_with_refs(metaast* ast, set* refs)
         }
 
         // no allocated inner components
-        case metaast_eps:
-        case metaast_dollar: break;
+        case metaast_eps: break;
     }
 
     // free the container
@@ -1310,7 +1297,6 @@ bool metaast_fold_charsets(metaast** ast_ptr)
     {
         // single expressions that can't be reduced
         case metaast_eps:
-        case metaast_dollar:
         case metaast_string:
         case metaast_caseless:
         case metaast_identifier:
@@ -1427,7 +1413,6 @@ void metaast_type_repr(metaast_type type)
     switch (type)
     {
         printenum(metaast_eps);
-        printenum(metaast_dollar);
         printenum(metaast_capture);
         printenum(metaast_string);
         printenum(metaast_caseless);
@@ -1602,11 +1587,6 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
             put_unicode(0x03F5);
             break;
         }
-        case metaast_dollar:
-        {
-            printf("#$");
-            break;
-        }
     }
 }
 
@@ -1716,11 +1696,6 @@ void metaast_repr_inner(metaast* ast, int level)
             printf(")\n");
             break;
         }
-        case metaast_dollar:
-        {
-            printf("(#$)\n");
-            break;
-        }
     }
 }
 
@@ -1786,7 +1761,6 @@ bool metaast_equals(metaast* left, metaast* right)
         }
 
         case metaast_eps:
-        case metaast_dollar:
         {
             return true;
         }
@@ -1845,7 +1819,6 @@ uint64_t metaast_hash(metaast* ast)
         }
 
         case metaast_eps:
-        case metaast_dollar:
         {
             return ast->type;
         }
