@@ -1,0 +1,8 @@
+//example of a potential bug in the parser..
+
+#id = [A-Za-z] [0-9A-Za-z]*;
+#type = #id (#s '*')*;
+#func_head = #type #s* #id;
+
+
+//fails on input int main
