@@ -1,12 +1,11 @@
-#program = #func_head;//(#c | #ws | #include | #func_decl)*;
-
-
+#line_comment = '/' '/' ('\n'~)*;
+//#program = #func_head;//(#c | #ws | #include | #func_decl)*;
 //#line_comment = '/' '/' (ξ - '\n')* ('\n' | #$);
 //#block_comment = '/*' ξ* '*/';
 //#c = #line_comment | #block_comment;
 //#s = [\x20\t];
-#ws = [\x20\t\n\r];
-#s = [\x20];
+//#ws = [\x20\t\n\r];
+//#s = [\x20];
 
 //#include = '#include' #s* ('<' #path '>' | '"' #path '"');
 //#path = #relative_path | #absolute_path;
@@ -15,15 +14,12 @@
 //#absolute_path = '/' #relative_path;
 
 //#file = #id #ext?;
-#id = [A-Za-z] [0-9A-Za-z]*;
+//#id = [A-Za-z] [0-9A-Za-z]*;
 //#ext = '.' #id;
 
-#type = #id (#s* '*')*;//(#ws? '*')*;
+//#type = #id (#s* '*')*;//(#ws? '*')*;
 //#typed_id = #type #ws* #id (#ws* '[]')?;
 
-#func_head = #type #s* #id;//'(' (#ws* #typed_id (',' #ws* #typed_id)*)? #ws* ')';
+//#func_head = #type #s* #id;//'(' (#ws* #typed_id (',' #ws* #typed_id)*)? #ws* ')';
 //#func_body = ;
 //#func_decl = #func_head;// #ws* #func_body;
-
-
-
