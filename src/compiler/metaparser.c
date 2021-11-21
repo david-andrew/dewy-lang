@@ -56,7 +56,7 @@ void allocate_metaparser()
 void complete_metaparser()
 {
     metaparser_get_eps_body_idx();
-    // metaparser_get_endmarker_symbol_idx();
+    metaparser_get_dollar_symbol_idx();
     metaparser_get_start_symbol_idx();
 
     // TODO->check to ensure that every identifier has at least 1 body, and return error if not...

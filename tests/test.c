@@ -1,1 +1,1 @@
-// line comment
+/**block comment*/
