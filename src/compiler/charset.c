@@ -477,32 +477,6 @@ void charset_free(charset* s)
     free(s);
 }
 
-// /**
-//  * Hash the charset object with a modified version of fnv1a.
-//  */
-// uint64_t charset_hash(charset* s)
-// {
-//     // create a uint64_t list of data in the charset
-//     uint64_t* values = malloc(sizeof(uint64_t) * charset_size(s));
-//     for (size_t i = 0; i < charset_size(s); i++)
-//     {
-//         // merge start/stop uint32_t into a single uint64_t
-//         uint64_t val = 0;
-//         val += s->ranges[i].start;
-//         val <<= 32;
-//         val += s->ranges[i].stop;
-//         values[i] = val;
-//     }
-
-//     // hash the sequence and return the result
-//     uint64_t hash = hash_uint_sequence(values, charset_size(s));
-//     free(values);
-//     return hash;
-// }
-// uint64_t utilities_identity_getval(void* seq, size_t i) {
-//    return ((uint64_t*)seq)[i];
-//}
-
 /**
  * Helper function for extracting a single uint64_t from a charset range for the hash sequence function.
  */
@@ -512,6 +486,9 @@ uint64_t charset_hash_lambda(void* seq, size_t i)
     return ((uint64_t)r.start) << 32 | r.stop;
 }
 
+/**
+ * Hash the charset by treating the range sequence as a sequence of uint64_t values.
+ */
 uint64_t charset_hash(charset* s) { return hash_uint_lambda_sequence(s, s->size, charset_hash_lambda); }
 
 #endif
