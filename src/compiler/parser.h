@@ -41,6 +41,7 @@ bool parser_parse(parser_context* con);
 // internal helper functions for running the parser
 void parser_generate_labels();
 vect* parser_get_labels();
+bool parser_is_slot_prev_symbol_dollar(vect* body, uint64_t dot);
 void parser_handle_label(slot* label, parser_context* con);
 void parser_print_label(slot* label);
 

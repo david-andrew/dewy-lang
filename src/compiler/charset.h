@@ -54,6 +54,7 @@ int charset_strlen(charset* s);
 void charset_repr(charset* s);
 void charset_free(charset* s);
 // int64_t charset_compare(charset* left, charset* right);
+uint64_t charset_hash_lambda(void* seq, size_t i);
 uint64_t charset_hash(charset* s);
 
 #endif

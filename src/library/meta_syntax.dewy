@@ -12,6 +12,7 @@
 #block_comment = '/' '{' (#block_comment | #block_string)* '}/';       // block comment, with allowed nested block comments
 #ws = (#wschar | #line_comment | #block_comment)*;          // optional whitespace sequence
 #anyset = '\\' [uUxX] | [VUξ];                              // V, U, ξ, \U, \u, \X, or \x used to indicate any unicode character
+#dollar = '#$';                                             // indicates end of input (represented as a null terminator)
 #hex = '\\' [uUxX] [0-9a-fA-F]+ / [0-9a-fA-F];              // hex number literal. Basically skipping the number part makes it #any
 #number = [0-9]+ / [0-9];                                   // decimal number literal. Used to indicate # of repetitions
 #charsetchar = ξ - [\-\[\]] - #wschar;                      // characters allowed in a set are any unicode excluding '-', '[', or ']', and whitespace

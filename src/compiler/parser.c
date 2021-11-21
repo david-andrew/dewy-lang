@@ -153,6 +153,11 @@ void parser_generate_labels()
  */
 vect* parser_get_labels() { return parser_labels; }
 
+bool parser_is_slot_prev_symbol_dollar(vect* body, uint64_t dot)
+{
+    return dot != 0 && *(uint64_t*)vect_get(body, dot - 1)->data == metaparser_get_dollar_symbol_idx();
+}
+
 /**
  * perform the CNP parsing actions for the given label
  */
@@ -164,13 +169,23 @@ void parser_handle_label(slot* label, parser_context* con)
     vect* body = metaparser_get_production_body(label->head_idx, label->production_idx);
     if (label->dot == 0 && vect_size(body) == 0)
     {
-        bsr* empty = new_prod_bsr(label->head_idx, label->production_idx, con->cI, con->cI, con->cI);
-        parser_bsr_add_helper(empty, con);
+        bsr empty = new_prod_bsr_struct(label->head_idx, label->production_idx, con->cI, con->cI, con->cI);
+        parser_bsr_add_helper(&empty, con);
     }
     else
     {
+        // handle all sequential terminals in the production body
         while (dot < vect_size(body))
         {
+            // if the last symbol was the special terminal #$, return
+            if (parser_is_slot_prev_symbol_dollar(body, dot))
+            {
+                parser_bsr_add(&(slot){label->head_idx, label->production_idx, dot}, con->cU, con->cI - 1, con->cI - 1,
+                               con);
+                parser_return(label->head_idx, con->cU, con->cI - 1, con);
+                return;
+            }
+
             if (!metaparser_is_symbol_terminal(*(uint64_t*)vect_get(body, dot)->data)) { break; }
             if (dot != 0)
             {
@@ -195,6 +210,15 @@ void parser_handle_label(slot* label, parser_context* con)
         }
     }
 
+    // same dollar symbol check as above
+    if (parser_is_slot_prev_symbol_dollar(body, dot))
+    {
+        parser_bsr_add(&(slot){label->head_idx, label->production_idx, dot}, con->cU, con->cI - 1, con->cI - 1, con);
+        parser_return(label->head_idx, con->cU, con->cI - 1, con);
+        return;
+    }
+
+    // handle next non-terminal in the production body
     if (label->dot == vect_size(body) ||
         (dot == vect_size(body) && metaparser_is_symbol_terminal(*(uint64_t*)vect_get(body, dot - 1)->data)))
     {
@@ -228,6 +252,18 @@ void parser_print_label(slot* label)
     {
         while (dot < vect_size(body))
         {
+            // if the last symbol was the special terminal #$, return
+            if (parser_is_slot_prev_symbol_dollar(body, dot))
+            {
+                printf("    parser_bsr_add(");
+                slot_str(&(slot){label->head_idx, label->production_idx, dot});
+                printf(", cU, cI - 1, cI - 1);\n");
+                printf("    rtn(");
+                obj_str(metaparser_get_symbol(label->head_idx));
+                printf(", cU, cI - 1);\n");
+                return;
+            }
+
             if (!metaparser_is_symbol_terminal(*(uint64_t*)vect_get(body, dot)->data)) { break; }
             if (dot != 0)
             {
@@ -260,6 +296,18 @@ void parser_print_label(slot* label)
             slot_str(&(slot){label->head_idx, label->production_idx, dot});
             printf(", cU, cI);\n");
         }
+    }
+
+    // same dollar symbol check as above
+    if (parser_is_slot_prev_symbol_dollar(body, dot))
+    {
+        printf("    parser_bsr_add(");
+        slot_str(&(slot){label->head_idx, label->production_idx, dot});
+        printf(", cU, cI - 1, cI - 1);\n");
+        printf("    rtn(");
+        obj_str(metaparser_get_symbol(label->head_idx));
+        printf(", cU, cI - 1);\n");
+        return;
     }
 
     if (label->dot == vect_size(body) ||
@@ -475,7 +523,8 @@ void parser_compute_symbol_firsts()
         if (!metaparser_is_symbol_terminal(symbol_idx)) { continue; }
         fset* symbol_fset = vect_get(parser_symbol_firsts, symbol_idx)->data;
         fset_add(symbol_fset, new_uint_obj(symbol_idx));
-        symbol_fset->special = false;
+        symbol_fset->special =
+            symbol_idx == metaparser_get_dollar_symbol_idx(); // dollar symbol is a special nullable terminal
     }
 
     // compute first for all non-terminal symbols. update each set until no new changes occur
@@ -519,7 +568,7 @@ void parser_compute_symbol_follows()
     // steps for computing follow sets:
     // 1. place $ in FOLLOW(S) where S is the start symbol and $ is the input right endmarker
     // 2. If there is a production A -> αBβ, then everything in FIRST(β) except ϵ is in FOLLOW(B)
-    // 3. if there is a production A -> αB, or a production A -> αBβ where FIRST(β) contains ϵ, then everything in
+    // 3. if there is a production A -> αB, or a production A -> αBβ where FIRST(β) contains ϵ or #$, then everything in
     //    FOLLOW(A) is in FOLLOW(B)
 
     set* symbols = metaparser_get_symbols();
@@ -559,7 +608,7 @@ void parser_compute_symbol_follows()
                     // create a substring beta of the body from i + 1 to the end, and compute its first set
                     slice beta = slice_struct(body, i + 1, vect_size(body), NULL);
                     fset* beta_first = parser_first_of_string(&beta);
-                    bool nullable = beta_first->special; // save nullable status
+                    bool nullable = beta_first->special || fset_contains_c(beta_first, 0); // save nullable status
 
                     // get union first of beta into the follow set of the symbol (ignoring epsilon)
                     fset* symbol_follow = vect_get(parser_symbol_follows, *symbol_idx)->data;

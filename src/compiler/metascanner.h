@@ -49,6 +49,7 @@ obj* match_meta_caseless_char(char** src);
 obj* match_meta_hex_number(char** src);
 obj* match_meta_dec_number(char** src);
 obj* match_meta_anyset(char** src);
+obj* match_meta_dollar(char** src);
 obj* match_meta_escape(char** src);
 obj* match_meta_charset_char(char** src);
 obj* match_meta_epsilon(char** src);

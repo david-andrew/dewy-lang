@@ -1,3 +1,4 @@
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -235,7 +236,8 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
     parser_context context = parser_context_struct(source, length, start_symbol_idx, true);
     printf("PARSING INPUT:\n```\n");
     ustring_str(source);
-    printf("\n```\n\n");
+    printf("\n```\nlength = %" PRIu64 "\n\n", length);
+
     bool success = parser_parse(&context);
     printf(success ? "PARSE SUCCEEDED\n\n" : "PARSE FAILED\n\n");
 

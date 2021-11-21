@@ -35,7 +35,7 @@ vect* metaparser_unused_ast_cache; // vect containing all ASTs not inserted into
 
 // convenience variables for the frequently used epsilon production body, and $ endmarker terminal.
 uint64_t metaparser_eps_body_idx = NULL_SYMBOL_INDEX;
-// uint64_t metaparser_endmarker_symbol_idx = NULL_SYMBOL_INDEX;
+uint64_t metaparser_dollar_symbol_idx = NULL_SYMBOL_INDEX;
 uint64_t metaparser_start_symbol_idx = NULL_SYMBOL_INDEX;
 
 /**
@@ -431,6 +431,30 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             {
                 // assign this identifier the null head
                 head_idx = nonterminal_idx;
+            }
+            break;
+        }
+        case metaast_dollar:
+        {
+            // dollar behaves like an identifier, just that it indicates the end of a sentence
+            uint64_t dollar_idx = metaparser_get_dollar_symbol_idx();
+
+            if (!anonymous)
+            {
+                // create a sentence with the dollar in it
+                vect* sentence = new_vect();
+                vect_append(sentence, new_uint_obj(dollar_idx));
+
+                // add the sentence to the grammar
+                uint64_t body_idx = metaparser_add_body(sentence);
+
+                // insert the production
+                metaparser_add_production(head_idx, body_idx);
+            }
+            else
+            {
+                // assign this identifier the null head
+                head_idx = dollar_idx;
             }
             break;
         }
@@ -886,19 +910,19 @@ uint64_t metaparser_get_eps_body_idx()
     return metaparser_eps_body_idx;
 }
 
-// /**
-//  * Return the symbol index of the endmarker terminal $.
-//  */
-// uint64_t metaparser_get_endmarker_symbol_idx()
-// {
-//     if (metaparser_endmarker_symbol_idx == NULL_SYMBOL_INDEX)
-//     {
-//         // endmarker terminal is represented as a special charset containing 0x200000
-//         charset* endmarker = charset_get_endmarker();
-//         metaparser_endmarker_symbol_idx = metaparser_add_symbol(new_charset_obj(endmarker));
-//     }
-//     return metaparser_endmarker_symbol_idx;
-// }
+/**
+ * Return the symbol index of the endmarker terminal $.
+ */
+uint64_t metaparser_get_dollar_symbol_idx()
+{
+    if (metaparser_dollar_symbol_idx == NULL_SYMBOL_INDEX)
+    {
+        // endmarker terminal is represented as a special charset containing 0x200000
+        charset* endmarker = charset_get_endmarker();
+        metaparser_dollar_symbol_idx = metaparser_add_symbol(new_charset_obj(endmarker));
+    }
+    return metaparser_dollar_symbol_idx;
+}
 
 /**
  * Get the index of the augmented start symbol for the grammar.

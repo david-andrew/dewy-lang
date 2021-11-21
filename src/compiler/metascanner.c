@@ -34,6 +34,7 @@ metascan_fn rule_funcs[] = {
     match_meta_hex_number,
     match_meta_dec_number,
     match_meta_anyset,
+    match_meta_dollar,
     match_meta_ampersand,
     match_meta_period,
     match_meta_star,
@@ -221,50 +222,52 @@ obj* scan(char** src)
         for (size_t i = 0; i < len(funcs); i++)                                                                        \
             if ((t = funcs[i](src))) return t;
 
-        scan_for(scan_root, root_funcs) scan_for(scan_meta_rule, rule_funcs) scan_for(scan_charset_body, charset_funcs)
-            scan_for(scan_single_quote_string_body, single_quote_string_funcs)
-                scan_for(scan_double_quote_string_body, double_quote_string_funcs)
-                    scan_for(scan_caseless_string_body, caseless_string_funcs)
-                        scan_for(scan_metafunc_body, metafunc_body_funcs)
+        scan_for(scan_root, root_funcs);
+        scan_for(scan_meta_rule, rule_funcs);
+        scan_for(scan_charset_body, charset_funcs);
+        scan_for(scan_single_quote_string_body, single_quote_string_funcs);
+        scan_for(scan_double_quote_string_body, double_quote_string_funcs);
+        scan_for(scan_caseless_string_body, caseless_string_funcs);
+        scan_for(scan_metafunc_body, metafunc_body_funcs);
 
-            // if (state == scan_root)
-            //     for (size_t i = 0; i < len(root_funcs); i++)
-            //         if ((t = root_funcs[i](src)))
-            //             return t;
+        // if (state == scan_root)
+        //     for (size_t i = 0; i < len(root_funcs); i++)
+        //         if ((t = root_funcs[i](src)))
+        //             return t;
 
-            // if (state == scan_meta_rule)
-            //     for (size_t i = 0; i < len(rule_funcs); i++)
-            //         if ((t = rule_funcs[i](src)))
-            //             return t;
+        // if (state == scan_meta_rule)
+        //     for (size_t i = 0; i < len(rule_funcs); i++)
+        //         if ((t = rule_funcs[i](src)))
+        //             return t;
 
-            // if (state == scan_charset_body)
-            //     for (size_t i = 0; i < len(charset_funcs); i++)
-            //         if ((t = charset_funcs[i](src)))
-            //             return t;
+        // if (state == scan_charset_body)
+        //     for (size_t i = 0; i < len(charset_funcs); i++)
+        //         if ((t = charset_funcs[i](src)))
+        //             return t;
 
-            // if (state == scan_single_quote_string_body)
-            //     for (size_t i = 0; i < len(single_quote_string_funcs); i++)
-            //         if ((t = single_quote_string_funcs[i](src)))
-            //             return t;
+        // if (state == scan_single_quote_string_body)
+        //     for (size_t i = 0; i < len(single_quote_string_funcs); i++)
+        //         if ((t = single_quote_string_funcs[i](src)))
+        //             return t;
 
-            // if (state == scan_double_quote_string_body)
-            //     for (size_t i = 0; i < len(double_quote_string_funcs); i++)
-            //         if ((t = double_quote_string_funcs[i](src)))
-            //             return t;
+        // if (state == scan_double_quote_string_body)
+        //     for (size_t i = 0; i < len(double_quote_string_funcs); i++)
+        //         if ((t = double_quote_string_funcs[i](src)))
+        //             return t;
 
-            // if (state == scan_caseless_string_body)
-            //     for (size_t i = 0; i < len(caseless_string_funcs); i++)
-            //         if ((t = caseless_string_funcs[i](src)))
-            //             return t;
+        // if (state == scan_caseless_string_body)
+        //     for (size_t i = 0; i < len(caseless_string_funcs); i++)
+        //         if ((t = caseless_string_funcs[i](src)))
+        //             return t;
 
-            // if (state == scan_metafunc_body)
-            //     for (size_t i = 0; i < len(metafunc_body_funcs); i++)
-            //         if ((t = metafunc_body_funcs[i](src)))
-            //             return t;
+        // if (state == scan_metafunc_body)
+        //     for (size_t i = 0; i < len(metafunc_body_funcs); i++)
+        //         if ((t = metafunc_body_funcs[i](src)))
+        //             return t;
 
-            // Scan until run out of whitespace and comments.
-            // if all peek functions fail, that means the next char should be non-ignorable
-            if (state == scan_peek)
+        // Scan until run out of whitespace and comments.
+        // if all peek functions fail, that means the next char should be non-ignorable
+        if (state == scan_peek)
         {
             for (size_t i = 0; i < len(scan_peek_funcs); i++)
                 if ((t = scan_peek_funcs[i](src))) return t;
@@ -469,6 +472,22 @@ obj* match_meta_anyset(char** src)
     else if ((*src)[0] == '\\' && is_hex_escape((*src)[1]))
     {
         obj* t = new_metatoken_obj(meta_anyset, ustring_charstar_substr((*src), 0, 1));
+        *src += 2;
+        return t;
+    }
+    return NULL;
+}
+
+/**
+ * #$ is a special character that matches for the end of the input.
+ *
+ * #dollar = '#$';
+ */
+obj* match_meta_dollar(char** src)
+{
+    if ((*src)[0] == '#' && (*src)[1] == '$')
+    {
+        obj* t = new_metatoken_obj(meta_dollar, ustring_charstar_substr((*src), 0, 1));
         *src += 2;
         return t;
     }

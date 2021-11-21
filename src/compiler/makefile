@@ -23,7 +23,7 @@ dewy_compiler_compiler.o: dewy_compiler_compiler.c metaast.h metaparser.h metasc
 dictionary.o: dictionary.c dictionary.h object.h utilities.h
 	clang -c -o dictionary.o dictionary.c
 
-fset.o: fset.c fset.h charset.h object.h set.h metaparser.h
+fset.o: fset.c fset.h charset.h object.h set.h metaparser.h ustring.h
 	clang -c -o fset.o fset.c
 
 metaast.o: metaast.c metaast.h charset.h metatoken.h object.h set.h vector.h ustring.h utilities.h

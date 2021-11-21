@@ -181,6 +181,7 @@ void metatoken_str(metatoken* t)
             break;
         case meta_epsilon: printf("ϵ"); break;
         case meta_anyset: printf("ξ"); break;
+        case meta_dollar: printf("#$"); break;
         case meta_hex_number:
             printf("\\x");
             ustring_str(t->content);
@@ -204,16 +205,38 @@ void metatoken_repr(metatoken* t)
 
     switch (t->type)
     {
-        printenum(hashtag) printenum(meta_char) printenum(meta_single_quote) printenum(meta_double_quote)
-            printenum(meta_hex_number) printenum(meta_dec_number) printenum(meta_escape) printenum(meta_charset_char)
-                printenum(meta_anyset) printenum(meta_epsilon) printenum(meta_ampersand) printenum(meta_period)
-                    printenum(meta_star) printenum(meta_plus) printenum(meta_question_mark) printenum(meta_tilde)
-                        printenum(meta_semicolon) printenum(meta_vertical_bar) printenum(meta_minus)
-                            printenum(meta_forward_slash) printenum(meta_greater_than) printenum(meta_less_than)
-                                printenum(meta_equals_sign) printenum(meta_left_parenthesis)
-                                    printenum(meta_right_parenthesis) printenum(meta_left_bracket)
-                                        printenum(meta_right_bracket) printenum(meta_left_brace)
-                                            printenum(meta_right_brace) printenum(whitespace) printenum(comment)
+        printenum(hashtag);
+        printenum(meta_char);
+        printenum(meta_single_quote);
+        printenum(meta_double_quote);
+        printenum(meta_hex_number);
+        printenum(meta_dec_number);
+        printenum(meta_escape);
+        printenum(meta_charset_char);
+        printenum(meta_anyset);
+        printenum(meta_dollar);
+        printenum(meta_epsilon);
+        printenum(meta_ampersand);
+        printenum(meta_period);
+        printenum(meta_star);
+        printenum(meta_plus);
+        printenum(meta_question_mark);
+        printenum(meta_tilde);
+        printenum(meta_semicolon);
+        printenum(meta_vertical_bar);
+        printenum(meta_minus);
+        printenum(meta_forward_slash);
+        printenum(meta_greater_than);
+        printenum(meta_less_than);
+        printenum(meta_equals_sign);
+        printenum(meta_left_parenthesis);
+        printenum(meta_right_parenthesis);
+        printenum(meta_left_bracket);
+        printenum(meta_right_bracket);
+        printenum(meta_left_brace);
+        printenum(meta_right_brace);
+        printenum(whitespace);
+        printenum(comment);
     }
     printf("(`");
     ustring_str(t->content);
