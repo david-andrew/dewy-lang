@@ -307,14 +307,8 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
             }
             // set up a new parsing context starting from cI to match for this rule
             uint64_t* head_idx = right->data;
-            printf("running subparse of ");
-            obj_str(metaparser_get_symbol(*head_idx));
-            printf(" on substring: \"");
-            ustring_str(&con->I[con->cI]);
-            printf("\"\n");
             parser_context subcon = parser_context_struct(&con->I[con->cI], con->m - con->cI, *head_idx, false);
             bool result = parser_parse(&subcon);
-            printf(result ? "subparse succeeded\n" : "subparse failed\n");
             release_parser_context(&subcon);
             if (result) return false; // success means the rule is rejected
         }
@@ -348,14 +342,8 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
         uint64_t* head_idx = right->data;
         uint32_t saved_char = con->I[con->cI]; // save the I[cI] so we can set it to \0 for the subparse
         con->I[con->cI] = 0;
-        printf("running subparse of ");
-        obj_str(metaparser_get_symbol(*head_idx));
-        printf(" on substring: \"");
-        ustring_str(&con->I[con->cU]);
-        printf("\"\n");
         parser_context subcon = parser_context_struct(&con->I[con->cU], con->cI - con->cU, *head_idx, true);
         bool result = parser_parse(&subcon);
-        printf(result ? "subparse succeeded\n" : "subparse failed\n");
         release_parser_context(&subcon);
         con->I[con->cI] = saved_char; // restore the I[cI]
         if (result) return false;     // success means the rule is rejected
