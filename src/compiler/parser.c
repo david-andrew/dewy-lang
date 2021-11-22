@@ -293,13 +293,6 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
         }
         else if (right->type == UnicodeString_t)
         {
-            printf("checking nofollow on ");
-            obj_str(metaparser_get_symbol(head_idx));
-            printf(" for prefix `");
-            obj_str(right);
-            printf("` with input ```\n");
-            ustring_str(&con->I[con->cI]);
-            printf("\n```\n");
             if (ustring_prefix_match(&con->I[con->cI], right->data)) return false;
         }
 
@@ -312,9 +305,19 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
     right = metaparser_get_reject_entry(head_idx);
     if (right != NULL)
     {
+        if (right->type == CharSet_t)
+        {
+            if (con->cI - con->cU == 1 && charset_contains_c(right->data, con->I[con->cU])) return false;
+        }
+        else if (right->type == UnicodeString_t)
+        {
+            if (con->cI - con->cU == ustring_len(right->data) && ustring_prefix_match(&con->I[con->cU], right->data))
+                return false;
+        }
+
         // TODO
-        printf("ERROR: handling reject is not yet implemented\n");
-        return false;
+        printf("ERROR: handling reject is not yet implemented for general rules\n");
+        // return false;
     }
 
     return true;
