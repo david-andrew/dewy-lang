@@ -17,6 +17,7 @@ void metaparser_rules_repr();
 void metaparser_rules_str();
 void metaparser_rule_str(obj* head, vect* body);
 void metaparser_production_str(uint64_t head_idx, uint64_t production_idx);
+void metaparser_filter_str(obj* right);
 bool metaparser_is_valid_rule(vect* tokens);
 obj* metaparser_get_rule_head(vect* tokens);
 vect* metaparser_get_rule_body(vect* tokens);
@@ -40,5 +41,7 @@ void metaparser_add_production(uint64_t head_idx, uint64_t body_idx);
 set* metaparser_get_production_bodies(uint64_t head_idx);
 vect* metaparser_get_production_body(uint64_t head_idx, uint64_t production_idx);
 void metaparser_set_start_symbol(uint64_t symbol_idx);
+void metaparser_add_nofollow(uint64_t left_idx, obj* right);
+void metaparser_add_reject(uint64_t left_idx, obj* right);
 
 #endif
