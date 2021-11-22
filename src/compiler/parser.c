@@ -225,7 +225,9 @@ void parser_print_label(slot* label)
     vect* body = metaparser_get_production_body(label->head_idx, label->production_idx);
     if (label->dot == 0 && vect_size(body) == 0)
     {
-        printf("    Y.add((SubTerm(label.head, Sentence([])), cI, cI, cI))\n");
+        printf("    insert (");
+        obj_str(metaparser_get_symbol(label->head_idx));
+        printf(" -> ϵ, cI, cI, cI) into Y\n");
     }
     else
     {
@@ -470,10 +472,10 @@ void parser_call(slot* L, uint64_t i, uint64_t j, parser_context* con)
             if (h_set_obj != NULL)
             {
                 set* h_set = h_set_obj->data;
-                for (size_t i = 0; i < set_size(h_set); i++)
+                for (size_t k = 0; k < set_size(h_set); k++)
                 {
                     // full action tuples are (X, j, h)
-                    uint64_t* h = set_get_at_index(h_set, i)->data;
+                    uint64_t* h = set_get_at_index(h_set, k)->data;
                     parser_descriptor_add(L, i, *h, con);
                     parser_bsr_add(L, i, j, *h, con);
                 }
