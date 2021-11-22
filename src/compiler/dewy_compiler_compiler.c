@@ -250,15 +250,14 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
     }
 
     // TODO->have variable for other structures from context
-
-    // {
-    //     printf("DESCRIPTOR SET:\n");
-    //     set_str(context.U);
-    //     printf("\n\n");
-    //     printf("ACTION SET:\n");
-    //     crf_action_P_str(context.P);
-    //     printf("\n\n");
-    // }
+    {
+        printf("DESCRIPTOR SET:\n");
+        set_str(context.U);
+        printf("\n\n");
+        printf("ACTION SET:\n");
+        crf_action_P_str(context.P);
+        printf("\n\n");
+    }
 
     if (bsr)
     {
