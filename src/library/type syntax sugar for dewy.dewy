@@ -1,0 +1,16 @@
+/{
+type syntax sugar for dewy
+[A...] expands to vect<A>
+[A, A, A] expands to tuple3<A, A, A>
+[A: int] expands to obj<A:int>
+
+what about vectors with known lengths
+[A..., ]<length: int> perhaps expands to vect<A, length: int>
+and then code that uses the vect length can be statically typechecked
+TBD on this syntax. perhaps to start, just use the verbose syntax
+look at julia for example on how they do their syntax
+
+probably only build in types can be used for the sugar, so for domain specific stuff where you want your own syntax, you'd have to define that syntax you self.
+}/
+
+//TODO->convert this to a grammar for type syntax

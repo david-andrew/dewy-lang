@@ -237,6 +237,15 @@ void metaparser_rules_str()
             metaparser_filter_str(result);
             printf("\n");
         }
+        result = dict_get(metaparser_reject_table, &(obj){.type = UInteger_t, .data = head_idx});
+        if (result != NULL)
+        {
+            printf(">>>> ");
+            obj_str(head);
+            printf(" - ");
+            metaparser_filter_str(result);
+            printf("\n");
+        }
     }
 }
 
@@ -787,14 +796,22 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 
         // TODO->filters/other extensions of the parser
         case metaast_nofollow:
+        case metaast_reject:
         {
             // crete an anonymous head if it wasn't provided
             head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
 
+            // nofollow filter
             //#rule = #A / #B =>
             //  #rule = #__0
             //  #__0 = #A
             //  nofollow_table[#__A] = #B
+
+            // reject filter
+            //#rule = #A - #B =>
+            //  #rule = #__0
+            //  #__0 = #A
+            //  reject_table[#__A] = #B
 
             // get the identifier for the left node
             uint64_t left_idx = metaparser_get_symbol_or_anonymous(body_ast->node.binary.left);
@@ -814,47 +831,38 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 
             // nofollow_table[#__A] = #B
             // check if the nofollow ast is a single charset, or a regular ustring
+            obj* right;
             if (body_ast->node.binary.right->type == metaast_charset)
             {
                 // nofollow is a single charset
-                charset* cs = charset_clone(body_ast->node.binary.right->node.cs);
-                metaparser_add_nofollow(left_idx, new_charset_obj(cs));
+                right = new_charset_obj(charset_clone(body_ast->node.binary.right->node.cs));
             }
             else if (body_ast->node.binary.right->type == metaast_string)
             {
                 // nofollow is a regular ustring
-                uint32_t* str = ustring_clone(body_ast->node.binary.right->node.string);
-                metaparser_add_nofollow(left_idx, new_ustring_obj(str));
+                right = new_ustring_obj(ustring_clone(body_ast->node.binary.right->node.string));
             }
             else // harder case of non charset/string match, so filter will run a full sub-parse on input following #A
             {
                 // nofollow is a full parse of the right hand side
-                uint64_t right_idx = metaparser_get_symbol_or_anonymous(body_ast->node.binary.right);
-                metaparser_add_nofollow(left_idx, new_uint_obj(right_idx));
+                right = new_uint_obj(metaparser_get_symbol_or_anonymous(body_ast->node.binary.right));
+            }
+
+            // insert the restriction according to the filter type
+            if (body_ast->type == metaast_nofollow)
+            {
+                // add the restriction to the nofollow table
+                metaparser_add_nofollow(left_idx, right);
+            }
+            else // if (type == metaast_reject)
+            {
+                // add the restriction to the reject table
+                metaparser_add_reject(left_idx, right);
             }
 
             break;
         }
-        case metaast_reject:
-            printf("ERROR: Cannot generate CFG sentence as reject `-` operator has not yet been implemented\n");
-            exit(1);
         case metaast_greaterthan:
-            // {
-            //     //crete an anonymous head if it wasn't provided
-            //     head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
-
-            //     //#rule = #A > #B =>
-            //     // #rule = #A
-            //     // #rule = #B
-            //     // insert special case of #A > #B in the grammar
-
-            //     metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.left);
-            //     metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.right);
-
-            //     //set the precedence of #A > #B in the special precedence table
-            //     metaparser_set_rule_precedence
-
-            // }
             printf("ERROR: Cannot generate CFG sentence as greater than `>` operator has not yet been implemented\n");
             exit(1);
         case metaast_lessthan:
@@ -1178,6 +1186,21 @@ void metaparser_add_nofollow(uint64_t left_idx, obj* right)
  * Insert a reject restriction that says the left expression may not derive a sequence also derivable by the right
  * expression.
  */
-void metaparser_add_reject(uint64_t left_idx, obj* right) {}
+void metaparser_add_reject(uint64_t left_idx, obj* right)
+{
+    // verify that the left_idx is not already in the nofollow set (this should always be true)
+    if (dict_contains_uint_key(metaparser_reject_table, left_idx))
+    {
+        printf("ERROR: metaparser_reject already contains left_idx %" PRIu64 "\n", left_idx);
+        obj_str(metaparser_get_symbol(left_idx));
+        printf(" - ");
+        obj_str(right);
+        printf("\n");
+        exit(1);
+    }
+
+    // map from left_idx to right in the nofollow table
+    dict_set(metaparser_reject_table, new_uint_obj(left_idx), right);
+}
 
 #endif
