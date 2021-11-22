@@ -1,15 +1,10 @@
-#reject_example = (ξ* - #D) #E;
-#D = '3abcd' | '567890' | 'apple' | 'banana' | 'peach';
-#E = '12345';
+#block_comment = '/*' (ξ* - '*/') '*/'; 
+#line_comment = '/\/' '\n'~* / '\n'~;
+#ws = [\n\x20];
+#s = ' ';
 
-#nofollow_example = #A #B;
-#A = (ξ - [0-9])* / ('1234' | '3abcd' | '567890');
-#B = [0-9a-d]*;
-//#C = '1234';
-
-//#block_comment = '/*' (ξ* - '*/') '*/'; 
-//#reject_example = ξ* - 'apple';
-//#line_comment = '/\/' '\n'~* / '\n'~;
+#incl = '#include <' #id '.h>';
+#id = [A-Za-z] [A-Za-z0-9]* / [A-Za-z0-9]; 
 
 
 

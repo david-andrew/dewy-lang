@@ -328,25 +328,26 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
             if (con->cI - con->cU == ustring_len(right->data) && ustring_prefix_match(&con->I[con->cU], right->data))
                 return false;
         }
-
-        // perform a full parse over the range of this rule in the input
-        if (right->type != UInteger_t)
+        else
         {
-            printf("ERROR: unkown type %d for reject filter. ", right->type);
-            obj_str(right);
-            printf("\n");
-            exit(1);
+            // perform a full parse over the range of this rule in the input
+            if (right->type != UInteger_t)
+            {
+                printf("ERROR: unkown type %d for reject filter. ", right->type);
+                obj_str(right);
+                printf("\n");
+                exit(1);
+            }
+            // set up a new parsing context starting from cU to match for this rule.
+            uint64_t* head_idx = right->data;
+            uint32_t saved_char = con->I[con->cI]; // save the I[cI] so we can set it to \0 for the subparse
+            con->I[con->cI] = 0;
+            parser_context subcon = parser_context_struct(&con->I[con->cU], con->cI - con->cU, *head_idx, true);
+            bool result = parser_parse(&subcon);
+            release_parser_context(&subcon);
+            con->I[con->cI] = saved_char; // restore the I[cI]
+            if (result) return false;     // success means the rule is rejected
         }
-
-        // set up a new parsing context starting from cU to match for this rule.
-        uint64_t* head_idx = right->data;
-        uint32_t saved_char = con->I[con->cI]; // save the I[cI] so we can set it to \0 for the subparse
-        con->I[con->cI] = 0;
-        parser_context subcon = parser_context_struct(&con->I[con->cU], con->cI - con->cU, *head_idx, true);
-        bool result = parser_parse(&subcon);
-        release_parser_context(&subcon);
-        con->I[con->cI] = saved_char; // restore the I[cI]
-        if (result) return false;     // success means the rule is rejected
     }
 
     // no filters disqualified this rule
