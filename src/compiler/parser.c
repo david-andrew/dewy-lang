@@ -307,8 +307,14 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
             }
             // set up a new parsing context starting from cI to match for this rule
             uint64_t* head_idx = right->data;
+            printf("running subparse of ");
+            obj_str(metaparser_get_symbol(*head_idx));
+            printf(" on substring: \"");
+            ustring_str(&con->I[con->cI]);
+            printf("\"\n");
             parser_context subcon = parser_context_struct(&con->I[con->cI], con->m - con->cI, *head_idx, false);
             bool result = parser_parse(&subcon);
+            printf(result ? "subparse succeeded\n" : "subparse failed\n");
             release_parser_context(&subcon);
             if (result) return false; // success means the rule is rejected
         }
@@ -329,11 +335,33 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
                 return false;
         }
 
-        // TODO
-        printf("ERROR: handling reject is not yet implemented for general rules\n");
-        // return false;
+        // perform a full parse over the range of this rule in the input
+        if (right->type != UInteger_t)
+        {
+            printf("ERROR: unkown type %d for reject filter. ", right->type);
+            obj_str(right);
+            printf("\n");
+            exit(1);
+        }
+
+        // set up a new parsing context starting from cU to match for this rule.
+        uint64_t* head_idx = right->data;
+        uint32_t saved_char = con->I[con->cI]; // save the I[cI] so we can set it to \0 for the subparse
+        con->I[con->cI] = 0;
+        printf("running subparse of ");
+        obj_str(metaparser_get_symbol(*head_idx));
+        printf(" on substring: \"");
+        ustring_str(&con->I[con->cU]);
+        printf("\"\n");
+        parser_context subcon = parser_context_struct(&con->I[con->cU], con->cI - con->cU, *head_idx, true);
+        bool result = parser_parse(&subcon);
+        printf(result ? "subparse succeeded\n" : "subparse failed\n");
+        release_parser_context(&subcon);
+        con->I[con->cI] = saved_char; // restore the I[cI]
+        if (result) return false;     // success means the rule is rejected
     }
 
+    // no filters disqualified this rule
     return true;
 }
 
@@ -499,7 +527,7 @@ void parser_bsr_add_helper(bsr* b, parser_context* con)
         uint64_t b_idx = set_add(con->Y, b_obj);
 
         // check if the BSR matches a success BSR
-        if (b->type == prod_bsr && b->head_idx == con->start_idx && b->i == 0 && (con->whole_input || b->k == con->m))
+        if (b->type == prod_bsr && b->head_idx == con->start_idx && b->i == 0 && (!con->whole_input || b->k == con->m))
         {
             // save the index of this success BSR
             set_add(con->results, new_uint_obj(b_idx));
