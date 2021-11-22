@@ -36,7 +36,9 @@ int main(int argc, char* argv[])
                " -p parser CFG\n"
                " -f first/follow sets\n"
                " -l grammar labels\n"
+               " -i input string\n"
                " -c Call Return Forest\n"
+               " -d Descriptor & Action sets\n"
                " -b Binary Subtree Representation\n"
                " -r results BSR\n"
                " -a ast\n"
@@ -60,21 +62,25 @@ int main(int argc, char* argv[])
     match_argv(parser, -p);
     match_argv(fsets, -f);
     match_argv(labels, -l);
+    match_argv(input, -i);
     match_argv(crf, -c);
+    match_argv(descriptors, -d);
     match_argv(bsr, -b);
     match_argv(result, -r);
     match_argv(ast, -a);
     match_argv(verbose, --verbose);
 
     // if no sections specified, run all of them
-    if (!(scanner || mast || parser || fsets || labels || crf || bsr || result || ast))
+    if (!(scanner || mast || parser || fsets || labels || input || crf || descriptors || bsr || result || ast))
     {
         scanner = true;
         mast = true;
         parser = true;
         fsets = true;
         labels = true;
+        input = true;
         crf = true;
+        descriptors = true;
         bsr = true;
         result = true;
         ast = true;
@@ -88,7 +94,10 @@ int main(int argc, char* argv[])
     if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, parser)) { goto cleanup; }
 
     initialize_parser();
-    if (!run_compiler(input_source, input_size, fsets, labels, crf, bsr, result, ast, verbose)) { goto cleanup; }
+    if (!run_compiler(input_source, input_size, fsets, labels, input, crf, descriptors, bsr, result, ast, verbose))
+    {
+        goto cleanup;
+    }
 
 cleanup:
     free(grammar_source);
@@ -203,8 +212,8 @@ bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, 
 /**
  * Parse the input file according to the input grammar.
  */
-bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool crf, bool bsr, bool result, bool ast,
-                  bool verbose)
+bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool input, bool crf, bool descriptors,
+                  bool bsr, bool result, bool ast, bool verbose)
 {
     // GRAMMAR FIRST/FOLLOW SET STEP
     if (fsets)
@@ -234,9 +243,13 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
     // parse the input
     uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
     parser_context context = parser_context_struct(source, length, start_symbol_idx, true);
-    printf("PARSING INPUT:\n```\n");
-    ustring_str(source);
-    printf("\n```\n(length = %" PRIu64 ")\n\n", length);
+    if (input)
+    {
+
+        printf("PARSING INPUT:\n```\n");
+        ustring_str(source);
+        printf("\n```\n(length = %" PRIu64 ")\n\n", length);
+    }
 
     bool success = parser_parse(&context);
     printf(success ? "PARSE SUCCEEDED\n\n" : "PARSE FAILED\n\n");
@@ -249,7 +262,7 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
         printf("\n\n");
     }
 
-    // TODO->have variable for other structures from context
+    if (descriptors)
     {
         printf("DESCRIPTOR SET:\n");
         set_str(context.U);
