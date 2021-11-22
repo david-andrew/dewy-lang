@@ -289,7 +289,7 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
     {
         if (right->type == CharSet_t)
         {
-            if (charset_contains_c(right->data, con->I[con->cI])) return false;
+            if (con->I[con->cI] != 0 && charset_contains_c(right->data, con->I[con->cI])) return false;
         }
         else if (right->type == UnicodeString_t)
         {
