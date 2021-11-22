@@ -295,7 +295,7 @@ void metaparser_production_str(uint64_t head_idx, uint64_t production_idx)
 void metaparser_filter_str(obj* right)
 {
     if (right->type == UnicodeString_t || right->type == CharSet_t) { obj_str(right); }
-    else if (right->type == Integer_t)
+    else if (right->type == UInteger_t)
     {
         obj_str(metaparser_get_symbol(*(uint64_t*)(right->data)));
     }
