@@ -852,12 +852,12 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             if (body_ast->type == metaast_nofollow)
             {
                 // add the restriction to the nofollow table
-                metaparser_add_nofollow(left_idx, right);
+                metaparser_add_nofollow(anonymous_head_idx, right);
             }
             else // if (type == metaast_reject)
             {
                 // add the restriction to the reject table
-                metaparser_add_reject(left_idx, right);
+                metaparser_add_reject(anonymous_head_idx, right);
             }
 
             break;
