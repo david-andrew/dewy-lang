@@ -1183,6 +1183,12 @@ void metaparser_add_nofollow(uint64_t left_idx, obj* right)
 }
 
 /**
+ * Return the entry in the nofollow table for the given rule.
+ * returns NULL if there are no restrictions.
+ */
+obj* metaparser_get_nofollow_entry(uint64_t head_idx) { return dict_get_uint_key(metaparser_nofollow_table, head_idx); }
+
+/**
  * Insert a reject restriction that says the left expression may not derive a sequence also derivable by the right
  * expression.
  */
@@ -1202,5 +1208,11 @@ void metaparser_add_reject(uint64_t left_idx, obj* right)
     // map from left_idx to right in the nofollow table
     dict_set(metaparser_reject_table, new_uint_obj(left_idx), right);
 }
+
+/**
+ * Return the entry in the reject table for the given rule.
+ * returns NULL if there are no restrictions.
+ */
+obj* metaparser_get_reject_entry(uint64_t head_idx) { return dict_get_uint_key(metaparser_reject_table, head_idx); }
 
 #endif

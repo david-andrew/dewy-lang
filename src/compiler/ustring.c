@@ -113,6 +113,20 @@ int64_t ustring_charstar_cmp(uint32_t* left, char* right)
 }
 
 /**
+ * Check if the given unicode string starts with the given prefix.
+ */
+bool ustring_prefix_match(uint32_t* str, uint32_t* prefix)
+{
+    uint32_t* s = str;
+    uint32_t* p = prefix;
+    while (*p)
+    {
+        if (*s++ != *p++) { return false; }
+    }
+    return true;
+}
+
+/**
  * Clone a null terminated unicode string.
  */
 uint32_t* ustring_clone(uint32_t* string)

@@ -200,13 +200,14 @@ void parser_handle_label(slot* label, parser_context* con)
     if (label->dot == vect_size(body) ||
         (dot == vect_size(body) && metaparser_is_symbol_terminal(*(uint64_t*)vect_get(body, dot - 1)->data)))
     {
-        // get the followset of the label head
+        // check that the next input character is in the followset of this non-terminal
         fset* follow = parser_follow_of_symbol(label->head_idx);
-        if (fset_contains_c(follow, con->I[con->cI]))
-        {
-            parser_return(label->head_idx, con->cU, con->cI, con);
-            return;
-        }
+        if (!fset_contains_c(follow, con->I[con->cI])) { return; }
+
+        // check that this rule has no filters, or does not fail any of its filters
+        if (!parser_rule_passes_filters(label->head_idx, con)) { return; }
+
+        parser_return(label->head_idx, con->cU, con->cI, con);
     }
 }
 
@@ -274,6 +275,49 @@ void parser_print_label(slot* label)
         printf(", cU, cI);\n");
     }
     printf("    goto L0\n");
+}
+
+/**
+ * When about to return a completed return action, check to ensure that the result should not be excluded by either
+ * nofollow or reject filters.
+ */
+bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
+{
+    // check if this rule has any nofollow filters
+    obj* right = metaparser_get_nofollow_entry(head_idx);
+    if (right != NULL)
+    {
+        if (right->type == CharSet_t)
+        {
+            if (!charset_contains_c(right->data, con->I[con->cI])) return false;
+        }
+        else if (right->type == UnicodeString_t)
+        {
+            printf("checking nofollow on ");
+            obj_str(metaparser_get_symbol(head_idx));
+            printf(" for prefix `");
+            obj_str(right);
+            printf("` with input ```\n");
+            ustring_str(&con->I[con->cI]);
+            printf("\n```\n");
+            if (ustring_prefix_match(&con->I[con->cI], right->data)) return false;
+        }
+
+        // TODO
+        printf("ERROR: handling nofollow is not yet implemented for general rules\n");
+        // return false;
+    }
+
+    // check if this rule has any reject filters
+    right = metaparser_get_reject_entry(head_idx);
+    if (right != NULL)
+    {
+        // TODO
+        printf("ERROR: handling reject is not yet implemented\n");
+        return false;
+    }
+
+    return true;
 }
 
 /**

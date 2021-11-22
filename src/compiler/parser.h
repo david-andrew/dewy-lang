@@ -43,6 +43,7 @@ void parser_generate_labels();
 vect* parser_get_labels();
 void parser_handle_label(slot* label, parser_context* con);
 void parser_print_label(slot* label);
+bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con);
 
 // CNP support functions
 void parser_nonterminal_add(uint64_t head_idx, uint64_t j, parser_context* con);

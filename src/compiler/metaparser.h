@@ -42,6 +42,8 @@ set* metaparser_get_production_bodies(uint64_t head_idx);
 vect* metaparser_get_production_body(uint64_t head_idx, uint64_t production_idx);
 void metaparser_set_start_symbol(uint64_t symbol_idx);
 void metaparser_add_nofollow(uint64_t left_idx, obj* right);
+obj* metaparser_get_nofollow_entry(uint64_t head_idx);
 void metaparser_add_reject(uint64_t left_idx, obj* right);
+obj* metaparser_get_reject_entry(uint64_t head_idx);
 
 #endif
