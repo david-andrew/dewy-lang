@@ -294,14 +294,14 @@ void metaparser_production_str(uint64_t head_idx, uint64_t production_idx)
  */
 void metaparser_filter_str(obj* right)
 {
-    if (right->type == String_t || right->type == CharSet_t) { obj_str(right); }
+    if (right->type == UnicodeString_t || right->type == CharSet_t) { obj_str(right); }
     else if (right->type == Integer_t)
     {
         obj_str(metaparser_get_symbol(*(uint64_t*)(right->data)));
     }
     else
     {
-        printf("ERROR: unknown nofollow type: %d\n", right->type);
+        printf("ERROR: unknown filter right expression type: %d\n", right->type);
         exit(1);
     }
 }
