@@ -1,12 +1,49 @@
-#block_comment = '/*' (ξ* - '*/') '*/'; 
+#program = (#w | #include | #func_decl)*;
+
+#comment = #block_comment | #line_comment;
+#block_comment = '/*' (ξ* - (ξ* '*/')) '*/'; 
 #line_comment = '/\/' '\n'~* / '\n'~;
 #ws = [\n\x20];
-#s = ' ';
+#w = #ws | #comment;
 
-#incl = '#include <' #id '.h>';
-#id = [A-Za-z] [A-Za-z0-9]* / [A-Za-z0-9]; 
+#include = '#include <' #id '.h>';
+#reserved = 'sizeof' | 'if' | 'for' | 'return';
+#id = (([A-Za-z_] [0-9A-Za-z_]*) / [0-9A-Za-z_]) - #reserved;
+#type = #id (#w* '*')*;
+#typed_id = #type #w* #id (#w* '[' #int? ']')?;
+#int = [0-9]+;
+#string = '"' ((ξ - '"')* - #comment) '"';
+#stmnt = #block | #assgn_stmnt | #expr_stmnt | #for_stmnt | #if_stmnt | #return |  ';';
+#assgn_stmnt = (#typed_id | #id) #w* '=' #w* #expr #w* ';';
+#expr_stmnt = #expr #w* ';';
+#expr = #string | #struct_literal | #m_expr;
+#sizeof = 'sizeof' #w* '(' #w* #type #w* ')';
 
+#muldiv = #m_expr #w* [*/%] #w* (#m_expr - #muldiv);
+#addsub = #m_expr #w* [+\-] #w* (#m_expr - #addsub);
+#compare = #m_expr #w* ('==' | '!=' | '<' | '<=' | '>' | '>=') #w* #m_expr;
+#m_expr = #id | #int | #muldiv | #addsub | #func_call | #arr_access | #compare | #sizeof | #incdec | #unary;
+#incdec = #id #w* ('++' | '--');
+#unary = [!+\-~] #w* #m_expr;
 
+#func_call = #id #w* '(' #w* (#expr #w* (',' #w* #expr #w*)*)? ')';
+#arr_access = #id #w* '[' #w* #m_expr #w* ']';
+
+#struct_literal = '{'#w* (#expr #w* (',' #w* #expr #w*)*)? '}';
+
+#func_decl = #func_head #w* #func_body;
+#func_head = #id ' ' #id '()';
+#func_body = #block;
+
+#block = '{' (#w | #stmnt)* '}';
+
+#for_stmnt = #for_head #w* #block;
+#for_head = 'for' #w* '(' #w* #stmnt #w* #stmnt #w* (#expr #w*)? ')';//'(' #w* (#assgn_stmnt | ';') #w* (#expr_stmnt | ';') #w* #expr #w* ')';
+
+#if_stmnt = #if_head #w* #block;
+#if_head = 'if' #w* '(' #w* #expr #w* ')';
+
+#return = 'return' #w* (#expr #w*)? ';';
 
 //#program = #func_head;//(#c | #ws | #include | #func_decl)*;
 //#line_comment = '/' '/' (ξ - '\n')* ('\n' | #$);

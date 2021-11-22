@@ -1,4 +1,3 @@
-/*
 // clean C fizzbuzz implementation
 
 #include <assert.h>
@@ -7,8 +6,8 @@
 
 int main()
 {
-    int taps[] = {3, 5 /*, 7, 11* /};
-    char* strings[] = {"Fizz", "Buzz" /*, "Bazz", "Bar"* /};
+    int taps[] = {3, 5 /*, 7, 11*/};
+    char* strings[] = {"Fizz", "Buzz" /*, "Bazz", "Bar"*/};
     assert(sizeof(taps) / sizeof(int) == sizeof(strings) / sizeof(char*));
 
     for (int i = 0; i < 100; i++)
@@ -27,4 +26,3 @@ int main()
     }
     return 0;
 }
-*/
