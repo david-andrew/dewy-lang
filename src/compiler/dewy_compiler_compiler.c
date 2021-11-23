@@ -33,7 +33,7 @@ int main(int argc, char* argv[])
         printf("Usage: ./dewy [-s] [-m] [-p] [-g] [-l] [-f] [-a] [--verbose] /grammar/file/path /input/file/path\n"
                " -s scanner\n"
                " -m (meta)ast\n"
-               " -p parser CFG\n"
+               " -g Context Free Grammar\n"
                " -f first/follow sets\n"
                " -l grammar labels\n"
                " -i input string\n"
@@ -59,7 +59,7 @@ int main(int argc, char* argv[])
     // determine what parts of the compile process to print out
     match_argv(scanner, -s);
     match_argv(mast, -m);
-    match_argv(parser, -p);
+    match_argv(grammar, -g);
     match_argv(fsets, -f);
     match_argv(labels, -l);
     match_argv(input, -i);
@@ -71,11 +71,11 @@ int main(int argc, char* argv[])
     match_argv(verbose, --verbose);
 
     // if no sections specified, run all of them
-    if (!(scanner || mast || parser || fsets || labels || input || crf || descriptors || bsr || result || ast))
+    if (!(scanner || mast || grammar || fsets || labels || input || crf || descriptors || bsr || result || ast))
     {
         scanner = true;
         mast = true;
-        parser = true;
+        grammar = true;
         fsets = true;
         labels = true;
         input = true;
@@ -91,7 +91,7 @@ int main(int argc, char* argv[])
     allocate_metaparser();
     allocate_parser();
 
-    if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, parser)) { goto cleanup; }
+    if (!run_compiler_compiler(grammar_source, verbose, scanner, mast, grammar)) { goto cleanup; }
 
     initialize_parser();
     if (!run_compiler(input_source, input_size, fsets, labels, input, crf, descriptors, bsr, result, ast, verbose))
@@ -117,7 +117,7 @@ cleanup:
  * corresponding bool is true. If verbose is true, print out more structure info.
  * returns whether or not compiler_compiler step completed successfully
  */
-bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, bool parser)
+bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, bool grammar)
 {
     vect* tokens = new_vect();
     obj* t = NULL;
@@ -191,7 +191,7 @@ bool run_compiler_compiler(char* source, bool verbose, bool scanner, bool mast, 
 
     if (mast) { printf("\n\n"); }
 
-    if (parser)
+    if (grammar)
     {
         printf("METAPARSER OUTPUT:\n");
         print_parser(verbose);
@@ -287,10 +287,10 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
     {
         printf("RESULTS BSRs:\n");
         printf("{");
-        for (size_t i = 0; i < set_size(context.results); i++)
+        for (size_t i = 0; i < vect_size(context.results); i++)
         {
             if (i > 0) printf(", ");
-            uint64_t* bsr_idx = set_get_at_index(context.results, i)->data;
+            uint64_t* bsr_idx = vect_get(context.results, i)->data;
             bsr_str(set_get_at_index(context.Y, *bsr_idx)->data);
         }
         printf("}\n\n");

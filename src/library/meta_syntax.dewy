@@ -1,8 +1,6 @@
-//http://www.engr.mun.ca/~theo/Courses/fm/pub/context-free.pdf
-//https://www.w3.org/TR/xml/#sec-notation
-//https://en.wikipedia.org/wiki/Whitespace_character
+// http://www.engr.mun.ca/~theo/Courses/fm/pub/context-free.pdf
+// https://www.w3.org/TR/xml/#sec-notation
 
-//Most of these should be purely character sets...
 
 #eps = 'ϵ' | '\\e' | "''" | '""' | "{}";                    // ϵ, \e, '', "", or {} indicates empty element, i.e. nullable
 #wschar = [\n\x20];                                         // ascii whitespace characters (restrict to newlines and spaces).
@@ -41,12 +39,14 @@
 
 //binary expr operators
 #or = (#expr #ws '|' #ws #expr) - #union;                   // left or right expression
-#and = (#expr #ws '&' #ws #expr) - #intersect;              // reduce if left and right expression match
 #reject = (#expr #ws '-' #ws #expr) - #diff;                // reduce left expression only if it is not also the right expression
-#noprecede = #expr #ws '\\' #ws #expr;                       // reduce right expression only if it is not preceded by left expression
 #nofollow = #expr #ws '/' #ws #expr;                        // reduce left expression only if not followed by right expression
 #greaterthan = #expr #ws '>' #ws #expr;                     // left expression has higher precedence than right expression
-#lessthan = #expr #ws '<' #ws #expr;                        // left expression has lower precedence than right expression
+
+// filters that may (but probably won't) be added
+//#and = (#expr #ws '&' #ws #expr) - #intersect;              // reduce if left and right expression match. (why is this ever useful?)
+//#noprecede = #expr #ws '\\' #ws #expr;                      // reduce right expression only if it is not preceded by left expression (can prevent "intx" -> (int, x))
+//#lessthan = #expr #ws '<' #ws #expr;                        // left expression has lower precedence than right expression. (case fully covered by greater than '>' filter)
 
 //binary set operators
 #diff = #set #ws '-' #ws #set;                              // everything in left that is not in right
@@ -60,68 +60,61 @@
 #rule = #hashtag #ws '=' #ws #expr #ws ';';
 #grammar = (#ws #rule)* #ws;
 #start = #grammar;
-// 
-// 
-// 
-// /{Interesting notes
-// 
-// `((A)2)+` indicates `A` exactly 2, 4, 6, 8, ... times
-// while `(A)2+` indicates `A` exactly 2, 3, 4, 5, ... times
-// Also `((A)2)*` indicates `A` exactly 0, 2, 4, 6, ... times
-// `(A)5+ - (A)11+` indicates repeat `A` exactly 5 to 10 times
-// 
-// `A+?` is the same as `A*`. Same with `(A)2+?` and `(A)2*`
-// Also `A?` is equivalent to (and represented internally as) `A | ϵ`
-// Also meaning that `A*` is represented as `A+ | ϵ`
-// `rule = A+` `__A = __A A | ϵ`, `rule = __A A`?
-// 
-// `(A)5+` indicates 5 or more of `A` while `(A)5*` indicates 0 or 5 or more of `A`
-// 
-// all expressions that reduce to a #set are combined / treated as a single unicode character set
-// 
-// all whitespace in charsets must either be escaped or in hex
-// 
-// 
-// }/
-// 
-// //e.g. the range expression in dewy
-// //range has no associativity, i.e. subexpressions may not be ranges themselves
-// //#bare_range = #expr - #range ':' #expr - #range;
-// //#range = #bare_range | [(\[] #bare_range [)\]];
-// 
-// /{
-// Precedence levels
-// //TODO...
-// //probably no associativity to worry about
-// 
-// //0 - identifier
-// 0 - group
-// //0 - charset
-// //0 - string
-// //0 - anyset
-// //0 - eps
-// //0 - hex
-// 
-// 1 - star
-// 1 - plus
-// 1 - capture
-// 1 - option
-// 1 - compliment
-// 1 - count
-// 
-// 2 - concatenation
-// 
-// 3 - diff
-// 3 - intersect
-// 3 - reject
-// 3 - nofollow
-// 
-// 4 - union
-// 4 - or
-// 4 - greater than
-// 4 - less than
-// 
-// 5 - semantic (i.e. `=>`)
+
+
+
+/{
+    Notes
+
+    `((A)2)+` indicates `A` exactly 2, 4, 6, 8, ... times
+    while `(A)2+` indicates `A` exactly 2, 3, 4, 5, ... times
+    Also `((A)2)*` indicates `A` exactly 0, 2, 4, 6, ... times
+    `(A)5+ - (A)11+` indicates repeat `A` exactly 5 to 10 times
+
+    `A+?` is the same as `A*`. Same with `(A)2+?` and `(A)2*`
+    Also `A?` is equivalent to (and represented internally as) `A | ϵ`
+    Also meaning that `A*` is represented as `A+ | ϵ`
+    `rule = A+` `__A = __A A | ϵ`, `rule = __A A`?
+
+    `(A)5+` indicates 5 or more of `A` while `(A)5*` indicates 0 or 5 or more of `A`
+
+    all expressions that reduce to a #set are combined / treated as a single unicode character set
+
+    all whitespace in charsets must either be escaped or in hex form
+
+
+    Precedence levels (highest to lowest):
+    0 - group
+
+    1 - star
+    1 - plus
+    1 - capture
+    1 - option
+    1 - compliment
+    1 - count
+
+    2 - concatenation
+
+    3 - diff
+    3 - intersect
+    3 - reject
+    3 - nofollow
+
+    4 - or
+    //4 - union (TBD on expression level unions)
+
+    5 - greater than
+    5 - less than
+
+    //6 - semantic (i.e. `=>`) (TBD how semantics will be handled)
+
+    ∞ - identifier
+    ∞ - charset
+    ∞ - string
+    ∞ - anyset
+    ∞ - eps
+    ∞ - hex
+
 // 
 // 
 // #what about restrictions / disambiguation filters?
@@ -177,4 +170,4 @@
 // //setting precedence levels
 // #expr = #exponential > #multiplication | #division > #addition | #subtraction;
 // #expr = #value; //precedence doesn't really matter here, but this acts just like an `| #value` on the end of the previous production
-// }/
+}/

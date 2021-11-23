@@ -27,7 +27,7 @@ typedef struct
     uint64_t cU;        // TBD
     uint64_t start_idx; // index of the start symbol
     bool whole_input;   // if true, require parse to consume the whole input
-    set* results;       // set<bsr> of all root nodes that successfully parsed the input
+    vect* results;      // vect<bsr> of all root nodes that successfully parsed the input
 } parser_context;
 
 // top level functions used by the main program

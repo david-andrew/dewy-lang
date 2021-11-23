@@ -71,7 +71,7 @@ inline parser_context parser_context_struct(uint32_t* src, uint64_t len, uint64_
         .U = new_set(),
         .whole_input = whole_input,
         .start_idx = start_idx,
-        .results = new_set(),
+        .results = new_vect(),
     };
     return con;
 }
@@ -86,7 +86,7 @@ void release_parser_context(parser_context* con)
     set_free(con->Y);
     vect_free(con->R);
     set_free(con->U);
-    set_free(con->results);
+    vect_free(con->results);
 }
 
 /**
@@ -107,7 +107,7 @@ bool parser_parse(parser_context* con)
         con->cI = d->j;
         parser_handle_label(&d->L, con);
     }
-    return set_size(con->results) > 0; // if for some α and l, (S ::= α, 0, l, m) ∈ Υ, report success
+    return vect_size(con->results) > 0; // if for some α and l, (S ::= α, 0, l, m) ∈ Υ, report success
 }
 
 /**
@@ -521,7 +521,7 @@ void parser_bsr_add_helper(bsr* b, parser_context* con)
         if (b->type == prod_bsr && b->head_idx == con->start_idx && b->i == 0 && (!con->whole_input || b->k == con->m))
         {
             // save the index of this success BSR
-            set_add(con->results, new_uint_obj(b_idx));
+            vect_append(con->results, new_uint_obj(b_idx));
         }
     }
 }
