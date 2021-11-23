@@ -1,15 +1,6 @@
-//example of a potential bug in the parser. Fails on input `Ab`
+//example of a (fixed) bug in the parser. Fails on input `Ab`
 //#S = 'A' (#b #b)? #b?;
 //#b = 'b';
-
-//#S -> A #__1 #__3
-//#__1 -> #__2
-//#__1 -> ϵ
-//#__2 -> #b #b
-//#__3 -> #b
-//#__3 -> ϵ
-//#b -> b
-
 
 #S = 'a' #B #C;
 #B = #b #b | ϵ;
