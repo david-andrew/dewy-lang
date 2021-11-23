@@ -306,7 +306,7 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
 
     printf(success ? "PARSE SUCCEEDED\n\n" : "PARSE FAILED\n\n");
 
-    return true;
+    return success;
 }
 
 /**
