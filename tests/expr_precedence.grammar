@@ -1,4 +1,4 @@
-//example of disambiguating precedence (and associativity) in mathematical expressions
+// example of disambiguating precedence (and associativity) in mathematical expressions
 #expr = #pow > #jux > #mul | #div | #mod > #add | #sub > #atom;
 #add = #expr #w* '+' #w* (#expr - (#add | #sub));
 #sub = #expr #w* '-' #w* (#expr - (#add | #sub));
@@ -13,5 +13,5 @@
 #id = [A-Za-z_] [0-9A-Za-z_]* / [0-9A-Za-z_];
 #num = [0-9]+;
 
-#w = [\n\x20];
-#s = [\x20]; //non-line-breaking whitespace
+#w = [\n\x20];  // all whitespace
+#s = [\x20];    // non-line-breaking whitespace

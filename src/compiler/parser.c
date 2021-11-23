@@ -57,7 +57,7 @@ void release_parser()
 /**
  * Create a new parser context
  */
-inline parser_context parser_context_struct(uint32_t* src, uint64_t len, uint64_t start_idx, bool whole_input)
+inline parser_context parser_context_struct(uint32_t* src, uint64_t len, uint64_t start_idx, bool whole, bool sub)
 {
     parser_context con = (parser_context){
         .I = src,
@@ -69,9 +69,11 @@ inline parser_context parser_context_struct(uint32_t* src, uint64_t len, uint64_
         .Y = new_set(),
         .R = new_vect(),
         .U = new_set(),
-        .whole_input = whole_input,
+        .whole = whole,
         .start_idx = start_idx,
         .results = new_vect(),
+        .sub = sub,
+        .success = false,
     };
     return con;
 }
@@ -107,7 +109,8 @@ bool parser_parse(parser_context* con)
         con->cI = d->j;
         parser_handle_label(&d->L, con);
     }
-    return vect_size(con->results) > 0; // if for some α and l, (S ::= α, 0, l, m) ∈ Υ, report success
+    // con->success |= vect_size(con->results) > 0; // if for some α and l, (S ::= α, 0, l, m) ∈ Υ, report success
+    return con->success;
 }
 
 /**
@@ -309,7 +312,7 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
             }
             // set up a new parsing context starting from cI to match for this rule
             uint64_t* head_idx = right->data;
-            parser_context subcon = parser_context_struct(&con->I[con->cI], con->m - con->cI, *head_idx, false);
+            parser_context subcon = parser_context_struct(&con->I[con->cI], con->m - con->cI, *head_idx, false, true);
             bool result = parser_parse(&subcon);
             release_parser_context(&subcon);
             if (result) return false; // success means the rule is rejected
@@ -344,7 +347,7 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
             uint64_t* head_idx = right->data;
             uint32_t saved_char = con->I[con->cI]; // save the I[cI] so we can set it to \0 for the subparse
             con->I[con->cI] = 0;
-            parser_context subcon = parser_context_struct(&con->I[con->cU], con->cI - con->cU, *head_idx, true);
+            parser_context subcon = parser_context_struct(&con->I[con->cU], con->cI - con->cU, *head_idx, true, true);
             bool result = parser_parse(&subcon);
             release_parser_context(&subcon);
             con->I[con->cI] = saved_char; // restore the I[cI]
@@ -518,10 +521,13 @@ void parser_bsr_add_helper(bsr* b, parser_context* con)
         uint64_t b_idx = set_add(con->Y, b_obj);
 
         // check if the BSR matches a success BSR
-        if (b->type == prod_bsr && b->head_idx == con->start_idx && b->i == 0 && (!con->whole_input || b->k == con->m))
+        if (b->type == prod_bsr && b->head_idx == con->start_idx && b->i == 0 && (!con->whole || b->k == con->m))
         {
             // save the index of this success BSR
-            vect_append(con->results, new_uint_obj(b_idx));
+            con->success = true;
+
+            // don't append to the BSR tree on sub-parses
+            if (!con->sub) vect_append(con->results, new_uint_obj(b_idx));
         }
     }
 }

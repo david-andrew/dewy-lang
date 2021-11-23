@@ -26,15 +26,17 @@ typedef struct
     uint64_t cI;        // current input index
     uint64_t cU;        // TBD
     uint64_t start_idx; // index of the start symbol
-    bool whole_input;   // if true, require parse to consume the whole input
     vect* results;      // vect<bsr> of all root nodes that successfully parsed the input
+    bool whole;         // if true, require parse to consume the whole input
+    bool sub;           // indicates if the parse needs to track BSR inputs, or just match for success
+    bool success;       // indicates if the parse succeeded
 } parser_context;
 
 // top level functions used by the main program
 void allocate_parser();
 void initialize_parser();
 void release_parser();
-parser_context parser_context_struct(uint32_t* src, uint64_t len, uint64_t start_idx, bool whole_input);
+parser_context parser_context_struct(uint32_t* src, uint64_t len, uint64_t start_idx, bool whole, bool sub);
 void release_parser_context(parser_context* con);
 bool parser_parse(parser_context* con);
 
