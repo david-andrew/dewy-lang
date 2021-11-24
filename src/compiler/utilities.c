@@ -216,7 +216,7 @@ uint64_t hash_uint(uint64_t val)
  * Identity function for passing into hash_uint_lambda_sequence.
  * Returns the i'th value in the uint64_t sequence, without modification.
  */
-uint64_t utilities_identity_getval(void* seq, size_t i) { return ((uint64_t*)seq)[i]; }
+inline uint64_t utilities_identity_getval(void* seq, size_t i) { return ((uint64_t*)seq)[i]; }
 
 /**
  * Hash the sequence of uint64_t's using a modified version of fnv1a.
