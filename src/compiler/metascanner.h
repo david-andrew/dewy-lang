@@ -63,7 +63,6 @@ obj* match_meta_vertical_bar(char** src);
 obj* match_meta_minus(char** src);
 obj* match_meta_forward_slash(char** src);
 obj* match_meta_greater_than(char** src);
-obj* match_meta_less_than(char** src);
 obj* match_meta_equals_sign(char** src);
 obj* match_meta_left_parenthesis(char** src);
 obj* match_meta_right_parenthesis(char** src);

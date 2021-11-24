@@ -42,7 +42,6 @@ Node struct map:
     metaast_binary_op_node
     - metaast_or
     - metaast_greaterthan
-    - metaast_lessthan
     - metaast_reject
     - metaast_nofollow
     - metaast_intersect
@@ -65,7 +64,6 @@ typedef enum
     metaast_cat,
     metaast_or, // or on sets is union
     metaast_greaterthan,
-    metaast_lessthan,
     metaast_reject, // reject on sets is diff
     metaast_nofollow,
     metaast_identifier,
@@ -147,7 +145,6 @@ metaast* metaast_parse_cat(vect* tokens);
 metaast* metaast_parse_or(vect* tokens);
 metaast* metaast_parse_group(vect* tokens);
 metaast* metaast_parse_greaterthan(vect* tokens);
-metaast* metaast_parse_lessthan(vect* tokens);
 metaast* metaast_parse_reject(vect* tokens);
 metaast* metaast_parse_nofollow(vect* tokens);
 metaast* metaast_parse_intersect(vect* tokens);

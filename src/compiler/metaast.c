@@ -40,9 +40,8 @@ metaast_parse_fn metaast_all_rule_funcs[] = {
     metaast_parse_group,
     metaast_parse_capture,
 
-    // special expressions for srnglr filters
+    // special expressions for parser filters
     metaast_parse_greaterthan,
-    metaast_parse_lessthan,
     metaast_parse_reject,
     metaast_parse_nofollow,
 };
@@ -846,14 +845,6 @@ metaast* metaast_parse_group(vect* tokens)
 metaast* metaast_parse_greaterthan(vect* tokens) { return metaast_parse_binary_op(tokens, meta_greater_than); }
 
 /**
- * Attempt to parse a lessthan binary op expression from the list of tokens.
- * if matches, tokens will be freed, else returns NULL.
- *
- * #lessthan = #expr #ws '<' #ws #expr;
- */
-metaast* metaast_parse_lessthan(vect* tokens) { return metaast_parse_binary_op(tokens, meta_less_than); }
-
-/**
  * Attempt to parse a reject/diff binary op expression from the list of tokens.
  * if matches, tokens will be freed, else returns NULL.
  *
@@ -1135,7 +1126,6 @@ metaast_type metaast_get_token_ast_type(metatoken_type type)
         case meta_ampersand: return metaast_intersect;
         case meta_vertical_bar: return metaast_or;
         case meta_greater_than: return metaast_greaterthan;
-        case meta_less_than: return metaast_lessthan;
 
         default: printf("ERROR: metatoken type %u is not a binary operator\n", type); exit(1);
     }
@@ -1170,9 +1160,9 @@ uint64_t metaast_get_type_precedence_level(metaast_type type)
         case metaast_nofollow:
         case metaast_intersect: return 3;
 
-        case metaast_or:
-        case metaast_greaterthan:
-        case metaast_lessthan: return 4;
+        case metaast_or: return 4;
+
+        case metaast_greaterthan: return 5;
     }
 }
 
@@ -1236,7 +1226,6 @@ void metaast_free_with_refs(metaast* ast, set* refs)
 
         case metaast_or:
         case metaast_greaterthan:
-        case metaast_lessthan:
         case metaast_reject:
         case metaast_nofollow:
         case metaast_intersect:
@@ -1315,7 +1304,6 @@ bool metaast_fold_charsets(metaast** ast_ptr)
             return metaast_fold_charsets(&ast->node.unary.inner);
         }
         case metaast_greaterthan:
-        case metaast_lessthan:
         case metaast_nofollow:
         {
             bool left = metaast_fold_charsets(&ast->node.binary.left);
@@ -1423,7 +1411,6 @@ void metaast_type_repr(metaast_type type)
         printenum(metaast_cat);
         printenum(metaast_or);
         printenum(metaast_greaterthan);
-        printenum(metaast_lessthan);
         printenum(metaast_reject);
         printenum(metaast_nofollow);
         printenum(metaast_identifier);
@@ -1535,7 +1522,6 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
 
         case metaast_or:
         case metaast_greaterthan:
-        case metaast_lessthan:
         case metaast_reject:
         case metaast_nofollow:
         case metaast_intersect:
@@ -1547,7 +1533,6 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
                 // print operator
                 if (ast->type == metaast_or) printf(" | ");
             else if (ast->type == metaast_greaterthan) printf(" > ");
-            else if (ast->type == metaast_lessthan) printf(" < ");
             else if (ast->type == metaast_reject) printf(" - ");
             else if (ast->type == metaast_nofollow) printf(" / ");
             else if (ast->type == metaast_intersect) printf(" & ");
@@ -1571,13 +1556,10 @@ void metaast_str_inner(metaast* ast, metaast_type parent)
 
                     // check if the inner expression needs to be wrapped in parenthesis
                     wrap_print(metaast_str_inner_check_needs_parenthesis(metaast_cat, inner->type),
-                               metaast_str_inner(inner, ast->type), "(", ")")
+                               metaast_str_inner(inner, ast->type), "(", ")");
 
-                        // print a space between elements (skip last since no elements follow)
-                        if (i < ast->node.sequence.size - 1)
-                    {
-                        printf(" ");
-                    }
+                    // print a space between elements (skip last since no elements follow)
+                    if (i < ast->node.sequence.size - 1) { printf(" "); }
                 },
                 "(", ")") break;
         }
@@ -1664,7 +1646,6 @@ void metaast_repr_inner(metaast* ast, int level)
 
         case metaast_or:
         case metaast_greaterthan:
-        case metaast_lessthan:
         case metaast_reject:
         case metaast_nofollow:
         case metaast_intersect:
@@ -1738,7 +1719,6 @@ bool metaast_equals(metaast* left, metaast* right)
 
         case metaast_or:
         case metaast_greaterthan:
-        case metaast_lessthan:
         case metaast_reject:
         case metaast_nofollow:
         case metaast_intersect:
@@ -1804,7 +1784,6 @@ uint64_t metaast_hash(metaast* ast)
 
         case metaast_or:
         case metaast_greaterthan:
-        case metaast_lessthan:
         case metaast_reject:
         case metaast_nofollow:
         case metaast_intersect:

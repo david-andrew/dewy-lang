@@ -865,9 +865,6 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
         case metaast_greaterthan:
             printf("ERROR: Cannot generate CFG sentence as greater than `>` operator has not yet been implemented\n");
             exit(1);
-        case metaast_lessthan:
-            printf("ERROR: Cannot generate CFG sentence as less than `<` operator has not yet been implemented\n");
-            exit(1);
         case metaast_capture:
             printf("ERROR: Cannot generate CFG sentence as capture `.` operator has not yet been implemented\n");
             exit(1);

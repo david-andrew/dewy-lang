@@ -45,7 +45,6 @@ metascan_fn rule_funcs[] = {
     match_meta_minus,
     match_meta_forward_slash,
     match_meta_greater_than,
-    match_meta_less_than,
     match_meta_equals_sign,
     match_meta_left_parenthesis,
     match_meta_right_parenthesis,
@@ -645,16 +644,6 @@ obj* match_meta_forward_slash(char** src)
 obj* match_meta_greater_than(char** src)
 {
     return *src[0] == '>' ? new_metatoken_obj(meta_greater_than, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
-}
-
-/**
- * Match less than '<' used to indicate the left expression has lower precedence than the right expressions.
- *
- * #less_than = '<';
- */
-obj* match_meta_less_than(char** src)
-{
-    return *src[0] == '<' ? new_metatoken_obj(meta_less_than, ustring_charstar_substr((*src)++, 0, 0)) : NULL;
 }
 
 /**

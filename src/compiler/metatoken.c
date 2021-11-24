@@ -138,8 +138,7 @@ bool metatoken_is_type_bin_op(metatoken_type type)
         case meta_forward_slash:
         case meta_ampersand:
         case meta_vertical_bar:
-        case meta_greater_than:
-        case meta_less_than: return true;
+        case meta_greater_than: return true;
 
         default: return false;
     }
@@ -189,7 +188,6 @@ void metatoken_str(metatoken* t)
         case meta_minus: printf("-"); break;
         case meta_forward_slash: printf(" / "); break;
         case meta_greater_than: printf(" > "); break;
-        case meta_less_than: printf(" < "); break;
         case meta_equals_sign: printf(" = "); break;
     }
 }
@@ -225,7 +223,6 @@ void metatoken_repr(metatoken* t)
         printenum(meta_minus);
         printenum(meta_forward_slash);
         printenum(meta_greater_than);
-        printenum(meta_less_than);
         printenum(meta_equals_sign);
         printenum(meta_left_parenthesis);
         printenum(meta_right_parenthesis);

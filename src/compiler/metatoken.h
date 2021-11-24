@@ -30,7 +30,6 @@ typedef enum
     meta_minus,
     meta_forward_slash,
     meta_greater_than,
-    meta_less_than,
     meta_equals_sign,
     meta_left_parenthesis,
     meta_right_parenthesis,
