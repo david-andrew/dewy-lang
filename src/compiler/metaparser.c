@@ -36,9 +36,10 @@ vect* metaparser_unused_ast_cache; // vect containing all ASTs not inserted into
 // For parsing filters, create tables indicating which rules to apply filters to.
 // #rule = #A / #B; indicates that #B may not follow #A when parsing #rule
 // #rule = #A - #B; indicates that the string matching #A may not also match #B when parsing #rule
-// TODO: explain other filters.
-dict* metaparser_nofollow_table; // map<head_idx, charset | ustring | vect<charset> | head_idx>>
-dict* metaparser_reject_table;   // map<head_idx, charset | ustring | vect<charset> | head_idx>>
+// #rule = #A > #B; indicates that when parsing #rule, if #A and #B are both matched, #A is preferred
+dict* metaparser_nofollow_table;    // map<head_idx, charset | ustring | vect<charset> | head_idx>>
+dict* metaparser_reject_table;      // map<head_idx, charset | ustring | vect<charset> | head_idx>>
+dict* metaparser_precedence_tables; // map<head_idx, map<production_idx, level>>. lower level means higher precedence
 
 // convenience variables for the frequently used epsilon production body, and $ endmarker terminal.
 uint64_t metaparser_eps_body_idx = NULL_SYMBOL_INDEX;
@@ -57,6 +58,7 @@ void allocate_metaparser()
 
     metaparser_nofollow_table = new_dict();
     metaparser_reject_table = new_dict();
+    metaparser_precedence_tables = new_dict();
 }
 
 /**
@@ -66,6 +68,7 @@ void complete_metaparser()
 {
     metaparser_get_eps_body_idx();
     metaparser_get_start_symbol_idx();
+    metaparser_finalize_precedence_tables();
 
     // TODO->check to ensure that every identifier has at least 1 body, and return error if not...
 }
@@ -80,6 +83,7 @@ void release_metaparser()
     dict_free(metaparser_productions);
     dict_free(metaparser_nofollow_table);
     dict_free(metaparser_reject_table);
+    dict_free(metaparser_precedence_tables);
 
     metaparser_free_ast_cache();
 }
@@ -246,6 +250,13 @@ void metaparser_rules_str()
             metaparser_filter_str(result);
             printf("\n");
         }
+        result = dict_get(metaparser_precedence_tables, &(obj){.type = UInteger_t, .data = head_idx});
+        if (result != NULL)
+        {
+            printf(">>>> precedence: [\n");
+            metaparser_precedence_table_str(result->data, bodies);
+            printf("]\n");
+        }
     }
 }
 
@@ -257,7 +268,14 @@ void metaparser_rule_str(obj* head, vect* body)
     // print head ->
     obj_str(head);
     printf(" -> ");
+    metaparser_body_str(body);
+}
 
+/**
+ * Print out the grammar string for the given rule body
+ */
+void metaparser_body_str(vect* body)
+{
     // print out the contents of this body
     if (vect_size(body) == 0)
     {
@@ -304,6 +322,36 @@ void metaparser_filter_str(obj* right)
         printf("ERROR: unknown filter right expression type: %d\n", right->type);
         exit(1);
     }
+}
+
+/**
+ * Print out the contents of the given precedence table.
+ */
+void metaparser_precedence_table_str(dict* table, set* bodies)
+{
+    uint64_t level = 0;
+    printf("  0: ");
+    for (size_t i = 0; i < set_size(bodies); i++)
+    {
+        uint64_t* body_idx = set_get_at_index(bodies, i)->data;
+        vect* body = metaparser_get_body(*body_idx);
+
+        if (i > 0)
+        {
+            uint64_t* body_level = dict_get_uint_key(table, *body_idx)->data;
+            if (*body_level != level)
+            {
+                printf("\n  %" PRIu64 ": ", *body_level);
+                level = *body_level;
+            }
+            else
+            {
+                printf(", ");
+            }
+        }
+        metaparser_body_str(body);
+    }
+    printf("\n");
 }
 
 /**
@@ -780,6 +828,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             break;
         }
         case metaast_or:
+        case metaast_greaterthan:
         {
             // crete an anonymous head if it wasn't provided
             head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
@@ -789,6 +838,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             //  #rule = #B
 
             metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.left);
+            if (body_ast->type == metaast_greaterthan) { metaparser_add_precedence_split(head_idx); }
             metaparser_insert_or_inner_rule_ast(head_idx, body_ast->node.binary.right);
 
             break;
@@ -862,7 +912,7 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 
             break;
         }
-        case metaast_greaterthan:
+
             printf("ERROR: Cannot generate CFG sentence as greater than `>` operator has not yet been implemented\n");
             exit(1);
         case metaast_capture:
@@ -913,6 +963,26 @@ uint64_t metaparser_get_symbol_or_anonymous(metaast* ast)
 }
 
 /**
+ * Indicate which types of AST nodes do not create sub rules.
+ * e.g. or nodes do not nest, and instead are all flattened into the parent rule.
+ * Additionally, atomic types (i.e. identifier, charset, string, etc.) also follow this pattern.
+ */
+inline bool metaparser_ast_uses_parent_level(metaast_type type)
+{
+    switch (type)
+    {
+        case metaast_or:
+        case metaast_greaterthan:
+        case metaast_eps:
+        case metaast_identifier:
+        case metaast_charset:
+        case metaast_string:
+        case metaast_cat: return true;
+        default: return false;
+    }
+}
+
+/**
  * Insert the ast at the same level as the parent ast.
  * e.g. or nodes insert children with the same head as the parent.
  * If the inner node needs an anonymous head, that head is returned,
@@ -924,8 +994,7 @@ uint64_t metaparser_get_symbol_or_anonymous(metaast* ast)
 void metaparser_insert_or_inner_rule_ast(uint64_t parent_head_idx, metaast* ast)
 {
     // case where the inner node reuses the parent index
-    if (ast->type == metaast_or || ast->type == metaast_eps || ast->type == metaast_identifier ||
-        ast->type == metaast_charset || ast->type == metaast_string || ast->type == metaast_cat)
+    if (metaparser_ast_uses_parent_level(ast->type))
     {
         // insert the inner as itself, using the parent's head
         metaparser_insert_rule_ast(parent_head_idx, ast);
@@ -1211,5 +1280,71 @@ void metaparser_add_reject(uint64_t left_idx, obj* right)
  * returns NULL if there are no restrictions.
  */
 obj* metaparser_get_reject_entry(uint64_t head_idx) { return dict_get_uint_key(metaparser_reject_table, head_idx); }
+
+/**
+ * Insert an entry into the precedence table for the given head_idx, indicating that all following bodies are at the
+ * next precedence level.
+ *
+ * Note that the table needs to be finalized after all entries have been added.
+ */
+void metaparser_add_precedence_split(uint64_t head_idx)
+{
+    set* bodies = metaparser_get_production_bodies(head_idx);
+    obj* precedence_table_obj = dict_get_uint_key(metaparser_precedence_tables, head_idx);
+    if (precedence_table_obj == NULL)
+    {
+        precedence_table_obj = new_dict_obj(NULL);
+        dict_set(metaparser_precedence_tables, new_uint_obj(head_idx), precedence_table_obj);
+    }
+    dict_set(precedence_table_obj->data, new_uint_obj(set_size(bodies)),
+             new_uint_obj(dict_size(precedence_table_obj->data) + 1));
+}
+
+/**
+ * Return the body precedence table for the given head. Returns NULL if there is no precedence table.
+ */
+dict* metaparser_get_precedence_table(uint64_t head_idx)
+{
+    obj* result = dict_get_uint_key(metaparser_precedence_tables, head_idx);
+    return result == NULL ? NULL : result->data;
+}
+
+/**
+ * Fill out each individual precedence table with entries for the precedence levels that are not yet filled out.
+ */
+void metaparser_finalize_precedence_tables()
+{
+    for (size_t i = 0; i < dict_size(metaparser_precedence_tables); i++)
+    {
+        obj k, v;
+        dict_get_at_index(metaparser_precedence_tables, i, &k, &v);
+        uint64_t* head_idx = k.data;
+        set* bodies = metaparser_get_production_bodies(*head_idx);
+
+        dict* precedence_table = v.data;
+        uint64_t prev_split_idx = 0;
+        uint64_t prev_level = 0;
+        size_t num_kernels = dict_size(precedence_table);
+        for (size_t j = 0; j < num_kernels; j++)
+        {
+            obj k, v;
+            dict_get_at_index(precedence_table, j, &k, &v);
+            uint64_t* split_idx = k.data;
+            uint64_t* level = v.data;
+            for (uint64_t body_idx = prev_split_idx; body_idx < *split_idx; body_idx++)
+            {
+                dict_set(precedence_table, new_uint_obj(body_idx), new_uint_obj(*level - 1));
+            }
+            prev_split_idx = *split_idx + 1;
+            prev_level = *level;
+        }
+
+        // insert all bodies after the last split into the last level
+        for (size_t j = prev_split_idx; j < set_size(bodies); j++)
+        {
+            dict_set(precedence_table, new_uint_obj(j), new_uint_obj(prev_level));
+        }
+    }
+}
 
 #endif

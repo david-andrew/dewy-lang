@@ -16,13 +16,17 @@ bool parse_next_meta_rule(vect* tokens);
 void metaparser_rules_repr();
 void metaparser_rules_str();
 void metaparser_rule_str(obj* head, vect* body);
+void metaparser_body_str(vect* body);
 void metaparser_production_str(uint64_t head_idx, uint64_t production_idx);
 void metaparser_filter_str(obj* right);
+void metaparser_precedence_table_str(dict* table, set* bodies);
+
 bool metaparser_is_valid_rule(vect* tokens);
 obj* metaparser_get_rule_head(vect* tokens);
 vect* metaparser_get_rule_body(vect* tokens);
 uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast);
 uint64_t metaparser_get_symbol_or_anonymous(metaast* ast);
+bool metaparser_ast_uses_parent_level(metaast_type type);
 void metaparser_insert_or_inner_rule_ast(uint64_t parent_head_idx, metaast* ast);
 
 bool metaparser_insert_rule_sentences(obj* head, vect* body);
@@ -45,5 +49,8 @@ void metaparser_add_nofollow(uint64_t left_idx, obj* right);
 obj* metaparser_get_nofollow_entry(uint64_t head_idx);
 void metaparser_add_reject(uint64_t left_idx, obj* right);
 obj* metaparser_get_reject_entry(uint64_t head_idx);
+void metaparser_add_precedence_split(uint64_t head_idx);
+dict* metaparser_get_precedence_table(uint64_t head_idx);
+void metaparser_finalize_precedence_tables();
 
 #endif

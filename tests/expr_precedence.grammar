@@ -1,5 +1,5 @@
 // example of disambiguating precedence (and associativity) in mathematical expressions
-#expr = #pow > #jux > #mul | #div | #mod > #add | #sub > #atom;
+#expr = #pow > #jux > #mul | #div | #mod > #add | #sub > #group | #id | #num;
 #add = #expr #w* '+' #w* (#expr - (#add | #sub));
 #sub = #expr #w* '-' #w* (#expr - (#add | #sub));
 #jux = #atom #s* #atom;

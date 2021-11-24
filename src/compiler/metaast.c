@@ -1147,6 +1147,7 @@ uint64_t metaast_get_type_precedence_level(metaast_type type)
         case metaast_caseless:
         case metaast_eps: return 0;
 
+        // unary operators
         case metaast_star:
         case metaast_plus:
         case metaast_count:
@@ -1154,15 +1155,15 @@ uint64_t metaast_get_type_precedence_level(metaast_type type)
         case metaast_option:
         case metaast_compliment: return 1;
 
+        // binary operators
         case metaast_cat: return 2;
 
         case metaast_reject:
         case metaast_nofollow:
         case metaast_intersect: return 3;
 
-        case metaast_or: return 4;
-
-        case metaast_greaterthan: return 5;
+        case metaast_or:
+        case metaast_greaterthan: return 4;
     }
 }
 
