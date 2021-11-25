@@ -111,7 +111,7 @@ bool parser_parse(parser_context* con)
         con->cI = d->j;
         parser_handle_label(&d->L, con);
     }
-    // con->success |= vect_size(con->results) > 0; // if for some α and l, (S ::= α, 0, l, m) ∈ Υ, report success
+
     return con->success;
 }
 
@@ -531,7 +531,7 @@ void parser_bsr_add_helper(bsr_head* b, uint64_t j, parser_context* con)
         if (!set_contains(j_set_obj->data, &(obj){UInteger_t, &j})) { set_add(j_set_obj->data, new_uint_obj(j)); }
     }
 
-    // check if the BSR matches a success BSR
+    // check if the BSR is a root, i.e. for some α and l (and m if !con->whole), (S ::= α, 0, l, m) ∈ Υ
     if (b->type == prod_bsr && b->head_idx == con->start_idx && b->i == 0 && (!con->whole || b->k == con->m))
     {
         con->success = true;
