@@ -85,8 +85,11 @@ void release_parser_context(parser_context* con)
     crf_free(con->CRF);
     dict_free(con->P);
     dict_free(con->Y);
-    vect_free(con->R);
     set_free(con->U);
+
+    // make sure R is empty before freeing it
+    while (vect_size(con->R) > 0) { vect_pop(con->R); }
+    vect_free(con->R);
 }
 
 /**
@@ -100,6 +103,8 @@ bool parser_parse(parser_context* con)
 
     while (vect_size(con->R) > 0)
     {
+        if (con->sub && con->success) { break; }
+
         // remove a descriptor (L,k,j) from R. Descriptors are owned by U, so no need to free in here.
         desc* d = vect_dequeue(con->R)->data; // depth first parse
         // desc* d = vect_pop(con->R)->data; // (alternative) breadth first parse
