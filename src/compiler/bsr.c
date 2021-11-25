@@ -160,4 +160,94 @@ void bsr_head_repr(bsr_head* b)
     printf(", i: %" PRIu64 ", k: %" PRIu64 ")", b->i, b->k);
 }
 
+/**
+ * Print out a BSR forest, starting from the root with the given head_idx
+ */
+void bsr_tree_str(dict* Y, uint64_t start_idx, uint64_t length)
+{
+    // printf("RESULTS BSRs:\n");
+    // printf("{");
+    // bool first = true;
+
+    // get the production bodies of the start symbol
+    size_t num_bodies = metaparser_get_num_production_bodies(start_idx);
+    for (size_t i = 0; i < num_bodies; i++)
+    {
+        // get the j-set associated with the body
+        bsr_head head = new_prod_bsr_head_struct(start_idx, i, 0, length);
+        obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = &head});
+        if (j_set_obj != NULL)
+        {
+            set* j_set = j_set_obj->data;
+            for (size_t k = 0; k < set_size(j_set); k++)
+            {
+                // printf(!first ? ", " : "");
+                // first = false;
+                uint64_t* j = set_get_at_index(j_set, k)->data;
+                bsr_tree_str_inner(&head, *j, 0);
+            }
+        }
+    }
+    // printf("}\n\n");
+}
+
+/**
+ * Helper function for printing out a bsr forest
+ */
+void bsr_tree_str_inner(bsr_head* head, uint64_t j, uint64_t level)
+{
+    // print indentation for the current level
+    for (size_t i = 0; i < level; i++) printf("  ");
+
+    // print the given head
+    bsr_str(head, j);
+    printf("\n");
+
+    if (head->type == prod_bsr) {}
+
+    // print the children of the given head
+    // TODO
+}
+
+/**
+ * Get the left and right children of a given BSR node. Results are stored in the pointers left and right.
+ * left or right may be set to NULL if no child is found.
+ */
+void bsr_get_children(dict* Y, bsr_head* head, uint64_t j, bsr_head** left, bsr_head** right)
+{
+    if (head->type == prod_bsr)
+    {
+        vect* body = metaparser_get_production_body(head->head_idx, head->production_idx);
+        if (vect_size(body) == 0)
+        {
+            *left = NULL;
+            *right = NULL;
+            return;
+        }
+        else if (vect_size(body) == 1)
+        {
+            uint64_t* symbol_idx = vect_get(body, 0)->data;
+            *right = NULL;
+
+            // TODO. could be multiple children, one for each production body of the symbol_idx.
+            // consider some method for either returning all children, or specifying which child to grab...
+
+            return;
+        }
+
+        // general case
+
+        // get the left child
+        slice left_substring = (slice){.v = body, .start = 0, .stop = vect_size(body) - 1, .lookahead = NULL},
+              right_substring = (slice){.v = body, .start = 0, .stop = vect_size(body) - 1, .lookahead = NULL};
+        if (slice_size(&left_substring) > 1) {}
+
+        // create left and right substrings of body, split at j
+    }
+    else
+    {
+        //
+    }
+}
+
 #endif

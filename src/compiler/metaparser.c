@@ -1167,6 +1167,14 @@ set* metaparser_get_production_bodies(uint64_t head_idx)
 }
 
 /**
+ * Return the number of productions for a given head index.
+ */
+size_t metaparser_get_num_production_bodies(uint64_t head_idx)
+{
+    return set_size(metaparser_get_production_bodies(head_idx));
+}
+
+/**
  * Return a specific production body for the given head and body indices.
  */
 vect* metaparser_get_production_body(uint64_t head_idx, uint64_t production_idx)

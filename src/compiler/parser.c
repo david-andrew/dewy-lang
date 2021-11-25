@@ -112,6 +112,12 @@ bool parser_parse(parser_context* con)
         parser_handle_label(&d->L, con);
     }
 
+    if (!con->sub)
+    {
+        // apply precedence filters to the BSR forest
+        parser_apply_precedence_filters(con);
+    }
+
     return con->success;
 }
 
@@ -291,29 +297,29 @@ void parser_print_label(slot* label)
 bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
 {
     // check if this rule has any nofollow filters
-    obj* right = metaparser_get_nofollow_entry(head_idx);
-    if (right != NULL)
+    obj* filter = metaparser_get_nofollow_entry(head_idx);
+    if (filter != NULL)
     {
-        if (right->type == CharSet_t)
+        if (filter->type == CharSet_t)
         {
-            if (con->I[con->cI] != 0 && charset_contains_c(right->data, con->I[con->cI])) return false;
+            if (con->I[con->cI] != 0 && charset_contains_c(filter->data, con->I[con->cI])) return false;
         }
-        else if (right->type == UnicodeString_t)
+        else if (filter->type == UnicodeString_t)
         {
-            if (ustring_prefix_match(&con->I[con->cI], right->data)) return false;
+            if (ustring_prefix_match(&con->I[con->cI], filter->data)) return false;
         }
         else
         {
             // perform a full parse starting at the end of the current location in the input
-            if (right->type != UInteger_t)
+            if (filter->type != UInteger_t)
             {
-                printf("ERROR: unkown type %d for nofollow filter. ", right->type);
-                obj_str(right);
+                printf("ERROR: unkown type %d for nofollow filter. ", filter->type);
+                obj_str(filter);
                 printf("\n");
                 exit(1);
             }
             // set up a new parsing context starting from cI to match for this rule
-            uint64_t* head_idx = right->data;
+            uint64_t* head_idx = filter->data;
             parser_context subcon = parser_context_struct(&con->I[con->cI], con->m - con->cI, *head_idx, false, true);
             bool result = parser_parse(&subcon);
             release_parser_context(&subcon);
@@ -322,31 +328,31 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
     }
 
     // check if this rule has any reject filters
-    right = metaparser_get_reject_entry(head_idx);
-    if (right != NULL)
+    filter = metaparser_get_reject_entry(head_idx);
+    if (filter != NULL)
     {
-        if (right->type == CharSet_t)
+        if (filter->type == CharSet_t)
         {
             // note: this is unlikely as charset rejects are generally collapsed into single charsets
-            if (con->cI - con->cU == 1 && charset_contains_c(right->data, con->I[con->cU])) return false;
+            if (con->cI - con->cU == 1 && charset_contains_c(filter->data, con->I[con->cU])) return false;
         }
-        else if (right->type == UnicodeString_t)
+        else if (filter->type == UnicodeString_t)
         {
-            if (con->cI - con->cU == ustring_len(right->data) && ustring_prefix_match(&con->I[con->cU], right->data))
+            if (con->cI - con->cU == ustring_len(filter->data) && ustring_prefix_match(&con->I[con->cU], filter->data))
                 return false;
         }
         else
         {
             // perform a full parse over the range of this rule in the input
-            if (right->type != UInteger_t)
+            if (filter->type != UInteger_t)
             {
-                printf("ERROR: unkown type %d for reject filter. ", right->type);
-                obj_str(right);
+                printf("ERROR: unkown type %d for reject filter. ", filter->type);
+                obj_str(filter);
                 printf("\n");
                 exit(1);
             }
             // set up a new parsing context starting from cU to match for this rule.
-            uint64_t* head_idx = right->data;
+            uint64_t* head_idx = filter->data;
             uint32_t saved_char = con->I[con->cI]; // save the I[cI] so we can set it to \0 for the subparse
             con->I[con->cI] = 0;
             parser_context subcon = parser_context_struct(&con->I[con->cU], con->cI - con->cU, *head_idx, true, true);
@@ -359,6 +365,15 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
 
     // no filters disqualified this rule
     return true;
+}
+
+/**
+ * Apply precedence filters to rules in the parse tree
+ */
+void parser_apply_precedence_filters(parser_context* con)
+{
+    // start with the root node
+    // TODO. see dewy_compiler_compiler for how to get the root node(s)
 }
 
 /**

@@ -47,5 +47,8 @@ void bsr_head_free(bsr_head* b);
 void bsr_head_str(bsr_head* b);
 void bsr_str(bsr_head* b, uint64_t j);
 void bsr_head_repr(bsr_head* b);
+void bsr_tree_str(dict* Y, uint64_t start_idx, uint64_t length);
+void bsr_tree_str_inner(bsr_head* head, uint64_t j, uint64_t level);
+void bsr_get_children(dict* Y, bsr_head* head, uint64_t j, bsr_head** left, bsr_head** right);
 
 #endif

@@ -23,13 +23,12 @@ typedef struct
     crf* CRF;           // Call Return Forest
     uint32_t* I;        // input source (null terminated)
     uint64_t m;         // length of the input
-    uint64_t cI;        // current input index
-    uint64_t cU;        // TBD
+    uint64_t cI;        // current input index (right extent so far, of rule being parsed)
+    uint64_t cU;        // current left extent of rule being parsed
     uint64_t start_idx; // index of the start symbol
     bool whole;         // if true, require parse to consume the whole input
     bool sub;           // indicates if the parse needs to track BSR inputs, or just match for success
     bool success;       // indicates if the parse succeeded
-    // vect* results;      // vect<bsr> of all root nodes that successfully parsed the input
 } parser_context;
 
 // top level functions used by the main program
@@ -46,6 +45,7 @@ vect* parser_get_labels();
 void parser_handle_label(slot* label, parser_context* con);
 void parser_print_label(slot* label);
 bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con);
+void parser_apply_precedence_filters(parser_context* con);
 
 // CNP support functions
 void parser_nonterminal_add(uint64_t head_idx, uint64_t j, parser_context* con);
