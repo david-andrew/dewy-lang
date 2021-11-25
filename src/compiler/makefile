@@ -11,7 +11,7 @@ debug:
 profile:
 	clang -O3 -o dewy dewy_compiler_compiler.c utilities.c object.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c slot.c fset.c parser.c bsr.c crf.c slice.c -lm -pg
 	./dewy -i -r ../../tests/11.grammar ../../tests/11.source
-	gprof dewy gmon.out > prof_output
+	gprof dewy gmon.out > gmon.txt
 
 bsr.o: bsr.c bsr.h slice.h
 	clang -O3 -c -o bsr.o bsr.c

@@ -101,13 +101,12 @@ bool parser_parse(parser_context* con)
     uint64_t node_idx = crf_add_cluster_node(con->CRF, &u0);
     parser_nonterminal_add(con->start_idx, 0, con);
 
-    while (vect_size(con->R) > 0)
+    // for sub-parses, stop on first sign of success
+    while (vect_size(con->R) > 0 && !(con->sub && con->success))
     {
-        if (con->sub && con->success) { break; }
-
         // remove a descriptor (L,k,j) from R. Descriptors are owned by U, so no need to free in here.
-        desc* d = vect_dequeue(con->R)->data; // depth first parse
-        // desc* d = vect_pop(con->R)->data; // (alternative) breadth first parse
+        desc* d = vect_dequeue(con->R)->data; // breadth first parse
+        // desc* d = vect_pop(con->R)->data; // (alternative) depth first parse. performs worse.
         con->cU = d->k;
         con->cI = d->j;
         parser_handle_label(&d->L, con);
