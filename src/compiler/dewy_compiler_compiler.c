@@ -275,10 +275,18 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
     {
         printf("BSR OUTPUT:\n");
         printf("{");
-        for (size_t i = 0; i < set_size(context.Y); i++)
+        for (size_t i = 0; i < dict_size(context.Y); i++)
         {
-            if (i > 0) printf(", ");
-            bsr_str(set_get_at_index(context.Y, i)->data);
+            obj k, v;
+            dict_get_at_index(context.Y, i, &k, &v);
+            bsr_head* head = k.data;
+            set* j_set = v.data;
+            for (size_t k = 0; k < set_size(j_set); k++)
+            {
+                uint64_t* j = set_get_at_index(j_set, k)->data;
+                if (i > 0 || k > 0) printf(", ");
+                bsr_str(head, *j);
+            }
         }
         printf("}\n\n");
     }
@@ -286,11 +294,26 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
     {
         printf("RESULTS BSRs:\n");
         printf("{");
-        for (size_t i = 0; i < vect_size(context.results); i++)
+        bool first = true;
+
+        // get the production bodies of the start symbol
+        set* bodies = metaparser_get_production_bodies(start_symbol_idx);
+        for (size_t i = 0; i < set_size(bodies); i++)
         {
-            if (i > 0) printf(", ");
-            uint64_t* bsr_idx = vect_get(context.results, i)->data;
-            bsr_str(set_get_at_index(context.Y, *bsr_idx)->data);
+            // get the j-set associated with the body
+            bsr_head head = new_prod_bsr_head_struct(start_symbol_idx, i, 0, length);
+            obj* j_set_obj = dict_get(context.Y, &(obj){.type = BSRHead_t, .data = &head});
+            if (j_set_obj != NULL)
+            {
+                set* j_set = j_set_obj->data;
+                for (size_t k = 0; k < set_size(j_set); k++)
+                {
+                    printf(!first ? ", " : "");
+                    first = false;
+                    uint64_t* j = set_get_at_index(j_set, k)->data;
+                    bsr_str(&head, *j);
+                }
+            }
         }
         printf("}\n\n");
     }

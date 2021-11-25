@@ -21,23 +21,31 @@ typedef struct
         };
         slice substring;
     };
-    uint64_t i;
-    uint64_t j;
-    uint64_t k;
-} bsr;
+    uint64_t i; // left extent
+    // uint64_t j; // binary right split point. stored separately for ease of lookup
+    uint64_t k; // right extent
+} bsr_head;
 
-bsr* new_str_bsr(slice* substring, uint64_t i, uint64_t j, uint64_t k);
-bsr new_str_bsr_struct(slice* substring, uint64_t i, uint64_t j, uint64_t k);
-bsr* new_prod_bsr(uint64_t head_idx, uint64_t production_idx, uint64_t i, uint64_t j, uint64_t k);
-bsr new_prod_bsr_struct(uint64_t head_idx, uint64_t production_idx, uint64_t i, uint64_t j, uint64_t k);
-bsr* bsr_copy(bsr* b);
-obj* new_bsr_obj(bsr* b);
-bool bsr_equals(bsr* left, bsr* right);
-uint64_t bsr_hash(bsr* b);
-uint64_t bsr_str_hash(bsr* b);
-uint64_t bsr_slot_hash(bsr* b);
-void bsr_free(bsr* b);
-void bsr_str(bsr* b);
-void bsr_repr(bsr* b);
+// BSR nodes are represented in the dict Y as follows:
+// Y[(X ::= μ, i, k)] = {j} and Y[(μ, i, k)] = {j}
+// i.e. (X ::= μ, i, k)/(μ, i, k) is a key in Y and the value is a set of j1, j2, ..., jn,
+// making actions (X ::= μ, i, j1, k), (X ::= μ, i, j2, k), ... (X ::= μ, i, jn k)
+// or (μ, i, j1, k), (μ, i, j2, k), ... (μ, i, jn, k), depending on the type of head
+// this allows easy lookup of BSRs by (X ::= μ, i, k) and (μ, i, k)
+
+bsr_head* new_str_bsr_head(slice* substring, uint64_t i, uint64_t k);
+bsr_head new_str_bsr_head_struct(slice* substring, uint64_t i, uint64_t k);
+bsr_head* new_prod_bsr_head(uint64_t head_idx, uint64_t production_idx, uint64_t i, uint64_t k);
+bsr_head new_prod_bsr_head_struct(uint64_t head_idx, uint64_t production_idx, uint64_t i, uint64_t k);
+bsr_head* bsr_head_copy(bsr_head* b);
+obj* new_bsr_head_obj(bsr_head* b);
+bool bsr_head_equals(bsr_head* left, bsr_head* right);
+uint64_t bsr_head_hash(bsr_head* b);
+uint64_t bsr_head_str_hash(bsr_head* b);
+uint64_t bsr_head_slot_hash(bsr_head* b);
+void bsr_head_free(bsr_head* b);
+void bsr_head_str(bsr_head* b);
+void bsr_str(bsr_head* b, uint64_t j);
+void bsr_head_repr(bsr_head* b);
 
 #endif

@@ -9,103 +9,102 @@
 #include "utilities.h"
 
 /**
- * Create a new BSR containing a production substring
+ * Create a new BSR head containing a production substring
  */
-bsr* new_str_bsr(slice* substring, uint64_t i, uint64_t j, uint64_t k)
+bsr_head* new_str_bsr_head(slice* substring, uint64_t i, uint64_t k)
 {
-    bsr* b = malloc(sizeof(bsr));
-    *b = new_str_bsr_struct(substring, i, j, k);
+    bsr_head* b = malloc(sizeof(bsr_head));
+    *b = new_str_bsr_head_struct(substring, i, k);
     return b;
 }
 
 /**
- * Return the struct for a BSR containing a production substring
+ * Return the struct for a BSR head containing a production substring
  */
-inline bsr new_str_bsr_struct(slice* substring, uint64_t i, uint64_t j, uint64_t k)
+inline bsr_head new_str_bsr_head_struct(slice* substring, uint64_t i, uint64_t k)
 {
-    return (bsr){.type = str_bsr, .substring = *substring, .i = i, .j = j, .k = k};
+    return (bsr_head){.type = str_bsr, .substring = *substring, .i = i, .k = k};
 }
 
 /**
- * Create a new BSR containing a whole production
+ * Create a new BSR head containing a whole production
  */
-bsr* new_prod_bsr(uint64_t head_idx, uint64_t production_idx, uint64_t i, uint64_t j, uint64_t k)
+bsr_head* new_prod_bsr(uint64_t head_idx, uint64_t production_idx, uint64_t i, uint64_t k)
 {
-    bsr* b = malloc(sizeof(bsr));
-    *b = new_prod_bsr_struct(head_idx, production_idx, i, j, k);
+    bsr_head* b = malloc(sizeof(bsr_head));
+    *b = new_prod_bsr_head_struct(head_idx, production_idx, i, k);
     return b;
 }
 
 /**
- * Return the struct for a BSR containing a whole production
+ * Return the struct for a BSR head containing a whole production
  */
-bsr new_prod_bsr_struct(uint64_t head_idx, uint64_t production_idx, uint64_t i, uint64_t j, uint64_t k)
+bsr_head new_prod_bsr_head_struct(uint64_t head_idx, uint64_t production_idx, uint64_t i, uint64_t k)
 {
-    return (bsr){.type = prod_bsr, .head_idx = head_idx, .production_idx = production_idx, .i = i, .j = j, .k = k};
+    return (bsr_head){.type = prod_bsr, .head_idx = head_idx, .production_idx = production_idx, .i = i, .k = k};
 }
 
 /**
- * Return a new copy of a BSR
+ * Return a new copy of a BSR head
  */
-bsr* bsr_copy(bsr* b)
+bsr_head* bsr_head_copy(bsr_head* b)
 {
-    bsr* b_copy = malloc(sizeof(bsr));
+    bsr_head* b_copy = malloc(sizeof(bsr_head));
     *b_copy = *b;
     return b_copy;
 }
 
 /**
- * Return a BSR wrapped in a new object
+ * Return a BSR head wrapped in a new object
  */
-obj* new_bsr_obj(bsr* b) { return new_obj(BSR_t, b); }
+obj* new_bsr_head_obj(bsr_head* b) { return new_obj(BSRHead_t, b); }
 
 /**
- * Check if two BSRs are equal
+ * Check if two BSR heads are equal
  */
-bool bsr_equals(bsr* left, bsr* right)
+bool bsr_head_equals(bsr_head* left, bsr_head* right)
 {
     if (left->type != right->type) return false;
-    if (left->i != right->i || left->j != right->j || left->k != right->k) return false;
+    if (left->i != right->i || left->k != right->k) return false;
     if (left->type == str_bsr) return slice_equals(&left->substring, &right->substring);
     else
         return left->head_idx == right->head_idx && left->production_idx == right->production_idx;
 }
 
 /**
- * Compute the hash of a BSR
+ * Compute the hash of a BSR head
  */
-uint64_t bsr_hash(bsr* bsr) { return bsr->type == str_bsr ? bsr_str_hash(bsr) : bsr_slot_hash(bsr); }
+uint64_t bsr_head_hash(bsr_head* b) { return b->type == str_bsr ? bsr_head_str_hash(b) : bsr_head_slot_hash(b); }
 
 /**
- * Compute the hash of a str BSR
+ * Compute the hash of a str BSR head
  */
-uint64_t bsr_str_hash(bsr* b)
+uint64_t bsr_head_str_hash(bsr_head* b)
 {
-    uint64_t seq[] = {b->type, slice_hash(&b->substring), b->i, b->j, b->k};
+    uint64_t seq[] = {b->type, slice_hash(&b->substring), b->i, b->k};
     return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
 }
 
 /**
- * Compute the hash of a slot BSR
+ * Compute the hash of a slot BSR head
  */
-uint64_t bsr_slot_hash(bsr* b)
+uint64_t bsr_head_slot_hash(bsr_head* b)
 {
-    uint64_t seq[] = {b->type, b->head_idx, b->production_idx, b->i, b->j, b->k};
+    uint64_t seq[] = {b->type, b->head_idx, b->production_idx, b->i, b->k};
     return hash_uint_sequence(seq, sizeof(seq) / sizeof(uint64_t));
 }
 
 /**
- * Free a BSR
+ * Free a BSR head
  */
-void bsr_free(bsr* b) { free(b); }
+void bsr_head_free(bsr_head* b) { free(b); }
 
 /**
- * Print out the BSR
+ * Print out the BSR head
  */
-void bsr_str(bsr* b)
+void bsr_head_str(bsr_head* b)
 {
-    //(X ::= α, i, k, j) for type prod_bsr
-    //(α, i, k, j) for type str_bsr
+
     printf("(");
     if (b->type == prod_bsr) { metaparser_production_str(b->head_idx, b->production_idx); }
     else
@@ -118,25 +117,47 @@ void bsr_str(bsr* b)
             obj_str(metaparser_get_symbol(*symbol_idx));
         }
     }
-    printf(", %" PRIu64 ", %" PRIu64 ", %" PRIu64 ")", b->i, b->j, b->k);
+    printf(", %" PRIu64 ", j, %" PRIu64 ")", b->i, b->k);
 }
 
 /**
- * Print out the internal representation of a BSR
+ * Print out the whole BSR node, given the head and the value j
  */
-void bsr_repr(bsr* bsr)
+void bsr_str(bsr_head* b, uint64_t j)
+{
+    //(X ::= α, i, j, k) for type prod_bsr
+    //(α, i, j, k) for type str_bsr
+    printf("(");
+    if (b->type == prod_bsr) { metaparser_production_str(b->head_idx, b->production_idx); }
+    else
+    {
+        if (slice_size(&b->substring) == 0) printf("ϵ");
+        for (size_t i = 0; i < slice_size(&b->substring); i++)
+        {
+            if (i > 0) printf(" ");
+            uint64_t* symbol_idx = slice_get(&b->substring, i)->data;
+            obj_str(metaparser_get_symbol(*symbol_idx));
+        }
+    }
+    printf(", %" PRIu64 ", %" PRIu64 ", %" PRIu64 ")", b->i, j, b->k);
+}
+
+/**
+ * Print out the internal representation of a BSR head
+ */
+void bsr_head_repr(bsr_head* b)
 {
     printf("(");
-    if (bsr->type == str_bsr)
+    if (b->type == str_bsr)
     {
         printf("type: str_bsr, substring: ");
-        slice_str(&bsr->substring);
+        slice_str(&b->substring);
     }
     else
     {
-        printf("type: prod_bsr, head_idx: %" PRIu64 ", production_idx: %" PRIu64, bsr->head_idx, bsr->production_idx);
+        printf("type: prod_bsr, head_idx: %" PRIu64 ", production_idx: %" PRIu64, b->head_idx, b->production_idx);
     }
-    printf(", i: %" PRIu64 ", j: %" PRIu64 ", k: %" PRIu64 ")", bsr->i, bsr->j, bsr->k);
+    printf(", i: %" PRIu64 ", k: %" PRIu64 ")", b->i, b->k);
 }
 
 #endif

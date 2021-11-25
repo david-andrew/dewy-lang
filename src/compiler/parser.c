@@ -66,12 +66,11 @@ inline parser_context parser_context_struct(uint32_t* src, uint64_t len, uint64_
         .cU = 0,
         .CRF = new_crf(),
         .P = new_dict(),
-        .Y = new_set(),
+        .Y = new_dict(),
         .R = new_vect(),
         .U = new_set(),
         .whole = whole,
         .start_idx = start_idx,
-        .results = new_vect(),
         .sub = sub,
         .success = false,
     };
@@ -85,10 +84,9 @@ void release_parser_context(parser_context* con)
 {
     crf_free(con->CRF);
     dict_free(con->P);
-    set_free(con->Y);
+    dict_free(con->Y);
     vect_free(con->R);
     set_free(con->U);
-    vect_free(con->results);
 }
 
 /**
@@ -167,8 +165,8 @@ void parser_handle_label(slot* label, parser_context* con)
     vect* body = metaparser_get_production_body(label->head_idx, label->production_idx);
     if (label->dot == 0 && vect_size(body) == 0)
     {
-        bsr empty = new_prod_bsr_struct(label->head_idx, label->production_idx, con->cI, con->cI, con->cI);
-        parser_bsr_add_helper(&empty, con);
+        bsr_head empty = new_prod_bsr_head_struct(label->head_idx, label->production_idx, con->cI, con->cI);
+        parser_bsr_add_helper(&empty, con->cI, con);
     }
     else
     {
@@ -490,21 +488,21 @@ void parser_call(slot* L, uint64_t i, uint64_t j, parser_context* con)
 /**
  * Insert a successfully parsed symbol into the set of BSRs.
  */
-void parser_bsr_add(slot* L, uint64_t i, uint64_t k, uint64_t j, parser_context* con)
+void parser_bsr_add(slot* L, uint64_t i, uint64_t j, uint64_t k, parser_context* con)
 {
     vect* body = metaparser_get_production_body(L->head_idx, L->production_idx);
     if (vect_size(body) == L->dot)
     {
-        // insert (head_idx, production_idx, i, k, j) into Y
-        bsr b = new_prod_bsr_struct(L->head_idx, L->production_idx, i, k, j);
-        parser_bsr_add_helper(&b, con);
+        // insert (head_idx, production_idx, i, j, k) into Y
+        bsr_head b = new_prod_bsr_head_struct(L->head_idx, L->production_idx, i, k);
+        parser_bsr_add_helper(&b, j, con);
     }
     else if (L->dot > 1)
     {
-        // insert (s, i, k, j) into Y
+        // insert (s, i, j, k) into Y
         slice s = slice_struct(body, 0, L->dot, NULL);
-        bsr b = new_str_bsr_struct(&s, i, k, j);
-        parser_bsr_add_helper(&b, con);
+        bsr_head b = new_str_bsr_head_struct(&s, i, k);
+        parser_bsr_add_helper(&b, j, con);
     }
 }
 
@@ -512,23 +510,27 @@ void parser_bsr_add(slot* L, uint64_t i, uint64_t k, uint64_t j, parser_context*
  * Insert the BSR into the BSR set, and save any success BSRs encountered
  * Does not modify the original BSR b (it is copied).
  */
-void parser_bsr_add_helper(bsr* b, parser_context* con)
+void parser_bsr_add_helper(bsr_head* b, uint64_t j, parser_context* con)
 {
-    if (!set_contains(con->Y, &(obj){BSR_t, b}))
+    obj* j_set_obj = dict_get(con->Y, &(obj){BSRHead_t, b});
+    if (j_set_obj == NULL)
     {
-        // insert the BSR into the BSR set
-        obj* b_obj = new_bsr_obj(bsr_copy(b));
-        uint64_t b_idx = set_add(con->Y, b_obj);
+        // insert the BSR head into Y, pointing to a new set of j values
+        set* j_set = new_set();
+        set_add(j_set, new_uint_obj(j));
+        obj* b_obj = new_bsr_head_obj(bsr_head_copy(b));
+        dict_set(con->Y, b_obj, new_set_obj(j_set));
+    }
+    else
+    {
+        // insert j into the j set if it doesn't already exist
+        if (!set_contains(j_set_obj->data, &(obj){UInteger_t, &j})) { set_add(j_set_obj->data, new_uint_obj(j)); }
+    }
 
-        // check if the BSR matches a success BSR
-        if (b->type == prod_bsr && b->head_idx == con->start_idx && b->i == 0 && (!con->whole || b->k == con->m))
-        {
-            // save the index of this success BSR
-            con->success = true;
-
-            // don't append to the BSR tree on sub-parses
-            if (!con->sub) vect_append(con->results, new_uint_obj(b_idx));
-        }
+    // check if the BSR matches a success BSR
+    if (b->type == prod_bsr && b->head_idx == con->start_idx && b->i == 0 && (!con->whole || b->k == con->m))
+    {
+        con->success = true;
     }
 }
 

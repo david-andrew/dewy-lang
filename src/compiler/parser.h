@@ -17,7 +17,7 @@
 typedef struct
 {
     dict* P;            // dict<(X, k), set<j>> where (X, k, j) is a crf_action
-    set* Y;             // set<bsr>: set of BSRs (X ::= μ, i, k, j) and (μ, i, k, j)
+    dict* Y;            // dict<bsr_head, set<j>>: BSRs (X ::= μ, i, j, k) and (μ, i, j, k)
     vect* R;            // vect<(slot, k, j)>: list of pending descriptors to handle.
     set* U;             // set<(slot, k, j)>: set of all descriptors constructed so far.
     crf* CRF;           // Call Return Forest
@@ -26,10 +26,10 @@ typedef struct
     uint64_t cI;        // current input index
     uint64_t cU;        // TBD
     uint64_t start_idx; // index of the start symbol
-    vect* results;      // vect<bsr> of all root nodes that successfully parsed the input
     bool whole;         // if true, require parse to consume the whole input
     bool sub;           // indicates if the parse needs to track BSR inputs, or just match for success
     bool success;       // indicates if the parse succeeded
+    // vect* results;      // vect<bsr> of all root nodes that successfully parsed the input
 } parser_context;
 
 // top level functions used by the main program
@@ -54,7 +54,7 @@ void parser_descriptor_add(slot* L, uint64_t k, uint64_t j, parser_context* con)
 void parser_return(uint64_t head_idx, uint64_t k, uint64_t j, parser_context* con);
 void parser_call(slot* L, uint64_t i, uint64_t j, parser_context* con);
 void parser_bsr_add(slot* L, uint64_t i, uint64_t k, uint64_t j, parser_context* con);
-void parser_bsr_add_helper(bsr* b, parser_context* con);
+void parser_bsr_add_helper(bsr_head* b, uint64_t j, parser_context* con);
 
 // first/follow set functions
 size_t parser_count_fsets_size(vect* fsets);
