@@ -7,6 +7,7 @@
 #include "bsr.h"
 #include "metaparser.h"
 #include "parser.h"
+#include "ustring.h"
 #include "utilities.h"
 
 /**
@@ -204,16 +205,13 @@ const char indent[] = "  ";
  */
 void bsr_tree_str_inner(dict* Y, uint32_t* I, bsr_head* head, uint64_t j, uint64_t level)
 {
-    // print indentation for the current level
+    // print the given head at the current indentation level
     indent_str(level, indent);
-
-    // print the given head
     bsr_str(head, j);
     printf("\n");
 
-    // split for printing left and right children
+    // split for printing left and right children. If production body is empty, then there are no children
     slice body;
-
     if (head->type == prod_bsr)
     {
         vect* prod_body = metaparser_get_production_body(head->head_idx, head->production_idx);
@@ -223,8 +221,6 @@ void bsr_tree_str_inner(dict* Y, uint32_t* I, bsr_head* head, uint64_t j, uint64
     {
         body = head->substring;
     }
-
-    // if no children to print, return
     if (slice_size(&body) == 0) return;
 
     // handle left branch of the tree
@@ -232,7 +228,7 @@ void bsr_tree_str_inner(dict* Y, uint32_t* I, bsr_head* head, uint64_t j, uint64
     if (slice_size(&left_substring) > 1)
     {
         // do a full substring print of the left child
-        bsr_tree_str_inner_substr(Y, I, &left_substring, level + 1);
+        bsr_tree_str_inner_substr(Y, I, &left_substring, head->i, j, level + 1);
     }
     else if (slice_size(&left_substring) == 1)
     {
@@ -245,26 +241,33 @@ void bsr_tree_str_inner(dict* Y, uint32_t* I, bsr_head* head, uint64_t j, uint64
     // handle right branch of the tree
     uint64_t* right_symbol_idx = slice_get(&body, slice_size(&body) - 1)->data;
     bsr_tree_str_inner_symbol(Y, I, *right_symbol_idx, j, head->k, level + 1);
-
-    //
-
-    //
-
-    //
-
-    // vect left_body = slice_vect_view_struct(&left_substring);
-    // indent_str(level, indent);
-    // printf("left split: ");
-    // metaparser_body_str(&left_body);
-    // printf("\n");
-
-    // // print the right child
-
-    // print the children of the given head
-    // TODO
 }
 
-void bsr_tree_str_inner_substr(dict* Y, uint32_t* I, slice* substring, uint64_t level) {}
+/**
+ * Helper function for printing out a BSR tree, given a left split substring. substring is expected to have length > 1
+ */
+void bsr_tree_str_inner_substr(dict* Y, uint32_t* I, slice* substring, uint64_t i, uint64_t k, uint64_t level)
+{
+    // create a substring BSR head
+    bsr_head head = new_str_bsr_head_struct(substring, i, k);
+    obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = &head});
+    if (j_set_obj != NULL)
+    {
+        for (size_t j_idx = 0; j_idx < set_size(j_set_obj->data); j_idx++)
+        {
+            // print out the BSR head
+            uint64_t* j = set_get_at_index(j_set_obj->data, j_idx)->data;
+            bsr_tree_str_inner(Y, I, &head, *j, level);
+
+            // for now skip all alternative j splits
+            break; // TODO->remove this!!!
+        }
+    }
+}
+
+/**
+ * Helper function for printing out a BSR tree, given a left or right split symbol
+ */
 void bsr_tree_str_inner_symbol(dict* Y, uint32_t* I, uint64_t symbol_idx, uint64_t i, uint64_t k, uint64_t level)
 {
     // check if the symbol is terminal or nonterminal
@@ -272,9 +275,11 @@ void bsr_tree_str_inner_symbol(dict* Y, uint32_t* I, uint64_t symbol_idx, uint64
     if (symbol->type == CharSet_t)
     {
         // print out the terminal at the location
-        // TODO->get the actual input string. for now print out the charset
         indent_str(level, indent);
-        charset_str(symbol->data);
+        // printf("\"");
+        put_unicode(I[i]); // TODO->maybe print the charset with the input character
+        // printf(" from ");
+        // charset_str(symbol->data);
         printf("\n");
     }
     else
@@ -285,15 +290,21 @@ void bsr_tree_str_inner_symbol(dict* Y, uint32_t* I, uint64_t symbol_idx, uint64
         {
             // check if there is a BSR head associated with this production
             bsr_head head = new_prod_bsr_head_struct(symbol_idx, prod_idx, i, k);
-            //
+            obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = &head});
+            if (j_set_obj != NULL)
+            {
+                for (size_t j_idx = 0; j_idx < set_size(j_set_obj->data); j_idx++)
+                {
+                    // print out the BSR head
+                    uint64_t* j = set_get_at_index(j_set_obj->data, j_idx)->data;
+                    bsr_tree_str_inner(Y, I, &head, *j, level);
+
+                    // for now skip all alternative j splits
+                    break; // TODO->remove this!!!
+                }
+            }
         }
     }
-
-    printf("indent level %" PRIu64 "\n", level);
-    indent_str(level, indent);
-    printf("symbol: ");
-    obj_str(symbol);
-    printf("\n");
 }
 
 /**
