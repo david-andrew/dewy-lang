@@ -191,63 +191,87 @@ void bsr_tree_str(dict* Y, uint64_t start_idx, uint64_t length)
     // printf("}\n\n");
 }
 
+void indent_str(uint64_t i, const char* str)
+{
+    for (size_t j = 0; j < i; j++) puts(str);
+}
+
 /**
  * Helper function for printing out a bsr forest
  */
 void bsr_tree_str_inner(bsr_head* head, uint64_t j, uint64_t level)
 {
+    const char indent[] = "  ";
+
     // print indentation for the current level
-    for (size_t i = 0; i < level; i++) printf("  ");
+    indent_str(level, indent);
 
     // print the given head
     bsr_str(head, j);
     printf("\n");
 
-    if (head->type == prod_bsr) {}
+    if (head->type == prod_bsr)
+    {
+        // print the production body left and right strings
+        indent_str(level, indent);
+        metaparser_production_str(head->head_idx, head->production_idx);
+        printf("\n");
+
+        vect* body = metaparser_get_production_body(head->head_idx, head->production_idx);
+
+        indent_str(level, indent);
+        metaparser_body_str(body);
+        printf("\n");
+
+        if (vect_size(body) == 0) { return; }
+
+        // get the left split of the body
+        slice left_substring = slice_struct(body, 0, vect_size(body) - 1);
+    }
 
     // print the children of the given head
     // TODO
 }
 
-/**
- * Get the left and right children of a given BSR node. Results are stored in the pointers left and right.
- * left or right may be set to NULL if no child is found.
- */
-void bsr_get_children(dict* Y, bsr_head* head, uint64_t j, bsr_head** left, bsr_head** right)
-{
-    if (head->type == prod_bsr)
-    {
-        vect* body = metaparser_get_production_body(head->head_idx, head->production_idx);
-        if (vect_size(body) == 0)
-        {
-            *left = NULL;
-            *right = NULL;
-            return;
-        }
-        else if (vect_size(body) == 1)
-        {
-            uint64_t* symbol_idx = vect_get(body, 0)->data;
-            *right = NULL;
+// /**
+//  * Get the left and right children of a given BSR node. Results are stored in the pointers left and right.
+//  * left or right may be set to NULL if no child is found.
+//  */
+// void bsr_get_children(dict* Y, bsr_head* head, uint64_t j, bsr_head** left, bsr_head** right)
+// {
+//     if (head->type == prod_bsr)
+//     {
+//         vect* body = metaparser_get_production_body(head->head_idx, head->production_idx);
+//         if (vect_size(body) == 0)
+//         {
+//             *left = NULL;
+//             *right = NULL;
+//             return;
+//         }
+//         else if (vect_size(body) == 1)
+//         {
+//             uint64_t* symbol_idx = vect_get(body, 0)->data;
+//             *right = NULL;
 
-            // TODO. could be multiple children, one for each production body of the symbol_idx.
-            // consider some method for either returning all children, or specifying which child to grab...
+//             // TODO. could be multiple children, one for each production body of the symbol_idx.
+//             // consider some method for either returning all children, or specifying which child to grab...
 
-            return;
-        }
+//             return;
+//         }
 
-        // general case
+//         // general case
 
-        // get the left child
-        slice left_substring = (slice){.v = body, .start = 0, .stop = vect_size(body) - 1, .lookahead = NULL},
-              right_substring = (slice){.v = body, .start = 0, .stop = vect_size(body) - 1, .lookahead = NULL};
-        if (slice_size(&left_substring) > 1) {}
+//         // get the left child
+//         slice left_substring = (slice){.v = body, .start = 0, .stop = vect_size(body) - 1, .lookahead = NULL},
+//               right_substring = (slice){.v = body, .start = 0, .stop = vect_size(body) - 1, .lookahead = NULL};
+//         if (slice_size(&left_substring) > 1) {}
 
-        // create left and right substrings of body, split at j
-    }
-    else
-    {
-        //
-    }
-}
+//         // create left and right substrings of body, split at j
+//     }
+//     else
+//     {
+//         //
+//     }
+// }
 
 #endif

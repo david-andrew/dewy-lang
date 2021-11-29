@@ -11,12 +11,11 @@ typedef struct
     vect* v;
     size_t start; // index of first element in slice
     size_t stop;  // index - 1 of last element in slice. essentially python slice rules
-    obj* lookahead;
 } slice;
 
-slice slice_struct(vect* v, size_t start, size_t stop, obj* lookahead);
+slice slice_struct(vect* v, size_t start, size_t stop);
 vect slice_vect_view_struct(slice* s);
-slice* new_slice(vect* v, size_t start, size_t stop, obj* lookahead);
+slice* new_slice(vect* v, size_t start, size_t stop);
 obj* new_slice_obj(slice* s);
 obj* slice_get(slice* s, size_t i);
 size_t slice_size(slice* s);

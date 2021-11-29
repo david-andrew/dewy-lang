@@ -186,7 +186,7 @@ void parser_handle_label(slot* label, parser_context* con)
             if (!metaparser_is_symbol_terminal(*(uint64_t*)vect_get(body, dot)->data)) { break; }
             if (dot != 0)
             {
-                slice s = slice_struct(body, dot, vect_size(body), NULL);
+                slice s = slice_struct(body, dot, vect_size(body));
                 if (!parser_test_select(con->I[con->cI], label->head_idx, &s)) { return; }
             }
             dot++;
@@ -199,7 +199,7 @@ void parser_handle_label(slot* label, parser_context* con)
         {
             if (dot != 0)
             {
-                slice s = slice_struct(body, dot, vect_size(body), NULL);
+                slice s = slice_struct(body, dot, vect_size(body));
                 if (!parser_test_select(con->I[con->cI], label->head_idx, &s)) { return; }
             }
             dot++;
@@ -247,7 +247,7 @@ void parser_print_label(slot* label)
             if (!metaparser_is_symbol_terminal(*(uint64_t*)vect_get(body, dot)->data)) { break; }
             if (dot != 0)
             {
-                slice s = slice_struct(body, dot, vect_size(body), NULL);
+                slice s = slice_struct(body, dot, vect_size(body));
                 printf("    if (!parser_test_select(I[cI], ");
                 obj_str(metaparser_get_symbol(label->head_idx));
                 printf(", ");
@@ -264,7 +264,7 @@ void parser_print_label(slot* label)
         {
             if (dot != 0)
             {
-                slice s = slice_struct(body, dot, vect_size(body), NULL);
+                slice s = slice_struct(body, dot, vect_size(body));
                 printf("    if (!parser_test_select(I[cI], ");
                 obj_str(metaparser_get_symbol(label->head_idx));
                 printf(", ");
@@ -385,7 +385,7 @@ void parser_nonterminal_add(uint64_t head_idx, uint64_t j, parser_context* con)
     for (size_t body_idx = 0; body_idx < set_size(bodies); body_idx++)
     {
         vect* body = metaparser_get_production_body(head_idx, body_idx);
-        slice s = slice_struct(body, 0, vect_size(body), NULL);
+        slice s = slice_struct(body, 0, vect_size(body));
         if (parser_test_select(con->I[j], head_idx, &s))
         {
             parser_descriptor_add(&(slot){head_idx, body_idx, 0}, j, j, con);
@@ -519,7 +519,7 @@ void parser_bsr_add(slot* L, uint64_t i, uint64_t j, uint64_t k, parser_context*
     else if (L->dot > 1)
     {
         // insert (s, i, j, k) into Y
-        slice s = slice_struct(body, 0, L->dot, NULL);
+        slice s = slice_struct(body, 0, L->dot);
         bsr_head b = new_str_bsr_head_struct(&s, i, k);
         parser_bsr_add_helper(&b, j, con);
     }
@@ -666,7 +666,7 @@ void parser_compute_symbol_follows()
                     uint64_t* symbol_idx = vect_get(body, i)->data;
 
                     // create a substring beta of the body from i + 1 to the end, and compute its first set
-                    slice beta = slice_struct(body, i + 1, vect_size(body), NULL);
+                    slice beta = slice_struct(body, i + 1, vect_size(body));
                     fset* beta_first = parser_first_of_string(&beta);
                     bool nullable = beta_first->special; // save nullable status
 
@@ -779,7 +779,7 @@ void parser_print_body_slice(slice* body)
  */
 void parser_print_body(vect* body)
 {
-    slice body_slice = slice_struct(body, 0, vect_size(body), NULL);
+    slice body_slice = slice_struct(body, 0, vect_size(body));
     parser_print_body_slice(&body_slice);
 }
 

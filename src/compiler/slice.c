@@ -9,14 +9,14 @@
 /**
  * Return a stack allocated slice struct.
  */
-inline slice slice_struct(vect* v, size_t start, size_t stop, obj* lookahead)
+inline slice slice_struct(vect* v, size_t start, size_t stop)
 {
     if (start > vect_size(v) || stop > vect_size(v))
     {
         printf("ERROR: slice indices %zu:%zu out of bounds for vect with size %zu\n", start, stop, vect_size(v));
         exit(1);
     }
-    return (slice){.v = v, .start = start, .stop = stop, .lookahead = lookahead};
+    return (slice){.v = v, .start = start, .stop = stop};
 }
 
 /**
@@ -28,15 +28,6 @@ inline slice slice_struct(vect* v, size_t start, size_t stop, obj* lookahead)
  */
 inline vect slice_vect_view_struct(slice* s)
 {
-    if (s->lookahead != NULL)
-    {
-        printf("ERROR: cannot create a vect view of a slice that contains a lookahead value\n");
-        exit(1);
-    }
-    // printf("vect view vect: "); vect_str(s->v); printf("\n");
-    // vect_repr(s->v);
-    // printf("capacity: %zu, head: %zu, size: %zu, start: %zu, stop: %zu\n", s->v->capacity, s->v->head, s->v->size,
-    // s->start, s->stop);
     return (vect){.capacity = s->v->capacity,
                   .head = (s->v->head + s->start) % s->v->capacity,
                   .list = s->v->list,
@@ -48,7 +39,7 @@ inline vect slice_vect_view_struct(slice* s)
  * Lookahead is an optional terminal index object that will be treated as
  * appended to the end of the slice. if lookahead is null, it is ignored.
  */
-slice* new_slice(vect* v, size_t start, size_t stop, obj* lookahead)
+slice* new_slice(vect* v, size_t start, size_t stop)
 {
     if (start > vect_size(v) || stop > vect_size(v))
     {
@@ -56,7 +47,7 @@ slice* new_slice(vect* v, size_t start, size_t stop, obj* lookahead)
         exit(1);
     }
     slice* s = malloc(sizeof(slice));
-    *s = (slice){.v = v, .start = start, .stop = stop, .lookahead = lookahead};
+    *s = slice_struct(v, start, stop);
     return s;
 }
 
@@ -75,15 +66,10 @@ obj* new_slice_obj(slice* s)
  */
 obj* slice_get(slice* s, size_t i)
 {
-    if ((s->lookahead == NULL && i < slice_size(s)) || (s->lookahead != NULL && i < slice_size(s) - 1))
+    if (i < slice_size(s))
     {
         // get the item from the contained vect
         return vect_get(s->v, s->start + i);
-    }
-    else if (s->lookahead != NULL && i == slice_size(s) - 1)
-    {
-        // get the "appended" lookahead item
-        return s->lookahead;
     }
     else
     {
@@ -101,7 +87,7 @@ obj* slice_get(slice* s, size_t i)
 size_t slice_size(slice* s)
 {
     // if lookahead is included, size is 1 larger
-    return s->stop - s->start + (s->lookahead != NULL);
+    return s->stop - s->start;
 }
 
 /**
@@ -127,7 +113,7 @@ void slice_str(slice* s)
  * Return a copy of the slice.
  * Note copy still points to same vector/lookahead as original.
  */
-slice* slice_copy(slice* s) { return new_slice(s->v, s->start, s->stop, s->lookahead); }
+slice* slice_copy(slice* s) { return new_slice(s->v, s->start, s->stop); }
 
 /**
  * Return a copy of the slice as if it were a normal vector.

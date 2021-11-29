@@ -54,7 +54,7 @@ bool slot_is_accept(slot* s)
     else
     {
         // check if the remaining portion of the string is nullable
-        slice remaining = slice_struct(body, s->dot, vect_size(body), NULL);
+        slice remaining = slice_struct(body, s->dot, vect_size(body));
         fset* first = parser_first_of_string(&remaining);
         bool nullable = first->special;
         fset_free(first);
