@@ -14,6 +14,7 @@ typedef struct
 } slice;
 
 slice slice_struct(vect* v, size_t start, size_t stop);
+slice slice_slice_struct(slice* s, size_t start, size_t stop);
 vect slice_vect_view_struct(slice* s);
 slice* new_slice(vect* v, size_t start, size_t stop);
 obj* new_slice_obj(slice* s);

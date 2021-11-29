@@ -47,8 +47,11 @@ void bsr_head_free(bsr_head* b);
 void bsr_head_str(bsr_head* b);
 void bsr_str(bsr_head* b, uint64_t j);
 void bsr_head_repr(bsr_head* b);
-void bsr_tree_str(dict* Y, uint64_t start_idx, uint64_t length);
-void bsr_tree_str_inner(bsr_head* head, uint64_t j, uint64_t level);
-void bsr_get_children(dict* Y, bsr_head* head, uint64_t j, bsr_head** left, bsr_head** right);
+void bsr_tree_str(dict* Y, uint32_t* I, uint64_t start_idx, uint64_t length);
+void bsr_tree_str_inner(dict* Y, uint32_t* I, bsr_head* head, uint64_t j, uint64_t level);
+void bsr_tree_str_inner_substr(dict* Y, uint32_t* I, slice* substring, uint64_t level);
+void bsr_tree_str_inner_symbol(dict* Y, uint32_t* I, uint64_t symbol_idx, uint64_t i, uint64_t k, uint64_t level);
+// void bsr_tree_str_leaf(charset* terminal, uint64_t j, uint64_t level);
+// void bsr_get_children(dict* Y, bsr_head* head, uint64_t j, bsr_head** left, bsr_head** right);
 
 #endif

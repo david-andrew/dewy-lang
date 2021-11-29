@@ -321,7 +321,7 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
     if (ast)
     {
         printf("BSR TREE OUTPUT:\n"); // for now, while AST output not implemented, print out the BSR Tree
-        bsr_tree_str(context.Y, start_symbol_idx, length);
+        bsr_tree_str(context.Y, context.I, start_symbol_idx, length);
         printf("\n\n");
         // printf("AST OUTPUT:\n");
         // print_sppf_from_bsr(context.BSR);

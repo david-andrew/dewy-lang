@@ -20,6 +20,19 @@ inline slice slice_struct(vect* v, size_t start, size_t stop)
 }
 
 /**
+ * Return a stack allocated slice of an existing slice.
+ */
+inline slice slice_slice_struct(slice* s, size_t start, size_t stop)
+{
+    if (start > slice_size(s) || stop > slice_size(s))
+    {
+        printf("ERROR: slice indices %zu:%zu out of bounds for slice with size %zu\n", start, stop, slice_size(s));
+        exit(1);
+    }
+    return (slice){.v = s->v, .start = s->start + start, .stop = s->start + stop};
+}
+
+/**
  * Return a static vect view of the slice.
  * Only works for slices where lookahead=NULL
  * Returned vect should be treated as immutable,

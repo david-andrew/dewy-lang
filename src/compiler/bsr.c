@@ -6,6 +6,7 @@
 
 #include "bsr.h"
 #include "metaparser.h"
+#include "parser.h"
 #include "utilities.h"
 
 /**
@@ -163,12 +164,8 @@ void bsr_head_repr(bsr_head* b)
 /**
  * Print out a BSR forest, starting from the root with the given head_idx
  */
-void bsr_tree_str(dict* Y, uint64_t start_idx, uint64_t length)
+void bsr_tree_str(dict* Y, uint32_t* I, uint64_t start_idx, uint64_t length)
 {
-    // printf("RESULTS BSRs:\n");
-    // printf("{");
-    // bool first = true;
-
     // get the production bodies of the start symbol
     size_t num_bodies = metaparser_get_num_production_bodies(start_idx);
     for (size_t i = 0; i < num_bodies; i++)
@@ -184,25 +181,29 @@ void bsr_tree_str(dict* Y, uint64_t start_idx, uint64_t length)
                 // printf(!first ? ", " : "");
                 // first = false;
                 uint64_t* j = set_get_at_index(j_set, k)->data;
-                bsr_tree_str_inner(&head, *j, 0);
+                bsr_tree_str_inner(Y, I, &head, *j, 0);
+
+                // for now skip all alternative j splits
+                break; // TODO->remove this!!!
+                // basically want a function for determining if a node is a packed node, which would count the number of
+                // different j and j-sets via these two for loops (for prod in productions, for j in j-sets)
             }
         }
     }
-    // printf("}\n\n");
 }
 
 void indent_str(uint64_t i, const char* str)
 {
-    for (size_t j = 0; j < i; j++) puts(str);
+    for (size_t j = 0; j < i; j++) fputs(str, stdout);
 }
+
+const char indent[] = "  ";
 
 /**
  * Helper function for printing out a bsr forest
  */
-void bsr_tree_str_inner(bsr_head* head, uint64_t j, uint64_t level)
+void bsr_tree_str_inner(dict* Y, uint32_t* I, bsr_head* head, uint64_t j, uint64_t level)
 {
-    const char indent[] = "  ";
-
     // print indentation for the current level
     indent_str(level, indent);
 
@@ -210,28 +211,95 @@ void bsr_tree_str_inner(bsr_head* head, uint64_t j, uint64_t level)
     bsr_str(head, j);
     printf("\n");
 
+    // split for printing left and right children
+    slice body;
+
     if (head->type == prod_bsr)
     {
-        // print the production body left and right strings
-        indent_str(level, indent);
-        metaparser_production_str(head->head_idx, head->production_idx);
-        printf("\n");
-
-        vect* body = metaparser_get_production_body(head->head_idx, head->production_idx);
-
-        indent_str(level, indent);
-        metaparser_body_str(body);
-        printf("\n");
-
-        if (vect_size(body) == 0) { return; }
-
-        // get the left split of the body
-        slice left_substring = slice_struct(body, 0, vect_size(body) - 1);
+        vect* prod_body = metaparser_get_production_body(head->head_idx, head->production_idx);
+        body = slice_struct(prod_body, 0, vect_size(prod_body));
     }
+    else // type == str_bsr
+    {
+        body = head->substring;
+    }
+
+    // if no children to print, return
+    if (slice_size(&body) == 0) return;
+
+    // handle left branch of the tree
+    slice left_substring = slice_slice_struct(&body, 0, slice_size(&body) - 1);
+    if (slice_size(&left_substring) > 1)
+    {
+        // do a full substring print of the left child
+        bsr_tree_str_inner_substr(Y, I, &left_substring, level + 1);
+    }
+    else if (slice_size(&left_substring) == 1)
+    {
+        // print the left child as a single symbol
+        uint64_t* left_symbol_idx = slice_get(&left_substring, 0)->data;
+        bsr_tree_str_inner_symbol(Y, I, *left_symbol_idx, head->i, j, level + 1);
+    }
+    // otherwise nothing to print for left child
+
+    // handle right branch of the tree
+    uint64_t* right_symbol_idx = slice_get(&body, slice_size(&body) - 1)->data;
+    bsr_tree_str_inner_symbol(Y, I, *right_symbol_idx, j, head->k, level + 1);
+
+    //
+
+    //
+
+    //
+
+    // vect left_body = slice_vect_view_struct(&left_substring);
+    // indent_str(level, indent);
+    // printf("left split: ");
+    // metaparser_body_str(&left_body);
+    // printf("\n");
+
+    // // print the right child
 
     // print the children of the given head
     // TODO
 }
+
+void bsr_tree_str_inner_substr(dict* Y, uint32_t* I, slice* substring, uint64_t level) {}
+void bsr_tree_str_inner_symbol(dict* Y, uint32_t* I, uint64_t symbol_idx, uint64_t i, uint64_t k, uint64_t level)
+{
+    // check if the symbol is terminal or nonterminal
+    obj* symbol = metaparser_get_symbol(symbol_idx);
+    if (symbol->type == CharSet_t)
+    {
+        // print out the terminal at the location
+        // TODO->get the actual input string. for now print out the charset
+        indent_str(level, indent);
+        charset_str(symbol->data);
+        printf("\n");
+    }
+    else
+    {
+        // find the BSR associated with this symbol
+        set* bodies = metaparser_get_production_bodies(symbol_idx);
+        for (size_t prod_idx = 0; prod_idx < set_size(bodies); prod_idx++)
+        {
+            // check if there is a BSR head associated with this production
+            bsr_head head = new_prod_bsr_head_struct(symbol_idx, prod_idx, i, k);
+            //
+        }
+    }
+
+    printf("indent level %" PRIu64 "\n", level);
+    indent_str(level, indent);
+    printf("symbol: ");
+    obj_str(symbol);
+    printf("\n");
+}
+
+/**
+ * helper function for printing out a leaf node in the bsr forest
+ */
+// void bsr_tree_str_leaf(charset* terminal, uint64_t j, uint64_t level) {}
 
 // /**
 //  * Get the left and right children of a given BSR node. Results are stored in the pointers left and right.
