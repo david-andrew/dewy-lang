@@ -173,23 +173,7 @@ void bsr_tree_str(dict* Y, uint32_t* I, uint64_t start_idx, uint64_t length)
     {
         // get the j-set associated with the body
         bsr_head head = new_prod_bsr_head_struct(start_idx, i, 0, length);
-        obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = &head});
-        if (j_set_obj != NULL)
-        {
-            set* j_set = j_set_obj->data;
-            for (size_t k = 0; k < set_size(j_set); k++)
-            {
-                // printf(!first ? ", " : "");
-                // first = false;
-                uint64_t* j = set_get_at_index(j_set, k)->data;
-                bsr_tree_str_inner(Y, I, &head, *j, 0);
-
-                // for now skip all alternative j splits
-                break; // TODO->remove this!!!
-                // basically want a function for determining if a node is a packed node, which would count the number of
-                // different j and j-sets via these two for loops (for prod in productions, for j in j-sets)
-            }
-        }
+        bsr_tree_str_inner_head(Y, I, &head, 0);
     }
 }
 
@@ -228,7 +212,9 @@ void bsr_tree_str_inner(dict* Y, uint32_t* I, bsr_head* head, uint64_t j, uint64
     if (slice_size(&left_substring) > 1)
     {
         // do a full substring print of the left child
-        bsr_tree_str_inner_substr(Y, I, &left_substring, head->i, j, level + 1);
+        // bsr_tree_str_inner_substr(Y, I, &left_substring, head->i, j, level + 1);
+        bsr_head left_head = new_str_bsr_head_struct(&left_substring, head->i, j);
+        bsr_tree_str_inner_head(Y, I, &left_head, level + 1);
     }
     else if (slice_size(&left_substring) == 1)
     {
@@ -244,23 +230,24 @@ void bsr_tree_str_inner(dict* Y, uint32_t* I, bsr_head* head, uint64_t j, uint64
 }
 
 /**
- * Helper function for printing out a BSR tree, given a left split substring. substring is expected to have length > 1
+ * Helper function for printing out a BSR tree.
+ * Search the BSR dict for the given head, and any assocaited j-sets, and print at the given level.
  */
-void bsr_tree_str_inner_substr(dict* Y, uint32_t* I, slice* substring, uint64_t i, uint64_t k, uint64_t level)
+void bsr_tree_str_inner_head(dict* Y, uint32_t* I, bsr_head* head, uint64_t level)
 {
-    // create a substring BSR head
-    bsr_head head = new_str_bsr_head_struct(substring, i, k);
-    obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = &head});
+    obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = head});
     if (j_set_obj != NULL)
     {
-        for (size_t j_idx = 0; j_idx < set_size(j_set_obj->data); j_idx++)
+        set* j_set = j_set_obj->data;
+        for (size_t k = 0; k < set_size(j_set); k++)
         {
-            // print out the BSR head
-            uint64_t* j = set_get_at_index(j_set_obj->data, j_idx)->data;
-            bsr_tree_str_inner(Y, I, &head, *j, level);
+            uint64_t* j = set_get_at_index(j_set, k)->data;
+            bsr_tree_str_inner(Y, I, head, *j, level);
 
             // for now skip all alternative j splits
-            break; // TODO->remove this!!!
+            // break; // TODO->remove this!!!
+            // basically want a function for determining if a node is a packed node, which would count the number of
+            // different j and j-sets via these two for loops (for prod in productions, for j in j-sets)
         }
     }
 }
@@ -290,19 +277,7 @@ void bsr_tree_str_inner_symbol(dict* Y, uint32_t* I, uint64_t symbol_idx, uint64
         {
             // check if there is a BSR head associated with this production
             bsr_head head = new_prod_bsr_head_struct(symbol_idx, prod_idx, i, k);
-            obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = &head});
-            if (j_set_obj != NULL)
-            {
-                for (size_t j_idx = 0; j_idx < set_size(j_set_obj->data); j_idx++)
-                {
-                    // print out the BSR head
-                    uint64_t* j = set_get_at_index(j_set_obj->data, j_idx)->data;
-                    bsr_tree_str_inner(Y, I, &head, *j, level);
-
-                    // for now skip all alternative j splits
-                    break; // TODO->remove this!!!
-                }
-            }
+            bsr_tree_str_inner_head(Y, I, &head, level);
         }
     }
 }
@@ -311,46 +286,5 @@ void bsr_tree_str_inner_symbol(dict* Y, uint32_t* I, uint64_t symbol_idx, uint64
  * helper function for printing out a leaf node in the bsr forest
  */
 // void bsr_tree_str_leaf(charset* terminal, uint64_t j, uint64_t level) {}
-
-// /**
-//  * Get the left and right children of a given BSR node. Results are stored in the pointers left and right.
-//  * left or right may be set to NULL if no child is found.
-//  */
-// void bsr_get_children(dict* Y, bsr_head* head, uint64_t j, bsr_head** left, bsr_head** right)
-// {
-//     if (head->type == prod_bsr)
-//     {
-//         vect* body = metaparser_get_production_body(head->head_idx, head->production_idx);
-//         if (vect_size(body) == 0)
-//         {
-//             *left = NULL;
-//             *right = NULL;
-//             return;
-//         }
-//         else if (vect_size(body) == 1)
-//         {
-//             uint64_t* symbol_idx = vect_get(body, 0)->data;
-//             *right = NULL;
-
-//             // TODO. could be multiple children, one for each production body of the symbol_idx.
-//             // consider some method for either returning all children, or specifying which child to grab...
-
-//             return;
-//         }
-
-//         // general case
-
-//         // get the left child
-//         slice left_substring = (slice){.v = body, .start = 0, .stop = vect_size(body) - 1, .lookahead = NULL},
-//               right_substring = (slice){.v = body, .start = 0, .stop = vect_size(body) - 1, .lookahead = NULL};
-//         if (slice_size(&left_substring) > 1) {}
-
-//         // create left and right substrings of body, split at j
-//     }
-//     else
-//     {
-//         //
-//     }
-// }
 
 #endif
