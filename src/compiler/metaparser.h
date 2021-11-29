@@ -53,5 +53,7 @@ obj* metaparser_get_reject_entry(uint64_t head_idx);
 void metaparser_add_precedence_split(uint64_t head_idx);
 dict* metaparser_get_precedence_table(uint64_t head_idx);
 void metaparser_finalize_precedence_tables();
+void metaparser_add_capture(uint64_t head_idx);
+bool metaparser_is_capture(uint64_t head_idx);
 
 #endif

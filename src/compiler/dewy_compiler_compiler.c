@@ -320,6 +320,7 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
 
     if (ast)
     {
+        // TODO->move this up to replace the output for RESULTS BSRs, and replace this with the actual AST
         printf("BSR TREE OUTPUT:\n"); // for now, while AST output not implemented, print out the BSR Tree
         bsr_tree_str(context.Y, context.I, start_symbol_idx, length);
         printf("\n\n");

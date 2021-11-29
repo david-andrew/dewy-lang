@@ -41,6 +41,11 @@ dict* metaparser_nofollow_table;    // map<head_idx, charset | ustring | vect<ch
 dict* metaparser_reject_table;      // map<head_idx, charset | ustring | vect<charset> | head_idx>>
 dict* metaparser_precedence_tables; // map<head_idx, map<production_idx, level>>. lower level means higher precedence
 
+// Captured rules are used to indicate which portion of the parsed input should be recorded for later retrieval.
+// #rule = #A.; indicates that when reconstructing the AST for a parse, the #A portion should be recorded.
+// By default, if no capture is specified, the entire rule is captured.
+set* metaparser_capture_set; // set<head_idx>
+
 // convenience variables for the frequently used epsilon production body, and $ endmarker terminal.
 uint64_t metaparser_eps_body_idx = NULL_SYMBOL_INDEX;
 uint64_t metaparser_start_symbol_idx = NULL_SYMBOL_INDEX;
@@ -59,6 +64,8 @@ void allocate_metaparser()
     metaparser_nofollow_table = new_dict();
     metaparser_reject_table = new_dict();
     metaparser_precedence_tables = new_dict();
+
+    metaparser_capture_set = new_set();
 }
 
 /**
@@ -84,6 +91,7 @@ void release_metaparser()
     dict_free(metaparser_nofollow_table);
     dict_free(metaparser_reject_table);
     dict_free(metaparser_precedence_tables);
+    set_free(metaparser_capture_set);
 
     metaparser_free_ast_cache();
 }
@@ -256,6 +264,12 @@ void metaparser_rules_str()
             printf(">>>> precedence: [\n");
             metaparser_precedence_table_str(result->data, bodies);
             printf("]\n");
+        }
+        if (set_contains(metaparser_capture_set, &(obj){.type = UInteger_t, .data = head_idx}))
+        {
+            printf(">>>> capture: ");
+            obj_str(head);
+            printf("\n");
         }
     }
 }
@@ -912,12 +926,38 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
 
             break;
         }
-
-            printf("ERROR: Cannot generate CFG sentence as greater than `>` operator has not yet been implemented\n");
-            exit(1);
         case metaast_capture:
-            printf("ERROR: Cannot generate CFG sentence as capture `.` operator has not yet been implemented\n");
-            exit(1);
+        {
+            // crete an anonymous head if it wasn't provided
+            head_idx = anonymous ? metaparser_get_anonymous_rule_head() : head_idx;
+
+            // capture node
+            //#rule = #A. =>
+            //  #rule = #__0
+            //  #__0 = #A
+            //  #__0 in capture_set = true
+
+            // get the identifier for the inner node
+            uint64_t inner_idx = metaparser_get_symbol_or_anonymous(body_ast->node.unary.inner);
+
+            // #__0 = #A
+            uint64_t anonymous_head_idx = metaparser_get_anonymous_rule_head();
+            vect* sentence0 = new_vect();
+            vect_append(sentence0, new_uint_obj(inner_idx));
+            uint64_t sentence0_idx = metaparser_add_body(sentence0);
+            metaparser_add_production(anonymous_head_idx, sentence0_idx);
+
+            // #rule = #__0
+            vect* sentence1 = new_vect();
+            vect_append(sentence1, new_uint_obj(anonymous_head_idx));
+            uint64_t sentence1_idx = metaparser_add_body(sentence1);
+            metaparser_add_production(head_idx, sentence1_idx);
+
+            // #__0 in capture_set = true
+            metaparser_add_capture(anonymous_head_idx);
+
+            break;
+        }
 
         // ERROR->should not allow, or come up with semantics for
         // e.g. (#A)~ => ξ* - #A
@@ -1353,6 +1393,28 @@ void metaparser_finalize_precedence_tables()
             dict_set(precedence_table, new_uint_obj(j), new_uint_obj(prev_level));
         }
     }
+}
+
+/**
+ * Add a production head to the list of catpure heads.
+ * Catpure is used to indicate which parts of the rule are to be recorded from the input stream.
+ * e.g. for a rule like #sum = #expr '+' #expr;, the #expr components ought to be captured when constructing an AST,
+ * while the '+' is not necessary.
+ */
+void metaparser_add_capture(uint64_t head_idx)
+{
+    if (!set_contains(metaparser_capture_set, &(obj){.type = UInteger_t, .data = &head_idx}))
+    {
+        set_add(metaparser_capture_set, new_uint_obj(head_idx));
+    }
+}
+
+/**
+ * Check if a given head is a capture head.
+ */
+bool metaparser_is_capture(uint64_t head_idx)
+{
+    return set_contains(metaparser_capture_set, &(obj){.type = UInteger_t, .data = &head_idx});
 }
 
 #endif
