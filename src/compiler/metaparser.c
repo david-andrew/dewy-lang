@@ -352,7 +352,7 @@ void metaparser_precedence_table_str(dict* table, set* bodies)
 
         if (i > 0)
         {
-            uint64_t* body_level = dict_get_uint_key(table, *body_idx)->data;
+            uint64_t* body_level = dict_get_uint_key(table, i)->data;
             if (*body_level != level)
             {
                 printf("\n  %" PRIu64 ": ", *body_level);
