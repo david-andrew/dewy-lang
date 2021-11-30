@@ -1,3 +1,5 @@
+#program = (#w* #expr)+ #w*;  // programs must contain at least 1 expression
+
 // whitespace/other ignored rules
 #line_comment = '/\/' '\n'~* / '\n'~;
 #block_comment = '/\{' #block_inner '}/';
@@ -8,25 +10,53 @@
 #s = ' ';                                           // non-breaking space
 
 
+//////// Expressions ////////
+// this will be a very long list
+#expr = #call > #assign > #id | #literal;
+
+#literal = #int_literal | #string;
+
 #id = ([a-zA-Z_] [0-9a-zA-Z_?!$&]* / [0-9a-zA-Z_?!$&]) - #unit;
 
-// Literal values
+
+#call = #callable_expr '(' #w* (#call_args #w*)? ')';
+#callable_expr = #id /{ accessor methods, func literals, etc. }/;
+#call_args = #expr (#w* ',' #w* #expr)*;  //includes assignment expressions
+
+#assign = #expr #w* '=' #w* #expr;
+
+
+//////// Literals ////////
+// strings with interpolation and comments
+#string = #double_string | #single_string;
+#double_string = '"' (#double_string_text | #escape | #string_interp | #comment)* '"';
+#double_string_text = (["{}\\]~+ / ["{}\\]~) - (#string_interp | #comment);
+#single_string = "'" (#single_string_text | #escape | #string_interp | #comment)* "'";
+#single_string_text = ([\'{}\\]~+ / [\'{}\\]~) - (#string_interp | #comment);
+#string_interp = '{' #w* #expr #w* '}';
+#escape = '\\' ξ;
 
 // integer strings. TODO: add more bases
-#binary_string = {0b} [01] [01_]* / [01_];
-#octal_string = {0o} [0-7] [0-7_]* / [0-7_];
-#decimal_string = {0d}? [0-9] [0-9_]* / [0-9_];
-#hexadecimal_string = {0x} [0-9A-Fa-f] [0-9A-Fa-f_]* / [0-9A-Fa-f_];
+#binary_string = '0' {b} [01] [01_]* / [01_];
+#octal_string = '0' {o} [0-7] [0-7_]* / [0-7_];
+#decimal_string = '0' {d}? [0-9] [0-9_]* / [0-9_];
+#hexadecimal_string = '0' {x} [0-9A-Fa-f] [0-9A-Fa-f_]* / [0-9A-Fa-f_];
 
 #int_literal = #binary_string | #octal_string | #decimal_string | #hexadecimal_string;
 
-#expr = #id | #int_literal /{many more...}/ ;
-
 // TODO->replace id with optionally typed id
-#tuple = #id #w* ',' (#w* #id #w* ',')* (#w* #id)?;
+#id_tuple = #id #w* ',' (#w* #id #w* ',')* (#w* #id)?;
 
-#func_literal_head = '(' #w* #tuple #w* ')' | #id;
+#func_literal_head = '(' #w* #id_tuple #w* ')' | #id;
 #func_literal = #func_literal_head #w* '=>' #w* #expr; 
+
+//Compact way of specifying units. Doesn't return parse tree containing which prefix/unit though..
+#unit = (#prefix_symbol)? #unit_symbol | (#prefix_name)? #unit_name;
+#prefix_symbol = [YZEPTGMkcmuμnpfazy];
+#unit_symbol = [gmsAK] | 'cd' | 'mol';
+#prefix_name = {yotta} | {zetta} | {exa} | {peta} | {tera} | {giga} | {mega} | {kilo} | {centi} | {milli} | {micro} | {nano} | {pico} | {femto} | {atto} | {zepto} | {yocto};
+#unit_name = {gram}{s}? | {meter}{s}? | {metre}{s}? | {second}{s}? | {amp}{s}? | {ampere}{s}? | {kelvin} | {mol}{s}? | {mole}{s}? | {candela}{s}?;
+
 
 /{
 TODO:
