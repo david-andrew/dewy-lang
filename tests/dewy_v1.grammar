@@ -1,0 +1,49 @@
+// whitespace/other ignored rules
+#line_comment = '/\/' '\n'~* / '\n'~;
+#block_comment = '/\{' #block_inner '}/';
+#block_inner = (ξ* - (ξ* '}/')) | #block_comment;   // block comments can have nested block comments
+#comment = #line_comment | #block_comment;
+#whitespace = [\x20\n];                             // only valid whitespace is space and newline
+#w = #whitespace | #comment;
+#s = ' ';                                           // non-breaking space
+
+
+#id = ([a-zA-Z_] [0-9a-zA-Z_?!$&]* / [0-9a-zA-Z_?!$&]) - #unit;
+
+// Literal values
+
+// integer strings. TODO: add more bases
+#binary_string = {0b} [01] [01_]* / [01_];
+#octal_string = {0o} [0-7] [0-7_]* / [0-7_];
+#decimal_string = {0d}? [0-9] [0-9_]* / [0-9_];
+#hexadecimal_string = {0x} [0-9A-Fa-f] [0-9A-Fa-f_]* / [0-9A-Fa-f_];
+
+#int_literal = #binary_string | #octal_string | #decimal_string | #hexadecimal_string;
+
+#expr = #id | #int_literal /{many more...}/ ;
+
+// TODO->replace id with optionally typed id
+#tuple = #id #w* ',' (#w* #id #w* ',')* (#w* #id)?;
+
+#func_literal_head = '(' #w* #tuple #w* ')' | #id;
+#func_literal = #func_literal_head #w* '=>' #w* #expr; 
+
+/{
+TODO:
+- blocks/scopes --> scoped/noscoped groups
+- type expressions
+- math expressions
+    - vector element-wise operations
+- assignments
+    - destructuring assignments
+    - update assignments
+- accessor methods (e.g. by index, by value, by field)
+- literals
+    - integer
+    - float
+    - arrays
+    - ranges
+    - function
+- units + unit expressions
+
+}/
