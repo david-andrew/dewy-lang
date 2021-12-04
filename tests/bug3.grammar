@@ -1,0 +1,10 @@
+//This bug is that reserved words are ignored and parsed as ids. but only based on the structure of the #reserved rule
+
+#S = #id | 'A';
+
+// id should not be able to derive 'A' as it should be reject filtered
+#id = [A-Z] - #B;
+
+// if B = 'A' directly, the filter works fine
+#B = #A;
+#A = 'A';
