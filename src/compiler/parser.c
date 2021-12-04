@@ -320,10 +320,7 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
             }
             // set up a new parsing context starting from cI to match for this rule
             uint64_t* head_idx = filter->data;
-            parser_context subcon = parser_context_struct(&con->I[con->cI], con->m - con->cI, *head_idx, false, true);
-            bool result = parser_parse(&subcon);
-            release_parser_context(&subcon);
-            if (result) return false; // success means the rule is rejected
+            if (parser_rule_is_followed(*head_idx, con)) return false;
         }
     }
 
@@ -351,20 +348,45 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
                 printf("\n");
                 exit(1);
             }
-            // set up a new parsing context starting from cU to match for this rule.
             uint64_t* head_idx = filter->data;
-            uint32_t saved_char = con->I[con->cI]; // save the I[cI] so we can set it to \0 for the subparse
-            con->I[con->cI] = 0;
-            parser_context subcon = parser_context_struct(&con->I[con->cU], con->cI - con->cU, *head_idx, true, true);
-            bool result = parser_parse(&subcon);
-            release_parser_context(&subcon);
-            con->I[con->cI] = saved_char; // restore the I[cI]
-            if (result) return false;     // success means the rule is rejected
+            if (parser_rule_is_rejected(*head_idx, con)) return false;
         }
     }
 
     // no filters disqualified this rule
     return true;
+}
+
+/**
+ * Run a generalized parse for the given nofollow filter rule.
+ */
+bool parser_rule_is_followed(uint64_t head_idx, parser_context* con)
+{
+    // TODO->check for cache/bsr/etc. for if this filter was already applied
+
+    // set up a new parsing context starting from cI to match for this rule
+    parser_context subcon = parser_context_struct(&con->I[con->cI], con->m - con->cI, head_idx, false, true);
+    bool result = parser_parse(&subcon);
+    release_parser_context(&subcon);
+    return result; // success means the rule is rejected
+}
+
+/**
+ * Run a generalized parse for the given reject filter rule.
+ */
+bool parser_rule_is_rejected(uint64_t head_idx, parser_context* con)
+{
+    // TODO->check cache/bsr/etc. for if this filter was already applied
+
+    // set up a new parsing context starting from cU to match for this rule.
+    uint32_t saved_char = con->I[con->cI]; // save the I[cI] so we can set it to \0 for the subparse
+    con->I[con->cI] = 0;
+    uint64_t length = con->cI - con->cU;
+    parser_context subcon = parser_context_struct(&con->I[con->cU], length, head_idx, true, true);
+    bool result = parser_parse(&subcon);
+    con->I[con->cI] = saved_char; // restore the I[cI]
+    release_parser_context(&subcon);
+    return result; // success means the rule is rejected
 }
 
 /**
@@ -631,10 +653,17 @@ void parser_compute_symbol_follows()
     // 3. if there is a production A -> αB, or a production A -> αBβ where FIRST(β) contains ϵ, then everything in
     //    FOLLOW(A) is in FOLLOW(B)
 
+    // TBD for filters. For now, set any rules of the form R -> A - B and R -> A / B,
+    // FOLLOW(B) contains all symbols (ξ) and $
+    // precedence filter rules should generate followsets correctly without any extra effort
+
     set* symbols = metaparser_get_symbols();
 
     // first initialize fsets for each symbol in the grammar
     for (size_t i = 0; i < set_size(symbols); i++) { vect_append(parser_symbol_follows, new_fset_obj(NULL)); }
+
+    // 0. for now set fset for all filter symbols to the anyset + $
+    parser_compute_filter_symbol_follows();
 
     // 1. add $ to the follow set of the start symbol
     uint64_t start_symbol_idx = metaparser_get_start_symbol_idx();
@@ -684,6 +713,38 @@ void parser_compute_symbol_follows()
             }
         }
     } while (count < parser_count_fsets_size(parser_symbol_follows));
+}
+
+/**
+ * Compute the follow sets for filter symbols.
+ * Because filter symbols never actually appear in the grammar, their follow sets are empty.
+ * To compute the follow set of a filter symbol, we need to substitute that symbol into the grammar
+ * and compute the follow sets of the resulting grammar.
+ */
+void parser_compute_filter_symbol_follows()
+{
+    // TODO->this is complicated...
+    // for now we are just going to use a hack where we set the followsets of all filter symbols
+    // to be the anyset (including $). This has the effect of ignoring followsets for filter symbols
+    set* symbols = metaparser_get_symbols();
+    for (size_t symbol_idx = 0; symbol_idx < set_size(symbols); symbol_idx++)
+    {
+        obj* filters[] = {
+            metaparser_get_nofollow_entry(symbol_idx),
+            metaparser_get_reject_entry(symbol_idx),
+        };
+        for (size_t i = 0; i < sizeof(filters) / sizeof(obj*); i++)
+        {
+            if (filters[i] != NULL && filters[i]->type == UInteger_t)
+            {
+                uint64_t* filter_symbol_idx = filters[i]->data;
+                fset* filter_symbol_fset = parser_follow_of_symbol(*filter_symbol_idx);
+                filter_symbol_fset->special = true;
+                uint64_t anyset_symbol_idx = metaparser_get_anyset_symbol_idx();
+                fset_add(filter_symbol_fset, new_uint_obj(anyset_symbol_idx));
+            }
+        }
+    }
 }
 
 /**

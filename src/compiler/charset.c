@@ -24,6 +24,19 @@ charset* new_charset()
 }
 
 /**
+ * Return an empty charset struct. This is mainly to be used for generating the anyset.
+ */
+inline charset charset_empty_struct() { return (charset){.ranges = NULL, .size = 0, .capacity = 0}; }
+
+charset* charset_get_new_anyset()
+{
+    // create anyset by taking compliment of an empty set
+    charset nullset = charset_empty_struct();
+    charset* anyset = charset_compliment(&nullset);
+    return anyset;
+}
+
+/**
  * Return a charset containing the special endmarker terminal `$` using 0x200000.
  * Care must be taken when dealing with this charset, as 0x200000 is not a valid
  * unicode code point, and may cause undefined behavior.

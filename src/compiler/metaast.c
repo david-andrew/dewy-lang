@@ -438,10 +438,7 @@ metaast* metaast_parse_anyset(vect* tokens)
         metatoken* t = vect_get(tokens, 0)->data;
         if (t->type == meta_anyset)
         {
-            // create anyset by taking compliment of an empty set
-            charset* nullset = new_charset();
-            charset* anyset = charset_compliment(nullset);
-            charset_free(nullset);
+            charset* anyset = charset_get_new_anyset();
             vect_free(tokens);
             return new_metaast_charset_node(metaast_charset, anyset);
         }

@@ -49,6 +49,7 @@ set* metaparser_capture_set; // set<head_idx>
 // convenience variables for the frequently used epsilon production body, and $ endmarker terminal.
 uint64_t metaparser_eps_body_idx = NULL_SYMBOL_INDEX;
 uint64_t metaparser_start_symbol_idx = NULL_SYMBOL_INDEX;
+uint64_t metaparser_anyset_symbol_idx = NULL_SYMBOL_INDEX;
 
 /**
  * Initialize all global data structures used by metaparser.
@@ -73,6 +74,7 @@ void allocate_metaparser()
  */
 void complete_metaparser()
 {
+    metaparser_get_anyset_symbol_idx();
     metaparser_get_eps_body_idx();
     metaparser_get_start_symbol_idx();
     metaparser_finalize_precedence_tables();
@@ -555,6 +557,12 @@ uint64_t metaparser_insert_rule_ast(uint64_t head_idx, metaast* body_ast)
             obj* terminal = new_charset_obj(charset_clone(body_ast->node.cs));
             uint64_t terminal_idx = metaparser_add_symbol(terminal);
             vect_append(sentence, new_uint_obj(terminal_idx));
+
+            // if the charset was the anyset, set the symbol idx as the anyset symbol
+            if (metaparser_anyset_symbol_idx == NULL_SYMBOL_INDEX && charset_is_anyset(body_ast->node.cs))
+            {
+                metaparser_anyset_symbol_idx = terminal_idx;
+            }
 
             // add the sentence to the grammar
             uint64_t body_idx = metaparser_add_body(sentence);
@@ -1116,6 +1124,20 @@ uint64_t metaparser_get_start_symbol_idx()
         metaparser_set_start_symbol(start_symbol_idx);
     }
     return metaparser_start_symbol_idx;
+}
+
+/**
+ * Return the symbol index of the anyset symbol
+ */
+uint64_t metaparser_get_anyset_symbol_idx()
+{
+    if (metaparser_anyset_symbol_idx == NULL_SYMBOL_INDEX)
+    {
+        // create the anyset symbol
+        obj* anyset = new_charset_obj(charset_get_new_anyset());
+        metaparser_anyset_symbol_idx = metaparser_add_symbol(anyset);
+    }
+    return metaparser_anyset_symbol_idx;
 }
 
 /**

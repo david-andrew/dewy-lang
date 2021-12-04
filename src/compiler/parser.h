@@ -45,6 +45,8 @@ vect* parser_get_labels();
 void parser_handle_label(slot* label, parser_context* con);
 void parser_print_label(slot* label);
 bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con);
+bool parser_rule_is_followed(uint64_t head_idx, parser_context* con);
+bool parser_rule_is_rejected(uint64_t head_idx, parser_context* con);
 void parser_apply_precedence_filters(parser_context* con);
 
 // CNP support functions
@@ -60,6 +62,7 @@ void parser_bsr_add_helper(bsr_head* b, uint64_t j, parser_context* con);
 size_t parser_count_fsets_size(vect* fsets);
 void parser_compute_symbol_firsts();
 void parser_compute_symbol_follows();
+void parser_compute_filter_symbol_follows();
 vect* parser_get_symbol_firsts();
 vect* parser_get_symbol_follows();
 fset* parser_first_of_symbol(uint64_t symbol_idx);
