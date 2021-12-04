@@ -1,0 +1,18 @@
+// proof that dewy is turing complete
+// rule 110 would grow the vector from the front, so instead we reverse everything for efficiency
+update = (world: vector<bit>) => {
+    update: bit = 0
+    loop i in 0:world.length
+    {
+        if i >? 0 world[i-1] = update
+        update = 0b01110110 << (world[i-1] ?? 0) << 2 | (world[i] ?? 0) << 1 | world[i+1] ?? 0
+    }
+    world.push(update)
+}
+
+world: vector<bit> = [1]
+loop true
+{
+    printl(world)
+    update(world)
+}

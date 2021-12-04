@@ -2,29 +2,100 @@
 
 // whitespace/other ignored rules
 #line_comment = '/\/' '\n'~* / '\n'~;
-#block_comment = '/\{' #block_inner '}/';
-#block_inner = (ξ* - (ξ* '}/')) | #block_comment;   // block comments can have nested block comments
+#block_comment = '/\{' #block_comment_inner '}/';
+#block_comment_inner = (ξ* - (ξ* '}/')) | #block_comment;   // block comments can have nested block comments
 #comment = #line_comment | #block_comment;
-#whitespace = [\x20\n];                             // only valid whitespace is space and newline
+#whitespace = [\x20\n];                                     // only valid whitespace is space and newline
 #w = #whitespace | #comment;
-#s = ' ';                                           // non-breaking space
+#s = ' ';                                                   // non-breaking space
+
+
+#reserved = #unit | #keyword;
+#keyword = {in} | {loop} | {if}; 
 
 
 //////// Expressions ////////
 // this will be a very long list
-#expr = #call > #assign > #id | #literal;
+#expr = 
+    #call | #access >
+    #unary_expr >
+    #math_expr >
+    #shift_expr >
+    #compare_expr >
+    #logical_expr >
+    #coalesce >
+    #assign >
+    #tid | #literal | #block | #loop | #if;
 
-#literal = #int_literal | #string;
 
-#id = ([a-zA-Z_] [0-9a-zA-Z_?!$&]* / [0-9a-zA-Z_?!$&]) - #unit;
+#block = #scope_block | #noscope_block;
+#scope_block = '{' #w* #block_inner '}';
+#noscope_block = '(' #w* #block_inner ')';
+#block_inner = (#expr #w*)*;
+
+
+#literal = #int_literal | #string | #func_literal | #range_literal;
+
+#id = ([a-zA-Z_] [0-9a-zA-Z_?!$&]* / [0-9a-zA-Z_?!$&]) - #reserved;
+//(('loop' | 'in' | 'if') | #unit);//#reserved;
 
 
 #call = #callable_expr '(' #w* (#call_args #w*)? ')';
-#callable_expr = #id /{ accessor methods, func literals, etc. }/;
+#callable_expr = #id | #func_literal | #access;
 #call_args = #expr (#w* ',' #w* #expr)*;  //includes assignment expressions
 
 #assign = #expr #w* '=' #w* #expr;
 
+#access = #name_access | #map_access;
+#name_access = #expr #w* '.' #w* #id;
+#map_access = #expr '[' #w* #expr #w* ']';
+
+#compare_expr = (#expr - #compare_expr) #w* #compare_op #w* (#expr - #compare_expr);
+#compare_op = '>?' | '<?' | '>=?' | '<=?' | '=?' | '!=?';
+
+#math_expr = #pow > #mul | #div | #mod > #add | #sub;
+#add = #expr #w* '+' #w* (#expr - (#add | #sub));
+#sub = #expr #w* '-' #w* (#expr - (#add | #sub));
+//#jux = #atom. #s* #atom.;
+#mul = #expr #w* '*' #w* (#expr - (#mul | #div | #mod));
+#div = #expr #w* '/' #w* (#expr - (#mul | #div | #mod));
+#mod = #expr #w* '%' #w* (#expr - (#mul | #div | #mod));
+#pow = (#expr - #pow) #w* '^' #w* #expr;
+
+
+
+//#atom = #group | #id | #num;
+//#group = '(' #w* #expr. #w* ')';
+
+
+
+#shift_expr = #shift_left | #shift_right | #rotate_left | #rotate_right | #rotate_left_with_carry | #rotate_right_with_carry;
+#shift_left = #expr #w* '<<' #w* (#expr - #shift_expr);
+#shift_right = #expr #w* '>>' #w* (#expr - #shift_expr);
+#rotate_left = #expr #w* '<<<' #w* (#expr - #shift_expr);
+#rotate_right = #expr #w* '>>>' #w* (#expr - #shift_expr);
+#rotate_left_with_carry = #expr #w* '<<<!' #w* (#expr - #shift_expr);
+#rotate_right_with_carry = #expr #w* '!>>>' #w* (#expr - #shift_expr);
+
+#coalesce = #expr #w* '??' #w* #expr;
+
+#unary_expr = #not | #fact;
+#not = 'not' #w* #expr;
+#fact = #expr #w* '!';
+
+#logical_expr = #and | #or | #xor | #nand | #nor | #xnor; 
+#and = #expr #w* 'and' #w* (#expr - #logical_expr);
+#or = #expr #w* 'or' #w* (#expr - #logical_expr);
+#xor = #expr #w* 'xor' #w* (#expr - #logical_expr);
+#nand = #expr #w* 'nand' #w* (#expr - #logical_expr);
+#nor = #expr #w* 'nor' #w* (#expr - #logical_expr);
+#xnor = #expr #w* 'xnor' #w* (#expr - #logical_expr);
+
+
+#loop = 'loop' #w* (#id | #id_tuple) #w* 'in' #w* #expr #w* #expr;
+
+//TODO->else/else if
+#if = 'if' #w* #expr #w* #expr;
 
 //////// Literals ////////
 // strings with interpolation and comments
@@ -32,22 +103,28 @@
 #double_string = '"' (#double_string_text | #escape | #string_interp | #comment)* '"';
 #double_string_text = (["{}\\]~+ / ["{}\\]~) - (#string_interp | #comment);
 #single_string = "'" (#single_string_text | #escape | #string_interp | #comment)* "'";
-#single_string_text = ([\'{}\\]~+ / [\'{}\\]~) - (#string_interp | #comment);
+#single_string_text = (['{}\\]~+ / ['{}\\]~) - (#string_interp | #comment);
 #string_interp = '{' #w* #expr #w* '}';
 #escape = '\\' ξ;
 
 // integer strings. TODO: add more bases
 #binary_string = '0' {b} [01] [01_]* / [01_];
 #octal_string = '0' {o} [0-7] [0-7_]* / [0-7_];
-#decimal_string = '0' {d}? [0-9] [0-9_]* / [0-9_];
+#decimal_string = ('0' {d})? [0-9] [0-9_]* / [0-9_];
 #hexadecimal_string = '0' {x} [0-9A-Fa-f] [0-9A-Fa-f_]* / [0-9A-Fa-f_];
 
-#int_literal = #binary_string | #octal_string | #decimal_string | #hexadecimal_string;
+#int_literal = (#binary_string | #octal_string | #decimal_string | #hexadecimal_string);
 
 // TODO->replace id with optionally typed id
+#type_spec = ':' #w* #type_expr;
+#tid = #id #type_spec?;
+#tid_tuple = #tid #w* ',' (#w* #tid #w* ',')* (#w* #tid)?;
 #id_tuple = #id #w* ',' (#w* #id #w* ',')* (#w* #id)?;
 
-#func_literal_head = '(' #w* #id_tuple #w* ')' | #id;
+#type_expr = #id | #generic_type; //TODO->more type expressions
+#generic_type = #type_expr '<' #w* (#tid | #tid_tuple) #w* '>';
+
+#func_literal_head = '(' #w* #tid_tuple #w* ')' | #tid;
 #func_literal = #func_literal_head #w* '=>' #w* #expr; 
 
 //Compact way of specifying units. Doesn't return parse tree containing which prefix/unit though..
@@ -56,6 +133,11 @@
 #unit_symbol = [gmsAK] | 'cd' | 'mol';
 #prefix_name = {yotta} | {zetta} | {exa} | {peta} | {tera} | {giga} | {mega} | {kilo} | {centi} | {milli} | {micro} | {nano} | {pico} | {femto} | {atto} | {zepto} | {yocto};
 #unit_name = {gram}{s}? | {meter}{s}? | {metre}{s}? | {second}{s}? | {amp}{s}? | {ampere}{s}? | {kelvin} | {mol}{s}? | {mole}{s}? | {candela}{s}?;
+
+
+#range_literal = [\[(] #w* #range_core [\])] | #range_core;
+#range_core = (#expr - #range_literal) #w* ':' #w* (#expr - #range_literal);
+
 
 
 /{
