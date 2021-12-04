@@ -92,10 +92,10 @@
 #xnor = #expr #w* 'xnor' #w* (#expr - #logical_expr);
 
 
-#loop = 'loop' #w* (#id | #id_tuple) #w* 'in' #w* #expr #w* #expr;
+#loop = {loop} #w* (#id | #id_tuple) #w* {in} #w* #expr #w* #expr;
 
 //TODO->else/else if
-#if = 'if' #w* #expr #w* #expr;
+#if = {if} #w* #expr #w* #expr;
 
 //////// Literals ////////
 // strings with interpolation and comments
