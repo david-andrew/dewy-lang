@@ -36,7 +36,6 @@ set* metaparser_get_bodies();
 dict* metaparser_get_productions();
 uint64_t metaparser_get_eps_body_idx();
 uint64_t metaparser_get_start_symbol_idx();
-uint64_t metaparser_get_anyset_symbol_idx();
 uint64_t metaparser_add_symbol(obj* symbol);
 obj* metaparser_get_symbol(uint64_t i);
 bool metaparser_is_symbol_terminal(uint64_t symbol_idx);

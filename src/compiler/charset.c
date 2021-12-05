@@ -37,6 +37,25 @@ charset* charset_get_new_anyset()
 }
 
 /**
+ * Return a static version of the anyset. Requires a charset and urange to be passed in.
+ * usage:
+ *
+ * ```
+ * charset anyset;
+ * urange range;
+ * charset_get_anyset(&anyset, &range);
+ * ```
+ *
+ * anyset should now be a static version of the anyset
+ */
+void charset_get_static_anyset(charset* anyset, urange* range)
+{
+    *anyset = (charset){.ranges = range, .size = 1, .capacity = 1};
+    range->start = 0;
+    range->stop = MAX_UNICODE_POINT;
+}
+
+/**
  * Return a charset containing the special endmarker terminal `$` using 0x200000.
  * Care must be taken when dealing with this charset, as 0x200000 is not a valid
  * unicode code point, and may cause undefined behavior.
@@ -282,6 +301,22 @@ charset* charset_union(charset* a, charset* b)
 }
 
 /**
+ * Add all ranges from charset `b` to charset `a`.
+ * Frees charset `b` if `free_b` is true.
+ */
+void charset_union_into(charset* a, charset* b, bool free_b)
+{
+    // if both charsets point to the same memory, then they are already a union
+    if (a == b) { return; }
+
+    for (int i = 0; i < b->size; i++) { charset_add_range_unchecked(a, b->ranges[i]); }
+
+    charset_reduce(a);
+
+    if (free_b) { charset_free(b); }
+}
+
+/**
  * Determine whether two charsets are equivalent. Assumes `a` and `b` are in reduced form.
  */
 bool charset_equals(charset* a, charset* b)
@@ -301,6 +336,11 @@ bool charset_is_anyset(charset* s)
 {
     return s->size == 1 && s->ranges[0].start == 0 && s->ranges[0].stop == MAX_UNICODE_POINT;
 }
+
+/**
+ * Determines if the charset contains exactly 1 character.
+ */
+inline bool charset_is_single_char(charset* s) { return s->size == 1 && s->ranges[0].start == s->ranges[0].stop; }
 
 /**
  * Get the index of the charset ranges that contains unicode character `c`.
@@ -427,19 +467,26 @@ int charset_char_strlen(uint32_t c, bool single_char)
  */
 void charset_str(charset* s)
 {
-    bool single_char = s->size == 1 && s->ranges[0].start == s->ranges[0].stop;
-    if (!single_char) { printf("["); }
+    if (!charset_is_single_char(s)) { printf("["); }
+    charset_str_inner(s);
+    if (!charset_is_single_char(s)) { printf("]"); }
+}
+
+/**
+ * Print out the list of characters/ranges in the charset.
+ */
+void charset_str_inner(charset* s)
+{
     for (int i = 0; i < s->size; i++)
     {
-        charset_char_str(s->ranges[i].start, single_char);
+        charset_char_str(s->ranges[i].start, charset_is_single_char(s));
         if (s->ranges[i].stop != s->ranges[i].start)
         {
             // only print dash on ranges larger than 2
             if (s->ranges[i].stop - s->ranges[i].start > 1) { printf("-"); }
-            charset_char_str(s->ranges[i].stop, single_char);
+            charset_char_str(s->ranges[i].stop, charset_is_single_char(s));
         }
     }
-    if (!single_char) { printf("]"); }
 }
 
 /**

@@ -648,7 +648,7 @@ size_t parser_count_fsets_size(vect* fsets)
     for (size_t i = 0; i < vect_size(fsets); i++)
     {
         fset* s = vect_get(fsets, i)->data;
-        count += set_size(s->terminals) + s->special;
+        count += fset_size(s);
     }
     return count;
 }
@@ -668,7 +668,8 @@ void parser_compute_symbol_firsts()
     {
         if (!metaparser_is_symbol_terminal(symbol_idx)) { continue; }
         fset* symbol_fset = vect_get(parser_symbol_firsts, symbol_idx)->data;
-        fset_add(symbol_fset, new_uint_obj(symbol_idx));
+        charset* symbol = metaparser_get_symbol(symbol_idx)->data;
+        fset_add(symbol_fset, symbol);
         symbol_fset->special = false;
     }
 
@@ -694,7 +695,7 @@ void parser_compute_symbol_firsts()
                 {
                     uint64_t* body_symbol_idx = vect_get(body, i)->data;
                     fset* body_symbol_fset = vect_get(parser_symbol_firsts, *body_symbol_idx)->data;
-                    fset_union_into(symbol_fset, fset_copy(body_symbol_fset), true);
+                    fset_union_into(symbol_fset, body_symbol_fset, true, false);
                     if (!body_symbol_fset->special) { break; }
                 }
 
@@ -764,13 +765,13 @@ void parser_compute_symbol_follows()
 
                     // get union first of beta into the follow set of the symbol (ignoring epsilon)
                     fset* symbol_follow = vect_get(parser_symbol_follows, *symbol_idx)->data;
-                    fset_union_into(symbol_follow, beta_first, false); // beta_first gets freed here
+                    fset_union_into(symbol_follow, beta_first, false, true); // beta_first gets freed here
 
                     // if beta is nullable, add everything in follow set of head to follow set of the current terminal
                     if (nullable)
                     {
                         fset* head_follow = vect_get(parser_symbol_follows, head_idx)->data;
-                        fset_union_into(symbol_follow, fset_copy(head_follow), true);
+                        fset_union_into(symbol_follow, head_follow, true, false);
                     }
                 }
             }
@@ -803,8 +804,10 @@ void parser_compute_filter_symbol_follows()
                 uint64_t* filter_symbol_idx = filters[i]->data;
                 fset* filter_symbol_fset = parser_follow_of_symbol(*filter_symbol_idx);
                 filter_symbol_fset->special = true;
-                uint64_t anyset_symbol_idx = metaparser_get_anyset_symbol_idx();
-                fset_add(filter_symbol_fset, new_uint_obj(anyset_symbol_idx));
+                charset anyset;
+                urange range;
+                charset_get_static_anyset(&anyset, &range);
+                fset_add(filter_symbol_fset, &anyset);
             }
         }
     }
@@ -849,8 +852,7 @@ fset* parser_first_of_string(slice* string)
             uint64_t* symbol_idx = slice_get(string, i)->data;
             fset* first_i = vect_get(symbol_firsts, *symbol_idx)->data;
             bool nullable = first_i->special;
-            fset_union_into(result, fset_copy(first_i),
-                            false); // merge first of symbol into result. Don't merge nullable
+            fset_union_into(result, first_i, false, false); // merge first of symbol into result. Don't merge nullable
             if (i == slice_size(string) - 1 && nullable) { result->special = true; }
 
             // only continue to next symbol if this symbol was nullable
