@@ -19,6 +19,8 @@ vect* parser_symbol_firsts;         // vect containing the first set of each sym
 vect* parser_symbol_follows;        // vect containing the follow set of each symbol.
 dict* parser_substring_firsts_dict; // dict<slice, fset> which memoizes the first set of a substring
 vect* parser_labels;
+dict* parser_nofollow_filter_cache; // dict<head_idx, dict<cU, bool>>
+dict* parser_reject_filter_cache;   // dict<head_idx, dict<cU, dict<cI, bool>>>
 
 /**
  * Allocate global data structures used by the parser
@@ -29,6 +31,8 @@ void allocate_parser()
     parser_symbol_follows = new_vect();
     parser_substring_firsts_dict = new_dict();
     parser_labels = new_vect();
+    parser_nofollow_filter_cache = new_dict();
+    parser_reject_filter_cache = new_dict();
 }
 
 /**
@@ -52,6 +56,8 @@ void release_parser()
     vect_free(parser_symbol_follows);
     dict_free(parser_substring_firsts_dict);
     vect_free(parser_labels);
+    dict_free(parser_nofollow_filter_cache);
+    dict_free(parser_reject_filter_cache);
 }
 
 /**
@@ -362,12 +368,27 @@ bool parser_rule_passes_filters(uint64_t head_idx, parser_context* con)
  */
 bool parser_rule_is_followed(uint64_t head_idx, parser_context* con)
 {
-    // TODO->check for cache/bsr/etc. for if this filter was already applied
+    // check the cache for if this filter was already checked
+    obj* cache_inner = dict_get_uint_key(parser_nofollow_filter_cache, head_idx);
+    if (cache_inner != NULL)
+    {
+        obj* cached_result = dict_get_uint_key((dict*)cache_inner->data, con->cU);
+        if (cached_result != NULL) { return *(bool*)cached_result->data; }
+    }
 
     // set up a new parsing context starting from cI to match for this rule
     parser_context subcon = parser_context_struct(&con->I[con->cI], con->m - con->cI, head_idx, false, true);
     bool result = parser_parse(&subcon);
     release_parser_context(&subcon);
+
+    // save this result to the cache
+    if (cache_inner == NULL)
+    {
+        cache_inner = new_dict_obj(NULL);
+        dict_set(parser_nofollow_filter_cache, new_uint_obj(head_idx), cache_inner);
+    }
+    dict_set((dict*)cache_inner->data, new_uint_obj(con->cU), new_bool_obj(result));
+
     return result; // success means the rule is rejected
 }
 
@@ -376,7 +397,23 @@ bool parser_rule_is_followed(uint64_t head_idx, parser_context* con)
  */
 bool parser_rule_is_rejected(uint64_t head_idx, parser_context* con)
 {
-    // TODO->check cache/bsr/etc. for if this filter was already applied
+    // check the cache for if this filter was already checked
+    obj* cache_inner0 = dict_get_uint_key(parser_reject_filter_cache, head_idx);
+    obj* cache_inner1 = NULL;
+    if (cache_inner0 != NULL) { cache_inner1 = dict_get_uint_key((dict*)cache_inner0->data, con->cU); }
+    if (cache_inner1 != NULL)
+    {
+        obj* cached_result = dict_get_uint_key((dict*)cache_inner1->data, con->cI);
+        if (cached_result != NULL)
+        {
+            // printf("parser_rule_is_rejected: cache hit for ");
+            // obj_str(metaparser_get_symbol(head_idx));
+            // printf(" = ");
+            // obj_str(cached_result);
+            // printf("\n");
+            return *(bool*)cached_result->data;
+        }
+    }
 
     // set up a new parsing context starting from cU to match for this rule.
     uint32_t saved_char = con->I[con->cI]; // save the I[cI] so we can set it to \0 for the subparse
@@ -384,8 +421,22 @@ bool parser_rule_is_rejected(uint64_t head_idx, parser_context* con)
     uint64_t length = con->cI - con->cU;
     parser_context subcon = parser_context_struct(&con->I[con->cU], length, head_idx, true, true);
     bool result = parser_parse(&subcon);
-    con->I[con->cI] = saved_char; // restore the I[cI]
     release_parser_context(&subcon);
+    con->I[con->cI] = saved_char; // restore the I[cI]
+
+    // save this result to the cache
+    if (cache_inner0 == NULL)
+    {
+        cache_inner0 = new_dict_obj(NULL);
+        dict_set(parser_reject_filter_cache, new_uint_obj(head_idx), cache_inner0);
+    }
+    if (cache_inner1 == NULL)
+    {
+        cache_inner1 = new_dict_obj(NULL);
+        dict_set((dict*)cache_inner0->data, new_uint_obj(con->cU), cache_inner1);
+    }
+    dict_set((dict*)cache_inner1->data, new_uint_obj(con->cI), new_bool_obj(result));
+
     return result; // success means the rule is rejected
 }
 

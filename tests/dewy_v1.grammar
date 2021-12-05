@@ -69,13 +69,13 @@
 
 
 
-#shift_expr = #shift_left | #shift_right | #rotate_left | #rotate_right | #rotate_left_with_carry | #rotate_right_with_carry;
+#shift_expr = #shift_left ;//| #shift_right | #rotate_left | #rotate_right | #rotate_left_with_carry | #rotate_right_with_carry;
 #shift_left = #expr #w* '<<' #w* (#expr - #shift_expr);
-#shift_right = #expr #w* '>>' #w* (#expr - #shift_expr);
-#rotate_left = #expr #w* '<<<' #w* (#expr - #shift_expr);
-#rotate_right = #expr #w* '>>>' #w* (#expr - #shift_expr);
-#rotate_left_with_carry = #expr #w* '<<<!' #w* (#expr - #shift_expr);
-#rotate_right_with_carry = #expr #w* '!>>>' #w* (#expr - #shift_expr);
+//#shift_right = #expr #w* '>>' #w* (#expr - #shift_expr);
+//#rotate_left = #expr #w* '<<<' #w* (#expr - #shift_expr);
+//#rotate_right = #expr #w* '>>>' #w* (#expr - #shift_expr);
+//#rotate_left_with_carry = #expr #w* '<<<!' #w* (#expr - #shift_expr);
+//#rotate_right_with_carry = #expr #w* '!>>>' #w* (#expr - #shift_expr);
 
 #coalesce = #expr #w* '??' #w* #expr;
 
