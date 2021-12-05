@@ -373,7 +373,17 @@ bool parser_rule_is_followed(uint64_t head_idx, parser_context* con)
     if (cache_inner != NULL)
     {
         obj* cached_result = dict_get_uint_key((dict*)cache_inner->data, con->cU);
-        if (cached_result != NULL) { return *(bool*)cached_result->data; }
+        if (cached_result != NULL)
+        {
+            // {
+            //     printf("parser_rule_is_followed: cache hit for ");
+            //     obj_str(metaparser_get_symbol(head_idx));
+            //     printf(" = ");
+            //     obj_str(cached_result);
+            //     printf("\n");
+            // }
+            return *(bool*)cached_result->data;
+        }
     }
 
     // set up a new parsing context starting from cI to match for this rule
@@ -406,11 +416,13 @@ bool parser_rule_is_rejected(uint64_t head_idx, parser_context* con)
         obj* cached_result = dict_get_uint_key((dict*)cache_inner1->data, con->cI);
         if (cached_result != NULL)
         {
-            // printf("parser_rule_is_rejected: cache hit for ");
-            // obj_str(metaparser_get_symbol(head_idx));
-            // printf(" = ");
-            // obj_str(cached_result);
-            // printf("\n");
+            // {
+            //     printf("parser_rule_is_rejected: cache hit for ");
+            //     obj_str(metaparser_get_symbol(head_idx));
+            //     printf(" = ");
+            //     obj_str(cached_result);
+            //     printf("\n");
+            // }
             return *(bool*)cached_result->data;
         }
     }

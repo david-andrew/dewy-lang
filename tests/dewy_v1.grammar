@@ -2,9 +2,13 @@
 
 // whitespace/other ignored rules
 #line_comment = '/\/' '\n'~* / '\n'~;
-#block_comment = '/\{' #block_comment_inner '}/';
-#block_comment_inner = (ξ* - (ξ* '}/')) | #block_comment;   // block comments can have nested block comments
-#comment = #line_comment | #block_comment;
+//TODO->block comments aren't correct yet...
+//#block_comment = '/\{' 
+//    (#block_comment_inner #block_comment #block_comment_inner)+ | 
+//    #block_comment_inner
+//'}/';
+//#block_comment_inner = (ξ* / [/}]~) - (ξ* '/\{' ξ* '}/' ξ*);                 // block comments can have nested block comments
+#comment = #line_comment;// | #block_comment;
 #whitespace = [\x20\n];                                     // only valid whitespace is space and newline
 #w = #whitespace | #comment;
 #s = ' ';                                                   // non-breaking space
@@ -113,7 +117,7 @@
 #decimal_string = ('0' {d})? [0-9] [0-9_]* / [0-9_];
 #hexadecimal_string = '0' {x} [0-9A-Fa-f] [0-9A-Fa-f_]* / [0-9A-Fa-f_];
 
-#int_literal = (#binary_string | #octal_string | #decimal_string | #hexadecimal_string);
+#int_literal = #binary_string | #octal_string | #decimal_string | #hexadecimal_string;
 
 // TODO->replace id with optionally typed id
 #type_spec = ':' #w* #type_expr;
