@@ -1,4 +1,5 @@
-#program = (#w* #expr)+ #w*;  // programs must contain at least 1 expression
+// programs must contain at least 1 expression, and expressions are obligated to be separated by whitespace
+#program = #w* #block_inner #w*;  
 
 // whitespace/other ignored rules
 #line_comment = '/\/' '\n'~* / '\n'~;
@@ -13,14 +14,14 @@
 #w = #whitespace | #comment;
 #s = ' ';                                                   // non-breaking space
 
-
 #reserved = #unit | #keyword;
-#keyword = {in} | {loop} | {if}; 
+#keyword = {in} | {loop} | {if} | {and} | {or} | {xor} | {nand} | {nor} | {xnor} | {true} | {false}; 
 
 
 //////// Expressions ////////
 // this will be a very long list
 #expr = 
+    #tid | #literal | #container | #block | #loop | #if >
     #call | #access >
     #unary_expr >
     #math_expr >
@@ -28,17 +29,17 @@
     #compare_expr >
     #logical_expr >
     #coalesce >
-    #assign >
-    #tid | #literal | #block | #loop | #if;
+    #in >
+    #assign;
 
 
 #block = #scope_block | #noscope_block;
-#scope_block = '{' #w* #block_inner '}';
-#noscope_block = '(' #w* #block_inner ')';
-#block_inner = (#expr #w*)*;
+#scope_block = '{' #w* (#block_inner #w*)? '}';
+#noscope_block = '(' #w* (#block_inner #w*)? ')';
+#block_inner = #expr (#w+ #expr)*;
 
 
-#literal = #int_literal | #string | #func_literal | #range_literal;
+#literal = #int_literal | #bool_literal | #string | #func_literal | #range_literal;
 
 #id = ([a-zA-Z_] [0-9a-zA-Z_?!$&]* / [0-9a-zA-Z_?!$&]) - #reserved;
 //(('loop' | 'in' | 'if') | #unit);//#reserved;
@@ -48,11 +49,22 @@
 #callable_expr = #id | #func_literal | #access;
 #call_args = #expr (#w* ',' #w* #expr)*;  //includes assignment expressions
 
-#assign = #expr #w* '=' #w* #expr;
+//TODO->unpack assignment/unpack in
+#assign = #assign_lhs #w* '=' #w* (#expr - #assign);
+#assign_lhs = #tid | #access; // | #unpack;
+#in = #id #w* 'in' #w* (#expr - #in);
+#points_to = #points_to_left | #points_to_right | #points_to_both;
+#points_to_right = #points_to_operand #w* '->' #w* #points_to_operand;
+#points_to_left = #points_to_operand #w* '<-' #w* #points_to_operand;
+#points_to_both = #points_to_operand #w* '<->' #w* #points_to_operand;
+#points_to_operand = (#expr - #points_to);
+
+//#unpack = '[' seq_of_ids, as, nested_unpacks ']';
 
 #access = #name_access | #map_access;
-#name_access = #expr #w* '.' #w* #id;
-#map_access = #expr '[' #w* #expr #w* ']';
+#name_access = #accessible_expr #w* '.' #w* #id;
+#map_access = #accessible_expr '[' #w* #expr #w* ']';
+#accessible_expr = #expr - (#if | #in | #loop);
 
 #compare_expr = (#expr - #compare_expr) #w* #compare_op #w* (#expr - #compare_expr);
 #compare_op = '>?' | '<?' | '>=?' | '<=?' | '=?' | '!=?';
@@ -60,7 +72,7 @@
 #math_expr = #pow > #mul | #div | #mod > #add | #sub;
 #add = #expr #w* '+' #w* (#expr - (#add | #sub));
 #sub = #expr #w* '-' #w* (#expr - (#add | #sub));
-//#jux = #atom. #s* #atom.;
+//#jux = #atom #s* #atom;
 #mul = #expr #w* '*' #w* (#expr - (#mul | #div | #mod));
 #div = #expr #w* '/' #w* (#expr - (#mul | #div | #mod));
 #mod = #expr #w* '%' #w* (#expr - (#mul | #div | #mod));
@@ -73,13 +85,13 @@
 
 
 
-#shift_expr = #shift_left ;//| #shift_right | #rotate_left | #rotate_right | #rotate_left_with_carry | #rotate_right_with_carry;
+#shift_expr = #shift_left | #shift_right | #rotate_left | #rotate_right | #rotate_left_with_carry | #rotate_right_with_carry;
 #shift_left = #expr #w* '<<' #w* (#expr - #shift_expr);
-//#shift_right = #expr #w* '>>' #w* (#expr - #shift_expr);
-//#rotate_left = #expr #w* '<<<' #w* (#expr - #shift_expr);
-//#rotate_right = #expr #w* '>>>' #w* (#expr - #shift_expr);
-//#rotate_left_with_carry = #expr #w* '<<<!' #w* (#expr - #shift_expr);
-//#rotate_right_with_carry = #expr #w* '!>>>' #w* (#expr - #shift_expr);
+#shift_right = #expr #w* '>>' #w* (#expr - #shift_expr);
+#rotate_left = #expr #w* '<<<' #w* (#expr - #shift_expr);
+#rotate_right = #expr #w* '>>>' #w* (#expr - #shift_expr);
+#rotate_left_with_carry = #expr #w* '<<<!' #w* (#expr - #shift_expr);
+#rotate_right_with_carry = #expr #w* '!>>>' #w* (#expr - #shift_expr);
 
 #coalesce = #expr #w* '??' #w* #expr;
 
@@ -88,15 +100,16 @@
 #fact = #expr #w* '!';
 
 #logical_expr = #and | #or | #xor | #nand | #nor | #xnor; 
-#and = #expr #w* 'and' #w* (#expr - #logical_expr);
-#or = #expr #w* 'or' #w* (#expr - #logical_expr);
-#xor = #expr #w* 'xor' #w* (#expr - #logical_expr);
-#nand = #expr #w* 'nand' #w* (#expr - #logical_expr);
-#nor = #expr #w* 'nor' #w* (#expr - #logical_expr);
-#xnor = #expr #w* 'xnor' #w* (#expr - #logical_expr);
+#and = #expr #w* {and} #w* (#expr - #logical_expr);
+#or = #expr #w* {or} #w* (#expr - #logical_expr);
+#xor = #expr #w* {xor} #w* (#expr - #logical_expr);
+#nand = #expr #w* {nand} #w* (#expr - #logical_expr);
+#nor = #expr #w* {nor} #w* (#expr - #logical_expr);
+#xnor = #expr #w* {xnor} #w* (#expr - #logical_expr);
 
 
-#loop = {loop} #w* (#id | #id_tuple) #w* {in} #w* #expr #w* #expr;
+//#loop = {loop} #w* (#id | #id_tuple) #w* {in} #w* #expr #w* #expr;
+#loop = {loop} #w* #expr #w* #expr;
 
 //TODO->else/else if
 #if = {if} #w* #expr #w* #expr;
@@ -119,6 +132,8 @@
 
 #int_literal = #binary_string | #octal_string | #decimal_string | #hexadecimal_string;
 
+#bool_literal = {true} | {false};
+
 // TODO->replace id with optionally typed id
 #type_spec = ':' #w* #type_expr;
 #tid = #id #type_spec?;
@@ -139,15 +154,20 @@
 #unit_name = {gram}{s}? | {meter}{s}? | {metre}{s}? | {second}{s}? | {amp}{s}? | {ampere}{s}? | {kelvin} | {mol}{s}? | {mole}{s}? | {candela}{s}?;
 
 
+//TODO->figure out bug where both left/right expressions can't be #range_endpoint, else infinite recursion
 #range_literal = [\[(] #w* #range_core [\])] | #range_core;
-#range_core = (#expr - #range_literal) #w* ':' #w* (#expr - #range_literal);
+#range_core = #range_endpoint #w* ':' #w* (#expr - (#range_literal | #assign | #in));
+#range_endpoint = #expr - (#range_literal | #assign | #in);
 
-
+#container = '[' #w* (#block_inner #w*)? ']';
 
 /{
 TODO:
-- blocks/scopes --> scoped/noscoped groups
+- unpack assignments/in, e.g. [a, b] in [a1 b1; a2 b2; a3 b3; ... an bn]
+---> also unpack assignments from objects can rename the objects
+
 - type expressions
+---> more possible expressions
 - math expressions
     - vector element-wise operations
 - assignments

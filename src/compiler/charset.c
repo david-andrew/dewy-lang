@@ -467,6 +467,11 @@ int charset_char_strlen(uint32_t c, bool single_char)
  */
 void charset_str(charset* s)
 {
+    if (charset_is_anyset(s))
+    {
+        printf("ξ");
+        return;
+    }
     if (!charset_is_single_char(s)) { printf("["); }
     charset_str_inner(s);
     if (!charset_is_single_char(s)) { printf("]"); }
@@ -477,6 +482,11 @@ void charset_str(charset* s)
  */
 void charset_str_inner(charset* s)
 {
+    if (charset_is_anyset(s))
+    {
+        printf("ξ");
+        return;
+    }
     for (int i = 0; i < s->size; i++)
     {
         charset_char_str(s->ranges[i].start, charset_is_single_char(s));
