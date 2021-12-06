@@ -15,7 +15,7 @@
 #s = ' ';                                                   // non-breaking space
 
 #reserved = #unit | #keyword;
-#keyword = {in} | {loop} | {if} | {and} | {or} | {xor} | {nand} | {nor} | {xnor} | {true} | {false}; 
+#keyword = {in} | {as} | {loop} | {if} | {and} | {or} | {xor} | {nand} | {nor} | {xnor} | {true} | {false}; 
 
 
 //////// Expressions ////////
@@ -30,7 +30,7 @@
     #logical_expr >
     #coalesce >
     #in >
-    #assign;
+    #assign;// | #points_to;
 
 
 #block = #scope_block | #noscope_block;
@@ -50,16 +50,19 @@
 #call_args = #expr (#w* ',' #w* #expr)*;  //includes assignment expressions
 
 //TODO->unpack assignment/unpack in
-#assign = #assign_lhs #w* '=' #w* (#expr - #assign);
-#assign_lhs = #tid | #access; // | #unpack;
-#in = #id #w* 'in' #w* (#expr - #in);
-#points_to = #points_to_left | #points_to_right | #points_to_both;
-#points_to_right = #points_to_operand #w* '->' #w* #points_to_operand;
-#points_to_left = #points_to_operand #w* '<-' #w* #points_to_operand;
-#points_to_both = #points_to_operand #w* '<->' #w* #points_to_operand;
-#points_to_operand = (#expr - #points_to);
+#assign = (#tid | #access | #unpack) #w* '=' #w* (#expr - #assign);
+#in = (#id | #unpack) #w* 'in' #w* (#expr - #in);
+//bug causes infinite recursion because #points_to_operand is used...
+//#points_to = #points_to_left | #points_to_right | #points_to_both;
+//#points_to_right = #points_to_operand #w* '->' #w* #points_to_operand;
+//#points_to_left = #points_to_operand #w* '<-' #w* #points_to_operand;
+//#points_to_both = #points_to_operand #w* '<->' #w* #points_to_operand;
+//#points_to_operand = #expr - #points_to;
 
-//#unpack = '[' seq_of_ids, as, nested_unpacks ']';
+#unpack = '[' #w* (#unpack_item (#w* ',' #w* #unpack_item)* #w*)? ']';
+#unpack_item = #as | #id | #collect | #unpack;
+#as = #id #w* {as} #w* (#id | #unpack);
+#collect = '...' #id;
 
 #access = #name_access | #map_access;
 #name_access = #accessible_expr #w* '.' #w* #id;
