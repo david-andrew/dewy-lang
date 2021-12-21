@@ -71,3 +71,26 @@ loop my_range.length > 0 ( [i, ...my_range] = my_range )
 //[...my_range, i] = my_range //will probably set my_range = 1:inf, i = inf
 
 // unpacking too many values, or named values that don't exist just sets them to undefined
+
+
+
+// assignment expressions (i.e. python's walrus operator from https://www.python.org/dev/peps/pep-0572/)
+// Handle a matched regex
+if (match = pattern.search(data); match) not =? undefined
+{
+    # Do something with match
+}
+
+// A loop that can't be trivially rewritten using 2-arg iter()
+loop (chunk = file.read(8192); chunk.length >? 0)
+{
+   process(chunk)
+}
+
+// Reuse a value that's expensive to compute
+[(y = f(x); y) y**2 y**3]
+
+// Share a subexpression between a comprehension filter clause and its output
+filtered_data = [for x in data if (y = f(x); y) not =? undefined y]
+//though you could also just write this like so
+filtered_data = [for x in data {y = f(x) if y not =? undefined y}]
