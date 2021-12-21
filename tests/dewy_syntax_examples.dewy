@@ -28,7 +28,7 @@ my_obj = [
     ]
 ]
 
-// nested unpack assignment
+// nested unpack assignment. tbd if the top level is `[unpack, params, etc] = obj`, or `obj as [unpack, params, etc]`
 [
     apple as [
         a1, 
@@ -46,7 +46,7 @@ my_obj = [
 //   renamed_banana = 10
 //   purple = 23, blue = 12, orange = 'orange'
 
-// unpacking dictionaries probably treats them as just the list of keys
+// unpacking dictionaries probably treats them as just the list of key -> value pairs
 // unpacking sets, probably just treats the elements like a normal array
 // unpacking ranges treats them as a normal array
 
@@ -54,7 +54,7 @@ my_obj = [
 // there may only be 1 `...` in an unpack (otherwise it would be ambiguous which elements to collect)
 // the variable receiving the `...` will be of the same type as the original object being unpacked
 my_arr = [1 2 3 4 5 6 7 8 9]
-[a1, a2, a3, ...my_arr, a8, a9] = arr  //a1 = 1, a2 = 2, a3 = 3, my_arr = [4, 5, 6, 7], a8 = 8, a9 = 9
+[a1, a2, a3, ...my_arr, a8, a9] = my_arr  //a1 = 1, a2 = 2, a3 = 3, my_arr = [4, 5, 6, 7], a8 = 8, a9 = 9
 
 my_dict = ['apple' -> 1 'banana' -> 2 'peach' -> 3 'pie' -> 4]
 [d1, ...dict_left] = my_dict //d1 = ('apple' -> 1), dict_left = ['banana' -> 2 'peach' -> 3 'pie' -> 4]
