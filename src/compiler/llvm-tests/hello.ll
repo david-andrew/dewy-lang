@@ -5,33 +5,10 @@ target triple = "x86_64-pc-linux-gnu"
 
 @buf = common dso_local global [32 x i8] zeroinitializer, align 16
 @.str = private unnamed_addr constant [2 x i8] c"\0A\00", align 1
-@.str.1 = private unnamed_addr constant [15 x i8] c"Hello, World!\0A\00", align 1
-@.str.2 = private unnamed_addr constant [7 x i8] c"apple\0A\00", align 1
-@.str.3 = private unnamed_addr constant [6 x i8] c"apple\00", align 1
-@.str.4 = private unnamed_addr constant [7 x i8] c"banana\00", align 1
-@.str.5 = private unnamed_addr constant [7 x i8] c"carrot\00", align 1
-@.str.6 = private unnamed_addr constant [7 x i8] c"durian\00", align 1
-@.str.7 = private unnamed_addr constant [11 x i8] c"elderberry\00", align 1
-@.str.8 = private unnamed_addr constant [4 x i8] c"fig\00", align 1
-@.str.9 = private unnamed_addr constant [6 x i8] c"grape\00", align 1
-@.str.10 = private unnamed_addr constant [12 x i8] c"huckleberry\00", align 1
-@.str.11 = private unnamed_addr constant [10 x i8] c"jackfruit\00", align 1
-@.str.12 = private unnamed_addr constant [5 x i8] c"kiwi\00", align 1
-@.str.13 = private unnamed_addr constant [6 x i8] c"lemon\00", align 1
-@.str.14 = private unnamed_addr constant [6 x i8] c"mango\00", align 1
-@.str.15 = private unnamed_addr constant [10 x i8] c"nectarine\00", align 1
-@.str.16 = private unnamed_addr constant [7 x i8] c"orange\00", align 1
-@.str.17 = private unnamed_addr constant [7 x i8] c"papaya\00", align 1
-@.str.18 = private unnamed_addr constant [7 x i8] c"quince\00", align 1
-@.str.19 = private unnamed_addr constant [10 x i8] c"raspberry\00", align 1
-@.str.20 = private unnamed_addr constant [11 x i8] c"strawberry\00", align 1
-@.str.21 = private unnamed_addr constant [10 x i8] c"tangerine\00", align 1
-@.str.22 = private unnamed_addr constant [11 x i8] c"watermelon\00", align 1
-@.str.23 = private unnamed_addr constant [10 x i8] c"xylophone\00", align 1
-@.str.24 = private unnamed_addr constant [4 x i8] c"yam\00", align 1
-@.str.25 = private unnamed_addr constant [9 x i8] c"zucchini\00", align 1
-@test_argv = dso_local local_unnamed_addr global [23 x i8*] [i8* getelementptr inbounds ([6 x i8], [6 x i8]* @.str.3, i32 0, i32 0), i8* getelementptr inbounds ([7 x i8], [7 x i8]* @.str.4, i32 0, i32 0), i8* getelementptr inbounds ([7 x i8], [7 x i8]* @.str.5, i32 0, i32 0), i8* getelementptr inbounds ([7 x i8], [7 x i8]* @.str.6, i32 0, i32 0), i8* getelementptr inbounds ([11 x i8], [11 x i8]* @.str.7, i32 0, i32 0), i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.str.8, i32 0, i32 0), i8* getelementptr inbounds ([6 x i8], [6 x i8]* @.str.9, i32 0, i32 0), i8* getelementptr inbounds ([12 x i8], [12 x i8]* @.str.10, i32 0, i32 0), i8* getelementptr inbounds ([10 x i8], [10 x i8]* @.str.11, i32 0, i32 0), i8* getelementptr inbounds ([5 x i8], [5 x i8]* @.str.12, i32 0, i32 0), i8* getelementptr inbounds ([6 x i8], [6 x i8]* @.str.13, i32 0, i32 0), i8* getelementptr inbounds ([6 x i8], [6 x i8]* @.str.14, i32 0, i32 0), i8* getelementptr inbounds ([10 x i8], [10 x i8]* @.str.15, i32 0, i32 0), i8* getelementptr inbounds ([7 x i8], [7 x i8]* @.str.16, i32 0, i32 0), i8* getelementptr inbounds ([7 x i8], [7 x i8]* @.str.17, i32 0, i32 0), i8* getelementptr inbounds ([7 x i8], [7 x i8]* @.str.18, i32 0, i32 0), i8* getelementptr inbounds ([10 x i8], [10 x i8]* @.str.19, i32 0, i32 0), i8* getelementptr inbounds ([11 x i8], [11 x i8]* @.str.20, i32 0, i32 0), i8* getelementptr inbounds ([10 x i8], [10 x i8]* @.str.21, i32 0, i32 0), i8* getelementptr inbounds ([11 x i8], [11 x i8]* @.str.22, i32 0, i32 0), i8* getelementptr inbounds ([10 x i8], [10 x i8]* @.str.23, i32 0, i32 0), i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.str.24, i32 0, i32 0), i8* getelementptr inbounds ([9 x i8], [9 x i8]* @.str.25, i32 0, i32 0)], align 16
-@test_argc = dso_local local_unnamed_addr global i32 23, align 4
+@.str.1 = private unnamed_addr constant [7 x i8] c"argc: \00", align 1
+@.str.2 = private unnamed_addr constant [15 x i8] c"Hello, World!\0A\00", align 1
+@argc = common dso_local local_unnamed_addr global i32* null, align 8
+@argv = common dso_local local_unnamed_addr global i8** null, align 8
 
 ; Function Attrs: nounwind
 define dso_local i32 @write(i8* %0, i32 %1) local_unnamed_addr #0 {
@@ -151,80 +128,67 @@ define dso_local void @putl() local_unnamed_addr #0 {
 
 ; Function Attrs: nounwind
 define dso_local i32 @main(i32 %0, i8** nocapture readnone %1) local_unnamed_addr #0 {
-  %3 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([15 x i8], [15 x i8]* @.str.1, i64 0, i64 0), i32 15) #3, !srcloc !2
-  store i8 50, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 31), align 1, !tbaa !4
-  store i8 52, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), align 2, !tbaa !4
-  %4 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), i32 2) #3, !srcloc !2
-  %5 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i32 1) #3, !srcloc !2
-  store i8 70, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 31), align 1, !tbaa !4
-  store i8 69, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), align 2, !tbaa !4
-  store i8 69, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 29), align 1, !tbaa !4
-  store i8 66, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 28), align 4, !tbaa !4
-  store i8 68, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 27), align 1, !tbaa !4
-  store i8 65, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 26), align 2, !tbaa !4
-  store i8 69, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 25), align 1, !tbaa !4
-  store i8 68, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 24), align 8, !tbaa !4
-  store i8 120, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 23), align 1, !tbaa !4
-  store i8 48, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 22), align 2, !tbaa !4
-  %6 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 22), i32 10) #3, !srcloc !2
-  %7 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i32 1) #3, !srcloc !2
-  store i8 57, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 31), align 1, !tbaa !4
-  store i8 57, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), align 2, !tbaa !4
-  store i8 57, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 29), align 1, !tbaa !4
-  %8 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 29), i32 3) #3, !srcloc !2
-  %9 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i32 1) #3, !srcloc !2
-  %10 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([7 x i8], [7 x i8]* @.str.2, i64 0, i64 0), i32 7) #3, !srcloc !2
-  store i8 50, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 31), align 1, !tbaa !4
-  store i8 52, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), align 2, !tbaa !4
-  %11 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), i32 2) #3, !srcloc !2
-  %12 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i32 1) #3, !srcloc !2
-  store i8 48, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 31), align 1, !tbaa !4
-  store i8 48, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), align 2, !tbaa !4
-  store i8 50, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 29), align 1, !tbaa !4
-  %13 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 29), i32 3) #3, !srcloc !2
-  %14 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i32 1) #3, !srcloc !2
+  %3 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([7 x i8], [7 x i8]* @.str.1, i64 0, i64 0), i32 7) #3, !srcloc !2
+  br label %4
+
+4:                                                ; preds = %4, %2
+  %5 = phi i64 [ %10, %4 ], [ 0, %2 ]
+  %6 = phi i32 [ %13, %4 ], [ %0, %2 ]
+  %7 = urem i32 %6, 10
+  %8 = trunc i32 %7 to i8
+  %9 = or i8 %8, 48
+  %10 = add nuw i64 %5, 1
+  %11 = sub nsw i64 31, %5
+  %12 = getelementptr inbounds [32 x i8], [32 x i8]* @buf, i64 0, i64 %11
+  store i8 %9, i8* %12, align 1, !tbaa !4
+  %13 = udiv i32 %6, 10
+  %14 = icmp ugt i32 %6, 9
+  br i1 %14, label %4, label %15
+
+15:                                               ; preds = %4
+  %16 = getelementptr inbounds [32 x i8], [32 x i8]* @buf, i64 0, i64 %11
+  %17 = trunc i64 %10 to i32
+  %18 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull %16, i32 %17) #3, !srcloc !2
+  %19 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i32 1) #3, !srcloc !2
+  %20 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([15 x i8], [15 x i8]* @.str.2, i64 0, i64 0), i32 15) #3, !srcloc !2
   ret i32 0
 }
 
 ; Function Attrs: noreturn nounwind
 define dso_local void @_start() local_unnamed_addr #1 {
-  %1 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([15 x i8], [15 x i8]* @.str.1, i64 0, i64 0), i32 15) #3, !srcloc !2
-  store i8 50, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 31), align 1, !tbaa !4
-  store i8 52, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), align 2, !tbaa !4
-  %2 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), i32 2) #3, !srcloc !2
-  %3 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i32 1) #3, !srcloc !2
-  store i8 70, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 31), align 1, !tbaa !4
-  store i8 69, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), align 2, !tbaa !4
-  store i8 69, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 29), align 1, !tbaa !4
-  store i8 66, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 28), align 4, !tbaa !4
-  store i8 68, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 27), align 1, !tbaa !4
-  store i8 65, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 26), align 2, !tbaa !4
-  store i8 69, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 25), align 1, !tbaa !4
-  store i8 68, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 24), align 8, !tbaa !4
-  store i8 120, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 23), align 1, !tbaa !4
-  store i8 48, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 22), align 2, !tbaa !4
-  %4 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 22), i32 10) #3, !srcloc !2
-  %5 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i32 1) #3, !srcloc !2
-  store i8 57, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 31), align 1, !tbaa !4
-  store i8 57, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), align 2, !tbaa !4
-  store i8 57, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 29), align 1, !tbaa !4
-  %6 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 29), i32 3) #3, !srcloc !2
-  %7 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i32 1) #3, !srcloc !2
-  %8 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([7 x i8], [7 x i8]* @.str.2, i64 0, i64 0), i32 7) #3, !srcloc !2
-  store i8 50, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 31), align 1, !tbaa !4
-  store i8 52, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), align 2, !tbaa !4
-  %9 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), i32 2) #3, !srcloc !2
-  %10 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i32 1) #3, !srcloc !2
-  store i8 48, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 31), align 1, !tbaa !4
-  store i8 48, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 30), align 2, !tbaa !4
-  store i8 50, i8* getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 29), align 1, !tbaa !4
-  %11 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([32 x i8], [32 x i8]* @buf, i64 0, i64 29), i32 3) #3, !srcloc !2
-  %12 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i32 1) #3, !srcloc !2
-  br label %13
+  %1 = tail call i32* asm sideeffect "movq %rsp, $0\0A", "=r,~{dirflag},~{fpsr},~{flags}"() #3, !srcloc !7
+  store i32* %1, i32** @argc, align 8, !tbaa !8
+  %2 = getelementptr inbounds i32, i32* %1, i64 2
+  store i32* %2, i32** bitcast (i8*** @argv to i32**), align 8, !tbaa !8
+  %3 = load i32, i32* %1, align 4, !tbaa !10
+  %4 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([7 x i8], [7 x i8]* @.str.1, i64 0, i64 0), i32 7) #3, !srcloc !2
+  br label %5
 
-13:                                               ; preds = %13, %0
+5:                                                ; preds = %5, %0
+  %6 = phi i64 [ %11, %5 ], [ 0, %0 ]
+  %7 = phi i32 [ %14, %5 ], [ %3, %0 ]
+  %8 = urem i32 %7, 10
+  %9 = trunc i32 %8 to i8
+  %10 = or i8 %9, 48
+  %11 = add nuw i64 %6, 1
+  %12 = sub nsw i64 31, %6
+  %13 = getelementptr inbounds [32 x i8], [32 x i8]* @buf, i64 0, i64 %12
+  store i8 %10, i8* %13, align 1, !tbaa !4
+  %14 = udiv i32 %7, 10
+  %15 = icmp ugt i32 %7, 9
+  br i1 %15, label %5, label %16
+
+16:                                               ; preds = %5
+  %17 = getelementptr inbounds [32 x i8], [32 x i8]* @buf, i64 0, i64 %12
+  %18 = trunc i64 %11 to i32
+  %19 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull %17, i32 %18) #3, !srcloc !2
+  %20 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i32 1) #3, !srcloc !2
+  %21 = tail call i32 asm sideeffect "syscall\0A", "=A,{ax},{di},{si},{dx},~{dirflag},~{fpsr},~{flags}"(i32 1, i32 2, i8* nonnull getelementptr inbounds ([15 x i8], [15 x i8]* @.str.2, i64 0, i64 0), i32 15) #3, !srcloc !2
+  br label %22
+
+22:                                               ; preds = %22, %16
   tail call void asm sideeffect "syscall\0A", "{ax},{di},~{dirflag},~{fpsr},~{flags}"(i32 60, i32 0) #3, !srcloc !3
-  br label %13
+  br label %22
 }
 
 attributes #0 = { nounwind "correctly-rounded-divide-sqrt-fp-math"="false" "disable-tail-calls"="false" "frame-pointer"="none" "less-precise-fpmad"="false" "min-legal-vector-width"="0" "no-builtins" "no-infs-fp-math"="false" "no-jump-tables"="false" "no-nans-fp-math"="false" "no-signed-zeros-fp-math"="false" "no-trapping-math"="false" "stack-protector-buffer-size"="8" "target-cpu"="x86-64" "target-features"="+cx8,+fxsr,+mmx,+sse,+sse2,+x87" "unsafe-fp-math"="false" "use-soft-float"="false" }
@@ -242,3 +206,8 @@ attributes #3 = { nounwind }
 !4 = !{!5, !5, i64 0}
 !5 = !{!"omnipotent char", !6, i64 0}
 !6 = !{!"Simple C/C++ TBAA"}
+!7 = !{i32 2433}
+!8 = !{!9, !9, i64 0}
+!9 = !{!"any pointer", !5, i64 0}
+!10 = !{!11, !11, i64 0}
+!11 = !{!"int", !5, i64 0}

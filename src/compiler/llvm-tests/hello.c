@@ -68,28 +68,43 @@ void putl() { write("\n", 1); }
 // TODO->move to a separate file
 int main(int argc, char** argv)
 {
+    // debug print out argc
+    puts("argc: ");
+    puti(argc);
+    putl();
+    // debug print out argv
+    // puts("argv: ");
+    // for (int i = 0; i < argc; i++)
+    // {
+    //     puti(i);
+    //     puts(": ");
+    //     puts(argv[i]);
+    //     putl();
+    // }
+
     puts("Hello, World!\n");
-    puti(42);
-    putl();
-    putx(0xDEADBEEF);
-    putl();
-    puti(999);
-    putl();
-    puts("apple\n");
-    puti(42);
-    putl();
-    puti(200);
-    putl();
+    // puti(42);
+    // putl();
+    // putx(0xDEADBEEF);
+    // putl();
+    // puti(999);
+    // putl();
+    // puts("apple\n");
+    // puti(42);
+    // putl();
+    // puti(200);
+    // putl();
     return 0;
 }
 
-char* test_argv[] = {"apple",     "banana",      "carrot",    "durian", "elderberry", "fig",
-                     "grape",     "huckleberry", "jackfruit", "kiwi",   "lemon",      "mango",
-                     "nectarine", "orange",      "papaya",    "quince", "raspberry",  "strawberry",
-                     "tangerine", "watermelon",  "xylophone", "yam",    "zucchini"};
-int test_argc = sizeof(test_argv) / sizeof(char*);
+int* argc;
+char** argv;
 void _start()
 {
-    int res = main(test_argc, test_argv);
+    // collect argc and argv from %rsp register
+    asm volatile("movq %%rsp, %0\n" : "=r"(argc));
+    argv = (char**)((char*)argc + 8);
+
+    int res = main(*argc, argv);
     exit(res);
 }
