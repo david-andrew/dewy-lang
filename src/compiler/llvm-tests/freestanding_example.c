@@ -73,14 +73,14 @@ int main(int argc, char** argv)
     puti(argc);
     putl();
     // debug print out argv
-    // puts("argv: ");
-    // for (int i = 0; i < argc; i++)
-    // {
-    //     puti(i);
-    //     puts(": ");
-    //     puts(argv[i]);
-    //     putl();
-    // }
+    puts("argv: ");
+    for (int i = 0; i < argc; i++)
+    {
+        puti(i);
+        puts(": ");
+        puts(argv[i]);
+        putl();
+    }
 
     puts("Hello, World!\n");
     // puti(42);
@@ -97,14 +97,14 @@ int main(int argc, char** argv)
     return 0;
 }
 
-int* argc;
-char** argv;
-void _start()
-{
-    // collect argc and argv from %rsp register
-    asm volatile("movq %%rsp, %0\n" : "=r"(argc));
-    argv = (char**)((char*)argc + 8);
+// int* argc;
+// char** argv;
+// void _start()
+// {
+//     // collect argc and argv from %rsp register
+//     asm volatile("movq %%rsp, %0\n" : "=r"(argc));
+//     argv = (char**)((char*)argc + 8);
 
-    int res = main(*argc, argv);
-    exit(res);
-}
+//     int res = main(*argc, argv);
+//     exit(res);
+// }

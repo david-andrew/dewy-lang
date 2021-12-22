@@ -1,0 +1,17 @@
+#ifndef METAL_H
+#define METAL_H
+
+/* C functions utilized by Dewy in a hosted environment (TBD what to do about bare-metal/freestanding envs) */
+
+#include <stdint.h>
+
+// printing to stdout
+void __puts(uint8_t* s);
+void __putu64(uint64_t u);
+void __putu64x(uint64_t x);
+void __puti64(int64_t i);
+void __putf32(float f);
+void __putf64(double d);
+void __putl();
+
+#endif
