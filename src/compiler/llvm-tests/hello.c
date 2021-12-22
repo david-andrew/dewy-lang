@@ -1,11 +1,13 @@
 // How to compile/run:
-// $ clang -O3 -emit-llvm -S hello.c
+// $ clang -ffreestanding -O3 -emit-llvm -S hello.c
 // $ llc -filetype=obj hello.ll
 // $ ld.lld hello.o
 // $ ./a.out
 
 // or as a single line:
-// $ clang -O3 -emit-llvm -S hello.c && llc -filetype=obj hello.ll && ld.lld hello.o && ./a.out
+// $ clang -ffreestanding -O3 -emit-llvm -S hello.c && llc -filetype=obj hello.ll && ld.lld hello.o && ./a.out
+
+// eventually this will just be an object file we link to that contains all the core OS functionality (i.e. syscalls)
 
 #define SYS_write 1
 #define SYS_exit 60
@@ -22,13 +24,23 @@ int write(char* buf, int len)
     return n;
 }
 
-void puts(char* s)
+// exit syscall:
+//     %rax: syscall number, %rdi: exit code
+void exit(int code)
 {
-    int len = 0;
-    while (s[len]) len++;
-    write(s, len);
+    // infinite loop until the system ends this process
+    for (;;) asm volatile("syscall\n" : : "a"(SYS_exit), "D"(code));
 }
 
+// stdout print functions. TODO->allow for stderr vs stdout via fd parameter in fput functions, and then wrap with these
+int strlen(char* s)
+{
+    int i = 0;
+    while (s[i++])
+        ;
+    return i;
+}
+void puts(char* s) { write(s, strlen(s)); }
 #define buf_size 32
 char buf[buf_size];
 void puti(unsigned int i)
@@ -51,36 +63,33 @@ void putx(unsigned int i)
     buf[buf_size - ++len] = '0';
     write(&buf[buf_size - len], len);
 }
-void putn() { write("\n", 1); }
-
-// exit syscall:
-//     %rax: syscall number, %rdi: exit code
-void exit(int code)
-{
-    // infinite loop until the system ends this process
-    for (;;) asm volatile("syscall\n" : : "a"(SYS_exit), "D"(code));
-}
+void putl() { write("\n", 1); }
 
 // TODO->move to a separate file
-int main()
+int main(int argc, char** argv)
 {
     puts("Hello, World!\n");
     puti(42);
-    putn();
+    putl();
     putx(0xDEADBEEF);
-    putn();
+    putl();
     puti(999);
-    putn();
+    putl();
     puts("apple\n");
     puti(42);
-    putn();
+    putl();
     puti(200);
-    putn();
+    putl();
     return 0;
 }
 
+char* test_argv[] = {"apple",     "banana",      "carrot",    "durian", "elderberry", "fig",
+                     "grape",     "huckleberry", "jackfruit", "kiwi",   "lemon",      "mango",
+                     "nectarine", "orange",      "papaya",    "quince", "raspberry",  "strawberry",
+                     "tangerine", "watermelon",  "xylophone", "yam",    "zucchini"};
+int test_argc = sizeof(test_argv) / sizeof(char*);
 void _start()
 {
-    int res = main();
+    int res = main(test_argc, test_argv);
     exit(res);
 }
