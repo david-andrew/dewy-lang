@@ -13,5 +13,7 @@ void __puti64(int64_t i);
 void __putf32(float f);
 void __putf64(double d);
 void __putl();
+uint64_t __getl(uint8_t** dst);
+uint64_t __getdl(uint8_t** dst, uint8_t delimiter);
 
 #endif
