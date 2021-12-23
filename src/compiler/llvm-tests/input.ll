@@ -1,6 +1,6 @@
 ; compile with `clang hello.ll metal.o`
 
-target triple = "x86_64-pc-linux-gnu"
+target triple = "x86_64-unknown-linux-gnu"
 
 @.str.0 = private unnamed_addr constant [19 x i8] c"What's your name? \00", align 1
 @.str.1 = private unnamed_addr constant [7 x i8] c"Hello \00", align 1
