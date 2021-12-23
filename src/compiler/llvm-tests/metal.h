@@ -1,7 +1,8 @@
 #ifndef METAL_H
 #define METAL_H
 
-/* C functions utilized by Dewy in a hosted environment (TBD what to do about bare-metal/freestanding envs) */
+/* C functions utilized by Dewy in a hosted environment */
+/* TBD what to do about bare-metal/freestanding envs, probably just don't include these */
 
 #include <stdint.h>
 
