@@ -287,4 +287,160 @@ void bsr_tree_str_inner_symbol(dict* Y, uint32_t* I, uint64_t symbol_idx, uint64
  */
 // void bsr_tree_str_leaf(charset* terminal, uint64_t j, uint64_t level) {}
 
+// /**
+//  * Check if the given BSR node is ambiguous (i.e. it or any of its children contain multiple j-sets)
+//  */
+// bool bsr_is_node_ambiguous(dict* Y, bsr_head* head, uint64_t j)
+// {
+//     // split for getting left and right children. If production body is empty, then there are no children
+//     slice body;
+//     if (head->type == prod_bsr)
+//     {
+//         vect* prod_body = metaparser_get_production_body(head->head_idx, head->production_idx);
+//         body = slice_struct(prod_body, 0, vect_size(prod_body));
+//     }
+//     else // type == str_bsr
+//     {
+//         body = head->substring;
+//     }
+//     if (slice_size(&body) == 0) return;
+
+//     // handle left branch of the tree
+//     slice left_substring = slice_slice_struct(&body, 0, slice_size(&body) - 1);
+//     if (slice_size(&left_substring) > 1)
+//     {
+//         // do a full substring print of the left child
+//         bsr_head left_head = new_str_bsr_head_struct(&left_substring, head->i, j);
+//         ///////////////////////////////////////////////RIGHT HERE///////////////////
+//         // bsr_tree_str_inner_head(Y, I, &left_head, level + 1);
+//     }
+//     else if (slice_size(&left_substring) == 1)
+//     {
+//         // print the left child as a single symbol
+//         uint64_t* left_symbol_idx = slice_get(&left_substring, 0)->data;
+//         bsr_tree_str_inner_symbol(Y, I, *left_symbol_idx, head->i, j, level + 1);
+//     }
+//     // otherwise nothing to print for left child
+
+//     // handle right branch of the tree
+//     uint64_t* right_symbol_idx = slice_get(&body, slice_size(&body) - 1)->data;
+//     bsr_tree_str_inner_symbol(Y, I, *right_symbol_idx, j, head->k, level + 1);
+
+//     // // check if the head is ambiguous
+//     // obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = head});
+//     // if (j_set_obj != NULL)
+//     // {
+//     //     set* j_set = j_set_obj->data;
+//     //     if (set_size(j_set) > 1) return true;
+//     // }
+
+//     // // check if the left or right child is ambiguous
+//     // slice body;
+//     // if (head->type == prod_bsr)
+//     // {
+//     //     vect* prod_body = metaparser_get_production_body(head->head_idx, head->production_idx);
+//     //     body = slice_struct(prod_body, 0, vect_size(prod_body));
+//     // }
+//     // else // type == str_bsr
+//     // {
+//     //     body = head->substring;
+//     // }
+//     // if (slice_size(&body) == 0) return false;
+
+//     // // handle left branch of the tree
+//     // slice left_substring = slice_slice_struct(&body, 0, slice_size(&body) - 1);
+//     // if (slice_size(&left_substring) > 1)
+//     // {
+//     //     // do a full substring print of the left child
+//     //     // bsr_tree_str_inner_substr(Y, I, &left_substring, head->i, j, level + 1);
+//     //     bsr_head left_head = new_str_bsr_head_struct(&left_substring, head->i, head->j);
+//     //     if (bsr_is_node_ambiguous(Y, &left_head)) return true;
+//     // }
+//     // else if (slice_size(&left_substring) == 1)
+//     // {
+//     //     // print the left child as a single symbol
+//     //     uint64_t* left_symbol_idx = slice_get(&left_substring, 0)->data;
+//     //     bsr_head left_head = new_symbol_bsr_head_struct(*left_symbol_idx, head->i, head->j);
+//     //     if (bsr_is_node_ambiguous(Y, &left_head)) return true;
+
+//     //     // otherwise nothing to print for left child
+
+//     //     // handle right branch of the tree
+//     //     uint64_t* right_symbol_idx = slice_get(&body, slice_size(&body) - 1)->data;
+//     //     bsr_head right_head = new_symbol_bsr_head_struct(*right_symbol_idx, head->j, head->k);
+//     //     if (bsr_is_node_ambiguous(Y, &right_head)) return true;
+
+//     //     // otherwise nothing to print for right child
+//     // }
+// }
+
+// // TODO->need an extra function for splitting out children productions from a given BSR node.
+// // this function should call it, passing in root_head
+// /**
+//  * Check if an entire BSR tree starting from the start symbol contains any ambiguous nodes
+//  */
+// bool bsr_is_tree_ambiguous(dict* Y, uint64_t start_idx, uint64_t length)
+// {
+//     // get the production bodies of the start symbol
+//     size_t num_bodies = metaparser_get_num_production_bodies(start_idx);
+
+//     // check if there are multiple root BSR nodes
+//     uint64_t root_bsr_count = 0;
+//     bsr_head root_bsr_head;
+//     obj* root_j_set_obj;
+//     for (size_t i = 0; i < num_bodies; i++)
+//     {
+//         // get the j-set associated with the body
+//         bsr_head head = new_prod_bsr_head_struct(start_idx, i, 0, length);
+//         obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = &head});
+//         if (j_set_obj != NULL)
+//         {
+//             // update count
+//             root_bsr_count++;
+
+//             // save parameters in case there was only one root BSR node
+//             root_j_set_obj = j_set_obj;
+//             root_bsr_head = head;
+//         }
+//     }
+//     if (root_bsr_count > 1) return true;
+
+//     // check if the root BSR node is ambiguous
+//     set* root_j_set = root_j_set_obj->data;
+//     if (set_size(root_j_set) > 1) return true;
+
+//     // check if any children of the root BSR node are ambiguous
+//     for (size_t i = 0; i < set_size(root_j_set); i++)
+//     {
+//         uint64_t* j = set_get_at_index(root_j_set, i)->data;
+//         if (bsr_is_node_ambiguous(Y, &root_bsr_head)) return true;
+//     }
+
+//     return false;
+
+//     // obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = head});
+//     // if (j_set_obj != NULL)
+//     // {
+//     //     set* j_set = j_set_obj->data;
+//     //     for (size_t k = 0; k < set_size(j_set); k++)
+//     //     {
+//     //         uint64_t* j = set_get_at_index(j_set, k)->data;
+//     //         bsr_tree_str_inner(Y, I, head, *j, level);
+
+//     //         // for now skip all alternative j splits
+//     //         // break; // TODO->remove this!!!
+//     //         // basically want a function for determining if a node is a packed node, which would count the number
+//     of
+//     //         // different j and j-sets via these two for loops (for prod in productions, for j in j-sets)
+//     //     }
+//     // }
+
+//     // get the j-set associated with the body
+//     // bsr_head head = new_prod_bsr_head_struct(start_idx, i, 0, length);
+//     // bsr_tree_str_inner_head(Y, I, &head, 0);
+
+//     // set* j_set = j_set_obj->data;
+//     // if (set_size(j_set) > 1) root_bsr_count++;
+// }
+
 #endif
