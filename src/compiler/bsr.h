@@ -35,6 +35,16 @@ typedef struct
 // or (μ, i, j1, k), (μ, i, j2, k), ... (μ, i, jn, k), depending on the type of head
 // this allows easy lookup of BSRs by (X ::= μ, i, k) and (μ, i, k)
 
+// convenience for storing bsr nodes (prod type only)
+typedef struct
+{
+    uint64_t head_idx;
+    uint64_t production_idx;
+    uint64_t i; // left extent
+    uint64_t j; // binary right split point
+    uint64_t k; // right extent
+} bsr;
+
 bsr_head* new_str_bsr_head(slice* substring, uint64_t i, uint64_t k);
 bsr_head new_str_bsr_head_struct(slice* substring, uint64_t i, uint64_t k);
 bsr_head* new_prod_bsr_head(uint64_t head_idx, uint64_t production_idx, uint64_t i, uint64_t k);
@@ -56,7 +66,11 @@ void bsr_tree_str_inner_substr(dict* Y, uint32_t* I, slice* substring, uint64_t 
 void bsr_tree_str_inner_symbol(dict* Y, uint32_t* I, uint64_t symbol_idx, uint64_t i, uint64_t k, uint64_t level);
 // void bsr_tree_str_leaf(charset* terminal, uint64_t j, uint64_t level);
 // void bsr_get_children(dict* Y, bsr_head* head, uint64_t j, bsr_head** left, bsr_head** right);
-bool bsr_is_node_ambiguous(dict* Y, bsr_head* head, uint64_t j);
-bool bsr_is_tree_ambiguous(dict* Y, uint64_t start_idx, uint64_t length);
+
+bool bsr_root_has_multiple_splits(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* production_idx, uint64_t* j);
+bool bsr_head_has_multiple_splits(dict* Y, bsr_head* head, uint64_t* j);
+bool bsr_has_ambiguities(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* production_idx);
+bool bsr_tree_is_ambiguous(dict* Y, bsr_head* head, uint64_t j); // recursively check any node for ambiguity
+// bool bsr_children_have_multiple_splits(dict* Y, bsr_head* head, uint64_t j);
 
 #endif

@@ -324,6 +324,18 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
         printf("BSR TREE OUTPUT:\n"); // for now, while AST output not implemented, print out the BSR Tree
         bsr_tree_str(context.Y, context.I, start_symbol_idx, length);
         printf("\n\n");
+
+        printf("AMBIGUOUS BSR TREE: ");
+        // bsr_head start_bsr = new_prod_bsr_head_struct(start_symbol_idx, 0, 0, length);
+        uint64_t production_idx;
+        bool ambiguous = bsr_has_ambiguities(context.Y, start_symbol_idx, length, &production_idx);
+        printf(ambiguous ? "true\n\n" : "false\n\n");
+        // if (!ambiguous)
+        // {
+        // printf("AMBIGUOUS BSR TREE: ");
+        // bsr_head root_bsr = new_prod_bsr_head_struct(start_symbol_idx, production_idx, 0, length);
+        // bool ambiguous =
+        // }
         // printf("AST OUTPUT:\n");
         // print_sppf_from_bsr(context.BSR);
         // printf("\n\n");
@@ -370,10 +382,7 @@ void print_ast(uint64_t head_idx, metaast* body_ast, bool verbose)
             printf("\n");
         }
     }
-    else
-    {
-        printf(" = NULL\n");
-    }
+    else { printf(" = NULL\n"); }
 }
 
 /**
