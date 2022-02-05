@@ -36,14 +36,14 @@ typedef struct
 // this allows easy lookup of BSRs by (X ::= μ, i, k) and (μ, i, k)
 
 // convenience for storing bsr nodes (prod type only)
-typedef struct
-{
-    uint64_t head_idx;
-    uint64_t production_idx;
-    uint64_t i; // left extent
-    uint64_t j; // binary right split point
-    uint64_t k; // right extent
-} bsr;
+// typedef struct
+// {
+//     uint64_t head_idx;
+//     uint64_t production_idx;
+//     uint64_t i; // left extent
+//     uint64_t j; // binary right split point
+//     uint64_t k; // right extent
+// } bsr;
 
 bsr_head* new_str_bsr_head(slice* substring, uint64_t i, uint64_t k);
 bsr_head new_str_bsr_head_struct(slice* substring, uint64_t i, uint64_t k);

@@ -360,6 +360,26 @@ bool bsr_tree_is_ambiguous(dict* Y, bsr_head* head, uint64_t j)
 
     printf("TODO->need to handle recursive check for ambiguity in BSR tree\n");
     return false;
+
+    // split for getting left and right children. If production body is empty, then there are no children
+    slice body;
+    if (head->type == prod_bsr)
+    {
+        vect* prod_body = metaparser_get_production_body(head->head_idx, head->production_idx);
+        body = slice_struct(prod_body, 0, vect_size(prod_body));
+    }
+    else // type == str_bsr
+    {
+        body = head->substring;
+    }
+    if (slice_size(&body) == 0) return false;
+
+    // handle left branch of the tree
+    slice left_substring = slice_slice_struct(&body, 0, slice_size(&body) - 1);
+    if (slice_size(&left_substring) > 1)
+    {
+        // do a full substring print of the left child
+    }
 }
 
 // /**
