@@ -280,11 +280,6 @@ void bsr_tree_str_inner_symbol(dict* Y, uint32_t* I, uint64_t symbol_idx, uint64
 }
 
 /**
- * helper function for printing out a leaf node in the bsr forest
- */
-// void bsr_tree_str_leaf(charset* terminal, uint64_t j, uint64_t level) {}
-
-/**
  * Check if the root BSR has multiple splits, indicating that it is ambiguous.
  * if production_idx and j are not NULL, then return the production and j value for non-ambiguous split
  */
@@ -314,6 +309,49 @@ bool bsr_root_has_multiple_splits(dict* Y, uint64_t head_idx, uint64_t length, u
 
     // return true if there is more than one split
     return num_splits > 1;
+}
+
+/**
+ * Get the production, and j split for the root of the BSR. Attempt to disambiguate according to filters (and future
+ * disambiguation steps, e.g. type checking, etc.)
+ */
+// TODO->THIS FUNCTION IS VERY BROKEN....
+bool bsr_get_root_split(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* production_idx, uint64_t* j)
+{
+    // keep track of the number of splits encountered
+    uint64_t num_splits = 0;
+
+    // iterate over each possible production_idx for the given head
+    set* bodies = metaparser_get_production_bodies(head_idx);
+    for (uint64_t cur_production_idx = 0; cur_production_idx < set_size(bodies); cur_production_idx++)
+    {
+        // check if there is a BSR head associated with this production
+        bsr_head head = new_prod_bsr_head_struct(head_idx, cur_production_idx, 0, length);
+        obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = &head});
+        if (j_set_obj == NULL) continue;
+        set* j_set = j_set_obj->data;
+        for (uint64_t j_idx; j_idx < set_size(j_set); j_idx++)
+        {
+            uint64_t cur_j = *(uint64_t*)set_get_at_index(j_set, j_idx)->data;
+            if (num_splits == 0)
+            {
+                *production_idx = cur_production_idx;
+                *j = cur_j;
+                num_splits++;
+            }
+            else
+            {
+                // TODO->apply disambiguation steps here
+
+                // if disambiguation succeeds, continue, else return true
+
+                printf("ERROR: potentially ambiguous BSR split. Disambiguation not yet implemented.\n");
+                return true;
+            }
+        }
+        return false;
+    }
+    return false;
 }
 
 /**
@@ -356,7 +394,8 @@ bool bsr_has_ambiguities(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* 
  */
 bool bsr_tree_is_ambiguous(dict* Y, bsr_head* head, uint64_t j)
 {
-    // first check if any of the children have multiple splits, and then recursively check each child with this function
+    // first check if any of the children have multiple splits, and then recursively check each child with this
+    // function
 
     printf("TODO->need to handle recursive check for ambiguity in BSR tree\n");
     return false;
@@ -524,8 +563,8 @@ bool bsr_tree_is_ambiguous(dict* Y, bsr_head* head, uint64_t j)
 
 //     //         // for now skip all alternative j splits
 //     //         // break; // TODO->remove this!!!
-//     //         // basically want a function for determining if a node is a packed node, which would count the number
-//     of
+//     //         // basically want a function for determining if a node is a packed node, which would count the
+//     number of
 //     //         // different j and j-sets via these two for loops (for prod in productions, for j in j-sets)
 //     //     }
 //     // }

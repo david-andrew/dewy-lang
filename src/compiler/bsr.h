@@ -67,6 +67,9 @@ void bsr_tree_str_inner_symbol(dict* Y, uint32_t* I, uint64_t symbol_idx, uint64
 // void bsr_tree_str_leaf(charset* terminal, uint64_t j, uint64_t level);
 // void bsr_get_children(dict* Y, bsr_head* head, uint64_t j, bsr_head** left, bsr_head** right);
 
+// methods used for building AST from BSR tree
+bool bsr_get_root_split(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* production_idx, uint64_t* j);
+
 bool bsr_root_has_multiple_splits(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* production_idx, uint64_t* j);
 bool bsr_head_has_multiple_splits(dict* Y, bsr_head* head, uint64_t* j);
 bool bsr_has_ambiguities(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* production_idx);

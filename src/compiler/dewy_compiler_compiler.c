@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ast.h"
 #include "crf.h"
 #include "dewy_compiler_compiler.h"
 #include "metaparser.h"
@@ -325,6 +326,7 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
         bsr_tree_str(context.Y, context.I, start_symbol_idx, length);
         printf("\n\n");
 
+        // print if the BSR tree is ambiguous
         printf("AMBIGUOUS BSR TREE: ");
         // bsr_head start_bsr = new_prod_bsr_head_struct(start_symbol_idx, 0, 0, length);
         uint64_t production_idx;
@@ -339,6 +341,17 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
         // printf("AST OUTPUT:\n");
         // print_sppf_from_bsr(context.BSR);
         // printf("\n\n");
+
+        // attempt to convert BSR tree to a regular AST, and print
+        printf("AST OUTPUT:\n");
+        ast_node* root = ast_from_root(context.Y, context.I, start_symbol_idx, length);
+        if (root != NULL)
+        {
+            ast_node_str(root);
+            printf("\n\n");
+            ast_node_free(root, true);
+        }
+        else { printf("NULL\n\n"); }
     }
 
     release_parser_context(&context);

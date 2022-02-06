@@ -1,19 +1,22 @@
-all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o metaast.o metascanner.o metaparser.o charset.o slot.o fset.o slice.o crf.o bsr.o
+all: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o  set.o metaast.o metascanner.o metaparser.o charset.o slot.o fset.o slice.o crf.o bsr.o ast.o
 
 
 #current completed step is simple lexer
-dewy: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o slot.o fset.o slice.o parser.o bsr.o crf.o
-	clang -O3 -o dewy dewy_compiler_compiler.o utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o slot.o fset.o slice.o parser.o bsr.o crf.o -lm
+dewy: dewy_compiler_compiler.o  utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o slot.o fset.o slice.o parser.o bsr.o crf.o ast.o
+	clang -O3 -o dewy dewy_compiler_compiler.o utilities.o object.o metatoken.o dictionary.o vector.o set.o ustring.o charset.o metaast.o metascanner.o metaparser.o slot.o fset.o slice.o parser.o bsr.o crf.o ast.o -lm
 
 debug:
-	clang -o dewy dewy_compiler_compiler.c utilities.c object.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c slot.c fset.c parser.c bsr.c crf.c slice.c -lm -g
+	clang -o dewy dewy_compiler_compiler.c utilities.c object.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c slot.c fset.c parser.c bsr.c crf.c slice.c ast.c -lm -g
 
 profile:
-	clang -O3 -o dewy dewy_compiler_compiler.c utilities.c object.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c slot.c fset.c parser.c bsr.c crf.c slice.c -lm -pg
+	clang -O3 -o dewy dewy_compiler_compiler.c utilities.c object.c metatoken.c dictionary.c vector.c set.c ustring.c charset.c metaast.c metascanner.c metaparser.c slot.c fset.c parser.c bsr.c crf.c slice.c ast.c -lm -pg
 	./dewy -i -r ../../tests/11.grammar ../../tests/11.source
 	gprof dewy gmon.out > gmon.txt
 
-bsr.o: bsr.c bsr.h slice.h
+ast.o: ast.c ast.h dictionary.h bsr.h metaparser.h ustring.h
+	clang -O3 -c -o ast.o ast.c
+
+bsr.o: bsr.c bsr.h slice.h metaparser.h parser.h ustring.h utilities.h
 	clang -O3 -c -o bsr.o bsr.c
 
 charset.o: charset.c charset.h object.h ustring.h utilities.h
@@ -22,7 +25,7 @@ charset.o: charset.c charset.h object.h ustring.h utilities.h
 crf.o: crf.c crf.h object.h set.h slice.h slot.h metaparser.h parser.h utilities.h
 	clang -O3 -c -o crf.o crf.c
 
-dewy_compiler_compiler.o: dewy_compiler_compiler.c metaast.h metaparser.h metascanner.h metatoken.h object.h parser.h set.h slot.h ustring.h utilities.h vector.h
+dewy_compiler_compiler.o: dewy_compiler_compiler.c metaast.h metaparser.h metascanner.h metatoken.h object.h parser.h set.h slot.h ustring.h utilities.h vector.h ast.h
 	clang -O3 -c -o dewy_compiler_compiler.o dewy_compiler_compiler.c
 
 dictionary.o: dictionary.c dictionary.h object.h utilities.h
