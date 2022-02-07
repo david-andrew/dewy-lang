@@ -340,7 +340,6 @@ bool bsr_get_root_split(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* p
                 {
                     uint64_t cur_rank = *(uint64_t*)dict_get_uint_key(precedence_table, *production_idx)->data;
                     uint64_t next_rank = *(uint64_t*)dict_get_uint_key(precedence_table, next_production_idx)->data;
-                    printf("cur_rank: %lu, next_rank: %lu\n", cur_rank, next_rank);
 
                     // new split replaces current split
                     if (next_rank < cur_rank)
