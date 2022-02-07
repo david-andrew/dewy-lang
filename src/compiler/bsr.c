@@ -155,7 +155,10 @@ void bsr_head_repr(bsr_head* b)
         printf("type: str_bsr, substring: ");
         slice_str(&b->substring);
     }
-    else { printf("type: prod_bsr, head_idx: %" PRIu64 ", production_idx: %" PRIu64, b->head_idx, b->production_idx); }
+    else
+    {
+        printf("type: prod_bsr, head_idx: %" PRIu64 ", production_idx: %" PRIu64, b->head_idx, b->production_idx);
+    }
     printf(", i: %" PRIu64 ", k: %" PRIu64 ")", b->i, b->k);
 }
 
@@ -174,20 +177,13 @@ void bsr_tree_str(dict* Y, uint32_t* I, uint64_t start_idx, uint64_t length)
     }
 }
 
-void indent_str(uint64_t i, const char* str)
-{
-    for (size_t j = 0; j < i; j++) fputs(str, stdout);
-}
-
-const char indent[] = "  ";
-
 /**
  * Helper function for printing out a bsr forest
  */
 void bsr_tree_str_inner(dict* Y, uint32_t* I, bsr_head* head, uint64_t j, uint64_t level)
 {
     // print the given head at the current indentation level
-    indent_str(level, indent);
+    put_tabs(level);
     bsr_str(head, j);
     printf("\n");
 
@@ -240,11 +236,6 @@ void bsr_tree_str_inner_head(dict* Y, uint32_t* I, bsr_head* head, uint64_t leve
         {
             uint64_t* j = set_get_at_index(j_set, k)->data;
             bsr_tree_str_inner(Y, I, head, *j, level);
-
-            // for now skip all alternative j splits
-            // break; // TODO->remove this!!!
-            // basically want a function for determining if a node is a packed node, which would count the number of
-            // different j and j-sets via these two for loops (for prod in productions, for j in j-sets)
         }
     }
 }
@@ -259,7 +250,7 @@ void bsr_tree_str_inner_symbol(dict* Y, uint32_t* I, uint64_t symbol_idx, uint64
     if (symbol->type == CharSet_t)
     {
         // print out the terminal at the location
-        indent_str(level, indent);
+        put_tabs(level);
         // printf("\"");
         put_unicode(I[i]); // TODO->maybe print the charset with the input character
         // printf(" from ");
@@ -313,45 +304,72 @@ bool bsr_root_has_multiple_splits(dict* Y, uint64_t head_idx, uint64_t length, u
 
 /**
  * Get the production, and j split for the root of the BSR. Attempt to disambiguate according to filters (and future
- * disambiguation steps, e.g. type checking, etc.)
+ * disambiguation steps, e.g. type checking, etc.),
+ * returns whether a split was successfully found. False indicates either ambiguous, or no split found.
  */
-// TODO->THIS FUNCTION IS VERY BROKEN....
 bool bsr_get_root_split(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* production_idx, uint64_t* j)
 {
-    // keep track of the number of splits encountered
-    uint64_t num_splits = 0;
+    // have we found a split yet
+    bool first = true;
+
+    // in case we need to disambiguate any production bodies. (Possibly NULL)
+    dict* precedence_table = metaparser_get_precedence_table(head_idx);
 
     // iterate over each possible production_idx for the given head
     set* bodies = metaparser_get_production_bodies(head_idx);
-    for (uint64_t cur_production_idx = 0; cur_production_idx < set_size(bodies); cur_production_idx++)
+    for (uint64_t next_production_idx = 0; next_production_idx < set_size(bodies); next_production_idx++)
     {
         // check if there is a BSR head associated with this production
-        bsr_head head = new_prod_bsr_head_struct(head_idx, cur_production_idx, 0, length);
+        bsr_head head = new_prod_bsr_head_struct(head_idx, next_production_idx, 0, length);
         obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = &head});
         if (j_set_obj == NULL) continue;
         set* j_set = j_set_obj->data;
-        for (uint64_t j_idx; j_idx < set_size(j_set); j_idx++)
+        for (uint64_t j_idx = 0; j_idx < set_size(j_set); j_idx++)
         {
-            uint64_t cur_j = *(uint64_t*)set_get_at_index(j_set, j_idx)->data;
-            if (num_splits == 0)
+            uint64_t next_j = *(uint64_t*)set_get_at_index(j_set, j_idx)->data;
+            if (first)
             {
-                *production_idx = cur_production_idx;
-                *j = cur_j;
-                num_splits++;
+                *production_idx = next_production_idx;
+                *j = next_j;
+                first = false;
             }
             else
             {
-                // TODO->apply disambiguation steps here
+                // check the precedence filter for the current split vs the new split
+                if (*production_idx != next_production_idx && precedence_table != NULL)
+                {
+                    uint64_t cur_rank = *(uint64_t*)dict_get_uint_key(precedence_table, *production_idx)->data;
+                    uint64_t next_rank = *(uint64_t*)dict_get_uint_key(precedence_table, next_production_idx)->data;
+                    printf("cur_rank: %lu, next_rank: %lu\n", cur_rank, next_rank);
 
-                // if disambiguation succeeds, continue, else return true
+                    // new split replaces current split
+                    if (next_rank < cur_rank)
+                    {
+                        *production_idx = next_production_idx;
+                        *j = next_j;
+                        continue;
+                    }
+                    // old split beats new candidate split
+                    else if (cur_rank < next_rank)
+                        continue;
+                }
 
-                printf("ERROR: potentially ambiguous BSR split. Disambiguation not yet implemented.\n");
-                return true;
+                // TODO->add more disambiguation steps here (e.g. type checking disambiguation, etc.)
+                // if (disambiguation_step(...))
+                // {
+                //     // select the new split
+                //     // continue;
+                // }
+
+                // failed to disambiguate
+                printf("DEBUG: failed to disambiguate %lu from %lu\n", *production_idx, next_production_idx);
+                return false;
             }
         }
-        return false;
     }
-    return false;
+
+    // return whether a split was successfully found
+    return !first;
 }
 
 /**

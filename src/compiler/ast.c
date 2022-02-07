@@ -46,7 +46,10 @@ void ast_node_free(ast_node* node, bool root)
         for (uint64_t i = 0; i < node->length; i++) { ast_node_free(&node->children[i], false); }
         free(node->children);
     }
-    else if (node->type == str_ast && node->string != NULL) { free(node->string); }
+    else if (node->type == str_ast && node->string != NULL)
+    {
+        free(node->string);
+    }
     if (root) { free(node); }
 }
 
@@ -76,14 +79,9 @@ void ast_node_allocate_children(ast_node* node, uint64_t num_children)
  */
 ast_node* ast_from_root(dict* Y, uint32_t* I, uint64_t head_idx, uint64_t length)
 {
-    // first check if the root node is unambiguous (BSR checks all possible disambiguations)
+    // first, attempt to get the start BSR node (applying disambiguation rules if possible)
     uint64_t j, production_idx;
-
-    // SUPER HACKY, replace with bsr_get_root_split function below!
-    bool ambiguous = bsr_root_has_multiple_splits(Y, head_idx, length, &production_idx, &j);
-    // bool ambiguous = bsr_get_root_split(Y, head_idx, length, &production_idx, &j);
-
-    if (ambiguous) { return NULL; }
+    if (!bsr_get_root_split(Y, head_idx, length, &production_idx, &j)) { return NULL; }
 
     // create the root of the AST
     ast_node* root = new_inner_ast_node(head_idx, production_idx);
@@ -96,9 +94,6 @@ ast_node* ast_from_root(dict* Y, uint32_t* I, uint64_t head_idx, uint64_t length
     // continue this process recursively
 
     return root;
-
-    // bsr_head head = new_prod_bsr_head_struct(head_idx, *production_idx, 0, length);
-    // return bsr_tree_is_ambiguous(Y, &head, j);
 }
 
 /**

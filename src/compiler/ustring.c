@@ -169,14 +169,8 @@ uint64_t ustring_hash(uint32_t* str)
 uint64_t hex_digit_to_value(char c)
 {
     if (is_dec_digit(c)) { return c - '0'; }
-    else if (is_upper_hex_letter(c))
-    {
-        return c - 'A' + 10;
-    }
-    else if (is_lower_hex_letter(c))
-    {
-        return c - 'a' + 10;
-    }
+    else if (is_upper_hex_letter(c)) { return c - 'A' + 10; }
+    else if (is_lower_hex_letter(c)) { return c - 'a' + 10; }
     printf("ERROR: character %c is not a hex digit\n", c);
     return 0;
 }
@@ -300,10 +294,7 @@ void put_unicode(uint32_t c)
         putchar(b1);
         putchar(b0);
     }
-    else
-    {
-        printf("ERROR: invalid unicode codepoint \"%u\"\n", c);
-    }
+    else { printf("ERROR: invalid unicode codepoint \"%u\"\n", c); }
 }
 
 /**
@@ -446,10 +437,7 @@ void printable_unicode_or_hex_str(uint32_t c)
         printf("\\");
         put_unicode(unicode_to_escape(c));
     }
-    else
-    {
-        printf("\\x%X", c);
-    }
+    else { printf("\\x%X", c); }
 }
 
 void ustring_str(uint32_t* s)
@@ -576,10 +564,7 @@ bool unicode_upper_and_lower(uint32_t c, uint32_t* uppercase, uint32_t* lowercas
 
         // check if found desired codepoint else adjust search range
         if (codepoint > c) { end = i - 1; }
-        else if (codepoint < c)
-        {
-            start = i + 1;
-        }
+        else if (codepoint < c) { start = i + 1; }
         else
         {
             // store the lower/uppercase values from the table
@@ -589,6 +574,23 @@ bool unicode_upper_and_lower(uint32_t c, uint32_t* uppercase, uint32_t* lowercas
         }
     }
     return false;
+}
+
+/**
+ * Helper function for printing indentation.
+ */
+void put_indents(uint64_t i, const char* str)
+{
+    for (size_t j = 0; j < i; j++) fputs(str, stdout);
+}
+
+/**
+ * Helper function for printing "tabs"
+ */
+void put_tabs(uint64_t i)
+{
+    const char indent[] = "  ";
+    put_indents(i, indent);
 }
 
 #endif

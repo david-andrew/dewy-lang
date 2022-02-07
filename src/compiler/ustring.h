@@ -41,4 +41,7 @@ uint32_t unicode_to_upper(uint32_t c);
 uint32_t unicode_to_lower(uint32_t c);
 bool unicode_upper_and_lower(uint32_t c, uint32_t* uppercase, uint32_t* lowercase);
 
+void put_indents(uint64_t i, const char* str);
+void put_tabs(uint64_t i);
+
 #endif
