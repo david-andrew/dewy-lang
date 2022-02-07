@@ -155,10 +155,7 @@ void bsr_head_repr(bsr_head* b)
         printf("type: str_bsr, substring: ");
         slice_str(&b->substring);
     }
-    else
-    {
-        printf("type: prod_bsr, head_idx: %" PRIu64 ", production_idx: %" PRIu64, b->head_idx, b->production_idx);
-    }
+    else { printf("type: prod_bsr, head_idx: %" PRIu64 ", production_idx: %" PRIu64, b->head_idx, b->production_idx); }
     printf(", i: %" PRIu64 ", k: %" PRIu64 ")", b->i, b->k);
 }
 
@@ -341,8 +338,8 @@ bool bsr_get_root_split(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* p
                     uint64_t cur_rank = *(uint64_t*)dict_get_uint_key(precedence_table, *production_idx)->data;
                     uint64_t next_rank = *(uint64_t*)dict_get_uint_key(precedence_table, next_production_idx)->data;
 
-                    // new split replaces current split
-                    if (next_rank < cur_rank)
+                    // new split replaces current split. select rule with least precedence (i.e. largest rank)
+                    if (next_rank > cur_rank)
                     {
                         *production_idx = next_production_idx;
                         *j = next_j;
