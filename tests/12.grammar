@@ -1,7 +1,7 @@
 //ambiguous example grammar for numeric expressions, with disambiguation rules
 
 
-#expr = #add | #sub > #mul | #div | #mod > #jux > #pow > #atom;
+#expr = #atom > #pow > #jux > #mul | #div | #mod > #add | #sub;
 
 
 #atom = #id | #num | #group;
