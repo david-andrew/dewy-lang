@@ -1,7 +1,8 @@
 //ambiguous example grammar for numeric expressions, with disambiguation rules
 
 
-#expr = #atom > #pow > #jux > #mul | #div | #mod > #add | #sub;
+// note that precedence level is inversely proportional to binding strength
+#expr = #add | #sub > #mul | #div | #mod > #jux > #pow > #atom;
 
 
 #atom = #id | #num | #group;
