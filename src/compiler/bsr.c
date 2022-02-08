@@ -338,15 +338,15 @@ bool bsr_get_root_split(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* p
                     uint64_t cur_rank = *(uint64_t*)dict_get_uint_key(precedence_table, *production_idx)->data;
                     uint64_t next_rank = *(uint64_t*)dict_get_uint_key(precedence_table, next_production_idx)->data;
 
-                    // new split replaces current split. select rule with least precedence rank
-                    if (next_rank < cur_rank)
+                    // new split replaces current split. select rule with least precedence since top down construction
+                    if (next_rank > cur_rank)
                     {
                         *production_idx = next_production_idx;
                         *j = next_j;
                         continue;
                     }
                     // old split beats new candidate split
-                    else if (next_rank > cur_rank)
+                    else if (next_rank < cur_rank)
                         continue;
                 }
 
