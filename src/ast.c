@@ -46,10 +46,7 @@ void ast_node_free(ast_node* node, bool root)
         for (uint64_t i = 0; i < node->length; i++) { ast_node_free(&node->children[i], false); }
         free(node->children);
     }
-    else if (node->type == str_ast && node->string != NULL)
-    {
-        free(node->string);
-    }
+    else if (node->type == str_ast && node->string != NULL) { free(node->string); }
     if (root) { free(node); }
 }
 
@@ -86,14 +83,48 @@ ast_node* ast_from_root(dict* Y, uint32_t* I, uint64_t head_idx, uint64_t length
     // create the root of the AST
     ast_node* root = new_inner_ast_node(head_idx, production_idx);
 
-    // create space for the children of the root
-    // ast_node_allocate_children(root, <length of the production>);
+    // recursively construct the AST
+    bool success = ast_attach_children(root, 0, j, length, Y, I);
 
+    // if the construction failed, free the root and return NULL
+    if (!success)
+    {
+        ast_node_free(root, true);
+        return NULL;
+    }
+
+    // reduce the AST
+    ast_reduce(root);
+
+    return root;
+}
+
+/**
+ *
+ */
+bool ast_attach_children(ast_node* node, uint64_t i, uint64_t j, uint64_t k, dict* Y, uint32_t* I)
+{
+    // get the production string for the current node
+    vect* body = metaparser_get_production_body(node->head_idx, node->production_idx);
+
+    // number of children of the AST node is the length of the production body
+    uint64_t num_children = vect_size(body);
+
+    // allocate space for the children
+    ast_node_allocate_children(node, num_children);
+
+    // start slotting child nodes into the children array, from the end since BSRs go from end to start
+    // if there is an ambiguity, then return false. If there is no ambiguity, then recursively call this function, and
+    // return the result of the recursive call.
+    // TODO: eventually should probably just iterate over all possible splits, and disambiguate when there's multiple
+
+    //
     // checking each symbol in the production for ambiguities, fill in each of the children
 
     // continue this process recursively
 
-    return root;
+    printf("TODO: implement attach_children\n");
+    return true;
 }
 
 /**
