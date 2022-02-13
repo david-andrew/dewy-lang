@@ -24,7 +24,7 @@ struct ast_node
         {
             uint64_t head_idx;
             uint64_t production_idx;
-            uint64_t length;
+            uint64_t length; // number of children
             ast_node* children;
         };
         uint32_t term;
@@ -40,6 +40,7 @@ ast_node* new_inner_ast_node(uint64_t head_idx, uint64_t production_idx);
 void ast_node_free(ast_node* node, bool root);
 void ast_node_allocate_children(ast_node* node, uint64_t num_children);
 ast_node* ast_from_root(dict* Y, uint32_t* I, uint64_t head_idx, uint64_t length);
+bool ast_attach_children(ast_node* node, uint64_t i, uint64_t j, uint64_t k, dict* Y, uint32_t* I);
 void ast_reduce(ast_node* node);
 void ast_node_str(ast_node* node);
 void ast_node_str_inner(ast_node* node, uint64_t depth);
