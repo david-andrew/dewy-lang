@@ -15,9 +15,14 @@
 ast_node* new_char_ast_node(uint32_t term)
 {
     ast_node* node = malloc(sizeof(ast_node));
-    *node = (ast_node){.type = char_ast, .term = term};
+    *node = new_char_ast_node_struct(term);
     return node;
 }
+
+/**
+ * Create a struct for an AST node representing a terminal character
+ */
+inline ast_node new_char_ast_node_struct(uint32_t term) { return (ast_node){.type = char_ast, .term = term}; }
 
 /**
  * Create a new AST node representing a non-terminal character (i.e. an inner node with children)
@@ -46,7 +51,10 @@ void ast_node_free(ast_node* node, bool root)
         for (uint64_t i = 0; i < node->length; i++) { ast_node_free(&node->children[i], false); }
         free(node->children);
     }
-    else if (node->type == str_ast && node->string != NULL) { free(node->string); }
+    else if (node->type == str_ast && node->string != NULL)
+    {
+        free(node->string);
+    }
     if (root) { free(node); }
 }
 
@@ -100,7 +108,7 @@ ast_node* ast_from_root(dict* Y, uint32_t* I, uint64_t head_idx, uint64_t length
 }
 
 /**
- *
+ * Recursively attach children to the given AST node, constructed from the given BSR forest.
  */
 bool ast_attach_children(ast_node* node, uint64_t i, uint64_t j, uint64_t k, dict* Y, uint32_t* I)
 {
@@ -113,17 +121,73 @@ bool ast_attach_children(ast_node* node, uint64_t i, uint64_t j, uint64_t k, dic
     // allocate space for the children
     ast_node_allocate_children(node, num_children);
 
+    // substring to keep track of progress in the traversal of the bsr for this production
+    slice string = slice_struct(body, 0, num_children);
+
+    // save i, j, k for later passes?
+    uint64_t saved_i = i;
+    uint64_t saved_j = j;
+    uint64_t saved_k = k;
+    while (slice_size(&string) > 0)
+    {
+        // split the last element off from the string
+        printf("slice size: %lu\n", slice_size(&string));
+        obj* right = slice_get(&string, slice_size(&string) - 1);
+        string = slice_struct(body, 0, slice_size(&string) - 1);
+        // printf("splitting string: ");
+        // slice_str(&string);
+        // printf(" | ");
+        // obj_str(right);
+        // printf("\n");
+
+        // determine if the right symbol is a terminal or non-terminal
+        uint64_t* symbol_idx = right->data;
+        obj* symbol = metaparser_get_symbol(*symbol_idx);
+        if (symbol->type == CharSet_t)
+        {
+            // terminal
+            node->children[slice_size(&string)] = new_char_ast_node_struct(I[k - 1]);
+        }
+        else
+        {
+            // nonterminal
+            printf("TODO: handle nonterminal symbols\n");
+            // find the bsr associated with the symbol
+            set* bodies = metaparser_get_production_bodies(*symbol_idx);
+            for (uint64_t prod_idx = 0; prod_idx < set_size(bodies); prod_idx++)
+            {
+                bsr_head head = new_prod_bsr_head_struct(*symbol_idx, prod_idx, i, k);
+            }
+        }
+        // printf("right symbol: ");
+        // obj_str(symbol);
+        // printf("\n");
+
+        // create the empty AST node for the right object
+        // ast_node* child = ast_from_right(right, j, k, Y, I);
+
+        // compute the next i, j, k values for the next item
+        if (slice_size(&string) > 0)
+        {
+            // get the next bsr node
+            bsr_head visitor = new_str_bsr_head_struct(&string, i, j);
+            printf("TODO: computing next i, j, k\n");
+            exit(1);
+        }
+    }
+
     // start slotting child nodes into the children array, from the end since BSRs go from end to start
-    // if there is an ambiguity, then return false. If there is no ambiguity, then recursively call this function, and
-    // return the result of the recursive call.
-    // TODO: eventually should probably just iterate over all possible splits, and disambiguate when there's multiple
+    // if there is an ambiguity, then return false. If there is no ambiguity, then recursively call this function,
+    // and return the result of the recursive call.
+    // TODO: eventually should probably just iterate over all possible splits, and disambiguate when there's
+    // multiple
 
     //
     // checking each symbol in the production for ambiguities, fill in each of the children
 
     // continue this process recursively
 
-    printf("TODO: implement attach_children\n");
+    // printf("TODO: implement attach_children\n");
     return true;
 }
 

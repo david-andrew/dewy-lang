@@ -35,6 +35,7 @@ struct ast_node
 // ast_node ast_nonterminal_node_struct(uint64_t head_idx);
 // ast_node ast_terminal_node_struct(uint32_t codepoint);
 ast_node* new_char_ast_node(uint32_t term);
+ast_node new_char_ast_node_struct(uint32_t term);
 // ast_node* new_str_ast_node(uint32_t* string);
 ast_node* new_inner_ast_node(uint64_t head_idx, uint64_t production_idx);
 void ast_node_free(ast_node* node, bool root);
