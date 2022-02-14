@@ -328,14 +328,17 @@ bool run_compiler(uint32_t* source, size_t length, bool fsets, bool labels, bool
 
         // attempt to convert BSR tree to a regular AST, and print
         printf("AST OUTPUT:\n");
-        ast_node* root = ast_from_root(context.Y, context.I, start_symbol_idx, length);
+        ast_node* root = ast_from_root(NULL, context.Y, context.I, start_symbol_idx, 0, length);
         if (root != NULL)
         {
             ast_node_str(root);
             printf("\n\n");
             ast_node_free(root, true);
         }
-        else { printf("NULL\n\n"); }
+        else
+        {
+            printf("NULL\n\n");
+        }
     }
 
     release_parser_context(&context);
@@ -379,7 +382,10 @@ void print_ast(uint64_t head_idx, metaast* body_ast, bool verbose)
             printf("\n");
         }
     }
-    else { printf(" = NULL\n"); }
+    else
+    {
+        printf(" = NULL\n");
+    }
 }
 
 /**

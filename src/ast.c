@@ -30,14 +30,19 @@ inline ast_node new_char_ast_node_struct(uint32_t term) { return (ast_node){.typ
 ast_node* new_inner_ast_node(uint64_t head_idx, uint64_t production_idx)
 {
     ast_node* node = malloc(sizeof(ast_node));
-    *node = (ast_node){
+    *node = new_inner_ast_node_struct(head_idx, production_idx);
+    return node;
+}
+
+inline ast_node new_inner_ast_node_struct(uint64_t head_idx, uint64_t production_idx)
+{
+    return (ast_node){
         .type = inner_ast,
         .head_idx = head_idx,
         .production_idx = production_idx,
         .length = 0,
         .children = NULL,
     };
-    return node;
 }
 
 /**
@@ -82,17 +87,22 @@ void ast_node_allocate_children(ast_node* node, uint64_t num_children)
  * Attempt to construct a full AST from the given BSR. When ambiguities are encountered, attempt to resolve them by
  * using ambiguity resolution (e.g. filters from the grammer, as well as post parse disambiguation, e.g. type info).
  */
-ast_node* ast_from_root(dict* Y, uint32_t* I, uint64_t head_idx, uint64_t length)
+ast_node* ast_from_root(ast_node* root, dict* Y, uint32_t* I, uint64_t head_idx, uint64_t i, uint64_t k)
 {
     // first, attempt to get the start BSR node (applying disambiguation rules if possible)
     uint64_t j, production_idx;
-    if (!bsr_get_root_split(Y, head_idx, length, &production_idx, &j)) { return NULL; }
+    if (!bsr_get_root_split(Y, head_idx, i, k, &production_idx, &j)) { return NULL; }
 
-    // create the root of the AST
-    ast_node* root = new_inner_ast_node(head_idx, production_idx);
+    // create/assign the root of the AST
+    if (root == NULL) { root = new_inner_ast_node(head_idx, production_idx); }
+    else
+    {
+        *root = new_inner_ast_node_struct(head_idx, production_idx);
+    }
+    // ast_node* root = new_inner_ast_node(head_idx, production_idx);
 
     // recursively construct the AST
-    bool success = ast_attach_children(root, 0, j, length, Y, I);
+    bool success = ast_attach_children(root, i, j, k, Y, I);
 
     // if the construction failed, free the root and return NULL
     if (!success)
@@ -131,7 +141,6 @@ bool ast_attach_children(ast_node* node, uint64_t i, uint64_t j, uint64_t k, dic
     while (slice_size(&string) > 0)
     {
         // split the last element off from the string
-        printf("slice size: %lu\n", slice_size(&string));
         obj* right = slice_get(&string, slice_size(&string) - 1);
         string = slice_struct(body, 0, slice_size(&string) - 1);
         // printf("splitting string: ");
@@ -152,11 +161,13 @@ bool ast_attach_children(ast_node* node, uint64_t i, uint64_t j, uint64_t k, dic
         {
             // nonterminal
             printf("TODO: handle nonterminal symbols\n");
+
             // find the bsr associated with the symbol
             set* bodies = metaparser_get_production_bodies(*symbol_idx);
             for (uint64_t prod_idx = 0; prod_idx < set_size(bodies); prod_idx++)
             {
-                bsr_head head = new_prod_bsr_head_struct(*symbol_idx, prod_idx, i, k);
+                // check if there is a J-set associated with this head
+                bsr_head head = new_prod_bsr_head_struct(*symbol_idx, prod_idx, j, k);
             }
         }
         // printf("right symbol: ");
