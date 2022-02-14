@@ -61,6 +61,10 @@ void ast_node_free(ast_node* node, bool root)
         free(node->string);
     }
     if (root) { free(node); }
+    else
+    {
+        node->type = undefined_ast;
+    }
 }
 
 /**
