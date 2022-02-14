@@ -155,7 +155,10 @@ void bsr_head_repr(bsr_head* b)
         printf("type: str_bsr, substring: ");
         slice_str(&b->substring);
     }
-    else { printf("type: prod_bsr, head_idx: %" PRIu64 ", production_idx: %" PRIu64, b->head_idx, b->production_idx); }
+    else
+    {
+        printf("type: prod_bsr, head_idx: %" PRIu64 ", production_idx: %" PRIu64, b->head_idx, b->production_idx);
+    }
     printf(", i: %" PRIu64 ", k: %" PRIu64 ")", b->i, b->k);
 }
 
@@ -304,7 +307,7 @@ bool bsr_root_has_multiple_splits(dict* Y, uint64_t head_idx, uint64_t length, u
  * disambiguation steps, e.g. type checking, etc.),
  * returns whether a split was successfully found. False indicates either ambiguous, or no split found.
  */
-bool bsr_get_root_split(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* production_idx, uint64_t* j)
+bool bsr_get_root_split(dict* Y, uint64_t head_idx, uint64_t i, uint64_t k, uint64_t* production_idx, uint64_t* j)
 {
     // have we found a split yet
     bool first = true;
@@ -317,7 +320,7 @@ bool bsr_get_root_split(dict* Y, uint64_t head_idx, uint64_t length, uint64_t* p
     for (uint64_t next_production_idx = 0; next_production_idx < set_size(bodies); next_production_idx++)
     {
         // check if there is a BSR head associated with this production
-        bsr_head head = new_prod_bsr_head_struct(head_idx, next_production_idx, 0, length);
+        bsr_head head = new_prod_bsr_head_struct(head_idx, next_production_idx, i, k);
         obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = &head});
         if (j_set_obj == NULL) continue;
         set* j_set = j_set_obj->data;
