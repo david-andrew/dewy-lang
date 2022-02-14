@@ -89,6 +89,9 @@ void ast_node_allocate_children(ast_node* node, uint64_t num_children)
  */
 ast_node* ast_from_root(ast_node* root, dict* Y, uint32_t* I, uint64_t head_idx, uint64_t i, uint64_t k)
 {
+    // was an existing allocation passed in?
+    bool preallocated = root != NULL;
+
     // first, attempt to get the start BSR node (applying disambiguation rules if possible)
     uint64_t j, production_idx;
     if (!bsr_get_root_split(Y, head_idx, i, k, &production_idx, &j)) { return NULL; }
@@ -99,7 +102,6 @@ ast_node* ast_from_root(ast_node* root, dict* Y, uint32_t* I, uint64_t head_idx,
     {
         *root = new_inner_ast_node_struct(head_idx, production_idx);
     }
-    // ast_node* root = new_inner_ast_node(head_idx, production_idx);
 
     // recursively construct the AST
     bool success = ast_attach_children(root, i, j, k, Y, I);
@@ -107,7 +109,7 @@ ast_node* ast_from_root(ast_node* root, dict* Y, uint32_t* I, uint64_t head_idx,
     // if the construction failed, free the root and return NULL
     if (!success)
     {
-        ast_node_free(root, true);
+        ast_node_free(root, !preallocated);
         return NULL;
     }
 
@@ -134,20 +136,11 @@ bool ast_attach_children(ast_node* node, uint64_t i, uint64_t j, uint64_t k, dic
     // substring to keep track of progress in the traversal of the bsr for this production
     slice string = slice_struct(body, 0, num_children);
 
-    // save i, j, k for later passes?
-    uint64_t saved_i = i;
-    uint64_t saved_j = j;
-    uint64_t saved_k = k;
     while (slice_size(&string) > 0)
     {
         // split the last element off from the string
         obj* right = slice_get(&string, slice_size(&string) - 1);
         string = slice_struct(body, 0, slice_size(&string) - 1);
-        // printf("splitting string: ");
-        // slice_str(&string);
-        // printf(" | ");
-        // obj_str(right);
-        // printf("\n");
 
         // determine if the right symbol is a terminal or non-terminal
         uint64_t* symbol_idx = right->data;
@@ -160,45 +153,42 @@ bool ast_attach_children(ast_node* node, uint64_t i, uint64_t j, uint64_t k, dic
         else
         {
             // nonterminal
-            printf("TODO: handle nonterminal symbols\n");
+            ast_node* result = ast_from_root(&node->children[slice_size(&string)], Y, I, *symbol_idx, j, k);
 
-            // find the bsr associated with the symbol
-            set* bodies = metaparser_get_production_bodies(*symbol_idx);
-            for (uint64_t prod_idx = 0; prod_idx < set_size(bodies); prod_idx++)
-            {
-                // check if there is a J-set associated with this head
-                bsr_head head = new_prod_bsr_head_struct(*symbol_idx, prod_idx, j, k);
-            }
+            // report failure case up the recursion stack
+            if (result == NULL) { return false; }
         }
-        // printf("right symbol: ");
-        // obj_str(symbol);
-        // printf("\n");
 
-        // create the empty AST node for the right object
-        // ast_node* child = ast_from_right(right, j, k, Y, I);
-
-        // compute the next i, j, k values for the next item
-        if (slice_size(&string) > 0)
+        // update i, j, k extents for the next BSR node in the iteration
+        k = j;
+        if (slice_size(&string) > 1)
         {
             // get the next bsr node
-            bsr_head visitor = new_str_bsr_head_struct(&string, i, j);
-            printf("TODO: computing next i, j, k\n");
-            exit(1);
+            bsr_head head = new_str_bsr_head_struct(&string, i, j);
+            obj* j_set_obj = dict_get(Y, &(obj){.type = BSRHead_t, .data = &head});
+            if (j_set_obj == NULL) { return false; }
+            set* j_set = j_set_obj->data;
+
+            // j-sets should always have at least one element
+            if (set_size(j_set) == 1)
+            {
+                // simple case: set j to the single element in the set
+                j = *(uint64_t*)set_get_at_index(j_set, 0)->data;
+            }
+            else
+            {
+                printf("ERROR: Unhandled ambiguity in BSR forest\n");
+                // TODO-> attempt to disambiguate to select the correct j
+                // for now just fail on ambiguities
+                return false;
+            }
+        }
+        else
+        {
+            j = i; // when there is only one node left, j is the same as i
         }
     }
 
-    // start slotting child nodes into the children array, from the end since BSRs go from end to start
-    // if there is an ambiguity, then return false. If there is no ambiguity, then recursively call this function,
-    // and return the result of the recursive call.
-    // TODO: eventually should probably just iterate over all possible splits, and disambiguate when there's
-    // multiple
-
-    //
-    // checking each symbol in the production for ambiguities, fill in each of the children
-
-    // continue this process recursively
-
-    // printf("TODO: implement attach_children\n");
     return true;
 }
 
