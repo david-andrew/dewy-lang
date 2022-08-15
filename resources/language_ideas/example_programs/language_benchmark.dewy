@@ -56,7 +56,7 @@ twelve_days_of_christmas = () => //function literal with no arguments
     loop i, day in #iteration, days
     {
         print("On the {day} day of Christmas, my true love gave to me") //string interpolation
-        loop j, gift in #iteration, gifts[0:i].reversed 
+        loop j, gift in #iteration, gifts[0 to i].reversed 
         {
             if j not =? i print("{gift},")
             else print("{if i is? 0 'And {gift.lowercase}' else '{gift}'}.\n") //example of nested string interpolation
@@ -69,7 +69,7 @@ FizzBuzz = () =>
 {
     words = [3 -> "Fizz" 5 -> "Buzz"] // 7->"Bazz"] //example of a dictionary
 
-    loop i in 1:100
+    loop i in 1 to 100
     {
         say = i .% words.keys .=? 0     //elementwise operation of % and =? //returns truth table
         if words.keys[say].length >? 0
@@ -83,7 +83,7 @@ FizzBuzz = () =>
 //alternate implementation using match
 FizzBuzzBazzFoo = () =>
 {
-    loop i in 1:100
+    loop i in 1 to 100
         match i%3, i%5, i%7, i%11   //want to be able to vectorize the input like i .% [3 5 7 11] as args. but need better syntax
         {
             0, _, _, _ {printf('Fizz') continue}
@@ -99,8 +99,8 @@ FizzBuzzBazzFoo = () =>
 sum_squares1 = () =>
 {
     //any overflow is seamlessly handled by the compiler
-    sum_squares = ((1:100).^2).sum
-    square_sum = (1:100).sum^2
+    sum_squares = ((1 to 100).^2).sum
+    square_sum = (1 to 100).sum^2
     
     print(sum_squares - square_sum)
 }
@@ -131,7 +131,7 @@ sum_multiples1 = () =>
     
     sum = 0     // least specific
     
-    loop i in 1:1000-1
+    loop i in 1 to 1000-1
         if (i%3)*(i%5) =? 0 //either a multiple of 3 or 5
             sum+=i
 
@@ -140,8 +140,8 @@ sum_multiples1 = () =>
 
 
 //example of shorter versions of sum multiples
-sum_multiples2 = () => { print([loop i in 1:1000-1 if (i%3)*(i%5) =? 0 i].sum) }
-sum_multiples3 = () => { print((1:1000-1).filter((i) => (i%3)*(i%5) =? 0).sum) }
+sum_multiples2 = () => { print([loop i in 1 to 1000-1 if (i%3)*(i%5) =? 0 i].sum) }
+sum_multiples3 = () => { print((1 to 1000-1).filter((i) => (i%3)*(i%5) =? 0).sum) }
 
 
 prime_factors = () =>
@@ -165,12 +165,12 @@ prime_factors = () =>
     
     print(primes[end]) //since this is a doubly linked list, there probably would be a method like primes.last
     
-    //note that while arrays can be set to be indexed with arbitrary start and end indices, if an index is accessed using +value or -value (e.g. primes[+10] or primes[-12]), the indexing is forced to be zero // actually this is no longer true. if indexing is not 0 based, then all values up to the first legal index are simply out of bounds for both + and - indexing. e.g. a = int[10:20], then a[10] is the first element, a[-10] is the last element, and any number < 10 or > 20 is out of bounds 
+    //note that while arrays can be set to be indexed with arbitrary start and end indices, if an index is accessed using +value or -value (e.g. primes[+10] or primes[-12]), the indexing is forced to be zero // actually this is no longer true. if indexing is not 0 based, then all values up to the first legal index are simply out of bounds for both + and - indexing. e.g. a = int[10 to 20], then a[10] is the first element, a[-10] is the last element, and any number < 10 or > 20 is out of bounds 
     //i.e. if primes was set to start at 1, primes[+0] will return the first element, even if primes[0] would throw an error
     //indexing with a '+' indicates indexing from the start. indexing with a '-' indicates indexing from the end
     //the index value i means the ith value precisely, none of this in between mumbo jumbo.
-    //e.g. if you want the last 10 elements in a = 0:20, then a[-9:-0]
-    //"start" and "end" can be used to refer to indices +0 and -0 respectively. e.g. it is legal to say a[end-9:end-0], and calling a[-9:-0] implicitely includes the "end"s
+    //e.g. if you want the last 10 elements in a = 0 to 20, then a[-9 to -0]
+    //"start" and "end" can be used to refer to indices +0 and -0 respectively. e.g. it is legal to say a[end-9 to end-0], and calling a[-9 to -0] implicitely includes the "end"s
 
 }
 
@@ -239,14 +239,14 @@ compute_pi = (n) =>
 
     //what if we procedurally increase the precision of pi so that only as much precision as is needed at each step is used
     //e.g. inside the loop, pi.precision += 14.181647462725477655. Probably doable with a fixed point type number
-    loop k in 0:iterations
+    loop k in 0 to iterations
     {
         pi += (-1)^k * (6*k)!/((k!)^3*(3*k)!) * ((13591409 + 545140134*k)/640320^(3*k))
     }
 
     pi = (10005^/2 / 4270934400 * pi)^-1
 
-    print(pi.string[:n]) //print the first n digits of computed value
+    print(pi.string[to n]) //print the first n digits of computed value
 }
 
 //currently needs more work converting from python to dewy
@@ -262,7 +262,7 @@ compute_pi(n) =
     iterations = 70 //need to figure out what this does. I think it's the number of iterations for the precision
 
     K, M, L, X, S = 6, 1, 13581409, 1, 13591408
-    loop k in 1:iterations
+    loop k in 1 to iterations
     {
         M = ((K^3 - 16*K) * M / k^3) as int //apparentfly floating point division is faster than integer division
         L += 545140134
@@ -271,7 +271,7 @@ compute_pi(n) =
         K += 12
     }
     pi = 426880 * sqrt(10005) / S
-    print(pi.string[:n-1]) //print first n digits of pi
+    print(pi.string[to n-1]) //print first n digits of pi
 }
 }/
 
