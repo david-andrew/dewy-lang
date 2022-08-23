@@ -15,7 +15,7 @@
 #s = ' ';                                                   // non-breaking space
 
 #reserved = #unit | #keyword;
-#keyword = {in} | {as} | {to} | {loop} | {if} | {and} | {or} | {xor} | {nand} | {nor} | {xnor} | {true} | {false}; 
+#keyword = {in} | {as} | {loop} | {if} | {and} | {or} | {xor} | {nand} | {nor} | {xnor} | {true} | {false}; 
 
 
 //////// Expressions ////////
@@ -158,8 +158,10 @@
 
 
 //TODO->figure out bug where both left/right expressions can't be #range_endpoint, else infinite recursion
+//TODO->make left and right side of range optional (e.g. ..10, 10.., ..), with the unspecified side being -inf/inf
+//#partial_range = (range_endpoint #w*)? '..' (#w* range_endpoint)?;
 #range_literal = [\[(] #w* #range_core [\])] | #range_core;
-#range_core = #range_endpoint #w* 'to' #w* (#expr - (#range_literal | #assign | #in));
+#range_core = #range_endpoint #w* '..' #w* (#expr - (#range_literal | #assign | #in));
 #range_endpoint = #expr - (#range_literal | #assign | #in);
 
 #container = '[' #w* (#block_inner #w*)? ']';

@@ -4,7 +4,7 @@
 
 update_world = world: vector<bit> => {
     cell_update: bit = 0
-    loop i in 0 to world.length
+    loop i in 0..world.length
     {
         if i >? 0 world[i-1] = cell_update
         update = (0b01110110 << (((world[i-1] ?? 0) << 2) or ((world[i] ?? 0) << 1) or (world[i+1] ?? 0)))

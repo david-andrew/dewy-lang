@@ -11,7 +11,7 @@ let pear: set<range>  // let indicates that this is definitely a new declaration
 
 
 // unpack assignment examples
-A = 1 to 10
+A = 1..10
 B = [loop a in A -a]
 loop [a, b] in [A B] {}
 
@@ -60,11 +60,11 @@ my_dict = ['apple' -> 1 'banana' -> 2 'peach' -> 3 'pie' -> 4]
 [d1, ...dict_left] = my_dict //d1 = ('apple' -> 1), dict_left = ['banana' -> 2 'peach' -> 3 'pie' -> 4]
 
 // random range note: for step sizes other than +1, use range_iter constructor e.g. range_iter(start to stop, step=5)
-my_range = 1 to inf
+my_range = 1..inf
 loop my_range.length > 0 ( [i, ...my_range] = my_range )
-// first iteration: i = 1, my_range = 2 to inf
-// second iteration: i = 2, my_range = 3 to inf
-// third iteration: i = 3, my_range = 4 to inf
+// first iteration: i = 1, my_range = 2..inf
+// second iteration: i = 2, my_range = 3..inf
+// third iteration: i = 3, my_range = 4..inf
 // ...
 // for forever
 
