@@ -44,12 +44,14 @@ class Scope():
         for p in self.parents: #TODO: may need to iterate in reverse to get same behavior as merging parent scopes
             if name in p.vars:
                 return p.vars[name]
-        raise NameError(name)
+        raise NameError(f'{name} not found in scope {self}')
 
     def set(self, name:str, val:AST):
         self.vars[name] = val
 
     def __repr__(self):
+        if len(self.parents) > 0:
+            return f'Scope({self.vars}, {self.parents})'
         return f'Scope({self.vars})'
 
     def copy(self):
@@ -74,8 +76,7 @@ def merge_scopes(*scopes:List[Scope], onto:Scope=None):
 
 
 class Function(AST):
-    def __init__(self, name:str, args:List[Arg], bargs:List[BArg], body:AST, scope:Scope=None):
-        self.name = name
+    def __init__(self, args:List[Arg], bargs:List[BArg], body:AST, scope:Scope=None):
         self.args = args
         self.bargs = bargs
         self.body = body
@@ -90,11 +91,14 @@ class Function(AST):
         return self.body.eval(fscope)
 
     def __str__(self, indent=0):
-        s = tab * indent + f'Function({self.name})\n'
+        s = tab * indent + f'Function()\n'
         s += tab * (indent + 1) + f'args: {self.args}\n'
         s += tab * (indent + 1) + f'bargs: {self.bargs}\n'
         s += self.body.__str__(indent + 1)
         return s
+
+    def __repr__(self):
+        return f'Function(args:{self.args}, bargs:{self.bargs}, body:{self.body}, scope:{self.scope})'
 
 builtins = {
     'print': partial(print, end=''),
@@ -102,11 +106,10 @@ builtins = {
     'readl': input
 }
 class Builtin(AST):
-    def __init__(self, name:str, args:List[Arg], bargs:List[BArg], scope:Scope=None):
+    def __init__(self, name:str, args:List[Arg], bargs:List[BArg]):
         self.name = name
         self.args = args
         self.bargs = bargs
-        self.scope = scope
     def eval(self, scope:Scope=None):
         if self.name in builtins:
             f = builtins[self.name]
@@ -125,9 +128,23 @@ class Builtin(AST):
     def __repr__(self):
         return f'Builtin({self.name}, {self.args}, {self.bargs})'
 
-root.set('print', Builtin('print', ['text'], [], root))
-root.set('printl', Builtin('printl', ['text'], [], root))
-root.set('readl', Builtin('readl', [], [], root))
+root.set('print', Builtin('print', ['text'], []))
+root.set('printl', Builtin('printl', ['text'], []))
+root.set('readl', Builtin('readl', [], []))
+
+
+class Bind(AST):
+    def __init__(self, name:str, value:AST):
+        self.name = name
+        self.value = value
+    def eval(self, scope:Scope=None):
+        scope.set(self.name, self.value)
+
+    def __str__(self, indent=0):
+        return f'{tab * indent}Bind: {self.name}\n{self.value.__str__(indent + 1)}'
+
+    def __repr__(self):
+        return f'Bind({self.name}, {repr(self.value)})'
 
 
 class Block(AST):
@@ -164,23 +181,24 @@ class Call(AST):
         scope.attach_args(self.args, self.bargs)
 
         if scope is not None:
-            try:
-                return scope.get(self.name).eval(scope)
-            except:
-                pdb.set_trace()
+            return scope.get(self.name).eval(scope)
         else:
             raise Exception(f'no scope provided for `{self.name}`')
 
     def __str__(self, indent=0):
-        s = tab * indent + 'Call: ' + self.name + '\n'
-        for arg in self.args:
-            s += arg.__str__(indent + 1) + '\n'
+        s = tab * indent + 'Call: ' + self.name
+        if len(self.args) > 0 or len(self.bargs) > 0:
+            s += '\n'
+            for arg in self.args:
+                s += arg.__str__(indent + 1) + '\n'
+            for a, v in self.bargs:
+                s += tab * (indent + 1) + f'{a}={v}\n'
         return s
 
     def __repr__(self):
-        return f'Call({self.name}, {repr(self.args)})'
+        return f'Call({self.name}, {repr(self.args)}, {repr(self.bargs)})'
 
-class Text(AST):
+class String(AST):
     def __init__(self, val:str):
         self.val = val
     def eval(self, scope:Scope=None):
@@ -188,53 +206,89 @@ class Text(AST):
     def __str__(self, indent=0):
         return f'{tab * indent}String: `{self.val}`'
     def __repr__(self):
-        return f'Text({repr(self.val)})'
+        return f'String({repr(self.val)})'
 
-class String(AST):
+class IString(AST):
     def __init__(self, parts:List[AST]):
         #convenience convert any str to Text
-        self.parts = [Text(part) if isinstance(part, str) else part for part in parts]
+        # self.parts = [String(part) if isinstance(part, str) else part for part in parts]
+        self.parts = parts
 
     def eval(self, scope:Scope=None):
         return ''.join(part.eval(scope) for part in self.parts)
 
     def __str__(self, indent=0):
-        s = tab * indent + 'String\n'
+        s = tab * indent + 'IString\n'
         for part in self.parts:
             s += part.__str__(indent + 1) + '\n'
         return s
 
     def __repr__(self):
-        return f'String({repr(self.parts)})'
+        return f'IString({repr(self.parts)})'
 
-class Bind(AST):
-    def __init__(self, name:str, value:AST):
-        self.name = name
-        self.value = value
+class Number(AST):
+    def __init__(self, val):
+        self.val = val
     def eval(self, scope:Scope=None):
-        scope.set(self.name, self.value)
-
+        return self.val
     def __str__(self, indent=0):
-        return f'{tab * indent}Bind: {self.name}\n{self.value.__str__(indent + 1)}'
-
+        return f'{tab * indent}Number: {self.val}'
     def __repr__(self):
-        return f'Bind({self.name}, {repr(self.value)})'
+        return f'Number({repr(self.val)})'
+
+class Vector(AST):
+    def __init__(self, vals:List[AST]):
+        self.vals = vals
+    def eval(self, scope:Scope=None):
+        return [v.eval(scope) for v in self.vals]
+    def __str__(self, indent=0):
+        s = tab * indent + 'Vector\n'
+        for v in self.vals:
+            s += v.__str__(indent + 1) + '\n'
+        return s
+    def __repr__(self):
+        return f'Vector({repr(self.vals)})'
 
 def main():
+    #Hello, World!
     prog0 = Block([
-        Call('printl', [Text('Hello, World!')]),
+        Call('printl', [String('Hello, World!')]),
     ])
-    print(prog0)
+    # print(prog0)
     prog0.eval(root)
 
-    scope1 = Scope(root)
+    #Hello <name>!
     prog1 = Block([
-        Call('print', [Text("What's your name? ")]),
+        Call('print', [String("What's your name? ")]),
         Bind('name', Call('readl')),
-        Call('printl', [String(['Hello ', Call('name'), '!'])]),
+        Call('printl', [IString([String('Hello '), Call('name'), String('!')])]),
     ])
-    print(prog1)
-    prog1.eval(scope1)
+    # print(prog1)
+    prog1.eval(root)
+
+    #rule 110
+    #TODO: handle type annotations in AST
+    prog2 = Block([
+        Bind(
+            'update_world', 
+            Function(['world'], [], Block([ #'world' should be type: vector<bit>
+                Bind('cell_update', Number(0)),
+                # loop i in 0..world.length
+                #     if i >? 0 world[i-1] = cell_update
+                #     update = (0b01110110 << (((world[i-1] ?? 0) << 2) or ((world[i] ?? 0) << 1) or (world[i+1] ?? 0)))
+                # world.push(update)
+                #etc....
+            ]), root)
+        ),
+        Bind(
+            'world', #TODO: should be type: vector<bit>
+            Vector([Number(1)])
+        ),
+        # loop true
+        #     printl(world)
+        #     update(world)
+    ])
+    prog2.eval(root)
 
 if __name__ == '__main__':
     main()
