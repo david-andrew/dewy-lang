@@ -2,11 +2,11 @@
 // rule 110 would grow the vector from the front, so instead we reverse everything for efficiency
 // for now use parenthesis where precedence filter needed. eventually should be able to remove with precedence filter
 
-update_world = world: vector<bit> => {
-    cell_update: bit = 0
+progress = world: vector<bit> => {
+    update: bit = 0
     loop i in 0..world.length
     {
-        if i >? 0 world[i-1] = cell_update
+        if i >? 0 world[i-1] = update //TODO: #notfirst or #iters[1..]
         update = (0b01110110 << (((world[i-1] ?? 0) << 2) or ((world[i] ?? 0) << 1) or (world[i+1] ?? 0)))
     }
     world.push(update)
@@ -16,5 +16,5 @@ world: vector<bit> = [1]
 loop true
 {
     printl(world)
-    update(world)
+    progress(world)
 }
