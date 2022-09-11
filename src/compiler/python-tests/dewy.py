@@ -322,11 +322,12 @@ def main():
                 # world.push(update)
                 #etc....
             ]), root),
-            Type('vector', Type('bit'))
+            # Type('function', [Type('vector', [Type('bit')]), Type('vector', [Type('bit')])]),
         ),
         Bind(
-            'world', #TODO: should be type: vector<bit>
-            Vector([Number(1)])
+            'world',
+            Vector([Number(1)]),
+            Type('vector', [Type('bit')])
         ),
         # loop true
         #     printl(world)
