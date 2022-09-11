@@ -20,6 +20,8 @@ class AST(ABC):
         raise NotImplementedError(f'{self.__class__.__name__}.eval')
     def comp(self, scope:'Scope'=None):
         raise NotImplementedError(f'{self.__class__.__name__}.comp')
+    def type(self, scope:'Scope'=None):
+        raise NotImplementedError(f'{self.__class__.__name__}.type')
     #TODO: other methods, e.g. semantic analysis
     def __str__(self, indent=0) -> str:
         raise NotImplementedError(f'{self.__class__.__name__}.__str__')
@@ -37,6 +39,7 @@ class Scope():
             parents = [parents]
         self.parents = parents
         self.vars = {}
+        self.types = {}
 
     def get(self, name:str) -> AST:
         if name in self.vars:
@@ -46,8 +49,15 @@ class Scope():
                 return p.vars[name]
         raise NameError(f'{name} not found in scope {self}')
 
-    def set(self, name:str, val:AST):
+    def set(self, name:str, val:AST, T:type=None):
         self.vars[name] = val
+        # if T is not None:
+        #     #TODO: check that val is of type T
+        #     self.types[name] = T
+        #     assert val.type() is T
+        # if name not in self.types:
+        #     self.types[name] = T
+        # else:
 
     def __repr__(self):
         if len(self.parents) > 0:
@@ -72,6 +82,27 @@ def merge_scopes(*scopes:List[Scope], onto:Scope=None):
     #TODO... this probably could actually be a scope union class that inherits from Scope
     #            that way we don't have to copy the scopes
     pdb.set_trace()
+
+class Type(AST):
+    def __init__(self, name:str, params:List[AST]):
+        self.name = name
+        self.params = params
+    def eval(self, scope:Scope=None):
+        return self
+
+    def __str__(self, indent=0):
+        s = tab * indent + f'Type: {self.name}\n'
+        for p in self.params:
+            s += p.__str__(indent + 1) + '\n'
+        return s
+
+    def __repr__(self):
+        if len(self.params) > 0:
+            return f'{self.name}<{", ".join(map(str, self.params))}>'
+        return self.name
+
+    # def __repr__(self):
+        # return f'Type({self.name}, {self.params})'
 
 
 
@@ -134,10 +165,22 @@ root.set('readl', Builtin('readl', [], []))
 
 
 class Bind(AST):
-    def __init__(self, name:str, value:AST):
+    def __init__(self, name:str, value:AST, type:Type=None):
         self.name = name
         self.value = value
+        self.type = type
     def eval(self, scope:Scope=None):
+        #TODO: 
+        # 1. check if name was already typed/new type is compatible
+        # 2. check if value is compatible with type
+        #if name doesn't exist in scope (or parents scope)
+        #  use given type
+        #else if given type is none, 
+        #  use existing type
+        #else
+        #  overwrite existing type with new type? alternatively this is an error...
+        #  also need to figure out let/const bindings.../ how they play with simple bindings
+
         scope.set(self.name, self.value)
 
     def __str__(self, indent=0):
@@ -278,7 +321,8 @@ def main():
                 #     update = (0b01110110 << (((world[i-1] ?? 0) << 2) or ((world[i] ?? 0) << 1) or (world[i+1] ?? 0)))
                 # world.push(update)
                 #etc....
-            ]), root)
+            ]), root),
+            Type('vector', Type('bit'))
         ),
         Bind(
             'world', #TODO: should be type: vector<bit>
