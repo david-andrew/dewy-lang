@@ -100,7 +100,7 @@ class Type(AST):
         return s
 
     def __str__(self):
-        if len(self.params) > 0:
+        if self.params is not None and len(self.params) > 0:
             return f'{self.name}<{", ".join(map(str, self.params))}>'
         return self.name
 
@@ -336,7 +336,13 @@ class IString(AST):
         return s
 
     def __str__(self):
-        return f'"{"".join(map(str, self.parts))}"'
+        s = ''
+        for part in self.parts:
+            if isinstance(part, String):
+                s += part.val
+            else:
+                s += f'{{{part}}}'
+        return f'"{s}"'
 
     def __repr__(self):
         return f'IString({repr(self.parts)})'
@@ -374,7 +380,7 @@ def hello():
 
     #set up root scope with some functions
     root = Scope() #highest level of scope, mainly for builtins
-    root.set('readl', Builtin('readl', []))
+    root.set('printl', Builtin('printl', [Arg('text')]))
 
     #Hello, World!
     prog0 = Block([
@@ -437,6 +443,7 @@ def rule110():
         #     printl(world)
         #     update(world)
     ])
+    # print(prog2)
     prog2.eval(root)
 
 
@@ -444,5 +451,5 @@ def rule110():
 
 if __name__ == '__main__':
     # hello()
-    hello_name()
-    # rule110()
+    # hello_name()
+    rule110()
