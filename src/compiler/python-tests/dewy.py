@@ -423,15 +423,19 @@ def rule110():
     #TODO: handle type annotations in AST
     prog2 = Block([
         Bind(
-            'update_world', 
-            Function([Arg('world')], Block([ #'world' should be type: vector<bit>
-                Bind('cell_update', Number(0)),
-                # loop i in 0..world.length
-                #     if i >? 0 world[i-1] = cell_update
-                #     update = (0b01110110 << (((world[i-1] ?? 0) << 2) or ((world[i] ?? 0) << 1) or (world[i+1] ?? 0)))
-                # world.push(update)
-                #etc....
-            ]), root),
+            'progress', 
+            Function(
+                [Arg('world', Type('vector', [Type('bit')]))], 
+                Block([
+                    Bind('cell_update', Number(0)),
+                    # loop i in 0..world.length
+                    #     if i >? 0 world[i-1] = cell_update
+                    #     update = (0b01110110 << (((world[i-1] ?? 0) << 2) or ((world[i] ?? 0) << 1) or (world[i+1] ?? 0)))
+                    # world.push(update)
+                    #etc....
+                ]), 
+                root
+            ),
             # Type('function', [Type('vector', [Type('bit')]), Type('vector', [Type('bit')])]),
         ),
         Let('world', Type('vector', [Type('bit')])),
