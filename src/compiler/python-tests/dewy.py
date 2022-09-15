@@ -41,6 +41,11 @@ class Scope():
         self.vars = {}
         self.types = {}
 
+    def let(self, name:str, type:'Type'=None, const=False):
+        pdb.set_trace()
+        #set the type for the name
+
+
     def get(self, name:str) -> AST:
         if name in self.vars:
             return self.vars[name]
@@ -49,15 +54,12 @@ class Scope():
                 return p.vars[name]
         raise NameError(f'{name} not found in scope {self}')
 
-    def set(self, name:str, val:AST, T:type=None):
+    def set(self, name:str, val:AST):
+        #check to ensure that `name` already has some type? or we can allow this and just default to `any` type
+        #type of val must match existing type on `name`
+        #also check to ensure that `name` is not const
         self.vars[name] = val
-        # if T is not None:
-        #     #TODO: check that val is of type T
-        #     self.types[name] = T
-        #     assert val.type() is T
-        # if name not in self.types:
-        #     self.types[name] = T
-        # else:
+        
 
     def __repr__(self):
         if len(self.parents) > 0:
@@ -75,7 +77,6 @@ class Scope():
         for a, v in bargs:
             self.set(a, v)
 
-root = Scope() #highest level of scope, mainly for builtins
 
 
 def merge_scopes(*scopes:List[Scope], onto:Scope=None):
@@ -84,7 +85,7 @@ def merge_scopes(*scopes:List[Scope], onto:Scope=None):
     pdb.set_trace()
 
 class Type(AST):
-    def __init__(self, name:str, params:List[AST]):
+    def __init__(self, name:str, params:List[AST]=None):
         self.name = name
         self.params = params
     def eval(self, scope:Scope=None):
@@ -159,16 +160,26 @@ class Builtin(AST):
     def __repr__(self):
         return f'Builtin({self.name}, {self.args}, {self.bargs})'
 
-root.set('print', Builtin('print', ['text'], []))
-root.set('printl', Builtin('printl', ['text'], []))
-root.set('readl', Builtin('readl', [], []))
 
+class Let(AST):
+    def __init__(self, name:str, type:Type, const=False):
+        self.name = name
+        self.type = type
+        self.const = const
+
+    def eval(self, scope:Scope=None):
+        scope.let(self.name, self.type, self.const)
+
+    def __str__(self, indent=0):
+        return f'{tab * indent}Let: {self.name}\n{self.type.__str__(indent + 1)}'
+
+    def __repr__(self):
+        return f'Let({self.name}, {self.type})'
 
 class Bind(AST):
-    def __init__(self, name:str, value:AST, type:Type=None):
+    def __init__(self, name:str, value:AST):
         self.name = name
         self.value = value
-        self.type = type
     def eval(self, scope:Scope=None):
         #TODO: 
         # 1. check if name was already typed/new type is compatible
@@ -293,6 +304,14 @@ class Vector(AST):
         return f'Vector({repr(self.vals)})'
 
 def main():
+
+    #set up root scope with some functions
+    root = Scope() #highest level of scope, mainly for builtins
+    root.set('print', Builtin('print', ['text'], []))
+    root.set('printl', Builtin('printl', ['text'], []))
+    root.set('readl', Builtin('readl', [], []))
+
+
     #Hello, World!
     prog0 = Block([
         Call('printl', [String('Hello, World!')]),
@@ -324,10 +343,10 @@ def main():
             ]), root),
             # Type('function', [Type('vector', [Type('bit')]), Type('vector', [Type('bit')])]),
         ),
+        Let('world', Type('vector', [Type('bit')])),
         Bind(
             'world',
             Vector([Number(1)]),
-            Type('vector', [Type('bit')])
         ),
         # loop true
         #     printl(world)

@@ -2,8 +2,8 @@
 // rule 110 would grow the vector from the front, so instead we reverse everything for efficiency
 // for now use parenthesis where precedence filter needed. eventually should be able to remove with precedence filter
 
-progress = world: vector<bit> => {
-    update: bit = 0
+progress = world:vector<bit> => {
+    update:bit = 0
     loop i in 0..world.length
     {
         if i >? 0 world[i-1] = update //TODO: #notfirst or #iters[1..]

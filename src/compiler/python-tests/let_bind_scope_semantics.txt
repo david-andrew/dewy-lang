@@ -1,0 +1,50 @@
+//scope vs variable let/bind/etc semantics
+
+
+
+///// What scope gets updated/created /////
+//Version 1:
+let w = 10          //outer scope
+{
+    w = 5           //updates outer scope
+    let w = 2       //local scope shadowing outer scope
+    let w = 'apple' //local scope overwriting local scope + shadowing outer scope
+    z = 10          //error since z has never been declared
+    let z = 10      //local scope
+}
+
+//Version 2:
+let w = 10          //outer scope
+{
+    w = 5           //updates outer scope
+    let w = 2       //local scope shadowing outer scope
+    let w = 'apple' //local scope overwriting local scope + shadowing outer scope
+    z = 10          //local scope z with type `any`
+    {
+        z = 10      //updates local scope z
+        let z = 10  //inner scope shadowing local scope
+    }
+    let z = 10      //local scope
+}
+
+
+// keywords for variable vs constant
+let p = 10
+const q = 10
+
+
+
+///// Changing/setting the type of a variable /////
+a:int = 5
+b:vector<int> = [1 2 3]
+c = 'apple' //defaults to type:any
+
+a = 10                  //works
+a = "hello"             //error
+a:string = "hello"      //works
+
+b = [1 2 3 4]           //works
+b = [1 2 3 "hello"]     //error
+b:vector<int|string> = [1 2 3 "hello"] //works
+
+c = 10                  //works since c was not given a type
