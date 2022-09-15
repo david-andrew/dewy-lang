@@ -3,23 +3,14 @@
 
 
 ///// What scope gets updated/created /////
-//Version 1:
+x = 'apple'         //outer scope x with no type
+y:bool = true       //outer scope y with type `bool`
 let w = 10          //outer scope
 {
     w = 5           //updates outer scope
     let w = 2       //local scope shadowing outer scope
     let w = 'apple' //local scope overwriting local scope + shadowing outer scope
-    z = 10          //error since z has never been declared
-    let z = 10      //local scope
-}
-
-//Version 2:
-let w = 10          //outer scope
-{
-    w = 5           //updates outer scope
-    let w = 2       //local scope shadowing outer scope
-    let w = 'apple' //local scope overwriting local scope + shadowing outer scope
-    z = 10          //local scope z with type `any`
+    z = 10          //local scope z with no type
     {
         z = 10      //updates local scope z
         let z = 10  //inner scope shadowing local scope

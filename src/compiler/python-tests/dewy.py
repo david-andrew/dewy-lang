@@ -23,15 +23,17 @@ class AST(ABC):
     def type(self, scope:'Scope'=None):
         raise NotImplementedError(f'{self.__class__.__name__}.type')
     #TODO: other methods, e.g. semantic analysis
-    def __str__(self, indent=0) -> str:
+    def treestr(self, indent=0) -> str:
+        raise NotImplementedError(f'{self.__class__.__name__}.treestr')
+    def __str__(self) -> str:
         raise NotImplementedError(f'{self.__class__.__name__}.__str__')
     def __repr__(self):
         raise NotImplementedError(f'{self.__class__.__name__}.__repr__')
 
 
-Arg = str                #name of an argument
-BArg = Tuple[Arg, AST]   #bound argument + current value
+
 tab = '    ' #for printing ASTs
+BArg = Tuple[str, AST]   #bound argument + current value for when making function calls
 
 class Scope():
     def __init__(self, parents:'Scope'|List['Scope']=[]):
@@ -71,18 +73,18 @@ class Scope():
         s.vars = self.vars.copy()
         return s
 
-    def attach_args(self, args:List[Arg], bargs:List[BArg]):
+    #TODO:consider having a custom space in a scope for storing current call arguments...
+    def attach_args(self, args:List[AST], bargs:List[BArg]): 
         for i, a in enumerate(args):
             self.set(f'.{i}', a)
         for a, v in bargs:
             self.set(a, v)
 
-
-
 def merge_scopes(*scopes:List[Scope], onto:Scope=None):
     #TODO... this probably could actually be a scope union class that inherits from Scope
     #            that way we don't have to copy the scopes
     pdb.set_trace()
+
 
 class Type(AST):
     def __init__(self, name:str, params:List[AST]=None):
@@ -91,26 +93,45 @@ class Type(AST):
     def eval(self, scope:Scope=None):
         return self
 
-    def __str__(self, indent=0):
+    def treestr(self, indent=0):
         s = tab * indent + f'Type: {self.name}\n'
         for p in self.params:
             s += p.__str__(indent + 1) + '\n'
         return s
 
-    def __repr__(self):
+    def __str__(self):
         if len(self.params) > 0:
             return f'{self.name}<{", ".join(map(str, self.params))}>'
         return self.name
 
-    # def __repr__(self):
-        # return f'Type({self.name}, {self.params})'
+    def __repr__(self):
+        return f'Type({self.name}, {self.params})'
 
+class Arg:
+    def __init__(self, name:str, type:Type=None, val:AST=None):
+        self.name = name
+        self.val = val
+        self.type = type
+    def __str__(self):
+        s = f'{self.name}'
+        if self.type is not None:
+            s += f':{repr(self.type)}'
+        if self.val is not None:
+            s += f' = {repr(self.val)}'
+        return s
+    def __repr__(self):
+        s = f'Arg({self.name}'
+        if self.type is not None:
+            s += f', {repr(self.type)}'
+        if self.val is not None:
+            s += f', {repr(self.val)}'
+        s += ')'
+        return s
 
 
 class Function(AST):
-    def __init__(self, args:List[Arg], bargs:List[BArg], body:AST, scope:Scope=None):
+    def __init__(self, args:List[Arg], body:AST, scope:Scope=None):
         self.args = args
-        self.bargs = bargs
         self.body = body
         self.scope = scope #scope where the function was defined, which may be different from the scope where it is called
     def eval(self, scope:Scope=None):
@@ -122,15 +143,28 @@ class Function(AST):
             fscope.set(a, v)
         return self.body.eval(fscope)
 
-    def __str__(self, indent=0):
+    def treestr(self, indent=0):
         s = tab * indent + f'Function()\n'
-        s += tab * (indent + 1) + f'args: {self.args}\n'
-        s += tab * (indent + 1) + f'bargs: {self.bargs}\n'
-        s += self.body.__str__(indent + 1)
+        for arg in self.args:
+            s += tab * (indent + 1) + f'Arg: {arg.name}\n'
+            if arg.type is not None:
+                s += arg.type.treestr(indent + 2) + '\n'
+            if arg.val is not None:
+                s += arg.val.treestr(indent + 2) + '\n'
+        s += tab*(indent+1) + 'Body:\n' + self.body.treestr(indent + 2)
+        return s
+
+    def __str__(self):
+        s = ''
+        if len(self.args) == 1:
+            s += f'{self.args[0]}'
+        else:
+            s += f'({", ".join(map(str, self.args))})'
+        s += f' => {self.body}'
         return s
 
     def __repr__(self):
-        return f'Function(args:{self.args}, bargs:{self.bargs}, body:{self.body}, scope:{self.scope})'
+        return f'Function(args:{self.args}, body:{self.body}, scope:{self.scope})'
 
 builtins = {
     'print': partial(print, end=''),
@@ -138,27 +172,33 @@ builtins = {
     'readl': input
 }
 class Builtin(AST):
-    def __init__(self, name:str, args:List[Arg], bargs:List[BArg]):
+    def __init__(self, name:str, args:List[Arg]):
         self.name = name
         self.args = args
-        self.bargs = bargs
     def eval(self, scope:Scope=None):
         if self.name in builtins:
             f = builtins[self.name]
-            args = [scope.get(f'.{i}').eval(scope) for i, a in enumerate(self.args)]
-            kwargs = {a: v.eval(scope) for a, v in self.bargs}
+            args = [scope.get(f'.{i}').eval(scope) for i, a in enumerate(self.args) if a.val is None]
+            kwargs = {a: a.val.eval(scope) for a in self.args if a.val is not None}
             return f(*args, **kwargs)
         else:
             raise NameError(self.name, 'is not a builtin')
 
-    def __str__(self, indent=0):
+    def treestr(self, indent=0):
         s = tab * indent + f'Builtin({self.name})\n'
-        s += tab * (indent + 1) + f'args: {self.args}\n'
-        s += tab * (indent + 1) + f'bargs: {self.bargs}\n'
+        for arg in self.args:
+            s += tab * (indent + 1) + f'Arg: {arg.name}\n'
+            if arg.type is not None:
+                s += arg.type.treestr(indent + 2) + '\n'
+            if arg.val is not None:
+                s += arg.val.treestr(indent + 2) + '\n'
         return s
 
+    def __str__(self):
+        return f'{self.name}({", ".join(map(str, self.args))})'
+
     def __repr__(self):
-        return f'Builtin({self.name}, {self.args}, {self.bargs})'
+        return f'Builtin({self.name}, {self.args})'
 
 
 class Let(AST):
@@ -170,11 +210,15 @@ class Let(AST):
     def eval(self, scope:Scope=None):
         scope.let(self.name, self.type, self.const)
 
-    def __str__(self, indent=0):
-        return f'{tab * indent}Let: {self.name}\n{self.type.__str__(indent + 1)}'
+    def treestr(self, indent=0):
+        return f'{tab * indent}{"Const" if self.const else "Let"}: {self.name}\n{self.type.treestr(indent + 1)}'
+
+    def __str__(self):
+        return f'{"const" if self.const else "let"} {self.name}:{self.type}'
 
     def __repr__(self):
-        return f'Let({self.name}, {self.type})'
+        return f'{"Const" if self.const else "Let"}({self.name}, {self.type})'
+
 
 class Bind(AST):
     def __init__(self, name:str, value:AST):
@@ -194,8 +238,11 @@ class Bind(AST):
 
         scope.set(self.name, self.value)
 
-    def __str__(self, indent=0):
-        return f'{tab * indent}Bind: {self.name}\n{self.value.__str__(indent + 1)}'
+    def treestr(self, indent=0):
+        return f'{tab * indent}Bind: {self.name}\n{self.value.treestr(indent + 1)}'
+
+    def __str__(self):
+        return f'{self.name} = {self.value}'
 
     def __repr__(self):
         return f'Bind({self.name}, {repr(self.value)})'
@@ -208,12 +255,15 @@ class Block(AST):
         for expr in self.exprs:
             expr.eval(scope)
 
-    def __str__(self, indent=0):
+    def treestr(self, indent=0):
         """print each expr on its own line, indented"""
         s = tab * indent + 'Block\n'
         for expr in self.exprs:
             s += expr.__str__(indent + 1)
         return s
+
+    def __str__(self):
+        return f'{{{" ".join(map(str, self.exprs))}}}'
 
     def __repr__(self):
         return f'Block({repr(self.exprs)})'
@@ -239,15 +289,21 @@ class Call(AST):
         else:
             raise Exception(f'no scope provided for `{self.name}`')
 
-    def __str__(self, indent=0):
+    def treestr(self, indent=0):
         s = tab * indent + 'Call: ' + self.name
         if len(self.args) > 0 or len(self.bargs) > 0:
             s += '\n'
             for arg in self.args:
-                s += arg.__str__(indent + 1) + '\n'
+                s += arg.treestr(indent + 1) + '\n'
             for a, v in self.bargs:
                 s += tab * (indent + 1) + f'{a}={v}\n'
         return s
+
+    def __str__(self):
+        arglist = ', '.join(map(str, self.args))
+        barglist = ', '.join(f'{a}={v}' for a, v in self.bargs)
+        args = arglist + (', ' if arglist and barglist else '') + barglist
+        return f'{self.name}({args})'
 
     def __repr__(self):
         return f'Call({self.name}, {repr(self.args)}, {repr(self.bargs)})'
@@ -257,8 +313,10 @@ class String(AST):
         self.val = val
     def eval(self, scope:Scope=None):
         return self.val
-    def __str__(self, indent=0):
+    def treestr(self, indent=0):
         return f'{tab * indent}String: `{self.val}`'
+    def __str__(self):
+        return f'"{self.val}"'
     def __repr__(self):
         return f'String({repr(self.val)})'
 
@@ -271,11 +329,14 @@ class IString(AST):
     def eval(self, scope:Scope=None):
         return ''.join(part.eval(scope) for part in self.parts)
 
-    def __str__(self, indent=0):
+    def treestr(self, indent=0):
         s = tab * indent + 'IString\n'
         for part in self.parts:
-            s += part.__str__(indent + 1) + '\n'
+            s += part.treestr(indent + 1) + '\n'
         return s
+
+    def __str__(self):
+        return f'"{"".join(map(str, self.parts))}"'
 
     def __repr__(self):
         return f'IString({repr(self.parts)})'
@@ -285,8 +346,10 @@ class Number(AST):
         self.val = val
     def eval(self, scope:Scope=None):
         return self.val
-    def __str__(self, indent=0):
+    def treestr(self, indent=0):
         return f'{tab * indent}Number: {self.val}'
+    def __str__(self):
+        return f'{self.val}'
     def __repr__(self):
         return f'Number({repr(self.val)})'
 
@@ -295,11 +358,13 @@ class Vector(AST):
         self.vals = vals
     def eval(self, scope:Scope=None):
         return [v.eval(scope) for v in self.vals]
-    def __str__(self, indent=0):
+    def treestr(self, indent=0):
         s = tab * indent + 'Vector\n'
         for v in self.vals:
-            s += v.__str__(indent + 1) + '\n'
+            s += v.treestr(indent + 1) + '\n'
         return s
+    def __str__(self):
+        return f'[{" ".join(map(str, self.vals))}]'
     def __repr__(self):
         return f'Vector({repr(self.vals)})'
 
@@ -307,9 +372,9 @@ def main():
 
     #set up root scope with some functions
     root = Scope() #highest level of scope, mainly for builtins
-    root.set('print', Builtin('print', ['text'], []))
-    root.set('printl', Builtin('printl', ['text'], []))
-    root.set('readl', Builtin('readl', [], []))
+    root.set('print', Builtin('print', [Arg('text')]))
+    root.set('printl', Builtin('printl', [Arg('text')]))
+    root.set('readl', Builtin('readl', []))
 
 
     #Hello, World!
@@ -333,7 +398,7 @@ def main():
     prog2 = Block([
         Bind(
             'update_world', 
-            Function(['world'], [], Block([ #'world' should be type: vector<bit>
+            Function([Arg('world')], Block([ #'world' should be type: vector<bit>
                 Bind('cell_update', Number(0)),
                 # loop i in 0..world.length
                 #     if i >? 0 world[i-1] = cell_update
