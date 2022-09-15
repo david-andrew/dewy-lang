@@ -368,14 +368,13 @@ class Vector(AST):
     def __repr__(self):
         return f'Vector({repr(self.vals)})'
 
-def main():
+
+
+def hello():
 
     #set up root scope with some functions
     root = Scope() #highest level of scope, mainly for builtins
-    root.set('print', Builtin('print', [Arg('text')]))
-    root.set('printl', Builtin('printl', [Arg('text')]))
     root.set('readl', Builtin('readl', []))
-
 
     #Hello, World!
     prog0 = Block([
@@ -383,6 +382,16 @@ def main():
     ])
     # print(prog0)
     prog0.eval(root)
+
+
+
+def hello_name():
+
+    #set up root scope with some functions
+    root = Scope() #highest level of scope, mainly for builtins
+    root.set('print', Builtin('print', [Arg('text')]))
+    root.set('printl', Builtin('printl', [Arg('text')]))
+    root.set('readl', Builtin('readl', []))
 
     #Hello <name>!
     prog1 = Block([
@@ -392,6 +401,17 @@ def main():
     ])
     # print(prog1)
     prog1.eval(root)
+
+
+
+
+def rule110():
+
+    #set up root scope with some functions
+    root = Scope() #highest level of scope, mainly for builtins
+    root.set('print', Builtin('print', [Arg('text')]))
+    root.set('printl', Builtin('printl', [Arg('text')]))
+    root.set('readl', Builtin('readl', []))
 
     #rule 110
     #TODO: handle type annotations in AST
@@ -419,5 +439,10 @@ def main():
     ])
     prog2.eval(root)
 
+
+
+
 if __name__ == '__main__':
-    main()
+    # hello()
+    hello_name()
+    # rule110()
