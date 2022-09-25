@@ -42,10 +42,14 @@ class Scope():
         self.parents = parents
         self.vars = {}
         self.types = {}
+        self.consts = {}
 
     def let(self, name:str, type:'Type'=None, const=False):
-        pdb.set_trace()
         #set the type for the name
+        if name in self.vars:
+            self.vars[name] = None
+        self.types[name] = type
+        self.consts[name] = const
 
 
     def get(self, name:str) -> AST:
@@ -347,6 +351,61 @@ class IString(AST):
     def __repr__(self):
         return f'IString({repr(self.parts)})'
 
+class Equal(AST):
+    def __init__(self, left:AST, right:AST):
+        self.left = left
+        self.right = right
+    def eval(self, scope:Scope=None):
+        return self.left.eval(scope) == self.right.eval(scope)
+    def treestr(self, indent=0):
+        return f'{tab * indent}Equal\n{self.left.treestr(indent + 1)}\n{self.right.treestr(indent + 1)}'
+    def __str__(self):
+        return f'{self.left} =? {self.right}'
+    def __repr__(self):
+        return f'Equal({repr(self.left)}, {repr(self.right)})'
+
+class Bool(AST):
+    def __init__(self, val:bool):
+        self.val = val
+    def eval(self, scope:Scope=None):
+        return self.val
+    def treestr(self, indent=0):
+        return f'{tab * indent}Bool: {self.val}'
+    def __str__(self):
+        return f'{self.val}'
+    def __repr__(self):
+        return f'Bool({repr(self.val)})'
+
+class If(AST):
+    def __init__(self, clauses:List[Tuple[AST, AST]]):
+        self.clauses = clauses
+    
+    def eval(self, scope:Scope=None):
+        for cond, expr in self.clauses:
+            if cond.eval(scope):
+                return expr.eval(scope)
+
+    def treestr(self, indent=0):
+        s = tab * indent + 'If\n'
+        for cond, expr in self.clauses:
+            s += tab * (indent + 1) + 'Clause\n'
+            s += cond.treestr(indent + 2) + '\n'
+            s += expr.treestr(indent + 2) + '\n'
+        return s
+
+    def __str__(self):
+        s = ''
+        for i, (cond, expr) in enumerate(self.clauses):
+            if i == 0:
+                s += f'if {cond} {expr}'
+            else:
+                s += f' else if {cond} {expr}'
+        return s
+
+    def __repr__(self):
+        return f'If({repr(self.clauses)})'
+
+
 class Number(AST):
     def __init__(self, val):
         self.val = val
@@ -410,6 +469,34 @@ def hello_name():
 
 
 
+def if_else():
+
+    #set up root scope with some functions
+    root = Scope() #highest level of scope, mainly for builtins
+    root.set('print', Builtin('print', [Arg('text')]))
+    root.set('printl', Builtin('printl', [Arg('text')]))
+    root.set('readl', Builtin('readl', []))
+
+    #Hello <name>!
+    prog2 = Block([
+        Call('print', [String("What's your name? ")]),
+        Bind('name', Call('readl')),
+        If([
+            (
+                Equal(Call('name'), String('Alice')),
+                Call('printl', [String('Hello Alice!')])
+            ),
+            (
+                Bool(True),
+                Call('printl', [String('Hello Stranger!')]),
+            )
+        ])
+    ])
+    # print(prog2)
+    prog2.eval(root)
+
+
+
 
 def rule110():
 
@@ -456,4 +543,5 @@ def rule110():
 if __name__ == '__main__':
     # hello()
     # hello_name()
-    rule110()
+    if_else()
+    # rule110()
