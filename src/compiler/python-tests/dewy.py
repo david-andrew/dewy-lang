@@ -1,6 +1,6 @@
 from abc import ABC
 from collections import namedtuple
-from typing import List, Tuple
+from typing import Any, List, Tuple, Callable as PyCallable
 from functools import partial
 
 import pdb
@@ -16,20 +16,33 @@ def notimplemented():
     raise NotImplementedError()
 
 class AST(ABC):
-    def eval(self, scope:'Scope'=None):
+    def eval(self, scope:'Scope'=None) -> 'AST': #TODO: handle returning none as creating an undefined AST
+        """Evaluate the AST in the given scope, and return the result (as a dewy obj) if any"""
         raise NotImplementedError(f'{self.__class__.__name__}.eval')
+    def topy(self, scope:'Scope'=None) -> Any:
+        """Convert the AST to a python equivalent object (usually unboxing the dewy object)"""
+        raise NotImplementedError(f'{self.__class__.__name__}.topy')
     def comp(self, scope:'Scope'=None):
+        """TODO: future handle compiling an AST to LLVM IR"""
         raise NotImplementedError(f'{self.__class__.__name__}.comp')
     def type(self, scope:'Scope'=None):
+        """Return the type of the object that would be returned by eval"""
         raise NotImplementedError(f'{self.__class__.__name__}.type')
     #TODO: other methods, e.g. semantic analysis
     def treestr(self, indent=0) -> str:
+        """Return a string representation of the AST tree"""
         raise NotImplementedError(f'{self.__class__.__name__}.treestr')
     def __str__(self) -> str:
+        """Return a string representation of the AST as dewy code"""
         raise NotImplementedError(f'{self.__class__.__name__}.__str__')
     def __repr__(self):
+        """Return a string representation of the python objects making up the AST"""
         raise NotImplementedError(f'{self.__class__.__name__}.__repr__')
 
+class Callable(AST):
+    def call(self, scope:'Scope'=None):
+        """Call the callable in the given scope"""
+        raise NotImplementedError(f'{self.__class__.__name__}.call')
 
 
 tab = '    ' #for printing ASTs
@@ -79,6 +92,8 @@ class Scope():
 
     #TODO:consider having a custom space in a scope for storing current call arguments...
     def attach_args(self, args:List[AST], bargs:List[BArg]): 
+        #TODO: args should have a separate parameter in the scope, e.g. self.args/self.bargs
+        #      that way we can't have a name collision, e.g. if a function and barg have the same name
         for i, a in enumerate(args):
             self.set(f'.{i}', a)
         for a, v in bargs:
@@ -133,12 +148,16 @@ class Arg:
         return s
 
 
-class Function(AST):
+class Function(Callable):
     def __init__(self, args:List[Arg], body:AST, scope:Scope=None):
         self.args = args
         self.body = body
         self.scope = scope #scope where the function was defined, which may be different from the scope where it is called
+    
     def eval(self, scope:Scope=None):
+        return self
+    
+    def call(self, scope:Scope=None):
         #collect args from calling scope, and merge into function scope
         fscope = self.scope.copy()
         for i, a in enumerate(self.args):
@@ -175,16 +194,23 @@ builtins = {
     'printl': print,
     'readl': input
 }
-class Builtin(AST):
-    def __init__(self, name:str, args:List[Arg]):
+class Builtin(Callable):
+    def __init__(self, name:str, args:List[Arg], cls:PyCallable=None):
         self.name = name
         self.args = args
+        self.cls = cls
+    
     def eval(self, scope:Scope=None):
+        return self
+    
+    def call(self, scope:Scope=None):
         if self.name in builtins:
             f = builtins[self.name]
-            args = [scope.get(f'.{i}').eval(scope) for i, a in enumerate(self.args) if a.val is None]
-            kwargs = {a: a.val.eval(scope) for a in self.args if a.val is not None}
-            return f(*args, **kwargs)
+            args = [scope.get(f'.{i}').eval(scope).topy(scope) for i, a in enumerate(self.args) if a.val is None]
+            kwargs = {a: a.val.eval(scope).topy(scope) for a in self.args if a.val is not None}
+            result = f(*args, **kwargs)
+            if self.cls is not None:
+                return self.cls(result)
         else:
             raise NameError(self.name, 'is not a builtin')
 
@@ -239,8 +265,7 @@ class Bind(AST):
         #else
         #  overwrite existing type with new type? alternatively this is an error...
         #  also need to figure out let/const bindings.../ how they play with simple bindings
-
-        scope.set(self.name, self.value)
+        scope.set(self.name, self.value.eval(scope))
 
     def treestr(self, indent=0):
         return f'{tab * indent}Bind: {self.name}\n{self.value.treestr(indent + 1)}'
@@ -256,8 +281,13 @@ class Block(AST):
     def __init__(self, exprs:List[AST]):
         self.exprs = exprs
     def eval(self, scope:Scope=None):
+        #TODO: handle flow control from a block, e.g. return, break, continue, express, etc.
         for expr in self.exprs:
+            # print(scope)
+            # if isinstance(expr, Call):
+            #     pdb.set_trace()
             expr.eval(scope)
+        #TODO: return Undefined if nothing is returned
 
     def treestr(self, indent=0):
         """print each expr on its own line, indented"""
@@ -279,19 +309,21 @@ class Call(AST):
         self.args = args
         self.bargs = bargs
 
-    def eval(self, scope:Scope=None):
+    def eval(self, scope:Scope):
         #make a fresh scope we can modify, and attach the calling args to it
         #TODO: maybe we could replace this with a view of the merged scopes. e.g. some sort of Scope union class...
-        if scope is None:
-            scope = Scope()
-        else:
-            scope = scope.copy()
+        # if scope is None:
+            # scope = Scope() #TODO: also, does this even make sense? can you ever call something if there was no scope which would contain it?
+        # else:
+        scope = scope.copy()
         scope.attach_args(self.args, self.bargs)
 
-        if scope is not None:
-            return scope.get(self.name).eval(scope)
+        #TODO: depending on the type, do different things
+        #functions get called with args, while everything else just gets evaluated/returned
+        if isinstance(scope.get(self.name), Callable):
+            return scope.get(self.name).call(scope)
         else:
-            raise Exception(f'no scope provided for `{self.name}`')
+            return scope.get(self.name)
 
     def treestr(self, indent=0):
         s = tab * indent + 'Call: ' + self.name
@@ -316,6 +348,8 @@ class String(AST):
     def __init__(self, val:str):
         self.val = val
     def eval(self, scope:Scope=None):
+        return self
+    def topy(self, scope:Scope=None) -> str:
         return self.val
     def treestr(self, indent=0):
         return f'{tab * indent}String: `{self.val}`'
@@ -331,7 +365,10 @@ class IString(AST):
         self.parts = parts
 
     def eval(self, scope:Scope=None):
-        return ''.join(part.eval(scope) for part in self.parts)
+        return self
+
+    def topy(self, scope:Scope=None):
+        return ''.join(part.eval(scope).topy(scope) for part in self.parts)
 
     def treestr(self, indent=0):
         s = tab * indent + 'IString\n'
@@ -356,7 +393,7 @@ class Equal(AST):
         self.left = left
         self.right = right
     def eval(self, scope:Scope=None):
-        return self.left.eval(scope) == self.right.eval(scope)
+        return Bool(self.left.eval(scope).topy() == self.right.eval(scope).topy())
     def treestr(self, indent=0):
         return f'{tab * indent}Equal\n{self.left.treestr(indent + 1)}\n{self.right.treestr(indent + 1)}'
     def __str__(self):
@@ -368,6 +405,8 @@ class Bool(AST):
     def __init__(self, val:bool):
         self.val = val
     def eval(self, scope:Scope=None):
+        return self
+    def topy(self, scope:Scope=None):
         return self.val
     def treestr(self, indent=0):
         return f'{tab * indent}Bool: {self.val}'
@@ -382,7 +421,7 @@ class If(AST):
     
     def eval(self, scope:Scope=None):
         for cond, expr in self.clauses:
-            if cond.eval(scope):
+            if cond.eval(scope).topy(scope):
                 return expr.eval(scope)
 
     def treestr(self, indent=0):
@@ -410,6 +449,8 @@ class Number(AST):
     def __init__(self, val):
         self.val = val
     def eval(self, scope:Scope=None):
+        return self
+    def topy(self, scope:Scope=None):
         return self.val
     def treestr(self, indent=0):
         return f'{tab * indent}Number: {self.val}'
@@ -422,6 +463,8 @@ class Vector(AST):
     def __init__(self, vals:List[AST]):
         self.vals = vals
     def eval(self, scope:Scope=None):
+        return self
+    def topy(self, scope:Scope=None):
         return [v.eval(scope) for v in self.vals]
     def treestr(self, indent=0):
         s = tab * indent + 'Vector\n'
@@ -456,7 +499,7 @@ def hello_name():
     root = Scope() #highest level of scope, mainly for builtins
     root.set('print', Builtin('print', [Arg('text')]))
     root.set('printl', Builtin('printl', [Arg('text')]))
-    root.set('readl', Builtin('readl', []))
+    root.set('readl', Builtin('readl', [], String))
 
     #Hello <name>!
     prog1 = Block([
@@ -475,9 +518,9 @@ def if_else():
     root = Scope() #highest level of scope, mainly for builtins
     root.set('print', Builtin('print', [Arg('text')]))
     root.set('printl', Builtin('printl', [Arg('text')]))
-    root.set('readl', Builtin('readl', []))
+    root.set('readl', Builtin('readl', [], String))
 
-    #Hello <name>!
+    #if name =? 'Alice' then print 'Hello Alice!' else print 'Hello stranger!'
     prog2 = Block([
         Call('print', [String("What's your name? ")]),
         Bind('name', Call('readl')),
@@ -496,6 +539,43 @@ def if_else():
     prog2.eval(root)
 
 
+def if_else_if():
+
+    #set up root scope with some functions
+    root = Scope() #highest level of scope, mainly for builtins
+    root.set('print', Builtin('print', [Arg('text')]))
+    root.set('printl', Builtin('printl', [Arg('text')]))
+    root.set('readl', Builtin('readl', [], String))
+
+
+    #name = readl()
+    #if name =? 'Alice' 
+    #   printl('Hello Alice!') 
+    #else if name =? 'Bob' 
+    #   printl('Hello Bob!')
+    #else
+    #   print('Hello stranger!')
+    prog3 = Block([
+        Call('print', [String("What's your name? ")]),
+        Bind('name', Call('readl')),
+        If([
+            (
+                Equal(Call('name'), String('Alice')),
+                Call('printl', [String('Hello Alice!')])
+            ),
+            (
+                Equal(Call('name'), String('Bob')),
+                Call('printl', [String('Hello Bob!')])
+            ),
+            (
+                Bool(True),
+                Call('printl', [String('Hello Stranger!')]),
+            )
+        ])
+    ])
+    # print(prog3)
+    prog3.eval(root)
+
 
 
 def rule110():
@@ -504,7 +584,7 @@ def rule110():
     root = Scope() #highest level of scope, mainly for builtins
     root.set('print', Builtin('print', [Arg('text')]))
     root.set('printl', Builtin('printl', [Arg('text')]))
-    root.set('readl', Builtin('readl', []))
+    root.set('readl', Builtin('readl', [], String))
 
     #rule 110
     #TODO: handle type annotations in AST
@@ -543,5 +623,6 @@ def rule110():
 if __name__ == '__main__':
     # hello()
     # hello_name()
-    if_else()
+    # if_else()
+    if_else_if()
     # rule110()
