@@ -1,6 +1,7 @@
 from abc import ABC
-from collections import namedtuple
-from typing import Any, List, Tuple, Callable as PyCallable
+from collections import defaultdict, namedtuple
+from dataclasses import dataclass
+from typing import Any, List, Tuple, Callable as PyCallable, Union
 from functools import partial
 
 import pdb
@@ -16,7 +17,7 @@ def notimplemented():
     raise NotImplementedError()
 
 class AST(ABC):
-    def eval(self, scope:'Scope'=None) -> 'AST': #TODO: handle returning none as creating an undefined AST
+    def eval(self, scope:'Scope'=None) -> 'AST':
         """Evaluate the AST in the given scope, and return the result (as a dewy obj) if any"""
         raise NotImplementedError(f'{self.__class__.__name__}.eval')
     def topy(self, scope:'Scope'=None) -> Any:
@@ -44,41 +45,73 @@ class Callable(AST):
         """Call the callable in the given scope"""
         raise NotImplementedError(f'{self.__class__.__name__}.call')
 
+class Undefined(AST):
+    def __init__(self):
+        pass
+    def eval(self, scope:'Scope'=None):
+        return self
+    def topy(self, scope:'Scope'=None):
+        return None
+    def treesr(self, indent=0):
+        return tab * indent + 'Undefined'
+    def __str__(self):
+        return 'undefined'
+    def __repr__(self):
+        return 'Undefined()'
+
+undefined = Undefined() #singleton instance of undefined
 
 tab = '    ' #for printing ASTs
 BArg = Tuple[str, AST]   #bound argument + current value for when making function calls
 
 class Scope():
+    
+    @dataclass
+    class _var():
+        # name:str #name is stored in the dict key
+        type:AST
+        value:AST
+        const:bool
+    
     def __init__(self, parents:'Scope'|List['Scope']=[]):
         if isinstance(parents, Scope):
             parents = [parents]
         self.parents = parents
-        self.vars = {}
-        self.types = {}
-        self.consts = {}
+        self.vars = {} #defaultdict(lambda: Scope._var(undefined, undefined, False)) #default dict would cause more bugs, e.g. from mispelling a variable name
 
-    def let(self, name:str, type:'Type'=None, const=False):
-        #set the type for the name
-        if name in self.vars:
-            self.vars[name] = None
-        self.types[name] = type
-        self.consts[name] = const
+    def let(self, name:str, type:'Type'=undefined, value:AST=undefined, const=False):
+        #overwrite anything that might have previously been there
+        self.vars[name] = Scope._var(type, value, const)
 
 
     def get(self, name:str) -> AST:
         if name in self.vars:
-            return self.vars[name]
+            return self.vars[name].value
         for p in self.parents: #TODO: may need to iterate in reverse to get same behavior as merging parent scopes
             if name in p.vars:
-                return p.vars[name]
+                return p.vars[name].value
         raise NameError(f'{name} not found in scope {self}')
 
-    def set(self, name:str, val:AST):
-        #check to ensure that `name` already has some type? or we can allow this and just default to `any` type
-        #type of val must match existing type on `name`
-        #also check to ensure that `name` is not const
-        self.vars[name] = val
+    def bind(self, name:str, value:AST):
+
+        #update an existing variable in this scope
+        if name in self.vars:
+            var = self.vars[name]
+            assert not var.const, f'cannot assign to const {name}'
+            assert Type.compatible(var.type, value.type()), f'cannot assign {value}:{value.type()} to {name}:{var.type}'
+            self.vars[name].value = value
+            return
         
+        #update an existing variable in any of the parent scopes
+        for p in self.parents:
+            if name in p.vars:
+                assert not self.vars[name].const, f'cannot assign to const {name}'
+                assert Type.compatible(var.type, value.type()), f'cannot assign {value}:{value.type()} to {name}:{var.type}'
+                p.vars[name].value = value
+                return
+
+        #otherwise just create a new instance of the variable
+        self.vars[name] = Scope._var(undefined, value, False)
 
     def __repr__(self):
         if len(self.parents) > 0:
@@ -95,9 +128,9 @@ class Scope():
         #TODO: args should have a separate parameter in the scope, e.g. self.args/self.bargs
         #      that way we can't have a name collision, e.g. if a function and barg have the same name
         for i, a in enumerate(args):
-            self.set(f'.{i}', a)
+            self.bind(f'.{i}', a)
         for a, v in bargs:
-            self.set(a, v)
+            self.bind(a, v)
 
 def merge_scopes(*scopes:List[Scope], onto:Scope=None):
     #TODO... this probably could actually be a scope union class that inherits from Scope
@@ -125,6 +158,25 @@ class Type(AST):
 
     def __repr__(self):
         return f'Type({self.name}, {self.params})'
+
+    def __eq__(self, other):
+        if isinstance(other, Type):
+            return self.name == other.name and self.params == other.params
+        return False
+    
+    @staticmethod
+    def compatible(rule:AST, candidate:AST) -> bool:
+        assert isinstance(rule, Type) or rule is undefined, f'rule must be a Type or undefined, not {rule}'
+        assert isinstance(candidate, Type) or candidate is undefined, f'candidate must be a Type or undefined, not {candidate}'
+        if rule == undefined:
+            return True
+        if rule == candidate:
+            return True
+        
+        #TODO: check type graph for compatibility
+        # pdb.set_trace()
+
+        return False
 
 class Arg:
     def __init__(self, name:str, type:Type=None, val:AST=None):
@@ -161,9 +213,9 @@ class Function(Callable):
         #collect args from calling scope, and merge into function scope
         fscope = self.scope.copy()
         for i, a in enumerate(self.args):
-            fscope.set(a, scope.get(f'.{i}'))
+            fscope.bind(a, scope.get(f'.{i}'))
         for a, v in self.bargs:
-            fscope.set(a, v)
+            fscope.bind(a, v)
         return self.body.eval(fscope)
 
     def treestr(self, indent=0):
@@ -232,13 +284,14 @@ class Builtin(Callable):
 
 
 class Let(AST):
-    def __init__(self, name:str, type:Type, const=False):
+    def __init__(self, name:str, type:Type, value:AST=undefined, const=False):
         self.name = name
         self.type = type
+        self.value = value
         self.const = const
 
     def eval(self, scope:Scope=None):
-        scope.let(self.name, self.type, self.const)
+        scope.let(self.name, self.type, self.value, self.const)
 
     def treestr(self, indent=0):
         return f'{tab * indent}{"Const" if self.const else "Let"}: {self.name}\n{self.type.treestr(indent + 1)}'
@@ -265,7 +318,7 @@ class Bind(AST):
         #else
         #  overwrite existing type with new type? alternatively this is an error...
         #  also need to figure out let/const bindings.../ how they play with simple bindings
-        scope.set(self.name, self.value.eval(scope))
+        scope.bind(self.name, self.value.eval(scope))
 
     def treestr(self, indent=0):
         return f'{tab * indent}Bind: {self.name}\n{self.value.treestr(indent + 1)}'
@@ -482,7 +535,7 @@ def hello():
 
     #set up root scope with some functions
     root = Scope() #highest level of scope, mainly for builtins
-    root.set('printl', Builtin('printl', [Arg('text')]))
+    root.bind('printl', Builtin('printl', [Arg('text')]))
 
     #Hello, World!
     prog0 = Block([
@@ -497,9 +550,9 @@ def hello_name():
 
     #set up root scope with some functions
     root = Scope() #highest level of scope, mainly for builtins
-    root.set('print', Builtin('print', [Arg('text')]))
-    root.set('printl', Builtin('printl', [Arg('text')]))
-    root.set('readl', Builtin('readl', [], String))
+    root.bind('print', Builtin('print', [Arg('text')]))
+    root.bind('printl', Builtin('printl', [Arg('text')]))
+    root.bind('readl', Builtin('readl', [], String))
 
     #Hello <name>!
     prog1 = Block([
@@ -516,9 +569,9 @@ def if_else():
 
     #set up root scope with some functions
     root = Scope() #highest level of scope, mainly for builtins
-    root.set('print', Builtin('print', [Arg('text')]))
-    root.set('printl', Builtin('printl', [Arg('text')]))
-    root.set('readl', Builtin('readl', [], String))
+    root.bind('print', Builtin('print', [Arg('text')]))
+    root.bind('printl', Builtin('printl', [Arg('text')]))
+    root.bind('readl', Builtin('readl', [], String))
 
     #if name =? 'Alice' then print 'Hello Alice!' else print 'Hello stranger!'
     prog2 = Block([
@@ -543,9 +596,9 @@ def if_else_if():
 
     #set up root scope with some functions
     root = Scope() #highest level of scope, mainly for builtins
-    root.set('print', Builtin('print', [Arg('text')]))
-    root.set('printl', Builtin('printl', [Arg('text')]))
-    root.set('readl', Builtin('readl', [], String))
+    root.bind('print', Builtin('print', [Arg('text')]))
+    root.bind('printl', Builtin('printl', [Arg('text')]))
+    root.bind('readl', Builtin('readl', [], String))
 
 
     #name = readl()
@@ -582,9 +635,9 @@ def rule110():
 
     #set up root scope with some functions
     root = Scope() #highest level of scope, mainly for builtins
-    root.set('print', Builtin('print', [Arg('text')]))
-    root.set('printl', Builtin('printl', [Arg('text')]))
-    root.set('readl', Builtin('readl', [], String))
+    root.bind('print', Builtin('print', [Arg('text')]))
+    root.bind('printl', Builtin('printl', [Arg('text')]))
+    root.bind('readl', Builtin('readl', [], String))
 
     #rule 110
     #TODO: handle type annotations in AST
