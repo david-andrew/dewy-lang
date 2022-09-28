@@ -1,6 +1,7 @@
 from abc import ABC
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass
+from types import NoneType
 from typing import Any, List, Tuple, Callable as PyCallable, Union
 from functools import partial
 
@@ -77,7 +78,11 @@ class Scope():
         if isinstance(parents, Scope):
             parents = [parents]
         self.parents = parents
-        self.vars = {} #defaultdict(lambda: Scope._var(undefined, undefined, False)) #default dict would cause more bugs, e.g. from mispelling a variable name
+        self.vars = {}
+        
+        #used for function calls
+        self.args:List[AST] = [] 
+        self.bargs:List[BArg] = []
 
     def let(self, name:str, type:'Type'=undefined, value:AST=undefined, const=False):
         #overwrite anything that might have previously been there
@@ -123,14 +128,10 @@ class Scope():
         s.vars = self.vars.copy()
         return s
 
-    #TODO:consider having a custom space in a scope for storing current call arguments...
     def attach_args(self, args:List[AST], bargs:List[BArg]): 
-        #TODO: args should have a separate parameter in the scope, e.g. self.args/self.bargs
-        #      that way we can't have a name collision, e.g. if a function and barg have the same name
-        for i, a in enumerate(args):
-            self.bind(f'.{i}', a)
-        for a, v in bargs:
-            self.bind(a, v)
+        self.args = args
+        self.bargs = bargs
+
 
 def merge_scopes(*scopes:List[Scope], onto:Scope=None):
     #TODO... this probably could actually be a scope union class that inherits from Scope
@@ -212,10 +213,25 @@ class Function(Callable):
     def call(self, scope:Scope=None):
         #collect args from calling scope, and merge into function scope
         fscope = self.scope.copy()
-        for i, a in enumerate(self.args):
-            fscope.bind(a, scope.get(f'.{i}'))
-        for a, v in self.bargs:
-            fscope.bind(a, v)
+        
+        #TODO: this probably doesn't handle when the named vs unnamed call arguments are not exactly the same as defined
+        for arg in self.args:
+            if arg.val is None:
+                fscope.bind(arg.name, scope.args.pop(0))
+            else:
+                fscope.bind(arg.name, arg.val)
+        assert len(scope.args) == 0, f'not all arguments were used in function call {self}'
+        for name, val in scope.bargs:
+            assert name in [a.name for a in self.args], f'unknown argument {name} in function call {self}'
+            fscope.bind(name, val)
+        scope.bargs = []
+
+        #check that all unnamed args have values in the scope
+        #TODO: make this check more robust + better error messages
+        # for name in self.args[len(scope.args):]:
+        #     if name not in fscope.vars:
+        #         raise TypeError(f'function {self} missing argument {name}')
+
         return self.body.eval(fscope)
 
     def treestr(self, indent=0):
@@ -241,12 +257,12 @@ class Function(Callable):
     def __repr__(self):
         return f'Function(args:{self.args}, body:{self.body}, scope:{self.scope})'
 
-builtins = {
-    'print': partial(print, end=''),
-    'printl': print,
-    'readl': input
-}
 class Builtin(Callable):
+    funcs = {
+        'print': partial(print, end=''),
+        'printl': print,
+        'readl': input
+    }
     def __init__(self, name:str, args:List[Arg], cls:PyCallable=None):
         self.name = name
         self.args = args
@@ -256,10 +272,13 @@ class Builtin(Callable):
         return self
     
     def call(self, scope:Scope=None):
-        if self.name in builtins:
-            f = builtins[self.name]
-            args = [scope.get(f'.{i}').eval(scope).topy(scope) for i, a in enumerate(self.args) if a.val is None]
+        if self.name in Builtin.funcs:
+            f = Builtin.funcs[self.name]
+            #TODO: this doesn't handle differences in named vs unnamed args between the function definition and the call
+            args = [scope.args[i].eval(scope).topy(scope) for i, a in enumerate(self.args) if a.val is None]
             kwargs = {a: a.val.eval(scope).topy(scope) for a in self.args if a.val is not None}
+            for name, val in scope.bargs:
+                kwargs[name] = val.eval(scope).topy(scope)
             result = f(*args, **kwargs)
             if self.cls is not None:
                 return self.cls(result)
@@ -308,16 +327,6 @@ class Bind(AST):
         self.name = name
         self.value = value
     def eval(self, scope:Scope=None):
-        #TODO: 
-        # 1. check if name was already typed/new type is compatible
-        # 2. check if value is compatible with type
-        #if name doesn't exist in scope (or parents scope)
-        #  use given type
-        #else if given type is none, 
-        #  use existing type
-        #else
-        #  overwrite existing type with new type? alternatively this is an error...
-        #  also need to figure out let/const bindings.../ how they play with simple bindings
         scope.bind(self.name, self.value.eval(scope))
 
     def treestr(self, indent=0):
@@ -544,6 +553,28 @@ def hello():
     # print(prog0)
     prog0.eval(root)
 
+def hello_func():
+
+    #set up root scope with some functions
+    root = Scope() #highest level of scope, mainly for builtins
+    root.bind('printl', Builtin('printl', [Arg('text')]))
+
+    #Hello, World!
+    prog0 = Block([
+        Bind(
+            'main',
+            Function(
+                [],
+                Block([
+                    Call('printl', [String('Hello, World!')]),
+                ]),
+                root
+            )
+        ),
+        Call('main'),
+    ])
+    # print(prog0)
+    prog0.eval(root)
 
 
 def hello_name():
@@ -675,7 +706,8 @@ def rule110():
 
 if __name__ == '__main__':
     # hello()
+    hello_func()
     # hello_name()
     # if_else()
-    if_else_if()
+    # if_else_if()
     # rule110()
