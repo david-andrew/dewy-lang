@@ -24,10 +24,10 @@ class AST(ABC):
     def topy(self, scope:'Scope'=None) -> Any:
         """Convert the AST to a python equivalent object (usually unboxing the dewy object)"""
         raise NotImplementedError(f'{self.__class__.__name__}.topy')
-    def comp(self, scope:'Scope'=None):
+    def comp(self, scope:'Scope'=None) -> str:
         """TODO: future handle compiling an AST to LLVM IR"""
         raise NotImplementedError(f'{self.__class__.__name__}.comp')
-    def type(self, scope:'Scope'=None):
+    def type(self, scope:'Scope'=None) -> 'Type':
         """Return the type of the object that would be returned by eval"""
         raise NotImplementedError(f'{self.__class__.__name__}.type')
     #TODO: other methods, e.g. semantic analysis
@@ -37,7 +37,7 @@ class AST(ABC):
     def __str__(self) -> str:
         """Return a string representation of the AST as dewy code"""
         raise NotImplementedError(f'{self.__class__.__name__}.__str__')
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a string representation of the python objects making up the AST"""
         raise NotImplementedError(f'{self.__class__.__name__}.__repr__')
 
@@ -53,6 +53,8 @@ class Undefined(AST):
         return self
     def topy(self, scope:'Scope'=None):
         return None
+    def type(self, scope:'Scope'=None):
+        return Type('undefined')
     def treesr(self, indent=0):
         return tab * indent + 'Undefined'
     def __str__(self):
@@ -344,12 +346,10 @@ class Block(AST):
         self.exprs = exprs
     def eval(self, scope:Scope=None):
         #TODO: handle flow control from a block, e.g. return, break, continue, express, etc.
+        ret = Undefined()
         for expr in self.exprs:
-            # print(scope)
-            # if isinstance(expr, Call):
-            #     pdb.set_trace()
-            expr.eval(scope)
-        #TODO: return Undefined if nothing is returned
+            ret = expr.eval(scope)
+        return ret
 
     def treestr(self, indent=0):
         """print each expr on its own line, indented"""
@@ -422,12 +422,11 @@ class String(AST):
 
 class IString(AST):
     def __init__(self, parts:List[AST]):
-        #convenience convert any str to Text
-        # self.parts = [String(part) if isinstance(part, str) else part for part in parts]
         self.parts = parts
 
     def eval(self, scope:Scope=None):
-        return self
+        #convert self into a String()
+        return String(self.topy(scope))
 
     def topy(self, scope:Scope=None):
         return ''.join(part.eval(scope).topy(scope) for part in self.parts)
@@ -450,18 +449,65 @@ class IString(AST):
     def __repr__(self):
         return f'IString({repr(self.parts)})'
 
-class Equal(AST):
-    def __init__(self, left:AST, right:AST):
+class BinOp(AST):
+    def __init__(self, left:AST, right:AST, op:PyCallable[[AST, AST],AST], opname:str, opsymbol:str):
         self.left = left
         self.right = right
+        self.op = op
+        self.opname = opname
+        self.opsymbol = opsymbol
+
     def eval(self, scope:Scope=None):
-        return Bool(self.left.eval(scope).topy() == self.right.eval(scope).topy())
+        return self.op(self.left.eval(scope).topy(), self.right.eval(scope).topy())
     def treestr(self, indent=0):
-        return f'{tab * indent}Equal\n{self.left.treestr(indent + 1)}\n{self.right.treestr(indent + 1)}'
+        return f'{tab * indent}{self.opname}\n{self.left.treestr(indent + 1)}\n{self.right.treestr(indent + 1)}'
     def __str__(self):
-        return f'{self.left} =? {self.right}'
+        return f'{self.left} {self.opsymbol} {self.right}'
     def __repr__(self):
-        return f'Equal({repr(self.left)}, {repr(self.right)})'
+        return f'{self.opname}({repr(self.left)}, {repr(self.right)})'
+
+##################### Binary operators #####################
+class Equal(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Bool(l == r), 'Equal', '=?')
+
+class NotEqual(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Bool(l != r), 'NotEqual', 'not=?')
+
+class Less(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Bool(l < r), 'Less', '<?')
+
+class LessEqual(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Bool(l <= r), 'LessEqual', '<=?')
+
+class Greater(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Bool(l > r), 'Greater', '>?')
+
+class GreaterEqual(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Bool(l >= r), 'GreaterEqual', '>=?')
+
+class Add(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Number(l + r), 'Add', '+')
+
+class Sub(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Number(l - r), 'Sub', '-')
+
+# class Mul(BinOp):
+#     def __init__(self, left:AST, right:AST):
+#         super().__init__(left, right, lambda l, r: Number(l * r), 'Mul', '*')
+
+# class Div(BinOp):
+#     def __init__(self, left:AST, right:AST):
+#         super().__init__(left, right, lambda l, r: Number(l / r), 'Div', '/')
+
+
 
 class Bool(AST):
     def __init__(self, val:bool):
@@ -506,12 +552,32 @@ class If(AST):
     def __repr__(self):
         return f'If({repr(self.clauses)})'
 
+#TODO: maybe loop can work the say way as If, taking in a list of clauses?
+class Loop(AST):
+    def __init__(self, cond:AST, body:AST):
+        self.cond = cond
+        self.body = body
+
+    def eval(self, scope:Scope=None):
+        while self.cond.eval(scope).topy(scope):
+            self.body.eval(scope)
+
+    def treestr(self, indent=0):
+        return f'{tab * indent}Loop\n{self.cond.treestr(indent + 1)}\n{self.body.treestr(indent + 1)}'
+
+    def __str__(self):
+        return f'loop {self.cond} {self.body}'
+
+    def __repr__(self):
+        return f'Loop({repr(self.cond)}, {repr(self.body)})'
 
 class Number(AST):
     def __init__(self, val):
         self.val = val
     def eval(self, scope:Scope=None):
         return self
+    def type(self):
+        return Type('Number')
     def topy(self, scope:Scope=None):
         return self.val
     def treestr(self, indent=0):
@@ -553,6 +619,7 @@ def hello():
     # print(prog0)
     prog0.eval(root)
 
+
 def hello_func():
 
     #set up root scope with some functions
@@ -560,7 +627,7 @@ def hello_func():
     root.bind('printl', Builtin('printl', [Arg('text')]))
 
     #Hello, World!
-    prog0 = Block([
+    prog = Block([
         Bind(
             'main',
             Function(
@@ -573,8 +640,8 @@ def hello_func():
         ),
         Call('main'),
     ])
-    # print(prog0)
-    prog0.eval(root)
+    # print(prog)
+    prog.eval(root)
 
 
 def hello_name():
@@ -586,13 +653,13 @@ def hello_name():
     root.bind('readl', Builtin('readl', [], String))
 
     #Hello <name>!
-    prog1 = Block([
+    prog = Block([
         Call('print', [String("What's your name? ")]),
         Bind('name', Call('readl')),
         Call('printl', [IString([String('Hello '), Call('name'), String('!')])]),
     ])
-    # print(prog1)
-    prog1.eval(root)
+    # print(prog)
+    prog.eval(root)
 
 
 
@@ -605,7 +672,7 @@ def if_else():
     root.bind('readl', Builtin('readl', [], String))
 
     #if name =? 'Alice' then print 'Hello Alice!' else print 'Hello stranger!'
-    prog2 = Block([
+    prog = Block([
         Call('print', [String("What's your name? ")]),
         Bind('name', Call('readl')),
         If([
@@ -619,8 +686,8 @@ def if_else():
             )
         ])
     ])
-    # print(prog2)
-    prog2.eval(root)
+    # print(prog)
+    prog.eval(root)
 
 
 def if_else_if():
@@ -639,7 +706,7 @@ def if_else_if():
     #   printl('Hello Bob!')
     #else
     #   print('Hello stranger!')
-    prog3 = Block([
+    prog = Block([
         Call('print', [String("What's your name? ")]),
         Bind('name', Call('readl')),
         If([
@@ -657,9 +724,33 @@ def if_else_if():
             )
         ])
     ])
-    # print(prog3)
-    prog3.eval(root)
+    # print(prog)
+    prog.eval(root)
 
+
+def hello_loop():
+    
+        #set up root scope with some functions
+        root = Scope() #highest level of scope, mainly for builtins
+        root.bind('print', Builtin('print', [Arg('text')]))
+        root.bind('printl', Builtin('printl', [Arg('text')]))
+        root.bind('readl', Builtin('readl', [], String))
+
+        #print 'Hello <name>!' 10 times
+        prog = Block([
+            Call('print', [String("What's your name? ")]),
+            Bind('name', Call('readl')),
+            Bind('i', Number(0)),
+            Loop(
+                Less(Call('i'), Number(10)),
+                Block([
+                    Call('printl', [IString([String('Hello '), Call('name'), String('!')])]),
+                    Bind('i', Add(Call('i'), Number(1))),
+                ])
+            )
+        ])
+        # print(prog)
+        prog.eval(root)
 
 
 def rule110():
@@ -672,7 +763,7 @@ def rule110():
 
     #rule 110
     #TODO: handle type annotations in AST
-    prog2 = Block([
+    prog = Block([
         Bind(
             'progress', 
             Function(
@@ -698,16 +789,17 @@ def rule110():
         #     printl(world)
         #     update(world)
     ])
-    # print(prog2)
-    prog2.eval(root)
+    # print(prog)
+    prog.eval(root)
 
 
 
 
 if __name__ == '__main__':
     # hello()
-    hello_func()
+    # hello_func()
     # hello_name()
     # if_else()
     # if_else_if()
+    hello_loop()
     # rule110()
