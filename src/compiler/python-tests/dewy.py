@@ -46,6 +46,11 @@ class Callable(AST):
         """Call the callable in the given scope"""
         raise NotImplementedError(f'{self.__class__.__name__}.call')
 
+class Iterable(AST):
+    def iter(self, scope:'Scope'=None) -> 'Iter':
+        """Return an iterator over the iterable"""
+        raise NotImplementedError(f'{self.__class__.__name__}.iter')
+
 class Undefined(AST):
     def __init__(self):
         pass
@@ -77,6 +82,7 @@ class Scope():
         const:bool
     
     def __init__(self, parents:'Scope'|List['Scope']=[]):
+        #TODO: I think maybe having multiple parents should be disallowed. It's not really useful, and it makes things more complicated
         if isinstance(parents, Scope):
             parents = [parents]
         self.parents = parents
@@ -112,9 +118,10 @@ class Scope():
         #update an existing variable in any of the parent scopes
         for p in self.parents:
             if name in p.vars:
-                assert not self.vars[name].const, f'cannot assign to const {name}'
+                var = p.vars[name]
+                assert not var.const, f'cannot assign to const {name}'
                 assert Type.compatible(var.type, value.type()), f'cannot assign {value}:{value.type()} to {name}:{var.type}'
-                p.vars[name].value = value
+                var.value = value
                 return
 
         #otherwise just create a new instance of the variable
@@ -129,6 +136,12 @@ class Scope():
         s = Scope(self.parents)
         s.vars = self.vars.copy()
         return s
+
+    @staticmethod
+    def makechild(parent:Union['Scope',NoneType]) -> 'Scope':
+        """make a new child scope from a possibly None parent"""
+        return Scope(parent if parent else [])
+
 
     def attach_args(self, args:List[AST], bargs:List[BArg]): 
         self.args = args
@@ -491,13 +504,14 @@ class GreaterEqual(BinOp):
     def __init__(self, left:AST, right:AST):
         super().__init__(left, right, lambda l, r: Bool(l >= r), 'GreaterEqual', '>=?')
 
+#TODO: type of output should be based on types of the inputs
 class Add(BinOp):
     def __init__(self, left:AST, right:AST):
         super().__init__(left, right, lambda l, r: Number(l + r), 'Add', '+')
 
-class Sub(BinOp):
-    def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Number(l - r), 'Sub', '-')
+# class Sub(BinOp):
+#     def __init__(self, left:AST, right:AST):
+#         super().__init__(left, right, lambda l, r: Number(l - r), 'Sub', '-')
 
 # class Mul(BinOp):
 #     def __init__(self, left:AST, right:AST):
@@ -528,9 +542,12 @@ class If(AST):
         self.clauses = clauses
     
     def eval(self, scope:Scope=None):
+        # TODO: determine if scope should be shared, or a new scope should be created per clause
+        child = Scope.makechild(scope) #all clauses share a scope
         for cond, expr in self.clauses:
-            if cond.eval(scope).topy(scope):
-                return expr.eval(scope)
+            # child = Scope.makechild(scope) #each clause gets its own scope
+            if cond.eval(child).topy(child):
+                return expr.eval(child)
 
     def treestr(self, indent=0):
         s = tab * indent + 'If\n'
@@ -559,8 +576,12 @@ class Loop(AST):
         self.body = body
 
     def eval(self, scope:Scope=None):
-        while self.cond.eval(scope).topy(scope):
-            self.body.eval(scope)
+        child = Scope.makechild(scope)
+        while self.cond.eval(child).topy(child):
+            self.body.eval(child)
+        #TODO: handle capturing values from a loop
+        #TODO: handle break and continue
+        #TODO: also eventually handle return (problem for other ASTs as well)
 
     def treestr(self, indent=0):
         return f'{tab * indent}Loop\n{self.cond.treestr(indent + 1)}\n{self.body.treestr(indent + 1)}'
@@ -570,6 +591,58 @@ class Loop(AST):
 
     def __repr__(self):
         return f'Loop({repr(self.cond)}, {repr(self.body)})'
+
+#DEBUG example
+"""
+loop i in [0..10)
+    printl(i)
+
+//expanded version of above
+iter = [0..10).iter()
+let i
+loop {(cond, i) = iter.next(); cond} 
+    printl(i)
+
+//but ideally the entire iterator could be contained in the condition expression of the loop
+{
+    loop
+    (
+        // idempotent initialization here
+        #ifnotexists(iter) iter = [0..10).iter()
+        (cond, i) = iter.next()
+        cond
+    )
+    (
+        // condition and body share the same scope
+        printl(i)
+    )
+}
+"""
+class Iter(AST):
+    def __init__(self, init:AST, body:AST):
+        self._id = f'.iter_{id(self)}'
+        self.init = init
+        self.body = body
+
+    # def reset(self, scope:Scope=None):
+    #     pdb.set_trace()
+
+    def eval(self, scope:Scope=None) -> Bool:
+        try:
+            it = scope.get(self._id)
+            if it == undefined:
+                raise KeyError
+        except KeyError:
+            it = self.init.eval(scope)
+            scope.let(self._id, value=it, const=True)
+        #set variables in the scope
+        #returns Bool at each call to act as the condition for the loop
+        pdb.set_trace()
+
+        #if return if False, then reset the id variable
+        # scope.let(self._id)
+
+
 
 class Number(AST):
     def __init__(self, val):
@@ -796,10 +869,10 @@ def rule110():
 
 
 if __name__ == '__main__':
-    # hello()
-    # hello_func()
-    # hello_name()
-    # if_else()
-    # if_else_if()
+    hello()
+    hello_func()
+    hello_name()
+    if_else()
+    if_else_if()
     hello_loop()
     # rule110()
