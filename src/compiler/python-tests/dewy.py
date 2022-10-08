@@ -379,14 +379,9 @@ class Call(AST):
 
     def eval(self, scope:Scope):
         #make a fresh scope we can modify, and attach the calling args to it
-        #TODO: maybe we could replace this with a view of the merged scopes. e.g. some sort of Scope union class...
-        # if scope is None:
-            # scope = Scope() #TODO: also, does this even make sense? can you ever call something if there was no scope which would contain it?
-        # else:
         scope = scope.copy()
         scope.attach_args(self.args, self.bargs)
 
-        #TODO: depending on the type, do different things
         #functions get called with args, while everything else just gets evaluated/returned
         if isinstance(scope.get(self.name), Callable):
             return scope.get(self.name).call(scope)
