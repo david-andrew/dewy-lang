@@ -81,11 +81,8 @@ class Scope():
         value:AST
         const:bool
     
-    def __init__(self, parents:'Scope'|List['Scope']=[]):
-        #TODO: I think maybe having multiple parents should be disallowed. It's not really useful, and it makes things more complicated
-        if isinstance(parents, Scope):
-            parents = [parents]
-        self.parents = parents
+    def __init__(self, parent:Union['Scope',NoneType]=None):
+        self.parent = parent
         self.vars = {}
         
         #used for function calls
@@ -98,27 +95,18 @@ class Scope():
 
 
     def get(self, name:str) -> AST:
-        if name in self.vars:
-            return self.vars[name].value
-        for p in self.parents: #TODO: may need to iterate in reverse to get same behavior as merging parent scopes
-            if name in p.vars:
-                return p.vars[name].value
+        #get a variable from this scope or any of its parents
+        for s in self:
+            if name in s.vars:
+                return s.vars[name].value
         raise NameError(f'{name} not found in scope {self}')
 
     def bind(self, name:str, value:AST):
 
-        #update an existing variable in this scope
-        if name in self.vars:
-            var = self.vars[name]
-            assert not var.const, f'cannot assign to const {name}'
-            assert Type.compatible(var.type, value.type()), f'cannot assign {value}:{value.type()} to {name}:{var.type}'
-            self.vars[name].value = value
-            return
-        
-        #update an existing variable in any of the parent scopes
-        for p in self.parents:
-            if name in p.vars:
-                var = p.vars[name]
+        #update an existing variable in this scope or  any of the parent scopes
+        for s in self:
+            if name in s.vars:
+                var = s.vars[name]
                 assert not var.const, f'cannot assign to const {name}'
                 assert Type.compatible(var.type, value.type()), f'cannot assign {value}:{value.type()} to {name}:{var.type}'
                 var.value = value
@@ -127,25 +115,27 @@ class Scope():
         #otherwise just create a new instance of the variable
         self.vars[name] = Scope._var(undefined, value, False)
 
+    def __iter__(self):
+        """return an iterator that walks up each successive parent scope. Starts with self"""
+        s = self
+        while s is not None:
+            yield s
+            s = s.parent
+
     def __repr__(self):
         if len(self.parents) > 0:
             return f'Scope({self.vars}, {self.parents})'
         return f'Scope({self.vars})'
 
     def copy(self):
-        s = Scope(self.parents)
+        s = Scope(self.parent)
         s.vars = self.vars.copy()
         return s
-
-    @staticmethod
-    def makechild(parent:Union['Scope',NoneType]) -> 'Scope':
-        """make a new child scope from a possibly None parent"""
-        return Scope(parent if parent else [])
-
 
     def attach_args(self, args:List[AST], bargs:List[BArg]): 
         self.args = args
         self.bargs = bargs
+
 
 
 def merge_scopes(*scopes:List[Scope], onto:Scope=None):
@@ -355,10 +345,13 @@ class Bind(AST):
 
 
 class Block(AST):
-    def __init__(self, exprs:List[AST]):
+    def __init__(self, exprs:List[AST], newscope:bool=True):
         self.exprs = exprs
+        self.newscope = newscope
     def eval(self, scope:Scope=None):
         #TODO: handle flow control from a block, e.g. return, break, continue, express, etc.
+        if self.newscope:
+            scope = Scope(scope)
         ret = Undefined()
         for expr in self.exprs:
             ret = expr.eval(scope)
@@ -543,9 +536,9 @@ class If(AST):
     
     def eval(self, scope:Scope=None):
         # TODO: determine if scope should be shared, or a new scope should be created per clause
-        child = Scope.makechild(scope) #all clauses share a scope
+        child = Scope(scope) #all clauses share a common anonymous scope
         for cond, expr in self.clauses:
-            # child = Scope.makechild(scope) #each clause gets its own scope
+            # child = Scope(scope) #each clause gets its own anonymous scope
             if cond.eval(child).topy(child):
                 return expr.eval(child)
 
@@ -576,7 +569,7 @@ class Loop(AST):
         self.body = body
 
     def eval(self, scope:Scope=None):
-        child = Scope.makechild(scope)
+        child = Scope(scope)
         while self.cond.eval(child).topy(child):
             self.body.eval(child)
         #TODO: handle capturing values from a loop
