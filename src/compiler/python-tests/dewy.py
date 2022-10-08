@@ -67,7 +67,10 @@ class Undefined(AST):
     def __repr__(self):
         return 'Undefined()'
 
-undefined = Undefined() #singleton instance of undefined
+#make any further calls to Undefined() return the same singleton instance
+undefined = Undefined()
+Undefined.__new__ = lambda cls: undefined
+
 
 tab = '    ' #for printing ASTs
 BArg = Tuple[str, AST]   #bound argument + current value for when making function calls
@@ -174,7 +177,7 @@ class Type(AST):
     def compatible(rule:AST, candidate:AST) -> bool:
         assert isinstance(rule, Type) or rule is undefined, f'rule must be a Type or undefined, not {rule}'
         assert isinstance(candidate, Type) or candidate is undefined, f'candidate must be a Type or undefined, not {candidate}'
-        if rule == undefined:
+        if rule is undefined:
             return True
         if rule == candidate:
             return True
@@ -352,7 +355,7 @@ class Block(AST):
         #TODO: handle flow control from a block, e.g. return, break, continue, express, etc.
         if self.newscope:
             scope = Scope(scope)
-        ret = Undefined()
+        ret = undefined
         for expr in self.exprs:
             ret = expr.eval(scope)
         return ret
@@ -618,7 +621,7 @@ class Iter(AST):
     def eval(self, scope:Scope=None) -> Bool:
         try:
             it = scope.get(self._id)
-            if it == undefined:
+            if it is undefined:
                 raise KeyError
         except KeyError:
             it = self.init.eval(scope)
