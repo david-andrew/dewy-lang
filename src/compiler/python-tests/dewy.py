@@ -425,7 +425,23 @@ class Unpack(AST):
         return f'{tab * indent}Unpack: {self.struct}\n{self.value.treestr(indent + 1)}'
 
     def __str__(self):
-        return f'{self.struct} = {self.value}'
+        return f'{Unpack.str_helper(self.struct)} = {self.value}'
+
+    @staticmethod
+    def str_helper(val):
+        if isinstance(val, str):
+            return val
+        else:
+            s = '['
+            for i, v in enumerate(val):
+                if isinstance(v, str):
+                    s += v
+                else:
+                    s += Unpack.str_helper(v)
+                if i != len(val) - 1:
+                    s += ', '
+            s += ']'
+            return s
 
     def __repr__(self):
         return f'Unpack({self.struct}, {self.value})'
@@ -490,7 +506,7 @@ class Call(AST):
         arglist = ', '.join(map(str, self.args))
         barglist = ', '.join(f'{a}={v}' for a, v in self.bargs)
         args = arglist + (', ' if arglist and barglist else '') + barglist
-        return f'{self.name}({args})'
+        return f'{self.name}({args})' if args else f'{self.name}'
 
     def __repr__(self):
         return f'Call({self.name}, {repr(self.args)}, {repr(self.bargs)})'
