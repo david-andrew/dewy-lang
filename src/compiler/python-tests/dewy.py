@@ -1,11 +1,12 @@
 from abc import ABC
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass
-from types import NoneType
-from typing import Any, List, Tuple, Callable as PyCallable, Union
+from types import NoneType, EllipsisType
+from typing import Any, List, Tuple as PyTuple, Callable as PyCallable, Union
 from functools import partial
 
 import pdb
+import typing
 
 #Written in python3.10
 
@@ -51,6 +52,22 @@ class Iterable(AST):
         """Return an iterator over the iterable"""
         raise NotImplementedError(f'{self.__class__.__name__}.iter')
 
+class Iter(AST):
+    def next(self, scope:'Scope'=None):# -> Tuple[AST,AST]: #TODO: TBD on the return type. need dewy tuple type...
+        """Get the next item from the iterator"""
+        raise NotImplementedError(f'{self.__class__.__name__}.next')
+
+class Unpackable(AST):
+    def len(self, scope:'Scope'=None) -> int:
+        """Return the length of the unpackable"""
+        raise NotImplementedError(f'{self.__class__.__name__}.len')
+    def get(self, key:int|EllipsisType|slice|PyTuple[int|EllipsisType|slice], scope:'Scope'=None) -> AST:
+        """Return the item at the given index"""
+        raise NotImplementedError(f'{self.__class__.__name__}.get')
+#TODO: make a type annotation for Unpackable[N] where N is the number of items in the unpackable?
+#        would maybe replace the len property?
+
+
 class Undefined(AST):
     def __init__(self):
         pass
@@ -73,7 +90,7 @@ Undefined.__new__ = lambda cls: undefined
 
 
 tab = '    ' #for printing ASTs
-BArg = Tuple[str, AST]   #bound argument + current value for when making function calls
+BArg = PyTuple[str, AST]   #bound argument + current value for when making function calls
 
 class Scope():
     
@@ -126,8 +143,8 @@ class Scope():
             s = s.parent
 
     def __repr__(self):
-        if len(self.parents) > 0:
-            return f'Scope({self.vars}, {self.parents})'
+        if self.parent is not None:
+            return f'Scope({self.vars}, {repr(self.parent)})'
         return f'Scope({self.vars})'
 
     def copy(self):
@@ -140,11 +157,11 @@ class Scope():
         self.bargs = bargs
 
 
-
-def merge_scopes(*scopes:List[Scope], onto:Scope=None):
-    #TODO... this probably could actually be a scope union class that inherits from Scope
-    #            that way we don't have to copy the scopes
-    pdb.set_trace()
+#probably won't use this, except possibly for when calling functions and providing enums from the function's scope
+# def merge_scopes(*scopes:List[Scope], onto:Scope=None):
+#     #TODO... this probably could actually be a scope union class that inherits from Scope
+#     #            that way we don't have to copy the scopes
+#     pdb.set_trace()
 
 
 class Type(AST):
@@ -331,6 +348,7 @@ class Let(AST):
 
 
 class Bind(AST):
+    #TODO: allow bind to take in an unpack structure
     def __init__(self, name:str, value:AST):
         self.name = name
         self.value = value
@@ -345,6 +363,59 @@ class Bind(AST):
 
     def __repr__(self):
         return f'Bind({self.name}, {repr(self.value)})'
+
+
+class PackStruct(List[Union[str,'PackStruct']]):
+    """
+    represents the type for left hand side of an unpack operation
+
+    unpacking operations in dewy look like this:
+    [a, b, c] = [1 2 3]                                         //a=1, b=2, c=3
+    [a, [b, c]] = [1 [2 3]]                                     //a=1, b=2, c=3
+    [a, [b, c], d] = [1 [2 3] 4]                                //a=1, b=2, c=3, d=4
+    [a, ...b] = [1 2 3 4]                                       //a=1, b=[2 3 4]
+    [a, ...b, c] = [1 2 3 4 5]                                  //a=1, b=[2 3 4], c=5
+    [a, ...b, [c, [...d, e, f]]] = [1 2 3 4 [5 [6 7 8 9 10]]]   //a=1, b=[2 3 4], c=5, d=[6 7 8], e=9, f=10
+
+    note that there may only be one ellipsis in a given level of the structure
+    """
+    ...
+
+
+
+class Unpack(AST):
+    def __init__(self, struct:PackStruct, value:Unpackable):
+        #check that there is only one ellipsis in the top level of the structure (lower levels are checked recursively)
+        #TODO: problem with checking lower levels recursively is that it is no longer a compile time check
+        assert sum(1 for s in struct if s.startswith('...')) <= 1, 'only one ellipsis is allowed per level of the structure'
+        self.struct = struct
+        self.value = value
+
+    def eval(self, scope:Scope=None):
+        value = self.value.eval(scope)
+        assert isinstance(value, Unpackable), f'{value} is not unpackable'
+        for i, s in enumerate(self.struct):
+            if isinstance(s, str):
+                if s.startswith('...'):
+                    n = len(self.struct) - i - 1 #number of elements after the ellipsis
+                    name = s[3:]
+                    scope.bind(name, value.get(slice(i,-n), scope))
+                else:
+                    scope.bind(s, value.get(i, scope))
+            elif isinstance(s, list):
+                Unpack(s, value.get(i, scope)).eval(scope)
+            else:
+                raise TypeError(f'invalid type in unpack structure: `{s}` of type `{type(s)}`')
+
+    def treestr(self, indent=0):
+        return f'{tab * indent}Unpack: {self.struct}\n{self.value.treestr(indent + 1)}'
+
+    def __str__(self):
+        return f'{self.struct} = {self.value}'
+
+    def __repr__(self):
+        return f'Unpack({self.struct}, {self.value})'
+
 
 
 class Block(AST):
@@ -364,7 +435,7 @@ class Block(AST):
         """print each expr on its own line, indented"""
         s = tab * indent + 'Block\n'
         for expr in self.exprs:
-            s += expr.__str__(indent + 1)
+            s += expr.treestr(indent + 1)
         return s
 
     def __str__(self):
@@ -433,7 +504,7 @@ class IString(AST):
         return String(self.topy(scope))
 
     def topy(self, scope:Scope=None):
-        return ''.join(part.eval(scope).topy(scope) for part in self.parts)
+        return ''.join(str(part.eval(scope).topy(scope)) for part in self.parts)
 
     def treestr(self, indent=0):
         s = tab * indent + 'IString\n'
@@ -500,9 +571,9 @@ class Add(BinOp):
     def __init__(self, left:AST, right:AST):
         super().__init__(left, right, lambda l, r: Number(l + r), 'Add', '+')
 
-# class Sub(BinOp):
-#     def __init__(self, left:AST, right:AST):
-#         super().__init__(left, right, lambda l, r: Number(l - r), 'Sub', '-')
+class Sub(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Number(l - r), 'Sub', '-')
 
 # class Mul(BinOp):
 #     def __init__(self, left:AST, right:AST):
@@ -529,7 +600,7 @@ class Bool(AST):
         return f'Bool({repr(self.val)})'
 
 class If(AST):
-    def __init__(self, clauses:List[Tuple[AST, AST]]):
+    def __init__(self, clauses:List[PyTuple[AST, AST]]):
         self.clauses = clauses
     
     def eval(self, scope:Scope=None):
@@ -609,29 +680,26 @@ loop {(cond, i) = iter.next(); cond}
     )
 }
 """
-class Iter(AST):
-    def __init__(self, init:AST, body:AST):
+#TODO: convert to class In()
+#  in basically does this, but has the extra stuff with the var being set, and so forth
+#class iter is the manager for things that can iterate, e.g. Range.iter()->RangeIter, Vector.iter()->VectorIter, etc.
+class In(AST):
+    #TODO: allow name to be an unpack structure as well
+    def __init__(self, name:str, iterable:Iterable):#, init:AST, body:AST):
         self._id = f'.iter_{id(self)}'
-        self.init = init
-        self.body = body
-
-    # def reset(self, scope:Scope=None):
-    #     pdb.set_trace()
+        # self.init = init
+        # self.body = body
 
     def eval(self, scope:Scope=None) -> Bool:
+        #idempotent initialization
         try:
             it = scope.get(self._id)
-            if it is undefined:
-                raise KeyError
-        except KeyError:
+        except NameError:
             it = self.init.eval(scope)
             scope.let(self._id, value=it, const=True)
-        #set variables in the scope
-        #returns Bool at each call to act as the condition for the loop
-        pdb.set_trace()
 
-        #if return if False, then reset the id variable
-        # scope.let(self._id)
+        # body gets the binds element and returns the resulting condition
+        return self.body.eval(scope)
 
 
 
@@ -651,13 +719,99 @@ class Number(AST):
     def __repr__(self):
         return f'Number({repr(self.val)})'
 
-class Vector(AST):
+
+#TODO: this needs something inbetween for handling `i in 1..10`, i.e. the part that does the binding is not part of the range
+class Range(Iterable,Unpackable):
+    """
+    Inspired by Haskell syntax for ranges:
+    [first..]               // first to inf
+    [first,second..]        // step size is second-first
+    [first..last]           // first to last
+    [first,second..last]    // first to last, step size is second-first
+    [..last]                // -inf to last
+    [..]                    // -inf to inf
+
+    open/closed ranges:
+    [first..last]           // first to last including first and last
+    [first..last)           // first to last including first, excluding last
+    (first..last]           // first to last excluding first, including last
+    (first..last)           // first to last excluding first and last
+    first..last             // same as [first..last]. Note that parentheses are required if `second` is included in the expression
+    """
+    def __init__(self, first:AST|Undefined=undefined, second:AST|Undefined=undefined, last:AST|Undefined=undefined, include_first:bool=True, include_last:bool=True):
+        self.first = first if first is not undefined else Number(float('-inf'))
+        self.second = second
+        self.last = last if last is not undefined else Number(float('inf'))
+        self.include_first = include_first
+        self.include_last = include_last
+        
+
+    def eval(self, scope:Scope=None):
+        return self
+    
+    def iter(self, scope:'Scope'=None) -> Iter:
+        #todo: write later
+        pdb.set_trace()
+
+    # def type(self):
+    #     return Type('Range') #TODO: this should maybe care about the type of data in it?
+
+    def topy(self, scope:Scope=None):
+        step_size = self.second.topy() - self.first.topy() if self.second is not undefined else 1
+        return range(self.first.topy(scope), self.last.topy(scope), step_size)
+
+    def treestr(self, indent=0):
+        s = f'{tab * indent}Range\n'
+        s += f'{tab * (indent + 1)}first:\n{self.first.treestr(indent + 2)}\n'
+        s += f'{tab * (indent + 1)}second:\n{self.second.treestr(indent + 2)}\n'
+        s += f'{tab * (indent + 1)}last:\n{self.last.treestr(indent + 2)}\n'
+        return s
+
+
+class RangeIter(Iter):
+    def __init__(self, range:Range):
+        self.range = range
+        self.i = self.range.first
+        self.step_size = Sub(self.range.second, self.range.first) if self.range.second is not undefined else Number(1)
+
+    # def next(self, scope:Scope=None) -> Tuple[Bool, AST]:
+    #     pdb.set_trace()
+    #     if self.i < self.range.last:
+    #         ret = self.i
+    #         self.i += self.step_size
+    #         return (Bool(True), ret)
+    #     else:
+    #         return (Bool(False), undefined)
+
+
+class Vector(Iterable, Unpackable):
     def __init__(self, vals:List[AST]):
         self.vals = vals
     def eval(self, scope:Scope=None):
         return self
+    
+    #unpackable interface
+    def len(self, scope:Scope=None):
+        return len(self.vals)
+    def get(self, key:int|EllipsisType|slice|PyTuple[int|EllipsisType|slice], scope:Scope=None):
+        if isinstance(key, int):
+            return self.vals[key]
+        elif isinstance(key, EllipsisType):
+            return self
+        elif isinstance(key, slice):
+            return Vector(self.vals[key])
+        elif isinstance(key, tuple):
+            #probably only valid for N-dimensional/non-jagged vectors
+            raise NotImplementedError('TODO: implement tuple indexing for Vector')
+        else:
+            raise TypeError(f'invalid type for Vector.get: `{key}` of type `{type(key)}`')
+
+
+    #iterable interface
+    #TODO...
+
     def topy(self, scope:Scope=None):
-        return [v.eval(scope) for v in self.vals]
+        return [v.eval(scope).topy(scope) for v in self.vals]
     def treestr(self, indent=0):
         s = tab * indent + 'Vector\n'
         for v in self.vals:
@@ -817,6 +971,22 @@ def hello_loop():
         prog.eval(root)
 
 
+def unpack_test():
+
+    #set up root scope with some functions
+    root = Scope()
+    root.bind('printl', Builtin('printl', [Arg('text')]))
+
+    #unpack several variables from a vector and print them
+    prog = Block([
+        Bind('s', Vector([String('Hello'), Vector([String('World'), String('!')]), Number(5), Number(10)])),
+        Unpack(['a', 'b', 'c', 'd'], Call('s')),
+        Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b'), String(' c='), Call('c'), String(' d='), Call('d')])]),
+    ])
+    # print(prog)
+    prog.eval(root)
+
+
 def rule110():
 
     #set up root scope with some functions
@@ -860,10 +1030,11 @@ def rule110():
 
 
 if __name__ == '__main__':
-    hello()
-    hello_func()
-    hello_name()
-    if_else()
-    if_else_if()
-    hello_loop()
+    # hello()
+    # hello_func()
+    # hello_name()
+    # if_else()
+    # if_else_if()
+    # hello_loop()
+    unpack_test()
     # rule110()
