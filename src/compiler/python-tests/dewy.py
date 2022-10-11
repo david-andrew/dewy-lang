@@ -387,23 +387,26 @@ class Unpack(AST):
     def __init__(self, struct:PackStruct, value:Unpackable):
         #check that there is only one ellipsis in the top level of the structure (lower levels are checked recursively)
         #TODO: problem with checking lower levels recursively is that it is no longer a compile time check
-        assert sum(1 for s in struct if s.startswith('...')) <= 1, 'only one ellipsis is allowed per level of the structure'
+        assert sum(1 for s in struct if isinstance(s, str) and s.startswith('...')) <= 1, 'only one ellipsis is allowed per level of the structure'
         self.struct = struct
         self.value = value
 
     def eval(self, scope:Scope=None):
         value = self.value.eval(scope)
         assert isinstance(value, Unpackable), f'{value} is not unpackable'
+        value_len = value.len(scope)
+        offset = 0 #offset for handling if an ellipsis was encountered during the unpack
         for i, s in enumerate(self.struct):
             if isinstance(s, str):
                 if s.startswith('...'):
-                    n = len(self.struct) - i - 1 #number of elements after the ellipsis
                     name = s[3:]
-                    scope.bind(name, value.get(slice(i,-n), scope))
+                    n = value_len - len(self.struct) + 1 #number of elements to fill the ellipsis with
+                    scope.bind(name, value.get(slice(i,i+n), scope))
+                    offset += n - 1
                 else:
-                    scope.bind(s, value.get(i, scope))
+                    scope.bind(s, value.get(i+offset, scope))
             elif isinstance(s, list):
-                Unpack(s, value.get(i, scope)).eval(scope)
+                Unpack(s, value.get(i+offset, scope)).eval(scope)
             else:
                 raise TypeError(f'invalid type in unpack structure: `{s}` of type `{type(s)}`')
 
@@ -486,6 +489,8 @@ class String(AST):
         self.val = val
     def eval(self, scope:Scope=None):
         return self
+    def type(self, scope:Scope=None):
+        return Type('string')
     def topy(self, scope:Scope=None) -> str:
         return self.val
     def treestr(self, indent=0):
@@ -789,6 +794,9 @@ class Vector(Iterable, Unpackable):
         self.vals = vals
     def eval(self, scope:Scope=None):
         return self
+    def type(self, scope:Scope=None):
+        #TODO: this should include the type of the data inside the vector...
+        return Type('Vector')
     
     #unpackable interface
     def len(self, scope:Scope=None):
@@ -980,7 +988,14 @@ def unpack_test():
     #unpack several variables from a vector and print them
     prog = Block([
         Bind('s', Vector([String('Hello'), Vector([String('World'), String('!')]), Number(5), Number(10)])),
+        Call('printl', [IString([String('s='), Call('s')])]),
         Unpack(['a', 'b', 'c', 'd'], Call('s')),
+        Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b'), String(' c='), Call('c'), String(' d='), Call('d')])]),
+        Unpack(['a', '...b'], Call('s')),
+        Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b')])]),
+        Unpack(['...a', 'b'], Call('s')),
+        Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b')])]),
+        Unpack(['a', ['b', 'c'], '...d'], Call('s')), #TODO: This currently has a bug! d is an empty array...
         Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b'), String(' c='), Call('c'), String(' d='), Call('d')])]),
     ])
     # print(prog)
