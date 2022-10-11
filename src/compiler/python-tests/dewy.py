@@ -156,6 +156,17 @@ class Scope():
         self.args = args
         self.bargs = bargs
 
+    @staticmethod
+    def default():
+        """return a scope with the standard library (of builtins) included"""
+        root = Scope()
+        root.bind('print', Builtin('print', [Arg('text')]))
+        root.bind('printl', Builtin('printl', [Arg('text')]))
+        root.bind('readl', Builtin('readl', [], String))
+        #TODO: eventually add more builtins
+
+        return root
+
 
 #probably won't use this, except possibly for when calling functions and providing enums from the function's scope
 # def merge_scopes(*scopes:List[Scope], onto:Scope=None):
@@ -835,8 +846,7 @@ class Vector(Iterable, Unpackable):
 def hello():
 
     #set up root scope with some functions
-    root = Scope() #highest level of scope, mainly for builtins
-    root.bind('printl', Builtin('printl', [Arg('text')]))
+    root = Scope.default() #highest level of scope, mainly for builtins
 
     #Hello, World!
     prog0 = Block([
@@ -849,8 +859,7 @@ def hello():
 def hello_func():
 
     #set up root scope with some functions
-    root = Scope() #highest level of scope, mainly for builtins
-    root.bind('printl', Builtin('printl', [Arg('text')]))
+    root = Scope.default()
 
     #Hello, World!
     prog = Block([
@@ -873,10 +882,7 @@ def hello_func():
 def hello_name():
 
     #set up root scope with some functions
-    root = Scope() #highest level of scope, mainly for builtins
-    root.bind('print', Builtin('print', [Arg('text')]))
-    root.bind('printl', Builtin('printl', [Arg('text')]))
-    root.bind('readl', Builtin('readl', [], String))
+    root = Scope.default()
 
     #Hello <name>!
     prog = Block([
@@ -892,10 +898,7 @@ def hello_name():
 def if_else():
 
     #set up root scope with some functions
-    root = Scope() #highest level of scope, mainly for builtins
-    root.bind('print', Builtin('print', [Arg('text')]))
-    root.bind('printl', Builtin('printl', [Arg('text')]))
-    root.bind('readl', Builtin('readl', [], String))
+    root = Scope.default()
 
     #if name =? 'Alice' then print 'Hello Alice!' else print 'Hello stranger!'
     prog = Block([
@@ -919,11 +922,7 @@ def if_else():
 def if_else_if():
 
     #set up root scope with some functions
-    root = Scope() #highest level of scope, mainly for builtins
-    root.bind('print', Builtin('print', [Arg('text')]))
-    root.bind('printl', Builtin('printl', [Arg('text')]))
-    root.bind('readl', Builtin('readl', [], String))
-
+    root = Scope.default()
 
     #name = readl()
     #if name =? 'Alice' 
@@ -957,10 +956,7 @@ def if_else_if():
 def hello_loop():
     
         #set up root scope with some functions
-        root = Scope() #highest level of scope, mainly for builtins
-        root.bind('print', Builtin('print', [Arg('text')]))
-        root.bind('printl', Builtin('printl', [Arg('text')]))
-        root.bind('readl', Builtin('readl', [], String))
+        root = Scope.default()
 
         #print 'Hello <name>!' 10 times
         prog = Block([
@@ -982,8 +978,7 @@ def hello_loop():
 def unpack_test():
 
     #set up root scope with some functions
-    root = Scope()
-    root.bind('printl', Builtin('printl', [Arg('text')]))
+    root = Scope.default()
 
     #unpack several variables from a vector and print them
     prog = Block([
@@ -995,7 +990,7 @@ def unpack_test():
         Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b')])]),
         Unpack(['...a', 'b'], Call('s')),
         Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b')])]),
-        Unpack(['a', ['b', 'c'], '...d'], Call('s')), #TODO: This currently has a bug! d is an empty array...
+        Unpack(['a', ['b', 'c'], '...d'], Call('s')),
         Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b'), String(' c='), Call('c'), String(' d='), Call('d')])]),
     ])
     # print(prog)
@@ -1005,10 +1000,7 @@ def unpack_test():
 def rule110():
 
     #set up root scope with some functions
-    root = Scope() #highest level of scope, mainly for builtins
-    root.bind('print', Builtin('print', [Arg('text')]))
-    root.bind('printl', Builtin('printl', [Arg('text')]))
-    root.bind('readl', Builtin('readl', [], String))
+    root = Scope.default()
 
     #rule 110
     #TODO: handle type annotations in AST
