@@ -406,6 +406,12 @@ class Unpack(AST):
         value = self.value.eval(scope)
         assert isinstance(value, Unpackable), f'{value} is not unpackable'
         value_len = value.len(scope)
+        has_ellipsis = any(isinstance(s, str) and s.startswith('...') for s in self.struct)
+        if has_ellipsis:
+            assert value_len >= len(self.struct) - 1, f'cannot unpack {value} into {Unpack.str_helper(self.struct)}, expected more values to unpack'
+        else:
+            assert value_len == len(self.struct), f'cannot unpack {value} into {Unpack.str_helper(self.struct)}, ' + ('expected more' if value_len < len(self.struct) else 'expected less') + ' values to unpack'
+
         offset = 0 #offset for handling if an ellipsis was encountered during the unpack
         for i, s in enumerate(self.struct):
             if isinstance(s, str):
@@ -1008,6 +1014,11 @@ def unpack_test():
         Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b')])]),
         Unpack(['a', ['b', 'c'], '...d'], Call('s')),
         Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b'), String(' c='), Call('c'), String(' d='), Call('d')])]),
+
+        # Test unpacking too few/many values
+        # Unpack(['a', 'b', 'c', 'd', 'e'], Call('s')),         # error: not enough values to unpack
+        # Unpack(['a', 'b'], Call('s')),                        # error: too many values to unpack
+        # Unpack(['a', '...b', 'c', 'd', 'e', 'f'], Call('s')), # error: too many values to unpack
     ])
     # print(prog)
     prog.eval(root)
