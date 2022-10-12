@@ -42,12 +42,60 @@ class AST(ABC):
         """Return a string representation of the python objects making up the AST"""
         raise NotImplementedError(f'{self.__class__.__name__}.__repr__')
 
+class Undefined(AST):
+    def __init__(self):
+        pass
+    def eval(self, scope:'Scope'=None):
+        return self
+    def topy(self, scope:'Scope'=None):
+        return None
+    def type(self, scope:'Scope'=None):
+        return Type('undefined')
+    def treesr(self, indent=0):
+        return tab * indent + 'Undefined'
+    def __str__(self):
+        return 'undefined'
+    def __repr__(self):
+        return 'Undefined()'
+
+#make any further calls to Undefined() return the same singleton instance
+undefined = Undefined()
+Undefined.__new__ = lambda cls: undefined
+
+
+
 class Callable(AST):
     def call(self, scope:'Scope'=None):
         """Call the callable in the given scope"""
         raise NotImplementedError(f'{self.__class__.__name__}.call')
 
+class Orderable(AST):
+    """An object that can be sorted relative to other objects of the same type"""
+    def compare(self, other:'Orderable', scope:'Scope'=None) -> 'Number':
+        """Return a value indicating the relationship between this value and another value"""
+        raise NotImplementedError(f'{self.__class__.__name__}.compare')
+    @staticmethod
+    def max(self) -> 'Rangeable':
+        """Return the maximum element from the set of all elements of this type"""
+        raise NotImplementedError(f'{self.__class__.__name__}.max')
+    @staticmethod
+    def min(self) -> 'Rangeable':
+        """Return the minimum element from the set of all elements of this type"""
+        raise NotImplementedError(f'{self.__class__.__name__}.min')
+    
+#TODO: come up with a better name for this class... successor and predecessor are only used for range iterators, not ranges themselves
+#        e.g. Incrementable, Decrementable, etc.
+class Rangeable(Orderable):
+    """An object that can be used to specify bounds of a range"""
+    def successor(self, step=undefined, scope:'Scope'=None) -> 'Rangeable':
+        """Return the next value in the range"""
+        raise NotImplementedError(f'{self.__class__.__name__}.successor')
+    def predecessor(self, step=undefined, scope:'Scope'=None) -> 'Rangeable':
+        """Return the previous value in the range"""
+        raise NotImplementedError(f'{self.__class__.__name__}.predecessor')
+
 class Iterable(AST):
+    #TODO: maybe don't need scope for this method...
     def iter(self, scope:'Scope'=None) -> 'Iter':
         """Return an iterator over the iterable"""
         raise NotImplementedError(f'{self.__class__.__name__}.iter')
@@ -68,25 +116,6 @@ class Unpackable(AST):
 #        would maybe replace the len property?
 
 
-class Undefined(AST):
-    def __init__(self):
-        pass
-    def eval(self, scope:'Scope'=None):
-        return self
-    def topy(self, scope:'Scope'=None):
-        return None
-    def type(self, scope:'Scope'=None):
-        return Type('undefined')
-    def treesr(self, indent=0):
-        return tab * indent + 'Undefined'
-    def __str__(self):
-        return 'undefined'
-    def __repr__(self):
-        return 'Undefined()'
-
-#make any further calls to Undefined() return the same singleton instance
-undefined = Undefined()
-Undefined.__new__ = lambda cls: undefined
 
 
 tab = '    ' #for printing ASTs
@@ -406,6 +435,9 @@ class Unpack(AST):
         value = self.value.eval(scope)
         assert isinstance(value, Unpackable), f'{value} is not unpackable'
         value_len = value.len(scope)
+        
+        #check that the structure has a matching number of elements to the value
+        #TODO: actually maybe allow this, and any extra elements are just undefined. complicated to handle if the number of elements is wrong though
         has_ellipsis = any(isinstance(s, str) and s.startswith('...') for s in self.struct)
         if has_ellipsis:
             assert value_len >= len(self.struct) - 1, f'cannot unpack {value} into {Unpack.str_helper(self.struct)}, expected more values to unpack'
@@ -422,7 +454,7 @@ class Unpack(AST):
                     offset += n - 1
                 else:
                     scope.bind(s, value.get(i+offset, scope))
-            elif isinstance(s, list):
+            elif isinstance(s, list) or isinstance(s, tuple):
                 Unpack(s, value.get(i+offset, scope)).eval(scope)
             else:
                 raise TypeError(f'invalid type in unpack structure: `{s}` of type `{type(s)}`')
@@ -517,13 +549,14 @@ class Call(AST):
     def __repr__(self):
         return f'Call({self.name}, {repr(self.args)}, {repr(self.bargs)})'
 
-class String(AST):
+class String(Rangeable):
     def __init__(self, val:str):
         self.val = val
     def eval(self, scope:Scope=None):
         return self
     def type(self, scope:Scope=None):
         return Type('string')
+    #TODO: implement rangable methods
     def topy(self, scope:Scope=None) -> str:
         return self.val
     def treestr(self, indent=0):
@@ -739,15 +772,55 @@ class In(AST):
         # body gets the binds element and returns the resulting condition
         return self.body.eval(scope)
 
+class Next(AST):
+    """handle getting the next element in the iteration"""
+    def __init__(self, iterable:AST):
+        self.iterable = iterable
 
+    def eval(self, scope:Scope=None) -> AST:
+        it = self.iterable.eval(scope)
+        assert isinstance(it, Iter), f'cannot call next on {it}, not an iterator'
+        return it.next(scope)
 
-class Number(AST):
+    def __repr__(self):
+        return f'Next({repr(self.iterable)})'
+
+    def __str__(self):
+        return f'next({self.iterable})'
+
+class Number(Rangeable):
     def __init__(self, val):
         self.val = val
     def eval(self, scope:Scope=None):
         return self
     def type(self):
         return Type('Number')
+    
+    #Rangeable methods
+    def compare(self, other:'Number', scope:Scope=None) -> 'Number':
+        if self.val < other.val:
+            return Number(-1)
+        elif self.val == other.val:
+            return Number(0)
+        else:
+            return Number(1)
+    def successor(self, step:'Number'=undefined, scope:'Scope'=None) -> 'Number':
+        if step is undefined:
+            return Number(self.val + 1)
+        else:
+            return Number(self.val + step.val)
+    def predecessor(self, step:'Number'=undefined, scope:'Scope'=None) -> 'Number':
+        if step is undefined:
+            return Number(self.val - 1)
+        else:
+            return Number(self.val - step.val)
+    @staticmethod
+    def max(self) -> 'Number':
+        return Number(float('inf'))
+    @staticmethod
+    def min(self) -> 'Number':
+        return Number(float('-inf'))
+    
     def topy(self, scope:Scope=None):
         return self.val
     def treestr(self, indent=0):
@@ -758,7 +831,10 @@ class Number(AST):
         return f'Number({repr(self.val)})'
 
 
-#TODO: this needs something inbetween for handling `i in 1..10`, i.e. the part that does the binding is not part of the range
+#TODO: handling of different types of ranges (e.g. character ranges, vs number ranges). 
+#   how to handle +inf/-inf in non-numeric case? implies some sort of max/min element for the range value...
+#   i.e. class Rangeable(AST): where class Number(Rangable), Char(Rangeable), etc.
+#   Rangable types should implement successor(step=1) and predecessor(step=1) methods
 class Range(Iterable,Unpackable):
     """
     Inspired by Haskell syntax for ranges:
@@ -776,10 +852,17 @@ class Range(Iterable,Unpackable):
     (first..last)           // first to last excluding first and last
     first..last             // same as [first..last]. Note that parentheses are required if `second` is included in the expression
     """
-    def __init__(self, first:AST|Undefined=undefined, second:AST|Undefined=undefined, last:AST|Undefined=undefined, include_first:bool=True, include_last:bool=True):
-        self.first = first if first is not undefined else Number(float('-inf'))
+    def __init__(self, first:Rangeable=undefined, second:Rangeable=undefined, last:Rangeable=undefined, include_first:bool=True, include_last:bool=True):
+        range_type = type(first) if first is not undefined else type(second) if second is not undefined else type(last)
+        if range_type is undefined:
+            range_type = Number
+        assert issubclass(range_type, Rangeable), f'Range type must be of type Rangeable, not {range_type}'
+        #TODO: type checking to confirm that first, second, and last are all compatible types
+
+        self.range_type = range_type
+        self.first = first if first is not undefined else range_type.min()
         self.second = second
-        self.last = last if last is not undefined else Number(float('inf'))
+        self.last = last if last is not undefined else range_type.max()
         self.include_first = include_first
         self.include_last = include_last
         
@@ -788,8 +871,7 @@ class Range(Iterable,Unpackable):
         return self
     
     def iter(self, scope:'Scope'=None) -> Iter:
-        #todo: write later
-        pdb.set_trace()
+        return RangeIter(scope)
 
     # def type(self):
     #     return Type('Range') #TODO: this should maybe care about the type of data in it?
@@ -805,21 +887,77 @@ class Range(Iterable,Unpackable):
         s += f'{tab * (indent + 1)}last:\n{self.last.treestr(indent + 2)}\n'
         return s
 
+    def __str__(self):
+        s = ''
+        s += '[' if self.include_first else '('
+        if self.first is not undefined:
+            s += str(self.first)
+        if self.second is not undefined:
+            s += ','
+            s += str(self.second)
+        s += '..'
+        if self.last is not undefined:
+            s += str(self.last)
+        s += ']' if self.include_last else ')'
+        return s
+
+    def __repr__(self):
+        interval = f'{"[" if self.include_first else "("}{"[" if self.include_last else ")"}'
+        return f'Range({repr(self.first)},{repr(self.second)},{repr(self.last)},interval={interval})'
+
 
 class RangeIter(Iter):
-    def __init__(self, range:Range):
-        self.range = range
-        self.i = self.range.first
-        self.step_size = Sub(self.range.second, self.range.first) if self.range.second is not undefined else Number(1)
+    def __init__(self, ast:AST):#range:Range): #TODO: want AST[Range] typing which means it evals to a range...
+        # self.range = range
+        self.ast = ast
+        self.range = None
+        self.i = None#self.range.first
+        self.step = None
+    
+    def eval(self, scope:Scope=None):
+        return self
 
-    # def next(self, scope:Scope=None) -> Tuple[Bool, AST]:
-    #     pdb.set_trace()
-    #     if self.i < self.range.last:
-    #         ret = self.i
-    #         self.i += self.step_size
-    #         return (Bool(True), ret)
-    #     else:
-    #         return (Bool(False), undefined)
+    def next(self, scope:Scope=None) -> Unpackable:
+
+        #first iteration stuff
+        #TODO: this is not a good condition to determine if this is the first iteration
+        #        it will fail if the iterator was reused (e.g. in a nested loop)
+        if self.step is None:
+            self.range = self.ast.eval(scope)
+            assert isinstance(self.range, Range), f'RangeIter must be initialized with an AST that evaluates to a Range, not {type(self.range)}' 
+            self.i = self.range.first
+            #set the stepsize (needed access to the scope)
+            if self.range.second is not undefined:
+                self.step = self.range.second.compare(self.range.first, scope)
+            else:
+                self.step = undefined
+            
+            #skip the first element if it's not included (closed interval)
+            if not self.range.include_first:
+                self.i = self.i.successor(self.step, scope)
+
+        #check the stop condition and return the next element
+        if (c:=self.i.compare(self.range.last).val) < 0 or (c==0 and self.range.include_last):
+            ret = self.i
+            self.i = self.i.successor(self.step, scope)
+            return Vector([Bool(True), ret])
+        else:
+            return Vector([Bool(False), undefined])
+
+    def type(self):
+        return Type('RangeIter')
+
+    def topy(self, scope:Scope=None):
+        raise NotImplementedError
+
+    def treestr(self, indent=0):
+        return f'{tab * indent}RangeIter:\n{self.range.treestr(indent + 1)}'
+        
+    def __str__(self):
+        return f'RangeIter({self.range})'
+
+    def __repr__(self):
+        return f'RangeIter({repr(self.range)})'
 
 
 class Vector(Iterable, Unpackable):
@@ -1023,6 +1161,40 @@ def unpack_test():
     # print(prog)
     prog.eval(root)
 
+def range_iter_test():
+    
+        #set up root scope with some functions
+        root = Scope.default()
+    
+        #range iterator test
+        # r = range(0,2,10)
+        # it = iter(r)
+        # print(next(it))
+        # print(next(it))
+        # print(next(it))
+        # print(next(it))
+        # print(next(it))
+        prog = Block([
+            Bind('r', Range(Number(0), Number(2), Number(10))),
+            Bind('it', RangeIter(Call('r'))),
+            Call('printl', [Next(Call('it'))]),
+            Call('printl', [Next(Call('it'))]),
+            Call('printl', [Next(Call('it'))]),
+            Call('printl', [Next(Call('it'))]),
+            Call('printl', [Next(Call('it'))]),
+            Call('printl', [Next(Call('it'))]),
+            Call('printl', [Next(Call('it'))]),
+            Call('printl', [Next(Call('it'))]),
+            Call('printl', [Next(Call('it'))]),
+            Call('printl', [Next(Call('it'))]),
+            Call('printl', [Next(Call('it'))]),
+            Call('printl', [Next(Call('it'))]), #should print [False, None] since the iterator is exhausted
+            Call('printl', [Next(Call('it'))]),
+            Call('printl', [Next(Call('it'))]),
+        ])
+        # print(prog)
+        prog.eval(root)
+
 
 def rule110():
 
@@ -1070,5 +1242,6 @@ if __name__ == '__main__':
     # if_else()
     # if_else_if()
     # hello_loop()
-    unpack_test()
+    # unpack_test()
+    range_iter_test()
     # rule110()
