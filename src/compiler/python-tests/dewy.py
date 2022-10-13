@@ -18,6 +18,47 @@ import typing
 def notimplemented():
     raise NotImplementedError()
 
+tab = '    ' #for printing ASTs
+newline = '\n' # or ' ' to make it all one line
+# tabin = '|>>>>|'
+# tabout = '|<<<<|'
+
+
+def insert_tabs_inner(s):
+    """given the output of __str__ from an AST, insert tabs at \n based on how many {} were encountered so far"""
+    #TODO: this runs into problems b/c {} is also used in string interpolation syntax...
+    level = 0
+    out = []
+    for c in s:
+        if c == '{':
+            level += 1
+        elif c == '}':
+            level -= 1
+            if out[-1].isspace():
+                out[-1] = out[-1][:-4] #remove 1 tab
+        out.append(c)
+
+        if c == '\n':
+            out.append(tab*level)
+            continue
+
+    return ''.join(out)
+
+inserting_tabs = False #so that only the top level inserts the tabs
+def insert_tabs(func):
+    def wrapper(*args, **kwargs):
+        global inserting_tabs
+        if inserting_tabs:
+            out = func(*args, **kwargs)
+        else:
+            inserting_tabs = True
+            out = insert_tabs_inner(func(*args, **kwargs))
+            inserting_tabs = False
+        return out
+
+    return wrapper
+
+
 class AST(ABC):
     def eval(self, scope:'Scope'=None) -> 'AST':
         """Evaluate the AST in the given scope, and return the result (as a dewy obj) if any"""
@@ -53,6 +94,7 @@ class Undefined(AST):
         return Type('undefined')
     def treesr(self, indent=0):
         return tab * indent + 'Undefined'
+    # @insert_tabs
     def __str__(self):
         return 'undefined'
     def __repr__(self):
@@ -119,7 +161,7 @@ class Iterable(AST):
 
 
 
-tab = '    ' #for printing ASTs
+
 BArg = PyTuple[str, AST]   #bound argument + current value for when making function calls
 
 class Scope():
@@ -221,9 +263,10 @@ class Type(AST):
     def treestr(self, indent=0):
         s = tab * indent + f'Type: {self.name}\n'
         for p in self.params:
-            s += p.__str__(indent + 1) + '\n'
+            s += p.treestr(indent + 1) + '\n'
         return s
 
+    @insert_tabs
     def __str__(self):
         if self.params is not None and len(self.params) > 0:
             return f'{self.name}<{", ".join(map(str, self.params))}>'
@@ -256,12 +299,13 @@ class Arg:
         self.name = name
         self.val = val
         self.type = type
+    # @insert_tabs
     def __str__(self):
         s = f'{self.name}'
         if self.type is not None:
-            s += f':{repr(self.type)}'
+            s += f':{self.type}'
         if self.val is not None:
-            s += f' = {repr(self.val)}'
+            s += f' = {self.val}'
         return s
     def __repr__(self):
         s = f'Arg({self.name}'
@@ -320,6 +364,7 @@ class Function(Callable):
         s += tab*(indent+1) + 'Body:\n' + self.body.treestr(indent + 2)
         return s
 
+    @insert_tabs
     def __str__(self):
         s = ''
         if len(self.args) == 1:
@@ -370,6 +415,7 @@ class Builtin(Callable):
                 s += arg.val.treestr(indent + 2) + '\n'
         return s
 
+    # @insert_tabs
     def __str__(self):
         return f'{self.name}({", ".join(map(str, self.args))})'
 
@@ -390,11 +436,12 @@ class Let(AST):
     def treestr(self, indent=0):
         return f'{tab * indent}{"Const" if self.const else "Let"}: {self.name}\n{self.type.treestr(indent + 1)}'
 
+    @insert_tabs
     def __str__(self):
-        return f'{"const" if self.const else "let"} {self.name}:{self.type}'
+        return f'{"const" if self.const else "let"} {self.name}:{self.type} = {self.value}'
 
     def __repr__(self):
-        return f'{"Const" if self.const else "Let"}({self.name}, {self.type})'
+        return f'{"Const" if self.const else "Let"}({self.name}, {self.type}, {self.value})'
 
 
 class Bind(AST):
@@ -408,6 +455,7 @@ class Bind(AST):
     def treestr(self, indent=0):
         return f'{tab * indent}Bind: {self.name}\n{self.value.treestr(indent + 1)}'
 
+    @insert_tabs
     def __str__(self):
         return f'{self.name} = {self.value}'
 
@@ -472,6 +520,7 @@ class Unpack(AST):
     def treestr(self, indent=0):
         return f'{tab * indent}Unpack: {self.struct}\n{self.value.treestr(indent + 1)}'
 
+    @insert_tabs
     def __str__(self):
         return f'{Unpack.str_helper(self.struct)} = {self.value}'
 
@@ -516,8 +565,9 @@ class Block(AST):
             s += expr.treestr(indent + 1)
         return s
 
+    @insert_tabs
     def __str__(self):
-        return f'{{{" ".join(map(str, self.exprs))}}}'
+        return f'{{{newline}{newline.join(map(str, self.exprs))}{newline}}}'
 
     def __repr__(self):
         return f'Block({repr(self.exprs)})'
@@ -548,6 +598,7 @@ class Call(AST):
                 s += tab * (indent + 1) + f'{a}={v}\n'
         return s
 
+    @insert_tabs
     def __str__(self):
         arglist = ', '.join(map(str, self.args))
         barglist = ', '.join(f'{a}={v}' for a, v in self.bargs)
@@ -569,6 +620,7 @@ class String(Rangeable):
         return self.val
     def treestr(self, indent=0):
         return f'{tab * indent}String: `{self.val}`'
+    # @insert_tabs
     def __str__(self):
         return f'"{self.val}"'
     def __repr__(self):
@@ -591,6 +643,7 @@ class IString(AST):
             s += part.treestr(indent + 1) + '\n'
         return s
 
+    @insert_tabs
     def __str__(self):
         s = ''
         for part in self.parts:
@@ -615,6 +668,7 @@ class BinOp(AST):
         return self.op(self.left.eval(scope).topy(), self.right.eval(scope).topy())
     def treestr(self, indent=0):
         return f'{tab * indent}{self.opname}\n{self.left.treestr(indent + 1)}\n{self.right.treestr(indent + 1)}'
+    @insert_tabs
     def __str__(self):
         return f'{self.left} {self.opsymbol} {self.right}'
     def __repr__(self):
@@ -675,6 +729,7 @@ class Bool(AST):
         return Type('bool')
     def treestr(self, indent=0):
         return f'{tab * indent}Bool: {self.val}'
+    # @insert_tabs
     def __str__(self):
         return f'{self.val}'
     def __repr__(self):
@@ -700,6 +755,7 @@ class If(AST):
             s += expr.treestr(indent + 2) + '\n'
         return s
 
+    @insert_tabs
     def __str__(self):
         s = ''
         for i, (cond, expr) in enumerate(self.clauses):
@@ -729,6 +785,7 @@ class Loop(AST):
     def treestr(self, indent=0):
         return f'{tab * indent}Loop\n{self.cond.treestr(indent + 1)}\n{self.body.treestr(indent + 1)}'
 
+    @insert_tabs
     def __str__(self):
         return f'loop {self.cond} {self.body}'
 
@@ -788,6 +845,7 @@ class In(AST):
     def treestr(self, indent=0):
         return f'{tab * indent}In: {self.name}\n{self.iterable.treestr(indent + 1)}'
 
+    @insert_tabs
     def __str__(self):
         return f'{self.name} in {self.iterable}'
 
@@ -807,6 +865,7 @@ class Next(AST):
     def __repr__(self):
         return f'Next({repr(self.iterable)})'
 
+    @insert_tabs
     def __str__(self):
         return f'next({self.iterable})'
 
@@ -842,6 +901,7 @@ class Number(Rangeable):
         return self.val
     def treestr(self, indent=0):
         return f'{tab * indent}Number: {self.val}'
+    # @insert_tabs
     def __str__(self):
         return f'{self.val}'
     def __repr__(self):
@@ -904,6 +964,7 @@ class Range(Iterable,Unpackable):
         s += f'{tab * (indent + 1)}last:\n{self.last.treestr(indent + 2)}\n'
         return s
 
+    @insert_tabs
     def __str__(self):
         s = ''
         s += '[' if self.include_first else '('
@@ -969,6 +1030,7 @@ class RangeIter(Iter):
     def treestr(self, indent=0):
         return f'{tab * indent}RangeIter:\n{self.ast.treestr(indent + 1)}'
         
+    @insert_tabs
     def __str__(self):
         return f'RangeIter({self.ast})'
 
@@ -1012,6 +1074,7 @@ class Vector(Iterable, Unpackable):
         for v in self.vals:
             s += v.treestr(indent + 1) + '\n'
         return s
+    @insert_tabs
     def __str__(self):
         return f'[{" ".join(map(str, self.vals))}]'
     def __repr__(self):
@@ -1019,20 +1082,22 @@ class Vector(Iterable, Unpackable):
 
 
 
-def hello():
+def hello(run=True):
 
     #set up root scope with some functions
     root = Scope.default() #highest level of scope, mainly for builtins
 
     #Hello, World!
-    prog0 = Block([
+    prog = Block([
         Call('printl', [String('Hello, World!')]),
     ])
-    # print(prog0)
-    prog0.eval(root)
+    if run:
+        prog.eval(root)
+    else:
+        print(prog)
 
 
-def hello_func():
+def hello_func(run=True):
 
     #set up root scope with some functions
     root = Scope.default()
@@ -1051,11 +1116,12 @@ def hello_func():
         ),
         Call('main'),
     ])
-    # print(prog)
-    prog.eval(root)
+    if run:
+        prog.eval(root)
+    else:
+        print(prog)
 
-
-def hello_name():
+def hello_name(run=True):
 
     #set up root scope with some functions
     root = Scope.default()
@@ -1066,11 +1132,13 @@ def hello_name():
         Bind('name', Call('readl')),
         Call('printl', [IString([String('Hello '), Call('name'), String('!')])]),
     ])
-    # print(prog)
-    prog.eval(root)
+    if run:
+        prog.eval(root)
+    else:
+        print(prog)
 
 
-def if_else():
+def if_else(run=True):
 
     #set up root scope with some functions
     root = Scope.default()
@@ -1090,11 +1158,13 @@ def if_else():
             )
         ])
     ])
-    # print(prog)
-    prog.eval(root)
+    if run:
+        prog.eval(root)
+    else:
+        print(prog)
 
 
-def if_else_if():
+def if_else_if(run=True):
 
     #set up root scope with some functions
     root = Scope.default()
@@ -1124,11 +1194,12 @@ def if_else_if():
             )
         ])
     ])
-    # print(prog)
-    prog.eval(root)
+    if run:
+        prog.eval(root)
+    else:
+        print(prog)
 
-
-def hello_loop():
+def hello_loop(run=True):
     
         #set up root scope with some functions
         root = Scope.default()
@@ -1146,11 +1217,13 @@ def hello_loop():
                 ])
             )
         ])
-        # print(prog)
-        prog.eval(root)
+        if run:
+            prog.eval(root)
+        else:
+            print(prog)
 
 
-def unpack_test():
+def unpack_test(run=True):
 
     #set up root scope with some functions
     root = Scope.default()
@@ -1173,11 +1246,13 @@ def unpack_test():
         # Unpack(['a', 'b'], Call('s')),                        # error: too many values to unpack
         # Unpack(['a', '...b', 'c', 'd', 'e', 'f'], Call('s')), # error: too many values to unpack
     ])
-    # print(prog)
-    prog.eval(root)
+    if run:
+        prog.eval(root)
+    else:
+        print(prog)
 
 
-def range_iter_test():
+def range_iter_test(run=True):
     
         #set up root scope with some functions
         root = Scope.default()
@@ -1209,11 +1284,12 @@ def range_iter_test():
             Call('printl', [Next(Call('it'))]),
             Call('printl', [Next(Call('it'))]),
         ])
-        print(prog)
-        prog.eval(root)
+        if run:
+            prog.eval(root)
+        else:
+            print(prog)
 
-
-def loop_iter_manual():
+def loop_iter_manual(run=True):
 
     #set up root scope with some functions
     root = Scope.default()
@@ -1236,11 +1312,13 @@ def loop_iter_manual():
             ])
         )
     ])
-    print(prog)
-    prog.eval(root)
+    if run:
+        prog.eval(root)
+    else:
+        print(prog)
 
 
-def loop_in_iter():
+def loop_in_iter(run=True):
 
     #set up root scope with some functions
     root = Scope.default()
@@ -1254,11 +1332,13 @@ def loop_in_iter():
             Call('printl', [Call('i')]),
         )
     ])
-    print(prog)
-    prog.eval(root)
+    if run:
+        prog.eval(root)
+    else:
+        print(prog)
 
 
-def nested_loop():
+def nested_loop(run=True):
 
     #set up root scope with some functions
     root = Scope.default()
@@ -1272,15 +1352,54 @@ def nested_loop():
             In('i', Range(Number(0), Number(2), Number(10))),
             Loop(
                 In('j', Range(Number(0), Number(2), Number(10))),
-                Call('printl', [IString([IString([Call('i'), String(',')]), Call('j')])]),
+                Call('printl', [IString([Call('i'), String(','), Call('j')])]),
             )
         )
     ])
-    print(prog)
-    prog.eval(root)
+    if run:
+        prog.eval(root)
+    else:
+        print(prog)
 
 
-def rule110():
+def block_printing(run=True):
+    #make a program with lots of nested blocks/loops to test printing
+    root = Scope.default()
+    prog = Block([
+        Loop(
+            In('i', Range(Number(0), Number(2), Number(10))),
+            Block([
+                Loop(
+                    In('j', Range(Number(0), Number(2), Number(10))),
+                    Block([
+                        Loop(
+                            In('k', Range(Number(0), Number(2), Number(10))),
+                            Block([
+                                Loop(
+                                    In('l', Range(Number(0), Number(2), Number(10))),
+                                    Block([
+                                        Loop(
+                                            In('m', Range(Number(0), Number(2), Number(10))),
+                                            Block([
+                                                Call('printl', [IString([Call('i'), String(','), Call('j'), String(','), Call('k'), String(','), Call('l'), String(','), Call('m')])]),
+                                            ])
+                                        )
+                                    ])
+                                )
+                            ])
+                        )
+                    ])
+                )
+            ])
+        )
+    ])
+    if run:
+        prog.eval(root)
+    else:
+        print(prog)
+
+
+def rule110(run=True):
 
     #set up root scope with some functions
     root = Scope.default()
@@ -1313,22 +1432,25 @@ def rule110():
         #     printl(world)
         #     update(world)
     ])
-    # print(prog)
-    prog.eval(root)
+    if run:
+        prog.eval(root)
+    else:
+        print(prog)
 
 
 
 
 if __name__ == '__main__':
-    # hello()
-    # hello_func()
-    # hello_name()
-    # if_else()
-    # if_else_if()
-    # hello_loop()
-    # unpack_test()
-    range_iter_test()
-    loop_iter_manual()
-    loop_in_iter()
-    nested_loop()
-    # rule110()
+    hello(False)
+    hello_func(False)
+    hello_name(False)
+    if_else(False)
+    if_else_if(False)
+    hello_loop(False)
+    unpack_test(False)
+    range_iter_test(False)
+    loop_iter_manual(False)
+    loop_in_iter(False)
+    nested_loop(False)
+    block_printing(False)
+    rule110(False)
