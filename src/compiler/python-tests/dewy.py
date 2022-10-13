@@ -766,7 +766,7 @@ loop {(cond, i) = iter.next(); cond}
 #class iter is the manager for things that can iterate, e.g. Range.iter()->RangeIter, Vector.iter()->VectorIter, etc.
 class In(AST):
     #TODO: allow name to be an unpack structure as well
-    def __init__(self, name:str, iterable:Iterable):#, init:AST, body:AST):
+    def __init__(self, name:str|PackStruct, iterable:Iterable):#, init:AST, body:AST):
         self._id = f'.it_{id(self)}'
         self.name = name
         self.iterable = iterable
@@ -784,6 +784,15 @@ class In(AST):
         cond = Call('_').eval(scope)
         assert isinstance(cond, Bool), f'loop condition must be a Bool, not {cond} of type {type(cond)}'
         return cond
+
+    def treestr(self, indent=0):
+        return f'{tab * indent}In: {self.name}\n{self.iterable.treestr(indent + 1)}'
+
+    def __str__(self):
+        return f'{self.name} in {self.iterable}'
+
+    def __repr__(self):
+        return f'In({repr(self.name)}, {repr(self.iterable)})'
 
 class Next(AST):
     """handle getting the next element in the iteration"""
@@ -958,13 +967,13 @@ class RangeIter(Iter):
         raise NotImplementedError
 
     def treestr(self, indent=0):
-        return f'{tab * indent}RangeIter:\n{self.range.treestr(indent + 1)}'
+        return f'{tab * indent}RangeIter:\n{self.ast.treestr(indent + 1)}'
         
     def __str__(self):
-        return f'RangeIter({self.range})'
+        return f'RangeIter({self.ast})'
 
     def __repr__(self):
-        return f'RangeIter({repr(self.range)})'
+        return f'RangeIter({repr(self.ast)})'
 
 
 class Vector(Iterable, Unpackable):
@@ -1200,7 +1209,7 @@ def range_iter_test():
             Call('printl', [Next(Call('it'))]),
             Call('printl', [Next(Call('it'))]),
         ])
-        # print(prog)
+        print(prog)
         prog.eval(root)
 
 
@@ -1227,7 +1236,7 @@ def loop_iter_manual():
             ])
         )
     ])
-    # print(prog)
+    print(prog)
     prog.eval(root)
 
 
@@ -1245,7 +1254,7 @@ def loop_in_iter():
             Call('printl', [Call('i')]),
         )
     ])
-    # print(prog)
+    print(prog)
     prog.eval(root)
 
 
@@ -1267,7 +1276,7 @@ def nested_loop():
             )
         )
     ])
-    # print(prog)
+    print(prog)
     prog.eval(root)
 
 
@@ -1318,8 +1327,8 @@ if __name__ == '__main__':
     # if_else_if()
     # hello_loop()
     # unpack_test()
-    # range_iter_test()
-    # loop_iter_manual()
-    # loop_in_iter()
+    range_iter_test()
+    loop_iter_manual()
+    loop_in_iter()
     nested_loop()
     # rule110()
