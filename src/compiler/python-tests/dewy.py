@@ -94,17 +94,6 @@ class Rangeable(Orderable):
         """Return the previous value in the range"""
         raise NotImplementedError(f'{self.__class__.__name__}.predecessor')
 
-class Iterable(AST):
-    #TODO: maybe don't need scope for this method...
-    def iter(self, scope:'Scope'=None) -> 'Iter':
-        """Return an iterator over the iterable"""
-        raise NotImplementedError(f'{self.__class__.__name__}.iter')
-
-class Iter(AST):
-    def next(self, scope:'Scope'=None):# -> Tuple[AST,AST]: #TODO: TBD on the return type. need dewy tuple type...
-        """Get the next item from the iterator"""
-        raise NotImplementedError(f'{self.__class__.__name__}.next')
-
 class Unpackable(AST):
     def len(self, scope:'Scope'=None) -> int:
         """Return the length of the unpackable"""
@@ -114,6 +103,21 @@ class Unpackable(AST):
         raise NotImplementedError(f'{self.__class__.__name__}.get')
 #TODO: make a type annotation for Unpackable[N] where N is the number of items in the unpackable?
 #        would maybe replace the len property?
+
+class Iter(AST):
+    def reset(self):
+        """Reset the iterator to the beginning"""
+        raise NotImplementedError(f'{self.__class__.__name__}.reset')
+    def next(self, scope:'Scope'=None) -> Unpackable: #TODO: TBD on the return type. need dewy tuple type...
+        """Get the next item from the iterator"""
+        raise NotImplementedError(f'{self.__class__.__name__}.next')
+
+class Iterable(AST):
+    #TODO: maybe don't need scope for this method...
+    def iter(self, scope:'Scope'=None) -> Iter:
+        """Return an iterator over the iterable"""
+        raise NotImplementedError(f'{self.__class__.__name__}.iter')
+
 
 
 
@@ -138,16 +142,22 @@ class Scope():
         self.args:List[AST] = [] 
         self.bargs:List[BArg] = []
 
+    @property
+    def root(self) -> 'Scope':
+        """Return the root scope"""
+        return [*self][-1]
+
     def let(self, name:str, type:'Type'=undefined, value:AST=undefined, const=False):
         #overwrite anything that might have previously been there
         self.vars[name] = Scope._var(type, value, const)
 
-
-    def get(self, name:str) -> AST:
+    def get(self, name:str, default:AST=None) -> AST:
         #get a variable from this scope or any of its parents
         for s in self:
             if name in s.vars:
                 return s.vars[name].value
+        if default is not None:
+            return default
         raise NameError(f'{name} not found in scope {self}')
 
     def bind(self, name:str, value:AST):
@@ -273,12 +283,15 @@ class Function(Callable):
         self.scope = scope #scope where the function was defined, which may be different from the scope where it is called
     
     def eval(self, scope:Scope=None):
+        #TODO: maybe this should do self.scope=scope since this is the scope where the function is defined
+        #        just probably problems when expressing the function without calling it, e.g. with handles
+        #        f = {() => {...}} @f // the @f would set the scope to be the outer scope...
         return self
     
     def call(self, scope:Scope=None):
         #collect args from calling scope, and merge into function scope
-        fscope = self.scope.copy()
-        
+        fscope = Scope(self.scope)
+
         #TODO: this probably doesn't handle when the named vs unnamed call arguments are not exactly the same as defined
         for arg in self.args:
             if arg.val is None:
@@ -520,8 +533,6 @@ class Call(AST):
         self.bargs = bargs
 
     def eval(self, scope:Scope):
-        #make a fresh scope we can modify, and attach the calling args to it
-        scope = scope.copy()
         scope.attach_args(self.args, self.bargs)
 
         #functions get called with args, while everything else just gets evaluated/returned
@@ -663,6 +674,8 @@ class Bool(AST):
         return self
     def topy(self, scope:Scope=None):
         return self.val
+    def type(self, scope:Scope=None):
+        return Type('bool')
     def treestr(self, indent=0):
         return f'{tab * indent}Bool: {self.val}'
     def __str__(self):
@@ -798,12 +811,7 @@ class Number(Rangeable):
     
     #Rangeable methods
     def compare(self, other:'Number', scope:Scope=None) -> 'Number':
-        if self.val < other.val:
-            return Number(-1)
-        elif self.val == other.val:
-            return Number(0)
-        else:
-            return Number(1)
+        return Number(self.val - other.val)
     def successor(self, step:'Number'=undefined, scope:'Scope'=None) -> 'Number':
         if step is undefined:
             return Number(self.val + 1)
@@ -902,18 +910,21 @@ class Range(Iterable,Unpackable):
         return s
 
     def __repr__(self):
-        interval = f'{"[" if self.include_first else "("}{"[" if self.include_last else ")"}'
+        interval = f'{"[" if self.include_first else "("}{"]" if self.include_last else ")"}'
         return f'Range({repr(self.first)},{repr(self.second)},{repr(self.last)},interval={interval})'
 
 
 class RangeIter(Iter):
     def __init__(self, ast:AST):#range:Range): #TODO: want AST[Range] typing which means it evals to a range...
-        # self.range = range
+        self._id = f'.iter_{id(self)}'
         self.ast = ast
+    #     self.reset()
+
+    # def reset(self):
         self.range = None
-        self.i = None#self.range.first
+        self.i = None
         self.step = None
-    
+
     def eval(self, scope:Scope=None):
         return self
 
@@ -922,7 +933,10 @@ class RangeIter(Iter):
         #first iteration stuff
         #TODO: this is not a good condition to determine if this is the first iteration
         #        it will fail if the iterator was reused (e.g. in a nested loop)
-        if self.step is None:
+        #        basically this step should store a unique id in the scope, and check if that id exists (like how I first tried to implement it)
+        # scope.let(self._id, value=self)
+        if self.range is None or scope.get(self._id, undefined) is undefined:
+            scope.let(self._id, value=self)
             self.range = self.ast.eval(scope)
             assert isinstance(self.range, Range), f'RangeIter must be initialized with an AST that evaluates to a Range, not {type(self.range)}' 
             self.i = self.range.first
@@ -1054,7 +1068,6 @@ def hello_name():
     prog.eval(root)
 
 
-
 def if_else():
 
     #set up root scope with some functions
@@ -1161,6 +1174,7 @@ def unpack_test():
     # print(prog)
     prog.eval(root)
 
+
 def range_iter_test():
     
         #set up root scope with some functions
@@ -1174,6 +1188,7 @@ def range_iter_test():
         # print(next(it))
         # print(next(it))
         # print(next(it))
+        # ...
         prog = Block([
             Bind('r', Range(Number(0), Number(2), Number(10))),
             Bind('it', RangeIter(Call('r'))),
@@ -1194,6 +1209,33 @@ def range_iter_test():
         ])
         # print(prog)
         prog.eval(root)
+
+
+def loop_iter():
+
+    #set up root scope with some functions
+    root = Scope.default()
+
+    #loop iterator test
+    # it = iter([0,2..10])
+    # [cond, i] = next(it)
+    # loop cond:
+    #     printl(i)
+    #     [cond, i] = next(it)
+    prog = Block([
+        Bind('it', RangeIter(Range(Number(0), Number(2), Number(10)))),
+        Unpack(['cond', 'i'], Next(Call('it'))),
+
+        Loop(
+            Call('cond'),
+            Block([
+                Call('printl', [Call('i')]),
+                Unpack(['cond', 'i'], Next(Call('it'))),
+            ])
+        )
+    ])
+    # print(prog)
+    prog.eval(root)
 
 
 def rule110():
@@ -1243,5 +1285,6 @@ if __name__ == '__main__':
     # if_else_if()
     # hello_loop()
     # unpack_test()
-    range_iter_test()
+    # range_iter_test()
+    loop_iter()
     # rule110()
