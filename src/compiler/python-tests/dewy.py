@@ -105,9 +105,6 @@ class Unpackable(AST):
 #        would maybe replace the len property?
 
 class Iter(AST):
-    def reset(self):
-        """Reset the iterator to the beginning"""
-        raise NotImplementedError(f'{self.__class__.__name__}.reset')
     def next(self, scope:'Scope'=None) -> Unpackable: #TODO: TBD on the return type. need dewy tuple type...
         """Get the next item from the iterator"""
         raise NotImplementedError(f'{self.__class__.__name__}.next')
@@ -770,20 +767,23 @@ loop {(cond, i) = iter.next(); cond}
 class In(AST):
     #TODO: allow name to be an unpack structure as well
     def __init__(self, name:str, iterable:Iterable):#, init:AST, body:AST):
-        self._id = f'.iter_{id(self)}'
-        # self.init = init
-        # self.body = body
+        self._id = f'.it_{id(self)}'
+        self.name = name
+        self.iterable = iterable
 
     def eval(self, scope:Scope=None) -> Bool:
         #idempotent initialization
         try:
             it = scope.get(self._id)
         except NameError:
-            it = self.init.eval(scope)
+            it = self.iterable.iter(scope)
             scope.let(self._id, value=it, const=True)
 
         # body gets the binds element and returns the resulting condition
-        return self.body.eval(scope)
+        Unpack(['_', self.name], Next(Call(self._id))).eval(scope)
+        cond = Call('_').eval(scope)
+        assert isinstance(cond, Bool), f'loop condition must be a Bool, not {cond} of type {type(cond)}'
+        return cond
 
 class Next(AST):
     """handle getting the next element in the iteration"""
@@ -879,7 +879,7 @@ class Range(Iterable,Unpackable):
         return self
     
     def iter(self, scope:'Scope'=None) -> Iter:
-        return RangeIter(scope)
+        return RangeIter(self)
 
     # def type(self):
     #     return Type('Range') #TODO: this should maybe care about the type of data in it?
@@ -916,7 +916,7 @@ class Range(Iterable,Unpackable):
 
 class RangeIter(Iter):
     def __init__(self, ast:AST):#range:Range): #TODO: want AST[Range] typing which means it evals to a range...
-        self._id = f'.iter_{id(self)}'
+        # self._id = f'.iter_{id(self)}'
         self.ast = ast
     #     self.reset()
 
@@ -929,14 +929,7 @@ class RangeIter(Iter):
         return self
 
     def next(self, scope:Scope=None) -> Unpackable:
-
-        #first iteration stuff
-        #TODO: this is not a good condition to determine if this is the first iteration
-        #        it will fail if the iterator was reused (e.g. in a nested loop)
-        #        basically this step should store a unique id in the scope, and check if that id exists (like how I first tried to implement it)
-        # scope.let(self._id, value=self)
-        if self.range is None or scope.get(self._id, undefined) is undefined:
-            scope.let(self._id, value=self)
+        if self.range is None:
             self.range = self.ast.eval(scope)
             assert isinstance(self.range, Range), f'RangeIter must be initialized with an AST that evaluates to a Range, not {type(self.range)}' 
             self.i = self.range.first
@@ -1211,7 +1204,7 @@ def range_iter_test():
         prog.eval(root)
 
 
-def loop_iter():
+def loop_iter_manual():
 
     #set up root scope with some functions
     root = Scope.default()
@@ -1232,6 +1225,46 @@ def loop_iter():
                 Call('printl', [Call('i')]),
                 Unpack(['cond', 'i'], Next(Call('it'))),
             ])
+        )
+    ])
+    # print(prog)
+    prog.eval(root)
+
+
+def loop_in_iter():
+
+    #set up root scope with some functions
+    root = Scope.default()
+
+    #loop iterator test
+    # for i in [0,2..10]:
+    #     printl(i)
+    prog = Block([
+        Loop(
+            In('i', Range(Number(0), Number(2), Number(10))),
+            Call('printl', [Call('i')]),
+        )
+    ])
+    # print(prog)
+    prog.eval(root)
+
+
+def nested_loop():
+
+    #set up root scope with some functions
+    root = Scope.default()
+
+    #nested loop
+    # for i in [0,2..10]:
+    #     for j in [0,2..10]:
+    #         printl('{i},{j}')
+    prog = Block([
+        Loop(
+            In('i', Range(Number(0), Number(2), Number(10))),
+            Loop(
+                In('j', Range(Number(0), Number(2), Number(10))),
+                Call('printl', [IString([IString([Call('i'), String(',')]), Call('j')])]),
+            )
         )
     ])
     # print(prog)
@@ -1286,5 +1319,7 @@ if __name__ == '__main__':
     # hello_loop()
     # unpack_test()
     # range_iter_test()
-    loop_iter()
+    # loop_iter_manual()
+    # loop_in_iter()
+    nested_loop()
     # rule110()
