@@ -574,22 +574,33 @@ class Block(AST):
 
 
 class Call(AST):
-    def __init__(self, name:str, args:List[AST]=[], bargs:List[BArg]=[]):
-        self.name = name
+    def __init__(self, expr:str|AST, args:List[AST]=[], bargs:List[BArg]=[]):
+        assert isinstance(expr, str|AST), f'invalid type for call expression: `{self.expr}` of type `{type(self.expr)}`'
+        self.expr = expr
         self.args = args
         self.bargs = bargs
 
     def eval(self, scope:Scope):
         scope.attach_args(self.args, self.bargs)
 
-        #functions get called with args, while everything else just gets evaluated/returned
-        if isinstance(scope.get(self.name), Callable):
-            return scope.get(self.name).call(scope)
+        #check if we need to resolve the name, or if it was an anonymous expression
+        if isinstance(self.expr, AST):
+            expr = self.expr.eval(scope)
         else:
-            return scope.get(self.name)
+            expr = scope.get(self.expr)
+        
+        #functions get called with args, while everything else just gets evaluated/returned
+        if isinstance(expr, Callable):
+            return expr.call(scope)
+        else:
+            return expr
 
     def treestr(self, indent=0):
-        s = tab * indent + 'Call: ' + self.name
+        s = tab * indent + 'Call: '
+        if isinstance(self.expr, AST):
+            s += self.expr.treestr(indent + 1)
+        else:
+            s += self.expr
         if len(self.args) > 0 or len(self.bargs) > 0:
             s += '\n'
             for arg in self.args:
@@ -603,10 +614,11 @@ class Call(AST):
         arglist = ', '.join(map(str, self.args))
         barglist = ', '.join(f'{a}={v}' for a, v in self.bargs)
         args = arglist + (', ' if arglist and barglist else '') + barglist
-        return f'{self.name}({args})' if args else f'{self.name}'
+        #TODO: not sure if Function captures all objects that should get () even if they don't have args
+        return f'{self.expr}' + (f'({args})' if args or isinstance(self.expr, Function) else f'')
 
     def __repr__(self):
-        return f'Call({self.name}, {repr(self.args)}, {repr(self.bargs)})'
+        return f'Call({self.expr}, {repr(self.args)}, {repr(self.bargs)})'
 
 class String(Rangeable):
     def __init__(self, val:str):
@@ -1121,6 +1133,28 @@ def hello_func(run=True):
     else:
         print(prog)
 
+def anonymous_func(run=True):
+    
+        #set up root scope with some functions
+        root = Scope.default()
+    
+        #Hello, World!
+        prog = Block([
+            Call(
+                Function(
+                    [],
+                    Block([
+                        Call('printl', [String('Hello, World!')]),
+                    ]),
+                    root
+                )
+            ),
+        ])
+        if run:
+            prog.eval(root)
+        else:
+            print(prog)
+
 def hello_name(run=True):
 
     #set up root scope with some functions
@@ -1441,16 +1475,18 @@ def rule110(run=True):
 
 
 if __name__ == '__main__':
-    hello(False)
-    hello_func(False)
-    hello_name(False)
-    if_else(False)
-    if_else_if(False)
-    hello_loop(False)
-    unpack_test(False)
-    range_iter_test(False)
-    loop_iter_manual(False)
-    loop_in_iter(False)
-    nested_loop(False)
-    block_printing(False)
-    rule110(False)
+    # hello(False)
+    # hello_func(False)
+    anonymous_func(False)
+    anonymous_func(True)
+    # hello_name(False)
+    # if_else(False)
+    # if_else_if(False)
+    # hello_loop(False)
+    # unpack_test(False)
+    # range_iter_test(False)
+    # loop_iter_manual(False)
+    # loop_in_iter(False)
+    # nested_loop(False)
+    # block_printing(False)
+    # rule110(False)
