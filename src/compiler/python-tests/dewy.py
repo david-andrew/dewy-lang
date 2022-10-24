@@ -1,12 +1,10 @@
 from abc import ABC
-from collections import defaultdict, namedtuple
 from dataclasses import dataclass
 from types import NoneType, EllipsisType
-from typing import Any, List, Tuple as PyTuple, Callable as PyCallable, Union
+from typing import Any, Callable as PyCallable, Union
 from functools import partial
 
 import pdb
-import typing
 
 #Written in python3.10
 
@@ -140,7 +138,7 @@ class Unpackable(AST):
     def len(self, scope:'Scope'=None) -> int:
         """Return the length of the unpackable"""
         raise NotImplementedError(f'{self.__class__.__name__}.len')
-    def get(self, key:int|EllipsisType|slice|PyTuple[int|EllipsisType|slice], scope:'Scope'=None) -> AST:
+    def get(self, key:int|EllipsisType|slice|tuple[int|EllipsisType|slice], scope:'Scope'=None) -> AST:
         """Return the item at the given index"""
         raise NotImplementedError(f'{self.__class__.__name__}.get')
 #TODO: make a type annotation for Unpackable[N] where N is the number of items in the unpackable?
@@ -162,7 +160,7 @@ class Iterable(AST):
 
 
 
-BArg = PyTuple[str, AST]   #bound argument + current value for when making function calls
+BArg = tuple[str, AST]   #bound argument + current value for when making function calls
 
 class Scope():
     
@@ -178,8 +176,8 @@ class Scope():
         self.vars = {}
         
         #used for function calls
-        self.args:List[AST] = [] 
-        self.bargs:List[BArg] = []
+        self.args:list[AST] = []
+        self.bargs:list[BArg] = []
 
     @property
     def root(self) -> 'Scope':
@@ -230,7 +228,7 @@ class Scope():
         s.vars = self.vars.copy()
         return s
 
-    def attach_args(self, args:List[AST], bargs:List[BArg]): 
+    def attach_args(self, args:list[AST], bargs:list[BArg]):
         self.args = args
         self.bargs = bargs
 
@@ -247,14 +245,14 @@ class Scope():
 
 
 #probably won't use this, except possibly for when calling functions and providing enums from the function's scope
-# def merge_scopes(*scopes:List[Scope], onto:Scope=None):
+# def merge_scopes(*scopes:list[Scope], onto:Scope=None):
 #     #TODO... this probably could actually be a scope union class that inherits from Scope
 #     #            that way we don't have to copy the scopes
 #     pdb.set_trace()
 
 
 class Type(AST):
-    def __init__(self, name:str, params:List[AST]=None):
+    def __init__(self, name:str, params:list[AST]=None):
         self.name = name
         self.params = params
     def eval(self, scope:Scope=None):
@@ -318,7 +316,7 @@ class Arg:
 
 
 class Function(Callable):
-    def __init__(self, args:List[Arg], body:AST, scope:Scope=None):
+    def __init__(self, args:list[Arg], body:AST, scope:Scope=None):
         self.args = args
         self.body = body
         self.scope = scope #scope where the function was defined, which may be different from the scope where it is called
@@ -383,7 +381,7 @@ class Builtin(Callable):
         'printl': print,
         'readl': input
     }
-    def __init__(self, name:str, args:List[Arg], cls:PyCallable=None):
+    def __init__(self, name:str, args:list[Arg], cls:PyCallable=None):
         self.name = name
         self.args = args
         self.cls = cls
@@ -463,7 +461,7 @@ class Bind(AST):
         return f'Bind({self.name}, {repr(self.value)})'
 
 
-class PackStruct(List[Union[str,'PackStruct']]):
+class PackStruct(list[Union[str,'PackStruct']]):
     """
     represents the type for left hand side of an unpack operation
 
@@ -546,7 +544,7 @@ class Unpack(AST):
 
 
 class Block(AST):
-    def __init__(self, exprs:List[AST], newscope:bool=True):
+    def __init__(self, exprs:list[AST], newscope:bool=True):
         self.exprs = exprs
         self.newscope = newscope
     def eval(self, scope:Scope=None):
@@ -574,7 +572,7 @@ class Block(AST):
 
 
 class Call(AST):
-    def __init__(self, expr:str|AST, args:List[AST]=[], bargs:List[BArg]=[]):
+    def __init__(self, expr:str|AST, args:list[AST]=[], bargs:list[BArg]=[]):
         assert isinstance(expr, str|AST), f'invalid type for call expression: `{self.expr}` of type `{type(self.expr)}`'
         self.expr = expr
         self.args = args
@@ -639,7 +637,7 @@ class String(Rangeable):
         return f'String({repr(self.val)})'
 
 class IString(AST):
-    def __init__(self, parts:List[AST]):
+    def __init__(self, parts:list[AST]):
         self.parts = parts
 
     def eval(self, scope:Scope=None):
@@ -748,7 +746,7 @@ class Bool(AST):
         return f'Bool({repr(self.val)})'
 
 class If(AST):
-    def __init__(self, clauses:List[PyTuple[AST, AST]]):
+    def __init__(self, clauses:list[tuple[AST, AST]]):
         self.clauses = clauses
     
     def eval(self, scope:Scope=None):
@@ -1051,7 +1049,7 @@ class RangeIter(Iter):
 
 
 class Vector(Iterable, Unpackable):
-    def __init__(self, vals:List[AST]):
+    def __init__(self, vals:list[AST]):
         self.vals = vals
     def eval(self, scope:Scope=None):
         return self
@@ -1062,7 +1060,7 @@ class Vector(Iterable, Unpackable):
     #unpackable interface
     def len(self, scope:Scope=None):
         return len(self.vals)
-    def get(self, key:int|EllipsisType|slice|PyTuple[int|EllipsisType|slice], scope:Scope=None):
+    def get(self, key:int|EllipsisType|slice|tuple[int|EllipsisType|slice], scope:Scope=None):
         if isinstance(key, int):
             return self.vals[key]
         elif isinstance(key, EllipsisType):
@@ -1401,19 +1399,19 @@ def block_printing(run=True):
     root = Scope.default()
     prog = Block([
         Loop(
-            In('i', Range(Number(0), Number(2), Number(10))),
+            In('i', Range(Number(0), Number(2), Number(5))),
             Block([
                 Loop(
-                    In('j', Range(Number(0), Number(2), Number(10))),
+                    In('j', Range(Number(0), Number(2), Number(5))),
                     Block([
                         Loop(
-                            In('k', Range(Number(0), Number(2), Number(10))),
+                            In('k', Range(Number(0), Number(2), Number(5))),
                             Block([
                                 Loop(
-                                    In('l', Range(Number(0), Number(2), Number(10))),
+                                    In('l', Range(Number(0), Number(2), Number(5))),
                                     Block([
                                         Loop(
-                                            In('m', Range(Number(0), Number(2), Number(10))),
+                                            In('m', Range(Number(0), Number(2), Number(5))),
                                             Block([
                                                 Call('printl', [IString([Call('i'), String(','), Call('j'), String(','), Call('k'), String(','), Call('l'), String(','), Call('m')])]),
                                             ])
@@ -1475,18 +1473,27 @@ def rule110(run=True):
 
 
 if __name__ == '__main__':
-    # hello(False)
-    # hello_func(False)
-    anonymous_func(False)
-    anonymous_func(True)
-    # hello_name(False)
-    # if_else(False)
-    # if_else_if(False)
-    # hello_loop(False)
-    # unpack_test(False)
-    # range_iter_test(False)
-    # loop_iter_manual(False)
-    # loop_in_iter(False)
-    # nested_loop(False)
-    # block_printing(False)
-    # rule110(False)
+    funcs = [
+        hello,
+        hello_func,
+        anonymous_func,
+        anonymous_func,
+        hello_name,
+        if_else,
+        if_else_if,
+        hello_loop,
+        unpack_test,
+        range_iter_test,
+        loop_iter_manual,
+        loop_in_iter,
+        nested_loop,
+        block_printing,
+        # rule110,
+    ]
+
+    #print function ASTs and run
+    for func in funcs:
+        func(False) #print AST
+        func(True)  #run
+        print('----------------------------------------')
+
