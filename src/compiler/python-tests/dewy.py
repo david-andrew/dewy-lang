@@ -1,7 +1,7 @@
 from abc import ABC
 from dataclasses import dataclass
-from types import NoneType, EllipsisType
-from typing import Any, Callable as PyCallable, Union
+from types import EllipsisType
+from typing import Any, Callable as PyCallable, Union, Optional
 from functools import partial
 
 import pdb
@@ -172,7 +172,7 @@ class Scope():
         value:AST
         const:bool
     
-    def __init__(self, parent:Union['Scope',None]=None):
+    def __init__(self, parent:Optional['Scope']=None):
         self.parent = parent
         self.vars:dict[str, Scope._var] = {}
         

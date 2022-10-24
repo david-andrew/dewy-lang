@@ -23,6 +23,10 @@ class NonTerminal(Symbol):
 class Sentence:
     symbols: list[Symbol]
     def __str__(self): return " ".join(map(str, self.symbols))
+    def __len__(self): return len(self.symbols)
+    def __getitem__(self, i: int|slice):
+        if isinstance(i, slice): return Sentence(self.symbols[i])
+        return self.symbols[i]
 
 
 class Grammar:
@@ -49,6 +53,18 @@ class Grammar:
         return '\n'.join(lines)
 
 
+@dataclass(slots=True, frozen=True, eq=True)
+class Slot:
+    X: NonTerminal
+    rule: Sentence
+    i: int
+
+    def __str__(self): return f'{self.X} -> {self.alpha} • {self.beta}'
+    @property
+    def alpha(self) -> Sentence: return self.rule[:self.i]
+    @property 
+    def beta(self) -> Sentence: return self.rule[self.i:]
+    
 
 
 
@@ -63,8 +79,6 @@ print(G)
 pdb.set_trace()
 
 
-
-class Slot: ...
 class BSR: ...
 
 class MAST(ABC): ... #perhaps this should just be grammar? or something
@@ -85,5 +99,5 @@ def ascend(k, K, r): ...
 def nmatch(k, K, R): ...
 
 def complete_parser_for(Gamma, X):
-    def inner(tau:str): ...
-    return inner
+    def parse(tau:str): ...
+    return parse
