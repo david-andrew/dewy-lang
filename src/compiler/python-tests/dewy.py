@@ -82,8 +82,11 @@ class AST(ABC):
         raise NotImplementedError(f'{self.__class__.__name__}.__repr__')
 
 class Undefined(AST):
-    def __init__(self):
-        pass
+    """undefined singleton"""
+    def __new__(cls):
+        if not hasattr(cls, 'instance'):
+            cls.instance = super(Undefined, cls).__new__(cls)
+        return cls.instance
     def eval(self, scope:'Scope'=None):
         return self
     def topy(self, scope:'Scope'=None):
@@ -92,15 +95,13 @@ class Undefined(AST):
         return Type('undefined')
     def treesr(self, indent=0):
         return tab * indent + 'Undefined'
-    # @insert_tabs
     def __str__(self):
         return 'undefined'
     def __repr__(self):
         return 'Undefined()'
 
-#make any further calls to Undefined() return the same singleton instance
+#undefined shorthand, for convenience
 undefined = Undefined()
-Undefined.__new__ = lambda cls: undefined
 
 
 
@@ -171,9 +172,9 @@ class Scope():
         value:AST
         const:bool
     
-    def __init__(self, parent:Union['Scope',NoneType]=None):
+    def __init__(self, parent:Union['Scope',None]=None):
         self.parent = parent
-        self.vars = {}
+        self.vars:dict[str, Scope._var] = {}
         
         #used for function calls
         self.args:list[AST] = []
@@ -184,7 +185,7 @@ class Scope():
         """Return the root scope"""
         return [*self][-1]
 
-    def let(self, name:str, type:'Type'=undefined, value:AST=undefined, const=False):
+    def let(self, name:str, type:Union['Type',Undefined]=undefined, value:AST=undefined, const=False):
         #overwrite anything that might have previously been there
         self.vars[name] = Scope._var(type, value, const)
 
