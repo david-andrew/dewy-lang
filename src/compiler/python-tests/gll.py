@@ -157,7 +157,7 @@ def nmatch(k:int, K:set[Continuation], R:set[int]) -> tuple[list[Descriptor], se
     for c in K:
         for r in R:
             W.append(Descriptor(c.g, c.l, r))
-            Y.append(BSR(c.g, c.l, k, r))
+            Y.add(BSR(c.g, c.l, k, r))
     return W, Y
 
 
