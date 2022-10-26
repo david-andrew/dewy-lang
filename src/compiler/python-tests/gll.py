@@ -98,7 +98,8 @@ class BSR:
 
 """
 Definitions:
-  R:list[Descriptor]                        - worklist of descriptors
+  R:list[Descriptor]                        - worklist of descriptors (R: fancy font)
+  R:set[int]                                - set of right extents (R: normal font)
   U:set[Descriptor]                         - set that stores all the descriptors that have been added to the worklist previously. ensures no descriptor is added to worklist twice
   P:set[tuple[Commencement, int]]           - set of relations that records for all nonterminals the left and right extents that have been discovered so far
   G:set[tuple[Commencement, Continuation]]  - set of relations between commencements and continuations
@@ -138,15 +139,15 @@ def match(tau:str, d:Descriptor):
     ...
 
 
-def skip(k:int, c:Continuation, R:list[Descriptor]):
-    ...
+def skip(k:int, c:Continuation, R:set[int]) -> tuple[list[Descriptor], set[BSR]]:
+    return nmatch(k, {c}, R)
 
 
 def ascend(k:int, K:set[Continuation], r:int) -> tuple[list[Descriptor], set[BSR]]:
-    ...
+    return nmatch(k, K, {r})
 
 
-def nmatch(k:int, K:set[Continuation], R:list[Descriptor]):
+def nmatch(k:int, K:set[Continuation], R:set[int]) -> tuple[list[Descriptor], set[BSR]]:
     ...
 
 
