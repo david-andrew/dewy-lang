@@ -98,8 +98,8 @@ class BSR:
 
 """
 Definitions:
-  R:list[Descriptor]                        - worklist of descriptors (R: fancy font)
-  R:set[int]                                - set of right extents (R: normal font)
+  W:list[Descriptor]                        - worklist of descriptors. paper uses 𝓡, but replaced with W to avoid confusion with R for the set of right extents. TODO: replace with unicode R that doesn't decompose to U+0052
+  R:set[int]                                - set of right extents
   U:set[Descriptor]                         - set that stores all the descriptors that have been added to the worklist previously. ensures no descriptor is added to worklist twice
   P:set[tuple[Commencement, int]]           - set of relations that records for all nonterminals the left and right extents that have been discovered so far
   G:set[tuple[Commencement, Continuation]]  - set of relations between commencements and continuations
@@ -115,12 +115,12 @@ def descend(Gamma:Grammar, X:NonTerminal, l:int) -> list[Descriptor]:
     return [Descriptor(Slot(X, rule, 0), l, l) for rule in Gamma.rules[X]]
 
 
-def loop(Gamma:Grammar, tau:str, R:list[Descriptor], U:set[Descriptor], G:set[tuple[Commencement,Continuation]], P:set[tuple[Commencement, int]], Y:set[BSR]) -> tuple[set[Descriptor], set[BSR]]: 
-    if not R: return U, Y
-    d = R.pop()
-    (Rp,Yp), Gp, Pp = process(Gamma, tau, d, G, P)
-    Rpp = [r for r in R + Rp  if r not in U] #and r != d (already popped)
-    return loop(Gamma, tau, Rpp, U|{d}, G|Gp, P|Pp, Y|Yp)
+def loop(Gamma:Grammar, tau:str, W:list[Descriptor], U:set[Descriptor], G:set[tuple[Commencement,Continuation]], P:set[tuple[Commencement, int]], Y:set[BSR]) -> tuple[set[Descriptor], set[BSR]]: 
+    if not W: return U, Y
+    d = W.pop()
+    (Wp,Yp), Gp, Pp = process(Gamma, tau, d, G, P)
+    Wpp = [r for r in W + Wp  if r not in U] #and r != d (already popped)
+    return loop(Gamma, tau, Wpp, U|{d}, G|Gp, P|Pp, Y|Yp)
 
 
 def process(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,Continuation]], P:set[tuple[Commencement, int]]): 
@@ -128,7 +128,11 @@ def process(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,Conti
 
 
 def process_eps(d:Descriptor, G:set[tuple[Commencement, Continuation]], P:set[tuple[Commencement, int]]): 
-    ...
+    assert len(d.slot.beta) == 0, "process_eps called on non-epsilon descriptor" #TODO: not sure if this is the right place for this
+    K:set[Continuation] = {c for (_,c) in G}
+    W, Y = ascend(d.l, K, d.k)
+    Yp = {BSR(d.slot, d.l, d.l, d.l)}
+    return (W, Y|Yp), set(), {(Commencement(d.slot.X, d.l), d.k)}
 
 
 def process_sym(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,Continuation]], P:set[tuple[Commencement, int]]):
@@ -148,7 +152,13 @@ def ascend(k:int, K:set[Continuation], r:int) -> tuple[list[Descriptor], set[BSR
 
 
 def nmatch(k:int, K:set[Continuation], R:set[int]) -> tuple[list[Descriptor], set[BSR]]:
-    ...
+    W: list[Descriptor] = []
+    Y: set[BSR] = {}
+    for c in K:
+        for r in R:
+            W.append(Descriptor(c.g, c.l, r))
+            Y.append(BSR(c.g, c.l, k, r))
+    return W, Y
 
 
 def complete_parser_for(Gamma:Grammar, X:NonTerminal):
