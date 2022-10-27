@@ -93,10 +93,10 @@ class Slot:
 #     l: int; k: int; r: int
 #     def __str__(self): return f'〈{self.g}, {self.l}, {self.k}, {self.r}〉'
 #     def __repr__(self): return f'BSR(slot={self.g}, l={self.l}, k={self.k}, r={self.r})'
-Commencement = tuple[NonTerminal, int]
-Continuation = tuple[Slot, int]
-Descriptor = tuple[Slot, int, int]
-BSR = tuple[Slot, int, int, int]
+Commencement = tuple[NonTerminal, int]      #(X:NonTerminal, l:int)
+Continuation = tuple[Slot, int]             #(g:Slot, l:int)
+Descriptor = tuple[Slot, int, int]          #(g:Slot, l:int, k:int)
+BSR = tuple[Slot, int, int, int]            #(g:Slot, l:int, k:int, r:int)
 
 
 """
@@ -131,12 +131,12 @@ def process(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,Conti
 
 
 def process_eps(d:Descriptor, G:set[tuple[Commencement, Continuation]], P:set[tuple[Commencement, int]]): 
-    slot, l, k = d
-    assert len(slot.beta) == 0, "process_eps called on non-epsilon descriptor" #TODO: not sure if this is the right place for this
+    g, l, k = d
+    assert len(g.beta) == 0, "process_eps called on non-epsilon descriptor" #TODO: not sure if this is the right place for this
     K:set[Continuation] = {c for (_,c) in G}
     W, Y = ascend(l, K, k)
-    Yp = {(slot, l, l, l)}
-    return (W, Y|Yp), set(), {((slot.X, l), k)}
+    Yp = {(g, l, l, l)}
+    return (W, Y|Yp), set(), {((g.X, l), k)}
 
 
 def process_sym(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,Continuation]], P:set[tuple[Commencement, int]]):
