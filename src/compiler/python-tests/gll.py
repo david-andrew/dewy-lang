@@ -66,33 +66,6 @@ class Slot:
     @property 
     def beta(self) -> Sentence: return self.rule[self.i:]
 
-# @dataclass(slots=True, frozen=True, eq=True)
-# class Commencement:
-#     X: NonTerminal
-#     l: int
-#     def __str__(self): return f'〈{self.X}, {self.l}〉'
-#     def __repr__(self): return f'Commencement(X={self.X}, l={self.l})'
-
-# @dataclass(slots=True, frozen=True, eq=True)
-# class Continuation:
-#     g: Slot
-#     l: int
-#     def __str__(self): return f'〈{self.g}, {self.l}〉'
-#     def __repr__(self): return f'Continuation(g={self.g}, l={self.l})'
-
-# @dataclass(slots=True, frozen=True, eq=True)
-# class Descriptor:
-#     slot: Slot
-#     l: int; k: int
-#     def __str__(self): return f'〈{self.g}, {self.l}, {self.k}〉'
-#     def __repr__(self): return f'Descriptor(slot={self.slot}, l={self.l}, k={self.k})'
-    
-# @dataclass(slots=True, frozen=True, eq=True)
-# class BSR:
-#     g: Slot
-#     l: int; k: int; r: int
-#     def __str__(self): return f'〈{self.g}, {self.l}, {self.k}, {self.r}〉'
-#     def __repr__(self): return f'BSR(slot={self.g}, l={self.l}, k={self.k}, r={self.r})'
 Commencement = tuple[NonTerminal, int]      #(X:NonTerminal, l:int)
 Continuation = tuple[Slot, int]             #(g:Slot, l:int)
 Descriptor = tuple[Slot, int, int]          #(g:Slot, l:int, k:int)
@@ -127,12 +100,15 @@ def loop(Gamma:Grammar, tau:str, W:list[Descriptor], U:set[Descriptor], G:set[tu
 
 
 def process(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,Continuation]], P:set[tuple[Commencement, int]]): 
-    ...
+    g, l, k = d
+    if len(g.beta) == 0:
+        return process_eps(d, G, P)
+    else:
+        return process_sym(Gamma, tau, d, G, P)
 
 
 def process_eps(d:Descriptor, G:set[tuple[Commencement, Continuation]], P:set[tuple[Commencement, int]]): 
     g, l, k = d
-    assert len(g.beta) == 0, "process_eps called on non-epsilon descriptor" #TODO: not sure if this is the right place for this
     K:set[Continuation] = {c for (_,c) in G}
     W, Y = ascend(l, K, k)
     Yp = {(g, l, l, l)}
@@ -143,8 +119,15 @@ def process_sym(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,C
     ...
 
 
-def match(tau:str, d:Descriptor):
-    ...
+def match(tau:str, d:Descriptor) -> tuple[set[Descriptor], set[BSR]]:
+    g, l, k = d
+    beta = g.beta
+    s = beta[0] #assert s is Terminal, occurs in process_sym
+    if tau[k] == s.t:
+        new_g = Slot(g.X, g.rule, g.i+1)
+        return ({(new_g,l,k+1)}, {(new_g,l,k,k+1)})
+    else:
+        return (set(), set())
 
 
 def skip(k:int, c:Continuation, R:set[int]) -> tuple[list[Descriptor], set[BSR]]:
