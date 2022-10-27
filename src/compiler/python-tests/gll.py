@@ -66,34 +66,37 @@ class Slot:
     @property 
     def beta(self) -> Sentence: return self.rule[self.i:]
 
-@dataclass(slots=True, frozen=True, eq=True)
-class Commencement:
-    X: NonTerminal
-    l: int
-    def __str__(self): return f'〈{self.X}, {self.l}〉'
-    def __repr__(self): return f'Commencement(X={self.X}, l={self.l})'
+# @dataclass(slots=True, frozen=True, eq=True)
+# class Commencement:
+#     X: NonTerminal
+#     l: int
+#     def __str__(self): return f'〈{self.X}, {self.l}〉'
+#     def __repr__(self): return f'Commencement(X={self.X}, l={self.l})'
 
-@dataclass(slots=True, frozen=True, eq=True)
-class Continuation:
-    g: Slot
-    l: int
-    def __str__(self): return f'〈{self.g}, {self.l}〉'
-    def __repr__(self): return f'Continuation(g={self.g}, l={self.l})'
+# @dataclass(slots=True, frozen=True, eq=True)
+# class Continuation:
+#     g: Slot
+#     l: int
+#     def __str__(self): return f'〈{self.g}, {self.l}〉'
+#     def __repr__(self): return f'Continuation(g={self.g}, l={self.l})'
 
-@dataclass(slots=True, frozen=True, eq=True)
-class Descriptor:
-    slot: Slot
-    l: int; k: int
-    def __str__(self): return f'〈{self.g}, {self.l}, {self.k}〉'
-    def __repr__(self): return f'Descriptor(slot={self.slot}, l={self.l}, k={self.k})'
+# @dataclass(slots=True, frozen=True, eq=True)
+# class Descriptor:
+#     slot: Slot
+#     l: int; k: int
+#     def __str__(self): return f'〈{self.g}, {self.l}, {self.k}〉'
+#     def __repr__(self): return f'Descriptor(slot={self.slot}, l={self.l}, k={self.k})'
     
-@dataclass(slots=True, frozen=True, eq=True)
-class BSR:
-    g: Slot
-    l: int; k: int; r: int
-    def __str__(self): return f'〈{self.g}, {self.l}, {self.k}, {self.r}〉'
-    def __repr__(self): return f'BSR(slot={self.g}, l={self.l}, k={self.k}, r={self.r})'
-
+# @dataclass(slots=True, frozen=True, eq=True)
+# class BSR:
+#     g: Slot
+#     l: int; k: int; r: int
+#     def __str__(self): return f'〈{self.g}, {self.l}, {self.k}, {self.r}〉'
+#     def __repr__(self): return f'BSR(slot={self.g}, l={self.l}, k={self.k}, r={self.r})'
+Commencement = tuple[NonTerminal, int]
+Continuation = tuple[Slot, int]
+Descriptor = tuple[Slot, int, int]
+BSR = tuple[Slot, int, int, int]
 
 
 """
@@ -112,14 +115,14 @@ def fungll(Gamma:Grammar, tau:str, X:NonTerminal):
 
 
 def descend(Gamma:Grammar, X:NonTerminal, l:int) -> list[Descriptor]:
-    return [Descriptor(Slot(X, rule, 0), l, l) for rule in Gamma.rules[X]]
+    return [(Slot(X, rule, 0), l, l) for rule in Gamma.rules[X]]
 
 
 def loop(Gamma:Grammar, tau:str, W:list[Descriptor], U:set[Descriptor], G:set[tuple[Commencement,Continuation]], P:set[tuple[Commencement, int]], Y:set[BSR]) -> tuple[set[Descriptor], set[BSR]]: 
     if not W: return U, Y
-    d = W.pop()
+    d = W[0]
     (Wp,Yp), Gp, Pp = process(Gamma, tau, d, G, P)
-    Wpp = [r for r in W + Wp  if r not in U] #and r != d (already popped)
+    Wpp = [r for r in W + Wp  if r not in U and r != d]
     return loop(Gamma, tau, Wpp, U|{d}, G|Gp, P|Pp, Y|Yp)
 
 
@@ -128,11 +131,12 @@ def process(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,Conti
 
 
 def process_eps(d:Descriptor, G:set[tuple[Commencement, Continuation]], P:set[tuple[Commencement, int]]): 
-    assert len(d.slot.beta) == 0, "process_eps called on non-epsilon descriptor" #TODO: not sure if this is the right place for this
+    slot, l, k = d
+    assert len(slot.beta) == 0, "process_eps called on non-epsilon descriptor" #TODO: not sure if this is the right place for this
     K:set[Continuation] = {c for (_,c) in G}
-    W, Y = ascend(d.l, K, d.k)
-    Yp = {BSR(d.slot, d.l, d.l, d.l)}
-    return (W, Y|Yp), set(), {(Commencement(d.slot.X, d.l), d.k)}
+    W, Y = ascend(l, K, k)
+    Yp = {(slot, l, l, l)}
+    return (W, Y|Yp), set(), {((slot.X, l), k)}
 
 
 def process_sym(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,Continuation]], P:set[tuple[Commencement, int]]):
@@ -153,11 +157,12 @@ def ascend(k:int, K:set[Continuation], r:int) -> tuple[list[Descriptor], set[BSR
 
 def nmatch(k:int, K:set[Continuation], R:set[int]) -> tuple[list[Descriptor], set[BSR]]:
     W: list[Descriptor] = []
-    Y: set[BSR] = {}
+    Y: set[BSR] = set()
     for c in K:
+        g, l = c
         for r in R:
-            W.append(Descriptor(c.g, c.l, r))
-            Y.add(BSR(c.g, c.l, k, r))
+            W.append((g, l, r))
+            Y.add((g, l, k, r))
     return W, Y
 
 
