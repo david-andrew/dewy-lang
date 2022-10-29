@@ -8,6 +8,10 @@ from dataclasses import dataclass
 
 import pdb
 
+#TODO: quality of life EBNF/notation for specifying grammar rules. probably put in a different file
+# class MAST(ABC): ... #perhaps this should just be grammar? or something
+# class EBNF(ABC): ... #this is the higher level grammar with extra notation
+
 
 class Symbol(ABC): ...
 
@@ -176,37 +180,52 @@ def complete_parser_for(Gamma:Grammar, X:NonTerminal):
 
 
 
-# test with example from paper: E ::= E E E | "1" | eps
-E = NonTerminal('E')
-G = Grammar()
-G.add_rule(E, Sentence((E,E,E)))
-G.add_rule(E, Sentence((Terminal('1'),)))
-G.add_rule(E, Sentence())
+if __name__ == '__main__':
 
-parser = complete_parser_for(G, E)
-print(G)
-print('1')
-print(parser('1'))
+    # test with example from paper: E ::= E E E | "1" | eps
+    E = NonTerminal('E')
+    G = Grammar()
+    G.add_rule(E, Sentence((E,E,E)))
+    G.add_rule(E, Sentence((Terminal('1'),)))
+    G.add_rule(E, Sentence())
 
-
-# custom test example
-#S = 'a' | 'b' #B #S #S | ϵ;
-#B = ϵ;
-S = NonTerminal('S')
-B = NonTerminal('B')
-G = Grammar()
-G.add_rule(S, Sentence((Terminal('a'),)))
-G.add_rule(S, Sentence((Terminal('b'), B, S, S,)))
-G.add_rule(S, Sentence())
-G.add_rule(B, Sentence())
-
-parser = complete_parser_for(G, S)
-print(G)
-print('bb')
-print(parser('bb'))
+    parser = complete_parser_for(G, E)
+    print(G)
+    print('1')
+    print(parser('1'))
 
 
+    # custom test example
+    #S = 'a' | 'b' #B #S #S | ϵ;
+    #B = ϵ;
+    S = NonTerminal('S')
+    B = NonTerminal('B')
+    G = Grammar()
+    G.add_rule(S, Sentence((Terminal('a'),)))
+    G.add_rule(S, Sentence((Terminal('b'), B, S, S,)))
+    G.add_rule(S, Sentence())
+    G.add_rule(B, Sentence())
 
-#TODO: quality of life EBNF/notation for specifying grammar rules
-# class MAST(ABC): ... #perhaps this should just be grammar? or something
-# class EBNF(ABC): ... #this is the higher level grammar with extra notation
+    parser = complete_parser_for(G, S)
+    print(G)
+    print('bb')
+    print(parser('bb'))
+
+
+    #simple arithmetic grammar
+    #E ::= E + E | E * E | (E) | 1
+    E = NonTerminal('E')
+    G = Grammar()
+    G.add_rule(E, Sentence((E, Terminal('+'), E)))
+    G.add_rule(E, Sentence((E, Terminal('*'), E)))
+    G.add_rule(E, Sentence((Terminal('('), E, Terminal(')'))))
+    G.add_rule(E, Sentence((Terminal('1'),)))
+
+    parser = complete_parser_for(G, E)
+    print(G)
+    print('1+1')
+    print(parser('1+1'))
+
+
+
+
