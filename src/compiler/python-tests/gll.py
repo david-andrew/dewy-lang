@@ -24,7 +24,7 @@ class NonTerminal(Symbol):
 @dataclass(slots=True, frozen=True, eq=True)
 class Sentence:
     symbols: tuple[Symbol, ...] = ()
-    def __str__(self): return " ".join(map(str, self.symbols))
+    def __str__(self): return " ".join(map(str, self.symbols)) if len(self.symbols) > 0 else "ϵ"
     def __len__(self): return len(self.symbols)
     def __getitem__(self, i: int|slice):
         if isinstance(i, slice): return Sentence(self.symbols[i])
@@ -126,12 +126,13 @@ def process_eps(d:Descriptor, G:set[tuple[Commencement, Continuation]], P:set[tu
 def process_sym(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,Continuation]], P:set[tuple[Commencement, int]]) -> tuple[tuple[list[Descriptor], set[BSR]], set[tuple[Commencement, Continuation]], set[tuple[Commencement, int]]]:
     g, l, k = d
     s = g.s
-    R = {r for ((_s,_k),r) in P if _k==k and _s==s}
     if isinstance(s, Terminal):
         return (match(tau, d), set(), set())
     
     assert isinstance(s, NonTerminal), f'Expected NonTerminal, got {s}'
     Gp = {((s,k),(g.next(), l))}
+    R = {r for ((_s,_k),r) in P if _k==k and _s==s}
+    
     if len(R) == 0:
         return ((descend(Gamma, s, k),set()), Gp, set())
     
@@ -141,7 +142,7 @@ def process_sym(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,C
 def match(tau:str, d:Descriptor) -> tuple[list[Descriptor], set[BSR]]:
     g, l, k = d
     assert isinstance(g.s, Terminal), f'Cannot match because {g.s} is not a terminal.'
-    if tau[k] == g.s.t:
+    if k < len(tau) and tau[k] == g.s.t:
         new_g = g.next()
         return ([(new_g,l,k+1)], {(new_g,l,k,k+1)})
     else:
