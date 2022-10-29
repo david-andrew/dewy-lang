@@ -184,18 +184,27 @@ G.add_rule(E, Sentence((Terminal('1'),)))
 G.add_rule(E, Sentence())
 
 parser = complete_parser_for(G, E)
+print(G)
+print('1')
 print(parser('1'))
 
 
-# #DEBUG make some test sentences and print
-# G = Grammar()
-# G.add_rule(NonTerminal("S"), Sentence([NonTerminal("A"), Terminal("a")]))
-# G.add_rule(NonTerminal("S"), Sentence([NonTerminal("B"), Terminal("b")]))
-# G.add_rule(NonTerminal("A"), Sentence([Terminal("a")]))
-# G.add_rule(NonTerminal("B"), Sentence([Terminal("b")]))
-# G.add_rule(NonTerminal("B"), Sentence([Terminal("b"), Terminal("b")]))
-# print(G)
-# pdb.set_trace()
+# custom test example
+#S = 'a' | 'b' #B #S #S | ϵ;
+#B = ϵ;
+S = NonTerminal('S')
+B = NonTerminal('B')
+G = Grammar()
+G.add_rule(S, Sentence((Terminal('a'),)))
+G.add_rule(S, Sentence((Terminal('b'), B, S, S,)))
+G.add_rule(S, Sentence())
+G.add_rule(B, Sentence())
+
+parser = complete_parser_for(G, S)
+print(G)
+print('bb')
+print(parser('bb'))
+
 
 
 #TODO: quality of life EBNF/notation for specifying grammar rules
