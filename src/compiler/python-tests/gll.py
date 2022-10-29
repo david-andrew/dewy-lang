@@ -92,7 +92,7 @@ Definitions:
 
 
 def fungll(Gamma:Grammar, tau:str, X:NonTerminal): 
-    return loop(Gamma, tau, descend(Gamma,X, 0), set(), set(), set(), set())
+    return loop(Gamma, tau, descend(Gamma, X, 0), set(), set(), set(), set())
 
 
 def descend(Gamma:Grammar, X:NonTerminal, l:int) -> list[Descriptor]:
@@ -103,7 +103,7 @@ def loop(Gamma:Grammar, tau:str, W:list[Descriptor], U:set[Descriptor], G:set[tu
     if not W: return U, Y
     d = W[0]
     (Wp,Yp), Gp, Pp = process(Gamma, tau, d, G, P)
-    Wpp = [r for r in W + Wp  if r not in U and r != d]
+    Wpp = [r for r in W + Wp  if r not in U|{d}]
     return loop(Gamma, tau, Wpp, U|{d}, G|Gp, P|Pp, Y|Yp)
 
 
@@ -115,7 +115,7 @@ def process(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,Conti
     return process_sym(Gamma, tau, d, G, P)
 
 
-def process_eps(d:Descriptor, G:set[tuple[Commencement, Continuation]], P:set[tuple[Commencement, int]]): 
+def process_eps(d:Descriptor, G:set[tuple[Commencement, Continuation]], P:set[tuple[Commencement, int]]) -> tuple[tuple[list[Descriptor], set[BSR]], set[tuple[Commencement, Continuation]], set[tuple[Commencement, int]]]: 
     g, l, k = d
     K:set[Continuation] = {c for (_,c) in G}
     W, Y = ascend(l, K, k)
@@ -123,28 +123,29 @@ def process_eps(d:Descriptor, G:set[tuple[Commencement, Continuation]], P:set[tu
     return (W, Y|Yp), set(), {((g.X, l), k)}
 
 
-def process_sym(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,Continuation]], P:set[tuple[Commencement, int]]):
+def process_sym(Gamma:Grammar, tau:str, d:Descriptor, G:set[tuple[Commencement,Continuation]], P:set[tuple[Commencement, int]]) -> tuple[tuple[list[Descriptor], set[BSR]], set[tuple[Commencement, Continuation]], set[tuple[Commencement, int]]]:
     g, l, k = d
     s = g.s
     R = {r for ((_s,_k),r) in P if _k==k and _s==s}
-    Gp = {((s,k),(g.next(), l))}
     if isinstance(s, Terminal):
         return (match(tau, d), set(), set())
+    
+    assert isinstance(s, NonTerminal), f'Expected NonTerminal, got {s}'
+    Gp = {((s,k),(g.next(), l))}
     if len(R) == 0:
-        assert isinstance(s, NonTerminal), f'Expected NonTerminal, got {s}'
         return ((descend(Gamma, s, k),set()), Gp, set())
     
     return (skip(k, (g.next(), l), R), Gp, set())
 
 
-def match(tau:str, d:Descriptor) -> tuple[set[Descriptor], set[BSR]]:
+def match(tau:str, d:Descriptor) -> tuple[list[Descriptor], set[BSR]]:
     g, l, k = d
     assert isinstance(g.s, Terminal), f'Cannot match because {g.s} is not a terminal.'
     if tau[k] == g.s.t:
         new_g = g.next()
         return ([(new_g,l,k+1)], {(new_g,l,k,k+1)})
     else:
-        return (set(), set())
+        return ([], set())
 
 
 def skip(k:int, c:Continuation, R:set[int]) -> tuple[list[Descriptor], set[BSR]]:
