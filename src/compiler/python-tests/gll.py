@@ -28,7 +28,8 @@ class NonTerminal(Symbol):
 @dataclass(slots=True, frozen=True, eq=True)
 class Sentence:
     symbols: tuple[Symbol, ...] = ()
-    def __str__(self): return " ".join(map(str, self.symbols)) if len(self.symbols) > 0 else "ϵ"
+    def base_str(self): return " ".join(map(str, self.symbols))
+    def __str__(self): return self.base_str() if len(self.symbols) > 0 else "ϵ"
     def __len__(self): return len(self.symbols)
     def __getitem__(self, i: int|slice):
         if isinstance(i, slice): return Sentence(self.symbols[i])
@@ -37,15 +38,20 @@ class Sentence:
 class Grammar:
     def __init__(self, rules:dict[NonTerminal, list[Sentence]]=None, start:NonTerminal=None):
         self.rules = rules if rules else {}
-        self.start = start
+        # self.start = start
 
     def add_rule(self, X:NonTerminal, sentence:Sentence):
         if X not in self.rules:
             self.rules[X] = []
         self.rules[X].append(sentence)
 
-    def set_start(self, X:NonTerminal):
-        self.start = X
+    # def set_start(self, X:NonTerminal):
+    #     self.start = X
+
+    def add_augment(self, X:NonTerminal):
+        Xp = NonTerminal(f"{X}'")
+        self.add_rule(Xp, Sentence((X,)))
+        return Xp
 
     def __repr__(self):
         return f'Grammar(start={self.start}, rules={self.rules})'
@@ -63,7 +69,7 @@ class Slot:
     X: NonTerminal
     rule: Sentence
     i: int
-    def __str__(self): return f'{self.X} ::= {self.alpha}•{self.beta}'
+    def __str__(self): return f'{self.X} ::= {self.alpha.base_str()}•{self.beta.base_str()}'
     def __repr__(self): return f'Slot(X={self.X}, rule={self.rule}, i={self.i})'
     @property
     def alpha(self) -> Sentence: return self.rule[:self.i]
@@ -95,7 +101,7 @@ Definitions:
 """
 
 
-def fungll(Gamma:Grammar, tau:str, X:NonTerminal): 
+def fungll(Gamma:Grammar, tau:str, X:NonTerminal) -> tuple[set[Descriptor], set[BSR]]: 
     return loop(Gamma, tau, descend(Gamma, X, 0), set(), set(), set(), set())
 
 
@@ -180,7 +186,71 @@ def complete_parser_for(Gamma:Grammar, X:NonTerminal):
 
 
 
+#tasks
+# check if a parse was a success by finding the top level BSR node
+# nice printing of BSR
+# seq[T] instead of str for tau
+
+
+def parse_str(Y:set[BSR]):
+    s = [f'({g}, {l}, {k}, {r})\n' for g, l, k, r in Y] 
+    return '{\n' + ''.join(s) + '}'
+
+def parse_roots(X:NonTerminal, Y:set[BSR], tau:str) -> set[BSR]:
+    result = set()
+    for y in Y:
+        g, l, k, r = y
+        if g.X == X and l == 0 and r == len(tau) and len(g.beta) == 0:
+            result.add(y)
+
+    return result
+
+
 if __name__ == '__main__':
+
+    # super simple test grammar S ::= 'h' 'e' 'l' 'l' 'o'
+    S = NonTerminal('S')
+    G = Grammar()
+    G.add_rule(S, Sentence((Terminal('h'), Terminal('e'), Terminal('l'), Terminal('l'), Terminal('o'))))
+    Sp = G.add_augment(S)
+
+    parse = complete_parser_for(G, Sp)
+    print('------------------------------------------------------------')
+    print(G)
+    input = 'hello'
+    print(f'input: {input}')
+    result = parse(input)
+    print(parse_str(result))
+    roots = parse_roots(Sp, result, input)
+    print(f'roots: {parse_str(roots)}')
+
+
+    # test with example from the paper
+    # Tuple ::= '(' As ')'
+    # As ::= ϵ | a' More
+    # More ::= ϵ | ',' 'a' More
+    Tuple = NonTerminal('Tuple')
+    As = NonTerminal('As')
+    More = NonTerminal('More')
+    G = Grammar()
+    G.add_rule(Tuple, Sentence((Terminal('('), As, Terminal(')'))))
+    G.add_rule(As, Sentence((Terminal('a'), More)))
+    G.add_rule(As, Sentence())
+    G.add_rule(More, Sentence((Terminal(','), Terminal('a'), More)))
+    G.add_rule(More, Sentence())
+    Tp = G.add_augment(Tuple)
+
+    parse = complete_parser_for(G, Tp)
+    print('------------------------------------------------------------')
+    print(G)
+    input = '(a,a)'
+    print(f'input: {input}')
+    result = parse(input)
+    print(parse_str(result))
+    roots = parse_roots(Tp, result, input)
+    print(f'roots: {parse_str(roots)}')
+
+
 
     # test with example from paper: E ::= E E E | "1" | eps
     E = NonTerminal('E')
@@ -188,11 +258,17 @@ if __name__ == '__main__':
     G.add_rule(E, Sentence((E,E,E)))
     G.add_rule(E, Sentence((Terminal('1'),)))
     G.add_rule(E, Sentence())
+    Ep = G.add_augment(E)
 
-    parser = complete_parser_for(G, E)
+    parser = complete_parser_for(G, Ep)
+    print('------------------------------------------------------------')
     print(G)
-    print('1')
-    print(parser('1'))
+    input = '1'
+    print(f'input: {input}')
+    result = parser(input)
+    print(parse_str(result))
+    roots = parse_roots(Ep, result, input)
+    print(f'roots: {parse_str(roots)}')
 
 
     # custom test example
@@ -205,11 +281,17 @@ if __name__ == '__main__':
     G.add_rule(S, Sentence((Terminal('b'), B, S, S,)))
     G.add_rule(S, Sentence())
     G.add_rule(B, Sentence())
+    Sp = G.add_augment(S)
 
-    parser = complete_parser_for(G, S)
+    parser = complete_parser_for(G, Sp)
+    print('------------------------------------------------------------')
     print(G)
-    print('bb')
-    print(parser('bb'))
+    input = 'bb'
+    print(f'input: {input}')
+    result = parser(input)
+    print(parse_str(result))
+    roots = parse_roots(Sp, result, input)
+    print(f'roots: {parse_str(roots)}')
 
 
     #simple arithmetic grammar
@@ -220,12 +302,17 @@ if __name__ == '__main__':
     G.add_rule(E, Sentence((E, Terminal('*'), E)))
     G.add_rule(E, Sentence((Terminal('('), E, Terminal(')'))))
     G.add_rule(E, Sentence((Terminal('1'),)))
+    Ep = G.add_augment(E)
 
-    parser = complete_parser_for(G, E)
+    parser = complete_parser_for(G, Ep)
+    print('------------------------------------------------------------')
     print(G)
-    print('1+1')
-    print(parser('1+1'))
-
+    input = '1+1'
+    print(f'input: {input}')
+    result = parser(input)
+    print(parse_str(result))
+    roots = parse_roots(Ep, result, input)
+    print(f'roots: {parse_str(roots)}')
 
 
 
