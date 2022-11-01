@@ -38,20 +38,11 @@ class Sentence:
 class Grammar:
     def __init__(self, rules:dict[NonTerminal, list[Sentence]]=None, start:NonTerminal=None):
         self.rules = rules if rules else {}
-        # self.start = start
 
     def add_rule(self, X:NonTerminal, sentence:Sentence):
         if X not in self.rules:
             self.rules[X] = []
         self.rules[X].append(sentence)
-
-    # def set_start(self, X:NonTerminal):
-    #     self.start = X
-
-    def add_augment(self, X:NonTerminal):
-        Xp = NonTerminal(f"{X}'")
-        self.add_rule(Xp, Sentence((X,)))
-        return Xp
 
     def __repr__(self):
         return f'Grammar(start={self.start}, rules={self.rules})'
@@ -212,16 +203,15 @@ if __name__ == '__main__':
     S = NonTerminal('S')
     G = Grammar()
     G.add_rule(S, Sentence((Terminal('h'), Terminal('e'), Terminal('l'), Terminal('l'), Terminal('o'))))
-    Sp = G.add_augment(S)
 
-    parse = complete_parser_for(G, Sp)
+    parse = complete_parser_for(G, S)
     print('------------------------------------------------------------')
     print(G)
     input = 'hello'
     print(f'input: {input}')
     result = parse(input)
     print(parse_str(result))
-    roots = parse_roots(Sp, result, input)
+    roots = parse_roots(S, result, input)
     print(f'roots: {parse_str(roots)}')
 
 
@@ -238,16 +228,15 @@ if __name__ == '__main__':
     G.add_rule(As, Sentence())
     G.add_rule(More, Sentence((Terminal(','), Terminal('a'), More)))
     G.add_rule(More, Sentence())
-    Tp = G.add_augment(Tuple)
 
-    parse = complete_parser_for(G, Tp)
+    parse = complete_parser_for(G, Tuple)
     print('------------------------------------------------------------')
     print(G)
     input = '(a,a)'
     print(f'input: {input}')
     result = parse(input)
     print(parse_str(result))
-    roots = parse_roots(Tp, result, input)
+    roots = parse_roots(Tuple, result, input)
     print(f'roots: {parse_str(roots)}')
 
 
@@ -258,16 +247,15 @@ if __name__ == '__main__':
     G.add_rule(E, Sentence((E,E,E)))
     G.add_rule(E, Sentence((Terminal('1'),)))
     G.add_rule(E, Sentence())
-    Ep = G.add_augment(E)
 
-    parser = complete_parser_for(G, Ep)
+    parser = complete_parser_for(G, E)
     print('------------------------------------------------------------')
     print(G)
     input = '1'
     print(f'input: {input}')
     result = parser(input)
     print(parse_str(result))
-    roots = parse_roots(Ep, result, input)
+    roots = parse_roots(E, result, input)
     print(f'roots: {parse_str(roots)}')
 
 
@@ -281,16 +269,15 @@ if __name__ == '__main__':
     G.add_rule(S, Sentence((Terminal('b'), B, S, S,)))
     G.add_rule(S, Sentence())
     G.add_rule(B, Sentence())
-    Sp = G.add_augment(S)
 
-    parser = complete_parser_for(G, Sp)
+    parser = complete_parser_for(G, S)
     print('------------------------------------------------------------')
     print(G)
     input = 'bb'
     print(f'input: {input}')
     result = parser(input)
     print(parse_str(result))
-    roots = parse_roots(Sp, result, input)
+    roots = parse_roots(S, result, input)
     print(f'roots: {parse_str(roots)}')
 
 
@@ -302,16 +289,15 @@ if __name__ == '__main__':
     G.add_rule(E, Sentence((E, Terminal('*'), E)))
     G.add_rule(E, Sentence((Terminal('('), E, Terminal(')'))))
     G.add_rule(E, Sentence((Terminal('1'),)))
-    Ep = G.add_augment(E)
 
-    parser = complete_parser_for(G, Ep)
+    parser = complete_parser_for(G, E)
     print('------------------------------------------------------------')
     print(G)
     input = '1+1'
     print(f'input: {input}')
     result = parser(input)
     print(parse_str(result))
-    roots = parse_roots(Ep, result, input)
+    roots = parse_roots(E, result, input)
     print(f'roots: {parse_str(roots)}')
 
 
