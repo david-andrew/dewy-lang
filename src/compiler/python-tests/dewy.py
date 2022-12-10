@@ -12,6 +12,20 @@ import pdb
 #for now, construct the AST directly, skipping the parsing step
 
 
+#tasks:
+# - write function for crawling AST, and replacing 
+# loop <var> in <expr> 
+#   <body> 
+# with 
+# <_itr> = <expr>.iter()
+# <var> = <itr>.next()
+# loop <var>
+#   <body>
+#   <var> = <itr>.next()
+#
+# - make all type checking happen at compile time, and be based on calls to expr.type
+#   -> need to be able to handle type graph with child types matching where parent types are expected, etc. e.g. int is a number, etc.
+
 #convenient for inside lambdas
 def notimplemented():
     raise NotImplementedError()
