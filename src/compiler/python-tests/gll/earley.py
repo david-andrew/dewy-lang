@@ -1,3 +1,6 @@
+from grammar import NonTerminal, Terminal, Sentence, Slot, Grammar
+
+
 #implement early parser from page 6 of Derivation representation using binary subtree sets
 #also implement conversion from BSR to SPPF
 #test how fast it is compared to FUN-GLL parser
@@ -14,13 +17,12 @@ Predictor((X ::= α · Y β, i), j)
         {
             add (Y ::= ·γ, j) to Sj and to Rj 
         }
-        for all (Y ::= δ·, j) ∈ Sj 
+    for all (Y ::= δ·, j) ∈ Sj 
+    {
+        if(X ::= αY · β, j) ∈ Sj 
         {
-            if(X ::= αY · β, j) ∈ Sj 
-            {
-                add (X ::= αY · β, j) to Sj and to Rj
-                bsrAdd(X ::= αY · β, i, j, j) 
-            } 
+            add (X ::= αY · β, j) to Sj and to Rj
+            bsrAdd(X ::= αY · β, i, j, j) 
         } 
     }
 }
