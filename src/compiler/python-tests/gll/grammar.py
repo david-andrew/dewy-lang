@@ -27,11 +27,18 @@ class Sentence:
 class Grammar:
     def __init__(self, rules:dict[NonTerminal, list[Sentence]]=None, start:NonTerminal=None):
         self.rules = rules if rules else {}
+        self._start = start
 
     def add_rule(self, X:NonTerminal, sentence:Sentence):
         if X not in self.rules:
             self.rules[X] = []
         self.rules[X].append(sentence)
+
+    @property
+    def start(self) -> NonTerminal:
+        assert self._start is not None or len(self.rules) > 0, 'No start symbol, grammar has no rules.'
+        #use the start symbol if specified, else the first nonterminal in the grammar
+        return self._start if self._start is not None else next(iter(self.rules.keys()))
 
     def __repr__(self):
         return f'Grammar(start={self.start}, rules={self.rules})'
@@ -62,4 +69,3 @@ class Slot:
     def next(self) -> 'Slot': 
         assert self.i < len(self.rule), f'Cannot get next slot for {self}. Slot is already at end of rule.'
         return Slot(self.X, self.rule, self.i+1) 
-    

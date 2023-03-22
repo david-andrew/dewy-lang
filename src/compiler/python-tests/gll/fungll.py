@@ -1,4 +1,5 @@
 from grammar import NonTerminal, Terminal, Sentence, Slot, Grammar
+from trees import BSR, extractSPPF
 
 
 
@@ -18,7 +19,6 @@ import pdb
 Commencement = tuple[NonTerminal, int]      #(X:NonTerminal, l:int)
 Continuation = tuple[Slot, int]             #(g:Slot, l:int)
 Descriptor = tuple[Slot, int, int]          #(g:Slot, l:int, k:int)
-BSR = tuple[Slot, int, int, int]            #(g:Slot, l:int, k:int, r:int)
 
 
 """
@@ -153,6 +153,10 @@ if __name__ == '__main__':
     print(parse_str(result))
     roots = parse_roots(S, result, input)
     print(f'roots: {parse_str(roots)}')
+    sppf = extractSPPF(result, G)
+    print(f'sppf: {sppf}')
+
+    # pdb.set_trace()
 
 
     # test with example from the paper
@@ -178,6 +182,8 @@ if __name__ == '__main__':
     print(parse_str(result))
     roots = parse_roots(Tuple, result, input)
     print(f'roots: {parse_str(roots)}')
+    sppf = extractSPPF(result, G)
+    print(f'sppf: {sppf}')
 
 
 
@@ -197,6 +203,8 @@ if __name__ == '__main__':
     print(parse_str(result))
     roots = parse_roots(E, result, input)
     print(f'roots: {parse_str(roots)}')
+    sppf = extractSPPF(result, G)
+    print(f'sppf: {sppf}')
 
 
     # custom test example
@@ -219,6 +227,8 @@ if __name__ == '__main__':
     print(parse_str(result))
     roots = parse_roots(S, result, input)
     print(f'roots: {parse_str(roots)}')
+    sppf = extractSPPF(result, G)
+    print(f'sppf: {sppf}')
 
 
     #simple arithmetic grammar
@@ -239,6 +249,8 @@ if __name__ == '__main__':
     print(parse_str(result))
     roots = parse_roots(E, result, input)
     print(f'roots: {parse_str(roots)}')
+    sppf = extractSPPF(result, G)
+    print(f'sppf: {sppf}')
 
 
 
