@@ -1,4 +1,4 @@
-from grammar import Slot, Grammar, Sentence, NonTerminal, Symbol
+from grammar import Slot, Grammar, Sentence, NonTerminal, Terminal, Symbol
 
 BSR = tuple[Slot, int, int, int]            #(g:Slot, l:int, k:int, r:int)
 
@@ -91,6 +91,12 @@ class SPPFNode:
 
     def add_child(self, child):
         self.children.append(child)
+
+    def is_terminal(self) -> bool:
+        return isinstance(self.label, Terminal)
+
+    def is_ambiguous(self) -> bool:
+        return len(self.children) > 1
 
 class SPPF:
     def __init__(self):
@@ -207,3 +213,40 @@ def mkPN(slot: Slot, i: int, k: int, j: int, sppf: SPPF) -> None:
 def mkN(omega: Symbol, i: int, j: int, y: SPPFNode, sppf: SPPF) -> None:
     node = sppf.get_node(omega, i, j)
     sppf.add_edge(y, node)
+
+
+
+
+
+
+
+def sppf_tree_str(sppf: SPPF, grammar: Grammar, input_str: str) -> str:
+    def _str_helper(node: SPPFNode|None, indent: str = "") -> str:
+        if node is None:
+            return ""
+
+        if node.is_terminal():
+            label = repr(node.label)
+        else:
+            label = str(node.label)
+
+        if node.is_ambiguous():
+            label += " [ambiguous]"
+
+        result = f"{indent}{label}\n"
+
+
+        for i, child in enumerate(node.children):
+            if i < len(node.children) - 1:
+                child_indent = indent + "├── "
+                next_indent = indent + "│   "
+            else:
+                child_indent = indent + "└── "
+                next_indent = indent + "    "
+            result += _str_helper(child, child_indent + next_indent)
+
+        return result
+
+    start_node = sppf.get_node(grammar.start, 0, len(input_str))
+    tree_str = _str_helper(start_node)
+    return tree_str

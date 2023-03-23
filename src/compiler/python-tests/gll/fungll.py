@@ -1,5 +1,5 @@
 from grammar import NonTerminal, Terminal, Sentence, Slot, Grammar
-from trees import BSR, extractSPPF
+from trees import BSR, extractSPPF, sppf_tree_str
 
 
 
@@ -155,8 +155,8 @@ if __name__ == '__main__':
     print(f'roots: {parse_str(roots)}')
     sppf = extractSPPF(result, G)
     print(f'sppf: {sppf}')
+    print(sppf_tree_str(sppf, G, input))
 
-    # pdb.set_trace()
 
 
     # test with example from the paper
@@ -184,6 +184,7 @@ if __name__ == '__main__':
     print(f'roots: {parse_str(roots)}')
     sppf = extractSPPF(result, G)
     print(f'sppf: {sppf}')
+    print(sppf_tree_str(sppf, G, input))
 
 
 
@@ -205,6 +206,7 @@ if __name__ == '__main__':
     print(f'roots: {parse_str(roots)}')
     sppf = extractSPPF(result, G)
     print(f'sppf: {sppf}')
+    print(sppf_tree_str(sppf, G, input))
 
 
     # custom test example
@@ -229,6 +231,7 @@ if __name__ == '__main__':
     print(f'roots: {parse_str(roots)}')
     sppf = extractSPPF(result, G)
     print(f'sppf: {sppf}')
+    print(sppf_tree_str(sppf, G, input))
 
 
     #simple arithmetic grammar
@@ -251,6 +254,7 @@ if __name__ == '__main__':
     print(f'roots: {parse_str(roots)}')
     sppf = extractSPPF(result, G)
     print(f'sppf: {sppf}')
+    print(sppf_tree_str(sppf, G, input))
 
 
 
