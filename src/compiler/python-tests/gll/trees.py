@@ -1,6 +1,84 @@
 from grammar import Slot, Grammar, Sentence, NonTerminal, Terminal, Symbol
 
+import pdb
+
+
+
+############################### Binary Subtree Representation ###############################
+
 BSR = tuple[Slot, int, int, int]            #(g:Slot, l:int, k:int, r:int)
+
+
+def find_roots(start:NonTerminal, Y:set[BSR], tau:str) -> set[BSR]:
+    """Find all BSRs in Y that are roots of the parse tree
+    
+    Args:
+        start (NonTerminal): The start symbol of the grammar
+        Y (set[BSR]): The BSR set
+        tau (str): The input string
+
+    Returns:
+        set[BSR]: The set of BSRs that are roots of the parse tree
+    """
+
+    result = set()
+    for y in Y:
+        g, l, k, r = y
+        if g.X == start and l == 0 and r == len(tau) and len(g.beta) == 0:
+            result.add(y)
+
+    return result
+
+#TODO: broken
+def find_children(Y: set[BSR], y0: BSR, tau:str) -> list[BSR]:
+        g0, l0, k0, r0 = y0
+        lefts, rights = [], []
+        for y in Y:
+            g, l, k, r = y
+            if l == l0 and r == k0: #TODO: other checks...
+                lefts.append(y)
+            elif l == k0 and r == r0: #TODO: other checks...
+                rights.append(y)
+
+        if r0 - k0 == 1:
+            rights.append(tau[k0:r0])
+
+        
+        pdb.set_trace()
+        return children
+
+
+def build_tree(Y: set[BSR], node: BSR, tau:str) -> list[tuple[BSR, list]]:
+    children = find_children(Y, node, tau)
+    tree = []
+    for child in children:
+        subtree = build_tree(Y, child, tau)
+        tree.append((child, subtree))
+    return tree
+
+def bsr_tree_str(X:NonTerminal, Y:set[BSR], tau:str) -> str:
+    roots = find_roots(X, Y, tau)
+    if len(roots) == 0:
+        return "No roots found in the BSR set."
+
+    trees = [build_tree(Y, root, tau) for root in roots]
+    pdb.set_trace()
+    return tree_to_string(tree)
+
+
+
+
+
+
+############################### Shared Packed Parse Forest ################################
+
+class SPPF: ...
+    # add node labelled (S, 0, n)
+    # add node labelled (X ::= α·δ, k)
+    # check if there are any extendable leaf nodes
+    # (μ, i, j) is an extendable leaf node
+    # node labelled (Ω, i, j)
+    # add an edge from y to the node (Ω, i, j) 
 
 
 
@@ -67,186 +145,3 @@ mkN (Ω, i, j, y, G)
     add an edge from y to the node (Ω, i, j) 
 }
 """
-
-
-from collections import defaultdict
-
-class SPPFNode:
-    def __init__(self, label: Symbol|None, i:int, j:int):
-        self.label = label
-        self.i = i
-        self.j = j
-        self.children = []
-
-    def __eq__(self, other):
-        if not isinstance(other, SPPFNode):
-            return False
-        return self.label == other.label and self.i == other.i and self.j == other.j
-
-    def __hash__(self):
-        return hash((self.label, self.i, self.j))
-
-    def __repr__(self):
-        return f'SPPFNode({self.label}, {self.i}, {self.j})'
-
-    def add_child(self, child):
-        self.children.append(child)
-
-    def is_terminal(self) -> bool:
-        return isinstance(self.label, Terminal)
-
-    def is_ambiguous(self) -> bool:
-        return len(self.children) > 1
-
-class SPPF:
-    def __init__(self):
-        self.nodes = defaultdict(set)
-
-    def get_node(self, label:Symbol|None, i:int, j:int):
-        node = SPPFNode(label, i, j)
-        if node not in self.nodes[(label, i, j)]:
-            self.nodes[(label, i, j)].add(node)
-        else:
-            node = next(filter(lambda n: n == node, self.nodes[(label, i, j)]))
-        return node
-
-    def add_edge(self, parent:SPPFNode, child:SPPFNode):
-        parent.add_child(child)
-
-    def __repr__(self):
-        result = "SPPF(\n"
-        for nodes_set in self.nodes.values():
-            for node in nodes_set:
-                result += f"  {node}: {[str(child) for child in node.children]}\n"
-        result += ")"
-        return result
-    
-    # def __str__(self) -> str:
-    #     return self._str_helper(self.get_node(self.G.start, 0, self.max_j))
-
-    # def _str_helper(self, node: SPPFNode|None, indent: str = "") -> str:
-    #     output = []
-
-    #     if node is None:
-    #         return ""
-
-    #     children = self.get_children(node)
-    #     is_ambiguous = len(children) > 1
-
-    #     label = f"!{node.X}" if is_ambiguous else str(node.X)
-    #     output.append(f"{indent}{label}:{node.i}-{node.j}")
-
-    #     indent += "│   " if is_ambiguous else "    "
-
-    #     for idx, child_list in enumerate(children):
-    #         if idx > 0:
-    #             output.append(f"{indent[:-4]}├── !alternate")
-    #         for i, child in enumerate(child_list):
-    #             if i < len(child_list) - 1:
-    #                 output.append(f"{indent}├── " + self._str_helper(child, indent + "│   "))
-    #             else:
-    #                 output.append(f"{indent}└── " + self._str_helper(child, indent + "    "))
-
-    #     return "\n".join(output)
-
-
-    # def print_sppf(sppf: 'SPPF', node: SPPFNode|None = None, indent: str = "") -> None:
-    #     if node is None:
-    #         node = sppf.get_node(sppf.start, 0, sppf.max_j)
-
-    #     children = sppf.get_children(node)
-    #     is_ambiguous = len(children) > 1
-
-    #     label = f"!{node.X}" if is_ambiguous else str(node.X)
-    #     print(f"{indent}{label}:{node.i}-{node.j}")
-
-    #     indent += "│   " if is_ambiguous else "    "
-
-    #     for idx, child_list in enumerate(children):
-    #         if idx > 0:
-    #             print(f"{indent[:-4]}├── !alternate")
-    #         for i, child in enumerate(child_list):
-    #             if i < len(child_list) - 1:
-    #                 print(f"{indent}├── ", end="")
-    #                 print_sppf(sppf, child, indent + "│   ")
-    #             else:
-    #                 print(f"{indent}└── ", end="")
-    #                 print_sppf(sppf, child, indent + "    ")
-
-
-
-
-def extractSPPF(Y: set[BSR], G: Grammar) -> SPPF:
-    sppf = SPPF()
-    n = max(r for _, _, _, r in Y)
-
-    if any(slot.X == G.start and slot.i == len(slot.rule) and r == n for slot, _, _, r in Y):
-        sppf.get_node(G.start, 0, n)
-        extendable_nodes = [sppf.get_node(G.start, 0, n)]
-        while extendable_nodes:
-            w = extendable_nodes.pop()
-            X = w.label
-            if isinstance(X, NonTerminal):
-                for slot, i, k, j in Y:
-                    if slot.X == X and w.i == i and w.j == j:
-                        mkPN(slot, i, k, j, sppf)
-    else:
-        print("No matching start symbol found in Y")
-
-    return sppf
-
-def mkPN(slot: Slot, i: int, k: int, j: int, sppf: SPPF) -> None:
-    y = sppf.get_node(slot, k, j)
-
-    if slot.i < len(slot.rule):  # Check if i is within bounds
-        mkN(slot.s, i, k, y, sppf)
-
-        if len(slot.alpha) == 1:
-            mkN(slot.alpha, i, k, y, sppf)
-        elif len(slot.alpha) > 1:
-            try:
-                next_slot = slot.next()
-                mkN(next_slot, i, k, y, sppf)
-            except AssertionError:
-                print(f"Cannot get next slot for {slot}. Slot is already at the end of the rule.")
-
-def mkN(omega: Symbol, i: int, j: int, y: SPPFNode, sppf: SPPF) -> None:
-    node = sppf.get_node(omega, i, j)
-    sppf.add_edge(y, node)
-
-
-
-
-
-
-
-def sppf_tree_str(sppf: SPPF, grammar: Grammar, input_str: str) -> str:
-    def _str_helper(node: SPPFNode|None, indent: str = "") -> str:
-        if node is None:
-            return ""
-
-        if node.is_terminal():
-            label = repr(node.label)
-        else:
-            label = str(node.label)
-
-        if node.is_ambiguous():
-            label += " [ambiguous]"
-
-        result = f"{indent}{label}\n"
-
-
-        for i, child in enumerate(node.children):
-            if i < len(node.children) - 1:
-                child_indent = indent + "├── "
-                next_indent = indent + "│   "
-            else:
-                child_indent = indent + "└── "
-                next_indent = indent + "    "
-            result += _str_helper(child, child_indent + next_indent)
-
-        return result
-
-    start_node = sppf.get_node(grammar.start, 0, len(input_str))
-    tree_str = _str_helper(start_node)
-    return tree_str

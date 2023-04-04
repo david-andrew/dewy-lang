@@ -1,5 +1,5 @@
 from grammar import NonTerminal, Terminal, Sentence, Slot, Grammar
-from trees import BSR, extractSPPF, sppf_tree_str
+from trees import BSR, bsr_tree_str, find_roots, extractSPPF, sppf_tree_str
 
 
 
@@ -127,36 +127,29 @@ def parse_str(Y:set[BSR]):
     s = [f'({g}, {l}, {k}, {r})\n' for g, l, k, r in Y] 
     return '{\n' + ''.join(s) + '}'
 
-def parse_roots(X:NonTerminal, Y:set[BSR], tau:str) -> set[BSR]:
-    result = set()
-    for y in Y:
-        g, l, k, r = y
-        if g.X == X and l == 0 and r == len(tau) and len(g.beta) == 0:
-            result.add(y)
 
-    return result
 
 
 if __name__ == '__main__':
 
-    # super simple test grammar S ::= 'h' 'e' 'l' 'l' 'o'
-    S = NonTerminal('S')
-    G = Grammar()
-    G.add_rule(S, Sentence((Terminal('h'), Terminal('e'), Terminal('l'), Terminal('l'), Terminal('o'))))
+    # # super simple test grammar S ::= 'h' 'e' 'l' 'l' 'o'
+    # S = NonTerminal('S')
+    # G = Grammar()
+    # G.add_rule(S, Sentence((Terminal('h'), Terminal('e'), Terminal('l'), Terminal('l'), Terminal('o'))))
 
-    parse = complete_parser_for(G, S)
-    print('------------------------------------------------------------')
-    print(G)
-    input = 'hello'
-    print(f'input: {input}')
-    result = parse(input)
-    print(parse_str(result))
-    roots = parse_roots(S, result, input)
-    print(f'roots: {parse_str(roots)}')
-    sppf = extractSPPF(result, G)
-    print(f'sppf: {sppf}')
-    print(sppf_tree_str(sppf, G, input))
-
+    # parse = complete_parser_for(G, S)
+    # print('------------------------------------------------------------')
+    # print(G)
+    # input = 'hello'
+    # print(f'input: {input}')
+    # result = parse(input)
+    # print(parse_str(result))
+    # roots = find_roots(S, result, input)
+    # print(f'roots: {parse_str(roots)}')
+    # print(f"bsr tree: {bsr_tree_str(result, input)}")
+    # sppf = extractSPPF(result, G)
+    # print(f'sppf: {sppf}')
+    # print(sppf_tree_str(sppf, G, input))
 
 
     # test with example from the paper
@@ -180,12 +173,14 @@ if __name__ == '__main__':
     print(f'input: {input}')
     result = parse(input)
     print(parse_str(result))
-    roots = parse_roots(Tuple, result, input)
+    roots = find_roots(Tuple, result, input)
     print(f'roots: {parse_str(roots)}')
+    print(f"bsr tree: {bsr_tree_str(Tuple, result, input)}")
     sppf = extractSPPF(result, G)
     print(f'sppf: {sppf}')
     print(sppf_tree_str(sppf, G, input))
 
+    exit(1)
 
 
     # test with example from paper: E ::= E E E | "1" | eps
@@ -202,8 +197,9 @@ if __name__ == '__main__':
     print(f'input: {input}')
     result = parser(input)
     print(parse_str(result))
-    roots = parse_roots(E, result, input)
+    roots = find_roots(E, result, input)
     print(f'roots: {parse_str(roots)}')
+    print(f"bsr tree: {bsr_tree_str(E, result, input)}")
     sppf = extractSPPF(result, G)
     print(f'sppf: {sppf}')
     print(sppf_tree_str(sppf, G, input))
@@ -227,8 +223,9 @@ if __name__ == '__main__':
     print(f'input: {input}')
     result = parser(input)
     print(parse_str(result))
-    roots = parse_roots(S, result, input)
+    roots = find_roots(S, result, input)
     print(f'roots: {parse_str(roots)}')
+    print(f"bsr tree: {bsr_tree_str(S, result, input)}")
     sppf = extractSPPF(result, G)
     print(f'sppf: {sppf}')
     print(sppf_tree_str(sppf, G, input))
@@ -250,8 +247,9 @@ if __name__ == '__main__':
     print(f'input: {input}')
     result = parser(input)
     print(parse_str(result))
-    roots = parse_roots(E, result, input)
+    roots = find_roots(E, result, input)
     print(f'roots: {parse_str(roots)}')
+    print(f"bsr tree: {bsr_tree_str(E, result, input)}")
     sppf = extractSPPF(result, G)
     print(f'sppf: {sppf}')
     print(sppf_tree_str(sppf, G, input))

@@ -38,6 +38,7 @@ class Grammar:
     def start(self) -> NonTerminal:
         assert self._start is not None or len(self.rules) > 0, 'No start symbol, grammar has no rules.'
         #use the start symbol if specified, else the first nonterminal in the grammar
+        #TODO: should check that at least one rule exists for the start symbol
         return self._start if self._start is not None else next(iter(self.rules.keys()))
 
     def __repr__(self):
