@@ -124,7 +124,7 @@ def complete_parser_for(Gamma:Grammar, X:NonTerminal):
 
 
 def parse_str(Y:set[BSR]):
-    s = [f'({g}, {l}, {k}, {r})\n' for g, l, k, r in Y] 
+    s = [f'    ({g}, {l}, {k}, {r})\n' for g, l, k, r in Y] 
     return '{\n' + ''.join(s) + '}'
 
 

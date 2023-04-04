@@ -45,7 +45,7 @@ def find_children(Y: set[BSR], y0: BSR, tau:str) -> list[BSR]:
 
         
         pdb.set_trace()
-        return children
+        # return children
 
 
 def build_tree(Y: set[BSR], node: BSR, tau:str) -> list[tuple[BSR, list]]:
@@ -63,7 +63,7 @@ def bsr_tree_str(X:NonTerminal, Y:set[BSR], tau:str) -> str:
 
     trees = [build_tree(Y, root, tau) for root in roots]
     pdb.set_trace()
-    return tree_to_string(tree)
+    # return tree_to_string(tree)
 
 
 
@@ -81,6 +81,11 @@ class SPPF: ...
     # add an edge from y to the node (Ω, i, j) 
 
 
+def extractSPPF(*args, **kwargs):
+    raise NotImplementedError
+
+def sppf_tree_str(*args, **kwargs):
+    raise NotImplementedError
 
 """
 extractSPPF (Υ, Γ)
