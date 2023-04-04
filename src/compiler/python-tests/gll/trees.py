@@ -9,13 +9,13 @@ import pdb
 BSR = tuple[Slot, int, int, int]            #(g:Slot, l:int, k:int, r:int)
 
 
-def find_roots(start:NonTerminal, Y:set[BSR], tau:str) -> set[BSR]:
+def find_roots(start:NonTerminal, Y:set[BSR], length:int) -> set[BSR]:
     """Find all BSRs in Y that are roots of the parse tree
     
     Args:
         start (NonTerminal): The start symbol of the grammar
         Y (set[BSR]): The BSR set
-        tau (str): The input string
+        length (int): The length of the input string
 
     Returns:
         set[BSR]: The set of BSRs that are roots of the parse tree
@@ -24,13 +24,13 @@ def find_roots(start:NonTerminal, Y:set[BSR], tau:str) -> set[BSR]:
     result = set()
     for y in Y:
         g, l, k, r = y
-        if g.X == start and l == 0 and r == len(tau) and len(g.beta) == 0:
+        if g.X == start and l == 0 and r == length and len(g.beta) == 0:
             result.add(y)
 
     return result
 
 #TODO: broken
-def find_children(Y: set[BSR], y0: BSR, tau:str) -> list[BSR]:
+def find_children(Y: set[BSR], y0: BSR) -> list[BSR]:
         g0, l0, k0, r0 = y0
         lefts, rights = [], []
         for y in Y:
@@ -41,27 +41,28 @@ def find_children(Y: set[BSR], y0: BSR, tau:str) -> list[BSR]:
                 rights.append(y)
 
         if r0 - k0 == 1:
-            rights.append(tau[k0:r0])
-
+            #tau[k0:r0]
+            assert isinstance(g0.alpha[-1], Terminal)
+            rights.append(g0.alpha[-1])
         
         pdb.set_trace()
         # return children
 
 
-def build_tree(Y: set[BSR], node: BSR, tau:str) -> list[tuple[BSR, list]]:
-    children = find_children(Y, node, tau)
+def build_tree(Y: set[BSR], node: BSR) -> list[tuple[BSR, list]]:
+    children = find_children(Y, node)
     tree = []
     for child in children:
-        subtree = build_tree(Y, child, tau)
+        subtree = build_tree(Y, child)
         tree.append((child, subtree))
     return tree
 
-def bsr_tree_str(X:NonTerminal, Y:set[BSR], tau:str) -> str:
-    roots = find_roots(X, Y, tau)
+def bsr_tree_str(X:NonTerminal, Y:set[BSR], length:int) -> str:
+    roots = find_roots(X, Y, length)
     if len(roots) == 0:
         return "No roots found in the BSR set."
 
-    trees = [build_tree(Y, root, tau) for root in roots]
+    trees = [build_tree(Y, root) for root in roots]
     pdb.set_trace()
     # return tree_to_string(tree)
 
@@ -72,7 +73,10 @@ def bsr_tree_str(X:NonTerminal, Y:set[BSR], tau:str) -> str:
 
 ############################### Shared Packed Parse Forest ################################
 
-class SPPF: ...
+class SPPF:
+    def __init__(self):
+        self.nodes: set[SPPFNode] = set()
+        self.edges: dict[SPPFNode, list[SPPFNode]] = {}
     # add node labelled (S, 0, n)
     # add node labelled (X ::= α·δ, k)
     # check if there are any extendable leaf nodes
@@ -80,6 +84,7 @@ class SPPF: ...
     # node labelled (Ω, i, j)
     # add an edge from y to the node (Ω, i, j) 
 
+class SPPFNode:...
 
 def extractSPPF(*args, **kwargs):
     raise NotImplementedError
