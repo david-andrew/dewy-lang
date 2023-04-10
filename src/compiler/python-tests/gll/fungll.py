@@ -2,6 +2,9 @@ from grammar import NonTerminal, Terminal, Sentence, Slot, Grammar
 from trees import BSR, bsr_tree_str, find_roots, extractSPPF, sppf_tree_str
 
 
+# def dedup(l:list) -> list:
+#     return list(dict.fromkeys(l))
+
 
 #implementation of the functional GLL parsing process from https://pure.royalholloway.ac.uk/portal/files/35434658/Accepted_Manuscript.pdf
 #TODO: maybe look into the parsing combinators that they also discuss in the paper-->future work
@@ -44,7 +47,7 @@ def loop(Gamma:Grammar, tau:str, W:list[Descriptor], U:set[Descriptor], G:set[tu
     if not W: return U, Y
     d = W[0]
     (Wp,Yp), Gp, Pp = process(Gamma, tau, d, G, P)
-    Wpp = [r for r in W + Wp  if r not in U|{d}]
+    Wpp = [r for r in W+Wp if r not in U|{d}] #is Wp guaranteed to be disjoint from W? otherwise we'd need to filter for duplicates...
     return loop(Gamma, tau, Wpp, U|{d}, G|Gp, P|Pp, Y|Yp)
 
 
@@ -104,6 +107,8 @@ def nmatch(k:int, K:set[Continuation], R:set[int]) -> tuple[list[Descriptor], se
     for c in K:
         g, l = c
         for r in R:
+            if k < l: continue#raise Exception(f'k ({k}) must be equal to or larger than l ({l})')
+            if k > r: continue#raise Exception(f'k ({k}) must be equal to or smaller than r ({r})')
             W.append((g, l, r))
             Y.add((g, l, k, r))
     return W, Y
