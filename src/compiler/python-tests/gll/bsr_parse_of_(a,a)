@@ -1,0 +1,60 @@
+input: (a,a)
+
+
+
+
+//from paper
+(Tuple ::= (•As ), 0, 0, 1)
+(Tuple ::= ( As•), 0, 1, 1)
+(Tuple ::= ( As•), 0, 1, 2)
+(Tuple ::= ( As•), 0, 1, 4)
+(Tuple ::= ( As )•, 0, 4, 5)
+(As ::= •, 1, 1, 1)
+(As ::= a•More, 1, 1, 2)
+(As ::= a More•, 1, 2, 2)
+(As ::= a More•, 1, 2, 4)
+(More ::= •, 2, 2, 2)
+(More ::= ,•a More, 2, 2, 3)
+(More ::= , a•More, 2, 3, 4)
+(More ::= , a More•, 2, 4, 4)
+(More ::= •, 4, 4, 4)
+
+//extra with continue
+(As ::= a More•, 1, 1, 2)
+(Tuple ::= ( As•), 0, 2, 4)
+(Tuple ::= ( As•), 0, 0, 5)
+(Tuple ::= ( As•), 0, 2, 2)
+(Tuple ::= ( As•), 0, 4, 4)
+(More ::= , a More•, 2, 2, 4)
+(As ::= a More•, 1, 1, 1)
+(As ::= a More•, 1, 1, 4)
+(Tuple ::= ( As )•, 0, 0, 0)
+(As ::= a More•, 1, 4, 4)
+(More ::= , a More•, 2, 2, 2)
+
+
+//extra without continue
+(More ::= , a More•, 2, 1, 4)
+(More ::= , a More•, 2, 0, 5)
+(Tuple ::= ( As•), 0, 1, 5)
+(As ::= a More•, 1, 0, 5)
+(More ::= , a More•, 2, 2, 5)
+(As ::= a More•, 1, 2, 5)
+(More ::= , a More•, 2, 1, 5)
+(Tuple ::= ( As•), 0, 2, 5)
+(As ::= a More•, 1, 1, 5)
+
+
+
+
+(Tuple ::= ( As )•, 0, 4, 5)
+    (Tuple ::= ( As•), 0, 1, 4)
+        '('    //(Tuple ::= (•As ), 0, 0, 1)
+        (As ::= a More•, 1, 2, 4)
+            'a'  // (As ::= a•More, 1, 1, 2)
+            (More ::= , a More•, 2, 4, 4)
+                (More ::= , a•More, 2, 3, 4)
+                    ','  // (More ::= ,•a More, 2, 2, 3)
+                    'a'
+                (More ::= •, 4, 4, 4)
+    ')'
