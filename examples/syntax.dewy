@@ -25,7 +25,7 @@ s = "first 10 primes are: {
 primes = [
     2
     lazy i in [3, 5..)
-        if i .% #self :> product not =? 0 
+        if i .% #self .=? 0 :> reduce(, (prev, v) => prev and v, true)
             i
 ][..10)
 
@@ -33,10 +33,11 @@ primes = [
 primes = [
     2
     lazy i in [3, 5..)
-        if not parallel_or(p => i % p =? 0, #self) //parallel or is like goroutines with cancel once any is true...should have it be more flexible, e.g. able to use any of the boolean keywords that can short circuit
+        if not parallel_or(p => i % p =? 0, #self) 
             i
 ][..10)
-]
+//parallel or is like goroutines with cancel once any is true...should have it be more flexible, e.g. able to use any of the boolean keywords that can short circuit
+//actually probably don't want to need to specify that it's parallel. Instead if there's an operation over a vector, it gets parallelized if possible.
 
 //nested interpolation
 s2 = 'this is an outer string, and {'this is an interior string with "{my_string}" in it}'
