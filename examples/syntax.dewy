@@ -29,6 +29,14 @@ primes = [
             i
 ][..10)
 
+//TBD if there is a parallel way to do this where the i .% primes dispatches each operation, and fails immediately on any returning false
+primes = [
+    2
+    lazy i in [3, 5..)
+        if not parallel_or(p => i % p =? 0, #self) //parallel or is like goroutines with cancel once any is true...should have it be more flexible, e.g. able to use any of the boolean keywords that can short circuit
+            i
+][..10)
+]
 
 //nested interpolation
 s2 = 'this is an outer string, and {'this is an interior string with "{my_string}" in it}'
