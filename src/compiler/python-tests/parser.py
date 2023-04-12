@@ -26,13 +26,21 @@ class Context(Enum):
     interpolation = auto()
 
 
-class Token(ABC): ...
+class Token(ABC):
+    def __repr__(self) -> str:
+        """default repr for tokens is just the class name"""
+        return f"<{self.__class__.__name__}>"
+
 class WhiteSpace(Token):
     def __init__(self, _): ...
 
+#token String
+#   will contain body:list[str|list[Token]], i.e. the string chunks, and lists of tokens extracted from interpolations
 
-
-idempotent_tokens = {WhiteSpace}
+# mark which tokens cannot be repeated in a list of tokens. E.g. whitespace should always be merged into a single token
+idempotent_tokens = {
+    WhiteSpace
+}
 
 
 def eat(cls:Type[Token]):
@@ -88,6 +96,13 @@ def eat_block_comment(src:str) -> int|None:
     raise ValueError("unterminated block comment")
     # return None
 
+@eat(WhiteSpace)
+def eat_whitespace(src:str) -> int|None:
+    """Eat whitespace, return the number of characters eaten"""
+    i = 0
+    while i < len(src) and src[i].isspace():
+        i += 1
+    return i if i > 0 else None
 
 
 def tokenize(src:str, context:list[Context]|None=None) -> list[Token]:
@@ -106,15 +121,33 @@ def tokenize(src:str, context:list[Context]|None=None) -> list[Token]:
     i = 0
 
     while i < len(src):
-        for eat_func in eat_funcs:
-            num_eaten, token_cls = eat_func(src[i:])
-            if num_eaten is not None:
-                if token_cls not in idempotent_tokens or not tokens or not isinstance(tokens[-1], token_cls):
-                    tokens.append(token_cls(src[i:i+num_eaten]))
-                i += num_eaten
-                break
-        else:
-            raise ValueError(f"failed to tokenize:\n{repr(src[i:])}")
+        #run all the eat functions on the current src
+        matches = [eat_func(src[i:]) for eat_func in eat_funcs]
+
+        #find the longest token that matched
+        n_eaten, token_cls = max(matches, key=lambda x: x[0] if x[0] is not None else 0)
+
+        #if we didn't match anything, raise an error
+        if n_eaten is None:
+            raise ValueError(f"failed to tokenize:\n{repr(src[i:])}.\nCurrent tokens: {tokens}")
+        
+        #add the token to the list of tokens (handling idempotent token cases)
+        if not tokens or token_cls not in idempotent_tokens or not isinstance(tokens[-1], token_cls):
+            tokens.append(token_cls(src[i:i+n_eaten]))
+
+        #increment the index
+        i += n_eaten
+
+
+        # for eat_func in eat_funcs:
+        #     num_eaten, token_cls = eat_func(src[i:])
+        #     if num_eaten is not None:
+        #         if token_cls not in idempotent_tokens or not tokens or not isinstance(tokens[-1], token_cls):
+        #             tokens.append(token_cls(src[i:i+num_eaten]))
+        #         i += num_eaten
+        #         break
+        # else:
+        #     raise ValueError(f"failed to tokenize:\n{repr(src[i:])}.\nCurrent tokens: {tokens}")
         
         #check if we need to stop tokenizing
         #TODO: this should go inside the loop?
