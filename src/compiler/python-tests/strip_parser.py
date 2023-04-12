@@ -3,6 +3,8 @@ a practical parser while we figure out how to do FUN-GLL/BSR parsing
 """
 
 
+
+
 #0. convert input str to a list of tokens (or could be handed an existing token string). actually though, these will probably be nodes in the AST
 #1. functions to remove comments and insert <jux> between adjacent tokens
 #
@@ -85,13 +87,14 @@ def find_next_comment_or_whitespace(nodes:list[Node]) -> tuple[int, int]|None:
     """
     for i in range(len(nodes)-1):
 
-        #whitespace
-        if pattern_match([(node_type.char, ' ')], nodes[i:i+1]):
-            return i, i+1
-        if pattern_match([(node_type.char, '\t')], nodes[i:i+1]):
-            return i, i+1
-        if pattern_match([(node_type.char, '\n')], nodes[i:i+1]):
-            return i, i+1
+        ##CANNOT STRIP WHITESPACE. there could be strings with whitespace in them...
+        # #whitespace
+        # if pattern_match([(node_type.char, ' ')], nodes[i:i+1]):
+        #     return i, i+1
+        # if pattern_match([(node_type.char, '\t')], nodes[i:i+1]):
+        #     return i, i+1
+        # if pattern_match([(node_type.char, '\n')], nodes[i:i+1]):
+        #     return i, i+1
         
 
         #line comment
