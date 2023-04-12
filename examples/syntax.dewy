@@ -1,0 +1,31 @@
+///////////////////// STRING INTERPOLATION /////////////////////
+
+/{Todo: probably break each section for different syntaxes into different files?}/
+
+//string interpolation
+my_string = '2 + 2 = {2+2}'
+
+//complex interpolation
+s = "first 10 primes are: {
+    primes = [2]
+    (loop i in [3, 5..)
+        if i .% primes :> product not =? 0 
+            primes.push(i)
+        if primes.length == 10
+            break
+    )
+    primes
+}"
+
+
+//alternative prime generator + getting first 10 primes
+primes = [
+    2
+    lazy i in [3, 5..)
+        if i .% #self :> product not =? 0 
+            i
+][..10)
+
+
+//nested interpolation
+s2 = 'this is an outer string, and {'this is an interior string with "{my_string}" in it}'
