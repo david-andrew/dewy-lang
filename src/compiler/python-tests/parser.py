@@ -34,8 +34,30 @@ class Token(ABC):
 class WhiteSpace(Token):
     def __init__(self, _): ...
 
+class Keyword(Token):
+    def __init__(self, src:str):
+        self.src = src.lower()
+    def __repr__(self) -> str:
+        return f"<Keyword: {self.src}>"
+
+class Identifier(Token):
+    def __init__(self, src:str):
+        self.src = src
+    def __repr__(self) -> str:
+        return f"<Identifier: {self.src}>"
+
 #token String
 #   will contain body:list[str|list[Token]], i.e. the string chunks, and lists of tokens extracted from interpolations
+
+
+# identify token classes that should take precedence over others when tokenizing. higher number means higher precedence
+#TBD if it's necessary to allow multiple classes at the same precedence level. if it's in the table, it probably shouldn't have any same level precedence. or it probably wouldn't be in the table...
+precedence_table = [
+    Keyword,
+    Identifier,
+    #Lower levels
+]
+precedence = {cls: len(precedence_table)-i for i, cls in enumerate(precedence_table)}
 
 # mark which tokens cannot be repeated in a list of tokens. E.g. whitespace should always be merged into a single token
 idempotent_tokens = {
@@ -54,6 +76,7 @@ def eat(cls:Type[Token]):
             return eat_func(src), cls
         wrapper._is_eat_decorator = True  # make it easy to check if a function has this decorator
         wrapper.eat_func = eat_func
+        wrapper.token_cls = cls
         return wrapper
     return decorator
 
@@ -104,6 +127,44 @@ def eat_whitespace(src:str) -> int|None:
         i += 1
     return i if i > 0 else None
 
+@eat(Keyword)
+def eat_keyword(src: str) -> int | None:
+    """
+    Eat a reserved keyword, return the number of characters eaten
+
+    #keyword = {in} | {as} | {loop} | {lazy} | {if} | {and} | {or} | {xor} | {nand} | {nor} | {xnor} | {not};# | {true} | {false}; 
+    
+    noting that keywords are case insensitive
+    """
+
+    keywords = ['in', 'as', 'loop', 'lazy', 'if', 'and', 'or', 'xor', 'nand', 'nor', 'xnor', 'not']#, 'true', 'false'] #TBD if true/false are keywords
+    max_len = max(len(keyword) for keyword in keywords)
+    
+    lower_src = src[:max_len].lower()
+    for keyword in keywords:
+        if lower_src.startswith(keyword):
+            #TBD if we need to check that the next character is not an identifier character
+            return len(keyword)
+
+    return None
+
+
+@eat(Identifier)
+def eat_identifier(src:str) -> int|None:
+    """
+    Eat an identifier, return the number of characters eaten
+    
+    identifiers are of the form  [a-zA-Z_] [0-9a-zA-Z_?!$&]*
+    """
+    i = 0
+    while i < len(src) and src[i].isalnum() or src[i] in '_?!$&':
+        i += 1
+    return i if i > 0 else None
+
+
+
+
+
 
 def tokenize(src:str, context:list[Context]|None=None) -> list[Token]:
     if context is None:
@@ -116,6 +177,7 @@ def tokenize(src:str, context:list[Context]|None=None) -> list[Token]:
     
     #get a list of all functions that are decorated with @eat
     eat_funcs = [func for _, func in get_eat_functions()]
+    func_precedences = [precedence.get(func.token_cls, 0) for func in eat_funcs]
 
     tokens = []
     i = 0
@@ -124,12 +186,21 @@ def tokenize(src:str, context:list[Context]|None=None) -> list[Token]:
         #run all the eat functions on the current src
         matches = [eat_func(src[i:]) for eat_func in eat_funcs]
 
-        #find the longest token that matched
-        n_eaten, token_cls = max(matches, key=lambda x: x[0] if x[0] is not None else 0)
+        #find the longest token that matched. if multiple tied for longest, use the one with the highest precedence.
+        #raise an error if multiple tokens tied, and they have the same precedence
+        key=lambda x: (x[0][0] or 0, x[1])
+        matches = [*zip(matches, func_precedences)]
+        best = max(matches, key=key)
+        ties = [match for match in matches if key(match) == key(best)]
+        if len(ties) > 1:
+            raise ValueError(f"multiple tokens matches tied {[match[0][1].__name__ for match in ties]}: {repr(src[i:])}\nPlease disambiguate by providing precedence levels for these tokens.")
+
+        (n_eaten, token_cls), _ = best
+
 
         #if we didn't match anything, raise an error
         if n_eaten is None:
-            raise ValueError(f"failed to tokenize:\n{repr(src[i:])}.\nCurrent tokens: {tokens}")
+            raise ValueError(f"failed to tokenize: {repr(src[i:])}.\nCurrent tokens: {tokens}")
         
         #add the token to the list of tokens (handling idempotent token cases)
         if not tokens or token_cls not in idempotent_tokens or not isinstance(tokens[-1], token_cls):
@@ -138,30 +209,21 @@ def tokenize(src:str, context:list[Context]|None=None) -> list[Token]:
         #increment the index
         i += n_eaten
 
-
-        # for eat_func in eat_funcs:
-        #     num_eaten, token_cls = eat_func(src[i:])
-        #     if num_eaten is not None:
-        #         if token_cls not in idempotent_tokens or not tokens or not isinstance(tokens[-1], token_cls):
-        #             tokens.append(token_cls(src[i:i+num_eaten]))
-        #         i += num_eaten
-        #         break
-        # else:
-        #     raise ValueError(f"failed to tokenize:\n{repr(src[i:])}.\nCurrent tokens: {tokens}")
-        
         #check if we need to stop tokenizing
         #TODO: this should go inside the loop?
 
 
+    return tokens
 
-def get_eat_functions():
+
+def get_eat_functions() -> list[tuple[str, Callable[[str], tuple[int|None, Type[Token]]]]]:
     """Get a list of all functions decorated with @eat"""
     return [(name, func) for name, func in globals().items() if callable(func) and hasattr(func, "_is_eat_decorator") and func._is_eat_decorator]
 
 def validate_functions():
     # Get all functions decorated with @eat(Token)
     decorated_functions = get_eat_functions()
-    print(decorated_functions)
+
     # Validate the function signatures
     for name, wrapper_func in decorated_functions:
         func = wrapper_func.eat_func
@@ -173,6 +235,11 @@ def validate_functions():
         if len(param_types) != 1 or param_types[0] != str or return_type != int|None:
             raise ValueError(f"{func.__name__} has an invalid signature: `{signature}`. Expected `(src: str) -> int|None`")
 
+    # check for any functions that start with eat_ but are not decorated with @eat
+    decorated_func_names = {name for name, _ in decorated_functions}
+    for name, func in globals().items():
+        if name.startswith("eat_") and callable(func) and name not in decorated_func_names:
+            raise ValueError(f"`{name}()` function is not decorated with @eat")
 
 
 
