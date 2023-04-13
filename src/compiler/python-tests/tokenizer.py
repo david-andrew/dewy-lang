@@ -55,12 +55,16 @@ class Identifier(Token):
 class Bind(Token):
     def __init__(self, _): ...
 
-#token String
-#   will contain body:list[str|list[Token]], i.e. the string chunks, and lists of tokens extracted from interpolations
+# class String(Token):
+#     def __init__(self, body:list[str|list[Token]]):
+#         self.body = body
+#     def __repr__(self) -> str:
+#         return f"<String: {self.body}>"
+    
 
 
 # identify token classes that should take precedence over others when tokenizing
-# each row is a list of token types that are confusable in their precedence order. e.g. [Keyword, Identifier, Etc] means Keyword > Identifier > Etc
+# each row is a list of token types that are confusable in their precedence order. e.g. [Keyword, Unit, Identifier] means Keyword > Unit > Identifier
 # only confusable token classes need to be included in the table
 precedence_table = [
     [Keyword, Identifier],
@@ -170,6 +174,13 @@ def eat_identifier(src:str) -> int|None:
     return i if i > 0 else None
 
 
+
+@eat(Bind)
+def eat_bind(src:str) -> int|None:
+    """eat a bind operator, return the number of characters eaten"""
+    if src.startswith('='):
+        return 1
+    return None
 
 
 
