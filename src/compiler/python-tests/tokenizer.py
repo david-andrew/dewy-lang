@@ -15,14 +15,20 @@
 from abc import ABC
 from enum import Enum, auto
 import inspect
-from typing import Callable, Any, Type
+from typing import Callable, Type
 
 import pdb
 
+#### DEBUG rich traceback printing ####
+from rich import traceback, print
+traceback.install(show_locals=True)
 
+
+#TODO: tbd how this gets used
 class Context(Enum):
     root = auto()
-    string = auto()
+    block = auto()
+    # string = auto()
     interpolation = auto()
 
 
@@ -45,19 +51,21 @@ class Identifier(Token):
         self.src = src
     def __repr__(self) -> str:
         return f"<Identifier: {self.src}>"
+    
+class Bind(Token):
+    def __init__(self, _): ...
 
 #token String
 #   will contain body:list[str|list[Token]], i.e. the string chunks, and lists of tokens extracted from interpolations
 
 
-# identify token classes that should take precedence over others when tokenizing. higher number means higher precedence
-#TBD if it's necessary to allow multiple classes at the same precedence level. if it's in the table, it probably shouldn't have any same level precedence. or it probably wouldn't be in the table...
+# identify token classes that should take precedence over others when tokenizing
+# each row is a list of token types that are confusable in their precedence order. e.g. [Keyword, Identifier, Etc] means Keyword > Identifier > Etc
+# only confusable token classes need to be included in the table
 precedence_table = [
-    Keyword,
-    Identifier,
-    #Lower levels
+    [Keyword, Identifier],
 ]
-precedence = {cls: len(precedence_table)-i for i, cls in enumerate(precedence_table)}
+precedence = {cls: len(row)-i for row in precedence_table for i, cls in enumerate(row)}
 
 # mark which tokens cannot be repeated in a list of tokens. E.g. whitespace should always be merged into a single token
 idempotent_tokens = {
@@ -75,8 +83,8 @@ def eat(cls:Type[Token]):
         def wrapper(src:str) -> tuple[int|None, Type[Token]]:
             return eat_func(src), cls
         wrapper._is_eat_decorator = True  # make it easy to check if a function has this decorator
-        wrapper.eat_func = eat_func
-        wrapper.token_cls = cls
+        wrapper._eat_func = eat_func
+        wrapper._token_cls = cls
         return wrapper
     return decorator
 
@@ -177,7 +185,7 @@ def tokenize(src:str, context:list[Context]|None=None) -> list[Token]:
     
     #get a list of all functions that are decorated with @eat
     eat_funcs = [func for _, func in get_eat_functions()]
-    func_precedences = [precedence.get(func.token_cls, 0) for func in eat_funcs]
+    func_precedences = [precedence.get(func._token_cls, 0) for func in eat_funcs]
 
     tokens = []
     i = 0
@@ -226,7 +234,7 @@ def validate_functions():
 
     # Validate the function signatures
     for name, wrapper_func in decorated_functions:
-        func = wrapper_func.eat_func
+        func = wrapper_func._eat_func
         signature = inspect.signature(func)
         param_types = [param.annotation for param in signature.parameters.values()]
         return_type = signature.return_annotation
@@ -250,9 +258,7 @@ def test():
         src = f.read()
 
     tokens = tokenize(src)
-    pdb.set_trace()
-
-    1
+    print(f'matched tokens: {tokens}')
 
 
 

@@ -25,7 +25,7 @@ s = "first 10 primes are: {
 primes = [
     2
     lazy i in [3, 5..)
-        if i .% #self .=? 0 :> reduce(, (prev, v) => prev and v, true)
+        if i .% #self .=? 0 :> @reduce(, (prev, v) => prev and v)
             i
 ][..10)
 
@@ -40,4 +40,4 @@ primes = [
 //actually probably don't want to need to specify that it's parallel. Instead if there's an operation over a vector, it gets parallelized if possible.
 
 //nested interpolation
-s2 = 'this is an outer string, and {'this is an interior string with "{my_string}" in it}'
+s2 = 'this is an outer string, and {'this is an interior string with "{my_string}" in it'}'
