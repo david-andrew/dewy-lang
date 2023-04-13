@@ -24,14 +24,14 @@ from rich import traceback, print
 traceback.install(show_locals=True)
 
 
-#TODO: tbd how this gets used
-#      context is useful to know which of the eat functions to use during tokenization
-#      e.g. when inside a string, only eat_character, eat_escape, and eat_block
-class Context(Enum):
-    root = auto()
-    block = auto()
-    # string = auto()
-    interpolation = auto()
+# #TODO: tbd how this gets used
+# #      context is useful to know which of the eat functions to use during tokenization
+# #      e.g. when inside a string, only eat_character, eat_escape, and eat_block
+# class Context(Enum):
+#     root = auto()
+#     block = auto()
+#     # string = auto()
+#     interpolation = auto()
 
 
 class Token(ABC):
@@ -58,10 +58,15 @@ class Bind(Token):
     def __init__(self, _): ...
 
 class Block(Token):
-    def __init__(self, body:list[Token]):
+    def __init__(self, body:list[Token], scoped:bool):
         self.body = body
+        self.scoped = scoped
     def __repr__(self) -> str:
-        return f"<Block: {self.body}>"
+        body_str = ', '.join(repr(token) for token in self.body)
+        if self.scoped:
+            return f"<Block: {{{body_str}}}>"
+        else:
+            return f"<Block: ({body_str})>"
 
 class Escape(Token):
     def __init__(self, src:str):
@@ -94,24 +99,39 @@ idempotent_tokens = {
 }
 
 
-def eat(cls:Type[Token], context_free:bool=True):
+def peek_eat(cls:Type[Token]):
     """
-    Decorator for functions that eat tokens. 
+    Decorator for functions that eat tokens, but only return how many characters would make up the token. 
     Makes function return include constructor for token class that it tries to eat, in tupled with return.
     """
     assert issubclass(cls, Token), f"cls must be a subclass of Token, but got {cls}"
     def decorator(eat_func:Callable[[str], int|None]):
         def wrapper(src:str) -> tuple[int|None, Type[Token]]:
             return eat_func(src), cls
-        wrapper._context_free = context_free
-        wrapper._is_eat_decorator = True  # make it easy to check if a function has this decorator
+        wrapper._is_peek_eat_decorator = True  # make it easy to check if a function has this decorator
         wrapper._eat_func = eat_func
         wrapper._token_cls = cls
         return wrapper
     return decorator
 
+#TODO: full eat probably won't need to take the class as an argument, since the function will know how to construct the token itself
+def full_eat(eat_func:Callable[[str], tuple[int, Token] | None]):
+    """
+    Decorator for functions that eat tokens, and return the token itself if successful.
+    TBD what this actually does...for now, largely keep unmodified, but attach the metadata to the wrapped function
+    """
+    # pull cls it from the return type of eat_func (which should be a Union[tuple[int, Token], None])
+    cls = inspect.signature(eat_func).return_annotation.__args__[0].__args__[1]
+    def wrapper(*args, **kwargs):
+        return eat_func(*args, **kwargs), cls
+    wrapper._is_full_eat_decorator = True  # make it easy to check if a function has this decorator
+    wrapper._eat_func = eat_func
+    wrapper._token_cls = cls
 
-@eat(WhiteSpace)
+    return wrapper
+
+
+@peek_eat(WhiteSpace)
 def eat_line_comment(src:str) -> int|None:
     """eat a line comment, return the number of characters eaten"""
     if src.startswith('//'):
@@ -121,7 +141,7 @@ def eat_line_comment(src:str) -> int|None:
             return len(src)
     return None
 
-@eat(WhiteSpace)
+@peek_eat(WhiteSpace)
 def eat_block_comment(src:str) -> int|None:
     """
     Eat a block comment, return the number of characters eaten
@@ -149,7 +169,7 @@ def eat_block_comment(src:str) -> int|None:
     raise ValueError("unterminated block comment")
     # return None
 
-@eat(WhiteSpace)
+@peek_eat(WhiteSpace)
 def eat_whitespace(src:str) -> int|None:
     """Eat whitespace, return the number of characters eaten"""
     i = 0
@@ -157,7 +177,7 @@ def eat_whitespace(src:str) -> int|None:
         i += 1
     return i if i > 0 else None
 
-@eat(Keyword)
+@peek_eat(Keyword)
 def eat_keyword(src: str) -> int | None:
     """
     Eat a reserved keyword, return the number of characters eaten
@@ -179,7 +199,7 @@ def eat_keyword(src: str) -> int | None:
     return None
 
 
-@eat(Identifier)
+@peek_eat(Identifier)
 def eat_identifier(src:str) -> int|None:
     """
     Eat an identifier, return the number of characters eaten
@@ -193,7 +213,7 @@ def eat_identifier(src:str) -> int|None:
 
 
 
-@eat(Bind)
+@peek_eat(Bind)
 def eat_bind(src:str) -> int|None:
     """eat a bind operator, return the number of characters eaten"""
     if src.startswith('='):
@@ -201,7 +221,7 @@ def eat_bind(src:str) -> int|None:
     return None
 
 
-@eat(Escape, context_free=False)
+@peek_eat(Escape)
 def eat_escape(src:str) -> int|None:
     r"""
     Eat an escape sequence, return the number of characters eaten
@@ -245,8 +265,8 @@ def eat_escape(src:str) -> int|None:
     return 2
 
 
-@eat(String)
-def eat_string(src:str) -> int|None:
+@full_eat
+def eat_string(src:str) -> tuple[int, String] | None:
     """
     strings are delimited with either single (') or double quotes (")
     the character portion of a string may contain any character except the delimiter, \, or {.
@@ -255,32 +275,63 @@ def eat_string(src:str) -> int|None:
     strings may interpolation blocks which open with { and close with }
 
     Tokenizing of escape sequences and interpolation blocks is handled as sub-tokenization task via eat_block and eat_escape
+
+    returns the number of characters eaten and an instance of the String token, containing the list of tokens/string chunks/escape sequences
     """
     if not src[0] in '"\'':
         return None
     
     delim = src[0]
     i = 1
-    while i < len(src):
-        if src[i] == delim:
-            return i + 1
-        elif src[i] == '\\':
+    chunk_start = 1
+    body = []
+
+    #TODO: this doesn't add the string chunks...
+    while i < len(src) and src[i] != delim:
+        
+        #regular characters
+        if src[i] not in '\\{':
+            i += 1
+            continue
+
+        #add the chunk before the body
+        if i > chunk_start:
+            body.append(src[chunk_start:i])
+
+        if src[i] == '\\':
             res, _ = eat_escape(src[i:])
             if res is None:
                 raise ValueError("invalid escape sequence")
+            body.append(Escape(src[i:i+res]))
             i += res
-        elif src[i] == '{':
+
+        else: # src[i] == '{':
+            assert src[i] == '{', "internal error"
             res, _ = eat_block(src[i:])
             if res is None:
-                raise ValueError("invalid interpolation block")
+                raise ValueError("invalid block")
+            block, res = res
+            body.append(block)
             i += res
-        else:
-            i += 1
+        
+        #update the chunk start
+        chunk_start = i
+            
+
+    if i == len(src):
+        raise ValueError("unterminated string")
+    
+    #add the final chunk
+    if i > chunk_start:
+        body.append(src[chunk_start:i])
+    
+    return i + 1, String(body)
+
+
 
 #random note: if you for some reason needed to do a unicode escape followed by a character that happens to be a hex digit, you could do \u##{}#, where the empty block {} breaks the hex digit sequence
 
-#TODO: need to handle this case where longest match would be incorrect: r'this is a raw string \' { expr } 'a separate string later'
-@eat(String)
+@peek_eat(String)
 def eat_raw_string(src:str) -> int|None:
     """
     raw strings start with either r' or r", and are terminated by the matching quote delimiter
@@ -305,69 +356,87 @@ def eat_raw_string(src:str) -> int|None:
     return i + 1
 
 
-#TODO: probably have separate eat function for eating a raw string?
-#alternatively, could also just store the raw string with the parsed string... though if there were errors that would only work during raw parsing....need a separate eat func..
+@full_eat
+def eat_block(src:str) -> tuple[int, Block] | None: ...
 
-def tokenize(src:str, context:list[Context]|None=None) -> list[Token]:
-    # if context is None:
-    #     #top level tokenizing
-    #     context = [Context.root]
-    #     min_context = 0
-    # else:
-    #     #sub tokenizing. Stop when we try to do anything involving the parents context
-    #     min_context = len(context)
-    
-    #get a list of all context free functions that are decorated with @eat
-    eat_funcs = [func for _, func in get_eat_functions() if func._context_free]
-    func_precedences = [precedence.get(func._token_cls, 0) for func in eat_funcs]
+
+
+root_eat_funcs = [
+    eat_line_comment,
+    eat_block_comment,
+    eat_whitespace,
+    eat_keyword,
+    eat_identifier,
+    eat_bind,
+    eat_string,
+    eat_raw_string,
+    eat_block
+]
+
+
+
+def tokenize(src:str) -> list[Token]:
+
+    #TODO: need to separate out the full_eat and peek_eat functions
+    #      probably if any full eat functions return, they take precedence over the peek eat functions
+    #TODO: TBD if should include _token_cls on full_eat functions... ideally we'd pull it from the signature since they should say what type of token they return
+
+    func_precedences = [precedence.get(func._token_cls, 0) for func in root_eat_funcs]
 
     tokens = []
     i = 0
 
     while i < len(src):
+        ########### TODO: probably break this inner part into a function that eats the next token, given a list of eat functions
+        ###########       could also think about ways to specify other multi-match resolutions, other than longest match + precedence...
         #run all the eat functions on the current src
-        matches = [eat_func(src[i:]) for eat_func in eat_funcs]
+        matches = [eat_func(src[i:]) for eat_func in root_eat_funcs]
 
         #find the longest token that matched. if multiple tied for longest, use the one with the highest precedence.
         #raise an error if multiple tokens tied, and they have the same precedence
-        key=lambda x: (x[0][0] or 0, x[1])
+        def key(x):
+            (res, _cls), precedence = x
+            if res is None:
+                return 0, precedence
+            if isinstance(res, tuple):
+                res, _token = res #full_eat functions return a tuple of (num_chars_eaten, token)
+            return res, precedence
+        
         matches = [*zip(matches, func_precedences)]
         best = max(matches, key=key)
         ties = [match for match in matches if key(match) == key(best)]
         if len(ties) > 1:
             raise ValueError(f"multiple tokens matches tied {[match[0][1].__name__ for match in ties]}: {repr(src[i:])}\nPlease disambiguate by providing precedence levels for these tokens.")
 
-        (n_eaten, token_cls), _ = best
-
+        (res, token_cls), _ = best
 
         #if we didn't match anything, raise an error
-        if n_eaten is None:
+        if res is None:
             raise ValueError(f"failed to tokenize: ```{escape_whitespace(src[i:])}```.\nCurrent tokens: {tokens}")
         
-        #add the token to the list of tokens (handling idempotent token cases)
-        if not tokens or token_cls not in idempotent_tokens or not isinstance(tokens[-1], token_cls):
-            tokens.append(token_cls(src[i:i+n_eaten]))
+        if isinstance(res, tuple):
+            n_eaten, token = res
+            tokens.append(token)
+        else:
+            #add the token to the list of tokens (handling idempotent token cases)
+            n_eaten = res
+            if not tokens or token_cls not in idempotent_tokens or not isinstance(tokens[-1], token_cls):
+                tokens.append(token_cls(src[i:i+n_eaten]))
 
         #increment the index
         i += n_eaten
 
-        #check if we need to stop tokenizing
-        #TODO: this should go inside the loop?
-
-
     return tokens
 
 
-def get_eat_functions() -> list[tuple[str, Callable[[str], tuple[int|None, Type[Token]]]]]:
-    """Get a list of all functions decorated with @eat"""
-    return [(name, func) for name, func in globals().items() if callable(func) and hasattr(func, "_is_eat_decorator") and func._is_eat_decorator]
 
 def validate_functions():
     # Get all functions decorated with @eat(Token)
-    decorated_functions = get_eat_functions()
+    peek_eat_functions = [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_peek_eat_decorator', False)]
+    full_eat_functions = [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_full_eat_decorator', False)]
 
-    # Validate the function signatures
-    for name, wrapper_func in decorated_functions:
+    # Validate the peek eat function signatures
+    for name, wrapper_func in peek_eat_functions:
         func = wrapper_func._eat_func
         signature = inspect.signature(func)
         param_types = [param.annotation for param in signature.parameters.values()]
@@ -377,11 +446,14 @@ def validate_functions():
         if len(param_types) != 1 or param_types[0] != str or return_type != int|None:
             raise ValueError(f"{func.__name__} has an invalid signature: `{signature}`. Expected `(src: str) -> int|None`")
 
+    # TODO: Validate the full eat function signatures
+
     # check for any functions that start with eat_ but are not decorated with @eat
-    decorated_func_names = {name for name, _ in decorated_functions}
+    peek_eat_func_names = {name for name, _ in peek_eat_functions}
+    full_eat_func_names = {name for name, _ in full_eat_functions}
     for name, func in globals().items():
-        if name.startswith("eat_") and callable(func) and name not in decorated_func_names:
-            raise ValueError(f"`{name}()` function is not decorated with @eat")
+        if name.startswith("eat_") and callable(func) and name not in peek_eat_func_names and name not in full_eat_func_names:
+            raise ValueError(f"`{name}()` function is not decorated with @peek_eat or @full_eat")
 
 
 def escape_whitespace(s:str):
