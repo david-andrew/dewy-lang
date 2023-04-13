@@ -25,6 +25,8 @@ traceback.install(show_locals=True)
 
 
 #TODO: tbd how this gets used
+#      context is useful to know which of the eat functions to use during tokenization
+#      e.g. when inside a string, only eat_character, eat_escape, and eat_block
 class Context(Enum):
     root = auto()
     block = auto()
@@ -55,11 +57,26 @@ class Identifier(Token):
 class Bind(Token):
     def __init__(self, _): ...
 
-# class String(Token):
-#     def __init__(self, body:list[str|list[Token]]):
-#         self.body = body
-#     def __repr__(self) -> str:
-#         return f"<String: {self.body}>"
+class Block(Token):
+    def __init__(self, body:list[Token]):
+        self.body = body
+    def __repr__(self) -> str:
+        return f"<Block: {self.body}>"
+
+class Escape(Token):
+    def __init__(self, src:str):
+        self.src = src
+    def __repr__(self) -> str:
+        return f"<Escape: {self.src}>"
+
+class String(Token):
+    def __init__(self, body:list[str|Escape|Block]):
+        self.body = body
+    def __repr__(self) -> str:
+        return f"<String: {self.body}>"
+    
+
+
     
 
 
@@ -77,7 +94,7 @@ idempotent_tokens = {
 }
 
 
-def eat(cls:Type[Token]):
+def eat(cls:Type[Token], context_free:bool=True):
     """
     Decorator for functions that eat tokens. 
     Makes function return include constructor for token class that it tries to eat, in tupled with return.
@@ -86,6 +103,7 @@ def eat(cls:Type[Token]):
     def decorator(eat_func:Callable[[str], int|None]):
         def wrapper(src:str) -> tuple[int|None, Type[Token]]:
             return eat_func(src), cls
+        wrapper._context_free = context_free
         wrapper._is_eat_decorator = True  # make it easy to check if a function has this decorator
         wrapper._eat_func = eat_func
         wrapper._token_cls = cls
@@ -183,19 +201,124 @@ def eat_bind(src:str) -> int|None:
     return None
 
 
+@eat(Escape, context_free=False)
+def eat_escape(src:str) -> int|None:
+    r"""
+    Eat an escape sequence, return the number of characters eaten
+    Escape sequences must be either a known escape sequence:
+    - \n newline 
+    - \r carriage return
+    - \t tab
+    - \b backspace
+    - \f form feed
+    - \v vertical tab
+    - \a alert
+    - \0 null
+    - \u##..# or \U##..# for an arbitrary unicode character. May have any number of hex digits
+    
+    or a \ followed by an unknown character. In this case, the escape converts to just the unknown character
+    This is how to insert characters that are otherwise illegal inside a string, e.g. 
+    - \' converts to just a single quote '
+    - \{ converts to just a single open brace {
+    - \\ converts to just a single backslash \
+    - \m converts to just a single character m
+    - etc.
+    """
+    if not src.startswith('\\'):
+        return None
 
+    if len(src) == 1:
+        raise ValueError("unterminated escape sequence")
+
+    if src[1] in 'uU':
+        i = 2
+        while i < len(src) and src[i].isxdigit():
+            i += 1
+        if i == 2:
+            raise ValueError("invalid unicode escape sequence")
+        return i
+
+    # if src[1] in 'nrtbfva0':
+    #     return 2
+
+    #all other escape sequences (known or unknown) are just a single character
+    return 2
+
+
+@eat(String)
+def eat_string(src:str) -> int|None:
+    """
+    strings are delimited with either single (') or double quotes (")
+    the character portion of a string may contain any character except the delimiter, \, or {.
+    strings may be multiline
+    strings may contain escape sequences of the form \s where s is either a known escape sequence or a single character
+    strings may interpolation blocks which open with { and close with }
+
+    Tokenizing of escape sequences and interpolation blocks is handled as sub-tokenization task via eat_block and eat_escape
+    """
+    if not src[0] in '"\'':
+        return None
+    
+    delim = src[0]
+    i = 1
+    while i < len(src):
+        if src[i] == delim:
+            return i + 1
+        elif src[i] == '\\':
+            res, _ = eat_escape(src[i:])
+            if res is None:
+                raise ValueError("invalid escape sequence")
+            i += res
+        elif src[i] == '{':
+            res, _ = eat_block(src[i:])
+            if res is None:
+                raise ValueError("invalid interpolation block")
+            i += res
+        else:
+            i += 1
+
+#random note: if you for some reason needed to do a unicode escape followed by a character that happens to be a hex digit, you could do \u##{}#, where the empty block {} breaks the hex digit sequence
+
+#TODO: need to handle this case where longest match would be incorrect: r'this is a raw string \' { expr } 'a separate string later'
+@eat(String)
+def eat_raw_string(src:str) -> int|None:
+    """
+    raw strings start with either r' or r", and are terminated by the matching quote delimiter
+    raw strings may contain any character except the delimiter.
+    Escapes and interpolations are ignored.
+    The string ends at the first instance of the delimiter
+    """
+    if not src.startswith('r'):
+        return None
+
+    delim = src[1]
+    if delim not in '"\'':
+        return None
+
+    i = 2
+    while i < len(src) and src[i] != delim:
+        i += 1
+
+    if i == len(src):
+        raise ValueError("unterminated raw string")
+
+    return i + 1
+
+
+#TODO: probably have separate eat function for eating a raw string?
+#alternatively, could also just store the raw string with the parsed string... though if there were errors that would only work during raw parsing....need a separate eat func..
 
 def tokenize(src:str, context:list[Context]|None=None) -> list[Token]:
-    if context is None:
-        #top level tokenizing
-        context = [Context.root]
-        min_context = 0
-    else:
-        #sub tokenizing. Stop when we try to do anything involving the parents context
-        min_context = len(context)
+    # if context is None:
+    #     #top level tokenizing
+    #     context = [Context.root]
+    #     min_context = 0
+    # else:
+    #     #sub tokenizing. Stop when we try to do anything involving the parents context
+    #     min_context = len(context)
     
-    #get a list of all functions that are decorated with @eat
-    eat_funcs = [func for _, func in get_eat_functions()]
+    #get a list of all context free functions that are decorated with @eat
+    eat_funcs = [func for _, func in get_eat_functions() if func._context_free]
     func_precedences = [precedence.get(func._token_cls, 0) for func in eat_funcs]
 
     tokens = []
@@ -219,7 +342,7 @@ def tokenize(src:str, context:list[Context]|None=None) -> list[Token]:
 
         #if we didn't match anything, raise an error
         if n_eaten is None:
-            raise ValueError(f"failed to tokenize: {repr(src[i:])}.\nCurrent tokens: {tokens}")
+            raise ValueError(f"failed to tokenize: ```{escape_whitespace(src[i:])}```.\nCurrent tokens: {tokens}")
         
         #add the token to the list of tokens (handling idempotent token cases)
         if not tokens or token_cls not in idempotent_tokens or not isinstance(tokens[-1], token_cls):
@@ -260,6 +383,17 @@ def validate_functions():
         if name.startswith("eat_") and callable(func) and name not in decorated_func_names:
             raise ValueError(f"`{name}()` function is not decorated with @eat")
 
+
+def escape_whitespace(s:str):
+    """convert a string to one where all non-space whitespace is escaped"""
+    escape_map = {
+        '\t': '\\t',
+        '\r': '\\r',
+        '\f': '\\f',
+        '\v': '\\v',
+        '\n': '\\n',
+    }
+    return ''.join(escape_map.get(c, c) for c in s)
 
 
 def test():
