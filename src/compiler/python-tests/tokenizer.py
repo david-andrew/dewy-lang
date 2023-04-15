@@ -148,21 +148,22 @@ def peek_eat(cls:Type[Token], root:bool=True):
     return decorator
 
 #TODO: full eat probably won't need to take the class as an argument, since the function will know how to construct the token itself
-# def full_eat(root:bool=True)
-def full_eat(eat_func:Callable[[str], tuple[int, Token] | None]):
-    """
-    Decorator for functions that eat tokens, and return the token itself if successful.
-    TBD what this actually does...for now, largely keep unmodified, but attach the metadata to the wrapped function
-    """
-    # pull cls it from the return type of eat_func (which should be a Union[tuple[int, Token], None])
-    cls = inspect.signature(eat_func).return_annotation.__args__[0].__args__[1]
-    def wrapper(*args, **kwargs):
-        return eat_func(*args, **kwargs), cls
-    wrapper._is_full_eat_decorator = True  # make it easy to check if a function has this decorator
-    wrapper._eat_func = eat_func
-    wrapper._token_cls = cls
+def full_eat(root:bool=True):
+    def decorator(eat_func:Callable[[str], tuple[int, Token] | None]):
+        """
+        Decorator for functions that eat tokens, and return the token itself if successful.
+        TBD what this actually does...for now, largely keep unmodified, but attach the metadata to the wrapped function
+        """
+        # pull cls it from the return type of eat_func (which should be a Union[tuple[int, Token], None])
+        cls = inspect.signature(eat_func).return_annotation.__args__[0].__args__[1]
+        def wrapper(*args, **kwargs):
+            return eat_func(*args, **kwargs), cls
+        wrapper._is_full_eat_decorator = True  # make it easy to check if a function has this decorator
+        wrapper._eat_func = eat_func
+        wrapper._token_cls = cls
 
-    return wrapper
+        return wrapper
+    return decorator
 
 
 @peek_eat(WhiteSpace)
@@ -299,7 +300,7 @@ def eat_escape(src:str) -> int|None:
     return 2
 
 
-@full_eat
+@full_eat()
 def eat_string(src:str) -> tuple[int, String] | None:
     """
     strings are delimited with either single (') or double quotes (")
@@ -439,7 +440,7 @@ class EatTracker:
     i: int
     tokens: list[Token]
 
-@full_eat
+@full_eat()
 def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None:
     """
     Eat a block, return the number of characters eaten and an instance of the Block token
