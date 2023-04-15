@@ -144,6 +144,7 @@ def peek_eat(cls:Type[Token], root:bool=True):
         wrapper._is_peek_eat_decorator = True  # make it easy to check if a function has this decorator
         wrapper._eat_func = eat_func
         wrapper._token_cls = cls
+        wrapper._root = root
         return wrapper
     return decorator
 
@@ -161,10 +162,18 @@ def full_eat(root:bool=True):
         wrapper._is_full_eat_decorator = True  # make it easy to check if a function has this decorator
         wrapper._eat_func = eat_func
         wrapper._token_cls = cls
+        wrapper._root = root
 
         return wrapper
     return decorator
 
+
+def get_peek_eat_funcs():
+    return [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_peek_eat_decorator', False)]
+def get_full_eat_funcs():
+    return [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_full_eat_decorator', False)]
+def get_eat_funcs():
+    return get_peek_eat_funcs() + get_full_eat_funcs()
 
 @peek_eat(WhiteSpace)
 def eat_line_comment(src:str) -> int|None:
@@ -256,7 +265,7 @@ def eat_identifier(src:str) -> int|None:
 #     return None
 
 
-@peek_eat(Escape)
+@peek_eat(Escape, root=False)
 def eat_escape(src:str) -> int|None:
     r"""
     Eat an escape sequence, return the number of characters eaten
@@ -535,19 +544,7 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
 
 
 #TODO: perhaps root_eat could be a property added by the decorator
-root_eat_funcs = [
-    eat_line_comment,
-    eat_block_comment,
-    eat_whitespace,
-    eat_keyword,
-    eat_identifier,
-    eat_string,
-    eat_raw_string,
-    eat_integer,
-    eat_operator,
-    eat_comma,
-    eat_block
-]
+root_eat_funcs = [func for name, func in get_eat_funcs() if func._root]
 root_func_precedences = [precedence.get(func._token_cls, 0) for func in root_eat_funcs]
 
 
@@ -573,13 +570,11 @@ def tokenize(src:str) -> list[Token]:
 
     return tokens
 
-    
-
 
 def validate_functions():
 
     # Validate the @peek_eat function signatures
-    peek_eat_functions = [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_peek_eat_decorator', False)]
+    peek_eat_functions = get_peek_eat_funcs()
     for name, wrapper_func in peek_eat_functions:
         func = wrapper_func._eat_func
         signature = inspect.signature(func)
@@ -592,7 +587,7 @@ def validate_functions():
             raise ValueError(f"{func.__name__} has an invalid signature: `{signature}`. Expected `(src: str) -> int | None`")
 
     # Validate the @full_eat function signatures
-    full_eat_functions = [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_full_eat_decorator', False)]
+    full_eat_functions = get_full_eat_funcs()
     for name, wrapper_func in full_eat_functions:
         func = wrapper_func._eat_func
         signature = inspect.signature(func)
