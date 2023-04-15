@@ -55,19 +55,17 @@ class Identifier(Token):
     def __repr__(self) -> str:
         return f"<Identifier: {self.src}>"
     
-class Bind(Token):
-    def __init__(self, _): ...
+# class Bind(Token):
+#     def __init__(self, _): ...
 
 class Block(Token):
-    def __init__(self, body:list[Token], scoped:bool):
+    def __init__(self, body:list[Token], left:str, right:str):
         self.body = body
-        self.scoped = scoped
+        self.left = left
+        self.right = right
     def __repr__(self) -> str:
         body_str = ', '.join(repr(token) for token in self.body)
-        if self.scoped:
-            return f"<Block: {{{body_str}}}>"
-        else:
-            return f"<Block: ({body_str})>"
+        return f"<Block: {self.left}{body_str}{self.right}>"
 
 class Escape(Token):
     def __init__(self, src:str):
@@ -87,11 +85,24 @@ class Integer(Token):
     def __repr__(self) -> str:
         return f"<Integer: {self.src}>"
 
-class BinOp(Token):
+class Operator(Token):
     def __init__(self, op:str):
         self.op = op
     def __repr__(self) -> str:
-        return f"<BinOp: {self.op}>"
+        return f"<Operator: {self.op}>"
+    
+class Dot(Token):
+    def __init__(self, _): ...
+
+class DotDot(Token):
+    def __init__(self, _): ...
+
+# class DotDotDot(Token):
+#     def __init__(self, _): ...
+
+class Comma(Token):
+    def __init__(self, _): ...
+
 
     
 
@@ -109,11 +120,19 @@ idempotent_tokens = {
     WhiteSpace
 }
 
-#TODO: how to handle range pairs that can be (] or [) or [], or ()...
-# delimiter_pairs = {'{':'}', '(':')'}
+# delimiters for blocks, ranges TODO: <> may not be part of this... what are <> blocks?
+pair_opening_delims = '{([<'
+pair_closing_delims = '})]>'
+
+#list of all operators sorted from longest to shortest
+operators = sorted(
+    ['+', '-', '*', '/', '%', '^', '@', 'not', 'and', 'or', 'nand', 'nor', 'xor', 'xnor', '<<', '>>', '<<<', '>>>', '<<<!', '!>>>', '=?', 'not?', '>?', '<?', '>=?', '<=?', 'in?', '<=>', ':>', '->', '<->', '<-', '=>', '@?', '=', ':=', '.', '..'], 
+    key=len, 
+    reverse=True
+)
 
 
-def peek_eat(cls:Type[Token]):
+def peek_eat(cls:Type[Token], root:bool=True):
     """
     Decorator for functions that eat tokens, but only return how many characters would make up the token. 
     Makes function return include constructor for token class that it tries to eat, in tupled with return.
@@ -129,6 +148,7 @@ def peek_eat(cls:Type[Token]):
     return decorator
 
 #TODO: full eat probably won't need to take the class as an argument, since the function will know how to construct the token itself
+# def full_eat(root:bool=True)
 def full_eat(eat_func:Callable[[str], tuple[int, Token] | None]):
     """
     Decorator for functions that eat tokens, and return the token itself if successful.
@@ -227,12 +247,12 @@ def eat_identifier(src:str) -> int|None:
 
 
 
-@peek_eat(Bind)
-def eat_bind(src:str) -> int|None:
-    """eat a bind operator, return the number of characters eaten"""
-    if src.startswith('='):
-        return 1
-    return None
+# @peek_eat(Bind)
+# def eat_bind(src:str) -> int|None:
+#     """eat a bind operator, return the number of characters eaten"""
+#     if src.startswith('='):
+#         return 1
+#     return None
 
 
 @peek_eat(Escape)
@@ -380,19 +400,40 @@ def eat_integer(src:str) -> int|None:
         i += 1
     return i if i > 0 else None
 
+@peek_eat(Operator)
+def eat_operator(src:str) -> int|None:
+    """
+    eat a unary or binary operator, return the number of characters eaten
+    unary operators: + - @ not TODO: others?
+    binary operators: 
+        + - * / % ^ 
+        and or nand nor xor xnor 
+        << >> >>> <<< <<<! !>>>
+        =? not? >? <? >=? <=? in?
+        <=>
+        :>
+        -> <-> <-
+        =>
+        @?
+        = :=
+        . ..
 
-@peek_eat(BinOp)
-def eat_binop(src:str) -> int|None:
+    picks the longest matching operator
     """
-    eat a binary operator, return the number of characters eaten
-    binary operators are of the form [+-/*%&|^~<>!]
-    """
-    if src[0] in '+-/*%^':
-        return 1
-    for op in ('<<', '>>', 'and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor', '=?', '>?', '<?', '>=?', '<=?'):
+    for op in operators:
         if src.startswith(op):
             return len(op)
     return None
+
+
+@peek_eat(Comma)
+def eat_comma(src:str) -> int|None:
+    """
+    eat a comma, return the number of characters eaten
+    """
+    return 1 if src.startswith(',') else None
+
+
 
 class EatTracker:
     i: int
@@ -408,19 +449,21 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
     if return_partial is True, then returns (i, body) in the case where the eat process fails, instead of None
     """
     
-    if not src or src[0] not in '{(':
+    if not src or src[0] not in pair_opening_delims:
         return None
+    
+    # save the opening delimiter
+    left = src[0]
     
     # try:
     i = 1
     body: list[Token] = []
-    delim = ')}'[src[0] == '{']
 
     if tracker:
         tracker.i = i
         tracker.tokens = body
 
-    while i < len(src) and src[i] != delim:
+    while i < len(src) and src[i] not in pair_closing_delims:
         #run all root eat functions
         #if multiple, resolve for best match (TBD... current is longest match + precedence)
         #if no match, return None
@@ -470,18 +513,18 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
     if i == len(src):
         raise ValueError("unterminated block")
     
+    # closing delim (doesn't need to match opening delim)
+    right = src[i]
+    assert left in pair_opening_delims and right in pair_closing_delims, f"invalid block delimiters: {left} {right}"
+
+    #include closing delimiter in character count
     i += 1
     if tracker:
         tracker.i = i
 
-    scoped = src[0] == '{'
-    return i, Block(body, scoped)
+    return i, Block(body, left=left, right=right)
 
-    # except Exception as e:
-    #     if return_partial:
-    #         return i, Block(body, scoped=False)
-    #     else:
-    #         raise e from None
+
 
     
     #TODO: need to separate out the full_eat and peek_eat functions
@@ -490,18 +533,18 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
 
 
 
-
+#TODO: perhaps root_eat could be a property added by the decorator
 root_eat_funcs = [
     eat_line_comment,
     eat_block_comment,
     eat_whitespace,
     eat_keyword,
     eat_identifier,
-    eat_bind,
     eat_string,
     eat_raw_string,
     eat_integer,
-    eat_binop,
+    eat_operator,
+    eat_comma,
     eat_block
 ]
 root_func_precedences = [precedence.get(func._token_cls, 0) for func in root_eat_funcs]
@@ -595,7 +638,9 @@ def test():
         src = f.read()
 
     tokens = tokenize(src)
-    print(f'matched tokens: {tokens}')
+    print(f'matched tokens:')
+    for t in tokens:
+        print(f'  {t}')
 
 
 

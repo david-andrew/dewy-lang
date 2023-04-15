@@ -1,0 +1,10 @@
+{
+    primes = [2]
+    (loop i in [3, 5..)
+        if i .% primes :> product not =? 0 
+            primes.push(i)
+        if primes.length =? 10
+            break
+    )
+    primes
+}
