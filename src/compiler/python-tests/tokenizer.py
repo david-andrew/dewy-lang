@@ -99,6 +99,9 @@ idempotent_tokens = {
     WhiteSpace
 }
 
+#TODO: how to handle range pairs that can be (] or [) or [], or ()...
+# delimiter_pairs = {'{':'}', '(':')'}
+
 
 def peek_eat(cls:Type[Token]):
     """
@@ -358,38 +361,28 @@ def eat_raw_string(src:str) -> int|None:
 
 
 @full_eat
-def eat_block(src:str, body:list|None=None) -> tuple[int, Block] | None:
+def eat_block(src:str, return_partial:bool=False) -> tuple[int, Block] | None:
+    """
+    Eat a block, return the number of characters eaten and an instance of the Block token
+
+    blocks are { ... } or ( ... ) and may contain sequences of any other tokens including other blocks
+
+    if return_partial is True, then returns (i, body) in the case where the eat process fails, instead of None
+    """
+    
     if not src or src[0] not in '{(':
         return None
     
     i = 1
-    delim = src[0]
-    scoped = delim == '{'
-    body = body or []
+    delim = ')}'[src[0] == '{']
+    body: list[Token] = []
 
     while i < len(src) and src[i] != delim:
-        pdb.set_trace()
-        ...
         #run all root eat functions
         #if multiple, resolve for best match (TBD... current is longest match + precedence)
         #if no match, return None
-    
-    
-        #i += n_eaten
 
-    return i, Block(body, scoped)
-    
-    
-    #TODO: need to separate out the full_eat and peek_eat functions
-    #      probably if any full eat functions return, they take precedence over the peek eat functions
-    #TODO: TBD if should include _token_cls on full_eat functions... ideally we'd pull it from the signature since they should say what type of token they return
 
-    
-
-    tokens = []
-    i = 0
-
-    while i < len(src):
         ########### TODO: probably break this inner part into a function that eats the next token, given a list of eat functions
         ###########       could also think about ways to specify other multi-match resolutions, other than longest match + precedence...
         #run all the eat functions on the current src
@@ -405,7 +398,7 @@ def eat_block(src:str, body:list|None=None) -> tuple[int, Block] | None:
                 res, _token = res #full_eat functions return a tuple of (num_chars_eaten, token)
             return res, precedence
         
-        matches = [*zip(matches, func_precedences)]
+        matches = [*zip(matches, root_func_precedences)]
         best = max(matches, key=key)
         ties = [match for match in matches if key(match) == key(best)]
         if len(ties) > 1:
@@ -413,23 +406,37 @@ def eat_block(src:str, body:list|None=None) -> tuple[int, Block] | None:
 
         (res, token_cls), _ = best
 
-        #if we didn't match anything, raise an error
+        #if we didn't match anything, return None
         if res is None:
-            raise ValueError(f"failed to tokenize: ```{escape_whitespace(src[i:])}```.\nCurrent tokens: {tokens}")
+            if return_partial:
+                return i, Block(body, scoped=False)
+            else:
+                return None
         
         if isinstance(res, tuple):
             n_eaten, token = res
-            tokens.append(token)
+            body.append(token)
         else:
             #add the token to the list of tokens (handling idempotent token cases)
             n_eaten = res
-            if not tokens or token_cls not in idempotent_tokens or not isinstance(tokens[-1], token_cls):
-                tokens.append(token_cls(src[i:i+n_eaten]))
+            if not body or token_cls not in idempotent_tokens or not isinstance(body[-1], token_cls):
+                body.append(token_cls(src[i:i+n_eaten]))
 
         #increment the index
         i += n_eaten
 
-    return tokens
+    if i == len(src):
+        raise ValueError("unterminated block")
+    
+    i += 1
+
+    scoped = src[0] == '{'
+    return i, Block(body, scoped)
+    
+    
+    #TODO: need to separate out the full_eat and peek_eat functions
+    #      probably if any full eat functions return, they take precedence over the peek eat functions
+    #TODO: TBD if should include _token_cls on full_eat functions... ideally we'd pull it from the signature since they should say what type of token they return
 
 
 
@@ -455,15 +462,14 @@ def tokenize(src:str) -> list[Token]:
     src = f'{{\n{src}\n}}'
 
     # eat tokens for a block
-    res = eat_block(src)
+    (i, block), _cls = eat_block(src, return_partial=True)
+    tokens = block.body
 
-    if not res:
-        raise ValueError("failed to tokenize")
-    
-    # pull the block out of the result
-    _, block = res
-    
-    return block.body
+    # check if the process failed
+    if i < len(src):
+        raise ValueError(f"failed to tokenize: ```{escape_whitespace(src[i:])}```.\nCurrent tokens: {tokens}")
+
+    return tokens
 
     
 
