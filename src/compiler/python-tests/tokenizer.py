@@ -81,7 +81,17 @@ class String(Token):
     def __repr__(self) -> str:
         return f"<String: {self.body}>"
     
+class Integer(Token):
+    def __init__(self, src:str):
+        self.src = src
+    def __repr__(self) -> str:
+        return f"<Integer: {self.src}>"
 
+class BinOp(Token):
+    def __init__(self, op:str):
+        self.op = op
+    def __repr__(self) -> str:
+        return f"<BinOp: {self.op}>"
 
     
 
@@ -298,7 +308,7 @@ def eat_string(src:str) -> tuple[int, String] | None:
             i += 1
             continue
 
-        #add the chunk before the body
+        #add the previous chunk before handling the escape/intepolation block
         if i > chunk_start:
             body.append(src[chunk_start:i])
 
@@ -314,9 +324,9 @@ def eat_string(src:str) -> tuple[int, String] | None:
             res, _ = eat_block(src[i:])
             if res is None:
                 raise ValueError("invalid block")
-            block, res = res
+            n_eaten, block = res
             body.append(block)
-            i += res
+            i += n_eaten
         
         #update the chunk start
         chunk_start = i
@@ -331,9 +341,8 @@ def eat_string(src:str) -> tuple[int, String] | None:
     
     return i + 1, String(body)
 
-
-
 #random note: if you for some reason needed to do a unicode escape followed by a character that happens to be a hex digit, you could do \u##{}#, where the empty block {} breaks the hex digit sequence
+
 
 @peek_eat(String)
 def eat_raw_string(src:str) -> int|None:
@@ -360,6 +369,31 @@ def eat_raw_string(src:str) -> int|None:
     return i + 1
 
 
+@peek_eat(Integer)
+def eat_integer(src:str) -> int|None:
+    """
+    eat an integer, return the number of characters eaten
+    integers are of the form [0-9]+
+    """
+    i = 0
+    while i < len(src) and src[i].isdigit():
+        i += 1
+    return i if i > 0 else None
+
+
+@peek_eat(BinOp)
+def eat_binop(src:str) -> int|None:
+    """
+    eat a binary operator, return the number of characters eaten
+    binary operators are of the form [+-/*%&|^~<>!]
+    """
+    if src[0] in '+-/*%^':
+        return 1
+    for op in ('<<', '>>', 'and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor', '=?', '>?', '<?', '>=?', '<=?'):
+        if src.startswith(op):
+            return len(op)
+    return None
+
 @full_eat
 def eat_block(src:str, return_partial:bool=False) -> tuple[int, Block] | None:
     """
@@ -373,66 +407,74 @@ def eat_block(src:str, return_partial:bool=False) -> tuple[int, Block] | None:
     if not src or src[0] not in '{(':
         return None
     
-    i = 1
-    delim = ')}'[src[0] == '{']
-    body: list[Token] = []
+    try:
 
-    while i < len(src) and src[i] != delim:
-        #run all root eat functions
-        #if multiple, resolve for best match (TBD... current is longest match + precedence)
-        #if no match, return None
+        i = 1
+        delim = ')}'[src[0] == '{']
+        body: list[Token] = []
+
+        while i < len(src) and src[i] != delim:
+            #run all root eat functions
+            #if multiple, resolve for best match (TBD... current is longest match + precedence)
+            #if no match, return None
 
 
-        ########### TODO: probably break this inner part into a function that eats the next token, given a list of eat functions
-        ###########       could also think about ways to specify other multi-match resolutions, other than longest match + precedence...
-        #run all the eat functions on the current src
-        matches = [eat_func(src[i:]) for eat_func in root_eat_funcs]
+            ########### TODO: probably break this inner part into a function that eats the next token, given a list of eat functions
+            ###########       could also think about ways to specify other multi-match resolutions, other than longest match + precedence...
+            #run all the eat functions on the current src
+            matches = [eat_func(src[i:]) for eat_func in root_eat_funcs]
 
-        #find the longest token that matched. if multiple tied for longest, use the one with the highest precedence.
-        #raise an error if multiple tokens tied, and they have the same precedence
-        def key(x):
-            (res, _cls), precedence = x
+            #find the longest token that matched. if multiple tied for longest, use the one with the highest precedence.
+            #raise an error if multiple tokens tied, and they have the same precedence
+            def key(x):
+                (res, _cls), precedence = x
+                if res is None:
+                    return 0, precedence
+                if isinstance(res, tuple):
+                    res, _token = res #full_eat functions return a tuple of (num_chars_eaten, token)
+                return res, precedence
+
+            matches = [*zip(matches, root_func_precedences)]
+            best = max(matches, key=key)
+            ties = [match for match in matches if key(match) == key(best)]
+            if len(ties) > 1:
+                raise ValueError(f"multiple tokens matches tied {[match[0][1].__name__ for match in ties]}: {repr(src[i:])}\nPlease disambiguate by providing precedence levels for these tokens.")
+
+            (res, token_cls), _ = best
+
+            #if we didn't match anything, return None
             if res is None:
-                return 0, precedence
+                if return_partial:
+                    return i, Block(body, scoped=False)
+                else:
+                    return None
+            
             if isinstance(res, tuple):
-                res, _token = res #full_eat functions return a tuple of (num_chars_eaten, token)
-            return res, precedence
-        
-        matches = [*zip(matches, root_func_precedences)]
-        best = max(matches, key=key)
-        ties = [match for match in matches if key(match) == key(best)]
-        if len(ties) > 1:
-            raise ValueError(f"multiple tokens matches tied {[match[0][1].__name__ for match in ties]}: {repr(src[i:])}\nPlease disambiguate by providing precedence levels for these tokens.")
-
-        (res, token_cls), _ = best
-
-        #if we didn't match anything, return None
-        if res is None:
-            if return_partial:
-                return i, Block(body, scoped=False)
+                n_eaten, token = res
+                body.append(token)
             else:
-                return None
+                #add the token to the list of tokens (handling idempotent token cases)
+                n_eaten = res
+                if not body or token_cls not in idempotent_tokens or not isinstance(body[-1], token_cls):
+                    body.append(token_cls(src[i:i+n_eaten]))
+
+            #increment the index
+            i += n_eaten
+
+        if i == len(src):
+            raise ValueError("unterminated block")
         
-        if isinstance(res, tuple):
-            n_eaten, token = res
-            body.append(token)
+        i += 1
+
+        scoped = src[0] == '{'
+        return i, Block(body, scoped)
+
+    except Exception as e:
+        if return_partial:
+            return i, Block(body, scoped=False)
         else:
-            #add the token to the list of tokens (handling idempotent token cases)
-            n_eaten = res
-            if not body or token_cls not in idempotent_tokens or not isinstance(body[-1], token_cls):
-                body.append(token_cls(src[i:i+n_eaten]))
+            raise e from None
 
-        #increment the index
-        i += n_eaten
-
-    if i == len(src):
-        raise ValueError("unterminated block")
-    
-    i += 1
-
-    scoped = src[0] == '{'
-    return i, Block(body, scoped)
-    
     
     #TODO: need to separate out the full_eat and peek_eat functions
     #      probably if any full eat functions return, they take precedence over the peek eat functions
@@ -450,6 +492,8 @@ root_eat_funcs = [
     eat_bind,
     eat_string,
     eat_raw_string,
+    eat_integer,
+    eat_binop,
     eat_block
 ]
 root_func_precedences = [precedence.get(func._token_cls, 0) for func in root_eat_funcs]
