@@ -55,8 +55,11 @@ class Identifier(Token):
     def __repr__(self) -> str:
         return f"<Identifier: {self.src}>"
     
-# class Bind(Token):
-#     def __init__(self, _): ...
+class Hashtag(Token):
+    def __init__(self, src):
+        self.src = src
+    def __repr__(self) -> str:
+        return f"<Hashtag: #{self.src}>"
 
 class Block(Token):
     def __init__(self, body:list[Token], left:str, right:str):
@@ -257,12 +260,20 @@ def eat_identifier(src:str) -> int|None:
 
 
 
-# @peek_eat(Bind)
-# def eat_bind(src:str) -> int|None:
-#     """eat a bind operator, return the number of characters eaten"""
-#     if src.startswith('='):
-#         return 1
-#     return None
+@peek_eat(Hashtag)
+def eat_hashtag(src:str) -> int|None:
+    """
+    Eat a hashtag, return the number of characters eaten
+    
+    hashtags are special identifiers that start with #
+    """
+
+    if src.startswith('#'):
+        i,_ = eat_identifier(src[1:])
+        if i is not None:
+            return i + 1
+        
+    return None
 
 
 @peek_eat(Escape, root=False)
