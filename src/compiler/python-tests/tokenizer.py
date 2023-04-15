@@ -16,6 +16,7 @@ from abc import ABC
 from enum import Enum, auto
 import inspect
 from typing import Callable, Type
+from types import UnionType
 
 import pdb
 
@@ -357,31 +358,33 @@ def eat_raw_string(src:str) -> int|None:
 
 
 @full_eat
-def eat_block(src:str) -> tuple[int, Block] | None: ...
+def eat_block(src:str, body:list|None=None) -> tuple[int, Block] | None:
+    if not src or src[0] not in '{(':
+        return None
+    
+    i = 1
+    delim = src[0]
+    scoped = delim == '{'
+    body = body or []
 
+    while i < len(src) and src[i] != delim:
+        pdb.set_trace()
+        ...
+        #run all root eat functions
+        #if multiple, resolve for best match (TBD... current is longest match + precedence)
+        #if no match, return None
+    
+    
+        #i += n_eaten
 
-
-root_eat_funcs = [
-    eat_line_comment,
-    eat_block_comment,
-    eat_whitespace,
-    eat_keyword,
-    eat_identifier,
-    eat_bind,
-    eat_string,
-    eat_raw_string,
-    eat_block
-]
-
-
-
-def tokenize(src:str) -> list[Token]:
-
+    return i, Block(body, scoped)
+    
+    
     #TODO: need to separate out the full_eat and peek_eat functions
     #      probably if any full eat functions return, they take precedence over the peek eat functions
     #TODO: TBD if should include _token_cls on full_eat functions... ideally we'd pull it from the signature since they should say what type of token they return
 
-    func_precedences = [precedence.get(func._token_cls, 0) for func in root_eat_funcs]
+    
 
     tokens = []
     i = 0
@@ -430,23 +433,76 @@ def tokenize(src:str) -> list[Token]:
 
 
 
-def validate_functions():
-    # Get all functions decorated with @eat(Token)
-    peek_eat_functions = [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_peek_eat_decorator', False)]
-    full_eat_functions = [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_full_eat_decorator', False)]
 
-    # Validate the peek eat function signatures
+root_eat_funcs = [
+    eat_line_comment,
+    eat_block_comment,
+    eat_whitespace,
+    eat_keyword,
+    eat_identifier,
+    eat_bind,
+    eat_string,
+    eat_raw_string,
+    eat_block
+]
+root_func_precedences = [precedence.get(func._token_cls, 0) for func in root_eat_funcs]
+
+
+
+def tokenize(src:str) -> list[Token]:
+
+    # insert src into a block
+    src = f'{{\n{src}\n}}'
+
+    # eat tokens for a block
+    res = eat_block(src)
+
+    if not res:
+        raise ValueError("failed to tokenize")
+    
+    # pull the block out of the result
+    _, block = res
+    
+    return block.body
+
+    
+
+
+def validate_functions():
+
+    # Validate the @peek_eat function signatures
+    peek_eat_functions = [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_peek_eat_decorator', False)]
     for name, wrapper_func in peek_eat_functions:
         func = wrapper_func._eat_func
         signature = inspect.signature(func)
-        param_types = [param.annotation for param in signature.parameters.values()]
+        param_types = [param.annotation for param in signature.parameters.values() if param.default is inspect.Parameter.empty]
         return_type = signature.return_annotation
 
         # Check if the function has the correct signature
         if len(param_types) != 1 or param_types[0] != str or return_type != int|None:
-            raise ValueError(f"{func.__name__} has an invalid signature: `{signature}`. Expected `(src: str) -> int|None`")
+            pdb.set_trace()
+            raise ValueError(f"{func.__name__} has an invalid signature: `{signature}`. Expected `(src: str) -> int | None`")
 
-    # TODO: Validate the full eat function signatures
+    # Validate the @full_eat function signatures
+    full_eat_functions = [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_full_eat_decorator', False)]
+    for name, wrapper_func in full_eat_functions:
+        func = wrapper_func._eat_func
+        signature = inspect.signature(func)
+        param_types = [param.annotation for param in signature.parameters.values() if param.default is inspect.Parameter.empty]
+        return_type = signature.return_annotation
+
+        # Check if the function has the correct signature
+        error_message = f"{func.__name__} has an invalid signature: `{signature}`. Expected `(src: str) -> tuple[int, Token] | None`"
+        if not (isinstance(return_type, UnionType) and len(return_type.__args__) == 2 and type(None) in return_type.__args__):
+            raise ValueError(error_message)
+        A, B = return_type.__args__
+        if B is not type(None):
+            B, A = A, B
+        if not (isinstance(A, type(tuple)) and len(A.__args__) == 2 and A.__args__[0] is int and issubclass(A.__args__[1], Token)):
+            raise ValueError(error_message)        
+        if len(param_types) != 1 or param_types[0] != str:
+            pdb.set_trace()
+            raise ValueError(error_message)
 
     # check for any functions that start with eat_ but are not decorated with @eat
     peek_eat_func_names = {name for name, _ in peek_eat_functions}
