@@ -394,8 +394,12 @@ def eat_binop(src:str) -> int|None:
             return len(op)
     return None
 
+class EatTracker:
+    i: int
+    tokens: list[Token]
+
 @full_eat
-def eat_block(src:str, return_partial:bool=False) -> tuple[int, Block] | None:
+def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None:
     """
     Eat a block, return the number of characters eaten and an instance of the Block token
 
@@ -407,73 +411,77 @@ def eat_block(src:str, return_partial:bool=False) -> tuple[int, Block] | None:
     if not src or src[0] not in '{(':
         return None
     
-    try:
+    # try:
+    i = 1
+    body: list[Token] = []
+    delim = ')}'[src[0] == '{']
 
-        i = 1
-        delim = ')}'[src[0] == '{']
-        body: list[Token] = []
+    if tracker:
+        tracker.i = i
+        tracker.tokens = body
 
-        while i < len(src) and src[i] != delim:
-            #run all root eat functions
-            #if multiple, resolve for best match (TBD... current is longest match + precedence)
-            #if no match, return None
+    while i < len(src) and src[i] != delim:
+        #run all root eat functions
+        #if multiple, resolve for best match (TBD... current is longest match + precedence)
+        #if no match, return None
 
 
-            ########### TODO: probably break this inner part into a function that eats the next token, given a list of eat functions
-            ###########       could also think about ways to specify other multi-match resolutions, other than longest match + precedence...
-            #run all the eat functions on the current src
-            matches = [eat_func(src[i:]) for eat_func in root_eat_funcs]
+        ########### TODO: probably break this inner part into a function that eats the next token, given a list of eat functions
+        ###########       could also think about ways to specify other multi-match resolutions, other than longest match + precedence...
+        #run all the eat functions on the current src
+        matches = [eat_func(src[i:]) for eat_func in root_eat_funcs]
 
-            #find the longest token that matched. if multiple tied for longest, use the one with the highest precedence.
-            #raise an error if multiple tokens tied, and they have the same precedence
-            def key(x):
-                (res, _cls), precedence = x
-                if res is None:
-                    return 0, precedence
-                if isinstance(res, tuple):
-                    res, _token = res #full_eat functions return a tuple of (num_chars_eaten, token)
-                return res, precedence
-
-            matches = [*zip(matches, root_func_precedences)]
-            best = max(matches, key=key)
-            ties = [match for match in matches if key(match) == key(best)]
-            if len(ties) > 1:
-                raise ValueError(f"multiple tokens matches tied {[match[0][1].__name__ for match in ties]}: {repr(src[i:])}\nPlease disambiguate by providing precedence levels for these tokens.")
-
-            (res, token_cls), _ = best
-
-            #if we didn't match anything, return None
+        #find the longest token that matched. if multiple tied for longest, use the one with the highest precedence.
+        #raise an error if multiple tokens tied, and they have the same precedence
+        def key(x):
+            (res, _cls), precedence = x
             if res is None:
-                if return_partial:
-                    return i, Block(body, scoped=False)
-                else:
-                    return None
-            
+                return 0, precedence
             if isinstance(res, tuple):
-                n_eaten, token = res
-                body.append(token)
-            else:
-                #add the token to the list of tokens (handling idempotent token cases)
-                n_eaten = res
-                if not body or token_cls not in idempotent_tokens or not isinstance(body[-1], token_cls):
-                    body.append(token_cls(src[i:i+n_eaten]))
+                res, _token = res #full_eat functions return a tuple of (num_chars_eaten, token)
+            return res, precedence
 
-            #increment the index
-            i += n_eaten
+        matches = [*zip(matches, root_func_precedences)]
+        best = max(matches, key=key)
+        ties = [match for match in matches if key(match) == key(best)]
+        if len(ties) > 1:
+            raise ValueError(f"multiple tokens matches tied {[match[0][1].__name__ for match in ties]}: {repr(src[i:])}\nPlease disambiguate by providing precedence levels for these tokens.")
 
-        if i == len(src):
-            raise ValueError("unterminated block")
+        (res, token_cls), _ = best
+
+        #if we didn't match anything, return None
+        if res is None:
+            return None
         
-        i += 1
-
-        scoped = src[0] == '{'
-        return i, Block(body, scoped)
-
-    except Exception as e:
-        if return_partial:
-            return i, Block(body, scoped=False)
+        if isinstance(res, tuple):
+            n_eaten, token = res
+            body.append(token)
         else:
-            raise e from None
+            #add the token to the list of tokens (handling idempotent token cases)
+            n_eaten = res
+            if not body or token_cls not in idempotent_tokens or not isinstance(body[-1], token_cls):
+                body.append(token_cls(src[i:i+n_eaten]))
+
+        #increment the index
+        i += n_eaten
+        if tracker:
+            tracker.i = i
+
+    if i == len(src):
+        raise ValueError("unterminated block")
+    
+    i += 1
+    if tracker:
+        tracker.i = i
+
+    scoped = src[0] == '{'
+    return i, Block(body, scoped)
+
+    # except Exception as e:
+    #     if return_partial:
+    #         return i, Block(body, scoped=False)
+    #     else:
+    #         raise e from None
 
     
     #TODO: need to separate out the full_eat and peek_eat functions
@@ -506,12 +514,18 @@ def tokenize(src:str) -> list[Token]:
     src = f'{{\n{src}\n}}'
 
     # eat tokens for a block
-    (i, block), _cls = eat_block(src, return_partial=True)
-    tokens = block.body
+    tracker = EatTracker()
+    try:
+        res, _cls = eat_block(src, tracker=tracker)
+    except Exception as e:
+        raise ValueError(f"failed to tokenize: ```{escape_whitespace(src[tracker.i:])}```.\nCurrent tokens: {tracker.tokens}") from e
 
     # check if the process failed
-    if i < len(src):
-        raise ValueError(f"failed to tokenize: ```{escape_whitespace(src[i:])}```.\nCurrent tokens: {tokens}")
+    if res is None:
+        raise ValueError(f"failed to tokenize: ```{escape_whitespace(src[tracker.i:])}```.\nCurrent tokens: {tracker.tokens}")
+
+    (i, block) = res
+    tokens = block.body
 
     return tokens
 
