@@ -98,6 +98,12 @@ class Operator(Token):
         self.op = op
     def __repr__(self) -> str:
         return f"<Operator: `{self.op}`>"
+    
+class ShiftOperator(Token):
+    def __init__(self, op:str):
+        self.op = op
+    def __repr__(self) -> str:
+        return f"<ShiftOperator: `{self.op}`>"
 
 class Comma(Token):
     def __init__(self, _): ...
@@ -127,7 +133,6 @@ pair_closing_delims = '})]'
 operators = sorted(
     [
         '+', '-', '*', '/', '%', '^',
-        '<<', '>>', '<<<', '>>>', '<<<!', '!>>>',
         '=?', '>?', '<?', '>=?', '<=?', 'in?', '<=>',
         'not', 'and', 'or', 'nand', 'nor', 'xor', 'xnor', '??', '?',
         '=', ':=', 'as',
@@ -139,6 +144,7 @@ operators = sorted(
     key=len, 
     reverse=True
 )
+shift_operators = sorted(['<<', '>>', '<<<', '>>>', '<<<!', '!>>>'], key=len, reverse=True)
 keywords = ['in', 'as', 'loop', 'lazy', 'if', 'else', 'return', 'express', 'transmute']
 
 # note that the prefix is case insensitive, so call .lower() when matching the prefix
@@ -162,24 +168,29 @@ number_bases = {
 
 
 
-def peek_eat(cls:Type[Token], root:bool=True):
+def peek_eat(cls:Type[Token], whitelist:list[Type[Token]]|None=None, blacklist:list[Type[Token]]|None=None):
     """
     Decorator for functions that eat tokens, but only return how many characters would make up the token. 
     Makes function return include constructor for token class that it tries to eat, in tupled with return.
+
+    whitelist and blacklist can be used to specify parent token contexts that may or may not consume this type as a child
     """
     assert issubclass(cls, Token), f"cls must be a subclass of Token, but got {cls}"
+    if whitelist is not None and blacklist is not None:
+        raise ValueError("cannot specify both whitelist and blacklist")
     def decorator(eat_func:Callable[[str], int|None]):
         def wrapper(src:str) -> tuple[int|None, Type[Token]]:
             return eat_func(src), cls
         wrapper._is_peek_eat_decorator = True  # make it easy to check if a function has this decorator
         wrapper._eat_func = eat_func
         wrapper._token_cls = cls
-        wrapper._root = root
+        wrapper._whitelist = whitelist
+        wrapper._blacklist = blacklist
         return wrapper
     return decorator
 
 #TODO: full eat probably won't need to take the class as an argument, since the function will know how to construct the token itself
-def full_eat(root:bool=True):
+def full_eat(whitelist:list[Type[Token]]|None=None, blacklist:list[Type[Token]]|None=None):
     def decorator(eat_func:Callable[[str], tuple[int, Token] | None]):
         """
         Decorator for functions that eat tokens, and return the token itself if successful.
@@ -187,23 +198,37 @@ def full_eat(root:bool=True):
         """
         # pull cls it from the return type of eat_func (which should be a Union[tuple[int, Token], None])
         cls = inspect.signature(eat_func).return_annotation.__args__[0].__args__[1]
+        assert issubclass(cls, Token), f"cls must be a subclass of Token, but got {cls}"
+        if whitelist is not None and blacklist is not None:
+            raise ValueError("cannot specify both whitelist and blacklist")
         def wrapper(*args, **kwargs):
             return eat_func(*args, **kwargs), cls
         wrapper._is_full_eat_decorator = True  # make it easy to check if a function has this decorator
         wrapper._eat_func = eat_func
         wrapper._token_cls = cls
-        wrapper._root = root
+        wrapper._whitelist = whitelist
+        wrapper._blacklist = blacklist
 
         return wrapper
     return decorator
 
 
-def get_peek_eat_funcs():
+def get_peek_eat_funcs_with_name() -> list[tuple[str, Callable]]:
     return [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_peek_eat_decorator', False)]
-def get_full_eat_funcs():
+def get_full_eat_funcs_with_name() -> list[tuple[str, Callable]]:
     return [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_full_eat_decorator', False)]
-def get_eat_funcs():
-    return get_peek_eat_funcs() + get_full_eat_funcs()
+
+def get_eat_funcs() -> list[Callable]:
+    return [func for name, func in get_peek_eat_funcs_with_name() + get_full_eat_funcs_with_name()]
+
+#TODO: cache this result
+def get_contextual_eat_funcs(context:Type[Token]) -> list[Callable]:
+    """Get all the eat functions that are valid in the given context"""
+    return [func for func in get_eat_funcs() if (func._whitelist is None or context in func._whitelist) and (func._blacklist is None or context not in func._blacklist)]
+
+def get_func_precedences(funcs:list[Callable]) -> list[int]:
+    return [precedence.get(func._token_cls, 0) for func in funcs]
+
 
 @peek_eat(WhiteSpace)
 def eat_line_comment(src:str) -> int|None:
@@ -312,7 +337,7 @@ def eat_hashtag(src:str) -> int|None:
     return None
 
 
-@peek_eat(Escape, root=False)
+@peek_eat(Escape, whitelist=[String])
 def eat_escape(src:str) -> int|None:
     r"""
     Eat an escape sequence, return the number of characters eaten
@@ -492,6 +517,20 @@ def eat_operator(src:str) -> int|None:
             return len(op)
     return None
 
+@peek_eat(ShiftOperator, blacklist=[TypeParam])
+def eat_shift_operator(src:str) -> int|None:
+    """
+    eat a shift operator, return the number of characters eaten
+
+    picks the longest matching operator. 
+    Shift operators are not allowed in type parameters, e.g. `>>` is not recognized in `Foo<Bar<Baz<T>>, U>`
+
+    see `shift_operators` for full list of operators
+    """
+    for op in shift_operators:
+        if src.startswith(op):
+            return len(op)
+    return None
 
 @peek_eat(Comma)
 def eat_comma(src:str) -> int|None:
@@ -561,7 +600,9 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
         ########### TODO: probably break this inner part into a function that eats the next token, given a list of eat functions
         ###########       could also think about ways to specify other multi-match resolutions, other than longest match + precedence...
         #run all the eat functions on the current src
-        res = get_best_match(src[i:], root_eat_funcs, root_func_precedences)
+        funcs = get_contextual_eat_funcs(Block)
+        precedences = get_func_precedences(funcs)
+        res = get_best_match(src[i:], funcs, precedences)
 
         #if we didn't match anything, return None
         if res is None:
@@ -609,12 +650,14 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
 
 
 def get_best_match(src:str, eat_funcs:list, precedences:list[int]) -> tuple[int, Type[Token]|Token]|None:
-    ...
+    #TODO: handle selecting between full_eat and peek_eat functions that were successful...
+    #      general, just need to clarify the selection order precedence
+
     #may return none if no match
     #may return (i, token_cls) if peek match
     #may return (i, token) if full match
 
-    matches = [eat_func(src) for eat_func in root_eat_funcs]
+    matches = [eat_func(src) for eat_func in eat_funcs]
 
     #find the longest token that matched. if multiple tied for longest, use the one with the highest precedence.
     #raise an error if multiple tokens tied, and they have the same precedence
@@ -650,11 +693,6 @@ def get_best_match(src:str, eat_funcs:list, precedences:list[int]) -> tuple[int,
     raise ValueError(f"invalid return type from eat function: {res}")
 
 
-#TODO: perhaps root_eat could be a property added by the decorator
-root_eat_funcs = [func for name, func in get_eat_funcs() if func._root]
-root_func_precedences = [precedence.get(func._token_cls, 0) for func in root_eat_funcs]
-
-
 
 def tokenize(src:str) -> list[Token]:
 
@@ -681,7 +719,7 @@ def tokenize(src:str) -> list[Token]:
 def validate_functions():
 
     # Validate the @peek_eat function signatures
-    peek_eat_functions = get_peek_eat_funcs()
+    peek_eat_functions = get_peek_eat_funcs_with_name()
     for name, wrapper_func in peek_eat_functions:
         func = wrapper_func._eat_func
         signature = inspect.signature(func)
@@ -694,7 +732,7 @@ def validate_functions():
             raise ValueError(f"{func.__name__} has an invalid signature: `{signature}`. Expected `(src: str) -> int | None`")
 
     # Validate the @full_eat function signatures
-    full_eat_functions = get_full_eat_funcs()
+    full_eat_functions = get_full_eat_funcs_with_name()
     for name, wrapper_func in full_eat_functions:
         func = wrapper_func._eat_func
         signature = inspect.signature(func)
