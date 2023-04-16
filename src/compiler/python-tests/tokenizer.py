@@ -561,40 +561,20 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
         ########### TODO: probably break this inner part into a function that eats the next token, given a list of eat functions
         ###########       could also think about ways to specify other multi-match resolutions, other than longest match + precedence...
         #run all the eat functions on the current src
-        matches = [eat_func(src[i:]) for eat_func in root_eat_funcs]
-
-        #find the longest token that matched. if multiple tied for longest, use the one with the highest precedence.
-        #raise an error if multiple tokens tied, and they have the same precedence
-        def key(x):
-            (res, _cls), precedence = x
-            if res is None:
-                return 0, precedence
-            if isinstance(res, tuple):
-                res, _token = res #full_eat functions return a tuple of (num_chars_eaten, token)
-            return res, precedence
-
-        matches = [*zip(matches, root_func_precedences)]
-        best = max(matches, key=key)
-        ties = [match for match in matches if key(match) == key(best)]
-        if len(ties) > 1:
-            raise ValueError(f"multiple tokens matches tied {[match[0][1].__name__ for match in ties]}: {repr(src[i:])}\nPlease disambiguate by providing precedence levels for these tokens.")
-
-        (res, token_cls), _ = best
-        
-        # force the type annotations
-        res: tuple[int, Token]|int|None 
-        token_cls: type[Token]
+        res = get_best_match(src[i:], root_eat_funcs, root_func_precedences)
 
         #if we didn't match anything, return None
         if res is None:
             return None
         
-        if isinstance(res, tuple):
-            n_eaten, token = res
+        n_eaten, token = res
+        
+        if isinstance(token, Token):
+            #add the already-eaten token to the list of tokens
             body.append(token)
         else:
-            #add the token to the list of tokens (handling idempotent token cases)
-            n_eaten = res
+            #add a new instance of the token to the list of tokens (handling idempotent token cases)
+            token_cls = token
             if not body or token_cls not in idempotent_tokens or not isinstance(body[-1], token_cls):
                 body.append(token_cls(src[i:i+n_eaten]))
 
@@ -626,6 +606,48 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
     #      probably if any full eat functions return, they take precedence over the peek eat functions
     #TODO: TBD if should include _token_cls on full_eat functions... ideally we'd pull it from the signature since they should say what type of token they return
 
+
+
+def get_best_match(src:str, eat_funcs:list, precedences:list[int]) -> tuple[int, Type[Token]|Token]|None:
+    ...
+    #may return none if no match
+    #may return (i, token_cls) if peek match
+    #may return (i, token) if full match
+
+    matches = [eat_func(src) for eat_func in root_eat_funcs]
+
+    #find the longest token that matched. if multiple tied for longest, use the one with the highest precedence.
+    #raise an error if multiple tokens tied, and they have the same precedence
+    def key(x):
+        (res, _cls), precedence = x
+        if res is None:
+            return 0, precedence
+        if isinstance(res, tuple):
+            res, _token = res #full_eat functions return a tuple of (num_chars_eaten, token)
+        return res, precedence
+
+    matches = [*zip(matches, precedences)]
+    best = max(matches, key=key)
+    ties = [match for match in matches if key(match) == key(best)]
+    if len(ties) > 1:
+        raise ValueError(f"multiple tokens matches tied {[match[0][1].__name__ for match in ties]}: {repr(src)}\nPlease disambiguate by providing precedence levels for these tokens.")
+
+    (res, token_cls), _ = best
+    
+    # force the type annotations
+    res: tuple[int, Token]|int|None 
+    token_cls: type[Token]
+
+    if res is None:
+        return None
+    
+    if isinstance(res, int):
+        return res, token_cls
+    
+    if isinstance(res, tuple):
+        return res
+    
+    raise ValueError(f"invalid return type from eat function: {res}")
 
 
 #TODO: perhaps root_eat could be a property added by the decorator
