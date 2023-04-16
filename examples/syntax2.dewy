@@ -1,1 +1,10 @@
-0b01110110 << (((world[i-1] ?? 0) << 2) or ((world[i] ?? 0) << 1) or (world[i+1] ?? 0))
+{
+    primes = [2]
+    (loop i in [3, 5..)
+        if i .% primes |> product not =? 0 
+            primes.push(i)
+        if primes.length =? 10
+            break
+    )
+    primes
+}

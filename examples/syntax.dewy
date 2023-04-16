@@ -21,7 +21,7 @@ my_string = '2 + 2 = {2+2}'
 s = "first 10 primes are: {
     primes = [2]
     (loop i in [3, 5..)
-        if i .% primes :> product not =? 0 
+        if i .% primes |> product not =? 0 
             primes.push(i)
         if primes.length =? 10
             break
@@ -34,7 +34,7 @@ s = "first 10 primes are: {
 primes = [
     2
     lazy i in [3, 5..)
-        if i .% #self .=? 0 :> @reduce(, (prev, v) => prev and v)
+        if i .% #self .=? 0 |> @reduce(, (prev, v) => prev and v)
             i
 ][..10)
 

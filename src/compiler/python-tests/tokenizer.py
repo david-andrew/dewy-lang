@@ -59,6 +59,13 @@ class Block(Token):
     def __repr__(self) -> str:
         body_str = ', '.join(repr(token) for token in self.body)
         return f"<Block: {self.left}{body_str}{self.right}>"
+    
+class TypeParam(Token):
+    def __init__(self, body:list[Token]):
+        self.body = body
+    def __repr__(self) -> str:
+        body_str = ', '.join(repr(token) for token in self.body)
+        return f"<TypeParam: `<{body_str}>`>"
 
 class Escape(Token):
     def __init__(self, src:str):
@@ -90,16 +97,7 @@ class Operator(Token):
     def __init__(self, op:str):
         self.op = op
     def __repr__(self) -> str:
-        return f"<Operator: {self.op}>"
-    
-class Dot(Token):
-    def __init__(self, _): ...
-
-class DotDot(Token):
-    def __init__(self, _): ...
-
-# class DotDotDot(Token):
-#     def __init__(self, _): ...
+        return f"<Operator: `{self.op}`>"
 
 class Comma(Token):
     def __init__(self, _): ...
@@ -122,8 +120,8 @@ idempotent_tokens = {
 }
 
 # delimiters for blocks, ranges TODO: <> may not be part of this... what are <> blocks?
-pair_opening_delims = '{([<'
-pair_closing_delims = '})]>'
+pair_opening_delims = '{(['
+pair_closing_delims = '})]'
 
 #list of all operators sorted from longest to shortest
 operators = sorted(
@@ -158,6 +156,9 @@ number_bases = {
     '0r': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'},      #base 36 (hexatrigesimal)
     '0t': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!?'},    #base 64 (tetrasexagesimal)
 }
+
+
+# units = #actually units should probably not be specific tokens, but recognized identifiers since the user can make their own units
 
 
 
@@ -481,21 +482,10 @@ def eat_based_number(src:str) -> int|None:
 def eat_operator(src:str) -> int|None:
     """
     eat a unary or binary operator, return the number of characters eaten
-    unary operators: + - @ not TODO: others?
-    binary operators: 
-        + - * / % ^ 
-        and or nand nor xor xnor 
-        << >> >>> <<< <<<! !>>>
-        =? not? >? <? >=? <=? in?
-        <=>
-        :>
-        -> <-> <-
-        =>
-        @?
-        = :=
-        . ..
 
     picks the longest matching operator
+
+    see `operators` for full list of operators
     """
     for op in operators:
         if src.startswith(op):
@@ -516,6 +506,29 @@ class EatTracker:
     i: int
     tokens: list[Token]
 
+
+@full_eat()
+def eat_type_param(src:str) -> tuple[int, TypeParam] | None:
+    """
+    eat a type parameter, return the number of characters eaten and an instance of the TypeParam token
+
+    type parameters are of the form <...> where ... is a sequence of tokens. 
+    Type parameters may not start with `<<` or contain any shift operators (`<<`, `<<<`, `>>`, `>>>`)
+    Internally encountered shift operators are considered to be delimiters for the type parameter
+    """
+    if not src.startswith('<') or src.startswith('<<'):
+        return None
+    
+    i = 1
+    body: list[Token] = []
+
+    while i < len(src) and src[i] != '>':
+        ...
+        pdb.set_trace()
+    
+
+
+
 @full_eat()
 def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None:
     """
@@ -532,7 +545,6 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
     # save the opening delimiter
     left = src[0]
     
-    # try:
     i = 1
     body: list[Token] = []
 
@@ -568,6 +580,10 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
             raise ValueError(f"multiple tokens matches tied {[match[0][1].__name__ for match in ties]}: {repr(src[i:])}\nPlease disambiguate by providing precedence levels for these tokens.")
 
         (res, token_cls), _ = best
+        
+        # force the type annotations
+        res: tuple[int, Token]|int|None 
+        token_cls: type[Token]
 
         #if we didn't match anything, return None
         if res is None:
@@ -588,7 +604,9 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
             tracker.i = i
 
     if i == len(src):
-        raise ValueError("unterminated block")
+        if tracker: #only return an exception for the top level block. nested blocks can return None
+            raise ValueError("unterminated block") 
+        return None
     
     # closing delim (doesn't need to match opening delim)
     right = src[i]
