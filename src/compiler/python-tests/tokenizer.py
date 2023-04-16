@@ -25,16 +25,6 @@ from rich import traceback, print
 traceback.install(show_locals=True)
 
 
-# #TODO: tbd how this gets used
-# #      context is useful to know which of the eat functions to use during tokenization
-# #      e.g. when inside a string, only eat_character, eat_escape, and eat_block
-# class Context(Enum):
-#     root = auto()
-#     block = auto()
-#     # string = auto()
-#     interpolation = auto()
-
-
 class Token(ABC):
     def __repr__(self) -> str:
         """default repr for tokens is just the class name"""
@@ -56,7 +46,7 @@ class Identifier(Token):
         return f"<Identifier: {self.src}>"
     
 class Hashtag(Token):
-    def __init__(self, src):
+    def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
         return f"<Hashtag: #{self.src}>"
@@ -82,11 +72,19 @@ class String(Token):
     def __repr__(self) -> str:
         return f"<String: {self.body}>"
     
-class Integer(Token):
+class Number(Token, ABC):...
+    
+class Integer(Number):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
         return f"<Integer: {self.src}>"
+    
+class BasedNumber(Token):
+    def __init__(self, src:str):
+        self.src = src
+    def __repr__(self) -> str:
+        return f"<BasedNumber: {self.src}>"
 
 class Operator(Token):
     def __init__(self, op:str):
@@ -129,10 +127,38 @@ pair_closing_delims = '})]>'
 
 #list of all operators sorted from longest to shortest
 operators = sorted(
-    ['+', '-', '*', '/', '%', '^', '@', 'not', 'and', 'or', 'nand', 'nor', 'xor', 'xnor', '<<', '>>', '<<<', '>>>', '<<<!', '!>>>', '=?', 'not?', '>?', '<?', '>=?', '<=?', 'in?', '<=>', ':>', '->', '<->', '<-', '=>', '@?', '=', ':=', '.', '..'], 
+    [
+        '+', '-', '*', '/', '%', '^',
+        '<<', '>>', '<<<', '>>>', '<<<!', '!>>>',
+        '=?', '>?', '<?', '>=?', '<=?', 'in?', '<=>',
+        'not', 'and', 'or', 'nand', 'nor', 'xor', 'xnor', '??', '?',
+        '=', ':=', 'as',
+        '@', '@?',
+        '|>', '=>',
+        '->', '<->', '<-',
+        '.', '..', '...', ':'
+    ], 
     key=len, 
     reverse=True
 )
+keywords = ['in', 'as', 'loop', 'lazy', 'if', 'else', 'return', 'express', 'transmute']
+
+# note that the prefix is case insensitive, so call .lower() when matching the prefix
+# numbers may have _ as a separator (if _ is not in the set of digits)
+number_bases = {
+    '0b': {*'01'},                      #binary
+    '0c': {*'012'},                     #ternary
+    '0q': {*'0123'},                    #quaternary
+    '0s': {*'012345'},                  #seximal
+    '0o': {*'01234567'},                #octal
+    '0d': {*'0123456789'},              #decimal
+    '0z': {*'0123456789xeXE'},          #dozenal
+    '0x': {*'0123456789abcdefABCDEF'},  #hexadecimal 
+    '0u': {*'0123456789abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRSTUV'},              #base 32 (duotrigesimal)
+    '0r': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'},      #base 36 (hexatrigesimal)
+    '0t': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!?'},    #base 64 (tetrasexagesimal)
+}
+
 
 
 def peek_eat(cls:Type[Token], root:bool=True):
@@ -234,7 +260,6 @@ def eat_keyword(src: str) -> int | None:
     noting that keywords are case insensitive
     """
 
-    keywords = ['in', 'as', 'loop', 'lazy', 'if', 'and', 'or', 'xor', 'nand', 'nor', 'xnor', 'not']#, 'true', 'false'] #TBD if true/false are keywords
     max_len = max(len(keyword) for keyword in keywords)
     
     lower_src = src[:max_len].lower()
@@ -251,12 +276,22 @@ def eat_identifier(src:str) -> int|None:
     """
     Eat an identifier, return the number of characters eaten
     
-    identifiers are of the form  [a-zA-Z_] [0-9a-zA-Z_?!$&]*
+    identifiers are of the form  [a-zA-Z_] ([0-9a-zA-Z_?!$&]* [0-9a-zA-Z_!$&])?
+    i.e. similar to regular identifiers, but allowing for ?!$& as well (though they may not end with ?)
+    identifiers must start with a letter or underscore
     """
-    i = 0
-    while i < len(src) and src[i].isalnum() or src[i] in '_?!$&':
+    if not src[0].isalpha() and src[0] != '_':
+        return None
+
+    i = 1
+    while i < len(src) and (src[i].isalnum() or src[i] in '_?!$&'):
         i += 1
-    return i if i > 0 else None
+
+    # while last character is ?, remove it
+    while i > 1 and src[i-1] == '?':
+        i -= 1
+
+    return i
 
 
 
@@ -420,6 +455,27 @@ def eat_integer(src:str) -> int|None:
     while i < len(src) and src[i].isdigit():
         i += 1
     return i if i > 0 else None
+
+
+@peek_eat(BasedNumber)
+def eat_based_number(src:str) -> int|None:
+    """
+    eat a based number, return the number of characters eaten
+
+    based numbers have a (case-insensitive) prefix (0p) identifying the base, and (case-sensitive) allowed digits
+    """
+    try:
+        digits = number_bases[src[:2].lower()]
+        1
+    except KeyError:
+        return None
+    
+    i = 2
+    while i < len(src) and src[i] in digits:
+        i += 1
+
+    return i if i > 2 else None
+        
 
 @peek_eat(Operator)
 def eat_operator(src:str) -> int|None:
@@ -639,9 +695,16 @@ def escape_whitespace(s:str):
 
 
 def test():
+    import sys
     """simple test dewy program"""
 
-    with open('../../../examples/syntax.dewy') as f:
+    try:
+        path = sys.argv[1]
+    except IndexError:
+        raise ValueError("Usage: `python tokenizer.py path/to/file.dewy>`")
+
+
+    with open(path) as f:
         src = f.read()
 
     tokens = tokenize(src)

@@ -39,10 +39,11 @@ primes = [
 ][..10)
 
 //TBD if there is a parallel way to do this where the i .% primes dispatches each operation, and fails immediately on any returning false
+#label
 primes = [
     2
     lazy i in [3, 5..)
-        if not parallel_or(p => i % p =? 0, #self) 
+        if not parallel_or(p => i % p =? 0, #label.primes)
             i
 ][..10)
 //parallel or is like goroutines with cancel once any is true...should have it be more flexible, e.g. able to use any of the boolean keywords that can short circuit
@@ -50,3 +51,16 @@ primes = [
 
 //nested interpolation
 s2 = 'this is an outer string, and {'this is an interior string with "{my_string}" in it'}'
+
+
+
+
+
+const add: func<int, int> => int = (a:int, b:int) => { /{return sum of a and b}/ }
+let div: func<real, real> => real? = (a:real, b:real) => { /{return a / b}/ }
+
+// function type with named default argument
+my_func: func<string, kwarg:bool> = (s:string, kwarg:bool=false) => {}
+
+//you probably can do the verbose version as well (probably useful for when you're just defining the interface without the implementation)
+my_func: (s:string, kwarg:bool=false) => void

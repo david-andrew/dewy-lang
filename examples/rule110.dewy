@@ -6,8 +6,8 @@ progress = world:vector<bit> => {
     update:bit = 0
     loop i in 0..world.length
     {
-        if i >? 0 world[i-1] = update //TODO: #notfirst or #iters[1..]
-        update = (0b01110110 << (((world[i-1] ?? 0) << 2) or ((world[i] ?? 0) << 1) or (world[i+1] ?? 0)))
+        if i >? 0 world[i-1] = update //TODO: #notfirst handled by compiler unrolling the loop into prelude, interludes, and postlude
+        update = 0b01110110 << (world[i-1..i+1] .? 0 .<< [2 1 0])
     }
     world.push(update)
 }
