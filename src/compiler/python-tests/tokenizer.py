@@ -17,6 +17,7 @@ from enum import Enum, auto
 import inspect
 from typing import Callable, Type
 from types import UnionType
+from functools import lru_cache
 
 import pdb
 
@@ -213,21 +214,23 @@ def full_eat(whitelist:list[Type[Token]]|None=None, blacklist:list[Type[Token]]|
     return decorator
 
 
-def get_peek_eat_funcs_with_name() -> list[tuple[str, Callable]]:
-    return [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_peek_eat_decorator', False)]
-def get_full_eat_funcs_with_name() -> list[tuple[str, Callable]]:
-    return [(name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_full_eat_decorator', False)]
+def get_peek_eat_funcs_with_name() -> tuple[tuple[str, Callable]]:
+    return tuple((name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_peek_eat_decorator', False))
+def get_full_eat_funcs_with_name() -> tuple[tuple[str, Callable]]:
+    return tuple((name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_full_eat_decorator', False))
 
-def get_eat_funcs() -> list[Callable]:
-    return [func for name, func in get_peek_eat_funcs_with_name() + get_full_eat_funcs_with_name()]
+def get_eat_funcs() -> tuple[Callable]:
+    return tuple(func for name, func in get_peek_eat_funcs_with_name() + get_full_eat_funcs_with_name())
 
-#TODO: cache this result
-def get_contextual_eat_funcs(context:Type[Token]) -> list[Callable]:
+@lru_cache()
+def get_contextual_eat_funcs(context:Type[Token]) -> tuple[Callable]:
     """Get all the eat functions that are valid in the given context"""
-    return [func for func in get_eat_funcs() if (func._whitelist is None or context in func._whitelist) and (func._blacklist is None or context not in func._blacklist)]
+    return tuple(func for func in get_eat_funcs() if (func._whitelist is None or context in func._whitelist) and (func._blacklist is None or context not in func._blacklist))
 
-def get_func_precedences(funcs:list[Callable]) -> list[int]:
-    return [precedence.get(func._token_cls, 0) for func in funcs]
+@lru_cache()
+def get_func_precedences(funcs:tuple[Callable]) -> tuple[int]:
+    assert isinstance(funcs, tuple)
+    return tuple(precedence.get(func._token_cls, 0) for func in funcs)
 
 
 @peek_eat(WhiteSpace)
@@ -562,7 +565,12 @@ def eat_type_param(src:str) -> tuple[int, TypeParam] | None:
     body: list[Token] = []
 
     while i < len(src) and src[i] != '>':
-        ...
+        
+        funcs = get_contextual_eat_funcs(TypeParam)
+        precedences = get_func_precedences(funcs)
+        res = get_best_match(src[i:], funcs, precedences)
+
+
         pdb.set_trace()
     
 
@@ -642,13 +650,6 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
 
 
 
-    
-    #TODO: need to separate out the full_eat and peek_eat functions
-    #      probably if any full eat functions return, they take precedence over the peek eat functions
-    #TODO: TBD if should include _token_cls on full_eat functions... ideally we'd pull it from the signature since they should say what type of token they return
-
-
-
 def get_best_match(src:str, eat_funcs:list, precedences:list[int]) -> tuple[int, Type[Token]|Token]|None:
     #TODO: handle selecting between full_eat and peek_eat functions that were successful...
     #      general, just need to clarify the selection order precedence
@@ -690,7 +691,7 @@ def get_best_match(src:str, eat_funcs:list, precedences:list[int]) -> tuple[int,
     if isinstance(res, tuple):
         return res
     
-    raise ValueError(f"invalid return type from eat function: {res}")
+    raise ValueError(f"Internal Error: invalid return type from eat function: {res}")
 
 
 
