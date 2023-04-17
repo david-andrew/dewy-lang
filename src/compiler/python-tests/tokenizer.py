@@ -13,7 +13,6 @@
 
 
 from abc import ABC
-from enum import Enum, auto
 import inspect
 from typing import Callable, Type
 from types import UnionType
@@ -132,7 +131,7 @@ idempotent_tokens = {
     WhiteSpace
 }
 
-# delimiters for blocks, ranges TODO: <> may not be part of this... what are <> blocks?
+# paired delimiters for blocks, ranges, groups, etc.
 pair_opening_delims = '{(['
 pair_closing_delims = '})]'
 
@@ -151,6 +150,7 @@ operators = sorted(
     key=len, 
     reverse=True
 )
+#TODO: may need to separate |> from regular operators since it may confuse type param
 shift_operators = sorted(['<<', '>>', '<<<', '>>>', '<<<!', '!>>>'], key=len, reverse=True)
 keywords = ['in', 'as', 'loop', 'lazy', 'if', 'else', 'return', 'express', 'transmute']
 
@@ -158,7 +158,7 @@ keywords = ['in', 'as', 'loop', 'lazy', 'if', 'else', 'return', 'express', 'tran
 # numbers may have _ as a separator (if _ is not in the set of digits)
 number_bases = {
     '0b': {*'01'},                      #binary
-    '0c': {*'012'},                     #ternary
+    '0t': {*'012'},                     #ternary
     '0q': {*'0123'},                    #quaternary
     '0s': {*'012345'},                  #seximal
     '0o': {*'01234567'},                #octal
@@ -167,7 +167,7 @@ number_bases = {
     '0x': {*'0123456789abcdefABCDEF'},  #hexadecimal 
     '0u': {*'0123456789abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRSTUV'},              #base 32 (duotrigesimal)
     '0r': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'},      #base 36 (hexatrigesimal)
-    '0t': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!?'},    #base 64 (tetrasexagesimal)
+    '0y': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!$'},    #base 64 (tetrasexagesimal)
 }
 
 
@@ -501,12 +501,11 @@ def eat_based_number(src:str) -> int|None:
     """
     try:
         digits = number_bases[src[:2].lower()]
-        1
     except KeyError:
         return None
     
     i = 2
-    while i < len(src) and src[i] in digits:
+    while i < len(src) and src[i] in digits or src[i] == '_':
         i += 1
 
     return i if i > 2 else None
@@ -837,8 +836,9 @@ def test():
 
     tokens = tokenize(src)
     print(f'matched tokens:')
-    for t in tokens:
-        tprint(t, level=1)
+    tprint(Block(left='{', right='}', body=tokens))
+    # for t in tokens:
+    #     tprint(t, level=1)
 
 
 
