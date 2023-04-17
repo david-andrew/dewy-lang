@@ -25,6 +25,7 @@ import pdb
 #
 # - make all type checking happen at compile time, and be based on calls to expr.type
 #   -> need to be able to handle type graph with child types matching where parent types are expected, etc. e.g. int is a number, etc.
+# also make the current functionality not worker (where it checks if the variable exists). should throw an error about how it's syntax sugar
 
 #convenient for inside lambdas
 def notimplemented():
