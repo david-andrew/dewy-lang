@@ -74,6 +74,12 @@ class Escape(Token):
     def __repr__(self) -> str:
         return f"<Escape: {self.src}>"
 
+class RawString(Token):
+    def __init__(self, body:str):
+        self.body = body
+    def __repr__(self) -> str:
+        return f"<RawString: {self.body}>"
+
 class String(Token):
     def __init__(self, body:list[str|Escape|Block]):
         self.body = body
@@ -117,7 +123,7 @@ class Comma(Token):
 # each row is a list of token types that are confusable in their precedence order. e.g. [Keyword, Unit, Identifier] means Keyword > Unit > Identifier
 # only confusable token classes need to be included in the table
 precedence_table = [
-    [Keyword, Identifier],
+    [Keyword, Operator, Identifier],
 ]
 precedence = {cls: len(row)-i for row in precedence_table for i, cls in enumerate(row)}
 
@@ -449,7 +455,7 @@ def eat_string(src:str) -> tuple[int, String] | None:
 #random note: if you for some reason needed to do a unicode escape followed by a character that happens to be a hex digit, you could do \u##{}#, where the empty block {} breaks the hex digit sequence
 
 
-@peek_eat(String)
+@peek_eat(RawString)
 def eat_raw_string(src:str) -> int|None:
     """
     raw strings start with either r' or r", and are terminated by the matching quote delimiter
@@ -792,6 +798,30 @@ def escape_whitespace(s:str):
     return ''.join(escape_map.get(c, c) for c in s)
 
 
+def tprint(token:Token, level=0):
+    """
+    print a token with a certain indentation level.
+    
+    If tokens contain nested tokens, they will be printed recursively with an increased indentation level
+    """
+    print(f'{"    "*level}', end='')
+    if isinstance(token, Block):
+        print(f'<Block {token.left}{token.right}>')
+        for t in token.body:
+            tprint(t, level=level+1)
+    elif isinstance(token, String):
+        print(f'<String>')
+        for t in token.body:
+            tprint(t, level=level+1)
+    elif isinstance(token, TypeParam):
+        print(f'<TypeParam>')
+        for t in token.body:
+            tprint(t, level=level+1)
+    else:
+        print(token)
+        
+
+
 def test():
     import sys
     """simple test dewy program"""
@@ -808,7 +838,7 @@ def test():
     tokens = tokenize(src)
     print(f'matched tokens:')
     for t in tokens:
-        print(f'  {t}')
+        tprint(t, level=1)
 
 
 
