@@ -570,8 +570,27 @@ def eat_type_param(src:str) -> tuple[int, TypeParam] | None:
         precedences = get_func_precedences(funcs)
         res = get_best_match(src[i:], funcs, precedences)
 
+        if res is None:
+            return None        
+        n_eaten, token = res
 
-        pdb.set_trace()
+        if isinstance(token, Token):
+            #add the already-eaten token to the list of tokens
+            body.append(token)
+        else:
+            #add a new instance of the token to the list of tokens (handling idempotent token cases)
+            token_cls = token
+            if not body or token_cls not in idempotent_tokens or not isinstance(body[-1], token_cls):
+                body.append(token_cls(src[i:i+n_eaten]))
+
+        #increment the index
+        i += n_eaten
+
+
+    if i == len(src):
+        return None
+    
+    return i + 1, TypeParam(body)
     
 
 
