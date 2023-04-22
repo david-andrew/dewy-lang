@@ -1,17 +1,3 @@
-#TODO:
-# - we're just going to go back to the standard lexer/parser approach
-#     tokenize
-
-# for handling string interpolation:
-# have string left and right halves as tokens, which can sandwich any number of expressions and internal strings
-#    ^^^^^basically, tokenizing needs to have a context stack, which is the current type being parsed.^^^^^
-#         if see a quote (and context is not string), add string onto stack
-
-
-# everything is either a sequence or an operation. strip outside (lowest precedence) of tokens until we get to the middle
-
-
-
 from abc import ABC
 import inspect
 from typing import Callable, Type
@@ -23,6 +9,20 @@ import pdb
 #### DEBUG rich traceback printing ####
 from rich import traceback, print
 traceback.install(show_locals=True)
+
+
+
+"""
+[tasks]
+- clean up eat_block
+    - general cleanup
+    - break out eat_ matching into smaller functions?
+    - figure out tie breaking process:
+        1. prefer @full_eat over @peek_eat ---> TODO: implement
+        2. prefer longest matches
+        3. prefer higher precedence
+        4. error
+"""
 
 
 class Token(ABC):
