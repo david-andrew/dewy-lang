@@ -12,7 +12,8 @@ import pdb
 #for now, construct the AST directly, skipping the parsing step
 
 
-#tasks:
+# [Tasks]
+# - instead of If with a block of multiple conditional checks: ConditionalChain, which can have any conditonals, e.g. if, loop, etc, and the first one that gets entered stops the chain
 # - write function for crawling AST, and replacing 
 # loop <var> in <expr> 
 #   <body> 
