@@ -30,28 +30,28 @@ class Token(ABC):
         """default repr for tokens is just the class name"""
         return f"<{self.__class__.__name__}>"
 
-class WhiteSpace(Token):
+class WhiteSpace_t(Token):
     def __init__(self, _): ...
 
-class Keyword(Token):
+class Keyword_t(Token):
     def __init__(self, src:str):
         self.src = src.lower()
     def __repr__(self) -> str:
         return f"<Keyword: {self.src}>"
 
-class Identifier(Token):
+class Identifier_t(Token):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
         return f"<Identifier: {self.src}>"
     
-class Hashtag(Token):
+class Hashtag_t(Token):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
         return f"<Hashtag: #{self.src}>"
 
-class Block(Token):
+class Block_t(Token):
     def __init__(self, body:list[Token], left:str, right:str):
         self.body = body
         self.left = left
@@ -60,58 +60,58 @@ class Block(Token):
         body_str = ', '.join(repr(token) for token in self.body)
         return f"<Block: {self.left}{body_str}{self.right}>"
     
-class TypeParam(Token):
+class TypeParam_t(Token):
     def __init__(self, body:list[Token]):
         self.body = body
     def __repr__(self) -> str:
         body_str = ', '.join(repr(token) for token in self.body)
         return f"<TypeParam: `<{body_str}>`>"
 
-class Escape(Token):
+class Escape_t(Token):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
         return f"<Escape: {self.src}>"
 
-class RawString(Token):
+class RawString_t(Token):
     def __init__(self, body:str):
         self.body = body
     def __repr__(self) -> str:
         return f"<RawString: {self.body}>"
 
-class String(Token):
-    def __init__(self, body:list[str|Escape|Block]):
+class String_t(Token):
+    def __init__(self, body:list[str|Escape_t|Block_t]):
         self.body = body
     def __repr__(self) -> str:
         return f"<String: {self.body}>"
     
-class Number(Token, ABC):...
+class Number_t(Token, ABC):...
     
-class Integer(Number):
+class Integer_t(Number_t):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
         return f"<Integer: {self.src}>"
     
-class BasedNumber(Token):
+class BasedNumber_t(Token):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
         return f"<BasedNumber: {self.src}>"
 
-class Operator(Token):
+class Operator_t(Token):
     def __init__(self, op:str):
         self.op = op
     def __repr__(self) -> str:
         return f"<Operator: `{self.op}`>"
     
-class ShiftOperator(Token):
+class ShiftOperator_t(Token):
     def __init__(self, op:str):
         self.op = op
     def __repr__(self) -> str:
         return f"<ShiftOperator: `{self.op}`>"
 
-class Comma(Token):
+class Comma_t(Token):
     def __init__(self, _): ...
 
 
@@ -122,13 +122,13 @@ class Comma(Token):
 # each row is a list of token types that are confusable in their precedence order. e.g. [Keyword, Unit, Identifier] means Keyword > Unit > Identifier
 # only confusable token classes need to be included in the table
 precedence_table = [
-    [Keyword, Operator, Identifier],
+    [Keyword_t, Operator_t, Identifier_t],
 ]
 precedence = {cls: len(row)-i for row in precedence_table for i, cls in enumerate(row)}
 
 # mark which tokens cannot be repeated in a list of tokens. E.g. whitespace should always be merged into a single token
 idempotent_tokens = {
-    WhiteSpace
+    WhiteSpace_t
 }
 
 # paired delimiters for blocks, ranges, groups, etc.
@@ -239,7 +239,7 @@ def get_func_precedences(funcs:tuple[Callable]) -> tuple[int]:
     return tuple(precedence.get(func._token_cls, 0) for func in funcs)
 
 
-@peek_eat(WhiteSpace)
+@peek_eat(WhiteSpace_t)
 def eat_line_comment(src:str) -> int|None:
     """eat a line comment, return the number of characters eaten"""
     if src.startswith('//'):
@@ -249,7 +249,7 @@ def eat_line_comment(src:str) -> int|None:
             return len(src)
     return None
 
-@peek_eat(WhiteSpace)
+@peek_eat(WhiteSpace_t)
 def eat_block_comment(src:str) -> int|None:
     """
     Eat a block comment, return the number of characters eaten
@@ -277,7 +277,7 @@ def eat_block_comment(src:str) -> int|None:
     raise ValueError("unterminated block comment")
     # return None
 
-@peek_eat(WhiteSpace)
+@peek_eat(WhiteSpace_t)
 def eat_whitespace(src:str) -> int|None:
     """Eat whitespace, return the number of characters eaten"""
     i = 0
@@ -285,7 +285,7 @@ def eat_whitespace(src:str) -> int|None:
         i += 1
     return i if i > 0 else None
 
-@peek_eat(Keyword)
+@peek_eat(Keyword_t)
 def eat_keyword(src: str) -> int | None:
     """
     Eat a reserved keyword, return the number of characters eaten
@@ -306,7 +306,7 @@ def eat_keyword(src: str) -> int | None:
     return None
 
 
-@peek_eat(Identifier)
+@peek_eat(Identifier_t)
 def eat_identifier(src:str) -> int|None:
     """
     Eat an identifier, return the number of characters eaten
@@ -330,7 +330,7 @@ def eat_identifier(src:str) -> int|None:
 
 
 
-@peek_eat(Hashtag)
+@peek_eat(Hashtag_t)
 def eat_hashtag(src:str) -> int|None:
     """
     Eat a hashtag, return the number of characters eaten
@@ -346,7 +346,7 @@ def eat_hashtag(src:str) -> int|None:
     return None
 
 
-@peek_eat(Escape, whitelist=[String])
+@peek_eat(Escape_t, whitelist=[String_t])
 def eat_escape(src:str) -> int|None:
     r"""
     Eat an escape sequence, return the number of characters eaten
@@ -391,7 +391,7 @@ def eat_escape(src:str) -> int|None:
 
 
 @full_eat()
-def eat_string(src:str) -> tuple[int, String] | None:
+def eat_string(src:str) -> tuple[int, String_t] | None:
     """
     strings are delimited with either single (') or double quotes (")
     the character portion of a string may contain any character except the delimiter, \, or {.
@@ -427,7 +427,7 @@ def eat_string(src:str) -> tuple[int, String] | None:
             res, _ = eat_escape(src[i:])
             if res is None:
                 raise ValueError("invalid escape sequence")
-            body.append(Escape(src[i:i+res]))
+            body.append(Escape_t(src[i:i+res]))
             i += res
 
         else: # src[i] == '{':
@@ -450,12 +450,12 @@ def eat_string(src:str) -> tuple[int, String] | None:
     if i > chunk_start:
         body.append(src[chunk_start:i])
     
-    return i + 1, String(body)
+    return i + 1, String_t(body)
 
 #random note: if you for some reason needed to do a unicode escape followed by a character that happens to be a hex digit, you could do \u##{}#, where the empty block {} breaks the hex digit sequence
 
 
-@peek_eat(RawString)
+@peek_eat(RawString_t)
 def eat_raw_string(src:str) -> int|None:
     """
     raw strings start with either r' or r", and are terminated by the matching quote delimiter
@@ -480,7 +480,7 @@ def eat_raw_string(src:str) -> int|None:
     return i + 1
 
 
-@peek_eat(Integer)
+@peek_eat(Integer_t)
 def eat_integer(src:str) -> int|None:
     """
     eat an integer, return the number of characters eaten
@@ -492,7 +492,7 @@ def eat_integer(src:str) -> int|None:
     return i if i > 0 else None
 
 
-@peek_eat(BasedNumber)
+@peek_eat(BasedNumber_t)
 def eat_based_number(src:str) -> int|None:
     """
     eat a based number, return the number of characters eaten
@@ -511,7 +511,7 @@ def eat_based_number(src:str) -> int|None:
     return i if i > 2 else None
         
 
-@peek_eat(Operator)
+@peek_eat(Operator_t)
 def eat_operator(src:str) -> int|None:
     """
     eat a unary or binary operator, return the number of characters eaten
@@ -525,7 +525,7 @@ def eat_operator(src:str) -> int|None:
             return len(op)
     return None
 
-@peek_eat(ShiftOperator, blacklist=[TypeParam])
+@peek_eat(ShiftOperator_t, blacklist=[TypeParam_t])
 def eat_shift_operator(src:str) -> int|None:
     """
     eat a shift operator, return the number of characters eaten
@@ -540,7 +540,7 @@ def eat_shift_operator(src:str) -> int|None:
             return len(op)
     return None
 
-@peek_eat(Comma)
+@peek_eat(Comma_t)
 def eat_comma(src:str) -> int|None:
     """
     eat a comma, return the number of characters eaten
@@ -555,7 +555,7 @@ class EatTracker:
 
 
 @full_eat()
-def eat_type_param(src:str) -> tuple[int, TypeParam] | None:
+def eat_type_param(src:str) -> tuple[int, TypeParam_t] | None:
     """
     eat a type parameter, return the number of characters eaten and an instance of the TypeParam token
 
@@ -571,7 +571,7 @@ def eat_type_param(src:str) -> tuple[int, TypeParam] | None:
 
     while i < len(src) and src[i] != '>':
         
-        funcs = get_contextual_eat_funcs(TypeParam)
+        funcs = get_contextual_eat_funcs(TypeParam_t)
         precedences = get_func_precedences(funcs)
         res = get_best_match(src[i:], funcs, precedences)
 
@@ -595,13 +595,13 @@ def eat_type_param(src:str) -> tuple[int, TypeParam] | None:
     if i == len(src):
         return None
     
-    return i + 1, TypeParam(body)
+    return i + 1, TypeParam_t(body)
     
 
 
 
 @full_eat()
-def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None:
+def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block_t] | None:
     """
     Eat a block, return the number of characters eaten and an instance of the Block token
 
@@ -632,7 +632,7 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
         ########### TODO: probably break this inner part into a function that eats the next token, given a list of eat functions
         ###########       could also think about ways to specify other multi-match resolutions, other than longest match + precedence...
         #run all the eat functions on the current src
-        funcs = get_contextual_eat_funcs(Block)
+        funcs = get_contextual_eat_funcs(Block_t)
         precedences = get_func_precedences(funcs)
         res = get_best_match(src[i:], funcs, precedences)
 
@@ -670,7 +670,7 @@ def eat_block(src:str, tracker:EatTracker|None=None) -> tuple[int, Block] | None
     if tracker:
         tracker.i = i
 
-    return i, Block(body, left=left, right=right)
+    return i, Block_t(body, left=left, right=right)
 
 
 
@@ -804,15 +804,15 @@ def tprint(token:Token, level=0):
     If tokens contain nested tokens, they will be printed recursively with an increased indentation level
     """
     print(f'{"    "*level}', end='')
-    if isinstance(token, Block):
+    if isinstance(token, Block_t):
         print(f'<Block {token.left}{token.right}>')
         for t in token.body:
             tprint(t, level=level+1)
-    elif isinstance(token, String):
+    elif isinstance(token, String_t):
         print(f'<String>')
         for t in token.body:
             tprint(t, level=level+1)
-    elif isinstance(token, TypeParam):
+    elif isinstance(token, TypeParam_t):
         print(f'<TypeParam>')
         for t in token.body:
             tprint(t, level=level+1)
@@ -836,7 +836,7 @@ def test():
 
     tokens = tokenize(src)
     print(f'matched tokens:')
-    tprint(Block(left='{', right='}', body=tokens))
+    tprint(Block_t(left='{', right='}', body=tokens))
     # for t in tokens:
     #     tprint(t, level=1)
 
