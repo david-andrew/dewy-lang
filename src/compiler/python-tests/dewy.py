@@ -1108,91 +1108,72 @@ class Vector(Iterable, Unpackable):
 
 
 
-def hello(run=True):
-
-    #set up root scope with some functions
-    root = Scope.default() #highest level of scope, mainly for builtins
-
-    #Hello, World!
-    prog = Block([
-        Call('printl', [String('Hello, World!')]),
-    ])
-    if run:
-        prog.eval(root)
-    else:
-        print(prog)
+def hello(root:Scope) -> AST:
+    """printl('Hello, World!')"""
+    return Call('printl', [String('Hello, World!')])
 
 
-def hello_func(run=True):
-
-    #set up root scope with some functions
-    root = Scope.default()
-
-    #Hello, World!
-    prog = Block([
+def hello_func(root:Scope) -> AST:
+    """
+    {
+        main = () => {printl('Hello, World!')}
+        main
+    }
+    """
+    return Block([
         Bind(
             'main',
             Function(
                 [],
-                Block([
-                    Call('printl', [String('Hello, World!')]),
-                ]),
+                Call('printl', [String('Hello, World!')]),
                 root
             )
         ),
         Call('main'),
     ])
-    if run:
-        prog.eval(root)
-    else:
-        print(prog)
+   
 
-def anonymous_func(run=True):
-    
-        #set up root scope with some functions
-        root = Scope.default()
-    
-        #Hello, World!
-        prog = Block([
-            Call(
-                Function(
-                    [],
-                    Block([
-                        Call('printl', [String('Hello, World!')]),
-                    ]),
-                    root
-                )
-            ),
-        ])
-        if run:
-            prog.eval(root)
-        else:
-            print(prog)
+def anonymous_func(root:Scope) -> AST:
+    """
+    {
+        (() => printl('Hello, World!'))()
+    }
+    """
+    return Block([
+        Call(
+            Function(
+                [],
+                Call('printl', [String('Hello, World!')]),
+                root
+            )
+        ),
+    ])
 
-def hello_name(run=True):
-
-    #set up root scope with some functions
-    root = Scope.default()
-
-    #Hello <name>!
-    prog = Block([
+def hello_name(root:Scope) -> AST:
+    """
+    {
+        print('What's your name? ')
+        name = readl()
+        printl('Hello {name}!')
+    }
+    """
+    return Block([
         Call('print', [String("What's your name? ")]),
         Bind('name', Call('readl')),
         Call('printl', [IString([String('Hello '), Call('name'), String('!')])]),
     ])
-    if run:
-        prog.eval(root)
-    else:
-        print(prog)
 
 
-def if_else(run=True):
-
-    #set up root scope with some functions
-    root = Scope.default()
-
-    #if name =? 'Alice' then print 'Hello Alice!' else print 'Hello stranger!'
-    prog = Block([
+def if_else(root:Scope) -> AST:
+    """
+    {
+        print('What's your name? ')
+        name = readl()
+        if name =? 'Alice' printl('Hello Alice!')
+        else printl('Hello stranger!')
+    }
+    """
+    return Block([
         Call('print', [String("What's your name? ")]),
         Bind('name', Call('readl')),
         If([
@@ -1206,25 +1187,19 @@ def if_else(run=True):
             )
         ])
     ])
-    if run:
-        prog.eval(root)
-    else:
-        print(prog)
 
 
-def if_else_if(run=True):
-
-    #set up root scope with some functions
-    root = Scope.default()
-
-    #name = readl()
-    #if name =? 'Alice' 
-    #   printl('Hello Alice!') 
-    #else if name =? 'Bob' 
-    #   printl('Hello Bob!')
-    #else
-    #   print('Hello stranger!')
-    prog = Block([
+def if_else_if(root:Scope) -> AST:
+    """
+    {
+        print('What's your name? ')
+        name = readl()
+        if name =? 'Alice' printl('Hello Alice!')
+        else if name =? 'Bob' printl('Hello Bob!')
+        else printl('Hello stranger!')
+    }
+    """
+    return Block([
         Call('print', [String("What's your name? ")]),
         Bind('name', Call('readl')),
         If([
@@ -1242,42 +1217,58 @@ def if_else_if(run=True):
             )
         ])
     ])
-    if run:
-        prog.eval(root)
-    else:
-        print(prog)
-
-def hello_loop(run=True):
-    
-        #set up root scope with some functions
-        root = Scope.default()
-
-        #print 'Hello <name>!' 10 times
-        prog = Block([
-            Call('print', [String("What's your name? ")]),
-            Bind('name', Call('readl')),
-            Bind('i', Number(0)),
-            Loop(
-                Less(Call('i'), Number(10)),
-                Block([
-                    Call('printl', [IString([String('Hello '), Call('name'), String('!')])]),
-                    Bind('i', Add(Call('i'), Number(1))),
-                ])
-            )
-        ])
-        if run:
-            prog.eval(root)
-        else:
-            print(prog)
 
 
-def unpack_test(run=True):
+def hello_loop(root:Scope) -> AST:
+    """
+    {
+        print('What's your name? ')
+        name = readl()
+        i = 0
+        loop i <? 10 {
+            printl('Hello {name}!')
+            i = i + 1
+        }
+    }
+    """
+    return Block([
+        Call('print', [String("What's your name? ")]),
+        Bind('name', Call('readl')),
+        Bind('i', Number(0)),
+        Loop(
+            Less(Call('i'), Number(10)),
+            Block([
+                Call('printl', [IString([String('Hello '), Call('name'), String('!')])]),
+                Bind('i', Add(Call('i'), Number(1))),
+            ])
+        )
+    ])
 
-    #set up root scope with some functions
-    root = Scope.default()
 
-    #unpack several variables from a vector and print them
-    prog = Block([
+def unpack_test(root:Scope) -> AST:
+    """
+    {
+        s = ['Hello' ['World' '!'] 5 10]
+        printl('s={s}')
+        a, b, c, d = s
+        printl('a={a} b={b} c={c} d={d}')
+        a, ...b = s
+        printl('a={a} b={b}')
+        ...a, b = s
+        printl('a={a} b={b}')
+        a, [b, c], ...d = s
+        printl('a={a} b={b} c={c} d={d}')
+
+        //error tests
+        //a, b, c, d, e = s         //error: not enough values to unpack
+        //a, b = s                  //error: too many values to unpack
+        //a, ...b, c, d, e, f = s   //error: too many values to unpack
+
+        //TBD how unpack would handle `a, ...b, c, d, e = s`. Probably b would be empty?
+    }
+    """
+
+    return Block([
         Bind('s', Vector([String('Hello'), Vector([String('World'), String('!')]), Number(5), Number(10)])),
         Call('printl', [IString([String('s='), Call('s')])]),
         Unpack(['a', 'b', 'c', 'd'], Call('s')),
@@ -1294,61 +1285,61 @@ def unpack_test(run=True):
         # Unpack(['a', 'b'], Call('s')),                        # error: too many values to unpack
         # Unpack(['a', '...b', 'c', 'd', 'e', 'f'], Call('s')), # error: too many values to unpack
     ])
-    if run:
-        prog.eval(root)
-    else:
-        print(prog)
 
 
-def range_iter_test(run=True):
-    
-        #set up root scope with some functions
-        root = Scope.default()
-    
-        #range iterator test
-        # r = range(0,2,10)
-        # it = iter(r)
-        # print(next(it))
-        # print(next(it))
-        # print(next(it))
-        # print(next(it))
-        # print(next(it))
-        # ...
-        prog = Block([
-            Bind('r', Range(Number(0), Number(2), Number(10))),
-            Bind('it', RangeIter(Call('r'))),
-            Call('printl', [Next(Call('it'))]),
-            Call('printl', [Next(Call('it'))]),
-            Call('printl', [Next(Call('it'))]),
-            Call('printl', [Next(Call('it'))]),
-            Call('printl', [Next(Call('it'))]),
-            Call('printl', [Next(Call('it'))]),
-            Call('printl', [Next(Call('it'))]),
-            Call('printl', [Next(Call('it'))]),
-            Call('printl', [Next(Call('it'))]),
-            Call('printl', [Next(Call('it'))]),
-            Call('printl', [Next(Call('it'))]),
-            Call('printl', [Next(Call('it'))]), #should print [False, None] since the iterator is exhausted
-            Call('printl', [Next(Call('it'))]),
-            Call('printl', [Next(Call('it'))]),
-        ])
-        if run:
-            prog.eval(root)
-        else:
-            print(prog)
+def range_iter_test(root:Scope) -> AST:
+    """
+    {
+        r = [0,2..20]
+        it = iter(r)
+        printl(next(it))
+        printl(next(it))
+        printl(next(it))
+        printl(next(it))
+        printl(next(it))
+        printl(next(it))
+        printl(next(it))
+        printl(next(it))
+        printl(next(it))
+        printl(next(it))
+        printl(next(it)) //last iteration. should return [true, 20]
+        printl(next(it)) //should return [false, undefined]
+        printl(next(it))
+        printl(next(it))
+    }
+    """
+    return Block([
+        Bind('r', Range(Number(0), Number(2), Number(20))),
+        Bind('it', RangeIter(Call('r'))),
+        Call('printl', [Next(Call('it'))]),
+        Call('printl', [Next(Call('it'))]),
+        Call('printl', [Next(Call('it'))]),
+        Call('printl', [Next(Call('it'))]),
+        Call('printl', [Next(Call('it'))]),
+        Call('printl', [Next(Call('it'))]),
+        Call('printl', [Next(Call('it'))]),
+        Call('printl', [Next(Call('it'))]),
+        Call('printl', [Next(Call('it'))]),
+        Call('printl', [Next(Call('it'))]),
+        Call('printl', [Next(Call('it'))]),
+        Call('printl', [Next(Call('it'))]), #should print [False, None] since the iterator is exhausted
+        Call('printl', [Next(Call('it'))]),
+        Call('printl', [Next(Call('it'))]),
+    ])
 
-def loop_iter_manual(run=True):
 
-    #set up root scope with some functions
-    root = Scope.default()
-
-    #loop iterator test
-    # it = iter([0,2..10])
-    # [cond, i] = next(it)
-    # loop cond:
-    #     printl(i)
-    #     [cond, i] = next(it)
-    prog = Block([
+def loop_iter_manual(root:Scope) -> AST:
+    """
+    {
+        it = iter([0,2..10])
+        [cond, i] = next(it)
+        loop cond {
+            printl(i)
+            [cond, i] = next(it)
+        }
+    }
+    """
+    return Block([
         Bind('it', RangeIter(Range(Number(0), Number(2), Number(10)))),
         Unpack(['cond', 'i'], Next(Call('it'))),
 
@@ -1360,60 +1351,54 @@ def loop_iter_manual(run=True):
             ])
         )
     ])
-    if run:
-        prog.eval(root)
-    else:
-        print(prog)
 
 
-def loop_in_iter(run=True):
 
-    #set up root scope with some functions
-    root = Scope.default()
+def loop_in_iter(root:Scope) -> AST:
+    """
+    {
+        loop i in [0,2..10] printl(i)
+    }
+    """
+    return Loop(
+        In('i', Range(Number(0), Number(2), Number(10))),
+        Call('printl', [Call('i')]),
+    )
+   
 
-    #loop iterator test
-    # for i in [0,2..10]:
-    #     printl(i)
-    prog = Block([
+def nested_loop(root:Scope) -> AST:
+    """    
+    loop i in [0,2..10]
+        loop j in [0,2..10]
+            printl('{i},{j}')
+    """
+    return Loop(
+        In('i', Range(Number(0), Number(2), Number(10))),
         Loop(
-            In('i', Range(Number(0), Number(2), Number(10))),
-            Call('printl', [Call('i')]),
+            In('j', Range(Number(0), Number(2), Number(10))),
+            Call('printl', [IString([Call('i'), String(','), Call('j')])]),
         )
-    ])
-    if run:
-        prog.eval(root)
-    else:
-        print(prog)
+    )
 
 
-def nested_loop(run=True):
 
-    #set up root scope with some functions
-    root = Scope.default()
-
-    #nested loop
-    # for i in [0,2..10]:
-    #     for j in [0,2..10]:
-    #         printl('{i},{j}')
-    prog = Block([
-        Loop(
-            In('i', Range(Number(0), Number(2), Number(10))),
-            Loop(
-                In('j', Range(Number(0), Number(2), Number(10))),
-                Call('printl', [IString([Call('i'), String(','), Call('j')])]),
-            )
-        )
-    ])
-    if run:
-        prog.eval(root)
-    else:
-        print(prog)
-
-
-def block_printing(run=True):
-    #make a program with lots of nested blocks/loops to test printing
-    root = Scope.default()
-    prog = Block([
+def block_printing(root:Scope) -> AST:
+    """
+    {
+        loop i in [0,2..5] {
+            loop j in [0,2..5] {
+                loop k in [0,2..5] {
+                    loop l in [0,2..5] {
+                        loop m in [0,2..5] {
+                            printl('{i},{j},{k},{l},{m}')
+                        }
+                    }
+                }
+            }
+        }
+    }
+    """
+    return Block([
         Loop(
             In('i', Range(Number(0), Number(2), Number(5))),
             Block([
@@ -1441,20 +1426,30 @@ def block_printing(run=True):
             ])
         )
     ])
-    if run:
-        prog.eval(root)
-    else:
-        print(prog)
 
+def rule110(root:Scope) -> AST:
+    """
+    progress = world:vector<bit> => {
+        update:bit = 0
+        loop i in 0..world.length
+        {
+            if i >? 0 world[i-1] = update //TODO: #notfirst handled by compiler unrolling the loop into prelude, interludes, and postlude
+            update = 0b01110110 << (world[i-1..i+1] .?? 0 .<< [2 1 0])
+        }
+        world.push(update)
+    }
 
-def rule110(run=True):
-
-    #set up root scope with some functions
-    root = Scope.default()
+    world: vector<bit> = [1]
+    loop true
+    {
+        printl(world)
+        progress(world)
+    }
+    """
 
     #rule 110
     #TODO: handle type annotations in AST
-    prog = Block([
+    return Block([
         Bind(
             'progress', 
             Function(
@@ -1480,19 +1475,17 @@ def rule110(run=True):
         #     printl(world)
         #     update(world)
     ])
-    if run:
-        prog.eval(root)
-    else:
-        print(prog)
 
 
 
 
 if __name__ == '__main__':
-    funcs = [
+    show = True
+    run = True
+
+    progs = [
         hello,
         hello_func,
-        anonymous_func,
         anonymous_func,
         hello_name,
         if_else,
@@ -1507,9 +1500,17 @@ if __name__ == '__main__':
         # rule110,
     ]
 
-    #print function ASTs and run
-    for func in funcs:
-        func(False) #print AST
-        func(True)  #run
-        print('----------------------------------------')
+    for prog in progs:
+        #set up root scope with some functions
+        root = Scope.default()
 
+        # get the program AST
+        ast = prog(root)
+
+        # display and or run the program
+        if show:
+            print(ast)
+        if run:
+            ast.eval(root)
+
+        print('----------------------------------------')
