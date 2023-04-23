@@ -1152,7 +1152,7 @@ def anonymous_func(root:Scope) -> AST:
 def hello_name(root:Scope) -> AST:
     """
     {
-        print('What's your name? ')
+        print("What's your name? ")
         name = readl()
         printl('Hello {name}!')
     }
@@ -1167,7 +1167,7 @@ def hello_name(root:Scope) -> AST:
 def if_else(root:Scope) -> AST:
     """
     {
-        print('What's your name? ')
+        print("What's your name? ")
         name = readl()
         if name =? 'Alice' printl('Hello Alice!')
         else printl('Hello stranger!')
@@ -1192,7 +1192,7 @@ def if_else(root:Scope) -> AST:
 def if_else_if(root:Scope) -> AST:
     """
     {
-        print('What's your name? ')
+        print("What's your name? ")
         name = readl()
         if name =? 'Alice' printl('Hello Alice!')
         else if name =? 'Bob' printl('Hello Bob!')
@@ -1222,7 +1222,7 @@ def if_else_if(root:Scope) -> AST:
 def hello_loop(root:Scope) -> AST:
     """
     {
-        print('What's your name? ')
+        print("What's your name? ")
         name = readl()
         i = 0
         loop i <? 10 {
@@ -1481,6 +1481,7 @@ def rule110(root:Scope) -> AST:
 
 if __name__ == '__main__':
     show = True
+    show_verbose = True
     run = True
 
     progs = [
@@ -1510,6 +1511,8 @@ if __name__ == '__main__':
         # display and or run the program
         if show:
             print(ast)
+        if show_verbose:
+            print(repr(ast))
         if run:
             ast.eval(root)
 
