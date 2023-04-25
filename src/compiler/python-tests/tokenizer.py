@@ -85,9 +85,9 @@ class String_t(Token):
     def __repr__(self) -> str:
         return f"<String: {self.body}>"
     
-class Number_t(Token, ABC):...
+# class Number_t(Token, ABC):...
     
-class Integer_t(Number_t):
+class Integer_t(Token):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
