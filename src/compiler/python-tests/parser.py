@@ -56,9 +56,14 @@ import pdb
 
 
 
-#expression chains. one token at a time, decide if it is part of the current expression chain
+#expression chains
+# build chain one token at a time, decide if it is part of the current expression chain
+# once chain is built, split by lowest precedence operator (kept track of during chain building)
+# create the node for the operator, and semi-recurse process on the left and right halves 
+#  - (the chain already exists, just need to find the lowest precedence operator)
 
 
+# TODO: these should include an optional validator function that either runs after a candidate was successful (or perhaps after each token that passes...)
 expression_templates: list[tuple[type, list[type]]] = [
     (None, (Identifier_t,)),
     (None, (Integer_t,)),
