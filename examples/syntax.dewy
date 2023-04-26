@@ -20,21 +20,19 @@ my_string = '2 + 2 = {2+2}'
 //complex interpolation
 s = "first 10 primes are: {
     primes = [2]
-    (loop i in [3, 5..)
+    loop i in [3, 5..) and primes.length <? 10
         if i .% primes |> product not =? 0 
             primes.push(i)
-        if primes.length =? 10
-            break
-    )
     primes
 }"
 
 
 //alternative prime generator + getting first 10 primes
+#ctx
 primes = [
     2
     lazy i in [3, 5..)
-        if i .% #self .=? 0 |> @reduce(, (prev, v) => prev and v)
+        if i .% #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
             i
 ][..10)
 
@@ -76,6 +74,12 @@ a: int => bool
 (int, int) => int
 <T>(T, T) => T
 <T>(a:T, b:T) => T
+
+// object type
+[a:int? b:string]
+
+//? (optional) is sugar for |void
+[a:int|void b:string]
 
 // operators juxtaposed to identifiers
 aorb
@@ -128,3 +132,21 @@ a+b
 [a, ...b] = [1 2 3 4]                                       //a=1, b=[2 3 4]
 [a, ...b, c] = [1 2 3 4 5]                                  //a=1, b=[2 3 4], c=5
 [a, ...b, [c, [...d, e, f]]] = [1 2 3 4 [5 [6 7 8 9 10]]]   //a=1, b=[2 3 4], c=5, d=[6 7 8], e=9, f=10
+
+
+
+// silly things that are technically valid
+x = loop i in [0..10] i //x=10
+
+y = [
+    if something 
+        x
+    else loop i in something_else
+        y
+    else if z
+        z
+    else loop i in last_thing
+        w
+    else
+        ()
+]
