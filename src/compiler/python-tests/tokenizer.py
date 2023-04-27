@@ -22,6 +22,23 @@ traceback.install(show_locals=True)
         2. prefer longest matches
         3. prefer higher precedence
         4. error
+- make a string class that knows the location of any slices that are accessed
+    ```
+    class ShapedString(str): ... #lays out the string as a 2D array (for computing where was accessed. noting that access is still 1D)
+    class ShapedStringSlice(str): ... #attaches coordinates to any slices. TBD how coordinates are represented. perhaps just ((start_row, start_col), (end_row, end_col))
+    ```
+    - both behave like strings (i.e. can be sliced, used in operations, printed, etc), but they carry with them the position information which can be accessed via properties
+- keep track of vertical vs horizontal whitespace. in terms of idempotent:
+    previous   | current    | combined
+    -----------+------------+-----------
+    horizontal | horizontal | horizontal
+    horizontal | vertical   | vertical
+    vertical   | horizontal | vertical
+    vertical   | vertical   | vertical
+    none       | horizontal | horizontal
+    none       | vertical   | vertical
+    i.e. vertical supersedes horizontal
+
 """
 
 

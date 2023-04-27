@@ -103,17 +103,19 @@ def parse(tokens:list[Token]) -> AST:
     
     chains = []
     current_chain = []
+    prev_was_whitespace = False
     while len(tokens) > 0:
         
         chunk_tokens = []
-        #TODO: lowest_precedence_op = ...
-        candidates = get_initial_candidates(current_chain) #[(0, ast_type, template) for ast_type, template in expression_templates]
+        #TODO: lowest_precedence_op = ... # or just keep track of the indices of all operators in the chain?
+        candidates = get_initial_candidates(current_chain)
         
         while len(tokens) > 0:
 
             #skip leading whitespace
             if isinstance(tokens[0], WhiteSpace_t):
                 tokens = tokens[1:]
+                prev_was_whitespace = True
                 continue
 
             token, tokens = tokens[0], tokens[1:]
@@ -131,19 +133,24 @@ def parse(tokens:list[Token]) -> AST:
             completed = [c for c in candidates if c[0] == len(c[2])]
             candidates = [c for c in candidates if c[0] != len(c[2])]
 
+            #validate any completed candidates
+            #TODO
+
             assert len(completed) <= 1, f"ERROR: multiple candidates completed at the same time: {completed}"
+
+            # indicate that the previous token was not whitespace
+            prev_was_whitespace = False
 
             if len(completed) == 1:
                 #add the completed candidate to the chain
                 i, ast_type, template = completed[0]
                 current_chain.append((ast_type, template, chunk_tokens))
-                # chain_tokens = []
-                # candidates = [(0, ast_type, template) for ast_type, template in expression_templates]
                 break
             
             if len(candidates) == 0:
                 #no candidates left, break out of the loop
-                raise ValueError(f"ERROR: no candidates left, chain_tokens: {chain_tokens}")
+                #TODO: perhaps this means the end of the current chain (but more tokens/chains follow)?
+                raise ValueError(f"ERROR: no candidates left: {chunk_tokens=}")
             
     pdb.set_trace()
     ...
