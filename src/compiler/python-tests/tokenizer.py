@@ -50,6 +50,9 @@ class Token(ABC):
 class WhiteSpace_t(Token):
     def __init__(self, _): ...
 
+class Juxtapose_t(Token):
+    def __init__(self, _): ...
+
 class Keyword_t(Token):
     def __init__(self, src:str):
         self.src = src.lower()
