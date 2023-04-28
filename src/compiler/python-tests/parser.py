@@ -42,7 +42,7 @@ from dewy import (
     RangeIter,
     Vector,
 )
-from tokenizer import ( tokenize, tprint,
+from tokenizer import ( tokenize, tprint, traverse_tokens,
     Token, 
     WhiteSpace_t,
     Juxtapose_t,
@@ -52,6 +52,7 @@ from tokenizer import ( tokenize, tprint,
     String_t,
     Integer_t,
     BasedNumber_t,
+
 )
 
 import pdb
@@ -59,86 +60,49 @@ import pdb
 
 
 
-
+valid_brace_pairs = {
+    '{': '}',
+    '(': ')]',
+    '[': '])',
+    # '<': '>'
+}
 def validate_block_braces(tokens:list[Token]) -> None:
-    ...
     #raise exception with location if braces don't match up
+    for token in traverse_tokens(tokens):
+        if isinstance(token, Block_t):
+            assert token.left in valid_brace_pairs, f'INTERNAL ERROR: left block opening token is not a valid token. Expected one of {[*valid_brace_pairs.keys()]}. Got \'{token.left}\''
+            assert token.right in valid_brace_pairs[token.left], f'ERROR: mismatched opening and closing braces. For opening brace \'{token.left}\', expected one of \'{valid_brace_pairs[token.left]}\''
+        
 
 
-
-#TODO: this doesn't handle recursion... honestly it should probably be in place...
-def invert_whitespace(tokens:list[Token]) -> None:
+jux = Juxtapose_t(None)
+def invert_whitespace(tokens: list[Token]) -> None:
     """
-    removes all instances of whitespace tokens, and insert juxtapose tokens between tokens that were not separated by whitespace
+    removes all whitespace tokens, and insert juxtapose tokens between adjacent pairs (i.e. not separated by whitespace)
+
+    Args:
+        tokens (list[Token]): list of tokens to modify. This is modified in place.
     """
     i = 0
-    prev_was_whitespace = False
-    while i < len(tokens) - 1:
-        left, right = tokens[i], tokens[i+1]
-
-        # delete whitespace if it comes up        
-        if isinstance(left, WhiteSpace_t):
-            del tokens[i]
-            prev_was_whitespace = True
+    while i < len(tokens):
+        # delete whitespace if it comes up
+        if isinstance(tokens[i], WhiteSpace_t):
+            tokens.pop(i)
             continue
 
         # recursively handle inverting whitespace for blocks
-        if isinstance(left, Block_t) or isinstance(left, TypeParam_t):
-            invert_whitespace(left.body)
-        if isinstance(left, String_t):
-            for child in left.body:
+        if isinstance(tokens[i], (Block_t, TypeParam_t)):
+            invert_whitespace(tokens[i].body)
+        elif isinstance(tokens[i], String_t):
+            for child in tokens[i].body:
                 if isinstance(child, Block_t):
                     invert_whitespace(child.body)
-        
+
         # insert juxtapose if no whitespace between tokens
-        if not isinstance(right, WhiteSpace_t) and not prev_was_whitespace:
-            tokens.insert(i+1, Juxtapose_t(None))
+        if i + 1 < len(tokens) and not isinstance(tokens[i + 1], WhiteSpace_t):
+            tokens.insert(i + 1, jux)
             i += 1
-
-        prev_was_whitespace = False
         i += 1
-
-    # handle the last token if it exists
-    if i != len(tokens) - 1:
-        return
-
-    if isinstance(tokens[-1], WhiteSpace_t):
-        del tokens[-1]
-    elif isinstance(tokens[-1], Block_t) or isinstance(tokens[-1], TypeParam_t):
-        invert_whitespace(tokens[-1].body)
-    elif isinstance(tokens[-1], String_t):
-        for child in tokens[-1].body:
-            if isinstance(child, Block_t):
-                invert_whitespace(child.body)
-
-    
-
-    # out = []
-    # for left, right in zip(tokens[:-1], tokens[1:]):
-        
-    #     # nothing to do if left is whitespace
-    #     if isinstance(left, WhiteSpace_t):
-    #         continue
-
-    #     # add the left token to the output
-    #     out.append(left)
-
-    #     # if right is also not whitespace, add a juxtaposition token
-    #     if not isinstance(right, WhiteSpace_t):
-    #         out.append(Juxtapose_t())
-    
-    # # add the last token to the output
-    # out.append(tokens[-1])
-
-    # return out
-
-
-
-
-
-
-
-
 
 
 
@@ -317,6 +281,10 @@ def test():
     tokens = tokenize(src)
     print(f'matched tokens:')
     tprint(Block_t(left='{', right='}', body=tokens))
+    print('\n\n\n')
+
+    # ensure that all blocks have valid open/close pairs
+    validate_block_braces(tokens)
 
 
     # in between tokenizing and parsing

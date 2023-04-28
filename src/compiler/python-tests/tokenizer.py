@@ -1,6 +1,6 @@
 from abc import ABC
 import inspect
-from typing import Callable, Type
+from typing import Callable, Type, Generator
 from types import UnionType
 from functools import lru_cache
 
@@ -160,6 +160,7 @@ operators = sorted(
     [
         '+', '-', '*', '/', '%', '^',
         '=?', '>?', '<?', '>=?', '<=?', 'in?', '<=>',
+        '|', '&',
         'not', 'and', 'or', 'nand', 'nor', 'xor', 'xnor', '??', '?',
         '=', ':=', 'as',
         '@', '@?',
@@ -760,6 +761,23 @@ def tokenize(src:str) -> list[Token]:
 
     return tokens
 
+def traverse_tokens(tokens:list[Token]) -> Generator[Token, None, None]:
+    for token in tokens:
+        yield token
+
+        if isinstance(token, Block_t) or isinstance(token, TypeParam_t):
+            for t in traverse_tokens(token.body):
+                yield t
+            continue
+        
+        if isinstance(token, String_t):
+            for child in token.body:
+                if isinstance(child, Token):
+                    yield child
+                if isinstance(child, Block_t):
+                    for t in traverse_tokens(child.body):
+                        yield t
+            continue
 
 def validate_functions():
 
