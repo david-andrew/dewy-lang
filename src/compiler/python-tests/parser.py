@@ -67,7 +67,17 @@ valid_brace_pairs = {
     # '<': '>'
 }
 def validate_block_braces(tokens:list[Token]) -> None:
-    #raise exception with location if braces don't match up
+    """
+    Checks that all blocks have valid open/close pairs.
+
+    For example, ranges may have differing open/close pairs, e.g. [0..10), (0..10], etc.
+    But regular blocks must have matching open/close pairs, e.g. { ... }, ( ... ), [ ... ]
+    Performs some validation, without knowing if the block is a range or a block. 
+    So more validation is needed when the actual block type is known.
+
+    Raises:
+        AssertionError: if a block is found with an invalid open/close pair
+    """
     for token in traverse_tokens(tokens):
         if isinstance(token, Block_t):
             assert token.left in valid_brace_pairs, f'INTERNAL ERROR: left block opening token is not a valid token. Expected one of {[*valid_brace_pairs.keys()]}. Got \'{token.left}\''
@@ -212,57 +222,6 @@ def parse(tokens:list[Token]) -> AST:
 
 
 
-
-#TODO: precedence sorting...
-
-# def eat_expr(tokens:list[Token]) -> AST | None:
-#     """
-#     eats the smallest next expression
-
-#     id | number | ... | TODO
-#     """
-
-# def eat_call(tokens:list[Token]) -> AST | None:
-#     """
-#     expr(<args_list>)
-#     """
-#     expr = eat_expr(tokens)
-
-# def id_call(tokens:list[Token]) -> tuple[AST, list[Token]] | None:
-#     """
-#     #id #arg_list?
-#     """
-#     pdb.set_trace()
-
-
-#TODO:
-#def arg_call... any expression followed by () with zero or more args
-
-def strip_whitespace(tokens:list[Token], left=True, right=True) -> list[Token]:
-    """remove whitespace tokens from the left and/or right of a list of tokens"""
-    if left:
-        while len(tokens) > 0 and isinstance(tokens[0], WhiteSpace_t):
-            tokens = tokens[1:]
-    if right:
-        while len(tokens) > 0 and isinstance(tokens[-1], WhiteSpace_t):
-            tokens = tokens[:-1]
-    return tokens
-
-
-# def parse(tokens:list[Token]) -> AST:
-#     tokens = strip_whitespace(tokens)
-    
-#     #TODO: for now just try to match an id_call, e.g. print("hello world")
-#     res = id_call(tokens)
-
-#     if res is None:
-#         raise ValueError(f"ERROR: parse failed, no ASTs found. Tokens: {tokens}")
-    
-#     ast, rest = res
-#     if len(rest) > 0:
-#         raise ValueError(f"ERROR: parse failed, tokens left over: {rest}")
-
-#     return ast
 
 
 
