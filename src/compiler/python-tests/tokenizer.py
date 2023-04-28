@@ -22,24 +22,47 @@ traceback.install(show_locals=True)
         2. prefer longest matches
         3. prefer higher precedence
         4. error
-- make a string class that knows the location of any slices that are accessed
-    ```
-    class ShapedString(str): ... #lays out the string as a 2D array (for computing where was accessed. noting that access is still 1D)
-    class ShapedStringSlice(str): ... #attaches coordinates to any slices. TBD how coordinates are represented. perhaps just ((start_row, start_col), (end_row, end_col))
-    ```
-    - both behave like strings (i.e. can be sliced, used in operations, printed, etc), but they carry with them the position information which can be accessed via properties
-- keep track of vertical vs horizontal whitespace. in terms of idempotent:
-    previous   | current    | combined
-    -----------+------------+-----------
-    horizontal | horizontal | horizontal
-    horizontal | vertical   | vertical
-    vertical   | horizontal | vertical
-    vertical   | vertical   | vertical
-    none       | horizontal | horizontal
-    none       | vertical   | vertical
-    i.e. vertical supersedes horizontal
-
 """
+
+
+class CoordString(str):
+    """
+    Drop-in replacement for str that keeps track of the coordinates of each character in the string
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.row_col_map = self._generate_row_col_map()
+
+    def _generate_row_col_map(self):
+        row_col_map = []
+        row = 0
+        col = 0
+        for c in self:
+            if c == '\n':
+                row_col_map.append((row, col))
+                row += 1
+                col = 0
+            else:
+                row_col_map.append((row, col))
+                col += 1
+        return row_col_map
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            sliced_str = super().__getitem__(key)
+            sliced_row_col_map = self.row_col_map[key]
+            custom_str = CoordString(sliced_str)
+            custom_str.row_col_map = sliced_row_col_map
+            return custom_str
+        return super().__getitem__(key)
+
+    def row_col(self, index):
+        return self.row_col_map[index]
+
+#TODO: maybe make adding this string with other regular str illegal
+
+
+
 
 
 class Token(ABC):
@@ -744,6 +767,9 @@ def tokenize(src:str) -> list[Token]:
 
     # insert src into a block
     src = f'{{\n{src}\n}}'
+
+    #convert string to a coordinate string (for keeping track of row/col numbers)
+    src = CoordString(src)
 
     # eat tokens for a block
     tracker = EatTracker()
