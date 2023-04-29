@@ -157,7 +157,7 @@ my_tensor[..2,0 .. () [0 4 5]] // should return a 4D tensor of shape [3 5 1 3]
 
 
 
-## Juxtaposition for everything
+## Juxtaposition for everything [Yes! rely on type safety to determine what happens or compile error if incompatible]
 - e.g. a function call could literally be `<fn><jux><value>` if the type of id was a function. Technically this leads to an interesting syntax (that I think stylistically should be discouraged)
 ```
 inc = i:int => i+1
@@ -173,7 +173,53 @@ inc{10}
 {inc}(10)
 ```
 
+The nice thing about this is that it handles the whole string prefix function thing perfectly. e.g.
+```
+path = s:string => [
+    //process s based on / and \ separators
+    //store result in this object
+]
 
+path"this/is/a/file/path.ext"
+```
+
+which literally gets parsed as `<id:path> <jux> <str:"this/is/a/file/path.ext">`, i.e. already a function call.
+
+
+In fact, this style could probably allow for custom operators to be added, e.g. by making the operator be an identifier. e.g.
+```
+dot = (left:vector<T>, right:vector<T>) => left .* right |> sum
+
+then you can use it like an operator
+a = [1 2 3]
+b = [4 5 6]
+
+a(dot)b
+```
+
+though actually this doesn't work because it looks like a is called with dot as an argument. If we make dot be a higher order function, then it sort of works, but just looks like a function call at that point
+```
+dot = (left:vector<T>) => (right:vector<T>) => left .* right |> sum
+dot(a)b
+```
+
+In fact for it to work where you can do `a(dot)b`, you would need a function inside of vector objects that takes a function operator, and applies it to a vector next to it. e.g.
+```
+//vector type definition
+vector = (vals) => [
+    //save vals
+    //save other metadata
+    __call__ = (fn) => (other) => fn(vals, other)
+]
+
+//dot function
+dot = (left:vector<T>, right:vector<T>) => left .* right |> sum
+
+//usage
+a = [1 2 3]
+b = [4 5 6]
+result = a(dot)b
+```
 
 ## How to handle unit dimensionality
 see: 

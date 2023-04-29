@@ -295,6 +295,8 @@ def test():
 
     # remove whitespace, and insert juxtapose tokens
     invert_whitespace(tokens)
+    print(f'juxtaposed tokens:')
+    tprint(Block_t(left='{', right='}', body=tokens))
 
     # parse tokens into an AST
     ast = parse(tokens)
