@@ -99,6 +99,48 @@ valid_brace_pairs = {
     '[': '])',
     # '<': '>'
 }
+
+unary_chain_prependers = {
+    Operator_t: lambda t: t.op in unary_prefix_operators,
+}
+
+#only postifx unary operators are allowed
+unary_chain_extenders = {
+    Operator_t: lambda t: t.op in unary_postfix_operators,
+}
+
+binary_chain_extenders = {
+    Juxtapose_t: None,
+    Operator_t: lambda t: t.op in binary_operators,
+    ShiftOperator_t: None,
+    Comma_t: None,
+}
+
+def match_single(token:Token, group:dict[type, None|Callable]) -> bool:
+    cls = token.__class__
+    return cls in group and (group[cls] is None or group[cls](token))
+
+chain_atoms = {
+    Identifier_t,
+    Integer_t,
+    BasedNumber_t,
+    RawString_t,
+    String_t,
+    Block_t,
+    TypeParam_t,
+    Hashtag_t,
+    DotDot_t,
+}
+
+# keep track of operators that are sensitive to whitespace (i.e. we cannot safely fold adjacent whitespace/juxtaposition tokens into the operator)
+whitespace_sensitive_operators = unary_prefix_operators & unary_postfix_operators | binary_operators & (unary_prefix_operators | unary_postfix_operators)
+
+
+#juxtapose singleton token so we aren't wasting memory
+jux = Juxtapose_t(None)
+
+
+
 def validate_block_braces(tokens:list[Token]) -> None:
     """
     Checks that all blocks have valid open/close pairs.
@@ -118,7 +160,6 @@ def validate_block_braces(tokens:list[Token]) -> None:
         
 
 
-jux = Juxtapose_t(None)
 def invert_whitespace(tokens: list[Token]) -> None:
     """
     removes all whitespace tokens, and insert juxtapose tokens between adjacent pairs (i.e. not separated by whitespace)
@@ -147,6 +188,16 @@ def invert_whitespace(tokens: list[Token]) -> None:
             i += 1
         i += 1
 
+    #finally, remove juxtapose tokens next to operators that are not whitespace sensitive
+    i = 1
+    while i < len(tokens) - 1:
+        left,middle,right = tokens[i-1:i+2]
+        if isinstance(middle, Juxtapose_t) and isinstance(left, Operator_t) and left.op not in whitespace_sensitive_operators and isinstance(right, Operator_t) and right.op not in whitespace_sensitive_operators:
+            tokens.pop(i)
+            continue
+        i += 1
+
+
 
 #TODO: determining type of a block
 from enum import Enum, auto
@@ -168,37 +219,6 @@ def determine_block_type(block:Block_t) -> BlockType: ...
     #if left and right are [], and tbd other stuff, should be an index. Index is the only time that ranges could possibly be naked (i.e. not wrapped in parens/brackets)
 
 
-unary_chain_prependers = {
-    Operator_t: lambda t: t.op in unary_prefix_operators,
-}
-
-#only postifx unary operators are allowed
-unary_chain_extenders = {
-    Operator_t: lambda t: t.op in unary_postfix_operators,
-}
-
-binary_chain_extenders = {
-    Juxtapose_t: None,
-    Operator_t: lambda t: t.op in binary_operators,
-    ShiftOperator_t: None,
-    Comma_t: None, 
-}
-
-def match_single(token:Token, group:dict[type, None|Callable]) -> bool:
-    cls = token.__class__
-    return cls in group and (group[cls] is None or group[cls](token))
-
-chain_atoms = {
-    Identifier_t,
-    Integer_t,
-    BasedNumber_t,
-    RawString_t,
-    String_t,
-    Block_t,
-    TypeParam_t,
-    Hashtag_t,
-    DotDot_t,
-}
 
 #TODO: handle context, namely blocks based on what the left/right brackets are, since some chains are only valid in certain contexts
 def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
