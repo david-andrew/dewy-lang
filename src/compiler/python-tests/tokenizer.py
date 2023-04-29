@@ -22,6 +22,7 @@ traceback.install(show_locals=True)
         2. prefer longest matches
         3. prefer higher precedence
         4. error
+- make all tokens keep the source they come from (for error reporting/keeping track of row/col of the token)
 """
 
 
@@ -155,7 +156,12 @@ class ShiftOperator_t(Token):
         return f"<ShiftOperator: `{self.op}`>"
 
 class Comma_t(Token):
-    def __init__(self, _): ...
+    def __init__(self, src:str):
+        self.src = src
+
+class DotDot_t(Token):
+    def __init__(self, src:str):
+        self.src = src
 
 
     
@@ -165,7 +171,7 @@ class Comma_t(Token):
 # each row is a list of token types that are confusable in their precedence order. e.g. [Keyword, Unit, Identifier] means Keyword > Unit > Identifier
 # only confusable token classes need to be included in the table
 precedence_table = [
-    [Keyword_t, Operator_t, Identifier_t],
+    [Keyword_t, Operator_t, DotDot_t, Identifier_t],
 ]
 precedence = {cls: len(row)-i for row in precedence_table for i, cls in enumerate(row)}
 
@@ -179,19 +185,23 @@ pair_opening_delims = '{(['
 pair_closing_delims = '})]'
 
 #list of all operators sorted from longest to shortest
-operators = sorted(
-    [
+unary_prefix_operators = {'+', '-', '*', '/', 'not', '@', '...'}
+unary_postfix_operators = {'?', '...'}
+binary_operators = {
         '+', '-', '*', '/', '%', '^',
         '=?', '>?', '<?', '>=?', '<=?', 'in?', '<=>',
         '|', '&',
-        'not', 'and', 'or', 'nand', 'nor', 'xor', 'xnor', '??', '?',
+        'and', 'or', 'nand', 'nor', 'xor', 'xnor', '??',
         '=', ':=', 'as',
-        '@', '@?',
+        '@?',
         '|>', '=>',
         '->', '<->', '<-',
-        '.', '..', '...', ':'
-    ], 
-    key=len, 
+        '.', ':'
+}
+# expression_operators = {'..'} #operators that can be an expression on their own
+operators = sorted(
+    [*(unary_prefix_operators | unary_postfix_operators | binary_operators)],
+    key=len,
     reverse=True
 )
 #TODO: may need to separate |> from regular operators since it may confuse type param
@@ -590,6 +600,14 @@ def eat_comma(src:str) -> int|None:
     eat a comma, return the number of characters eaten
     """
     return 1 if src.startswith(',') else None
+
+
+@peek_eat(DotDot_t)
+def eat_dotdot(src:str) -> int|None:
+    """
+    eat a dotdot, return the number of characters eaten
+    """
+    return 2 if src.startswith('..') else None
 
 
 
