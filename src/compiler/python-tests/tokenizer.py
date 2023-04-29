@@ -26,18 +26,44 @@ traceback.install(show_locals=True)
 """
 
 
+def wrap_coords(method:Callable):
+    def wrapped_method(self, *args, **kwargs):
+        result = method(self, *args, **kwargs)
+        if isinstance(result, str) and len(result) == len(self):
+            custom_str = CoordString(result)
+            custom_str.row_col_map = self.row_col_map
+            return custom_str
+        else:
+            raise ValueError("coord_string_method must return a string of the same length as the original string")
+        return result
+
+    return wrapped_method
+
+def fail_coords(method:Callable):
+    def wrapped_method(self, *args, **kwargs):
+        raise ValueError(f"coord_string_method {method} cannot be called on a CoordString, as it will not return a CoordString")
+    return wrapped_method
+
+
 class CoordString(str):
     """
     Drop-in replacement for str that keeps track of the coordinates of each character in the string
-    """
-    def __init__(self, *args, **kwargs):
-        super().__init__()
-        self.row_col_map = self._generate_row_col_map()
 
-    def _generate_row_col_map(self):
+    Identical to normal strings, but attaches the `row_col(i:int) -> tuple[int, int]` method
+    which returns the (row, column) of the character at index i
+
+    Args:
+        anchor (tuple[int,int], optional): The row and column of the top left of the string. Defaults to (0, 0).
+    """
+    def __new__(cls, *args, anchor:tuple[int,int]=(0, 0), **kwargs):
+        self = super().__new__(cls, *args, **kwargs)
+        row, col = anchor
+        self.row_col_map = self._generate_row_col_map(row, col)
+
+        return self
+
+    def _generate_row_col_map(self, row=0, col=0):
         row_col_map = []
-        row = 0
-        col = 0
         for c in self:
             if c == '\n':
                 row_col_map.append((row, col))
@@ -59,6 +85,57 @@ class CoordString(str):
 
     def row_col(self, index):
         return self.row_col_map[index]
+
+    #wrappers for string methods that should return CoordStrings
+    @wrap_coords
+    def capitalize(self): return super().capitalize()
+
+    @wrap_coords
+    def casefold(self): return super().casefold()
+
+    @wrap_coords
+    def lower(self): return super().lower()
+
+    @wrap_coords
+    def upper(self): return super().upper()
+
+    @wrap_coords
+    def swapcase(self): return super().swapcase()
+
+    @wrap_coords
+    def title(self): return super().title()
+
+    @wrap_coords
+    def translate(self, table): return super().translate(table)
+
+    @wrap_coords
+    def replace(self, old, new, count=-1): return super().replace(old, new, count)
+
+    #TODO: some of these could be wrapped
+    @fail_coords
+    def center(self, *args, **kwargs): ...
+
+    @fail_coords
+    def expandtabs(self, *args, **kwargs): ...
+
+    @fail_coords
+    def ljust(self, *args, **kwargs): ...
+
+    @fail_coords
+    def lstrip(self, *args, **kwargs): ...
+
+    @fail_coords
+    def rstrip(self, *args, **kwargs): ...
+
+    @fail_coords
+    def strip(self, *args, **kwargs): ...
+
+    @fail_coords
+    def zfill(self, *args, **kwargs): ...
+
+
+
+
 
 #TODO: maybe make adding this string with other regular str illegal
 
@@ -797,7 +874,7 @@ def tokenize(src:str) -> list[Token]:
     src = f'{{\n{src}\n}}'
 
     #convert string to a coordinate string (for keeping track of row/col numbers)
-    src = CoordString(src)
+    src = CoordString(src, anchor=(-1, 0))
 
     # eat tokens for a block
     tracker = EatTracker()
