@@ -172,3 +172,10 @@ inc{10}
 (inc){10}
 {inc}(10)
 ```
+
+
+
+## How to handle unit dimensionality
+see: 
+* https://www.youtube.com/watch?v=bI-FS7aZJpY
+* https://www.youtube.com/watch?v=KmfdeWd0RMk
