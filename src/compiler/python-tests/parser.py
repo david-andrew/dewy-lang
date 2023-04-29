@@ -85,6 +85,12 @@ import pdb
 #    -> llvm: convert ast to ssa form, then generate llvm ir from ssa form
 
 
+#expression chains
+# build chain one token at a time, decide if it is part of the current expression chain
+# once chain is built, split by lowest precedence operator (kept track of during chain building)
+# create the node for the operator, and semi-recurse process on the left and right halves 
+#  - (the chain already exists, just need to find the lowest precedence operator)
+
 
 
 valid_brace_pairs = {
@@ -257,109 +263,6 @@ def parse(tokens:list[Token]) -> AST:
     pdb.set_trace()
     return ast
     
-
-
-
-
-
-#expression chains
-# build chain one token at a time, decide if it is part of the current expression chain
-# once chain is built, split by lowest precedence operator (kept track of during chain building)
-# create the node for the operator, and semi-recurse process on the left and right halves 
-#  - (the chain already exists, just need to find the lowest precedence operator)
-
-
-# # TODO: these should include an optional validator function that either runs after a candidate was successful (or perhaps after each token that passes...)
-# expression_templates: list[tuple[type, list[type]]] = [
-#     (None, (Identifier_t,)),
-#     (None, (Integer_t,)),
-#     (None, (BasedNumber_t,)),
-#     (None, (String_t,)),
-#     (Call, (..., Block_t)),
-# ]
-
-
-
-# def progress_chain(token:Token, candidate:tuple[int, type, list[type]]) -> tuple[int, type, list[type]]|None:
-#     #unpack candidate
-#     i, ast_type, template = candidate
-
-#     assert i < len(template), f"ERROR: progress_chain called on a completed chain: {candidate}"
-    
-#     if token.__class__ is template[i]:
-#         return (i+1, ast_type, template)
-
-#     return None
-
-# def get_initial_candidates(current_chain:list) -> list[tuple[type, list[type]]]:
-#     candidates = []
-    
-#     for ast_type, template in expression_templates:
-#         if template[0] is ... and len(current_chain) > 0:
-#             candidates.append((1, ast_type, template))
-#         elif template[0] is not ...:
-#             candidates.append((0, ast_type, template))
-#     return candidates
-
-
-# def parse(tokens:list[Token]) -> AST:
-#     """
-#     parse a list of tokens into an AST
-#     """
-    
-#     chains = []
-#     current_chain = []
-#     prev_was_whitespace = False
-#     while len(tokens) > 0:
-        
-#         chunk_tokens = []
-#         #TODO: lowest_precedence_op = ... # or just keep track of the indices of all operators in the chain?
-#         candidates = get_initial_candidates(current_chain)
-        
-#         while len(tokens) > 0:
-
-#             #skip leading whitespace
-#             if isinstance(tokens[0], WhiteSpace_t):
-#                 tokens = tokens[1:]
-#                 prev_was_whitespace = True
-#                 continue
-
-#             token, tokens = tokens[0], tokens[1:]
-#             chunk_tokens.append(token)
-#             print(f'token: {token}')
-#             print(f'chunk_tokens: {chunk_tokens}')
-#             print(f'current_chain: {current_chain}')
-#             print(f'candidates: {candidates}')
-
-#             #progress all candidates and remove any that are None
-#             candidates = [progress_chain(token, c) for c in candidates]
-#             candidates = [c for c in candidates if c is not None]
-
-#             #separate out completed candidates
-#             completed = [c for c in candidates if c[0] == len(c[2])]
-#             candidates = [c for c in candidates if c[0] != len(c[2])]
-
-#             #validate any completed candidates
-#             #TODO
-
-#             assert len(completed) <= 1, f"ERROR: multiple candidates completed at the same time: {completed}"
-
-#             # indicate that the previous token was not whitespace
-#             prev_was_whitespace = False
-
-#             if len(completed) == 1:
-#                 #add the completed candidate to the chain
-#                 i, ast_type, template = completed[0]
-#                 current_chain.append((ast_type, template, chunk_tokens))
-#                 break
-            
-#             if len(candidates) == 0:
-#                 #no candidates left, break out of the loop
-#                 #TODO: perhaps this means the end of the current chain (but more tokens/chains follow)?
-#                 raise ValueError(f"ERROR: no candidates left: {chunk_tokens=}")
-            
-#     pdb.set_trace()
-#     ...
 
 
 
