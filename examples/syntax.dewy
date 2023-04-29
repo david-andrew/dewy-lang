@@ -173,13 +173,16 @@ p = s:string => [
 p"this/is/a/file/path.ext"
 
 //other prefixes
-re"[^i*&2@]"                    // regex literal
-t'my_token'                     //token literal
-r'this is a raw string'         //raw string. technically handled during tokenizing, there is no r function
-dewy'printl("Hello, World!")'   //dewy source code literal.
+re"[^i*&2@]"                            // regex literal
+t'my_token'                             //token literal
+r'this is a raw string'                 //raw string. technically handled during tokenizing, there is no r function
+(dewy)r'''printl("Hello, World!")'''    //dewy source code literal. uses raw string so that we don't have to worry about {}. TBD how to handle allowing '' inside the string literal since it's the delimiter...
 
 ipa"ɛt vɔkavit dɛus aɾidam tɛɾam kɔngɾɛgatsiɔnɛskwɛ akwaɾum apɛlavit maɾia ɛt vidit dɛus kwɔd ɛsɛt bɔnum" //international phonetic alphabet literal
-apl"life ← {⊃1 ⍵ ∨.∧ 3 4 = +/ +⌿ ¯1 0 1 ∘.⊖ ¯1 0 1 ⌽¨ ⊂⍵}"  //apl expression literal
+(apl)r"life ← {⊃1 ⍵ ∨.∧ 3 4 = +/ +⌿ ¯1 0 1 ∘.⊖ ¯1 0 1 ⌽¨ ⊂⍵}"  //apl expression literal
+
+'''this is a regular string with triple quotes'''
+"""this is a regular string with triple quotes"""
 
 ///////////// object prefixes ////////////////
 //doubly linked list

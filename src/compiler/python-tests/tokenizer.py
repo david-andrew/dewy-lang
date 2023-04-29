@@ -93,7 +93,7 @@ class Hashtag_t(Token):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
-        return f"<Hashtag: #{self.src}>"
+        return f"<Hashtag: {self.src}>"
 
 class Block_t(Token):
     def __init__(self, body:list[Token], left:str, right:str):
