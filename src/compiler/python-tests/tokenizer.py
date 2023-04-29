@@ -87,6 +87,22 @@ class CoordString(str):
         return self.row_col_map[index]
 
     #wrappers for string methods that should return CoordStrings
+    def lstrip(self, *args, **kwargs):
+        result = super().lstrip(*args, **kwargs)
+        custom_str = CoordString(result)
+        custom_str.row_col_map = self.row_col_map[len(self)-len(result):]
+        return custom_str
+
+    def rstrip(self, *args, **kwargs):
+        result = super().rstrip(*args, **kwargs)
+        custom_str = CoordString(result)
+        custom_str.row_col_map = self.row_col_map[:len(result)]
+        return custom_str
+    
+    def strip(self, *args, **kwargs):
+        return self.lstrip(*args, **kwargs).rstrip(*args, **kwargs)
+
+
     @wrap_coords
     def capitalize(self): return super().capitalize()
 
@@ -111,7 +127,6 @@ class CoordString(str):
     @wrap_coords
     def replace(self, old, new, count=-1): return super().replace(old, new, count)
 
-    #TODO: some of these could be wrapped
     @fail_coords
     def center(self, *args, **kwargs): ...
 
@@ -120,15 +135,6 @@ class CoordString(str):
 
     @fail_coords
     def ljust(self, *args, **kwargs): ...
-
-    @fail_coords
-    def lstrip(self, *args, **kwargs): ...
-
-    @fail_coords
-    def rstrip(self, *args, **kwargs): ...
-
-    @fail_coords
-    def strip(self, *args, **kwargs): ...
 
     @fail_coords
     def zfill(self, *args, **kwargs): ...
