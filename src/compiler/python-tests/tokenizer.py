@@ -198,7 +198,6 @@ binary_operators = {
         '->', '<->', '<-',
         '.', ':'
 }
-# expression_operators = {'..'} #operators that can be an expression on their own
 operators = sorted(
     [*(unary_prefix_operators | unary_postfix_operators | binary_operators)],
     key=len,
@@ -457,23 +456,30 @@ def eat_string(src:str) -> tuple[int, String_t] | None:
 
     returns the number of characters eaten and an instance of the String token, containing the list of tokens/string chunks/escape sequences
     """
-    if not src[0] in '"\'':
+    
+    #determine the starting delimiter, or exit if there is none
+    if src.startswith('"""') or src.startswith("'''"):
+        delim = src[:3]
+        i = 3
+    elif src.startswith('"') or src.startswith("'"):
+        delim = src[0]
+        i = 1
+    else:
         return None
     
-    delim = src[0]
-    i = 1
-    chunk_start = 1
+    #keep track of chunks, and the start index of the current chunk
+    chunk_start = i
     body = []
 
-    #TODO: this doesn't add the string chunks...
-    while i < len(src) and src[i] != delim:
+    # add character sequences, escapes, and block sections until the end of the string
+    while i < len(src) and not src[i:].startswith(delim):
         
         #regular characters
         if src[i] not in '\\{':
             i += 1
             continue
 
-        #add the previous chunk before handling the escape/intepolation block
+        #add the previous chunk before handling the escape/interpolation block
         if i > chunk_start:
             body.append(src[chunk_start:i])
 
@@ -504,34 +510,38 @@ def eat_string(src:str) -> tuple[int, String_t] | None:
     if i > chunk_start:
         body.append(src[chunk_start:i])
     
-    return i + 1, String_t(body)
+    return i + len(delim), String_t(body)
 
-#random note: if you for some reason needed to do a unicode escape followed by a character that happens to be a hex digit, you could do \u##{}#, where the empty block {} breaks the hex digit sequence
 
 
 @peek_eat(RawString_t)
 def eat_raw_string(src:str) -> int|None:
     """
-    raw strings start with either r' or r", and are terminated by the matching quote delimiter
+    raw strings start with `r`, followed by a delimiter, one of ' " ''' or \"""
     raw strings may contain any character except the delimiter.
     Escapes and interpolations are ignored.
     The string ends at the first instance of the delimiter
     """
     if not src.startswith('r'):
         return None
+    i = 1
 
-    delim = src[1]
-    if delim not in '"\'':
+    if src[i:].startswith('"""') or src[i:].startswith("'''"):
+        delim = src[i:i+3]
+        i += 3
+    elif src[i:].startswith('"') or src[i:].startswith("'"):
+        delim = src[i]
+        i += 1
+    else:
         return None
 
-    i = 2
-    while i < len(src) and src[i] != delim:
+    while i < len(src) and not src[i:].startswith(delim):
         i += 1
 
     if i == len(src):
         raise ValueError("unterminated raw string")
 
-    return i + 1
+    return i + len(delim)
 
 
 @peek_eat(Integer_t)
