@@ -260,6 +260,7 @@ def parse(tokens:list[Token]) -> AST:
         chain, tokens = get_next_chain(tokens)
         chains.append(chain)
 
+    #TODO: need to recurse somewhere and handle interiors of blocks...
     pdb.set_trace()
     return ast
     

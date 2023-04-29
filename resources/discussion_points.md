@@ -6,13 +6,13 @@ Here will contain all features that I have aspects I'm undecided on (and any res
 need to decide if all loops should be lazy, or there should be an explicit `lazy` keyword used instead of `loop` (or could be lazy by default and have an `eager` loop keyword)
 
 
-## bind expressions or statements [DONE: bind is a statement]
+## bind expressions or statements [DONE: bind is an expression that returns void]
 need to decide if bind expressions e.g. `x = 1` express values that are capturable. e.g. in a list comprehension, you might be doing work
 ```
 mylist = [
     a = 2
     loop i in [3, 5..)
-        if somthing(i + a)
+        if something(i + a)
             i
 ]
 ```
@@ -31,6 +31,8 @@ captured_bind // expresses `x=y`. what does this even do???
 ```
 
 And then there's the `:=` operator which is a proper bind expression, but it returns the value assigned, rather than what I was describing above where the bind action itself would have been returned.
+
+Actually on further thought, I think bind should still be an expression, it's just that the bind expression returns `void`, thus even if it is in a context that captures expressions, it doesn't lead to anything. This way, we keep the "Everything is an expression" mantra.
 
 
 
@@ -150,3 +152,23 @@ my_tensor[..2,0 .. () [0 4 5]] // should return a 4D tensor of shape [3 5 1 3]
     ```
 
     i.e. each space separated thing accesses that dimension. If you want to access multiple elements in a particular dimension, you need to wrap them up so that they are a single expression in the indexing block
+
+
+
+
+
+## Juxtaposition for everything
+- e.g. a function call could literally be `<fn><jux><value>` if the type of id was a function. Technically this leads to an interesting syntax (that I think stylistically should be discouraged)
+```
+inc = i:int => i+1
+
+// all of these are identical, and would be parsed as function calls
+inc(10)
+(inc)10
+(inc)(10)
+inc{10}
+{inc}10
+{inc}{10}
+(inc){10}
+{inc}(10)
+```
