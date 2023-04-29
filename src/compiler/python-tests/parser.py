@@ -42,20 +42,47 @@ from dewy import (
     RangeIter,
     Vector,
 )
-from tokenizer import ( tokenize, tprint, traverse_tokens,
+from tokenizer import ( tokenize, tprint, traverse_tokens,                       
+    unary_prefix_operators,
+    unary_postfix_operators,
+    binary_operators,
+    
     Token, 
+
     WhiteSpace_t,
-    Juxtapose_t,
+
+    Escape_t,
+
     Identifier_t,
     Block_t,
     TypeParam_t,
+    RawString_t,
     String_t,
     Integer_t,
     BasedNumber_t,
+    Hashtag_t,
+    DotDot_t,
 
+    Keyword_t,
+
+    Juxtapose_t,
+    Operator_t,
+    ShiftOperator_t,
+    Comma_t,
 )
 
 import pdb
+
+
+#compiler pipeline steps:
+# 1. tokenize
+# 2. validate block braces
+# 3. invert whitespace to juxtapose
+# 4. create program ast from tokens
+# 5. validation (what kind?). type checking. valid operations. etc.
+# 6. high level optimizations/transformations
+# 7. generate code via a backend (e.g. llvm, c, python)
+#    -> llvm: convert ast to ssa form, then generate llvm ir from ssa form
 
 
 
@@ -115,6 +142,123 @@ def invert_whitespace(tokens: list[Token]) -> None:
         i += 1
 
 
+#TODO: determining type of a block
+from enum import Enum, auto
+class BlockType(Enum):
+    Range = auto()
+    Scope = auto()
+    Group = auto()
+    Args = auto()
+    Call = auto()
+    Index = auto()
+    # others?
+def determine_block_type(block:Block_t) -> BlockType: ...
+    #if contains .., and left/right are any of [( ]), should be a range
+    #if contains any commas, and left/right are (), should be a function call or args...this maybe overlaps a bit with group...
+    # - for args, only certain expressions are valid
+    # - for call, any comma separated expressions are valid. probably require ranges to be wrapped in parens/brackets?
+    #if left and right are {}, should be a scope
+    #if left and right are (), and tbd other stuff, should be a group
+    #if left and right are [], and tbd other stuff, should be an index. Index is the only time that ranges could possibly be naked (i.e. not wrapped in parens/brackets)
+
+
+unary_chain_prependers = {
+    Operator_t: lambda t: t.op in unary_prefix_operators,
+}
+
+#only postifx unary operators are allowed
+unary_chain_extenders = {
+    Operator_t: lambda t: t.op in unary_postfix_operators,
+}
+
+binary_chain_extenders = {
+    Juxtapose_t: None,
+    Operator_t: lambda t: t.op in binary_operators,
+    ShiftOperator_t: None,
+    Comma_t: None, 
+}
+
+def match_single(token:Token, group:dict[type, None|Callable]) -> bool:
+    cls = token.__class__
+    return cls in group and (group[cls] is None or group[cls](token))
+
+chain_atoms = {
+    Identifier_t,
+    Integer_t,
+    BasedNumber_t,
+    RawString_t,
+    String_t,
+    Block_t,
+    TypeParam_t,
+    Hashtag_t,
+    DotDot_t,
+}
+
+#TODO: handle context, namely blocks based on what the left/right brackets are, since some chains are only valid in certain contexts
+def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
+    """
+    grab the next single expression chain of tokens from the given list of tokens
+
+    Args:
+        tokens (list[Token]): list of tokens to grab the next chain from
+
+    Returns:
+        next, rest (list[Token], list[Token]): the next chain of tokens, and the remaining tokens
+    """
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        cls = token.__class__
+        
+        
+        #TODO: replace with: if empty chain, or current is binary op, while next is unary prepender, keep going until we have an atom
+        #if chain is empty, is token a chain starter. else error.
+        if i == 0:
+            #TODO: can also be a unary_chain_prepender
+            if cls not in chain_atoms:
+                raise ValueError(f"ERROR: unexpected token at start of chain: {token=}")
+            i += 1
+            continue
+        
+        if match_single(token, unary_chain_extenders): #cls in unary_chain_extenders:
+            i += 1
+            continue
+
+        #check if the token after is a valid token type to be
+        if match_single(token, binary_chain_extenders): #token.__class__ in binary_chain_extenders:
+            assert i+1 < len(tokens), f"ERROR: unexpected end of tokens after binary extender: {token=}"
+            token = tokens[i+1]
+            cls = token.__class__
+            if cls not in chain_atoms:
+                raise ValueError(f"ERROR: unexpected token after binary extender: {token=}")
+            i += 2
+            continue
+
+        #TODO: handling of keyword chains...
+
+        #TODO: handling opchaining. basically can be a binary operator followed by any number of unary operators, followed by an atom
+
+        
+        #else end of chain
+        break
+        
+    return tokens[:i], tokens[i:]
+
+
+def parse(tokens:list[Token]) -> AST:
+    """
+    parse a list of tokens into an AST
+    """
+    chains = []
+    while len(tokens) > 0:
+        chain, tokens = get_next_chain(tokens)
+        chains.append(chain)
+
+    pdb.set_trace()
+    return ast
+    
+
+
 
 
 
@@ -125,97 +269,97 @@ def invert_whitespace(tokens: list[Token]) -> None:
 #  - (the chain already exists, just need to find the lowest precedence operator)
 
 
-# TODO: these should include an optional validator function that either runs after a candidate was successful (or perhaps after each token that passes...)
-expression_templates: list[tuple[type, list[type]]] = [
-    (None, (Identifier_t,)),
-    (None, (Integer_t,)),
-    (None, (BasedNumber_t,)),
-    (None, (String_t,)),
-    (Call, (..., Block_t)),
-]
+# # TODO: these should include an optional validator function that either runs after a candidate was successful (or perhaps after each token that passes...)
+# expression_templates: list[tuple[type, list[type]]] = [
+#     (None, (Identifier_t,)),
+#     (None, (Integer_t,)),
+#     (None, (BasedNumber_t,)),
+#     (None, (String_t,)),
+#     (Call, (..., Block_t)),
+# ]
 
 
 
-def progress_chain(token:Token, candidate:tuple[int, type, list[type]]) -> tuple[int, type, list[type]]|None:
-    #unpack candidate
-    i, ast_type, template = candidate
+# def progress_chain(token:Token, candidate:tuple[int, type, list[type]]) -> tuple[int, type, list[type]]|None:
+#     #unpack candidate
+#     i, ast_type, template = candidate
 
-    assert i < len(template), f"ERROR: progress_chain called on a completed chain: {candidate}"
+#     assert i < len(template), f"ERROR: progress_chain called on a completed chain: {candidate}"
     
-    if token.__class__ is template[i]:
-        return (i+1, ast_type, template)
+#     if token.__class__ is template[i]:
+#         return (i+1, ast_type, template)
 
-    return None
+#     return None
 
-def get_initial_candidates(current_chain:list) -> list[tuple[type, list[type]]]:
-    candidates = []
+# def get_initial_candidates(current_chain:list) -> list[tuple[type, list[type]]]:
+#     candidates = []
     
-    for ast_type, template in expression_templates:
-        if template[0] is ... and len(current_chain) > 0:
-            candidates.append((1, ast_type, template))
-        elif template[0] is not ...:
-            candidates.append((0, ast_type, template))
-    return candidates
+#     for ast_type, template in expression_templates:
+#         if template[0] is ... and len(current_chain) > 0:
+#             candidates.append((1, ast_type, template))
+#         elif template[0] is not ...:
+#             candidates.append((0, ast_type, template))
+#     return candidates
 
 
-def parse(tokens:list[Token]) -> AST:
-    """
-    parse a list of tokens into an AST
-    """
+# def parse(tokens:list[Token]) -> AST:
+#     """
+#     parse a list of tokens into an AST
+#     """
     
-    chains = []
-    current_chain = []
-    prev_was_whitespace = False
-    while len(tokens) > 0:
+#     chains = []
+#     current_chain = []
+#     prev_was_whitespace = False
+#     while len(tokens) > 0:
         
-        chunk_tokens = []
-        #TODO: lowest_precedence_op = ... # or just keep track of the indices of all operators in the chain?
-        candidates = get_initial_candidates(current_chain)
+#         chunk_tokens = []
+#         #TODO: lowest_precedence_op = ... # or just keep track of the indices of all operators in the chain?
+#         candidates = get_initial_candidates(current_chain)
         
-        while len(tokens) > 0:
+#         while len(tokens) > 0:
 
-            #skip leading whitespace
-            if isinstance(tokens[0], WhiteSpace_t):
-                tokens = tokens[1:]
-                prev_was_whitespace = True
-                continue
+#             #skip leading whitespace
+#             if isinstance(tokens[0], WhiteSpace_t):
+#                 tokens = tokens[1:]
+#                 prev_was_whitespace = True
+#                 continue
 
-            token, tokens = tokens[0], tokens[1:]
-            chunk_tokens.append(token)
-            print(f'token: {token}')
-            print(f'chunk_tokens: {chunk_tokens}')
-            print(f'current_chain: {current_chain}')
-            print(f'candidates: {candidates}')
+#             token, tokens = tokens[0], tokens[1:]
+#             chunk_tokens.append(token)
+#             print(f'token: {token}')
+#             print(f'chunk_tokens: {chunk_tokens}')
+#             print(f'current_chain: {current_chain}')
+#             print(f'candidates: {candidates}')
 
-            #progress all candidates and remove any that are None
-            candidates = [progress_chain(token, c) for c in candidates]
-            candidates = [c for c in candidates if c is not None]
+#             #progress all candidates and remove any that are None
+#             candidates = [progress_chain(token, c) for c in candidates]
+#             candidates = [c for c in candidates if c is not None]
 
-            #separate out completed candidates
-            completed = [c for c in candidates if c[0] == len(c[2])]
-            candidates = [c for c in candidates if c[0] != len(c[2])]
+#             #separate out completed candidates
+#             completed = [c for c in candidates if c[0] == len(c[2])]
+#             candidates = [c for c in candidates if c[0] != len(c[2])]
 
-            #validate any completed candidates
-            #TODO
+#             #validate any completed candidates
+#             #TODO
 
-            assert len(completed) <= 1, f"ERROR: multiple candidates completed at the same time: {completed}"
+#             assert len(completed) <= 1, f"ERROR: multiple candidates completed at the same time: {completed}"
 
-            # indicate that the previous token was not whitespace
-            prev_was_whitespace = False
+#             # indicate that the previous token was not whitespace
+#             prev_was_whitespace = False
 
-            if len(completed) == 1:
-                #add the completed candidate to the chain
-                i, ast_type, template = completed[0]
-                current_chain.append((ast_type, template, chunk_tokens))
-                break
+#             if len(completed) == 1:
+#                 #add the completed candidate to the chain
+#                 i, ast_type, template = completed[0]
+#                 current_chain.append((ast_type, template, chunk_tokens))
+#                 break
             
-            if len(candidates) == 0:
-                #no candidates left, break out of the loop
-                #TODO: perhaps this means the end of the current chain (but more tokens/chains follow)?
-                raise ValueError(f"ERROR: no candidates left: {chunk_tokens=}")
+#             if len(candidates) == 0:
+#                 #no candidates left, break out of the loop
+#                 #TODO: perhaps this means the end of the current chain (but more tokens/chains follow)?
+#                 raise ValueError(f"ERROR: no candidates left: {chunk_tokens=}")
             
-    pdb.set_trace()
-    ...
+#     pdb.set_trace()
+#     ...
 
 
 
@@ -245,16 +389,12 @@ def test():
     # ensure that all blocks have valid open/close pairs
     validate_block_braces(tokens)
 
-
-    # in between tokenizing and parsing
+    # remove whitespace, and insert juxtapose tokens
     invert_whitespace(tokens)
-    tprint(Block_t(left='{', right='}', body=tokens))
 
-
-
-
-    # ast = parse(tokens)
-    # print(f'parsed ast: {ast}')
+    # parse tokens into an AST
+    ast = parse(tokens)
+    print(f'parsed ast: {ast}')
 
 
 
