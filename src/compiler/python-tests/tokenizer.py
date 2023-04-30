@@ -83,7 +83,7 @@ class CoordString(str):
             return custom_str
         return super().__getitem__(key)
 
-    def row_col(self, index):
+    def loc(self, index):
         return self.row_col_map[index]
 
     #wrappers for string methods that should return CoordStrings

@@ -225,3 +225,40 @@ result = a(dot)b
 see: 
 * https://www.youtube.com/watch?v=bI-FS7aZJpY
 * https://www.youtube.com/watch?v=KmfdeWd0RMk
+
+
+
+## No need for zip function
+as a consequence of iterators expressing a boolean value , I think it implies a straightforward way to zip together 2 sequences
+```
+A = [1 2 3]
+B = [4 5 6 7 8]
+pairs = [
+    loop i in A and j in B
+        [i j]
+]
+
+//pairs is [[1 4] [2 5] [3 6]]
+```
+
+A cool consequence of this is you can change the logic operator and get a different behavior
+```
+pairs = [
+    loop i in A or j in B
+        [i j]
+]
+
+//pairs is [[1 4] [2 5] [3 6] [undefined 7] [undefined 8]]
+```
+
+certainly if you glue the two sequences together, you could do the whole zip process, and unpack as two variables
+```
+A = [1 2 3]
+B = [4 5 6]
+sums = [
+    loop i, j in [A; B]`
+        i + j
+]
+
+//sums is [5 7 9]
+```
