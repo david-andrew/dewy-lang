@@ -100,6 +100,15 @@ row_vec = [
 ]
 ```
 
+actually perhaps instead of `\`, we could use `,`, since it makes things into tuples, so a tuple directly inside a vector would be interpreted as a row vector. e.g.
+```
+row_vec = [
+    1,
+    2,
+    3
+]
+```
+
 
 ## How does multidimensional indexing work? [DONE: each dimension access is separated by spaces. Also ranges may not contain any spaces]
 e.g. if you have this 3D array, how can you index each dimension with a range?
@@ -249,6 +258,12 @@ pairs = [
 ]
 
 //pairs is [[1 4] [2 5] [3 6] [undefined 7] [undefined 8]]
+```
+
+In fact, it makes it trivial to enumerate a list
+```
+loop i in count and v in some_sequence
+    printl[i v]
 ```
 
 certainly if you glue the two sequences together, you could do the whole zip process, and unpack as two variables

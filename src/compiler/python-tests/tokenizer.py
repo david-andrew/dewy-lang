@@ -269,13 +269,13 @@ pair_closing_delims = '})]'
 
 #list of all operators sorted from longest to shortest
 unary_prefix_operators = {'+', '-', '*', '/', 'not', '@', '...'}
-unary_postfix_operators = {'?', '...'}
+unary_postfix_operators = {'?', '...', '`'}
 binary_operators = {
         '+', '-', '*', '/', '%', '^',
         '=?', '>?', '<?', '>=?', '<=?', 'in?', '<=>',
         '|', '&',
         'and', 'or', 'nand', 'nor', 'xor', 'xnor', '??',
-        '=', ':=', 'as',
+        '=', ':=', 'as', 'in', 'transmute',
         '@?',
         '|>', '=>',
         '->', '<->', '<-',
@@ -288,7 +288,7 @@ operators = sorted(
 )
 #TODO: may need to separate |> from regular operators since it may confuse type param
 shift_operators = sorted(['<<', '>>', '<<<', '>>>', '<<<!', '!>>>'], key=len, reverse=True)
-keywords = ['in', 'as', 'loop', 'lazy', 'if', 'else', 'return', 'express', 'transmute']
+keywords = ['loop', 'lazy', 'if', 'else', 'return', 'express']
 
 # note that the prefix is case insensitive, so call .lower() when matching the prefix
 # numbers may have _ as a separator (if _ is not in the set of digits)

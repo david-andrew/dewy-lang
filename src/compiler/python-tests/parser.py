@@ -242,6 +242,7 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
         if i == 0:
             #TODO: can also be a unary_chain_prepender
             if cls not in chain_atoms:
+                pdb.set_trace()
                 raise ValueError(f"ERROR: unexpected token at start of chain: {token=}")
             i += 1
             continue
@@ -271,6 +272,41 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
     return tokens[:i], tokens[i:]
 
 
+
+def split_at_lowest_precedence(tokens:list[Token]) -> tuple[list[Token], Token, list[Token]]:
+    ...
+
+
+def parse_chain(tokens:list[Token]) -> AST:
+    pdb.set_trace()
+    ...
+
+
+
+#TODO:
+# - grouping up keywords + expected chains. perhaps this should be a preparse step, that makes new tokens, Flow_t with their internal groups
+#     if <chain> <chain> (optional else <chain>)
+#     loop <chain> <chain> (optional else <chain>)
+# - split_by_lowest_precedence
+# - pattern matching chains e.g. <id> <jux> <str> -> call(id, str), etc. probably handle by split by lowest precedence...
+# - parse chain into AST
+# - parsing process. each chain -> AST, all wrapped up in a block
+# - determining what type a block is based on its contents. especially tuples?
+# - stripping parenthesis off of groups (probably only when handling that token -> AST)
+# - initially building the AST without type info, and then making a typed AST from that? e.g. 
+#     <jux>
+#       <id: printl>
+#       <str: 'hello world'>
+#    ----------------------
+#    <call>
+#       <id: printl>
+#       <str: 'hello world'>
+
+
+
+
+
+
 def parse(tokens:list[Token]) -> AST:
     """
     parse a list of tokens into an AST
@@ -284,9 +320,6 @@ def parse(tokens:list[Token]) -> AST:
     pdb.set_trace()
     return ast
     
-
-
-
 
 
 

@@ -558,7 +558,17 @@ class Unpack(AST):
     def __repr__(self):
         return f'Unpack({self.struct}, {self.value})'
 
+class Tuple(AST):
+    """
+    A comma separated list of expressions (not wrapped in parentheses) e.g. 1, 2, 3
+    There is no special in-memory representation of a tuple, it is literally just a const list
+    """
+    def __init__(self, exprs:list[AST]):
+        self.exprs = exprs
 
+    def eval(self, scope:Scope=None):
+        pdb.set_trace()
+    
 
 class Block(AST):
     def __init__(self, exprs:list[AST], newscope:bool=True):
