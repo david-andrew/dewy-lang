@@ -277,3 +277,10 @@ sums = [
 
 //sums is [5 7 9]
 ```
+
+
+
+## Should units be their own token class, or just be pre-existing named identifiers?
+- if ID, then it makes it super easy to add new ones
+- if distinct class, makes it easier to handle how units have somewhat different precedence than other identifiers.
+   e.g. there's the whole `<number> <space> <unit>` construction that I'm not quite sure how to handle without units being their own type
