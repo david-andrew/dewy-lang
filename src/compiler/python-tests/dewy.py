@@ -907,7 +907,7 @@ class Next(AST):
         return f'next({self.iterable})'
 
 class Number(Rangeable):
-    def __init__(self, val):
+    def __init__(self, val:int|float):
         self.val = val
     def eval(self, scope:Scope=None):
         return self
