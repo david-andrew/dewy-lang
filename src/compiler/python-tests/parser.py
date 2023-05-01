@@ -41,6 +41,8 @@ from dewy import (
     Range,
     RangeIter,
     Vector,
+
+    Scope,
 )
 from tokenizer import ( tokenize, tprint, traverse_tokens,                       
     unary_prefix_operators,
@@ -70,6 +72,8 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
     ShiftOperator_t,
     Comma_t,
 )
+
+from utils import based_number_to_int
 
 import pdb
 
@@ -221,6 +225,8 @@ def determine_block_type(block:Block_t) -> BlockType: ...
 
 
 #TODO: handle context, namely blocks based on what the left/right brackets are, since some chains are only valid in certain contexts
+
+#TODO: get next chain needs to recursively call itself to handle conditionals/loops/etc. keyword based syntax
 def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
     """
     grab the next single expression chain of tokens from the given list of tokens
@@ -278,6 +284,31 @@ def split_at_lowest_precedence(tokens:list[Token]) -> tuple[list[Token], Token, 
 
 
 def parse_chain(tokens:list[Token]) -> AST:
+    """
+    Convert a chain of tokens to an AST
+
+    Must be a valid chain as produced by get_next_chain
+    """
+
+    #For now, we're just gonna do some simple pattern matching.
+    match tokens:
+        case [Integer_t(src)]:
+            return Number(int(src))
+        case [BasedNumber_t(src)]:
+            return Number(based_number_to_int(src))
+        case [RawString_t(src)]:
+            pdb.set_trace()
+        case [String_t(body)]:
+            pdb.set_trace()
+        #TODO: lots of other simple cases here
+
+        
+        #Happy path
+        case [Identifier_t(src=str(id)), Juxtapose_t(), String_t(body=[str(string)])]:
+            return Call(id, [String(string)])
+        
+        #TODO: lots of other semi-complex cases here
+
     pdb.set_trace()
     ...
 
@@ -311,14 +342,19 @@ def parse(tokens:list[Token]) -> AST:
     """
     parse a list of tokens into an AST
     """
-    chains = []
+    # chains = []
+    exprs:list[AST] = []
     while len(tokens) > 0:
         chain, tokens = get_next_chain(tokens)
-        chains.append(chain)
+        expr = parse_chain(chain)
+        exprs.append(expr)
 
-    #TODO: need to recurse somewhere and handle interiors of blocks...
-    pdb.set_trace()
-    return ast
+    #TODO: should newscope be true or false? so far this is the outermost block, though in the future it could be nested...
+    #      if it was to be nested though, we'd need to determine what type of block it was...
+    #      perhaps include a newscope flag in the parse signature
+    return Block(exprs, newscope=True)
+
+    
     
 
 
@@ -339,22 +375,27 @@ def test():
         src = f.read()
 
     tokens = tokenize(src)
-    print(f'matched tokens:')
-    tprint(Block_t(left='{', right='}', body=tokens))
-    print('\n\n\n')
+    # print(f'matched tokens:')
+    # tprint(Block_t(left='{', right='}', body=tokens))
+    # print('\n\n\n')
 
     # ensure that all blocks have valid open/close pairs
     validate_block_braces(tokens)
 
     # remove whitespace, and insert juxtapose tokens
     invert_whitespace(tokens)
-    print(f'juxtaposed tokens:')
-    tprint(Block_t(left='{', right='}', body=tokens))
+    # print(f'juxtaposed tokens:')
+    # tprint(Block_t(left='{', right='}', body=tokens))
 
     # parse tokens into an AST
     ast = parse(tokens)
-    print(f'parsed ast: {ast}')
+    # print(f'parsed ast: {ast}')
 
+    #TODO: restructuring, type checking, optimizations, etc.
+
+    # run the program
+    root = Scope.default()
+    ast.eval(root)
 
 
 if __name__ == "__main__":
