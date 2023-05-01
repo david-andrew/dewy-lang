@@ -284,3 +284,14 @@ sums = [
 - if ID, then it makes it super easy to add new ones
 - if distinct class, makes it easier to handle how units have somewhat different precedence than other identifiers.
    e.g. there's the whole `<number> <space> <unit>` construction that I'm not quite sure how to handle without units being their own type
+
+
+
+## should we allow certain string prefix functions to be parsed as raw strings? [probably not]
+e.g. allow `dewy'''if rand > 0.5 { print('hi') } else { print('bye') }'''` to be parsed using the raw string tokenizer, rather than the regular string tokenizer. At present, if you want to use the raw string tokenizer, you'd have to do `(dewy)r"your raw string"`, which is a little clunky. It's hard to say what to do though because there may be instances where you'd want to allow string interpolation, but other instances where the string interpolation would get in the way. 
+
+This could be accomplished, e.g. by having a file or something that list out all of the prefixes that should be parsed that way, and then the raw string tokenizer pulls that list to determine what prefixes count as the beginning of a raw string.
+
+If we allowed specific string function types to be parsed as raw strings, it causes a couple problems:
+- if the function that is the prefix is ever redefined, the tokenizer will not follow the new definition, and in fact, the new function definition won't be applied to the string (unless we're really careful... sounds like a headache)
+- let's say we wanted an interpolated string, there's not an easy syntax to go back
