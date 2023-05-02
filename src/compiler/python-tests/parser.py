@@ -212,6 +212,7 @@ class BlockType(Enum):
     Args = auto()
     Call = auto()
     Index = auto()
+    Void = auto() # perhaps just an empty Group type?
     # others?
 def determine_block_type(block:Block_t) -> BlockType: ...
     #if contains .., and left/right are any of [( ]), should be a range
@@ -292,26 +293,69 @@ def parse_chain(tokens:list[Token]) -> AST:
 
     #For now, we're just gonna do some simple pattern matching.
     match tokens:
-        case [Integer_t(src)]:
+        case [Integer_t(src=str(src))]:
             return Number(int(src))
-        case [BasedNumber_t(src)]:
+        
+        case [BasedNumber_t(src=str(src))]:
             return Number(based_number_to_int(src))
-        case [RawString_t(src)]:
-            pdb.set_trace()
-        case [String_t(body)]:
-            pdb.set_trace()
+        
+        case [RawString_t(body=str(body))]:
+            if body.startswith('r"""') or body.startswith("r'''"):
+                return String(body[4:-3])
+            assert body.startswith('r"') or body.startswith("r'"), f"INTERNAL ERROR: raw string body does not start with r\" or r'. Got {body=}"
+            return String(body[2:-1])
+        
+        case [String_t(body=[str(body)])]:
+            return String(body)
+            ...
         #TODO: lots of other simple cases here
 
         
-        #Happy path
+        #Happy paths
         case [Identifier_t(src=str(id)), Juxtapose_t(), String_t(body=[str(string)])]:
             return Call(id, [String(string)])
         
+        # case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t(left='(', right=')', body=[String_t(body=[str(string)])])]:
+        #     return Call(id, [String(string)])
+        
+        case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t() as block_t]:
+            block = parse_block(block_t)
+            if isinstance(block, (Number,String,IString)):
+                return Call(id, [block])
+            else:
+                pdb.set_trace()
+                ...
+
         #TODO: lots of other semi-complex cases here
 
+    
     pdb.set_trace()
+    raise Exception(f"INTERNAL ERROR: no match for chain: {tokens=}")
     ...
 
+
+
+def parse_block(block:Block_t) -> AST:
+    """
+    Convert a block to an AST
+    """
+
+    match block:
+        case Block_t(left='(', right=')', body=[]):
+            pdb.set_trace()
+            return Void() # or Undefined?
+        case Block_t(left='(', right=')', body=[Identifier_t() | RawString_t() | String_t() | Integer_t() | BasedNumber_t()]):
+            return parse_chain(block.body)
+            # Identifier_t,
+            # Block_t,
+            # TypeParam_t,
+            # RawString_t,
+            # String_t,
+            # Integer_t,
+            # BasedNumber_t,
+            # Hashtag_t,
+            # DotDot_t,
+            pdb.set_trace()
 
 
 #TODO:
