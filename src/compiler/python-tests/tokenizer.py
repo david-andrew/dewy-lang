@@ -164,19 +164,19 @@ class Keyword_t(Token):
     def __init__(self, src:str):
         self.src = src.lower()
     def __repr__(self) -> str:
-        return f"<Keyword: {self.src}>"
+        return f"<Keyword_t: {self.src}>"
 
 class Identifier_t(Token):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
-        return f"<Identifier: {self.src}>"
+        return f"<Identifier_t: {self.src}>"
     
 class Hashtag_t(Token):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
-        return f"<Hashtag: {self.src}>"
+        return f"<Hashtag_t: {self.src}>"
 
 class Block_t(Token):
     def __init__(self, body:list[Token], left:str, right:str):
@@ -185,32 +185,32 @@ class Block_t(Token):
         self.right = right
     def __repr__(self) -> str:
         body_str = ', '.join(repr(token) for token in self.body)
-        return f"<Block: {self.left}{body_str}{self.right}>"
+        return f"<Block_t: {self.left}{body_str}{self.right}>"
     
 class TypeParam_t(Token):
     def __init__(self, body:list[Token]):
         self.body = body
     def __repr__(self) -> str:
         body_str = ', '.join(repr(token) for token in self.body)
-        return f"<TypeParam: `<{body_str}>`>"
+        return f"<TypeParam_t: `<{body_str}>`>"
 
 class Escape_t(Token):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
-        return f"<Escape: {self.src}>"
+        return f"<Escape_t: {self.src}>"
 
 class RawString_t(Token):
     def __init__(self, body:str):
         self.body = body
     def __repr__(self) -> str:
-        return f"<RawString: {self.body}>"
+        return f"<RawString_t: {self.body}>"
 
 class String_t(Token):
     def __init__(self, body:list[str|Escape_t|Block_t]):
         self.body = body
     def __repr__(self) -> str:
-        return f"<String: {self.body}>"
+        return f"<String_t: {self.body}>"
     
 # class Number_t(Token, ABC):...
     
@@ -218,25 +218,25 @@ class Integer_t(Token):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
-        return f"<Integer: {self.src}>"
+        return f"<Integer_t: {self.src}>"
     
 class BasedNumber_t(Token):
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
-        return f"<BasedNumber: {self.src}>"
+        return f"<BasedNumber_t: {self.src}>"
 
 class Operator_t(Token):
     def __init__(self, op:str):
         self.op = op
     def __repr__(self) -> str:
-        return f"<Operator: `{self.op}`>"
+        return f"<Operator_t: `{self.op}`>"
     
 class ShiftOperator_t(Token):
     def __init__(self, op:str):
         self.op = op
     def __repr__(self) -> str:
-        return f"<ShiftOperator: `{self.op}`>"
+        return f"<ShiftOperator_t: `{self.op}`>"
 
 class Comma_t(Token):
     def __init__(self, src:str):
@@ -288,7 +288,7 @@ operators = sorted(
 )
 #TODO: may need to separate |> from regular operators since it may confuse type param
 shift_operators = sorted(['<<', '>>', '<<<', '>>>', '<<<!', '!>>>'], key=len, reverse=True)
-keywords = ['loop', 'lazy', 'if', 'else', 'return', 'express']
+keywords = ['loop', 'lazy', 'if', 'else', 'return', 'express', 'let', 'const']
 
 # note that the prefix is case insensitive, so call .lower() when matching the prefix
 # numbers may have _ as a separator (if _ is not in the set of digits)
