@@ -299,32 +299,47 @@ def parse_chain(tokens:list[Token]) -> AST:
         case [BasedNumber_t(src=str(src))]:
             return Number(based_number_to_int(src))
         
-        case [RawString_t(body=str(body))]:
-            if body.startswith('r"""') or body.startswith("r'''"):
-                return String(body[4:-3])
-            assert body.startswith('r"') or body.startswith("r'"), f"INTERNAL ERROR: raw string body does not start with r\" or r'. Got {body=}"
+        case [RawString_t(body=str(body))] if body.startswith('r"""') or body.startswith("r'''"):
+            return String(body[4:-3])
+        case [RawString_t(body=str(body))] if body.startswith('r"') or body.startswith("r'"):
             return String(body[2:-1])
         
         case [String_t(body=[str(body)])]:
             return String(body)
-            ...
+        case [String_t(body=list(body))]:
+            parts = []
+            for part in body:
+                if isinstance(part, str):
+                    parts.append(String(part))
+                elif isinstance(part, Block_t):
+                    parts.append(parse_block(part))
+                elif isinstance(part, Escape_t):
+                    parts.append(String(part.to_str()))
+                else:
+                    raise ValueError(f"INTERNAL ERROR: unexpected token in string body: {part=}")
+            return IString(parts)
+
+
         #TODO: lots of other simple cases here
 
         
         #Happy paths
-        case [Identifier_t(src=str(id)), Juxtapose_t(), String_t(body=[str(string)])]:
-            return Call(id, [String(string)])
+        case [Identifier_t(src=str(id)), Juxtapose_t(), String_t()]:
+            string = parse_chain(tokens[2:])
+            return Call(id, [string])
         
         # case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t(left='(', right=')', body=[String_t(body=[str(string)])])]:
         #     return Call(id, [String(string)])
         
         case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t() as block_t]:
-            block = parse_block(block_t)
+            block = parse_block([block_t])
             if isinstance(block, (Number,String,IString)):
                 return Call(id, [block])
             else:
                 pdb.set_trace()
                 ...
+
+
 
         #TODO: lots of other semi-complex cases here
 
@@ -342,10 +357,13 @@ def parse_block(block:Block_t) -> AST:
 
     match block:
         case Block_t(left='(', right=')', body=[]):
-            pdb.set_trace()
             return Void() # or Undefined?
-        case Block_t(left='(', right=')', body=[Identifier_t() | RawString_t() | String_t() | Integer_t() | BasedNumber_t()]):
-            return parse_chain(block.body)
+        case Block_t(left='{', right='}', body=[]):
+            return Void() # or Undefined?
+        case Block_t(left='(', right=')', body=[Identifier_t() | RawString_t() | String_t() | Integer_t() | BasedNumber_t()] as body):
+            return parse_chain(body)
+        case Block_t(left='{', right='}', body=[Identifier_t() | RawString_t() | String_t() | Integer_t() | BasedNumber_t()] as body):
+            return parse_chain(body)
             # Identifier_t,
             # Block_t,
             # TypeParam_t,
@@ -355,7 +373,9 @@ def parse_block(block:Block_t) -> AST:
             # BasedNumber_t,
             # Hashtag_t,
             # DotDot_t,
-            pdb.set_trace()
+
+    pdb.set_trace()
+    ...
 
 
 #TODO:
@@ -439,7 +459,8 @@ def test():
 
     # run the program
     root = Scope.default()
-    ast.eval(root)
+    res = ast.eval(root)
+    if res: print(res)
 
 
 if __name__ == "__main__":
