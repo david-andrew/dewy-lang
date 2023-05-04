@@ -75,10 +75,29 @@ class TypeParam_t(Token):
         return f"<TypeParam_t: `<{body_str}>`>"
 
 class Escape_t(Token):
+    escape_map = {
+        '\\n': '\n', '\\r': '\r', '\\t': '\t', '\\b': '\b', '\\f': '\f', '\\v': '\v', '\\a': '\a', '\\0': '\0', '\\\\': '\\'
+    }
     def __init__(self, src:str):
         self.src = src
     def __repr__(self) -> str:
         return f"<Escape_t: {self.src}>"
+    def to_str(self) -> str:
+        """Convert the escape sequence to the character it represents"""
+
+        #unicode escape (may be several characters long)
+        if self.src.startswith('\\U') or self.src.startswith('\\u'):
+            return chr(int(self.src[2:], 16))
+        assert len(self.src) == 2 and self.src[0] == '\\', "internal error. Ill-posed escape sequence"
+
+        #known escape sequence
+        if self.src in self.escape_map:
+            return self.escape_map[self.src]
+
+        #unknown escape sequence (i.e. just replicate the character)
+        return self.src[1]
+
+
 
 class RawString_t(Token):
     def __init__(self, body:str):
@@ -149,7 +168,7 @@ pair_closing_delims = '})]'
 
 #list of all operators sorted from longest to shortest
 unary_prefix_operators = {'+', '-', '*', '/', 'not', '@', '...'}
-unary_postfix_operators = {'?', '...', '`'}
+unary_postfix_operators = {'?', '...', '`', ';'}
 binary_operators = {
         '+', '-', '*', '/', '%', '^',
         '=?', '>?', '<?', '>=?', '<=?', 'in?', '<=>',
