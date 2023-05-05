@@ -382,6 +382,10 @@ def parse_block(block:Block_t) -> AST:
         case Block_t(left='(', right=')', body=[Block_t() as block_t]):
             return parse_block(block_t)
         
+        case Block_t(left='('|'[', right=')'|']', body=[DotDot_t()]):
+            pdb.set_trace()
+            return Range()
+        
         # scope stripping
         case Block_t(left='{', right='}', body=[Block_t() as block_t]):
             return Block([parse_block(block_t)], newscope=True)

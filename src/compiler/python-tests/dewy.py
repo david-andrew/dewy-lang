@@ -956,6 +956,8 @@ class Range(Iterable,Unpackable):
     [first,second..]        // step size is second-first
     [first..last]           // first to last
     [first,second..last]    // first to last, step size is second-first
+    //[first..2ndlast,last] // this is explicitly NOT ALLOWED, as it is covered by the previous case, and can have unintuitive behavior
+    [..2ndlast,last]        // -inf to last, step size is last-penultimate
     [..last]                // -inf to last
     [..]                    // -inf to inf
 
