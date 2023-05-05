@@ -78,6 +78,13 @@ from utils import based_number_to_int
 import pdb
 
 
+
+# [TASKS]
+# - dewy AST stuff:
+#   --> every AST needs to have a .eval_type() function that will determine what type the AST evaluates to
+#   --> TBD. maybe make it so that dewy ASTs can handle juxtapose by themselves, rather than having to figure it out in the parser? or have there be multiple parser passes over the generated AST...
+
+
 #compiler pipeline steps:
 # 1. tokenize
 # 2. validate block braces
@@ -224,6 +231,11 @@ def determine_block_type(block:Block_t) -> BlockType: ...
     #if left and right are [], and tbd other stuff, should be an index. Index is the only time that ranges could possibly be naked (i.e. not wrapped in parens/brackets)
 
 
+#TODO: custom AST nodes for intermediate steps
+class Void: ...
+class Jux: ...
+
+
 
 #TODO: handle context, namely blocks based on what the left/right brackets are, since some chains are only valid in certain contexts
 
@@ -332,7 +344,8 @@ def parse_chain(tokens:list[Token]) -> AST:
         #     return Call(id, [String(string)])
         
         case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t() as block_t]:
-            block = parse_block([block_t])
+            block = parse_block(block_t)
+            #TODO: this really needs to check the type of eval on the block, rather than the raw AST type.
             if isinstance(block, (Number,String,IString)):
                 return Call(id, [block])
             else:
@@ -364,6 +377,14 @@ def parse_block(block:Block_t) -> AST:
             return parse_chain(body)
         case Block_t(left='{', right='}', body=[Identifier_t() | RawString_t() | String_t() | Integer_t() | BasedNumber_t()] as body):
             return parse_chain(body)
+        
+        # parenthesis stripping
+        case Block_t(left='(', right=')', body=[Block_t() as block_t]):
+            return parse_block(block_t)
+        
+        # scope stripping
+        case Block_t(left='{', right='}', body=[Block_t() as block_t]):
+            return Block([parse_block(block_t)], newscope=True)
             # Identifier_t,
             # Block_t,
             # TypeParam_t,
