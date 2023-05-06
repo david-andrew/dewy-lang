@@ -83,7 +83,8 @@ import pdb
 # - dewy AST stuff:
 #   --> every AST needs to have a .eval_type() function that will determine what type the AST evaluates to
 #   --> TBD. maybe make it so that dewy ASTs can handle juxtapose by themselves, rather than having to figure it out in the parser? or have there be multiple parser passes over the generated AST...
-
+# - start parsing simple AST expressions, e.g. expr + expr, expr - expr
+# - more complicated expressions parsed via split by lowest precedence
 
 #compiler pipeline steps:
 # 1. tokenize
@@ -292,7 +293,26 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
 
 
 
-def split_at_lowest_precedence(tokens:list[Token]) -> tuple[list[Token], Token, list[Token]]:
+"""
+precedence:
+[HIGHEST]
+
+<jux call>
+^
+<jux mul>
+/*%
++-
+,            //tuple maker
+..           //range maker. can have size 2 tuples on left/right, or single expressions that evaluate to rangables
+=? and other comparison operators
+=
+if-else
+<seq> (i.e. space)
+[LOWEST]
+"""
+
+
+def lowest_precedence_split(tokens:list[Token]) -> tuple[Token, list[list[Token]]] | None:
     ...
 
 
