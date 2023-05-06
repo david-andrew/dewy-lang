@@ -295,3 +295,47 @@ This could be accomplished, e.g. by having a file or something that list out all
 If we allowed specific string function types to be parsed as raw strings, it causes a couple problems:
 - if the function that is the prefix is ever redefined, the tokenizer will not follow the new definition, and in fact, the new function definition won't be applied to the string (unless we're really careful... sounds like a headache)
 - let's say we wanted an interpolated string, there's not an easy syntax to go back
+
+
+
+## how to handle the fact that juxtapose having two different precedences 
+**[for now, probably start with a jux-unknown during initial parse, and replace with jux-call or jux-multiply in a post parse step when we can check the type of the left/right expressions]**
+depending on if it should be a multiply juxtapose or a call juxtapose, the ^ operator has a precedence in between them, making things confusing.
+
+function call juxtaposition has higher precedence than ^
+```
+sin(x)^2 + cos(x)^2  // => (sin(x))^2 + (cos(x))^2
+```
+
+But we can easily make an identical set of tokens that have a reversed precedence
+```
+sin = 2 cos = 3
+sin(x)^2 + cos(x)^2 // => sin((x)^2) + cos((x)^2) 
+                    // => 2((x)^2) + 3((x)^2)
+```
+
+see also:
+```
+2x^2 + 3x + 4
+2(x)^2 + 3(x) + 4
+```
+
+what's even more messed up is if the type of the identifier is a union between one that is callable, and one that is multipliable, then the precedence gets decided at runtime!
+```
+sin: ((x:float) => float) | float
+cos: ((x:float) => float) | float
+
+sin(x)^2 + cos(x)^2 // undecidable until runtime
+```
+
+Note that the way julia handles it is that if sin/cos are value rather than functions, it is illegal syntax to juxtapose them like
+```
+sin(x)^2 + cos(x)^2
+```
+
+Instead you must put parenthesis around the identifier
+```
+(sin)x^2 + (cos)x^2
+```
+
+TBD what the solution is. Ideally we could parse things that look like calls into calls, and things that don't look like calls into multiplies, but the () get stripped away, and in all cases we're just left with id,jux,id without any parenthesis...
