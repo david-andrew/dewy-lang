@@ -146,6 +146,11 @@ class DotDot_t(Token):
         self.src = src
 
 
+# #TODO: these should probably each be their own class/token, or a single class..
+# these should all be case insensitive
+# reserved_values = ['true', 'false', 'void', 'undefined', 'end'] 
+
+
     
 
 
