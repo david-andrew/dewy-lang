@@ -299,7 +299,9 @@ If we allowed specific string function types to be parsed as raw strings, it cau
 
 
 ## how to handle the fact that juxtapose having two different precedences 
-**[for now, probably start with a jux-unknown during initial parse, and replace with jux-call or jux-multiply in a post parse step when we can check the type of the left/right expressions]**
+~~[for now, probably start with a jux-unknown during initial parse, and replace with jux-call or jux-multiply in a post parse step when we can check the type of the left/right expressions]~~
+
+**[for now, check the (eval result) type of the left and right, and determine if it is a multiply of a call based on the types. If it is a union of types and could be either a multiply or call based on the union, throw an error.]**
 depending on if it should be a multiply juxtapose or a call juxtapose, the ^ operator has a precedence in between them, making things confusing.
 
 function call juxtaposition has higher precedence than ^
