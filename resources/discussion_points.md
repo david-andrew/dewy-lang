@@ -377,3 +377,23 @@ The alternative is to make use of juxtaposition to attach units to expressions
 ```
 
 For these, you can attach the unit directly to the number if it is just a single unit, or you can wrap single units and unit expressions in parenthesis and juxtapose them with the number. The great thing about this approach is it already works under the current system, with no needed adjustments to the parsing process. It is slightly less aesthetic, but honestly I'd say it's like 95% as good.
+
+
+## is `|>` just for function application, or can it be a general juxtapose operator?
+I'm leaning towards it just being a juxtapose operator, though tbd if it affects examples like this
+```
+i .% #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
+```
+
+The other weird thing to think about is that it flips the arguments around for the juxtaposition, e.g.
+
+```
+sin(2pi(rad))
+2pi(rad) |> sin
+```
+
+so perhaps we could have a reversed version that juxtaposes without flipping around...
+```
+sin <|> 2pi(rad)
+sin <| 2pi(rad)
+```
