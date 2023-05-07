@@ -341,3 +341,39 @@ Instead you must put parenthesis around the identifier
 ```
 
 TBD what the solution is. Ideally we could parse things that look like calls into calls, and things that don't look like calls into multiplies, but the () get stripped away, and in all cases we're just left with id,jux,id without any parenthesis...
+
+
+
+## How to have physical number literals with units [use juxtaposition]
+Originally I wanted to be able to say things like
+```
+10 kg * 9.8 m/s^2
+15 kg
+7 kg * 10 m/s/s
+25 N/m^2 + 15 Pa
+12 kg + 8 kg
+3 m * 5 s
+25 J - 15 J
+9 N * 6 m
+1500 W / 10 A
+5 A * 2 Ω
+8 ms^-1 / 2 s
+```
+however this presents a problem as there is a space between the number and the unit, making it seem like they are separate expressions. I could have the parsing process try to get around this by looking for instances of numeric expression ASTs right next unit expression ASTs.
+
+The alternative is to make use of juxtaposition to attach units to expressions
+```
+10kg * 9.8(m/s^2)
+15kg
+7kg * 10(m/s/s)
+25(N/m^2) + 15(Pa)
+12(kg) + 8(kg)
+3(m) * 5(s)
+25(J) - 15(J)
+9(N) * 6(m)
+1500(W) / 10(A)
+5(A) * 2(Ω)
+8(ms^-1) / 2(s)
+```
+
+For these, you can attach the unit directly to the number if it is just a single unit, or you can wrap single units and unit expressions in parenthesis and juxtapose them with the number. The great thing about this approach is it already works under the current system, with no needed adjustments to the parsing process. It is slightly less aesthetic, but honestly I'd say it's like 95% as good.
