@@ -508,9 +508,36 @@ def test():
     if res: print(res)
 
 
-if __name__ == "__main__":
-    test()
 
+
+def test2():
+    #load in the specific file and split the lines
+    with open('../../../examples/syntax3.dewy') as f:
+        lines = f.read().splitlines()
+
+    # tokenize each line and remove ones that are just whitespace
+    tokens = [tokenize(line) for line in lines]
+    for line in tokens: invert_whitespace(line)
+    tokens = [token for token in tokens if len(token) > 0]
+
+    #match the ast for each line
+    for line in tokens:
+        pdb.set_trace()
+        ast = parse(line)
+        print(ast)
+
+
+
+    pdb.set_trace()
+
+
+
+
+
+
+if __name__ == "__main__":
+    # test()
+    test2()
 
 
 
