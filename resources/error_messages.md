@@ -6,4 +6,3 @@ ranges may have either an expression that evaluates to a single rangable value, 
 ```
 a, myrange = 1, [2,4..10]
 ```
-```

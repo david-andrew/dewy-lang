@@ -297,7 +297,7 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
 precedence:
 [HIGHEST]
 
-<jux call>
+<jux call>   //on first parse pass, we only use jux-mul. after, if we see a jux-mul with right child pow, we make an ambiguous jux-pow node, which selects the correct one at type checking time (or runtime if it could be either)
 ^
 <jux mul>
 /*%
