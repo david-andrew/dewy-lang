@@ -347,20 +347,33 @@ def eat_keyword(src: str) -> int | None:
     return None
 
 
+
+#TODO: expand the list of valid identifier characters
+digits = set('0123456789')
+alpha = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
+greek = set('ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψω')
+misc = set('_?!$&°')
+
+start_characters = (alpha | greek | misc) - {'?'}
+continue_characters = (alpha | digits | greek | misc)
+
+
 @peek_eat(Identifier_t)
 def eat_identifier(src:str) -> int|None:
     """
     Eat an identifier, return the number of characters eaten
+
+    Identifiers:
+    - may not start with a number or a question mark
+    - may not end with a question mark
+    - may use (TODO enumerate the full chars list somewhere. for now copying from python)
     
-    identifiers are of the form  [a-zA-Z_] ([0-9a-zA-Z_?!$&]* [0-9a-zA-Z_!$&])?
-    i.e. similar to regular identifiers, but allowing for ?!$& as well (though they may not end with ?)
-    identifiers must start with a letter or underscore
     """
-    if not src[0].isalpha() and src[0] != '_':
+    if not src[0] in start_characters:
         return None
 
     i = 1
-    while i < len(src) and (src[i].isalnum() or src[i] in '_?!$&'):
+    while i < len(src) and src[i] in continue_characters:
         i += 1
 
     # while last character is ?, remove it
