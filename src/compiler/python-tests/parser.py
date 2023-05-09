@@ -144,9 +144,6 @@ chain_atoms = {
     DotDot_t,
 }
 
-# keep track of operators that are sensitive to whitespace (i.e. we cannot safely fold adjacent whitespace/juxtaposition tokens into the operator)
-whitespace_sensitive_operators = unary_prefix_operators & unary_postfix_operators | binary_operators & (unary_prefix_operators | unary_postfix_operators)
-
 
 #juxtapose singleton token so we aren't wasting memory
 jux = Juxtapose_t(None)
@@ -204,7 +201,7 @@ def invert_whitespace(tokens: list[Token]) -> None:
     i = 1
     while i < len(tokens) - 1:
         left,middle,right = tokens[i-1:i+2]
-        if isinstance(middle, Juxtapose_t) and isinstance(left, Operator_t) and left.op not in whitespace_sensitive_operators and isinstance(right, Operator_t) and right.op not in whitespace_sensitive_operators:
+        if isinstance(middle, Juxtapose_t) and (isinstance(left, Operator_t) or isinstance(right, Operator_t)):
             tokens.pop(i)
             continue
         i += 1

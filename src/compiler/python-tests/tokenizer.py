@@ -173,7 +173,7 @@ pair_closing_delims = '})]'
 
 #list of all operators sorted from longest to shortest
 unary_prefix_operators = {'+', '-', '*', '/', 'not', '@', '...'}
-unary_postfix_operators = {'?', '...', '`', ';'}
+unary_postfix_operators = {'?', '`', ';'}
 binary_operators = {
         '+', '-', '*', '/', '%', '^',
         '=?', '>?', '<?', '>=?', '<=?', 'in?', '<=>',
