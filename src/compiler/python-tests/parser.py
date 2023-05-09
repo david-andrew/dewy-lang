@@ -246,7 +246,12 @@ class Identifier(IntermediateAST):
     name:str
 
 class Tuple(IntermediateAST): ...
-class UnknownBlock(IntermediateAST): ...
+
+@dataclass
+class UnknownBlock(IntermediateAST):
+    left:str
+    right:str
+    body:list[IntermediateAST|AST]
 
 
 
@@ -410,14 +415,30 @@ def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
         case [Identifier_t(src=str(src))]:
             return Identifier(src)
         
-        case [Block_t(body=list(body))]:
-            return parse_block(body)
+        case [Block_t(body=list()) as block]:
+            return parse_block(block)
 
         # <atom> <juxtapose> <atom>
         case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Juxtapose_t(), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
             left, right = parse_chain([left]), parse_chain([right])
             return Juxtapose(left, right)
 
+        # <atom> <+> <atom>
+        case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Operator_t(op=str(op)), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
+            left, right = parse_chain([left]), parse_chain([right])
+            if op == '+':
+                return Add(left, right)
+            elif op == '-':
+                return Sub(left, right)
+            # elif op == '*':
+            #     return Mul(left, right)
+            # elif op == '/':
+            #     return Div(left, right)
+            # elif op == '%':
+            #     return Mod(left, right)
+            else:
+                raise ValueError(f"INTERNAL ERROR: unexpected operator in chain: {op=}")
+            
         #TODO: lots of other simple cases here
 
         
@@ -484,6 +505,16 @@ def parse_block(block:Block_t) -> AST:
             # BasedNumber_t,
             # Hashtag_t,
             # DotDot_t,
+
+
+
+        #catch all case
+        case Block_t(left=str(left), right=str(right), body=list(body)):
+            seq = []
+            while len(body) > 0:
+                chain, body = get_next_chain(body)
+                seq.append(parse_chain(chain))
+            return UnknownBlock(left, right, seq)
 
     pdb.set_trace()
     ...
