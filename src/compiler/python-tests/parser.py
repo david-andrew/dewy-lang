@@ -254,15 +254,14 @@ def _get_next_postfixes(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
 def _get_next_atom(tokens:list[Token]) -> tuple[Token, list[Token]]:
     if len(tokens) == 0:
         raise ValueError(f"ERROR: expected atom, got {tokens=}")
-    t, tokens = tokens[0], tokens[1:]
     
-    if isinstance(t, Keyword_t):
-        raise NotImplementedError("TODO: handle keyword based expressions")
+    if isinstance(tokens[0], Keyword_t):
+        return _get_next_keyword_expr(tokens)
     
-    if isinstance(t, (Integer_t, BasedNumber_t, String_t, RawString_t, Identifier_t, Hashtag_t, Block_t, TypeParam_t, DotDot_t)):
-        return t, tokens
+    if isinstance(tokens[0], (Integer_t, BasedNumber_t, String_t, RawString_t, Identifier_t, Hashtag_t, Block_t, TypeParam_t, DotDot_t)):
+        return tokens[0], tokens[1:]
     
-    raise ValueError(f"ERROR: expected atom, got {t=}")
+    raise ValueError(f"ERROR: expected atom, got {tokens[0]=}")
 
 def _get_next_chunk(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
     chunk = []
@@ -282,9 +281,25 @@ def _get_next_chunk(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
 def is_binop(token:Token) -> bool:
     return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t))
 
-#TODO: handle context, namely blocks based on what the left/right brackets are, since some chains are only valid in certain contexts
 
-#TODO: get next chain needs to recursively call itself to handle conditionals/loops/etc. keyword based syntax
+def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
+    """package up the next keyword expression into a single token"""
+    if len(tokens) == 0:
+        raise ValueError(f"ERROR: expected keyword expression, got {tokens=}")
+    t, tokens = tokens[0], tokens[1:]
+    
+    if not isinstance(t, Keyword_t):
+        raise ValueError(f"ERROR: expected keyword expression, got {t=}")
+    
+    raise NotImplementedError("TODO: handle keyword based expressions")
+    # (if | loop) #chain #chain (else (if | loop) #chain #chain)* (else #chain)?
+    # return #chain?
+    # express #chain
+    # (break | continue) #hashtag? //note the hashtag should be an entire chain if present
+    # (let | const) #chain
+
+
+
 def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
     """
     grab the next single expression chain of tokens from the given list of tokens
