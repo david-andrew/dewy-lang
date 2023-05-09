@@ -203,7 +203,7 @@ def invert_whitespace(tokens: list[Token]) -> None:
     i = 1
     while i < len(tokens) - 1:
         left,middle,right = tokens[i-1:i+2]
-        if isinstance(middle, Juxtapose_t) and (isinstance(left, (Operator_t, ShiftOperator_t, Comma_t, DotDot_t)) or isinstance(right, (Operator_t, ShiftOperator_t, Comma_t, DotDot_t))):
+        if isinstance(middle, Juxtapose_t) and (isinstance(left, (Operator_t, ShiftOperator_t, Comma_t)) or isinstance(right, (Operator_t, ShiftOperator_t, Comma_t))):
             tokens.pop(i)
             continue
         i += 1
