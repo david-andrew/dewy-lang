@@ -75,6 +75,8 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
 
 from utils import based_number_to_int
 
+from rich import print, traceback; traceback.install(show_locals=True)
+
 import pdb
 
 
@@ -242,12 +244,25 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
     """
     grab the next single expression chain of tokens from the given list of tokens
 
+    Also wraps up keyword-based expressions (if loop etc.) into a single token
+
     Args:
         tokens (list[Token]): list of tokens to grab the next chain from
 
     Returns:
         next, rest (list[Token], list[Token]): the next chain of tokens, and the remaining tokens
     """
+
+
+    """
+    #chunk = #prefix_op* #atom_expr (#postfix_op - ';')*
+    #chain = #chunk (#binary_op #chunk)* ';'?
+    """
+
+
+
+
+
     i = 0
     while i < len(tokens):
         token = tokens[i]
