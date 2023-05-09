@@ -589,7 +589,7 @@ def test():
     # tprint(Block_t(left='{', right='}', body=tokens))
 
     # parse tokens into an AST
-    ast = parse(tokens)
+    ast = parse0(tokens)
     # print(f'parsed ast: {ast}')
     #second pass/etc.
 
