@@ -74,7 +74,7 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
 )
 
 from utils import based_number_to_int
-
+from dataclasses import dataclass
 from rich import print, traceback; traceback.install(show_locals=True)
 
 import pdb
@@ -134,7 +134,7 @@ def match_single(token:Token, group:dict[type, None|Callable]) -> bool:
     cls = token.__class__
     return cls in group and (group[cls] is None or group[cls](token))
 
-chain_atoms = {
+atom_tokens = (
     Identifier_t,
     Integer_t,
     BasedNumber_t,
@@ -144,7 +144,7 @@ chain_atoms = {
     TypeParam_t,
     Hashtag_t,
     DotDot_t,
-}
+)
 
 
 #juxtapose singleton token so we aren't wasting memory
@@ -235,7 +235,16 @@ def determine_block_type(block:Block_t) -> BlockType: ...
 from abc import ABC
 class IntermediateAST(ABC): ...
 class Void(IntermediateAST): ...
-class Jux(IntermediateAST): ...
+
+@dataclass
+class Juxtapose(IntermediateAST):
+    left:IntermediateAST|AST
+    right:IntermediateAST|AST
+
+@dataclass
+class Identifier(IntermediateAST):
+    name:str
+
 class Tuple(IntermediateAST): ...
 class UnknownBlock(IntermediateAST): ...
 
@@ -258,7 +267,7 @@ def _get_next_atom(tokens:list[Token]) -> tuple[Token, list[Token]]:
     if isinstance(tokens[0], Keyword_t):
         return _get_next_keyword_expr(tokens)
     
-    if isinstance(tokens[0], (Integer_t, BasedNumber_t, String_t, RawString_t, Identifier_t, Hashtag_t, Block_t, TypeParam_t, DotDot_t)):
+    if isinstance(tokens[0], atom_tokens):#(Integer_t, BasedNumber_t, String_t, RawString_t, Identifier_t, Hashtag_t, Block_t, TypeParam_t, DotDot_t)):
         return tokens[0], tokens[1:]
     
     raise ValueError(f"ERROR: expected atom, got {tokens[0]=}")
@@ -363,7 +372,7 @@ def lowest_precedence_split(tokens:list[Token]) -> tuple[Token, list[list[Token]
     ...
 
 
-def parse_chain(tokens:list[Token]) -> AST:
+def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
     """
     Convert a chain of tokens to an AST
 
@@ -398,26 +407,36 @@ def parse_chain(tokens:list[Token]) -> AST:
                     raise ValueError(f"INTERNAL ERROR: unexpected token in string body: {part=}")
             return IString(parts)
 
+        case [Identifier_t(src=str(src))]:
+            return Identifier(src)
+        
+        case [Block_t(body=list(body))]:
+            return parse_block(body)
+
+        # <atom> <juxtapose> <atom>
+        case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Juxtapose_t(), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
+            left, right = parse_chain([left]), parse_chain([right])
+            return Juxtapose(left, right)
 
         #TODO: lots of other simple cases here
 
         
         #Happy paths
-        case [Identifier_t(src=str(id)), Juxtapose_t(), String_t()]:
-            string = parse_chain(tokens[2:])
-            return Call(id, [string])
+        # case [Identifier_t(src=str(id)), Juxtapose_t(), String_t()]:
+        #     string = parse_chain(tokens[2:])
+        #     return Call(id, [string])
         
         # case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t(left='(', right=')', body=[String_t(body=[str(string)])])]:
         #     return Call(id, [String(string)])
         
-        case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t() as block_t]:
-            block = parse_block(block_t)
-            #TODO: this really needs to check the type of eval on the block, rather than the raw AST type.
-            if isinstance(block, (Number,String,IString)):
-                return Call(id, [block])
-            else:
-                pdb.set_trace()
-                ...
+        # case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t() as block_t]:
+        #     block = parse_block(block_t)
+        #     #TODO: this really needs to check the type of eval on the block, rather than the raw AST type.
+        #     if isinstance(block, (Number,String,IString)):
+        #         return Call(id, [block])
+        #     else:
+        #         pdb.set_trace()
+        #         ...
 
 
 
@@ -492,13 +511,11 @@ def parse_block(block:Block_t) -> AST:
 
 
 
-
-
-def parse(tokens:list[Token]) -> AST:
+def parse0(tokens:list[Token]) -> Block:
     """
     parse a list of tokens into an AST
     """
-    # chains = []
+    #initial parsing pass. may contain intermediate ASTs that need to be further parsed
     exprs:list[AST] = []
     while len(tokens) > 0:
         chain, tokens = get_next_chain(tokens)
@@ -509,9 +526,6 @@ def parse(tokens:list[Token]) -> AST:
     #      if it was to be nested though, we'd need to determine what type of block it was...
     #      perhaps include a newscope flag in the parse signature
     return Block(exprs, newscope=True)
-
-    
-    
 
 
 
@@ -572,8 +586,8 @@ def test2():
     for line in tokens:
         print(line)
         # pdb.set_trace()
-        ast = parse(line)
-        print(ast)
+        ast0 = parse0(line)
+        print(ast0)
 
 
 
