@@ -203,7 +203,7 @@ def invert_whitespace(tokens: list[Token]) -> None:
     i = 1
     while i < len(tokens) - 1:
         left,middle,right = tokens[i-1:i+2]
-        if isinstance(middle, Juxtapose_t) and (isinstance(left, Operator_t) or isinstance(right, Operator_t)):
+        if isinstance(middle, Juxtapose_t) and (isinstance(left, (Operator_t, ShiftOperator_t, Comma_t, DotDot_t)) or isinstance(right, (Operator_t, ShiftOperator_t, Comma_t, DotDot_t))):
             tokens.pop(i)
             continue
         i += 1
@@ -214,11 +214,11 @@ def invert_whitespace(tokens: list[Token]) -> None:
 from enum import Enum, auto
 class BlockType(Enum):
     Range = auto()
+    # Index = auto() #possibly just a special case of range
     Scope = auto()
     Group = auto()
-    Args = auto()
-    Call = auto()
-    Index = auto()
+    # Tuple = auto()
+    # Call = auto()
     Void = auto() # perhaps just an empty Group type?
     # others?
 def determine_block_type(block:Block_t) -> BlockType: ...
@@ -232,10 +232,55 @@ def determine_block_type(block:Block_t) -> BlockType: ...
 
 
 #TODO: custom AST nodes for intermediate steps
-class Void: ...
-class Jux: ...
+from abc import ABC
+class IntermediateAST(ABC): ...
+class Void(IntermediateAST): ...
+class Jux(IntermediateAST): ...
+class Tuple(IntermediateAST): ...
+class UnknownBlock(IntermediateAST): ...
 
 
+
+def _get_next_prefixes(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
+    prefixes = []
+    while len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op in unary_prefix_operators:
+        prefixes.append(tokens.pop(0))
+    return prefixes, tokens
+def _get_next_postfixes(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
+    postfixes = []
+    while len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op in unary_postfix_operators - {';'}:
+        postfixes.append(tokens.pop(0))
+    return postfixes, tokens
+def _get_next_atom(tokens:list[Token]) -> tuple[Token, list[Token]]:
+    if len(tokens) == 0:
+        raise ValueError(f"ERROR: expected atom, got {tokens=}")
+    t, tokens = tokens[0], tokens[1:]
+    
+    if isinstance(t, Keyword_t):
+        raise NotImplementedError("TODO: handle keyword based expressions")
+    
+    if isinstance(t, (Integer_t, BasedNumber_t, String_t, RawString_t, Identifier_t, Hashtag_t, Block_t, TypeParam_t, DotDot_t)):
+        return t, tokens
+    
+    raise ValueError(f"ERROR: expected atom, got {t=}")
+
+def _get_next_chunk(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
+    chunk = []
+    t, tokens = _get_next_prefixes(tokens)
+    chunk.extend(t)
+
+    t, tokens = _get_next_atom(tokens)
+    if t is None:
+        raise ValueError(f"ERROR: expected atom, got {tokens[0]=}")
+    chunk.append(t)
+
+    t, tokens = _get_next_postfixes(tokens)
+    chunk.extend(t)
+
+    return chunk, tokens
+
+def is_binop(token:Token) -> bool:
+    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t))
 
 #TODO: handle context, namely blocks based on what the left/right brackets are, since some chains are only valid in certain contexts
 
@@ -246,6 +291,10 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
 
     Also wraps up keyword-based expressions (if loop etc.) into a single token
 
+    A chain is represented by the following grammar:
+        #chunk = #prefix_op* #atom_expr (#postfix_op - ';')*
+        #chain = #chunk (#binary_op #chunk)* ';'?
+
     Args:
         tokens (list[Token]): list of tokens to grab the next chain from
 
@@ -254,54 +303,25 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
     """
 
 
-    """
-    #chunk = #prefix_op* #atom_expr (#postfix_op - ';')*
-    #chain = #chunk (#binary_op #chunk)* ';'?
-    """
 
+    chain = []
+    
+    chunk, tokens = _get_next_chunk(tokens)
+    chain.extend(chunk)
 
+    while len(tokens) > 0:
+        if is_binop(tokens[0]):
+            chain.append(tokens.pop(0))
 
+            chunk, tokens = _get_next_chunk(tokens)
+            chain.extend(chunk)
+        else:
+            break
 
+    if len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op == ';':
+        chain.append(tokens.pop(0))
 
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        cls = token.__class__
-        
-        
-        #TODO: replace with: if empty chain, or current is binary op, while next is unary prepender, keep going until we have an atom
-        #if chain is empty, is token a chain starter. else error.
-        if i == 0:
-            #TODO: can also be a unary_chain_prepender
-            if cls not in chain_atoms:
-                pdb.set_trace()
-                raise ValueError(f"ERROR: unexpected token at start of chain: {token=}")
-            i += 1
-            continue
-        
-        if match_single(token, unary_chain_extenders): #cls in unary_chain_extenders:
-            i += 1
-            continue
-
-        #check if the token after is a valid token type to be
-        if match_single(token, binary_chain_extenders): #token.__class__ in binary_chain_extenders:
-            assert i+1 < len(tokens), f"ERROR: unexpected end of tokens after binary extender: {token=}"
-            token = tokens[i+1]
-            cls = token.__class__
-            if cls not in chain_atoms:
-                raise ValueError(f"ERROR: unexpected token after binary extender: {token=}")
-            i += 2
-            continue
-
-        #TODO: handling of keyword chains...
-
-        #TODO: handling opchaining. basically can be a binary operator followed by any number of unary operators, followed by an atom
-
-        
-        #else end of chain
-        break
-        
-    return tokens[:i], tokens[i:]
+    return chain, tokens
 
 
 
@@ -511,6 +531,7 @@ def test():
     # parse tokens into an AST
     ast = parse(tokens)
     # print(f'parsed ast: {ast}')
+    #second pass/etc.
 
     #TODO: restructuring, type checking, optimizations, etc.
 
@@ -534,13 +555,10 @@ def test2():
 
     #match the ast for each line
     for line in tokens:
-        pdb.set_trace()
+        print(line)
+        # pdb.set_trace()
         ast = parse(line)
         print(ast)
-
-
-
-    pdb.set_trace()
 
 
 
