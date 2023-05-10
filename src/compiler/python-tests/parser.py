@@ -344,37 +344,71 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
 
 
 
-"""
-precedence:
-[HIGHEST]
-@
-. <jux call>
-^
-<jux mul>
-/ * %
-+ -
-<< >> <<< >>> <<<! !>>>
-,            //tuple maker
-=? >? <? >=? <=? not=? <=>
-and nand
-xor xnor  //following C's precedence, and > xor > or
-or nor
-=
-<seq> (i.e. space)
-[LOWEST]
 
-TODO:
-- add operators: ... not ` ? & | as in transmute @? |> => -> <-> <- : ;
+def operator_precedence(t:Token) -> int | list[int]:
+    """
+    precedence:
+    [HIGHEST]
+    @
+    . <jux call>
+    ^
+    <jux mul>
+    / * %
+    + -
+    << >> <<< >>> <<! !>>
+    ,            //tuple maker
+    =? >? <? >=? <=? not=? <=>
+    and nand
+    xor xnor  //following C's precedence, and > xor > or
+    or nor
+    =
+    <seq> (i.e. space)
+    [LOWEST]
 
-[Notes]
-.. for ranges is not an operator. it uses juxtapose to bind to left/right arguments (or empty), and type-checks left and right
-if-else-loop chain expr is more like a single unit, so it doesn't really have a precedence
-unary + - / * have the same precedence as their binary counterparts (all of which are left-associative) 
-"""
+    TODO:
+    - add operators: ... not ` ? & | as in transmute @? |> => -> <-> <- : ;
+
+    [Notes]
+    .. for ranges is not an operator. it uses juxtapose to bind to left/right arguments (or empty), and type-checks left and right
+    if-else-loop chain expr is more like a single unit, so it doesn't really have a precedence. but they act like they have the lowest precedence since the expressions they capture will be full chains only broken by space/seq
+    unary + - / * have the same precedence as their binary counterparts (all of which are left-associative) 
+    """
+
+    match t:
+        case Operator_t(op='='):
+            return 0
+        case Operator_t(op='or'|'nor'):
+            return 1
+        case Operator_t(op='xor'|'xnor'):
+            return 2
+        case Operator_t(op='and'|'nand'):
+            return 3
+        case Operator_t(op='=?'|'>?'|'<?'|'>=?'|'<=?'|'<=?'): #TODO: need to have a parsing step that combines not =? into a single token
+            return 4
+        case Comma_t():
+            return 5
+        case ShiftOperator_t(op='<<'|'>>'|'<<<'|'>>>'|'<<!'|'!>>'):
+            return 6
+        case Operator_t(op='+'|'-'):
+            return 7
+        case Operator_t(op='*'|'/'|'%'):
+            return 8
+        case Juxtapose_t():
+            return [9, 11]
+        case Operator_t(op='^'):
+            return 10
+        case Operator_t(op='.'):
+            return 11
+        case Operator_t(op='@'):
+            return 12
+        case _:
+            raise ValueError(f"ERROR: expected operator, got {t=}")
 
 
-def lowest_precedence_split(tokens:list[Token]) -> tuple[Token, list[list[Token]]] | None:
-    ...
+
+def lowest_precedence_split(tokens:list[Token]) -> list[int] | list[list[int]] | None:
+    """"""
+    #TODO: how to handle ambiguous precedence (e.g. s(x)^2)
 
 
 def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
