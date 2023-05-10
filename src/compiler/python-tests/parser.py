@@ -406,7 +406,7 @@ def operator_precedence(t:Token) -> int | list[int]:
 
 
 
-def lowest_precedence_split(tokens:list[Token]) -> list[int] | list[list[int]] | None:
+def lowest_precedence_split(tokens:list[Token]) -> list[int] | list[list[int]]:
     """"""
     #TODO: how to handle ambiguous precedence (e.g. s(x)^2)
 
@@ -456,8 +456,15 @@ def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
         case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Juxtapose_t(), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
             left, right = parse_chain([left]), parse_chain([right])
             return Juxtapose(left, right)
+        
+        # <atom> <comma> <atom>
+        # TODO: tuple maker needs to chain multiple commas into a single tuple, but this will make a tuple binary tree...
+        # case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Comma_t(), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
+        #     left, right = parse_chain([left]), parse_chain([right])
+        #     raise NotImplementedError("")
+        #     return Tuple(left, right)
 
-        # <atom> <+> <atom>
+        # <atom> <binop> <atom>
         case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Operator_t(op=str(op)), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
             left, right = parse_chain([left]), parse_chain([right])
             if op == '+':
@@ -474,7 +481,33 @@ def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
                 return Pow(left, right)
             else:
                 raise ValueError(f"INTERNAL ERROR: unexpected operator in chain: {op=}")
-            
+        
+        case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, ShiftOperator_t(op=str(op)), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
+            left, right = parse_chain([left]), parse_chain([right])
+            if op == '<<':
+                return LeftShift(left, right)
+            elif op == '>>':
+                return RightShift(left, right)
+            elif op == '<<<':
+                return LeftRotate(left, right)
+            elif op == '>>>':
+                return RightRotate(left, right)
+            elif op == '<<!':
+                return LeftRotateCarry(left, right)
+            elif op == '!>>':
+                return RightRotateCarry(left, right)
+            else:
+                raise ValueError(f"INTERNAL ERROR: unexpected operator in chain: {op=}")
+
+        
+        
+        
+    # Base case
+    splits = lowest_precedence_split(tokens)
+    pdb.set_trace()
+    ...
+        
+        
         #TODO: lots of other simple cases here
 
         
