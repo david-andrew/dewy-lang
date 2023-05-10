@@ -745,14 +745,25 @@ class Sub(BinOp):
     def __init__(self, left:AST, right:AST):
         super().__init__(left, right, lambda l, r: Number(l - r), 'Sub', '-')
 
-# class Mul(BinOp):
-#     def __init__(self, left:AST, right:AST):
-#         super().__init__(left, right, lambda l, r: Number(l * r), 'Mul', '*')
+class Mul(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Number(l * r), 'Mul', '*')
 
-# class Div(BinOp):
-#     def __init__(self, left:AST, right:AST):
-#         super().__init__(left, right, lambda l, r: Number(l / r), 'Div', '/')
+class Div(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Number(l / r), 'Div', '/')
 
+class IDiv(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Number(l // r), 'IDiv', '//')
+
+class Mod(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Number(l % r), 'Mod', '%')
+
+class Pow(BinOp):
+    def __init__(self, left:AST, right:AST):
+        super().__init__(left, right, lambda l, r: Number(l ** r), 'Pow', '**')
 
 
 class Bool(AST):

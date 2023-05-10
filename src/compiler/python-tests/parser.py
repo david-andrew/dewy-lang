@@ -19,19 +19,10 @@ from dewy import (
     Unpack,
     Block,
     Call,
-    String,
-    IString,
+    String, IString,
     BinOp,
-    Equal,
-    NotEqual,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
-    Add,
-    Sub,
-    # Mul,
-    # Div,
+    Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
+    Add, Sub, Mul, Div, IDiv, Mod, Pow,
     Bool,
     If,
     Loop,
@@ -41,7 +32,6 @@ from dewy import (
     Range,
     RangeIter,
     Vector,
-
     Scope,
 )
 from tokenizer import ( tokenize, tprint, traverse_tokens,                       
@@ -357,19 +347,29 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
 """
 precedence:
 [HIGHEST]
-
-<jux call>   //on first parse pass, we only use jux-mul. after, if we see a jux-mul with right child pow, we make an ambiguous jux-pow node, which selects the correct one at type checking time (or runtime if it could be either)
+@
+. <jux call>
 ^
 <jux mul>
-/*%
-+-
+/ * %
++ -
+<< >> <<< >>> <<<! !>>>
 ,            //tuple maker
-..           //range maker. can have size 2 tuples on left/right, or single expressions that evaluate to rangables
-=? and other comparison operators
+=? >? <? >=? <=? not=? <=>
+and nand
+xor xnor  //following C's precedence, and > xor > or
+or nor
 =
-if-else
 <seq> (i.e. space)
 [LOWEST]
+
+TODO:
+- add operators: ... not ` ? & | as in transmute @? |> => -> <-> <- : ;
+
+[Notes]
+.. for ranges is not an operator. it uses juxtapose to bind to left/right arguments (or empty), and type-checks left and right
+if-else-loop chain expr is more like a single unit, so it doesn't really have a precedence
+unary + - / * have the same precedence as their binary counterparts (all of which are left-associative) 
 """
 
 
@@ -430,12 +430,14 @@ def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
                 return Add(left, right)
             elif op == '-':
                 return Sub(left, right)
-            # elif op == '*':
-            #     return Mul(left, right)
-            # elif op == '/':
-            #     return Div(left, right)
-            # elif op == '%':
-            #     return Mod(left, right)
+            elif op == '*':
+                return Mul(left, right)
+            elif op == '/':
+                return Div(left, right)
+            elif op == '%':
+                return Mod(left, right)
+            elif op == '^':
+                return Pow(left, right)
             else:
                 raise ValueError(f"INTERNAL ERROR: unexpected operator in chain: {op=}")
             
