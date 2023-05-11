@@ -342,26 +342,41 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
 
     return chain, tokens
 
+@dataclass
+class qint:
+    """quantum int for precedences that are multiple values at the same time"""
+    values:set[int]
+    def __gt__(self, other:int|'qint') -> bool:
+        if isinstance(other, int):
+            return all(v > other for v in self.values)
+        return all(v > other for v in self.values)
+    def __lt__(self, other:int|'qint') -> bool:
+        if isinstance(other, int):
+            return all(v < other for v in self.values)
+        return all(v < other for v in self.values)
+    
+    def __eq__(self, other:int|'qint') -> bool:
+        return False #qint can only be strictly greater or strictly less than other values. Otherwise it's ambiguous
+    
+        
 
-
-
-def operator_precedence(t:Token) -> int | list[int]:
+def operator_precedence(t:Token) -> int | qint:
     """
     precedence:
     [HIGHEST]
     @
     . <jux call>
-    ^
+    ^                                   //right-associative
     <jux mul>
     / * %
     + -
     << >> <<< >>> <<! !>>
-    ,            //tuple maker
+    ,                                   //tuple maker
     =? >? <? >=? <=? not=? <=>
     and nand
-    xor xnor  //following C's precedence, and > xor > or
+    xor xnor                            //following C's precedence, and > xor > or
     or nor
-    =
+    = .= <op>= .<op>=  (e.g. += .+=)    //right-associative (but technically causes a type error since assignments can't be chained)
     <seq> (i.e. space)
     [LOWEST]
 
@@ -394,7 +409,7 @@ def operator_precedence(t:Token) -> int | list[int]:
         case Operator_t(op='*'|'/'|'%'):
             return 8
         case Juxtapose_t():
-            return [9, 11]
+            return qint({9, 11})
         case Operator_t(op='^'):
             return 10
         case Operator_t(op='.'):
@@ -409,6 +424,8 @@ def operator_precedence(t:Token) -> int | list[int]:
 def lowest_precedence_split(tokens:list[Token]) -> list[int] | list[list[int]]:
     """"""
     #TODO: how to handle ambiguous precedence (e.g. s(x)^2)
+    pdb.set_trace()
+    ...
 
 
 def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
@@ -682,12 +699,18 @@ def test2():
     for line in tokens: invert_whitespace(line)
     tokens = [token for token in tokens if len(token) > 0]
 
+    #should have a pass to combine dots with operators (e.g. .+ ./ .= etc.)
+    #and combine operators with assignment (e.g. +=, -=, etc.)
+    #note these all have to be juxtaposed to connect up
+    #TODO: make a list of valid combinable operators. basically any math operators
+
     #match the ast for each line
     for line in tokens:
-        print(line)
-        # pdb.set_trace()
+        # print(f'{line=}')
         ast0 = parse0(line)
         print(ast0)
+        # pdb.set_trace()
+        # ...
 
 
 
