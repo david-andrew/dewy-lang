@@ -1,3 +1,5 @@
+# from __future__ import annotations
+
 from dewy import (
     AST, 
     Undefined,
@@ -346,16 +348,16 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
 class qint:
     """quantum int for precedences that are multiple values at the same time"""
     values:set[int]
-    def __gt__(self, other:int|'qint') -> bool:
+    def __gt__(self, other:'int|qint') -> bool:
         if isinstance(other, int):
             return all(v > other for v in self.values)
         return all(v > other for v in self.values)
-    def __lt__(self, other:int|'qint') -> bool:
+    def __lt__(self, other:'int|qint') -> bool:
         if isinstance(other, int):
             return all(v < other for v in self.values)
         return all(v < other for v in self.values)
     
-    def __eq__(self, other:int|'qint') -> bool:
+    def __eq__(self, other:'int|qint') -> bool:
         return False #qint can only be strictly greater or strictly less than other values. Otherwise it's ambiguous
     
         
@@ -649,14 +651,7 @@ def parse0(tokens:list[Token]) -> Block:
 
 
 
-def test():
-    import sys
-
-    try:
-        path = sys.argv[1]
-    except IndexError:
-        raise ValueError("Usage: `python parser.py path/to/file.dewy>`")
-
+def test(path:str):
 
     with open(path) as f:
         src = f.read()
@@ -718,8 +713,13 @@ def test2():
 
 
 if __name__ == "__main__":
-    # test()
-    test2()
+    import sys
+    if len(sys.argv) > 1:
+        test(sys.argv[1])
+    else:
+        test2()
+
+    # print("Usage: `python parser.py [path/to/file.dewy>]`")
 
 
 
