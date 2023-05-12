@@ -423,7 +423,7 @@ def operator_precedence(t:Token) -> int | qint:
             raise ValueError(f"ERROR: expected operator, got {t=}")
 
 
-
+#TODO: this needs to consider opchains, and use the precedence of the operator to the left of the chain (other ops are unary prefix ops)
 def lowest_precedence_split(tokens:list[Token]) -> list[int]:# TODO: handle ambiguous e.g. list[list[int]] for each option of splitting?
     """
     return the integer index/indices of the lowest precedence operator(s) in the given list of tokens
@@ -784,6 +784,7 @@ def test2():
         # print(f'{line=}')
         ast0 = parse0(line)
         print(ast0)
+        print(repr(ast0))
         # pdb.set_trace()
         # ...
 
