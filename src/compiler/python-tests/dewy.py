@@ -766,6 +766,33 @@ class Pow(BinOp):
         super().__init__(left, right, lambda l, r: Number(l ** r), 'Pow', '**')
 
 
+##################### Unary operators #####################
+class UnaryOp(AST):
+    def __init__(self, child:AST, op:PyCallable[[AST],AST], opname:str, opsymbol:str):
+        self.child = child
+        self.op = op
+        self.opname = opname
+        self.opsymbol = opsymbol
+
+    def eval(self, scope:Scope=None):
+        return self.op(self.child.eval(scope).topy())
+    def treestr(self, indent=0):
+        return f'{tab * indent}{self.opname}\n{self.child.treestr(indent + 1)}'
+    @insert_tabs
+    def __str__(self):
+        return f'{self.opsymbol}{self.child}'
+    def __repr__(self):
+        return f'{self.opname}({repr(self.child)})'
+
+class Neg(UnaryOp):
+    def __init__(self, child:AST):
+        super().__init__(child, lambda c: Number(-c), 'Neg', '-')
+
+class Inv(UnaryOp):
+    def __init__(self, child:AST):
+        super().__init__(child, lambda c: Number(1/c), 'Inv', '/')
+
+
 class Bool(AST):
     def __init__(self, val:bool):
         self.val = val

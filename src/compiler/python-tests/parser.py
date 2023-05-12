@@ -25,6 +25,7 @@ from dewy import (
     BinOp,
     Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
+    Neg, Inv,
     Bool,
     If,
     Loop,
@@ -322,9 +323,6 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
     Returns:
         next, rest (list[Token], list[Token]): the next chain of tokens, and the remaining tokens
     """
-
-
-
     chain = []
     
     chunk, tokens = _get_next_chunk(tokens)
@@ -344,6 +342,7 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
 
     return chain, tokens
 
+
 @dataclass
 class qint:
     """
@@ -359,13 +358,9 @@ class qint:
         if isinstance(other, int):
             return all(v < other for v in self.values)
         return all(v < other for v in self.values)
-    def __ge__(self, other:'int|qint') -> bool:
-        return self.__gt__(other)
-    def __le__(self, other:'int|qint') -> bool:
-        return self.__lt__(other)
-    
-    def __eq__(self, other:'int|qint') -> bool:
-        return False
+    def __ge__(self, other:'int|qint') -> bool: return self.__gt__(other)
+    def __le__(self, other:'int|qint') -> bool: return self.__lt__(other)
+    def __eq__(self, other:'int|qint') -> bool: return False
         
 
 def operator_precedence(t:Token) -> int | qint:
@@ -439,7 +434,7 @@ def lowest_precedence_split(tokens:list[Token]) -> list[int]:# TODO: handle ambi
     if len(ops) == 0:
         return []
     if len(ops) == 1:
-        return idxs
+        return list(idxs)
     
     ranks = [operator_precedence(op) for op in ops]
     min_rank = min(ranks)
@@ -457,8 +452,88 @@ def make_ast_chain(chunks:list[Token], ops:list[Token]) -> AST | IntermediateAST
     assert len(ops) > 0, f"ERROR: {ops=} is empty"
 
     if len(ops) == 1:
-        pdb.set_trace()
+        assert len(chunks) == 2, f"ERROR: {chunks=} should have length 2"
+        op, = ops
+        left, right = chunks
 
+        if len(left) == 0 and isinstance(op, Operator_t) and op.op in unary_prefix_operators:
+            return parse_unary_prefix_op(op, right)
+        if len(right) == 0 and isinstance(op, Operator_t) and op.op in unary_postfix_operators:
+            return parse_unary_postfix_op(left, op)
+        
+        assert len(left) > 0 and len(right) > 0, f"ERROR: {left=} and {right=} should both have length > 0"
+        return parse_bin_op(left, op, right)
+
+    pdb.set_trace()
+
+
+def parse_bin_op(left:list[Token], op:Token, right:list[Token]) -> AST | IntermediateAST:
+    """
+    create a binary operation AST from the left, op, and right tokens
+    """
+    left, right = parse_chain(left), parse_chain(right)
+
+    match op:
+        case Juxtapose_t():
+            return Juxtapose(left, right)
+        case Comma_t():
+            return Tuple(left, right)
+        case ShiftOperator_t(op='<<'):
+            return LeftShift(left, right)
+        case ShiftOperator_t(op='>>'):
+            return RightShift(left, right)
+        case ShiftOperator_t(op='<<<'):
+            return LeftRotate(left, right)
+        case ShiftOperator_t(op='>>>'):
+            return RightRotate(left, right)
+        case ShiftOperator_t(op='<<!'):
+            return LeftRotateCarry(left, right)
+        case ShiftOperator_t(op='!>>'):
+            return RightRotateCarry(left, right)
+        case Operator_t(op='+'):
+            return Add(left, right)
+        case Operator_t(op='-'):
+            return Sub(left, right)
+        case Operator_t(op='*'):
+            return Mul(left, right)
+        case Operator_t(op='/'):
+            return Div(left, right)
+        case Operator_t(op='%'):
+            return Mod(left, right)
+        case Operator_t(op='^'):
+            return Pow(left, right)
+        case _:
+            raise NotImplementedError(f"TODO: {op=}")
+
+def parse_unary_prefix_op(op:Token, right:list[Token]) -> AST | IntermediateAST:
+    """
+    create a unary prefix operation AST from the op and right tokens
+    """
+    right = parse_chain(right)
+
+    match op:
+        case Operator_t(op='+'):
+            return right
+        case Operator_t(op='-'):
+            return Neg(right)
+        case Operator_t(op='*'):
+            return right
+        case Operator_t(op='/'):
+            return Inv(right)
+        case _:
+            raise NotImplementedError(f"TODO: {op=}")
+        
+def parse_unary_postfix_op(left:list[Token], op:Token) -> AST | IntermediateAST:
+    """
+    create a unary postfix operation AST from the left and op tokens
+    """
+    left = parse_chain(left)
+
+    match op:
+        case Operator_t(op='!'):
+            return Factorial(left)
+        case _:
+            raise NotImplementedError(f"TODO: {op=}")
 
 def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
     """
@@ -502,9 +577,9 @@ def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
             return parse_block(block)
 
         # <atom> <juxtapose> <atom>
-        case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Juxtapose_t(), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
-            left, right = parse_chain([left]), parse_chain([right])
-            return Juxtapose(left, right)
+        # case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Juxtapose_t(), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
+        #     left, right = parse_chain([left]), parse_chain([right])
+        #     return Juxtapose(left, right)
         
         # <atom> <comma> <atom>
         # TODO: tuple maker needs to chain multiple commas into a single tuple, but this will make a tuple binary tree...
@@ -513,40 +588,40 @@ def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
         #     raise NotImplementedError("")
         #     return Tuple(left, right)
 
-        # <atom> <binop> <atom>
-        case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Operator_t(op=str(op)), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
-            left, right = parse_chain([left]), parse_chain([right])
-            if op == '+':
-                return Add(left, right)
-            elif op == '-':
-                return Sub(left, right)
-            elif op == '*':
-                return Mul(left, right)
-            elif op == '/':
-                return Div(left, right)
-            elif op == '%':
-                return Mod(left, right)
-            elif op == '^':
-                return Pow(left, right)
-            else:
-                raise ValueError(f"INTERNAL ERROR: unexpected operator in chain: {op=}")
+        # # <atom> <binop> <atom>
+        # case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Operator_t(op=str(op)), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
+        #     left, right = parse_chain([left]), parse_chain([right])
+        #     if op == '+':
+        #         return Add(left, right)
+        #     elif op == '-':
+        #         return Sub(left, right)
+        #     elif op == '*':
+        #         return Mul(left, right)
+        #     elif op == '/':
+        #         return Div(left, right)
+        #     elif op == '%':
+        #         return Mod(left, right)
+        #     elif op == '^':
+        #         return Pow(left, right)
+        #     else:
+        #         raise ValueError(f"INTERNAL ERROR: unexpected operator in chain: {op=}")
         
-        case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, ShiftOperator_t(op=str(op)), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
-            left, right = parse_chain([left]), parse_chain([right])
-            if op == '<<':
-                return LeftShift(left, right)
-            elif op == '>>':
-                return RightShift(left, right)
-            elif op == '<<<':
-                return LeftRotate(left, right)
-            elif op == '>>>':
-                return RightRotate(left, right)
-            elif op == '<<!':
-                return LeftRotateCarry(left, right)
-            elif op == '!>>':
-                return RightRotateCarry(left, right)
-            else:
-                raise ValueError(f"INTERNAL ERROR: unexpected operator in chain: {op=}")
+        # case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, ShiftOperator_t(op=str(op)), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
+        #     left, right = parse_chain([left]), parse_chain([right])
+        #     if op == '<<':
+        #         return LeftShift(left, right)
+        #     elif op == '>>':
+        #         return RightShift(left, right)
+        #     elif op == '<<<':
+        #         return LeftRotate(left, right)
+        #     elif op == '>>>':
+        #         return RightRotate(left, right)
+        #     elif op == '<<!':
+        #         return LeftRotateCarry(left, right)
+        #     elif op == '!>>':
+        #         return RightRotateCarry(left, right)
+        #     else:
+        #         raise ValueError(f"INTERNAL ERROR: unexpected operator in chain: {op=}")
 
         
         
@@ -565,7 +640,7 @@ def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
         else:
             ast_chunks.append(tokens[prev:split])
             ast_ops.append(tokens[split])
-    ast_chunks.append(tokens[splits[-1]:])
+    ast_chunks.append(tokens[splits[-1]+1:])
 
     return make_ast_chain(ast_chunks, ast_ops)
     
