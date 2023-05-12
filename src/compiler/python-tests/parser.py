@@ -346,7 +346,10 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
 
 @dataclass
 class qint:
-    """quantum int for precedences that are multiple values at the same time"""
+    """
+    quantum int for dealing with precedences that are multiple values at the same time
+    qint's can only be strictly greater or strictly less than other values. Otherwise it's ambiguous
+    """
     values:set[int]
     def __gt__(self, other:'int|qint') -> bool:
         if isinstance(other, int):
@@ -356,10 +359,13 @@ class qint:
         if isinstance(other, int):
             return all(v < other for v in self.values)
         return all(v < other for v in self.values)
+    def __ge__(self, other:'int|qint') -> bool:
+        return self.__gt__(other)
+    def __le__(self, other:'int|qint') -> bool:
+        return self.__lt__(other)
     
     def __eq__(self, other:'int|qint') -> bool:
-        return False #qint can only be strictly greater or strictly less than other values. Otherwise it's ambiguous
-    
+        return False
         
 
 def operator_precedence(t:Token) -> int | qint:
@@ -383,7 +389,7 @@ def operator_precedence(t:Token) -> int | qint:
     [LOWEST]
 
     TODO:
-    - add operators: ... not ` ? & | as in transmute @? |> => -> <-> <- : ;
+    - add operators: ... not ` ? & | as in transmute @? |> <| => -> <-> <- : ;
 
     [Notes]
     .. for ranges is not an operator. it uses juxtapose to bind to left/right arguments (or empty), and type-checks left and right
@@ -423,11 +429,35 @@ def operator_precedence(t:Token) -> int | qint:
 
 
 
-def lowest_precedence_split(tokens:list[Token]) -> list[int] | list[list[int]]:
-    """"""
-    #TODO: how to handle ambiguous precedence (e.g. s(x)^2)
-    pdb.set_trace()
-    ...
+def lowest_precedence_split(tokens:list[Token]) -> list[int]:# TODO: handle ambiguous e.g. list[list[int]] for each option of splitting?
+    """
+    return the integer index/indices of the lowest precedence operator(s) in the given list of tokens
+    """
+    #collect all operators and their indices in the list of tokens
+    idxs, ops = zip(*[(i,t) for i,t in enumerate(tokens) if isinstance(t, (Operator_t, Comma_t, ShiftOperator_t, Juxtapose_t))])
+
+    if len(ops) == 0:
+        return []
+    if len(ops) == 1:
+        return idxs
+    
+    ranks = [operator_precedence(op) for op in ops]
+    min_rank = min(ranks)
+
+    # verify that the min is strictly less than or equal to all other ranks
+    if not all(min_rank <= r for r in ranks):
+        #TODO: probably enumerate out all permutations of the ambiguous operators and return all of them as a list of lists of indices
+        raise NotImplementedError(f"TODO: ambiguous precedence for {ops=} with {ranks=}")
+
+    return [i for i,r in zip(idxs, ranks) if r == min_rank]
+
+def make_ast_chain(chunks:list[Token], ops:list[Token]) -> AST | IntermediateAST:
+    """Create an AST chain from the sequence of ops/chunks"""
+    assert len(chunks) == len(ops) + 1, f"ERROR: mismatched lengths for {chunks=} and {ops=}"
+    assert len(ops) > 0, f"ERROR: {ops=} is empty"
+
+    if len(ops) == 1:
+        pdb.set_trace()
 
 
 def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
@@ -523,6 +553,23 @@ def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
         
     # Base case
     splits = lowest_precedence_split(tokens)
+
+    #TODO: handle left/right associativity. need to check if ^ or =. otherwise left-associative.
+
+    ast_chunks = []
+    ast_ops = []
+    for prev, split in zip([0]+splits, splits):
+        if isinstance(split, list):
+            #TODO: could have something like an ambiguous chain, which takes in all the options. TBD how to handle collapsing to the correct one once type information is known
+            raise NotImplementedError("TODO: handle multiple split permutations")
+        else:
+            ast_chunks.append(tokens[prev:split])
+            ast_ops.append(tokens[split])
+    ast_chunks.append(tokens[splits[-1]:])
+
+    return make_ast_chain(ast_chunks, ast_ops)
+    
+
     pdb.set_trace()
     ...
         
