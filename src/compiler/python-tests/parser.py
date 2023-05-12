@@ -520,9 +520,16 @@ def parse_unary_prefix_op(op:Token, right:list[Token]) -> AST | IntermediateAST:
             return right
         case Operator_t(op='/'):
             return Inv(right)
-        case _:
+        case Operator_t(op='not'):
             raise NotImplementedError(f"TODO: {op=}")
-        
+        case Operator_t(op='@'):
+            raise NotImplementedError(f"TODO: {op=}")
+        case Operator_t(op='...'):
+            raise NotImplementedError(f"TODO: {op=}")
+        case _:
+            raise ValueError(f"INTERNAL ERROR: {op=} is not a unary prefix operator")
+
+ 
 def parse_unary_postfix_op(left:list[Token], op:Token) -> AST | IntermediateAST:
     """
     create a unary postfix operation AST from the left and op tokens
@@ -531,7 +538,7 @@ def parse_unary_postfix_op(left:list[Token], op:Token) -> AST | IntermediateAST:
 
     match op:
         case Operator_t(op='!'):
-            return Factorial(left)
+            return Fact(left)
         case _:
             raise NotImplementedError(f"TODO: {op=}")
 
@@ -575,57 +582,8 @@ def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
         
         case [Block_t(body=list()) as block]:
             return parse_block(block)
-
-        # <atom> <juxtapose> <atom>
-        # case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Juxtapose_t(), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
-        #     left, right = parse_chain([left]), parse_chain([right])
-        #     return Juxtapose(left, right)
         
-        # <atom> <comma> <atom>
-        # TODO: tuple maker needs to chain multiple commas into a single tuple, but this will make a tuple binary tree...
-        # case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Comma_t(), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
-        #     left, right = parse_chain([left]), parse_chain([right])
-        #     raise NotImplementedError("")
-        #     return Tuple(left, right)
-
-        # # <atom> <binop> <atom>
-        # case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, Operator_t(op=str(op)), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
-        #     left, right = parse_chain([left]), parse_chain([right])
-        #     if op == '+':
-        #         return Add(left, right)
-        #     elif op == '-':
-        #         return Sub(left, right)
-        #     elif op == '*':
-        #         return Mul(left, right)
-        #     elif op == '/':
-        #         return Div(left, right)
-        #     elif op == '%':
-        #         return Mod(left, right)
-        #     elif op == '^':
-        #         return Pow(left, right)
-        #     else:
-        #         raise ValueError(f"INTERNAL ERROR: unexpected operator in chain: {op=}")
-        
-        # case [Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as left, ShiftOperator_t(op=str(op)), Identifier_t() | Integer_t() | BasedNumber_t() | RawString_t() | String_t() | Block_t() | TypeParam_t() | Hashtag_t() | DotDot_t() as right]:
-        #     left, right = parse_chain([left]), parse_chain([right])
-        #     if op == '<<':
-        #         return LeftShift(left, right)
-        #     elif op == '>>':
-        #         return RightShift(left, right)
-        #     elif op == '<<<':
-        #         return LeftRotate(left, right)
-        #     elif op == '>>>':
-        #         return RightRotate(left, right)
-        #     elif op == '<<!':
-        #         return LeftRotateCarry(left, right)
-        #     elif op == '!>>':
-        #         return RightRotateCarry(left, right)
-        #     else:
-        #         raise ValueError(f"INTERNAL ERROR: unexpected operator in chain: {op=}")
-
-        
-        
-        
+    
     # Base case
     splits = lowest_precedence_split(tokens)
 
