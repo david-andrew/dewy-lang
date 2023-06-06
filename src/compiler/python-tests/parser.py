@@ -369,29 +369,31 @@ def operator_precedence(t:Token) -> int | qint:
     """
     precedence:
     [HIGHEST]
-    @
+    (prefix) @
     . <jux call>
+    (prefix) + - * / not ...
+    (postfix) ? `
     ^                                   //right-associative
     <jux mul>
     / * %
     + -
     << >> <<< >>> <<! !>>
     ,                                   //tuple maker
-    =? >? <? >=? <=? not=? <=>
-    and nand
-    xor xnor                            //following C's precedence, and > xor > or
-    or nor
+    =? >? <? >=? <=? not=? <=> is? isnt? @?
+    and nand &
+    xor xnor                            //following C's precedence: and > xor > or
+    or nor |
     = .= <op>= .<op>=  (e.g. += .+=)    //right-associative (but technically causes a type error since assignments can't be chained)
+    (postfix) ;
     <seq> (i.e. space)
     [LOWEST]
 
     TODO:
-    - add operators: ... not ` ? & | as in transmute @? |> <| => -> <-> <- : ;
+    - add operators: in as transmute |> <| => -> <-> <- :
 
     [Notes]
     .. for ranges is not an operator. it uses juxtapose to bind to left/right arguments (or empty), and type-checks left and right
     if-else-loop chain expr is more like a single unit, so it doesn't really have a precedence. but they act like they have the lowest precedence since the expressions they capture will be full chains only broken by space/seq
-    unary + - / * have the same precedence as their binary counterparts (all of which are left-associative) 
     """
 
     match t:
