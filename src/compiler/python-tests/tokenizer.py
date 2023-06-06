@@ -176,7 +176,7 @@ unary_prefix_operators = {'+', '-', '*', '/', 'not', '@', '...'}
 unary_postfix_operators = {'?', '`', ';'}
 binary_operators = {
         '+', '-', '*', '/', '%', '^',
-        '=?', '>?', '<?', '>=?', '<=?', 'in?', '<=>',
+        '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
         '|', '&',
         'and', 'or', 'nand', 'nor', 'xor', 'xnor', '??',
         '=', ':=', 'as', 'in', 'transmute',

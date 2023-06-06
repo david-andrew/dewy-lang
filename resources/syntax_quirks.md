@@ -37,3 +37,13 @@ result = sin(x)^2 + cos(x)^2
 ```
 
 The particular precedence chosen is based on the arguments. If the left argument is callable, then the jux-call operator will be used. else if it is a numeric expression, then the jux-mul operator will be used. **If possible, this will be determined at compile-time, otherwise it will be determined at runtime**.
+
+
+
+# preset constants
+## unmodifiable constants
+- `pi`
+- `inf`
+
+## modifiable constants
+- `i`, `j`, `k` //should have a warning when trying to use them with numbers if they've been redefined
