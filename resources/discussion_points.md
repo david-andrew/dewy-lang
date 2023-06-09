@@ -110,7 +110,7 @@ row_vec = [
 ```
 
 
-## How does multidimensional indexing work? [DONE: each dimension access is separated by spaces. Also ranges may not contain any spaces]
+## How does multidimensional indexing work? [DONE: each dimension access is separated by spaces as in regular arrays. Parsing precedence will determine what attaches to .. and user's can use ()/[] to disambiguate]
 e.g. if you have this 3D array, how can you index each dimension with a range?
 ```
 my_tensor = [
@@ -163,6 +163,7 @@ my_tensor[..2,0 .. () [0 4 5]] // should return a 4D tensor of shape [3 5 1 3]
     i.e. each space separated thing accesses that dimension. If you want to access multiple elements in a particular dimension, you need to wrap them up so that they are a single expression in the indexing block
 
 
+Basically the question really comes down to how are lists containing ranges handled from a parsing point of view? In generally, juxtaposing a tensor with a list will try to access the tensor. Though actually, since matrix multiplication is a thing, aren't there contexts where we'd want it to multiply rather than access? Probably need the type of the left and right to determine if it's a multiply or an access... Perhaps array literals on the right-hand-side cannot be multiplied with juxtaposition, and will always be interpreted as accessing? still needs type information, but it's a pretty good clear rule.
 
 
 

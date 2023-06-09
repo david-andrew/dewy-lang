@@ -370,7 +370,7 @@ def operator_precedence(t:Token) -> int | qint:
     precedence:
     [HIGHEST]
     (prefix) @
-    . <jux call>
+    . <jux call> <jux index access>
     (prefix) + - * / not ...
     (postfix) ? `
     ^                                   //right-associative
