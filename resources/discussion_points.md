@@ -398,6 +398,32 @@ sin(2pi(rad))
 
 so perhaps we could have a reversed version that juxtaposes without flipping around...
 ```
-sin <|> 2pi(rad)
 sin <| 2pi(rad)
+```
+
+
+## Piping multiple arguments vs piping a list
+since I want to be able to pipe multiple arguments, as well as a list, perhaps there could be a spread pipe operator that spreads the arguments out, e.g.
+
+```
+a, b, c |*> myfunc
+```
+
+whereas just using the regular pipe would treat the list as a single argument
+```
+a, b, c |> myfunc
+```
+
+This probably also implies the existence of a `<*|` reverse order spread pipe operator
+
+Alternative syntaxes for the operator:
+```
+*>
+<*
+
+[>
+<]
+
+:>
+<:
 ```
