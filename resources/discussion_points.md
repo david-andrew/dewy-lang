@@ -232,8 +232,11 @@ result = a(dot)b
 
 ## How to handle unit dimensionality
 see: 
-* https://www.youtube.com/watch?v=bI-FS7aZJpY
-* https://www.youtube.com/watch?v=KmfdeWd0RMk
+* Seven Dimensions: https://www.youtube.com/watch?v=bI-FS7aZJpY
+* a joke about measurement: https://www.youtube.com/watch?v=KmfdeWd0RMk
+
+Also related:
+- cursed units: https://www.youtube.com/watch?v=kkfIXUjkYqE
 
 
 
