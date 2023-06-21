@@ -376,7 +376,7 @@ def operator_precedence(t:Token) -> int | qint:
     [HIGHEST]
     (prefix) @
     . <jux call> <jux index access>
-    (prefix) + - * / not ...
+    (prefix) not ...
     (postfix) ? `
     ^                                   //right-associative
     <jux mul>
