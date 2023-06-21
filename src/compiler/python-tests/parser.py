@@ -74,9 +74,14 @@ import pdb
 
 
 
+# Parsing process:
+# list[Token] -> Chain[Chain] -> AST
+
+
 # [TASKS]
 # - have a post tokanization step for combining chains of operators into opchains (e.g. x^/-2, needs to chain the ^/- into a single op)
 #   - this is so that split by lowest precedence works because it only considers the precedence of the first operator. it's harder if they're not combined
+# - also need to wrap up conditional/etc. blocks into a single token
 # - dewy AST stuff:
 #   --> every AST needs to have a .eval_type() function that will determine what type the AST evaluates to
 #   --> TBD. maybe make it so that dewy ASTs can handle juxtapose by themselves, rather than having to figure it out in the parser? or have there be multiple parser passes over the generated AST...
