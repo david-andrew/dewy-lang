@@ -20,7 +20,7 @@ class Parser:
     def expression(self, precedence=0):
         token = self.current
 
-        if token.type in {"+", "-"}:
+        if token.type in {"+", "-", "*", "/", "^"}:
             self.eat(token.type)
             left = UnaryOpNode(token.type, self.expression(10))
         else:
@@ -28,9 +28,10 @@ class Parser:
             left = IntNode(token.value)
 
         while self.current is not None and self.current.type in OPERATORS and OPERATORS[self.current.type] > precedence:
-            token = self.current
-            self.eat(token.type)
-            left = BinOpNode(left, token.type, self.expression(OPERATORS[token.type]))
+            op = self.current.type
+            self.eat(op)
+            right = self.expression(10 if self.current.type in {"*", "/"} else OPERATORS[op])
+            left = BinOpNode(left, op, right)
 
         return left
 
@@ -72,6 +73,7 @@ def parse_expression(expression):
     return parser.parse()
 
 ast = parse_expression("2+3*5")
+ast2 = parse_expression("10^/-3")
 # This will create an abstract syntax tree (AST) representing the expression.
 import pdb; pdb.set_trace()
 ...

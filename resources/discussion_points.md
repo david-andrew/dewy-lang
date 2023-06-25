@@ -443,3 +443,46 @@ perhaps the dot syntax would work here
 
 
 (random note for later. what about handling vectorized calls in general, e.g. `myfunc.[1 2 3]`, how is juxtapose vs dot handled there to make that clear?)
+
+
+
+## Execution order and Lazy evaluation [function body is lazily evaluated. functions can capture any local variables at that scope, even if they are defined later, so long as they are defined by the time the function is called]
+Python lets you use functions that are defined later in the file (if you use it inside a function definition). But there's not a clear easy way to do that in dewy
+
+```
+
+let func1 = () => {
+    printl"func1"
+    func2
+}
+
+let func2 = () => printl"func2"
+```
+
+Nice languages let this work, e.g. in python the definition of func2 is available because the function names are evaluated first, and then the inner declarations are evaluated later. But I'm not sure this will work in dewy, because defining a function is the same as assigning a variable, so what if we did something like this
+
+```
+let apple = func2
+
+let func2 = () => "func2"
+```
+
+
+Though now that I'm looking at it, I think the way to handle it is that function bodies are not evaluated at the point they are defined, they are evaluated when they are used, which is very much like python.
+
+I was also thinking about making the language broadly lazily evaluated, but I think that runs into issues with how people would expect procedural code to evaluate. I think in general things should probably be greedy, unless using a lazy construct, such as a function body
+
+
+Weird things I think this may imply:
+
+```
+let func1 = () => {
+    printl'apple is {apple}'
+}
+
+apple = 10
+
+func1()
+```
+
+which technically would work. If however func1 was called somewhere before apple was defined, it would fail. This weirds me out a bit, because what if there is some variable that the user defines in another file that the function is expected to capture? I feel like that's getting too complicated to handle (let alone being a bad practice)--perhaps we just disallow non-local values like that to be captured. Only values in the scope where the function is defined may be captured. But they can be defined after the function definition, so that we can have the nice behavior where function definition order isn't important.

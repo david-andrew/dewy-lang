@@ -19,30 +19,16 @@ import pdb
 TODO:
 - full pipeline for hello world:
   [x] tokenize
-  [ ] chain (plus ability to (not recursively) check type of lowest links (but no larger chain expressions))
-  [ ] parse (building up types based on expressions and types of lowest levels)
+  [ ] chain (still no typing, just group single expressions together)
+  [ ] parse (building up types based on expressions and types of lowest levels/outside in)
 """
 
 
-class LinkType(Enum):
-    number = auto()
-    string = auto()
-    function = auto()
-    #etc...
-
-
-class Link:
-    def __init__(self, token:Token, type:LinkType):
-        self.token = token
-        self.type = type
-
-
-class Chain(list[Token|Link]): 
-    # A chain is a list of tokens that is directly parsable as an expression without any other syntax
-    # all other syntax is wrapped up into compound tokens
-    # it should literally just be a sequence of atoms and operators
-    ...
-
+# There is no chain class
+# A chain is just a list of tokens that is directly parsable as an expression without any other syntax
+# all other syntax is wrapped up into compound tokens
+# it should literally just be a sequence of atoms and operators
+    
 
 
 
