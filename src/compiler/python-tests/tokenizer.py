@@ -171,6 +171,14 @@ idempotent_tokens = {
 pair_opening_delims = '{(['
 pair_closing_delims = '})]'
 
+# which closing delimiters are allowed for each opening delimiter
+valid_delim_closers = {
+    '{': '}',
+    '(': ')]',
+    '[': '])',
+    # '<': '>'
+}
+
 #list of all operators sorted from longest to shortest
 unary_prefix_operators = {'+', '-', '*', '/', 'not', '@', '...'}
 unary_postfix_operators = {'?', '`', ';'}
@@ -814,9 +822,13 @@ def tokenize(src:str) -> list[Token]:
     (i, block) = res
     tokens = block.body
 
+    # ensure that all blocks have valid open/close pairs
+    validate_block_braces(tokens)
+
     return tokens
 
 def traverse_tokens(tokens:list[Token]) -> Generator[Token, None, None]:
+    """Yields all tokens in a list of tokens, including tokens in nested blocks."""
     for token in tokens:
         yield token
 
@@ -833,6 +845,25 @@ def traverse_tokens(tokens:list[Token]) -> Generator[Token, None, None]:
                     for t in traverse_tokens(child.body):
                         yield t
             continue
+
+
+def validate_block_braces(tokens:list[Token]) -> None:
+    """
+    Checks that all blocks have valid open/close pairs.
+
+    For example, ranges may have differing open/close pairs, e.g. [0..10), (0..10], etc.
+    But regular blocks must have matching open/close pairs, e.g. { ... }, ( ... ), [ ... ]
+    Performs some validation, without knowing if the block is a range or a block. 
+    So more validation is needed when the actual block type is known.
+
+    Raises:
+        AssertionError: if a block is found with an invalid open/close pair
+    """
+    for token in traverse_tokens(tokens):
+        if isinstance(token, Block_t):
+            assert token.left in valid_delim_closers, f'INTERNAL ERROR: left block opening token is not a valid token. Expected one of {[*valid_delim_closers.keys()]}. Got \'{token.left}\''
+            assert token.right in valid_delim_closers[token.left], f'ERROR: mismatched opening and closing braces. For opening brace \'{token.left}\', expected one of \'{valid_delim_closers[token.left]}\''
+        
 
 def validate_functions():
 

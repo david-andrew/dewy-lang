@@ -427,3 +427,19 @@ Alternative syntaxes for the operator:
 :>
 <:
 ```
+
+
+
+Also, what about vectorized pipes? e.g. say you have a function that takes a single argument, but you want to vectorize passing in a list
+
+```
+[1 2 3] |> myfunc
+```
+
+perhaps the dot syntax would work here
+```
+[1 2 3] .|> myfunc
+```
+
+
+(random note for later. what about handling vectorized calls in general, e.g. `myfunc.[1 2 3]`, how is juxtapose vs dot handled there to make that clear?)

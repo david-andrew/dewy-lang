@@ -66,6 +66,8 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
     Comma_t,
 )
 
+from chainer import invert_whitespace
+
 from utils import based_number_to_int
 from dataclasses import dataclass
 from rich import print, traceback; traceback.install(show_locals=True)
@@ -107,12 +109,7 @@ import pdb
 
 
 
-valid_brace_pairs = {
-    '{': '}',
-    '(': ')]',
-    '[': '])',
-    # '<': '>'
-}
+
 
 unary_chain_prependers = {
     Operator_t: lambda t: t.op in unary_prefix_operators,
@@ -145,68 +142,6 @@ atom_tokens = (
     Hashtag_t,
     DotDot_t,
 )
-
-
-#juxtapose singleton token so we aren't wasting memory
-jux = Juxtapose_t(None)
-
-
-
-def validate_block_braces(tokens:list[Token]) -> None:
-    """
-    Checks that all blocks have valid open/close pairs.
-
-    For example, ranges may have differing open/close pairs, e.g. [0..10), (0..10], etc.
-    But regular blocks must have matching open/close pairs, e.g. { ... }, ( ... ), [ ... ]
-    Performs some validation, without knowing if the block is a range or a block. 
-    So more validation is needed when the actual block type is known.
-
-    Raises:
-        AssertionError: if a block is found with an invalid open/close pair
-    """
-    for token in traverse_tokens(tokens):
-        if isinstance(token, Block_t):
-            assert token.left in valid_brace_pairs, f'INTERNAL ERROR: left block opening token is not a valid token. Expected one of {[*valid_brace_pairs.keys()]}. Got \'{token.left}\''
-            assert token.right in valid_brace_pairs[token.left], f'ERROR: mismatched opening and closing braces. For opening brace \'{token.left}\', expected one of \'{valid_brace_pairs[token.left]}\''
-        
-
-
-def invert_whitespace(tokens: list[Token]) -> None:
-    """
-    removes all whitespace tokens, and insert juxtapose tokens between adjacent pairs (i.e. not separated by whitespace)
-
-    Args:
-        tokens (list[Token]): list of tokens to modify. This is modified in place.
-    """
-    i = 0
-    while i < len(tokens):
-        # delete whitespace if it comes up
-        if isinstance(tokens[i], WhiteSpace_t):
-            tokens.pop(i)
-            continue
-
-        # recursively handle inverting whitespace for blocks
-        if isinstance(tokens[i], (Block_t, TypeParam_t)):
-            invert_whitespace(tokens[i].body)
-        elif isinstance(tokens[i], String_t):
-            for child in tokens[i].body:
-                if isinstance(child, Block_t):
-                    invert_whitespace(child.body)
-
-        # insert juxtapose if no whitespace between tokens
-        if i + 1 < len(tokens) and not isinstance(tokens[i + 1], WhiteSpace_t):
-            tokens.insert(i + 1, jux)
-            i += 1
-        i += 1
-
-    #finally, remove juxtapose tokens next to operators that are not whitespace sensitive
-    i = 1
-    while i < len(tokens) - 1:
-        left,middle,right = tokens[i-1:i+2]
-        if isinstance(middle, Juxtapose_t) and (isinstance(left, (Operator_t, ShiftOperator_t, Comma_t)) or isinstance(right, (Operator_t, ShiftOperator_t, Comma_t))):
-            tokens.pop(i)
-            continue
-        i += 1
 
 
 
@@ -750,9 +685,6 @@ def test(path:str):
     # tprint(Block_t(left='{', right='}', body=tokens))
     # print('\n\n\n')
 
-    # ensure that all blocks have valid open/close pairs
-    validate_block_braces(tokens)
-
     # remove whitespace, and insert juxtapose tokens
     invert_whitespace(tokens)
     # print(f'juxtaposed tokens:')
@@ -774,14 +706,17 @@ def test(path:str):
 
 
 def test2():
-    #load in the specific file and split the lines
+    """
+    Parse each line of syntax3.dewy one at a time for testing
+    """
+    #load the syntax3 file and split the lines
     with open('../../../examples/syntax3.dewy') as f:
         lines = f.read().splitlines()
 
     # tokenize each line and remove ones that are just whitespace
-    tokens = [tokenize(line) for line in lines]
-    for line in tokens: invert_whitespace(line)
-    tokens = [token for token in tokens if len(token) > 0]
+    token_lines = [tokenize(line) for line in lines]
+    for line in token_lines: invert_whitespace(line)
+    token_lines = [line for line in token_lines if len(line) > 0]
 
     #should have a pass to combine dots with operators (e.g. .+ ./ .= etc.)
     #and combine operators with assignment (e.g. +=, -=, etc.)
@@ -789,7 +724,7 @@ def test2():
     #TODO: make a list of valid combinable operators. basically any math operators
 
     #match the ast for each line
-    for line in tokens:
+    for line in token_lines:
         # print(f'{line=}')
         ast0 = parse0(line)
         print(ast0)
