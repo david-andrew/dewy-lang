@@ -77,9 +77,36 @@ def invert_whitespace(tokens: list[Token]) -> None:
 
 
 
+def bundle_conditionals(tokens: list[Token]) -> None:
+    """Convert sequences of tokens that represent conditionals (if, loop, etc.) into a single expression token"""
+    raise NotImplementedError
+    #TODO: should scan through, and if it finds a conditional, raise the not implemented error
+
+def chain_operators(tokens: list[Token]) -> None:
+    """Convert consecutive operator tokens into a single opchain token"""
+    raise NotImplementedError
+    #TODO: should scan through, and if it finds a chain of operators, raise the not implemented error
 
 
+def chain(tokens: list[Token]) -> list[list[Token]]:
+    # remove whitespace, and insert juxtapose tokens
+    invert_whitespace(tokens)
 
+    # bundle up conditionals into single token expressions
+    bundle_conditionals(tokens)
+
+    # combine operator chains into a single operator token
+    # TODO: skip for now. not needed by hello world
+    # also may not be necessary if we use a pratt parser. was necessary for split by lowest precedence parser
+    chain_operators(tokens)
+
+    # make the actual list of chains
+
+    # based on types, replace jux with jux_mul or jux_call
+    # TODO: actually this probably would need to be done during parsing, since we can't get a type for a complex/compound expression...
+
+    pdb.set_trace()
+    ...
 
 
 
@@ -88,25 +115,11 @@ def test():
         src = f.read()
 
     tokens = tokenize(src)
-
-    # remove whitespace, and insert juxtapose tokens
-    invert_whitespace(tokens)
-
-    # bundle up conditionals into single tokens
-    # TODO: skip for now. not needed by hello world
-
-    # combine operator chains into a single operator token
-    # TODO: skip for now. not needed by hello world
-    # also may not be necessary if we use a pratt parser. was necessary for split by lowest precedence parser
-
-    # make the actual list of chains
-
-    # based on types, replace jux with jux_mul or jux_call
-    # TODO: actually this probably would need to be done during parsing, since we can't get a type for a complex/compound expression...
-
+    chains = chain(tokens)
 
     pdb.set_trace()
     ...
+    
 
 
 if __name__ == '__main__':
