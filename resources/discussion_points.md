@@ -486,3 +486,90 @@ func1()
 ```
 
 which technically would work. If however func1 was called somewhere before apple was defined, it would fail. This weirds me out a bit, because what if there is some variable that the user defines in another file that the function is expected to capture? I feel like that's getting too complicated to handle (let alone being a bad practice)--perhaps we just disallow non-local values like that to be captured. Only values in the scope where the function is defined may be captured. But they can be defined after the function definition, so that we can have the nice behavior where function definition order isn't important.
+
+For exported functions, any captured values must be defined before the call to export, which is treated as the point that any external code will call the function from.
+
+
+
+## Import/Export syntax [`import <thing(s)> [from <file path>]` and `export <thing(s)>`]
+
+```
+// importing from local files
+import myfun from p"stuff.dewy"
+import myfun2, myfun3 from p"stuff2.dewy"
+
+// importing stdlib stuff. TBD on if any of this stuff is auto-imported
+import IO                       //std lib import whole module object
+let [sin cos tan] = import Math //std lib break out specific values
+
+// importing from installed packages
+import RandomForest from sklearn
+```
+
+technically sin, cos, tan should all be available without having to import them. It's more for installed package syntax.
+
+## Global functions vs object methods
+Only in very rare instances will there be globally available functions. It is mainly reserved for cases where it is a fundamental aspect of the language, rather than an intrinsic property of the object.
+
+Python's `len` function absolutely would not qualify. It should have been a property on all of the objects that have length!
+
+- many math functions, (e.g. `abs` `min` `max` `sin` `cos` `tan` etc.) that take in a numeric expression
+- autodiff which takes in (what? perhaps an expression with symbolic variables in it)
+
+
+## Unified naming for length/size/shape/dim/etc.
+(TODO) these need to be picked, and be consistent across objects of the same type. Could have multiple of these if it makes sense/they represent usually different things.
+
+## unified naming for vectors/matrices/tensors/etc.
+basically I want a single type that represents a regular grid of numbers. Technically tensor is the most general, but IDK if I like the syntax. I'm leaning towards everything just be called `vec` or `vector`
+
+I think maybe a separate notion of list is unnecessary
+
+## Handling symbolics
+- create symbolic expression
+  - evaluate expression by setting value of symbolic variables
+  - operate on expression, e.g. `autodiff`
+  - use in a larger expression `expr1 + expr2`
+
+e.g.
+```
+let W: vec[5 2] = symbol
+let b: vec[5] = symbol
+
+let x: vec[2] = symbol
+
+let y = W * x + b
+let dydW = autodiff(y, W)
+
+//evaluate expression
+let Wi = randn[5 2]
+let bi = randn[5]
+let xi = randn[2]
+
+let grad = dydW(W=Wi, b=bi, x=xi)
+```
+honestly though this is actually competing a bit with just the function notation
+
+```
+let y = (W:vec[5 2], b:vec[5], x:vec[2]) => W * x + b
+let dydW = autodiff(y, W) //though how do we specify which variable? what does pytorch do?
+```
+
+I do like the idea of having a symbolic type. Might also be good to keep them separate because you can restrict what types of operations are valid on symbolics, whereas functions are much more general. More consideration needed though.
+
+## Coupling variable lifetimes with resources
+imagine I want to make a temporary file for doing some operation, and then delete the temporary file when I'm done. This will typically be over the same scope as some process. I want some way to automatically have the cleanup code for deleting the file be called when whatever coupled variable goes out of scope. It shouldn't matter how the code exits, e.g. if there's an error, cleanup should happen anyways
+
+I think python's with statement syntax is a bit too verbose in that it requires you to explicitly wrap whatever process in the context. Instead I want something more like this:
+
+```
+let file = open("temp.txt", "w")
+//some sort of binding to when file variable goes out of scope
+#on_cleanup(file, () => file.close())
+
+//do stuff with file
+```
+
+Then no matter how the scope is exited, the file will always be closed. And the programmer doesn't have to worry about making sure that some context covers the right bounds or anything. Instead it is literally tied to the lifetime of the variable.
+
+This is similar to python's weak references
