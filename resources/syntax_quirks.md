@@ -39,6 +39,27 @@ result = sin(x)^2 + cos(x)^2
 The particular precedence chosen is based on the arguments. If the left argument is callable, then the jux-call operator will be used. else if it is a numeric expression, then the jux-mul operator will be used. **If possible, this will be determined at compile-time, otherwise it will be determined at runtime**.
 
 
+## Ambiguous Jux Parses
+This is a corollary to jux representing two operators of different precedence. Basically the way that the different precedence levels will be handled is that at parse time, the type of the left operand of the jux will be checked to see if it is a function, indicating the higher precedence jux-call operator, or if it is numeric, indicating the lower precedence jux-mul operator. 
+
+Given this, it should be possible to construct a parse where if it is interpreted as jux-call, then the left operand is not a function, but if it is interpreted as jux-mul, then the left operand is not interpreted as a number. Though I seem to be having trouble constructing an example
+```
+a^(f)(x)^b
+```
+
+To get this to be a problem, you'd need to construct something that looks like a function when interpreting the operator as jux-mul, but looks like a number when the operator is jux-call. I'm not gonna worry for now
+
+## Juxtapose call is right associative while juxtapose multiply is left associative
+```
+//functions f and g
+f(g)(x)  // f(g(x))
+
+// numbers a b and c
+a(b)(c) // (a*b)*c
+```
+
+TBD if this can cause parse ambiguity
+
 
 # preset constants
 ## unmodifiable constants
