@@ -107,47 +107,47 @@ range[0, 2..10] * product[-5..5] >> 3
 10^/-2
 
 // weird syntax but technically not a syntax error. possibly a type error though
-mat[0,2..(4) [1..4) 1,3..]
-mat[0,3..end [1..3) [1,2 4,5]]
-mat[1,2,3 (0..end) [1,3..end)]
+myvec[0,2..(4) [1..4) 1,3..]
+myvec[0,3..end [1..3) [1,2 4,5]]
+myvec[1,2,3 (0..end) [1,3..end)]
 
 // lots of range examples
 [1 .. 5]
 [1 ..5]
 [1.. 5]
 [1..5]
-mat[() [5 6] 3..]
-mat[1.. [1..3)]
-mat[[0 2] [1 3]]
-mat[() 0,3..end 1,4]
-mat[0..3 2..5]
-mat[[0 2 4] 1..4 1,3..]
-mat[0,3..end [1..3) [1 2 4 5]]
-mat[1,2,3 [0..end) [1,3..end]]
-mat[1 2 3 [0..end) [1,3..end]]
-mat[() 0,3..end [1 4]]
-mat[0,2..end 1..4 [0 2 4]]
-mat[() 1..end 0,2..]
-mat[[0 2 4] [1 3 5] (0..end) [3..6]]
-mat[0,2.. [1..4) [1 3 5]]
-mat[[0 3] [1 4] (0..end)]
+myvec[() [5 6] 3..]
+myvec[1.. [1..3)]
+myvec[[0 2] [1 3]]
+myvec[() 0,3..end 1,4]
+myvec[0..3 2..5]
+myvec[[0 2 4] 1..4 1,3..]
+myvec[0,3..end [1..3) [1 2 4 5]]
+myvec[1,2,3 [0..end) [1,3..end]]
+myvec[1 2 3 [0..end) [1,3..end]]
+myvec[() 0,3..end [1 4]]
+myvec[0,2..end 1..4 [0 2 4]]
+myvec[() 1..end 0,2..]
+myvec[[0 2 4] [1 3 5] (0..end) [3..6]]
+myvec[0,2.. [1..4) [1 3 5]]
+myvec[[0 3] [1 4] (0..end)]
 
 // optional commas
-mat[0,2..end 1..4 [0 2 4]]
-mat[0, (1,3..end)]
-mat[(0,2..end)]
-mat(0,2..end)
-mat[(0,2..end), [1 3 5]]
-mat[[0,2..end), [1,3..end)]
+myvec[0,2..end 1..4 [0 2 4]]
+myvec[0, (1,3..end)]
+myvec[(0,2..end)]
+myvec(0,2..end)
+myvec[(0,2..end), [1 3 5]]
+myvec[[0,2..end), [1,3..end)]
 
 // mathy range indices
-mat[0..(end-1), (1,3..end/2)]
-mat[(0,2*sqrt(2)..end) [1 3 5].*2]
-mat[(0..end*0.75), 1..(end-2)]
-mat[(1+1,2*2..end-1) [1 3 5] .- 1]
-mat[(-3,3..end*0.9), [1 3] .* (end/2)]
-mat[(0..end-1)/2 2..(end*0.5)]
-mat[(0,3*sin(pi/3)..end-1), [1 3] + end/4]
+myvec[0..(end-1), (1,3..end/2)]
+myvec[(0,2*sqrt(2)..end) [1 3 5].*2]
+myvec[(0..end*0.75), 1..(end-2)]
+myvec[(1+1,2*2..end-1) [1 3 5] .- 1]
+myvec[(-3,3..end*0.9), [1 3] .* (end/2)]
+myvec[(0..end-1)/2 2..(end*0.5)]
+myvec[(0,3*sin(pi/3)..end-1), [1 3] + end/4]
 
 
 //TODO: how to handle the fact that juxtapose has different precedence based on if its a function call vs a multiply?
