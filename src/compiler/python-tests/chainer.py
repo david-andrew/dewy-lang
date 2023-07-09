@@ -6,7 +6,8 @@ from tokenizer import (Token, tokenize, full_traverse_tokens,
     Operator_t,
     ShiftOperator_t,
     Comma_t,
-    Juxtapose_t
+    Juxtapose_t,
+    Keyword_t
 )
 
 from enum import Enum, auto
@@ -105,15 +106,25 @@ def invert_whitespace(tokens: list[Token]) -> None:
 
 # pdb.set_trace()
 
+def desugar_ranges(tokens: list[Token]) -> None:
+    """fill in empty expressions on the left/right of any range `..` that lacks left or right operands"""
+    #TODO: also maybe put range in a group with []
+    raise NotImplementedError
+
+
 
 def bundle_conditionals(tokens: list[Token]) -> None:
     """Convert sequences of tokens that represent conditionals (if, loop, etc.) into a single expression token"""
-    # pdb.set_trace()
     
-    # raise NotImplementedError
     #TODO: should scan through, and if it finds a conditional, raise the not implemented error
     #TODO: need to check that nested conditionals as well as chained conditionals are handled properly
     #      e.g. `if a b`, `if a b else if c d else f`, `if a if b c else d`
+    
+    for i, token, stream in (gen := full_traverse_tokens(tokens)):
+        if isinstance(token, Keyword_t):
+            #TODO: handle bundling up the keyword into an expression
+            raise NotImplementedError
+
 
 def chain_operators(tokens: list[Token]) -> None:
     """Convert consecutive operator tokens into a single opchain token"""
