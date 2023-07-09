@@ -1,4 +1,4 @@
-from tokenizer import (Token, tokenize, traverse_tokens,
+from tokenizer import (Token, tokenize, full_traverse_tokens,
     WhiteSpace_t,
     Block_t,
     TypeParam_t,
@@ -136,7 +136,7 @@ def chain_operators(tokens: list[Token]) -> None:
            
     """
 
-    for i, token, stream in (gen := traverse_tokens(tokens)):
+    for i, token, stream in (gen := full_traverse_tokens(tokens)):
        
         pdb.set_trace()
         ...

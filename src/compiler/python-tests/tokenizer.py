@@ -834,6 +834,20 @@ def full_traverse_tokens(tokens:list[Token]) -> Generator[tuple[int, Token, list
     So long as modifications do not occur before the current token, this will safely iterate over all tokens.
     This will not yield string or escape chunks in strings, but will yield interpolated blocks.
 
+    While traversing, the user can overwrite the current index by calling .send(new_index).
+
+    e.g.
+    ```python
+    gen = full_traverse_tokens(tokens)
+    for i, token, stream in gen:
+        #do something with current token
+        #...
+
+        #maybe overwrite the current index
+        if should_overwrite:
+            gen.send(new_index)
+    ```
+
     Do not call .send() twice in a row without calling next() in between. This will cause unexpected behavior.
 
     Args:
@@ -863,7 +877,7 @@ def full_traverse_tokens(tokens:list[Token]) -> Generator[tuple[int, Token, list
 
         # only calls to next() will continue execution. calls to .send do nothing wait
         if overwrite_i is not None:
-            yield
+            assert (yield) is None, ".send() may only be called once per iteration."
             i = overwrite_i
         else:
             i += 1
@@ -909,8 +923,7 @@ def validate_block_braces(tokens:list[Token]) -> None:
     Raises:
         AssertionError: if a block is found with an invalid open/close pair
     """
-    # for token in traverse_tokens(tokens):
-    for _, token, _ in mutate_traverse_tokens(tokens):
+    for token in traverse_tokens(tokens):
         if isinstance(token, Block_t):
             assert token.left in valid_delim_closers, f'INTERNAL ERROR: left block opening token is not a valid token. Expected one of {[*valid_delim_closers.keys()]}. Got \'{token.left}\''
             assert token.right in valid_delim_closers[token.left], f'ERROR: mismatched opening and closing braces. For opening brace \'{token.left}\', expected one of \'{valid_delim_closers[token.left]}\''
