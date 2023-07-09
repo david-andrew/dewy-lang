@@ -318,6 +318,7 @@ def operator_precedence(t:Token) -> int | qint:
     / * %
     + -
     << >> <<< >>> <<! !>>
+    <jux range>
     ,                                   //tuple maker
     =? >? <? >=? <=? not=? <=> is? isnt? @?
     and nand &
@@ -332,7 +333,7 @@ def operator_precedence(t:Token) -> int | qint:
     - add operators: in as transmute |> <| => -> <-> <- :
 
     [Notes]
-    .. for ranges is not an operator. it uses juxtapose to bind to left/right arguments (or empty), and type-checks left and right
+    .. for ranges is not an operator, it is an expression. it uses juxtapose to bind to left/right arguments (or empty), and type-checks left and right
     if-else-loop chain expr is more like a single unit, so it doesn't really have a precedence. but they act like they have the lowest precedence since the expressions they capture will be full chains only broken by space/seq
     """
 
