@@ -1,4 +1,4 @@
-from tokenizer import (Token, tokenize, 
+from tokenizer import (Token, tokenize, traverse_tokens,
     WhiteSpace_t,
     Block_t,
     TypeParam_t,
@@ -19,7 +19,7 @@ import pdb
 TODO:
 - full pipeline for hello world:
   [x] tokenize
-  [ ] chain (still no typing, just group single expressions together)
+  [ ] chain (still no typing, just group single expressions together). Actually probably just leave as list[Token], and generate chains again at parse time!
   [ ] parse (building up types based on expressions and types of lowest levels/outside in)
 """
 
@@ -74,16 +74,75 @@ def invert_whitespace(tokens: list[Token]) -> None:
         i += 1
 
 
+# from typing import Generator, Any
+# def test_gen(l:list) -> Generator[Any, None, None]:
+#     i = 0
+#     overwrite_i = None
+#     while i < len(l):
 
+#         # overwrite the current index with received values
+#         if overwrite_i is not None:
+#             i = overwrite_i
+
+#         # send the current index to the user. possibly receive a new index to continue from
+#         overwrite_i = yield l[i]
+
+#         # calls to send should wait for the call to next before executing
+#         if overwrite_i is not None:
+#             yield
+#             continue
+
+#         # increment the index
+#         i += 1
+
+#     # handle when the received i was out of bounds 
+#     #   meaning a call to .send would raise StopIteration,
+#     #   but it should only be raised on calls to next()
+#     if overwrite_i is not None:
+#         yield
+
+# gen = test_gen([1,2,3,4,5])
+
+# pdb.set_trace()
 
 
 def bundle_conditionals(tokens: list[Token]) -> None:
     """Convert sequences of tokens that represent conditionals (if, loop, etc.) into a single expression token"""
-    raise NotImplementedError
+    # pdb.set_trace()
+    
+    # raise NotImplementedError
     #TODO: should scan through, and if it finds a conditional, raise the not implemented error
+    #TODO: need to check that nested conditionals as well as chained conditionals are handled properly
+    #      e.g. `if a b`, `if a b else if c d else f`, `if a if b c else d`
 
 def chain_operators(tokens: list[Token]) -> None:
     """Convert consecutive operator tokens into a single opchain token"""
+    """
+    A chain is represented by the following grammar:
+        #chunk = #prefix_op* #atom_expr (#postfix_op - ';')*
+        #chain = #chunk (#binary_op #chunk)* ';'?
+
+        #prefix_op = '+' | '-' | '*' | '/' | 'not' | '@' | '...'
+        #postfix_op = '?' | '`' | ';'
+        #binary_op = '+' | '-' | '*' | '/' | '%' | '^'
+          | '=?' | '>?' | '<?' | '>=?' | '<=?' | 'in?' | 'is?' | 'isnt?' | '<=>'
+          | '|' | '&'
+          | 'and' | 'or' | 'nand' | 'nor' | 'xor' | 'xnor' | '??'
+          | '=' | ':=' | 'as' | 'in' | 'transmute'
+          | '@?'
+          | '|>' | '<|' | '=>'
+          | '->' | '<->' | '<-'
+          | '.' | ':'
+           
+    """
+
+    for i, token, stream in (gen := traverse_tokens(tokens)):
+       
+        pdb.set_trace()
+        ...
+    
+    pdb.set_trace()
+    
     raise NotImplementedError
     #TODO: should scan through, and if it finds a chain of operators, raise the not implemented error
 
@@ -91,6 +150,8 @@ def chain_operators(tokens: list[Token]) -> None:
 def chain(tokens: list[Token]) -> list[list[Token]]:
     # remove whitespace, and insert juxtapose tokens
     invert_whitespace(tokens)
+
+    if len(tokens) == 0: return []
 
     # bundle up conditionals into single token expressions
     bundle_conditionals(tokens)
@@ -115,12 +176,34 @@ def test():
         src = f.read()
 
     tokens = tokenize(src)
-    chains = chain(tokens)
+
+    #chainer process
+    tokens = chain(tokens)
 
     pdb.set_trace()
     ...
     
 
+def test2():
+    """gauntlet of multiple tests from example file"""
+    with open('../../../examples/syntax3.dewyl') as f:
+        lines = f.readlines()
+
+    # filter out empty lines
+    lines = [l for line in lines if (l := line.strip())]
+
+    for line in lines:
+        tokens = tokenize(line)
+
+        #chainer process
+        tokens = chain(tokens)
+
+        #other stuff? pass to the parser? etc.
+
+    pdb.set_trace()
+    ...
+
 
 if __name__ == '__main__':
-    test()
+    # test()
+    test2()

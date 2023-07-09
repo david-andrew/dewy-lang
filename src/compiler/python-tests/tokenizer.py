@@ -827,24 +827,74 @@ def tokenize(src:str) -> list[Token]:
 
     return tokens
 
-def traverse_tokens(tokens:list[Token]) -> Generator[Token, None, None]:
-    """Yields all tokens in a list of tokens, including tokens in nested blocks."""
-    for token in tokens:
-        yield token
+def full_traverse_tokens(tokens:list[Token]) -> Generator[tuple[int, Token, list[Token]], None, None]:
+    """
+    Walk all tokens recursively, allowing for modification of the tokens list as it is traversed.
+    
+    So long as modifications do not occur before the current token, this will safely iterate over all tokens.
+    This will not yield string or escape chunks in strings, but will yield interpolated blocks.
 
+    Do not call .send() twice in a row without calling next() in between. This will cause unexpected behavior.
+
+    Args:
+        tokens: the list of tokens to traverse
+
+    Yields:
+        i: the index of the current token in the current token list
+        token: the current token
+        stream: the current token list
+    """
+
+    i = 0
+
+    while i < len(tokens):
+        """
+        1. get next token
+        2. send current to user
+        3. increment index (or overwrite it)
+        4. recurse into blocks
+        """
+
+        # get the current token
+        token = tokens[i]
+
+        # send the current index to the user. possibly receive a new index to continue from
+        overwrite_i = yield i, token, tokens
+
+        # only calls to next() will continue execution. calls to .send do nothing wait
+        if overwrite_i is not None:
+            yield
+            i = overwrite_i
+        else:
+            i += 1
+
+        # recursively handle traversing into blocks
         if isinstance(token, Block_t) or isinstance(token, TypeParam_t):
-            for t in traverse_tokens(token.body):
-                yield t
-            continue
+            yield from full_traverse_tokens(token.body)
         
+        # recursively handle traversing into strings (only interpolation blocks are yielded)
         if isinstance(token, String_t):
             for child in token.body:
-                if isinstance(child, Token):
-                    yield child
                 if isinstance(child, Block_t):
-                    for t in traverse_tokens(child.body):
-                        yield t
-            continue
+                    yield from full_traverse_tokens(child.body)
+
+
+def traverse_tokens(tokens:list[Token]) -> Generator[Token, None, None]:
+    """
+    Convenience function over full_traverse_tokens. Walk all tokens recursively
+    
+    Does not allow for modification of the tokens list as it is traversed.
+    To modify during traversal, use `full_traverse_tokens` instead.
+
+    Args:
+        tokens: the list of tokens to traverse
+
+    Yields:
+        token: the current token
+    """
+    for _, token, _ in full_traverse_tokens(tokens):
+        yield token
+
 
 
 def validate_block_braces(tokens:list[Token]) -> None:
@@ -859,7 +909,8 @@ def validate_block_braces(tokens:list[Token]) -> None:
     Raises:
         AssertionError: if a block is found with an invalid open/close pair
     """
-    for token in traverse_tokens(tokens):
+    # for token in traverse_tokens(tokens):
+    for _, token, _ in mutate_traverse_tokens(tokens):
         if isinstance(token, Block_t):
             assert token.left in valid_delim_closers, f'INTERNAL ERROR: left block opening token is not a valid token. Expected one of {[*valid_delim_closers.keys()]}. Got \'{token.left}\''
             assert token.right in valid_delim_closers[token.left], f'ERROR: mismatched opening and closing braces. For opening brace \'{token.left}\', expected one of \'{valid_delim_closers[token.left]}\''
