@@ -131,17 +131,7 @@ def match_single(token:Token, group:dict[type, None|Callable]) -> bool:
     cls = token.__class__
     return cls in group and (group[cls] is None or group[cls](token))
 
-atom_tokens = (
-    Identifier_t,
-    Integer_t,
-    BasedNumber_t,
-    RawString_t,
-    String_t,
-    Block_t,
-    TypeParam_t,
-    Hashtag_t,
-    DotDot_t,
-)
+
 
 
 
@@ -187,102 +177,6 @@ class UnknownBlock(IntermediateAST):
     left:str
     right:str
     body:list[IntermediateAST|AST]
-
-
-
-def _get_next_prefixes(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
-    prefixes = []
-    while len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op in unary_prefix_operators:
-        prefixes.append(tokens.pop(0))
-    return prefixes, tokens
-def _get_next_postfixes(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
-    postfixes = []
-    while len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op in unary_postfix_operators - {';'}:
-        postfixes.append(tokens.pop(0))
-    return postfixes, tokens
-def _get_next_atom(tokens:list[Token]) -> tuple[Token, list[Token]]:
-    if len(tokens) == 0:
-        raise ValueError(f"ERROR: expected atom, got {tokens=}")
-    
-    if isinstance(tokens[0], Keyword_t):
-        return _get_next_keyword_expr(tokens)
-    
-    if isinstance(tokens[0], atom_tokens):#(Integer_t, BasedNumber_t, String_t, RawString_t, Identifier_t, Hashtag_t, Block_t, TypeParam_t, DotDot_t)):
-        return tokens[0], tokens[1:]
-    
-    raise ValueError(f"ERROR: expected atom, got {tokens[0]=}")
-
-def _get_next_chunk(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
-    chunk = []
-    t, tokens = _get_next_prefixes(tokens)
-    chunk.extend(t)
-
-    t, tokens = _get_next_atom(tokens)
-    if t is None:
-        raise ValueError(f"ERROR: expected atom, got {tokens[0]=}")
-    chunk.append(t)
-
-    t, tokens = _get_next_postfixes(tokens)
-    chunk.extend(t)
-
-    return chunk, tokens
-
-def is_binop(token:Token) -> bool:
-    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t))
-
-
-def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
-    """package up the next keyword expression into a single token"""
-    if len(tokens) == 0:
-        raise ValueError(f"ERROR: expected keyword expression, got {tokens=}")
-    t, tokens = tokens[0], tokens[1:]
-    
-    if not isinstance(t, Keyword_t):
-        raise ValueError(f"ERROR: expected keyword expression, got {t=}")
-    
-    raise NotImplementedError("TODO: handle keyword based expressions")
-    # (if | loop) #chain #chain (else (if | loop) #chain #chain)* (else #chain)?
-    # return #chain?
-    # express #chain
-    # (break | continue) #hashtag? //note the hashtag should be an entire chain if present
-    # (let | const) #chain
-
-
-
-def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
-    """
-    grab the next single expression chain of tokens from the given list of tokens
-
-    Also wraps up keyword-based expressions (if loop etc.) into a single token
-
-    A chain is represented by the following grammar:
-        #chunk = #prefix_op* #atom_expr (#postfix_op - ';')*
-        #chain = #chunk (#binary_op #chunk)* ';'?
-
-    Args:
-        tokens (list[Token]): list of tokens to grab the next chain from
-
-    Returns:
-        next, rest (list[Token], list[Token]): the next chain of tokens, and the remaining tokens
-    """
-    chain = []
-    
-    chunk, tokens = _get_next_chunk(tokens)
-    chain.extend(chunk)
-
-    while len(tokens) > 0:
-        if is_binop(tokens[0]):
-            chain.append(tokens.pop(0))
-
-            chunk, tokens = _get_next_chunk(tokens)
-            chain.extend(chunk)
-        else:
-            break
-
-    if len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op == ';':
-        chain.append(tokens.pop(0))
-
-    return chain, tokens
 
 
 @dataclass
@@ -335,6 +229,7 @@ def operator_precedence(t:Token) -> int | qint:
     [Notes]
     .. for ranges is not an operator, it is an expression. it uses juxtapose to bind to left/right arguments (or empty), and type-checks left and right
     if-else-loop chain expr is more like a single unit, so it doesn't really have a precedence. but they act like they have the lowest precedence since the expressions they capture will be full chains only broken by space/seq
+    the unary versions of + - * / % have the same precedence as their binary versions
     """
 
     match t:

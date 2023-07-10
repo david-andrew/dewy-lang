@@ -1,13 +1,30 @@
-from tokenizer import (Token, tokenize, full_traverse_tokens,
+from tokenizer import ( tokenize, tprint, full_traverse_tokens,
+    unary_prefix_operators,
+    unary_postfix_operators,
+    binary_operators,
+
+    Token,
+
     WhiteSpace_t,
+
+    Escape_t,
+
+    Identifier_t,
     Block_t,
     TypeParam_t,
+    RawString_t,
     String_t,
+    Integer_t,
+    BasedNumber_t,
+    Hashtag_t,
+    DotDot_t,
+
+    Keyword_t,
+
+    Juxtapose_t,
     Operator_t,
     ShiftOperator_t,
     Comma_t,
-    Juxtapose_t,
-    Keyword_t
 )
 
 from enum import Enum, auto
@@ -30,6 +47,21 @@ TODO:
 # all other syntax is wrapped up into compound tokens
 # it should literally just be a sequence of atoms and operators
     
+
+
+atom_tokens = (
+    Identifier_t,
+    Integer_t,
+    BasedNumber_t,
+    RawString_t,
+    String_t,
+    Block_t,
+    TypeParam_t,
+    Hashtag_t,
+    DotDot_t,
+)
+
+
 
 
 
@@ -75,41 +107,133 @@ def invert_whitespace(tokens: list[Token]) -> None:
         i += 1
 
 
-# from typing import Generator, Any
-# def test_gen(l:list) -> Generator[Any, None, None]:
-#     i = 0
-#     overwrite_i = None
-#     while i < len(l):
 
-#         # overwrite the current index with received values
-#         if overwrite_i is not None:
-#             i = overwrite_i
 
-#         # send the current index to the user. possibly receive a new index to continue from
-#         overwrite_i = yield l[i]
+def _get_next_prefixes(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
+    prefixes = []
+    while len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op in unary_prefix_operators:
+        prefixes.append(tokens.pop(0))
+    return prefixes, tokens
+def _get_next_postfixes(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
+    postfixes = []
+    while len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op in unary_postfix_operators - {';'}:
+        postfixes.append(tokens.pop(0))
+    return postfixes, tokens
+def _get_next_atom(tokens:list[Token]) -> tuple[Token, list[Token]]:
+    if len(tokens) == 0:
+        raise ValueError(f"ERROR: expected atom, got {tokens=}")
 
-#         # calls to send should wait for the call to next before executing
-#         if overwrite_i is not None:
-#             yield
-#             continue
+    if isinstance(tokens[0], Keyword_t):
+        return _get_next_keyword_expr(tokens)
 
-#         # increment the index
-#         i += 1
+    if isinstance(tokens[0], atom_tokens):#(Integer_t, BasedNumber_t, String_t, RawString_t, Identifier_t, Hashtag_t, Block_t, TypeParam_t, DotDot_t)):
+        return tokens[0], tokens[1:]
 
-#     # handle when the received i was out of bounds 
-#     #   meaning a call to .send would raise StopIteration,
-#     #   but it should only be raised on calls to next()
-#     if overwrite_i is not None:
-#         yield
+    raise ValueError(f"ERROR: expected atom, got {tokens[0]=}")
 
-# gen = test_gen([1,2,3,4,5])
+def _get_next_chunk(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
+    chunk = []
+    t, tokens = _get_next_prefixes(tokens)
+    chunk.extend(t)
 
-# pdb.set_trace()
+    t, tokens = _get_next_atom(tokens)
+    if t is None:
+        raise ValueError(f"ERROR: expected atom, got {tokens[0]=}")
+    chunk.append(t)
+
+    t, tokens = _get_next_postfixes(tokens)
+    chunk.extend(t)
+
+    return chunk, tokens
+
+def is_unary_prefix_op(token:Token) -> bool:
+    return isinstance(token, Operator_t) and token.op in unary_prefix_operators
+
+def is_unary_postfix_op(token:Token) -> bool:
+    return isinstance(token, Operator_t) and token.op in unary_postfix_operators
+
+def is_binop(token:Token) -> bool:
+    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t))
+
+
+def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
+    """package up the next keyword expression into a single token"""
+    if len(tokens) == 0:
+        raise ValueError(f"ERROR: expected keyword expression, got {tokens=}")
+    t, tokens = tokens[0], tokens[1:]
+
+    if not isinstance(t, Keyword_t):
+        raise ValueError(f"ERROR: expected keyword expression, got {t=}")
+
+    raise NotImplementedError("TODO: handle keyword based expressions")
+    # (if | loop) #chain #chain (else (if | loop) #chain #chain)* (else #chain)?
+    # return #chain?
+    # express #chain
+    # (break | continue) #hashtag? //note the hashtag should be an entire chain if present
+    # (let | const) #chain
+
+
+
+def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
+    """
+    grab the next single expression chain of tokens from the given list of tokens
+
+    Also wraps up keyword-based expressions (if loop etc.) into a single token
+
+    A chain is represented by the following grammar:
+        #chunk = #prefix_op* #atom_expr (#postfix_op - ';')*
+        #chain = #chunk (#binary_op #chunk)* ';'?
+
+    Args:
+        tokens (list[Token]): list of tokens to grab the next chain from
+
+    Returns:
+        next, rest (list[Token], list[Token]): the next chain of tokens, and the remaining tokens
+    """
+    chain = []
+
+    chunk, tokens = _get_next_chunk(tokens)
+    chain.extend(chunk)
+
+    while len(tokens) > 0:
+        if is_binop(tokens[0]):
+            chain.append(tokens.pop(0))
+
+            chunk, tokens = _get_next_chunk(tokens)
+            chain.extend(chunk)
+        else:
+            break
+
+    if len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op == ';':
+        chain.append(tokens.pop(0))
+
+    return chain, tokens
+
+
+
+
+def combine_keywords(tokens: list[Token]) -> None:
+    """
+    combine known keyword pairs into a single keyword
+
+    TBD on some of these
+    do loop -> do_loop
+    do lazy -> do_lazy
+    else if -> else_if
+    else loop -> else_loop
+    else lazy -> else_lazy
+    """
+
+    for i, token, stream in (gen := full_traverse_tokens(tokens)):
+        if isinstance(token, Keyword_t):
+            raise NotImplementedError
 
 def desugar_ranges(tokens: list[Token]) -> None:
     """fill in empty expressions on the left/right of any range `..` that lacks left or right operands"""
     #TODO: also maybe put range in a group with []
-    raise NotImplementedError
+    for i, token, stream in (gen := full_traverse_tokens(tokens)):
+        if isinstance(token, DotDot_t):
+            raise NotImplementedError
 
 
 
@@ -144,18 +268,19 @@ def chain_operators(tokens: list[Token]) -> None:
           | '|>' | '<|' | '=>'
           | '->' | '<->' | '<-'
           | '.' | ':'
-           
     """
 
+    # TODO: skip for now. not needed by hello world
+    # also may not be necessary if we use a pratt parser. was necessary for split by lowest precedence parser
+
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
-       
-        pdb.set_trace()
+
+        #TODO: this is not a correct way to detect these. need to verify that the operators are in between two #chunks
+        #   this will be conservative, but for now it will let us do a hello world happy path
+        if is_binop(token):
+            if i+1 < len(stream) and is_unary_prefix_op(stream[i+1]):
+                raise NotImplementedError
         ...
-    
-    pdb.set_trace()
-    
-    raise NotImplementedError
-    #TODO: should scan through, and if it finds a chain of operators, raise the not implemented error
 
 
 def chain(tokens: list[Token]) -> list[list[Token]]:
@@ -164,21 +289,25 @@ def chain(tokens: list[Token]) -> list[list[Token]]:
 
     if len(tokens) == 0: return []
 
+    # combine known keyword pairs into a single keyword
+    combine_keywords(tokens)
+
     # bundle up conditionals into single token expressions
     bundle_conditionals(tokens)
 
     # combine operator chains into a single operator token
-    # TODO: skip for now. not needed by hello world
-    # also may not be necessary if we use a pratt parser. was necessary for split by lowest precedence parser
     chain_operators(tokens)
+
+    # desugar ranges
+    desugar_ranges(tokens)
+
 
     # make the actual list of chains
 
     # based on types, replace jux with jux_mul or jux_call
     # TODO: actually this probably would need to be done during parsing, since we can't get a type for a complex/compound expression...
 
-    pdb.set_trace()
-    ...
+    print(tokens)
 
 
 
