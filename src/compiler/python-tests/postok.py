@@ -228,21 +228,21 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
 
 
 
-def combine_keywords(tokens: list[Token]) -> None:
-    """
-    combine known keyword pairs into a single keyword
+# def combine_keywords(tokens: list[Token]) -> None:
+#     """
+#     combine known keyword pairs into a single keyword
 
-    TBD on some of these
-    do loop -> do_loop
-    do lazy -> do_lazy
-    else if -> else_if
-    else loop -> else_loop
-    else lazy -> else_lazy
-    """
+#     TBD on some of these
+#     do loop -> do_loop
+#     do lazy -> do_lazy
+#     else if -> else_if
+#     else loop -> else_loop
+#     else lazy -> else_lazy
+#     """
 
-    for i, token, stream in (gen := full_traverse_tokens(tokens)):
-        if isinstance(token, Keyword_t):
-            raise NotImplementedError
+#     for i, token, stream in (gen := full_traverse_tokens(tokens)):
+#         if isinstance(token, Keyword_t):
+#             raise NotImplementedError
 
 def desugar_ranges(tokens: list[Token]) -> None:
     """fill in empty expressions on the left/right of any range `..` that lacks left or right operands"""
