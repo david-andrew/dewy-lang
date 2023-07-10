@@ -66,7 +66,7 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
     Comma_t,
 )
 
-from chainer import invert_whitespace
+from postok import invert_whitespace
 
 from utils import based_number_to_int
 from dataclasses import dataclass

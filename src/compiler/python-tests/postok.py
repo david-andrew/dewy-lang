@@ -111,18 +111,19 @@ def invert_whitespace(tokens: list[Token]) -> None:
 
 def _get_next_prefixes(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
     prefixes = []
-    while len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op in unary_prefix_operators:
+    while len(tokens) > 0 and is_unary_prefix_op(tokens[0]): #isinstance(tokens[0], Operator_t) and tokens[0].op in unary_prefix_operators:
         prefixes.append(tokens.pop(0))
     return prefixes, tokens
 def _get_next_postfixes(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
     postfixes = []
-    while len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op in unary_postfix_operators - {';'}:
+    while len(tokens) > 0 and is_unary_postfix_op(tokens[0], exclude_semicolon=True):#isinstance(tokens[0], Operator_t) and tokens[0].op in unary_postfix_operators - {';'}:
         postfixes.append(tokens.pop(0))
     return postfixes, tokens
 def _get_next_atom(tokens:list[Token]) -> tuple[Token, list[Token]]:
     if len(tokens) == 0:
         raise ValueError(f"ERROR: expected atom, got {tokens=}")
 
+    #TODO: this is going to be unnecessary as expressions will have been bundled up into single tokens
     if isinstance(tokens[0], Keyword_t):
         return _get_next_keyword_expr(tokens)
 
@@ -147,12 +148,27 @@ def _get_next_chunk(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
     return chunk, tokens
 
 def is_unary_prefix_op(token:Token) -> bool:
+    """
+    Determines if a token could be a unary prefix operator.
+    Note that this is not mutually exclusive with being a postfix operator or a binary operator.
+    """
     return isinstance(token, Operator_t) and token.op in unary_prefix_operators
 
-def is_unary_postfix_op(token:Token) -> bool:
+def is_unary_postfix_op(token:Token, exclude_semicolon:bool=False) -> bool:
+    """
+    Determines if a token could be a unary postfix operator. 
+    Optionally can exclude semicolon from the set of operators.
+    Note that this is not mutually exclusive with being a prefix operator or a binary operator.
+    """
+    if exclude_semicolon:
+        return isinstance(token, Operator_t) and token.op in unary_postfix_operators - {';'}
     return isinstance(token, Operator_t) and token.op in unary_postfix_operators
 
 def is_binop(token:Token) -> bool:
+    """
+    Determines if a token could be a binary operator.
+    Note that this is not mutually exclusive with being a prefix operator or a postfix operator.
+    """
     return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t))
 
 
@@ -283,14 +299,16 @@ def chain_operators(tokens: list[Token]) -> None:
         ...
 
 
-def chain(tokens: list[Token]) -> list[list[Token]]:
+def post_process(tokens: list[Token]) -> None:
+    """post process the tokens to make them ready for parsing"""
+
     # remove whitespace, and insert juxtapose tokens
     invert_whitespace(tokens)
 
     if len(tokens) == 0: return []
 
     # combine known keyword pairs into a single keyword
-    combine_keywords(tokens)
+    # combine_keywords(tokens) # possibly handled by bundling conditionals...
 
     # bundle up conditionals into single token expressions
     bundle_conditionals(tokens)
