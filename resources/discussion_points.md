@@ -573,3 +573,68 @@ let file = open("temp.txt", "w")
 Then no matter how the scope is exited, the file will always be closed. And the programmer doesn't have to worry about making sure that some context covers the right bounds or anything. Instead it is literally tied to the lifetime of the variable.
 
 This is similar to python's weak references
+
+
+## Function overloading [leaning `xor`]
+
+function overloading will be achieved by combining two or more function literals / function references and binding to a single variable. The question is which operator should be used to achieve this
+
+```
+func1 = (a:int, b:str) => 'first version'
+func2 = (a:int, b:int) => 'second version'
+
+//Using the `|` operator normally for type unions:
+overloaded = @func1 | @func2
+
+//Using `xor` normally for boolean/bitwise exclusive or
+overloaded = @func1 xor @func2
+```
+
+
+Also an existing function could be updated to be overloaded, or further overloaded
+```
+myfunc = (a:int, b:str) => 'first version'
+myfunc |= (a:int, b:int) => 'second version'
+myfunc |= (a:int, b:int, c:int) => 'third version'
+```
+
+or 
+
+```
+myfunc = (a:int, b:str) => 'first version'
+myfunc xor= (a:int, b:int) => 'second version'
+myfunc xor= (a:int, b:int, c:int) => 'third version'
+```
+
+Pros and cons for both:
+- `|` is probably more intuitive
+- `|` is mainly for types though
+
+- `xor` means the correct thing: one of these but not both
+- `xor` might be slightly less intuitive though
+
+
+### also random note about in place overloading
+
+normally in place operators are just syntactic sugar like so:
+```
+a += 15  
+// a = a + 15
+```
+
+but for function overloading, since functions need to be @referenced, this is what happens
+
+```
+myfunc xor= (a:int, b:int) => 'second version'
+// myfunc = @myfunc xor (a:int, b:int) => 'second version'
+```
+
+that is to say, functions are @ referenced when part of an in-place operator
+
+conceivably, we could also do something like this to maintain the symmetry of the notation:
+```
+@myfunc xor= (a:int, b:int) => 'second version'
+// @myfunc = @myfunc xor (a:int, b:int) => 'second version'
+```
+
+This implies that in the `@myfunc` on the left receiving the assignment the `@` is a no-op. which may or may not be what I want to do
