@@ -66,7 +66,7 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
     Comma_t,
 )
 
-from postok import invert_whitespace
+from postok import post_process, get_next_chain
 
 from utils import based_number_to_int
 from dataclasses import dataclass
@@ -550,26 +550,64 @@ def parse_block(block:Block_t) -> AST:
 
 
 
-def parse0(tokens:list[Token]) -> Block:
-    """
-    parse a list of tokens into an AST
-    """
-    #initial parsing pass. may contain intermediate ASTs that need to be further parsed
-    exprs:list[AST] = []
+# def parse0(tokens:list[Token]) -> Block:
+#     """
+#     parse a list of tokens into an AST
+#     """
+#     #initial parsing pass. may contain intermediate ASTs that need to be further parsed
+#     exprs:list[AST] = []
+#     while len(tokens) > 0:
+#         chain, tokens = get_next_chain(tokens)
+#         expr = parse_chain(chain)
+#         exprs.append(expr)
+
+#     #TODO: should newscope be true or false? so far this is the outermost block, though in the future it could be nested...
+#     #      if it was to be nested though, we'd need to determine what type of block it was...
+#     #      perhaps include a newscope flag in the parse signature
+#     return Block(exprs, newscope=True)
+
+
+
+# @cache
+def typeof(tokens: list[Token]) -> Type: #this should be the same type system`` used in the interpreter!
+    # recursively determine the type of the sequence of tokens
+    # follow a similar process to parsing, breaking down the expressions, etc.
+    ...
+
+# @cache
+def split_by_lowest_precedence(tokens: list[Token]) -> tuple[list[Token], Token, list[Token]]:
+    # self explanatory
+    pdb.set_trace()
+    ...
+
+
+def parse(tokens:list[Token]) -> AST:
+
+    # #count the number of operators
+    # op_count = sum(1 for token in tokens if is_op(token))
+
+    # if op_count == 0:
+    #     assert len(tokens) == 1, f"expressions without operators expected to have only a single token. Found {tokens}"
+    #     return parse_single(tokens[0])
+    asts = []
     while len(tokens) > 0:
         chain, tokens = get_next_chain(tokens)
-        expr = parse_chain(chain)
-        exprs.append(expr)
 
-    #TODO: should newscope be true or false? so far this is the outermost block, though in the future it could be nested...
-    #      if it was to be nested though, we'd need to determine what type of block it was...
-    #      perhaps include a newscope flag in the parse signature
-    return Block(exprs, newscope=True)
-
+        if len(chain) == 1:
+            return parse_single(chain[0])
+        
+        left, op, right = split_by_lowest_precedence(chain)
+        pdb.set_trace()
 
 
+    pdb.set_trace()
+    ...
 
-
+def parse_single(token:Token) -> AST:
+    """Parse a single token into an AST"""
+    pdb.set_trace()
+    raise NotImplementedError()
+    ...
 
 def test(path:str):
 
@@ -577,14 +615,7 @@ def test(path:str):
         src = f.read()
 
     tokens = tokenize(src)
-    # print(f'matched tokens:')
-    # tprint(Block_t(left='{', right='}', body=tokens))
-    # print('\n\n\n')
-
-    # remove whitespace, and insert juxtapose tokens
-    invert_whitespace(tokens)
-    # print(f'juxtaposed tokens:')
-    # tprint(Block_t(left='{', right='}', body=tokens))
+    post_process(tokens)
 
     # parse tokens into an AST
     ast = parse0(tokens)
@@ -611,7 +642,7 @@ def test2():
 
     # tokenize each line and remove ones that are just whitespace
     token_lines = [tokenize(line) for line in lines]
-    for line in token_lines: invert_whitespace(line)
+    for line in token_lines: post_process(line)
     token_lines = [line for line in token_lines if len(line) > 0]
 
     #should have a pass to combine dots with operators (e.g. .+ ./ .= etc.)
@@ -629,7 +660,18 @@ def test2():
         # ...
 
 
+def test_hello():
+    line = "printl'Hello, World!'"
 
+    tokens = tokenize(line)
+    post_process(tokens)
+
+    ast = parse(tokens)
+    root = Scope.default()
+    ast.eval(root)
+
+    pdb.set_trace()
+    ...
 
 
 
@@ -638,7 +680,8 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         test(sys.argv[1])
     else:
-        test2()
+        # test2()
+        test_hello()
 
     # print("Usage: `python parser.py [path/to/file.dewy>]`")
 

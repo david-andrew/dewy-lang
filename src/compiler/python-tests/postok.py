@@ -171,6 +171,8 @@ def is_binop(token:Token) -> bool:
     """
     return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t))
 
+def is_op(token:Token) -> bool:
+    return is_binop(token) or is_unary_prefix_op(token) or is_unary_postfix_op(token)
 
 def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
     """package up the next keyword expression into a single token"""
@@ -305,7 +307,7 @@ def post_process(tokens: list[Token]) -> None:
     # remove whitespace, and insert juxtapose tokens
     invert_whitespace(tokens)
 
-    if len(tokens) == 0: return []
+    if len(tokens) == 0: return
 
     # combine known keyword pairs into a single keyword
     # combine_keywords(tokens) # possibly handled by bundling conditionals...
@@ -336,7 +338,7 @@ def test():
     tokens = tokenize(src)
 
     #chainer process
-    tokens = chain(tokens)
+    post_process(tokens)
 
     pdb.set_trace()
     ...
@@ -354,7 +356,7 @@ def test2():
         tokens = tokenize(line)
 
         #chainer process
-        tokens = chain(tokens)
+        post_process(tokens)
 
         #other stuff? pass to the parser? etc.
 
@@ -362,6 +364,17 @@ def test2():
     ...
 
 
+def test_hello():
+    line = "printl'Hello, World!'"
+
+    tokens = tokenize(line)
+    post_process(tokens)
+
+    pdb.set_trace()
+    ...
+
+
 if __name__ == '__main__':
     # test()
-    test2()
+    # test2()
+    test_hello()
