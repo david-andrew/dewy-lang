@@ -638,3 +638,16 @@ conceivably, we could also do something like this to maintain the symmetry of th
 ```
 
 This implies that in the `@myfunc` on the left receiving the assignment the `@` is a no-op. which may or may not be what I want to do
+
+
+## Type syntax just forwards to type function
+
+```
+let myvar: vector<int, length=5> = [1 2 3 4 5]
+```
+
+perhaps this is really just sugar/gets converted to a call to type with the given parameters
+
+```
+let myvar: type(base=vector, params=(int, length=5)) = [1 2 3 4 5]
+```
