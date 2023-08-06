@@ -1,8 +1,9 @@
 from abc import ABC
 from dataclasses import dataclass
 from types import EllipsisType
-from typing import Any, Callable as PyCallable, Union, Optional
+from typing import Any, Callable as PyCallable, Type as PyType, Union, Optional
 from functools import partial
+import operator
 
 import pdb
 
@@ -221,7 +222,7 @@ class Scope():
             if name in s.vars:
                 var = s.vars[name]
                 assert not var.const, f'cannot assign to const {name}'
-                assert Type.compatible(var.type, value.type()), f'cannot assign {value}:{value.type()} to {name}:{var.type}'
+                assert Type.is_instance(var.type, value.type()), f'cannot assign {value}:{value.type()} to {name}:{var.type}'
                 var.value = value
                 return
 
@@ -269,11 +270,22 @@ class Scope():
 
 
 class Type(AST):
-    def __init__(self, name:str, params:list[AST]=None):
+
+    #point from atomic types to their parent type in the type graph
+    #initial type graph is filled out below the class, since it references Type()
+    graph = {}
+
+    def __init__(self, name:str|AST, params:list[AST]=None, parent:'Type'=None):
         self.name = name
         self.params = params
+        
+        # register type in the type graph
+        if isinstance(name, str) and name not in Type.graph:
+            Type.graph[name] = parent
+        
     def eval(self, scope:Scope=None):
         return self
+    
 
     def treestr(self, indent=0):
         s = tab * indent + f'Type: {self.name}\n'
@@ -295,8 +307,20 @@ class Type(AST):
             return self.name == other.name and self.params == other.params
         return False
     
+    def __and__(self, other:AST):
+        return And(self, other, Type)
+    
+    def __rand__(self, other:AST):
+        return And(other, self, Type)
+    
+    def __or__(self, other:AST):
+        return Or(self, other, Type)
+    
+    def __ror__(self, other:AST):
+        return Or(other, self, Type)
+    
     @staticmethod
-    def compatible(rule:AST, candidate:AST) -> bool:
+    def is_instance(rule:AST, candidate:AST) -> bool:
         assert isinstance(rule, Type) or rule is undefined, f'rule must be a Type or undefined, not {rule}'
         assert isinstance(candidate, Type) or candidate is undefined, f'candidate must be a Type or undefined, not {candidate}'
         if rule is undefined:
@@ -304,10 +328,19 @@ class Type(AST):
         if rule == candidate:
             return True
         
-        #TODO: check type graph for compatibility
-        # pdb.set_trace()
+        # if atomic type, recursively check parent type in graph for compatibility
+        if isinstance(candidate.name, str):
+            parent = Type.graph[candidate.name]
+            if parent is not None:
+                return Type.is_instance(rule, parent)
 
         return False
+
+# add initial typed to graph available by default 
+Type.graph.update({
+    #TODO: fill out some initial type graph that is available by default
+})
+
 
 class Arg:
     def __init__(self, name:str, type:Type=None, val:AST=None):
@@ -694,15 +727,22 @@ class IString(AST):
         return f'IString({repr(self.parts)})'
 
 class BinOp(AST):
-    def __init__(self, left:AST, right:AST, op:PyCallable[[AST, AST],AST], opname:str, opsymbol:str):
+    def __init__(self, left:AST, right:AST, op:PyCallable[[Any, Any],Any], outtype:PyType[AST], opname:str, opsymbol:str):
         self.left = left
         self.right = right
         self.op = op
+        self.outtype = outtype
         self.opname = opname
         self.opsymbol = opsymbol
 
     def eval(self, scope:Scope=None):
-        return self.op(self.left.eval(scope).topy(), self.right.eval(scope).topy())
+        return self.outtype(
+            self.op(
+                self.left.eval(scope).topy(), 
+                self.right.eval(scope).topy()
+            )
+        )
+
     def treestr(self, indent=0):
         return f'{tab * indent}{self.opname}\n{self.left.treestr(indent + 1)}\n{self.right.treestr(indent + 1)}'
     @insert_tabs
@@ -714,56 +754,81 @@ class BinOp(AST):
 ##################### Binary operators #####################
 class Equal(BinOp):
     def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Bool(l == r), 'Equal', '=?')
+        super().__init__(left, right, operator.eq, Bool, 'Equal', '=?')
 
 class NotEqual(BinOp):
     def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Bool(l != r), 'NotEqual', 'not=?')
+        super().__init__(left, right, operator.ne, Bool, 'NotEqual', 'not=?')
 
 class Less(BinOp):
     def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Bool(l < r), 'Less', '<?')
+        super().__init__(left, right, operator.lt, Bool, 'Less', '<?')
 
 class LessEqual(BinOp):
     def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Bool(l <= r), 'LessEqual', '<=?')
+        super().__init__(left, right, operator.le, Bool, 'LessEqual', '<=?')
 
 class Greater(BinOp):
     def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Bool(l > r), 'Greater', '>?')
+        super().__init__(left, right, operator.gt, Bool, 'Greater', '>?')
 
 class GreaterEqual(BinOp):
     def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Bool(l >= r), 'GreaterEqual', '>=?')
+        super().__init__(left, right, operator.ge, Bool, 'GreaterEqual', '>=?')
 
 #TODO: type of output should be based on types of the inputs
 class Add(BinOp):
-    def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Number(l + r), 'Add', '+')
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, operator.add, outtype, 'Add', '+')
 
 class Sub(BinOp):
-    def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Number(l - r), 'Sub', '-')
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, operator.sub, outtype, 'Sub', '-')
 
 class Mul(BinOp):
-    def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Number(l * r), 'Mul', '*')
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, operator.mul, outtype, 'Mul', '*')
 
 class Div(BinOp):
-    def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Number(l / r), 'Div', '/')
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, operator.truediv, outtype, 'Div', '/')
 
 class IDiv(BinOp):
-    def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Number(l // r), 'IDiv', '//')
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, operator.floordiv, outtype, 'IDiv', '//')
 
 class Mod(BinOp):
-    def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Number(l % r), 'Mod', '%')
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, operator.mod, outtype, 'Mod', '%')
 
 class Pow(BinOp):
-    def __init__(self, left:AST, right:AST):
-        super().__init__(left, right, lambda l, r: Number(l ** r), 'Pow', '**')
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, operator.pow, outtype, 'Pow', '**')
+
+class And(BinOp):
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, operator.and_, outtype, 'And', 'and')
+
+class Or(BinOp):
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, operator.or_, outtype, 'Or', 'or')
+
+class Xor(BinOp):
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, operator.xor, outtype, 'Xor', 'xor')
+
+class Nand(BinOp):
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, lambda l, r: not (l and r), outtype, 'Nand', 'nand')
+
+class Nor(BinOp):
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, lambda l, r: not (l or r), outtype, 'Nor', 'nor')
+
+class Xnor(BinOp):
+    def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
+        super().__init__(left, right, lambda l, r: l == r, outtype, 'Xnor', 'xnor')
+
 
 
 ##################### Unary operators #####################
@@ -1290,7 +1355,7 @@ def hello_loop(root:Scope) -> AST:
             Less(Call('i'), Number(10)),
             Block([
                 Call('printl', [IString([String('Hello '), Call('name'), String('!')])]),
-                Bind('i', Add(Call('i'), Number(1))),
+                Bind('i', Add(Call('i'), Number(1), Number)),
             ])
         )
     ])
