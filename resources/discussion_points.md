@@ -655,6 +655,11 @@ perhaps this is really just sugar/gets converted to a call to type with the give
 let myvar: type(base=vector, params=(int, length=5)) = [1 2 3 4 5]
 ```
 
+## Type system
+(combination of nominative and structural, i.e. julia and typescript)
+- type graph for build in types "atoms". user can expand the type graph if they want, though that will be pretty rare
+- structural/complex constructed type "molecules" like in typescript (e.g. unions, intersections, structs, etc.), that don't necessarily fit into the type graph.
+TODO: more discussion, e.g. where do parametric types go? probably in the graph
 
 ## names for different declaration types
 There are three explicit declarations types (and one implicit type)
