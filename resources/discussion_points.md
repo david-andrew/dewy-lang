@@ -520,10 +520,13 @@ Python's `len` function absolutely would not qualify. It should have been a prop
 ## Unified naming for length/size/shape/dim/etc.
 (TODO) these need to be picked, and be consistent across objects of the same type. Could have multiple of these if it makes sense/they represent usually different things.
 
-## unified naming for vectors/matrices/tensors/etc.
-basically I want a single type that represents a regular grid of numbers. Technically tensor is the most general, but IDK if I like the syntax. I'm leaning towards everything just be called `vec` or `vector`
+## unified naming for vectors/matrices/tensors/etc. ["Array"]
+basically I want a single type that represents a regular grid of numbers. Technically tensor is the most general, but IDK if I like the syntax. ~~I'm leaning towards everything just be called `vec` or `vector`.~~
 
 I think maybe a separate notion of list is unnecessary
+
+I think I've settled on "Array" being the term (though tbd if we shorten to arr). Array is non-specific in the number of dimensions it has. If an array has a specific shape that fits one of the other terms, it could be called that in context, but the type will still be "Array"
+
 
 ## Handling symbolics
 - create symbolic expression
@@ -651,3 +654,17 @@ perhaps this is really just sugar/gets converted to a call to type with the give
 ```
 let myvar: type(base=vector, params=(int, length=5)) = [1 2 3 4 5]
 ```
+
+
+## names for different declaration types
+There are three explicit declarations types (and one implicit type)
+
+`let`: variable type. If the name already exists in a higher scope, a new shadow for the name is made
+`const`: constant type, unmodifiable
+`tbd`: types that are constant, but do not cause compile time error when trying to overwrite in lower scopes. instead they make a new shadow. Perhaps we don't have this type, and just force the user to explicitly use `let` when they want to overwrite const types.
+- I think a common case would be `i` for the complex value, and the user will want to overwrite it with i as the common iterator index in loops. that's a weird case though because it uses none of the mutability declarations. It would be `loop i in a..b`, so presumably loop uses `let` by default
+
+simply doing `name = value` may or may not be allowed depending on if name is aleady defined, and the mutability it has.
+- if `name` does not exist yet, then this is equivalent to `let name = value`
+- if `name` exists and was declared with `let`, then this is equivalent to updating that instance of `name` with the new value
+- if `name` exists and was declared with `const` then this will fail at compile-time
