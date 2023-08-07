@@ -222,7 +222,7 @@ class Scope():
             if name in s.vars:
                 var = s.vars[name]
                 assert not var.const, f'cannot assign to const {name}'
-                assert Type.is_instance(var.type, value.type()), f'cannot assign {value}:{value.type()} to {name}:{var.type}'
+                assert Type.is_instance(value.type(), var.type), f'cannot assign {value}:{value.type()} to {name}:{var.type}'
                 var.value = value
                 return
 
@@ -273,7 +273,7 @@ class Type(AST):
 
     #point from atomic types to their parent type in the type graph
     #initial type graph is filled out below the class, since it references Type()
-    graph = {}
+    graph: dict[str, 'Type'] = {}
 
     def __init__(self, name:str|AST, params:list[AST]=None, parent:'Type'=None):
         self.name = name
@@ -285,6 +285,9 @@ class Type(AST):
         
     def eval(self, scope:Scope=None):
         return self
+
+    def type(self, scope:Scope=None):
+        return Type('type')
     
 
     def treestr(self, indent=0):
@@ -318,21 +321,64 @@ class Type(AST):
     
     def __ror__(self, other:AST):
         return Or(other, self, Type)
+
+    def __eq__(self, other):
+        raise NotImplementedError('Type comparisons should be performed with `Type.is_instance()`')
     
+    #TODO: come up with better names for the method arguments
     @staticmethod
-    def is_instance(rule:AST, candidate:AST) -> bool:
-        assert isinstance(rule, Type) or rule is undefined, f'rule must be a Type or undefined, not {rule}'
-        assert isinstance(candidate, Type) or candidate is undefined, f'candidate must be a Type or undefined, not {candidate}'
-        if rule is undefined:
-            return True
-        if rule == candidate:
+    def is_instance(obj_t:'Type'|Undefined, target_t:'Type'|Undefined) -> bool:
+        """
+        Check if the object is an instance (or descendent) of the specified type
+
+        if target_t is undefined, short circuit results to True.
+        Parameters are only checked based on those present in target_t, 
+            e.g. if obj_t=array<int> and target_t=array, then no params would be checked (and is_instance would be true)
+
+        Args:
+            obj_t (Type|Undefined): The type of the object to be checked (i.e. for some dewy obj, obj_t = obj.type())
+            target_t: (Type|Undefined): The target type for determining if obj_t is an instance or not
+
+        Returns:
+            (bool): whether or not obj_t is an instance (or descendent) of target_t
+        """
+        assert isinstance(target_t, (Type, Undefined)), f't must be a Type or undefined, not {target_t}'
+        assert isinstance(obj_t, (Type, Undefined)), f'obj_t must be a Type or undefined, not {obj_t}'
+        
+        # undefined target always returns true
+        if isinstance(target_t, Undefined):
             return True
         
-        # if atomic type, recursively check parent type in graph for compatibility
-        if isinstance(candidate.name, str):
-            parent = Type.graph[candidate.name]
-            if parent is not None:
-                return Type.is_instance(rule, parent)
+        # since target is not undefined, undefined obj_t necessarily doesn't match
+        if isinstance(obj_t, Undefined):
+            return False
+        
+        
+        #DEBUG/TODO
+        if isinstance(target_t.name, AST) and isinstance(obj_t.name, AST):
+            #TODO: need to make AST equality work properly (namely for binops and/or)
+            #      will remove this if check, and let target.name == obj_t.name handle it
+            pdb.set_trace()
+        
+        # check the type by name, and params
+        if target_t.name == obj_t.name:
+            if len(obj_t.params) < len(target_t.params):
+                return False
+            
+            # check if any object parameters don't match the present target parameters
+            # note: obj_t may have more params than target_t
+            if any(obj_param != target_param for obj_param, target_param in zip(target_t.params, obj_t.params)):
+                return False
+                
+            # names match, and obj_t has all params target_t has
+            return True
+        
+
+        # for non-matching name, if atomic type, recursively check parent type in graph for compatibility
+        if isinstance(obj_t.name, str):
+            parent_t = Type.graph[obj_t.name]
+            if parent_t is not None:
+                return Type.is_instance(parent_t, target_t)
 
         return False
 
