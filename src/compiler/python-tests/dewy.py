@@ -84,7 +84,7 @@ class AST(ABC):
     def comp(self, scope:'Scope'=None) -> str:
         """TODO: future handle compiling an AST to LLVM IR"""
         raise NotImplementedError(f'{self.__class__.__name__}.comp')
-    def type(self, scope:'Scope'=None) -> 'Type':
+    def typeof(self, scope:'Scope'=None) -> 'Type':
         """Return the type of the object that would be returned by eval"""
         raise NotImplementedError(f'{self.__class__.__name__}.type')
     #TODO: other methods, e.g. semantic analysis
@@ -100,6 +100,10 @@ class AST(ABC):
 
 class Undefined(AST):
     """undefined singleton"""
+
+    #type value is set in __new__, since class Type isn't declared yet
+    type:'Type'
+
     def __new__(cls):
         if not hasattr(cls, 'instance'):
             cls.instance = super(Undefined, cls).__new__(cls)
@@ -108,7 +112,7 @@ class Undefined(AST):
         return self
     def topy(self, scope:'Scope'=None):
         return None
-    def type(self, scope:'Scope'=None):
+    def typeof(self, scope:'Scope'=None):
         return Type('undefined')
     def treesr(self, indent=0):
         return tab * indent + 'Undefined'
@@ -122,7 +126,230 @@ undefined = Undefined()
 
 
 
+
+
+BArg = tuple[str, AST]   #bound argument + current value for when making function calls
+
+class Scope():
+    
+    @dataclass
+    class _var():
+        # name:str #name is stored in the dict key
+        type:AST
+        value:AST
+        const:bool
+    
+    def __init__(self, parent:Optional['Scope']=None):
+        self.parent = parent
+        self.vars:dict[str, Scope._var] = {}
+        
+        #used for function calls
+        self.args:list[AST] = []
+        self.bargs:list[BArg] = []
+
+    @property
+    def root(self) -> 'Scope':
+        """Return the root scope"""
+        return [*self][-1]
+
+    def let(self, name:str, type:Union['Type',Undefined]=undefined, value:AST=undefined, const=False):
+        #overwrite anything that might have previously been there
+        self.vars[name] = Scope._var(type, value, const)
+
+    def get(self, name:str, default:AST=None) -> AST:
+        #get a variable from this scope or any of its parents
+        for s in self:
+            if name in s.vars:
+                return s.vars[name].value
+        if default is not None:
+            return default
+        raise NameError(f'{name} not found in scope {self}')
+
+    def bind(self, name:str, value:AST):
+
+        #update an existing variable in this scope or  any of the parent scopes
+        for s in self:
+            if name in s.vars:
+                var = s.vars[name]
+                assert not var.const, f'cannot assign to const {name}'
+                assert Type.is_instance(value.typeof(), var.type), f'cannot assign {value}:{value.typeof()} to {name}:{var.type}'
+                var.value = value
+                return
+
+        #otherwise just create a new instance of the variable
+        self.vars[name] = Scope._var(undefined, value, False)
+
+    def __iter__(self):
+        """return an iterator that walks up each successive parent scope. Starts with self"""
+        s = self
+        while s is not None:
+            yield s
+            s = s.parent
+
+    def __repr__(self):
+        if self.parent is not None:
+            return f'Scope({self.vars}, {repr(self.parent)})'
+        return f'Scope({self.vars})'
+
+    def copy(self):
+        s = Scope(self.parent)
+        s.vars = self.vars.copy()
+        return s
+
+    def attach_args(self, args:list[AST], bargs:list[BArg]):
+        self.args = args
+        self.bargs = bargs
+
+    @staticmethod
+    def default():
+        """return a scope with the standard library (of builtins) included"""
+        root = Scope()
+        root.bind('print', Builtin('print', [Arg('text')], None, Type('callable', [Vector([String.type]), undefined.typeof()])))
+        root.bind('printl', Builtin('printl', [Arg('text')], None, undefined.typeof()))
+        root.bind('readl', Builtin('readl', [], String, Type('string')))
+        #TODO: eventually add more builtins
+
+        return root
+
+
+#probably won't use this, except possibly for when calling functions and providing enums from the function's scope
+# def merge_scopes(*scopes:list[Scope], onto:Scope=None):
+#     #TODO... this probably could actually be a scope union class that inherits from Scope
+#     #            that way we don't have to copy the scopes
+#     pdb.set_trace()
+
+
+class Type(AST):
+
+    type:'Type'
+
+    #point from atomic types to their parent type in the type graph
+    #initial type graph is filled out below the class, since it references Type()
+    graph: dict[str, 'Type'] = {}
+
+    def __init__(self, name:str|AST, params:list[AST]=None, parent:'Type'=None):
+        self.name = name
+        self.params = params
+        
+        # register type in the type graph
+        if isinstance(name, str) and name not in Type.graph:
+            Type.graph[name] = parent
+        
+    def eval(self, scope:Scope=None):
+        return self
+
+    def typeof(self, scope:Scope=None):
+        return Type('type')
+    
+
+    def treestr(self, indent=0):
+        s = tab * indent + f'Type: {self.name}\n'
+        for p in self.params:
+            s += p.treestr(indent + 1) + '\n'
+        return s
+
+    @insert_tabs
+    def __str__(self):
+        if self.params is not None and len(self.params) > 0:
+            return f'{self.name}<{", ".join(map(str, self.params))}>'
+        return self.name
+
+    def __repr__(self):
+        return f'Type({self.name}, {self.params})'
+
+    def __eq__(self, other):
+        if isinstance(other, Type):
+            return self.name == other.name and self.params == other.params
+        return False
+    
+    def __and__(self, other:AST):
+        return And(self, other, Type)
+    
+    def __rand__(self, other:AST):
+        return And(other, self, Type)
+    
+    def __or__(self, other:AST):
+        return Or(self, other, Type)
+    
+    def __ror__(self, other:AST):
+        return Or(other, self, Type)
+
+    def __eq__(self, other):
+        raise NotImplementedError('Type comparisons should be performed with `Type.is_instance()`')
+    
+    #TODO: come up with better names for the method arguments
+    @staticmethod
+    def is_instance(obj_t:Union['Type',Undefined], target_t:Union['Type',Undefined]) -> bool:
+        """
+        Check if the object is an instance (or descendent) of the specified type
+
+        if target_t is undefined, short circuit results to True.
+        Parameters are only checked based on those present in target_t, 
+            e.g. if obj_t=array<int> and target_t=array, then no params would be checked (and is_instance would be true)
+
+        Args:
+            obj_t (Type|Undefined): The type of the object to be checked (i.e. for some dewy obj, obj_t = obj.typeof())
+            target_t: (Type|Undefined): The target type for determining if obj_t is an instance or not
+
+        Returns:
+            (bool): whether or not obj_t is an instance (or descendent) of target_t
+        """
+        assert isinstance(target_t, (Type, Undefined)), f't must be a Type or undefined, not {target_t}'
+        assert isinstance(obj_t, (Type, Undefined)), f'obj_t must be a Type or undefined, not {obj_t}'
+        
+        # undefined target always returns true
+        if isinstance(target_t, Undefined):
+            return True
+        
+        # since target is not undefined, undefined obj_t necessarily doesn't match
+        if isinstance(obj_t, Undefined):
+            return False
+        
+        
+        #DEBUG/TODO
+        if isinstance(target_t.name, AST) and isinstance(obj_t.name, AST):
+            #TODO: need to make AST equality work properly (namely for binops and/or)
+            #      will remove this if check, and let target.name == obj_t.name handle it
+            pdb.set_trace()
+        
+        # check the type by name, and params
+        if target_t.name == obj_t.name:
+            if len(obj_t.params) < len(target_t.params):
+                return False
+            
+            # check if any object parameters don't match the present target parameters
+            # note: obj_t may have more params than target_t
+            if any(obj_param != target_param for obj_param, target_param in zip(target_t.params, obj_t.params)):
+                return False
+                
+            # names match, and obj_t has all params target_t has
+            return True
+        
+
+        # for non-matching name, if atomic type, recursively check parent type in graph for compatibility
+        if isinstance(obj_t.name, str):
+            parent_t = Type.graph[obj_t.name]
+            if parent_t is not None:
+                return Type.is_instance(parent_t, target_t)
+
+        return False
+
+# add initial typed to graph available by default 
+Type.graph.update({
+    #TODO: fill out some initial type graph that is available by default
+    'callable': None
+})
+
+
+# set the type class property for Type, and Undefined since class Type() exists now
+Type.type = Type('type')
+Undefined.type = Type('undefined')
+
+
 class Callable(AST):
+
+    type:Type=Type('callable')
+
     def call(self, scope:'Scope'=None):
         """Call the callable in the given scope"""
         raise NotImplementedError(f'{self.__class__.__name__}.call')
@@ -174,218 +401,6 @@ class Iterable(AST):
         raise NotImplementedError(f'{self.__class__.__name__}.iter')
 
 
-
-
-
-
-BArg = tuple[str, AST]   #bound argument + current value for when making function calls
-
-class Scope():
-    
-    @dataclass
-    class _var():
-        # name:str #name is stored in the dict key
-        type:AST
-        value:AST
-        const:bool
-    
-    def __init__(self, parent:Optional['Scope']=None):
-        self.parent = parent
-        self.vars:dict[str, Scope._var] = {}
-        
-        #used for function calls
-        self.args:list[AST] = []
-        self.bargs:list[BArg] = []
-
-    @property
-    def root(self) -> 'Scope':
-        """Return the root scope"""
-        return [*self][-1]
-
-    def let(self, name:str, type:Union['Type',Undefined]=undefined, value:AST=undefined, const=False):
-        #overwrite anything that might have previously been there
-        self.vars[name] = Scope._var(type, value, const)
-
-    def get(self, name:str, default:AST=None) -> AST:
-        #get a variable from this scope or any of its parents
-        for s in self:
-            if name in s.vars:
-                return s.vars[name].value
-        if default is not None:
-            return default
-        raise NameError(f'{name} not found in scope {self}')
-
-    def bind(self, name:str, value:AST):
-
-        #update an existing variable in this scope or  any of the parent scopes
-        for s in self:
-            if name in s.vars:
-                var = s.vars[name]
-                assert not var.const, f'cannot assign to const {name}'
-                assert Type.is_instance(value.type(), var.type), f'cannot assign {value}:{value.type()} to {name}:{var.type}'
-                var.value = value
-                return
-
-        #otherwise just create a new instance of the variable
-        self.vars[name] = Scope._var(undefined, value, False)
-
-    def __iter__(self):
-        """return an iterator that walks up each successive parent scope. Starts with self"""
-        s = self
-        while s is not None:
-            yield s
-            s = s.parent
-
-    def __repr__(self):
-        if self.parent is not None:
-            return f'Scope({self.vars}, {repr(self.parent)})'
-        return f'Scope({self.vars})'
-
-    def copy(self):
-        s = Scope(self.parent)
-        s.vars = self.vars.copy()
-        return s
-
-    def attach_args(self, args:list[AST], bargs:list[BArg]):
-        self.args = args
-        self.bargs = bargs
-
-    @staticmethod
-    def default():
-        """return a scope with the standard library (of builtins) included"""
-        root = Scope()
-        root.bind('print', Builtin('print', [Arg('text')]))
-        root.bind('printl', Builtin('printl', [Arg('text')]))
-        root.bind('readl', Builtin('readl', [], String))
-        #TODO: eventually add more builtins
-
-        return root
-
-
-#probably won't use this, except possibly for when calling functions and providing enums from the function's scope
-# def merge_scopes(*scopes:list[Scope], onto:Scope=None):
-#     #TODO... this probably could actually be a scope union class that inherits from Scope
-#     #            that way we don't have to copy the scopes
-#     pdb.set_trace()
-
-
-class Type(AST):
-
-    #point from atomic types to their parent type in the type graph
-    #initial type graph is filled out below the class, since it references Type()
-    graph: dict[str, 'Type'] = {}
-
-    def __init__(self, name:str|AST, params:list[AST]=None, parent:'Type'=None):
-        self.name = name
-        self.params = params
-        
-        # register type in the type graph
-        if isinstance(name, str) and name not in Type.graph:
-            Type.graph[name] = parent
-        
-    def eval(self, scope:Scope=None):
-        return self
-
-    def type(self, scope:Scope=None):
-        return Type('type')
-    
-
-    def treestr(self, indent=0):
-        s = tab * indent + f'Type: {self.name}\n'
-        for p in self.params:
-            s += p.treestr(indent + 1) + '\n'
-        return s
-
-    @insert_tabs
-    def __str__(self):
-        if self.params is not None and len(self.params) > 0:
-            return f'{self.name}<{", ".join(map(str, self.params))}>'
-        return self.name
-
-    def __repr__(self):
-        return f'Type({self.name}, {self.params})'
-
-    def __eq__(self, other):
-        if isinstance(other, Type):
-            return self.name == other.name and self.params == other.params
-        return False
-    
-    def __and__(self, other:AST):
-        return And(self, other, Type)
-    
-    def __rand__(self, other:AST):
-        return And(other, self, Type)
-    
-    def __or__(self, other:AST):
-        return Or(self, other, Type)
-    
-    def __ror__(self, other:AST):
-        return Or(other, self, Type)
-
-    def __eq__(self, other):
-        raise NotImplementedError('Type comparisons should be performed with `Type.is_instance()`')
-    
-    #TODO: come up with better names for the method arguments
-    @staticmethod
-    def is_instance(obj_t:'Type'|Undefined, target_t:'Type'|Undefined) -> bool:
-        """
-        Check if the object is an instance (or descendent) of the specified type
-
-        if target_t is undefined, short circuit results to True.
-        Parameters are only checked based on those present in target_t, 
-            e.g. if obj_t=array<int> and target_t=array, then no params would be checked (and is_instance would be true)
-
-        Args:
-            obj_t (Type|Undefined): The type of the object to be checked (i.e. for some dewy obj, obj_t = obj.type())
-            target_t: (Type|Undefined): The target type for determining if obj_t is an instance or not
-
-        Returns:
-            (bool): whether or not obj_t is an instance (or descendent) of target_t
-        """
-        assert isinstance(target_t, (Type, Undefined)), f't must be a Type or undefined, not {target_t}'
-        assert isinstance(obj_t, (Type, Undefined)), f'obj_t must be a Type or undefined, not {obj_t}'
-        
-        # undefined target always returns true
-        if isinstance(target_t, Undefined):
-            return True
-        
-        # since target is not undefined, undefined obj_t necessarily doesn't match
-        if isinstance(obj_t, Undefined):
-            return False
-        
-        
-        #DEBUG/TODO
-        if isinstance(target_t.name, AST) and isinstance(obj_t.name, AST):
-            #TODO: need to make AST equality work properly (namely for binops and/or)
-            #      will remove this if check, and let target.name == obj_t.name handle it
-            pdb.set_trace()
-        
-        # check the type by name, and params
-        if target_t.name == obj_t.name:
-            if len(obj_t.params) < len(target_t.params):
-                return False
-            
-            # check if any object parameters don't match the present target parameters
-            # note: obj_t may have more params than target_t
-            if any(obj_param != target_param for obj_param, target_param in zip(target_t.params, obj_t.params)):
-                return False
-                
-            # names match, and obj_t has all params target_t has
-            return True
-        
-
-        # for non-matching name, if atomic type, recursively check parent type in graph for compatibility
-        if isinstance(obj_t.name, str):
-            parent_t = Type.graph[obj_t.name]
-            if parent_t is not None:
-                return Type.is_instance(parent_t, target_t)
-
-        return False
-
-# add initial typed to graph available by default 
-Type.graph.update({
-    #TODO: fill out some initial type graph that is available by default
-})
 
 
 class Arg:
@@ -477,10 +492,11 @@ class Builtin(Callable):
         'printl': print,
         'readl': input
     }
-    def __init__(self, name:str, args:list[Arg], cls:PyCallable=None):
+    def __init__(self, name:str, args:list[Arg], cls:PyCallable, dtype:Type):
         self.name = name
         self.args = args
         self.cls = cls
+        self.dtype = dtype
     
     def eval(self, scope:Scope=None):
         return self
@@ -725,12 +741,14 @@ class Call(AST):
         return f'Call({self.expr}, {repr(self.args)}, {repr(self.bargs)})'
 
 class String(Rangeable):
+    type:Type=Type('string')
+    
     def __init__(self, val:str):
         self.val = val
     def eval(self, scope:Scope=None):
         return self
-    def type(self, scope:Scope=None):
-        return Type('string')
+    def typeof(self, scope:Scope=None):
+        return self.type
     #TODO: implement rangable methods
     def topy(self, scope:Scope=None) -> str:
         return self.val
@@ -911,7 +929,7 @@ class Bool(AST):
         return self
     def topy(self, scope:Scope=None):
         return self.val
-    def type(self, scope:Scope=None):
+    def typeof(self, scope:Scope=None):
         return Type('bool')
     def treestr(self, indent=0):
         return f'{tab * indent}Bool: {self.val}'
@@ -1060,7 +1078,7 @@ class Number(Rangeable):
         self.val = val
     def eval(self, scope:Scope=None):
         return self
-    def type(self):
+    def typeof(self):
         return Type('Number')
     
     #Rangeable methods
@@ -1138,7 +1156,7 @@ class Range(Iterable,Unpackable):
     def iter(self, scope:'Scope'=None) -> Iter:
         return RangeIter(self)
 
-    # def type(self):
+    # def typeof(self):
     #     return Type('Range') #TODO: this should maybe care about the type of data in it?
 
     def topy(self, scope:Scope=None):
@@ -1209,7 +1227,7 @@ class RangeIter(Iter):
         else:
             return Vector([Bool(False), undefined])
 
-    def type(self):
+    def typeof(self):
         return Type('RangeIter')
 
     def topy(self, scope:Scope=None):
@@ -1231,7 +1249,7 @@ class Vector(Iterable, Unpackable):
         self.vals = vals
     def eval(self, scope:Scope=None):
         return self
-    def type(self, scope:Scope=None):
+    def typeof(self, scope:Scope=None):
         #TODO: this should include the type of the data inside the vector...
         return Type('Vector')
     
