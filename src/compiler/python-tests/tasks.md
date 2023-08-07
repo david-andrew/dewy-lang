@@ -1,4 +1,13 @@
 [tasks]
+- builtins should take the exact type that they are, e.g. callable<[str], undefined>
+- write out basic type graph, including just callables
+  - can do numbers/etc later
+- test type graph and is_instance descendancy checks
+
+
+
+
+
 - chainer functions:
     def bundle_conditionals(tokens:list[Token]):
     def chain_operators(tokens:list[Token]):
