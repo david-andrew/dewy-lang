@@ -223,11 +223,14 @@ class Type(AST):
 
     type:'Type'
 
-    #point from atomic types to their parent type in the type graph
-    #initial type graph is filled out below the class, since it references Type()
-    graph: dict[str, 'Type'] = {}
+    #map by name from simple types to their parent type in the type graph
+    graph: dict[str, str|None] = {
+        'callable': None,
+        'function': 'callable',
+        'builtin': 'callable'
+    }
 
-    def __init__(self, name:str|AST, params:list[AST]=None, parent:'Type'=None):
+    def __init__(self, name:str|AST, params:list[AST]=None, parent:str=None):
         self.name = name
         self.params = params
         
@@ -328,18 +331,12 @@ class Type(AST):
 
         # for non-matching name, if atomic type, recursively check parent type in graph for compatibility
         if isinstance(obj_t.name, str):
-            parent_t = Type.graph[obj_t.name]
-            if parent_t is not None:
-                return Type.is_instance(parent_t, target_t)
+            parent = Type.graph[obj_t.name]
+            if parent is not None:
+                #TODO: this is a poor way to check for parent types. Assumes parent parameters are same shape as child type...
+                return Type.is_instance(Type(parent, obj_t.params), target_t)
 
         return False
-
-# add initial typed to graph available by default 
-Type.graph.update({
-    #TODO: fill out some initial type graph that is available by default
-    'callable': None
-})
-
 
 # set the type class property for Type, and Undefined since class Type() exists now
 Type.type = Type('type')
@@ -348,7 +345,7 @@ Undefined.type = Type('undefined')
 
 class Callable(AST):
 
-    type:Type=Type('callable')
+    type:Type = Type('callable')
 
     def call(self, scope:'Scope'=None):
         """Call the callable in the given scope"""
@@ -427,6 +424,9 @@ class Arg:
 
 
 class Function(Callable):
+    
+    type:Type = Type('function')
+
     def __init__(self, args:list[Arg], body:AST, scope:Scope=None):
         self.args = args
         self.body = body
@@ -492,6 +492,9 @@ class Builtin(Callable):
         'printl': print,
         'readl': input
     }
+
+    type:Type = Type('builtin')
+
     def __init__(self, name:str, args:list[Arg], cls:PyCallable, dtype:Type):
         self.name = name
         self.args = args
