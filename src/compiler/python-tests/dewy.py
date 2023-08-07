@@ -75,6 +75,10 @@ def insert_tabs(func):
 
 
 class AST(ABC):
+    
+    #TODO:make accessing this raise an error if it is None, i.e. not overwritten by child class
+    type:'Type' = None
+
     def eval(self, scope:'Scope'=None) -> 'AST':
         """Evaluate the AST in the given scope, and return the result (as a dewy obj) if any"""
         raise NotImplementedError(f'{self.__class__.__name__}.eval')
@@ -84,8 +88,9 @@ class AST(ABC):
     def comp(self, scope:'Scope'=None) -> str:
         """TODO: future handle compiling an AST to LLVM IR"""
         raise NotImplementedError(f'{self.__class__.__name__}.comp')
-    def typeof(self, scope:'Scope'=None) -> 'Type':
-        """Return the type of the object that would be returned by eval"""
+    # @property
+    # def type(self, scope:'Scope'=None) -> 'Type':
+    #     """Return the type of the object that would be returned by eval"""
         raise NotImplementedError(f'{self.__class__.__name__}.type')
     #TODO: other methods, e.g. semantic analysis
     def treestr(self, indent=0) -> str:
@@ -495,11 +500,11 @@ class Builtin(Callable):
 
     type:Type = Type('builtin')
 
-    def __init__(self, name:str, args:list[Arg], cls:PyCallable, dtype:Type):
+    def __init__(self, name:str, args:list[Arg], cls:PyCallable, type:Type):
         self.name = name
         self.args = args
         self.cls = cls
-        self.dtype = dtype
+        self.type = type
     
     def eval(self, scope:Scope=None):
         return self
@@ -697,11 +702,13 @@ class Block(AST):
 
 
 class Call(AST):
-    def __init__(self, expr:str|AST, args:list[AST]=[], bargs:list[BArg]=[]):
+    def __init__(self, expr:str|AST, args:list[AST]=[], bargs:list[BArg]=[], called:bool=True):
         assert isinstance(expr, str|AST), f'invalid type for call expression: `{self.expr}` of type `{type(self.expr)}`'
         self.expr = expr
         self.args = args
         self.bargs = bargs
+        self.called = called #useful for parsing. if call args have been applied 
+
 
     def eval(self, scope:Scope):
         scope.attach_args(self.args, self.bargs)

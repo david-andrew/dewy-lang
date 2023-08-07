@@ -2,14 +2,14 @@
 
 from dewy import (
     AST, 
-    Undefined,
+    Undefined, undefined,
     Callable,
     Orderable,
     Rangeable,
     Unpackable,
     Iter,
     Iterable,
-    # BArg,
+    BArg,
     # Scope,
     Type,
     Arg,
@@ -66,7 +66,7 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
     Comma_t,
 )
 
-from postok import post_process, get_next_chain
+from postok import post_process, get_next_chain, is_op
 
 from utils import based_number_to_int
 from dataclasses import dataclass
@@ -568,43 +568,138 @@ def parse_block(block:Block_t) -> AST:
 
 
 
-# @cache
-def typeof(tokens: list[Token]) -> Type: #this should be the same type system`` used in the interpreter!
-    # recursively determine the type of the sequence of tokens
-    # follow a similar process to parsing, breaking down the expressions, etc.
-    ...
+
 
 # @cache
-def split_by_lowest_precedence(tokens: list[Token]) -> tuple[list[Token], Token, list[Token]]:
-    # self explanatory
+def split_by_lowest_precedence(tokens: list[Token], scope:Scope) -> tuple[list[Token], Token, list[Token]]:
+    """
+    return the integer index/indices of the lowest precedence operator(s) in the given list of tokens
+    """
+    #collect all operators and their indices in the list of tokens
+    idxs, ops = zip(*[(i,token) for i,token in enumerate(tokens) if is_op(token)])
+
+    if len(ops) == 0:
+        return []
+    if len(ops) == 1:
+        i, = idxs
+        op, = ops
+        return tokens[:i], op, tokens[i+1:]
+    
+    #TODO: need to reimpliment handling multiple operations.
+    #      also make use of scope to disambiguate ambiguous ops, e.g. juxtapose
+    pdb.set_trace()
+    # ... old implementation below ...
+
+    ranks = [operator_precedence(op) for op in ops]
+    min_rank = min(ranks)
+
+    # verify that the min is strictly less than or equal to all other ranks
+    if not all(min_rank <= r for r in ranks):
+        #TODO: probably enumerate out all permutations of the ambiguous operators and return all of them as a list of lists of indices
+        raise NotImplementedError(f"TODO: ambiguous precedence for {ops=} with {ranks=}")
+
+    return [i for i,r in zip(idxs, ranks) if r == min_rank]
+
     pdb.set_trace()
     ...
 
+# @cache
+def typeof(chain: list[Token], scope:Scope) -> Type|None: #this should be the same type system`` used in the interpreter!
+    # recursively determine the type of the sequence of tokens
+    # return none if the sequence does not form a valid type
+    # follow a similar process to parsing, breaking down the expressions, etc.
 
-def parse(tokens:list[Token]) -> AST:
+    pdb.set_trace()
+    chain, remainder = get_next_chain(chain)
+    assert len(remainder) == 0, 'typeof may only be called on single chains of tokens'
 
-    # #count the number of operators
-    # op_count = sum(1 for token in tokens if is_op(token))
+    if len(chain) == 1:
+        token, = chain
+        return typeof_single(token, scope)
+        
+    # TODO: handle type check for more complicated chains...
+    pdb.set_trace()
+    left, op, right = split_by_lowest_precedence(chain, scope)
+    left_t, right_t = typeof(left, scope), typeof(right, scope)
 
-    # if op_count == 0:
-    #     assert len(tokens) == 1, f"expressions without operators expected to have only a single token. Found {tokens}"
-    #     return parse_single(tokens[0])
+    pdb.set_trace()
+
+
+
+def typeof_single(token:Token, scope:Scope) -> Type|None:
+    pdb.set_trace()
+    ...
+
+def arg_barg_split(ast:AST) -> tuple[list[Arg], list[BArg]]:
+    if not isinstance(ast, Tuple):
+        #TODO: some sort of check that ast is a single type...?
+        return [ast], []
+    
+    #TODO:handle this case which may have args and or bargs
+    pdb.set_trace
+    ...
+
+
+
+def parse(tokens:list[Token], scope:Scope=None) -> AST:
+
+    #ensure there is a valid scope to do the parse with
+    if scope is None:
+        scope = Scope.default()
+
     asts = []
     while len(tokens) > 0:
         chain, tokens = get_next_chain(tokens)
 
         if len(chain) == 1:
-            return parse_single(chain[0])
+            token, = chain
+            asts.append(parse_single(token, scope))
+            break
         
-        left, op, right = split_by_lowest_precedence(chain)
+        left, op, right = split_by_lowest_precedence(chain, scope)
+        left, right = parse(left, scope), parse(right, scope)
+
+        match op:
+            case Juxtapose_t():
+                if isinstance(left, Call) and not left.called:
+                    left.args, left.bargs = arg_barg_split(right)
+                    asts.append(left)
+                    continue
+
+                # elif left/right are multipliable
+                    #do left*right
+                pdb.set_trace()
         pdb.set_trace()
 
 
-    pdb.set_trace()
-    ...
+    if len(asts) == 0:
+        pdb.set_trace()
+        return undefined
+    
+    if len(asts) == 1:
+        ast, = asts
+        return ast
+    
+    return Block(asts, newscope=False)
 
-def parse_single(token:Token) -> AST:
+def parse_single(token:Token, scope:Scope) -> AST:
     """Parse a single token into an AST"""
+    match token:
+        case Identifier_t():
+            return Call(token.src, called=False)
+        case String_t():
+            if len(token.body) == 1 and isinstance(token.body[0], str):
+                return String(token.body[0])
+            #else handle interpolation strings
+            pdb.set_trace()
+            ...
+
+        
+        case _:
+            #TODO handle other types...
+            pdb.set_trace()
+            ...
+    
     pdb.set_trace()
     raise NotImplementedError()
     ...
@@ -669,9 +764,6 @@ def test_hello():
     ast = parse(tokens)
     root = Scope.default()
     ast.eval(root)
-
-    pdb.set_trace()
-    ...
 
 
 
