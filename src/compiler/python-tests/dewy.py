@@ -204,9 +204,9 @@ class Scope():
     def default():
         """return a scope with the standard library (of builtins) included"""
         root = Scope()
-        root.bind('print', Builtin('print', [Arg('text')], None, Type('callable', [Vector([String.type]), undefined.typeof()])))
-        root.bind('printl', Builtin('printl', [Arg('text')], None, undefined.typeof()))
-        root.bind('readl', Builtin('readl', [], String, Type('string')))
+        root.bind('print', Builtin('print', [Arg('text')], None, Type('callable', [Vector([String.type]), Undefined.type])))
+        root.bind('printl', Builtin('printl', [Arg('text')], None, Type('callable', [Vector([String.type]), Undefined.type])))
+        root.bind('readl', Builtin('readl', [], String, Type('callable', [Vector([]), String.type])))
         #TODO: eventually add more builtins
 
         return root
