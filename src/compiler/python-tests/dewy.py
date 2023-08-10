@@ -103,6 +103,10 @@ class AST(ABC):
         """Return a string representation of the python objects making up the AST"""
         raise NotImplementedError(f'{self.__class__.__name__}.__repr__')
 
+class PrototypeAST(AST):
+    def eval(self, scope:'Scope'=None) -> AST:
+        raise ValueError('Prototype ASTs may not define eval')
+
 class Undefined(AST):
     """undefined singleton"""
 
@@ -237,7 +241,7 @@ class Type(AST):
 
     def __init__(self, name:str|AST, params:list[AST]=None, parent:str=None):
         self.name = name
-        self.params = params
+        self.params = params or []
         
         # register type in the type graph
         if isinstance(name, str) and name not in Type.graph:
@@ -346,6 +350,13 @@ class Type(AST):
 # set the type class property for Type, and Undefined since class Type() exists now
 Type.type = Type('type')
 Undefined.type = Type('undefined')
+
+class Identifier(PrototypeAST):
+    # intermediate node, expected to be replaced with call or etc. during AST construction
+
+    def __init__(self, name:str) -> None:
+        self.name = name
+    ...
 
 
 class Callable(AST):
@@ -702,12 +713,11 @@ class Block(AST):
 
 
 class Call(AST):
-    def __init__(self, expr:str|AST, args:list[AST]=[], bargs:list[BArg]=[], called:bool=True):
+    def __init__(self, expr:str|AST, args:list[AST]=[], bargs:list[BArg]=[]):
         assert isinstance(expr, str|AST), f'invalid type for call expression: `{self.expr}` of type `{type(self.expr)}`'
         self.expr = expr
         self.args = args
         self.bargs = bargs
-        self.called = called #useful for parsing. if call args have been applied 
 
 
     def eval(self, scope:Scope):

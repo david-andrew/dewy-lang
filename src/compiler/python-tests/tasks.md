@@ -1,9 +1,6 @@
 [tasks]
-- builtins should take the exact type that they are, e.g. callable<[str], undefined>
-- write out basic type graph, including just callables
-  - can do numbers/etc later
-- test type graph and is_instance descendancy checks
-
+- rename .type property on AST classes to basetype or default type. Add a type function which does a runtime check of the type
+- make a walk_ast method, similar to the travers_tokens/full_traverse_tokens
 
 
 

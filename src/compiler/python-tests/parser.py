@@ -1,8 +1,9 @@
 # from __future__ import annotations
 
 from dewy import (
-    AST, 
+    AST, PrototypeAST,
     Undefined, undefined,
+    Identifier,
     Callable,
     Orderable,
     Rangeable,
@@ -13,6 +14,7 @@ from dewy import (
     # Scope,
     Type,
     Arg,
+    Tuple,
     Function,
     Builtin,
     Let,
@@ -156,27 +158,27 @@ def determine_block_type(block:Block_t) -> BlockType: ...
     #if left and right are [], and tbd other stuff, should be an index. Index is the only time that ranges could possibly be naked (i.e. not wrapped in parens/brackets)
 
 
-#TODO: custom AST nodes for intermediate steps
-from abc import ABC
-class IntermediateAST(ABC): ...
-class Void(IntermediateAST): ...
+# #TODO: custom AST nodes for intermediate steps
+# from abc import ABC
+# class IntermediateAST(ABC): ...
+# class Void(IntermediateAST): ...
 
-@dataclass
-class Juxtapose(IntermediateAST):
-    left:IntermediateAST|AST
-    right:IntermediateAST|AST
+# @dataclass
+# class Juxtapose(IntermediateAST):
+#     left:IntermediateAST|AST
+#     right:IntermediateAST|AST
 
-@dataclass
-class Identifier(IntermediateAST):
-    name:str
+# # @dataclass
+# # class Identifier(IntermediateAST):
+# #     name:str
 
-class Tuple(IntermediateAST): ...
+# class Tuple(IntermediateAST): ...
 
-@dataclass
-class UnknownBlock(IntermediateAST):
-    left:str
-    right:str
-    body:list[IntermediateAST|AST]
+# @dataclass
+# class UnknownBlock(IntermediateAST):
+#     left:str
+#     right:str
+#     body:list[IntermediateAST|AST]
 
 
 @dataclass
@@ -286,7 +288,7 @@ def lowest_precedence_split(tokens:list[Token]) -> list[int]:# TODO: handle ambi
 
     return [i for i,r in zip(idxs, ranks) if r == min_rank]
 
-def make_ast_chain(chunks:list[Token], ops:list[Token]) -> AST | IntermediateAST:
+def make_ast_chain(chunks:list[Token], ops:list[Token]) -> AST | PrototypeAST:
     """Create an AST chain from the sequence of ops/chunks"""
     assert len(chunks) == len(ops) + 1, f"ERROR: mismatched lengths for {chunks=} and {ops=}"
     assert len(ops) > 0, f"ERROR: {ops=} is empty"
@@ -307,7 +309,7 @@ def make_ast_chain(chunks:list[Token], ops:list[Token]) -> AST | IntermediateAST
     pdb.set_trace()
 
 
-def parse_bin_op(left:list[Token], op:Token, right:list[Token]) -> AST | IntermediateAST:
+def parse_bin_op(left:list[Token], op:Token, right:list[Token]) -> AST | PrototypeAST:
     """
     create a binary operation AST from the left, op, and right tokens
     """
@@ -345,7 +347,7 @@ def parse_bin_op(left:list[Token], op:Token, right:list[Token]) -> AST | Interme
         case _:
             raise NotImplementedError(f"TODO: {op=}")
 
-def parse_unary_prefix_op(op:Token, right:list[Token]) -> AST | IntermediateAST:
+def parse_unary_prefix_op(op:Token, right:list[Token]) -> AST | PrototypeAST:
     """
     create a unary prefix operation AST from the op and right tokens
     """
@@ -370,7 +372,7 @@ def parse_unary_prefix_op(op:Token, right:list[Token]) -> AST | IntermediateAST:
             raise ValueError(f"INTERNAL ERROR: {op=} is not a unary prefix operator")
 
  
-def parse_unary_postfix_op(left:list[Token], op:Token) -> AST | IntermediateAST:
+def parse_unary_postfix_op(left:list[Token], op:Token) -> AST | PrototypeAST:
     """
     create a unary postfix operation AST from the left and op tokens
     """
@@ -382,7 +384,7 @@ def parse_unary_postfix_op(left:list[Token], op:Token) -> AST | IntermediateAST:
         case _:
             raise NotImplementedError(f"TODO: {op=}")
 
-def parse_chain(tokens:list[Token]) -> AST | IntermediateAST:
+def parse_chain(tokens:list[Token]) -> AST | PrototypeAST:
     """
     Convert a chain of tokens to an AST
 
@@ -627,6 +629,7 @@ def typeof(chain: list[Token], scope:Scope) -> Type|None: #this should be the sa
 
 
 def typeof_single(token:Token, scope:Scope) -> Type|None:
+
     pdb.set_trace()
     ...
 
@@ -640,12 +643,27 @@ def arg_barg_split(ast:AST) -> tuple[list[Arg], list[BArg]]:
     ...
 
 
+def is_callable(ast:AST, scope:Scope) -> bool:
+    if isinstance(ast, Identifier):
+        #check the type of the identifier in the scope
+        if (val:=scope.get(ast.name, undefined)) is not undefined:
+            if Type.is_instance(val.type, Callable.type):
+                return True
+            
+    if isinstance(ast, PrototypeAST):
+        raise NotImplementedError(f"Currently haven't handled is_callable for case of {type(ast)}")
+        
+    
 
-def parse(tokens:list[Token], scope:Scope=None) -> AST:
+    #other cases, e.g. function literals. should be able to use the AST type checking method at this point
+    pdb.set_trace()
+    ...
 
-    #ensure there is a valid scope to do the parse with
-    if scope is None:
-        scope = Scope.default()
+# don't need is_callable, because that is just the default case.
+# also don't have to worry about the user making custom callable types not being parsed correctly,
+#    since they should inherit from Callable, making is_callable return true for them!
+
+def parse(tokens:list[Token], scope:Scope) -> AST:
 
     asts = []
     while len(tokens) > 0:
@@ -661,19 +679,19 @@ def parse(tokens:list[Token], scope:Scope=None) -> AST:
 
         match op:
             case Juxtapose_t():
-                if isinstance(left, Call) and not left.called:
-                    left.args, left.bargs = arg_barg_split(right)
-                    asts.append(left)
-                    continue
-
-                # elif left/right are multipliable
+                if is_callable(left, scope):
+                    args, bargs = arg_barg_split(right)
+                    asts.append(Call(left.name, args, bargs))
+                else:
+                    # assume left/right are multipliable
                     #do left*right
-                pdb.set_trace()
-        pdb.set_trace()
-
-
+                    pdb.set_trace()
+                    ...
+    
+    
     if len(asts) == 0:
-        pdb.set_trace()
+        pdb.set_trace() 
+        #perhaps this should raise an exception
         return undefined
     
     if len(asts) == 1:
@@ -686,7 +704,7 @@ def parse_single(token:Token, scope:Scope) -> AST:
     """Parse a single token into an AST"""
     match token:
         case Identifier_t():
-            return Call(token.src, called=False)
+            return Identifier(token.src)
         case String_t():
             if len(token.body) == 1 and isinstance(token.body[0], str):
                 return String(token.body[0])
@@ -704,22 +722,107 @@ def parse_single(token:Token, scope:Scope) -> AST:
     raise NotImplementedError()
     ...
 
-def test(path:str):
+def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
+    """
+    Parse the sequence of tokens into an AST
+
+    Args:
+        tokens (list[Token]): tokens to be parsed
+        scope (Scope, optional): The scope to use when determining the type of identified values. Defaults to Scope.default()
+    """
+
+    #ensure there is a valid scope to do the parse with
+    if scope is None:
+        scope = Scope.default()
+
+    # kick of the parser
+    ast = parse(tokens, scope)
+
+    # post processing on the parsed AST 
+    express_identifiers(ast)
+    ensure_no_prototypes(ast)
+
+    return ast
+    
+
+
+def express_identifiers(ast:AST) -> AST:
+    """
+    Convert (in-place) any free floating Identifier AST nodes (PrototypeAST) to Call nodes
+    """
+    match ast:
+        case Block(exprs=list(exprs)):
+            for expr in exprs:
+                #TODO: handling scope here isn't correct...
+                express_identifiers(expr)
+        case Identifier():
+            #in place convert Identifier to Call
+            call = Call(ast.name)
+            ast.__dict__ = call.__dict__
+            ast.__class__ = Call
+
+        case Call():
+            for arg in ast.args:
+                express_identifiers(arg)
+            for name, val in ast.bargs:
+                express_identifiers(val)
+        
+        # do-nothing cases:
+        case String(): ...
+
+        # TODO: unhandled cases
+        case _:
+            pdb.set_trace()
+            ...
+
+
+
+
+
+
+
+def ensure_no_prototypes(ast:AST) -> None:
+    """
+    Raises an exception if there are any PrototypeAST nodes in the AST
+    """
+    
+    match ast:
+        case PrototypeAST():
+            raise ValueError(f'May not have any PrototypeASTs in a final AST. Found {ast} of type ({type(ast)})')
+        case Block(exprs=list(exprs)):
+            for expr in exprs:
+                ensure_no_prototypes(expr)
+
+        case Call():
+            #handle any arguments
+            for arg in ast.args:
+                ensure_no_prototypes(arg)
+            for name, val in ast.bargs:
+                ensure_no_prototypes(val)
+
+        #TODO: other cases that can be recursed on
+
+        #do-nothing cases
+        case String(): ...
+        
+        
+        case _:
+            #unkown other cases
+            pdb.set_trace()
+            ...
+
+
+
+def test_file(path:str):
+    """Run a given file"""
 
     with open(path) as f:
         src = f.read()
-
+    
     tokens = tokenize(src)
     post_process(tokens)
 
-    # parse tokens into an AST
-    ast = parse0(tokens)
-    # print(f'parsed ast: {ast}')
-    #second pass/etc.
-
-    #TODO: restructuring, type checking, optimizations, etc.
-
-    # run the program
+    ast = top_level_parse(tokens)
     root = Scope.default()
     res = ast.eval(root)
     if res: print(res)
@@ -727,7 +830,8 @@ def test(path:str):
 
 
 
-def test2():
+#TODO: broken. probably set up scope with some default values
+def test_many_lines():
     """
     Parse each line of syntax3.dewy one at a time for testing
     """
@@ -735,33 +839,40 @@ def test2():
     with open('../../../examples/syntax3.dewy') as f:
         lines = f.read().splitlines()
 
-    # tokenize each line and remove ones that are just whitespace
-    token_lines = [tokenize(line) for line in lines]
-    for line in token_lines: post_process(line)
-    token_lines = [line for line in token_lines if len(line) > 0]
+    
+    for line in lines:
+        tokens = tokenize(line)
+        post_process(tokens)
 
-    #should have a pass to combine dots with operators (e.g. .+ ./ .= etc.)
-    #and combine operators with assignment (e.g. +=, -=, etc.)
-    #note these all have to be juxtaposed to connect up
-    #TODO: make a list of valid combinable operators. basically any math operators
+        # skip empty lines
+        if len(tokens) == 0:
+            continue
 
-    #match the ast for each line
-    for line in token_lines:
-        # print(f'{line=}')
-        ast0 = parse0(line)
-        print(ast0)
-        print(repr(ast0))
-        # pdb.set_trace()
-        # ...
+        #print the line, and run it
+        print('-'*80)
+        print(tokens)
+
+        ast = top_level_parse(tokens)
+        root = Scope.default()
+        res = ast.eval(root)
+        if res: print(res)
 
 
 def test_hello():
-    line = "printl'Hello, World!'"
+    # line = "'Hello, World!'"
+    line = """
+printl'What is your name? '
+print'Hello '
+readl
+"""
 
     tokens = tokenize(line)
     post_process(tokens)
 
-    ast = parse(tokens)
+    #DEBUG
+    # tokens = [Identifier_t('printl'), Juxtapose_t(''), Identifier_t('readl')]
+
+    ast = top_level_parse(tokens)
     root = Scope.default()
     ast.eval(root)
 
@@ -770,7 +881,7 @@ def test_hello():
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:
-        test(sys.argv[1])
+        test_file(sys.argv[1])
     else:
         # test2()
         test_hello()
