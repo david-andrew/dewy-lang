@@ -72,6 +72,7 @@ from postok import post_process, get_next_chain, is_op
 
 from utils import based_number_to_int
 from dataclasses import dataclass
+from typing import Generator
 from rich import print, traceback; traceback.install(show_locals=True)
 
 import pdb
@@ -746,70 +747,146 @@ def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     
 
 
-def express_identifiers(ast:AST) -> AST:
+def express_identifiers(root:AST) -> AST:
     """
     Convert (in-place) any free floating Identifier AST nodes (PrototypeAST) to Call nodes
     """
-    match ast:
-        case Block(exprs=list(exprs)):
-            for expr in exprs:
-                #TODO: handling scope here isn't correct...
-                express_identifiers(expr)
-        case Identifier():
+    for ast in full_traverse_ast(root):
+        if isinstance(ast, Identifier):
             #in place convert Identifier to Call
             call = Call(ast.name)
             ast.__dict__ = call.__dict__
             ast.__class__ = Call
 
-        case Call():
-            for arg in ast.args:
-                express_identifiers(arg)
-            for name, val in ast.bargs:
-                express_identifiers(val)
-        
-        # do-nothing cases:
-        case String(): ...
 
-        # TODO: unhandled cases
-        case _:
-            pdb.set_trace()
-            ...
-
-
-
-
-
-
-
-def ensure_no_prototypes(ast:AST) -> None:
+def ensure_no_prototypes(root:AST) -> None:
     """
     Raises an exception if there are any PrototypeAST nodes in the AST
     """
+    for ast in full_traverse_ast(root):
+        if isinstance(ast, PrototypeAST):
+            raise ValueError(f'May not have any PrototypeASTs in a final AST. Found {ast} of type ({type(ast)})')
+            
+    
+
+def full_traverse_ast(ast:AST) -> Generator[AST, None, None]:
+    
+    skip = yield ast
+    if skip is not None: assert (yield) is None, ".send() may only be called once per iteration"
+    if skip is not None: return
     
     match ast:
-        case PrototypeAST():
-            raise ValueError(f'May not have any PrototypeASTs in a final AST. Found {ast} of type ({type(ast)})')
         case Block(exprs=list(exprs)):
             for expr in exprs:
-                ensure_no_prototypes(expr)
+                yield from full_traverse_ast(expr)
 
         case Call():
             #handle any arguments
             for arg in ast.args:
-                ensure_no_prototypes(arg)
+                yield from full_traverse_ast(arg)
             for name, val in ast.bargs:
-                ensure_no_prototypes(val)
-
-        #TODO: other cases that can be recursed on
-
-        #do-nothing cases
-        case String(): ...
+                yield from full_traverse_ast(val)
         
+        case IString():
+            raise NotImplementedError()
+
+        # do nothing cases
+        case String(): ...
+        case Identifier(): ...
         
         case _:
-            #unkown other cases
+            #TODO: unhandled ast type
             pdb.set_trace()
-            ...
+            raise NotImplementedError(f'traversal not implemented for ast type {type(ast)}')
+
+
+# def full_traverse_ast(ast:AST) -> Generator[AST, None, None]:
+#     """
+#     Walk all nodes in the AST recursively, allowing for modification of the tokens list as it is traversed.
+    
+#     So long as modifications do not occur before the current token, this will safely iterate over all tokens.
+#     This will not yield string or escape chunks in strings, but will yield interpolated blocks.
+
+#     While traversing, the user can overwrite the current index by calling .send(new_index).
+
+#     e.g.
+#     ```python
+#     gen = full_traverse_tokens(tokens)
+#     for i, token, stream in gen:
+#         #do something with current token
+#         #...
+
+#         #maybe overwrite the current index
+#         if should_overwrite:
+#             gen.send(new_index)
+#     ```
+
+#     Do not call .send() twice in a row without calling next() in between. This will cause unexpected behavior.
+
+#     Args:
+#         tokens: the list of tokens to traverse
+
+#     Yields:
+#         i: the index of the current token in the current token list
+#         token: the current token
+#         stream: the current token list
+#     """
+
+#     i = 0
+
+#     while i < len(tokens):
+#         """
+#         1. get next token
+#         2. send current to user
+#         3. increment index (or overwrite it)
+#         4. recurse into blocks
+#         """
+
+#         # get the current token
+#         token = tokens[i]
+
+#         # send the current index to the user. possibly receive a new index to continue from
+#         overwrite_i = yield i, token, tokens
+
+#         # only calls to next() will continue execution. calls to .send do nothing wait
+#         if overwrite_i is not None:
+#             assert (yield) is None, ".send() may only be called once per iteration."
+#             i = overwrite_i
+#         else:
+#             i += 1
+
+#         # recursively handle traversing into blocks
+#         if isinstance(token, Block_t) or isinstance(token, TypeParam_t):
+#             yield from full_traverse_tokens(token.body)
+        
+#         # recursively handle traversing into strings (only interpolation blocks are yielded)
+#         if isinstance(token, String_t):
+#             for child in token.body:
+#                 if isinstance(child, Block_t):
+#                     yield from full_traverse_tokens(child.body)
+
+
+# def traverse_tokens(tokens:list[Token]) -> Generator[Token, None, None]:
+#     """
+#     Convenience function over full_traverse_tokens. Walk all tokens recursively
+    
+#     Does not allow for modification of the tokens list as it is traversed.
+#     To modify during traversal, use `full_traverse_tokens` instead.
+
+#     Args:
+#         tokens: the list of tokens to traverse
+
+#     Yields:
+#         token: the current token
+#     """
+#     for _, token, _ in full_traverse_tokens(tokens):
+#         yield token
+
+
+
+
+
+
 
 
 
