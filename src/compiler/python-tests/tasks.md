@@ -1,7 +1,7 @@
 [tasks]
 - rename .type property on AST classes to basetype or default type. Add a type function which does a runtime check of the type
 - make a walk_ast method, similar to the travers_tokens/full_traverse_tokens
-
+- make Call take a tuple, where bound args are just bind expressions
 
 
 

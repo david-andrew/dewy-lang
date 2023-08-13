@@ -105,7 +105,7 @@ class AST(ABC):
 
 class PrototypeAST(AST):
     def eval(self, scope:'Scope'=None) -> AST:
-        raise ValueError('Prototype ASTs may not define eval')
+        raise ValueError(f'Prototype ASTs may not define eval. Attempted to call eval on prototype {self}, of type ({type(self)})')
 
 class Undefined(AST):
     """undefined singleton"""
@@ -356,7 +356,12 @@ class Identifier(PrototypeAST):
 
     def __init__(self, name:str) -> None:
         self.name = name
-    ...
+    
+    def __str__(self) -> str:
+        return f'{self.name}'
+    
+    def __repr__(self) -> str:
+        return f'Identifier({self.name})'
 
 
 class Callable(AST):
