@@ -673,7 +673,7 @@ def is_callable(ast:AST, scope:Scope) -> bool:
 # also don't have to worry about the user making custom callable types not being parsed correctly,
 #    since they should inherit from Callable, making is_callable return true for them!
 
-def parse(tokens:list[Token], scope:Scope) -> AST:
+def parse(tokens:list[Token], scope:Scope, *, newscope:bool=False) -> AST:
 
     asts = []
     while len(tokens) > 0:
@@ -703,7 +703,7 @@ def parse(tokens:list[Token], scope:Scope) -> AST:
                 if isinstance(left, Identifier):
                     asts.append(Bind(left.name, right))   
                 else:    
-                    #TODO: handle other cases
+                    #TODO: handle other cases, e.g. a.b, a[b], etc.
                     pdb.set_trace()
                     ...
 
@@ -720,7 +720,7 @@ def parse(tokens:list[Token], scope:Scope) -> AST:
         ast, = asts
         return ast
     
-    return Block(asts, newscope=False)
+    return Block(asts, newscope=newscope)
 
 def parse_single(token:Token, scope:Scope) -> AST:
     """Parse a single token into an AST"""
@@ -740,7 +740,7 @@ def parse_single(token:Token, scope:Scope) -> AST:
                     #TODO: handle converting escape sequences to a string ast
                     pdb.set_trace()
                 else:
-                    parts.append(parse(chunk.body, scope))
+                    parts.append(parse(chunk.body, scope, newscope=True))
             return IString(parts)
 
         
