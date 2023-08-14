@@ -771,9 +771,11 @@ def ensure_no_prototypes(root:AST) -> None:
 
 def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
     """
-    Generator to recursively walk all nodes in the given AST. Performs a preorder traversal.
+    Generator to recursively walk all nodes in the given AST.
     
     While traversing, the user can skip visiting the current node's children by calling `.send(True)`.
+    Children nodes are visited after the current node (preorder traversal), so you may modify the children
+      during iteration, and the iterator ought to handle it fine.
 
     e.g.
     ```python
