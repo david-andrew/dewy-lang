@@ -826,7 +826,6 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
         case IString(parts=list(parts)):
             for ast in parts:
                 yield from full_traverse_ast(ast)
-            raise NotImplementedError()
 
         # do nothing cases
         case String(): ...
