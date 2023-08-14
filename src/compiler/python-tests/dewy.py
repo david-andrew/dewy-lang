@@ -137,8 +137,6 @@ undefined = Undefined()
 
 
 
-BArg = tuple[str, AST]   #bound argument + current value for when making function calls
-
 class Scope():
     
     @dataclass
@@ -153,8 +151,7 @@ class Scope():
         self.vars:dict[str, Scope._var] = {}
         
         #used for function calls
-        self.args:list[AST] = []
-        self.bargs:list[BArg] = []
+        self.args:Array|None = None
 
     @property
     def root(self) -> 'Scope':
@@ -205,9 +202,8 @@ class Scope():
         s.vars = self.vars.copy()
         return s
 
-    def attach_args(self, args:list[AST], bargs:list[BArg]):
+    def attach_args(self, args:Union['Array', None]):
         self.args = args
-        self.bargs = bargs
 
     @staticmethod
     def default():
@@ -422,7 +418,7 @@ class Iterable(AST):
 
 
 class Arg:
-    def __init__(self, name:str, type:Type=None, val:AST=None):
+    def __init__(self, name:str, type:Type=None, val:AST|None=None):
         self.name = name
         self.val = val
         self.type = type
@@ -463,17 +459,47 @@ class Function(Callable):
         #collect args from calling scope, and merge into function scope
         fscope = Scope(self.scope)
 
-        #TODO: this probably doesn't handle when the named vs unnamed call arguments are not exactly the same as defined
-        for arg in self.args:
-            if arg.val is None:
-                fscope.bind(arg.name, scope.args.pop(0))
-            else:
-                fscope.bind(arg.name, arg.val)
-        assert len(scope.args) == 0, f'not all arguments were used in function call {self}'
-        for name, val in scope.bargs:
-            assert name in [a.name for a in self.args], f'unknown argument {name} in function call {self}'
-            fscope.bind(name, val)
-        scope.bargs = []
+        # grab the args being passed in
+        caller_args:list[AST] = []
+        caller_kwargs:dict[str,AST] = {}
+        if scope is not None and scope.args is not None:
+            for arg in scope.args.vals:
+                if not isinstance(arg, Bind):
+                    caller_args.append(arg)
+                else:
+                    caller_kwargs[arg.name] = arg.value
+        
+        # grab the args and any default args from the function definition
+        fn_args = [arg for arg in self.args if arg.val is None and arg.name not in caller_kwargs]
+        fn_kwargs = [arg for arg in self.args if arg.val is not None and arg.name not in caller_kwargs]
+        fn_arg_names = {arg.name for arg in self.args}
+
+        # bind the positional arguments to the function scope
+        assert len(fn_args) == len(caller_args), f'encountered different number of positional arguments than expected. Function is defined with {[a for a in self.args if a.val is None]}. Tried to call with {caller_args}'
+        for fn_arg, caller_arg in zip(fn_args, caller_args):
+            fscope.let(fn_arg.name, caller_arg)
+
+        # bind keyward arguments to the function scope, first from default args, then from caller
+        for fn_kwarg in fn_kwargs:
+            fscope.let(fn_kwarg.name, fn_kwarg.val)
+        for caller_kwarg_name, caller_kwarg_value in caller_kwargs.items():
+            assert caller_kwarg_name in fn_arg_names, f"tried to bind unrecognized keyword argument '{caller_kwarg_name}' to function {self}"
+            fscope.let(caller_kwarg_name, caller_kwarg_value)
+
+
+
+        
+        # #TODO: this probably doesn't handle when the named vs unnamed call arguments are not exactly the same as defined
+        # for arg in self.args:
+        #     if arg.val is None:
+        #         fscope.bind(arg.name, scope.args.pop(0))
+        #     else:
+        #         fscope.bind(arg.name, arg.val)
+        # assert len(scope.args) == 0, f'not all arguments were used in function call {self}'
+        # for name, val in scope.bargs:
+        #     assert name in [a.name for a in self.args], f'unknown argument {name} in function call {self}'
+        #     fscope.bind(name, val)
+        # scope.bargs = []
 
         #check that all unnamed args have values in the scope
         #TODO: make this check more robust + better error messages
@@ -529,10 +555,25 @@ class Builtin(Callable):
         if self.name in Builtin.funcs:
             f = Builtin.funcs[self.name]
             #TODO: this doesn't handle differences in named vs unnamed args between the function definition and the call
-            args = [scope.args[i].eval(scope).topy(scope) for i, a in enumerate(self.args) if a.val is None]
-            kwargs = {a: a.val.eval(scope).topy(scope) for a in self.args if a.val is not None}
-            for name, val in scope.bargs:
-                kwargs[name] = val.eval(scope).topy(scope)
+            # args = [scope.args[i].eval(scope).topy(scope) for i, a in enumerate(self.args) if a.val is None]
+            # kwargs = {a: a.val.eval(scope).topy(scope) for a in self.args if a.val is not None}
+
+            args = []
+            kwargs = {}
+
+            # insert positional and keyward args from the call
+            if scope.args is not None:
+                for ast in scope.args.vals:
+                    if not isinstance(ast, Bind):
+                        args.append(ast.eval(scope).topy(scope))
+                    else:
+                        kwargs[ast.name] = ast.value.eval(scope).topy(scope)
+
+            # insert any default/named args (not already inserted by the call)
+            for arg in self.args:
+                if arg.val is not None and arg.name not in kwargs:
+                    kwargs[arg.name] = arg.val.eval(scope).topy(scope)
+
             result = f(*args, **kwargs)
             if self.cls is not None:
                 return self.cls(result)
@@ -718,15 +759,14 @@ class Block(AST):
 
 
 class Call(AST):
-    def __init__(self, expr:str|AST, args:list[AST]=[], bargs:list[BArg]=[]):
+    def __init__(self, expr:str|AST, args:Union['Array',None]=None):
         assert isinstance(expr, str|AST), f'invalid type for call expression: `{self.expr}` of type `{type(self.expr)}`'
         self.expr = expr
         self.args = args
-        self.bargs = bargs
 
 
     def eval(self, scope:Scope):
-        scope.attach_args(self.args, self.bargs)
+        scope.attach_args(self.args)
 
         #check if we need to resolve the name, or if it was an anonymous expression
         if isinstance(self.expr, AST):
@@ -746,24 +786,19 @@ class Call(AST):
             s += self.expr.treestr(indent + 1)
         else:
             s += self.expr
-        if len(self.args) > 0 or len(self.bargs) > 0:
+        if self.args is not None:
             s += '\n'
-            for arg in self.args:
-                s += arg.treestr(indent + 1) + '\n'
-            for a, v in self.bargs:
-                s += tab * (indent + 1) + f'{a}={v}\n'
+            s += self.args.treestr(indent+1)
         return s
 
     @insert_tabs
     def __str__(self):
-        arglist = ', '.join(map(str, self.args))
-        barglist = ', '.join(f'{a}={v}' for a, v in self.bargs)
-        args = arglist + (', ' if arglist and barglist else '') + barglist
-        #TODO: not sure if Function captures all objects that should get () even if they don't have args
-        return f'{self.expr}' + (f'({args})' if args or isinstance(self.expr, Function) else f'')
+        #TODO: not sure if expr of type Function should get () even if they don't have args
+        argsstr = '' if self.args is None else f'({str(self.args)[1:-1]})' #strip off [] and replace with ()
+        return f'{self.expr}' + (f'{self.args}' if self.args else '')
 
     def __repr__(self):
-        return f'Call({self.expr}, {repr(self.args)}, {repr(self.bargs)})'
+        return f'Call({repr(self.expr)}, {repr(self.args)})'
 
 class String(Rangeable):
     type:Type=Type('string')
@@ -1315,7 +1350,7 @@ class Array(Iterable, Unpackable):
 
 def hello(root:Scope) -> AST:
     """printl('Hello, World!')"""
-    return Call('printl', [String('Hello, World!')])
+    return Call('printl', Array([String('Hello, World!')]))
 
 
 def hello_func(root:Scope) -> AST:
@@ -1330,7 +1365,7 @@ def hello_func(root:Scope) -> AST:
             'main',
             Function(
                 [],
-                Call('printl', [String('Hello, World!')]),
+                Call('printl', Array([String('Hello, World!')])),
                 root
             )
         ),
@@ -1348,7 +1383,7 @@ def anonymous_func(root:Scope) -> AST:
         Call(
             Function(
                 [],
-                Call('printl', [String('Hello, World!')]),
+                Call('printl', Array([String('Hello, World!')])),
                 root
             )
         ),
@@ -1363,9 +1398,9 @@ def hello_name(root:Scope) -> AST:
     }
     """
     return Block([
-        Call('print', [String("What's your name? ")]),
+        Call('print', Array([String("What's your name? ")])),
         Bind('name', Call('readl')),
-        Call('printl', [IString([String('Hello '), Call('name'), String('!')])]),
+        Call('printl', Array([IString([String('Hello '), Call('name'), String('!')])])),
     ])
 
 
@@ -1379,16 +1414,16 @@ def if_else(root:Scope) -> AST:
     }
     """
     return Block([
-        Call('print', [String("What's your name? ")]),
+        Call('print', Array([String("What's your name? ")])),
         Bind('name', Call('readl')),
         If([
             (
                 Equal(Call('name'), String('Alice')),
-                Call('printl', [String('Hello Alice!')])
+                Call('printl', Array([String('Hello Alice!')]))
             ),
             (
                 Bool(True),
-                Call('printl', [String('Hello Stranger!')]),
+                Call('printl', Array([String('Hello Stranger!')])),
             )
         ])
     ])
@@ -1405,20 +1440,20 @@ def if_else_if(root:Scope) -> AST:
     }
     """
     return Block([
-        Call('print', [String("What's your name? ")]),
+        Call('print', Array([String("What's your name? ")])),
         Bind('name', Call('readl')),
         If([
             (
                 Equal(Call('name'), String('Alice')),
-                Call('printl', [String('Hello Alice!')])
+                Call('printl', Array([String('Hello Alice!')]))
             ),
             (
                 Equal(Call('name'), String('Bob')),
-                Call('printl', [String('Hello Bob!')])
+                Call('printl', Array([String('Hello Bob!')]))
             ),
             (
                 Bool(True),
-                Call('printl', [String('Hello Stranger!')]),
+                Call('printl', Array([String('Hello Stranger!')])),
             )
         ])
     ])
@@ -1437,13 +1472,13 @@ def hello_loop(root:Scope) -> AST:
     }
     """
     return Block([
-        Call('print', [String("What's your name? ")]),
+        Call('print', Array([String("What's your name? ")])),
         Bind('name', Call('readl')),
         Bind('i', Number(0)),
         Loop(
             Less(Call('i'), Number(10)),
             Block([
-                Call('printl', [IString([String('Hello '), Call('name'), String('!')])]),
+                Call('printl', Array([IString([String('Hello '), Call('name'), String('!')])])),
                 Bind('i', Add(Call('i'), Number(1), Number)),
             ])
         )
@@ -1475,15 +1510,15 @@ def unpack_test(root:Scope) -> AST:
 
     return Block([
         Bind('s', Array([String('Hello'), Array([String('World'), String('!')]), Number(5), Number(10)])),
-        Call('printl', [IString([String('s='), Call('s')])]),
+        Call('printl', Array([IString([String('s='), Call('s')])])),
         Unpack(['a', 'b', 'c', 'd'], Call('s')),
-        Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b'), String(' c='), Call('c'), String(' d='), Call('d')])]),
+        Call('printl', Array([IString([String('a='), Call('a'), String(' b='), Call('b'), String(' c='), Call('c'), String(' d='), Call('d')])])),
         Unpack(['a', '...b'], Call('s')),
-        Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b')])]),
+        Call('printl', Array([IString([String('a='), Call('a'), String(' b='), Call('b')])])),
         Unpack(['...a', 'b'], Call('s')),
-        Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b')])]),
+        Call('printl', Array([IString([String('a='), Call('a'), String(' b='), Call('b')])])),
         Unpack(['a', ['b', 'c'], '...d'], Call('s')),
-        Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b'), String(' c='), Call('c'), String(' d='), Call('d')])]),
+        Call('printl', Array([IString([String('a='), Call('a'), String(' b='), Call('b'), String(' c='), Call('c'), String(' d='), Call('d')])])),
 
         # Test unpacking too few/many values
         # Unpack(['a', 'b', 'c', 'd', 'e'], Call('s')),         # error: not enough values to unpack
@@ -1516,20 +1551,20 @@ def range_iter_test(root:Scope) -> AST:
     return Block([
         Bind('r', Range(Number(0), Number(2), Number(20))),
         Bind('it', RangeIter(Call('r'))),
-        Call('printl', [Next(Call('it'))]),
-        Call('printl', [Next(Call('it'))]),
-        Call('printl', [Next(Call('it'))]),
-        Call('printl', [Next(Call('it'))]),
-        Call('printl', [Next(Call('it'))]),
-        Call('printl', [Next(Call('it'))]),
-        Call('printl', [Next(Call('it'))]),
-        Call('printl', [Next(Call('it'))]),
-        Call('printl', [Next(Call('it'))]),
-        Call('printl', [Next(Call('it'))]),
-        Call('printl', [Next(Call('it'))]),
-        Call('printl', [Next(Call('it'))]), #should print [False, None] since the iterator is exhausted
-        Call('printl', [Next(Call('it'))]),
-        Call('printl', [Next(Call('it'))]),
+        Call('printl', Array([Next(Call('it'))])),
+        Call('printl', Array([Next(Call('it'))])),
+        Call('printl', Array([Next(Call('it'))])),
+        Call('printl', Array([Next(Call('it'))])),
+        Call('printl', Array([Next(Call('it'))])),
+        Call('printl', Array([Next(Call('it'))])),
+        Call('printl', Array([Next(Call('it'))])),
+        Call('printl', Array([Next(Call('it'))])),
+        Call('printl', Array([Next(Call('it'))])),
+        Call('printl', Array([Next(Call('it'))])),
+        Call('printl', Array([Next(Call('it'))])),
+        Call('printl', Array([Next(Call('it'))])), #should print [False, None] since the iterator is exhausted
+        Call('printl', Array([Next(Call('it'))])),
+        Call('printl', Array([Next(Call('it'))])),
     ])
 
 
@@ -1551,7 +1586,7 @@ def loop_iter_manual(root:Scope) -> AST:
         Loop(
             Call('cond'),
             Block([
-                Call('printl', [Call('i')]),
+                Call('printl', Array([Call('i')])),
                 Unpack(['cond', 'i'], Next(Call('it'))),
             ])
         )
@@ -1567,7 +1602,7 @@ def loop_in_iter(root:Scope) -> AST:
     """
     return Loop(
         In('i', Range(Number(0), Number(2), Number(10))),
-        Call('printl', [Call('i')]),
+        Call('printl', Array([Call('i')])),
     )
    
 
@@ -1581,7 +1616,7 @@ def nested_loop(root:Scope) -> AST:
         In('i', Range(Number(0), Number(2), Number(10))),
         Loop(
             In('j', Range(Number(0), Number(2), Number(10))),
-            Call('printl', [IString([Call('i'), String(','), Call('j')])]),
+            Call('printl', Array([IString([Call('i'), String(','), Call('j')])])),
         )
     )
 
@@ -1619,7 +1654,7 @@ def block_printing(root:Scope) -> AST:
                                         Loop(
                                             In('m', Range(Number(0), Number(2), Number(5))),
                                             Block([
-                                                Call('printl', [IString([Call('i'), String(','), Call('j'), String(','), Call('k'), String(','), Call('l'), String(','), Call('m')])]),
+                                                Call('printl', Array([IString([Call('i'), String(','), Call('j'), String(','), Call('k'), String(','), Call('l'), String(','), Call('m')])])),
                                             ])
                                         )
                                     ])
