@@ -698,6 +698,17 @@ def parse(tokens:list[Token], scope:Scope) -> AST:
                     #do left*right
                     pdb.set_trace()
                     ...
+            
+            case Operator_t(op='='):
+                if isinstance(left, Identifier):
+                    asts.append(Bind(left.name, right))   
+                else:    
+                    #TODO: handle other cases
+                    pdb.set_trace()
+                    ...
+
+            case _:
+                raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
     
     
     if len(asts) == 0:
@@ -719,9 +730,18 @@ def parse_single(token:Token, scope:Scope) -> AST:
         case String_t():
             if len(token.body) == 1 and isinstance(token.body[0], str):
                 return String(token.body[0])
-            #else handle interpolation strings
-            pdb.set_trace()
-            ...
+            
+            # else handle interpolation strings
+            parts = []
+            for chunk in token.body:
+                if isinstance(chunk, str):
+                    parts.append(String(chunk))
+                elif isinstance(chunk, Escape_t):
+                    #TODO: handle converting escape sequences to a string ast
+                    pdb.set_trace()
+                else:
+                    parts.append(parse(chunk.body, scope))
+            return IString(parts)
 
         
         case _:
@@ -827,6 +847,9 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
             for ast in parts:
                 yield from full_traverse_ast(ast)
 
+        case Bind():
+            yield from full_traverse_ast(root.value)
+        
         # do nothing cases
         case String(): ...
         case Identifier(): ...
@@ -888,10 +911,10 @@ def test_many_lines():
 
 def test_hello():
     # line = "'Hello, World!'"
-    line = """
-printl'What is your name? '
-print'Hello '
-readl
+    line = r"""
+print'What is your name? '
+name = readl
+printl'Hello {name}'
 """
 
     tokens = tokenize(line)
