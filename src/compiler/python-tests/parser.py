@@ -36,7 +36,7 @@ from dewy import (
     Number,
     Range,
     RangeIter,
-    Vector,
+    Array,
     Scope,
 )
 from tokenizer import ( tokenize, tprint, traverse_tokens,                       

@@ -213,9 +213,9 @@ class Scope():
     def default():
         """return a scope with the standard library (of builtins) included"""
         root = Scope()
-        root.bind('print', Builtin('print', [Arg('text')], None, Type('callable', [Vector([String.type]), Undefined.type])))
-        root.bind('printl', Builtin('printl', [Arg('text')], None, Type('callable', [Vector([String.type]), Undefined.type])))
-        root.bind('readl', Builtin('readl', [], String, Type('callable', [Vector([]), String.type])))
+        root.bind('print', Builtin('print', [Arg('text')], None, Type('callable', [Array([String.type]), Undefined.type])))
+        root.bind('printl', Builtin('printl', [Arg('text')], None, Type('callable', [Array([String.type]), Undefined.type])))
+        root.bind('readl', Builtin('readl', [], String, Type('callable', [Array([]), String.type])))
         #TODO: eventually add more builtins
 
         return root
@@ -1049,7 +1049,7 @@ loop {(cond, i) = iter.next(); cond}
 """
 #TODO: convert to class In()
 #  in basically does this, but has the extra stuff with the var being set, and so forth
-#class iter is the manager for things that can iterate, e.g. Range.iter()->RangeIter, Vector.iter()->VectorIter, etc.
+#class iter is the manager for things that can iterate, e.g. Range.iter()->RangeIter, Array.iter()->ArrayIter, etc.
 class In(AST):
     #TODO: allow name to be an unpack structure as well
     def __init__(self, name:str|PackStruct, iterable:Iterable):#, init:AST, body:AST):
@@ -1248,9 +1248,9 @@ class RangeIter(Iter):
         if (c:=self.i.compare(self.range.last).val) < 0 or (c==0 and self.range.include_last):
             ret = self.i
             self.i = self.i.successor(self.step, scope)
-            return Vector([Bool(True), ret])
+            return Array([Bool(True), ret])
         else:
-            return Vector([Bool(False), undefined])
+            return Array([Bool(False), undefined])
 
     def typeof(self):
         return Type('RangeIter')
@@ -1269,14 +1269,14 @@ class RangeIter(Iter):
         return f'RangeIter({repr(self.ast)})'
 
 
-class Vector(Iterable, Unpackable):
+class Array(Iterable, Unpackable):
     def __init__(self, vals:list[AST]):
         self.vals = vals
     def eval(self, scope:Scope=None):
         return self
     def typeof(self, scope:Scope=None):
         #TODO: this should include the type of the data inside the vector...
-        return Type('Vector')
+        return Type('Array')
     
     #unpackable interface
     def len(self, scope:Scope=None):
@@ -1287,12 +1287,12 @@ class Vector(Iterable, Unpackable):
         elif isinstance(key, EllipsisType):
             return self
         elif isinstance(key, slice):
-            return Vector(self.vals[key])
+            return Array(self.vals[key])
         elif isinstance(key, tuple):
             #probably only valid for N-dimensional/non-jagged vectors
-            raise NotImplementedError('TODO: implement tuple indexing for Vector')
+            raise NotImplementedError('TODO: implement tuple indexing for Array')
         else:
-            raise TypeError(f'invalid type for Vector.get: `{key}` of type `{type(key)}`')
+            raise TypeError(f'invalid type for Array.get: `{key}` of type `{type(key)}`')
 
 
     #iterable interface
@@ -1301,7 +1301,7 @@ class Vector(Iterable, Unpackable):
     def topy(self, scope:Scope=None):
         return [v.eval(scope).topy(scope) for v in self.vals]
     def treestr(self, indent=0):
-        s = tab * indent + 'Vector\n'
+        s = tab * indent + 'Array\n'
         for v in self.vals:
             s += v.treestr(indent + 1) + '\n'
         return s
@@ -1309,7 +1309,7 @@ class Vector(Iterable, Unpackable):
     def __str__(self):
         return f'[{" ".join(map(str, self.vals))}]'
     def __repr__(self):
-        return f'Vector({repr(self.vals)})'
+        return f'Array({repr(self.vals)})'
 
 
 
@@ -1474,7 +1474,7 @@ def unpack_test(root:Scope) -> AST:
     """
 
     return Block([
-        Bind('s', Vector([String('Hello'), Vector([String('World'), String('!')]), Number(5), Number(10)])),
+        Bind('s', Array([String('Hello'), Array([String('World'), String('!')]), Number(5), Number(10)])),
         Call('printl', [IString([String('s='), Call('s')])]),
         Unpack(['a', 'b', 'c', 'd'], Call('s')),
         Call('printl', [IString([String('a='), Call('a'), String(' b='), Call('b'), String(' c='), Call('c'), String(' d='), Call('d')])]),
@@ -1674,7 +1674,7 @@ def rule110(root:Scope) -> AST:
         Let('world', Type('vector', [Type('bit')])),
         Bind(
             'world',
-            Vector([Number(1)]),
+            Array([Number(1)]),
         ),
         # loop true
         #     printl(world)

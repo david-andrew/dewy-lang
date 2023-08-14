@@ -1,6 +1,7 @@
 [tasks]
 - rename .type property on AST classes to basetype or default type. Add a type function which does a runtime check of the type
-- make Call take a tuple, where bound args are just bind expressions
+- rename vector to array
+- make Call take an array, where bound args are just bind expressions
 
 
 
