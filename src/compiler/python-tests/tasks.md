@@ -1,8 +1,7 @@
 [tasks]
 - rename .type property on AST classes to basetype or default type. Add a type function which does a runtime check of the type
-- rename vector to array
-- make Call take an array, where bound args are just bind expressions
-
+- probably make identifier not a prototype, and instead anything that uses identifiers uses them instead of python strings
+  --> e.g. Bind(Identifier, AST), Call(Identifier), etc.
 
 
 - chainer functions:

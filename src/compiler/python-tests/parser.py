@@ -10,7 +10,6 @@ from dewy import (
     Unpackable,
     Iter,
     Iterable,
-    BArg,
     # Scope,
     Type,
     Arg,
@@ -634,15 +633,25 @@ def typeof_single(token:Token, scope:Scope) -> Type|None:
     pdb.set_trace()
     ...
 
-def arg_barg_split(ast:AST) -> tuple[list[Arg], list[BArg]]:
+def to_callable(ast:AST) -> str|Callable:
+    """Convert the ast to either a string or Callable"""
+
+    if isinstance(ast, Identifier):
+        return ast.name
+    if isinstance(ast, (Builtin, Function)):
+        return ast
+
+    raise ValueError(f'Tried to prepare callable expression with unrecognized type {type(ast)}')
+
+
+def to_call_args(ast:AST) -> Array:
     if not isinstance(ast, Tuple):
         #TODO: some sort of check that ast is a single type...?
-        return [ast], []
+        return Array([ast])
     
-    #TODO:handle this case which may have args and or bargs
-    pdb.set_trace
-    ...
-
+    # if ast was a tuple, should be able to directly convert to call args as is
+    return Array(ast.exprs)
+    
 
 def is_callable(ast:AST, scope:Scope) -> bool:
     if isinstance(ast, Identifier):
@@ -681,8 +690,9 @@ def parse(tokens:list[Token], scope:Scope) -> AST:
         match op:
             case Juxtapose_t():
                 if is_callable(left, scope):
-                    args, bargs = arg_barg_split(right)
-                    asts.append(Call(left.name, args, bargs))
+                    fn = to_callable(left)
+                    args = to_call_args(right)
+                    asts.append(Call(fn, args))
                 else:
                     # assume left/right are multipliable
                     #do left*right
@@ -809,10 +819,9 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
 
         case Call():
             #handle any arguments
-            for arg in root.args:
-                yield from full_traverse_ast(arg)
-            for name, val in root.bargs:
-                yield from full_traverse_ast(val)
+            if root.args is not None:
+                for arg in root.args.vals:
+                    yield from full_traverse_ast(arg)
         
         case IString(parts=list(parts)):
             for ast in parts:
