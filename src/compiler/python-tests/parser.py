@@ -660,7 +660,7 @@ def is_callable(ast:AST, scope:Scope) -> bool:
     pdb.set_trace()
     ...
 
-# don't need is_callable, because that is just the default case.
+# don't need is_multipliable, because that is just the default case.
 # also don't have to worry about the user making custom callable types not being parsed correctly,
 #    since they should inherit from Callable, making is_callable return true for them!
 
@@ -769,25 +769,52 @@ def ensure_no_prototypes(root:AST) -> None:
             
     
 
-def full_traverse_ast(ast:AST) -> Generator[AST, None, None]:
+def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
+    """
+    Generator to recursively walk all nodes in the given AST. Performs a preorder traversal.
     
-    skip = yield ast
+    While traversing, the user can skip visiting the current node's children by calling `.send(True)`.
+
+    e.g.
+    ```python
+    
+    for ast in (gen := full_traverse_ast(root)):
+        #do something with current ast node
+        #...
+
+        #maybe skip any children of this node
+        if should_skip:
+            gen.send(True)
+    ```
+
+    Do not call `.send()` twice in a row without calling `next()` in between. This will cause unexpected behavior.
+
+    Args:
+        root: the ast node to start traversing from
+
+    Yields:
+        ast: the current ast node being looked at (and recursively all children nodes)
+    """
+    
+    skip = yield root
     if skip is not None: assert (yield) is None, ".send() may only be called once per iteration"
     if skip is not None: return
     
-    match ast:
+    match root:
         case Block(exprs=list(exprs)):
             for expr in exprs:
                 yield from full_traverse_ast(expr)
 
         case Call():
             #handle any arguments
-            for arg in ast.args:
+            for arg in root.args:
                 yield from full_traverse_ast(arg)
-            for name, val in ast.bargs:
+            for name, val in root.bargs:
                 yield from full_traverse_ast(val)
         
-        case IString():
+        case IString(parts=list(parts)):
+            for ast in parts:
+                yield from full_traverse_ast(ast)
             raise NotImplementedError()
 
         # do nothing cases
@@ -797,93 +824,7 @@ def full_traverse_ast(ast:AST) -> Generator[AST, None, None]:
         case _:
             #TODO: unhandled ast type
             pdb.set_trace()
-            raise NotImplementedError(f'traversal not implemented for ast type {type(ast)}')
-
-
-# def full_traverse_ast(ast:AST) -> Generator[AST, None, None]:
-#     """
-#     Walk all nodes in the AST recursively, allowing for modification of the tokens list as it is traversed.
-    
-#     So long as modifications do not occur before the current token, this will safely iterate over all tokens.
-#     This will not yield string or escape chunks in strings, but will yield interpolated blocks.
-
-#     While traversing, the user can overwrite the current index by calling .send(new_index).
-
-#     e.g.
-#     ```python
-#     gen = full_traverse_tokens(tokens)
-#     for i, token, stream in gen:
-#         #do something with current token
-#         #...
-
-#         #maybe overwrite the current index
-#         if should_overwrite:
-#             gen.send(new_index)
-#     ```
-
-#     Do not call .send() twice in a row without calling next() in between. This will cause unexpected behavior.
-
-#     Args:
-#         tokens: the list of tokens to traverse
-
-#     Yields:
-#         i: the index of the current token in the current token list
-#         token: the current token
-#         stream: the current token list
-#     """
-
-#     i = 0
-
-#     while i < len(tokens):
-#         """
-#         1. get next token
-#         2. send current to user
-#         3. increment index (or overwrite it)
-#         4. recurse into blocks
-#         """
-
-#         # get the current token
-#         token = tokens[i]
-
-#         # send the current index to the user. possibly receive a new index to continue from
-#         overwrite_i = yield i, token, tokens
-
-#         # only calls to next() will continue execution. calls to .send do nothing wait
-#         if overwrite_i is not None:
-#             assert (yield) is None, ".send() may only be called once per iteration."
-#             i = overwrite_i
-#         else:
-#             i += 1
-
-#         # recursively handle traversing into blocks
-#         if isinstance(token, Block_t) or isinstance(token, TypeParam_t):
-#             yield from full_traverse_tokens(token.body)
-        
-#         # recursively handle traversing into strings (only interpolation blocks are yielded)
-#         if isinstance(token, String_t):
-#             for child in token.body:
-#                 if isinstance(child, Block_t):
-#                     yield from full_traverse_tokens(child.body)
-
-
-# def traverse_tokens(tokens:list[Token]) -> Generator[Token, None, None]:
-#     """
-#     Convenience function over full_traverse_tokens. Walk all tokens recursively
-    
-#     Does not allow for modification of the tokens list as it is traversed.
-#     To modify during traversal, use `full_traverse_tokens` instead.
-
-#     Args:
-#         tokens: the list of tokens to traverse
-
-#     Yields:
-#         token: the current token
-#     """
-#     for _, token, _ in full_traverse_tokens(tokens):
-#         yield token
-
-
-
+            raise NotImplementedError(f'traversal not implemented for ast type {type(root)}')
 
 
 
