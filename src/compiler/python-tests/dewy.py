@@ -136,7 +136,6 @@ undefined = Undefined()
 
 
 
-
 class Scope():
     
     @dataclass
@@ -1344,6 +1343,38 @@ class Array(Iterable, Unpackable):
         return f'Array({repr(self.vals)})'
 
 
+
+class Void(AST):
+    """undefined singleton"""
+
+    #type value is set in __new__, since class Type isn't declared yet
+    type:Type=Type('void')
+
+    def __new__(cls):
+        if not hasattr(cls, 'instance'):
+            cls.instance = super(Void, cls).__new__(cls)
+        return cls.instance
+    def eval(self, scope:Scope=None):
+        return self
+    def topy(self, scope:Scope=None):
+        return None
+    def typeof(self, scope:Scope=None):
+        return Type('void')
+    def treesr(self, indent=0):
+        return tab * indent + 'Void'
+    def __str__(self):
+        return 'void'
+    def __repr__(self):
+        return 'Void()'
+
+#void shorthand, for convenience
+void = Void()
+
+
+
+
+
+############################################## EXAMPLE PROGRAMS #############################################
 
 def hello(root:Scope) -> AST:
     """printl('Hello, World!')"""
