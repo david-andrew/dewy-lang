@@ -38,7 +38,11 @@ class CoordString(str):
 
         return self
 
-    def _generate_row_col_map(self, row=0, col=0):
+    #TODO: make init so that class recognized .row_col_map as property on instances
+    # def __init__(self, s:str, row_col_map:list[tuple[int,int]]):
+
+
+    def _generate_row_col_map(self, row=0, col=0) -> list[tuple[int, int]]:
         row_col_map = []
         for c in self:
             if c == '\n':
@@ -61,6 +65,12 @@ class CoordString(str):
 
     def loc(self, index):
         return self.row_col_map[index]
+
+    @staticmethod
+    def from_existing(new_str:str, old_coords:list[tuple[int,int]]) -> 'CoordString':
+        new_coord_str = CoordString(new_str)
+        new_coord_str.row_col_map = old_coords
+        return new_coord_str
 
     #wrappers for string methods that should return CoordStrings
     def lstrip(self, *args, **kwargs):

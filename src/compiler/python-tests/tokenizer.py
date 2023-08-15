@@ -92,7 +92,9 @@ class Escape_t(Token):
 
         #known escape sequence
         if self.src in self.escape_map:
-            return self.escape_map[self.src]
+            esc = self.escape_map[self.src]
+            #construct a CoordString at the position of the original escape
+            return CoordString.from_existing(esc, self.src[:len(esc)].row_col_map)
 
         #unknown escape sequence (i.e. just replicate the character)
         return self.src[1]

@@ -3,6 +3,7 @@
 from dewy import (
     AST, PrototypeAST,
     Undefined, undefined,
+    Void, void,
     Identifier,
     Callable,
     Orderable,
@@ -10,7 +11,6 @@ from dewy import (
     Unpackable,
     Iter,
     Iterable,
-    # Scope,
     Type,
     Arg,
     Tuple,
@@ -72,6 +72,8 @@ from postok import post_process, get_next_chain, is_op
 from utils import based_number_to_int
 from dataclasses import dataclass
 from typing import Generator
+from itertools import groupby, chain
+from functools import reduce
 from rich import print, traceback; traceback.install(show_locals=True)
 
 import pdb
@@ -138,24 +140,24 @@ def match_single(token:Token, group:dict[type, None|Callable]) -> bool:
 
 
 #TODO: determining type of a block
-from enum import Enum, auto
-class BlockType(Enum):
-    Range = auto()
-    # Index = auto() #possibly just a special case of range
-    Scope = auto()
-    Group = auto()
-    # Tuple = auto()
-    # Call = auto()
-    Void = auto() # perhaps just an empty Group type?
-    # others?
-def determine_block_type(block:Block_t) -> BlockType: ...
-    #if contains .., and left/right are any of [( ]), should be a range
-    #if contains any commas, and left/right are (), should be a function call or args...this maybe overlaps a bit with group...
-    # - for args, only certain expressions are valid
-    # - for call, any comma separated expressions are valid. probably require ranges to be wrapped in parens/brackets?
-    #if left and right are {}, should be a scope
-    #if left and right are (), and tbd other stuff, should be a group
-    #if left and right are [], and tbd other stuff, should be an index. Index is the only time that ranges could possibly be naked (i.e. not wrapped in parens/brackets)
+# from enum import Enum, auto
+# class BlockType(Enum):
+#     Range = auto()
+#     # Index = auto() #possibly just a special case of range
+#     Scope = auto()
+#     Group = auto()
+#     # Tuple = auto()
+#     # Call = auto()
+#     Void = auto() # perhaps just an empty Group type?
+#     # others?
+# def determine_block_type(block:Block_t) -> BlockType: ...
+#     #if contains .., and left/right are any of [( ]), should be a range
+#     #if contains any commas, and left/right are (), should be a function call or args...this maybe overlaps a bit with group...
+#     # - for args, only certain expressions are valid
+#     # - for call, any comma separated expressions are valid. probably require ranges to be wrapped in parens/brackets?
+#     #if left and right are {}, should be a scope
+#     #if left and right are (), and tbd other stuff, should be a group
+#     #if left and right are [], and tbd other stuff, should be an index. Index is the only time that ranges could possibly be naked (i.e. not wrapped in parens/brackets)
 
 
 # #TODO: custom AST nodes for intermediate steps
@@ -265,28 +267,28 @@ def operator_precedence(t:Token) -> int | qint:
             raise ValueError(f"ERROR: expected operator, got {t=}")
 
 
-#TODO: this needs to consider opchains, and use the precedence of the operator to the left of the chain (other ops are unary prefix ops)
-def lowest_precedence_split(tokens:list[Token]) -> list[int]:# TODO: handle ambiguous e.g. list[list[int]] for each option of splitting?
-    """
-    return the integer index/indices of the lowest precedence operator(s) in the given list of tokens
-    """
-    #collect all operators and their indices in the list of tokens
-    idxs, ops = zip(*[(i,t) for i,t in enumerate(tokens) if isinstance(t, (Operator_t, Comma_t, ShiftOperator_t, Juxtapose_t))])
+# #TODO: this needs to consider opchains, and use the precedence of the operator to the left of the chain (other ops are unary prefix ops)
+# def lowest_precedence_split(tokens:list[Token]) -> list[int]:# TODO: handle ambiguous e.g. list[list[int]] for each option of splitting?
+#     """
+#     return the integer index/indices of the lowest precedence operator(s) in the given list of tokens
+#     """
+#     #collect all operators and their indices in the list of tokens
+#     idxs, ops = zip(*[(i,t) for i,t in enumerate(tokens) if isinstance(t, (Operator_t, Comma_t, ShiftOperator_t, Juxtapose_t))])
 
-    if len(ops) == 0:
-        return []
-    if len(ops) == 1:
-        return list(idxs)
+#     if len(ops) == 0:
+#         return []
+#     if len(ops) == 1:
+#         return list(idxs)
     
-    ranks = [operator_precedence(op) for op in ops]
-    min_rank = min(ranks)
+#     ranks = [operator_precedence(op) for op in ops]
+#     min_rank = min(ranks)
 
-    # verify that the min is strictly less than or equal to all other ranks
-    if not all(min_rank <= r for r in ranks):
-        #TODO: probably enumerate out all permutations of the ambiguous operators and return all of them as a list of lists of indices
-        raise NotImplementedError(f"TODO: ambiguous precedence for {ops=} with {ranks=}")
+#     # verify that the min is strictly less than or equal to all other ranks
+#     if not all(min_rank <= r for r in ranks):
+#         #TODO: probably enumerate out all permutations of the ambiguous operators and return all of them as a list of lists of indices
+#         raise NotImplementedError(f"TODO: ambiguous precedence for {ops=} with {ranks=}")
 
-    return [i for i,r in zip(idxs, ranks) if r == min_rank]
+#     return [i for i,r in zip(idxs, ranks) if r == min_rank]
 
 def make_ast_chain(chunks:list[Token], ops:list[Token]) -> AST | PrototypeAST:
     """Create an AST chain from the sequence of ops/chunks"""
@@ -480,54 +482,6 @@ def parse_chain(tokens:list[Token]) -> AST | PrototypeAST:
 
 
 
-def parse_block(block:Block_t) -> AST:
-    """
-    Convert a block to an AST
-    """
-
-    match block:
-        case Block_t(left='(', right=')', body=[]):
-            return Void() # or Undefined?
-        case Block_t(left='{', right='}', body=[]):
-            return Void() # or Undefined?
-        case Block_t(left='(', right=')', body=[Identifier_t() | RawString_t() | String_t() | Integer_t() | BasedNumber_t()] as body):
-            return parse_chain(body)
-        case Block_t(left='{', right='}', body=[Identifier_t() | RawString_t() | String_t() | Integer_t() | BasedNumber_t()] as body):
-            return parse_chain(body)
-        
-        # parenthesis stripping
-        case Block_t(left='(', right=')', body=[Block_t() as block_t]):
-            return parse_block(block_t)
-        
-        case Block_t(left='('|'[', right=')'|']', body=[DotDot_t()]):
-            pdb.set_trace()
-            return Range()
-        
-        # scope stripping
-        case Block_t(left='{', right='}', body=[Block_t() as block_t]):
-            return Block([parse_block(block_t)], newscope=True)
-            # Identifier_t,
-            # Block_t,
-            # TypeParam_t,
-            # RawString_t,
-            # String_t,
-            # Integer_t,
-            # BasedNumber_t,
-            # Hashtag_t,
-            # DotDot_t,
-
-
-
-        #catch all case
-        case Block_t(left=str(left), right=str(right), body=list(body)):
-            seq = []
-            while len(body) > 0:
-                chain, body = get_next_chain(body)
-                seq.append(parse_chain(chain))
-            return UnknownBlock(left, right, seq)
-
-    pdb.set_trace()
-    ...
 
 
 #TODO:
@@ -673,7 +627,7 @@ def is_callable(ast:AST, scope:Scope) -> bool:
 # also don't have to worry about the user making custom callable types not being parsed correctly,
 #    since they should inherit from Callable, making is_callable return true for them!
 
-def parse(tokens:list[Token], scope:Scope, *, newscope:bool=False) -> AST:
+def parse(tokens:list[Token], scope:Scope) -> AST:
 
     asts = []
     while len(tokens) > 0:
@@ -712,15 +666,17 @@ def parse(tokens:list[Token], scope:Scope, *, newscope:bool=False) -> AST:
     
     
     if len(asts) == 0:
-        pdb.set_trace() 
-        #perhaps this should raise an exception
-        return undefined
+        #literally nothing was parsed
+        return void
     
     if len(asts) == 1:
         ast, = asts
         return ast
     
-    return Block(asts, newscope=newscope)
+    block = Block(asts)
+    block.newscope = True
+    return block
+
 
 def parse_single(token:Token, scope:Scope) -> AST:
     """Parse a single token into an AST"""
@@ -735,14 +691,28 @@ def parse_single(token:Token, scope:Scope) -> AST:
             parts = []
             for chunk in token.body:
                 if isinstance(chunk, str):
-                    parts.append(String(chunk))
+                    parts.append(chunk)
                 elif isinstance(chunk, Escape_t):
-                    #TODO: handle converting escape sequences to a string ast
-                    pdb.set_trace()
+                    parts.append(chunk.to_str())
                 else:
-                    parts.append(parse(chunk.body, scope, newscope=True))
+                    #put any interpolation expressions in a new scope
+                    ast = parse(chunk.body, scope)
+                    if isinstance(ast, Block):
+                        ast.newscope = True
+                    else:
+                        ast = Block([ast], newscope=True)
+                    parts.append(ast)
+
+            # combine any adjacent Strings into a single string (e.g. if there were escapes)
+            parts = chain(*((''.join(g),) if issubclass(t, str) else (*g,) for t, g in groupby(parts, type)))
+            # convert any free strings to ASTs
+            parts = [p if not isinstance(p, str) else String(p) for p in parts]
+
             return IString(parts)
 
+        case Block_t():
+            return parse_block(token, scope)
+        
         
         case _:
             #TODO handle other types...
@@ -752,6 +722,70 @@ def parse_single(token:Token, scope:Scope) -> AST:
     pdb.set_trace()
     raise NotImplementedError()
     ...
+
+
+def parse_block(block:Block_t, scope:Scope) -> AST:
+    """
+    Convert a block to an AST
+    """
+
+    #parse the inside of the block
+    inner = parse()
+
+
+
+    pdb.set_trace()
+
+    match block:
+        case Block_t(left='(', right=')', body=[]):
+            return Void() # or Undefined?
+        case Block_t(left='{', right='}', body=[]):
+            return Void() # or Undefined?
+        case Block_t(left='(', right=')', body=[Identifier_t() | RawString_t() | String_t() | Integer_t() | BasedNumber_t()] as body):
+            return parse_chain(body)
+        case Block_t(left='{', right='}', body=[Identifier_t() | RawString_t() | String_t() | Integer_t() | BasedNumber_t()] as body):
+            return parse_chain(body)
+        
+        # parenthesis stripping
+        case Block_t(left='(', right=')', body=[Block_t() as block_t]):
+            return parse_block(block_t)
+        
+        case Block_t(left='('|'[', right=')'|']', body=[DotDot_t()]):
+            pdb.set_trace()
+            return Range()
+        
+        # scope stripping
+        case Block_t(left='{', right='}', body=[Block_t() as block_t]):
+            return Block([parse_block(block_t)], newscope=True)
+            # Identifier_t,
+            # Block_t,
+            # TypeParam_t,
+            # RawString_t,
+            # String_t,
+            # Integer_t,
+            # BasedNumber_t,
+            # Hashtag_t,
+            # DotDot_t,
+
+
+
+        #catch all case
+        case Block_t(left=str(left), right=str(right), body=list(body)):
+            seq = []
+            while len(body) > 0:
+                chain, body = get_next_chain(body)
+                seq.append(parse_chain(chain))
+            return UnknownBlock(left, right, seq)
+
+    pdb.set_trace()
+    ...
+
+
+
+
+
+
+
 
 def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     """
@@ -928,6 +962,21 @@ printl'Hello {name}'
     ast.eval(root)
 
 
+def test_example_progs():
+    from dewy import hello, hello_func, anonymous_func, hello_name, if_else, if_else_if, hello_loop, unpack_test, range_iter_test, loop_iter_manual, loop_in_iter, nested_loop, block_printing
+
+    funcs = [hello, hello_func, anonymous_func, hello_name, if_else, if_else_if, hello_loop, unpack_test, range_iter_test, loop_iter_manual, loop_in_iter, nested_loop, block_printing]
+
+    for func in funcs:
+        src = func.__doc__
+        print(f'Parsing source:\n{src}\n')
+        tokens = tokenize(src)
+        post_process(tokens)
+
+        ast = top_level_parse(tokens)
+        root = Scope.default()
+        ast.eval(root)
+
 
 if __name__ == "__main__":
     import sys
@@ -936,6 +985,7 @@ if __name__ == "__main__":
     else:
         # test2()
         test_hello()
+        # test_example_progs()
 
     # print("Usage: `python parser.py [path/to/file.dewy>]`")
 
@@ -944,51 +994,3 @@ if __name__ == "__main__":
 
 
 
-# from dewy import (
-#     hello,
-#     hello_func,
-#     anonymous_func,
-#     hello_name,
-#     if_else,
-#     if_else_if,
-#     hello_loop,
-#     unpack_test,
-#     range_iter_test,
-#     loop_iter_manual,
-#     loop_in_iter,
-#     nested_loop,
-#     block_printing,
-# )
-
-
-# funcs = [hello,
-#     hello_func,
-#     anonymous_func,
-#     hello_name,
-#     if_else,
-#     if_else_if,
-#     hello_loop,
-#     unpack_test,
-#     range_iter_test,
-#     loop_iter_manual,
-#     loop_in_iter,
-#     nested_loop,
-#     block_printing
-# ]
-# from dewy import Scope
-# for func in funcs:
-#     src = func.__doc__
-#     tokens = tokenize(src)
-#     ast = func(Scope.default())
-#     print(f'''
-# -------------------------------------------------------
-# SRC:```{src}```
-# TOKENS:
-# {tokens}
-
-# AST:
-# {repr(ast)}
-# -------------------------------------------------------
-# ''')
-
-# exit(1)
