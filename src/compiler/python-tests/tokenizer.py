@@ -33,12 +33,20 @@ class Token(ABC):
     def __repr__(self) -> str:
         """default repr for tokens is just the class name"""
         return f"<{self.__class__.__name__}>"
+    def __hash__(self) -> int:
+        raise NotImplementedError(f'hash is not implemented for token type {type(self)}')
+    def __eq__(self, __value: object) -> bool:
+        raise NotImplementedError(f'equals is not implemented for token type {type(self)}')
 
 class WhiteSpace_t(Token):
     def __init__(self, _): ...
 
 class Juxtapose_t(Token):
     def __init__(self, _): ...
+    def __hash__(self) -> int:
+        return hash(Juxtapose_t)
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Juxtapose_t)
 
 class Keyword_t(Token):
     def __init__(self, src:str):
@@ -132,16 +140,29 @@ class Operator_t(Token):
         self.op = op
     def __repr__(self) -> str:
         return f"<Operator_t: `{self.op}`>"
+    def __hash__(self) -> int:
+        return hash((Operator_t, self.op))
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Operator_t) and self.op == other.op
     
 class ShiftOperator_t(Token):
     def __init__(self, op:str):
         self.op = op
     def __repr__(self) -> str:
         return f"<ShiftOperator_t: `{self.op}`>"
+    def __hash__(self) -> int:
+        return hash((ShiftOperator_t, self.op))
+    def __eq__(self, other) -> bool:
+        return isinstance(other, ShiftOperator_t) and self.op == other.op
+    
 
 class Comma_t(Token):
     def __init__(self, src:str):
         self.src = src
+    def __hash__(self) -> int:
+        return hash(Comma_t)
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Comma_t)
 
 class DotDot_t(Token):
     def __init__(self, src:str):

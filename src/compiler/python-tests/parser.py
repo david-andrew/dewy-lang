@@ -203,7 +203,41 @@ class qint:
     def __eq__(self, other:'int|qint') -> bool: return False
         
 
-def operator_precedence(t:Token) -> int | qint:
+
+######### Operator Precedence Table #########
+#TODO: class for compund operators, e.g. += -= .+= .-= not=? not>? etc.
+#TODO: how to handle unary operators in the table? perhaps make PrefixOperator_t/PostfixOperator_t classes?
+operator_groups = [
+    [Operator_t('@')],
+    [Operator_t('.'), Juxtapose_t(None)],
+    [Operator_t('^')],
+    [Juxtapose_t(None)],
+    [Operator_t('*'), Operator_t('/'), Operator_t('%')],
+    [Operator_t('+'), Operator_t('-')],
+    [ShiftOperator_t('<<'), ShiftOperator_t('>>'), ShiftOperator_t('<<<'), ShiftOperator_t('>>>'), ShiftOperator_t('<<!'), ShiftOperator_t('!>>')],
+    [Comma_t(None)],
+    [Operator_t('=?'), Operator_t('>?'), Operator_t('<?'), Operator_t('>=?'), Operator_t('<=?')],
+    [Operator_t('and'), Operator_t('nand'), Operator_t('&')],
+    [Operator_t('xor'), Operator_t('xnor')],
+    [Operator_t('or'), Operator_t('nor'), Operator_t('|')],
+    [Operator_t('=>')],
+    [Operator_t('=')],
+]
+precedence_table: dict[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t, int|qint] = {}
+for i, group in enumerate(reversed(operator_groups)):
+    for op in group:
+        if op not in precedence_table:
+            precedence_table[op] = i
+            continue
+        
+        val = precedence_table[op]
+        if isinstance(val, int):
+            precedence_table[op] = qint({val, i})
+        else:
+            precedence_table[op] = qint(val.values|{i})
+
+
+def operator_precedence(t:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> int | qint:
     """
     precedence:
     [HIGHEST]
@@ -216,19 +250,20 @@ def operator_precedence(t:Token) -> int | qint:
     / * %
     + -
     << >> <<< >>> <<! !>>
-    <jux range>
     ,                                   //tuple maker
+    <jux range>                         //TBD, e.g. [first,second..last]
     =? >? <? >=? <=? not=? <=> is? isnt? @?
     and nand &
     xor xnor                            //following C's precedence: and > xor > or
     or nor |
+    =>
     = .= <op>= .<op>=  (e.g. += .+=)    //right-associative (but technically causes a type error since assignments can't be chained)
     (postfix) ;
     <seq> (i.e. space)
     [LOWEST]
 
     TODO:
-    - add operators: in as transmute |> <| => -> <-> <- :
+    - add operators: in as transmute |> <| -> <-> <- :
 
     [Notes]
     .. for ranges is not an operator, it is an expression. it uses juxtapose to bind to left/right arguments (or empty), and type-checks left and right
@@ -236,35 +271,11 @@ def operator_precedence(t:Token) -> int | qint:
     the unary versions of + - * / % have the same precedence as their binary versions
     """
 
-    match t:
-        case Operator_t(op='='):
-            return 0
-        case Operator_t(op='or'|'nor'):
-            return 1
-        case Operator_t(op='xor'|'xnor'):
-            return 2
-        case Operator_t(op='and'|'nand'):
-            return 3
-        case Operator_t(op='=?'|'>?'|'<?'|'>=?'|'<=?'|'<=?'): #TODO: need to have a parsing step that combines not =? into a single token
-            return 4
-        case Comma_t():
-            return 5
-        case ShiftOperator_t(op='<<'|'>>'|'<<<'|'>>>'|'<<!'|'!>>'):
-            return 6
-        case Operator_t(op='+'|'-'):
-            return 7
-        case Operator_t(op='*'|'/'|'%'):
-            return 8
-        case Juxtapose_t():
-            return qint({9, 11})
-        case Operator_t(op='^'):
-            return 10
-        case Operator_t(op='.'):
-            return 11
-        case Operator_t(op='@'):
-            return 12
-        case _:
-            raise ValueError(f"ERROR: expected operator, got {t=}")
+    #TODO: handling compound operators like +=, .+=, etc.
+    try:
+        return precedence_table[t]
+    except:
+        raise ValueError(f"ERROR: expected operator, got {t=}")
 
 
 # #TODO: this needs to consider opchains, and use the precedence of the operator to the left of the chain (other ops are unary prefix ops)
