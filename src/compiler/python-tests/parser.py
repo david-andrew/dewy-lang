@@ -73,7 +73,7 @@ from utils import based_number_to_int
 from dataclasses import dataclass
 from typing import Generator
 from itertools import groupby, chain
-from functools import reduce
+from enum import Enum, auto
 from rich import print, traceback; traceback.install(show_locals=True)
 
 import pdb
@@ -207,24 +207,30 @@ class qint:
 ######### Operator Precedence Table #########
 #TODO: class for compund operators, e.g. += -= .+= .-= not=? not>? etc.
 #TODO: how to handle unary operators in the table? perhaps make PrefixOperator_t/PostfixOperator_t classes?
-operator_groups = [
-    [Operator_t('@')],
-    [Operator_t('.'), Juxtapose_t(None)],
-    [Operator_t('^')],
-    [Juxtapose_t(None)],
-    [Operator_t('*'), Operator_t('/'), Operator_t('%')],
-    [Operator_t('+'), Operator_t('-')],
-    [ShiftOperator_t('<<'), ShiftOperator_t('>>'), ShiftOperator_t('<<<'), ShiftOperator_t('>>>'), ShiftOperator_t('<<!'), ShiftOperator_t('!>>')],
-    [Comma_t(None)],
-    [Operator_t('=?'), Operator_t('>?'), Operator_t('<?'), Operator_t('>=?'), Operator_t('<=?')],
-    [Operator_t('and'), Operator_t('nand'), Operator_t('&')],
-    [Operator_t('xor'), Operator_t('xnor')],
-    [Operator_t('or'), Operator_t('nor'), Operator_t('|')],
-    [Operator_t('=>')],
-    [Operator_t('=')],
-]
+#TODO: add specification of associativity for each row
+class Associativity(Enum):
+    left = auto()
+    right = auto()
+    none = auto()
+
+operator_groups: list[tuple[Associativity, list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]]] = reversed([
+    (Associativity.none, [Operator_t('@')]),
+    (Associativity.none, [Operator_t('.'), Juxtapose_t(None)]),
+    (Associativity.none, [Operator_t('^')]),
+    (Associativity.none, [Juxtapose_t(None)]),
+    (Associativity.none, [Operator_t('*'), Operator_t('/'), Operator_t('%')]),
+    (Associativity.none, [Operator_t('+'), Operator_t('-')]),
+    (Associativity.none, [ShiftOperator_t('<<'), ShiftOperator_t('>>'), ShiftOperator_t('<<<'), ShiftOperator_t('>>>'), ShiftOperator_t('<<!'), ShiftOperator_t('!>>')]),
+    (Associativity.none, [Comma_t(None)]),
+    (Associativity.none, [Operator_t('=?'), Operator_t('>?'), Operator_t('<?'), Operator_t('>=?'), Operator_t('<=?')]),
+    (Associativity.none, [Operator_t('and'), Operator_t('nand'), Operator_t('&')]),
+    (Associativity.none, [Operator_t('xor'), Operator_t('xnor')]),
+    (Associativity.none, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
+    (Associativity.none, [Operator_t('=>')]),
+    (Associativity.none, [Operator_t('=')]),
+])
 precedence_table: dict[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t, int|qint] = {}
-for i, group in enumerate(reversed(operator_groups)):
+for i, (assoc, group) in enumerate(operator_groups):
     for op in group:
         if op not in precedence_table:
             precedence_table[op] = i
@@ -237,7 +243,7 @@ for i, group in enumerate(reversed(operator_groups)):
             precedence_table[op] = qint(val.values|{i})
 
 
-def operator_precedence(t:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> int | qint:
+def operator_precedence(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> int | qint:
     """
     precedence:
     [HIGHEST]
@@ -272,11 +278,16 @@ def operator_precedence(t:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> int
     """
 
     #TODO: handling compound operators like +=, .+=, etc.
-    try:
-        return precedence_table[t]
-    except:
-        raise ValueError(f"ERROR: expected operator, got {t=}")
+    # if isinstance(op, CompoundOperator_t):
+    #     op = op.base
 
+    try:
+        return precedence_table[op]
+    except:
+        raise ValueError(f"ERROR: expected operator, got {op=}")
+
+def operator_associativity(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> Associativity:
+    raise NotImplementedError(f'operator associativity not implemented yet')
 
 # #TODO: this needs to consider opchains, and use the precedence of the operator to the left of the chain (other ops are unary prefix ops)
 # def lowest_precedence_split(tokens:list[Token]) -> list[int]:# TODO: handle ambiguous e.g. list[list[int]] for each option of splitting?
@@ -552,21 +563,24 @@ def split_by_lowest_precedence(tokens: list[Token], scope:Scope) -> tuple[list[T
         op, = ops
         return tokens[:i], op, tokens[i+1:]
     
-    #TODO: need to reimpliment handling multiple operations.
-    #      also make use of scope to disambiguate ambiguous ops, e.g. juxtapose
-    pdb.set_trace()
-    # ... old implementation below ...
-
+    # when more than one op present, find the lowest precedence one
     ranks = [operator_precedence(op) for op in ops]
     min_rank = min(ranks)
 
     # verify that the min is strictly less than or equal to all other ranks
     if not all(min_rank <= r for r in ranks):
         #TODO: probably enumerate out all permutations of the ambiguous operators and return all of them as a list of lists of indices
-        raise NotImplementedError(f"TODO: ambiguous precedence for {ops=} with {ranks=}")
+        #make use of scope/chain typeof to disambiguate if need be
+        raise NotImplementedError(f"TODO: ambiguous precedence for {ops=} with {ranks=}, in token stream {tokens=}")
 
-    return [i for i,r in zip(idxs, ranks) if r == min_rank]
 
+    op_idxs = [i for i,r in zip(idxs, ranks) if r == min_rank]
+
+    if len(op_idxs) == 1:
+        i, = op_idxs
+        return tokens[:i], tokens[i], tokens[i+1:]
+
+    # handling when multiple ops have the same precedence, select based on associativity rules
     pdb.set_trace()
     ...
 
@@ -672,7 +686,19 @@ def parse(tokens:list[Token], scope:Scope) -> AST:
                     pdb.set_trace()
                     ...
 
+            case Operator_t(op='=>'):
+                if isinstance(left, Void):
+                    return Function([], right) #TODO: scope needs to be set, probably on a post processing pass...
+                elif isinstance(left, Identifier):
+                    pdb.set_trace()
+                    ...
+                elif isinstance(left, Block):
+                    pdb.set_trace()
+                    ...
+                else:
+                    raise ValueError(f'Unrecognized left-hand side for function literal: {left=}, {right=}')
             case _:
+                pdb.set_trace()
                 raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
     
     
@@ -750,11 +776,22 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
 
     match block.left+block.right, inner:
         #types returned as is
-        case '()', String() | IString(): #TODO: more types
+        case '()', String() | IString() | Call(): #TODO: more types
             return inner
-        case '{}', String() | IString(): #TODO: more types
+        case '{}', String() | IString() | Call(): #TODO: more types
             return Block([inner])
+        case '()'|'{}', Void():
+            return inner #Block([], newscope=False)
+        # case '{}', Void():
+            # return inner #Block([])
+        case '{}', Block():
+            inner.newscope = True
+            return inner
+        case '()', Block():
+            inner.newscope = False
+            return inner
         case _:
+            pdb.set_trace()
             raise NotImplementedError(f'block parse not implemented for {block.left+block.right}, {type(inner)}')
 
     pdb.set_trace()
@@ -822,6 +859,8 @@ def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     #ensure there is a valid scope to do the parse with
     if scope is None:
         scope = Scope.default()
+    
+    scope, original_scope = scope.copy(), scope
 
     # kick of the parser
     ast = parse(tokens, scope)
@@ -829,6 +868,7 @@ def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     # post processing on the parsed AST 
     express_identifiers(ast)
     ensure_no_prototypes(ast)
+    set_ast_scopes(ast, scope)
 
     return ast
     
@@ -854,7 +894,13 @@ def ensure_no_prototypes(root:AST) -> None:
         if isinstance(ast, PrototypeAST):
             raise ValueError(f'May not have any PrototypeASTs in a final AST. Found {ast} of type ({type(ast)})')
             
-    
+def set_ast_scopes(root:AST, scope:Scope) -> None:
+    #TODO: hacky, just setting function scopes to root scope!
+    #      need to handle setting scope to where fn defined.
+    #      probably have traverse keep track of scope for given node!
+    for ast in full_traverse_ast(root):
+        if isinstance(ast, Function):
+            ast.scope = scope
 
 def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
     """
@@ -907,6 +953,13 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
         case Bind():
             yield from full_traverse_ast(root.value)
         
+        case Function():
+            for arg in root.args:
+                yield from full_traverse_ast(arg.type)
+                if arg.val is not None:
+                    yield from full_traverse_ast(arg.val)
+            yield from full_traverse_ast(root.body)
+
         # do nothing cases
         case String(): ...
         case Identifier(): ...
@@ -930,8 +983,8 @@ def test_file(path:str):
     tokens = tokenize(src)
     post_process(tokens)
 
-    ast = top_level_parse(tokens)
     root = Scope.default()
+    ast = top_level_parse(tokens, root)
     res = ast.eval(root)
     if res: print(res)
 
