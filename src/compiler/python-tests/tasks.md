@@ -1,7 +1,9 @@
 [tasks]
-- rename .type property on AST classes to basetype or default type. Add a type function which does a runtime check of the type
+- split repo into branches with C version, python version, and perhaps any other old versions. Current python work goes on main at top level
 - probably make identifier not a prototype, and instead anything that uses identifiers uses them instead of python strings
   --> e.g. Bind(Identifier, AST), Call(Identifier), etc.
+- rename .type property on AST classes to basetype or default type. Add a type function which does a runtime check of the type
+
 
 
 - chainer functions:
