@@ -729,10 +729,22 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
     Convert a block to an AST
     """
 
+    # if new scope block, nest the current scope
+    newscope =  block.left == '{' and block.right == '}'
+    if newscope:
+        scope = Scope(scope)
+    
     #parse the inside of the block
-    inner = parse()
+    inner = parse(block.body, scope)
 
-
+    match block.left+block.right, inner:
+        #types returned as is
+        case '()', String() | IString(): #TODO: more types
+            return inner
+        case '{}', String() | IString(): #TODO: more types
+            return Block([inner])
+        case _:
+            raise NotImplementedError(f'block parse not implemented for {block.left+block.right}, {type(inner)}')
 
     pdb.set_trace()
 
@@ -984,8 +996,8 @@ if __name__ == "__main__":
         test_file(sys.argv[1])
     else:
         # test2()
-        test_hello()
-        # test_example_progs()
+        # test_hello()
+        test_example_progs()
 
     # print("Usage: `python parser.py [path/to/file.dewy>]`")
 
