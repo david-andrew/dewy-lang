@@ -114,75 +114,6 @@ import pdb
 
 
 
-
-unary_chain_prependers = {
-    Operator_t: lambda t: t.op in unary_prefix_operators,
-}
-
-#only postifx unary operators are allowed
-unary_chain_extenders = {
-    Operator_t: lambda t: t.op in unary_postfix_operators,
-}
-
-binary_chain_extenders = {
-    Juxtapose_t: None,
-    Operator_t: lambda t: t.op in binary_operators,
-    ShiftOperator_t: None,
-    Comma_t: None,
-}
-
-def match_single(token:Token, group:dict[type, None|Callable]) -> bool:
-    cls = token.__class__
-    return cls in group and (group[cls] is None or group[cls](token))
-
-
-
-
-
-#TODO: determining type of a block
-# from enum import Enum, auto
-# class BlockType(Enum):
-#     Range = auto()
-#     # Index = auto() #possibly just a special case of range
-#     Scope = auto()
-#     Group = auto()
-#     # Tuple = auto()
-#     # Call = auto()
-#     Void = auto() # perhaps just an empty Group type?
-#     # others?
-# def determine_block_type(block:Block_t) -> BlockType: ...
-#     #if contains .., and left/right are any of [( ]), should be a range
-#     #if contains any commas, and left/right are (), should be a function call or args...this maybe overlaps a bit with group...
-#     # - for args, only certain expressions are valid
-#     # - for call, any comma separated expressions are valid. probably require ranges to be wrapped in parens/brackets?
-#     #if left and right are {}, should be a scope
-#     #if left and right are (), and tbd other stuff, should be a group
-#     #if left and right are [], and tbd other stuff, should be an index. Index is the only time that ranges could possibly be naked (i.e. not wrapped in parens/brackets)
-
-
-# #TODO: custom AST nodes for intermediate steps
-# from abc import ABC
-# class IntermediateAST(ABC): ...
-# class Void(IntermediateAST): ...
-
-# @dataclass
-# class Juxtapose(IntermediateAST):
-#     left:IntermediateAST|AST
-#     right:IntermediateAST|AST
-
-# # @dataclass
-# # class Identifier(IntermediateAST):
-# #     name:str
-
-# class Tuple(IntermediateAST): ...
-
-# @dataclass
-# class UnknownBlock(IntermediateAST):
-#     left:str
-#     right:str
-#     body:list[IntermediateAST|AST]
-
-
 @dataclass
 class qint:
     """
@@ -212,6 +143,8 @@ class Associativity(Enum):
     left = auto()
     right = auto()
     none = auto()
+    prefix = auto()
+    postfix = auto()
 
 operator_groups: list[tuple[Associativity, list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]]] = reversed([
     (Associativity.none, [Operator_t('@')]),
@@ -289,218 +222,196 @@ def operator_precedence(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> in
 def operator_associativity(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> Associativity:
     raise NotImplementedError(f'operator associativity not implemented yet')
 
-# #TODO: this needs to consider opchains, and use the precedence of the operator to the left of the chain (other ops are unary prefix ops)
-# def lowest_precedence_split(tokens:list[Token]) -> list[int]:# TODO: handle ambiguous e.g. list[list[int]] for each option of splitting?
-#     """
-#     return the integer index/indices of the lowest precedence operator(s) in the given list of tokens
-#     """
-#     #collect all operators and their indices in the list of tokens
-#     idxs, ops = zip(*[(i,t) for i,t in enumerate(tokens) if isinstance(t, (Operator_t, Comma_t, ShiftOperator_t, Juxtapose_t))])
 
-#     if len(ops) == 0:
-#         return []
+# def make_ast_chain(chunks:list[Token], ops:list[Token]) -> AST | PrototypeAST:
+#     """Create an AST chain from the sequence of ops/chunks"""
+#     assert len(chunks) == len(ops) + 1, f"ERROR: mismatched lengths for {chunks=} and {ops=}"
+#     assert len(ops) > 0, f"ERROR: {ops=} is empty"
+
 #     if len(ops) == 1:
-#         return list(idxs)
-    
-#     ranks = [operator_precedence(op) for op in ops]
-#     min_rank = min(ranks)
+#         assert len(chunks) == 2, f"ERROR: {chunks=} should have length 2"
+#         op, = ops
+#         left, right = chunks
 
-#     # verify that the min is strictly less than or equal to all other ranks
-#     if not all(min_rank <= r for r in ranks):
-#         #TODO: probably enumerate out all permutations of the ambiguous operators and return all of them as a list of lists of indices
-#         raise NotImplementedError(f"TODO: ambiguous precedence for {ops=} with {ranks=}")
-
-#     return [i for i,r in zip(idxs, ranks) if r == min_rank]
-
-def make_ast_chain(chunks:list[Token], ops:list[Token]) -> AST | PrototypeAST:
-    """Create an AST chain from the sequence of ops/chunks"""
-    assert len(chunks) == len(ops) + 1, f"ERROR: mismatched lengths for {chunks=} and {ops=}"
-    assert len(ops) > 0, f"ERROR: {ops=} is empty"
-
-    if len(ops) == 1:
-        assert len(chunks) == 2, f"ERROR: {chunks=} should have length 2"
-        op, = ops
-        left, right = chunks
-
-        if len(left) == 0 and isinstance(op, Operator_t) and op.op in unary_prefix_operators:
-            return parse_unary_prefix_op(op, right)
-        if len(right) == 0 and isinstance(op, Operator_t) and op.op in unary_postfix_operators:
-            return parse_unary_postfix_op(left, op)
+#         if len(left) == 0 and isinstance(op, Operator_t) and op.op in unary_prefix_operators:
+#             return parse_unary_prefix_op(op, right)
+#         if len(right) == 0 and isinstance(op, Operator_t) and op.op in unary_postfix_operators:
+#             return parse_unary_postfix_op(left, op)
         
-        assert len(left) > 0 and len(right) > 0, f"ERROR: {left=} and {right=} should both have length > 0"
-        return parse_bin_op(left, op, right)
+#         assert len(left) > 0 and len(right) > 0, f"ERROR: {left=} and {right=} should both have length > 0"
+#         return parse_bin_op(left, op, right)
 
-    pdb.set_trace()
+#     pdb.set_trace()
 
 
-def parse_bin_op(left:list[Token], op:Token, right:list[Token]) -> AST | PrototypeAST:
-    """
-    create a binary operation AST from the left, op, and right tokens
-    """
-    left, right = parse_chain(left), parse_chain(right)
+# def parse_bin_op(left:list[Token], op:Token, right:list[Token]) -> AST | PrototypeAST:
+#     """
+#     create a binary operation AST from the left, op, and right tokens
+#     """
+#     left, right = parse_chain(left), parse_chain(right)
 
-    match op:
-        case Juxtapose_t():
-            return Juxtapose(left, right)
-        case Comma_t():
-            return Tuple(left, right)
-        case ShiftOperator_t(op='<<'):
-            return LeftShift(left, right)
-        case ShiftOperator_t(op='>>'):
-            return RightShift(left, right)
-        case ShiftOperator_t(op='<<<'):
-            return LeftRotate(left, right)
-        case ShiftOperator_t(op='>>>'):
-            return RightRotate(left, right)
-        case ShiftOperator_t(op='<<!'):
-            return LeftRotateCarry(left, right)
-        case ShiftOperator_t(op='!>>'):
-            return RightRotateCarry(left, right)
-        case Operator_t(op='+'):
-            return Add(left, right)
-        case Operator_t(op='-'):
-            return Sub(left, right)
-        case Operator_t(op='*'):
-            return Mul(left, right)
-        case Operator_t(op='/'):
-            return Div(left, right)
-        case Operator_t(op='%'):
-            return Mod(left, right)
-        case Operator_t(op='^'):
-            return Pow(left, right)
-        case _:
-            raise NotImplementedError(f"TODO: {op=}")
+#     match op:
+#         case Juxtapose_t():
+#             return Juxtapose(left, right)
+#         case Comma_t():
+#             return Tuple(left, right)
+#         case ShiftOperator_t(op='<<'):
+#             return LeftShift(left, right)
+#         case ShiftOperator_t(op='>>'):
+#             return RightShift(left, right)
+#         case ShiftOperator_t(op='<<<'):
+#             return LeftRotate(left, right)
+#         case ShiftOperator_t(op='>>>'):
+#             return RightRotate(left, right)
+#         case ShiftOperator_t(op='<<!'):
+#             return LeftRotateCarry(left, right)
+#         case ShiftOperator_t(op='!>>'):
+#             return RightRotateCarry(left, right)
+#         case Operator_t(op='+'):
+#             return Add(left, right)
+#         case Operator_t(op='-'):
+#             return Sub(left, right)
+#         case Operator_t(op='*'):
+#             return Mul(left, right)
+#         case Operator_t(op='/'):
+#             return Div(left, right)
+#         case Operator_t(op='%'):
+#             return Mod(left, right)
+#         case Operator_t(op='^'):
+#             return Pow(left, right)
+#         case _:
+#             raise NotImplementedError(f"TODO: {op=}")
 
-def parse_unary_prefix_op(op:Token, right:list[Token]) -> AST | PrototypeAST:
-    """
-    create a unary prefix operation AST from the op and right tokens
-    """
-    right = parse_chain(right)
+# def parse_unary_prefix_op(op:Token, right:list[Token]) -> AST | PrototypeAST:
+#     """
+#     create a unary prefix operation AST from the op and right tokens
+#     """
+#     right = parse_chain(right)
 
-    match op:
-        case Operator_t(op='+'):
-            return right
-        case Operator_t(op='-'):
-            return Neg(right)
-        case Operator_t(op='*'):
-            return right
-        case Operator_t(op='/'):
-            return Inv(right)
-        case Operator_t(op='not'):
-            raise NotImplementedError(f"TODO: {op=}")
-        case Operator_t(op='@'):
-            raise NotImplementedError(f"TODO: {op=}")
-        case Operator_t(op='...'):
-            raise NotImplementedError(f"TODO: {op=}")
-        case _:
-            raise ValueError(f"INTERNAL ERROR: {op=} is not a unary prefix operator")
+#     match op:
+#         case Operator_t(op='+'):
+#             return right
+#         case Operator_t(op='-'):
+#             return Neg(right)
+#         case Operator_t(op='*'):
+#             return right
+#         case Operator_t(op='/'):
+#             return Inv(right)
+#         case Operator_t(op='not'):
+#             raise NotImplementedError(f"TODO: {op=}")
+#         case Operator_t(op='@'):
+#             raise NotImplementedError(f"TODO: {op=}")
+#         case Operator_t(op='...'):
+#             raise NotImplementedError(f"TODO: {op=}")
+#         case _:
+#             raise ValueError(f"INTERNAL ERROR: {op=} is not a unary prefix operator")
 
  
-def parse_unary_postfix_op(left:list[Token], op:Token) -> AST | PrototypeAST:
-    """
-    create a unary postfix operation AST from the left and op tokens
-    """
-    left = parse_chain(left)
+# def parse_unary_postfix_op(left:list[Token], op:Token) -> AST | PrototypeAST:
+#     """
+#     create a unary postfix operation AST from the left and op tokens
+#     """
+#     left = parse_chain(left)
 
-    match op:
-        case Operator_t(op='!'):
-            return Fact(left)
-        case _:
-            raise NotImplementedError(f"TODO: {op=}")
+#     match op:
+#         case Operator_t(op='!'):
+#             return Fact(left)
+#         case _:
+#             raise NotImplementedError(f"TODO: {op=}")
 
-def parse_chain(tokens:list[Token]) -> AST | PrototypeAST:
-    """
-    Convert a chain of tokens to an AST
+# def parse_chain(tokens:list[Token]) -> AST | PrototypeAST:
+#     """
+#     Convert a chain of tokens to an AST
 
-    Must be a valid chain as produced by get_next_chain
-    """
+#     Must be a valid chain as produced by get_next_chain
+#     """
 
-    #For now, we're just gonna do some simple pattern matching.
-    match tokens:
-        case [Integer_t(src=str(src))]:
-            return Number(int(src))
+#     #For now, we're just gonna do some simple pattern matching.
+#     match tokens:
+#         case [Integer_t(src=str(src))]:
+#             return Number(int(src))
         
-        case [BasedNumber_t(src=str(src))]:
-            return Number(based_number_to_int(src))
+#         case [BasedNumber_t(src=str(src))]:
+#             return Number(based_number_to_int(src))
         
-        case [RawString_t(body=str(body))] if body.startswith('r"""') or body.startswith("r'''"):
-            return String(body[4:-3])
-        case [RawString_t(body=str(body))] if body.startswith('r"') or body.startswith("r'"):
-            return String(body[2:-1])
+#         case [RawString_t(body=str(body))] if body.startswith('r"""') or body.startswith("r'''"):
+#             return String(body[4:-3])
+#         case [RawString_t(body=str(body))] if body.startswith('r"') or body.startswith("r'"):
+#             return String(body[2:-1])
         
-        case [String_t(body=[str(body)])]:
-            return String(body)
-        case [String_t(body=list(body))]:
-            parts = []
-            for part in body:
-                if isinstance(part, str):
-                    parts.append(String(part))
-                elif isinstance(part, Block_t):
-                    parts.append(parse_block(part))
-                elif isinstance(part, Escape_t):
-                    parts.append(String(part.to_str()))
-                else:
-                    raise ValueError(f"INTERNAL ERROR: unexpected token in string body: {part=}")
-            return IString(parts)
+#         case [String_t(body=[str(body)])]:
+#             return String(body)
+#         case [String_t(body=list(body))]:
+#             parts = []
+#             for part in body:
+#                 if isinstance(part, str):
+#                     parts.append(String(part))
+#                 elif isinstance(part, Block_t):
+#                     parts.append(parse_block(part))
+#                 elif isinstance(part, Escape_t):
+#                     parts.append(String(part.to_str()))
+#                 else:
+#                     raise ValueError(f"INTERNAL ERROR: unexpected token in string body: {part=}")
+#             return IString(parts)
 
-        case [Identifier_t(src=str(src))]:
-            return Identifier(src)
+#         case [Identifier_t(src=str(src))]:
+#             return Identifier(src)
         
-        case [Block_t(body=list()) as block]:
-            return parse_block(block)
+#         case [Block_t(body=list()) as block]:
+#             return parse_block(block)
         
     
-    # Base case
-    splits = lowest_precedence_split(tokens)
+#     # Base case
+#     splits = lowest_precedence_split(tokens)
 
-    #TODO: handle left/right associativity. need to check if ^ or =. otherwise left-associative.
+#     #TODO: handle left/right associativity. need to check if ^ or =. otherwise left-associative.
 
-    ast_chunks = []
-    ast_ops = []
-    for prev, split in zip([0]+splits, splits):
-        if isinstance(split, list):
-            #TODO: could have something like an ambiguous chain, which takes in all the options. TBD how to handle collapsing to the correct one once type information is known
-            raise NotImplementedError("TODO: handle multiple split permutations")
-        else:
-            ast_chunks.append(tokens[prev:split])
-            ast_ops.append(tokens[split])
-    ast_chunks.append(tokens[splits[-1]+1:])
+#     ast_chunks = []
+#     ast_ops = []
+#     for prev, split in zip([0]+splits, splits):
+#         if isinstance(split, list):
+#             #TODO: could have something like an ambiguous chain, which takes in all the options. TBD how to handle collapsing to the correct one once type information is known
+#             raise NotImplementedError("TODO: handle multiple split permutations")
+#         else:
+#             ast_chunks.append(tokens[prev:split])
+#             ast_ops.append(tokens[split])
+#     ast_chunks.append(tokens[splits[-1]+1:])
 
-    return make_ast_chain(ast_chunks, ast_ops)
+#     return make_ast_chain(ast_chunks, ast_ops)
     
 
-    pdb.set_trace()
-    ...
+#     pdb.set_trace()
+#     ...
         
         
-        #TODO: lots of other simple cases here
+#         #TODO: lots of other simple cases here
 
         
-        #Happy paths
-        # case [Identifier_t(src=str(id)), Juxtapose_t(), String_t()]:
-        #     string = parse_chain(tokens[2:])
-        #     return Call(id, [string])
+#         #Happy paths
+#         # case [Identifier_t(src=str(id)), Juxtapose_t(), String_t()]:
+#         #     string = parse_chain(tokens[2:])
+#         #     return Call(id, [string])
         
-        # case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t(left='(', right=')', body=[String_t(body=[str(string)])])]:
-        #     return Call(id, [String(string)])
+#         # case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t(left='(', right=')', body=[String_t(body=[str(string)])])]:
+#         #     return Call(id, [String(string)])
         
-        # case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t() as block_t]:
-        #     block = parse_block(block_t)
-        #     #TODO: this really needs to check the type of eval on the block, rather than the raw AST type.
-        #     if isinstance(block, (Number,String,IString)):
-        #         return Call(id, [block])
-        #     else:
-        #         pdb.set_trace()
-        #         ...
+#         # case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t() as block_t]:
+#         #     block = parse_block(block_t)
+#         #     #TODO: this really needs to check the type of eval on the block, rather than the raw AST type.
+#         #     if isinstance(block, (Number,String,IString)):
+#         #         return Call(id, [block])
+#         #     else:
+#         #         pdb.set_trace()
+#         #         ...
 
 
 
-        #TODO: lots of other semi-complex cases here
+#         #TODO: lots of other semi-complex cases here
 
     
-    pdb.set_trace()
-    raise Exception(f"INTERNAL ERROR: no match for chain: {tokens=}")
-    ...
+#     pdb.set_trace()
+#     raise Exception(f"INTERNAL ERROR: no match for chain: {tokens=}")
+#     ...
 
 
 
@@ -525,24 +436,6 @@ def parse_chain(tokens:list[Token]) -> AST | PrototypeAST:
 #       <id: printl>
 #       <str: 'hello world'>
 
-
-
-
-# def parse0(tokens:list[Token]) -> Block:
-#     """
-#     parse a list of tokens into an AST
-#     """
-#     #initial parsing pass. may contain intermediate ASTs that need to be further parsed
-#     exprs:list[AST] = []
-#     while len(tokens) > 0:
-#         chain, tokens = get_next_chain(tokens)
-#         expr = parse_chain(chain)
-#         exprs.append(expr)
-
-#     #TODO: should newscope be true or false? so far this is the outermost block, though in the future it could be nested...
-#     #      if it was to be nested though, we'd need to determine what type of block it was...
-#     #      perhaps include a newscope flag in the parse signature
-#     return Block(exprs, newscope=True)
 
 
 
@@ -574,6 +467,7 @@ def split_by_lowest_precedence(tokens: list[Token], scope:Scope) -> tuple[list[T
         raise NotImplementedError(f"TODO: ambiguous precedence for {ops=} with {ranks=}, in token stream {tokens=}")
 
 
+    # find operators with precedence equal to the current minimum
     op_idxs = [i for i,r in zip(idxs, ranks) if r == min_rank]
 
     if len(op_idxs) == 1:
@@ -617,8 +511,16 @@ def to_callable(ast:AST) -> str|Callable:
 
     if isinstance(ast, Identifier):
         return ast.name
-    if isinstance(ast, (Builtin, Function)):
+    if isinstance(ast, Callable):
         return ast
+    
+    # hacky way of dealing with blocks
+    if isinstance(ast, Block):
+        if len(ast.exprs) == 1:
+            return to_callable(ast.exprs[0])
+        else:
+            pdb.set_trace()
+            ...
 
     raise ValueError(f'Tried to prepare callable expression with unrecognized type {type(ast)}')
 
@@ -636,15 +538,25 @@ def to_call_args(ast:AST) -> Array:
     
 
 def is_callable(ast:AST, scope:Scope) -> bool:
+    #TODO: make calling typeof on an AST more robust/handle this better
+
     if isinstance(ast, Identifier):
         #check the type of the identifier in the scope
         if (val:=scope.get(ast.name, undefined)) is not undefined:
             if Type.is_instance(val.type, Callable.type):
                 return True
 
-    # Buildtin types        
-    if isinstance(ast, Function):
+    # check if directly callable
+    if isinstance(ast, Callable):
         return True
+    
+    # TODO: hacky way of dealing with blocks...
+    if isinstance(ast, Block):
+        if len(ast.exprs) == 1:
+            return is_callable(ast.exprs[0], scope)
+        else:
+            pdb.set_trace()
+            ...
     
     if isinstance(ast, PrototypeAST):
         raise NotImplementedError(f"Currently haven't handled is_callable for case of {type(ast)}")
@@ -681,9 +593,7 @@ def parse(tokens:list[Token], scope:Scope) -> AST:
                     asts.append(Call(fn, args))
                 else:
                     # assume left/right are multipliable
-                    #do left*right
-                    pdb.set_trace()
-                    ...
+                    asts.append(Mul(left, right))
             
             case Operator_t(op='='):
                 if isinstance(left, Identifier):
@@ -786,13 +696,11 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
     match block.left+block.right, inner:
         #types returned as is
         case '()', String() | IString() | Call() | Function(): #TODO: more types
-            return inner
+            return Block([inner], newscope=False)
         case '{}', String() | IString() | Call() | Function(): #TODO: more types
             return Block([inner])
         case '()'|'{}', Void():
-            return inner #Block([], newscope=False)
-        # case '{}', Void():
-            # return inner #Block([])
+            return inner
         case '{}', Block():
             inner.newscope = True
             return inner
@@ -1073,8 +981,8 @@ if __name__ == "__main__":
         test_file(sys.argv[1])
     else:
         # test2()
-        test_hello()
-        # test_example_progs()
+        # test_hello()
+        test_example_progs()
 
     # print("Usage: `python parser.py [path/to/file.dewy>]`")
 
