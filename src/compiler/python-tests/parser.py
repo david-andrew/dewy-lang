@@ -494,40 +494,12 @@ def parse(tokens:list[Token], scope:Scope) -> AST:
 def parse_single(token:Token, scope:Scope) -> AST:
     """Parse a single token into an AST"""
     match token:
-        case Identifier_t():
-            return Identifier(token.src)
-        case RawString_t():
-            return String(token.to_str())
-        case String_t():
-            if len(token.body) == 1 and isinstance(token.body[0], str):
-                return String(token.body[0])
-            
-            # else handle interpolation strings
-            parts = []
-            for chunk in token.body:
-                if isinstance(chunk, str):
-                    parts.append(chunk)
-                elif isinstance(chunk, Escape_t):
-                    parts.append(chunk.to_str())
-                else:
-                    #put any interpolation expressions in a new scope
-                    ast = parse(chunk.body, scope)
-                    if isinstance(ast, Block):
-                        ast.newscope = True
-                    else:
-                        ast = Block([ast], newscope=True)
-                    parts.append(ast)
-
-            # combine any adjacent Strings into a single string (e.g. if there were escapes)
-            parts = iterchain(*((''.join(g),) if issubclass(t, str) else (*g,) for t, g in groupby(parts, type)))
-            # convert any free strings to ASTs
-            parts = [p if not isinstance(p, str) else String(p) for p in parts]
-
-            return IString(parts)
-
-        case Block_t():
-            return parse_block(token, scope)
-        
+        case Identifier_t():    return Identifier(token.src)
+        case Integer_t():       return Number(int(token.src))
+        case BasedNumber_t():   return Number(based_number_to_int(token.src))
+        case RawString_t():     return String(token.to_str())
+        case String_t():        return parse_string(token, scope)
+        case Block_t():         return parse_block(token, scope)
         
         case _:
             #TODO handle other types...
@@ -638,6 +610,34 @@ def build_unary_postfix_expr(left:AST, op:Token, scope:Scope) -> AST:
         case _:
             raise NotImplementedError(f"TODO: {op=}")
 
+def parse_string(token:String_t, scope:Scope) -> String | IString:
+    """Convert a string token to an AST"""
+
+    if len(token.body) == 1 and isinstance(token.body[0], str):
+        return String(token.body[0])
+
+    # else handle interpolation strings
+    parts = []
+    for chunk in token.body:
+        if isinstance(chunk, str):
+            parts.append(chunk)
+        elif isinstance(chunk, Escape_t):
+            parts.append(chunk.to_str())
+        else:
+            #put any interpolation expressions in a new scope
+            ast = parse(chunk.body, scope)
+            if isinstance(ast, Block):
+                ast.newscope = True
+            else:
+                ast = Block([ast], newscope=True)
+            parts.append(ast)
+
+    # combine any adjacent Strings into a single string (e.g. if there were escapes)
+    parts = iterchain(*((''.join(g),) if issubclass(t, str) else (*g,) for t, g in groupby(parts, type)))
+    # convert any free strings to ASTs
+    parts = [p if not isinstance(p, str) else String(p) for p in parts]
+
+    return IString(parts)
 
 
 def parse_block(block:Block_t, scope:Scope) -> AST:
