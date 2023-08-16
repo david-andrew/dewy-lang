@@ -224,80 +224,6 @@ def operator_associativity(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) ->
 
 
 
-# def parse_bin_op(left:list[Token], op:Token, right:list[Token]) -> AST | PrototypeAST:
-#     """
-#     create a binary operation AST from the left, op, and right tokens
-#     """
-#     left, right = parse_chain(left), parse_chain(right)
-
-#     match op:
-#         case Juxtapose_t():
-#             return Juxtapose(left, right)
-#         case Comma_t():
-#             return Tuple(left, right)
-#         case ShiftOperator_t(op='<<'):
-#             return LeftShift(left, right)
-#         case ShiftOperator_t(op='>>'):
-#             return RightShift(left, right)
-#         case ShiftOperator_t(op='<<<'):
-#             return LeftRotate(left, right)
-#         case ShiftOperator_t(op='>>>'):
-#             return RightRotate(left, right)
-#         case ShiftOperator_t(op='<<!'):
-#             return LeftRotateCarry(left, right)
-#         case ShiftOperator_t(op='!>>'):
-#             return RightRotateCarry(left, right)
-#         case Operator_t(op='+'):
-#             return Add(left, right)
-#         case Operator_t(op='-'):
-#             return Sub(left, right)
-#         case Operator_t(op='*'):
-#             return Mul(left, right)
-#         case Operator_t(op='/'):
-#             return Div(left, right)
-#         case Operator_t(op='%'):
-#             return Mod(left, right)
-#         case Operator_t(op='^'):
-#             return Pow(left, right)
-#         case _:
-#             raise NotImplementedError(f"TODO: {op=}")
-
-# def parse_unary_prefix_op(op:Token, right:list[Token]) -> AST | PrototypeAST:
-#     """
-#     create a unary prefix operation AST from the op and right tokens
-#     """
-#     right = parse_chain(right)
-
-#     match op:
-#         case Operator_t(op='+'):
-#             return right
-#         case Operator_t(op='-'):
-#             return Neg(right)
-#         case Operator_t(op='*'):
-#             return right
-#         case Operator_t(op='/'):
-#             return Inv(right)
-#         case Operator_t(op='not'):
-#             raise NotImplementedError(f"TODO: {op=}")
-#         case Operator_t(op='@'):
-#             raise NotImplementedError(f"TODO: {op=}")
-#         case Operator_t(op='...'):
-#             raise NotImplementedError(f"TODO: {op=}")
-#         case _:
-#             raise ValueError(f"INTERNAL ERROR: {op=} is not a unary prefix operator")
-
- 
-# def parse_unary_postfix_op(left:list[Token], op:Token) -> AST | PrototypeAST:
-#     """
-#     create a unary postfix operation AST from the left and op tokens
-#     """
-#     left = parse_chain(left)
-
-#     match op:
-#         case Operator_t(op='!'):
-#             return Fact(left)
-#         case _:
-#             raise NotImplementedError(f"TODO: {op=}")
 
 # def parse_chain(tokens:list[Token]) -> AST | PrototypeAST:
 #     """
@@ -633,6 +559,17 @@ def parse_chain(chain:Chain[Token], scope:Scope) -> AST:
     left, op, right = split_by_lowest_precedence(chain, scope)
     left, right = parse(left, scope), parse(right, scope)
 
+    assert not isinstance(left, Void) or not isinstance(right, Void), f"Internal Error: both left and right returned Void during parse chain, implying chain was invalid: {chain}"
+
+    # 3 cases are prefix expr, postfix expr, or binary expr
+    if isinstance(left, Void): return build_unary_prefix_expr(op, right, scope)
+    if isinstance(right, Void): return build_unary_postfix_expr(left, op, scope)
+    return build_bin_expr(left, op, right, scope)
+
+
+def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
+    """create a unary prefix expression AST from the op and right AST"""
+
     match op:
         case Juxtapose_t():
             if is_callable(left, scope):
@@ -648,12 +585,14 @@ def parse_chain(chain:Chain[Token], scope:Scope) -> AST:
                 return Bind(left.name, right)
             else:
                 #TODO: handle other cases, e.g. a.b, a[b], etc.
+                #      probably make bind take str|AST as the left-hand-side target
+                #      return Bind(left, right)
                 pdb.set_trace()
                 ...
 
         case Operator_t(op='=>'):
             if isinstance(left, Void):
-                return Function([], right) #TODO: scope needs to be set, probably on a post processing pass...
+                return Function([], right, scope) #TODO: scope needs to be set. not sure if should set here or on a post processing pass...
             elif isinstance(left, Identifier):
                 pdb.set_trace()
                 ...
@@ -683,10 +622,41 @@ def parse_chain(chain:Chain[Token], scope:Scope) -> AST:
             raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
 
 
+def build_unary_prefix_expr(op:Token, right:AST, scope:Scope) -> AST:
+    """create a unary prefix expression AST from the op and right AST"""
+    match op:
+        # normal prefix operators
+        case Operator_t(op='+'): return right
+        case Operator_t(op='-'): return Neg(right)
+        case Operator_t(op='*'): return right
+        case Operator_t(op='/'): return Inv(right)
+        case Operator_t(op='not'): raise NotImplementedError(f"TODO: prefix op: {op=}")
+        case Operator_t(op='@'):   raise NotImplementedError(f"TODO: prefix op: {op=}")
+        case Operator_t(op='...'): raise NotImplementedError(f"TODO: prefix op: {op=}")
+
+        # binary operators that appear to be unary because the left can be void
+        case Operator_t(op='=>'): return Function([], right, scope) # => called as unary prefix op means left was ()/void
+
+        case _:
+            raise ValueError(f"INTERNAL ERROR: {op=} is not a known unary prefix operator")
+
+
+def build_unary_postfix_expr(left:AST, op:Token, scope:Scope) -> AST:
+    """create a unary postfix expression AST from the left AST and op token"""
+    match op:
+        # normal postfix operators
+        case Operator_t(op='!'): raise NotImplementedError(f"TODO: postfix op: {op=}") #return Fact(left)
+
+        # binary operators that appear to be unary because the right can be void
+        case Juxtapose_t(): return Call(to_callable(left), Array([])) # anything juxtaposed with void is treated as a zero-arg call()
+
+        case _:
+            raise NotImplementedError(f"TODO: {op=}")
+
+
+
 def parse_block(block:Block_t, scope:Scope) -> AST:
-    """
-    Convert a block to an AST
-    """
+    """Convert a block token to an AST"""
 
     # if new scope block, nest the current scope
     newscope =  block.left == '{' and block.right == '}'
