@@ -210,128 +210,6 @@ def operator_associativity(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) ->
 
 
 
-# def parse_chain(tokens:list[Token]) -> AST | PrototypeAST:
-#     """
-#     Convert a chain of tokens to an AST
-
-#     Must be a valid chain as produced by get_next_chain
-#     """
-
-#     #For now, we're just gonna do some simple pattern matching.
-#     match tokens:
-#         case [Integer_t(src=str(src))]:
-#             return Number(int(src))
-        
-#         case [BasedNumber_t(src=str(src))]:
-#             return Number(based_number_to_int(src))
-        
-#         case [RawString_t(body=str(body))] if body.startswith('r"""') or body.startswith("r'''"):
-#             return String(body[4:-3])
-#         case [RawString_t(body=str(body))] if body.startswith('r"') or body.startswith("r'"):
-#             return String(body[2:-1])
-        
-#         case [String_t(body=[str(body)])]:
-#             return String(body)
-#         case [String_t(body=list(body))]:
-#             parts = []
-#             for part in body:
-#                 if isinstance(part, str):
-#                     parts.append(String(part))
-#                 elif isinstance(part, Block_t):
-#                     parts.append(parse_block(part))
-#                 elif isinstance(part, Escape_t):
-#                     parts.append(String(part.to_str()))
-#                 else:
-#                     raise ValueError(f"INTERNAL ERROR: unexpected token in string body: {part=}")
-#             return IString(parts)
-
-#         case [Identifier_t(src=str(src))]:
-#             return Identifier(src)
-        
-#         case [Block_t(body=list()) as block]:
-#             return parse_block(block)
-        
-    
-#     # Base case
-#     splits = lowest_precedence_split(tokens)
-
-#     #TODO: handle left/right associativity. need to check if ^ or =. otherwise left-associative.
-
-#     ast_chunks = []
-#     ast_ops = []
-#     for prev, split in zip([0]+splits, splits):
-#         if isinstance(split, list):
-#             #TODO: could have something like an ambiguous chain, which takes in all the options. TBD how to handle collapsing to the correct one once type information is known
-#             raise NotImplementedError("TODO: handle multiple split permutations")
-#         else:
-#             ast_chunks.append(tokens[prev:split])
-#             ast_ops.append(tokens[split])
-#     ast_chunks.append(tokens[splits[-1]+1:])
-
-#     return make_ast_chain(ast_chunks, ast_ops)
-    
-
-#     pdb.set_trace()
-#     ...
-        
-        
-#         #TODO: lots of other simple cases here
-
-        
-#         #Happy paths
-#         # case [Identifier_t(src=str(id)), Juxtapose_t(), String_t()]:
-#         #     string = parse_chain(tokens[2:])
-#         #     return Call(id, [string])
-        
-#         # case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t(left='(', right=')', body=[String_t(body=[str(string)])])]:
-#         #     return Call(id, [String(string)])
-        
-#         # case [Identifier_t(src=str(id)), Juxtapose_t(), Block_t() as block_t]:
-#         #     block = parse_block(block_t)
-#         #     #TODO: this really needs to check the type of eval on the block, rather than the raw AST type.
-#         #     if isinstance(block, (Number,String,IString)):
-#         #         return Call(id, [block])
-#         #     else:
-#         #         pdb.set_trace()
-#         #         ...
-
-
-
-#         #TODO: lots of other semi-complex cases here
-
-    
-#     pdb.set_trace()
-#     raise Exception(f"INTERNAL ERROR: no match for chain: {tokens=}")
-#     ...
-
-
-
-
-
-#TODO:
-# - grouping up keywords + expected chains. perhaps this should be a preparse step, that makes new tokens, Flow_t with their internal groups
-#     if <chain> <chain> (optional else <chain>)
-#     loop <chain> <chain> (optional else <chain>)
-# - split_by_lowest_precedence
-# - pattern matching chains e.g. <id> <jux> <str> -> call(id, str), etc. probably handle by split by lowest precedence...
-# - parse chain into AST
-# - parsing process. each chain -> AST, all wrapped up in a block
-# - determining what type a block is based on its contents. especially tuples?
-# - stripping parenthesis off of groups (probably only when handling that token -> AST)
-# - initially building the AST without type info, and then making a typed AST from that? e.g. 
-#     <jux>
-#       <id: printl>
-#       <str: 'hello world'>
-#    ----------------------
-#    <call>
-#       <id: printl>
-#       <str: 'hello world'>
-
-
-
-
-
-
 # @cache
 def split_by_lowest_precedence(tokens: Chain[Token], scope:Scope) -> tuple[Chain[Token], Token, Chain[Token]]:
     """
@@ -403,7 +281,7 @@ def typeof_single(token:Token, scope:Scope) -> Type|None:
     ...
 
 def to_callable(ast:AST) -> str|Callable:
-    """Convert the ast to either a string or Callable"""
+    """Convert the ast to either a string (identifier name) or Callable"""
 
     if isinstance(ast, Identifier):
         return ast.name
@@ -665,59 +543,17 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
         case '()', Block():
             inner.newscope = False
             return inner
+        
+
+        # create class RawRange(PrototypeAST) for representing the inner part of a range without the block delimiters
+        # case '()'|'(]'|'[)'|'[]', RawRange(): ...
+
+        # array
+        # case '[]', Block(): return Array(inner.exprs)
+
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'block parse not implemented for {block.left+block.right}, {type(inner)}')
-
-    pdb.set_trace()
-
-    match block:
-        case Block_t(left='(', right=')', body=[]):
-            return Void() # or Undefined?
-        case Block_t(left='{', right='}', body=[]):
-            return Void() # or Undefined?
-        case Block_t(left='(', right=')', body=[Identifier_t() | RawString_t() | String_t() | Integer_t() | BasedNumber_t()] as body):
-            return parse_chain(body)
-        case Block_t(left='{', right='}', body=[Identifier_t() | RawString_t() | String_t() | Integer_t() | BasedNumber_t()] as body):
-            return parse_chain(body)
-        
-        # parenthesis stripping
-        case Block_t(left='(', right=')', body=[Block_t() as block_t]):
-            return parse_block(block_t)
-        
-        case Block_t(left='('|'[', right=')'|']', body=[DotDot_t()]):
-            pdb.set_trace()
-            return Range()
-        
-        # scope stripping
-        case Block_t(left='{', right='}', body=[Block_t() as block_t]):
-            return Block([parse_block(block_t)], newscope=True)
-            # Identifier_t,
-            # Block_t,
-            # TypeParam_t,
-            # RawString_t,
-            # String_t,
-            # Integer_t,
-            # BasedNumber_t,
-            # Hashtag_t,
-            # DotDot_t,
-
-
-
-        #catch all case
-        case Block_t(left=str(left), right=str(right), body=list(body)):
-            seq = []
-            while len(body) > 0:
-                chain, body = get_next_chain(body)
-                seq.append(parse_chain(chain))
-            return UnknownBlock(left, right, seq)
-
-    pdb.set_trace()
-    ...
-
-
-
-
 
 
 
