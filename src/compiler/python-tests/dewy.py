@@ -76,8 +76,9 @@ def insert_tabs(func):
 
 class AST(ABC):
     
-    #TODO:make accessing this raise an error if it is None, i.e. not overwritten by child class
-    type:'Type' = None
+    #TODO: make accessing this raise better error if not overwritten by child class
+    #      for now, just rely on exception for missing property
+    # type:'Type' = None
 
     def eval(self, scope:'Scope'=None) -> 'AST':
         """Evaluate the AST in the given scope, and return the result (as a dewy obj) if any"""
@@ -88,10 +89,10 @@ class AST(ABC):
     def comp(self, scope:'Scope'=None) -> str:
         """TODO: future handle compiling an AST to LLVM IR"""
         raise NotImplementedError(f'{self.__class__.__name__}.comp')
-    # @property
-    # def type(self, scope:'Scope'=None) -> 'Type':
+    # @abstractclassmethod
+    # def type(cls, scope:'Scope'=None) -> 'Type':
     #     """Return the type of the object that would be returned by eval"""
-        raise NotImplementedError(f'{self.__class__.__name__}.type')
+    #     raise NotImplementedError(f'{cls.__name__}.type')
     #TODO: other methods, e.g. semantic analysis
     def treestr(self, indent=0) -> str:
         """Return a string representation of the AST tree"""
@@ -1130,12 +1131,14 @@ class Next(AST):
         return f'next({self.iterable})'
 
 class Number(Rangeable):
+    type:Type = Type('number')
+
     def __init__(self, val:int|float):
         self.val = val
     def eval(self, scope:Scope=None):
         return self
     def typeof(self):
-        return Type('Number')
+        return Type('number')
     
     #Rangeable methods
     def compare(self, other:'Number', scope:Scope=None) -> 'Number':

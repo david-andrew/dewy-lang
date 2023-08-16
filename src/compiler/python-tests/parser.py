@@ -208,6 +208,16 @@ def operator_associativity(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) ->
     raise NotImplementedError(f'operator associativity not implemented yet')
 
 
+#TODO: this isn't very well integrated into the type system...
+# operator_result_type_table = {
+#     (Number.type, Add, Number.type): Number,
+#     (Number.type, Sub, Number.type): Number,
+#     (Number.type, Mul, Number.type): Number,
+#     (Number.type, Div, Number.type): Number,
+#     (Inv, Number.type): Number,
+#     (Neg, Number.type): Number,
+#     #TODO: add anything else to the matrix
+# }
 
 
 # @cache
@@ -317,8 +327,8 @@ def is_callable(ast:AST, scope:Scope) -> bool:
     if isinstance(ast, Identifier):
         #check the type of the identifier in the scope
         if (val:=scope.get(ast.name, undefined)) is not undefined:
-            if Type.is_instance(val.type, Callable.type):
-                return True
+            return Type.is_instance(val.type, Callable.type)
+        raise ValueError(f'Could not check is_callable. Identifier `{ast}` was undefined in scope.')
 
     # check if directly callable
     if isinstance(ast, Callable):
@@ -531,9 +541,9 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
 
     match block.left+block.right, inner:
         #types returned as is
-        case '()', String() | IString() | Call() | Function(): #TODO: more types
+        case '()', String() | IString() | Call() | Function() | Identifier(): #TODO: more types
             return Block([inner], newscope=False)
-        case '{}', String() | IString() | Call() | Function(): #TODO: more types
+        case '{}', String() | IString() | Call() | Function() | Identifier(): #TODO: more types
             return Block([inner])
         case '()'|'{}', Void():
             return inner
@@ -677,6 +687,7 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
         # do nothing cases
         case String(): ...
         case Identifier(): ...
+        case Number(): ...
         case Void(): ...
         
         case _:

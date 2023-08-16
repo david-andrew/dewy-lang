@@ -3,12 +3,14 @@
 - probably make identifier not a prototype, and instead anything that uses identifiers uses them instead of python strings
     - e.g. Bind(Identifier, AST), Call(Identifier), etc.
 - rename .type property on AST classes to basetype or default type. Add a type function which does a runtime check of the type
+    - really need to make a type matrix for representing results of all the operators on pairs of every combination of types
 - post tokanization steps:
     - combining chains of operators into opchains (e.g. x^/-2, needs to chain the ^/- into a single op)
     - wrap up conditional/etc. blocks into a single token
         - create `class Flow_t()` for holding the groups
         - if <chain> <chain> (optional else <chain>)
         - loop <chain> <chain> (optional else <chain>)
+- parsing needs to be chain by chain, namely if a an expression binds a value to an identifier, later expressions should be able to get the type of that identifier!
 
 - Arrays should allow specifying new scope or no new scope
 
