@@ -624,12 +624,15 @@ def to_callable(ast:AST) -> str|Callable:
 
 
 def to_call_args(ast:AST) -> Array:
-    if not isinstance(ast, Tuple):
-        #TODO: some sort of check that ast is a single type...?
-        return Array([ast])
+    if isinstance(ast, Void):
+        return Array([])
     
-    # if ast was a tuple, should be able to directly convert to call args as is
-    return Array(ast.exprs)
+    if isinstance(ast, Tuple):
+        return Array(ast.exprs)
+
+    #TODO: some sort of check that ast is a valid single type...?
+    return Array([ast])
+    
     
 
 def is_callable(ast:AST, scope:Scope) -> bool:
@@ -638,7 +641,11 @@ def is_callable(ast:AST, scope:Scope) -> bool:
         if (val:=scope.get(ast.name, undefined)) is not undefined:
             if Type.is_instance(val.type, Callable.type):
                 return True
-            
+
+    # Buildtin types        
+    if isinstance(ast, Function):
+        return True
+    
     if isinstance(ast, PrototypeAST):
         raise NotImplementedError(f"Currently haven't handled is_callable for case of {type(ast)}")
         
@@ -776,9 +783,9 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
 
     match block.left+block.right, inner:
         #types returned as is
-        case '()', String() | IString() | Call(): #TODO: more types
+        case '()', String() | IString() | Call() | Function(): #TODO: more types
             return inner
-        case '{}', String() | IString() | Call(): #TODO: more types
+        case '{}', String() | IString() | Call() | Function(): #TODO: more types
             return Block([inner])
         case '()'|'{}', Void():
             return inner #Block([], newscope=False)
@@ -860,10 +867,8 @@ def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     if scope is None:
         scope = Scope.default()
     
-    scope, original_scope = scope.copy(), scope
-
-    # kick of the parser
-    ast = parse(tokens, scope)
+    # kick off the parser
+    ast = parse(tokens, scope.copy())
 
     # post processing on the parsed AST 
     express_identifiers(ast)
@@ -941,6 +946,11 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
                 yield from full_traverse_ast(expr)
 
         case Call():
+            #handle expr being called
+            if isinstance(root.expr, AST):
+                yield from full_traverse_ast(root.expr)
+            # else str identifier, which doesn't need to be visited
+
             #handle any arguments
             if root.args is not None:
                 for arg in root.args.vals:
@@ -963,6 +973,7 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
         # do nothing cases
         case String(): ...
         case Identifier(): ...
+        case Void(): ...
         
         case _:
             #TODO: unhandled ast type

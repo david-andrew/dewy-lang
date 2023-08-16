@@ -1345,9 +1345,8 @@ class Array(Iterable, Unpackable):
 
 
 class Void(AST):
-    """undefined singleton"""
+    """void singleton"""
 
-    #type value is set in __new__, since class Type isn't declared yet
     type:Type=Type('void')
 
     def __new__(cls):
