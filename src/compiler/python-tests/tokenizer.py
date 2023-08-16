@@ -114,6 +114,15 @@ class RawString_t(Token):
         self.body = body
     def __repr__(self) -> str:
         return f"<RawString_t: {self.body}>"
+    def to_str(self) -> str:
+        body = self.body
+        if body.startswith('r"""') or body.startswith("r'''"):
+            body = body[4:-3]
+        elif body.startswith('r"') or body.startswith("r'"):
+            body = body[2:-1]
+        else:
+            raise ValueError(f"Internal Error: unrecognized delimiters on raw string: {repr(self)}")
+        return body
 
 class String_t(Token):
     def __init__(self, body:list[str|Escape_t|Block_t]):

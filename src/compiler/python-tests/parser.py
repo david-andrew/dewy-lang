@@ -727,6 +727,8 @@ def parse_single(token:Token, scope:Scope) -> AST:
     match token:
         case Identifier_t():
             return Identifier(token.src)
+        case RawString_t():
+            return String(token.to_str())
         case String_t():
             if len(token.body) == 1 and isinstance(token.body[0], str):
                 return String(token.body[0])
@@ -1071,8 +1073,8 @@ if __name__ == "__main__":
         test_file(sys.argv[1])
     else:
         # test2()
-        # test_hello()
-        test_example_progs()
+        test_hello()
+        # test_example_progs()
 
     # print("Usage: `python parser.py [path/to/file.dewy>]`")
 
