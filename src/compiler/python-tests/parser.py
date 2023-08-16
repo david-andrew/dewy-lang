@@ -43,7 +43,7 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
     unary_postfix_operators,
     binary_operators,
     
-    Token, 
+    Token,
 
     WhiteSpace_t,
 
@@ -80,37 +80,22 @@ import pdb
 
 
 
-# Parsing process:
-# list[Token] -> Chain[Chain] -> AST
-
-
-# [TASKS]
-# - have a post tokanization step for combining chains of operators into opchains (e.g. x^/-2, needs to chain the ^/- into a single op)
-#   - this is so that split by lowest precedence works because it only considers the precedence of the first operator. it's harder if they're not combined
-# - also need to wrap up conditional/etc. blocks into a single token
-# - dewy AST stuff:
-#   --> every AST needs to have a .eval_type() function that will determine what type the AST evaluates to
-#   --> TBD. maybe make it so that dewy ASTs can handle juxtapose by themselves, rather than having to figure it out in the parser? or have there be multiple parser passes over the generated AST...
-# - start parsing simple AST expressions, e.g. expr + expr, expr - expr
-# - more complicated expressions parsed via split by lowest precedence
 
 #compiler pipeline steps:
 # 1. tokenize
-# 2. validate block braces
-# 3. invert whitespace to juxtapose
-# 4. create program ast from tokens
-# 5. validation (what kind?). type checking. valid operations. etc.
+# 2. post tokenization
+#    -> invert whitespace to juxtapose
+#    -> bundle conditional chains into a single token
+#    -> chain operator sequences into a single compount operator
+#    -> desugar things, e.g. empty range `..` to `()..()`
+# 3. parse tokens to AST
+# 4. post parse
+#    -> convert PrototypeASTs to concrete AST
+#    -> (maybe) set correct scope for exprs that use (e.g. Function)
+# 5. type checking, other validation, etc.
 # 6. high level optimizations/transformations
 # 7. generate code via a backend (e.g. llvm, c, python)
 #    -> llvm: convert ast to ssa form, then generate llvm ir from ssa form
-
-
-#expression chains
-# build chain one token at a time, decide if it is part of the current expression chain
-# once chain is built, split by lowest precedence operator (kept track of during chain building)
-# create the node for the operator, and semi-recurse process on the left and right halves 
-#  - (the chain already exists, just need to find the lowest precedence operator)
-
 
 
 
