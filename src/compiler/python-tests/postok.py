@@ -190,9 +190,14 @@ def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
     # (break | continue) #hashtag? //note the hashtag should be an entire chain if present
     # (let | const) #chain
 
+from typing import TypeVar
+T = TypeVar('T')
+class Chain(list[T]):
+    """class for explicitly annotating that a token list is a single chain"""
 
+#TODO: replace with 3.12 syntax when released: class Chain[T](list[T], T): ...
 
-def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
+def get_next_chain(tokens:list[Token]) -> tuple[Chain[Token], list[Token]]:
     """
     grab the next single expression chain of tokens from the given list of tokens
 
@@ -225,7 +230,7 @@ def get_next_chain(tokens:list[Token]) -> tuple[list[Token], list[Token]]:
     if len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op == ';':
         chain.append(tokens.pop(0))
 
-    return chain, tokens
+    return Chain(chain), tokens
 
 
 

@@ -67,12 +67,12 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
     Comma_t,
 )
 
-from postok import post_process, get_next_chain, is_op
+from postok import post_process, get_next_chain, is_op, Chain
 
 from utils import based_number_to_int
 from dataclasses import dataclass
 from typing import Generator
-from itertools import groupby, chain
+from itertools import groupby, chain as iterchain
 from enum import Enum, auto
 from rich import print, traceback; traceback.install(show_locals=True)
 
@@ -222,26 +222,6 @@ def operator_precedence(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> in
 def operator_associativity(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> Associativity:
     raise NotImplementedError(f'operator associativity not implemented yet')
 
-
-# def make_ast_chain(chunks:list[Token], ops:list[Token]) -> AST | PrototypeAST:
-#     """Create an AST chain from the sequence of ops/chunks"""
-#     assert len(chunks) == len(ops) + 1, f"ERROR: mismatched lengths for {chunks=} and {ops=}"
-#     assert len(ops) > 0, f"ERROR: {ops=} is empty"
-
-#     if len(ops) == 1:
-#         assert len(chunks) == 2, f"ERROR: {chunks=} should have length 2"
-#         op, = ops
-#         left, right = chunks
-
-#         if len(left) == 0 and isinstance(op, Operator_t) and op.op in unary_prefix_operators:
-#             return parse_unary_prefix_op(op, right)
-#         if len(right) == 0 and isinstance(op, Operator_t) and op.op in unary_postfix_operators:
-#             return parse_unary_postfix_op(left, op)
-        
-#         assert len(left) > 0 and len(right) > 0, f"ERROR: {left=} and {right=} should both have length > 0"
-#         return parse_bin_op(left, op, right)
-
-#     pdb.set_trace()
 
 
 # def parse_bin_op(left:list[Token], op:Token, right:list[Token]) -> AST | PrototypeAST:
@@ -442,19 +422,24 @@ def operator_associativity(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) ->
 
 
 # @cache
-def split_by_lowest_precedence(tokens: list[Token], scope:Scope) -> tuple[list[Token], Token, list[Token]]:
+def split_by_lowest_precedence(tokens: Chain[Token], scope:Scope) -> tuple[Chain[Token], Token, Chain[Token]]:
     """
     return the integer index/indices of the lowest precedence operator(s) in the given list of tokens
     """
+    assert isinstance(tokens, Chain), f"ERROR: `split_by_lowset_precedence()` may only be called on explicitly known Chain[Token], got {type(tokens)}"
+
     #collect all operators and their indices in the list of tokens
     idxs, ops = zip(*[(i,token) for i,token in enumerate(tokens) if is_op(token)])
 
     if len(ops) == 0:
-        return []
+        pdb.set_trace()
+        #TODO: how to handle this case?
+        return Chain(), None, Chain()
+        raise ValueError()
     if len(ops) == 1:
         i, = idxs
         op, = ops
-        return tokens[:i], op, tokens[i+1:]
+        return Chain(tokens[:i]), op, Chain(tokens[i+1:])
     
     # when more than one op present, find the lowest precedence one
     ranks = [operator_precedence(op) for op in ops]
@@ -472,7 +457,7 @@ def split_by_lowest_precedence(tokens: list[Token], scope:Scope) -> tuple[list[T
 
     if len(op_idxs) == 1:
         i, = op_idxs
-        return tokens[:i], tokens[i], tokens[i+1:]
+        return Chain(tokens[:i]), tokens[i], Chain(tokens[i+1:])
 
     # handling when multiple ops have the same precedence, select based on associativity rules
     pdb.set_trace()
@@ -578,46 +563,9 @@ def parse(tokens:list[Token], scope:Scope) -> AST:
         chain, tokens = get_next_chain(tokens)
 
         if len(chain) == 1:
-            token, = chain
-            asts.append(parse_single(token, scope))
-            break
-        
-        left, op, right = split_by_lowest_precedence(chain, scope)
-        left, right = parse(left, scope), parse(right, scope)
-
-        match op:
-            case Juxtapose_t():
-                if is_callable(left, scope):
-                    fn = to_callable(left)
-                    args = to_call_args(right)
-                    asts.append(Call(fn, args))
-                else:
-                    # assume left/right are multipliable
-                    asts.append(Mul(left, right))
-            
-            case Operator_t(op='='):
-                if isinstance(left, Identifier):
-                    asts.append(Bind(left.name, right))   
-                else:    
-                    #TODO: handle other cases, e.g. a.b, a[b], etc.
-                    pdb.set_trace()
-                    ...
-
-            case Operator_t(op='=>'):
-                if isinstance(left, Void):
-                    return Function([], right) #TODO: scope needs to be set, probably on a post processing pass...
-                elif isinstance(left, Identifier):
-                    pdb.set_trace()
-                    ...
-                elif isinstance(left, Block):
-                    pdb.set_trace()
-                    ...
-                else:
-                    raise ValueError(f'Unrecognized left-hand side for function literal: {left=}, {right=}')
-            case _:
-                pdb.set_trace()
-                raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
-    
+            asts.append(parse_single(chain[0], scope))
+        else:
+            asts.append(parse_chain(chain, scope))
     
     if len(asts) == 0:
         #literally nothing was parsed
@@ -660,7 +608,7 @@ def parse_single(token:Token, scope:Scope) -> AST:
                     parts.append(ast)
 
             # combine any adjacent Strings into a single string (e.g. if there were escapes)
-            parts = chain(*((''.join(g),) if issubclass(t, str) else (*g,) for t, g in groupby(parts, type)))
+            parts = iterchain(*((''.join(g),) if issubclass(t, str) else (*g,) for t, g in groupby(parts, type)))
             # convert any free strings to ASTs
             parts = [p if not isinstance(p, str) else String(p) for p in parts]
 
@@ -678,6 +626,61 @@ def parse_single(token:Token, scope:Scope) -> AST:
     pdb.set_trace()
     raise NotImplementedError()
     ...
+
+
+def parse_chain(chain:Chain[Token], scope:Scope) -> AST:
+    assert isinstance(chain, Chain), f"ERROR: parse chain may only be called on explicitly known Chain[Token], got {type(chain)}"
+    left, op, right = split_by_lowest_precedence(chain, scope)
+    left, right = parse(left, scope), parse(right, scope)
+
+    match op:
+        case Juxtapose_t():
+            if is_callable(left, scope):
+                fn = to_callable(left)
+                args = to_call_args(right)
+                return Call(fn, args)
+            else:
+                # assume left/right are multipliable
+                return Mul(left, right)
+
+        case Operator_t(op='='):
+            if isinstance(left, Identifier):
+                return Bind(left.name, right)
+            else:
+                #TODO: handle other cases, e.g. a.b, a[b], etc.
+                pdb.set_trace()
+                ...
+
+        case Operator_t(op='=>'):
+            if isinstance(left, Void):
+                return Function([], right) #TODO: scope needs to be set, probably on a post processing pass...
+            elif isinstance(left, Identifier):
+                pdb.set_trace()
+                ...
+            elif isinstance(left, Block):
+                pdb.set_trace()
+                ...
+            else:
+                raise ValueError(f'Unrecognized left-hand side for function literal: {left=}, {right=}')
+
+        # a bunch of simple cases:
+        case Comma_t(): return Tuple(left, right)
+        # case ShiftOperator_t(op='<<'):  return LeftShift(left, right)
+        # case ShiftOperator_t(op='>>'):  return RightShift(left, right)
+        # case ShiftOperator_t(op='<<<'): return LeftRotate(left, right)
+        # case ShiftOperator_t(op='>>>'): return RightRotate(left, right)
+        # case ShiftOperator_t(op='<<!'): return LeftRotateCarry(left, right)
+        # case ShiftOperator_t(op='!>>'): return RightRotateCarry(left, right)
+        case Operator_t(op='+'): return Add(left, right)
+        case Operator_t(op='-'): return Sub(left, right)
+        case Operator_t(op='*'): return Mul(left, right)
+        case Operator_t(op='/'): return Div(left, right)
+        case Operator_t(op='%'): return Mod(left, right)
+        case Operator_t(op='^'): return Pow(left, right)
+
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
 
 
 def parse_block(block:Block_t, scope:Scope) -> AST:
