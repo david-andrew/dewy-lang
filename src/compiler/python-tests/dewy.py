@@ -486,27 +486,6 @@ class Function(Callable):
             assert caller_kwarg_name in fn_arg_names, f"tried to bind unrecognized keyword argument '{caller_kwarg_name}' to function {self}"
             fscope.let(caller_kwarg_name, caller_kwarg_value)
 
-
-
-        
-        # #TODO: this probably doesn't handle when the named vs unnamed call arguments are not exactly the same as defined
-        # for arg in self.args:
-        #     if arg.val is None:
-        #         fscope.bind(arg.name, scope.args.pop(0))
-        #     else:
-        #         fscope.bind(arg.name, arg.val)
-        # assert len(scope.args) == 0, f'not all arguments were used in function call {self}'
-        # for name, val in scope.bargs:
-        #     assert name in [a.name for a in self.args], f'unknown argument {name} in function call {self}'
-        #     fscope.bind(name, val)
-        # scope.bargs = []
-
-        #check that all unnamed args have values in the scope
-        #TODO: make this check more robust + better error messages
-        # for name in self.args[len(scope.args):]:
-        #     if name not in fscope.vars:
-        #         raise TypeError(f'function {self} missing argument {name}')
-
         return self.body.eval(fscope)
 
     def treestr(self, indent=0):
@@ -555,8 +534,6 @@ class Builtin(Callable):
         if self.name in Builtin.funcs:
             f = Builtin.funcs[self.name]
             #TODO: this doesn't handle differences in named vs unnamed args between the function definition and the call
-            # args = [scope.args[i].eval(scope).topy(scope) for i, a in enumerate(self.args) if a.val is None]
-            # kwargs = {a: a.val.eval(scope).topy(scope) for a in self.args if a.val is not None}
 
             args = []
             kwargs = {}
