@@ -544,27 +544,22 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
     #parse the inside of the block
     inner = parse(block.body, scope)
 
-    match block.left+block.right, inner:
+    delims = block.left + block.right
+    match delims, inner:
         #types returned as is
-        case '()', String() | IString() | Call() | Function() | Identifier() | Number(): #TODO: more types
-            return Block([inner], newscope=False)
-        case '{}', String() | IString() | Call() | Function() | Identifier() | Number(): #TODO: more types
-            return Block([inner])
+        case '()'|'{}', String() | IString() | Call() | Function() | Identifier() | Number(): #TODO: more types
+            return Block([inner], newscope=delims=='{}')
         case '()'|'{}', Void():
             return inner
-        case '{}', Block():
-            inner.newscope = True
-            return inner
-        case '()', Block():
-            inner.newscope = False
+        case '()'|'{}', Block():
+            inner.newscope = delims == '{}'
             return inner
         
-
         # create class RawRange(PrototypeAST) for representing the inner part of a range without the block delimiters
         # case '()'|'(]'|'[)'|'[]', RawRange(): ...
 
         # array
-        # case '[]', Block(): return Array(inner.exprs)
+        # case '[]', Block() | Tuple(): return Array(inner.exprs)
 
         case _:
             pdb.set_trace()
