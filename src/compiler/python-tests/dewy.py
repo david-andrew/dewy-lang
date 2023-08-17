@@ -825,7 +825,7 @@ class IString(AST):
         return f'IString({repr(self.parts)})'
 
 class BinOp(AST):
-    def __init__(self, left:AST, right:AST, op:PyCallable[[Any, Any],Any], outtype:PyType[AST], opname:str, opsymbol:str):
+    def __init__(self, left:AST, right:AST, op:PyCallable[[Any, Any],Any], outtype:PyType[AST]|None, opname:str, opsymbol:str):
         self.left = left
         self.right = right
         self.op = op
@@ -834,12 +834,18 @@ class BinOp(AST):
         self.opsymbol = opsymbol
 
     def eval(self, scope:Scope=None):
-        return self.outtype(
-            self.op(
-                self.left.eval(scope).topy(), 
-                self.right.eval(scope).topy()
-            )
-        )
+        left = self.left.eval(scope)
+        right = self.right.eval(scope)
+        outtype = self.outtype
+
+        if outtype is None:
+            #TODO: remove support for this later. type should be determined after parsing during type checking!
+            # determine the outtype from the input types
+            assert type(left) == type(right), f"For unspecified output type, both left and right must have the same type. Found {type(left)=}, {type(right)=}"
+            outtype = type(left)
+
+        return outtype(self.op(left.topy(), right.topy()))
+    
 
     def treestr(self, indent=0):
         return f'{tab * indent}{self.opname}\n{self.left.treestr(indent + 1)}\n{self.right.treestr(indent + 1)}'
@@ -874,7 +880,6 @@ class GreaterEqual(BinOp):
     def __init__(self, left:AST, right:AST):
         super().__init__(left, right, operator.ge, Bool, 'GreaterEqual', '>=?')
 
-#TODO: type of output should be based on types of the inputs
 class Add(BinOp):
     def __init__(self, left:AST, right:AST, outtype:PyType[AST]):
         super().__init__(left, right, operator.add, outtype, 'Add', '+')
@@ -931,14 +936,24 @@ class Xnor(BinOp):
 
 ##################### Unary operators #####################
 class UnaryOp(AST):
-    def __init__(self, child:AST, op:PyCallable[[AST],AST], opname:str, opsymbol:str):
+    def __init__(self, child:AST, op:PyCallable[[Any, Any],Any], outtype:PyType[AST]|None, opname:str, opsymbol:str):
         self.child = child
         self.op = op
+        self.outtype = outtype
         self.opname = opname
         self.opsymbol = opsymbol
 
     def eval(self, scope:Scope=None):
-        return self.op(self.child.eval(scope).topy())
+        child = self.child.eval(scope)
+        outtype = self.outtype
+
+        if outtype is None:
+            #TODO: remove support for this later. type should be determined after parsing during type checking!
+            # determine the outtype from the input type
+            outtype = type(child)
+
+        return outtype(self.op(child.topy()))
+
     def treestr(self, indent=0):
         return f'{tab * indent}{self.opname}\n{self.child.treestr(indent + 1)}'
     @insert_tabs
@@ -948,12 +963,13 @@ class UnaryOp(AST):
         return f'{self.opname}({repr(self.child)})'
 
 class Neg(UnaryOp):
-    def __init__(self, child:AST):
-        super().__init__(child, lambda c: Number(-c), 'Neg', '-')
+    def __init__(self, child:AST, outtype:PyType[AST]):
+        super().__init__(child, operator.neg, outtype, 'Neg', '-')
+
 
 class Inv(UnaryOp):
-    def __init__(self, child:AST):
-        super().__init__(child, lambda c: Number(1/c), 'Inv', '/')
+    def __init__(self, child:AST, outtype:PyType[AST]):
+        super().__init__(child, lambda x: 1/x, outtype, 'Inv', '/')
 
 
 class Bool(AST):

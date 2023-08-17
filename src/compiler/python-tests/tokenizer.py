@@ -225,6 +225,7 @@ binary_operators = {
         '->', '<->', '<-',
         '.', ':'
 }
+opchain_starters = {'+', '-', '*', '/', '%', '^'}
 operators = sorted(
     [*(unary_prefix_operators | unary_postfix_operators | binary_operators)],
     key=len,

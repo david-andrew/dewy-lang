@@ -2,6 +2,7 @@ from tokenizer import ( tokenize, tprint, full_traverse_tokens,
     unary_prefix_operators,
     unary_postfix_operators,
     binary_operators,
+    opchain_starters,
 
     Token,
 
@@ -174,6 +175,9 @@ def is_binop(token:Token) -> bool:
 def is_op(token:Token) -> bool:
     return is_binop(token) or is_unary_prefix_op(token) or is_unary_postfix_op(token)
 
+def is_opchain_starter(token:Token) -> bool:
+    return isinstance(token, Operator_t) and token.op in opchain_starters
+
 def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
     """package up the next keyword expression into a single token"""
     if len(tokens) == 0:
@@ -190,12 +194,12 @@ def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
     # (break | continue) #hashtag? //note the hashtag should be an entire chain if present
     # (let | const) #chain
 
+#TODO: replace with 3.12 syntax when released: class Chain[T](list[T]): ...
 from typing import TypeVar
 T = TypeVar('T')
 class Chain(list[T]):
     """class for explicitly annotating that a token list is a single chain"""
 
-#TODO: replace with 3.12 syntax when released: class Chain[T](list[T], T): ...
 
 def get_next_chain(tokens:list[Token]) -> tuple[Chain[Token], list[Token]]:
     """
@@ -300,10 +304,13 @@ def chain_operators(tokens: list[Token]) -> None:
 
         #TODO: this is not a correct way to detect these. need to verify that the operators are in between two #chunks
         #   this will be conservative, but for now it will let us do a hello world happy path
-        if is_binop(token):
-            if i+1 < len(stream) and is_unary_prefix_op(stream[i+1]):
-                raise NotImplementedError
-        ...
+        if is_opchain_starter(token):
+            j = 1
+            while i+j < len(stream) and is_unary_prefix_op(stream[i+j]):
+                j+=1
+            if j > 1:
+                pdb.set_trace()
+                raise NotImplementedError('opchaining has not been implemented yet')
 
 
 def post_process(tokens: list[Token]) -> None:

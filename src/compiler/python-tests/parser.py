@@ -26,6 +26,7 @@ from dewy import (
     BinOp,
     Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
+    UnaryOp,
     Neg, Inv,
     Bool,
     If,
@@ -334,6 +335,10 @@ def is_callable(ast:AST, scope:Scope) -> bool:
     if isinstance(ast, Callable):
         return True
     
+    # Non-callable types
+    if isinstance(ast, (Number, String, IString)):
+        return False
+
     # TODO: hacky way of dealing with blocks...
     if isinstance(ast, Block):
         if len(ast.exprs) == 1:
@@ -423,7 +428,7 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
                 return Call(fn, args)
             else:
                 # assume left/right are multipliable
-                return Mul(left, right)
+                return Mul(left, right, None)
 
         case Operator_t(op='='):
             if isinstance(left, Identifier):
@@ -455,12 +460,12 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
         # case ShiftOperator_t(op='>>>'): return RightRotate(left, right)
         # case ShiftOperator_t(op='<<!'): return LeftRotateCarry(left, right)
         # case ShiftOperator_t(op='!>>'): return RightRotateCarry(left, right)
-        case Operator_t(op='+'): return Add(left, right)
-        case Operator_t(op='-'): return Sub(left, right)
-        case Operator_t(op='*'): return Mul(left, right)
-        case Operator_t(op='/'): return Div(left, right)
-        case Operator_t(op='%'): return Mod(left, right)
-        case Operator_t(op='^'): return Pow(left, right)
+        case Operator_t(op='+'): return Add(left, right, None)
+        case Operator_t(op='-'): return Sub(left, right, None)
+        case Operator_t(op='*'): return Mul(left, right, None)
+        case Operator_t(op='/'): return Div(left, right, None)
+        case Operator_t(op='%'): return Mod(left, right, None)
+        case Operator_t(op='^'): return Pow(left, right, None)
 
         case _:
             pdb.set_trace()
@@ -472,9 +477,9 @@ def build_unary_prefix_expr(op:Token, right:AST, scope:Scope) -> AST:
     match op:
         # normal prefix operators
         case Operator_t(op='+'): return right
-        case Operator_t(op='-'): return Neg(right)
+        case Operator_t(op='-'): return Neg(right, None)
         case Operator_t(op='*'): return right
-        case Operator_t(op='/'): return Inv(right)
+        case Operator_t(op='/'): return Inv(right, None)
         case Operator_t(op='not'): raise NotImplementedError(f"TODO: prefix op: {op=}")
         case Operator_t(op='@'):   raise NotImplementedError(f"TODO: prefix op: {op=}")
         case Operator_t(op='...'): raise NotImplementedError(f"TODO: prefix op: {op=}")
@@ -541,9 +546,9 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
 
     match block.left+block.right, inner:
         #types returned as is
-        case '()', String() | IString() | Call() | Function() | Identifier(): #TODO: more types
+        case '()', String() | IString() | Call() | Function() | Identifier() | Number(): #TODO: more types
             return Block([inner], newscope=False)
-        case '{}', String() | IString() | Call() | Function() | Identifier(): #TODO: more types
+        case '{}', String() | IString() | Call() | Function() | Identifier() | Number(): #TODO: more types
             return Block([inner])
         case '()'|'{}', Void():
             return inner
@@ -684,6 +689,14 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
                     yield from full_traverse_ast(arg.val)
             yield from full_traverse_ast(root.body)
 
+        case BinOp():
+            yield from full_traverse_ast(root.left)
+            yield from full_traverse_ast(root.right)
+
+        case UnaryOp():
+            yield from full_traverse_ast(root.child)
+
+
         # do nothing cases
         case String(): ...
         case Identifier(): ...
@@ -751,6 +764,10 @@ def test_hello():
 print'What is your name? '
 name = readl
 printl'Hello {name}'
+a = 4(5)
+b = -5
+c = /4
+printl'a={a}, b={b}, c={c}'
 """
 
     tokens = tokenize(line)
@@ -786,8 +803,8 @@ if __name__ == "__main__":
         test_file(sys.argv[1])
     else:
         # test2()
-        # test_hello()
-        test_example_progs()
+        test_hello()
+        # test_example_progs()
 
     # print("Usage: `python parser.py [path/to/file.dewy>]`")
 
