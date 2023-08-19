@@ -219,6 +219,7 @@ binary_operators = {
         '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
         '|', '&',
         'and', 'or', 'nand', 'nor', 'xor', 'xnor', '??',
+        'else',
         '=', ':=', 'as', 'in', 'transmute',
         '@?',
         '|>', '<|', '=>',
@@ -233,7 +234,7 @@ operators = sorted(
 )
 #TODO: may need to separate |> from regular operators since it may confuse type param
 shift_operators = sorted(['<<', '>>', '<<<', '>>>', '<<!', '!>>'], key=len, reverse=True)
-keywords = ['loop', 'lazy', 'do', 'if', 'else', 'return', 'express', 'let', 'const']
+keywords = ['loop', 'lazy', 'do', 'if', 'return', 'express', 'let', 'const']
 #TODO: what about language values, e.g. void, undefined, end, units, etc.? probably define at compile time, rather than in the compiler
 
 # note that the prefix is case insensitive, so call .lower() when matching the prefix

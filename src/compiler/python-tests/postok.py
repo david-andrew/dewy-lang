@@ -187,6 +187,29 @@ def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
     if not isinstance(t, Keyword_t):
         raise ValueError(f"ERROR: expected keyword expression, got {t=}")
 
+    match t:
+        case Keyword_t(src='if'|'loop'|'lazy'):
+            cond, tokens = get_next_chain(tokens)
+            clause, tokens = get_next_chain(tokens)
+            return Flow_t(t, cond, clause), tokens
+        case Keyword_t(src='do'):
+            clause, tokens = get_next_chain(tokens)
+            #assert next token is a do_keyward
+            #depending on the keyward, get a condition, or condition+clause
+            pdb.set_trace()
+            ...
+        case Keyword_t(src='return'):
+            #TBD how to do this one...
+            pdb.set_trace()
+            ...
+        case Keyword_t(src='express'):
+            pdb.set_trace()
+            ...
+        case Keyword_t(src='let'|'const'):
+            expr, tokens = get_next_chain(tokens)
+            pdb.set_trace()
+            ...
+    
     raise NotImplementedError("TODO: handle keyword based expressions")
     # (if | loop) #chain #chain (else (if | loop) #chain #chain)* (else #chain)?
     # return #chain?
@@ -199,6 +222,23 @@ from typing import TypeVar
 T = TypeVar('T')
 class Chain(list[T]):
     """class for explicitly annotating that a token list is a single chain"""
+
+
+# Later Token classes
+
+class Flow_t(Token):
+    def __init__(self, keyword:Keyword_t, condition:Chain[Token], clause:Chain[Token]):
+        self.keyword = keyword
+        self.condition = condition
+        self.clause = clause
+    def __repr__(self) -> str:
+        return f"<Flow_t: {self.keyword}: {self.condition} {self.clause}"
+
+class Do_t(Token):...
+class Return_t(Token):...
+class Express_t(Token):...
+class Declare_t(Token):...
+
 
 
 def get_next_chain(tokens:list[Token]) -> tuple[Chain[Token], list[Token]]:
@@ -325,7 +365,8 @@ def post_process(tokens: list[Token]) -> None:
     # combine_keywords(tokens) # possibly handled by bundling conditionals...
 
     # bundle up conditionals into single token expressions
-    bundle_conditionals(tokens)
+    #TODO: can put this in after get_next_chain can bundle as it goes. Basically this would just make any work it does finding flow permenant
+    # bundle_conditionals(tokens)
 
     # combine operator chains into a single operator token
     chain_operators(tokens)

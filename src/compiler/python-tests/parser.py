@@ -68,7 +68,7 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
     Comma_t,
 )
 
-from postok import post_process, get_next_chain, is_op, Chain
+from postok import post_process, get_next_chain, is_op, Chain, Flow_t
 
 from utils import based_number_to_int
 from dataclasses import dataclass
@@ -126,30 +126,38 @@ class qint:
 #TODO: how to handle unary operators in the table? perhaps make PrefixOperator_t/PostfixOperator_t classes?
 #TODO: add specification of associativity for each row
 class Associativity(Enum):
-    left = auto()
-    right = auto()
-    none = auto()
+    left = auto()    #left-to-right
+    right = auto()   #right-to-left
     prefix = auto()
     postfix = auto()
+    none = auto()
+    fail = auto()
 
 operator_groups: list[tuple[Associativity, list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]]] = reversed([
-    (Associativity.none, [Operator_t('@')]),
-    (Associativity.none, [Operator_t('.'), Juxtapose_t(None)]),
-    (Associativity.none, [Operator_t('^')]),
-    (Associativity.none, [Juxtapose_t(None)]),
-    (Associativity.none, [Operator_t('*'), Operator_t('/'), Operator_t('%')]),
-    (Associativity.none, [Operator_t('+'), Operator_t('-')]),
-    (Associativity.none, [ShiftOperator_t('<<'), ShiftOperator_t('>>'), ShiftOperator_t('<<<'), ShiftOperator_t('>>>'), ShiftOperator_t('<<!'), ShiftOperator_t('!>>')]),
-    (Associativity.none, [Comma_t(None)]),
-    (Associativity.none, [Operator_t('=?'), Operator_t('>?'), Operator_t('<?'), Operator_t('>=?'), Operator_t('<=?')]),
-    (Associativity.none, [Operator_t('and'), Operator_t('nand'), Operator_t('&')]),
-    (Associativity.none, [Operator_t('xor'), Operator_t('xnor')]),
-    (Associativity.none, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
-    (Associativity.none, [Operator_t('=>')]),
-    (Associativity.none, [Operator_t('=')]),
+    (Associativity.prefix, [Operator_t('@')]),
+    (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),
+    (Associativity.right,  [Operator_t('^')]),
+    (Associativity.left, [Juxtapose_t(None)]),
+    (Associativity.left, [Operator_t('*'), Operator_t('/'), Operator_t('%')]),
+    (Associativity.left, [Operator_t('+'), Operator_t('-')]),
+    (Associativity.left, [ShiftOperator_t('<<'), ShiftOperator_t('>>'), ShiftOperator_t('<<<'), ShiftOperator_t('>>>'), ShiftOperator_t('<<!'), ShiftOperator_t('!>>')]),
+    (Associativity.none,  [Comma_t(None)]),
+    (Associativity.left, [Operator_t('=?'), Operator_t('>?'), Operator_t('<?'), Operator_t('>=?'), Operator_t('<=?')]),
+    (Associativity.left, [Operator_t('and'), Operator_t('nand'), Operator_t('&')]),
+    (Associativity.left, [Operator_t('xor'), Operator_t('xnor')]),
+    (Associativity.left, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
+    (Associativity.right,  [Operator_t('=>')]), # () => () => () => 42
+    (Associativity.fail,  [Operator_t('=')]),
+    (Associativity.none,  [Operator_t('else')]),
 ])
 precedence_table: dict[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t, int|qint] = {}
+associativity_table: dict[int, Associativity] = {}
 for i, (assoc, group) in enumerate(operator_groups):
+
+    #mark precedence level i as the specified associativity
+    associativity_table[i] = assoc
+
+    #insert all ops in the row into the precedence table at precedence level i
     for op in group:
         if op not in precedence_table:
             precedence_table[op] = i
@@ -183,6 +191,7 @@ def operator_precedence(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> in
     or nor |
     =>
     = .= <op>= .<op>=  (e.g. += .+=)    //right-associative (but technically causes a type error since assignments can't be chained)
+    else
     (postfix) ;
     <seq> (i.e. space)
     [LOWEST]
@@ -203,10 +212,18 @@ def operator_precedence(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> in
     try:
         return precedence_table[op]
     except:
-        raise ValueError(f"ERROR: expected operator, got {op=}")
+        raise ValueError(f"ERROR: expected operator, got {op=}") from None
 
-def operator_associativity(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> Associativity:
-    raise NotImplementedError(f'operator associativity not implemented yet')
+def operator_associativity(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t|int) -> Associativity:
+    if not isinstance(op, int):
+        i = operator_precedence(op)
+        assert isinstance(i, int), f'Cannot determine associativity of operator ({op}) with multiple precedence levels ({i})'
+    else:
+        i = op
+    try:
+        return associativity_table[i]
+    except:
+        raise ValueError(f"Error: failed to determine associativity for operator {op}") from None
 
 
 #TODO: this isn't very well integrated into the type system...
@@ -260,8 +277,23 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope:Scope) -> tuple[Chain
         return Chain(tokens[:i]), tokens[i], Chain(tokens[i+1:])
 
     # handling when multiple ops have the same precedence, select based on associativity rules
-    pdb.set_trace()
-    ...
+    if isinstance(min_rank, qint):
+        assocs = {operator_associativity(i) for i in min_rank.values}
+        if len(assocs) > 1:
+            raise NotImplementedError(f'TODO: need to type check to deal with multiple/ambiguous operator associativities: {assocs}')
+        assoc, = assocs
+    else:
+        assoc = operator_associativity(min_rank)
+    
+    match assoc:
+        case Associativity.left: i = op_idxs[0]
+        case Associativity.right: i = op_idxs[-1]
+        case Associativity.prefix: i = op_idxs[0]
+        case Associativity.postfix: i = op_idxs[-1]
+        case Associativity.none: i = op_idxs[0] #default to left. handled later in parsing
+        case Associativity.fail: raise ValueError(f'Cannot handle multiple given operators in chain {tokens}, as lowest precedence operator is marked as un-associable.')
+    
+    return Chain(tokens[:i]), tokens[i], Chain(tokens[i+1:])
 
 # @cache
 def typeof(chain: list[Token], scope:Scope) -> Type|None: #this should be the same type system`` used in the interpreter!
@@ -393,6 +425,7 @@ def parse_single(token:Token, scope:Scope) -> AST:
         case RawString_t():     return String(token.to_str())
         case String_t():        return parse_string(token, scope)
         case Block_t():         return parse_block(token, scope)
+        case Flow_t():          return parse_flow(token, scope)
         
         case _:
             #TODO handle other types...
@@ -453,7 +486,6 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
                 raise ValueError(f'Unrecognized left-hand side for function literal: {left=}, {right=}')
 
         # a bunch of simple cases:
-        case Comma_t(): return Tuple(left, right)
         # case ShiftOperator_t(op='<<'):  return LeftShift(left, right)
         # case ShiftOperator_t(op='>>'):  return RightShift(left, right)
         # case ShiftOperator_t(op='<<<'): return LeftRotate(left, right)
@@ -466,6 +498,54 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
         case Operator_t(op='/'): return Div(left, right, None)
         case Operator_t(op='%'): return Mod(left, right, None)
         case Operator_t(op='^'): return Pow(left, right, None)
+
+        #comparison operators
+        case Operator_t(op='=?'): return Equal(left, right)
+        case Operator_t(op='>?'): return Greater(left, right)
+        case Operator_t(op='<?'): return Less(left, right)
+        case Operator_t(op='>=?'): return GreaterEqual(left, right)
+        case Operator_t(op='<=?'): return LessEqual(left, right)
+        # case Operator_t(op='in?'): return MemberIn(left, right)
+        # case Operator_t(op='is?'): return Is(left, right)
+        # case Operator_t(op='isnt?'): return Isnt(left, right)
+        # case Operator_t(op='<=>'): return ThreewayCompare(left, right)
+
+        # Boolean Operators
+
+        # Misc Operators
+        case Comma_t(): 
+            #TODO: combine left or right tuples into a single tuple
+            if isinstance(left, Tuple) and isinstance(right, Tuple):
+                return Tuple([*left.exprs, *right.exprs])
+            elif isinstance(left, Tuple):
+                return Tuple([*left.exprs, right])
+            elif isinstance(right, Tuple):
+                return Tuple([left, *right.exprs])
+            else:
+                return Tuple([left, right])
+        
+        case Operator_t(op='else'):
+            if isinstance(left, Flow) and isinstance(right, Flow):
+                #merge left+right as single flow
+                #return Flow([*left.branches, *right.branches])
+                pdb.set_trace()
+                ...
+            elif isinstance(left, Flow):
+                #append right to left
+                #return Flow([*left.branches, right])
+                pdb.set_trace()
+                ...
+            elif isinstance(right, Flow):
+                #prepend left to right
+                #return Flow([left, *right.branches])
+                pdb.set_trace()
+                ...
+            else:
+                #create a new flow out of the left and right
+                pdb.set_trace()
+                ...
+
+        
 
         case _:
             pdb.set_trace()
@@ -566,6 +646,13 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
             raise NotImplementedError(f'block parse not implemented for {block.left+block.right}, {type(inner)}')
 
 
+def parse_flow(flow:Flow_t, scope:Scope) -> If|Loop:
+    cond = parse_chain(flow.condition, scope)
+    clause = parse_chain(flow.clause, scope)
+    
+    pdb.set_trace()
+    ...
+
 
 
 def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
@@ -586,6 +673,7 @@ def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
 
     # post processing on the parsed AST 
     express_identifiers(ast)
+    tuples_to_arrays(ast)
     ensure_no_prototypes(ast)
     set_ast_scopes(ast, scope)
 
@@ -593,7 +681,7 @@ def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     
 
 
-def express_identifiers(root:AST) -> AST:
+def express_identifiers(root:AST) -> None:
     """
     Convert (in-place) any free floating Identifier AST nodes (PrototypeAST) to Call nodes
     """
@@ -604,6 +692,24 @@ def express_identifiers(root:AST) -> AST:
             ast.__dict__ = call.__dict__
             ast.__class__ = Call
 
+def tuples_to_arrays(root:AST)  -> None:
+    """Convert (in-place) any Tuple nodes (PrototypeAST) to Array nodes"""
+    #TODO: should be able to specify that the array is const...
+    for ast in full_traverse_ast(root):
+        if isinstance(ast, Tuple):
+            #in place convert Tuple to Array
+            arr = Array(ast.exprs)
+            ast.__dict__ = arr.__dict__
+            ast.__class__ = Array
+
+#TODO: if we make a third conversion function, make a meta conversion function that takes a lambda 
+# for how to make the new instance from the old one, and then does the in-place conversion
+# def in_place_type_conversion(root:AST, target:PyType[AST], converter: Function[[AST], AST]) -> None
+#     for ast in full_traverse_ast(root):
+#         if isinstance(ast, target):
+#             new = converter(ast)
+#             ast.__dict__ = new.__dict__
+#             ast.__class__ = target
 
 def ensure_no_prototypes(root:AST) -> None:
     """
@@ -655,9 +761,13 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
     if skip is not None: return
     
     match root:
-        case Block(exprs=list(exprs)):
+        case Block(exprs=list(exprs)) | Tuple(exprs=list(exprs)):
             for expr in exprs:
                 yield from full_traverse_ast(expr)
+
+        case Array(vals=list(vals)):
+            for val in vals:
+                yield from full_traverse_ast(val)
 
         case Call():
             #handle expr being called
@@ -762,7 +872,8 @@ printl'Hello {name}'
 a = 4(5)
 b = -5
 c = /4
-printl'a={a}, b={b}, c={c}'
+d = 1,2,3,4,5
+printl'a={a}, b={b}, c={c} d={d}'
 """
 
     tokens = tokenize(line)
