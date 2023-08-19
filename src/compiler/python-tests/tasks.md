@@ -1,7 +1,5 @@
 [tasks]
 - split repo into branches with C version, python version, and perhaps any other old versions. Current python work goes on main at top level
-- probably make identifier not a prototype, and instead anything that uses identifiers uses them instead of python strings
-    - e.g. Bind(Identifier, AST), Call(Identifier), etc.
 - rename .type property on AST classes to basetype or default type. Add a type function which does a runtime check of the type
     - really need to make a type matrix for representing results of all the operators on pairs of every combination of types
 - post tokanization steps:
@@ -10,9 +8,12 @@
         - create `class Flow_t()` for holding the groups
         - if <chain> <chain> (optional else <chain>)
         - loop <chain> <chain> (optional else <chain>)
-- parsing needs to be chain by chain, namely if a an expression binds a value to an identifier, later expressions should be able to get the type of that identifier!
-
-- Arrays should allow specifying new scope or no new scope
+    - also dewy.py needs to be modified to accomodate `Flow()`, containing sequence of `If()`/`Loop()`
+- handling scope while parsing: parsing needs to be chain by chain, namely if a an expression binds a value to an identifier, later expressions should be able to get the type of that identifier!
+- probably make identifier not a prototype, and instead anything that uses identifiers uses them instead of python strings
+    - e.g. Bind(Identifier, AST), Call(Identifier), etc.
+- Arrays should create a new scope for their contents
+- `else` should maybe be a binary operator that operates on flow clauses (if/loop/compound)
 
 - chainer functions:
     def bundle_conditionals(tokens:list[Token]):
