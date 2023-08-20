@@ -624,7 +624,7 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
     delims = block.left + block.right
     match delims, inner:
         #types returned as is
-        case '()'|'{}', String() | IString() | Call() | Function() | Identifier() | Number(): #TODO: more types
+        case '()'|'{}', String() | IString() | Call() | Function() | Identifier() | Number() | BinOp() | UnaryOp(): #TODO: more types
             return Block([inner], newscope=delims=='{}')
         case '()'|'{}', Void():
             return inner
@@ -860,10 +860,16 @@ def test_many_lines():
     Parse each line of syntax3.dewy one at a time for testing
     """
     #load the syntax3 file and split the lines
-    with open('../../../examples/syntax3.dewy') as f:
+    with open('../../../examples/syntax3.dewyl') as f:
         lines = f.read().splitlines()
 
-    
+
+    #set up a scope with declarations for all of the variables used in the example file    
+    root = Scope.default()
+    root.let('x', Number.type)
+    root.let('y', Number.type)
+    root.let('z', Number.type)
+
     for line in lines:
         tokens = tokenize(line)
         post_process(tokens)
@@ -877,9 +883,11 @@ def test_many_lines():
         print(tokens)
 
         ast = top_level_parse(tokens)
-        root = Scope.default()
-        res = ast.eval(root)
-        if res: print(res)
+        print(ast)
+
+        #TODO: maybe later we can run the file. potentially declare all the values used at the top?
+        # res = ast.eval(root)
+        # if res: print(res)
 
 
 def test_hello():
@@ -927,9 +935,9 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         test_file(sys.argv[1])
     else:
-        # test2()
         # test_hello()
-        test_example_progs()
+        # test_example_progs()
+        test_many_lines()
 
     # print("Usage: `python parser.py [path/to/file.dewy>]`")
 
