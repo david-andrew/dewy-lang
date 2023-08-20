@@ -989,52 +989,70 @@ class Bool(AST):
     def __repr__(self):
         return f'Bool({repr(self.val)})'
 
-class If(AST):
-    def __init__(self, clauses:list[tuple[AST, AST]]):
-        self.clauses = clauses
+class Flowable(AST):
+    def was_entered(self) -> bool:
+        """Determine if the flowable branch was entered. Should reset before performing calls to flow and checking this."""
+        raise NotImplementedError(f'flowables must implement `was_entered()`. No implementation found for {self.__class__}')
+
+    def reset_was_entered(self) -> None:
+        """reset the state of was_entered, in preparation for executing branches in a flow"""
+        raise NotADirectoryError(f'flowables must implement `reset_was_entered()`. No implementation found for {self.__class__}')
+
+class If(Flowable):
+    def __init__(self, condition:AST, branch:AST):
+        self.condition = condition
+        self.branch = branch
+        self._was_entered: bool = False
+    
+    def was_entered(self) -> bool:
+        return self._was_entered
+    
+    def reset_was_entered(self) -> None:
+        self._was_entered = False
     
     def eval(self, scope:Scope=None):
-        # TODO: determine if scope should be shared, or a new scope should be created per clause
-        child = Scope(scope) #all clauses share a common anonymous scope
-        for cond, expr in self.clauses:
-            # child = Scope(scope) #each clause gets its own anonymous scope
-            if cond.eval(child).topy(child):
-                return expr.eval(child)
+        child = Scope(scope) #if clause gets an anonymous scope
+        if self.condition.eval(child).topy(child):
+            self._was_entered = True
+            return self.branch.eval(child)
 
     def treestr(self, indent=0):
         s = tab * indent + 'If\n'
-        for cond, expr in self.clauses:
-            s += tab * (indent + 1) + 'Clause\n'
-            s += cond.treestr(indent + 2) + '\n'
-            s += expr.treestr(indent + 2) + '\n'
+        s += self.condition.treestr(indent + 1) + '\n'
+        s += self.branch.treestr(indent + 1) + '\n'
         return s
 
     @insert_tabs
     def __str__(self):
-        s = ''
-        for i, (cond, expr) in enumerate(self.clauses):
-            if i == 0:
-                s += f'if {cond} {expr}'
-            else:
-                s += f' else if {cond} {expr}'
-        return s
-
+        return f'if {self.condition} {self.branch}'
+        
     def __repr__(self):
-        return f'If({repr(self.clauses)})'
+        return f'If({repr(self.condition)}, {repr(self.branch)})'
 
 #TODO: maybe loop can work the say way as If, taking in a list of clauses?
-class Loop(AST):
+class Loop(Flowable):
     def __init__(self, cond:AST, body:AST):
         self.cond = cond
         self.body = body
+        self._was_entered: bool = False
+    
+    def was_entered(self) -> bool:
+        return self._was_entered
+    
+    def reset_was_entered(self) -> None:
+        self._was_entered = False
 
     def eval(self, scope:Scope=None):
         child = Scope(scope)
         while self.cond.eval(child).topy(child):
+            self._was_entered = True
             self.body.eval(child)
         #TODO: handle capturing values from a loop
         #TODO: handle break and continue
         #TODO: also eventually handle return (problem for other ASTs as well)
+
+        #for now just don't let loops return anything
+        return undefined
 
     def treestr(self, indent=0):
         return f'{tab * indent}Loop\n{self.cond.treestr(indent + 1)}\n{self.body.treestr(indent + 1)}'
@@ -1045,6 +1063,65 @@ class Loop(AST):
 
     def __repr__(self):
         return f'Loop({repr(self.cond)}, {repr(self.body)})'
+
+class Flow(AST):
+    def __init__(self, branches:list[Flowable|AST]):
+        
+        #separate out the possible last branch which need not be a Flowable()
+        if not isinstance(branches[-1], Flowable):
+            branches, default = branches[:-1], branches[-1]
+        else:
+            branches, default = branches, None
+        
+        #verify all branches (not necessarily including last) are Flowable
+        assert all(isinstance(branch, Flowable) for branch in branches), f'All branches in a flow (excluding the last one) must inherit `Flowable()`. Got {branches=}'
+        
+        self.branches: list[Flowable] = branches
+        self.default: AST|None = default
+        
+    
+    def eval(self, scope:Scope=None):
+        shared = Scope(scope) #for now, all clauses share a common anonymous scope
+
+        #reset was entered for this execution of the flow
+        for expr in self.branches:
+            expr.reset_was_entered()
+
+        #execute branches in the flow until one is entered
+        for expr in self.branches:
+            res = expr.eval(shared)
+            if expr.was_entered():
+                return res
+            
+        #execute any default branch if it exists
+        if self.default is not None:
+            return self.default.eval(shared)
+        
+        return undefined
+
+    def treestr(self, indent=0):
+        s = tab * indent + 'Flow\n'
+        for expr in self.branches:
+            s += expr.treestr(indent + 1) + '\n'
+        if self.default is not None:
+            s += self.default.treestr(indent + 1) + '\n'
+        return s
+
+    @insert_tabs
+    def __str__(self):
+        s = ''
+        for i, expr in enumerate(self.branches):
+            if i == 0:
+                s += f'{expr}'
+            else:
+                s += f' else {expr}'
+        if self.default is not None:
+            s += f' else {self.default}'
+        return s
+
+    def __repr__(self):
+        return f'Flow({repr(self.branches)})'
+
 
 #DEBUG example
 """
@@ -1439,15 +1516,12 @@ def if_else(root:Scope) -> AST:
     return Block([
         Call('print', Array([String("What's your name? ")])),
         Bind('name', Call('readl')),
-        If([
-            (
+        Flow([
+            If(
                 Equal(Call('name'), String('Alice')),
                 Call('printl', Array([String('Hello Alice!')]))
             ),
-            (
-                Bool(True),
-                Call('printl', Array([String('Hello Stranger!')])),
-            )
+            Call('printl', Array([String('Hello Stranger!')])),
         ])
     ])
 
@@ -1465,19 +1539,16 @@ def if_else_if(root:Scope) -> AST:
     return Block([
         Call('print', Array([String("What's your name? ")])),
         Bind('name', Call('readl')),
-        If([
-            (
+        Flow([
+            If(
                 Equal(Call('name'), String('Alice')),
                 Call('printl', Array([String('Hello Alice!')]))
             ),
-            (
+            If(
                 Equal(Call('name'), String('Bob')),
                 Call('printl', Array([String('Hello Bob!')]))
             ),
-            (
-                Bool(True),
-                Call('printl', Array([String('Hello Stranger!')])),
-            )
+            Call('printl', Array([String('Hello Stranger!')])),
         ])
     ])
 
