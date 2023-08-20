@@ -70,3 +70,12 @@ TBD if this can cause parse ambiguity
 - `i`, `j`, `k` //should have a warning when trying to use them with numbers if they've been redefined
 - all language-defined units, e.g. `kg`, `m`, `s`, `N`, `Pa`, etc.
     - for user defined constants, it will be up to the user if they want them to be modifiable, shadowable, or permanent
+
+
+## The branches of chained flow control (if/loop) share scope
+this mainly means that the conditions of each of the branches can share variables
+
+```
+if (a=10 a>?b) {...}
+else if a>?c {...} //a is the same a created in first clause
+```
