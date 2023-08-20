@@ -1,2 +1,2 @@
 compiler:
-	cd src/compiler && $(MAKE)
+	cd src && $(MAKE)
