@@ -999,9 +999,9 @@ class Flowable(AST):
         raise NotADirectoryError(f'flowables must implement `reset_was_entered()`. No implementation found for {self.__class__}')
 
 class If(Flowable):
-    def __init__(self, condition:AST, branch:AST):
-        self.condition = condition
-        self.branch = branch
+    def __init__(self, cond:AST, body:AST):
+        self.cond = cond
+        self.body = body
         self._was_entered: bool = False
     
     def was_entered(self) -> bool:
@@ -1012,22 +1012,22 @@ class If(Flowable):
     
     def eval(self, scope:Scope=None):
         child = Scope(scope) #if clause gets an anonymous scope
-        if self.condition.eval(child).topy(child):
+        if self.cond.eval(child).topy(child):
             self._was_entered = True
-            return self.branch.eval(child)
+            return self.body.eval(child)
 
     def treestr(self, indent=0):
         s = tab * indent + 'If\n'
-        s += self.condition.treestr(indent + 1) + '\n'
-        s += self.branch.treestr(indent + 1) + '\n'
+        s += self.cond.treestr(indent + 1) + '\n'
+        s += self.body.treestr(indent + 1) + '\n'
         return s
 
     @insert_tabs
     def __str__(self):
-        return f'if {self.condition} {self.branch}'
+        return f'if {self.cond} {self.body}'
         
     def __repr__(self):
-        return f'If({repr(self.condition)}, {repr(self.branch)})'
+        return f'If({repr(self.cond)}, {repr(self.body)})'
 
 #TODO: maybe loop can work the say way as If, taking in a list of clauses?
 class Loop(Flowable):

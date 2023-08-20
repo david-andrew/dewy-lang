@@ -29,6 +29,7 @@ from dewy import (
     UnaryOp,
     Neg, Inv,
     Bool,
+    Flow,
     If,
     Loop,
     In,
@@ -439,6 +440,10 @@ def parse_single(token:Token, scope:Scope) -> AST:
 
 def parse_chain(chain:Chain[Token], scope:Scope) -> AST:
     assert isinstance(chain, Chain), f"ERROR: parse chain may only be called on explicitly known Chain[Token], got {type(chain)}"
+    
+    if len(chain) == 0: return void
+    if len(chain) == 1: return parse_single(chain[0], scope)
+    
     left, op, right = split_by_lowest_precedence(chain, scope)
     left, right = parse(left, scope), parse(right, scope)
 
@@ -527,24 +532,16 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
         case Operator_t(op='else'):
             if isinstance(left, Flow) and isinstance(right, Flow):
                 #merge left+right as single flow
-                #return Flow([*left.branches, *right.branches])
-                pdb.set_trace()
-                ...
+                return Flow([*left.branches, *right.branches])
             elif isinstance(left, Flow):
                 #append right to left
-                #return Flow([*left.branches, right])
-                pdb.set_trace()
-                ...
+                return Flow([*left.branches, right])
             elif isinstance(right, Flow):
                 #prepend left to right
-                #return Flow([left, *right.branches])
-                pdb.set_trace()
-                ...
+                return Flow([left, *right.branches])
             else:
                 #create a new flow out of the left and right
-                pdb.set_trace()
-                ...
-
+                return Flow([left, right])
         
 
         case _:
@@ -650,6 +647,13 @@ def parse_flow(flow:Flow_t, scope:Scope) -> If|Loop:
     cond = parse_chain(flow.condition, scope)
     clause = parse_chain(flow.clause, scope)
     
+    match flow.keyword:
+        case Keyword_t(src='if'): return If(cond, clause)
+        case Keyword_t(src='loop'): return Loop(cond, clause)
+        case _:
+            pdb.set_trace()
+            ...
+            raise NotImplementedError('TODO: other flow keywords, namely lazy')
     pdb.set_trace()
     ...
 
@@ -802,6 +806,21 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
             yield from full_traverse_ast(root.child)
 
 
+        case Flow():
+            for expr in root.branches:
+                yield from full_traverse_ast(expr)
+            if root.default is not None:
+                yield from full_traverse_ast(root.default)
+
+        case If():
+            yield from full_traverse_ast(root.cond)
+            yield from full_traverse_ast(root.body)
+
+        case Loop():
+            yield from full_traverse_ast(root.cond)
+            yield from full_traverse_ast(root.body)
+
+
         # do nothing cases
         case String(): ...
         case Identifier(): ...
@@ -909,8 +928,8 @@ if __name__ == "__main__":
         test_file(sys.argv[1])
     else:
         # test2()
-        test_hello()
-        # test_example_progs()
+        # test_hello()
+        test_example_progs()
 
     # print("Usage: `python parser.py [path/to/file.dewy>]`")
 

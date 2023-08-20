@@ -49,6 +49,28 @@ TODO:
 # it should literally just be a sequence of atoms and operators
     
 
+#TODO: replace with 3.12 syntax when released: class Chain[T](list[T]): ...
+from typing import TypeVar
+T = TypeVar('T')
+class Chain(list[T]):
+    """class for explicitly annotating that a token list is a single chain"""
+
+
+# Later Token classes
+
+class Flow_t(Token):
+    def __init__(self, keyword:Keyword_t, condition:Chain[Token], clause:Chain[Token]):
+        self.keyword = keyword
+        self.condition = condition
+        self.clause = clause
+    def __repr__(self) -> str:
+        return f"<Flow_t: {self.keyword}: {self.condition} {self.clause}"
+
+class Do_t(Token):...
+class Return_t(Token):...
+class Express_t(Token):...
+class Declare_t(Token):...
+
 
 atom_tokens = (
     Identifier_t,
@@ -60,6 +82,7 @@ atom_tokens = (
     TypeParam_t,
     Hashtag_t,
     DotDot_t,
+    Flow_t,
 )
 
 
@@ -189,8 +212,8 @@ def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
 
     match t:
         case Keyword_t(src='if'|'loop'|'lazy'):
-            cond, tokens = get_next_chain(tokens)
-            clause, tokens = get_next_chain(tokens)
+            cond, tokens = get_next_chain(tokens, binop_blacklist={Operator_t('else')})
+            clause, tokens = get_next_chain(tokens, binop_blacklist={Operator_t('else')})
             return Flow_t(t, cond, clause), tokens
         case Keyword_t(src='do'):
             clause, tokens = get_next_chain(tokens)
@@ -217,31 +240,8 @@ def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
     # (break | continue) #hashtag? //note the hashtag should be an entire chain if present
     # (let | const) #chain
 
-#TODO: replace with 3.12 syntax when released: class Chain[T](list[T]): ...
-from typing import TypeVar
-T = TypeVar('T')
-class Chain(list[T]):
-    """class for explicitly annotating that a token list is a single chain"""
 
-
-# Later Token classes
-
-class Flow_t(Token):
-    def __init__(self, keyword:Keyword_t, condition:Chain[Token], clause:Chain[Token]):
-        self.keyword = keyword
-        self.condition = condition
-        self.clause = clause
-    def __repr__(self) -> str:
-        return f"<Flow_t: {self.keyword}: {self.condition} {self.clause}"
-
-class Do_t(Token):...
-class Return_t(Token):...
-class Express_t(Token):...
-class Declare_t(Token):...
-
-
-
-def get_next_chain(tokens:list[Token]) -> tuple[Chain[Token], list[Token]]:
+def get_next_chain(tokens:list[Token], binop_blacklist:set[Token]=None) -> tuple[Chain[Token], list[Token]]:
     """
     grab the next single expression chain of tokens from the given list of tokens
 
@@ -257,19 +257,17 @@ def get_next_chain(tokens:list[Token]) -> tuple[Chain[Token], list[Token]]:
     Returns:
         next, rest (list[Token], list[Token]): the next chain of tokens, and the remaining tokens
     """
+    if binop_blacklist is None: binop_blacklist = set()
+
     chain = []
 
     chunk, tokens = _get_next_chunk(tokens)
     chain.extend(chunk)
 
-    while len(tokens) > 0:
-        if is_binop(tokens[0]):
-            chain.append(tokens.pop(0))
-
-            chunk, tokens = _get_next_chunk(tokens)
-            chain.extend(chunk)
-        else:
-            break
+    while len(tokens) > 0 and is_binop(tokens[0]) and tokens[0] not in binop_blacklist:
+        chain.append(tokens.pop(0))
+        chunk, tokens = _get_next_chunk(tokens)
+        chain.extend(chunk)
 
     if len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op == ';':
         chain.append(tokens.pop(0))
