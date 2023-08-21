@@ -1,0 +1,24 @@
+//ambiguous example grammar for numeric expressions, with disambiguation rules
+
+
+#expr = #atom > #pow > #jux > #mul | #div | #mod > #add | #sub;
+
+
+#atom = #id | #num | #group;
+#id = [A-Za-z_] [A-Za-z0-9]* / [A-Za-z0-9];
+#num = [0-9]+ / [0-9];
+#group = '(' #w* #expr #w* ')';
+
+#pow = (#expr - #pow) #w* '^' #w* #expr;
+
+#jux = #atom #s* #atom;
+
+#mul = #expr #w* '*' #w* (#expr - (#mul | #div | #mod));
+#div = #expr #w* '/' #w* (#expr - (#mul | #div | #mod));
+#mod = #expr #w* '%' #w* (#expr - (#mul | #div | #mod));
+
+#add = #expr #w* '+' #w* (#expr - (#add | #sub));
+#sub = #expr #w* '-' #w* (#expr - (#add | #sub));
+
+#w = [\n\x20];
+#s = ' ';

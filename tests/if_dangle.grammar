@@ -1,0 +1,11 @@
+//example of disambiguating the dangling else problem (as it will appear in dewy)
+
+#expr = #if_expr | #bool_expr | #id_expr;
+#w = [\x20\n];
+#if_expr = 
+      'if' #w* #expr #w* (#expr - #if_expr) #w* 'else' #w* #expr
+    | 'if' #w* #expr #w* #if_expr #w* 'else' #w* #if_expr
+    | 'if' #w* #expr #w* #expr;
+#bool_expr = 'true' | 'false';
+#reserved = #bool_expr | 'if' | 'else';
+#id_expr = [A-Za-z_] [0-9A-Za-z_]* - #reserved;

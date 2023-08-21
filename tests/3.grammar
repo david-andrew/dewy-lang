@@ -1,0 +1,24 @@
+//example grammar for numeric expressions 
+//based on https://cs.stackexchange.com/a/47904
+
+//addition/subtraction (left associative)
+#S = #S #w* '+' #w* #A | #S #w* '-' #w* #A | #A;
+
+//multiplication/division (left associative)
+#A = #A #w* '*' #w* #E | #A #w* '/' #w* #E | #E;
+
+//exponentiation (right associative)
+#E = #T #w* '^' #w* #E | #T;
+
+//terms (numbers/identifiers/groups)
+//technically these are ambiguous without a longest match filter, but this particular grammer works out,
+//since the rnglr algorithms can do actions in parallel, only the longest match will remain at the end.
+#T = #N | #I | #G;
+#N = [0-9]+;
+#I = [A-Za-z_] [A-Za-z0-9!@%&_?]*;
+#G = '(' #w* #S #w* ')';
+
+//whitespace
+#w = [\x20\n];
+
+#start = (#w* #S)+ #w*;

@@ -1,0 +1,87 @@
+#s = ' ';           //space
+#w = '\n' | ' ';    //newline or space
+
+#line_comment = '/' '/' (ξ - '\n')* '\n';
+#block_comment = '/*' ξ* '*/';  //needs reject of end delimiter #block_comment = '/*' (ξ* - '*/') '*/';
+
+
+#ifndef = '#ifndef' #s+ #id;
+//#define = '#define' #s+ #id (#s+ ((ξ - '\n') | '\\\n')*)? ('\n' | #$);
+#endif = '#endif';
+#id = [a-zA-Z_] [a-zA-Z0-9_]*; //needs to reject id chars following #id = [a-zA-Z_] [a-zA-Z0-9_]* / [a-zA-Z0-9_];
+
+#path = #id ('/' #id)* ('.' #id)?;
+#include = '#include' #s+ ('"' #path '"' | '<' #path '>');
+
+#type = #id (#w* '*')*;
+#func_decl = #type #w* #id '(' #w* (#type #w* #id? #w* (',' #w* #type #w* #id? #w*)*)? ')' #w* (#block | ';');
+#var_decl = #type #w* #id #w* ('=' #w* #expr #w*)? ';';
+
+
+
+//operators/expressions
+#group = '(' #w* #expr #w* ')';
+
+#suffix_inc = #expr #w* '++';
+#suffix_dec = #expr #w* '--';
+#call = #id #w* '(' #w* (#expr #w* (',' #w* #expr)*)? ')';
+#arr_access = #expr #w* '[' #w* #expr #w* ']';
+#member_access = #expr #w* '.' #w* #id;
+#ref_access = #expr #w* '->' #w* #id;
+
+#prefix_inc = '++' #w* #expr;
+#prefix_dec = '--' #w* #expr;
+#unary_plus = '+' #w* #expr;
+#unary_minus = '-' #w* #expr;
+#logic_not = '!' #w* #expr;
+#bitwise_not = '~' #w* #expr;
+#cast = '(' #w* #type #w* ')' #w* #expr;
+#deref = '*' #w* #expr;
+#addr = '&' #w* #expr;
+
+#mult = #expr #w* '*' #w* #expr;
+#div = #expr #w* '/' #w* #expr;
+#mod = #expr #w* '%' #w* #expr;
+
+#sum = #expr #w* '+' #w* #expr;
+#diff = #expr #w* '-' #w* #expr;
+
+#lshift = #expr #w* '<<' #w* #expr;
+#rshift = #expr #w* '>>' #w* #expr;
+
+#greater = #expr #w* '>' #w* #expr;
+#greater_eq = #expr #w* '>=' #w* #expr;
+#less = #expr #w* '<' #w* #expr;
+#less_eq = #expr #w* '<=' #w* #expr;
+
+#equals = #expr #w* '==' #w* #expr;
+#not_eq = #expr #w* '!=' #w* #expr;
+
+#bit_and = #expr #w* '&' #w* #expr;
+
+#bit_xor = #expr #w* '^' #w* #expr;
+
+#bit_or = #expr #w* '|' #w* #expr;
+
+#and = #expr #w* '&&' #w* #expr;
+
+#or = #expr #w* '||' #w* #expr;
+
+#ternary = #expr #w* '?' #w* #expr #w* ':' #w* #expr;
+
+
+#assign_left = #id | #member_access | #ref_access | #arr_access;
+#assign = #assign_left #w* '=' #w* #expr #w* ';';
+#sum_assign = #assign_left #w* '+=' #w* #expr #w* ';';
+#diff_assign = #assign_left #w* '-=' #w* #expr #w* ';';
+#mul_assign = #assign_left #w* '*=' #w* #expr #w* ';';
+#div_assign = #assign_left #w* '/=' #w* #expr #w* ';';
+#mod_assign = #assign_left #w* '%=' #w* #expr #w* ';';
+#lshift_assign = #assign_left #w* '<<=' #w* #expr #w* ';';
+#rshift_assign = #assign_left #w* '>>=' #w* #expr #w* ';';
+#bit_and_assign = #assign_left #w* '&=' #w* #expr #w* ';';
+#bit_xor_assign = #assign_left #w* '^=' #w* #expr #w* ';';
+#bit_or_assign = #assign_left #w* '|=' #w* #expr #w* ';';
+
+
+//compound literal (type){members} | (type){expr, expr, ...}
