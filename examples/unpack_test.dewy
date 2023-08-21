@@ -1,0 +1,17 @@
+ s = ['Hello' ['World' '!'] 5 10]
+printl's={s}'
+a, b, c, d = s
+printl'a={a} b={b} c={c} d={d}'
+a, ...b = s
+printl'a={a} b={b}'
+...a, b = s
+printl'a={a} b={b}'
+a, [b, c], ...d = s
+printl'a={a} b={b} c={c} d={d}'
+
+//error tests
+//a, b, c, d, e = s         //error: not enough values to unpack
+//a, b = s                  //error: too many values to unpack
+//a, ...b, c, d, e, f = s   //error: too many values to unpack
+
+//TBD how unpack would handle `a, ...b, c, d, e = s`. Probably b would be empty?
