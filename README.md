@@ -1,53 +1,52 @@
 # The Dewy Programming Language
-Dewy is a general purpose programming language with a focus on engineering. 
+Dewy is a general purpose programming language with a focus on engineering.
 
-For now, the main goal is to make my ideal language.
+**Still very work in progress**
+
+## Installation
+
+### Dependancies
+For now, the only dependancy is **Python >= 3.11** with an optional dependancy on `rich` for rich printing/errors (`pip install rich`)
+
+Later dependancies will probably include `clang`/`llvm`
+
+### Automatic
+
+```
+python install.py
+```
+
+This should work on most linux distros with most common shells (`sh`, `bash`, `zsh`, `fish`). This script just attempts to add the lines below from the `Manual` section to your `.profile` or equivalent file.
+
+You will need to logout and log back in for changes to take effect.
+
+### Manual
+1. Add the following to your distribution/shell's corresponding `.profile` file: 
+
+    ```
+    if [ -d "/home/user/path/to/dewy-compiler-compiler" ]; then
+      PATH="/home/user/path/to/dewy-compiler-compiler:$PATH"
+    fi
+    ```
+
+    **Note: Be sure to adjust the command to match the current absolute path of this repo**
+
+1. Then logout, and log back in for changes to take effect
+
 
 ## Try it out
-Thus far, only the compiler-compiler is even runnable. To run the compiler compiler
+Note that the language parser is largely incomplete, and there are very many different syntaxes that will get trapped at breakpoints marking TODO, or cause exceptions for `NotImplementedError`
 
-    $ cd src/compiler
-    $ make dewy #alternatively `make debug`
-    $ ./dewy path/to/grammar/file path/to/source/file
+If you completed the install steps, you can simply run:
+```
+dewy my_script.dewy
+```
 
-The project includes several test grammar/source file pairs in DewySpeak/tests/. e.g. an simple expression grammar/source could be run like so
+otherwise you can run the python script directly
+```
+cd src/compiler
+python compiler.py ../path/to/my_script.dewy
+```
 
-    $ ./dewy ../../tests/grammar8.dewy ../../tests/source8.dewy
-
-Note that the compiler-compiler is still in development, and can/will crash on incorrect grammar specifications (better error handling coming soon™), though source files shouldn't be able to cause crashes.
-
-To run source text directly, you can use here strings like so
-
-    $ ./dewy /path/to/grammar/file /dev/stdin <<< 'source text'
-
-note that this will always add a newline to the end of the source text
-
-## Language Documentation
-Currently incomplete documentation is available at: https://david-andrew.github.io/dewy-compiler-compiler/
-
-## Language Features
-* first class physical units (e.g. length, time, mass, temperature, etc.)
-* first class functions (as well as many concepts borrowed from functional programming)
-    * partial function evalutation
-    * unified lambda vs regular function declaration
-* simple, easty-to-read, elegant syntax
-* optional type system with type inference
-* rust-style memory safety gurantees
-    * suitable for realtime applications
-* powerful meta-programming capabilities 
-    * ability to arbitrily add or modify language syntax
-    * compiler-compiler uses meta-programming to add all features of the language (meaning compiler implementations are extremely simple/lightweight)
-* (planned) extremely fast
-* (planned) batteries included, i.e. common data structures, algorithms, libraries, etc. (will be) included
-* guranteed syntax stability, backwards compatibility, etc.
-    * Once version 1 is released, If it runs on some version, it will run on all future versions
-* (planned) simple unified package management system akin to ckan
-* (probably) lots of other things...
-
-## Language Examples
-An out of date example of the language can be found in [language_benchmark.dewy](resources/language_ideas/example_programs/language_benchmark.dewy)
-
-TODO->write better examples.
-
-## Trello Project
-For more information about the current state of the project, see the DewySpeak Trello: https://trello.com/b/YYsedENy/dewyspeak
+## Documentation
+Currently out of date documentation is available at: https://david-andrew.github.io/dewy-compiler-compiler/
