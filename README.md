@@ -59,7 +59,7 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | hello_name.dewy           |    [✓]   |
 | anonymous_func.dewy       |    [✓]   |
 | if_else.dewy              |    [✓]   |
-| if_else_if.dewy           |   [✓/✗]  |
+| if_else_if.dewy           |    [✓]   |
 | loop_in_iter.dewy         |    [✗]   |
 | loop_iter_manual.dewy     |    [✗]   |
 | nested_loop.dewy          |    [✗]   |

@@ -536,13 +536,17 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
         case Operator_t(op='else'):
             if isinstance(left, Flow) and isinstance(right, Flow):
                 #merge left+right as single flow
-                return Flow([*left.branches, *right.branches])
+                assert left.default is None, f'cannot merge left flow with default case. Got {left=}, {right=}'
+                default = [right.default] if right.default else []
+                return Flow([*left.branches, *right.branches, *default])
             elif isinstance(left, Flow):
                 #append right to left
+                assert left.default is None, f'cannot merge left flow with default case. Got {left=}, {right=}'
                 return Flow([*left.branches, right])
             elif isinstance(right, Flow):
                 #prepend left to right
-                return Flow([left, *right.branches])
+                default = [right.default] if right.default else []
+                return Flow([left, *right.branches, *default])
             else:
                 #create a new flow out of the left and right
                 return Flow([left, right])
