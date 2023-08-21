@@ -4,7 +4,7 @@ from typing import Callable
 def python_interpreter(path:str, args:list[str]):
     from tokenizer import tokenize
     from postok import post_process
-    from parser import top_level_parse
+    from parser import top_level_parse # type: ignore[reportShadowedImports]
     from dewy import Scope
 
     with open(path) as f:
