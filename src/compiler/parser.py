@@ -291,11 +291,11 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope:Scope) -> tuple[Chain
         assoc = operator_associativity(min_rank)
     
     match assoc:
-        case Associativity.left: i = op_idxs[0]
-        case Associativity.right: i = op_idxs[-1]
+        case Associativity.left: i = op_idxs[-1]
+        case Associativity.right: i = op_idxs[0]
         case Associativity.prefix: i = op_idxs[0]
         case Associativity.postfix: i = op_idxs[-1]
-        case Associativity.none: i = op_idxs[0] #default to left. handled later in parsing
+        case Associativity.none: i = op_idxs[-1] #default to left. handled later in parsing
         case Associativity.fail: raise ValueError(f'Cannot handle multiple given operators in chain {tokens}, as lowest precedence operator is marked as un-associable.')
     
     return Chain(tokens[:i]), tokens[i], Chain(tokens[i+1:])
