@@ -76,7 +76,11 @@ from dataclasses import dataclass
 from typing import Generator
 from itertools import groupby, chain as iterchain
 from enum import Enum, auto
-from rich import print, traceback; traceback.install(show_locals=True)
+
+try:
+    from rich import print, traceback; traceback.install(show_locals=True)
+except:
+    print('rich unavailable for import. using built-in printing')
 
 import pdb
 
@@ -860,7 +864,7 @@ def test_many_lines():
     Parse each line of syntax3.dewy one at a time for testing
     """
     #load the syntax3 file and split the lines
-    with open('../../../examples/syntax3.dewyl') as f:
+    with open('../../examples/syntax3.dewyl') as f:
         lines = f.read().splitlines()
 
 
