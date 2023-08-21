@@ -36,8 +36,22 @@ def main():
 
 # TODO: import these from somewhere more legit
 def python_interpreter(path:str, args:list[str]):
-    pdb.set_trace()
-    ...
+    from tokenizer import tokenize
+    from postok import post_process
+    from parser import top_level_parse
+    from dewy import Scope
+
+    with open(path) as f:
+        src = f.read()
+    
+    tokens = tokenize(src)
+    post_process(tokens)
+
+    root = Scope.default()
+    ast = top_level_parse(tokens, root)
+    res = ast.eval(root)
+    if res: print(res)
+
 
 def llvm_compiler(path:str, args:list[str]):
     raise NotImplementedError('LLVM backend is not yet supported')
