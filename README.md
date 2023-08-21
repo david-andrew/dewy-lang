@@ -48,5 +48,34 @@ cd src/compiler
 python compiler.py ../path/to/my_script.dewy
 ```
 
+### Examples
+Several example programs are available in [examples/](examples/). Here is a breakdown of which ones work with the current progress:
+
+| Filename                  |  status  |
+|---------------------------|----------|
+| hello.dewy                |    [✓]   |
+| hello_func.dewy           |    [✓]   |
+| hello_loop.dewy           |    [✓]   |
+| hello_name.dewy           |    [✓]   |
+| anonymous_func.dewy       |    [✓]   |
+| if_else.dewy              |    [✓]   |
+| if_else_if.dewy           |   [✓/✗]  |
+| loop_in_iter.dewy         |    [✗]   |
+| loop_iter_manual.dewy     |    [✗]   |
+| nested_loop.dewy          |    [✗]   |
+| range_iter_test.dewy      |    [✗]   |
+| block_printing.dewy       |    [✗]   |
+| unpack_test.dewy          |    [✗]   |
+| rule110.dewy              |    [✗]   |
+| dewy_syntax_examples.dewy |    [✗]   |
+| fast_inverse_sqrt.dewy    |    [✗]   |
+| fizzbuzz0.dewy            |    [✗]   |
+| fizzbuzz1.dewy            |    [✗]   |
+| syntax.dewy               |    [✗]   |
+| tokenizer.dewy            |    [✗]   |
+
+
+
+
 ## Documentation
 Currently out of date documentation is available at: https://david-andrew.github.io/dewy-compiler-compiler/
