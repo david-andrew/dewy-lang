@@ -11,3 +11,13 @@
     - e.g. Bind(Identifier, AST), Call(Identifier), etc.
 - Arrays should create a new scope for their contents
 - some sort of process to freeze all lists after chaining so that they can be cached
+- handling whitespace in matrix literals. As is, all whitespace is removed, but we need it to be able to parse 2D matrices correctly. e.g.:
+    
+    ```
+    mat = [
+        1 2 3
+        4 5 6
+        7 8 9
+    ]
+    ```    
+- also handling `;` for higher dimensional tensor literals (see julia syntax for example). Perhaps `;` wraps whatever expression it attaches to in something like `Colonize(expr)`, and then in most cases, that evaluates to `void`, but inside of an array, the array replaces `Colonize()` with the inner expression, and counts the number of `Colonize()` layers for determining how many dimensions the next line is offset by
