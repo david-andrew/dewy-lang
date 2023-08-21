@@ -1,9 +1,7 @@
-#llvm backend or interpreter
+# llvm backend or interpreter
+# all backends either compile+run the code or just run it directly
 
-from argparse import ArgumentParser
-
-
-
+from argparse import ArgumentParser, REMAINDER
 
 import pdb
 
@@ -19,35 +17,35 @@ def main():
     group.add_argument('-c', action='store_true', help='Run in compiler mode')
     group.add_argument('--backend', type=str, help=f'Specify a specific backend to compiler/interpret the program with. Backends include: {[*backend_map.keys()]}.')
 
+    arg_parser.add_argument('args', nargs=REMAINDER, help='Arguments after the file are passed directly to program')
+
     args = arg_parser.parse_args()
 
-    if args.i:
-        python_interpreter(args.file)
-    elif args.c:
-        llvm_compiler(args.file)
+    if args.i: backend = python_interpreter
+    elif args.c: backend = llvm_compiler
     elif args.backend:
         try:
             backend = backend_map[args.backend.lower()]
         except:
             raise ValueError(f'Unknown backend "{args.backend}"')
-        backend(args.file)
-    else:
-        #current default is python interpreter
-        python_interpreter(args.file)
+    else: backend = python_interpreter #current default is python interpreter
+    
+    # run with the selected backend
+    backend(args.file, args.args)
 
 
-# TODO: import these from somewhere?
-def python_interpreter(path:str):
+# TODO: import these from somewhere more legit
+def python_interpreter(path:str, args:list[str]):
     pdb.set_trace()
     ...
 
-def llvm_compiler(path:str):
+def llvm_compiler(path:str, args:list[str]):
     raise NotImplementedError('LLVM backend is not yet supported')
 
-def c_compiler(path:str):
+def c_compiler(path:str, forwarded_args:list[str]):
     raise NotImplementedError('C backend is not yet supported')
 
-def x86_64_compiler(path:str):
+def x86_64_compiler(path:str, args:list[str]):
     raise NotImplementedError('x86_64 backend is not yet supported')
 
 backend_map = {
