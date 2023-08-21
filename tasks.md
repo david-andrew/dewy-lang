@@ -1,6 +1,7 @@
 [tasks]
 - overhaul the docs
-    - look into moving the docs build folder into mdbook folder if possible.
+    - look into moving the docs build folder into mdbook folder if possible. should be `docs/` -> `docs/build/`, and `mdbook/` -> `docs/`
+- pull out the old old python expression parser from the git history into its own branch
 - handling scope while parsing: parsing needs to be chain by chain, namely if a an expression binds a value to an identifier, later expressions should be able to get the type of that identifier!
 - rename .type property on AST classes to basetype or default type. Add a type function which does a runtime check of the type
     - really need to make a type matrix for representing results of all the operators on pairs of every combination of types
