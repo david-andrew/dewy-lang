@@ -1,12 +1,12 @@
 [tasks]
+- overhaul the docs
+    - look into moving the docs build folder into mdbook folder if possible.
+- handling scope while parsing: parsing needs to be chain by chain, namely if a an expression binds a value to an identifier, later expressions should be able to get the type of that identifier!
 - rename .type property on AST classes to basetype or default type. Add a type function which does a runtime check of the type
     - really need to make a type matrix for representing results of all the operators on pairs of every combination of types
 - post tokanization steps:
     - combining chains of operators into opchains (e.g. x^/-2, needs to chain the ^/- into a single op)
-- handling scope while parsing: parsing needs to be chain by chain, namely if a an expression binds a value to an identifier, later expressions should be able to get the type of that identifier!
 - probably make identifier not a prototype, and instead anything that uses identifiers uses them instead of python strings
     - e.g. Bind(Identifier, AST), Call(Identifier), etc.
 - Arrays should create a new scope for their contents
-- update the docs
-
 - some sort of process to freeze all lists after chaining so that they can be cached
