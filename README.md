@@ -78,4 +78,4 @@ Several example programs are available in [examples/](examples/). Here is a brea
 
 
 ## Documentation
-Currently out of date documentation is available at: https://david-andrew.github.io/dewy-compiler-compiler/
+Currently out of date documentation is available at: https://david-andrew.github.io/dewy-lang/
