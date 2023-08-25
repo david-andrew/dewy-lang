@@ -219,7 +219,7 @@ Dewy 0.0.0
 <p>Printing &quot;Hello, World!&quot; is super simple in Dewy. Assuming you've got everything set up, and can invoke the language from the command line, here's how to run your first Dewy program.</p>
 <h2 id="put-your-code-in-a-directory"><a class="header" href="#put-your-code-in-a-directory">Put Your Code in a Directory</a></h2>
 <p>It's probably a good idea to put your code in a dedicated directory.</p>
-<pre><code class="language-bash">$ mdkir ~/code
+<pre><code class="language-bash">$ mdkir code
 $ cd code
 $ mdkir hello_world
 $ cd hello_world
@@ -229,23 +229,16 @@ $ cd hello_world
 <pre><code class="language-bash">$ subl hello.dewy
 </code></pre>
 <p>Then in the text editor, enter the following code</p>
-<pre><code class="language-dewy">printn('Hello, World!')
+<pre><code class="language-dewy">printl'Hello, World!'
 </code></pre>
-<p>This code invokes the <code>printn</code> function with the string <code>'Hello, World!'</code>. <code>printn</code> is a commonly used function which prints the specified text to the terminal, followed by a newline.</p>
+<p>This code invokes the <code>printl</code> function with the string <code>'Hello, World!'</code>. <code>printl</code> is a commonly used function which prints the specified text to the terminal, followed by a newline.</p>
 <p>When you are done in the text editor, save and close the file.</p>
 <h2 id="run-the-code"><a class="header" href="#run-the-code">Run the Code</a></h2>
 <p>Running a dewy file is as simple as invoking the file with the <code>dewy</code> command</p>
 <pre><code class="language-bash">$ dewy hello.dewy
 </code></pre>
-<p>Which should print <code>Hello, World!</code> in the terminal. Note that in addition to printing that string, a new executable file named <code>hello</code> has appeared in the directory</p>
-<pre><code class="language-bash">$ ls
-hello.dewy hello
-</code></pre>
-<p>This is because Dewy is a compiled language. Calling the <code>dewy</code> command on a source file will compile that file into an executable (the <code>hello</code> file in this case), and then run that executable. </p>
-<p>If you would instead like to separately compile, and then execute your code, you may do the following:</p>
-<pre><code class="language-bash">$ dewyc hello.dewy  #compile the file
-$ ./hello           #execute the compiled file
-</code></pre>
+<p>Which should print <code>Hello, World!</code> in the terminal. </p>
+<p>(TODO explain about any build files, possible in a hidden directory)</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="hello-many-worlds"><a class="header" href="#hello-many-worlds">Hello, Many Worlds!</a></h1>
 <p>This chapter contains equivalent Hello World programs for a variety of different domains. This might be split into several sections involving the standard library</p>
 <p>(TODO) Examples will probably include:</p>
