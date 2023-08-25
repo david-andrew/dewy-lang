@@ -1,3 +1,10 @@
 # Getting Started
 
-**Currently there is no complete version of the language ready for use.** It is the goal of the author to complete an MVP of the language in the near future, from which a complete version can be developed.
+Dewy is still in it's early development stages, but you can try it out! Currently this chapter explains how to use the current python interpreter implementation:
+- Installing the interpreter on Linux
+- Writing hello world
+
+Long term, this chapter will explain how to use the compiler, and provide several hello world examples for various different applications of Dewy.
+- Installing the compiler on Linux, Windows, and Mac
+- Writing hello world
+- Simple examples for other domains

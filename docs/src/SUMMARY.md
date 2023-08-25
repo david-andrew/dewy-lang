@@ -1,7 +1,7 @@
 # The Dewy Programming Language
 
 [Introduction](ch00-00-introduction.md)
-[Features List](ch00-01-features-list.md)
+<!-- [Features List](ch00-01-features-list.md) -->
 
 ## Getting Started
 
