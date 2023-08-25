@@ -32,11 +32,11 @@ jobs:
     - name: Build docs with mdbook
       if: steps.docschange.outputs.changed == 'true'
       run: |
-        mdbook build docs --dest-dir tmp-build-folder
+        mdbook build docs --dest-dir $(pwd)/book
 
-    - name: List files in tmp-build-folder
+    - name: List files in book
       if: steps.docschange.outputs.changed == 'true'
-      run: ls -al tmp-build-folder
+      run: ls -al book
 
     - name: Get commit message
       if: steps.docschange.outputs.changed == 'true'
@@ -48,7 +48,7 @@ jobs:
       uses: peaceiris/actions-gh-pages@v3
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./tmp-build-folder
+        publish_dir: ./book
         keep_files: false
         branch: gh-pages
         commit_message: ${{ steps.get_commit_message.outputs.message }}
