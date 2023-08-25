@@ -2,7 +2,7 @@
 # all backends either compile+run the code or just run it directly
 
 from argparse import ArgumentParser, REMAINDER
-from backend import backends, get_backend, python_interpreter, llvm_compiler
+from backend import backends, get_backend, python_interpreter, llvm_compiler, get_version
 
 import pdb
 
@@ -18,6 +18,7 @@ def main():
     group.add_argument('-c', action='store_true', help='Run in compiler mode with the llvm backend (not implemented yet)')
     group.add_argument('--backend', type=str, help=f'Specify a backend compiler/interpreter by name to use. Backends will include: {backends} (however currently only python is available).')
 
+    arg_parser.add_argument('-v', '--version', action='version', version=f'Dewy {get_version()}', help='Print version information and exit')
     arg_parser.add_argument('args', nargs=REMAINDER, help='Arguments after the file are passed directly to program')
 
     args = arg_parser.parse_args()

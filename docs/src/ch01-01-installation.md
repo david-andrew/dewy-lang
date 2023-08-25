@@ -1,6 +1,16 @@
 # Installation
 
-**As mentioned, there is no implementation of the language ready for installation.** When the MVP is complete, the planned installation methods will include prebuilt binaries, along with C source code for building from scratch. Additionally, it is planned to provide some form of online interpreter that people can use to test the language
+Currently, only the python interpreter backend is available. To install it, you must have **python 3.11** or later installed. Then to install:
+1. Clone the repo
+    ```bash
+    git clone git@github.com:david-andrew/dewy-lang.git
+    ```
+2. Run the install script
+    ```bash
+    cd dewy-lang
+    python install.py
+    ```
+3. Log out and back in
 
 ## Verify Install
 
@@ -8,5 +18,5 @@ When you do have the language properly installed, you should be able to verify t
 
 ```bash
 $ dewy -v
-dewy0alpha (version 0.0.1) 
+Dewy 0.0.0
 ```
