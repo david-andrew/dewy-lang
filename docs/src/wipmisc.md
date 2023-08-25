@@ -90,6 +90,3 @@ In the second case, it's ambiguous which block the loop attaches to, so the comp
 ## Sections I need to add to docs
 
 - how package management works (TODO->read about how julia & V package management works. also ideas about auto stl importing)
-
-## Misc
-(testing automatic deployment)
