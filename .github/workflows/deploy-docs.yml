@@ -18,10 +18,10 @@ jobs:
     - name: Determine if there were changes in the docs directory
       id: docschange
       run: |
-        # CHANGED=$(git diff --name-only HEAD^ HEAD -- docs/)
-        # if [[ -n "$CHANGED" ]]; then
+        CHANGED=$(git diff --name-only HEAD^ HEAD -- docs/)
+        if [[ -n "$CHANGED" ]]; then
           echo "::set-output name=changed::true"
-        # fi
+        fi
 
     - name: Setup mdbook
       if: steps.docschange.outputs.changed == 'true'
@@ -33,10 +33,6 @@ jobs:
       if: steps.docschange.outputs.changed == 'true'
       run: |
         mdbook build docs --dest-dir $(pwd)/book
-
-    - name: List files in book
-      if: steps.docschange.outputs.changed == 'true'
-      run: ls -al book
 
     - name: Get commit message
       if: steps.docschange.outputs.changed == 'true'
