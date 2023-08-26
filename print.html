@@ -570,102 +570,125 @@ printl('pear' in? my_set)  //prints 'false'
 printl(my_obj.apples) //prints out 5
 printl(my_obj.buy_bananas(10))  //prints out 8.9
 </code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="range-types"><a class="header" href="#range-types">Range Types</a></h1>
-<h2 id="numeric-ranges"><a class="header" href="#numeric-ranges">Numeric ranges</a></h2>
-<p>Numeric ranges allow you to describe a range of real numbers</p>
-<p>Inclusive and exclusive bounds on a range can be specified with <code>[]</code> i.e. open bounds, and <code>()</code> i.e. closed bounds. If no bounds are included, then the default is open bounds</p>
-<pre><code class="language-dewy">range1 = 1:5    // 1 2 3 4 5
-range2 = (1:5)  // 2 3 4
-range3 = (1:5]  // 2 3 4 5
-range4 = [1:5)  // 1 2 3 4
-range5 = [1:5]  // 1 2 3 4 5
+<div style="break-before: page; page-break-before: always;"></div><h1 id="ranges"><a class="header" href="#ranges">Ranges</a></h1>
+<p>A range represents some span over a set of values. Typically ranges will be over numbers, however any orderable set could be used for a range (e.g. strings, dates, etc.). Ranges are frequently used for loops, indexing, and several other places.</p>
+<h2 id="range-syntax"><a class="header" href="#range-syntax">Range Syntax</a></h2>
+<p>The syntax for ranges is inspired by Haskell syntax for ranges:</p>
+<pre><code class="language-dewy">[first..]               // first to inf
+[first,second..]        // first to inf, step size is second-first
+[first..last]           // first to last
+[first,second..last]    // first to last, step size is second-first
+[..2ndlast,last]        // -inf to last, step size is last-2ndlast
+[..last]                // -inf to last
+[..]                    // -inf to inf
 </code></pre>
-<p>Ranges are a convenient way to loop a specified number of times. The following prints <code>AppleBanana</code> 21 times</p>
-<pre><code class="language-dewy">loop i in 0:20
-    printn('AppleBanana')
+<p>Note that <code>[first..2ndlast,last]</code> is explicitly <strong>NOT ALLOWED</strong>, as it is covered by <code>[first,second..last]</code>, and can have unintuitive behavior.</p>
+<p>In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.</p>
+<pre><code class="language-dewy">[first..last]           // first to last including first and last
+[first..last)           // first to last including first, excluding last
+(first..last]           // first to last excluding first, including last
+(first..last)           // first to last excluding first and last
+first..last             // same as [first..last]
 </code></pre>
-<p>You can also check if a value falls within a specified range</p>
-<pre><code class="language-dewy">5 in? [1:5]         //returns true
-5 in? (1:5)         //returns false
-3.1415 in? (1:5)    //returns true 
+<h2 id="numeric-ranges"><a class="header" href="#numeric-ranges">Numeric Ranges</a></h2>
+<p>Probably the most common type of range will be a numeric ranges which describes a span over real numbers.</p>
+<p>Some simple examples include:</p>
+<pre><code class="language-dewy">range1 = (1..5)  // 2 3 4
+range2 = (1..5]  // 2 3 4 5
+range3 = [1..5)  // 1 2 3 4
+range4 = [1..5]  // 1 2 3 4 5
+range5 = 1..5    // 1 2 3 4 5
 </code></pre>
-<p>Additionally you can construct more complex ranges by using arithmetic on basic ranges</p>
-<pre><code class="language-dewy">complex_range = [1:5] + (15:20)
+<h2 id="ordinal-ranges"><a class="header" href="#ordinal-ranges">Ordinal Ranges</a></h2>
+<p>Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.</p>
+<p>For example, the following range captures all characters in the range from <code>'a'</code> to <code>'z'</code> inclusive</p>
+<pre><code>ord_range = 'a'..'z'
+</code></pre>
+<p>All alpahbetical characters might be represented like so</p>
+<pre><code>alpha_range = 'a'..'z' + 'A'..'Z'
+ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc.
+</code></pre>
+<p>But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this</p>
+<pre><code>word_range = 'apple'..'zebra'
+'panda' in? word_range  //returns true
+</code></pre>
+<p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>. NOTE that this is distinct from every dictionary word in that range, as it will include many many gibberish words. </p>
+<p>TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. <code>'apple2'</code> should come before <code>'apple10'</code>), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used</p>
+<h2 id="range-uses"><a class="header" href="#range-uses">Range Uses</a></h2>
+<p>Ranges have a variety of different uses in Dewy.</p>
+<h3 id="ranges-in-loops"><a class="header" href="#ranges-in-loops">Ranges in Loops</a></h3>
+<p>Probably the most common use is in conjunction with loops as a sequence to iterate over:</p>
+<pre><code class="language-dewy">loop i in 0..5 print'{i} '
+</code></pre>
+<p>The above will print <code>'0 1 2 3 4 5 '</code>.</p>
+<p>To iterate over values in reverse, you can specify a reversed range:</p>
+<pre><code class="language-dewy">loop i in 5,4..0 print'{i} '
+</code></pre>
+<p>This prints <code>'5 4 3 2 1 0 '</code>. <strong>Note:</strong> when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.</p>
+<h3 id="range-arithmetic"><a class="header" href="#range-arithmetic">Range Arithmetic</a></h3>
+<p>Ranges can be used in arithmetic expressions, often as a way to construct new ranges.</p>
+<pre><code>//division version
+loop i in [0..4]/4 print'{i} '
+
+//multiplication version
+loop i in [0..4]*0.25 print'{i} '
+</code></pre>
+<p>Both of which will print <code>'0 0.25 0.5 0.75 1 '</code></p>
+<p>These are both equivalent to directly constructing the range <code>0,0.25..4</code>, however the arithmetic versions are frequently more convenient.</p>
+<p>This type of construction is closely related to the <code>linspace()</code>/<code>logspace()</code> functions in Dewy. TBD but <code>linspace</code>/<code>logspace</code> may in fact be implemented like so:</p>
+<pre><code class="language-dewy">linspace = (interval:range, n:int=10) =&gt; {
+    start, stop = interval.start, interval.stop
+    step = (stop-start)/(n-1)
+    return interval.start, interval.start+step .. interval.stop
+}
+logspace = (interval:range, n:int=10, base:real=10) =&gt; base^linspace(interval, n)
+</code></pre>
+<h3 id="compound-range-construction"><a class="header" href="#compound-range-construction">Compound Range Construction</a></h3>
+<p>Additionally you can construct more complex ranges by combining together multiple ranges:</p>
+<pre><code class="language-dewy">complex_range = [1..5] + (15..20)
 loop i in complex_range
     printn(i)           //prints 1 2 3 4 5 16 17 18 19
 7 in? complex_range     //returns false
 16 in? complex_range    //returns true
 </code></pre>
 <p>The same range as above can be constructed using subtraction</p>
-<pre><code class="language-dewy">complex_range = [1:20) - (5:15]
+<pre><code class="language-dewy">complex_range = [1..20) - (5..15]
 </code></pre>
-<h3 id="ranges-in-loops"><a class="header" href="#ranges-in-loops">Ranges in loops</a></h3>
-<p>Ranges are commonly used in conjunction with loops</p>
-<pre><code>loop i in 0:5 { print('{i} ') }
+<h3 id="interval-membership"><a class="header" href="#interval-membership">Interval Membership</a></h3>
+<p>You can also check if a value falls within a specified range</p>
+<pre><code class="language-dewy">5 in? [1..5]         //returns true
+5 in? (1..5)         //returns false
+3.1415 in? (1..5)    //returns true 
 </code></pre>
-<p>The above will print <code>0 1 2 3 4 5 </code>. And to iterate over a list in reverse, you can simply reverse the range</p>
-<pre><code>loop i in range 5:0 { print('{i} ') }
-</code></pre>
-<p>This prints <code>5 4 3 2 1 0 </code>. To use non-integers for looping, probably use <code>linspace()</code>/<code>logspace()</code>. Considering a syntax as follows for ranges that are non-integer</p>
-<pre><code>//division version
-loop i in [0:4]/4 { print('{i} ') }
-
-//multiplication version
-loop i in [0:4]*0.25 { print('{i} ') }
-</code></pre>
-<p>Both of which will print <code>'0 0.25 0.5 0.75 1 '</code></p>
-<h2 id="ordinal-ranges"><a class="header" href="#ordinal-ranges">Ordinal Ranges</a></h2>
-<p>Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.</p>
-<p>For example, the following range captures all characters in the range from <code>'a'</code> to <code>'z'</code> inclusive</p>
-<pre><code>ord_range = 'a':'z'
-</code></pre>
-<p>All alpahbetical characters might be represented like so</p>
-<pre><code>alpha_range = 'a':'z' + 'A':'Z'
-ascii_range = 'A':'z' //this would include extra characters like '[\]^_{|}' etc.
-</code></pre>
-<p>But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this</p>
-<pre><code>word_range = 'apple':'zebra'
-'panda' in? word_range  //returns true
-</code></pre>
-<p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>. NOTE that this is distinct from every dictionary word in that range, as it will include many many gibberish words. </p>
-<p>TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. <code>'apple2'</code> should come before <code>'apple10'</code>), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used</p>
-<h2 id="indexing-sequences"><a class="header" href="#indexing-sequences">Indexing Sequences</a></h2>
-<p>ranges can be used to select values from a sequence. For example, say we want a substring we can do thw following</p>
+<h3 id="indexing-sequences"><a class="header" href="#indexing-sequences">Indexing Sequences</a></h3>
+<p>ranges can be used to select values from a sequence. For example, say we want a substring we can do the following</p>
 <pre><code class="language-dewy">full_string = 'this is a string'
 
-substring = full_string[3:12]
+substring = full_string[3..12]
 printl(substring) //prints 's is a str'
 </code></pre>
-<p>This works for any sequence type. Note that the default range is inclusive (indicated by array indexing using square brackets). If you want to have exclusive bounds, simply wrap the range in parenthesis/brackets</p>
+<p>This works for any sequence type. <strong>Note:</strong> only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).</p>
+<p>Also, because of juxtaposition, we can easily make the selection inclusive or exclusive on either side.</p>
 <pre><code>full_string = 'this is a string'
 
-substring1 = full_string[(3:12)]
-substring2 = full_string[[3:12)]
-substring3 = full_string[(3:12]]
-
-printl(substring1) //prints ' is a st'
-printl(substring2) //prints 's is a st'
-printl(substring3) //prints ' is a str'
+substring1 = full_string(3..12)  // ' is a st'
+substring2 = full_string[3..12)  // 's is a st'
+substring3 = full_string(3..12]  // ' is a str'
 </code></pre>
-<p>Note that all ranges used to index sequences must be integer ranges</p>
-<p>Lastly, you can specify that a range continues to the end of the sequence using the special <code>_</code> (underscore) identifier. paired with <code>0</code> to select from the start of the string, you can select from sequences relative to both the start and end bounds.</p>
+<p>You can specify that a range continues to the end of the sequence, or starts from the beginning by omitting the value for that side. This will construct a range that goes to infinity in that direction, which will select all elements in that direction.</p>
 <pre><code>full_string = 'this is a string'
 
-substring_to_end = full_string[3:_]
-printl(substring_to_end) //prints 's is a string'
-
-substring_from_start = full_string[0:12]
-printl(substring_from_start) //prints 'this is a str'
-
-whole_string = full_string[0:_] //selects the whole string
+substring_to_end = full_string[3..] // 's is a string'
+substring_from_start = full_string[..12] // 'this is a str'
+whole_string = full_string[..] //selects the whole string
 </code></pre>
-<p>Also potentially can <code>_</code> be combined with math to select points near the endpoints? </p>
-<pre><code>arr[_]     // last element
-arr[_-1]   // second to last element
-arr[5:_-3] // 5th element to 4th to last element
-arr[_-3:_] // 4th to last element to last element
+<p>Paired with the special <code>end</code> token which represents the index of the last element in a sequence, this provides the means to select any desired subset of a sequence.</p>
+<pre><code>arr[end]      // last element
+arr[end-1]    // second to last element
+arr[..end-3]  // first element to 4th to last element
+arr[5..end-3] // 5th element to 4th to last element
+arr[end-3..]  // 4th to last element to last element
 </code></pre>
-<p>TBD on how inclusive/exclusive works with <code>_</code>. I'm inclined to think that <code>_</code> is equivalent to the index of the last element, in which case exclusive bounds would exclude the last element. This mirrors how exclusive bounds would work for the first element being specified as zero. e.g. <code>arr[(0:_)]</code> would select all elements except for the first and last. This also makes the most sense/is the least complicated with introducing arithmetic into the range values</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="object-and-class-types"><a class="header" href="#object-and-class-types">Object and Class Types</a></h1>
 <h2 id="todo"><a class="header" href="#todo">TODO</a></h2>
 <p>Object types are basically just containers containing assigments of variables and functions</p>
