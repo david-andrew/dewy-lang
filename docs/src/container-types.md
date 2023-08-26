@@ -48,14 +48,14 @@ Note that to create an actual bidictionary, every arrow must by double-ended. As
 
 ## Sets
 
-A set is an unordered collection of elements. (TODO:determine set notation.)
+A set is an unordered collection of elements. (TODO:determine set literal notation.)
 
 For now, sets will probably be declared like so
 
 ```dewy
-my_set = Set([0 1 2 3 'apple' 'banana' 'peach' true])
-print(3 in? my_set)  //prints 'true'
-print('pear' in? my_set)  //prints 'false'
+my_set = set[0 1 2 3 'apple' 'banana' 'peach' true]
+printl(3 in? my_set)  //prints 'true'
+printl('pear' in? my_set)  //prints 'false'
 ```
 
 
@@ -67,8 +67,8 @@ See the entry on **Object and Class Types** for more details. But breifly, an ob
 my_obj = [
     apple = 5
     bananas = 0.89
-    buy_apples = (q) => q * @apples
-    buy_bananas = (q) => q * @bananas
+    buy_apples = q => q * @apples
+    buy_bananas = q => q * @bananas
 ]
 
 printl(my_obj.apples) //prints out 5

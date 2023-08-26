@@ -81,9 +81,9 @@ my_bool = true
 complex numbers
 
 ```dewy
-my_complex0 = 2^/2 + 2i^/2  //TBD if imaginary numbers can be declared as such
+my_complex0 = 2^/2 + 2i^/2
 my_complex1 = complex(2^/2, 2^/2)
-my_complex2 = complex(1, 45 degrees)
+my_complex2 = complex(1, 45°)
 ```
 
 ### Quaternions
