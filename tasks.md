@@ -20,6 +20,14 @@
         4 5 6
         7 8 9
     ]
-    ```    
+    ``` 
+    (seems like my original idea was to use the token coordinates to figure this part out)
+
 - also handling `;` for higher dimensional tensor literals (see julia syntax for example). Perhaps `;` wraps whatever expression it attaches to in something like `Colonize(expr)`, and then in most cases, that evaluates to `void`, but inside of an array, the array replaces `Colonize()` with the inner expression, and counts the number of `Colonize()` layers for determining how many dimensions the next line is offset by
 - ... shouldn't be an operator, it should be a literal. When ... is juxtaposed with something it does the unpacking, but when it is by itself, it is a literal ellipsis
+Operators to add:
+    - polar angle operator `∠` for constructing complex numbers, e.g. `7.81 ∠ 230.19°`. potentially also allow for keyword `angle`
+    - dot/cross product operators
+    - tensor product operator `⊗`
+    - square root operator `√`
+
