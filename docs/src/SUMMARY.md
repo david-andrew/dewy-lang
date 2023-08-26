@@ -1,14 +1,28 @@
 # The Dewy Programming Language
 
 [Introduction](ch00-00-introduction.md)
-<!-- [Features List](ch00-01-features-list.md) -->
 
 ## Getting Started
 
 - [Getting Started](ch01-00-getting-started.md)
     - [Installation](ch01-01-installation.md)
     - [Hello, World!](ch01-02-hello-world.md)
-    - [Hello, Many Worlds!](ch01-03-hello-many-worlds.md)
+
+- [Hello, Many Worlds!](ch02-00-hello-many-worlds.md)
+    - [GUI](ch02-01-gui.md)
+    - [Graphics](ch02-02-graphics.md)
+    - [Audio](ch02-03-audio.md)
+    - [Networking](ch02-04-networking.md)
+    - [2D Game Development](ch02-05a-game-development.md)
+    - [3D Game Development](ch02-05b-game-development.md)
+    - [Web Development](ch02-06-web-development.md)
+    - [Databases](ch02-07-databases.md)
+    - [Cryptography](ch02-08-cryptography.md)
+    - [Operating Systems](ch02-09-operating-systems.md)
+    - [Compilers](ch02-10-compilers.md)
+    - [Scientific Computing](ch02-11-scientific-computing.md)
+    - [Engineering](ch02-12-engineering.md)
+    - [Machine Learning](ch02-13-machine-learning.md)
 
 - [Language Features](chxx-features.md)
     - [Units](units.md)
