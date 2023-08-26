@@ -30,4 +30,6 @@ Operators to add:
     - dot/cross product operators
     - tensor product operator `⊗`
     - square root operator `√`
-
+- add a `end` literal that can be tokenized/parsed. It will be mainly used for relative indexing from the end of a sequence, e.g. `arr[end-1]` to get the second to last element of an array.
+- add an `inf` literal
+- handling range syntax. probably make `..` non-juxtaposable, which means any juxtaposes next to it are deleted (or perhaps converted to a range_jux which has super low precedence). Then figure out how to parse `first, second .. final` style syntax. perhaps have a custom range_cat operator with the lowest precedence that concatenates expressions next to it into the range (if any are present, or voids should have been put in their place)

@@ -1,38 +1,131 @@
-# Range Types
+# Ranges
 
-## Numeric ranges
+A range represents some span over a set of values. Typically ranges will be over numbers, however any orderable set could be used for a range (e.g. strings, dates, etc.). Ranges are frequently used for loops, indexing, and several other places.
 
-Numeric ranges allow you to describe a range of real numbers
+## Range Syntax
 
-Inclusive and exclusive bounds on a range can be specified with `[]` i.e. open bounds, and `()` i.e. closed bounds. If no bounds are included, then the default is open bounds
+The syntax for ranges is inspired by Haskell syntax for ranges:
 
 ```dewy
-range1 = 1:5    // 1 2 3 4 5
-range2 = (1:5)  // 2 3 4
-range3 = (1:5]  // 2 3 4 5
-range4 = [1:5)  // 1 2 3 4
-range5 = [1:5]  // 1 2 3 4 5
+[first..]               // first to inf
+[first,second..]        // first to inf, step size is second-first
+[first..last]           // first to last
+[first,second..last]    // first to last, step size is second-first
+[..2ndlast,last]        // -inf to last, step size is last-2ndlast
+[..last]                // -inf to last
+[..]                    // -inf to inf
 ```
 
-Ranges are a convenient way to loop a specified number of times. The following prints `AppleBanana` 21 times
+Note that `[first..2ndlast,last]` is explicitly **NOT ALLOWED**, as it is covered by `[first,second..last]`, and can have unintuitive behavior.
+
+In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.
 
 ```dewy
-loop i in 0:20
-    printn('AppleBanana')
+[first..last]           // first to last including first and last
+[first..last)           // first to last including first, excluding last
+(first..last]           // first to last excluding first, including last
+(first..last)           // first to last excluding first and last
+first..last             // same as [first..last]
 ```
 
-You can also check if a value falls within a specified range
+## Numeric Ranges
+
+Probably the most common type of range will be a numeric ranges which describes a span over real numbers.
+
+Some simple examples include:
 
 ```dewy
-5 in? [1:5]         //returns true
-5 in? (1:5)         //returns false
-3.1415 in? (1:5)    //returns true 
+range1 = (1..5)  // 2 3 4
+range2 = (1..5]  // 2 3 4 5
+range3 = [1..5)  // 1 2 3 4
+range4 = [1..5]  // 1 2 3 4 5
+range5 = 1..5    // 1 2 3 4 5
 ```
 
-Additionally you can construct more complex ranges by using arithmetic on basic ranges
+## Ordinal Ranges
+
+Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.
+
+For example, the following range captures all characters in the range from `'a'` to `'z'` inclusive
+
+```
+ord_range = 'a'..'z'
+```
+
+All alpahbetical characters might be represented like so
+
+```
+alpha_range = 'a'..'z' + 'A'..'Z'
+ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc.
+```
+
+But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this
+
+```
+word_range = 'apple'..'zebra'
+'panda' in? word_range  //returns true
+```
+
+which would create a range that consists of every possible 5 letter combination starting from the word `'apple'` and iterating through to the word `'zebra'`. NOTE that this is distinct from every dictionary word in that range, as it will include many many gibberish words. 
+
+TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. `'apple2'` should come before `'apple10'`), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used
+
+
+## Range Uses
+
+Ranges have a variety of different uses in Dewy.
+
+### Ranges in Loops
+
+Probably the most common use is in conjunction with loops as a sequence to iterate over:
 
 ```dewy
-complex_range = [1:5] + (15:20)
+loop i in 0..5 print'{i} '
+```
+
+The above will print `'0 1 2 3 4 5 '`.
+
+To iterate over values in reverse, you can specify a reversed range:
+
+```dewy
+loop i in 5,4..0 print'{i} '
+```
+
+This prints `'5 4 3 2 1 0 '`. **Note:** when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.
+
+### Range Arithmetic
+
+Ranges can be used in arithmetic expressions, often as a way to construct new ranges.
+
+```
+//division version
+loop i in [0..4]/4 print'{i} '
+
+//multiplication version
+loop i in [0..4]*0.25 print'{i} '
+```
+
+Both of which will print `'0 0.25 0.5 0.75 1 '`
+
+These are both equivalent to directly constructing the range `0,0.25..4`, however the arithmetic versions are frequently more convenient.
+
+This type of construction is closely related to the `linspace()`/`logspace()` functions in Dewy. TBD but `linspace`/`logspace` may in fact be implemented like so:
+
+```dewy
+linspace = (interval:range, n:int=10) => {
+    start, stop = interval.start, interval.stop
+    step = (stop-start)/(n-1)
+    return interval.start,interval.start+step..interval.stop
+}
+logspace = (interval:range, n:int=10, base:real=10) => base^linspace(interval, n)
+```
+
+### Compound Range Construction
+
+Additionally you can construct more complex ranges by combining together multiple ranges:
+
+```dewy
+complex_range = [1..5] + (15..20)
 loop i in complex_range
     printn(i)           //prints 1 2 3 4 5 16 17 18 19
 7 in? complex_range     //returns false
@@ -42,111 +135,59 @@ loop i in complex_range
 The same range as above can be constructed using subtraction
 
 ```dewy
-complex_range = [1:20) - (5:15]
+complex_range = [1..20) - (5..15]
 ```
 
-### Ranges in loops
+### Interval Membership
 
-Ranges are commonly used in conjunction with loops
+You can also check if a value falls within a specified range
 
-```
-loop i in 0:5 { print('{i} ') }
-```
-
-The above will print `0 1 2 3 4 5 `. And to iterate over a list in reverse, you can simply reverse the range
-
-```
-loop i in range 5:0 { print('{i} ') }
+```dewy
+5 in? [1..5]         //returns true
+5 in? (1..5)         //returns false
+3.1415 in? (1..5)    //returns true 
 ```
 
-This prints `5 4 3 2 1 0 `. To use non-integers for looping, probably use `linspace()`/`logspace()`. Considering a syntax as follows for ranges that are non-integer
+### Indexing Sequences
 
-```
-//division version
-loop i in [0:4]/4 { print('{i} ') }
-
-//multiplication version
-loop i in [0:4]*0.25 { print('{i} ') }
-```
-
-Both of which will print `'0 0.25 0.5 0.75 1 '`
-
-## Ordinal Ranges
-
-Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.
-
-For example, the following range captures all characters in the range from `'a'` to `'z'` inclusive
-
-```
-ord_range = 'a':'z'
-```
-
-All alpahbetical characters might be represented like so
-
-```
-alpha_range = 'a':'z' + 'A':'Z'
-ascii_range = 'A':'z' //this would include extra characters like '[\]^_{|}' etc.
-```
-
-But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this
-
-```
-word_range = 'apple':'zebra'
-'panda' in? word_range  //returns true
-```
-
-which would create a range that consists of every possible 5 letter combination starting from the word `'apple'` and iterating through to the word `'zebra'`. NOTE that this is distinct from every dictionary word in that range, as it will include many many gibberish words. 
-
-TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. `'apple2'` should come before `'apple10'`), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used
-
-## Indexing Sequences
-
-ranges can be used to select values from a sequence. For example, say we want a substring we can do thw following
+ranges can be used to select values from a sequence. For example, say we want a substring we can do the following
 
 ```dewy
 full_string = 'this is a string'
 
-substring = full_string[3:12]
+substring = full_string[3..12]
 printl(substring) //prints 's is a str'
 ```
 
-This works for any sequence type. Note that the default range is inclusive (indicated by array indexing using square brackets). If you want to have exclusive bounds, simply wrap the range in parenthesis/brackets
+This works for any sequence type. **Note:** only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).
+
+Also, because of juxtaposition, we can easily make the selection inclusive or exclusive on either side.
 
 ```
 full_string = 'this is a string'
 
-substring1 = full_string[(3:12)]
-substring2 = full_string[[3:12)]
-substring3 = full_string[(3:12]]
-
-printl(substring1) //prints ' is a st'
-printl(substring2) //prints 's is a st'
-printl(substring3) //prints ' is a str'
+substring1 = full_string(3..12)  // ' is a st'
+substring2 = full_string[3..12)  // 's is a st'
+substring3 = full_string(3..12]  // ' is a str'
 ```
 
-Note that all ranges used to index sequences must be integer ranges
 
-Lastly, you can specify that a range continues to the end of the sequence using the special `_` (underscore) identifier. paired with `0` to select from the start of the string, you can select from sequences relative to both the start and end bounds.
+You can specify that a range continues to the end of the sequence, or starts from the beginning by omitting the value for that side. This will construct a range that goes to infinity in that direction, which will select all elements in that direction.
 
 ```
 full_string = 'this is a string'
 
-substring_to_end = full_string[3:_]
-printl(substring_to_end) //prints 's is a string'
-
-substring_from_start = full_string[0:12]
-printl(substring_from_start) //prints 'this is a str'
-
-whole_string = full_string[0:_] //selects the whole string
+substring_to_end = full_string[3..] // 's is a string'
+substring_from_start = full_string[..12] // 'this is a str'
+whole_string = full_string[..] //selects the whole string
 ```
 
-Also potentially can `_` be combined with math to select points near the endpoints? 
+Paired with the special `end` token which represents the index of the last element in a sequence, this provides the means to select any desired subset of a sequence.
 
 ```
-arr[_]     // last element
-arr[_-1]   // second to last element
-arr[5:_-3] // 5th element to 4th to last element
-arr[_-3:_] // 4th to last element to last element
+arr[end]      // last element
+arr[end-1]    // second to last element
+arr[..end-3]  // first element to 4th to last element
+arr[5..end-3] // 5th element to 4th to last element
+arr[end-3..]  // 4th to last element to last element
 ```
-
-TBD on how inclusive/exclusive works with `_`. I'm inclined to think that `_` is equivalent to the index of the last element, in which case exclusive bounds would exclude the last element. This mirrors how exclusive bounds would work for the first element being specified as zero. e.g. `arr[(0:_)]` would select all elements except for the first and last. This also makes the most sense/is the least complicated with introducing arithmetic into the range values
