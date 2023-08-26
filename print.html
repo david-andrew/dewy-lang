@@ -293,12 +293,37 @@ $ cd hello_world
 <div style="break-before: page; page-break-before: always;"></div><h1 id="units"><a class="header" href="#units">Units</a></h1>
 <p>Dewy was designed from day 1 to include physical units such as kilogram, meter, second. </p>
 <h2 id="a-simple-example"><a class="header" href="#a-simple-example">A Simple Example</a></h2>
-<p>Using units is quite straightforward, as they can be included in just about any regular math expression</p>
-<pre><code class="language-dewy">mass = 10 kg
-velocity = 30 m/s
+<p>Using units is quite straightforward, as they are just another expression. Juxtaposing a unit with a number will multiply the number by the unit, and you can use this to build up more complex expressions.</p>
+<pre><code class="language-dewy">mass = 10kg
+velocity = 30m/s
 energy = 1/2 * mass * velocity^2
 </code></pre>
-<p>The <code>energy</code> variable now contains a value of <code>9000 joules</code>.</p>
+<p>The <code>energy</code> variable now contains a value of <code>9000 joules</code>. For more complex unit expressions, sometimes it is necessary to use parentheses to group terms together. In general it is good style to do so, except for the simplest unit expressions. See <a href="operators.html">Operator Precedence</a>. </p>
+<p>Here are several more examples of unit expressions:</p>
+<pre><code class="language-dewy">7kg * 10(m/s/s)
+25(N/m^2) + 15(Pa)
+12(kg) + 8(kg)
+3(m) * 5(s)
+25(J) - 15(J)
+9(N) * 6(m)
+1500(W) / 10(A)
+5(A) * 2(Ω)
+8(m*s^-1) / 2(s)
+40(N*m) * 10(rad)
+200(Pa) * 3(m^2)
+1000(m^3) * 2(kg/m^3)
+20(J/s) * 4(s)
+8(km/h) + 20(m/s)
+6(N) / 2(m^2)
+18(L) * 0.001(m^3/L)
+1000(kg) * 9.8(m/s^2)
+12(C) * 1.6 x 10^-19(C)
+0.5(kg) * (10(m/s))^2
+1200(W) / 240(V)
+6000(s) / 3600(s/h)
+7.5(mol) * 6.022e23(particles/mol)
+15(kg * m^2 * s^-1 * A^-2 * K^2 * mol^-1 * cd^3) + 10(kg * m * s^-2 * A^-1 * K * mol^-2 * cd^2)
+</code></pre>
 <h2 id="todo-rest-of-units-features--examples"><a class="header" href="#todo-rest-of-units-features--examples">(TODO-&gt;rest of units features + examples)</a></h2>
 <h2 id="full-list-of-units"><a class="header" href="#full-list-of-units">Full List of Units</a></h2>
 <p>(TODO-&gt;maybe like solidworks, allow user to set unit system, e.g. meters-kilograms-seconds, centimeters-grams-seconds, etc. See: https://en.wikipedia.org/wiki/MKS_system_of_units https://en.wikipedia.org/wiki/Metre%E2%80%93tonne%E2%80%93second_system_of_units https://en.wikipedia.org/wiki/Foot%E2%80%93pound%E2%80%93second_system https://en.wikipedia.org/wiki/Centimetre%E2%80%93gram%E2%80%93second_system_of_units )</p>
@@ -306,12 +331,23 @@ energy = 1/2 * mass * velocity^2
 <p>Abbreviations are written inside of brackes <code>[]</code>. Also note that abbreviated units are case sensitive, while written out units are case insensitive (and the same is true for prefixes). TODO-&gt;write out all the unit conversion</p>
 <h4 id="mass-m"><a class="header" href="#mass-m">Mass [M]</a></h4>
 <p><code>[g]</code>, <code>gram</code>, <code>grams</code> (note that the base unit is <code>kg</code>/<code>kilograms</code>)<br />
-<code>[lb]</code>, <code>[lbm]</code> <code>pound</code>, <code>pounds</code>, <code>pound-mass</code>, <code>pounds-mass</code><br />
+<code>[k]</code>, <code>kilo</code>, <code>kilos</code>
+<code>[lbm]</code>, <code>pound-mass</code>, <code>pounds-mass</code><br />
 <code>slug</code>, <code>slugs</code></p>
 <h4 id="length-l"><a class="header" href="#length-l">Length [L]</a></h4>
 <p><code>[m]</code>, <code>meter</code>, <code>meters</code>, <code>metre</code>, <code>metres</code></p>
 <h4 id="time-t"><a class="header" href="#time-t">Time [T]</a></h4>
-<p><code>[s]</code> <code>second</code>, <code>seconds</code></p>
+<p><code>[s]</code>, <code>second</code>, <code>seconds</code>
+<code>minute</code>, <code>minutes</code>
+<code>hour</code>, <code>hours</code>
+(TODO: exact durations of longer units. e.g. sidereal day vs solar day, etc.)
+<code>day</code>, <code>days</code>
+<code>week</code>, <code>weeks</code>
+<code>month</code>, <code>months</code>
+<code>year</code>, <code>years</code>
+<code>decade</code>, <code>decades</code>
+<code>century</code>, <code>centuries</code>
+<code>millennium</code>, <code>millennia</code></p>
 <h4 id="electric-current-i"><a class="header" href="#electric-current-i">Electric Current [I]</a></h4>
 <p><code>[A]</code>, <code>amp</code>, <code>amps</code>, <code>ampere</code>, <code>amperes</code></p>
 <h4 id="thermodynamic-temperature-Θ"><a class="header" href="#thermodynamic-temperature-Θ">Thermodynamic Temperature [Θ]</a></h4>
@@ -322,20 +358,27 @@ energy = 1/2 * mass * velocity^2
 <p><code>[cd]</code>, <code>candela</code>, <code>candelas</code></p>
 <h3 id="named-derived-units"><a class="header" href="#named-derived-units">Named Derived Units</a></h3>
 <h4 id="plane-angle"><a class="header" href="#plane-angle">Plane Angle</a></h4>
-<p><code>[rad]</code>, <code>radian</code>, <code>radians</code></p>
+<p><code>[rad]</code>, <code>radian</code>, <code>radians</code>
+<code>[deg]</code>, <code>°</code>, <code>degree</code>, <code>degrees</code></p>
 <h4 id="solid-angle"><a class="header" href="#solid-angle">Solid Angle</a></h4>
 <p><code>[sr]</code>, <code>steradian</code>, <code>steradian</code>, <code>steradians</code></p>
 <h4 id="frequency"><a class="header" href="#frequency">Frequency</a></h4>
 <p><code>[Hz]</code>, <code>hertz</code></p>
 <h4 id="force--weight"><a class="header" href="#force--weight">Force / Weight</a></h4>
 <p><code>[N]</code>, <code>newton</code>, <code>newtons</code>
-<code>[lbf]</code>, <code>pound-force</code>, <code>pounds-force</code></p>
+<code>[lb]</code>, <code>[lbf]</code>, <code>pound</code>, <code>pounds</code>, <code>pound-force</code>, <code>pounds-force</code></p>
 <h4 id="pressure--stress"><a class="header" href="#pressure--stress">Pressure / Stress</a></h4>
 <p><code>[Pa]</code>, <code>pascal</code>, <code>pascals</code></p>
 <h4 id="energy--work--heat"><a class="header" href="#energy--work--heat">Energy / Work / Heat</a></h4>
-<p><code>[J]</code>, <code>joule</code>, <code>joules</code></p>
+<p><code>[J]</code>, <code>joule</code>, <code>joules</code>
+<code>[cal]</code>, <code>calorie</code>, <code>calories</code>
+<code>[Cal]</code> (note that <code>Cal</code> is equivalent to <code>kcal</code> or <code>kilocalorie</code>)
+<code>[BTU]</code>, <code>british_thermal_unit</code>, <code>british_thermal_units</code>
+<code>[eV]</code>, <code>electron_volt</code>, <code>electron_volts</code>
+<code>[Wh]</code>, <code>watt_hour</code>, <code>watt_hours</code></p>
 <h4 id="power--radiant-flux"><a class="header" href="#power--radiant-flux">Power / Radiant Flux</a></h4>
-<p><code>[W]</code>, <code>watt</code>, <code>watts</code></p>
+<p><code>[W]</code>, <code>watt</code>, <code>watts</code>
+<code>[hp]</code>, <code>horsepower</code></p>
 <h4 id="electric-charge--quantity-of-electricity"><a class="header" href="#electric-charge--quantity-of-electricity">Electric Charge / Quantity of Electricity</a></h4>
 <p><code>[C]</code>, <code>coulomb</code>, <code>coulombs</code></p>
 <h4 id="voltage--electrical-potential--emf"><a class="header" href="#voltage--electrical-potential--emf">Voltage / Electrical Potential / EMF</a></h4>
@@ -351,10 +394,10 @@ energy = 1/2 * mass * velocity^2
 <h4 id="magnetic-flux-density"><a class="header" href="#magnetic-flux-density">Magnetic Flux Density</a></h4>
 <p><code>[T]</code>, <code>tesla</code>, <code>teslas</code></p>
 <h4 id="inductance"><a class="header" href="#inductance">Inductance</a></h4>
-<p><code>[H]</code>, <code>henry</code>, <code>henries</code>, <code>henrys</code></p>
+<p><code>[H]</code>, <code>henry</code>, <code>henries</code></p>
 <h4 id="relative-temperature"><a class="header" href="#relative-temperature">Relative Temperature</a></h4>
-<p><code>[°C]</code>, <code>celsius</code>, <code>degrees-celsius</code><br />
-<code>[°F]</code>, <code>fahrenheit</code>, <code>degrees-fahrenheit</code></p>
+<p><code>[°C]</code>, <code>celsius</code>, <code>degrees_celsius</code>
+<code>[°F]</code>, <code>fahrenheit</code>, <code>degrees_fahrenheit</code></p>
 <h4 id="luminous-flux"><a class="header" href="#luminous-flux">Luminous Flux</a></h4>
 <p><code>[lm]</code>, <code>lumen</code>, <code>lumens</code></p>
 <h4 id="illuminance"><a class="header" href="#illuminance">Illuminance</a></h4>
