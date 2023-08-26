@@ -3,12 +3,12 @@
 Currently, only the python interpreter backend is available. To install it, you must have **python 3.11** or later installed. Then to install:
 1. Clone the repo
     ```bash
-    git clone git@github.com:david-andrew/dewy-lang.git
+    $ git clone git@github.com:david-andrew/dewy-lang.git
     ```
 2. Run the install script
     ```bash
-    cd dewy-lang
-    python install.py
+    $ cd dewy-lang
+    $ python install.py
     ```
 3. Log out and back in
 
