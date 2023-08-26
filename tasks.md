@@ -1,6 +1,6 @@
 [tasks]
 - overhaul the docs
-    - look into moving the docs build folder into mdbook folder if possible. should be `docs/` -> `docs/build/`, and `mdbook/` -> `docs/`
+    - add a hello many world entry that uses matrices, e.g. 6-DoF robot arm forward kinematics
 - pull out the old old python expression parser from the git history into its own branch
 - handling scope while parsing: parsing needs to be chain by chain, namely if a an expression binds a value to an identifier, later expressions should be able to get the type of that identifier!
 - include exmaple programs that do and don't work in the README. ideally this would be automated, e.g. on push, it would try to run them, and see if it is successful/has the correct output, vs raises exception/prints (pdb)
