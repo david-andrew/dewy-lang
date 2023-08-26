@@ -84,6 +84,7 @@ complex numbers
 my_complex0 = 2^/2 + 2i^/2
 my_complex1 = complex(2^/2, 2^/2)
 my_complex2 = complex(1, 45°)
+my_complex3 = 1 ∠ 45°
 ```
 
 ### Quaternions
