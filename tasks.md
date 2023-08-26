@@ -22,3 +22,4 @@
     ]
     ```    
 - also handling `;` for higher dimensional tensor literals (see julia syntax for example). Perhaps `;` wraps whatever expression it attaches to in something like `Colonize(expr)`, and then in most cases, that evaluates to `void`, but inside of an array, the array replaces `Colonize()` with the inner expression, and counts the number of `Colonize()` layers for determining how many dimensions the next line is offset by
+- ... shouldn't be an operator, it should be a literal. When ... is juxtaposed with something it does the unpacking, but when it is by itself, it is a literal ellipsis

@@ -286,9 +286,30 @@ sums = [
 
 ## Should units be their own token class, or just be pre-existing named identifiers?
 - if ID, then it makes it super easy to add new ones
-- if distinct class, makes it easier to handle how units have somewhat different precedence than other identifiers.
-   e.g. there's the whole `<number> <space> <unit>` construction that I'm not quite sure how to handle without units being their own type
+- if distinct class, makes it easier to handle parsing all the different combinations of units with their prefixes, abbreviations, plural forms, etc.
 
+I'm actually leaning towards having a feature for complex named identifiers. Basically you could define lexer rules that would check if an identifier matched some criteria, and then use that to refer to a specific value (which may be constructed from other values)
+
+So, something like:
+```dewy
+long_si_prefix_table = [
+    'kilo' -> 1e3
+    'mega' -> 1e6
+    ...
+]
+short_si_prefix_table = ...
+long_unit_table = ...
+short_unit_table = [
+    'm' -> //perhaps some sort of meter singleton
+    's' -> //...
+    'g' -> //...
+    ...
+]
+#complex_identifier(
+    //rules for parsing units with their prefixes (both abbreviated and written out)
+    //function for handling the result, combining from the tables above to get the value
+)
+```
 
 
 ## should we allow certain string prefix functions to be parsed as raw strings? [probably not]
