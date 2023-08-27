@@ -194,10 +194,11 @@ abs = x =&gt; if x &lt;? 0 -x else x
 <pre><code class="language-dewy">foo = a, (b=5) =&gt; a + b
 foo = a:int, (b:int=5), (c:int=10) =&gt; a + b + c
 </code></pre>
-<p>Alternatively, you can replace the tuple with an array literal, which is separated by spaced, meaning <code>=</code> will be at the correct precedence level without the need for parenthesis.</p>
-<pre><code class="language-dewy">foo = [a b=5] =&gt; a + b
-foo = [a:int b:int=5 c:int=10] =&gt; a + b + c
-</code></pre>
+<!-- Alternatively, you can replace the tuple with an array literal, which is separated by spaced, meaning `=` will be at the correct precedence level without the need for parenthesis. -->
+<!-- ```dewy -->
+<!-- foo = [a b=5] => a + b -->
+<!-- foo = [a:int b:int=5 c:int=10] => a + b + c -->
+<!-- ``` -->
 <h2 id="calling-functions"><a class="header" href="#calling-functions">Calling functions</a></h2>
 <p>TODO</p>
 <ul>
@@ -240,8 +241,8 @@ add5(-7)        //returns -2
 thirtyseven = @add5(32) //new function that takes 0 arguments
 thirtyseven   //returns 37
 </code></pre>
-<p>TODO-&gt;explain about overwriting arguments</p>
-<pre><code class="language-dewy">new_sum = (x, y) =&gt; thirtyseven(a=x, b=y)
+<p>TODO-&gt;explain about overwriting arguments. Also explain precedence requiring wrapping named arguments in parenthesis</p>
+<pre><code class="language-dewy">new_sum = (x, y) =&gt; thirtyseven((a=x), (b=y))
 </code></pre>
 
                     </main>
