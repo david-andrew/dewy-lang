@@ -690,8 +690,7 @@ arr[5..end-3] // 5th element to 4th to last element
 arr[end-3..]  // 4th to last element to last element
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="object-and-class-types"><a class="header" href="#object-and-class-types">Object and Class Types</a></h1>
-<h2 id="todo"><a class="header" href="#todo">TODO</a></h2>
-<p>Object types are basically just containers containing assigments of variables and functions</p>
+<p>Object types are basically just containers containing assignments of variables and functions</p>
 <pre><code>my_obj = [
     a = 'apple'
     b = 'banana'
@@ -724,34 +723,29 @@ my_obj.p2  //returns 'pi'
 }
 </code></pre>
 <p>There will not be any sort of <code>this</code> or <code>self</code> parameter as in other languages to access an objects members from within itself/any contained functions. Instead because the functions are at the same scope as the declaration of the objects members, those members are available to the function. </p>
-<p>Note that here there is a meaningful distinction between referencing and copying a parameter within the function body.</p>
-<pre><code>//shorthand constructor declaration
-my_class0 = (param1) =&gt; [
+<p>If we remove any unnecessary syntax, the shorthand for constructing an object looks like this:</p>
+<pre><code>my_class0 = param1 =&gt; [
     p1 = param1
     func = () =&gt; printl('p1 is {p1}')
 ]
-
-my_class1 = (param1) =&gt; [
-    p1 = param1
-    func = () =&gt; printl('p1 is {@p1}')
+</code></pre>
+<p>that is, just a function that returns an object literal, no need for braces or <code>return</code>.</p>
+<h2 id="dunder-methods"><a class="header" href="#dunder-methods">Dunder Methods</a></h2>
+<p>Similar to python, objects can define custom so-called &quot;double-underscore&quot; or &quot;dunder&quot; methods, which hook into the language's built-in functionality. </p>
+<pre><code>
+// Define a point class with a custom add method
+Point = (x:number,y:number) =&gt; [
+    x = x  //TBD if these are necessary since x/y are already in scope
+    y = y
+    __add__ = other:Point =&gt; Point(x + other.x, y + other.y)
 ]
 
-my_obj0 = my_class0('apple')
-my_obj1 = my_class1('apple')
-
-my_obj0.func  //prints 'p1 is apple'
-my_obj1.func  //prints 'p1 is apple'
-
-//change the member data for each object
-my_obj0.p1 = 'pie'
-my_obj1.p1 = 'pie'
-
-//re-call func to see how the output changes
-my_obj0.func  //prints 'p1 is apple'
-my_obj1.func  //prints 'p1 is pie'
-
+// Create two points and add them together
+p1 = Point(1,2)
+p2 = Point(3,4)
+p3 = p1 + p2
 </code></pre>
-<p>notice how when <code>func</code> doesn't reference the parameters using <code>@</code> that their original value gets printed, while using <code>@</code> means that the new updated value is used. This is because in the first instance, the parameters in the function are copied, while the second instance references the live parameter in the object scope.</p>
+<p>(TODO: longer explanation)</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="function-types"><a class="header" href="#function-types">Function Types</a></h1>
 <p>Functions are first class citizens in Dewy. In fact many concepts from functional programming are included in Dewy, as they frequently allow for cleaner and more concise code.</p>
 <h2 id="function-literals"><a class="header" href="#function-literals">Function Literals</a></h2>
