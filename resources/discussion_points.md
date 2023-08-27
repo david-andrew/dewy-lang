@@ -694,3 +694,75 @@ simply doing `name = value` may or may not be allowed depending on if name is al
 - if `name` does not exist yet, then this is equivalent to `let name = value`
 - if `name` exists and was declared with `let`, then this is equivalent to updating that instance of `name` with the new value
 - if `name` exists and was declared with `const` then this will fail at compile-time
+
+
+## Precedence of comma vs assignment [leaning towards having two approaches: 1) requiring parenthesis around default function arguments, e.g. `foo = a,(b=1),(c=2) => a+b+c`. And 2) array literals which have the correct precedence: `foo = [a b=5 c=10] => a+b+c`]
+There are situations when comma needs to have higher precedence than assignment, but also situations where it is the opposite:
+```dewy
+//comma needs lower precedence
+foo = (a, b=1, c=2) => a+b+c
+
+//comma needs higher precedence
+a,b,c = 1,2,3
+```
+
+possibly solved by making comma have lower precedence and requiring parenthesis in the second case:
+```dewy
+(a,b,c) = (1,2,3)
+```
+however I do not like this, as it decreases flexibility in the language, and prevents the ability of removing parenthesis from many tuple expressions, which is laborious.
+
+Another alternative is to introduce a higher precedence version of the assignment operator
+```dewy
+foo = (a, b:=1, c:=2) => a+b+c
+```
+The problem I have here is that other than the walrus operator, I'm not sure I can think of any syntax that I like for the operator. Unfortunately the walrus operator itself was going to have the same precedence as the assignment operator, so I'd have to forgo having it if another operator syntax can't be found. Not the end of the world though since the walrus operator's effect can be pretty simply achieved
+```dewy
+//with walrus operator
+loop (chunk := get_next_chunk())? {
+    //do stuff with chunk
+}
+
+//equivalent
+loop (chunk = get_next_chunk() chunk?) {
+    //do stuff with chunk
+}
+
+The nice thing about having the higher precedence assignment operator is that it allows us to remove parenthesis from argument lists in a function declaration:
+```dewy
+foo = a, b:=1, c:=2 => a+b+c
+```
+
+Possible syntaxes:
+- `foo = a:int, (b:int=1), (c:int=2) => a+b+c`
+- `foo = a:int, b:int:=1, c:int:=2 => a+b+c`
+- `foo = a:int, b:int<-1, c:int<-2 => a+b+c`
+- `foo = a:int, b:int#=1, c:int#=2 => a+b+c`
+- `foo = a:int, b:int=1, c:int=2 => a+b+c`
+- `foo = a:int, b:int~1, c:int~2 => a+b+c`
+- `foo = a:int, b:int<=1, c:int<=2 => a+b+c`
+- `foo = a:int, b:int$1, c:int$2 => a+b+c`
+- `foo = a:int, b:int::1, c:int::2 => a+b+c`
+- `foo = a:int, b:int$=1, c:int$=2 => a+b+c`
+- `foo = a:int, b:int[=]1, c:int[=]2 => a+b+c`
+- `foo = a:int, b:int(1), c:int(2) => a+b+c`
+- `foo = a:int, b:int<>1, c:int<>2 => a+b+c`
+
+I think the best case is `foo = a:int, (b:int=1), (c:int=2) => a+b+c`.
+- it forces the developer to be more aware of the precedence of operators in the language
+- it is the most explicit and intuitive about what is happening (though not necessarily intuitive that it would be necessary to do this way)
+- it makes use of the existing language semantics, without introducing new operators
+
+
+A somewhat radical take, but technically within the rules of the language is to use array literals for the argument list
+```dewy
+foo = [a b=5] => a + b
+foo = [a:int b:int=5 c:int=10] => a + b + c
+```
+
+This is potentially better than requiring parenthesis:
+- since arrays are space separated, the assignment is parsed logically as one would expect
+
+It does bring into question what the purpose of tuples are. Why not just use array syntax everywhere with no commas for anything?
+
+Or we could just allow both.

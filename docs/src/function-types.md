@@ -7,45 +7,55 @@ Functions are first class citizens in Dewy. In fact many concepts from functiona
 To create a function, simply bind a function literal to a variable
 
 ```dewy
-my_function = () => 
-{ 
-    printn('You called my function!') 
-}
+my_function = () => { printl'You called my function!' }
 
-my_function()  //calls the function
+my_function  //calls the function
 ```
 
-In the above example, the function takes no input arguments, and doesn't return any values. Instead is simply prints a string to the terminal
-
+A function literal consists of the arguments, followed by the `=>` operator, followed by a single expression that is the function body. In the above example, the function takes no input arguments, and doesn't return any values. Instead is simply prints a string to the terminal.
 
 Here's an example that takes two arguments
 
 ```dewy
-pythag_length = (a, b) => 
-{ 
-    return (a^2 + b^2)^/2
-}
+pythag_length = (a, b) => { return (a^2 + b^2)^/2 }
 ```
 
-In fact we can simplify the above function's declaration quite a bit via syntactic sugar
+In fact we can simplify the above function's declaration quite a bit since blocks return expressions present in the body.
 
 ```dewy
 pythag_length = (a, b) => (a^2 + b^2)^/2
 ```
 
-In fact, if we have exactly one argument, we can omit the parenthesis around the argument list
+And, because of precedence rules, we can omit the parenthesis around the argument list
 
 ```dewy
+pythag_length = a, b => (a^2 + b^2)^/2
 abs = x => if x <? 0 -x else x
 ```
 
 Note that zero arguments require an empty pair of parenthesis, in order to be parsed correctly
 
 ```dewy
-foo = () => printl('bar')
+foo = () => printl'bar'
 ```
 
-TODO->Originally I had the syntax be `@(args) => {}`, but I'm thinking that we can actually probably omit the `@` because as an operator, it doesn't really make sense here. TODO is to make a final decision on this
+This is because a function literal is parsed as `<left> => <right>`, so something must always be present on the left side of the `=>` operator.
+
+### Default Arguments
+Function arguments can have default values, which are used if the argument is not specified in the function call. **Note:** because comma `,` has higher precedence than `=`, the default value must be wrapped in parenthesis.
+
+```dewy
+foo = a, (b=5) => a + b
+foo = a:int, (b:int=5), (c:int=10) => a + b + c
+```
+
+Alternatively, you can replace the tuple with an array literal, which is separated by spaced, meaning `=` will be at the correct precedence level without the need for parenthesis.
+
+```dewy
+foo = [a b=5] => a + b
+foo = [a:int b:int=5 c:int=10] => a + b + c
+```
+
 
 ## Calling functions
 
@@ -68,7 +78,7 @@ TODO
 First note that if you want to pass a function around as an object, you need to get a handle to the function using the `@` ("handle") operator.
 
 ```dewy
-my_func = () => printl('foo')
+my_func = () => printl'foo'
 
 reference_to_my_func = @my_func
 ```
@@ -79,7 +89,7 @@ If you don't include the `@` operator, then the evaluation of the right-hand sid
 reference_to_my_func = my_func  //this doesn't work
 ```
 
-what happens is `my_func` prints out "foo" to the command line, and then since it returns no value, `reference_to_my_func` is `undefined`. If `my_func` required arguments, we'd actually get a compilation error at this point, as we essentially are trying to call my_func without an arguments.
+what happens is `my_func` prints out "foo" to the command line, and then since it returns no value, `reference_to_my_func` is not able to be assigned, causing a compiler error. We'd also get a compiler error if `my_func` required arguments, as we essentially are trying to call my_func without an arguments.
 
 ```dewy
 another_func = (a, b, c, x) => a^2*x + b*x + c
@@ -102,7 +112,7 @@ add5(24)        //returns 29
 add5(-7)        //returns -2
 
 thirtyseven = @add5(32) //new function that takes 0 arguments
-thirtyseven()   //returns 37
+thirtyseven   //returns 37
 ```
 
 TODO->explain about overwriting arguments

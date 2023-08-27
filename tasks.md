@@ -1,4 +1,5 @@
 [tasks]
+- make all operator tokens inherit from operator_t, rather than just token. this should simplify some of the type checks that want to know if something is an operator
 - overhaul the docs
     - add a hello many world entry that uses matrices, e.g. 6-DoF robot arm forward kinematics
 - pull out the old old python expression parser from the git history into its own branch
