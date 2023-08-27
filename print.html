@@ -826,70 +826,12 @@ thirtyseven   //returns 37
 <div style="break-before: page; page-break-before: always;"></div><h1 id="operators"><a class="header" href="#operators">Operators</a></h1>
 <p>Dewy is a 100% expression-based language, meaning operators are its bread and butter. Dewy has 3 types of operators:</p>
 <ul>
-<li>prefix: come before the expression</li>
-<li>infix: come between two expressions</li>
-<li>postfix: come after the expression</li>
+<li>unary prefix: come before the expression</li>
+<li>binary infix: come between two expressions</li>
+<li>unary postfix: come after the expression</li>
 </ul>
-<p>Additionally every operator has a precedence level, and an associativity. The precedence level determines the order in which operators in a compound expression are evaluated. Associativity determines the order of evaluation when multiple operators of the same precedence level are present in a compound expression. Associativity can be:</p>
-<ul>
-<li>left-to-right</li>
-<li>right-to-left</li>
-<li>prefix</li>
-<li>postfix</li>
-<li>none (typically these expressions generate a single node in the AST)</li>
-<li>fail (i.e. the expression is invalid if multiple operators of the same precedence level are present)</li>
-</ul>
-<p>(TODO: some way of populating this table with the current full precedence table in the code)</p>
-<p>(TODO: this table is missing several operators)</p>
-<div class="table-wrapper"><table><thead><tr><th>Operator</th><th>Precedence</th><th>Associativity</th><th>Name</th></tr></thead><tbody>
-<tr><td><code>@</code></td><td>15</td><td>prefix</td><td>reference</td></tr>
-<tr><td><code>.</code></td><td>14</td><td>left</td><td>access</td></tr>
-<tr><td>Jux-call</td><td>14</td><td>left</td><td>jux call</td></tr>
-<tr><td>Jux-index</td><td>14</td><td>left</td><td>jux index</td></tr>
-<tr><td><code>^</code></td><td>13</td><td>right</td><td>power</td></tr>
-<tr><td>Jux-mul</td><td>12</td><td>left</td><td>jux mul</td></tr>
-<tr><td><code>*</code></td><td>11</td><td>left</td><td>multiply</td></tr>
-<tr><td><code>/</code></td><td>11</td><td>left</td><td>divide</td></tr>
-<tr><td><code>%</code></td><td>11</td><td>left</td><td>modulus</td></tr>
-<tr><td><code>+</code></td><td>10</td><td>left</td><td>add</td></tr>
-<tr><td><code>-</code></td><td>10</td><td>left</td><td>subtract</td></tr>
-<tr><td><code>&lt;&lt;</code></td><td>9</td><td>left</td><td>left shift</td></tr>
-<tr><td><code>&gt;&gt;</code></td><td>9</td><td>left</td><td>right shift</td></tr>
-<tr><td><code>&gt;&gt;&gt;</code></td><td>9</td><td>left</td><td>rotate left no carry</td></tr>
-<tr><td><code>&lt;&lt;&lt;</code></td><td>9</td><td>left</td><td>rotate right no carry</td></tr>
-<tr><td><code>&lt;&lt;!</code></td><td>9</td><td>left</td><td>rotate left with carry</td></tr>
-<tr><td><code>!&gt;&gt;</code></td><td>9</td><td>left</td><td>rotate right with carry</td></tr>
-<tr><td><code>,</code></td><td>8</td><td>none</td><td>comma</td></tr>
-<tr><td>Jux-range</td><td>7</td><td>left</td><td>jux range</td></tr>
-<tr><td><code>&gt;?</code></td><td>6</td><td>left</td><td>greater than</td></tr>
-<tr><td><code>&lt;?</code></td><td>6</td><td>left</td><td>less than</td></tr>
-<tr><td><code>&gt;=?</code></td><td>6</td><td>left</td><td>greater than or equal</td></tr>
-<tr><td><code>&lt;=?</code></td><td>6</td><td>left</td><td>less than or equal</td></tr>
-<tr><td><code>=?</code></td><td>6</td><td>left</td><td>equal</td></tr>
-<tr><td><code>and</code></td><td>5</td><td>left</td><td>and</td></tr>
-<tr><td><code>nand</code></td><td>5</td><td>left</td><td>nand</td></tr>
-<tr><td><code>&amp;</code></td><td>5</td><td>left</td><td>and</td></tr>
-<tr><td><code>xor</code></td><td>4</td><td>left</td><td>xor</td></tr>
-<tr><td><code>xnor</code></td><td>4</td><td>left</td><td>xnor</td></tr>
-<tr><td><code>or</code></td><td>3</td><td>left</td><td>or</td></tr>
-<tr><td><code>nor</code></td><td>3</td><td>left</td><td>nor</td></tr>
-<tr><td>|</td><td>3</td><td>left</td><td>or</td></tr>
-<tr><td><code>=&gt;</code></td><td>2</td><td>right</td><td>function</td></tr>
-<tr><td><code>=</code></td><td>1</td><td>fail</td><td>bind</td></tr>
-<tr><td><code>else</code></td><td>0</td><td>none</td><td>flow alternate</td></tr>
-<tr><td><code>;</code></td><td>-1</td><td>postfix</td><td>semicolon</td></tr>
-<tr><td>space</td><td>-2</td><td>left</td><td>space</td></tr>
-<tr><td><code>in</code></td><td>TBD</td><td>TBD</td><td>in</td></tr>
-<tr><td><code>as</code></td><td>TBD</td><td>TBD</td><td>as</td></tr>
-<tr><td><code>transmute</code></td><td>TBD</td><td>TBD</td><td>transmute</td></tr>
-<tr><td>|&gt;</td><td>TBD</td><td>TBD</td><td>pipe</td></tr>
-<tr><td>&lt;|</td><td>TBD</td><td>TBD</td><td>reverse pipe</td></tr>
-<tr><td><code>-&gt;</code></td><td>TBD</td><td>TBD</td><td>right-pointer</td></tr>
-<tr><td><code>&lt;-&gt;</code></td><td>TBD</td><td>TBD</td><td>bi-pointer</td></tr>
-<tr><td><code>&lt;-</code></td><td>TBD</td><td>TBD</td><td>left-pointer</td></tr>
-<tr><td><code>:</code></td><td>TBD</td><td>TBD</td><td>type annotation</td></tr>
-</tbody></table>
-</div>
+<h2 id="binary-operators"><a class="header" href="#binary-operators">Binary Operators</a></h2>
+<p>(TODO: this is missing several operators, and may have some extra ones that are no longer planned)</p>
 <p><strong>Basic Math Operations</strong></p>
 <ul>
 <li><code>+</code> plus</li>
@@ -912,8 +854,8 @@ thirtyseven   //returns 37
 </ul>
 <p><strong>bit-shift operations</strong></p>
 <ul>
-<li><code>&lt;&lt;&lt;!</code> rotate left through carry bit</li>
-<li><code>!&gt;&gt;&gt;</code> rotate right through carry bit</li>
+<li><code>&lt;&lt;!</code> rotate left through carry bit</li>
+<li><code>!&gt;&gt;</code> rotate right through carry bit</li>
 <li><code>&lt;&lt;&lt;</code> rotate left no carry bit</li>
 <li><code>&gt;&gt;&gt;</code> rotate right no carry bit</li>
 <li><code>&lt;&lt;</code> shift left (arithmetic and logical are the same for left-shift) </li>
@@ -921,21 +863,18 @@ thirtyseven   //returns 37
 </ul>
 <p><strong>boolean returning operations</strong></p>
 <ul>
-<li><code>=?</code> equal</li>
-<li><code>not?</code> not equal</li>
+<li><code>=?</code> equal<!-- - `not?` not equal --></li>
 <li><code>&gt;?</code> greater than</li>
 <li><code>&gt;=?</code> greater than or equal</li>
 <li><code>&lt;?</code> less than</li>
 <li><code>&lt;=?</code> less than or equal</li>
 <li><code>in?</code> is a member of</li>
 </ul>
-<p><strong>Special Operators</strong></p>
+<!-- **Special Operators**
+- `<=>` spaceship (three-way comparison) -->
+<p><strong>colon operator</strong></p>
 <ul>
-<li><code>&lt;=&gt;</code> spaceship (three-way comparison)</li>
-</ul>
-<p><strong>colon operator</strong> or <strong>list creator operator</strong></p>
-<ul>
-<li><code>:</code> creates a list/sequence</li>
+<li><code>:</code> apply a type annotation</li>
 </ul>
 <p><strong>dictionary pointers</strong></p>
 <ul>
@@ -955,19 +894,26 @@ thirtyseven   //returns 37
 <p><strong>Assignment operators</strong></p>
 <ul>
 <li><code>=</code> binds the righthand expression to the lefthand identifier as a statement (i.e. nothing is returned)</li>
-<li><code>:=</code> (walrus operator) same as normal assignment operator, but also returns the righthand side as an expression available for use</li>
+<li><code>:=</code> (walrus operator) same as normal assignment operator, but also returns the righthand side as an expression available for use.</li>
 </ul>
-<h2 id="notes"><a class="header" href="#notes">Notes</a></h2>
+<p><strong>Juxtaposition</strong></p>
+<p>(TODO: explain how juxtaposition works)</p>
+<h2 id="unary-prefix-operators"><a class="header" href="#unary-prefix-operators">Unary Prefix Operators</a></h2>
+<p>(TODO: prefix operators)</p>
+<h2 id="unary-postfix-operators"><a class="header" href="#unary-postfix-operators">Unary Postfix Operators</a></h2>
+<p>(TODO: postfix operators)</p>
+<h2 id="in-place-assignment"><a class="header" href="#in-place-assignment">In-place Assignment</a></h2>
 <p>any of the logical/bitwise operators, as well as the boolean returning operators can be preceeded by <code>not</code> which will then cause the inverse of the operation to be returned. e.g. <code>not and</code> is equivalent to <code>nand</code>, <code>not &lt;?</code> is equivalent to <code>&gt;=?</code>, etc.</p>
 <p>any of these operations can be appended with an <code>=</code> sign to make them into an assignment (this probably excludes <code>@</code> and <code>!</code> and any other unary operators)
 e.g. </p>
 <pre><code>a += 5  //is equivalent to a = a + 5
 a &lt;?= 5  //is equivalent to a = a &lt;? 5
-a !&gt;&gt;&gt;= 5  //is equivalent to a = a !&gt;&gt;&gt; 5
+a !&gt;&gt;= 5  //is equivalent to a = a !&gt;&gt; 5
 a xor= false  //is equivalent to a = a xor false
 </code></pre>
-<p>Can the <code>=</code> sign be (optionally) separated from the operation? e.g. <code>+=</code> is equivalent to <code>+ =</code>, <code>xor=</code> is equivalent to <code>xor =</code>, etc. I think it should be allowed in this case, so long as the first operator is in a single piece</p>
+<p>TBD if the <code>=</code> sign can be (optionally) separated from the operation. e.g. <code>+=</code> is equivalent to <code>+ =</code>, <code>xor=</code> is equivalent to <code>xor =</code>, etc. I think it should be allowed in this case, so long as the first operator is in a single piece</p>
 <p>This should also probably work with element-wise operations where each element in the list is updated according to the operation (can be done in parallel)</p>
+<h2 id="elementwise-operations"><a class="header" href="#elementwise-operations">Elementwise Operations</a></h2>
 <p>the elementwise operator <code>.</code> can be prepended to any operation to make it be performed on each element in a vector/matrix/tensor/etc. 
 e.g. </p>
 <pre><code>//find the prime factors of 20
@@ -984,27 +930,48 @@ primes = [2 3 5 7 11 13 17 19]
 p_factors = primes[20 .% primes =? 0]
 </code></pre>
 <p>This works if either the either first operand is a list, or the second is a list, or both are lists with the exact same shape</p>
-<p>The current precedence levels for the operations are as follows:</p>
-<pre><code>precedence_levels = 
-[
-    0 -&gt; [ '=' ]  //assignmnent (also += &lt;?= xor= etc.)
-    1 -&gt; [ 'and' 'or' 'xor' 'not' 'nand' 'nor' 'xnor' ]  // 'not' might actually be inserted in between 7 and 8 as it's a unary operator
-    2 -&gt; [ '=?' 'not?' '&gt;?' '&gt;=?' '&lt;?' '&lt;=?' 'in?' ]
-    3 -&gt; [ '!&gt;&gt;&gt;' '&lt;&lt;&lt;!' '&gt;&gt;&gt;' '&lt;&lt;&lt;' '&gt;&gt;' '&lt;&lt;' ]
-    4 -&gt; [ '+' '-' ]
-    5 -&gt; [ '*' '/' '%' ]
-    6 -&gt; [ 'm' 'd' ]  //unit versions of divide (d) and multiply (m), bind more tightly than normal arithmetic. You can't actually use these in the language
-    7 -&gt; [ '^' ]
-    8 -&gt; [ ':' ]  //list maker e.g. 1:10. This probably should be much lower, i.e. between 1 and 2, or 2 and 3
-    9 -&gt; [ '!' ]
-    10 -&gt; [ 'a.b' 'a()' 'a[]' ]  //attribute access e.g. some_obj.value
-    11 -&gt; [ '@' ]  //11 might actually swap with 10
-    12 -&gt; [ 'if' ]  //ternary if
-    13 -&gt; [ '()' ]  //parenthesis groupings
-    14 -&gt; [ '{}' ]  //block grouping
-]
-</code></pre>
-<p>If we add a three-way comparison operator, it goes between levels 0 and 1. Also any multi-operators e.g. <code>100^/2</code> for sqrt, or <code>5+-1</code>, etc. have a precedence at the level of the first operator in the chain (i.e. all following operators have no effect on the precedence).
+<h2 id="precedence"><a class="header" href="#precedence">Precedence</a></h2>
+<p>Every operator has a precedence level, and an associativity. The precedence level determines the order in which operators in a compound expression are evaluated. Associativity determines the order of evaluation when multiple operators of the same precedence level are present in a compound expression. Associativity can be:</p>
+<ul>
+<li>left-to-right</li>
+<li>right-to-left</li>
+<li>prefix</li>
+<li>postfix</li>
+<li>none (typically these expressions generate a single node in the AST)</li>
+<li>fail (i.e. the expression is invalid if multiple operators of the same precedence level are present)</li>
+</ul>
+<p>(TODO: some way of populating this table with the current full precedence table in the code)</p>
+<p>(TODO: this table is missing several operators)</p>
+<div class="table-wrapper"><table><thead><tr><th>Precedence</th><th>Operator</th><th>Name</th><th>Associativity</th></tr></thead><tbody>
+<tr><td>14</td><td><code>@</code></td><td>reference</td><td>prefix</td></tr>
+<tr><td>13</td><td><code>.</code><br>juxtapose<br>juxtapose</td><td>access<br>jux-call<br>jux-index</td><td>left</td></tr>
+<tr><td>12</td><td><code>^</code></td><td>power</td><td>right</td></tr>
+<tr><td>11</td><td>juxtapose</td><td>jux-multiply</td><td>left</td></tr>
+<tr><td>10</td><td><code>*</code><br><code>/</code><br><code>%</code></td><td>multiply<br>divide<br>modulus</td><td>left</td></tr>
+<tr><td>9</td><td><code>+</code><br><code>-</code></td><td>add<br>subtract</td><td>left</td></tr>
+<tr><td>8</td><td><code>&lt;&lt;</code><br><code>&gt;&gt;</code><br><code>&lt;&lt;&lt;</code><br><code>&gt;&gt;&gt;</code><br><code>&lt;&lt;!</code><br><code>!&gt;&gt;</code></td><td>left shift<br>right shift<br>rotate right no carry<br>rotate left no carry<br>rotate left with carry<br>rotate right with carry</td><td>left</td></tr>
+<tr><td>7</td><td><code>=?</code><br><code>&gt;?</code><br><code>&lt;?</code><br><code>&gt;=?</code><br><code>&lt;=?</code></td><td>equal<br>greater than<br>less than<br>greater than or equal<br>less than or equal</td><td>left</td></tr>
+<tr><td>6</td><td><code>and</code><br><code>nand</code><br><code>&amp;</code></td><td>and<br>nand<br>and</td><td>left</td></tr>
+<tr><td>5</td><td><code>xor</code><br><code>xnor</code></td><td>xor<br>xnor</td><td>left</td></tr>
+<tr><td>4</td><td><code>or</code><br><code>nor</code><br>|</td><td>or<br>nor<br>or</td><td>left</td></tr>
+<tr><td>3</td><td><code>comma</code></td><td>comma</td><td>none</td></tr>
+<tr><td>#</td><td>juxtapose</td><td>jux-range</td><td>none</td></tr>
+<tr><td>2</td><td><code>=&gt;</code></td><td>function arrow</td><td>right</td></tr>
+<tr><td>1</td><td><code>=</code></td><td>bind</td><td>fail</td></tr>
+<tr><td>0</td><td><code>else</code></td><td>flow alternate</td><td>none</td></tr>
+<tr><td>-1</td><td>space</td><td>space</td><td>left</td></tr>
+<tr><td>TBD</td><td><code>in</code></td><td>in</td><td>TBD</td></tr>
+<tr><td>TBD</td><td><code>as</code></td><td>as</td><td>TBD</td></tr>
+<tr><td>TBD</td><td><code>transmute</code></td><td>transmute</td><td>TBD</td></tr>
+<tr><td>TBD</td><td>|&gt;</td><td>pipe</td><td>TBD</td></tr>
+<tr><td>TBD</td><td>&lt;|</td><td>reverse pipe</td><td>TBD</td></tr>
+<tr><td>TBD</td><td><code>-&gt;</code></td><td>right-pointer</td><td>TBD</td></tr>
+<tr><td>TBD</td><td><code>&lt;-&gt;</code></td><td>bi-pointer</td><td>TBD</td></tr>
+<tr><td>TBD</td><td><code>&lt;-</code></td><td>left-pointer</td><td>TBD</td></tr>
+<tr><td>TBD</td><td><code>:</code></td><td>type annotation</td><td>TBD</td></tr>
+</tbody></table>
+</div>
+<p>multi-operators e.g. <code>100^/2</code> for sqrt, or <code>5+-1</code>, etc. have a precedence at the level of the first operator in the chain (i.e. all following operators have no effect on the precedence).
 Also any instances of elementwise operators (e.g. <code>.+</code> <code>.=</code> <code>.xor</code> etc.) are at the level of precedence as the operator they're attached to. Assignment operators on the other hand are all at the same level, regardless of the type of operator they're attached to (e.g. <code>+=</code> <code>&lt;?=</code> <code>&lt;&lt;=</code> <code>nand=</code> etc.)</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="numbers-and-bases"><a class="header" href="#numbers-and-bases">Numbers and Bases</a></h1>
 <p>literal numbers in various bases can be specified using prefixes before the number</p>
