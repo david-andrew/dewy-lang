@@ -1,9 +1,7 @@
 # Object and Class Types
 
 
-## TODO
-
-Object types are basically just containers containing assigments of variables and functions
+Object types are basically just containers containing assignments of variables and functions
 
 ```
 my_obj = [
@@ -51,34 +49,35 @@ constructor = (param1, param2) => {
 
 There will not be any sort of `this` or `self` parameter as in other languages to access an objects members from within itself/any contained functions. Instead because the functions are at the same scope as the declaration of the objects members, those members are available to the function. 
 
-Note that here there is a meaningful distinction between referencing and copying a parameter within the function body.
+
+
+If we remove any unnecessary syntax, the shorthand for constructing an object looks like this:
 
 ```
-//shorthand constructor declaration
-my_class0 = (param1) => [
+my_class0 = param1 => [
     p1 = param1
     func = () => printl('p1 is {p1}')
 ]
+```
 
-my_class1 = (param1) => [
-    p1 = param1
-    func = () => printl('p1 is {@p1}')
-]
+that is, just a function that returns an object literal, no need for braces or `return`.
 
-my_obj0 = my_class0('apple')
-my_obj1 = my_class1('apple')
-
-my_obj0.func  //prints 'p1 is apple'
-my_obj1.func  //prints 'p1 is apple'
-
-//change the member data for each object
-my_obj0.p1 = 'pie'
-my_obj1.p1 = 'pie'
-
-//re-call func to see how the output changes
-my_obj0.func  //prints 'p1 is apple'
-my_obj1.func  //prints 'p1 is pie'
+## Dunder Methods
+Similar to python, objects can define custom so-called "double-underscore" or "dunder" methods, which hook into the language's built-in functionality. 
 
 ```
 
-notice how when `func` doesn't reference the parameters using `@` that their original value gets printed, while using `@` means that the new updated value is used. This is because in the first instance, the parameters in the function are copied, while the second instance references the live parameter in the object scope.
+// Define a point class with a custom add method
+Point = (x:number,y:number) => [
+    x = x  //TBD if these are necessary since x/y are already in scope
+    y = y
+    __add__ = other:Point => Point(x + other.x, y + other.y)
+]
+
+// Create two points and add them together
+p1 = Point(1,2)
+p2 = Point(3,4)
+p3 = p1 + p2
+```
+
+(TODO: longer explanation)
