@@ -49,12 +49,12 @@ foo = a, (b=5) => a + b
 foo = a:int, (b:int=5), (c:int=10) => a + b + c
 ```
 
-Alternatively, you can replace the tuple with an array literal, which is separated by spaced, meaning `=` will be at the correct precedence level without the need for parenthesis.
+<!-- Alternatively, you can replace the tuple with an array literal, which is separated by spaced, meaning `=` will be at the correct precedence level without the need for parenthesis. -->
 
-```dewy
-foo = [a b=5] => a + b
-foo = [a:int b:int=5 c:int=10] => a + b + c
-```
+<!-- ```dewy -->
+<!-- foo = [a b=5] => a + b -->
+<!-- foo = [a:int b:int=5 c:int=10] => a + b + c -->
+<!-- ``` -->
 
 
 ## Calling functions
@@ -115,9 +115,9 @@ thirtyseven = @add5(32) //new function that takes 0 arguments
 thirtyseven   //returns 37
 ```
 
-TODO->explain about overwriting arguments
+TODO->explain about overwriting arguments. Also explain precedence requiring wrapping named arguments in parenthesis
 
 ```dewy
-new_sum = (x, y) => thirtyseven(a=x, b=y)
+new_sum = (x, y) => thirtyseven((a=x), (b=y))
 ```
 
