@@ -170,30 +170,34 @@
 <p>Functions are first class citizens in Dewy. In fact many concepts from functional programming are included in Dewy, as they frequently allow for cleaner and more concise code.</p>
 <h2 id="function-literals"><a class="header" href="#function-literals">Function Literals</a></h2>
 <p>To create a function, simply bind a function literal to a variable</p>
-<pre><code class="language-dewy">my_function = () =&gt; 
-{ 
-    printn('You called my function!') 
-}
+<pre><code class="language-dewy">my_function = () =&gt; { printl'You called my function!' }
 
-my_function()  //calls the function
+my_function  //calls the function
 </code></pre>
-<p>In the above example, the function takes no input arguments, and doesn't return any values. Instead is simply prints a string to the terminal</p>
+<p>A function literal consists of the arguments, followed by the <code>=&gt;</code> operator, followed by a single expression that is the function body. In the above example, the function takes no input arguments, and doesn't return any values. Instead is simply prints a string to the terminal.</p>
 <p>Here's an example that takes two arguments</p>
-<pre><code class="language-dewy">pythag_length = (a, b) =&gt; 
-{ 
-    return (a^2 + b^2)^/2
-}
+<pre><code class="language-dewy">pythag_length = (a, b) =&gt; { return (a^2 + b^2)^/2 }
 </code></pre>
-<p>In fact we can simplify the above function's declaration quite a bit via syntactic sugar</p>
+<p>In fact we can simplify the above function's declaration quite a bit since blocks return expressions present in the body.</p>
 <pre><code class="language-dewy">pythag_length = (a, b) =&gt; (a^2 + b^2)^/2
 </code></pre>
-<p>In fact, if we have exactly one argument, we can omit the parenthesis around the argument list</p>
-<pre><code class="language-dewy">abs = x =&gt; if x &lt;? 0 -x else x
+<p>And, because of precedence rules, we can omit the parenthesis around the argument list</p>
+<pre><code class="language-dewy">pythag_length = a, b =&gt; (a^2 + b^2)^/2
+abs = x =&gt; if x &lt;? 0 -x else x
 </code></pre>
 <p>Note that zero arguments require an empty pair of parenthesis, in order to be parsed correctly</p>
-<pre><code class="language-dewy">foo = () =&gt; printl('bar')
+<pre><code class="language-dewy">foo = () =&gt; printl'bar'
 </code></pre>
-<p>TODO-&gt;Originally I had the syntax be <code>@(args) =&gt; {}</code>, but I'm thinking that we can actually probably omit the <code>@</code> because as an operator, it doesn't really make sense here. TODO is to make a final decision on this</p>
+<p>This is because a function literal is parsed as <code>&lt;left&gt; =&gt; &lt;right&gt;</code>, so something must always be present on the left side of the <code>=&gt;</code> operator.</p>
+<h3 id="default-arguments"><a class="header" href="#default-arguments">Default Arguments</a></h3>
+<p>Function arguments can have default values, which are used if the argument is not specified in the function call. <strong>Note:</strong> because comma <code>,</code> has higher precedence than <code>=</code>, the default value must be wrapped in parenthesis.</p>
+<pre><code class="language-dewy">foo = a, (b=5) =&gt; a + b
+foo = a:int, (b:int=5), (c:int=10) =&gt; a + b + c
+</code></pre>
+<p>Alternatively, you can replace the tuple with an array literal, which is separated by spaced, meaning <code>=</code> will be at the correct precedence level without the need for parenthesis.</p>
+<pre><code class="language-dewy">foo = [a b=5] =&gt; a + b
+foo = [a:int b:int=5 c:int=10] =&gt; a + b + c
+</code></pre>
 <h2 id="calling-functions"><a class="header" href="#calling-functions">Calling functions</a></h2>
 <p>TODO</p>
 <ul>
@@ -212,14 +216,14 @@ my_function()  //calls the function
 </ul>
 <h2 id="partial-function-evaluation"><a class="header" href="#partial-function-evaluation">Partial Function Evaluation</a></h2>
 <p>First note that if you want to pass a function around as an object, you need to get a handle to the function using the <code>@</code> (&quot;handle&quot;) operator.</p>
-<pre><code class="language-dewy">my_func = () =&gt; printl('foo')
+<pre><code class="language-dewy">my_func = () =&gt; printl'foo'
 
 reference_to_my_func = @my_func
 </code></pre>
 <p>If you don't include the <code>@</code> operator, then the evaluation of the right-hand side would be stored into the left side</p>
 <pre><code class="language-dewy">reference_to_my_func = my_func  //this doesn't work
 </code></pre>
-<p>what happens is <code>my_func</code> prints out &quot;foo&quot; to the command line, and then since it returns no value, <code>reference_to_my_func</code> is <code>undefined</code>. If <code>my_func</code> required arguments, we'd actually get a compilation error at this point, as we essentially are trying to call my_func without an arguments.</p>
+<p>what happens is <code>my_func</code> prints out &quot;foo&quot; to the command line, and then since it returns no value, <code>reference_to_my_func</code> is not able to be assigned, causing a compiler error. We'd also get a compiler error if <code>my_func</code> required arguments, as we essentially are trying to call my_func without an arguments.</p>
 <pre><code class="language-dewy">another_func = (a, b, c, x) =&gt; a^2*x + b*x + c
 
 good_reference = @another_func
@@ -234,7 +238,7 @@ add5 = @sum(5)          //partially evaluate sum with a=5
 add5(-7)        //returns -2
 
 thirtyseven = @add5(32) //new function that takes 0 arguments
-thirtyseven()   //returns 37
+thirtyseven   //returns 37
 </code></pre>
 <p>TODO-&gt;explain about overwriting arguments</p>
 <pre><code class="language-dewy">new_sum = (x, y) =&gt; thirtyseven(a=x, b=y)
