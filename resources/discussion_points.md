@@ -696,7 +696,7 @@ simply doing `name = value` may or may not be allowed depending on if name is al
 - if `name` exists and was declared with `const` then this will fail at compile-time
 
 
-## Precedence of comma vs assignment [leaning towards having two approaches: 1) requiring parenthesis around default function arguments, e.g. `foo = a,(b=1),(c=2) => a+b+c`. And 2) array literals which have the correct precedence: `foo = [a b=5 c=10] => a+b+c`]
+## Precedence of comma vs assignment [leaning towards requiring parenthesis around default function arguments, e.g. `foo = a,(b=1),(c=2) => a+b+c`, e.g. `foo123 = @foo((a=1),(b=2),(c=3))`]
 There are situations when comma needs to have higher precedence than assignment, but also situations where it is the opposite:
 ```dewy
 //comma needs lower precedence

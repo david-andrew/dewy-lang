@@ -138,23 +138,24 @@ class Associativity(Enum):
     none = auto()
     fail = auto()
 
-operator_groups: list[tuple[Associativity, list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]]] = reversed([
+operator_groups: list[tuple[Associativity, list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]]] = list(reversed([
     (Associativity.prefix, [Operator_t('@')]),
-    (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),
+    (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]), #jux-call, jux-index
     (Associativity.right,  [Operator_t('^')]),
-    (Associativity.left, [Juxtapose_t(None)]),
+    (Associativity.left, [Juxtapose_t(None)]), #jux-multiply
     (Associativity.left, [Operator_t('*'), Operator_t('/'), Operator_t('%')]),
     (Associativity.left, [Operator_t('+'), Operator_t('-')]),
     (Associativity.left, [ShiftOperator_t('<<'), ShiftOperator_t('>>'), ShiftOperator_t('<<<'), ShiftOperator_t('>>>'), ShiftOperator_t('<<!'), ShiftOperator_t('!>>')]),
-    (Associativity.none,  [Comma_t(None)]),
     (Associativity.left, [Operator_t('=?'), Operator_t('>?'), Operator_t('<?'), Operator_t('>=?'), Operator_t('<=?')]),
     (Associativity.left, [Operator_t('and'), Operator_t('nand'), Operator_t('&')]),
     (Associativity.left, [Operator_t('xor'), Operator_t('xnor')]),
     (Associativity.left, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
+    (Associativity.none,  [Comma_t(None)]),
+    # (Associativity.none/fail?, [RangeJuxtapose_t(None)]), #jux-range
     (Associativity.right,  [Operator_t('=>')]), # () => () => () => 42
     (Associativity.fail,  [Operator_t('=')]),
     (Associativity.none,  [Operator_t('else')]),
-])
+]))
 precedence_table: dict[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t, int|qint] = {}
 associativity_table: dict[int, Associativity] = {}
 for i, (assoc, group) in enumerate(operator_groups):
@@ -188,12 +189,12 @@ def operator_precedence(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> in
     / * %
     + -
     << >> <<< >>> <<! !>>
-    ,                                   //tuple maker
-    <jux range>                         //TBD, e.g. [first,second..last]
     =? >? <? >=? <=? not=? <=> is? isnt? @?
     and nand &
     xor xnor                            //following C's precedence: and > xor > or
     or nor |
+    ,                                   //tuple maker
+    <jux range>                         //TBD, e.g. [first,second..last]
     =>
     = .= <op>= .<op>=  (e.g. += .+=)    //right-associative (but technically causes a type error since assignments can't be chained)
     else
@@ -229,6 +230,70 @@ def operator_associativity(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t|int
         return associativity_table[i]
     except:
         raise ValueError(f"Error: failed to determine associativity for operator {op}") from None
+
+opname_map = {
+    '@': 'reference',
+    '.': 'access',
+    '^': 'power',
+    '*': 'multiply',
+    '/': 'divide',
+    '%': 'modulus',
+    '+': 'add',
+    '-': 'subtract',
+    '<<': 'left shift',
+    '>>': 'right shift',
+    '>>>': 'rotate left no carry',
+    '<<<': 'rotate right no carry',
+    '<<!': 'rotate left with carry',
+    '!>>': 'rotate right with carry',
+    '>?': 'greater than',
+    '<?': 'less than',
+    '>=?': 'greater than or equal',
+    '<=?': 'less than or equal',
+    '=?': 'equal',
+    'and': 'and',
+    'nand': 'nand',
+    '&': 'and',
+    'xor': 'xor',
+    'xnor': 'xnor',
+    'or': 'or',
+    'nor': 'nor',
+    '|': 'or',
+    '=>': 'function arrow',
+    '=': 'bind',
+    'else': 'flow alternate',
+    ';': 'semicolon',
+    'in': 'in',
+    'as': 'as',
+    'transmute': 'transmute',
+    '|>': 'pipe',
+    '<|': 'reverse pipe',
+    '->': 'right pointer',
+    '<->': 'bidir pointer',
+    '<-': 'left pointer',
+    ':': 'type annotation',
+
+    Comma_t(None): 'comma',
+    Juxtapose_t(None): 'unknown juxtapose',
+}
+def get_precedence_table_markdown() -> str:
+    """return a string that is the markdown table for the docs containing all the operators"""
+    header = '| Precedence | Operator | Name | Associativity |\n| --- | --- | --- | --- |'
+    
+    def get_ops_str(ops:list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]) -> str:
+        return '<br>'.join(f'`{op.op if isinstance(op, (Operator_t, ShiftOperator_t)) else op.__class__.__name__[:-2].lower()}`' for op in ops)
+    def get_opnames_str(ops:list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]) -> str:
+        return '<br>'.join(f'{opname_map.get(op.op, None) if isinstance(op, (Operator_t, ShiftOperator_t)) else op.__class__.__name__[:-2].lower()}' for op in ops)
+    def get_row_str(row:tuple[Associativity, list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]]) -> str:
+        assoc, group = row
+        return f'{get_ops_str(group)} | {get_opnames_str(group)} | {assoc.name}'
+
+    rows = [
+        f'| {i} | {get_row_str(row)} |'
+        for i, row in reversed([*enumerate(operator_groups)])
+    ]
+
+    return header + '\n' + '\n'.join(rows)
 
 
 #TODO: this isn't very well integrated into the type system...
