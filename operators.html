@@ -167,7 +167,72 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="operators"><a class="header" href="#operators">Operators</a></h1>
-<p>TODO-&gt;clean this up, and verify that it is still correct</p>
+<p>Dewy is a 100% expression-based language, meaning operators are its bread and butter. Dewy has 3 types of operators:</p>
+<ul>
+<li>prefix: come before the expression</li>
+<li>infix: come between two expressions</li>
+<li>postfix: come after the expression</li>
+</ul>
+<p>Additionally every operator has a precedence level, and an associativity. The precedence level determines the order in which operators in a compound expression are evaluated. Associativity determines the order of evaluation when multiple operators of the same precedence level are present in a compound expression. Associativity can be:</p>
+<ul>
+<li>left-to-right</li>
+<li>right-to-left</li>
+<li>prefix</li>
+<li>postfix</li>
+<li>none (typically these expressions generate a single node in the AST)</li>
+<li>fail (i.e. the expression is invalid if multiple operators of the same precedence level are present)</li>
+</ul>
+<p>(TODO: some way of populating this table with the current full precedence table in the code)</p>
+<p>(TODO: this table is missing several operators)</p>
+<div class="table-wrapper"><table><thead><tr><th>Operator</th><th>Precedence</th><th>Associativity</th><th>Name</th></tr></thead><tbody>
+<tr><td><code>@</code></td><td>15</td><td>prefix</td><td>reference</td></tr>
+<tr><td><code>.</code></td><td>14</td><td>left</td><td>access</td></tr>
+<tr><td>Jux-call</td><td>14</td><td>left</td><td>jux call</td></tr>
+<tr><td>Jux-index</td><td>14</td><td>left</td><td>jux index</td></tr>
+<tr><td><code>^</code></td><td>13</td><td>right</td><td>power</td></tr>
+<tr><td>Jux-mul</td><td>12</td><td>left</td><td>jux mul</td></tr>
+<tr><td><code>*</code></td><td>11</td><td>left</td><td>multiply</td></tr>
+<tr><td><code>/</code></td><td>11</td><td>left</td><td>divide</td></tr>
+<tr><td><code>%</code></td><td>11</td><td>left</td><td>modulus</td></tr>
+<tr><td><code>+</code></td><td>10</td><td>left</td><td>add</td></tr>
+<tr><td><code>-</code></td><td>10</td><td>left</td><td>subtract</td></tr>
+<tr><td><code>&lt;&lt;</code></td><td>9</td><td>left</td><td>left shift</td></tr>
+<tr><td><code>&gt;&gt;</code></td><td>9</td><td>left</td><td>right shift</td></tr>
+<tr><td><code>&gt;&gt;&gt;</code></td><td>9</td><td>left</td><td>rotate left no carry</td></tr>
+<tr><td><code>&lt;&lt;&lt;</code></td><td>9</td><td>left</td><td>rotate right no carry</td></tr>
+<tr><td><code>&lt;&lt;!</code></td><td>9</td><td>left</td><td>rotate left with carry</td></tr>
+<tr><td><code>!&gt;&gt;</code></td><td>9</td><td>left</td><td>rotate right with carry</td></tr>
+<tr><td><code>,</code></td><td>8</td><td>none</td><td>comma</td></tr>
+<tr><td>Jux-range</td><td>7</td><td>left</td><td>jux range</td></tr>
+<tr><td><code>&gt;?</code></td><td>6</td><td>left</td><td>greater than</td></tr>
+<tr><td><code>&lt;?</code></td><td>6</td><td>left</td><td>less than</td></tr>
+<tr><td><code>&gt;=?</code></td><td>6</td><td>left</td><td>greater than or equal</td></tr>
+<tr><td><code>&lt;=?</code></td><td>6</td><td>left</td><td>less than or equal</td></tr>
+<tr><td><code>=?</code></td><td>6</td><td>left</td><td>equal</td></tr>
+<tr><td><code>and</code></td><td>5</td><td>left</td><td>and</td></tr>
+<tr><td><code>nand</code></td><td>5</td><td>left</td><td>nand</td></tr>
+<tr><td><code>&amp;</code></td><td>5</td><td>left</td><td>and</td></tr>
+<tr><td><code>xor</code></td><td>4</td><td>left</td><td>xor</td></tr>
+<tr><td><code>xnor</code></td><td>4</td><td>left</td><td>xnor</td></tr>
+<tr><td><code>or</code></td><td>3</td><td>left</td><td>or</td></tr>
+<tr><td><code>nor</code></td><td>3</td><td>left</td><td>nor</td></tr>
+<tr><td>|</td><td>3</td><td>left</td><td>or</td></tr>
+<tr><td><code>=&gt;</code></td><td>2</td><td>right</td><td>function</td></tr>
+<tr><td><code>=</code></td><td>1</td><td>fail</td><td>bind</td></tr>
+<tr><td><code>else</code></td><td>0</td><td>none</td><td>flow alternate</td></tr>
+<tr><td><code>;</code></td><td>-1</td><td>postfix</td><td>semicolon</td></tr>
+<tr><td>space</td><td>-2</td><td>left</td><td>space</td></tr>
+<tr><td><code>in</code></td><td>TBD</td><td>TBD</td><td>in</td></tr>
+<tr><td><code>as</code></td><td>TBD</td><td>TBD</td><td>as</td></tr>
+<tr><td><code>transmute</code></td><td>TBD</td><td>TBD</td><td>transmute</td></tr>
+<tr><td>|&gt;</td><td>TBD</td><td>TBD</td><td>pipe</td></tr>
+<tr><td>&lt;|</td><td>TBD</td><td>TBD</td><td>reverse pipe</td></tr>
+<tr><td><code>-&gt;</code></td><td>TBD</td><td>TBD</td><td>right-pointer</td></tr>
+<tr><td><code>&lt;-&gt;</code></td><td>TBD</td><td>TBD</td><td>bi-pointer</td></tr>
+<tr><td><code>&lt;-</code></td><td>TBD</td><td>TBD</td><td>left-pointer</td></tr>
+<tr><td><code>:</code></td><td>TBD</td><td>TBD</td><td>type annotation</td></tr>
+</tbody></table>
+</div>
 <p><strong>Basic Math Operations</strong></p>
 <ul>
 <li><code>+</code> plus</li>
