@@ -766,3 +766,14 @@ This is potentially better than requiring parenthesis:
 It does bring into question what the purpose of tuples are. Why not just use array syntax everywhere with no commas for anything?
 
 Or we could just allow both.
+
+Though there is still a problem in other cases, e.g. calling a function and overwriting a value by name:
+```dewy
+sum = (a, b) => a + b   //simple addition function
+add5 = @sum(5)          //partially evaluate sum with a=5
+thirtyseven = @add5(32) //new function that takes 0 arguments
+
+//recreate the sum function by overwriting the partial evaluation
+new_sum = (x, y) => thirtyseven(a=x, b=y)
+```
+In this case, we still have an issue with the comma operator having the wrong precedence when calling `thirtyseven`...

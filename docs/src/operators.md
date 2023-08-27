@@ -1,6 +1,73 @@
 # Operators
 
-TODO->clean this up, and verify that it is still correct
+Dewy is a 100% expression-based language, meaning operators are its bread and butter. Dewy has 3 types of operators:
+- prefix: come before the expression
+- infix: come between two expressions
+- postfix: come after the expression
+
+Additionally every operator has a precedence level, and an associativity. The precedence level determines the order in which operators in a compound expression are evaluated. Associativity determines the order of evaluation when multiple operators of the same precedence level are present in a compound expression. Associativity can be:
+- left-to-right
+- right-to-left
+- prefix
+- postfix
+- none (typically these expressions generate a single node in the AST)
+- fail (i.e. the expression is invalid if multiple operators of the same precedence level are present)
+
+(TODO: some way of populating this table with the current full precedence table in the code)
+
+
+(TODO: this table is missing several operators)
+
+| Operator  | Precedence | Associativity |    Name     |
+|-----------|------------|---------------|-------------|
+|    `@`    |     15     |     prefix    | reference   | 
+|    `.`    |     14     |     left      | access      | 
+| Jux-call  |     14     |     left      | jux call    | 
+| Jux-index |     14     |     left      | jux index   | 
+|   `^`     |     13     |     right     | power       | 
+| Jux-mul   |     12     |     left      | jux mul     | 
+|   `*`     |     11     |     left      | multiply    | 
+|   `/`     |     11     |     left      | divide      | 
+|   `%`     |     11     |     left      | modulus     | 
+|   `+`     |     10     |     left      | add         | 
+|   `-`     |     10     |     left      | subtract    | 
+|   `<<`    |     9      |     left      | left shift  | 
+|   `>>`    |     9      |     left      | right shift | 
+|   `>>>`   |     9      |     left      | rotate left no carry | 
+|   `<<<`   |     9      |     left      | rotate right no carry| 
+|   `<<!`   |     9      |     left      | rotate left with carry | 
+|   `!>>`   |     9      |     left      | rotate right with carry | 
+|   `,`     |     8      |     none      | comma       | 
+| Jux-range |     7      |     left      | jux range   | 
+|   `>?`    |     6      |     left      | greater than| 
+|   `<?`    |     6      |     left      | less than   | 
+|   `>=?`   |     6      |     left      | greater than or equal | 
+|   `<=?`   |     6      |     left      | less than or equal | 
+|   `=?`    |     6      |     left      | equal       | 
+|   `and`   |     5      |     left      | and         | 
+|   `nand`  |     5      |     left      | nand        | 
+|   `&`     |     5      |     left      | and         | 
+|   `xor`   |     4      |     left      | xor         | 
+|   `xnor`  |     4      |     left      | xnor        | 
+|   `or`    |     3      |     left      | or          | 
+|   `nor`   |     3      |     left      | nor         | 
+|   \|      |     3      |     left      | or          | 
+|   `=>`    |     2      |     right     | function    | 
+|   `=`     |     1      |     fail      | bind        | 
+|   `else`  |     0      |     none      | flow alternate |
+|   `;`     |     -1     |     postfix   | semicolon   |
+|  space    |     -2     |     left      | space       |
+|  `in`     |    TBD     |     TBD       | in          |
+|  `as`     |    TBD     |     TBD       | as          |
+|`transmute`|    TBD     |     TBD       | transmute   |
+|   \|>     |    TBD     |     TBD       | pipe        |
+|   <\|     |    TBD     |     TBD       | reverse pipe|
+|   `->`    |    TBD     |     TBD       | right-pointer |
+|   `<->`   |    TBD     |     TBD       | bi-pointer |
+|   `<-`    |    TBD     |     TBD       | left-pointer |
+|   `:`     |    TBD     |     TBD       | type annotation |
+
+
 
 **Basic Math Operations**
 - `+` plus
