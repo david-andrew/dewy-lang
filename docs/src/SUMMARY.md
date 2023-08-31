@@ -21,7 +21,7 @@
     - [Operating Systems](ch02-09-operating-systems.md)
     - [Compilers](ch02-10-compilers.md)
     - [Scientific Computing](ch02-11-scientific-computing.md)
-    - [Engineering](ch02-12-engineering.md)
+    - [Robotics](ch02-12-robotics.md)
     - [Machine Learning](ch02-13-machine-learning.md)
 
 - [Language Features](chxx-features.md)
