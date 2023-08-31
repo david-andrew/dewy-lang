@@ -168,19 +168,33 @@
                     <main>
                         <h1 id="numbers-and-bases"><a class="header" href="#numbers-and-bases">Numbers and Bases</a></h1>
 <p>literal numbers in various bases can be specified using prefixes before the number</p>
-<ul>
-<li><strong>Binary</strong>: <code>0b</code> with digits <code>01</code></li>
-<li><strong>Quaternary</strong>: <code>0q</code> with digits <code>0123</code></li>
-<li><strong>Seximal</strong>: <code>0s</code> with digits <code>012345</code></li>
-<li><strong>Octal</strong>: <code>0o</code> with digits <code>01234567</code></li>
-<li><strong>Decimal</strong>: <code>0d</code> with digits <code>0123456789</code> (only needed when the default base is set to something other than 10)</li>
-<li><strong>Dozenal</strong>: <code>0z</code> with digits <code>0123456789XE</code></li>
-<li><strong>Hexidecimal</strong>: <code>0x</code> with digits <code>0123456789ABCDEF</code></li>
-<li><strong>Duotrigesimal</strong>: <code>0u</code> with digits <code>0123456789ABCDEFGHIJKLMNOPQRSTUV</code></li>
-<li><strong>Tetrasexagesimal</strong>: <code>0t</code> with digits <code>0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ@_</code> (which is the encoding bash uses)</li>
-</ul>
-<p><a href="https://en.wikipedia.org/wiki/List_of_numeral_systems">Base names</a>, and 
-<a href="https://en.wikipedia.org/wiki/Senary">Seximal</a></p>
+<div class="table-wrapper"><table><thead><tr><th>Radix</th><th>Name</th><th>Prefix</th><th>Digits</th></tr></thead><tbody>
+<tr><td>2</td><td>Binary</td><td><code>0b</code></td><td><code>[01]</code></td></tr>
+<tr><td>3</td><td>Ternary</td><td><code>0t</code></td><td><code>[012]</code></td></tr>
+<tr><td>4</td><td>Quaternary</td><td><code>0q</code></td><td><code>[0123]</code></td></tr>
+<tr><td>6</td><td>Seximal</td><td><code>0s</code></td><td><code>[0-5]</code></td></tr>
+<tr><td>8</td><td>Octal</td><td><code>0o</code></td><td><code>[0-7]</code></td></tr>
+<tr><td>10</td><td>Decimal*</td><td><code>0d</code></td><td><code>[0-9]</code></td></tr>
+<tr><td>12</td><td>Dozenal</td><td><code>0z</code></td><td><code>[0-9xXeE]</code></td></tr>
+<tr><td>16</td><td>Hexidecimal</td><td><code>0x</code></td><td><code>[0-9A-Fa-f]</code></td></tr>
+<tr><td>32</td><td>Duotrigesimal</td><td><code>0u</code></td><td><code>[0-9A-Va-v]</code></td></tr>
+<tr><td>36</td><td>Hexatrigesimal</td><td><code>0r</code></td><td><code>[0-9A-Za-z]</code></td></tr>
+<tr><td>64</td><td>Tetrasexagesimal</td><td><code>0y</code></td><td><code>[0-9A-Za-z!$]</code></td></tr>
+</tbody></table>
+</div>
+<p>*Decimal is the default base, so the prefix is generally not necessary, unless the default base is changed.</p>
+<p>Some examples:</p>
+<pre><code class="language-dewy">0b10101010  // 170
+0t121010    // 435
+0q123       // 27
+0s1432      // 380
+0o1234567   // 342391
+0xdeadbeef  // 3735928559
+0u1v2u3t    // 66156669
+0rz1b2c3    // 2118512019
+0yl1z2$3!   // 3231913341182
+</code></pre>
+<p>See also: <a href="https://en.wikipedia.org/wiki/List_of_numeral_systems">Base names</a>, and <a href="https://en.wikipedia.org/wiki/Senary">Seximal</a></p>
 <h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
 
                     </main>
