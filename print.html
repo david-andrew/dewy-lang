@@ -558,8 +558,7 @@ printl(my_bidictionary[3])        //prints 'three'
 </code></pre>
 <p>Note that when creating a bidictionary, every arrow must by double-ended. As new elements are added, the bidictionary will maintain the bidirectional links between each element. Regular dictionaries will not maintin such links.</p>
 <h2 id="sets"><a class="header" href="#sets">Sets</a></h2>
-<p>A set is an unordered collection of elements. (TODO:determine set literal notation.)</p>
-<p>For now, sets will probably be declared like so</p>
+<p>A set is an unordered collection of elements</p>
 <pre><code class="language-dewy">my_set = set[0 1 2 3 'apple' 'banana' 'peach' true]
 printl(3 in? my_set)  //prints 'true'
 printl('pear' in? my_set)  //prints 'false'
@@ -578,6 +577,7 @@ printl(my_obj.buy_bananas(10))  //prints out 8.9
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="ranges"><a class="header" href="#ranges">Ranges</a></h1>
 <p>A range represents some span over a set of values. Typically ranges will be over numbers, however any orderable set could be used for a range (e.g. strings, dates, etc.). Ranges are frequently used for loops, indexing, and several other places.</p>
+<p>Ranges always contain a <code>..</code> and may include left and or right values that are juxtaposed, optionally specifying the bounds and step size.</p>
 <h2 id="range-syntax"><a class="header" href="#range-syntax">Range Syntax</a></h2>
 <p>The syntax for ranges is inspired by Haskell syntax for ranges:</p>
 <pre><code class="language-dewy">[first..]               // first to inf
@@ -590,11 +590,31 @@ printl(my_obj.buy_bananas(10))  //prints out 8.9
 </code></pre>
 <p>Note that <code>[first..2ndlast,last]</code> is explicitly <strong>NOT ALLOWED</strong>, as it is covered by <code>[first,second..last]</code>, and can have unintuitive behavior.</p>
 <p>In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.</p>
-<pre><code class="language-dewy">[first..last]           // first to last including first and last
-[first..last)           // first to last including first, excluding last
-(first..last]           // first to last excluding first, including last
-(first..last)           // first to last excluding first and last
-first..last             // same as [first..last]
+<pre><code class="language-dewy">[first..last]   // first to last including first and last
+[first..last)   // first to last including first, excluding last
+(first..last]   // first to last excluding first, including last
+(first..last)   // first to last excluding first and last
+first..last     // same as [first..last]
+</code></pre>
+<h3 id="juxtaposition"><a class="header" href="#juxtaposition">Juxtaposition</a></h3>
+<p>The left and right values are only considered part of the range if they are juxtaposed with the <code>..</code>. Values not juxtaposed with the range are considered separate expressions.</p>
+<pre><code class="language-dewy">first..last     // first to last
+first ..last    // -inf to last. first is not part of the range
+first.. last    // first to inf. last is not part of the range
+first .. last   // -inf to inf. neither first or last are part of the range
+</code></pre>
+<p>Note that the range juxtaposition operator has relatively low precedence, so you can construct various common ranges without needing parenthesis.</p>
+<pre><code class="language-dewy">first..last+1           // first to last+1
+first,second..last      // first to last, step size is second-first
+first/2,first..last+10  // first/2 to last, step size is first/2
+</code></pre>
+<p>The juxtaposition requirement allows ranges to be used to index into matricies</p>
+<pre><code class="language-dewy">my_array = [
+    0 1 2 3 4 5 6 7 8 9 
+    10 11 12 13 14 15 16 17 18 19
+    20 21 22 23 24 25 26 27 28 29
+]
+my_array[1.. 6..]     //returns [16 17 18 19; 26 27 28 29]
 </code></pre>
 <h2 id="numeric-ranges"><a class="header" href="#numeric-ranges">Numeric Ranges</a></h2>
 <p>Probably the most common type of range will be a numeric ranges which describes a span over real numbers.</p>
