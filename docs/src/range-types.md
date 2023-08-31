@@ -2,6 +2,8 @@
 
 A range represents some span over a set of values. Typically ranges will be over numbers, however any orderable set could be used for a range (e.g. strings, dates, etc.). Ranges are frequently used for loops, indexing, and several other places.
 
+Ranges always contain a `..` and may include left and or right values that are juxtaposed, optionally specifying the bounds and step size.
+
 ## Range Syntax
 
 The syntax for ranges is inspired by Haskell syntax for ranges:
@@ -21,12 +23,42 @@ Note that `[first..2ndlast,last]` is explicitly **NOT ALLOWED**, as it is covere
 In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.
 
 ```dewy
-[first..last]           // first to last including first and last
-[first..last)           // first to last including first, excluding last
-(first..last]           // first to last excluding first, including last
-(first..last)           // first to last excluding first and last
-first..last             // same as [first..last]
+[first..last]   // first to last including first and last
+[first..last)   // first to last including first, excluding last
+(first..last]   // first to last excluding first, including last
+(first..last)   // first to last excluding first and last
+first..last     // same as [first..last]
 ```
+
+### Juxtaposition
+The left and right values are only considered part of the range if they are juxtaposed with the `..`. Values not juxtaposed with the range are considered separate expressions.
+
+```dewy
+first..last     // first to last
+first ..last    // -inf to last. first is not part of the range
+first.. last    // first to inf. last is not part of the range
+first .. last   // -inf to inf. neither first or last are part of the range
+```
+
+Note that the range juxtaposition operator has relatively low precedence, so you can construct various common ranges without needing parenthesis.
+
+```dewy
+first..last+1           // first to last+1
+first,second..last      // first to last, step size is second-first
+first/2,first..last+10  // first/2 to last, step size is first/2
+```
+
+The juxtaposition requirement allows ranges to be used to index into matricies
+
+```dewy
+my_array = [
+    0 1 2 3 4 5 6 7 8 9 
+    10 11 12 13 14 15 16 17 18 19
+    20 21 22 23 24 25 26 27 28 29
+]
+my_array[1.. 6..]     //returns [16 17 18 19; 26 27 28 29]
+```
+
 
 ## Numeric Ranges
 

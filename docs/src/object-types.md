@@ -68,7 +68,7 @@ Similar to python, objects can define custom so-called "double-underscore" or "d
 ```
 
 // Define a point class with a custom add method
-Point = (x:number,y:number) => [
+Point = (x:number, y:number) => [
     x = x  //TBD if these are necessary since x/y are already in scope
     y = y
     __add__ = other:Point => Point(x + other.x, y + other.y)

@@ -48,9 +48,7 @@ Note that when creating a bidictionary, every arrow must by double-ended. As new
 
 ## Sets
 
-A set is an unordered collection of elements. (TODO:determine set literal notation.)
-
-For now, sets will probably be declared like so
+A set is an unordered collection of elements
 
 ```dewy
 my_set = set[0 1 2 3 'apple' 'banana' 'peach' true]
