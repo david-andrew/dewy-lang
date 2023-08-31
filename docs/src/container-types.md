@@ -13,7 +13,7 @@ printl(my_array[3])  //prints '3'
 
 Note that values do not need commas to separate them. Also arrays can contain objects of different types, though arrays as only a single type will be more efficient. Arrays are 0-indexed (with potentially the option to set an arbitrary index)
 
-TODO->explain how to make matrices and other linear algebra stuff. note, probably replace `;` with `|` to indicate new row or next dimension in array (since `;` is also be used to surpress expressions)
+TODO->explain how to make matrices and other linear algebra stuff.
 
 ## Dictionaries
 
@@ -44,7 +44,7 @@ printl(my_bidictionary['three'])  //prints '3'
 printl(my_bidictionary[3])        //prints 'three'
 ```
 
-Note that to create an actual bidictionary, every arrow must by double-ended. As new elements are added, the bidictionary will maintain the bidirectional links between each element. Regular dictionaries will not maintin such links.
+Note that when creating a bidictionary, every arrow must by double-ended. As new elements are added, the bidictionary will maintain the bidirectional links between each element. Regular dictionaries will not maintin such links.
 
 ## Sets
 
@@ -67,8 +67,8 @@ See the entry on **Object and Class Types** for more details. But breifly, an ob
 my_obj = [
     apple = 5
     bananas = 0.89
-    buy_apples = q => q * @apples
-    buy_bananas = q => q * @bananas
+    buy_apples = q => q * apples
+    buy_bananas = q => q * bananas
 ]
 
 printl(my_obj.apples) //prints out 5
