@@ -451,7 +451,7 @@ P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
 my_string = 'I am {my_age} years old'
 printl(my_string)
 </code></pre>
-<p>which will print the string <code>I am 24 years old</code>. Any arbitrary expression can be contained inside of the curly braces. For expressions that are not a string by default, the <code>.string()</code> method will be called on them to get the string version.</p>
+<p>which will print the string <code>I am 24 years old</code>. Any arbitrary expression can be contained inside of the curly braces. For expressions that are not a string by default, the <code>__str__</code> method will be called on them to get the string version.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="basic-data-types"><a class="header" href="#basic-data-types">Basic Data Types</a></h1>
 <h2 id="numeric"><a class="header" href="#numeric">Numeric</a></h2>
 <p>Numeric data is what it sounds like, values that represent a number</p>
@@ -468,20 +468,26 @@ my_uint = 15 as uint
 my_uint64 = 2001 as uint64
 </code></pre>
 <p>The full list of integer types includes</p>
-<ul>
-<li><strong>int</strong>: Arbitrary precision signed integer</li>
-<li><strong>int8</strong>: 8-bit signed integer. range = [-128:127]</li>
-<li><strong>int16</strong>: 16-bit signed integer. range = []</li>
-<li><strong>int32</strong>: 32-bit signed integer. range = []</li>
-<li><strong>int64</strong>: 64-bit signed integer. range = []</li>
-<li><strong>(maybe) int128</strong>: 128-bit signed integer. range = []</li>
-<li><strong>uint</strong>: arbitrary precision unsigned integer</li>
-<li><strong>uint8</strong>: 8-bit unsigned integer. range = [0:255]</li>
-<li><strong>uint16</strong>: 16-bit unsigned integer. range = []</li>
-<li><strong>uint32</strong>: 32-bit unsigned integer. range = []</li>
-<li><strong>uint64</strong>: 64-bit unsigned integer. range = []</li>
-<li><strong>(maybe) uint128</strong>: 128-bit unsigned integer. range = []</li>
-</ul>
+<div class="table-wrapper"><table><thead><tr><th>Type</th><th>Description</th><th>Range</th></tr></thead><tbody>
+<tr><td>int</td><td>Arbitrary precision signed integer</td><td><code>(-inf..inf)</code></td></tr>
+<tr><td>int8</td><td>8-bit signed integer</td><td><code>[-128..127]</code></td></tr>
+<tr><td>int16</td><td>16-bit signed integer</td><td><code>[-32768..32767]</code></td></tr>
+<tr><td>int32</td><td>32-bit signed integer</td><td><code>[-2147483648..2147483647]</code></td></tr>
+<tr><td>int64</td><td>64-bit signed integer</td><td><code>[-9223372036854775808..9223372036854775807]</code></td></tr>
+<tr><td>int128</td><td>128-bit signed integer</td><td><code>[-170141183460469231731687303715884105728</code>­<code>..170141183460469231731687303715884105727]</code></td></tr>
+<tr><td>uint</td><td>Arbitrary precision unsigned integer</td><td><code>[0..inf)</code></td></tr>
+<tr><td>uint8</td><td>8-bit unsigned integer</td><td><code>[0..255]</code></td></tr>
+<tr><td>uint16</td><td>16-bit unsigned integer</td><td><code>[0..65535]</code></td></tr>
+<tr><td>uint32</td><td>32-bit unsigned integer</td><td><code>[0..4294967295]</code></td></tr>
+<tr><td>uint64</td><td>64-bit unsigned integer</td><td><code>[0..18446744073709551615]</code></td></tr>
+<tr><td>uint128</td><td>128-bit unsigned integer</td><td><code>[0..340282366920938463463374607431768211455]</code></td></tr>
+</tbody></table>
+</div>
+<h3 id="custom-ranged-integers"><a class="header" href="#custom-ranged-integers">Custom Ranged Integers</a></h3>
+<p>You can create integer types with a custom range by specifying the range as part of the type annotation</p>
+<pre><code class="language-dewy">my_custom_number:int&lt;range=[42..)&gt; = 42
+</code></pre>
+<p>TBD for behavior when value goes out of bounds. Perhaps result will be undefined, or there can be a type setting for wrap around</p>
 <h3 id="fixed-point"><a class="header" href="#fixed-point">Fixed Point</a></h3>
 <p>Fixed point will be stored as two integers, <code>digits</code> and <code>shift</code> where the value is <code>digits * 10^shift</code></p>
 <p>TBD on the syntax for declaring a fixed point number. likely to be a function call e.g. </p>
