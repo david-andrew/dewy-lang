@@ -167,104 +167,83 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="flow-control"><a class="header" href="#flow-control">Flow Control</a></h1>
+<p>In Dewy, the two main methods of conditionally executing code are <code>if</code> and <code>loop</code> expressions.</p>
 <h2 id="if-expressions"><a class="header" href="#if-expressions">If Expressions</a></h2>
 <p>If expressions allow you to conditionally evaluate code based on whether or not some condition is met.</p>
-<pre><code>my_var = 10
+<pre><code class="language-dewy">my_var = 10
 if my_var =? 10 
+    printl&quot;my_var is ten&quot;
+</code></pre>
+<p>The syntax for an <code>if</code> expression is:</p>
+<pre><code>if &lt;condition&gt; &lt;expression&gt;
+</code></pre>
+<p>where <code>&lt;condition&gt;</code> must result in a boolean value, and <code>&lt;expression&gt;</code> can be anything. Commonly, <code>&lt;expression&gt;</code> will be a block containing multiple expressions.</p>
+<pre><code class="language-dewy">if a &gt;? b
 {
-    printl(&quot;my_var is ten&quot;)
+    //do something
+    //do another thing
 }
 </code></pre>
-<p>If statements require the expression to be a <code>boolean</code> value. Any other type will result in a compilation error.</p>
-<p>If the first condition is false, you can use an <code>else</code> clause to execute something else instead</p>
-<pre><code>my_var = 'apple'
+<h2 id="loop-expressions"><a class="header" href="#loop-expressions">Loop Expressions</a></h2>
+<p>Loop expressions allow you to repeat the execution of some code while some condition is met.</p>
+<pre><code class="language-dewy">i = 0
+loop i &lt;? 10
+{
+    printl&quot;i is {i}&quot;
+    i += 1
+}
+</code></pre>
+<p>The syntax for a <code>loop</code> expression is:</p>
+<pre><code>loop &lt;condition&gt; &lt;expression&gt;
+</code></pre>
+<p>where <code>&lt;condition&gt;</code> must be an expression that evaluates to a boolean value, and <code>&lt;expression&gt;</code> can be anything.</p>
+<p>Loops will be explored in more detail in <a href="loops.html">One Loop To Rule Them All</a>.</p>
+<h2 id="flow-chains"><a class="header" href="#flow-chains">Flow Chains</a></h2>
+<p>Multiple flow expressions can be chained together via the <code>else</code> operator, along with an optional final default case that need not be a flow expression. In normal languages, this would be <code>if-else-if</code> kinds of sequences, which are certainly possible in Dewy:</p>
+<pre><code class="language-dewy">my_var = 'apple'
 if my_var =? 'banana' 
-{
-    printl('A fruit enjoyed by monkies')
-}
+    printl'A fruit enjoyed by monkeys'
 else
-{
-    printl('monkies don\'t like {my_var}, only bananas!')
-}
+    printl'monkeys don\'t like {my_var}, only bananas!'
 </code></pre>
-<p>You can also nest multiple conditions using <code>else if</code></p>
-<pre><code>my_var = 42
+<p>or even</p>
+<pre><code class="language-dewy">my_var = 42
 if my_var &lt;=? 10
-{
-    printl('a small number')
-}
+    printl'a small number'
 else if my_var &lt;=? 50
+    printl'a medium number'
+else
+    printl'a number larger than 50'
+</code></pre>
+<p>But Dewy also allows <code>loop</code> expressions to be combined in this way as well:</p>
+<pre><code class="language-dewy">if a &gt;? b
 {
-    printl('a medium number')
+    printl'a is greater than b'
+}
+else loop a &lt;? b
+{
+    printl'a is less than b. Increasing a until it matches b'
+    a += 1
 }
 else
 {
-    printl('a number larger than 50')
+    printl'a is equal to b'
 }
 </code></pre>
-<p>Unlike if statements from other languages, ifs in Dewy are expressions, allowing them to be used like the ternary operator from other languages</p>
+<p>In the above example, if <code>a</code> is greater than <code>b</code>, the first block would be executed, and the rest of the blocks are skipped. If <code>a</code>  is less than <code>b</code>, the loop in the second block executes, incrementing <code>a</code> until it is equal to <code>b</code>, at which point the rest of the chain is skipped. Only if <code>a</code> is neither greater than nor less than <code>b</code> (i.e. <code>a</code> equals <code>b</code>) will the final block be executed exclusively.</p>
+<p>(TODO: add an example for how all conditions share the same scope, so variables defined in one condition will be available in later bodies if they execute)</p>
+<p>(TODO: probably add a <code>finally</code> operator which can be used to always execute code at the end)</p>
+<h2 id="capturing-values"><a class="header" href="#capturing-values">Capturing Values</a></h2>
+<p>Unlike if statements from other languages, <code>if</code>s and <code>loop</code>s in Dewy are themselves expressions, allowing any expressed values to be captured. <code>if</code> expressions basically act like Dewy's version of the ternary operator</p>
 <pre><code>my_fruit = 'kiwi'
 tropical_fruits = ['banana' 'pineapple' 'kiwi' 'papaya']
 my_var = if my_fruit in? tropical_fruit
-{
     'a tropical fruit'
-}
 else
-{
     'some other type of fruit'
-}
 </code></pre>
 <p><code>my_var</code> would have a value of <code>'a tropical fruit'</code> at the end of the above example.</p>
-<h2 id="loops-expressions"><a class="header" href="#loops-expressions">Loops Expressions</a></h2>
-<p>All loop behavior is handled with the <code>loop</code> keyword. It is capable of performing every other type of loop, including while, for, do-while, and infinite loops from other languages.</p>
-<p>Basic examples of loops</p>
-<pre><code>loop 
-{
-    printl('this is an infinite loop')
-}
-
-i = 0
-loop my_var &lt;? 10
-{
-    i += 1
-    printl('this is a while loop')
-}
-
-loop i in 0:10
-{
-    printl('this is a for loop')
-}
-</code></pre>
-<p>The do-while version of the loop can be constructed by putting the loop keyword after the block to loop. This can also be performed with for and infinite versions of the loop. In each case, the loop body is executed once before the condition is checked. The syntax is still slightly TBD--currently this is the only syntax in the language that relies on whitespace to determine what the user intends</p>
-<pre><code>i = 0
-{
-    i += 1
-    printl('this is a do-while loop')
-}
-loop i &lt;? 20
-
-
-{
-    printl('this is a do-for loop')
-}
-loop i in 0:10
-
-{
-    printl('this is a do-infinite loop')
-}
-loop
-</code></pre>
-<p>Lastly you can combine the normal loop with the do form of the loop. This will give you a block executed before the condition and a block executed after the condition</p>
-<pre><code>i = 0
-{
-    printl('before condition is checked')
-}
-loop i &lt;? 20
-{
-    printl('after condition is checked')
-    i += 1
-}
-</code></pre>
+<p>Values from loops can be captured to construct sequences, which is explored more in <a href="loops.html">One Loop To Rule Them All</a>.</p>
 <h2 id="match-expressions"><a class="header" href="#match-expressions">Match Expressions</a></h2>
 <p>(TODO) switch statement equivalent</p>
 <h2 id="break-continue-return"><a class="header" href="#break-continue-return">Break, Continue, Return, <expr-return></a></h2>

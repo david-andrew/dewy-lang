@@ -581,10 +581,10 @@ printl(my_obj.buy_bananas(10))  //prints out 8.9
 <h2 id="range-syntax"><a class="header" href="#range-syntax">Range Syntax</a></h2>
 <p>The syntax for ranges is inspired by Haskell syntax for ranges:</p>
 <pre><code class="language-dewy">[first..]               // first to inf
-[first,second..]        // first to inf, step size is second-first
+[(first,second)..]        // first to inf, step size is second-first
 [first..last]           // first to last
-[first,second..last]    // first to last, step size is second-first
-[..2ndlast,last]        // -inf to last, step size is last-2ndlast
+[(first,second)..last]    // first to last, step size is second-first
+[..(2ndlast,last)]        // -inf to last, step size is last-2ndlast
 [..last]                // -inf to last
 [..]                    // -inf to inf
 </code></pre>
@@ -1110,104 +1110,83 @@ Also any instances of elementwise operators (e.g. <code>.+</code> <code>.=</code
 <pre><code class="language-dewy">#rule = #hashtag, '=', #expr, ';' =&gt; { /{semantics for handling the rule}/ }
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="flow-control"><a class="header" href="#flow-control">Flow Control</a></h1>
+<p>In Dewy, the two main methods of conditionally executing code are <code>if</code> and <code>loop</code> expressions.</p>
 <h2 id="if-expressions"><a class="header" href="#if-expressions">If Expressions</a></h2>
 <p>If expressions allow you to conditionally evaluate code based on whether or not some condition is met.</p>
-<pre><code>my_var = 10
+<pre><code class="language-dewy">my_var = 10
 if my_var =? 10 
+    printl&quot;my_var is ten&quot;
+</code></pre>
+<p>The syntax for an <code>if</code> expression is:</p>
+<pre><code>if &lt;condition&gt; &lt;expression&gt;
+</code></pre>
+<p>where <code>&lt;condition&gt;</code> must result in a boolean value, and <code>&lt;expression&gt;</code> can be anything. Commonly, <code>&lt;expression&gt;</code> will be a block containing multiple expressions.</p>
+<pre><code class="language-dewy">if a &gt;? b
 {
-    printl(&quot;my_var is ten&quot;)
+    //do something
+    //do another thing
 }
 </code></pre>
-<p>If statements require the expression to be a <code>boolean</code> value. Any other type will result in a compilation error.</p>
-<p>If the first condition is false, you can use an <code>else</code> clause to execute something else instead</p>
-<pre><code>my_var = 'apple'
+<h2 id="loop-expressions"><a class="header" href="#loop-expressions">Loop Expressions</a></h2>
+<p>Loop expressions allow you to repeat the execution of some code while some condition is met.</p>
+<pre><code class="language-dewy">i = 0
+loop i &lt;? 10
+{
+    printl&quot;i is {i}&quot;
+    i += 1
+}
+</code></pre>
+<p>The syntax for a <code>loop</code> expression is:</p>
+<pre><code>loop &lt;condition&gt; &lt;expression&gt;
+</code></pre>
+<p>where <code>&lt;condition&gt;</code> must be an expression that evaluates to a boolean value, and <code>&lt;expression&gt;</code> can be anything.</p>
+<p>Loops will be explored in more detail in <a href="loops.html">One Loop To Rule Them All</a>.</p>
+<h2 id="flow-chains"><a class="header" href="#flow-chains">Flow Chains</a></h2>
+<p>Multiple flow expressions can be chained together via the <code>else</code> operator, along with an optional final default case that need not be a flow expression. In normal languages, this would be <code>if-else-if</code> kinds of sequences, which are certainly possible in Dewy:</p>
+<pre><code class="language-dewy">my_var = 'apple'
 if my_var =? 'banana' 
-{
-    printl('A fruit enjoyed by monkies')
-}
+    printl'A fruit enjoyed by monkeys'
 else
-{
-    printl('monkies don\'t like {my_var}, only bananas!')
-}
+    printl'monkeys don\'t like {my_var}, only bananas!'
 </code></pre>
-<p>You can also nest multiple conditions using <code>else if</code></p>
-<pre><code>my_var = 42
+<p>or even</p>
+<pre><code class="language-dewy">my_var = 42
 if my_var &lt;=? 10
-{
-    printl('a small number')
-}
+    printl'a small number'
 else if my_var &lt;=? 50
+    printl'a medium number'
+else
+    printl'a number larger than 50'
+</code></pre>
+<p>But Dewy also allows <code>loop</code> expressions to be combined in this way as well:</p>
+<pre><code class="language-dewy">if a &gt;? b
 {
-    printl('a medium number')
+    printl'a is greater than b'
+}
+else loop a &lt;? b
+{
+    printl'a is less than b. Increasing a until it matches b'
+    a += 1
 }
 else
 {
-    printl('a number larger than 50')
+    printl'a is equal to b'
 }
 </code></pre>
-<p>Unlike if statements from other languages, ifs in Dewy are expressions, allowing them to be used like the ternary operator from other languages</p>
+<p>In the above example, if <code>a</code> is greater than <code>b</code>, the first block would be executed, and the rest of the blocks are skipped. If <code>a</code>  is less than <code>b</code>, the loop in the second block executes, incrementing <code>a</code> until it is equal to <code>b</code>, at which point the rest of the chain is skipped. Only if <code>a</code> is neither greater than nor less than <code>b</code> (i.e. <code>a</code> equals <code>b</code>) will the final block be executed exclusively.</p>
+<p>(TODO: add an example for how all conditions share the same scope, so variables defined in one condition will be available in later bodies if they execute)</p>
+<p>(TODO: probably add a <code>finally</code> operator which can be used to always execute code at the end)</p>
+<h2 id="capturing-values"><a class="header" href="#capturing-values">Capturing Values</a></h2>
+<p>Unlike if statements from other languages, <code>if</code>s and <code>loop</code>s in Dewy are themselves expressions, allowing any expressed values to be captured. <code>if</code> expressions basically act like Dewy's version of the ternary operator</p>
 <pre><code>my_fruit = 'kiwi'
 tropical_fruits = ['banana' 'pineapple' 'kiwi' 'papaya']
 my_var = if my_fruit in? tropical_fruit
-{
     'a tropical fruit'
-}
 else
-{
     'some other type of fruit'
-}
 </code></pre>
 <p><code>my_var</code> would have a value of <code>'a tropical fruit'</code> at the end of the above example.</p>
-<h2 id="loops-expressions"><a class="header" href="#loops-expressions">Loops Expressions</a></h2>
-<p>All loop behavior is handled with the <code>loop</code> keyword. It is capable of performing every other type of loop, including while, for, do-while, and infinite loops from other languages.</p>
-<p>Basic examples of loops</p>
-<pre><code>loop 
-{
-    printl('this is an infinite loop')
-}
-
-i = 0
-loop my_var &lt;? 10
-{
-    i += 1
-    printl('this is a while loop')
-}
-
-loop i in 0:10
-{
-    printl('this is a for loop')
-}
-</code></pre>
-<p>The do-while version of the loop can be constructed by putting the loop keyword after the block to loop. This can also be performed with for and infinite versions of the loop. In each case, the loop body is executed once before the condition is checked. The syntax is still slightly TBD--currently this is the only syntax in the language that relies on whitespace to determine what the user intends</p>
-<pre><code>i = 0
-{
-    i += 1
-    printl('this is a do-while loop')
-}
-loop i &lt;? 20
-
-
-{
-    printl('this is a do-for loop')
-}
-loop i in 0:10
-
-{
-    printl('this is a do-infinite loop')
-}
-loop
-</code></pre>
-<p>Lastly you can combine the normal loop with the do form of the loop. This will give you a block executed before the condition and a block executed after the condition</p>
-<pre><code>i = 0
-{
-    printl('before condition is checked')
-}
-loop i &lt;? 20
-{
-    printl('after condition is checked')
-    i += 1
-}
-</code></pre>
+<p>Values from loops can be captured to construct sequences, which is explored more in <a href="loops.html">One Loop To Rule Them All</a>.</p>
 <h2 id="match-expressions"><a class="header" href="#match-expressions">Match Expressions</a></h2>
 <p>(TODO) switch statement equivalent</p>
 <h2 id="break-continue-return"><a class="header" href="#break-continue-return">Break, Continue, Return, <expr-return></a></h2>
@@ -1217,9 +1196,13 @@ loop i &lt;? 20
 (TODO) list and dictionary generators</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="one-loop-to-rule-them-all"><a class="header" href="#one-loop-to-rule-them-all">One Loop to Rule them All</a></h1>
 <p>Other languages make use of sometimes multiple keywords such as <code>for</code>, <code>while</code>, <code>do-while</code>, <code>for each</code>, etc., to handle looping over a piece of code. Dewy instead simply uses the <code>loop</code> keyword to handle all forms of looping.</p>
-<p>Loops start with the <code>loop</code> keyword followed by either an expression the produces a boolean <code>true</code>/<code>false</code> value, or a <code>&lt;value&gt; in &lt;iterable&gt;</code> expression. The loop is then attached either below, or above, to a block/expression which is executed multiple times</p>
+<p>Syntactically, loops are quite simple. The syntax for a loop is:</p>
+<pre><code>loop &lt;condition&gt; &lt;expression&gt;
+</code></pre>
+<p>Where <code>&lt;condition&gt;</code> must result in a boolean determines if the loop continues, and <code>&lt;expression&gt;</code> which can be anything is executed each time the loop repeats.</p>
+<p>The various types of loops seen in other languages are formed simply by changing the <code>&lt;condition&gt;</code> part of the loop.</p>
 <h2 id="infinite-loops"><a class="header" href="#infinite-loops">Infinite Loops</a></h2>
-<p>An infinite loop is one that never ends. They are constructed by calling loop with the condition fixed to <code>true</code>, which ensures that the loop will always repeat.</p>
+<p>An infinite loop is one that never ends. They are constructed by hardcoding the condition to <code>true</code>, which ensures that the loop will always repeat.</p>
 <pre><code class="language-dewy">loop true
 {
     //do something repeatedly forever
@@ -1227,27 +1210,26 @@ loop i &lt;? 20
 </code></pre>
 <p>The only way to leave an infinite loop is via the <code>break</code>, and <code>return</code> keywords.</p>
 <h2 id="while-loops"><a class="header" href="#while-loops">While Loops</a></h2>
-<p>A while loop is a loop that executes &quot;while&quot; some condition is true. </p>
+<p>A while loop is a loop that executes &quot;while&quot; some condition is true. A simple boolean expression can be used as the condition. When the condition is false, the loop ends.</p>
 <pre><code class="language-dewy">loop i &gt;? 0
 {
     //while i is greater than 0, do something 
 }
 </code></pre>
-<p>If the condition is false before the loop starts, the body of the loop will never be entered. If you want the loop body to be entered at least once, you can use a do while loop</p>
-<pre><code class="language-dewy">{
-    //do something, while i is less or equal to 10
-}
-loop i &lt;=? 10
-</code></pre>
-<p>Instead of checking the condition at the start of the loop, the condition is checked at the end of each cycle. This way, the body is guaranteed to execute at least once.</p>
 <h2 id="for-loops"><a class="header" href="#for-loops">For Loops</a></h2>
-<p>A for loop, and similarly a for-each loop is a loop that performs the body &quot;for each&quot; item in a range or collection.</p>
-<pre><code class="language-dewy">loop i in 1:5
+<p>Many languages feature for loops, which iterate over some iterable object. The simplest case of this would be iterating over a range of numbers. In Dewy, the <code>in</code> operator manages iteration for loops. <code>in</code> has two aspects:</p>
+<ol>
+<li>the variable on the left is assigned with the next value of the iterable on the right (or <code>void</code> if there are no more values)</li>
+<li>the expression returns <code>true</code> or <code>false</code> depending on if there was a value to assign to the variable this iteration.</li>
+</ol>
+<p>This means that <code>in</code> expressions can be used to trivially construct a for-loop.</p>
+<pre><code class="language-dewy">loop i in 1..5
 {
     print('{i}, ') 
 }
 </code></pre>
-<p>Which prints out <code>1, 2, 3, 4, 5, </code> to the console. For loops can also iterate over the items in any type of container. Iterating over a list looks like this</p>
+<p>Which prints out <code>1, 2, 3, 4, 5, </code> to the console. Each iteration, <code>in</code> causes <code>i</code> to be assigned the next value in the sequence, while returning true for the loop condition. When the sequence is exhausted, <code>in</code> returns false, and the loop ends.</p>
+<p>For loops can also iterate over the items in any type of container. Iterating over a list looks like this</p>
 <pre><code class="language-dewy">loop fruit in ['apple' 'banana' 'peach' 'pear']
 {
     print('I like to eat {fruit}!')
@@ -1272,132 +1254,138 @@ loop show, rating in ratings
 {
     printl('I give {show} a {rating} out 100')
 }
-
-//TODO-&gt;syntax might change, depending on if dicts can return either 1 or 2 values for iterating over 
-//loop show, rating in ratings.keys, ratings.values
-//I think the 1 instance where left parameters doesn't match the right parameters is in the case of a single dict? otherwise you have to specify with _ to ignore
 </code></pre>
-<p>This prints out the following to the console</p>
+<p>This takes advantage of the fact that iterating over a dictionary returns each pair, which can then be unpacked into separate variables <code>show</code> and <code>rating</code>. This prints out the following to the console</p>
 <pre><code>I give star wars a 73 out of 100
 I give star trek a 89 out of 100
 I give star gate a 84 out of 100
 I give battlestar galactica a 87 out of 100
 I give legend of the galactic heroes a 100 out of 100
 </code></pre>
-<p>Lastly, you can also put the loop condition at the end of the block, to ensure the block executes at least once</p>
-<pre><code>{
-    //body is looped through 11 times.
-}
-loop i in 1:10
+<h3 id="multiple-conditions"><a class="header" href="#multiple-conditions">Multiple Conditions</a></h3>
+<p>A neat side effect of <code>in</code> statements returning a boolean is that it provides a free method for looping over multiple sequences simultaneously. Simply combine two <code>in</code> statements with a logical operator. The loop will continue until one sequence is exhausted, both, or something else, depending on which logical operator is used. The behavior <code>zip</code> from other languages can be achieved by combining sequences with <code>and</code></p>
+<pre><code class="language-dewy">names = ['Alice' 'Bob' 'Charlie']
+colors = ['Red' 'Blue' 'Green' 'Yellow']
+
+loop name in names and color in colors
+    printl'{name} chose {color}'
 </code></pre>
-<p>Note that the variable <code>i</code> does note exist on the first iteration of the loop, so do while loops don't tend to be used for iterating over lists or dictionaries. </p>
-<p>(TODO-&gt;perhaps talk about introspection to check if a variable exists, thus indicating actions to do/not do on the first iteration when the variable doesn't exist)</p>
+<p>In this case, the loop runs until either sequence is exhausted (as <code>and</code> requires both conditions to be true, so as soon as one is false, the loop ends). This prints out the following to the console</p>
+<pre><code>Alice chose Red
+Bob chose Blue
+Charlie chose Green
+</code></pre>
+<p>Other languages commonly have an <code>enumerate</code> function which will count how many iterations have occurred on top of looping over some sequence. This can be achieved by combining an infinite range with any sequence using <code>and</code>:</p>
+<pre><code class="language-dewy">loop i in 0.. and fruit in ['apple' 'banana' 'peach' 'pear']
+    printl'{i}) {fruit}'
+</code></pre>
+<p><code>i</code> will never run out of values, so the loop continues so long as <code>fruit</code> has values remaining. This prints out the following to the console</p>
+<pre><code>0) apple
+1) banana
+2) peach
+3) pear
+</code></pre>
+<p>Using the <code>or</code> operator to combine sequences will loop until so long as either of the sequences have values remaining. </p>
+<pre><code class="language-dewy">A = [1 2 3]
+B = [4 5 6 7 8]
+loop a in A or b in B
+    printl[a b]
+</code></pre>
+<p>Which prints</p>
+<pre><code>[1 4]
+[2 5]
+[3 6]
+[undefined 7]
+[undefined 8]
+</code></pre>
+<p>Since this is just combining boolean expressions, any combination of expressions that results in a boolean may be used.</p>
+<pre><code class="language-dewy">limit = time.now + 5(minutes)
+loop batch in batches and time.now &lt;? limit
+    process(batch)
+</code></pre>
+<p>As a similar approach, perhaps there might be iterators in this style where they don't have a fixed value, but instead track over some changing resource</p>
+<pre><code class="language-dewy">loop batch in batches and t in timer(5(minutes))
+{
+    process(batch)
+    printl'timeout in {t}'
+}
+</code></pre>
 <h2 id="do-loop-do"><a class="header" href="#do-loop-do">Do Loop Do</a></h2>
-<p>Following the pattern that a regular loop has the condition at the top, and a do-loop has the condition at the bottom, we can construct a loop that is sandwiched between two loop bodies</p>
-<pre><code>{
-    //occurs before condition is checked
-}
-loop i not =? 42
+<p>The do-while version of the loop can be constructed by putting the <code>do</code> keyword before the body, and putting the <code>loop</code> keyword and its condition after the body. This means loop body is executed at least once before the condition is checked, at which point the loop could exit or continue.</p>
+<p>Basic do-while loop:</p>
+<pre><code class="language-dewy">i = 0
+do
 {
-    //occurs after condition is checked
+    i += 1
+    printl'this is a do-while loop'
+}
+loop i &lt;? 20
+</code></pre>
+<p>do-loop over an iterator. On the first iteration, <code>i</code> will be undefined, while it will be available on subsequent iterations</p>
+<pre><code class="language-dewy">do printl'this is a do-for loop. i={i}'
+loop i in 0..5
+</code></pre>
+<p>Which prints</p>
+<pre><code>this is a do-for loop. i=undefined
+this is a do-for loop. i=0
+this is a do-for loop. i=1
+this is a do-for loop. i=2
+this is a do-for loop. i=3
+this is a do-for loop. i=4
+this is a do-for loop. i=5
+</code></pre>
+<p>Technically you can construct an infinite do-while loop, but it's basically identical to a regular infinite loop</p>
+<pre><code>do printl'this is a do-infinite loop'
+loop true
+</code></pre>
+<p>Lastly you can sandwich <code>loop</code> between two blocks using two <code>do</code> keywords (one before the first block, and one after the loop condition). This will give you a block executed before the condition and a block executed after the condition</p>
+<p><strong>NOTE:</strong> the syntax for do-loop-do is still being finalized, and may change from this example</p>
+<pre><code class="language-dewy">i = 0
+do
+{
+    printl'before condition is checked'
+}
+loop i &lt;? 20 do
+{
+    printl'after condition is checked'
+    i += 1
 }
 </code></pre>
-<p>In this loop, the first block is guaranteed to execute at least once. Then we check the condition, and then if true, we execute the second block, then repeat the loop, execute the first block, and then check the condition again, repeating until the condition is false, or we have iterated over all elements. </p>
-<h2 id="whitespace-and-semicolons"><a class="header" href="#whitespace-and-semicolons">Whitespace and Semicolons</a></h2>
-<p>If you're wondering how the loop keyword knows whether it's a regular <code>loop {block}</code> or a do-while <code>{block} loop</code>, so am I.</p>
-<p>Absent any other indicators, the loop keyword will use the spacing between it and surrounding blocks of code or expressions, to determine what it is looping. If a block/expression is on the same line or adjacent line as the <code>loop</code> keyword, then that block will be executed as part of the loop</p>
-<pre><code>{
-    //part of the loop
-} loop condition {
-    //part of the loop
-}
-
-
-{
-    //part of the loop
-}
-loop condition
-{
-    //part of the loop
-}
-
-
-{
-    //NOT part of the loop
-}
-
-loop condition
-{
-    //part of the loop
-}
-
-
-
-//This will (probably) raise an error during compilation as it is ambiguous
-//the alternative might be whichever block is closer
-{
-    //NOT part of the loop
-}
-
-loop condition
-
-{
-    //NOT part of the loop
-}
-
-</code></pre>
-<p>If you want to be more explicit about which block is attached to the loop, you can use <code>;</code> semicolons which act as a sort of empty block that binds to the loop. (Or you could use an actual empty block <code>{}</code>)</p>
-<pre><code>{
-    //NOT part of the loop
-};
-loop condition
-{
-    //part of the loop
-}
-
-{
-    //part of the loop
-} loop condition; {
-    //NOT part of the loop
-}
-</code></pre>
+<p>In this loop, the first block is guaranteed to execute at least once. Then we check the condition, and then if true, we execute the second block, then repeat the loop, execute the first block, and then check the condition again, repeating until the condition is false, or we have iterated over all elements.</p>
 <h2 id="break-continue-return-inside-loops"><a class="header" href="#break-continue-return-inside-loops">Break, Continue, Return inside Loops</a></h2>
 <p>TODO-&gt;write this. follows basic principles of other languages. extra is that you can use <code>#hashtags</code> to break/continue from inside nested loops</p>
 <h2 id="loop-generators"><a class="header" href="#loop-generators">Loop Generators</a></h2>
 <p>Let's look at this example</p>
-<pre><code>loop i in 1:10
-{
-    i
-}
+<pre><code>loop i in 1..10 {i}
 </code></pre>
 <p>Every iteration of the loop, the current value of <code>i</code> is &quot;expressed&quot;, that is to say, the value could be stored in a variable or a container.</p>
 <p>Lets capture the expressed value in a container by wrapping the loop in <code>[]</code> brackets</p>
-<pre><code>[loop i in 1:10 {i}]
+<pre><code>[loop i in 1..10 {i}]
 </code></pre>
 <p>This &quot;generates&quot; the array <code>[1 2 3 4 5 6 7 8 9 10]</code>, which we can then store into a variable</p>
-<pre><code>my_array = [loop i in 1:10 {i}]
+<pre><code>my_array = [loop i in 1..10 {i}]
 
 //optional to omit the braces since only a single expression is in the body
-my_array = [loop i in 1:10 i]
+my_array = [loop i in 1..10 i]
 </code></pre>
 <p>And thus we have created the simplest list generator. </p>
 <h3 id="multiple-expressions-per-iteration"><a class="header" href="#multiple-expressions-per-iteration">Multiple Expressions per Iteration</a></h3>
 <p>Generators can do a lot of interesting things. For example we can express multiple values on a single loop iteration</p>
 <pre><code>//note the braces are not optional in this case
-my_array = [loop i in 1:5 { i i^2 }]
+my_array = [loop i in 1..5 { i i^2 }]
 </code></pre>
 <p>producing the array <code>[1 1 2 4 3 9 4 16 5 25]</code>. </p>
 <p>We can also construct a dictionary by expressing with a <code>-&gt;</code> between two values</p>
-<pre><code>squares = [loop i in 1:5 { i -&gt; i^2 }]
+<pre><code>squares = [loop i in 1..5 { i -&gt; i^2 }]
 </code></pre>
 <p>which produces the dictionary <code>[1-&gt;1 2-&gt;4 3-&gt;9 4-&gt;16 5-&gt;25]</code> which points from values to their squares.</p>
 <h3 id="multidimensional-generators"><a class="header" href="#multidimensional-generators">Multidimensional Generators</a></h3>
 <p>You can generate a multidimensional array using multiple nested loops. For example</p>
 <pre><code>indices = 
 [
-    loop i in 1:5 
+    loop i in 1..5 
     [
-        loop j in 1:5 
+        loop j in 1..5 
         [ 
             i 
             j 
@@ -1415,25 +1403,6 @@ my_array = [loop i in 1:5 { i i^2 }]
 ]
 </code></pre>
 <p>And so many more things are possible. Loop generators are about as flexible a feature as one could imagine. It's really up to you how you want to apply them</p>
-<h3 id="maybe-repeated-function-calls"><a class="header" href="#maybe-repeated-function-calls">(Maybe) Repeated Function Calls</a></h3>
-<p>(TODO-&gt;decide how this plays with function vectorization...)</p>
-<p>In the same way a container can capture expressed items from a loop, and collect them all together, a function can capture expressed items from a loop, and perform a function on each item</p>
-<pre><code>//example definition of printl
-printl = str =&gt; system.console.write('{s}\n')
-printl( loop i in 1:10 {i} )
-</code></pre>
-<p>In this example, <code>printl</code> is called for each value of <code>i</code>, thus printing out</p>
-<pre><code>1
-2
-3
-4
-5
-6
-7
-8
-9
-10
-</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="blocks-statements-and-expressions"><a class="header" href="#blocks-statements-and-expressions">Blocks, Statements, and Expressions</a></h1>
 <h2 id="statements"><a class="header" href="#statements">Statements</a></h2>
 <p>a statement is a single piece of code that expresses no value. For example the <code>printl</code> function, which prints out a string to the console</p>
