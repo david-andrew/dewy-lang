@@ -12,6 +12,7 @@ This is mainly for when a jux is next to a power. Juxtapose can mean either mult
 ^
 <jux mul>
 / * %
+<jux range> //note jux range can be converted to an explicit operator since it will always appear next to a `..` token
 ...
 
 [LOWEST]
@@ -78,4 +79,10 @@ this mainly means that the conditions of each of the branches can share variable
 ```
 if (a=10 a>?b) {...}
 else if a>?c {...} //a is the same a created in first clause
+```
+
+## simple `count` implementation
+the dewy implementation for the `count` iterator is literally just
+```
+count = () => 0..
 ```

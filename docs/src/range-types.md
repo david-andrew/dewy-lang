@@ -10,10 +10,10 @@ The syntax for ranges is inspired by Haskell syntax for ranges:
 
 ```dewy
 [first..]               // first to inf
-[first,second..]        // first to inf, step size is second-first
+[(first,second)..]        // first to inf, step size is second-first
 [first..last]           // first to last
-[first,second..last]    // first to last, step size is second-first
-[..2ndlast,last]        // -inf to last, step size is last-2ndlast
+[(first,second)..last]    // first to last, step size is second-first
+[..(2ndlast,last)]        // -inf to last, step size is last-2ndlast
 [..last]                // -inf to last
 [..]                    // -inf to inf
 ```

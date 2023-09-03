@@ -423,7 +423,7 @@ sin <| 2pi(rad)
 ```
 
 
-## Piping multiple arguments vs piping a list
+## Piping multiple arguments vs piping a list [functions called with tuple get each argument separately, functions called with list get the whole list as one]
 since I want to be able to pipe multiple arguments, as well as a list, perhaps there could be a spread pipe operator that spreads the arguments out, e.g.
 
 ```
@@ -777,3 +777,35 @@ thirtyseven = @add5(32) //new function that takes 0 arguments
 new_sum = (x, y) => thirtyseven(a=x, b=y)
 ```
 In this case, we still have an issue with the comma operator having the wrong precedence when calling `thirtyseven`...
+
+## Should we get rid of the low precedence range juxtapose, and force ranges with step size to wrap the tuple in parenthesis, or should loops with multiple iterators require parenthesis around each iterator? [require ranges with tuple for step size to be wrapped in parenthesis+increase precedence of range juxtapose/in to be above logical operators]
+
+Currently there is a conflict with the operator precedence. We cannot have both of these:
+
+```dewy
+//range with a step size
+r = [first,second..last]
+
+//loop with multiple iterators
+loop i in 1..5 and j in 1..5
+{
+    printl('{i} {j}')
+}
+```
+
+The problem is with the precedence of the range juxtapose. Right now range juxtapose is lower than comma, allowing the first case `first,second..last` to work without needing to wrap the tuple in parenthesis. However, `,` comma is generally a pretty low precedence operator due to how tuples are typically sequences of expressions, so most operators should have higher precedence. `in` must have even lower precedence than range juxtapose so that the range is constructed before the `in` expression. This means in the second example, the `and` will bind with the `5` and `j` rather than the correct interpretation.
+
+The two approaches to fixing:
+1. keep precedence of range juxtapose/in below comma, and require any logically combined iterators to be wrapped in parenthesis:
+    ```dewy
+    loop (i in 1..5) and (j in 1..5)
+    {
+        printl('{i} {j}')
+    }
+    ```
+2. increase the precedence of range juxtapose/in to be above logical operators (e.g. `and`, `or`, etc.), and require any ranges with step size to be wrapped in parenthesis:
+    ```dewy
+    r = [(first,second)..last]
+    ```
+
+I think it comes down to which will occur more often--I suspect logically combined iterators will be much more common than ranges with a step size. So I'm leaning option 2.

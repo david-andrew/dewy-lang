@@ -189,12 +189,13 @@ def operator_precedence(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> in
     / * %
     + -
     << >> <<< >>> <<! !>>
+    <jux range>                         //TBD, e.g. [(first,second)..last]
+    in
     =? >? <? >=? <=? not=? <=> is? isnt? @?
     and nand &
     xor xnor                            //following C's precedence: and > xor > or
     or nor |
     ,                                   //tuple maker
-    <jux range>                         //TBD, e.g. [first,second..last]
     =>
     = .= <op>= .<op>=  (e.g. += .+=)    //right-associative (but technically causes a type error since assignments can't be chained)
     else
@@ -203,7 +204,7 @@ def operator_precedence(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> in
     [LOWEST]
 
     TODO:
-    - add operators: in as transmute |> <| -> <-> <- :
+    - add operators: as transmute |> <| -> <-> <- :
 
     [Notes]
     .. for ranges is not an operator, it is an expression. it uses juxtapose to bind to left/right arguments (or empty), and type-checks left and right
