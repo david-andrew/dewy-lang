@@ -2,7 +2,7 @@
 
 Welcome to the Dewy Programming Language Book. This book covers all aspects of the language, including syntax, style, the standard library, examples, etc. 
 
-**Please note that this book and the language are still VERY work in progress. The book is still missing many chapters, and the current language implementation is very incomplete.**
+> Please note that this book and the language are still VERY work in progress. The book is still missing many chapters, and the current language implementation is very incomplete.
 
 ## What is Dewy
 

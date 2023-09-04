@@ -60,13 +60,18 @@ P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
 (TODO->maybe like solidworks, allow user to set unit system, e.g. meters-kilograms-seconds, centimeters-grams-seconds, etc. See: https://en.wikipedia.org/wiki/MKS_system_of_units https://en.wikipedia.org/wiki/Metre%E2%80%93tonne%E2%80%93second_system_of_units https://en.wikipedia.org/wiki/Foot%E2%80%93pound%E2%80%93second_system https://en.wikipedia.org/wiki/Centimetre%E2%80%93gram%E2%80%93second_system_of_units )
 
 ### Base Units
-Abbreviations are written inside of brackes `[]`. Also note that abbreviated units are case sensitive, while written out units are case insensitive (and the same is true for prefixes). TODO->write out all the unit conversion
+Abbreviations are written inside of brackes `[]`. 
+
+> Note: abbreviated units and prefixes are **case sensitive**, while fully written out units and prefixes are **case insensitive**
 
 #### Mass [M]
-`[g]`, `gram`, `grams` (note that the base unit is `kg`/`kilograms`)  
+`[g]`, `gram`, `grams` 
 `[k]`, `kilo`, `kilos`
 `[lbm]`, `pound-mass`, `pounds-mass`  
 `slug`, `slugs`
+(TODO: metric vs us vs etc. tons)
+
+> Note: the base unit is `kg`/`kilograms`, not `g`/`grams`. `k`/`kilo` is provided as a convenience to allow for a mass base unit without a prefix. e.g. `kilokilo` would be equivalent to `1000(kilograms)`. 
 
 #### Length [L]
 `[m]`, `meter`, `meters`, `metre`, `metres`
@@ -88,7 +93,8 @@ Abbreviations are written inside of brackes `[]`. Also note that abbreviated uni
 `[A]`, `amp`, `amps`, `ampere`, `amperes`
 
 #### Thermodynamic Temperature [Θ]
-`[K]`, `kelvin` (note the plural of `kelvin` is `kelvin`)
+`[K]`, `kelvin` 
+> Note: the plural of `kelvin` is `kelvin`, not `kelvins`
 
 #### Amount of Substance [N]
 `[mol]`, `mole`, `moles`
@@ -118,10 +124,11 @@ Abbreviations are written inside of brackes `[]`. Also note that abbreviated uni
 #### Energy / Work / Heat
 `[J]`, `joule`, `joules`
 `[cal]`, `calorie`, `calories`
-`[Cal]` (note that `Cal` is equivalent to `kcal` or `kilocalorie`)
+`[Cal]` 
 `[BTU]`, `british_thermal_unit`, `british_thermal_units`
 `[eV]`, `electron_volt`, `electron_volts`
 `[Wh]`, `watt_hour`, `watt_hours`
+> Note: `Cal` is equivalent to `kcal` or `kilocalorie` (i.e. `1000(calories)`). 
 
 #### Power / Radiant Flux
 `[W]`, `watt`, `watts`
@@ -176,9 +183,7 @@ Abbreviations are written inside of brackes `[]`. Also note that abbreviated uni
 (TODO->all other units + weird units. e.g. drops)
 
 ### SI Prefixes
-Note that SI prefixes only work for SI base and derived units (and a few exceptions noted below). 
-
-Also note that the abbreviated forms of prefixes may only be combined with abbreviated units, and written out prefixes may only be combined with written out units. E.g. `kilograms` and `kg` are valid, but `kgrams` and `kilog` are invalid.
+> Note: SI prefixes only work for SI base and derived units (and a few exceptions noted below). Also the abbreviated forms of prefixes may only be combined with abbreviated units, and written out prefixes may only be combined with written out units. E.g. `kilograms` and `kg` are valid, but `kgrams` and `kilog` are invalid.
 
 10^24 = `[Y]`, `yotta`  
 10^21 = `[Z]`, `zetta`  

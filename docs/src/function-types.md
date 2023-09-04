@@ -30,19 +30,19 @@ And, because of precedence rules, we can omit the parenthesis around the argumen
 
 ```dewy
 pythag_length = a, b => (a^2 + b^2)^/2
-abs = x => if x <? 0 -x else x
 ```
 
-Note that zero arguments require an empty pair of parenthesis, in order to be parsed correctly
+> Note: zero arguments require an empty pair of parenthesis, in order to be parsed correctly. This is because a function literal is parsed as `<left> => <right>`, so something must always be present on the left side of the `=>` operator.
 
 ```dewy
 foo = () => printl'bar'
 ```
 
-This is because a function literal is parsed as `<left> => <right>`, so something must always be present on the left side of the `=>` operator.
 
 ### Default Arguments
-Function arguments can have default values, which are used if the argument is not specified in the function call. **Note:** because comma `,` has higher precedence than `=`, the default value must be wrapped in parenthesis.
+Function arguments can have default values, which are used if the argument is not specified in the function call. 
+
+> Note: because comma `,` has higher precedence than `=`, the default value must be wrapped in parenthesis.
 
 ```dewy
 foo = a, (b=5) => a + b

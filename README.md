@@ -29,13 +29,13 @@ You will need to logout and log back in for changes to take effect.
     fi
     ```
 
-    **Note: Be sure to adjust the command to match the current absolute path of this repo**
+    > Note: Be sure to adjust the command to match the current absolute path of this repo
 
 1. Then logout, and log back in for changes to take effect
 
 
 ## Try it out
-Note that the language parser is largely incomplete, and there are very many different syntaxes that will get trapped at breakpoints marking TODO, or cause exceptions for `NotImplementedError`
+> Note that the language parser is largely incomplete, and there are very many different syntaxes that will get trapped at breakpoints marking TODO, or cause exceptions for `NotImplementedError`
 
 If you completed the install steps, you can simply run:
 ```

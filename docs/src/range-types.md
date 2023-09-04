@@ -10,15 +10,22 @@ The syntax for ranges is inspired by Haskell syntax for ranges:
 
 ```dewy
 [first..]               // first to inf
-[(first,second)..]        // first to inf, step size is second-first
-[first..last]           // first to last
-[(first,second)..last]    // first to last, step size is second-first
-[..(2ndlast,last)]        // -inf to last, step size is last-2ndlast
 [..last]                // -inf to last
+[first..last]           // first to last
 [..]                    // -inf to inf
 ```
 
-Note that `[first..2ndlast,last]` is explicitly **NOT ALLOWED**, as it is covered by `[first,second..last]`, and can have unintuitive behavior.
+Like in haskell, you can use a tuple to include a second value to specify the step size.
+
+
+```dewy
+[(first,second)..]        // first to inf, step size is second-first
+[(first,second)..last]    // first to last, step size is second-first
+[..(2ndlast,last)]        // -inf to last, step size is last-2ndlast
+```
+
+> Note: Due to precedence rules in Dewy, namely `,` having relatively low precedence, the step size tuple must be wrapped in parenthesis.
+> Also `[first..(2ndlast,last)]` is explicitly **NOT ALLOWED**, as it can have unintuitive behavior, and is covered by `[(first,second)..last]`.
 
 In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.
 
@@ -40,15 +47,16 @@ first.. last    // first to inf. last is not part of the range
 first .. last   // -inf to inf. neither first or last are part of the range
 ```
 
-Note that the range juxtaposition operator has relatively low precedence, so you can construct various common ranges without needing parenthesis.
+> Note: the range juxtaposition operator has medium precedence. Most operators will have higher precedence, not requiring parenthesis, with `,` and `in` being the main exceptions
 
 ```dewy
-first..last+1           // first to last+1
-first,second..last      // first to last, step size is second-first
-first/2,first..last+10  // first/2 to last, step size is first/2
+first..last+1             // first to last+1
+(first,second)..last/2    // first to last/2, step size is second-first
+(first/2,first)..last+10  // first/2 to last+10, step size is first/2
+a in first..last          // iterate a over range first to last
 ```
 
-The juxtaposition requirement allows ranges to be used to index into matricies
+The juxtaposition requirement allows multiple ranges to be included in an array, which can be used to index into multidimensional matrices
 
 ```dewy
 my_array = [
@@ -98,7 +106,9 @@ word_range = 'apple'..'zebra'
 'panda' in? word_range  //returns true
 ```
 
-which would create a range that consists of every possible 5 letter combination starting from the word `'apple'` and iterating through to the word `'zebra'`. NOTE that this is distinct from every dictionary word in that range, as it will include many many gibberish words. 
+which would create a range that consists of every possible 5 letter combination starting from the word `'apple'` and iterating through to the word `'zebra'`. 
+
+> Note: this is distinct from every dictionary word in that range, as it will include many many gibberish words. 
 
 TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. `'apple2'` should come before `'apple10'`), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used
 
@@ -123,7 +133,9 @@ To iterate over values in reverse, you can specify a reversed range:
 loop i in 5,4..0 print'{i} '
 ```
 
-This prints `'5 4 3 2 1 0 '`. **Note:** when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.
+This prints `'5 4 3 2 1 0 '`. 
+
+> Note: when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.
 
 ### Range Arithmetic
 
@@ -191,7 +203,9 @@ substring = full_string[3..12]
 printl(substring) //prints 's is a str'
 ```
 
-This works for any sequence type. **Note:** only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).
+This works for any sequence type. 
+
+> Note: only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).
 
 Also, because of juxtaposition, we can easily make the selection inclusive or exclusive on either side.
 

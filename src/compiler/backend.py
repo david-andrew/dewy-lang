@@ -28,11 +28,20 @@ def c_compiler(path:str, args:list[str]):
 def x86_64_compiler(path:str, args:list[str]):
     raise NotImplementedError('x86_64 backend is not yet supported')
 
+def shell(path:str, args:list[str]):
+    """this would target sh/powershell/etc. all simultaneously"""
+    raise NotImplementedError('Shell backend is not yet supported')
+
 backend_map = {
     'python': python_interpreter,
     'llvm': llvm_compiler,
     'c': c_compiler,
-    'x86_64': x86_64_compiler
+    'x86_64': x86_64_compiler,
+    # 'arm': arm,
+    # 'riscv': riscv,
+    'sh': shell,
+    # 'posix': posix_shell,
+    # 'powershell': powershell_shell,
 }
 backends = [*backend_map.keys()]
 

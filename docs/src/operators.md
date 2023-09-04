@@ -18,7 +18,8 @@ Dewy is a 100% expression-based language, meaning everything is formed from smal
 - `^` exponent
 
 **logical and bitwise operations**
-(note that these are logical if both operands are boolean, otherwise they are bitwise and operate on as many bits as the size of the largest operand)
+> Note: these are logical if both operands are boolean, otherwise they are bitwise and operate on as many bits as the size of the largest operand
+
 - `and` both are true
 - `or` either are true
 - `xor` exactly one is true
@@ -79,7 +80,7 @@ Dewy is a 100% expression-based language, meaning everything is formed from smal
 
 any of the logical/bitwise operators, as well as the boolean returning operators can be preceeded by `not` which will then cause the inverse of the operation to be returned. e.g. `not and` is equivalent to `nand`, `not <?` is equivalent to `>=?`, etc.
 
-any of these operations can be appended with an `=` sign to make them into an assignment (this probably excludes `@` and `!` and any other unary operators)
+most binary operators can be appended with an `=` sign to make them into an assignment
 e.g. 
 
 ```
@@ -89,13 +90,11 @@ a !>>= 5  //is equivalent to a = a !>> 5
 a xor= false  //is equivalent to a = a xor false
 ```
 
-TBD if the `=` sign can be (optionally) separated from the operation. e.g. `+=` is equivalent to `+ =`, `xor=` is equivalent to `xor =`, etc. I think it should be allowed in this case, so long as the first operator is in a single piece
-
-This should also probably work with element-wise operations where each element in the list is updated according to the operation (can be done in parallel)
+(TODO: This should also probably be able to be combined with element-wise/vectorized `.` operations where each element in the list is updated according to the operation (can be done in parallel))
 
 ## Elementwise Operations
 
-the elementwise operator `.` can be prepended to any operation to make it be performed on each element in a vector/matrix/tensor/etc. 
+the elementwise operator `.` can be prepended to most binary operators to make it be performed on each element in a array or sequence 
 e.g. 
 
 ```
@@ -106,11 +105,11 @@ is_factor = mods .=? 0 //returns [true false true false false false false]
 p_factors = a[is_factor] //returns [2 5]
 
 //above in a single line
-p_factors = [2 3 5 7 11 13 17 19][20 .% [2 3 5 7 11 13 17 19] =? 0]
+p_factors = [2 3 5 7 11 13 17 19][20 .% [2 3 5 7 11 13 17 19] .=? 0]
 
 //though it's probably cleaner in 2 lines
 primes = [2 3 5 7 11 13 17 19]
-p_factors = primes[20 .% primes =? 0]
+p_factors = primes[20 .% primes .=? 0]
 ```
 
 This works if either the either first operand is a list, or the second is a list, or both are lists with the exact same shape
@@ -140,17 +139,17 @@ Every operator has a precedence level, and an associativity. The precedence leve
 | 10 | `*`<br>`/`<br>`%` | multiply<br>divide<br>modulus | left |
 | 9 | `+`<br>`-` | add<br>subtract | left |
 | 8 | `<<`<br>`>>`<br>`<<<`<br>`>>>`<br>`<<!`<br>`!>>` | left shift<br>right shift<br>rotate right no carry<br>rotate left no carry<br>rotate left with carry<br>rotate right with carry | left
+| # | juxtapose | jux-range | none |
+| # | `in` | in | fail |
 | 7 | `=?`<br>`>?`<br>`<?`<br>`>=?`<br>`<=?` | equal<br>greater than<br>less than<br>greater than or equal<br>less than or equal | left |
 | 6 | `and`<br>`nand`<br>`&` | and<br>nand<br>and | left |
 | 5 | `xor`<br>`xnor` | xor<br>xnor | left |
 | 4 | `or`<br>`nor`<br>\| | or<br>nor<br>or | left |
 | 3 | `comma` | comma | none |
-| # | juxtapose | jux-range | none |
 | 2 | `=>` | function arrow | right |
 | 1 | `=` | bind | fail |
 | 0 | `else` | flow alternate | none |
 | -1 | space | space | left |
-| TBD |  `in`     | in          |     TBD       |
 | TBD |  `as`     | as          |     TBD       |
 | TBD |`transmute`| transmute   |     TBD       |
 | TBD |   \|>     | pipe        |     TBD       |

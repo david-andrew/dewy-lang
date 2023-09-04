@@ -217,7 +217,7 @@ loop true
 
 Lastly you can sandwich `loop` between two blocks using two `do` keywords (one before the first block, and one after the loop condition). This will give you a block executed before the condition and a block executed after the condition
 
-**NOTE:** the syntax for do-loop-do is still being finalized, and may change from this example
+> Note: the syntax for do-loop-do is still being finalized, and may change from this example
 
 ```dewy
 i = 0

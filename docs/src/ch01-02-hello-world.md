@@ -43,7 +43,7 @@ This code invokes the `printl` function with the string `'Hello, World!'`. `prin
 
 ## Compiling and Running Are the Same Step
 
-**NOTE: this is not relevant until the LLVM/other compiler backends are implemented.**
+> NOTE: this is not relevant until the LLVM/other compiler backends are implemented.
 
 When you run the program, you are actually doing two things: first compiling, and then running.
 

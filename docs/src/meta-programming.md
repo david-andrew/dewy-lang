@@ -1,5 +1,5 @@
 # Meta Programming
-**NOTE:** This will probably not be relevant until the current handwritten parser is replaced with a parser generator (probably GLL)
+> Note: This will probably not be relevant until the current handwritten parser is replaced with a parser generator (probably GLL)
 
 Eventually, the goal is for the language to be completely described via some sort of syntax description, such as a context-free grammar. There was work on this in the past, but it was paused in favor of building a usable version of the language first. When there is a suitable parser-generator implementation of the language, one of the planned features is to include the syntax description language within Dewy itself for metaprogramming purposes. Users could describe new syntax features via the metalanguage, and then be able to use them in their programs.
 

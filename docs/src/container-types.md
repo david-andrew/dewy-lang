@@ -11,7 +11,7 @@ my_array = [0 1 2 3 'apple' 'banana' 'peach' true]
 printl(my_array[3])  //prints '3'
 ```
 
-Note that values do not need commas to separate them. Also arrays can contain objects of different types, though arrays as only a single type will be more efficient. Arrays are 0-indexed (with potentially the option to set an arbitrary index)
+> Note: values do not need commas to separate them. Also arrays can contain objects of different types, though arrays where all values are just a single type will be more efficient. Arrays are 0-indexed (with potentially the option to set an arbitrary index)
 
 TODO->explain how to make matrices and other linear algebra stuff.
 
@@ -29,7 +29,7 @@ my_dictionary = [
 printl(my_dictionary['peach'])  //prints '3'
 ```
 
-Again note the lack of a need for comma separation. (Potentially may add an option for using `<-` arrows in addition to `->` arrows, esp. b/c of `<->` arrows)
+Again note the lack of a need for comma separation between key-value pairs.
 
 Additionally if you wish, you can define a bi-directional dictionary using a double-ended arrow:
 
@@ -44,7 +44,7 @@ printl(my_bidictionary['three'])  //prints '3'
 printl(my_bidictionary[3])        //prints 'three'
 ```
 
-Note that when creating a bidictionary, every arrow must by double-ended. As new elements are added, the bidictionary will maintain the bidirectional links between each element. Regular dictionaries will not maintin such links.
+> Note: when creating a bidictionary, every arrow must by double-ended. As new elements are added, the bidictionary will maintain the bidirectional links between each element. Regular dictionaries will not maintin such links.
 
 ## Sets
 
