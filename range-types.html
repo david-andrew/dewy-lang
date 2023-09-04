@@ -172,14 +172,19 @@
 <h2 id="range-syntax"><a class="header" href="#range-syntax">Range Syntax</a></h2>
 <p>The syntax for ranges is inspired by Haskell syntax for ranges:</p>
 <pre><code class="language-dewy">[first..]               // first to inf
-[(first,second)..]        // first to inf, step size is second-first
-[first..last]           // first to last
-[(first,second)..last]    // first to last, step size is second-first
-[..(2ndlast,last)]        // -inf to last, step size is last-2ndlast
 [..last]                // -inf to last
+[first..last]           // first to last
 [..]                    // -inf to inf
 </code></pre>
-<p>Note that <code>[first..2ndlast,last]</code> is explicitly <strong>NOT ALLOWED</strong>, as it is covered by <code>[first,second..last]</code>, and can have unintuitive behavior.</p>
+<p>Like in haskell, you can use a tuple to include a second value to specify the step size.</p>
+<pre><code class="language-dewy">[(first,second)..]        // first to inf, step size is second-first
+[(first,second)..last]    // first to last, step size is second-first
+[..(2ndlast,last)]        // -inf to last, step size is last-2ndlast
+</code></pre>
+<blockquote>
+<p>Note: Due to precedence rules in Dewy, namely <code>,</code> having relatively low precedence, the step size tuple must be wrapped in parenthesis.
+Also <code>[first..(2ndlast,last)]</code> is explicitly <strong>NOT ALLOWED</strong>, as it can have unintuitive behavior, and is covered by <code>[(first,second)..last]</code>.</p>
+</blockquote>
 <p>In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.</p>
 <pre><code class="language-dewy">[first..last]   // first to last including first and last
 [first..last)   // first to last including first, excluding last
@@ -194,12 +199,15 @@ first ..last    // -inf to last. first is not part of the range
 first.. last    // first to inf. last is not part of the range
 first .. last   // -inf to inf. neither first or last are part of the range
 </code></pre>
-<p>Note that the range juxtaposition operator has relatively low precedence, so you can construct various common ranges without needing parenthesis.</p>
-<pre><code class="language-dewy">first..last+1           // first to last+1
-first,second..last      // first to last, step size is second-first
-first/2,first..last+10  // first/2 to last, step size is first/2
+<blockquote>
+<p>Note: the range juxtaposition operator has medium precedence. Most operators will have higher precedence, not requiring parenthesis, with <code>,</code> and <code>in</code> being the main exceptions</p>
+</blockquote>
+<pre><code class="language-dewy">first..last+1             // first to last+1
+(first,second)..last/2    // first to last/2, step size is second-first
+(first/2,first)..last+10  // first/2 to last+10, step size is first/2
+a in first..last          // iterate a over range first to last
 </code></pre>
-<p>The juxtaposition requirement allows ranges to be used to index into matricies</p>
+<p>The juxtaposition requirement allows multiple ranges to be included in an array, which can be used to index into multidimensional matrices</p>
 <pre><code class="language-dewy">my_array = [
     0 1 2 3 4 5 6 7 8 9 
     10 11 12 13 14 15 16 17 18 19
@@ -229,7 +237,10 @@ ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc
 <pre><code>word_range = 'apple'..'zebra'
 'panda' in? word_range  //returns true
 </code></pre>
-<p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>. NOTE that this is distinct from every dictionary word in that range, as it will include many many gibberish words. </p>
+<p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>. </p>
+<blockquote>
+<p>Note: this is distinct from every dictionary word in that range, as it will include many many gibberish words. </p>
+</blockquote>
 <p>TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. <code>'apple2'</code> should come before <code>'apple10'</code>), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used</p>
 <h2 id="range-uses"><a class="header" href="#range-uses">Range Uses</a></h2>
 <p>Ranges have a variety of different uses in Dewy.</p>
@@ -241,7 +252,10 @@ ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc
 <p>To iterate over values in reverse, you can specify a reversed range:</p>
 <pre><code class="language-dewy">loop i in 5,4..0 print'{i} '
 </code></pre>
-<p>This prints <code>'5 4 3 2 1 0 '</code>. <strong>Note:</strong> when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.</p>
+<p>This prints <code>'5 4 3 2 1 0 '</code>. </p>
+<blockquote>
+<p>Note: when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.</p>
+</blockquote>
 <h3 id="range-arithmetic"><a class="header" href="#range-arithmetic">Range Arithmetic</a></h3>
 <p>Ranges can be used in arithmetic expressions, often as a way to construct new ranges.</p>
 <pre><code>//division version
@@ -284,7 +298,10 @@ loop i in complex_range
 substring = full_string[3..12]
 printl(substring) //prints 's is a str'
 </code></pre>
-<p>This works for any sequence type. <strong>Note:</strong> only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).</p>
+<p>This works for any sequence type. </p>
+<blockquote>
+<p>Note: only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).</p>
+</blockquote>
 <p>Also, because of juxtaposition, we can easily make the selection inclusive or exclusive on either side.</p>
 <pre><code>full_string = 'this is a string'
 

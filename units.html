@@ -215,12 +215,19 @@ P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
 <h2 id="full-list-of-units"><a class="header" href="#full-list-of-units">Full List of Units</a></h2>
 <p>(TODO-&gt;maybe like solidworks, allow user to set unit system, e.g. meters-kilograms-seconds, centimeters-grams-seconds, etc. See: https://en.wikipedia.org/wiki/MKS_system_of_units https://en.wikipedia.org/wiki/Metre%E2%80%93tonne%E2%80%93second_system_of_units https://en.wikipedia.org/wiki/Foot%E2%80%93pound%E2%80%93second_system https://en.wikipedia.org/wiki/Centimetre%E2%80%93gram%E2%80%93second_system_of_units )</p>
 <h3 id="base-units"><a class="header" href="#base-units">Base Units</a></h3>
-<p>Abbreviations are written inside of brackes <code>[]</code>. Also note that abbreviated units are case sensitive, while written out units are case insensitive (and the same is true for prefixes). TODO-&gt;write out all the unit conversion</p>
+<p>Abbreviations are written inside of brackes <code>[]</code>. </p>
+<blockquote>
+<p>Note: abbreviated units and prefixes are <strong>case sensitive</strong>, while fully written out units and prefixes are <strong>case insensitive</strong></p>
+</blockquote>
 <h4 id="mass-m"><a class="header" href="#mass-m">Mass [M]</a></h4>
-<p><code>[g]</code>, <code>gram</code>, <code>grams</code> (note that the base unit is <code>kg</code>/<code>kilograms</code>)<br />
+<p><code>[g]</code>, <code>gram</code>, <code>grams</code> 
 <code>[k]</code>, <code>kilo</code>, <code>kilos</code>
 <code>[lbm]</code>, <code>pound-mass</code>, <code>pounds-mass</code><br />
-<code>slug</code>, <code>slugs</code></p>
+<code>slug</code>, <code>slugs</code>
+(TODO: metric vs us vs etc. tons)</p>
+<blockquote>
+<p>Note: the base unit is <code>kg</code>/<code>kilograms</code>, not <code>g</code>/<code>grams</code>. <code>k</code>/<code>kilo</code> is provided as a convenience to allow for a mass base unit without a prefix. e.g. <code>kilokilo</code> would be equivalent to <code>1000(kilograms)</code>. </p>
+</blockquote>
 <h4 id="length-l"><a class="header" href="#length-l">Length [L]</a></h4>
 <p><code>[m]</code>, <code>meter</code>, <code>meters</code>, <code>metre</code>, <code>metres</code></p>
 <h4 id="time-t"><a class="header" href="#time-t">Time [T]</a></h4>
@@ -238,7 +245,10 @@ P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
 <h4 id="electric-current-i"><a class="header" href="#electric-current-i">Electric Current [I]</a></h4>
 <p><code>[A]</code>, <code>amp</code>, <code>amps</code>, <code>ampere</code>, <code>amperes</code></p>
 <h4 id="thermodynamic-temperature-Θ"><a class="header" href="#thermodynamic-temperature-Θ">Thermodynamic Temperature [Θ]</a></h4>
-<p><code>[K]</code>, <code>kelvin</code> (note the plural of <code>kelvin</code> is <code>kelvin</code>)</p>
+<p><code>[K]</code>, <code>kelvin</code> </p>
+<blockquote>
+<p>Note: the plural of <code>kelvin</code> is <code>kelvin</code>, not <code>kelvins</code></p>
+</blockquote>
 <h4 id="amount-of-substance-n"><a class="header" href="#amount-of-substance-n">Amount of Substance [N]</a></h4>
 <p><code>[mol]</code>, <code>mole</code>, <code>moles</code></p>
 <h4 id="luminous-intensity-j"><a class="header" href="#luminous-intensity-j">Luminous Intensity [J]</a></h4>
@@ -259,10 +269,13 @@ P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
 <h4 id="energy--work--heat"><a class="header" href="#energy--work--heat">Energy / Work / Heat</a></h4>
 <p><code>[J]</code>, <code>joule</code>, <code>joules</code>
 <code>[cal]</code>, <code>calorie</code>, <code>calories</code>
-<code>[Cal]</code> (note that <code>Cal</code> is equivalent to <code>kcal</code> or <code>kilocalorie</code>)
+<code>[Cal]</code> 
 <code>[BTU]</code>, <code>british_thermal_unit</code>, <code>british_thermal_units</code>
 <code>[eV]</code>, <code>electron_volt</code>, <code>electron_volts</code>
 <code>[Wh]</code>, <code>watt_hour</code>, <code>watt_hours</code></p>
+<blockquote>
+<p>Note: <code>Cal</code> is equivalent to <code>kcal</code> or <code>kilocalorie</code> (i.e. <code>1000(calories)</code>). </p>
+</blockquote>
 <h4 id="power--radiant-flux"><a class="header" href="#power--radiant-flux">Power / Radiant Flux</a></h4>
 <p><code>[W]</code>, <code>watt</code>, <code>watts</code>
 <code>[hp]</code>, <code>horsepower</code></p>
@@ -299,8 +312,9 @@ P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
 <p><code>[kat]</code>, <code>katal</code>, <code>katals</code></p>
 <p>(TODO-&gt;all other units + weird units. e.g. drops)</p>
 <h3 id="si-prefixes"><a class="header" href="#si-prefixes">SI Prefixes</a></h3>
-<p>Note that SI prefixes only work for SI base and derived units (and a few exceptions noted below). </p>
-<p>Also note that the abbreviated forms of prefixes may only be combined with abbreviated units, and written out prefixes may only be combined with written out units. E.g. <code>kilograms</code> and <code>kg</code> are valid, but <code>kgrams</code> and <code>kilog</code> are invalid.</p>
+<blockquote>
+<p>Note: SI prefixes only work for SI base and derived units (and a few exceptions noted below). Also the abbreviated forms of prefixes may only be combined with abbreviated units, and written out prefixes may only be combined with written out units. E.g. <code>kilograms</code> and <code>kg</code> are valid, but <code>kgrams</code> and <code>kilog</code> are invalid.</p>
+</blockquote>
 <p>10^24 = <code>[Y]</code>, <code>yotta</code><br />
 10^21 = <code>[Z]</code>, <code>zetta</code><br />
 10^18 = <code>[E]</code>, <code>exa</code><br />

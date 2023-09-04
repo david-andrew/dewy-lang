@@ -184,8 +184,10 @@
 <li><code>%</code> modulus</li>
 <li><code>^</code> exponent</li>
 </ul>
-<p><strong>logical and bitwise operations</strong>
-(note that these are logical if both operands are boolean, otherwise they are bitwise and operate on as many bits as the size of the largest operand)</p>
+<p><strong>logical and bitwise operations</strong></p>
+<blockquote>
+<p>Note: these are logical if both operands are boolean, otherwise they are bitwise and operate on as many bits as the size of the largest operand</p>
+</blockquote>
 <ul>
 <li><code>and</code> both are true</li>
 <li><code>or</code> either are true</li>
@@ -247,17 +249,16 @@
 <p>(TODO: postfix operators)</p>
 <h2 id="in-place-assignment"><a class="header" href="#in-place-assignment">In-place Assignment</a></h2>
 <p>any of the logical/bitwise operators, as well as the boolean returning operators can be preceeded by <code>not</code> which will then cause the inverse of the operation to be returned. e.g. <code>not and</code> is equivalent to <code>nand</code>, <code>not &lt;?</code> is equivalent to <code>&gt;=?</code>, etc.</p>
-<p>any of these operations can be appended with an <code>=</code> sign to make them into an assignment (this probably excludes <code>@</code> and <code>!</code> and any other unary operators)
+<p>most binary operators can be appended with an <code>=</code> sign to make them into an assignment
 e.g. </p>
 <pre><code>a += 5  //is equivalent to a = a + 5
 a &lt;?= 5  //is equivalent to a = a &lt;? 5
 a !&gt;&gt;= 5  //is equivalent to a = a !&gt;&gt; 5
 a xor= false  //is equivalent to a = a xor false
 </code></pre>
-<p>TBD if the <code>=</code> sign can be (optionally) separated from the operation. e.g. <code>+=</code> is equivalent to <code>+ =</code>, <code>xor=</code> is equivalent to <code>xor =</code>, etc. I think it should be allowed in this case, so long as the first operator is in a single piece</p>
-<p>This should also probably work with element-wise operations where each element in the list is updated according to the operation (can be done in parallel)</p>
+<p>(TODO: This should also probably be able to be combined with element-wise/vectorized <code>.</code> operations where each element in the list is updated according to the operation (can be done in parallel))</p>
 <h2 id="elementwise-operations"><a class="header" href="#elementwise-operations">Elementwise Operations</a></h2>
-<p>the elementwise operator <code>.</code> can be prepended to any operation to make it be performed on each element in a vector/matrix/tensor/etc. 
+<p>the elementwise operator <code>.</code> can be prepended to most binary operators to make it be performed on each element in a array or sequence 
 e.g. </p>
 <pre><code>//find the prime factors of 20
 a = [2 3 5 7 11 13 17 19]  //primes up to 20
@@ -266,11 +267,11 @@ is_factor = mods .=? 0 //returns [true false true false false false false]
 p_factors = a[is_factor] //returns [2 5]
 
 //above in a single line
-p_factors = [2 3 5 7 11 13 17 19][20 .% [2 3 5 7 11 13 17 19] =? 0]
+p_factors = [2 3 5 7 11 13 17 19][20 .% [2 3 5 7 11 13 17 19] .=? 0]
 
 //though it's probably cleaner in 2 lines
 primes = [2 3 5 7 11 13 17 19]
-p_factors = primes[20 .% primes =? 0]
+p_factors = primes[20 .% primes .=? 0]
 </code></pre>
 <p>This works if either the either first operand is a list, or the second is a list, or both are lists with the exact same shape</p>
 <h2 id="precedence"><a class="header" href="#precedence">Precedence</a></h2>
@@ -293,17 +294,17 @@ p_factors = primes[20 .% primes =? 0]
 <tr><td>10</td><td><code>*</code><br><code>/</code><br><code>%</code></td><td>multiply<br>divide<br>modulus</td><td>left</td></tr>
 <tr><td>9</td><td><code>+</code><br><code>-</code></td><td>add<br>subtract</td><td>left</td></tr>
 <tr><td>8</td><td><code>&lt;&lt;</code><br><code>&gt;&gt;</code><br><code>&lt;&lt;&lt;</code><br><code>&gt;&gt;&gt;</code><br><code>&lt;&lt;!</code><br><code>!&gt;&gt;</code></td><td>left shift<br>right shift<br>rotate right no carry<br>rotate left no carry<br>rotate left with carry<br>rotate right with carry</td><td>left</td></tr>
+<tr><td>#</td><td>juxtapose</td><td>jux-range</td><td>none</td></tr>
+<tr><td>#</td><td><code>in</code></td><td>in</td><td>fail</td></tr>
 <tr><td>7</td><td><code>=?</code><br><code>&gt;?</code><br><code>&lt;?</code><br><code>&gt;=?</code><br><code>&lt;=?</code></td><td>equal<br>greater than<br>less than<br>greater than or equal<br>less than or equal</td><td>left</td></tr>
 <tr><td>6</td><td><code>and</code><br><code>nand</code><br><code>&amp;</code></td><td>and<br>nand<br>and</td><td>left</td></tr>
 <tr><td>5</td><td><code>xor</code><br><code>xnor</code></td><td>xor<br>xnor</td><td>left</td></tr>
 <tr><td>4</td><td><code>or</code><br><code>nor</code><br>|</td><td>or<br>nor<br>or</td><td>left</td></tr>
 <tr><td>3</td><td><code>comma</code></td><td>comma</td><td>none</td></tr>
-<tr><td>#</td><td>juxtapose</td><td>jux-range</td><td>none</td></tr>
 <tr><td>2</td><td><code>=&gt;</code></td><td>function arrow</td><td>right</td></tr>
 <tr><td>1</td><td><code>=</code></td><td>bind</td><td>fail</td></tr>
 <tr><td>0</td><td><code>else</code></td><td>flow alternate</td><td>none</td></tr>
 <tr><td>-1</td><td>space</td><td>space</td><td>left</td></tr>
-<tr><td>TBD</td><td><code>in</code></td><td>in</td><td>TBD</td></tr>
 <tr><td>TBD</td><td><code>as</code></td><td>as</td><td>TBD</td></tr>
 <tr><td>TBD</td><td><code>transmute</code></td><td>transmute</td><td>TBD</td></tr>
 <tr><td>TBD</td><td>|&gt;</td><td>pipe</td><td>TBD</td></tr>

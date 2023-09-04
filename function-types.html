@@ -183,14 +183,17 @@ my_function  //calls the function
 </code></pre>
 <p>And, because of precedence rules, we can omit the parenthesis around the argument list</p>
 <pre><code class="language-dewy">pythag_length = a, b =&gt; (a^2 + b^2)^/2
-abs = x =&gt; if x &lt;? 0 -x else x
 </code></pre>
-<p>Note that zero arguments require an empty pair of parenthesis, in order to be parsed correctly</p>
+<blockquote>
+<p>Note: zero arguments require an empty pair of parenthesis, in order to be parsed correctly. This is because a function literal is parsed as <code>&lt;left&gt; =&gt; &lt;right&gt;</code>, so something must always be present on the left side of the <code>=&gt;</code> operator.</p>
+</blockquote>
 <pre><code class="language-dewy">foo = () =&gt; printl'bar'
 </code></pre>
-<p>This is because a function literal is parsed as <code>&lt;left&gt; =&gt; &lt;right&gt;</code>, so something must always be present on the left side of the <code>=&gt;</code> operator.</p>
 <h3 id="default-arguments"><a class="header" href="#default-arguments">Default Arguments</a></h3>
-<p>Function arguments can have default values, which are used if the argument is not specified in the function call. <strong>Note:</strong> because comma <code>,</code> has higher precedence than <code>=</code>, the default value must be wrapped in parenthesis.</p>
+<p>Function arguments can have default values, which are used if the argument is not specified in the function call. </p>
+<blockquote>
+<p>Note: because comma <code>,</code> has higher precedence than <code>=</code>, the default value must be wrapped in parenthesis.</p>
+</blockquote>
 <pre><code class="language-dewy">foo = a, (b=5) =&gt; a + b
 foo = a:int, (b:int=5), (c:int=10) =&gt; a + b + c
 </code></pre>

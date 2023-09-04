@@ -169,7 +169,9 @@
                     <main>
                         <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
 <p>Welcome to the Dewy Programming Language Book. This book covers all aspects of the language, including syntax, style, the standard library, examples, etc. </p>
-<p><strong>Please note that this book and the language are still VERY work in progress. The book is still missing many chapters, and the current language implementation is very incomplete.</strong></p>
+<blockquote>
+<p>Please note that this book and the language are still VERY work in progress. The book is still missing many chapters, and the current language implementation is very incomplete.</p>
+</blockquote>
 <h2 id="what-is-dewy"><a class="header" href="#what-is-dewy">What is Dewy</a></h2>
 <p>The Dewy Programming Language is a simple yet powerful general purpose language designed with engineering applications in mind. I began developing Dewy when I became frustrated at the lack of a single language containing many of the high level engineering features I frequently use, without sacrificing speed and efficiency. Think the functionality and ease of use of matlab or python combined with the speed of a compiled language like C or Rust</p>
 <h2 id="who-is-dewy-for"><a class="header" href="#who-is-dewy-for">Who is Dewy for</a></h2>
@@ -238,7 +240,9 @@ $ cd hello_world
 <h2 id="how-it-works"><a class="header" href="#how-it-works">How it Works</a></h2>
 <p>This code invokes the <code>printl</code> function with the string <code>'Hello, World!'</code>. <code>printl</code> is a commonly used function that takes text and prints it to the terminal, followed by a newline.</p>
 <h2 id="compiling-and-running-are-the-same-step"><a class="header" href="#compiling-and-running-are-the-same-step">Compiling and Running Are the Same Step</a></h2>
-<p><strong>NOTE: this is not relevant until the LLVM/other compiler backends are implemented.</strong></p>
+<blockquote>
+<p>NOTE: this is not relevant until the LLVM/other compiler backends are implemented.</p>
+</blockquote>
 <p>When you run the program, you are actually doing two things: first compiling, and then running.</p>
 <p>Compiling is the process that translates the code from Dewy, which your computer doesn't understand natively, to machine language which it does understand. The resulting translation is saved to a file, called an <strong>executable</strong>, that your computer can run directly. Once the executable is created, the <code>dewy</code> command then automatically runs it for you.</p>
 <p>All of this goes on under the hood, so you don't have to worry about it. But you might notice the effects of this process, e.g. the first time you run a program, it might take a bit longer than subsequent runs. Additionally, you might notice a hidden directory containing the executable, and perhaps other files related to the compilation process. In this case, the directory is called <code>.hello/</code> and contains the executable <code>hello</code>.</p>
@@ -339,12 +343,19 @@ P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
 <h2 id="full-list-of-units"><a class="header" href="#full-list-of-units">Full List of Units</a></h2>
 <p>(TODO-&gt;maybe like solidworks, allow user to set unit system, e.g. meters-kilograms-seconds, centimeters-grams-seconds, etc. See: https://en.wikipedia.org/wiki/MKS_system_of_units https://en.wikipedia.org/wiki/Metre%E2%80%93tonne%E2%80%93second_system_of_units https://en.wikipedia.org/wiki/Foot%E2%80%93pound%E2%80%93second_system https://en.wikipedia.org/wiki/Centimetre%E2%80%93gram%E2%80%93second_system_of_units )</p>
 <h3 id="base-units"><a class="header" href="#base-units">Base Units</a></h3>
-<p>Abbreviations are written inside of brackes <code>[]</code>. Also note that abbreviated units are case sensitive, while written out units are case insensitive (and the same is true for prefixes). TODO-&gt;write out all the unit conversion</p>
+<p>Abbreviations are written inside of brackes <code>[]</code>. </p>
+<blockquote>
+<p>Note: abbreviated units and prefixes are <strong>case sensitive</strong>, while fully written out units and prefixes are <strong>case insensitive</strong></p>
+</blockquote>
 <h4 id="mass-m"><a class="header" href="#mass-m">Mass [M]</a></h4>
-<p><code>[g]</code>, <code>gram</code>, <code>grams</code> (note that the base unit is <code>kg</code>/<code>kilograms</code>)<br />
+<p><code>[g]</code>, <code>gram</code>, <code>grams</code> 
 <code>[k]</code>, <code>kilo</code>, <code>kilos</code>
 <code>[lbm]</code>, <code>pound-mass</code>, <code>pounds-mass</code><br />
-<code>slug</code>, <code>slugs</code></p>
+<code>slug</code>, <code>slugs</code>
+(TODO: metric vs us vs etc. tons)</p>
+<blockquote>
+<p>Note: the base unit is <code>kg</code>/<code>kilograms</code>, not <code>g</code>/<code>grams</code>. <code>k</code>/<code>kilo</code> is provided as a convenience to allow for a mass base unit without a prefix. e.g. <code>kilokilo</code> would be equivalent to <code>1000(kilograms)</code>. </p>
+</blockquote>
 <h4 id="length-l"><a class="header" href="#length-l">Length [L]</a></h4>
 <p><code>[m]</code>, <code>meter</code>, <code>meters</code>, <code>metre</code>, <code>metres</code></p>
 <h4 id="time-t"><a class="header" href="#time-t">Time [T]</a></h4>
@@ -362,7 +373,10 @@ P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
 <h4 id="electric-current-i"><a class="header" href="#electric-current-i">Electric Current [I]</a></h4>
 <p><code>[A]</code>, <code>amp</code>, <code>amps</code>, <code>ampere</code>, <code>amperes</code></p>
 <h4 id="thermodynamic-temperature-Θ"><a class="header" href="#thermodynamic-temperature-Θ">Thermodynamic Temperature [Θ]</a></h4>
-<p><code>[K]</code>, <code>kelvin</code> (note the plural of <code>kelvin</code> is <code>kelvin</code>)</p>
+<p><code>[K]</code>, <code>kelvin</code> </p>
+<blockquote>
+<p>Note: the plural of <code>kelvin</code> is <code>kelvin</code>, not <code>kelvins</code></p>
+</blockquote>
 <h4 id="amount-of-substance-n"><a class="header" href="#amount-of-substance-n">Amount of Substance [N]</a></h4>
 <p><code>[mol]</code>, <code>mole</code>, <code>moles</code></p>
 <h4 id="luminous-intensity-j"><a class="header" href="#luminous-intensity-j">Luminous Intensity [J]</a></h4>
@@ -383,10 +397,13 @@ P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
 <h4 id="energy--work--heat"><a class="header" href="#energy--work--heat">Energy / Work / Heat</a></h4>
 <p><code>[J]</code>, <code>joule</code>, <code>joules</code>
 <code>[cal]</code>, <code>calorie</code>, <code>calories</code>
-<code>[Cal]</code> (note that <code>Cal</code> is equivalent to <code>kcal</code> or <code>kilocalorie</code>)
+<code>[Cal]</code> 
 <code>[BTU]</code>, <code>british_thermal_unit</code>, <code>british_thermal_units</code>
 <code>[eV]</code>, <code>electron_volt</code>, <code>electron_volts</code>
 <code>[Wh]</code>, <code>watt_hour</code>, <code>watt_hours</code></p>
+<blockquote>
+<p>Note: <code>Cal</code> is equivalent to <code>kcal</code> or <code>kilocalorie</code> (i.e. <code>1000(calories)</code>). </p>
+</blockquote>
 <h4 id="power--radiant-flux"><a class="header" href="#power--radiant-flux">Power / Radiant Flux</a></h4>
 <p><code>[W]</code>, <code>watt</code>, <code>watts</code>
 <code>[hp]</code>, <code>horsepower</code></p>
@@ -423,8 +440,9 @@ P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
 <p><code>[kat]</code>, <code>katal</code>, <code>katals</code></p>
 <p>(TODO-&gt;all other units + weird units. e.g. drops)</p>
 <h3 id="si-prefixes"><a class="header" href="#si-prefixes">SI Prefixes</a></h3>
-<p>Note that SI prefixes only work for SI base and derived units (and a few exceptions noted below). </p>
-<p>Also note that the abbreviated forms of prefixes may only be combined with abbreviated units, and written out prefixes may only be combined with written out units. E.g. <code>kilograms</code> and <code>kg</code> are valid, but <code>kgrams</code> and <code>kilog</code> are invalid.</p>
+<blockquote>
+<p>Note: SI prefixes only work for SI base and derived units (and a few exceptions noted below). Also the abbreviated forms of prefixes may only be combined with abbreviated units, and written out prefixes may only be combined with written out units. E.g. <code>kilograms</code> and <code>kg</code> are valid, but <code>kgrams</code> and <code>kilog</code> are invalid.</p>
+</blockquote>
 <p>10^24 = <code>[Y]</code>, <code>yotta</code><br />
 10^21 = <code>[Z]</code>, <code>zetta</code><br />
 10^18 = <code>[E]</code>, <code>exa</code><br />
@@ -533,7 +551,9 @@ my_complex3 = 1 ∠ 45°
 <pre><code class="language-dewy">my_array = [0 1 2 3 'apple' 'banana' 'peach' true]
 printl(my_array[3])  //prints '3'
 </code></pre>
-<p>Note that values do not need commas to separate them. Also arrays can contain objects of different types, though arrays as only a single type will be more efficient. Arrays are 0-indexed (with potentially the option to set an arbitrary index)</p>
+<blockquote>
+<p>Note: values do not need commas to separate them. Also arrays can contain objects of different types, though arrays where all values are just a single type will be more efficient. Arrays are 0-indexed (with potentially the option to set an arbitrary index)</p>
+</blockquote>
 <p>TODO-&gt;explain how to make matrices and other linear algebra stuff.</p>
 <h2 id="dictionaries"><a class="header" href="#dictionaries">Dictionaries</a></h2>
 <p>A dictionary is a list of key-value pairs</p>
@@ -545,7 +565,7 @@ printl(my_array[3])  //prints '3'
 ]
 printl(my_dictionary['peach'])  //prints '3'
 </code></pre>
-<p>Again note the lack of a need for comma separation. (Potentially may add an option for using <code>&lt;-</code> arrows in addition to <code>-&gt;</code> arrows, esp. b/c of <code>&lt;-&gt;</code> arrows)</p>
+<p>Again note the lack of a need for comma separation between key-value pairs.</p>
 <p>Additionally if you wish, you can define a bi-directional dictionary using a double-ended arrow:</p>
 <pre><code class="language-dewy">my_bidictionary = [
     0 &lt;-&gt; 'zero'
@@ -556,7 +576,9 @@ printl(my_dictionary['peach'])  //prints '3'
 printl(my_bidictionary['three'])  //prints '3'
 printl(my_bidictionary[3])        //prints 'three'
 </code></pre>
-<p>Note that when creating a bidictionary, every arrow must by double-ended. As new elements are added, the bidictionary will maintain the bidirectional links between each element. Regular dictionaries will not maintin such links.</p>
+<blockquote>
+<p>Note: when creating a bidictionary, every arrow must by double-ended. As new elements are added, the bidictionary will maintain the bidirectional links between each element. Regular dictionaries will not maintin such links.</p>
+</blockquote>
 <h2 id="sets"><a class="header" href="#sets">Sets</a></h2>
 <p>A set is an unordered collection of elements</p>
 <pre><code class="language-dewy">my_set = set[0 1 2 3 'apple' 'banana' 'peach' true]
@@ -581,14 +603,19 @@ printl(my_obj.buy_bananas(10))  //prints out 8.9
 <h2 id="range-syntax"><a class="header" href="#range-syntax">Range Syntax</a></h2>
 <p>The syntax for ranges is inspired by Haskell syntax for ranges:</p>
 <pre><code class="language-dewy">[first..]               // first to inf
-[(first,second)..]        // first to inf, step size is second-first
-[first..last]           // first to last
-[(first,second)..last]    // first to last, step size is second-first
-[..(2ndlast,last)]        // -inf to last, step size is last-2ndlast
 [..last]                // -inf to last
+[first..last]           // first to last
 [..]                    // -inf to inf
 </code></pre>
-<p>Note that <code>[first..2ndlast,last]</code> is explicitly <strong>NOT ALLOWED</strong>, as it is covered by <code>[first,second..last]</code>, and can have unintuitive behavior.</p>
+<p>Like in haskell, you can use a tuple to include a second value to specify the step size.</p>
+<pre><code class="language-dewy">[(first,second)..]        // first to inf, step size is second-first
+[(first,second)..last]    // first to last, step size is second-first
+[..(2ndlast,last)]        // -inf to last, step size is last-2ndlast
+</code></pre>
+<blockquote>
+<p>Note: Due to precedence rules in Dewy, namely <code>,</code> having relatively low precedence, the step size tuple must be wrapped in parenthesis.
+Also <code>[first..(2ndlast,last)]</code> is explicitly <strong>NOT ALLOWED</strong>, as it can have unintuitive behavior, and is covered by <code>[(first,second)..last]</code>.</p>
+</blockquote>
 <p>In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.</p>
 <pre><code class="language-dewy">[first..last]   // first to last including first and last
 [first..last)   // first to last including first, excluding last
@@ -603,12 +630,15 @@ first ..last    // -inf to last. first is not part of the range
 first.. last    // first to inf. last is not part of the range
 first .. last   // -inf to inf. neither first or last are part of the range
 </code></pre>
-<p>Note that the range juxtaposition operator has relatively low precedence, so you can construct various common ranges without needing parenthesis.</p>
-<pre><code class="language-dewy">first..last+1           // first to last+1
-first,second..last      // first to last, step size is second-first
-first/2,first..last+10  // first/2 to last, step size is first/2
+<blockquote>
+<p>Note: the range juxtaposition operator has medium precedence. Most operators will have higher precedence, not requiring parenthesis, with <code>,</code> and <code>in</code> being the main exceptions</p>
+</blockquote>
+<pre><code class="language-dewy">first..last+1             // first to last+1
+(first,second)..last/2    // first to last/2, step size is second-first
+(first/2,first)..last+10  // first/2 to last+10, step size is first/2
+a in first..last          // iterate a over range first to last
 </code></pre>
-<p>The juxtaposition requirement allows ranges to be used to index into matricies</p>
+<p>The juxtaposition requirement allows multiple ranges to be included in an array, which can be used to index into multidimensional matrices</p>
 <pre><code class="language-dewy">my_array = [
     0 1 2 3 4 5 6 7 8 9 
     10 11 12 13 14 15 16 17 18 19
@@ -638,7 +668,10 @@ ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc
 <pre><code>word_range = 'apple'..'zebra'
 'panda' in? word_range  //returns true
 </code></pre>
-<p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>. NOTE that this is distinct from every dictionary word in that range, as it will include many many gibberish words. </p>
+<p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>. </p>
+<blockquote>
+<p>Note: this is distinct from every dictionary word in that range, as it will include many many gibberish words. </p>
+</blockquote>
 <p>TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. <code>'apple2'</code> should come before <code>'apple10'</code>), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used</p>
 <h2 id="range-uses"><a class="header" href="#range-uses">Range Uses</a></h2>
 <p>Ranges have a variety of different uses in Dewy.</p>
@@ -650,7 +683,10 @@ ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc
 <p>To iterate over values in reverse, you can specify a reversed range:</p>
 <pre><code class="language-dewy">loop i in 5,4..0 print'{i} '
 </code></pre>
-<p>This prints <code>'5 4 3 2 1 0 '</code>. <strong>Note:</strong> when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.</p>
+<p>This prints <code>'5 4 3 2 1 0 '</code>. </p>
+<blockquote>
+<p>Note: when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.</p>
+</blockquote>
 <h3 id="range-arithmetic"><a class="header" href="#range-arithmetic">Range Arithmetic</a></h3>
 <p>Ranges can be used in arithmetic expressions, often as a way to construct new ranges.</p>
 <pre><code>//division version
@@ -693,7 +729,10 @@ loop i in complex_range
 substring = full_string[3..12]
 printl(substring) //prints 's is a str'
 </code></pre>
-<p>This works for any sequence type. <strong>Note:</strong> only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).</p>
+<p>This works for any sequence type. </p>
+<blockquote>
+<p>Note: only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).</p>
+</blockquote>
 <p>Also, because of juxtaposition, we can easily make the selection inclusive or exclusive on either side.</p>
 <pre><code>full_string = 'this is a string'
 
@@ -789,14 +828,17 @@ my_function  //calls the function
 </code></pre>
 <p>And, because of precedence rules, we can omit the parenthesis around the argument list</p>
 <pre><code class="language-dewy">pythag_length = a, b =&gt; (a^2 + b^2)^/2
-abs = x =&gt; if x &lt;? 0 -x else x
 </code></pre>
-<p>Note that zero arguments require an empty pair of parenthesis, in order to be parsed correctly</p>
+<blockquote>
+<p>Note: zero arguments require an empty pair of parenthesis, in order to be parsed correctly. This is because a function literal is parsed as <code>&lt;left&gt; =&gt; &lt;right&gt;</code>, so something must always be present on the left side of the <code>=&gt;</code> operator.</p>
+</blockquote>
 <pre><code class="language-dewy">foo = () =&gt; printl'bar'
 </code></pre>
-<p>This is because a function literal is parsed as <code>&lt;left&gt; =&gt; &lt;right&gt;</code>, so something must always be present on the left side of the <code>=&gt;</code> operator.</p>
 <h3 id="default-arguments"><a class="header" href="#default-arguments">Default Arguments</a></h3>
-<p>Function arguments can have default values, which are used if the argument is not specified in the function call. <strong>Note:</strong> because comma <code>,</code> has higher precedence than <code>=</code>, the default value must be wrapped in parenthesis.</p>
+<p>Function arguments can have default values, which are used if the argument is not specified in the function call. </p>
+<blockquote>
+<p>Note: because comma <code>,</code> has higher precedence than <code>=</code>, the default value must be wrapped in parenthesis.</p>
+</blockquote>
 <pre><code class="language-dewy">foo = a, (b=5) =&gt; a + b
 foo = a:int, (b:int=5), (c:int=10) =&gt; a + b + c
 </code></pre>
@@ -868,8 +910,10 @@ thirtyseven   //returns 37
 <li><code>%</code> modulus</li>
 <li><code>^</code> exponent</li>
 </ul>
-<p><strong>logical and bitwise operations</strong>
-(note that these are logical if both operands are boolean, otherwise they are bitwise and operate on as many bits as the size of the largest operand)</p>
+<p><strong>logical and bitwise operations</strong></p>
+<blockquote>
+<p>Note: these are logical if both operands are boolean, otherwise they are bitwise and operate on as many bits as the size of the largest operand</p>
+</blockquote>
 <ul>
 <li><code>and</code> both are true</li>
 <li><code>or</code> either are true</li>
@@ -931,17 +975,16 @@ thirtyseven   //returns 37
 <p>(TODO: postfix operators)</p>
 <h2 id="in-place-assignment"><a class="header" href="#in-place-assignment">In-place Assignment</a></h2>
 <p>any of the logical/bitwise operators, as well as the boolean returning operators can be preceeded by <code>not</code> which will then cause the inverse of the operation to be returned. e.g. <code>not and</code> is equivalent to <code>nand</code>, <code>not &lt;?</code> is equivalent to <code>&gt;=?</code>, etc.</p>
-<p>any of these operations can be appended with an <code>=</code> sign to make them into an assignment (this probably excludes <code>@</code> and <code>!</code> and any other unary operators)
+<p>most binary operators can be appended with an <code>=</code> sign to make them into an assignment
 e.g. </p>
 <pre><code>a += 5  //is equivalent to a = a + 5
 a &lt;?= 5  //is equivalent to a = a &lt;? 5
 a !&gt;&gt;= 5  //is equivalent to a = a !&gt;&gt; 5
 a xor= false  //is equivalent to a = a xor false
 </code></pre>
-<p>TBD if the <code>=</code> sign can be (optionally) separated from the operation. e.g. <code>+=</code> is equivalent to <code>+ =</code>, <code>xor=</code> is equivalent to <code>xor =</code>, etc. I think it should be allowed in this case, so long as the first operator is in a single piece</p>
-<p>This should also probably work with element-wise operations where each element in the list is updated according to the operation (can be done in parallel)</p>
+<p>(TODO: This should also probably be able to be combined with element-wise/vectorized <code>.</code> operations where each element in the list is updated according to the operation (can be done in parallel))</p>
 <h2 id="elementwise-operations"><a class="header" href="#elementwise-operations">Elementwise Operations</a></h2>
-<p>the elementwise operator <code>.</code> can be prepended to any operation to make it be performed on each element in a vector/matrix/tensor/etc. 
+<p>the elementwise operator <code>.</code> can be prepended to most binary operators to make it be performed on each element in a array or sequence 
 e.g. </p>
 <pre><code>//find the prime factors of 20
 a = [2 3 5 7 11 13 17 19]  //primes up to 20
@@ -950,11 +993,11 @@ is_factor = mods .=? 0 //returns [true false true false false false false]
 p_factors = a[is_factor] //returns [2 5]
 
 //above in a single line
-p_factors = [2 3 5 7 11 13 17 19][20 .% [2 3 5 7 11 13 17 19] =? 0]
+p_factors = [2 3 5 7 11 13 17 19][20 .% [2 3 5 7 11 13 17 19] .=? 0]
 
 //though it's probably cleaner in 2 lines
 primes = [2 3 5 7 11 13 17 19]
-p_factors = primes[20 .% primes =? 0]
+p_factors = primes[20 .% primes .=? 0]
 </code></pre>
 <p>This works if either the either first operand is a list, or the second is a list, or both are lists with the exact same shape</p>
 <h2 id="precedence"><a class="header" href="#precedence">Precedence</a></h2>
@@ -977,17 +1020,17 @@ p_factors = primes[20 .% primes =? 0]
 <tr><td>10</td><td><code>*</code><br><code>/</code><br><code>%</code></td><td>multiply<br>divide<br>modulus</td><td>left</td></tr>
 <tr><td>9</td><td><code>+</code><br><code>-</code></td><td>add<br>subtract</td><td>left</td></tr>
 <tr><td>8</td><td><code>&lt;&lt;</code><br><code>&gt;&gt;</code><br><code>&lt;&lt;&lt;</code><br><code>&gt;&gt;&gt;</code><br><code>&lt;&lt;!</code><br><code>!&gt;&gt;</code></td><td>left shift<br>right shift<br>rotate right no carry<br>rotate left no carry<br>rotate left with carry<br>rotate right with carry</td><td>left</td></tr>
+<tr><td>#</td><td>juxtapose</td><td>jux-range</td><td>none</td></tr>
+<tr><td>#</td><td><code>in</code></td><td>in</td><td>fail</td></tr>
 <tr><td>7</td><td><code>=?</code><br><code>&gt;?</code><br><code>&lt;?</code><br><code>&gt;=?</code><br><code>&lt;=?</code></td><td>equal<br>greater than<br>less than<br>greater than or equal<br>less than or equal</td><td>left</td></tr>
 <tr><td>6</td><td><code>and</code><br><code>nand</code><br><code>&amp;</code></td><td>and<br>nand<br>and</td><td>left</td></tr>
 <tr><td>5</td><td><code>xor</code><br><code>xnor</code></td><td>xor<br>xnor</td><td>left</td></tr>
 <tr><td>4</td><td><code>or</code><br><code>nor</code><br>|</td><td>or<br>nor<br>or</td><td>left</td></tr>
 <tr><td>3</td><td><code>comma</code></td><td>comma</td><td>none</td></tr>
-<tr><td>#</td><td>juxtapose</td><td>jux-range</td><td>none</td></tr>
 <tr><td>2</td><td><code>=&gt;</code></td><td>function arrow</td><td>right</td></tr>
 <tr><td>1</td><td><code>=</code></td><td>bind</td><td>fail</td></tr>
 <tr><td>0</td><td><code>else</code></td><td>flow alternate</td><td>none</td></tr>
 <tr><td>-1</td><td>space</td><td>space</td><td>left</td></tr>
-<tr><td>TBD</td><td><code>in</code></td><td>in</td><td>TBD</td></tr>
 <tr><td>TBD</td><td><code>as</code></td><td>as</td><td>TBD</td></tr>
 <tr><td>TBD</td><td><code>transmute</code></td><td>transmute</td><td>TBD</td></tr>
 <tr><td>TBD</td><td>|&gt;</td><td>pipe</td><td>TBD</td></tr>
@@ -1034,7 +1077,9 @@ Also any instances of elementwise operators (e.g. <code>.+</code> <code>.=</code
 <div style="break-before: page; page-break-before: always;"></div><h1 id="linear-algebra"><a class="header" href="#linear-algebra">Linear Algebra</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="functional-programming"><a class="header" href="#functional-programming">Functional Programming</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="meta-programming"><a class="header" href="#meta-programming">Meta Programming</a></h1>
-<p><strong>NOTE:</strong> This will probably not be relevant until the current handwritten parser is replaced with a parser generator (probably GLL)</p>
+<blockquote>
+<p>Note: This will probably not be relevant until the current handwritten parser is replaced with a parser generator (probably GLL)</p>
+</blockquote>
 <p>Eventually, the goal is for the language to be completely described via some sort of syntax description, such as a context-free grammar. There was work on this in the past, but it was paused in favor of building a usable version of the language first. When there is a suitable parser-generator implementation of the language, one of the planned features is to include the syntax description language within Dewy itself for metaprogramming purposes. Users could describe new syntax features via the metalanguage, and then be able to use them in their programs.</p>
 <p>Here's an example of the previous work on the metalanguage:</p>
 <pre><code>// This is a description of the metalanguage written in the metalanguage itself
@@ -1339,7 +1384,9 @@ this is a do-for loop. i=5
 loop true
 </code></pre>
 <p>Lastly you can sandwich <code>loop</code> between two blocks using two <code>do</code> keywords (one before the first block, and one after the loop condition). This will give you a block executed before the condition and a block executed after the condition</p>
-<p><strong>NOTE:</strong> the syntax for do-loop-do is still being finalized, and may change from this example</p>
+<blockquote>
+<p>Note: the syntax for do-loop-do is still being finalized, and may change from this example</p>
+</blockquote>
 <pre><code class="language-dewy">i = 0
 do
 {
