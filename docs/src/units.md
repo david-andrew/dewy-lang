@@ -168,4 +168,5 @@ Non-SI units that may receive SI prefixes:
 | -------- | ------------- | ---------- |
 | Information | `b`/`bit`<br>`B`/`byte` | `bit`/`bits`<br>`byte`/`bytes` |
 
-(TODO: where do decibels go? `B` is already taken by `byte`... perhaps the user can select what units get imported by importing units from different domains, e.g. `import units from si` or `import units from information`) 
+(TODO: where do decibels go? `B` is already taken by `byte`... perhaps the user can select what units get imported by importing units from different domains, e.g. `import units from si` or `import units from information`)
+(TODO: other units to add: `Hz`, `liter`, `gallon`, `oz`, `phon`/`lufs`/other sound intensity related units)
