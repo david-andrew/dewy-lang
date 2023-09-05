@@ -25,6 +25,7 @@
     - [Machine Learning](ch02-13-machine-learning.md)
 
 - [Language Features](chxx-features.md)
+    - [Expressions, Statements, and Blocks](expressions-statements-blocks.md)
     - [Units](units.md)
     - [String Interpolation](string-interpolation.md)
     - [Basic Data Types](basic-data-types.md)
@@ -40,7 +41,6 @@
     - [Meta Programming](meta-programming.md)
     - [Flow Control](flow-control.md)
     - [One Loop to Rule them All](loops.md)
-    - [Blocks, Statements, and Expressions](blocks-statements-expressions.md)
     - [Meta Syntax](meta-syntax.md)
 - [WIP/Misc. Ideas](wipmisc.md)
 
