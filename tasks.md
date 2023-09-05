@@ -1,8 +1,10 @@
 [tasks]
 - make all operator tokens inherit from operator_t, rather than just token. this should simplify some of the type checks that want to know if something is an operator
 - make tuple an actual class that inherits from array rather than a PrototypeAST. Tuples are just const arrays, but some contexts expect them (namely as args function declarations, and as multiple arguments for functions that take more than 1 argument)
-- overhaul the docs
-    - add a hello many world entry that uses matrices, e.g. 6-DoF robot arm forward kinematics
+- docs tasks
+    - add page on how package management works (TODO->read about how julia & V package management works. also ideas about auto stl importing)
+    - fill in hello many worlds examples
+    - fill in missing pages
 - pull out the old old python expression parser from the git history into its own branch
 - handling scope while parsing: parsing needs to be chain by chain, namely if a an expression binds a value to an identifier, later expressions should be able to get the type of that identifier!
 - include exmaple programs that do and don't work in the README. ideally this would be automated, e.g. on push, it would try to run them, and see if it is successful/has the correct output, vs raises exception/prints (pdb)

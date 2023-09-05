@@ -41,6 +41,4 @@
     - [Meta Programming](meta-programming.md)
     - [Flow Control](flow-control.md)
     - [One Loop to Rule them All](loops.md)
-    - [Meta Syntax](meta-syntax.md)
-- [WIP/Misc. Ideas](wipmisc.md)
-
+    <!-- - [Meta Syntax](meta-syntax.md) -->
