@@ -160,3 +160,13 @@ def based_number_to_int(src:str) -> int:
         raise NotImplementedError(f"base {prefix} is not supported")
     else:
         raise ValueError(f"INTERNAL ERROR: base {prefix} is not a valid base")
+
+
+def bool_to_bool(src:str) -> bool:
+    """
+    convert a (case-insensitive) bool literal to a bool
+    """
+    try:
+        return bool(['false', 'true'].index(src.lower()))
+    except ValueError:
+        raise ValueError(f"INTERNAL ERROR: bool {src} is not a valid bool") from None

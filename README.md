@@ -61,6 +61,7 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [anonymous_func.dewy](examples/anonymous_func.dewy)             |    [✓]   |
 | [if_else.dewy](examples/if_else.dewy)                           |    [✓]   |
 | [if_else_if.dewy](examples/if_else_if.dewy)                     |    [✓]   |
+| [dangling_else.dewy](examples/dangling_else.dewy)               |    [✗]   |
 | [loop_in_iter.dewy](examples/loop_in_iter.dewy)                 |    [✗]   |
 | [loop_iter_manual.dewy](examples/loop_iter_manual.dewy)         |    [✗]   |
 | [nested_loop.dewy](examples/nested_loop.dewy)                   |    [✗]   |

@@ -147,6 +147,12 @@ class BasedNumber_t(Token):
     def __repr__(self) -> str:
         return f"<BasedNumber_t: {self.src}>"
 
+class Boolean_t(Token):
+    def __init__(self, src:str):
+        self.src = src
+    def __repr__(self) -> str:
+        return f"<Boolean_t: {self.src}>"
+
 class Operator_t(Token):
     def __init__(self, op:str):
         self.op = op
@@ -193,7 +199,7 @@ class DotDot_t(Token):
 # each row is a list of token types that are confusable in their precedence order. e.g. [Keyword, Unit, Identifier] means Keyword > Unit > Identifier
 # only confusable token classes need to be included in the table
 precedence_table = [
-    [Keyword_t, Operator_t, DotDot_t, Identifier_t],
+    [Keyword_t, Boolean_t, Operator_t, DotDot_t, Identifier_t],
 ]
 precedence = {cls: len(row)-i for row in precedence_table for i, cls in enumerate(row)}
 
@@ -619,7 +625,23 @@ def eat_based_number(src:str) -> int|None:
         i += 1
 
     return i if i > 2 else None
-        
+
+
+@peek_eat(Boolean_t)
+def eat_boolean(src:str) -> int|None:
+    """
+    eat a boolean, return the number of characters eaten
+
+    booleans are either true or false (case-insensitive)
+    """
+    sample = src[:5].lower()
+    if sample.startswith('true'):
+        return 4
+    elif sample.startswith('false'):
+        return 5
+
+    return None
+
 
 @peek_eat(Operator_t)
 def eat_operator(src:str) -> int|None:

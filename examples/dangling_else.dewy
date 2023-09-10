@@ -1,0 +1,15 @@
+// if a then if b then s else s2
+// See: https://en.wikipedia.org/wiki/Dangling_else
+
+a = false
+b = true
+
+//TODO: this should print nothing, but prints 's2'
+//The problem has to do with how flow control chains are parsed with the blacklist
+if a
+    if b
+        printl's'
+    else
+        printl's2'
+//else
+//    printl's3'

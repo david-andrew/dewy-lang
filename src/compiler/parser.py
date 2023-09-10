@@ -58,6 +58,7 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
     String_t,
     Integer_t,
     BasedNumber_t,
+    Boolean_t,
     Hashtag_t,
     DotDot_t,
 
@@ -71,7 +72,7 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
 
 from postok import post_process, get_next_chain, is_op, Chain, Flow_t
 
-from utils import based_number_to_int
+from utils import based_number_to_int, bool_to_bool
 from dataclasses import dataclass
 from typing import Generator
 from itertools import groupby, chain as iterchain
@@ -492,6 +493,7 @@ def parse_single(token:Token, scope:Scope) -> AST:
     match token:
         case Identifier_t():    return Identifier(token.src)
         case Integer_t():       return Number(int(token.src))
+        case Boolean_t():       return Bool(bool_to_bool(token.src))
         case BasedNumber_t():   return Number(based_number_to_int(token.src))
         case RawString_t():     return String(token.to_str())
         case String_t():        return parse_string(token, scope)
@@ -899,6 +901,7 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
         case String(): ...
         case Identifier(): ...
         case Number(): ...
+        case Bool(): ...
         case Void(): ...
         
         case _:
