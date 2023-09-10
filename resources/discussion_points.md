@@ -809,3 +809,23 @@ The two approaches to fixing:
     ```
 
 I think it comes down to which will occur more often--I suspect logically combined iterators will be much more common than ranges with a step size. So I'm leaning option 2.
+
+
+
+## Parsing flow expressions joined with `else` [leaning towards handle during tokenization]
+This isn't a syntax issue, but rather a parsing issue. Where should the correct nesting of flow expressions be handled?
+
+e.g. 
+```dewy
+if a if b c else if d e else f else g
+```
+
+Ideally this would be correctly nested during tokenization, but as is, with the token_blacklist which excludes `else` while parsing flow expressions, any nested expressions are not able to be constructed. To fix in the tokenizer, it would require some sort of more complicated stack to keep track of if an `else` could be joined to the current expression or not
+
+Pros:
+- easier to deal with the result as flow expressions already are properly nested
+
+Cons:
+- complicates the process of `get_next_chain()`
+
+The alternative would be to handle it during parsing. Honestly, I think we need to handle it during tokenization because keyword expressions are not infix expressions, so if we push it to parse time, it greatly complicates parsing (which as is, is relatively elegant). Also it's not clear that it would be possible to handle tokenization correctly anyways, unless we skip bundling up captured expressions with the keywords they go with :-(

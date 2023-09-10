@@ -1,4 +1,5 @@
 [tasks]
+- fix dangling else problem. need to overhaul parsing while observing else. Probably add some sort of stack to `get_next_chain()` that keeps track of if else is allowed or not. Alternative is to ignore the blacklist, and handle splitting up while parsing.
 - make all operator tokens inherit from operator_t, rather than just token. this should simplify some of the type checks that want to know if something is an operator
 - make tuple an actual class that inherits from array rather than a PrototypeAST. Tuples are just const arrays, but some contexts expect them (namely as args function declarations, and as multiple arguments for functions that take more than 1 argument)
 - docs tasks
