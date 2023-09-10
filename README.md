@@ -16,22 +16,23 @@ Later dependancies will probably include `clang`/`llvm`
 python install.py
 ```
 
-This should work on most linux distros with most common shells (`sh`, `bash`, `zsh`, `fish`). This script just attempts to add the lines below from the `Manual` section to your `.profile` or equivalent file.
+This should work on most linux distros with most common shells (`sh`, `bash`, `zsh`, `fish`). This script just attempts to add the lines below from the `Manual` section to your `.profile` or equivalent file, or your `.rc` file (e.g. `.bashrc`) if available.
 
-You will need to logout and log back in for changes to take effect.
+If you don't have a `.rc` file, You will need to logout and log back in for changes to take effect. Otherwise, you can run `source ~/.rc` to apply changes, or open a new terminal.
 
 ### Manual
-1. Add the following to your distribution/shell's corresponding `.profile` file: 
+1. Add the following to your distribution/shell's corresponding `.profile` or `.rc` file: 
 
     ```
-    if [ -d "/home/user/path/to/dewy-compiler-compiler" ]; then
-      PATH="/home/user/path/to/dewy-compiler-compiler:$PATH"
+    if [ -d "/home/user/path/to/dewy-lang" ]; then
+      PATH="/home/user/path/to/dewy-lang:$PATH"
     fi
     ```
 
-    > Note: Be sure to adjust the command to match the current absolute path of this repo
+    > Note: Be sure to adjust the path in the command to match the current absolute path of **this** repo
 
-1. Then logout, and log back in for changes to take effect
+    > Note: If modifying `.profile`, you must logout, and log back in for changes to take effect.
+    > If modifying a `.rc` file (e.g. `.bashrc`), then either run `source path/to/.rc` to apply changes, or open a new terminal
 
 
 ## Try it out
