@@ -892,3 +892,44 @@ A |> @f( , B, 5)
 
 
 But honestly this could replace the need for the pipe operator!
+
+
+## Enums are just string unions
+Earlier I had been thinking I wanted some way for you to be able to use enum values when calling a function, where the enum value is only defined in the body of the function, but not necessarily at the call site. But this breaks a lot of things if using regular enums. However this can easily be achieved by just making the argument a string union over the desired enumeration fields. Dewy should be able to identify the type, and reduce it down to enum-like performance without doing string comparisons
+
+
+```dewy
+///////// file1.dewy //////////
+
+option = <'opt1' | 'opt2' | 'opt3' | 'etc'>
+
+A = [
+    f = o:option => printl'you selected option {o}'
+]
+
+///////////////////////////////
+
+///////// file2.dewy //////////
+import A from p'file1.dewy'
+
+// compiler ensures that the input is only one of the valid strings
+// compiler also optimizes strings into integers under the hood
+A.f('opt3')
+
+myOpt:option = 'etc'
+```
+
+
+I think this is the general way to construct enums in Dewy. For python style enums where there is a top level name and then you refer to values in that name, you'd just make an object
+
+```dewy
+// python-style enum
+MyEnum = [
+    A = auto
+    B = auto
+    C = auto
+    D = auto
+]
+
+MyEnum.A
+```
