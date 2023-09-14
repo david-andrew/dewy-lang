@@ -829,3 +829,66 @@ Cons:
 - complicates the process of `get_next_chain()`
 
 The alternative would be to handle it during parsing. Honestly, I think we need to handle it during tokenization because keyword expressions are not infix expressions, so if we push it to parse time, it greatly complicates parsing (which as is, is relatively elegant). Also it's not clear that it would be possible to handle tokenization correctly anyways, unless we skip bundling up captured expressions with the keywords they go with :-(
+
+
+## adding methods to types based on first argument of function
+In some languages you can have a type, and then externally define functions that take that type as the first argument, and then let you call that function as if it was a method on the first type. e.g.
+
+```dewy
+obj = [
+    x = 5
+    y = 10
+]
+
+objType = type(obj)
+
+f = o:objType => o.x + o.y
+
+obj.f() //returns 15
+```
+
+I think this should definitely be a feature in dewy (with a bit more thought on how they typing works). But I actually think it should be expanded to work for tuples of values as well
+
+
+
+```dewy
+A = [
+    x = 5
+    y = 10
+]
+B = [
+    z = [1 2 3 4 5]
+]
+
+f = a:type(A), b:type(B), c:int => (a.x + a.y - c) .* z
+
+// these all do the same thing
+A.f(B, 5)       // [10 20 30 40 50]
+(A, B).f(5)     // [10 20 30 40 50]
+(A, B, 5).f     // [10 20 30 40 50]
+```
+
+
+The question is if this is useful. Definitely allowing the function to attach to methods of the first type makes sense, but hard to say if allowing for more complicated attachments via tuples is useful for anything.
+
+Also though this is basically like the same thing as the pipe operator..
+
+```
+A = [
+    x = 5
+    y = 10
+]
+B = [
+    z = [1 2 3 4 5]
+]
+
+f = a:type(A), b:type(B), c:int => (a.x + a.y - c) .* z
+
+// equivalent to the above
+A |> @f( , B, 5)
+(A, B) |> @f( , , 5)
+(A, B, 5) |> @f
+```
+
+
+But honestly this could replace the need for the pipe operator!
