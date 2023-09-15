@@ -536,6 +536,7 @@ Python's `len` function absolutely would not qualify. It should have been a prop
 
 - many math functions, (e.g. `abs` `min` `max` `sin` `cos` `tan` etc.) that take in a numeric expression
 - autodiff which takes in (what? perhaps an expression with symbolic variables in it)
+- introspection/functions for interacting with Dewy internals, e.g. (from python) `type`, `__class__`, `__name__` etc.
 
 
 ## Unified naming for length/size/shape/dim/etc.
@@ -892,6 +893,12 @@ A |> @f( , B, 5)
 
 
 But honestly this could replace the need for the pipe operator!
+
+Also important note: I think this should probably be opt-in to make a function be able to be used as a method on matching type. perhaps something like
+```dewy
+#methodable
+f = a:type(A), b:type(B), c:int => (a.x + a.y - c) .* z
+```
 
 
 ## Enums are just string unions
