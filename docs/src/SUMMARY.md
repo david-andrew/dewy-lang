@@ -43,4 +43,5 @@
     - [One Loop to Rule them All](loops.md)
     <!-- - [Meta Syntax](meta-syntax.md) -->
 - [Standard Library](ch04-00-stdlib.md)
+    - [Data Structures](ch04-xx-data-structures.md)
     - [Plotting](ch04-xx-plotting.md)
