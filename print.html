@@ -852,12 +852,18 @@ Point = (x:number, y:number) =&gt; [
     x = x  //TBD if these are necessary since x/y are already in scope
     y = y
     __add__ = other:Point =&gt; Point(x + other.x, y + other.y)
+    __repr__ = () =&gt; 'Point({x}, {y})'
+    __str__ = () =&gt; '({x}, {y})'
 ]
 
 // Create two points and add them together
 p1 = Point(1,2)
 p2 = Point(3,4)
 p3 = p1 + p2
+printl(p3)  //prints Point(4, 6)
+</code></pre>
+<p>Though actually for <code>__add__</code>, it might make more sense for it to be global, and you add an alternate that gets dispatched on rather than including it in the object itself:</p>
+<pre><code>__add__ |= (a:Point, b:Point) =&gt; Point(a.x + b.x, a.y + b.y)
 </code></pre>
 <p>(TODO: longer explanation)</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="function-types"><a class="header" href="#function-types">Function Types</a></h1>
