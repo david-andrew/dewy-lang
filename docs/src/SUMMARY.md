@@ -42,3 +42,5 @@
     - [Flow Control](flow-control.md)
     - [One Loop to Rule them All](loops.md)
     <!-- - [Meta Syntax](meta-syntax.md) -->
+- [Standard Library](ch04-00-stdlib.md)
+    - [Plotting](ch04-xx-plotting.md)
