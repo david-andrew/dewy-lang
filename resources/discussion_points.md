@@ -639,6 +639,23 @@ Pros and cons for both:
 - `xor` might be slightly less intuitive though
 
 
+
+But actually the best might just be to use `and`
+
+Such overloading will be especially important for user's defining infix operations over custom types:
+
+```
+Point = (x:number, y:number) => [
+    x = x  //TBD if these are necessary since x/y are already in scope
+    y = y
+    __repr__ = () => 'Point({x}, {y})'
+    __str__ = () => '({x}, {y})'
+]
+
+__add__ |= (a:Point, b:Point) => Point(a.x + b.x, a.y + b.y)
+```
+
+
 ### also random note about in place overloading
 
 normally in place operators are just syntactic sugar like so:
@@ -940,3 +957,29 @@ MyEnum = [
 
 MyEnum.A
 ```
+## Should function arguments be included in the body of an object as parameters, without requiring the user to explicitly assign them?
+e.g. in this:
+
+```dewy
+Point = (x:number, y:number) => [
+    x = x
+    y = y
+    __repr__ = () => 'Point({x}, {y})'
+    __str__ = () => '({x}, {y})'
+] 
+```
+
+does the user need to do the `x=x` and `y=y` step? I think there are pros and cons.
+
+As is, it is more verbose, but it is definitely clear that x and y exist in the object since they are explicitly set
+
+without, you might have something like this:
+
+```dewy
+Point = (x:number, y:number) => [
+    __repr__ = () => 'Point({x}, {y})'
+    __str__ = () => '({x}, {y})'
+]
+```
+
+which is more concise, and I definitely appreciate not having to repeat yourself, since technically `x` and `y` are present in the scope (though technically it's 1 scope up from the obj literal?). The only confusing thing is what if you have arguments that you don't want to include in your object? when it's explicit, you are more flexible to specify the shape of your object, and have it take any construction arguments you want...

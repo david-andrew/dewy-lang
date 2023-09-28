@@ -72,12 +72,21 @@ Point = (x:number, y:number) => [
     x = x  //TBD if these are necessary since x/y are already in scope
     y = y
     __add__ = other:Point => Point(x + other.x, y + other.y)
+    __repr__ = () => 'Point({x}, {y})'
+    __str__ = () => '({x}, {y})'
 ]
 
 // Create two points and add them together
 p1 = Point(1,2)
 p2 = Point(3,4)
 p3 = p1 + p2
+printl(p3)  //prints Point(4, 6)
+```
+
+Though actually for `__add__`, it might make more sense for it to be global, and you add an alternate that gets dispatched on rather than including it in the object itself:
+
+```
+__add__ |= (a:Point, b:Point) => Point(a.x + b.x, a.y + b.y)
 ```
 
 (TODO: longer explanation)
