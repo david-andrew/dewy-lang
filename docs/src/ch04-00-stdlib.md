@@ -6,5 +6,6 @@ Dewy is 100% batteries included, and provides a comprehensive standard library o
 
 ## Standard Library Reference
 - [Data Structures](ch04-xx-data-structures.md)
+- [Time](ch04-xx-time.md)
 - [Plotting](ch04-xx-plotting.md)
 - TODO: more
