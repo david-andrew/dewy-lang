@@ -600,7 +600,7 @@ Then no matter how the scope is exited, the file will always be closed. And the 
 This is similar to python's weak references
 
 
-## Function overloading [leaning `xor`]
+## Function overloading [`|` and `or`]
 
 function overloading will be achieved by combining two or more function literals / function references and binding to a single variable. The question is which operator should be used to achieve this
 
@@ -667,20 +667,21 @@ a += 15
 but for function overloading, since functions need to be @referenced, this is what happens
 
 ```
-myfunc xor= (a:int, b:int) => 'second version'
-// myfunc = @myfunc xor (a:int, b:int) => 'second version'
+myfunc |= (a:int, b:int) => 'second version'
+// myfunc = @myfunc | ((a:int, b:int) => 'second version')
 ```
 
 that is to say, functions are @ referenced when part of an in-place operator
 
 conceivably, we could also do something like this to maintain the symmetry of the notation:
 ```
-@myfunc xor= (a:int, b:int) => 'second version'
-// @myfunc = @myfunc xor (a:int, b:int) => 'second version'
+@myfunc |= (a:int, b:int) => 'second version'
+// @myfunc = @myfunc | ((a:int, b:int) => 'second version')
 ```
 
 This implies that in the `@myfunc` on the left receiving the assignment the `@` is a no-op. which may or may not be what I want to do
 
+Clearly the first way is better though
 
 ## Type syntax just forwards to type function
 
@@ -708,10 +709,12 @@ There are three explicit declarations types (and one implicit type)
 `tbd`: types that are constant, but do not cause compile time error when trying to overwrite in lower scopes. instead they make a new shadow. Perhaps we don't have this type, and just force the user to explicitly use `let` when they want to overwrite const types.
 - I think a common case would be `i` for the complex value, and the user will want to overwrite it with i as the common iterator index in loops. that's a weird case though because it uses none of the mutability declarations. It would be `loop i in a..b`, so presumably loop uses `let` by default
 
-simply doing `name = value` may or may not be allowed depending on if name is aleady defined, and the mutability it has.
+simply doing `name = value` may or may not be allowed depending on if name is already defined, and the mutability it has.
 - if `name` does not exist yet, then this is equivalent to `let name = value`
 - if `name` exists and was declared with `let`, then this is equivalent to updating that instance of `name` with the new value
 - if `name` exists and was declared with `const` then this will fail at compile-time
+
+To put it another way, `name = value` is sort of equivalent to `create_or_overwrite name = value`. perhaps we'll even have `create_or_overwrite` used internally, and `name = value` is just syntactic sugar for it
 
 
 ## Precedence of comma vs assignment [leaning towards requiring parenthesis around default function arguments, e.g. `foo = a,(b=1),(c=2) => a+b+c`, e.g. `foo123 = @foo((a=1),(b=2),(c=3))`]
@@ -957,19 +960,21 @@ MyEnum = [
 
 MyEnum.A
 ```
-## Should function arguments be included in the body of an object as parameters, without requiring the user to explicitly assign them?
+## Should function arguments be included in the body of an object as parameters, without requiring the user to explicitly assign them? [leaning requiring user to explicitly assign them]
 e.g. in this:
 
 ```dewy
 Point = (x:number, y:number) => [
-    x = x
-    y = y
+    let x = x
+    let y = y
     __repr__ = () => 'Point({x}, {y})'
     __str__ = () => '({x}, {y})'
-] 
+]
 ```
 
-does the user need to do the `x=x` and `y=y` step? I think there are pros and cons.
+> Note that x and y need to be declared using `let` since x and y exist in the parent scope from the arguments, just doing `x = x` would reassign the `x` in the parent scope, but would not assign it in the object scope
+
+does the user need to do the `let x = x` and `let y = y` step? I think there are pros and cons.
 
 As is, it is more verbose, but it is definitely clear that x and y exist in the object since they are explicitly set
 
@@ -984,12 +989,33 @@ Point = (x:number, y:number) => [
 
 which is more concise, and I definitely appreciate not having to repeat yourself, since technically `x` and `y` are present in the scope (though technically it's 1 scope up from the obj literal?). The only confusing thing is what if you have arguments that you don't want to include in your object? when it's explicit, you are more flexible to specify the shape of your object, and have it take any construction arguments you want...
 
+A thought on when you have arguments you don't want to include in the object: delete any terms you don't want
+
+```dewy
+Point = (x:number, y:number, verbose:bool=false) => [
+    if verbose printl'hello world'
+    del verbose
+    
+    __repr__ = () => 'Point({x}, {y})'
+    __str__ = () => '({x}, {y})'
+]
+```
+
+Or perhaps we can distinguish between implicit and explicit argument capturing via {[]} vs [].
+
+```dewy
+Point = (x:number, y:number) => []  // x and y are captured
+Point = (x:number, y:number) => {[]}  // x and y are not captured
+Point = (x:number, y:number) => {[let x = x let y = y]}  // x and y are captured
+```
+
+I think I'm still leaning towards requiring `let x = x` and `let y = y` in all cases.
 
 ## Literal arguments in functions
 
 for example if you wanted to define the factorial function via operator overloading, where normal arguments are integer, and the base case is a literal 1, perhaps it might be something like this:
 ```dewy
 fact = n:1 => n
-fact or= n:int => n * fact(n-1)
+fact |= n:int => n * fact(n-1)
 
 ```
