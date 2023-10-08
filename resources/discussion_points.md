@@ -983,3 +983,13 @@ Point = (x:number, y:number) => [
 ```
 
 which is more concise, and I definitely appreciate not having to repeat yourself, since technically `x` and `y` are present in the scope (though technically it's 1 scope up from the obj literal?). The only confusing thing is what if you have arguments that you don't want to include in your object? when it's explicit, you are more flexible to specify the shape of your object, and have it take any construction arguments you want...
+
+
+## Literal arguments in functions
+
+for example if you wanted to define the factorial function via operator overloading, where normal arguments are integer, and the base case is a literal 1, perhaps it might be something like this:
+```dewy
+fact = n:1 => n
+fact or= n:int => n * fact(n-1)
+
+```
