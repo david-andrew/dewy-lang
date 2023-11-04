@@ -41,6 +41,7 @@
     - [Meta Programming](meta-programming.md)
     - [Flow Control](flow-control.md)
     - [One Loop to Rule them All](loops.md)
+    - [Imports](imports.md)
     <!-- - [Meta Syntax](meta-syntax.md) -->
 
 - [Standard Library](ch04-00-stdlib.md)

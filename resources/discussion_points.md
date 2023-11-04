@@ -512,7 +512,7 @@ For exported functions, any captured values must be defined before the call to e
 
 
 
-## Import/Export syntax [`import <thing(s)> [from <file path>]` and `export <thing(s)>`]
+## Import/Export syntax [`[from <file path>] import <thing(s)>`. TBD on if export syntax is necessary `export <thing(s)>`]
 
 ```
 // importing from local files
@@ -528,6 +528,90 @@ import RandomForest from sklearn
 ```
 
 technically sin, cos, tan should all be available without having to import them. It's more for installed package syntax.
+
+Actually based on this video (https://www.youtube.com/watch?v=X6Jhxm1lPHY), I'm gonna switch the order of the thing being imported with the import path. So things would be:
+
+```dewy
+from p"stuff.dewy" import myfun
+from p"stuff2.dewy" import myfun2, myfun3 as f1, mymodule as [f2 f3 mod3 as [f4 f5]]]
+import p"../mylib3.dewy" as mylib3
+from p"mylib4.dewy" import ...
+
+import IO
+from Math import sin, cos, tan
+import seaborn as sns
+from sklearn import RandomForest
+```
+
+probably don't allow the syntax 
+```dewy
+let [sin cos tan] = import Math
+```
+ 
+If someone did want to break it down like that, they'd need to do it as two separate imports
+
+```dewy
+import Math
+let [sin cos tan] = Math
+```
+
+
+## Unpack syntax
+```dewy
+s = ['Hello' ['World' '!'] 5 10]
+
+// tuple version
+a, b, c, d = s
+a, ...b = s
+...a, b = s
+a, [b, c], ...d = s
+
+// list version
+[a b c d] = s
+[a ...b] = s
+[...a b] = s
+[a [b c] ...d] = s
+```
+
+unpacking from an object with named fields: 
+```dewy
+o = [apple=1 banana=2 carrot=3]
+
+// tuple version
+a, b, c = o
+a, = o
+a, c = o
+c, = o
+
+// list version. I think I prefer this
+[a b c] = o
+[a] = o
+[a c] = o
+[c] = o
+```
+
+unpacking from a map
+```dewy
+m = ['apple' -> 1 'banana' -> 2 'carrot' -> 3]
+
+// tuple version
+'apple' -> a, 'banana' -> b, 'carrot' -> c = m
+'apple' -> a, 'carrot' -> c = m
+'carrot' -> c = m
+
+// list version
+['apple' -> a 'banana' -> b 'carrot' -> c] = m
+['apple' -> a 'carrot' -> c] = m
+['carrot' -> c] = m
+```
+
+I think in general, I prefer the bracketed version
+
+incidentally, this is how you'd do a swap
+```dewy
+[a b] = [b a]
+a, b = b, a
+```
 
 ## Global functions vs object methods
 Only in very rare instances will there be globally available functions. It is mainly reserved for cases where it is a fundamental aspect of the language, rather than an intrinsic property of the object.
