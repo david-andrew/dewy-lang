@@ -556,6 +556,25 @@ let [sin cos tan] = Math
 ```
 
 
+## Relative Path default starting location: cwd vs __file__ [definitely __file__. require user to specify CWD/ if they want it]
+when making a relative path in dewy, should it be relative to where the `dewy` command was invoked (i.e. the current directory), or should it be relative to the file that is currently being executed?
+
+```
+from p"../mylib.dewy" import ...
+
+p'some_text_file.txt'.write_text('hello world')
+```
+
+I think intuitively, most people think like it's relative to __file__. Plenty of times I get burned by writing scripts and then running them from different locations. It's especially good for imports, since that should never be affected by the location of the invocation of the script.
+
+If you want to make it relative to the current directory, you can just do
+```
+from p"{cwd}/mylib.dewy" import ... //why anyone would ever want this is beyond me
+
+p'{cwd}/some_text_file.txt'.write_text('hello world')
+```
+
+
 ## Unpack syntax
 ```dewy
 s = ['Hello' ['World' '!'] 5 10]
