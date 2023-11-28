@@ -1,0 +1,134 @@
+//simple, fast, high quality, dependency-free RNG generation
+//uniform distribution via XORSHIFT*
+//normal distribution via PPND16
+
+
+RNG = (s:uint64) => [
+    let s = s
+    next_u64 = () => {
+        s ^= s >> 21
+        s ^= s << 35
+        s ^= s >> 4
+        s * 2685821657736338717
+    }
+    next_uniform = () => fast_to_uniform(next_u64())
+    next_normal = () => ppnd16(fast_to_uniform(next_u64()))
+    
+    /{
+        Use bit hacks to quickly convert a 64-bit number to a double in the range [0, 1)
+
+        @param x the number to convert. Only the lowest 23 bits are used.
+        @return the number in the range [0, 1)
+    }/
+    fast_to_uniform = (x:uint64):float64 => {
+        const mask1 = 0x3FF0_0000_0000_0000
+        const mask2 = 0x3FFF_FFFF_FFFF_FFFF
+        out: uint64 = (x | mask1) & mask2
+        (out as float64) - 1
+    }
+
+    full_to_uniform = (x:uint64):float64 => truediv(x, uint64.max, float64)
+
+
+    /{
+        Convert a uniformly distributed double in the range (0, 1) to a normally distributed double
+        Uses the PPND16 algorithm from Algorithm AS241: The Percentage Points of the Normal Distribution
+
+        @param P the uniformly distributed double in the range (0, 1)
+        @return the normally distributed double
+    }/
+    ppnd16 = (P:float64) => {
+        const SPLIT1:float64 = 0.425
+        const SPLIT2:float64 = 5.0
+        const CONST1:float64 = 0.180625
+        const CONST2:float64 = 1.6
+
+        // Cofficients for P close to 0.5
+        const A0:float64 = 3.3871328727963665
+        const A1:float64 = 133.14166789178438
+        const A2:float64 = 1971.5909503065514
+        const A3:float64 = 13731.693765509461
+        const A4:float64 = 45921.95393154987
+        const A5:float64 = 67265.7709270087
+        const A6:float64 = 33430.575583588128
+        const A7:float64 = 2509.0809287301227
+        const B1:float64 = 42.313330701600911
+        const B2:float64 = 687.18700749205789
+        const B3:float64 = 5394.1960214247511
+        const B4:float64 = 21213.794301586597
+        const B5:float64 = 39307.895800092709
+        const B6:float64 = 28729.085735721943
+        const B7:float64 = 5226.4952788528544
+        
+        // Coefficients for P not close to 0, 0.5 or 1
+        const C0:float64 = 1.4234371107496835
+        const C1:float64 = 4.6303378461565456
+        const C2:float64 = 5.769497221460691
+        const C3:float64 = 3.6478483247632045
+        const C4:float64 = 1.2704582524523684
+        const C5:float64 = 0.24178072517745061
+        const C6:float64 = 0.022723844989269184
+        const C7:float64 = 0.00077454501427834139
+        const D1:float64 = 2.053191626637759
+        const D2:float64 = 1.6763848301838038
+        const D3:float64 = 0.6897673349851
+        const D4:float64 = 0.14810397642748008
+        const D5:float64 = 0.015198666563616457
+        const D6:float64 = 0.00054759380849953455
+        const D7:float64 = 0.0000000010507500716444169
+
+        // Coefficients for P near 0 or 1
+        const E0:float64 = 6.6579046435011033
+        const E1:float64 = 5.4637849111641144
+        const E2:float64 = 1.7848265399172913
+        const E3:float64 = 0.29656057182850487
+        const E4:float64 = 0.026532189526576124
+        const E5:float64 = 0.0012426609473880784
+        const E6:float64 = 0.000027115555687434876
+        const E7:float64 = 0.00000020103343992922882
+        const F1:float64 = 0.599832206555888
+        const F2:float64 = 0.13692988092273581
+        const F3:float64 = 0.014875361290850615
+        const F4:float64 = 0.00078686913114561329
+        const F5:float64 = 0.000018463183175100548
+        const F6:float64 = 0.0000001421511758316446
+        const F7:float64 = 0.0000000000000020442631033899397
+
+        let R:float64, Q:float64, PPND16:float64
+        Q = P - 0.5
+
+        if (abs(Q) <=? SPLIT1)
+        {
+            R = CONST1 - Q * Q
+            return Q * (((((((A7 * R + A6) * R + A5) * R + A4) * R + A3) * R + A2) * R + A1) * R + A0) / (((((((B7 * R + B6) * R + B5) * R + B4) * R + B3) * R + B2) * R + B1) * R + 1)
+        }
+        
+        R = if Q <? 0 P else 1 - P
+        
+        if (R <=? 0)
+            return 0
+        
+        R = sqrt(-log(R))
+        
+        if (R <=? SPLIT2)
+        {
+            R = R - CONST2
+            PPND16 = (((((((C7 * R + C6) * R + C5) * R + C4) * R + C3) * R + C2) * R + C1) * R + C0) / (((((((D7 * R + D6) * R + D5) * R + D4) * R + D3) * R + D2) * R + D1) * R + 1)
+        }
+        else
+        {
+            R = R - SPLIT2
+            PPND16 = (((((((E7 * R + E6) * R + E5) * R + E4) * R + E3) * R + E2) * R + E1) * R + E0) / (((((((F7 * R + F6) * R + F5) * R + F4) * R + F3) * R + F2) * R + F1) * R + 1)
+        }
+        
+        if (Q <? 0)
+            PPND16 = -PPND16
+        
+        return PPND16
+    }
+]
+
+
+
+r = RNG(42)
+loop i in 0..100 printl(r.next_normal())

@@ -62,6 +62,7 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [if_else.dewy](examples/if_else.dewy)                           |    [✓]   |
 | [if_else_if.dewy](examples/if_else_if.dewy)                     |    [✓]   |
 | [dangling_else.dewy](examples/dangling_else.dewy)               |    [✗]   |
+| [if_tree.dewy](examples/if_tree.dewy)                           |    [✗]   |
 | [loop_in_iter.dewy](examples/loop_in_iter.dewy)                 |    [✗]   |
 | [loop_iter_manual.dewy](examples/loop_iter_manual.dewy)         |    [✗]   |
 | [nested_loop.dewy](examples/nested_loop.dewy)                   |    [✗]   |
@@ -73,6 +74,7 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [fast_inverse_sqrt.dewy](examples/fast_inverse_sqrt.dewy)       |    [✗]   |
 | [fizzbuzz0.dewy](examples/fizzbuzz0.dewy)                       |    [✗]   |
 | [fizzbuzz1.dewy](examples/fizzbuzz1.dewy)                       |    [✗]   |
+| [random.dewy](examples/random.dewy)                             |    [✗]   |
 | [syntax.dewy](examples/syntax.dewy)                             |    [✗]   |
 | [tokenizer.dewy](examples/tokenizer.dewy)                       |    [✗]   |
 

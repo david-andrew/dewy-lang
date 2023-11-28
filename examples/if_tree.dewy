@@ -1,0 +1,132 @@
+
+//TODO: uncomment when types are supported
+/{
+// simple xorshift+ generator
+state:uint64 = 123456789
+rand = ():uint64 => {
+    state xor= state >> 21
+    state xor= state << 35
+    state xor= state >> 4
+    
+    return state * 2_685821_657736_338717 //TODO: divide by uint64.MAX (18_446744_073709_551615)
+}
+half = 9_223372_036854_775807
+a = rand < half
+b = rand < half
+c = rand < half
+d = rand < half
+e = rand < half
+f = rand < half
+g = rand < half
+h = rand < half
+i = rand < half
+j = rand < half
+k = rand < half
+l = rand < half
+m = rand < half
+n = rand < half
+o = rand < half
+p = rand < half
+q = rand < half
+r = rand < half
+s = rand < half
+t = rand < half
+u = rand < half
+v = rand < half
+w = rand < half
+x = rand < half
+y = rand < half
+z = rand < half
+}/
+
+//manually specify bools
+a = false
+b = true
+c = true
+d = false
+e = true
+f = false
+g = true
+h = false
+i = true
+j = false
+k = true
+l = false
+m = true
+n = false
+o = true
+p = false
+q = true
+r = false
+s = true
+t = false
+u = true
+v = false
+w = true
+x = false
+y = true
+z = false
+
+
+
+if a
+    printl'a'
+else if b
+    if c
+        if d
+            if e
+                printl'bcde'
+            else if f
+                if g
+                    if h
+                        printl'bcdfgh'
+                    else if i
+                        printl'bcdfgi'
+                    else if j
+                        printl'bcdfgj'
+                    else
+                        printl'bcdfg[]'
+                else if k
+                    printl'bcdfk'
+                else if l
+                    if m
+                        printl'bcdflm'
+                    else
+                        printl'bcdfl[]'
+                else
+                    printl'bcdf[]'
+            else if n
+                printl'bcdn'
+            else
+                printl'bcd[]'
+        else if o
+            printl'bco'
+        else if p
+            if q
+                printl'bcpq'
+            else
+                printl'bcp[]'
+        else
+            printl'bc[]'
+    else
+        printl'b[]'
+else if r
+    printl'r'
+else if s
+    if t
+        printl'st'
+    else if u
+        printl'su'
+if v
+    if w
+        printl'vw'
+    else if x
+        printl'x'
+if y
+    printl'y'
+else if z
+    printl'z'
+else
+    printl'[]'
+```
+
