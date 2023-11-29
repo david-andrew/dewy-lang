@@ -19,3 +19,6 @@ To run source text directly, you can use here strings like so
     $ ./dewy /path/to/grammar/file /dev/stdin <<< 'source text'
 
 note that this will always add a newline to the end of the source text
+
+## Paper
+The relevant paper detailing Clustered Nonterminal Parsing is [Derivation Representation Using Binary Subtree Sets](resources/2019_derivation_representation_using_binary_subtree_sets.pdf) by Elizabeth Scott, Adrian Johnstone, and L. Thomas van Binsbergen.
