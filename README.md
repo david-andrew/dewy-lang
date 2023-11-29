@@ -19,3 +19,8 @@ To run source text directly, you can use here strings like so
     $ ./dewy /path/to/grammar/file /dev/stdin <<< 'source text'
 
 note that this will always add a newline to the end of the source text
+
+## Papers
+The relevant papers detailing SRNGLR parsing are:
+- [Right Nulled GLR Parsers](resources/Right_Nulled_GLR_Parsers.pdf) by Elizabeth Scott and Adrian Johnstone
+- [Faster Scannerless Parsing](resources/Faster_Scannerless_Parsing.pdf) by Giorgios Economopoulos, Paul Klint, and Jurgen Vinju
