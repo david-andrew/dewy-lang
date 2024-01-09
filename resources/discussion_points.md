@@ -665,6 +665,15 @@ incidentally, this is how you'd do a swap
 a, b = b, a
 ```
 
+## Unifying imports, unpacks, and declarations [YES!]
+
+```dewy
+const bigthing = import p"bigthing.dewy"
+let [something1, [sub1, sub2] = something2] = import p'path/to/file.dewy'
+const [prop1, prop2] = myobj
+let apple = 42
+```
+
 ## Global functions vs object methods
 
 Only in very rare instances will there be globally available functions. It is mainly reserved for cases where it is a fundamental aspect of the language, rather than an intrinsic property of the object.
