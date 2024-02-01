@@ -30,6 +30,7 @@ from tokenizer import ( tokenize, tprint, full_traverse_tokens,
 )
 
 from enum import Enum, auto
+from typing import Callable
 
 
 import pdb
@@ -67,6 +68,12 @@ class Flow_t(Token):
     def __repr__(self) -> str:
         return f"<Flow_t: {self.keyword}: {self.condition} {self.clause}"
 
+# class Flow_t(Token):
+#     def __init__(self, branches:list[Flowable_t]):
+#         self.branches = branches
+#     def __repr__(self) -> str:
+#         return f"<Flow_t: {self.branches}>"
+
 class Do_t(Token):...
 class Return_t(Token):...
 class Express_t(Token):...
@@ -88,6 +95,26 @@ atom_tokens = (
 )
 
 
+class ShouldBreakFlowTracker:
+    def __init__(self):
+        self.flows_seen = 0
+    def op_breaks_chain(self, token:Token) -> bool:
+        #should only be operators
+        if isinstance(token, Operator_t) and token.op == 'else':
+            if self.flows_seen == 0:
+                return True
+            self.flows_seen -= 1
+        
+        return False
+    
+    def view(self, tokens:list[Token]) -> None:
+        # view each token without any ability to do anything
+        # keep track of how many flows we've seen
+        for token in tokens:
+            if (isinstance(token, Keyword_t) and token.src in ('if', 'loop', 'lazy')) or isinstance(token, Flow_t):
+                self.flows_seen += 1
+            if isinstance(token, Operator_t) and token.op == 'else':
+                raise ValueError("should not be seeing else here")
 
 
 
@@ -213,9 +240,9 @@ def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
         raise ValueError(f"ERROR: expected keyword expression, got {t=}")
 
     match t:
-        case Keyword_t(src='if'|'loop'|'lazy'):
-            cond, tokens = get_next_chain(tokens, binop_blacklist={Operator_t('else')})
-            clause, tokens = get_next_chain(tokens, binop_blacklist={Operator_t('else')})
+        case Keyword_t(src='if'|'loop'|'lazy'):#|'else_if'|'else_loop'|'else_lazy'):
+            cond, tokens = get_next_chain(tokens)
+            clause, tokens = get_next_chain(tokens, tracker=ShouldBreakFlowTracker())
             return Flow_t(t, cond, clause), tokens
         case Keyword_t(src='do'):
             clause, tokens = get_next_chain(tokens)
@@ -243,7 +270,7 @@ def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
     # (let | const) #chain
 
 
-def get_next_chain(tokens:list[Token], binop_blacklist:set[Token]=None) -> tuple[Chain[Token], list[Token]]:
+def get_next_chain(tokens:list[Token], *, tracker:ShouldBreakFlowTracker=None) -> tuple[Chain[Token], list[Token]]:
     """
     grab the next single expression chain of tokens from the given list of tokens
 
@@ -259,14 +286,17 @@ def get_next_chain(tokens:list[Token], binop_blacklist:set[Token]=None) -> tuple
     Returns:
         next, rest (list[Token], list[Token]): the next chain of tokens, and the remaining tokens
     """
-    if binop_blacklist is None: binop_blacklist = set()
 
     chain = []
 
     chunk, tokens = _get_next_chunk(tokens)
     chain.extend(chunk)
 
-    while len(tokens) > 0 and is_binop(tokens[0]) and tokens[0] not in binop_blacklist:
+    # let tracker view the chunk that was just added
+    if tracker is not None:
+        tracker.view(chunk)
+
+    while len(tokens) > 0 and is_binop(tokens[0]) and (tracker is None or not tracker.op_breaks_chain(tokens[0])):
         chain.append(tokens.pop(0))
         chunk, tokens = _get_next_chunk(tokens)
         chain.extend(chunk)
@@ -291,19 +321,47 @@ def get_next_chain(tokens:list[Token], binop_blacklist:set[Token]=None) -> tuple
 #     else lazy -> else_lazy
 #     """
 
-#     for i, token, stream in (gen := full_traverse_tokens(tokens)):
-#         if isinstance(token, Keyword_t):
-#             raise NotImplementedError
+#     transformations = [
+#         (Operator_t('else'), Keyword_t('if'), Keyword_t('else_if')),
+#         (Operator_t('else'), Keyword_t('loop'), Keyword_t('else_loop')),
+#         # TODO: others...
+#     ]
 
-def desugar_ranges(tokens: list[Token]) -> None:
-    """fill in empty expressions on the left/right of any range `..` that lacks left or right operands"""
+#     firsts = {type(t1) for t1, _, _ in transformations}
+#     seconds = {type(t2) for _, t2, _ in transformations}
+
+#     for i, token, stream in (gen := full_traverse_tokens(tokens)):    
+#         if i+1 < len(stream) and type(token) in firsts and type(stream[i+1]) in seconds:
+#             for t1, t2, replacement in transformations:
+#                 if token == t1 and stream[i+1] == t2:
+#                     stream[i] = replacement
+#                     stream.pop(i+1)
+#                     break
+            
+
+def regularize_ranges(tokens: list[Token]) -> None:
+    """
+    fill in empty expressions on the left/right of any range `..` that lacks left or right operands
+    convert [<token>, <jux>, <..>] into [<token>, <range_jux>, <..>]
+    convert [<..>, <jux>, <token>] into [<..>, <range_jux>, <token>]
+    """
     #TODO: also maybe put range in a group with []
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
         if isinstance(token, DotDot_t):
             raise NotImplementedError
 
+def convert_bare_else(tokens: list[Token]) -> None:
+    """
+    convert any instances of `else` without a flow keyword after, and convert to `else` `if` `true`
+    """
+    for i, token, stream in (gen := full_traverse_tokens(tokens)):
+        if isinstance(token, Operator_t) and token.op == 'else':
+            if i+1 < len(stream) and isinstance(stream[i+1], Keyword_t) and stream[i+1].src in ('if', 'loop', 'lazy'):
+                continue
+            stream[i+1:i+1] = [Keyword_t('if'), Boolean_t('true')]
 
 
+       
 def bundle_conditionals(tokens: list[Token]) -> None:
     """Convert sequences of tokens that represent conditionals (if, loop, etc.) into a single expression token"""
     
@@ -312,9 +370,12 @@ def bundle_conditionals(tokens: list[Token]) -> None:
     #      e.g. `if a b`, `if a b else if c d else f`, `if a if b c else d`
     
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
-        if isinstance(token, Keyword_t):
-            #TODO: handle bundling up the keyword into an expression
-            raise NotImplementedError
+        if isinstance(token, Keyword_t) and token.src in ('if', 'loop', 'lazy'):#, 'else_if', 'else_loop', 'else_lazy'):
+            flow_chain, tokens = get_next_chain(stream[i:])
+            stream[i] = flow_chain[0]
+            stream[i+1:] = [*flow_chain[1:], *tokens]
+
+
 
 
 def chain_operators(tokens: list[Token]) -> None:
@@ -362,17 +423,19 @@ def post_process(tokens: list[Token]) -> None:
     if len(tokens) == 0: return
 
     # combine known keyword pairs into a single keyword
-    # combine_keywords(tokens) # possibly handled by bundling conditionals...
+    # combine_keywords(tokens)
+
+    # find any instances of <else> without a flow keyword after, and convert to <else> <if> <true>
+    convert_bare_else(tokens)
 
     # bundle up conditionals into single token expressions
-    #TODO: can put this in after get_next_chain can bundle as it goes. Basically this would just make any work it does finding flow permenant
-    # bundle_conditionals(tokens)
+    bundle_conditionals(tokens)
 
     # combine operator chains into a single operator token
     chain_operators(tokens)
 
     # desugar ranges
-    desugar_ranges(tokens)
+    regularize_ranges(tokens)
 
 
     # make the actual list of chains
@@ -380,7 +443,9 @@ def post_process(tokens: list[Token]) -> None:
     # based on types, replace jux with jux_mul or jux_call
     # TODO: actually this probably would need to be done during parsing, since we can't get a type for a complex/compound expression...
 
-    # print(tokens)
+    for t in tokens: 
+        print(t)
+    pdb.set_trace()
 
 
 

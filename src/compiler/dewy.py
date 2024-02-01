@@ -996,7 +996,7 @@ class Flowable(AST):
 
     def reset_was_entered(self) -> None:
         """reset the state of was_entered, in preparation for executing branches in a flow"""
-        raise NotADirectoryError(f'flowables must implement `reset_was_entered()`. No implementation found for {self.__class__}')
+        raise NotImplementedError(f'flowables must implement `reset_was_entered()`. No implementation found for {self.__class__}')
 
 class If(Flowable):
     def __init__(self, cond:AST, body:AST):

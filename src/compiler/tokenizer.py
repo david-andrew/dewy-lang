@@ -56,6 +56,10 @@ class Keyword_t(Token):
         self.src = src.lower()
     def __repr__(self) -> str:
         return f"<Keyword_t: {self.src}>"
+    def __hash__(self) -> int:
+        return hash((Keyword_t, self.src))
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Keyword_t) and self.src == other.src
 
 class Identifier_t(Token):
     def __init__(self, src:str):
