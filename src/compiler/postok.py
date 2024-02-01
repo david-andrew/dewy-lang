@@ -111,7 +111,9 @@ class ShouldBreakFlowTracker:
         # view each token without any ability to do anything
         # keep track of how many flows we've seen
         for token in tokens:
-            if (isinstance(token, Keyword_t) and token.src in ('if', 'loop', 'lazy')) or isinstance(token, Flow_t):
+            if (isinstance(token, Keyword_t) and token.src in ('if', 'loop', 'lazy')):
+                self.flows_seen += 1
+            if isinstance(token, Flow_t) and token.keyword != 'closing_else':
                 self.flows_seen += 1
             if isinstance(token, Operator_t) and token.op == 'else':
                 raise ValueError("should not be seeing else here")
@@ -244,6 +246,9 @@ def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
             cond, tokens = get_next_chain(tokens)
             clause, tokens = get_next_chain(tokens, tracker=ShouldBreakFlowTracker())
             return Flow_t(t, cond, clause), tokens
+        case Keyword_t(src='closing_else'):
+            clause, tokens = get_next_chain(tokens, tracker=ShouldBreakFlowTracker())
+            return Flow_t(t, None, clause), tokens
         case Keyword_t(src='do'):
             clause, tokens = get_next_chain(tokens)
             #assert next token is a do_keyward
@@ -358,8 +363,8 @@ def convert_bare_else(tokens: list[Token]) -> None:
         if isinstance(token, Operator_t) and token.op == 'else':
             if i+1 < len(stream) and isinstance(stream[i+1], Keyword_t) and stream[i+1].src in ('if', 'loop', 'lazy'):
                 continue
-            stream[i+1:i+1] = [Keyword_t('if'), Boolean_t('true')]
-
+            # stream[i+1:i+1] = [Keyword_t('if'), Boolean_t('true')]
+            stream.insert(i+1, Keyword_t('closing_else'))
 
        
 def bundle_conditionals(tokens: list[Token]) -> None:
@@ -371,6 +376,7 @@ def bundle_conditionals(tokens: list[Token]) -> None:
     
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
         if isinstance(token, Keyword_t) and token.src in ('if', 'loop', 'lazy'):#, 'else_if', 'else_loop', 'else_lazy'):
+            pdb.set_trace()
             flow_chain, tokens = get_next_chain(stream[i:])
             stream[i] = flow_chain[0]
             stream[i+1:] = [*flow_chain[1:], *tokens]
