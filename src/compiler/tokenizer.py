@@ -497,7 +497,7 @@ def eat_escape(src:str) -> int|None:
 
 @full_eat()
 def eat_string(src:str) -> tuple[int, String_t] | None:
-    """
+    r"""
     strings are delimited with either single (') or double quotes (")
     the character portion of a string may contain any character except the delimiter, \, or {.
     strings may be multiline
