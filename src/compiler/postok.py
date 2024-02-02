@@ -29,20 +29,10 @@ from tokenizer import ( tokenize, tprint, full_traverse_tokens,
     Comma_t,
 )
 
-from enum import Enum, auto
-from typing import Callable, overload
+from typing import Generator, overload
 
 
 import pdb
-
-
-"""
-TODO:
-- full pipeline for hello world:
-  [x] tokenize
-  [ ] chain (still no typing, just group single expressions together). Actually probably just leave as list[Token], and generate chains again at parse time!
-  [ ] parse (building up types based on expressions and types of lowest levels/outside in)
-"""
 
 
 # There is no chain class
@@ -58,7 +48,7 @@ class Chain(list[T]):
     """class for explicitly annotating that a token list is a single chain"""
 
 
-# Later Token classes
+############### NEW TOKENS CREATED BY POST-TOKENIZATION PROCESS ###############
 
 class Flow_t(Token):
     @overload
@@ -72,14 +62,20 @@ class Flow_t(Token):
         self.keyword = keyword
         self.condition = condition
         self.clause = clause
+
     def __repr__(self) -> str:
         return f"<Flow_t: {self.keyword}: {self.condition} {self.clause}>"
 
+    def __iter__(self) -> Generator[Token, None, None]:
+        if self.condition is not None: 
+            yield self.condition
+        yield self.clause
 
-class Do_t(Token):...
-class Return_t(Token):...
-class Express_t(Token):...
-class Declare_t(Token):...
+
+# class Do_t(Token):...
+# class Return_t(Token):...
+# class Express_t(Token):...
+# class Declare_t(Token):...
 
 
 atom_tokens = (

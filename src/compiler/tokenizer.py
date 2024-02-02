@@ -40,6 +40,12 @@ class Token(ABC):
         raise NotImplementedError(f'hash is not implemented for token type {type(self)}')
     def __eq__(self, __value: object) -> bool:
         raise NotImplementedError(f'equals is not implemented for token type {type(self)}')
+    def __iter__(self) -> Generator['list[Token]', None, None]:
+        """
+        Iter is used by full_traverse_tokens for iterating over any contained tokens.
+        e.g. Block_t.body TypeParam_t.body, String_t.body (interpolation blocks only), etc.
+        """
+        raise NotImplementedError(f'iter is not implemented for token type {type(self)}')
 
 class WhiteSpace_t(Token):
     def __init__(self, _): ...
@@ -81,6 +87,8 @@ class Block_t(Token):
     def __repr__(self) -> str:
         body_str = ', '.join(repr(token) for token in self.body)
         return f"<Block_t: {self.left}{body_str}{self.right}>"
+    def __iter__(self) -> Generator[list[Token], None, None]:
+        yield self.body
     
 class TypeParam_t(Token):
     def __init__(self, body:list[Token]):
@@ -88,6 +96,8 @@ class TypeParam_t(Token):
     def __repr__(self) -> str:
         body_str = ', '.join(repr(token) for token in self.body)
         return f"<TypeParam_t: `<{body_str}>`>"
+    def __iter__(self) -> Generator[list[Token], None, None]:
+        yield self.body
 
 class Escape_t(Token):
     escape_map = {
@@ -136,6 +146,10 @@ class String_t(Token):
         self.body = body
     def __repr__(self) -> str:
         return f"<String_t: {self.body}>"
+    def __iter__(self) -> Generator[list[Token], None, None]:
+        for token in self.body:
+            if isinstance(token, Block_t):
+                yield token.body
     
 # class Number_t(Token, ABC):...
     
@@ -945,15 +959,12 @@ def full_traverse_tokens(tokens:list[Token]) -> Generator[tuple[int, Token, list
         else:
             i += 1
 
-        # recursively handle traversing into blocks
-        if isinstance(token, Block_t) or isinstance(token, TypeParam_t):
-            yield from full_traverse_tokens(token.body)
-        
-        # recursively handle traversing into strings (only interpolation blocks are yielded)
-        if isinstance(token, String_t):
-            for child in token.body:
-                if isinstance(child, Block_t):
-                    yield from full_traverse_tokens(child.body)
+        # for tokens that have defined __iter__ methods, yield their contents
+        try:
+            for children in token:
+                yield from full_traverse_tokens(children)
+        except NotImplementedError:
+            pass
 
 
 def traverse_tokens(tokens:list[Token]) -> Generator[Token, None, None]:

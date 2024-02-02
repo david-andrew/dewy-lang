@@ -56,8 +56,8 @@ Several example programs are available in [examples/](examples/). Here is a brea
 |-----------------------------------------------------------------|----------|
 | [hello.dewy](examples/hello.dewy)                               |    [✓]   |
 | [hello_func.dewy](examples/hello_func.dewy)                     |    [✓]   |
-| [hello_loop.dewy](examples/hello_loop.dewy)                     |    [✓]   |
 | [hello_name.dewy](examples/hello_name.dewy)                     |    [✓]   |
+| [hello_loop.dewy](examples/hello_loop.dewy)                     |    [✓]   |
 | [anonymous_func.dewy](examples/anonymous_func.dewy)             |    [✓]   |
 | [if_else.dewy](examples/if_else.dewy)                           |    [✓]   |
 | [if_else_if.dewy](examples/if_else_if.dewy)                     |    [✓]   |
