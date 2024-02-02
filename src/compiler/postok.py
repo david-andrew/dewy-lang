@@ -30,7 +30,7 @@ from tokenizer import ( tokenize, tprint, full_traverse_tokens,
 )
 
 from enum import Enum, auto
-from typing import Callable
+from typing import Callable, overload
 
 
 import pdb
@@ -61,18 +61,18 @@ class Chain(list[T]):
 # Later Token classes
 
 class Flow_t(Token):
-    def __init__(self, keyword:Keyword_t, condition:Chain[Token], clause:Chain[Token]):
+    @overload
+    def __init__(self, keyword:None, condition:None, clause:Chain[Token]): ... # closing else
+    @overload
+    def __init__(self, keyword:Keyword_t, condition:Chain[Token], clause:Chain[Token]): ... # if, loop, lazy
+
+    def __init__(self, keyword:Keyword_t|None, condition:Chain[Token]|None, clause:Chain[Token]):
         self.keyword = keyword
         self.condition = condition
         self.clause = clause
     def __repr__(self) -> str:
-        return f"<Flow_t: {self.keyword}: {self.condition} {self.clause}"
+        return f"<Flow_t: {self.keyword}: {self.condition} {self.clause}>"
 
-# class Flow_t(Token):
-#     def __init__(self, branches:list[Flowable_t]):
-#         self.branches = branches
-#     def __repr__(self) -> str:
-#         return f"<Flow_t: {self.branches}>"
 
 class Do_t(Token):...
 class Return_t(Token):...
@@ -111,12 +111,12 @@ class ShouldBreakFlowTracker:
         # view each token without any ability to do anything
         # keep track of how many flows we've seen
         for token in tokens:
-            if (isinstance(token, Keyword_t) and token.src in ('if', 'loop', 'lazy')):
-                self.flows_seen += 1
-            if isinstance(token, Flow_t) and token.keyword != 'closing_else':
+            if isinstance(token, Flow_t) and token.keyword is not None:
                 self.flows_seen += 1
             if isinstance(token, Operator_t) and token.op == 'else':
                 raise ValueError("should not be seeing else here")
+            if isinstance(token, Keyword_t) and token.src in ('if', 'loop', 'lazy'):
+                raise ValueError("should not be seeing if/loop/lazy here. Everything should be bundled up into a flow")
 
 
 
@@ -244,11 +244,12 @@ def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
     match t:
         case Keyword_t(src='if'|'loop'|'lazy'):#|'else_if'|'else_loop'|'else_lazy'):
             cond, tokens = get_next_chain(tokens)
+            # pdb.set_trace()
             clause, tokens = get_next_chain(tokens, tracker=ShouldBreakFlowTracker())
             return Flow_t(t, cond, clause), tokens
         case Keyword_t(src='closing_else'):
             clause, tokens = get_next_chain(tokens, tracker=ShouldBreakFlowTracker())
-            return Flow_t(t, None, clause), tokens
+            return Flow_t(None, None, clause), tokens
         case Keyword_t(src='do'):
             clause, tokens = get_next_chain(tokens)
             #assert next token is a do_keyward
@@ -294,18 +295,21 @@ def get_next_chain(tokens:list[Token], *, tracker:ShouldBreakFlowTracker=None) -
 
     chain = []
 
+    # grab the first chunk and let the tracker view it
     chunk, tokens = _get_next_chunk(tokens)
     chain.extend(chunk)
-
-    # let tracker view the chunk that was just added
     if tracker is not None:
         tracker.view(chunk)
 
     while len(tokens) > 0 and is_binop(tokens[0]) and (tracker is None or not tracker.op_breaks_chain(tokens[0])):
+        # get the operator, and continuing chunk, then let the tracker view it
         chain.append(tokens.pop(0))
         chunk, tokens = _get_next_chunk(tokens)
         chain.extend(chunk)
+        if tracker is not None:
+            tracker.view(chunk)
 
+    # if there's a semicolon, it ends the chain
     if len(tokens) > 0 and isinstance(tokens[0], Operator_t) and tokens[0].op == ';':
         chain.append(tokens.pop(0))
 
@@ -370,13 +374,11 @@ def convert_bare_else(tokens: list[Token]) -> None:
 def bundle_conditionals(tokens: list[Token]) -> None:
     """Convert sequences of tokens that represent conditionals (if, loop, etc.) into a single expression token"""
     
-    #TODO: should scan through, and if it finds a conditional, raise the not implemented error
     #TODO: need to check that nested conditionals as well as chained conditionals are handled properly
     #      e.g. `if a b`, `if a b else if c d else f`, `if a if b c else d`
     
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
-        if isinstance(token, Keyword_t) and token.src in ('if', 'loop', 'lazy'):#, 'else_if', 'else_loop', 'else_lazy'):
-            pdb.set_trace()
+        if isinstance(token, Keyword_t) and token.src in ('if', 'loop', 'lazy'):
             flow_chain, tokens = get_next_chain(stream[i:])
             stream[i] = flow_chain[0]
             stream[i+1:] = [*flow_chain[1:], *tokens]
