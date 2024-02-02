@@ -712,7 +712,7 @@ class Block(AST):
         #TODO: handle flow control from a block, e.g. return, break, continue, express, etc.
         if self.newscope:
             scope = Scope(scope)
-        ret = undefined
+        ret = void
         for expr in self.exprs:
             ret = expr.eval(scope)
         return ret
@@ -1052,7 +1052,7 @@ class Loop(Flowable):
         #TODO: also eventually handle return (problem for other ASTs as well)
 
         #for now just don't let loops return anything
-        return undefined
+        return void
 
     def treestr(self, indent=0):
         return f'{tab * indent}Loop\n{self.cond.treestr(indent + 1)}\n{self.body.treestr(indent + 1)}'

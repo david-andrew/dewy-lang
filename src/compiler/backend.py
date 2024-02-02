@@ -5,7 +5,7 @@ def python_interpreter(path:str, args:list[str]):
     from tokenizer import tokenize
     from postok import post_process
     from parser import top_level_parse # type: ignore[reportShadowedImports]
-    from dewy import Scope
+    from dewy import Scope, void
 
     with open(path) as f:
         src = f.read()
@@ -16,7 +16,7 @@ def python_interpreter(path:str, args:list[str]):
     root = Scope.default()
     ast = top_level_parse(tokens, root)
     res = ast.eval(root)
-    if res: print(res)
+    if res and res is not void: print(res)
 
 
 def llvm_compiler(path:str, args:list[str]):
