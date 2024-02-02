@@ -78,6 +78,25 @@ class Flow_t(Token):
 # class Declare_t(Token):...
 
 
+class RangeJux_t(Token):
+    def __init__(self, _): ...
+    def __repr__(self) -> str:
+        return "<RangeJux_t>"
+    def __hash__(self) -> int:
+        return hash(RangeJux_t)
+    def __eq__(self, other) -> bool:
+        return isinstance(other, RangeJux_t)
+
+class Inf_t(Token):
+    def __init__(self, _): ...
+    def __repr__(self) -> str:
+        return "<Inf_t>"
+    def __hash__(self) -> int:
+        return hash(Inf_t)
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Inf_t)
+
+
 atom_tokens = (
     Identifier_t,
     Integer_t,
@@ -317,14 +336,33 @@ def get_next_chain(tokens:list[Token], *, tracker:ShouldBreakFlowTracker=None) -
 
 def regularize_ranges(tokens: list[Token]) -> None:
     """
-    fill in empty expressions on the left/right of any range `..` that lacks left or right operands
     convert [<token>, <jux>, <..>] into [<token>, <range_jux>, <..>]
     convert [<..>, <jux>, <token>] into [<..>, <range_jux>, <token>]
+    if .. doesn't connect to anything on the left or right, connect it to -/+ infinity
+    if range expression chain is not wrapped in a block, wrap it in a block
     """
+    range_jux = RangeJux_t(None)
+    inf = Inf_t(None)
     #TODO: also maybe put range in a group with []
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
         if isinstance(token, DotDot_t):
-            raise NotImplementedError
+            if i > 0 and isinstance(stream[i-1], Juxtapose_t):
+                stream[i-1] = range_jux
+            if i+1 < len(stream) and isinstance(stream[i+1], Juxtapose_t):
+                stream[i+1] = range_jux
+
+            # unattached ranges get +/- infinity on the left or right
+            if i+1 == len(stream) or stream[i+1] != range_jux:
+                stream[i+1:i+1] = [range_jux, inf]
+            if i == 0 or stream[i-1] != range_jux:
+                stream[i:i] = [Operator_t('-'), inf, range_jux]
+                gen.send(i+4)
+
+    #TODO: wrap up any naked ranges in a Block_t([])
+    for i, token, stream in (gen := full_traverse_tokens(tokens)):
+        ...      
+
+                
 
 def convert_bare_else(tokens: list[Token]) -> None:
     """
