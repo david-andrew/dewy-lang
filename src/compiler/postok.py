@@ -67,6 +67,8 @@ class Flow_t(Token):
     def __init__(self, keyword:Keyword_t, condition:Chain[Token], clause:Chain[Token]): ... # if, loop, lazy
 
     def __init__(self, keyword:Keyword_t|None, condition:Chain[Token]|None, clause:Chain[Token]):
+        if keyword is None and condition is not None:
+            raise ValueError("closing else should have no condition. `keyword` and `condition` should both be None")
         self.keyword = keyword
         self.condition = condition
         self.clause = clause
@@ -451,9 +453,6 @@ def post_process(tokens: list[Token]) -> None:
     # based on types, replace jux with jux_mul or jux_call
     # TODO: actually this probably would need to be done during parsing, since we can't get a type for a complex/compound expression...
 
-    for t in tokens: 
-        print(t)
-    pdb.set_trace()
 
 
 

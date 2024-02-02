@@ -720,10 +720,12 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
 
 
 def parse_flow(flow:Flow_t, scope:Scope) -> If|Loop:
-    #TODO: Flow_t now has possible case of keyword=None, cond=None, when it is the closing else clause
-    pdb.set_trace()
 
-    cond = parse_chain(flow.condition, scope)
+    # special case for closing else clause in a flow chain. Treat as `<if> <true> <clause>`
+    if flow.keyword is None:
+        return If(Bool(True), parse_chain(flow.clause, scope))
+
+    cond = parse_chain(flow.condition, scope) 
     clause = parse_chain(flow.clause, scope)
     
     match flow.keyword:
