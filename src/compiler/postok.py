@@ -313,38 +313,7 @@ def get_next_chain(tokens:list[Token], *, tracker:ShouldBreakFlowTracker=None) -
 
     return Chain(chain), tokens
 
-
-
-
-# def combine_keywords(tokens: list[Token]) -> None:
-#     """
-#     combine known keyword pairs into a single keyword
-
-#     TBD on some of these
-#     do loop -> do_loop
-#     do lazy -> do_lazy
-#     else if -> else_if
-#     else loop -> else_loop
-#     else lazy -> else_lazy
-#     """
-
-#     transformations = [
-#         (Operator_t('else'), Keyword_t('if'), Keyword_t('else_if')),
-#         (Operator_t('else'), Keyword_t('loop'), Keyword_t('else_loop')),
-#         # TODO: others...
-#     ]
-
-#     firsts = {type(t1) for t1, _, _ in transformations}
-#     seconds = {type(t2) for _, t2, _ in transformations}
-
-#     for i, token, stream in (gen := full_traverse_tokens(tokens)):    
-#         if i+1 < len(stream) and type(token) in firsts and type(stream[i+1]) in seconds:
-#             for t1, t2, replacement in transformations:
-#                 if token == t1 and stream[i+1] == t2:
-#                     stream[i] = replacement
-#                     stream.pop(i+1)
-#                     break
-            
+          
 
 def regularize_ranges(tokens: list[Token]) -> None:
     """
@@ -427,9 +396,6 @@ def post_process(tokens: list[Token]) -> None:
     invert_whitespace(tokens)
 
     if len(tokens) == 0: return
-
-    # combine known keyword pairs into a single keyword
-    # combine_keywords(tokens)
 
     # find any instances of <else> without a flow keyword after, and convert to <else> <if> <true>
     convert_bare_else(tokens)
