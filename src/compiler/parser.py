@@ -26,6 +26,7 @@ from dewy import (
     BinOp,
     Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
+    And, Or, Xor, Nand, Nor, Xnor,
     UnaryOp,
     Neg, Inv,
     Bool,
@@ -589,7 +590,13 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
         # case Operator_t(op='isnt?'): return Isnt(left, right)
         # case Operator_t(op='<=>'): return ThreewayCompare(left, right)
 
-        # Boolean Operators
+        # Logical Operators. TODO: outtype=Bool is not flexible enough...
+        case Operator_t(op='and'):  return And(left, right, outtype=Bool)
+        case Operator_t(op='or'):   return Or(left, right, outtype=Bool)
+        case Operator_t(op='nand'): return Nand(left, right, outtype=Bool)
+        case Operator_t(op='nor'):  return Nor(left, right, outtype=Bool)
+        case Operator_t(op='xor'):  return Xor(left, right, outtype=Bool)
+        case Operator_t(op='xnor'): return Xnor(left, right, outtype=Bool)
 
         # Misc Operators
         case Comma_t(): 
@@ -621,7 +628,6 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
                 #create a new flow out of the left and right
                 return Flow([left, right])
         
-
         case Operator_t(op='in'):
             if isinstance(left, Identifier):
                 return In(left.name, right)
@@ -984,6 +990,7 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
         case Number(): ...
         case Bool(): ...
         case Void(): ...
+        case Undefined(): ...
         
         case _:
             #TODO: unhandled ast type
