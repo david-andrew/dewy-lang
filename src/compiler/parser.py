@@ -31,6 +31,7 @@ from dewy import (
     Neg, Inv,
     Bool,
     Flow,
+    Flowable,
     If,
     Loop,
     In,
@@ -727,6 +728,8 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
         case '()'|'{}', Block():
             inner.newscope = delims == '{}'
             return inner
+        case '()'|'{}', Flow() | Flowable():
+            return Block([inner], newscope=delims=='{}')
         case '()'|'[]'|'(]'|'[)', Range():
             inner.include_first = block.left == '['
             inner.include_last = block.right == ']'
