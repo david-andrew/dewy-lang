@@ -121,6 +121,63 @@ row_vec = [
 ]
 ```
 
+
+## Capturing the result of a block with multiple expressions (related to list comprihensions/generators) [multiple expressions in a block return a generator, unless the block is wrapped in `[]`]
+lets say you have a block 
+
+```dewy
+a = {
+    1+1
+    2+2
+    3+3
+}
+```
+
+how should this behave? what gets stored in `a`? It's pretty obvious when it's just a single expression in the block
+
+```dewy
+a = { 1+1 }
+```
+
+`a` should definitely just be `2`.
+
+I'm thinking though for the first case, I think `a` should get a generator. Basically it would be the same as if in python you did:
+
+```python
+def gen():
+    yield 1+1
+    yield 2+2
+    yield 3+3
+
+a = gen()
+```
+
+Though this does bring up a different interesting question, what is the difference between these two:
+
+```dewy
+a = { 1+1 2+2 3+3 }
+b = () => { 1+1 2+2 3+3 }
+
+
+A = a // 2
+A = a // 4
+A = a // 6
+
+
+//B = b // 2
+//B = b // 4
+//B = b // 6
+//actually I think this is what would happen
+gen = b // generator object
+B = gen // 2
+B = gen // 4
+B = gen // 6
+
+```
+
+More thought is needed on this though. Basically should come up with a long list of examples and use cases
+
+
 ## How does multidimensional indexing work? [DONE: each dimension access is separated by spaces as in regular arrays. Parsing precedence will determine what attaches to .. and user's can use ()/[] to disambiguate]
 
 e.g. if you have this 3D array, how can you index each dimension with a range?
@@ -964,7 +1021,7 @@ new_sum = (x, y) => thirtyseven(a=x, b=y)
 
 In this case, we still have an issue with the comma operator having the wrong precedence when calling `thirtyseven`...
 
-## Should we get rid of the low precedence range juxtapose, and force ranges with step size to wrap the tuple in parenthesis, or should loops with multiple iterators require parenthesis around each iterator? [require ranges with tuple for step size to be wrapped in parenthesis+increase precedence of range juxtapose/in to be above logical operators]
+## Should we get rid of the low precedence range juxtapose, and force ranges with step size to wrap the tuple in parenthesis, or should loops with multiple iterators require parenthesis around each iterator? [leaning have range-jux have lower precedence than comma, and any time you want to do `a in range`, you need to wrap the range. `in` gets higher precedence than logical operators]
 
 Currently there is a conflict with the operator precedence. We cannot have both of these:
 
@@ -997,7 +1054,11 @@ The two approaches to fixing:
 
 I think it comes down to which will occur more often--I suspect logically combined iterators will be much more common than ranges with a step size. So I'm leaning option 2.
 
-## Parsing flow expressions joined with `else` [leaning towards handle during tokenization]
+Last alternative is to just require that all ranges have parenthesis or brackets around them... This allows low range_jux precedence, and also doesn't require us to wrap the range first,second in parenthesis. Also it makes it always unambiguous what the bounds are on the range (i.e. open or closed). 
+EXCEPT this breaks the whole syntax for multidimensional indexing, making it super verbose
+
+
+## Parsing flow expressions joined with `else` [Fixed, handled correctly in post-tokenization!]
 
 This isn't a syntax issue, but rather a parsing issue. Where should the correct nesting of flow expressions be handled?
 
