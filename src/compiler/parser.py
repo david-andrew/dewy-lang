@@ -147,6 +147,7 @@ operator_groups: list[tuple[Associativity, list[Operator_t|ShiftOperator_t|Juxta
     (Associativity.left, [Operator_t('*'), Operator_t('/'), Operator_t('%')]),
     (Associativity.left, [Operator_t('+'), Operator_t('-')]),
     (Associativity.left, [ShiftOperator_t('<<'), ShiftOperator_t('>>'), ShiftOperator_t('<<<'), ShiftOperator_t('>>>'), ShiftOperator_t('<<!'), ShiftOperator_t('!>>')]),
+    (Associativity.none, [Operator_t('in')]), 
     (Associativity.left, [Operator_t('=?'), Operator_t('>?'), Operator_t('<?'), Operator_t('>=?'), Operator_t('<=?')]),
     (Associativity.left, [Operator_t('and'), Operator_t('nand'), Operator_t('&')]),
     (Associativity.left, [Operator_t('xor'), Operator_t('xnor')]),
@@ -190,13 +191,13 @@ def operator_precedence(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> in
     / * %
     + -
     << >> <<< >>> <<! !>>
-    <jux range>                         //TBD, e.g. [(first,second)..last]
     in
     =? >? <? >=? <=? not=? <=> is? isnt? @?
     and nand &
     xor xnor                            //following C's precedence: and > xor > or
     or nor |
     ,                                   //tuple maker
+    <jux range>                         //e.g. [first,second..last]
     =>
     = .= <op>= .<op>=  (e.g. += .+=)    //right-associative (but technically causes a type error since assignments can't be chained)
     else
@@ -723,6 +724,7 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
         case '()'|'[]'|'(]'|'[)', Range():
             inner.include_first = block.left == '['
             inner.include_last = block.right == ']'
+            inner.was_wrapped = True #TODO: look into removing this attribute (needs post-tokenization process to be able to separate the range (and any first,second..last expressions) from surrounding tokens)
             return inner
         
         # create class RawRange(PrototypeAST) for representing the inner part of a range without the block delimiters
@@ -775,7 +777,7 @@ def parse_range(rng:Range_t, scope:Scope) -> Range:
 
 
     match (left, right):
-        case (None, None): return Range(undefined, undefined, undefined)
+        case (None, None):                                                      return Range(undefined, undefined, undefined)
         case (None, AST() as last):                                             return Range(undefined, undefined, last)
         case (AST() as first, None):                                            return Range(first, undefined, undefined)
         case (Tuple(exprs=[AST() as first, AST() as second]), None):            return Range(first, second, undefined)
@@ -806,6 +808,7 @@ def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     express_identifiers(ast)
     tuples_to_arrays(ast)
     ensure_no_prototypes(ast)
+    ensure_no_unwrapped_ranges(ast)
     set_ast_scopes(ast, scope)
 
     return ast
@@ -849,7 +852,18 @@ def ensure_no_prototypes(root:AST) -> None:
     for ast in full_traverse_ast(root):
         if isinstance(ast, PrototypeAST):
             raise ValueError(f'May not have any PrototypeASTs in a final AST. Found {ast} of type ({type(ast)})')
-            
+
+
+def ensure_no_unwrapped_ranges(root:AST) -> None:
+    """
+    Raises an exception, if any Range object has was_wrapped=False
+    """
+    for ast in full_traverse_ast(root):
+        if isinstance(ast, Range):
+            if not ast.was_wrapped:
+                raise ValueError(f'Range AST node {ast} was not wrapped in brackets/parenthesis. Options are [], [), (], ().\nPotentially can relax this is the post-tokenizer process is able to separate the range from the surrounding tokens.')
+
+
 def set_ast_scopes(root:AST, scope:Scope) -> None:
     #TODO: hacky, just setting function scopes to root scope!
     #      need to handle setting scope to where fn defined.
@@ -858,6 +872,9 @@ def set_ast_scopes(root:AST, scope:Scope) -> None:
         if isinstance(ast, Function):
             ast.scope = scope
 
+#TODO: consider adding __iter__ to AST classes instead of manually specifying them here
+#      though potentially good as is, as it forces you to implement it. 
+#      if we use __iter__ we'd have to provide a default that raises, and then implement it on EVERY AST class            
 def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
     """
     Generator to recursively walk all nodes in the given AST.

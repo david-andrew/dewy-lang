@@ -714,10 +714,18 @@ class Block(AST):
         #TODO: handle flow control from a block, e.g. return, break, continue, express, etc.
         if self.newscope:
             scope = Scope(scope)
-        ret = void
+        expressed = []
         for expr in self.exprs:
-            ret = expr.eval(scope)
-        return ret
+            res = expr.eval(scope)
+            if res is not None and res is not void:
+                expressed.append(res)
+        if len(expressed) == 0:
+            return void
+        if len(expressed) == 1:
+            return expressed[0]
+        raise NotImplementedError('block with multiple expressions not yet supported')
+        #TODO: this is actually a lot like `yield`! maybe `yield` should be instead of `express` or they are synonymous
+        return Array(expressed)
 
     def treestr(self, indent=0):
         """print each expr on its own line, indented"""
@@ -1226,10 +1234,10 @@ class Number(Rangeable):
         else:
             return Number(self.val - step.val)
     @staticmethod
-    def max(self) -> 'Number':
+    def max() -> 'Number':
         return Number(float('inf'))
     @staticmethod
-    def min(self) -> 'Number':
+    def min() -> 'Number':
         return Number(float('-inf'))
     
     def topy(self, scope:Scope=None):
@@ -1280,6 +1288,10 @@ class Range(Iterable,Unpackable):
         self.include_first = include_first
         self.include_last = include_last
         
+        # DEBUG: for now, require that ranges were wrapped in [], [), (], or () to avoid ambiguity
+        # this means at parse time, when the range is first made, was_wrapped will be false
+        # and then when the enclosing block is parsed, was_wrapped can be set to true
+        self.was_wrapped = False
 
     def eval(self, scope:Scope=None):
         return self
