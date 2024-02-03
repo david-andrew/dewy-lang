@@ -63,9 +63,9 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [if_else_if.dewy](examples/if_else_if.dewy)                     |    [✓]   |
 | [dangling_else.dewy](examples/dangling_else.dewy)               |    [✓]   |
 | [if_tree.dewy](examples/if_tree.dewy)                           |    [✓]   |
-| [loop_in_iter.dewy](examples/loop_in_iter.dewy)                 |    [✗]   |
+| [loop_in_iter.dewy](examples/loop_in_iter.dewy)                 |    [✓]   |
 | [loop_iter_manual.dewy](examples/loop_iter_manual.dewy)         |    [✗]   |
-| [nested_loop.dewy](examples/nested_loop.dewy)                   |    [✗]   |
+| [nested_loop.dewy](examples/nested_loop.dewy)                   |    [✓]   |
 | [range_iter_test.dewy](examples/range_iter_test.dewy)           |    [✗]   |
 | [block_printing.dewy](examples/block_printing.dewy)             |    [✗]   |
 | [unpack_test.dewy](examples/unpack_test.dewy)                   |    [✗]   |
