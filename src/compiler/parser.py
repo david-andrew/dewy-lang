@@ -70,7 +70,7 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
     Comma_t,
 )
 
-from postok import post_process, get_next_chain, is_op, Chain, Flow_t
+from postok import post_process, get_next_chain, is_op, Chain, Flow_t, Range_t
 
 from utils import based_number_to_int, bool_to_bool
 from dataclasses import dataclass
@@ -499,6 +499,7 @@ def parse_single(token:Token, scope:Scope) -> AST:
         case String_t():        return parse_string(token, scope)
         case Block_t():         return parse_block(token, scope)
         case Flow_t():          return parse_flow(token, scope)
+        case Range_t():         return parse_range(token, scope)
         
         case _:
             #TODO handle other types...
@@ -620,6 +621,18 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
                 return Flow([left, right])
         
 
+        case Operator_t(op='in'):
+            if isinstance(left, Identifier):
+                return In(left.name, right)
+            
+            pdb.set_trace()
+            #TODO: handle unpacking case where left is a PackStruct
+            #TDB if post-tokenizer or parser handles. probably parser, which would build a PackStruct AST node 
+            # elif isinstance(left, PackStruct):
+            #     return In(left, right)
+                
+            raise NotImplementedError(f"Parsing of operator 'in' operator for non-identifiers on left, has not been implemented yet. Got {left=}, {right=}")
+        
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
@@ -707,6 +720,10 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
         case '()'|'{}', Block():
             inner.newscope = delims == '{}'
             return inner
+        case '()'|'[]'|'(]'|'[)', Range():
+            inner.include_first = block.left == '['
+            inner.include_last = block.right == ']'
+            return inner
         
         # create class RawRange(PrototypeAST) for representing the inner part of a range without the block delimiters
         # case '()'|'(]'|'[)'|'[]', RawRange(): ...
@@ -739,6 +756,35 @@ def parse_flow(flow:Flow_t, scope:Scope) -> If|Loop:
     ...
 
 
+def parse_range(rng:Range_t, scope:Scope) -> Range:
+    """
+    Convert a range token to an AST
+    
+    Cases are:
+        [first..]               // first to inf
+        [first,second..]        // step size is second-first
+        [first..last]           // first to last
+        [first,second..last]    // first to last, step size is second-first
+        //[first..2ndlast,last] // this is explicitly NOT ALLOWED, as it is covered by the previous case, and can have unintuitive behavior
+        [..2ndlast,last]        // -inf to last, step size is last-penultimate
+        [..last]                // -inf to last
+        [..]                    // -inf to inf
+    """
+    left = parse(rng.left, scope) if rng.left is not None else None
+    right = parse(rng.right, scope) if rng.right is not None else None
+
+
+    match (left, right):
+        case (None, None): return Range(undefined, undefined, undefined)
+        case (None, AST() as last):                                             return Range(undefined, undefined, last)
+        case (AST() as first, None):                                            return Range(first, undefined, undefined)
+        case (Tuple(exprs=[AST() as first, AST() as second]), None):            return Range(first, second, undefined)
+        case (Tuple(exprs=[AST() as first, AST() as second]), AST() as last):   return Range(first, second, last)
+        # case (None, Tuple(exprs=[AST() as secondlast, AST() as last])):       return Range(undefined, secondlast=secondlast, last) #TODO: potentially modify Range() to also take a secondlast parameter
+        case (AST() as first, AST() as last):                                   return Range(first, undefined, last)
+
+    pdb.set_trace()
+    raise ValueError(f'Unrecognized range case: {rng=}, {left=}, {right=}')
 
 def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     """
@@ -901,6 +947,19 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
             yield from full_traverse_ast(root.cond)
             yield from full_traverse_ast(root.body)
 
+        case In():
+            #TODO: probably going to change pack struct to be a proper AST, which can then have contents yielded from...
+            # if isinstance(root.name, PackStruct):
+            #     yield from full_traverse_ast(root.name)
+            yield from full_traverse_ast(root.iterable)
+
+        case Range():
+            if root.first is not None:
+                yield from full_traverse_ast(root.first)
+            if root.second is not None:
+                yield from full_traverse_ast(root.second)
+            if root.last is not None:
+                yield from full_traverse_ast(root.last)
 
         # do nothing cases
         case String(): ...

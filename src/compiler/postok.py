@@ -78,23 +78,38 @@ class Flow_t(Token):
 # class Declare_t(Token):...
 
 
-class RangeJux_t(Token):
-    def __init__(self, _): ...
-    def __repr__(self) -> str:
-        return "<RangeJux_t>"
-    def __hash__(self) -> int:
-        return hash(RangeJux_t)
-    def __eq__(self, other) -> bool:
-        return isinstance(other, RangeJux_t)
+# class RangeJux_t(Token):
+#     def __init__(self, _): ...
+#     def __repr__(self) -> str:
+#         return "<RangeJux_t>"
+#     def __hash__(self) -> int:
+#         return hash(RangeJux_t)
+#     def __eq__(self, other) -> bool:
+#         return isinstance(other, RangeJux_t)
 
-class Inf_t(Token):
-    def __init__(self, _): ...
+
+
+class Range_t(Token):
+    def __init__(self, left:Chain[Token]|None, right:Chain[Token]|None):
+        self.left = left
+        self.right = right
     def __repr__(self) -> str:
-        return "<Inf_t>"
-    def __hash__(self) -> int:
-        return hash(Inf_t)
-    def __eq__(self, other) -> bool:
-        return isinstance(other, Inf_t)
+        return f"<Range_t: {self.left} .. {self.right}>"
+    def __iter__(self) -> Generator[Chain[Token], None, None]:
+        if self.left is not None:
+            yield self.left
+        if self.right is not None:
+            yield self.right
+
+
+# class Inf_t(Token):
+#     def __init__(self, _): ...
+#     def __repr__(self) -> str:
+#         return "<Inf_t>"
+#     def __hash__(self) -> int:
+#         return hash(Inf_t)
+#     def __eq__(self, other) -> bool:
+#         return isinstance(other, Inf_t)
 
 
 atom_tokens = (
@@ -105,6 +120,7 @@ atom_tokens = (
     RawString_t,
     String_t,
     Block_t,
+    Range_t,
     TypeParam_t,
     Hashtag_t,
     DotDot_t,
@@ -332,7 +348,36 @@ def get_next_chain(tokens:list[Token], *, tracker:ShouldBreakFlowTracker=None) -
 
     return Chain(chain), tokens
 
-          
+
+
+# def get_chain_start_idx(tokens: list[Token], start_idx: int, connects_to_following:bool=True) -> int:
+#     """
+#     Count backwards from the current location until the start of the chain is found
+    
+#     Args:
+#         tokens (list[Token]): list of tokens to search
+#         start_idx (int): the index to start searching from
+#         connects_to_following (bool, optional): whether the chain should connect to the following token. Defaults to True.
+#             If True, the chain should continue past tokens[i], at least into tokens[i+1]
+#             If False, the chain could be a whole expression, e.g. i = len(tokens)-1 or tokens[i] == ';'
+#     """
+#     """
+#     # A chain is represented by the following grammar:
+#     # #chunk = #prefix_op* #atom_expr (#postfix_op - ';')*
+#     # #chain = #chunk (#binary_op #chunk)* ';'?
+    
+#     So going backwards
+#     inv(#chain) = ';'? inv(#chunk) (#binary_op inv(#chunk))*
+#     inv(#chunk) = (#postfix_op - ';')* #atom_expr #prefix_op*
+    
+#     """
+
+
+
+
+#     pdb.set_trace()
+
+
 
 def regularize_ranges(tokens: list[Token]) -> None:
     """
@@ -341,28 +386,51 @@ def regularize_ranges(tokens: list[Token]) -> None:
     if .. doesn't connect to anything on the left or right, connect it to -/+ infinity
     if range expression chain is not wrapped in a block, wrap it in a block
     """
-    range_jux = RangeJux_t(None)
-    inf = Inf_t(None)
+    # range_jux = RangeJux_t(None)
+    # inf = Inf_t(None)
     #TODO: also maybe put range in a group with []
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
         if isinstance(token, DotDot_t):
-            if i > 0 and isinstance(stream[i-1], Juxtapose_t):
-                stream[i-1] = range_jux
-            if i+1 < len(stream) and isinstance(stream[i+1], Juxtapose_t):
-                stream[i+1] = range_jux
+            
+            # find the start and end bounds of the chain that contains the dotdot
+            j0, j1 = 0, 0
+            remainder = stream
+            while i > j1:
+                _, remainder = get_next_chain(remainder)
+                j0 = j1
+                j1 = len(stream) - len(remainder)
+            
+            left = Chain(stream[j0:i-1]) if i-1-j0 > 0 else None
+            right = Chain(stream[i+2:j1]) if j1-i-2 > 0 else None
 
-            # unattached ranges get +/- infinity on the left or right
-            if i+1 == len(stream) or stream[i+1] != range_jux:
-                stream[i+1:i+1] = [range_jux, inf]
-            if i == 0 or stream[i-1] != range_jux:
-                stream[i:i] = [Operator_t('-'), inf, range_jux]
-                gen.send(i+4)
+            stream[j0:j1] = [Range_t(left, right)]
+            gen.send(j0+1)
 
-    #TODO: wrap up any naked ranges in a Block_t([])
-    for i, token, stream in (gen := full_traverse_tokens(tokens)):
-        ...      
+            # left = None
+            # right = None
+            # left_idx = i
+            # right_idx = i
+            
+            # # check if there's a connected chain before the dotdot
+            # if i > 1 and isinstance(stream[i-1], Juxtapose_t):
+            #     ...
 
+
+
+            #     # chain_start_idx = get_chain_start_idx(stream, i-2, connects_to_following=True)
+            #     left = Chain(stream[chain_start_idx:i-1]) #don't include the juxtapose
+            #     left_idx = chain_start_idx
+
+            # # check if there's a connected chain after the dotdot
+            # if i+2 < len(stream) and isinstance(stream[i+1], Juxtapose_t):
+            #     right, remainder = get_next_chain(stream[i+2:])
+            #     right_idx = len(stream) - len(remainder)
                 
+            # # splice a Range_t into the stream, replacing the dotdot and connected chains 
+            # stream[left_idx:right_idx] = [Range_t(left, right)]
+
+            # # update the index of the stream, skipping over the range we just inserted
+            # gen.send(left_idx + 1)
 
 def convert_bare_else(tokens: list[Token]) -> None:
     """

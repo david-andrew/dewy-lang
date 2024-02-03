@@ -702,6 +702,8 @@ class Tuple(PrototypeAST):
     """
     def __init__(self, exprs:list[AST]):
         self.exprs = exprs
+    def __repr__(self):
+        return f'Tuple({repr(self.exprs)})'
     
 
 class Block(AST):
