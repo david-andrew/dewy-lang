@@ -30,6 +30,7 @@ from tokenizer import ( tokenize, tprint, full_traverse_tokens,
 )
 
 from typing import Generator, overload
+from abc import ABC
 
 
 import pdb
@@ -128,7 +129,13 @@ atom_tokens = (
 )
 
 
-class ShouldBreakFlowTracker:
+class ShouldBreakTracker(ABC):
+    def op_breaks_chain(self, token:Token) -> bool:
+        raise NotImplementedError("op_breaks_chain must be implemented by subclass")
+    def view(self, tokens:list[Token]) -> None:
+        raise NotImplementedError("view must be implemented by subclass")
+
+class ShouldBreakFlowTracker(ShouldBreakTracker):
     def __init__(self):
         self.flows_seen = 0
     def op_breaks_chain(self, token:Token) -> bool:
@@ -309,7 +316,7 @@ def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
     # (let | const) #chain
 
 
-def get_next_chain(tokens:list[Token], *, tracker:ShouldBreakFlowTracker=None) -> tuple[Chain[Token], list[Token]]:
+def get_next_chain(tokens:list[Token], *, tracker:ShouldBreakTracker=None, op_blacklist:set[Token]=None) -> tuple[Chain[Token], list[Token]]:
     """
     grab the next single expression chain of tokens from the given list of tokens
 
@@ -321,10 +328,15 @@ def get_next_chain(tokens:list[Token], *, tracker:ShouldBreakFlowTracker=None) -
 
     Args:
         tokens (list[Token]): list of tokens to grab the next chain from
+        tracker (ShouldBreakTracker, optional): tracker for complex analysis to determine if an operator should break the chain. Defaults to None.
+        op_blacklist (set[Token], optional): simpler handler for operators that should break the chain. Defaults to None.
 
     Returns:
         next, rest (list[Token], list[Token]): the next chain of tokens, and the remaining tokens
     """
+
+    if op_blacklist is None:
+        op_blacklist = set()
 
     chain = []
 
@@ -334,7 +346,7 @@ def get_next_chain(tokens:list[Token], *, tracker:ShouldBreakFlowTracker=None) -
     if tracker is not None:
         tracker.view(chunk)
 
-    while len(tokens) > 0 and is_binop(tokens[0]) and (tracker is None or not tracker.op_breaks_chain(tokens[0])):
+    while len(tokens) > 0 and is_binop(tokens[0]) and (tracker is None or not tracker.op_breaks_chain(tokens[0])) and tokens[0] not in op_blacklist:
         # get the operator, and continuing chunk, then let the tracker view it
         chain.append(tokens.pop(0))
         chunk, tokens = _get_next_chunk(tokens)
@@ -350,34 +362,6 @@ def get_next_chain(tokens:list[Token], *, tracker:ShouldBreakFlowTracker=None) -
 
 
 
-# def get_chain_start_idx(tokens: list[Token], start_idx: int, connects_to_following:bool=True) -> int:
-#     """
-#     Count backwards from the current location until the start of the chain is found
-    
-#     Args:
-#         tokens (list[Token]): list of tokens to search
-#         start_idx (int): the index to start searching from
-#         connects_to_following (bool, optional): whether the chain should connect to the following token. Defaults to True.
-#             If True, the chain should continue past tokens[i], at least into tokens[i+1]
-#             If False, the chain could be a whole expression, e.g. i = len(tokens)-1 or tokens[i] == ';'
-#     """
-#     """
-#     # A chain is represented by the following grammar:
-#     # #chunk = #prefix_op* #atom_expr (#postfix_op - ';')*
-#     # #chain = #chunk (#binary_op #chunk)* ';'?
-    
-#     So going backwards
-#     inv(#chain) = ';'? inv(#chunk) (#binary_op inv(#chunk))*
-#     inv(#chunk) = (#postfix_op - ';')* #atom_expr #prefix_op*
-    
-#     """
-
-
-
-
-#     pdb.set_trace()
-
-
 
 def regularize_ranges(tokens: list[Token]) -> None:
     """
@@ -386,8 +370,7 @@ def regularize_ranges(tokens: list[Token]) -> None:
     if .. doesn't connect to anything on the left or right, connect it to -/+ infinity
     if range expression chain is not wrapped in a block, wrap it in a block
     """
-    # range_jux = RangeJux_t(None)
-    # inf = Inf_t(None)
+    # op_in = Operator_t('in')
     #TODO: also maybe put range in a group with []
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
         if isinstance(token, DotDot_t):
@@ -400,37 +383,20 @@ def regularize_ranges(tokens: list[Token]) -> None:
                 j0 = j1
                 j1 = len(stream) - len(remainder)
             
+            # TODO: can we completely separate the range and it's expressions here, even if unwrapped?
+            # we need the chain to not include any operators that have lower precedence than range_jux
+            # # if there is an `in` to the left of the dotdot, do not include it in the expression
+            # in_indices = [j for j, t in enumerate(stream[j0:i]) if op_in == t]
+            # if len(in_indices) > 0:
+            #     raise NotImplementedError("Currently don't support unwrapped ranges.")
+            #     # j0 = in_indices[-1] + j0 + 1
+
             left = Chain(stream[j0:i-1]) if i-1-j0 > 0 else None
             right = Chain(stream[i+2:j1]) if j1-i-2 > 0 else None
 
             stream[j0:j1] = [Range_t(left, right)]
             gen.send(j0+1)
 
-            # left = None
-            # right = None
-            # left_idx = i
-            # right_idx = i
-            
-            # # check if there's a connected chain before the dotdot
-            # if i > 1 and isinstance(stream[i-1], Juxtapose_t):
-            #     ...
-
-
-
-            #     # chain_start_idx = get_chain_start_idx(stream, i-2, connects_to_following=True)
-            #     left = Chain(stream[chain_start_idx:i-1]) #don't include the juxtapose
-            #     left_idx = chain_start_idx
-
-            # # check if there's a connected chain after the dotdot
-            # if i+2 < len(stream) and isinstance(stream[i+1], Juxtapose_t):
-            #     right, remainder = get_next_chain(stream[i+2:])
-            #     right_idx = len(stream) - len(remainder)
-                
-            # # splice a Range_t into the stream, replacing the dotdot and connected chains 
-            # stream[left_idx:right_idx] = [Range_t(left, right)]
-
-            # # update the index of the stream, skipping over the range we just inserted
-            # gen.send(left_idx + 1)
 
 def convert_bare_else(tokens: list[Token]) -> None:
     """
