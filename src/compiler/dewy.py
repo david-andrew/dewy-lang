@@ -976,11 +976,13 @@ class Neg(UnaryOp):
     def __init__(self, child:AST, outtype:PyType[AST]):
         super().__init__(child, operator.neg, outtype, 'Neg', '-')
 
-
 class Inv(UnaryOp):
     def __init__(self, child:AST, outtype:PyType[AST]):
         super().__init__(child, lambda x: 1/x, outtype, 'Inv', '/')
 
+class Not(UnaryOp):
+    def __init__(self, child:AST, outtype:PyType[AST]):
+        super().__init__(child, operator.not_, outtype, 'Not', 'not')
 
 class Bool(AST):
     def __init__(self, val:bool):

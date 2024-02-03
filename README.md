@@ -71,6 +71,7 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [loop_iter_manual.dewy](examples/loop_iter_manual.dewy)         |    [✗]   |
 | [range_iter_test.dewy](examples/range_iter_test.dewy)           |    [✗]   |
 | [unpack_test.dewy](examples/unpack_test.dewy)                   |    [✗]   |
+| [fizzbuzz-1.dewy](examples/fizzbuzz-1.dewy)                     |    [✓]   |
 | [fizzbuzz0.dewy](examples/fizzbuzz0.dewy)                       |    [✗]   |
 | [fizzbuzz1.dewy](examples/fizzbuzz1.dewy)                       |    [✗]   |
 | [random.dewy](examples/random.dewy)                             |    [✗]   |

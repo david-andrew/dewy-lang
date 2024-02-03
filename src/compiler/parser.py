@@ -28,7 +28,7 @@ from dewy import (
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
     And, Or, Xor, Nand, Nor, Xnor,
     UnaryOp,
-    Neg, Inv,
+    Neg, Inv, Not,
     Bool,
     Flow,
     Flowable,
@@ -487,7 +487,7 @@ def parse(tokens:list[Token], scope:Scope) -> AST:
         return ast
     
     block = Block(asts)
-    block.newscope = True
+    block.newscope = False #TODO: toplevel should get new scope
     return block
 
 
@@ -654,7 +654,7 @@ def build_unary_prefix_expr(op:Token, right:AST, scope:Scope) -> AST:
         case Operator_t(op='-'): return Neg(right, None)
         case Operator_t(op='*'): return right
         case Operator_t(op='/'): return Inv(right, None)
-        case Operator_t(op='not'): raise NotImplementedError(f"TODO: prefix op: {op=}")
+        case Operator_t(op='not'): return Not(right, outtype=Bool) #TODO: don't want to hardcode Bool here!
         case Operator_t(op='@'):   raise NotImplementedError(f"TODO: prefix op: {op=}")
         case Operator_t(op='...'): raise NotImplementedError(f"TODO: prefix op: {op=}")
 
@@ -728,6 +728,8 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
         case '()'|'{}', Block():
             inner.newscope = delims == '{}'
             return inner
+        case '[]', Block(newscope=False):
+            return Array(inner.exprs)
         case '()'|'{}', Flow() | Flowable():
             return Block([inner], newscope=delims=='{}')
         case '()'|'[]'|'(]'|'[)', Range():
