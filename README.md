@@ -64,10 +64,12 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [dangling_else.dewy](examples/dangling_else.dewy)               |    [✓]   |
 | [if_tree.dewy](examples/if_tree.dewy)                           |    [✓]   |
 | [loop_in_iter.dewy](examples/loop_in_iter.dewy)                 |    [✓]   |
-| [loop_iter_manual.dewy](examples/loop_iter_manual.dewy)         |    [✗]   |
+| [loop_and_iters.dewy](examples/loop_and_iters.dewy)             |    [✓]   |
+| [loop_or_iters.dewy](examples/loop_or_iters.dewy)               |    [✓]   |
 | [nested_loop.dewy](examples/nested_loop.dewy)                   |    [✓]   |
-| [range_iter_test.dewy](examples/range_iter_test.dewy)           |    [✗]   |
 | [block_printing.dewy](examples/block_printing.dewy)             |    [✗]   |
+| [loop_iter_manual.dewy](examples/loop_iter_manual.dewy)         |    [✗]   |
+| [range_iter_test.dewy](examples/range_iter_test.dewy)           |    [✗]   |
 | [unpack_test.dewy](examples/unpack_test.dewy)                   |    [✗]   |
 | [rule110.dewy](examples/rule110.dewy)                           |    [✗]   |
 | [dewy_syntax_examples.dewy](examples/dewy_syntax_examples.dewy) |    [✗]   |
