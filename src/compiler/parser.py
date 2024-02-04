@@ -4,6 +4,7 @@ from dewy import (
     AST, PrototypeAST,
     Undefined, undefined,
     Void, void,
+    ListOfASTs,
     Identifier,
     Callable,
     Orderable,
@@ -486,9 +487,7 @@ def parse(tokens:list[Token], scope:Scope) -> AST:
         ast, = asts
         return ast
     
-    block = Block(asts)
-    block.newscope = False #TODO: toplevel should get new scope
-    return block
+    return ListOfASTs(asts)
 
 
 def parse_single(token:Token, scope:Scope) -> AST:
@@ -720,30 +719,25 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
 
     delims = block.left + block.right
     match delims, inner:
-        #types returned as is
-        case '()'|'{}', String() | IString() | Call() | Function() | Identifier() | Number() | BinOp() | UnaryOp(): #TODO: more types
-            return Block([inner], newscope=delims=='{}')
         case '()'|'{}', Void():
             return inner
-        case '()'|'{}', Block():
-            inner.newscope = delims == '{}'
-            return inner
-        case '[]', Block(newscope=False):
-            return Array(inner.exprs)
-        case '()'|'{}', Flow() | Flowable():
-            return Block([inner], newscope=delims=='{}')
+        case '()'|'{}', ListOfASTs():
+            return Block(inner.asts, newscope=delims=='{}')
+        case '[]', ListOfASTs():
+            #TODO: handle if this should be an object or dictionary instead of an array
+            return Array(inner.asts)
         case '()'|'[]'|'(]'|'[)', Range():
             inner.include_first = block.left == '['
             inner.include_last = block.right == ']'
             inner.was_wrapped = True #TODO: look into removing this attribute (needs post-tokenization process to be able to separate the range (and any first,second..last expressions) from surrounding tokens)
             return inner
         
-        # create class RawRange(PrototypeAST) for representing the inner part of a range without the block delimiters
-        # case '()'|'(]'|'[)'|'[]', RawRange(): ...
-
-        # array
-        # case '[]', Block() | Tuple(): return Array(inner.exprs)
-
+        #catch all cases for any type of AST inside a block or range
+        case '()'|'{}', _:
+            return Block([inner], newscope=delims=='{}')
+        case '[]', _:
+            # TODO: handle if this should be an object or dictionary instead of an array
+            return Array([inner])
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'block parse not implemented for {block.left+block.right}, {type(inner)}')
@@ -814,6 +808,12 @@ def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     
     # kick off the parser
     ast = parse(tokens, scope.copy())
+
+    # wrap top level in a block
+    if isinstance(ast, ListOfASTs):
+        ast = Block(ast.asts, newscope=True)
+    else:
+        ast = Block([ast], newscope=True)
 
     # post processing on the parsed AST 
     express_identifiers(ast)

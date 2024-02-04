@@ -347,6 +347,15 @@ class Type(AST):
 Type.type = Type('type')
 Undefined.type = Type('undefined')
 
+class ListOfASTs(PrototypeAST):
+    """Intermediate step for holding a list of ASTs that are probably captured by a container"""
+    def __init__(self, asts:list[AST]):
+        self.asts = asts
+    def __str__(self):
+        return f'{", ".join(map(str, self.asts))}'
+    def __repr__(self):
+        return f'ListOfASTs({self.asts})'
+
 class Identifier(PrototypeAST):
     # intermediate node, expected to be replaced with call or etc. during AST construction
 
