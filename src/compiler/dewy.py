@@ -104,9 +104,6 @@ class AST(ABC):
         """Return a string representation of the python objects making up the AST"""
         raise NotImplementedError(f'{self.__class__.__name__}.__repr__')
 
-class PrototypeAST(AST):
-    def eval(self, scope:'Scope'=None) -> AST:
-        raise ValueError(f'Prototype ASTs may not define eval. Attempted to call eval on prototype {self}, of type ({type(self)})')
 
 class Undefined(AST):
     """undefined singleton"""
@@ -347,26 +344,7 @@ class Type(AST):
 Type.type = Type('type')
 Undefined.type = Type('undefined')
 
-class ListOfASTs(PrototypeAST):
-    """Intermediate step for holding a list of ASTs that are probably captured by a container"""
-    def __init__(self, asts:list[AST]):
-        self.asts = asts
-    def __str__(self):
-        return f'{", ".join(map(str, self.asts))}'
-    def __repr__(self):
-        return f'ListOfASTs({self.asts})'
 
-class Identifier(PrototypeAST):
-    # intermediate node, expected to be replaced with call or etc. during AST construction
-
-    def __init__(self, name:str) -> None:
-        self.name = name
-    
-    def __str__(self) -> str:
-        return f'{self.name}'
-    
-    def __repr__(self) -> str:
-        return f'Identifier({self.name})'
 
 
 class Callable(AST):
@@ -704,16 +682,7 @@ class Unpack(AST):
     def __repr__(self):
         return f'Unpack({self.struct}, {self.value})'
 
-class Tuple(PrototypeAST):
-    """
-    A comma separated list of expressions (not wrapped in parentheses) e.g. 1, 2, 3
-    There is no special in-memory representation of a tuple, it is literally just a const list
-    """
-    def __init__(self, exprs:list[AST]):
-        self.exprs = exprs
-    def __repr__(self):
-        return f'Tuple({repr(self.exprs)})'
-    
+
 
 class Block(AST):
     def __init__(self, exprs:list[AST], newscope:bool=True):
@@ -1285,47 +1254,52 @@ class Range(Iterable,Unpackable):
     (first..last)           // first to last excluding first and last
     first..last             // same as [first..last]. Note that parentheses are required if `second` is included in the expression
     """
-    def __init__(self, first:Rangeable=undefined, second:Rangeable=undefined, last:Rangeable=undefined, include_first:bool=True, include_last:bool=True):
-        range_type = type(first) if first is not undefined else type(second) if second is not undefined else type(last)
-        if range_type is undefined:
-            range_type = Number
-        assert issubclass(range_type, Rangeable), f'Range type must be of type Rangeable, not {range_type}'
+    def __init__(self, *, first:Rangeable=undefined, second:Rangeable=undefined, secondlast:Rangeable=undefined, last:Rangeable=undefined, include_first:bool=True, include_last:bool=True):
         #TODO: type checking to confirm that first, second, and last are all compatible types
 
-        self.range_type = range_type
-        self.first = first if first is not undefined else range_type.min()
+        self.first = first #if first is not undefined else range_type.min()
         self.second = second
-        self.last = last if last is not undefined else range_type.max()
+        self.secondlast = secondlast
+        self.last = last #if last is not undefined else range_type.max()
         self.include_first = include_first
         self.include_last = include_last
         
-        # DEBUG: for now, require that ranges were wrapped in [], [), (], or () to avoid ambiguity
-        # this means at parse time, when the range is first made, was_wrapped will be false
-        # and then when the enclosing block is parsed, was_wrapped can be set to true
-        self.was_wrapped = False
 
     def eval(self, scope:Scope=None):
+        self.assert_valid_syntax()
         return self
     
     def iter(self, scope:'Scope'=None) -> Iter:
+        self.assert_valid_syntax()
         return RangeIter(self)
 
     # def typeof(self):
     #     return Type('Range') #TODO: this should maybe care about the type of data in it?
 
+    def assert_valid_syntax(self) -> bool:
+        if self.second is not undefined:
+            assert self.first is not undefined, 'second is only allowed if first is defined'
+        if self.secondlast is not undefined:
+            assert self.first is undefined and self.last is not undefined, 'secondlast is only allowed if first is undefined and last is defined'
+                
     def topy(self, scope:Scope=None):
+        self.assert_valid_syntax()
+        pdb.set_trace()
         step_size = self.second.topy() - self.first.topy() if self.second is not undefined else 1
         return range(self.first.topy(scope), self.last.topy(scope), step_size)
 
     def treestr(self, indent=0):
+        self.assert_valid_syntax()
         s = f'{tab * indent}Range\n'
         s += f'{tab * (indent + 1)}first:\n{self.first.treestr(indent + 2)}\n'
         s += f'{tab * (indent + 1)}second:\n{self.second.treestr(indent + 2)}\n'
+        s += f'{tab * (indent + 1)}secondlast:\n{self.secondlast.treestr(indent + 2)}\n'
         s += f'{tab * (indent + 1)}last:\n{self.last.treestr(indent + 2)}\n'
         return s
 
     @insert_tabs
     def __str__(self):
+        self.assert_valid_syntax()
         s = ''
         s += '[' if self.include_first else '('
         if self.first is not undefined:
@@ -1334,47 +1308,65 @@ class Range(Iterable,Unpackable):
             s += ','
             s += str(self.second)
         s += '..'
+        if self.secondlast is not undefined:
+            s += str(self.secondlast)
+            s += ','
         if self.last is not undefined:
             s += str(self.last)
         s += ']' if self.include_last else ')'
         return s
 
     def __repr__(self):
+        self.assert_valid_syntax()
         interval = f'{"[" if self.include_first else "("}{"]" if self.include_last else ")"}'
-        return f'Range({repr(self.first)},{repr(self.second)},{repr(self.last)},interval={interval})'
+        return f'Range({repr(self.first)},{repr(self.second)},{repr(self.secondlast)},{repr(self.last)},interval={interval})'
 
 
 class RangeIter(Iter):
     def __init__(self, ast:AST):#range:Range): #TODO: want AST[Range] typing which means it evals to a range...
-        # self._id = f'.iter_{id(self)}'
         self.ast = ast
-    #     self.reset()
 
-    # def reset(self):
-        self.range = None
-        self.i = None
-        self.step = None
+        # runtime iter state
+        self.range: Range = None
+        self.i: AST = None
+        self.step: Number|Undefined = None
+        self.last: AST  = None
 
     def eval(self, scope:Scope=None):
         return self
 
-    def next(self, scope:Scope=None) -> Unpackable:
-        if self.range is None:
-            self.range = self.ast.eval(scope)
-            assert isinstance(self.range, Range), f'RangeIter must be initialized with an AST that evaluates to a Range, not {type(self.range)}' 
-            self.i = self.range.first
-            #set the stepsize (needed access to the scope)
-            if self.range.second is not undefined:
-                self.step = self.range.second.compare(self.range.first, scope)
-            else:
-                self.step = undefined
-            
-            #skip the first element if it's not included (closed interval)
-            if not self.range.include_first:
-                self.i = self.i.successor(self.step, scope)
+    def initialize_iter_params(self, scope:Scope=None):
+        
+        # get the Range expression
+        self.range = self.ast.eval(scope)
+        
+        # check that the range is valid
+        assert isinstance(self.range, Range), f'RangeIter must be initialized with an AST that evaluates to a Range, not {type(self.range)}' 
+        self.range.assert_valid_syntax()
+        assert self.range.first is not undefined, 'Cannot iterate over a range that has an unbounded left side'
 
+        # get the first, step, and last values
+        self.i = self.range.first
+        if self.range.second is not undefined:
+            self.step = self.range.second.compare(self.range.first, scope)
+        else:
+            self.step = undefined
+        if self.range.last is not undefined:
+            self.last = self.range.last
+        else:
+            self.last = self.i.max()
+
+        #skip the first element if it's not included (closed interval)
+        if not self.range.include_first:
+            self.i = self.i.successor(self.step, scope)
+    
+    def next(self, scope:Scope=None) -> Unpackable:
+        # before first step, initialize the range and the iterator
+        if self.range is None:
+            self.initialize_iter_params(scope)
+        
         #check the stop condition and return the next element
-        if (c:=self.i.compare(self.range.last).val) < 0 or (c==0 and self.range.include_last):
+        if (c:=self.i.compare(self.last).val) < 0 or (c==0 and self.range.include_last):
             ret = self.i
             self.i = self.i.successor(self.step, scope)
             return Array([Bool(True), ret])
@@ -1385,7 +1377,8 @@ class RangeIter(Iter):
         return Type('RangeIter')
 
     def topy(self, scope:Scope=None):
-        raise NotImplementedError
+        raise NotImplementedError()
+        return iter(self.range.topy(scope))
 
     def treestr(self, indent=0):
         return f'{tab * indent}RangeIter:\n{self.ast.treestr(indent + 1)}'

@@ -1,11 +1,9 @@
 # from __future__ import annotations
 
 from dewy import (
-    AST, PrototypeAST,
+    AST,
     Undefined, undefined,
     Void, void,
-    ListOfASTs,
-    Identifier,
     Callable,
     Orderable,
     Rangeable,
@@ -14,7 +12,6 @@ from dewy import (
     Iterable,
     Type,
     Arg,
-    Tuple,
     Function,
     Builtin,
     Let,
@@ -73,7 +70,7 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
     Comma_t,
 )
 
-from postok import post_process, get_next_chain, is_op, Chain, Flow_t, Range_t
+from postok import post_process, get_next_chain, is_op, Chain, Flow_t, RangeJuxtapose_t
 
 from utils import based_number_to_int, bool_to_bool
 from dataclasses import dataclass
@@ -106,6 +103,55 @@ import pdb
 # 6. high level optimizations/transformations
 # 7. generate code via a backend (e.g. llvm, c, python)
 #    -> llvm: convert ast to ssa form, then generate llvm ir from ssa form
+
+
+class PrototypeAST(AST):
+    def eval(self, scope:'Scope'=None) -> AST:
+        raise ValueError(f'Prototype ASTs may not define eval. Attempted to call eval on prototype {self}, of type ({type(self)})')
+
+
+class ListOfASTs(PrototypeAST):
+    """Intermediate step for holding a list of ASTs that are probably captured by a container"""
+    def __init__(self, asts:list[AST]):
+        self.asts = asts
+    def __str__(self):
+        return f'{", ".join(map(str, self.asts))}'
+    def __repr__(self):
+        return f'ListOfASTs({self.asts})'
+
+
+class Identifier(PrototypeAST):
+    # intermediate node, expected to be replaced with call or etc. during AST construction
+
+    def __init__(self, name:str) -> None:
+        self.name = name
+    
+    def __str__(self) -> str:
+        return f'{self.name}'
+    
+    def __repr__(self) -> str:
+        return f'Identifier({self.name})'
+
+
+class Tuple(PrototypeAST):
+    """
+    A comma separated list of expressions (not wrapped in parentheses) e.g. 1, 2, 3
+    There is no special in-memory representation of a tuple, it is literally just a const list
+    """
+    def __init__(self, exprs:list[AST]):
+        self.exprs = exprs
+    def __repr__(self):
+        return f'Tuple({repr(self.exprs)})'
+
+# class PrototypeRange(PrototypeAST):
+#     def __init__(self):
+#         self.left=None
+#         self.right=None
+#     def __repr__(self):
+#         return f'PrototypeRange{{{self.left=}, {self.right=}}}'
+#     def __str__(self):
+#         return f'{self.left}..{self.right}'
+
 
 
 
@@ -157,7 +203,7 @@ operator_groups: list[tuple[Associativity, list[Operator_t|ShiftOperator_t|Juxta
     (Associativity.left, [Operator_t('xor'), Operator_t('xnor')]),
     (Associativity.left, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
     (Associativity.none,  [Comma_t(None)]),
-    # (Associativity.none/fail?, [RangeJuxtapose_t(None)]), #jux-range
+    (Associativity.left, [RangeJuxtapose_t(None)]), #jux-range
     (Associativity.right,  [Operator_t('=>')]), # () => () => () => 42
     (Associativity.fail,  [Operator_t('=')]),
     (Associativity.none,  [Operator_t('else')]),
@@ -499,10 +545,11 @@ def parse_single(token:Token, scope:Scope) -> AST:
         case Boolean_t():       return Bool(bool_to_bool(token.src))
         case BasedNumber_t():   return Number(based_number_to_int(token.src))
         case RawString_t():     return String(token.to_str())
+        case DotDot_t():        return Range()
         case String_t():        return parse_string(token, scope)
         case Block_t():         return parse_block(token, scope)
         case Flow_t():          return parse_flow(token, scope)
-        case Range_t():         return parse_range(token, scope)
+        # case Range_t():         return parse_range(token, scope)
         
         case _:
             #TODO handle other types...
@@ -600,6 +647,31 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
         case Operator_t(op='xnor'): return Xnor(left, right, outtype=Bool)
 
         # Misc Operators
+        case RangeJuxtapose_t():
+            if isinstance(right, Range):
+                assert right.first is undefined and right.second is undefined, f"ERROR: can't attach expression to range, range already has values. Got {left=}, {right=}"
+                match left:
+                    case Tuple(exprs=[first, second]):
+                        right.first = first
+                        right.second = second
+                        return right
+                    case _:
+                        right.first = left
+                        return right
+
+            if isinstance(left, Range):
+                assert left.secondlast is undefined and left.last is undefined, f"ERROR: can't attach expression to range, range already has values. Got {left=}, {right=}"
+                match right:
+                    case Tuple(exprs=[secondlast, last]):
+                        left.secondlast = secondlast
+                        left.last = last
+                        return left
+                    case _:
+                        left.last = right
+                        return left
+
+            raise ValueError(f'INTERNAL ERROR: Range Juxtapose must be next to a range. Got {left=}, {right=}')
+
         case Comma_t(): 
             #TODO: combine left or right tuples into a single tuple
             if isinstance(left, Tuple) and isinstance(right, Tuple):
@@ -730,7 +802,7 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
         case '()'|'[]'|'(]'|'[)', Range():
             inner.include_first = block.left == '['
             inner.include_last = block.right == ']'
-            inner.was_wrapped = True #TODO: look into removing this attribute (needs post-tokenization process to be able to separate the range (and any first,second..last expressions) from surrounding tokens)
+            # inner.was_wrapped = True #TODO: look into removing this attribute (needs post-tokenization process to be able to separate the range (and any first,second..last expressions) from surrounding tokens)
             return inner
         
         #catch all cases for any type of AST inside a block or range
@@ -764,35 +836,35 @@ def parse_flow(flow:Flow_t, scope:Scope) -> If|Loop:
     ...
 
 
-def parse_range(rng:Range_t, scope:Scope) -> Range:
-    """
-    Convert a range token to an AST
+# def parse_range(rng:Range_t, scope:Scope) -> Range:
+#     """
+#     Convert a range token to an AST
     
-    Cases are:
-        [first..]               // first to inf
-        [first,second..]        // step size is second-first
-        [first..last]           // first to last
-        [first,second..last]    // first to last, step size is second-first
-        //[first..2ndlast,last] // this is explicitly NOT ALLOWED, as it is covered by the previous case, and can have unintuitive behavior
-        [..2ndlast,last]        // -inf to last, step size is last-penultimate
-        [..last]                // -inf to last
-        [..]                    // -inf to inf
-    """
-    left = parse(rng.left, scope) if rng.left is not None else None
-    right = parse(rng.right, scope) if rng.right is not None else None
+#     Cases are:
+#         [first..]               // first to inf
+#         [first,second..]        // step size is second-first
+#         [first..last]           // first to last
+#         [first,second..last]    // first to last, step size is second-first
+#         //[first..2ndlast,last] // this is explicitly NOT ALLOWED, as it is covered by the previous case, and can have unintuitive behavior
+#         [..2ndlast,last]        // -inf to last, step size is last-penultimate
+#         [..last]                // -inf to last
+#         [..]                    // -inf to inf
+#     """
+#     left = parse(rng.left, scope) if rng.left is not None else None
+#     right = parse(rng.right, scope) if rng.right is not None else None
 
 
-    match (left, right):
-        case (None, None):                                                      return Range(undefined, undefined, undefined)
-        case (None, AST() as last):                                             return Range(undefined, undefined, last)
-        case (AST() as first, None):                                            return Range(first, undefined, undefined)
-        case (Tuple(exprs=[AST() as first, AST() as second]), None):            return Range(first, second, undefined)
-        case (Tuple(exprs=[AST() as first, AST() as second]), AST() as last):   return Range(first, second, last)
-        # case (None, Tuple(exprs=[AST() as secondlast, AST() as last])):       return Range(undefined, secondlast=secondlast, last) #TODO: potentially modify Range() to also take a secondlast parameter
-        case (AST() as first, AST() as last):                                   return Range(first, undefined, last)
+#     match (left, right):
+#         case (None, None):                                                      return Range(undefined, undefined, undefined)
+#         case (None, AST() as last):                                             return Range(undefined, undefined, last)
+#         case (AST() as first, None):                                            return Range(first, undefined, undefined)
+#         case (Tuple(exprs=[AST() as first, AST() as second]), None):            return Range(first, second, undefined)
+#         case (Tuple(exprs=[AST() as first, AST() as second]), AST() as last):   return Range(first, second, last)
+#         # case (None, Tuple(exprs=[AST() as secondlast, AST() as last])):       return Range(undefined, secondlast=secondlast, last) #TODO: potentially modify Range() to also take a secondlast parameter
+#         case (AST() as first, AST() as last):                                   return Range(first, undefined, last)
 
-    pdb.set_trace()
-    raise ValueError(f'Unrecognized range case: {rng=}, {left=}, {right=}')
+#     pdb.set_trace()
+#     raise ValueError(f'Unrecognized range case: {rng=}, {left=}, {right=}')
 
 def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     """
@@ -820,7 +892,7 @@ def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     express_identifiers(ast)
     tuples_to_arrays(ast)
     ensure_no_prototypes(ast)
-    ensure_no_unwrapped_ranges(ast)
+    # ensure_no_unwrapped_ranges(ast)
     set_ast_scopes(ast, scope)
 
     return ast
@@ -866,14 +938,14 @@ def ensure_no_prototypes(root:AST) -> None:
             raise ValueError(f'May not have any PrototypeASTs in a final AST. Found {ast} of type ({type(ast)})')
 
 
-def ensure_no_unwrapped_ranges(root:AST) -> None:
-    """
-    Raises an exception, if any Range object has was_wrapped=False
-    """
-    for ast in full_traverse_ast(root):
-        if isinstance(ast, Range):
-            if not ast.was_wrapped:
-                raise ValueError(f'Range AST node {ast} was not wrapped in brackets/parenthesis. Options are [], [), (], ().\nPotentially can relax this is the post-tokenizer process is able to separate the range from the surrounding tokens.')
+# def ensure_no_unwrapped_ranges(root:AST) -> None:
+#     """
+#     Raises an exception, if any Range object has was_wrapped=False
+#     """
+#     for ast in full_traverse_ast(root):
+#         if isinstance(ast, Range):
+#             if not ast.was_wrapped:
+#                 raise ValueError(f'Range AST node {ast} was not wrapped in brackets/parenthesis. Options are [], [), (], ().\nPotentially can relax this is the post-tokenizer process is able to separate the range from the surrounding tokens.')
 
 
 def set_ast_scopes(root:AST, scope:Scope) -> None:
@@ -987,6 +1059,8 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
                 yield from full_traverse_ast(root.first)
             if root.second is not None:
                 yield from full_traverse_ast(root.second)
+            if root.secondlast is not None:
+                yield from full_traverse_ast(root.secondlast)
             if root.last is not None:
                 yield from full_traverse_ast(root.last)
 

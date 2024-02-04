@@ -16,6 +16,9 @@ from tokenizer import ( tokenize, tprint, full_traverse_tokens,
     RawString_t,
     String_t,
     Integer_t,
+    Undefined_t,
+    Void_t,
+    End_t,
     Boolean_t,
     BasedNumber_t,
     Hashtag_t,
@@ -79,28 +82,28 @@ class Flow_t(Token):
 # class Declare_t(Token):...
 
 
-# class RangeJux_t(Token):
-#     def __init__(self, _): ...
-#     def __repr__(self) -> str:
-#         return "<RangeJux_t>"
-#     def __hash__(self) -> int:
-#         return hash(RangeJux_t)
-#     def __eq__(self, other) -> bool:
-#         return isinstance(other, RangeJux_t)
-
-
-
-class Range_t(Token):
-    def __init__(self, left:Chain[Token]|None, right:Chain[Token]|None):
-        self.left = left
-        self.right = right
+class RangeJuxtapose_t(Token):
+    def __init__(self, _): ...
     def __repr__(self) -> str:
-        return f"<Range_t: {self.left} .. {self.right}>"
-    def __iter__(self) -> Generator[Chain[Token], None, None]:
-        if self.left is not None:
-            yield self.left
-        if self.right is not None:
-            yield self.right
+        return "<RangeJuxtapose_t>"
+    def __hash__(self) -> int:
+        return hash(RangeJuxtapose_t)
+    def __eq__(self, other) -> bool:
+        return isinstance(other, RangeJuxtapose_t)
+
+
+
+# class Range_t(Token):
+#     def __init__(self, left:Chain[Token]|None, right:Chain[Token]|None):
+#         self.left = left
+#         self.right = right
+#     def __repr__(self) -> str:
+#         return f"<Range_t: {self.left} .. {self.right}>"
+#     def __iter__(self) -> Generator[Chain[Token], None, None]:
+#         if self.left is not None:
+#             yield self.left
+#         if self.right is not None:
+#             yield self.right
 
 
 # class Inf_t(Token):
@@ -121,7 +124,6 @@ atom_tokens = (
     RawString_t,
     String_t,
     Block_t,
-    Range_t,
     TypeParam_t,
     Hashtag_t,
     DotDot_t,
@@ -264,7 +266,7 @@ def is_binop(token:Token) -> bool:
     Determines if a token could be a binary operator.
     Note that this is not mutually exclusive with being a prefix operator or a postfix operator.
     """
-    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t))
+    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t, RangeJuxtapose_t))
 
 def is_op(token:Token) -> bool:
     return is_binop(token) or is_unary_prefix_op(token) or is_unary_postfix_op(token)
@@ -367,35 +369,39 @@ def regularize_ranges(tokens: list[Token]) -> None:
     """
     convert [<token>, <jux>, <..>] into [<token>, <range_jux>, <..>]
     convert [<..>, <jux>, <token>] into [<..>, <range_jux>, <token>]
-    if .. doesn't connect to anything on the left or right, connect it to -/+ infinity
-    if range expression chain is not wrapped in a block, wrap it in a block
+    if .. doesn't connect to anything on the left or right, connect it to undefined
     """
-    # op_in = Operator_t('in')
+    range_jux = RangeJuxtapose_t(None)
+    undefined = Undefined_t(None)
     #TODO: also maybe put range in a group with []
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
         if isinstance(token, DotDot_t):
-            
-            # find the start and end bounds of the chain that contains the dotdot
-            j0, j1 = 0, 0
-            remainder = stream
-            while i > j1:
-                _, remainder = get_next_chain(remainder)
-                j0 = j1
-                j1 = len(stream) - len(remainder)
-            
-            # TODO: can we completely separate the range and it's expressions here, even if unwrapped?
-            # we need the chain to not include any operators that have lower precedence than range_jux
-            # # if there is an `in` to the left of the dotdot, do not include it in the expression
-            # in_indices = [j for j, t in enumerate(stream[j0:i]) if op_in == t]
-            # if len(in_indices) > 0:
-            #     raise NotImplementedError("Currently don't support unwrapped ranges.")
-            #     # j0 = in_indices[-1] + j0 + 1
+            if i + 1 < len(stream):
+                if isinstance(stream[i+1], Juxtapose_t):
+                    stream[i+1] = range_jux
+                else:
+                    stream[i+1:i+1] = [range_jux, undefined]
+            if i > 0:
+                if isinstance(stream[i-1], Juxtapose_t):
+                    stream[i-1] = range_jux
+                else:
+                    stream[i:i] = [undefined, range_jux]
+                    gen.send(i+2)
 
-            left = Chain(stream[j0:i-1]) if i-1-j0 > 0 else None
-            right = Chain(stream[i+2:j1]) if j1-i-2 > 0 else None
 
-            stream[j0:j1] = [Range_t(left, right)]
-            gen.send(j0+1)
+            # # find the start and end bounds of the chain that contains the dotdot
+            # j0, j1 = 0, 0
+            # remainder = stream
+            # while i > j1:
+            #     _, remainder = get_next_chain(remainder)
+            #     j0 = j1
+            #     j1 = len(stream) - len(remainder)
+
+            # left = Chain(stream[j0:i-1]) if i-1-j0 > 0 else None
+            # right = Chain(stream[i+2:j1]) if j1-i-2 > 0 else None
+
+            # stream[j0:j1] = [Range_t(left, right)]
+            # gen.send(j0+1)
 
 
 def convert_bare_else(tokens: list[Token]) -> None:
