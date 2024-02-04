@@ -1,15 +1,17 @@
 // fizbuzz that works with the current version of dewy
+//multiples = [3 5]       //TODO on variable typing for loop
+//words = ['Fizz' 'Buzz'] //TODO on variable typing for loop
 loop i in [0..100)
 {
-    printed_words = false
-    loop tap in [3,5..7)
+    print_num = true
+    loop multiple in [3 5] and word in ['Fizz' 'Buzz']
     {
-        if i % tap =? 0 
+        if i % multiple =? 0 
         { 
-            print(if tap =? 3 'Fizz' else 'Buzz')
-            printed_words = true
+            print(word)
+            print_num = false
         }
     }
-    if printed_words {} else print(i)
+    if print_num print(i)
     printl()
 }

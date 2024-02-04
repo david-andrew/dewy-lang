@@ -1414,10 +1414,8 @@ class Array(Iterable, Unpackable):
         else:
             raise TypeError(f'invalid type for Array.get: `{key}` of type `{type(key)}`')
 
-
-    #iterable interface
-    #TODO...
-
+    def iter(self, scope:Scope=None) -> Iter:
+        return ArrayIter(self)
     def topy(self, scope:Scope=None):
         return [v.eval(scope).topy(scope) for v in self.vals]
     def treestr(self, indent=0):
@@ -1431,6 +1429,45 @@ class Array(Iterable, Unpackable):
     def __repr__(self):
         return f'Array({repr(self.vals)})'
 
+
+class ArrayIter(Iter):
+    def __init__(self, ast:AST):
+        self.ast = ast
+
+        self.array = None
+        self.i = None
+
+    def eval(self, scope:Scope=None):
+        return self
+
+    def next(self, scope:Scope=None) -> Unpackable:
+        if self.array is None:
+            self.array = self.ast.eval(scope)
+            assert isinstance(self.array, Array), f'ArrayIter must be initialized with an AST that evaluates to an Array, not {type(self.array)}' 
+            self.i = 0
+
+        if self.i < len(self.array.vals):
+            ret = self.array.vals[self.i]
+            self.i += 1
+            return Array([Bool(True), ret])
+
+        return Array([Bool(False), undefined])
+
+    def typeof(self):
+        return Type('ArrayIter')
+
+    def topy(self, scope:Scope=None):
+        raise NotImplementedError
+
+    def treestr(self, indent=0):
+        return f'{tab * indent}ArrayIter:\n{self.ast.treestr(indent + 1)}'
+        
+    @insert_tabs
+    def __str__(self):
+        return f'ArrayIter({self.ast})'
+
+    def __repr__(self):
+        return f'ArrayIter({repr(self.ast)})'
 
 
 class Void(AST):
