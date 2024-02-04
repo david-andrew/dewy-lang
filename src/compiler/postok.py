@@ -92,30 +92,6 @@ class RangeJuxtapose_t(Token):
         return isinstance(other, RangeJuxtapose_t)
 
 
-
-# class Range_t(Token):
-#     def __init__(self, left:Chain[Token]|None, right:Chain[Token]|None):
-#         self.left = left
-#         self.right = right
-#     def __repr__(self) -> str:
-#         return f"<Range_t: {self.left} .. {self.right}>"
-#     def __iter__(self) -> Generator[Chain[Token], None, None]:
-#         if self.left is not None:
-#             yield self.left
-#         if self.right is not None:
-#             yield self.right
-
-
-# class Inf_t(Token):
-#     def __init__(self, _): ...
-#     def __repr__(self) -> str:
-#         return "<Inf_t>"
-#     def __hash__(self) -> int:
-#         return hash(Inf_t)
-#     def __eq__(self, other) -> bool:
-#         return isinstance(other, Inf_t)
-
-
 atom_tokens = (
     Identifier_t,
     Integer_t,
@@ -284,9 +260,8 @@ def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
         raise ValueError(f"ERROR: expected keyword expression, got {t=}")
 
     match t:
-        case Keyword_t(src='if'|'loop'|'lazy'):#|'else_if'|'else_loop'|'else_lazy'):
+        case Keyword_t(src='if'|'loop'|'lazy'):
             cond, tokens = get_next_chain(tokens)
-            # pdb.set_trace()
             clause, tokens = get_next_chain(tokens, tracker=ShouldBreakFlowTracker())
             return Flow_t(t, cond, clause), tokens
         case Keyword_t(src='closing_else'):
@@ -311,9 +286,8 @@ def _get_next_keyword_expr(tokens:list[Token]) -> tuple[Token, list[Token]]:
             ...
     
     raise NotImplementedError("TODO: handle keyword based expressions")
-    # (if | loop) #chain #chain (else (if | loop) #chain #chain)* (else #chain)?
     # return #chain?
-    # express #chain
+    # yield #chain
     # (break | continue) #hashtag? //note the hashtag should be an entire chain if present
     # (let | const) #chain
 
@@ -373,7 +347,6 @@ def regularize_ranges(tokens: list[Token]) -> None:
     """
     range_jux = RangeJuxtapose_t(None)
     undefined = Undefined_t(None)
-    #TODO: also maybe put range in a group with []
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
         if isinstance(token, DotDot_t):
             if i + 1 < len(stream):
@@ -389,21 +362,6 @@ def regularize_ranges(tokens: list[Token]) -> None:
                     gen.send(i+2)
 
 
-            # # find the start and end bounds of the chain that contains the dotdot
-            # j0, j1 = 0, 0
-            # remainder = stream
-            # while i > j1:
-            #     _, remainder = get_next_chain(remainder)
-            #     j0 = j1
-            #     j1 = len(stream) - len(remainder)
-
-            # left = Chain(stream[j0:i-1]) if i-1-j0 > 0 else None
-            # right = Chain(stream[i+2:j1]) if j1-i-2 > 0 else None
-
-            # stream[j0:j1] = [Range_t(left, right)]
-            # gen.send(j0+1)
-
-
 def convert_bare_else(tokens: list[Token]) -> None:
     """
     convert any instances of `else` without a flow keyword after, and convert to `else` `if` `true`
@@ -417,11 +375,9 @@ def convert_bare_else(tokens: list[Token]) -> None:
 
        
 def bundle_conditionals(tokens: list[Token]) -> None:
-    """Convert sequences of tokens that represent conditionals (if, loop, etc.) into a single expression token"""
-    
-    #TODO: need to check that nested conditionals as well as chained conditionals are handled properly
-    #      e.g. `if a b`, `if a b else if c d else f`, `if a if b c else d`
-    
+    """
+    Convert sequences of tokens that represent conditionals (if, loop, etc.) into a single expression token
+    """
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
         if isinstance(token, Keyword_t) and token.src in ('if', 'loop', 'lazy'):
             flow_chain, tokens = get_next_chain(stream[i:])

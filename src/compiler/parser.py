@@ -121,7 +121,7 @@ class ListOfASTs(PrototypeAST):
 
 
 class Identifier(PrototypeAST):
-    # intermediate node, expected to be replaced with call or etc. during AST construction
+    """intermediate node, expected to be replaced with call or etc. during AST construction"""
 
     def __init__(self, name:str) -> None:
         self.name = name
@@ -142,16 +142,6 @@ class Tuple(PrototypeAST):
         self.exprs = exprs
     def __repr__(self):
         return f'Tuple({repr(self.exprs)})'
-
-# class PrototypeRange(PrototypeAST):
-#     def __init__(self):
-#         self.left=None
-#         self.right=None
-#     def __repr__(self):
-#         return f'PrototypeRange{{{self.left=}, {self.right=}}}'
-#     def __str__(self):
-#         return f'{self.left}..{self.right}'
-
 
 
 
@@ -549,7 +539,6 @@ def parse_single(token:Token, scope:Scope) -> AST:
         case String_t():        return parse_string(token, scope)
         case Block_t():         return parse_block(token, scope)
         case Flow_t():          return parse_flow(token, scope)
-        # case Range_t():         return parse_range(token, scope)
         
         case _:
             #TODO handle other types...
@@ -836,36 +825,6 @@ def parse_flow(flow:Flow_t, scope:Scope) -> If|Loop:
     ...
 
 
-# def parse_range(rng:Range_t, scope:Scope) -> Range:
-#     """
-#     Convert a range token to an AST
-    
-#     Cases are:
-#         [first..]               // first to inf
-#         [first,second..]        // step size is second-first
-#         [first..last]           // first to last
-#         [first,second..last]    // first to last, step size is second-first
-#         //[first..2ndlast,last] // this is explicitly NOT ALLOWED, as it is covered by the previous case, and can have unintuitive behavior
-#         [..2ndlast,last]        // -inf to last, step size is last-penultimate
-#         [..last]                // -inf to last
-#         [..]                    // -inf to inf
-#     """
-#     left = parse(rng.left, scope) if rng.left is not None else None
-#     right = parse(rng.right, scope) if rng.right is not None else None
-
-
-#     match (left, right):
-#         case (None, None):                                                      return Range(undefined, undefined, undefined)
-#         case (None, AST() as last):                                             return Range(undefined, undefined, last)
-#         case (AST() as first, None):                                            return Range(first, undefined, undefined)
-#         case (Tuple(exprs=[AST() as first, AST() as second]), None):            return Range(first, second, undefined)
-#         case (Tuple(exprs=[AST() as first, AST() as second]), AST() as last):   return Range(first, second, last)
-#         # case (None, Tuple(exprs=[AST() as secondlast, AST() as last])):       return Range(undefined, secondlast=secondlast, last) #TODO: potentially modify Range() to also take a secondlast parameter
-#         case (AST() as first, AST() as last):                                   return Range(first, undefined, last)
-
-#     pdb.set_trace()
-#     raise ValueError(f'Unrecognized range case: {rng=}, {left=}, {right=}')
-
 def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     """
     Parse the sequence of tokens into an AST
@@ -936,17 +895,6 @@ def ensure_no_prototypes(root:AST) -> None:
     for ast in full_traverse_ast(root):
         if isinstance(ast, PrototypeAST):
             raise ValueError(f'May not have any PrototypeASTs in a final AST. Found {ast} of type ({type(ast)})')
-
-
-# def ensure_no_unwrapped_ranges(root:AST) -> None:
-#     """
-#     Raises an exception, if any Range object has was_wrapped=False
-#     """
-#     for ast in full_traverse_ast(root):
-#         if isinstance(ast, Range):
-#             if not ast.was_wrapped:
-#                 raise ValueError(f'Range AST node {ast} was not wrapped in brackets/parenthesis. Options are [], [), (], ().\nPotentially can relax this is the post-tokenizer process is able to separate the range from the surrounding tokens.')
-
 
 def set_ast_scopes(root:AST, scope:Scope) -> None:
     #TODO: hacky, just setting function scopes to root scope!
@@ -1055,13 +1003,13 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
             yield from full_traverse_ast(root.iterable)
 
         case Range():
-            if root.first is not None:
+            if root.first is not undefined:
                 yield from full_traverse_ast(root.first)
-            if root.second is not None:
+            if root.second is not undefined:
                 yield from full_traverse_ast(root.second)
-            if root.secondlast is not None:
+            if root.secondlast is not undefined:
                 yield from full_traverse_ast(root.secondlast)
-            if root.last is not None:
+            if root.last is not undefined:
                 yield from full_traverse_ast(root.last)
 
         # do nothing cases
