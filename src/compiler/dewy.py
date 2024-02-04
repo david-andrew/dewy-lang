@@ -1185,7 +1185,7 @@ class In(AST):
         try:
             it = scope.get(self._id)
         except NameError:
-            it = self.iterable.iter(scope)
+            it = self.iterable.eval(scope).iter(scope)
             scope.let(self._id, value=it, const=True)
 
         # body gets the binds element and returns the resulting condition
