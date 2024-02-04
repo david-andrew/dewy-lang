@@ -165,6 +165,33 @@ class BasedNumber_t(Token):
     def __repr__(self) -> str:
         return f"<BasedNumber_t: {self.src}>"
 
+class Undefined_t(Token):
+    def __init__(self, _): ...
+    def __hash__(self) -> int:
+        return hash(Undefined_t)
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Undefined_t)
+    def __repr__(self) -> str:
+        return "<Undefined_t>"
+
+class Void_t(Token):
+    def __init__(self, _): ...
+    def __hash__(self) -> int:
+        return hash(Void_t)
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Void_t)
+    def __repr__(self) -> str:
+        return "<Void_t>"
+
+class End_t(Token):
+    def __init__(self, _): ...
+    def __hash__(self) -> int:
+        return hash(End_t)
+    def __eq__(self, other) -> bool:
+        return isinstance(other, End_t)
+    def __repr__(self) -> str:
+        return "<End_t>"
+
 class Boolean_t(Token):
     def __init__(self, src:str):
         self.src = src
@@ -217,7 +244,7 @@ class DotDot_t(Token):
 # each row is a list of token types that are confusable in their precedence order. e.g. [Keyword, Unit, Identifier] means Keyword > Unit > Identifier
 # only confusable token classes need to be included in the table
 precedence_table = [
-    [Keyword_t, Boolean_t, Operator_t, DotDot_t, Identifier_t],
+    [Keyword_t, Undefined_t, Void_t, End_t, Boolean_t, Operator_t, DotDot_t, Identifier_t],
 ]
 precedence = {cls: len(row)-i for row in precedence_table for i, cls in enumerate(row)}
 
@@ -261,7 +288,7 @@ operators = sorted(
 )
 #TODO: may need to separate |> from regular operators since it may confuse type param
 shift_operators = sorted(['<<', '>>', '<<<', '>>>', '<<!', '!>>'], key=len, reverse=True)
-keywords = ['loop', 'lazy', 'do', 'if', 'return', 'express', 'import', 'let', 'const']
+keywords = ['loop', 'lazy', 'do', 'if', 'return', 'yield', 'async', 'await', 'import', 'from', 'let', 'const']
 #TODO: what about language values, e.g. void, undefined, end, units, etc.? probably define at compile time, rather than in the compiler
 
 # note that the prefix is case insensitive, so call .lower() when matching the prefix
@@ -643,6 +670,39 @@ def eat_based_number(src:str) -> int|None:
         i += 1
 
     return i if i > 2 else None
+
+
+@peek_eat(Undefined_t)
+def eat_undefined(src:str) -> int|None:
+    """
+    eat the undefined token, return the number of characters eaten
+    """
+    sample = src[:9].lower()
+    if sample.startswith('undefined'):
+        return 9
+    return None
+
+
+@peek_eat(Void_t)
+def eat_void(src:str) -> int|None:
+    """
+    eat the void token, return the number of characters eaten
+    """
+    sample = src[:4].lower()
+    if sample.startswith('void'):
+        return 4
+    return None
+
+
+@peek_eat(End_t)
+def eat_end(src:str) -> int|None:
+    """
+    eat the end token, return the number of characters eaten
+    """
+    sample = src[:3].lower()
+    if sample.startswith('end'):
+        return 3
+    return None
 
 
 @peek_eat(Boolean_t)
