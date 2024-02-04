@@ -145,6 +145,7 @@ class Associativity(Enum):
 operator_groups: list[tuple[Associativity, list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]]] = list(reversed([
     (Associativity.prefix, [Operator_t('@')]),
     (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]), #jux-call, jux-index
+    (Associativity.prefix, [Operator_t('not')]),
     (Associativity.right,  [Operator_t('^')]),
     (Associativity.left, [Juxtapose_t(None)]), #jux-multiply
     (Associativity.left, [Operator_t('*'), Operator_t('/'), Operator_t('%')]),
