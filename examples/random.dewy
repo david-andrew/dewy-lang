@@ -22,7 +22,7 @@ RNG = (s:uint64) => [
     fast_to_uniform = (x:uint64):float64 => {
         const mask1 = 0x3FF0_0000_0000_0000
         const mask2 = 0x3FFF_FFFF_FFFF_FFFF
-        out: uint64 = (x | mask1) & mask2
+        out: uint64 = (x or mask1) and mask2
         (out as float64) - 1
     }
 
