@@ -139,13 +139,13 @@ Every operator has a precedence level, and an associativity. The precedence leve
 | 10 | `*`<br>`/`<br>`%` | multiply<br>divide<br>modulus | left |
 | 9 | `+`<br>`-` | add<br>subtract | left |
 | 8 | `<<`<br>`>>`<br>`<<<`<br>`>>>`<br>`<<!`<br>`!>>` | left shift<br>right shift<br>rotate right no carry<br>rotate left no carry<br>rotate left with carry<br>rotate right with carry | left
-| # | juxtapose | jux-range | none |
 | # | `in` | in | fail |
 | 7 | `=?`<br>`>?`<br>`<?`<br>`>=?`<br>`<=?` | equal<br>greater than<br>less than<br>greater than or equal<br>less than or equal | left |
 | 6 | `and`<br>`nand`<br>`&` | and<br>nand<br>and | left |
 | 5 | `xor`<br>`xnor` | xor<br>xnor | left |
 | 4 | `or`<br>`nor`<br>\| | or<br>nor<br>or | left |
 | 3 | `comma` | comma | none |
+| # | juxtapose | jux-range | none |
 | 2 | `=>` | function arrow | right |
 | 1 | `=` | bind | fail |
 | 0 | `else` | flow alternate | none |
