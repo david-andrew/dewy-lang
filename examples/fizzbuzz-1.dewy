@@ -3,15 +3,15 @@ multiples = [3 5]
 words = ['Fizz' 'Buzz']
 loop i in [0..100)
 {
-    print_num = true
+    printed_words = false
     loop multiple in multiples and word in words
     {
         if i % multiple =? 0 
         { 
             print(word)
-            print_num = false
+            printed_words = true
         }
     }
-    if print_num print(i)
+    if not printed_words print(i)
     printl()
 }
