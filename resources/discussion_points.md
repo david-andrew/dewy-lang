@@ -121,9 +121,9 @@ row_vec = [
 ]
 ```
 
-
 ## Capturing the result of a block with multiple expressions (related to list comprihensions/generators) [multiple expressions in a block return a generator, unless the block is wrapped in `[]`]
-lets say you have a block 
+
+lets say you have a block
 
 ```dewy
 a = {
@@ -176,7 +176,6 @@ B = gen // 6
 ```
 
 More thought is needed on this though. Basically should come up with a long list of examples and use cases
-
 
 ## How does multidimensional indexing work? [DONE: each dimension access is separated by spaces as in regular arrays. Parsing precedence will determine what attaches to .. and user's can use ()/[] to disambiguate]
 
@@ -1054,9 +1053,8 @@ The two approaches to fixing:
 
 I think it comes down to which will occur more often--I suspect logically combined iterators will be much more common than ranges with a step size. So I'm leaning option 2.
 
-Last alternative is to just require that all ranges have parenthesis or brackets around them... This allows low range_jux precedence, and also doesn't require us to wrap the range first,second in parenthesis. Also it makes it always unambiguous what the bounds are on the range (i.e. open or closed). 
+Last alternative is to just require that all ranges have parenthesis or brackets around them... This allows low range_jux precedence, and also doesn't require us to wrap the range first,second in parenthesis. Also it makes it always unambiguous what the bounds are on the range (i.e. open or closed).
 EXCEPT this breaks the whole syntax for multidimensional indexing, making it super verbose
-
 
 ## Parsing flow expressions joined with `else` [Fixed, handled correctly in post-tokenization!]
 
@@ -1238,7 +1236,7 @@ Point = (x:number, y:number) => {[let x = x let y = y]}  // x and y are captured
 ~~I think I'm still leaning towards requiring `let x = x` and `let y = y` in all cases.~~
 Actually now I'm leaning towards one of the implicit versions. This last idea about wrapping with {} to make any arguments not captured I think is actually pretty good, just requires working out the semantics
 
-## Literal arguments in functions
+## Literal arguments in functions OR literals as type annotations
 
 for example if you wanted to define the factorial function via operator overloading, where normal arguments are integer, and the base case is a literal 1, perhaps it might be something like this:
 
