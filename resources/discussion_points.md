@@ -1235,7 +1235,8 @@ Point = (x:number, y:number) => {[]}  // x and y are not captured
 Point = (x:number, y:number) => {[let x = x let y = y]}  // x and y are captured
 ```
 
-I think I'm still leaning towards requiring `let x = x` and `let y = y` in all cases.
+~~I think I'm still leaning towards requiring `let x = x` and `let y = y` in all cases.~~
+Actually now I'm leaning towards one of the implicit versions. This last idea about wrapping with {} to make any arguments not captured I think is actually pretty good, just requires working out the semantics
 
 ## Literal arguments in functions
 
