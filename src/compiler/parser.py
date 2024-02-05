@@ -675,17 +675,13 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
         case Operator_t(op='else'):
             if isinstance(left, Flow) and isinstance(right, Flow):
                 #merge left+right as single flow
-                assert left.default is None, f'cannot merge left flow with default case. Got {left=}, {right=}'
-                default = [right.default] if right.default else []
-                return Flow([*left.branches, *right.branches, *default])
+                return Flow([*left.branches, *right.branches])
             elif isinstance(left, Flow):
                 #append right to left
-                assert left.default is None, f'cannot merge left flow with default case. Got {left=}, {right=}'
                 return Flow([*left.branches, right])
             elif isinstance(right, Flow):
                 #prepend left to right
-                default = [right.default] if right.default else []
-                return Flow([left, *right.branches, *default])
+                return Flow([left, *right.branches])
             else:
                 #create a new flow out of the left and right
                 return Flow([left, right])
@@ -985,8 +981,6 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
         case Flow():
             for expr in root.branches:
                 yield from full_traverse_ast(expr)
-            if root.default is not None:
-                yield from full_traverse_ast(root.default)
 
         case If():
             yield from full_traverse_ast(root.cond)

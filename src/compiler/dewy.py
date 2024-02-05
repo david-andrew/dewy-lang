@@ -1019,7 +1019,7 @@ class If(Flowable):
     def __repr__(self):
         return f'If({repr(self.cond)}, {repr(self.body)})'
 
-#TODO: maybe loop can work the say way as If, taking in a list of clauses?
+
 class Loop(Flowable):
     def __init__(self, cond:AST, body:AST):
         self.cond = cond
@@ -1055,19 +1055,11 @@ class Loop(Flowable):
         return f'Loop({repr(self.cond)}, {repr(self.body)})'
 
 class Flow(AST):
-    def __init__(self, branches:list[Flowable|AST]):
-        
-        #separate out the possible last branch which need not be a Flowable()
-        if not isinstance(branches[-1], Flowable):
-            branches, default = branches[:-1], branches[-1]
-        else:
-            branches, default = branches, None
-        
-        #verify all branches (not necessarily including last) are Flowable
-        assert all(isinstance(branch, Flowable) for branch in branches), f'All branches in a flow (excluding the last one) must inherit `Flowable()`. Got {branches=}'
-        
+    def __init__(self, branches:list[Flowable]):
+        #verify all branches are Flowable
+        assert all(isinstance(branch, Flowable) for branch in branches), f'All branches in a flow must inherit `Flowable()`. Got {branches=}'
+
         self.branches: list[Flowable] = branches
-        self.default: AST|None = default
         
     
     def eval(self, scope:Scope=None):
@@ -1083,30 +1075,21 @@ class Flow(AST):
             if expr.was_entered():
                 return res
             
-        #execute any default branch if it exists
-        if self.default is not None:
-            return self.default.eval(shared)
-        
         return undefined
 
     def treestr(self, indent=0):
         s = tab * indent + 'Flow\n'
         for expr in self.branches:
             s += expr.treestr(indent + 1) + '\n'
-        if self.default is not None:
-            s += self.default.treestr(indent + 1) + '\n'
         return s
 
     @insert_tabs
     def __str__(self):
         s = ''
-        for i, expr in enumerate(self.branches):
-            if i == 0:
-                s += f'{expr}'
-            else:
-                s += f' else {expr}'
-        if self.default is not None:
-            s += f' else {self.default}'
+        if len(self.branches) > 0:
+            s += f'{self.branches[0]}' #first branch is not preceded by else
+        for branch in self.branches[1:]:
+            s += f' else {branch}'
         return s
 
     def __repr__(self):
