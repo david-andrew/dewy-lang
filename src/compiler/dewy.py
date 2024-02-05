@@ -1284,8 +1284,12 @@ class Range(Iterable,Unpackable):
                 
     def topy(self, scope:Scope=None):
         self.assert_valid_syntax()
-        pdb.set_trace()
-        step_size = self.second.topy() - self.first.topy() if self.second is not undefined else 1
+        step_size = 1
+        if self.first is not undefined and self.second is not undefined:
+            step_size = Sub(self.second, self.first).eval(scope).topy(scope)
+        if self.secondlast is not undefined and self.last is not undefined:
+            step_size = Sub(self.last, self.secondlast).eval(scope).topy(scope)
+        #TODO: this probably will fail for non-integer ranges (e.g. character ranges, etc.)
         return range(self.first.topy(scope), self.last.topy(scope), step_size)
 
     def treestr(self, indent=0):
