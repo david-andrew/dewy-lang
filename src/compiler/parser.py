@@ -595,11 +595,11 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
             if isinstance(left, Void):
                 return Function([], right, scope) #TODO: scope needs to be set. not sure if should set here or on a post processing pass...
             elif isinstance(left, Identifier):
-                pdb.set_trace()
-                ...
+                return Function([Arg(left.name)], right, scope)
             elif isinstance(left, Block):
                 pdb.set_trace()
                 ...
+            #TODO: what about typed arguments, or arguments with default values...
             else:
                 raise ValueError(f'Unrecognized left-hand side for function literal: {left=}, {right=}')
 
@@ -966,7 +966,8 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
         
         case Function():
             for arg in root.args:
-                yield from full_traverse_ast(arg.type)
+                if arg.type is not None:
+                    yield from full_traverse_ast(arg.type)
                 if arg.val is not None:
                     yield from full_traverse_ast(arg.val)
             yield from full_traverse_ast(root.body)
