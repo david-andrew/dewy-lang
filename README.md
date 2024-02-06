@@ -65,6 +65,7 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [if_tree.dewy](examples/if_tree.dewy)                           |    [✓]   |
 | [loop_in_iter.dewy](examples/loop_in_iter.dewy)                 |    [✓]   |
 | [loop_and_iters.dewy](examples/loop_and_iters.dewy)             |    [✓]   |
+| [enumerate_list.dewy](examples/enumerate_list.dewy)             |    [✓]   |
 | [loop_or_iters.dewy](examples/loop_or_iters.dewy)               |    [✓]   |
 | [nested_loop.dewy](examples/nested_loop.dewy)                   |    [✓]   |
 | [block_printing.dewy](examples/block_printing.dewy)             |    [✓]   |
