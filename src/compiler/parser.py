@@ -50,7 +50,7 @@ from tokenizer import ( tokenize, tprint, traverse_tokens,
     WhiteSpace_t,
 
     Escape_t,
-
+    Undefined_t,
     Identifier_t,
     Block_t,
     TypeParam_t,
@@ -530,6 +530,7 @@ def parse(tokens:list[Token], scope:Scope) -> AST:
 def parse_single(token:Token, scope:Scope) -> AST:
     """Parse a single token into an AST"""
     match token:
+        case Undefined_t():     return undefined
         case Identifier_t():    return Identifier(token.src)
         case Integer_t():       return Number(int(token.src))
         case Boolean_t():       return Bool(bool_to_bool(token.src))
@@ -559,11 +560,11 @@ def parse_chain(chain:Chain[Token], scope:Scope) -> AST:
     left, op, right = split_by_lowest_precedence(chain, scope)
     left, right = parse(left, scope), parse(right, scope)
 
-    assert not isinstance(left, Void) or not isinstance(right, Void), f"Internal Error: both left and right returned Void during parse chain, implying chain was invalid: {chain}"
+    assert left is not void or right is not void, f"Internal Error: both left and right returned void during parse chain, implying both left and right side of operator were empty, i.e. chain was invalid: {chain}"
 
     # 3 cases are prefix expr, postfix expr, or binary expr
-    if isinstance(left, Void): return build_unary_prefix_expr(op, right, scope)
-    if isinstance(right, Void): return build_unary_postfix_expr(left, op, scope)
+    if left is void: return build_unary_prefix_expr(op, right, scope)
+    if right is void: return build_unary_postfix_expr(left, op, scope)
     return build_bin_expr(left, op, right, scope)
 
 

@@ -104,6 +104,7 @@ atom_tokens = (
     Hashtag_t,
     DotDot_t,
     Flow_t,
+    Undefined_t,
 )
 
 
