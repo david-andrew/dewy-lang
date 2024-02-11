@@ -32,7 +32,8 @@ jobs:
     - name: Build docs with mdbook
       if: steps.docschange.outputs.changed == 'true'
       run: |
-        mdbook build docs --dest-dir $(pwd)/book
+        cd docs
+        mdbook build --dest-dir $(pwd)/../book
 
     - name: Get commit message
       if: steps.docschange.outputs.changed == 'true'
