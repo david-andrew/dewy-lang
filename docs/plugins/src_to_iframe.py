@@ -20,7 +20,7 @@ def process_markdown(input_markdown):
         iframe = f'''\
 <iframe
     src="https://david-andrew.github.io/iframes/dewy/{page}?src={encoded_code}&id=DewyIframe{i}"
-    style="width: 100%;"
+    style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe{i}"
     frameBorder="0"
 ></iframe>'''
