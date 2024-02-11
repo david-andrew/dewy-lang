@@ -172,14 +172,14 @@
 <h2 id="range-syntax"><a class="header" href="#range-syntax">Range Syntax</a></h2>
 <p>The syntax for ranges is inspired by Haskell syntax for ranges:</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=%5Bfirst..%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20inf%0A%5B..last%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20-inf%20to%20last%0A%5Bfirst..last%5D%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20last%0A%5B..%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20-inf%20to%20inf&id=DewyIframe28"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bfirst..%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20inf%0A%5B..last%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20-inf%20to%20last%0A%5Bfirst..last%5D%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20last%0A%5B..%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20-inf%20to%20inf&id=DewyIframe28"
     style="width: 100%;"
     id="DewyIframe28"
     frameBorder="0"
 ></iframe>
 <p>Like in haskell, you can use a tuple to include a second value to specify the step size.</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=%5B%28first%2Csecond%29..%5D%20%20%20%20%20%20%20%20//%20first%20to%20inf%2C%20step%20size%20is%20second-first%0A%5B%28first%2Csecond%29..last%5D%20%20%20%20//%20first%20to%20last%2C%20step%20size%20is%20second-first%0A%5B..%282ndlast%2Clast%29%5D%20%20%20%20%20%20%20%20//%20-inf%20to%20last%2C%20step%20size%20is%20last-2ndlast&id=DewyIframe29"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5B%28first%2Csecond%29..%5D%20%20%20%20%20%20%20%20//%20first%20to%20inf%2C%20step%20size%20is%20second-first%0A%5B%28first%2Csecond%29..last%5D%20%20%20%20//%20first%20to%20last%2C%20step%20size%20is%20second-first%0A%5B..%282ndlast%2Clast%29%5D%20%20%20%20%20%20%20%20//%20-inf%20to%20last%2C%20step%20size%20is%20last-2ndlast&id=DewyIframe29"
     style="width: 100%;"
     id="DewyIframe29"
     frameBorder="0"
@@ -190,7 +190,7 @@ Also <code>[first..(2ndlast,last)]</code> is explicitly <strong>NOT ALLOWED</str
 </blockquote>
 <p>In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=%5Bfirst..last%5D%20%20%20//%20first%20to%20last%20including%20first%20and%20last%0A%5Bfirst..last%29%20%20%20//%20first%20to%20last%20including%20first%2C%20excluding%20last%0A%28first..last%5D%20%20%20//%20first%20to%20last%20excluding%20first%2C%20including%20last%0A%28first..last%29%20%20%20//%20first%20to%20last%20excluding%20first%20and%20last%0Afirst..last%20%20%20%20%20//%20same%20as%20%5Bfirst..last%5D&id=DewyIframe30"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bfirst..last%5D%20%20%20//%20first%20to%20last%20including%20first%20and%20last%0A%5Bfirst..last%29%20%20%20//%20first%20to%20last%20including%20first%2C%20excluding%20last%0A%28first..last%5D%20%20%20//%20first%20to%20last%20excluding%20first%2C%20including%20last%0A%28first..last%29%20%20%20//%20first%20to%20last%20excluding%20first%20and%20last%0Afirst..last%20%20%20%20%20//%20same%20as%20%5Bfirst..last%5D&id=DewyIframe30"
     style="width: 100%;"
     id="DewyIframe30"
     frameBorder="0"
@@ -198,7 +198,7 @@ Also <code>[first..(2ndlast,last)]</code> is explicitly <strong>NOT ALLOWED</str
 <h3 id="juxtaposition"><a class="header" href="#juxtaposition">Juxtaposition</a></h3>
 <p>The left and right values are only considered part of the range if they are juxtaposed with the <code>..</code>. Values not juxtaposed with the range are considered separate expressions.</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=first..last%20%20%20%20%20//%20first%20to%20last%0Afirst%20..last%20%20%20%20//%20-inf%20to%20last.%20first%20is%20not%20part%20of%20the%20range%0Afirst..%20last%20%20%20%20//%20first%20to%20inf.%20last%20is%20not%20part%20of%20the%20range%0Afirst%20..%20last%20%20%20//%20-inf%20to%20inf.%20neither%20first%20or%20last%20are%20part%20of%20the%20range&id=DewyIframe31"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=first..last%20%20%20%20%20//%20first%20to%20last%0Afirst%20..last%20%20%20%20//%20-inf%20to%20last.%20first%20is%20not%20part%20of%20the%20range%0Afirst..%20last%20%20%20%20//%20first%20to%20inf.%20last%20is%20not%20part%20of%20the%20range%0Afirst%20..%20last%20%20%20//%20-inf%20to%20inf.%20neither%20first%20or%20last%20are%20part%20of%20the%20range&id=DewyIframe31"
     style="width: 100%;"
     id="DewyIframe31"
     frameBorder="0"
@@ -207,14 +207,14 @@ Also <code>[first..(2ndlast,last)]</code> is explicitly <strong>NOT ALLOWED</str
 <p>Note: the range juxtaposition operator has medium precedence. Most operators will have higher precedence, not requiring parenthesis, with <code>,</code> and <code>in</code> being the main exceptions</p>
 </blockquote>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=first..last%2B1%20%20%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20last%2B1%0A%28first%2Csecond%29..last/2%20%20%20%20//%20first%20to%20last/2%2C%20step%20size%20is%20second-first%0A%28first/2%2Cfirst%29..last%2B10%20%20//%20first/2%20to%20last%2B10%2C%20step%20size%20is%20first/2%0Aa%20in%20first..last%20%20%20%20%20%20%20%20%20%20//%20iterate%20a%20over%20range%20first%20to%20last&id=DewyIframe32"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=first..last%2B1%20%20%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20last%2B1%0A%28first%2Csecond%29..last/2%20%20%20%20//%20first%20to%20last/2%2C%20step%20size%20is%20second-first%0A%28first/2%2Cfirst%29..last%2B10%20%20//%20first/2%20to%20last%2B10%2C%20step%20size%20is%20first/2%0Aa%20in%20first..last%20%20%20%20%20%20%20%20%20%20//%20iterate%20a%20over%20range%20first%20to%20last&id=DewyIframe32"
     style="width: 100%;"
     id="DewyIframe32"
     frameBorder="0"
 ></iframe>
 <p>The juxtaposition requirement allows multiple ranges to be included in an array, which can be used to index into multidimensional matrices</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_array%20%3D%20%5B%0A%20%20%20%200%201%202%203%204%205%206%207%208%209%20%0A%20%20%20%2010%2011%2012%2013%2014%2015%2016%2017%2018%2019%0A%20%20%20%2020%2021%2022%2023%2024%2025%2026%2027%2028%2029%0A%5D%0Amy_array%5B1..%206..%5D%20%20%20%20%20//returns%20%5B16%2017%2018%2019%3B%2026%2027%2028%2029%5D&id=DewyIframe33"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_array%20%3D%20%5B%0A%20%20%20%200%201%202%203%204%205%206%207%208%209%20%0A%20%20%20%2010%2011%2012%2013%2014%2015%2016%2017%2018%2019%0A%20%20%20%2020%2021%2022%2023%2024%2025%2026%2027%2028%2029%0A%5D%0Amy_array%5B1..%206..%5D%20%20%20%20%20//returns%20%5B16%2017%2018%2019%3B%2026%2027%2028%2029%5D&id=DewyIframe33"
     style="width: 100%;"
     id="DewyIframe33"
     frameBorder="0"
@@ -223,7 +223,7 @@ Also <code>[first..(2ndlast,last)]</code> is explicitly <strong>NOT ALLOWED</str
 <p>Probably the most common type of range will be a numeric ranges which describes a span over real numbers.</p>
 <p>Some simple examples include:</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=range1%20%3D%20%281..5%29%20%20//%202%203%204%0Arange2%20%3D%20%281..5%5D%20%20//%202%203%204%205%0Arange3%20%3D%20%5B1..5%29%20%20//%201%202%203%204%0Arange4%20%3D%20%5B1..5%5D%20%20//%201%202%203%204%205%0Arange5%20%3D%201..5%20%20%20%20//%201%202%203%204%205&id=DewyIframe34"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=range1%20%3D%20%281..5%29%20%20//%202%203%204%0Arange2%20%3D%20%281..5%5D%20%20//%202%203%204%205%0Arange3%20%3D%20%5B1..5%29%20%20//%201%202%203%204%0Arange4%20%3D%20%5B1..5%5D%20%20//%201%202%203%204%205%0Arange5%20%3D%201..5%20%20%20%20//%201%202%203%204%205&id=DewyIframe34"
     style="width: 100%;"
     id="DewyIframe34"
     frameBorder="0"
@@ -251,7 +251,7 @@ ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc
 <h3 id="ranges-in-loops"><a class="header" href="#ranges-in-loops">Ranges in Loops</a></h3>
 <p>Probably the most common use is in conjunction with loops as a sequence to iterate over:</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=loop%20i%20in%200..5%20print%27%7Bi%7D%20%27&id=DewyIframe35"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%200..5%20print%27%7Bi%7D%20%27&id=DewyIframe35"
     style="width: 100%;"
     id="DewyIframe35"
     frameBorder="0"
@@ -259,7 +259,7 @@ ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc
 <p>The above will print <code>'0 1 2 3 4 5 '</code>.</p>
 <p>To iterate over values in reverse, you can specify a reversed range:</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=loop%20i%20in%205%2C4..0%20print%27%7Bi%7D%20%27&id=DewyIframe36"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%205%2C4..0%20print%27%7Bi%7D%20%27&id=DewyIframe36"
     style="width: 100%;"
     id="DewyIframe36"
     frameBorder="0"
@@ -280,7 +280,7 @@ loop i in [0..4]*0.25 print'{i} '
 <p>These are both equivalent to directly constructing the range <code>0,0.25..4</code>, however the arithmetic versions are frequently more convenient.</p>
 <p>This type of construction is closely related to the <code>linspace()</code>/<code>logspace()</code> functions in Dewy. TBD but <code>linspace</code>/<code>logspace</code> may in fact be implemented like so:</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=linspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%29%20%3D%3E%20%7B%0A%20%20%20%20start%2C%20stop%20%3D%20interval.start%2C%20interval.stop%0A%20%20%20%20step%20%3D%20%28stop-start%29/%28n-1%29%0A%20%20%20%20return%20interval.start%2Cinterval.start%2Bstep..interval.stop%0A%7D%0Alogspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%2C%20base%3Areal%3D10%29%20%3D%3E%20base%5Elinspace%28interval%2C%20n%29&id=DewyIframe37"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=linspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%29%20%3D%3E%20%7B%0A%20%20%20%20start%2C%20stop%20%3D%20interval.start%2C%20interval.stop%0A%20%20%20%20step%20%3D%20%28stop-start%29/%28n-1%29%0A%20%20%20%20return%20interval.start%2Cinterval.start%2Bstep..interval.stop%0A%7D%0Alogspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%2C%20base%3Areal%3D10%29%20%3D%3E%20base%5Elinspace%28interval%2C%20n%29&id=DewyIframe37"
     style="width: 100%;"
     id="DewyIframe37"
     frameBorder="0"
@@ -288,14 +288,14 @@ loop i in [0..4]*0.25 print'{i} '
 <h3 id="compound-range-construction"><a class="header" href="#compound-range-construction">Compound Range Construction</a></h3>
 <p>Additionally you can construct more complex ranges by combining together multiple ranges:</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=complex_range%20%3D%20%5B1..5%5D%20%2B%20%2815..20%29%0Aloop%20i%20in%20complex_range%0A%20%20%20%20printn%28i%29%20%20%20%20%20%20%20%20%20%20%20//prints%201%202%203%204%205%2016%2017%2018%2019%0A7%20in%3F%20complex_range%20%20%20%20%20//returns%20false%0A16%20in%3F%20complex_range%20%20%20%20//returns%20true&id=DewyIframe38"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=complex_range%20%3D%20%5B1..5%5D%20%2B%20%2815..20%29%0Aloop%20i%20in%20complex_range%0A%20%20%20%20printn%28i%29%20%20%20%20%20%20%20%20%20%20%20//prints%201%202%203%204%205%2016%2017%2018%2019%0A7%20in%3F%20complex_range%20%20%20%20%20//returns%20false%0A16%20in%3F%20complex_range%20%20%20%20//returns%20true&id=DewyIframe38"
     style="width: 100%;"
     id="DewyIframe38"
     frameBorder="0"
 ></iframe>
 <p>The same range as above can be constructed using subtraction</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=complex_range%20%3D%20%5B1..20%29%20-%20%285..15%5D&id=DewyIframe39"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=complex_range%20%3D%20%5B1..20%29%20-%20%285..15%5D&id=DewyIframe39"
     style="width: 100%;"
     id="DewyIframe39"
     frameBorder="0"
@@ -303,7 +303,7 @@ loop i in [0..4]*0.25 print'{i} '
 <h3 id="interval-membership"><a class="header" href="#interval-membership">Interval Membership</a></h3>
 <p>You can also check if a value falls within a specified range</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=5%20in%3F%20%5B1..5%5D%20%20%20%20%20%20%20%20%20//returns%20true%0A5%20in%3F%20%281..5%29%20%20%20%20%20%20%20%20%20//returns%20false%0A3.1415%20in%3F%20%281..5%29%20%20%20%20//returns%20true%20&id=DewyIframe40"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=5%20in%3F%20%5B1..5%5D%20%20%20%20%20%20%20%20%20//returns%20true%0A5%20in%3F%20%281..5%29%20%20%20%20%20%20%20%20%20//returns%20false%0A3.1415%20in%3F%20%281..5%29%20%20%20%20//returns%20true%20&id=DewyIframe40"
     style="width: 100%;"
     id="DewyIframe40"
     frameBorder="0"
@@ -311,7 +311,7 @@ loop i in [0..4]*0.25 print'{i} '
 <h3 id="indexing-sequences"><a class="header" href="#indexing-sequences">Indexing Sequences</a></h3>
 <p>ranges can be used to select values from a sequence. For example, say we want a substring we can do the following</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=full_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring%20%3D%20full_string%5B3..12%5D%0Aprintl%28substring%29%20//prints%20%27s%20is%20a%20str%27&id=DewyIframe41"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=full_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring%20%3D%20full_string%5B3..12%5D%0Aprintl%28substring%29%20//prints%20%27s%20is%20a%20str%27&id=DewyIframe41"
     style="width: 100%;"
     id="DewyIframe41"
     frameBorder="0"
