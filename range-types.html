@@ -172,11 +172,176 @@
 <h2 id="range-syntax"><a class="header" href="#range-syntax">Range Syntax</a></h2>
 <p>The syntax for ranges is inspired by Haskell syntax for ranges:</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=%5Bfirst..%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20inf%0A%5B..last%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20-inf%20to%20last%0A%5Bfirst..last%5D%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20last%0A%5B..%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20-inf%20to%20inf%0A%60%60%60%0A%0ALike%20in%20haskell%2C%20you%20can%20use%20a%20tuple%20to%20include%20a%20second%20value%20to%20specify%20the%20step%20size.%0A%0A%0A%60%60%60dewy%0A%5B%28first%2Csecond%29..%5D%20%20%20%20%20%20%20%20//%20first%20to%20inf%2C%20step%20size%20is%20second-first%0A%5B%28first%2Csecond%29..last%5D%20%20%20%20//%20first%20to%20last%2C%20step%20size%20is%20second-first%0A%5B..%282ndlast%2Clast%29%5D%20%20%20%20%20%20%20%20//%20-inf%20to%20last%2C%20step%20size%20is%20last-2ndlast%0A%60%60%60%0A%0A%3E%20Note%3A%20Due%20to%20precedence%20rules%20in%20Dewy%2C%20namely%20%60%2C%60%20having%20relatively%20low%20precedence%2C%20the%20step%20size%20tuple%20must%20be%20wrapped%20in%20parenthesis.%0A%3E%20Also%20%60%5Bfirst..%282ndlast%2Clast%29%5D%60%20is%20explicitly%20%2A%2ANOT%20ALLOWED%2A%2A%2C%20as%20it%20can%20have%20unintuitive%20behavior%2C%20and%20is%20covered%20by%20%60%5B%28first%2Csecond%29..last%5D%60.%0A%0AIn%20addition%2C%20ranges%20can%20have%20their%20bounds%20be%20inclusive%20or%20exclusive.%20Inclusive%20bounds%20are%20indicated%20by%20square%20brackets%2C%20and%20exclusive%20bounds%20are%20indicated%20by%20parenthesis.%20The%20default%20is%20inclusive%20bounds.%20Also%20left%20and%20right%20bounds%20can%20be%20specified%20independently%2C%20so%20you%20can%20have%20a%20range%20that%20is%20inclusive%20on%20the%20left%20and%20exclusive%20on%20the%20right%2C%20or%20vice%20versa.%0A%0A%60%60%60dewy%0A%5Bfirst..last%5D%20%20%20//%20first%20to%20last%20including%20first%20and%20last%0A%5Bfirst..last%29%20%20%20//%20first%20to%20last%20including%20first%2C%20excluding%20last%0A%28first..last%5D%20%20%20//%20first%20to%20last%20excluding%20first%2C%20including%20last%0A%28first..last%29%20%20%20//%20first%20to%20last%20excluding%20first%20and%20last%0Afirst..last%20%20%20%20%20//%20same%20as%20%5Bfirst..last%5D%0A%60%60%60%0A%0A%23%23%23%20Juxtaposition%0AThe%20left%20and%20right%20values%20are%20only%20considered%20part%20of%20the%20range%20if%20they%20are%20juxtaposed%20with%20the%20%60..%60.%20Values%20not%20juxtaposed%20with%20the%20range%20are%20considered%20separate%20expressions.%0A%0A%60%60%60dewy%0Afirst..last%20%20%20%20%20//%20first%20to%20last%0Afirst%20..last%20%20%20%20//%20-inf%20to%20last.%20first%20is%20not%20part%20of%20the%20range%0Afirst..%20last%20%20%20%20//%20first%20to%20inf.%20last%20is%20not%20part%20of%20the%20range%0Afirst%20..%20last%20%20%20//%20-inf%20to%20inf.%20neither%20first%20or%20last%20are%20part%20of%20the%20range%0A%60%60%60%0A%0A%3E%20Note%3A%20the%20range%20juxtaposition%20operator%20has%20medium%20precedence.%20Most%20operators%20will%20have%20higher%20precedence%2C%20not%20requiring%20parenthesis%2C%20with%20%60%2C%60%20and%20%60in%60%20being%20the%20main%20exceptions%0A%0A%60%60%60dewy%0Afirst..last%2B1%20%20%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20last%2B1%0A%28first%2Csecond%29..last/2%20%20%20%20//%20first%20to%20last/2%2C%20step%20size%20is%20second-first%0A%28first/2%2Cfirst%29..last%2B10%20%20//%20first/2%20to%20last%2B10%2C%20step%20size%20is%20first/2%0Aa%20in%20first..last%20%20%20%20%20%20%20%20%20%20//%20iterate%20a%20over%20range%20first%20to%20last%0A%60%60%60%0A%0AThe%20juxtaposition%20requirement%20allows%20multiple%20ranges%20to%20be%20included%20in%20an%20array%2C%20which%20can%20be%20used%20to%20index%20into%20multidimensional%20matrices%0A%0A%60%60%60dewy%0Amy_array%20%3D%20%5B%0A%20%20%20%200%201%202%203%204%205%206%207%208%209%20%0A%20%20%20%2010%2011%2012%2013%2014%2015%2016%2017%2018%2019%0A%20%20%20%2020%2021%2022%2023%2024%2025%2026%2027%2028%2029%0A%5D%0Amy_array%5B1..%206..%5D%20%20%20%20%20//returns%20%5B16%2017%2018%2019%3B%2026%2027%2028%2029%5D%0A%60%60%60%0A%0A%0A%23%23%20Numeric%20Ranges%0A%0AProbably%20the%20most%20common%20type%20of%20range%20will%20be%20a%20numeric%20ranges%20which%20describes%20a%20span%20over%20real%20numbers.%0A%0ASome%20simple%20examples%20include%3A%0A%0A%60%60%60dewy%0Arange1%20%3D%20%281..5%29%20%20//%202%203%204%0Arange2%20%3D%20%281..5%5D%20%20//%202%203%204%205%0Arange3%20%3D%20%5B1..5%29%20%20//%201%202%203%204%0Arange4%20%3D%20%5B1..5%5D%20%20//%201%202%203%204%205%0Arange5%20%3D%201..5%20%20%20%20//%201%202%203%204%205%0A%60%60%60%0A%0A%23%23%20Ordinal%20Ranges%0A%0ARanges%20can%20also%20be%20constructed%20using%20any%20ordinal%20type.%20Currently%20the%20only%20only%20built%20in%20ordinal%20type%20other%20than%20numbers%20would%20be%20strings.%0A%0AFor%20example%2C%20the%20following%20range%20captures%20all%20characters%20in%20the%20range%20from%20%60%27a%27%60%20to%20%60%27z%27%60%20inclusive%0A%0A%60%60%60%0Aord_range%20%3D%20%27a%27..%27z%27%0A%60%60%60%0A%0AAll%20alpahbetical%20characters%20might%20be%20represented%20like%20so%0A%0A%60%60%60%0Aalpha_range%20%3D%20%27a%27..%27z%27%20%2B%20%27A%27..%27Z%27%0Aascii_range%20%3D%20%27A%27..%27z%27%20//this%20would%20include%20extra%20characters%20like%20%27%5B%5C%5D%5E_%7B%7C%7D%27%20etc.%0A%60%60%60%0A%0ABut%20I%20probably%20won%27t%20just%20be%20limited%20to%20individual%20characters.%20In%20principle%20you%20ought%20to%20be%20able%20to%20do%20something%20like%20this%0A%0A%60%60%60%0Aword_range%20%3D%20%27apple%27..%27zebra%27%0A%27panda%27%20in%3F%20word_range%20%20//returns%20true%0A%60%60%60%0A%0Awhich%20would%20create%20a%20range%20that%20consists%20of%20every%20possible%205%20letter%20combination%20starting%20from%20the%20word%20%60%27apple%27%60%20and%20iterating%20through%20to%20the%20word%20%60%27zebra%27%60.%20%0A%0A%3E%20Note%3A%20this%20is%20distinct%20from%20every%20dictionary%20word%20in%20that%20range%2C%20as%20it%20will%20include%20many%20many%20gibberish%20words.%20%0A%0ATDB%20exactly%20what%20criteria%20will%20be%20used%20for%20ordering%20strings%2C%20as%20I%20like%20string%20orderings%20that%20respect%20numbers%20embedded%20in%20them%20%28e.g.%20%60%27apple2%27%60%20should%20come%20before%20%60%27apple10%27%60%29%2C%20but%20that%20becomes%20difficult%20with%20arbitrary%20strings.%20perhaps%20there%20might%20be%20a%20macro%20setting%20for%20the%20ordering%20type%20used%0A%0A%0A%23%23%20Range%20Uses%0A%0ARanges%20have%20a%20variety%20of%20different%20uses%20in%20Dewy.%0A%0A%23%23%23%20Ranges%20in%20Loops%0A%0AProbably%20the%20most%20common%20use%20is%20in%20conjunction%20with%20loops%20as%20a%20sequence%20to%20iterate%20over%3A%0A%0A%60%60%60dewy%0Aloop%20i%20in%200..5%20print%27%7Bi%7D%20%27%0A%60%60%60%0A%0AThe%20above%20will%20print%20%60%270%201%202%203%204%205%20%27%60.%0A%0ATo%20iterate%20over%20values%20in%20reverse%2C%20you%20can%20specify%20a%20reversed%20range%3A%0A%0A%60%60%60dewy%0Aloop%20i%20in%205%2C4..0%20print%27%7Bi%7D%20%27%0A%60%60%60%0A%0AThis%20prints%20%60%275%204%203%202%201%200%20%27%60.%20%0A%0A%3E%20Note%3A%20when%20specifying%20a%20reversed%20range%2C%20you%20must%20include%20the%20step%20size.%20Forgetting%20to%20specify%20the%20step%20size%20will%20result%20in%20an%20empty%20range%2C%20as%20ranges%20are%20normally%20increasing.%0A%0A%23%23%23%20Range%20Arithmetic%0A%0ARanges%20can%20be%20used%20in%20arithmetic%20expressions%2C%20often%20as%20a%20way%20to%20construct%20new%20ranges.%0A%0A%60%60%60%0A//division%20version%0Aloop%20i%20in%20%5B0..4%5D/4%20print%27%7Bi%7D%20%27%0A%0A//multiplication%20version%0Aloop%20i%20in%20%5B0..4%5D%2A0.25%20print%27%7Bi%7D%20%27%0A%60%60%60%0A%0ABoth%20of%20which%20will%20print%20%60%270%200.25%200.5%200.75%201%20%27%60%0A%0AThese%20are%20both%20equivalent%20to%20directly%20constructing%20the%20range%20%600%2C0.25..4%60%2C%20however%20the%20arithmetic%20versions%20are%20frequently%20more%20convenient.%0A%0AThis%20type%20of%20construction%20is%20closely%20related%20to%20the%20%60linspace%28%29%60/%60logspace%28%29%60%20functions%20in%20Dewy.%20TBD%20but%20%60linspace%60/%60logspace%60%20may%20in%20fact%20be%20implemented%20like%20so%3A%0A%0A%60%60%60dewy%0Alinspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%29%20%3D%3E%20%7B%0A%20%20%20%20start%2C%20stop%20%3D%20interval.start%2C%20interval.stop%0A%20%20%20%20step%20%3D%20%28stop-start%29/%28n-1%29%0A%20%20%20%20return%20interval.start%2Cinterval.start%2Bstep..interval.stop%0A%7D%0Alogspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%2C%20base%3Areal%3D10%29%20%3D%3E%20base%5Elinspace%28interval%2C%20n%29%0A%60%60%60%0A%0A%23%23%23%20Compound%20Range%20Construction%0A%0AAdditionally%20you%20can%20construct%20more%20complex%20ranges%20by%20combining%20together%20multiple%20ranges%3A%0A%0A%60%60%60dewy%0Acomplex_range%20%3D%20%5B1..5%5D%20%2B%20%2815..20%29%0Aloop%20i%20in%20complex_range%0A%20%20%20%20printn%28i%29%20%20%20%20%20%20%20%20%20%20%20//prints%201%202%203%204%205%2016%2017%2018%2019%0A7%20in%3F%20complex_range%20%20%20%20%20//returns%20false%0A16%20in%3F%20complex_range%20%20%20%20//returns%20true%0A%60%60%60%0A%0AThe%20same%20range%20as%20above%20can%20be%20constructed%20using%20subtraction%0A%0A%60%60%60dewy%0Acomplex_range%20%3D%20%5B1..20%29%20-%20%285..15%5D%0A%60%60%60%0A%0A%23%23%23%20Interval%20Membership%0A%0AYou%20can%20also%20check%20if%20a%20value%20falls%20within%20a%20specified%20range%0A%0A%60%60%60dewy%0A5%20in%3F%20%5B1..5%5D%20%20%20%20%20%20%20%20%20//returns%20true%0A5%20in%3F%20%281..5%29%20%20%20%20%20%20%20%20%20//returns%20false%0A3.1415%20in%3F%20%281..5%29%20%20%20%20//returns%20true%20%0A%60%60%60%0A%0A%23%23%23%20Indexing%20Sequences%0A%0Aranges%20can%20be%20used%20to%20select%20values%20from%20a%20sequence.%20For%20example%2C%20say%20we%20want%20a%20substring%20we%20can%20do%20the%20following%0A%0A%60%60%60dewy%0Afull_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring%20%3D%20full_string%5B3..12%5D%0Aprintl%28substring%29%20//prints%20%27s%20is%20a%20str%27%0A%60%60%60%0A%0AThis%20works%20for%20any%20sequence%20type.%20%0A%0A%3E%20Note%3A%20only%20integer%20ranges%20can%20be%20used%20to%20index%20into%20sequences%20%28TBD%20if%20this%20might%20be%20relaxed%20to%20real%20valued%20ranges%29.%0A%0AAlso%2C%20because%20of%20juxtaposition%2C%20we%20can%20easily%20make%20the%20selection%20inclusive%20or%20exclusive%20on%20either%20side.%0A%0A%60%60%60%0Afull_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring1%20%3D%20full_string%283..12%29%20%20//%20%27%20is%20a%20st%27%0Asubstring2%20%3D%20full_string%5B3..12%29%20%20//%20%27s%20is%20a%20st%27%0Asubstring3%20%3D%20full_string%283..12%5D%20%20//%20%27%20is%20a%20str%27%0A%60%60%60%0A%0A%0AYou%20can%20specify%20that%20a%20range%20continues%20to%20the%20end%20of%20the%20sequence%2C%20or%20starts%20from%20the%20beginning%20by%20omitting%20the%20value%20for%20that%20side.%20This%20will%20construct%20a%20range%20that%20goes%20to%20infinity%20in%20that%20direction%2C%20which%20will%20select%20all%20elements%20in%20that%20direction.%0A%0A%60%60%60%0Afull_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring_to_end%20%3D%20full_string%5B3..%5D%20//%20%27s%20is%20a%20string%27%0Asubstring_from_start%20%3D%20full_string%5B..12%5D%20//%20%27this%20is%20a%20str%27%0Awhole_string%20%3D%20full_string%5B..%5D%20//selects%20the%20whole%20string%0A%60%60%60%0A%0APaired%20with%20the%20special%20%60end%60%20token%20which%20represents%20the%20index%20of%20the%20last%20element%20in%20a%20sequence%2C%20this%20provides%20the%20means%20to%20select%20any%20desired%20subset%20of%20a%20sequence.%0A%0A%60%60%60%0Aarr%5Bend%5D%20%20%20%20%20%20//%20last%20element%0Aarr%5Bend-1%5D%20%20%20%20//%20second%20to%20last%20element%0Aarr%5B..end-3%5D%20%20//%20first%20element%20to%204th%20to%20last%20element%0Aarr%5B5..end-3%5D%20//%205th%20element%20to%204th%20to%20last%20element%0Aarr%5Bend-3..%5D%20%20//%204th%20to%20last%20element%20to%20last%20element"
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=%5Bfirst..%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20inf%0A%5B..last%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20-inf%20to%20last%0A%5Bfirst..last%5D%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20last%0A%5B..%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20-inf%20to%20inf"
     style="width: 100%;"
     id="DemoIframe"
     frameBorder="0"
 ></iframe>
+<p>Like in haskell, you can use a tuple to include a second value to specify the step size.</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=%5B%28first%2Csecond%29..%5D%20%20%20%20%20%20%20%20//%20first%20to%20inf%2C%20step%20size%20is%20second-first%0A%5B%28first%2Csecond%29..last%5D%20%20%20%20//%20first%20to%20last%2C%20step%20size%20is%20second-first%0A%5B..%282ndlast%2Clast%29%5D%20%20%20%20%20%20%20%20//%20-inf%20to%20last%2C%20step%20size%20is%20last-2ndlast"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<blockquote>
+<p>Note: Due to precedence rules in Dewy, namely <code>,</code> having relatively low precedence, the step size tuple must be wrapped in parenthesis.
+Also <code>[first..(2ndlast,last)]</code> is explicitly <strong>NOT ALLOWED</strong>, as it can have unintuitive behavior, and is covered by <code>[(first,second)..last]</code>.</p>
+</blockquote>
+<p>In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=%5Bfirst..last%5D%20%20%20//%20first%20to%20last%20including%20first%20and%20last%0A%5Bfirst..last%29%20%20%20//%20first%20to%20last%20including%20first%2C%20excluding%20last%0A%28first..last%5D%20%20%20//%20first%20to%20last%20excluding%20first%2C%20including%20last%0A%28first..last%29%20%20%20//%20first%20to%20last%20excluding%20first%20and%20last%0Afirst..last%20%20%20%20%20//%20same%20as%20%5Bfirst..last%5D"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h3 id="juxtaposition"><a class="header" href="#juxtaposition">Juxtaposition</a></h3>
+<p>The left and right values are only considered part of the range if they are juxtaposed with the <code>..</code>. Values not juxtaposed with the range are considered separate expressions.</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=first..last%20%20%20%20%20//%20first%20to%20last%0Afirst%20..last%20%20%20%20//%20-inf%20to%20last.%20first%20is%20not%20part%20of%20the%20range%0Afirst..%20last%20%20%20%20//%20first%20to%20inf.%20last%20is%20not%20part%20of%20the%20range%0Afirst%20..%20last%20%20%20//%20-inf%20to%20inf.%20neither%20first%20or%20last%20are%20part%20of%20the%20range"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<blockquote>
+<p>Note: the range juxtaposition operator has medium precedence. Most operators will have higher precedence, not requiring parenthesis, with <code>,</code> and <code>in</code> being the main exceptions</p>
+</blockquote>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=first..last%2B1%20%20%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20last%2B1%0A%28first%2Csecond%29..last/2%20%20%20%20//%20first%20to%20last/2%2C%20step%20size%20is%20second-first%0A%28first/2%2Cfirst%29..last%2B10%20%20//%20first/2%20to%20last%2B10%2C%20step%20size%20is%20first/2%0Aa%20in%20first..last%20%20%20%20%20%20%20%20%20%20//%20iterate%20a%20over%20range%20first%20to%20last"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>The juxtaposition requirement allows multiple ranges to be included in an array, which can be used to index into multidimensional matrices</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_array%20%3D%20%5B%0A%20%20%20%200%201%202%203%204%205%206%207%208%209%20%0A%20%20%20%2010%2011%2012%2013%2014%2015%2016%2017%2018%2019%0A%20%20%20%2020%2021%2022%2023%2024%2025%2026%2027%2028%2029%0A%5D%0Amy_array%5B1..%206..%5D%20%20%20%20%20//returns%20%5B16%2017%2018%2019%3B%2026%2027%2028%2029%5D"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h2 id="numeric-ranges"><a class="header" href="#numeric-ranges">Numeric Ranges</a></h2>
+<p>Probably the most common type of range will be a numeric ranges which describes a span over real numbers.</p>
+<p>Some simple examples include:</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=range1%20%3D%20%281..5%29%20%20//%202%203%204%0Arange2%20%3D%20%281..5%5D%20%20//%202%203%204%205%0Arange3%20%3D%20%5B1..5%29%20%20//%201%202%203%204%0Arange4%20%3D%20%5B1..5%5D%20%20//%201%202%203%204%205%0Arange5%20%3D%201..5%20%20%20%20//%201%202%203%204%205"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h2 id="ordinal-ranges"><a class="header" href="#ordinal-ranges">Ordinal Ranges</a></h2>
+<p>Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.</p>
+<p>For example, the following range captures all characters in the range from <code>'a'</code> to <code>'z'</code> inclusive</p>
+<pre><code>ord_range = 'a'..'z'
+</code></pre>
+<p>All alpahbetical characters might be represented like so</p>
+<pre><code>alpha_range = 'a'..'z' + 'A'..'Z'
+ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc.
+</code></pre>
+<p>But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this</p>
+<pre><code>word_range = 'apple'..'zebra'
+'panda' in? word_range  //returns true
+</code></pre>
+<p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>. </p>
+<blockquote>
+<p>Note: this is distinct from every dictionary word in that range, as it will include many many gibberish words. </p>
+</blockquote>
+<p>TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. <code>'apple2'</code> should come before <code>'apple10'</code>), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used</p>
+<h2 id="range-uses"><a class="header" href="#range-uses">Range Uses</a></h2>
+<p>Ranges have a variety of different uses in Dewy.</p>
+<h3 id="ranges-in-loops"><a class="header" href="#ranges-in-loops">Ranges in Loops</a></h3>
+<p>Probably the most common use is in conjunction with loops as a sequence to iterate over:</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=loop%20i%20in%200..5%20print%27%7Bi%7D%20%27"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>The above will print <code>'0 1 2 3 4 5 '</code>.</p>
+<p>To iterate over values in reverse, you can specify a reversed range:</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=loop%20i%20in%205%2C4..0%20print%27%7Bi%7D%20%27"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>This prints <code>'5 4 3 2 1 0 '</code>. </p>
+<blockquote>
+<p>Note: when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.</p>
+</blockquote>
+<h3 id="range-arithmetic"><a class="header" href="#range-arithmetic">Range Arithmetic</a></h3>
+<p>Ranges can be used in arithmetic expressions, often as a way to construct new ranges.</p>
+<pre><code>//division version
+loop i in [0..4]/4 print'{i} '
+
+//multiplication version
+loop i in [0..4]*0.25 print'{i} '
+</code></pre>
+<p>Both of which will print <code>'0 0.25 0.5 0.75 1 '</code></p>
+<p>These are both equivalent to directly constructing the range <code>0,0.25..4</code>, however the arithmetic versions are frequently more convenient.</p>
+<p>This type of construction is closely related to the <code>linspace()</code>/<code>logspace()</code> functions in Dewy. TBD but <code>linspace</code>/<code>logspace</code> may in fact be implemented like so:</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=linspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%29%20%3D%3E%20%7B%0A%20%20%20%20start%2C%20stop%20%3D%20interval.start%2C%20interval.stop%0A%20%20%20%20step%20%3D%20%28stop-start%29/%28n-1%29%0A%20%20%20%20return%20interval.start%2Cinterval.start%2Bstep..interval.stop%0A%7D%0Alogspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%2C%20base%3Areal%3D10%29%20%3D%3E%20base%5Elinspace%28interval%2C%20n%29"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h3 id="compound-range-construction"><a class="header" href="#compound-range-construction">Compound Range Construction</a></h3>
+<p>Additionally you can construct more complex ranges by combining together multiple ranges:</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=complex_range%20%3D%20%5B1..5%5D%20%2B%20%2815..20%29%0Aloop%20i%20in%20complex_range%0A%20%20%20%20printn%28i%29%20%20%20%20%20%20%20%20%20%20%20//prints%201%202%203%204%205%2016%2017%2018%2019%0A7%20in%3F%20complex_range%20%20%20%20%20//returns%20false%0A16%20in%3F%20complex_range%20%20%20%20//returns%20true"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>The same range as above can be constructed using subtraction</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=complex_range%20%3D%20%5B1..20%29%20-%20%285..15%5D"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h3 id="interval-membership"><a class="header" href="#interval-membership">Interval Membership</a></h3>
+<p>You can also check if a value falls within a specified range</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=5%20in%3F%20%5B1..5%5D%20%20%20%20%20%20%20%20%20//returns%20true%0A5%20in%3F%20%281..5%29%20%20%20%20%20%20%20%20%20//returns%20false%0A3.1415%20in%3F%20%281..5%29%20%20%20%20//returns%20true%20"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h3 id="indexing-sequences"><a class="header" href="#indexing-sequences">Indexing Sequences</a></h3>
+<p>ranges can be used to select values from a sequence. For example, say we want a substring we can do the following</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=full_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring%20%3D%20full_string%5B3..12%5D%0Aprintl%28substring%29%20//prints%20%27s%20is%20a%20str%27"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>This works for any sequence type. </p>
+<blockquote>
+<p>Note: only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).</p>
+</blockquote>
+<p>Also, because of juxtaposition, we can easily make the selection inclusive or exclusive on either side.</p>
+<pre><code>full_string = 'this is a string'
+
+substring1 = full_string(3..12)  // ' is a st'
+substring2 = full_string[3..12)  // 's is a st'
+substring3 = full_string(3..12]  // ' is a str'
+</code></pre>
+<p>You can specify that a range continues to the end of the sequence, or starts from the beginning by omitting the value for that side. This will construct a range that goes to infinity in that direction, which will select all elements in that direction.</p>
+<pre><code>full_string = 'this is a string'
+
+substring_to_end = full_string[3..] // 's is a string'
+substring_from_start = full_string[..12] // 'this is a str'
+whole_string = full_string[..] //selects the whole string
+</code></pre>
+<p>Paired with the special <code>end</code> token which represents the index of the last element in a sequence, this provides the means to select any desired subset of a sequence.</p>
+<pre><code>arr[end]      // last element
+arr[end-1]    // second to last element
+arr[..end-3]  // first element to 4th to last element
+arr[5..end-3] // 5th element to 4th to last element
+arr[end-3..]  // 4th to last element to last element
+</code></pre>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

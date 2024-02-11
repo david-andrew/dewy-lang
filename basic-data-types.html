@@ -172,7 +172,82 @@
 <h3 id="numbers"><a class="header" href="#numbers">Numbers</a></h3>
 <p>Numbers are the base case for numerical values, with each subsequent type being a more specific / restricted version of the number class.</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_number%20%3D%2010%0A%60%60%60%0A%0A%23%23%23%20Integers%0A%0AIntegers%20are%20numbers%20that%20do%20not%20contain%20any%20decimal%20component.%20By%20default%2C%20integers%20can%20be%20arbitrarily%20large%2C%20but%20fixed%20width%20integers%20are%20also%20possible%0A%0A%60%60%60dewy%0Amy_int%20%3D%20-12%20as%20int%0Amy_int32%20%3D%2042%20as%20int32%0A%0Amy_uint%20%3D%2015%20as%20uint%0Amy_uint64%20%3D%202001%20as%20uint64%0A%60%60%60%0A%0AThe%20full%20list%20of%20integer%20types%20includes%0A%0A%7C%20Type%20%7C%20%20%20%20%20%20Description%20%20%20%20%20%20%20%20%7C%20Range%20%7C%0A%7C%20---%20%7C%20---------------------%20%7C%20---%20%7C%0A%7C%20int%20%7C%20Arbitrary%20precision%20signed%20integer%20%7C%20%60%28-inf..inf%29%60%20%7C%0A%7C%20int8%20%7C%208-bit%20signed%20integer%20%7C%20%60%5B-128..127%5D%60%20%7C%0A%7C%20int16%20%7C%2016-bit%20signed%20integer%20%7C%20%60%5B-32768..32767%5D%60%20%7C%0A%7C%20int32%20%7C%2032-bit%20signed%20integer%20%7C%20%60%5B-2147483648..2147483647%5D%60%20%7C%0A%7C%20int64%20%7C%2064-bit%20signed%20integer%20%7C%20%60%5B-9223372036854775808..9223372036854775807%5D%60%20%7C%0A%7C%20int128%20%7C%20128-bit%20signed%20integer%20%7C%20%60%5B-170141183460469231731687303715884105728%60%26shy%3B%60..170141183460469231731687303715884105727%5D%60%20%7C%0A%7C%20uint%20%7C%20Arbitrary%20precision%20unsigned%20integer%20%7C%20%60%5B0..inf%29%60%20%7C%0A%7C%20uint8%20%7C%208-bit%20unsigned%20integer%20%7C%20%60%5B0..255%5D%60%20%7C%0A%7C%20uint16%20%7C%2016-bit%20unsigned%20integer%20%7C%20%60%5B0..65535%5D%60%20%7C%0A%7C%20uint32%20%7C%2032-bit%20unsigned%20integer%20%7C%20%60%5B0..4294967295%5D%60%20%7C%0A%7C%20uint64%20%7C%2064-bit%20unsigned%20integer%20%7C%20%60%5B0..18446744073709551615%5D%60%20%7C%0A%7C%20uint128%20%7C%20128-bit%20unsigned%20integer%20%7C%20%60%5B0..340282366920938463463374607431768211455%5D%60%20%7C%0A%0A%23%23%23%20Custom%20Ranged%20Integers%0AYou%20can%20create%20integer%20types%20with%20a%20custom%20range%20by%20specifying%20the%20range%20as%20part%20of%20the%20type%20annotation%0A%0A%60%60%60dewy%0Amy_custom_number%3Aint%3Crange%3D%5B42..%29%3E%20%3D%2042%0A%60%60%60%0A%0ATBD%20for%20behavior%20when%20value%20goes%20out%20of%20bounds.%20Perhaps%20result%20will%20be%20undefined%2C%20or%20there%20can%20be%20a%20type%20setting%20for%20wrap%20around%0A%0A%23%23%23%20Fixed%20Point%0AFixed%20point%20will%20be%20stored%20as%20two%20integers%2C%20%60digits%60%20and%20%60shift%60%20where%20the%20value%20is%20%60digits%20%2A%2010%5Eshift%60%0A%0ATBD%20on%20the%20syntax%20for%20declaring%20a%20fixed%20point%20number.%20likely%20to%20be%20a%20function%20call%20e.g.%20%0A%0A%60%60%60dewy%0Amy_fixed_point%20%3D%20fixed_point%283141592%2C%20-6%29%0A%60%60%60%0A%0A%0A%23%23%23%20Rational%0ARational%20numbers%20are%20stored%20as%20two%20integers%2C%20the%20%60numerator%60%20and%20the%20%60denominator%60%2C%20where%20the%20value%20is%20%60numerator%20/%20denominator%60%0A%0ATBD%20on%20the%20syntax%20for%20declaring%20a%20rational%20number.%20likely%20to%20be%20a%20function%20call%20e.g.%0A%0A%60%60%60dewy%0Amy_rational%20%3D%20rational%2822%2C%207%29%20//rational%20approximation%20of%20pi%0A%60%60%60%0A%0A%0A%23%23%23%20Real%0A%0AReal%20numbers%20are%20positive%20and%20negative%20numbers%20that%20can%20have%20a%20decimal%20component%20to%20them.%20The%20default%20real%20will%20be%20stored%20as%20a%20%60float64%60%20i.e.%20a%2064-bit%20floating%20point%20number%2C%20but%20other%20widths%20%28and%20potentially%20arbitrary%20precision%29%20are%20possible%0A%0A%60%60%60dewy%0Amy_real%20%3D%203.1415%0Amy_real32%20%3D%2054.54%20as%20real32%0Amy_real64%20%3D%20233.511534%20as%20real64%0A%60%60%60%0A%0A%23%23%23%20Boolean%0A%0AStandard%20true/false%20type%0A%0A%60%60%60dewy%0Amy_bool%20%3D%20true%0A%60%60%60%0A%0A%23%23%23%20Complex%0A%0Acomplex%20numbers%0A%0A%60%60%60dewy%0Amy_complex0%20%3D%202%5E/2%20%2B%202i%5E/2%0Amy_complex1%20%3D%20complex%282%5E/2%2C%202%5E/2%29%0Amy_complex2%20%3D%20complex%281%2C%2045%C2%B0%29%0Amy_complex3%20%3D%201%20%E2%88%A0%2045%C2%B0"
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_number%20%3D%2010"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h3 id="integers"><a class="header" href="#integers">Integers</a></h3>
+<p>Integers are numbers that do not contain any decimal component. By default, integers can be arbitrarily large, but fixed width integers are also possible</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_int%20%3D%20-12%20as%20int%0Amy_int32%20%3D%2042%20as%20int32%0A%0Amy_uint%20%3D%2015%20as%20uint%0Amy_uint64%20%3D%202001%20as%20uint64"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>The full list of integer types includes</p>
+<div class="table-wrapper"><table><thead><tr><th>Type</th><th>Description</th><th>Range</th></tr></thead><tbody>
+<tr><td>int</td><td>Arbitrary precision signed integer</td><td><code>(-inf..inf)</code></td></tr>
+<tr><td>int8</td><td>8-bit signed integer</td><td><code>[-128..127]</code></td></tr>
+<tr><td>int16</td><td>16-bit signed integer</td><td><code>[-32768..32767]</code></td></tr>
+<tr><td>int32</td><td>32-bit signed integer</td><td><code>[-2147483648..2147483647]</code></td></tr>
+<tr><td>int64</td><td>64-bit signed integer</td><td><code>[-9223372036854775808..9223372036854775807]</code></td></tr>
+<tr><td>int128</td><td>128-bit signed integer</td><td><code>[-170141183460469231731687303715884105728</code>­<code>..170141183460469231731687303715884105727]</code></td></tr>
+<tr><td>uint</td><td>Arbitrary precision unsigned integer</td><td><code>[0..inf)</code></td></tr>
+<tr><td>uint8</td><td>8-bit unsigned integer</td><td><code>[0..255]</code></td></tr>
+<tr><td>uint16</td><td>16-bit unsigned integer</td><td><code>[0..65535]</code></td></tr>
+<tr><td>uint32</td><td>32-bit unsigned integer</td><td><code>[0..4294967295]</code></td></tr>
+<tr><td>uint64</td><td>64-bit unsigned integer</td><td><code>[0..18446744073709551615]</code></td></tr>
+<tr><td>uint128</td><td>128-bit unsigned integer</td><td><code>[0..340282366920938463463374607431768211455]</code></td></tr>
+</tbody></table>
+</div>
+<h3 id="custom-ranged-integers"><a class="header" href="#custom-ranged-integers">Custom Ranged Integers</a></h3>
+<p>You can create integer types with a custom range by specifying the range as part of the type annotation</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_custom_number%3Aint%3Crange%3D%5B42..%29%3E%20%3D%2042"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>TBD for behavior when value goes out of bounds. Perhaps result will be undefined, or there can be a type setting for wrap around</p>
+<h3 id="fixed-point"><a class="header" href="#fixed-point">Fixed Point</a></h3>
+<p>Fixed point will be stored as two integers, <code>digits</code> and <code>shift</code> where the value is <code>digits * 10^shift</code></p>
+<p>TBD on the syntax for declaring a fixed point number. likely to be a function call e.g. </p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_fixed_point%20%3D%20fixed_point%283141592%2C%20-6%29"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h3 id="rational"><a class="header" href="#rational">Rational</a></h3>
+<p>Rational numbers are stored as two integers, the <code>numerator</code> and the <code>denominator</code>, where the value is <code>numerator / denominator</code></p>
+<p>TBD on the syntax for declaring a rational number. likely to be a function call e.g.</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_rational%20%3D%20rational%2822%2C%207%29%20//rational%20approximation%20of%20pi"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h3 id="real"><a class="header" href="#real">Real</a></h3>
+<p>Real numbers are positive and negative numbers that can have a decimal component to them. The default real will be stored as a <code>float64</code> i.e. a 64-bit floating point number, but other widths (and potentially arbitrary precision) are possible</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_real%20%3D%203.1415%0Amy_real32%20%3D%2054.54%20as%20real32%0Amy_real64%20%3D%20233.511534%20as%20real64"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h3 id="boolean"><a class="header" href="#boolean">Boolean</a></h3>
+<p>Standard true/false type</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_bool%20%3D%20true"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h3 id="complex"><a class="header" href="#complex">Complex</a></h3>
+<p>complex numbers</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_complex0%20%3D%202%5E/2%20%2B%202i%5E/2%0Amy_complex1%20%3D%20complex%282%5E/2%2C%202%5E/2%29%0Amy_complex2%20%3D%20complex%281%2C%2045%C2%B0%29%0Amy_complex3%20%3D%201%20%E2%88%A0%2045%C2%B0"
     style="width: 100%;"
     id="DemoIframe"
     frameBorder="0"

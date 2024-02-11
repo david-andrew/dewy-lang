@@ -171,7 +171,113 @@
 <h2 id="function-literals"><a class="header" href="#function-literals">Function Literals</a></h2>
 <p>To create a function, simply bind a function literal to a variable</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_function%20%3D%20%28%29%20%3D%3E%20%7B%20printl%27You%20called%20my%20function%21%27%20%7D%0A%0Amy_function%20%20//calls%20the%20function%0A%60%60%60%0A%0AA%20function%20literal%20consists%20of%20the%20arguments%2C%20followed%20by%20the%20%60%3D%3E%60%20operator%2C%20followed%20by%20a%20single%20expression%20that%20is%20the%20function%20body.%20In%20the%20above%20example%2C%20the%20function%20takes%20no%20input%20arguments%2C%20and%20doesn%27t%20return%20any%20values.%20Instead%20is%20simply%20prints%20a%20string%20to%20the%20terminal.%0A%0AHere%27s%20an%20example%20that%20takes%20two%20arguments%0A%0A%60%60%60dewy%0Apythag_length%20%3D%20%28a%2C%20b%29%20%3D%3E%20%7B%20return%20%28a%5E2%20%2B%20b%5E2%29%5E/2%20%7D%0A%60%60%60%0A%0AIn%20fact%20we%20can%20simplify%20the%20above%20function%27s%20declaration%20quite%20a%20bit%20since%20blocks%20return%20expressions%20present%20in%20the%20body.%0A%0A%60%60%60dewy%0Apythag_length%20%3D%20%28a%2C%20b%29%20%3D%3E%20%28a%5E2%20%2B%20b%5E2%29%5E/2%0A%60%60%60%0A%0AAnd%2C%20because%20of%20precedence%20rules%2C%20we%20can%20omit%20the%20parenthesis%20around%20the%20argument%20list%0A%0A%60%60%60dewy%0Apythag_length%20%3D%20a%2C%20b%20%3D%3E%20%28a%5E2%20%2B%20b%5E2%29%5E/2%0A%60%60%60%0A%0A%3E%20Note%3A%20zero%20arguments%20require%20an%20empty%20pair%20of%20parenthesis%2C%20in%20order%20to%20be%20parsed%20correctly.%20This%20is%20because%20a%20function%20literal%20is%20parsed%20as%20%60%3Cleft%3E%20%3D%3E%20%3Cright%3E%60%2C%20so%20something%20must%20always%20be%20present%20on%20the%20left%20side%20of%20the%20%60%3D%3E%60%20operator.%0A%0A%60%60%60dewy%0Afoo%20%3D%20%28%29%20%3D%3E%20printl%27bar%27%0A%60%60%60%0A%0A%0A%23%23%23%20Default%20Arguments%0AFunction%20arguments%20can%20have%20default%20values%2C%20which%20are%20used%20if%20the%20argument%20is%20not%20specified%20in%20the%20function%20call.%20%0A%0A%3E%20Note%3A%20because%20comma%20%60%2C%60%20has%20higher%20precedence%20than%20%60%3D%60%2C%20the%20default%20value%20must%20be%20wrapped%20in%20parenthesis.%0A%0A%60%60%60dewy%0Afoo%20%3D%20a%2C%20%28b%3D5%29%20%3D%3E%20a%20%2B%20b%0Afoo%20%3D%20a%3Aint%2C%20%28b%3Aint%3D5%29%2C%20%28c%3Aint%3D10%29%20%3D%3E%20a%20%2B%20b%20%2B%20c%0A%60%60%60%0A%0A%3C%21--%20Alternatively%2C%20you%20can%20replace%20the%20tuple%20with%20an%20array%20literal%2C%20which%20is%20separated%20by%20spaced%2C%20meaning%20%60%3D%60%20will%20be%20at%20the%20correct%20precedence%20level%20without%20the%20need%20for%20parenthesis.%20--%3E%0A%0A%3C%21--%20%60%60%60dewy%20--%3E%0A%3C%21--%20foo%20%3D%20%5Ba%20b%3D5%5D%20%3D%3E%20a%20%2B%20b%20--%3E%0A%3C%21--%20foo%20%3D%20%5Ba%3Aint%20b%3Aint%3D5%20c%3Aint%3D10%5D%20%3D%3E%20a%20%2B%20b%20%2B%20c%20--%3E%0A%3C%21--%20%60%60%60%20--%3E%0A%0A%0A%23%23%20Calling%20functions%0A%0ATODO%0A-%20calling%20a%20function%20with%20name%2C%20parenthesis%2C%20and%20args%0A-%20functions%20with%20no%20arguments%20can%20omit%20the%20parenthesis%0A%0A%23%23%20Optional%2C%20Name-only%20and%20Positional-only%20Arguments%0A%0ATODO%0A-%20also%20explain%20about%20overwriting%20previously%20specified%20arguments%20%28e.g.%20from%20partial%20evaluation%2C%20or%20in%20the%20same%20call%29%0A%0A%23%23%20Scope%20Capture%0A%0ATODO%0A-%20what%20variables%20are%20available%20to%20a%20function%27s%20body%0A%0A%23%23%20Partial%20Function%20Evaluation%0A%0AFirst%20note%20that%20if%20you%20want%20to%20pass%20a%20function%20around%20as%20an%20object%2C%20you%20need%20to%20get%20a%20handle%20to%20the%20function%20using%20the%20%60%40%60%20%28%22handle%22%29%20operator.%0A%0A%60%60%60dewy%0Amy_func%20%3D%20%28%29%20%3D%3E%20printl%27foo%27%0A%0Areference_to_my_func%20%3D%20%40my_func%0A%60%60%60%0A%0AIf%20you%20don%27t%20include%20the%20%60%40%60%20operator%2C%20then%20the%20evaluation%20of%20the%20right-hand%20side%20would%20be%20stored%20into%20the%20left%20side%0A%0A%60%60%60dewy%0Areference_to_my_func%20%3D%20my_func%20%20//this%20doesn%27t%20work%0A%60%60%60%0A%0Awhat%20happens%20is%20%60my_func%60%20prints%20out%20%22foo%22%20to%20the%20command%20line%2C%20and%20then%20since%20it%20returns%20no%20value%2C%20%60reference_to_my_func%60%20is%20not%20able%20to%20be%20assigned%2C%20causing%20a%20compiler%20error.%20We%27d%20also%20get%20a%20compiler%20error%20if%20%60my_func%60%20required%20arguments%2C%20as%20we%20essentially%20are%20trying%20to%20call%20my_func%20without%20an%20arguments.%0A%0A%60%60%60dewy%0Aanother_func%20%3D%20%28a%2C%20b%2C%20c%2C%20x%29%20%3D%3E%20a%5E2%2Ax%20%2B%20b%2Ax%20%2B%20c%0A%0Agood_reference%20%3D%20%40another_func%0Abad_reference%20%3D%20another_func%20%20//this%20causes%20a%20compilation%20error%0A%60%60%60%0A%0ANow%2C%20using%20the%20%60%40%60%20operator%2C%20we%20can%20not%20only%20create%20a%20new%20reference%20to%20an%20existing%20function%2C%20but%20we%20can%20also%20%2A%2Aapply%20arguments%20to%20the%20reference%2A%2A.%20What%20this%20means%20is%20we%20can%20fix%20the%20value%20of%20given%20arguments%2C%20allowing%20us%20to%20create%20a%20new%20function.%0A%0A%60%60%60dewy%0Asum%20%3D%20%28a%2C%20b%29%20%3D%3E%20a%20%2B%20b%20%20%20//simple%20addition%20function%0Aadd5%20%3D%20%40sum%285%29%20%20%20%20%20%20%20%20%20%20//partially%20evaluate%20sum%20with%20a%3D5%0A%60%60%60%0A%0AHere%20we%27ve%20created%20a%20new%20function%20%60add5%60%20which%20takes%20a%20single%20argument%2C%20and%20return%20the%20result%20of%20that%20argument%20plus%205.%0A%0A%60%60%60dewy%0Aadd5%2824%29%20%20%20%20%20%20%20%20//returns%2029%0Aadd5%28-7%29%20%20%20%20%20%20%20%20//returns%20-2%0A%0Athirtyseven%20%3D%20%40add5%2832%29%20//new%20function%20that%20takes%200%20arguments%0Athirtyseven%20%20%20//returns%2037%0A%60%60%60%0A%0ATODO-%3Eexplain%20about%20overwriting%20arguments.%20Also%20explain%20precedence%20requiring%20wrapping%20named%20arguments%20in%20parenthesis%0A%0A%60%60%60dewy%0Anew_sum%20%3D%20%28x%2C%20y%29%20%3D%3E%20thirtyseven%28%28a%3Dx%29%2C%20%28b%3Dy%29%29"
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_function%20%3D%20%28%29%20%3D%3E%20%7B%20printl%27You%20called%20my%20function%21%27%20%7D%0A%0Amy_function%20%20//calls%20the%20function"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>A function literal consists of the arguments, followed by the <code>=&gt;</code> operator, followed by a single expression that is the function body. In the above example, the function takes no input arguments, and doesn't return any values. Instead is simply prints a string to the terminal.</p>
+<p>Here's an example that takes two arguments</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=pythag_length%20%3D%20%28a%2C%20b%29%20%3D%3E%20%7B%20return%20%28a%5E2%20%2B%20b%5E2%29%5E/2%20%7D"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>In fact we can simplify the above function's declaration quite a bit since blocks return expressions present in the body.</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=pythag_length%20%3D%20%28a%2C%20b%29%20%3D%3E%20%28a%5E2%20%2B%20b%5E2%29%5E/2"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>And, because of precedence rules, we can omit the parenthesis around the argument list</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=pythag_length%20%3D%20a%2C%20b%20%3D%3E%20%28a%5E2%20%2B%20b%5E2%29%5E/2"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<blockquote>
+<p>Note: zero arguments require an empty pair of parenthesis, in order to be parsed correctly. This is because a function literal is parsed as <code>&lt;left&gt; =&gt; &lt;right&gt;</code>, so something must always be present on the left side of the <code>=&gt;</code> operator.</p>
+</blockquote>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=foo%20%3D%20%28%29%20%3D%3E%20printl%27bar%27"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h3 id="default-arguments"><a class="header" href="#default-arguments">Default Arguments</a></h3>
+<p>Function arguments can have default values, which are used if the argument is not specified in the function call. </p>
+<blockquote>
+<p>Note: because comma <code>,</code> has higher precedence than <code>=</code>, the default value must be wrapped in parenthesis.</p>
+</blockquote>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=foo%20%3D%20a%2C%20%28b%3D5%29%20%3D%3E%20a%20%2B%20b%0Afoo%20%3D%20a%3Aint%2C%20%28b%3Aint%3D5%29%2C%20%28c%3Aint%3D10%29%20%3D%3E%20a%20%2B%20b%20%2B%20c"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<!-- Alternatively, you can replace the tuple with an array literal, which is separated by spaced, meaning `=` will be at the correct precedence level without the need for parenthesis. -->
+<!-- ```dewy -->
+<!-- foo = [a b=5] => a + b -->
+<!-- foo = [a:int b:int=5 c:int=10] => a + b + c -->
+<!-- ``` -->
+<h2 id="calling-functions"><a class="header" href="#calling-functions">Calling functions</a></h2>
+<p>TODO</p>
+<ul>
+<li>calling a function with name, parenthesis, and args</li>
+<li>functions with no arguments can omit the parenthesis</li>
+</ul>
+<h2 id="optional-name-only-and-positional-only-arguments"><a class="header" href="#optional-name-only-and-positional-only-arguments">Optional, Name-only and Positional-only Arguments</a></h2>
+<p>TODO</p>
+<ul>
+<li>also explain about overwriting previously specified arguments (e.g. from partial evaluation, or in the same call)</li>
+</ul>
+<h2 id="scope-capture"><a class="header" href="#scope-capture">Scope Capture</a></h2>
+<p>TODO</p>
+<ul>
+<li>what variables are available to a function's body</li>
+</ul>
+<h2 id="partial-function-evaluation"><a class="header" href="#partial-function-evaluation">Partial Function Evaluation</a></h2>
+<p>First note that if you want to pass a function around as an object, you need to get a handle to the function using the <code>@</code> (&quot;handle&quot;) operator.</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_func%20%3D%20%28%29%20%3D%3E%20printl%27foo%27%0A%0Areference_to_my_func%20%3D%20%40my_func"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>If you don't include the <code>@</code> operator, then the evaluation of the right-hand side would be stored into the left side</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=reference_to_my_func%20%3D%20my_func%20%20//this%20doesn%27t%20work"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>what happens is <code>my_func</code> prints out &quot;foo&quot; to the command line, and then since it returns no value, <code>reference_to_my_func</code> is not able to be assigned, causing a compiler error. We'd also get a compiler error if <code>my_func</code> required arguments, as we essentially are trying to call my_func without an arguments.</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=another_func%20%3D%20%28a%2C%20b%2C%20c%2C%20x%29%20%3D%3E%20a%5E2%2Ax%20%2B%20b%2Ax%20%2B%20c%0A%0Agood_reference%20%3D%20%40another_func%0Abad_reference%20%3D%20another_func%20%20//this%20causes%20a%20compilation%20error"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>Now, using the <code>@</code> operator, we can not only create a new reference to an existing function, but we can also <strong>apply arguments to the reference</strong>. What this means is we can fix the value of given arguments, allowing us to create a new function.</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=sum%20%3D%20%28a%2C%20b%29%20%3D%3E%20a%20%2B%20b%20%20%20//simple%20addition%20function%0Aadd5%20%3D%20%40sum%285%29%20%20%20%20%20%20%20%20%20%20//partially%20evaluate%20sum%20with%20a%3D5"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>Here we've created a new function <code>add5</code> which takes a single argument, and return the result of that argument plus 5.</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=add5%2824%29%20%20%20%20%20%20%20%20//returns%2029%0Aadd5%28-7%29%20%20%20%20%20%20%20%20//returns%20-2%0A%0Athirtyseven%20%3D%20%40add5%2832%29%20//new%20function%20that%20takes%200%20arguments%0Athirtyseven%20%20%20//returns%2037"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>TODO-&gt;explain about overwriting arguments. Also explain precedence requiring wrapping named arguments in parenthesis</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=new_sum%20%3D%20%28x%2C%20y%29%20%3D%3E%20thirtyseven%28%28a%3Dx%29%2C%20%28b%3Dy%29%29"
     style="width: 100%;"
     id="DemoIframe"
     frameBorder="0"

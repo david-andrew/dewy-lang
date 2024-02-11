@@ -171,11 +171,67 @@
 <h2 id="if-expressions"><a class="header" href="#if-expressions">If Expressions</a></h2>
 <p>If expressions allow you to conditionally evaluate code based on whether or not some condition is met.</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_var%20%3D%2010%0Aif%20my_var%20%3D%3F%2010%20%0A%20%20%20%20printl%22my_var%20is%20ten%22%0A%60%60%60%20%0A%0AThe%20syntax%20for%20an%20%60if%60%20expression%20is%3A%0A%0A%60%60%60%0Aif%20%3Ccondition%3E%20%3Cexpression%3E%0A%60%60%60%0A%0Awhere%20%60%3Ccondition%3E%60%20must%20result%20in%20a%20boolean%20value%2C%20and%20%60%3Cexpression%3E%60%20can%20be%20anything.%20Commonly%2C%20%60%3Cexpression%3E%60%20will%20be%20a%20block%20containing%20multiple%20expressions.%0A%0A%60%60%60dewy%0Aif%20a%20%3E%3F%20b%0A%7B%0A%20%20%20%20//do%20something%0A%20%20%20%20//do%20another%20thing%0A%7D%0A%60%60%60%0A%0A%23%23%20Loop%20Expressions%0ALoop%20expressions%20allow%20you%20to%20repeat%20the%20execution%20of%20some%20code%20while%20some%20condition%20is%20met.%0A%0A%60%60%60dewy%0Ai%20%3D%200%0Aloop%20i%20%3C%3F%2010%0A%7B%0A%20%20%20%20printl%22i%20is%20%7Bi%7D%22%0A%20%20%20%20i%20%2B%3D%201%0A%7D%0A%60%60%60%0A%0AThe%20syntax%20for%20a%20%60loop%60%20expression%20is%3A%0A%0A%60%60%60%0Aloop%20%3Ccondition%3E%20%3Cexpression%3E%0A%60%60%60%0A%0Awhere%20%60%3Ccondition%3E%60%20must%20be%20an%20expression%20that%20evaluates%20to%20a%20boolean%20value%2C%20and%20%60%3Cexpression%3E%60%20can%20be%20anything.%0A%0ALoops%20will%20be%20explored%20in%20more%20detail%20in%20%5BOne%20Loop%20To%20Rule%20Them%20All%5D%28loops.md%29.%0A%0A%0A%23%23%20Flow%20Chains%0A%0AMultiple%20flow%20expressions%20can%20be%20chained%20together%20via%20the%20%60else%60%20operator%2C%20along%20with%20an%20optional%20final%20default%20case%20that%20need%20not%20be%20a%20flow%20expression.%20In%20normal%20languages%2C%20this%20would%20be%20%60if-else-if%60%20kinds%20of%20sequences%2C%20which%20are%20certainly%20possible%20in%20Dewy%3A%0A%0A%0A%60%60%60dewy%0Amy_var%20%3D%20%27apple%27%0Aif%20my_var%20%3D%3F%20%27banana%27%20%0A%20%20%20%20printl%27A%20fruit%20enjoyed%20by%20monkeys%27%0Aelse%0A%20%20%20%20printl%27monkeys%20don%5C%27t%20like%20%7Bmy_var%7D%2C%20only%20bananas%21%27%0A%60%60%60%0A%0Aor%20even%0A%0A%60%60%60dewy%0Amy_var%20%3D%2042%0Aif%20my_var%20%3C%3D%3F%2010%0A%20%20%20%20printl%27a%20small%20number%27%0Aelse%20if%20my_var%20%3C%3D%3F%2050%0A%20%20%20%20printl%27a%20medium%20number%27%0Aelse%0A%20%20%20%20printl%27a%20number%20larger%20than%2050%27%0A%60%60%60%0A%0ABut%20Dewy%20also%20allows%20%60loop%60%20expressions%20to%20be%20combined%20in%20this%20way%20as%20well%3A%0A%0A%60%60%60dewy%0Aif%20a%20%3E%3F%20b%0A%7B%0A%20%20%20%20printl%27a%20is%20greater%20than%20b%27%0A%7D%0Aelse%20loop%20a%20%3C%3F%20b%0A%7B%0A%20%20%20%20printl%27a%20is%20less%20than%20b.%20Increasing%20a%20until%20it%20matches%20b%27%0A%20%20%20%20a%20%2B%3D%201%0A%7D%0Aelse%0A%7B%0A%20%20%20%20printl%27a%20is%20equal%20to%20b%27%0A%7D%0A%60%60%60%0A%0AIn%20the%20above%20example%2C%20if%20%60a%60%20is%20greater%20than%20%60b%60%2C%20the%20first%20block%20would%20be%20executed%2C%20and%20the%20rest%20of%20the%20blocks%20are%20skipped.%20If%20%60a%60%20%20is%20less%20than%20%60b%60%2C%20the%20loop%20in%20the%20second%20block%20executes%2C%20incrementing%20%60a%60%20until%20it%20is%20equal%20to%20%60b%60%2C%20at%20which%20point%20the%20rest%20of%20the%20chain%20is%20skipped.%20Only%20if%20%60a%60%20is%20neither%20greater%20than%20nor%20less%20than%20%60b%60%20%28i.e.%20%60a%60%20equals%20%60b%60%29%20will%20the%20final%20block%20be%20executed%20exclusively.%0A%0A%28TODO%3A%20add%20an%20example%20for%20how%20all%20conditions%20share%20the%20same%20scope%2C%20so%20variables%20defined%20in%20one%20condition%20will%20be%20available%20in%20later%20bodies%20if%20they%20execute%29%0A%0A%28TODO%3A%20probably%20add%20a%20%60finally%60%20operator%20which%20can%20be%20used%20to%20always%20execute%20code%20at%20the%20end%29%0A%0A%0A%23%23%20Capturing%20Values%0A%0AUnlike%20if%20statements%20from%20other%20languages%2C%20%60if%60s%20and%20%60loop%60s%20in%20Dewy%20are%20themselves%20expressions%2C%20allowing%20any%20expressed%20values%20to%20be%20captured.%20%60if%60%20expressions%20basically%20act%20like%20Dewy%27s%20version%20of%20the%20ternary%20operator%0A%0A%60%60%60%0Amy_fruit%20%3D%20%27kiwi%27%0Atropical_fruits%20%3D%20%5B%27banana%27%20%27pineapple%27%20%27kiwi%27%20%27papaya%27%5D%0Amy_var%20%3D%20if%20my_fruit%20in%3F%20tropical_fruit%0A%20%20%20%20%27a%20tropical%20fruit%27%0Aelse%0A%20%20%20%20%27some%20other%20type%20of%20fruit%27"
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_var%20%3D%2010%0Aif%20my_var%20%3D%3F%2010%20%0A%20%20%20%20printl%22my_var%20is%20ten%22%0A%60%60%60%20%0A%0AThe%20syntax%20for%20an%20%60if%60%20expression%20is%3A%0A"
     style="width: 100%;"
     id="DemoIframe"
     frameBorder="0"
 ></iframe>
+if <condition> <expression>
+```
+<p>where <code>&lt;condition&gt;</code> must result in a boolean value, and <code>&lt;expression&gt;</code> can be anything. Commonly, <code>&lt;expression&gt;</code> will be a block containing multiple expressions.</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=if%20a%20%3E%3F%20b%0A%7B%0A%20%20%20%20//do%20something%0A%20%20%20%20//do%20another%20thing%0A%7D"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<h2 id="loop-expressions"><a class="header" href="#loop-expressions">Loop Expressions</a></h2>
+<p>Loop expressions allow you to repeat the execution of some code while some condition is met.</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=i%20%3D%200%0Aloop%20i%20%3C%3F%2010%0A%7B%0A%20%20%20%20printl%22i%20is%20%7Bi%7D%22%0A%20%20%20%20i%20%2B%3D%201%0A%7D"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>The syntax for a <code>loop</code> expression is:</p>
+<pre><code>loop &lt;condition&gt; &lt;expression&gt;
+</code></pre>
+<p>where <code>&lt;condition&gt;</code> must be an expression that evaluates to a boolean value, and <code>&lt;expression&gt;</code> can be anything.</p>
+<p>Loops will be explored in more detail in <a href="loops.html">One Loop To Rule Them All</a>.</p>
+<h2 id="flow-chains"><a class="header" href="#flow-chains">Flow Chains</a></h2>
+<p>Multiple flow expressions can be chained together via the <code>else</code> operator, along with an optional final default case that need not be a flow expression. In normal languages, this would be <code>if-else-if</code> kinds of sequences, which are certainly possible in Dewy:</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_var%20%3D%20%27apple%27%0Aif%20my_var%20%3D%3F%20%27banana%27%20%0A%20%20%20%20printl%27A%20fruit%20enjoyed%20by%20monkeys%27%0Aelse%0A%20%20%20%20printl%27monkeys%20don%5C%27t%20like%20%7Bmy_var%7D%2C%20only%20bananas%21%27"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>or even</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_var%20%3D%2042%0Aif%20my_var%20%3C%3D%3F%2010%0A%20%20%20%20printl%27a%20small%20number%27%0Aelse%20if%20my_var%20%3C%3D%3F%2050%0A%20%20%20%20printl%27a%20medium%20number%27%0Aelse%0A%20%20%20%20printl%27a%20number%20larger%20than%2050%27"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>But Dewy also allows <code>loop</code> expressions to be combined in this way as well:</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=if%20a%20%3E%3F%20b%0A%7B%0A%20%20%20%20printl%27a%20is%20greater%20than%20b%27%0A%7D%0Aelse%20loop%20a%20%3C%3F%20b%0A%7B%0A%20%20%20%20printl%27a%20is%20less%20than%20b.%20Increasing%20a%20until%20it%20matches%20b%27%0A%20%20%20%20a%20%2B%3D%201%0A%7D%0Aelse%0A%7B%0A%20%20%20%20printl%27a%20is%20equal%20to%20b%27%0A%7D"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>In the above example, if <code>a</code> is greater than <code>b</code>, the first block would be executed, and the rest of the blocks are skipped. If <code>a</code>  is less than <code>b</code>, the loop in the second block executes, incrementing <code>a</code> until it is equal to <code>b</code>, at which point the rest of the chain is skipped. Only if <code>a</code> is neither greater than nor less than <code>b</code> (i.e. <code>a</code> equals <code>b</code>) will the final block be executed exclusively.</p>
+<p>(TODO: add an example for how all conditions share the same scope, so variables defined in one condition will be available in later bodies if they execute)</p>
+<p>(TODO: probably add a <code>finally</code> operator which can be used to always execute code at the end)</p>
+<h2 id="capturing-values"><a class="header" href="#capturing-values">Capturing Values</a></h2>
+<p>Unlike if statements from other languages, <code>if</code>s and <code>loop</code>s in Dewy are themselves expressions, allowing any expressed values to be captured. <code>if</code> expressions basically act like Dewy's version of the ternary operator</p>
+<pre><code>my_fruit = 'kiwi'
+tropical_fruits = ['banana' 'pineapple' 'kiwi' 'papaya']
+my_var = if my_fruit in? tropical_fruit
+    'a tropical fruit'
+else
+    'some other type of fruit'
+</code></pre>
 <p><code>my_var</code> would have a value of <code>'a tropical fruit'</code> at the end of the above example.</p>
 <p>Values from loops can be captured to construct sequences, which is explored more in <a href="loops.html#loop-generators">One Loop To Rule Them All</a>.</p>
 <h2 id="match-expressions"><a class="header" href="#match-expressions">Match Expressions</a></h2>

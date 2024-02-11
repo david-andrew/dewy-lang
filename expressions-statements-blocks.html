@@ -171,7 +171,83 @@
 <p>Dewy is an expression based language. An expression is literally just a value, or something that evaluates to a value. Results of expressions can be stored in variables, or used to build up more complicated expressions.</p>
 <p>The simplest type of expression is any literal value, such as an integer for instance</p>
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/src_only?src=42%20%20//an%20integer%20expression%0A%60%60%60%0A%0AThis%20expression%20can%20easily%20be%20bound%20to%20a%20variable%0A%0A%60%60%60dewy%0Amy_expression%20%3D%2042%0A%60%60%60%0A%0ACalling%20a%20function%20is%20an%20expression%20if%20the%20function%20returns%20a%20value.%20For%20example%2C%20the%20%60sqrt%60%20function%20returns%20the%20square%20root%20of%20a%20value%0A%0A%60%60%60dewy%0Amy_expression%20%3D%20sqrt%2864%29%20%20//returns%208%0A%60%60%60%0A%0AAnd%20now%20%60my_expression%60%20contains%20the%20value%20%608%60.%0A%0AExpressions%20can%20also%20be%20used%20to%20build%20up%20more%20complicated%20expressions%0A%0A%60%60%60dewy%0Amy_expression%20%3D%20%27string%20with%20the%20expression%20%7Bsqrt%2864%29%20%2B%209%20%2A%20cos%28pi%29%7D%27%0A%60%60%60%0A%0AIn%20this%20example%2C%20at%20the%20highest%20level%2C%20there%20is%20a%20string%20expression%2C%20which%20contains%20a%20nested%20expression.%20The%20nested%20expression%20%60sqrt%2864%29%20%2B%209%20%2A%20cos%28pi%29%60%20is%20a%20mathematical%20expression%2C%20built%20up%20from%20smaller%20expressions%20combined%20with%20math%20operators%20%60%2B%60%20and%20%60%2A%60.%20%60sqrt%2864%29%60%20and%20%60cos%28pi%29%60%20are%20both%20a%20function%20call%20expressions%2C%20and%20%6064%60%2C%20%609%60%20are%20literal%20expressions%20and%20%60pi%60%20is%20an%20identifier%20for%20a%20constant%20value.%0A%0A%0A%23%23%20Statements%0A%0AA%20statement%20is%20a%20single%20piece%20of%20code%20that%20expresses%20no%20value%20%28typically%20referred%20to%20as%20%60void%60%29.%20For%20example%20calling%20the%20%60printl%60%20function%2C%20which%20prints%20out%20a%20string%20to%20the%20console%0A%0A%60%60%60dewy%0Aprintl%27Hello%27%0A%60%60%60%0A%0AThis%20function%20call%20doesn%27t%20return%20a%20value.%20If%20you%20tried%20to%20store%20the%20result%20into%20a%20variable%2C%20you%27d%20get%20a%20compilation%20error%0A%0A%60%60%60dewy%0Amy_var%20%3D%20printl%27Hello%27%20%20//%20Error%3A%20can%27t%20assign%20void%20to%20a%20variable%0A%60%60%60%0A%0AMost%20expressions%20in%20Dewy%20will%20return%20something%2C%20but%20you%20can%20easily%20convert%20an%20expression%20into%20a%20%60void%60%20statement%20by%20appending%20a%20semicolon%20%60%3B%60%20to%20the%20end%20of%20the%20expression%0A%0A%60%60%60dewy%0Amy_expression%20%3D%20%5B%0A%20%20%20%20sqrt%281%29%3B%0A%20%20%20%20sqrt%284%29%3B%0A%20%20%20%20sqrt%289%29%3B%0A%20%20%20%20sqrt%2816%29%3B%0A%20%20%20%20sqrt%2836%29%3B%0A%20%20%20%20sqrt%2849%29%3B%0A%20%20%20%20sqrt%2864%29%3B%0A%5D%0A%60%60%60%0A%0AIn%20this%20example%2C%20the%20resulting%20value%20of%20each%20%60sqrt%60%20call%20is%20suppressed%20by%20the%20semicolon%2C%20and%20the%20array%20captures%20no%20values%2C%20meaning%20%60my_expression%20%3D%20%5B%5D%60.%0A%0A%3E%20Note%3A%20the%20one%20context%20where%20semicolon%20does%20not%20suppress%20the%20value%20of%20an%20expression%20is%20in%20a%20multidimensional%20array%20literal.%20In%20this%20context%2C%20semicolons%20are%20used%20to%20indicate%20new%20dimensions%20of%20the%20array%2C%20and%20values%20with%20semicolons%20are%20still%20captured.%0A%0A%23%23%20Blocks%0A%0AA%20block%20is%20just%20a%20sequence%20of%20expressions%20or%20statements%20wrapped%20in%20either%20%60%7B%7D%60%20or%20%60%28%29%60.%20A%20block%20is%20itself%20an%20expression.%0A%0A%3E%20Note%3A%20the%20distinction%20between%20%60%7B%7D%60%20and%20%60%28%29%60%20blocks%20has%20to%20do%20with%20the%20scope%20of%20the%20block.%20Any%20expressions%20inside%20a%20%60%7B%7D%60%20block%20receive%20a%20new%20child%20execution%20scope%2C%20while%20those%20inside%20a%20%60%28%29%60%20block%20share%20the%20same%20scope%20as%20the%20parent%20where%20the%20block%20is%20written.%20Scope%20will%20be%20explained%20in%20greater%20detail%20later%20%28TODO%3A%20link%29%0A%0ALet%27s%20start%20with%20the%20simplest%20type%20of%20a%20block%2C%20the%20empty%20block%0A%0A%60%60%60dewy%0A%7B%20%7D%20%20//%20an%20empty%20block%0A%28%20%29%20%20//%20also%20an%20empty%20block%0A%60%60%60%0A%0AEmpty%20blocks%20have%20type%20%60void%60%20since%20they%20don%27t%20contain%20any%20expressions%2C%20thus%20making%20the%20overall%20block%20not%20express%20anything.%0A%0AAdding%20a%20single%20expression%20to%20a%20block%20makes%20the%20block%20itself%20express%20that%20value%0A%0A%60%60%60dewy%0A%7B%2042%20%7D%20%20//%20a%20block%20that%20expresses%20the%20value%2042%0A%60%60%60%0A%0AAdding%20multiple%20expressions%20to%20a%20block%20makes%20the%20block%20express%20multiple%20values%20%28TODO%3A%20link%20to%20generators%29%0A%20%20%20%20%0A%60%60%60dewy%0A%7B%201%202%203%204%205%206%207%208%209%2010%20%7D%20%20//%20a%20block%20that%20expresses%20the%20values%201%20through%2010"
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=42%20%20//an%20integer%20expression"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>This expression can easily be bound to a variable</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_expression%20%3D%2042"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>Calling a function is an expression if the function returns a value. For example, the <code>sqrt</code> function returns the square root of a value</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_expression%20%3D%20sqrt%2864%29%20%20//returns%208"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>And now <code>my_expression</code> contains the value <code>8</code>.</p>
+<p>Expressions can also be used to build up more complicated expressions</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_expression%20%3D%20%27string%20with%20the%20expression%20%7Bsqrt%2864%29%20%2B%209%20%2A%20cos%28pi%29%7D%27"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>In this example, at the highest level, there is a string expression, which contains a nested expression. The nested expression <code>sqrt(64) + 9 * cos(pi)</code> is a mathematical expression, built up from smaller expressions combined with math operators <code>+</code> and <code>*</code>. <code>sqrt(64)</code> and <code>cos(pi)</code> are both a function call expressions, and <code>64</code>, <code>9</code> are literal expressions and <code>pi</code> is an identifier for a constant value.</p>
+<h2 id="statements"><a class="header" href="#statements">Statements</a></h2>
+<p>A statement is a single piece of code that expresses no value (typically referred to as <code>void</code>). For example calling the <code>printl</code> function, which prints out a string to the console</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=printl%27Hello%27"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>This function call doesn't return a value. If you tried to store the result into a variable, you'd get a compilation error</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_var%20%3D%20printl%27Hello%27%20%20//%20Error%3A%20can%27t%20assign%20void%20to%20a%20variable"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>Most expressions in Dewy will return something, but you can easily convert an expression into a <code>void</code> statement by appending a semicolon <code>;</code> to the end of the expression</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_expression%20%3D%20%5B%0A%20%20%20%20sqrt%281%29%3B%0A%20%20%20%20sqrt%284%29%3B%0A%20%20%20%20sqrt%289%29%3B%0A%20%20%20%20sqrt%2816%29%3B%0A%20%20%20%20sqrt%2836%29%3B%0A%20%20%20%20sqrt%2849%29%3B%0A%20%20%20%20sqrt%2864%29%3B%0A%5D"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>In this example, the resulting value of each <code>sqrt</code> call is suppressed by the semicolon, and the array captures no values, meaning <code>my_expression = []</code>.</p>
+<blockquote>
+<p>Note: the one context where semicolon does not suppress the value of an expression is in a multidimensional array literal. In this context, semicolons are used to indicate new dimensions of the array, and values with semicolons are still captured.</p>
+</blockquote>
+<h2 id="blocks"><a class="header" href="#blocks">Blocks</a></h2>
+<p>A block is just a sequence of expressions or statements wrapped in either <code>{}</code> or <code>()</code>. A block is itself an expression.</p>
+<blockquote>
+<p>Note: the distinction between <code>{}</code> and <code>()</code> blocks has to do with the scope of the block. Any expressions inside a <code>{}</code> block receive a new child execution scope, while those inside a <code>()</code> block share the same scope as the parent where the block is written. Scope will be explained in greater detail later (TODO: link)</p>
+</blockquote>
+<p>Let's start with the simplest type of a block, the empty block</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=%7B%20%7D%20%20//%20an%20empty%20block%0A%28%20%29%20%20//%20also%20an%20empty%20block"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>Empty blocks have type <code>void</code> since they don't contain any expressions, thus making the overall block not express anything.</p>
+<p>Adding a single expression to a block makes the block itself express that value</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=%7B%2042%20%7D%20%20//%20a%20block%20that%20expresses%20the%20value%2042"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
+<p>Adding multiple expressions to a block makes the block express multiple values (TODO: link to generators)</p>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=%7B%201%202%203%204%205%206%207%208%209%2010%20%7D%20%20//%20a%20block%20that%20expresses%20the%20values%201%20through%2010"
     style="width: 100%;"
     id="DemoIframe"
     frameBorder="0"
