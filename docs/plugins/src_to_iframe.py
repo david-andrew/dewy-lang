@@ -9,7 +9,7 @@ import json
 
 def process_markdown(input_markdown):
 
-    pattern = re.compile(r"```dewy(, *editable)?\n((.*\n)*)```$", re.MULTILINE)
+    pattern = re.compile(r"```dewy(, *editable)?\n((.*\n)*?)```$", re.MULTILINE)
 
     def replacement(match):
         editable = match.group(1) is not None
