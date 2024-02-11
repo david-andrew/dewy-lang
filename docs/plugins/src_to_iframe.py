@@ -19,7 +19,7 @@ def process_markdown(input_markdown):
         encoded_code = quote(code_block)
         iframe = f'''\
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/{page}?src={encoded_code}&id=DewyIframe{i}"
+    src="https://david-andrew.github.io/iframes/dewy/{page}?src={encoded_code}&id=DewyIframe{i}"
     style="width: 100%;"
     id="DewyIframe{i}"
     frameBorder="0"
