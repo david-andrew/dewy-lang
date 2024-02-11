@@ -1,0 +1,13 @@
+//TODO: need more language features to finish writing this...
+
+// get the input markdown from stdin
+input_markdown = read()
+
+// find blocks of ```dewy ``` and ```dewy, editable ``` and convert them to iframes
+i = 0
+loop i <? input_markdown.length - 11 {
+    if input_markdown[i..i+7] =? '```dewy' {
+        j = i
+        loop ... //until we find \n```\n or \n```EOF
+    }
+}
