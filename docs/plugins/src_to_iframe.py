@@ -3,8 +3,8 @@ import re
 from urllib.parse import quote
 import json
 
-# from itertools import count
-# counter = count(0)
+from itertools import count
+counter = count(0)
 
 
 def process_markdown(input_markdown):
@@ -12,15 +12,16 @@ def process_markdown(input_markdown):
     pattern = re.compile(r"```dewy(, *editable)?\n((.*\n)*?)```$", re.MULTILINE)
 
     def replacement(match):
+        i = next(counter)  # give each iframe a unique id
         editable = match.group(1) is not None
         page = 'demo_only' if editable else 'src_only'
         code_block = match.group(2)[:-1]  # remove the trailing newline
         encoded_code = quote(code_block)
         iframe = f'''\
 <iframe
-    src="https://david-andrew.github.io/projects/dewy/{page}?src={encoded_code}"
+    src="https://david-andrew.github.io/projects/dewy/{page}?src={encoded_code}&id=DewyIframe{i}"
     style="width: 100%;"
-    id="DemoIframe"
+    id="DewyIframe{i}"
     frameBorder="0"
 ></iframe>'''
         return iframe
