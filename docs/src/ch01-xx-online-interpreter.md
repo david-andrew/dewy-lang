@@ -5,5 +5,5 @@ This is a simple online interpreter for the Dewy programming language. It's very
 Long term, this will be replaced with a less janky version that supports the full language.
 
 ```dewy, editable
-printl'Hello, World!'
+printl'Welcome to the online Dewy Interpreter!'
 ```
