@@ -202,8 +202,12 @@
 <div style="break-before: page; page-break-before: always;"></div><h1 id="online-interpreter"><a class="header" href="#online-interpreter">Online Interpreter</a></h1>
 <p>This is a simple online interpreter for the Dewy programming language. It's very work in progress, and only supports a subset of the language features, but it should give a good idea of what the language is like.</p>
 <p>Long term, this will be replaced with a less janky version that supports the full language.</p>
-<pre><code class="language-dewy  editable">printl'Hello, World!'
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/demo_only?src=printl%27Welcome%20to%20the%20online%20Dewy%20Interpreter%21%27"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="installation"><a class="header" href="#installation">Installation</a></h1>
 <p>Currently, only the python interpreter backend is available. To install it, you must have <strong>python 3.11</strong> or later installed. Then to install:</p>
 <ol>
@@ -235,13 +239,12 @@ $ cd hello_world
 <h2 id="write-the-source-code"><a class="header" href="#write-the-source-code">Write the Source Code</a></h2>
 <p>Next we'll create the source file. In a text editor of your choosing, create a file called <code>hello.dewy</code>.</p>
 <p>Then in the text editor, enter the following code</p>
-<pre><code class="language-dewy">printl'Hello, World!'
-</code></pre>
-<p>When you are done in the text editor, save and close the file.</p>
-<h2 id="run-the-code"><a class="header" href="#run-the-code">Run the Code</a></h2>
-<p>Running a dewy file is as simple as invoking the file with the <code>dewy</code> command</p>
-<pre><code class="language-bash">$ dewy hello.dewy
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=printl%27Hello%2C%20World%21%27%0A%60%60%60%0A%0AWhen%20you%20are%20done%20in%20the%20text%20editor%2C%20save%20and%20close%20the%20file.%0A%0A%23%23%20Run%20the%20Code%0A%0ARunning%20a%20dewy%20file%20is%20as%20simple%20as%20invoking%20the%20file%20with%20the%20%60dewy%60%20command%0A%0A%60%60%60bash%0A%24%20dewy%20hello.dewy"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
 <p>Which should print <code>Hello, World!</code> in the terminal. </p>
 <h2 id="how-it-works"><a class="header" href="#how-it-works">How it Works</a></h2>
 <p>This code invokes the <code>printl</code> function with the string <code>'Hello, World!'</code>. <code>printl</code> is a commonly used function that takes text and prints it to the terminal, followed by a newline.</p>
@@ -304,57 +307,12 @@ $ cd hello_world
 <h2 id="expressions"><a class="header" href="#expressions">Expressions</a></h2>
 <p>Dewy is an expression based language. An expression is literally just a value, or something that evaluates to a value. Results of expressions can be stored in variables, or used to build up more complicated expressions.</p>
 <p>The simplest type of expression is any literal value, such as an integer for instance</p>
-<pre><code class="language-dewy">42  //an integer expression
-</code></pre>
-<p>This expression can easily be bound to a variable</p>
-<pre><code class="language-dewy">my_expression = 42
-</code></pre>
-<p>Calling a function is an expression if the function returns a value. For example, the <code>sqrt</code> function returns the square root of a value</p>
-<pre><code class="language-dewy">my_expression = sqrt(64)  //returns 8
-</code></pre>
-<p>And now <code>my_expression</code> contains the value <code>8</code>.</p>
-<p>Expressions can also be used to build up more complicated expressions</p>
-<pre><code class="language-dewy">my_expression = 'string with the expression {sqrt(64) + 9 * cos(pi)}'
-</code></pre>
-<p>In this example, at the highest level, there is a string expression, which contains a nested expression. The nested expression <code>sqrt(64) + 9 * cos(pi)</code> is a mathematical expression, built up from smaller expressions combined with math operators <code>+</code> and <code>*</code>. <code>sqrt(64)</code> and <code>cos(pi)</code> are both a function call expressions, and <code>64</code>, <code>9</code> are literal expressions and <code>pi</code> is an identifier for a constant value.</p>
-<h2 id="statements"><a class="header" href="#statements">Statements</a></h2>
-<p>A statement is a single piece of code that expresses no value (typically referred to as <code>void</code>). For example calling the <code>printl</code> function, which prints out a string to the console</p>
-<pre><code class="language-dewy">printl'Hello'
-</code></pre>
-<p>This function call doesn't return a value. If you tried to store the result into a variable, you'd get a compilation error</p>
-<pre><code class="language-dewy">my_var = printl'Hello'  // Error: can't assign void to a variable
-</code></pre>
-<p>Most expressions in Dewy will return something, but you can easily convert an expression into a <code>void</code> statement by appending a semicolon <code>;</code> to the end of the expression</p>
-<pre><code class="language-dewy">my_expression = [
-    sqrt(1);
-    sqrt(4);
-    sqrt(9);
-    sqrt(16);
-    sqrt(36);
-    sqrt(49);
-    sqrt(64);
-]
-</code></pre>
-<p>In this example, the resulting value of each <code>sqrt</code> call is suppressed by the semicolon, and the array captures no values, meaning <code>my_expression = []</code>.</p>
-<blockquote>
-<p>Note: the one context where semicolon does not suppress the value of an expression is in a multidimensional array literal. In this context, semicolons are used to indicate new dimensions of the array, and values with semicolons are still captured.</p>
-</blockquote>
-<h2 id="blocks"><a class="header" href="#blocks">Blocks</a></h2>
-<p>A block is just a sequence of expressions or statements wrapped in either <code>{}</code> or <code>()</code>. A block is itself an expression.</p>
-<blockquote>
-<p>Note: the distinction between <code>{}</code> and <code>()</code> blocks has to do with the scope of the block. Any expressions inside a <code>{}</code> block receive a new child execution scope, while those inside a <code>()</code> block share the same scope as the parent where the block is written. Scope will be explained in greater detail later (TODO: link)</p>
-</blockquote>
-<p>Let's start with the simplest type of a block, the empty block</p>
-<pre><code class="language-dewy">{ }  // an empty block
-( )  // also an empty block
-</code></pre>
-<p>Empty blocks have type <code>void</code> since they don't contain any expressions, thus making the overall block not express anything.</p>
-<p>Adding a single expression to a block makes the block itself express that value</p>
-<pre><code class="language-dewy">{ 42 }  // a block that expresses the value 42
-</code></pre>
-<p>Adding multiple expressions to a block makes the block express multiple values (TODO: link to generators)</p>
-<pre><code class="language-dewy">{ 1 2 3 4 5 6 7 8 9 10 }  // a block that expresses the values 1 through 10
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=42%20%20//an%20integer%20expression%0A%60%60%60%0A%0AThis%20expression%20can%20easily%20be%20bound%20to%20a%20variable%0A%0A%60%60%60dewy%0Amy_expression%20%3D%2042%0A%60%60%60%0A%0ACalling%20a%20function%20is%20an%20expression%20if%20the%20function%20returns%20a%20value.%20For%20example%2C%20the%20%60sqrt%60%20function%20returns%20the%20square%20root%20of%20a%20value%0A%0A%60%60%60dewy%0Amy_expression%20%3D%20sqrt%2864%29%20%20//returns%208%0A%60%60%60%0A%0AAnd%20now%20%60my_expression%60%20contains%20the%20value%20%608%60.%0A%0AExpressions%20can%20also%20be%20used%20to%20build%20up%20more%20complicated%20expressions%0A%0A%60%60%60dewy%0Amy_expression%20%3D%20%27string%20with%20the%20expression%20%7Bsqrt%2864%29%20%2B%209%20%2A%20cos%28pi%29%7D%27%0A%60%60%60%0A%0AIn%20this%20example%2C%20at%20the%20highest%20level%2C%20there%20is%20a%20string%20expression%2C%20which%20contains%20a%20nested%20expression.%20The%20nested%20expression%20%60sqrt%2864%29%20%2B%209%20%2A%20cos%28pi%29%60%20is%20a%20mathematical%20expression%2C%20built%20up%20from%20smaller%20expressions%20combined%20with%20math%20operators%20%60%2B%60%20and%20%60%2A%60.%20%60sqrt%2864%29%60%20and%20%60cos%28pi%29%60%20are%20both%20a%20function%20call%20expressions%2C%20and%20%6064%60%2C%20%609%60%20are%20literal%20expressions%20and%20%60pi%60%20is%20an%20identifier%20for%20a%20constant%20value.%0A%0A%0A%23%23%20Statements%0A%0AA%20statement%20is%20a%20single%20piece%20of%20code%20that%20expresses%20no%20value%20%28typically%20referred%20to%20as%20%60void%60%29.%20For%20example%20calling%20the%20%60printl%60%20function%2C%20which%20prints%20out%20a%20string%20to%20the%20console%0A%0A%60%60%60dewy%0Aprintl%27Hello%27%0A%60%60%60%0A%0AThis%20function%20call%20doesn%27t%20return%20a%20value.%20If%20you%20tried%20to%20store%20the%20result%20into%20a%20variable%2C%20you%27d%20get%20a%20compilation%20error%0A%0A%60%60%60dewy%0Amy_var%20%3D%20printl%27Hello%27%20%20//%20Error%3A%20can%27t%20assign%20void%20to%20a%20variable%0A%60%60%60%0A%0AMost%20expressions%20in%20Dewy%20will%20return%20something%2C%20but%20you%20can%20easily%20convert%20an%20expression%20into%20a%20%60void%60%20statement%20by%20appending%20a%20semicolon%20%60%3B%60%20to%20the%20end%20of%20the%20expression%0A%0A%60%60%60dewy%0Amy_expression%20%3D%20%5B%0A%20%20%20%20sqrt%281%29%3B%0A%20%20%20%20sqrt%284%29%3B%0A%20%20%20%20sqrt%289%29%3B%0A%20%20%20%20sqrt%2816%29%3B%0A%20%20%20%20sqrt%2836%29%3B%0A%20%20%20%20sqrt%2849%29%3B%0A%20%20%20%20sqrt%2864%29%3B%0A%5D%0A%60%60%60%0A%0AIn%20this%20example%2C%20the%20resulting%20value%20of%20each%20%60sqrt%60%20call%20is%20suppressed%20by%20the%20semicolon%2C%20and%20the%20array%20captures%20no%20values%2C%20meaning%20%60my_expression%20%3D%20%5B%5D%60.%0A%0A%3E%20Note%3A%20the%20one%20context%20where%20semicolon%20does%20not%20suppress%20the%20value%20of%20an%20expression%20is%20in%20a%20multidimensional%20array%20literal.%20In%20this%20context%2C%20semicolons%20are%20used%20to%20indicate%20new%20dimensions%20of%20the%20array%2C%20and%20values%20with%20semicolons%20are%20still%20captured.%0A%0A%23%23%20Blocks%0A%0AA%20block%20is%20just%20a%20sequence%20of%20expressions%20or%20statements%20wrapped%20in%20either%20%60%7B%7D%60%20or%20%60%28%29%60.%20A%20block%20is%20itself%20an%20expression.%0A%0A%3E%20Note%3A%20the%20distinction%20between%20%60%7B%7D%60%20and%20%60%28%29%60%20blocks%20has%20to%20do%20with%20the%20scope%20of%20the%20block.%20Any%20expressions%20inside%20a%20%60%7B%7D%60%20block%20receive%20a%20new%20child%20execution%20scope%2C%20while%20those%20inside%20a%20%60%28%29%60%20block%20share%20the%20same%20scope%20as%20the%20parent%20where%20the%20block%20is%20written.%20Scope%20will%20be%20explained%20in%20greater%20detail%20later%20%28TODO%3A%20link%29%0A%0ALet%27s%20start%20with%20the%20simplest%20type%20of%20a%20block%2C%20the%20empty%20block%0A%0A%60%60%60dewy%0A%7B%20%7D%20%20//%20an%20empty%20block%0A%28%20%29%20%20//%20also%20an%20empty%20block%0A%60%60%60%0A%0AEmpty%20blocks%20have%20type%20%60void%60%20since%20they%20don%27t%20contain%20any%20expressions%2C%20thus%20making%20the%20overall%20block%20not%20express%20anything.%0A%0AAdding%20a%20single%20expression%20to%20a%20block%20makes%20the%20block%20itself%20express%20that%20value%0A%0A%60%60%60dewy%0A%7B%2042%20%7D%20%20//%20a%20block%20that%20expresses%20the%20value%2042%0A%60%60%60%0A%0AAdding%20multiple%20expressions%20to%20a%20block%20makes%20the%20block%20express%20multiple%20values%20%28TODO%3A%20link%20to%20generators%29%0A%20%20%20%20%0A%60%60%60dewy%0A%7B%201%202%203%204%205%206%207%208%209%2010%20%7D%20%20//%20a%20block%20that%20expresses%20the%20values%201%20through%2010"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
 <p>TODO-&gt;rest of explanation of blocks.</p>
 <ul>
 <li>catching values expressed in blocks</li>
@@ -365,47 +323,12 @@ $ cd hello_world
 <p>Dewy was designed from day 1 to include physical units such as kilogram, meter, second. </p>
 <h2 id="a-simple-example"><a class="header" href="#a-simple-example">A Simple Example</a></h2>
 <p>Using units is quite straightforward, as they are just another expression. Juxtaposing a unit with a number will multiply the number by the unit, and you can use this to build up more complex expressions.</p>
-<pre><code class="language-dewy">mass = 10kg
-velocity = 30m/s
-energy = 1/2 * mass * velocity^2
-</code></pre>
-<p>The <code>energy</code> variable now contains a value of <code>9000 joules</code>. For more complex unit expressions, sometimes it is necessary to use parentheses to group terms together. In general it is good style to do so, except for the simplest unit expressions. See <a href="operators.html">Operator Precedence</a>. </p>
-<p>Here are several more examples of unit expressions:</p>
-<pre><code class="language-dewy">7kg * 10(m/s/s)
-25(N/m^2) + 15(Pa)
-12(kg) + 8(kg)
-3(m) * 5(s)
-25(J) - 15(J)
-9(N) * 6(m)
-1500(W) / 10(A)
-5(A) * 2(Ω)
-8(m*s^-1) / 2(s)
-40(N*m) * 10(rad)
-200(Pa) * 3(m^2)
-1000(m^3) * 2(kg/m^3)
-20(J/s) * 4(s)
-8(km/h) + 20(m/s)
-6(N) / 2(m^2)
-18(L) * 0.001(m^3/L)
-1000(kg) * 9.8(m/s^2)
-12(C) * 1.6 x 10^-19(C)
-0.5(kg) * (10(m/s))^2
-1200(W) / 240(V)
-6000(s) / 3600(s/h)
-7.5(mol) * 6.022e23(particles/mol)
-15(kg * m^2 * s^-1 * A^-2 * K^2 * mol^-1 * cd^3) + 10(kg * m * s^-2 * A^-1 * K * mol^-2 * cd^2)
-
-F = 5kg * 2(m/s^2) // 10 N
-W = 20N * 10m * cos(45°) // 141.42 J
-V = 2A * 10Ω // 20 V
-P = 12V * 5A // 60 W
-KE = 0.5 * 8kg * (6(m/s))^2 // 144 J
-U = 75kg * 9.81(m/s^2) * 5m // 3678.75 J
-F = 200(N/m) * 0.05m // 10 N
-Q = 385(W/(m * K)) * 1m^2 * (100°C - 25°C) * 3600s / 0.01m // 990000 J
-P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
-ρ = 50kg / 0.1m^3 // 500 kg/m^3
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=mass%20%3D%2010kg%0Avelocity%20%3D%2030m/s%0Aenergy%20%3D%201/2%20%2A%20mass%20%2A%20velocity%5E2%0A%60%60%60%0A%0AThe%20%60energy%60%20variable%20now%20contains%20a%20value%20of%20%609000%20joules%60.%20For%20more%20complex%20unit%20expressions%2C%20sometimes%20it%20is%20necessary%20to%20use%20parentheses%20to%20group%20terms%20together.%20In%20general%20it%20is%20good%20style%20to%20do%20so%2C%20except%20for%20the%20simplest%20unit%20expressions.%20See%20%5BOperator%20Precedence%5D%28operators.md%29.%20%0A%0AHere%20are%20several%20more%20examples%20of%20unit%20expressions%3A%0A%0A%60%60%60dewy%0A7kg%20%2A%2010%28m/s/s%29%0A25%28N/m%5E2%29%20%2B%2015%28Pa%29%0A12%28kg%29%20%2B%208%28kg%29%0A3%28m%29%20%2A%205%28s%29%0A25%28J%29%20-%2015%28J%29%0A9%28N%29%20%2A%206%28m%29%0A1500%28W%29%20/%2010%28A%29%0A5%28A%29%20%2A%202%28%CE%A9%29%0A8%28m%2As%5E-1%29%20/%202%28s%29%0A40%28N%2Am%29%20%2A%2010%28rad%29%0A200%28Pa%29%20%2A%203%28m%5E2%29%0A1000%28m%5E3%29%20%2A%202%28kg/m%5E3%29%0A20%28J/s%29%20%2A%204%28s%29%0A8%28km/h%29%20%2B%2020%28m/s%29%0A6%28N%29%20/%202%28m%5E2%29%0A18%28L%29%20%2A%200.001%28m%5E3/L%29%0A1000%28kg%29%20%2A%209.8%28m/s%5E2%29%0A12%28C%29%20%2A%201.6%20x%2010%5E-19%28C%29%0A0.5%28kg%29%20%2A%20%2810%28m/s%29%29%5E2%0A1200%28W%29%20/%20240%28V%29%0A6000%28s%29%20/%203600%28s/h%29%0A7.5%28mol%29%20%2A%206.022e23%28particles/mol%29%0A15%28kg%20%2A%20m%5E2%20%2A%20s%5E-1%20%2A%20A%5E-2%20%2A%20K%5E2%20%2A%20mol%5E-1%20%2A%20cd%5E3%29%20%2B%2010%28kg%20%2A%20m%20%2A%20s%5E-2%20%2A%20A%5E-1%20%2A%20K%20%2A%20mol%5E-2%20%2A%20cd%5E2%29%0A%0AF%20%3D%205kg%20%2A%202%28m/s%5E2%29%20//%2010%20N%0AW%20%3D%2020N%20%2A%2010m%20%2A%20cos%2845%C2%B0%29%20//%20141.42%20J%0AV%20%3D%202A%20%2A%2010%CE%A9%20//%2020%20V%0AP%20%3D%2012V%20%2A%205A%20//%2060%20W%0AKE%20%3D%200.5%20%2A%208kg%20%2A%20%286%28m/s%29%29%5E2%20//%20144%20J%0AU%20%3D%2075kg%20%2A%209.81%28m/s%5E2%29%20%2A%205m%20//%203678.75%20J%0AF%20%3D%20200%28N/m%29%20%2A%200.05m%20//%2010%20N%0AQ%20%3D%20385%28W/%28m%20%2A%20K%29%29%20%2A%201m%5E2%20%2A%20%28100%C2%B0C%20-%2025%C2%B0C%29%20%2A%203600s%20/%200.01m%20//%20990000%20J%0AP%20%3D%20%282mol%20%2A%208.314%28J/%28mol%20%2A%20K%29%29%20%2A%20300K%29%20/%200.01m%5E3%20//%20498420%20Pa%0A%CF%81%20%3D%2050kg%20/%200.1m%5E3%20//%20500%20kg/m%5E3"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
 <h2 id="si-prefixes"><a class="header" href="#si-prefixes">SI Prefixes</a></h2>
 <blockquote>
 <p>Note: SI prefixes only work for SI base and derived units (and a few exceptions noted below). Also the abbreviated forms of prefixes may only be combined with abbreviated units, and written out prefixes may only be combined with written out units. E.g. <code>kilograms</code> and <code>kg</code> are valid, but <code>kgrams</code> and <code>kilog</code> are invalid.</p>
@@ -520,74 +443,24 @@ P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
 (TODO: other units to add: <code>Hz</code>, <code>liter</code>, <code>gallon</code>, <code>oz</code>, <code>phon</code>/<code>lufs</code>/other sound intensity related units)</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="string-interpolation"><a class="header" href="#string-interpolation">String Interpolation</a></h1>
 <p>Including variable values inside of a string is handled with string interpolation. </p>
-<pre><code class="language-dewy">my_age = 24
-my_string = 'I am {my_age} years old'
-printl(my_string)
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_age%20%3D%2024%0Amy_string%20%3D%20%27I%20am%20%7Bmy_age%7D%20years%20old%27%0Aprintl%28my_string%29"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
 <p>which will print the string <code>I am 24 years old</code>. Any arbitrary expression can be contained inside of the curly braces. For expressions that are not a string by default, the <code>__str__</code> method will be called on them to get the string version.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="basic-data-types"><a class="header" href="#basic-data-types">Basic Data Types</a></h1>
 <h2 id="numeric"><a class="header" href="#numeric">Numeric</a></h2>
 <p>Numeric data is what it sounds like, values that represent a number</p>
 <h3 id="numbers"><a class="header" href="#numbers">Numbers</a></h3>
 <p>Numbers are the base case for numerical values, with each subsequent type being a more specific / restricted version of the number class.</p>
-<pre><code class="language-dewy">my_number = 10
-</code></pre>
-<h3 id="integers"><a class="header" href="#integers">Integers</a></h3>
-<p>Integers are numbers that do not contain any decimal component. By default, integers can be arbitrarily large, but fixed width integers are also possible</p>
-<pre><code class="language-dewy">my_int = -12 as int
-my_int32 = 42 as int32
-
-my_uint = 15 as uint
-my_uint64 = 2001 as uint64
-</code></pre>
-<p>The full list of integer types includes</p>
-<div class="table-wrapper"><table><thead><tr><th>Type</th><th>Description</th><th>Range</th></tr></thead><tbody>
-<tr><td>int</td><td>Arbitrary precision signed integer</td><td><code>(-inf..inf)</code></td></tr>
-<tr><td>int8</td><td>8-bit signed integer</td><td><code>[-128..127]</code></td></tr>
-<tr><td>int16</td><td>16-bit signed integer</td><td><code>[-32768..32767]</code></td></tr>
-<tr><td>int32</td><td>32-bit signed integer</td><td><code>[-2147483648..2147483647]</code></td></tr>
-<tr><td>int64</td><td>64-bit signed integer</td><td><code>[-9223372036854775808..9223372036854775807]</code></td></tr>
-<tr><td>int128</td><td>128-bit signed integer</td><td><code>[-170141183460469231731687303715884105728</code>­<code>..170141183460469231731687303715884105727]</code></td></tr>
-<tr><td>uint</td><td>Arbitrary precision unsigned integer</td><td><code>[0..inf)</code></td></tr>
-<tr><td>uint8</td><td>8-bit unsigned integer</td><td><code>[0..255]</code></td></tr>
-<tr><td>uint16</td><td>16-bit unsigned integer</td><td><code>[0..65535]</code></td></tr>
-<tr><td>uint32</td><td>32-bit unsigned integer</td><td><code>[0..4294967295]</code></td></tr>
-<tr><td>uint64</td><td>64-bit unsigned integer</td><td><code>[0..18446744073709551615]</code></td></tr>
-<tr><td>uint128</td><td>128-bit unsigned integer</td><td><code>[0..340282366920938463463374607431768211455]</code></td></tr>
-</tbody></table>
-</div>
-<h3 id="custom-ranged-integers"><a class="header" href="#custom-ranged-integers">Custom Ranged Integers</a></h3>
-<p>You can create integer types with a custom range by specifying the range as part of the type annotation</p>
-<pre><code class="language-dewy">my_custom_number:int&lt;range=[42..)&gt; = 42
-</code></pre>
-<p>TBD for behavior when value goes out of bounds. Perhaps result will be undefined, or there can be a type setting for wrap around</p>
-<h3 id="fixed-point"><a class="header" href="#fixed-point">Fixed Point</a></h3>
-<p>Fixed point will be stored as two integers, <code>digits</code> and <code>shift</code> where the value is <code>digits * 10^shift</code></p>
-<p>TBD on the syntax for declaring a fixed point number. likely to be a function call e.g. </p>
-<pre><code class="language-dewy">my_fixed_point = fixed_point(3141592, -6)
-</code></pre>
-<h3 id="rational"><a class="header" href="#rational">Rational</a></h3>
-<p>Rational numbers are stored as two integers, the <code>numerator</code> and the <code>denominator</code>, where the value is <code>numerator / denominator</code></p>
-<p>TBD on the syntax for declaring a rational number. likely to be a function call e.g.</p>
-<pre><code class="language-dewy">my_rational = rational(22, 7) //rational approximation of pi
-</code></pre>
-<h3 id="real"><a class="header" href="#real">Real</a></h3>
-<p>Real numbers are positive and negative numbers that can have a decimal component to them. The default real will be stored as a <code>float64</code> i.e. a 64-bit floating point number, but other widths (and potentially arbitrary precision) are possible</p>
-<pre><code class="language-dewy">my_real = 3.1415
-my_real32 = 54.54 as real32
-my_real64 = 233.511534 as real64
-</code></pre>
-<h3 id="boolean"><a class="header" href="#boolean">Boolean</a></h3>
-<p>Standard true/false type</p>
-<pre><code class="language-dewy">my_bool = true
-</code></pre>
-<h3 id="complex"><a class="header" href="#complex">Complex</a></h3>
-<p>complex numbers</p>
-<pre><code class="language-dewy">my_complex0 = 2^/2 + 2i^/2
-my_complex1 = complex(2^/2, 2^/2)
-my_complex2 = complex(1, 45°)
-my_complex3 = 1 ∠ 45°
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_number%20%3D%2010%0A%60%60%60%0A%0A%23%23%23%20Integers%0A%0AIntegers%20are%20numbers%20that%20do%20not%20contain%20any%20decimal%20component.%20By%20default%2C%20integers%20can%20be%20arbitrarily%20large%2C%20but%20fixed%20width%20integers%20are%20also%20possible%0A%0A%60%60%60dewy%0Amy_int%20%3D%20-12%20as%20int%0Amy_int32%20%3D%2042%20as%20int32%0A%0Amy_uint%20%3D%2015%20as%20uint%0Amy_uint64%20%3D%202001%20as%20uint64%0A%60%60%60%0A%0AThe%20full%20list%20of%20integer%20types%20includes%0A%0A%7C%20Type%20%7C%20%20%20%20%20%20Description%20%20%20%20%20%20%20%20%7C%20Range%20%7C%0A%7C%20---%20%7C%20---------------------%20%7C%20---%20%7C%0A%7C%20int%20%7C%20Arbitrary%20precision%20signed%20integer%20%7C%20%60%28-inf..inf%29%60%20%7C%0A%7C%20int8%20%7C%208-bit%20signed%20integer%20%7C%20%60%5B-128..127%5D%60%20%7C%0A%7C%20int16%20%7C%2016-bit%20signed%20integer%20%7C%20%60%5B-32768..32767%5D%60%20%7C%0A%7C%20int32%20%7C%2032-bit%20signed%20integer%20%7C%20%60%5B-2147483648..2147483647%5D%60%20%7C%0A%7C%20int64%20%7C%2064-bit%20signed%20integer%20%7C%20%60%5B-9223372036854775808..9223372036854775807%5D%60%20%7C%0A%7C%20int128%20%7C%20128-bit%20signed%20integer%20%7C%20%60%5B-170141183460469231731687303715884105728%60%26shy%3B%60..170141183460469231731687303715884105727%5D%60%20%7C%0A%7C%20uint%20%7C%20Arbitrary%20precision%20unsigned%20integer%20%7C%20%60%5B0..inf%29%60%20%7C%0A%7C%20uint8%20%7C%208-bit%20unsigned%20integer%20%7C%20%60%5B0..255%5D%60%20%7C%0A%7C%20uint16%20%7C%2016-bit%20unsigned%20integer%20%7C%20%60%5B0..65535%5D%60%20%7C%0A%7C%20uint32%20%7C%2032-bit%20unsigned%20integer%20%7C%20%60%5B0..4294967295%5D%60%20%7C%0A%7C%20uint64%20%7C%2064-bit%20unsigned%20integer%20%7C%20%60%5B0..18446744073709551615%5D%60%20%7C%0A%7C%20uint128%20%7C%20128-bit%20unsigned%20integer%20%7C%20%60%5B0..340282366920938463463374607431768211455%5D%60%20%7C%0A%0A%23%23%23%20Custom%20Ranged%20Integers%0AYou%20can%20create%20integer%20types%20with%20a%20custom%20range%20by%20specifying%20the%20range%20as%20part%20of%20the%20type%20annotation%0A%0A%60%60%60dewy%0Amy_custom_number%3Aint%3Crange%3D%5B42..%29%3E%20%3D%2042%0A%60%60%60%0A%0ATBD%20for%20behavior%20when%20value%20goes%20out%20of%20bounds.%20Perhaps%20result%20will%20be%20undefined%2C%20or%20there%20can%20be%20a%20type%20setting%20for%20wrap%20around%0A%0A%23%23%23%20Fixed%20Point%0AFixed%20point%20will%20be%20stored%20as%20two%20integers%2C%20%60digits%60%20and%20%60shift%60%20where%20the%20value%20is%20%60digits%20%2A%2010%5Eshift%60%0A%0ATBD%20on%20the%20syntax%20for%20declaring%20a%20fixed%20point%20number.%20likely%20to%20be%20a%20function%20call%20e.g.%20%0A%0A%60%60%60dewy%0Amy_fixed_point%20%3D%20fixed_point%283141592%2C%20-6%29%0A%60%60%60%0A%0A%0A%23%23%23%20Rational%0ARational%20numbers%20are%20stored%20as%20two%20integers%2C%20the%20%60numerator%60%20and%20the%20%60denominator%60%2C%20where%20the%20value%20is%20%60numerator%20/%20denominator%60%0A%0ATBD%20on%20the%20syntax%20for%20declaring%20a%20rational%20number.%20likely%20to%20be%20a%20function%20call%20e.g.%0A%0A%60%60%60dewy%0Amy_rational%20%3D%20rational%2822%2C%207%29%20//rational%20approximation%20of%20pi%0A%60%60%60%0A%0A%0A%23%23%23%20Real%0A%0AReal%20numbers%20are%20positive%20and%20negative%20numbers%20that%20can%20have%20a%20decimal%20component%20to%20them.%20The%20default%20real%20will%20be%20stored%20as%20a%20%60float64%60%20i.e.%20a%2064-bit%20floating%20point%20number%2C%20but%20other%20widths%20%28and%20potentially%20arbitrary%20precision%29%20are%20possible%0A%0A%60%60%60dewy%0Amy_real%20%3D%203.1415%0Amy_real32%20%3D%2054.54%20as%20real32%0Amy_real64%20%3D%20233.511534%20as%20real64%0A%60%60%60%0A%0A%23%23%23%20Boolean%0A%0AStandard%20true/false%20type%0A%0A%60%60%60dewy%0Amy_bool%20%3D%20true%0A%60%60%60%0A%0A%23%23%23%20Complex%0A%0Acomplex%20numbers%0A%0A%60%60%60dewy%0Amy_complex0%20%3D%202%5E/2%20%2B%202i%5E/2%0Amy_complex1%20%3D%20complex%282%5E/2%2C%202%5E/2%29%0Amy_complex2%20%3D%20complex%281%2C%2045%C2%B0%29%0Amy_complex3%20%3D%201%20%E2%88%A0%2045%C2%B0"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
 <h3 id="quaternions"><a class="header" href="#quaternions">Quaternions</a></h3>
 <p>Quaternions</p>
 <h2 id="misc"><a class="header" href="#misc">MISC.</a></h2>
@@ -603,213 +476,22 @@ my_complex3 = 1 ∠ 45°
 <p>Container types are things like arrays, dictionaries, and sets. all containers are specified using square brackets <code>[]</code>, while the contents (or other factors) determine the type of container</p>
 <h2 id="arrays"><a class="header" href="#arrays">Arrays</a></h2>
 <p>An array is simple a list of values inside a container</p>
-<pre><code class="language-dewy">my_array = [0 1 2 3 'apple' 'banana' 'peach' true]
-printl(my_array[3])  //prints '3'
-</code></pre>
-<blockquote>
-<p>Note: values do not need commas to separate them. Also arrays can contain objects of different types, though arrays where all values are just a single type will be more efficient. Arrays are 0-indexed (with potentially the option to set an arbitrary index)</p>
-</blockquote>
-<p>TODO-&gt;explain how to make matrices and other linear algebra stuff.</p>
-<h2 id="dictionaries"><a class="header" href="#dictionaries">Dictionaries</a></h2>
-<p>A dictionary is a list of key-value pairs</p>
-<pre><code class="language-dewy">my_dictionary = [
-    'apple' -&gt; 10
-    'banana' -&gt; 15
-    'peach' -&gt; 3
-    'pear' -&gt; 6
-]
-printl(my_dictionary['peach'])  //prints '3'
-</code></pre>
-<p>Again note the lack of a need for comma separation between key-value pairs.</p>
-<p>Additionally if you wish, you can define a bi-directional dictionary using a double-ended arrow:</p>
-<pre><code class="language-dewy">my_bidictionary = [
-    0 &lt;-&gt; 'zero'
-    1 &lt;-&gt; 'one'
-    'two' &lt;-&gt; 2
-    3 &lt;-&gt; 'three'
-]
-printl(my_bidictionary['three'])  //prints '3'
-printl(my_bidictionary[3])        //prints 'three'
-</code></pre>
-<blockquote>
-<p>Note: when creating a bidictionary, every arrow must by double-ended. As new elements are added, the bidictionary will maintain the bidirectional links between each element. Regular dictionaries will not maintin such links.</p>
-</blockquote>
-<h2 id="sets"><a class="header" href="#sets">Sets</a></h2>
-<p>A set is an unordered collection of elements</p>
-<pre><code class="language-dewy">my_set = set[0 1 2 3 'apple' 'banana' 'peach' true]
-printl(3 in? my_set)  //prints 'true'
-printl('pear' in? my_set)  //prints 'false'
-</code></pre>
-<h2 id="objects"><a class="header" href="#objects">Objects</a></h2>
-<p>See the entry on <strong>Object and Class Types</strong> for more details. But breifly, an object can be created by wrapping declarations in a container</p>
-<pre><code class="language-dewy">my_obj = [
-    apple = 5
-    bananas = 0.89
-    buy_apples = q =&gt; q * apples
-    buy_bananas = q =&gt; q * bananas
-]
-
-printl(my_obj.apples) //prints out 5
-printl(my_obj.buy_bananas(10))  //prints out 8.9
-</code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="ranges"><a class="header" href="#ranges">Ranges</a></h1>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_array%20%3D%20%5B0%201%202%203%20%27apple%27%20%27banana%27%20%27peach%27%20true%5D%0Aprintl%28my_array%5B3%5D%29%20%20//prints%20%273%27%0A%60%60%60%0A%0A%3E%20Note%3A%20values%20do%20not%20need%20commas%20to%20separate%20them.%20Also%20arrays%20can%20contain%20objects%20of%20different%20types%2C%20though%20arrays%20where%20all%20values%20are%20just%20a%20single%20type%20will%20be%20more%20efficient.%20Arrays%20are%200-indexed%20%28with%20potentially%20the%20option%20to%20set%20an%20arbitrary%20index%29%0A%0ATODO-%3Eexplain%20how%20to%20make%20matrices%20and%20other%20linear%20algebra%20stuff.%0A%0A%23%23%20Dictionaries%0A%0AA%20dictionary%20is%20a%20list%20of%20key-value%20pairs%0A%0A%60%60%60dewy%0Amy_dictionary%20%3D%20%5B%0A%20%20%20%20%27apple%27%20-%3E%2010%0A%20%20%20%20%27banana%27%20-%3E%2015%0A%20%20%20%20%27peach%27%20-%3E%203%0A%20%20%20%20%27pear%27%20-%3E%206%0A%5D%0Aprintl%28my_dictionary%5B%27peach%27%5D%29%20%20//prints%20%273%27%0A%60%60%60%0A%0AAgain%20note%20the%20lack%20of%20a%20need%20for%20comma%20separation%20between%20key-value%20pairs.%0A%0AAdditionally%20if%20you%20wish%2C%20you%20can%20define%20a%20bi-directional%20dictionary%20using%20a%20double-ended%20arrow%3A%0A%0A%60%60%60dewy%0Amy_bidictionary%20%3D%20%5B%0A%20%20%20%200%20%3C-%3E%20%27zero%27%0A%20%20%20%201%20%3C-%3E%20%27one%27%0A%20%20%20%20%27two%27%20%3C-%3E%202%0A%20%20%20%203%20%3C-%3E%20%27three%27%0A%5D%0Aprintl%28my_bidictionary%5B%27three%27%5D%29%20%20//prints%20%273%27%0Aprintl%28my_bidictionary%5B3%5D%29%20%20%20%20%20%20%20%20//prints%20%27three%27%0A%60%60%60%0A%0A%3E%20Note%3A%20when%20creating%20a%20bidictionary%2C%20every%20arrow%20must%20by%20double-ended.%20As%20new%20elements%20are%20added%2C%20the%20bidictionary%20will%20maintain%20the%20bidirectional%20links%20between%20each%20element.%20Regular%20dictionaries%20will%20not%20maintin%20such%20links.%0A%0A%23%23%20Sets%0A%0AA%20set%20is%20an%20unordered%20collection%20of%20elements%0A%0A%60%60%60dewy%0Amy_set%20%3D%20set%5B0%201%202%203%20%27apple%27%20%27banana%27%20%27peach%27%20true%5D%0Aprintl%283%20in%3F%20my_set%29%20%20//prints%20%27true%27%0Aprintl%28%27pear%27%20in%3F%20my_set%29%20%20//prints%20%27false%27%0A%60%60%60%0A%0A%0A%23%23%20Objects%0A%0ASee%20the%20entry%20on%20%2A%2AObject%20and%20Class%20Types%2A%2A%20for%20more%20details.%20But%20breifly%2C%20an%20object%20can%20be%20created%20by%20wrapping%20declarations%20in%20a%20container%0A%0A%60%60%60dewy%0Amy_obj%20%3D%20%5B%0A%20%20%20%20apple%20%3D%205%0A%20%20%20%20bananas%20%3D%200.89%0A%20%20%20%20buy_apples%20%3D%20q%20%3D%3E%20q%20%2A%20apples%0A%20%20%20%20buy_bananas%20%3D%20q%20%3D%3E%20q%20%2A%20bananas%0A%5D%0A%0Aprintl%28my_obj.apples%29%20//prints%20out%205%0Aprintl%28my_obj.buy_bananas%2810%29%29%20%20//prints%20out%208.9"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe><div style="break-before: page; page-break-before: always;"></div><h1 id="ranges"><a class="header" href="#ranges">Ranges</a></h1>
 <p>A range represents some span over a set of values. Typically ranges will be over numbers, however any orderable set could be used for a range (e.g. strings, dates, etc.). Ranges are frequently used for loops, indexing, and several other places.</p>
 <p>Ranges always contain a <code>..</code> and may include left and or right values that are juxtaposed, optionally specifying the bounds and step size.</p>
 <h2 id="range-syntax"><a class="header" href="#range-syntax">Range Syntax</a></h2>
 <p>The syntax for ranges is inspired by Haskell syntax for ranges:</p>
-<pre><code class="language-dewy">[first..]               // first to inf
-[..last]                // -inf to last
-[first..last]           // first to last
-[..]                    // -inf to inf
-</code></pre>
-<p>Like in haskell, you can use a tuple to include a second value to specify the step size.</p>
-<pre><code class="language-dewy">[(first,second)..]        // first to inf, step size is second-first
-[(first,second)..last]    // first to last, step size is second-first
-[..(2ndlast,last)]        // -inf to last, step size is last-2ndlast
-</code></pre>
-<blockquote>
-<p>Note: Due to precedence rules in Dewy, namely <code>,</code> having relatively low precedence, the step size tuple must be wrapped in parenthesis.
-Also <code>[first..(2ndlast,last)]</code> is explicitly <strong>NOT ALLOWED</strong>, as it can have unintuitive behavior, and is covered by <code>[(first,second)..last]</code>.</p>
-</blockquote>
-<p>In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.</p>
-<pre><code class="language-dewy">[first..last]   // first to last including first and last
-[first..last)   // first to last including first, excluding last
-(first..last]   // first to last excluding first, including last
-(first..last)   // first to last excluding first and last
-first..last     // same as [first..last]
-</code></pre>
-<h3 id="juxtaposition"><a class="header" href="#juxtaposition">Juxtaposition</a></h3>
-<p>The left and right values are only considered part of the range if they are juxtaposed with the <code>..</code>. Values not juxtaposed with the range are considered separate expressions.</p>
-<pre><code class="language-dewy">first..last     // first to last
-first ..last    // -inf to last. first is not part of the range
-first.. last    // first to inf. last is not part of the range
-first .. last   // -inf to inf. neither first or last are part of the range
-</code></pre>
-<blockquote>
-<p>Note: the range juxtaposition operator has medium precedence. Most operators will have higher precedence, not requiring parenthesis, with <code>,</code> and <code>in</code> being the main exceptions</p>
-</blockquote>
-<pre><code class="language-dewy">first..last+1             // first to last+1
-(first,second)..last/2    // first to last/2, step size is second-first
-(first/2,first)..last+10  // first/2 to last+10, step size is first/2
-a in first..last          // iterate a over range first to last
-</code></pre>
-<p>The juxtaposition requirement allows multiple ranges to be included in an array, which can be used to index into multidimensional matrices</p>
-<pre><code class="language-dewy">my_array = [
-    0 1 2 3 4 5 6 7 8 9 
-    10 11 12 13 14 15 16 17 18 19
-    20 21 22 23 24 25 26 27 28 29
-]
-my_array[1.. 6..]     //returns [16 17 18 19; 26 27 28 29]
-</code></pre>
-<h2 id="numeric-ranges"><a class="header" href="#numeric-ranges">Numeric Ranges</a></h2>
-<p>Probably the most common type of range will be a numeric ranges which describes a span over real numbers.</p>
-<p>Some simple examples include:</p>
-<pre><code class="language-dewy">range1 = (1..5)  // 2 3 4
-range2 = (1..5]  // 2 3 4 5
-range3 = [1..5)  // 1 2 3 4
-range4 = [1..5]  // 1 2 3 4 5
-range5 = 1..5    // 1 2 3 4 5
-</code></pre>
-<h2 id="ordinal-ranges"><a class="header" href="#ordinal-ranges">Ordinal Ranges</a></h2>
-<p>Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.</p>
-<p>For example, the following range captures all characters in the range from <code>'a'</code> to <code>'z'</code> inclusive</p>
-<pre><code>ord_range = 'a'..'z'
-</code></pre>
-<p>All alpahbetical characters might be represented like so</p>
-<pre><code>alpha_range = 'a'..'z' + 'A'..'Z'
-ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc.
-</code></pre>
-<p>But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this</p>
-<pre><code>word_range = 'apple'..'zebra'
-'panda' in? word_range  //returns true
-</code></pre>
-<p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>. </p>
-<blockquote>
-<p>Note: this is distinct from every dictionary word in that range, as it will include many many gibberish words. </p>
-</blockquote>
-<p>TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. <code>'apple2'</code> should come before <code>'apple10'</code>), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used</p>
-<h2 id="range-uses"><a class="header" href="#range-uses">Range Uses</a></h2>
-<p>Ranges have a variety of different uses in Dewy.</p>
-<h3 id="ranges-in-loops"><a class="header" href="#ranges-in-loops">Ranges in Loops</a></h3>
-<p>Probably the most common use is in conjunction with loops as a sequence to iterate over:</p>
-<pre><code class="language-dewy">loop i in 0..5 print'{i} '
-</code></pre>
-<p>The above will print <code>'0 1 2 3 4 5 '</code>.</p>
-<p>To iterate over values in reverse, you can specify a reversed range:</p>
-<pre><code class="language-dewy">loop i in 5,4..0 print'{i} '
-</code></pre>
-<p>This prints <code>'5 4 3 2 1 0 '</code>. </p>
-<blockquote>
-<p>Note: when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.</p>
-</blockquote>
-<h3 id="range-arithmetic"><a class="header" href="#range-arithmetic">Range Arithmetic</a></h3>
-<p>Ranges can be used in arithmetic expressions, often as a way to construct new ranges.</p>
-<pre><code>//division version
-loop i in [0..4]/4 print'{i} '
-
-//multiplication version
-loop i in [0..4]*0.25 print'{i} '
-</code></pre>
-<p>Both of which will print <code>'0 0.25 0.5 0.75 1 '</code></p>
-<p>These are both equivalent to directly constructing the range <code>0,0.25..4</code>, however the arithmetic versions are frequently more convenient.</p>
-<p>This type of construction is closely related to the <code>linspace()</code>/<code>logspace()</code> functions in Dewy. TBD but <code>linspace</code>/<code>logspace</code> may in fact be implemented like so:</p>
-<pre><code class="language-dewy">linspace = (interval:range, n:int=10) =&gt; {
-    start, stop = interval.start, interval.stop
-    step = (stop-start)/(n-1)
-    return interval.start,interval.start+step..interval.stop
-}
-logspace = (interval:range, n:int=10, base:real=10) =&gt; base^linspace(interval, n)
-</code></pre>
-<h3 id="compound-range-construction"><a class="header" href="#compound-range-construction">Compound Range Construction</a></h3>
-<p>Additionally you can construct more complex ranges by combining together multiple ranges:</p>
-<pre><code class="language-dewy">complex_range = [1..5] + (15..20)
-loop i in complex_range
-    printn(i)           //prints 1 2 3 4 5 16 17 18 19
-7 in? complex_range     //returns false
-16 in? complex_range    //returns true
-</code></pre>
-<p>The same range as above can be constructed using subtraction</p>
-<pre><code class="language-dewy">complex_range = [1..20) - (5..15]
-</code></pre>
-<h3 id="interval-membership"><a class="header" href="#interval-membership">Interval Membership</a></h3>
-<p>You can also check if a value falls within a specified range</p>
-<pre><code class="language-dewy">5 in? [1..5]         //returns true
-5 in? (1..5)         //returns false
-3.1415 in? (1..5)    //returns true 
-</code></pre>
-<h3 id="indexing-sequences"><a class="header" href="#indexing-sequences">Indexing Sequences</a></h3>
-<p>ranges can be used to select values from a sequence. For example, say we want a substring we can do the following</p>
-<pre><code class="language-dewy">full_string = 'this is a string'
-
-substring = full_string[3..12]
-printl(substring) //prints 's is a str'
-</code></pre>
-<p>This works for any sequence type. </p>
-<blockquote>
-<p>Note: only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).</p>
-</blockquote>
-<p>Also, because of juxtaposition, we can easily make the selection inclusive or exclusive on either side.</p>
-<pre><code>full_string = 'this is a string'
-
-substring1 = full_string(3..12)  // ' is a st'
-substring2 = full_string[3..12)  // 's is a st'
-substring3 = full_string(3..12]  // ' is a str'
-</code></pre>
-<p>You can specify that a range continues to the end of the sequence, or starts from the beginning by omitting the value for that side. This will construct a range that goes to infinity in that direction, which will select all elements in that direction.</p>
-<pre><code>full_string = 'this is a string'
-
-substring_to_end = full_string[3..] // 's is a string'
-substring_from_start = full_string[..12] // 'this is a str'
-whole_string = full_string[..] //selects the whole string
-</code></pre>
-<p>Paired with the special <code>end</code> token which represents the index of the last element in a sequence, this provides the means to select any desired subset of a sequence.</p>
-<pre><code>arr[end]      // last element
-arr[end-1]    // second to last element
-arr[..end-3]  // first element to 4th to last element
-arr[5..end-3] // 5th element to 4th to last element
-arr[end-3..]  // 4th to last element to last element
-</code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="object-and-class-types"><a class="header" href="#object-and-class-types">Object and Class Types</a></h1>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=%5Bfirst..%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20inf%0A%5B..last%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20-inf%20to%20last%0A%5Bfirst..last%5D%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20last%0A%5B..%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20//%20-inf%20to%20inf%0A%60%60%60%0A%0ALike%20in%20haskell%2C%20you%20can%20use%20a%20tuple%20to%20include%20a%20second%20value%20to%20specify%20the%20step%20size.%0A%0A%0A%60%60%60dewy%0A%5B%28first%2Csecond%29..%5D%20%20%20%20%20%20%20%20//%20first%20to%20inf%2C%20step%20size%20is%20second-first%0A%5B%28first%2Csecond%29..last%5D%20%20%20%20//%20first%20to%20last%2C%20step%20size%20is%20second-first%0A%5B..%282ndlast%2Clast%29%5D%20%20%20%20%20%20%20%20//%20-inf%20to%20last%2C%20step%20size%20is%20last-2ndlast%0A%60%60%60%0A%0A%3E%20Note%3A%20Due%20to%20precedence%20rules%20in%20Dewy%2C%20namely%20%60%2C%60%20having%20relatively%20low%20precedence%2C%20the%20step%20size%20tuple%20must%20be%20wrapped%20in%20parenthesis.%0A%3E%20Also%20%60%5Bfirst..%282ndlast%2Clast%29%5D%60%20is%20explicitly%20%2A%2ANOT%20ALLOWED%2A%2A%2C%20as%20it%20can%20have%20unintuitive%20behavior%2C%20and%20is%20covered%20by%20%60%5B%28first%2Csecond%29..last%5D%60.%0A%0AIn%20addition%2C%20ranges%20can%20have%20their%20bounds%20be%20inclusive%20or%20exclusive.%20Inclusive%20bounds%20are%20indicated%20by%20square%20brackets%2C%20and%20exclusive%20bounds%20are%20indicated%20by%20parenthesis.%20The%20default%20is%20inclusive%20bounds.%20Also%20left%20and%20right%20bounds%20can%20be%20specified%20independently%2C%20so%20you%20can%20have%20a%20range%20that%20is%20inclusive%20on%20the%20left%20and%20exclusive%20on%20the%20right%2C%20or%20vice%20versa.%0A%0A%60%60%60dewy%0A%5Bfirst..last%5D%20%20%20//%20first%20to%20last%20including%20first%20and%20last%0A%5Bfirst..last%29%20%20%20//%20first%20to%20last%20including%20first%2C%20excluding%20last%0A%28first..last%5D%20%20%20//%20first%20to%20last%20excluding%20first%2C%20including%20last%0A%28first..last%29%20%20%20//%20first%20to%20last%20excluding%20first%20and%20last%0Afirst..last%20%20%20%20%20//%20same%20as%20%5Bfirst..last%5D%0A%60%60%60%0A%0A%23%23%23%20Juxtaposition%0AThe%20left%20and%20right%20values%20are%20only%20considered%20part%20of%20the%20range%20if%20they%20are%20juxtaposed%20with%20the%20%60..%60.%20Values%20not%20juxtaposed%20with%20the%20range%20are%20considered%20separate%20expressions.%0A%0A%60%60%60dewy%0Afirst..last%20%20%20%20%20//%20first%20to%20last%0Afirst%20..last%20%20%20%20//%20-inf%20to%20last.%20first%20is%20not%20part%20of%20the%20range%0Afirst..%20last%20%20%20%20//%20first%20to%20inf.%20last%20is%20not%20part%20of%20the%20range%0Afirst%20..%20last%20%20%20//%20-inf%20to%20inf.%20neither%20first%20or%20last%20are%20part%20of%20the%20range%0A%60%60%60%0A%0A%3E%20Note%3A%20the%20range%20juxtaposition%20operator%20has%20medium%20precedence.%20Most%20operators%20will%20have%20higher%20precedence%2C%20not%20requiring%20parenthesis%2C%20with%20%60%2C%60%20and%20%60in%60%20being%20the%20main%20exceptions%0A%0A%60%60%60dewy%0Afirst..last%2B1%20%20%20%20%20%20%20%20%20%20%20%20%20//%20first%20to%20last%2B1%0A%28first%2Csecond%29..last/2%20%20%20%20//%20first%20to%20last/2%2C%20step%20size%20is%20second-first%0A%28first/2%2Cfirst%29..last%2B10%20%20//%20first/2%20to%20last%2B10%2C%20step%20size%20is%20first/2%0Aa%20in%20first..last%20%20%20%20%20%20%20%20%20%20//%20iterate%20a%20over%20range%20first%20to%20last%0A%60%60%60%0A%0AThe%20juxtaposition%20requirement%20allows%20multiple%20ranges%20to%20be%20included%20in%20an%20array%2C%20which%20can%20be%20used%20to%20index%20into%20multidimensional%20matrices%0A%0A%60%60%60dewy%0Amy_array%20%3D%20%5B%0A%20%20%20%200%201%202%203%204%205%206%207%208%209%20%0A%20%20%20%2010%2011%2012%2013%2014%2015%2016%2017%2018%2019%0A%20%20%20%2020%2021%2022%2023%2024%2025%2026%2027%2028%2029%0A%5D%0Amy_array%5B1..%206..%5D%20%20%20%20%20//returns%20%5B16%2017%2018%2019%3B%2026%2027%2028%2029%5D%0A%60%60%60%0A%0A%0A%23%23%20Numeric%20Ranges%0A%0AProbably%20the%20most%20common%20type%20of%20range%20will%20be%20a%20numeric%20ranges%20which%20describes%20a%20span%20over%20real%20numbers.%0A%0ASome%20simple%20examples%20include%3A%0A%0A%60%60%60dewy%0Arange1%20%3D%20%281..5%29%20%20//%202%203%204%0Arange2%20%3D%20%281..5%5D%20%20//%202%203%204%205%0Arange3%20%3D%20%5B1..5%29%20%20//%201%202%203%204%0Arange4%20%3D%20%5B1..5%5D%20%20//%201%202%203%204%205%0Arange5%20%3D%201..5%20%20%20%20//%201%202%203%204%205%0A%60%60%60%0A%0A%23%23%20Ordinal%20Ranges%0A%0ARanges%20can%20also%20be%20constructed%20using%20any%20ordinal%20type.%20Currently%20the%20only%20only%20built%20in%20ordinal%20type%20other%20than%20numbers%20would%20be%20strings.%0A%0AFor%20example%2C%20the%20following%20range%20captures%20all%20characters%20in%20the%20range%20from%20%60%27a%27%60%20to%20%60%27z%27%60%20inclusive%0A%0A%60%60%60%0Aord_range%20%3D%20%27a%27..%27z%27%0A%60%60%60%0A%0AAll%20alpahbetical%20characters%20might%20be%20represented%20like%20so%0A%0A%60%60%60%0Aalpha_range%20%3D%20%27a%27..%27z%27%20%2B%20%27A%27..%27Z%27%0Aascii_range%20%3D%20%27A%27..%27z%27%20//this%20would%20include%20extra%20characters%20like%20%27%5B%5C%5D%5E_%7B%7C%7D%27%20etc.%0A%60%60%60%0A%0ABut%20I%20probably%20won%27t%20just%20be%20limited%20to%20individual%20characters.%20In%20principle%20you%20ought%20to%20be%20able%20to%20do%20something%20like%20this%0A%0A%60%60%60%0Aword_range%20%3D%20%27apple%27..%27zebra%27%0A%27panda%27%20in%3F%20word_range%20%20//returns%20true%0A%60%60%60%0A%0Awhich%20would%20create%20a%20range%20that%20consists%20of%20every%20possible%205%20letter%20combination%20starting%20from%20the%20word%20%60%27apple%27%60%20and%20iterating%20through%20to%20the%20word%20%60%27zebra%27%60.%20%0A%0A%3E%20Note%3A%20this%20is%20distinct%20from%20every%20dictionary%20word%20in%20that%20range%2C%20as%20it%20will%20include%20many%20many%20gibberish%20words.%20%0A%0ATDB%20exactly%20what%20criteria%20will%20be%20used%20for%20ordering%20strings%2C%20as%20I%20like%20string%20orderings%20that%20respect%20numbers%20embedded%20in%20them%20%28e.g.%20%60%27apple2%27%60%20should%20come%20before%20%60%27apple10%27%60%29%2C%20but%20that%20becomes%20difficult%20with%20arbitrary%20strings.%20perhaps%20there%20might%20be%20a%20macro%20setting%20for%20the%20ordering%20type%20used%0A%0A%0A%23%23%20Range%20Uses%0A%0ARanges%20have%20a%20variety%20of%20different%20uses%20in%20Dewy.%0A%0A%23%23%23%20Ranges%20in%20Loops%0A%0AProbably%20the%20most%20common%20use%20is%20in%20conjunction%20with%20loops%20as%20a%20sequence%20to%20iterate%20over%3A%0A%0A%60%60%60dewy%0Aloop%20i%20in%200..5%20print%27%7Bi%7D%20%27%0A%60%60%60%0A%0AThe%20above%20will%20print%20%60%270%201%202%203%204%205%20%27%60.%0A%0ATo%20iterate%20over%20values%20in%20reverse%2C%20you%20can%20specify%20a%20reversed%20range%3A%0A%0A%60%60%60dewy%0Aloop%20i%20in%205%2C4..0%20print%27%7Bi%7D%20%27%0A%60%60%60%0A%0AThis%20prints%20%60%275%204%203%202%201%200%20%27%60.%20%0A%0A%3E%20Note%3A%20when%20specifying%20a%20reversed%20range%2C%20you%20must%20include%20the%20step%20size.%20Forgetting%20to%20specify%20the%20step%20size%20will%20result%20in%20an%20empty%20range%2C%20as%20ranges%20are%20normally%20increasing.%0A%0A%23%23%23%20Range%20Arithmetic%0A%0ARanges%20can%20be%20used%20in%20arithmetic%20expressions%2C%20often%20as%20a%20way%20to%20construct%20new%20ranges.%0A%0A%60%60%60%0A//division%20version%0Aloop%20i%20in%20%5B0..4%5D/4%20print%27%7Bi%7D%20%27%0A%0A//multiplication%20version%0Aloop%20i%20in%20%5B0..4%5D%2A0.25%20print%27%7Bi%7D%20%27%0A%60%60%60%0A%0ABoth%20of%20which%20will%20print%20%60%270%200.25%200.5%200.75%201%20%27%60%0A%0AThese%20are%20both%20equivalent%20to%20directly%20constructing%20the%20range%20%600%2C0.25..4%60%2C%20however%20the%20arithmetic%20versions%20are%20frequently%20more%20convenient.%0A%0AThis%20type%20of%20construction%20is%20closely%20related%20to%20the%20%60linspace%28%29%60/%60logspace%28%29%60%20functions%20in%20Dewy.%20TBD%20but%20%60linspace%60/%60logspace%60%20may%20in%20fact%20be%20implemented%20like%20so%3A%0A%0A%60%60%60dewy%0Alinspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%29%20%3D%3E%20%7B%0A%20%20%20%20start%2C%20stop%20%3D%20interval.start%2C%20interval.stop%0A%20%20%20%20step%20%3D%20%28stop-start%29/%28n-1%29%0A%20%20%20%20return%20interval.start%2Cinterval.start%2Bstep..interval.stop%0A%7D%0Alogspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%2C%20base%3Areal%3D10%29%20%3D%3E%20base%5Elinspace%28interval%2C%20n%29%0A%60%60%60%0A%0A%23%23%23%20Compound%20Range%20Construction%0A%0AAdditionally%20you%20can%20construct%20more%20complex%20ranges%20by%20combining%20together%20multiple%20ranges%3A%0A%0A%60%60%60dewy%0Acomplex_range%20%3D%20%5B1..5%5D%20%2B%20%2815..20%29%0Aloop%20i%20in%20complex_range%0A%20%20%20%20printn%28i%29%20%20%20%20%20%20%20%20%20%20%20//prints%201%202%203%204%205%2016%2017%2018%2019%0A7%20in%3F%20complex_range%20%20%20%20%20//returns%20false%0A16%20in%3F%20complex_range%20%20%20%20//returns%20true%0A%60%60%60%0A%0AThe%20same%20range%20as%20above%20can%20be%20constructed%20using%20subtraction%0A%0A%60%60%60dewy%0Acomplex_range%20%3D%20%5B1..20%29%20-%20%285..15%5D%0A%60%60%60%0A%0A%23%23%23%20Interval%20Membership%0A%0AYou%20can%20also%20check%20if%20a%20value%20falls%20within%20a%20specified%20range%0A%0A%60%60%60dewy%0A5%20in%3F%20%5B1..5%5D%20%20%20%20%20%20%20%20%20//returns%20true%0A5%20in%3F%20%281..5%29%20%20%20%20%20%20%20%20%20//returns%20false%0A3.1415%20in%3F%20%281..5%29%20%20%20%20//returns%20true%20%0A%60%60%60%0A%0A%23%23%23%20Indexing%20Sequences%0A%0Aranges%20can%20be%20used%20to%20select%20values%20from%20a%20sequence.%20For%20example%2C%20say%20we%20want%20a%20substring%20we%20can%20do%20the%20following%0A%0A%60%60%60dewy%0Afull_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring%20%3D%20full_string%5B3..12%5D%0Aprintl%28substring%29%20//prints%20%27s%20is%20a%20str%27%0A%60%60%60%0A%0AThis%20works%20for%20any%20sequence%20type.%20%0A%0A%3E%20Note%3A%20only%20integer%20ranges%20can%20be%20used%20to%20index%20into%20sequences%20%28TBD%20if%20this%20might%20be%20relaxed%20to%20real%20valued%20ranges%29.%0A%0AAlso%2C%20because%20of%20juxtaposition%2C%20we%20can%20easily%20make%20the%20selection%20inclusive%20or%20exclusive%20on%20either%20side.%0A%0A%60%60%60%0Afull_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring1%20%3D%20full_string%283..12%29%20%20//%20%27%20is%20a%20st%27%0Asubstring2%20%3D%20full_string%5B3..12%29%20%20//%20%27s%20is%20a%20st%27%0Asubstring3%20%3D%20full_string%283..12%5D%20%20//%20%27%20is%20a%20str%27%0A%60%60%60%0A%0A%0AYou%20can%20specify%20that%20a%20range%20continues%20to%20the%20end%20of%20the%20sequence%2C%20or%20starts%20from%20the%20beginning%20by%20omitting%20the%20value%20for%20that%20side.%20This%20will%20construct%20a%20range%20that%20goes%20to%20infinity%20in%20that%20direction%2C%20which%20will%20select%20all%20elements%20in%20that%20direction.%0A%0A%60%60%60%0Afull_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring_to_end%20%3D%20full_string%5B3..%5D%20//%20%27s%20is%20a%20string%27%0Asubstring_from_start%20%3D%20full_string%5B..12%5D%20//%20%27this%20is%20a%20str%27%0Awhole_string%20%3D%20full_string%5B..%5D%20//selects%20the%20whole%20string%0A%60%60%60%0A%0APaired%20with%20the%20special%20%60end%60%20token%20which%20represents%20the%20index%20of%20the%20last%20element%20in%20a%20sequence%2C%20this%20provides%20the%20means%20to%20select%20any%20desired%20subset%20of%20a%20sequence.%0A%0A%60%60%60%0Aarr%5Bend%5D%20%20%20%20%20%20//%20last%20element%0Aarr%5Bend-1%5D%20%20%20%20//%20second%20to%20last%20element%0Aarr%5B..end-3%5D%20%20//%20first%20element%20to%204th%20to%20last%20element%0Aarr%5B5..end-3%5D%20//%205th%20element%20to%204th%20to%20last%20element%0Aarr%5Bend-3..%5D%20%20//%204th%20to%20last%20element%20to%20last%20element"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe><div style="break-before: page; page-break-before: always;"></div><h1 id="object-and-class-types"><a class="header" href="#object-and-class-types">Object and Class Types</a></h1>
 <p>Object types are basically just containers containing assignments of variables and functions</p>
 <pre><code>my_obj = [
     a = 'apple'
@@ -876,83 +558,12 @@ printl(p3)  //prints Point(4, 6)
 <p>Functions are first class citizens in Dewy. In fact many concepts from functional programming are included in Dewy, as they frequently allow for cleaner and more concise code.</p>
 <h2 id="function-literals"><a class="header" href="#function-literals">Function Literals</a></h2>
 <p>To create a function, simply bind a function literal to a variable</p>
-<pre><code class="language-dewy">my_function = () =&gt; { printl'You called my function!' }
-
-my_function  //calls the function
-</code></pre>
-<p>A function literal consists of the arguments, followed by the <code>=&gt;</code> operator, followed by a single expression that is the function body. In the above example, the function takes no input arguments, and doesn't return any values. Instead is simply prints a string to the terminal.</p>
-<p>Here's an example that takes two arguments</p>
-<pre><code class="language-dewy">pythag_length = (a, b) =&gt; { return (a^2 + b^2)^/2 }
-</code></pre>
-<p>In fact we can simplify the above function's declaration quite a bit since blocks return expressions present in the body.</p>
-<pre><code class="language-dewy">pythag_length = (a, b) =&gt; (a^2 + b^2)^/2
-</code></pre>
-<p>And, because of precedence rules, we can omit the parenthesis around the argument list</p>
-<pre><code class="language-dewy">pythag_length = a, b =&gt; (a^2 + b^2)^/2
-</code></pre>
-<blockquote>
-<p>Note: zero arguments require an empty pair of parenthesis, in order to be parsed correctly. This is because a function literal is parsed as <code>&lt;left&gt; =&gt; &lt;right&gt;</code>, so something must always be present on the left side of the <code>=&gt;</code> operator.</p>
-</blockquote>
-<pre><code class="language-dewy">foo = () =&gt; printl'bar'
-</code></pre>
-<h3 id="default-arguments"><a class="header" href="#default-arguments">Default Arguments</a></h3>
-<p>Function arguments can have default values, which are used if the argument is not specified in the function call. </p>
-<blockquote>
-<p>Note: because comma <code>,</code> has higher precedence than <code>=</code>, the default value must be wrapped in parenthesis.</p>
-</blockquote>
-<pre><code class="language-dewy">foo = a, (b=5) =&gt; a + b
-foo = a:int, (b:int=5), (c:int=10) =&gt; a + b + c
-</code></pre>
-<!-- Alternatively, you can replace the tuple with an array literal, which is separated by spaced, meaning `=` will be at the correct precedence level without the need for parenthesis. -->
-<!-- ```dewy -->
-<!-- foo = [a b=5] => a + b -->
-<!-- foo = [a:int b:int=5 c:int=10] => a + b + c -->
-<!-- ``` -->
-<h2 id="calling-functions"><a class="header" href="#calling-functions">Calling functions</a></h2>
-<p>TODO</p>
-<ul>
-<li>calling a function with name, parenthesis, and args</li>
-<li>functions with no arguments can omit the parenthesis</li>
-</ul>
-<h2 id="optional-name-only-and-positional-only-arguments"><a class="header" href="#optional-name-only-and-positional-only-arguments">Optional, Name-only and Positional-only Arguments</a></h2>
-<p>TODO</p>
-<ul>
-<li>also explain about overwriting previously specified arguments (e.g. from partial evaluation, or in the same call)</li>
-</ul>
-<h2 id="scope-capture"><a class="header" href="#scope-capture">Scope Capture</a></h2>
-<p>TODO</p>
-<ul>
-<li>what variables are available to a function's body</li>
-</ul>
-<h2 id="partial-function-evaluation"><a class="header" href="#partial-function-evaluation">Partial Function Evaluation</a></h2>
-<p>First note that if you want to pass a function around as an object, you need to get a handle to the function using the <code>@</code> (&quot;handle&quot;) operator.</p>
-<pre><code class="language-dewy">my_func = () =&gt; printl'foo'
-
-reference_to_my_func = @my_func
-</code></pre>
-<p>If you don't include the <code>@</code> operator, then the evaluation of the right-hand side would be stored into the left side</p>
-<pre><code class="language-dewy">reference_to_my_func = my_func  //this doesn't work
-</code></pre>
-<p>what happens is <code>my_func</code> prints out &quot;foo&quot; to the command line, and then since it returns no value, <code>reference_to_my_func</code> is not able to be assigned, causing a compiler error. We'd also get a compiler error if <code>my_func</code> required arguments, as we essentially are trying to call my_func without an arguments.</p>
-<pre><code class="language-dewy">another_func = (a, b, c, x) =&gt; a^2*x + b*x + c
-
-good_reference = @another_func
-bad_reference = another_func  //this causes a compilation error
-</code></pre>
-<p>Now, using the <code>@</code> operator, we can not only create a new reference to an existing function, but we can also <strong>apply arguments to the reference</strong>. What this means is we can fix the value of given arguments, allowing us to create a new function.</p>
-<pre><code class="language-dewy">sum = (a, b) =&gt; a + b   //simple addition function
-add5 = @sum(5)          //partially evaluate sum with a=5
-</code></pre>
-<p>Here we've created a new function <code>add5</code> which takes a single argument, and return the result of that argument plus 5.</p>
-<pre><code class="language-dewy">add5(24)        //returns 29
-add5(-7)        //returns -2
-
-thirtyseven = @add5(32) //new function that takes 0 arguments
-thirtyseven   //returns 37
-</code></pre>
-<p>TODO-&gt;explain about overwriting arguments. Also explain precedence requiring wrapping named arguments in parenthesis</p>
-<pre><code class="language-dewy">new_sum = (x, y) =&gt; thirtyseven((a=x), (b=y))
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_function%20%3D%20%28%29%20%3D%3E%20%7B%20printl%27You%20called%20my%20function%21%27%20%7D%0A%0Amy_function%20%20//calls%20the%20function%0A%60%60%60%0A%0AA%20function%20literal%20consists%20of%20the%20arguments%2C%20followed%20by%20the%20%60%3D%3E%60%20operator%2C%20followed%20by%20a%20single%20expression%20that%20is%20the%20function%20body.%20In%20the%20above%20example%2C%20the%20function%20takes%20no%20input%20arguments%2C%20and%20doesn%27t%20return%20any%20values.%20Instead%20is%20simply%20prints%20a%20string%20to%20the%20terminal.%0A%0AHere%27s%20an%20example%20that%20takes%20two%20arguments%0A%0A%60%60%60dewy%0Apythag_length%20%3D%20%28a%2C%20b%29%20%3D%3E%20%7B%20return%20%28a%5E2%20%2B%20b%5E2%29%5E/2%20%7D%0A%60%60%60%0A%0AIn%20fact%20we%20can%20simplify%20the%20above%20function%27s%20declaration%20quite%20a%20bit%20since%20blocks%20return%20expressions%20present%20in%20the%20body.%0A%0A%60%60%60dewy%0Apythag_length%20%3D%20%28a%2C%20b%29%20%3D%3E%20%28a%5E2%20%2B%20b%5E2%29%5E/2%0A%60%60%60%0A%0AAnd%2C%20because%20of%20precedence%20rules%2C%20we%20can%20omit%20the%20parenthesis%20around%20the%20argument%20list%0A%0A%60%60%60dewy%0Apythag_length%20%3D%20a%2C%20b%20%3D%3E%20%28a%5E2%20%2B%20b%5E2%29%5E/2%0A%60%60%60%0A%0A%3E%20Note%3A%20zero%20arguments%20require%20an%20empty%20pair%20of%20parenthesis%2C%20in%20order%20to%20be%20parsed%20correctly.%20This%20is%20because%20a%20function%20literal%20is%20parsed%20as%20%60%3Cleft%3E%20%3D%3E%20%3Cright%3E%60%2C%20so%20something%20must%20always%20be%20present%20on%20the%20left%20side%20of%20the%20%60%3D%3E%60%20operator.%0A%0A%60%60%60dewy%0Afoo%20%3D%20%28%29%20%3D%3E%20printl%27bar%27%0A%60%60%60%0A%0A%0A%23%23%23%20Default%20Arguments%0AFunction%20arguments%20can%20have%20default%20values%2C%20which%20are%20used%20if%20the%20argument%20is%20not%20specified%20in%20the%20function%20call.%20%0A%0A%3E%20Note%3A%20because%20comma%20%60%2C%60%20has%20higher%20precedence%20than%20%60%3D%60%2C%20the%20default%20value%20must%20be%20wrapped%20in%20parenthesis.%0A%0A%60%60%60dewy%0Afoo%20%3D%20a%2C%20%28b%3D5%29%20%3D%3E%20a%20%2B%20b%0Afoo%20%3D%20a%3Aint%2C%20%28b%3Aint%3D5%29%2C%20%28c%3Aint%3D10%29%20%3D%3E%20a%20%2B%20b%20%2B%20c%0A%60%60%60%0A%0A%3C%21--%20Alternatively%2C%20you%20can%20replace%20the%20tuple%20with%20an%20array%20literal%2C%20which%20is%20separated%20by%20spaced%2C%20meaning%20%60%3D%60%20will%20be%20at%20the%20correct%20precedence%20level%20without%20the%20need%20for%20parenthesis.%20--%3E%0A%0A%3C%21--%20%60%60%60dewy%20--%3E%0A%3C%21--%20foo%20%3D%20%5Ba%20b%3D5%5D%20%3D%3E%20a%20%2B%20b%20--%3E%0A%3C%21--%20foo%20%3D%20%5Ba%3Aint%20b%3Aint%3D5%20c%3Aint%3D10%5D%20%3D%3E%20a%20%2B%20b%20%2B%20c%20--%3E%0A%3C%21--%20%60%60%60%20--%3E%0A%0A%0A%23%23%20Calling%20functions%0A%0ATODO%0A-%20calling%20a%20function%20with%20name%2C%20parenthesis%2C%20and%20args%0A-%20functions%20with%20no%20arguments%20can%20omit%20the%20parenthesis%0A%0A%23%23%20Optional%2C%20Name-only%20and%20Positional-only%20Arguments%0A%0ATODO%0A-%20also%20explain%20about%20overwriting%20previously%20specified%20arguments%20%28e.g.%20from%20partial%20evaluation%2C%20or%20in%20the%20same%20call%29%0A%0A%23%23%20Scope%20Capture%0A%0ATODO%0A-%20what%20variables%20are%20available%20to%20a%20function%27s%20body%0A%0A%23%23%20Partial%20Function%20Evaluation%0A%0AFirst%20note%20that%20if%20you%20want%20to%20pass%20a%20function%20around%20as%20an%20object%2C%20you%20need%20to%20get%20a%20handle%20to%20the%20function%20using%20the%20%60%40%60%20%28%22handle%22%29%20operator.%0A%0A%60%60%60dewy%0Amy_func%20%3D%20%28%29%20%3D%3E%20printl%27foo%27%0A%0Areference_to_my_func%20%3D%20%40my_func%0A%60%60%60%0A%0AIf%20you%20don%27t%20include%20the%20%60%40%60%20operator%2C%20then%20the%20evaluation%20of%20the%20right-hand%20side%20would%20be%20stored%20into%20the%20left%20side%0A%0A%60%60%60dewy%0Areference_to_my_func%20%3D%20my_func%20%20//this%20doesn%27t%20work%0A%60%60%60%0A%0Awhat%20happens%20is%20%60my_func%60%20prints%20out%20%22foo%22%20to%20the%20command%20line%2C%20and%20then%20since%20it%20returns%20no%20value%2C%20%60reference_to_my_func%60%20is%20not%20able%20to%20be%20assigned%2C%20causing%20a%20compiler%20error.%20We%27d%20also%20get%20a%20compiler%20error%20if%20%60my_func%60%20required%20arguments%2C%20as%20we%20essentially%20are%20trying%20to%20call%20my_func%20without%20an%20arguments.%0A%0A%60%60%60dewy%0Aanother_func%20%3D%20%28a%2C%20b%2C%20c%2C%20x%29%20%3D%3E%20a%5E2%2Ax%20%2B%20b%2Ax%20%2B%20c%0A%0Agood_reference%20%3D%20%40another_func%0Abad_reference%20%3D%20another_func%20%20//this%20causes%20a%20compilation%20error%0A%60%60%60%0A%0ANow%2C%20using%20the%20%60%40%60%20operator%2C%20we%20can%20not%20only%20create%20a%20new%20reference%20to%20an%20existing%20function%2C%20but%20we%20can%20also%20%2A%2Aapply%20arguments%20to%20the%20reference%2A%2A.%20What%20this%20means%20is%20we%20can%20fix%20the%20value%20of%20given%20arguments%2C%20allowing%20us%20to%20create%20a%20new%20function.%0A%0A%60%60%60dewy%0Asum%20%3D%20%28a%2C%20b%29%20%3D%3E%20a%20%2B%20b%20%20%20//simple%20addition%20function%0Aadd5%20%3D%20%40sum%285%29%20%20%20%20%20%20%20%20%20%20//partially%20evaluate%20sum%20with%20a%3D5%0A%60%60%60%0A%0AHere%20we%27ve%20created%20a%20new%20function%20%60add5%60%20which%20takes%20a%20single%20argument%2C%20and%20return%20the%20result%20of%20that%20argument%20plus%205.%0A%0A%60%60%60dewy%0Aadd5%2824%29%20%20%20%20%20%20%20%20//returns%2029%0Aadd5%28-7%29%20%20%20%20%20%20%20%20//returns%20-2%0A%0Athirtyseven%20%3D%20%40add5%2832%29%20//new%20function%20that%20takes%200%20arguments%0Athirtyseven%20%20%20//returns%2037%0A%60%60%60%0A%0ATODO-%3Eexplain%20about%20overwriting%20arguments.%20Also%20explain%20precedence%20requiring%20wrapping%20named%20arguments%20in%20parenthesis%0A%0A%60%60%60dewy%0Anew_sum%20%3D%20%28x%2C%20y%29%20%3D%3E%20thirtyseven%28%28a%3Dx%29%2C%20%28b%3Dy%29%29"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="operators"><a class="header" href="#operators">Operators</a></h1>
 <p>Dewy is a 100% expression-based language, meaning everything is formed from small pieces combined together with operators. Dewy has 3 types of operators:</p>
 <ul>
@@ -1122,16 +733,12 @@ Also any instances of elementwise operators (e.g. <code>.+</code> <code>.=</code
 </div>
 <p>*Decimal is the default base, so the prefix is generally not necessary, unless the default base is changed.</p>
 <p>Some examples:</p>
-<pre><code class="language-dewy">0b10101010  // 170
-0t121010    // 435
-0q123       // 27
-0s1432      // 380
-0o1234567   // 342391
-0xdeadbeef  // 3735928559
-0u1v2u3t    // 66156669
-0rz1b2c3    // 2118512019
-0yl1z2$3!   // 3231913341182
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=0b10101010%20%20//%20170%0A0t121010%20%20%20%20//%20435%0A0q123%20%20%20%20%20%20%20//%2027%0A0s1432%20%20%20%20%20%20//%20380%0A0o1234567%20%20%20//%20342391%0A0xdeadbeef%20%20//%203735928559%0A0u1v2u3t%20%20%20%20//%2066156669%0A0rz1b2c3%20%20%20%20//%202118512019%0A0yl1z2%243%21%20%20%20//%203231913341182"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
 <p>See also: <a href="https://en.wikipedia.org/wiki/List_of_numeral_systems">Base names</a>, and <a href="https://en.wikipedia.org/wiki/Senary">Seximal</a></p>
 <h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="basic-math"><a class="header" href="#basic-math">Basic Math</a></h1>
@@ -1208,89 +815,21 @@ Also any instances of elementwise operators (e.g. <code>.+</code> <code>.=</code
 <li>currently no process for the semantic results of parsed rules</li>
 </ul>
 <p>Something more ideal may make use of string prefix functions</p>
-<pre><code class="language-dewy">(meta)r'''
-    #rule = #hashtag '=' #expr ';' =&gt; { /{semantics for handling the rule}/ };
-'''
-</code></pre>
-<p>Or perhaps a syntax constructed explicitly from valid Dewy expressions</p>
-<pre><code class="language-dewy">#rule = #hashtag, '=', #expr, ';' =&gt; { /{semantics for handling the rule}/ }
-</code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="flow-control"><a class="header" href="#flow-control">Flow Control</a></h1>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=%28meta%29r%27%27%27%0A%20%20%20%20%23rule%20%3D%20%23hashtag%20%27%3D%27%20%23expr%20%27%3B%27%20%3D%3E%20%7B%20/%7Bsemantics%20for%20handling%20the%20rule%7D/%20%7D%3B%0A%27%27%27%0A%60%60%60%0A%0AOr%20perhaps%20a%20syntax%20constructed%20explicitly%20from%20valid%20Dewy%20expressions%0A%0A%60%60%60dewy%0A%23rule%20%3D%20%23hashtag%2C%20%27%3D%27%2C%20%23expr%2C%20%27%3B%27%20%3D%3E%20%7B%20/%7Bsemantics%20for%20handling%20the%20rule%7D/%20%7D"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe><div style="break-before: page; page-break-before: always;"></div><h1 id="flow-control"><a class="header" href="#flow-control">Flow Control</a></h1>
 <p>In Dewy, the two main methods of conditionally executing code are <code>if</code> and <code>loop</code> expressions.</p>
 <h2 id="if-expressions"><a class="header" href="#if-expressions">If Expressions</a></h2>
 <p>If expressions allow you to conditionally evaluate code based on whether or not some condition is met.</p>
-<pre><code class="language-dewy">my_var = 10
-if my_var =? 10 
-    printl&quot;my_var is ten&quot;
-</code></pre>
-<p>The syntax for an <code>if</code> expression is:</p>
-<pre><code>if &lt;condition&gt; &lt;expression&gt;
-</code></pre>
-<p>where <code>&lt;condition&gt;</code> must result in a boolean value, and <code>&lt;expression&gt;</code> can be anything. Commonly, <code>&lt;expression&gt;</code> will be a block containing multiple expressions.</p>
-<pre><code class="language-dewy">if a &gt;? b
-{
-    //do something
-    //do another thing
-}
-</code></pre>
-<h2 id="loop-expressions"><a class="header" href="#loop-expressions">Loop Expressions</a></h2>
-<p>Loop expressions allow you to repeat the execution of some code while some condition is met.</p>
-<pre><code class="language-dewy">i = 0
-loop i &lt;? 10
-{
-    printl&quot;i is {i}&quot;
-    i += 1
-}
-</code></pre>
-<p>The syntax for a <code>loop</code> expression is:</p>
-<pre><code>loop &lt;condition&gt; &lt;expression&gt;
-</code></pre>
-<p>where <code>&lt;condition&gt;</code> must be an expression that evaluates to a boolean value, and <code>&lt;expression&gt;</code> can be anything.</p>
-<p>Loops will be explored in more detail in <a href="loops.html">One Loop To Rule Them All</a>.</p>
-<h2 id="flow-chains"><a class="header" href="#flow-chains">Flow Chains</a></h2>
-<p>Multiple flow expressions can be chained together via the <code>else</code> operator, along with an optional final default case that need not be a flow expression. In normal languages, this would be <code>if-else-if</code> kinds of sequences, which are certainly possible in Dewy:</p>
-<pre><code class="language-dewy">my_var = 'apple'
-if my_var =? 'banana' 
-    printl'A fruit enjoyed by monkeys'
-else
-    printl'monkeys don\'t like {my_var}, only bananas!'
-</code></pre>
-<p>or even</p>
-<pre><code class="language-dewy">my_var = 42
-if my_var &lt;=? 10
-    printl'a small number'
-else if my_var &lt;=? 50
-    printl'a medium number'
-else
-    printl'a number larger than 50'
-</code></pre>
-<p>But Dewy also allows <code>loop</code> expressions to be combined in this way as well:</p>
-<pre><code class="language-dewy">if a &gt;? b
-{
-    printl'a is greater than b'
-}
-else loop a &lt;? b
-{
-    printl'a is less than b. Increasing a until it matches b'
-    a += 1
-}
-else
-{
-    printl'a is equal to b'
-}
-</code></pre>
-<p>In the above example, if <code>a</code> is greater than <code>b</code>, the first block would be executed, and the rest of the blocks are skipped. If <code>a</code>  is less than <code>b</code>, the loop in the second block executes, incrementing <code>a</code> until it is equal to <code>b</code>, at which point the rest of the chain is skipped. Only if <code>a</code> is neither greater than nor less than <code>b</code> (i.e. <code>a</code> equals <code>b</code>) will the final block be executed exclusively.</p>
-<p>(TODO: add an example for how all conditions share the same scope, so variables defined in one condition will be available in later bodies if they execute)</p>
-<p>(TODO: probably add a <code>finally</code> operator which can be used to always execute code at the end)</p>
-<h2 id="capturing-values"><a class="header" href="#capturing-values">Capturing Values</a></h2>
-<p>Unlike if statements from other languages, <code>if</code>s and <code>loop</code>s in Dewy are themselves expressions, allowing any expressed values to be captured. <code>if</code> expressions basically act like Dewy's version of the ternary operator</p>
-<pre><code>my_fruit = 'kiwi'
-tropical_fruits = ['banana' 'pineapple' 'kiwi' 'papaya']
-my_var = if my_fruit in? tropical_fruit
-    'a tropical fruit'
-else
-    'some other type of fruit'
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=my_var%20%3D%2010%0Aif%20my_var%20%3D%3F%2010%20%0A%20%20%20%20printl%22my_var%20is%20ten%22%0A%60%60%60%20%0A%0AThe%20syntax%20for%20an%20%60if%60%20expression%20is%3A%0A%0A%60%60%60%0Aif%20%3Ccondition%3E%20%3Cexpression%3E%0A%60%60%60%0A%0Awhere%20%60%3Ccondition%3E%60%20must%20result%20in%20a%20boolean%20value%2C%20and%20%60%3Cexpression%3E%60%20can%20be%20anything.%20Commonly%2C%20%60%3Cexpression%3E%60%20will%20be%20a%20block%20containing%20multiple%20expressions.%0A%0A%60%60%60dewy%0Aif%20a%20%3E%3F%20b%0A%7B%0A%20%20%20%20//do%20something%0A%20%20%20%20//do%20another%20thing%0A%7D%0A%60%60%60%0A%0A%23%23%20Loop%20Expressions%0ALoop%20expressions%20allow%20you%20to%20repeat%20the%20execution%20of%20some%20code%20while%20some%20condition%20is%20met.%0A%0A%60%60%60dewy%0Ai%20%3D%200%0Aloop%20i%20%3C%3F%2010%0A%7B%0A%20%20%20%20printl%22i%20is%20%7Bi%7D%22%0A%20%20%20%20i%20%2B%3D%201%0A%7D%0A%60%60%60%0A%0AThe%20syntax%20for%20a%20%60loop%60%20expression%20is%3A%0A%0A%60%60%60%0Aloop%20%3Ccondition%3E%20%3Cexpression%3E%0A%60%60%60%0A%0Awhere%20%60%3Ccondition%3E%60%20must%20be%20an%20expression%20that%20evaluates%20to%20a%20boolean%20value%2C%20and%20%60%3Cexpression%3E%60%20can%20be%20anything.%0A%0ALoops%20will%20be%20explored%20in%20more%20detail%20in%20%5BOne%20Loop%20To%20Rule%20Them%20All%5D%28loops.md%29.%0A%0A%0A%23%23%20Flow%20Chains%0A%0AMultiple%20flow%20expressions%20can%20be%20chained%20together%20via%20the%20%60else%60%20operator%2C%20along%20with%20an%20optional%20final%20default%20case%20that%20need%20not%20be%20a%20flow%20expression.%20In%20normal%20languages%2C%20this%20would%20be%20%60if-else-if%60%20kinds%20of%20sequences%2C%20which%20are%20certainly%20possible%20in%20Dewy%3A%0A%0A%0A%60%60%60dewy%0Amy_var%20%3D%20%27apple%27%0Aif%20my_var%20%3D%3F%20%27banana%27%20%0A%20%20%20%20printl%27A%20fruit%20enjoyed%20by%20monkeys%27%0Aelse%0A%20%20%20%20printl%27monkeys%20don%5C%27t%20like%20%7Bmy_var%7D%2C%20only%20bananas%21%27%0A%60%60%60%0A%0Aor%20even%0A%0A%60%60%60dewy%0Amy_var%20%3D%2042%0Aif%20my_var%20%3C%3D%3F%2010%0A%20%20%20%20printl%27a%20small%20number%27%0Aelse%20if%20my_var%20%3C%3D%3F%2050%0A%20%20%20%20printl%27a%20medium%20number%27%0Aelse%0A%20%20%20%20printl%27a%20number%20larger%20than%2050%27%0A%60%60%60%0A%0ABut%20Dewy%20also%20allows%20%60loop%60%20expressions%20to%20be%20combined%20in%20this%20way%20as%20well%3A%0A%0A%60%60%60dewy%0Aif%20a%20%3E%3F%20b%0A%7B%0A%20%20%20%20printl%27a%20is%20greater%20than%20b%27%0A%7D%0Aelse%20loop%20a%20%3C%3F%20b%0A%7B%0A%20%20%20%20printl%27a%20is%20less%20than%20b.%20Increasing%20a%20until%20it%20matches%20b%27%0A%20%20%20%20a%20%2B%3D%201%0A%7D%0Aelse%0A%7B%0A%20%20%20%20printl%27a%20is%20equal%20to%20b%27%0A%7D%0A%60%60%60%0A%0AIn%20the%20above%20example%2C%20if%20%60a%60%20is%20greater%20than%20%60b%60%2C%20the%20first%20block%20would%20be%20executed%2C%20and%20the%20rest%20of%20the%20blocks%20are%20skipped.%20If%20%60a%60%20%20is%20less%20than%20%60b%60%2C%20the%20loop%20in%20the%20second%20block%20executes%2C%20incrementing%20%60a%60%20until%20it%20is%20equal%20to%20%60b%60%2C%20at%20which%20point%20the%20rest%20of%20the%20chain%20is%20skipped.%20Only%20if%20%60a%60%20is%20neither%20greater%20than%20nor%20less%20than%20%60b%60%20%28i.e.%20%60a%60%20equals%20%60b%60%29%20will%20the%20final%20block%20be%20executed%20exclusively.%0A%0A%28TODO%3A%20add%20an%20example%20for%20how%20all%20conditions%20share%20the%20same%20scope%2C%20so%20variables%20defined%20in%20one%20condition%20will%20be%20available%20in%20later%20bodies%20if%20they%20execute%29%0A%0A%28TODO%3A%20probably%20add%20a%20%60finally%60%20operator%20which%20can%20be%20used%20to%20always%20execute%20code%20at%20the%20end%29%0A%0A%0A%23%23%20Capturing%20Values%0A%0AUnlike%20if%20statements%20from%20other%20languages%2C%20%60if%60s%20and%20%60loop%60s%20in%20Dewy%20are%20themselves%20expressions%2C%20allowing%20any%20expressed%20values%20to%20be%20captured.%20%60if%60%20expressions%20basically%20act%20like%20Dewy%27s%20version%20of%20the%20ternary%20operator%0A%0A%60%60%60%0Amy_fruit%20%3D%20%27kiwi%27%0Atropical_fruits%20%3D%20%5B%27banana%27%20%27pineapple%27%20%27kiwi%27%20%27papaya%27%5D%0Amy_var%20%3D%20if%20my_fruit%20in%3F%20tropical_fruit%0A%20%20%20%20%27a%20tropical%20fruit%27%0Aelse%0A%20%20%20%20%27some%20other%20type%20of%20fruit%27"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
 <p><code>my_var</code> would have a value of <code>'a tropical fruit'</code> at the end of the above example.</p>
 <p>Values from loops can be captured to construct sequences, which is explored more in <a href="loops.html#loop-generators">One Loop To Rule Them All</a>.</p>
 <h2 id="match-expressions"><a class="header" href="#match-expressions">Match Expressions</a></h2>
@@ -1309,247 +848,22 @@ else
 <p>The various types of loops seen in other languages are formed simply by changing the <code>&lt;condition&gt;</code> part of the loop.</p>
 <h2 id="infinite-loops"><a class="header" href="#infinite-loops">Infinite Loops</a></h2>
 <p>An infinite loop is one that never ends. They are constructed by hardcoding the condition to <code>true</code>, which ensures that the loop will always repeat.</p>
-<pre><code class="language-dewy">loop true
-{
-    //do something repeatedly forever
-}
-</code></pre>
-<p>The only way to leave an infinite loop is via the <code>break</code>, and <code>return</code> keywords.</p>
-<h2 id="while-loops"><a class="header" href="#while-loops">While Loops</a></h2>
-<p>A while loop is a loop that executes &quot;while&quot; some condition is true. A simple boolean expression can be used as the condition. When the condition is false, the loop ends.</p>
-<pre><code class="language-dewy">loop i &gt;? 0
-{
-    //while i is greater than 0, do something 
-}
-</code></pre>
-<h2 id="for-loops"><a class="header" href="#for-loops">For Loops</a></h2>
-<p>Many languages feature for loops, which iterate over some iterable object. The simplest case of this would be iterating over a range of numbers. In Dewy, the <code>in</code> operator manages iteration for loops. <code>in</code> has two aspects:</p>
-<ol>
-<li>the variable on the left is assigned with the next value of the iterable on the right (or <code>void</code> if there are no more values)</li>
-<li>the expression returns <code>true</code> or <code>false</code> depending on if there was a value to assign to the variable this iteration.</li>
-</ol>
-<p>This means that <code>in</code> expressions can be used to trivially construct a for-loop.</p>
-<pre><code class="language-dewy">loop i in 1..5
-{
-    print('{i}, ') 
-}
-</code></pre>
-<p>Which prints out <code>1, 2, 3, 4, 5, </code> to the console. Each iteration, <code>in</code> causes <code>i</code> to be assigned the next value in the sequence, while returning true for the loop condition. When the sequence is exhausted, <code>in</code> returns false, and the loop ends.</p>
-<p>For loops can also iterate over the items in any type of container. Iterating over a list looks like this</p>
-<pre><code class="language-dewy">loop fruit in ['apple' 'banana' 'peach' 'pear']
-{
-    print('I like to eat {fruit}!')
-}
-</code></pre>
-<p>Which prints the following to the console</p>
-<pre><code>I like to eat apple
-I like to eat banana
-I like to eat peach
-I like to eat pear
-</code></pre>
-<p>Items in a dictionary can be iterated over like so</p>
-<pre><code class="language-dewy">ratings = [
-    'star wars' -&gt; 73
-    'star trek' -&gt; 89
-    'star gate' -&gt; 84
-    'battlestar galactica' -&gt; 87
-    'legend of the galactic heroes' -&gt; 100
-]
-
-loop show, rating in ratings
-{
-    printl('I give {show} a {rating} out 100')
-}
-</code></pre>
-<p>This takes advantage of the fact that iterating over a dictionary returns each pair, which can then be unpacked into separate variables <code>show</code> and <code>rating</code>. This prints out the following to the console</p>
-<pre><code>I give star wars a 73 out of 100
-I give star trek a 89 out of 100
-I give star gate a 84 out of 100
-I give battlestar galactica a 87 out of 100
-I give legend of the galactic heroes a 100 out of 100
-</code></pre>
-<h3 id="multiple-conditions"><a class="header" href="#multiple-conditions">Multiple Conditions</a></h3>
-<p>A neat side effect of <code>in</code> statements returning a boolean is that it provides a free method for looping over multiple sequences simultaneously. Simply combine two <code>in</code> statements with a logical operator. The loop will continue until one sequence is exhausted, both, or something else, depending on which logical operator is used. The behavior <code>zip</code> from other languages can be achieved by combining sequences with <code>and</code></p>
-<pre><code class="language-dewy">names = ['Alice' 'Bob' 'Charlie']
-colors = ['Red' 'Blue' 'Green' 'Yellow']
-
-loop name in names and color in colors
-    printl'{name} chose {color}'
-</code></pre>
-<p>In this case, the loop runs until either sequence is exhausted (as <code>and</code> requires both conditions to be true, so as soon as one is false, the loop ends). This prints out the following to the console</p>
-<pre><code>Alice chose Red
-Bob chose Blue
-Charlie chose Green
-</code></pre>
-<p>Other languages commonly have an <code>enumerate</code> function which will count how many iterations have occurred on top of looping over some sequence. This can be achieved by combining an infinite range with any sequence using <code>and</code>:</p>
-<pre><code class="language-dewy">loop i in 0.. and fruit in ['apple' 'banana' 'peach' 'pear']
-    printl'{i}) {fruit}'
-</code></pre>
-<p><code>i</code> will never run out of values, so the loop continues so long as <code>fruit</code> has values remaining. This prints out the following to the console</p>
-<pre><code>0) apple
-1) banana
-2) peach
-3) pear
-</code></pre>
-<p>Using the <code>or</code> operator to combine sequences will loop until so long as either of the sequences have values remaining. </p>
-<pre><code class="language-dewy">A = [1 2 3]
-B = [4 5 6 7 8]
-loop a in A or b in B
-    printl[a b]
-</code></pre>
-<p>Which prints</p>
-<pre><code>[1 4]
-[2 5]
-[3 6]
-[undefined 7]
-[undefined 8]
-</code></pre>
-<p>Since this is just combining boolean expressions, any combination of expressions that results in a boolean may be used.</p>
-<pre><code class="language-dewy">limit = time.now + 5(minutes)
-loop batch in batches and time.now &lt;? limit
-    process(batch)
-</code></pre>
-<p>As a similar approach, perhaps there might be iterators in this style where they don't have a fixed value, but instead track over some changing resource</p>
-<pre><code class="language-dewy">loop batch in batches and t in timer(5(minutes))
-{
-    process(batch)
-    printl'timeout in {t}'
-}
-</code></pre>
-<h2 id="do-loop-do"><a class="header" href="#do-loop-do">Do Loop Do</a></h2>
-<p>The do-while version of the loop can be constructed by putting the <code>do</code> keyword before the body, and putting the <code>loop</code> keyword and its condition after the body. This means loop body is executed at least once before the condition is checked, at which point the loop could exit or continue.</p>
-<p>Basic do-while loop:</p>
-<pre><code class="language-dewy">i = 0
-do
-{
-    i += 1
-    printl'this is a do-while loop'
-}
-loop i &lt;? 20
-</code></pre>
-<p>do-loop over an iterator. On the first iteration, <code>i</code> will be undefined, while it will be available on subsequent iterations</p>
-<pre><code class="language-dewy">do printl'this is a do-for loop. i={i}'
-loop i in 0..5
-</code></pre>
-<p>Which prints</p>
-<pre><code>this is a do-for loop. i=undefined
-this is a do-for loop. i=0
-this is a do-for loop. i=1
-this is a do-for loop. i=2
-this is a do-for loop. i=3
-this is a do-for loop. i=4
-this is a do-for loop. i=5
-</code></pre>
-<p>Technically you can construct an infinite do-while loop, but it's basically identical to a regular infinite loop</p>
-<pre><code>do printl'this is a do-infinite loop'
-loop true
-</code></pre>
-<p>Lastly you can sandwich <code>loop</code> between two blocks using two <code>do</code> keywords (one before the first block, and one after the loop condition). This will give you a block executed before the condition and a block executed after the condition</p>
-<blockquote>
-<p>Note: the syntax for do-loop-do is still being finalized, and may change from this example</p>
-</blockquote>
-<pre><code class="language-dewy">i = 0
-do
-{
-    printl'before condition is checked'
-}
-loop i &lt;? 20 do
-{
-    printl'after condition is checked'
-    i += 1
-}
-</code></pre>
-<p>In this loop, the first block is guaranteed to execute at least once. Then we check the condition, and then if true, we execute the second block, then repeat the loop, execute the first block, and then check the condition again, repeating until the condition is false, or we have iterated over all elements.</p>
-<h2 id="break-continue-return-inside-loops"><a class="header" href="#break-continue-return-inside-loops">Break, Continue, Return inside Loops</a></h2>
-<p>TODO-&gt;write this. follows basic principles of other languages. extra is that you can use <code>#hashtags</code> to break/continue from inside nested loops</p>
-<h2 id="loop-generators"><a class="header" href="#loop-generators">Loop Generators</a></h2>
-<p>Let's look at this example</p>
-<pre><code>loop i in 1..10 {i}
-</code></pre>
-<p>Every iteration of the loop, the current value of <code>i</code> is &quot;expressed&quot;, that is to say, the value could be stored in a variable or a container.</p>
-<p>Lets capture the expressed value in a container by wrapping the loop in <code>[]</code> brackets</p>
-<pre><code>[loop i in 1..10 {i}]
-</code></pre>
-<p>This &quot;generates&quot; the array <code>[1 2 3 4 5 6 7 8 9 10]</code>, which we can then store into a variable</p>
-<pre><code>my_array = [loop i in 1..10 {i}]
-
-//optional to omit the braces since only a single expression is in the body
-my_array = [loop i in 1..10 i]
-</code></pre>
-<p>And thus we have created the simplest list generator. </p>
-<h3 id="multiple-expressions-per-iteration"><a class="header" href="#multiple-expressions-per-iteration">Multiple Expressions per Iteration</a></h3>
-<p>Generators can do a lot of interesting things. For example we can express multiple values on a single loop iteration</p>
-<pre><code>//note the braces are not optional in this case
-my_array = [loop i in 1..5 { i i^2 }]
-</code></pre>
-<p>producing the array <code>[1 1 2 4 3 9 4 16 5 25]</code>. </p>
-<p>We can also construct a dictionary by expressing with a <code>-&gt;</code> between two values</p>
-<pre><code>squares = [loop i in 1..5 { i -&gt; i^2 }]
-</code></pre>
-<p>which produces the dictionary <code>[1-&gt;1 2-&gt;4 3-&gt;9 4-&gt;16 5-&gt;25]</code> which points from values to their squares.</p>
-<h3 id="multidimensional-generators"><a class="header" href="#multidimensional-generators">Multidimensional Generators</a></h3>
-<p>You can generate a multidimensional array using multiple nested loops. For example</p>
-<pre><code>indices = 
-[
-    loop i in 1..5 
-    [
-        loop j in 1..5 
-        [ 
-            i 
-            j 
-        ] 
-    ] 
-]
-</code></pre>
-<p>which produces the following 3D array representing the indices of a 5x5 matrix as tuples</p>
-<pre><code>indices = [
-    [[1 1] [1 2] [1 3] [1 4] [1 5]]
-    [[2 1] [2 2] [2 3] [2 4] [2 5]]
-    [[3 1] [4 2] [3 3] [3 4] [3 5]]
-    [[4 1] [4 2] [4 3] [4 4] [4 5]]
-    [[5 1] [5 2] [5 3] [5 4] [5 5]]
-]
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=loop%20true%0A%7B%0A%20%20%20%20//do%20something%20repeatedly%20forever%0A%7D%0A%60%60%60%0A%0AThe%20only%20way%20to%20leave%20an%20infinite%20loop%20is%20via%20the%20%60break%60%2C%20and%20%60return%60%20keywords.%0A%0A%23%23%20While%20Loops%0A%0AA%20while%20loop%20is%20a%20loop%20that%20executes%20%22while%22%20some%20condition%20is%20true.%20A%20simple%20boolean%20expression%20can%20be%20used%20as%20the%20condition.%20When%20the%20condition%20is%20false%2C%20the%20loop%20ends.%0A%0A%60%60%60dewy%0Aloop%20i%20%3E%3F%200%0A%7B%0A%20%20%20%20//while%20i%20is%20greater%20than%200%2C%20do%20something%20%0A%7D%0A%60%60%60%0A%0A%23%23%20For%20Loops%0A%0AMany%20languages%20feature%20for%20loops%2C%20which%20iterate%20over%20some%20iterable%20object.%20The%20simplest%20case%20of%20this%20would%20be%20iterating%20over%20a%20range%20of%20numbers.%20In%20Dewy%2C%20the%20%60in%60%20operator%20manages%20iteration%20for%20loops.%20%60in%60%20has%20two%20aspects%3A%0A1.%20the%20variable%20on%20the%20left%20is%20assigned%20with%20the%20next%20value%20of%20the%20iterable%20on%20the%20right%20%28or%20%60void%60%20if%20there%20are%20no%20more%20values%29%0A2.%20the%20expression%20returns%20%60true%60%20or%20%60false%60%20depending%20on%20if%20there%20was%20a%20value%20to%20assign%20to%20the%20variable%20this%20iteration.%0A%0AThis%20means%20that%20%60in%60%20expressions%20can%20be%20used%20to%20trivially%20construct%20a%20for-loop.%0A%0A%60%60%60dewy%0Aloop%20i%20in%201..5%0A%7B%0A%20%20%20%20print%28%27%7Bi%7D%2C%20%27%29%20%0A%7D%0A%60%60%60%20%0A%0AWhich%20prints%20out%20%601%2C%202%2C%203%2C%204%2C%205%2C%20%60%20to%20the%20console.%20Each%20iteration%2C%20%60in%60%20causes%20%60i%60%20to%20be%20assigned%20the%20next%20value%20in%20the%20sequence%2C%20while%20returning%20true%20for%20the%20loop%20condition.%20When%20the%20sequence%20is%20exhausted%2C%20%60in%60%20returns%20false%2C%20and%20the%20loop%20ends.%0A%0AFor%20loops%20can%20also%20iterate%20over%20the%20items%20in%20any%20type%20of%20container.%20Iterating%20over%20a%20list%20looks%20like%20this%0A%0A%60%60%60dewy%0Aloop%20fruit%20in%20%5B%27apple%27%20%27banana%27%20%27peach%27%20%27pear%27%5D%0A%7B%0A%20%20%20%20print%28%27I%20like%20to%20eat%20%7Bfruit%7D%21%27%29%0A%7D%0A%60%60%60%0A%0AWhich%20prints%20the%20following%20to%20the%20console%0A%0A%60%60%60%0AI%20like%20to%20eat%20apple%0AI%20like%20to%20eat%20banana%0AI%20like%20to%20eat%20peach%0AI%20like%20to%20eat%20pear%0A%60%60%60%0A%0AItems%20in%20a%20dictionary%20can%20be%20iterated%20over%20like%20so%0A%0A%60%60%60dewy%0Aratings%20%3D%20%5B%0A%20%20%20%20%27star%20wars%27%20-%3E%2073%0A%20%20%20%20%27star%20trek%27%20-%3E%2089%0A%20%20%20%20%27star%20gate%27%20-%3E%2084%0A%20%20%20%20%27battlestar%20galactica%27%20-%3E%2087%0A%20%20%20%20%27legend%20of%20the%20galactic%20heroes%27%20-%3E%20100%0A%5D%0A%0Aloop%20show%2C%20rating%20in%20ratings%0A%7B%0A%20%20%20%20printl%28%27I%20give%20%7Bshow%7D%20a%20%7Brating%7D%20out%20100%27%29%0A%7D%0A%60%60%60%0A%0AThis%20takes%20advantage%20of%20the%20fact%20that%20iterating%20over%20a%20dictionary%20returns%20each%20pair%2C%20which%20can%20then%20be%20unpacked%20into%20separate%20variables%20%60show%60%20and%20%60rating%60.%20This%20prints%20out%20the%20following%20to%20the%20console%0A%0A%60%60%60%0AI%20give%20star%20wars%20a%2073%20out%20of%20100%0AI%20give%20star%20trek%20a%2089%20out%20of%20100%0AI%20give%20star%20gate%20a%2084%20out%20of%20100%0AI%20give%20battlestar%20galactica%20a%2087%20out%20of%20100%0AI%20give%20legend%20of%20the%20galactic%20heroes%20a%20100%20out%20of%20100%0A%60%60%60%0A%0A%23%23%23%20Multiple%20Conditions%0A%0AA%20neat%20side%20effect%20of%20%60in%60%20statements%20returning%20a%20boolean%20is%20that%20it%20provides%20a%20free%20method%20for%20looping%20over%20multiple%20sequences%20simultaneously.%20Simply%20combine%20two%20%60in%60%20statements%20with%20a%20logical%20operator.%20The%20loop%20will%20continue%20until%20one%20sequence%20is%20exhausted%2C%20both%2C%20or%20something%20else%2C%20depending%20on%20which%20logical%20operator%20is%20used.%20The%20behavior%20%60zip%60%20from%20other%20languages%20can%20be%20achieved%20by%20combining%20sequences%20with%20%60and%60%0A%0A%60%60%60dewy%0Anames%20%3D%20%5B%27Alice%27%20%27Bob%27%20%27Charlie%27%5D%0Acolors%20%3D%20%5B%27Red%27%20%27Blue%27%20%27Green%27%20%27Yellow%27%5D%0A%0Aloop%20name%20in%20names%20and%20color%20in%20colors%0A%20%20%20%20printl%27%7Bname%7D%20chose%20%7Bcolor%7D%27%0A%60%60%60%0A%0AIn%20this%20case%2C%20the%20loop%20runs%20until%20either%20sequence%20is%20exhausted%20%28as%20%60and%60%20requires%20both%20conditions%20to%20be%20true%2C%20so%20as%20soon%20as%20one%20is%20false%2C%20the%20loop%20ends%29.%20This%20prints%20out%20the%20following%20to%20the%20console%0A%0A%60%60%60%0AAlice%20chose%20Red%0ABob%20chose%20Blue%0ACharlie%20chose%20Green%0A%60%60%60%0A%0AOther%20languages%20commonly%20have%20an%20%60enumerate%60%20function%20which%20will%20count%20how%20many%20iterations%20have%20occurred%20on%20top%20of%20looping%20over%20some%20sequence.%20This%20can%20be%20achieved%20by%20combining%20an%20infinite%20range%20with%20any%20sequence%20using%20%60and%60%3A%0A%0A%60%60%60dewy%0Aloop%20i%20in%200..%20and%20fruit%20in%20%5B%27apple%27%20%27banana%27%20%27peach%27%20%27pear%27%5D%0A%20%20%20%20printl%27%7Bi%7D%29%20%7Bfruit%7D%27%0A%60%60%60%0A%0A%60i%60%20will%20never%20run%20out%20of%20values%2C%20so%20the%20loop%20continues%20so%20long%20as%20%60fruit%60%20has%20values%20remaining.%20This%20prints%20out%20the%20following%20to%20the%20console%0A%0A%60%60%60%0A0%29%20apple%0A1%29%20banana%0A2%29%20peach%0A3%29%20pear%0A%60%60%60%0A%0AUsing%20the%20%60or%60%20operator%20to%20combine%20sequences%20will%20loop%20until%20so%20long%20as%20either%20of%20the%20sequences%20have%20values%20remaining.%20%0A%0A%60%60%60dewy%0AA%20%3D%20%5B1%202%203%5D%0AB%20%3D%20%5B4%205%206%207%208%5D%0Aloop%20a%20in%20A%20or%20b%20in%20B%0A%20%20%20%20printl%5Ba%20b%5D%0A%60%60%60%0A%0AWhich%20prints%0A%0A%60%60%60%0A%5B1%204%5D%0A%5B2%205%5D%0A%5B3%206%5D%0A%5Bundefined%207%5D%0A%5Bundefined%208%5D%0A%60%60%60%20%0A%0ASince%20this%20is%20just%20combining%20boolean%20expressions%2C%20any%20combination%20of%20expressions%20that%20results%20in%20a%20boolean%20may%20be%20used.%0A%0A%60%60%60dewy%0Alimit%20%3D%20time.now%20%2B%205%28minutes%29%0Aloop%20batch%20in%20batches%20and%20time.now%20%3C%3F%20limit%0A%20%20%20%20process%28batch%29%0A%60%60%60%0A%0AAs%20a%20similar%20approach%2C%20perhaps%20there%20might%20be%20iterators%20in%20this%20style%20where%20they%20don%27t%20have%20a%20fixed%20value%2C%20but%20instead%20track%20over%20some%20changing%20resource%0A%0A%60%60%60dewy%0Aloop%20batch%20in%20batches%20and%20t%20in%20timer%285%28minutes%29%29%0A%7B%0A%20%20%20%20process%28batch%29%0A%20%20%20%20printl%27timeout%20in%20%7Bt%7D%27%0A%7D%0A%60%60%60%0A%0A%23%23%20Do%20Loop%20Do%0A%0AThe%20do-while%20version%20of%20the%20loop%20can%20be%20constructed%20by%20putting%20the%20%60do%60%20keyword%20before%20the%20body%2C%20and%20putting%20the%20%60loop%60%20keyword%20and%20its%20condition%20after%20the%20body.%20This%20means%20loop%20body%20is%20executed%20at%20least%20once%20before%20the%20condition%20is%20checked%2C%20at%20which%20point%20the%20loop%20could%20exit%20or%20continue.%0A%0ABasic%20do-while%20loop%3A%0A%0A%60%60%60dewy%0Ai%20%3D%200%0Ado%0A%7B%0A%20%20%20%20i%20%2B%3D%201%0A%20%20%20%20printl%27this%20is%20a%20do-while%20loop%27%0A%7D%0Aloop%20i%20%3C%3F%2020%0A%60%60%60%0A%0Ado-loop%20over%20an%20iterator.%20On%20the%20first%20iteration%2C%20%60i%60%20will%20be%20undefined%2C%20while%20it%20will%20be%20available%20on%20subsequent%20iterations%0A%0A%60%60%60dewy%0Ado%20printl%27this%20is%20a%20do-for%20loop.%20i%3D%7Bi%7D%27%0Aloop%20i%20in%200..5%0A%60%60%60%0A%0AWhich%20prints%0A%0A%60%60%60%0Athis%20is%20a%20do-for%20loop.%20i%3Dundefined%0Athis%20is%20a%20do-for%20loop.%20i%3D0%0Athis%20is%20a%20do-for%20loop.%20i%3D1%0Athis%20is%20a%20do-for%20loop.%20i%3D2%0Athis%20is%20a%20do-for%20loop.%20i%3D3%0Athis%20is%20a%20do-for%20loop.%20i%3D4%0Athis%20is%20a%20do-for%20loop.%20i%3D5%0A%60%60%60%0A%0A%0ATechnically%20you%20can%20construct%20an%20infinite%20do-while%20loop%2C%20but%20it%27s%20basically%20identical%20to%20a%20regular%20infinite%20loop%0A%0A%60%60%60%0Ado%20printl%27this%20is%20a%20do-infinite%20loop%27%0Aloop%20true%0A%60%60%60%0A%0ALastly%20you%20can%20sandwich%20%60loop%60%20between%20two%20blocks%20using%20two%20%60do%60%20keywords%20%28one%20before%20the%20first%20block%2C%20and%20one%20after%20the%20loop%20condition%29.%20This%20will%20give%20you%20a%20block%20executed%20before%20the%20condition%20and%20a%20block%20executed%20after%20the%20condition%0A%0A%3E%20Note%3A%20the%20syntax%20for%20do-loop-do%20is%20still%20being%20finalized%2C%20and%20may%20change%20from%20this%20example%0A%0A%60%60%60dewy%0Ai%20%3D%200%0Ado%0A%7B%0A%20%20%20%20printl%27before%20condition%20is%20checked%27%0A%7D%0Aloop%20i%20%3C%3F%2020%20do%0A%7B%0A%20%20%20%20printl%27after%20condition%20is%20checked%27%0A%20%20%20%20i%20%2B%3D%201%0A%7D%0A%60%60%60%0A%0AIn%20this%20loop%2C%20the%20first%20block%20is%20guaranteed%20to%20execute%20at%20least%20once.%20Then%20we%20check%20the%20condition%2C%20and%20then%20if%20true%2C%20we%20execute%20the%20second%20block%2C%20then%20repeat%20the%20loop%2C%20execute%20the%20first%20block%2C%20and%20then%20check%20the%20condition%20again%2C%20repeating%20until%20the%20condition%20is%20false%2C%20or%20we%20have%20iterated%20over%20all%20elements.%0A%0A%0A%23%23%20Break%2C%20Continue%2C%20Return%20inside%20Loops%0A%0ATODO-%3Ewrite%20this.%20follows%20basic%20principles%20of%20other%20languages.%20extra%20is%20that%20you%20can%20use%20%60%23hashtags%60%20to%20break/continue%20from%20inside%20nested%20loops%0A%0A%23%23%20Loop%20Generators%0A%0ALet%27s%20look%20at%20this%20example%0A%0A%60%60%60%0Aloop%20i%20in%201..10%20%7Bi%7D%0A%60%60%60%0A%0AEvery%20iteration%20of%20the%20loop%2C%20the%20current%20value%20of%20%60i%60%20is%20%22expressed%22%2C%20that%20is%20to%20say%2C%20the%20value%20could%20be%20stored%20in%20a%20variable%20or%20a%20container.%0A%0ALets%20capture%20the%20expressed%20value%20in%20a%20container%20by%20wrapping%20the%20loop%20in%20%60%5B%5D%60%20brackets%0A%0A%60%60%60%0A%5Bloop%20i%20in%201..10%20%7Bi%7D%5D%0A%60%60%60%0A%0AThis%20%22generates%22%20the%20array%20%60%5B1%202%203%204%205%206%207%208%209%2010%5D%60%2C%20which%20we%20can%20then%20store%20into%20a%20variable%0A%0A%60%60%60%0Amy_array%20%3D%20%5Bloop%20i%20in%201..10%20%7Bi%7D%5D%0A%0A//optional%20to%20omit%20the%20braces%20since%20only%20a%20single%20expression%20is%20in%20the%20body%0Amy_array%20%3D%20%5Bloop%20i%20in%201..10%20i%5D%0A%60%60%60%0A%0AAnd%20thus%20we%20have%20created%20the%20simplest%20list%20generator.%20%0A%0A%23%23%23%20Multiple%20Expressions%20per%20Iteration%0A%0AGenerators%20can%20do%20a%20lot%20of%20interesting%20things.%20For%20example%20we%20can%20express%20multiple%20values%20on%20a%20single%20loop%20iteration%0A%0A%60%60%60%0A//note%20the%20braces%20are%20not%20optional%20in%20this%20case%0Amy_array%20%3D%20%5Bloop%20i%20in%201..5%20%7B%20i%20i%5E2%20%7D%5D%0A%60%60%60%0A%0Aproducing%20the%20array%20%60%5B1%201%202%204%203%209%204%2016%205%2025%5D%60.%20%0A%0AWe%20can%20also%20construct%20a%20dictionary%20by%20expressing%20with%20a%20%60-%3E%60%20between%20two%20values%0A%0A%60%60%60%0Asquares%20%3D%20%5Bloop%20i%20in%201..5%20%7B%20i%20-%3E%20i%5E2%20%7D%5D%0A%60%60%60%0A%0Awhich%20produces%20the%20dictionary%20%60%5B1-%3E1%202-%3E4%203-%3E9%204-%3E16%205-%3E25%5D%60%20which%20points%20from%20values%20to%20their%20squares.%0A%0A%23%23%23%20Multidimensional%20Generators%0A%0AYou%20can%20generate%20a%20multidimensional%20array%20using%20multiple%20nested%20loops.%20For%20example%0A%0A%60%60%60%0Aindices%20%3D%20%0A%5B%0A%20%20%20%20loop%20i%20in%201..5%20%0A%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20loop%20j%20in%201..5%20%0A%20%20%20%20%20%20%20%20%5B%20%0A%20%20%20%20%20%20%20%20%20%20%20%20i%20%0A%20%20%20%20%20%20%20%20%20%20%20%20j%20%0A%20%20%20%20%20%20%20%20%5D%20%0A%20%20%20%20%5D%20%0A%5D%0A%60%60%60%0A%0Awhich%20produces%20the%20following%203D%20array%20representing%20the%20indices%20of%20a%205x5%20matrix%20as%20tuples%0A%0A%60%60%60%0Aindices%20%3D%20%5B%0A%20%20%20%20%5B%5B1%201%5D%20%5B1%202%5D%20%5B1%203%5D%20%5B1%204%5D%20%5B1%205%5D%5D%0A%20%20%20%20%5B%5B2%201%5D%20%5B2%202%5D%20%5B2%203%5D%20%5B2%204%5D%20%5B2%205%5D%5D%0A%20%20%20%20%5B%5B3%201%5D%20%5B4%202%5D%20%5B3%203%5D%20%5B3%204%5D%20%5B3%205%5D%5D%0A%20%20%20%20%5B%5B4%201%5D%20%5B4%202%5D%20%5B4%203%5D%20%5B4%204%5D%20%5B4%205%5D%5D%0A%20%20%20%20%5B%5B5%201%5D%20%5B5%202%5D%20%5B5%203%5D%20%5B5%204%5D%20%5B5%205%5D%5D%0A%5D"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe>
 <p>And so many more things are possible. Loop generators are about as flexible a feature as one could imagine. It's really up to you how you want to apply them</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="imports"><a class="header" href="#imports">Imports</a></h1>
 <p>TODO</p>
 <p>Examples of imports</p>
-<pre><code class="language-dewy">
-// import an item from a local file
-from p&quot;stuff.dewy&quot; import myfun
-
-// import an item from a local file, and rename it
-from p&quot;../some/other/path/to/stuff.dewy&quot; import myfun as myfun2
-
-// import a whole file as an object with a given name.
-// tbd if you can omit the name since not an installed library
-import p&quot;../../mylib3.dewy&quot; as mylib3
-
-// import all the contents of a file into the current scope
-from p&quot;mylib4.dewy&quot; import ...
-
-// import several functions from a local file, unpacking some from nested objects
-from p&quot;stuff2.dewy&quot; import myfun2, myfun3 as f1, mymodule as [f2 f3 mod3 as [f4 f5]]]
-
-//importing from a whole folder
-from p&quot;myproject&quot; import mod1, mod2, mod3
-
-//TODO: what about glob patterns in the import path?
-from p&quot;myproject/*.dewy&quot; import ...
-
-// import a whole installed library
-import IO
-
-// import items from an installed library
-from Math import sin, cos, tan
-
-// import and rename a whole installed library
-import seaborn as sns
-
-// import and rename items from an installed library
-from sklearn import RandomForest as RF, LinearRegression as LR
-</code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="standard-library"><a class="header" href="#standard-library">Standard Library</a></h1>
+<iframe
+    src="https://david-andrew.github.io/projects/dewy/src_only?src=%0A//%20import%20an%20item%20from%20a%20local%20file%0Afrom%20p%22stuff.dewy%22%20import%20myfun%0A%0A//%20import%20an%20item%20from%20a%20local%20file%2C%20and%20rename%20it%0Afrom%20p%22../some/other/path/to/stuff.dewy%22%20import%20myfun%20as%20myfun2%0A%0A//%20import%20a%20whole%20file%20as%20an%20object%20with%20a%20given%20name.%0A//%20tbd%20if%20you%20can%20omit%20the%20name%20since%20not%20an%20installed%20library%0Aimport%20p%22../../mylib3.dewy%22%20as%20mylib3%0A%0A//%20import%20all%20the%20contents%20of%20a%20file%20into%20the%20current%20scope%0Afrom%20p%22mylib4.dewy%22%20import%20...%0A%0A//%20import%20several%20functions%20from%20a%20local%20file%2C%20unpacking%20some%20from%20nested%20objects%0Afrom%20p%22stuff2.dewy%22%20import%20myfun2%2C%20myfun3%20as%20f1%2C%20mymodule%20as%20%5Bf2%20f3%20mod3%20as%20%5Bf4%20f5%5D%5D%5D%0A%0A//importing%20from%20a%20whole%20folder%0Afrom%20p%22myproject%22%20import%20mod1%2C%20mod2%2C%20mod3%0A%0A//TODO%3A%20what%20about%20glob%20patterns%20in%20the%20import%20path%3F%0Afrom%20p%22myproject/%2A.dewy%22%20import%20...%0A%0A//%20import%20a%20whole%20installed%20library%0Aimport%20IO%0A%0A//%20import%20items%20from%20an%20installed%20library%0Afrom%20Math%20import%20sin%2C%20cos%2C%20tan%0A%0A//%20import%20and%20rename%20a%20whole%20installed%20library%0Aimport%20seaborn%20as%20sns%0A%0A//%20import%20and%20rename%20items%20from%20an%20installed%20library%0Afrom%20sklearn%20import%20RandomForest%20as%20RF%2C%20LinearRegression%20as%20LR"
+    style="width: 100%;"
+    id="DemoIframe"
+    frameBorder="0"
+></iframe><div style="break-before: page; page-break-before: always;"></div><h1 id="standard-library"><a class="header" href="#standard-library">Standard Library</a></h1>
 <p>Dewy is 100% batteries included, and provides a comprehensive standard library over most common programming facets.</p>
 <blockquote>
 <p><strong>Note:</strong> This is a work in progress. The standard library is not yet implemented. For now this is just a record of the planned standard library features.</p>
