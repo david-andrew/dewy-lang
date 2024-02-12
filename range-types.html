@@ -214,7 +214,7 @@ Also <code>[first..(2ndlast,last)]</code> is explicitly <strong>NOT ALLOWED</str
 ></iframe>
 <p>The juxtaposition requirement allows multiple ranges to be included in an array, which can be used to index into multidimensional matrices</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_array%20%3D%20%5B%0A%20%20%20%200%201%202%203%204%205%206%207%208%209%20%0A%20%20%20%2010%2011%2012%2013%2014%2015%2016%2017%2018%2019%0A%20%20%20%2020%2021%2022%2023%2024%2025%2026%2027%2028%2029%0A%5D%0Amy_array%5B1..%206..%5D%20%20%20%20%20//returns%20%5B16%2017%2018%2019%3B%2026%2027%2028%2029%5D&id=DewyIframe33"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_array%20%3D%20%5B%0A%20%20%20%200%201%202%203%204%205%206%207%208%209%0A%20%20%20%2010%2011%2012%2013%2014%2015%2016%2017%2018%2019%0A%20%20%20%2020%2021%2022%2023%2024%2025%2026%2027%2028%2029%0A%5D%0Amy_array%5B1..%206..%5D%20%20%20%20%20//returns%20%5B16%2017%2018%2019%3B%2026%2027%2028%2029%5D&id=DewyIframe33"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe33"
     frameBorder="0"
@@ -231,19 +231,29 @@ Also <code>[first..(2ndlast,last)]</code> is explicitly <strong>NOT ALLOWED</str
 <h2 id="ordinal-ranges"><a class="header" href="#ordinal-ranges">Ordinal Ranges</a></h2>
 <p>Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.</p>
 <p>For example, the following range captures all characters in the range from <code>'a'</code> to <code>'z'</code> inclusive</p>
-<pre><code>ord_range = 'a'..'z'
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=ord_range%20%3D%20%27a%27..%27z%27&id=DewyIframe35"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe35"
+    frameBorder="0"
+></iframe>
 <p>All alpahbetical characters might be represented like so</p>
-<pre><code>alpha_range = 'a'..'z' + 'A'..'Z'
-ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc.
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=alpha_range%20%3D%20%27a%27..%27z%27%20%2B%20%27A%27..%27Z%27%0Aascii_range%20%3D%20%27A%27..%27z%27%20//this%20would%20include%20extra%20characters%20like%20%27%5B%5C%5D%5E_%7B%7C%7D%27%20etc.&id=DewyIframe36"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe36"
+    frameBorder="0"
+></iframe>
 <p>But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this</p>
-<pre><code>word_range = 'apple'..'zebra'
-'panda' in? word_range  //returns true
-</code></pre>
-<p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>. </p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=word_range%20%3D%20%27apple%27..%27zebra%27%0A%27panda%27%20in%3F%20word_range%20%20//returns%20true&id=DewyIframe37"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe37"
+    frameBorder="0"
+></iframe>
+<p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>.</p>
 <blockquote>
-<p>Note: this is distinct from every dictionary word in that range, as it will include many many gibberish words. </p>
+<p>Note: this is distinct from every dictionary word in that range, as it will include many many gibberish words.</p>
 </blockquote>
 <p>TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. <code>'apple2'</code> should come before <code>'apple10'</code>), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used</p>
 <h2 id="range-uses"><a class="header" href="#range-uses">Range Uses</a></h2>
@@ -251,96 +261,96 @@ ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc
 <h3 id="ranges-in-loops"><a class="header" href="#ranges-in-loops">Ranges in Loops</a></h3>
 <p>Probably the most common use is in conjunction with loops as a sequence to iterate over:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%200..5%20print%27%7Bi%7D%20%27&id=DewyIframe35"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%200..5%20print%27%7Bi%7D%20%27&id=DewyIframe38"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe35"
+    id="DewyIframe38"
     frameBorder="0"
 ></iframe>
 <p>The above will print <code>'0 1 2 3 4 5 '</code>.</p>
 <p>To iterate over values in reverse, you can specify a reversed range:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%205%2C4..0%20print%27%7Bi%7D%20%27&id=DewyIframe36"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%205%2C4..0%20print%27%7Bi%7D%20%27&id=DewyIframe39"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe36"
+    id="DewyIframe39"
     frameBorder="0"
 ></iframe>
-<p>This prints <code>'5 4 3 2 1 0 '</code>. </p>
+<p>This prints <code>'5 4 3 2 1 0 '</code>.</p>
 <blockquote>
 <p>Note: when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.</p>
 </blockquote>
 <h3 id="range-arithmetic"><a class="header" href="#range-arithmetic">Range Arithmetic</a></h3>
 <p>Ranges can be used in arithmetic expressions, often as a way to construct new ranges.</p>
-<pre><code>//division version
-loop i in [0..4]/4 print'{i} '
-
-//multiplication version
-loop i in [0..4]*0.25 print'{i} '
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=//division%20version%0Aloop%20i%20in%20%5B0..4%5D/4%20print%27%7Bi%7D%20%27%0A%0A//multiplication%20version%0Aloop%20i%20in%20%5B0..4%5D%2A0.25%20print%27%7Bi%7D%20%27&id=DewyIframe40"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe40"
+    frameBorder="0"
+></iframe>
 <p>Both of which will print <code>'0 0.25 0.5 0.75 1 '</code></p>
 <p>These are both equivalent to directly constructing the range <code>0,0.25..4</code>, however the arithmetic versions are frequently more convenient.</p>
 <p>This type of construction is closely related to the <code>linspace()</code>/<code>logspace()</code> functions in Dewy. TBD but <code>linspace</code>/<code>logspace</code> may in fact be implemented like so:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=linspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%29%20%3D%3E%20%7B%0A%20%20%20%20start%2C%20stop%20%3D%20interval.start%2C%20interval.stop%0A%20%20%20%20step%20%3D%20%28stop-start%29/%28n-1%29%0A%20%20%20%20return%20interval.start%2Cinterval.start%2Bstep..interval.stop%0A%7D%0Alogspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%2C%20base%3Areal%3D10%29%20%3D%3E%20base%5Elinspace%28interval%2C%20n%29&id=DewyIframe37"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=linspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%29%20%3D%3E%20%7B%0A%20%20%20%20start%2C%20stop%20%3D%20interval.start%2C%20interval.stop%0A%20%20%20%20step%20%3D%20%28stop-start%29/%28n-1%29%0A%20%20%20%20return%20interval.start%2Cinterval.start%2Bstep..interval.stop%0A%7D%0Alogspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%2C%20base%3Areal%3D10%29%20%3D%3E%20base%5Elinspace%28interval%2C%20n%29&id=DewyIframe41"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe37"
+    id="DewyIframe41"
     frameBorder="0"
 ></iframe>
 <h3 id="compound-range-construction"><a class="header" href="#compound-range-construction">Compound Range Construction</a></h3>
 <p>Additionally you can construct more complex ranges by combining together multiple ranges:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=complex_range%20%3D%20%5B1..5%5D%20%2B%20%2815..20%29%0Aloop%20i%20in%20complex_range%0A%20%20%20%20printn%28i%29%20%20%20%20%20%20%20%20%20%20%20//prints%201%202%203%204%205%2016%2017%2018%2019%0A7%20in%3F%20complex_range%20%20%20%20%20//returns%20false%0A16%20in%3F%20complex_range%20%20%20%20//returns%20true&id=DewyIframe38"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=complex_range%20%3D%20%5B1..5%5D%20%2B%20%2815..20%29%0Aloop%20i%20in%20complex_range%0A%20%20%20%20printn%28i%29%20%20%20%20%20%20%20%20%20%20%20//prints%201%202%203%204%205%2016%2017%2018%2019%0A7%20in%3F%20complex_range%20%20%20%20%20//returns%20false%0A16%20in%3F%20complex_range%20%20%20%20//returns%20true&id=DewyIframe42"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe38"
+    id="DewyIframe42"
     frameBorder="0"
 ></iframe>
 <p>The same range as above can be constructed using subtraction</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=complex_range%20%3D%20%5B1..20%29%20-%20%285..15%5D&id=DewyIframe39"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=complex_range%20%3D%20%5B1..20%29%20-%20%285..15%5D&id=DewyIframe43"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe39"
+    id="DewyIframe43"
     frameBorder="0"
 ></iframe>
 <h3 id="interval-membership"><a class="header" href="#interval-membership">Interval Membership</a></h3>
 <p>You can also check if a value falls within a specified range</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=5%20in%3F%20%5B1..5%5D%20%20%20%20%20%20%20%20%20//returns%20true%0A5%20in%3F%20%281..5%29%20%20%20%20%20%20%20%20%20//returns%20false%0A3.1415%20in%3F%20%281..5%29%20%20%20%20//returns%20true%20&id=DewyIframe40"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=5%20in%3F%20%5B1..5%5D%20%20%20%20%20%20%20%20%20//returns%20true%0A5%20in%3F%20%281..5%29%20%20%20%20%20%20%20%20%20//returns%20false%0A3.1415%20in%3F%20%281..5%29%20%20%20%20//returns%20true&id=DewyIframe44"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe40"
+    id="DewyIframe44"
     frameBorder="0"
 ></iframe>
 <h3 id="indexing-sequences"><a class="header" href="#indexing-sequences">Indexing Sequences</a></h3>
 <p>ranges can be used to select values from a sequence. For example, say we want a substring we can do the following</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=full_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring%20%3D%20full_string%5B3..12%5D%0Aprintl%28substring%29%20//prints%20%27s%20is%20a%20str%27&id=DewyIframe41"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=full_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring%20%3D%20full_string%5B3..12%5D%0Aprintl%28substring%29%20//prints%20%27s%20is%20a%20str%27&id=DewyIframe45"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe41"
+    id="DewyIframe45"
     frameBorder="0"
 ></iframe>
-<p>This works for any sequence type. </p>
+<p>This works for any sequence type.</p>
 <blockquote>
 <p>Note: only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).</p>
 </blockquote>
 <p>Also, because of juxtaposition, we can easily make the selection inclusive or exclusive on either side.</p>
-<pre><code>full_string = 'this is a string'
-
-substring1 = full_string(3..12)  // ' is a st'
-substring2 = full_string[3..12)  // 's is a st'
-substring3 = full_string(3..12]  // ' is a str'
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=full_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring1%20%3D%20full_string%283..12%29%20%20//%20%27%20is%20a%20st%27%0Asubstring2%20%3D%20full_string%5B3..12%29%20%20//%20%27s%20is%20a%20st%27%0Asubstring3%20%3D%20full_string%283..12%5D%20%20//%20%27%20is%20a%20str%27&id=DewyIframe46"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe46"
+    frameBorder="0"
+></iframe>
 <p>You can specify that a range continues to the end of the sequence, or starts from the beginning by omitting the value for that side. This will construct a range that goes to infinity in that direction, which will select all elements in that direction.</p>
-<pre><code>full_string = 'this is a string'
-
-substring_to_end = full_string[3..] // 's is a string'
-substring_from_start = full_string[..12] // 'this is a str'
-whole_string = full_string[..] //selects the whole string
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=full_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring_to_end%20%3D%20full_string%5B3..%5D%20//%20%27s%20is%20a%20string%27%0Asubstring_from_start%20%3D%20full_string%5B..12%5D%20//%20%27this%20is%20a%20str%27%0Awhole_string%20%3D%20full_string%5B..%5D%20//selects%20the%20whole%20string&id=DewyIframe47"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe47"
+    frameBorder="0"
+></iframe>
 <p>Paired with the special <code>end</code> token which represents the index of the last element in a sequence, this provides the means to select any desired subset of a sequence.</p>
-<pre><code>arr[end]      // last element
-arr[end-1]    // second to last element
-arr[..end-3]  // first element to 4th to last element
-arr[5..end-3] // 5th element to 4th to last element
-arr[end-3..]  // 4th to last element to last element
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=arr%5Bend%5D%20%20%20%20%20%20//%20last%20element%0Aarr%5Bend-1%5D%20%20%20%20//%20second%20to%20last%20element%0Aarr%5B..end-3%5D%20%20//%20first%20element%20to%204th%20to%20last%20element%0Aarr%5B5..end-3%5D%20//%205th%20element%20to%204th%20to%20last%20element%0Aarr%5Bend-3..%5D%20%20//%204th%20to%20last%20element%20to%20last%20element&id=DewyIframe48"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe48"
+    frameBorder="0"
+></iframe>
 
                     </main>
 
