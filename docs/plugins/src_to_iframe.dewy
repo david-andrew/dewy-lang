@@ -6,8 +6,8 @@
 #main = () => {
     // mdbook calls preprocessor twice, first with args ["supports", <renderer>], 
     // and then if the first call exited with 0, the actual preprocessor run occurs
+    // ignore the second argument (meaning support for all renderers)
     if sys.argv.length >? 1 and sys.argv[1] =? "supports"
-        // ignore the second argument (meaning support for all renderers)
         sys.exit(0)
 
     // get and parse the json input from stdin
