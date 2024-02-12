@@ -168,66 +168,57 @@
                     <main>
                         <h1 id="object-and-class-types"><a class="header" href="#object-and-class-types">Object and Class Types</a></h1>
 <p>Object types are basically just containers containing assignments of variables and functions</p>
-<pre><code>my_obj = [
-    a = 'apple'
-    b = 'banana'
-    c = 'cat'
-]
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_obj%20%3D%20%5B%0A%20%20%20%20a%20%3D%20%27apple%27%0A%20%20%20%20b%20%3D%20%27banana%27%0A%20%20%20%20c%20%3D%20%27cat%27%0A%5D&id=DewyIframe49"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe49"
+    frameBorder="0"
+></iframe>
 <p>You can access the members of the object using the <code>.</code> accessor</p>
-<pre><code>my_obj.a  //returns 'apple'
-my_obj.c  //returns 'cat'
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_obj.a%20%20//returns%20%27apple%27%0Amy_obj.c%20%20//returns%20%27cat%27&id=DewyIframe50"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe50"
+    frameBorder="0"
+></iframe>
 <p>To create an object constructor (like many languages have classes that you can instantiate) we create a function that returns an object</p>
-<pre><code>constructor = (param1, param2) =&gt; {
-    return [
-        p1 = param1
-        p2 = param2
-    ]
-}
-
-my_obj = constructor(42, 'pi')
-my_obj.p1  //returns 42
-my_obj.p2  //returns 'pi'
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=constructor%20%3D%20%28param1%2C%20param2%29%20%3D%3E%20%7B%0A%20%20%20%20return%20%5B%0A%20%20%20%20%20%20%20%20p1%20%3D%20param1%0A%20%20%20%20%20%20%20%20p2%20%3D%20param2%0A%20%20%20%20%5D%0A%7D%0A%0Amy_obj%20%3D%20constructor%2842%2C%20%27pi%27%29%0Amy_obj.p1%20%20//returns%2042%0Amy_obj.p2%20%20//returns%20%27pi%27&id=DewyIframe51"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe51"
+    frameBorder="0"
+></iframe>
 <p>You can also store functions inside of objects, allowing objects to completely cover regular object behaviors from other languages</p>
-<pre><code>constructor = (param1, param2) =&gt; {
-    return [
-        p1 = param1
-        p2 = param2
-        func = () =&gt; printl('p1 is {p1} and p2 is {p2}') 
-    ]
-}
-</code></pre>
-<p>There will not be any sort of <code>this</code> or <code>self</code> parameter as in other languages to access an objects members from within itself/any contained functions. Instead because the functions are at the same scope as the declaration of the objects members, those members are available to the function. </p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=constructor%20%3D%20%28param1%2C%20param2%29%20%3D%3E%20%7B%0A%20%20%20%20return%20%5B%0A%20%20%20%20%20%20%20%20p1%20%3D%20param1%0A%20%20%20%20%20%20%20%20p2%20%3D%20param2%0A%20%20%20%20%20%20%20%20func%20%3D%20%28%29%20%3D%3E%20printl%28%27p1%20is%20%7Bp1%7D%20and%20p2%20is%20%7Bp2%7D%27%29%0A%20%20%20%20%5D%0A%7D&id=DewyIframe52"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe52"
+    frameBorder="0"
+></iframe>
+<p>There will not be any sort of <code>this</code> or <code>self</code> parameter as in other languages to access an objects members from within itself/any contained functions. Instead because the functions are at the same scope as the declaration of the objects members, those members are available to the function.</p>
 <p>If we remove any unnecessary syntax, the shorthand for constructing an object looks like this:</p>
-<pre><code>my_class0 = param1 =&gt; [
-    p1 = param1
-    func = () =&gt; printl('p1 is {p1}')
-]
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_class0%20%3D%20param1%20%3D%3E%20%5B%0A%20%20%20%20p1%20%3D%20param1%0A%20%20%20%20func%20%3D%20%28%29%20%3D%3E%20printl%28%27p1%20is%20%7Bp1%7D%27%29%0A%5D&id=DewyIframe53"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe53"
+    frameBorder="0"
+></iframe>
 <p>that is, just a function that returns an object literal, no need for braces or <code>return</code>.</p>
 <h2 id="dunder-methods"><a class="header" href="#dunder-methods">Dunder Methods</a></h2>
-<p>Similar to python, objects can define custom so-called &quot;double-underscore&quot; or &quot;dunder&quot; methods, which hook into the language's built-in functionality. </p>
-<pre><code>
-// Define a point class with a custom add method
-Point = (x:number, y:number) =&gt; [
-    x = x  //TBD if these are necessary since x/y are already in scope
-    y = y
-    __add__ = other:Point =&gt; Point(x + other.x, y + other.y)
-    __repr__ = () =&gt; 'Point({x}, {y})'
-    __str__ = () =&gt; '({x}, {y})'
-]
-
-// Create two points and add them together
-p1 = Point(1,2)
-p2 = Point(3,4)
-p3 = p1 + p2
-printl(p3)  //prints Point(4, 6)
-</code></pre>
+<p>Similar to python, objects can define custom so-called &quot;double-underscore&quot; or &quot;dunder&quot; methods, which hook into the language's built-in functionality.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%0A//%20Define%20a%20point%20class%20with%20a%20custom%20add%20method%0APoint%20%3D%20%28x%3Anumber%2C%20y%3Anumber%29%20%3D%3E%20%5B%0A%20%20%20%20x%20%3D%20x%20%20//TBD%20if%20these%20are%20necessary%20since%20x/y%20are%20already%20in%20scope%0A%20%20%20%20y%20%3D%20y%0A%20%20%20%20__add__%20%3D%20other%3APoint%20%3D%3E%20Point%28x%20%2B%20other.x%2C%20y%20%2B%20other.y%29%0A%20%20%20%20__repr__%20%3D%20%28%29%20%3D%3E%20%27Point%28%7Bx%7D%2C%20%7By%7D%29%27%0A%20%20%20%20__str__%20%3D%20%28%29%20%3D%3E%20%27%28%7Bx%7D%2C%20%7By%7D%29%27%0A%5D%0A%0A//%20Create%20two%20points%20and%20add%20them%20together%0Ap1%20%3D%20Point%281%2C2%29%0Ap2%20%3D%20Point%283%2C4%29%0Ap3%20%3D%20p1%20%2B%20p2%0Aprintl%28p3%29%20%20//prints%20Point%284%2C%206%29&id=DewyIframe54"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe54"
+    frameBorder="0"
+></iframe>
 <p>Though actually for <code>__add__</code>, it might make more sense for it to be global, and you add an alternate that gets dispatched on rather than including it in the object itself:</p>
-<pre><code>__add__ |= (a:Point, b:Point) =&gt; Point(a.x + b.x, a.y + b.y)
-</code></pre>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=__add__%20%7C%3D%20%28a%3APoint%2C%20b%3APoint%29%20%3D%3E%20Point%28a.x%20%2B%20b.x%2C%20a.y%20%2B%20b.y%29&id=DewyIframe55"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe55"
+    frameBorder="0"
+></iframe>
 <p>(TODO: longer explanation)</p>
 
                     </main>
