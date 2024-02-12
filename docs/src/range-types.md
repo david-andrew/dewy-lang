@@ -18,13 +18,12 @@ The syntax for ranges is inspired by Haskell syntax for ranges:
 Like in haskell, you can use a tuple to include a second value to specify the step size.
 
 ```dewy
-[(first,second)..]        // first to inf, step size is second-first
-[(first,second)..last]    // first to last, step size is second-first
-[..(2ndlast,last)]        // -inf to last, step size is last-2ndlast
+[first,second..]        // first to inf, step size is second-first
+[first,second..last]    // first to last, step size is second-first
+[..2ndlast,last]        // -inf to last, step size is last-2ndlast
 ```
 
-> Note: Due to precedence rules in Dewy, namely `,` having relatively low precedence, the step size tuple must be wrapped in parenthesis.
-> Also `[first..(2ndlast,last)]` is explicitly **NOT ALLOWED**, as it can have unintuitive behavior, and is covered by `[(first,second)..last]`.
+> Note: `[first..2ndlast,last]` is explicitly **NOT ALLOWED**, as it can have unintuitive behavior, and is covered by `[first,second..last]`.
 
 In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.
 
@@ -33,7 +32,7 @@ In addition, ranges can have their bounds be inclusive or exclusive. Inclusive b
 [first..last)   // first to last including first, excluding last
 (first..last]   // first to last excluding first, including last
 (first..last)   // first to last excluding first and last
-first..last     // same as [first..last]
+first..last     // same as [first..last]. Careful of precedence
 ```
 
 ### Juxtaposition
@@ -47,16 +46,17 @@ first.. last    // first to inf. last is not part of the range
 first .. last   // -inf to inf. neither first or last are part of the range
 ```
 
-> Note: the range juxtaposition operator has medium precedence. Most operators will have higher precedence, not requiring parenthesis, with `,` and `in` being the main exceptions
+> Note: the range juxtaposition operator has a quite low precedence. Most operators will have higher precedence, meaning the left and right expressions don't need to be wrapped in parenthesis.
+> However, due to range juxtapose's low precedence, any range as part of an `in` expression (e.g. `a in [A..B]`) must be wrapped in range bounds (i.e. `[]`, `(]`, `[)`, `()`) to ensure the range is parsed correctly. `a in A..B` will be parsed as `(a in A)..B` .
 
 ```dewy
-first..last+1             // first to last+1
-(first,second)..last/2    // first to last/2, step size is second-first
-(first/2,first)..last+10  // first/2 to last+10, step size is first/2
-a in first..last          // iterate a over range first to last
+first..last+1           // first to last+1
+first,second..last/2    // first to last/2, step size is second-first
+first/2,first..last+10  // first/2 to last+10, step size is first/2
+a in [first..last]      // iterate a over range first to last
 ```
 
-The juxtaposition requirement allows multiple ranges to be included in an array, which can be used to index into multidimensional matrices
+Multiple ranges can be used to index into multidimensional matrices
 
 ```dewy
 my_array = [
@@ -91,10 +91,10 @@ For example, the following range captures all characters in the range from `'a'`
 ord_range = 'a'..'z'
 ```
 
-All alpahbetical characters might be represented like so
+All alphabetical characters might be represented like so
 
 ```dewy
-alpha_range = 'a'..'z' + 'A'..'Z'
+alpha_range = ['a'..'z'] + ['A'..'Z']
 ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc.
 ```
 
@@ -120,7 +120,7 @@ Ranges have a variety of different uses in Dewy.
 Probably the most common use is in conjunction with loops as a sequence to iterate over:
 
 ```dewy
-loop i in 0..5 print'{i} '
+loop i in [0..5] print'{i} '
 ```
 
 The above will print `'0 1 2 3 4 5 '`.
@@ -128,7 +128,7 @@ The above will print `'0 1 2 3 4 5 '`.
 To iterate over values in reverse, you can specify a reversed range:
 
 ```dewy
-loop i in 5,4..0 print'{i} '
+loop i in [5,4..0] print'{i} '
 ```
 
 This prints `'5 4 3 2 1 0 '`.
@@ -149,7 +149,7 @@ loop i in [0..4]*0.25 print'{i} '
 
 Both of which will print `'0 0.25 0.5 0.75 1 '`
 
-These are both equivalent to directly constructing the range `0,0.25..4`, however the arithmetic versions are frequently more convenient.
+These are both equivalent to directly constructing the range `[0,0.25..1]`, however the arithmetic versions are frequently more convenient.
 
 This type of construction is closely related to the `linspace()`/`logspace()` functions in Dewy. TBD but `linspace`/`logspace` may in fact be implemented like so:
 
@@ -169,7 +169,7 @@ Additionally you can construct more complex ranges by combining together multipl
 ```dewy
 complex_range = [1..5] + (15..20)
 loop i in complex_range
-    printn(i)           //prints 1 2 3 4 5 16 17 18 19
+    printl(i)           //prints 1 2 3 4 5 16 17 18 19
 7 in? complex_range     //returns false
 16 in? complex_range    //returns true
 ```
@@ -205,7 +205,7 @@ This works for any sequence type.
 
 > Note: only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).
 
-Also, because of juxtaposition, we can easily make the selection inclusive or exclusive on either side.
+Also, because array access is a juxtapose expression, we can easily make the selection inclusive or exclusive on either side.
 
 ```dewy
 full_string = 'this is a string'
@@ -220,9 +220,9 @@ You can specify that a range continues to the end of the sequence, or starts fro
 ```dewy
 full_string = 'this is a string'
 
-substring_to_end = full_string[3..] // 's is a string'
+substring_to_end = full_string[3..]      // 's is a string'
 substring_from_start = full_string[..12] // 'this is a str'
-whole_string = full_string[..] //selects the whole string
+whole_string = full_string[..]           //selects the whole string
 ```
 
 Paired with the special `end` token which represents the index of the last element in a sequence, this provides the means to select any desired subset of a sequence.
