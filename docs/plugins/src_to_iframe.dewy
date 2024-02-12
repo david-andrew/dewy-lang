@@ -16,10 +16,10 @@
 
     loop section in book['sections']
     {
-        section['Chapter']['content'] = process_markdown(section['Chapter']['content'])
+        section['Chapter']['content'] |>= process_markdown
 
         loop subitem in section['Chapter']['sub_items']
-            subitem['Chapter']['content'] = process_markdown(subitem['Chapter']['content'])
+            subitem['Chapter']['content'] |>= process_markdown
 
         print(dump_json(book))
     }
@@ -49,6 +49,8 @@ process_markdown = (input_markdown) => {
             remainder[0] = ',' and remainder[1..].strip =? 'editable'
         }
     ]
+
+    // match closing ``` lines
     stops = [
         loop i in starts
             loop line in lines[i..]
@@ -63,15 +65,16 @@ process_markdown = (input_markdown) => {
         printl'Error: mismatched dewy code block starts and ends'
         sys.exit(1)
 
-    chunks = [
+    return [
         loop 
             start in starts 
             and stop in stops 
             and editable in editables
-            and prev_end in [0 ...(stops.+1)]
+            and prev_stop in [0 ...(stops.+1)]
         {
             //push the previous non-code block content
-            lines[prev_end..start).join('\n')
+            if start >? prev_stop
+                lines[prev_stop..start).join('\n')
 
             i = next(counter) // to give each iframe a unique id
             page = if editable 'demo_only' else 'src_only'
@@ -90,10 +93,10 @@ process_markdown = (input_markdown) => {
         }
 
         // push the last non-code block content
-        lines[stops[-1]+1..].join('\n')
-    ]
-
-    chunks.join('\n')
+        if stops[-1]+1 <? lines.length
+            lines[stops[-1]+1..].join('\n')
+ 
+    ].join('\n')
 }
 
 
