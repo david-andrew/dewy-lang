@@ -37,6 +37,10 @@ process_markdown = (input_markdown) => {
                 i
     ]
 
+    // early return if no dewy code blocks
+    if starts.length =? 0
+        return input_markdown
+
     // ```dewy lines that are followed by ', editable' (whitespace invariant)
     editables = [
         loop i in starts
@@ -59,29 +63,35 @@ process_markdown = (input_markdown) => {
         printl'Error: mismatched dewy code block starts and ends'
         sys.exit(1)
 
-    chunks = []
-    loop 
-        start in starts 
-        and stop in stops 
-        and editable in editables
-        and prev_end in [0 ...(stops.+1)]
-    {
-        //push the previous non-code block content
-        chunks.push(lines[prev_end..start).join('\n'))
+    chunks = [
+        loop 
+            start in starts 
+            and stop in stops 
+            and editable in editables
+            and prev_end in [0 ...(stops.+1)]
+        {
+            //push the previous non-code block content
+            lines[prev_end..start).join('\n')
 
-        i = next(counter) // to give each iframe a unique id
-        page = if editable 'demo_only' else 'src_only'
-        code = lines(start..stop).join('\n')
-        encoded_code = url_quote(code)
-        chunks.push(f'
-            <iframe
-                src="https://david-andrew.github.io/iframes/dewy/{page}?src={encoded_code}&id=DewyIframe{i}"
-                style="width: 100%; border-radius: 0.5rem;"
-                id="DewyIframe{i}"
-                frameBorder="0"
-            ></iframe>
-        ')
-    }
+            i = next(counter) // to give each iframe a unique id
+            page = if editable 'demo_only' else 'src_only'
+            code = lines(start..stop).join('\n')
+            encoded_code = url_quote(code)
+            
+            // push the iframe replacement
+            f'
+                <iframe
+                    src="https://david-andrew.github.io/iframes/dewy/{page}?src={encoded_code}&id=DewyIframe{i}"
+                    style="width: 100%; border-radius: 0.5rem;"
+                    id="DewyIframe{i}"
+                    frameBorder="0"
+                ></iframe>
+            '
+        }
+
+        // push the last non-code block content
+        lines[stops[-1]..].join('\n')
+    ]
 
     chunks.join('\n')
 }
