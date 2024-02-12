@@ -1,13 +1,94 @@
-//TODO: need more language features to finish writing this...
+/{ 
+    Dewy Docs mdbook preprocessor:
+    find code blocks labelled 'dewy' or 'dewy, editable' and convert them to iframes
+}/
 
-// get the input markdown from stdin
-input_markdown = read()
+#main = () => {
+    // mdbook calls preprocessor twice, first with args ["supports", <renderer>], 
+    // and then if the first call exited with 0, the actual preprocessor run occurs
+    if sys.argv.length >? 1 and sys.argv[1] =? "supports"
+        // ignore the second argument (meaning support for all renderers)
+        sys.exit(0)
 
-// find blocks of ```dewy ``` and ```dewy, editable ``` and convert them to iframes
-i = 0
-loop i <? input_markdown.length - 11 {
-    if input_markdown[i..i+7] =? '```dewy' {
-        j = i
-        loop ... //until we find \n```\n or \n```EOF
+    // get and parse the json input from stdin
+    // TODO: need to make a json parser
+    context, book = parse_json(read())
+
+    loop section in book['sections']
+    {
+        section['Chapter']['content'] = process_markdown(section['Chapter']['content'])
+
+        loop subitem in section['Chapter']['sub_items']
+            subitem['Chapter']['content'] = process_markdown(subitem['Chapter']['content'])
+
+        print(dump_json(book))
     }
 }
+
+
+counter = iter[0..]
+process_markdown = (input_markdown) => {
+    lines = input_markdown.split('\n')
+
+    // lines starting with ```dewy
+    starts = [
+        loop i in [0..] and line in lines 
+            if line[..6] =? '```dewy' 
+                i
+    ]
+
+    // ```dewy lines that are followed by ', editable' (whitespace invariant)
+    editables = [
+        loop i in starts
+        {
+            remainder = lines[i][7..].strip
+            remainder[0] = ',' and remainder[1..].strip =? 'editable'
+        }
+    ]
+    stops = [
+        loop i in starts
+            loop line in lines[i..]
+                if line =? '```'
+                {
+                    j
+                    break
+                }
+    ]
+
+    if starts.length not=? stops.length
+        printl'Error: mismatched dewy code block starts and ends'
+        sys.exit(1)
+
+    chunks = []
+    loop 
+        start in starts 
+        and stop in stops 
+        and editable in editables
+        and prev_end in [0 ...(stops.+1)]
+    {
+        //push the previous non-code block content
+        chunks.push(lines[prev_end..start).join('\n'))
+
+        i = next(counter) // to give each iframe a unique id
+        page = if editable 'demo_only' else 'src_only'
+        code = lines(start..stop).join('\n')
+        encoded_code = url_quote(code)
+        chunks.push(f'
+            <iframe
+                src="https://david-andrew.github.io/iframes/dewy/{page}?src={encoded_code}&id=DewyIframe{i}"
+                style="width: 100%; border-radius: 0.5rem;"
+                id="DewyIframe{i}"
+                frameBorder="0"
+            ></iframe>
+        ')
+    }
+
+    chunks.join('\n')
+}
+
+
+//TODO: implement these functions
+let parse_json = () => {}
+let dump_json = () => {}
+let url_quote = () => {}
+let f = () => {}
