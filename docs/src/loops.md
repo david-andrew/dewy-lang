@@ -4,14 +4,13 @@ Other languages make use of sometimes multiple keywords such as `for`, `while`, 
 
 Syntactically, loops are quite simple. The syntax for a loop is:
 
-```
+```dewy
 loop <condition> <expression>
 ```
 
 Where `<condition>` must result in a boolean determines if the loop continues, and `<expression>` which can be anything is executed each time the loop repeats.
 
 The various types of loops seen in other languages are formed simply by changing the `<condition>` part of the loop.
-
 
 ## Infinite Loops
 
@@ -33,13 +32,14 @@ A while loop is a loop that executes "while" some condition is true. A simple bo
 ```dewy
 loop i >? 0
 {
-    //while i is greater than 0, do something 
+    //while i is greater than 0, do something
 }
 ```
 
 ## For Loops
 
 Many languages feature for loops, which iterate over some iterable object. The simplest case of this would be iterating over a range of numbers. In Dewy, the `in` operator manages iteration for loops. `in` has two aspects:
+
 1. the variable on the left is assigned with the next value of the iterable on the right (or `void` if there are no more values)
 2. the expression returns `true` or `false` depending on if there was a value to assign to the variable this iteration.
 
@@ -48,9 +48,9 @@ This means that `in` expressions can be used to trivially construct a for-loop.
 ```dewy
 loop i in 1..5
 {
-    print('{i}, ') 
+    print('{i}, ')
 }
-``` 
+```
 
 Which prints out `1, 2, 3, 4, 5, ` to the console. Each iteration, `in` causes `i` to be assigned the next value in the sequence, while returning true for the loop condition. When the sequence is exhausted, `in` returns false, and the loop ends.
 
@@ -135,7 +135,7 @@ loop i in 0.. and fruit in ['apple' 'banana' 'peach' 'pear']
 3) pear
 ```
 
-Using the `or` operator to combine sequences will loop until so long as either of the sequences have values remaining. 
+Using the `or` operator to combine sequences will loop until so long as either of the sequences have values remaining.
 
 ```dewy
 A = [1 2 3]
@@ -152,7 +152,7 @@ Which prints
 [3 6]
 [undefined 7]
 [undefined 8]
-``` 
+```
 
 Since this is just combining boolean expressions, any combination of expressions that results in a boolean may be used.
 
@@ -207,10 +207,9 @@ this is a do-for loop. i=4
 this is a do-for loop. i=5
 ```
 
-
 Technically you can construct an infinite do-while loop, but it's basically identical to a regular infinite loop
 
-```
+```dewy
 do printl'this is a do-infinite loop'
 loop true
 ```
@@ -234,7 +233,6 @@ loop i <? 20 do
 
 In this loop, the first block is guaranteed to execute at least once. Then we check the condition, and then if true, we execute the second block, then repeat the loop, execute the first block, and then check the condition again, repeating until the condition is false, or we have iterated over all elements.
 
-
 ## Break, Continue, Return inside Loops
 
 TODO->write this. follows basic principles of other languages. extra is that you can use `#hashtags` to break/continue from inside nested loops
@@ -243,7 +241,7 @@ TODO->write this. follows basic principles of other languages. extra is that you
 
 Let's look at this example
 
-```
+```dewy
 loop i in 1..10 {i}
 ```
 
@@ -251,35 +249,35 @@ Every iteration of the loop, the current value of `i` is "expressed", that is to
 
 Lets capture the expressed value in a container by wrapping the loop in `[]` brackets
 
-```
+```dewy
 [loop i in 1..10 {i}]
 ```
 
 This "generates" the array `[1 2 3 4 5 6 7 8 9 10]`, which we can then store into a variable
 
-```
+```dewy
 my_array = [loop i in 1..10 {i}]
 
 //optional to omit the braces since only a single expression is in the body
 my_array = [loop i in 1..10 i]
 ```
 
-And thus we have created the simplest list generator. 
+And thus we have created the simplest list generator.
 
 ### Multiple Expressions per Iteration
 
 Generators can do a lot of interesting things. For example we can express multiple values on a single loop iteration
 
-```
+```dewy
 //note the braces are not optional in this case
 my_array = [loop i in 1..5 { i i^2 }]
 ```
 
-producing the array `[1 1 2 4 3 9 4 16 5 25]`. 
+producing the array `[1 1 2 4 3 9 4 16 5 25]`.
 
 We can also construct a dictionary by expressing with a `->` between two values
 
-```
+```dewy
 squares = [loop i in 1..5 { i -> i^2 }]
 ```
 
@@ -289,17 +287,17 @@ which produces the dictionary `[1->1 2->4 3->9 4->16 5->25]` which points from v
 
 You can generate a multidimensional array using multiple nested loops. For example
 
-```
-indices = 
+```dewy
+indices =
 [
-    loop i in 1..5 
+    loop i in 1..5
     [
-        loop j in 1..5 
-        [ 
-            i 
-            j 
-        ] 
-    ] 
+        loop j in 1..5
+        [
+            i
+            j
+        ]
+    ]
 ]
 ```
 
