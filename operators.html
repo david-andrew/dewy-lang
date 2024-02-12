@@ -203,7 +203,7 @@
 <li><code>!&gt;&gt;</code> rotate right through carry bit</li>
 <li><code>&lt;&lt;&lt;</code> rotate left no carry bit</li>
 <li><code>&gt;&gt;&gt;</code> rotate right no carry bit</li>
-<li><code>&lt;&lt;</code> shift left (arithmetic and logical are the same for left-shift) </li>
+<li><code>&lt;&lt;</code> shift left (arithmetic and logical are the same for left-shift)</li>
 <li><code>&gt;&gt;</code> shift right (arithmetic vs logical determined by whether signed or unsigned)</li>
 </ul>
 <p><strong>boolean returning operations</strong></p>
@@ -250,29 +250,23 @@
 <h2 id="in-place-assignment"><a class="header" href="#in-place-assignment">In-place Assignment</a></h2>
 <p>any of the logical/bitwise operators, as well as the boolean returning operators can be preceeded by <code>not</code> which will then cause the inverse of the operation to be returned. e.g. <code>not and</code> is equivalent to <code>nand</code>, <code>not &lt;?</code> is equivalent to <code>&gt;=?</code>, etc.</p>
 <p>most binary operators can be appended with an <code>=</code> sign to make them into an assignment
-e.g. </p>
-<pre><code>a += 5  //is equivalent to a = a + 5
-a &lt;?= 5  //is equivalent to a = a &lt;? 5
-a !&gt;&gt;= 5  //is equivalent to a = a !&gt;&gt; 5
-a xor= false  //is equivalent to a = a xor false
-</code></pre>
+e.g.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=a%20%2B%3D%205%20%20//is%20equivalent%20to%20a%20%3D%20a%20%2B%205%0Aa%20%3C%3F%3D%205%20%20//is%20equivalent%20to%20a%20%3D%20a%20%3C%3F%205%0Aa%20%21%3E%3E%3D%205%20%20//is%20equivalent%20to%20a%20%3D%20a%20%21%3E%3E%205%0Aa%20xor%3D%20false%20%20//is%20equivalent%20to%20a%20%3D%20a%20xor%20false&id=DewyIframe68"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe68"
+    frameBorder="0"
+></iframe>
 <p>(TODO: This should also probably be able to be combined with element-wise/vectorized <code>.</code> operations where each element in the list is updated according to the operation (can be done in parallel))</p>
 <h2 id="elementwise-operations"><a class="header" href="#elementwise-operations">Elementwise Operations</a></h2>
-<p>the elementwise operator <code>.</code> can be prepended to most binary operators to make it be performed on each element in a array or sequence 
-e.g. </p>
-<pre><code>//find the prime factors of 20
-a = [2 3 5 7 11 13 17 19]  //primes up to 20
-mods = 20 .% a  //returns [0 2 0 6 9 7 3 1]
-is_factor = mods .=? 0 //returns [true false true false false false false]
-p_factors = a[is_factor] //returns [2 5]
-
-//above in a single line
-p_factors = [2 3 5 7 11 13 17 19][20 .% [2 3 5 7 11 13 17 19] .=? 0]
-
-//though it's probably cleaner in 2 lines
-primes = [2 3 5 7 11 13 17 19]
-p_factors = primes[20 .% primes .=? 0]
-</code></pre>
+<p>the elementwise operator <code>.</code> can be prepended to most binary operators to make it be performed on each element in a array or sequence
+e.g.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=//find%20the%20prime%20factors%20of%2020%0Aa%20%3D%20%5B2%203%205%207%2011%2013%2017%2019%5D%20%20//primes%20up%20to%2020%0Amods%20%3D%2020%20.%25%20a%20%20//returns%20%5B0%202%200%206%209%207%203%201%5D%0Ais_factor%20%3D%20mods%20.%3D%3F%200%20//returns%20%5Btrue%20false%20true%20false%20false%20false%20false%5D%0Ap_factors%20%3D%20a%5Bis_factor%5D%20//returns%20%5B2%205%5D%0A%0A//above%20in%20a%20single%20line%0Ap_factors%20%3D%20%5B2%203%205%207%2011%2013%2017%2019%5D%5B20%20.%25%20%5B2%203%205%207%2011%2013%2017%2019%5D%20.%3D%3F%200%5D%0A%0A//though%20it%27s%20probably%20cleaner%20in%202%20lines%0Aprimes%20%3D%20%5B2%203%205%207%2011%2013%2017%2019%5D%0Ap_factors%20%3D%20primes%5B20%20.%25%20primes%20.%3D%3F%200%5D&id=DewyIframe69"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe69"
+    frameBorder="0"
+></iframe>
 <p>This works if either the either first operand is a list, or the second is a list, or both are lists with the exact same shape</p>
 <h2 id="precedence"><a class="header" href="#precedence">Precedence</a></h2>
 <p>Every operator has a precedence level, and an associativity. The precedence level determines the order in which operators in a compound expression are evaluated. Associativity determines the order of evaluation when multiple operators of the same precedence level are present in a compound expression. Associativity can be:</p>
