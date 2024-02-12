@@ -17,7 +17,6 @@ The syntax for ranges is inspired by Haskell syntax for ranges:
 
 Like in haskell, you can use a tuple to include a second value to specify the step size.
 
-
 ```dewy
 [(first,second)..]        // first to inf, step size is second-first
 [(first,second)..last]    // first to last, step size is second-first
@@ -38,6 +37,7 @@ first..last     // same as [first..last]
 ```
 
 ### Juxtaposition
+
 The left and right values are only considered part of the range if they are juxtaposed with the `..`. Values not juxtaposed with the range are considered separate expressions.
 
 ```dewy
@@ -60,13 +60,12 @@ The juxtaposition requirement allows multiple ranges to be included in an array,
 
 ```dewy
 my_array = [
-    0 1 2 3 4 5 6 7 8 9 
+    0 1 2 3 4 5 6 7 8 9
     10 11 12 13 14 15 16 17 18 19
     20 21 22 23 24 25 26 27 28 29
 ]
 my_array[1.. 6..]     //returns [16 17 18 19; 26 27 28 29]
 ```
-
 
 ## Numeric Ranges
 
@@ -88,30 +87,29 @@ Ranges can also be constructed using any ordinal type. Currently the only only b
 
 For example, the following range captures all characters in the range from `'a'` to `'z'` inclusive
 
-```
+```dewy
 ord_range = 'a'..'z'
 ```
 
 All alpahbetical characters might be represented like so
 
-```
+```dewy
 alpha_range = 'a'..'z' + 'A'..'Z'
 ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc.
 ```
 
 But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this
 
-```
+```dewy
 word_range = 'apple'..'zebra'
 'panda' in? word_range  //returns true
 ```
 
-which would create a range that consists of every possible 5 letter combination starting from the word `'apple'` and iterating through to the word `'zebra'`. 
+which would create a range that consists of every possible 5 letter combination starting from the word `'apple'` and iterating through to the word `'zebra'`.
 
-> Note: this is distinct from every dictionary word in that range, as it will include many many gibberish words. 
+> Note: this is distinct from every dictionary word in that range, as it will include many many gibberish words.
 
 TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. `'apple2'` should come before `'apple10'`), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used
-
 
 ## Range Uses
 
@@ -133,7 +131,7 @@ To iterate over values in reverse, you can specify a reversed range:
 loop i in 5,4..0 print'{i} '
 ```
 
-This prints `'5 4 3 2 1 0 '`. 
+This prints `'5 4 3 2 1 0 '`.
 
 > Note: when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.
 
@@ -141,7 +139,7 @@ This prints `'5 4 3 2 1 0 '`.
 
 Ranges can be used in arithmetic expressions, often as a way to construct new ranges.
 
-```
+```dewy
 //division version
 loop i in [0..4]/4 print'{i} '
 
@@ -189,7 +187,7 @@ You can also check if a value falls within a specified range
 ```dewy
 5 in? [1..5]         //returns true
 5 in? (1..5)         //returns false
-3.1415 in? (1..5)    //returns true 
+3.1415 in? (1..5)    //returns true
 ```
 
 ### Indexing Sequences
@@ -203,13 +201,13 @@ substring = full_string[3..12]
 printl(substring) //prints 's is a str'
 ```
 
-This works for any sequence type. 
+This works for any sequence type.
 
 > Note: only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).
 
 Also, because of juxtaposition, we can easily make the selection inclusive or exclusive on either side.
 
-```
+```dewy
 full_string = 'this is a string'
 
 substring1 = full_string(3..12)  // ' is a st'
@@ -217,10 +215,9 @@ substring2 = full_string[3..12)  // 's is a st'
 substring3 = full_string(3..12]  // ' is a str'
 ```
 
-
 You can specify that a range continues to the end of the sequence, or starts from the beginning by omitting the value for that side. This will construct a range that goes to infinity in that direction, which will select all elements in that direction.
 
-```
+```dewy
 full_string = 'this is a string'
 
 substring_to_end = full_string[3..] // 's is a string'
@@ -230,7 +227,7 @@ whole_string = full_string[..] //selects the whole string
 
 Paired with the special `end` token which represents the index of the last element in a sequence, this provides the means to select any desired subset of a sequence.
 
-```
+```dewy
 arr[end]      // last element
 arr[end-1]    // second to last element
 arr[..end-3]  // first element to 4th to last element
