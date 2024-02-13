@@ -122,7 +122,7 @@ Charlie chose Green
 Other languages commonly have an `enumerate` function which will count how many iterations have occurred on top of looping over some sequence. This can be achieved by combining an infinite range with any sequence using `and`:
 
 ```dewy
-loop i in 0.. and fruit in ['apple' 'banana' 'peach' 'pear']
+loop i in [0..] and fruit in ['apple' 'banana' 'peach' 'pear']
     printl'{i}) {fruit}'
 ```
 
