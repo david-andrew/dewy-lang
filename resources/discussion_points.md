@@ -926,7 +926,7 @@ simply doing `name = value` may or may not be allowed depending on if name is al
 
 To put it another way, `name = value` is sort of equivalent to `create_or_overwrite name = value`. perhaps we'll even have `create_or_overwrite` used internally, and `name = value` is just syntactic sugar for it
 
-## Precedence of comma vs assignment [leaning towards requiring parenthesis around default function arguments, e.g. `foo = a,(b=1),(c=2) => a+b+c`, e.g. `foo123 = @foo((a=1),(b=2),(c=3))`]
+## Precedence of comma vs assignment [leaning towards requiring parenthesis around default function arguments, e.g. `foo = a,(b=1),(c=2) => a+b+c`, e.g. `foo123 = @foo((a=1),(b=2),(c=3))`] But actually NEEDS MORE THOUGHT
 
 There are situations when comma needs to have higher precedence than assignment, but also situations where it is the opposite:
 
@@ -1019,6 +1019,28 @@ new_sum = (x, y) => thirtyseven(a=x, b=y)
 ```
 
 In this case, we still have an issue with the comma operator having the wrong precedence when calling `thirtyseven`...
+
+Another two hot take are:
+
+1. make the arguments list be space separated rather than comma separated
+2. add `;` to the end of arguments that have a default value
+
+```dewy
+foo = (a:int b:int=1 c:int=2) => a+b+c
+
+//or
+
+foo = (a:int;, b:int=1;, c:int=2) => a+b+c
+```
+
+The second case works with the current syntax rules since `;` is the end of an expression. But it is a bit obnoxious. The first case is a bit more elegant, but it's unconventional and not clear if people would adapt to it. Also it really changes a lot about the style of the language.
+
+Another hot take is to have a different operator for handling unpacking. E.g. `as`
+
+```dewy
+foo = (a:int, b:int=1, c:int=2) => a+b+c
+1, 2, 3 as a, b, c
+```
 
 ## Should we get rid of the low precedence range juxtapose, and force ranges with step size to wrap the tuple in parenthesis, or should loops with multiple iterators require parenthesis around each iterator? [leaning have range-jux have lower precedence than comma, and any time you want to do `a in range`, you need to wrap the range. `in` gets higher precedence than logical operators]
 
@@ -1236,6 +1258,44 @@ Point = (x:number, y:number) => {[let x = x let y = y]}  // x and y are captured
 ~~I think I'm still leaning towards requiring `let x = x` and `let y = y` in all cases.~~
 Actually now I'm leaning towards one of the implicit versions. This last idea about wrapping with {} to make any arguments not captured I think is actually pretty good, just requires working out the semantics
 
+Basically, if you look at the case of creating an object without the function
+
+```dewy
+let x = 10
+
+let obj = [
+    y = 20
+    f = () => x + y
+]
+
+obj.x // TBD if this is allowed or not
+```
+
+While it is clear that you can use `x` within the object, it is also maybe clear that you would not be able to do something like `obj.x` as `x` was not defined within the scope of the object
+**although** actually maybe it would make sense to allow `obj.x` since perhaps the dot operator could just be looking up the scope chain for the variable `x`? It certainly makes the semantics simpler, since dot would then be just a proxy over the scope of the object. If you want to make an object that doesn't capture any of the surrounding scope, you would do something like:
+
+```dewy
+let x = 10
+
+let obj = #noscope[
+    y = 20
+    f = () => 10 + y
+]
+
+obj.x // would fail
+```
+
+perhaps `{{}}` could be no-scope, e.g.
+
+```dewy
+let x = 10
+
+let obj = {{[
+    y = 20
+    f = () => 10 + y
+]}}
+```
+
 ## Literal arguments in functions OR literals as type annotations
 
 for example if you wanted to define the factorial function via operator overloading, where normal arguments are integer, and the base case is a literal 1, perhaps it might be something like this:
@@ -1245,3 +1305,70 @@ fact = n:1 => n
 fact |= n:int => n * fact(n-1)
 
 ```
+
+## Arguments conventions for positional vs keyword [arguments without a default value are position only (allow both positional and keyword during partial evaluation), and must be provided to call. default-valued arguments are keyword only, and need not be provided. Use val=void to create a keyword value that must be overwritten by the user]
+
+When defining a function, the following semantics will be used to manage how arguments are expected when calling the function:
+
+- arguments without a default value are position only, and must be provided when calling
+- default-valued arguments are keyword only, and need not be provided when calling
+- positional and keyword arguments can be interspersed in the function definition, as well as the call. The only thing that matters is that the order of the positional arguments match up (keyword arguments, if any, can be in any order)
+
+```dewy
+// no arguments
+f0 = () => 0 // can call with `f0` or `f0()`
+
+// 1 positional argument
+f1 = x => x + 1     // can call with `f1(5)`
+f1b = (x) => x + 1  // can call with `f1b(5)`
+
+// 1 optional keyword-only argument
+f1c = (x=2) => x + 1 // can call with 'f1c' or `f1c()` or `f1c(x=5)`
+
+// 2 positional arguments
+f2 = (x, y) => x + y // can call with `f2(5, 6)`
+
+// 1 positional and 1 optional keyword-only argument
+f2b = (x, y=2) => x + y // can call with `f2b(5)` or `f2b(5, y=6)`
+
+// 3 positional arguments
+f3 = (x, y, z) => x + y + z // can call with `f3(5, 6, 7)`
+```
+
+Also note that partial function evaluation follows the exact same semantics, it is just that the arguments will be bound without calling the function
+
+```dewy
+f1 = (x, y) => x + y
+f1a = @f1(5) // f1a is now a function that takes 1 argument
+f1b = @f1(5, 6) // f1b is now a function that takes 0 arguments
+f1c = @f1(y=6) // TBD if this is allowed. referring to a positional argument by name, but only in partial evaluation?
+
+f2 = (x, y=2) => x + y
+f2a = @f2(5) // f2a is now a function that takes 0 arguments
+f2b = @f2(y=6) // f2b is now a function that takes 1 argument
+f2c = @f2(5, y=6) // f2c is now a function that takes 0 arguments
+```
+
+Though a question this brings up is that currently doing partial evaluation is a bit restricted for positional arguments, since you can't skip ahead and specify them by name... Perhaps non-default arguments can be given either by position or by name, but default arguments still must be given by name. Or perhaps partial evaluation gets a special exception where you can refer to positional arguments by name if you want to skip ahead
+
+### val=void for a required keyword argument
+
+If the library writer wants a value that is keyword-only, but force the user to overwrite it, they can use `val=void`. Since no value can actually be set to `void`, there will be a compiler error if the user does not overwrite it.
+
+```dewy
+f = (x:int, y:int, opflag:bool=void) => if opflag x + y else x - y
+f(5, 6) // compiler error
+f(5, 6, opflag=true) // 11
+
+add = @f(opflag=true)
+add(5, 6) // 11
+
+sub = @f(opflag=false)
+sub(5, 6) // -1
+```
+
+There will probably need to be a bit of type checking magic here since `opflag` could never actually be `void` so the typing should show it always being just a boolean. But perhaps this could be a convention that works with `void`
+
+## function overloading and partial application
+
+Just a note about how partial application would work on an overloaded function. Basically as arguments are added, the list of possible functions that match are narrowed down (and maintained in the new function object). Once all options are narrowed down to a single one, and all arguments have been provided, only then can the function be called
