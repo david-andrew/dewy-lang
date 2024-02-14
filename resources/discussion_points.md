@@ -1372,3 +1372,28 @@ There will probably need to be a bit of type checking magic here since `opflag` 
 ## function overloading and partial application
 
 Just a note about how partial application would work on an overloaded function. Basically as arguments are added, the list of possible functions that match are narrowed down (and maintained in the new function object). Once all options are narrowed down to a single one, and all arguments have been provided, only then can the function be called
+
+
+## Match case syntax
+I'm thinking we make use of the existing `->` notation for match case, so we only need to add the `match` keyword
+
+```dewy
+match x {
+    1 -> 'one'
+    2 -> 'two'
+    3 -> 'three'
+    _ -> 'other'
+}
+```
+
+But more interesting is that the left side can be an unpack pattern
+
+```dewy
+match x {
+    [a b] -> a + b
+    [a b c] -> a + b + c
+    _ -> 0
+}
+```
+
+Though this is tricky because how do we distinguish between a list with two elements that we just named `a` and `b` and an object with members a and b (also for objects, what if you only want to match against part of it, e.g. it has some member named `a` of some specific type, but the rest doesn't matter?)
