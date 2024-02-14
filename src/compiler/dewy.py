@@ -1,7 +1,7 @@
 from abc import ABC
 from dataclasses import dataclass
 from types import EllipsisType
-from typing import Any, Callable as PyCallable, Type as PyType, Union, Optional
+from typing import Any, Callable as PyCallable, Type as PyType, Optional
 from functools import partial
 import operator
 
@@ -155,7 +155,7 @@ class Scope():
         """Return the root scope"""
         return [*self][-1]
 
-    def let(self, name:str, type:Union['Type',Undefined]=undefined, value:AST=undefined, const=False):
+    def let(self, name:str, type:'Type|Undefined'=undefined, value:AST=undefined, const=False):
         #overwrite anything that might have previously been there
         self.vars[name] = Scope._var(type, value, const)
 
@@ -199,7 +199,7 @@ class Scope():
         s.vars = self.vars.copy()
         return s
 
-    def attach_args(self, args:Union['Array', None]):
+    def attach_args(self, args:'Array|None'):
         self.args = args
 
     @staticmethod
@@ -284,7 +284,7 @@ class Type(AST):
     
     #TODO: come up with better names for the method arguments
     @staticmethod
-    def is_instance(obj_t:Union['Type',Undefined], target_t:Union['Type',Undefined]) -> bool:
+    def is_instance(obj_t:'Type|Undefined', target_t:'Type|Undefined') -> bool:
         """
         Check if the object is an instance (or descendent) of the specified type
 
@@ -602,7 +602,7 @@ class Bind(AST):
         return f'Bind({self.name}, {repr(self.value)})'
 
 
-class PackStruct(list[Union[str,'PackStruct']]):
+class PackStruct(list['str|PackStruct']):
     """
     represents the type for left hand side of an unpack operation
 
@@ -721,7 +721,7 @@ class Block(AST):
 
 
 class Call(AST):
-    def __init__(self, expr:str|Callable, args:Union['Array',None]=None):
+    def __init__(self, expr:str|Callable, args:'Array|None'=None):
         assert isinstance(expr, str|Callable), f'invalid type for call expression: `{self.expr}` of type `{type(self.expr)}`'
         self.expr = expr
         self.args = args
