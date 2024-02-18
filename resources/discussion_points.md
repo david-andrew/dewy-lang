@@ -1373,8 +1373,8 @@ There will probably need to be a bit of type checking magic here since `opflag` 
 
 Just a note about how partial application would work on an overloaded function. Basically as arguments are added, the list of possible functions that match are narrowed down (and maintained in the new function object). Once all options are narrowed down to a single one, and all arguments have been provided, only then can the function be called
 
-
 ## Match case syntax
+
 I'm thinking we make use of the existing `->` notation for match case, so we only need to add the `match` keyword
 
 ```dewy
@@ -1398,8 +1398,8 @@ match x {
 
 Though this is tricky because how do we distinguish between a list with two elements that we just named `a` and `b` and an object with members a and b (also for objects, what if you only want to match against part of it, e.g. it has some member named `a` of some specific type, but the rest doesn't matter?)
 
-
 ## Debugging: Ability to dump program state at a point, and pick up from that point
+
 Basically, when debugging, say it takes a lot of time/computation to get to a particular point in your code that you're debugging. There should be a way to dump the program state right before that point, and then subsequent debugging runs can pick up directly from that point without having to go through all the previous computation again
 
 Think of it like a better version of a core dump. Ideally it would also include the relevant stack trace and what not.
@@ -1412,5 +1412,51 @@ let x = 5
 call_some_function()
 ```
 
-
 Also should be able to do a debug mode where it automatically dumps the state on any exiting error (tbd since there aren't exceptions in dewy... but perhaps types marked as error types will trigger this behavior)
+
+## Dewy Decorator syntax
+
+python decorators are excellent, and I want to replicate their functionality and expressiveness in dewy. I think they might make use of the `<|` operator
+
+```dewy
+
+let decorator = (f) => (...args) => {
+    printl'before'
+    let result = f(...args)
+    printl'after'
+    return result
+}
+
+// simplest
+let myfunc = (a, b) => a + b
+let myfunc = decorator(myfunc)
+
+// option 2
+let myfunc = (a, b) => a + b
+let myfunc |>= decorator
+
+// in a single expression
+let myfunc = decorator <|
+    (a, b) => a + b
+```
+
+Technically all the options above are valid. As to which will be the most idiomatic, I'm leaning towards the first one, since it's the most explicit about what is happening. But the single expression version is also a good contender
+
+Also decorator functions are welcome to take arguments the same way as in python--by making them a higher order function
+
+```dewy
+let decorator = (extra:bool) => (f) => (...args) => {
+    if extra printl'extra'
+    printl'before'
+    let result = f(...args)
+    printl'after'
+    return result
+}
+
+let myfunc = decorator(true) <|
+    (a, b) => a + b
+```
+
+## <| and |> are treated as a jux-call with super low precedence
+
+Basically when doing post-tokenization, if we see a `<|` or `|>` we should replace them immediately with a jux-call (or jux-call-reversed) operator, but one with very low level precedence. This means that we don't need to take handles of the functions we want to use, since they are treated as juxtaposed (thus catching the function before it executes), even though they might not touching the operator.
