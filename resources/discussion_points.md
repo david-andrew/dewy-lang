@@ -1397,3 +1397,20 @@ match x {
 ```
 
 Though this is tricky because how do we distinguish between a list with two elements that we just named `a` and `b` and an object with members a and b (also for objects, what if you only want to match against part of it, e.g. it has some member named `a` of some specific type, but the rest doesn't matter?)
+
+
+## Debugging: Ability to dump program state at a point, and pick up from that point
+Basically, when debugging, say it takes a lot of time/computation to get to a particular point in your code that you're debugging. There should be a way to dump the program state right before that point, and then subsequent debugging runs can pick up directly from that point without having to go through all the previous computation again
+
+Think of it like a better version of a core dump. Ideally it would also include the relevant stack trace and what not.
+
+```dewy
+let x = 5
+
+#dump_state
+#restart_here
+call_some_function()
+```
+
+
+Also should be able to do a debug mode where it automatically dumps the state on any exiting error (tbd since there aren't exceptions in dewy... but perhaps types marked as error types will trigger this behavior)
