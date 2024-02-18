@@ -18,6 +18,8 @@ def python_interpreter(path:str, args:list[str]):
     res = ast.eval(root)
     if res and res is not void: print(res)
 
+def qbe_compiler(path:str, args:list[str]):
+    raise NotImplementedError('QBE backend is not yet supported')
 
 def llvm_compiler(path:str, args:list[str]):
     raise NotImplementedError('LLVM backend is not yet supported')
@@ -28,17 +30,24 @@ def c_compiler(path:str, args:list[str]):
 def x86_64_compiler(path:str, args:list[str]):
     raise NotImplementedError('x86_64 backend is not yet supported')
 
+def arm(path:str, args:list[str]):
+    raise NotImplementedError('ARM backend is not yet supported')
+
+def riscv(path:str, args:list[str]):
+    raise NotImplementedError('RISC-V backend is not yet supported')
+
 def shell(path:str, args:list[str]):
     """this would target sh/powershell/etc. all simultaneously"""
     raise NotImplementedError('Shell backend is not yet supported')
 
 backend_map = {
     'python': python_interpreter,
+    'QBE': qbe_compiler,
     'llvm': llvm_compiler,
     'c': c_compiler,
     'x86_64': x86_64_compiler,
-    # 'arm': arm,
-    # 'riscv': riscv,
+    'arm': arm,
+    'riscv': riscv,
     'sh': shell,
     'zsh': shell,
     'bash': shell,
