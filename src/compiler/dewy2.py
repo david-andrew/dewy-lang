@@ -45,10 +45,6 @@ import pdb
 
 
 class AST(ABC):
-
-    # TODO: make accessing this raise better error if not overwritten by child class
-    #      for now, just rely on exception for missing property
-    # type:'Type' = None
     @abstractmethod
     def eval(self, scope: 'Scope') -> 'AST':
         """Evaluate the AST in the given scope, and return the result (as a dewy obj) if any"""
