@@ -40,8 +40,11 @@ backend_map = {
     # 'arm': arm,
     # 'riscv': riscv,
     'sh': shell,
-    # 'posix': posix_shell,
-    # 'powershell': powershell_shell,
+    'zsh': shell,
+    'bash': shell,
+    'fish': shell,
+    'posix': shell,
+    'powershell': shell,
 }
 backends = [*backend_map.keys()]
 
