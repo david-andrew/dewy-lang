@@ -1460,3 +1460,5 @@ let myfunc = decorator(true) <|
 ## <| and |> are treated as a jux-call with super low precedence
 
 Basically when doing post-tokenization, if we see a `<|` or `|>` we should replace them immediately with a jux-call (or jux-call-reversed) operator, but one with very low level precedence. This means that we don't need to take handles of the functions we want to use, since they are treated as juxtaposed (thus catching the function before it executes), even though they might not touching the operator.
+
+Though perhaps there should be some consideration that the pipe operators are just regular operators, and so the left and the right operands get evaluated. In this case, any time you want to pipe into a function, you'd need to prefix the function with `@` to have a handle to the function so that it is not evaluated.
