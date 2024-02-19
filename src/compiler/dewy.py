@@ -17,10 +17,9 @@ On each new binop AST, add an entry to the type table
     def eval(self, scope):
         left = self.left.eval(scope)
         right = self.right.eval(scope)
-        outtype = self.outtype
-        if outtype is None:
-            #lookup outtype based on the table
-            outtype = types_table[self.__class__][left.typeof(), right.typeof()]
+
+        #lookup outtype based on the table
+        outtype = types_table[self.__class__][left.typeof(), right.typeof()]
     
         return outtype(self.op(left.topy(), right.topy()))
     ```
@@ -40,6 +39,7 @@ handling case insensitive identifiers (e.g. for units)
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from types import EllipsisType
 
 import pdb
 
@@ -222,3 +222,203 @@ class Scope():
         s = Scope(self.parent)
         s.vars = self.vars.copy()
         return s
+
+
+class Callable(AST):
+    @abstractmethod
+    def call(self, scope: 'Scope'):
+        """Call the callable in the given scope"""
+
+
+class Orderable(AST):
+    """An object that can be sorted relative to other objects of the same type"""
+    @abstractmethod
+    def compare(self, other: 'Orderable', scope: 'Scope') -> 'Number':
+        """Return a value indicating the relationship between this value and another value"""
+    @staticmethod
+    @abstractmethod
+    def max() -> 'Rangeable':
+        """Return the maximum element from the set of all elements of this type"""
+    @staticmethod
+    @abstractmethod
+    def min() -> 'Rangeable':
+        """Return the minimum element from the set of all elements of this type"""
+
+# TODO: come up with a better name for this class... successor and predecessor are only used for range iterators, not ranges themselves
+#        e.g. Incrementable, Decrementable, etc.
+
+
+class Rangeable(Orderable):
+    """An object that can be used to specify bounds of a range"""
+    @abstractmethod
+    def successor(self, scope: 'Scope', step=undefined) -> 'Rangeable':
+        """Return the next value in the range"""
+    @abstractmethod
+    def predecessor(self, scope: 'Scope', step=undefined) -> 'Rangeable':
+        """Return the previous value in the range"""
+
+
+class Unpackable(AST):
+    @abstractmethod
+    def len(self, scope: 'Scope') -> int:
+        """Return the length of the unpackable"""
+    @abstractmethod
+    def get(self, key: int | EllipsisType | slice | tuple[int | EllipsisType | slice], scope: 'Scope') -> AST:
+        """Return the item at the given index"""
+# TODO: make a type annotation for Unpackable[N] where N is the number of items in the unpackable?
+#        would maybe replace the len property?
+
+
+class Iter(AST):
+    @abstractmethod
+    def next(self, scope: 'Scope') -> Unpackable:  # TODO: TBD on the return type. need dewy tuple type...
+        """Get the next item from the iterator"""
+
+
+class Iterable(AST):
+    # TODO: maybe don't need scope for this method...
+    @abstractmethod
+    def iter(self, scope: 'Scope') -> Iter:
+        """Return an iterator over the iterable"""
+
+
+class Flowable(AST):
+    @abstractmethod
+    def was_entered(self) -> bool:
+        """Determine if the flowable branch was entered. Should reset before performing calls to flow and checking this."""
+    @abstractmethod
+    def reset_was_entered(self) -> None:
+        """reset the state of was_entered, in preparation for executing branches in a flow"""
+
+
+class Array(Iterable, Unpackable):
+    def __init__(self, vals: list[AST]):
+        self.vals = vals
+
+    def eval(self, scope: Scope):
+        return self
+
+    def typeof(self, scope: Scope):
+        pdb.set_trace()
+        # TODO: this should include the type of the data inside the vector...
+        return Type('Array')
+
+    # unpackable interface
+    def len(self, scope: Scope):
+        return len(self.vals)
+
+    def get(self, key: int | EllipsisType | slice | tuple[int | EllipsisType | slice], scope: Scope):
+        if isinstance(key, int):
+            return self.vals[key]
+        elif isinstance(key, EllipsisType):
+            return self
+        elif isinstance(key, slice):
+            return Array(self.vals[key])
+        elif isinstance(key, tuple):
+            # probably only valid for N-dimensional/non-jagged vectors
+            raise NotImplementedError('TODO: implement tuple indexing for Array')
+        else:
+            raise TypeError(f'invalid type for Array.get: `{key}` of type `{type(key)}`')
+
+    def iter(self, scope: Scope) -> Iter:
+        return ArrayIter(self)
+
+    def treestr(self, prefix=''):
+        s = prefix + 'Array\n'
+        for v in self.vals:
+            s += v.treestr(indent + 1) + '\n'
+        return s
+
+    def __str__(self):
+        return f'[{" ".join(map(str, self.vals))}]'
+
+    def __repr__(self):
+        return f'Array({repr(self.vals)})'
+
+
+class ArrayIter(Iter):
+    def __init__(self, ast: AST):
+        self.ast = ast
+
+        self.array = None
+        self.i = None
+
+    def eval(self, scope: Scope):
+        return self
+
+    def next(self, scope: Scope = None) -> Unpackable:
+        if self.array is None:
+            self.array = self.ast.eval(scope)
+            assert isinstance(self.array, Array), f'ArrayIter must be initialized with an AST that evaluates to an Array, not {
+                type(self.array)}'
+            self.i = 0
+
+        if self.i < len(self.array.vals):
+            ret = self.array.vals[self.i]
+            self.i += 1
+            return Array([Bool(True), ret])
+
+        return Array([Bool(False), undefined])
+
+    def typeof(self):
+        return Type('ArrayIter')
+
+    def treestr(self, prefix=''):
+        return f'{prefix}ArrayIter:\n{self.ast.treestr(indent + 1)}'
+
+    def __str__(self):
+        return f'ArrayIter({self.ast})'
+
+    def __repr__(self):
+        return f'ArrayIter({repr(self.ast)})'
+
+
+class String(Rangeable):
+    type: Type = Type('string')
+
+    def __init__(self, val: str):
+        self.val = val
+
+    def eval(self, scope: Scope):
+        return self
+
+    def typeof(self, scope: Scope):
+        return self.type
+    # TODO: implement rangable methods
+
+    def treestr(self, indent=0):
+        return f'{tab * indent}String: `{self.val}`'
+    # @insert_tabs
+
+    def __str__(self):
+        return f'"{self.val}"'
+
+    def __repr__(self):
+        return f'String({repr(self.val)})'
+
+
+class IString(AST):
+    def __init__(self, parts: list[AST]):
+        self.parts = parts
+
+    def eval(self, scope: Scope = None):
+        # convert self into a String()
+        return String(self.topy(scope))
+
+    def treestr(self, indent=0):
+        s = tab * indent + 'IString\n'
+        for part in self.parts:
+            s += part.treestr(indent + 1) + '\n'
+        return s
+
+    def __str__(self):
+        s = ''
+        for part in self.parts:
+            if isinstance(part, String):
+                s += part.val
+            else:
+                s += f'{{{part}}}'
+        return f'"{s}"'
+
+    def __repr__(self):
+        return f'IString({repr(self.parts)})'
