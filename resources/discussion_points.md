@@ -1462,3 +1462,16 @@ let myfunc = decorator(true) <|
 Basically when doing post-tokenization, if we see a `<|` or `|>` we should replace them immediately with a jux-call (or jux-call-reversed) operator, but one with very low level precedence. This means that we don't need to take handles of the functions we want to use, since they are treated as juxtaposed (thus catching the function before it executes), even though they might not touching the operator.
 
 Though perhaps there should be some consideration that the pipe operators are just regular operators, and so the left and the right operands get evaluated. In this case, any time you want to pipe into a function, you'd need to prefix the function with `@` to have a handle to the function so that it is not evaluated.
+
+## Graphics + accelerated compute programming
+
+compute and graphics support
+long term goal: webgpu api directly implemented in dewy (i.e. apis for vulcan, metal, and directx)
+
+in the meantime:
+
+- [wgpu](https://wgpu.rs/) for a rust implementation we can hook into
+- [C++ webgpu native tutorial](https://eliemichel.github.io/LearnWebGPU/getting-started/hello-webgpu.html)
+  - seems like it calls a webgpu C api directly, which is more in line with what I think I want..
+
+Also look into cuda, opencl, halide, etc. graphics accelerated compute libraries
