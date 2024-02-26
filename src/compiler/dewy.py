@@ -63,6 +63,9 @@ class AST(ABC):
     @abstractmethod
     def __repr__(self) -> str:
         """Return a string representation of the python objects making up the AST"""
+    @abstractmethod
+    def to_string(self, scope: 'Scope') -> 'String':
+        """Return a string representation of the AST. Used when automatically converting to string, e.g. in `printl`"""
 
 
 class Type(AST):
@@ -80,6 +83,9 @@ class Type(AST):
         pdb.set_trace()
         # return prefix + f'Type({self.name})'
 
+    def to_string(self, scope: 'Scope') -> 'String':
+        return String(self.__str__())
+
     def __str__(self) -> str:
         if self.parameters:
             return f'{self.name}<{", ".join(map(str, self.parameters))}>'
@@ -96,7 +102,7 @@ class Type(AST):
         pdb.set_trace()
 
     @staticmethod
-    def is_instance(val: AST, type: 'Type') -> bool:
+    def is_instance(scope: 'Scope', val: AST, type: 'Type') -> bool:
         pdb.set_trace()
 
 
@@ -116,6 +122,9 @@ class Undefined(AST):
 
     def treestr(self, prefix='') -> str:
         return prefix + 'Undefined'
+
+    def to_string(self, scope: 'Scope') -> 'String':
+        return String('undefined')
 
     def __str__(self):
         return 'undefined'
@@ -144,6 +153,9 @@ class Void(AST):
 
     def treestr(self, prefix=''):
         return prefix + 'Void'
+
+    def to_string(self, scope: 'Scope'):
+        return String('void')
 
     def __str__(self):
         return 'void'
@@ -223,11 +235,16 @@ class Scope():
         s.vars = self.vars.copy()
         return s
 
+    @staticmethod
+    def default():
+        """return a scope with the standard library (of builtins) included"""
+        root = Scope()
+        # root.bind('print', Builtin('print', [Arg('text')], None, Type('callable', [Array([String.type]), Undefined.type])))
+        # root.bind('printl', Builtin('printl', [Arg('text')], None, Type('callable', [Array([String.type]), Undefined.type])))
+        # root.bind('readl', Builtin('readl', [], String, Type('callable', [Array([]), String.type])))
+        # TODO: eventually add more builtins
 
-class Callable(AST):
-    @abstractmethod
-    def call(self, scope: 'Scope'):
-        """Call the callable in the given scope"""
+        return root
 
 
 class Orderable(AST):
@@ -235,14 +252,14 @@ class Orderable(AST):
     @abstractmethod
     def compare(self, other: 'Orderable', scope: 'Scope') -> 'Number':
         """Return a value indicating the relationship between this value and another value"""
-    @staticmethod
-    @abstractmethod
-    def max() -> 'Rangeable':
-        """Return the maximum element from the set of all elements of this type"""
-    @staticmethod
-    @abstractmethod
-    def min() -> 'Rangeable':
-        """Return the minimum element from the set of all elements of this type"""
+    # @staticmethod
+    # @abstractmethod
+    # def max() -> 'Rangeable':
+    #     """Return the maximum element from the set of all elements of this type"""
+    # @staticmethod
+    # @abstractmethod
+    # def min() -> 'Rangeable':
+    #     """Return the minimum element from the set of all elements of this type"""
 
 # TODO: come up with a better name for this class... successor and predecessor are only used for range iterators, not ranges themselves
 #        e.g. Incrementable, Decrementable, etc.
@@ -251,10 +268,10 @@ class Orderable(AST):
 class Rangeable(Orderable):
     """An object that can be used to specify bounds of a range"""
     @abstractmethod
-    def successor(self, scope: 'Scope', step=undefined) -> 'Rangeable':
+    def successor(self, step: 'Number', scope: 'Scope') -> 'Rangeable':
         """Return the next value in the range"""
     @abstractmethod
-    def predecessor(self, scope: 'Scope', step=undefined) -> 'Rangeable':
+    def predecessor(self, step: 'Number', scope: 'Scope') -> 'Rangeable':
         """Return the previous value in the range"""
 
 
@@ -289,6 +306,29 @@ class Flowable(AST):
     @abstractmethod
     def reset_was_entered(self) -> None:
         """reset the state of was_entered, in preparation for executing branches in a flow"""
+
+
+class Identifier(AST):
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __str__(self) -> str:
+        return f'{self.name}'
+
+    def __repr__(self) -> str:
+        return f'Identifier({self.name})'
+
+    def eval(self, scope: Scope) -> AST:
+        return scope.get(self.name)
+
+    def typeof(self, scope: Scope) -> Type:
+        pdb.set_trace()
+
+    def treestr(self, prefix='') -> str:
+        return prefix + f'Identifier: {self.name}'
+
+    def to_string(self, scope: Scope) -> 'String':
+        return String(self.name)
 
 
 class Array(Iterable, Unpackable):
@@ -388,7 +428,18 @@ class String(Rangeable):
 
     def treestr(self, indent=0):
         return f'{tab * indent}String: `{self.val}`'
-    # @insert_tabs
+
+    def to_string(self, scope: Scope):
+        return self
+
+    def compare(self, other: 'String', scope: 'Scope') -> 'Number':
+        pdb.set_trace()
+
+    def successor(self, step: 'Number', scope: 'Scope') -> 'String':
+        pdb.set_trace()
+
+    def predecessor(self, step: 'Number', scope: 'Scope') -> 'String':
+        pdb.set_trace()
 
     def __str__(self):
         return f'"{self.val}"'
@@ -422,3 +473,11 @@ class IString(AST):
 
     def __repr__(self):
         return f'IString({repr(self.parts)})'
+
+
+class Function(AST):
+    ...
+
+
+class AtHandle(AST):
+    ...

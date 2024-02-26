@@ -4,12 +4,12 @@ from dewy import (
     AST,
     Undefined, undefined,
     Void, void,
-    Callable,
     # Orderable,
     # Rangeable,
     # Unpackable,
     # Iter,
     # Iterable,
+    Identifier,
     Type,
     # Arg,
     # Function,
@@ -118,19 +118,6 @@ class ListOfASTs(PrototypeAST):
         return f'{", ".join(map(str, self.asts))}'
     def __repr__(self):
         return f'ListOfASTs({self.asts})'
-
-
-class Identifier(PrototypeAST):
-    """intermediate node, expected to be replaced with call or etc. during AST construction"""
-
-    def __init__(self, name:str) -> None:
-        self.name = name
-    
-    def __str__(self) -> str:
-        return f'{self.name}'
-    
-    def __repr__(self) -> str:
-        return f'Identifier({self.name})'
 
 
 class Tuple(PrototypeAST):
@@ -436,9 +423,9 @@ def typeof_single(token:Token, scope:Scope) -> Type|None:
     pdb.set_trace()
     ...
 
-def to_callable(ast:AST) -> str|Callable:
+def apply_arguments(ast:AST) -> None:
     """Convert the ast to either a string (identifier name) or Callable"""
-
+    pdb.set_trace()
     if isinstance(ast, Identifier):
         return ast.name
     if isinstance(ast, Callable):
@@ -447,7 +434,7 @@ def to_callable(ast:AST) -> str|Callable:
     # hacky way of dealing with blocks
     if isinstance(ast, Block):
         if len(ast.exprs) == 1:
-            return to_callable(ast.exprs[0])
+            return apply_arguments(ast.exprs[0])
         else:
             pdb.set_trace()
             ...
