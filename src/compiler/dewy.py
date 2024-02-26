@@ -360,14 +360,16 @@ class Orderable(AST):
     def compare(self, other:'Orderable', scope:'Scope'=None) -> 'Number':
         """Return a value indicating the relationship between this value and another value"""
         raise NotImplementedError(f'{self.__class__.__name__}.compare')
-    @staticmethod
-    def max(self) -> 'Rangeable':
-        """Return the maximum element from the set of all elements of this type"""
-        raise NotImplementedError(f'{self.__class__.__name__}.max')
-    @staticmethod
-    def min(self) -> 'Rangeable':
-        """Return the minimum element from the set of all elements of this type"""
-        raise NotImplementedError(f'{self.__class__.__name__}.min')
+
+    # TODO: move these to a more appropriate trait
+    # @staticmethod
+    # def max(self) -> 'Rangeable':
+    #     """Return the maximum element from the set of all elements of this type"""
+    #     raise NotImplementedError(f'{self.__class__.__name__}.max')
+    # @staticmethod
+    # def min(self) -> 'Rangeable':
+    #     """Return the minimum element from the set of all elements of this type"""
+    #     raise NotImplementedError(f'{self.__class__.__name__}.min')
     
 #TODO: come up with a better name for this class... successor and predecessor are only used for range iterators, not ranges themselves
 #        e.g. Incrementable, Decrementable, etc.
@@ -1315,9 +1317,8 @@ class RangeIter(Iter):
 
         # runtime iter state
         self.range: Range = None
-        self.i: AST = None
-        self.step: Number|Undefined = None
-        self.last: AST  = None
+        self.i: Rangeable = None
+        self.step: Number = None
 
     def eval(self, scope:Scope=None):
         return self
@@ -1337,11 +1338,7 @@ class RangeIter(Iter):
         if self.range.second is not undefined:
             self.step = self.range.second.compare(self.range.first, scope)
         else:
-            self.step = undefined
-        if self.range.last is not undefined:
-            self.last = self.range.last
-        else:
-            self.last = self.i.max()
+            self.step = Number(1)
 
         #skip the first element if it's not included (closed interval)
         if not self.range.include_first:
@@ -1353,7 +1350,7 @@ class RangeIter(Iter):
             self.initialize_iter_params(scope)
         
         #check the stop condition and return the next element
-        if (c:=self.i.compare(self.last).val) < 0 or (c==0 and self.range.include_last):
+        if self.range.last is undefined or (c:=self.i.compare(self.range.last).val) < 0 or (c==0 and self.range.include_last):
             ret = self.i
             self.i = self.i.successor(self.step, scope)
             return Array([Bool(True), ret])
