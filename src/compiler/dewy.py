@@ -40,6 +40,7 @@ handling case insensitive identifiers (e.g. for units)
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from types import EllipsisType
+from typing import Callable as PyCallable
 
 import pdb
 
@@ -239,9 +240,21 @@ class Scope():
     def default():
         """return a scope with the standard library (of builtins) included"""
         root = Scope()
-        # root.bind('print', Builtin('print', [Arg('text')], None, Type('callable', [Array([String.type]), Undefined.type])))
-        # root.bind('printl', Builtin('printl', [Arg('text')], None, Type('callable', [Array([String.type]), Undefined.type])))
-        # root.bind('readl', Builtin('readl', [], String, Type('callable', [Array([]), String.type])))
+
+        def pyprint(scope: 'Scope'):
+            print(scope.get('text'), end='')
+            return void
+        root.bind('print', Function([Arg('text')], PyAction(pyprint, Type('void'))))
+
+        def pyprintl(scope: 'Scope'):
+            print(scope.get('text'))
+            return void
+        root.bind('printl', Function([Arg('text')], PyAction(pyprintl, Type('void'))))
+
+        def pyreadl(scope: 'Scope'):
+            return String(input())
+        root.bind('readl', Function([], PyAction(pyreadl, Type('string'))))
+
         # TODO: eventually add more builtins
 
         return root
@@ -306,6 +319,30 @@ class Flowable(AST):
     @abstractmethod
     def reset_was_entered(self) -> None:
         """reset the state of was_entered, in preparation for executing branches in a flow"""
+
+
+class PyAction(AST):
+    def __init__(self, action: PyCallable[[Scope], AST], return_type: Type):
+        self.action = action
+        self.return_type = return_type
+
+    def eval(self, scope: Scope):
+        return self.action(scope)
+
+    def typeof(self, scope: Scope):
+        return self.return_type
+
+    def treestr(self, prefix=''):
+        return prefix + f'PyAction: {self.action}'
+
+    def to_string(self, scope: Scope):
+        return String(f'<PyAction: {self.action}>')
+
+    def __str__(self):
+        return f'PyAction({self.action})'
+
+    def __repr__(self):
+        return f'PyAction({self.action}, {self.return_type})'
 
 
 class Identifier(AST):
@@ -475,8 +512,56 @@ class IString(AST):
         return f'IString({repr(self.parts)})'
 
 
+class Arg:
+    def __init__(self, name: str, type: Type = None, val: AST | None = None):
+        self.name = name
+        self.val = val
+        self.type = type
+
+    def __str__(self):
+        s = f'{self.name}'
+        if self.type is not None:
+            s += f':{self.type}'
+        if self.val is not None:
+            s += f' = {self.val}'
+        return s
+
+    def __repr__(self):
+        s = f'Arg({self.name}'
+        if self.type is not None:
+            s += f', {repr(self.type)}'
+        if self.val is not None:
+            s += f', {repr(self.val)}'
+        s += ')'
+        return s
+
+
 class Function(AST):
-    ...
+    def __init__(self, args: list['Arg'], body: AST):
+        self.args = args
+        self.body = body
+
+    def eval(self, scope: Scope):
+        pdb.set_trace()
+
+    def typeof(self, scope: Scope):
+        pdb.set_trace()
+
+    def treestr(self, indent=0):
+        s = tab * indent + 'Function\n'
+        for arg in self.args:
+            s += arg.treestr(indent + 1) + '\n'
+        s += self.body.treestr(indent + 1)
+        return s
+
+    def to_string(self, scope: Scope):
+        return String(self.__str__())
+
+    def __str__(self):
+        return f'({", ".join(map(str, self.args))}) => {self.body}'
+
+    def __repr__(self):
+        return f'Function({repr(self.args)}, {repr(self.body)})'
 
 
 class AtHandle(AST):
