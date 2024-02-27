@@ -2,7 +2,7 @@
 [redo of dewy runtime]
 remove all reliance on .topy(). .eval() needs to be better fleshed out
 --> .eval() means if atom type, return self, otherwise operate/evaluate until there is an atomic type
-    --> eval(4) -> 4.  eval(1 + 2) -> 3. eval(() => {5}) -> 5 (or function handle?)  
+    --> eval(4) -> 4.  eval(1 + 2) -> 3. eval(() => {5}) -> () => {5}. eval(eval(() => {5})) -> 5. eval(eval(4)) -> 4
 FunctionHandle(AST)
 --> .eval returns a Function (perhaps different name...)
 --> Function.eval() evaluates the function
@@ -177,6 +177,7 @@ class Scope():
         type: AST
         value: AST
         const: bool
+        caseless: bool
 
     def __init__(self, parent: 'Scope|None' = None):
         self.parent = parent
@@ -191,11 +192,13 @@ class Scope():
         """Return the root scope"""
         return [*self][-1]
 
-    def let(self, name: str, type: 'Type|Undefined', value: AST, const: bool):
+    def let(self, name: str, type: 'Type|Undefined', value: AST, const: bool, caseless: bool):
         # overwrite anything that might have previously been there
-        self.vars[name] = Scope._var(type, value, const)
+        pdb.set_trace()  # TODO: need to handle setting casefolded name for caseless
+        self.vars[name] = Scope._var(type, value, const, caseless)
 
     def get(self, name: str, default: AST = None) -> AST:
+        pdb.set_trace()  # TODO: need to handle getting casefolded name for caseless
         # get a variable from this scope or any of its parents
         for s in self:
             if name in s.vars:
@@ -205,7 +208,7 @@ class Scope():
         raise NameError(f'{name} not found in scope {self}')
 
     def bind(self, name: str, value: AST):
-
+        pdb.set_trace()  # TODO: need to handle setting casefolded name for caseless
         # update an existing variable in this scope or  any of the parent scopes
         for s in self:
             if name in s.vars:
@@ -217,7 +220,7 @@ class Scope():
                 return
 
         # otherwise just create a new instance of the variable
-        self.vars[name] = Scope._var(undefined, value, False)
+        self.vars[name] = Scope._var(undefined, value, False, False)
 
     def __iter__(self):
         """return an iterator that walks up each successive parent scope. Starts with self"""
@@ -244,16 +247,16 @@ class Scope():
         def pyprint(scope: 'Scope'):
             print(scope.get('text'), end='')
             return void
-        root.bind('print', Function([Arg('text')], PyAction(pyprint, Type('void'))))
+        root.bind('print', Function([Declare('text', Type('string'), void)], [], PyAction(pyprint, Type('void'))))
 
         def pyprintl(scope: 'Scope'):
             print(scope.get('text'))
             return void
-        root.bind('printl', Function([Arg('text')], PyAction(pyprintl, Type('void'))))
+        root.bind('printl', Function([Declare('text', Type('string'), void)], [], PyAction(pyprintl, Type('void'))))
 
         def pyreadl(scope: 'Scope'):
             return String(input())
-        root.bind('readl', Function([], PyAction(pyreadl, Type('string'))))
+        root.bind('readl', Function([], [], PyAction(pyreadl, Type('string'))))
 
         # TODO: eventually add more builtins
 
@@ -265,20 +268,22 @@ class Orderable(AST):
     @abstractmethod
     def compare(self, other: 'Orderable', scope: 'Scope') -> 'Number':
         """Return a value indicating the relationship between this value and another value"""
-    # @staticmethod
-    # @abstractmethod
-    # def max() -> 'Rangeable':
-    #     """Return the maximum element from the set of all elements of this type"""
-    # @staticmethod
-    # @abstractmethod
-    # def min() -> 'Rangeable':
-    #     """Return the minimum element from the set of all elements of this type"""
 
-# TODO: come up with a better name for this class... successor and predecessor are only used for range iterators, not ranges themselves
-#        e.g. Incrementable, Decrementable, etc.
+
+class Boundable(AST):
+    @staticmethod
+    @abstractmethod
+    def max() -> 'Rangeable':
+        """Return the maximum element from the set of all elements of this type"""
+    @staticmethod
+    @abstractmethod
+    def min() -> 'Rangeable':
+        """Return the minimum element from the set of all elements of this type"""
 
 
 class Rangeable(Orderable):
+    # TODO: come up with a better name for this class... successor and predecessor are only used for range iterators, not ranges themselves
+    #        e.g. Incrementable, Decrementable, etc.
     """An object that can be used to specify bounds of a range"""
     @abstractmethod
     def successor(self, step: 'Number', scope: 'Scope') -> 'Rangeable':
@@ -289,6 +294,7 @@ class Rangeable(Orderable):
 
 
 class Unpackable(AST):
+    # TODO: need to handle unpacking of objects + unpacking dicts
     @abstractmethod
     def len(self, scope: 'Scope') -> int:
         """Return the length of the unpackable"""
@@ -301,7 +307,7 @@ class Unpackable(AST):
 
 class Iter(AST):
     @abstractmethod
-    def next(self, scope: 'Scope') -> Unpackable:  # TODO: TBD on the return type. need dewy tuple type...
+    def next(self, scope: 'Scope') -> Unpackable:  # TODO: TBD on the return type, e.g. Tuple[Bool, AST]
         """Get the next item from the iterator"""
 
 
@@ -366,6 +372,52 @@ class Identifier(AST):
 
     def to_string(self, scope: Scope) -> 'String':
         return String(self.name)
+
+
+class Declare(AST):
+    def __init__(self, name: str, type: Type, value: AST = undefined, const=False, caseless=False):
+        self.name = name
+        self.type = type
+        self.value = value
+        self.const = const
+        self.caseless = caseless  # does case matter when looking up this variable?
+
+    def eval(self, scope: Scope = None):
+        scope.let(self.name, self.type, self.value, self.const, self.caseless)
+
+    def treestr(self, indent=0):
+        return f'{tab * indent}{"Const" if self.const else "Let"}: {self.name}\n{self.type.treestr(indent + 1)}'
+
+    def to_string(self, scope: Scope) -> 'String':
+        raise ValueError('cannot convert void expression Declare to a string')
+
+    def typeof(self, scope: Scope) -> Type:
+        return Type('void')
+
+    def __str__(self):
+        return f'{"const" if self.const else "let"} {self.name}:{self.type} = {self.value}'
+
+    def __repr__(self):
+        return f'{"Const" if self.const else "Let"}({self.name}, {self.type}, {self.value})'
+
+
+class Bind(AST):
+    # TODO: allow bind to take in an unpack structure
+    def __init__(self, name: str, value: AST):
+        self.name = name
+        self.value = value
+
+    def eval(self, scope: Scope = None):
+        scope.bind(self.name, self.value.eval(scope))
+
+    def treestr(self, indent=0):
+        return f'{tab * indent}Bind: {self.name}\n{self.value.treestr(indent + 1)}'
+
+    def __str__(self):
+        return f'{self.name} = {self.value}'
+
+    def __repr__(self):
+        return f'Bind({self.name}, {repr(self.value)})'
 
 
 class Array(Iterable, Unpackable):
@@ -512,40 +564,83 @@ class IString(AST):
         return f'IString({repr(self.parts)})'
 
 
-class Arg:
-    def __init__(self, name: str, type: Type = None, val: AST | None = None):
-        self.name = name
-        self.val = val
-        self.type = type
+# class Arg:
+#     def __init__(self, name: str, type: Type = None):
+#         self.name = name
+#         self.type = type
 
-    def __str__(self):
-        s = f'{self.name}'
-        if self.type is not None:
-            s += f':{self.type}'
-        if self.val is not None:
-            s += f' = {self.val}'
-        return s
+#     def __str__(self):
+#         s = f'{self.name}'
+#         if self.type is not None:
+#             s += f':{self.type}'
+#         return s
 
-    def __repr__(self):
-        s = f'Arg({self.name}'
-        if self.type is not None:
-            s += f', {repr(self.type)}'
-        if self.val is not None:
-            s += f', {repr(self.val)}'
-        s += ')'
-        return s
+#     def __repr__(self):
+#         s = f'Arg({self.name}'
+#         if self.type is not None:
+#             s += f', {repr(self.type)}'
+#         s += ')'
+#         return s
 
+# class Kwarg(Arg):
+#     def __init__(self, name: str, type: Type = None, val: AST | None = None):
+#         super().__init__(name, type)
+#         self.val = val
+
+#     def __str__(self):
+#         s = super().__str__()
+#         if self.val is not None:
+#             s += f' = {self.val}'
+#         return s
+
+#     def __repr__(self):
+#         s = super().__repr__()
+#         if self.val is not None:
+#             s = s[:-1] + f', {repr(self.val)})'
+#         return s
 
 class Function(AST):
-    def __init__(self, args: list['Arg'], body: AST):
+    def __init__(self, args: list[Declare], kwargs: list[Declare], body: AST):
+
+        # ensure all args have no default values, and all kwargs have default values
+        assert all(arg.value is void for arg in args), 'args cannot have default values'
+        assert all(kwarg.value is not void for kwarg in kwargs), 'kwargs must have default values'
+        arg_names = {arg.name for arg in args}
+        kwarg_names = {kwarg.name for kwarg in kwargs}
+
+        # ensure no duplicate names
+        assert arg_names.isdisjoint(kwarg_names), f'args and kwargs cannot share any names. Names found in both: {
+            arg_names & kwarg_names}'
+
         self.args = args
+        self.kwargs = kwargs
         self.body = body
 
+        # as positional args are bound, they are transferred into the kwargs list
+
+    def partial_eval(self, update: list[Bind]):
+        # update the args/kwargs with the new values
+        assert all(u.value is not void for u in update), f'cannot partially evaluate with void values. Update: {update}'
+        for u in update:
+            arg_names = [arg.name for arg in self.args]
+            try:
+                i = arg_names.index(u.name)
+                decl = self.args.pop(i)
+                decl.value = u.value
+                self.kwargs.append(decl)
+            except ValueError:
+                kwarg_names = [kwarg.name for kwarg in self.kwargs]
+                i = kwarg_names.index(u.name)
+                self.kwargs[i].value = u.value
+
     def eval(self, scope: Scope):
+        # this is the scope that everything gets bound to
+        # make a child scope for the arguments/body (tbd if they share, or separate args from body)
         pdb.set_trace()
 
     def typeof(self, scope: Scope):
         pdb.set_trace()
+        # something to do with body.typeof(), but need to allow any argument types to also come into play
 
     def treestr(self, indent=0):
         s = tab * indent + 'Function\n'

@@ -560,6 +560,7 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
 
     match op:
         case Juxtapose_t():
+            pdb.set_trace()
             if is_callable(left, scope):
                 fn = to_callable(left)
                 args = to_call_args(right)
