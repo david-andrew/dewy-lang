@@ -41,6 +41,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from types import EllipsisType
 from typing import Callable as PyCallable
+from utils import CaseSelectiveDict, CaselessStr
 
 import pdb
 
@@ -177,11 +178,10 @@ class Scope():
         type: AST
         value: AST
         const: bool
-        caseless: bool
 
     def __init__(self, parent: 'Scope|None' = None):
         self.parent = parent
-        self.vars: dict[str, Scope._var] = {}
+        self.vars: CaseSelectiveDict[Scope._var] = CaseSelectiveDict()
 
         # used for function calls
         # TODO: from now on, we just make a new scope for holding args
@@ -192,13 +192,14 @@ class Scope():
         """Return the root scope"""
         return [*self][-1]
 
-    def let(self, name: str, type: 'Type|Undefined', value: AST, const: bool, caseless: bool):
+    def let(self, name: str | CaselessStr, type: 'Type|Undefined', value: AST, const: bool):
         # overwrite anything that might have previously been there
-        pdb.set_trace()  # TODO: need to handle setting casefolded name for caseless
-        self.vars[name] = Scope._var(type, value, const, caseless)
+        # TBD: if a caseless name already exists, and the new name is caseful, should the new one become caseless, or should it stay caseful, or should it be an error?
+        # if name in self.vars:
+        #     del self.vars[name]
+        self.vars[name] = Scope._var(type, value, const)
 
-    def get(self, name: str, default: AST = None) -> AST:
-        pdb.set_trace()  # TODO: need to handle getting casefolded name for caseless
+    def get(self, name: str | CaselessStr, default: AST = None) -> AST:
         # get a variable from this scope or any of its parents
         for s in self:
             if name in s.vars:
@@ -220,7 +221,7 @@ class Scope():
                 return
 
         # otherwise just create a new instance of the variable
-        self.vars[name] = Scope._var(undefined, value, False, False)
+        self.vars[name] = Scope._var(undefined, value, False)
 
     def __iter__(self):
         """return an iterator that walks up each successive parent scope. Starts with self"""

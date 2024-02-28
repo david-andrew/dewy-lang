@@ -1,3 +1,4 @@
+from typing import TypeVar, Generic
 import pdb
 from typing import Callable
 
@@ -186,7 +187,11 @@ class CaselessStr(str):
         return self.casefold()
 
 
-class CaseSelectiveDict:
+T = TypeVar('T')
+U = TypeVar('U')
+
+
+class CaseSelectiveDict(Generic[T]):
     """A dictionary where keys may be either case sensitive or case insensitive"""
 
     def __init__(self, **kwargs):
@@ -195,7 +200,7 @@ class CaseSelectiveDict:
         for k, v in kwargs.items():
             self.__setitem__(k, v)  # Use setitem to handle initial assignments
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str | CaselessStr) -> T:
         try:
             return self.caseless[CaselessStr(key)]
         except KeyError:
@@ -207,7 +212,7 @@ class CaseSelectiveDict:
 
         raise KeyError(f"Key {key} not found") from None
 
-    def __setitem__(self, key: str | CaselessStr, value):
+    def __setitem__(self, key: str | CaselessStr, value: T):
         if not isinstance(key, (str, CaselessStr)):
             raise TypeError(f"Key must be of type str or CaselessStr, not '{type(key)}'")
 
@@ -253,7 +258,7 @@ class CaseSelectiveDict:
     def has_key(self, key: str | CaselessStr):
         return key in self
 
-    def get(self, key: str | CaselessStr, default=None):
+    def get(self, key: str | CaselessStr, default: U = None) -> T | U:
         try:
             return self[key]
         except KeyError:
@@ -268,10 +273,10 @@ class CaseSelectiveDict:
     def items(self):
         return {**self.caseless, **self.caseful}.items()
 
-    def keys(self):
+    def keys(self) -> list[str | CaselessStr]:
         return [*self.caseless.keys(), *self.caseful.keys()]
 
-    def values(self):
+    def values(self) -> list[T]:
         return [*self.caseless.values(), *self.caseful.values()]
 
     def __repr__(self):
