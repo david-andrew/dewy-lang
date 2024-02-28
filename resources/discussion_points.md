@@ -1475,3 +1475,76 @@ in the meantime:
   - seems like it calls a webgpu C api directly, which is more in line with what I think I want..
 
 Also look into cuda, opencl, halide, etc. graphics accelerated compute libraries
+
+## Scopes, capitalization, combination identifiers, aliases
+
+### capitalization/case-insensitive identifiers
+
+I think I'm not going to allow case-insensitive identifiers. Units written out will all just be lower case. Same with e.g. constants like `pi`, etc.
+
+### combination identifiers
+
+For handling units, I think scopes should support a form of dynamic lookup over combinations. The flow would be:
+
+1. check the regular list of identifiers
+1. if not found, perform the dynamic check over combination identifiers
+   - combination identifiers should also get some sort of post processing when found (e.g. multiply prefix by unit)
+1. if dynamic check finds a match, store the identifier in the regular list of identifiers and return the result
+1. else lookup fails
+
+e.g. `kilogram`. initially `kilogram` is not in the scope. so we do a dynamic lookup over si prefixes and units, and are able to construct kilogram from `kilo` and `gram`. `kilogram` is then computed as `kilo * gram` and stored in the regular scope as `kilogram`.
+
+TBD how to declare a set of combination identifiers
+
+```dewy
+prefixes = ['kilo'-> 1e3 'mega' -> 1e6 'giga' -> 1e9 'tera' -> 1e12 ...]
+units = ['gram' -> [1 0 0 0 0 0 0] 'meter' -> [0 1 0 0 0 0 0] 'second' -> [0 0 1 0 0 0 0] ...]
+
+combo [prefixes.keys units.keys] = (prefix, unit) => prefix * unit
+```
+
+### aliases
+
+Aliases basically allow you to have multiple names pointing to the same underlying variable. Aliases can be declared via the `alias` keyword
+
+```dewy
+let meter = [0 1 0 0 0 0 0] //etc. some definition of a meter
+alias metre = meter
+alias m = meter
+```
+
+When performing the lookup of a variable in a scope, first check for regular identifiers, then check for aliases.
+
+Ideally aliases and combination identifiers would play nice with each other, e.g. you could define all the written-out units+prefixes as a combo, and then set up aliases for each of them (e.g. the abbreviation, plural versions, etc), and it would all just work out
+
+## Let, Const, Local
+The declaration keywords all have to do with what happens when trying to assign a value without the keyword
+
+```dewy
+let x = 5
+x = 6 // allowed, x is now 6
+{
+    x = 7 // allowed, x in outer scope is now 7
+}
+
+const y = 5
+y = 6 // not allowed, compile time error
+{
+    y = 7 // not allowed, compile time error
+}
+
+local z = 5 //local is a like const, but does not cause compile time error when trying to overwrite in lower scopes
+z = 6 // not allowed, compile time error
+{
+    z = 7 // allowed. equivalent to let z = 7. in inner scope is now 7, outer scope is still 5
+}
+```
+
+Local is useful for standard library values that users might want to use the same identifier for for a different purpose. E.g. `i`, `j`, `k` which by default are quaternion units, but user's frequently use them as loop indices. So at the standard library level, `i`, `j`, `k` would be declared as `local`.
+
+Perhaps there is a better name instead of `local` though. `shadow`? Basically want something that explains that it is const, but can be overwritten in lower scopes. Other options are:
+- `shadowable`
+- `localconst`
+- `locallet` //allows for having a const and let version of local
+- `constlocal`
+- `letlocal`
