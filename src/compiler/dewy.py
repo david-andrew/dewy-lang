@@ -41,7 +41,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from types import EllipsisType
 from typing import Callable as PyCallable
-from utils import CaseSelectiveDict, CaselessStr
+
 
 import pdb
 
@@ -178,10 +178,13 @@ class Scope():
         type: AST
         value: AST
         const: bool
+        local: bool
 
     def __init__(self, parent: 'Scope|None' = None):
         self.parent = parent
-        self.vars: CaseSelectiveDict[Scope._var] = CaseSelectiveDict()
+        self.vars: dict[str, Scope._var] = {}
+        self.aliases: dict[str, str] = {}  # name:alias
+        self.combos: dict[tuple[list[str], ...], Function] = {}
 
         # used for function calls
         # TODO: from now on, we just make a new scope for holding args
@@ -192,14 +195,26 @@ class Scope():
         """Return the root scope"""
         return [*self][-1]
 
-    def let(self, name: str | CaselessStr, type: 'Type|Undefined', value: AST, const: bool):
-        # overwrite anything that might have previously been there
-        # TBD: if a caseless name already exists, and the new name is caseful, should the new one become caseless, or should it stay caseful, or should it be an error?
-        # if name in self.vars:
-        #     del self.vars[name]
-        self.vars[name] = Scope._var(type, value, const)
+    def const(self, name: str, type: 'Type|Undefined', value: AST, local: bool = False):
+        pdb.set_trace()
+        self.vars[name] = Scope._var(type, value, True, local)
 
-    def get(self, name: str | CaselessStr, default: AST = None) -> AST:
+    # def let(self, name: str, type: 'Type|Undefined', value: AST, const: bool):
+    def let(self, name: str, type: 'Type|Undefined', value: AST, local: bool = False):
+        pdb.set_trace()
+        # overwrite anything that might have previously been there
+        self.vars[name] = Scope._var(type, value, False, local)
+
+    def alias(self, name: str, value: AST):
+        pdb.set_trace()
+        ...
+
+    def combo(self, *names: dict[str, AST], postprocess: 'Function'):
+        pdb.set_trace()
+        ...
+    
+    def get(self, name: str, default: AST = None) -> AST:
+        pdb.set_trace()
         # get a variable from this scope or any of its parents
         for s in self:
             if name in s.vars:
@@ -209,7 +224,7 @@ class Scope():
         raise NameError(f'{name} not found in scope {self}')
 
     def bind(self, name: str, value: AST):
-        pdb.set_trace()  # TODO: need to handle setting casefolded name for caseless
+        pdb.set_trace()  # dealing with local, alias, etc. other cases
         # update an existing variable in this scope or  any of the parent scopes
         for s in self:
             if name in s.vars:
@@ -246,12 +261,12 @@ class Scope():
         root = Scope()
 
         def pyprint(scope: 'Scope'):
-            print(scope.get('text'), end='')
+            print(scope.get('text').to_string(scope).val, end='')
             return void
         root.bind('print', Function([Declare('text', Type('string'), void)], [], PyAction(pyprint, Type('void'))))
 
         def pyprintl(scope: 'Scope'):
-            print(scope.get('text'))
+            print(scope.get('text').to_string(scope).val)
             return void
         root.bind('printl', Function([Declare('text', Type('string'), void)], [], PyAction(pyprintl, Type('void'))))
 
