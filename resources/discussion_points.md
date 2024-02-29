@@ -1548,3 +1548,10 @@ Perhaps there is a better name instead of `local` though. `shadow`? Basically wa
 - `locallet` //allows for having a const and let version of local
 - `constlocal`
 - `letlocal`
+
+
+
+## Security design
+TODO
+in general memory safety is a given but other areas not handled by rust are important to consider:
+- https://www.horizon3.ai/attack-research/attack-blogs/analysis-of-2023s-known-exploited-vulnerabilities/
