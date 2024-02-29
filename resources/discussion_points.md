@@ -1555,3 +1555,5 @@ Perhaps there is a better name instead of `local` though. `shadow`? Basically wa
 TODO
 in general memory safety is a given but other areas not handled by rust are important to consider:
 - https://www.horizon3.ai/attack-research/attack-blogs/analysis-of-2023s-known-exploited-vulnerabilities/
+- https://owasp.org/www-project-top-ten/
+- https://www.ibm.com/reports/threat-intelligence
