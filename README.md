@@ -79,6 +79,7 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [range_iter_test.dewy](examples/range_iter_test.dewy)           | [✗]    |
 | [functions.dewy](examples/functions.dewy)                       | [✗]    |
 | [partial_functions.dewy](examples/partial_functions.dewy)       | [✗]    |
+| [closure.dewy](examples/closure.dewy)                           | [✗]    |
 | [unpack_test.dewy](examples/unpack_test.dewy)                   | [✗]    |
 | [fizzbuzz-1.dewy](examples/fizzbuzz-1.dewy)                     | [✓]    |
 | [fizzbuzz0.dewy](examples/fizzbuzz0.dewy)                       | [✗]    |
