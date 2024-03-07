@@ -1500,12 +1500,12 @@ TBD how to declare a set of combination identifiers
 prefixes = ['kilo'-> 1e3 'mega' -> 1e6 'giga' -> 1e9 'tera' -> 1e12 ...]
 units = ['gram' -> [1 0 0 0 0 0 0] 'meter' -> [0 1 0 0 0 0 0] 'second' -> [0 0 1 0 0 0 0] ...]
 
-combo [prefixes.keys units.keys] = (prefix, unit) => prefix * unit
+combo [prefixes.keys units.keys]: PhysicalNumber = (prefix, unit) => prefix * unit
 ```
 
-### aliases
+### aliases [handled just by doing `myalias = () => value`]
 
-Aliases basically allow you to have multiple names pointing to the same underlying variable. Aliases can be declared via the `alias` keyword
+~~Aliases basically allow you to have multiple names pointing to the same underlying variable. Aliases can be declared via the `alias` keyword~~
 
 ```dewy
 let meter = [0 1 0 0 0 0 0] //etc. some definition of a meter
@@ -1513,9 +1513,20 @@ alias metre = meter
 alias m = meter
 ```
 
-When performing the lookup of a variable in a scope, first check for regular identifiers, then check for aliases.
+~~When performing the lookup of a variable in a scope, first check for regular identifiers, then check for aliases.~~
 
-Ideally aliases and combination identifiers would play nice with each other, e.g. you could define all the written-out units+prefixes as a combo, and then set up aliases for each of them (e.g. the abbreviation, plural versions, etc), and it would all just work out
+~~Ideally aliases and combination identifiers would play nice with each other, e.g. you could define all the written-out units+prefixes as a combo, and then set up aliases for each of them (e.g. the abbreviation, plural versions, etc), and it would all just work out~~
+
+
+Aliases are not actually going to be a thing. Instead you can effectively create an alias by binding to a zero-argument function, e.g.
+
+```dewy
+let meter = [0 1 0 0 0 0 0]
+let metre = () => meter
+let m = () => meter
+```
+
+Since zero-arg functions can be called without parenthesis, it functions identically to how an alias might work. This is nice because it is very clear how the aliasing mechanics work, as a consequence of normal let/const declarations and function closures.
 
 ## Let, Const, Local
 The declaration keywords all have to do with what happens when trying to assign a value without the keyword
@@ -1545,9 +1556,13 @@ Local is useful for standard library values that users might want to use the sam
 Perhaps there is a better name instead of `local` though. `shadow`? Basically want something that explains that it is const, but can be overwritten in lower scopes. Other options are:
 - `shadowable`
 - `localconst`
-- `locallet` //allows for having a const and let version of local
 - `constlocal`
+- `locallet` //allows for having a const and let version of local
 - `letlocal`
+- `weakconst`
+- `scopedconst`
+- `scopeconst`
+- `hereconst`
 
 
 
