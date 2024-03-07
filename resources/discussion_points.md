@@ -1500,7 +1500,7 @@ TBD how to declare a set of combination identifiers
 prefixes = ['kilo'-> 1e3 'mega' -> 1e6 'giga' -> 1e9 'tera' -> 1e12 ...]
 units = ['gram' -> [1 0 0 0 0 0 0] 'meter' -> [0 1 0 0 0 0 0] 'second' -> [0 0 1 0 0 0 0] ...]
 
-combo [prefixes.keys units.keys]: PhysicalNumber = (prefix, unit) => prefix * unit
+combo [prefixes.keys units.keys]: PhysicalNumber = (prefix, unit) => prefixes[prefix] * units[unit]
 ```
 
 ### aliases [handled just by doing `myalias = () => value`]
