@@ -41,6 +41,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from types import EllipsisType
 from typing import Callable as PyCallable
+from enum import Enum, auto
 
 
 import pdb
@@ -170,6 +171,12 @@ class Void(AST):
 void = Void()
 
 
+class DeclarationType(Enum):
+    LET = auto()
+    CONST = auto()
+    CONST_LOCAL = auto()
+
+
 class Scope():
 
     @dataclass
@@ -177,13 +184,11 @@ class Scope():
         # name:str #name is stored in the dict key
         type: AST
         value: AST
-        const: bool
-        local: bool
+        decltype: DeclarationType
 
     def __init__(self, parent: 'Scope|None' = None):
         self.parent = parent
         self.vars: dict[str, Scope._var] = {}
-        self.aliases: dict[str, str] = {}  # name:alias
         self.combos: dict[tuple[list[str], ...], Function] = {}
 
         # used for function calls
@@ -209,10 +214,10 @@ class Scope():
         pdb.set_trace()
         ...
 
-    def combo(self, *names: dict[str, AST], postprocess: 'Function'):
+    def combo(self, *names: dict[str, AST], postprocess: PyCallable[[list[AST]], AST]):
         pdb.set_trace()
         ...
-    
+
     def get(self, name: str, default: AST = None) -> AST:
         pdb.set_trace()
         # get a variable from this scope or any of its parents
@@ -615,8 +620,18 @@ class IString(AST):
 #             s = s[:-1] + f', {repr(self.val)})'
 #         return s
 
-class Function(AST):
+class FunctionLiteral(AST):
     def __init__(self, args: list[Declare], kwargs: list[Declare], body: AST):
+        self.args = args
+        self.kwargs = kwargs
+        self.body = body
+
+    def eval(self, scope: Scope) -> 'Function':
+        return Function(self.args, self.kwargs, self.body, scope)
+
+
+class Function(AST):
+    def __init__(self, args: list[Declare], kwargs: list[Declare], body: AST, decl_scope: Scope):
 
         # ensure all args have no default values, and all kwargs have default values
         assert all(arg.value is void for arg in args), 'args cannot have default values'
@@ -649,9 +664,10 @@ class Function(AST):
                 i = kwarg_names.index(u.name)
                 self.kwargs[i].value = u.value
 
-    def eval(self, scope: Scope):
-        # this is the scope that everything gets bound to
-        # make a child scope for the arguments/body (tbd if they share, or separate args from body)
+    def eval(self, scope: Scope) -> AST:
+        # this is the scope that passed in arguments come from
+        # decl_scope is where any closure captured variables come from
+        # execution of functions happens in a child of the decl_scope
         pdb.set_trace()
 
     def typeof(self, scope: Scope):
@@ -674,6 +690,12 @@ class Function(AST):
     def __repr__(self):
         return f'Function({repr(self.args)}, {repr(self.body)})'
 
+# TODO: behavior might change depending on precedence of @ and juxtaposition
+
 
 class AtHandle(AST):
-    ...
+    def __init__(self, id: Identifier):
+        self.id = id
+
+    def eval(self, scope: Scope) -> Identifier:
+        return self.id

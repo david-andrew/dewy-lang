@@ -561,7 +561,7 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
     match op:
         case Juxtapose_t():
             pdb.set_trace()
-            if is_callable(left, scope):
+            if is_callable(left, scope): #callable includes Function, FunctionLiteral, AtHandle, PyAction, and ID that points to one of these
                 fn = to_callable(left)
                 args = to_call_args(right)
                 return Call(fn, args)
