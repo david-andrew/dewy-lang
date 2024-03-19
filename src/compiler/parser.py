@@ -810,7 +810,7 @@ def parse_flow(flow:Flow_t, scope:Scope) -> Flowable:
     ...
 
 
-def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
+def top_level_parse(tokens:list[Token], scope:Scope) -> AST:
     """
     Parse the sequence of tokens into an AST
 
@@ -820,11 +820,11 @@ def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     """
 
     #ensure there is a valid scope to do the parse with
-    if scope is None:
-        scope = Scope.default()
+    # if scope is None:
+    #     scope = Scope.default()
     
     # kick off the parser
-    ast = parse(tokens, scope.copy())
+    ast = parse(tokens, scope)
 
     # wrap top level in a block
     if isinstance(ast, ListOfASTs):
@@ -837,7 +837,7 @@ def top_level_parse(tokens:list[Token], scope:Scope=None) -> AST:
     tuples_to_arrays(ast)
     ensure_no_prototypes(ast)
     # ensure_no_unwrapped_ranges(ast)
-    set_ast_scopes(ast, scope)
+    # set_ast_scopes(ast, scope)
 
     return ast
     
