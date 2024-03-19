@@ -14,8 +14,8 @@ from dewy import (
     # Arg,
     # Function,
     # Builtin,
-    # Let,
-    # Bind,
+    Declare,
+    Bind,
     # PackStruct,
     # Unpack,
     # Block,
@@ -423,70 +423,70 @@ def typeof_single(token:Token, scope:Scope) -> Type|None:
     pdb.set_trace()
     ...
 
-def apply_arguments(ast:AST) -> None:
-    """Convert the ast to either a string (identifier name) or Callable"""
-    pdb.set_trace()
-    if isinstance(ast, Identifier):
-        return ast.name
-    if isinstance(ast, Callable):
-        return ast
+# def apply_arguments(ast:AST) -> None:
+#     """Convert the ast to either a string (identifier name) or Callable"""
+#     pdb.set_trace()
+#     if isinstance(ast, Identifier):
+#         return ast.name
+#     if isinstance(ast, Callable):
+#         return ast
     
-    # hacky way of dealing with blocks
-    if isinstance(ast, Block):
-        if len(ast.exprs) == 1:
-            return apply_arguments(ast.exprs[0])
-        else:
-            pdb.set_trace()
-            ...
+#     # hacky way of dealing with blocks
+#     if isinstance(ast, Block):
+#         if len(ast.exprs) == 1:
+#             return apply_arguments(ast.exprs[0])
+#         else:
+#             pdb.set_trace()
+#             ...
 
-    raise ValueError(f'Tried to prepare callable expression with unrecognized type {type(ast)}')
+#     raise ValueError(f'Tried to prepare callable expression with unrecognized type {type(ast)}')
 
 
-def to_call_args(ast:AST) -> Array:
-    if isinstance(ast, Void):
-        return Array([])
+# def to_call_args(ast:AST) -> Array:
+#     if isinstance(ast, Void):
+#         return Array([])
     
-    if isinstance(ast, Tuple):
-        return Array(ast.exprs)
+#     if isinstance(ast, Tuple):
+#         return Array(ast.exprs)
 
-    #TODO: some sort of check that ast is a valid single type...?
-    return Array([ast])
+#     #TODO: some sort of check that ast is a valid single type...?
+#     return Array([ast])
     
     
 
-def is_callable(ast:AST, scope:Scope) -> bool:
-    #TODO: make calling typeof on an AST more robust/handle this better
+# def is_callable(ast:AST, scope:Scope) -> bool:
+#     #TODO: make calling typeof on an AST more robust/handle this better
 
-    if isinstance(ast, Identifier):
-        #check the type of the identifier in the scope
-        if (val:=scope.get(ast.name, undefined)) is not undefined:
-            return Type.is_instance(val.type, Callable.type)
-        raise ValueError(f'Could not check is_callable. Identifier `{ast}` was undefined in scope.')
+#     if isinstance(ast, Identifier):
+#         #check the type of the identifier in the scope
+#         if (val:=scope.get(ast.name, undefined)) is not undefined:
+#             return Type.is_instance(val.type, Callable.type)
+#         raise ValueError(f'Could not check is_callable. Identifier `{ast}` was undefined in scope.')
 
-    # check if directly callable
-    if isinstance(ast, Callable):
-        return True
+#     # check if directly callable
+#     if isinstance(ast, Callable):
+#         return True
     
-    # Non-callable types
-    if isinstance(ast, (Number, String, IString)):
-        return False
+#     # Non-callable types
+#     if isinstance(ast, (Number, String, IString)):
+#         return False
 
-    # TODO: hacky way of dealing with blocks...
-    if isinstance(ast, Block):
-        if len(ast.exprs) == 1:
-            return is_callable(ast.exprs[0], scope)
-        else:
-            pdb.set_trace()
-            ...
+#     # TODO: hacky way of dealing with blocks...
+#     if isinstance(ast, Block):
+#         if len(ast.exprs) == 1:
+#             return is_callable(ast.exprs[0], scope)
+#         else:
+#             pdb.set_trace()
+#             ...
     
-    if isinstance(ast, PrototypeAST):
-        raise NotImplementedError(f"Currently haven't handled is_callable for case of {type(ast)}")
+#     if isinstance(ast, PrototypeAST):
+#         raise NotImplementedError(f"Currently haven't handled is_callable for case of {type(ast)}")
         
     
 
-    #other cases, e.g. function literals. should be able to use the AST type checking method at this point
-    pdb.set_trace()
-    ...
+#     #other cases, e.g. function literals. should be able to use the AST type checking method at this point
+#     pdb.set_trace()
+#     ...
 
 # don't need is_multipliable, because that is just the default case.
 # also don't have to worry about the user making custom callable types not being parsed correctly,
@@ -566,8 +566,8 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
                 return Mul(left, right)
 
         case Operator_t(op='='):
-            if isinstance(left, Identifier):
-                return Bind(left.name, right)
+            if isinstance(left, Identifier) or isinstance(left, Declare):
+                return Bind(left, right)
             else:
                 #TODO: handle other cases, e.g. a.b, a[b], etc.
                 #      probably make bind take str|AST as the left-hand-side target
