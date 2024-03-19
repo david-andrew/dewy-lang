@@ -186,6 +186,7 @@ class DeclarationType(Enum):
 
 
 class Scope():
+    _empty = None
 
     @dataclass
     class _var():
@@ -257,6 +258,13 @@ class Scope():
         s.vars = self.vars.copy()
         return s
 
+    # TODO: would be nice if this was read-only, i.e. no declaring or binding allowed
+    @staticmethod
+    def empty():
+        if Scope._empty is None:
+            Scope._empty = Scope()
+        return Scope._empty
+
     @staticmethod
     def default():
         """return a scope with the standard library (of builtins) included"""
@@ -272,7 +280,7 @@ class Scope():
                 [Declare(DeclarationType.DEFAULT, 'text', Type('string'))],
                 [],
                 PyAction(pyprint, Type('void')),
-                Scope()
+                Scope.empty()
             )
         )
 
@@ -286,7 +294,7 @@ class Scope():
                 [Declare(DeclarationType.DEFAULT, 'text', Type('string'))],
                 [],
                 PyAction(pyprintl, Type('void')),
-                Scope()
+                Scope.empty()
             )
         )
 
@@ -295,7 +303,7 @@ class Scope():
         root.declare(
             DeclarationType.LOCAL_CONST,
             'readl',
-            Function([], [], PyAction(pyreadl, Type('string')), Scope())
+            Function([], [], PyAction(pyreadl, Type('string')), Scope.empty())
         )
 
         # TODO: eventually add more builtins
