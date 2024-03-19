@@ -219,7 +219,7 @@ class Scope():
     #     ...
 
     def get(self, name: str, default: AST = None) -> AST:
-        pdb.set_trace()
+        # pdb.set_trace()
         # get a variable from this scope or any of its parents
         for s in self:
             if name in s.vars:
@@ -278,38 +278,31 @@ class Scope():
         def pyprint(scope: 'Scope'):
             print(scope.get('text').to_string(scope).val, end='')
             return void
-        root.declare(
-            DeclarationType.LOCAL_CONST,
-            'print',
-            Function(
-                [Declare(DeclarationType.DEFAULT, 'text', Type('string'))],
-                [],
-                PyAction(pyprint, Type('void')),
-                Scope.empty()
-            )
+        pyprint_ast = Function(
+            [Declare(DeclarationType.DEFAULT, 'text', Type('string'))],
+            [],
+            PyAction(pyprint, Type('void')),
+            Scope.empty()
         )
+        root.declare(DeclarationType.LOCAL_CONST, 'print', pyprint_ast.typeof(root), pyprint_ast)
+
 
         def pyprintl(scope: 'Scope'):
             print(scope.get('text').to_string(scope).val)
             return void
-        root.declare(
-            DeclarationType.LOCAL_CONST,
-            'printl',
-            Function(
-                [Declare(DeclarationType.DEFAULT, 'text', Type('string'))],
-                [],
-                PyAction(pyprintl, Type('void')),
-                Scope.empty()
-            )
+        pyprintl_ast = Function(
+            [Declare(DeclarationType.DEFAULT, 'text', Type('string'))],
+            [],
+            PyAction(pyprintl, Type('void')),
+            Scope.empty()
         )
+        root.declare(DeclarationType.LOCAL_CONST, 'printl', pyprintl_ast.typeof(root), pyprintl_ast)
+
 
         def pyreadl(scope: 'Scope'):
             return String(input())
-        root.declare(
-            DeclarationType.LOCAL_CONST,
-            'readl',
-            Function([], [], PyAction(pyreadl, Type('string')), Scope.empty())
-        )
+        pyreadl_ast = Function([], [], PyAction(pyreadl, Type('string')), Scope.empty())
+        root.declare(DeclarationType.LOCAL_CONST, 'readl', pyreadl_ast.typeof(root), pyreadl_ast)
 
         # TODO: eventually add more builtins
 
@@ -674,16 +667,9 @@ class FunctionLiteral(AST):
 class Function(AST):
     def __init__(self, args: list[Declare], kwargs: list[Bind], body: AST, decl_scope: Scope):
 
-        # ensure all args have no default values, and all kwargs have default values
-        try:
-            arg_names = {arg.name for arg in args}
-            kwarg_names = {kwarg.target.name for kwarg in kwargs}
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            pdb.set_trace()
-
         # ensure no duplicate names
+        arg_names = {arg.name for arg in args}
+        kwarg_names = {kwarg.target.name for kwarg in kwargs}
         assert arg_names.isdisjoint(kwarg_names), f'args and kwargs cannot share any names. Names found in both: {
             arg_names & kwarg_names}'
 
@@ -696,16 +682,16 @@ class Function(AST):
     def partial_eval(self, update: list[Bind]):
         # update the args/kwargs with the new values
         assert all(u.value is not void for u in update), f'cannot partially evaluate with void values. Update: {update}'
+        assert all(isinstance(u.target, Identifier) for u in update), f'can only partially evaluate with identifiers, not declarations. Update: {update}'
         for u in update:
-            arg_names = [arg.name for arg in self.args]
             try:
-                i = arg_names.index(u.name)
+                arg_names = [arg.name for arg in self.args]
+                i = arg_names.index(u.target.name) # raises ValueError if not found
                 decl = self.args.pop(i)
-                decl.value = u.value
-                self.kwargs.append(decl)
+                self.kwargs.append(Bind(decl, u.value))
             except ValueError:
-                kwarg_names = [kwarg.name for kwarg in self.kwargs]
-                i = kwarg_names.index(u.name)
+                kwarg_names = [kwarg.target.name for kwarg in self.kwargs]
+                i = kwarg_names.index(u.target.name)
                 self.kwargs[i].value = u.value
 
     def eval(self, scope: Scope) -> AST:
@@ -715,8 +701,12 @@ class Function(AST):
         pdb.set_trace()
 
     def typeof(self, scope: Scope):
-        pdb.set_trace()
+        #TODO: make this include arg types and return type
+        return Type('callable')
+        # argtypes = [arg.typeof(scope) for arg in self.args]
+        # kwargtypes = [kwarg.typeof(scope) for kwarg in self.kwargs]
         # something to do with body.typeof(), but need to allow any argument types to also come into play
+        # honestly gets complicated especially with parametric types, etc.
 
     def treestr(self, indent=0):
         s = tab * indent + 'Function\n'

@@ -560,14 +560,10 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
 
     match op:
         case Juxtapose_t():
-            pdb.set_trace()
-            if is_callable(left, scope): #callable includes Function, FunctionLiteral, AtHandle, PyAction, and ID that points to one of these
-                fn = to_callable(left)
-                args = to_call_args(right)
-                return Call(fn, args)
+            if left.typeof(scope).name == 'callable': #TODO: want to make use of Type.is_instance here
+                return CallWithArgs(left, right)
             else:
-                # assume left/right are multipliable
-                return Mul(left, right, None)
+                return Mul(left, right)
 
         case Operator_t(op='='):
             if isinstance(left, Identifier):
