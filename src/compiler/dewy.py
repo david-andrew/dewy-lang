@@ -109,6 +109,11 @@ class Type(AST):
         pdb.set_trace()
 
 
+# TODO: turn into a singleton...
+# untyped type for when a declaration doesn't specify a type
+untyped = Type('untyped')
+
+
 class Undefined(AST):
     """undefined singleton"""
 
@@ -174,7 +179,7 @@ void = Void()
 class DeclarationType(Enum):
     LET = auto()
     CONST = auto()
-    CONST_LOCAL = auto()
+    LOCAL_CONST = auto()
 
 
 class Scope():
@@ -182,41 +187,48 @@ class Scope():
     @dataclass
     class _var():
         # name:str #name is stored in the dict key
+        decltype: DeclarationType
         type: AST
         value: AST
-        decltype: DeclarationType
 
     def __init__(self, parent: 'Scope|None' = None):
         self.parent = parent
         self.vars: dict[str, Scope._var] = {}
-        self.combos: dict[tuple[list[str], ...], Function] = {}
-
-        # used for function calls
-        # TODO: from now on, we just make a new scope for holding args
-        # self.args: Array | None = None
+        # self.combos: dict[tuple[list[str], ...], Function] = {} #TODO: mainly for handling unit combo identifiers such, e.g. <kilo><gram>
 
     @property
     def root(self) -> 'Scope':
         """Return the root scope"""
         return [*self][-1]
 
-    def const(self, name: str, type: 'Type|Undefined', value: AST, local: bool = False):
-        pdb.set_trace()
-        self.vars[name] = Scope._var(type, value, True, local)
+    def declare(self, decltype: DeclarationType, name: str, type: Type, value: AST = undefined):
+        if name in self.vars:
+            pdb.set_trace()  # TODO: are there circumstances overwriting an existing variable is allowed? e.g. if it was LET?
+            raise NameError(f'Cannot redeclare "{name}". already exists in scope {self} with value {self.vars[name]}')
+        self.vars[name] = Scope._var(decltype, type, value)
 
-    # def let(self, name: str, type: 'Type|Undefined', value: AST, const: bool):
-    def let(self, name: str, type: 'Type|Undefined', value: AST, local: bool = False):
-        pdb.set_trace()
-        # overwrite anything that might have previously been there
-        self.vars[name] = Scope._var(type, value, False, local)
+    # def const(self, name: str, type: 'Type|Undefined', value: AST = undefined):
+    #     if name in self.vars:
+    #         pdb.set_trace()
+    #         raise NameError(f'Cannot redeclare "{name}". already exists in scope {self} with value {self.vars[name]}')
+    #     self.vars[name] = Scope._var(DeclarationType.CONST, type, value)
 
-    def alias(self, name: str, value: AST):
-        pdb.set_trace()
-        ...
+    # # def let(self, name: str, type: 'Type|Undefined', value: AST, const: bool):
+    # def let(self, name: str, type: 'Type|Undefined', value: AST = undefined):
+    #     if name in self.vars:
+    #         pdb.set_trace()
+    #         raise NameError(f'Cannot redeclare "{name}". already exists in scope {self} with value {self.vars[name]}')
+    #     self.vars[name] = Scope._var(DeclarationType.LET, type, value)
 
-    def combo(self, *names: dict[str, AST], postprocess: PyCallable[[list[AST]], AST]):
-        pdb.set_trace()
-        ...
+    # def local_const(self, name: str, type: 'Type|Undefined', value: AST = undefined):
+    #     if name in self.vars:
+    #         pdb.set_trace()
+    #         raise NameError(f'Cannot redeclare "{name}". already exists in scope {self} with value {self.vars[name]}')
+    #     self.vars[name] = Scope._var(DeclarationType.LOCAL_CONST, type, value)
+
+    # def combo(self, *names: dict[str, AST], postprocess: PyCallable[[list[AST]], AST]):
+    #     pdb.set_trace()
+    #     ...
 
     def get(self, name: str, default: AST = None) -> AST:
         pdb.set_trace()
@@ -268,20 +280,120 @@ class Scope():
         def pyprint(scope: 'Scope'):
             print(scope.get('text').to_string(scope).val, end='')
             return void
-        root.bind('print', Function([Declare('text', Type('string'), void)], [], PyAction(pyprint, Type('void'))))
+        root.declare(
+            DeclarationType.LOCAL_CONST,
+            'print',
+            Function(
+                [Declare(DeclarationType.CONST, 'text', Type('string'))],
+                [],
+                PyAction(pyprint, Type('void')),
+                Scope()
+            )
+        )
 
         def pyprintl(scope: 'Scope'):
             print(scope.get('text').to_string(scope).val)
             return void
-        root.bind('printl', Function([Declare('text', Type('string'), void)], [], PyAction(pyprintl, Type('void'))))
+        root.declare(
+            DeclarationType.LOCAL_CONST,
+            'printl',
+            Function(
+                [Declare(DeclarationType.CONST, 'text', Type('string'))],
+                [],
+                PyAction(pyprintl, Type('void')),
+                Scope()
+            )
+        )
 
         def pyreadl(scope: 'Scope'):
             return String(input())
-        root.bind('readl', Function([], [], PyAction(pyreadl, Type('string'))))
+        root.declare(
+            DeclarationType.LOCAL_CONST,
+            'readl',
+            Function([], [], PyAction(pyreadl, Type('string')), Scope())
+        )
 
         # TODO: eventually add more builtins
 
         return root
+
+
+class Identifier(AST):
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __str__(self) -> str:
+        return f'{self.name}'
+
+    def __repr__(self) -> str:
+        return f'Identifier({self.name})'
+
+    def eval(self, scope: Scope) -> AST:
+        return scope.get(self.name).eval(scope)
+
+    def typeof(self, scope: Scope) -> Type:
+        return scope.get(self.name).typeof(scope)
+
+    def treestr(self, prefix='') -> str:
+        return prefix + f'Identifier: {self.name}'
+
+    def to_string(self, scope: Scope) -> 'String':
+        pdb.set_trace()
+        # return String(self.name)
+        return self.eval(scope).to_string(scope)
+
+
+class Declare(AST):
+    # TODO: allow unpack as option in addition to single name
+    def __init__(self, decltype: DeclarationType, name: str, type: Type = untyped):
+        self.decltype = decltype
+        self.name = name
+        self.type = type
+
+    def eval(self, scope: Scope):
+        scope.declare(self.decltype, self.name, self.type)
+
+    def treestr(self, indent=0):
+        return f'{tab * indent}{"Const" if self.const else "Let"}: {self.name}\n{self.type.treestr(indent + 1)}'
+
+    def to_string(self, scope: Scope) -> 'String':
+        raise ValueError('cannot convert void expression Declare to a string')
+
+    def typeof(self, scope: Scope) -> Type:
+        return void.typeof(scope)
+
+    def __str__(self):
+        return f'{self.decltype.name.lower()} {self.name}:{self.type}'
+
+    def __repr__(self):
+        return f'Declare({self.decltype.name}, {self.name}, {self.type})'
+
+
+class Bind(AST):
+    # TODO: allow bind to take in an unpack structure
+    def __init__(self, target: Declare | Identifier, value: AST):
+        self.target = target
+        self.value = value
+
+    def eval(self, scope: Scope):
+        if isinstance(self.target, Declare):
+            self.target.eval(scope)
+        else:
+            try:
+                scope.get(self.target.name)
+            except NameError:
+                Declare(DeclarationType.CONST, self.target.name).eval(scope)
+
+        scope.bind(self.target.name, self.value.eval(scope))
+
+    def treestr(self, indent=0):
+        return f'{tab * indent}Bind: {self.name}\n{self.value.treestr(indent + 1)}'
+
+    def __str__(self):
+        return f'{self.target} = {self.value}'
+
+    def __repr__(self):
+        return f'Bind({self.target!r}, {self.value!r})'
 
 
 class Orderable(AST):
@@ -370,75 +482,6 @@ class PyAction(AST):
 
     def __repr__(self):
         return f'PyAction({self.action}, {self.return_type})'
-
-
-class Identifier(AST):
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    def __str__(self) -> str:
-        return f'{self.name}'
-
-    def __repr__(self) -> str:
-        return f'Identifier({self.name})'
-
-    def eval(self, scope: Scope) -> AST:
-        return scope.get(self.name)
-
-    def typeof(self, scope: Scope) -> Type:
-        pdb.set_trace()
-
-    def treestr(self, prefix='') -> str:
-        return prefix + f'Identifier: {self.name}'
-
-    def to_string(self, scope: Scope) -> 'String':
-        return String(self.name)
-
-
-class Declare(AST):
-    def __init__(self, name: str, type: Type, value: AST = undefined, const=False, caseless=False):
-        self.name = name
-        self.type = type
-        self.value = value
-        self.const = const
-        self.caseless = caseless  # does case matter when looking up this variable?
-
-    def eval(self, scope: Scope = None):
-        scope.let(self.name, self.type, self.value, self.const, self.caseless)
-
-    def treestr(self, indent=0):
-        return f'{tab * indent}{"Const" if self.const else "Let"}: {self.name}\n{self.type.treestr(indent + 1)}'
-
-    def to_string(self, scope: Scope) -> 'String':
-        raise ValueError('cannot convert void expression Declare to a string')
-
-    def typeof(self, scope: Scope) -> Type:
-        return Type('void')
-
-    def __str__(self):
-        return f'{"const" if self.const else "let"} {self.name}:{self.type} = {self.value}'
-
-    def __repr__(self):
-        return f'{"Const" if self.const else "Let"}({self.name}, {self.type}, {self.value})'
-
-
-class Bind(AST):
-    # TODO: allow bind to take in an unpack structure
-    def __init__(self, name: str, value: AST):
-        self.name = name
-        self.value = value
-
-    def eval(self, scope: Scope = None):
-        scope.bind(self.name, self.value.eval(scope))
-
-    def treestr(self, indent=0):
-        return f'{tab * indent}Bind: {self.name}\n{self.value.treestr(indent + 1)}'
-
-    def __str__(self):
-        return f'{self.name} = {self.value}'
-
-    def __repr__(self):
-        return f'Bind({self.name}, {repr(self.value)})'
 
 
 class Array(Iterable, Unpackable):
@@ -621,7 +664,7 @@ class IString(AST):
 #         return s
 
 class FunctionLiteral(AST):
-    def __init__(self, args: list[Declare], kwargs: list[Declare], body: AST):
+    def __init__(self, args: list[Declare], kwargs: list[Bind], body: AST):
         self.args = args
         self.kwargs = kwargs
         self.body = body
@@ -631,13 +674,16 @@ class FunctionLiteral(AST):
 
 
 class Function(AST):
-    def __init__(self, args: list[Declare], kwargs: list[Declare], body: AST, decl_scope: Scope):
+    def __init__(self, args: list[Declare], kwargs: list[Bind], body: AST, decl_scope: Scope):
 
         # ensure all args have no default values, and all kwargs have default values
-        assert all(arg.value is void for arg in args), 'args cannot have default values'
-        assert all(kwarg.value is not void for kwarg in kwargs), 'kwargs must have default values'
-        arg_names = {arg.name for arg in args}
-        kwarg_names = {kwarg.name for kwarg in kwargs}
+        try:
+            arg_names = {arg.name for arg in args}
+            kwarg_names = {kwarg.target.name for kwarg in kwargs}
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            pdb.set_trace()
 
         # ensure no duplicate names
         assert arg_names.isdisjoint(kwarg_names), f'args and kwargs cannot share any names. Names found in both: {
