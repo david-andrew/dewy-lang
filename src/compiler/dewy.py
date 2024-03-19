@@ -181,6 +181,9 @@ class DeclarationType(Enum):
     CONST = auto()
     LOCAL_CONST = auto()
 
+    # default for binding without declaring
+    DEFAULT = CONST
+
 
 class Scope():
 
@@ -206,25 +209,6 @@ class Scope():
             pdb.set_trace()  # TODO: are there circumstances overwriting an existing variable is allowed? e.g. if it was LET?
             raise NameError(f'Cannot redeclare "{name}". already exists in scope {self} with value {self.vars[name]}')
         self.vars[name] = Scope._var(decltype, type, value)
-
-    # def const(self, name: str, type: 'Type|Undefined', value: AST = undefined):
-    #     if name in self.vars:
-    #         pdb.set_trace()
-    #         raise NameError(f'Cannot redeclare "{name}". already exists in scope {self} with value {self.vars[name]}')
-    #     self.vars[name] = Scope._var(DeclarationType.CONST, type, value)
-
-    # # def let(self, name: str, type: 'Type|Undefined', value: AST, const: bool):
-    # def let(self, name: str, type: 'Type|Undefined', value: AST = undefined):
-    #     if name in self.vars:
-    #         pdb.set_trace()
-    #         raise NameError(f'Cannot redeclare "{name}". already exists in scope {self} with value {self.vars[name]}')
-    #     self.vars[name] = Scope._var(DeclarationType.LET, type, value)
-
-    # def local_const(self, name: str, type: 'Type|Undefined', value: AST = undefined):
-    #     if name in self.vars:
-    #         pdb.set_trace()
-    #         raise NameError(f'Cannot redeclare "{name}". already exists in scope {self} with value {self.vars[name]}')
-    #     self.vars[name] = Scope._var(DeclarationType.LOCAL_CONST, type, value)
 
     # def combo(self, *names: dict[str, AST], postprocess: PyCallable[[list[AST]], AST]):
     #     pdb.set_trace()
@@ -252,8 +236,9 @@ class Scope():
                 var.value = value
                 return
 
+        # TODO: consider what the declaration type default should be. Or maybe we just disallow binding to undeclared variables
         # otherwise just create a new instance of the variable
-        self.vars[name] = Scope._var(undefined, value, False)
+        self.vars[name] = Scope._var(DeclarationType.DEFAULT, untyped, value)
 
     def __iter__(self):
         """return an iterator that walks up each successive parent scope. Starts with self"""
@@ -284,7 +269,7 @@ class Scope():
             DeclarationType.LOCAL_CONST,
             'print',
             Function(
-                [Declare(DeclarationType.CONST, 'text', Type('string'))],
+                [Declare(DeclarationType.DEFAULT, 'text', Type('string'))],
                 [],
                 PyAction(pyprint, Type('void')),
                 Scope()
@@ -298,7 +283,7 @@ class Scope():
             DeclarationType.LOCAL_CONST,
             'printl',
             Function(
-                [Declare(DeclarationType.CONST, 'text', Type('string'))],
+                [Declare(DeclarationType.DEFAULT, 'text', Type('string'))],
                 [],
                 PyAction(pyprintl, Type('void')),
                 Scope()
@@ -345,7 +330,7 @@ class Identifier(AST):
 
 class Declare(AST):
     # TODO: allow unpack as option in addition to single name
-    def __init__(self, decltype: DeclarationType, name: str, type: Type = untyped):
+    def __init__(self, decltype: DeclarationType, name: str, type: Type):
         self.decltype = decltype
         self.name = name
         self.type = type
@@ -382,7 +367,7 @@ class Bind(AST):
             try:
                 scope.get(self.target.name)
             except NameError:
-                Declare(DeclarationType.CONST, self.target.name).eval(scope)
+                Declare(DeclarationType.DEFAULT, self.target.name, untyped).eval(scope)
 
         scope.bind(self.target.name, self.value.eval(scope))
 
