@@ -195,10 +195,11 @@ class Scope():
         type: AST
         value: AST
 
-    def __init__(self, parent: 'Scope|None' = None):
+    def __init__(self, parent: 'Scope|None' = None, readonly=False):
         self.parent = parent
         self.vars: dict[str, Scope._var] = {}
         # self.combos: dict[tuple[list[str], ...], Function] = {} #TODO: mainly for handling unit combo identifiers such, e.g. <kilo><gram>
+        self.readonly = readonly
 
     @property
     def root(self) -> 'Scope':
@@ -206,6 +207,8 @@ class Scope():
         return [*self][-1]
 
     def declare(self, decltype: DeclarationType, name: str, type: Type, value: AST = undefined):
+        if self.readonly:
+            raise ValueError(f'cannot declare in a readonly scope')
         if name in self.vars:
             pdb.set_trace()  # TODO: are there circumstances overwriting an existing variable is allowed? e.g. if it was LET?
             raise NameError(f'Cannot redeclare "{name}". already exists in scope {self} with value {self.vars[name]}')
@@ -226,6 +229,8 @@ class Scope():
         raise NameError(f'{name} not found in scope {self}')
 
     def bind(self, name: str, value: AST):
+        if self.readonly:
+            raise ValueError(f'cannot bind in a readonly scope')
         pdb.set_trace()  # dealing with local, alias, etc. other cases
         # update an existing variable in this scope or  any of the parent scopes
         for s in self:
@@ -253,16 +258,16 @@ class Scope():
             return f'Scope({self.vars}, {repr(self.parent)})'
         return f'Scope({self.vars})'
 
-    def copy(self):
-        s = Scope(self.parent)
-        s.vars = self.vars.copy()
-        return s
+    # def copy(self):
+    #     s = Scope(self.parent)
+    #     s.vars = self.vars.copy()
+    #     return s
 
     # TODO: would be nice if this was read-only, i.e. no declaring or binding allowed
     @staticmethod
     def empty():
         if Scope._empty is None:
-            Scope._empty = Scope()
+            Scope._empty = Scope(readonly=True)
         return Scope._empty
 
     @staticmethod
