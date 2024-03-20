@@ -275,7 +275,7 @@ class Scope():
         """return a scope with the standard library (of builtins) included"""
         root = Scope()
 
-        def pyprint(scope: 'Scope'):
+        def pyprint(scope: Scope):
             print(scope.get('text').to_string(scope).val, end='')
             return void
         pyprint_ast = Function(
@@ -286,8 +286,7 @@ class Scope():
         )
         root.declare(DeclarationType.LOCAL_CONST, 'print', pyprint_ast.typeof(root), pyprint_ast)
 
-
-        def pyprintl(scope: 'Scope'):
+        def pyprintl(scope: Scope):
             print(scope.get('text').to_string(scope).val)
             return void
         pyprintl_ast = Function(
@@ -298,8 +297,7 @@ class Scope():
         )
         root.declare(DeclarationType.LOCAL_CONST, 'printl', pyprintl_ast.typeof(root), pyprintl_ast)
 
-
-        def pyreadl(scope: 'Scope'):
+        def pyreadl(scope: Scope):
             return String(input())
         pyreadl_ast = Function([], [], PyAction(pyreadl, Type('string')), Scope.empty())
         root.declare(DeclarationType.LOCAL_CONST, 'readl', pyreadl_ast.typeof(root), pyreadl_ast)
@@ -619,49 +617,14 @@ class IString(AST):
         return f'IString({repr(self.parts)})'
 
 
-# class Arg:
-#     def __init__(self, name: str, type: Type = None):
-#         self.name = name
-#         self.type = type
+# class FunctionLiteral(AST):
+#     def __init__(self, args: list[Declare], kwargs: list[Bind], body: AST):
+#         self.args = args
+#         self.kwargs = kwargs
+#         self.body = body
 
-#     def __str__(self):
-#         s = f'{self.name}'
-#         if self.type is not None:
-#             s += f':{self.type}'
-#         return s
-
-#     def __repr__(self):
-#         s = f'Arg({self.name}'
-#         if self.type is not None:
-#             s += f', {repr(self.type)}'
-#         s += ')'
-#         return s
-
-# class Kwarg(Arg):
-#     def __init__(self, name: str, type: Type = None, val: AST | None = None):
-#         super().__init__(name, type)
-#         self.val = val
-
-#     def __str__(self):
-#         s = super().__str__()
-#         if self.val is not None:
-#             s += f' = {self.val}'
-#         return s
-
-#     def __repr__(self):
-#         s = super().__repr__()
-#         if self.val is not None:
-#             s = s[:-1] + f', {repr(self.val)})'
-#         return s
-
-class FunctionLiteral(AST):
-    def __init__(self, args: list[Declare], kwargs: list[Bind], body: AST):
-        self.args = args
-        self.kwargs = kwargs
-        self.body = body
-
-    def eval(self, scope: Scope) -> 'Function':
-        return Function(self.args, self.kwargs, self.body, scope)
+#     def eval(self, scope: Scope) -> 'Function':
+#         return Function(self.args, self.kwargs, self.body, scope)
 
 
 class Function(AST):
@@ -682,11 +645,12 @@ class Function(AST):
     def partial_eval(self, update: list[Bind]):
         # update the args/kwargs with the new values
         assert all(u.value is not void for u in update), f'cannot partially evaluate with void values. Update: {update}'
-        assert all(isinstance(u.target, Identifier) for u in update), f'can only partially evaluate with identifiers, not declarations. Update: {update}'
+        assert all(isinstance(u.target, Identifier)
+                   for u in update), f'can only partially evaluate with identifiers, not declarations. Update: {update}'
         for u in update:
             try:
                 arg_names = [arg.name for arg in self.args]
-                i = arg_names.index(u.target.name) # raises ValueError if not found
+                i = arg_names.index(u.target.name)  # raises ValueError if not found
                 decl = self.args.pop(i)
                 self.kwargs.append(Bind(decl, u.value))
             except ValueError:
@@ -701,7 +665,7 @@ class Function(AST):
         pdb.set_trace()
 
     def typeof(self, scope: Scope):
-        #TODO: make this include arg types and return type
+        # TODO: make this include arg types and return type
         return Type('callable')
         # argtypes = [arg.typeof(scope) for arg in self.args]
         # kwargtypes = [kwarg.typeof(scope) for kwarg in self.kwargs]
@@ -729,7 +693,18 @@ class Function(AST):
 
 class AtHandle(AST):
     def __init__(self, id: Identifier):
+        # TODO: identifier must be a function or other callable...
         self.id = id
 
     def eval(self, scope: Scope) -> Identifier:
+        pdb.set_trace()
         return self.id
+
+
+class CallWithArgs(AST):
+    def __init__(self, fn: AST, args: list[Declare], kwargs: list[Bind]):
+        self.fn = fn
+        self.args = args
+
+    def eval(self, scope: Scope):
+        pdb.set_trace()
