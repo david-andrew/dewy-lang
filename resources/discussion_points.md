@@ -1575,7 +1575,7 @@ in general memory safety is a given but other areas not handled by rust are impo
 - https://www.ibm.com/reports/threat-intelligence
 - jonathan blow on mitigating buffer overflow risks: https://www.youtube.com/watch?v=EJRdXxS_jqo
 
-## functions that capture external variables, specifying what variables they capture
+## closure explicit syntax for specifying what variables they capture
 
 In C++, you can have a lambda that captures specific variables from the parent scope (perhaps not exactly correct syntax, from jonathan blow talk on about his hypothetical language):
 
@@ -1589,10 +1589,20 @@ This is an interesting idea. As is, in dewy, functions have available to them al
 let y = 5
 let z = 10
 
-lef f = (x:float, #capture[y]) => x + y
+let f = (x:float, #capture[y]) => x + y
 
 let g = (x:float, #capture_all) => x + y + z
 // let g = (x:float, #capture[y, z]) => x + y + z
+
+// alternative syntax
+let f = ([y], x:float) => x + y
+let g = ([y, z], x:float) => x + y + z
+let g = ([#all], x:float) => x + y + z
+
+
+// jonathon blow suggests specifying the capture as part of the body rather than the function type
+let f = (x:float) => #capture[y]{ x + y }
+let g = (x:float) => #capture_all{ x + y + z }
 ```
 
 More thought needed on the actual syntax, but I do think it's an important feature
