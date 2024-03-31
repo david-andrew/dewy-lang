@@ -1517,7 +1517,6 @@ alias m = meter
 
 ~~Ideally aliases and combination identifiers would play nice with each other, e.g. you could define all the written-out units+prefixes as a combo, and then set up aliases for each of them (e.g. the abbreviation, plural versions, etc), and it would all just work out~~
 
-
 Aliases are not actually going to be a thing. Instead you can effectively create an alias by binding to a zero-argument function, e.g.
 
 ```dewy
@@ -1529,6 +1528,7 @@ let m = () => meter
 Since zero-arg functions can be called without parenthesis, it functions identically to how an alias might work. This is nice because it is very clear how the aliasing mechanics work, as a consequence of normal let/const declarations and function closures.
 
 ## Let, Const, Local
+
 The declaration keywords all have to do with what happens when trying to assign a value without the keyword
 
 ```dewy
@@ -1554,6 +1554,7 @@ z = 6 // not allowed, compile time error
 Local is useful for standard library values that users might want to use the same identifier for for a different purpose. E.g. `i`, `j`, `k` which by default are quaternion units, but user's frequently use them as loop indices. So at the standard library level, `i`, `j`, `k` would be declared as `local`.
 
 Perhaps there is a better name instead of `local` though. `shadow`? Basically want something that explains that it is const, but can be overwritten in lower scopes. Other options are:
+
 - `shadowable`
 - `localconst`
 - `constlocal`
@@ -1564,11 +1565,34 @@ Perhaps there is a better name instead of `local` though. `shadow`? Basically wa
 - `scopeconst`
 - `hereconst`
 
-
-
 ## Security design
+
 TODO
 in general memory safety is a given but other areas not handled by rust are important to consider:
+
 - https://www.horizon3.ai/attack-research/attack-blogs/analysis-of-2023s-known-exploited-vulnerabilities/
 - https://owasp.org/www-project-top-ten/
 - https://www.ibm.com/reports/threat-intelligence
+- jonathan blow on mitigating buffer overflow risks: https://www.youtube.com/watch?v=EJRdXxS_jqo
+
+## functions that capture external variables, specifying what variables they capture
+
+In C++, you can have a lambda that captures specific variables from the parent scope (perhaps not exactly correct syntax, from jonathan blow talk on about his hypothetical language):
+
+```cpp
+auto f = [y](float x) { return x + y; }
+```
+
+This is an interesting idea. As is, in dewy, functions have available to them all variables in the parent scope and up. But it might be a good idea to have a mechanism for restricting this to specific variables. Perhaps the default is access to all, or the default is access to none, and you have to opt in to access to all, or access to specific variables.
+
+```dewy
+let y = 5
+let z = 10
+
+lef f = (x:float, #capture[y]) => x + y
+
+let g = (x:float, #capture_all) => x + y + z
+// let g = (x:float, #capture[y, z]) => x + y + z
+```
+
+More thought needed on the actual syntax, but I do think it's an important feature
