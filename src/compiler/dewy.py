@@ -182,7 +182,7 @@ class DeclarationType(Enum):
     LOCAL_CONST = auto()
 
     # default for binding without declaring
-    DEFAULT = CONST
+    DEFAULT = LET
 
 
 class Scope():

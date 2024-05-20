@@ -926,7 +926,16 @@ simply doing `name = value` may or may not be allowed depending on if name is al
 
 To put it another way, `name = value` is sort of equivalent to `create_or_overwrite name = value`. perhaps we'll even have `create_or_overwrite` used internally, and `name = value` is just syntactic sugar for it
 
-## Precedence of comma vs assignment [leaning towards requiring parenthesis around default function arguments, e.g. `foo = a,(b=1),(c=2) => a+b+c`, e.g. `foo123 = @foo((a=1),(b=2),(c=3))`] But actually NEEDS MORE THOUGHT
+## Precedence of comma vs assignment [conservative: comma has lower precedence than equals |OR| liberal: get rid of commas altogether and use space separation (or commas are optional)]. Maybe have it be easy to toggle between the two while parsing, to test which feels better
+
+All the below discussion is old. It basically comes down to 2 options:
+
+- comma has lower precedence than equals. Any cases where that is a problem, we wrap the expression in parenthesis
+- comma has higher precedence than equals. we have a paradigm shift in syntax, where we just don't use commas is all cases, and instead use spaces. commas could be optional, and have the higher precedence than equals
+
+The first case is better because it keeps the language closer to what people are used to, while only introducing a bit of inflexibility. I think case 2 definitely has some interesting possibilities, but it requires a pretty radical syntax shift. tbd if the syntax shift would feel natural / like dewy. Though it is true I have always been a bit uncertain about the point of the comma operator, since I've already removed from list/dict/etc. syntax.
+
+---
 
 There are situations when comma needs to have higher precedence than assignment, but also situations where it is the opposite:
 
@@ -936,6 +945,10 @@ foo = (a, b=1, c=2) => a+b+c
 
 //comma needs higher precedence
 a,b,c = 1,2,3
+
+//comma needs lower precedence
+myfunc = (a, b, c) => a+b+c
+myfunc2 = (c) => myfunc(a=1, b=2)
 ```
 
 possibly solved by making comma have lower precedence and requiring parenthesis in the second case:
@@ -995,8 +1008,14 @@ I think the best case is `foo = a:int, (b:int=1), (c:int=2) => a+b+c`.
 A somewhat radical take, but technically within the rules of the language is to use array literals for the argument list
 
 ```dewy
+// with list syntax
 foo = [a b=5] => a + b
 foo = [a:int b:int=5 c:int=10] => a + b + c
+foo(a=5 b=10)
+
+// or even just parentheses
+foo = (a b=5) => a + b
+foo = (a:int b:int=5 c:int=10) => a + b + c
 ```
 
 This is potentially better than requiring parenthesis:
@@ -1602,7 +1621,42 @@ let g = ([#all], x:float) => x + y + z
 
 // jonathon blow suggests specifying the capture as part of the body rather than the function type
 let f = (x:float) => #capture[y]{ x + y }
-let g = (x:float) => #capture_all{ x + y + z }
+//let g = (x:float) => #capture_all{ x + y + z } //I think this is default, and therefore redundant
+let g = (x:float) => #nocapture{ x + x*x + x*x*x }
 ```
 
 More thought needed on the actual syntax, but I do think it's an important feature
+
+## Compiletime execution
+
+I think jai has it 100% correct in that you can run any language feature at compile time.
+I'm thinking there could be 2 compiletime modes a user could select:
+
+- interpreted
+- jit-compiled
+
+Both would execute the code at compiletime, and have results available for use at runtime-baked into the executable. Under this framework, nothing would be run at compiletime unless explicitly specified by the user (as opposed to what I was previously thinking which was we would try to intelligently figure out what to precompute).
+
+I think the syntax might look something like this:
+
+```dewy
+main = () => {
+    let x = 5
+    let y = 6
+    let z = #pre{ x + y }
+    let q = #jit{ x + y }
+}
+```
+
+where `#jit` and `#pre` syntactically behave like functions applying to the expression on the right. `#pre` is the interpreted version of compiletime actions, while jit is the jit-compiled version. The results of the compiletime expressions are then baked into the executable, i.e. we would be compiling the following for runtime:
+
+```dewy
+main = () => {
+    let x = 5
+    let y = 6
+    let z = 11
+    let q = 11
+}
+```
+
+Also an orthogonal intersection with this; loading files is typically done by filename, but what if the user built a string at compiletime that would then be used to compile for runtime. I think that could be pretty powerful.
