@@ -67,5 +67,4 @@ def get_backend(name:str) -> Callable[[str, list[str]], None]:
 def get_version() -> str:
     """Return the semantic version of the language"""
     from pathlib import Path
-    with open(Path(__file__).parent.parent.parent / 'VERSION') as f:
-        return f.read().strip()
+    return (Path(__file__).parent.parent.parent / 'VERSION').read_text().strip()

@@ -48,15 +48,16 @@ import pdb
 
 
 class AST(ABC):
-    @abstractmethod
-    def eval(self, scope: 'Scope') -> 'AST':
-        """Evaluate the AST in the given scope, and return the result (as a dewy obj) if any"""
+    # TODO: add property to all ASTs for function complete/locked/etc. meaning it and all children are settled
+    # @abstractmethod
+    # def eval(self, scope: 'Scope') -> 'AST':
+    #     """Evaluate the AST in the given scope, and return the result (as a dewy obj) if any"""
     # @abstractmethod
     # def comp(self, scope: 'Scope') -> str:
     #     """TODO: future handle compiling an AST to LLVM IR"""
-    @abstractmethod
-    def typeof(self, scope: 'Scope') -> 'Type':
-        """Return the type of the object that would be returned by eval"""
+    # @abstractmethod
+    # def typeof(self, scope: 'Scope') -> 'Type':
+    #     """Return the type of the object that would be returned by eval"""
     @abstractmethod
     def treestr(self, prefix='') -> str:
         """Return a string representation of the AST tree"""
@@ -66,9 +67,9 @@ class AST(ABC):
     @abstractmethod
     def __repr__(self) -> str:
         """Return a string representation of the python objects making up the AST"""
-    @abstractmethod
-    def to_string(self, scope: 'Scope') -> 'String':
-        """Return a string representation of the AST. Used when automatically converting to string, e.g. in `printl`"""
+    # @abstractmethod
+    # def to_string(self, scope: 'Scope') -> 'String':
+    #     """Return a string representation of the AST. Used when automatically converting to string, e.g. in `printl`"""
 
 
 class Type(AST):
@@ -76,18 +77,18 @@ class Type(AST):
         self.name = name
         self.parameters = parameters or []
 
-    def eval(self, scope: 'Scope') -> 'Type':
-        return self
+    # def eval(self, scope: 'Scope') -> 'Type':
+    #     return self
 
-    def typeof(self, scope: 'Scope') -> 'Type':
-        return Type('type')
+    # def typeof(self, scope: 'Scope') -> 'Type':
+    #     return Type('type')
 
     def treestr(self, prefix='') -> str:
         pdb.set_trace()
         # return prefix + f'Type({self.name})'
 
-    def to_string(self, scope: 'Scope') -> 'String':
-        return String(self.__str__())
+    # def to_string(self, scope: 'Scope') -> 'String':
+    #     return String(self.__str__())
 
     def __str__(self) -> str:
         if self.parameters:
@@ -97,16 +98,16 @@ class Type(AST):
     def __repr__(self) -> str:
         return f'Type({self.name}, {self.parameters})'
 
-    def __eq__(self, other):
-        pdb.set_trace()
+    # def __eq__(self, other):
+    #     pdb.set_trace()
 
-    @staticmethod
-    def is_subtype(candidate: 'Type', type: 'Type') -> bool:
-        pdb.set_trace()
+    # @staticmethod
+    # def is_subtype(candidate: 'Type', type: 'Type') -> bool:
+    #     pdb.set_trace()
 
-    @staticmethod
-    def is_instance(scope: 'Scope', val: AST, type: 'Type') -> bool:
-        pdb.set_trace()
+    # @staticmethod
+    # def is_instance(scope: 'Scope', val: AST, type: 'Type') -> bool:
+    #     pdb.set_trace()
 
 
 # TODO: turn into a singleton...
@@ -122,17 +123,17 @@ class Undefined(AST):
             cls.instance = super(Undefined, cls).__new__(cls)
         return cls.instance
 
-    def eval(self, scope: 'Scope'):
-        return self
+    # def eval(self, scope: 'Scope'):
+    #     return self
 
-    def typeof(self, scope: 'Scope'):
-        return Type('undefined')
+    # def typeof(self, scope: 'Scope'):
+    #     return Type('undefined')
 
     def treestr(self, prefix='') -> str:
         return prefix + 'Undefined'
 
-    def to_string(self, scope: 'Scope') -> 'String':
-        return String('undefined')
+    # def to_string(self, scope: 'Scope') -> 'String':
+    #     return String('undefined')
 
     def __str__(self):
         return 'undefined'
@@ -153,17 +154,17 @@ class Void(AST):
             cls.instance = super(Void, cls).__new__(cls)
         return cls.instance
 
-    def eval(self, scope: 'Scope'):
-        return self
+    # def eval(self, scope: 'Scope'):
+    #     return self
 
-    def typeof(self, scope: 'Scope'):
-        return Type('void')
+    # def typeof(self, scope: 'Scope'):
+    #     return Type('void')
 
     def treestr(self, prefix=''):
         return prefix + 'Void'
 
-    def to_string(self, scope: 'Scope'):
-        return String('void')
+    # def to_string(self, scope: 'Scope'):
+    #     return String('void')
 
     def __str__(self):
         return 'void'
@@ -317,19 +318,19 @@ class Identifier(AST):
     def __repr__(self) -> str:
         return f'Identifier({self.name})'
 
-    def eval(self, scope: Scope) -> AST:
-        return scope.get(self.name).eval(scope)
+    # def eval(self, scope: Scope) -> AST:
+    #     return scope.get(self.name).eval(scope)
 
-    def typeof(self, scope: Scope) -> Type:
-        return scope.get(self.name).typeof(scope)
+    # def typeof(self, scope: Scope) -> Type:
+    #     return scope.get(self.name).typeof(scope)
 
     def treestr(self, prefix='') -> str:
         return prefix + f'Identifier: {self.name}'
 
-    def to_string(self, scope: Scope) -> 'String':
-        pdb.set_trace()
-        # return String(self.name)
-        return self.eval(scope).to_string(scope)
+    # def to_string(self, scope: Scope) -> 'String':
+    #     pdb.set_trace()
+    #     # return String(self.name)
+    #     return self.eval(scope).to_string(scope)
 
 
 class Declare(AST):
@@ -339,17 +340,17 @@ class Declare(AST):
         self.name = name
         self.type = type
 
-    def eval(self, scope: Scope):
-        scope.declare(self.decltype, self.name, self.type)
+    # def eval(self, scope: Scope):
+    #     scope.declare(self.decltype, self.name, self.type)
 
     def treestr(self, indent=0):
         return f'{tab * indent}{"Const" if self.const else "Let"}: {self.name}\n{self.type.treestr(indent + 1)}'
 
-    def to_string(self, scope: Scope) -> 'String':
-        raise ValueError('cannot convert void expression Declare to a string')
+    # def to_string(self, scope: Scope) -> 'String':
+    #     raise ValueError('cannot convert void expression Declare to a string')
 
-    def typeof(self, scope: Scope) -> Type:
-        return void.typeof(scope)
+    # def typeof(self, scope: Scope) -> Type:
+    #     return void.typeof(scope)
 
     def __str__(self):
         return f'{self.decltype.name.lower()} {self.name}:{self.type}'
@@ -364,16 +365,16 @@ class Bind(AST):
         self.target = target
         self.value = value
 
-    def eval(self, scope: Scope):
-        if isinstance(self.target, Declare):
-            self.target.eval(scope)
-        else:
-            try:
-                scope.get(self.target.name)
-            except NameError:
-                Declare(DeclarationType.DEFAULT, self.target.name, untyped).eval(scope)
+    # def eval(self, scope: Scope):
+    #     if isinstance(self.target, Declare):
+    #         self.target.eval(scope)
+    #     else:
+    #         try:
+    #             scope.get(self.target.name)
+    #         except NameError:
+    #             Declare(DeclarationType.DEFAULT, self.target.name, untyped).eval(scope)
 
-        scope.bind(self.target.name, self.value.eval(scope))
+    #     scope.bind(self.target.name, self.value.eval(scope))
 
     def treestr(self, indent=0):
         return f'{tab * indent}Bind: {self.name}\n{self.value.treestr(indent + 1)}'
@@ -385,68 +386,68 @@ class Bind(AST):
         return f'Bind({self.target!r}, {self.value!r})'
 
 
-class Orderable(AST):
-    """An object that can be sorted relative to other objects of the same type"""
-    @abstractmethod
-    def compare(self, other: 'Orderable', scope: 'Scope') -> 'Number':
-        """Return a value indicating the relationship between this value and another value"""
+# class Orderable(AST):
+#     """An object that can be sorted relative to other objects of the same type"""
+#     @abstractmethod
+#     def compare(self, other: 'Orderable', scope: 'Scope') -> 'Number':
+#         """Return a value indicating the relationship between this value and another value"""
 
 
-class Boundable(AST):
-    @staticmethod
-    @abstractmethod
-    def max() -> 'Rangeable':
-        """Return the maximum element from the set of all elements of this type"""
-    @staticmethod
-    @abstractmethod
-    def min() -> 'Rangeable':
-        """Return the minimum element from the set of all elements of this type"""
+# class Boundable(AST):
+#     @staticmethod
+#     @abstractmethod
+#     def max() -> 'Rangeable':
+#         """Return the maximum element from the set of all elements of this type"""
+#     @staticmethod
+#     @abstractmethod
+#     def min() -> 'Rangeable':
+#         """Return the minimum element from the set of all elements of this type"""
 
 
-class Rangeable(Orderable):
-    # TODO: come up with a better name for this class... successor and predecessor are only used for range iterators, not ranges themselves
-    #        e.g. Incrementable, Decrementable, etc.
-    """An object that can be used to specify bounds of a range"""
-    @abstractmethod
-    def successor(self, step: 'Number', scope: 'Scope') -> 'Rangeable':
-        """Return the next value in the range"""
-    @abstractmethod
-    def predecessor(self, step: 'Number', scope: 'Scope') -> 'Rangeable':
-        """Return the previous value in the range"""
+# class Rangeable(Orderable):
+#     # TODO: come up with a better name for this class... successor and predecessor are only used for range iterators, not ranges themselves
+#     #        e.g. Incrementable, Decrementable, etc.
+#     """An object that can be used to specify bounds of a range"""
+#     @abstractmethod
+#     def successor(self, step: 'Number', scope: 'Scope') -> 'Rangeable':
+#         """Return the next value in the range"""
+#     @abstractmethod
+#     def predecessor(self, step: 'Number', scope: 'Scope') -> 'Rangeable':
+#         """Return the previous value in the range"""
 
 
-class Unpackable(AST):
-    # TODO: need to handle unpacking of objects + unpacking dicts
-    @abstractmethod
-    def len(self, scope: 'Scope') -> int:
-        """Return the length of the unpackable"""
-    @abstractmethod
-    def get(self, key: int | EllipsisType | slice | tuple[int | EllipsisType | slice], scope: 'Scope') -> AST:
-        """Return the item at the given index"""
-# TODO: make a type annotation for Unpackable[N] where N is the number of items in the unpackable?
-#        would maybe replace the len property?
+# class Unpackable(AST):
+#     # TODO: need to handle unpacking of objects + unpacking dicts
+#     @abstractmethod
+#     def len(self, scope: 'Scope') -> int:
+#         """Return the length of the unpackable"""
+#     @abstractmethod
+#     def get(self, key: int | EllipsisType | slice | tuple[int | EllipsisType | slice], scope: 'Scope') -> AST:
+#         """Return the item at the given index"""
+# # TODO: make a type annotation for Unpackable[N] where N is the number of items in the unpackable?
+# #        would maybe replace the len property?
 
 
-class Iter(AST):
-    @abstractmethod
-    def next(self, scope: 'Scope') -> Unpackable:  # TODO: TBD on the return type, e.g. Tuple[Bool, AST]
-        """Get the next item from the iterator"""
+# class Iter(AST):
+#     @abstractmethod
+#     def next(self, scope: 'Scope') -> Unpackable:  # TODO: TBD on the return type, e.g. Tuple[Bool, AST]
+#         """Get the next item from the iterator"""
 
 
-class Iterable(AST):
-    # TODO: maybe don't need scope for this method...
-    @abstractmethod
-    def iter(self, scope: 'Scope') -> Iter:
-        """Return an iterator over the iterable"""
+# class Iterable(AST):
+#     # TODO: maybe don't need scope for this method...
+#     @abstractmethod
+#     def iter(self, scope: 'Scope') -> Iter:
+#         """Return an iterator over the iterable"""
 
 
-class Flowable(AST):
-    @abstractmethod
-    def was_entered(self) -> bool:
-        """Determine if the flowable branch was entered. Should reset before performing calls to flow and checking this."""
-    @abstractmethod
-    def reset_was_entered(self) -> None:
-        """reset the state of was_entered, in preparation for executing branches in a flow"""
+# class Flowable(AST):
+#     @abstractmethod
+#     def was_entered(self) -> bool:
+#         """Determine if the flowable branch was entered. Should reset before performing calls to flow and checking this."""
+#     @abstractmethod
+#     def reset_was_entered(self) -> None:
+#         """reset the state of was_entered, in preparation for executing branches in a flow"""
 
 
 class PyAction(AST):
@@ -454,17 +455,17 @@ class PyAction(AST):
         self.action = action
         self.return_type = return_type
 
-    def eval(self, scope: Scope):
-        return self.action(scope)
+    # def eval(self, scope: Scope):
+    #     return self.action(scope)
 
-    def typeof(self, scope: Scope):
-        return self.return_type
+    # def typeof(self, scope: Scope):
+    #     return self.return_type
 
     def treestr(self, prefix=''):
         return prefix + f'PyAction: {self.action}'
 
-    def to_string(self, scope: Scope):
-        return String(f'<PyAction: {self.action}>')
+    # def to_string(self, scope: Scope):
+    #     return String(f'<PyAction: {self.action}>')
 
     def __str__(self):
         return f'PyAction({self.action})'
@@ -477,33 +478,33 @@ class Array(Iterable, Unpackable):
     def __init__(self, vals: list[AST]):
         self.vals = vals
 
-    def eval(self, scope: Scope):
-        return self
+    # def eval(self, scope: Scope):
+    #     return self
 
-    def typeof(self, scope: Scope):
-        pdb.set_trace()
-        # TODO: this should include the type of the data inside the vector...
-        return Type('Array')
+    # def typeof(self, scope: Scope):
+    #     pdb.set_trace()
+    #     # TODO: this should include the type of the data inside the vector...
+    #     return Type('Array')
 
-    # unpackable interface
-    def len(self, scope: Scope):
-        return len(self.vals)
+    # # unpackable interface
+    # def len(self, scope: Scope):
+    #     return len(self.vals)
 
-    def get(self, key: int | EllipsisType | slice | tuple[int | EllipsisType | slice], scope: Scope):
-        if isinstance(key, int):
-            return self.vals[key]
-        elif isinstance(key, EllipsisType):
-            return self
-        elif isinstance(key, slice):
-            return Array(self.vals[key])
-        elif isinstance(key, tuple):
-            # probably only valid for N-dimensional/non-jagged vectors
-            raise NotImplementedError('TODO: implement tuple indexing for Array')
-        else:
-            raise TypeError(f'invalid type for Array.get: `{key}` of type `{type(key)}`')
+    # def get(self, key: int | EllipsisType | slice | tuple[int | EllipsisType | slice], scope: Scope):
+    #     if isinstance(key, int):
+    #         return self.vals[key]
+    #     elif isinstance(key, EllipsisType):
+    #         return self
+    #     elif isinstance(key, slice):
+    #         return Array(self.vals[key])
+    #     elif isinstance(key, tuple):
+    #         # probably only valid for N-dimensional/non-jagged vectors
+    #         raise NotImplementedError('TODO: implement tuple indexing for Array')
+    #     else:
+    #         raise TypeError(f'invalid type for Array.get: `{key}` of type `{type(key)}`')
 
-    def iter(self, scope: Scope) -> Iter:
-        return ArrayIter(self)
+    # def iter(self, scope: Scope) -> Iter:
+    #     return ArrayIter(self)
 
     def treestr(self, prefix=''):
         s = prefix + 'Array\n'
@@ -525,25 +526,25 @@ class ArrayIter(Iter):
         self.array = None
         self.i = None
 
-    def eval(self, scope: Scope):
-        return self
+    # def eval(self, scope: Scope):
+    #     return self
 
-    def next(self, scope: Scope = None) -> Unpackable:
-        if self.array is None:
-            self.array = self.ast.eval(scope)
-            assert isinstance(self.array, Array), f'ArrayIter must be initialized with an AST that evaluates to an Array, not {
-                type(self.array)}'
-            self.i = 0
+    # def next(self, scope: Scope = None) -> Unpackable:
+    #     if self.array is None:
+    #         self.array = self.ast.eval(scope)
+    #         assert isinstance(self.array, Array), f'ArrayIter must be initialized with an AST that evaluates to an Array, not {
+    #             type(self.array)}'
+    #         self.i = 0
 
-        if self.i < len(self.array.vals):
-            ret = self.array.vals[self.i]
-            self.i += 1
-            return Array([Bool(True), ret])
+    #     if self.i < len(self.array.vals):
+    #         ret = self.array.vals[self.i]
+    #         self.i += 1
+    #         return Array([Bool(True), ret])
 
-        return Array([Bool(False), undefined])
+    #     return Array([Bool(False), undefined])
 
-    def typeof(self):
-        return Type('ArrayIter')
+    # def typeof(self):
+    #     return Type('ArrayIter')
 
     def treestr(self, prefix=''):
         return f'{prefix}ArrayIter:\n{self.ast.treestr(indent + 1)}'
@@ -561,27 +562,27 @@ class String(Rangeable):
     def __init__(self, val: str):
         self.val = val
 
-    def eval(self, scope: Scope):
-        return self
+    # def eval(self, scope: Scope):
+    #     return self
 
-    def typeof(self, scope: Scope):
-        return self.type
-    # TODO: implement rangable methods
+    # def typeof(self, scope: Scope):
+    #     return self.type
+    # # TODO: implement rangable methods
 
     def treestr(self, indent=0):
         return f'{tab * indent}String: `{self.val}`'
 
-    def to_string(self, scope: Scope):
-        return self
+    # def to_string(self, scope: Scope):
+    #     return self
 
-    def compare(self, other: 'String', scope: 'Scope') -> 'Number':
-        pdb.set_trace()
+    # def compare(self, other: 'String', scope: 'Scope') -> 'Number':
+    #     pdb.set_trace()
 
-    def successor(self, step: 'Number', scope: 'Scope') -> 'String':
-        pdb.set_trace()
+    # def successor(self, step: 'Number', scope: 'Scope') -> 'String':
+    #     pdb.set_trace()
 
-    def predecessor(self, step: 'Number', scope: 'Scope') -> 'String':
-        pdb.set_trace()
+    # def predecessor(self, step: 'Number', scope: 'Scope') -> 'String':
+    #     pdb.set_trace()
 
     def __str__(self):
         return f'"{self.val}"'
@@ -594,9 +595,9 @@ class IString(AST):
     def __init__(self, parts: list[AST]):
         self.parts = parts
 
-    def eval(self, scope: Scope = None):
-        # convert self into a String()
-        return String(self.topy(scope))
+    # def eval(self, scope: Scope = None):
+    #     # convert self into a String()
+    #     return String(self.topy(scope))
 
     def treestr(self, indent=0):
         s = tab * indent + 'IString\n'
@@ -642,35 +643,35 @@ class Function(AST):
 
         # as positional args are bound, they are transferred into the kwargs list
 
-    def partial_eval(self, update: list[Bind]):
-        # update the args/kwargs with the new values
-        assert all(u.value is not void for u in update), f'cannot partially evaluate with void values. Update: {update}'
-        assert all(isinstance(u.target, Identifier)
-                   for u in update), f'can only partially evaluate with identifiers, not declarations. Update: {update}'
-        for u in update:
-            try:
-                arg_names = [arg.name for arg in self.args]
-                i = arg_names.index(u.target.name)  # raises ValueError if not found
-                decl = self.args.pop(i)
-                self.kwargs.append(Bind(decl, u.value))
-            except ValueError:
-                kwarg_names = [kwarg.target.name for kwarg in self.kwargs]
-                i = kwarg_names.index(u.target.name)
-                self.kwargs[i].value = u.value
+    # def partial_eval(self, update: list[Bind]):
+    #     # update the args/kwargs with the new values
+    #     assert all(u.value is not void for u in update), f'cannot partially evaluate with void values. Update: {update}'
+    #     assert all(isinstance(u.target, Identifier)
+    #                for u in update), f'can only partially evaluate with identifiers, not declarations. Update: {update}'
+    #     for u in update:
+    #         try:
+    #             arg_names = [arg.name for arg in self.args]
+    #             i = arg_names.index(u.target.name)  # raises ValueError if not found
+    #             decl = self.args.pop(i)
+    #             self.kwargs.append(Bind(decl, u.value))
+    #         except ValueError:
+    #             kwarg_names = [kwarg.target.name for kwarg in self.kwargs]
+    #             i = kwarg_names.index(u.target.name)
+    #             self.kwargs[i].value = u.value
 
-    def eval(self, scope: Scope) -> AST:
-        # this is the scope that passed in arguments come from
-        # decl_scope is where any closure captured variables come from
-        # execution of functions happens in a child of the decl_scope
-        pdb.set_trace()
+    # def eval(self, scope: Scope) -> AST:
+    #     # this is the scope that passed in arguments come from
+    #     # decl_scope is where any closure captured variables come from
+    #     # execution of functions happens in a child of the decl_scope
+    #     pdb.set_trace()
 
-    def typeof(self, scope: Scope):
-        # TODO: make this include arg types and return type
-        return Type('callable')
-        # argtypes = [arg.typeof(scope) for arg in self.args]
-        # kwargtypes = [kwarg.typeof(scope) for kwarg in self.kwargs]
-        # something to do with body.typeof(), but need to allow any argument types to also come into play
-        # honestly gets complicated especially with parametric types, etc.
+    # def typeof(self, scope: Scope):
+    #     # TODO: make this include arg types and return type
+    #     return Type('callable')
+    #     # argtypes = [arg.typeof(scope) for arg in self.args]
+    #     # kwargtypes = [kwarg.typeof(scope) for kwarg in self.kwargs]
+    #     # something to do with body.typeof(), but need to allow any argument types to also come into play
+    #     # honestly gets complicated especially with parametric types, etc.
 
     def treestr(self, indent=0):
         s = tab * indent + 'Function\n'
@@ -679,8 +680,8 @@ class Function(AST):
         s += self.body.treestr(indent + 1)
         return s
 
-    def to_string(self, scope: Scope):
-        return String(self.__str__())
+    # def to_string(self, scope: Scope):
+    #     return String(self.__str__())
 
     def __str__(self):
         return f'({", ".join(map(str, self.args))}) => {self.body}'
@@ -696,9 +697,9 @@ class AtHandle(AST):
         # TODO: identifier must be a function or other callable...
         self.id = id
 
-    def eval(self, scope: Scope) -> Identifier:
-        pdb.set_trace()
-        return self.id
+    # def eval(self, scope: Scope) -> Identifier:
+    #     pdb.set_trace()
+    #     return self.id
 
 
 class CallWithArgs(AST):
@@ -706,5 +707,5 @@ class CallWithArgs(AST):
         self.fn = fn
         self.args = args
 
-    def eval(self, scope: Scope):
-        pdb.set_trace()
+    # def eval(self, scope: Scope):
+    #     pdb.set_trace()

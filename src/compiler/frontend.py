@@ -2,7 +2,7 @@
 # all backends either compile+run the code or just run it directly
 
 from argparse import ArgumentParser, REMAINDER
-from backend import backends, get_backend, python_interpreter, llvm_compiler, get_version
+from backend import backends, get_backend, python_interpreter, qbe_compiler, get_version
 
 import pdb
 
@@ -25,7 +25,7 @@ def main():
 
     # default interpreter is python. default compiler is llvm. default with no args is python.
     if args.backend: backend = get_backend(args.backend)
-    elif args.c:     backend = llvm_compiler
+    elif args.c:     backend = qbe_compiler
     elif args.i:     backend = python_interpreter
     else:            backend = python_interpreter
     

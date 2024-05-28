@@ -1,6 +1,6 @@
 # from __future__ import annotations
 
-from dewy import (
+from syntax import (
     AST,
     Undefined, undefined,
     Void, void,
