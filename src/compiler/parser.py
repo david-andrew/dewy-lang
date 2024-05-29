@@ -4,23 +4,28 @@ from syntax import (
     AST,
     Undefined, undefined,
     Void, void,
+    Identifier,
+    # Declare,
+    # Bind,
+    # String, IString,
+    # Flowable,
+    # Array,
+    # Scope,
+
+
     # Orderable,
     # Rangeable,
     # Unpackable,
     # Iter,
     # Iterable,
-    Identifier,
-    Type,
+    # Type,
     # Arg,
     # Function,
     # Builtin,
-    Declare,
-    Bind,
     # PackStruct,
     # Unpack,
     # Block,
     # Call,
-    String, IString,
     # BinOp,
     # Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
     # Add, Sub, Mul, Div, IDiv, Mod, Pow,
@@ -29,7 +34,6 @@ from syntax import (
     # Neg, Inv, Not,
     # Bool,
     # Flow,
-    Flowable,
     # If,
     # Loop,
     # In,
@@ -37,38 +41,36 @@ from syntax import (
     # Number,
     # Range,
     # RangeIter,
-    Array,
-    Scope,
 )
-from tokenizer import ( tokenize, tprint, traverse_tokens,                       
-    unary_prefix_operators,
-    unary_postfix_operators,
-    binary_operators,
-    
-    Token,
+from tokenizer import (tokenize, tprint, traverse_tokens,
+                       unary_prefix_operators,
+                       unary_postfix_operators,
+                       binary_operators,
 
-    WhiteSpace_t,
+                       Token,
 
-    Escape_t,
-    Undefined_t,
-    Identifier_t,
-    Block_t,
-    TypeParam_t,
-    RawString_t,
-    String_t,
-    Integer_t,
-    BasedNumber_t,
-    Boolean_t,
-    Hashtag_t,
-    DotDot_t,
+                       WhiteSpace_t,
 
-    Keyword_t,
+                       Escape_t,
+                       Undefined_t,
+                       Identifier_t,
+                       Block_t,
+                       TypeParam_t,
+                       RawString_t,
+                       String_t,
+                       Integer_t,
+                       BasedNumber_t,
+                       Boolean_t,
+                       Hashtag_t,
+                       DotDot_t,
 
-    Juxtapose_t,
-    Operator_t,
-    ShiftOperator_t,
-    Comma_t,
-)
+                       Keyword_t,
+
+                       Juxtapose_t,
+                       Operator_t,
+                       ShiftOperator_t,
+                       Comma_t,
+                       )
 
 from postok import post_process, get_next_chain, is_op, Chain, Flow_t, RangeJuxtapose_t
 
@@ -79,16 +81,15 @@ from itertools import groupby, chain as iterchain
 from enum import Enum, auto
 
 try:
-    from rich import print, traceback; traceback.install(show_locals=True)
+    from rich import print, traceback
+    traceback.install(show_locals=True)
 except:
     print('rich unavailable for import. using built-in printing')
 
 import pdb
 
 
-
-
-#compiler pipeline steps:
+# compiler pipeline steps:
 # 1. tokenize
 # 2. post tokenization
 #    -> invert whitespace to juxtapose
@@ -105,31 +106,36 @@ import pdb
 #    -> llvm: convert ast to ssa form, then generate llvm ir from ssa form
 
 
-class PrototypeAST(AST):
-    def eval(self, scope:'Scope'=None) -> AST:
-        raise ValueError(f'Prototype ASTs may not define eval. Attempted to call eval on prototype {self}, of type ({type(self)})')
+# class PrototypeAST(AST):
+#     def eval(self, scope: 'Scope' = None) -> AST:
+#         raise ValueError(f'Prototype ASTs may not define eval. Attempted to call eval on prototype {
+#                          self}, of type ({type(self)})')
 
 
-class ListOfASTs(PrototypeAST):
-    """Intermediate step for holding a list of ASTs that are probably captured by a container"""
-    def __init__(self, asts:list[AST]):
-        self.asts = asts
-    def __str__(self):
-        return f'{", ".join(map(str, self.asts))}'
-    def __repr__(self):
-        return f'ListOfASTs({self.asts})'
+# class ListOfASTs(PrototypeAST):
+#     """Intermediate step for holding a list of ASTs that are probably captured by a container"""
+
+#     def __init__(self, asts: list[AST]):
+#         self.asts = asts
+
+#     def __str__(self):
+#         return f'{", ".join(map(str, self.asts))}'
+
+#     def __repr__(self):
+#         return f'ListOfASTs({self.asts})'
 
 
-class Tuple(PrototypeAST):
-    """
-    A comma separated list of expressions (not wrapped in parentheses) e.g. 1, 2, 3
-    There is no special in-memory representation of a tuple, it is literally just a const list
-    """
-    def __init__(self, exprs:list[AST]):
-        self.exprs = exprs
-    def __repr__(self):
-        return f'Tuple({repr(self.exprs)})'
+# class Tuple(PrototypeAST):
+#     """
+#     A comma separated list of expressions (not wrapped in parentheses) e.g. 1, 2, 3
+#     There is no special in-memory representation of a tuple, it is literally just a const list
+#     """
 
+#     def __init__(self, exprs: list[AST]):
+#         self.exprs = exprs
+
+#     def __repr__(self):
+#         return f'Tuple({repr(self.exprs)})'
 
 
 @dataclass
@@ -138,74 +144,78 @@ class qint:
     quantum int for dealing with precedences that are multiple values at the same time
     qint's can only be strictly greater or strictly less than other values. Otherwise it's ambiguous
     """
-    values:set[int]
-    def __gt__(self, other:'int|qint') -> bool:
+    values: set[int]
+
+    def __gt__(self, other: 'int|qint') -> bool:
         if isinstance(other, int):
             return all(v > other for v in self.values)
         return all(v > other for v in self.values)
-    def __lt__(self, other:'int|qint') -> bool:
+
+    def __lt__(self, other: 'int|qint') -> bool:
         if isinstance(other, int):
             return all(v < other for v in self.values)
         return all(v < other for v in self.values)
-    def __ge__(self, other:'int|qint') -> bool: return self.__gt__(other)
-    def __le__(self, other:'int|qint') -> bool: return self.__lt__(other)
-    def __eq__(self, other:'int|qint') -> bool: return False
-        
+
+    def __ge__(self, other: 'int|qint') -> bool: return self.__gt__(other)
+    def __le__(self, other: 'int|qint') -> bool: return self.__lt__(other)
+    def __eq__(self, other: 'int|qint') -> bool: return False
 
 
 ######### Operator Precedence Table #########
-#TODO: class for compund operators, e.g. += -= .+= .-= not=? not>? etc.
-#TODO: how to handle unary operators in the table? perhaps make PrefixOperator_t/PostfixOperator_t classes?
-#TODO: add specification of associativity for each row
+# TODO: class for compund operators, e.g. += -= .+= .-= not=? not>? etc.
+# TODO: how to handle unary operators in the table? perhaps make PrefixOperator_t/PostfixOperator_t classes?
+# TODO: add specification of associativity for each row
 class Associativity(Enum):
-    left = auto()    #left-to-right
-    right = auto()   #right-to-left
+    left = auto()  # left-to-right
+    right = auto()  # right-to-left
     prefix = auto()
     postfix = auto()
     none = auto()
     fail = auto()
 
-operator_groups: list[tuple[Associativity, list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]]] = list(reversed([
+
+operator_groups: list[tuple[Associativity, list[Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t]]] = list(reversed([
     (Associativity.prefix, [Operator_t('@')]),
-    (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]), #jux-call, jux-index
+    (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),  # jux-call, jux-index
     (Associativity.prefix, [Operator_t('not')]),
     (Associativity.right,  [Operator_t('^')]),
-    (Associativity.left, [Juxtapose_t(None)]), #jux-multiply
+    (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
     (Associativity.left, [Operator_t('*'), Operator_t('/'), Operator_t('%')]),
     (Associativity.left, [Operator_t('+'), Operator_t('-')]),
-    (Associativity.left, [ShiftOperator_t('<<'), ShiftOperator_t('>>'), ShiftOperator_t('<<<'), ShiftOperator_t('>>>'), ShiftOperator_t('<<!'), ShiftOperator_t('!>>')]),
-    (Associativity.none, [Operator_t('in')]), 
+    (Associativity.left, [ShiftOperator_t('<<'), ShiftOperator_t('>>'), ShiftOperator_t(
+        '<<<'), ShiftOperator_t('>>>'), ShiftOperator_t('<<!'), ShiftOperator_t('!>>')]),
+    (Associativity.none, [Operator_t('in')]),
     (Associativity.left, [Operator_t('=?'), Operator_t('>?'), Operator_t('<?'), Operator_t('>=?'), Operator_t('<=?')]),
     (Associativity.left, [Operator_t('and'), Operator_t('nand'), Operator_t('&')]),
     (Associativity.left, [Operator_t('xor'), Operator_t('xnor')]),
     (Associativity.left, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
     (Associativity.none,  [Comma_t(None)]),
-    (Associativity.left, [RangeJuxtapose_t(None)]), #jux-range
-    (Associativity.right,  [Operator_t('=>')]), # () => () => () => 42
+    (Associativity.left, [RangeJuxtapose_t(None)]),  # jux-range
+    (Associativity.right,  [Operator_t('=>')]),  # () => () => () => 42
     (Associativity.fail,  [Operator_t('=')]),
     (Associativity.none,  [Operator_t('else')]),
 ]))
-precedence_table: dict[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t, int|qint] = {}
+precedence_table: dict[Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t, int | qint] = {}
 associativity_table: dict[int, Associativity] = {}
 for i, (assoc, group) in enumerate(operator_groups):
 
-    #mark precedence level i as the specified associativity
+    # mark precedence level i as the specified associativity
     associativity_table[i] = assoc
 
-    #insert all ops in the row into the precedence table at precedence level i
+    # insert all ops in the row into the precedence table at precedence level i
     for op in group:
         if op not in precedence_table:
             precedence_table[op] = i
             continue
-        
+
         val = precedence_table[op]
         if isinstance(val, int):
             precedence_table[op] = qint({val, i})
         else:
-            precedence_table[op] = qint(val.values|{i})
+            precedence_table[op] = qint(val.values | {i})
 
 
-def operator_precedence(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> int | qint:
+def operator_precedence(op: Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t) -> int | qint:
     """
     precedence:
     [HIGHEST]
@@ -241,7 +251,7 @@ def operator_precedence(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> in
     the unary versions of + - * / % have the same precedence as their binary versions
     """
 
-    #TODO: handling compound operators like +=, .+=, etc.
+    # TODO: handling compound operators like +=, .+=, etc.
     # if isinstance(op, CompoundOperator_t):
     #     op = op.base
 
@@ -250,16 +260,19 @@ def operator_precedence(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t) -> in
     except:
         raise ValueError(f"ERROR: expected operator, got {op=}") from None
 
-def operator_associativity(op:Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t|int) -> Associativity:
+
+def operator_associativity(op: Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t | int) -> Associativity:
     if not isinstance(op, int):
         i = operator_precedence(op)
-        assert isinstance(i, int), f'Cannot determine associativity of operator ({op}) with multiple precedence levels ({i})'
+        assert isinstance(i, int), f'Cannot determine associativity of operator ({
+            op}) with multiple precedence levels ({i})'
     else:
         i = op
     try:
         return associativity_table[i]
     except:
         raise ValueError(f"Error: failed to determine associativity for operator {op}") from None
+
 
 opname_map = {
     '@': 'reference',
@@ -306,15 +319,19 @@ opname_map = {
     Comma_t(None): 'comma',
     Juxtapose_t(None): 'unknown juxtapose',
 }
+
+
 def get_precedence_table_markdown() -> str:
     """return a string that is the markdown table for the docs containing all the operators"""
     header = '| Precedence | Operator | Name | Associativity |\n| --- | --- | --- | --- |'
-    
-    def get_ops_str(ops:list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]) -> str:
+
+    def get_ops_str(ops: list[Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t]) -> str:
         return '<br>'.join(f'`{op.op if isinstance(op, (Operator_t, ShiftOperator_t)) else op.__class__.__name__[:-2].lower()}`' for op in ops)
-    def get_opnames_str(ops:list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]) -> str:
+
+    def get_opnames_str(ops: list[Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t]) -> str:
         return '<br>'.join(f'{opname_map.get(op.op, None) if isinstance(op, (Operator_t, ShiftOperator_t)) else op.__class__.__name__[:-2].lower()}' for op in ops)
-    def get_row_str(row:tuple[Associativity, list[Operator_t|ShiftOperator_t|Juxtapose_t|Comma_t]]) -> str:
+
+    def get_row_str(row: tuple[Associativity, list[Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t]]) -> str:
         assoc, group = row
         return f'{get_ops_str(group)} | {get_opnames_str(group)} | {assoc.name}'
 
@@ -326,7 +343,7 @@ def get_precedence_table_markdown() -> str:
     return header + '\n' + '\n'.join(rows)
 
 
-#TODO: this isn't very well integrated into the type system...
+# TODO: this isn't very well integrated into the type system...
 # operator_result_type_table = {
 #     (Number.type, Add, Number.type): Number,
 #     (Number.type, Sub, Number.type): Number,
@@ -339,38 +356,38 @@ def get_precedence_table_markdown() -> str:
 
 
 # @cache
-def split_by_lowest_precedence(tokens: Chain[Token], scope:Scope) -> tuple[Chain[Token], Token, Chain[Token]]:
+def split_by_lowest_precedence(tokens: Chain[Token]) -> tuple[Chain[Token], Token, Chain[Token]]:
     """
     return the integer index/indices of the lowest precedence operator(s) in the given list of tokens
     """
-    assert isinstance(tokens, Chain), f"ERROR: `split_by_lowset_precedence()` may only be called on explicitly known Chain[Token], got {type(tokens)}"
+    assert isinstance(
+        tokens, Chain), f"ERROR: `split_by_lowset_precedence()` may only be called on explicitly known Chain[Token], got {type(tokens)}"
 
-    #collect all operators and their indices in the list of tokens
-    idxs, ops = zip(*[(i,token) for i,token in enumerate(tokens) if is_op(token)])
+    # collect all operators and their indices in the list of tokens
+    idxs, ops = zip(*[(i, token) for i, token in enumerate(tokens) if is_op(token)])
 
     if len(ops) == 0:
         pdb.set_trace()
-        #TODO: how to handle this case?
+        # TODO: how to handle this case?
         return Chain(), None, Chain()
         raise ValueError()
     if len(ops) == 1:
         i, = idxs
         op, = ops
         return Chain(tokens[:i]), op, Chain(tokens[i+1:])
-    
+
     # when more than one op present, find the lowest precedence one
     ranks = [operator_precedence(op) for op in ops]
     min_rank = min(ranks)
 
     # verify that the min is strictly less than or equal to all other ranks
     if not all(min_rank <= r for r in ranks):
-        #TODO: probably enumerate out all permutations of the ambiguous operators and return all of them as a list of lists of indices
-        #make use of scope/chain typeof to disambiguate if need be
+        # TODO: probably enumerate out all permutations of the ambiguous operators and return all of them as a list of lists of indices
+        # make use of scope/chain typeof to disambiguate if need be
         raise NotImplementedError(f"TODO: ambiguous precedence for {ops=} with {ranks=}, in token stream {tokens=}")
 
-
     # find operators with precedence equal to the current minimum
-    op_idxs = [i for i,r in zip(idxs, ranks) if r == min_rank]
+    op_idxs = [i for i, r in zip(idxs, ranks) if r == min_rank]
 
     if len(op_idxs) == 1:
         i, = op_idxs
@@ -380,48 +397,51 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope:Scope) -> tuple[Chain
     if isinstance(min_rank, qint):
         assocs = {operator_associativity(i) for i in min_rank.values}
         if len(assocs) > 1:
-            raise NotImplementedError(f'TODO: need to type check to deal with multiple/ambiguous operator associativities: {assocs}')
+            raise NotImplementedError(
+                f'TODO: need to type check to deal with multiple/ambiguous operator associativities: {assocs}')
         assoc, = assocs
     else:
         assoc = operator_associativity(min_rank)
-    
+
     match assoc:
         case Associativity.left: i = op_idxs[-1]
         case Associativity.right: i = op_idxs[0]
         case Associativity.prefix: i = op_idxs[0]
         case Associativity.postfix: i = op_idxs[-1]
-        case Associativity.none: i = op_idxs[-1] #default to left. handled later in parsing
+        case Associativity.none: i = op_idxs[-1]  # default to left. handled later in parsing
         case Associativity.fail: raise ValueError(f'Cannot handle multiple given operators in chain {tokens}, as lowest precedence operator is marked as un-associable.')
-    
+
     return Chain(tokens[:i]), tokens[i], Chain(tokens[i+1:])
 
 # @cache
-def typeof(chain: list[Token], scope:Scope) -> Type|None: #this should be the same type system`` used in the interpreter!
-    # recursively determine the type of the sequence of tokens
-    # return none if the sequence does not form a valid type
-    # follow a similar process to parsing, breaking down the expressions, etc.
-
-    pdb.set_trace()
-    chain, remainder = get_next_chain(chain)
-    assert len(remainder) == 0, 'typeof may only be called on single chains of tokens'
-
-    if len(chain) == 1:
-        token, = chain
-        return typeof_single(token, scope)
-        
-    # TODO: handle type check for more complicated chains...
-    pdb.set_trace()
-    left, op, right = split_by_lowest_precedence(chain, scope)
-    left_t, right_t = typeof(left, scope), typeof(right, scope)
-
-    pdb.set_trace()
 
 
+# this should be the same type system`` used in the interpreter!
+# def typeof(chain: list[Token], scope: Scope) -> Type | None:
+#     # recursively determine the type of the sequence of tokens
+#     # return none if the sequence does not form a valid type
+#     # follow a similar process to parsing, breaking down the expressions, etc.
 
-def typeof_single(token:Token, scope:Scope) -> Type|None:
+#     pdb.set_trace()
+#     chain, remainder = get_next_chain(chain)
+#     assert len(remainder) == 0, 'typeof may only be called on single chains of tokens'
 
-    pdb.set_trace()
-    ...
+#     if len(chain) == 1:
+#         token, = chain
+#         return typeof_single(token, scope)
+
+#     # TODO: handle type check for more complicated chains...
+#     pdb.set_trace()
+#     left, op, right = split_by_lowest_precedence(chain, scope)
+#     left_t, right_t = typeof(left, scope), typeof(right, scope)
+
+#     pdb.set_trace()
+
+
+# def typeof_single(token: Token, scope: Scope) -> Type | None:
+
+#     pdb.set_trace()
+#     ...
 
 # def apply_arguments(ast:AST) -> None:
 #     """Convert the ast to either a string (identifier name) or Callable"""
@@ -430,7 +450,7 @@ def typeof_single(token:Token, scope:Scope) -> Type|None:
 #         return ast.name
 #     if isinstance(ast, Callable):
 #         return ast
-    
+
 #     # hacky way of dealing with blocks
 #     if isinstance(ast, Block):
 #         if len(ast.exprs) == 1:
@@ -445,14 +465,13 @@ def typeof_single(token:Token, scope:Scope) -> Type|None:
 # def to_call_args(ast:AST) -> Array:
 #     if isinstance(ast, Void):
 #         return Array([])
-    
+
 #     if isinstance(ast, Tuple):
 #         return Array(ast.exprs)
 
 #     #TODO: some sort of check that ast is a valid single type...?
 #     return Array([ast])
-    
-    
+
 
 # def is_callable(ast:AST, scope:Scope) -> bool:
 #     #TODO: make calling typeof on an AST more robust/handle this better
@@ -466,7 +485,7 @@ def typeof_single(token:Token, scope:Scope) -> Type|None:
 #     # check if directly callable
 #     if isinstance(ast, Callable):
 #         return True
-    
+
 #     # Non-callable types
 #     if isinstance(ast, (Number, String, IString)):
 #         return False
@@ -478,11 +497,10 @@ def typeof_single(token:Token, scope:Scope) -> Type|None:
 #         else:
 #             pdb.set_trace()
 #             ...
-    
+
 #     if isinstance(ast, PrototypeAST):
 #         raise NotImplementedError(f"Currently haven't handled is_callable for case of {type(ast)}")
-        
-    
+
 
 #     #other cases, e.g. function literals. should be able to use the AST type checking method at this point
 #     pdb.set_trace()
@@ -492,75 +510,81 @@ def typeof_single(token:Token, scope:Scope) -> Type|None:
 # also don't have to worry about the user making custom callable types not being parsed correctly,
 #    since they should inherit from Callable, making is_callable return true for them!
 
-def parse(tokens:list[Token], scope:Scope) -> AST:
+def parse(tokens: list[Token]) -> AST:  # , scope: Scope) -> AST:
 
     asts = []
     while len(tokens) > 0:
         chain, tokens = get_next_chain(tokens)
 
         if len(chain) == 1:
-            asts.append(parse_single(chain[0], scope))
+            asts.append(parse_single(chain[0]))  # , scope))
         else:
-            asts.append(parse_chain(chain, scope))
-    
+            asts.append(parse_chain(chain))  # , scope))
+
     if len(asts) == 0:
-        #literally nothing was parsed
+        # literally nothing was parsed
         return void
-    
+
     if len(asts) == 1:
         ast, = asts
         return ast
-    
+
     return ListOfASTs(asts)
 
 
-def parse_single(token:Token, scope:Scope) -> AST:
+def parse_single(token: Token) -> AST:  # , scope: Scope) -> AST:
     """Parse a single token into an AST"""
     match token:
-        case Undefined_t():     return undefined
-        case Identifier_t():    return Identifier(token.src)
-        case Integer_t():       return Number(int(token.src))
-        case Boolean_t():       return Bool(bool_to_bool(token.src))
-        case BasedNumber_t():   return Number(based_number_to_int(token.src))
-        case RawString_t():     return String(token.to_str())
-        case DotDot_t():        return Range()
-        case String_t():        return parse_string(token, scope)
-        case Block_t():         return parse_block(token, scope)
-        case Flow_t():          return parse_flow(token, scope)
-        
+        case Undefined_t(): return undefined
+        case Identifier_t(): return Identifier(token.src)
+        case Integer_t(): return Number(int(token.src))
+        case Boolean_t(): return Bool(bool_to_bool(token.src))
+        case BasedNumber_t(): return Number(based_number_to_int(token.src))
+        case RawString_t(): return String(token.to_str())
+        case DotDot_t(): return Range()
+        case String_t(): return parse_string(token)  # , scope)
+        case Block_t(): return parse_block(token)  # , scope)
+        case Flow_t(): return parse_flow(token)  # , scope)
+
         case _:
-            #TODO handle other types...
+            # TODO handle other types...
             pdb.set_trace()
             ...
-    
+
     pdb.set_trace()
     raise NotImplementedError()
     ...
 
 
-def parse_chain(chain:Chain[Token], scope:Scope) -> AST:
-    assert isinstance(chain, Chain), f"ERROR: parse chain may only be called on explicitly known Chain[Token], got {type(chain)}"
-    
-    if len(chain) == 0: return void
-    if len(chain) == 1: return parse_single(chain[0], scope)
-    
-    left, op, right = split_by_lowest_precedence(chain, scope)
-    left, right = parse(left, scope), parse(right, scope)
+def parse_chain(chain: Chain[Token]) -> AST:  # , scope: Scope) -> AST:
+    assert isinstance(chain, Chain), f"ERROR: parse chain may only be called on explicitly known Chain[Token], got {
+        type(chain)}"
 
-    assert left is not void or right is not void, f"Internal Error: both left and right returned void during parse chain, implying both left and right side of operator were empty, i.e. chain was invalid: {chain}"
+    if len(chain) == 0:
+        return void
+    if len(chain) == 1:
+        return parse_single(chain[0])  # , scope)
+
+    left, op, right = split_by_lowest_precedence(chain)  # , scope)
+    left, right = parse(left), parse(right)  # parse(left, scope), parse(right, scope)
+
+    assert left is not void or right is not void, f"Internal Error: both left and right returned void during parse chain, implying both left and right side of operator were empty, i.e. chain was invalid: {
+        chain}"
 
     # 3 cases are prefix expr, postfix expr, or binary expr
-    if left is void: return build_unary_prefix_expr(op, right, scope)
-    if right is void: return build_unary_postfix_expr(left, op, scope)
-    return build_bin_expr(left, op, right, scope)
+    if left is void:
+        return build_unary_prefix_expr(op, right)  # , scope)
+    if right is void:
+        return build_unary_postfix_expr(left, op)  # , scope)
+    return build_bin_expr(left, op, right)  # , scope)
 
 
-def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
+def build_bin_expr(left: AST, op: Token, right: AST) -> AST:  # , scope: Scope) -> AST:
     """create a unary prefix expression AST from the op and right AST"""
 
     match op:
         case Juxtapose_t():
-            if left.typeof(scope).name == 'callable': #TODO: want to make use of Type.is_instance here
+            if left.typeof(scope).name == 'callable':  # TODO: want to make use of Type.is_instance here
                 return CallWithArgs(left, right)
             else:
                 return Mul(left, right)
@@ -569,7 +593,7 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
             if isinstance(left, Identifier) or isinstance(left, Declare):
                 return Bind(left, right)
             else:
-                #TODO: handle other cases, e.g. a.b, a[b], etc.
+                # TODO: handle other cases, e.g. a.b, a[b], etc.
                 #      probably make bind take str|AST as the left-hand-side target
                 #      return Bind(left, right)
                 pdb.set_trace()
@@ -577,13 +601,14 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
 
         case Operator_t(op='=>'):
             if isinstance(left, Void):
-                return Function([], right, scope) #TODO: scope needs to be set. not sure if should set here or on a post processing pass...
+                # TODO: scope needs to be set. not sure if should set here or on a post processing pass...
+                return Function([], right, scope)
             elif isinstance(left, Identifier):
                 return Function([Arg(left.name)], right, scope)
             elif isinstance(left, Block):
                 pdb.set_trace()
                 ...
-            #TODO: what about typed arguments, or arguments with default values...
+            # TODO: what about typed arguments, or arguments with default values...
             else:
                 raise ValueError(f'Unrecognized left-hand side for function literal: {left=}, {right=}')
 
@@ -601,7 +626,7 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
         case Operator_t(op='%'): return Mod(left, right, None)
         case Operator_t(op='^'): return Pow(left, right, None)
 
-        #comparison operators
+        # comparison operators
         case Operator_t(op='=?'): return Equal(left, right)
         case Operator_t(op='>?'): return Greater(left, right)
         case Operator_t(op='<?'): return Less(left, right)
@@ -613,17 +638,18 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
         # case Operator_t(op='<=>'): return ThreewayCompare(left, right)
 
         # Logical Operators. TODO: outtype=Bool is not flexible enough...
-        case Operator_t(op='and'):  return And(left, right, outtype=Bool)
-        case Operator_t(op='or'):   return Or(left, right, outtype=Bool)
+        case Operator_t(op='and'): return And(left, right, outtype=Bool)
+        case Operator_t(op='or'): return Or(left, right, outtype=Bool)
         case Operator_t(op='nand'): return Nand(left, right, outtype=Bool)
-        case Operator_t(op='nor'):  return Nor(left, right, outtype=Bool)
-        case Operator_t(op='xor'):  return Xor(left, right, outtype=Bool)
+        case Operator_t(op='nor'): return Nor(left, right, outtype=Bool)
+        case Operator_t(op='xor'): return Xor(left, right, outtype=Bool)
         case Operator_t(op='xnor'): return Xnor(left, right, outtype=Bool)
 
         # Misc Operators
         case RangeJuxtapose_t():
             if isinstance(right, Range):
-                assert right.first is undefined and right.second is undefined, f"ERROR: can't attach expression to range, range already has values. Got {left=}, {right=}"
+                assert right.first is undefined and right.second is undefined, f"ERROR: can't attach expression to range, range already has values. Got {
+                    left=}, {right=}"
                 match left:
                     case Tuple(exprs=[first, second]):
                         right.first = first
@@ -634,7 +660,8 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
                         return right
 
             if isinstance(left, Range):
-                assert left.secondlast is undefined and left.last is undefined, f"ERROR: can't attach expression to range, range already has values. Got {left=}, {right=}"
+                assert left.secondlast is undefined and left.last is undefined, f"ERROR: can't attach expression to range, range already has values. Got {
+                    left=}, {right=}"
                 match right:
                     case Tuple(exprs=[secondlast, last]):
                         left.secondlast = secondlast
@@ -646,8 +673,8 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
 
             raise ValueError(f'INTERNAL ERROR: Range Juxtapose must be next to a range. Got {left=}, {right=}')
 
-        case Comma_t(): 
-            #TODO: combine left or right tuples into a single tuple
+        case Comma_t():
+            # TODO: combine left or right tuples into a single tuple
             if isinstance(left, Tuple) and isinstance(right, Tuple):
                 return Tuple([*left.exprs, *right.exprs])
             elif isinstance(left, Tuple):
@@ -656,39 +683,40 @@ def build_bin_expr(left:AST, op:Token, right:AST, scope:Scope) -> AST:
                 return Tuple([left, *right.exprs])
             else:
                 return Tuple([left, right])
-        
+
         case Operator_t(op='else'):
             if isinstance(left, Flow) and isinstance(right, Flow):
-                #merge left+right as single flow
+                # merge left+right as single flow
                 return Flow([*left.branches, *right.branches])
             elif isinstance(left, Flow):
-                #append right to left
+                # append right to left
                 return Flow([*left.branches, right])
             elif isinstance(right, Flow):
-                #prepend left to right
+                # prepend left to right
                 return Flow([left, *right.branches])
             else:
-                #create a new flow out of the left and right
+                # create a new flow out of the left and right
                 return Flow([left, right])
-        
+
         case Operator_t(op='in'):
             if isinstance(left, Identifier):
                 return In(left.name, right)
-            
+
             pdb.set_trace()
-            #TODO: handle unpacking case where left is a PackStruct
-            #TDB if post-tokenizer or parser handles. probably parser, which would build a PackStruct AST node 
+            # TODO: handle unpacking case where left is a PackStruct
+            # TDB if post-tokenizer or parser handles. probably parser, which would build a PackStruct AST node
             # elif isinstance(left, PackStruct):
             #     return In(left, right)
-                
-            raise NotImplementedError(f"Parsing of operator 'in' operator for non-identifiers on left, has not been implemented yet. Got {left=}, {right=}")
-        
+
+            raise NotImplementedError(
+                f"Parsing of operator 'in' operator for non-identifiers on left, has not been implemented yet. Got {left=}, {right=}")
+
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
 
 
-def build_unary_prefix_expr(op:Token, right:AST, scope:Scope) -> AST:
+def build_unary_prefix_expr(op: Token, right: AST) -> AST:  # , scope: Scope) -> AST:
     """create a unary prefix expression AST from the op and right AST"""
     match op:
         # normal prefix operators
@@ -696,30 +724,33 @@ def build_unary_prefix_expr(op:Token, right:AST, scope:Scope) -> AST:
         case Operator_t(op='-'): return Neg(right, None)
         case Operator_t(op='*'): return right
         case Operator_t(op='/'): return Inv(right, None)
-        case Operator_t(op='not'): return Not(right, outtype=Bool) #TODO: don't want to hardcode Bool here!
-        case Operator_t(op='@'):   raise NotImplementedError(f"TODO: prefix op: {op=}")
+        case Operator_t(op='not'): return Not(right, outtype=Bool)  # TODO: don't want to hardcode Bool here!
+        case Operator_t(op='@'): raise NotImplementedError(f"TODO: prefix op: {op=}")
         case Operator_t(op='...'): raise NotImplementedError(f"TODO: prefix op: {op=}")
 
         # binary operators that appear to be unary because the left can be void
-        case Operator_t(op='=>'): return Function([], right, scope) # => called as unary prefix op means left was ()/void
+        # => called as unary prefix op means left was ()/void
+        case Operator_t(op='=>'): return Function([], right, scope)
 
         case _:
             raise ValueError(f"INTERNAL ERROR: {op=} is not a known unary prefix operator")
 
 
-def build_unary_postfix_expr(left:AST, op:Token, scope:Scope) -> AST:
+def build_unary_postfix_expr(left: AST, op: Token) -> AST:  # , scope: Scope) -> AST:
     """create a unary postfix expression AST from the left AST and op token"""
     match op:
         # normal postfix operators
-        case Operator_t(op='!'): raise NotImplementedError(f"TODO: postfix op: {op=}") #return Fact(left)
+        case Operator_t(op='!'): raise NotImplementedError(f"TODO: postfix op: {op=}")  # return Fact(left)
 
         # binary operators that appear to be unary because the right can be void
-        case Juxtapose_t(): return Call(to_callable(left), Array([])) # anything juxtaposed with void is treated as a zero-arg call()
+        # anything juxtaposed with void is treated as a zero-arg call()
+        case Juxtapose_t(): return Call(to_callable(left), Array([]))
 
         case _:
             raise NotImplementedError(f"TODO: {op=}")
 
-def parse_string(token:String_t, scope:Scope) -> String | IString:
+
+def parse_string(token: String_t) -> String | IString:  # , scope: Scope) -> String | IString:
     """Convert a string token to an AST"""
 
     if len(token.body) == 1 and isinstance(token.body[0], str):
@@ -733,7 +764,7 @@ def parse_string(token:String_t, scope:Scope) -> String | IString:
         elif isinstance(chunk, Escape_t):
             parts.append(chunk.to_str())
         else:
-            #put any interpolation expressions in a new scope
+            # put any interpolation expressions in a new scope
             ast = parse(chunk.body, scope)
             if isinstance(ast, Block):
                 ast.newscope = True
@@ -749,35 +780,35 @@ def parse_string(token:String_t, scope:Scope) -> String | IString:
     return IString(parts)
 
 
-def parse_block(block:Block_t, scope:Scope) -> AST:
+def parse_block(block: Block_t, scope: Scope) -> AST:
     """Convert a block token to an AST"""
 
     # if new scope block, nest the current scope
-    newscope =  block.left == '{' and block.right == '}'
+    newscope = block.left == '{' and block.right == '}'
     if newscope:
         scope = Scope(scope)
-    
-    #parse the inside of the block
+
+    # parse the inside of the block
     inner = parse(block.body, scope)
 
     delims = block.left + block.right
     match delims, inner:
-        case '()'|'{}', Void():
+        case '()' | '{}', Void():
             return inner
-        case '()'|'{}', ListOfASTs():
-            return Block(inner.asts, newscope=delims=='{}')
+        case '()' | '{}', ListOfASTs():
+            return Block(inner.asts, newscope=delims == '{}')
         case '[]', ListOfASTs():
-            #TODO: handle if this should be an object or dictionary instead of an array
+            # TODO: handle if this should be an object or dictionary instead of an array
             return Array(inner.asts)
-        case '()'|'[]'|'(]'|'[)', Range():
+        case '()' | '[]' | '(]' | '[)', Range():
             inner.include_first = block.left == '['
             inner.include_last = block.right == ']'
             # inner.was_wrapped = True #TODO: look into removing this attribute (needs post-tokenization process to be able to separate the range (and any first,second..last expressions) from surrounding tokens)
             return inner
-        
-        #catch all cases for any type of AST inside a block or range
-        case '()'|'{}', _:
-            return Block([inner], newscope=delims=='{}')
+
+        # catch all cases for any type of AST inside a block or range
+        case '()' | '{}', _:
+            return Block([inner], newscope=delims == '{}')
         case '[]', _:
             # TODO: handle if this should be an object or dictionary instead of an array
             return Array([inner])
@@ -786,15 +817,15 @@ def parse_block(block:Block_t, scope:Scope) -> AST:
             raise NotImplementedError(f'block parse not implemented for {block.left+block.right}, {type(inner)}')
 
 
-def parse_flow(flow:Flow_t, scope:Scope) -> Flowable:
+def parse_flow(flow: Flow_t, scope: Scope) -> Flowable:
 
     # special case for closing else clause in a flow chain. Treat as `<if> <true> <clause>`
     if flow.keyword is None:
         return If(Bool(True), parse_chain(flow.clause, scope))
 
-    cond = parse_chain(flow.condition, scope) 
+    cond = parse_chain(flow.condition, scope)
     clause = parse_chain(flow.clause, scope)
-    
+
     match flow.keyword:
         case Keyword_t(src='if'): return If(cond, clause)
         case Keyword_t(src='loop'): return Loop(cond, clause)
@@ -806,7 +837,7 @@ def parse_flow(flow:Flow_t, scope:Scope) -> Flowable:
     ...
 
 
-def top_level_parse(tokens:list[Token], scope:Scope) -> AST:
+def top_level_parse(tokens: list[Token], scope: Scope) -> AST:
     """
     Parse the sequence of tokens into an AST
 
@@ -815,10 +846,10 @@ def top_level_parse(tokens:list[Token], scope:Scope) -> AST:
         scope (Scope, optional): The scope to use when determining the type of identified values. Defaults to Scope.default()
     """
 
-    #ensure there is a valid scope to do the parse with
+    # ensure there is a valid scope to do the parse with
     # if scope is None:
     #     scope = Scope.default()
-    
+
     # kick off the parser
     ast = parse(tokens, scope)
 
@@ -828,7 +859,7 @@ def top_level_parse(tokens:list[Token], scope:Scope) -> AST:
     else:
         ast = Block([ast], newscope=True)
 
-    # post processing on the parsed AST 
+    # post processing on the parsed AST
     express_identifiers(ast)
     tuples_to_arrays(ast)
     ensure_no_prototypes(ast)
@@ -836,31 +867,31 @@ def top_level_parse(tokens:list[Token], scope:Scope) -> AST:
     # set_ast_scopes(ast, scope)
 
     return ast
-    
 
 
-def express_identifiers(root:AST) -> None:
+def express_identifiers(root: AST) -> None:
     """
     Convert (in-place) any free floating Identifier AST nodes (PrototypeAST) to Call nodes
     """
     for ast in full_traverse_ast(root):
         if isinstance(ast, Identifier):
-            #in place convert Identifier to Call
+            # in place convert Identifier to Call
             call = Call(ast.name)
             ast.__dict__ = call.__dict__
             ast.__class__ = Call
 
-def tuples_to_arrays(root:AST)  -> None:
+
+def tuples_to_arrays(root: AST) -> None:
     """Convert (in-place) any Tuple nodes (PrototypeAST) to Array nodes"""
-    #TODO: should be able to specify that the array is const...
+    # TODO: should be able to specify that the array is const...
     for ast in full_traverse_ast(root):
         if isinstance(ast, Tuple):
-            #in place convert Tuple to Array
+            # in place convert Tuple to Array
             arr = Array(ast.exprs)
             ast.__dict__ = arr.__dict__
             ast.__class__ = Array
 
-#TODO: if we make a third conversion function, make a meta conversion function that takes a lambda 
+# TODO: if we make a third conversion function, make a meta conversion function that takes a lambda
 # for how to make the new instance from the old one, and then does the in-place conversion
 # def in_place_type_conversion(root:AST, target:PyType[AST], converter: Function[[AST], AST]) -> None
 #     for ast in full_traverse_ast(root):
@@ -869,7 +900,8 @@ def tuples_to_arrays(root:AST)  -> None:
 #             ast.__dict__ = new.__dict__
 #             ast.__class__ = target
 
-def ensure_no_prototypes(root:AST) -> None:
+
+def ensure_no_prototypes(root: AST) -> None:
     """
     Raises an exception if there are any PrototypeAST nodes in the AST
     """
@@ -877,28 +909,31 @@ def ensure_no_prototypes(root:AST) -> None:
         if isinstance(ast, PrototypeAST):
             raise ValueError(f'May not have any PrototypeASTs in a final AST. Found {ast} of type ({type(ast)})')
 
-def set_ast_scopes(root:AST, scope:Scope) -> None:
-    #TODO: hacky, just setting function scopes to root scope!
+
+def set_ast_scopes(root: AST, scope: Scope) -> None:
+    # TODO: hacky, just setting function scopes to root scope!
     #      need to handle setting scope to where fn defined.
     #      probably have traverse keep track of scope for given node!
     for ast in full_traverse_ast(root):
         if isinstance(ast, Function):
             ast.scope = scope
 
-#TODO: consider adding __iter__ to AST classes instead of manually specifying them here
-#      though potentially good as is, as it forces you to implement it. 
-#      if we use __iter__ we'd have to provide a default that raises, and then implement it on EVERY AST class            
-def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
+# TODO: consider adding __iter__ to AST classes instead of manually specifying them here
+#      though potentially good as is, as it forces you to implement it.
+#      if we use __iter__ we'd have to provide a default that raises, and then implement it on EVERY AST class
+
+
+def full_traverse_ast(root: AST) -> Generator[AST, None, None]:
     """
     Generator to recursively walk all nodes in the given AST.
-    
+
     While traversing, the user can skip visiting the current node's children by calling `.send(True)`.
     Children nodes are visited after the current node (preorder traversal), so you may modify the children
       during iteration, and the iterator ought to handle it fine.
 
     e.g.
     ```python
-    
+
     for ast in (gen := full_traverse_ast(root)):
         #do something with current ast node
         #...
@@ -916,11 +951,13 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
     Yields:
         ast: the current ast node being looked at (and recursively all children nodes)
     """
-    
+
     skip = yield root
-    if skip is not None: assert (yield) is None, ".send() may only be called once per iteration"
-    if skip is not None: return
-    
+    if skip is not None:
+        assert (yield) is None, ".send() may only be called once per iteration"
+    if skip is not None:
+        return
+
     match root:
         case Block(exprs=list(exprs)) | Tuple(exprs=list(exprs)):
             for expr in exprs:
@@ -931,23 +968,23 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
                 yield from full_traverse_ast(val)
 
         case Call():
-            #handle expr being called
+            # handle expr being called
             if isinstance(root.expr, AST):
                 yield from full_traverse_ast(root.expr)
             # else str identifier, which doesn't need to be visited
 
-            #handle any arguments
+            # handle any arguments
             if root.args is not None:
                 for arg in root.args.vals:
                     yield from full_traverse_ast(arg)
-        
+
         case IString(parts=list(parts)):
             for ast in parts:
                 yield from full_traverse_ast(ast)
 
         case Bind():
             yield from full_traverse_ast(root.value)
-        
+
         case Function():
             for arg in root.args:
                 if arg.type is not None:
@@ -963,7 +1000,6 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
         case UnaryOp():
             yield from full_traverse_ast(root.child)
 
-
         case Flow():
             for expr in root.branches:
                 yield from full_traverse_ast(expr)
@@ -977,7 +1013,7 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
             yield from full_traverse_ast(root.body)
 
         case In():
-            #TODO: probably going to change pack struct to be a proper AST, which can then have contents yielded from...
+            # TODO: probably going to change pack struct to be a proper AST, which can then have contents yielded from...
             # if isinstance(root.name, PackStruct):
             #     yield from full_traverse_ast(root.name)
             yield from full_traverse_ast(root.iterable)
@@ -999,45 +1035,39 @@ def full_traverse_ast(root:AST) -> Generator[AST, None, None]:
         case Bool(): ...
         case Void(): ...
         case Undefined(): ...
-        
+
         case _:
-            #TODO: unhandled ast type
+            # TODO: unhandled ast type
             pdb.set_trace()
             raise NotImplementedError(f'traversal not implemented for ast type {type(root)}')
 
 
-
-
-
-
-def test_file(path:str):
+def test_file(path: str):
     """Run a given file"""
 
     with open(path) as f:
         src = f.read()
-    
+
     tokens = tokenize(src)
     post_process(tokens)
 
     root = Scope.default()
     ast = top_level_parse(tokens, root)
     res = ast.eval(root)
-    if res: print(res)
+    if res:
+        print(res)
 
 
-
-
-#TODO: broken. probably set up scope with some default values
+# TODO: broken. probably set up scope with some default values
 def test_many_lines():
     """
     Parse each line of syntax3.dewy one at a time for testing
     """
-    #load the syntax3 file and split the lines
+    # load the syntax3 file and split the lines
     with open('../../examples/syntax3.dewyl') as f:
         lines = f.read().splitlines()
 
-
-    #set up a scope with declarations for all of the variables used in the example file    
+    # set up a scope with declarations for all of the variables used in the example file
     root = Scope.default()
     root.let('x', Number.type)
     root.let('y', Number.type)
@@ -1051,14 +1081,14 @@ def test_many_lines():
         if len(tokens) == 0:
             continue
 
-        #print the line, and run it
+        # print the line, and run it
         print('-'*80)
         print(tokens)
 
         ast = top_level_parse(tokens)
         print(ast)
 
-        #TODO: maybe later we can run the file. potentially declare all the values used at the top?
+        # TODO: maybe later we can run the file. potentially declare all the values used at the top?
         # res = ast.eval(root)
         # if res: print(res)
 
@@ -1079,7 +1109,7 @@ printl'a={a}, b={b}, c={c} d={d}'
     tokens = tokenize(line)
     post_process(tokens)
 
-    #DEBUG
+    # DEBUG
     # tokens = [Identifier_t('printl'), Juxtapose_t(''), Identifier_t('readl')]
 
     ast = top_level_parse(tokens)
@@ -1090,7 +1120,8 @@ printl'a={a}, b={b}, c={c} d={d}'
 def test_example_progs():
     from dewy import hello, hello_func, anonymous_func, hello_name, if_else, if_else_if, hello_loop, unpack_test, range_iter_test, loop_iter_manual, loop_in_iter, nested_loop, block_printing
 
-    funcs = [hello, hello_func, anonymous_func, hello_name, if_else, if_else_if, hello_loop, unpack_test, range_iter_test, loop_iter_manual, loop_in_iter, nested_loop, block_printing]
+    funcs = [hello, hello_func, anonymous_func, hello_name, if_else, if_else_if, hello_loop,
+             unpack_test, range_iter_test, loop_iter_manual, loop_in_iter, nested_loop, block_printing]
 
     for func in funcs:
         src = func.__doc__
@@ -1113,9 +1144,3 @@ if __name__ == "__main__":
         test_many_lines()
 
     # print("Usage: `python parser.py [path/to/file.dewy>]`")
-
-
-
-
-
-
