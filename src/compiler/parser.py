@@ -7,7 +7,7 @@ from syntax import (
     Identifier,
     # Declare,
     # Bind,
-    # String, IString,
+    String, IString,
     # Flowable,
     # Array,
     # Scope,

@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Generator
 
+from tokenizer import escape_whitespace  # TODO: move into utils
+
 import pdb
 
 
@@ -15,13 +17,13 @@ class AST(ABC):
     def __repr__(self) -> str:
         """Return a string representation of the python objects making up the AST"""
 
-    @abstractmethod
-    def children(self) -> Generator['AST', None, None]:
+    def __iter__(self) -> Generator['AST', None, None]:
         """Return a generator of the children of the AST"""
+        return  # default, no children
 
     def is_settled(self) -> bool:
         """Return True if the neither the AST, nor any of its children, are prototypes"""
-        for child in self.children():
+        for child in self:
             if not child.is_settled():
                 return False
         return True
@@ -51,9 +53,6 @@ class Undefined(AST):
     def __repr__(self) -> str:
         return 'Undefined()'
 
-    def children(self) -> Generator[AST, None, None]:
-        return
-
 
 # undefined shorthand, for convenience
 undefined = Undefined()
@@ -75,9 +74,6 @@ class Void(AST):
     def __repr__(self) -> str:
         return 'Void()'
 
-    def children(self) -> Generator[AST, None, None]:
-        return
-
 
 # void shorthand, for convenience
 void = Void()
@@ -96,9 +92,6 @@ class Identifier(AST):
     def treestr(self, prefix='') -> str:
         return prefix + f'Identifier: {self.name}'
 
-    def children(self) -> Generator[AST, None, None]:
-        return
-
 
 class ListOfASTs(PrototypeAST):
     """Intermediate step for holding a list of ASTs that are probably captured by a container"""
@@ -116,6 +109,57 @@ class ListOfASTs(PrototypeAST):
         pdb.set_trace()
         raise NotImplementedError('ListOfASTs.treestr')
 
-    def children(self) -> Generator[AST, None, None]:
-        for ast in self.asts:
-            yield ast
+    def __iter__(self) -> Generator[AST, None, None]:
+        yield from self.asts
+
+
+class String(AST):
+    def __init__(self, val: str):
+        self.val = val
+
+    def __str__(self) -> str:
+        return f'"{escape_whitespace(self.val)}"'
+
+    def __repr__(self):
+        return f'String({repr(self.val)})'
+
+    def treestr(self, indent=0):
+        pdb.set_trace()
+        return f'{tab * indent}String: `{self.val}`'
+
+
+class IString(AST):
+    def __init__(self, parts: list[AST]):
+        self.parts = parts
+
+    def treestr(self, indent=0):
+        pdb.set_trace()
+        s = tab * indent + 'IString\n'
+        for part in self.parts:
+            s += part.treestr(indent + 1) + '\n'
+        return s
+
+    def __str__(self):
+        s = ''
+        for part in self.parts:
+            if isinstance(part, String):
+                s += part.val
+            else:
+                s += f'{{{part}}}'
+        return f'"{s}"'
+
+    def __repr__(self):
+        return f'IString({repr(self.parts)})'
+
+    def __iter__(self) -> Generator[AST, None, None]:
+        yield from self.parts
+
+
+# class FunctionLiteral(AST):
+#     def __init__(self, args: list[Declare], kwargs: list[Bind], body: AST):
+#         self.args = args
+#         self.kwargs = kwargs
+#         self.body = body
+
+#     def eval(self, scope: Scope) -> 'Function':
+#         return Function(self.args, self.kwargs, self.body, scope)
