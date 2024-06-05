@@ -1660,3 +1660,59 @@ main = () => {
 ```
 
 Also an orthogonal intersection with this; loading files is typically done by filename, but what if the user built a string at compiletime that would then be used to compile for runtime. I think that could be pretty powerful.
+
+## Format string specifiers ["{fmt'.2f'(x)}"]
+
+In python, you can format f-strings via certain format codes, e.g.
+
+```python
+x = 5.123456
+print(f'{x:.2f}')
+```
+
+I like the idea of quick format strings, but we need to figure out how to make this kind of thing work with dewy's syntax. One idea is that there is a format function that you partially apply with the format string, and then it receives the format input, e.g. something like this:
+
+```dewy
+
+// defining formatter functions for each type
+let f = (fmt:str, val:int): str => ... //some function for handling formatting ints
+f |= (fmt:str, val:float): str => ... //some function for handling formatting floats
+// etc. implementations of formatters
+
+
+let x = 5.123456
+printl'{x |> @f'.2f'}'
+```
+
+I think this actually looks pretty good, except for the fact that f is perhaps not the best name for the formatter function... But ideally it would be only a single letter long. If we make f a higher order function, we can get rid of the @, e.g.
+
+```dewy
+let f = (fmt:str) => (val:int): str => ... //some function for handling formatting ints
+f |= (fmt:str) => (val:float): str => ... //some function for handling formatting floats
+// etc. implementations of formatters
+
+let x = 5.123
+printl'{x |> f'.2f'}'
+```
+
+or some other options
+
+```dewy
+printl'{x |> fmt'.2f'}' //alternative name
+printl'{fmt'.2f'(x)}' //alternative syntax
+```
+
+which actually I think is probably perfect.
+
+Specific note about how I think this should be enforced,
+
+```dewy
+//somehow want to restrict T to be any concrete type that isn't `any`
+const fmt_type = <<T>(pattern:str, val:T) => (val: T) => str>
+
+//somehow fmt should not be reassignable, but you should be able to overload it. maybe we need something in addition to let/const...
+const fmt = #overload(fmt_type)
+fmt |= (pattern:str, val:int) => (val: int) => ...
+fmt |= (pattern:str, val:float) => (val: float) => ...
+// etc. formatters
+```
