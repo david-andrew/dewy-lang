@@ -1716,3 +1716,41 @@ fmt |= (pattern:str, val:int) => (val: int) => ...
 fmt |= (pattern:str, val:float) => (val: float) => ...
 // etc. formatters
 ```
+
+
+
+
+## Argument Type Propogation for spread arguments
+
+In python, you can use `*args`, and `**kwargs` to capture extra arguments and pass them further into functions. This is great, but it doesn't maintain type information at all, e.g.
+
+```python
+def g(a:bool, b:float, *args):
+    #do something with a and b
+    print(f'a: {a}, b: {b}')
+
+    #do something with the rest of the arguments
+    f(*args)
+
+def f(c: str, d: int):
+    print(f'c: {c}, d: {d}')
+```
+
+When you look at the type signature of `g`, it will say it takes `(a: bool, b: float, args: Any)`. 
+
+Dewy should properly propogate the types of the arguments, so that the type signature of `g` would actually be `(a: bool, b: float, c: str, d: int)`. Same idea with keyword arguments.
+
+```dewy
+let g = (a:bool, b:float, ...args) => {
+    printl'a: {a}, b: {b}'
+    f(...args)
+}
+
+let f = (c:str, d:int) => {
+    printl'c: {c}, d: {d}'
+}
+```
+
+TBD how hard it will be to handle this from the type checking point of view, but it is necessary for programmer convenience
+
+Also tbd is the syntax for specifying `**kwargs`. Perhaps `...args` indicates any extra arguments, regardless of how they are specified.
