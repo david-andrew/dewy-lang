@@ -1754,3 +1754,45 @@ let f = (c:str, d:int) => {
 TBD how hard it will be to handle this from the type checking point of view, but it is necessary for programmer convenience
 
 Also tbd is the syntax for specifying `**kwargs`. Perhaps `...args` indicates any extra arguments, regardless of how they are specified.
+
+
+## Strongly typed databases
+I think databases are bad, and could use an overhaul that can integrate them into languages more seamlessly. On random idea I had was about representing data with its structure+type definitions in the same place. Here's an example I was working with for collecting chinese characters into a dataset
+
+```dewy
+let Word = [
+    character: str
+    pinyin: str
+    english: str
+    level: 'HSK1' | 'HSK2' | 'HSK3' | 'HSK4' | 'HSK5' | 'HSK6'
+]
+
+let data = csv<Word>'''
+爱,ài,"to love; affection; to be fond of; to like","HSK1"
+八,bā,"eight; 8","HSK1"
+爸爸,bà ba,"father (informal); CL:个[ge4] ,位[wei4]","HSK1"
+杯子,bēi zi,"cup; glass; CL:个[ge4] ,支[zhi1]","HSK1"
+... etc.
+
+''' // necessary to end the data with a delimiter
+```
+
+Some things that could be improved would be the necessity of having the ending quote. ideally we could just have something that says anything after this point is part of the data.
+
+Perhaps we could do something more like this:
+
+```dewy
+let Word = [
+    character: str
+    pinyin: str
+    english: str
+    level: 'HSK1' | 'HSK2' | 'HSK3' | 'HSK4' | 'HSK5' | 'HSK6'
+]
+
+#data_start(csv<Word>) //could easily specify other plain-text data formats
+爱,ài,"to love; affection; to be fond of; to like","HSK1"
+八,bā,"eight; 8","HSK1"
+爸爸,bà ba,"father (informal); CL:个[ge4] ,位[wei4]","HSK1"
+杯子,bēi zi,"cup; glass; CL:个[ge4] ,支[zhi1]","HSK1"
+... etc.
+```
