@@ -1717,9 +1717,6 @@ fmt |= (pattern:str, val:float) => (val: float) => ...
 // etc. formatters
 ```
 
-
-
-
 ## Argument Type Propogation for spread arguments
 
 In python, you can use `*args`, and `**kwargs` to capture extra arguments and pass them further into functions. This is great, but it doesn't maintain type information at all, e.g.
@@ -1736,7 +1733,7 @@ def f(c: str, d: int):
     print(f'c: {c}, d: {d}')
 ```
 
-When you look at the type signature of `g`, it will say it takes `(a: bool, b: float, args: Any)`. 
+When you look at the type signature of `g`, it will say it takes `(a: bool, b: float, args: Any)`.
 
 Dewy should properly propogate the types of the arguments, so that the type signature of `g` would actually be `(a: bool, b: float, c: str, d: int)`. Same idea with keyword arguments.
 
@@ -1755,8 +1752,8 @@ TBD how hard it will be to handle this from the type checking point of view, but
 
 Also tbd is the syntax for specifying `**kwargs`. Perhaps `...args` indicates any extra arguments, regardless of how they are specified.
 
-
 ## Strongly typed databases
+
 I think databases are bad, and could use an overhaul that can integrate them into languages more seamlessly. On random idea I had was about representing data with its structure+type definitions in the same place. Here's an example I was working with for collecting chinese characters into a dataset
 
 ```dewy
@@ -1796,3 +1793,93 @@ let Word = [
 杯子,bēi zi,"cup; glass; CL:个[ge4] ,支[zhi1]","HSK1"
 ... etc.
 ```
+
+## Struct/Type definition syntax
+
+I think wherever possible, type definitions should not use new syntax, but fit within what is already established.
+
+### Structs
+
+For example, I think struct definitions look like this:
+
+```dewy
+let vect3:type = [
+    x:real
+    y:real
+    z:real
+]
+
+let p:vect3 = [x=1 y=2 z=3]
+```
+
+Basically a struct definition is just an object with a bunch of declared, but undefined fields. Then you can use that object to specify types for instances you're making.
+
+I think this clashes a little bit with the construction for making a class/instance,
+
+```dewy
+let Vect3 = (x:real, y:real, z:real) => [
+    x = x
+    y = y
+    z = z
+]
+
+let p = Vect3(1, 2, 3)
+```
+
+though that may just end up being a stylistic thing. TBD how types would be handled in the case of classes--the way I'm thinking is redundant, so perhaps there would be a shorthand
+
+```dewy
+let vect3:type = [
+    x:real
+    y:real
+    z:real
+]
+let Vect3 = (x:real, y:real, z:real): vect3 => [
+    x = x
+    y = y
+    z = z
+]
+```
+
+Also something to think about is if you can include fields in a type that are already defined, e.g. with some default value, or perhaps methods, etc.
+
+```dewy
+let vect3:type = [
+    x:real
+    y:real
+    z:real
+    length = () => sqrt(x*x + y*y + z*z)
+]
+
+
+let p:vect3 = [x=1 y=2 z=3] //does p have `.length`?
+```
+
+Perhaps declaring types on fields can do extra work when a concrete value is assigned, e.g. when doing `p:vect3 = [x=1 y=2 z=3]`, perhaps under the hood, there is an implicit `vect3[x=1 y=2 z=3]` called which attaches all the predefined fields/methods/etc. to the object.
+
+### Other types
+
+For declaring types derived from other types, I'll have to think of more examples, but the main one I can think of is for integers with restricted ranges
+
+```dewy
+let x:int<range=[0..10]> = 5
+
+let ascii:type = int<range=[0x20..0x7E)> //e.g. just printable ascii characters
+```
+
+where I think the fields you can set inside the `< >` are probably defined at struct definition time, something like this
+
+```dewy
+//probably lots more compiletime stuff that would happen with `int`, but this is the general idea
+let int:type = [
+    _value:#builtin... //perhaps this is a compiletime thing. and depending on the size of range, it makes it the smallest possible type
+
+    //type properties
+    range:range<int>=-inf..inf
+    //etc...
+]
+```
+
+### compiletime type definitions
+
+TBD how this will work, but I think the most powerful types will be defined this way
