@@ -1274,8 +1274,8 @@ Point = (x:number, y:number) => {[]}  // x and y are not captured
 Point = (x:number, y:number) => {[let x = x let y = y]}  // x and y are captured
 ```
 
-~~I think I'm still leaning towards requiring `let x = x` and `let y = y` in all cases.~~
-Actually now I'm leaning towards one of the implicit versions. This last idea about wrapping with {} to make any arguments not captured I think is actually pretty good, just requires working out the semantics
+I think I'm still leaning towards requiring `let x = x` and `let y = y` in all cases.
+~~Actually now I'm leaning towards one of the implicit versions. This last idea about wrapping with {} to make any arguments not captured I think is actually pretty good, just requires working out the semantics~~
 
 Basically, if you look at the case of creating an object without the function
 
@@ -1291,7 +1291,8 @@ obj.x // TBD if this is allowed or not
 ```
 
 While it is clear that you can use `x` within the object, it is also maybe clear that you would not be able to do something like `obj.x` as `x` was not defined within the scope of the object
-**although** actually maybe it would make sense to allow `obj.x` since perhaps the dot operator could just be looking up the scope chain for the variable `x`? It certainly makes the semantics simpler, since dot would then be just a proxy over the scope of the object. If you want to make an object that doesn't capture any of the surrounding scope, you would do something like:
+
+<!-- **although** actually maybe it would make sense to allow `obj.x` since perhaps the dot operator could just be looking up the scope chain for the variable `x`? It certainly makes the semantics simpler, since dot would then be just a proxy over the scope of the object. If you want to make an object that doesn't capture any of the surrounding scope, you would do something like:
 
 ```dewy
 let x = 10
@@ -1313,7 +1314,9 @@ let obj = {{[
     y = 20
     f = () => 10 + y
 ]}}
-```
+``` -->
+
+On further thought, the notion that `.` could be accessing the entire scope of the object is sort of dumb. I think this is very similar to the concept of namespaces, and so I think that the ideas should be merged into a single concept. `let` inside of an object is what assigns something into that object's namespace. Without `let`, the object doesn't own the item, and therefor, there is no reason the member accesser `.` should be able to see things the object doesn't own. This way the semantics are very clear and unambiguous.
 
 ## Literal arguments in functions OR literals as type annotations
 
