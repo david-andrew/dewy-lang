@@ -1961,3 +1961,40 @@ let [[do_something, something_else] = SomeLibrary] = import'path/to/SomeLibrary.
 // equivalent to the above
 ...import'path/to/SomeLibrary.dewy'.SomeLibrary
 ```
+
+
+
+## Code Snippets as first class citizens
+Very inspired by jai's macro system: https://www.youtube.com/watch?v=QX46eLqq1ps
+
+Basically, in the same way that functions are fist class citizens and can be manipulated and passed around, a more primitive form of this is code snippets. Code snippets are any code, and can be inserted places, passed around, etc. I think in the grand scheme, functions should be semantically derived from code snippets, i.e. code snippets are a generalization over functions. Snippets are also hygenic as in jai, so declarations in a snippet don't interfere with declarations where it is inserted, unless you specify that they should.
+
+```jai
+for_expansion :: (array: $T/Bucket_Array, body: Code, pointer: bool, reverse: bool) #expand {
+    `it_index := -1
+    for <=reverse bucket, bi: array.all_buckets {
+        for <=reverse *=(pointer||array.always_iterate_by_pointer) `it, i: bucket.data {
+            if !bucket.occupied[i] continue;
+
+            it_index += 1;
+            #insert body(break=break bucket, remove={bucket.occupied[i]=false; bucket.count-=1;});
+        }
+    }
+}
+```
+
+Probably manage code snippets with a `Code` type as in jai, and expand them with an `#expand` directive
+
+```dewy
+let s = #code {
+    let y = 6
+    x + y
+}
+
+
+let f = (x:int) => #expand(s)
+```
+
+Historically, I had been thinking about using backticks for code literals, but at the moment that intersects with the transpose operator...
+
+TODO: more examples on this, I think it's very powerful. Also I think the syntax isn't final
