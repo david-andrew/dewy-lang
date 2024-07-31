@@ -1886,3 +1886,78 @@ let int:type = [
 ### compiletime type definitions
 
 TBD how this will work, but I think the most powerful types will be defined this way
+
+
+## How do libraries work
+see this discussion about jai for ideas: https://www.youtube.com/watch?v=3TwEaRZ4H3w
+
+Points I like:
+- single file libraries should be a thing. So a single file should be able to be completely packaged up without any other supporting files
+- import flexibility for renaming stuff, making sure nothing overlaps
+- everything is compiled in one go as if it's all one giant source file?
+- 
+
+
+SomeLibrary.dewy
+```dewy
+//Example library
+// any values to be used by the library, but not included in the export
+let Y = 10
+let other_stuff = () => ...
+
+// Primary exported content
+export const SomeLibrary = [
+    let do_something = () => ...
+    let something_else = () => ...
+    let X = ...
+    let Z = Y * other_stuff
+]
+```
+
+```dewy
+//from the main program
+let [SL = SomeLibrary] = (import)p'SomeLibrary.dewy'
+
+// calling into the library "namespace"
+SL.do_something()
+```
+
+What if `import` was a function that wrapped `p` so you could do it like this:
+```dewy
+let SL = import'path/to/SomeLibrary.dewy'.SomeLibrary
+let [SomeLibrary] = import'path/to/SomeLibrary.dewy'
+```
+
+TBD on import syntax, more thought needed...
+What does import syntax need to accomplish
+- path to library, or library name if it's from the standard library
+- bringing in the library as it is named (ideally not having to repeat the name more than once)
+- bringin in the library with a different name
+- directly importing sub-members of the library
+- spreading all members of the library into the current scope (ideally without having to name them all)
+
+```dewy
+// import math from standard library
+let [math] = #STL
+
+// import SomeLibrary from a file
+let [SomeLibrary] = import'path/to/SomeLibrary.dewy'
+
+// import all exported members of SomeLibrary.dewy into the current scope (equivalent to the above)
+...import'path/to/SomeLibrary.dewy'
+
+// import SomeLibrary with a different name
+let [SL=SomeLibrary] = import'path/to/SomeLibrary.dewy'
+
+// import sub-members of SomeLibrary
+let [do_something, something_else] = import'path/to/SomeLibrary.dewy'.SomeLibrary
+
+// equivalent to the above
+let [[do_something, something_else] = SomeLibrary] = import'path/to/SomeLibrary.dewy'
+
+// import all members of SomeLibrary into the current scope
+// let [...SomeLibrary] = import'path/to/SomeLibrary.dewy' //TBD if this makes sense
+
+// equivalent to the above
+...import'path/to/SomeLibrary.dewy'.SomeLibrary
+```
