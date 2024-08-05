@@ -38,16 +38,15 @@ handling case insensitive identifiers (e.g. for units)
 
 
 from dataclasses import dataclass
-from .ast import Type, Undefined, Void, AST, DeclarationType
+from syntax import Type, Undefined, Void, AST, DeclarationType
 
 # from abc import ABC, abstractmethod
 # from dataclasses import dataclass, field
 # from types import EllipsisType
-# from typing import Callable as PyCallable
+from typing import Callable as PyCallable
 
 
 # import pdb
-
 
 
 # TODO: turn into a singleton...
@@ -59,8 +58,6 @@ undefined = Undefined()
 
 # void shorthand, for convenience
 void = Void()
-
-
 
 
 class Scope():
@@ -185,7 +182,6 @@ class Scope():
         return root
 
 
-
 # class Orderable(AST):
 #     """An object that can be sorted relative to other objects of the same type"""
 #     @abstractmethod
@@ -274,158 +270,32 @@ class PyAction(AST):
         return f'PyAction({self.action}, {self.return_type})'
 
 
-class Array(Iterable, Unpackable):
-    def __init__(self, vals: list[AST]):
-        self.vals = vals
+# class ArrayIter(Iter):
+#     def __init__(self, ast: AST):
+#         self.ast = ast
 
-    # def eval(self, scope: Scope):
-    #     return self
+#         self.array = None
+#         self.i = None
 
-    # def typeof(self, scope: Scope):
-    #     pdb.set_trace()
-    #     # TODO: this should include the type of the data inside the vector...
-    #     return Type('Array')
+#     # def next(self, scope: Scope = None) -> Unpackable:
+#     #     if self.array is None:
+#     #         self.array = self.ast.eval(scope)
+#     #         assert isinstance(self.array, Array), f'ArrayIter must be initialized with an AST that evaluates to an Array, not {
+#     #             type(self.array)}'
+#     #         self.i = 0
 
-    # # unpackable interface
-    # def len(self, scope: Scope):
-    #     return len(self.vals)
+#     #     if self.i < len(self.array.vals):
+#     #         ret = self.array.vals[self.i]
+#     #         self.i += 1
+#     #         return Array([Bool(True), ret])
 
-    # def get(self, key: int | EllipsisType | slice | tuple[int | EllipsisType | slice], scope: Scope):
-    #     if isinstance(key, int):
-    #         return self.vals[key]
-    #     elif isinstance(key, EllipsisType):
-    #         return self
-    #     elif isinstance(key, slice):
-    #         return Array(self.vals[key])
-    #     elif isinstance(key, tuple):
-    #         # probably only valid for N-dimensional/non-jagged vectors
-    #         raise NotImplementedError('TODO: implement tuple indexing for Array')
-    #     else:
-    #         raise TypeError(f'invalid type for Array.get: `{key}` of type `{type(key)}`')
+#     #     return Array([Bool(False), undefined])
 
-    # def iter(self, scope: Scope) -> Iter:
-    #     return ArrayIter(self)
+#     # def typeof(self):
+#     #     return Type('ArrayIter')
 
-    def treestr(self, prefix=''):
-        s = prefix + 'Array\n'
-        for v in self.vals:
-            s += v.treestr(indent + 1) + '\n'
-        return s
-
-    def __str__(self):
-        return f'[{" ".join(map(str, self.vals))}]'
-
-    def __repr__(self):
-        return f'Array({repr(self.vals)})'
-
-
-class ArrayIter(Iter):
-    def __init__(self, ast: AST):
-        self.ast = ast
-
-        self.array = None
-        self.i = None
-
-    # def eval(self, scope: Scope):
-    #     return self
-
-    # def next(self, scope: Scope = None) -> Unpackable:
-    #     if self.array is None:
-    #         self.array = self.ast.eval(scope)
-    #         assert isinstance(self.array, Array), f'ArrayIter must be initialized with an AST that evaluates to an Array, not {
-    #             type(self.array)}'
-    #         self.i = 0
-
-    #     if self.i < len(self.array.vals):
-    #         ret = self.array.vals[self.i]
-    #         self.i += 1
-    #         return Array([Bool(True), ret])
-
-    #     return Array([Bool(False), undefined])
-
-    # def typeof(self):
-    #     return Type('ArrayIter')
-
-    def treestr(self, prefix=''):
-        return f'{prefix}ArrayIter:\n{self.ast.treestr(indent + 1)}'
-
-    def __str__(self):
-        return f'ArrayIter({self.ast})'
-
-    def __repr__(self):
-        return f'ArrayIter({repr(self.ast)})'
-
-
-class String(Rangeable):
-    type: Type = Type('string')
-
-    def __init__(self, val: str):
-        self.val = val
-
-    # def eval(self, scope: Scope):
-    #     return self
-
-    # def typeof(self, scope: Scope):
-    #     return self.type
-    # # TODO: implement rangable methods
-
-    def treestr(self, indent=0):
-        return f'{tab * indent}String: `{self.val}`'
-
-    # def to_string(self, scope: Scope):
-    #     return self
-
-    # def compare(self, other: 'String', scope: 'Scope') -> 'Number':
-    #     pdb.set_trace()
-
-    # def successor(self, step: 'Number', scope: 'Scope') -> 'String':
-    #     pdb.set_trace()
-
-    # def predecessor(self, step: 'Number', scope: 'Scope') -> 'String':
-    #     pdb.set_trace()
-
-    def __str__(self):
-        return f'"{self.val}"'
-
-    def __repr__(self):
-        return f'String({repr(self.val)})'
-
-
-class IString(AST):
-    def __init__(self, parts: list[AST]):
-        self.parts = parts
-
-    # def eval(self, scope: Scope = None):
-    #     # convert self into a String()
-    #     return String(self.topy(scope))
-
-    def treestr(self, indent=0):
-        s = tab * indent + 'IString\n'
-        for part in self.parts:
-            s += part.treestr(indent + 1) + '\n'
-        return s
-
-    def __str__(self):
-        s = ''
-        for part in self.parts:
-            if isinstance(part, String):
-                s += part.val
-            else:
-                s += f'{{{part}}}'
-        return f'"{s}"'
-
-    def __repr__(self):
-        return f'IString({repr(self.parts)})'
-
-
-# class FunctionLiteral(AST):
-#     def __init__(self, args: list[Declare], kwargs: list[Bind], body: AST):
-#         self.args = args
-#         self.kwargs = kwargs
-#         self.body = body
-
-#     def eval(self, scope: Scope) -> 'Function':
-#         return Function(self.args, self.kwargs, self.body, scope)
+#     def __str__(self):
+#         return f'ArrayIter({self.ast})'
 
 
 class Function(AST):
