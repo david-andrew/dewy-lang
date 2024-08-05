@@ -95,11 +95,3 @@ Several example programs are available in [examples/](examples/). Here is a brea
 ## Documentation
 
 Currently out of date documentation is available at: https://david-andrew.github.io/dewy-lang/
-
-## License
-
-This project is dual-licensed under the MIT License and the Apache License 2.0. You may choose to use this project under the terms of either the MIT License or the Apache License 2.0. See the [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE) files in this repository for the full text of the licenses.
-
-## Contributing
-
-Contributions to this project are accepted under the same dual-license terms as the project itself. By contributing, you agree to license your contributions under both the MIT License and the Apache License 2.0.
