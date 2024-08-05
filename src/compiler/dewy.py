@@ -20,7 +20,7 @@ On each new binop AST, add an entry to the type table
 
         #lookup outtype based on the table
         outtype = types_table[self.__class__][left.typeof(), right.typeof()]
-    
+
         return outtype(self.op(left.topy(), right.topy()))
     ```
 
@@ -37,153 +37,30 @@ handling case insensitive identifiers (e.g. for units)
 """
 
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from types import EllipsisType
-from typing import Callable as PyCallable
-from enum import Enum, auto
+from .ast import Type, Undefined, Void, AST, DeclarationType
+
+# from abc import ABC, abstractmethod
+# from dataclasses import dataclass, field
+# from types import EllipsisType
+# from typing import Callable as PyCallable
 
 
-import pdb
+# import pdb
 
-
-class AST(ABC):
-    # TODO: add property to all ASTs for function complete/locked/etc. meaning it and all children are settled
-    # @abstractmethod
-    # def eval(self, scope: 'Scope') -> 'AST':
-    #     """Evaluate the AST in the given scope, and return the result (as a dewy obj) if any"""
-    # @abstractmethod
-    # def comp(self, scope: 'Scope') -> str:
-    #     """TODO: future handle compiling an AST to LLVM IR"""
-    # @abstractmethod
-    # def typeof(self, scope: 'Scope') -> 'Type':
-    #     """Return the type of the object that would be returned by eval"""
-    @abstractmethod
-    def treestr(self, prefix='') -> str:
-        """Return a string representation of the AST tree"""
-    @abstractmethod
-    def __str__(self) -> str:
-        """Return a string representation of the AST as dewy code"""
-    @abstractmethod
-    def __repr__(self) -> str:
-        """Return a string representation of the python objects making up the AST"""
-    # @abstractmethod
-    # def to_string(self, scope: 'Scope') -> 'String':
-    #     """Return a string representation of the AST. Used when automatically converting to string, e.g. in `printl`"""
-
-
-class Type(AST):
-    def __init__(self, name: str, parameters: list = None):
-        self.name = name
-        self.parameters = parameters or []
-
-    # def eval(self, scope: 'Scope') -> 'Type':
-    #     return self
-
-    # def typeof(self, scope: 'Scope') -> 'Type':
-    #     return Type('type')
-
-    def treestr(self, prefix='') -> str:
-        pdb.set_trace()
-        # return prefix + f'Type({self.name})'
-
-    # def to_string(self, scope: 'Scope') -> 'String':
-    #     return String(self.__str__())
-
-    def __str__(self) -> str:
-        if self.parameters:
-            return f'{self.name}<{", ".join(map(str, self.parameters))}>'
-        return self.name
-
-    def __repr__(self) -> str:
-        return f'Type({self.name}, {self.parameters})'
-
-    # def __eq__(self, other):
-    #     pdb.set_trace()
-
-    # @staticmethod
-    # def is_subtype(candidate: 'Type', type: 'Type') -> bool:
-    #     pdb.set_trace()
-
-    # @staticmethod
-    # def is_instance(scope: 'Scope', val: AST, type: 'Type') -> bool:
-    #     pdb.set_trace()
 
 
 # TODO: turn into a singleton...
 # untyped type for when a declaration doesn't specify a type
 untyped = Type('untyped')
 
-
-class Undefined(AST):
-    """undefined singleton"""
-
-    def __new__(cls):
-        if not hasattr(cls, 'instance'):
-            cls.instance = super(Undefined, cls).__new__(cls)
-        return cls.instance
-
-    # def eval(self, scope: 'Scope'):
-    #     return self
-
-    # def typeof(self, scope: 'Scope'):
-    #     return Type('undefined')
-
-    def treestr(self, prefix='') -> str:
-        return prefix + 'Undefined'
-
-    # def to_string(self, scope: 'Scope') -> 'String':
-    #     return String('undefined')
-
-    def __str__(self):
-        return 'undefined'
-
-    def __repr__(self):
-        return 'Undefined()'
-
-
 # undefined shorthand, for convenience
 undefined = Undefined()
-
-
-class Void(AST):
-    """void singleton"""
-
-    def __new__(cls):
-        if not hasattr(cls, 'instance'):
-            cls.instance = super(Void, cls).__new__(cls)
-        return cls.instance
-
-    # def eval(self, scope: 'Scope'):
-    #     return self
-
-    # def typeof(self, scope: 'Scope'):
-    #     return Type('void')
-
-    def treestr(self, prefix=''):
-        return prefix + 'Void'
-
-    # def to_string(self, scope: 'Scope'):
-    #     return String('void')
-
-    def __str__(self):
-        return 'void'
-
-    def __repr__(self):
-        return 'Void()'
-
 
 # void shorthand, for convenience
 void = Void()
 
 
-class DeclarationType(Enum):
-    LET = auto()
-    CONST = auto()
-    LOCAL_CONST = auto()
-
-    # default for binding without declaring
-    DEFAULT = LET
 
 
 class Scope():
@@ -307,83 +184,6 @@ class Scope():
 
         return root
 
-
-class Identifier(AST):
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    def __str__(self) -> str:
-        return f'{self.name}'
-
-    def __repr__(self) -> str:
-        return f'Identifier({self.name})'
-
-    # def eval(self, scope: Scope) -> AST:
-    #     return scope.get(self.name).eval(scope)
-
-    # def typeof(self, scope: Scope) -> Type:
-    #     return scope.get(self.name).typeof(scope)
-
-    def treestr(self, prefix='') -> str:
-        return prefix + f'Identifier: {self.name}'
-
-    # def to_string(self, scope: Scope) -> 'String':
-    #     pdb.set_trace()
-    #     # return String(self.name)
-    #     return self.eval(scope).to_string(scope)
-
-
-class Declare(AST):
-    # TODO: allow unpack as option in addition to single name
-    def __init__(self, decltype: DeclarationType, name: str, type: Type):
-        self.decltype = decltype
-        self.name = name
-        self.type = type
-
-    # def eval(self, scope: Scope):
-    #     scope.declare(self.decltype, self.name, self.type)
-
-    def treestr(self, indent=0):
-        return f'{tab * indent}{"Const" if self.const else "Let"}: {self.name}\n{self.type.treestr(indent + 1)}'
-
-    # def to_string(self, scope: Scope) -> 'String':
-    #     raise ValueError('cannot convert void expression Declare to a string')
-
-    # def typeof(self, scope: Scope) -> Type:
-    #     return void.typeof(scope)
-
-    def __str__(self):
-        return f'{self.decltype.name.lower()} {self.name}:{self.type}'
-
-    def __repr__(self):
-        return f'Declare({self.decltype.name}, {self.name}, {self.type})'
-
-
-class Bind(AST):
-    # TODO: allow bind to take in an unpack structure
-    def __init__(self, target: Declare | Identifier, value: AST):
-        self.target = target
-        self.value = value
-
-    # def eval(self, scope: Scope):
-    #     if isinstance(self.target, Declare):
-    #         self.target.eval(scope)
-    #     else:
-    #         try:
-    #             scope.get(self.target.name)
-    #         except NameError:
-    #             Declare(DeclarationType.DEFAULT, self.target.name, untyped).eval(scope)
-
-    #     scope.bind(self.target.name, self.value.eval(scope))
-
-    def treestr(self, indent=0):
-        return f'{tab * indent}Bind: {self.name}\n{self.value.treestr(indent + 1)}'
-
-    def __str__(self):
-        return f'{self.target} = {self.value}'
-
-    def __repr__(self):
-        return f'Bind({self.target!r}, {self.value!r})'
 
 
 # class Orderable(AST):
