@@ -1,44 +1,54 @@
 from typing import Callable
+from interpreter import python_interpreter
 
 
-def python_interpreter(path:str, args:list[str]):
+def python_interpreter(path: str, args: list[str]):
     from tokenizer import tokenize
     from postok import post_process
-    from parser import top_level_parse # type: ignore[reportShadowedImports]
+    from parser import top_level_parse  # type: ignore[reportShadowedImports]
     from dewy import Scope, void
 
     with open(path) as f:
         src = f.read()
-    
+
     tokens = tokenize(src)
     post_process(tokens)
 
     root = Scope.default()
     ast = top_level_parse(tokens, root)
     res = ast.eval(root)
-    if res and res is not void: print(res)
+    if res and res is not void:
+        print(res)
 
-def qbe_compiler(path:str, args:list[str]):
+
+def qbe_compiler(path: str, args: list[str]):
     raise NotImplementedError('QBE backend is not yet supported')
 
-def llvm_compiler(path:str, args:list[str]):
+
+def llvm_compiler(path: str, args: list[str]):
     raise NotImplementedError('LLVM backend is not yet supported')
 
-def c_compiler(path:str, args:list[str]):
+
+def c_compiler(path: str, args: list[str]):
     raise NotImplementedError('C backend is not yet supported')
 
-def x86_64_compiler(path:str, args:list[str]):
+
+def x86_64_compiler(path: str, args: list[str]):
     raise NotImplementedError('x86_64 backend is not yet supported')
 
-def arm(path:str, args:list[str]):
+
+def arm(path: str, args: list[str]):
     raise NotImplementedError('ARM backend is not yet supported')
 
-def riscv(path:str, args:list[str]):
+
+def riscv(path: str, args: list[str]):
     raise NotImplementedError('RISC-V backend is not yet supported')
 
-def shell(path:str, args:list[str]):
+
+def shell(path: str, args: list[str]):
     """this would target sh/powershell/etc. all simultaneously"""
     raise NotImplementedError('Shell backend is not yet supported')
+
 
 backend_map = {
     'python': python_interpreter,
@@ -57,7 +67,8 @@ backend_map = {
 }
 backends = [*backend_map.keys()]
 
-def get_backend(name:str) -> Callable[[str, list[str]], None]:
+
+def get_backend(name: str) -> Callable[[str, list[str]], None]:
     try:
         return backend_map[name.lower()]
     except:
