@@ -1,2 +1,10 @@
+#!/bin/bash
+
+# Determine the directory where the script is located
 SCRIPT_DIR="$(dirname -- "$0")"
-python "$SCRIPT_DIR/src/frontend.py" "$@"
+
+# Add the script directory to the PYTHONPATH
+export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
+
+# Run the frontend module with the provided arguments
+python -m src.frontend "$@"

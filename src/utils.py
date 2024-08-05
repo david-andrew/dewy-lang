@@ -1,6 +1,5 @@
-from typing import TypeVar, Generic
+from typing import TypeVar, Generic, Callable
 import pdb
-from typing import Callable
 
 
 def wrap_coords(method: Callable):

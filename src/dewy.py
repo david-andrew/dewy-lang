@@ -38,7 +38,7 @@ handling case insensitive identifiers (e.g. for units)
 
 
 from dataclasses import dataclass
-from syntax import Type, Undefined, Void, AST, DeclarationType
+from .syntax import Type, Undefined, Void, AST, DeclarationType
 
 # from abc import ABC, abstractmethod
 # from dataclasses import dataclass, field
@@ -47,17 +47,6 @@ from typing import Callable as PyCallable
 
 
 # import pdb
-
-
-# TODO: turn into a singleton...
-# untyped type for when a declaration doesn't specify a type
-untyped = Type('untyped')
-
-# undefined shorthand, for convenience
-undefined = Undefined()
-
-# void shorthand, for convenience
-void = Void()
 
 
 class Scope():

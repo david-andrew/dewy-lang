@@ -1,6 +1,6 @@
 # from __future__ import annotations
 
-from syntax import (
+from .syntax import (
     AST,
     Undefined, undefined,
     Void, void,
@@ -42,39 +42,40 @@ from syntax import (
     # Range,
     # RangeIter,
 )
-from tokenizer import (tokenize, tprint, traverse_tokens,
-                       unary_prefix_operators,
-                       unary_postfix_operators,
-                       binary_operators,
+from .tokenizer import (
+    tokenize, tprint, traverse_tokens,
+    unary_prefix_operators,
+    unary_postfix_operators,
+    binary_operators,
 
-                       Token,
+    Token,
 
-                       WhiteSpace_t,
+    WhiteSpace_t,
 
-                       Escape_t,
-                       Undefined_t,
-                       Identifier_t,
-                       Block_t,
-                       TypeParam_t,
-                       RawString_t,
-                       String_t,
-                       Integer_t,
-                       BasedNumber_t,
-                       Boolean_t,
-                       Hashtag_t,
-                       DotDot_t,
+    Escape_t,
+    Undefined_t,
+    Identifier_t,
+    Block_t,
+    TypeParam_t,
+    RawString_t,
+    String_t,
+    Integer_t,
+    BasedNumber_t,
+    Boolean_t,
+    Hashtag_t,
+    DotDot_t,
 
-                       Keyword_t,
+    Keyword_t,
 
-                       Juxtapose_t,
-                       Operator_t,
-                       ShiftOperator_t,
-                       Comma_t,
-                       )
+    Juxtapose_t,
+    Operator_t,
+    ShiftOperator_t,
+    Comma_t,
+)
 
-from postok import post_process, get_next_chain, is_op, Chain, Flow_t, RangeJuxtapose_t
+from .postok import post_process, get_next_chain, is_op, Chain, Flow_t, RangeJuxtapose_t
 
-from utils import based_number_to_int, bool_to_bool
+from .utils import based_number_to_int, bool_to_bool
 from dataclasses import dataclass
 from typing import Generator
 from itertools import groupby, chain as iterchain

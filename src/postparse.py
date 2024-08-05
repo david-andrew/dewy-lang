@@ -1,4 +1,4 @@
-from syntax import AST
+from .syntax import AST
 
 """after the main parsing, post parse to handle any remaining prototype asts within the main ast"""
 import pdb

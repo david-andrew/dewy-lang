@@ -3,7 +3,7 @@ from typing import Generator, Iterable, Any
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
-from tokenizer import escape_whitespace  # TODO: move into utils
+from .tokenizer import escape_whitespace  # TODO: move into utils
 
 import pdb
 
@@ -143,6 +143,11 @@ class Type(AST):
         return self.name
 
 
+# TODO: turn into a singleton...
+# untyped type for when a declaration doesn't specify a type
+untyped = Type('untyped')
+
+
 class Undefined(AST):
     """undefined singleton"""
     def __new__(cls):
@@ -154,6 +159,10 @@ class Undefined(AST):
         return 'undefined'
 
 
+# undefined shorthand, for convenience
+undefined = Undefined()
+
+
 class Void(AST):
     """void singleton"""
     def __new__(cls):
@@ -163,6 +172,10 @@ class Void(AST):
 
     def __str__(self) -> str:
         return 'void'
+
+
+# void shorthand, for convenience
+void = Void()
 
 
 class Identifier(AST):
