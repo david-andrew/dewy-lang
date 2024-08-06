@@ -10,8 +10,6 @@ from .syntax import (
     String, IString,
     # Flowable,
     # Array,
-    # Scope,
-
 
     # Orderable,
     # Rangeable,
@@ -106,11 +104,6 @@ import pdb
 # 7. generate code via a backend (e.g. llvm, c, python)
 #    -> llvm: convert ast to ssa form, then generate llvm ir from ssa form
 
-
-# class PrototypeAST(AST):
-#     def eval(self, scope: 'Scope' = None) -> AST:
-#         raise ValueError(f'Prototype ASTs may not define eval. Attempted to call eval on prototype {
-#                          self}, of type ({type(self)})')
 
 
 # class ListOfASTs(PrototypeAST):
@@ -511,16 +504,16 @@ def split_by_lowest_precedence(tokens: Chain[Token]) -> tuple[Chain[Token], Toke
 # also don't have to worry about the user making custom callable types not being parsed correctly,
 #    since they should inherit from Callable, making is_callable return true for them!
 
-def parse(tokens: list[Token]) -> AST:  # , scope: Scope) -> AST:
+def parse(tokens: list[Token]) -> AST:
 
     asts = []
     while len(tokens) > 0:
         chain, tokens = get_next_chain(tokens)
 
         if len(chain) == 1:
-            asts.append(parse_single(chain[0]))  # , scope))
+            asts.append(parse_single(chain[0]))
         else:
-            asts.append(parse_chain(chain))  # , scope))
+            asts.append(parse_chain(chain))
 
     if len(asts) == 0:
         # literally nothing was parsed
@@ -533,7 +526,7 @@ def parse(tokens: list[Token]) -> AST:  # , scope: Scope) -> AST:
     return ListOfASTs(asts)
 
 
-def parse_single(token: Token) -> AST:  # , scope: Scope) -> AST:
+def parse_single(token: Token) -> AST:
     """Parse a single token into an AST"""
     match token:
         case Undefined_t(): return undefined
@@ -543,9 +536,9 @@ def parse_single(token: Token) -> AST:  # , scope: Scope) -> AST:
         case BasedNumber_t(): return Number(based_number_to_int(token.src))
         case RawString_t(): return String(token.to_str())
         case DotDot_t(): return Range()
-        case String_t(): return parse_string(token)  # , scope)
-        case Block_t(): return parse_block(token)  # , scope)
-        case Flow_t(): return parse_flow(token)  # , scope)
+        case String_t(): return parse_string(token)
+        case Block_t(): return parse_block(token)
+        case Flow_t(): return parse_flow(token)
 
         case _:
             # TODO handle other types...
@@ -557,7 +550,7 @@ def parse_single(token: Token) -> AST:  # , scope: Scope) -> AST:
     ...
 
 
-def parse_chain(chain: Chain[Token]) -> AST:  # , scope: Scope) -> AST:
+def parse_chain(chain: Chain[Token]) -> AST:
     assert isinstance(chain, Chain), f"ERROR: parse chain may only be called on explicitly known Chain[Token], got {
         type(chain)}"
 
@@ -574,13 +567,13 @@ def parse_chain(chain: Chain[Token]) -> AST:  # , scope: Scope) -> AST:
 
     # 3 cases are prefix expr, postfix expr, or binary expr
     if left is void:
-        return build_unary_prefix_expr(op, right)  # , scope)
+        return build_unary_prefix_expr(op, right)
     if right is void:
-        return build_unary_postfix_expr(left, op)  # , scope)
-    return build_bin_expr(left, op, right)  # , scope)
+        return build_unary_postfix_expr(left, op)
+    return build_bin_expr(left, op, right)
 
 
-def build_bin_expr(left: AST, op: Token, right: AST) -> AST:  # , scope: Scope) -> AST:
+def build_bin_expr(left: AST, op: Token, right: AST) -> AST:
     """create a unary prefix expression AST from the op and right AST"""
 
     match op:
@@ -717,7 +710,7 @@ def build_bin_expr(left: AST, op: Token, right: AST) -> AST:  # , scope: Scope) 
             raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
 
 
-def build_unary_prefix_expr(op: Token, right: AST) -> AST:  # , scope: Scope) -> AST:
+def build_unary_prefix_expr(op: Token, right: AST) -> AST:
     """create a unary prefix expression AST from the op and right AST"""
     match op:
         # normal prefix operators
@@ -737,7 +730,7 @@ def build_unary_prefix_expr(op: Token, right: AST) -> AST:  # , scope: Scope) ->
             raise ValueError(f"INTERNAL ERROR: {op=} is not a known unary prefix operator")
 
 
-def build_unary_postfix_expr(left: AST, op: Token) -> AST:  # , scope: Scope) -> AST:
+def build_unary_postfix_expr(left: AST, op: Token) -> AST:
     """create a unary postfix expression AST from the left AST and op token"""
     match op:
         # normal postfix operators
@@ -751,7 +744,7 @@ def build_unary_postfix_expr(left: AST, op: Token) -> AST:  # , scope: Scope) ->
             raise NotImplementedError(f"TODO: {op=}")
 
 
-def parse_string(token: String_t) -> String | IString:  # , scope: Scope) -> String | IString:
+def parse_string(token: String_t) -> String | IString:
     """Convert a string token to an AST"""
 
     if len(token.body) == 1 and isinstance(token.body[0], str):
@@ -781,7 +774,7 @@ def parse_string(token: String_t) -> String | IString:  # , scope: Scope) -> Str
     return IString(parts)
 
 
-def parse_block(block: Block_t, scope: Scope) -> AST:
+def parse_block(block: Block_t) -> AST:
     """Convert a block token to an AST"""
 
     # if new scope block, nest the current scope
@@ -818,7 +811,7 @@ def parse_block(block: Block_t, scope: Scope) -> AST:
             raise NotImplementedError(f'block parse not implemented for {block.left+block.right}, {type(inner)}')
 
 
-def parse_flow(flow: Flow_t, scope: Scope) -> Flowable:
+def parse_flow(flow: Flow_t) -> Flowable:
 
     # special case for closing else clause in a flow chain. Treat as `<if> <true> <clause>`
     if flow.keyword is None:
@@ -838,13 +831,12 @@ def parse_flow(flow: Flow_t, scope: Scope) -> Flowable:
     ...
 
 
-def top_level_parse(tokens: list[Token], scope: Scope) -> AST:
+def top_level_parse(tokens: list[Token]) -> AST:
     """
     Parse the sequence of tokens into an AST
 
     Args:
         tokens (list[Token]): tokens to be parsed
-        scope (Scope, optional): The scope to use when determining the type of identified values. Defaults to Scope.default()
     """
 
     # ensure there is a valid scope to do the parse with
@@ -911,13 +903,13 @@ def ensure_no_prototypes(root: AST) -> None:
             raise ValueError(f'May not have any PrototypeASTs in a final AST. Found {ast} of type ({type(ast)})')
 
 
-def set_ast_scopes(root: AST, scope: Scope) -> None:
-    # TODO: hacky, just setting function scopes to root scope!
-    #      need to handle setting scope to where fn defined.
-    #      probably have traverse keep track of scope for given node!
-    for ast in full_traverse_ast(root):
-        if isinstance(ast, Function):
-            ast.scope = scope
+# def set_ast_scopes(root: AST, scope: Scope) -> None:
+#     # TODO: hacky, just setting function scopes to root scope!
+#     #      need to handle setting scope to where fn defined.
+#     #      probably have traverse keep track of scope for given node!
+#     for ast in full_traverse_ast(root):
+#         if isinstance(ast, Function):
+#             ast.scope = scope
 
 # TODO: consider adding __iter__ to AST classes instead of manually specifying them here
 #      though potentially good as is, as it forces you to implement it.
