@@ -1,3 +1,7 @@
+"""
+Collection of all the Dewy Language backends
+"""
+
 from .python import python_interpreter
 from .qbe import qbe_compiler
 from .llvm import llvm_compiler
@@ -28,7 +32,7 @@ backend_map: dict[str, Backend] = {
     'posix': shell_compiler,
     'powershell': shell_compiler,
 }
-backends = [*backend_map.keys()]
+backend_names = [*backend_map.keys()]
 
 
 def get_backend(name: str) -> Backend:

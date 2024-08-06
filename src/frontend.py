@@ -1,5 +1,5 @@
 from argparse import ArgumentParser, REMAINDER
-from .backend import backends, get_backend, python_interpreter, qbe_compiler, get_version
+from .backend import backend_names, get_backend, python_interpreter, qbe_compiler, get_version
 
 import pdb
 
@@ -16,7 +16,7 @@ def main():
     group.add_argument('-c', action='store_true',
                        help='Run in compiler mode with the llvm backend (not implemented yet)')
     group.add_argument('--backend', type=str, help=f'Specify a backend compiler/interpreter by name to use. Backends will include: {
-                       backends} (however currently only python is available).')
+                       backend_names} (however currently only python is available).')
 
     arg_parser.add_argument('-v', '--version', action='version',
                             version=f'Dewy {get_version()}', help='Print version information and exit')
