@@ -18,8 +18,19 @@ TODO:
 """
 
 
-def parse(tokens: list[Token]) -> Generator[AST, None, None]:
+def top_level_parse(tokens: list[Token]) -> AST:
+    """Main entrypoint to kick off parsing a sequence of tokens"""
+    pdb.set_trace()
+    raise NotImplementedError
+
+
+class Scope:
+    ...
+
+
+def parse(tokens: list[Token], scope: Scope) -> Generator[AST, None, None]:
     """
     Parse all tokens into a sequence of ASTs
     """
     pdb.set_trace()
+    raise NotImplementedError

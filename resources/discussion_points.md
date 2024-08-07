@@ -304,6 +304,51 @@ b = [4 5 6]
 result = a(dot)b
 ```
 
+## Ambiguous/Undecidable Parses
+
+Because of the fact that juxtaposition can mean operations with different precedence levels, combined with the ability to have expressions that perform operations before expressing the value, it is possible to construct pathological examples that are unparsable:
+
+```dewy
+// undecidable if it should be case 1 or 2
+{
+  let A: int|fn = x=>x
+  A(2)^(A=0 3)
+}
+
+// also maybe undecidable
+(let A=x=>x A)2^(let A=0 3)
+```
+
+A(B)^C
+
+case 1: left is fn, op is call
+(A(B))^C
+
+```
+pow:
+  C
+  call:
+    B
+    A
+```
+
+By evaluating C first (since exponentiation is right associative), we convert A to a number, meaning that `call` is no longer the correct operation
+
+case 2: left is value op is multiply
+A\*(B^C)
+
+```
+mul:
+  A
+  pow:
+    C
+    B
+```
+
+If you assume that it is a multiply instead of a call, A is evaluated first due to multiplication being left associative, but then at that point, A is already defined before it can be modified by the rightmost block, so A is still a function, and therefore `mul` is the wrong operation.
+
+This is a contradiction, and therefore the parse is undecidable. Such parses will raise an error on compilation. The main issue will be detecting such cases. I think the way to handle it is to pick the operation before the expression based on the current type of the expressions, and then if the precedence changes in the process of evaluating, it is a
+
 ## How to handle unit dimensionality
 
 see:
@@ -1887,18 +1932,19 @@ let int:type = [
 
 TBD how this will work, but I think the most powerful types will be defined this way
 
-
 ## How do libraries work
+
 see this discussion about jai for ideas: https://www.youtube.com/watch?v=3TwEaRZ4H3w
 
 Points I like:
+
 - single file libraries should be a thing. So a single file should be able to be completely packaged up without any other supporting files
 - import flexibility for renaming stuff, making sure nothing overlaps
 - everything is compiled in one go as if it's all one giant source file?
-- 
-
+-
 
 SomeLibrary.dewy
+
 ```dewy
 //Example library
 // any values to be used by the library, but not included in the export
@@ -1923,6 +1969,7 @@ SL.do_something()
 ```
 
 What if `import` was a function that wrapped `p` so you could do it like this:
+
 ```dewy
 let SL = import'path/to/SomeLibrary.dewy'.SomeLibrary
 let [SomeLibrary] = import'path/to/SomeLibrary.dewy'
@@ -1930,6 +1977,7 @@ let [SomeLibrary] = import'path/to/SomeLibrary.dewy'
 
 TBD on import syntax, more thought needed...
 What does import syntax need to accomplish
+
 - path to library, or library name if it's from the standard library
 - bringing in the library as it is named (ideally not having to repeat the name more than once)
 - bringin in the library with a different name
@@ -1962,9 +2010,8 @@ let [[do_something, something_else] = SomeLibrary] = import'path/to/SomeLibrary.
 ...import'path/to/SomeLibrary.dewy'.SomeLibrary
 ```
 
-
-
 ## Code Snippets as first class citizens
+
 Very inspired by jai's macro system: https://www.youtube.com/watch?v=QX46eLqq1ps
 
 Basically, in the same way that functions are fist class citizens and can be manipulated and passed around, a more primitive form of this is code snippets. Code snippets are any code, and can be inserted places, passed around, etc. I think in the grand scheme, functions should be semantically derived from code snippets, i.e. code snippets are a generalization over functions. Snippets are also hygenic as in jai, so declarations in a snippet don't interfere with declarations where it is inserted, unless you specify that they should.
