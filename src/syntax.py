@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod, ABCMeta
-from typing import Generator, Iterable, Any
+from typing import Generator, Iterable, Any, Literal, Type as TypingType
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
@@ -27,30 +27,22 @@ def anonyname[T](gen: Iterable[T], count: bool = False) -> Generator[tuple[str, 
         yield from ((f'', item) for item in gen)
 
 
-class ASTMeta(ABCMeta):
-    """
-    Metaclass for AST abstract class
-    - automatically applies the dataclass decorator with repr=False to concrete AST subclasses
-    - ensures that __iter__ is not overwritten by any child classes
-    """
-    def __new__(cls, name, bases, dct):
-        # ensure that __iter__ is not overwritten by any child classes
-        if ABC not in bases and '__iter__' in dct:
+
+class AST(ABC):
+    def __init_subclass__(cls: TypingType['AST'], **kwargs):
+        """
+        - automatically applies the dataclass decorator with repr=False to AST subclasses
+        - ensures that __iter__ is not overwritten by any child classes
+        """
+        super().__init_subclass__(**kwargs)
+        # Check if __iter__ is overridden in the subclass (not including AST itself)
+        if '__iter__' in cls.__dict__ and cls.__name__ != 'AST':
             raise AttributeError(
-                f'cannot overwrite __iter__() in class {name}(AST). Please overwrite __full_iter__() instead'
+                f"cannot overwrite __iter__() in class {cls.__name__}(AST). Please overwrite __full_iter__() instead"
             )
+        # Apply the dataclass decorator with repr=False to the subclass
+        dataclass(repr=False)(cls)
 
-        new_cls = super().__new__(cls, name, bases, dct)
-
-        # apply the dataclass decorator with repr=False to all AST classes
-        if ABC not in bases:
-            new_cls = dataclass(repr=False)(new_cls)
-
-        return new_cls
-
-
-@dataclass(repr=False)
-class AST(ABC, metaclass=ASTMeta):
     # TODO: add property to all ASTs for function complete/locked/etc. meaning it and all children are settled
     @abstractmethod
     def __str__(self) -> str:
@@ -60,7 +52,7 @@ class AST(ABC, metaclass=ASTMeta):
         """
         Returns a string representation of the AST tree with correct indentation for each sub-component
 
-        e.g. 
+        e.g.
         SomeAST(prop0=..., prop1=...)
         ├── child0=SomeSubAST(...)
         ├── child1=SomeOtherAST(...)
@@ -236,11 +228,36 @@ class ListOfASTs(PrototypeAST):
         yield from anonyname(self.asts)
 
 
-class Array(AST):
+# class Block(AST):
+#     items: list[AST]
+
+#     # def __init__(self, exprs:list[AST], newscope:bool=True):
+#     #     self.exprs = exprs
+#     #     self.newscope = newscope
+#     # def eval(self, scope:Scope=None):
+#     #     #TODO: handle flow control from a block, e.g. return, break, continue, express, etc.
+#     #     if self.newscope:
+#     #         scope = Scope(scope)
+#     #     expressed = []
+#     #     for expr in self.exprs:
+#     #         res = expr.eval(scope)
+#     #         if res is not None and res is not void:
+#     #             expressed.append(res)
+#     #     if len(expressed) == 0:
+#     #         return void
+#     #     if len(expressed) == 1:
+#     #         return expressed[0]
+#     #     raise NotImplementedError('block with multiple expressions not yet supported')
+#     #     #TODO: this is actually a lot like `yield`! maybe `yield` should be instead of `express` or they are synonymous
+#     #     return Array(expressed)
+
+
+class Block(AST):
     items: list[AST]
+    brackets: Literal['{}', '[]', '(]', '[)', '()', '<>']
 
     def __str__(self):
-        return f'[{", ".join(map(str, self.items))}]'
+        return f'{self.brackets[0]}{" ".join(map(str, self.items))}{self.brackets[1]}'
 
     def __full_iter__(self) -> Generator[tuple[str, AST], None, None]:
         yield from anonyname(self.items)
@@ -265,7 +282,7 @@ class IString(AST):
                 s += f'{{{part}}}'
         return f'"{s}"'
 
-    def __full_iter__(self) -> Generator[AST, None, None]:
+    def __full_iter__(self) -> Generator[tuple[str, AST], None, None]:
         yield from anonyname(self.parts)
 
 
