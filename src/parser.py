@@ -77,7 +77,7 @@ class qint:
 
     def __ge__(self, other: 'int|qint') -> bool: return self.__gt__(other)
     def __le__(self, other: 'int|qint') -> bool: return self.__lt__(other)
-    def __eq__(self, other: 'int|qint') -> bool: return False
+    def __eq__(self, other: object) -> bool: return False
 
 
 ######### Operator Precedence Table #########
@@ -108,7 +108,7 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.left, [Operator_t('and'), Operator_t('nand'), Operator_t('&')]),
     (Associativity.left, [Operator_t('xor'), Operator_t('xnor')]),
     (Associativity.left, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
-    (Associativity.none,  [Comma_t(None)]),
+    (Associativity.none,  [Comma_t(',')]),
     (Associativity.left, [RangeJuxtapose_t(None)]),  # jux-range
     (Associativity.right,  [Operator_t('=>')]),  # () => () => () => 42
     (Associativity.fail,  [Operator_t('=')]),
@@ -134,7 +134,7 @@ for i, (assoc, group) in enumerate(operator_groups):
             precedence_table[op] = qint(val.values | {i})
 
 
-def operator_precedence(op: Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t) -> int | qint:
+def operator_precedence(op: Operator_t) -> int | qint:
     """
     precedence:
     [HIGHEST]
@@ -180,7 +180,7 @@ def operator_precedence(op: Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t
         raise ValueError(f"ERROR: expected operator, got {op=}") from None
 
 
-def operator_associativity(op: Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t | int) -> Associativity:
+def operator_associativity(op: Operator_t | int) -> Associativity:
     if not isinstance(op, int):
         i = operator_precedence(op)
         assert isinstance(i, int), f'Cannot determine associativity of operator ({

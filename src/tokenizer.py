@@ -415,26 +415,26 @@ def full_eat(whitelist: list[Type[Token]] | None = None, blacklist: list[Type[To
     return decorator
 
 
-def get_peek_eat_funcs_with_name() -> tuple[tuple[str, Callable]]:
+def get_peek_eat_funcs_with_name() -> tuple[tuple[str, Callable], ...]:
     return tuple((name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_peek_eat_decorator', False))
 
 
-def get_full_eat_funcs_with_name() -> tuple[tuple[str, Callable]]:
+def get_full_eat_funcs_with_name() -> tuple[tuple[str, Callable], ...]:
     return tuple((name, func) for name, func in globals().items() if callable(func) and getattr(func, '_is_full_eat_decorator', False))
 
 
-def get_eat_funcs() -> tuple[Callable]:
+def get_eat_funcs() -> tuple[Callable, ...]:
     return tuple(func for name, func in get_peek_eat_funcs_with_name() + get_full_eat_funcs_with_name())
 
 
 @lru_cache()
-def get_contextual_eat_funcs(context: Type[Token]) -> tuple[Callable]:
+def get_contextual_eat_funcs(context: Type[Token]) -> tuple[Callable, ...]:
     """Get all the eat functions that are valid in the given context"""
     return tuple(func for func in get_eat_funcs() if (func._whitelist is None or context in func._whitelist) and (func._blacklist is None or context not in func._blacklist))
 
 
 @lru_cache()
-def get_func_precedences(funcs: tuple[Callable]) -> tuple[int]:
+def get_func_precedences(funcs: tuple[Callable]) -> tuple[int, ...]:
     assert isinstance(funcs, tuple)
     return tuple(precedence.get(func._token_cls, 0) for func in funcs)
 
