@@ -182,8 +182,8 @@ class Associativity(Enum):
     none = auto()
     fail = auto()
 
-
-operator_groups: list[tuple[Associativity, list[Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t]]] = list(reversed([
+from typing import Sequence
+operator_groups: list[tuple[Associativity, Sequence[Operator_t | ShiftOperator_t | Juxtapose_t | RangeJuxtapose_t | Comma_t]]] = list(reversed([
     (Associativity.prefix, [Operator_t('@')]),
     (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),  # jux-call, jux-index
     (Associativity.prefix, [Operator_t('not')]),

@@ -85,8 +85,9 @@ class Flow_t(Token):
 # class Declare_t(Token):...
 
 
-class RangeJuxtapose_t(Token):
-    def __init__(self, _): ...
+class RangeJuxtapose_t(Operator_t):
+    def __init__(self, _):
+        super().__init__('')
 
     def __repr__(self) -> str:
         return "<RangeJuxtapose_t>"
@@ -246,7 +247,7 @@ def is_unary_prefix_op(token: Token) -> bool:
 
 def is_unary_postfix_op(token: Token, exclude_semicolon: bool = False) -> bool:
     """
-    Determines if a token could be a unary postfix operator. 
+    Determines if a token could be a unary postfix operator.
     Optionally can exclude semicolon from the set of operators.
     Note that this is not mutually exclusive with being a prefix operator or a binary operator.
     """

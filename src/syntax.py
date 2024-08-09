@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod, ABCMeta
-from typing import Generator, Iterable, Any, Literal, Type as TypingType
+from typing import Generator, Iterable, Any, Literal, Type as TypingType, dataclass_transform
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
@@ -27,7 +27,7 @@ def anonyname[T](gen: Iterable[T], count: bool = False) -> Generator[tuple[str, 
         yield from ((f'', item) for item in gen)
 
 
-@dataclass(repr=False)
+@dataclass_transform()#field_specifiers=(field,))
 class AST(ABC):
     def __init_subclass__(cls: TypingType['AST'], **kwargs):
         """
@@ -40,8 +40,8 @@ class AST(ABC):
             raise AttributeError(
                 f"cannot overwrite __iter__() in class {cls.__name__}(AST). Please overwrite __full_iter__() instead"
             )
-        # # Apply the dataclass decorator with repr=False to the subclass
-        # dataclass(repr=False)(cls)
+        # Apply the dataclass decorator with repr=False to the subclass
+        dataclass(repr=False)(cls)
 
     # TODO: add property to all ASTs for function complete/locked/etc. meaning it and all children are settled
     @abstractmethod
@@ -117,7 +117,6 @@ class AST(ABC):
         return True
 
 
-@dataclass(repr=False)
 class PrototypeAST(AST, ABC):
     """Used to represent AST nodes that are not complete, and must be removed before the whole AST is evaluated"""
 
@@ -126,7 +125,6 @@ class PrototypeAST(AST, ABC):
         return False
 
 
-@dataclass(repr=False)
 class Type(AST):
     name: str
     parameters: list = field(default_factory=list)
@@ -142,7 +140,6 @@ class Type(AST):
 untyped = Type('untyped')
 
 
-@dataclass(repr=False)
 class Undefined(AST):
     """undefined singleton"""
     def __new__(cls):
@@ -158,7 +155,6 @@ class Undefined(AST):
 undefined = Undefined()
 
 
-@dataclass(repr=False)
 class Void(AST):
     """void singleton"""
     def __new__(cls):
@@ -174,7 +170,6 @@ class Void(AST):
 void = Void()
 
 
-@dataclass(repr=False)
 class Identifier(AST):
     name: str
 
@@ -182,7 +177,6 @@ class Identifier(AST):
         return f'{self.name}'
 
 
-@dataclass(repr=False)
 class TypedIdentifier(AST):
     id: Identifier
     type: Type
@@ -191,14 +185,12 @@ class TypedIdentifier(AST):
         return f'{self.id}:{self.type}'
 
 
-@dataclass(repr=False)
 class UnpackTarget(AST):
     def __str__(self):
         target: list[Identifier | UnpackTarget]
         raise NotImplementedError('UnpackTarget is not implemented yet')
 
 
-@dataclass(repr=False)
 class DeclarationType(Enum):
     LET = auto()
     CONST = auto()
@@ -208,7 +200,6 @@ class DeclarationType(Enum):
     DEFAULT = LET
 
 
-@dataclass(repr=False)
 class Declare(AST):
     decltype: DeclarationType
     target: Identifier | TypedIdentifier | UnpackTarget
@@ -217,7 +208,6 @@ class Declare(AST):
         return f'{self.decltype.name.lower()} {self.target}'
 
 
-@dataclass(repr=False)
 class Assign(AST):
     # TODO: allow bind to take in an unpack structure
     target: Declare | Identifier | UnpackTarget
@@ -227,7 +217,6 @@ class Assign(AST):
         return f'{self.target} = {self.value}'
 
 
-@dataclass(repr=False)
 class ListOfASTs(PrototypeAST):
     """Intermediate step for holding a list of ASTs that are probably captured by a container"""
     asts: list[AST]
@@ -239,7 +228,6 @@ class ListOfASTs(PrototypeAST):
         yield from anonyname(self.asts)
 
 
-@dataclass(repr=False)
 class Block(AST):
     items: list[AST]
     brackets: Literal['{}', '[]', '(]', '[)', '()', '<>']
@@ -251,7 +239,6 @@ class Block(AST):
         yield from anonyname(self.items)
 
 
-@dataclass(repr=False)
 class String(AST):
     val: str
 
@@ -259,7 +246,6 @@ class String(AST):
         return f'"{escape_whitespace(self.val)}"'
 
 
-@dataclass(repr=False)
 class IString(AST):
     parts: list[AST]
 
@@ -276,7 +262,6 @@ class IString(AST):
         yield from anonyname(self.parts)
 
 
-# @dataclass(repr=False)
 # class FunctionLiteral(AST):
 #     args: list[Declare]
 #     kwargs: list[Bind]

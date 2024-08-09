@@ -52,8 +52,23 @@ class WhiteSpace_t(Token):
     def __init__(self, _): ...
 
 
-class Juxtapose_t(Token):
-    def __init__(self, _): ...
+class Operator_t(Token):
+    def __init__(self, op: str):
+        self.op = op
+
+    def __repr__(self) -> str:
+        return f"<Operator_t: `{self.op}`>"
+
+    def __hash__(self) -> int:
+        return hash((Operator_t, self.op))
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Operator_t) and self.op == other.op
+
+
+class Juxtapose_t(Operator_t):
+    def __init__(self, _):
+        super().__init__('')
 
     def __hash__(self) -> int:
         return hash(Juxtapose_t)
@@ -243,21 +258,7 @@ class Boolean_t(Token):
         return f"<Boolean_t: {self.src}>"
 
 
-class Operator_t(Token):
-    def __init__(self, op: str):
-        self.op = op
-
-    def __repr__(self) -> str:
-        return f"<Operator_t: `{self.op}`>"
-
-    def __hash__(self) -> int:
-        return hash((Operator_t, self.op))
-
-    def __eq__(self, other) -> bool:
-        return isinstance(other, Operator_t) and self.op == other.op
-
-
-class ShiftOperator_t(Token):
+class ShiftOperator_t(Operator_t):
     def __init__(self, op: str):
         self.op = op
 
@@ -271,7 +272,7 @@ class ShiftOperator_t(Token):
         return isinstance(other, ShiftOperator_t) and self.op == other.op
 
 
-class Comma_t(Token):
+class Comma_t(Operator_t):
     def __init__(self, src: str):
         self.src = src
 
@@ -367,7 +368,7 @@ number_bases = {
 
 def peek_eat(cls: Type[Token], whitelist: list[Type[Token]] | None = None, blacklist: list[Type[Token]] | None = None):
     """
-    Decorator for functions that eat tokens, but only return how many characters would make up the token. 
+    Decorator for functions that eat tokens, but only return how many characters would make up the token.
     Makes function return include constructor for token class that it tries to eat, in tupled with return.
 
     whitelist and blacklist can be used to specify parent token contexts that may or may not consume this type as a child
@@ -492,7 +493,7 @@ def eat_keyword(src: str) -> int | None:
     """
     Eat a reserved keyword, return the number of characters eaten
 
-    #keyword = {in} | {as} | {loop} | {lazy} | {if} | {and} | {or} | {xor} | {nand} | {nor} | {xnor} | {not};# | {true} | {false}; 
+    #keyword = {in} | {as} | {loop} | {lazy} | {if} | {and} | {or} | {xor} | {nand} | {nor} | {xnor} | {not};# | {true} | {false};
 
     noting that keywords are case insensitive
     """
@@ -564,7 +565,7 @@ def eat_escape(src: str) -> int | None:
     r"""
     Eat an escape sequence, return the number of characters eaten
     Escape sequences must be either a known escape sequence:
-    - \n newline 
+    - \n newline
     - \r carriage return
     - \t tab
     - \b backspace
@@ -575,7 +576,7 @@ def eat_escape(src: str) -> int | None:
     - \u##..# or \U##..# for an arbitrary unicode character. May have any number of hex digits
 
     or a \ followed by an unknown character. In this case, the escape converts to just the unknown character
-    This is how to insert characters that are otherwise illegal inside a string, e.g. 
+    This is how to insert characters that are otherwise illegal inside a string, e.g.
     - \' converts to just a single quote '
     - \{ converts to just a single open brace {
     - \\ converts to just a single backslash \
@@ -802,7 +803,7 @@ def eat_shift_operator(src: str) -> int | None:
     """
     eat a shift operator, return the number of characters eaten
 
-    picks the longest matching operator. 
+    picks the longest matching operator.
     Shift operators are not allowed in type parameters, e.g. `>>` is not recognized in `Foo<Bar<Baz<T>>, U>`
 
     see `shift_operators` for full list of operators
@@ -839,7 +840,7 @@ def eat_type_param(src: str) -> tuple[int, TypeParam_t] | None:
     """
     eat a type parameter, return the number of characters eaten and an instance of the TypeParam token
 
-    type parameters are of the form <...> where ... is a sequence of tokens. 
+    type parameters are of the form <...> where ... is a sequence of tokens.
     Type parameters may not start with `<<` or contain any shift operators (`<<`, `<<<`, `>>`, `>>>`)
     Internally encountered shift operators are considered to be delimiters for the type parameter
     """
@@ -1110,7 +1111,7 @@ def validate_block_braces(tokens: list[Token]) -> None:
 
     For example, ranges may have differing open/close pairs, e.g. [0..10), (0..10], etc.
     But regular blocks must have matching open/close pairs, e.g. { ... }, ( ... ), [ ... ]
-    Performs some validation, without knowing if the block is a range or a block. 
+    Performs some validation, without knowing if the block is a range or a block.
     So more validation is needed when the actual block type is known.
 
     Raises:
