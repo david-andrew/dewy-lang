@@ -1,7 +1,8 @@
 from typing import Generator
 
 from .syntax import (
-    AST
+    AST,
+    Block
 )
 from .tokenizer import (
     Token
@@ -18,14 +19,28 @@ TODO:
 """
 
 
+class Scope:
+
+    # TODO: rest of implementation
+    @staticmethod
+    def default() -> 'Scope':
+        # TODO: scope should include default functions for printl, print, readl, etc.
+        return Scope()
+
+
 def top_level_parse(tokens: list[Token]) -> AST:
     """Main entrypoint to kick off parsing a sequence of tokens"""
+
+    scope = Scope.default()
+
+    items = [*parse(tokens, scope)]
+    if len(items) == 1:
+        return items[0]
+
+    return Block(items, '{}')
+
     pdb.set_trace()
     raise NotImplementedError
-
-
-class Scope:
-    ...
 
 
 def parse(tokens: list[Token], scope: Scope) -> Generator[AST, None, None]:
