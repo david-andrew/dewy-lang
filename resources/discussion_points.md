@@ -1106,7 +1106,7 @@ foo = (a:int, b:int=1, c:int=2) => a+b+c
 1, 2, 3 as a, b, c
 ```
 
-## Should we get rid of the low precedence range juxtapose, and force ranges with step size to wrap the tuple in parenthesis, or should loops with multiple iterators require parenthesis around each iterator? [leaning have range-jux have lower precedence than comma, and any time you want to do `a in range`, you need to wrap the range. `in` gets higher precedence than logical operators]
+## Should we get rid of the low precedence range juxtapose, and force ranges with step size to wrap the tuple in parenthesis, or should loops with multiple iterators require parenthesis around each iterator? [leaning increase range-jux precedence above logical operators, and require any ranges with step size to be wrapped in parenthesis]
 
 Currently there is a conflict with the operator precedence. We cannot have both of these:
 

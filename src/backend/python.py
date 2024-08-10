@@ -17,6 +17,7 @@ def python_interpreter(path: str, args: list[str]):
     post_process(tokens)
 
     ast = top_level_parse(tokens)
+    print(f'parsed AST: {ast}\n{repr(ast)}')
     res = top_level_evaluate(ast)
     if res and res is not void:
         print(res)

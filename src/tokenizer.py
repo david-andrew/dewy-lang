@@ -288,6 +288,10 @@ class DotDot_t(Token):
         self.src = src
 
 
+class DotDotDot_t(Token):
+    def __init__(self, src: str):
+        self.src = src
+
 # #TODO: these should probably each be their own class/token, or a single class..
 # these should all be case insensitive
 # reserved_values = ['true', 'false', 'void', 'undefined', 'end']
@@ -320,7 +324,7 @@ valid_delim_closers = {
 
 # list of all operators sorted from longest to shortest
 # TODO: make @ and ... into expressions (perhaps with lower precedence calling than regular calls?)
-unary_prefix_operators = {'+', '-', '*', '/', 'not', '@', '...'}
+unary_prefix_operators = {'+', '-', '*', '/', 'not', '@'}#, '...'}
 unary_postfix_operators = {'?', '`', ';'}
 binary_operators = {
     '+', '-', '*', '/', '%', '^',

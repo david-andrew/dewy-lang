@@ -3,7 +3,7 @@ from typing import Generator, Iterable, Any, Literal, Type as TypingType, datacl
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
-from .tokenizer import escape_whitespace  # TODO: move into utils
+from .tokenizer import Operator_t, escape_whitespace  # TODO: move into utils
 
 import pdb
 
@@ -208,13 +208,13 @@ class Declare(AST):
         return f'{self.decltype.name.lower()} {self.target}'
 
 
-class Assign(AST):
-    # TODO: allow bind to take in an unpack structure
-    target: Declare | Identifier | UnpackTarget
-    value: AST
+# class Assign(AST):
+#     # TODO: allow bind to take in an unpack structure
+#     target: Declare | Identifier | UnpackTarget
+#     value: AST
 
-    def __str__(self):
-        return f'{self.target} = {self.value}'
+#     def __str__(self):
+#         return f'{self.target} = {self.value}'
 
 
 class ListOfASTs(PrototypeAST):
@@ -262,29 +262,152 @@ class IString(AST):
         yield from anonyname(self.parts)
 
 
+class Flowable(AST, ABC):
+    ...
+    # def was_entered(self) -> bool:
+    #     """Determine if the flowable branch was entered. Should reset before performing calls to flow and checking this."""
+    #     raise NotImplementedError(f'flowables must implement `was_entered()`. No implementation found for {self.__class__}')
+
+    # def reset_was_entered(self) -> None:
+    #     """reset the state of was_entered, in preparation for executing branches in a flow"""
+    #     raise NotImplementedError(f'flowables must implement `reset_was_entered()`. No implementation found for {self.__class__}')
+
+
 # class FunctionLiteral(AST):
 #     args: list[Declare]
 #     kwargs: list[Bind]
 #     body: AST
 
+#TODO: perhaps args could just be AST|None, where multi-args would be represented as e.g. ListOfArgs, etc.
+class Call(AST):
+    f: AST
+    args: None | AST | list[AST] = None
+
+    def __str__(self):
+        if self.args is None:
+            return f'{self.f}()'
+        if isinstance(self.args, AST):
+            return f'{self.f}({self.args})'
+        return f'{self.f}({", ".join(map(str, self.args))})'
+
+    def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
+        yield ('f', self.f)
+        if self.args is not None:
+            if isinstance(self.args, AST):
+                yield ('', self.args)
+            else:
+                yield from anonyname(self.args)
+
+
+
+class BinOp(AST, ABC):
+    left: AST
+    right: AST
+
+class Assign(BinOp):
+    def __str__(self): return f'{self.left} = {self.right}'
+
+class Equal(BinOp):
+    def __str__(self): return f'{self.left} =? {self.right}'
+
+# class NotEqual(BinOp):
+#     def __str__(self): return f'{self.left} not=? {self.right}'
+
+class Less(BinOp):
+    def __str__(self): return f'{self.left} <? {self.right}'
+
+class LessEqual(BinOp):
+    def __str__(self): return f'{self.left} <=? {self.right}'
+
+class Greater(BinOp):
+    def __str__(self): return f'{self.left} >? {self.right}'
+
+class GreaterEqual(BinOp):
+    def __str__(self): return f'{self.left} >=? {self.right}'
+
+class Add(BinOp):
+    def __str__(self): return f'{self.left} + {self.right}'
+
+class Sub(BinOp):
+    def __str__(self): return f'{self.left} - {self.right}'
+
+class Mul(BinOp):
+    def __str__(self): return f'{self.left} * {self.right}'
+
+class Div(BinOp):
+    def __str__(self): return f'{self.left} / {self.right}'
+
+class IDiv(BinOp):
+    def __str__(self): return f'{self.left} ÷ {self.right}'
+
+class Mod(BinOp):
+    def __str__(self): return f'{self.left} % {self.right}'
+
+class Pow(BinOp):
+    def __str__(self): return f'{self.left} ^ {self.right}'
+
+class And(BinOp):
+    def __str__(self): return f'{self.left} and {self.right}'
+
+class Or(BinOp):
+    def __str__(self): return f'{self.left} or {self.right}'
+
+class Xor(BinOp):
+    def __str__(self): return f'{self.left} xor {self.right}'
+
+class Nand(BinOp):
+    def __str__(self): return f'{self.left} nand {self.right}'
+
+class Nor(BinOp):
+    def __str__(self): return f'{self.left} nor {self.right}'
+
+class Xnor(BinOp):
+    def __str__(self): return f'{self.left} xnor {self.right}'
+
+class IterIn(BinOp):
+    def __str__(self): return f'{self.left} in {self.right}'
+
+class MemberIn(BinOp):
+    def __str__(self): return f'{self.left} in? {self.right}'
+
+class UnaryPrefixOp(AST, ABC):
+    operand: AST
+
+class Not(UnaryPrefixOp):
+    def __str__(self): return f'not {self.operand}'
+
+class Neg(UnaryPrefixOp):
+    def __str__(self): return f'-{self.operand}'
+
+# class Pos(UnaryPrefixOp):
+#     def __str__(self): return f'+{self.operand}'
+
+class UnaryDiv(UnaryPrefixOp):
+    def __str__(self): return f'/{self.operand}'
+
+
+class UnaryPostfixOp(AST, ABC):
+    operand: AST
+
+
 
 if __name__ == '__main__':
     # DEBUG testing tree string printing
-    class Add(AST):
+    class _Add(AST):
         l: AST
         r: AST
 
         def __str__(self) -> str:
             return f'{self.l} + {self.r}'
 
-    class Mul(AST):
+    class _Mul(AST):
         l: AST
         r: AST
 
         def __str__(self) -> str:
             return f'{self.l} * {self.r}'
 
-    class List(AST):
+    class _List(AST):
         items: list[AST]
 
         def __str__(self) -> str:
@@ -293,34 +416,35 @@ if __name__ == '__main__':
         def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
             yield from (('', v) for v in self.items)
 
-    class Int(AST):
+    class _Int(AST):
         value: int
 
         def __str__(self) -> str:
             return str(self.value)
 
     # big long test ast
-    test = Add(
-        Add(
-            Int(1),
-            List([Int(2), Int(3), Int(4), Int(5)])
+    test = _Add(
+        _Add(
+            _Int(1),
+            _List([_Int(2), _Int(3), _Int(4), _Int(5)])
         ),
-        Mul(
-            Int(2),
-            Add(
-                Mul(
-                    Int(3),
-                    Int(4)
+        _Mul(
+            _Int(2),
+            _Add(
+                _Mul(
+                    _Int(3),
+                    _Int(4)
                 ),
-                Mul(
-                    Int(5),
-                    Int(6)
+                _Mul(
+                    _Int(5),
+                    _Int(6)
                 )
             )
         )
     )
 
     print(repr(test))
+    print(str(test))
     # class Broken(AST):
     #     num: int
     #     def __str__(self) -> str:
