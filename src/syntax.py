@@ -167,7 +167,7 @@ class Void(AST):
         return cls.instance
 
     def __str__(self) -> str:
-        return 'void'
+        return ''#'void'
 
 
 # void shorthand, for convenience
@@ -256,6 +256,12 @@ class Block(AST, Delimited):
         yield ('brackets', self.brackets)
         yield from anonyname(self.items)
 
+
+class Array(AST, Delimited):
+    items: list[AST]
+
+    def __str__(self):
+        return f'[{" ".join(map(str, self.items))}]'
 
 # class Number(AST):
 #     val: int | float | Fraction

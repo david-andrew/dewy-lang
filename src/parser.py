@@ -5,7 +5,7 @@ from itertools import groupby, chain as iterchain
 
 from .syntax import (
     AST,
-    Block, ListOfASTs, Tuple,
+    Block, ListOfASTs, Tuple, Array,
     void, undefined,
     String, IString,
     Flowable, Flow, If, Loop, Default,
@@ -14,9 +14,11 @@ from .syntax import (
     Assign,
     Int, Bool,
     Range, IterIn,
-    Less, LessEqual, Greater, GreaterEqual, Equal,
+    Less, LessEqual, Greater, GreaterEqual, Equal, MemberIn,
     LeftShift, RightShift, LeftRotate, RightRotate, LeftRotateCarry, RightRotateCarry,
-    Add, Sub, Mul, Div, IDiv, Mod, Pow
+    Add, Sub, Mul, Div, IDiv, Mod, Pow,
+    And, Or, Xor, Nand, Nor, Xnor,
+    Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv,
 )
 from .tokenizer import (
     Token,
@@ -425,18 +427,18 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         case Operator_t(op='<?'): return Less(left, right)
         case Operator_t(op='>=?'): return GreaterEqual(left, right)
         case Operator_t(op='<=?'): return LessEqual(left, right)
-        # case Operator_t(op='in?'): return MemberIn(left, right)
+        case Operator_t(op='in?'): return MemberIn(left, right)
         # case Operator_t(op='is?'): return Is(left, right)
         # case Operator_t(op='isnt?'): return Isnt(left, right)
         # case Operator_t(op='<=>'): return ThreewayCompare(left, right)
 
         # Logical Operators. TODO: outtype=Bool is not flexible enough...
-        case Operator_t(op='and'): return And(left, right, outtype=Bool)
-        case Operator_t(op='or'): return Or(left, right, outtype=Bool)
-        case Operator_t(op='nand'): return Nand(left, right, outtype=Bool)
-        case Operator_t(op='nor'): return Nor(left, right, outtype=Bool)
-        case Operator_t(op='xor'): return Xor(left, right, outtype=Bool)
-        case Operator_t(op='xnor'): return Xnor(left, right, outtype=Bool)
+        case Operator_t(op='and'): return And(left, right)
+        case Operator_t(op='or'): return Or(left, right)
+        case Operator_t(op='nand'): return Nand(left, right)
+        case Operator_t(op='nor'): return Nor(left, right)
+        case Operator_t(op='xor'): return Xor(left, right)
+        case Operator_t(op='xnor'): return Xnor(left, right)
 
         # Misc Operators
         case RangeJuxtapose_t():
@@ -515,11 +517,11 @@ def build_unary_prefix_expr(op: Token, right: AST, scope: Scope) -> AST:
     """create a unary prefix expression AST from the op and right AST"""
     match op:
         # normal prefix operators
-        case Operator_t(op='+'): return right
-        case Operator_t(op='-'): return Neg(right, None)
-        case Operator_t(op='*'): return right
-        case Operator_t(op='/'): return Inv(right, None)
-        case Operator_t(op='not'): return Not(right, outtype=Bool)  # TODO: don't want to hardcode Bool here!
+        case Operator_t(op='+'): return UnaryPos(right)
+        case Operator_t(op='-'): return UnaryNeg(right)
+        case Operator_t(op='*'): return UnaryMul(right)
+        case Operator_t(op='/'): return UnaryDiv(right)
+        case Operator_t(op='not'): return Not(right)  # TODO: don't want to hardcode Bool here!
         case Operator_t(op='@'): raise NotImplementedError(f"TODO: prefix op: {op=}")
         case Operator_t(op='...'): raise NotImplementedError(f"TODO: prefix op: {op=}")
 
