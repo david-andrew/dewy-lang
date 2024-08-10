@@ -5,17 +5,18 @@ from itertools import groupby, chain as iterchain
 
 from .syntax import (
     AST,
-    Block,
-    ListOfASTs,
-    void,
-    String,
-    IString,
-    Flowable,
+    Block, ListOfASTs, Tuple,
+    void, undefined,
+    String, IString,
+    Flowable, Flow, If, Loop, Default,
     Identifier,
-    Function,
-    Call,
+    Function, Call,
     Assign,
-
+    Int, Bool,
+    Range, IterIn,
+    Less, LessEqual, Greater, GreaterEqual, Equal,
+    LeftShift, RightShift, LeftRotate, RightRotate, LeftRotateCarry, RightRotateCarry,
+    Add, Sub, Mul, Div, IDiv, Mod, Pow
 )
 from .tokenizer import (
     Token,
@@ -33,6 +34,7 @@ from .tokenizer import (
     BasedNumber_t,
     RawString_t,
     DotDot_t,
+    Keyword_t,
 )
 from .postok import (
     RangeJuxtapose_t,
@@ -40,9 +42,11 @@ from .postok import (
     Chain,
     is_op,
     Flow_t,
-
 )
-
+from .utils import (
+    bool_to_bool,
+    based_number_to_int,
+)
 
 import pdb
 
@@ -348,11 +352,11 @@ def parse_single(token: Token, scope: Scope) -> AST:
     match token:
         case Undefined_t(): return undefined
         case Identifier_t(): return Identifier(token.src)
-        case Integer_t(): return Number(int(token.src))
+        case Integer_t(): return Int(int(token.src))
         case Boolean_t(): return Bool(bool_to_bool(token.src))
-        case BasedNumber_t(): return Number(based_number_to_int(token.src))
+        case BasedNumber_t(): return Int(based_number_to_int(token.src))
         case RawString_t(): return String(token.to_str())
-        case DotDot_t(): return Range()
+        case DotDot_t(): return Range(void, void, '()')
         case String_t(): return parse_string(token, scope)
         case Block_t(): return parse_block(token, scope)
         case Flow_t(): return parse_flow(token, scope)
@@ -375,17 +379,17 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
             if is_callable(left, scope):
                 return Call(left, right)
             else:
-                return BinOp(left, right, Operator_t('*'))
+                return Mul(left, right)
 
         case Operator_t(op='='):
-            if isinstance(left, Identifier) or isinstance(left, Declare):
-                return Assign(left, right)
-            else:
-                # TODO: handle other cases, e.g. a.b, a[b], etc.
-                #      probably make bind take str|AST as the left-hand-side target
-                #      return Bind(left, right)
-                pdb.set_trace()
-                ...
+            return Assign(left, right)
+            # if isinstance(left, Identifier) or isinstance(left, Declare):
+            # else:
+            #     # TODO: handle other cases, e.g. a.b, a[b], etc.
+            #     #      probably make bind take str|AST as the left-hand-side target
+            #     #      return Bind(left, right)
+            #     pdb.set_trace()
+            #     ...
 
         case Operator_t(op='=>'):
             if isinstance(left, Void):
@@ -401,18 +405,19 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
                 raise ValueError(f'Unrecognized left-hand side for function literal: {left=}, {right=}')
 
         # a bunch of simple cases:
-        # case ShiftOperator_t(op='<<'):  return LeftShift(left, right)
-        # case ShiftOperator_t(op='>>'):  return RightShift(left, right)
-        # case ShiftOperator_t(op='<<<'): return LeftRotate(left, right)
-        # case ShiftOperator_t(op='>>>'): return RightRotate(left, right)
-        # case ShiftOperator_t(op='<<!'): return LeftRotateCarry(left, right)
-        # case ShiftOperator_t(op='!>>'): return RightRotateCarry(left, right)
-        case Operator_t(op='+'): return Add(left, right, None)
-        case Operator_t(op='-'): return Sub(left, right, None)
-        case Operator_t(op='*'): return Mul(left, right, None)
-        case Operator_t(op='/'): return Div(left, right, None)
-        case Operator_t(op='%'): return Mod(left, right, None)
-        case Operator_t(op='^'): return Pow(left, right, None)
+        case ShiftOperator_t(op='<<'):  return LeftShift(left, right)
+        case ShiftOperator_t(op='>>'):  return RightShift(left, right)
+        case ShiftOperator_t(op='<<<'): return LeftRotate(left, right)
+        case ShiftOperator_t(op='>>>'): return RightRotate(left, right)
+        case ShiftOperator_t(op='<<!'): return LeftRotateCarry(left, right)
+        case ShiftOperator_t(op='!>>'): return RightRotateCarry(left, right)
+        case Operator_t(op='+'): return Add(left, right)
+        case Operator_t(op='-'): return Sub(left, right)
+        case Operator_t(op='*'): return Mul(left, right)
+        case Operator_t(op='/'): return Div(left, right)
+        case Operator_t(op='÷'): return IDiv(left, right)
+        case Operator_t(op='%'): return Mod(left, right)
+        case Operator_t(op='^'): return Pow(left, right)
 
         # comparison operators
         case Operator_t(op='=?'): return Equal(left, right)
@@ -436,28 +441,30 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         # Misc Operators
         case RangeJuxtapose_t():
             if isinstance(right, Range):
-                assert right.first is undefined and right.second is undefined, f"ERROR: can't attach expression to range, range already has values. Got {
-                    left=}, {right=}"
-                match left:
-                    case Tuple(exprs=[first, second]):
-                        right.first = first
-                        right.second = second
-                        return right
-                    case _:
-                        right.first = left
-                        return right
+                assert right.left is void, f"ERROR: can't attach expression to range, range already has values. Got {left=}, {right=}"
+                right.left = left
+                # match left:
+                #     case Tuple(exprs=[first, second]):
+                #         right.first = first
+                #         right.second = second
+                #         return right
+                #     case _:
+                #         right.first = left
+                #         return right
+                return right
 
             if isinstance(left, Range):
-                assert left.secondlast is undefined and left.last is undefined, f"ERROR: can't attach expression to range, range already has values. Got {
-                    left=}, {right=}"
-                match right:
-                    case Tuple(exprs=[secondlast, last]):
-                        left.secondlast = secondlast
-                        left.last = last
-                        return left
-                    case _:
-                        left.last = right
-                        return left
+                assert left.right is void, f"ERROR: can't attach expression to range, range already has values. Got {left=}, {right=}"
+                left.right = right
+                # match right:
+                #     case Tuple(exprs=[secondlast, last]):
+                #         left.secondlast = secondlast
+                #         left.last = last
+                #         return left
+                #     case _:
+                #         left.last = right
+                #         return left
+                return left
 
             raise ValueError(f'INTERNAL ERROR: Range Juxtapose must be next to a range. Got {left=}, {right=}')
 
@@ -488,13 +495,13 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
 
         case Operator_t(op='in'):
             if isinstance(left, Identifier):
-                return In(left.name, right)
+                return IterIn(left, right)
 
             pdb.set_trace()
             # TODO: handle unpacking case where left is a PackStruct
             # TDB if post-tokenizer or parser handles. probably parser, which would build a PackStruct AST node
             # elif isinstance(left, PackStruct):
-            #     return In(left, right)
+            #     return IterIn(left, right)
 
             raise NotImplementedError(
                 f"Parsing of operator 'in' operator for non-identifiers on left, has not been implemented yet. Got {left=}, {right=}")
@@ -532,7 +539,8 @@ def build_unary_postfix_expr(left: AST, op: Token, scope: Scope) -> AST:
 
         # binary operators that appear to be unary because the right can be void
         # anything juxtaposed with void is treated as a zero-arg call()
-        case Juxtapose_t(): return Call(to_callable(left), Array([]))
+        case Juxtapose_t():
+            return Call(left)
 
         case _:
             raise NotImplementedError(f"TODO: {op=}")
@@ -589,8 +597,9 @@ def parse_block(block: Block_t, scope: Scope) -> AST:
             # TODO: handle if this should be an object or dictionary instead of an array
             return Array(inner.asts)
         case '()' | '[]' | '(]' | '[)', Range():
-            inner.include_first = block.left == '['
-            inner.include_last = block.right == ']'
+            # inner.include_first = block.left == '['
+            # inner.include_last = block.right == ']'
+            inner.brackets = delims
             # inner.was_wrapped = True #TODO: look into removing this attribute (needs post-tokenization process to be able to separate the range (and any first,second..last expressions) from surrounding tokens)
             return inner
 
@@ -609,7 +618,7 @@ def parse_flow(flow: Flow_t, scope: Scope) -> Flowable:
 
     # special case for closing else clause in a flow chain. Treat as `<if> <true> <clause>`
     if flow.keyword is None:
-        return If(Bool(True), parse_chain(flow.clause, scope))
+        return Default(parse_chain(flow.clause, scope))
 
     cond = parse_chain(flow.condition, scope)
     clause = parse_chain(flow.clause, scope)

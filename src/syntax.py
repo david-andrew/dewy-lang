@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod, ABCMeta
 from typing import Generator, Iterable, Any, Literal, Type as TypingType, dataclass_transform
 from dataclasses import dataclass, field
 from enum import Enum, auto
+# from fractions import Fraction
 
 from .tokenizer import Operator_t, escape_whitespace  # TODO: move into utils
 
@@ -230,6 +231,19 @@ class ListOfASTs(PrototypeAST):
     def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
         yield from anonyname(self.asts)
 
+class Tuple(PrototypeAST):
+    """
+    A comma separated list of expressions (not wrapped in parentheses) e.g. 1, 2, 3
+    There is no special in-memory representation of a tuple, it is literally just a const list
+    """
+    items: list[AST]
+
+    def __str__(self):
+        return f'{", ".join(map(str, self.items))}'
+
+    def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
+        yield from anonyname(self.items)
+
 
 class Block(AST, Delimited):
     items: list[AST]
@@ -241,6 +255,31 @@ class Block(AST, Delimited):
     def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
         yield ('brackets', self.brackets)
         yield from anonyname(self.items)
+
+
+# class Number(AST):
+#     val: int | float | Fraction
+
+class Bool(AST):
+    val: bool
+
+    def __str__(self) -> str:
+        return str(self.val).lower()
+
+class Int(AST):
+    val: int
+
+    def __str__(self) -> str:
+        return str(self.val)
+
+
+class Range(AST):
+    left: AST
+    right: AST
+    brackets: Literal['[]', '[)', '(]', '()']
+
+    def __str__(self) -> str:
+        return f'{self.brackets[0]}{self.left}..{self.right}{self.brackets[1]}'
 
 
 class String(AST, Delimited):
@@ -276,6 +315,34 @@ class Flowable(AST, ABC):
     #     """reset the state of was_entered, in preparation for executing branches in a flow"""
     #     raise NotImplementedError(f'flowables must implement `reset_was_entered()`. No implementation found for {self.__class__}')
 
+class Flow(AST):
+    branches: list[Flowable]
+
+    def __str__(self):
+        return ' else '.join(map(str, self.branches))
+
+    def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
+        yield from anonyname(self.branches)
+
+class If(Flowable):
+    condition: AST
+    body: AST
+
+    def __str__(self):
+        return f'if {self.condition} {self.body}'
+
+class Loop(Flowable):
+    condition: AST
+    body: AST
+
+    def __str__(self):
+        return f'loop {self.condition} {self.body}'
+
+class Default(Flowable):
+    body: AST
+
+    def __str__(self):
+        return f'{self.body}'
 
 class Function(AST):
     args: AST
@@ -323,6 +390,24 @@ class Greater(BinOp):
 
 class GreaterEqual(BinOp):
     def __str__(self): return f'{self.left} >=? {self.right}'
+
+class  LeftShift(BinOp):
+    def __str__(self): return f'{self.left} << {self.right}'
+
+class  RightShift(BinOp):
+    def __str__(self): return f'{self.left} >> {self.right}'
+
+class LeftRotate(BinOp):
+    def __str__(self): return f'{self.left} <<< {self.right}'
+
+class RightRotate(BinOp):
+    def __str__(self): return f'{self.left} >>> {self.right}'
+
+class LeftRotateCarry(BinOp):
+    def __str__(self): return f'{self.left} <<! {self.right}'
+
+class RightRotateCarry(BinOp):
+    def __str__(self): return f'{self.left} !>> {self.right}'
 
 class Add(BinOp):
     def __str__(self): return f'{self.left} + {self.right}'

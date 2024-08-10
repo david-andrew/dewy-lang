@@ -273,8 +273,8 @@ class ShiftOperator_t(Operator_t):
 
 
 class Comma_t(Operator_t):
-    def __init__(self, src: str):
-        self.src = src
+    def __init__(self, op: str):
+        self.op = op
 
     def __hash__(self) -> int:
         return hash(Comma_t)
