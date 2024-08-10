@@ -125,6 +125,9 @@ class PrototypeAST(AST, ABC):
         return False
 
 
+class Delimited(ABC):
+    """used to track which ASTs are printed with their own delimiter so they can be juxtaposed without extra parentheses"""
+
 class Type(AST):
     name: str
     parameters: list = field(default_factory=list)
@@ -228,7 +231,7 @@ class ListOfASTs(PrototypeAST):
         yield from anonyname(self.asts)
 
 
-class Block(AST):
+class Block(AST, Delimited):
     items: list[AST]
     brackets: Literal['{}', '[]', '(]', '[)', '()', '<>']
 
@@ -239,14 +242,14 @@ class Block(AST):
         yield from anonyname(self.items)
 
 
-class String(AST):
+class String(AST, Delimited):
     val: str
 
     def __str__(self) -> str:
         return f'"{escape_whitespace(self.val)}"'
 
 
-class IString(AST):
+class IString(AST, Delimited):
     parts: list[AST]
 
     def __str__(self):
@@ -278,25 +281,16 @@ class Flowable(AST, ABC):
 #     kwargs: list[Bind]
 #     body: AST
 
-#TODO: perhaps args could just be AST|None, where multi-args would be represented as e.g. ListOfArgs, etc.
 class Call(AST):
     f: AST
-    args: None | AST | list[AST] = None
+    args: None | AST = None
 
     def __str__(self):
         if self.args is None:
             return f'{self.f}()'
-        if isinstance(self.args, AST):
-            return f'{self.f}({self.args})'
-        return f'{self.f}({", ".join(map(str, self.args))})'
-
-    def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
-        yield ('f', self.f)
-        if self.args is not None:
-            if isinstance(self.args, AST):
-                yield ('', self.args)
-            else:
-                yield from anonyname(self.args)
+        if isinstance(self.args, Delimited):
+            return f'{self.f}{self.args}'
+        return f'{self.f}({self.args})'
 
 
 
@@ -376,11 +370,14 @@ class UnaryPrefixOp(AST, ABC):
 class Not(UnaryPrefixOp):
     def __str__(self): return f'not {self.operand}'
 
-class Neg(UnaryPrefixOp):
+class UnaryNeg(UnaryPrefixOp):
     def __str__(self): return f'-{self.operand}'
 
-# class Pos(UnaryPrefixOp):
-#     def __str__(self): return f'+{self.operand}'
+class UnaryPos(UnaryPrefixOp):
+    def __str__(self): return f'+{self.operand}'
+
+class UnaryMul(UnaryPrefixOp):
+    def __str__(self): return f'*{self.operand}'
 
 class UnaryDiv(UnaryPrefixOp):
     def __str__(self): return f'/{self.operand}'
