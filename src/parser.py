@@ -301,7 +301,7 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope: Scope) -> tuple[Chai
     if len(ops) == 0:
         pdb.set_trace()
         # TODO: how to handle this case?
-        return Chain(), None, Chain()
+        # return Chain(), None, Chain()
         raise ValueError()
     if len(ops) == 1:
         i, = idxs
@@ -385,26 +385,9 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
 
         case Operator_t(op='='):
             return Assign(left, right)
-            # if isinstance(left, Identifier) or isinstance(left, Declare):
-            # else:
-            #     # TODO: handle other cases, e.g. a.b, a[b], etc.
-            #     #      probably make bind take str|AST as the left-hand-side target
-            #     #      return Bind(left, right)
-            #     pdb.set_trace()
-            #     ...
 
         case Operator_t(op='=>'):
-            if isinstance(left, Void):
-                # TODO: scope needs to be set. not sure if should set here or on a post processing pass...
-                return Function([], right, scope)
-            elif isinstance(left, Identifier):
-                return Function([Arg(left.name)], right, scope)
-            elif isinstance(left, Block):
-                pdb.set_trace()
-                ...
-            # TODO: what about typed arguments, or arguments with default values...
-            else:
-                raise ValueError(f'Unrecognized left-hand side for function literal: {left=}, {right=}')
+            return Function(left, right)
 
         # a bunch of simple cases:
         case ShiftOperator_t(op='<<'):  return LeftShift(left, right)
@@ -445,27 +428,11 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
             if isinstance(right, Range):
                 assert right.left is void, f"ERROR: can't attach expression to range, range already has values. Got {left=}, {right=}"
                 right.left = left
-                # match left:
-                #     case Tuple(exprs=[first, second]):
-                #         right.first = first
-                #         right.second = second
-                #         return right
-                #     case _:
-                #         right.first = left
-                #         return right
                 return right
 
             if isinstance(left, Range):
                 assert left.right is void, f"ERROR: can't attach expression to range, range already has values. Got {left=}, {right=}"
                 left.right = right
-                # match right:
-                #     case Tuple(exprs=[secondlast, last]):
-                #         left.secondlast = secondlast
-                #         left.last = last
-                #         return left
-                #     case _:
-                #         left.last = right
-                #         return left
                 return left
 
             raise ValueError(f'INTERNAL ERROR: Range Juxtapose must be next to a range. Got {left=}, {right=}')
@@ -473,11 +440,11 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         case Comma_t():
             # TODO: combine left or right tuples into a single tuple
             if isinstance(left, Tuple) and isinstance(right, Tuple):
-                return Tuple([*left.exprs, *right.exprs])
+                return Tuple([*left.items, *right.items])
             elif isinstance(left, Tuple):
-                return Tuple([*left.exprs, right])
+                return Tuple([*left.items, right])
             elif isinstance(right, Tuple):
-                return Tuple([left, *right.exprs])
+                return Tuple([left, *right.items])
             else:
                 return Tuple([left, right])
 
@@ -487,26 +454,24 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
                 return Flow([*left.branches, *right.branches])
             elif isinstance(left, Flow):
                 # append right to left
-                return Flow([*left.branches, right])
+                assert not isinstance(left.branches[-1], Default), f"ERROR: can't merge default branch into middle of flow. Got: {left=}, {right=}"
+                if isinstance(right, Flowable):
+                    return Flow([*left.branches, right])
+                return Flow([*left.branches, Default(right)])
+
             elif isinstance(right, Flow):
                 # prepend left to right
+                assert isinstance(left, Flowable), f"ERROR: can only prepend Flowables to left of a Flow. Got: {left=}, {right=}"
                 return Flow([left, *right.branches])
             else:
                 # create a new flow out of the left and right
-                return Flow([left, right])
+                assert isinstance(left, Flowable), f"ERROR: can only create a Flow from Flowables. Got: {left=}, {right=}"
+                if isinstance(right, Flowable):
+                    return Flow([left, right])
+                return Flow([left, Default(right)])
 
         case Operator_t(op='in'):
-            if isinstance(left, Identifier):
-                return IterIn(left, right)
-
-            pdb.set_trace()
-            # TODO: handle unpacking case where left is a PackStruct
-            # TDB if post-tokenizer or parser handles. probably parser, which would build a PackStruct AST node
-            # elif isinstance(left, PackStruct):
-            #     return IterIn(left, right)
-
-            raise NotImplementedError(
-                f"Parsing of operator 'in' operator for non-identifiers on left, has not been implemented yet. Got {left=}, {right=}")
+            return IterIn(left, right)
 
         case _:
             pdb.set_trace()
