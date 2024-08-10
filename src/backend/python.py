@@ -17,7 +17,15 @@ def python_interpreter(path: str, args: list[str]):
     post_process(tokens)
 
     ast = top_level_parse(tokens)
-    print(f'parsed AST: {ast}\n{repr(ast)}')
+    # print(f'parsed AST: {ast}\n{repr(ast)}')
+    from ..syntax import Block
+    print('```dewy')
+    if isinstance(ast, Block):
+        for i in ast: print(i)
+    else:
+        print(ast)
+    print('```')
+    print(repr(ast))
     exit(1)
     raise NotImplementedError("evaluation hasn't been implemented yet")
 

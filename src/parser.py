@@ -1,6 +1,7 @@
 from typing import Generator, Sequence
 from enum import Enum, auto
 from dataclasses import dataclass, field
+from itertools import groupby, chain as iterchain
 
 from .syntax import (
     AST,
@@ -11,7 +12,10 @@ from .syntax import (
     IString,
     Flowable,
     Identifier,
+    Function,
     Call,
+    Assign,
+
 )
 from .tokenizer import (
     Token,
@@ -21,6 +25,7 @@ from .tokenizer import (
     Juxtapose_t,
     Comma_t,
     String_t,
+    Escape_t,
     Undefined_t,
     Identifier_t,
     Integer_t,
@@ -374,7 +379,7 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
 
         case Operator_t(op='='):
             if isinstance(left, Identifier) or isinstance(left, Declare):
-                return Bind(left, right)
+                return Assign(left, right)
             else:
                 # TODO: handle other cases, e.g. a.b, a[b], etc.
                 #      probably make bind take str|AST as the left-hand-side target
@@ -513,7 +518,7 @@ def build_unary_prefix_expr(op: Token, right: AST, scope: Scope) -> AST:
 
         # binary operators that appear to be unary because the left can be void
         # => called as unary prefix op means left was ()/void
-        case Operator_t(op='=>'): return Function([], right, scope)
+        case Operator_t(op='=>'): return Function(void, right)
 
         case _:
             raise ValueError(f"INTERNAL ERROR: {op=} is not a known unary prefix operator")
@@ -550,9 +555,9 @@ def parse_string(token: String_t, scope: Scope) -> String | IString:
             # put any interpolation expressions in a new scope
             ast = parse(chunk.body, scope)
             if isinstance(ast, Block):
-                ast.newscope = True
+                ast.brackets = '{}'
             else:
-                ast = Block([ast], newscope=True)
+                ast = Block([ast], brackets='{}')
             parts.append(ast)
 
     # combine any adjacent Strings into a single string (e.g. if there were escapes)

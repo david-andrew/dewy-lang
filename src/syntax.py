@@ -227,7 +227,7 @@ class ListOfASTs(PrototypeAST):
     def __str__(self):
         return f'{", ".join(map(str, self.asts))}'
 
-    def __full_iter__(self) -> Generator[tuple[str, AST], None, None]:
+    def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
         yield from anonyname(self.asts)
 
 
@@ -238,7 +238,8 @@ class Block(AST, Delimited):
     def __str__(self):
         return f'{self.brackets[0]}{" ".join(map(str, self.items))}{self.brackets[1]}'
 
-    def __full_iter__(self) -> Generator[tuple[str, AST], None, None]:
+    def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
+        yield ('brackets', self.brackets)
         yield from anonyname(self.items)
 
 
@@ -261,7 +262,7 @@ class IString(AST, Delimited):
                 s += f'{{{part}}}'
         return f'"{s}"'
 
-    def __full_iter__(self) -> Generator[tuple[str, AST], None, None]:
+    def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
         yield from anonyname(self.parts)
 
 
@@ -276,10 +277,14 @@ class Flowable(AST, ABC):
     #     raise NotImplementedError(f'flowables must implement `reset_was_entered()`. No implementation found for {self.__class__}')
 
 
-# class FunctionLiteral(AST):
-#     args: list[Declare]
-#     kwargs: list[Bind]
-#     body: AST
+class Function(AST):
+    args: AST
+    body: AST
+
+    def __str__(self):
+        if isinstance(self.args, Delimited):
+            return f'{self.args} => {self.body}'
+        return f'({self.args}) => {self.body}'
 
 class Call(AST):
     f: AST
