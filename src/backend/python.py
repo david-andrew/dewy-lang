@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from ..tokenizer import tokenize
 from ..postok import post_process
-from ..parser import top_level_parse, Scope  # type: ignore[reportShadowedImports]
+from ..parser import top_level_parse, Scope
 from ..syntax import AST, Type, undefined, untyped, void, DeclarationType
 
 
@@ -18,6 +18,9 @@ def python_interpreter(path: str, args: list[str]):
 
     ast = top_level_parse(tokens)
     print(f'parsed AST: {ast}\n{repr(ast)}')
+    exit(1)
+    raise NotImplementedError("evaluation hasn't been implemented yet")
+
     res = top_level_evaluate(ast)
     if res and res is not void:
         print(res)

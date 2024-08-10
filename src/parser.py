@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from .syntax import (
     AST,
     Block,
+    ListOfASTs,
     void,
     String,
     IString,
@@ -69,15 +70,9 @@ def top_level_parse(tokens: list[Token]) -> AST:
     """Main entrypoint to kick off parsing a sequence of tokens"""
 
     scope = Scope.default()
-    items = [*parse(tokens, scope)]
-
-    # depending on how many expressions were parsed, return an AST or container
-    if len(items) == 0:
-        ast = void # literally nothing was parsed
-    elif len(items) == 1:
-        ast = items[0]
-    else:
-        ast = Block(items, '{}')
+    ast = parse(tokens, scope)
+    if isinstance(ast, ListOfASTs):
+        ast = Block(ast.asts, '()')
 
     # post processing on the parsed AST
     # express_identifiers(ast)
@@ -88,7 +83,7 @@ def top_level_parse(tokens: list[Token]) -> AST:
 
     return ast
 
-def parse(tokens: list[Token], scope: Scope) -> Generator[AST, None, None]:
+def parse_generator(tokens: list[Token], scope: Scope) -> Generator[AST, None, None]:
     """
     Parse all tokens into a sequence of ASTs
     """
@@ -97,6 +92,19 @@ def parse(tokens: list[Token], scope: Scope) -> Generator[AST, None, None]:
         chain, tokens = get_next_chain(tokens)
         yield parse_chain(chain, scope)
 
+
+def parse(tokens: list[Token], scope: Scope) -> AST:
+    items = [*parse_generator(tokens, scope)]
+
+    # depending on how many expressions were parsed, return an AST or container
+    if len(items) == 0:
+        ast = void # literally nothing was parsed
+    elif len(items) == 1:
+        ast = items[0]
+    else:
+        ast = ListOfASTs(items)
+
+    return ast
 
 @dataclass
 class qint:
@@ -255,11 +263,7 @@ def parse_chain(chain: Chain[Token], scope: Scope) -> AST:
         return parse_single(chain[0], scope)
 
     left, op, right = split_by_lowest_precedence(chain, scope)
-    left, right = [*parse(left, scope)], [*parse(right, scope)]
-    assert len(left) in (0, 1), f"Internal Error: left side of chain is not a single token or void: {left}"
-    assert len(right) in (0, 1), f"Internal Error: right side of chain is not a single token or void: {right}"
-    left = left[0] if left else void
-    right = right[0] if right else void
+    left, right = parse(left, scope), parse(right, scope)
 
     assert not (left is void and right is void), f"Internal Error: both left and right returned void during parse chain, implying both left and right side of operator were empty, i.e. chain was invalid: {chain}"
 
@@ -344,9 +348,9 @@ def parse_single(token: Token, scope: Scope) -> AST:
         case BasedNumber_t(): return Number(based_number_to_int(token.src))
         case RawString_t(): return String(token.to_str())
         case DotDot_t(): return Range()
-        case String_t(): return parse_string(token)
-        case Block_t(): return parse_block(token)
-        case Flow_t(): return parse_flow(token)
+        case String_t(): return parse_string(token, scope)
+        case Block_t(): return parse_block(token, scope)
+        case Flow_t(): return parse_flow(token, scope)
 
         case _:
             # TODO handle other types...
@@ -529,7 +533,7 @@ def build_unary_postfix_expr(left: AST, op: Token, scope: Scope) -> AST:
             raise NotImplementedError(f"TODO: {op=}")
 
 
-def parse_string(token: String_t) -> String | IString:
+def parse_string(token: String_t, scope: Scope) -> String | IString:
     """Convert a string token to an AST"""
 
     if len(token.body) == 1 and isinstance(token.body[0], str):
@@ -559,7 +563,7 @@ def parse_string(token: String_t) -> String | IString:
     return IString(parts)
 
 
-def parse_block(block: Block_t) -> AST:
+def parse_block(block: Block_t, scope: Scope) -> AST:
     """Convert a block token to an AST"""
 
     # if new scope block, nest the current scope
@@ -572,10 +576,10 @@ def parse_block(block: Block_t) -> AST:
 
     delims = block.left + block.right
     match delims, inner:
-        case '()' | '{}', Void():
+        case '()' | '{}', void:
             return inner
         case '()' | '{}', ListOfASTs():
-            return Block(inner.asts, newscope=delims == '{}')
+            return Block(inner.asts, brackets=delims)
         case '[]', ListOfASTs():
             # TODO: handle if this should be an object or dictionary instead of an array
             return Array(inner.asts)
@@ -596,7 +600,7 @@ def parse_block(block: Block_t) -> AST:
             raise NotImplementedError(f'block parse not implemented for {block.left+block.right}, {type(inner)}')
 
 
-def parse_flow(flow: Flow_t) -> Flowable:
+def parse_flow(flow: Flow_t, scope: Scope) -> Flowable:
 
     # special case for closing else clause in a flow chain. Treat as `<if> <true> <clause>`
     if flow.keyword is None:
