@@ -1631,6 +1631,7 @@ Perhaps there is a better name instead of `local` though. `shadow`? Basically wa
 - `scopedconst`
 - `scopeconst`
 - `hereconst`
+- `loco`
 
 ## Security design
 
