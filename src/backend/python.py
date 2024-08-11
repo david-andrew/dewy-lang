@@ -5,16 +5,27 @@ from ..postok import post_process
 from ..parser import top_level_parse, Scope
 from ..syntax import (
     AST,
-    void,
-    Function, PyAction, Call,
-    Identifier,
-    Assign,
-    Tuple,
-    Array,
+    Type,
+    Block, ListOfASTs, Tuple, Array,
+    TypedIdentifier,
+    void, undefined,
     String, IString,
-
+    Flowable, Flow, If, Loop, Default,
+    Identifier,
+    Function, PyAction, Call,
+    Assign,
+    Int, Bool,
+    Range, IterIn,
+    Less, LessEqual, Greater, GreaterEqual, Equal, MemberIn,
+    LeftShift, RightShift, LeftRotate, RightRotate, LeftRotateCarry, RightRotateCarry,
+    Add, Sub, Mul, Div, IDiv, Mod, Pow,
+    And, Or, Xor, Nand, Nor, Xnor,
+    Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv,
+    # DeclarationType,
 )
 from pathlib import Path
+from typing import Protocol
+from functools import cache
 
 import pdb
 
@@ -49,21 +60,37 @@ def top_level_evaluate(ast:AST) -> AST|None:
     scope = Scope.default()
     return evaluate(ast, scope)
 
+
+class EvalFunc[T](Protocol):
+    def __call__(self, ast: T, scope: Scope) -> AST: ...
+
+@cache
+def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
+    return {
+        Call: evaluate_call,
+        Block: evaluate_block,
+        #TODO: other AST types here
+    }
+
 def evaluate(ast:AST, scope:Scope) -> AST|None:
+    eval_fn_map = get_eval_fn_map()
 
-    match ast:
-        case Call(f, args): return evaluate_call(f, args, scope)
+    ast_type = type(ast)
+    if ast_type in eval_fn_map:
+        return eval_fn_map[ast_type](ast, scope)
 
-    pdb.set_trace()
+    raise NotImplementedError(f'evaluation not implemented for {ast_type}')
 
 
-def evaluate_call(f: AST, f_args: AST | None, scope: Scope) -> AST:
+
+def evaluate_call(ast: Call, scope: Scope) -> AST: #(f: AST, f_args: AST | None, scope: Scope) -> AST:
+    f = ast.f
     if isinstance(f, Identifier):
         f = scope.get(f.name).value
     assert isinstance(f, (Function, PyAction)), f'expected Function or PyAction, got {f}'
 
     if isinstance(f, PyAction):
-        args, kwargs = collect_args(f_args, scope)
+        args, kwargs = collect_args(ast.args, scope)
         return f.action(*args, **kwargs)
 
     pdb.set_trace()
@@ -81,3 +108,8 @@ def collect_args(args: AST | None, scope: Scope) -> tuple[list[AST], dict[str, A
 
 
     raise NotImplementedError(f'collect_args not implemented yet for {args}')
+
+def evaluate_block(ast: Block, scope: Scope):
+    pdb.set_trace()
+    return void
+    raise NotImplementedError('Block evaluation not implemented yet')
