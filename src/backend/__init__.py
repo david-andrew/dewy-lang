@@ -11,9 +11,10 @@ from .arm import arm_compiler
 from .riscv import riscv_compiler
 from .shell import shell_compiler
 from typing import Protocol
+from pathlib import Path
 
 class Backend(Protocol):
-    def __call__(self, path: str, args: list[str]) -> None:
+    def __call__(self, path: Path, args: list[str]) -> None:
         ...
 
 
@@ -44,5 +45,4 @@ def get_backend(name: str) -> Backend:
 
 def get_version() -> str:
     """Return the semantic version of the language"""
-    from pathlib import Path
     return (Path(__file__).parent.parent.parent / 'VERSION').read_text().strip()

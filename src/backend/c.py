@@ -1,2 +1,4 @@
-def c_compiler(path: str, args: list[str]):
+from pathlib import Path
+
+def c_compiler(path: Path, args: list[str]):
     raise NotImplementedError('C backend is not yet supported')
