@@ -5,12 +5,14 @@ from itertools import groupby, chain as iterchain
 
 from .syntax import (
     AST,
+    Type,
     Block, ListOfASTs, Tuple, Array,
+    TypedIdentifier,
     void, undefined,
     String, IString,
     Flowable, Flow, If, Loop, Default,
     Identifier,
-    Function, Call,
+    Function, PyAction, Call,
     Assign,
     Int, Bool,
     Range, IterIn,
@@ -19,6 +21,7 @@ from .syntax import (
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
     And, Or, Xor, Nand, Nor, Xnor,
     Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv,
+    DeclarationType,
 )
 from .tokenizer import (
     Token,
@@ -64,17 +67,176 @@ TODO:
 # Scope class only used during parsing to keep track of callables
 @dataclass
 class Scope:
+    @dataclass
+    class _var():
+        # name:str #name is stored in the dict key
+        decltype: DeclarationType
+        type: Type
+        value: AST
+
     parent: 'Scope | None' = None
-    #TODO: maybe replace str->AST with str->signature (where signature might be constructed based on the func structure)
-    callables: dict[str, AST | None] = field(default_factory=dict)
+    # callables: dict[str, AST | None] = field(default_factory=dict) #TODO: maybe replace str->AST with str->signature (where signature might be constructed based on the func structure)
+    vars: 'dict[str, Scope._var]' = field(default_factory=dict)
+
+    #TODO: this should be expanded/more comprihensive/etc.
+    def is_callable(self, name: str) -> bool:
+        for s in self:
+            if name in s.vars:
+                var = s.vars[name]
+                return var.type.name == 'callable'
+
+        return False
+
+
+    def __iter__(self) -> Generator['Scope', None, None]:
+        """return an iterator that walks up each successive parent scope. Starts with self"""
+        s = self
+        while s is not None:
+            yield s
+            s = s.parent
 
     @staticmethod
     def default() -> 'Scope':
-        return Scope(callables={
-            'printl': None,
-            'print': None,
-            'readl': None #TODO: this needs to say readl returns a string|error
+        return Scope(vars={
+            'printl': Scope._var(
+                DeclarationType.LOCAL_CONST,
+                Type('callable'),
+                PyAction(
+                    TypedIdentifier(Identifier('x'), Type('string')),
+                    lambda x: print(str(x)),
+                    Type('void')
+                )
+            ),
+            'print': Scope._var(
+                DeclarationType.LOCAL_CONST,
+                Type('callable'),
+                PyAction(
+                    TypedIdentifier(Identifier('x'), Type('string')),
+                    lambda x: print(str(x), end=''),
+                    Type('void')
+                )
+            ),
+            'readl': Scope._var(
+                DeclarationType.LOCAL_CONST,
+                Type('callable'),
+                PyAction(
+                    void,
+                    lambda: String(input()), #TODO: use easyrepl.readl
+                    Type('string')
+                )
+            )
         })
+
+
+
+
+# # For now, scope lives here, but perhaps we will move it to a higher level if it can be shared between backends
+
+# class Scope():
+#     @dataclass
+#     class _var():
+#         # name:str #name is stored in the dict key
+#         decltype: DeclarationType
+#         type: AST
+#         value: AST
+
+#     def __init__(self, parent: 'Scope | None' = None):
+#         self.parent = parent
+#         self.vars: dict[str, Scope._var] = {}
+
+#     @property
+#     def root(self) -> 'Scope':
+#         """Return the root scope"""
+#         return [*self][-1]
+
+#     def declare(self, decltype: DeclarationType, name: str, type: Type, value: AST = undefined):
+#         pdb.set_trace()  # TODO: are there circumstances overwriting an existing variable is allowed? e.g. if it was LET?
+#         if name in self.vars:
+#             raise NameError(f'Cannot redeclare "{name}". already exists in scope {self} with value {self.vars[name]}')
+#         self.vars[name] = Scope._var(decltype, type, value)
+
+#     def get(self, name: str, default: AST = None) -> AST:
+#         pdb.set_trace()
+#         # get a variable from this scope or any of its parents
+#         for s in self:
+#             if name in s.vars:
+#                 return s.vars[name].value
+#         if default is not None:
+#             return default
+#         raise NameError(f'{name} not found in scope {self}')
+
+#     def bind(self, name: str, value: AST):
+#         pdb.set_trace()  # dealing with local, alias, etc. other cases
+#         # update an existing variable in this scope or  any of the parent scopes
+#         for s in self:
+#             if name in s.vars:
+#                 var = s.vars[name]
+#                 assert not var.const, f'cannot assign to const {name}'
+#                 assert Type.is_instance(value.typeof(), var.type), f'cannot assign {
+#                     value}:{value.typeof()} to {name}:{var.type}'
+#                 var.value = value
+#                 return
+
+#         # TODO: consider what the declaration type default should be. Or maybe we just disallow binding to undeclared variables
+#         # otherwise just create a new instance of the variable
+#         self.vars[name] = Scope._var(DeclarationType.DEFAULT, untyped, value)
+
+#     def __iter__(self):
+#         """return an iterator that walks up each successive parent scope. Starts with self"""
+#         s = self
+#         while s is not None:
+#             yield s
+#             s = s.parent
+
+#     def __repr__(self):
+#         if self.parent is not None:
+#             return f'Scope({self.vars}, {repr(self.parent)})'
+#         return f'Scope({self.vars})'
+
+#     def copy(self):
+#         s = Scope(self.parent)
+#         s.vars = self.vars.copy()
+#         return s
+
+#     @staticmethod
+#     def default():
+#         """return a scope with the standard library (of builtins) included"""
+#         root = Scope()
+
+#         raise NotImplementedError('default scope is not implemented yet.')
+
+#         # def pyprint(scope: Scope):
+#         #     print(scope.get('text').to_string(scope).val, end='')
+#         #     return void
+#         # pyprint_ast = Function(
+#         #     [Declare(DeclarationType.DEFAULT, 'text', Type('string'))],
+#         #     [],
+#         #     PyAction(pyprint, Type('void')),
+#         #     Scope.empty()
+#         # )
+#         # root.declare(DeclarationType.LOCAL_CONST, 'print', pyprint_ast.typeof(root), pyprint_ast)
+
+#         # def pyprintl(scope: Scope):
+#         #     print(scope.get('text').to_string(scope).val)
+#         #     return void
+#         # pyprintl_ast = Function(
+#         #     [Declare(DeclarationType.DEFAULT, 'text', Type('string'))],
+#         #     [],
+#         #     PyAction(pyprintl, Type('void')),
+#         #     Scope.empty()
+#         # )
+#         # root.declare(DeclarationType.LOCAL_CONST, 'printl', pyprintl_ast.typeof(root), pyprintl_ast)
+
+#         # def pyreadl(scope: Scope):
+#         #     return String(input())
+#         # pyreadl_ast = Function([], [], PyAction(pyreadl, Type('string')), Scope.empty())
+#         # root.declare(DeclarationType.LOCAL_CONST, 'readl', pyreadl_ast.typeof(root), pyreadl_ast)
+
+#         # # TODO: eventually add more builtins
+
+#         # return root
+
+
 
 
 def top_level_parse(tokens: list[Token]) -> AST:
@@ -258,7 +420,7 @@ def operator_associativity(op: Operator_t | int) -> Associativity:
 def is_callable(ast:AST, scope: Scope):
     match ast:
         case Identifier(name):
-            return name in scope.callables
+            return scope.is_callable(name)
         case _:
             raise ValueError(f"ERROR: unhandled case to check if is_callable: {ast=}")
 

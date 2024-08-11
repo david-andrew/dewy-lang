@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod, ABCMeta
-from typing import Generator, Iterable, Any, Literal, Type as TypingType, dataclass_transform
+from typing import Generator, Iterable, Any, Literal, Type as TypingType, dataclass_transform, Callable as TypingCallable
 from dataclasses import dataclass, field
 from enum import Enum, auto
 # from fractions import Fraction
@@ -211,7 +211,7 @@ class Declare(AST):
     def __str__(self):
         return f'{self.decltype.name.lower()} {self.target}'
 
-
+# assign is just a binop
 # class Assign(AST):
 #     # TODO: allow bind to take in an unpack structure
 #     target: Declare | Identifier | UnpackTarget
@@ -359,6 +359,16 @@ class Function(AST):
             return f'{self.args} => {self.body}'
         return f'({self.args}) => {self.body}'
 
+
+class PyAction(AST):
+    args: AST
+    action: TypingCallable
+    return_type: AST
+
+    def __str__(self):
+        return f'({self.args}): {self.return_type} => {self.action}'
+
+
 class Call(AST):
     f: AST
     args: None | AST = None
@@ -369,7 +379,6 @@ class Call(AST):
         if isinstance(self.args, Delimited):
             return f'{self.f}{self.args}'
         return f'{self.f}({self.args})'
-
 
 
 class BinOp(AST, ABC):
