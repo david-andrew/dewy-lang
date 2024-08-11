@@ -1029,7 +1029,7 @@ def tokenize(src: str) -> list[Token]:
     return tokens
 
 
-def full_traverse_tokens(tokens: list[Token]) -> Generator[tuple[int, Token, list[Token]], None, None]:
+def full_traverse_tokens(tokens: list[Token]) -> Generator[tuple[int, Token, list[Token]], int, None]:
     """
     Walk all tokens recursively, allowing for modification of the tokens list as it is traversed.
 

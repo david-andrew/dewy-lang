@@ -78,14 +78,17 @@ class Scope:
     # callables: dict[str, AST | None] = field(default_factory=dict) #TODO: maybe replace str->AST with str->signature (where signature might be constructed based on the func structure)
     vars: 'dict[str, Scope._var]' = field(default_factory=dict)
 
-    #TODO: this should be expanded/more comprihensive/etc.
-    def is_callable(self, name: str) -> bool:
+    def get(self, name) -> 'Scope._var':
         for s in self:
             if name in s.vars:
-                var = s.vars[name]
-                return var.type.name == 'callable'
+                return s.vars[name]
 
-        return False
+        raise KeyError(f'variable {name} not found in scope')
+
+    #TODO: this should be expanded/more comprihensive/etc.
+    def is_callable(self, name: str) -> bool:
+        var = self.get(name)
+        return var.type.name == 'callable'
 
 
     def __iter__(self) -> Generator['Scope', None, None]:
@@ -103,7 +106,7 @@ class Scope:
                 Type('callable'),
                 PyAction(
                     TypedIdentifier(Identifier('x'), Type('string')),
-                    lambda x: print(str(x)),
+                    lambda x: print(str(x)) or void,
                     Type('void')
                 )
             ),
@@ -112,7 +115,7 @@ class Scope:
                 Type('callable'),
                 PyAction(
                     TypedIdentifier(Identifier('x'), Type('string')),
-                    lambda x: print(str(x), end=''),
+                    lambda x: print(str(x), end='') or void,
                     Type('void')
                 )
             ),

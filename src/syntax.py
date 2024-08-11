@@ -167,7 +167,7 @@ class Void(AST):
         return cls.instance
 
     def __str__(self) -> str:
-        return ''#'void'
+        return 'void'
 
 
 # void shorthand, for convenience

@@ -3,7 +3,7 @@ from ..backend.python import python_interpreter
 import pdb
 
 def test_examples():
-    current_test_cases = {
+    current_test_cases = [
         'hello.dewy',
         'hello_func.dewy',
         'hello_name.dewy',
@@ -19,12 +19,11 @@ def test_examples():
         'loop_or_iters.dewy',
         'nested_loop.dewy',
         'block_printing.dewy',
-        # 'fizzbuzz-1.dewy',
-    }
+        'fizzbuzz-1.dewy',
+    ]
     example_root = Path(__file__).parent.parent.parent / 'examples'
-    for example_path in example_root.glob('*.dewy'):
-        if example_path.name not in current_test_cases:
-            continue
+    for filename in current_test_cases:
+        example_path = example_root / filename
         print(f'running {example_path.relative_to(example_root)}')
         python_interpreter(example_path, [])
 
