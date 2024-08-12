@@ -32,7 +32,6 @@ my_expression = 'string with the expression {sqrt(64) + 9 * cos(pi)}'
 
 In this example, at the highest level, there is a string expression, which contains a nested expression. The nested expression `sqrt(64) + 9 * cos(pi)` is a mathematical expression, built up from smaller expressions combined with math operators `+` and `*`. `sqrt(64)` and `cos(pi)` are both a function call expressions, and `64`, `9` are literal expressions and `pi` is an identifier for a constant value.
 
-
 ## Statements
 
 A statement is a single piece of code that expresses no value (typically referred to as `void`). For example calling the `printl` function, which prints out a string to the console
@@ -52,16 +51,17 @@ Most expressions in Dewy will return something, but you can easily convert an ex
 ```dewy
 my_expression = [
     sqrt(1);
-    sqrt(4);
+    sqrt(4)
     sqrt(9);
-    sqrt(16);
+    sqrt(16)
+    sqrt(25);
     sqrt(36);
     sqrt(49);
-    sqrt(64);
+    sqrt(64)
 ]
 ```
 
-In this example, the resulting value of each `sqrt` call is suppressed by the semicolon, and the array captures no values, meaning `my_expression = []`.
+In this example, the resulting value of each `sqrt` call is suppressed by the semicolon, and the array captures only the non-suppressed values, resulting in `my_expression = [2 4 8]`.
 
 > Note: the one context where semicolon does not suppress the value of an expression is in a multidimensional array literal. In this context, semicolons are used to indicate new dimensions of the array, and values with semicolons are still captured.
 
@@ -87,14 +87,13 @@ Adding a single expression to a block makes the block itself express that value
 ```
 
 Adding multiple expressions to a block makes the block express multiple values (TODO: link to generators)
-    
+
 ```dewy
 { 1 2 3 4 5 6 7 8 9 10 }  // a block that expresses the values 1 through 10
 ```
 
-
-
 TODO->rest of explanation of blocks.
+
 - catching values expressed in blocks
 - blocks for precedence overriding
 - blocks work anywhere an expression is expected

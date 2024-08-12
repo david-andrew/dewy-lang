@@ -83,7 +83,7 @@ ratings = [
     'legend of the galactic heroes' -> 100
 ]
 
-loop show, rating in ratings
+loop [show rating] in ratings
 {
     printl('I give {show} a {rating} out 100')
 }

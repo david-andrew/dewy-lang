@@ -154,12 +154,12 @@ These are both equivalent to directly constructing the range `[0,0.25..1]`, howe
 This type of construction is closely related to the `linspace()`/`logspace()` functions in Dewy. TBD but `linspace`/`logspace` may in fact be implemented like so:
 
 ```dewy
-linspace = (interval:range, n:int=10) => {
-    start, stop = interval.start, interval.stop
+linspace = (interval:range n:int=10) => {
+    [start stop] = [interval.start interval.stop]
     step = (stop-start)/(n-1)
-    return interval.start,interval.start+step..interval.stop
+    return start,start+step..stop
 }
-logspace = (interval:range, n:int=10, base:real=10) => base^linspace(interval, n)
+logspace = (interval:range n:int=10 base:real=10) => base^linspace(interval n)
 ```
 
 ### Compound Range Construction

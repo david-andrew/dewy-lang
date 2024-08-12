@@ -1,7 +1,11 @@
 # Imports
+
 TODO
 
+> Syntax likely to change
+
 Examples of imports
+
 ```dewy
 
 // import an item from a local file
@@ -18,7 +22,7 @@ import p"../../mylib3.dewy" as mylib3
 from p"mylib4.dewy" import ...
 
 // import several functions from a local file, unpacking some from nested objects
-from p"stuff2.dewy" import myfun2, myfun3 as f1, mymodule as [f2 f3 mod3 as [f4 f5]]]
+from p"stuff2.dewy" import myfun2, myfun3 as f1, mymodule as [f2 f3 mod3 as [f4 f5]]
 
 //importing from a whole folder
 from p"myproject" import mod1, mod2, mod3
