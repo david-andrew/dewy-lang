@@ -383,16 +383,19 @@ class Call(AST):
 
 #TODO: maybe this should just be a binop, i.e. does right need to be restricted to Block?
 # perhaps keep since to parse an index, the right must be a block
-class Index(AST):
-    left: AST
-    right: Block
+# class Index(AST):
+#     left: AST
+#     right: PrototypeBlock
 
-    def __str__(self):
-        return f'{self.left}{self.right}'
+#     def __str__(self):
+#         return f'{self.left}{self.right}'
 
 class BinOp(AST, ABC):
     left: AST
     right: AST
+
+class Index(BinOp):
+    def __str__(self): return f'{self.left}{self.right}' #right should already have brackets
 
 class Assign(BinOp):
     def __str__(self): return f'{self.left} = {self.right}'

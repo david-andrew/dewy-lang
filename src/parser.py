@@ -552,7 +552,7 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         case Juxtapose_t():
             if is_callable(left, scope):
                 return Call(left, right)
-            elif is_indexable(left, scope) and isinstance(right, Block):
+            elif is_indexable(left, scope):# and isinstance(right, (PrototypeBlock, Range, Array)):
                 return Index(left, right)
             else:
                 return Mul(left, right)
@@ -738,15 +738,12 @@ def parse_block(block: Block_t, scope: Scope) -> AST:
             # TODO: handle if this should be an object or dictionary instead of an array
             return Array(inner.asts)
         case '()' | '[]' | '(]' | '[)', Range():
-            # inner.include_first = block.left == '['
-            # inner.include_last = block.right == ']'
             inner.brackets = delims
-            # inner.was_wrapped = True #TODO: look into removing this attribute (needs post-tokenization process to be able to separate the range (and any first,second..last expressions) from surrounding tokens)
             return inner
 
         # catch all cases for any type of AST inside a block or range
         case '()' | '{}', _:
-            return Block([inner], newscope=delims == '{}')
+            return Block([inner], brackets=delims)
         case '[]', _:
             # TODO: handle if this should be an object or dictionary instead of an array
             return Array([inner])
@@ -761,6 +758,7 @@ def parse_flow(flow: Flow_t, scope: Scope) -> Flowable:
     if flow.keyword is None:
         return Default(parse_chain(flow.clause, scope))
 
+    assert flow.condition is not None, f"ERROR: flow condition must be present for {flow=}"
     cond = parse_chain(flow.condition, scope)
     clause = parse_chain(flow.clause, scope)
 
