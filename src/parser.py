@@ -13,6 +13,7 @@ from .syntax import (
     Flowable, Flow, If, Loop, Default,
     Identifier,
     Function, PyAction, Call,
+    Index,
     Assign,
     Int, Bool,
     Range, IterIn,
@@ -424,10 +425,16 @@ def is_callable(ast:AST, scope: Scope):
     match ast:
         case Identifier(name):
             return scope.is_callable(name)
+        case PyAction() | Function():
+            return True
         case _:
             raise ValueError(f"ERROR: unhandled case to check if is_callable: {ast=}")
 
     pdb.set_trace()
+
+def is_indexable(ast:AST, scope: Scope):
+    pdb.set_trace()
+    raise NotImplementedError
 
 
 def parse_chain(chain: Chain[Token], scope: Scope) -> AST:
@@ -545,6 +552,8 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         case Juxtapose_t():
             if is_callable(left, scope):
                 return Call(left, right)
+            elif is_indexable(left, scope) and isinstance(right, Block):
+                return Index(left, right)
             else:
                 return Mul(left, right)
 
