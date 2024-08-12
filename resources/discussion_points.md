@@ -1106,7 +1106,7 @@ foo = (a:int, b:int=1, c:int=2) => a+b+c
 1, 2, 3 as a, b, c
 ```
 
-## Should we get rid of the low precedence range juxtapose, and force ranges with step size to wrap the tuple in parenthesis, or should loops with multiple iterators require parenthesis around each iterator? [leaning increase range-jux precedence above logical operators, and require any ranges with step size to be wrapped in parenthesis]
+## Should we get rid of the low precedence range juxtapose, and force ranges with step size to wrap the tuple in parenthesis, or should loops with multiple iterators require parenthesis around each iterator? [leaning remove need for commas in most situations]
 
 Currently there is a conflict with the operator precedence. We cannot have both of these:
 
@@ -1141,6 +1141,58 @@ I think it comes down to which will occur more often--I suspect logically combin
 
 Last alternative is to just require that all ranges have parenthesis or brackets around them... This allows low range_jux precedence, and also doesn't require us to wrap the range first,second in parenthesis. Also it makes it always unambiguous what the bounds are on the range (i.e. open or closed).
 EXCEPT this breaks the whole syntax for multidimensional indexing, making it super verbose
+
+### spaces instead of commas
+
+Last Last alternative is to make arguments be space separated rather than comma separated, then we don't need to compromise on the precedence of comma
+
+What might that look like in many instances:
+
+```dewy
+foo = (a:int b:int=1 c:int=2) => a+b+c
+foo(5 10 15)
+
+bar = (a b=1 c=2) => a+b+c
+bar(5)
+bar(5 c=20)
+
+[a b c] = [1 2 3]
+(a b c) = (1 2 3)
+{a b c} = {1 2 3} // tbd how the scope around a b c affects things. If a, b, c exist already then they get reassigned, otherwise they only exist in the scope?
+
+sum = (a b) => a + b
+add5 = @sum(5)
+thirtyseven = @add5(32)
+sum_redux = (x y) => thirtyseven(a=x b=y)
+
+
+r = first,second..last
+r = [first,second..last]
+
+
+Point = (x:number y:number) => [
+    let x = x
+    let y = y
+    __repr__ = () => 'Point({x}, {y})'
+    __str__ = () => '({x}, {y})'
+]
+
+
+f = (x:int y:int opflag:bool=void) => if opflag x + y else x - y
+f(5 6) // compiler error
+f(5 6 opflag=true) // 11
+
+
+
+let g = (a:bool b:float ...args) => {
+    printl'a: {a}, b: {b}'
+    f(...args)
+}
+
+let f = (c:str d:int) => {
+    printl'c: {c}, d: {d}'
+}
+```
 
 ## Parsing flow expressions joined with `else` [Fixed, handled correctly in post-tokenization!]
 
