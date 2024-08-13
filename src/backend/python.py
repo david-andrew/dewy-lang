@@ -6,7 +6,7 @@ from ..parser import top_level_parse, Scope
 from ..syntax import (
     AST,
     Type,
-    Block, ListOfASTs, Tuple, Array,
+    ListOfASTs, Tuple, Block, Array, Group, Range, Object, Dict,
     TypedIdentifier,
     void, undefined,
     String, IString,
@@ -41,13 +41,13 @@ def python_interpreter(path: Path, args: list[str]):
     # print(f'parsed AST: {ast}\n{repr(ast)}')
     from ..syntax import Block
     print('```dewy')
-    if isinstance(ast, Block):
+    if isinstance(ast, (Block, Group)):
         for i in ast: print(i)
     else:
         print(ast)
     print('```')
     print(repr(ast))
-    # return
+    return #DEBUG while not done evaluate implementation
     # raise NotImplementedError("evaluation hasn't been implemented yet")
 
     res = top_level_evaluate(ast)

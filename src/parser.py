@@ -5,8 +5,10 @@ from itertools import groupby, chain as iterchain
 
 from .syntax import (
     AST,
+    Declare,
+    PointsTo,
     Type,
-    Block, ListOfASTs, Tuple, Array,
+    ListOfASTs, Tuple, Block, BareRange, Array, Group, Range, Object, Dict,
     TypedIdentifier,
     void, undefined,
     String, IString,
@@ -249,7 +251,7 @@ def top_level_parse(tokens: list[Token]) -> AST:
     scope = Scope.default()
     ast = parse(tokens, scope)
     if isinstance(ast, ListOfASTs):
-        ast = Block(ast.asts, '()')
+        ast = Group(ast.asts)
 
     # post processing on the parsed AST
     # express_identifiers(ast)
@@ -530,7 +532,7 @@ def parse_single(token: Token, scope: Scope) -> AST:
         case Boolean_t(): return Bool(bool_to_bool(token.src))
         case BasedNumber_t(): return Int(based_number_to_int(token.src))
         case RawString_t(): return String(token.to_str())
-        case DotDot_t(): return Range(void, void, '()')
+        case DotDot_t(): return BareRange(void, void)
         case String_t(): return parse_string(token, scope)
         case Block_t(): return parse_block(token, scope)
         case Flow_t(): return parse_flow(token, scope)
@@ -552,7 +554,7 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         case Juxtapose_t():
             if is_callable(left, scope):
                 return Call(left, right)
-            elif is_indexable(left, scope):# and isinstance(right, (PrototypeBlock, Range, Array)):
+            elif is_indexable(left, scope) and isinstance(right, (Range, Array)):
                 return Index(left, right)
             else:
                 return Mul(left, right)
@@ -599,12 +601,12 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
 
         # Misc Operators
         case RangeJuxtapose_t():
-            if isinstance(right, Range):
+            if isinstance(right, BareRange):
                 assert right.left is void, f"ERROR: can't attach expression to range, range already has values. Got {left=}, {right=}"
                 right.left = left
                 return right
 
-            if isinstance(left, Range):
+            if isinstance(left, BareRange):
                 assert left.right is void, f"ERROR: can't attach expression to range, range already has values. Got {left=}, {right=}"
                 left.right = right
                 return left
@@ -686,7 +688,7 @@ def build_unary_postfix_expr(left: AST, op: Token, scope: Scope) -> AST:
         case _:
             raise NotImplementedError(f"TODO: {op=}")
 
-
+from typing import cast
 def parse_string(token: String_t, scope: Scope) -> String | IString:
     """Convert a string token to an AST"""
 
@@ -704,18 +706,42 @@ def parse_string(token: String_t, scope: Scope) -> String | IString:
             # put any interpolation expressions in a new scope
             ast = parse(chunk.body, scope)
             if isinstance(ast, Block):
-                ast.brackets = '{}'
+                parts.append(ast)
             else:
-                ast = Block([ast], brackets='{}')
-            parts.append(ast)
+                parts.append(Block([ast]))
 
     # combine any adjacent Strings into a single string (e.g. if there were escapes)
     parts = iterchain(*((''.join(g),) if issubclass(t, str) else (*g,) for t, g in groupby(parts, type)))
     # convert any free strings to ASTs
     parts = [p if not isinstance(p, str) else String(p) for p in parts]
 
+    # cast because pyright complains
+    parts = cast(list[AST], parts)
     return IString(parts)
 
+
+def as_dict_inners(items:list[AST]) -> list[PointsTo] | None:
+    """Determine if the inner items indicate the container is a Dict (i.e. all items are points-to)"""
+    if all(isinstance(i, PointsTo) for i in items):
+        return cast(list[PointsTo], items)
+    return None
+
+def as_array_inners(items:list[AST]) -> list[AST] | None:
+    """Determine if the inner items indicate the container is an Array (i.e. no points-to, assigns, or declarations)"""
+    invalid_types = (Declare, Assign, PointsTo)
+    if any(isinstance(i, invalid_types) for i in items):
+        return None
+    return items
+
+def as_object_inners(items:list[AST]) -> list[AST] | None:
+    """determine if the inner items indicate the container is an Object (i.e. no points-to, and should contain at least one assign or declaration)"""
+    invalid_types = (PointsTo,)
+    expected_types = (Assign, Declare)
+    if any(isinstance(i, invalid_types) for i in items):
+        return None
+    if not any(isinstance(i, expected_types) for i in items):
+        return None
+    return items
 
 def parse_block(block: Block_t, scope: Scope) -> AST:
     """Convert a block token to an AST"""
@@ -730,20 +756,37 @@ def parse_block(block: Block_t, scope: Scope) -> AST:
 
     delims = block.left + block.right
     match delims, inner:
-        case '()' | '{}', void:
+        case '()' | '{}' | '[]', void:
             return inner
-        case '()' | '{}', ListOfASTs():
-            return Block(inner.asts, brackets=delims)
+        case '()', ListOfASTs():
+            return Group(inner.asts)
+        case '{}', ListOfASTs():
+            return Block(inner.asts)
         case '[]', ListOfASTs():
-            # TODO: handle if this should be an object or dictionary instead of an array
-            return Array(inner.asts)
-        case '()' | '[]' | '(]' | '[)', Range():
-            inner.brackets = delims
-            return inner
+            if (asts:=as_dict_inners(inner.asts)) is not None:
+                return Dict(asts)
+            elif (asts:=as_array_inners(inner.asts)) is not None:
+                return Array(asts)
+            elif (asts:=as_object_inners(inner.asts)) is not None:
+                return Object(inner.asts)
+            #error cases
+            if any(isinstance(i, PointsTo) for i in inner.asts) and not all(isinstance(i, PointsTo) for i in inner.asts):
+                raise ValueError(f"ERROR: cannot mix PointsTo with other types in a dict: {inner=}")
+            #TBD other known cases
+            #otherwise there is an issue with the parser
+            raise ValueError(f"INTERNAL ERROR: could not determine container type for {inner=}. Should have been suitably disambiguated by parser...")
+        case '()' | '[]' | '(]' | '[)', BareRange():
+            return Range(inner.left, inner.right, delims)
 
         # catch all cases for any type of AST inside a block or range
-        case '()' | '{}', _:
-            return Block([inner], brackets=delims)
+        case '()', _:
+            return Group([inner])
+        case '{}', _:
+            return Block([inner])
+        case '[]', PointsTo():
+            return Dict([inner])
+        case '[]', Assign() | Declare():
+            return Object([inner])
         case '[]', _:
             # TODO: handle if this should be an object or dictionary instead of an array
             return Array([inner])

@@ -245,7 +245,7 @@ class Tuple(PrototypeAST):
         yield from anonyname(self.items)
 
 
-class Block(AST, Delimited):
+class Container(PrototypeAST, Delimited):
     items: list[AST]
     brackets: Literal['{}', '[]', '(]', '[)', '()', '<>']
 
@@ -257,12 +257,6 @@ class Block(AST, Delimited):
         yield from anonyname(self.items)
 
 
-class Array(AST, Delimited):
-    items: list[AST]
-
-    def __str__(self):
-        return f'[{" ".join(map(str, self.items))}]'
-
 # class Number(AST):
 #     val: int | float | Fraction
 
@@ -272,20 +266,12 @@ class Bool(AST):
     def __str__(self) -> str:
         return str(self.val).lower()
 
+
 class Int(AST):
     val: int
 
     def __str__(self) -> str:
         return str(self.val)
-
-
-class Range(AST):
-    left: AST
-    right: AST
-    brackets: Literal['[]', '[)', '(]', '()']
-
-    def __str__(self) -> str:
-        return f'{self.brackets[0]}{self.left}..{self.right}{self.brackets[1]}'
 
 
 class String(AST, Delimited):
@@ -321,6 +307,7 @@ class Flowable(AST, ABC):
     #     """reset the state of was_entered, in preparation for executing branches in a flow"""
     #     raise NotImplementedError(f'flowables must implement `reset_was_entered()`. No implementation found for {self.__class__}')
 
+
 class Flow(AST):
     branches: list[Flowable]
 
@@ -330,12 +317,14 @@ class Flow(AST):
     def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
         yield from anonyname(self.branches)
 
+
 class If(Flowable):
     condition: AST
     body: AST
 
     def __str__(self):
         return f'if {self.condition} {self.body}'
+
 
 class Loop(Flowable):
     condition: AST
@@ -344,11 +333,13 @@ class Loop(Flowable):
     def __str__(self):
         return f'loop {self.condition} {self.body}'
 
+
 class Default(Flowable):
     body: AST
 
     def __str__(self):
         return f'{self.body}'
+
 
 class Function(AST):
     args: AST
@@ -381,28 +372,23 @@ class Call(AST):
         return f'{self.f}({self.args})'
 
 
-#TODO: maybe this should just be a binop, i.e. does right need to be restricted to Block?
-# perhaps keep since to parse an index, the right must be a block
-# class Index(AST):
-#     left: AST
-#     right: PrototypeBlock
-
-#     def __str__(self):
-#         return f'{self.left}{self.right}'
-
 class BinOp(AST, ABC):
     left: AST
     right: AST
 
-class Index(BinOp):
-    def __str__(self): return f'{self.left}{self.right}' #right should already have brackets
-
 class Assign(BinOp):
     def __str__(self): return f'{self.left} = {self.right}'
+
+class PointsTo(BinOp):
+    def __str__(self): return f'{self.left} -> {self.right}'
+
+class Access(BinOp):
+    def __str__(self): return f'{self.left}.{self.right}'
 
 class Equal(BinOp):
     def __str__(self): return f'{self.left} =? {self.right}'
 
+# covered by OpChain([Not, Equal])
 # class NotEqual(BinOp):
 #     def __str__(self): return f'{self.left} not=? {self.right}'
 
@@ -502,6 +488,66 @@ class UnaryDiv(UnaryPrefixOp):
 
 class UnaryPostfixOp(AST, ABC):
     operand: AST
+
+
+class Group(AST, Delimited):
+    items: list[AST]
+
+    def __str__(self):
+        return f'({" ".join(map(str, self.items))})'
+
+
+class Block(AST, Delimited):
+    items: list[AST]
+
+    def __str__(self):
+        return f'{{{" ".join(map(str, self.items))}}}'
+
+class BareRange(PrototypeAST):
+    left: AST
+    right: AST
+
+    def __str__(self) -> str:
+        return f'{self.left}..{self.right}'
+
+class Range(AST):
+    left: AST
+    right: AST
+    brackets: Literal['[]', '[)', '(]', '()']
+
+    def __str__(self) -> str:
+        return f'{self.brackets[0]}{self.left}..{self.right}{self.brackets[1]}'
+
+
+class Array(AST, Delimited):
+    items: list[AST] # list[T] where type(express(T)) is not void
+
+    def __str__(self):
+        return f'[{" ".join(map(str, self.items))}]'
+
+
+class Dict(AST, Delimited):
+    items: list[PointsTo]
+
+    def __str__(self):
+        return f'[{", ".join(map(str, self.items))}]'
+
+
+class Object(AST, Delimited):
+    items: list[AST] # list[Declare|Assign|AST] has to have at least 1 declare or assignment
+
+    def __str__(self):
+        return f'[{" ".join(map(str, self.items))}]'
+
+
+#TODO: maybe this should just be a binop, i.e. does right need to be restricted to Range|Array?
+# perhaps keep since to parse an index, the right must be a Range|Array
+class Index(AST):
+    left: AST
+    right: Range | Array
+
+    def __str__(self):
+        return f'{self.left}{self.right}'
 
 
 
