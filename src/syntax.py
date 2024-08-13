@@ -211,7 +211,8 @@ class Declare(AST):
     def __str__(self):
         return f'{self.decltype.name.lower()} {self.target}'
 
-# assign is just a binop
+# assign is just a binop?
+# perhaps bring this one back since it's syntax that distinguishes it, not type checking
 # class Assign(AST):
 #     # TODO: allow bind to take in an unpack structure
 #     target: Declare | Identifier | UnpackTarget
@@ -245,16 +246,16 @@ class Tuple(PrototypeAST):
         yield from anonyname(self.items)
 
 
-class Container(PrototypeAST, Delimited):
-    items: list[AST]
-    brackets: Literal['{}', '[]', '(]', '[)', '()', '<>']
+# class Container(PrototypeAST, Delimited):
+#     items: list[AST]
+#     brackets: Literal['{}', '[]', '(]', '[)', '()', '<>']
 
-    def __str__(self):
-        return f'{self.brackets[0]}{" ".join(map(str, self.items))}{self.brackets[1]}'
+#     def __str__(self):
+#         return f'{self.brackets[0]}{" ".join(map(str, self.items))}{self.brackets[1]}'
 
-    def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
-        yield ('brackets', self.brackets)
-        yield from anonyname(self.items)
+#     def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:
+#         yield ('brackets', self.brackets)
+#         yield from anonyname(self.items)
 
 
 # class Number(AST):
@@ -382,6 +383,9 @@ class Assign(BinOp):
 class PointsTo(BinOp):
     def __str__(self): return f'{self.left} -> {self.right}'
 
+class BidirPointsTo(BinOp):
+    def __str__(self): return f'{self.left} <-> {self.right}'
+
 class Access(BinOp):
     def __str__(self): return f'{self.left}.{self.right}'
 
@@ -496,6 +500,9 @@ class Group(AST, Delimited):
     def __str__(self):
         return f'({" ".join(map(str, self.items))})'
 
+    def __full_iter__(self):
+        yield from anonyname(self.items)
+
 
 class Block(AST, Delimited):
     items: list[AST]
@@ -503,12 +510,17 @@ class Block(AST, Delimited):
     def __str__(self):
         return f'{{{" ".join(map(str, self.items))}}}'
 
+    def __full_iter__(self):
+        yield from anonyname(self.items)
+
+
 class BareRange(PrototypeAST):
     left: AST
     right: AST
 
     def __str__(self) -> str:
         return f'{self.left}..{self.right}'
+
 
 class Range(AST):
     left: AST
@@ -520,17 +532,33 @@ class Range(AST):
 
 
 class Array(AST, Delimited):
-    items: list[AST] # list[T] where type(express(T)) is not void
+    items: list[AST] # list[T] where T is not Declare or Assign or PointsTo or BidirPointsTo
 
     def __str__(self):
         return f'[{" ".join(map(str, self.items))}]'
+
+    def __full_iter__(self):
+        yield from anonyname(self.items)
 
 
 class Dict(AST, Delimited):
     items: list[PointsTo]
 
     def __str__(self):
-        return f'[{", ".join(map(str, self.items))}]'
+        return f'[{" ".join(map(str, self.items))}]'
+
+    def __full_iter__(self):
+        yield from anonyname(self.items)
+
+
+class BidirDict(AST, Delimited):
+    items: list[BidirPointsTo]
+
+    def __str__(self):
+        return f'[{" ".join(map(str, self.items))}]'
+
+    def __full_iter__(self):
+        yield from anonyname(self.items)
 
 
 class Object(AST, Delimited):
@@ -538,6 +566,9 @@ class Object(AST, Delimited):
 
     def __str__(self):
         return f'[{" ".join(map(str, self.items))}]'
+
+    def __full_iter__(self):
+        yield from anonyname(self.items)
 
 
 #TODO: maybe this should just be a binop, i.e. does right need to be restricted to Range|Array?

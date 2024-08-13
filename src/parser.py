@@ -1,4 +1,4 @@
-from typing import Generator, Sequence
+from typing import Generator, Sequence, cast
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from itertools import groupby, chain as iterchain
@@ -6,11 +6,11 @@ from itertools import groupby, chain as iterchain
 from .syntax import (
     AST,
     Declare,
-    PointsTo,
+    PointsTo, BidirPointsTo,
     Type,
-    ListOfASTs, Tuple, Block, BareRange, Array, Group, Range, Object, Dict,
+    ListOfASTs, Tuple, Block, BareRange, Array, Group, Range, Object, Dict, BidirDict,
     TypedIdentifier,
-    void, undefined,
+    Void, Undefined, void, undefined,
     String, IString,
     Flowable, Flow, If, Loop, Default,
     Identifier,
@@ -448,7 +448,7 @@ def parse_chain(chain: Chain[Token], scope: Scope) -> AST:
         return parse_single(chain[0], scope)
 
     left, op, right = split_by_lowest_precedence(chain, scope)
-    left, right = parse(left, scope), parse(right, scope)
+    left, right = parse_chain(left, scope), parse_chain(right, scope)
 
     assert not (left is void and right is void), f"Internal Error: both left and right returned void during parse chain, implying both left and right side of operator were empty, i.e. chain was invalid: {chain}"
 
@@ -559,11 +559,11 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
             else:
                 return Mul(left, right)
 
-        case Operator_t(op='='):
-            return Assign(left, right)
-
-        case Operator_t(op='=>'):
-            return Function(left, right)
+        case Operator_t(op='='): return Assign(left, right)
+        case Operator_t(op='=>'): return Function(left, right)
+        case Operator_t(op='->'): return PointsTo(left, right)
+        # case Operator_t(op='<-'): return PointsTo(right, left) #TBD if we just remove this one...
+        case Operator_t(op='<->'): return BidirPointsTo(left, right)
 
         # a bunch of simple cases:
         case ShiftOperator_t(op='<<'):  return LeftShift(left, right)
@@ -688,7 +688,6 @@ def build_unary_postfix_expr(left: AST, op: Token, scope: Scope) -> AST:
         case _:
             raise NotImplementedError(f"TODO: {op=}")
 
-from typing import cast
 def parse_string(token: String_t, scope: Scope) -> String | IString:
     """Convert a string token to an AST"""
 
@@ -707,6 +706,10 @@ def parse_string(token: String_t, scope: Scope) -> String | IString:
             ast = parse(chunk.body, scope)
             if isinstance(ast, Block):
                 parts.append(ast)
+            elif isinstance(ast, ListOfASTs):
+                pdb.set_trace()
+                # not sure if this should ever come up, might be a parse bug
+                # or might just need to convert to a block...
             else:
                 parts.append(Block([ast]))
 
@@ -726,16 +729,22 @@ def as_dict_inners(items:list[AST]) -> list[PointsTo] | None:
         return cast(list[PointsTo], items)
     return None
 
+def as_bidir_dict_inners(items:list[AST]) -> list[BidirPointsTo] | None:
+    """Determine if the inner items indicate the container is a BidirDict (i.e. all items are bidir-points-to)"""
+    if all(isinstance(i, BidirPointsTo) for i in items):
+        return cast(list[BidirPointsTo], items)
+    return None
+
 def as_array_inners(items:list[AST]) -> list[AST] | None:
     """Determine if the inner items indicate the container is an Array (i.e. no points-to, assigns, or declarations)"""
-    invalid_types = (Declare, Assign, PointsTo)
+    invalid_types = (Declare, Assign, PointsTo, BidirPointsTo)
     if any(isinstance(i, invalid_types) for i in items):
         return None
     return items
 
 def as_object_inners(items:list[AST]) -> list[AST] | None:
     """determine if the inner items indicate the container is an Object (i.e. no points-to, and should contain at least one assign or declaration)"""
-    invalid_types = (PointsTo,)
+    invalid_types = (PointsTo, BidirPointsTo)
     expected_types = (Assign, Declare)
     if any(isinstance(i, invalid_types) for i in items):
         return None
@@ -756,7 +765,7 @@ def parse_block(block: Block_t, scope: Scope) -> AST:
 
     delims = block.left + block.right
     match delims, inner:
-        case '()' | '{}' | '[]', void:
+        case '()' | '{}' | '[]', Void():
             return inner
         case '()', ListOfASTs():
             return Group(inner.asts)
@@ -765,6 +774,8 @@ def parse_block(block: Block_t, scope: Scope) -> AST:
         case '[]', ListOfASTs():
             if (asts:=as_dict_inners(inner.asts)) is not None:
                 return Dict(asts)
+            elif (asts:=as_bidir_dict_inners(inner.asts)) is not None:
+                return BidirDict(asts)
             elif (asts:=as_array_inners(inner.asts)) is not None:
                 return Array(asts)
             elif (asts:=as_object_inners(inner.asts)) is not None:
@@ -785,6 +796,8 @@ def parse_block(block: Block_t, scope: Scope) -> AST:
             return Block([inner])
         case '[]', PointsTo():
             return Dict([inner])
+        case '[]', BidirPointsTo():
+            return BidirDict([inner])
         case '[]', Assign() | Declare():
             return Object([inner])
         case '[]', _:

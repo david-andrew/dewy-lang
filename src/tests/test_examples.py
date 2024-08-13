@@ -9,6 +9,7 @@ def test_examples():
         'hello_name.dewy',
         'hello_loop.dewy',
         'anonymous_func.dewy',
+        'containers.dewy',
         'if_else.dewy',
         'if_else_if.dewy',
         'dangling_else.dewy',
