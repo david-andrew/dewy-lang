@@ -1646,7 +1646,7 @@ let m = () => meter
 
 Since zero-arg functions can be called without parenthesis, it functions identically to how an alias might work. This is nice because it is very clear how the aliasing mechanics work, as a consequence of normal let/const declarations and function closures.
 
-## Let, Const, Local
+## Let, Const, Local [probably just use `const`, `let`, `local`, and maybe `fixed`]
 
 The declaration keywords all have to do with what happens when trying to assign a value without the keyword
 
@@ -1684,6 +1684,13 @@ Perhaps there is a better name instead of `local` though. `shadow`? Basically wa
 - `scopeconst`
 - `hereconst`
 - `loco`
+
+Lastly I'm considering one that has the name and type declaration `fixed` but allows for the value to be overwritten. This might be for cases of shared methods that the user can append onto, e.g. `__add__`. Though probably we won't allow users to access the value directly, but rather access them through a function for registering new methods
+
+```dewy
+fixed __add__:<T,U,V>callable<(a:T, b:U), V>
+const register__add__ = (func:callable<(a:T, b:T), T>) => __add__ |= func
+```
 
 ## Security design
 
