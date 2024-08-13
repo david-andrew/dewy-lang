@@ -43,6 +43,8 @@
 //[let a]
 //[const a = 10]
 [b = 10]
+//[2..5 7..9 3.. 4,7.. ..7,9 ..9] //causes infinite loop
+//[2..5 7..9 .. 3.. 4,7.. ..7,9 ..9] //causes infinite loop
 
 
 // range
@@ -52,3 +54,8 @@
 ['a'..'z')
 [1,3..10)
 [9,8..1]
+[..10]
+(10..)
+[..]
+//.. //apparently this causes an infinite loop...
+(..9,11]
