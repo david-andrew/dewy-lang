@@ -431,7 +431,7 @@ def narrow_juxtapose(tokens: list[Token]) -> None:
                     stream[i-1] = range_jux
                 else:
                     stream[i:i] = [undefined, range_jux]
-                    gen.send(i+2)
+                    gen.send(i+3)
 
         # handle ellipsis jux
         elif isinstance(token, DotDotDot_t):
