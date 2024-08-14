@@ -713,10 +713,13 @@ def eat_integer(src: str) -> int | None:
     eat an integer, return the number of characters eaten
     integers are of the form [0-9]+
     """
-    i = 0
-    while i < len(src) and src[i].isdigit():
+    if not src[0].isdigit():
+        return None
+
+    i = 1
+    while i < len(src) and src[i].isdigit() or src[i] == '_':
         i += 1
-    return i if i > 0 else None
+    return i
 
 
 @peek_eat(BasedNumber_t)
