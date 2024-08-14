@@ -347,7 +347,7 @@ operators = sorted(
 # TODO: may need to separate |> from regular operators since it may confuse type param
 shift_operators = sorted(['<<', '>>', '<<<', '>>>', '<<!', '!>>'], key=len, reverse=True)
 keywords = ['loop', 'lazy', 'do', 'if', 'match', 'return', 'yield', 'break', 'continue',
-            'async', 'await', 'import', 'from', 'let', 'const', 'local', 'fixed']
+            'async', 'await', 'import', 'from', 'let', 'const', 'local_const', 'fixed_type']
 # TODO: what about language values, e.g. void, undefined, end, units, etc.? probably define at compile time, rather than in the compiler
 
 # note that the prefix is case insensitive, so call .lower() when matching the prefix

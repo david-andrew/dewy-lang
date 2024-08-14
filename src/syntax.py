@@ -174,43 +174,6 @@ class Void(AST):
 void = Void()
 
 
-class Identifier(AST):
-    name: str
-
-    def __str__(self) -> str:
-        return f'{self.name}'
-
-
-class TypedIdentifier(AST):
-    id: Identifier
-    type: Type
-
-    def __str__(self) -> str:
-        return f'{self.id}:{self.type}'
-
-
-class UnpackTarget(AST):
-    def __str__(self):
-        target: list[Identifier | UnpackTarget]
-        raise NotImplementedError('UnpackTarget is not implemented yet')
-
-
-class DeclarationType(Enum):
-    LET = auto()
-    CONST = auto()
-    LOCAL_CONST = auto()
-
-    # default for binding without declaring
-    DEFAULT = LET
-
-
-class Declare(AST):
-    decltype: DeclarationType
-    target: Identifier | TypedIdentifier | UnpackTarget
-
-    def __str__(self):
-        return f'{self.decltype.name.lower()} {self.target}'
-
 # assign is just a binop?
 # perhaps bring this one back since it's syntax that distinguishes it, not type checking
 # class Assign(AST):
@@ -583,6 +546,32 @@ class Object(AST, Delimited):
         yield from anonyname(self.items)
 
 
+class TypeParam(AST, Delimited):
+    items: list[AST]
+
+    def __str__(self):
+        return f'<{" ".join(map(str, self.items))}>'
+
+    def __full_iter__(self):
+        yield from anonyname(self.items)
+
+
+class DeclareGeneric(AST):
+    left: TypeParam
+    right: AST
+
+    def __str__(self):
+        return f'{self.left}{self.right}'
+
+
+class Parameterize(AST):
+    left: AST
+    right: TypeParam
+
+    def __str__(self):
+        return f'{self.left}{self.right}'
+
+
 #TODO: maybe this should just be a binop, i.e. does right need to be restricted to Range|Array?
 # perhaps keep since to parse an index, the right must be a Range|Array
 class Index(AST):
@@ -591,6 +580,53 @@ class Index(AST):
 
     def __str__(self):
         return f'{self.left}{self.right}'
+
+
+class Identifier(AST):
+    name: str
+
+    def __str__(self) -> str:
+        return f'{self.name}'
+
+
+class TypedIdentifier(AST):
+    id: Identifier
+    type: AST
+
+    def __str__(self) -> str:
+        return f'{self.id}:{self.type}'
+
+
+class TypedGroup(AST):
+    group: Group
+    type: AST
+
+    def __str__(self) -> str:
+        return f'{self.group}:{self.type}'
+
+
+class UnpackTarget(AST):
+    def __str__(self):
+        target: list[Identifier | UnpackTarget | Spread]
+        raise NotImplementedError('UnpackTarget is not implemented yet')
+
+
+class DeclarationType(Enum):
+    LET = auto()
+    CONST = auto()
+    LOCAL_CONST = auto()
+    FIXED_TYPE = auto()
+
+    # default for binding without declaring
+    DEFAULT = LET
+
+
+class Declare(AST):
+    decltype: DeclarationType
+    target: Identifier | TypedIdentifier | TypedGroup | UnpackTarget | Assign
+
+    def __str__(self):
+        return f'{self.decltype.name.lower()} {self.target}'
 
 
 

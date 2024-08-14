@@ -9,15 +9,13 @@ from .syntax import (
     Declare,
     PointsTo, BidirPointsTo,
     Type,
-    ListOfASTs, Tuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, Object, Dict, BidirDict,
-    TypedIdentifier,
+    ListOfASTs, Tuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, Object, Dict, BidirDict, TypeParam,
     Void, Undefined, void, undefined,
     String, IString,
     Flowable, Flow, If, Loop, Default,
-    Identifier,
     Function, PyAction, Call,
     Index,
-    Assign,
+    Identifier, TypedIdentifier, TypedGroup, UnpackTarget, Assign,
     Int, Bool,
     Range, IterIn,
     Less, LessEqual, Greater, GreaterEqual, Equal, MemberIn,
@@ -26,6 +24,7 @@ from .syntax import (
     And, Or, Xor, Nand, Nor, Xnor,
     Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv,
     DeclarationType,
+    DeclareGeneric, Parameterize,
 )
 from .tokenizer import (
     Token,
@@ -36,6 +35,7 @@ from .tokenizer import (
     Comma_t,
     String_t,
     Escape_t,
+    TypeParam_t,
     Undefined_t,
     Identifier_t,
     Integer_t,
@@ -48,10 +48,12 @@ from .tokenizer import (
 from .postok import (
     RangeJuxtapose_t,
     EllipsisJuxtapose_t,
+    TypeParamJuxtapose_t,
     get_next_chain,
     Chain,
     is_op,
     Flow_t,
+    Declare_t,
 )
 from .utils import (
     bool_to_bool,
@@ -331,7 +333,9 @@ class Associativity(Enum):
 [HIGHEST PRECEDENCE]
     (prefix) @
     . <jux call> <jux index access>
-    (prefix) not ...
+    <jux ellipsis>                      //e.g. [...args]
+    :                                   //e.g. let x:int
+    (prefix) not
     (postfix) ? `
     ^                                   //right-associative
     <jux mul>
@@ -364,6 +368,8 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.prefix, [Operator_t('@')]),
     (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),  # jux-call, jux-index
     (Associativity.right, [EllipsisJuxtapose_t(None)]),  # jux-ellipsis
+    (Associativity.none, [TypeParamJuxtapose_t(None)]),
+    (Associativity.none, [Operator_t(':')]),
     (Associativity.prefix, [Operator_t('not')]),
     (Associativity.right,  [Operator_t('^')]),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
@@ -428,10 +434,19 @@ def operator_associativity(op: Operator_t | int) -> Associativity:
 
 def is_callable(ast:AST, scope: Scope):
     match ast:
+        # ASTs the have to be evaluated to determine the type
         case Identifier(name):
             return scope.is_callable(name)
+        #TODO: any other types that need to be evaluated to determine if callable
+
+        # known callable ASTs
         case PyAction() | Function():
             return True
+
+        # known non-callables
+        case Int() | String() | Bool(): #TODO: rest of them..
+            return False
+
         case _:
             raise ValueError(f"ERROR: unhandled case to check if is_callable: {ast=}")
 
@@ -539,7 +554,9 @@ def parse_single(token: Token, scope: Scope) -> AST:
         case DotDotDot_t(): return Ellipsis()
         case String_t(): return parse_string(token, scope)
         case Block_t(): return parse_block(token, scope)
+        case TypeParam_t(): return parse_type_param(token, scope)
         case Flow_t(): return parse_flow(token, scope)
+        case Declare_t(): return parse_declare(token, scope)
 
         case _:
             # TODO handle other types...
@@ -558,7 +575,7 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         case Juxtapose_t():
             if is_callable(left, scope):
                 return Call(left, right)
-            elif is_indexable(left, scope) and isinstance(right, (Range, Array)):
+            elif isinstance(right, (Range, Array)) and is_indexable(left, scope):
                 return Index(left, right)
             else:
                 return Mul(left, right)
@@ -605,6 +622,18 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         case Operator_t(op='xnor'): return Xnor(left, right)
 
         # Misc Operators
+        case Operator_t(op=':'):
+            if isinstance(left, Identifier): return TypedIdentifier(left, right)
+            if isinstance(left, Group): return TypedGroup(left, right)
+            raise ValueError(f'ERROR: can only apply a type to an identifier or a (group). Got {left=}, {right=}')
+
+        case TypeParamJuxtapose_t():
+            if isinstance(left, TypeParam):
+                return DeclareGeneric(left, right)
+            if isinstance(right, TypeParam):
+                return Parameterize(left, right)
+            raise ValueError(f"INTERNAL ERROR: TypeParamJuxtapose must be attached to a type param. {left=}, {right=}")
+
         case EllipsisJuxtapose_t():
             assert isinstance(left, Ellipsis), f'INTERNAL ERROR: EllipsisJuxtapose was attached to a non ellipsis token. {left=}, {right=}'
             return Spread(right)
@@ -817,6 +846,14 @@ def parse_block(block: Block_t, scope: Scope) -> AST:
             raise NotImplementedError(f'block parse not implemented for {block.left+block.right}, {type(inner)}')
 
 
+
+def parse_type_param(param: TypeParam_t, scope: Scope) -> TypeParam:
+    items = parse(param.body, scope)
+    if isinstance(items, ListOfASTs):
+        return TypeParam(items.asts)
+    return TypeParam([items])
+
+
 def parse_flow(flow: Flow_t, scope: Scope) -> Flowable:
 
     # special case for closing else clause in a flow chain. Treat as `<if> <true> <clause>`
@@ -836,3 +873,17 @@ def parse_flow(flow: Flow_t, scope: Scope) -> Flowable:
             raise NotImplementedError('TODO: other flow keywords, namely lazy')
     pdb.set_trace()
     ...
+
+
+def parse_declare(declare: Declare_t, scope: Scope) -> Declare:
+    expr = parse_chain(declare.expr, scope)
+    assert isinstance(expr, (Identifier, TypedIdentifier, TypedGroup, UnpackTarget, Assign)), f'ERROR: expected identifier, typed-identifier, or unpack target for declare expression, got {expr=}'
+    match declare:
+        case Declare_t(keyword=Keyword_t(src='let')): return Declare(DeclarationType.LET, expr)
+        case Declare_t(keyword=Keyword_t(src='const')): return Declare(DeclarationType.CONST, expr)
+        case Declare_t(keyword=Keyword_t(src='local_const')): return Declare(DeclarationType.LOCAL_CONST, expr)
+        case Declare_t(keyword=Keyword_t(src='fixed_type')): return Declare(DeclarationType.FIXED_TYPE, expr)
+        case _:
+            raise ValueError(f"ERROR: unknown declare keyword {declare.keyword=}. Expected 'let', 'const', 'local_const', or 'fixed_type'. {declare=}")
+    pdb.set_trace()
+    raise NotImplementedError

@@ -73,7 +73,7 @@ class Flow_t(Token):
     def __repr__(self) -> str:
         return f"<Flow_t: {self.keyword}: {self.condition} {self.clause}>"
 
-    def __iter__(self) -> Generator[Token, None, None]:
+    def __iter__(self) -> Generator[list[Token], None, None]:
         if self.condition is not None:
             yield self.condition
         yield self.clause
@@ -82,7 +82,19 @@ class Flow_t(Token):
 # class Do_t(Token):...
 # class Return_t(Token):...
 # class Express_t(Token):...
-# class Declare_t(Token):...
+
+
+class Declare_t(Token):
+    def __init__(self, keyword: Keyword_t, expr: Chain[Token]):
+        self.keyword = keyword
+        self.expr = expr
+
+    def __repr__(self) -> str:
+        return f"<Declare_t: {self.keyword} {self.expr}>"
+
+    def __iter__(self) -> Generator[list[Token], None, None]:
+        # yield [self.keyword] #appraently flow doesn't yield the keyword. tbd if it matters...
+        yield self.expr
 
 
 class RangeJuxtapose_t(Operator_t):
@@ -98,6 +110,7 @@ class RangeJuxtapose_t(Operator_t):
     def __eq__(self, other) -> bool:
         return isinstance(other, RangeJuxtapose_t)
 
+
 class EllipsisJuxtapose_t(Operator_t):
     def __init__(self, _):
         super().__init__('')
@@ -111,6 +124,19 @@ class EllipsisJuxtapose_t(Operator_t):
     def __eq__(self, other) -> bool:
         return isinstance(other, EllipsisJuxtapose_t)
 
+
+class TypeParamJuxtapose_t(Operator_t):
+    def __init__(self, _):
+        super().__init__('')
+
+    def __repr__(self) -> str:
+        return "<TypeParamJuxtapose_t>"
+
+    def __hash__(self) -> int:
+        return hash(TypeParamJuxtapose_t)
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, TypeParamJuxtapose_t)
 
 
 atom_tokens = (
@@ -276,7 +302,7 @@ def is_binop(token: Token) -> bool:
     Determines if a token could be a binary operator.
     Note that this is not mutually exclusive with being a prefix operator or a postfix operator.
     """
-    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t, RangeJuxtapose_t, EllipsisJuxtapose_t))
+    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t, RangeJuxtapose_t, EllipsisJuxtapose_t, TypeParamJuxtapose_t))
 
 
 def is_op(token: Token) -> bool:
@@ -317,10 +343,10 @@ def _get_next_keyword_expr(tokens: list[Token]) -> tuple[Token, list[Token]]:
         case Keyword_t(src='express'):
             pdb.set_trace()
             ...
-        case Keyword_t(src='let' | 'const'):
+        case Keyword_t(src='let' | 'const' | 'local_const' | 'fixed_type'):
             expr, tokens = get_next_chain(tokens)
-            pdb.set_trace()
-            ...
+            return Declare_t(t, expr), tokens
+
 
     raise NotImplementedError("TODO: handle keyword based expressions")
     # return #chain?
@@ -374,15 +400,26 @@ def get_next_chain(tokens: list[Token], *, tracker: ShouldBreakTracker = None, o
     return Chain(chain), tokens
 
 
-def regularize_ranges(tokens: list[Token]) -> None:
+def narrow_juxtapose(tokens: list[Token]) -> None:
     """
+    range juxtapose:
     convert [<token>, <jux>, <..>] into [<token>, <range_jux>, <..>]
     convert [<..>, <jux>, <token>] into [<..>, <range_jux>, <token>]
     if .. doesn't connect to anything on the left or right, connect it to undefined
+
+    ellipsis juxtapose:
+    convert [<...>, <jux>, <token>] into [<...>, <ellipsis_jux>, <token>]
+
+    type param juxtapose:
+    convert [<token>, <jux>, <type_param>] into [<token>, <type_param_jux>, <type_param>]
+    convert [<type_param>, <jux>, <token>] into [<type_param>, <type_param_jux>, <token>]
     """
     range_jux = RangeJuxtapose_t(None)
+    ellipsis_jux = EllipsisJuxtapose_t(None)
+    type_param_jux = TypeParamJuxtapose_t(None)
     undefined = Undefined_t(None)
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
+        # handle range jux
         if isinstance(token, DotDot_t):
             if i + 1 < len(stream):
                 if isinstance(stream[i+1], Juxtapose_t):
@@ -396,15 +433,17 @@ def regularize_ranges(tokens: list[Token]) -> None:
                     stream[i:i] = [undefined, range_jux]
                     gen.send(i+2)
 
-def regularize_ellipsis(tokens: list[Token]) -> None:
-    """convert [<...>, <jux>, <token>] into [<...>, <ellipsis_jux>, <token>]"""
-    ellipsis_jux = EllipsisJuxtapose_t(None)
-    undefined = Undefined_t(None)
-    for i, token, stream in (gen := full_traverse_tokens(tokens)):
-        if isinstance(token, DotDotDot_t):
-            if i + 1 < len(stream):
-                if isinstance(stream[i+1], Juxtapose_t):
-                    stream[i+1] = ellipsis_jux
+        # handle ellipsis jux
+        elif isinstance(token, DotDotDot_t):
+            if i + 1 < len(stream) and isinstance(stream[i+1], Juxtapose_t):
+                stream[i+1] = ellipsis_jux
+
+        # handle type param jux
+        elif isinstance(token, TypeParam_t):
+            if i > 0 and isinstance(stream[i-1], Juxtapose_t):
+                stream[i-1] = type_param_jux
+            elif i + 1 < len(stream) and isinstance(stream[i+1], Juxtapose_t):
+                stream[i+1] = type_param_jux
 
 
 def convert_bare_else(tokens: list[Token]) -> None:
@@ -484,11 +523,9 @@ def post_process(tokens: list[Token]) -> None:
     # combine operator chains into a single operator token
     chain_operators(tokens)
 
-    # desugar ranges
-    regularize_ranges(tokens)
+    # convert juxtapose tokens to more specific types if possible
+    narrow_juxtapose(tokens)
 
-    # desugar ellipsis
-    regularize_ellipsis(tokens)
 
     # make the actual list of chains
 
