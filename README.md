@@ -8,7 +8,7 @@ Dewy is a general purpose programming language with a focus on engineering.
 
 ### Dependancies
 
-For now, the only dependancy is **Python >= 3.11** with an optional dependancy on `rich` for rich printing/errors (`pip install rich`)
+For now, the only dependancy is **Python >= 3.12** with an optional dependancy on `rich` for rich printing/errors (`pip install rich`)
 
 Later dependancies will probably include `clang`/`llvm`
 

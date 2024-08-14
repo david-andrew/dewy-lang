@@ -4,33 +4,15 @@ from .tokenizer import (
     unary_postfix_operators,
     binary_operators,
     opchain_starters,
-
     Token,
-
-    WhiteSpace_t,
-
-    Escape_t,
-
-    Identifier_t,
-    Block_t,
-    TypeParam_t,
-    RawString_t,
-    String_t,
-    Integer_t,
-    Undefined_t,
-    Void_t,
-    End_t,
-    Boolean_t,
-    BasedNumber_t,
-    Hashtag_t,
+    Keyword_t, Undefined_t, Void_t, End_t,
+    WhiteSpace_t, Escape_t,
+    Identifier_t, Hashtag_t,
+    Block_t, TypeParam_t,
+    RawString_t, String_t,
+    Integer_t, BasedNumber_t, Boolean_t,
     DotDot_t, DotDotDot_t,
-
-    Keyword_t,
-
-    Juxtapose_t,
-    Operator_t,
-    ShiftOperator_t,
-    Comma_t,
+    Juxtapose_t, Operator_t, ShiftOperator_t, Comma_t,
 )
 
 from typing import Generator, overload
@@ -40,18 +22,11 @@ from abc import ABC
 import pdb
 
 
-# There is no chain class
-# A chain is just a list of tokens that is directly parsable as an expression without any other syntax
+# A chain is just a list of tokens that is known to be directly parsable as an expression without any other syntax
+# i.e. it is the result of calls to `get_next_chain()`
 # all other syntax is wrapped up into compound tokens
 # it should literally just be a sequence of atoms and operators
-
-
-# TODO: replace with 3.12 syntax when released: class Chain[T](list[T]): ...
-from typing import TypeVar
-T = TypeVar('T')
-
-
-class Chain(list[T]):
+class Chain[T](list[T]):
     """class for explicitly annotating that a token list is a single chain"""
 
 
