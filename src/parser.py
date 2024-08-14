@@ -363,7 +363,7 @@ the unary versions of + - * / % have the same precedence as their binary version
 operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reversed([
     (Associativity.prefix, [Operator_t('@')]),
     (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),  # jux-call, jux-index
-    (Associativity.none, [EllipsisJuxtapose_t(None)]),  # jux-ellipsis
+    (Associativity.right, [EllipsisJuxtapose_t(None)]),  # jux-ellipsis
     (Associativity.prefix, [Operator_t('not')]),
     (Associativity.right,  [Operator_t('^')]),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
