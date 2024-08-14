@@ -5,10 +5,11 @@ from itertools import groupby, chain as iterchain
 
 from .syntax import (
     AST,
+    Access,
     Declare,
     PointsTo, BidirPointsTo,
     Type,
-    ListOfASTs, Tuple, Block, BareRange, Array, Group, Range, Object, Dict, BidirDict,
+    ListOfASTs, Tuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, Object, Dict, BidirDict,
     TypedIdentifier,
     Void, Undefined, void, undefined,
     String, IString,
@@ -41,11 +42,12 @@ from .tokenizer import (
     Boolean_t,
     BasedNumber_t,
     RawString_t,
-    DotDot_t,
+    DotDot_t, DotDotDot_t,
     Keyword_t,
 )
 from .postok import (
     RangeJuxtapose_t,
+    EllipsisJuxtapose_t,
     get_next_chain,
     Chain,
     is_op,
@@ -361,6 +363,7 @@ the unary versions of + - * / % have the same precedence as their binary version
 operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reversed([
     (Associativity.prefix, [Operator_t('@')]),
     (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),  # jux-call, jux-index
+    (Associativity.none, [EllipsisJuxtapose_t(None)]),  # jux-ellipsis
     (Associativity.prefix, [Operator_t('not')]),
     (Associativity.right,  [Operator_t('^')]),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
@@ -533,6 +536,7 @@ def parse_single(token: Token, scope: Scope) -> AST:
         case BasedNumber_t(): return Int(based_number_to_int(token.src))
         case RawString_t(): return String(token.to_str())
         case DotDot_t(): return BareRange(void, void)
+        case DotDotDot_t(): return Ellipsis()
         case String_t(): return parse_string(token, scope)
         case Block_t(): return parse_block(token, scope)
         case Flow_t(): return parse_flow(token, scope)
@@ -564,6 +568,7 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         case Operator_t(op='->'): return PointsTo(left, right)
         # case Operator_t(op='<-'): return PointsTo(right, left) #TBD if we just remove this one...
         case Operator_t(op='<->'): return BidirPointsTo(left, right)
+        case Operator_t(op='.'): return Access(left, right)
 
         # a bunch of simple cases:
         case ShiftOperator_t(op='<<'):  return LeftShift(left, right)
@@ -600,6 +605,10 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         case Operator_t(op='xnor'): return Xnor(left, right)
 
         # Misc Operators
+        case EllipsisJuxtapose_t():
+            assert isinstance(left, Ellipsis), f'INTERNAL ERROR: EllipsisJuxtapose was attached to a non ellipsis token. {left=}, {right=}'
+            return Spread(right)
+
         case RangeJuxtapose_t():
             if isinstance(right, BareRange):
                 assert right.left is void, f"ERROR: can't attach expression to range, range already has values. Got {left=}, {right=}"

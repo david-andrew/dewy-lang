@@ -834,6 +834,14 @@ def eat_dotdot(src: str) -> int | None:
     return 2 if src.startswith('..') else None
 
 
+@peek_eat(DotDotDot_t)
+def eat_dotdotdot(src: str) -> int | None:
+    """
+    eat a dotdotdot, return the number of characters eaten
+    """
+    return 3 if src.startswith('...') else None
+
+
 class EatTracker:
     i: int
     tokens: list[Token]

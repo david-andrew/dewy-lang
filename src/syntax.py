@@ -522,6 +522,18 @@ class BareRange(PrototypeAST):
         return f'{self.left}..{self.right}'
 
 
+class Ellipsis(AST):
+    def __str__(self) -> str:
+        return '...'
+
+
+class Spread(AST):
+    right: AST
+
+    def __str__(self) -> str:
+        return f'...{self.right}'
+
+
 class Range(AST):
     left: AST
     right: AST

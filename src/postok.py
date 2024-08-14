@@ -23,7 +23,7 @@ from .tokenizer import (
     Boolean_t,
     BasedNumber_t,
     Hashtag_t,
-    DotDot_t,
+    DotDot_t, DotDotDot_t,
 
     Keyword_t,
 
@@ -98,6 +98,20 @@ class RangeJuxtapose_t(Operator_t):
     def __eq__(self, other) -> bool:
         return isinstance(other, RangeJuxtapose_t)
 
+class EllipsisJuxtapose_t(Operator_t):
+    def __init__(self, _):
+        super().__init__('')
+
+    def __repr__(self) -> str:
+        return "<EllipsisJuxtapose_t>"
+
+    def __hash__(self) -> int:
+        return hash(EllipsisJuxtapose_t)
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, EllipsisJuxtapose_t)
+
+
 
 atom_tokens = (
     Identifier_t,
@@ -110,6 +124,7 @@ atom_tokens = (
     TypeParam_t,
     Hashtag_t,
     DotDot_t,
+    DotDotDot_t,
     Flow_t,
     Undefined_t,
 )
@@ -261,7 +276,7 @@ def is_binop(token: Token) -> bool:
     Determines if a token could be a binary operator.
     Note that this is not mutually exclusive with being a prefix operator or a postfix operator.
     """
-    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t, RangeJuxtapose_t))
+    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t, RangeJuxtapose_t, EllipsisJuxtapose_t))
 
 
 def is_op(token: Token) -> bool:
@@ -381,6 +396,16 @@ def regularize_ranges(tokens: list[Token]) -> None:
                     stream[i:i] = [undefined, range_jux]
                     gen.send(i+2)
 
+def regularize_ellipsis(tokens: list[Token]) -> None:
+    """convert [<...>, <jux>, <token>] into [<...>, <ellipsis_jux>, <token>]"""
+    ellipsis_jux = EllipsisJuxtapose_t(None)
+    undefined = Undefined_t(None)
+    for i, token, stream in (gen := full_traverse_tokens(tokens)):
+        if isinstance(token, DotDotDot_t):
+            if i + 1 < len(stream):
+                if isinstance(stream[i+1], Juxtapose_t):
+                    stream[i+1] = ellipsis_jux
+
 
 def convert_bare_else(tokens: list[Token]) -> None:
     """
@@ -461,6 +486,9 @@ def post_process(tokens: list[Token]) -> None:
 
     # desugar ranges
     regularize_ranges(tokens)
+
+    # desugar ellipsis
+    regularize_ellipsis(tokens)
 
     # make the actual list of chains
 
