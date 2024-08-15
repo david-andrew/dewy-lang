@@ -12,7 +12,7 @@ from ..syntax import (
     String, IString,
     Flowable, Flow, If, Loop, Default,
     Identifier,
-    Function, PyAction, Call,
+    FunctionLiteral, PyAction, Call,
     Assign,
     Int, Bool,
     Range, IterIn,
@@ -47,7 +47,7 @@ def python_interpreter(path: Path, args: list[str]):
         print(ast)
     print('```')
     print(repr(ast))
-    return #DEBUG while not done evaluate implementation
+    # return #DEBUG while not done evaluate implementation
     # raise NotImplementedError("evaluation hasn't been implemented yet")
 
     res = top_level_evaluate(ast)
@@ -69,10 +69,16 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
     return {
         Call: evaluate_call,
         Block: evaluate_block,
+        Group: evaluate_group,
+        Assign: evaluate_assign,
+        FunctionLiteral: evaluate_function_literal,
+        Closure: evaluate_closure,
+        PyAction: evaluate_pyaction,
+        Identifier: evaluate_identifier,
         #TODO: other AST types here
     }
 
-def evaluate(ast:AST, scope:Scope) -> AST|None:
+def evaluate(ast:AST, scope:Scope) -> AST:
     eval_fn_map = get_eval_fn_map()
 
     ast_type = type(ast)
@@ -83,11 +89,11 @@ def evaluate(ast:AST, scope:Scope) -> AST|None:
 
 
 
-def evaluate_call(ast: Call, scope: Scope) -> AST: #(f: AST, f_args: AST | None, scope: Scope) -> AST:
+def evaluate_call(ast: Call, scope: Scope) -> AST:
     f = ast.f
     if isinstance(f, Identifier):
         f = scope.get(f.name).value
-    assert isinstance(f, (Function, PyAction)), f'expected Function or PyAction, got {f}'
+    assert isinstance(f, (FunctionLiteral, PyAction)), f'expected Function or PyAction, got {f}'
 
     if isinstance(f, PyAction):
         args, kwargs = collect_args(ast.args, scope)
@@ -95,7 +101,6 @@ def evaluate_call(ast: Call, scope: Scope) -> AST: #(f: AST, f_args: AST | None,
 
     pdb.set_trace()
     raise NotImplementedError(f'Function evaluation not implemented yet')
-
 
 def collect_args(args: AST | None, scope: Scope) -> tuple[list[AST], dict[str, AST]]:
     match args:
@@ -109,7 +114,63 @@ def collect_args(args: AST | None, scope: Scope) -> tuple[list[AST], dict[str, A
 
     raise NotImplementedError(f'collect_args not implemented yet for {args}')
 
+def evaluate_group(ast: Group, scope: Scope):
+
+    expressed: list[AST] = []
+    for expr in ast.items:
+        res = evaluate(expr, scope)
+        if res is not void:
+            expressed.append(res)
+    if len(expressed) == 0:
+        return void
+    if len(expressed) == 1:
+        return expressed[0]
+    raise NotImplementedError(f'Block with multiple expressions not yet supported. {ast=}, {expressed=}')
+
+
 def evaluate_block(ast: Block, scope: Scope):
+    scope = Scope(scope)
+    return evaluate_group(Group(ast.items), scope)
+
+
+def evaluate_assign(ast: Assign, scope: Scope):
+    match ast:
+        case Assign(left=Identifier(name), right=right):
+            right = evaluate(right, scope)
+            scope.assign(name, right)
+            return void
     pdb.set_trace()
-    return void
-    raise NotImplementedError('Block evaluation not implemented yet')
+    raise NotImplementedError('Assign not implemented yet')
+
+class Closure(AST):
+    fn: FunctionLiteral
+    scope: Scope
+    # call_args: AST|None=None # TBD how to handle
+    def __str__(self):
+        return f'Closure({self.fn}, scope={self.scope})'
+
+def evaluate_function_literal(ast: FunctionLiteral, scope: Scope):
+    return Closure(fn=ast, scope=scope)
+
+def evaluate_closure(ast: Closure, scope: Scope):
+    fn_scope = Scope(ast.scope)
+    #TODO: for now we assume everything is 0 args. need to handle args being attached to the closure
+    return evaluate(ast.fn.body, fn_scope)
+
+    #grab arguments from scope and put them in fn_scope
+    pdb.set_trace()
+    ast.fn.args
+    raise NotImplementedError('Closure not implemented yet')
+
+def evaluate_pyaction(ast: PyAction, scope: Scope):
+    # fn_scope = Scope(ast.scope)
+    #TODO: currently just assuming 0 args in and no return
+    return ast.action()
+    raise NotImplementedError('PyAction not implemented yet')
+
+
+def evaluate_identifier(ast: Identifier, scope: Scope):
+    var = scope.get(ast.name)
+    # if ast.name == 'readl':
+    #     pdb.set_trace()
+    return evaluate(var.value, scope)

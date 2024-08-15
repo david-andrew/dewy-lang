@@ -305,7 +305,7 @@ class Default(Flowable):
         return f'{self.body}'
 
 
-class Function(AST):
+class FunctionLiteral(AST):
     args: AST
     body: AST
 
@@ -614,11 +614,11 @@ class UnpackTarget(AST):
 class DeclarationType(Enum):
     LET = auto()
     CONST = auto()
-    LOCAL_CONST = auto()
-    FIXED_TYPE = auto()
+    # LOCAL_CONST = auto()
+    # FIXED_TYPE = auto()
 
     # default for binding without declaring
-    DEFAULT = LET
+    # DEFAULT = LET
 
 
 class Declare(AST):

@@ -1,4 +1,4 @@
-from typing import Generator, Sequence, cast
+from typing import Generator, Sequence, cast, overload, Literal
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from itertools import groupby, chain as iterchain
@@ -10,10 +10,10 @@ from .syntax import (
     PointsTo, BidirPointsTo,
     Type,
     ListOfASTs, Tuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, Object, Dict, BidirDict, TypeParam,
-    Void, Undefined, void, undefined,
+    Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
-    Function, PyAction, Call,
+    FunctionLiteral, PyAction, Call,
     Index,
     Identifier, TypedIdentifier, TypedGroup, UnpackTarget, Assign,
     Int, Bool,
@@ -85,12 +85,55 @@ class Scope:
     # callables: dict[str, AST | None] = field(default_factory=dict) #TODO: maybe replace str->AST with str->signature (where signature might be constructed based on the func structure)
     vars: 'dict[str, Scope._var]' = field(default_factory=dict)
 
-    def get(self, name) -> 'Scope._var':
+    @overload
+    def get(self, name:str, throw:Literal[True]=True) -> 'Scope._var': ...
+    @overload
+    def get(self, name:str, throw:Literal[False]) -> 'Scope._var|None': ...
+    def get(self, name:str, throw:bool=True) -> 'Scope._var|None':
         for s in self:
             if name in s.vars:
                 return s.vars[name]
 
-        raise KeyError(f'variable {name} not found in scope')
+        if throw:
+            raise KeyError(f'variable {name} not found in scope')
+        return None
+
+    def assign(self, name:str, value:AST):
+        assert len(DeclarationType.__members__) == 2, f'expected only 2 declaration types: let, const. found {DeclarationType.__members__}'
+
+        # var is already declared in current scope
+        if name in self.vars:
+            var = self.vars[name]
+            assert var.decltype != DeclarationType.CONST, f"Attempted to assign to constant variable: {name=}{var=}. {value=}"
+            var.value = value
+            return
+
+        var = self.get(name, throw=False)
+
+        # var is not declared in any scope
+        if var is None:
+            self.let(name, value, untyped)
+            return
+
+        # var was declared in a parent scope
+        if var.decltype == DeclarationType.LET:
+            var.value = value
+
+        raise ValueError(f'Attempted to assign to constant variable: {name=}{var=}. {value=}')
+
+    def declare(self, name:str, value:AST, type:Type, decltype:DeclarationType):
+        if name in self.vars:
+            var = self.vars[name]
+            assert var.decltype != DeclarationType.CONST, f"Attempted to {decltype.name.lower()} declare a value that is const in this current scope. {name=}{var=}. {value=}"
+
+        self.vars[name] = Scope._var(decltype, type, value)
+
+    def let(self, name:str, value:AST, type:Type):
+        self.declare(name, value, type, DeclarationType.LET)
+
+    def const(self, name:str, value:AST, type:Type):
+        self.declare(name, value, type, DeclarationType.CONST)
+
 
     #TODO: this should be expanded/more comprihensive/etc.
     def is_callable(self, name: str) -> bool:
@@ -109,7 +152,7 @@ class Scope:
     def default() -> 'Scope':
         return Scope(vars={
             'printl': Scope._var(
-                DeclarationType.LOCAL_CONST,
+                DeclarationType.CONST,
                 Type('callable'),
                 PyAction(
                     TypedIdentifier(Identifier('x'), Type('string')),
@@ -118,7 +161,7 @@ class Scope:
                 )
             ),
             'print': Scope._var(
-                DeclarationType.LOCAL_CONST,
+                DeclarationType.CONST,
                 Type('callable'),
                 PyAction(
                     TypedIdentifier(Identifier('x'), Type('string')),
@@ -127,7 +170,7 @@ class Scope:
                 )
             ),
             'readl': Scope._var(
-                DeclarationType.LOCAL_CONST,
+                DeclarationType.CONST,
                 Type('callable'),
                 PyAction(
                     void,
@@ -440,7 +483,7 @@ def is_callable(ast:AST, scope: Scope):
         #TODO: any other types that need to be evaluated to determine if callable
 
         # known callable ASTs
-        case PyAction() | Function():
+        case PyAction() | FunctionLiteral():
             return True
 
         # known non-callables
@@ -581,7 +624,7 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
                 return Mul(left, right)
 
         case Operator_t(op='='): return Assign(left, right)
-        case Operator_t(op='=>'): return Function(left, right)
+        case Operator_t(op='=>'): return FunctionLiteral(left, right)
         case Operator_t(op='->'): return PointsTo(left, right)
         # case Operator_t(op='<-'): return PointsTo(right, left) #TBD if we just remove this one...
         case Operator_t(op='<->'): return BidirPointsTo(left, right)
@@ -706,7 +749,7 @@ def build_unary_prefix_expr(op: Token, right: AST, scope: Scope) -> AST:
 
         # binary operators that appear to be unary because the left can be void
         # => called as unary prefix op means left was ()/void
-        case Operator_t(op='=>'): return Function(void, right)
+        case Operator_t(op='=>'): return FunctionLiteral(void, right)
 
         case _:
             raise ValueError(f"INTERNAL ERROR: {op=} is not a known unary prefix operator")
