@@ -15,7 +15,7 @@ from .tokenizer import (
     Juxtapose_t, Operator_t, ShiftOperator_t, Comma_t,
 )
 
-from typing import Generator, overload
+from typing import Generator, overload, cast
 from abc import ABC
 
 
@@ -68,7 +68,7 @@ class Declare_t(Token):
         return f"<Declare_t: {self.keyword} {self.expr}>"
 
     def __iter__(self) -> Generator[list[Token], None, None]:
-        # yield [self.keyword] #appraently flow doesn't yield the keyword. tbd if it matters...
+        yield [self.keyword] #appraently flow doesn't yield the keyword. tbd if it matters...
         yield self.expr
 
 
@@ -112,6 +112,62 @@ class TypeParamJuxtapose_t(Operator_t):
 
     def __eq__(self, other) -> bool:
         return isinstance(other, TypeParamJuxtapose_t)
+
+class OpChain_t(Token):
+    def __init__(self, ops:list[Operator_t]):
+        assert len(ops) > 1, f"OpChain_t must have at least 2 operators. Got {len(ops)} operators"
+        self.ops = ops
+
+    def __repr__(self) -> str:
+        return f"<OpChain_t: {''.join(op.op for op in self.ops)}>"
+
+    def __hash__(self) -> int:
+        return hash((OpChain_t, tuple(self.ops)))
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, OpChain_t) and self.ops == other.ops
+
+    def __iter__(self) -> Generator[list[Token], None, None]:
+        yield cast(list[Token], self.ops)
+
+class VectorizedOp_t(Token):
+    def __init__(self, dot:Operator_t, op:Operator_t|OpChain_t):
+        assert isinstance(dot, Operator_t) and dot.op == '.', f"VectorizedOp_t must have a '.' operator. Got {dot}"
+        self.dot = dot
+        self.op = op
+
+    def __repr__(self) -> str:
+        return f"<VectorizedOp_t: {self.dot}, {self.op}>"
+
+    def __hash__(self) -> int:
+        return hash((VectorizedOp_t, self.dot, self.op))
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, VectorizedOp_t) and self.dot == other.dot and self.op == other.op
+
+    def __iter__(self) -> Generator[list[Token], None, None]:
+        yield [self.dot]
+        yield [self.op]
+
+
+class CombinedAssignmentOp_t(Token):
+    def __init__(self, op:Operator_t, assign:Operator_t):
+        assert isinstance(assign, Operator_t) and assign.op == '=', f"CombinedAssignmentOp_t must have an '=' operator. Got {assign}"
+        self.op = op
+        self.assign = assign
+
+    def __repr__(self) -> str:
+        return f"<CombinedAssignmentOp_t: {self.op}, {self.assign}>"
+
+    def __hash__(self) -> int:
+        return hash((CombinedAssignmentOp_t, self.op, self.assign))
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, CombinedAssignmentOp_t) and self.op == other.op and self.assign == other.assign
+
+    def __iter__(self) -> Generator[list[Token], None, None]:
+        yield [self.op]
+        yield [self.assign]
 
 
 atom_tokens = (
