@@ -254,7 +254,7 @@ class IString(AST, Delimited):
             if isinstance(part, String):
                 s += part.val
             else:
-                s += f'{{{part}}}'
+                s += f'{part}'
         return f'"{s}"'
 
     def __full_iter__(self) -> Generator[tuple[str, Any], None, None]:

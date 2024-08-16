@@ -44,11 +44,12 @@ def python_interpreter(path: Path, args: list[str]):
     ast = top_level_parse(tokens)
     ast = post_parse(ast)
 
+    #TODO: put these under a verbose/etc. flag
     print_ast(ast)
     print(repr(ast))
 
     res = top_level_evaluate(ast)
-    if res and res is not void:
+    if res is not void:
         print(res)
 
 def print_ast(ast: AST):
@@ -61,7 +62,7 @@ def print_ast(ast: AST):
     print('```')
 
 
-def top_level_evaluate(ast:AST) -> AST|None:
+def top_level_evaluate(ast:AST) -> AST:
     scope = Scope.default()
     insert_pyactions(scope)
     return evaluate(ast, scope)
