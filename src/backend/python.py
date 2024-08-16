@@ -13,7 +13,7 @@ from ..syntax import (
     Void, void, Undefined, undefined,
     String, IString,
     Flowable, Flow, If, Loop, Default,
-    PrototypeIdentifier, Identifier,
+    PrototypeIdentifier, Identifier, Express,
     FunctionLiteral, PrototypePyAction, PyAction, Call,
     Assign,
     Int, Bool,
@@ -43,21 +43,22 @@ def python_interpreter(path: Path, args: list[str]):
 
     ast = top_level_parse(tokens)
     ast = post_parse(ast)
-    # print(f'parsed AST: {ast}\n{repr(ast)}')
-    from ..syntax import Block
+
+    print_ast(ast)
+    print(repr(ast))
+
+    res = top_level_evaluate(ast)
+    if res and res is not void:
+        print(res)
+
+def print_ast(ast: AST):
+    """little helper function to print out the equivalent source code of an AST"""
     print('```dewy')
     if isinstance(ast, (Block, Group)):
         for i in ast: print(i)
     else:
         print(ast)
     print('```')
-    print(repr(ast))
-    # return #DEBUG while not done evaluate implementation
-    # raise NotImplementedError("evaluation hasn't been implemented yet")
-
-    res = top_level_evaluate(ast)
-    if res and res is not void:
-        print(res)
 
 
 def top_level_evaluate(ast:AST) -> AST|None:
@@ -91,6 +92,7 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         String: no_op,
         IString: evaluate_istring,
         Identifier: cannot_evaluate,
+        Express: evaluate_express,
         #TODO: other AST types here
     }
 
@@ -109,11 +111,15 @@ def evaluate_call(ast: Call, scope: Scope) -> AST:
     f = ast.f
     if isinstance(f, Identifier):
         f = scope.get(f.name).value
-    assert isinstance(f, (FunctionLiteral, PyAction)), f'expected Function or PyAction, got {f}'
+    assert isinstance(f, (PyAction, Closure)), f'expected Function or PyAction, got {f}'
 
     if isinstance(f, PyAction):
         args, kwargs = collect_args(ast.args, scope)
         return f.action(*args, **kwargs, scope=scope)
+
+    if isinstance(f, Closure):
+        args, kwargs = collect_args(ast.args, scope)
+        return evaluate(f.fn.body, f.scope)
 
     pdb.set_trace()
     raise NotImplementedError(f'Function evaluation not implemented yet')
@@ -181,14 +187,17 @@ def evaluate_closure(ast: Closure, scope: Scope):
 def evaluate_pyaction(ast: PyAction, scope: Scope):
     # fn_scope = Scope(ast.scope)
     #TODO: currently just assuming 0 args in and no return
-    return ast.action()
-    raise NotImplementedError('PyAction not implemented yet')
+    return ast.action(scope)
 
 
 def evaluate_istring(ast: IString, scope: Scope) -> String:
     parts = (py_stringify(i, scope) for i in ast.parts)
     return String(''.join(parts))
 
+
+def evaluate_express(ast: Express, scope: Scope):
+    val = scope.get(ast.id.name).value
+    return evaluate(val, scope)
 
 
 ######################### Builtin functions and helpers ############################

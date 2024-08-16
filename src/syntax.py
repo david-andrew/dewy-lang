@@ -600,6 +600,12 @@ class Identifier(AST):
         return f'{self.name}'
 
 
+class Express(AST):
+    id: Identifier
+
+    def __str__(self) -> str:
+        return f'{self.id}'
+
 class TypedIdentifier(AST):
     id: Identifier
     type: AST
