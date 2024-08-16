@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod, ABCMeta
 from typing import Generator, Iterable, Any, Literal, Type as TypingType, dataclass_transform, Callable as TypingCallable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum, auto
 # from fractions import Fraction
 
@@ -116,6 +116,21 @@ class AST(ABC):
             if not child.is_settled():
                 return False
         return True
+
+    #TODO: this is pretty hacky. probably better would be to redo __full_iter__ to allow for replacement, and also have it automatically figure out how to iterator over container stuff
+    def replace(self, child: 'AST', replacement: 'AST'):
+        """Find the child in this AST object and replace it with the replacement"""
+        for key, value in self.__dict__.items():
+            if value is child:
+                setattr(self, key, replacement)
+                return
+            elif isinstance(value, list):
+                for i, item in enumerate(value):
+                    if item is child:
+                        value[i] = replacement
+                        return
+        else:
+            raise ValueError(f"child {child} not found in {self}")
 
 
 class PrototypeAST(AST, ABC):

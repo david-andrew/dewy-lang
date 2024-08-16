@@ -47,6 +47,10 @@ def python_interpreter(path: Path, args: list[str]):
     #TODO: put these under a verbose/etc. flag
     print_ast(ast)
     print(repr(ast))
+    # from ..postparse import traverse_ast
+    # for parent, child in traverse_ast(ast):
+    #     print(f'{parent=},\n||||{child=}')
+    # pdb.set_trace()
 
     res = top_level_evaluate(ast)
     if res is not void:
@@ -94,6 +98,10 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         IString: evaluate_istring,
         Identifier: cannot_evaluate,
         Express: evaluate_express,
+        Int: no_op,
+        Loop: evaluate_loop,
+        Less: evaluate_less,
+        Add: evaluate_add,
         #TODO: other AST types here
     }
 
@@ -200,6 +208,37 @@ def evaluate_express(ast: Express, scope: Scope):
     val = scope.get(ast.id.name).value
     return evaluate(val, scope)
 
+
+#TODO: this needs improvements!
+def evaluate_loop(ast: Loop, scope: Scope):
+    ast._was_entered = False
+    scope = Scope(scope)
+    while cast(Bool, evaluate(ast.condition, scope)).val:
+        ast._was_entered = True
+        evaluate(ast.body, scope)
+
+    # for now loops can't return anything
+    return void
+    # ast.body
+    # ast.condition
+    # pdb.set_trace()
+
+
+def evaluate_less(ast: Less, scope: Scope):
+    left = evaluate(ast.left, scope)
+    right = evaluate(ast.right, scope)
+    match left, right:
+        case Int(val=l), Int(val=r): return Bool(l < r)
+        case _:
+            raise NotImplementedError(f'Less not implemented for {left=} and {right=}')
+
+def evaluate_add(ast: Add, scope: Scope):
+    left = evaluate(ast.left, scope)
+    right = evaluate(ast.right, scope)
+    match left, right:
+        case Int(val=l), Int(val=r): return Int(l + r)
+        case _:
+            raise NotImplementedError(f'Add not implemented for {left=} and {right=}')
 
 ######################### Builtin functions and helpers ############################
 def py_stringify(ast: AST, scope: Scope) -> str:

@@ -111,6 +111,7 @@ class Scope:
         # var was declared in a parent scope
         if var.decltype == DeclarationType.LET:
             var.value = value
+            return
 
         raise ValueError(f'Attempted to assign to constant variable: {name=}{var=}. {value=}')
 
