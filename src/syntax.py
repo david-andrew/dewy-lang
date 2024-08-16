@@ -28,7 +28,7 @@ def anonyname[T](gen: Iterable[T], count: bool = False) -> Generator[tuple[str, 
         yield from ((f'', item) for item in gen)
 
 
-@dataclass_transform()#field_specifiers=(field,))
+@dataclass_transform()
 class AST(ABC):
     def __init_subclass__(cls: TypingType['AST'], **kwargs):
         """
