@@ -707,16 +707,11 @@ p'{cwd}/some_text_file.txt'.write_text('hello world')
 
 ## Unpack syntax
 
+unpacking from a list:
+
 ```dewy
 s = ['Hello' ['World' '!'] 5 10]
 
-// tuple version
-a, b, c, d = s
-a, ...b = s
-...a, b = s
-a, [b, c], ...d = s
-
-// list version
 [a b c d] = s
 [a ...b] = s
 [...a b] = s
@@ -728,50 +723,46 @@ unpacking from an object with named fields:
 ```dewy
 o = [apple=1 banana=2 carrot=3]
 
-// tuple version
-a, b, c = o
-a, = o
-a, c = o
-c, = o
+[apple banana carrot] = o
+[apple] = o
+[apple carrot] = o
+[carrot] = o
+// [apple ...rest] = o //apple = 1, rest = [banana=2 carrot=3] //TBD if this is allowed
 
-// list version. I think I prefer this
-[a b c] = o
-[a] = o
-[a c] = o
-[c] = o
+
+o2 = [apple=1 banana=[carrot=3 durian=4] eggplant=5 pear=6]
+
+[apple banana eggplant pear] = o2
+[apple [carrot durian]=banana eggplant pear] = o2
+[a=apple b=banana c=eggplant d=pear] = o2
+[apple [c=carrot durian]=banana] = o2
 ```
 
-unpacking from a map
+unpacking from a map:
 
 ```dewy
 m = ['apple' -> 1 'banana' -> 2 'carrot' -> 3]
 
-// tuple version
-'apple' -> a, 'banana' -> b, 'carrot' -> c = m
-'apple' -> a, 'carrot' -> c = m
-'carrot' -> c = m
-
-// list version
-['apple' -> a 'banana' -> b 'carrot' -> c] = m
-['apple' -> a 'carrot' -> c] = m
-['carrot' -> c] = m
+// not sure about the semantics of this one.. Perhaps it is like this:
+[a b c] = m.['apple' 'banana' 'carrot']
+[a c] = m.['apple' 'carrot']
+//[a c ...rest] = m.['apple' 'carrot' ...] not sure if this syntax works here...
+[[k1 v1] [k2 v2] ...rest] = m   // k1='apple' v1=1 k2='banana' v2=2 rest=['carrot'->3]
+[p1 p2 p3] = m                  //p1='apple'->1 p2='banana'->2 p3='carrot'->3
 ```
-
-I think in general, I prefer the bracketed version
 
 incidentally, this is how you'd do a swap
 
 ```dewy
 [a b] = [b a]
-a, b = b, a
 ```
 
 ## Unifying imports, unpacks, and declarations [YES!]
 
 ```dewy
 const bigthing = import p"bigthing.dewy"
-let [something1, [sub1, sub2] = something2] = import p'path/to/file.dewy'
-const [prop1, prop2] = myobj
+let [something1 [sub1 sub2] = something2] = import p'path/to/file.dewy'
+const [prop1 prop2] = myobj
 let apple = 42
 ```
 
@@ -1505,13 +1496,13 @@ match x {
 }
 ```
 
-But more interesting is that the left side can be an unpack pattern
+But more interesting is that the left side can be an unpack pattern, also maybe use `=>` since it could be interpreted as a kind of function call (a bit weird though for literal values e.g. 5 => 'five')
 
 ```dewy
 match x {
-    [a b] -> a + b
-    [a b c] -> a + b + c
-    _ -> 0
+    [a b] => a + b
+    [a b c] => a + b + c
+    _ => 0
 }
 ```
 
