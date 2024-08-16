@@ -13,9 +13,9 @@ from .syntax import (
     Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
-    FunctionLiteral, PyAction, Call,
+    FunctionLiteral, PrototypePyAction, PyAction, Call,
     Index,
-    Identifier, TypedIdentifier, TypedGroup, UnpackTarget, Assign,
+    PrototypeIdentifier, Identifier, TypedIdentifier, TypedGroup, SequenceUnpackTarget, ObjectUnpackTarget, Assign,
     Int, Bool,
     Range, IterIn,
     Less, LessEqual, Greater, GreaterEqual, Equal, MemberIn,
@@ -148,33 +148,31 @@ class Scope:
             yield s
             s = s.parent
 
+    #TODO: these should actually be defined in python.py. There should maybe only be stubs here..
     @staticmethod
     def default() -> 'Scope':
         return Scope(vars={
             'printl': Scope._var(
                 DeclarationType.CONST,
                 Type('callable'),
-                PyAction(
+                PrototypePyAction(
                     TypedIdentifier(Identifier('x'), Type('string')),
-                    lambda x: print(str(x)) or void,
                     Type('void')
                 )
             ),
             'print': Scope._var(
                 DeclarationType.CONST,
                 Type('callable'),
-                PyAction(
+                PrototypePyAction(
                     TypedIdentifier(Identifier('x'), Type('string')),
-                    lambda x: print(str(x), end='') or void,
                     Type('void')
                 )
             ),
             'readl': Scope._var(
                 DeclarationType.CONST,
                 Type('callable'),
-                PyAction(
+                PrototypePyAction(
                     void,
-                    lambda: String(input()), #TODO: use easyrepl.readl
                     Type('string')
                 )
             )
@@ -478,7 +476,7 @@ def operator_associativity(op: Operator_t | int) -> Associativity:
 def is_callable(ast:AST, scope: Scope):
     match ast:
         # ASTs the have to be evaluated to determine the type
-        case Identifier(name):
+        case PrototypeIdentifier(name):
             return scope.is_callable(name)
         #TODO: any other types that need to be evaluated to determine if callable
 
@@ -588,7 +586,7 @@ def parse_single(token: Token, scope: Scope) -> AST:
     """Parse a single token into an AST"""
     match token:
         case Undefined_t(): return undefined
-        case Identifier_t(): return Identifier(token.src)
+        case Identifier_t(): return PrototypeIdentifier(token.src)
         case Integer_t(): return Int(int(token.src))
         case Boolean_t(): return Bool(bool_to_bool(token.src))
         case BasedNumber_t(): return Int(based_number_to_int(token.src))
@@ -666,7 +664,7 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
 
         # Misc Operators
         case Operator_t(op=':'):
-            if isinstance(left, Identifier): return TypedIdentifier(left, right)
+            if isinstance(left, PrototypeIdentifier): return TypedIdentifier(Identifier(left.name), right)
             if isinstance(left, Group): return TypedGroup(left, right)
             raise ValueError(f'ERROR: can only apply a type to an identifier or a (group). Got {left=}, {right=}')
 
@@ -924,9 +922,9 @@ def parse_declare(declare: Declare_t, scope: Scope) -> Declare:
     match declare:
         case Declare_t(keyword=Keyword_t(src='let')): return Declare(DeclarationType.LET, expr)
         case Declare_t(keyword=Keyword_t(src='const')): return Declare(DeclarationType.CONST, expr)
-        case Declare_t(keyword=Keyword_t(src='local_const')): return Declare(DeclarationType.LOCAL_CONST, expr)
-        case Declare_t(keyword=Keyword_t(src='fixed_type')): return Declare(DeclarationType.FIXED_TYPE, expr)
+        # case Declare_t(keyword=Keyword_t(src='local_const')): return Declare(DeclarationType.LOCAL_CONST, expr)
+        # case Declare_t(keyword=Keyword_t(src='fixed_type')): return Declare(DeclarationType.FIXED_TYPE, expr)
         case _:
-            raise ValueError(f"ERROR: unknown declare keyword {declare.keyword=}. Expected 'let', 'const', 'local_const', or 'fixed_type'. {declare=}")
+            raise ValueError(f"ERROR: unknown declare keyword {declare.keyword=}. Expected one of {DeclarationType.__members__}. {declare=}")
     pdb.set_trace()
     raise NotImplementedError

@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from src.postparse import post_parse
+
 from ..tokenizer import tokenize
 from ..postok import post_process
 from ..parser import top_level_parse, Scope
@@ -8,11 +10,11 @@ from ..syntax import (
     Type,
     ListOfASTs, Tuple, Block, Array, Group, Range, Object, Dict,
     TypedIdentifier,
-    void, undefined,
+    Void, void, Undefined, undefined,
     String, IString,
     Flowable, Flow, If, Loop, Default,
-    Identifier,
-    FunctionLiteral, PyAction, Call,
+    PrototypeIdentifier, Identifier,
+    FunctionLiteral, PrototypePyAction, PyAction, Call,
     Assign,
     Int, Bool,
     Range, IterIn,
@@ -24,10 +26,12 @@ from ..syntax import (
     # DeclarationType,
 )
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 from functools import cache
 
 import pdb
+
+
 
 def python_interpreter(path: Path, args: list[str]):
 
@@ -38,6 +42,7 @@ def python_interpreter(path: Path, args: list[str]):
     post_process(tokens)
 
     ast = top_level_parse(tokens)
+    ast = post_parse(ast)
     # print(f'parsed AST: {ast}\n{repr(ast)}')
     from ..syntax import Block
     print('```dewy')
@@ -55,14 +60,23 @@ def python_interpreter(path: Path, args: list[str]):
         print(res)
 
 
-
 def top_level_evaluate(ast:AST) -> AST|None:
     scope = Scope.default()
+    insert_pyactions(scope)
     return evaluate(ast, scope)
 
 
 class EvalFunc[T](Protocol):
     def __call__(self, ast: T, scope: Scope) -> AST: ...
+
+
+def no_op[T](ast: T, scope: Scope) -> T:
+    """For ASTs that just return themselves when evaluated"""
+    return ast
+
+def cannot_evaluate(ast: AST, scope: Scope) -> AST:
+    raise ValueError(f'INTERNAL ERROR: evaluation of type {type(ast)} is not possible')
+
 
 @cache
 def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
@@ -74,7 +88,9 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         FunctionLiteral: evaluate_function_literal,
         Closure: evaluate_closure,
         PyAction: evaluate_pyaction,
-        Identifier: evaluate_identifier,
+        String: no_op,
+        IString: evaluate_istring,
+        Identifier: cannot_evaluate,
         #TODO: other AST types here
     }
 
@@ -97,7 +113,7 @@ def evaluate_call(ast: Call, scope: Scope) -> AST:
 
     if isinstance(f, PyAction):
         args, kwargs = collect_args(ast.args, scope)
-        return f.action(*args, **kwargs)
+        return f.action(*args, **kwargs, scope=scope)
 
     pdb.set_trace()
     raise NotImplementedError(f'Function evaluation not implemented yet')
@@ -169,8 +185,48 @@ def evaluate_pyaction(ast: PyAction, scope: Scope):
     raise NotImplementedError('PyAction not implemented yet')
 
 
-def evaluate_identifier(ast: Identifier, scope: Scope):
-    var = scope.get(ast.name)
-    # if ast.name == 'readl':
-    #     pdb.set_trace()
-    return evaluate(var.value, scope)
+def evaluate_istring(ast: IString, scope: Scope) -> String:
+    parts = (py_stringify(i, scope) for i in ast.parts)
+    return String(''.join(parts))
+
+
+
+######################### Builtin functions and helpers ############################
+def py_stringify(ast: AST, scope: Scope) -> str:
+    ast = evaluate(ast, scope)
+    match ast:
+        case String(val): return val
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'stringify not implemented for {type(ast)}')
+    pdb.set_trace()
+
+    raise NotImplementedError('stringify not implemented yet')
+
+def py_printl(s:String|IString, scope: Scope) -> Void:
+    py_print(s, scope)
+    print()
+    return void
+
+def py_print(s:String|IString, scope: Scope) -> Void:
+    if not isinstance(s, (String, IString)):
+        raise ValueError(f'py_print expected String or IString, got {type(s)}:\n{s!r}')
+    if isinstance(s, IString):
+        s = cast(String, evaluate(s, scope))
+    print(s.val, end='')
+    return void
+
+def py_readl(scope: Scope) -> String:
+    return String(input())
+
+def insert_pyactions(scope: Scope):
+    """replace pyaction stubs with actual implementations"""
+    if 'printl' in scope.vars:
+        assert isinstance((proto:=scope.vars['printl'].value), PrototypePyAction)
+        scope.vars['printl'].value = PyAction(proto.args, py_printl, proto.return_type)
+    if 'print' in scope.vars:
+        assert isinstance((proto:=scope.vars['print'].value), PrototypePyAction)
+        scope.vars['print'].value = PyAction(proto.args, py_print, proto.return_type)
+    if 'readl' in scope.vars:
+        assert isinstance((proto:=scope.vars['readl'].value), PrototypePyAction)
+        scope.vars['readl'].value = PyAction(proto.args, py_readl, proto.return_type)

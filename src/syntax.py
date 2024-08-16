@@ -315,6 +315,13 @@ class FunctionLiteral(AST):
         return f'({self.args}) => {self.body}'
 
 
+class PrototypePyAction(PrototypeAST):
+    args: AST
+    return_type: AST
+
+    def __str__(self):
+        return f'({self.args}): {self.return_type} => ...'
+
 class PyAction(AST):
     args: AST
     action: TypingCallable
@@ -582,9 +589,13 @@ class Index(AST):
         return f'{self.left}{self.right}'
 
 
+class PrototypeIdentifier(PrototypeAST):
+    name: str
+    def __str__(self) -> str:
+        return f'{self.name}'
+
 class Identifier(AST):
     name: str
-
     def __str__(self) -> str:
         return f'{self.name}'
 
@@ -604,11 +615,20 @@ class TypedGroup(AST):
     def __str__(self) -> str:
         return f'{self.group}:{self.type}'
 
+class SequenceUnpackTarget(AST):
+    target: 'list[Identifier | SequenceUnpackTarget | ObjectUnpackTarget | Spread]'
+    def __str__(self) -> str:
+        return f'{" ".join(map(str, self.target))}'
 
-class UnpackTarget(AST):
-    def __str__(self):
-        target: list[Identifier | UnpackTarget | Spread]
-        raise NotImplementedError('UnpackTarget is not implemented yet')
+class ObjectUnpackTarget(AST):
+    target: 'list[Identifier | Assign | SequenceUnpackTarget | ObjectUnpackTarget | Spread]'
+    def __str__(self) -> str:
+        return f'{" ".join(map(str, self.target))}'
+
+# class UnpackTarget(AST):
+#     target: 'list[Identifier | UnpackTarget | Spread]'
+#     def __str__(self):
+#         raise NotImplementedError('UnpackTarget is not implemented yet')
 
 
 class DeclarationType(Enum):
@@ -623,7 +643,7 @@ class DeclarationType(Enum):
 
 class Declare(AST):
     decltype: DeclarationType
-    target: Identifier | TypedIdentifier | TypedGroup | UnpackTarget | Assign
+    target: Identifier | TypedIdentifier | TypedGroup | SequenceUnpackTarget | ObjectUnpackTarget | Assign
 
     def __str__(self):
         return f'{self.decltype.name.lower()} {self.target}'
