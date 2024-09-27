@@ -46,7 +46,7 @@ Many languages feature for loops, which iterate over some iterable object. The s
 This means that `in` expressions can be used to trivially construct a for-loop.
 
 ```dewy
-loop i in 1..5
+loop i in [1..5]
 {
     print('{i}, ')
 }
@@ -192,7 +192,7 @@ do-loop over an iterator. On the first iteration, `i` will be undefined, while i
 
 ```dewy
 do printl'this is a do-for loop. i={i}'
-loop i in 0..5
+loop i in [0..5]
 ```
 
 Which prints
@@ -242,7 +242,7 @@ TODO->write this. follows basic principles of other languages. extra is that you
 Let's look at this example
 
 ```dewy
-loop i in 1..10 {i}
+loop i in [1..10] {i}
 ```
 
 Every iteration of the loop, the current value of `i` is "expressed", that is to say, the value could be stored in a variable or a container.
@@ -250,16 +250,16 @@ Every iteration of the loop, the current value of `i` is "expressed", that is to
 Lets capture the expressed value in a container by wrapping the loop in `[]` brackets
 
 ```dewy
-[loop i in 1..10 {i}]
+[loop i in [1..10] {i}]
 ```
 
 This "generates" the array `[1 2 3 4 5 6 7 8 9 10]`, which we can then store into a variable
 
 ```dewy
-my_array = [loop i in 1..10 {i}]
+my_array = [loop i in [1..10] {i}]
 
 //optional to omit the braces since only a single expression is in the body
-my_array = [loop i in 1..10 i]
+my_array = [loop i in [1..10] i]
 ```
 
 And thus we have created the simplest list generator.
@@ -270,7 +270,7 @@ Generators can do a lot of interesting things. For example we can express multip
 
 ```dewy
 //note the braces are not optional in this case
-my_array = [loop i in 1..5 { i i^2 }]
+my_array = [loop i in [1..5] { i i^2 }]
 ```
 
 producing the array `[1 1 2 4 3 9 4 16 5 25]`.
@@ -278,7 +278,7 @@ producing the array `[1 1 2 4 3 9 4 16 5 25]`.
 We can also construct a dictionary by expressing with a `->` between two values
 
 ```dewy
-squares = [loop i in 1..5 { i -> i^2 }]
+squares = [loop i in [1..5] { i -> i^2 }]
 ```
 
 which produces the dictionary `[1->1 2->4 3->9 4->16 5->25]` which points from values to their squares.
@@ -290,9 +290,9 @@ You can generate a multidimensional array using multiple nested loops. For examp
 ```dewy
 indices =
 [
-    loop i in 1..5
+    loop i in [1..5]
     [
-        loop j in 1..5
+        loop j in [1..5]
         [
             i
             j
