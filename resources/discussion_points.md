@@ -89,7 +89,29 @@ primes = [
 ][..10)
 ```
 
-## is \ syntax or escaping a newline? [DONE: syntax]
+Or perhaps a better idea is instead of dealing with \ and ;, we could use the type of the variable to coerce the shape to be whatever the user wants. Think of the initial version as shape underspecified, and then the type specification gives extra info on how to deal with the shape
+
+```dewy
+// this is a column vector
+primes: int[1 10] = [
+    2
+    lazy i in [3, 5..)
+        if i .% #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
+            i
+][..10)
+
+
+// this is a row vector
+primes: int[10 1] = [
+    2
+    lazy i in [3, 5..)
+        if i .% #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
+            i
+][..10)
+```
+
+
+### is \ syntax or escaping a newline? [DONE: syntax]
 
 related point to previous: is \ escaping the newline, or is actual syntax for saying the next newline doesn't count (e.g. could have comments after it). I it should be bona-fide syntax because it's less cumbersome than an escape. If it's an escape, nothing can come after it (including whitespace) except the newline:
 
@@ -117,6 +139,15 @@ actually perhaps instead of `\`, we could use `,`, since it makes things into tu
 row_vec = [
     1,
     2,
+    3
+]
+row_vec = [1, 2, 3]
+
+col_vec = [1 2 3]
+col_vec = [1; 2; 3]
+col_vec = [
+    1
+    2
     3
 ]
 ```
