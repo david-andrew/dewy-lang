@@ -1510,6 +1510,41 @@ sub(5, 6) // -1
 
 There will probably need to be a bit of type checking magic here since `opflag` could never actually be `void` so the typing should show it always being just a boolean. But perhaps this could be a convention that works with `void`
 
+
+### Alternative for positional vs keyword and also handles capture
+
+Could just make use of #labels inside of the arguments declaration to specify some arguments have special properties
+
+```dewy
+f = (#pos x:int y:int #kw opflag:bool #capture z) => if opflag z*(x + y) else z*(x - y)
+f(5, 6, opflag=true, z=2) // 22
+```
+
+I think this might be the best in terms of flexibility without obtuse syntax, while also leaning into how arguments declarations are just regular groups of expressions. Additionally, a notation for capture fits nicely into this framework
+
+The only thing that might be a bit tricky is allowing partial evaluation to play nicely with all these features.
+
+Longer example
+```dewy
+f = (
+    #pos
+        x:int
+        y:int
+        z:int
+    #kw
+        opflag:bool
+        verbose:bool=false
+        scale:float=1.0
+        weight:float=1.0
+        precision:int=2
+    #capture
+        a
+        b
+        c
+) => {
+    //some implementation...
+}
+
 ## function overloading and partial application
 
 Just a note about how partial application would work on an overloaded function. Basically as arguments are added, the list of possible functions that match are narrowed down (and maintained in the new function object). Once all options are narrowed down to a single one, and all arguments have been provided, only then can the function be called
