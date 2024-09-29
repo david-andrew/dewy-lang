@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
-from src.postparse import post_parse
-
+from ..postparse import post_parse
 from ..tokenizer import tokenize
 from ..postok import post_process
 from ..parser import top_level_parse, Scope
