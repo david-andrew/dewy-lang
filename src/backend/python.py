@@ -218,13 +218,15 @@ def iter_next(iter: Iter):
                 cond, val = Bool(True), items[iter.i]
             iter.i += 1
             return Array([cond, val])
-        case Range(left=Int(val=l), right=Void()):
-            cond, val = Bool(True), Int(l + iter.i)
+        case Range(left=Int(val=l), right=Void(), brackets=brackets):
+            offset = int(brackets[0] == '(') # handle if first value is exclusive
+            cond, val = Bool(True), Int(l + iter.i + offset)
             iter.i += 1
             return Array([cond, val])
-        case Range(left=Tuple(items=[Int(val=r0), Int(val=r1)]), right=Void()):
+        case Range(left=Tuple(items=[Int(val=r0), Int(val=r1)]), right=Void(), brackets=brackets):
+            offset = int(brackets[0] == '(') # handle if first value is exclusive
             step = r1 - r0
-            cond, val = Bool(True), Int(r0 + iter.i * step)
+            cond, val = Bool(True), Int(r0 + (iter.i + offset) * step)
             iter.i += 1
             return Array([cond, val])
         #TODO: other range cases...
