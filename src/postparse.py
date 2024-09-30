@@ -38,27 +38,15 @@ def post_parse(ast: AST) -> AST:
     return ast
 
 
-# def traverse_ast(parent: AST) -> Generator[tuple[AST, AST], None, None]:
-#     """In order traversal of the AST"""
-#     for child in parent:
-#         yield parent, child
-#         yield from traverse_ast(child)
-
-
-def traverse_ast(ast: AST) -> Generator[AST, AST, None]:
-    """In order traversal of the AST"""
-    for child in ast:
-        replacement = yield child
-        if replacement is not None:
-            ast.replace(child, replacement)
-            child = replacement
-        yield from traverse_ast(child)
-
-
 def convert_prototype_identifiers(ast: AST) -> AST:
     """Convert all PrototypeIdentifiers to either Identifier or Express, depending on the context"""
     ast = Group([ast])
-    for i in (gen:=traverse_ast(ast)):
+    for i in (gen := ast.__full_traversal_iter__()):
+
+        # skip ASTs that don't have any Prototypes
+        if i.is_settled():
+            continue
+
         match i:
             case Call(f=PrototypeIdentifier(name=name), args=args):
                 gen.send(Call(Identifier(name), args))
@@ -86,23 +74,21 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 pdb.set_trace()
                 ...
 
-
-
-
-            #TODO: this should probably be exhaustive...
-            # ignore cases
-            case Int() | String() | IString() | Group() | Block() | FunctionLiteral() | Loop() | Less() | Add() | Void():
+            # cases that themselves don't get adjusted but may contain nested children that need to be converted
+            case IString() | Group() | Block() | FunctionLiteral() | Loop() | Less() | Add():
                 ...
             # case Access() | Declare() | PointsTo() | BidirPointsTo() | Type() | ListOfASTs() | Tuple() | Block() | BareRange() | Ellipsis() | Spread() | Array() | Group() | Range() | Object() | Dict() | BidirDict() | TypeParam() | Void() | Undefined() | String() | IString() | Flowable() | Flow() | If() | Loop() | Default() | FunctionLiteral() | PrototypePyAction() | PyAction() | Call() | Index() | PrototypeIdentifier() | Express() | Identifier() | TypedIdentifier() | TypedGroup() | SequenceUnpackTarget() | ObjectUnpackTarget() | Assign() | Int() | Bool() | Range() | IterIn() | Less() | LessEqual() | Greater() | GreaterEqual() | Equal() | MemberIn() | LeftShift() | RightShift() | LeftRotate() | RightRotate() | LeftRotateCarry() | RightRotateCarry() | Add() | Sub() | Mul() | Div() | IDiv() | Mod() | Pow() | And() | Or() | Xor() | Nand() | Nor() | Xnor() | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() | DeclarationType() | DeclareGeneric() | Parameterize():
                 # ...
-            case _: # all others are traversed as normal
+            case _:  # all others are traversed as normal
                 raise ValueError(f'Unhandled case {type(i)}')
             #     pdb.set_trace()
             #     ...
 
     return ast.items[0]
 
-#TODO: this is pretty inefficient memory-wise. more ideal would be in place conversions
+# TODO: this is pretty inefficient memory-wise. more ideal would be in place conversions
+
+
 def OLD_convert_prototype_identifiers(ast: AST) -> AST:
     match ast:
         case PrototypeIdentifier(name=name):

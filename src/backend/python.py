@@ -59,7 +59,7 @@ def print_ast(ast: AST):
     """little helper function to print out the equivalent source code of an AST"""
     print('```dewy')
     if isinstance(ast, (Block, Group)):
-        for i in ast: print(i)
+        for i in ast.__iter_asts__(): print(i)
     else:
         print(ast)
     print('```')
