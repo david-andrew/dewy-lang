@@ -117,6 +117,8 @@ def evaluate(ast:AST, scope:Scope) -> AST:
 
 def evaluate_call(ast: Call, scope: Scope) -> AST:
     f = ast.f
+    if isinstance(f, Group):
+        f = evaluate(f, scope)
     if isinstance(f, Identifier):
         f = scope.get(f.name).value
     assert isinstance(f, (PyAction, Closure)), f'expected Function or PyAction, got {f}'

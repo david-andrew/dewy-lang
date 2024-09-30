@@ -50,9 +50,8 @@ def convert_prototype_identifiers(ast: AST) -> AST:
         match i:
             case Call(f=PrototypeIdentifier(name=name), args=args):
                 gen.send(Call(Identifier(name), args))
-            case Call():
-                pdb.set_trace()
-                ...
+            case Call(args=None): ...
+            # case Call(args=): ... #TODO: handling when args is not none... generally will be a list of identifiers that need to be converted directly to Identifier
             case Assign(left=PrototypeIdentifier(name=name), right=right):
                 gen.send(Assign(Identifier(name), right))
             # if we ever get to a bare identifier, treat it like an express
