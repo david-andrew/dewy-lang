@@ -25,11 +25,18 @@ from ..syntax import (
     # DeclarationType,
 )
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol, cast, Callable
 from functools import cache
 
 import pdb
 
+
+class Iter(AST):
+    item: AST
+    i: int
+
+    def __str__(self):
+        return f'Iter({self.item}, i={self.i})'
 
 
 def python_interpreter(path: Path, args: list[str]):
@@ -89,7 +96,9 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         Call: evaluate_call,
         Block: evaluate_block,
         Group: evaluate_group,
+        Array: evaluate_array,
         Assign: evaluate_assign,
+        IterIn: evaluate_iter_in,
         FunctionLiteral: evaluate_function_literal,
         Closure: evaluate_closure,
         PyAction: evaluate_pyaction,
@@ -98,8 +107,11 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         Identifier: cannot_evaluate,
         Express: evaluate_express,
         Int: no_op,
+        Range: no_op,
         Loop: evaluate_loop,
         Less: evaluate_less,
+        And: evaluate_and,
+        Or: evaluate_or,
         Add: evaluate_add,
         #TODO: other AST types here
     }
@@ -164,6 +176,8 @@ def evaluate_block(ast: Block, scope: Scope):
     scope = Scope(scope)
     return evaluate_group(Group(ast.items), scope)
 
+def evaluate_array(ast: Array, scope: Scope):
+    return Array([evaluate(i, scope) for i in ast.items])
 
 def evaluate_assign(ast: Assign, scope: Scope):
     match ast:
@@ -173,6 +187,52 @@ def evaluate_assign(ast: Assign, scope: Scope):
             return void
     pdb.set_trace()
     raise NotImplementedError('Assign not implemented yet')
+
+def evaluate_iter_in(ast: IterIn, scope: Scope):
+    def step_iter_in(iter_props: tuple[Callable, Iter], scope: Scope) -> AST:
+        binder, iterable = iter_props
+        cond, val = iter_next(iterable).items
+        binder(val)
+        return cond
+
+    if hasattr(ast, 'iter_props'):
+        return step_iter_in(ast.iter_props, scope)
+
+    match ast:
+        case IterIn(left=Identifier(name), right=right):
+            right = evaluate(right, scope)
+            binder, iterable = lambda x: scope.assign(name, x), Iter(item=right, i=0)
+            ast.iter_props = binder, iterable
+            return step_iter_in(ast.iter_props, scope)
+
+    pdb.set_trace()
+    raise NotImplementedError('IterIn not implemented yet')
+
+# TODO: probably break this up into one function per type of iterable
+def iter_next(iter: Iter):
+    match iter.item:
+        case Array(items):
+            if iter.i >= len(items):
+                cond, val = Bool(False), undefined
+            else:
+                cond, val = Bool(True), items[iter.i]
+            iter.i += 1
+            return Array([cond, val])
+        case Range(left=Int(val=l), right=Void()):
+            cond, val = Bool(True), Int(l + iter.i)
+            iter.i += 1
+            return Array([cond, val])
+        case Range(left=Tuple(items=[Int(val=r0), Int(val=r1)]), right=Void()):
+            step = r1 - r0
+            cond, val = Bool(True), Int(r0 + iter.i * step)
+            iter.i += 1
+            return Array([cond, val])
+        #TODO: other range cases...
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'iter_next not implemented yet for {iter.item=}')
+
+
 
 class Closure(AST):
     fn: FunctionLiteral
@@ -233,6 +293,23 @@ def evaluate_less(ast: Less, scope: Scope):
         case _:
             raise NotImplementedError(f'Less not implemented for {left=} and {right=}')
 
+
+def evaluate_and(ast: And, scope: Scope):
+    left = evaluate(ast.left, scope)
+    right = evaluate(ast.right, scope)
+    match left, right:
+        case Bool(val=l), Bool(val=r): return Bool(l and r)
+        case _:
+            raise NotImplementedError(f'And not implemented for {left=} and {right=}')
+
+def evaluate_or(ast: Or, scope: Scope):
+    left = evaluate(ast.left, scope)
+    right = evaluate(ast.right, scope)
+    match left, right:
+        case Bool(val=l), Bool(val=r): return Bool(l or r)
+        case _:
+            raise NotImplementedError(f'Or not implemented for {left=} and {right=}')
+
 def evaluate_add(ast: Add, scope: Scope):
     left = evaluate(ast.left, scope)
     right = evaluate(ast.right, scope)
@@ -246,6 +323,7 @@ def py_stringify(ast: AST, scope: Scope) -> str:
     ast = evaluate(ast, scope)
     match ast:
         case String(val): return val
+        case Int(val): return str(val)
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'stringify not implemented for {type(ast)}')
