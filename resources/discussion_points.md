@@ -788,6 +788,23 @@ incidentally, this is how you'd do a swap
 [a b] = [b a]
 ```
 
+### Unpacking with type annotations
+
+```dewy
+const person = [
+    name = 'John'
+    age = 30
+]
+
+const p = person
+const [name age] = person
+const [name:string, age:number] = person
+const [[l1, l2, ...letters] = name, age:number] = person
+const [[l1:char, l2:char, ...letters:string] = name, age=number] = person
+```
+
+> Note: `char` is just `string<length=1>`
+
 ## Unifying imports, unpacks, and declarations [YES!]
 
 ```dewy
