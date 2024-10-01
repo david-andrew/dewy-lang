@@ -79,7 +79,6 @@ class MetaNamespace(SimpleNamespace):
     """A simple namespace for storing AST meta attributes for use at runtime"""
     def __getattribute__(self, key: str) -> Any | None:
         """Get the attribute associated with the key, or None if it doesn't exist"""
-        # convert the key to a string
         try:
             return super().__getattribute__(key)
         except AttributeError:
@@ -454,7 +453,6 @@ def py_stringify(ast: AST, scope: Scope) -> str:
 
     raise NotImplementedError('stringify not implemented yet')
 
-#TODO: fix the function signatures here! they should not be keyword only for scope.
 #TODO: fix the function signatures here! they should not be keyword only for scope.
 #      fixing will involve being able to set default arguments for regular functions
 #      then making the pyaction have a default for the string s=''
