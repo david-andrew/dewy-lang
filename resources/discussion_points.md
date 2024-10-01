@@ -38,6 +38,40 @@ And then there's the `:=` operator which is a proper bind expression, but it ret
 
 Actually on further thought, I think bind should still be an expression, it's just that the bind expression returns `void`, thus even if it is in a context that captures expressions, it doesn't lead to anything. This way, we keep the "Everything is an expression" mantra.
 
+
+## Inline distinguishing row vector vs column vector [DONE: [a,b,c,...] separated by commas automatically makes a row vector]
+perhaps we actually got lucky, and can let tuples make a row vector since a tuple desugars to a list, so a tuple inside of an array would turn into an array inside an array
+
+```dewy
+let row_vec = [1, 2, 3] //  desugars to [[1 2 3]]
+```
+
+```dewy
+// 1D array is usually interpreted as a column vector
+unit = [1 2 3]
+
+// 2D 1x3 row vector (since a tuple desugars to a list)
+row = [1,2,3]
+// e.g. if we want a literal Nx1 column vector
+// tbd if better way to make this, but generally not necessary since 1D arrays are treated as column vectors
+col = [[1] [2] [3]] 
+
+// Can make a 2D matrix by having a sequence of tuple expressions
+// whitespace is allowed between the commas, but doesn't look as good
+mat = [1,2,3 4,5,6 7,8,9]
+
+// currently not supported. Just gets parsed as a 1D array...
+mat2 = [
+    1 2 3
+    4 5 6
+    7 8 9
+]
+
+
+// Technically can also construct tensors like this, but currently a bit cumbersome
+tensor = [(1,2,3),(4,5,6),(7,8,9) (10,11,12),(13,14,15),(16,17,18) (19,20,21),(22,23,24),(25,26,27)]
+```
+
 ## will complex list comprehensions be column vectors if people use usual spacing?
 
 e.g.
