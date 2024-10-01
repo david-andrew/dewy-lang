@@ -14,6 +14,9 @@ jobs:
     runs-on: "ubuntu-latest"
     steps:
       - uses: "actions/checkout@v4"
+        with:
+          ref: ${{ github.ref }}
+          # fetch-depth: 0 # 0 fetches all history, but is slower, and tbd if necessary
       - name: "TODO to Issue"
         uses: "alstr/todo-to-issue-action@v5"
         with:
@@ -26,8 +29,19 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-      - name: Commit and Push Changes
+      - name: Check for changes
+        id: changes
         run: |
-          git add .
-          git commit -m "Automatically added GitHub issue links to TODOs"
-          git push origin main
+            git add .
+            if git diff --cached --quiet; then
+              echo "No changes to commit" && echo "changes=false" >> $GITHUB_ENV
+            else
+              echo "Changes to commit" && echo "changes=true" >> $GITHUB_ENV
+            fi
+  
+      - name: Commit and Push Changes
+        # Only run if there are changes
+        if: env.changes == 'true'
+        run: |
+            git commit -m "Automatically added GitHub issue links to TODOs"
+            git push origin ${{ github.ref_name }}  # Push to the current branch
