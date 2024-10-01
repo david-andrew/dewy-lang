@@ -169,6 +169,7 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         Not: evaluate_not,
         Add: evaluate_add,
         Mod: evaluate_mod,
+        Undefined: no_op,
         #TODO: other AST types here
     }
 
@@ -499,8 +500,13 @@ def evaluate_mod(ast: Mod, scope: Scope):
 def py_stringify(ast: AST, scope: Scope) -> str:
     ast = evaluate(ast, scope)
     match ast:
+        # types that require special handling
         case String(val): return val
-        case Int(val): return str(val)
+
+        # can use the built-in __str__ method for these types
+        case Int() | Bool() | Undefined(): return str(ast)
+
+        # TBD what other types need to be handled
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'stringify not implemented for {type(ast)}')
