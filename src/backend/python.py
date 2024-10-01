@@ -168,6 +168,7 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         Or: evaluate_or,
         Not: evaluate_not,
         Add: evaluate_add,
+        Mul: evaluate_mul,
         Mod: evaluate_mod,
         Undefined: no_op,
         #TODO: other AST types here
@@ -447,37 +448,38 @@ def evaluate_equal(ast: Equal, scope: Scope):
 
 
 # TODO: op depends on what type of operands. bools use built-in and/or/etc, but ints need to use the bitwise operators
-# def evaluate_logical_op[T](logical_op: Callable[[bool, bool], bool], bitwise_op: Callable[[int, int], int], ast: AST, scope: Scope):
-#     left = evaluate(ast.left, scope)
-#     right = evaluate(ast.right, scope)
-#     match left, right:
-#         case Bool(val=l), Bool(val=r): return Bool(op(l, r))
-#         case _:
-#             raise NotImplementedError(f'{op.__name__} not implemented for {left=} and {right=}')
+def evaluate_logical_op(logical_op: Callable[[bool, bool], bool], bitwise_op: Callable[[int, int], int], ast: AST, scope: Scope):
+    left = evaluate(ast.left, scope)
+    right = evaluate(ast.right, scope)
+    match left, right:
+        case Bool(val=l), Bool(val=r): return Bool(logical_op(l, r))
+        case Int(val=l), Int(val=r): return Int(bitwise_op(l, r))
+        case _:
+            raise NotImplementedError(f'evaluate logical op not implemented for {left=} and {right=}')
 
 def evaluate_and(ast: And, scope: Scope):
-    left = evaluate(ast.left, scope)
-    right = evaluate(ast.right, scope)
-    match left, right:
-        case Bool(val=l), Bool(val=r): return Bool(l and r)
-        case _:
-            raise NotImplementedError(f'And not implemented for {left=} and {right=}')
+    return evaluate_logical_op(lambda l, r: l and r, lambda l, r: l & r, ast, scope)
 
 def evaluate_or(ast: Or, scope: Scope):
-    left = evaluate(ast.left, scope)
-    right = evaluate(ast.right, scope)
-    match left, right:
-        case Bool(val=l), Bool(val=r): return Bool(l or r)
-        case _:
-            raise NotImplementedError(f'Or not implemented for {left=} and {right=}')
+    return evaluate_logical_op(lambda l, r: l or r, lambda l, r: l | r, ast, scope)
 
 def evaluate_not(ast: Not, scope: Scope):
     val = evaluate(ast.operand, scope)
     match val:
         case Bool(val=v): return Bool(not v)
+        case Int(val=v): return Int(~v) #TODO: bitwise not depends on the size of the int...
         case _:
             raise NotImplementedError(f'Not not implemented for {val=}')
-            raise NotImplementedError(f'Not not implemented for {val=}')
+
+#TODO: long term, probably convert this into a matrix for all the input types and ops, where pairs can register to it
+# def evaluate_arithmetic_op[T](op: Callable[[T, T], T], ast: AST, scope: Scope):
+#     left = evaluate(ast.left, scope)
+#     right = evaluate(ast.right, scope)
+#     match left, right:
+#         case Int(val=l), Int(val=r): return Int(op(l, r))
+#         case Array(), Array(): return Array(op(left.items, right.items)) #TODO: restrict this to add only...
+#         case _:
+#             raise NotImplementedError(f'{op.__name__} not implemented for {left=} and {right=}')
 
 #TODO: unified arithmetic evaluation function
 def evaluate_add(ast: Add, scope: Scope):
@@ -485,8 +487,17 @@ def evaluate_add(ast: Add, scope: Scope):
     right = evaluate(ast.right, scope)
     match left, right:
         case Int(val=l), Int(val=r): return Int(l + r)
+        case Array(items=l), Array(items=r): return Array(l + r)
         case _:
             raise NotImplementedError(f'Add not implemented for {left=} and {right=}')
+
+def evaluate_mul(ast: Mul, scope: Scope):
+    left = evaluate(ast.left, scope)
+    right = evaluate(ast.right, scope)
+    match left, right:
+        case Int(val=l), Int(val=r): return Int(l * r)
+        case _:
+            raise NotImplementedError(f'Mul not implemented for {left=} and {right=}')
 
 def evaluate_mod(ast: Mod, scope: Scope):
     left = evaluate(ast.left, scope)
@@ -502,6 +513,7 @@ def py_stringify(ast: AST, scope: Scope) -> str:
     match ast:
         # types that require special handling
         case String(val): return val
+        case Array(items): return f"[{' '.join(py_stringify(i, scope) for i in items)}]"
 
         # can use the built-in __str__ method for these types
         case Int() | Bool() | Undefined(): return str(ast)

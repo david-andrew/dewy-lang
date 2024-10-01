@@ -1,0 +1,8 @@
+// generating primes with more advanced features
+#ctx
+primes = [
+    2
+    loop i in [3, 5..)
+        if i .% #ctx.primes .=? 0 |> @any |> @not
+            i
+][..10)
