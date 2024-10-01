@@ -672,49 +672,6 @@ which technically would work. If however func1 was called somewhere before apple
 
 For exported functions, any captured values must be defined before the call to export, which is treated as the point that any external code will call the function from.
 
-## Import/Export syntax [`[from <file path>] import <thing(s)>`. TBD on if export syntax is necessary `export <thing(s)>`]
-
-```
-// importing from local files
-import myfun from p"stuff.dewy"
-import myfun2, myfun3 from p"stuff2.dewy"
-
-// importing stdlib stuff. TBD on if any of this stuff is auto-imported
-import IO                       //std lib import whole module object
-let [sin cos tan] = import Math //std lib break out specific values
-
-// importing from installed packages
-import RandomForest from sklearn
-```
-
-technically sin, cos, tan should all be available without having to import them. It's more for installed package syntax.
-
-Actually based on this video (https://www.youtube.com/watch?v=X6Jhxm1lPHY), I'm gonna switch the order of the thing being imported with the import path. So things would be:
-
-```dewy
-from p"stuff.dewy" import myfun
-from p"stuff2.dewy" import myfun2, myfun3 as f1, mymodule as [f2 f3 mod3 as [f4 f5]]]
-import p"../mylib3.dewy" as mylib3
-from p"mylib4.dewy" import ...
-
-import IO
-from Math import sin, cos, tan
-import seaborn as sns
-from sklearn import RandomForest
-```
-
-probably don't allow the syntax
-
-```dewy
-let [sin cos tan] = import Math
-```
-
-If someone did want to break it down like that, they'd need to do it as two separate imports
-
-```dewy
-import Math
-let [sin cos tan] = Math
-```
 
 ## Relative Path default starting location: cwd vs **file** [definitely __file__. require user to specify CWD/ if they want it]
 
@@ -735,6 +692,40 @@ from p"{cwd}/mylib.dewy" import ... //why anyone would ever want this is beyond 
 
 p'{cwd}/some_text_file.txt'.write_text('hello world')
 ```
+
+
+## Import/Export syntax [`[from <file path>] import <thing(s)>`. TBD on if export syntax is necessary `export <thing(s)>`]
+
+```
+// importing from local files
+import myfun from p"stuff.dewy"
+import myfun2, myfun3 from p"stuff2.dewy"
+
+// importing stdlib stuff. TBD on if any of this stuff is auto-imported
+import IO                       //std lib import whole module object
+let [sin cos tan] = import Math //std lib break out specific values
+
+// importing from installed packages
+import RandomForest from sklearn
+```
+
+technically sin, cos, tan should all be available without having to import them. It's more for installed package syntax.
+
+~~Actually based on this video (https://www.youtube.com/watch?v=X6Jhxm1lPHY), I'm gonna switch the order of the thing being imported with the import path. So things would be:~~
+
+```dewy
+from p"stuff.dewy" import myfun
+from p"stuff2.dewy" import myfun2, myfun3 as f1, mymodule as [f2 f3 mod3 as [f4 f5]]]
+import p"../mylib3.dewy" as mylib3
+from p"mylib4.dewy" import ...
+
+import IO
+from Math import sin, cos, tan
+import seaborn as sns
+from sklearn import RandomForest
+```
+
+on further thought, it's a weak argument, since sometimes you don't know what item to import but other times you don't know the name of where it is coming from (also IDEs are pretty good at giving you options in either case). So I think it's a wash, and the original allows us to unify all the syntax for imports with regular unpacking syntax.
 
 ## Unpack syntax
 
