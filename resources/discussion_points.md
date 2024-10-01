@@ -1544,6 +1544,7 @@ f = (
 ) => {
     //some implementation...
 }
+```
 
 ## function overloading and partial application
 
@@ -1573,6 +1574,33 @@ match x {
 ```
 
 Though this is tricky because how do we distinguish between a list with two elements that we just named `a` and `b` and an object with members a and b (also for objects, what if you only want to match against part of it, e.g. it has some member named `a` of some specific type, but the rest doesn't matter?)
+
+Probably keep `=>` since the left hand side is only ever used for declarations, so we know anything is specifying a literal pattern. If you want to match against values stored in variables, you might do something with `=?`
+    
+```dewy
+myvar = 3
+
+match x {
+    [a b] => a + b
+    [a b c =? myvar] => a + b + c  // only match if c is equal to myvar
+    [a b c] => a + b + c           // any other cases with 3 elements
+    _ => 0
+}
+```
+
+I think this is starting to get into the full functionality provided by e.g. python's pattern matching, e.g. ability to match against types, specific values, etc. Also I think the case of matching a literal may actually be more like:
+
+```dewy
+match x {
+    [a b] => a + b
+    [a b 3] => a + b + c    // only match if c is equal to 3
+    [a b c] => a + b + c
+    5 => 'five'             // match against a literal
+    _ => 0
+}
+```
+
+A bit more work needs to go into distinguishing between the different types that may be unpacked, e.g. object vs array, etc., as well as how to match for specific types, etc.
 
 ## Debugging: Ability to dump program state at a point, and pick up from that point
 
