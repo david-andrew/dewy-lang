@@ -341,6 +341,7 @@ def evaluate_express(ast: Express, scope: Scope):
     return evaluate(val, scope)
 
 #TODO: this needs improvements!
+#Issue URL: https://github.com/david-andrew/dewy-lang/issues/2
 def evaluate_if(ast: If, scope: Scope):
     scope = Scope(scope)
     scope.meta[ast].was_entered=False
@@ -388,6 +389,7 @@ def evaluate_equal(ast: Equal, scope: Scope):
     return evaluate_comparison_op(lambda l, r: l == r, ast, scope)
 
 
+
 # TODO: op depends on what type of operands. bools use built-in and/or/etc, but ints need to use the bitwise operators
 # def evaluate_logical_op[T](logical_op: Callable[[bool, bool], bool], bitwise_op: Callable[[int, int], int], ast: AST, scope: Scope):
 #     left = evaluate(ast.left, scope)
@@ -419,6 +421,7 @@ def evaluate_not(ast: Not, scope: Scope):
         case Bool(val=v): return Bool(not v)
         case _:
             raise NotImplementedError(f'Not not implemented for {val=}')
+            raise NotImplementedError(f'Not not implemented for {val=}')
 
 #TODO: unified arithmetic evaluation function
 def evaluate_add(ast: Add, scope: Scope):
@@ -448,8 +451,10 @@ def py_stringify(ast: AST, scope: Scope) -> str:
             raise NotImplementedError(f'stringify not implemented for {type(ast)}')
     pdb.set_trace()
 
+
     raise NotImplementedError('stringify not implemented yet')
 
+#TODO: fix the function signatures here! they should not be keyword only for scope.
 #TODO: fix the function signatures here! they should not be keyword only for scope.
 #      fixing will involve being able to set default arguments for regular functions
 #      then making the pyaction have a default for the string s=''
