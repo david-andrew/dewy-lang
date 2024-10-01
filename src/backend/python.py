@@ -299,6 +299,7 @@ def unpack_assign(target: UnpackTarget, value: AST, scope: Scope):
             case UnpackTarget():
                 unpack_assign(left, right, scope)
             # case Spread(): ... #TODO: spread should collect the rest of the values via gen
+            # case Spread(): ... #Issue URL: https://github.com/david-andrew/dewy-lang/issues/9
             case _:
                 pdb.set_trace()
                 raise NotImplementedError(f'unpack_assign not implemented for {left=} and {right=}')
