@@ -1,4 +1,4 @@
-from typing import Generator, Sequence, cast, overload, Literal
+from typing import Generator, Sequence, cast, overload, Literal, Type as PyType
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from itertools import groupby, chain as iterchain
@@ -143,9 +143,9 @@ class Scope:
             s = s.parent
 
     #TODO: these should actually be defined in python.py. There should maybe only be stubs here..
-    @staticmethod
-    def default() -> 'Scope':
-        return Scope(vars={
+    @classmethod
+    def default(cls: PyType['Scope']) -> 'Scope':
+        return cls(vars={
             'printl': Scope._var(
                 DeclarationType.CONST,
                 Type('callable'),

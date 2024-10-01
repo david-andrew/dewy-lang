@@ -1,9 +1,7 @@
-from dataclasses import dataclass
-
 from ..postparse import post_parse
 from ..tokenizer import tokenize
 from ..postok import post_process
-from ..parser import top_level_parse, Scope
+from ..parser import top_level_parse, Scope as ParserScope
 from ..syntax import (
     AST,
     Type,
@@ -24,19 +22,16 @@ from ..syntax import (
     Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv,
     # DeclarationType,
 )
+
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, cast, Callable
+from typing import Protocol, cast, Callable, Any
 from functools import cache
+from collections import defaultdict
+from types import SimpleNamespace
 
 import pdb
 
-
-class Iter(AST):
-    item: AST
-    i: int
-
-    def __str__(self):
-        return f'Iter({self.item}, i={self.i})'
 
 
 def python_interpreter(path: Path, args: list[str]):
@@ -78,6 +73,58 @@ def top_level_evaluate(ast:AST) -> AST:
     return evaluate(ast, scope)
 
 
+############################ Runtime helper classes ############################
+
+class MetaNamespace(SimpleNamespace):
+    """A simple namespace for storing AST meta attributes for use at runtime"""
+    def __getattribute__(self, key: str) -> Any | None:
+        """Get the attribute associated with the key, or None if it doesn't exist"""
+        # convert the key to a string
+        try:
+            return super().__getattribute__(key)
+        except AttributeError:
+            return None
+
+    def __setattr__(self, key: str, value: Any) -> None:
+        """Set the attribute associated with the key"""
+        super().__setattr__(key, value)
+
+
+class MetaNamespaceDict:
+    def __init__(self):
+        self._dict = defaultdict(MetaNamespace)
+
+    def __getitem__(self, item: AST) -> Any | None:
+        key = f'::{item.__class__.__name__}@{hex(id(item))}'
+        return self._dict[key]
+
+    def __setitem__(self, key: AST, value: Any) -> None:
+        key = f'::{key.__class__.__name__}@{hex(id(key))}'
+        self._dict[key] = value
+
+    def __str__(self):
+        return str(self._dict)
+
+    def __repr__(self):
+        return repr(self._dict)
+
+
+@dataclass
+class Scope(ParserScope):
+    """An extension of the Scope used during parsing to support runtime"""
+    meta: dict[AST, MetaNamespace] = field(default_factory=MetaNamespaceDict)
+
+
+class Iter(AST):
+    item: AST
+    i: int
+
+    def __str__(self):
+        return f'Iter({self.item}, i={self.i})'
+
+
+############################ Evaluation functions ############################
+
 class EvalFunc[T](Protocol):
     def __call__(self, ast: T, scope: Scope) -> AST: ...
 
@@ -107,12 +154,17 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         Identifier: cannot_evaluate,
         Express: evaluate_express,
         Int: no_op,
+        Bool: no_op,
         Range: no_op,
+        If: evaluate_if,
         Loop: evaluate_loop,
         Less: evaluate_less,
+        Equal: evaluate_equal,
         And: evaluate_and,
         Or: evaluate_or,
+        Not: evaluate_not,
         Add: evaluate_add,
+        Mod: evaluate_mod,
         #TODO: other AST types here
     }
 
@@ -153,7 +205,10 @@ def collect_args(args: AST | None, scope: Scope) -> tuple[list[AST], dict[str, A
         case Assign(): raise NotImplementedError('Assign not implemented yet')
         # case Tuple(items): raise NotImplementedError('Tuple not implemented yet')
         case String() | IString(): return [args], {}
-        case _: raise NotImplementedError(f'collect_args not implemented yet for {args}')
+        case Group(items): return [evaluate(i, scope) for i in items], {}
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'collect_args not implemented yet for {args}')
 
 
     raise NotImplementedError(f'collect_args not implemented yet for {args}')
@@ -189,21 +244,25 @@ def evaluate_assign(ast: Assign, scope: Scope):
     raise NotImplementedError('Assign not implemented yet')
 
 def evaluate_iter_in(ast: IterIn, scope: Scope):
+
+    # helper function for progressing the iterator
     def step_iter_in(iter_props: tuple[Callable, Iter], scope: Scope) -> AST:
         binder, iterable = iter_props
         cond, val = iter_next(iterable).items
         binder(val)
         return cond
 
-    if hasattr(ast, 'iter_props'):
-        return step_iter_in(ast.iter_props, scope)
+    # if the iterator properties are already in the scope, use them
+    if (res := scope.meta[ast].props) is not None:
+        return step_iter_in(cast(tuple[Callable, Iter], res), scope)
 
+    # otherwise initialize since this is the first time we're hitting this IterIn
     match ast:
         case IterIn(left=Identifier(name), right=right):
             right = evaluate(right, scope)
-            binder, iterable = lambda x: scope.assign(name, x), Iter(item=right, i=0)
-            ast.iter_props = binder, iterable
-            return step_iter_in(ast.iter_props, scope)
+            props = lambda x: scope.assign(name, x), Iter(item=right, i=0)
+            scope.meta[ast].props = props
+            return step_iter_in(props, scope)
 
     pdb.set_trace()
     raise NotImplementedError('IterIn not implemented yet')
@@ -221,6 +280,16 @@ def iter_next(iter: Iter):
         case Range(left=Int(val=l), right=Void(), brackets=brackets):
             offset = int(brackets[0] == '(') # handle if first value is exclusive
             cond, val = Bool(True), Int(l + iter.i + offset)
+            iter.i += 1
+            return Array([cond, val])
+        case Range(left=Int(val=l), right=Int(val=r), brackets=brackets):
+            offset = int(brackets[0] == '(') # handle if first value is exclusive
+            end_offset = int(brackets[1] == ']')
+            i = l + iter.i + offset
+            if i > r + end_offset:
+                cond, val = Bool(False), undefined
+            else:
+                cond, val = Bool(True), Int(i)
             iter.i += 1
             return Array([cond, val])
         case Range(left=Tuple(items=[Int(val=r0), Int(val=r1)]), right=Void(), brackets=brackets):
@@ -271,13 +340,23 @@ def evaluate_express(ast: Express, scope: Scope):
     val = scope.get(ast.id.name).value
     return evaluate(val, scope)
 
+#TODO: this needs improvements!
+def evaluate_if(ast: If, scope: Scope):
+    scope = Scope(scope)
+    scope.meta[ast].was_entered=False
+    if cast(Bool, evaluate(ast.condition, scope)).val:
+        scope.meta[ast].was_entered = True
+        return evaluate(ast.body, scope)
+
+    # is this correct if the If isn't entered?
+    return void
 
 #TODO: this needs improvements!
 def evaluate_loop(ast: Loop, scope: Scope):
-    ast._was_entered = False
     scope = Scope(scope)
+    scope.meta[ast].was_entered = False
     while cast(Bool, evaluate(ast.condition, scope)).val:
-        ast._was_entered = True
+        scope.meta[ast].was_entered = True
         evaluate(ast.body, scope)
 
     # for now loops can't return anything
@@ -286,15 +365,37 @@ def evaluate_loop(ast: Loop, scope: Scope):
     # ast.condition
     # pdb.set_trace()
 
+class Comparable(Protocol):
+    def __lt__(self, other: "Comparable") -> bool: ...
+    def __le__(self, other: "Comparable") -> bool: ...
+    def __gt__(self, other: "Comparable") -> bool: ...
+    def __ge__(self, other: "Comparable") -> bool: ...
+    def __eq__(self, other: "Comparable") -> bool: ...
+    def __ne__(self, other: "Comparable") -> bool: ...
 
-def evaluate_less(ast: Less, scope: Scope):
+def evaluate_comparison_op(op: Callable[[Comparable, Comparable], bool], ast: AST, scope: Scope):
     left = evaluate(ast.left, scope)
     right = evaluate(ast.right, scope)
     match left, right:
-        case Int(val=l), Int(val=r): return Bool(l < r)
+        case Int(val=l), Int(val=r): return Bool(op(l, r))
         case _:
-            raise NotImplementedError(f'Less not implemented for {left=} and {right=}')
+            raise NotImplementedError(f'{op.__name__} not implemented for {left=} and {right=}')
 
+def evaluate_less(ast: Less, scope: Scope):
+    return evaluate_comparison_op(lambda l, r: l < r, ast, scope)
+
+def evaluate_equal(ast: Equal, scope: Scope):
+    return evaluate_comparison_op(lambda l, r: l == r, ast, scope)
+
+
+# TODO: op depends on what type of operands. bools use built-in and/or/etc, but ints need to use the bitwise operators
+# def evaluate_logical_op[T](logical_op: Callable[[bool, bool], bool], bitwise_op: Callable[[int, int], int], ast: AST, scope: Scope):
+#     left = evaluate(ast.left, scope)
+#     right = evaluate(ast.right, scope)
+#     match left, right:
+#         case Bool(val=l), Bool(val=r): return Bool(op(l, r))
+#         case _:
+#             raise NotImplementedError(f'{op.__name__} not implemented for {left=} and {right=}')
 
 def evaluate_and(ast: And, scope: Scope):
     left = evaluate(ast.left, scope)
@@ -312,6 +413,14 @@ def evaluate_or(ast: Or, scope: Scope):
         case _:
             raise NotImplementedError(f'Or not implemented for {left=} and {right=}')
 
+def evaluate_not(ast: Not, scope: Scope):
+    val = evaluate(ast.operand, scope)
+    match val:
+        case Bool(val=v): return Bool(not v)
+        case _:
+            raise NotImplementedError(f'Not not implemented for {val=}')
+
+#TODO: unified arithmetic evaluation function
 def evaluate_add(ast: Add, scope: Scope):
     left = evaluate(ast.left, scope)
     right = evaluate(ast.right, scope)
@@ -320,7 +429,15 @@ def evaluate_add(ast: Add, scope: Scope):
         case _:
             raise NotImplementedError(f'Add not implemented for {left=} and {right=}')
 
-######################### Builtin functions and helpers ############################
+def evaluate_mod(ast: Mod, scope: Scope):
+    left = evaluate(ast.left, scope)
+    right = evaluate(ast.right, scope)
+    match left, right:
+        case Int(val=l), Int(val=r): return Int(l % r)
+        case _:
+            raise NotImplementedError(f'Mod not implemented for {left=} and {right=}')
+
+############################ Builtin functions and helpers ############################
 def py_stringify(ast: AST, scope: Scope) -> str:
     ast = evaluate(ast, scope)
     match ast:
@@ -333,14 +450,24 @@ def py_stringify(ast: AST, scope: Scope) -> str:
 
     raise NotImplementedError('stringify not implemented yet')
 
-def py_printl(s:String|IString, scope: Scope) -> Void:
-    py_print(s, scope)
+#TODO: fix the function signatures here! they should not be keyword only for scope.
+#      fixing will involve being able to set default arguments for regular functions
+#      then making the pyaction have a default for the string s=''
+def py_printl(s:String|IString=None, *, scope: Scope) -> Void:
+    # TODO: hacky way of handling no-arg case
+    if s is None:
+        s = String('')
+    py_print(s, scope=scope)
     print()
     return void
 
-def py_print(s:String|IString, scope: Scope) -> Void:
+def py_print(s:String|IString=None, *, scope: Scope) -> Void:
+    # TODO: hacky way of handling no-arg case
+    if s is None:
+        s = String('')
     if not isinstance(s, (String, IString)):
-        raise ValueError(f'py_print expected String or IString, got {type(s)}:\n{s!r}')
+        s = String(py_stringify(s, scope))
+        # raise ValueError(f'py_print expected String or IString, got {type(s)}:\n{s!r}')
     if isinstance(s, IString):
         s = cast(String, evaluate(s, scope))
     print(s.val, end='')

@@ -55,6 +55,9 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 gen.send(Call(Identifier(name), args))
             case Call(args=None): ...
             # case Call(args=): ... #TODO: handling when args is not none... generally will be a list of identifiers that need to be converted directly to Identifier
+            case Call():
+                pdb.set_trace()
+                ...
             case Assign(left=PrototypeIdentifier(name=name), right=right):
                 gen.send(Assign(Identifier(name), right))
             # if we ever get to a bare identifier, treat it like an express
@@ -63,6 +66,9 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 ...
             case IterIn(left=PrototypeIdentifier(name=name), right=right):
                 gen.send(IterIn(Identifier(name), right))
+            case IterIn():
+                pdb.set_trace()
+                ...
             case SequenceUnpackTarget():
                 pdb.set_trace()
                 ...
@@ -72,15 +78,19 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             case Declare():
                 pdb.set_trace()
                 ...
+            case Index():
+                pdb.set_trace()
+                ...
             case Access():
                 pdb.set_trace()
                 ...
 
             # cases that themselves don't get adjusted but may contain nested children that need to be converted
-            case IString() | Group() | Block() | FunctionLiteral() | Loop() | Less() | Add() | Range() | Tuple() | And():
+            case IString() | Group() | Block() | Tuple() | Array() | Object() | Dict() | BidirDict() | FunctionLiteral() | Range() | Loop() | If() | Default() \
+                | PointsTo() | BidirPointsTo() | Equal() | Less() | LessEqual() | Greater() | GreaterEqual() | LeftShift() | RightShift() | LeftRotate() | RightRotate() | LeftRotateCarry() | RightRotateCarry() | Add() | Sub() | Mul() | Div() | IDiv() | Mod() | Pow() | And() | Or() | Xor() | Nand() | Nor() | Xnor() | MemberIn() \
+                | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv():
                 ...
-            # case Access() | Declare() | PointsTo() | BidirPointsTo() | Type() | ListOfASTs() | Tuple() | Block() | BareRange() | Ellipsis() | Spread() | Array() | Group() | Range() | Object() | Dict() | BidirDict() | TypeParam() | Void() | Undefined() | String() | IString() | Flowable() | Flow() | If() | Loop() | Default() | FunctionLiteral() | PrototypePyAction() | PyAction() | Call() | Index() | PrototypeIdentifier() | Express() | Identifier() | TypedIdentifier() | TypedGroup() | SequenceUnpackTarget() | ObjectUnpackTarget() | Assign() | Int() | Bool() | Range() | IterIn() | Less() | LessEqual() | Greater() | GreaterEqual() | Equal() | MemberIn() | LeftShift() | RightShift() | LeftRotate() | RightRotate() | LeftRotateCarry() | RightRotateCarry() | Add() | Sub() | Mul() | Div() | IDiv() | Mod() | Pow() | And() | Or() | Xor() | Nand() | Nor() | Xnor() | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() | DeclarationType() | DeclareGeneric() | Parameterize():
-                # ...
+            #TBD cases: Type() | ListOfASTs() | BareRange() | Ellipsis() | Spread() | TypeParam() | Flowable() | Flow() | PrototypePyAction() | PyAction() | Express() | TypedIdentifier() | TypedGroup() | SequenceUnpackTarget() | ObjectUnpackTarget() | DeclarationType() | DeclareGeneric() | Parameterize():
             case _:  # all others are traversed as normal
                 raise ValueError(f'Unhandled case {type(i)}')
             #     pdb.set_trace()
