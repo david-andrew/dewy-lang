@@ -331,16 +331,27 @@ def iter_next(iter: Iter):
             offset = int(brackets[0] == '(') # handle if first value is exclusive
             end_offset = int(brackets[1] == ']')
             i = l + iter.i + offset
-            if i > r + end_offset:
+            if i > r + end_offset - 1:
                 cond, val = Bool(False), undefined
             else:
                 cond, val = Bool(True), Int(i)
             iter.i += 1
             return Array([cond, val])
-        case Range(left=Tuple(items=[Int(val=r0), Int(val=r1)]), right=Void(), brackets=brackets):
+        case Range(left=Array(items=[Int(val=r0), Int(val=r1)]), right=Void(), brackets=brackets):
             offset = int(brackets[0] == '(') # handle if first value is exclusive
             step = r1 - r0
             cond, val = Bool(True), Int(r0 + (iter.i + offset) * step)
+            iter.i += 1
+            return Array([cond, val])
+        case Range(left=Array(items=[Int(val=r0), Int(val=r1)]), right=Int(val=r2), brackets=brackets):
+            offset = int(brackets[0] == '(') # handle if first value is exclusive
+            end_offset = int(brackets[1] == ']')
+            step = r1 - r0
+            i = r0 + (iter.i + offset) * step
+            if i > r2 + end_offset - 1:
+                cond, val = Bool(False), undefined
+            else:
+                cond, val = Bool(True), Int(i)
             iter.i += 1
             return Array([cond, val])
         #TODO: other range cases...

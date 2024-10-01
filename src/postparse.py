@@ -123,19 +123,9 @@ def convert_prototype_to_unpack_target(ast: Array) -> UnpackTarget:
 
 
 def convert_prototype_tuples(ast: AST) -> AST:
+    """For now, literally just turn all tuples into arrays"""
     ast = Group([ast])
     for i in (gen := ast.__full_traversal_iter__()):
-        # if i.is_settled():
-        #     continue
-
-        match i:
-            case Range(left=Tuple(items=start_items)):
-                pdb.set_trace()
-                ...
-            case Range(right=Tuple(items=end_items)):
-                pdb.set_trace()
-                ...
-            # case _:
-            #     raise ValueError(f'Unhandled case {type(i)}')
-
+        if isinstance(i, Tuple):
+            gen.send(Array(i.items))
     return ast.items[0]
