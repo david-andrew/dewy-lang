@@ -5,7 +5,8 @@ from ..parser import top_level_parse, Scope as ParserScope
 from ..syntax import (
     AST,
     Type,
-    ListOfASTs, Tuple, Block, Array, Group, Range, Object, Dict,
+    PointsTo, BidirPointsTo,
+    ListOfASTs, Tuple, Block, Array, Group, Range, Object, Dict, BidirDict, UnpackTarget,
     TypedIdentifier,
     Void, void, Undefined, undefined,
     String, IString,
@@ -143,6 +144,10 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         Block: evaluate_block,
         Group: evaluate_group,
         Array: evaluate_array,
+        Dict: evaluate_dict,
+        PointsTo: evaluate_points_to,
+        BidirDict: evaluate_bidir_dict,
+        BidirPointsTo: evaluate_bidir_points_to,
         Assign: evaluate_assign,
         IterIn: evaluate_iter_in,
         FunctionLiteral: evaluate_function_literal,
@@ -230,8 +235,20 @@ def evaluate_block(ast: Block, scope: Scope):
     scope = Scope(scope)
     return evaluate_group(Group(ast.items), scope)
 
-def evaluate_array(ast: Array, scope: Scope):
+def evaluate_array(ast: Array, scope: Scope) -> Array:
     return Array([evaluate(i, scope) for i in ast.items])
+
+def evaluate_dict(ast: Dict, scope: Scope) -> Dict:
+    return Dict([evaluate(kv, scope) for kv in ast.items])
+
+def evaluate_points_to(ast: PointsTo, scope: Scope) -> PointsTo:
+    return PointsTo(evaluate(ast.left, scope), evaluate(ast.right, scope))
+
+def evaluate_bidir_dict(ast: BidirDict, scope: Scope) -> BidirDict:
+    return BidirDict([BidirPointsTo(evaluate(kv, scope)) for kv in ast.items])
+
+def evaluate_bidir_points_to(ast: BidirPointsTo, scope: Scope) -> BidirPointsTo:
+    return BidirPointsTo(evaluate(ast.left, scope), evaluate(ast.right, scope))
 
 def evaluate_assign(ast: Assign, scope: Scope):
     match ast:
@@ -262,14 +279,42 @@ def evaluate_iter_in(ast: IterIn, scope: Scope):
             props = lambda x: scope.assign(name, x), Iter(item=right, i=0)
             scope.meta[ast].props = props
             return step_iter_in(props, scope)
+        case IterIn(left=UnpackTarget() as target, right=right):
+            right = evaluate(right, scope)
+            props = lambda x: unpack_assign(target, x, scope), Iter(item=right, i=0)
+            scope.meta[ast].props = props
+            return step_iter_in(props, scope)
 
     pdb.set_trace()
     raise NotImplementedError('IterIn not implemented yet')
+
+
+def unpack_assign(target: UnpackTarget, value: AST, scope: Scope):
+    for left, right in zip(target.target, gen:=value.__iter_asts__()):
+        match left:
+            case Identifier(name):
+                scope.assign(name, right)
+            case Assign(left=Identifier(name), right=right):
+                scope.assign(name, right)
+            case UnpackTarget():
+                unpack_assign(left, right, scope)
+            # case Spread(): ... #TODO: spread should collect the rest of the values via gen
+            case _:
+                pdb.set_trace()
+                raise NotImplementedError(f'unpack_assign not implemented for {left=} and {right=}')
+
 
 # TODO: probably break this up into one function per type of iterable
 def iter_next(iter: Iter):
     match iter.item:
         case Array(items):
+            if iter.i >= len(items):
+                cond, val = Bool(False), undefined
+            else:
+                cond, val = Bool(True), items[iter.i]
+            iter.i += 1
+            return Array([cond, val])
+        case Dict(items):
             if iter.i >= len(items):
                 cond, val = Bool(False), undefined
             else:
@@ -301,7 +346,6 @@ def iter_next(iter: Iter):
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'iter_next not implemented yet for {iter.item=}')
-
 
 
 class Closure(AST):

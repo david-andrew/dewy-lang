@@ -641,21 +641,10 @@ class TypedGroup(AST):
     def __str__(self) -> str:
         return f'{self.group}:{self.type}'
 
-class SequenceUnpackTarget(AST):
-    target: 'list[Identifier | SequenceUnpackTarget | ObjectUnpackTarget | Spread]'
+class UnpackTarget(AST):
+    target: 'list[Identifier | TypedIdentifier | UnpackTarget | Assign | Spread]'
     def __str__(self) -> str:
-        return f'{" ".join(map(str, self.target))}'
-
-class ObjectUnpackTarget(AST):
-    target: 'list[Identifier | Assign | SequenceUnpackTarget | ObjectUnpackTarget | Spread]'
-    def __str__(self) -> str:
-        return f'{" ".join(map(str, self.target))}'
-
-# class UnpackTarget(AST):
-#     target: 'list[Identifier | UnpackTarget | Spread]'
-#     def __str__(self):
-#         raise NotImplementedError('UnpackTarget is not implemented yet')
-
+        return f'[{" ".join(map(str, self.target))}]'
 
 class DeclarationType(Enum):
     LET = auto()
@@ -669,7 +658,7 @@ class DeclarationType(Enum):
 
 class Declare(AST):
     decltype: DeclarationType
-    target: Identifier | TypedIdentifier | TypedGroup | SequenceUnpackTarget | ObjectUnpackTarget | Assign
+    target: Identifier | TypedIdentifier | TypedGroup | UnpackTarget | Assign
 
     def __str__(self):
         return f'{self.decltype.name.lower()} {self.target}'

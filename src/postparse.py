@@ -10,7 +10,7 @@ from .syntax import (
     Flowable, Flow, If, Loop, Default,
     FunctionLiteral, PrototypePyAction, PyAction, Call,
     Index,
-    PrototypeIdentifier, Express, Identifier, TypedIdentifier, TypedGroup, SequenceUnpackTarget, ObjectUnpackTarget, Assign,
+    PrototypeIdentifier, Express, Identifier, TypedIdentifier, TypedGroup, UnpackTarget, Assign,
     Int, Bool,
     Range, IterIn,
     Less, LessEqual, Greater, GreaterEqual, Equal, MemberIn,
@@ -66,13 +66,13 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 ...
             case IterIn(left=PrototypeIdentifier(name=name), right=right):
                 gen.send(IterIn(Identifier(name), right))
+            case IterIn(left=Array() as arr, right=right):
+                target = convert_prototype_to_unpack_target(arr)
+                gen.send(IterIn(target, right))
             case IterIn():
                 pdb.set_trace()
                 ...
-            case SequenceUnpackTarget():
-                pdb.set_trace()
-                ...
-            case ObjectUnpackTarget():
+            case UnpackTarget():
                 pdb.set_trace()
                 ...
             case Declare():
@@ -97,6 +97,29 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             #     ...
 
     return ast.items[0]
+
+
+def convert_prototype_to_unpack_target(ast: Array) -> UnpackTarget:
+    """Convert an Array of PrototypeIdentifiers or other ASTs to an UnpackTarget"""
+    for i in (gen := ast.__full_traversal_iter__()):
+        if i.is_settled():
+            continue
+
+        match i:
+            case PrototypeIdentifier(name=name):
+                gen.send(Identifier(name))
+            case Assign(left=PrototypeIdentifier(name=name), right=right):
+                gen.send(Assign(Identifier(name), right))
+            case Array() as arr:
+                gen.send(convert_prototype_to_unpack_target(arr))
+            case Spread():
+                gen.send(Spread())
+            case TypedIdentifier():
+                gen.send(i)
+            case _:
+                raise NotImplementedError(f'Unhandled case {type(i)} in convert_prototype_to_unpack_target')
+
+    return UnpackTarget(ast.items)
 
 
 def convert_prototype_tuples(ast: AST) -> AST:

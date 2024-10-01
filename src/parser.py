@@ -15,7 +15,7 @@ from .syntax import (
     Flowable, Flow, If, Loop, Default,
     FunctionLiteral, PrototypePyAction, PyAction, Call,
     Index,
-    PrototypeIdentifier, Identifier, TypedIdentifier, TypedGroup, SequenceUnpackTarget, ObjectUnpackTarget, Assign,
+    PrototypeIdentifier, Identifier, TypedIdentifier, TypedGroup, UnpackTarget, Assign,
     Int, Bool,
     Range, IterIn,
     Less, LessEqual, Greater, GreaterEqual, Equal, MemberIn,
@@ -803,7 +803,7 @@ def parse_flow(flow: Flow_t, scope: Scope) -> Flowable:
 
 def parse_declare(declare: Declare_t, scope: Scope) -> Declare:
     expr = parse_chain(declare.expr, scope)
-    assert isinstance(expr, (Identifier, TypedIdentifier, TypedGroup, SequenceUnpackTarget, ObjectUnpackTarget, Assign)), f'ERROR: expected identifier, typed-identifier, or unpack target for declare expression, got {expr=}'
+    assert isinstance(expr, (Identifier, TypedIdentifier, TypedGroup, UnpackTarget, Assign)), f'ERROR: expected identifier, typed-identifier, or unpack target for declare expression, got {expr=}'
     match declare:
         case Declare_t(keyword=Keyword_t(src='let')): return Declare(DeclarationType.LET, expr)
         case Declare_t(keyword=Keyword_t(src='const')): return Declare(DeclarationType.CONST, expr)
