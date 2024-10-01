@@ -454,6 +454,7 @@ def py_stringify(ast: AST, scope: Scope) -> str:
     raise NotImplementedError('stringify not implemented yet')
 
 #TODO: fix the function signatures here! they should not be keyword only for scope.
+#Issue URL: https://github.com/david-andrew/dewy-lang/issues/8
 #      fixing will involve being able to set default arguments for regular functions
 #      then making the pyaction have a default for the string s=''
 def py_printl(s:String|IString=None, *, scope: Scope) -> Void:
