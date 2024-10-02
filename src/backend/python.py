@@ -564,6 +564,15 @@ def evaluate_mod(ast: Mod, scope: Scope):
             raise NotImplementedError(f'Mod not implemented for {left=} and {right=}')
 
 ############################ Builtin functions and helpers ############################
+
+# all references to python functions go through this interface to allow for easy swapping
+from functools import partial
+class BuiltinFuncs:
+    printl=print
+    print=partial(print, end='')
+    readl=input
+
+
 def py_stringify(ast: AST, scope: Scope) -> str:
     ast = evaluate(ast, scope)
     match ast:
@@ -592,7 +601,7 @@ def py_printl(s:String|IString=None, *, scope: Scope) -> Void:
     if s is None:
         s = String('')
     py_print(s, scope=scope)
-    print()
+    BuiltinFuncs.printl()
     return void
 
 def py_print(s:String|IString=None, *, scope: Scope) -> Void:
@@ -604,7 +613,7 @@ def py_print(s:String|IString=None, *, scope: Scope) -> Void:
         # raise ValueError(f'py_print expected String or IString, got {type(s)}:\n{s!r}')
     if isinstance(s, IString):
         s = cast(String, evaluate(s, scope))
-    print(s.val, end='')
+    BuiltinFuncs.print(s.val)
     return void
 
 def py_readl(scope: Scope) -> String:
