@@ -30,30 +30,32 @@ from typing import Protocol, cast, Callable, Any
 from functools import cache
 from collections import defaultdict
 from types import SimpleNamespace
+from argparse import ArgumentParser
 
 import pdb
 
 
 
 def python_interpreter(path: Path, args: list[str]):
+    arg_parser = ArgumentParser(description='Dewy Compiler: Python Interpreter Backend')
+    arg_parser.add_argument('--verbose', action='store_true', help='Print verbose output')
+    args = arg_parser.parse_args(args)
 
-    with open(path) as f:
-        src = f.read()
-
+    # get the source code and tokenize
+    src = path.read_text()
     tokens = tokenize(src)
     post_process(tokens)
 
+    # parse tokens into AST
     ast = top_level_parse(tokens)
     ast = post_parse(ast)
 
-    #TODO: put these under a verbose/etc. flag
-    print_ast(ast)
-    print(repr(ast))
-    # from ..postparse import traverse_ast
-    # for parent, child in traverse_ast(ast):
-    #     print(f'{parent=},\n||||{child=}')
-    # pdb.set_trace()
+    # debug printing
+    if args.verbose:
+        print_ast(ast)
+        print(repr(ast))
 
+    # run the program
     res = top_level_evaluate(ast)
     if res is not void:
         print(res)
@@ -165,6 +167,7 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         Mul: evaluate_mul,
         Mod: evaluate_mod,
         Undefined: no_op,
+        Void: no_op,
         #TODO: other AST types here
     }
 

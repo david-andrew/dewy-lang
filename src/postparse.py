@@ -118,7 +118,7 @@ def convert_prototype_to_unpack_target(ast: Array) -> UnpackTarget:
             case Array() as arr:
                 gen.send(convert_prototype_to_unpack_target(arr))
             case Spread():
-                gen.send(Spread())
+                gen.send(i)
             case TypedIdentifier():
                 gen.send(i)
             case _:

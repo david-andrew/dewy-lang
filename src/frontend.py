@@ -1,3 +1,4 @@
+from pathlib import Path
 from argparse import ArgumentParser, REMAINDER
 from .backend import backend_names, get_backend, python_interpreter, qbe_compiler, get_version
 
@@ -21,14 +22,14 @@ def main():
 
     arg_parser.add_argument('-v', '--version', action='version',
                             version=f'Dewy {get_version()}', help='Print version information and exit')
-    arg_parser.add_argument('-p', '--rich-print', action='store_true', help='Use rich for printing', default=True)
+    arg_parser.add_argument('-p', '--disable-rich-print', action='store_true', help='Disable using rich for printing stack traces')
     arg_parser.add_argument('args', nargs=REMAINDER, help='Arguments after the file are passed directly to program')
 
     args = arg_parser.parse_args()
 
     # use rich for pretty traceback printing
     #TODO: maybe add a util or something for trying to import rich and replacing print in all files
-    if args.rich_print:
+    if not args.disable_rich_print:
         try:
             from rich import traceback
             traceback.install(show_locals=True)
@@ -46,7 +47,7 @@ def main():
         backend = python_interpreter
 
     # run with the selected backend
-    backend(args.file, args.args)
+    backend(Path(args.file), args.args)
 
 
 if __name__ == '__main__':
