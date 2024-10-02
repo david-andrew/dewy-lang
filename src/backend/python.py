@@ -303,8 +303,12 @@ def unpack_assign(target: UnpackTarget, value: AST, scope: Scope):
     if not isinstance(value, Array): raise NotImplementedError(f'unpack_assign() is not yet implemented for {value=}')
     num_values = len([*value.__iter_asts__()])
     num_targets = len(target.target)
+    num_spread = sum(isinstance(t, Spread) for t in target.target)
+    if num_spread > 1: raise RuntimeError(f'Only one spread is allowed in unpacking. {target=}, {value=}')
     spread_size = num_values - num_targets + 1  # if a spread is present, how many elements it will take
+    if num_targets - num_spread > num_values: raise RuntimeError(f'Not enough values to unpack. {num_targets=}, {target=}, {value=}')
     gen = value.__iter_asts__()
+    
     for left in target.target:
         match left:
             case Identifier(name):
@@ -321,7 +325,10 @@ def unpack_assign(target: UnpackTarget, value: AST, scope: Scope):
             case _:
                 pdb.set_trace()
                 raise NotImplementedError(f'unpack_assign not implemented for {left=} and right={next(gen)}')
-
+    
+    # if there are any remaining values, raise an error
+    if (remaining := [*gen]):
+        raise RuntimeError(f'Too many values to unpack. {num_targets=}, {target=}, {value=}, {remaining=}')
 
 # TODO: probably break this up into one function per type of iterable
 def iter_next(iter: Iter):
