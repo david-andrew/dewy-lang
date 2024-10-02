@@ -7,13 +7,6 @@ from .utils import CoordString
 
 import pdb
 
-#### DEBUG rich traceback printing ####
-try:
-    from rich import traceback, print
-    traceback.install(show_locals=True)
-except:
-    print('rich unavailable for import. using built-in printing')
-
 
 """
 [tasks]

@@ -4,6 +4,7 @@ from .backend import backend_names, get_backend, python_interpreter, qbe_compile
 import pdb
 
 
+
 def main():
     arg_parser = ArgumentParser(description='Dewy Compiler')
 
@@ -20,9 +21,19 @@ def main():
 
     arg_parser.add_argument('-v', '--version', action='version',
                             version=f'Dewy {get_version()}', help='Print version information and exit')
+    arg_parser.add_argument('-p', '--rich-print', action='store_true', help='Use rich for printing', default=True)
     arg_parser.add_argument('args', nargs=REMAINDER, help='Arguments after the file are passed directly to program')
 
     args = arg_parser.parse_args()
+
+    # use rich for pretty traceback printing
+    #TODO: maybe add a util or something for trying to import rich and replacing print in all files
+    if args.rich_print:
+        try:
+            from rich import traceback
+            traceback.install(show_locals=True)
+        except:
+            print('rich unavailable for import. using built-in printing')
 
     # default interpreter is python. default compiler is qbe. default with no args is python.
     if args.backend:
