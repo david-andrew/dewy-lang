@@ -813,3 +813,80 @@ def parse_declare(declare: Declare_t, scope: Scope) -> Declare:
             raise ValueError(f"ERROR: unknown declare keyword {declare.keyword=}. Expected one of {DeclarationType.__members__}. {declare=}")
     pdb.set_trace()
     raise NotImplementedError
+
+
+
+
+
+
+################################ Docs Markdown Helpers ################################
+opname_map = {
+    '@': 'reference',
+    '.': 'access',
+    '^': 'power',
+    '*': 'multiply',
+    '/': 'divide',
+    '%': 'modulus',
+    '+': 'add',
+    '-': 'subtract',
+    '<<': 'left shift',
+    '>>': 'right shift',
+    '>>>': 'rotate left no carry',
+    '<<<': 'rotate right no carry',
+    '<<!': 'rotate left with carry',
+    '!>>': 'rotate right with carry',
+    '>?': 'greater than',
+    '<?': 'less than',
+    '>=?': 'greater than or equal',
+    '<=?': 'less than or equal',
+    '=?': 'equal',
+    'and': 'and',
+    'nand': 'nand',
+    '&': 'and',
+    'xor': 'xor',
+    'xnor': 'xnor',
+    'or': 'or',
+    'nor': 'nor',
+    '|': 'or',
+    '=>': 'function arrow',
+    '=': 'bind',
+    'else': 'flow alternate',
+    ';': 'semicolon',
+    'in': 'in',
+    'as': 'as',
+    'transmute': 'transmute',
+    '|>': 'pipe',
+    '<|': 'reverse pipe',
+    '->': 'right pointer',
+    '<->': 'bidir pointer',
+    '<-': 'left pointer',
+    ':': 'type annotation',
+
+    Comma_t(None): 'comma',
+    Juxtapose_t(None): 'unknown juxtapose',
+    EllipsisJuxtapose_t(None): 'ellipsis juxtapose',
+    RangeJuxtapose_t(None): 'range juxtapose',
+    TypeParamJuxtapose_t(None): 'type param juxtapose',
+}
+
+
+def get_precedence_table_markdown() -> str:
+    """return a string that is the markdown table for the docs containing all the operators"""
+    header = '| Precedence | Operator | Name | Associativity |\n| --- | --- | --- | --- |'
+
+    def get_ops_str(ops: list[Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t]) -> str:
+        return '<br>'.join(f'`{op.op if isinstance(op, (Operator_t, ShiftOperator_t)) else op.__class__.__name__[:-2].lower()}`' for op in ops)
+
+    def get_opnames_str(ops: list[Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t]) -> str:
+        return '<br>'.join(f'{opname_map.get(op.op, None) if isinstance(op, (Operator_t, ShiftOperator_t)) else op.__class__.__name__[:-2].lower()}' for op in ops)
+
+    def get_row_str(row: tuple[Associativity, list[Operator_t | ShiftOperator_t | Juxtapose_t | Comma_t]]) -> str:
+        assoc, group = row
+        return f'{get_ops_str(group)} | {get_opnames_str(group)} | {assoc.name}'
+
+    rows = [
+        f'| {i} | {get_row_str(row)} |'
+        for i, row in reversed([*enumerate(operator_groups)])
+    ]
+
+    return header + '\n' + '\n'.join(rows)
