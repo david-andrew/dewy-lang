@@ -1819,6 +1819,19 @@ fixed __add__:<T,U,V>callable<(a:T, b:U), V>
 const register__add__ = (func:callable<(a:T, b:T), T>) => __add__ |= func
 ```
 
+### stdlib provided parameters and their declaration types
+
+Local:
+- `i`, `j`, `k` (quaternion units, often used as loop indices)
+- `e` (euler's number)
+- `s`, `ms`, `μs`, `us`, `ns`, `hr`, `min` (units of time. also include written-out and plural versions)
+- any imported units? (though perhaps the user specifies that when they import them, e.g. `const ...(import units))
+
+Const:
+- `I`, `J`, `K` (quaternion units. uppercase is less likely to be used, and also matches geometric algebra)
+- `pi`, `tau`
+- `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
+
 ## Security design
 
 TODO
