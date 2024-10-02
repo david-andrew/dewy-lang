@@ -250,8 +250,13 @@ def evaluate_assign(ast: Assign, scope: Scope):
             right = evaluate(right, scope)
             scope.assign(name, right)
             return void
+        case Assign(left=UnpackTarget() as target, right=right):
+            right = evaluate(right, scope)
+            unpack_assign(target, right, scope)
+            return void
     pdb.set_trace()
     raise NotImplementedError('Assign not implemented yet')
+
 
 def evaluate_iter_in(ast: IterIn, scope: Scope):
 
@@ -293,7 +298,7 @@ def unpack_assign(target: UnpackTarget, value: AST, scope: Scope):
             case UnpackTarget():
                 unpack_assign(left, right, scope)
             # case Spread(): ... #TODO: spread should collect the rest of the values via gen
-            # case Spread(): ... #Issue URL: https://github.com/david-andrew/dewy-lang/issues/9
+                                 #Issue URL: https://github.com/david-andrew/dewy-lang/issues/9
             case _:
                 pdb.set_trace()
                 raise NotImplementedError(f'unpack_assign not implemented for {left=} and {right=}')

@@ -29,8 +29,9 @@ import pdb
 
 def post_parse(ast: AST) -> AST:
 
-    ast = convert_prototype_identifiers(ast)
+    # any conversions should probably run simplest to most complex
     ast = convert_prototype_tuples(ast)
+    ast = convert_prototype_identifiers(ast)
 
     # at the end of the post parse process
     if not ast.is_settled():
@@ -49,6 +50,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             continue
 
         match i:
+            # if we ever get to a bare identifier, treat it like an express
             case PrototypeIdentifier(name=name):
                 gen.send(Express(Identifier(name)))
             case Call(f=PrototypeIdentifier(name=name), args=args):
@@ -60,7 +62,9 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 ...
             case Assign(left=PrototypeIdentifier(name=name), right=right):
                 gen.send(Assign(Identifier(name), right))
-            # if we ever get to a bare identifier, treat it like an express
+            case Assign(left=Array() as arr, right=right):
+                target = convert_prototype_to_unpack_target(arr)
+                gen.send(Assign(target, right))
             case Assign():
                 pdb.set_trace()
                 ...
