@@ -302,13 +302,13 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.left, [Operator_t('*'), Operator_t('/'), Operator_t('%')]),
     (Associativity.left, [Operator_t('+'), Operator_t('-')]),
     (Associativity.left, [*map(ShiftOperator_t, ['<<', '>>', '<<<', '>>>', '<<!', '!>>'])]),
+    (Associativity.none,  [Comma_t(',')]),
+    (Associativity.left, [RangeJuxtapose_t(None)]),  # jux-range
     (Associativity.none, [Operator_t('in')]),
     (Associativity.left, [Operator_t('=?'), Operator_t('>?'), Operator_t('<?'), Operator_t('>=?'), Operator_t('<=?')]),
     (Associativity.left, [Operator_t('and'), Operator_t('nand'), Operator_t('&')]),
     (Associativity.left, [Operator_t('xor'), Operator_t('xnor')]),
     (Associativity.left, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
-    (Associativity.none,  [Comma_t(',')]),
-    (Associativity.left, [RangeJuxtapose_t(None)]),  # jux-range
     (Associativity.right,  [Operator_t('=>')]),  # () => () => () => 42
     (Associativity.fail,  [Operator_t('=')]),
     (Associativity.none,  [Operator_t('else')]),

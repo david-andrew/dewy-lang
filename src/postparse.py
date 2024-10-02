@@ -31,6 +31,7 @@ def post_parse(ast: AST) -> AST:
 
     # any conversions should probably run simplest to most complex
     ast = convert_prototype_tuples(ast)
+    ast = convert_bare_ranges(ast)
     ast = convert_prototype_identifiers(ast)
 
     # at the end of the post parse process
@@ -132,4 +133,12 @@ def convert_prototype_tuples(ast: AST) -> AST:
     for i in (gen := ast.__full_traversal_iter__()):
         if isinstance(i, Tuple):
             gen.send(Array(i.items))
+    return ast.items[0]
+
+def convert_bare_ranges(ast: AST) -> AST:
+    """Convert all BareRanges to Ranges with inclusive bounds"""
+    ast = Group([ast])
+    for i in (gen := ast.__full_traversal_iter__()):
+        if isinstance(i, BareRange):
+            gen.send(Range(i.left, i.right, '[]'))
     return ast.items[0]

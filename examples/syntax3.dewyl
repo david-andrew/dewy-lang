@@ -15,7 +15,7 @@ a b c d e
 2^/-+*32    // 2^(1/(0-(0+(1*32))))
 -x(y)(z)
 /x(y)(z)
-add(2, 3)result
+add(2 3)result
 a(x)b(x)
 4, 5, 6
 "apple", "banana", "cherry"
@@ -57,19 +57,18 @@ w^@3
 (-x * y / 2).length * (z+5)
 print[1 2 3]x*2
 (3+5, 2*3)range[0..10)
-function(x: int, y: float): str
+function(x: int y: float): str
 a =? 5 and b >=? 10
 (sum[1 2 3] + product[4 5 6]) * 7
 true xor (false or y >=? 3)
 (((3 + 2x).area, y^2 * 10), (a, b, c))
 [1, 3..9] .* (x+3)
-myFunc@age: int, name: string;
+myFunc = (age: int name: string): bool => age >=? 18
 (x^2 + y^2)^(1/2).magnitude
 if (a >? b) and (c <=? d) result = 1 else result = 0
-(4x^2 - 2, y+1 .^ 3, z^/4).tupleProduct
-set[2x 3y 5z] : (int, float, string)
+(4x^2 - 2, y+1 .^ 3, z^/4).product
 (((10..20, 25..30) .+ 5), (x-3..x+3))
-obj.method1(3)method2(x*y, "str").property
+obj.method1(3)method2(x*y "str").property
 not a =? b or c <? d nand e >=? f
 sum[0, 2..10] * product[-5..5]/@2
 
@@ -99,7 +98,7 @@ sum[1, 3..9] .* (x+3 << 1)
 (a >>> b) nand (c <<! d)
 ((5 - 3) << 1, (10 * 2) >> 3, (15 / 3) <<< 2)
 (((10..20, 25..30) .+ 5) << 1, (x-3..x+3) >>> 2)
-obj.method1(3 << 2)method2(x*y >>> 1, "str").property
+obj.method1(3 << 2)method2(x*y >>> 1 "str").property
 not a =? b or c << 2 <? d >>> 3
 range[0, 2..10] * product[-5..5] >> 3
 
@@ -134,20 +133,20 @@ myvec[[0 3] [1 4] (0..end)]
 
 // optional commas
 myvec[0,2..end 1..4 [0 2 4]]
-myvec[0, (1,3..end)]
+myvec[0 (1,3..end)]
 myvec[(0,2..end)]
 myvec(0,2..end)
-myvec[(0,2..end), [1 3 5]]
-myvec[[0,2..end), [1,3..end)]
+myvec[(0,2..end) [1 3 5]]
+myvec[[0,2..end) [1,3..end)]
 
 // mathy range indices
-myvec[0..(end-1), (1,3..end/2)]
+myvec[0..(end-1) (1,3..end/2)]
 myvec[(0,2*sqrt(2)..end) [1 3 5].*2]
-myvec[(0..end*0.75), 1..(end-2)]
+myvec[(0..end*0.75) 1..(end-2)]
 myvec[(1+1,2*2..end-1) [1 3 5] .- 1]
-myvec[(-3,3..end*0.9), [1 3] .* (end/2)]
+myvec[(-3,3..end*0.9) [1 3] .* (end/2)]
 myvec[(0..end-1)/2 2..(end*0.5)]
-myvec[(0,3*sin(pi/3)..end-1), [1 3] + end/4]
+myvec[(0,3*sin(pi/3)..end-1) [1 3] + end/4]
 
 
 //TODO: how to handle the fact that juxtapose has different precedence based on if its a function call vs a multiply?

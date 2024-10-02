@@ -321,7 +321,7 @@ def iter_next(iter: Iter):
                 cond, val = Bool(True), items[iter.i]
             iter.i += 1
             return Array([cond, val])
-        case Range(left=Int(val=l), right=Void(), brackets=brackets):
+        case Range(left=Int(val=l), right=Void()|Undefined(), brackets=brackets):
             offset = int(brackets[0] == '(') # handle if first value is exclusive
             cond, val = Bool(True), Int(l + iter.i + offset)
             iter.i += 1
@@ -336,7 +336,7 @@ def iter_next(iter: Iter):
                 cond, val = Bool(True), Int(i)
             iter.i += 1
             return Array([cond, val])
-        case Range(left=Array(items=[Int(val=r0), Int(val=r1)]), right=Void(), brackets=brackets):
+        case Range(left=Array(items=[Int(val=r0), Int(val=r1)]), right=Void()|Undefined(), brackets=brackets):
             offset = int(brackets[0] == '(') # handle if first value is exclusive
             step = r1 - r0
             cond, val = Bool(True), Int(r0 + (iter.i + offset) * step)

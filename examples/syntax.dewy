@@ -54,14 +54,14 @@ s2 = 'this is an outer string, and {'this is an interior string with "{my_string
 
 
 
-const add: (int, int) => int = (a:int, b:int) => { /{return sum of a and b}/ }
-let div: (real, real) => real? = (a:real, b:real) => { /{return a / b}/ }
+const add = (a:int b:int): int => { /{return sum of a and b}/ }
+let div = (a:real b:real): real? => { /{return a / b}/ }
 
 // function type with named default argument
-my_func: (string, kwarg:bool) => () = (s:string, kwarg:bool=false) => {}
+my_func = (s:string kwarg:bool=false): void => {}
 
 //you probably can do the verbose version as well (probably useful for when you're just defining the interface without the implementation)
-my_func: (s:string, kwarg:bool=false) => void
+my_func: (s:string kwarg:bool=false): void
 
 
 
@@ -71,9 +71,9 @@ my_func: (s:string, kwarg:bool=false) => void
 () => bool
 int => bool
 a: int => bool
-(int, int) => int
-<T>(T, T) => T
-<T>(a:T, b:T) => T
+(int int) => int
+<T>(T T) => T
+<T>(a:T b:T) => T
 
 // object type
 [a:int? b:string]
@@ -126,12 +126,12 @@ a+b
 
 
 
-[a, b, c] = [1 2 3]                                         //a=1, b=2, c=3
-[a, [b, c]] = [1 [2 3]]                                     //a=1, b=2, c=3
-[a, [b, c], d] = [1 [2 3] 4]                                //a=1, b=2, c=3, d=4
-[a, ...b] = [1 2 3 4]                                       //a=1, b=[2 3 4]
-[a, ...b, c] = [1 2 3 4 5]                                  //a=1, b=[2 3 4], c=5
-[a, ...b, [c, [...d, e, f]]] = [1 2 3 4 [5 [6 7 8 9 10]]]   //a=1, b=[2 3 4], c=5, d=[6 7 8], e=9, f=10
+[a b c] = [1 2 3]                                       //a=1, b=2, c=3
+[a [b c]] = [1 [2 3]]                                   //a=1, b=2, c=3
+[a [b c] d] = [1 [2 3] 4]                               //a=1, b=2, c=3, d=4
+[a ...b] = [1 2 3 4]                                    //a=1, b=[2 3 4]
+[a ...b c] = [1 2 3 4 5]                                //a=1, b=[2 3 4], c=5
+[a ...b [c [...d e f]]] = [1 2 3 4 [5 [6 7 8 9 10]]]    //a=1, b=[2 3 4], c=5, d=[6 7 8], e=9, f=10
 
 
 

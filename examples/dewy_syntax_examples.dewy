@@ -4,8 +4,8 @@
 
 // typed declaration
 apple: uint64
-banana: map<int, string>
-peach: array<int, length=N>  //array of ints with length N...
+banana: map<int string>
+peach: array<int length=N>  //array of ints with length N...
 let pear: set<range>  // let indicates that this is definitely a new declaration, even if the identifier already exists
 
 
@@ -13,7 +13,7 @@ let pear: set<range>  // let indicates that this is definitely a new declaration
 // unpack assignment examples
 A = 1..10
 B = [loop a in A -a]
-loop [a, b] in [A B] {}
+loop [a b] in [A B] {}
 
 // object with nested objects to unpack
 my_obj = [
@@ -30,15 +30,15 @@ my_obj = [
 
 // nested unpack assignment. tbd if the top level is `[unpack, params, etc] = obj`, or `obj as [unpack, params, etc]`
 [
-    apple as [
-        a1, 
-        a2, 
-        a3, 
-        a4, 
-        a5 as [ultimate_answer as answer]
-    ], 
-    banana as renamed_banana, 
-    peach as [purple, blue, orange]
+    [
+        a1
+        a2 
+        a3 
+        a4 
+        [answer = ultimate_answer] = a5
+    ] = apple
+    renamed_banana = banana
+    [purple blue orange] = peach
 ] = my_obj
 // unpacked variables are:
 //   a1 = 1, a2 = 2, a3 = 3, a4 = 4
@@ -54,21 +54,21 @@ my_obj = [
 // there may only be 1 `...` in an unpack (otherwise it would be ambiguous which elements to collect)
 // the variable receiving the `...` will be of the same type as the original object being unpacked
 my_arr = [1 2 3 4 5 6 7 8 9]
-[a1, a2, a3, ...my_arr, a8, a9] = my_arr  //a1 = 1, a2 = 2, a3 = 3, my_arr = [4, 5, 6, 7], a8 = 8, a9 = 9
+[a1 a2 a3 ...my_arr a8 a9] = my_arr  //a1 = 1, a2 = 2, a3 = 3, my_arr = [4, 5, 6, 7], a8 = 8, a9 = 9
 
 my_dict = ['apple' -> 1 'banana' -> 2 'peach' -> 3 'pie' -> 4]
-[d1, ...dict_left] = my_dict //d1 = ('apple' -> 1), dict_left = ['banana' -> 2 'peach' -> 3 'pie' -> 4]
+[d1 ...dict_left] = my_dict //d1 = ('apple' -> 1), dict_left = ['banana' -> 2 'peach' -> 3 'pie' -> 4]
 
 // random range note: for step sizes other than +1, use range_iter constructor e.g. range_iter(start to stop, step=5)
 my_range = 1..inf
-loop my_range.length >? 0 ( [i, ...my_range] = my_range )
+loop my_range.length >? 0 ( [i ...my_range] = my_range )
 // first iteration: i = 1, my_range = 2..inf
 // second iteration: i = 2, my_range = 3..inf
 // third iteration: i = 3, my_range = 4..inf
 // ...
 // for forever
 
-//[...my_range, i] = my_range //will probably set my_range = 1 to inf, i = inf
+//[...my_range i] = my_range //will probably set my_range = 1 to inf, i = inf
 
 // unpacking too many values, or named values that don't exist just sets them to undefined
 
@@ -82,15 +82,15 @@ if (match = pattern.search(data); match) not =? undefined
 }
 
 // A loop that can't be trivially rewritten using 2-arg iter()
-loop (chunk = file.read(8192); chunk.length >? 0)
+loop (chunk = file.read(8192) chunk.length >? 0)
 {
    process(chunk)
 }
 
 // Reuse a value that's expensive to compute
-[(y = f(x); y) y**2 y**3]
+[y=f(x) y y**2 y**3]
 
 // Share a subexpression between a comprehension filter clause and its output
-filtered_data = [for x in data if (y = f(x); y) not =? undefined y]
+filtered_data = [for x in data if (y=f(x) y) not =? undefined y]
 //though you could also just write this like so
-filtered_data = [for x in data {y = f(x) if y not =? undefined y}]
+filtered_data = [for x in data {y=f(x) if y not =? undefined y}]
