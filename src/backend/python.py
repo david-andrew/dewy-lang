@@ -90,24 +90,16 @@ class MetaNamespace(SimpleNamespace):
         super().__setattr__(key, value)
 
 
-class MetaNamespaceDict:
+class MetaNamespaceDict(defaultdict):
+    """A defaultdict that preprocesses AST keys to use the classname + memory address as the key"""
     def __init__(self):
-        self._dict = defaultdict(MetaNamespace)
+        super().__init__(MetaNamespace)
 
+    # add preprocessing to both __getitem__ and __setitem__ to handle AST keys
+    # apparently __setitem__ always calls __getitem__ so we only need to override __getitem__
     def __getitem__(self, item: AST) -> Any | None:
         key = f'::{item.__class__.__name__}@{hex(id(item))}'
-        return self._dict[key]
-
-    def __setitem__(self, key: AST, value: Any) -> None:
-        key = f'::{key.__class__.__name__}@{hex(id(key))}'
-        self._dict[key] = value
-
-    def __str__(self):
-        return str(self._dict)
-
-    def __repr__(self):
-        return repr(self._dict)
-
+        return super().__getitem__(key)
 
 @dataclass
 class Scope(ParserScope):
