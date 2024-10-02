@@ -152,6 +152,8 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         Int: no_op,
         Bool: no_op,
         Range: no_op,
+        Flow: evaluate_flow,
+        Default: evaluate_default,
         If: evaluate_if,
         Loop: evaluate_loop,
         Less: evaluate_less,
@@ -394,11 +396,42 @@ def evaluate_express(ast: Express, scope: Scope):
     val = scope.get(ast.id.name).value
     return evaluate(val, scope)
 
+def evaluate_flow(ast: Flow, scope: Scope):
+    for branch in ast.branches:
+        #TODO: slightly hacky way to get the child scope created by the branch (so we can check if it was entered)
+        child_scope = None
+        def save_child_scope(scope: Scope):
+            nonlocal child_scope
+            child_scope = scope
+
+        match branch:
+            case Default(): res = evaluate_default(branch, scope, save_child_scope)
+            case If(): res = evaluate_if(branch, scope, save_child_scope)
+            case Loop(): res = evaluate_loop(branch, scope, save_child_scope)
+            case _:
+                pdb.set_trace()
+                raise NotImplementedError(f'evaluate_flow not implemented for flow type {branch=}')
+
+        # if the branch was entered, return its result
+        assert child_scope.meta[branch].was_entered is not None, f'INTERNAL ERROR: {branch=} .was_entered was not set'
+        if child_scope.meta[branch].was_entered:
+            return res
+
+    # if no branches were entered, return void
+    return void
+
+def evaluate_default(ast: Default, scope: Scope, save_child_scope:Callable[[Scope], None]=lambda _: None):
+    scope = Scope(scope)
+    save_child_scope(scope)
+    scope.meta[ast].was_entered = True
+    return evaluate(ast.body, scope)
+
 #TODO: this needs improvements!
 #Issue URL: https://github.com/david-andrew/dewy-lang/issues/2
-def evaluate_if(ast: If, scope: Scope):
+def evaluate_if(ast: If, scope: Scope, save_child_scope:Callable[[Scope], None]=lambda _: None):
     scope = Scope(scope)
-    scope.meta[ast].was_entered=False
+    save_child_scope(scope)
+    scope.meta[ast].was_entered = False
     if cast(Bool, evaluate(ast.condition, scope)).val:
         scope.meta[ast].was_entered = True
         return evaluate(ast.body, scope)
@@ -407,8 +440,9 @@ def evaluate_if(ast: If, scope: Scope):
     return void
 
 #TODO: this needs improvements!
-def evaluate_loop(ast: Loop, scope: Scope):
+def evaluate_loop(ast: Loop, scope: Scope, save_child_scope:Callable[[Scope], None]=lambda _: None):
     scope = Scope(scope)
+    save_child_scope(scope)
     scope.meta[ast].was_entered = False
     while cast(Bool, evaluate(ast.condition, scope)).val:
         scope.meta[ast].was_entered = True
@@ -433,6 +467,7 @@ def evaluate_comparison_op(op: Callable[[Comparable, Comparable], bool], ast: AS
     right = evaluate(ast.right, scope)
     match left, right:
         case Int(val=l), Int(val=r): return Bool(op(l, r))
+        case String(val=l), String(val=r): return Bool(op(l, r))
         case _:
             raise NotImplementedError(f'{op.__name__} not implemented for {left=} and {right=}')
 
