@@ -21,6 +21,7 @@ from ..syntax import (
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
     And, Or, Xor, Nand, Nor, Xnor,
     Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv,
+    Spread,
     # DeclarationType,
 )
 
@@ -292,21 +293,34 @@ def evaluate_iter_in(ast: IterIn, scope: Scope):
     pdb.set_trace()
     raise NotImplementedError('IterIn not implemented yet')
 
+# def determine_how_many_to_take
+def take_n(gen, n:int):
+    return [next(gen) for _ in range(n)]
 
+#TODO: this is really only for array unpacking. need to handle object unpacking as well...
+#      need to check what type value
 def unpack_assign(target: UnpackTarget, value: AST, scope: Scope):
-    for left, right in zip(target.target, gen:=value.__iter_asts__()):
+    if not isinstance(value, Array): raise NotImplementedError(f'unpack_assign() is not yet implemented for {value=}')
+    num_values = len([*value.__iter_asts__()])
+    num_targets = len(target.target)
+    spread_size = num_values - num_targets + 1  # if a spread is present, how many elements it will take
+    gen = value.__iter_asts__()
+    for left in target.target:
         match left:
             case Identifier(name):
-                scope.assign(name, right)
-            case Assign(left=Identifier(name), right=right):
-                scope.assign(name, right)
+                scope.assign(name, next(gen))
+            # #TODO: object member renamed unpack. need to get the member of the object and assign it to the new name
+            # case Assign(left=Identifier(name), right=right):
+            #     scope.assign(name, right)
             case UnpackTarget():
-                unpack_assign(left, right, scope)
-            # case Spread(): ... #TODO: spread should collect the rest of the values via gen
-                                 #Issue URL: https://github.com/david-andrew/dewy-lang/issues/9
+                unpack_assign(left, next(gen), scope)
+            case Spread(right=Identifier(name)):
+                scope.assign(name, Array([next(gen) for _ in range(spread_size)]))
+            case Spread(right=UnpackTarget() as left):
+                unpack_assign(left, Array([next(gen) for _ in range(spread_size)]), scope)
             case _:
                 pdb.set_trace()
-                raise NotImplementedError(f'unpack_assign not implemented for {left=} and {right=}')
+                raise NotImplementedError(f'unpack_assign not implemented for {left=} and right={next(gen)}')
 
 
 # TODO: probably break this up into one function per type of iterable
