@@ -26,8 +26,13 @@ import pdb
 # i.e. it is the result of calls to `get_next_chain()`
 # all other syntax is wrapped up into compound tokens
 # it should literally just be a sequence of atoms and operators
-class Chain[T](list[T]):
+from typing import TypeVar
+T = TypeVar('T', bound=Token)
+class Chain(list[T]):
     """class for explicitly annotating that a token list is a single chain"""
+
+# class Chain[T](list[T]):
+#     """class for explicitly annotating that a token list is a single chain"""
 
 
 ############### NEW TOKENS CREATED BY POST-TOKENIZATION PROCESS ###############

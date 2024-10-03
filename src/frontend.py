@@ -15,13 +15,10 @@ def main():
     # mutually exclusive flags for specifying the backend to use
     group = arg_parser.add_mutually_exclusive_group()
     group.add_argument('-i', action='store_true', help='(DEFAULT) Run in interpreter mode with the python backend')
-    group.add_argument('-c', action='store_true',
-                       help='Run in compiler mode with the llvm backend (not implemented yet)')
-    group.add_argument('--backend', type=str, help=f'Specify a backend compiler/interpreter by name to use. Backends will include: {
-                       backend_names} (however currently only python is available).')
+    group.add_argument('-c', action='store_true', help='Run in compiler mode with the llvm backend (not implemented yet)')
+    group.add_argument('--backend', type=str, help=f'Specify a backend compiler/interpreter by name to use. Backends will include: {backend_names} (however currently only python is available).')
 
-    arg_parser.add_argument('-v', '--version', action='version',
-                            version=f'Dewy {get_version()}', help='Print version information and exit')
+    arg_parser.add_argument('-v', '--version', action='version', version=f'Dewy {get_version()}', help='Print version information and exit')
     arg_parser.add_argument('-p', '--disable-rich-print', action='store_true', help='Disable using rich for printing stack traces')
     arg_parser.add_argument('args', nargs=REMAINDER, help='Arguments after the file are passed directly to program')
 

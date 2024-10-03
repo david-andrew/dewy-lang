@@ -18,8 +18,7 @@ def wrap_coords(method: Callable):
 
 def fail_coords(method: Callable):
     def wrapped_method(self, *args, **kwargs):
-        raise ValueError(f"coord_string_method {
-                         method} cannot be called on a CoordString, as it will not return a CoordString")
+        raise ValueError(f"coord_string_method {method} cannot be called on a CoordString, as it will not return a CoordString")
     return wrapped_method
 
 

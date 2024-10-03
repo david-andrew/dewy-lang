@@ -120,13 +120,23 @@ class Iter(AST):
 
 ############################ Evaluation functions ############################
 
-class EvalFunc[T](Protocol):
+#DEBUG supporting py3.11
+from typing import TypeVar
+T = TypeVar('T', bound=AST)
+class EvalFunc(Protocol):
     def __call__(self, ast: T, scope: Scope) -> AST: ...
 
-
-def no_op[T](ast: T, scope: Scope) -> T:
+def no_op(ast: T, scope: Scope) -> T:
     """For ASTs that just return themselves when evaluated"""
     return ast
+
+# class EvalFunc[T](Protocol):
+#     def __call__(self, ast: T, scope: Scope) -> AST: ...
+
+
+# def no_op[T](ast: T, scope: Scope) -> T:
+#     """For ASTs that just return themselves when evaluated"""
+#     return ast
 
 def cannot_evaluate(ast: AST, scope: Scope) -> AST:
     raise ValueError(f'INTERNAL ERROR: evaluation of type {type(ast)} is not possible')

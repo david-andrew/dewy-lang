@@ -348,8 +348,7 @@ def operator_precedence(op: Operator_t) -> int | qint:
 def operator_associativity(op: Operator_t | int) -> Associativity:
     if not isinstance(op, int):
         i = operator_precedence(op)
-        assert isinstance(i, int), f'Cannot determine associativity of operator ({
-            op}) with multiple precedence levels ({i})'
+        assert isinstance(i, int), f'Cannot determine associativity of operator ({op}) with multiple precedence levels ({i})'
     else:
         i = op
     try:

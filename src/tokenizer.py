@@ -982,8 +982,7 @@ def get_best_match(src: str, eat_funcs: list, precedences: list[int]) -> tuple[i
     best = max(matches, key=key)
     ties = [match for match in matches if key(match) == key(best)]
     if len(ties) > 1:
-        raise ValueError(f"multiple tokens matches tied {[match[0][1].__name__ for match in ties]}: {
-                         repr(src)}\nPlease disambiguate by providing precedence levels for these tokens.")
+        raise ValueError(f"multiple tokens matches tied {[match[0][1].__name__ for match in ties]}: {repr(src)}\nPlease disambiguate by providing precedence levels for these tokens.")
 
     (res, token_cls), _ = best
 
@@ -1016,13 +1015,11 @@ def tokenize(src: str) -> list[Token]:
     try:
         res, _cls = eat_block(src, tracker=tracker)
     except Exception as e:
-        raise ValueError(f"failed to tokenize: ```{escape_whitespace(
-            src[tracker.i:])}```.\nCurrent tokens: {tracker.tokens}") from e
+        raise ValueError(f"failed to tokenize: ```{escape_whitespace(src[tracker.i:])}```.\nCurrent tokens: {tracker.tokens}") from e
 
     # check if the process failed
     if res is None:
-        raise ValueError(f"failed to tokenize: ```{escape_whitespace(
-            src[tracker.i:])}```.\nCurrent tokens: {tracker.tokens}")
+        raise ValueError(f"failed to tokenize: ```{escape_whitespace(src[tracker.i:])}```.\nCurrent tokens: {tracker.tokens}")
 
     (i, block) = res
     tokens = block.body
@@ -1127,10 +1124,8 @@ def validate_block_braces(tokens: list[Token]) -> None:
     """
     for token in traverse_tokens(tokens):
         if isinstance(token, Block_t):
-            assert token.left in valid_delim_closers, f'INTERNAL ERROR: left block opening token is not a valid token. Expected one of {
-                [*valid_delim_closers.keys()]}. Got \'{token.left}\''
-            assert token.right in valid_delim_closers[token.left], f'ERROR: mismatched opening and closing braces. For opening brace \'{
-                token.left}\', expected one of \'{valid_delim_closers[token.left]}\''
+            assert token.left in valid_delim_closers, f'INTERNAL ERROR: left block opening token is not a valid token. Expected one of {[*valid_delim_closers.keys()]}. Got \'{token.left}\''
+            assert token.right in valid_delim_closers[token.left], f'ERROR: mismatched opening and closing braces. For opening brace \'{token.left}\', expected one of \'{valid_delim_closers[token.left]}\''
 
 
 def validate_functions():
@@ -1147,8 +1142,7 @@ def validate_functions():
         # Check if the function has the correct signature
         if len(param_types) != 1 or param_types[0] != str or return_type != int | None:
             pdb.set_trace()
-            raise ValueError(f"{func.__name__} has an invalid signature: `{
-                             signature}`. Expected `(src: str) -> int | None`")
+            raise ValueError(f"{func.__name__} has an invalid signature: `{signature}`. Expected `(src: str) -> int | None`")
 
     # Validate the @full_eat function signatures
     full_eat_functions = get_full_eat_funcs_with_name()
@@ -1160,8 +1154,7 @@ def validate_functions():
         return_type = signature.return_annotation
 
         # Check if the function has the correct signature
-        error_message = f"{func.__name__} has an invalid signature: `{
-            signature}`. Expected `(src: str) -> tuple[int, Token] | None`"
+        error_message = f"{func.__name__} has an invalid signature: `{signature}`. Expected `(src: str) -> tuple[int, Token] | None`"
         if not (isinstance(return_type, UnionType) and len(return_type.__args__) == 2 and type(None) in return_type.__args__):
             raise ValueError(error_message)
         A, B = return_type.__args__
