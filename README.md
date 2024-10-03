@@ -76,6 +76,7 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [nested_loop.dewy](examples/nested_loop.dewy)                   | [✓]    |
 | [block_printing.dewy](examples/block_printing.dewy)             | [✓]    |
 | [row_vs_col.dewy](examples/row_vs_col.dewy)                     | [✓]    |
+| [tensors.dewy](examples/tensors.dewy)                           | [✗]    |
 | [unpack_array.dewy](examples/unpack_array.dewy)                 | [✓]    |
 | [unpack_dict.dewy](examples/unpack_dict.dewy)                   | [✓]    |
 | [unpack_object.dewy](examples/unpack_object.dewy)               | [✗]    |
