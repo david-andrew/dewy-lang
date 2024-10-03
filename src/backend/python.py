@@ -300,15 +300,23 @@ def take_n(gen, n:int):
 #TODO: this is really only for array unpacking. need to handle object unpacking as well...
 #      need to check what type value
 def unpack_assign(target: UnpackTarget, value: AST, scope: Scope):
-    if not isinstance(value, Array): raise NotImplementedError(f'unpack_assign() is not yet implemented for {value=}')
-    num_values = len([*value.__iter_asts__()])
+    if not isinstance(value, (Array, PointsTo, Undefined)): raise NotImplementedError(f'unpack_assign() is not yet implemented for {value=}')
+
+    # determine how many targets will be assigned, and if spread is present
     num_targets = len(target.target)
     num_spread = sum(isinstance(t, Spread) for t in target.target)
     if num_spread > 1: raise RuntimeError(f'Only one spread is allowed in unpacking. {target=}, {value=}')
+
+    # undefined unpacks as many undefineds as there are non-spread targets
+    if isinstance(value, Undefined):
+        value = Array([undefined for _ in range(num_targets - num_spread)])
+
+    # verify if enough values to unpack, and set up generator (using built in iteration over ASTs children)
+    num_values = len([*value.__iter_asts__()])
     spread_size = num_values - num_targets + 1  # if a spread is present, how many elements it will take
     if num_targets - num_spread > num_values: raise RuntimeError(f'Not enough values to unpack. {num_targets=}, {target=}, {value=}')
     gen = value.__iter_asts__()
-    
+
     for left in target.target:
         match left:
             case Identifier(name):
@@ -325,7 +333,7 @@ def unpack_assign(target: UnpackTarget, value: AST, scope: Scope):
             case _:
                 pdb.set_trace()
                 raise NotImplementedError(f'unpack_assign not implemented for {left=} and right={next(gen)}')
-    
+
     # if there are any remaining values, raise an error
     if (remaining := [*gen]):
         raise RuntimeError(f'Too many values to unpack. {num_targets=}, {target=}, {value=}, {remaining=}')
