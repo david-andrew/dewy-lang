@@ -1,0 +1,26 @@
+d1 = ['a' -> 1 'b' -> 2 'c' -> 3]
+
+a, b, c = d1
+printl'a={a} b={b} c={c}'
+
+a, ...b = d1
+printl'a={a} b={b}'
+
+...a, b = d1
+printl'a={a} b={b}'
+
+a, [b c], ...d = d1
+printl'a={a} b={b} c={c} d={d}'
+
+
+
+d2 = ['a' <-> 1 'b' <-> 2 'c' <-> 3 'd' <-> ['e' -> 4 'f' -> 5]]
+
+a, b, c, d = d2
+printl'a={a} b={b} c={c} d={d}'
+
+a, ...b, c, d, e = d2
+printl'a={a} b={b} c={c} d={d} e={e}'
+
+[ka va], [kb vb], [kc vc], [kd [ke vf]] = d2
+printl'ka={ka} va={va} kb={kb} vb={vb} kc={kc} vc={vc} kd={kd} ke={ke} vf={vf}'

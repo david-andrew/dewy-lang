@@ -245,7 +245,7 @@ def evaluate_points_to(ast: PointsTo, scope: Scope) -> PointsTo:
     return PointsTo(evaluate(ast.left, scope), evaluate(ast.right, scope))
 
 def evaluate_bidir_dict(ast: BidirDict, scope: Scope) -> BidirDict:
-    return BidirDict([BidirPointsTo(evaluate(kv, scope)) for kv in ast.items])
+    return BidirDict([evaluate(kv, scope) for kv in ast.items])
 
 def evaluate_bidir_points_to(ast: BidirPointsTo, scope: Scope) -> BidirPointsTo:
     return BidirPointsTo(evaluate(ast.left, scope), evaluate(ast.right, scope))
@@ -300,7 +300,14 @@ def take_n(gen, n:int):
 #TODO: this is really only for array unpacking. need to handle object unpacking as well...
 #      need to check what type value
 def unpack_assign(target: UnpackTarget, value: AST, scope: Scope):
-    if not isinstance(value, (Array, PointsTo, Undefined)): raise NotImplementedError(f'unpack_assign() is not yet implemented for {value=}')
+
+    # current inefficient hack to unpack strings
+    if isinstance(value, String):
+        value = Array([String(c) for c in value.val])
+
+    # current types supporting unpacking
+    if not isinstance(value, (Array, Dict, PointsTo, BidirDict, BidirPointsTo, Undefined)):
+        raise NotImplementedError(f'unpack_assign() is not yet implemented for {value=}')
 
     # determine how many targets will be assigned, and if spread is present
     num_targets = len(target.target)
@@ -580,13 +587,19 @@ class BuiltinFuncs:
     print=partial(print, end='')
     readl=input
 
-
+#TODO: consider adding a flag repr vs str, where initially str is used, but children get repr. 
+# as is, stringifying should put quotes around strings that are children of other objects 
+# but top level printed strings should not show their quotes
 def py_stringify(ast: AST, scope: Scope) -> str:
     ast = evaluate(ast, scope)
     match ast:
-        # types that require special handling
-        case String(val): return val
+        # types that require special handling (i.e. because they have children that need to be stringified)
+        case String(val): return val #TODO: should get quotes if stringified as a child
         case Array(items): return f"[{' '.join(py_stringify(i, scope) for i in items)}]"
+        case Dict(items): return f"[{' '.join(py_stringify(kv, scope) for kv in items)}]"
+        case PointsTo(left, right): return f'{py_stringify(left, scope)}->{py_stringify(right, scope)}'
+        case BidirDict(items): return f"[{' '.join(py_stringify(kv, scope) for kv in items)}]"
+        case BidirPointsTo(left, right): return f'{py_stringify(left, scope)}<->{py_stringify(right, scope)}'
 
         # can use the built-in __str__ method for these types
         case Int() | Bool() | Undefined(): return str(ast)
