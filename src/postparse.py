@@ -80,9 +80,15 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             case UnpackTarget():
                 pdb.set_trace()
                 ...
-            case Declare():
+            case Declare(decltype=decltype, target=PrototypeIdentifier(name=name)):
+                gen.send(Declare(decltype, Identifier(name)))
+            case Declare(decltype=decltype, target=Array() as arr):
                 pdb.set_trace()
                 ...
+            case Declare(decltype=decltype, target=Group() as group):
+                pdb.set_trace()
+                ...
+            case Declare(): ... # all other declare cases are handled as normal
             case Index():
                 pdb.set_trace()
                 ...

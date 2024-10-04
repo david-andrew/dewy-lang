@@ -8,10 +8,10 @@ from ..syntax import (
     PointsTo, BidirPointsTo,
     ListOfASTs, Tuple, Block, Array, Group, Range, Object, Dict, BidirDict, UnpackTarget,
     TypedIdentifier,
-    Void, void, Undefined, undefined,
+    Void, void, Undefined, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
-    PrototypeIdentifier, Identifier, Express,
+    PrototypeIdentifier, Identifier, Express, Declare,
     FunctionLiteral, PrototypePyAction, PyAction, Call,
     Assign,
     Int, Bool,
@@ -145,6 +145,7 @@ def cannot_evaluate(ast: AST, scope: Scope) -> AST:
 @cache
 def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
     return {
+        Declare: evaluate_declare,
         Call: evaluate_call,
         Block: evaluate_block,
         Group: evaluate_group,
@@ -191,6 +192,23 @@ def evaluate(ast:AST, scope:Scope) -> AST:
 
     raise NotImplementedError(f'evaluation not implemented for {ast_type}')
 
+
+def evaluate_declare(ast: Declare, scope: Scope):
+    match ast.target:
+        case Identifier(name):
+            value = void
+            type = untyped
+        case TypedIdentifier(id=Identifier(name), type=type): ... # values unpacked by match
+        case Assign(left=Identifier(name), right=right):
+            value = evaluate(right, scope)
+            type = untyped
+        case Assign(left=TypedIdentifier(id=Identifier(name), type=type), right=right):
+            value = evaluate(right, scope)
+        case _:
+            raise NotImplementedError(f'Declare not implemented yet for {ast.target=}')
+
+    scope.declare(name, value, type, ast.decltype)
+    return void
 
 
 def evaluate_call(ast: Call, scope: Scope) -> AST:
