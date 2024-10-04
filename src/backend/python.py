@@ -175,6 +175,7 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         And: evaluate_and,
         Or: evaluate_or,
         Not: evaluate_not,
+        UnaryNeg: evaluate_unary_neg,
         Add: evaluate_add,
         Mul: evaluate_mul,
         Mod: evaluate_mod,
@@ -251,6 +252,7 @@ def collect_args(args: AST | None, scope: Scope) -> tuple[list[AST], dict[str, A
 
 def normalize_signature(signature: AST) -> tuple[list[str], dict[str, AST]]:
     match signature:
+        case Void(): return [], {}
         case Identifier(name): return [name], {}
         case Assign(left=Identifier(name), right=right): return [], {name: right}
         case Array(items) | Group(items):
@@ -608,6 +610,13 @@ def evaluate_not(ast: Not, scope: Scope):
         case Int(val=v): return Int(~v) #TODO: bitwise not depends on the size of the int...
         case _:
             raise NotImplementedError(f'Not not implemented for {val=}')
+
+def evaluate_unary_neg(ast: UnaryNeg, scope: Scope):
+    val = evaluate(ast.operand, scope)
+    match val:
+        case Int(val=v): return Int(-v)
+        case _:
+            raise NotImplementedError(f'Negation not implemented for {val=}')
 
 #TODO: long term, probably convert this into a matrix for all the input types and ops, where pairs can register to it
 # def evaluate_arithmetic_op[T](op: Callable[[T, T], T], ast: AST, scope: Scope):

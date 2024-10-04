@@ -1,3 +1,5 @@
+"""after the main parsing, post parse to handle any remaining prototype asts within the main ast"""
+
 from .syntax import (
     AST,
     Access,
@@ -21,9 +23,7 @@ from .syntax import (
     DeclarationType,
     DeclareGeneric, Parameterize,
 )
-from typing import Generator
 
-"""after the main parsing, post parse to handle any remaining prototype asts within the main ast"""
 import pdb
 
 
@@ -32,6 +32,7 @@ def post_parse(ast: AST) -> AST:
     # any conversions should probably run simplest to most complex
     ast = convert_prototype_tuples(ast)
     ast = convert_bare_ranges(ast)
+    # ast = convert_prototype_function_literals(ast)
     ast = convert_prototype_identifiers(ast)
 
     # at the end of the post parse process
@@ -63,11 +64,16 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             case Call():
                 pdb.set_trace()
                 ...
+            case FunctionLiteral(args=Void()): ... # no args to convert
             case FunctionLiteral(args=PrototypeIdentifier(name=name), body=body):
                 gen.send(FunctionLiteral(Identifier(name), body))
             case FunctionLiteral(args=Array() as args, body=body):
                 converted_args = convert_prototype_to_unpack_target(args)
-                gen.send(FunctionLiteral(Array(converted_args.target), body))
+                gen.send(FunctionLiteral(converted_args, body))
+            case FunctionLiteral(args=Object() as args, body=body):
+                pdb.set_trace()
+                converted_args = convert_prototype_to_unpack_target(args)
+                gen.send(FunctionLiteral(converted_args, body))
             case FunctionLiteral(args=Group(items=items), body=body):
                 converted_args = convert_prototype_to_unpack_target(Array(items))
                 gen.send(FunctionLiteral(Group(converted_args.target), body))
@@ -123,7 +129,9 @@ def convert_prototype_identifiers(ast: AST) -> AST:
 
     return ast.items[0]
 
-
+#TODO: maybe have one of these for Array, Object, Dict, BidirDict depending on what is to be unpacked
+#      hard though because also requires the type of whatever is being unpacked
+#      because array unpack and object unpack can look the same syntactically
 def convert_prototype_to_unpack_target(ast: Array) -> UnpackTarget:
     """Convert an Array of PrototypeIdentifiers or other ASTs to an UnpackTarget"""
     for i in (gen := ast.__full_traversal_iter__()):
@@ -160,3 +168,9 @@ def convert_bare_ranges(ast: AST) -> AST:
         if isinstance(i, BareRange):
             gen.send(Range(i.left, i.right, '[]'))
     return ast.items[0]
+
+# basically just convert all the different types of args to a normalized format (i.e. group)
+# class FunctionLiteral(AST):
+#     args: Group
+#     body: AST
+# def convert_prototype_function_literals(ast: PrototypeFunctionLiteral): ...

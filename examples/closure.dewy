@@ -1,3 +1,24 @@
+// simplest case
 x = 10
+plus_5 = () => x + 5
+printl(plus_5())
+
+// taking in args
+x = 12
 my_closure = y => x + y
-my_closure(5)
+printl(my_closure(-5))
+
+
+// returning a closure from a child scope
+a = 13
+my_closure = {
+    b = 10
+    c => a + b + c // uses `b` from this scope and `a` from parent scope
+
+    // want to do, but haven't implemented @ yet
+    // fn = c => a + b + c
+    // @fn
+}
+printl(my_closure(5))
+
+
