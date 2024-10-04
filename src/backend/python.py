@@ -225,7 +225,10 @@ def evaluate_call(ast: Call, scope: Scope) -> AST:
 
     if isinstance(f, Closure):
         args, kwargs = collect_args(ast.args, scope)
-        return evaluate(f.fn.body, f.scope)
+        scope.meta[f].call_args = args, kwargs
+        return evaluate_closure(f, scope)
+        # attach_args_to_scope(args, kwargs, f.scope)
+        # return evaluate(f.fn.body, f.scope)
 
     pdb.set_trace()
     raise NotImplementedError(f'Function evaluation not implemented yet')
@@ -244,6 +247,39 @@ def collect_args(args: AST | None, scope: Scope) -> tuple[list[AST], dict[str, A
 
 
     raise NotImplementedError(f'collect_args not implemented yet for {args}')
+
+
+def normalize_signature(signature: AST) -> tuple[list[str], dict[str, AST]]:
+    match signature:
+        case Identifier(name): return [name], {}
+        case Assign(left=Identifier(name), right=right): return [], {name: right}
+        case Array(items) | Group(items):
+            args, kwargs = [], {}
+            for i in items:
+                match i:
+                    case Identifier(name): args.append(name)
+                    case TypedIdentifier(id=Identifier(name)): args.append(name)
+                    case Assign(left=Identifier(name), right=right): kwargs[name] = right
+                    case Assign(left=TypedIdentifier(id=Identifier(name)), right=right): kwargs[name] = right
+                    case _:
+                        raise NotImplementedError(f'normalize_signature not implemented yet for {signature=}, {i=}')
+            return args, kwargs
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'normalize_signature not implemented yet for {signature=}')
+
+def attach_args_to_scope(signature: AST, args: list[AST], kwargs: dict[str, AST], scope: Scope):
+    sig_args, sig_kwargs = normalize_signature(signature)
+    for sig_arg, arg in zip(sig_args, args):
+        scope.assign(sig_arg, arg)
+
+    #TODO: handle kwargs
+    if kwargs:
+        pdb.set_trace()
+        raise NotImplementedError('kwargs not yet supported')
+        for sig_kwarg, kwarg in kwargs.items():
+            scope.assign(sig_kwarg, kwarg)
+
 
 def evaluate_group(ast: Group, scope: Scope):
 
@@ -440,6 +476,9 @@ def evaluate_function_literal(ast: FunctionLiteral, scope: Scope):
 
 def evaluate_closure(ast: Closure, scope: Scope):
     fn_scope = Scope(ast.scope)
+    args, kwargs = scope.meta[ast].call_args or ([], {})
+    signature = ast.fn.args
+    attach_args_to_scope(signature, args, kwargs, fn_scope)
     #TODO: for now we assume everything is 0 args. need to handle args being attached to the closure
     return evaluate(ast.fn.body, fn_scope)
 

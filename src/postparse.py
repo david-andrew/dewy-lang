@@ -50,15 +50,28 @@ def convert_prototype_identifiers(ast: AST) -> AST:
         if i.is_settled():
             continue
 
+        # if we ever get to a bare identifier, treat it like an express
+        if isinstance(i, PrototypeIdentifier):
+            gen.send(Express(Identifier(i.name)))
+            continue
+
         match i:
-            # if we ever get to a bare identifier, treat it like an express
-            case PrototypeIdentifier(name=name):
-                gen.send(Express(Identifier(name)))
             case Call(f=PrototypeIdentifier(name=name), args=args):
                 gen.send(Call(Identifier(name), args))
             case Call(args=None): ...
             # case Call(args=): ... #TODO: handling when args is not none... generally will be a list of identifiers that need to be converted directly to Identifier
             case Call():
+                pdb.set_trace()
+                ...
+            case FunctionLiteral(args=PrototypeIdentifier(name=name), body=body):
+                gen.send(FunctionLiteral(Identifier(name), body))
+            case FunctionLiteral(args=Array() as args, body=body):
+                converted_args = convert_prototype_to_unpack_target(args)
+                gen.send(FunctionLiteral(Array(converted_args.target), body))
+            case FunctionLiteral(args=Group(items=items), body=body):
+                converted_args = convert_prototype_to_unpack_target(Array(items))
+                gen.send(FunctionLiteral(Group(converted_args.target), body))
+            case FunctionLiteral():
                 pdb.set_trace()
                 ...
             case Assign(left=PrototypeIdentifier(name=name), right=right):
@@ -99,9 +112,10 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             # cases that themselves don't get adjusted but may contain nested children that need to be converted
             case IString() | Group() | Block() | Tuple() | Array() | Object() | Dict() | BidirDict() | FunctionLiteral() | Range() | Loop() | If() | Flow() | Default() \
                 | PointsTo() | BidirPointsTo() | Equal() | Less() | LessEqual() | Greater() | GreaterEqual() | LeftShift() | RightShift() | LeftRotate() | RightRotate() | LeftRotateCarry() | RightRotateCarry() | Add() | Sub() | Mul() | Div() | IDiv() | Mod() | Pow() | And() | Or() | Xor() | Nand() | Nor() | Xnor() | MemberIn() \
-                | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv():
+                | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() \
+                | TypedIdentifier():
                 ...
-            #TBD cases: Type() | ListOfASTs() | BareRange() | Ellipsis() | Spread() | TypeParam() | Flowable() | Flow() | PrototypePyAction() | PyAction() | Express() | TypedIdentifier() | TypedGroup() | SequenceUnpackTarget() | ObjectUnpackTarget() | DeclarationType() | DeclareGeneric() | Parameterize():
+            #TBD cases: Type() | ListOfASTs() | BareRange() | Ellipsis() | Spread() | TypeParam() | Flowable() | Flow() | PrototypePyAction() | PyAction() | Express() | TypedGroup() | SequenceUnpackTarget() | ObjectUnpackTarget() | DeclarationType() | DeclareGeneric() | Parameterize():
             case _:  # all others are traversed as normal
                 raise ValueError(f'Unhandled case {type(i)}')
             #     pdb.set_trace()
@@ -123,10 +137,8 @@ def convert_prototype_to_unpack_target(ast: Array) -> UnpackTarget:
                 gen.send(Assign(Identifier(name), right))
             case Array() as arr:
                 gen.send(convert_prototype_to_unpack_target(arr))
-            case Spread():
-                gen.send(i)
-            case TypedIdentifier():
-                gen.send(i)
+            case Spread(): ...
+            case TypedIdentifier(): ...
             case _:
                 raise NotImplementedError(f'Unhandled case {type(i)} in convert_prototype_to_unpack_target')
 
