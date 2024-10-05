@@ -13,12 +13,12 @@ printl(my_closure(-5))
 a = 13
 my_closure = {
     b = 10
-    c => a + b + c // uses `b` from this scope and `a` from parent scope
-
-    // want to do, but haven't implemented @ yet
-    // fn = c => a + b + c
-    // @fn
+    fn = c => a + b + c // uses `b` from this scope and `a` from parent scope
+    @fn
 }
 printl(my_closure(5))
 
 
+
+// print the handle to the closure itself
+printl(@my_closure)

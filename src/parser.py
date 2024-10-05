@@ -13,7 +13,7 @@ from .syntax import (
     Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
-    FunctionLiteral, PrototypePyAction, PyAction, Call,
+    PrototypeFunctionLiteral, PrototypePyAction, Call,
     Index,
     PrototypeIdentifier, Identifier, TypedIdentifier, TypedGroup, UnpackTarget, Assign,
     Int, Bool,
@@ -22,7 +22,7 @@ from .syntax import (
     LeftShift, RightShift, LeftRotate, RightRotate, LeftRotateCarry, RightRotateCarry,
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
     And, Or, Xor, Nand, Nor, Xnor,
-    Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv,
+    Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv, AtHandle,
     DeclarationType,
     DeclareGeneric, Parameterize,
 )
@@ -150,7 +150,7 @@ class Scope:
                 DeclarationType.CONST,
                 Type('callable'),
                 PrototypePyAction(
-                    TypedIdentifier(Identifier('x'), Type('string')),
+                    Group([Assign(TypedIdentifier(Identifier('x'), Type('string')), String(''))]),
                     Type('void')
                 )
             ),
@@ -158,7 +158,7 @@ class Scope:
                 DeclarationType.CONST,
                 Type('callable'),
                 PrototypePyAction(
-                    TypedIdentifier(Identifier('x'), Type('string')),
+                    Group([Assign(TypedIdentifier(Identifier('x'), Type('string')), String(''))]),
                     Type('void')
                 )
             ),
@@ -166,7 +166,7 @@ class Scope:
                 DeclarationType.CONST,
                 Type('callable'),
                 PrototypePyAction(
-                    void,
+                    Group([]),
                     Type('string')
                 )
             )
@@ -365,7 +365,7 @@ def is_callable(ast:AST, scope: Scope):
         #TODO: any other types that need to be evaluated to determine if callable
 
         # known callable ASTs
-        case PyAction() | FunctionLiteral():
+        case PrototypePyAction() | PrototypeFunctionLiteral():
             return True
 
         # known non-callables
@@ -506,7 +506,7 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
                 return Mul(left, right)
 
         case Operator_t(op='='): return Assign(left, right)
-        case Operator_t(op='=>'): return FunctionLiteral(left, right)
+        case Operator_t(op='=>'): return PrototypeFunctionLiteral(left, right)
         case Operator_t(op='->'): return PointsTo(left, right)
         # case Operator_t(op='<-'): return PointsTo(right, left) #TBD if we just remove this one...
         case Operator_t(op='<->'): return BidirPointsTo(left, right)
@@ -626,12 +626,11 @@ def build_unary_prefix_expr(op: Token, right: AST, scope: Scope) -> AST:
         case Operator_t(op='*'): return UnaryMul(right)
         case Operator_t(op='/'): return UnaryDiv(right)
         case Operator_t(op='not'): return Not(right)  # TODO: don't want to hardcode Bool here!
-        case Operator_t(op='@'): raise NotImplementedError(f"TODO: prefix op: {op=}")
-        case Operator_t(op='...'): raise NotImplementedError(f"TODO: prefix op: {op=}")
+        case Operator_t(op='@'): return AtHandle(right)
 
         # binary operators that appear to be unary because the left can be void
         # => called as unary prefix op means left was ()/void
-        case Operator_t(op='=>'): return FunctionLiteral(void, right)
+        case Operator_t(op='=>'): return PrototypeFunctionLiteral(void, right)
 
         case _:
             raise ValueError(f"INTERNAL ERROR: {op=} is not a known unary prefix operator")

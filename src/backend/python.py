@@ -11,23 +11,26 @@ from ..syntax import (
     Void, void, Undefined, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
-    PrototypeIdentifier, Identifier, Express, Declare,
-    FunctionLiteral, PrototypePyAction, PyAction, Call,
+    Identifier, Express, Declare,
+    PrototypePyAction, Call,
     Assign,
     Int, Bool,
     Range, IterIn,
+    BinOp,
     Less, LessEqual, Greater, GreaterEqual, Equal, MemberIn,
     LeftShift, RightShift, LeftRotate, RightRotate, LeftRotateCarry, RightRotateCarry,
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
     And, Or, Xor, Nand, Nor, Xnor,
-    Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv,
+    UnaryPrefixOp,
+    Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv, AtHandle,
     Spread,
-    # DeclarationType,
 )
+
+from ..postparse import FunctionLiteral
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, cast, Callable, Any
+from typing import Protocol, cast, Callable as TypingCallable, Any
 from functools import cache
 from collections import defaultdict
 from types import SimpleNamespace
@@ -117,6 +120,36 @@ class Iter(AST):
     def __str__(self):
         return f'Iter({self.item}, i={self.i})'
 
+class PyActionArgsPreprocessor(Protocol):
+    def __call__(self, args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]: ...
+
+class PyAction(AST):
+    signature: Group
+    preprocessor: PyActionArgsPreprocessor
+    action: TypingCallable[..., AST]
+    return_type: AST
+
+    def __str__(self):
+        return f'{self.signature}: {self.return_type} => {self.action}'
+
+class Closure(AST):
+    fn: FunctionLiteral
+    scope: Scope
+
+    def __str__(self):
+        scope_lines = []
+        for name, var in self.scope.vars.items():
+            line = f'{var.decltype.name.lower()} {name}'
+            if var.type is not untyped:
+                line += f': {var.type}'
+            if var.value is self:
+                line += ' = <self>'
+            elif var.value is not void:
+                line += f' = {var.value}'
+            scope_lines.append(line)
+        scope_contents = ', '.join(scope_lines)
+        return f'{self.fn} with scope=[{scope_contents}]'
+
 
 ############################ Evaluation functions ############################
 
@@ -179,6 +212,7 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         Add: evaluate_add,
         Mul: evaluate_mul,
         Mod: evaluate_mod,
+        AtHandle: evaluate_at_handle,
         Undefined: no_op,
         Void: no_op,
         #TODO: other AST types here
@@ -212,36 +246,71 @@ def evaluate_declare(ast: Declare, scope: Scope):
     return void
 
 
-def evaluate_call(ast: Call, scope: Scope) -> AST:
-    f = ast.f
+def evaluate_call(call: Call, scope: Scope) -> AST:
+    f = call.f
+
+    # get the expression of the group
     if isinstance(f, Group):
         f = evaluate(f, scope)
+
+    # get the value pointed to by the identifier
     if isinstance(f, Identifier):
         f = scope.get(f.name).value
+
+    # if this is a handle, do a partial evaluation rather than a call
+    if isinstance(f, AtHandle):
+        return apply_partial_eval(f.operand, call.args, scope)
+
+    # AST being called must be TypingCallable
     assert isinstance(f, (PyAction, Closure)), f'expected Function or PyAction, got {f}'
 
-    if isinstance(f, PyAction):
-        args, kwargs = collect_args(ast.args, scope)
-        return f.action(*args, **kwargs, scope=scope)
+    # save the args of the call as metadata for the function AST
+    call_args, call_kwargs = collect_calling_args(call.args, scope)
+    scope.meta[f].call_args = call_args, call_kwargs
 
+    # run the function and return the result
+    if isinstance(f, PyAction):
+        return evaluate_pyaction(f, scope)
     if isinstance(f, Closure):
-        args, kwargs = collect_args(ast.args, scope)
-        scope.meta[f].call_args = args, kwargs
         return evaluate_closure(f, scope)
-        # attach_args_to_scope(args, kwargs, f.scope)
-        # return evaluate(f.fn.body, f.scope)
 
     pdb.set_trace()
     raise NotImplementedError(f'Function evaluation not implemented yet')
 
-def collect_args(args: AST | None, scope: Scope) -> tuple[list[AST], dict[str, AST]]:
+def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dict[str, AST]]:
+    """
+    Collect the arguments that a function is being called with
+    e.g. `let fn = (a, b, c) => a + b + c; fn(1, c=2, 3)`
+    then the calling args are [1, 3] and {c: 2}
+
+    Args:
+        args: the arguments being passed to the function. If None, then treat as a no-arg call
+        scope: the scope in which the function is being called
+
+    Returns:
+        a tuple of the positional arguments and keyword arguments
+    """
     match args:
-        case None: return [], {}
+        case None | Void(): return [], {}
         case Identifier(name): return [scope.get(name).value], {}
-        case Assign(): raise NotImplementedError('Assign not implemented yet')
-        # case Tuple(items): raise NotImplementedError('Tuple not implemented yet')
-        case String() | IString(): return [args], {}
-        case Group(items): return [evaluate(i, scope) for i in items], {}
+        case Assign(): raise NotImplementedError('Assign not implemented yet') #called recursively if a calling arg was an keyword arg rather than positional
+        case Spread(right=right):
+            pdb.set_trace()
+            ... #right should be iterable, so extend with the values it expresses
+                #whether to add to args or kwargs depends on each type from right
+            val = evaluate(right, scope)
+            match val:
+                case Array(items): ... #return [collect_calling_args(i, scope) for i in items]
+        case Int() | String() | IString() | Call() | UnaryPrefixOp():
+            return [args], {}
+        # case Call(): return [args], {}
+        case Group(items):
+            call_args, call_kwargs = [], {}
+            for i in items:
+                a, kw = collect_calling_args(i, scope)
+                call_args.extend(a)
+                call_kwargs.update(kw)
+            return call_args, call_kwargs
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'collect_args not implemented yet for {args}')
@@ -250,37 +319,82 @@ def collect_args(args: AST | None, scope: Scope) -> tuple[list[AST], dict[str, A
     raise NotImplementedError(f'collect_args not implemented yet for {args}')
 
 
-def normalize_signature(signature: AST) -> tuple[list[str], dict[str, AST]]:
-    match signature:
-        case Void(): return [], {}
-        case Identifier(name): return [name], {}
-        case Assign(left=Identifier(name), right=right): return [], {name: right}
-        case Array(items) | Group(items):
-            args, kwargs = [], {}
-            for i in items:
-                match i:
-                    case Identifier(name): args.append(name)
-                    case TypedIdentifier(id=Identifier(name)): args.append(name)
-                    case Assign(left=Identifier(name), right=right): kwargs[name] = right
-                    case Assign(left=TypedIdentifier(id=Identifier(name)), right=right): kwargs[name] = right
-                    case _:
-                        raise NotImplementedError(f'normalize_signature not implemented yet for {signature=}, {i=}')
-            return args, kwargs
-        case _:
-            pdb.set_trace()
-            raise NotImplementedError(f'normalize_signature not implemented yet for {signature=}')
 
-def attach_args_to_scope(signature: AST, args: list[AST], kwargs: dict[str, AST], scope: Scope):
-    sig_args, sig_kwargs = normalize_signature(signature)
-    for sig_arg, arg in zip(sig_args, args):
-        scope.assign(sig_arg, arg)
+def attach_args_to_scope(signature: Group, args: list[AST], kwargs: dict[str, AST], scope: Scope):
+    """Resolve calling arguments and attach each to the scope so they are available during function body evaluation"""
+    dewy_args, dewy_kwargs = resolve_calling_args(signature, args, kwargs, scope)
+    for name, value in (dewy_args | dewy_kwargs).items():
+        scope.assign(name, value)
 
-    #TODO: handle kwargs
-    if kwargs:
+
+# TODO: resolve args should handle the full gamut of possible types of arguments in a function
+#       position or keyword arguments (with or without defaults)
+#       position only arguments (with or without defaults)
+#       keyword only arguments (with or without defaults)
+# Note: the function signature will stay the same since calling a function or pyaction just amounts to setting args and kwargs
+def resolve_calling_args(signature: Group, args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[dict[str, AST], dict[str, AST]]:
+    """
+    Resolve the final list of arguments the function actually receives
+    Properly handles when the signature includes defaults, keyword args, positional args, partial evaluation, etc.
+
+    e.g. if we have:
+
+    ```dewy
+    let fn = (a, b, c) => a + b + c
+    fn = @fn(c=3)
+    fn(1, a=2)
+    ```
+
+    then we would resolve to args={b: 1} kwargs={a: 2, c: 3}
+    """
+    # for now, just assume all args are position or keyword args
+    # partial eval converts that particular arg to keyword only
+    sig_list = [*signature.items]
+    dewy_args, dewy_kwargs = {}, {}
+
+    # first pull out the calling keyword arguments
+    for name, arg in kwargs.items():
+        #remove this parameter from the sig list
         pdb.set_trace()
-        raise NotImplementedError('kwargs not yet supported')
-        for sig_kwarg, kwarg in kwargs.items():
-            scope.assign(sig_kwarg, kwarg)
+        remove_from_sig_list(sig_list, name)
+        dewy_kwargs[name] = arg
+
+    if len(sig_list) < len(args):
+        raise ValueError(f'Too many arguments for function. {signature=}, {args=}, {kwargs=}')
+
+    # split off the positional arguments from any remaining args in the signature
+    sig_list, remaining = sig_list[:len(args)], sig_list[len(args):]
+    assert all(isinstance(arg, Assign) for arg in remaining), f'Non-Assign arguments remaining unpaired in signature. {signature=}, {args=}, {kwargs=}, {remaining=}'
+    for spec, arg in zip(sig_list, args):
+        match spec:
+            case Identifier(name):
+                dewy_args[name] = arg
+            case TypedIdentifier(id=Identifier(name), type=type): #TODO: could do type checking here? probably leave for type checker
+                dewy_args[name] = arg
+            case Assign(left=Identifier(name), right=right):
+                dewy_args[name] = arg
+            case Assign(left=TypedIdentifier(id=Identifier(name), type=type), right=right):
+                dewy_args[name] = arg
+            case _:
+                raise NotImplementedError(f'Assign positional arg not implemented yet for {spec=}\n{signature=}, {args=}, {kwargs=}, {remaining=}')
+
+    # all remaining arguments must have a value provided by the signature
+    for arg in remaining:
+        pdb.set_trace()
+
+    return dewy_args, dewy_kwargs    
+
+
+def apply_partial_eval(f: AST, args: list[AST], scope: Scope) -> AST:
+    match f:
+        case FunctionLiteral(args, body):
+            pdb.set_trace()
+            ...
+        case Identifier(name):
+            f = scope.get(name).value
+            return apply_partial_eval(f, args, scope)
+        case _:
+            raise NotImplementedError(f'Partial evaluation not implemented yet for {f=}')
 
 
 def evaluate_group(ast: Group, scope: Scope):
@@ -333,7 +447,7 @@ def evaluate_assign(ast: Assign, scope: Scope):
 def evaluate_iter_in(ast: IterIn, scope: Scope):
 
     # helper function for progressing the iterator
-    def step_iter_in(iter_props: tuple[Callable, Iter], scope: Scope) -> AST:
+    def step_iter_in(iter_props: tuple[TypingCallable, Iter], scope: Scope) -> AST:
         binder, iterable = iter_props
         cond, val = iter_next(iterable).items
         binder(val)
@@ -341,7 +455,7 @@ def evaluate_iter_in(ast: IterIn, scope: Scope):
 
     # if the iterator properties are already in the scope, use them
     if (res := scope.meta[ast].props) is not None:
-        return step_iter_in(cast(tuple[Callable, Iter], res), scope)
+        return step_iter_in(cast(tuple[TypingCallable, Iter], res), scope)
 
     # otherwise initialize since this is the first time we're hitting this IterIn
     match ast:
@@ -466,12 +580,6 @@ def iter_next(iter: Iter):
             raise NotImplementedError(f'iter_next not implemented yet for {iter.item=}')
 
 
-class Closure(AST):
-    fn: FunctionLiteral
-    scope: Scope
-    # call_args: AST|None=None # TBD how to handle
-    def __str__(self):
-        return f'Closure({self.fn}, scope={self.scope})'
 
 def evaluate_function_literal(ast: FunctionLiteral, scope: Scope):
     return Closure(fn=ast, scope=scope)
@@ -481,7 +589,6 @@ def evaluate_closure(ast: Closure, scope: Scope):
     args, kwargs = scope.meta[ast].call_args or ([], {})
     signature = ast.fn.args
     attach_args_to_scope(signature, args, kwargs, fn_scope)
-    #TODO: for now we assume everything is 0 args. need to handle args being attached to the closure
     return evaluate(ast.fn.body, fn_scope)
 
     #grab arguments from scope and put them in fn_scope
@@ -490,9 +597,11 @@ def evaluate_closure(ast: Closure, scope: Scope):
     raise NotImplementedError('Closure not implemented yet')
 
 def evaluate_pyaction(ast: PyAction, scope: Scope):
-    # fn_scope = Scope(ast.scope)
-    #TODO: currently just assuming 0 args in and no return
-    return ast.action(scope)
+    fn_scope = Scope(scope)
+    call_args, call_kwargs = scope.meta[ast].call_args or ([], {})
+    dewy_args, dewy_kwargs = resolve_calling_args(ast.signature, call_args, call_kwargs, fn_scope)
+    py_args, py_kwargs = ast.preprocessor([*dewy_args.values()], dewy_kwargs, fn_scope)
+    return ast.action(*py_args, **py_kwargs)
 
 
 def evaluate_istring(ast: IString, scope: Scope) -> String:
@@ -528,7 +637,7 @@ def evaluate_flow(ast: Flow, scope: Scope):
     # if no branches were entered, return void
     return void
 
-def evaluate_default(ast: Default, scope: Scope, save_child_scope:Callable[[Scope], None]=lambda _: None):
+def evaluate_default(ast: Default, scope: Scope, save_child_scope:TypingCallable[[Scope], None]=lambda _: None):
     scope = Scope(scope)
     save_child_scope(scope)
     scope.meta[ast].was_entered = True
@@ -536,7 +645,7 @@ def evaluate_default(ast: Default, scope: Scope, save_child_scope:Callable[[Scop
 
 #TODO: this needs improvements!
 #Issue URL: https://github.com/david-andrew/dewy-lang/issues/2
-def evaluate_if(ast: If, scope: Scope, save_child_scope:Callable[[Scope], None]=lambda _: None):
+def evaluate_if(ast: If, scope: Scope, save_child_scope:TypingCallable[[Scope], None]=lambda _: None):
     scope = Scope(scope)
     save_child_scope(scope)
     scope.meta[ast].was_entered = False
@@ -548,7 +657,7 @@ def evaluate_if(ast: If, scope: Scope, save_child_scope:Callable[[Scope], None]=
     return void
 
 #TODO: this needs improvements!
-def evaluate_loop(ast: Loop, scope: Scope, save_child_scope:Callable[[Scope], None]=lambda _: None):
+def evaluate_loop(ast: Loop, scope: Scope, save_child_scope:TypingCallable[[Scope], None]=lambda _: None):
     scope = Scope(scope)
     save_child_scope(scope)
     scope.meta[ast].was_entered = False
@@ -570,7 +679,7 @@ class Comparable(Protocol):
     def __eq__(self, other: "Comparable") -> bool: ...
     def __ne__(self, other: "Comparable") -> bool: ...
 
-def evaluate_comparison_op(op: Callable[[Comparable, Comparable], bool], ast: AST, scope: Scope):
+def evaluate_comparison_op(op: TypingCallable[[Comparable, Comparable], bool], ast: AST, scope: Scope):
     left = evaluate(ast.left, scope)
     right = evaluate(ast.right, scope)
     match left, right:
@@ -588,7 +697,7 @@ def evaluate_equal(ast: Equal, scope: Scope):
 
 
 # TODO: op depends on what type of operands. bools use built-in and/or/etc, but ints need to use the bitwise operators
-def evaluate_logical_op(logical_op: Callable[[bool, bool], bool], bitwise_op: Callable[[int, int], int], ast: AST, scope: Scope):
+def evaluate_logical_op(logical_op: TypingCallable[[bool, bool], bool], bitwise_op: TypingCallable[[int, int], int], ast: AST, scope: Scope):
     left = evaluate(ast.left, scope)
     right = evaluate(ast.right, scope)
     match left, right:
@@ -619,7 +728,7 @@ def evaluate_unary_neg(ast: UnaryNeg, scope: Scope):
             raise NotImplementedError(f'Negation not implemented for {val=}')
 
 #TODO: long term, probably convert this into a matrix for all the input types and ops, where pairs can register to it
-# def evaluate_arithmetic_op[T](op: Callable[[T, T], T], ast: AST, scope: Scope):
+# def evaluate_arithmetic_op[T](op: TypingCallable[[T, T], T], ast: AST, scope: Scope):
 #     left = evaluate(ast.left, scope)
 #     right = evaluate(ast.right, scope)
 #     match left, right:
@@ -654,6 +763,15 @@ def evaluate_mod(ast: Mod, scope: Scope):
         case _:
             raise NotImplementedError(f'Mod not implemented for {left=} and {right=}')
 
+
+def evaluate_at_handle(ast: AtHandle, scope: Scope):
+    match ast.operand:
+        case Identifier(name):
+            return scope.get(name).value
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'AtHandle not implemented for {ast.operand=}')
+
 ############################ Builtin functions and helpers ############################
 
 # all references to python functions go through this interface to allow for easy swapping
@@ -676,6 +794,8 @@ def py_stringify(ast: AST, scope: Scope) -> str:
         case PointsTo(left, right): return f'{py_stringify(left, scope)}->{py_stringify(right, scope)}'
         case BidirDict(items): return f"[{' '.join(py_stringify(kv, scope) for kv in items)}]"
         case BidirPointsTo(left, right): return f'{py_stringify(left, scope)}<->{py_stringify(right, scope)}'
+        case Closure(fn): return f'{fn}'
+        case FunctionLiteral() as fn: return f'{fn}'
 
         # can use the built-in __str__ method for these types
         case Int() | Bool() | Undefined(): return str(ast)
@@ -689,41 +809,30 @@ def py_stringify(ast: AST, scope: Scope) -> str:
 
     raise NotImplementedError('stringify not implemented yet')
 
-#TODO: fix the function signatures here! they should not be keyword only for scope.
-#Issue URL: https://github.com/david-andrew/dewy-lang/issues/8
-#      fixing will involve being able to set default arguments for regular functions
-#      then making the pyaction have a default for the string s=''
-def py_printl(s:String|IString=None, *, scope: Scope) -> Void:
-    # TODO: hacky way of handling no-arg case
-    if s is None:
-        s = String('')
-    py_print(s, scope=scope)
-    BuiltinFuncs.printl()
+def preprocess_py_print_args(args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]:
+    py_args = [py_stringify(i, scope) for i in args]
+    py_kwargs = {k: py_stringify(v, scope) for k, v in kwargs.items()}
+    return py_args, py_kwargs
+
+def py_printl(s:str) -> Void:
+    BuiltinFuncs.printl(s)
     return void
 
-def py_print(s:String|IString=None, *, scope: Scope) -> Void:
-    # TODO: hacky way of handling no-arg case
-    if s is None:
-        s = String('')
-    if not isinstance(s, (String, IString)):
-        s = String(py_stringify(s, scope))
-        # raise ValueError(f'py_print expected String or IString, got {type(s)}:\n{s!r}')
-    if isinstance(s, IString):
-        s = cast(String, evaluate(s, scope))
-    BuiltinFuncs.print(s.val)
+def py_print(s:str) -> Void:
+    BuiltinFuncs.print(s)
     return void
 
-def py_readl(scope: Scope) -> String:
-    return String(input())
+def py_readl() -> String:
+    return String(BuiltinFuncs.readl())
 
 def insert_pyactions(scope: Scope):
     """replace pyaction stubs with actual implementations"""
     if 'printl' in scope.vars:
         assert isinstance((proto:=scope.vars['printl'].value), PrototypePyAction)
-        scope.vars['printl'].value = PyAction(proto.args, py_printl, proto.return_type)
+        scope.vars['printl'].value = PyAction(proto.args, preprocess_py_print_args, py_printl, proto.return_type)
     if 'print' in scope.vars:
         assert isinstance((proto:=scope.vars['print'].value), PrototypePyAction)
-        scope.vars['print'].value = PyAction(proto.args, py_print, proto.return_type)
+        scope.vars['print'].value = PyAction(proto.args, preprocess_py_print_args, py_print, proto.return_type)
     if 'readl' in scope.vars:
         assert isinstance((proto:=scope.vars['readl'].value), PrototypePyAction)
-        scope.vars['readl'].value = PyAction(proto.args, py_readl, proto.return_type)
+        scope.vars['readl'].value = PyAction(proto.args, lambda *a: ([],{}), py_readl, proto.return_type)

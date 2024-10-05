@@ -156,6 +156,11 @@ def is_ast_container(type_hint: TypingType | None) -> bool:
     if type_hint is None:
         return False
 
+    # python callables are not containers regardless of if they take in or return ASTs
+    if get_origin(type_hint) == get_origin(TypingCallable):
+        return False
+
+
     # Iterate over all contained types
     args = get_args(type_hint)
     for arg in args:
@@ -260,12 +265,18 @@ class Tuple(PrototypeAST):
         return f'{", ".join(map(str, self.items))}'
 
 
-# class Container(PrototypeAST, Delimited):
-#     items: list[AST]
-#     brackets: Literal['{}', '[]', '(]', '[)', '()', '<>']
+class Group(AST, Delimited):
+    items: list[AST]
 
-#     def __str__(self):
-#         return f'{self.brackets[0]}{" ".join(map(str, self.items))}{self.brackets[1]}'
+    def __str__(self):
+        return f'({" ".join(map(str, self.items))})'
+
+
+class Block(AST, Delimited):
+    items: list[AST]
+
+    def __str__(self):
+        return f'{{{" ".join(map(str, self.items))}}}'
 
 
 # class Number(AST):
@@ -346,7 +357,7 @@ class Default(Flowable):
         return f'{self.body}'
 
 
-class FunctionLiteral(AST):
+class PrototypeFunctionLiteral(PrototypeAST):
     args: AST
     body: AST
 
@@ -357,19 +368,11 @@ class FunctionLiteral(AST):
 
 
 class PrototypePyAction(PrototypeAST):
-    args: AST
+    args: Group
     return_type: AST
 
     def __str__(self):
         return f'({self.args}): {self.return_type} => ...'
-
-class PyAction(AST):
-    args: AST
-    action: TypingCallable
-    return_type: AST
-
-    def __str__(self):
-        return f'({self.args}): {self.return_type} => {self.action}'
 
 
 class Call(AST):
@@ -501,22 +504,15 @@ class UnaryDiv(UnaryPrefixOp):
     def __str__(self): return f'/{self.operand}'
 
 
+class AtHandle(UnaryPrefixOp):
+    def __str__(self):
+        if isinstance(self.operand, Delimited):
+            return f'@{self.operand}'
+        return f'@({self.operand})'
+
+
 class UnaryPostfixOp(AST, ABC):
     operand: AST
-
-
-class Group(AST, Delimited):
-    items: list[AST]
-
-    def __str__(self):
-        return f'({" ".join(map(str, self.items))})'
-
-
-class Block(AST, Delimited):
-    items: list[AST]
-
-    def __str__(self):
-        return f'{{{" ".join(map(str, self.items))}}}'
 
 
 class BareRange(PrototypeAST):

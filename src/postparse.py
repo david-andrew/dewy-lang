@@ -10,7 +10,7 @@ from .syntax import (
     Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
-    FunctionLiteral, PrototypePyAction, PyAction, Call,
+    PrototypeFunctionLiteral, PrototypePyAction, Call,
     Index,
     PrototypeIdentifier, Express, Identifier, TypedIdentifier, TypedGroup, UnpackTarget, Assign,
     Int, Bool,
@@ -19,12 +19,24 @@ from .syntax import (
     LeftShift, RightShift, LeftRotate, RightRotate, LeftRotateCarry, RightRotateCarry,
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
     And, Or, Xor, Nand, Nor, Xnor,
-    Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv,
+    Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv, AtHandle,
     DeclarationType,
     DeclareGeneric, Parameterize,
 )
 
+from typing import Callable as TypingCallable
+
 import pdb
+
+
+# basically just convert all the different types of args to a normalized format (i.e. group)
+class FunctionLiteral(AST):
+    args: Group
+    body: AST
+
+    def __str__(self):
+        return f'{self.args} => {self.body}'
+
 
 
 def post_parse(ast: AST) -> AST:
@@ -32,7 +44,7 @@ def post_parse(ast: AST) -> AST:
     # any conversions should probably run simplest to most complex
     ast = convert_prototype_tuples(ast)
     ast = convert_bare_ranges(ast)
-    # ast = convert_prototype_function_literals(ast)
+    ast = convert_prototype_function_literals(ast)
     ast = convert_prototype_identifiers(ast)
 
     # at the end of the post parse process
@@ -64,22 +76,14 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             case Call():
                 pdb.set_trace()
                 ...
-            case FunctionLiteral(args=Void()): ... # no args to convert
-            case FunctionLiteral(args=PrototypeIdentifier(name=name), body=body):
-                gen.send(FunctionLiteral(Identifier(name), body))
-            case FunctionLiteral(args=Array() as args, body=body):
-                converted_args = convert_prototype_to_unpack_target(args)
-                gen.send(FunctionLiteral(converted_args, body))
-            case FunctionLiteral(args=Object() as args, body=body):
+            case AtHandle(operand=PrototypeIdentifier(name=name)):
+                gen.send(AtHandle(Identifier(name)))
+            case AtHandle():
                 pdb.set_trace()
-                converted_args = convert_prototype_to_unpack_target(args)
-                gen.send(FunctionLiteral(converted_args, body))
+                ...
             case FunctionLiteral(args=Group(items=items), body=body):
                 converted_args = convert_prototype_to_unpack_target(Array(items))
                 gen.send(FunctionLiteral(Group(converted_args.target), body))
-            case FunctionLiteral():
-                pdb.set_trace()
-                ...
             case Assign(left=PrototypeIdentifier(name=name), right=right):
                 gen.send(Assign(Identifier(name), right))
             case Assign(left=Array() as arr, right=right):
@@ -96,7 +100,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             case IterIn():
                 pdb.set_trace()
                 ...
-            case UnpackTarget():
+            case UnpackTarget(): #TODO: may not need this one
                 pdb.set_trace()
                 ...
             case Declare(decltype=decltype, target=PrototypeIdentifier(name=name)):
@@ -169,8 +173,31 @@ def convert_bare_ranges(ast: AST) -> AST:
             gen.send(Range(i.left, i.right, '[]'))
     return ast.items[0]
 
-# basically just convert all the different types of args to a normalized format (i.e. group)
-# class FunctionLiteral(AST):
-#     args: Group
-#     body: AST
-# def convert_prototype_function_literals(ast: PrototypeFunctionLiteral): ...
+
+def convert_prototype_function_literals(ast: AST) -> AST:
+    ast = Group([ast])
+    for i in (gen := ast.__full_traversal_iter__()):
+        if isinstance(i, PrototypeFunctionLiteral):
+            args = normalize_function_args(i.args)
+            gen.send(FunctionLiteral(args, i.body))
+    return ast.items[0]
+
+
+def normalize_function_args(signature: AST) -> Group:
+    """Convert all the different function arg syntax options to a normalized format (group)"""
+    match signature:
+        case Void():
+            return Group([])
+        case Identifier() | PrototypeIdentifier() | TypedIdentifier() | Assign():
+            return Group([signature])
+        case Spread() | UnpackTarget():
+            pdb.set_trace()
+            ...
+        case Array(items):
+            assert all(isinstance(i, (Identifier, PrototypeIdentifier, TypedIdentifier, Assign, Spread, UnpackTarget)) for i in items), f'Unpack Function args must all be one of Identifier(), TypedIdentifier(), Assign(), Spread(), or UnpackTarget(). Got {items}'
+            return Group([UnpackTarget(items)])
+        case Group() as group:
+            return group
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'normalize_signature not implemented yet for {signature=}')
