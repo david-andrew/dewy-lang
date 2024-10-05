@@ -128,13 +128,6 @@ class Scope:
     def const(self, name:str, value:AST, type:Type):
         self.declare(name, value, type, DeclarationType.CONST)
 
-
-    #TODO: this should be expanded/more comprihensive/etc.
-    def is_callable(self, name: str) -> bool:
-        var = self.get(name)
-        return var.type.name == 'callable'
-
-
     def __iter__(self) -> Generator['Scope', None, None]:
         """return an iterator that walks up each successive parent scope. Starts with self"""
         s = self
@@ -361,11 +354,17 @@ def is_callable(ast:AST, scope: Scope):
     match ast:
         # ASTs the have to be evaluated to determine the type
         case PrototypeIdentifier(name):
-            return scope.is_callable(name)
+            #TODO: use full type checker here to determine the type
+            # DEBUG: for now, hardcode to call
+            return True
         #TODO: any other types that need to be evaluated to determine if callable
 
         # known callable ASTs
         case PrototypePyAction() | PrototypeFunctionLiteral():
+            return True
+
+        #TODO: may change this in the future, but for now, assume at handle can only be used on callables
+        case AtHandle():
             return True
 
         # known non-callables
@@ -428,15 +427,17 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope: Scope) -> tuple[Chai
     # when more than one op present, find the lowest precedence one
     ranks = [operator_precedence(op) for op in ops]
     min_rank = min(ranks)
+    min_idx = ranks.index(min_rank)
 
     # verify that the min is strictly less than or equal to all other ranks
-    if not all(min_rank <= r for r in ranks):
+    if not all(min_rank <= r for r in ranks[:min_idx] + ranks[min_idx+1:]):
         # TODO: probably enumerate out all permutations of the ambiguous operators and return all of them as a list of lists of indices
         # make use of scope/chain typeof to disambiguate if need be
+        pdb.set_trace()
         raise NotImplementedError(f"TODO: ambiguous precedence for {ops=} with {ranks=}, in token stream {tokens=}")
 
     # find operators with precedence equal to the current minimum
-    op_idxs = [i for i, r in zip(idxs, ranks) if r == min_rank]
+    op_idxs = [i for i, r in zip(idxs, ranks) if r == min_rank or r is min_rank]
 
     if len(op_idxs) == 1:
         i, = op_idxs

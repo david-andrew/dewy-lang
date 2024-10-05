@@ -211,6 +211,7 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         UnaryNeg: evaluate_unary_neg,
         Add: evaluate_add,
         Mul: evaluate_mul,
+        Div: evaluate_div,
         Mod: evaluate_mod,
         AtHandle: evaluate_at_handle,
         Undefined: no_op,
@@ -332,7 +333,7 @@ def attach_args_to_scope(signature: Group, args: list[AST], kwargs: dict[str, AS
 #       position only arguments (with or without defaults)
 #       keyword only arguments (with or without defaults)
 # Note: the function signature will stay the same since calling a function or pyaction just amounts to setting args and kwargs
-def resolve_calling_args(signature: Group, args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[dict[str, AST], dict[str, AST]]:
+def resolve_calling_args(signature: Group, args: list[AST], kwargs: dict[str, AST], scope: Scope, is_partial: bool = False) -> tuple[dict[str, AST], dict[str, AST]]:
     """
     Resolve the final list of arguments the function actually receives
     Properly handles when the signature includes defaults, keyword args, positional args, partial evaluation, etc.
@@ -364,7 +365,10 @@ def resolve_calling_args(signature: Group, args: list[AST], kwargs: dict[str, AS
 
     # split off the positional arguments from any remaining args in the signature
     sig_list, remaining = sig_list[:len(args)], sig_list[len(args):]
-    assert all(isinstance(arg, Assign) for arg in remaining), f'Non-Assign arguments remaining unpaired in signature. {signature=}, {args=}, {kwargs=}, {remaining=}'
+
+    if not is_partial and not all(isinstance(arg, Assign) for arg in remaining):
+        raise ValueError(f'Non-Assign arguments remaining unpaired in signature. {signature=}, {args=}, {kwargs=}, {remaining=}')
+
     for spec, arg in zip(sig_list, args):
         match spec:
             case Identifier(name):
@@ -383,8 +387,9 @@ def resolve_calling_args(signature: Group, args: list[AST], kwargs: dict[str, AS
         match arg:
             case Assign(left=Identifier(name), right=right):
                 dewy_kwargs[name] = right
-            case Assign(left=TypedIdentifier(id=Identifier(name), type=type), right=right):
+            case Assign(left=TypedIdentifier(id=Identifier(name)), right=right):
                 dewy_kwargs[name] = right
+            case Identifier() | TypedIdentifier() if is_partial: ... # these are still positional or keyword until they are set
             case _:
                 raise NotImplementedError(f'Assign keyword arg not implemented yet for {arg=}\n{signature=}, {args=}, {kwargs=}, {remaining=}')
 
@@ -393,15 +398,38 @@ def resolve_calling_args(signature: Group, args: list[AST], kwargs: dict[str, AS
 
 def apply_partial_eval(f: AST, args: list[AST], scope: Scope) -> AST:
     match f:
-        case FunctionLiteral(args, body):
-            pdb.set_trace()
-            ...
+        # # this case shouldn't really be possible since you have to wrap a function literal in parenthesis to @ it, turning it into a Closure
+        # case FunctionLiteral(args=signature, body=body):
+        #     call_args, call_kwargs = collect_calling_args(args, scope)
+        #     dewy_args, dewy_kwargs = resolve_calling_args(signature, call_args, call_kwargs, scope)
+        #     pdb.set_trace()
+        #     ...
+        case Closure(fn=FunctionLiteral(args=signature, body=body), scope=closure_scope):
+            call_args, call_kwargs = collect_calling_args(args, scope)
+            dewy_args, dewy_kwargs = resolve_calling_args(signature, call_args, call_kwargs, scope, is_partial=True)
+            new_signature = Group([*signature.items])
+            for name, arg in (dewy_args | dewy_kwargs).items():
+                idx = find_arg_index(name, new_signature)
+                del new_signature.items[idx]
+                new_signature.items.append(Assign(left=Identifier(name), right=arg))
+            return Closure(fn=FunctionLiteral(args=new_signature, body=body), scope=closure_scope)
+
         case Identifier(name):
             f = scope.get(name).value
             return apply_partial_eval(f, args, scope)
         case _:
             raise NotImplementedError(f'Partial evaluation not implemented yet for {f=}')
 
+
+def find_arg_index(name: str, signature: Group) -> int:
+    for i, arg in enumerate(signature.items):
+        match arg:
+            case Identifier(arg_name) | TypedIdentifier(id=Identifier(arg_name)) | Assign(left=Identifier(arg_name)):
+                if arg_name == name: return i
+            case _:
+                raise NotImplementedError(f'find_arg_index not implemented yet for {arg=}')
+
+    raise ValueError(f'Argument {name} not found in signature {signature}')
 
 def evaluate_group(ast: Group, scope: Scope):
 
@@ -760,6 +788,14 @@ def evaluate_mul(ast: Mul, scope: Scope):
         case Int(val=l), Int(val=r): return Int(l * r)
         case _:
             raise NotImplementedError(f'Mul not implemented for {left=} and {right=}')
+
+def evaluate_div(ast: Div, scope: Scope):
+    left = evaluate(ast.left, scope)
+    right = evaluate(ast.right, scope)
+    match left, right:
+        case Int(val=l), Int(val=r): return Int(l / r)
+        case _:
+            raise NotImplementedError(f'Div not implemented for {left=} and {right=}')
 
 def evaluate_mod(ast: Mod, scope: Scope):
     left = evaluate(ast.left, scope)
