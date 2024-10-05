@@ -301,7 +301,7 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
             val = evaluate(right, scope)
             match val:
                 case Array(items): ... #return [collect_calling_args(i, scope) for i in items]
-        case Int() | String() | IString() | Call() | UnaryPrefixOp():
+        case Int() | String() | IString() | Call() | Express() | UnaryPrefixOp():
             return [args], {}
         # case Call(): return [args], {}
         case Group(items):
@@ -380,7 +380,13 @@ def resolve_calling_args(signature: Group, args: list[AST], kwargs: dict[str, AS
 
     # all remaining arguments must have a value provided by the signature
     for arg in remaining:
-        pdb.set_trace()
+        match arg:
+            case Assign(left=Identifier(name), right=right):
+                dewy_kwargs[name] = right
+            case Assign(left=TypedIdentifier(id=Identifier(name), type=type), right=right):
+                dewy_kwargs[name] = right
+            case _:
+                raise NotImplementedError(f'Assign keyword arg not implemented yet for {arg=}\n{signature=}, {args=}, {kwargs=}, {remaining=}')
 
     return dewy_args, dewy_kwargs    
 

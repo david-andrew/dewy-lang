@@ -150,7 +150,7 @@ class Scope:
                 DeclarationType.CONST,
                 Type('callable'),
                 PrototypePyAction(
-                    Group([Assign(TypedIdentifier(Identifier('x'), Type('string')), String(''))]),
+                    Group([Assign(TypedIdentifier(Identifier('s'), Type('string')), String(''))]),
                     Type('void')
                 )
             ),
@@ -158,7 +158,7 @@ class Scope:
                 DeclarationType.CONST,
                 Type('callable'),
                 PrototypePyAction(
-                    Group([Assign(TypedIdentifier(Identifier('x'), Type('string')), String(''))]),
+                    Group([Assign(TypedIdentifier(Identifier('s'), Type('string')), String(''))]),
                     Type('void')
                 )
             ),
