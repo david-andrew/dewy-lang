@@ -9,7 +9,7 @@ from .syntax import (
     Declare,
     PointsTo, BidirPointsTo,
     Type,
-    ListOfASTs, Tuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, Object, Dict, BidirDict, TypeParam,
+    ListOfASTs, PrototypeTuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, Object, Dict, BidirDict, TypeParam,
     Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
@@ -579,14 +579,14 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
 
         case Comma_t():
             # TODO: combine left or right tuples into a single tuple
-            if isinstance(left, Tuple) and isinstance(right, Tuple):
-                return Tuple([*left.items, *right.items])
-            elif isinstance(left, Tuple):
-                return Tuple([*left.items, right])
-            elif isinstance(right, Tuple):
-                return Tuple([left, *right.items])
+            if isinstance(left, PrototypeTuple) and isinstance(right, PrototypeTuple):
+                return PrototypeTuple([*left.items, *right.items])
+            elif isinstance(left, PrototypeTuple):
+                return PrototypeTuple([*left.items, right])
+            elif isinstance(right, PrototypeTuple):
+                return PrototypeTuple([left, *right.items])
             else:
-                return Tuple([left, right])
+                return PrototypeTuple([left, right])
 
         case Operator_t(op='else'):
             if isinstance(left, Flow) and isinstance(right, Flow):

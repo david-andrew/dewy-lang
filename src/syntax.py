@@ -254,7 +254,7 @@ class ListOfASTs(PrototypeAST):
         return f'{", ".join(map(str, self.asts))}'
 
 
-class Tuple(PrototypeAST):
+class PrototypeTuple(PrototypeAST):
     """
     A comma separated list of expressions (not wrapped in parentheses) e.g. 1, 2, 3
     There is no special in-memory representation of a tuple, it is literally just a const list

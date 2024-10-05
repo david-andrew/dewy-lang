@@ -6,7 +6,7 @@ from ..syntax import (
     AST,
     Type,
     PointsTo, BidirPointsTo,
-    ListOfASTs, Tuple, Block, Array, Group, Range, Object, Dict, BidirDict, UnpackTarget,
+    ListOfASTs, PrototypeTuple, Block, Array, Group, Range, Object, Dict, BidirDict, UnpackTarget,
     TypedIdentifier,
     Void, void, Undefined, undefined, untyped,
     String, IString,

@@ -6,7 +6,7 @@ from .syntax import (
     Declare,
     PointsTo, BidirPointsTo,
     Type,
-    ListOfASTs, Tuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, Object, Dict, BidirDict, TypeParam,
+    ListOfASTs, PrototypeTuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, Object, Dict, BidirDict, TypeParam,
     Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
@@ -120,7 +120,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 ...
 
             # cases that themselves don't get adjusted but may contain nested children that need to be converted
-            case IString() | Group() | Block() | Tuple() | Array() | Object() | Dict() | BidirDict() | FunctionLiteral() | Range() | Loop() | If() | Flow() | Default() \
+            case IString() | Group() | Block() | PrototypeTuple() | Array() | Object() | Dict() | BidirDict() | FunctionLiteral() | Range() | Loop() | If() | Flow() | Default() \
                 | PointsTo() | BidirPointsTo() | Equal() | Less() | LessEqual() | Greater() | GreaterEqual() | LeftShift() | RightShift() | LeftRotate() | RightRotate() | LeftRotateCarry() | RightRotateCarry() | Add() | Sub() | Mul() | Div() | IDiv() | Mod() | Pow() | And() | Or() | Xor() | Nand() | Nor() | Xnor() | MemberIn() \
                 | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() \
                 | TypedIdentifier():
@@ -161,7 +161,7 @@ def convert_prototype_tuples(ast: AST) -> AST:
     """For now, literally just turn all tuples into arrays"""
     ast = Group([ast])
     for i in (gen := ast.__full_traversal_iter__()):
-        if isinstance(i, Tuple):
+        if isinstance(i, PrototypeTuple):
             gen.send(Array(i.items))
     return ast.items[0]
 
