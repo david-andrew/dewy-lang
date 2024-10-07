@@ -630,12 +630,12 @@ class TypedIdentifier(AST):
         return f'{self.id}:{self.type}'
 
 
-class TypedGroup(AST):
-    group: Group
+class ReturnTyped(BinOp):
+    item: AST
     type: AST
 
     def __str__(self) -> str:
-        return f'{self.group}:{self.type}'
+        return f'{self.item}:>{self.type}'
 
 class UnpackTarget(AST):
     target: 'list[Identifier | TypedIdentifier | UnpackTarget | Assign | Spread]'

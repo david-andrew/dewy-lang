@@ -329,7 +329,7 @@ binary_operators = {
     '@?',
     '|>', '<|', '=>',
     '->', '<->', #'<-', #reverse arrow is dumb
-    '.', ':'
+    '.', ':', ':>'
 }
 opchain_starters = {'+', '-', '*', '/', '%', '^'}
 operators = sorted(

@@ -15,7 +15,7 @@ from .syntax import (
     Flowable, Flow, If, Loop, Default,
     PrototypeFunctionLiteral, PrototypePyAction, Call,
     Index,
-    PrototypeIdentifier, Identifier, TypedIdentifier, TypedGroup, UnpackTarget, Assign,
+    PrototypeIdentifier, Identifier, TypedIdentifier, ReturnTyped, UnpackTarget, Assign,
     Int, Bool,
     Range, IterIn,
     Less, LessEqual, Greater, GreaterEqual, Equal, MemberIn,
@@ -289,6 +289,7 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.right, [EllipsisJuxtapose_t(None)]),  # jux-ellipsis
     (Associativity.none, [TypeParamJuxtapose_t(None)]),
     (Associativity.none, [Operator_t(':')]),
+    (Associativity.right, [Operator_t(':>')]),
     (Associativity.prefix, [Operator_t('not')]),
     (Associativity.right,  [Operator_t('^')]),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
@@ -550,8 +551,9 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         # Misc Operators
         case Operator_t(op=':'):
             if isinstance(left, PrototypeIdentifier): return TypedIdentifier(Identifier(left.name), right)
-            if isinstance(left, Group): return TypedGroup(left, right)
-            raise ValueError(f'ERROR: can only apply a type to an identifier or a (group). Got {left=}, {right=}')
+            #TBD if there are other things that can have type annotations beyond identifiers
+            raise ValueError(f'ERROR: can only apply a type to an identifier. Got {left=}, {right=}')
+        case Operator_t(op=':>'): return ReturnTyped(left, right)
 
         case TypeParamJuxtapose_t():
             if isinstance(left, TypeParam):
