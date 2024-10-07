@@ -1477,7 +1477,7 @@ let obj = {{[
 ]}}
 ``` -->
 
-On further thought, the notion that `.` could be accessing the entire scope of the object is sort of dumb. I think this is very similar to the concept of namespaces, and so I think that the ideas should be merged into a single concept. `let` inside of an object is what assigns something into that object's namespace. Without `let`, the object doesn't own the item, and therefor, there is no reason the member accesser `.` should be able to see things the object doesn't own. This way the semantics are very clear and unambiguous.
+On further thought, the notion that `.` could be accessing the entire scope of the object is sort of dumb. I think this is very similar to the concept of namespaces, and so I think that the ideas should be merged into a single concept. `let` inside of an object is what assigns something into that object's namespace. Without `let`, the object doesn't own the item, and therefor, there is no reason the member accessor `.` should be able to see things the object doesn't own. This way the semantics are very clear and unambiguous.
 
 ## Literal arguments in functions OR literals as type annotations
 
@@ -1509,27 +1509,27 @@ f1b = (x) => x + 1  // can call with `f1b(5)`
 f1c = (x=2) => x + 1 // can call with 'f1c' or `f1c()` or `f1c(x=5)`
 
 // 2 positional arguments
-f2 = (x, y) => x + y // can call with `f2(5, 6)`
+f2 = (x y) => x + y // can call with `f2(5 6)`
 
 // 1 positional and 1 optional keyword-only argument
-f2b = (x, y=2) => x + y // can call with `f2b(5)` or `f2b(5, y=6)`
+f2b = (x y=2) => x + y // can call with `f2b(5)` or `f2b(5 y=6)`
 
 // 3 positional arguments
-f3 = (x, y, z) => x + y + z // can call with `f3(5, 6, 7)`
+f3 = (x y z) => x + y + z // can call with `f3(5 6 7)`
 ```
 
 Also note that partial function evaluation follows the exact same semantics, it is just that the arguments will be bound without calling the function
 
 ```dewy
-f1 = (x, y) => x + y
+f1 = (x y) => x + y
 f1a = @f1(5) // f1a is now a function that takes 1 argument
-f1b = @f1(5, 6) // f1b is now a function that takes 0 arguments
+f1b = @f1(5 6) // f1b is now a function that takes 0 arguments
 f1c = @f1(y=6) // TBD if this is allowed. referring to a positional argument by name, but only in partial evaluation?
 
-f2 = (x, y=2) => x + y
+f2 = (x y=2) => x + y
 f2a = @f2(5) // f2a is now a function that takes 0 arguments
 f2b = @f2(y=6) // f2b is now a function that takes 1 argument
-f2c = @f2(5, y=6) // f2c is now a function that takes 0 arguments
+f2c = @f2(5 y=6) // f2c is now a function that takes 0 arguments
 ```
 
 Though a question this brings up is that currently doing partial evaluation is a bit restricted for positional arguments, since you can't skip ahead and specify them by name... Perhaps non-default arguments can be given either by position or by name, but default arguments still must be given by name. Or perhaps partial evaluation gets a special exception where you can refer to positional arguments by name if you want to skip ahead
@@ -2245,3 +2245,70 @@ let f = (x:int) => #expand(s)
 Historically, I had been thinking about using backticks for code literals, but at the moment that intersects with the transpose operator...
 
 TODO: more examples on this, I think it's very powerful. Also I think the syntax isn't final
+
+
+
+
+## Syntax for annotating return type [`:>` where typescript puts `:`]
+I've figured out what the syntax should be for annotating a return type on a function. Combine `:` for type annotation with `=>` for function declaration, giving `:>` for return type annotation
+
+```dewy
+let f = (x:int):>int => x + 5
+```
+
+TBD on the precedence of `:>` vs `:`, or if you can construct a fully annotated function without any parnethesis...
+
+```dewy
+
+let g = ():>int => 5
+let f = x:int:>int => x + g
+```
+
+Does that work with higher order functions or functions that take functions as arguments? perhaps at that point you just have to use parens
+
+```dewy
+let f = (x:int, (g:int):>int) => ...
+let f = (x:int, g:(int:>int)) => ...
+
+//probably definitely do need parentheses to disambiguate most cases
+let f = z:int :> a:int :> int => z+5 => a+6 ... //TBD if you need to redefine the arguments for subsequent parts...
+let f = (z:int) :> (a:int :> int) => a:int => a+z+5+6
+
+// to annotate something like `() => () => () => 42`, lots of options depending on what you want to restrict
+// obvuiously most of this are bad style, i.e. you'd probably break these out on multiple lines
+let f = () => () => () :> int => 42
+let f = () => () :> (():>int) => () => 42
+let f = () :> (() :> (() :> int)) => () => () => 42
+let f = () => () :> (():>int) => () :> int => 42
+let f = () :> (() :> (() :> int)) => () :> (():>int) => () :> int => 42
+```
+
+Needs a bit more thought on the precedence and what not
+
+## things that can have a type annotation attached to them
+- identifiers
+
+```dewy
+let x:int = 5
+let fn = (x:int) => x + 5
+[a:int b:int c:int] = [1, 2, 3]
+```
+ 
+TBD for others. We handle return type annotation with `:>` symbol. Typescript also has these case:
+
+```typescript
+//Mapped Types
+type ReadOnly<T> = {
+    readonly [K in keyof T]: T[K];
+};
+let readOnlyObj: ReadOnly<{ a: number; b: string }> = { a: 10, b: "hello" };
+// readOnlyObj.a = 20; // Error, a is read-only
+
+
+//Index Signatures
+interface Dictionary {
+    [key: string]: string;
+}
+let dict: Dictionary = { name: "Alice", city: "Wonderland" };
+
+```
