@@ -254,6 +254,7 @@ class Associativity(Enum):
     . <jux call> <jux index access>
     <jux ellipsis>                      //e.g. [...args]
     :                                   //e.g. let x:int
+    :>                                  //e.g. let x:():>int => 42
     (prefix) not
     (postfix) ? `
     ^                                   //right-associative
@@ -261,22 +262,23 @@ class Associativity(Enum):
     / * %
     + -
     << >> <<< >>> <<! !>>
+    ,                                   //tuple maker
+    <jux range>                         //e.g. [first,second..last]
     in
     =? >? <? >=? <=? not=? <=> is? isnt? @?
     and nand &
     xor xnor                            //following C's precedence: and > xor > or
     or nor |
-    ,                                   //tuple maker
-    <jux range>                         //e.g. [first,second..last]
+    as transmute
     =>
+    |>                                  //function pipe operators
+    <|
+    -> <->                              //dict pointers
     = .= <op>= .<op>=  (e.g. += .+=)    //right-associative (but technically causes a type error since assignments can't be chained)
     else
     (postfix) ;
     <seq> (i.e. space)
 [LOWEST PRECEDENCE]
-
-TODO:
-- add operators: as transmute |> <| -> <-> <- :
 
 [Notes]
 .. for ranges is not an operator, it is an expression. it uses juxtapose to bind to left/right arguments (or empty), and type-checks left and right
@@ -303,7 +305,11 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.left, [Operator_t('and'), Operator_t('nand'), Operator_t('&')]),
     (Associativity.left, [Operator_t('xor'), Operator_t('xnor')]),
     (Associativity.left, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
+    (Associativity.none,  [Operator_t('as'), Operator_t('transmute')]),
     (Associativity.right,  [Operator_t('=>')]),  # () => () => () => 42
+    (Associativity.right, [Operator_t('|>')]),
+    (Associativity.left, [Operator_t('<|')]),
+    (Associativity.fail,  [Operator_t('->'), Operator_t('<->')]),
     (Associativity.fail,  [Operator_t('=')]),
     (Associativity.none,  [Operator_t('else')]),
 ]))
