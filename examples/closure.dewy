@@ -22,3 +22,24 @@ printl(my_closure(5))
 
 // print the handle to the closure itself
 printl(@my_closure)
+
+
+// some pathological cases
+my_print = {
+    x = 5
+    s = 'string with internal reference to x={x}'
+    @printl(s)
+}
+my_print
+
+
+my_print = {
+    my_str = {
+        x = 5
+        s = 'string with internal reference to x={x}'
+        s
+    }
+    fn = @printl(my_str)
+    @fn
+}
+my_print

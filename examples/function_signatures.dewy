@@ -1,0 +1,36 @@
+//examples of each of the possible function signatures
+
+// all args start out as positional or keyword (regardless of if they have defaults)
+// partial application with positional args turns them into keyword only args
+// partial application with keyword args turns them into positional args
+// TBD unpack types probably need to be positional?
+// TBD spread types probably need to be positional? 
+//     or can we spread each of the possible types? I feel like spread just collects up everything not already specified in the signature
+
+//////////////// Positional Arguments ////////////////
+// no arguments
+f0 = () => 0 // can call with `f0` or `f0()`
+
+// 1 positional argument
+f1 = x => x + 1     // can call with `f1(5)`
+f1b = (x) => x + 1  // can call with `f1b(5)`
+
+// 2 positional arguments
+f2 = (x y) => x + y // can call with `f2(5 6)`
+
+// 3 positional arguments
+f3 = (x y z) => x + y + z // can call with `f3(5 6 7)`
+
+printl'Positional Arguments'
+printl(f0)
+printl(f1(5))
+printl(f2(5 6))
+printl(f3(5 6 7))
+
+
+//////////////// Optional Arguments ////////////////
+// 1 positional and 1 optional keyword-only argument
+f2b = (x y=2) => x + y // can call with `f2b(5)` or `f2b(5 y=6)`
+
+// 1 optional keyword-only argument
+f1c = (x=2) => x + 1 // can call with 'f1c' or `f1c()` or `f1c(x=5)`

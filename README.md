@@ -87,6 +87,7 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [partial_functions.dewy](examples/partial_functions.dewy)       | [✗]    |
 | [closure.dewy](examples/closure.dewy)                           | [✗]    |
 | [functions.dewy](examples/functions.dewy)                       | [✗]    |
+| [function_signatures.dewy](examples/function_signatures.dewy)   | [✗]    |
 | [shebang.dewy](examples/shebang.dewy)                           | [✗]    |
 | [fizzbuzz-1.dewy](examples/fizzbuzz-1.dewy)                     | [✓]    |
 | [fizzbuzz0.dewy](examples/fizzbuzz0.dewy)                       | [✓]    |
