@@ -810,7 +810,7 @@ def parse_flow(flow: Flow_t, scope: Scope) -> Flowable:
 
 def parse_declare(declare: Declare_t, scope: Scope) -> Declare:
     expr = parse_chain(declare.expr, scope)
-    assert isinstance(expr, (PrototypeIdentifier, Identifier, TypedIdentifier, TypedGroup, UnpackTarget, Assign)), f'ERROR: expected identifier, typed-identifier, or unpack target for declare expression, got {expr=}'
+    assert isinstance(expr, (PrototypeIdentifier, Identifier, TypedIdentifier, ReturnTyped, UnpackTarget, Assign)), f'ERROR: expected identifier, typed-identifier, or unpack target for declare expression, got {expr=}'
     match declare:
         case Declare_t(keyword=Keyword_t(src='let')): return Declare(DeclarationType.LET, expr)
         case Declare_t(keyword=Keyword_t(src='const')): return Declare(DeclarationType.CONST, expr)

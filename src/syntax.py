@@ -654,7 +654,7 @@ class DeclarationType(Enum):
 
 class Declare(AST):
     decltype: DeclarationType
-    target: Identifier | TypedIdentifier | TypedGroup | UnpackTarget | Assign
+    target: Identifier | TypedIdentifier | ReturnTyped | UnpackTarget | Assign
 
     def __str__(self):
         return f'{self.decltype.name.lower()} {self.target}'
