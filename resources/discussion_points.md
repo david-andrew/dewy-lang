@@ -334,7 +334,7 @@ which literally gets parsed as `<id:path> <jux> <str:"this/is/a/file/path.ext">`
 In fact, this style could probably allow for custom operators to be added, e.g. by making the operator be an identifier. e.g.
 
 ```
-dot = (left:vector<T>, right:vector<T>) => left .* right |> sum
+dot = <T>(left:vector<T> right:vector<T>):> T => left .* right |> sum
 
 then you can use it like an operator
 a = [1 2 3]
@@ -357,11 +357,11 @@ In fact for it to work where you can do `a(dot)b`, you would need a function ins
 vector = (vals) => [
     //save vals
     //save other metadata
-    __call__ = (fn) => (other) => fn(vals, other)
+    __call__ = fn => other => fn(vals other)
 ]
 
 //dot function
-dot = (left:vector<T>, right:vector<T>) => left .* right |> sum
+dot = (left:vector<T> right:vector<T>) => left .* right |> sum
 
 //usage
 a = [1 2 3]
@@ -542,8 +542,8 @@ see also:
 what's even more messed up is if the type of the identifier is a union between one that is callable, and one that is multipliable, then the precedence gets decided at runtime!
 
 ```
-sin: ((x:float) => float) | float
-cos: ((x:float) => float) | float
+sin: ((x:float) :> float) | float
+cos: ((x:float) :> float) | float
 
 sin(x)^2 + cos(x)^2 // undecidable until runtime
 ```
@@ -830,6 +830,8 @@ const [[l1:char, l2:char, ...letters:string] = name, age=number] = person
 
 > Note: `char` is just `string<length=1>`
 
+This is mostly just using typing to verify the types of the unpacked values match up
+
 ## Unifying imports, unpacks, and declarations [YES!]
 
 ```dewy
@@ -890,7 +892,7 @@ let grad = dydW(W=Wi, b=bi, x=xi)
 honestly though this is actually competing a bit with just the function notation
 
 ```
-let y = (W:vec[5 2], b:vec[5], x:vec[2]) => W * x + b
+let y = (W:vec[5 2] b:vec[5] x:vec[2]) => W * x + b
 let dydW = autodiff(y, W) //though how do we specify which variable? what does pytorch do?
 ```
 
@@ -903,9 +905,9 @@ imagine I want to make a temporary file for doing some operation, and then delet
 I think python's with statement syntax is a bit too verbose in that it requires you to explicitly wrap whatever process in the context. Instead I want something more like this:
 
 ```
-let file = open("temp.txt", "w")
+let file = open("temp.txt" "w")
 //some sort of binding to when file variable goes out of scope
-#on_cleanup(file, () => file.close())
+#on_cleanup(file () => file.close())
 
 //do stuff with file
 ```
@@ -919,8 +921,8 @@ This is similar to python's weak references
 function overloading will be achieved by combining two or more function literals / function references and binding to a single variable. The question is which operator should be used to achieve this
 
 ```
-func1 = (a:int, b:str) => 'first version'
-func2 = (a:int, b:int) => 'second version'
+func1 = (a:int b:str) => 'first version'
+func2 = (a:int b:int) => 'second version'
 
 //Using the `|` operator normally for type unions:
 overloaded = @func1 | @func2
@@ -932,17 +934,17 @@ overloaded = @func1 xor @func2
 Also an existing function could be updated to be overloaded, or further overloaded
 
 ```
-myfunc = (a:int, b:str) => 'first version'
-myfunc |= (a:int, b:int) => 'second version'
-myfunc |= (a:int, b:int, c:int) => 'third version'
+myfunc = (a:int b:str) => 'first version'
+myfunc |= (a:int b:int) => 'second version'
+myfunc |= (a:int b:int c:int) => 'third version'
 ```
 
 or
 
 ```
-myfunc = (a:int, b:str) => 'first version'
-myfunc xor= (a:int, b:int) => 'second version'
-myfunc xor= (a:int, b:int, c:int) => 'third version'
+myfunc = (a:int b:str) => 'first version'
+myfunc xor= (a:int b:int) => 'second version'
+myfunc xor= (a:int b:int c:int) => 'third version'
 ```
 
 Pros and cons for both:
@@ -958,14 +960,14 @@ But actually the best might just be to use `and`
 Such overloading will be especially important for user's defining infix operations over custom types:
 
 ```
-Point = (x:number, y:number) => [
+Point = (x:number y:number) => [
     x = x  //TBD if these are necessary since x/y are already in scope
     y = y
     __repr__ = () => 'Point({x}, {y})'
     __str__ = () => '({x}, {y})'
 ]
 
-__add__ |= (a:Point, b:Point) => Point(a.x + b.x, a.y + b.y)
+__add__ |= (a:Point b:Point) => Point(a.x + b.x, a.y + b.y)
 ```
 
 ### also random note about in place overloading
@@ -980,8 +982,8 @@ a += 15
 but for function overloading, since functions need to be @referenced, this is what happens
 
 ```
-myfunc |= (a:int, b:int) => 'second version'
-// myfunc = @myfunc | ((a:int, b:int) => 'second version')
+myfunc |= (a:int b:int) => 'second version'
+// myfunc = @myfunc | ((a:int b:int) => 'second version')
 ```
 
 that is to say, functions are @ referenced when part of an in-place operator
@@ -989,8 +991,8 @@ that is to say, functions are @ referenced when part of an in-place operator
 conceivably, we could also do something like this to maintain the symmetry of the notation:
 
 ```
-@myfunc |= (a:int, b:int) => 'second version'
-// @myfunc = @myfunc | ((a:int, b:int) => 'second version')
+@myfunc |= (a:int b:int) => 'second version'
+// @myfunc = @myfunc | ((a:int b:int) => 'second version')
 ```
 
 This implies that in the `@myfunc` on the left receiving the assignment the `@` is a no-op. which may or may not be what I want to do
@@ -1000,13 +1002,13 @@ Clearly the first way is better though
 ## Type syntax just forwards to type function
 
 ```
-let myvar: vector<int, length=5> = [1 2 3 4 5]
+let myvar: vector<int length=5> = [1 2 3 4 5]
 ```
 
 perhaps this is really just sugar/gets converted to a call to type with the given parameters
 
 ```
-let myvar: type(base=vector, params=(int, length=5)) = [1 2 3 4 5]
+let myvar: type(base=vector params=(int length=5)) = [1 2 3 4 5]
 ```
 
 ## Type system
@@ -1035,7 +1037,7 @@ simply doing `name = value` may or may not be allowed depending on if name is al
 
 To put it another way, `name = value` is sort of equivalent to `create_or_overwrite name = value`. perhaps we'll even have `create_or_overwrite` used internally, and `name = value` is just syntactic sugar for it
 
-## Precedence of comma vs assignment [conservative: comma has lower precedence than equals |OR| liberal: get rid of commas altogether and use space separation (or commas are optional)]. Maybe have it be easy to toggle between the two while parsing, to test which feels better
+## Precedence of comma vs assignment [got rid of the need to use commas in a lot of cases, so now commas have decently high precedence]
 
 All the below discussion is old. It basically comes down to 2 options:
 
@@ -1170,7 +1172,7 @@ foo = (a:int, b:int=1, c:int=2) => a+b+c
 1, 2, 3 as a, b, c
 ```
 
-## Should we get rid of the low precedence range juxtapose, and force ranges with step size to wrap the tuple in parenthesis, or should loops with multiple iterators require parenthesis around each iterator? [leaning remove need for commas in most situations]
+## Should we get rid of the low precedence range juxtapose, and force ranges with step size to wrap the tuple in parenthesis, or should loops with multiple iterators require parenthesis around each iterator? [mott since we removed need for commas in most situations]
 
 Currently there is a conflict with the operator precedence. We cannot have both of these:
 
@@ -1308,12 +1310,12 @@ B = [
     z = [1 2 3 4 5]
 ]
 
-f = a:type(A), b:type(B), c:int => (a.x + a.y - c) .* z
+f = (a:type(A) b:type(B) c:int) => (a.x + a.y - c) .* z
 
 // these all do the same thing
-A.f(B, 5)       // [10 20 30 40 50]
-(A, B).f(5)     // [10 20 30 40 50]
-(A, B, 5).f     // [10 20 30 40 50]
+A.f(B 5)       // [10 20 30 40 50]
+(A B).f(5)     // [10 20 30 40 50]
+(A B 5).f      // [10 20 30 40 50]
 ```
 
 The question is if this is useful. Definitely allowing the function to attach to methods of the first type makes sense, but hard to say if allowing for more complicated attachments via tuples is useful for anything.
@@ -1329,12 +1331,14 @@ B = [
     z = [1 2 3 4 5]
 ]
 
-f = a:type(A), b:type(B), c:int => (a.x + a.y - c) .* z
+f = (a:type(A) b:type(B) c:int) => (a.x + a.y - c) .* z
 
+// Actually now that we've gotten rid of commas for function calls, this doesn't work anymore...
+// TODO: look into if we can regain the functionality of piping into specific positional/named/etc. arguments
 // equivalent to the above
-A |> @f( , B, 5)
-(A, B) |> @f( , , 5)
-(A, B, 5) |> @f
+//A |> @f( , B, 5)
+//(A, B) |> @f( , , 5)
+//(A, B, 5) |> @f
 ```
 
 But honestly this could replace the need for the pipe operator!
@@ -1343,7 +1347,7 @@ Also important note: I think this should probably be opt-in to make a function b
 
 ```dewy
 #methodable
-f = a:type(A), b:type(B), c:int => (a.x + a.y - c) .* z
+f = (a:type(A) b:type(B) c:int) => (a.x + a.y - c) .* z
 ```
 
 ## Enums are just string unions
@@ -1385,12 +1389,12 @@ MyEnum = [
 MyEnum.A
 ```
 
-## Should function arguments be included in the body of an object as parameters, without requiring the user to explicitly assign them? [leaning requiring user to explicitly assign them]
+## Should function arguments be included in the body of an object as parameters, without requiring the user to explicitly assign them? [require user to explicitly assign them]
 
 e.g. in this:
 
 ```dewy
-Point = (x:number, y:number) => [
+Point = (x:number y:number) => [
     let x = x
     let y = y
     __repr__ = () => 'Point({x}, {y})'
@@ -1407,7 +1411,7 @@ As is, it is more verbose, but it is definitely clear that x and y exist in the 
 without, you might have something like this:
 
 ```dewy
-Point = (x:number, y:number) => [
+Point = (x:number y:number) => [
     __repr__ = () => 'Point({x}, {y})'
     __str__ = () => '({x}, {y})'
 ]
@@ -1418,7 +1422,7 @@ which is more concise, and I definitely appreciate not having to repeat yourself
 A thought on when you have arguments you don't want to include in the object: delete any terms you don't want
 
 ```dewy
-Point = (x:number, y:number, verbose:bool=false) => [
+Point = (x:number y:number verbose:bool=false) => [
     if verbose printl'hello world'
     del verbose
 
@@ -1430,9 +1434,9 @@ Point = (x:number, y:number, verbose:bool=false) => [
 Or perhaps we can distinguish between implicit and explicit argument capturing via {[]} vs [].
 
 ```dewy
-Point = (x:number, y:number) => []  // x and y are captured
-Point = (x:number, y:number) => {[]}  // x and y are not captured
-Point = (x:number, y:number) => {[let x = x let y = y]}  // x and y are captured
+Point = (x:number y:number) => []  // x and y are captured
+Point = (x:number y:number) => {[]}  // x and y are not captured
+Point = (x:number y:number) => {[let x = x let y = y]}  // x and y are captured
 ```
 
 I think I'm still leaning towards requiring `let x = x` and `let y = y` in all cases.
@@ -1539,15 +1543,15 @@ Though a question this brings up is that currently doing partial evaluation is a
 If the library writer wants a value that is keyword-only, but force the user to overwrite it, they can use `val=void`. Since no value can actually be set to `void`, there will be a compiler error if the user does not overwrite it.
 
 ```dewy
-f = (x:int, y:int, opflag:bool=void) => if opflag x + y else x - y
-f(5, 6) // compiler error
-f(5, 6, opflag=true) // 11
+f = (x:int y:int opflag:bool=void) => if opflag x + y else x - y
+f(5 6) // compiler error
+f(5 6 opflag=true) // 11
 
 add = @f(opflag=true)
-add(5, 6) // 11
+add(5 6) // 11
 
 sub = @f(opflag=false)
-sub(5, 6) // -1
+sub(5 6) // -1
 ```
 
 There will probably need to be a bit of type checking magic here since `opflag` could never actually be `void` so the typing should show it always being just a boolean. But perhaps this could be a convention that works with `void`
@@ -1674,16 +1678,16 @@ let decorator = (f) => (...args) => {
 }
 
 // simplest
-let myfunc = (a, b) => a + b
+let myfunc = (a b) => a + b
 let myfunc = decorator(myfunc)
 
 // option 2
-let myfunc = (a, b) => a + b
+let myfunc = (a b) => a + b
 let myfunc |>= decorator
 
 // in a single expression
 let myfunc = decorator <|
-    (a, b) => a + b
+    (a b) => a + b
 ```
 
 Technically all the options above are valid. As to which will be the most idiomatic, I'm leaning towards the first one, since it's the most explicit about what is happening. But the single expression version is also a good contender
@@ -1700,7 +1704,7 @@ let decorator = (extra:bool) => (f) => (...args) => {
 }
 
 let myfunc = decorator(true) <|
-    (a, b) => a + b
+    (a b) => a + b
 ```
 
 ## <| and |> are treated as a jux-call with super low precedence
@@ -1746,10 +1750,10 @@ TBD how to declare a set of combination identifiers
 prefixes = ['kilo'-> 1e3 'mega' -> 1e6 'giga' -> 1e9 'tera' -> 1e12 ...]
 units = ['gram' -> [1 0 0 0 0 0 0] 'meter' -> [0 1 0 0 0 0 0] 'second' -> [0 0 1 0 0 0 0] ...]
 
-combo [prefixes.keys units.keys]: PhysicalNumber = (prefix, unit) => prefixes[prefix] * units[unit]
+combo [prefixes.keys units.keys]: PhysicalNumber = (prefix unit) => prefixes[prefix] * units[unit]
 ```
 
-### aliases [handled just by doing `myalias = () => value`]
+### aliases [Not a feature. instead can achieve just by doing `myalias = () => value`]
 
 ~~Aliases basically allow you to have multiple names pointing to the same underlying variable. Aliases can be declared via the `alias` keyword~~
 
@@ -1773,7 +1777,7 @@ let m = () => meter
 
 Since zero-arg functions can be called without parenthesis, it functions identically to how an alias might work. This is nice because it is very clear how the aliasing mechanics work, as a consequence of normal let/const declarations and function closures.
 
-## Let, Const, Local [probably just use `const`, `let`, `local`, and maybe `fixed`]
+## Let, Const, Local [probably just use `const`, `let`, `local`, and maybe `private`]
 
 The declaration keywords all have to do with what happens when trying to assign a value without the keyword
 
@@ -1815,8 +1819,8 @@ Perhaps there is a better name instead of `local` though. `shadow`? Basically wa
 Lastly I'm considering one that has the name and type declaration `fixed` but allows for the value to be overwritten. This might be for cases of shared methods that the user can append onto, e.g. `__add__`. Though probably we won't allow users to access the value directly, but rather access them through a function for registering new methods
 
 ```dewy
-fixed __add__:<T,U,V>callable<(a:T, b:U), V>
-const register__add__ = (func:callable<(a:T, b:T), T>) => __add__ |= func
+private __add__:<T U V>(a:T b:U):> V
+const register__add__ = (func:typeof<__add__>) => __add__ |= func
 ```
 
 ### stdlib provided parameters and their declaration types
@@ -1856,15 +1860,15 @@ This is an interesting idea. As is, in dewy, functions have available to them al
 let y = 5
 let z = 10
 
-let f = (x:float, #capture[y]) => x + y
+let f = (x:float #capture[y]) => x + y
 
-let g = (x:float, #capture_all) => x + y + z
-// let g = (x:float, #capture[y, z]) => x + y + z
+let g = (x:float #capture_all) => x + y + z
+// let g = (x:float #capture[y z]) => x + y + z
 
 // alternative syntax
-let f = ([y], x:float) => x + y
-let g = ([y, z], x:float) => x + y + z
-let g = ([#all], x:float) => x + y + z
+let f = ([y] x:float) => x + y
+let g = ([y z] x:float) => x + y + z
+let g = ([#all] x:float) => x + y + z
 
 
 // jonathon blow suggests specifying the capture as part of the body rather than the function type
@@ -1923,8 +1927,8 @@ I like the idea of quick format strings, but we need to figure out how to make t
 ```dewy
 
 // defining formatter functions for each type
-let f = (fmt:str, val:int): str => ... //some function for handling formatting ints
-f |= (fmt:str, val:float): str => ... //some function for handling formatting floats
+let f = (fmt:str val:int):> str => ... //some function for handling formatting ints
+f |= (fmt:str val:float):> str => ... //some function for handling formatting floats
 // etc. implementations of formatters
 
 
@@ -1935,8 +1939,8 @@ printl'{x |> @f'.2f'}'
 I think this actually looks pretty good, except for the fact that f is perhaps not the best name for the formatter function... But ideally it would be only a single letter long. If we make f a higher order function, we can get rid of the @, e.g.
 
 ```dewy
-let f = (fmt:str) => (val:int): str => ... //some function for handling formatting ints
-f |= (fmt:str) => (val:float): str => ... //some function for handling formatting floats
+let f = (fmt:str) => (val:int):> str => ... //some function for handling formatting ints
+f |= (fmt:str) => (val:float):> str => ... //some function for handling formatting floats
 // etc. implementations of formatters
 
 let x = 5.123
@@ -1956,7 +1960,7 @@ Specific note about how I think this should be enforced,
 
 ```dewy
 //somehow want to restrict T to be any concrete type that isn't `any`
-const fmt_type = <<T>(pattern:str) => (val: T) => str>
+const fmt_type = <T>(pattern:str) :> (val: T) :> str
 
 //somehow fmt should not be reassignable, but you should be able to overload it. maybe we need something in addition to let/const...
 const fmt = #overload(fmt_type)
@@ -1983,15 +1987,15 @@ def f(c: str, d: int):
 
 When you look at the type signature of `g`, it will say it takes `(a: bool, b: float, args: Any)`.
 
-Dewy should properly propogate the types of the arguments, so that the type signature of `g` would actually be `(a: bool, b: float, c: str, d: int)`. Same idea with keyword arguments.
+Dewy should properly propogate the types of the arguments, so that the type signature of `g` would actually be `(a: bool b: float c: str d: int):>void`. Same idea with keyword arguments.
 
 ```dewy
-let g = (a:bool, b:float, ...args) => {
+let g = (a:bool b:float ...args) => {
     printl'a: {a}, b: {b}'
     f(...args)
 }
 
-let f = (c:str, d:int) => {
+let f = (c:str d:int) => {
     printl'c: {c}, d: {d}'
 }
 ```
@@ -2065,13 +2069,13 @@ Basically a struct definition is just an object with a bunch of declared, but un
 I think this clashes a little bit with the construction for making a class/instance,
 
 ```dewy
-let Vect3 = (x:real, y:real, z:real) => [
+let Vect3 = (x:real y:real z:real) => [
     x = x
     y = y
     z = z
 ]
 
-let p = Vect3(1, 2, 3)
+let p = Vect3(1 2 3)
 ```
 
 though that may just end up being a stylistic thing. TBD how types would be handled in the case of classes--the way I'm thinking is redundant, so perhaps there would be a shorthand
@@ -2082,7 +2086,7 @@ let vect3:type = [
     y:real
     z:real
 ]
-let Vect3 = (x:real, y:real, z:real): vect3 => [
+let Vect3 = (x:real y:real z:real):> vect3 => [
     x = x
     y = y
     z = z
@@ -2162,7 +2166,7 @@ export const SomeLibrary = [
 
 ```dewy
 //from the main program
-let [SL = SomeLibrary] = (import)p'SomeLibrary.dewy'
+let [SL = SomeLibrary] = import <| p'SomeLibrary.dewy'
 
 // calling into the library "namespace"
 SL.do_something()
@@ -2198,10 +2202,10 @@ let [SomeLibrary] = import'path/to/SomeLibrary.dewy'
 let [SL=SomeLibrary] = import'path/to/SomeLibrary.dewy'
 
 // import sub-members of SomeLibrary
-let [do_something, something_else] = import'path/to/SomeLibrary.dewy'.SomeLibrary
+let [do_something something_else] = import'path/to/SomeLibrary.dewy'.SomeLibrary
 
 // equivalent to the above
-let [[do_something, something_else] = SomeLibrary] = import'path/to/SomeLibrary.dewy'
+let [[do_something something_else] = SomeLibrary] = import'path/to/SomeLibrary.dewy'
 
 // import all members of SomeLibrary into the current scope
 // let [...SomeLibrary] = import'path/to/SomeLibrary.dewy' //TBD if this makes sense
