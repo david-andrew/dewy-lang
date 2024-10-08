@@ -26,7 +26,7 @@ from ..syntax import (
     Spread,
 )
 
-from ..postparse import FunctionLiteral
+from ..postparse import FunctionLiteral, Signature, normalize_function_args
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,6 +34,8 @@ from typing import Protocol, cast, Callable as TypingCallable, Any
 from functools import cache
 from collections import defaultdict
 from types import SimpleNamespace
+from enum import Enum, auto
+
 from argparse import ArgumentParser
 
 import pdb
@@ -124,13 +126,21 @@ class PyActionArgsPreprocessor(Protocol):
     def __call__(self, args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]: ...
 
 class PyAction(AST):
-    signature: Group
+    signature: Signature
     preprocessor: PyActionArgsPreprocessor
     action: TypingCallable[..., AST]
     return_type: AST
 
     def __str__(self):
         return f'{self.signature}: {self.return_type} => {self.action}'
+
+    def from_prototype(proto: PrototypePyAction, preprocessor: PyActionArgsPreprocessor, action: TypingCallable[..., AST]) -> 'PyAction':
+        return PyAction(
+            signature=normalize_function_args(proto.args),
+            preprocessor=preprocessor,
+            action=action,
+            return_type=proto.return_type,
+        )
 
 class Closure(AST):
     fn: FunctionLiteral
@@ -278,10 +288,11 @@ def evaluate_call(call: Call, scope: Scope) -> AST:
     pdb.set_trace()
     raise NotImplementedError(f'Function evaluation not implemented yet')
 
+#TODO: longer term this might also return a list/dict of spread args passed into the function
 def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dict[str, AST]]:
     """
     Collect the arguments that a function is being called with
-    e.g. `let fn = (a, b, c) => a + b + c; fn(1, c=2, 3)`
+    e.g. `let fn = (a b c) => a + b + c; fn(1 c=2 3)`
     then the calling args are [1, 3] and {c: 2}
 
     Args:
@@ -294,6 +305,8 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
     match args:
         case None | Void(): return [], {}
         case Identifier(name): return [scope.get(name).value], {}
+        case Assign(left=Identifier(name)|TypedIdentifier(id=Identifier(name)), right=right): return [], {name: right}
+        # case Assign(left=UnpackTarget() as target, right=right): raise NotImplementedError('UnpackTarget not implemented yet')
         case Assign(): raise NotImplementedError('Assign not implemented yet') #called recursively if a calling arg was an keyword arg rather than positional
         case Spread(right=right):
             pdb.set_trace()
@@ -321,7 +334,7 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
 
 
 
-def attach_args_to_scope(signature: Group, args: list[AST], kwargs: dict[str, AST], scope: Scope):
+def attach_args_to_scope(signature: Signature, args: list[AST], kwargs: dict[str, AST], scope: Scope):
     """Resolve calling arguments and attach each to the scope so they are available during function body evaluation"""
     dewy_args, dewy_kwargs = resolve_calling_args(signature, args, kwargs, scope)
     for name, value in (dewy_args | dewy_kwargs).items():
@@ -333,7 +346,8 @@ def attach_args_to_scope(signature: Group, args: list[AST], kwargs: dict[str, AS
 #       position only arguments (with or without defaults)
 #       keyword only arguments (with or without defaults)
 # Note: the function signature will stay the same since calling a function or pyaction just amounts to setting args and kwargs
-def resolve_calling_args(signature: Group, args: list[AST], kwargs: dict[str, AST], scope: Scope, is_partial: bool = False) -> tuple[dict[str, AST], dict[str, AST]]:
+# TODO: probably expand to include a container for unpack targets
+def resolve_calling_args(signature: Signature, args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[dict[str, AST], dict[str, AST]]:
     """
     Resolve the final list of arguments the function actually receives
     Properly handles when the signature includes defaults, keyword args, positional args, partial evaluation, etc.
@@ -347,54 +361,67 @@ def resolve_calling_args(signature: Group, args: list[AST], kwargs: dict[str, AS
     ```
 
     then we would resolve to args={b: 1} kwargs={a: 2, c: 3}
+
+    This is mainly for interfacing with python functions which want *args, **kwargs
     """
     # for now, just assume all args are position or keyword args
     # partial eval converts that particular arg to keyword only
-    sig_list = [*signature.items]
+    sig_pkwargs, sig_pargs, sig_kwargs = signature.pkwargs, signature.pargs, signature.kwargs
     dewy_args, dewy_kwargs = {}, {}
 
-    # first pull out the calling keyword arguments
-    for name, arg in kwargs.items():
-        #remove this parameter from the sig list
-        pdb.set_trace()
-        remove_from_sig_list(sig_list, name)
-        dewy_kwargs[name] = arg
-
-    if len(sig_list) < len(args):
-        raise ValueError(f'Too many arguments for function. {signature=}, {args=}, {kwargs=}')
-
-    # split off the positional arguments from any remaining args in the signature
-    sig_list, remaining = sig_list[:len(args)], sig_list[len(args):]
-
-    if not is_partial and not all(isinstance(arg, Assign) for arg in remaining):
-        raise ValueError(f'Non-Assign arguments remaining unpaired in signature. {signature=}, {args=}, {kwargs=}, {remaining=}')
-
-    for spec, arg in zip(sig_list, args):
-        match spec:
-            case Identifier(name):
-                dewy_args[name] = arg
-            case TypedIdentifier(id=Identifier(name), type=type): #TODO: could do type checking here? probably leave for type checker
-                dewy_args[name] = arg
-            case Assign(left=Identifier(name), right=right):
-                dewy_args[name] = arg
-            case Assign(left=TypedIdentifier(id=Identifier(name), type=type), right=right):
-                dewy_args[name] = arg
+    def get_arg_name(arg: AST) -> str:
+        """little helper function to get the name of an argument"""
+        match arg:
+            case Identifier(name): return name
+            case TypedIdentifier(id=Identifier(name)): return name
+            case Assign(left=Identifier(name)): return name
+            case Assign(left=TypedIdentifier(id=Identifier(name))): return name
             case _:
-                raise NotImplementedError(f'Assign positional arg not implemented yet for {spec=}\n{signature=}, {args=}, {kwargs=}, {remaining=}')
+                raise NotImplementedError(f'get_arg_name not implemented for {arg=}')
+
+    # first pull out the calling keyword arguments
+    dewy_kwargs.update(kwargs)
+    sig_pkwargs = [*filter(lambda item: get_arg_name(item) not in kwargs, sig_pkwargs)]
+    sig_kwargs = [*filter(lambda item: get_arg_name(item) not in kwargs, sig_kwargs)]
+
+    if len(signature.pargs) + len(signature.pkwargs) < len(args):
+        raise ValueError(f'Too many positional arguments for function. {signature=}, {args=}, {kwargs=}')
+
+    for spec, arg in zip(signature.pargs + signature.pkwargs, args):
+        name = get_arg_name(spec)
+        dewy_args[name] = arg
 
     # all remaining arguments must have a value provided by the signature
-    for arg in remaining:
-        match arg:
-            case Assign(left=Identifier(name), right=right):
-                dewy_kwargs[name] = right
-            case Assign(left=TypedIdentifier(id=Identifier(name)), right=right):
-                dewy_kwargs[name] = right
-            case Identifier() | TypedIdentifier() if is_partial: ... # these are still positional or keyword until they are set
-            case _:
-                raise NotImplementedError(f'Assign keyword arg not implemented yet for {arg=}\n{signature=}, {args=}, {kwargs=}, {remaining=}')
+    for arg in (sig_pargs + sig_pkwargs)[len(args):]:
+        name = get_arg_name(arg)
+        if not isinstance(arg, Assign):
+            raise ValueError(f'Non-Assign arguments remaining unpaired in signature. {signature=}, {args=}, {kwargs=}')
+        dewy_kwargs[name] = arg.right
 
-    return dewy_args, dewy_kwargs    
+    return dewy_args, dewy_kwargs
 
+
+class ArgBinding(Enum):
+    KEYWORD = auto()
+    POSITIONAL = auto()
+
+@dataclass
+class ResolvedArg:
+    name: str
+    value: AST
+    binding: ArgBinding
+
+
+def update_signature(signature: Signature, args: list[AST], scope: Scope) -> Group:
+    call_args, call_kwargs = collect_calling_args(args, scope)
+    pdb.set_trace()
+    dewy_args, dewy_kwargs = resolve_calling_args(signature, call_args, call_kwargs, scope, is_partial=True)
+    new_signature = Group([*signature.items])
+    for name, arg in (dewy_args | dewy_kwargs).items():
+        idx = find_arg_index(name, new_signature)
+        del new_signature.items[idx]
+        new_signature.items.append(Assign(left=Identifier(name), right=arg))
+    return new_signature
 
 def apply_partial_eval(f: AST, args: list[AST], scope: Scope) -> AST:
     match f:
@@ -405,14 +432,12 @@ def apply_partial_eval(f: AST, args: list[AST], scope: Scope) -> AST:
         #     pdb.set_trace()
         #     ...
         case Closure(fn=FunctionLiteral(args=signature, body=body), scope=closure_scope):
-            call_args, call_kwargs = collect_calling_args(args, scope)
-            dewy_args, dewy_kwargs = resolve_calling_args(signature, call_args, call_kwargs, scope, is_partial=True)
-            new_signature = Group([*signature.items])
-            for name, arg in (dewy_args | dewy_kwargs).items():
-                idx = find_arg_index(name, new_signature)
-                del new_signature.items[idx]
-                new_signature.items.append(Assign(left=Identifier(name), right=arg))
+            new_signature = update_signature(signature, args, scope)
             return Closure(fn=FunctionLiteral(args=new_signature, body=body), scope=closure_scope)
+
+        case PyAction(signature=signature, preprocessor=preprocessor, action=action, return_type=return_type):
+            new_signature = update_signature(signature, args, scope)
+            return PyAction(signature=new_signature, preprocessor=preprocessor, action=action, return_type=return_type)
 
         case Identifier(name):
             f = scope.get(name).value
@@ -625,10 +650,6 @@ def evaluate_closure(ast: Closure, scope: Scope):
     attach_args_to_scope(signature, args, kwargs, fn_scope)
     return evaluate(ast.fn.body, fn_scope)
 
-    #grab arguments from scope and put them in fn_scope
-    pdb.set_trace()
-    ast.fn.args
-    raise NotImplementedError('Closure not implemented yet')
 
 def evaluate_pyaction(ast: PyAction, scope: Scope):
     fn_scope = Scope(scope)
@@ -826,11 +847,11 @@ class BuiltinFuncs:
 #TODO: consider adding a flag repr vs str, where initially str is used, but children get repr. 
 # as is, stringifying should put quotes around strings that are children of other objects 
 # but top level printed strings should not show their quotes
-def py_stringify(ast: AST, scope: Scope) -> str:
+def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
     ast = evaluate(ast, scope)
     match ast:
         # types that require special handling (i.e. because they have children that need to be stringified)
-        case String(val): return val #TODO: should get quotes if stringified as a child
+        case String(val): return val if top_level else f'"{val}"'
         case Array(items): return f"[{' '.join(py_stringify(i, scope) for i in items)}]"
         case Dict(items): return f"[{' '.join(py_stringify(kv, scope) for kv in items)}]"
         case PointsTo(left, right): return f'{py_stringify(left, scope)}->{py_stringify(right, scope)}'
@@ -852,9 +873,9 @@ def py_stringify(ast: AST, scope: Scope) -> str:
     raise NotImplementedError('stringify not implemented yet')
 
 def preprocess_py_print_args(args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]:
-    py_args = [py_stringify(i, scope) for i in args]
-    py_kwargs = {k: py_stringify(v, scope) for k, v in kwargs.items()}
-    return py_args, py_kwargs
+    py_args = [py_stringify(i, scope, top_level=True) for i in args]
+    # py_kwargs = {k: py_stringify(v, scope) for k, v in kwargs.items()}
+    return py_args, {}#py_kwargs
 
 def py_printl(s:str) -> Void:
     BuiltinFuncs.printl(s)
@@ -871,10 +892,10 @@ def insert_pyactions(scope: Scope):
     """replace pyaction stubs with actual implementations"""
     if 'printl' in scope.vars:
         assert isinstance((proto:=scope.vars['printl'].value), PrototypePyAction)
-        scope.vars['printl'].value = PyAction(proto.args, preprocess_py_print_args, py_printl, proto.return_type)
+        scope.vars['printl'].value = PyAction.from_prototype(proto, preprocess_py_print_args, py_printl)
     if 'print' in scope.vars:
         assert isinstance((proto:=scope.vars['print'].value), PrototypePyAction)
-        scope.vars['print'].value = PyAction(proto.args, preprocess_py_print_args, py_print, proto.return_type)
+        scope.vars['print'].value = PyAction.from_prototype(proto, preprocess_py_print_args, py_print)
     if 'readl' in scope.vars:
         assert isinstance((proto:=scope.vars['readl'].value), PrototypePyAction)
-        scope.vars['readl'].value = PyAction(proto.args, lambda *a: ([],{}), py_readl, proto.return_type)
+        scope.vars['readl'].value = PyAction.from_prototype(proto, lambda *a: ([],{}), py_readl)

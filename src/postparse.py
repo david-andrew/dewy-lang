@@ -12,7 +12,7 @@ from .syntax import (
     Flowable, Flow, If, Loop, Default,
     PrototypeFunctionLiteral, PrototypePyAction, Call,
     Index,
-    PrototypeIdentifier, Express, Identifier, TypedIdentifier, TypedGroup, UnpackTarget, Assign,
+    PrototypeIdentifier, Express, Identifier, TypedIdentifier, ReturnTyped, UnpackTarget, Assign,
     Int, Bool,
     Range, IterIn,
     Less, LessEqual, Greater, GreaterEqual, Equal, MemberIn,
@@ -25,13 +25,41 @@ from .syntax import (
 )
 
 from typing import Callable as TypingCallable
-
+from dataclasses import field
 import pdb
+
+
+class Signature(AST):
+    pkwargs: list[AST] = field(default_factory=list)
+    pargs:   list[AST] = field(default_factory=list)
+    kwargs:  list[AST] = field(default_factory=list)
+    #TODO: probably keep track of spread args i.e. "spargs"
+
+    def _is_delimited(self) -> bool:
+        if any(isinstance(i, Assign) for i in self.pkwargs + self.pargs + self.kwargs):
+            return False
+        return not bool(self.pargs or self.kwargs)
+
+    def __str__(self):
+        pkwargs = ' '.join(str(i) for i in self.pkwargs)
+        pargs   = ' '.join(str(i) for i in self.pargs)
+        kwargs  = ' '.join(str(i) for i in self.kwargs)
+
+        if pargs:
+            pargs = f' #pos_only {pargs}'
+        if kwargs:
+            kwargs = f' #kw_only {kwargs}'
+
+        s = f'{pkwargs}{pargs}{kwargs}'.strip()
+
+        if self._is_delimited():
+            return s
+        return f'({s})'
 
 
 # basically just convert all the different types of args to a normalized format (i.e. group)
 class FunctionLiteral(AST):
-    args: Group
+    args: Signature
     body: AST
 
     def __str__(self):
@@ -80,10 +108,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 gen.send(AtHandle(Identifier(name)))
             case AtHandle():
                 pdb.set_trace()
-                ...
-            case FunctionLiteral(args=Group(items=items), body=body):
-                converted_args = convert_prototype_to_unpack_target(Array(items))
-                gen.send(FunctionLiteral(Group(converted_args.target), body))
+                ...          
             case Assign(left=PrototypeIdentifier(name=name), right=right):
                 gen.send(Assign(Identifier(name), right))
             case Assign(left=Array() as arr, right=right):
@@ -120,12 +145,12 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 ...
 
             # cases that themselves don't get adjusted but may contain nested children that need to be converted
-            case IString() | Group() | Block() | PrototypeTuple() | Array() | Object() | Dict() | BidirDict() | FunctionLiteral() | Range() | Loop() | If() | Flow() | Default() \
+            case IString() | Group() | Block() | PrototypeTuple() | Array() | Object() | Dict() | BidirDict() | FunctionLiteral() | Signature() | Range() | Loop() | If() | Flow() | Default() \
                 | PointsTo() | BidirPointsTo() | Equal() | Less() | LessEqual() | Greater() | GreaterEqual() | LeftShift() | RightShift() | LeftRotate() | RightRotate() | LeftRotateCarry() | RightRotateCarry() | Add() | Sub() | Mul() | Div() | IDiv() | Mod() | Pow() | And() | Or() | Xor() | Nand() | Nor() | Xnor() | MemberIn() \
                 | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() \
                 | TypedIdentifier():
                 ...
-            #TBD cases: Type() | ListOfASTs() | BareRange() | Ellipsis() | Spread() | TypeParam() | Flowable() | Flow() | PrototypePyAction() | PyAction() | Express() | TypedGroup() | SequenceUnpackTarget() | ObjectUnpackTarget() | DeclarationType() | DeclareGeneric() | Parameterize():
+            #TBD cases: Type() | ListOfASTs() | BareRange() | Ellipsis() | Spread() | TypeParam() | Flowable() | Flow() | PrototypePyAction() | PyAction() | Express() | ReturnTyped() | SequenceUnpackTarget() | ObjectUnpackTarget() | DeclarationType() | DeclareGeneric() | Parameterize():
             case _:  # all others are traversed as normal
                 raise ValueError(f'Unhandled case {type(i)}')
             #     pdb.set_trace()
@@ -183,21 +208,57 @@ def convert_prototype_function_literals(ast: AST) -> AST:
     return ast.items[0]
 
 
-def normalize_function_args(signature: AST) -> Group:
-    """Convert all the different function arg syntax options to a normalized format (group)"""
-    match signature:
-        case Void():
-            return Group([])
-        case Identifier() | PrototypeIdentifier() | TypedIdentifier() | Assign():
-            return Group([signature])
-        case Spread() | UnpackTarget():
+def normalize_function_arg(arg: AST) -> tuple[list[AST], list[AST], list[AST]]:
+    pkwarg, parg, kwarg = [], [], []
+    match arg:
+        case Void(): ...
+        case PrototypeIdentifier(name=name):
+            parg.append(Identifier(name))
+        case Identifier() | TypedIdentifier() | Assign():
+            pkwarg.append(arg)
+        case Array() as arr:
             pdb.set_trace()
-            ...
-        case Array(items):
-            assert all(isinstance(i, (Identifier, PrototypeIdentifier, TypedIdentifier, Assign, Spread, UnpackTarget)) for i in items), f'Unpack Function args must all be one of Identifier(), TypedIdentifier(), Assign(), Spread(), or UnpackTarget(). Got {items}'
-            return Group([UnpackTarget(items)])
-        case Group() as group:
-            return group
+            parg.append(convert_prototype_to_unpack_target(arr))
+        # case Spread() | UnpackTarget():
+        #     pdb.set_trace()
+        #     ...
+        # case Dict() | BidirDict():
+        #     pdb.set_trace()
+        #     ...
+        #     #copilot suggested these could be kwargs, though I suspect it won't work (i.e. how is default vs no default handled? name -> void)
+        #     #think about though. could use identifiers directly instead of strings
+
         case _:
-            pdb.set_trace()
-            raise NotImplementedError(f'normalize_signature not implemented yet for {signature=}')
+            raise NotImplementedError(f'normalize_signature not implemented yet for {arg=}')
+
+    return pkwarg, parg, kwarg
+
+
+# def array_items_to_unpack_target(items: list[AST]) -> UnpackTarget:
+#     """Convert an Array of ASTs to an UnpackTarget"""
+#     unpack_items = []
+#     for i in items:
+#         match i:
+#             case Identifier() | PrototypeIdentifier() | TypedIdentifier() | Assign() | Spread() | UnpackTarget():
+#                 unpack_items.append(i)
+#             case Array(items):
+#                 unpack_items.append(array_items_to_unpack_target(items))
+#             case _:
+#                 raise NotImplementedError(f'array_items_to_unpack_target not implemented yet for {i=}')
+#     return UnpackTarget(unpack_items)
+
+
+def normalize_function_args(signature: AST) -> Signature:
+    """Convert all the different function arg syntax options to a normalized format (group)"""
+    if not isinstance(signature, Group):
+        return Signature(*normalize_function_arg(signature))
+
+    pkwargs, pargs, kwargs = [], [], []
+    for i in signature.items:
+        pkw, p, kw = normalize_function_arg(i)
+        pkwargs.extend(pkw)
+        pargs.extend(p)
+        kwargs.extend(kw)
+    return Signature(pkwargs, pargs, kwargs)
+
+
