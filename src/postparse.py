@@ -213,7 +213,7 @@ def normalize_function_arg(arg: AST) -> tuple[list[AST], list[AST], list[AST]]:
     match arg:
         case Void(): ...
         case PrototypeIdentifier(name=name):
-            parg.append(Identifier(name))
+            pkwarg.append(Identifier(name))
         case Identifier() | TypedIdentifier() | Assign():
             pkwarg.append(arg)
         case Array() as arr:
