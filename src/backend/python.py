@@ -341,6 +341,17 @@ def attach_args_to_scope(signature: Signature, args: list[AST], kwargs: dict[str
         scope.assign(name, value)
 
 
+def get_arg_name(arg: AST) -> str:
+    """little helper function to get the name of an argument"""
+    match arg:
+        case Identifier(name): return name
+        case TypedIdentifier(id=Identifier(name)): return name
+        case Assign(left=Identifier(name)): return name
+        case Assign(left=TypedIdentifier(id=Identifier(name))): return name
+        case _:
+            raise NotImplementedError(f'get_arg_name not implemented for {arg=}')
+
+
 # TODO: resolve args should handle the full gamut of possible types of arguments in a function
 #       position or keyword arguments (with or without defaults)
 #       position only arguments (with or without defaults)
@@ -369,20 +380,21 @@ def resolve_calling_args(signature: Signature, args: list[AST], kwargs: dict[str
     sig_pkwargs, sig_pargs, sig_kwargs = signature.pkwargs, signature.pargs, signature.kwargs
     dewy_args, dewy_kwargs = {}, {}
 
-    def get_arg_name(arg: AST) -> str:
-        """little helper function to get the name of an argument"""
-        match arg:
-            case Identifier(name): return name
-            case TypedIdentifier(id=Identifier(name)): return name
-            case Assign(left=Identifier(name)): return name
-            case Assign(left=TypedIdentifier(id=Identifier(name))): return name
-            case _:
-                raise NotImplementedError(f'get_arg_name not implemented for {arg=}')
+    # evaluate all the args and kwargs
+    args = [evaluate(arg, scope) for arg in args]
+    kwargs = {name: evaluate(arg, scope) for name, arg in kwargs.items()}
+
 
     # first pull out the calling keyword arguments
     dewy_kwargs.update(kwargs)
     sig_pkwargs = [*filter(lambda item: get_arg_name(item) not in kwargs, sig_pkwargs)]
     sig_kwargs = [*filter(lambda item: get_arg_name(item) not in kwargs, sig_kwargs)]
+
+    #remaining kwargs are added to the dewy_kwargs
+    for arg in sig_kwargs:
+        assert isinstance(arg, Assign), f'INTERNAL ERROR: {arg=} is not an Assign'
+        name = get_arg_name(arg)
+        dewy_kwargs[name] = arg.right
 
     if len(signature.pargs) + len(signature.pkwargs) < len(args):
         raise ValueError(f'Too many positional arguments for function. {signature=}, {args=}, {kwargs=}')
@@ -412,16 +424,39 @@ class ResolvedArg:
     binding: ArgBinding
 
 
-def update_signature(signature: Signature, args: list[AST], scope: Scope) -> Group:
+def update_signature(signature: Signature, args: list[AST], scope: Scope) -> Signature:
+    """Given values to partially apply to a function, update the call signature to reflect the new values"""
     call_args, call_kwargs = collect_calling_args(args, scope)
-    pdb.set_trace()
-    dewy_args, dewy_kwargs = resolve_calling_args(signature, call_args, call_kwargs, scope, is_partial=True)
-    new_signature = Group([*signature.items])
-    for name, arg in (dewy_args | dewy_kwargs).items():
-        idx = find_arg_index(name, new_signature)
-        del new_signature.items[idx]
-        new_signature.items.append(Assign(left=Identifier(name), right=arg))
-    return new_signature
+    sig_pkwargs, sig_pargs, sig_kwargs = signature.pkwargs, signature.pargs, signature.kwargs
+
+    for item in sig_kwargs:
+        name = get_arg_name(item)
+        if name in call_kwargs:
+            sig_kwargs = [*filter(lambda i: get_arg_name(i) != name, sig_kwargs)]
+            right = evaluate(call_kwargs[name], scope)
+            sig_kwargs.append(Assign(left=Identifier(name), right=right))
+    for item in sig_pkwargs:
+        name = get_arg_name(item)
+        if name in call_kwargs:
+            sig_pkwargs = [*filter(lambda i: get_arg_name(i) != name, sig_pkwargs)]
+            right = evaluate(call_kwargs[name], scope)
+            # any pkwargs become kwargs when a value is given by keyword or position
+            sig_kwargs.append(Assign(left=Identifier(name), right=right))
+
+    # update the positional arguments
+    for item in call_args:
+        if len(sig_pargs) > 0:
+            parg, sig_pargs = sig_pargs[0], sig_pargs[1:]
+            name = get_arg_name(parg)
+        elif len(sig_pkwargs) > 0:
+            parg, sig_pkwargs = sig_pkwargs[0], sig_pkwargs[1:]
+            name = get_arg_name(parg)
+        else:
+            raise ValueError(f'Too many positional arguments for function. {signature=}, {args=}')
+        right = evaluate(item, scope)
+        sig_kwargs.append(Assign(left=Identifier(name), right=right))
+
+    return Signature(pargs=sig_pargs, pkwargs=sig_pkwargs, kwargs=sig_kwargs)
 
 def apply_partial_eval(f: AST, args: list[AST], scope: Scope) -> AST:
     match f:
@@ -848,10 +883,10 @@ class BuiltinFuncs:
 # as is, stringifying should put quotes around strings that are children of other objects 
 # but top level printed strings should not show their quotes
 def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
-    ast = evaluate(ast, scope)
+    ast = evaluate(ast, scope) if not isinstance(ast, (PyAction, Closure)) else ast
     match ast:
         # types that require special handling (i.e. because they have children that need to be stringified)
-        case String(val): return val if top_level else f'"{val}"'
+        case String(val): return val# if top_level else f'"{val}"'
         case Array(items): return f"[{' '.join(py_stringify(i, scope) for i in items)}]"
         case Dict(items): return f"[{' '.join(py_stringify(kv, scope) for kv in items)}]"
         case PointsTo(left, right): return f'{py_stringify(left, scope)}->{py_stringify(right, scope)}'
@@ -859,6 +894,7 @@ def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
         case BidirPointsTo(left, right): return f'{py_stringify(left, scope)}<->{py_stringify(right, scope)}'
         case Closure(fn): return f'{fn}'
         case FunctionLiteral() as fn: return f'{fn}'
+        case PyAction() as fn: return f'{fn}'
 
         # can use the built-in __str__ method for these types
         case Int() | Bool() | Undefined(): return str(ast)
@@ -874,8 +910,8 @@ def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
 
 def preprocess_py_print_args(args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]:
     py_args = [py_stringify(i, scope, top_level=True) for i in args]
-    # py_kwargs = {k: py_stringify(v, scope) for k, v in kwargs.items()}
-    return py_args, {}#py_kwargs
+    py_kwargs = {k: py_stringify(v, scope) for k, v in kwargs.items()}
+    return py_args, py_kwargs
 
 def py_printl(s:str) -> Void:
     BuiltinFuncs.printl(s)
