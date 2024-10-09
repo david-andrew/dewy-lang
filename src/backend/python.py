@@ -249,7 +249,8 @@ def evaluate_declare(ast: Declare, scope: Scope):
         case Identifier(name):
             value = void
             type = untyped
-        case TypedIdentifier(id=Identifier(name), type=type): ... # values unpacked by match
+        case TypedIdentifier(id=Identifier(name), type=type):
+            value = void
         case Assign(left=Identifier(name), right=right):
             value = evaluate(right, scope)
             type = untyped
