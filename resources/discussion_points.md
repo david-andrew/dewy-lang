@@ -1648,6 +1648,22 @@ match x {
 
 A bit more work needs to go into distinguishing between the different types that may be unpacked, e.g. object vs array, etc., as well as how to match for specific types, etc.
 
+
+Honestly though this all sort of looks like function overloading, so maybe we just lean into that without needing an extra feature
+
+```dewy
+fn = ([a b] => a + b)
+   | ([a b 3] => a + b + c)    // only match if c is equal to 3
+   | ([a b c] => a + b + c)
+   | (5 => 'five')             // match against a literal
+   | (... => 0)
+
+x = //something to match
+fn(x)
+```
+
+though I'm not really satisfied with the extra parenthesis needed, nor the handling of the default case. TBD
+
 ## Debugging: Ability to dump program state at a point, and pick up from that point
 
 Basically, when debugging, say it takes a lot of time/computation to get to a particular point in your code that you're debugging. There should be a way to dump the program state right before that point, and then subsequent debugging runs can pick up directly from that point without having to go through all the previous computation again
