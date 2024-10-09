@@ -1,1 +1,31 @@
 // examples of bugs (or just unimplemented stuff) that currently exist in the tokenizer/parser/etc.
+
+
+// closure/partial evaluation pathological case
+X = 'apple'
+Y = 'banana'
+fn = {
+    Z = 'Peach'
+    fn = {
+        A = 'Cherry'
+        fn = {
+            B = () => '@Kiwi'
+            fn = {
+                fn = (x y z a b c d) => {
+                    printl'x={x}\ny={y}\nz={z}\na={a}\nb={b}\nc={c}\nd={d}'
+                }
+                @fn
+            }
+            printl'fn={@fn}'
+            @fn(b=@B)
+        }
+        printl'fn={@fn}'
+        @fn(a=A d='manually assigning D')
+    }
+    printl'fn={@fn}'
+    @fn(z=Z)
+}
+printl'fn={@fn}'
+fn = @fn(y=Y x=X)
+printl(@fn)
+printl(@fn(c='C'))

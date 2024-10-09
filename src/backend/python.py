@@ -161,6 +161,10 @@ class Closure(AST):
         return f'{self.fn} with scope=[{scope_contents}]'
 
 
+
+class Suspense(AST):
+    getter: TypingCallable[[], AST]
+
 ############################ Evaluation functions ############################
 
 #DEBUG supporting py3.11
@@ -202,6 +206,7 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         FunctionLiteral: evaluate_function_literal,
         Closure: evaluate_closure,
         PyAction: evaluate_pyaction,
+        Suspense: evaluate_suspense,
         String: no_op,
         IString: evaluate_istring,
         Identifier: cannot_evaluate,
@@ -333,14 +338,6 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
     raise NotImplementedError(f'collect_args not implemented yet for {args}')
 
 
-
-def attach_args_to_scope(signature: Signature, args: list[AST], kwargs: dict[str, AST], scope: Scope):
-    """Resolve calling arguments and attach each to the scope so they are available during function body evaluation"""
-    dewy_args, dewy_kwargs = resolve_calling_args(signature, args, kwargs, scope)
-    for name, value in (dewy_args | dewy_kwargs).items():
-        scope.assign(name, value)
-
-
 def get_arg_name(arg: AST) -> str:
     """little helper function to get the name of an argument"""
     match arg:
@@ -351,14 +348,14 @@ def get_arg_name(arg: AST) -> str:
         case _:
             raise NotImplementedError(f'get_arg_name not implemented for {arg=}')
 
-
+# TODO: this should maybe take in 2 scopes, one for the closure scope, and one for the callings scope... or closure scope args should already be evaluated...
 # TODO: resolve args should handle the full gamut of possible types of arguments in a function
 #       position or keyword arguments (with or without defaults)
 #       position only arguments (with or without defaults)
 #       keyword only arguments (with or without defaults)
 # Note: the function signature will stay the same since calling a function or pyaction just amounts to setting args and kwargs
 # TODO: probably expand to include a container for unpack targets
-def resolve_calling_args(signature: Signature, args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[dict[str, AST], dict[str, AST]]:
+def resolve_calling_args(signature: Signature, args: list[AST], kwargs: dict[str, AST], caller_scope: Scope, closure_scope: Scope = Scope()) -> tuple[dict[str, AST], dict[str, AST]]:
     """
     Resolve the final list of arguments the function actually receives
     Properly handles when the signature includes defaults, keyword args, positional args, partial evaluation, etc.
@@ -381,8 +378,8 @@ def resolve_calling_args(signature: Signature, args: list[AST], kwargs: dict[str
     dewy_args, dewy_kwargs = {}, {}
 
     # evaluate all the args and kwargs
-    args = [evaluate(arg, scope) for arg in args]
-    kwargs = {name: evaluate(arg, scope) for name, arg in kwargs.items()}
+    args = [evaluate(arg, caller_scope) for arg in args]
+    kwargs = {name: evaluate(arg, caller_scope) for name, arg in kwargs.items()}
 
 
     # first pull out the calling keyword arguments
@@ -394,21 +391,23 @@ def resolve_calling_args(signature: Signature, args: list[AST], kwargs: dict[str
     for arg in sig_kwargs:
         assert isinstance(arg, Assign), f'INTERNAL ERROR: {arg=} is not an Assign'
         name = get_arg_name(arg)
-        dewy_kwargs[name] = arg.right
+        dewy_kwargs[name] = evaluate(arg.right, closure_scope)
 
-    if len(signature.pargs) + len(signature.pkwargs) < len(args):
+    if len(sig_pargs) + len(sig_pkwargs) < len(args):
         raise ValueError(f'Too many positional arguments for function. {signature=}, {args=}, {kwargs=}')
 
-    for spec, arg in zip(signature.pargs + signature.pkwargs, args):
+    # next, pair up the positional arguments
+    for spec, arg in zip(sig_pargs + sig_pkwargs, args):
         name = get_arg_name(spec)
-        dewy_args[name] = arg
+        dewy_args[name] = evaluate(arg, caller_scope)
 
     # all remaining arguments must have a value provided by the signature
     for arg in (sig_pargs + sig_pkwargs)[len(args):]:
+        #TODO: handle unpacking/spread
         name = get_arg_name(arg)
         if not isinstance(arg, Assign):
             raise ValueError(f'Non-Assign arguments remaining unpaired in signature. {signature=}, {args=}, {kwargs=}')
-        dewy_kwargs[name] = arg.right
+        dewy_kwargs[name] = evaluate(arg.right, closure_scope)
 
     return dewy_args, dewy_kwargs
 
@@ -456,16 +455,15 @@ def update_signature(signature: Signature, args: list[AST], scope: Scope) -> Sig
         right = evaluate(item, scope)
         sig_kwargs.append(Assign(left=Identifier(name), right=right))
 
-    return Signature(pargs=sig_pargs, pkwargs=sig_pkwargs, kwargs=sig_kwargs)
+    return Signature(pkwargs=sig_pkwargs, pargs=sig_pargs, kwargs=sig_kwargs)
 
 def apply_partial_eval(f: AST, args: list[AST], scope: Scope) -> AST:
     match f:
         # # this case shouldn't really be possible since you have to wrap a function literal in parenthesis to @ it, turning it into a Closure
         # case FunctionLiteral(args=signature, body=body):
-        #     call_args, call_kwargs = collect_calling_args(args, scope)
-        #     dewy_args, dewy_kwargs = resolve_calling_args(signature, call_args, call_kwargs, scope)
-        #     pdb.set_trace()
-        #     ...
+        #     new_signature = update_signature(signature, args, scope)
+        #     return FunctionLiteral(args=new_signature, body=body)
+
         case Closure(fn=FunctionLiteral(args=signature, body=body), scope=closure_scope):
             new_signature = update_signature(signature, args, scope)
             return Closure(fn=FunctionLiteral(args=new_signature, body=body), scope=closure_scope)
@@ -679,19 +677,30 @@ def evaluate_function_literal(ast: FunctionLiteral, scope: Scope):
     return Closure(fn=ast, scope=scope)
 
 def evaluate_closure(ast: Closure, scope: Scope):
-    fn_scope = Scope(ast.scope)
+    closure_scope = Scope(ast.scope)
+    caller_scope = Scope(scope)
     args, kwargs = scope.meta[ast].call_args or ([], {})
     signature = ast.fn.args
-    attach_args_to_scope(signature, args, kwargs, fn_scope)
-    return evaluate(ast.fn.body, fn_scope)
+
+    # attach all the args to scope so body can access them
+    dewy_args, dewy_kwargs = resolve_calling_args(signature, args, kwargs, caller_scope, closure_scope)
+    for name, value in (dewy_args | dewy_kwargs).items():
+        closure_scope.assign(name, value)
+
+    return evaluate(ast.fn.body, closure_scope)
 
 
 def evaluate_pyaction(ast: PyAction, scope: Scope):
-    fn_scope = Scope(scope)
+    caller_scope = Scope(scope)
     call_args, call_kwargs = scope.meta[ast].call_args or ([], {})
-    dewy_args, dewy_kwargs = resolve_calling_args(ast.signature, call_args, call_kwargs, fn_scope)
-    py_args, py_kwargs = ast.preprocessor([*dewy_args.values()], dewy_kwargs, fn_scope)
+    dewy_args, dewy_kwargs = resolve_calling_args(ast.signature, call_args, call_kwargs, caller_scope)
+    py_args, py_kwargs = ast.preprocessor([*dewy_args.values()], dewy_kwargs, caller_scope)
     return ast.action(*py_args, **py_kwargs)
+
+
+def evaluate_suspense(ast: Suspense, scope: Scope) -> AST:
+    # suspense is independent of the calling scope
+    return ast.getter()
 
 
 def evaluate_istring(ast: IString, scope: Scope) -> String:
