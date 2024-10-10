@@ -908,7 +908,7 @@ class BuiltinFuncs:
 # but top level printed strings should not show their quotes
 def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:    
     # don't evaluate. already evaluated by resolve_calling_args
-    # ast = evaluate(ast, scope) if not isinstance(ast, (PyAction, Closure)) else ast
+    ast = evaluate(ast, scope) if not isinstance(ast, (PyAction, Closure)) else ast
     match ast:
         # types that require special handling (i.e. because they have children that need to be stringified)
         case String(val): return val# if top_level else f'"{val}"'
@@ -920,6 +920,7 @@ def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
         case Closure(fn): return f'{fn}'
         case FunctionLiteral() as fn: return f'{fn}'
         case PyAction() as fn: return f'{fn}'
+        # case AtHandle() as at: return py_stringify(evaluate(at, scope), scope)
 
         # can use the built-in __str__ method for these types
         case Int() | Bool() | Undefined(): return str(ast)
