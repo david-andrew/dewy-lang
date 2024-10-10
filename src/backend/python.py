@@ -114,6 +114,9 @@ class Scope(ParserScope):
     """An extension of the Scope used during parsing to support runtime"""
     meta: dict[AST, MetaNamespace] = field(default_factory=MetaNamespaceDict)
 
+    def __repr__(self):
+        return f'<Scope@{hex(id(self))}>'
+
 
 class Iter(AST):
     item: AST
@@ -147,23 +150,30 @@ class Closure(AST):
     scope: Scope
 
     def __str__(self):
-        scope_lines = []
-        for name, var in self.scope.vars.items():
-            line = f'{var.decltype.name.lower()} {name}'
-            if var.type is not untyped:
-                line += f': {var.type}'
-            if var.value is self:
-                line += ' = <self>'
-            elif var.value is not void:
-                line += f' = {var.value}'
-            scope_lines.append(line)
-        scope_contents = ', '.join(scope_lines)
-        return f'{self.fn} with scope=[{scope_contents}]'
+        return f'{self.fn} with <Scope@{hex(id(self.scope))}>'
+        # scope_lines = []
+        # for name, var in self.scope.vars.items():
+        #     line = f'{var.decltype.name.lower()} {name}'
+        #     if var.type is not untyped:
+        #         line += f': {var.type}'
+        #     if var.value is self:
+        #         line += ' = <self>'
+        #     elif var.value is not void:
+        #         line += f' = {var.value}'
+        #     scope_lines.append(line)
+        # scope_contents = ', '.join(scope_lines)
+        # return f'{self.fn} with scope=[{scope_contents}]'
 
 
 
 class Suspense(AST):
     getter: TypingCallable[[], AST]
+
+    def __str__(self):
+        return f'Suspense(<getter@{hex(id(self.getter))}>)'
+    
+    # def from_value(value: AST, scope: Scope) -> 'Suspense':
+    #     return Suspense(lambda: evaluate(value, scope))
 
 ############################ Evaluation functions ############################
 
@@ -242,6 +252,10 @@ def evaluate(ast:AST, scope:Scope) -> AST:
         return eval_fn_map[ast_type](ast, scope)
 
     raise NotImplementedError(f'evaluation not implemented for {ast_type}')
+
+
+def suspend(ast:AST, scope:Scope) -> Suspense:
+    return Suspense(lambda: evaluate(ast, scope))
 
 
 def evaluate_declare(ast: Declare, scope: Scope):
@@ -400,46 +414,46 @@ def resolve_calling_args(signature: Signature, args: list[AST], kwargs: dict[str
     # next, pair up the positional arguments
     for spec, arg in zip(sig_pargs + sig_pkwargs, args):
         name = get_arg_name(spec)
-        dewy_args[name] = evaluate(arg, caller_scope)
+        dewy_args[name] = arg
 
     # all remaining arguments must have a value provided by the signature
     for arg in (sig_pargs + sig_pkwargs)[len(args):]:
         #TODO: handle unpacking/spread
         name = get_arg_name(arg)
         if not isinstance(arg, Assign):
+            pdb.set_trace()
             raise ValueError(f'Non-Assign arguments remaining unpaired in signature. {signature=}, {args=}, {kwargs=}')
         dewy_kwargs[name] = evaluate(arg.right, closure_scope)
 
     return dewy_args, dewy_kwargs
 
 
-class ArgBinding(Enum):
-    KEYWORD = auto()
-    POSITIONAL = auto()
+# class ArgBinding(Enum):
+#     KEYWORD = auto()
+#     POSITIONAL = auto()
 
-@dataclass
-class ResolvedArg:
-    name: str
-    value: AST
-    binding: ArgBinding
+# @dataclass
+# class ResolvedArg:
+#     name: str
+#     value: AST
+#     binding: ArgBinding
 
 
 def update_signature(signature: Signature, args: list[AST], scope: Scope) -> Signature:
     """Given values to partially apply to a function, update the call signature to reflect the new values"""
     call_args, call_kwargs = collect_calling_args(args, scope)
     sig_pkwargs, sig_pargs, sig_kwargs = signature.pkwargs, signature.pargs, signature.kwargs
-
     for item in sig_kwargs:
         name = get_arg_name(item)
         if name in call_kwargs:
             sig_kwargs = [*filter(lambda i: get_arg_name(i) != name, sig_kwargs)]
-            right = evaluate(call_kwargs[name], scope)
+            right = suspend(call_kwargs[name], scope) #((lambda ast, scope: lambda: evaluate(ast, scope))(call_kwargs[name], scope))
             sig_kwargs.append(Assign(left=Identifier(name), right=right))
     for item in sig_pkwargs:
         name = get_arg_name(item)
         if name in call_kwargs:
             sig_pkwargs = [*filter(lambda i: get_arg_name(i) != name, sig_pkwargs)]
-            right = evaluate(call_kwargs[name], scope)
+            right = suspend(call_kwargs[name], scope) #Suspense((lambda ast, scope: lambda: evaluate(ast, scope))(call_kwargs[name], scope))
             # any pkwargs become kwargs when a value is given by keyword or position
             sig_kwargs.append(Assign(left=Identifier(name), right=right))
 
@@ -453,7 +467,7 @@ def update_signature(signature: Signature, args: list[AST], scope: Scope) -> Sig
             name = get_arg_name(parg)
         else:
             raise ValueError(f'Too many positional arguments for function. {signature=}, {args=}')
-        right = evaluate(item, scope)
+        right = suspend(item, scope) #Suspense((lambda ast, scope: lambda: evaluate(ast, scope))(item, scope))
         sig_kwargs.append(Assign(left=Identifier(name), right=right))
 
     return Signature(pkwargs=sig_pkwargs, pargs=sig_pargs, kwargs=sig_kwargs)
@@ -480,15 +494,15 @@ def apply_partial_eval(f: AST, args: list[AST], scope: Scope) -> AST:
             raise NotImplementedError(f'Partial evaluation not implemented yet for {f=}')
 
 
-def find_arg_index(name: str, signature: Group) -> int:
-    for i, arg in enumerate(signature.items):
-        match arg:
-            case Identifier(arg_name) | TypedIdentifier(id=Identifier(arg_name)) | Assign(left=Identifier(arg_name)):
-                if arg_name == name: return i
-            case _:
-                raise NotImplementedError(f'find_arg_index not implemented yet for {arg=}')
+# def find_arg_index(name: str, signature: Group) -> int:
+#     for i, arg in enumerate(signature.items):
+#         match arg:
+#             case Identifier(arg_name) | TypedIdentifier(id=Identifier(arg_name)) | Assign(left=Identifier(arg_name)):
+#                 if arg_name == name: return i
+#             case _:
+#                 raise NotImplementedError(f'find_arg_index not implemented yet for {arg=}')
 
-    raise ValueError(f'Argument {name} not found in signature {signature}')
+#     raise ValueError(f'Argument {name} not found in signature {signature}')
 
 def evaluate_group(ast: Group, scope: Scope):
 
@@ -892,8 +906,9 @@ class BuiltinFuncs:
 #TODO: consider adding a flag repr vs str, where initially str is used, but children get repr. 
 # as is, stringifying should put quotes around strings that are children of other objects 
 # but top level printed strings should not show their quotes
-def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
-    ast = evaluate(ast, scope) if not isinstance(ast, (PyAction, Closure)) else ast
+def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:    
+    # don't evaluate. already evaluated by resolve_calling_args
+    # ast = evaluate(ast, scope) if not isinstance(ast, (PyAction, Closure)) else ast
     match ast:
         # types that require special handling (i.e. because they have children that need to be stringified)
         case String(val): return val# if top_level else f'"{val}"'
