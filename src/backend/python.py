@@ -168,12 +168,10 @@ class Closure(AST):
 
 class Suspense(AST):
     getter: TypingCallable[[], AST]
+    _value: AST # just for printing
 
     def __str__(self):
-        return f'Suspense(<getter@{hex(id(self.getter))}>)'
-    
-    # def from_value(value: AST, scope: Scope) -> 'Suspense':
-    #     return Suspense(lambda: evaluate(value, scope))
+        return f'Suspense({self._value})'
 
 ############################ Evaluation functions ############################
 
@@ -255,7 +253,7 @@ def evaluate(ast:AST, scope:Scope) -> AST:
 
 
 def suspend(ast:AST, scope:Scope) -> Suspense:
-    return Suspense(lambda: evaluate(ast, scope))
+    return Suspense(lambda: evaluate(ast, scope), ast)
 
 
 def evaluate_declare(ast: Declare, scope: Scope):
