@@ -442,7 +442,7 @@ def resolve_calling_args(signature: Signature, args: list[AST], kwargs: dict[str
 def update_signature(signature: Signature, args: list[AST], scope: Scope) -> Signature:
     """Given values to partially apply to a function, update the call signature to reflect the new values"""
     call_args, call_kwargs = collect_calling_args(args, scope)
-    sig_pkwargs, sig_pargs, sig_kwargs = signature.pkwargs, signature.pargs, signature.kwargs
+    sig_pkwargs, sig_pargs, sig_kwargs = signature.pkwargs.copy(), signature.pargs.copy(), signature.kwargs.copy()
     for item in sig_kwargs:
         name = get_arg_name(item)
         if name in call_kwargs:
