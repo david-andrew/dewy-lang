@@ -12,11 +12,11 @@ Token = type(TokenBase)
 Keyword = src:string => [
     ...TokenBase
     name = 'Keyword'
-    __repr__ = () => '<{name}: {value}>'
+    __repr__ = () => '<{name}: {src}>'
 ]
 
 
-eat_fn_type = func<src:string> => int? 
+eat_fn_type = src:string :> int?
 
 
 /{
@@ -26,12 +26,12 @@ eat_fn_type = func<src:string> => int?
 
     noting that keywords are case insensitive
 }/
-eat_keyword: func<src:string> => int? = src:string => {
+eat_keyword = src:string :> int? => {
     keywords = ['in' 'as' 'loop' 'lazy' 'if' 'and' 'or' 'xor' 'nand' 'nor' 'xnor' 'not']
     max_len = [loop k in keywords k.length].max
-    lower_src = src[..max_len].lowercase()
+    lower_src = src[..max_len].lowercase
     loop k in keywords
         if lower_src.startswith(k)
             return k.length
-    return undefined // tbd if this is optional
+    return undefined
 }
