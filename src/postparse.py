@@ -36,9 +36,14 @@ class Signature(AST):
     #TODO: probably keep track of spread args i.e. "spargs"
 
     def _is_delimited(self) -> bool:
-        if any(isinstance(i, Assign) for i in self.pkwargs + self.pargs + self.kwargs):
+        n_args = len(self.pkwargs) + len(self.pargs) + len(self.kwargs)
+        if n_args > 1 or n_args == 0:
             return False
-        return not bool(self.pargs or self.kwargs)
+        if any(isinstance(i, Assign) for i in self.pkwargs):
+            return False
+        if len(self.pargs) > 0 or len(self.kwargs) > 0:
+            return False
+        return True
 
     def __str__(self):
         pkwargs = ' '.join(str(i) for i in self.pkwargs)

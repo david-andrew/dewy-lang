@@ -8,9 +8,9 @@ Dewy is a general purpose programming language with a focus on engineering.
 
 ### Dependancies
 
-For now, the only dependancy is **Python >= 3.12** with an optional dependancy on `rich` for rich printing/errors (`pip install rich`)
+For now, the only dependency is **Python >= 3.12** with an optional dependency on `rich` for rich printing/errors (`pip install rich`)
 
-Later dependancies will probably include `clang`/`llvm`
+Later (dev) dependencies will probably include [`QBE`](https://c9x.me/compile/)
 
 ### Automatic
 
@@ -50,8 +50,7 @@ dewy my_script.dewy
 otherwise you can run the python script directly
 
 ```
-cd src/compiler
-python compiler.py ../path/to/my_script.dewy
+python -m src.frontend ../path/to/my_script.dewy
 ```
 
 ### Examples
