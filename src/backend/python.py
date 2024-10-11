@@ -165,14 +165,6 @@ class Closure(AST):
         # return f'{self.fn} with scope=[{scope_contents}]'
 
 
-
-class Suspense(AST):
-    getter: TypingCallable[[], AST]
-    _value: AST # just for printing
-
-    def __str__(self):
-        return f'Suspense({self._value})'
-
 ############################ Evaluation functions ############################
 
 #DEBUG supporting py3.11
@@ -214,7 +206,6 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         FunctionLiteral: evaluate_function_literal,
         Closure: evaluate_closure,
         PyAction: evaluate_pyaction,
-        Suspense: evaluate_suspense,
         String: no_op,
         IString: evaluate_istring,
         Identifier: cannot_evaluate,
@@ -252,8 +243,9 @@ def evaluate(ast:AST, scope:Scope) -> AST:
     raise NotImplementedError(f'evaluation not implemented for {ast_type}')
 
 
-def suspend(ast:AST, scope:Scope) -> Suspense:
-    return Suspense(lambda: evaluate(ast, scope), ast)
+def suspend(ast:AST, scope:Scope) -> Closure:
+    """Wrap an AST in a Closure to be evaluated later"""
+    return Closure(fn=FunctionLiteral(args=Signature(), body=ast), scope=scope)
 
 
 def evaluate_declare(ast: Declare, scope: Scope):
@@ -426,16 +418,6 @@ def resolve_calling_args(signature: Signature, args: list[AST], kwargs: dict[str
     return dewy_args, dewy_kwargs
 
 
-# class ArgBinding(Enum):
-#     KEYWORD = auto()
-#     POSITIONAL = auto()
-
-# @dataclass
-# class ResolvedArg:
-#     name: str
-#     value: AST
-#     binding: ArgBinding
-
 
 def update_signature(signature: Signature, args: list[AST], scope: Scope) -> Signature:
     """Given values to partially apply to a function, update the call signature to reflect the new values"""
@@ -491,16 +473,6 @@ def apply_partial_eval(f: AST, args: list[AST], scope: Scope) -> AST:
         case _:
             raise NotImplementedError(f'Partial evaluation not implemented yet for {f=}')
 
-
-# def find_arg_index(name: str, signature: Group) -> int:
-#     for i, arg in enumerate(signature.items):
-#         match arg:
-#             case Identifier(arg_name) | TypedIdentifier(id=Identifier(arg_name)) | Assign(left=Identifier(arg_name)):
-#                 if arg_name == name: return i
-#             case _:
-#                 raise NotImplementedError(f'find_arg_index not implemented yet for {arg=}')
-
-#     raise ValueError(f'Argument {name} not found in signature {signature}')
 
 def evaluate_group(ast: Group, scope: Scope):
 
@@ -578,9 +550,6 @@ def evaluate_iter_in(ast: IterIn, scope: Scope):
     pdb.set_trace()
     raise NotImplementedError('IterIn not implemented yet')
 
-# def determine_how_many_to_take
-def take_n(gen, n:int):
-    return [next(gen) for _ in range(n)]
 
 #TODO: this is really only for array unpacking. need to handle object unpacking as well...
 #      need to check what type value
@@ -709,11 +678,6 @@ def evaluate_pyaction(ast: PyAction, scope: Scope):
     dewy_args, dewy_kwargs = resolve_calling_args(ast.signature, call_args, call_kwargs, caller_scope)
     py_args, py_kwargs = ast.preprocessor([*dewy_args.values()], dewy_kwargs, caller_scope)
     return ast.action(*py_args, **py_kwargs)
-
-
-def evaluate_suspense(ast: Suspense, scope: Scope) -> AST:
-    # suspense is independent of the calling scope
-    return ast.getter()
 
 
 def evaluate_istring(ast: IString, scope: Scope) -> String:

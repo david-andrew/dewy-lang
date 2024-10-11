@@ -506,7 +506,7 @@ class UnaryDiv(UnaryPrefixOp):
 
 class AtHandle(UnaryPrefixOp):
     def __str__(self):
-        if isinstance(self.operand, Delimited):
+        if isinstance(self.operand, (Delimited, Identifier)):
             return f'@{self.operand}'
         return f'@({self.operand})'
 
