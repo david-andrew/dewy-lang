@@ -6,13 +6,13 @@ from ..syntax import (
     AST,
     Type,
     PointsTo, BidirPointsTo,
-    ListOfASTs, PrototypeTuple, Block, Array, Group, Range, Object, Dict, BidirDict, UnpackTarget,
+    ListOfASTs, PrototypeTuple, Block, Array, Group, Range, ObjectLiteral, Dict, BidirDict, UnpackTarget,
     TypedIdentifier,
     Void, void, Undefined, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
     Identifier, Express, Declare,
-    PrototypePyAction, Call,
+    PrototypePyAction, Call, Access,
     Assign,
     Int, Bool,
     Range, IterIn,
@@ -165,6 +165,26 @@ class Closure(AST):
         # return f'{self.fn} with scope=[{scope_contents}]'
 
 
+
+class Object(AST):
+    scope: Scope
+
+    def __str__(self):
+        chunks = []
+        for name, var in self.scope.vars.items():
+            chunk = f'{var.decltype.name.lower()} {name}'
+            if var.type is not untyped:
+                chunk += f': {var.type}'
+            #TODO: need to handle any recursion loops...
+            elif var.value is not void:
+                chunk += f' = {var.value}'
+            chunks.append(chunk)
+        if len(chunks) < 5:
+            return f'[{' '.join(chunks)}]'
+        return f'[\n    {'\n    '.join(chunks)}\n]'
+
+
+
 ############################ Evaluation functions ############################
 
 #DEBUG supporting py3.11
@@ -201,6 +221,9 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         PointsTo: evaluate_points_to,
         BidirDict: evaluate_bidir_dict,
         BidirPointsTo: evaluate_bidir_points_to,
+        ObjectLiteral: evaluate_object_literal,
+        Object: no_op,
+        Access: evaluate_access,
         Assign: evaluate_assign,
         IterIn: evaluate_iter_in,
         FunctionLiteral: evaluate_function_literal,
@@ -325,7 +348,7 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
             val = evaluate(right, scope)
             match val:
                 case Array(items): ... #return [collect_calling_args(i, scope) for i in items]
-        case Int() | String() | IString() | Call() | Express() | UnaryPrefixOp():
+        case Int() | String() | IString() | Call() | Access() | Express() | UnaryPrefixOp():
             return [args], {}
         # case Call(): return [args], {}
         case Group(items):
@@ -506,6 +529,33 @@ def evaluate_bidir_dict(ast: BidirDict, scope: Scope) -> BidirDict:
 
 def evaluate_bidir_points_to(ast: BidirPointsTo, scope: Scope) -> BidirPointsTo:
     return BidirPointsTo(evaluate(ast.left, scope), evaluate(ast.right, scope))
+
+def evaluate_object_literal(ast: ObjectLiteral, scope: Scope) -> Object:
+    obj_scope = Scope(scope)
+    evaluate(Group(ast.items), obj_scope)
+    return Object(scope=obj_scope)
+
+def evaluate_access(ast: Access, scope: Scope) -> AST:
+    left = evaluate(ast.left, scope)
+    right = ast.right
+    match right:
+        case Identifier():
+            return evaluate_id_access(left, right, scope)
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'evaluate_access not implemented yet for {right=}. {left=}')
+
+def evaluate_id_access(left: AST, right: Identifier, scope: Scope) -> AST:
+    match left:
+        case Object(scope):
+            return evaluate(scope.get(right.name).value, scope)
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'evaluate_id_access not implemented yet for {left=}, {right=}')
+
+#TODO: other access types (which are probably more like vectorized ops)
+#      vectorized_call. perhaps this is just the catch all case for anything not an identifier? to use an identifier as an arg, just wrap in parens
+#      vectorized_index? is that a coherent concept? honestly probably just let regular multidimensional indexing handle that case
 
 def evaluate_assign(ast: Assign, scope: Scope):
     match ast:
@@ -882,6 +932,7 @@ def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
         case Closure(fn): return f'{fn}'
         case FunctionLiteral() as fn: return f'{fn}'
         case PyAction() as fn: return f'{fn}'
+        case Object() as obj: return f'{obj}'
         # case AtHandle() as at: return py_stringify(evaluate(at, scope), scope)
 
         # can use the built-in __str__ method for these types

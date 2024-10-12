@@ -6,7 +6,7 @@ from .syntax import (
     Declare,
     PointsTo, BidirPointsTo,
     Type,
-    ListOfASTs, PrototypeTuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, Object, Dict, BidirDict, TypeParam,
+    ListOfASTs, PrototypeTuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, ObjectLiteral, Dict, BidirDict, TypeParam,
     Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
@@ -145,12 +145,14 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             case Index():
                 pdb.set_trace()
                 ...
+            case Access(left=left, right=PrototypeIdentifier(name=name)):
+                gen.send(Access(left, Identifier(name)))
             case Access():
                 pdb.set_trace()
                 ...
 
             # cases that themselves don't get adjusted but may contain nested children that need to be converted
-            case IString() | Group() | Block() | PrototypeTuple() | Array() | Object() | Dict() | BidirDict() | FunctionLiteral() | Signature() | Range() | Loop() | If() | Flow() | Default() \
+            case IString() | Group() | Block() | PrototypeTuple() | Array() | ObjectLiteral() | Dict() | BidirDict() | FunctionLiteral() | Signature() | Range() | Loop() | If() | Flow() | Default() \
                 | PointsTo() | BidirPointsTo() | Equal() | Less() | LessEqual() | Greater() | GreaterEqual() | LeftShift() | RightShift() | LeftRotate() | RightRotate() | LeftRotateCarry() | RightRotateCarry() | Add() | Sub() | Mul() | Div() | IDiv() | Mod() | Pow() | And() | Or() | Xor() | Nand() | Nor() | Xnor() | MemberIn() \
                 | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() \
                 | TypedIdentifier():

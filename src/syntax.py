@@ -565,7 +565,7 @@ class BidirDict(AST, Delimited):
         return f'[{" ".join(map(str, self.items))}]'
 
 
-class Object(AST, Delimited):
+class ObjectLiteral(AST, Delimited):
     items: list[AST] # list[Declare|Assign|AST] has to have at least 1 declare or assignment
 
     def __str__(self):

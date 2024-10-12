@@ -9,7 +9,7 @@ from .syntax import (
     Declare,
     PointsTo, BidirPointsTo,
     Type,
-    ListOfASTs, PrototypeTuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, Object, Dict, BidirDict, TypeParam,
+    ListOfASTs, PrototypeTuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, ObjectLiteral, Dict, BidirDict, TypeParam,
     Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
@@ -750,7 +750,13 @@ def parse_block(block: Block_t, scope: Scope) -> AST:
             elif (asts:=as_array_inners(inner.asts)) is not None:
                 return Array(asts)
             elif (asts:=as_object_inners(inner.asts)) is not None:
-                return Object(inner.asts)
+                return ObjectLiteral(inner.asts)
+            # elif (asts:=as_array_generator_inners(inner.asts)) is not None:
+            #     return ArrayGenerator(asts)
+            # elif (asts:=as_dict_generator_inners(inner.asts)) is not None:
+            #     return DictGenerator(asts)
+            # elif (asts:=as_bidict_generator_inners(inner.asts)) is not None:
+            #     return BidirDictGenerator(asts)
             #error cases
             if any(isinstance(i, PointsTo) for i in inner.asts) and not all(isinstance(i, PointsTo) for i in inner.asts):
                 raise ValueError(f"ERROR: cannot mix PointsTo with other types in a dict: {inner=}")
@@ -770,7 +776,7 @@ def parse_block(block: Block_t, scope: Scope) -> AST:
         case '[]', BidirPointsTo():
             return BidirDict([inner])
         case '[]', Assign() | Declare():
-            return Object([inner])
+            return ObjectLiteral([inner])
         case '[]', _:
             # TODO: handle if this should be an object or dictionary instead of an array
             return Array([inner])
