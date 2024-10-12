@@ -202,7 +202,7 @@
 </ol>
 <p>This means that <code>in</code> expressions can be used to trivially construct a for-loop.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%201..5%0A%7B%0A%20%20%20%20print%28%27%7Bi%7D%2C%20%27%29%0A%7D&id=DewyIframe85"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B1..5%5D%0A%7B%0A%20%20%20%20print%28%27%7Bi%7D%2C%20%27%29%0A%7D&id=DewyIframe85"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe85"
     frameBorder="0"
@@ -223,7 +223,7 @@ I like to eat pear
 </code></pre>
 <p>Items in a dictionary can be iterated over like so</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=ratings%20%3D%20%5B%0A%20%20%20%20%27star%20wars%27%20-%3E%2073%0A%20%20%20%20%27star%20trek%27%20-%3E%2089%0A%20%20%20%20%27star%20gate%27%20-%3E%2084%0A%20%20%20%20%27battlestar%20galactica%27%20-%3E%2087%0A%20%20%20%20%27legend%20of%20the%20galactic%20heroes%27%20-%3E%20100%0A%5D%0A%0Aloop%20show%2C%20rating%20in%20ratings%0A%7B%0A%20%20%20%20printl%28%27I%20give%20%7Bshow%7D%20a%20%7Brating%7D%20out%20100%27%29%0A%7D&id=DewyIframe87"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=ratings%20%3D%20%5B%0A%20%20%20%20%27star%20wars%27%20-%3E%2073%0A%20%20%20%20%27star%20trek%27%20-%3E%2089%0A%20%20%20%20%27star%20gate%27%20-%3E%2084%0A%20%20%20%20%27battlestar%20galactica%27%20-%3E%2087%0A%20%20%20%20%27legend%20of%20the%20galactic%20heroes%27%20-%3E%20100%0A%5D%0A%0Aloop%20%5Bshow%20rating%5D%20in%20ratings%0A%7B%0A%20%20%20%20printl%28%27I%20give%20%7Bshow%7D%20a%20%7Brating%7D%20out%20100%27%29%0A%7D&id=DewyIframe87"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe87"
     frameBorder="0"
@@ -300,7 +300,7 @@ Charlie chose Green
 ></iframe>
 <p>do-loop over an iterator. On the first iteration, <code>i</code> will be undefined, while it will be available on subsequent iterations</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=do%20printl%27this%20is%20a%20do-for%20loop.%20i%3D%7Bi%7D%27%0Aloop%20i%20in%200..5&id=DewyIframe94"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=do%20printl%27this%20is%20a%20do-for%20loop.%20i%3D%7Bi%7D%27%0Aloop%20i%20in%20%5B0..5%5D&id=DewyIframe94"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe94"
     frameBorder="0"
@@ -337,7 +337,7 @@ this is a do-for loop. i=5
 <h2 id="loop-generators"><a class="header" href="#loop-generators">Loop Generators</a></h2>
 <p>Let's look at this example</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%201..10%20%7Bi%7D&id=DewyIframe97"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B1..10%5D%20%7Bi%7D&id=DewyIframe97"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe97"
     frameBorder="0"
@@ -345,14 +345,14 @@ this is a do-for loop. i=5
 <p>Every iteration of the loop, the current value of <code>i</code> is &quot;expressed&quot;, that is to say, the value could be stored in a variable or a container.</p>
 <p>Lets capture the expressed value in a container by wrapping the loop in <code>[]</code> brackets</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bloop%20i%20in%201..10%20%7Bi%7D%5D&id=DewyIframe98"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bloop%20i%20in%20%5B1..10%5D%20%7Bi%7D%5D&id=DewyIframe98"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe98"
     frameBorder="0"
 ></iframe>
 <p>This &quot;generates&quot; the array <code>[1 2 3 4 5 6 7 8 9 10]</code>, which we can then store into a variable</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_array%20%3D%20%5Bloop%20i%20in%201..10%20%7Bi%7D%5D%0A%0A//optional%20to%20omit%20the%20braces%20since%20only%20a%20single%20expression%20is%20in%20the%20body%0Amy_array%20%3D%20%5Bloop%20i%20in%201..10%20i%5D&id=DewyIframe99"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_array%20%3D%20%5Bloop%20i%20in%20%5B1..10%5D%20%7Bi%7D%5D%0A%0A//optional%20to%20omit%20the%20braces%20since%20only%20a%20single%20expression%20is%20in%20the%20body%0Amy_array%20%3D%20%5Bloop%20i%20in%20%5B1..10%5D%20i%5D&id=DewyIframe99"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe99"
     frameBorder="0"
@@ -361,7 +361,7 @@ this is a do-for loop. i=5
 <h3 id="multiple-expressions-per-iteration"><a class="header" href="#multiple-expressions-per-iteration">Multiple Expressions per Iteration</a></h3>
 <p>Generators can do a lot of interesting things. For example we can express multiple values on a single loop iteration</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=//note%20the%20braces%20are%20not%20optional%20in%20this%20case%0Amy_array%20%3D%20%5Bloop%20i%20in%201..5%20%7B%20i%20i%5E2%20%7D%5D&id=DewyIframe100"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=//note%20the%20braces%20are%20not%20optional%20in%20this%20case%0Amy_array%20%3D%20%5Bloop%20i%20in%20%5B1..5%5D%20%7B%20i%20i%5E2%20%7D%5D&id=DewyIframe100"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe100"
     frameBorder="0"
@@ -369,7 +369,7 @@ this is a do-for loop. i=5
 <p>producing the array <code>[1 1 2 4 3 9 4 16 5 25]</code>.</p>
 <p>We can also construct a dictionary by expressing with a <code>-&gt;</code> between two values</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=squares%20%3D%20%5Bloop%20i%20in%201..5%20%7B%20i%20-%3E%20i%5E2%20%7D%5D&id=DewyIframe101"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=squares%20%3D%20%5Bloop%20i%20in%20%5B1..5%5D%20%7B%20i%20-%3E%20i%5E2%20%7D%5D&id=DewyIframe101"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe101"
     frameBorder="0"
@@ -378,7 +378,7 @@ this is a do-for loop. i=5
 <h3 id="multidimensional-generators"><a class="header" href="#multidimensional-generators">Multidimensional Generators</a></h3>
 <p>You can generate a multidimensional array using multiple nested loops. For example</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=indices%20%3D%0A%5B%0A%20%20%20%20loop%20i%20in%201..5%0A%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20loop%20j%20in%201..5%0A%20%20%20%20%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20%20%20%20%20i%0A%20%20%20%20%20%20%20%20%20%20%20%20j%0A%20%20%20%20%20%20%20%20%5D%0A%20%20%20%20%5D%0A%5D&id=DewyIframe102"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=indices%20%3D%0A%5B%0A%20%20%20%20loop%20i%20in%20%5B1..5%5D%0A%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20loop%20j%20in%20%5B1..5%5D%0A%20%20%20%20%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20%20%20%20%20i%0A%20%20%20%20%20%20%20%20%20%20%20%20j%0A%20%20%20%20%20%20%20%20%5D%0A%20%20%20%20%5D%0A%5D&id=DewyIframe102"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe102"
     frameBorder="0"

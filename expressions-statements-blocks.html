@@ -216,12 +216,12 @@
 ></iframe>
 <p>Most expressions in Dewy will return something, but you can easily convert an expression into a <code>void</code> statement by appending a semicolon <code>;</code> to the end of the expression</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_expression%20%3D%20%5B%0A%20%20%20%20sqrt%281%29%3B%0A%20%20%20%20sqrt%284%29%3B%0A%20%20%20%20sqrt%289%29%3B%0A%20%20%20%20sqrt%2816%29%3B%0A%20%20%20%20sqrt%2836%29%3B%0A%20%20%20%20sqrt%2849%29%3B%0A%20%20%20%20sqrt%2864%29%3B%0A%5D&id=DewyIframe8"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_expression%20%3D%20%5B%0A%20%20%20%20sqrt%281%29%3B%0A%20%20%20%20sqrt%284%29%0A%20%20%20%20sqrt%289%29%3B%0A%20%20%20%20sqrt%2816%29%0A%20%20%20%20sqrt%2825%29%3B%0A%20%20%20%20sqrt%2836%29%3B%0A%20%20%20%20sqrt%2849%29%3B%0A%20%20%20%20sqrt%2864%29%0A%5D&id=DewyIframe8"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe8"
     frameBorder="0"
 ></iframe>
-<p>In this example, the resulting value of each <code>sqrt</code> call is suppressed by the semicolon, and the array captures no values, meaning <code>my_expression = []</code>.</p>
+<p>In this example, the resulting value of each <code>sqrt</code> call is suppressed by the semicolon, and the array captures only the non-suppressed values, resulting in <code>my_expression = [2 4 8]</code>.</p>
 <blockquote>
 <p>Note: the one context where semicolon does not suppress the value of an expression is in a multidimensional array literal. In this context, semicolons are used to indicate new dimensions of the array, and values with semicolons are still captured.</p>
 </blockquote>

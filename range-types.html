@@ -290,7 +290,7 @@ However, due to range juxtapose's low precedence, any range as part of an <code>
 <p>These are both equivalent to directly constructing the range <code>[0,0.25..1]</code>, however the arithmetic versions are frequently more convenient.</p>
 <p>This type of construction is closely related to the <code>linspace()</code>/<code>logspace()</code> functions in Dewy. TBD but <code>linspace</code>/<code>logspace</code> may in fact be implemented like so:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=linspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%29%20%3D%3E%20%7B%0A%20%20%20%20start%2C%20stop%20%3D%20interval.start%2C%20interval.stop%0A%20%20%20%20step%20%3D%20%28stop-start%29/%28n-1%29%0A%20%20%20%20return%20interval.start%2Cinterval.start%2Bstep..interval.stop%0A%7D%0Alogspace%20%3D%20%28interval%3Arange%2C%20n%3Aint%3D10%2C%20base%3Areal%3D10%29%20%3D%3E%20base%5Elinspace%28interval%2C%20n%29&id=DewyIframe41"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=linspace%20%3D%20%28interval%3Arange%20n%3Aint%3D10%29%20%3D%3E%20%7B%0A%20%20%20%20%5Bstart%20stop%5D%20%3D%20%5Binterval.start%20interval.stop%5D%0A%20%20%20%20step%20%3D%20%28stop-start%29/%28n-1%29%0A%20%20%20%20return%20start%2Cstart%2Bstep..stop%0A%7D%0Alogspace%20%3D%20%28interval%3Arange%20n%3Aint%3D10%20base%3Areal%3D10%29%20%3D%3E%20base%5Elinspace%28interval%20n%29&id=DewyIframe41"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe41"
     frameBorder="0"
