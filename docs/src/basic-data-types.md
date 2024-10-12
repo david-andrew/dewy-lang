@@ -104,6 +104,11 @@ my_complex3 = 1 ∠ 45°
 
 Quaternions
 
+```dewy
+q = 1 + 2i + 3j + 4k
+Q = 1 + 2I + 3J + 4K   // can use lower or uppercase
+```
+
 ## MISC.
 
 Other datatypes (probably include on this page)
