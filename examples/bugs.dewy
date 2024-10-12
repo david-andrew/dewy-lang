@@ -1,1 +1,8 @@
 // examples of bugs (or just unimplemented stuff) that currently exist in the tokenizer/parser/etc.
+
+// precedence ambiguity between `.` and `()`.
+//should obviously be access first, then call due to left to right associativity
+obj = [
+    fn = x => x * 2
+]
+printl(obj.fn(5))
