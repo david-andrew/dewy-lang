@@ -2,7 +2,14 @@
 
 // precedence ambiguity between `.` and `()`.
 //should obviously be access first, then call due to left to right associativity
+// this one is fixable by adding slight float offsets to the operator precedences in the parser
 obj = [
     fn = x => x * 2
 ]
 printl(obj.fn(5))
+
+// this one will require type checking to verify myfn is a callable rather than a multipliable
+myfn = () => [
+    x = 5
+]
+printl(myfn().x)
