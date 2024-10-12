@@ -540,18 +540,28 @@ def evaluate_access(ast: Access, scope: Scope) -> AST:
     right = ast.right
     match right:
         case Identifier():
-            return evaluate_id_access(left, right, scope)
+            return evaluate_id_access(left, right, scope, evaluate_right=True)
+        case AtHandle(operand=Identifier() as id):
+            return evaluate_id_access(left, id, scope, evaluate_right=False)
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'evaluate_access not implemented yet for {right=}. {left=}')
 
-def evaluate_id_access(left: AST, right: Identifier, scope: Scope) -> AST:
+def evaluate_id_access(left: AST, right: Identifier, scope: Scope, evaluate_right=True) -> AST:
     match left:
         case Object(scope):
-            return evaluate(scope.get(right.name).value, scope)
+            access = scope.get(right.name).value
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'evaluate_id_access not implemented yet for {left=}, {right=}')
+        
+    if evaluate_right:
+        return evaluate(access, scope)
+    return access
+
+# def evaluate_at_handle_access(left: AST, right: AtHandle, scope: Scope) -> AST:
+#     pdb.set_trace()
+#     raise NotImplementedError(f'evaluate_at_handle_access not implemented yet for {left=}, {right=}')
 
 #TODO: other access types (which are probably more like vectorized ops)
 #      vectorized_call. perhaps this is just the catch all case for anything not an identifier? to use an identifier as an arg, just wrap in parens

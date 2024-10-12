@@ -147,6 +147,8 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 ...
             case Access(left=left, right=PrototypeIdentifier(name=name)):
                 gen.send(Access(left, Identifier(name)))
+            case Access(left=left, right=AtHandle(operand=PrototypeIdentifier(name=name))):
+                gen.send(Access(left, AtHandle(Identifier(name))))
             case Access():
                 pdb.set_trace()
                 ...
