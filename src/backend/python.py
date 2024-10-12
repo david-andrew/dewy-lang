@@ -180,8 +180,10 @@ class Object(AST):
                 chunk += f' = {var.value}'
             chunks.append(chunk)
         if len(chunks) < 5:
-            return f'[{' '.join(chunks)}]'
-        return f'[\n    {'\n    '.join(chunks)}\n]'
+            return f'[{" ".join(chunks)}]'
+        newline = '\n'
+        #TODO: py3.12 remove {newline} and replace with direct \n
+        return f'[{newline}    {f"{newline}    ".join(chunks)}{newline}]'
 
 
 
