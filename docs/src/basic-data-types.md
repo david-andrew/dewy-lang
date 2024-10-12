@@ -58,7 +58,7 @@ Fixed point will be stored as two integers, `digits` and `shift` where the value
 TBD on the syntax for declaring a fixed point number. likely to be a function call e.g.
 
 ```dewy
-my_fixed_point = fixed_point(3141592, -6)
+my_fixed_point = fixed_point(3141592 -6)
 ```
 
 ### Rational

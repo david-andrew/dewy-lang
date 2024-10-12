@@ -59,7 +59,7 @@ Dewy is a 100% expression-based language, meaning everything is formed from smal
 **dictionary pointers**
 
 - `->` indicates the left expression points to the right expression in the dictionary
-- `<-` reverses the order, making the right expression the key, and the left the value
+<!-- - `<-` reverses the order, making the right expression the key, and the left the value -->
 - `<->` indicates that left is inserted as a key that points to right, and right is inserted as a key that points to left
 
 **Function pointer**
