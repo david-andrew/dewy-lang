@@ -104,7 +104,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
         match i:
             case Call(f=PrototypeIdentifier(name=name), args=args):
                 gen.send(Call(Identifier(name), args))
-            case Call(args=None) | Call(f=AtHandle()): ...
+            case Call(args=None) | Call(f=AtHandle()) | Call(f=Group()): ...
             # case Call(args=args): ... #TODO: handling when args is not none... generally will be a list of identifiers that need to be converted directly to Identifier
             case Call():
                 pdb.set_trace()

@@ -79,16 +79,18 @@ class Scope:
     vars: 'dict[str, Scope._var]' = field(default_factory=dict)
 
     @overload
-    def get(self, name:str, throw:Literal[True]=True) -> 'Scope._var': ...
+    def get(self, name:str, throw:Literal[True]=True, search_parents:bool=True) -> 'Scope._var': ...
     @overload
-    def get(self, name:str, throw:Literal[False]) -> 'Scope._var|None': ...
-    def get(self, name:str, throw:bool=True) -> 'Scope._var|None':
+    def get(self, name:str, throw:Literal[False], search_parents:bool=True) -> 'Scope._var|None': ...
+    def get(self, name:str, throw:bool=True, search_parents:bool=True) -> 'Scope._var|None':
         for s in self:
             if name in s.vars:
                 return s.vars[name]
+            if not search_parents:
+                break
 
         if throw:
-            raise KeyError(f'variable {name} not found in scope')
+            raise KeyError(f'variable "{name}" not found in scope')
         return None
 
     def assign(self, name:str, value:AST):
@@ -365,18 +367,36 @@ def is_callable(ast:AST, scope: Scope):
             # DEBUG: for now, hardcode to call
             return True
         #TODO: any other types that need to be evaluated to determine if callable
-
+        case Access(right=PrototypeIdentifier()) | Access(right=AtHandle(operand=PrototypeIdentifier())):
+            #TODO: same deal as above. for debugging, hardcode to call
+            return True
+        
         # known callable ASTs
         case PrototypePyAction() | PrototypeFunctionLiteral():
             return True
 
-        #TODO: may change this in the future, but for now, assume at handle can only be used on callables
+        #TODO: may change this in the future, but for now, assume at handle can only be used on callables 
+        #      as in when doing partial evaluation
         case AtHandle():
             return True
 
         # known non-callables
         case Int() | String() | Bool(): #TODO: rest of them..
             return False
+
+        # recuse into other ASTs
+        # TODO: need to handle more cases for group. e.g. it could have multiple items that are void, but still only return a single AST
+        #       and then also if there are multiple non-void items that makes a generator, which I think is not callable
+        case Group(items):
+            if len(items) == 0: return False #TODO: this generally shouldn't be possible as this should parse to a void literal
+            if len(items) == 1: return is_callable(items[0], scope)
+            pdb.set_trace()
+            raise NotImplementedError(f"ERROR: unhandled case to check if is_callable: {ast=}")
+            types = [get_type(i, scope) for i in items]
+            types = [*filter(lambda t: t is not void, types)]
+            if len(types) == 0: return False # this is possible if all items evaluate to void
+            if len(types) == 1: return is_callable_type(types[0])
+            if len(types) > 1: return False
 
         case _:
             raise ValueError(f"ERROR: unhandled case to check if is_callable: {ast=}")

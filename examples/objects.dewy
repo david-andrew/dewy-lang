@@ -18,7 +18,7 @@ printl(obj.fn)
 //printl(obj.fn2(5))
 
 
-
+something_global = 42
 
 obj2 = [
     let A = [
@@ -41,8 +41,13 @@ printl(obj2.A.x)
 printl(obj2.A.y)
 printl(obj2.A.fn)
 printl(obj2.@B)
-//printl(obj2.B(5 10))
-//printl(obj2.B(5 10).x)
-//printl(obj2.B(5 10).y)
-//printl(obj2.B(5 10).fn)
+//TODO: fix parse issue causing needing extra parenthesis/@ for disambiguation here
+printl((obj2.@B)(5 10))
+printl(((obj2.@B)(3 4)).x)
+printl(((obj2.@B)(6 7)).y)
+printl(((obj2.@B)(8 9)).fn)
 printl(obj2.C)
+
+// can't access members not in the direct object scope
+//printl(obj.something_global)
+//printl(obj2.something_global)

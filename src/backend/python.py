@@ -550,7 +550,7 @@ def evaluate_access(ast: Access, scope: Scope) -> AST:
 def evaluate_id_access(left: AST, right: Identifier, scope: Scope, evaluate_right=True) -> AST:
     match left:
         case Object(scope):
-            access = scope.get(right.name).value
+            access = scope.get(right.name, search_parents=False).value
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'evaluate_id_access not implemented yet for {left=}, {right=}')
