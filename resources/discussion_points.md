@@ -1172,7 +1172,26 @@ foo = (a:int, b:int=1, c:int=2) => a+b+c
 1, 2, 3 as a, b, c
 ```
 
-## Should we get rid of the low precedence range juxtapose, and force ranges with step size to wrap the tuple in parenthesis, or should loops with multiple iterators require parenthesis around each iterator? [mott since we removed need for commas in most situations]
+## Small consequences of getting rid of commas in most cases (and letting commas just be sugar for const list syntax)
+multiple arguments into the pipe operator is less convenient (requires wrapping in parenthesis). Though actually past me seems to have thought of a solution lol. I think having the `|*>` and `|>` version of the operator will nicely handle this. Perhaps consider `|...>` as the operator since it matches the spread operator `...` rather than python's `*` which is sort of like what I have now, but it's a bit obnoxious.
+
+```dewy
+myfunc1 = (A:number B:number C:number):>number => A*B+C
+a = 1
+b = 2
+c = 3
+a, b, c |*> myfunc1
+[a b c] |*> myfunc1  // equivalent to above
+
+// version that takes a list rather than multiple arguments
+myfunc2 = ([A B C]:[number number number]):> number => A*B+C
+a, b, c |> myfunc2
+[a b c] |> myfunc2
+```
+
+
+
+## Should we get rid of the low precedence range juxtapose, and force ranges with step size to wrap the tuple in parenthesis, or should loops with multiple iterators require parenthesis around each iterator? [moot since we removed need for commas in most situations]
 
 Currently there is a conflict with the operator precedence. We cannot have both of these:
 
