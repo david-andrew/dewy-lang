@@ -338,7 +338,7 @@ def is_binop(token: Token) -> bool:
     Determines if a token could be a binary operator.
     Note that this is not mutually exclusive with being a prefix operator or a postfix operator.
     """
-    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t, RangeJuxtapose_t, EllipsisJuxtapose_t, TypeParamJuxtapose_t))
+    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t, RangeJuxtapose_t, EllipsisJuxtapose_t, TypeParamJuxtapose_t, OpChain_t, VectorizedOp_t, CombinedAssignmentOp_t))
 
 
 def is_op(token: Token) -> bool:
@@ -537,8 +537,10 @@ def chain_operators(tokens: list[Token]) -> None:
             while i+j < len(stream) and is_unary_prefix_op(stream[i+j]):
                 j += 1
             if j > 1:
-                pdb.set_trace()
-                raise NotImplementedError('opchaining has not been implemented yet')
+                # convert the prefix operators into a single token
+                stream[i:i+j] = [OpChain_t([stream[i+k] for k in range(j)])]
+                gen.send(i+j)
+                continue
 
 
 def post_process(tokens: list[Token]) -> None:

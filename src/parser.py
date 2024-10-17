@@ -54,6 +54,9 @@ from .postok import (
     is_op,
     Flow_t,
     Declare_t,
+    OpChain_t,
+    VectorizedOp_t,
+    CombinedAssignmentOp_t,
 )
 from .utils import (
     bool_to_bool,
@@ -640,6 +643,11 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
 
         case Operator_t(op='in'):
             return IterIn(left, right)
+        
+        case OpChain_t(ops=list() as ops) if len(ops) > 1: #TODO: shouldn't be possible to make an OpChain with 1 or 0 ops
+            for unary_op in reversed(ops[1:]):
+                right = build_unary_prefix_expr(unary_op, right, scope)
+            return build_bin_expr(left, ops[0], right, scope)            
 
         case _:
             pdb.set_trace()
