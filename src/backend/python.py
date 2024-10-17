@@ -937,29 +937,48 @@ binary_dispatch_table: dict[BinaryDispatchKey[T, U], TypingCallable[[T, U], AST]
 }
 
 unsymmetric_binary_dispatch_table: dict[BinaryDispatchKey[T, U], ] = {
+    #e.g. (Mul, String, Int): lambda l, r: String(l * r), # if we follow python's behavior
 }
 
 #TODO: handling short circuiting for logical operators. perhaps have them in a separate dispatch table
 
 def evaluate_binary_dispatch(op: BinOp, scope: Scope):
+    # evaluate the operands
     left = evaluate(op.left, scope)
     right = evaluate(op.right, scope)
+    
+    # if either operand is undefined, the result is undefined
+    if isinstance(left, Undefined) or isinstance(right, Undefined):
+        return undefined
+    
+    # dispatch to the appropriate function
     key = (type(op), type(left), type(right))
     if key in binary_dispatch_table:
         left, right = cast(SimpleValue[T], left), cast(SimpleValue[U], right)
         return binary_dispatch_table[key](left.val, right.val)
+    
+    # if the key wasn't found, try the reverse key (by swapping the types of the operands)
     reverse_key = (type(op), type(right), type(left))
     if reverse_key in binary_dispatch_table:
         left, right = cast(SimpleValue[U], left), cast(SimpleValue[T], right)
         return binary_dispatch_table[reverse_key](left.val, right.val)
+    
     raise NotImplementedError(f'Binary dispatch not implemented for {key=}')
 
 def evaluate_unary_dispatch(op: UnaryPrefixOp|UnaryPostfixOp, scope: Scope):
+    # evaluate the operand
     operand = evaluate(op.operand, scope)
+
+    # if the operand is undefined, the result is undefined
+    if isinstance(operand, Undefined):
+        return undefined
+    
+    # dispatch to the appropriate function
     key = (type(op), type(operand))
     if key in unary_dispatch_table:
         operand = cast(SimpleValue[T], operand)
         return unary_dispatch_table[key](operand.val)
+    
     raise NotImplementedError(f'Unary dispatch not implemented for {key=}')
 
 
