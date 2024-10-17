@@ -338,11 +338,15 @@ for i, (assoc, group) in enumerate(operator_groups):
             precedence_table[op] = qint(val.values | {i})
 
 
-def operator_precedence(op: Operator_t) -> int | qint:
+def operator_precedence(op: Operator_t|OpChain_t|VectorizedOp_t|CombinedAssignmentOp_t) -> int | qint:
 
-    # TODO: handling compound operators like .+, +=, .+=, etc.
-    # if isinstance(op, CompoundOperator_t):
-    #     op = op.base
+    # for complex operators, extract the actual operator that determines precedence
+    if isinstance(op, CombinedAssignmentOp_t):
+        op = op.assign # combined assignment has same precedence as regular assignment
+    elif isinstance(op, VectorizedOp_t):
+        op = op.op # precedence should be based on the operator attached to the . operator
+    elif isinstance(op, OpChain_t):
+        op = op.ops[0] # opchain precedence is determined by the first operator in the chain
 
     try:
         return precedence_table[op]
