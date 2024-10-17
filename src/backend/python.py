@@ -186,6 +186,11 @@ class Object(AST):
         return f'[{newline}    {f"{newline}    ".join(chunks)}{newline}]'
 
 
+class Float(AST):
+    val: float
+
+    def __str__(self):
+        return f'{self.val}'
 
 ############################ Evaluation functions ############################
 
@@ -237,21 +242,22 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         Identifier: cannot_evaluate,
         Express: evaluate_express,
         Int: no_op,
+        Float: no_op,
         Bool: no_op,
         Range: no_op,
         Flow: evaluate_flow,
         Default: evaluate_default,
         If: evaluate_if,
         Loop: evaluate_loop,
+        UnaryPos: evaluate_unary_dispatch,
+        UnaryNeg: evaluate_unary_dispatch,
+        UnaryMul: evaluate_unary_dispatch,
+        UnaryDiv: evaluate_unary_dispatch,
+        Not: evaluate_unary_dispatch,
         Less: evaluate_binary_dispatch,
         Equal: evaluate_binary_dispatch,
         And: evaluate_binary_dispatch,
         Or: evaluate_binary_dispatch,
-        Not: evaluate_unary_dispatch,
-        UnaryPos: evaluate_binary_dispatch,
-        UnaryNeg: evaluate_binary_dispatch,
-        UnaryMul: evaluate_binary_dispatch,
-        UnaryDiv: evaluate_binary_dispatch,
         Add: evaluate_binary_dispatch,
         Mul: evaluate_binary_dispatch,
         Div: evaluate_binary_dispatch,
@@ -816,8 +822,7 @@ def evaluate_loop(ast: Loop, scope: Scope, save_child_scope:TypingCallable[[Scop
     # ast.condition
     # pdb.set_trace()
 
-class Float(AST):
-    val: float
+
 
 def int_int_div(l: int, r: int) -> Int | Float | Undefined:
     if r == 0:
@@ -828,6 +833,10 @@ def int_int_div(l: int, r: int) -> Int | Float | Undefined:
     else:
         return Float(res)
 
+def float_float_div(l: int|float, r: int|float) -> Float | Undefined:
+    if r == 0:
+        return undefined
+    return Float(l / r)
 
 class SimpleValue(Protocol, Generic[T]):
     val: T
@@ -843,22 +852,57 @@ unary_dispatch_table: dict[UnaryDispatchKey[T], TypingCallable[[T], AST]] = {
 }
 
 BinaryDispatchKey = tuple[type[BinOp], type[SimpleValue[T]], type[SimpleValue[U]]]
-binary_dispatch_table: dict[BinaryDispatchKey[T, U], TypingCallable[[T, U], AST]] = {
+# These are all symmetric meaning you can swap the operand types and the same function will be used (but the arguments should not be swapped)
+binary_dispatch_table: dict[BinaryDispatchKey[T, U], TypingCallable[[T, U], AST]|TypingCallable[[U, T], AST]] = {
     (And, Int, Int): lambda l, r: Int(l & r),
     (And, Bool, Bool): lambda l, r: Bool(l and r),
     (Or, Int, Int): lambda l, r: Int(l | r),
     (Or, Bool, Bool): lambda l, r: Bool(l or r),
+    (Xor, Int, Int): lambda l, r: Int(l ^ r),
+    (Xor, Bool, Bool): lambda l, r: Bool(l != r),
+    (Nand, Int, Int): lambda l, r: Int(~(l & r)),
+    (Nand, Bool, Bool): lambda l, r: Bool(not (l and r)),
+    (Nor, Int, Int): lambda l, r: Int(~(l | r)),
+    (Nor, Bool, Bool): lambda l, r: Bool(not (l or r)),
     (Add, Int, Int): lambda l, r: Int(l + r),
+    (Add, Int, Float): lambda l, r: Float(l + r),
+    (Add, Float, Float): lambda l, r: Float(l + r),
+    (Sub, Int, Int): lambda l, r: Int(l - r),
+    (Sub, Int, Float): lambda l, r: Float(l - r),
+    (Sub, Float, Float): lambda l, r: Float(l - r),
     (Mul, Int, Int): lambda l, r: Int(l * r),
+    (Mul, Int, Float): lambda l, r: Float(l * r),
+    (Mul, Float, Float): lambda l, r: Float(l * r),
     (Div, Int, Int): int_int_div,
+    (Div, Int, Float): float_float_div,
+    (Div, Float, Float): float_float_div,
     (Mod, Int, Int): lambda l, r: Int(l % r),
+    (Mod, Int, Float): lambda l, r: Float(l % r),
+    (Mod, Float, Float): lambda l, r: Float(l % r),
     (Pow, Int, Int): lambda l, r: Int(l ** r),
-    (Equal, Int, Int): lambda l, r: Bool(l == r),
-    # (NotEqual, Int, Int): lambda l, r: Bool(l != r),
+    (Pow, Int, Float): lambda l, r: Float(l ** r),
+    (Pow, Float, Float): lambda l, r: Float(l ** r),
     (Less, Int, Int): lambda l, r: Bool(l < r),
+    (Less, Int, Float): lambda l, r: Bool(l < r),
+    (Less, Float, Float): lambda l, r: Bool(l < r),
     (LessEqual, Int, Int): lambda l, r: Bool(l <= r),
+    (LessEqual, Int, Float): lambda l, r: Bool(l <= r),
+    (LessEqual, Float, Float): lambda l, r: Bool(l <= r),
     (Greater, Int, Int): lambda l, r: Bool(l > r),
+    (Greater, Int, Float): lambda l, r: Bool(l > r),
+    (Greater, Float, Float): lambda l, r: Bool(l > r),
     (GreaterEqual, Int, Int): lambda l, r: Bool(l >= r),
+    (GreaterEqual, Int, Float): lambda l, r: Bool(l >= r),
+    (GreaterEqual, Float, Float): lambda l, r: Bool(l >= r),
+    (Equal, Int, Int): lambda l, r: Bool(l == r),
+    (Equal, Float, Float): lambda l, r: Bool(l == r),
+    (Equal, Bool, Bool): lambda l, r: Bool(l == r),
+    (Equal, String, String): lambda l, r: Bool(l == r),
+    # (NotEqual, Int, Int): lambda l, r: Bool(l != r),
+
+}
+
+unsymmetric_binary_dispatch_table: dict[BinaryDispatchKey[T, U], ] = {
 }
 
 #TODO: handling short circuiting for logical operators. perhaps have them in a separate dispatch table
@@ -870,6 +914,10 @@ def evaluate_binary_dispatch(op: BinOp, scope: Scope):
     if key in binary_dispatch_table:
         left, right = cast(SimpleValue[T], left), cast(SimpleValue[U], right)
         return binary_dispatch_table[key](left.val, right.val)
+    reverse_key = (type(op), type(right), type(left))
+    if reverse_key in binary_dispatch_table:
+        left, right = cast(SimpleValue[U], left), cast(SimpleValue[T], right)
+        return binary_dispatch_table[reverse_key](left.val, right.val)
     raise NotImplementedError(f'Binary dispatch not implemented for {key=}')
 
 def evaluate_unary_dispatch(op: UnaryPrefixOp|UnaryPostfixOp, scope: Scope):
@@ -879,128 +927,6 @@ def evaluate_unary_dispatch(op: UnaryPrefixOp|UnaryPostfixOp, scope: Scope):
         operand = cast(SimpleValue[T], operand)
         return unary_dispatch_table[key](operand.val)
     raise NotImplementedError(f'Unary dispatch not implemented for {key=}')
-
-# class Comparable(Protocol):
-#     def __lt__(self, other: "Comparable") -> bool: ...
-#     def __le__(self, other: "Comparable") -> bool: ...
-#     def __gt__(self, other: "Comparable") -> bool: ...
-#     def __ge__(self, other: "Comparable") -> bool: ...
-#     def __eq__(self, other: "Comparable") -> bool: ...
-#     def __ne__(self, other: "Comparable") -> bool: ...
-
-# def evaluate_comparison_op(op: TypingCallable[[Comparable, Comparable], bool], ast: AST, scope: Scope):
-#     left = evaluate(ast.left, scope)
-#     right = evaluate(ast.right, scope)
-#     match left, right:
-#         case Int(val=l), Int(val=r): return Bool(op(l, r))
-#         case String(val=l), String(val=r): return Bool(op(l, r))
-#         case _:
-#             raise NotImplementedError(f'{op.__name__} not implemented for {left=} and {right=}')
-
-# def evaluate_less(ast: Less, scope: Scope):
-#     return evaluate_comparison_op(lambda l, r: l < r, ast, scope)
-
-# def evaluate_equal(ast: Equal, scope: Scope):
-#     return evaluate_comparison_op(lambda l, r: l == r, ast, scope)
-
-
-
-
-# TODO: op depends on what type of operands. bools use built-in and/or/etc, but ints need to use the bitwise operators
-# def evaluate_logical_op(logical_op: TypingCallable[[bool, bool], bool], bitwise_op: TypingCallable[[int, int], int], ast: AST, scope: Scope):
-#     left = evaluate(ast.left, scope)
-#     right = evaluate(ast.right, scope)
-#     match left, right:
-#         case Bool(val=l), Bool(val=r): return Bool(logical_op(l, r))
-#         case Int(val=l), Int(val=r): return Int(bitwise_op(l, r))
-#         case _:
-#             raise NotImplementedError(f'evaluate logical op not implemented for {left=} and {right=}')
-
-# def evaluate_and(ast: And, scope: Scope):
-#     return evaluate_logical_op(lambda l, r: l and r, lambda l, r: l & r, ast, scope)
-
-# def evaluate_or(ast: Or, scope: Scope):
-#     return evaluate_logical_op(lambda l, r: l or r, lambda l, r: l | r, ast, scope)
-
-# def evaluate_not(ast: Not, scope: Scope):
-#     val = evaluate(ast.operand, scope)
-#     match val:
-#         case Bool(val=v): return Bool(not v)
-#         case Int(val=v): return Int(~v) #TODO: bitwise not depends on the size of the int...
-#         case _:
-#             raise NotImplementedError(f'Not not implemented for {val=}')
-
-# def evaluate_unary_pos(ast: UnaryPos, scope: Scope):
-#     val = evaluate(ast.operand, scope)
-#     match val:
-#         case Int(val=v): return Int(v)
-#         case _:
-#             raise NotImplementedError(f'Positive not implemented for {val=}')
-
-# def evaluate_unary_neg(ast: UnaryNeg, scope: Scope):
-#     val = evaluate(ast.operand, scope)
-#     match val:
-#         case Int(val=v): return Int(-v)
-#         case _:
-#             raise NotImplementedError(f'Negation not implemented for {val=}')
-
-# def evaluate_unary_mul(ast: UnaryMul, scope: Scope):
-#     val = evaluate(ast.operand, scope)
-#     match val:
-#         case Int(val=v): return Int(v)
-#         case _:
-#             raise NotImplementedError(f'Multiplication not implemented for {val=}')
-
-# def evaluate_unary_div(ast: UnaryDiv, scope: Scope):
-#     val = evaluate(ast.operand, scope)
-#     match val:
-#         case Int(val=v): return Int(1/v) #TODO: this isn't an Int anymore, it's a real number (or possibly undefined)
-#         case _:
-#             raise NotImplementedError(f'Division not implemented for {val=}')
-
-#TODO: long term, probably convert this into a matrix for all the input types and ops, where pairs can register to it
-# def evaluate_arithmetic_op[T](op: TypingCallable[[T, T], T], ast: AST, scope: Scope):
-#     left = evaluate(ast.left, scope)
-#     right = evaluate(ast.right, scope)
-#     match left, right:
-#         case Int(val=l), Int(val=r): return Int(op(l, r))
-#         case Array(), Array(): return Array(op(left.items, right.items)) #TODO: restrict this to add only...
-#         case _:
-#             raise NotImplementedError(f'{op.__name__} not implemented for {left=} and {right=}')
-
-# #TODO: unified arithmetic evaluation function
-# def evaluate_add(ast: Add, scope: Scope):
-#     left = evaluate(ast.left, scope)
-#     right = evaluate(ast.right, scope)
-#     match left, right:
-#         case Int(val=l), Int(val=r): return Int(l + r)
-#         case Array(items=l), Array(items=r): return Array(l + r)
-#         case _:
-#             raise NotImplementedError(f'Add not implemented for {left=} and {right=}')
-
-# def evaluate_mul(ast: Mul, scope: Scope):
-#     left = evaluate(ast.left, scope)
-#     right = evaluate(ast.right, scope)
-#     match left, right:
-#         case Int(val=l), Int(val=r): return Int(l * r)
-#         case _:
-#             raise NotImplementedError(f'Mul not implemented for {left=} and {right=}')
-
-# def evaluate_div(ast: Div, scope: Scope):
-#     left = evaluate(ast.left, scope)
-#     right = evaluate(ast.right, scope)
-#     match left, right:
-#         case Int(val=l), Int(val=r): return Int(l / r)
-#         case _:
-#             raise NotImplementedError(f'Div not implemented for {left=} and {right=}')
-
-# def evaluate_mod(ast: Mod, scope: Scope):
-#     left = evaluate(ast.left, scope)
-#     right = evaluate(ast.right, scope)
-#     match left, right:
-#         case Int(val=l), Int(val=r): return Int(l % r)
-#         case _:
-#             raise NotImplementedError(f'Mod not implemented for {left=} and {right=}')
 
 
 def evaluate_at_handle(ast: AtHandle, scope: Scope):
@@ -1041,7 +967,7 @@ def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
         # case AtHandle() as at: return py_stringify(evaluate(at, scope), scope)
 
         # can use the built-in __str__ method for these types
-        case Int() | Bool() | Undefined(): return str(ast)
+        case Int() | Float() | Bool() | Undefined(): return str(ast)
 
         # TBD what other types need to be handled
         case _:
