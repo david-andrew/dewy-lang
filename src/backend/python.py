@@ -293,6 +293,7 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         Nor: evaluate_binary_dispatch,
         Xnor: evaluate_binary_dispatch,
         Add: evaluate_binary_dispatch,
+        Sub: evaluate_binary_dispatch,
         Mul: evaluate_binary_dispatch,
         Div: evaluate_binary_dispatch,
         Mod: evaluate_binary_dispatch,

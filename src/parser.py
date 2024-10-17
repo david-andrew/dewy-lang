@@ -669,6 +669,11 @@ def build_unary_prefix_expr(op: Token, right: AST, scope: Scope) -> AST:
         # => called as unary prefix op means left was ()/void
         case Operator_t(op='=>'): return PrototypeFunctionLiteral(void, right)
 
+        case OpChain_t(ops=list() as ops):
+            for unary_op in reversed(ops):
+                right = build_unary_prefix_expr(unary_op, right, scope)
+            return right
+
         case _:
             raise ValueError(f"INTERNAL ERROR: {op=} is not a known unary prefix operator")
 

@@ -319,7 +319,7 @@ def is_unary_prefix_op(token: Token) -> bool:
     Determines if a token could be a unary prefix operator.
     Note that this is not mutually exclusive with being a postfix operator or a binary operator.
     """
-    return isinstance(token, Operator_t) and token.op in unary_prefix_operators
+    return isinstance(token, Operator_t) and token.op in unary_prefix_operators or isinstance(token, OpChain_t) and token.ops[0].op in unary_prefix_operators
 
 
 def is_unary_postfix_op(token: Token, exclude_semicolon: bool = False) -> bool:
