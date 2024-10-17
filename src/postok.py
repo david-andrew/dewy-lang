@@ -16,7 +16,7 @@ from .tokenizer import (
 )
 
 from typing import Generator, overload, cast
-from abc import ABC
+from abc import ABC, abstractmethod
 
 
 import pdb
@@ -193,11 +193,11 @@ atom_tokens = (
 
 
 class ShouldBreakTracker(ABC):
-    def op_breaks_chain(self, token: Token) -> bool:
-        raise NotImplementedError("op_breaks_chain must be implemented by subclass")
+    @abstractmethod
+    def op_breaks_chain(self, token: Token) -> bool: ...
 
-    def view(self, tokens: list[Token]) -> None:
-        raise NotImplementedError("view must be implemented by subclass")
+    @abstractmethod
+    def view(self, tokens: list[Token]) -> None: ...
 
 
 class ShouldBreakFlowTracker(ShouldBreakTracker):
