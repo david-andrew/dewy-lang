@@ -42,11 +42,7 @@ import pdb
 
 
 
-def python_interpreter(path: Path, args: list[str]):
-    arg_parser = ArgumentParser(description='Dewy Compiler: Python Interpreter Backend')
-    arg_parser.add_argument('--verbose', action='store_true', help='Print verbose output')
-    args = arg_parser.parse_args(args)
-
+def python_interpreter(path: Path, args:list[str], verbose:bool=False):
     # get the source code and tokenize
     src = path.read_text()
     tokens = tokenize(src)
@@ -57,7 +53,7 @@ def python_interpreter(path: Path, args: list[str]):
     ast = post_parse(ast)
 
     # debug printing
-    if args.verbose:
+    if verbose:
         print_ast(ast)
         print(repr(ast))
 
@@ -65,6 +61,37 @@ def python_interpreter(path: Path, args: list[str]):
     res = top_level_evaluate(ast)
     if res is not void:
         print(res)
+
+def python_repl(args: list[str], verbose:bool=False):
+    try:
+        from easyrepl import REPL
+    except ImportError:
+        print('easyrepl is required for REPL mode. Install with `pip install easyrepl`')
+        return
+
+    # get the source code and tokenize
+    for src in REPL(history_file='~/.dewy/repl_history'):
+        try:
+            tokens = tokenize(src)
+            post_process(tokens)
+
+            # parse tokens into AST
+            ast = top_level_parse(tokens)
+            ast = post_parse(ast)
+
+            # debug printing
+            if verbose:
+                print_ast(ast)
+                print(repr(ast))
+
+            # run the program
+            res = top_level_evaluate(ast)
+            if res is not void:
+                print(res)
+        except Exception as e:
+            print(f'Error: {e}')
+
+    print() # newline after exiting REPL
 
 def print_ast(ast: AST):
     """little helper function to print out the equivalent source code of an AST"""

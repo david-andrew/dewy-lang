@@ -2,7 +2,7 @@
 Collection of all the Dewy Language backends
 """
 
-from .python import python_interpreter
+from .python import python_interpreter, python_repl
 from .qbe import qbe_compiler
 from .llvm import llvm_compiler
 from .c import c_compiler
