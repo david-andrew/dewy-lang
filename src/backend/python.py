@@ -23,6 +23,8 @@ from ..syntax import (
     And, Or, Xor, Nand, Nor, Xnor,
     UnaryPrefixOp, UnaryPostfixOp,
     Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv, AtHandle,
+    RollAxes, Suppress,
+    BroadcastOp,
     Spread,
 )
 
@@ -405,7 +407,7 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
             return call_args, call_kwargs
 
         #TODO: eventually it should just be anything that is left over is positional args rather than specifying them all out
-        case Int() | String() | IString() | Call() | Access() | Express() | UnaryPrefixOp() | UnaryPostfixOp() | BinOp():
+        case Int() | String() | IString() | Call() | Access() | Express() | UnaryPrefixOp() | UnaryPostfixOp() | BinOp() | BroadcastOp():
             return [args], {}
         # case Call(): return [args], {}
         case _:

@@ -89,6 +89,7 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [functions.dewy](examples/functions.dewy)                       | [✓]    |
 | [function_signatures.dewy](examples/function_signatures.dewy)   | [✓]    |
 | [opchains.dewy](examples/opchains.dewy)                         | [✓]    |
+| [ops.dewy](examples/ops.dewy)                                   | [✗]    |
 | [shebang.dewy](examples/shebang.dewy)                           | [✗]    |
 | [fizzbuzz-1.dewy](examples/fizzbuzz-1.dewy)                     | [✓]    |
 | [fizzbuzz0.dewy](examples/fizzbuzz0.dewy)                       | [✓]    |

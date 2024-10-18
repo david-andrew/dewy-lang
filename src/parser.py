@@ -18,11 +18,14 @@ from .syntax import (
     PrototypeIdentifier, Identifier, TypedIdentifier, ReturnTyped, UnpackTarget, Assign,
     Int, Bool,
     Range, IterIn,
+    BinOp,
     Less, LessEqual, Greater, GreaterEqual, Equal, MemberIn,
     LeftShift, RightShift, LeftRotate, RightRotate, LeftRotateCarry, RightRotateCarry,
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
     And, Or, Xor, Nand, Nor, Xnor,
     Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv, AtHandle,
+    RollAxes, Suppress,
+    BroadcastOp,
     DeclarationType,
     DeclareGeneric, Parameterize,
 )
@@ -55,7 +58,7 @@ from .postok import (
     Flow_t,
     Declare_t,
     OpChain_t,
-    VectorizedOp_t,
+    BroadcastOp_t,
     CombinedAssignmentOp_t,
 )
 from .utils import (
@@ -338,14 +341,14 @@ for i, (assoc, group) in enumerate(operator_groups):
             precedence_table[op] = qint(val.values | {i})
 
 
-def operator_precedence(op: Operator_t|OpChain_t|VectorizedOp_t|CombinedAssignmentOp_t) -> int | qint:
+def operator_precedence(op: Operator_t|OpChain_t|BroadcastOp_t|CombinedAssignmentOp_t) -> int | qint:
 
     # for complex operators, extract the actual operator that determines precedence
     if isinstance(op, CombinedAssignmentOp_t):
         op = op.assign # combined assignment has same precedence as regular assignment
-    elif isinstance(op, VectorizedOp_t):
+    if isinstance(op, BroadcastOp_t):
         op = op.op # precedence should be based on the operator attached to the . operator
-    elif isinstance(op, OpChain_t):
+    if isinstance(op, OpChain_t):
         op = op.ops[0] # opchain precedence is determined by the first operator in the chain
 
     try:
@@ -532,7 +535,7 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
     """create a unary prefix expression AST from the op and right AST"""
 
     match op:
-        case Juxtapose_t():
+        case Juxtapose_t(): #TODO: perhaps vanilla juxtapose should be a prototype, since we'll usually have to decide which type of juxtapose it was before here when building the AST
             if is_callable(left, scope):
                 return Call(left, right)
             elif isinstance(right, (Range, Array)) and is_indexable(left, scope):
@@ -540,10 +543,11 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
             else:
                 return Mul(left, right)
 
+        case Operator_t(op='|>'): return Call(right, left)
+        case Operator_t(op='<|'): return Call(left, right)
         case Operator_t(op='='): return Assign(left, right)
         case Operator_t(op='=>'): return PrototypeFunctionLiteral(left, right)
         case Operator_t(op='->'): return PointsTo(left, right)
-        # case Operator_t(op='<-'): return PointsTo(right, left) #TBD if we just remove this one...
         case Operator_t(op='<->'): return BidirPointsTo(left, right)
         case Operator_t(op='.'): return Access(left, right)
 
@@ -651,7 +655,15 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         case OpChain_t(ops=list() as ops) if len(ops) > 1: #TODO: shouldn't be possible to make an OpChain with 1 or 0 ops
             for unary_op in reversed(ops[1:]):
                 right = build_unary_prefix_expr(unary_op, right, scope)
-            return build_bin_expr(left, ops[0], right, scope)            
+            return build_bin_expr(left, ops[0], right, scope)
+
+        case CombinedAssignmentOp_t(op=op):
+            return Assign(left, build_bin_expr(left, op, right, scope))
+
+        case BroadcastOp_t(op=op):
+            expr = build_bin_expr(left, op, right, scope)
+            assert isinstance(expr, BinOp), f'INTERNAL ERROR: expected BinOp, got {expr=}'
+            return BroadcastOp(expr)
 
         case _:
             pdb.set_trace()

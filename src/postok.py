@@ -135,7 +135,7 @@ class OpChain_t(Token):
     def __iter__(self) -> Generator[list[Token], None, None]:
         yield cast(list[Token], self.ops)
 
-class VectorizedOp_t(Token):
+class BroadcastOp_t(Token):
     def __init__(self, dot:Operator_t, op:Operator_t|OpChain_t):
         assert isinstance(dot, Operator_t) and dot.op == '.', f"VectorizedOp_t must have a '.' operator. Got {dot}"
         self.dot = dot
@@ -145,10 +145,10 @@ class VectorizedOp_t(Token):
         return f"<VectorizedOp_t: {self.dot}, {self.op}>"
 
     def __hash__(self) -> int:
-        return hash((VectorizedOp_t, self.dot, self.op))
+        return hash((BroadcastOp_t, self.dot, self.op))
 
     def __eq__(self, other) -> bool:
-        return isinstance(other, VectorizedOp_t) and self.dot == other.dot and self.op == other.op
+        return isinstance(other, BroadcastOp_t) and self.dot == other.dot and self.op == other.op
 
     def __iter__(self) -> Generator[list[Token], None, None]:
         yield [self.dot]
@@ -156,7 +156,7 @@ class VectorizedOp_t(Token):
 
 
 class CombinedAssignmentOp_t(Token):
-    def __init__(self, op:Operator_t, assign:Operator_t):
+    def __init__(self, op:Operator_t|OpChain_t|BroadcastOp_t, assign:Operator_t):
         assert isinstance(assign, Operator_t) and assign.op == '=', f"CombinedAssignmentOp_t must have an '=' operator. Got {assign}"
         self.op = op
         self.assign = assign
@@ -338,7 +338,7 @@ def is_binop(token: Token) -> bool:
     Determines if a token could be a binary operator.
     Note that this is not mutually exclusive with being a prefix operator or a postfix operator.
     """
-    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t, RangeJuxtapose_t, EllipsisJuxtapose_t, TypeParamJuxtapose_t, OpChain_t, VectorizedOp_t, CombinedAssignmentOp_t))
+    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t, RangeJuxtapose_t, EllipsisJuxtapose_t, TypeParamJuxtapose_t, OpChain_t, BroadcastOp_t, CombinedAssignmentOp_t))
 
 
 def is_op(token: Token) -> bool:
@@ -505,33 +505,9 @@ def bundle_conditionals(tokens: list[Token]) -> None:
             stream[i+1:] = [*flow_chain[1:], *tokens]
 
 
-def chain_operators(tokens: list[Token]) -> None:
+def make_chain_operators(tokens: list[Token]) -> None:
     """Convert consecutive operator tokens into a single opchain token"""
-    """
-    A chain is represented by the following grammar:
-        #chunk = #prefix_op* #atom_expr (#postfix_op - ';')*
-        #chain = #chunk (#binary_op #chunk)* ';'?
-
-        #prefix_op = '+' | '-' | '*' | '/' | 'not' | '@' | '...'
-        #postfix_op = '?' | '`' | ';'
-        #binary_op = '+' | '-' | '*' | '/' | '%' | '^'
-          | '=?' | '>?' | '<?' | '>=?' | '<=?' | 'in?' | 'is?' | 'isnt?' | '<=>'
-          | '|' | '&'
-          | 'and' | 'or' | 'nand' | 'nor' | 'xor' | 'xnor' | '??'
-          | '=' | ':=' | 'as' | 'in' | 'transmute'
-          | '@?'
-          | '|>' | '<|' | '=>'
-          | '->' | '<->' | '<-'
-          | '.' | ':'
-    """
-
-    # TODO: skip for now. not needed by hello world
-    # also may not be necessary if we use a pratt parser. was necessary for split by lowest precedence parser
-
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
-
-        # TODO: this is not a correct way to detect these. need to verify that the operators are in between two #chunks
-        #   this will be conservative, but for now it will let us do a hello world happy path
         if is_opchain_starter(token):
             j = 1
             while i+j < len(stream) and is_unary_prefix_op(stream[i+j]):
@@ -542,6 +518,21 @@ def chain_operators(tokens: list[Token]) -> None:
                 gen.send(i+j)
                 continue
 
+def make_broadcast_operators(tokens: list[Token]) -> None:
+    """Convert any . operator next to a binary operator or opchain into a broadcast operator"""
+    for i, token, stream in (gen := full_traverse_tokens(tokens)):
+        if isinstance(token, Operator_t) and token.op == '.':
+            if len(stream) > i+1 and is_binop(stream[i+1]) or isinstance(stream[i+1], OpChain_t):
+                stream[i:i+2] = [BroadcastOp_t(token, stream[i+1])]
+                gen.send(i+2)
+
+def make_combined_assignment_operators(tokens: list[Token]) -> None:
+    """Convert any combined assignment operators into a single token"""
+    for i, token, stream in (gen := full_traverse_tokens(tokens)):
+        if is_binop(token) or isinstance(token, OpChain_t) or isinstance(token, BroadcastOp_t):
+            if i+1 < len(stream) and isinstance(stream[i+1], Operator_t) and stream[i+1].op == '=':
+                stream[i:i+2] = [CombinedAssignmentOp_t(token, stream[i+1])]
+                gen.send(i+2)
 
 def post_process(tokens: list[Token]) -> None:
     """post process the tokens to make them ready for parsing"""
@@ -559,7 +550,13 @@ def post_process(tokens: list[Token]) -> None:
     bundle_conditionals(tokens)
 
     # combine operator chains into a single operator token
-    chain_operators(tokens)
+    make_chain_operators(tokens)
+
+    # convert any . operator next to a binary operator or opchain (e.g. .+ .^/-) into a broadcast operator
+    make_broadcast_operators(tokens)
+
+    # convert any combined assignment operators (e.g. += -= etc.) into a single token
+    make_combined_assignment_operators(tokens)
 
     # convert juxtapose tokens to more specific types if possible
     narrow_juxtapose(tokens)

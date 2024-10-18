@@ -386,104 +386,111 @@ class Call(AST):
             return f'{self.f}{self.args}'
         return f'{self.f}({self.args})'
 
-
+from typing import cast
 class BinOp(AST, ABC):
     left: AST
     right: AST
 
+    def __post_init__(self):
+        self.space = cast(bool, getattr(self, 'space', True))
+        self.op_str = cast(str, getattr(self, 'op_str', None))
+        assert isinstance(self.op_str, str), f'BinOp subclass "{self.__class__.__name__}" must define an `op_str` attribute'
+
+    def __str__(self) -> str:
+        if self.space:
+            return f'{self.left} {self.op_str} {self.right}'
+        return f'{self.left}{self.op_str}{self.right}'
+
 class Assign(BinOp):
-    def __str__(self): return f'{self.left} = {self.right}'
-
+    op_str = '='
 class PointsTo(BinOp):
-    def __str__(self): return f'{self.left} -> {self.right}'
-
+    op_str = '->'
 class BidirPointsTo(BinOp):
-    def __str__(self): return f'{self.left} <-> {self.right}'
-
+    op_str = '<->'
 class Access(BinOp):
-    def __str__(self): return f'{self.left}.{self.right}'
-
+    op_str = '.'
+    space = False
 class Equal(BinOp):
-    def __str__(self): return f'{self.left} =? {self.right}'
+    op_str = '=?'
 
 # covered by OpChain([Not, Equal])
 # class NotEqual(BinOp):
-#     def __str__(self): return f'{self.left} not=? {self.right}'
+#     op_str = 'not=?'
 
 class Less(BinOp):
-    def __str__(self): return f'{self.left} <? {self.right}'
+    op_str = '<?'
 
 class LessEqual(BinOp):
-    def __str__(self): return f'{self.left} <=? {self.right}'
+    op_str = '<=?'
 
 class Greater(BinOp):
-    def __str__(self): return f'{self.left} >? {self.right}'
+    op_str = '>?'
 
 class GreaterEqual(BinOp):
-    def __str__(self): return f'{self.left} >=? {self.right}'
+    op_str = '>=?'
 
 class  LeftShift(BinOp):
-    def __str__(self): return f'{self.left} << {self.right}'
+    op_str = '<<'
 
 class  RightShift(BinOp):
-    def __str__(self): return f'{self.left} >> {self.right}'
+    op_str = '>>'
 
 class LeftRotate(BinOp):
-    def __str__(self): return f'{self.left} <<< {self.right}'
+    op_str = '<<<'
 
 class RightRotate(BinOp):
-    def __str__(self): return f'{self.left} >>> {self.right}'
+    op_str = '>>>'
 
 class LeftRotateCarry(BinOp):
-    def __str__(self): return f'{self.left} <<! {self.right}'
+    op_str = '<<!'
 
 class RightRotateCarry(BinOp):
-    def __str__(self): return f'{self.left} !>> {self.right}'
+    op_str = '!>>'
 
 class Add(BinOp):
-    def __str__(self): return f'{self.left} + {self.right}'
+    op_str = '+'
 
 class Sub(BinOp):
-    def __str__(self): return f'{self.left} - {self.right}'
+    op_str = '-'
 
 class Mul(BinOp):
-    def __str__(self): return f'{self.left} * {self.right}'
+    op_str = '*'
 
 class Div(BinOp):
-    def __str__(self): return f'{self.left} / {self.right}'
+    op_str = '/'
 
 class IDiv(BinOp):
-    def __str__(self): return f'{self.left} ÷ {self.right}'
+    op_str = '÷'
 
 class Mod(BinOp):
-    def __str__(self): return f'{self.left} % {self.right}'
+    op_str = '%'
 
 class Pow(BinOp):
-    def __str__(self): return f'{self.left} ^ {self.right}'
+    op_str = '^'
 
 class And(BinOp):
-    def __str__(self): return f'{self.left} and {self.right}'
+    op_str = 'and'
 
 class Or(BinOp):
-    def __str__(self): return f'{self.left} or {self.right}'
+    op_str = 'or'
 
 class Xor(BinOp):
-    def __str__(self): return f'{self.left} xor {self.right}'
+    op_str = 'xor'
 
 class Nand(BinOp):
-    def __str__(self): return f'{self.left} nand {self.right}'
+    op_str = 'nand'
 
 class Nor(BinOp):
-    def __str__(self): return f'{self.left} nor {self.right}'
+    op_str = 'nor'
 
 class Xnor(BinOp):
-    def __str__(self): return f'{self.left} xnor {self.right}'
+    op_str = 'xnor'
 
 class IterIn(BinOp):
-    def __str__(self): return f'{self.left} in {self.right}'
+    op_str = 'in'
 
 class MemberIn(BinOp):
-    def __str__(self): return f'{self.left} in? {self.right}'
+    op_str = 'in?'
 
 class UnaryPrefixOp(AST, ABC):
     operand: AST
@@ -514,6 +521,18 @@ class AtHandle(UnaryPrefixOp):
 class UnaryPostfixOp(AST, ABC):
     operand: AST
 
+class RollAxes(UnaryPostfixOp):
+    def __str__(self): return f'{self.operand}`'
+
+class Suppress(UnaryPostfixOp):
+    def __str__(self): return f'{self.operand};'
+
+
+class BroadcastOp(AST):
+    op: BinOp
+
+    def __str__(self):
+        return f'{self.op.left} .{self.op.op_str} {self.op.right}'
 
 class BareRange(PrototypeAST):
     left: AST
@@ -631,11 +650,7 @@ class TypedIdentifier(AST):
 
 
 class ReturnTyped(BinOp):
-    item: AST
-    type: AST
-
-    def __str__(self) -> str:
-        return f'{self.item}:>{self.type}'
+    op_str = ':>'
 
 class UnpackTarget(AST):
     target: 'list[Identifier | TypedIdentifier | UnpackTarget | Assign | Spread]'
