@@ -495,23 +495,35 @@ class MemberIn(BinOp):
 class UnaryPrefixOp(AST, ABC):
     operand: AST
 
+    def __post_init__(self):
+        self.space = cast(bool, getattr(self, 'space', False))
+        self.op_str = cast(str, getattr(self, 'op_str', None))
+        assert isinstance(self.op_str, str), f'UnaryPrefixOp subclass "{self.__class__.__name__}" must define an `op_str` attribute'
+
+    def __str__(self) -> str:
+        if self.space:
+            return f'{self.op_str} {self.operand}'
+        return f'{self.op_str}{self.operand}'
+
 class Not(UnaryPrefixOp):
-    def __str__(self): return f'not {self.operand}'
+    op_str = 'not'
+    space = True
 
 class UnaryNeg(UnaryPrefixOp):
-    def __str__(self): return f'-{self.operand}'
+    op_str = '-'
 
 class UnaryPos(UnaryPrefixOp):
-    def __str__(self): return f'+{self.operand}'
+    op_str = '+'
 
 class UnaryMul(UnaryPrefixOp):
-    def __str__(self): return f'*{self.operand}'
+    op_str = '*'
 
 class UnaryDiv(UnaryPrefixOp):
-    def __str__(self): return f'/{self.operand}'
+    op_str = '/'
 
 
 class AtHandle(UnaryPrefixOp):
+    op_str = '@'
     def __str__(self):
         if isinstance(self.operand, (Delimited, Identifier)):
             return f'@{self.operand}'
@@ -521,11 +533,18 @@ class AtHandle(UnaryPrefixOp):
 class UnaryPostfixOp(AST, ABC):
     operand: AST
 
+    def __post_init__(self):
+        self.op_str = cast(str, getattr(self, 'op_str', None))
+        assert isinstance(self.op_str, str), f'UnaryPostfixOp subclass "{self.__class__.__name__}" must define an `op_str` attribute'
+
+    def __str__(self) -> str:
+        return f'{self.operand}{self.op_str}'
+
 class RollAxes(UnaryPostfixOp):
-    def __str__(self): return f'{self.operand}`'
+    op_str = '`'
 
 class Suppress(UnaryPostfixOp):
-    def __str__(self): return f'{self.operand};'
+    op_str = ';'
 
 
 class BroadcastOp(AST):
