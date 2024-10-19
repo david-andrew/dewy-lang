@@ -1,5 +1,18 @@
 // examples of bugs (or just unimplemented stuff) that currently exist in the tokenizer/parser/etc.
 
+
+// expressions with prefix or postfix operators can't be juxtaposed
+// really only matters for unary operators that aren't binary operators
+// backtick "`" and at "@" are really the only two that matter
+a=10
+b = [1,2 3,4]
+c = a@10
+d = b`a
+// honestly though these are pretty un-idiomatic, and perhaps the best solution would be to identify these cases and say they're ambiguous
+
+
+
+
 // precedence ambiguity between `.` and `()`.
 //should obviously be access first, then call due to left to right associativity
 // this one is fixable by adding slight float offsets to the operator precedences in the parser

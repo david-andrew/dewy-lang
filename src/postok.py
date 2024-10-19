@@ -300,9 +300,12 @@ def invert_whitespace(tokens: list[Token]) -> None:
                 tokens[i-1] = CycleLeft_t('`')
                 continue
             if type(right) is Operator_t and right.op == '`':   # strict check for Operator_t since CycleLeft_t/CycleRight_t is a subclass
-                tokens.pop(i)
-                tokens[i] = CycleRight_t('`')
-                continue
+                # CycleRight_t may only be next to other CycleRight_t, or non Operator_t. Otherwise it's probably actually a CycleLeft_t that we'll get on the next pass
+                # this might be pretty flaky
+                if not isinstance(left, Operator_t) or left.op == '`':
+                    tokens.pop(i)
+                    tokens[i] = CycleRight_t('`')
+                    continue
             if (isinstance(left, (Operator_t, ShiftOperator_t, Comma_t)) or isinstance(right, (Operator_t, ShiftOperator_t, Comma_t))):
                 tokens.pop(i)
                 continue
@@ -368,7 +371,9 @@ def is_unary_prefix_op(token: Token) -> bool:
     Determines if a token could be a unary prefix operator.
     Note that this is not mutually exclusive with being a postfix operator or a binary operator.
     """
-    return isinstance(token, Operator_t) and token.op in unary_prefix_operators or isinstance(token, OpChain_t) and token.ops[0].op in unary_prefix_operators or isinstance(token, CycleLeft_t)
+    return isinstance(token, Operator_t) and token.op in unary_prefix_operators \
+        or isinstance(token, OpChain_t) and token.ops[0].op in unary_prefix_operators \
+        or isinstance(token, CycleLeft_t)
 
 
 def is_unary_postfix_op(token: Token, exclude_semicolon: bool = False) -> bool:
