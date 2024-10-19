@@ -20,7 +20,7 @@ from .syntax import (
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
     And, Or, Xor, Nand, Nor, Xnor,
     Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv, AtHandle,
-    RollAxes, Suppress,
+    CycleLeft, CycleRight, Suppress,
     BroadcastOp,
     DeclarationType,
     DeclareGeneric, Parameterize,

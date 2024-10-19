@@ -522,6 +522,9 @@ class UnaryDiv(UnaryPrefixOp):
     op_str = '/'
 
 
+class CycleLeft(UnaryPrefixOp):
+    op_str = '`'
+
 class AtHandle(UnaryPrefixOp):
     op_str = '@'
     def __str__(self):
@@ -540,7 +543,7 @@ class UnaryPostfixOp(AST, ABC):
     def __str__(self) -> str:
         return f'{self.operand}{self.op_str}'
 
-class RollAxes(UnaryPostfixOp):
+class CycleRight(UnaryPostfixOp):
     op_str = '`'
 
 class Suppress(UnaryPostfixOp):

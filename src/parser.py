@@ -24,7 +24,7 @@ from .syntax import (
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
     And, Or, Xor, Nand, Nor, Xnor,
     Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv, AtHandle,
-    RollAxes, Suppress,
+    CycleLeft, CycleRight, Suppress,
     BroadcastOp,
     DeclarationType,
     DeclareGeneric, Parameterize,
@@ -49,6 +49,8 @@ from .tokenizer import (
     Keyword_t,
 )
 from .postok import (
+    CycleLeft_t,
+    CycleRight_t,
     RangeJuxtapose_t,
     EllipsisJuxtapose_t,
     TypeParamJuxtapose_t,
@@ -261,10 +263,9 @@ class Associativity(Enum):
     (prefix) @
     . <jux call> <jux index access>
     <jux ellipsis>                      //e.g. [...args]
-    :                                   //e.g. let x:int
-    :>                                  //e.g. let x:():>int => 42
+    <jux type param>                    //e.g. <T>(x:T):>T
+    (prefix) ` (postfix) `
     (prefix) not
-    (postfix) ? `
     ^                                   //right-associative
     <jux mul>
     / * %
@@ -274,10 +275,13 @@ class Associativity(Enum):
     <jux range>                         //e.g. [first,second..last]
     in
     =? >? <? >=? <=? not=? <=> is? isnt? @?
+    (postfix) ?
     and nand &
     xor xnor                            //following C's precedence: and > xor > or
     or nor |
     as transmute
+    :                                   //e.g. let x:int
+    :>                                  //e.g. let x:():>int => 42
     =>
     |>                                  //function pipe operators
     <|
@@ -298,8 +302,8 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),  # jux-call, jux-index
     (Associativity.right, [EllipsisJuxtapose_t(None)]),  # jux-ellipsis
     (Associativity.none, [TypeParamJuxtapose_t(None)]),
-    (Associativity.none, [Operator_t(':')]),
-    (Associativity.right, [Operator_t(':>')]),
+    (Associativity.prefix, [CycleLeft_t('`')]),   # `arr
+    (Associativity.postfix, [CycleRight_t('`')]), #  arr`
     (Associativity.prefix, [Operator_t('not')]),
     (Associativity.right,  [Operator_t('^')]),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
@@ -310,10 +314,13 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.left, [RangeJuxtapose_t(None)]),  # jux-range
     (Associativity.none, [Operator_t('in')]),
     (Associativity.left, [Operator_t('=?'), Operator_t('>?'), Operator_t('<?'), Operator_t('>=?'), Operator_t('<=?')]),
+    (Associativity.postfix, [Operator_t('?')]),
     (Associativity.left, [Operator_t('and'), Operator_t('nand'), Operator_t('&')]),
     (Associativity.left, [Operator_t('xor'), Operator_t('xnor')]),
     (Associativity.left, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
     (Associativity.none,  [Operator_t('as'), Operator_t('transmute')]),
+    (Associativity.none, [Operator_t(':')]),
+    (Associativity.right, [Operator_t(':>')]),
     (Associativity.right,  [Operator_t('=>')]),  # () => () => () => 42
     (Associativity.right, [Operator_t('|>')]),
     (Associativity.left, [Operator_t('<|')]),
@@ -681,6 +688,8 @@ def build_unary_prefix_expr(op: Token, right: AST, scope: Scope) -> AST:
         case Operator_t(op='not'): return Not(right)  # TODO: don't want to hardcode Bool here!
         case Operator_t(op='@'): return AtHandle(right)
 
+        case CycleLeft_t(): return CycleLeft(right)
+
         # binary operators that appear to be unary because the left can be void
         # => called as unary prefix op means left was ()/void
         case Operator_t(op='=>'): return PrototypeFunctionLiteral(void, right)
@@ -704,6 +713,9 @@ def build_unary_postfix_expr(left: AST, op: Token, scope: Scope) -> AST:
         # anything juxtaposed with void is treated as a zero-arg call()
         case Juxtapose_t():
             return Call(left)
+
+        case CycleRight_t():
+            return CycleRight(left)
 
         case _:
             raise NotImplementedError(f"TODO: {op=}")

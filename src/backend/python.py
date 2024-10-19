@@ -23,7 +23,7 @@ from ..syntax import (
     And, Or, Xor, Nand, Nor, Xnor,
     UnaryPrefixOp, UnaryPostfixOp,
     Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv, AtHandle,
-    RollAxes, Suppress,
+    CycleLeft, CycleRight, Suppress,
     BroadcastOp,
     Spread,
 )
