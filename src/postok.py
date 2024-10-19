@@ -291,10 +291,27 @@ def invert_whitespace(tokens: list[Token]) -> None:
     i = 1
     while i < len(tokens) - 1:
         left, middle, right = tokens[i-1:i+2]
-        if isinstance(middle, Juxtapose_t) and (isinstance(left, (Operator_t, ShiftOperator_t, Comma_t)) or isinstance(right, (Operator_t, ShiftOperator_t, Comma_t))):
-            tokens.pop(i)
-            continue
+        if isinstance(middle, Juxtapose_t):
+            # TODO: pretty hacky way to deal with disambiguating ` operator into left or right cycle
+            # basically since we look at left first, it means that `` is always left cycle (when looking one token at a time)
+            # to get cycle right, we have to see a different token on the left side
+            if type(left) is Operator_t and left.op == '`':     # strict check for Operator_t since CycleLeft_t/CycleRight_t is a subclass
+                tokens.pop(i)
+                tokens[i-1] = CycleLeft_t('`')
+                continue
+            if type(right) is Operator_t and right.op == '`':   # strict check for Operator_t since CycleLeft_t/CycleRight_t is a subclass
+                tokens.pop(i)
+                tokens[i] = CycleRight_t('`')
+                continue
+            if (isinstance(left, (Operator_t, ShiftOperator_t, Comma_t)) or isinstance(right, (Operator_t, ShiftOperator_t, Comma_t))):
+                tokens.pop(i)
+                continue
         i += 1
+
+    # finally finally (because of ` hack), ensure no remaining backticks
+    for i, t in enumerate(tokens):
+        if type(t) is Operator_t  and t.op == '`':
+            raise ValueError(f"ERROR: backtick operator ` must be juxtaposed with an expression on either the left or right. Got {tokens[i-1:i+2]}")
 
 
 def _get_next_prefixes(tokens: list[Token]) -> tuple[list[Token], list[Token]]:
@@ -302,11 +319,6 @@ def _get_next_prefixes(tokens: list[Token]) -> tuple[list[Token], list[Token]]:
     # isinstance(tokens[0], Operator_t) and tokens[0].op in unary_prefix_operators:
     while len(tokens) > 0 and is_unary_prefix_op(tokens[0]):
         prefixes.append(tokens.pop(0))
-
-    # replace any instances of ` with CycleLeft_t
-    # Unfortunately this is the best place for this because otherwise we have to do a bunch of work to figure out if it's a prefix or postfix
-    # perhaps this might be replaced with a generic function that can make any replacements for prefixes it needs to
-    prefixes = [CycleLeft_t(p.op) if isinstance(p, Operator_t) and p.op == '`' else p for p in prefixes]
 
     return prefixes, tokens
 
@@ -316,11 +328,6 @@ def _get_next_postfixes(tokens: list[Token]) -> tuple[list[Token], list[Token]]:
     # isinstance(tokens[0], Operator_t) and tokens[0].op in unary_postfix_operators - {';'}:
     while len(tokens) > 0 and is_unary_postfix_op(tokens[0], exclude_semicolon=True):
         postfixes.append(tokens.pop(0))
-
-    # replace any instances of ` with CycleRight_t
-    # Unfortunately this is the best place for this because otherwise we have to do a bunch of work to figure out if it's a prefix or postfix
-    # perhaps this might be replaced with a generic function that can make any replacements for postfixes it needs to
-    postfixes = [CycleRight_t(p.op) if isinstance(p, Operator_t) and p.op == '`' else p for p in postfixes]
 
     return postfixes, tokens
 
@@ -361,7 +368,7 @@ def is_unary_prefix_op(token: Token) -> bool:
     Determines if a token could be a unary prefix operator.
     Note that this is not mutually exclusive with being a postfix operator or a binary operator.
     """
-    return isinstance(token, Operator_t) and token.op in unary_prefix_operators or isinstance(token, OpChain_t) and token.ops[0].op in unary_prefix_operators
+    return isinstance(token, Operator_t) and token.op in unary_prefix_operators or isinstance(token, OpChain_t) and token.ops[0].op in unary_prefix_operators or isinstance(token, CycleLeft_t)
 
 
 def is_unary_postfix_op(token: Token, exclude_semicolon: bool = False) -> bool:
@@ -371,8 +378,8 @@ def is_unary_postfix_op(token: Token, exclude_semicolon: bool = False) -> bool:
     Note that this is not mutually exclusive with being a prefix operator or a binary operator.
     """
     if exclude_semicolon:
-        return isinstance(token, Operator_t) and token.op in unary_postfix_operators - {';'}
-    return isinstance(token, Operator_t) and token.op in unary_postfix_operators
+        return isinstance(token, Operator_t) and token.op in unary_postfix_operators - {';'} or isinstance(token, CycleRight_t)
+    return isinstance(token, Operator_t) and token.op in unary_postfix_operators or isinstance(token, CycleRight_t)
 
 
 def is_binop(token: Token) -> bool:

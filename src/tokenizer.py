@@ -63,6 +63,9 @@ class Juxtapose_t(Operator_t):
     def __init__(self, _):
         super().__init__('')
 
+    def __repr__(self) -> str:
+        return f"<Juxtapose_t>"
+
     def __hash__(self) -> int:
         return hash(Juxtapose_t)
 
@@ -317,8 +320,9 @@ valid_delim_closers = {
 
 # list of all operators sorted from longest to shortest
 # TODO: make @ and ... into expressions (perhaps with lower precedence calling than regular calls?)
-unary_prefix_operators = {'+', '-', '*', '/', 'not', '@', '`'}#, '...'}
-unary_postfix_operators = {'?', '`', ';'}
+unary_prefix_operators = {'+', '-', '*', '/', 'not', '@'}#, '...'}
+unary_postfix_operators = {'?', ';'}
+special_unary_operators = {'`'} # can be prefix or postfix depending on context
 binary_operators = {
     '+', '-', '*', '/', '%', '^',
     '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
@@ -333,7 +337,7 @@ binary_operators = {
 }
 opchain_starters = {'+', '-', '*', '/', '%', '^'}
 operators = sorted(
-    [*(unary_prefix_operators | unary_postfix_operators | binary_operators)],
+    [*(unary_prefix_operators | unary_postfix_operators | special_unary_operators | binary_operators)],
     key=len,
     reverse=True
 )

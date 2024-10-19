@@ -159,7 +159,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             case IString() | Group() | Block() | PrototypeTuple() | Array() | ObjectLiteral() | Dict() | BidirDict() | FunctionLiteral() | Signature() | Range() | Loop() | If() | Flow() | Default() \
                 | PointsTo() | BidirPointsTo() | Equal() | Less() | LessEqual() | Greater() | GreaterEqual() | LeftShift() | RightShift() | LeftRotate() | RightRotate() | LeftRotateCarry() | RightRotateCarry() | Add() | Sub() | Mul() | Div() | IDiv() | Mod() | Pow() | And() | Or() | Xor() | Nand() | Nor() | Xnor() | MemberIn() \
                 | BroadcastOp() \
-                | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() \
+                | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() | CycleLeft() | CycleRight() \
                 | TypedIdentifier():
                 ...
             #TBD cases: Type() | ListOfASTs() | BareRange() | Ellipsis() | Spread() | TypeParam() | Flowable() | Flow() | PrototypePyAction() | PyAction() | Express() | ReturnTyped() | SequenceUnpackTarget() | ObjectUnpackTarget() | DeclarationType() | DeclareGeneric() | Parameterize():
