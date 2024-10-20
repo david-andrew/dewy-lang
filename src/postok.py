@@ -5,7 +5,7 @@ from .tokenizer import (
     binary_operators,
     opchain_starters,
     Token,
-    Keyword_t, Undefined_t, Void_t, End_t,
+    Keyword_t, Undefined_t, Void_t, End_t, New_t,
     WhiteSpace_t, Escape_t,
     Identifier_t, Hashtag_t,
     Block_t, TypeParam_t,
@@ -15,7 +15,7 @@ from .tokenizer import (
     Juxtapose_t, Operator_t, ShiftOperator_t, Comma_t,
 )
 
-from typing import Generator, Literal, overload, cast
+from typing import Generator, overload, cast
 from abc import ABC, abstractmethod
 
 
@@ -75,36 +75,6 @@ class Declare_t(Token):
     def __iter__(self) -> Generator[list[Token], None, None]:
         yield [self.keyword] #appraently flow doesn't yield the keyword. tbd if it matters...
         yield self.expr
-
-
-# class CycleLeft_t(Token):
-#     def __init__(self, src: str):
-#         assert all(c == '`' for c in src), f"CycleLeft_t must contain only '`' characters. Got '{src}'"
-#         self.src = src
-
-#     def __repr__(self) -> str:
-#         return f"<CycleLeft_t: {self.src}>"
-
-#     def __hash__(self) -> int:
-#         return hash(CycleLeft_t)
-
-#     def __eq__(self, other) -> bool:
-#         return isinstance(other, CycleLeft_t)
-
-
-# class CycleRight_t(Token):
-#     def __init__(self, src: str):
-#         assert all(c == '`' for c in src), f"CycleRight_t must contain only '`' characters. Got '{src}'"
-#         self.src = src
-
-#     def __repr__(self) -> str:
-#         return f"<CycleRight_t: {self.src}>"
-
-#     def __hash__(self) -> int:
-#         return hash(CycleRight_t)
-
-#     def __eq__(self, other) -> bool:
-#         return isinstance(other, CycleRight_t)
 
 
 class RangeJuxtapose_t(Operator_t):
@@ -312,15 +282,9 @@ def invert_whitespace(tokens: list[Token]) -> None:
             continue
         i += 1
 
-    # finally finally (because of ` hack), ensure no remaining backticks
-    for i, t in enumerate(tokens):
-        if type(t) is Operator_t  and t.op == '`':
-            raise ValueError(f"ERROR: backtick operator ` must be juxtaposed with an expression on either the left or right. Got {tokens[i-1:i+2]}")
-
 
 def _get_next_prefixes(tokens: list[Token]) -> tuple[list[Token], list[Token]]:
     prefixes = []
-    # isinstance(tokens[0], Operator_t) and tokens[0].op in unary_prefix_operators:
     while len(tokens) > 0 and is_unary_prefix_op(tokens[0]):
         prefixes.append(tokens.pop(0))
 
@@ -329,7 +293,6 @@ def _get_next_prefixes(tokens: list[Token]) -> tuple[list[Token], list[Token]]:
 
 def _get_next_postfixes(tokens: list[Token]) -> tuple[list[Token], list[Token]]:
     postfixes = []
-    # isinstance(tokens[0], Operator_t) and tokens[0].op in unary_postfix_operators - {';'}:
     while len(tokens) > 0 and is_unary_postfix_op(tokens[0], exclude_semicolon=True):
         postfixes.append(tokens.pop(0))
 
@@ -344,7 +307,6 @@ def _get_next_atom(tokens: list[Token]) -> tuple[Token, list[Token]]:
     if isinstance(tokens[0], Keyword_t):
         return _get_next_keyword_expr(tokens)
 
-    # (Integer_t, BasedNumber_t, String_t, RawString_t, Identifier_t, Hashtag_t, Block_t, TypeParam_t, DotDot_t)):
     if isinstance(tokens[0], atom_tokens):
         return tokens[0], tokens[1:]
 
