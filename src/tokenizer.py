@@ -246,6 +246,19 @@ class End_t(Token):
         return "<End_t>"
 
 
+class New_t(Token):
+    def __init__(self, _): ...
+
+    def __hash__(self) -> int:
+        return hash(New_t)
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, New_t)
+
+    def __repr__(self) -> str:
+        return "<New_t>"
+
+
 class Boolean_t(Token):
     def __init__(self, src: str):
         self.src = src
@@ -297,7 +310,7 @@ class DotDotDot_t(Token):
 # each row is a list of token types that are confusable in their precedence order. e.g. [Keyword, Unit, Identifier] means Keyword > Unit > Identifier
 # only confusable token classes need to be included in the table
 precedence_table = [
-    [Keyword_t, Undefined_t, Void_t, End_t, Boolean_t, Operator_t, DotDot_t, Identifier_t],
+    [Keyword_t, Undefined_t, Void_t, End_t, New_t, Boolean_t, Operator_t, DotDot_t, Identifier_t],
 ]
 precedence = {cls: len(row)-i for row in precedence_table for i, cls in enumerate(row)}
 
@@ -767,6 +780,16 @@ def eat_end(src: str) -> int | None:
     """
     sample = src[:3].lower()
     if sample.startswith('end'):
+        return 3
+    return None
+
+@peek_eat(New_t)
+def eat_new(src: str) -> int | None:
+    """
+    eat the new token, return the number of characters eaten
+    """
+    sample = src[:3].lower()
+    if sample.startswith('new'):
         return 3
     return None
 
