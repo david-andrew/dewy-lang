@@ -301,16 +301,19 @@ class DotDotDot_t(Token):
     def __init__(self, src: str):
         self.src = src
 
-# #TODO: these should probably each be their own class/token, or a single class..
-# these should all be case insensitive
-# reserved_values = ['true', 'false', 'void', 'undefined', 'end']
+class Backticks_t(Token):
+    def __init__(self, src: str):
+        self.src = src
+
+    def __repr__(self) -> str:
+        return f"<Backticks_t: {self.src}>"
 
 
 # identify token classes that should take precedence over others when tokenizing
 # each row is a list of token types that are confusable in their precedence order. e.g. [Keyword, Unit, Identifier] means Keyword > Unit > Identifier
 # only confusable token classes need to be included in the table
 precedence_table = [
-    [Keyword_t, Undefined_t, Void_t, End_t, New_t, Boolean_t, Operator_t, DotDot_t, Identifier_t],
+    [Keyword_t, Undefined_t, Void_t, End_t, New_t, Boolean_t, Operator_t, DotDot_t, Backticks_t, Identifier_t],
 ]
 precedence = {cls: len(row)-i for row in precedence_table for i, cls in enumerate(row)}
 
@@ -335,7 +338,6 @@ valid_delim_closers = {
 # TODO: make @ and ... into expressions (perhaps with lower precedence calling than regular calls?)
 unary_prefix_operators = {'+', '-', '*', '/', 'not', '@'}#, '...'}
 unary_postfix_operators = {'?', ';'}
-special_unary_operators = {'`'} # can be prefix or postfix depending on context
 binary_operators = {
     '+', '-', '*', '/', '%', '^',
     '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
@@ -350,7 +352,7 @@ binary_operators = {
 }
 opchain_starters = {'+', '-', '*', '/', '%', '^'}
 operators = sorted(
-    [*(unary_prefix_operators | unary_postfix_operators | special_unary_operators | binary_operators)],
+    [*(unary_prefix_operators | unary_postfix_operators | binary_operators)],
     key=len,
     reverse=True
 )
@@ -864,6 +866,16 @@ def eat_dotdotdot(src: str) -> int | None:
     """
     return 3 if src.startswith('...') else None
 
+
+@peek_eat(Backticks_t)
+def eat_cycle(src: str) -> int | None:
+    """
+    eat one or more cycle operators, return the number of characters eaten
+    """
+    i = 0
+    while i < len(src) and src[i] == '`':
+        i += 1
+    return i if i > 0 else None
 
 class EatTracker:
     i: int

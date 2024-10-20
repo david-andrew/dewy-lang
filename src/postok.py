@@ -11,7 +11,7 @@ from .tokenizer import (
     Block_t, TypeParam_t,
     RawString_t, String_t,
     Integer_t, BasedNumber_t, Boolean_t,
-    DotDot_t, DotDotDot_t,
+    DotDot_t, DotDotDot_t, Backticks_t,
     Juxtapose_t, Operator_t, ShiftOperator_t, Comma_t,
 )
 
@@ -77,34 +77,34 @@ class Declare_t(Token):
         yield self.expr
 
 
-class CycleLeft_t(Operator_t):
-    def __init__(self, op: Literal['`']):
-        assert op == '`', f"CycleLeft_t must have a '`' operator. Got '{op}'"
-        super().__init__(op)
+# class CycleLeft_t(Token):
+#     def __init__(self, src: str):
+#         assert all(c == '`' for c in src), f"CycleLeft_t must contain only '`' characters. Got '{src}'"
+#         self.src = src
 
-    def __repr__(self) -> str:
-        return f"<CycleLeft_t: {self.op}>"
+#     def __repr__(self) -> str:
+#         return f"<CycleLeft_t: {self.src}>"
 
-    def __hash__(self) -> int:
-        return hash(CycleLeft_t)
+#     def __hash__(self) -> int:
+#         return hash(CycleLeft_t)
 
-    def __eq__(self, other) -> bool:
-        return isinstance(other, CycleLeft_t)
+#     def __eq__(self, other) -> bool:
+#         return isinstance(other, CycleLeft_t)
 
 
-class CycleRight_t(Operator_t):
-    def __init__(self, op: Literal['`']):
-        assert op == '`', f"CycleRight_t must have a '`' operator. Got '{op}'"
-        super().__init__(op)
+# class CycleRight_t(Token):
+#     def __init__(self, src: str):
+#         assert all(c == '`' for c in src), f"CycleRight_t must contain only '`' characters. Got '{src}'"
+#         self.src = src
 
-    def __repr__(self) -> str:
-        return f"<CycleRight_t: {self.op}>"
+#     def __repr__(self) -> str:
+#         return f"<CycleRight_t: {self.src}>"
 
-    def __hash__(self) -> int:
-        return hash(CycleRight_t)
+#     def __hash__(self) -> int:
+#         return hash(CycleRight_t)
 
-    def __eq__(self, other) -> bool:
-        return isinstance(other, CycleRight_t)
+#     def __eq__(self, other) -> bool:
+#         return isinstance(other, CycleRight_t)
 
 
 class RangeJuxtapose_t(Operator_t):
@@ -133,6 +133,20 @@ class EllipsisJuxtapose_t(Operator_t):
 
     def __eq__(self, other) -> bool:
         return isinstance(other, EllipsisJuxtapose_t)
+
+
+class BackticksJuxtapose_t(Operator_t):
+    def __init__(self, _):
+        super().__init__('')
+
+    def __repr__(self) -> str:
+        return "<BackticksJuxtapose_t>"
+
+    def __hash__(self) -> int:
+        return hash(BackticksJuxtapose_t)
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, BackticksJuxtapose_t)
 
 
 class TypeParamJuxtapose_t(Operator_t):
@@ -217,6 +231,7 @@ atom_tokens = (
     Hashtag_t,
     DotDot_t,
     DotDotDot_t,
+    Backticks_t,
     Flow_t,
     Undefined_t,
 )
@@ -288,27 +303,13 @@ def invert_whitespace(tokens: list[Token]) -> None:
         i += 1
 
     # finally, remove juxtapose tokens next to operators that are not whitespace sensitive
+    non_jux_ops = (Operator_t, ShiftOperator_t, Comma_t)
     i = 1
     while i < len(tokens) - 1:
         left, middle, right = tokens[i-1:i+2]
-        if isinstance(middle, Juxtapose_t):
-            # TODO: pretty hacky way to deal with disambiguating ` operator into left or right cycle
-            # basically since we look at left first, it means that `` is always left cycle (when looking one token at a time)
-            # to get cycle right, we have to see a different token on the left side
-            if type(left) is Operator_t and left.op == '`':     # strict check for Operator_t since CycleLeft_t/CycleRight_t is a subclass
-                tokens.pop(i)
-                tokens[i-1] = CycleLeft_t('`')
-                continue
-            if type(right) is Operator_t and right.op == '`':   # strict check for Operator_t since CycleLeft_t/CycleRight_t is a subclass
-                # CycleRight_t may only be next to other CycleRight_t, or non Operator_t. Otherwise it's probably actually a CycleLeft_t that we'll get on the next pass
-                # this might be pretty flaky
-                if not isinstance(left, Operator_t) or left.op == '`':
-                    tokens.pop(i)
-                    tokens[i] = CycleRight_t('`')
-                    continue
-            if (isinstance(left, (Operator_t, ShiftOperator_t, Comma_t)) or isinstance(right, (Operator_t, ShiftOperator_t, Comma_t))):
-                tokens.pop(i)
-                continue
+        if isinstance(middle, Juxtapose_t) and (isinstance(left, non_jux_ops) or isinstance(right, non_jux_ops)):
+            tokens.pop(i)
+            continue
         i += 1
 
     # finally finally (because of ` hack), ensure no remaining backticks
@@ -372,8 +373,7 @@ def is_unary_prefix_op(token: Token) -> bool:
     Note that this is not mutually exclusive with being a postfix operator or a binary operator.
     """
     return isinstance(token, Operator_t) and token.op in unary_prefix_operators \
-        or isinstance(token, OpChain_t) and token.ops[0].op in unary_prefix_operators \
-        or isinstance(token, CycleLeft_t)
+        or isinstance(token, OpChain_t) and token.ops[0].op in unary_prefix_operators
 
 
 def is_unary_postfix_op(token: Token, exclude_semicolon: bool = False) -> bool:
@@ -383,8 +383,8 @@ def is_unary_postfix_op(token: Token, exclude_semicolon: bool = False) -> bool:
     Note that this is not mutually exclusive with being a prefix operator or a binary operator.
     """
     if exclude_semicolon:
-        return isinstance(token, Operator_t) and token.op in unary_postfix_operators - {';'} or isinstance(token, CycleRight_t)
-    return isinstance(token, Operator_t) and token.op in unary_postfix_operators or isinstance(token, CycleRight_t)
+        return isinstance(token, Operator_t) and token.op in unary_postfix_operators - {';'}
+    return isinstance(token, Operator_t) and token.op in unary_postfix_operators
 
 
 def is_binop(token: Token) -> bool:
@@ -392,7 +392,7 @@ def is_binop(token: Token) -> bool:
     Determines if a token could be a binary operator.
     Note that this is not mutually exclusive with being a prefix operator or a postfix operator.
     """
-    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t, RangeJuxtapose_t, EllipsisJuxtapose_t, TypeParamJuxtapose_t, OpChain_t, BroadcastOp_t, CombinedAssignmentOp_t))
+    return isinstance(token, Operator_t) and token.op in binary_operators or isinstance(token, (ShiftOperator_t, Comma_t, Juxtapose_t, RangeJuxtapose_t, EllipsisJuxtapose_t, BackticksJuxtapose_t, TypeParamJuxtapose_t, OpChain_t, BroadcastOp_t, CombinedAssignmentOp_t))
 
 
 def is_op(token: Token) -> bool:
@@ -506,6 +506,7 @@ def narrow_juxtapose(tokens: list[Token]) -> None:
     """
     range_jux = RangeJuxtapose_t(None)
     ellipsis_jux = EllipsisJuxtapose_t(None)
+    backticks_jux = BackticksJuxtapose_t(None)
     type_param_jux = TypeParamJuxtapose_t(None)
     undefined = Undefined_t(None)
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
@@ -534,6 +535,21 @@ def narrow_juxtapose(tokens: list[Token]) -> None:
                 stream[i-1] = type_param_jux
             elif i + 1 < len(stream) and isinstance(stream[i+1], Juxtapose_t):
                 stream[i+1] = type_param_jux
+
+        # handle backticks jux
+        elif isinstance(token, Backticks_t):
+            left_is_jux = i > 0 and isinstance(stream[i-1], Juxtapose_t)
+            right_is_jux = i + 1 < len(stream) and isinstance(stream[i+1], Juxtapose_t)
+
+            # only left or right can be juxtaposed, but not both, and not neither
+            if (left_is_jux and right_is_jux) or (not left_is_jux and not right_is_jux):
+                raise ValueError(f"ERROR: backticks operator {token} must be juxtaposed on a exactly one side. Got {stream[i-2:i+3]}")
+
+            if left_is_jux:
+                stream[i-1] = backticks_jux
+            elif right_is_jux:
+                stream[i+1] = backticks_jux
+
 
 
 def convert_bare_else(tokens: list[Token]) -> None:

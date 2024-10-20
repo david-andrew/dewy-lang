@@ -24,7 +24,7 @@ from .syntax import (
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
     And, Or, Xor, Nand, Nor, Xnor,
     Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv, AtHandle,
-    CycleLeft, CycleRight, Suppress,
+    Backticks, CycleLeft, CycleRight, Suppress,
     BroadcastOp,
     DeclarationType,
     DeclareGeneric, Parameterize,
@@ -45,15 +45,14 @@ from .tokenizer import (
     Boolean_t,
     BasedNumber_t,
     RawString_t,
-    DotDot_t, DotDotDot_t,
+    DotDot_t, DotDotDot_t, Backticks_t,
     Keyword_t,
 )
 from .postok import (
-    CycleLeft_t,
-    CycleRight_t,
     RangeJuxtapose_t,
     EllipsisJuxtapose_t,
     TypeParamJuxtapose_t,
+    BackticksJuxtapose_t,
     get_next_chain,
     Chain,
     is_op,
@@ -302,8 +301,7 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),  # jux-call, jux-index
     (Associativity.right, [EllipsisJuxtapose_t(None)]),  # jux-ellipsis
     (Associativity.none, [TypeParamJuxtapose_t(None)]),
-    (Associativity.prefix, [CycleLeft_t('`')]),   # `arr
-    (Associativity.postfix, [CycleRight_t('`')]), #  arr`
+    (Associativity.none, [BackticksJuxtapose_t(None)]),  # jux-backticks
     (Associativity.prefix, [Operator_t('not')]),
     (Associativity.right,  [Operator_t('^')]),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
@@ -522,6 +520,7 @@ def parse_single(token: Token, scope: Scope) -> AST:
         case RawString_t(): return String(token.to_str())
         case DotDot_t(): return BareRange(void, void)
         case DotDotDot_t(): return Ellipsis()
+        case Backticks_t(src=src): return Backticks(src)
         case String_t(): return parse_string(token, scope)
         case Block_t(): return parse_block(token, scope)
         case TypeParam_t(): return parse_type_param(token, scope)
@@ -607,6 +606,7 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
             raise ValueError(f"INTERNAL ERROR: TypeParamJuxtapose must be attached to a type param. {left=}, {right=}")
 
         case EllipsisJuxtapose_t():
+            #TODO: can ellipsis be attached on both left and right?
             assert isinstance(left, Ellipsis), f'INTERNAL ERROR: EllipsisJuxtapose was attached to a non ellipsis token. {left=}, {right=}'
             return Spread(right)
 
@@ -622,6 +622,12 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
                 return left
 
             raise ValueError(f'INTERNAL ERROR: Range Juxtapose must be next to a range. Got {left=}, {right=}')
+
+        case BackticksJuxtapose_t():
+            assert isinstance(left, Backticks) or isinstance(right, Backticks), f'INTERNAL ERROR: BackticksJuxtapose must be attached to a backticks token. Got {left=}, {right=}'
+            if isinstance(left, Backticks):
+                return CycleLeft(right, len(left.backticks))
+            return CycleRight(left, len(right.backticks))
 
         case Comma_t():
             # TODO: combine left or right tuples into a single tuple
@@ -688,8 +694,6 @@ def build_unary_prefix_expr(op: Token, right: AST, scope: Scope) -> AST:
         case Operator_t(op='not'): return Not(right)  # TODO: don't want to hardcode Bool here!
         case Operator_t(op='@'): return AtHandle(right)
 
-        case CycleLeft_t(): return CycleLeft(right)
-
         # binary operators that appear to be unary because the left can be void
         # => called as unary prefix op means left was ()/void
         case Operator_t(op='=>'): return PrototypeFunctionLiteral(void, right)
@@ -713,9 +717,6 @@ def build_unary_postfix_expr(left: AST, op: Token, scope: Scope) -> AST:
         # anything juxtaposed with void is treated as a zero-arg call()
         case Juxtapose_t():
             return Call(left)
-
-        case CycleRight_t():
-            return CycleRight(left)
 
         case _:
             raise NotImplementedError(f"TODO: {op=}")

@@ -522,8 +522,6 @@ class UnaryDiv(UnaryPrefixOp):
     op_str = '/'
 
 
-class CycleLeft(UnaryPrefixOp):
-    op_str = '`'
 
 class AtHandle(UnaryPrefixOp):
     op_str = '@'
@@ -542,9 +540,6 @@ class UnaryPostfixOp(AST, ABC):
 
     def __str__(self) -> str:
         return f'{self.operand}{self.op_str}'
-
-class CycleRight(UnaryPostfixOp):
-    op_str = '`'
 
 class Suppress(UnaryPostfixOp):
     op_str = ';'
@@ -567,6 +562,28 @@ class BareRange(PrototypeAST):
 class Ellipsis(AST):
     def __str__(self) -> str:
         return '...'
+
+
+class Backticks(PrototypeAST):
+    backticks: str
+    def __str__(self) -> str:
+        return f'{self.backticks}'
+
+
+class CycleLeft(AST):
+    operand: AST
+    num_steps: int
+
+    def __str__(self):
+        return f'{"`"*self.num_steps}{self.operand}'
+
+
+class CycleRight(AST):
+    operand: AST
+    num_steps: int
+
+    def __str__(self):
+        return f'{self.operand}{"`"*self.num_steps}'
 
 
 class Spread(AST):
