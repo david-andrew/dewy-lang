@@ -73,6 +73,16 @@ def python_repl(args: list[str], verbose:bool=False):
 
     # get the source code and tokenize
     for src in REPL(history_file='~/.dewy/repl_history'):
+        # Check for custom commands
+        match src:
+            case 'exit' | 'quit':
+                return
+            case 'help':
+                print('Commands:')
+                print('  exit|quit: exit the REPL')
+                print('  help: display this help message')
+                continue
+
         try:
             tokens = tokenize(src)
             post_process(tokens)
