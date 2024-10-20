@@ -71,6 +71,10 @@ def python_repl(args: list[str], verbose:bool=False):
         print('easyrepl is required for REPL mode. Install with `pip install easyrepl`')
         return
 
+    # Set up scope to share between REPL calls
+    scope = Scope.default()
+    insert_pyactions(scope)
+
     # get the source code and tokenize
     for src in REPL(history_file='~/.dewy/repl_history'):
         # Check for custom commands
@@ -96,14 +100,14 @@ def python_repl(args: list[str], verbose:bool=False):
                 print_ast(ast)
                 print(repr(ast))
 
-            # run the program
-            res = top_level_evaluate(ast)
+            # run the program (sharing the same scope)
+            res = evaluate(ast, scope)
             if res is not void:
                 print(res)
         except Exception as e:
             print(f'Error: {e}')
 
-    print() # newline after exiting REPL
+    print() # newline after exiting REPL with ctrl+d
 
 def print_ast(ast: AST):
     """little helper function to print out the equivalent source code of an AST"""
