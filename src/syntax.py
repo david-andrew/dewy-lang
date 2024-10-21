@@ -105,6 +105,8 @@ class AST(ABC):
 
             # properties that are not ASTs
             else:
+                if key.startswith('_'): # skip private properties
+                    continue
                 _ = yield key, value
                 assert _ is None, f'ILLEGAL: attempted to replace non-AST value "{key}" during __iter_members__ for ast {self}'
 
@@ -392,139 +394,139 @@ class BinOp(AST, ABC):
     right: AST
 
     def __post_init__(self):
-        self.space = cast(bool, getattr(self, 'space', True))
-        self.op_str = cast(str, getattr(self, 'op_str', None))
-        assert isinstance(self.op_str, str), f'BinOp subclass "{self.__class__.__name__}" must define an `op_str` attribute'
+        self._space = cast(bool, getattr(self, '_space', True))
+        self._op = cast(str, getattr(self, '_op', None))
+        assert isinstance(self._op, str), f'BinOp subclass "{self.__class__.__name__}" must define an `_op` attribute'
 
     def __str__(self) -> str:
-        if self.space:
-            return f'{self.left} {self.op_str} {self.right}'
-        return f'{self.left}{self.op_str}{self.right}'
+        if self._space:
+            return f'{self.left} {self._op} {self.right}'
+        return f'{self.left}{self._op}{self.right}'
 
 class Assign(BinOp):
-    op_str = '='
+    _op = '='
 class PointsTo(BinOp):
-    op_str = '->'
+    _op = '->'
 class BidirPointsTo(BinOp):
-    op_str = '<->'
+    _op = '<->'
 class Access(BinOp):
-    op_str = '.'
-    space = False
+    _op = '.'
+    _space = False
 class Equal(BinOp):
-    op_str = '=?'
+    _op = '=?'
 
 # covered by OpChain([Not, Equal])
 # class NotEqual(BinOp):
-#     op_str = 'not=?'
+#     _op = 'not=?'
 
 class Less(BinOp):
-    op_str = '<?'
+    _op = '<?'
 
 class LessEqual(BinOp):
-    op_str = '<=?'
+    _op = '<=?'
 
 class Greater(BinOp):
-    op_str = '>?'
+    _op = '>?'
 
 class GreaterEqual(BinOp):
-    op_str = '>=?'
+    _op = '>=?'
 
 class  LeftShift(BinOp):
-    op_str = '<<'
+    _op = '<<'
 
 class  RightShift(BinOp):
-    op_str = '>>'
+    _op = '>>'
 
 class LeftRotate(BinOp):
-    op_str = '<<<'
+    _op = '<<<'
 
 class RightRotate(BinOp):
-    op_str = '>>>'
+    _op = '>>>'
 
 class LeftRotateCarry(BinOp):
-    op_str = '<<!'
+    _op = '<<!'
 
 class RightRotateCarry(BinOp):
-    op_str = '!>>'
+    _op = '!>>'
 
 class Add(BinOp):
-    op_str = '+'
+    _op = '+'
 
 class Sub(BinOp):
-    op_str = '-'
+    _op = '-'
 
 class Mul(BinOp):
-    op_str = '*'
+    _op = '*'
 
 class Div(BinOp):
-    op_str = '/'
+    _op = '/'
 
 class IDiv(BinOp):
-    op_str = '÷'
+    _op = '÷'
 
 class Mod(BinOp):
-    op_str = '%'
+    _op = '%'
 
 class Pow(BinOp):
-    op_str = '^'
+    _op = '^'
 
 class And(BinOp):
-    op_str = 'and'
+    _op = 'and'
 
 class Or(BinOp):
-    op_str = 'or'
+    _op = 'or'
 
 class Xor(BinOp):
-    op_str = 'xor'
+    _op = 'xor'
 
 class Nand(BinOp):
-    op_str = 'nand'
+    _op = 'nand'
 
 class Nor(BinOp):
-    op_str = 'nor'
+    _op = 'nor'
 
 class Xnor(BinOp):
-    op_str = 'xnor'
+    _op = 'xnor'
 
 class IterIn(BinOp):
-    op_str = 'in'
+    _op = 'in'
 
 class MemberIn(BinOp):
-    op_str = 'in?'
+    _op = 'in?'
 
 class UnaryPrefixOp(AST, ABC):
     operand: AST
 
     def __post_init__(self):
-        self.space = cast(bool, getattr(self, 'space', False))
-        self.op_str = cast(str, getattr(self, 'op_str', None))
-        assert isinstance(self.op_str, str), f'UnaryPrefixOp subclass "{self.__class__.__name__}" must define an `op_str` attribute'
+        self._space = cast(bool, getattr(self, '_space', False))
+        self._op = cast(str, getattr(self, '_op', None))
+        assert isinstance(self._op, str), f'UnaryPrefixOp subclass "{self.__class__.__name__}" must define an `_op` attribute'
 
     def __str__(self) -> str:
-        if self.space:
-            return f'{self.op_str} {self.operand}'
-        return f'{self.op_str}{self.operand}'
+        if self._space:
+            return f'{self._op} {self.operand}'
+        return f'{self._op}{self.operand}'
 
 class Not(UnaryPrefixOp):
-    op_str = 'not'
-    space = True
+    _op = 'not'
+    _space = True
 
 class UnaryNeg(UnaryPrefixOp):
-    op_str = '-'
+    _op = '-'
 
 class UnaryPos(UnaryPrefixOp):
-    op_str = '+'
+    _op = '+'
 
 class UnaryMul(UnaryPrefixOp):
-    op_str = '*'
+    _op = '*'
 
 class UnaryDiv(UnaryPrefixOp):
-    op_str = '/'
+    _op = '/'
 
 
 
 class AtHandle(UnaryPrefixOp):
-    op_str = '@'
+    _op = '@'
     def __str__(self):
         if isinstance(self.operand, (Delimited, Identifier)):
             return f'@{self.operand}'
@@ -535,21 +537,21 @@ class UnaryPostfixOp(AST, ABC):
     operand: AST
 
     def __post_init__(self):
-        self.op_str = cast(str, getattr(self, 'op_str', None))
-        assert isinstance(self.op_str, str), f'UnaryPostfixOp subclass "{self.__class__.__name__}" must define an `op_str` attribute'
+        self._op = cast(str, getattr(self, '_op', None))
+        assert isinstance(self._op, str), f'UnaryPostfixOp subclass "{self.__class__.__name__}" must define an `_op` attribute'
 
     def __str__(self) -> str:
-        return f'{self.operand}{self.op_str}'
+        return f'{self.operand}{self._op}'
 
 class Suppress(UnaryPostfixOp):
-    op_str = ';'
+    _op = ';'
 
 
 class BroadcastOp(AST):
     op: BinOp
 
     def __str__(self):
-        return f'{self.op.left} .{self.op.op_str} {self.op.right}'
+        return f'{self.op.left} .{self.op.op} {self.op.right}'
 
 class BareRange(PrototypeAST):
     left: AST
@@ -700,7 +702,7 @@ class TypedIdentifier(AST):
 
 
 class ReturnTyped(BinOp):
-    op_str = ':>'
+    _op = ':>'
 
 class UnpackTarget(AST):
     target: 'list[Identifier | TypedIdentifier | UnpackTarget | Assign | CollectInto]'
