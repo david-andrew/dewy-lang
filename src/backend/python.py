@@ -421,7 +421,7 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
             return call_args, call_kwargs
 
         #TODO: eventually it should just be anything that is left over is positional args rather than specifying them all out
-        case Int() | String() | IString() | Call() | Access() | Express() | UnaryPrefixOp() | UnaryPostfixOp() | BinOp() | BroadcastOp():
+        case Int() | String() | IString() | Range() | Call() | Access() | Express() | UnaryPrefixOp() | UnaryPostfixOp() | BinOp() | BroadcastOp():
             return [args], {}
         # case Call(): return [args], {}
         case _:
@@ -1030,6 +1030,7 @@ def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
         case PointsTo(left, right): return f'{py_stringify(left, scope)}->{py_stringify(right, scope)}'
         case BidirDict(items): return f"[{' '.join(py_stringify(kv, scope) for kv in items)}]"
         case BidirPointsTo(left, right): return f'{py_stringify(left, scope)}<->{py_stringify(right, scope)}'
+        case Range(left, right, brackets): return f'{brackets[0]}{py_stringify_range_operands(left, scope)}..{py_stringify_range_operands(right, scope)}{brackets[1]}'
         case Closure(fn): return f'{fn}'
         case FunctionLiteral() as fn: return f'{fn}'
         case PyAction() as fn: return f'{fn}'
@@ -1047,6 +1048,12 @@ def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
 
 
     raise NotImplementedError('stringify not implemented yet')
+
+def py_stringify_range_operands(ast: AST, scope: Scope) -> str:
+    """helper function to stringify range operands which may be a single value or a tuple (represented as an array)"""
+    if isinstance(ast, Array):
+        return f"{','.join(py_stringify(i, scope) for i in ast.items)}"
+    return py_stringify(ast, scope)
 
 def preprocess_py_print_args(args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]:
     py_args = [py_stringify(i, scope, top_level=True) for i in args]
