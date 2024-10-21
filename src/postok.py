@@ -206,6 +206,20 @@ atom_tokens = (
     Undefined_t,
 )
 
+# atoms that can be juxtaposed (so juxtaposes next to them shouldn't be removed)
+jux_atoms = (
+    DotDot_t,
+    DotDotDot_t,
+    Backticks_t,
+)
+
+non_jux_ops = (
+    Operator_t,
+    ShiftOperator_t,
+    Comma_t
+)
+
+
 
 class ShouldBreakTracker(ABC):
     @abstractmethod
@@ -273,11 +287,12 @@ def invert_whitespace(tokens: list[Token]) -> None:
         i += 1
 
     # finally, remove juxtapose tokens next to operators that are not whitespace sensitive
-    non_jux_ops = (Operator_t, ShiftOperator_t, Comma_t)
     i = 1
     while i < len(tokens) - 1:
         left, middle, right = tokens[i-1:i+2]
-        if isinstance(middle, Juxtapose_t) and (isinstance(left, non_jux_ops) or isinstance(right, non_jux_ops)):
+        if isinstance(middle, Juxtapose_t) \
+        and (isinstance(left, non_jux_ops) or isinstance(right, non_jux_ops))\
+        and not isinstance(left, jux_atoms) and not isinstance(right, jux_atoms):
             tokens.pop(i)
             continue
         i += 1
