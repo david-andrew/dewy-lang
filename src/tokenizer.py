@@ -336,7 +336,7 @@ valid_delim_closers = {
 
 # list of all operators sorted from longest to shortest
 # TODO: make @ and ... into expressions (perhaps with lower precedence calling than regular calls?)
-unary_prefix_operators = {'+', '-', '*', '/', 'not', '@'}#, '...'}
+unary_prefix_operators = {'+', '-', '*', '/', 'not', '~', '@'}#, '...'}
 unary_postfix_operators = {'?', ';'}
 binary_operators = {
     '+', '-', '*', '/', '%', '^',

@@ -300,7 +300,7 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.prefix, [Operator_t('@')]),
     (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),  # jux-call, jux-index
     (Associativity.none, [TypeParamJuxtapose_t(None)]),
-    (Associativity.prefix, [Operator_t('not')]),
+    (Associativity.prefix, [Operator_t('not'), Operator_t('~')]),
     (Associativity.right,  [Operator_t('^')]),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
     (Associativity.left, [Operator_t('*'), Operator_t('/'), Operator_t('%')]),
@@ -584,8 +584,8 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         # case Operator_t(op='<=>'): return ThreewayCompare(left, right)
 
         # Logical Operators. TODO: outtype=Bool is not flexible enough...
-        case Operator_t(op='and'): return And(left, right)
-        case Operator_t(op='or'): return Or(left, right)
+        case Operator_t(op='and'|'&'): return And(left, right)
+        case Operator_t(op='or'|'|'): return Or(left, right)
         case Operator_t(op='nand'): return Nand(left, right)
         case Operator_t(op='nor'): return Nor(left, right)
         case Operator_t(op='xor'): return Xor(left, right)
@@ -691,7 +691,7 @@ def build_unary_prefix_expr(op: Token, right: AST, scope: Scope) -> AST:
         case Operator_t(op='-'): return UnaryNeg(right)
         case Operator_t(op='*'): return UnaryMul(right)
         case Operator_t(op='/'): return UnaryDiv(right)
-        case Operator_t(op='not'): return Not(right)  # TODO: don't want to hardcode Bool here!
+        case Operator_t(op='not'|'~'): return Not(right)  # TODO: don't want to hardcode Bool here!
         case Operator_t(op='@'): return AtHandle(right)
 
         # binary operators that appear to be unary because the left can be void
