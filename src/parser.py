@@ -9,7 +9,7 @@ from .syntax import (
     Declare,
     PointsTo, BidirPointsTo,
     Type,
-    ListOfASTs, PrototypeTuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, ObjectLiteral, Dict, BidirDict, TypeParam,
+    ListOfASTs, PrototypeTuple, Block, BareRange, DotDotDot, CollectInto, SpreadOutFrom, Array, Group, Range, ObjectLiteral, Dict, BidirDict, TypeParam,
     Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
@@ -519,7 +519,7 @@ def parse_single(token: Token, scope: Scope) -> AST:
         case BasedNumber_t(): return Int(based_number_to_int(token.src))
         case RawString_t(): return String(token.to_str())
         case DotDot_t(): return BareRange(void, void)
-        case DotDotDot_t(): return Ellipsis()
+        case DotDotDot_t(): return DotDotDot()
         case Backticks_t(src=src): return Backticks(src)
         case String_t(): return parse_string(token, scope)
         case Block_t(): return parse_block(token, scope)
@@ -606,9 +606,11 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
             raise ValueError(f"INTERNAL ERROR: TypeParamJuxtapose must be attached to a type param. {left=}, {right=}")
 
         case EllipsisJuxtapose_t():
-            #TODO: can ellipsis be attached on both left and right?
-            assert isinstance(left, Ellipsis), f'INTERNAL ERROR: EllipsisJuxtapose was attached to a non ellipsis token. {left=}, {right=}'
-            return Spread(right)
+            if isinstance(left, DotDotDot):
+                return CollectInto(right)
+            if isinstance(right, DotDotDot):
+                return SpreadOutFrom(left)
+            raise ValueError(f'INTERNAL ERROR: EllipsisJuxtapose must be attached to an ellipsis token. {left=}, {right=}')
 
         case RangeJuxtapose_t():
             if isinstance(right, BareRange):

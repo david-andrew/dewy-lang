@@ -6,7 +6,7 @@ from .syntax import (
     Declare,
     PointsTo, BidirPointsTo,
     Type,
-    ListOfASTs, PrototypeTuple, Block, BareRange, Ellipsis, Spread, Array, Group, Range, ObjectLiteral, Dict, BidirDict, TypeParam,
+    ListOfASTs, PrototypeTuple, Block, BareRange, Ellipsis, DotDotDot, CollectInto, SpreadOutFrom, Array, Group, Range, ObjectLiteral, Dict, BidirDict, TypeParam,
     Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
@@ -79,6 +79,7 @@ def post_parse(ast: AST) -> AST:
     # any conversions should probably run simplest to most complex
     ast = convert_prototype_tuples(ast)
     ast = convert_bare_ranges(ast)
+    ast = convert_bare_ellipses(ast)
     ast = convert_prototype_function_literals(ast)
     ast = convert_prototype_identifiers(ast)
 
@@ -158,7 +159,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             # cases that themselves don't get adjusted but may contain nested children that need to be converted
             case IString() | Group() | Block() | PrototypeTuple() | Array() | ObjectLiteral() | Dict() | BidirDict() | FunctionLiteral() | Signature() | Range() | Loop() | If() | Flow() | Default() \
                 | PointsTo() | BidirPointsTo() | Equal() | Less() | LessEqual() | Greater() | GreaterEqual() | LeftShift() | RightShift() | LeftRotate() | RightRotate() | LeftRotateCarry() | RightRotateCarry() | Add() | Sub() | Mul() | Div() | IDiv() | Mod() | Pow() | And() | Or() | Xor() | Nand() | Nor() | Xnor() | MemberIn() \
-                | BroadcastOp() \
+                | BroadcastOp() | SpreadOutFrom() \
                 | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() | CycleLeft() | CycleRight() \
                 | TypedIdentifier():
                 ...
@@ -186,7 +187,7 @@ def convert_prototype_to_unpack_target(ast: Array) -> UnpackTarget:
                 gen.send(Assign(Identifier(name), right))
             case Array() as arr:
                 gen.send(convert_prototype_to_unpack_target(arr))
-            case Spread(): ...
+            case CollectInto(): ...
             case TypedIdentifier(): ...
             case _:
                 raise NotImplementedError(f'Unhandled case {type(i)} in convert_prototype_to_unpack_target')
@@ -208,6 +209,15 @@ def convert_bare_ranges(ast: AST) -> AST:
     for i in (gen := ast.__full_traversal_iter__()):
         if isinstance(i, BareRange):
             gen.send(Range(i.left, i.right, '[]'))
+    return ast.items[0]
+
+
+def convert_bare_ellipses(ast: AST) -> AST:
+    """Convert all remaining DotDotDots (that were not juxtaposed) to Ellipsis"""
+    ast = Group([ast])
+    for i in (gen := ast.__full_traversal_iter__()):
+        if isinstance(i, DotDotDot):
+            gen.send(Ellipsis())
     return ast.items[0]
 
 

@@ -488,6 +488,9 @@ def narrow_juxtapose(tokens: list[Token]) -> None:
     type_param_jux = TypeParamJuxtapose_t(None)
     undefined = Undefined_t(None)
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
+        left_is_jux = i > 0 and isinstance(stream[i-1], Juxtapose_t)
+        right_is_jux = i + 1 < len(stream) and isinstance(stream[i+1], Juxtapose_t)
+
         # handle range jux
         if isinstance(token, DotDot_t):
             if i + 1 < len(stream):
@@ -504,21 +507,23 @@ def narrow_juxtapose(tokens: list[Token]) -> None:
 
         # handle ellipsis jux
         elif isinstance(token, DotDotDot_t):
-            if i + 1 < len(stream) and isinstance(stream[i+1], Juxtapose_t):
+            # ellipsis can be optionally juxtaposed, but when it is juxtaposed, it may only be juxtaposed on one side
+            if left_is_jux and right_is_jux:
+                raise ValueError(f"ERROR: ellipsis operator {token} must be juxtaposed on either zero or one side. Got ...{stream[i-2:i+3]}...")
+            if left_is_jux:
+                stream[i-1] = ellipsis_jux
+            if right_is_jux:
                 stream[i+1] = ellipsis_jux
 
         # handle type param jux
         elif isinstance(token, TypeParam_t):
-            if i > 0 and isinstance(stream[i-1], Juxtapose_t):
+            if left_is_jux:
                 stream[i-1] = type_param_jux
-            elif i + 1 < len(stream) and isinstance(stream[i+1], Juxtapose_t):
+            elif right_is_jux:
                 stream[i+1] = type_param_jux
 
         # handle backticks jux
         elif isinstance(token, Backticks_t):
-            left_is_jux = i > 0 and isinstance(stream[i-1], Juxtapose_t)
-            right_is_jux = i + 1 < len(stream) and isinstance(stream[i+1], Juxtapose_t)
-
             # only left or right can be juxtaposed, but not both, and not neither
             if (left_is_jux and right_is_jux) or (not left_is_jux and not right_is_jux):
                 raise ValueError(f"ERROR: backticks operator {token} must be juxtaposed on a exactly one side. Got ...{stream[i-2:i+3]}...")

@@ -586,11 +586,22 @@ class CycleRight(AST):
         return f'{self.operand}{"`"*self.num_steps}'
 
 
-class Spread(AST):
+class DotDotDot(PrototypeAST):
+    def __str__(self) -> str:
+        return f'...'
+
+class CollectInto(AST):
     right: AST
 
-    def __str__(self) -> str:
+    def __str__(self):
         return f'...{self.right}'
+
+class SpreadOutFrom(AST):
+    left: AST
+
+    def __str__(self):
+        return f'{self.left}...'
+
 
 
 class Range(AST):
@@ -692,7 +703,7 @@ class ReturnTyped(BinOp):
     op_str = ':>'
 
 class UnpackTarget(AST):
-    target: 'list[Identifier | TypedIdentifier | UnpackTarget | Assign | Spread]'
+    target: 'list[Identifier | TypedIdentifier | UnpackTarget | Assign | CollectInto]'
     def __str__(self) -> str:
         return f'[{" ".join(map(str, self.target))}]'
 

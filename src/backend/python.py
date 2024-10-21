@@ -25,7 +25,7 @@ from ..syntax import (
     Not, UnaryPos, UnaryNeg, UnaryMul, UnaryDiv, AtHandle,
     CycleLeft, CycleRight, Suppress,
     BroadcastOp,
-    Spread,
+    CollectInto, SpreadOutFrom,
 )
 
 from ..postparse import FunctionLiteral, Signature, normalize_function_args
@@ -347,6 +347,13 @@ def evaluate_declare(ast: Declare, scope: Scope):
             type = untyped
         case Assign(left=TypedIdentifier(id=Identifier(name), type=type), right=right):
             value = evaluate(right, scope)
+        case Assign(left=UnpackTarget() as target, right=right):
+            right = evaluate(right, scope)
+            #TODO: need to declare each value being unpacked. something with this effect (but also makes new declarations for each):
+            # unpack_assign(target, right, scope)
+            pdb.set_trace()
+            ...
+
         case _:
             raise NotImplementedError(f'Declare not implemented yet for {ast.target=}')
 
@@ -405,7 +412,7 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
         case Assign(left=Identifier(name)|TypedIdentifier(id=Identifier(name)), right=right): return [], {name: right}
         # case Assign(left=UnpackTarget() as target, right=right): raise NotImplementedError('UnpackTarget not implemented yet')
         case Assign(): raise NotImplementedError('Assign not implemented yet') #called recursively if a calling arg was an keyword arg rather than positional
-        case Spread(right=right):
+        case CollectInto(right=right):
             pdb.set_trace()
             ... #right should be iterable, so extend with the values it expresses
                 #whether to add to args or kwargs depends on each type from right
@@ -691,8 +698,8 @@ def unpack_assign(target: UnpackTarget, value: AST, scope: Scope):
 
     # determine how many targets will be assigned, and if spread is present
     num_targets = len(target.target)
-    num_spread = sum(isinstance(t, Spread) for t in target.target)
-    if num_spread > 1: raise RuntimeError(f'Only one spread is allowed in unpacking. {target=}, {value=}')
+    num_spread = sum(isinstance(t, CollectInto) for t in target.target)
+    if num_spread > 1: raise RuntimeError(f'Only one collect-into is allowed in unpacking. {target=}, {value=}')
 
     # undefined unpacks as many undefineds as there are non-spread targets
     if isinstance(value, Undefined):
@@ -713,9 +720,9 @@ def unpack_assign(target: UnpackTarget, value: AST, scope: Scope):
             #     scope.assign(name, right)
             case UnpackTarget():
                 unpack_assign(left, next(gen), scope)
-            case Spread(right=Identifier(name)):
+            case CollectInto(right=Identifier(name)):
                 scope.assign(name, Array([next(gen) for _ in range(spread_size)]))
-            case Spread(right=UnpackTarget() as left):
+            case CollectInto(right=UnpackTarget() as left):
                 unpack_assign(left, Array([next(gen) for _ in range(spread_size)]), scope)
             case _:
                 pdb.set_trace()
