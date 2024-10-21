@@ -359,7 +359,7 @@ def operator_precedence(op: Operator_t|OpChain_t|BroadcastOp_t|CombinedAssignmen
     try:
         return precedence_table[op]
     except:
-        raise ValueError(f"ERROR: expected operator, got {op=}") from None
+        raise ValueError(f"ERROR: expected operator, got {op=} which failed to return a value from the operator precedence table") from None
 
 
 def operator_associativity(op: Operator_t | int) -> Associativity:

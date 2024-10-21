@@ -290,6 +290,7 @@ def invert_whitespace(tokens: list[Token]) -> None:
     i = 1
     while i < len(tokens) - 1:
         left, middle, right = tokens[i-1:i+2]
+        #TODO: somewhere around here, need to fix how @ isn't juxtaposable but should be on the left depending on lots of stuff...
         if isinstance(middle, Juxtapose_t) \
         and (isinstance(left, non_jux_ops) or isinstance(right, non_jux_ops))\
         and not isinstance(left, jux_atoms) and not isinstance(right, jux_atoms):
@@ -520,7 +521,7 @@ def narrow_juxtapose(tokens: list[Token]) -> None:
 
             # only left or right can be juxtaposed, but not both, and not neither
             if (left_is_jux and right_is_jux) or (not left_is_jux and not right_is_jux):
-                raise ValueError(f"ERROR: backticks operator {token} must be juxtaposed on a exactly one side. Got {stream[i-2:i+3]}")
+                raise ValueError(f"ERROR: backticks operator {token} must be juxtaposed on a exactly one side. Got ...{stream[i-2:i+3]}...")
 
             if left_is_jux:
                 stream[i-1] = backticks_jux
