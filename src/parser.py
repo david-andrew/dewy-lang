@@ -300,14 +300,14 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.prefix, [Operator_t('@')]),
     (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),  # jux-call, jux-index
     (Associativity.none, [TypeParamJuxtapose_t(None)]),
+    (Associativity.none, [EllipsisJuxtapose_t(None)]),  # jux-ellipsis
+    (Associativity.none, [BackticksJuxtapose_t(None)]),  # jux-backticks
     (Associativity.prefix, [Operator_t('not'), Operator_t('~')]),
     (Associativity.right,  [Operator_t('^')]),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
     (Associativity.left, [Operator_t('*'), Operator_t('/'), Operator_t('%')]),
     (Associativity.left, [Operator_t('+'), Operator_t('-')]),
     (Associativity.left, [*map(ShiftOperator_t, ['<<', '>>', '<<<', '>>>', '<<!', '!>>'])]),
-    (Associativity.none, [EllipsisJuxtapose_t(None)]),  # jux-ellipsis
-    (Associativity.none, [BackticksJuxtapose_t(None)]),  # jux-backticks
     (Associativity.none,  [Comma_t(',')]),
     (Associativity.left, [RangeJuxtapose_t(None)]),  # jux-range
     (Associativity.none, [Operator_t('in')]),
