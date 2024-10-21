@@ -10,6 +10,13 @@ c = a@10
 d = b`a
 // honestly though these are pretty un-idiomatic, and perhaps the best solution would be to identify these cases and say they're ambiguous
 
+// juxtapose with unary operators gets lost
+// seems like it could be a design decision at the moment, but I think it might actually be something to fix
+arr = [1,2 3,4]
+//juxtapose gets lost in these cases. ideally the juxtapose would remain since ` and ... and .. are whitespace sensitive
+`/arr
+../arr
+.../arr
 
 
 
