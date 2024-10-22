@@ -55,7 +55,7 @@ from .postok import (
     BackticksJuxtapose_t,
     get_next_chain,
     Chain,
-    is_op,
+    is_op, is_binop, is_unary_prefix_op, is_unary_postfix_op,
     Flow_t,
     Declare_t,
     OpChain_t,
@@ -363,14 +363,16 @@ def operator_precedence(op: Operator_t|OpChain_t|BroadcastOp_t|CombinedAssignmen
         raise ValueError(f"ERROR: expected operator, got {op=} which failed to return a value from the operator precedence table") from None
 
 
-def operator_associativity(op: Operator_t | int) -> Associativity:
+def operator_associativity(op: Operator_t | int) -> Associativity|set[Associativity]:
     if not isinstance(op, int):
         i = operator_precedence(op)
-        assert isinstance(i, int), f'Cannot determine associativity of operator ({op}) with multiple precedence levels ({i})'
+        # assert isinstance(i, int), f'Cannot determine associativity of operator ({op}) with multiple precedence levels ({i})'
     else:
         i = op
     try:
-        return associativity_table[i]
+        if isinstance(i, int):
+            return associativity_table[i]
+        return {associativity_table[v] for v in i.values}
     except:
         raise ValueError(f"Error: failed to determine associativity for operator {op}") from None
 
@@ -451,16 +453,17 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope: Scope) -> tuple[Chai
     """
     return the integer index/indices of the lowest precedence operator(s) in the given list of tokens
     """
-    assert isinstance(
-        tokens, Chain), f"ERROR: `split_by_lowset_precedence()` may only be called on explicitly known Chain[Token], got {type(tokens)}"
+    assert isinstance(tokens, Chain), f"ERROR: `split_by_lowset_precedence()` may only be called on explicitly known Chain[Token], got {type(tokens)}"
 
-    # collect all operators and their indices in the list of tokens
+    # collect all operators, their indices, and their associativity from the list of tokens
     idxs, ops = zip(*[(i, token) for i, token in enumerate(tokens) if is_op(token)])
+    idxs, ops = cast(list[int], idxs), cast(list[Token], ops)
+    assocs = [operator_associativity(op) for op in ops]
 
+    # simple cases of none or one operator
     if len(ops) == 0:
         pdb.set_trace()
-        # TODO: how to handle this case?
-        # return Chain(), None, Chain()
+        # TODO: how to handle this case? probably an error
         raise ValueError()
     if len(ops) == 1:
         i, = idxs
@@ -468,6 +471,16 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope: Scope) -> tuple[Chai
         return Chain(tokens[:i]), op, Chain(tokens[i+1:])
 
     # when more than one op present, find the lowest precedence one
+
+    # case of all unary operators has different splitting logic
+    if all(assoc == Associativity.unary for assoc in assocs):
+        return unary_split_by_lowest_precedence(tokens, ops, idxs, scope)
+
+    # filter out any unary operators
+    assocs, idxs, ops = zip(*[(a, i, op) for a, i, op in zip(assocs, idxs, ops) if a is not Associativity.unary])
+    assocs, idxs, ops = cast(list[Associativity], assocs), cast(list[int], idxs), cast(list[Token], ops)
+
+    # continue handling binary operators as before
     ranks = [operator_precedence(op) for op in ops]
     min_rank = min(ranks)
     min_idx = ranks.index(min_rank)
@@ -488,27 +501,62 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope: Scope) -> tuple[Chai
 
     # handling when multiple ops have the same precedence, select based on associativity rules
     if isinstance(min_rank, qint):
-        assocs = {operator_associativity(i) for i in min_rank.values}
-        if len(assocs) > 1:
-            raise NotImplementedError(
-                f'TODO: need to type check to deal with multiple/ambiguous operator associativities: {assocs}')
-        assoc, = assocs
+        assocs_set = set(assocs) #{operator_associativity(i) for i in min_rank.values}
+        if len(assocs_set) > 1:
+            raise NotImplementedError(f'TODO: need to type check to deal with multiple/ambiguous operator associativities: {assocs_set}')
+        assoc, = assocs_set
     else:
         assoc = operator_associativity(min_rank)
 
     match assoc:
         case Associativity.left: i = op_idxs[-1]
         case Associativity.right: i = op_idxs[0]
-        case Associativity.unary: pdb.set_trace(); ... # I think the way to handle this is to first look for lowest precedence non-unary operators, and then do unary operators. Do by filtering out above
-        # case Associativity.prefix: i = op_idxs[0]
-        # case Associativity.postfix: i = op_idxs[-1]
+        case Associativity.unary: raise ValueError(f'INTERNAL ERROR: there should not be any unary operators in the list of operators at this point')
         case Associativity.none: i = op_idxs[-1]  # default to left. handled later in parsing
         case Associativity.fail: raise ValueError(f'Cannot handle multiple given operators in chain {tokens}, as lowest precedence operator is marked as un-associable.')
 
     return Chain(tokens[:i]), tokens[i], Chain(tokens[i+1:])
 
 
+def unary_split_by_lowest_precedence(tokens: Chain[Token], ops: list[Token], idxs:list[int], scope: Scope) -> tuple[Chain[Token], Token, Chain[Token]]:
+    """
+    split the list of tokens by the lowest precedence unary operator
+    """
+    # unary split looks at the left=leftmost prefix operator and the right=rightmost postfix operator
+    # if left is None, then it's right. if right is None, then it's left
+    # otherwise, it's determined by which has the lower precedence
+    # if both have the same precedence (shouldn't generally happen), probably just do left to right
 
+    #TODO: this might actually fail for the jux operators because to determine if they are prefix or postfix requires looking at the left and right token...
+    pdb.set_trace()
+
+
+    # get the leftmost and rightmost operators
+    left_op = ops[0] if is_unary_prefix_op(ops[0]) else None
+    left_idx = idxs[0]
+    if left_op is not None:
+        assert left_idx == 0, f'INTERNAL ERROR: expected left operator to be at the start of the list of tokens, got {left_idx=}, {tokens=}'
+    
+    right_op = ops[-1] if is_unary_postfix_op(ops[-1]) else None
+    right_idx = idxs[-1]
+    if right_op is not None:
+        assert right_idx == len(tokens) - 1, f'INTERNAL ERROR: expected right operator to be at the end of the list of tokens, got {right_idx=}, {tokens=}'
+
+    if left_op is None and right_op is None:
+        raise ValueError(f'INTERNAL ERROR: no unary operators found in list of operators {ops=}')
+
+    # determine which operator is the lowest precedence
+    if left_op is None:
+        i = right_idx
+    elif right_op is None:
+        i = left_idx
+    else:
+        # use precedence to determine lower precedence op
+        left_rank = operator_precedence(left_op)
+        right_rank = operator_precedence(right_op)
+        i = left_idx if left_rank <= right_rank else right_idx
+
+    return Chain(tokens[:i]), tokens[i], Chain(tokens[i+1:])
 
 
 def parse_single(token: Token, scope: Scope) -> AST:
