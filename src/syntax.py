@@ -192,14 +192,21 @@ class PrototypeAST(AST, ABC):
 class Delimited(ABC):
     """used to track which ASTs are printed with their own delimiter so they can be juxtaposed without extra parentheses"""
 
+class TypeParam(AST, Delimited):
+    items: list[AST]
+
+    def __str__(self):
+        return f'<{" ".join(map(str, self.items))}>'
 class Type(AST):
-    name: str
-    parameters: list = field(default_factory=list)
+    t: type[AST]
+    parameters: TypeParam | None = None
 
     def __str__(self) -> str:
         if self.parameters:
-            return f'{self.name}<{", ".join(map(str, self.parameters))}>'
-        return self.name
+            return f'{self.t.__name__}{self.parameters}'
+        return self.t.__name__
+
+
 
 
 # TODO: turn into a singleton...
@@ -643,11 +650,6 @@ class ObjectLiteral(AST, Delimited):
         return f'[{" ".join(map(str, self.items))}]'
 
 
-class TypeParam(AST, Delimited):
-    items: list[AST]
-
-    def __str__(self):
-        return f'<{" ".join(map(str, self.items))}>'
 
 
 class DeclareGeneric(AST):

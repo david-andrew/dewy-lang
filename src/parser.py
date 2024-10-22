@@ -29,6 +29,9 @@ from .syntax import (
     DeclarationType,
     DeclareGeneric, Parameterize,
 )
+from .dtypes import (
+    TypeExpr
+)
 from .tokenizer import (
     Token,
     Block_t,
@@ -78,7 +81,7 @@ class Scope:
     class _var():
         # name:str #name is stored in the dict key
         decltype: DeclarationType
-        type: Type
+        type: TypeExpr
         value: AST
 
     parent: 'Scope | None' = None
@@ -153,7 +156,7 @@ class Scope:
                 Type('callable'),
                 PrototypePyAction(
                     Group([Assign(TypedIdentifier(Identifier('s'), Type('string')), String(''))]),
-                    Type('void')
+                    Type(Void)
                 )
             ),
             'print': Scope._var(
@@ -161,7 +164,7 @@ class Scope:
                 Type('callable'),
                 PrototypePyAction(
                     Group([Assign(TypedIdentifier(Identifier('s'), Type('string')), String(''))]),
-                    Type('void')
+                    Type(Void)
                 )
             ),
             'readl': Scope._var(
@@ -169,7 +172,7 @@ class Scope:
                 Type('callable'),
                 PrototypePyAction(
                     Group([]),
-                    Type('string')
+                    Type(String)
                 )
             )
         })
