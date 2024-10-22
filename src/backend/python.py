@@ -899,6 +899,17 @@ def float_float_div(l: int|float, r: int|float) -> Float | Undefined:
 class SimpleValue(Protocol, Generic[T]):
     val: T
 
+
+# @dataclass
+# class Dispatch:
+#     fn_table: dict[tuple[Any, ...], TypingCallable[..., AST]]
+#     type_symmetric: bool = True
+#     # etc.
+# DispatchTable = dict[type[UnaryPrefixOp|UnaryPostfixOp|BinOp], Dispatch]
+# PromotionTable = dict[tuple[type[T], type[U]], TypingCallable[[T|U], T|U]]
+# promote_rule(Int, Float64) == Float64
+# promote_type(Int, Float64)  # Float64
+
 UnaryDispatchKey =  tuple[type[UnaryPrefixOp]|type[UnaryPostfixOp], type[SimpleValue[T]]]
 unary_dispatch_table: dict[UnaryDispatchKey[T], TypingCallable[[T], AST]] = {
     (Not, Int): lambda l: Int(~l),
@@ -964,6 +975,18 @@ unsymmetric_binary_dispatch_table: dict[BinaryDispatchKey[T, U], ] = {
     #e.g. (Mul, String, Int): lambda l, r: String(l * r), # if we follow python's behavior
 }
 
+# dispatch table for more complicated values that can't be automatically unpacked by the dispatch table
+# TODO: actually ideally just have a single table
+CustomBinaryDispatchKey = tuple[type[BinOp], type[T], type[U]]
+custom_binary_dispatch_table: dict[CustomBinaryDispatchKey[T, U], TypingCallable[[T, U], AST]] = {
+    (Add, Array, Array): lambda l, r: Array(l.items + r.items), #TODO: this will be removed in favor of spread. array add will probably be vector add
+    # (BroadcastOp, Array, Array): broadcast_array_op,
+    # (BroadcastOp, NpArray, NpArray): broadcast_array_op,
+    # (BroadcastOp, Int, Array): broadcast_array_op,
+    # (BroadcastOp, Float, Array): broadcast_array_op,
+
+}
+
 #TODO: handling short circuiting for logical operators. perhaps have them in a separate dispatch table
 
 def evaluate_binary_dispatch(op: BinOp, scope: Scope):
@@ -980,13 +1003,17 @@ def evaluate_binary_dispatch(op: BinOp, scope: Scope):
     if key in binary_dispatch_table:
         left, right = cast(SimpleValue[T], left), cast(SimpleValue[U], right)
         return binary_dispatch_table[key](left.val, right.val)
-    
+    if key in custom_binary_dispatch_table:
+        return custom_binary_dispatch_table[key](left, right)
+
     # if the key wasn't found, try the reverse key (by swapping the types of the operands)
     reverse_key = (type(op), type(right), type(left))
     if reverse_key in binary_dispatch_table:
         left, right = cast(SimpleValue[U], left), cast(SimpleValue[T], right)
         return binary_dispatch_table[reverse_key](left.val, right.val)
-    
+    if reverse_key in custom_binary_dispatch_table:
+        return custom_binary_dispatch_table[reverse_key](right, left)
+
     raise NotImplementedError(f'Binary dispatch not implemented for {key=}')
 
 def evaluate_unary_dispatch(op: UnaryPrefixOp|UnaryPostfixOp, scope: Scope):

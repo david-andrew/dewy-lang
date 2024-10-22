@@ -86,7 +86,6 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [functions.dewy](examples/functions.dewy)                       | [✓]    |
 | [partial_functions.dewy](examples/partial_functions.dewy)       | [✓]    |
 | [closure.dewy](examples/closure.dewy)                           | [✓]    |
-| [functions.dewy](examples/functions.dewy)                       | [✓]    |
 | [function_signatures.dewy](examples/function_signatures.dewy)   | [✓]    |
 | [opchains.dewy](examples/opchains.dewy)                         | [✓]    |
 | [ops.dewy](examples/ops.dewy)                                   | [✗]    |

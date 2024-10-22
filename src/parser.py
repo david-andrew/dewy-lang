@@ -251,8 +251,9 @@ class qint:
 class Associativity(Enum):
     left = auto()  # left-to-right
     right = auto()  # right-to-left
-    prefix = auto()
-    postfix = auto()
+    unary = auto()  # out-to-in
+    # prefix = auto()
+    # postfix = auto()
     none = auto()
     fail = auto()
 
@@ -297,12 +298,12 @@ if-else-loop chain expr is more like a single unit, so it doesn't really have a 
 the unary versions of + - * / % have the same precedence as their binary versions
 """
 operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reversed([
-    (Associativity.prefix, [Operator_t('@')]),
+    (Associativity.unary, [Operator_t('@')]),
     (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),  # jux-call, jux-index
     (Associativity.none, [TypeParamJuxtapose_t(None)]),
     (Associativity.none, [EllipsisJuxtapose_t(None)]),  # jux-ellipsis
     (Associativity.none, [BackticksJuxtapose_t(None)]),  # jux-backticks
-    (Associativity.prefix, [Operator_t('not'), Operator_t('~')]),
+    (Associativity.unary, [Operator_t('not'), Operator_t('~')]),
     (Associativity.right,  [Operator_t('^')]),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
     (Associativity.left, [Operator_t('*'), Operator_t('/'), Operator_t('%')]),
@@ -312,7 +313,7 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.left, [RangeJuxtapose_t(None)]),  # jux-range
     (Associativity.none, [Operator_t('in')]),
     (Associativity.left, [Operator_t('=?'), Operator_t('>?'), Operator_t('<?'), Operator_t('>=?'), Operator_t('<=?')]),
-    (Associativity.postfix, [Operator_t('?')]),
+    (Associativity.unary, [Operator_t('?')]),
     (Associativity.left, [Operator_t('and'), Operator_t('nand'), Operator_t('&')]),
     (Associativity.left, [Operator_t('xor'), Operator_t('xnor')]),
     (Associativity.left, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
@@ -498,8 +499,9 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope: Scope) -> tuple[Chai
     match assoc:
         case Associativity.left: i = op_idxs[-1]
         case Associativity.right: i = op_idxs[0]
-        case Associativity.prefix: i = op_idxs[0]
-        case Associativity.postfix: i = op_idxs[-1]
+        case Associativity.unary: pdb.set_trace(); ... # I think the way to handle this is to first look for lowest precedence non-unary operators, and then do unary operators. Do by filtering out above
+        # case Associativity.prefix: i = op_idxs[0]
+        # case Associativity.postfix: i = op_idxs[-1]
         case Associativity.none: i = op_idxs[-1]  # default to left. handled later in parsing
         case Associativity.fail: raise ValueError(f'Cannot handle multiple given operators in chain {tokens}, as lowest precedence operator is marked as un-associable.')
 

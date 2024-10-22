@@ -551,7 +551,7 @@ class BroadcastOp(AST):
     op: BinOp
 
     def __str__(self):
-        return f'{self.op.left} .{self.op.op} {self.op.right}'
+        return f'{self.op.left} .{self.op._op} {self.op.right}'
 
 class BareRange(PrototypeAST):
     left: AST
