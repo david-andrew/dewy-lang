@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod, ABCMeta
-from typing import get_args, get_origin, Generator, Any, Literal, Union, Type as TypingType, dataclass_transform, Callable as TypingCallable
+from typing import get_args, get_origin, Generator, Any, Literal, Union, dataclass_transform, Callable as TypingCallable
 from types import UnionType
 from dataclasses import dataclass, field, fields
 from enum import Enum, auto
@@ -12,7 +12,7 @@ import pdb
 
 @dataclass_transform()
 class AST(ABC):
-    def __init_subclass__(cls: TypingType['AST'], **kwargs):
+    def __init_subclass__(cls: type['AST'], **kwargs):
         """
         - automatically applies the dataclass decorator with repr=False to AST subclasses
         """
@@ -144,13 +144,13 @@ class AST(ABC):
         return True
 
 
-def is_ast_container(type_hint: TypingType | None) -> bool:
+def is_ast_container(type_hint: type | None) -> bool:
     """
     Determine if the type hint is a container of ASTs.
     e.g. list[AST], set[SomeSubclassOfAST|OtherSubclassOfAST], etc.
 
     Args:
-        type_hint: TypingType | None - the type hint to check. If None, returns False
+        type_hint: type | None - the type hint to check. If None, returns False
 
     Returns:
         bool: True if any of the contained types are subclasses of AST, False otherwise

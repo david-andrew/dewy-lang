@@ -1,7 +1,8 @@
 from ..postparse import post_parse
 from ..tokenizer import tokenize
 from ..postok import post_process
-from ..parser import top_level_parse, Scope as ParserScope
+from ..dtypes import Scope as DTypesScope
+from ..parser import top_level_parse
 from ..syntax import (
     AST,
     Type,
@@ -153,7 +154,7 @@ class MetaNamespaceDict(defaultdict):
         return super().__getitem__(key)
 
 @dataclass
-class Scope(ParserScope):
+class Scope(DTypesScope):
     """An extension of the Scope used during parsing to support runtime"""
     meta: dict[AST, MetaNamespace] = field(default_factory=MetaNamespaceDict)
 
