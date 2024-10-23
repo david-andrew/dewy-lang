@@ -1,8 +1,8 @@
 from ..postparse import post_parse
 from ..tokenizer import tokenize
 from ..postok import post_process
-from ..dtypes import Scope as DTypesScope
-from ..parser import top_level_parse
+from ..dtypes import Scope as DTypesScope, typecheck, register_callable
+from ..parser import top_level_parse, QAST
 from ..syntax import (
     AST,
     Type,
@@ -189,6 +189,7 @@ class PyAction(AST):
             return_type=proto.return_type,
         )
 
+
 class Closure(AST):
     fn: FunctionLiteral
     scope: Scope
@@ -208,6 +209,8 @@ class Closure(AST):
         # scope_contents = ', '.join(scope_lines)
         # return f'{self.fn} with scope=[{scope_contents}]'
 
+register_callable(PyAction)
+register_callable(Closure)
 
 
 class Object(AST):
@@ -265,6 +268,7 @@ def cannot_evaluate(ast: AST, scope: Scope) -> AST:
 def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
     return {
         Declare: evaluate_declare,
+        QAST: evaluate_qast,
         Call: evaluate_call,
         Block: evaluate_block,
         Group: evaluate_group,
@@ -361,6 +365,16 @@ def evaluate_declare(ast: Declare, scope: Scope):
 
     scope.declare(name, value, type, ast.decltype)
     return void
+
+def evaluate_qast(ast: QAST, scope: Scope):
+    # use type checking to determine which branch of the QAST to evaluate
+    candidates: list[AST] = [a for a in ast.asts if typecheck(a, scope)]
+    if len(candidates) == 0:
+        raise ValueError(f'No valid candidates for QAST. {ast=}')
+    if len(candidates) > 1:
+        raise ValueError(f'Multiple valid candidates for QAST. {ast=}, {candidates=}')
+    selected, = candidates
+    return evaluate(selected, scope)
 
 
 def evaluate_call(call: Call, scope: Scope) -> AST:

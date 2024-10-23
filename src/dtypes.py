@@ -1,20 +1,19 @@
 from dataclasses import dataclass, field
 from functools import cache
 from typing import Protocol, TypeVar, Generator, Sequence, cast, overload, Literal as TypingLiteral
-from enum import Enum, auto
 
 
 from .syntax import (
     AST,
     Type,
     PointsTo, BidirPointsTo,
-    ListOfASTs, PrototypeTuple, Block, Array, Group, Range, ObjectLiteral, Dict, BidirDict, UnpackTarget,
-    PrototypeIdentifier, TypedIdentifier,
+    ListOfASTs, Block, Array, Group, Range, ObjectLiteral, Dict, BidirDict, UnpackTarget,
+    TypedIdentifier,
     Void, void, Undefined, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
     Identifier, Express, Declare,
-    PrototypePyAction, PrototypeFunctionLiteral, Call, Access,
+    PrototypePyAction, Call, Access, Index,
     Assign,
     Int, Bool,
     Range, IterIn,
@@ -195,9 +194,9 @@ def cannot_typeof(ast: AST, scope: Scope, params:bool=False):
 def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
     return {
         Declare: short_circuit(Void),
-        # Call: typeof_call,
-        # Block: typeof_block,
-        # Group: typeof_group,
+        Call: typeof_call,
+        Block: typeof_block,
+        Group: typeof_group,
         Array: typeof_array,
         # Dict: typeof_dict,
         # PointsTo: typeof_points_to,
@@ -208,13 +207,11 @@ def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
         # Access: typeof_access,
         Assign: short_circuit(Void),
         # IterIn: typeof_iter_in,
-        PrototypeFunctionLiteral: short_circuit(PrototypeFunctionLiteral),
         # FunctionLiteral: typeof_function_literal,
         # # Closure: typeof_closure,
         # # PyAction: typeof_pyaction,
         String: identity,
         IString: short_circuit(String),
-        PrototypeIdentifier: typeof_identifier,
         Identifier: typeof_identifier,
         Express: typeof_express,
         Int: identity,
@@ -245,7 +242,7 @@ def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
         # Xnor: typeof_binary_dispatch,
         # Add: typeof_binary_dispatch,
         # Sub: typeof_binary_dispatch,
-        # Mul: typeof_binary_dispatch,
+        Mul: typeof_binary_dispatch,
         # Div: typeof_binary_dispatch,
         # Mod: typeof_binary_dispatch,
         # Pow: typeof_binary_dispatch,
@@ -273,116 +270,18 @@ def typeof(ast: AST, scope: Scope, params:bool=False) -> TypeExpr:
 # promotion_table = {...}
 # type_tree = {...}
 
-# def typecheck/validate()
+def typecheck(ast: AST, scope: Scope) -> bool:
+    """Check if the given AST is well-formed from a type perspective"""
+    match ast:
+        case Call(): return typecheck_call(ast, scope)
+        case Index(): return typecheck_index(ast, scope)
+        case Mul(): return typecheck_binary_dispatch(ast, scope)
+        case _: raise NotImplementedError(f'typecheck not implemented for {type(ast)}')
+
+# def infer_types(ast: AST, scope: Scope) -> AST:
 
 
-
-class JuxtaposeCase(Enum):
-    """Useful for cases where a boolean answer isn't rich enough"""
-    callable = auto()
-    indexable = auto()
-    other = auto()
-
-
-
-def disambiguate_juxtapose(ast:AST, scope:Scope) -> JuxtaposeCase:
-    """
-    Determine if the given AST is callable, indexable, or something else
-    This way we can determine which type of juxtapose and thus which precedence to use
-    """
-    t = typeof(ast, scope)
-    if isinstance(t, Type):
-        if t.t is Array:
-            return JuxtaposeCase.indexable
-        elif t.t in (PrototypePyAction, PrototypeFunctionLiteral):
-            return JuxtaposeCase.callable
-        else:
-            return JuxtaposeCase.other
-
-    if isinstance(t, And):
-        pdb.set_trace()
-        ...
-
-    if isinstance(t, Or):
-        pdb.set_trace()
-        ...
-
-    if isinstance(t, Not):
-        pdb.set_trace()
-        ...
-
-    if isinstance(t, Literal):
-        pdb.set_trace()
-        ...
-
-    if isinstance(t, TBD):
-        pdb.set_trace()
-        ...
-
-    if isinstance(t, Fail):
-        pdb.set_trace()
-        ...
-
-    pdb.set_trace()
-    ...
-
-# def is_callable(ast:AST, scope: Scope) -> Answer:
-#     t = typeof(ast, scope)
-#     pdb.set_trace()
-
-    # match ast:
-    #     # ASTs the have to be evaluated to determine the type
-    #     case PrototypeIdentifier(name):
-    #         pdb.set_trace()
-    #         #TODO: use full type checker here to determine the type
-    #         # DEBUG: for now, hardcode to call
-    #         return True
-    #     #TODO: any other types that need to be evaluated to determine if callable
-    #     case Access(right=PrototypeIdentifier()) | Access(right=AtHandle(operand=PrototypeIdentifier())):
-    #         pdb.set_trace()
-    #         #TODO: same deal as above. for debugging, hardcode to call
-    #         return True
-
-    #     # known callable ASTs
-    #     case PrototypePyAction() | PrototypeFunctionLiteral():
-    #         return True
-
-    #     #TODO: may change this in the future, but for now, assume at handle can only be used on callables 
-    #     #      as in when doing partial evaluation
-    #     case AtHandle():
-    #         pdb.set_trace()
-    #         return True
-
-    #     # known non-callables
-    #     case Int() | String() | Bool(): #TODO: rest of them..
-    #         return False
-
-    #     # recuse into other ASTs
-    #     # TODO: need to handle more cases for group. e.g. it could have multiple items that are void, but still only return a single AST
-    #     #       and then also if there are multiple non-void items that makes a generator, which I think is not callable
-    #     case Group(items):
-    #         if len(items) == 0: return False #TODO: this generally shouldn't be possible as this should parse to a void literal
-    #         if len(items) == 1: return is_callable(items[0], scope)
-    #         pdb.set_trace()
-    #         raise NotImplementedError(f"ERROR: unhandled case to check if is_callable: {ast=}")
-    #         types = [get_type(i, scope) for i in items]
-    #         types = [*filter(lambda t: t is not void, types)]
-    #         if len(types) == 0: return False # this is possible if all items evaluate to void
-    #         if len(types) == 1: return is_callable_type(types[0])
-    #         if len(types) > 1: return False
-
-    #     case _:
-    #         raise ValueError(f"ERROR: unhandled case to check if is_callable: {ast=}")
-
-    # pdb.set_trace()
-
-# def is_indexable(ast:AST, scope: Scope):
-#     t = typeof(ast, scope)
-#     pdb.set_trace()
-#     raise NotImplementedError
-
-
-def typeof_identifier(ast: PrototypeIdentifier|Identifier, scope: Scope, params:bool=False) -> TypeExpr:
+def typeof_identifier(ast: Identifier, scope: Scope, params:bool=False) -> TypeExpr:
     var = scope.get(ast.name)
     if var is None:
         raise KeyError(f'variable "{ast.name}" not found in scope')
@@ -392,12 +291,210 @@ def typeof_identifier(ast: PrototypeIdentifier|Identifier, scope: Scope, params:
     return typeof(var.value, scope, params)
 
 
+_callable_types = [PrototypePyAction, FunctionLiteral]
+def register_callable(cls: type[AST]):
+    _callable_types.append(cls)
+
+def typeof_call(ast: Call, scope: Scope, params:bool=False) -> Type:
+    pdb.set_trace()
+    ...
+
+def typecheck_call(ast: Call, scope: Scope) -> bool:
+    #For now, just the simplest check. is f callable. ignore rest of type checking
+    f = ast.f
+    if isinstance(f, Identifier):
+        var = scope.get(f.name)
+        f = var.value
+    if isinstance(f, AtHandle):
+        f = f.operand
+
+    if isinstance(f, tuple(_callable_types)):
+        return True
+
+    #TODO: longer term, want to check that the expected args match the given args
+    pdb.set_trace()
+    ...
+
+
+_indexable_types = [Array, Range]
+_indexer_types = [Array, Range]
+def register_indexable(cls: type[AST]):
+    _indexable_types.append(cls)
+def register_indexer(cls: type[AST]):
+    _indexer_types.append(cls)
+
+def typeof_index(ast: Index, scope: Scope, params:bool=False) -> Type:
+    pdb.set_trace()
+    ...
+
+def typecheck_index(ast: Index, scope: Scope) -> bool:
+    #for now super simple checks on left and right
+    left_type = typeof(ast.left, scope)
+    right_type = typeof(ast.right, scope)
+    if not isinstance(left_type, Type) or not isinstance(right_type, Type):
+        pdb.set_trace()
+        #TODO: more complex cases...
+        raise NotImplementedError('typecheck_index not implemented for non-Type left side')
+
+    if left_type.t not in _indexable_types or right_type.t not in _indexer_types:
+        return False
+    return True
+
+
+
+
+
+def typeof_group(ast: Group, scope: Scope, params:bool=False) -> TypeExpr:
+
+    expressed: list[AST] = []
+    for expr in ast.items:
+        res = typeof(expr, scope, params)
+        pdb.set_trace()
+        if res is not void:
+            expressed.append(res)
+    if len(expressed) == 0:
+        pdb.set_trace()
+        return void
+    if len(expressed) == 1:
+        return expressed[0]
+    raise NotImplementedError(f'Block with multiple expressions not yet supported. {ast=}, {expressed=}')
+
+
+def typeof_block(ast: Block, scope: Scope, params:bool=False) -> TypeExpr:
+    scope = Scope(scope)
+    return typeof_group(Group(ast.items), scope, params)
+
+
+
+
+
+
 def typeof_at_handle(ast: AtHandle, scope: Scope, params:bool=False) -> Type:
+    pdb.set_trace()
     raise NotImplementedError('typeof_at_handle not implemented')
 
 def typeof_express(ast: Express, scope: Scope, params:bool=False) -> Type:
+    var = scope.get(ast.id.name)
+    if isinstance(var.type, Type):
+        return var.type
+    pdb.set_trace()
+    ...
+
     raise NotImplementedError('typeof_express not implemented')
+
+
+def typeof_binary_dispatch(ast: BinOp, scope: Scope, params:bool=False) -> Type:
+    pdb.set_trace()
+    raise NotImplementedError('typeof_binary_dispatch not implemented')
+
+def typecheck_binary_dispatch(ast: BinOp, scope: Scope) -> bool:
+    op = type(ast)
+    if op not in binary_dispatch_table:
+        return False
+    left_type = typeof(ast.left, scope)
+    right_type = typeof(ast.right, scope)
+    if not isinstance(left_type, Type) or not isinstance(right_type, Type):
+        pdb.set_trace()
+        raise NotImplementedError('typecheck_binary_dispatch not implemented for non-Type left side')
+
+    if (left_type.t, right_type.t) not in binary_dispatch_table[op]:
+        return False
+
+    return True
 
 def typeof_array(ast: Array, scope: Scope, params:bool=False) -> Type:
     if not params:
         return Type(Array)
+    pdb.set_trace()
+    ...
+    raise NotImplementedError('typeof_array not implemented when params=True')
+
+
+# TODO: for now, just a super simple dispatch table
+binary_dispatch_table = {
+    Mul: {
+        (Int, Int): Int,
+        # (Int, Float): Float,
+        # (Float, Float): Float,
+    }
+}
+
+
+
+
+# UnaryDispatchKey =  tuple[type[UnaryPrefixOp]|type[UnaryPostfixOp], type[SimpleValue[T]]]
+# unary_dispatch_table: dict[UnaryDispatchKey[T], TypingCallable[[T], AST]] = {
+#     (Not, Int): lambda l: Int(~l),
+#     (Not, Bool): lambda l: Bool(not l),
+#     (UnaryPos, Int): lambda l: Int(l),
+#     (UnaryNeg, Int): lambda l: Int(-l),
+#     (UnaryMul, Int): lambda l: Int(l),
+#     (UnaryDiv, Int): lambda l: Int(1/l),
+# }
+
+# BinaryDispatchKey = tuple[type[BinOp], type[SimpleValue[T]], type[SimpleValue[U]]]
+# # These are all symmetric meaning you can swap the operand types and the same function will be used (but the arguments should not be swapped)
+# binary_dispatch_table: dict[BinaryDispatchKey[T, U], TypingCallable[[T, U], AST]|TypingCallable[[U, T], AST]] = {
+#     (And, Int, Int): lambda l, r: Int(l & r),
+#     (And, Bool, Bool): lambda l, r: Bool(l and r),
+#     (Or, Int, Int): lambda l, r: Int(l | r),
+#     (Or, Bool, Bool): lambda l, r: Bool(l or r),
+#     (Xor, Int, Int): lambda l, r: Int(l ^ r),
+#     (Xor, Bool, Bool): lambda l, r: Bool(l != r),
+#     (Nand, Int, Int): lambda l, r: Int(~(l & r)),
+#     (Nand, Bool, Bool): lambda l, r: Bool(not (l and r)),
+#     (Nor, Int, Int): lambda l, r: Int(~(l | r)),
+#     (Nor, Bool, Bool): lambda l, r: Bool(not (l or r)),
+#     (Add, Int, Int): lambda l, r: Int(l + r),
+#     (Add, Int, Float): lambda l, r: Float(l + r),
+#     (Add, Float, Float): lambda l, r: Float(l + r),
+#     (Sub, Int, Int): lambda l, r: Int(l - r),
+#     (Sub, Int, Float): lambda l, r: Float(l - r),
+#     (Sub, Float, Float): lambda l, r: Float(l - r),
+#     (Mul, Int, Int): lambda l, r: Int(l * r),
+#     (Mul, Int, Float): lambda l, r: Float(l * r),
+#     (Mul, Float, Float): lambda l, r: Float(l * r),
+#     (Div, Int, Int): int_int_div,
+#     (Div, Int, Float): float_float_div,
+#     (Div, Float, Float): float_float_div,
+#     (Mod, Int, Int): lambda l, r: Int(l % r),
+#     (Mod, Int, Float): lambda l, r: Float(l % r),
+#     (Mod, Float, Float): lambda l, r: Float(l % r),
+#     (Pow, Int, Int): lambda l, r: Int(l ** r),
+#     (Pow, Int, Float): lambda l, r: Float(l ** r),
+#     (Pow, Float, Float): lambda l, r: Float(l ** r),
+#     (Less, Int, Int): lambda l, r: Bool(l < r),
+#     (Less, Int, Float): lambda l, r: Bool(l < r),
+#     (Less, Float, Float): lambda l, r: Bool(l < r),
+#     (LessEqual, Int, Int): lambda l, r: Bool(l <= r),
+#     (LessEqual, Int, Float): lambda l, r: Bool(l <= r),
+#     (LessEqual, Float, Float): lambda l, r: Bool(l <= r),
+#     (Greater, Int, Int): lambda l, r: Bool(l > r),
+#     (Greater, Int, Float): lambda l, r: Bool(l > r),
+#     (Greater, Float, Float): lambda l, r: Bool(l > r),
+#     (GreaterEqual, Int, Int): lambda l, r: Bool(l >= r),
+#     (GreaterEqual, Int, Float): lambda l, r: Bool(l >= r),
+#     (GreaterEqual, Float, Float): lambda l, r: Bool(l >= r),
+#     (Equal, Int, Int): lambda l, r: Bool(l == r),
+#     (Equal, Float, Float): lambda l, r: Bool(l == r),
+#     (Equal, Bool, Bool): lambda l, r: Bool(l == r),
+#     (Equal, String, String): lambda l, r: Bool(l == r),
+#     # (NotEqual, Int, Int): lambda l, r: Bool(l != r),
+
+# }
+
+# unsymmetric_binary_dispatch_table: dict[BinaryDispatchKey[T, U], ] = {
+#     #e.g. (Mul, String, Int): lambda l, r: String(l * r), # if we follow python's behavior
+# }
+
+# # dispatch table for more complicated values that can't be automatically unpacked by the dispatch table
+# # TODO: actually ideally just have a single table
+# CustomBinaryDispatchKey = tuple[type[BinOp], type[T], type[U]]
+# custom_binary_dispatch_table: dict[CustomBinaryDispatchKey[T, U], TypingCallable[[T, U], AST]] = {
+#     (Add, Array, Array): lambda l, r: Array(l.items + r.items), #TODO: this will be removed in favor of spread. array add will probably be vector add
+#     # (BroadcastOp, Array, Array): broadcast_array_op,
+#     # (BroadcastOp, NpArray, NpArray): broadcast_array_op,
+#     # (BroadcastOp, Int, Array): broadcast_array_op,
+#     # (BroadcastOp, Float, Array): broadcast_array_op,
+
+# }

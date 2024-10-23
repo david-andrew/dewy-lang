@@ -1,4 +1,4 @@
-from typing import Generator, Sequence, cast, overload, Literal, Type as PyType
+from typing import Generator, Sequence, cast, Callable as TypingCallable
 from enum import Enum, auto
 from dataclasses import dataclass
 from itertools import groupby, chain as iterchain
@@ -28,11 +28,6 @@ from .syntax import (
     BroadcastOp,
     DeclarationType,
     DeclareGeneric, Parameterize,
-)
-from .dtypes import (
-    Scope,
-    JuxtaposeCase,
-    disambiguate_juxtapose,
 )
 from .tokenizer import (
     Token,
@@ -81,32 +76,24 @@ import pdb
 def top_level_parse(tokens: list[Token]) -> AST:
     """Main entrypoint to kick off parsing a sequence of tokens"""
 
-    scope = Scope.default()
-    ast = parse(tokens, scope)
+    ast = parse(tokens)
     if isinstance(ast, ListOfASTs):
         ast = Group(ast.asts)
 
-    # post processing on the parsed AST
-    # express_identifiers(ast)
-    # tuples_to_arrays(ast)
-    # ensure_no_prototypes(ast) #ensure all settled...
-    # ensure_no_unwrapped_ranges(ast)
-    # set_ast_scopes(ast, scope)
-
     return ast
 
-def parse_generator(tokens: list[Token], scope: Scope) -> Generator[AST, None, None]:
+def parse_generator(tokens: list[Token]) -> Generator[AST, None, None]:
     """
     Parse all tokens into a sequence of ASTs
     """
 
     while len(tokens) > 0:
         chain, tokens = get_next_chain(tokens)
-        yield parse_chain(chain, scope)
+        yield parse_chain(chain)
 
 
-def parse(tokens: list[Token], scope: Scope) -> AST:
-    items = [*parse_generator(tokens, scope)]
+def parse(tokens: list[Token]) -> AST:
+    items = [*parse_generator(tokens)]
 
     # depending on how many expressions were parsed, return an AST or container
     if len(items) == 0:
@@ -144,6 +131,21 @@ class qint:
     def __le__(self, other: 'int|qint') -> bool: return self.__lt__(other)
     def __eq__(self, other: object) -> bool: return False
 
+
+class QAST(AST):
+    """
+    Quantum AST for dealing with ambiguous precedence
+    Simplest usage will just look see which expression passes typechecking
+    More complex versions can include something (lambdas?) to determine which case should be selected
+    """
+    asts: list[AST]
+    # predicates: list[TypingCallable] | None = None  # uncomment if we actually use this
+
+    def __post_init__(self):
+        assert len(self.asts) > 1, f'QAST must have more than one value. Got {self.asts}'
+
+    def __str__(self):
+        return f'QAST([{", ".join(str(i) for i in self.asts)}])'
 
 ######### Operator Precedence Table #########
 # TODO: class for compund operators, e.g. += -= .+= .-= not=? not>? etc.
@@ -279,30 +281,43 @@ def operator_associativity(op: Operator_t | int) -> Associativity|set[Associativ
 
 
 
-def parse_chain(chain: Chain[Token], scope: Scope) -> AST:
+def parse_chain(chain: Chain[Token]) -> AST:
     assert isinstance(chain, Chain), f"ERROR: parse chain must be called on Chain[Token], got {type(chain)}"
 
     if len(chain) == 0:
         return void
     if len(chain) == 1:
-        return parse_single(chain[0], scope)
+        return parse_single(chain[0])
 
-    left, op, right = split_by_lowest_precedence(chain, scope)
-    left, right = parse_chain(left, scope), parse_chain(right, scope)
+    try:
+        left, op, right = split_by_lowest_precedence(chain)
+    except AmbiguousPrecedenceError as e:
+        pdb.set_trace()
+        ... #TODO: handle ambiguous precedence error by making a QAST
+        return build_quantum_expr(e.ops, e.ranks, e.assocs, e.tokens)
+
+    left, right = parse_chain(left), parse_chain(right)
 
     assert not (left is void and right is void), f"Internal Error: both left and right returned void during parse chain, implying both left and right side of operator were empty, i.e. chain was invalid: {chain}"
 
     # 3 cases are prefix expr, postfix expr, or binary expr
     if left is void:
-        return build_unary_prefix_expr(op, right, scope)
+        return build_unary_prefix_expr(op, right)
     if right is void:
-        return build_unary_postfix_expr(left, op, scope)
-    return build_bin_expr(left, op, right, scope)
+        return build_unary_postfix_expr(left, op)
+    return build_bin_expr(left, op, right)
 
 
+class AmbiguousPrecedenceError(ValueError):
+    def __init__(self, ops: list[Operator_t], ranks: list[int], assocs: list[Associativity], tokens: Chain[Token]):
+        self.ops = ops
+        self.ranks = ranks
+        self.assocs = assocs
+        self.tokens = tokens
+        super().__init__(f"Ambiguous precedence for operators {ops=} with ranks {ranks=} in token stream {tokens=}")
 
 
-def split_by_lowest_precedence(tokens: Chain[Token], scope: Scope) -> tuple[Chain[Token], Token, Chain[Token]]:
+def split_by_lowest_precedence(tokens: Chain[Token]) -> tuple[Chain[Token], Token, Chain[Token]]:
     """
     return the integer index/indices of the lowest precedence operator(s) in the given list of tokens
     """
@@ -315,9 +330,7 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope: Scope) -> tuple[Chai
 
     # simple cases of none or one operator
     if len(ops) == 0:
-        pdb.set_trace()
-        # TODO: how to handle this case? probably an error
-        raise ValueError()
+        raise ValueError("INTERNAL ERROR: Attempted to split chain with no operators which shouldn't happen")
     if len(ops) == 1:
         i, = idxs
         op, = ops
@@ -327,7 +340,7 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope: Scope) -> tuple[Chai
 
     # case of all unary operators has different splitting logic
     if all(assoc == Associativity.unary for assoc in assocs):
-        return unary_split_by_lowest_precedence(tokens, ops, idxs, scope)
+        return unary_split_by_lowest_precedence(tokens, ops, idxs)
 
     # filter out any unary operators
     assocs, idxs, ops = zip(*[(a, i, op) for a, i, op in zip(assocs, idxs, ops) if a is not Associativity.unary])
@@ -340,10 +353,7 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope: Scope) -> tuple[Chai
 
     # verify that the min is strictly less than or equal to all other ranks
     if not all(min_rank <= r for r in ranks[:min_idx] + ranks[min_idx+1:]):
-        # TODO: probably enumerate out all permutations of the ambiguous operators and return all of them as a list of lists of indices
-        # make use of scope/chain typeof to disambiguate if need be
-        pdb.set_trace()
-        raise NotImplementedError(f"TODO: ambiguous precedence for {ops=} with {ranks=}, in token stream {tokens=}")
+        raise AmbiguousPrecedenceError(ops, ranks, assocs, tokens)
 
     # find operators with precedence equal to the current minimum
     op_idxs = [i for i, r in zip(idxs, ranks) if r == min_rank or r is min_rank]
@@ -371,7 +381,7 @@ def split_by_lowest_precedence(tokens: Chain[Token], scope: Scope) -> tuple[Chai
     return Chain(tokens[:i]), tokens[i], Chain(tokens[i+1:])
 
 
-def unary_split_by_lowest_precedence(tokens: Chain[Token], ops: list[Token], idxs:list[int], scope: Scope) -> tuple[Chain[Token], Token, Chain[Token]]:
+def unary_split_by_lowest_precedence(tokens: Chain[Token], ops: list[Token], idxs:list[int]) -> tuple[Chain[Token], Token, Chain[Token]]:
     """
     split the list of tokens by the lowest precedence unary operator
     """
@@ -412,7 +422,7 @@ def unary_split_by_lowest_precedence(tokens: Chain[Token], ops: list[Token], idx
     return Chain(tokens[:i]), tokens[i], Chain(tokens[i+1:])
 
 
-def parse_single(token: Token, scope: Scope) -> AST:
+def parse_single(token: Token) -> AST:
     """Parse a single token into an AST"""
     match token:
         case Undefined_t(): return undefined
@@ -424,11 +434,11 @@ def parse_single(token: Token, scope: Scope) -> AST:
         case DotDot_t(): return BareRange(void, void)
         case DotDotDot_t(): return DotDotDot()
         case Backticks_t(src=src): return Backticks(src)
-        case String_t(): return parse_string(token, scope)
-        case Block_t(): return parse_block(token, scope)
-        case TypeParam_t(): return parse_type_param(token, scope)
-        case Flow_t(): return parse_flow(token, scope)
-        case Declare_t(): return parse_declare(token, scope)
+        case String_t(): return parse_string(token)
+        case Block_t(): return parse_block(token)
+        case TypeParam_t(): return parse_type_param(token)
+        case Flow_t(): return parse_flow(token)
+        case Declare_t(): return parse_declare(token)
 
         case _:
             # TODO handle other types...
@@ -440,23 +450,18 @@ def parse_single(token: Token, scope: Scope) -> AST:
     ...
 
 
-def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
+def build_bin_expr(left: AST, op: Token, right: AST) -> AST:
     """create a unary prefix expression AST from the op and right AST"""
 
     match op:
-        #TODO: perhaps vanilla juxtapose should be a prototype, since we'll usually have to decide which type of juxtapose it was before here when building the AST
-        case Juxtapose_t():
-            jux = disambiguate_juxtapose(left, scope)
-            if jux == JuxtaposeCase.callable:
-                return Call(left, right)
-            elif jux == JuxtaposeCase.indexable:
-                return Index(left, right)
-            else:
-                return Mul(left, right)
+        #TODO: replace vanilla juxtapose with prototype?
+        # when split_by_lowest_precedence is ambiguous we will create a QAST which has all possible ASTs, and disambiguation will happen at runtime/compiletime
+        # then we will replace Juxtapose_t here with JuxtaposeCall_t | JuxtaposeIndex_t | JuxtaposeMul_t
+        case Juxtapose_t(): return QAST([Call(left, right), Index(left, right), Mul(left, right)])
 
         case Operator_t(op='|>'): return Call(right, left)
         case Operator_t(op='<|'): return Call(left, right)
-        case Operator_t(op='='): return do_assign(left, right, scope)
+        case Operator_t(op='='): return Assign(left, right)
         case Operator_t(op='=>'): return PrototypeFunctionLiteral(left, right)
         case Operator_t(op='->'): return PointsTo(left, right)
         case Operator_t(op='<->'): return BidirPointsTo(left, right)
@@ -574,14 +579,14 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         
         case OpChain_t(ops=list() as ops) if len(ops) > 1: #TODO: shouldn't be possible to make an OpChain with 1 or 0 ops
             for unary_op in reversed(ops[1:]):
-                right = build_unary_prefix_expr(unary_op, right, scope)
-            return build_bin_expr(left, ops[0], right, scope)
+                right = build_unary_prefix_expr(unary_op, right)
+            return build_bin_expr(left, ops[0], right)
 
         case CombinedAssignmentOp_t(op=op):
-            return Assign(left, build_bin_expr(left, op, right, scope))
+            return Assign(left, build_bin_expr(left, op, right))
 
         case BroadcastOp_t(op=op):
-            expr = build_bin_expr(left, op, right, scope)
+            expr = build_bin_expr(left, op, right)
             assert isinstance(expr, BinOp), f'INTERNAL ERROR: expected BinOp, got {expr=}'
             return BroadcastOp(expr)
 
@@ -590,25 +595,8 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
             raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
 
 
-def do_assign(left: AST, right: AST, scope: Scope) -> AST:
-    """insert the assignment into the scope so that the type can be used later"""
-    if isinstance(left, PrototypeIdentifier):
-        scope.assign(left.name, right)
 
-    elif isinstance(left, Access):
-        pdb.set_trace()
-        ...
-    elif isinstance(left, Index):
-        pdb.set_trace()
-        ...
-    else:
-        pdb.set_trace()
-        ...
-
-    return Assign(left, right)
-
-
-def build_unary_prefix_expr(op: Token, right: AST, scope: Scope) -> AST:
+def build_unary_prefix_expr(op: Token, right: AST) -> AST:
     """create a unary prefix expression AST from the op and right AST"""
     match op:
         # normal prefix operators
@@ -625,14 +613,14 @@ def build_unary_prefix_expr(op: Token, right: AST, scope: Scope) -> AST:
 
         case OpChain_t(ops=list() as ops):
             for unary_op in reversed(ops):
-                right = build_unary_prefix_expr(unary_op, right, scope)
+                right = build_unary_prefix_expr(unary_op, right)
             return right
 
         case _:
             raise ValueError(f"INTERNAL ERROR: {op=} is not a known unary prefix operator")
 
 
-def build_unary_postfix_expr(left: AST, op: Token, scope: Scope) -> AST:
+def build_unary_postfix_expr(left: AST, op: Token) -> AST:
     """create a unary postfix expression AST from the left AST and op token"""
     match op:
         # normal postfix operators
@@ -646,7 +634,7 @@ def build_unary_postfix_expr(left: AST, op: Token, scope: Scope) -> AST:
         case _:
             raise NotImplementedError(f"TODO: {op=}")
 
-def parse_string(token: String_t, scope: Scope) -> String | IString:
+def parse_string(token: String_t) -> String | IString:
     """Convert a string token to an AST"""
 
     if len(token.body) == 1 and isinstance(token.body[0], str):
@@ -660,8 +648,7 @@ def parse_string(token: String_t, scope: Scope) -> String | IString:
         elif isinstance(chunk, Escape_t):
             parts.append(chunk.to_str())
         else:
-            # put any interpolation expressions in a new scope
-            ast = parse(chunk.body, scope)
+            ast = parse(chunk.body)
             if isinstance(ast, Block):
                 parts.append(ast)
             elif isinstance(ast, ListOfASTs):
@@ -710,16 +697,11 @@ def as_object_inners(items:list[AST]) -> list[AST] | None:
         return None
     return items
 
-def parse_block(block: Block_t, scope: Scope) -> AST:
+def parse_block(block: Block_t) -> AST:
     """Convert a block token to an AST"""
 
-    # if new scope block, nest the current scope
-    newscope = block.left == '{' and block.right == '}'
-    if newscope:
-        scope = Scope(scope)
-
     # parse the inside of the block
-    inner = parse(block.body, scope)
+    inner = parse(block.body)
 
     delims = block.left + block.right
     match delims, inner:
@@ -773,22 +755,22 @@ def parse_block(block: Block_t, scope: Scope) -> AST:
 
 
 
-def parse_type_param(param: TypeParam_t, scope: Scope) -> TypeParam:
-    items = parse(param.body, scope)
+def parse_type_param(param: TypeParam_t) -> TypeParam:
+    items = parse(param.body)
     if isinstance(items, ListOfASTs):
         return TypeParam(items.asts)
     return TypeParam([items])
 
 
-def parse_flow(flow: Flow_t, scope: Scope) -> Flowable:
+def parse_flow(flow: Flow_t) -> Flowable:
 
     # special case for closing else clause in a flow chain. Treat as `<if> <true> <clause>`
     if flow.keyword is None:
-        return Default(parse_chain(flow.clause, scope))
+        return Default(parse_chain(flow.clause))
 
     assert flow.condition is not None, f"ERROR: flow condition must be present for {flow=}"
-    cond = parse_chain(flow.condition, scope)
-    clause = parse_chain(flow.clause, scope)
+    cond = parse_chain(flow.condition)
+    clause = parse_chain(flow.clause)
 
     match flow.keyword:
         case Keyword_t(src='if'): return If(cond, clause)
@@ -801,8 +783,8 @@ def parse_flow(flow: Flow_t, scope: Scope) -> Flowable:
     ...
 
 
-def parse_declare(declare: Declare_t, scope: Scope) -> Declare:
-    expr = parse_chain(declare.expr, scope)
+def parse_declare(declare: Declare_t) -> Declare:
+    expr = parse_chain(declare.expr)
     assert isinstance(expr, (PrototypeIdentifier, Identifier, TypedIdentifier, ReturnTyped, UnpackTarget, Assign)), f'ERROR: expected identifier, typed-identifier, or unpack target for declare expression, got {expr=}'
     match declare:
         case Declare_t(keyword=Keyword_t(src='let')): return Declare(DeclarationType.LET, expr)

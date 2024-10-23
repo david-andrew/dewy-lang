@@ -428,14 +428,9 @@ class Access(BinOp):
     _op = '.'
     _space = False
 
-
 class Index(BinOp):
     _op = ''
     _space = False
-
-    def __post_init__(self):
-        assert isinstance(self.right, (Range, Array)), f'Index right side must be a Range or Array. Got {self.right}'
-
 
 class Equal(BinOp):
     _op = '=?'

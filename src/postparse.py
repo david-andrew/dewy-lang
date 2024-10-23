@@ -25,6 +25,7 @@ from .syntax import (
     DeclarationType,
     DeclareGeneric, Parameterize,
 )
+from .parser import QAST
 
 from typing import Callable as TypingCallable
 from dataclasses import field
@@ -157,7 +158,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             # cases that themselves don't get adjusted but may contain nested children that need to be converted
             case IString() | Group() | Block() | PrototypeTuple() | Array() | ObjectLiteral() | Dict() | BidirDict() | FunctionLiteral() | Signature() | Range() | Loop() | If() | Flow() | Default() \
                 | PointsTo() | BidirPointsTo() | Equal() | Less() | LessEqual() | Greater() | GreaterEqual() | LeftShift() | RightShift() | LeftRotate() | RightRotate() | LeftRotateCarry() | RightRotateCarry() | Add() | Sub() | Mul() | Div() | IDiv() | Mod() | Pow() | And() | Or() | Xor() | Nand() | Nor() | Xnor() | MemberIn() \
-                | BroadcastOp() | SpreadOutFrom() \
+                | BroadcastOp() | SpreadOutFrom() | QAST() \
                 | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() | CycleLeft() | CycleRight() \
                 | TypedIdentifier():
                 ...
