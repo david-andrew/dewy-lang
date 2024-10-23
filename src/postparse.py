@@ -145,9 +145,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 pdb.set_trace()
                 ...
             case Declare(): ... # all other declare cases are handled as normal
-            case Index():
-                pdb.set_trace()
-                ...
+            case Index(): ... # I think all index cases are handled as normal
             case Access(left=left, right=PrototypeIdentifier(name=name)):
                 gen.send(Access(left, Identifier(name)))
             case Access(left=left, right=AtHandle(operand=PrototypeIdentifier(name=name))):

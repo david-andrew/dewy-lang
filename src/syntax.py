@@ -93,6 +93,7 @@ class AST(ABC):
             elif is_ast_container(self.__class__.__annotations__.get(key)):
                 if value is None:
                     continue
+
                 if isinstance(value, list):
                     for i, item in enumerate(value):
                         replacement = yield '', item
@@ -158,6 +159,10 @@ def is_ast_container(type_hint: type | None) -> bool:
     if type_hint is None:
         return False
 
+    # class constructors are not containers
+    if get_origin(type_hint) is type:
+        return False
+
     # python callables are not containers regardless of if they take in or return ASTs
     if get_origin(type_hint) == get_origin(TypingCallable):
         return False
@@ -211,7 +216,10 @@ class Type(AST):
 
 # TODO: turn into a singleton...
 # untyped type for when a declaration doesn't specify a type
-untyped = Type('untyped')
+class Untyped(AST):
+    def __str__(self) -> str:
+        return 'untyped'
+untyped = Type(Untyped)
 
 
 class Undefined(AST):
@@ -419,6 +427,16 @@ class BidirPointsTo(BinOp):
 class Access(BinOp):
     _op = '.'
     _space = False
+
+
+class Index(BinOp):
+    _op = ''
+    _space = False
+
+    def __post_init__(self):
+        assert isinstance(self.right, (Range, Array)), f'Index right side must be a Range or Array. Got {self.right}'
+
+
 class Equal(BinOp):
     _op = '=?'
 
@@ -663,16 +681,6 @@ class DeclareGeneric(AST):
 class Parameterize(AST):
     left: AST
     right: TypeParam
-
-    def __str__(self):
-        return f'{self.left}{self.right}'
-
-
-#TODO: maybe this should just be a binop, i.e. does right need to be restricted to Range|Array?
-# perhaps keep since to parse an index, the right must be a Range|Array
-class Index(AST):
-    left: AST
-    right: Range | Array
 
     def __str__(self):
         return f'{self.left}{self.right}'

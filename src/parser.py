@@ -30,7 +30,9 @@ from .syntax import (
     DeclareGeneric, Parameterize,
 )
 from .dtypes import (
-    Scope
+    Scope,
+    JuxtaposeCase,
+    disambiguate_juxtapose,
 )
 from .tokenizer import (
     Token,
@@ -276,54 +278,6 @@ def operator_associativity(op: Operator_t | int) -> Associativity|set[Associativ
         raise ValueError(f"Error: failed to determine associativity for operator {op}") from None
 
 
-def is_callable(ast:AST, scope: Scope):
-    match ast:
-        # ASTs the have to be evaluated to determine the type
-        case PrototypeIdentifier(name):
-            #TODO: use full type checker here to determine the type
-            # DEBUG: for now, hardcode to call
-            return True
-        #TODO: any other types that need to be evaluated to determine if callable
-        case Access(right=PrototypeIdentifier()) | Access(right=AtHandle(operand=PrototypeIdentifier())):
-            #TODO: same deal as above. for debugging, hardcode to call
-            return True
-        
-        # known callable ASTs
-        case PrototypePyAction() | PrototypeFunctionLiteral():
-            return True
-
-        #TODO: may change this in the future, but for now, assume at handle can only be used on callables 
-        #      as in when doing partial evaluation
-        case AtHandle():
-            return True
-
-        # known non-callables
-        case Int() | String() | Bool(): #TODO: rest of them..
-            return False
-
-        # recuse into other ASTs
-        # TODO: need to handle more cases for group. e.g. it could have multiple items that are void, but still only return a single AST
-        #       and then also if there are multiple non-void items that makes a generator, which I think is not callable
-        case Group(items):
-            if len(items) == 0: return False #TODO: this generally shouldn't be possible as this should parse to a void literal
-            if len(items) == 1: return is_callable(items[0], scope)
-            pdb.set_trace()
-            raise NotImplementedError(f"ERROR: unhandled case to check if is_callable: {ast=}")
-            types = [get_type(i, scope) for i in items]
-            types = [*filter(lambda t: t is not void, types)]
-            if len(types) == 0: return False # this is possible if all items evaluate to void
-            if len(types) == 1: return is_callable_type(types[0])
-            if len(types) > 1: return False
-
-        case _:
-            raise ValueError(f"ERROR: unhandled case to check if is_callable: {ast=}")
-
-    pdb.set_trace()
-
-def is_indexable(ast:AST, scope: Scope):
-    pdb.set_trace()
-    raise NotImplementedError
-
 
 def parse_chain(chain: Chain[Token], scope: Scope) -> AST:
     assert isinstance(chain, Chain), f"ERROR: parse chain must be called on Chain[Token], got {type(chain)}"
@@ -490,17 +444,19 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
     """create a unary prefix expression AST from the op and right AST"""
 
     match op:
-        case Juxtapose_t(): #TODO: perhaps vanilla juxtapose should be a prototype, since we'll usually have to decide which type of juxtapose it was before here when building the AST
-            if is_callable(left, scope):
+        #TODO: perhaps vanilla juxtapose should be a prototype, since we'll usually have to decide which type of juxtapose it was before here when building the AST
+        case Juxtapose_t():
+            jux = disambiguate_juxtapose(left, scope)
+            if jux == JuxtaposeCase.callable:
                 return Call(left, right)
-            elif isinstance(right, (Range, Array)) and is_indexable(left, scope):
+            elif jux == JuxtaposeCase.indexable:
                 return Index(left, right)
             else:
                 return Mul(left, right)
 
         case Operator_t(op='|>'): return Call(right, left)
         case Operator_t(op='<|'): return Call(left, right)
-        case Operator_t(op='='): return Assign(left, right)
+        case Operator_t(op='='): return do_assign(left, right, scope)
         case Operator_t(op='=>'): return PrototypeFunctionLiteral(left, right)
         case Operator_t(op='->'): return PointsTo(left, right)
         case Operator_t(op='<->'): return BidirPointsTo(left, right)
@@ -632,6 +588,24 @@ def build_bin_expr(left: AST, op: Token, right: AST, scope: Scope) -> AST:
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
+
+
+def do_assign(left: AST, right: AST, scope: Scope) -> AST:
+    """insert the assignment into the scope so that the type can be used later"""
+    if isinstance(left, PrototypeIdentifier):
+        scope.assign(left.name, right)
+
+    elif isinstance(left, Access):
+        pdb.set_trace()
+        ...
+    elif isinstance(left, Index):
+        pdb.set_trace()
+        ...
+    else:
+        pdb.set_trace()
+        ...
+
+    return Assign(left, right)
 
 
 def build_unary_prefix_expr(op: Token, right: AST, scope: Scope) -> AST:

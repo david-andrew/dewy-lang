@@ -13,7 +13,7 @@ from ..syntax import (
     String, IString,
     Flowable, Flow, If, Loop, Default,
     Identifier, Express, Declare,
-    PrototypePyAction, Call, Access,
+    PrototypePyAction, Call, Access, Index,
     Assign,
     Int, Bool,
     Range, IterIn,
@@ -276,6 +276,7 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         ObjectLiteral: evaluate_object_literal,
         Object: no_op,
         Access: evaluate_access,
+        Index: evaluate_index,
         Assign: evaluate_assign,
         IterIn: evaluate_iter_in,
         FunctionLiteral: evaluate_function_literal,
@@ -429,7 +430,7 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
             return call_args, call_kwargs
 
         #TODO: eventually it should just be anything that is left over is positional args rather than specifying them all out
-        case Int() | String() | IString() | Range() | Call() | Access() | Express() | UnaryPrefixOp() | UnaryPostfixOp() | BinOp() | BroadcastOp():
+        case Int() | String() | IString() | Range() | Call() | Access() | Index() | Express() | UnaryPrefixOp() | UnaryPostfixOp() | BinOp() | BroadcastOp():
             return [args], {}
         # case Call(): return [args], {}
         case _:
@@ -620,6 +621,17 @@ def evaluate_access(ast: Access, scope: Scope) -> AST:
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'evaluate_access not implemented yet for {right=}. {left=}')
+
+def evaluate_index(ast: Index, scope: Scope) -> AST:
+    left = evaluate(ast.left, scope)
+    right = evaluate(ast.right, scope)
+    match left, right:
+        case Array(items), Array(items=[Int(i)]):
+            return items[i]
+        case _:
+            pdb.set_trace()
+    pdb.set_trace()
+    ...
 
 def evaluate_id_access(left: AST, right: Identifier, scope: Scope, evaluate_right=True) -> AST:
     match left:
