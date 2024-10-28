@@ -204,7 +204,7 @@ def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
         # BidirPointsTo: typeof_bidir_points_to,
         # ObjectLiteral: typeof_object_literal,
         # # Object: no_op,
-        # Access: typeof_access,
+        Access: typeof_access,
         Assign: short_circuit(Void),
         # IterIn: typeof_iter_in,
         # FunctionLiteral: typeof_function_literal,
@@ -312,6 +312,11 @@ def typecheck_call(ast: Call, scope: Scope) -> bool:
         #TODO: longer term, want to check that the expected args match the given args
         return True
 
+    if isinstance(f, Group):
+        pdb.set_trace()
+        # get the type of the group items... handling void, and if multiple, then answer is False...
+        ...
+    print(f'not callable: {f=}')
     return False
 
 
@@ -408,6 +413,20 @@ def typeof_array(ast: Array, scope: Scope, params:bool=False) -> Type:
     pdb.set_trace()
     ...
     raise NotImplementedError('typeof_array not implemented when params=True')
+
+
+
+
+
+
+
+
+def typeof_access(ast: Access, scope: Scope, params:bool=False) -> Type:
+    pdb.set_trace()
+    raise NotImplementedError('typeof_access not implemented')
+
+
+
 
 
 # TODO: for now, just a super simple dispatch table
