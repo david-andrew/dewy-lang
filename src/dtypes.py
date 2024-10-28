@@ -309,11 +309,11 @@ def typecheck_call(ast: Call, scope: Scope) -> bool:
         f = f.operand
 
     if isinstance(f, tuple(_callable_types)):
+        #TODO: longer term, want to check that the expected args match the given args
         return True
 
-    #TODO: longer term, want to check that the expected args match the given args
-    pdb.set_trace()
-    ...
+    return False
+
 
 
 _indexable_types = [Array, Range]
@@ -375,12 +375,12 @@ def typeof_at_handle(ast: AtHandle, scope: Scope, params:bool=False) -> Type:
 
 def typeof_express(ast: Express, scope: Scope, params:bool=False) -> Type:
     var = scope.get(ast.id.name)
-    if isinstance(var.type, Type):
-        return var.type
-    pdb.set_trace()
-    ...
 
-    raise NotImplementedError('typeof_express not implemented')
+    # if we were told what the type is, return that (as it should be the main source of truth)
+    if isinstance(var.type, Type) and var.type is not untyped:
+        return var.type
+
+    return typeof(var.value, scope, params)
 
 
 def typeof_binary_dispatch(ast: BinOp, scope: Scope, params:bool=False) -> Type:

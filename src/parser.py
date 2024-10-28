@@ -132,20 +132,36 @@ class qint:
     def __eq__(self, other: object) -> bool: return False
 
 
-class QAST(AST):
-    """
-    Quantum AST for dealing with ambiguous precedence
-    Simplest usage will just look see which expression passes typechecking
-    More complex versions can include something (lambdas?) to determine which case should be selected
-    """
-    asts: list[AST]
-    # predicates: list[TypingCallable] | None = None  # uncomment if we actually use this
+# class QAST(AST):
+#     """
+#     Quantum AST for dealing with ambiguous precedence
+#     Simplest usage will just look see which expression passes typechecking
+#     More complex versions can include something (lambdas?) to determine which case should be selected
+#     """
+#     asts: list[AST]
+#     # predicates: list[TypingCallable] | None = None  # uncomment if we actually use this
 
-    def __post_init__(self):
-        assert len(self.asts) > 1, f'QAST must have more than one value. Got {self.asts}'
+#     def __post_init__(self):
+#         assert len(self.asts) > 1, f'QAST must have more than one value. Got {self.asts}'
+
+#     def __str__(self):
+#         return f'QAST([{", ".join(str(i) for i in self.asts)}])'
+
+class QJux(AST):
+    """
+    Quantum Juxtapose for dealing with the three operators vanilla juxtapose could be:
+    - call e.g. a(b)
+    - index e.g. a[b]
+    - multiply e.g. a * b
+    """
+    call: Call
+    index: Index|None #syntactically we can know if it's not index if right is not Array or Range
+    mul: Mul
 
     def __str__(self):
-        return f'QAST([{", ".join(str(i) for i in self.asts)}])'
+        if self.index is None:
+            return f'QJux({self.call}, {self.mul})'
+        return f'QJux({self.call}, {self.index}, {self.mul})'
 
 ######### Operator Precedence Table #########
 # TODO: class for compund operators, e.g. += -= .+= .-= not=? not>? etc.
@@ -457,7 +473,7 @@ def build_bin_expr(left: AST, op: Token, right: AST) -> AST:
         #TODO: replace vanilla juxtapose with prototype?
         # when split_by_lowest_precedence is ambiguous we will create a QAST which has all possible ASTs, and disambiguation will happen at runtime/compiletime
         # then we will replace Juxtapose_t here with JuxtaposeCall_t | JuxtaposeIndex_t | JuxtaposeMul_t
-        case Juxtapose_t(): return QAST([Call(left, right), Index(left, right), Mul(left, right)])
+        case Juxtapose_t(): return build_quantum_juxtapose(left, right) #return QAST([Call(left, right), Index(left, right), Mul(left, right)])
 
         case Operator_t(op='|>'): return Call(right, left)
         case Operator_t(op='<|'): return Call(left, right)
@@ -594,6 +610,13 @@ def build_bin_expr(left: AST, op: Token, right: AST) -> AST:
             pdb.set_trace()
             raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
 
+
+def build_quantum_juxtapose(left: AST, right: AST) -> QJux:
+    return QJux(
+        call=Call(left, right),
+        index=Index(left, right) if isinstance(right, (Array, Range)) else None,
+        mul=Mul(left, right)
+    )
 
 
 def build_unary_prefix_expr(op: Token, right: AST) -> AST:

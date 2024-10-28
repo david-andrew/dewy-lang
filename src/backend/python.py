@@ -1,8 +1,8 @@
 from ..postparse import post_parse
 from ..tokenizer import tokenize
 from ..postok import post_process
-from ..dtypes import Scope as DTypesScope, typecheck, register_callable
-from ..parser import top_level_parse, QAST
+from ..dtypes import Scope as DTypesScope, typecheck, register_callable, typecheck_call, register_indexable, typecheck_index
+from ..parser import top_level_parse, QJux
 from ..syntax import (
     AST,
     Type,
@@ -268,7 +268,7 @@ def cannot_evaluate(ast: AST, scope: Scope) -> AST:
 def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
     return {
         Declare: evaluate_declare,
-        QAST: evaluate_qast,
+        QJux: evaluate_qjux,
         Call: evaluate_call,
         Block: evaluate_block,
         Group: evaluate_group,
@@ -366,15 +366,24 @@ def evaluate_declare(ast: Declare, scope: Scope):
     scope.declare(name, value, type, ast.decltype)
     return void
 
-def evaluate_qast(ast: QAST, scope: Scope):
-    # use type checking to determine which branch of the QAST to evaluate
-    candidates: list[AST] = [a for a in ast.asts if typecheck(a, scope)]
-    if len(candidates) == 0:
-        raise ValueError(f'No valid candidates for QAST. {ast=}')
-    if len(candidates) > 1:
-        raise ValueError(f'Multiple valid candidates for QAST. {ast=}, {candidates=}')
-    selected, = candidates
-    return evaluate(selected, scope)
+def evaluate_qjux(ast: QJux, scope: Scope) -> AST:
+    if typecheck_call(ast.call, scope):
+        return evaluate_call(ast.call, scope)
+    if ast.index is not None and typecheck_index(ast.index, scope):
+        return evaluate_index(ast.index, scope)
+
+    return evaluate_binary_dispatch(ast.mul, scope)
+
+
+# def evaluate_qast(ast: QAST, scope: Scope):
+#     # use type checking to determine which branch of the QAST to evaluate
+#     candidates: list[AST] = [a for a in ast.asts if typecheck(a, scope)]
+#     if len(candidates) == 0:
+#         raise ValueError(f'No valid candidates for QAST. {ast=}')
+#     if len(candidates) > 1:
+#         raise ValueError(f'Multiple valid candidates for QAST. {ast=}, {candidates=}')
+#     selected, = candidates
+#     return evaluate(selected, scope)
 
 
 def evaluate_call(call: Call, scope: Scope) -> AST:
@@ -444,7 +453,7 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
             return call_args, call_kwargs
 
         #TODO: eventually it should just be anything that is left over is positional args rather than specifying them all out
-        case Int() | String() | IString() | Range() | Call() | Access() | Index() | Express() | UnaryPrefixOp() | UnaryPostfixOp() | BinOp() | BroadcastOp():
+        case Int() | String() | IString() | Range() | Call() | Access() | Index() | Express() | QJux() | UnaryPrefixOp() | UnaryPostfixOp() | BinOp() | BroadcastOp():
             return [args], {}
         # case Call(): return [args], {}
         case _:
