@@ -139,7 +139,7 @@ class Scope:
                 DeclarationType.CONST,
                 Type(PrototypePyAction),
                 PrototypePyAction(
-                    Group([Assign(TypedIdentifier(Identifier('s'), Type('string')), String(''))]),
+                    Group([Assign(TypedIdentifier(Identifier('s'), Type(String)), String(''))]),
                     Type(Void)
                 )
             ),
@@ -147,7 +147,7 @@ class Scope:
                 DeclarationType.CONST,
                 Type(PrototypePyAction),
                 PrototypePyAction(
-                    Group([Assign(TypedIdentifier(Identifier('s'), Type('string')), String(''))]),
+                    Group([Assign(TypedIdentifier(Identifier('s'), Type(String)), String(''))]),
                     Type(Void)
                 )
             ),
