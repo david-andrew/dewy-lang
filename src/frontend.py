@@ -22,6 +22,7 @@ def main():
     arg_parser.add_argument('-p', '--disable-rich-print', action='store_true', help='Disable using rich for printing stack traces')
     arg_parser.add_argument('args', nargs=REMAINDER, help='Arguments after the file are passed directly to program')
     arg_parser.add_argument('--verbose', action='store_true', help='Print verbose output')
+    arg_parser.add_argument('--tokens', action='store_true', help='Print tokens for the input expression')
 
 
     args = arg_parser.parse_args()
@@ -41,7 +42,7 @@ def main():
 
     # if no file is provided, enter REPL mode
     if args.file is None:
-        python_repl(args.args, args.verbose)
+        python_repl(args.args, args.verbose, args.tokens)
         return
     
     # default interpreter is python. default compiler is qbe. default with no args is python.

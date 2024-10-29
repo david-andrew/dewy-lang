@@ -69,7 +69,7 @@ def python_interpreter(path: Path, args:list[str], verbose:bool=False):
     if res is not void:
         print(res)
 
-def python_repl(args: list[str], verbose:bool=False):
+def python_repl(args: list[str], verbose:bool=False, print_tokens:bool=False):
     try:
         from easyrepl import REPL
     except ImportError:
@@ -95,6 +95,8 @@ def python_repl(args: list[str], verbose:bool=False):
         try:
             tokens = tokenize(src)
             post_process(tokens)
+            if print_tokens:
+                print(tokens)
 
             # parse tokens into AST
             ast = top_level_parse(tokens)
