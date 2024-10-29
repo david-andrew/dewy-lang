@@ -1,7 +1,11 @@
 from ..postparse import post_parse
 from ..tokenizer import tokenize
 from ..postok import post_process
-from ..dtypes import Scope as DTypesScope, typecheck, register_callable, typecheck_call, register_indexable, typecheck_index
+from ..dtypes import (
+    Scope as DTypesScope,
+    typecheck, typecheck_call, typecheck_index, typecheck_multiply,
+    CallableBase, IndexableBase, IndexerBase, MultipliableBase
+)
 from ..parser import top_level_parse, QJux
 from ..syntax import (
     AST,
@@ -172,7 +176,7 @@ class Iter(AST):
 class PyActionArgsPreprocessor(Protocol):
     def __call__(self, args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]: ...
 
-class PyAction(AST):
+class PyAction(CallableBase):
     signature: Signature
     preprocessor: PyActionArgsPreprocessor
     action: TypingCallable[..., AST]
@@ -190,7 +194,7 @@ class PyAction(AST):
         )
 
 
-class Closure(AST):
+class Closure(CallableBase):
     fn: FunctionLiteral
     scope: Scope
 
@@ -209,8 +213,8 @@ class Closure(AST):
         # scope_contents = ', '.join(scope_lines)
         # return f'{self.fn} with scope=[{scope_contents}]'
 
-register_callable(PyAction)
-register_callable(Closure)
+# register_callable(PyAction)
+# register_callable(Closure)
 
 
 class Object(AST):
@@ -233,7 +237,7 @@ class Object(AST):
         return f'[{newline}    {f"{newline}    ".join(chunks)}{newline}]'
 
 
-class Float(AST):
+class Float(MultipliableBase):
     val: float
 
     def __str__(self):
@@ -367,13 +371,14 @@ def evaluate_declare(ast: Declare, scope: Scope):
     return void
 
 def evaluate_qjux(ast: QJux, scope: Scope) -> AST:
-    if typecheck_call(ast.call, scope):
+    if ast.call is not None and typecheck_call(ast.call, scope):
         return evaluate_call(ast.call, scope)
     if ast.index is not None and typecheck_index(ast.index, scope):
         return evaluate_index(ast.index, scope)
+    if typecheck_multiply(ast.mul, scope):
+        return evaluate_binary_dispatch(ast.mul, scope)
 
-    return evaluate_binary_dispatch(ast.mul, scope)
-
+    raise ValueError(f'Typechecking failed to match a valid evaluation for QJux. {ast=}')
 
 # def evaluate_qast(ast: QAST, scope: Scope):
 #     # use type checking to determine which branch of the QAST to evaluate

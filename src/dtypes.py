@@ -291,48 +291,84 @@ def typeof_identifier(ast: Identifier, scope: Scope, params:bool=False) -> TypeE
     return typeof(var.value, scope, params)
 
 
-_callable_types = [PrototypePyAction, FunctionLiteral]
-def register_callable(cls: type[AST]):
-    _callable_types.append(cls)
+
+# abstract base type to register new callable types
+class CallableBase(AST): ...
+_callable_types = (PrototypePyAction, FunctionLiteral, CallableBase)
+# def register_callable(cls: type[AST]):
+#     _callable_types.append(cls)
 
 def typeof_call(ast: Call, scope: Scope, params:bool=False) -> Type:
     pdb.set_trace()
     ...
 
+def simple_typecheck_resolve_ast(ast: AST, scope: Scope) -> AST:
+    """Resolve the AST to a type. This is a simple version that doesn't do any complex type checking"""
+    if isinstance(ast, Identifier):
+        var = scope.get(ast.name)
+        return var.value
+    if isinstance(ast, AtHandle):
+        return ast.operand
+    if isinstance(ast, Group):
+        pdb.set_trace()
+        ...
+    if isinstance(ast, Access):
+        pdb.set_trace()
+        ...
+
+    # no resolving possible
+    return ast
+
 def typecheck_call(ast: Call, scope: Scope) -> bool:
     #For now, just the simplest check. is f callable. ignore rest of type checking
     f = ast.f
-    if isinstance(f, Identifier):
-        var = scope.get(f.name)
-        f = var.value
-    if isinstance(f, AtHandle):
-        f = f.operand
+    f = simple_typecheck_resolve_ast(f, scope) # resolve to a value
+    # if isinstance(f, Identifier):
+    #     var = scope.get(f.name)
+    #     f = var.value
+    # if isinstance(f, AtHandle):
+    #     f = f.operand
 
     if isinstance(f, tuple(_callable_types)):
         #TODO: longer term, want to check that the expected args match the given args
         return True
 
-    if isinstance(f, Group):
-        pdb.set_trace()
-        # get the type of the group items... handling void, and if multiple, then answer is False...
-        ...
-    print(f'not callable: {f=}')
+    # if isinstance(f, Group):
+    #     pdb.set_trace()
+    #     # get the type of the group items... handling void, and if multiple, then answer is False...
+    #     ...
+    # if isinstance(f, Access):
+    #     pdb.set_trace()
+    #     ...
+    #TODO: replace all this with full typechecking...
+    # t = typeof(f, scope)
+    # if t in _callable_types: return True
+    # return False
     return False
 
 
+# Abstract base types to register new indexable/indexer types
+class IndexableBase(AST): ...
+class IndexerBase(AST): ...
 
-_indexable_types = [Array, Range]
-_indexer_types = [Array, Range]
-def register_indexable(cls: type[AST]):
-    _indexable_types.append(cls)
-def register_indexer(cls: type[AST]):
-    _indexer_types.append(cls)
+_indexable_types = (Array, Range, IndexableBase)
+_indexer_types = (Array, Range, IndexerBase)
+# def register_indexable(cls: type[AST]):
+#     _indexable_types.append(cls)
+# def register_indexer(cls: type[AST]):
+#     _indexer_types.append(cls)
 
 def typeof_index(ast: Index, scope: Scope, params:bool=False) -> Type:
     pdb.set_trace()
     ...
 
 def typecheck_index(ast: Index, scope: Scope) -> bool:
+    left = simple_typecheck_resolve_ast(ast.left, scope)
+    right = simple_typecheck_resolve_ast(ast.right, scope)
+    if isinstance(left, _indexable_types) and isinstance(right, _indexer_types):
+        return True
+
+
     #for now super simple checks on left and right
     left_type = typeof(ast.left, scope)
     right_type = typeof(ast.right, scope)
@@ -347,19 +383,39 @@ def typecheck_index(ast: Index, scope: Scope) -> bool:
 
 
 
+# abstract base type to register new multipliable types
+class MultipliableBase(AST): ...
+_multipliable_types = (Int, Array, Range, MultipliableBase) #TODO: add more types
+# def register_multipliable(cls: type[AST]):
+#     _multipliable_types.append(cls)
+def typecheck_multiply(ast: Mul, scope: Scope) -> bool:
+    # left = simple_typecheck_resolve_ast(ast.left, scope)
+    # right = simple_typecheck_resolve_ast(ast.right, scope)
+    # if isinstance(left, _multipliable_types) and isinstance(right, _multipliable_types):
+    #     return True
+
+    #TODO: full type checking to check if values are multipliable
+    # pdb.set_trace()
+    left_type = typeof(ast.left, scope)
+    right_type = typeof(ast.right, scope)
+    if not isinstance(left_type, Type) or not isinstance(right_type, Type):
+        pdb.set_trace()
+        raise NotImplementedError('typecheck_multiply not implemented for non-Type left side')
+
+    if left_type.t not in _multipliable_types or right_type.t not in _multipliable_types:
+        return False
+    return True
+
 
 
 def typeof_group(ast: Group, scope: Scope, params:bool=False) -> TypeExpr:
-
-    expressed: list[AST] = []
+    expressed: list[TypeExpr] = []
     for expr in ast.items:
         res = typeof(expr, scope, params)
-        pdb.set_trace()
         if res is not void:
             expressed.append(res)
     if len(expressed) == 0:
-        pdb.set_trace()
-        return void
+        return Type(Void)
     if len(expressed) == 1:
         return expressed[0]
     raise NotImplementedError(f'Block with multiple expressions not yet supported. {ast=}, {expressed=}')

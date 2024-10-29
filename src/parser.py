@@ -154,14 +154,14 @@ class QJux(AST):
     - index e.g. a[b]
     - multiply e.g. a * b
     """
-    call: Call
-    index: Index|None #syntactically we can know if it's not index if right is not Array or Range
+    call: Call|None   # syntactically we might know if left is not callable
+    index: Index|None # syntactically we definitely know if it's not index if right is not Array or Range
     mul: Mul
 
     def __str__(self):
-        if self.index is None:
-            return f'QJux({self.call}, {self.mul})'
-        return f'QJux({self.call}, {self.index}, {self.mul})'
+        call = f'{self.call}, ' if self.call is not None else ''
+        index = f'{self.index}, ' if self.index is not None else ''
+        return f'QJux({call}{index}{self.mul})'
 
 ######### Operator Precedence Table #########
 # TODO: class for compund operators, e.g. += -= .+= .-= not=? not>? etc.
@@ -610,10 +610,10 @@ def build_bin_expr(left: AST, op: Token, right: AST) -> AST:
             pdb.set_trace()
             raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
 
-
+_non_callables = (Int, Bool, String, IString, Array, Range, Dict, BidirDict, ObjectLiteral, Void, DotDotDot, BareRange, Backticks)
 def build_quantum_juxtapose(left: AST, right: AST) -> QJux:
     return QJux(
-        call=Call(left, right),
+        call=Call(left, right) if not isinstance(left, _non_callables) else None,
         index=Index(left, right) if isinstance(right, (Array, Range)) else None,
         mul=Mul(left, right)
     )
