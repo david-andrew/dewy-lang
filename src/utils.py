@@ -2,6 +2,15 @@ from typing import TypeVar, Generic, Callable
 import pdb
 
 
+
+from dataclasses import dataclass
+@dataclass
+class Options:
+    tokens: bool
+    verbose: bool
+    #TODO: other command line options
+
+
 def wrap_coords(method: Callable):
     def wrapped_method(self, *args, **kwargs):
         result = method(self, *args, **kwargs)

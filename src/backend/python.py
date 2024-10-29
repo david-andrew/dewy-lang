@@ -34,6 +34,7 @@ from ..syntax import (
 )
 
 from ..postparse import FunctionLiteral, Signature, normalize_function_args
+from ..utils import Options
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -49,7 +50,7 @@ import pdb
 
 
 
-def python_interpreter(path: Path, args:list[str], verbose:bool=False):
+def python_interpreter(path: Path, args:list[str], options: Options) -> None:
     # get the source code and tokenize
     src = path.read_text()
     tokens = tokenize(src)
@@ -60,7 +61,7 @@ def python_interpreter(path: Path, args:list[str], verbose:bool=False):
     ast = post_parse(ast)
 
     # debug printing
-    if verbose:
+    if options.verbose:
         print_ast(ast)
         print(repr(ast))
 
@@ -69,7 +70,7 @@ def python_interpreter(path: Path, args:list[str], verbose:bool=False):
     if res is not void:
         print(res)
 
-def python_repl(args: list[str], verbose:bool=False, print_tokens:bool=False):
+def python_repl(args: list[str], options: Options):
     try:
         from easyrepl import REPL
     except ImportError:
@@ -95,7 +96,7 @@ def python_repl(args: list[str], verbose:bool=False, print_tokens:bool=False):
         try:
             tokens = tokenize(src)
             post_process(tokens)
-            if print_tokens:
+            if options.tokens:
                 print(tokens)
 
             # parse tokens into AST
@@ -103,7 +104,7 @@ def python_repl(args: list[str], verbose:bool=False, print_tokens:bool=False):
             ast = post_parse(ast)
 
             # debug printing
-            if verbose:
+            if options.verbose:
                 print_ast(ast)
                 print(repr(ast))
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 from argparse import ArgumentParser, REMAINDER
 from .backend import backend_names, get_backend, python_interpreter, python_repl, qbe_compiler, get_version
+from .utils import Options
 
 import pdb
 
@@ -40,9 +41,11 @@ def main():
         except:
             print('rich unavailable for import. using built-in printing')
 
+    options = Options(args.tokens, args.verbose)
+
     # if no file is provided, enter REPL mode
     if args.file is None:
-        python_repl(args.args, args.verbose, args.tokens)
+        python_repl(args.args, options)
         return
     
     # default interpreter is python. default compiler is qbe. default with no args is python.
@@ -56,7 +59,9 @@ def main():
         backend = python_interpreter
 
     # run with the selected backend
-    backend(Path(args.file), args.args, args.verbose)
+    backend(Path(args.file), args.args, options)
+
+
 
 
 if __name__ == '__main__':

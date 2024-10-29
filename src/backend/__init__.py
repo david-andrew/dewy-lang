@@ -12,9 +12,10 @@ from .riscv import riscv_compiler
 from .shell import shell_compiler
 from typing import Protocol
 from pathlib import Path
+from ..utils import Options
 
 class Backend(Protocol):
-    def __call__(self, path: Path, args: list[str]) -> None:
+    def __call__(self, path: Path, args: list[str], options: Options) -> None:
         ...
 
 
