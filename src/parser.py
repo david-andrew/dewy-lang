@@ -159,9 +159,12 @@ class QJux(AST):
     mul: Mul
 
     def __str__(self):
-        call = f'{self.call}, ' if self.call is not None else ''
-        index = f'{self.index}, ' if self.index is not None else ''
-        return f'QJux({call}{index}{self.mul})'
+        call = 'call | ' if self.call is not None else ''
+        index = 'index | ' if self.index is not None else ''
+        return f'QJux(({call}{index}multiply): {self.mul.left}{self.mul.right})'
+        # call = f'{self.call}, ' if self.call is not None else ''
+        # index = f'{self.index}, ' if self.index is not None else ''
+        # return f'QJux({call}{index}{self.mul})'
 
 ######### Operator Precedence Table #########
 # TODO: class for compund operators, e.g. += -= .+= .-= not=? not>? etc.
@@ -611,12 +614,16 @@ def build_bin_expr(left: AST, op: Token, right: AST) -> AST:
             raise NotImplementedError(f'Parsing of operator {op} has not been implemented yet')
 
 _non_callables = (Int, Bool, String, IString, Array, Range, Dict, BidirDict, ObjectLiteral, Void, DotDotDot, BareRange, Backticks)
-def build_quantum_juxtapose(left: AST, right: AST) -> QJux:
-    return QJux(
-        call=Call(left, right) if not isinstance(left, _non_callables) else None,
-        index=Index(left, right) if isinstance(right, (Array, Range)) else None,
-        mul=Mul(left, right)
-    )
+def build_quantum_juxtapose(left: AST, right: AST) -> QJux | Mul:
+    call = Call(left, right) if not isinstance(left, _non_callables) else None
+    index = Index(left, right) if isinstance(right, (Array, Range)) else None
+    mul = Mul(left, right)
+
+    # default to just mul if the other options definitely don't work
+    if call is None and index is None:
+        return mul
+
+    return QJux(call=call, index=index, mul=mul)
 
 
 def build_unary_prefix_expr(op: Token, right: AST) -> AST:
