@@ -389,7 +389,7 @@ class PrototypePyAction(PrototypeAST):
     return_type: AST
 
     def __str__(self):
-        return f'({self.args}): {self.return_type} => ...'
+        return f'({self.args}):> {self.return_type} => ...'
 
 
 class Call(AST):
@@ -636,7 +636,7 @@ class Range(AST):
 
 
 class Array(AST, Delimited):
-    items: list[AST] # list[T] where T is not Declare or Assign or PointsTo or BidirPointsTo
+    items: list[AST] # list[T] where T is not PointsTo or BidirPointsTo. Might have Declare or Assign. Must have at least 1 expression!
 
     def __str__(self):
         return f'[{" ".join(map(str, self.items))}]'
@@ -657,7 +657,7 @@ class BidirDict(AST, Delimited):
 
 
 class ObjectLiteral(AST, Delimited):
-    items: list[AST] # list[Declare|Assign|AST] has to have at least 1 declare or assignment
+    items: list[AST] # list[Declare|Assign|AST] has to have at least 1 declare or assignment, and no expressions!
 
     def __str__(self):
         return f'[{" ".join(map(str, self.items))}]'
