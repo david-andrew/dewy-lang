@@ -190,6 +190,10 @@ def cannot_typeof(ast: AST, scope: Scope, params:bool=False):
     raise ValueError(f'INTERNAL ERROR: determining the type of `({type(ast)}) {ast}` is not possible')
 
 
+_external_typeof_fn_map: dict[type[AST], TypeofFunc] = {}
+def register_typeof(cls: type[AST], fn: TypeofFunc):
+    _external_typeof_fn_map[cls] = fn
+
 @cache
 def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
     return {
@@ -250,7 +254,7 @@ def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
         Undefined: identity,
         Void: identity,
         #TODO: other AST types here
-    }
+    } | _external_typeof_fn_map
 
 
 
@@ -270,13 +274,13 @@ def typeof(ast: AST, scope: Scope, params:bool=False) -> TypeExpr:
 # promotion_table = {...}
 # type_tree = {...}
 
-def typecheck(ast: AST, scope: Scope) -> bool:
-    """Check if the given AST is well-formed from a type perspective"""
-    match ast:
-        case Call(): return typecheck_call(ast, scope)
-        case Index(): return typecheck_index(ast, scope)
-        case Mul(): return typecheck_binary_dispatch(ast, scope)
-        case _: raise NotImplementedError(f'typecheck not implemented for {type(ast)}')
+# def typecheck(ast: AST, scope: Scope) -> bool:
+#     """Check if the given AST is well-formed from a type perspective"""
+#     match ast:
+#         case Call(): return typecheck_call(ast, scope)
+#         case Index(): return typecheck_index(ast, scope)
+#         case Mul(): return typecheck_binary_dispatch(ast, scope)
+#         case _: raise NotImplementedError(f'typecheck not implemented for {type(ast)}')
 
 # def infer_types(ast: AST, scope: Scope) -> AST:
 
@@ -298,31 +302,42 @@ _callable_types = (PrototypePyAction, FunctionLiteral, CallableBase)
 # def register_callable(cls: type[AST]):
 #     _callable_types.append(cls)
 
-def typeof_call(ast: Call, scope: Scope, params:bool=False) -> Type:
+def typeof_call(ast: Call, scope: Scope, params:bool=False) -> TypeExpr:
     pdb.set_trace()
     ...
 
-def simple_typecheck_resolve_ast(ast: AST, scope: Scope) -> AST:
-    """Resolve the AST to a type. This is a simple version that doesn't do any complex type checking"""
-    if isinstance(ast, Identifier):
-        var = scope.get(ast.name)
-        return var.value
-    if isinstance(ast, AtHandle):
-        return ast.operand
-    if isinstance(ast, Group):
-        pdb.set_trace()
-        ...
-    if isinstance(ast, Access):
-        pdb.set_trace()
-        ...
+# def simple_typecheck_resolve_ast(ast: AST, scope: Scope) -> AST:
+#     """Resolve the AST to a type. This is a simple version that doesn't do any complex type checking"""
+#     if isinstance(ast, Identifier):
+#         var = scope.get(ast.name)
+#         return var.value
+#     if isinstance(ast, AtHandle):
+#         return ast.operand
+#     if isinstance(ast, Group):
+#         pdb.set_trace()
+#         ...
+#     if isinstance(ast, Access):
+#         pdb.set_trace()
+#         ...
 
-    # no resolving possible
-    return ast
+#     # no resolving possible
+#     return ast
 
 def typecheck_call(ast: Call, scope: Scope) -> bool:
     #For now, just the simplest check. is f callable. ignore rest of type checking
-    f = ast.f
-    f = simple_typecheck_resolve_ast(f, scope) # resolve to a value
+    f_type = typeof(ast.f, scope)
+    if not isinstance(f_type, Type):
+        pdb.set_trace()
+        ...
+        #TBD how to handle the different TypeExpr's
+
+    if isinstance(f_type, Type) and issubclass(f_type.t, _callable_types):
+        return True
+
+    return False
+    pdb.set_trace()
+    # f = ast.f
+    # f = simple_typecheck_resolve_ast(f, scope) # resolve to a value
     # if isinstance(f, Identifier):
     #     var = scope.get(f.name)
     #     f = var.value
@@ -358,15 +373,15 @@ _indexer_types = (Array, Range, IndexerBase)
 # def register_indexer(cls: type[AST]):
 #     _indexer_types.append(cls)
 
-def typeof_index(ast: Index, scope: Scope, params:bool=False) -> Type:
+def typeof_index(ast: Index, scope: Scope, params:bool=False) -> TypeExpr:
     pdb.set_trace()
     ...
 
 def typecheck_index(ast: Index, scope: Scope) -> bool:
-    left = simple_typecheck_resolve_ast(ast.left, scope)
-    right = simple_typecheck_resolve_ast(ast.right, scope)
-    if isinstance(left, _indexable_types) and isinstance(right, _indexer_types):
-        return True
+    # left = simple_typecheck_resolve_ast(ast.left, scope)
+    # right = simple_typecheck_resolve_ast(ast.right, scope)
+    # if isinstance(left, _indexable_types) and isinstance(right, _indexer_types):
+    #     return True
 
 
     #for now super simple checks on left and right
@@ -374,12 +389,13 @@ def typecheck_index(ast: Index, scope: Scope) -> bool:
     right_type = typeof(ast.right, scope)
     if not isinstance(left_type, Type) or not isinstance(right_type, Type):
         pdb.set_trace()
-        #TODO: more complex cases...
+        #TODO: more complex cases involving type expressions...
         raise NotImplementedError('typecheck_index not implemented for non-Type left side')
 
-    if left_type.t not in _indexable_types or right_type.t not in _indexer_types:
-        return False
-    return True
+    if issubclass(left_type.t, _indexable_types) and issubclass(right_type.t, _indexer_types):
+        return True
+
+    return False
 
 
 
@@ -402,9 +418,10 @@ def typecheck_multiply(ast: Mul, scope: Scope) -> bool:
         pdb.set_trace()
         raise NotImplementedError('typecheck_multiply not implemented for non-Type left side')
 
-    if left_type.t not in _multipliable_types or right_type.t not in _multipliable_types:
-        return False
-    return True
+    if issubclass(left_type.t, _multipliable_types) and issubclass(right_type.t, _multipliable_types):
+        return True
+
+    return False
 
 
 
@@ -430,11 +447,13 @@ def typeof_block(ast: Block, scope: Scope, params:bool=False) -> TypeExpr:
 
 
 
-def typeof_at_handle(ast: AtHandle, scope: Scope, params:bool=False) -> Type:
-    pdb.set_trace()
-    raise NotImplementedError('typeof_at_handle not implemented')
+def typeof_at_handle(ast: AtHandle, scope: Scope, params:bool=False) -> TypeExpr:
+    if not isinstance(ast.operand, Identifier):
+        raise NotImplementedError('typeof_at_handle only implemented for Identifiers')
+    return typeof_identifier(ast.operand, scope, params)
 
-def typeof_express(ast: Express, scope: Scope, params:bool=False) -> Type:
+
+def typeof_express(ast: Express, scope: Scope, params:bool=False) -> TypeExpr:
     var = scope.get(ast.id.name)
 
     # if we were told what the type is, return that (as it should be the main source of truth)
@@ -444,7 +463,7 @@ def typeof_express(ast: Express, scope: Scope, params:bool=False) -> Type:
     return typeof(var.value, scope, params)
 
 
-def typeof_binary_dispatch(ast: BinOp, scope: Scope, params:bool=False) -> Type:
+def typeof_binary_dispatch(ast: BinOp, scope: Scope, params:bool=False) -> TypeExpr:
     pdb.set_trace()
     raise NotImplementedError('typeof_binary_dispatch not implemented')
 
@@ -463,7 +482,7 @@ def typecheck_binary_dispatch(ast: BinOp, scope: Scope) -> bool:
 
     return True
 
-def typeof_array(ast: Array, scope: Scope, params:bool=False) -> Type:
+def typeof_array(ast: Array, scope: Scope, params:bool=False) -> TypeExpr:
     if not params:
         return Type(Array)
     pdb.set_trace()
@@ -477,7 +496,7 @@ def typeof_array(ast: Array, scope: Scope, params:bool=False) -> Type:
 
 
 
-def typeof_access(ast: Access, scope: Scope, params:bool=False) -> Type:
+def typeof_access(ast: Access, scope: Scope, params:bool=False) -> TypeExpr:
     pdb.set_trace()
     raise NotImplementedError('typeof_access not implemented')
 

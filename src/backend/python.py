@@ -3,8 +3,9 @@ from ..tokenizer import tokenize
 from ..postok import post_process
 from ..dtypes import (
     Scope as DTypesScope,
-    typecheck, typecheck_call, typecheck_index, typecheck_multiply,
-    CallableBase, IndexableBase, IndexerBase, MultipliableBase
+    typecheck_call, typecheck_index, typecheck_multiply,
+    register_typeof, short_circuit,
+    CallableBase, IndexableBase, IndexerBase, MultipliableBase,
 )
 from ..parser import top_level_parse, QJux
 from ..syntax import (
@@ -196,6 +197,8 @@ class PyAction(CallableBase):
             return_type=proto.return_type,
         )
 
+# hacky for now. longer term, want full signature type checking for functions!
+register_typeof(PyAction, short_circuit(PyAction))
 
 class Closure(CallableBase):
     fn: FunctionLiteral
@@ -219,6 +222,7 @@ class Closure(CallableBase):
 # register_callable(PyAction)
 # register_callable(Closure)
 
+register_typeof(Closure, short_circuit(Closure))
 
 class Object(AST):
     scope: Scope
