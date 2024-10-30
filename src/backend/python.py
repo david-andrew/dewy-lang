@@ -5,12 +5,12 @@ from ..dtypes import (
     Scope as DTypesScope,
     typecheck_call, typecheck_index, typecheck_multiply,
     register_typeof, short_circuit,
-    CallableBase, IndexableBase, IndexerBase, MultipliableBase,
+    CallableBase, IndexableBase, IndexerBase, MultipliableBase, ObjectBase,
 )
 from ..parser import top_level_parse, QJux
 from ..syntax import (
     AST,
-    Type,
+    Type, TypeParam,
     PointsTo, BidirPointsTo,
     ListOfASTs, PrototypeTuple, Block, Array, Group, Range, ObjectLiteral, Dict, BidirDict, UnpackTarget,
     TypedIdentifier,
@@ -224,7 +224,7 @@ class Closure(CallableBase):
 
 register_typeof(Closure, short_circuit(Closure))
 
-class Object(AST):
+class Object(ObjectBase):
     scope: Scope
 
     def __str__(self):
@@ -243,6 +243,10 @@ class Object(AST):
         #TODO: py3.12 remove {newline} and replace with direct \n
         return f'[{newline}    {f"{newline}    ".join(chunks)}{newline}]'
 
+
+def typeof_object(obj: Object, scope: Scope, params:bool=False) -> Type:
+    return Type(Object, TypeParam([obj.scope]))
+register_typeof(Object, typeof_object)
 
 class Float(MultipliableBase):
     val: float

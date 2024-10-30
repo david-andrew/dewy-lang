@@ -494,11 +494,35 @@ def typeof_array(ast: Array, scope: Scope, params:bool=False) -> TypeExpr:
 
 
 
-
+class ObjectBase(AST): ...
 
 def typeof_access(ast: Access, scope: Scope, params:bool=False) -> TypeExpr:
+    left = typeof(ast.left, scope, params)
+
+    # happy path: left was an object
+    if isinstance(left, Type) and issubclass(left.t, ObjectBase) and left.parameters is not None:
+        parameters = left.parameters
+        assert len(parameters.items) == 1, f'expected only one parameter for object access. {parameters=}'
+        scope, = parameters.items
+        assert isinstance(scope, Scope), f'expected parameter to be a scope. {parameters.items[0]=}'
+        if isinstance(ast.right, Identifier):
+            handle, id = False, ast.right
+        elif isinstance(ast.right, AtHandle):
+            handle, id = True, ast.right.operand
+            assert isinstance(id, Identifier), f'expected id to be an Identifier. {id=}. Other types not yet supported'
+        elif isinstance(ast.right, Access):
+            raise ValueError('Right hand side should not be access. Access should be left associative')
+        else:
+            raise NotImplementedError(f'Access right-hand-side not implemented for {type(ast.right)}')
+
+        if handle:
+            return typeof_identifier(id, scope, params)
+        return typeof_express(Express(id), scope, params)
+
+
+
     pdb.set_trace()
-    raise NotImplementedError('typeof_access not implemented')
+    raise NotImplementedError(f'typeof_access not implemented for {type(ast)}')
 
 
 
