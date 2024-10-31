@@ -1,4 +1,3 @@
-from ..postparse import post_parse
 from ..tokenizer import tokenize
 from ..postok import post_process
 from ..dtypes import (
@@ -34,7 +33,7 @@ from ..syntax import (
     CollectInto, SpreadOutFrom,
 )
 
-from ..postparse import FunctionLiteral, Signature, normalize_function_args
+from ..postparse import post_parse, FunctionLiteral, Signature, normalize_function_args
 from ..utils import Options
 
 from dataclasses import dataclass, field
@@ -43,9 +42,7 @@ from typing import Protocol, cast, Callable as TypingCallable, Any, Generic
 from functools import cache
 from collections import defaultdict
 from types import SimpleNamespace
-from enum import Enum, auto
 
-from argparse import ArgumentParser
 
 import pdb
 
