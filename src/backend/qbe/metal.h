@@ -1,3 +1,6 @@
+// TODO: this isn't quite right. For now just lean on C-compiler to handle everything.
+// i.e. qbe <file>.ssa | gcc -o <file> <file>.o -lc
+
 #ifndef METAL_H
 #define METAL_H
 
@@ -23,6 +26,7 @@ uint64_t __getdl(uint8_t** dst, uint8_t delimiter);
 
 
 
+// #define METAL_IMPLEMENTATION  // Uncomment to include implementations
 
 // Implementations (if METAL_IMPLEMENTATION is defined)
 #ifdef METAL_IMPLEMENTATION
@@ -91,14 +95,14 @@ uint64_t __getdl(uint8_t** dst, uint8_t delimiter)
     uint64_t buf_size = 128; // initial buffer size
     uint64_t count = 0;      // characters read
     uint64_t c;              // current character
-    uint8_t* buf = malloc(buf_size);
+    uint8_t* buf = (uint8_t*)malloc(buf_size);
     if (buf == NULL) return -1;
     while ((c = fgetc(stdin)) != EOF && c != delimiter)
     {
         if (count + 1 >= buf_size)
         {
             buf_size *= 2;
-            buf = realloc(buf, buf_size);
+            buf = (uint8_t*)realloc(buf, buf_size);
             if (buf == NULL) return -1;
         }
         buf[count++] = c;
