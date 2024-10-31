@@ -573,6 +573,24 @@ class BroadcastOp(AST):
     def __str__(self):
         return f'{self.op.left} .{self.op._op} {self.op.right}'
 
+# TBD if need. For now, parser just does `left = left op right` for `left op= right`
+#     needed if we wanted to instead actually do slightly different things when doing an update assign
+#     ony case I can think of is from overloading:
+#     ```
+#     myfunc = () => 'first version'
+#     // three possible ways overloading would work...
+#     myfunc  |= (a:int b:int) => 'second version'  // myfunc  = myfunc  | (a:int b:int) => 'second version' // fails because myfunc needs to be @myfunc on the right side
+#     @myfunc |= (a:int b:int) => 'second version'  // @myfunc = @myfunc | (a:int b:int) => 'second version'
+#     myfunc  |= (a:int b:int) => 'second version'  // myfunc  = @myfunc | (a:int b:int) => 'second version'
+#     ```
+# Also note that vectorized ops might be `op: BinOp | CombinedAssign` if we implement this
+# class CombinedAssign(AST):
+#     op: BinOp
+
+#     def __str__(self) -> str:
+#         return f'{self.op.left} {self.op._op}= {self.op.right}'
+
+
 class BareRange(PrototypeAST):
     left: AST
     right: AST
