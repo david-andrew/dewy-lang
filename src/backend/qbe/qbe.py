@@ -112,7 +112,7 @@ class QbeFunction:
     name: str
     export: bool
     args: list[QbeArg]
-    ret: QbeType
+    ret: QbeType | None
     blocks: list[QbeBlock]
 
     def __str__(self) -> str:
