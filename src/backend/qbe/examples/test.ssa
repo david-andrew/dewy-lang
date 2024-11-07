@@ -1,0 +1,16 @@
+export function w $main() {
+@start
+    %a =w copy 5
+    %b =w copy 10
+    %res =w call $add(w %a, w %b)
+    call $printf(l $format, ..., w %res)
+    ret 0
+}
+
+function w $add(w %a, w %b) {
+@start
+    %res =w add %a, %b
+    ret %res
+}
+
+data $format = { b "Result: %d\n", b 0 }

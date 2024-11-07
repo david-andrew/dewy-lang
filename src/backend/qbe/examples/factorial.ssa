@@ -1,0 +1,55 @@
+data $format = { b "Result: %d\n\0" }
+
+export function w $main() {
+@start
+    %n = w 5  # Change this to compute the factorial of a different number
+    %iter_res =w call $factorial_iterative(w %n)
+    %recur_res =w call $factorial_recursive(w %n)
+
+    # Print iterative result
+    %arg1 =w %iter_res
+    call $printf(l $format, w %arg1)
+
+    # Print recursive result
+    %arg2 =w %recur_res
+    call $printf(l $format, w %arg2)
+
+    ret 0
+}
+
+function w $factorial_iterative(w %n) {
+@start
+    %res = copy 1
+    %i = copy 1
+    jmp @loop_check
+
+@loop_check
+    %cond = le w %i, %n
+    jnz %cond, @loop_body, @end
+
+@loop_body
+    %res = mul w %res, %i
+    %i = add w %i, 1
+    jmp @loop_check
+
+@end
+    ret %res
+}
+
+function w $factorial_recursive(w %n)
+{
+@start
+    %cond = eq w %n, 0
+    jnz %cond, @base_case, @recurse
+
+@base_case
+    ret 1
+
+@recurse
+    %n_minus_1 = sub w %n, 1
+    %sub_res = call $factorial_recursive(w %n_minus_1)
+    %res = mul w %n, %sub_res
+    ret %res
+}
+
+extern function $printf(l $format, ...)
