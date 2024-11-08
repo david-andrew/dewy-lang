@@ -94,6 +94,7 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [fizzbuzz-1.dewy](examples/fizzbuzz-1.dewy)                     | [✓]    |
 | [fizzbuzz0.dewy](examples/fizzbuzz0.dewy)                       | [✓]    |
 | [fizzbuzz1.dewy](examples/fizzbuzz1.dewy)                       | [✗]    |
+| [random.dewy](examples/random.dewy)                             | [✓]    |
 | [primes.dewy](examples/primes.dewy)                             | [✓]    |
 | [primes2.dewy](examples/primes2.dewy)                           | [✗]    |
 | [mdbook_preprocessor.dewy](docs/plugins/src_to_iframe.dewy)     | [✗]    |

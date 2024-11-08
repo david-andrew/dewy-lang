@@ -1,154 +1,24 @@
-//simple, fast, high quality, dependency-free RNG generation
-//uniform distribution via XORSHIFT*
-//normal distribution via PPND16
+// simple xorshift+ generator
+// could be simplified when types are supported (i.e. `state: uint64` `rand = ():> uint64`, etc.)
+// for now have extra `and` operations to simulate truncation 
 
-
-RNG = (s:uint64) => [
-    next_u64 = () => {
-        s ^= s >> 21
-        s ^= s << 35
-        s ^= s >> 4
-        s * 2685821657736338717
-    }
-    next_uniform = () => fast_to_uniform(next_u64())
-    next_normal = () => ppnd16(fast_to_uniform(next_u64()))
+UINT64_MAX = 0xFFFF_FFFF_FFFF_FFFF
+state = 123456789
+rand = () => {
+    state xor= state >> 21
+    state xor= state << 35
+    state xor= state >> 4
+    state and= UINT64_MAX
     
-    /{
-        Use bit hacks to quickly convert a 64-bit number to a double in the range [0, 1)
-
-        @param x the number to convert. Only the lowest 23 bits are used.
-        @return the number in the range [0, 1)
-    }/
-    fast_to_uniform = (x:uint64):float64 => {
-        const mask1 = 0x3FF0_0000_0000_0000
-        const mask2 = 0x3FFF_FFFF_FFFF_FFFF
-        out: uint64 = (x or mask1) and mask2
-        (out as float64) - 1
-    }
-
-    full_to_uniform = (x:uint64):float64 => truediv(x uint64.max float64)
-
-    /{
-        Convert a uniformly distributed double in the range (0, 1) to a normally distributed double
-        Uses the PPND16 algorithm from Algorithm AS241: The Percentage Points of the Normal Distribution
-
-        @param x the uniformly distributed double in the range (0, 1)
-        @return the normally distributed double
-    }/
-    ppnd16 = (x:float64) => {
-
-        // zero area at x=0/x=1
-        if x <=? 0 or x >=? 1
-            return 0
-
-        const split1:float64 = 0.425
-        const split2:float64 = 5.0
-        const C1:float64 = 0.180625
-        const C2:float64 = 1.6
-
-        // Cofficients for x close to 0.5
-        const A:float64[] =
-        [
-            3.3871328727963665
-            133.14166789178438
-            1971.5909503065514
-            13731.693765509461
-            45921.95393154987
-            67265.7709270087
-            33430.575583588128
-            2509.0809287301227            
-        ]
-        const B:float64[] =
-        [
-            1.0
-            42.313330701600911
-            687.18700749205789
-            5394.1960214247511
-            21213.794301586597
-            39307.895800092709
-            28729.085735721943
-            5226.4952788528544
-        ]
-        
-        // Coefficients for x not close to 0, 0.5 or 1
-        const C:float64[] =
-        [
-            1.4234371107496835
-            4.6303378461565456
-            5.769497221460691
-            3.6478483247632045
-            1.2704582524523684
-            0.24178072517745061
-            0.022723844989269184
-            0.00077454501427834139
-        ]
-        const D:float64[] =
-        [
-            1.0
-            2.053191626637759
-            1.6763848301838038
-            0.6897673349851
-            0.14810397642748008
-            0.015198666563616457
-            0.00054759380849953455
-            0.0000000010507500716444169
-        ]
-
-        // Coefficients for x near 0 or 1
-        const E:float64[] =
-        [
-            6.6579046435011033
-            5.4637849111641144
-            1.7848265399172913
-            0.29656057182850487
-            0.026532189526576124
-            0.0012426609473880784
-            0.000027115555687434876
-            0.00000020103343992922882
-        ]
-        const F:float64[] =
-        [
-            1.0
-            0.599832206555888
-            0.13692988092273581
-            0.014875361290850615
-            0.00078686913114561329
-            0.000018463183175100548
-            0.0000001421511758316446
-            0.0000000000000020442631033899397
-        ]
-
-        let r:float64
-
-        // shift x to the range (-0.5, 0.5)
-        const q = x - 0.5
-        if abs(q) <=? split1
-        {
-            r = C1 - q^2
-            powers = r.^[0..7]
-            return q * (A .* powers).sum / (B .* powers).sum
-        }
-        
-        // shift x back to (0,1) and invert if it was positive
-        r = if q <? 0 x else 1 - x
-        r = sqrt(-log(r))
-        
-        if r <=? split2
-        {
-            r -= C2
-            powers = r.^[0..7]
-            return sign(q) * (C .* powers).sum / (D .* powers).sum
-        }
-        else
-        {
-            r -= split2
-            powers = r.^[0..7]
-            return sign(q) * (E .* powers).sum / (F .* powers).sum
-        }
-    }
-]
+    state * 2_685821_657736_338717 and UINT64_MAX
+}
 
 
+sum = 0
+loop i in 1..1000 {
+    r = rand / UINT64_MAX
+    r |> printl
+    sum += r
+}
 
-r = RNG(42)
-loop i in 0..100 printl(r.next_normal())
+printl'avg = {sum / 1000}'

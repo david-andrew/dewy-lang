@@ -332,6 +332,13 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         Div: evaluate_binary_dispatch,
         Mod: evaluate_binary_dispatch,
         Pow: evaluate_binary_dispatch,
+        LeftShift: evaluate_binary_dispatch,
+        RightShift: evaluate_binary_dispatch,
+        LeftRotate: evaluate_binary_dispatch,
+        RightRotate: evaluate_binary_dispatch,
+        LeftRotateCarry: evaluate_binary_dispatch,
+        RightRotateCarry: evaluate_binary_dispatch,
+        CycleLeft: evaluate_binary_dispatch,
         AtHandle: evaluate_at_handle,
         Undefined: no_op,
         Void: no_op,
@@ -1017,6 +1024,8 @@ binary_dispatch_table: dict[BinaryDispatchKey[T, U], TypingCallable[[T, U], AST]
     (Equal, Bool, Bool): lambda l, r: Bool(l == r),
     (Equal, String, String): lambda l, r: Bool(l == r),
     # (NotEqual, Int, Int): lambda l, r: Bool(l != r),
+    (LeftShift, Int, Int): lambda l, r: Int(l << r),
+    (RightShift, Int, Int): lambda l, r: Int(l >> r),
 
 }
 
