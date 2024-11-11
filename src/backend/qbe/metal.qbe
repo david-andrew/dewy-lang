@@ -1,0 +1,23 @@
+function $exit(w %code) {
+@start
+        # 60 is the exit syscall
+        call $syscall1(w 60, w %code)
+        ret
+}
+
+function w $print(l %buf, l %len) {
+@start
+        # 1 is the write syscall
+        %ret =w call $syscall3(w 1, w 1, l %buf, l %len)
+        ret %ret
+}
+
+data $greet = { b "hello world!\n" }
+
+# TODO: make this more like the C _start function that calls main with argc and argv
+export function $_start() {
+@start
+        call $print(l $greet, l 13)
+        call $exit(w 0)
+        ret
+}

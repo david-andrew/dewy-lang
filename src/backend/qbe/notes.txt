@@ -1,0 +1,9 @@
+How to compile (for linux) completely standalone:
+- see: https://lists.sr.ht/~mpu/qbe/%3Ca8afa424-5fcc-f241-d630-dd6fbac0ded2%40gmail.com%3E
+- basically have a short x86_64 assembly that provides the syscall interface
+- then use syscalls from qbe
+- also define _start as the entry point in qbe
+- then link the assembly and qbe output together
+
+
+qbe metal.qbe > metal.s && as -o metal.o metal.s && as -o syscalls.o syscalls.x86_64 && ld -o app syscalls.o metal.o && ./app
