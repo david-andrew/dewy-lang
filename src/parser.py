@@ -13,7 +13,7 @@ from .syntax import (
     Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
-    PrototypeFunctionLiteral, PrototypePyAction, Call,
+    PrototypeFunctionLiteral, PrototypeBuiltin, Call,
     Index,
     PrototypeIdentifier, Identifier, TypedIdentifier, ReturnTyped, UnpackTarget, Assign,
     Int, Bool,

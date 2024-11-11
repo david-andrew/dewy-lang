@@ -13,7 +13,7 @@ from .syntax import (
     String, IString,
     Flowable, Flow, If, Loop, Default,
     Identifier, Express, Declare,
-    PrototypePyAction, Call, Access, Index,
+    PrototypeBuiltin, Call, Access, Index,
     Assign,
     Int, Bool,
     Range, IterIn,
@@ -137,24 +137,24 @@ class Scope:
         return cls(vars={
             'printl': Scope._var(
                 DeclarationType.CONST,
-                Type(PrototypePyAction),
-                PrototypePyAction(
+                Type(PrototypeBuiltin),
+                PrototypeBuiltin(
                     Group([Assign(TypedIdentifier(Identifier('s'), Type(String)), String(''))]),
                     Type(Void)
                 )
             ),
             'print': Scope._var(
                 DeclarationType.CONST,
-                Type(PrototypePyAction),
-                PrototypePyAction(
+                Type(PrototypeBuiltin),
+                PrototypeBuiltin(
                     Group([Assign(TypedIdentifier(Identifier('s'), Type(String)), String(''))]),
                     Type(Void)
                 )
             ),
             'readl': Scope._var(
                 DeclarationType.CONST,
-                Type(PrototypePyAction),
-                PrototypePyAction(
+                Type(PrototypeBuiltin),
+                PrototypeBuiltin(
                     Group([]),
                     Type(String)
                 )
@@ -213,7 +213,7 @@ def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
         # IterIn: typeof_iter_in,
         # FunctionLiteral: typeof_function_literal,
         # # Closure: typeof_closure,
-        # # PyAction: typeof_pyaction,
+        # # Builtin: typeof_builtin,
         String: identity,
         IString: short_circuit(String),
         Identifier: typeof_identifier,
@@ -298,7 +298,7 @@ def typeof_identifier(ast: Identifier, scope: Scope, params:bool=False) -> TypeE
 
 # abstract base type to register new callable types
 class CallableBase(AST): ...
-_callable_types = (PrototypePyAction, FunctionLiteral, CallableBase)
+_callable_types = (PrototypeBuiltin, FunctionLiteral, CallableBase)
 # def register_callable(cls: type[AST]):
 #     _callable_types.append(cls)
 

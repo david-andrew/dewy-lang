@@ -17,7 +17,7 @@ from ...syntax import (
     String, IString,
     Flowable, Flow, If, Loop, Default,
     Identifier, Express, Declare,
-    PrototypePyAction, Call, Access, Index,
+    PrototypeBuiltin, Call, Access, Index,
     Assign,
     Int, Bool,
     Range, IterIn,
@@ -162,7 +162,7 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         # IterIn: compile_iter_in,
         # FunctionLiteral: compile_function_literal,
         # Closure: compile_closure,
-        # PyAction: compile_pyaction,
+        # Builtin: compile_builtin,
         String: compile_string,
         # IString: compile_istring,
         # Identifier: cannot_evaluate,
@@ -248,14 +248,14 @@ def compile_call(call: Call, scope: Scope) -> str:
         return apply_partial_eval(f.operand, call.args, scope)
 
     # AST being called must be TypingCallable
-    assert isinstance(f, (PrototypePyAction, Closure)), f'expected Function or PyAction, got {f}'
+    assert isinstance(f, (PrototypeBuiltin, Closure)), f'expected Function or Builtin, got {f}'
 
     # save the args of the call as metadata for the function AST
     call_args, call_kwargs = collect_calling_args(call.args, scope)
     scope.meta[f].call_args = call_args, call_kwargs
 
     # run the function and return the result
-    if isinstance(f, PrototypePyAction):
+    if isinstance(f, PrototypeBuiltin):
         return compile_call_pyaction(f, scope)
     if isinstance(f, Closure):
         return compile_call_closure(f, scope)
@@ -322,7 +322,7 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
 
 
 
-def compile_call_pyaction(f: PrototypePyAction, scope: Scope) -> str:
+def compile_call_pyaction(f: PrototypeBuiltin, scope: Scope) -> str:
     pdb.set_trace()
     ...
 

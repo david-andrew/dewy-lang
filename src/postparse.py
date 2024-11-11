@@ -10,7 +10,7 @@ from .syntax import (
     Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
-    PrototypeFunctionLiteral, PrototypePyAction, Call,
+    PrototypeFunctionLiteral, PrototypeBuiltin, Call,
     Index,
     PrototypeIdentifier, Express, Identifier, TypedIdentifier, ReturnTyped, UnpackTarget, Assign,
     Int, Bool,
@@ -162,7 +162,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() | CycleLeft() | CycleRight() \
                 | TypedIdentifier():
                 ...
-            #TBD cases: Type() | ListOfASTs() | BareRange() | Ellipsis() | Spread() | TypeParam() | Flowable() | Flow() | PrototypePyAction() | PyAction() | Express() | ReturnTyped() | SequenceUnpackTarget() | ObjectUnpackTarget() | DeclarationType() | DeclareGeneric() | Parameterize():
+            #TBD cases: Type() | ListOfASTs() | BareRange() | Ellipsis() | Spread() | TypeParam() | Flowable() | Flow() | PrototypeBuiltin() | Builtin() | Express() | ReturnTyped() | SequenceUnpackTarget() | ObjectUnpackTarget() | DeclarationType() | DeclareGeneric() | Parameterize():
             case _:  # all others are traversed as normal
                 raise ValueError(f'Unhandled case {type(i)}')
             #     pdb.set_trace()

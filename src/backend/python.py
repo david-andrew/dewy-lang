@@ -17,7 +17,7 @@ from ..syntax import (
     String, IString,
     Flowable, Flow, If, Loop, Default,
     Identifier, Express, Declare,
-    PrototypePyAction, Call, Access, Index,
+    PrototypeBuiltin, Call, Access, Index,
     Assign,
     Int, Bool,
     Range, IterIn,
@@ -174,20 +174,20 @@ class Iter(AST):
     def __str__(self):
         return f'Iter({self.item}, i={self.i})'
 
-class PyActionArgsPreprocessor(Protocol):
+class BuiltinArgsPreprocessor(Protocol):
     def __call__(self, args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]: ...
 
-class PyAction(CallableBase):
+class Builtin(CallableBase):
     signature: Signature
-    preprocessor: PyActionArgsPreprocessor
+    preprocessor: BuiltinArgsPreprocessor
     action: TypingCallable[..., AST]
     return_type: AST
 
     def __str__(self):
         return f'{self.signature}: {self.return_type} => {self.action}'
 
-    def from_prototype(proto: PrototypePyAction, preprocessor: PyActionArgsPreprocessor, action: TypingCallable[..., AST]) -> 'PyAction':
-        return PyAction(
+    def from_prototype(proto: PrototypeBuiltin, preprocessor: BuiltinArgsPreprocessor, action: TypingCallable[..., AST]) -> 'Builtin':
+        return Builtin(
             signature=normalize_function_args(proto.args),
             preprocessor=preprocessor,
             action=action,
@@ -195,7 +195,7 @@ class PyAction(CallableBase):
         )
 
 # hacky for now. longer term, want full signature type checking for functions!
-register_typeof(PyAction, short_circuit(PyAction))
+register_typeof(Builtin, short_circuit(Builtin))
 
 class Closure(CallableBase):
     fn: FunctionLiteral
@@ -216,7 +216,7 @@ class Closure(CallableBase):
         # scope_contents = ', '.join(scope_lines)
         # return f'{self.fn} with scope=[{scope_contents}]'
 
-# register_callable(PyAction)
+# register_callable(Builtin)
 # register_callable(Closure)
 
 register_typeof(Closure, short_circuit(Closure))
@@ -297,7 +297,7 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         IterIn: evaluate_iter_in,
         FunctionLiteral: evaluate_function_literal,
         Closure: evaluate_closure,
-        PyAction: evaluate_pyaction,
+        Builtin: evaluate_pyaction,
         String: no_op,
         IString: evaluate_istring,
         Identifier: cannot_evaluate,
@@ -422,14 +422,14 @@ def evaluate_call(call: Call, scope: Scope) -> AST:
         return apply_partial_eval(f.operand, call.args, scope)
 
     # AST being called must be TypingCallable
-    assert isinstance(f, (PyAction, Closure)), f'expected Function or PyAction, got {f}'
+    assert isinstance(f, (Builtin, Closure)), f'expected Function or Builtin, got {f}'
 
     # save the args of the call as metadata for the function AST
     call_args, call_kwargs = collect_calling_args(call.args, scope)
     scope.meta[f].call_args = call_args, call_kwargs
 
     # run the function and return the result
-    if isinstance(f, PyAction):
+    if isinstance(f, Builtin):
         return evaluate_pyaction(f, scope)
     if isinstance(f, Closure):
         return evaluate_closure(f, scope)
@@ -604,9 +604,9 @@ def apply_partial_eval(f: AST, args: list[AST], scope: Scope) -> AST:
             new_signature = update_signature(signature, args, scope)
             return Closure(fn=FunctionLiteral(args=new_signature, body=body), scope=closure_scope)
 
-        case PyAction(signature=signature, preprocessor=preprocessor, action=action, return_type=return_type):
+        case Builtin(signature=signature, preprocessor=preprocessor, action=action, return_type=return_type):
             new_signature = update_signature(signature, args, scope)
-            return PyAction(signature=new_signature, preprocessor=preprocessor, action=action, return_type=return_type)
+            return Builtin(signature=new_signature, preprocessor=preprocessor, action=action, return_type=return_type)
 
         case Identifier(name):
             f = scope.get(name).value
@@ -861,7 +861,7 @@ def evaluate_closure(ast: Closure, scope: Scope):
     return evaluate(ast.fn.body, closure_scope)
 
 
-def evaluate_pyaction(ast: PyAction, scope: Scope):
+def evaluate_pyaction(ast: Builtin, scope: Scope):
     caller_scope = Scope(scope)
     call_args, call_kwargs = scope.meta[ast].call_args or ([], {})
     dewy_args, dewy_kwargs = resolve_calling_args(ast.signature, call_args, call_kwargs, caller_scope)
@@ -1113,7 +1113,7 @@ class BuiltinFuncs:
 # but top level printed strings should not show their quotes
 def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:    
     # don't evaluate. already evaluated by resolve_calling_args
-    ast = evaluate(ast, scope) if not isinstance(ast, (PyAction, Closure)) else ast
+    ast = evaluate(ast, scope) if not isinstance(ast, (Builtin, Closure)) else ast
     match ast:
         # types that require special handling (i.e. because they have children that need to be stringified)
         case String(val): return val# if top_level else f'"{val}"'
@@ -1125,7 +1125,7 @@ def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
         case Range(left, right, brackets): return f'{brackets[0]}{py_stringify_range_operands(left, scope)}..{py_stringify_range_operands(right, scope)}{brackets[1]}'
         case Closure(fn): return f'{fn}'
         case FunctionLiteral() as fn: return f'{fn}'
-        case PyAction() as fn: return f'{fn}'
+        case Builtin() as fn: return f'{fn}'
         case Object() as obj: return f'{obj}'
         # case AtHandle() as at: return py_stringify(evaluate(at, scope), scope)
 
@@ -1166,11 +1166,11 @@ def py_readl() -> String:
 def insert_pyactions(scope: Scope):
     """replace pyaction stubs with actual implementations"""
     if 'printl' in scope.vars:
-        assert isinstance((proto:=scope.vars['printl'].value), PrototypePyAction)
-        scope.vars['printl'].value = PyAction.from_prototype(proto, preprocess_py_print_args, py_printl)
+        assert isinstance((proto:=scope.vars['printl'].value), PrototypeBuiltin)
+        scope.vars['printl'].value = Builtin.from_prototype(proto, preprocess_py_print_args, py_printl)
     if 'print' in scope.vars:
-        assert isinstance((proto:=scope.vars['print'].value), PrototypePyAction)
-        scope.vars['print'].value = PyAction.from_prototype(proto, preprocess_py_print_args, py_print)
+        assert isinstance((proto:=scope.vars['print'].value), PrototypeBuiltin)
+        scope.vars['print'].value = Builtin.from_prototype(proto, preprocess_py_print_args, py_print)
     if 'readl' in scope.vars:
-        assert isinstance((proto:=scope.vars['readl'].value), PrototypePyAction)
-        scope.vars['readl'].value = PyAction.from_prototype(proto, lambda *a: ([],{}), py_readl)
+        assert isinstance((proto:=scope.vars['readl'].value), PrototypeBuiltin)
+        scope.vars['readl'].value = Builtin.from_prototype(proto, lambda *a: ([],{}), py_readl)

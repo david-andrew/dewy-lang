@@ -384,7 +384,7 @@ class PrototypeFunctionLiteral(PrototypeAST):
         return f'({self.args}) => {self.body}'
 
 
-class PrototypePyAction(PrototypeAST):
+class PrototypeBuiltin(PrototypeAST):
     args: Group
     return_type: AST
 
