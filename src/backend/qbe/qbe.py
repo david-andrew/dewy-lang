@@ -89,7 +89,7 @@ global_counter = count(0)
 
 
 # TODO: include user defined struct types...
-QbeType = Literal['w', 'l', 's', 'd', 'b', 'h']
+QbeType = Literal['w', 'l', 's', 'd', 'b', 'h'] | str
 
 @dataclass
 class QbeBlock:

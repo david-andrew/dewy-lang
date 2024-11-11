@@ -48,15 +48,19 @@ def main():
         python_repl(args.args, options)
         return
     
-    # default interpreter is python. default compiler is qbe. default with no args is python.
+
     if args.backend:
+        # use user specified backend
         backend = get_backend(args.backend)
     elif args.c:
+        # default compiler is qbe
         backend = qbe_compiler
     elif args.i:
+        # default interpreter is python
         backend = python_interpreter
     else:
-        backend = python_interpreter
+        # default with no args is currently python #qbe
+        backend = python_interpreter # qbe_compiler
 
     # run with the selected backend
     backend(Path(args.file), args.args, options)
