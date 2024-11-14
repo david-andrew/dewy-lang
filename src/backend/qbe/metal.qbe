@@ -15,103 +15,21 @@ function w $write(l %buf, l %len) {
 data $greet = { b "hello world!\n\0" }
 data $newline = { b "\n\0" }
 
-# TODO
-# type :strlong = { b 8 }
-# function l $_strlen(l %str) {
-# @start
-#         %start =l copy %str
-# @loop
-#         %word =l loadl %str
-#         %word =l sub %word, 72340172838076673   # 0x0101010101010101
-#         %word =l and %word, 9259542123273814144 # 0x8080808080808080
-#         %cmp =l ceql %word, 0
-#         jnz %cmp, @done, @next
-# @next
-#         %str =l add %str, 1
-#         jmp @loop
-# @done
-#         %len =l sub %str, %start
-#         ret %len
 
-# }
 
 # determine the length of a null-terminated string
-# little endian only?
-# consider using custom type :{ b 8 }
 function l $_strlen(l %str) {
 @start
         %start =l copy %str
 @loop
-        %word =l loadl %str
-@cmp.0
-        %byte.0 =l and %word, 255
-        %cmp =l ceql %byte.0, 0
-        jnz %cmp, @done.0, @cmp.1
-@cmp.1
-        %byte.1 =l shr %word, 8
-        %byte.1 =l and %byte.1, 255
-        %cmp =l ceql %byte.1, 0
-        jnz %cmp, @done.1, @cmp.2
-@cmp.2
-        %byte.2 =l shr %word, 16
-        %byte.2 =l and %byte.2, 255
-        %cmp =l ceql %byte.2, 0
-        jnz %cmp, @done.2, @cmp.3
-@cmp.3
-        %byte.3 =l shr %word, 24
-        %byte.3 =l and %byte.3, 255
-        %cmp =l ceql %byte.3, 0
-        jnz %cmp, @done.3, @cmp.4
-@cmp.4
-        %byte.4 =l shr %word, 32
-        %byte.4 =l and %byte.4, 255
-        %cmp =l ceql %byte.4, 0
-        jnz %cmp, @done.4, @cmp.5
-@cmp.5
-        %byte.5 =l shr %word, 40
-        %byte.5 =l and %byte.5, 255
-        %cmp =l ceql %byte.5, 0
-        jnz %cmp, @done.5, @cmp.6
-@cmp.6
-        %byte.6 =l shr %word, 48
-        %byte.6 =l and %byte.6, 255
-        %cmp =l ceql %byte.6, 0
-        jnz %cmp, @done.6, @cmp.7
-@cmp.7
-        %byte.7 =l shr %word, 56
-        %byte.7 =l and %byte.7, 255
-        %cmp =l ceql %byte.7, 0
-        jnz %cmp, @done.7, @next
+        %byte =w loadub %str
+        %cmp =w ceqw %byte, 0
+        jnz %cmp, @done, @next
 @next
         %str =l add %str, 1
         jmp @loop
-@done.0
-        %extra =l copy 0
-        jmp @done
-@done.1
-        %extra =l copy 1
-        jmp @done
-@done.2
-        %extra =l copy 2
-        jmp @done
-@done.3
-        %extra =l copy 3
-        jmp @done
-@done.4
-        %extra =l copy 4
-        jmp @done
-@done.5
-        %extra =l copy 5
-        jmp @done
-@done.6
-        %extra =l copy 6
-        jmp @done
-@done.7
-        %extra =l copy 7
-        jmp @done
 @done
         %len =l sub %str, %start
-        %len =l add %len, %extra
         ret %len
 }
 
