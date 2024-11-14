@@ -17,6 +17,23 @@ data $newline = { b "\n\0" }
 
 # TODO
 # type :strlong = { b 8 }
+# function l $_strlen(l %str) {
+# @start
+#         %start =l copy %str
+# @loop
+#         %word =l loadl %str
+#         %word =l sub %word, 72340172838076673   # 0x0101010101010101
+#         %word =l and %word, 9259542123273814144 # 0x8080808080808080
+#         %cmp =l ceql %word, 0
+#         jnz %cmp, @done, @next
+# @next
+#         %str =l add %str, 1
+#         jmp @loop
+# @done
+#         %len =l sub %str, %start
+#         ret %len
+
+# }
 
 # determine the length of a null-terminated string
 # little endian only?
