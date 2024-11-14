@@ -11,10 +11,8 @@ _start:
     # Call main(argc, argv, envp)
     call main
 
-    # Handle the return value from main (in %rax)
+    # Handle return value from main (in %rax) and invoke the exit syscall
     movq %rax, %rdi                 # rdi = return value from main (for exit syscall)
-
-    # Invoke the exit syscall
     movq $60, %rax                  # syscall number for exit (60)
     syscall
 
