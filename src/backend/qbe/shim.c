@@ -1,20 +1,30 @@
-// TODO: this isn't quite right. For now just lean on C-compiler to handle everything.
-// i.e. qbe <file>.ssa | gcc -o <file> <file>.o -lc
-
-#ifndef METAL_H
-#define METAL_H
-
-// Header Declarations
-
-/* C functions utilized by Dewy in a hosted environment */
-/* TBD what to do about bare-metal/freestanding envs, probably just don't include these */
-
+/**
+ * Until we have QBE as completely standalone,
+ * we will use C to provide portable access to
+ * a few base functions.
+ * 
+ * Usage:
+ * qbe myprog.ssa > myprog.s && gcc shim.c myprog.s -o myprog && ./myprog
+ * note that myprog.ssa should contain a $main function
+ * ```qbe
+ * export function w $main(l %argc, l %argv, l %envp) { ... }
+ * ```
+ * noting that %argc, %argv, and %envp are optional
+ * 
+ * Other notes:
+ * - to increment argv/envp to the next pointer, you must add 8
+ * -
+ * 
+ */
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-void _start(); // entry point
 
-// printing to stdout
-void __puts(uint8_t* s);
+// declarations
+uint64_t __cstrlen(uint8_t* s);
+void __putcstr(uint8_t* s);
+void __write(uint8_t* s, uint64_t len);
 void __putu64(uint64_t u);
 void __putu64x(uint64_t x);
 void __puti64(int64_t i);
@@ -23,33 +33,22 @@ void __putf64(double d);
 void __putl();
 uint64_t __getl(uint8_t** dst);
 uint64_t __getdl(uint8_t** dst, uint8_t delimiter);
+void* __malloc(uint64_t size);
+void __free(void* ptr);
+void* __realloc(void* ptr, uint64_t size);
 
 
 
-// #define METAL_IMPLEMENTATION  // Uncomment to include implementations
 
-// Implementations (if METAL_IMPLEMENTATION is defined)
-#ifdef METAL_IMPLEMENTATION
-#include <stdio.h>
-#include <stdlib.h>
-
-extern int main(int argc, char** argv);
-
-int* argc;
-char** argv;
-void _start()
+// implementations
+uint64_t __cstrlen(uint8_t* s)
 {
-    // collect argc and argv from %rsp register
-    asm volatile("movq %%rsp, %0\n" : "=r"(argc));
-    argv = (char**)((char*)argc + 8);
-
-    int res = main(*argc, argv);
-    exit(res);
+    uint64_t len = 0;
+    while (s[len] != '\0') len++;
+    return len;
 }
-
-////// writing to stdout //////
-
-void __puts(uint8_t* s) { fputs((char*)s, stdout); }
+void __putcstr(uint8_t* s) { fputs((char*)s, stdout); }
+void __write(uint8_t* s, uint64_t len) { fwrite(s, len, 1, stdout); }
 void __putu64(uint64_t u)
 {
     const uint64_t buf_size = 20;
@@ -67,9 +66,9 @@ void __putu64x(uint64_t u)
     uint8_t buf[buf_size];
     uint8_t len = 0;
     do {
-        uint8_t v = u % 16;
-        buf[buf_size - ++len] = u < 10 ? '0' + v : 'A' + v - 10;
-        u /= 16;
+        uint8_t v = u & 0xF;   
+        buf[buf_size - ++len] = v < 10 ? '0' + v : 'A' + v - 10;
+        u >>= 4;
     } while (u > 0);
     buf[buf_size - ++len] = 'x';
     buf[buf_size - ++len] = '0';
@@ -113,7 +112,6 @@ uint64_t __getdl(uint8_t** dst, uint8_t delimiter)
     return count;
 }
 
-#endif // METAL_IMPLEMENTATION
-
-
-#endif // METAL_H
+void* __malloc(uint64_t size) { return malloc(size); }
+void __free(void* ptr) { free(ptr); }
+void* __realloc(void* ptr, uint64_t size) { return realloc(ptr, size); }
