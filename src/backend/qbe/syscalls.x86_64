@@ -35,3 +35,29 @@ syscall3:
         movq %rcx, %rdx
         syscall
         ret
+
+
+# 5-arg syscall
+.globl syscall5
+syscall5:
+        movq %rdi, %rax
+        movq %rsi, %rdi
+        movq %rdx, %rsi
+        movq %rcx, %rdx
+        movq %r8, %r10
+        syscall
+        ret
+
+
+# 7-arg syscall
+.globl syscall7
+syscall7:
+        movq %rdi, %rax
+        movq %rsi, %rdi
+        movq %rdx, %rsi
+        movq %rcx, %rdx
+        movq %r8, %r10
+        movq %r9, %r8
+        movq 16(%rsp), %r9
+        syscall
+        ret
