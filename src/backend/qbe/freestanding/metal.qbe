@@ -34,7 +34,7 @@ function l $__cstrlen(l %str) {
 }
 
 
-
+# UNTESTED
 function l $__malloc(l %size) {
 @start
         # 9 is the mmap syscall
@@ -43,12 +43,14 @@ function l $__malloc(l %size) {
         %ret =w call $syscall5(w 9, w 0, l %size, w 3, w 34, w -1)
         ret %ret
 }
+# UNTESTED
 function $__free(l %ptr) {
 @start
         # 11 is the munmap syscall
         %ret =w call $syscall3(w 11, l %ptr, l 0, l 0)
         ret %ret
 }
+# UNTESTED
 function l $__realloc(l %ptr, l %size) {
 @start
         # 25 is the mremap syscall
@@ -56,6 +58,7 @@ function l $__realloc(l %ptr, l %size) {
         ret %ret
 }
 
+# UNTESTED
 # TODO: current problems
 #       - 8 bytes at a time can overflow/go out of bounds. perhaps use blit for last up to 7 bytes
 #       - backwards probably not right
