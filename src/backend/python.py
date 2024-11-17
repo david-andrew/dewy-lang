@@ -77,7 +77,7 @@ def python_repl(args: list[str], options: Options):
 
     # Set up scope to share between REPL calls
     scope = Scope.default()
-    insert_pyactions(scope)
+    insert_builtins(scope)
 
     # get the source code and tokenize
     for src in REPL(history_file='~/.dewy/repl_history'):
@@ -127,7 +127,7 @@ def print_ast(ast: AST):
 
 def top_level_evaluate(ast:AST) -> AST:
     scope = Scope.default()
-    insert_pyactions(scope)
+    insert_builtins(scope)
     return evaluate(ast, scope)
 
 
@@ -297,7 +297,7 @@ def get_eval_fn_map() -> dict[type[AST], EvalFunc]:
         IterIn: evaluate_iter_in,
         FunctionLiteral: evaluate_function_literal,
         Closure: evaluate_closure,
-        Builtin: evaluate_pyaction,
+        Builtin: evaluate_builtin,
         String: no_op,
         IString: evaluate_istring,
         Identifier: cannot_evaluate,
@@ -430,7 +430,7 @@ def evaluate_call(call: Call, scope: Scope) -> AST:
 
     # run the function and return the result
     if isinstance(f, Builtin):
-        return evaluate_pyaction(f, scope)
+        return evaluate_builtin(f, scope)
     if isinstance(f, Closure):
         return evaluate_closure(f, scope)
 
@@ -499,7 +499,7 @@ def get_arg_name(arg: AST) -> str:
 #       position or keyword arguments (with or without defaults)
 #       position only arguments (with or without defaults)
 #       keyword only arguments (with or without defaults)
-# Note: the function signature will stay the same since calling a function or pyaction just amounts to setting args and kwargs
+# Note: the function signature will stay the same since calling a function or builtin just amounts to setting args and kwargs
 # TODO: probably expand to include a container for unpack targets
 def resolve_calling_args(signature: Signature, args: list[AST], kwargs: dict[str, AST], caller_scope: Scope, closure_scope: Scope = Scope()) -> tuple[dict[str, AST], dict[str, AST]]:
     """
@@ -861,7 +861,7 @@ def evaluate_closure(ast: Closure, scope: Scope):
     return evaluate(ast.fn.body, closure_scope)
 
 
-def evaluate_pyaction(ast: Builtin, scope: Scope):
+def evaluate_builtin(ast: Builtin, scope: Scope):
     caller_scope = Scope(scope)
     call_args, call_kwargs = scope.meta[ast].call_args or ([], {})
     dewy_args, dewy_kwargs = resolve_calling_args(ast.signature, call_args, call_kwargs, caller_scope)
@@ -1163,8 +1163,8 @@ def py_print(s:str) -> Void:
 def py_readl() -> String:
     return String(BuiltinFuncs.readl())
 
-def insert_pyactions(scope: Scope):
-    """replace pyaction stubs with actual implementations"""
+def insert_builtins(scope: Scope):
+    """replace prototype builtin stubs with actual implementations"""
     if 'printl' in scope.vars:
         assert isinstance((proto:=scope.vars['printl'].value), PrototypeBuiltin)
         scope.vars['printl'].value = Builtin.from_prototype(proto, preprocess_py_print_args, py_printl)
