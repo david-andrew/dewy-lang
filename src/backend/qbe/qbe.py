@@ -73,19 +73,28 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     if options.verbose:
         print(repr(ast))
 
-    # run the program
-    ssa = top_level_compile(ast)
+    # generate the program qbe
+    qbe = top_level_compile(ast)
+    ssa = str(qbe)
+    #DEBUG
     print(ssa)
 
+    # TODO:
+    # write the ssa to a file
+    # compile the ssa with qbe
+    # construct the full executable
+    # run the executable
 
 
-def top_level_compile(ast: AST) -> str:
+
+def top_level_compile(ast: AST) -> 'QbeModule':
     scope = Scope.default()
-    return compile(ast, scope)
+    qbe = QbeModule()
+    compile(ast, scope, qbe)
+    return qbe
 
 
 
-global_counter = count(0)
 
 
 # TODO: include user defined struct types...
@@ -126,6 +135,10 @@ class QbeFunction:
 class QbeModule:
     functions: list[QbeFunction] = field(default_factory=list)
     global_data: list[str] = field(default_factory=list)
+    global_counter = count(0)
+
+    # TODO: function for getting identifiers, or next counter
+
 
     def __str__(self) -> str:
         functions = '\n\n'.join(map(str, self.functions))
@@ -137,7 +150,7 @@ from typing import Protocol, TypeVar
 T = TypeVar('T', bound=AST)
 U = TypeVar('U', bound=AST)
 class CompileFunc(Protocol):
-    def __call__(self, ast: T, scope: Scope) -> str: ...
+    def __call__(self, ast: T, scope: Scope, qbe: QbeModule): ...
 
 
 
@@ -205,32 +218,32 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
 
 
 
-def compile(ast:AST, scope:Scope) -> str:
+def compile(ast:AST, scope:Scope, qbe: QbeModule):
     compile_fn_map = get_compile_fn_map()
 
     ast_type = type(ast)
     if ast_type in compile_fn_map:
-        return compile_fn_map[ast_type](ast, scope)
+        return compile_fn_map[ast_type](ast, scope, qbe)
 
     raise NotImplementedError(f'AST type {ast_type} not implemented yet')
 
-def compile_qjux(ast: QJux, scope: Scope) -> AST:
+def compile_qjux(ast: QJux, scope: Scope, qbe: QbeModule):
     if ast.call is not None and typecheck_call(ast.call, scope):
-        return compile_call(ast.call, scope)
+        return compile_call(ast.call, scope, qbe)
     if ast.index is not None and typecheck_index(ast.index, scope):
-        return compile_index(ast.index, scope)
+        return compile_index(ast.index, scope, qbe)
     if typecheck_multiply(ast.mul, scope):
-        return compile_binary_dispatch(ast.mul, scope)
+        return compile_binary_dispatch(ast.mul, scope, qbe)
 
     raise ValueError(f'Typechecking failed to match a valid evaluation for QJux. {ast=}')
 
 
 
-def compile_string(ast: String, scope: Scope) -> str:
+def compile_string(ast: String, scope: Scope, qbe: QbeModule):
     pdb.set_trace()
     ...
 
-def compile_call(call: Call, scope: Scope) -> str:
+def compile_call(call: Call, scope: Scope, qbe: QbeModule):
     f = call.f
 
     # get the expression of the group
@@ -256,9 +269,9 @@ def compile_call(call: Call, scope: Scope) -> str:
 
     # run the function and return the result
     if isinstance(f, PrototypeBuiltin):
-        return compile_call_pyaction(f, scope)
+        return compile_call_pyaction(f, scope, qbe)
     if isinstance(f, Closure):
-        return compile_call_closure(f, scope)
+        return compile_call_closure(f, scope, qbe)
 
     pdb.set_trace()
     raise NotImplementedError(f'Function evaluation not implemented yet')
@@ -322,11 +335,11 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
 
 
 
-def compile_call_pyaction(f: PrototypeBuiltin, scope: Scope) -> str:
+def compile_call_pyaction(f: PrototypeBuiltin, scope: Scope, qbe: QbeModule):
     pdb.set_trace()
     ...
 
 
-def compile_call_closure(f: Closure, scope: Scope) -> str:
+def compile_call_closure(f: Closure, scope: Scope, qbe: QbeModule):
     pdb.set_trace()
     ...
