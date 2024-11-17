@@ -93,8 +93,10 @@ def top_level_compile(ast: AST) -> 'QbeModule':
     compile(ast, scope, qbe)
     return qbe
 
-
-
+@dataclass
+class CAST:
+    ast: AST
+    meta: SimpleNamespace
 
 
 # TODO: include user defined struct types...
@@ -150,7 +152,12 @@ from typing import Protocol, TypeVar
 T = TypeVar('T', bound=AST)
 U = TypeVar('U', bound=AST)
 class CompileFunc(Protocol):
-    def __call__(self, ast: T, scope: Scope, qbe: QbeModule): ...
+    #TODO: what is the correct return type here?
+    #      - str for the name of the expression as stored in the scope if needs to be looked up?
+    #         - could be good because we make us of scopes, and help keep things organized
+    #         - what gets stored in the scope though? and how does the scope name map to the name in the QBE module?
+    #      - CAST which includes the AST, and any qbe identifiers for it?
+    def __call__(self, ast: T, scope: Scope, qbe: QbeModule) -> CAST: ...
 
 
 

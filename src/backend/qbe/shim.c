@@ -38,6 +38,24 @@ void __free(void* ptr);
 void* __realloc(void* ptr, uint64_t size);
 
 
+// future extensions
+void* __fopen(uint8_t* path, uint8_t* mode);
+void __fclose(void* stream);
+uint64_t __fread(void* stream, uint8_t* buffer, uint64_t size);
+void __fwrite(void* stream, uint8_t* buffer, uint64_t size);
+uint64_t __fgetc(void* stream);
+void __fputc(void* stream, uint8_t c);
+uint64_t __fseek(void* stream, int64_t offset, uint8_t whence);
+uint64_t __ftell(void* stream);
+uint64_t __stat(uint8_t* path, uint64_t* size, uint64_t* mtime);
+uint8_t __unlink(uint8_t* path);
+void __memcpy(uint8_t* dest, uint8_t* src, uint64_t size);
+void __memset(uint8_t* dest, uint8_t value, uint64_t size);
+void __exit(uint64_t code);
+uint64_t __system(uint8_t* command);
+uint64_t __time(); //return microseconds?
+// struct {uint64_t s; uint64_t n} __precise_time(){} //return uint128_t of nanoseconds?
+//threading stuff/synchronization
 
 
 // implementations
