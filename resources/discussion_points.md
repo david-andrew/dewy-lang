@@ -1881,6 +1881,13 @@ in general memory safety is a given but other areas not handled by rust are impo
 - https://www.ibm.com/reports/threat-intelligence
 - jonathan blow on mitigating buffer overflow risks: https://www.youtube.com/watch?v=EJRdXxS_jqo
 
+TODO: any other logical errors that come up, note them here. Basically we need to treat this the same way airplane crash investigations are handled (Root Cause Analysis / Safety Management System). Collect basically all case studies of known security vulnerabilities, categorize them by their root cause/flavor, and then adjust OS design, and language security features to mitigate them.
+
+Logical errors that we can help with:
+- https://www.youtube.com/watch?v=CDtIS8XaJDY
+    - basically I think the OS should know what things are trusted vs untrusted, and then perhaps there are libraries that when interacting with the OS (e.g. getting environment variables) that hooks into the security model for the language, and you would get a compile time security error if you tried to do something like use environment variables in a context marked as privileged. note that the security checker would probably be compile-time running code
+    - I think in general, having a good model of trusted vs untrusted side effects (inputs), and a good security model in the language where you can mark sections as privileged. For example I think the type system will already have a good notion of what is internal vs external (e.g. for being able to determine what can be precomputed vs what touches non-deterministic/external input). So I think having hooks into that kind of internal vs external source information should be a solid part of the security structure
+
 ## closure explicit syntax for specifying what variables they capture
 
 In C++, you can have a lambda that captures specific variables from the parent scope (perhaps not exactly correct syntax, from jonathan blow talk on about his hypothetical language):
