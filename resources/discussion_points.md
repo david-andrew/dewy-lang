@@ -2358,3 +2358,12 @@ interface Dictionary {
 let dict: Dictionary = { name: "Alice", city: "Wonderland" };
 
 ```
+
+
+
+## Linear Algebra / Matrix Math Implementation
+for interpreter use numpy
+for compiled, probably use OpenBLAS: https://github.com/OpenMathLib/OpenBLAS https://www.openmathlib.org/OpenBLAS/
+
+see also:
+- https://en.wikipedia.org/wiki/Math_Kernel_Library
