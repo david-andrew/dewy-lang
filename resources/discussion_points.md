@@ -2340,7 +2340,8 @@ let fn = (x:int) => x + 5
 [a:int b:int c:int] = [1, 2, 3]
 ```
  
-TBD for others. We handle return type annotation with `:>` symbol. Typescript also has these case:
+TBD for others. We handle return type annotation with `:>` symbol. 
+Typescript also has these cases which we may consider as possible things in dewy that may get a type annotation attached:
 
 ```typescript
 //Mapped Types
