@@ -2368,3 +2368,17 @@ for compiled, probably use OpenBLAS: https://github.com/OpenMathLib/OpenBLAS htt
 
 see also:
 - https://en.wikipedia.org/wiki/Math_Kernel_Library
+
+
+
+## Literal types vs regular types vs literal literal types
+in dewy don't need to do `Literal[value]` like python does to annotate a type is a literal, just use value directly.
+the only case that this slightly conflicts with is if you want the literal of some type rather than an instance of that type, in which case you'd use literal. e.g.
+
+```
+a: 5|10|string = 5              // can be 5, 10, or any string
+a: int|string = 10              // can be any int or any string
+a: literal<int string> = int    // can be either the type int or the type string
+```
+
+Basically the rule is, if it's a type, we expect an instance of that type. otherwise we expect the literal value given. and to do literals of type values, you have to say `literal<type1 type2 etc...>`
