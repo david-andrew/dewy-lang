@@ -3828,3 +3828,70 @@ Also probably would be a good idea to warn on any strings that mix composed + de
 type('é') =? string<scalar mode=decomposed>
 type('é') =? string<scalar mode=composed>
 ```
+
+
+
+
+## Operators as functions syntax
+consider adding this feature:
+operator wrapped in parenthesis creates a function of that operator
+```dewy
+add = (+)
+sub = (-)
+mul = (*)
+div = (/)
+_idiv = (idiv)
+pow = (^)
+invert = (~)
+cycle = (`)
+cycleleft = @cycle(dir='left')
+cycleright = @cycle(dir='right')
+
+
+add(1 2 3 4 5)  % same as 1+2+3+4+5
+pow(1 2 3 4 5)  % same as 1^2^3^4^5
+
+cycle([1 2 3 ; 4 5 6] 'left') % some might require extra arguments
+cycleleft([1 2 3 ; 4 5 6])
+cycleright([1 2 3 ; 4 5 6])
+invert(true)
+```
+
+
+
+## Multidimensional array literals in a single line
+matlab let you use `;` to indicate new dimensions. julia lets you use multiple `;` in a row for higher dimensions.
+
+thus far in dewy, technically you can use `[]` to separate out dimensions, but that makes too many paired symbols. Ideally we could use `;`
+
+Idea: `;` only suppresses a value from being expressed if it is juxtaposed to that value. If you want a new dimension, just separate the semicolon from the expressions
+```dewy
+a = [1 2 ; 3 4 ;; 5 6 ; 7 8 ;;; 9 0 ; 1 1 ;; 0 0 ; 0 1]
+
+% equivalent to
+a = [
+    1 2
+    3 4
+
+    5 6
+    7 8
+
+
+    9 0
+    1 1
+
+    0 0
+    0 1
+]
+```
+And you should be able to mix and match any of layout based with semicolon based with block delimited based
+
+```
+a = [
+    1 2 ; 3 4
+    5 6 ; 7 8
+    ;
+    9 0 ; 1 1
+    0 0 ; 0 1
+]
+```
