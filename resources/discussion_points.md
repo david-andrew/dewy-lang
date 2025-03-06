@@ -1873,6 +1873,9 @@ Const:
 
 ## Security design
 
+The language should be secure by default and users have to opt in (usually with long obnoxious flags) to unsecure execution
+
+
 TODO
 in general memory safety is a given but other areas not handled by rust are important to consider:
 
@@ -1887,6 +1890,15 @@ Logical errors that we can help with:
 - https://www.youtube.com/watch?v=CDtIS8XaJDY
     - basically I think the OS should know what things are trusted vs untrusted, and then perhaps there are libraries that when interacting with the OS (e.g. getting environment variables) that hooks into the security model for the language, and you would get a compile time security error if you tried to do something like use environment variables in a context marked as privileged. note that the security checker would probably be compile-time running code
     - I think in general, having a good model of trusted vs untrusted side effects (inputs), and a good security model in the language where you can mark sections as privileged. For example I think the type system will already have a good notion of what is internal vs external (e.g. for being able to determine what can be precomputed vs what touches non-deterministic/external input). So I think having hooks into that kind of internal vs external source information should be a solid part of the security structure
+
+### High Level features targeted at security
+> as much as possible of this stuff should happen at compiletime. Being hard to figure out isn't a good excuse to not. Only things that are physically impossible to determine at compiletime (e.g. tracking resource usage of some running program) would be reasonable for non-compiletime safety overhead.
+
+- compile-time determination of if a given AST is side-effect free or not
+    - e.g. see below command-line argument stuff. Input is technically a side effect, but everything processing it would be guaranteed to be side-effect free. There do need to be mitigations for resource hogging DoS attacks
+    - TBD but this should probably be granular and able to track if things are susceptible side-channel attacks
+- tracking anything that is read from input (e.g. `read`/`readl`) and preventing it from touching anything that has side effects. Though this prevents a lot of useful stuff people want to do, so probably there should be good structured mechanisms the language provides to e.g. process input and write it back as output but in a generally safe way (e.g. by forcing the user to have a resource tracking system they specify how much resources are allowed to be used in the process and then the process fails if that threshold is violated)
+- memory safety at compiletime
 
 ## closure explicit syntax for specifying what variables they capture
 
@@ -2382,3 +2394,66 @@ a: literal<int string> = int    // can be either the type int or the type string
 ```
 
 Basically the rule is, if it's a type, we expect an instance of that type. otherwise we expect the literal value given. and to do literals of type values, you have to say `literal<type1 type2 etc...>`
+
+
+## Command-line arguments
+Dewy should have nice native handling of command line arguments. I'm thinking anything that can be representing as a string on the command line (i.e. without needing to execute code) could be passed in. I think that we can lean on the dewy syntax for how to format command line stuff:
+
+```bash
+dewy myprog.dewy arg1='apple' arg2=r\''[1 2 3 4 5]' r\''['a'->5 'b'->42]' 'treated as a regular string'
+```
+
+The program would then receive two keyword arguments: `arg1='apple'` and `arg2=[1 2 3 4 5]`, and two positional arguments `['a'->5 'b'->42]` and `'treated as a regular string'`. Perhaps the program gets access to a system object that looks something like this:
+```
+sys=[
+    pargs=[
+        ['a'->5 'b'->42]
+        'treated as a regular string'
+    ]
+    kwargs=[
+        arg1:string='apple'
+        arg2:array<int>=[1 2 3 4 5]
+    ]
+]
+```
+
+I'm thinking that in cases where the dewy syntax conflicts with terminal syntax (such as bash/et. al.) e.g. because of spacing/etc. I think perhaps we'll have some sort of escaped string perhaps like I have shown above, i.e. `r\''content to be converted to a dewy object'`. What this does is provide the following string argument into dewy `"r'content to be converted to a dewy object"` (note the missing ending single quote). So the first `r\'` tells us that what follows needs extra processing, and then the following `'<content>'` uses quotes to prevent bash from separating it into multiple arguments.
+
+Conceivably we could require a trailing `\'` so that dewy receives a proper thing as an argument (e.g. `"r'content to be converted to a dewy object'"`) but 1. I think it's cumbersome, and 2. I think it's not necessary anyways since already doing different processing to how dewy would handle such an object like 
+```dewy
+r'some content'
+```
+in an actual dewy program. We just need a signal to treat it as an object rather than a string.
+
+### Security discussion
+I was considering allowing the command line arguments system to be even more flexible, e.g. the ability to run arbitrary code for generating arguments:
+
+```bash
+dewy myprog.dewy r\''import something from somelib' arg1=r\''something.SomeContainer(1 2 3 4)'
+```
+
+as I could imagine it being useful to be able to construct completely arbitrary arguments from the command line. However I beleive this has too large of a security implication to be allowed (at least as a default). In general assume people are going to pass untrusted input in anywhere that is possible:
+- command-line args
+- `read`/`readl`
+- etc.
+
+I think all of these should take a secure by default posture, and users have to explicitely turn off the security if they are in a known secure environment and don't have to worry about untrusted input.
+
+So for command line arguments, I think if you want to enable this completely arbitrary code execution behavior, I think you'd have to pass a very obvious command-line argument, something like
+
+```bash
+dewy --allow-evaluation-of-command-line-args-with-side-effects-because-this-environment-is-trusted myprog.dewy r\''import something from somelib' arg1=r\''something.SomeContainer(1 2 3 4)'
+```
+
+and if people don't like such a long argument, they can make an alias
+
+```
+dewy-trusted myprog.dewy r\''import something from somelib' arg1=r\''something.SomeContainer(1 2 3 4)'
+```
+
+By default command-line argument evaluation should be extremely limited, ~~I think perhaps just disallowing function calling alltogether~~. Discussing with an LLM suggest that the system for parsing arguments could be maximally flexible while also completely secure against untrusted inputs under the following circumstances:
+- The parsing process is wholly derived from side-effect-free programming capabilities
+    - i.e. any feature in the language is available so long as the compiler says it is side effect free. I think (assuming we have good resource DoS monitoring/mitigation) we perhaps don't have to limit it to the functional-only subset of dewy, just the side-effect-free subset of dewy (e.g. so we could use loops, define functions, etc.). Technically functional-only+side-effect-free is a stronger guarantee.
+- steps are taken to mitigate resource-based DoS (e.g. if the user constructs a very large input or an input that recurses forever, etc.)
+- The underlying implementation is bug/vulnerability free
+- potentially out of scope for command-line arguments (but perhaps not) is a process for dealing with any sort of side-channel attacks.
