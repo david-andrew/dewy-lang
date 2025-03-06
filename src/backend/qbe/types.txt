@@ -1,0 +1,21 @@
+# since annotating structured types in QBE is not first-class, everything will just be opaque
+# and we will provide descriptions of each type here
+# ALSO consider adding qbe preprocessing step that does simple text replacement preprocessing for constants
+"""
+string:
+    ptr: Data* // points to chrs[0] or points to len
+    where Data = [len: uint64_t, chrs: uint32_t...]
+    // strings could be stack allocated (e.g. simple 256-len strings) or heap allocated with arbitrary size
+
+
+small_string?:
+    ptr: Data*
+    where Data = [len: uint8_t, chrs: uint8_t..., 0: uint8_t] // stack allocated, len <= 254 (or const string in QBE source)
+
+
+dict
+
+set
+
+
+"""

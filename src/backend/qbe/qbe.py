@@ -89,14 +89,15 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
 
 def top_level_compile(ast: AST) -> 'QbeModule':
     scope = Scope.default()
+    insert_builtins(scope)
     qbe = QbeModule()
     compile(ast, scope, qbe)
     return qbe
 
-@dataclass
-class CAST:
-    ast: AST
-    meta: SimpleNamespace
+# @dataclass
+# class CAST:
+#     ast: AST
+#     id: str | None = None
 
 
 # TODO: include user defined struct types...
@@ -137,7 +138,8 @@ class QbeFunction:
 class QbeModule:
     functions: list[QbeFunction] = field(default_factory=list)
     global_data: list[str] = field(default_factory=list)
-    global_counter = count(0)
+    _counter = count(0)
+    _symbols: dict[str, Type] = field(default_factory=dict)
 
     # TODO: function for getting identifiers, or next counter
 
@@ -152,12 +154,12 @@ from typing import Protocol, TypeVar
 T = TypeVar('T', bound=AST)
 U = TypeVar('U', bound=AST)
 class CompileFunc(Protocol):
-    #TODO: what is the correct return type here?
-    #      - str for the name of the expression as stored in the scope if needs to be looked up?
-    #         - could be good because we make us of scopes, and help keep things organized
-    #         - what gets stored in the scope though? and how does the scope name map to the name in the QBE module?
-    #      - CAST which includes the AST, and any qbe identifiers for it?
-    def __call__(self, ast: T, scope: Scope, qbe: QbeModule) -> CAST: ...
+    def __call__(self, ast: T, scope: Scope, qbe: QbeModule) -> str | None:
+        """
+        Converts the AST to corresponding QBE code. 
+        If anything is expressed, the %temporary name of the expression is returned
+        the type of the %temporary is store in module._symbols[%temporary]
+        """
 
 
 
@@ -225,7 +227,7 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
 
 
 
-def compile(ast:AST, scope:Scope, qbe: QbeModule):
+def compile(ast:AST, scope:Scope, qbe: QbeModule) -> str:
     compile_fn_map = get_compile_fn_map()
 
     ast_type = type(ast)
@@ -234,7 +236,7 @@ def compile(ast:AST, scope:Scope, qbe: QbeModule):
 
     raise NotImplementedError(f'AST type {ast_type} not implemented yet')
 
-def compile_qjux(ast: QJux, scope: Scope, qbe: QbeModule):
+def compile_qjux(ast: QJux, scope: Scope, qbe: QbeModule) -> str:
     if ast.call is not None and typecheck_call(ast.call, scope):
         return compile_call(ast.call, scope, qbe)
     if ast.index is not None and typecheck_index(ast.index, scope):
@@ -246,11 +248,11 @@ def compile_qjux(ast: QJux, scope: Scope, qbe: QbeModule):
 
 
 
-def compile_string(ast: String, scope: Scope, qbe: QbeModule):
+def compile_string(ast: String, scope: Scope, qbe: QbeModule) -> str:
     pdb.set_trace()
     ...
 
-def compile_call(call: Call, scope: Scope, qbe: QbeModule):
+def compile_call(call: Call, scope: Scope, qbe: QbeModule) -> str:
     f = call.f
 
     # get the expression of the group
@@ -342,11 +344,163 @@ def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dic
 
 
 
-def compile_call_pyaction(f: PrototypeBuiltin, scope: Scope, qbe: QbeModule):
+def compile_call_pyaction(f: PrototypeBuiltin, scope: Scope, qbe: QbeModule) -> str:
     pdb.set_trace()
     ...
 
 
-def compile_call_closure(f: Closure, scope: Scope, qbe: QbeModule):
+def compile_call_closure(f: Closure, scope: Scope, qbe: QbeModule) -> str:
     pdb.set_trace()
     ...
+
+
+
+
+
+#TODO: consider adding a flag repr vs str, where initially str is used, but children get repr. 
+# as is, stringifying should put quotes around strings that are children of other objects 
+# but top level printed strings should not show their quotes
+def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:    
+    # don't evaluate. already evaluated by resolve_calling_args
+    ast = evaluate(ast, scope) if not isinstance(ast, (Builtin, Closure)) else ast
+    match ast:
+        # types that require special handling (i.e. because they have children that need to be stringified)
+        case String(val): return val# if top_level else f'"{val}"'
+        case Array(items): return f"[{' '.join(py_stringify(i, scope) for i in items)}]"
+        case Dict(items): return f"[{' '.join(py_stringify(kv, scope) for kv in items)}]"
+        case PointsTo(left, right): return f'{py_stringify(left, scope)}->{py_stringify(right, scope)}'
+        case BidirDict(items): return f"[{' '.join(py_stringify(kv, scope) for kv in items)}]"
+        case BidirPointsTo(left, right): return f'{py_stringify(left, scope)}<->{py_stringify(right, scope)}'
+        case Range(left, right, brackets): return f'{brackets[0]}{py_stringify_range_operands(left, scope)}..{py_stringify_range_operands(right, scope)}{brackets[1]}'
+        case Closure(fn): return f'{fn}'
+        case FunctionLiteral() as fn: return f'{fn}'
+        case Builtin() as fn: return f'{fn}'
+        case Object() as obj: return f'{obj}'
+        # case AtHandle() as at: return py_stringify(evaluate(at, scope), scope)
+
+        # can use the built-in __str__ method for these types
+        case Int() | Float() | Bool() | Undefined(): return str(ast)
+
+        # TBD what other types need to be handled
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'stringify not implemented for {type(ast)}')
+    pdb.set_trace()
+
+
+    raise NotImplementedError('stringify not implemented yet')
+
+# def py_stringify_range_operands(ast: AST, scope: Scope) -> str:
+#     """helper function to stringify range operands which may be a single value or a tuple (represented as an array)"""
+#     if isinstance(ast, Array):
+#         return f"{','.join(py_stringify(i, scope) for i in ast.items)}"
+#     return py_stringify(ast, scope)
+
+# def preprocess_py_print_args(args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]:
+#     py_args = [py_stringify(i, scope, top_level=True) for i in args]
+#     py_kwargs = {k: py_stringify(v, scope) for k, v in kwargs.items()}
+#     return py_args, py_kwargs
+
+
+# TODO
+class BuiltinArgsPreprocessor(Protocol):
+    def __call__(self, args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]:
+        ...
+
+class Builtin(CallableBase):
+    signature: Signature
+    preprocessor: BuiltinArgsPreprocessor
+    action: QbeFunction
+    return_type: AST
+
+    def __str__(self):
+        return f'{self.signature}: {self.return_type} => {self.action}'
+
+    def from_prototype(proto: PrototypeBuiltin, preprocessor: BuiltinArgsPreprocessor, action: QbeFunction) -> 'Builtin':
+        return Builtin(
+            signature=normalize_function_args(proto.args),
+            preprocessor=preprocessor,
+            action=action,
+            return_type=proto.return_type,
+        )
+
+
+"""
+# type :String = {l, w...} #long term want to just have unicode code points rather than utf-8 bytes
+type :String = {l, b...}
+
+"""
+
+# TODO:
+def preprocess_py_print_args(args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]: ...
+
+builtin_map: dict[str, tuple[BuiltinArgsPreprocessor, QbeFunction]] = {
+    'printl': (preprocess_py_print_args, 
+        QbeFunction(
+            name='$printl',
+            export=False,
+            args=[QbeArg(r'%s', ':String')],
+            ret=None,
+            blocks=[
+                QbeBlock(
+                    label='@start',
+                    lines=[
+                        'call $print(l %s)',
+                        'call $__putl()'
+                    ]
+                )
+            ]
+        )
+    ),
+    'print': (preprocess_py_print_args,
+        QbeFunction(
+            name='$print',
+            export=False,
+            args=[QbeArg(r'%s', ':String')],
+            ret=None,
+            blocks=[
+                QbeBlock(
+                    label='@start',
+                    lines=[
+                        '%len =l loadl %s',
+                        '%data =l add %s 8',
+                        'call $__write(l %val, l %len)',
+                    ]
+                )
+            ]
+        )
+    ),
+    'readl': (lambda *a: ([],{}),
+        QbeFunction(
+            name='$readl',
+            export=False,
+            args=[QbeArg('%s_ptr', 'l')],
+            ret='l',
+            blocks=[
+                QbeBlock(
+                    label='@start',
+                    lines=[
+                        # '%data_ptr =l add %s_ptr 8',
+                        # '%len =w call $getl(l %data_ptr)',
+                    ]
+                )
+            ]
+        )
+    ),
+}
+
+def insert_builtins(scope: Scope):
+    """replace prototype builtin stubs with actual implementations"""
+    for name, (preprocessor, action) in builtin_map.items():
+        if name in scope.vars:
+            assert isinstance((proto:=scope.vars[name].value), PrototypeBuiltin)
+            scope.vars[name].value = Builtin.from_prototype(proto, preprocessor, action)
+    # if 'printl' in scope.vars:
+    #     assert isinstance((proto:=scope.vars['printl'].value), PrototypeBuiltin)
+    #     scope.vars['printl'].value = Builtin.from_prototype(proto, preprocess_py_print_args, py_printl)
+    # if 'print' in scope.vars:
+    #     assert isinstance((proto:=scope.vars['print'].value), PrototypeBuiltin)
+    #     scope.vars['print'].value = Builtin.from_prototype(proto, preprocess_py_print_args, py_print)
+    # if 'readl' in scope.vars:
+    #     assert isinstance((proto:=scope.vars['readl'].value), PrototypeBuiltin)
+    #     scope.vars['readl'].value = Builtin.from_prototype(proto, lambda *a: ([],{}), py_readl)
