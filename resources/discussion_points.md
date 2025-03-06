@@ -2457,3 +2457,13 @@ By default command-line argument evaluation should be extremely limited, ~~I thi
 - steps are taken to mitigate resource-based DoS (e.g. if the user constructs a very large input or an input that recurses forever, etc.)
 - The underlying implementation is bug/vulnerability free
 - potentially out of scope for command-line arguments (but perhaps not) is a process for dealing with any sort of side-channel attacks.
+
+
+
+## Solid library support for dealing with languages
+see this article hinting at problems people deal with when making apps support multiple languages: https://www.lexiconista.com/falsehoods-about-languages/
+
+Basically I think in the standard library, there should be a ton of functionality around dealing with multi-language support. want it to capture:
+- best practices
+- easily converting from one to another
+- character sets. I think this will be a big one, e.g. having specific type-safe types/features for language facets, that way you wouldn't shoot yourself in the foot by doing a naive conversion
