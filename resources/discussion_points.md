@@ -2467,3 +2467,215 @@ Basically I think in the standard library, there should be a ton of functionalit
 - best practices
 - easily converting from one to another
 - character sets. I think this will be a big one, e.g. having specific type-safe types/features for language facets, that way you wouldn't shoot yourself in the foot by doing a naive conversion
+
+
+
+## Dunder methods
+This should be the full list of dunder methods you can assign on objects and how they behave
+[basic operators]
+- __add__ = (lhs: tbd rhs: tbd) => 
+    - probably just by setting the types you can get radd (e.g. putting the object's type on the right)
+- __sub__               // a - b
+- __mul__               // a * b   or a(b)  or (a)b  (assuming correct types)
+- __div__               // a / b
+- __idiv__              // a ÷ b
+- __pow__               // a ^ b
+- __gt__                // a >? b
+- __ge__                // a >=? b
+- __lt__                // a <? b
+- __le__                // a <=? b
+- __eq__                // a =? b
+- __3way_compare__      // a <=> b    // could also be __spaceship__
+- __is__                // a is? b
+- __isnt__              // a isnt? b
+- __question__          // a?         // what does this do again? cast to a bool?
+- __at__                // @a
+- __is_at__             // a @? b
+- __neq__               // a not=? b
+- __lshift__            // a >> b
+- __rshift__            // a << b
+- __lrotate__           // a >>> b
+- __rrotate__           // a <<< b
+- __lrotate_carry__     // a !>> b
+- __rrotate_carry__     // a <<! b
+- __and__               // a and b  // also  a & b  style used for type annotations
+- __or__                // a or b   // also  a | b  style used for type annotations
+- __xor__               // a xor b
+- __nand__              // a nand b
+- __nor__               // a nor b
+- __xnor__              // a xnor b
+- __not__               // not a
+- __as__                // a as b
+- __transmute__         // a transmute b
+- __member_in__         // a in? b
+- __iter_in__           // a in b   //e.g. loop a in b
+- __call__              // a(arg1 arg2 ...)  //todo. what if we just express the object, does that call it the same way zero arg functions are called? no shouldn't be
+- __dot__               // a.b    // tricky because `__dot__ = (lhs: tbd rhs: identifier):>tbd => ...` dealing with the identifier type is weird. I don't think dynamic lookup of members will be allowed so we have to statically ensure that rhs is always an identifier that is present in the object... probably not too different from how it will be done already with regular dot access
+- __range_left__        // a..    // these two are weird
+- __range_right__       // ..a
+- __index__             // a[b]
+- __pipe__              // a |> b
+- __rpipe__             // a <| b
+- __piped_dot__         // a |.| b
+- __collect_into__      // ...a
+- __spread_from__       // a...
+- __annotate__          // a:b
+- __fn_annotate__       // a:>b
+- __fn_ize__            // a=>b
+- __coalesce__          // a ?? b
+- __lcycle__            // `a
+- __rcycle__            // a`
+- __larrow__            // a -> b
+// - __rarrow__            // a <- b
+- __biarrow__           // a <-> b
+- __comma__             // a, b   // often will want to implement 2 `__comma__ = <T U>(l:T r:U) => l, r` and `__comma__ |= <T U>(l:T[] r:U) => [l... r]`
+- __else__              // a else b
+- __suppress__          // a;
+
+// TBD on these, e.g. could make each __op_assign__ be generic over all ops. or spread them out. same idea with vectorize..
+- __vectorize__         // a .op b    // `default = <T U V>(lhs:T op:(T U):>V rhs:U):>V[] => [loop i in lhs op(i rhs)]`
+- __add_assign__        // a += b
+- __sub_assign__        // a -= b
+// or just have a single __op_assign__
+- __op_assign__         // a op= b    // `default = <T U V>(lhs:T op:(T U):>V rhs):>V => op(lhs rhs)`  // use magic to assign the result back to the value that lhs comes from. note the side effect in the docs!
+
+
+// Methods on object behavior
+- __str__
+- __del__
+- tbd...
+
+// other magic variables/etc.
+- __file__
+- tbd...
+
+
+## Piped member access operator
+pipelines are quite flexible at the moment
+```
+a |> fn1 |> fn2, b, c, d |> fn3 
+```
+
+though I realized a case that makes it even more flexible. Basically if we could in a pipeline reach into and access members of an object (created by the previous pipeline to the left), it opens up a lot of convenient cases. Take this example
+
+```python
+here = Path(__file__).parent
+example = (here  / '../gdc/examples_(reference_solution).md').read_text()
+```
+
+even if python had a function pipe operator, we still have the issue that there's no way to just grab some internal method. pipe passes the left as an arg into the function, whereas we want to pull out the function from the left and execute it. I think maybe a new operator is in order for this (need to be careful not to class with the vectorizer dot). It might look something like this:
+
+```dewy
+here = __file__.parent  // __file__ would be a path object by default
+example = here / p'../gdc/examples_(reference_solution).md' [.] read_text'
+```
+
+Basically this lets us treat the regular `.` member access in the context of a pipeline. The problem with the regular `.` is that the precedence is too high to use it in a pipeline on the left expression:
+
+```dewy
+example = (here / p'../gdc/examples_(reference_solution).md').read_text
+```
+
+we have to do the thing in the python example where we wrap in parenthesis
+
+possible operators:
+- `|.>`
+- `|.|`    // I actually think I quite like this one. but feels like a bit of conflict with math things I might do later like norms, etc.
+- `[.]`    // this one is good, but perhaps difficult to parse? Also a bit of a fine line between indexing and this? or perhaps we just parse 
+- `|->`    // llm recommended, only vaguely a fan
+- `/.\`
+
+some other examples
+
+```dewy
+result = data |> transform |> filter [.] relevant_field
+```
+
+
+### Precedence issue [during parsing, split on any adjacent `@` and `jux-call` first when we encounter a `|.|` to split on. will need to test to verify intuitive behavior, e.g. what about expressions to the right?]
+Unfortunately just having a low precedence `.` operator won't work because if we want to include extra arguments in the call of some method we access, the call binds too tightly to the method name
+
+```dewy
+example = here / p'../gdc/examples.md' |.| read_text(encoding='utf-32')
+```
+
+As is this won't work because the juxtapose-call operator binds too tightly to the `read_text` function, so this parses like `read_text` comes from the surrounding context rather than is a member that was accessed off of the path object created by the expression to the left. i.e.
+
+```dewy
+// naive parsing. would cause a syntax error
+example = (here / p'../gdc/examples.md') |.| (read_text(encoding='utf-32'))
+
+// want to parse like this
+example = (here / p'../gdc/examples.md' |.| @read_text)(encoding='utf-32')
+```
+
+
+Perhaps a naive way we could handle this without needing extra fancy parsing is with `@` and `<|`
+```dewy
+example = here / p'../gdc/examples.md' |.| @read_text <| (encoding='utf-32')
+```
+
+though actually the fundamental problem still remains because we have to treat `@` the same way so as to not think it is binding to some external variable
+
+
+So fundamentally we need a special way to handle the precedence of the following:
+```
+expr |.| member
+expr |.| member(args)
+expr |.| @member
+expr |.| @member(args)
+```
+
+I think when we're parsing, what would happen is when we encounter `|.|`, since it's low precedence, we'll hit it first, and then we can look for adjacent `@` and `jux-call` operators, and we can split on them first (i.e. treat them as lower precedence even though they are high precedence)
+
+Or we could have a more formal system for ternary and quaternary operators and dealing with the precedence associated with them.
+
+LLM suggested also we could use a pratt parser to handle this, where the `|.|` would have low left precedence (to match up with the pipeline operator precedence) but high right precedence to bind tightly to the member name on the right. probably not relevant since I don't think we'll be rewriting the parser to be a pratt parser
+
+
+Just another more complicated example
+```dewy
+example = here / p'../gdc/examples.md' 
+    |.| read_text(encoding='utf-32')
+    |> parse_examples
+    |> filter_examples
+    |> etc
+    |.| some_member
+    <| ['some_key']
+    <| [42]
+```
+
+
+### Piped indexing [just use the `<|` operator since indexing is just juxtapose with an array on the right]
+The piped member access implies there might also be use for a piped indexing operator. TBD what format it might take since regular indexing uses square brackets already and we want to be intuitive
+
+```dewy
+my_dict['some_key']
+my_arr[12]
+```
+
+in a pipeline expression, I feel like we need some way to take the array on the right and low precedence attach it to the left. perhaps this is exactly what the `<|` operator is for?
+
+```dewy
+expression |> that |> generates |> an |> array <| [12]
+expression |> that |> generates |> a |> dict <| ['some_key']
+```
+
+
+
+
+TODO: think about precedence of |.| operator since sometimes we want to also add arguments to the method. so it sort of needs to work like the high precedence dot operator so that the arguments don't bind first... perhaps just using the <| operator in these cases is the way to go? idk
+
+
+
+
+## Integer Division Operator
+There should be separate operators for division and integer division. The issue is that `//` is used for comments, so we can't follow python for the idiv operator. Here are some candidates
+- `\`   // probably easy to confuse with `/`, especially when reading code
+- `\\`  // clear when reading but when coding, probably the person might forget that it's supposed to be backwards. however the instant feedback of syntax highlighting a comment when they do `//` should actually make this one not too burdensome
+- `%%`  // possible. slight conceptual crossover with modulus, but it's not the worst, and since modulus is about remainder, it is sort of aligned with integer division
+- `÷`   // good symbolically, but hard to type. perhaps this + another operator
+- `/%`  // this could be pretty good since it's division but also calling out the modulus. the only problem is that i was thinking `divmod` i.e. `res, rem = A /% B` might be a thing. but internally if we automatically track any time both the integer part and remainder are used, divmod could just be an under the hood performance optimization
+- `%/`  // same idea as above. less good though for remembering the order of symbols I think?
+- `%/%` // integer division in R. pretty ok in my book. a bit long, but probably won't be used too often to matter. And it is very obvious when looking at it
+- `./.` // reminiscent of `÷` but conflicts with vectorizing
