@@ -2679,3 +2679,16 @@ There should be separate operators for division and integer division. The issue 
 - `%/`  // same idea as above. less good though for remembering the order of symbols I think?
 - `%/%` // integer division in R. pretty ok in my book. a bit long, but probably won't be used too often to matter. And it is very obvious when looking at it
 - `./.` // reminiscent of `÷` but conflicts with vectorizing
+
+
+
+
+## Bidirectional compilation
+Basically I agree with the thesis of this video: https://www.youtube.com/watch?v=82JpGhctWpU
+
+so the question is, can we write dewy with strong support for forwards+backwards compilation where the two are kept in sync
+e.g. we have a compiler + decompiler available. we compile a .dewy file which creates corresponding .qbe and lower layers. we can modify the .dewy and recompile and get new .qbe/lower but we can also modify the .qbe and recompile and get both the lower layers and the corresponding .dewy back
+
+At a high level I think this is hard because compiling from source to lower level isn't necessarily 1-to-1. e.g. any "optimization" done on the lower levels in principle should have zero affect on the original, so the unoptimized and optimized version of the lower level are both equally valid and thus there (perhaps?) isn't a clean way to represent the differences between the optimized and unoptimized versions back in the high level code...
+
+my first thought is if there was some sort of meta layer that sat on top of the high level code that you could toggle on and off, in that layer, you could enumerate out all the various optimizations/etc. being performed, and then the meta layer + the high level source would represent a 1-to-1 map down to the lower level. This feels vaguely like my ideas around being able to set various flags or settings in the code (e.g. things like units system, display numerical precision, showing/hiding warnings, etc.). This would just be a very systematized version targeted at all the ways optimizations (and other typically non-injective transformations from higher to lower level, if any). It almost feels like a sort of language mark-up. e.g. you'd have your high level source file, and then could toggle a view marking up all the facets of the source file that dictate exactly how it gets transformed into the corresponding low level source.
