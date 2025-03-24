@@ -60,6 +60,8 @@ def main():
         ['as', '-o', f'{program}.o', f'{program}.s'],
         ['as', '-o', f'{os_name}-syscalls-{arch_name}.o', f'{os_name}-syscalls-{arch_name}.s'],
         ['ld', '-o', program, f'{program}.o', f'{os_name}-syscalls-{arch_name}.o'],
+        # clean up temporary files
+        ['rm', f'{program}.s', f'{program}.o', f'{os_name}-syscalls-{arch_name}.o'],
         [f'./{program}'] + remaining_args
     ]
 
