@@ -1,0 +1,28 @@
+data $greet = { b "hello world!\n\0" }
+data $newline = { b "\n\0" }
+
+
+# Example program
+# print'hello world!\n'
+# print(argv[1])
+# print'\n'
+
+
+# TODO: make this more like the C _start function that calls main with argc and argv
+export function w $main(l %argc, l %argv, l %envp) {
+@start
+        %len =l call $__cstrlen(l $greet)
+        call $__write(l $greet, l %len)
+
+        # print argv0
+        # %.0 =l loadl %argv
+        %argv.1 =l add %argv, 8
+        %.0 =l loadl %argv.1
+        %len =l call $__cstrlen(l %.0)
+        call $__write(l %.0, l %len)
+
+        # print newline
+        %len =l call $__write(l $newline, l 1)
+
+        ret 0
+}

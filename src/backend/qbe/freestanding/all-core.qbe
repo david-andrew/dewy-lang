@@ -1,0 +1,42 @@
+# common core QBE functions that work across all OS's
+# e.g. perhaps this could be how basic data structures are templated or something
+
+
+# determine the length of a null-terminated string
+function l $__cstrlen(l %str) {
+@start
+        %start =l copy %str
+@loop
+        %byte =w loadub %str
+        %cmp =w ceqw %byte, 0
+        jnz %cmp, @done, @next
+@next
+        %str =l add %str, 1
+        jmp @loop
+@done
+        %len =l sub %str, %start
+        ret %len
+}
+
+
+function $__putcstr(l %str) {
+# print a null-terminated string to stdout
+@start
+        %len =l call $__cstrlen(l %str)
+        call $__write(l %str, l %len)
+        ret
+}
+function $__putstr(l %str, l %len) {
+# print a non-null-terminated string to stdout
+@start
+        call $__write(l %str, l %len)
+        ret
+}
+# function $__putu64(l %n) {}
+# function $__putu64x(l %n) {}
+# function $__puti64(l %n) {}
+# function $__putf32(s %n) {}
+# function $__putf64(d %n) {}
+# function $__putl() {}
+# function l $__getl(l %dst) {} #uint8_t** dst
+# function l $__getdl(l %dst, w %delimiter) {} #uint8_t** dst, uint8_t delimiter

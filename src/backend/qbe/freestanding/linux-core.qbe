@@ -1,0 +1,73 @@
+function $__exit(w %code) {
+@start
+        # 60 is the exit syscall
+        call $syscall1(w 60, w %code)
+        ret
+}
+
+function w $__write(l %buf, l %len) {
+@start
+        # 1 is the write syscall
+        %ret =w call $syscall3(w 1, w 1, l %buf, l %len)
+        ret %ret
+}
+
+
+# # UNTESTED
+# function l $__malloc(l %size) {
+# @start
+#         # 9 is the mmap syscall
+#         # MAP_ANONYMOUS | MAP_PRIVATE = 0x22
+#         # PROT_READ | PROT_WRITE = 0x3
+#         %ret =w call $syscall5(w 9, w 0, l %size, w 3, w 34, w -1)
+#         ret %ret
+# }
+# # UNTESTED
+# function $__free(l %ptr) {
+# @start
+#         # 11 is the munmap syscall
+#         %ret =w call $syscall3(w 11, l %ptr, l 0, l 0)
+#         ret %ret
+# }
+# # UNTESTED
+# function l $__realloc(l %ptr, l %size) {
+# @start
+#         # 25 is the mremap syscall
+#         %ret =w call $syscall7(w 25, l %ptr, l 0, l %size, w 1, w 34, l -1, l 0)
+#         ret %ret
+# }
+
+# # UNTESTED
+# # TODO: current problems
+# #       - 8 bytes at a time can overflow/go out of bounds. perhaps use blit for last up to 7 bytes
+# #       - backwards probably not right
+# #       - dst_end not used
+# function $__memmove(l %dst, l %src, l %len) {
+# @start
+#         %src_end =l add %src, %len
+#         %dst_end =l add %dst, %len
+#         %dir =l cultl %dst, %src
+#         jnz %dir, @forward, @backward
+# @forward
+# @forward_loop
+#         # copy 8 bytes at a time
+#         %src_word =l loadl %src
+#         storel %src_word, %dst
+#         %src =l add %src, 8
+#         %dst =l add %dst, 8
+#         %cmp =l cultl %src, %src_end
+#         jnz %cmp, @forward_loop, @done
+# @backward
+# @backward_loop
+#         %src =l sub %src, 8
+#         %dst =l sub %dst, 8
+#         # copy 8 bytes at a time
+#         %src_word =l loadl %src
+#         storel %src_word, %dst
+#         %cmp =l cultl %src, %src_end
+#         jnz %cmp, @backward_loop, @done
+# @done
+# }
+
+
+

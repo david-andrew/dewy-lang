@@ -61,3 +61,8 @@ syscall7:
         movq 16(%rsp), %r9
         syscall
         ret
+
+
+
+# for security, mark the stack as non-executable
+.section .note.GNU-stack,"",@progbits
