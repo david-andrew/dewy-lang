@@ -11,22 +11,21 @@ Given
 
 emit the following commands:
 # compile QBE files to assembly
-- qbe {program}.qbe > {program}.s
-- qbe all-core.qbe > all-core.s
-- qbe {OS}-core.qbe > {OS}-core.s
+- qbe {program}.qbe all-core.qbe {OS}-core.qbe > {program}.s
 
 # assemble object files
 - as -o {program}.o {program}.s
-- as -o all-core.o all-core.s
-- as -o {OS}-core.o {OS}-core.s
 - as -o {OS}-syscalls-{arch}.o {OS}-syscalls-{arch}.s
 
 # link all object files together into program
-ld -o {program} {program}.o all-core.o {OS}-core.o {OS}-syscalls-{arch}.o
+ld -o {program} {program}.o {OS}-syscalls-{arch}.o
 
 # run the program
 ./{program}
 """
+
+# e.g.
+# qbe myprog.qbe > myprog.s && qbe all-core.qbe > all-core.s && qbe linux-core.qbe > linux-core.s && as -o myprog.o myprog.s && as -o all-core.o all-core.s && as -o linux-core.o linux-core.s && as -o linux-syscalls-x86_64.o linux-syscalls-x86_64.s && ld -o myprog myprog.o all-core.o linux-core.o linux-syscalls-x86_64.o && ./myprog
 
 import subprocess
 from argparse import ArgumentParser
@@ -34,11 +33,12 @@ import platform
 from pathlib import Path
 
 def main():
-    # args: program name, [-os <os_name>] [-arch <arch_name>]
+    # args: [-os <os_name>] [-arch <arch_name>] program_name [optional command line args for the program]
     parser = ArgumentParser(description='Demo to assemble and link QBE programs.')
     parser.add_argument('program', type=str, help='Name of the program to assemble and link.')
     parser.add_argument('-os', type=str, help='Operating system name for cross compilation. If not provided, defaults to current host OS', choices=['linux', 'apple', 'windows'])
     parser.add_argument('-arch', type=str, help='Architecture name for cross compilation. If not provided, defaults to current host arch', choices=['x86_64', 'arm64', 'riscv64'])
+    parser.add_argument('remaining_args', nargs='*', help='Any command line arguments for the program.')
 
     args = parser.parse_args()
     program_path = Path(args.program)
@@ -46,6 +46,7 @@ def main():
     extension = program_path.suffix
     os_name: str = args.os if args.os else platform.system().lower()
     arch_name: str = args.arch if args.arch else platform.machine().lower()
+    remaining_args = args.remaining_args
 
     # verify that host arch is 64-bit since qbe doesn't support 32-bit
     if platform.architecture()[0] != '64bit':
@@ -55,15 +56,11 @@ def main():
     qbe_target = get_qbe_target(arch_name, os_name)
 
     commands = [
-        ['qbe', f'{program}{extension}', '>', f'{program}.s'],
-        ['qbe', 'all-core.qbe', '>', 'all-core.s'],
-        ['qbe', f'{os_name}-core.qbe', '>', f'{os_name}-core.s'],
+        ['qbe', f'{program}{extension}', 'all-core.qbe', f'{os_name}-core.qbe', '>', f'{program}.s'],
         ['as', '-o', f'{program}.o', f'{program}.s'],
-        ['as', '-o', 'all-core.o', 'all-core.s'],
-        ['as', '-o', f'{os_name}-core.o', f'{os_name}-core.s'],
         ['as', '-o', f'{os_name}-syscalls-{arch_name}.o', f'{os_name}-syscalls-{arch_name}.s'],
-        ['ld', '-o', program, f'{program}.o', 'all-core.o', f'{os_name}-core.o', f'{os_name}-syscalls-{arch_name}.o'],
-        ['./', program]
+        ['ld', '-o', program, f'{program}.o', f'{os_name}-syscalls-{arch_name}.o'],
+        [f'./{program}'] + remaining_args
     ]
 
     for command in commands:
