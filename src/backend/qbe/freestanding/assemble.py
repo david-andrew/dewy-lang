@@ -4,8 +4,8 @@
 
 """
 Tasks
-- grab the system regardless of if target provided
-- if target provided, check against system to determine if can run at the end or not
+- when compiling for different arch, need different assembler/linker commands
+- when compiling for different OS, need different core files
 
 - allow running against .qbe programs anywhere (but the supporting files stay here)
 """
@@ -66,37 +66,47 @@ def main():
 
     args = parser.parse_args()
     verbose: bool = args.verbose
-    program_path = Path(args.program)
-    program, extension = program_path.stem, program_path.suffix
+    program = Path(args.program)
     target_os: str = args.os if args.os else host_os
     target_arch: str = args.arch if args.arch else host_arch
     remaining_args: list[str] = args.remaining_args
 
-    # compile QBE files to assembly
+    # determine if we should run the program after building (i.e. not cross-compiling and not build-only mode)
     target_system = get_qbe_target(target_arch, target_os)
     cross_compiling = target_system != host_system
     run_program = not args.build_only and not cross_compiling
 
+    # files used in the build process along with the user's program
+    syscalls = here / f'{target_os}-syscalls-{target_arch}.s'
+    os_core = here / f'{target_os}-core.qbe'
+    all_core = here / 'all-core.qbe'
+
+    # make each path relative to the current working directory
+    cwd = os.getcwd()
+    syscalls = syscalls.relative_to(cwd, walk_up=True)
+    os_core = os_core.relative_to(cwd, walk_up=True)
+    all_core = all_core.relative_to(cwd, walk_up=True)
+
     commands = [
-        ['qbe', '-t', target_system, f'{program}{extension}', 'all-core.qbe', f'{target_os}-core.qbe', '>', f'{program}.s'],
-        ['as', '-o', f'{program}.o', f'{program}.s'],
-        ['as', '-o', f'{target_os}-syscalls-{target_arch}.o', f'{target_os}-syscalls-{target_arch}.s'],
-        ['ld', '-o', program, f'{program}.o', f'{target_os}-syscalls-{target_arch}.o'],
-        # clean up temporary files
-        ['rm', f'{program}.s', f'{program}.o', f'{target_os}-syscalls-{target_arch}.o'],
+        ['qbe', '-t', target_system, program, all_core, os_core, '>', program.with_suffix('.s')],
+        ['as', '-o', program.with_suffix('.o'), program.with_suffix('.s')],
+        ['as', '-o', syscalls.with_suffix('.o'), syscalls],
+        ['ld', '-o', program.with_suffix(''), program.with_suffix('.o'), syscalls.with_suffix('.o')],
+        ['rm', program.with_suffix('.s'), program.with_suffix('.o'), syscalls.with_suffix('.o')], # clean up temporary files
     ]
 
 
     for command in commands:
         # TODO: this isn't secure. want shell=False, but need to properly handle piping
-        cmd = ' '.join(command)
+        cmd = ' '.join(map(str, command))
         if verbose: print(cmd)
         subprocess.run(cmd, shell=True, check=True)
 
 
-    # run the program after if not cross-compiling (or in build-only mode)
-    # hand off execution from this script to the compiled program
+    # run the program after building
+    # execv to hand off execution from this script to the compiled program
     if run_program:
+        program = program.with_suffix('')
         if verbose: print(f'./{program} {" ".join(remaining_args)}')
         os.execv(program, [program] + remaining_args)
 
