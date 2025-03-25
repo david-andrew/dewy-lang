@@ -3,6 +3,14 @@
 
 
 """
+Tasks
+- grab the system regardless of if target provided
+- if target provided, check against system to determine if can run at the end or not
+
+- allow running against .qbe programs anywhere (but the supporting files stay here)
+"""
+
+"""
 Given
 - <program>.qbe
 - all-core.qbe
@@ -20,53 +28,77 @@ emit the following commands:
 # link all object files together into program
 ld -o {program} {program}.o {OS}-syscalls-{arch}.o
 
-# run the program
+# run the program (if not cross-compiling)
 ./{program}
 """
 
 # e.g.
-# qbe myprog.qbe > myprog.s && qbe all-core.qbe > all-core.s && qbe linux-core.qbe > linux-core.s && as -o myprog.o myprog.s && as -o all-core.o all-core.s && as -o linux-core.o linux-core.s && as -o linux-syscalls-x86_64.o linux-syscalls-x86_64.s && ld -o myprog myprog.o all-core.o linux-core.o linux-syscalls-x86_64.o && ./myprog
+# qbe myprog.qbe all-core.qbe linux-core.qbe > myprog.s && as -o myprog.o myprog.s && as -o linux-syscalls-x86_64.o linux-syscalls-x86_64.s && ld -o myprog myprog.o linux-syscalls-x86_64.o && ./myprog
 
 import subprocess
 from argparse import ArgumentParser
 import platform
 from pathlib import Path
+import os
+
+import pdb
+
+here = Path(__file__).parent
 
 def main():
-    # args: [-os <os_name>] [-arch <arch_name>] program_name [optional command line args for the program]
-    parser = ArgumentParser(description='Demo to assemble and link QBE programs.')
-    parser.add_argument('program', type=str, help='Name of the program to assemble and link.')
-    parser.add_argument('-os', type=str, help='Operating system name for cross compilation. If not provided, defaults to current host OS', choices=['linux', 'apple', 'windows'])
-    parser.add_argument('-arch', type=str, help='Architecture name for cross compilation. If not provided, defaults to current host arch', choices=['x86_64', 'arm64', 'riscv64'])
-    parser.add_argument('remaining_args', nargs='*', help='Any command line arguments for the program.')
-
-    args = parser.parse_args()
-    program_path = Path(args.program)
-    program = program_path.stem
-    extension = program_path.suffix
-    os_name: str = args.os if args.os else platform.system().lower()
-    arch_name: str = args.arch if args.arch else platform.machine().lower()
-    remaining_args = args.remaining_args
+    # get the host system info
+    host_os = platform.system().lower()
+    host_arch = platform.machine().lower()
+    host_system = get_qbe_target(host_arch, host_os)
 
     # verify that host arch is 64-bit since qbe doesn't support 32-bit
     if platform.architecture()[0] != '64bit':
         raise ValueError("This script only supports 64-bit architectures.")
 
+    # args: [-os <os_name>] [-arch <arch_name>] program_name [optional command line args for the program]
+    parser = ArgumentParser(description='Demo to assemble and link QBE programs.')
+    parser.add_argument('program', type=str, help='Name of the program to assemble and link.')
+    parser.add_argument('-os', type=str, help='Operating system name for cross compilation. If not provided, defaults to current host OS', choices=['linux', 'apple', 'windows'])
+    parser.add_argument('-arch', type=str, help='Architecture name for cross compilation. If not provided, defaults to current host arch', choices=['x86_64', 'arm64', 'riscv64'])
+    parser.add_argument('-b', '--build-only', action='store_true', help='Only compile/build the program, do not run it')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Print out the commands being run')
+    parser.add_argument('remaining_args', nargs='*', help='Any command line arguments for the program.')
+
+    args = parser.parse_args()
+    verbose: bool = args.verbose
+    program_path = Path(args.program)
+    program, extension = program_path.stem, program_path.suffix
+    target_os: str = args.os if args.os else host_os
+    target_arch: str = args.arch if args.arch else host_arch
+    remaining_args: list[str] = args.remaining_args
+
     # compile QBE files to assembly
-    qbe_target = get_qbe_target(arch_name, os_name)
+    target_system = get_qbe_target(target_arch, target_os)
+    cross_compiling = target_system != host_system
+    run_program = not args.build_only and not cross_compiling
 
     commands = [
-        ['qbe', f'{program}{extension}', 'all-core.qbe', f'{os_name}-core.qbe', '>', f'{program}.s'],
+        ['qbe', '-t', target_system, f'{program}{extension}', 'all-core.qbe', f'{target_os}-core.qbe', '>', f'{program}.s'],
         ['as', '-o', f'{program}.o', f'{program}.s'],
-        ['as', '-o', f'{os_name}-syscalls-{arch_name}.o', f'{os_name}-syscalls-{arch_name}.s'],
-        ['ld', '-o', program, f'{program}.o', f'{os_name}-syscalls-{arch_name}.o'],
+        ['as', '-o', f'{target_os}-syscalls-{target_arch}.o', f'{target_os}-syscalls-{target_arch}.s'],
+        ['ld', '-o', program, f'{program}.o', f'{target_os}-syscalls-{target_arch}.o'],
         # clean up temporary files
-        ['rm', f'{program}.s', f'{program}.o', f'{os_name}-syscalls-{arch_name}.o'],
-        [f'./{program}'] + remaining_args
+        ['rm', f'{program}.s', f'{program}.o', f'{target_os}-syscalls-{target_arch}.o'],
     ]
 
+
     for command in commands:
-        subprocess.run(' '.join(command), shell=True, check=True)
+        # TODO: this isn't secure. want shell=False, but need to properly handle piping
+        cmd = ' '.join(command)
+        if verbose: print(cmd)
+        subprocess.run(cmd, shell=True, check=True)
+
+
+    # run the program after if not cross-compiling (or in build-only mode)
+    # hand off execution from this script to the compiled program
+    if run_program:
+        if verbose: print(f'./{program} {" ".join(remaining_args)}')
+        os.execv(program, [program] + remaining_args)
 
 
 def get_qbe_target(arch_name: str, os_name: str) -> str:
