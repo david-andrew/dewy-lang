@@ -1,0 +1,109 @@
+// __syscall1, __syscall2, ... __syscallN are builtin
+// everything else is implemented in dewy!
+
+// TBD how to set up this type
+//__ptr<T> = uint64
+
+
+__qbe_types = [
+    b = uint8
+    h = uint16
+    w = uint32
+    l = uint64
+    s = float32
+    d = float64
+]
+
+// TODO: select proper list of syscalls to include here
+//       this list was just a suggestion from ChatGPT
+
+// File I/O & FD Management
+SYSCALL_READ        = 0
+SYSCALL_WRITE       = 1
+SYSCALL_OPEN        = 2
+SYSCALL_CLOSE       = 3
+SYSCALL_LSEEK       = 8
+SYSCALL_READV       = 19
+SYSCALL_WRITEV      = 20
+SYSCALL_DUP         = 32
+SYSCALL_DUP2        = 33
+SYSCALL_DUP3        = 292
+SYSCALL_FCNTL       = 72
+SYSCALL_IOCTL       = 16
+
+// Memory Management
+SYSCALL_MMAP        = 9
+SYSCALL_MUNMAP      = 11
+SYSCALL_MPROTECT    = 10
+SYSCALL_BRK         = 12
+SYSCALL_MREMAP      = 25
+
+// Process Control
+SYSCALL_FORK        = 57
+SYSCALL_CLONE       = 56
+SYSCALL_EXECVE      = 59
+SYSCALL_EXIT        = 60
+SYSCALL_EXIT_GROUP  = 231
+SYSCALL_WAIT4       = 61
+SYSCALL_GETPID      = 39
+SYSCALL_KILL        = 62
+SYSCALL_TGKILL      = 234
+
+// Time & Sleep
+SYSCALL_NANOSLEEP   = 35
+SYSCALL_CLOCK_GETTIME = 228
+
+// File System
+SYSCALL_STAT        = 4       // Deprecated on x86_64, use newfstatat
+SYSCALL_FSTAT       = 5       // "
+SYSCALL_LSTAT       = 6       // "
+SYSCALL_NEWFSTATAT  = 262
+SYSCALL_ACCESS      = 21
+SYSCALL_UNLINK      = 87
+SYSCALL_MKDIR       = 83
+SYSCALL_RMDIR       = 84
+SYSCALL_RENAME      = 82
+SYSCALL_GETDENTS64  = 217
+
+
+// User / Group / UID / GID
+SYSCALL_GETUID      = 102
+SYSCALL_GETGID      = 104
+SYSCALL_GETEUID     = 107
+SYSCALL_GETEGID     = 108
+
+
+// Misc
+SYSCALL_GETRANDOM   = 318
+SYSCALL_PRCTL       = 157
+SYSCALL_ARCH_PRCTL  = 158
+SYSCALL_MADVISE     = 28
+SYSCALL_REBOOT      = 169
+SYSCALL_UNAME       = 63
+
+
+
+__syscall1 = (n:uint64 a0:uint64)                                                   :> int64 => builtin
+__syscall2 = (n:uint64 a0:uint64 a1:uint64)                                         :> int64 => builtin
+__syscall3 = (n:uint64 a0:uint64 a1:uint64 a2:uint64)                               :> int64 => builtin
+__syscall4 = (n:uint64 a0:uint64 a1:uint64 a2:uint64 a3:uint64)                     :> int64 => builtin
+__syscall5 = (n:uint64 a0:uint64 a1:uint64 a2:uint64 a3:uint64 a4:uint64)           :> int64 => builtin
+__syscall6 = (n:uint64 a0:uint64 a1:uint64 a2:uint64 a3:uint64 a4:uint64 a5:uint64) :> int64 => builtin
+
+
+
+// Only the functions below will be available externally. all the syscalls should only be used within this file for implementing any functionality needed
+// this is to maintain portibility, namely we implement a common core of functions per each OS, and then can use them anywhere
+
+__exit = (status: uint32) :> noreturn => {
+    __syscall1(SYSCALL_EXIT_GROUP status)   
+    loop true __syscall1(SYSCALL_EXIT status)
+}
+
+
+stdin = 0
+stdout = 1
+stderr = 2
+
+__write = (buf: __ptr<uint8> len: uint64) :> int64 => __syscall3(SYSCALL_WRITE stdout buf len)
+__err = (buf: __ptr<uint8> len: uint64) :> int64 => __syscall3(SYSCALL_WRITE stderr buf len)
