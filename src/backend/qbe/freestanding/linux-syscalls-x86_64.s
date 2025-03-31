@@ -26,6 +26,16 @@ syscall1:
         ret
 
 
+# 2-arg syscall
+.globl syscall2
+syscall2:
+        movq %rdi, %rax
+        movq %rsi, %rdi
+        movq %rdx, %rsi
+        syscall
+        ret
+
+
 # 3-arg syscall
 .globl syscall3
 syscall3:
@@ -33,6 +43,18 @@ syscall3:
         movq %rsi, %rdi
         movq %rdx, %rsi
         movq %rcx, %rdx
+        syscall
+        ret
+
+
+# 4-arg syscall
+.globl syscall4
+syscall4:
+        movq %rdi, %rax
+        movq %rsi, %rdi
+        movq %rdx, %rsi
+        movq %rcx, %rdx
+        movq %r8, %r10
         syscall
         ret
 
@@ -49,19 +71,17 @@ syscall5:
         ret
 
 
-# 7-arg syscall
-.globl syscall7
-syscall7:
+# 6-arg syscall
+.globl syscall6
+syscall6:
         movq %rdi, %rax
         movq %rsi, %rdi
         movq %rdx, %rsi
         movq %rcx, %rdx
         movq %r8, %r10
         movq %r9, %r8
-        movq 16(%rsp), %r9
         syscall
         ret
-
 
 
 # for security, mark the stack as non-executable
