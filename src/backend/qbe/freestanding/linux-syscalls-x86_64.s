@@ -9,7 +9,7 @@ _start:
     leaq 16(%rsp, %rdi, 8), %rdx    # rdx = envp (pointer to environment variables)
 
     # Call main(argc, argv, envp)
-    call main
+    call __main
 
     # Handle return value from main (in %rax) and invoke the exit syscall
     movq %rax, %rdi                 # rdi = return value from main (for exit syscall)
@@ -18,8 +18,8 @@ _start:
 
 
 # 1-arg syscall
-.globl syscall1
-syscall1:
+.globl __syscall1
+__syscall1:
         movq %rdi, %rax
         movq %rsi, %rdi
         syscall
@@ -27,8 +27,8 @@ syscall1:
 
 
 # 2-arg syscall
-.globl syscall2
-syscall2:
+.globl __syscall2
+__syscall2:
         movq %rdi, %rax
         movq %rsi, %rdi
         movq %rdx, %rsi
@@ -37,8 +37,8 @@ syscall2:
 
 
 # 3-arg syscall
-.globl syscall3
-syscall3:
+.globl __syscall3
+__syscall3:
         movq %rdi, %rax
         movq %rsi, %rdi
         movq %rdx, %rsi
@@ -48,8 +48,8 @@ syscall3:
 
 
 # 4-arg syscall
-.globl syscall4
-syscall4:
+.globl __syscall4
+__syscall4:
         movq %rdi, %rax
         movq %rsi, %rdi
         movq %rdx, %rsi
@@ -60,8 +60,8 @@ syscall4:
 
 
 # 5-arg syscall
-.globl syscall5
-syscall5:
+.globl __syscall5
+__syscall5:
         movq %rdi, %rax
         movq %rsi, %rdi
         movq %rdx, %rsi
@@ -72,8 +72,8 @@ syscall5:
 
 
 # 6-arg syscall
-.globl syscall6
-syscall6:
+.globl __syscall6
+__syscall6:
         movq %rdi, %rax
         movq %rsi, %rdi
         movq %rdx, %rsi
