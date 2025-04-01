@@ -1,0 +1,11 @@
+# Example program
+# exit(42)
+# How to run and see exit code:
+# $ python src/backend/qbe/freestanding/assemble.py src/backend/qbe/examples/exit.qbe ; echo $?
+
+
+export function w $__main(l %argc, l %argv, l %envp) {
+@start
+        call $__syscall1(w 60, l 42)
+        ret 0
+}
