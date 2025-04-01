@@ -1,20 +1,20 @@
-function $__exit(l %code) {
+function $__exit__(l %code) {
 @start
         # 60 is the exit syscall
-        call $__syscall1(w 60, l %code)
+        call $__syscall1__(w 60, l %code)
         ret
 }
 
-function w $__write(l %buf, l %len) {
+function w $__write__(l %buf, l %len) {
 @start
         # 1 is the write syscall
-        %ret =w call $__syscall3(w 1, w 1, l %buf, l %len)
+        %ret =w call $__syscall3__(w 1, w 1, l %buf, l %len)
         ret %ret
 }
 
 
 # # UNTESTED
-# function l $__malloc(l %size) {
+# function l $__malloc__(l %size) {
 # @start
 #         # 9 is the mmap syscall
 #         # MAP_ANONYMOUS | MAP_PRIVATE = 0x22
@@ -23,14 +23,14 @@ function w $__write(l %buf, l %len) {
 #         ret %ret
 # }
 # # UNTESTED
-# function $__free(l %ptr) {
+# function $__free__(l %ptr) {
 # @start
 #         # 11 is the munmap syscall
 #         %ret =w call $syscall3(w 11, l %ptr, l 0, l 0)
 #         ret %ret
 # }
 # # UNTESTED
-# function l $__realloc(l %ptr, l %size) {
+# function l $__realloc__(l %ptr, l %size) {
 # @start
 #         # 25 is the mremap syscall
 #         %ret =w call $syscall7(w 25, l %ptr, l 0, l %size, w 1, w 34, l -1, l 0)
@@ -42,7 +42,7 @@ function w $__write(l %buf, l %len) {
 # #       - 8 bytes at a time can overflow/go out of bounds. perhaps use blit for last up to 7 bytes
 # #       - backwards probably not right
 # #       - dst_end not used
-# function $__memmove(l %dst, l %src, l %len) {
+# function $__memmove__(l %dst, l %src, l %len) {
 # @start
 #         %src_end =l add %src, %len
 #         %dst_end =l add %dst, %len

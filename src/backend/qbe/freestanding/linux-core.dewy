@@ -1,11 +1,12 @@
-// __syscall1, __syscall2, ... __syscallN are builtin
+// __syscall1__, __syscall2__, ... __syscall6__ are builtin (implemented in assembly)
+// __main__ is the entrypoint called in the assembly
 // everything else is implemented in dewy!
 
 // TBD how to set up this type
-//__ptr<T> = uint64
+//__ptr__<T> = uint64
 
-
-__qbe_types = [
+// mostly just for reference
+__qbe_types__ = [
     b = uint8
     h = uint16
     w = uint32
@@ -13,6 +14,8 @@ __qbe_types = [
     s = float32
     d = float64
 ]
+
+// TODO: some sort of indication that all of these are NOT PORTABLE
 
 // TODO: select proper list of syscalls to include here
 //       this list was just a suggestion from ChatGPT
@@ -83,21 +86,23 @@ SYSCALL_UNAME       = 63
 
 
 
-__syscall1 = (n:uint64 a0:uint64)                                                   :> int64 => builtin
-__syscall2 = (n:uint64 a0:uint64 a1:uint64)                                         :> int64 => builtin
-__syscall3 = (n:uint64 a0:uint64 a1:uint64 a2:uint64)                               :> int64 => builtin
-__syscall4 = (n:uint64 a0:uint64 a1:uint64 a2:uint64 a3:uint64)                     :> int64 => builtin
-__syscall5 = (n:uint64 a0:uint64 a1:uint64 a2:uint64 a3:uint64 a4:uint64)           :> int64 => builtin
-__syscall6 = (n:uint64 a0:uint64 a1:uint64 a2:uint64 a3:uint64 a4:uint64 a5:uint64) :> int64 => builtin
+__syscall1__ = (n:uint64 a0:uint64)                                                   :> int64 => builtin
+__syscall2__ = (n:uint64 a0:uint64 a1:uint64)                                         :> int64 => builtin
+__syscall3__ = (n:uint64 a0:uint64 a1:uint64 a2:uint64)                               :> int64 => builtin
+__syscall4__ = (n:uint64 a0:uint64 a1:uint64 a2:uint64 a3:uint64)                     :> int64 => builtin
+__syscall5__ = (n:uint64 a0:uint64 a1:uint64 a2:uint64 a3:uint64 a4:uint64)           :> int64 => builtin
+__syscall6__ = (n:uint64 a0:uint64 a1:uint64 a2:uint64 a3:uint64 a4:uint64 a5:uint64) :> int64 => builtin
 
 
 
 // Only the functions below will be available externally. all the syscalls should only be used within this file for implementing any functionality needed
 // this is to maintain portibility, namely we implement a common core of functions per each OS, and then can use them anywhere
+// TODO: some stronger indication that these are the portable functions that can be imported (perhaps consider just moving to a separate file? too complex though...)
 
-__exit = (status: uint32) :> noreturn => {
-    __syscall1(SYSCALL_EXIT_GROUP status)   
-    loop true __syscall1(SYSCALL_EXIT status)
+
+__exit__ = (status: uint32) :> noreturn => {
+    __syscall1__(SYSCALL_EXIT_GROUP status)   
+    loop true __syscall1__(SYSCALL_EXIT status)
 }
 
 
@@ -105,5 +110,5 @@ stdin = 0
 stdout = 1
 stderr = 2
 
-__write = (buf: __ptr<uint8> len: uint64) :> int64 => __syscall3(SYSCALL_WRITE stdout buf len)
-__err = (buf: __ptr<uint8> len: uint64) :> int64 => __syscall3(SYSCALL_WRITE stderr buf len)
+__write__ = (buf: __ptr__<uint8> len: uint64) :> int64 => __syscall3__(SYSCALL_WRITE stdout buf len)
+__err__ = (buf: __ptr__<uint8> len: uint64) :> int64 => __syscall3__(SYSCALL_WRITE stderr buf len)

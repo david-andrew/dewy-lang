@@ -3,7 +3,7 @@
 
 
 # determine the length of a null-terminated string
-function l $__cstrlen(l %str) {
+function l $__cstrlen__(l %str) {
 @start
         %start =l copy %str
 @loop
@@ -19,24 +19,24 @@ function l $__cstrlen(l %str) {
 }
 
 
-function $__putcstr(l %str) {
+function $__putcstr__(l %str) {
 # print a null-terminated string to stdout
 @start
-        %len =l call $__cstrlen(l %str)
-        call $__write(l %str, l %len)
+        %len =l call $__cstrlen__(l %str)
+        call $__write__(l %str, l %len)
         ret
 }
-function $__putstr(l %str, l %len) {
+function $__putstr__(l %str, l %len) {
 # print a non-null-terminated string to stdout
 @start
-        call $__write(l %str, l %len)
+        call $__write__(l %str, l %len)
         ret
 }
-# function $__putu64(l %n) {}
-# function $__putu64x(l %n) {}
-# function $__puti64(l %n) {}
-# function $__putf32(s %n) {}
-# function $__putf64(d %n) {}
-# function $__putl() {}
-# function l $__getl(l %dst) {} #uint8_t** dst
-# function l $__getdl(l %dst, w %delimiter) {} #uint8_t** dst, uint8_t delimiter
+# function $__putu64__(l %n) {}
+# function $__putu64x__(l %n) {}
+# function $__puti64__(l %n) {}
+# function $__putf32__(s %n) {}
+# function $__putf64__(d %n) {}
+# function $__putl__() {}
+# function l $__getl__(l %dst) {} #uint8_t** dst
+# function l $__getdl__(l %dst, w %delimiter) {} #uint8_t** dst, uint8_t delimiter
