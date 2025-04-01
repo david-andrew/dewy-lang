@@ -60,7 +60,7 @@ def main():
         backend = python_interpreter
     else:
         # default with no args is currently python #qbe
-        backend = python_interpreter # qbe_compiler
+        backend = qbe_compiler # python_interpreter
 
     # run with the selected backend
     backend(Path(args.file), args.args, options)
