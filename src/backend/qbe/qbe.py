@@ -2,6 +2,7 @@ from ...tokenizer import tokenize
 from ...postok import post_process
 from ...dtypes import (
     Scope as DTypesScope,
+    top_level_typecheck_and_resolve,
     typecheck_call, typecheck_index, typecheck_multiply,
     register_typeof, short_circuit,
     CallableBase, IndexableBase, IndexerBase, MultipliableBase, ObjectBase,
@@ -71,7 +72,7 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     ast = post_parse(ast)
 
     # typecheck and collapse any Quantum ASTs to a concrete selection
-    ast = typecheck_and_resolve(ast)
+    ast = top_level_typecheck_and_resolve(ast)
 
     # debug printing
     if options.verbose:
