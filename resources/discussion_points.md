@@ -1279,6 +1279,52 @@ let f = (c:str d:int) => {
 }
 ```
 
+
+
+## commas should make a group rather than a list [YES!]
+since I got rid of commas in most situations, I think the syntax is nicer, but people are liable to accidentally include commas in situations that they don't mean to, and get the wrong thing because they don't realize commas do something else.
+
+```dewy
+a = (b, c, d) => b + c + d    
+v = [1, 2, 3, 4, 5]
+```
+for the first case, commas make it: `a = ([b c d]) => b + c + d`  which I think is a syntax error...
+for the second case, commas make it: `v = [[1 2 3 4 5]]`, which I had initially thought was a nice side effect for creating row vs column vectors. however it could still be confusing
+
+I see 2 options:
+- leave it as making a list, and let people get used to the difference between the two
+- make commas create a group rather than a list, and then several contexts (e.g. ranges) take a group rather than a list
+
+I actually think I like the idea of making them make a group because it creates a really nice way to make groups in a pipeline without having to wrap the whole thing in parenthesis
+
+```dewy
+a, b, c, d |> some_fn  // identical to (a b c d) |> some_fn
+```
+
+ranges just need to be adjusted semantically to take a group with 2 elements rather than an array with 2 elements for specifying step sizes
+
+```dewy
+loop i in 1,3..50 ...     // range becomes (1 3)..50 rather than [1 3]..50
+```
+
+Other contexts that use commas, I think multi-assignment and multi-return, actually I think make more sense now
+
+```dewy
+a, b, c = 1, 2, 3    // (a b c) = (1 2 3)
+```
+
+Basically I've just reinvented tuples lol. Though actually it is a bit more nuanced because it interacts with the syntax a bit differently
+
+
+For the issues I described at the beginning, making commas just make groups turns them into this:
+```dewy
+a = ((b c d)) => b + c + d
+v = [(1 2 3 4 5)]
+```
+
+which I think both syntactically would just treat the group like a redundant parenthesis and thus ignore it!
+
+
 ## Parsing flow expressions joined with `else` [Fixed, handled correctly in post-tokenization!]
 
 This isn't a syntax issue, but rather a parsing issue. Where should the correct nesting of flow expressions be handled?
