@@ -195,11 +195,11 @@ def convert_prototype_to_unpack_target(ast: Array) -> UnpackTarget:
 
 
 def convert_prototype_tuples(ast: AST) -> AST:
-    """For now, literally just turn all tuples into arrays"""
+    """For now, literally just turn all tuples into groups"""
     ast = Group([ast])
     for i in (gen := ast.__full_traversal_iter__()):
         if isinstance(i, PrototypeTuple):
-            gen.send(Array(i.items))
+            gen.send(Group(i.items))
     return ast.items[0]
 
 def convert_bare_ranges(ast: AST) -> AST:
