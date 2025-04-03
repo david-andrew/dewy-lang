@@ -6,8 +6,15 @@ from .utils import Options
 import pdb
 
 
+default_backend = qbe_compiler
+
+# strings for modifying the help string output
+make_default_str = lambda f: '(Default) ' if f == default_backend else ''
+i_default_str = make_default_str(python_interpreter)
+c_default_str = make_default_str(qbe_compiler)
 
 def main():
+
     arg_parser = ArgumentParser(description='Dewy Compiler')
 
     # positional argument for the file to compile
@@ -15,8 +22,8 @@ def main():
 
     # mutually exclusive flags for specifying the backend to use
     group = arg_parser.add_mutually_exclusive_group()
-    group.add_argument('-i', action='store_true', help='(DEFAULT) Run in interpreter mode with the python backend')
-    group.add_argument('-c', action='store_true', help='Run in compiler mode with the QBE backend (not implemented yet)')
+    group.add_argument('-i', action='store_true', help=f'{i_default_str}Run in interpreter mode with the python backend')
+    group.add_argument('-c', action='store_true', help=f'{c_default_str}Run in compiler mode with the QBE backend')
     group.add_argument('--backend', type=str, help=f'Specify a backend compiler/interpreter by name to use. Backends will include: {backend_names} (however currently only python is available).')
 
     arg_parser.add_argument('-v', '--version', action='version', version=f'Dewy {get_version()}', help='Print version information and exit')
@@ -60,7 +67,7 @@ def main():
         backend = python_interpreter
     else:
         # default with no args is currently python #qbe
-        backend = qbe_compiler # python_interpreter
+        backend = default_backend
 
     # run with the selected backend
     backend(Path(args.file), args.args, options)
