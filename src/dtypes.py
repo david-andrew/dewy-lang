@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 from functools import cache
-from typing import Protocol, TypeVar, Generator, Sequence, cast, overload, Literal as TypingLiteral
-
+from typing import Protocol, TypeVar, Generator, Sequence, Any, cast, overload, Literal as TypingLiteral
+from collections import defaultdict
+from types import SimpleNamespace
 
 from .syntax import (
     AST,
@@ -57,6 +58,32 @@ class Fail(AST):
 TypeExpr = Type | And | Or | Not | Literal | TBD | Fail
 
 
+# TODO: consider moving metanamespace stuff into e.g. a utils/etc. file
+class MetaNamespace(SimpleNamespace):
+    """A simple namespace for storing AST meta attributes for use at runtime"""
+    def __getattribute__(self, key: str) -> Any | None:
+        """Get the attribute associated with the key, or None if it doesn't exist"""
+        try:
+            return super().__getattribute__(key)
+        except AttributeError:
+            return None
+
+    def __setattr__(self, key: str, value: Any) -> None:
+        """Set the attribute associated with the key"""
+        super().__setattr__(key, value)
+
+
+class MetaNamespaceDict(defaultdict):
+    """A defaultdict that preprocesses AST keys to use the classname + memory address as the key"""
+    def __init__(self):
+        super().__init__(MetaNamespace)
+
+    # add preprocessing to both __getitem__ and __setitem__ to handle AST keys
+    # apparently __setitem__ always calls __getitem__ so we only need to override __getitem__
+    def __getitem__(self, item: AST) -> Any | None:
+        key = f'::{item.__class__.__name__}@{hex(id(item))}'
+        return super().__getitem__(key)
+
 
 # Scope class only used during parsing to keep track of callables
 @dataclass
@@ -71,6 +98,7 @@ class Scope:
     parent: 'Scope | None' = None
     # callables: dict[str, AST | None] = field(default_factory=dict) #TODO: maybe replace str->AST with str->signature (where signature might be constructed based on the func structure)
     vars: 'dict[str, Scope._var]' = field(default_factory=dict)
+    meta: dict[AST, MetaNamespace] = field(default_factory=MetaNamespaceDict)
 
     @overload
     def get(self, name:str, throw:TypingLiteral[True]=True, search_parents:bool=True) -> 'Scope._var': ...
@@ -131,35 +159,9 @@ class Scope:
             yield s
             s = s.parent
 
-    #TODO: these should actually be defined in python.py. There should maybe only be stubs here..
-    @classmethod
-    def default(cls: type['Scope']) -> 'Scope':
-        return cls(vars={
-            'printl': Scope._var(
-                DeclarationType.CONST,
-                Type(PrototypeBuiltin),
-                PrototypeBuiltin(
-                    Group([Assign(TypedIdentifier(Identifier('s'), Type(String)), String(''))]),
-                    Type(Void)
-                )
-            ),
-            'print': Scope._var(
-                DeclarationType.CONST,
-                Type(PrototypeBuiltin),
-                PrototypeBuiltin(
-                    Group([Assign(TypedIdentifier(Identifier('s'), Type(String)), String(''))]),
-                    Type(Void)
-                )
-            ),
-            'readl': Scope._var(
-                DeclarationType.CONST,
-                Type(PrototypeBuiltin),
-                PrototypeBuiltin(
-                    Group([]),
-                    Type(String)
-                )
-            )
-        })
+    def __repr__(self):
+        return f'<Scope@{hex(id(self))}>'
+
 
 
 class TypeofFunc(Protocol):

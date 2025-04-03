@@ -31,6 +31,7 @@ from ..syntax import (
     CycleLeft, CycleRight, Suppress,
     BroadcastOp,
     CollectInto, SpreadOutFrom,
+    DeclarationType,
 )
 
 from ..postparse import post_parse, FunctionLiteral, Signature, normalize_function_args
@@ -77,7 +78,6 @@ def python_repl(args: list[str], options: Options):
 
     # Set up scope to share between REPL calls
     scope = Scope.default()
-    insert_builtins(scope)
 
     # get the source code and tokenize
     for src in REPL(history_file='~/.dewy/repl_history'):
@@ -127,44 +127,63 @@ def print_ast(ast: AST):
 
 def top_level_evaluate(ast:AST) -> AST:
     scope = Scope.default()
-    insert_builtins(scope)
     return evaluate(ast, scope)
 
 
 ############################ Runtime helper classes ############################
 
-class MetaNamespace(SimpleNamespace):
-    """A simple namespace for storing AST meta attributes for use at runtime"""
-    def __getattribute__(self, key: str) -> Any | None:
-        """Get the attribute associated with the key, or None if it doesn't exist"""
-        try:
-            return super().__getattribute__(key)
-        except AttributeError:
-            return None
-
-    def __setattr__(self, key: str, value: Any) -> None:
-        """Set the attribute associated with the key"""
-        super().__setattr__(key, value)
-
-
-class MetaNamespaceDict(defaultdict):
-    """A defaultdict that preprocesses AST keys to use the classname + memory address as the key"""
-    def __init__(self):
-        super().__init__(MetaNamespace)
-
-    # add preprocessing to both __getitem__ and __setitem__ to handle AST keys
-    # apparently __setitem__ always calls __getitem__ so we only need to override __getitem__
-    def __getitem__(self, item: AST) -> Any | None:
-        key = f'::{item.__class__.__name__}@{hex(id(item))}'
-        return super().__getitem__(key)
 
 @dataclass
 class Scope(DTypesScope):
     """An extension of the Scope used during parsing to support runtime"""
-    meta: dict[AST, MetaNamespace] = field(default_factory=MetaNamespaceDict)
 
-    def __repr__(self):
-        return f'<Scope@{hex(id(self))}>'
+    @staticmethod
+    def default() -> 'Scope':
+        return Scope(vars={
+            'printl': Scope._var(
+                DeclarationType.CONST,
+                Type(Builtin),
+                Builtin(
+                    normalize_function_args(Group([Assign(TypedIdentifier(Identifier('s'), Type(String)), String(''))])),
+                    preprocess_py_print_args,
+                    py_printl,
+                    Type(Void)
+                ),
+            ),
+            'print': Scope._var(
+                DeclarationType.CONST,
+                Type(Builtin),
+                Builtin(
+                    normalize_function_args(Group([Assign(TypedIdentifier(Identifier('s'), Type(String)), String(''))])),
+                    preprocess_py_print_args,
+                    py_print,
+                    Type(Void)
+                )
+            ),
+            'readl': Scope._var(
+                DeclarationType.CONST,
+                Type(Builtin),
+                Builtin(
+                    normalize_function_args(Group([])),
+                    lambda *a, **kw: ([],{}),
+                    py_readl,
+                    Type(String)
+                )
+            )
+        })
+
+# def insert_builtins(scope: Scope):
+#     """replace prototype builtin stubs with actual implementations"""
+#     if 'printl' in scope.vars:
+#         assert isinstance((proto:=scope.vars['printl'].value), PrototypeBuiltin)
+#         scope.vars['printl'].value = Builtin.from_prototype(proto, preprocess_py_print_args, py_printl)
+#     if 'print' in scope.vars:
+#         assert isinstance((proto:=scope.vars['print'].value), PrototypeBuiltin)
+#         scope.vars['print'].value = Builtin.from_prototype(proto, preprocess_py_print_args, py_print)
+#     if 'readl' in scope.vars:
+#         assert isinstance((proto:=scope.vars['readl'].value), PrototypeBuiltin)
+#         scope.vars['readl'].value = Builtin.from_prototype(proto, lambda *a: ([],{}), py_readl)
+
 
 
 class Iter(AST):
@@ -184,15 +203,15 @@ class Builtin(CallableBase):
     return_type: AST
 
     def __str__(self):
-        return f'{self.signature}: {self.return_type} => {self.action}'
+        return f'{self.signature}:> {self.return_type} => {self.action}'
 
-    def from_prototype(proto: PrototypeBuiltin, preprocessor: BuiltinArgsPreprocessor, action: TypingCallable[..., AST]) -> 'Builtin':
-        return Builtin(
-            signature=normalize_function_args(proto.args),
-            preprocessor=preprocessor,
-            action=action,
-            return_type=proto.return_type,
-        )
+    # def from_prototype(proto: PrototypeBuiltin, preprocessor: BuiltinArgsPreprocessor, action: TypingCallable[..., AST]) -> 'Builtin':
+    #     return Builtin(
+    #         signature=normalize_function_args(proto.args),
+    #         preprocessor=preprocessor,
+    #         action=action,
+    #         return_type=proto.return_type,
+    #     )
 
 # hacky for now. longer term, want full signature type checking for functions!
 register_typeof(Builtin, short_circuit(Builtin))
@@ -683,7 +702,7 @@ def evaluate_id_access(left: AST, right: Identifier, scope: Scope, evaluate_righ
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'evaluate_id_access not implemented yet for {left=}, {right=}')
-        
+
     if evaluate_right:
         return evaluate(access, scope)
     return access
@@ -1051,11 +1070,11 @@ def evaluate_binary_dispatch(op: BinOp, scope: Scope):
     # evaluate the operands
     left = evaluate(op.left, scope)
     right = evaluate(op.right, scope)
-    
+
     # if either operand is undefined, the result is undefined
     if isinstance(left, Undefined) or isinstance(right, Undefined):
         return undefined
-    
+
     # dispatch to the appropriate function
     key = (type(op), type(left), type(right))
     if key in binary_dispatch_table:
@@ -1081,13 +1100,13 @@ def evaluate_unary_dispatch(op: UnaryPrefixOp|UnaryPostfixOp, scope: Scope):
     # if the operand is undefined, the result is undefined
     if isinstance(operand, Undefined):
         return undefined
-    
+
     # dispatch to the appropriate function
     key = (type(op), type(operand))
     if key in unary_dispatch_table:
         operand = cast(SimpleValue[T], operand)
         return unary_dispatch_table[key](operand.val)
-    
+
     raise NotImplementedError(f'Unary dispatch not implemented for {key=}')
 
 
@@ -1108,10 +1127,10 @@ class BuiltinFuncs:
     print=partial(print, end='')
     readl=input
 
-#TODO: consider adding a flag repr vs str, where initially str is used, but children get repr. 
-# as is, stringifying should put quotes around strings that are children of other objects 
+#TODO: consider adding a flag repr vs str, where initially str is used, but children get repr.
+# as is, stringifying should put quotes around strings that are children of other objects
 # but top level printed strings should not show their quotes
-def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:    
+def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
     # don't evaluate. already evaluated by resolve_calling_args
     ast = evaluate(ast, scope) if not isinstance(ast, (Builtin, Closure)) else ast
     match ast:
@@ -1162,15 +1181,3 @@ def py_print(s:str) -> Void:
 
 def py_readl() -> String:
     return String(BuiltinFuncs.readl())
-
-def insert_builtins(scope: Scope):
-    """replace prototype builtin stubs with actual implementations"""
-    if 'printl' in scope.vars:
-        assert isinstance((proto:=scope.vars['printl'].value), PrototypeBuiltin)
-        scope.vars['printl'].value = Builtin.from_prototype(proto, preprocess_py_print_args, py_printl)
-    if 'print' in scope.vars:
-        assert isinstance((proto:=scope.vars['print'].value), PrototypeBuiltin)
-        scope.vars['print'].value = Builtin.from_prototype(proto, preprocess_py_print_args, py_print)
-    if 'readl' in scope.vars:
-        assert isinstance((proto:=scope.vars['readl'].value), PrototypeBuiltin)
-        scope.vars['readl'].value = Builtin.from_prototype(proto, lambda *a: ([],{}), py_readl)
