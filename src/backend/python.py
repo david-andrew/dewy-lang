@@ -797,19 +797,19 @@ def iter_next(iter: Iter):
             else:
                 cond, val = Bool(True), items[iter.i]
             iter.i += 1
-            return Array([cond, val])
+            return Group([cond, val])
         case Dict(items):
             if iter.i >= len(items):
                 cond, val = Bool(False), undefined
             else:
                 cond, val = Bool(True), items[iter.i]
             iter.i += 1
-            return Array([cond, val])
+            return Group([cond, val])
         case Range(left=Int(val=l), right=Void()|Undefined(), brackets=brackets):
             offset = int(brackets[0] == '(') # handle if first value is exclusive
             cond, val = Bool(True), Int(l + iter.i + offset)
             iter.i += 1
-            return Array([cond, val])
+            return Group([cond, val])
         case Range(left=Int(val=l), right=Int(val=r), brackets=brackets):
             offset = int(brackets[0] == '(') # handle if first value is exclusive
             end_offset = int(brackets[1] == ']')
@@ -819,14 +819,14 @@ def iter_next(iter: Iter):
             else:
                 cond, val = Bool(True), Int(i)
             iter.i += 1
-            return Array([cond, val])
-        case Range(left=Array(items=[Int(val=r0), Int(val=r1)]), right=Void()|Undefined(), brackets=brackets):
+            return Group([cond, val])
+        case Range(left=Group(items=[Int(val=r0), Int(val=r1)]), right=Void()|Undefined(), brackets=brackets):
             offset = int(brackets[0] == '(') # handle if first value is exclusive
             step = r1 - r0
             cond, val = Bool(True), Int(r0 + (iter.i + offset) * step)
             iter.i += 1
-            return Array([cond, val])
-        case Range(left=Array(items=[Int(val=r0), Int(val=r1)]), right=Int(val=r2), brackets=brackets):
+            return Group([cond, val])
+        case Range(left=Group(items=[Int(val=r0), Int(val=r1)]), right=Int(val=r2), brackets=brackets):
             offset = int(brackets[0] == '(') # handle if first value is exclusive
             end_offset = int(brackets[1] == ']')
             step = r1 - r0
@@ -836,7 +836,7 @@ def iter_next(iter: Iter):
             else:
                 cond, val = Bool(True), Int(i)
             iter.i += 1
-            return Array([cond, val])
+            return Group([cond, val])
         #TODO: other range cases...
         case _:
             pdb.set_trace()
