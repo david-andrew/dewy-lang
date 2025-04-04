@@ -1,7 +1,7 @@
 from ...tokenizer import tokenize
 from ...postok import post_process
-from ...dtypes import (
-    Scope as DTypesScope,
+from ...typecheck import (
+    Scope as TypecheckScope,
     top_level_typecheck_and_resolve,
     typecheck_call, typecheck_index, typecheck_multiply,
     register_typeof, short_circuit,
@@ -104,7 +104,7 @@ def top_level_compile(ast: AST) -> 'QbeModule':
 # from ..python import MetaNamespaceDict
 
 @dataclass
-class Scope(DTypesScope):
+class Scope(TypecheckScope):
 
     # TODO: note that these are only relevant for linux
     # so probably have default versions for other OS environments...

@@ -1,7 +1,7 @@
 from ..tokenizer import tokenize
 from ..postok import post_process
-from ..dtypes import (
-    Scope as DTypesScope,
+from ..typecheck import (
+    Scope as TypecheckScope,
     typecheck_call, typecheck_index, typecheck_multiply,
     register_typeof, short_circuit,
     CallableBase, IndexableBase, IndexerBase, MultipliableBase, ObjectBase,
@@ -134,7 +134,7 @@ def top_level_evaluate(ast:AST) -> AST:
 
 
 @dataclass
-class Scope(DTypesScope):
+class Scope(TypecheckScope):
     """An extension of the Scope used during parsing to support runtime"""
 
     @staticmethod
