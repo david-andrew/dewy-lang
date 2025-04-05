@@ -276,8 +276,12 @@ def typeof(ast: AST, scope: Scope, params:bool=False) -> TypeExpr:
 # promotion_table = {...}
 # type_tree = {...}
 
-def top_level_typecheck_and_resolve(ast: AST) -> tuple[AST, Scope]:
+def typecheck_and_resolve(ast: AST, scope: Scope) -> tuple[AST, Scope]:
     """Typecheck the given AST, and resolve any quantum ASTs to concrete selections based on the types"""
+    if isinstance(ast, Void):
+        return ast, scope
+    
+
     pdb.set_trace()
     ...
 #     """Check if the given AST is well-formed from a type perspective"""

@@ -2,7 +2,7 @@ from ...tokenizer import tokenize
 from ...postok import post_process
 from ...typecheck import (
     Scope as TypecheckScope,
-    top_level_typecheck_and_resolve,
+    typecheck_and_resolve,
     typecheck_call, typecheck_index, typecheck_multiply,
     register_typeof, short_circuit,
     CallableBase, IndexableBase, IndexerBase, MultipliableBase, ObjectBase,
@@ -72,14 +72,23 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     ast = post_parse(ast)
 
     # typecheck and collapse any Quantum ASTs to a concrete selection
-    ast = top_level_typecheck_and_resolve(ast)
+    scope = Scope.linux_default()
+    ast, scope = typecheck_and_resolve(ast, scope)
 
     # debug printing
     if options.verbose:
         print(repr(ast))
 
     # generate the program qbe
-    qbe = top_level_compile(ast)
+    qbe = QbeModule([
+        QbeFunction('$__main__', True, [QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')], 'w', [])
+    ])
+    qbe, meta_info = compile(ast, scope, qbe)
+    
+    # add a fallback exit block to the __main__ function
+    assert qbe.functions[0].name == '$__main__', 'Internal Error: expected __main__ as first function'
+    qbe.functions[0].blocks.append(QbeBlock('@__fallback_exit__', ['ret 0']))
+
     ssa = str(qbe)
     #DEBUG
     print(ssa)
@@ -92,13 +101,12 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
 
 
 
-def top_level_compile(ast: AST) -> 'QbeModule':
-    # TODO: pull in relevant files for os envm abd select relevant scope
-    # os_env = determine_os_env()
-    scope = Scope.linux_default()
-    qbe = QbeModule()
-    compile(ast, scope, qbe)
-    return qbe
+# def top_level_compile(ast: AST, scope: Scope) -> 'QbeModule':
+#     # TODO: pull in relevant files for os envm abd select relevant scope
+#     # os_env = determine_os_env()
+#     qbe = QbeModule()
+#     compile(ast, scope, qbe)
+#     return qbe
 
 # TODO: move this to something more central like utils
 # from ..python import MetaNamespaceDict
@@ -304,8 +312,13 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
     }
 
 
+@dataclass
+class MetaInfo: ...
 
-def compile(ast:AST, scope:Scope, qbe: QbeModule) -> str:
+def compile(ast:AST, scope:Scope, qbe: QbeModule) -> tuple[QbeModule, MetaInfo]:
+    if isinstance(ast, Void):
+        return qbe, MetaInfo()
+    
     compile_fn_map = get_compile_fn_map()
 
     ast_type = type(ast)
