@@ -36,15 +36,14 @@ from ...syntax import (
 )
 
 from ...postparse import post_parse, FunctionLiteral, Signature, normalize_function_args
-from ...utils import Options
+from ...utils import BaseOptions, Backend
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, cast, Callable as TypingCallable, Any, Generic, Literal
+from typing import Protocol, Literal
 from functools import cache
-from collections import defaultdict
-from types import SimpleNamespace
 from itertools import count
+from argparse import ArgumentParser, Namespace
 
 
 import pdb
@@ -52,7 +51,6 @@ import pdb
 
 from functools import cache
 from pathlib import Path
-from ...utils import Options
 
 
 # TODO: not quite sure what to do about scope. for now, just steal from
@@ -60,6 +58,43 @@ from ...utils import Options
 
 # command to compile a .qbe file to an executable
 # qbe <file>.ssa | gcc -x assembler -static -o hello
+
+OS = Literal['linux', 'apple', 'windows']
+Arch = Literal['x86_64', 'arm64', 'riscv64']
+
+@dataclass
+class Options(BaseOptions):
+    os: OS
+    arch: Arch
+    build_only: bool
+    test_qbe: bool
+    opt_level: int
+    emit_asm: bool
+    emit_qbe: bool
+
+def make_argparser(parent: ArgumentParser) -> None:
+    parent.add_argument('-os', type=str, help='Operating system name for cross compilation. If not provided, defaults to current host OS', choices=OS.__args__)
+    parent.add_argument('-arch', type=str, help='Architecture name for cross compilation. If not provided, defaults to current host arch', choices=Arch.__args__)
+    parent.add_argument('-b', '--build-only', action='store_true', help='Only compile/build the program, do not run it')
+
+    parent.add_argument('--test-qbe', action='store_true', help='Test option for the QBE backend')
+    parent.add_argument('--opt-level', type=int, default=2, help='Optimization level for QBE codegen')
+    parent.add_argument('--emit-asm', action='store_true', help='Emit final assembly output')
+    parent.add_argument('--emit-qbe', action='store_true', help='Emit QBE IR output')
+
+def make_options(args: Namespace) -> Options:
+    return Options(
+        os=args.os,
+        arch=args.arch,
+        build_only=args.build_only,
+        tokens=args.tokens,
+        verbose=args.verbose,
+        test_qbe=args.test_qbe,
+        opt_level=args.opt_level,
+        emit_asm=args.emit_asm,
+        emit_qbe=args.emit_qbe,
+    )
+
 
 def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     # get the source code and tokenize
@@ -100,6 +135,13 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     # run the executable
 
 
+
+QbeBackend = Backend(
+    name='qbe',
+    exec=qbe_compiler,
+    make_argparser = make_argparser,
+    make_options = make_options
+)
 
 # def top_level_compile(ast: AST, scope: Scope) -> 'QbeModule':
 #     # TODO: pull in relevant files for os envm abd select relevant scope

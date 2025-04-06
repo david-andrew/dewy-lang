@@ -1,14 +1,42 @@
 from typing import TypeVar, Generic, Callable
+from dataclasses import dataclass
+from typing import Protocol, TypeVar
+from pathlib import Path
+from argparse import ArgumentParser, Namespace
+
+
 import pdb
 
-
-
-from dataclasses import dataclass
 @dataclass
-class Options:
+class BaseOptions:
     tokens: bool
     verbose: bool
     #TODO: other command line options
+
+T = TypeVar('T', bound=BaseOptions)
+class BackendExecutor(Protocol[T]):
+    def __call__(self, path: Path, args: list[str], options: T) -> None: ...
+class ArgumentParserMaker(Protocol):
+    def __call__(self, parent:ArgumentParser) -> None: ...
+class OptionsMaker(Protocol[T]):
+    def __call__(self, args: Namespace) -> T: ...
+
+@dataclass
+class Backend(Generic[T]):
+    name: str
+    exec: BackendExecutor[T]
+    make_argparser: ArgumentParserMaker
+    make_options: OptionsMaker[T]
+
+
+def try_install_rich():
+    try:
+        from rich import traceback
+        traceback.install(show_locals=True)
+    except:
+        print('rich unavailable for import. using built-in printing')
+
+
 
 
 def wrap_coords(method: Callable):

@@ -35,18 +35,36 @@ from ..syntax import (
 )
 
 from ..postparse import post_parse, FunctionLiteral, Signature, normalize_function_args
-from ..utils import Options
+from ..utils import Backend, BaseOptions
 
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast, Callable as TypingCallable, Any, Generic
 from functools import cache
-from collections import defaultdict
-from types import SimpleNamespace
+from argparse import ArgumentParser, Namespace
+# from collections import defaultdict
+# from types import SimpleNamespace
 
 
 import pdb
 
+
+@dataclass
+class Options(BaseOptions):
+    test_option: bool = False
+
+
+def make_argparser(parent: ArgumentParser) -> None:
+    parent.add_argument('--test-option', action='store_true', help='Test option for the python backend')
+
+def make_options(args: Namespace) -> Options:
+    return Options(
+        tokens=args.tokens,
+        verbose=args.verbose,
+
+        # TODO: collect other options here
+        test_option=args.test_option,
+    )
 
 
 def python_interpreter(path: Path, args:list[str], options: Options) -> None:
@@ -68,6 +86,16 @@ def python_interpreter(path: Path, args:list[str], options: Options) -> None:
     res = top_level_evaluate(ast)
     if res is not void:
         print(res)
+
+
+PythonBackend = Backend[Options](
+    name = 'python',
+    exec = python_interpreter,
+    make_argparser = make_argparser,
+    make_options = make_options
+)
+
+    
 
 def python_repl(args: list[str], options: Options):
     try:
