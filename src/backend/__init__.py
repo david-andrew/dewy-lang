@@ -2,32 +2,29 @@
 Collection of all the Dewy Language backends
 """
 
-from .python import PythonBackend, python_repl
-from .qbe import QbeBackend
-# from .llvm import llvm_compiler
-# from .c import c_compiler
-# from .x86_64 import x86_64_compiler
-# from .arm import arm_compiler
-# from .riscv import riscv_compiler
-# from .shell import shell_compiler
-# from typing import Protocol
+from .python import python_backend, python_repl
+from .qbe import qbe_backend
+from .llvm import llvm_backend
+from .c import c_backend
+from .x86_64 import x86_64_backend
+from .arm import arm_backend
+from .riscv import riscv_backend
+from .shell import shell_backend
 from pathlib import Path
-# from argparse import ArgumentParser
-# from dataclasses import dataclass
 from ..utils import Backend
 
 
 
 # TODO: perhaps we could automatically discover these backends based on files in the backend/ folder
 backends: list[Backend] = [
-    PythonBackend,
-    QbeBackend,
-    # llvm_compiler,
-    # c_compiler,
-    # x86_64_compiler,
-    # arm_compiler,
-    # riscv_compiler,
-    # shell_compiler,
+    python_backend,
+    qbe_backend,
+    llvm_backend,
+    c_backend,
+    x86_64_backend,
+    arm_backend,
+    riscv_backend,
+    shell_backend,
 ]
 
 backend_map = {

@@ -1,1 +1,1 @@
-from .qbe import QbeBackend
+from .qbe import qbe_backend

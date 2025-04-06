@@ -88,7 +88,7 @@ def python_interpreter(path: Path, args:list[str], options: Options) -> None:
         print(res)
 
 
-PythonBackend = Backend[Options](
+python_backend = Backend[Options](
     name = 'python',
     exec = python_interpreter,
     make_argparser = make_argparser,

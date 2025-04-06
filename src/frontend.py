@@ -1,6 +1,6 @@
 from pathlib import Path
 from argparse import ArgumentParser, REMAINDER
-from .backend import backend_names, get_backend, PythonBackend, python_repl, QbeBackend, get_version
+from .backend import backend_names, get_backend, python_repl, get_version
 from .utils import try_install_rich
 import sys
 

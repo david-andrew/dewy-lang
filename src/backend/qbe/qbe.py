@@ -136,7 +136,7 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
 
 
 
-QbeBackend = Backend(
+qbe_backend = Backend[Options](
     name='qbe',
     exec=qbe_compiler,
     make_argparser = make_argparser,
