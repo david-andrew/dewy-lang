@@ -44,6 +44,8 @@ def main():
     
     # if no file was provided, we enter REPL mode (backend is ignored)
     if args.file is None:
+        if args.interpret or args.compile or args.backend:
+            print("Warning: backend selection flags [--interpret --compile --backend] are ignored in REPL mode")
         args.backend = 'python'
         args.interpret = False
         args.compile = False
