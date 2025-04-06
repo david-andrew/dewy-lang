@@ -125,6 +125,10 @@ def make_options(args: Namespace) -> Options:
 
 
 def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
+    # create a __dewycache__ directory if it doesn't exist
+    cache_dir = path.parent / '__dewycache__'
+    cache_dir.mkdir(exist_ok=True)
+    
     # get the source code and tokenize
     src = path.read_text()
     tokens = tokenize(src)
@@ -152,9 +156,19 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     assert qbe.functions[0].name == '$__main__', 'Internal Error: expected __main__ as first function'
     qbe.functions[0].blocks.append(QbeBlock('@__fallback_exit__', ['ret 0']))
 
+    # generate the QBE IR string
     ssa = str(qbe)
+
+    # write the qbe to a file
+    qbe_file = cache_dir / f'{path.name}.qbe'
+    qbe_file.write_text(ssa)
+
+    # get paths to the relevant core files 
+
+
     #DEBUG
-    print(ssa)
+    # print(ssa)
+    # print(f'\n{args=}, {options=}')
 
     # TODO:
     # write the ssa to a file
@@ -323,7 +337,7 @@ class QbeModule:
     def __str__(self) -> str:
         functions = '\n\n'.join(map(str, self.functions))
         global_data = '\n'.join(self.global_data)
-        return f'{global_data}\n\n{functions}'
+        return f'{global_data}\n\n{functions}'.strip()
 
 
 from typing import Protocol, TypeVar
