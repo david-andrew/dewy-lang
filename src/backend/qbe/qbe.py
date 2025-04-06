@@ -180,47 +180,32 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     program = cache_dir / path.stem
 
     # compile the qbe file to assembly
+    # assemble the assembly files into object files
+    # link the object files into an executable
     with program.with_suffix('.s').open('w') as f:
         subprocess.run(['qbe', '-t', options.target_system, qbe_file], stdout=f, check=True)
-
-    # assemble the assembly files into object files
     subprocess.run(['as', '-o', program.with_suffix('.o'), program.with_suffix('.s')], check=True)
     subprocess.run(['as', '-o', syscalls.with_suffix('.o'), syscalls], check=True)
-
-    # link the object files into an executable
     subprocess.run(['ld', '-o', program, program.with_suffix('.o'), syscalls.with_suffix('.o')], check=True)
 
-    # clean up assembly files
-    if options.emit_asm:
-        print(f'Assembly output written to {program.with_suffix(".s")}')
-        print(f'Syscall assembly output written to {syscalls}')
-    else:
-        subprocess.run(['rm', program.with_suffix('.s')], check=True)
-
-    # clean up object files
+    # clean up qbe, assembly, and object files
     subprocess.run(['rm', program.with_suffix('.o'), syscalls.with_suffix('.o')], check=True)
-
-    # clean up qbe files
     if options.emit_qbe:
         print(f'QBE output written to {qbe_file}')
     else:
         subprocess.run(['rm', qbe_file], check=True)
+    if options.emit_asm:
+        print(f'Assembly output written to {program.with_suffix(".s")}')
+        print(f'Syscall assembly output at {syscalls}')
+    else:
+        subprocess.run(['rm', program.with_suffix('.s')], check=True)
+
 
     # Run the program
     if options.run_program:
         if options.verbose: print(f'./{program} {" ".join(args)}')
         os.execv(program, [program] + args)
 
-
-    #DEBUG
-    # print(ssa)
-    # print(f'\n{args=}, {options=}')
-
-    # TODO:
-    # write the ssa to a file
-    # compile the ssa with qbe
-    # construct the full executable
-    # run the executable
 
 
 qbe_backend = Backend[Options](
