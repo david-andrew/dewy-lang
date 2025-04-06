@@ -38,6 +38,7 @@ from ...syntax import (
 from ...postparse import post_parse, FunctionLiteral, Signature, normalize_function_args
 from ...utils import BaseOptions, Backend
 
+import platform
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, Literal
@@ -61,14 +62,25 @@ from pathlib import Path
 
 OS = Literal['linux', 'apple', 'windows']
 Arch = Literal['x86_64', 'arm64', 'riscv64']
+QbeSystem = Literal['amd64_sysv', 'amd64_apple', 'arm64', 'arm64_apple', 'rv64']
+
+arch_map: dict[Arch, str] = {
+    'x86_64': 'amd64',
+    'arm64': 'arm64',
+    'riscv64': 'rv64',
+}
+os_map: dict[OS, str] = {
+    'linux': 'sysv',
+    'apple': 'apple',
+    'windows': 'windows',
+}
 
 @dataclass
 class Options(BaseOptions):
-    os: OS
-    arch: Arch
-    build_only: bool
-    test_qbe: bool
-    opt_level: int
+    target_os: OS
+    target_arch: Arch
+    target_system: QbeSystem
+    run_program: bool
     emit_asm: bool
     emit_qbe: bool
 
@@ -79,18 +91,34 @@ def make_argparser(parent: ArgumentParser) -> None:
 
     parent.add_argument('--test-qbe', action='store_true', help='Test option for the QBE backend')
     parent.add_argument('--opt-level', type=int, default=2, help='Optimization level for QBE codegen')
-    parent.add_argument('--emit-asm', action='store_true', help='Emit final assembly output')
-    parent.add_argument('--emit-qbe', action='store_true', help='Emit QBE IR output')
+    # TODO: figure out how to allow these to optionally accept a path as --emit-asm=<path>
+    #       tried: nargs='?', const=True, default=False, but this will cause the args to greedily eat any positional arguments after
+    #       if there is no `=`. Somehow need to ignore such cases which instead just go with True 
+    parent.add_argument('--emit-asm', action='store_true', help='Emit final assembly output. If no path is specified, output will be placed in __dewycache__/<program>.s')
+    parent.add_argument('--emit-qbe', action='store_true', help='Emit QBE IR output. If no path is specified, output will be placed in __dewycache__/<program>.qbe')
 
 def make_options(args: Namespace) -> Options:
+    # get the host system info
+    host_os = platform.system().lower()
+    host_arch = platform.machine().lower()
+    host_system = get_qbe_target(host_arch, host_os)
+
+    target_os: str = args.os if args.os else host_os
+    target_arch: str = args.arch if args.arch else host_arch
+    target_system = get_qbe_target(target_arch, target_os)
+
+    cross_compiling = target_system != host_system
+    run_program = not args.build_only and not cross_compiling
+
+
     return Options(
-        os=args.os,
-        arch=args.arch,
-        build_only=args.build_only,
         tokens=args.tokens,
         verbose=args.verbose,
-        test_qbe=args.test_qbe,
-        opt_level=args.opt_level,
+        # -------------------- #
+        target_os=target_os,
+        target_arch=target_arch,
+        target_system=target_system,
+        run_program=run_program,
         emit_asm=args.emit_asm,
         emit_qbe=args.emit_qbe,
     )
@@ -135,13 +163,33 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     # run the executable
 
 
-
 qbe_backend = Backend[Options](
     name='qbe',
     exec=qbe_compiler,
     make_argparser = make_argparser,
     make_options = make_options
 )
+
+
+
+def get_qbe_target(arch_name: Arch, os_name: OS) -> QbeSystem:
+    if arch_name not in arch_map:
+        raise ValueError(f"Unsupported architecture: {arch_name}, supported: {list(arch_map.keys())}")
+    if os_name not in os_map:
+        raise ValueError(f"Unsupported OS: {os_name}, supported: {list(os_map.keys())}")
+    
+    arch_name = arch_map[arch_name]
+    os_name = os_map[os_name]
+
+    qbe_target = arch_name
+    if arch_name in ['amd64', 'arm64'] and os_name == 'apple':
+        qbe_target += '_apple'
+    elif arch_name == 'amd64' and os_name == 'sysv':
+        qbe_target += '_sysv'
+    
+    return qbe_target
+
+
 
 # def top_level_compile(ast: AST, scope: Scope) -> 'QbeModule':
 #     # TODO: pull in relevant files for os envm abd select relevant scope
