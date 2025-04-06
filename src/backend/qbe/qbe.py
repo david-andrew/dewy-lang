@@ -45,6 +45,8 @@ from typing import Protocol, Literal
 from functools import cache
 from itertools import count
 from argparse import ArgumentParser, Namespace
+import subprocess
+import os
 
 
 import pdb
@@ -54,11 +56,20 @@ from functools import cache
 from pathlib import Path
 
 
-# TODO: not quite sure what to do about scope. for now, just steal from
-# from ..python import Scope, Closure
 
 # command to compile a .qbe file to an executable
-# qbe <file>.ssa | gcc -x assembler -static -o hello
+# $ qbe <file>.ssa | gcc -x assembler -static -o hello
+
+# bare metal version of qbe (requires some assembly as the entrypoint/syscall interface, e.g. syscalls.s)
+# $ qbe -t <target> all.qbe files.qbe toinclude.qbe > program.s
+# $ as -o program.o program.s
+# $ as -o syscalls.o
+# $ ld -o program program.o syscalls.o
+
+
+# location of this directory (for referencing build files)
+here = Path(__file__).parent
+
 
 OS = Literal['linux', 'apple', 'windows']
 Arch = Literal['x86_64', 'arm64', 'riscv64']
@@ -163,7 +174,42 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     qbe_file = cache_dir / f'{path.name}.qbe'
     qbe_file.write_text(ssa)
 
-    # get paths to the relevant core files 
+    # get paths to the relevant core files
+    syscalls = here / f'{options.target_os}-syscalls-{options.target_arch}.s'
+    syscalls = syscalls.relative_to(os.getcwd(), walk_up=True)
+    program = cache_dir / path.stem
+
+    # compile the qbe file to assembly
+    with program.with_suffix('.s').open('w') as f:
+        subprocess.run(['qbe', '-t', options.target_system, qbe_file], stdout=f, check=True)
+
+    # assemble the assembly files into object files
+    subprocess.run(['as', '-o', program.with_suffix('.o'), program.with_suffix('.s')], check=True)
+    subprocess.run(['as', '-o', syscalls.with_suffix('.o'), syscalls], check=True)
+
+    # link the object files into an executable
+    subprocess.run(['ld', '-o', program, program.with_suffix('.o'), syscalls.with_suffix('.o')], check=True)
+
+    # clean up assembly files
+    if options.emit_asm:
+        print(f'Assembly output written to {program.with_suffix(".s")}')
+        print(f'Syscall assembly output written to {syscalls}')
+    else:
+        subprocess.run(['rm', program.with_suffix('.s')], check=True)
+
+    # clean up object files
+    subprocess.run(['rm', program.with_suffix('.o'), syscalls.with_suffix('.o')], check=True)
+
+    # clean up qbe files
+    if options.emit_qbe:
+        print(f'QBE output written to {qbe_file}')
+    else:
+        subprocess.run(['rm', qbe_file], check=True)
+
+    # Run the program
+    if options.run_program:
+        if options.verbose: print(f'./{program} {" ".join(args)}')
+        os.execv(program, [program] + args)
 
 
     #DEBUG
