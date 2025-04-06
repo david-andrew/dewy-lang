@@ -22,7 +22,7 @@ def c_compiler(path: Path, args: list[str], options: Options) -> None:
 
 
 c_backend = Backend[Options](
-    name='c',
+    name='C',
     exec=c_compiler,
     make_argparser=make_argparser,
     make_options=make_options

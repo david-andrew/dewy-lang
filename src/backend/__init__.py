@@ -28,7 +28,7 @@ backends: list[Backend] = [
 ]
 
 backend_map = {
-    backend.name: backend for backend in backends
+    backend.name.lower(): backend for backend in backends
 }
 
 # TODO: for now we're gonna skip this and all shell backends are accessed under the name 'shell'

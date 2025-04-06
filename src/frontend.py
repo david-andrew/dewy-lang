@@ -22,7 +22,7 @@ def main():
     group = arg_parser.add_mutually_exclusive_group()
     group.add_argument('-i', '--interpret', action='store_true', help=f'Run in interpreter mode with the python backend')
     group.add_argument('-c', '--compile', action='store_true', help=f'Run in compiler mode with the QBE backend')
-    group.add_argument('--backend', choices=backend_names, type=str, help=f'Specify a backend compiler/interpreter to use (default: {default_backend_name})')
+    group.add_argument('--backend', choices=backend_names, type=str.lower, help=f'Specify a backend compiler/interpreter to use (default: {default_backend_name})')
 
     # other args for the base 
     arg_parser.add_argument('-v', '--version', action='version', version=f'Dewy {get_version()}', help='Print version information and exit')
