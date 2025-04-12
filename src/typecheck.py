@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from .syntax import (
     AST,
-    Type,
+    Type, TypeParam,
     PointsTo, BidirPointsTo,
     ListOfASTs, Block, Array, Group, Range, ObjectLiteral, Dict, BidirDict, UnpackTarget,
     TypedIdentifier,
@@ -30,6 +30,7 @@ from .syntax import (
     CollectInto, SpreadOutFrom,
     DeclarationType,
 )
+from .parser import QJux
 from .postparse import FunctionLiteral, Signature
 
 
@@ -275,14 +276,66 @@ def typeof(ast: AST, scope: Scope, params:bool=False) -> TypeExpr:
 # def promote/coerce() -> Type: #or make_compatible
 # promotion_table = {...}
 # type_tree = {...}
-
-def typecheck_and_resolve(ast: AST, scope: Scope) -> tuple[AST, Scope]:
+# TODO: perhaps ctx should be a dataclass that contains scope but also any other context needed? TBD...
+def typecheck_and_resolve(ast: AST, scope: Scope, ctx=None) -> tuple[AST, Scope]:
     """Typecheck the given AST, and resolve any quantum ASTs to concrete selections based on the types"""
-    if isinstance(ast, Void):
-        return ast, scope
-    
+    # ctx_stack: list[Literal['assigning', 'etc']] = []
 
-    pdb.set_trace()
+    ast = Group([ast])
+    for i in (gen := ast.__full_traversal_iter__()):
+
+        match i:
+            case Void(): ... 
+                # return ast, scope
+            case Identifier(): ... # TODO...
+            case Signature(): ...
+            case Assign():
+                # TODO: put the identifier into the scope with the type of the right...
+                ...
+
+                # # TODO: handling identifier or other assignment targets on the left...
+                # typecheck_and_resolve(ast.right, scope)
+                # return ast, scope
+            case Group(items=items): ...
+                # pdb.set_trace()
+                # ...
+                # results = []
+                # for item in items:
+                #     result = typecheck_and_resolve(item, scope)
+                #     results.append(result)
+                # pdb.set_trace()
+                # ...
+            case FunctionLiteral(): ...
+                # typecheck_and_resolve(ast.body, scope)
+                # return ast, scope
+            case QJux(call=call, mul=mul, index=index):
+                valid_branches = []
+                if call is not None and is_call_valid(call, scope):
+                    valid_branches.append(call)
+                if index is not None and is_index_valid(index, scope):
+                    valid_branches.append(index)
+                if mul is not None and is_multiply_valid(mul, scope):
+                    valid_branches.append(mul)
+                if len(valid_branches) == 0:
+                    raise ValueError(f'ERROR: no valid branches for QJux. must have at exactly one. {ast=}')
+                if len(valid_branches) > 1:
+                    raise ValueError(f'ERROR: multiple valid branches for QJux. must have exactly one. {ast=}')
+                
+                # TODO: need to overwrite QJux with the valid branch (in place...)
+                gen.send(valid_branches[0])
+                # pdb.set_trace()
+                # ...
+                # return valid_branches[0], scope
+            case Int(): ...
+            
+            case _:
+                pdb.set_trace()
+                ...
+                raise ValueError(f'INTERNAL ERROR: typecheck_and_resolve not implemented for {type(ast)}')
+
+        
+
+    return ast.items[0], scope
     ...
 #     """Check if the given AST is well-formed from a type perspective"""
 #     match ast:
@@ -292,6 +345,33 @@ def typecheck_and_resolve(ast: AST, scope: Scope) -> tuple[AST, Scope]:
 #         case _: raise NotImplementedError(f'typecheck not implemented for {type(ast)}')
 
 # def infer_types(ast: AST, scope: Scope) -> AST:
+
+def is_call_valid(ast: Call, scope: Scope) -> bool:
+    f_type = typeof(ast.f, scope)
+    if issubclass(f_type.t, (FunctionLiteral, CallableBase)):
+        # TODO: check if args match the function signature.
+        #       for now, just skip
+        return True
+    return False
+
+
+def is_index_valid(ast: Index, scope: Scope) -> bool:
+    pdb.set_trace()
+    ...
+
+def is_multiply_valid(ast: Mul, scope: Scope) -> bool:
+    left_type = typeof(ast.left, scope)
+    right_type = typeof(ast.right, scope)
+
+    # early short circuit for common case 
+    if issubclass(left_type.t, (FunctionLiteral, CallableBase)) or issubclass(right_type.t, (FunctionLiteral, CallableBase)):
+        return False
+
+
+    # TODO: probably need some sort of proper table for keeping track of multipliable types
+    pdb.set_trace()
+    ...
+
 
 
 def typeof_identifier(ast: Identifier, scope: Scope, params:bool=False) -> TypeExpr:
@@ -307,7 +387,7 @@ def typeof_identifier(ast: Identifier, scope: Scope, params:bool=False) -> TypeE
 
 # abstract base type to register new callable types
 class CallableBase(AST): ...
-_callable_types = (PrototypeBuiltin, FunctionLiteral, CallableBase)
+# _callable_types = (PrototypeBuiltin, FunctionLiteral, CallableBase)
 # def register_callable(cls: type[AST]):
 #     _callable_types.append(cls)
 
@@ -444,7 +524,7 @@ def typeof_group(ast: Group, scope: Scope, params:bool=False) -> TypeExpr:
         return Type(Void)
     if len(expressed) == 1:
         return expressed[0]
-    raise NotImplementedError(f'Block with multiple expressions not yet supported. {ast=}, {expressed=}')
+    return Type(Group, parameters=TypeParam(expressed))
 
 
 def typeof_block(ast: Block, scope: Scope, params:bool=False) -> TypeExpr:
