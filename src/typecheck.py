@@ -321,11 +321,19 @@ def typecheck_and_resolve(ast: AST, scope: Scope, ctx=None) -> tuple[AST, Scope]
                 if len(valid_branches) > 1:
                     raise ValueError(f'ERROR: multiple valid branches for QJux. must have exactly one. {ast=}')
                 
-                # TODO: need to overwrite QJux with the valid branch (in place...)
-                gen.send(valid_branches[0])
+                # overwrite QJux with the valid branch
+                valid_branch, = valid_branches
+                typecheck_and_resolve(valid_branch, scope) #manually typechecking here since current __full_traversal_iter doesn't recurse into newly sent children... consider adjusting
+                gen.send(valid_branch)
+
                 # pdb.set_trace()
                 # ...
                 # return valid_branches[0], scope
+            case Call(f=f, args=args):
+                # TODO: check if the signature of f agrees with the args...
+                print(f'skipping function typechecking...')
+                ...
+            
             case Int(): ...
             
             case _:
