@@ -44,7 +44,7 @@ from pathlib import Path
 from typing import Protocol, Literal
 from functools import cache
 from itertools import count
-from argparse import ArgumentParser, Namespace
+from argparse import Namespace, ArgumentParser
 import subprocess
 import os
 
@@ -92,21 +92,21 @@ class Options(BaseOptions):
     target_arch: Arch
     target_system: QbeSystem
     run_program: bool
-    emit_asm: bool
-    emit_qbe: bool
+    emit_asm: bool|Path
+    emit_qbe: bool|Path
 
 def make_argparser(parent: ArgumentParser) -> None:
     parent.add_argument('-os', type=str, help='Operating system name for cross compilation. If not provided, defaults to current host OS', choices=OS.__args__)
     parent.add_argument('-arch', type=str, help='Architecture name for cross compilation. If not provided, defaults to current host arch', choices=Arch.__args__)
     parent.add_argument('-b', '--build-only', action='store_true', help='Only compile/build the program, do not run it')
 
-    parent.add_argument('--test-qbe', action='store_true', help='Test option for the QBE backend')
-    parent.add_argument('--opt-level', type=int, default=2, help='Optimization level for QBE codegen')
+    # parent.add_argument('--test-qbe', action='store_true', help='Test option for the QBE backend')
+    # parent.add_argument('--opt-level', type=int, default=2, help='Optimization level for QBE codegen')
     # TODO: figure out how to allow these to optionally accept a path as --emit-asm=<path>
     #       tried: nargs='?', const=True, default=False, but this will cause the args to greedily eat any positional arguments after
     #       if there is no `=`. Somehow need to ignore such cases which instead just go with True 
-    parent.add_argument('--emit-asm', action='store_true', help='Emit final assembly output. If no path is specified, output will be placed in __dewycache__/<program>.s')
-    parent.add_argument('--emit-qbe', action='store_true', help='Emit QBE IR output. If no path is specified, output will be placed in __dewycache__/<program>.qbe')
+    parent.add_argument('--emit-asm', nargs='?', const=True, default=False, help='Emit final assembly output. If no path is specified, output will be placed in __dewycache__/<program>.s')
+    parent.add_argument('--emit-qbe', nargs='?', const=True, default=False, help='Emit QBE IR output. If no path is specified, output will be placed in __dewycache__/<program>.qbe')
 
 def make_options(args: Namespace) -> Options:
     # get the host system info
@@ -121,6 +121,9 @@ def make_options(args: Namespace) -> Options:
     cross_compiling = target_system != host_system
     run_program = not args.build_only and not cross_compiling
 
+    # collect the bool or path args
+    emit_asm = args.emit_asm if isinstance(args.emit_asm, bool) else Path(args.emit_asm)
+    emit_qbe = args.emit_qbe if isinstance(args.emit_qbe, bool) else Path(args.emit_qbe)
 
     return Options(
         tokens=args.tokens,
@@ -130,8 +133,8 @@ def make_options(args: Namespace) -> Options:
         target_arch=target_arch,
         target_system=target_system,
         run_program=run_program,
-        emit_asm=args.emit_asm,
-        emit_qbe=args.emit_qbe,
+        emit_asm=emit_asm,
+        emit_qbe=emit_qbe,
     )
 
 

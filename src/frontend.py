@@ -13,7 +13,7 @@ default_backend_name = 'qbe'
 def main():
 
     # base argparser without backend-specific options
-    arg_parser = ArgumentParser(description='Dewy Compiler', add_help=False)
+    arg_parser = MyArgumentParser(description='Dewy Compiler', add_help=False)
 
     # positional argument for the file to compile
     arg_parser.add_argument('file', nargs='?', help='.dewy file to run. If not provided, enter REPL mode')
@@ -34,7 +34,8 @@ def main():
     arg_parser.add_argument('remaining', nargs=REMAINDER, help='Arguments after the file are passed directly to program')
     
     # initial pass over the args to figure out which backend to use
-    args, _ = arg_parser.parse_known_args()
+    argv = sys.argv[1:]
+    args, _ = arg_parser.parse_known_args(argv)
 
     # verify any file specified exists
     if args.file and not Path(args.file).exists():
@@ -60,11 +61,11 @@ def main():
 
     # augment the argparser with backend-specific options
     backend = get_backend(args.backend)
-    arg_parser = ArgumentParser(parents=[arg_parser], description=f'Dewy Compiler - Backend: {args.backend}')
+    arg_parser = MyArgumentParser(parents=[arg_parser], description=f'Dewy Compiler - Backend: {args.backend}')
     backend.make_argparser(arg_parser)
 
     # reparse now that all the args have been specified
-    args = arg_parser.parse_args()
+    args = arg_parser.parse_args(argv)
 
     # if no file is provided, we enter REPL mode (and no remaining args allowed)
     # TODO: this probably isn't possible to happen since positional args must be specified for there to be remaining args, and the first is taken as the file
@@ -89,6 +90,58 @@ def main():
     
     # run with the selected backend
     backend.exec(Path(args.file), args.remaining, options)
+
+
+
+
+
+
+
+class MyArgumentParser(ArgumentParser):
+    """
+    Custom ArgumentParser that allows for explicit optional arguments 
+    i.e. allow --arg[=optional_value] while preventing --arg optional_value
+    This is achieved by inserting -- between the arg any trailing arguments
+    This is pretty hacky, but it works well enough for now.
+    Current drawbacks:
+    - help message displays incorrectly (e.g. --arg [ARG] rather than --arg[=ARG])
+    - de-syncs sys.argv and the argv actually parsed
+    Longterm solution is probably just implementing our own custom argparser
+    """
+    def __init__(self, *args, **kwargs):
+        self.explicit_optionals: list[str] = []
+        super().__init__(*args, **kwargs)
+
+    def add_argument(self, *name_or_flags, **kwargs):
+        nargs = kwargs.get('nargs')
+        # action = kwargs.get('action')
+        const = kwargs.get('const')
+        default = kwargs.get('default')
+        # special case where we want only explicit optional arguments (i.e. --arg[=optional_value] rather than allowing --arg optional_value)
+        if nargs=='?' and const == True and default == False and len(name_or_flags) == 1 and name_or_flags[0].startswith('--'):
+            self._register_explicit_optional(name_or_flags[0])
+        return super().add_argument(*name_or_flags, **kwargs)
+    
+    def _register_explicit_optional(self, name:str):
+        self.explicit_optionals.append(name)
+    
+    def parse_known_args(self, args, namespace=None):
+        # collect the supplied args
+        if args is None:
+            args = sys.argv[1:]
+
+        # replace any free floating instances of explicit optionals with '--arg --' so that any following args are left alone
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            for name in self.explicit_optionals:
+                if arg == name and i+1 < len(args) and args[i+1] != '--':
+                    args.insert(i+1, '--')
+            i += 1
+
+
+        return super().parse_known_args(args, namespace)
+        
 
 
 
