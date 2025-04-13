@@ -105,8 +105,8 @@ def make_argparser(parent: ArgumentParser) -> None:
     # TODO: figure out how to allow these to optionally accept a path as --emit-asm=<path>
     #       tried: nargs='?', const=True, default=False, but this will cause the args to greedily eat any positional arguments after
     #       if there is no `=`. Somehow need to ignore such cases which instead just go with True 
-    parent.add_argument('--emit-asm', nargs='?', const=True, default=False, help='Emit final assembly output. If no path is specified, output will be placed in __dewycache__/<program>.s')
-    parent.add_argument('--emit-qbe', nargs='?', const=True, default=False, help='Emit QBE IR output. If no path is specified, output will be placed in __dewycache__/<program>.qbe')
+    parent.add_argument('--emit-asm', action='flag_or_explicit', const=True, default=False, metavar='PATH', help='Emit final assembly output. If no path is specified, output will be placed in __dewycache__/<program>.s')
+    parent.add_argument('--emit-qbe', action='flag_or_explicit', const=True, default=False, metavar='PATH', help='Emit QBE IR output. If no path is specified, output will be placed in __dewycache__/<program>.qbe')
 
 def make_options(args: Namespace) -> Options:
     # get the host system info

@@ -1,5 +1,6 @@
 from pathlib import Path
-from argparse import ArgumentParser, REMAINDER
+from argparse import REMAINDER
+from .argparse_monkeypatch import CustomArgumentParser, CustomHelpFormatter, FlagOrEqualsValueAction
 from .backend import backend_names, get_backend, python_repl, get_version
 from .utils import try_install_rich
 import sys
@@ -13,38 +14,43 @@ default_backend_name = 'qbe'
 def main():
 
     # base argparser without backend-specific options
-    arg_parser = MyArgumentParser(description='Dewy Compiler', add_help=False)
+    _base_parser = CustomArgumentParser(description='Dewy Compiler', add_help=False)
 
     # positional argument for the file to compile
-    arg_parser.add_argument('file', nargs='?', help='.dewy file to run. If not provided, enter REPL mode')
+    _base_parser.add_argument('file', nargs='?', help='.dewy file to run. If not provided, enter REPL mode')
 
     # mutually exclusive flags for specifying the backend to use
-    group = arg_parser.add_mutually_exclusive_group()
+    group = _base_parser.add_mutually_exclusive_group()
     group.add_argument('-i', '--interpret', action='store_true', help=f'Run in interpreter mode with the python backend')
     group.add_argument('-c', '--compile', action='store_true', help=f'Run in compiler mode with the QBE backend')
     group.add_argument('--backend', choices=backend_names, type=str.lower, help=f'Specify a backend compiler/interpreter to use (default: {default_backend_name})')
 
     # other args for the base 
-    arg_parser.add_argument('-v', '--version', action='version', version=f'Dewy {get_version()}', help='Print version information and exit')
-    arg_parser.add_argument('-p', '--disable-rich-print', action='store_true', help='Disable using rich for printing stack traces')
-    arg_parser.add_argument('--verbose', action='store_true', help='Print verbose output')
-    arg_parser.add_argument('--tokens', action='store_true', help='Print tokens for the input expression')
+    _base_parser.add_argument('-v', '--version', action='version', version=f'Dewy {get_version()}', help='Print version information and exit')
+    _base_parser.add_argument('-p', '--disable-rich-print', action='store_true', help='Disable using rich for printing stack traces')
+    _base_parser.add_argument('--verbose', action='store_true', help='Print verbose output')
+    _base_parser.add_argument('--tokens', action='store_true', help='Print tokens for the input expression')
     
     # all remaining args will be passed to the program
-    arg_parser.add_argument('remaining', nargs=REMAINDER, help='Arguments after the file are passed directly to program')
+    _base_parser.add_argument('remaining', nargs=REMAINDER, help='Arguments after the file are passed directly to program')
     
+
+    # make a first pass parser that includes a fake --help option so we can detect it without printing it out
+    pre_parser = CustomArgumentParser(parents=[_base_parser], description='Dewy Compiler', add_help=False)
+    pre_parser.add_argument('-h', '--help', action='store_true') # placeholder to be replaced by help option
+
     # initial pass over the args to figure out which backend to use
     argv = sys.argv[1:]
-    args, _ = arg_parser.parse_known_args(argv)
+    args, _ = pre_parser.parse_known_args(argv)
 
     # verify any file specified exists
     if args.file and not Path(args.file).exists():
         print(f"Error: file '{args.file}' does not exist")
-        arg_parser.print_help()
+        _base_parser.print_help()
         sys.exit(1)
     
     # if no file was provided, we enter REPL mode (backend is ignored)
-    if args.file is None:
+    if args.file is None and not args.help:
         if args.interpret or args.compile or args.backend:
             print("Warning: backend selection flags [--interpret --compile --backend] are ignored in REPL mode")
         args.backend = 'python'
@@ -59,19 +65,20 @@ def main():
     if args.backend is None:
         args.backend = default_backend_name
 
-    # augment the argparser with backend-specific options
+    # augment the base argparser with backend-specific options
     backend = get_backend(args.backend)
-    arg_parser = MyArgumentParser(parents=[arg_parser], description=f'Dewy Compiler - Backend: {args.backend}')
-    backend.make_argparser(arg_parser)
+    main_parser = CustomArgumentParser(parents=[_base_parser], description=f'Dewy Compiler - Backend: {args.backend}', formatter_class=CustomHelpFormatter)
+    main_parser.register('action', 'flag_or_explicit', FlagOrEqualsValueAction)
+    backend.make_argparser(main_parser)
 
     # reparse now that all the args have been specified
-    args = arg_parser.parse_args(argv)
+    args = main_parser.parse_args(argv)
 
     # if no file is provided, we enter REPL mode (and no remaining args allowed)
-    # TODO: this probably isn't possible to happen since positional args must be specified for there to be remaining args, and the first is taken as the file
+    # TODO: this branch probably isn't possible to happen since positional args must be specified for there to be remaining args, and the first is taken as the file
     if not args.file and args.remaining:
         print("Error: unrecognized arguments:", " ".join(args.remaining))
-        arg_parser.print_help()
+        main_parser.print_help()
         sys.exit(1)
     
     # use rich for pretty traceback printing
@@ -92,56 +99,6 @@ def main():
     backend.exec(Path(args.file), args.remaining, options)
 
 
-
-
-
-
-
-class MyArgumentParser(ArgumentParser):
-    """
-    Custom ArgumentParser that allows for explicit optional arguments 
-    i.e. allow --arg[=optional_value] while preventing --arg optional_value
-    This is achieved by inserting -- between the arg any trailing arguments
-    This is pretty hacky, but it works well enough for now.
-    Current drawbacks:
-    - help message displays incorrectly (e.g. --arg [ARG] rather than --arg[=ARG])
-    - de-syncs sys.argv and the argv actually parsed
-    Longterm solution is probably just implementing our own custom argparser
-    """
-    def __init__(self, *args, **kwargs):
-        self.explicit_optionals: list[str] = []
-        super().__init__(*args, **kwargs)
-
-    def add_argument(self, *name_or_flags, **kwargs):
-        nargs = kwargs.get('nargs')
-        # action = kwargs.get('action')
-        const = kwargs.get('const')
-        default = kwargs.get('default')
-        # special case where we want only explicit optional arguments (i.e. --arg[=optional_value] rather than allowing --arg optional_value)
-        if nargs=='?' and const == True and default == False and len(name_or_flags) == 1 and name_or_flags[0].startswith('--'):
-            self._register_explicit_optional(name_or_flags[0])
-        return super().add_argument(*name_or_flags, **kwargs)
-    
-    def _register_explicit_optional(self, name:str):
-        self.explicit_optionals.append(name)
-    
-    def parse_known_args(self, args, namespace=None):
-        # collect the supplied args
-        if args is None:
-            args = sys.argv[1:]
-
-        # replace any free floating instances of explicit optionals with '--arg --' so that any following args are left alone
-        i = 0
-        while i < len(args):
-            arg = args[i]
-            for name in self.explicit_optionals:
-                if arg == name and i+1 < len(args) and args[i+1] != '--':
-                    args.insert(i+1, '--')
-            i += 1
-
-
-        return super().parse_known_args(args, namespace)
-        
 
 
 
