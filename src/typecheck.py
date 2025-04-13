@@ -395,7 +395,8 @@ def typeof_identifier(ast: Identifier, scope: Scope, params:bool=False) -> TypeE
 
 # abstract base type to register new callable types
 class CallableBase(AST): ...
-# _callable_types = (PrototypeBuiltin, FunctionLiteral, CallableBase)
+#TODO: this is used by the interpreter. remove when compiler type checking is complete and can replace interpreter stuff
+_callable_types = (PrototypeBuiltin, FunctionLiteral, CallableBase)  
 # def register_callable(cls: type[AST]):
 #     _callable_types.append(cls)
 
