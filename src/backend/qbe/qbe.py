@@ -36,13 +36,12 @@ from ...syntax import (
 )
 
 from ...postparse import post_parse, FunctionLiteral, Signature, normalize_function_args
-# (Keep existing imports: BaseOptions, Backend, platform, dataclasses, Path, Protocol, Literal, cache, count, Namespace, ArgumentParser, subprocess, os)
 from ...utils import BaseOptions, Backend
 
 import platform
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, Literal, cast
+from typing import Protocol, Literal, TypeVar, Optional
 from functools import cache
 from itertools import count
 from argparse import Namespace, ArgumentParser
@@ -100,12 +99,6 @@ def make_argparser(parent: ArgumentParser) -> None:
     parent.add_argument('-os', type=str, help='Operating system name for cross compilation. If not provided, defaults to current host OS', choices=OS.__args__)
     parent.add_argument('-arch', type=str, help='Architecture name for cross compilation. If not provided, defaults to current host arch', choices=Arch.__args__)
     parent.add_argument('-b', '--build-only', action='store_true', help='Only compile/build the program, do not run it')
-
-    # parent.add_argument('--test-qbe', action='store_true', help='Test option for the QBE backend')
-    # parent.add_argument('--opt-level', type=int, default=2, help='Optimization level for QBE codegen')
-    # TODO: figure out how to allow these to optionally accept a path as --emit-asm=<path>
-    #       tried: nargs='?', const=True, default=False, but this will cause the args to greedily eat any positional arguments after
-    #       if there is no `=`. Somehow need to ignore such cases which instead just go with True 
     parent.add_argument('--emit-asm', action='flag_or_explicit', const=True, default=False, metavar='PATH', help='Emit final assembly output. If no path is specified, output will be placed in __dewycache__/<program>.s')
     parent.add_argument('--emit-qbe', action='flag_or_explicit', const=True, default=False, metavar='PATH', help='Emit QBE IR output. If no path is specified, output will be placed in __dewycache__/<program>.qbe')
 
@@ -161,32 +154,34 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     if options.verbose:
         print(repr(ast))
 
-    # Initialize QBE Module with __main__ function stub
-    qbe = QbeModule([
-        QbeFunction('$__main__', True, [QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')], 'w', [])
-    ])
+    # Initialize an *empty* QBE Module
+    qbe = QbeModule()
 
-    # Compile the AST into the QBE module
-    qbe, meta_info = compile(ast, scope, qbe)
+    # Compile the AST into the QBE module. This will create functions as needed.
+    qbe, meta_info = top_level_compile(ast, scope, qbe)
 
-    # Add a fallback exit block to the __main__ function (if it exists and doesn't already have one or a ret)
-    main_fn = next((f for f in qbe.functions if f.name == '$__main__'), None)
-    if main_fn:
-        # Check if the last block already ends with ret or jmp
-        needs_fallback = True
-        if main_fn.blocks:
-            last_block_lines = main_fn.blocks[-1].lines
-            if last_block_lines and (last_block_lines[-1].strip().startswith('ret') or last_block_lines[-1].strip().startswith('jmp')):
-                 needs_fallback = False
-
-        if needs_fallback:
-            main_fn.blocks.append(QbeBlock('@__fallback_exit__', ['ret 0']))
-    else:
-       print("Warning: No $__main__ function generated.")
-
+    # Check if __main__ was defined by the user's code. If not, add a fallback.
+    main_fn_exists = any(f.name == '$__main__' for f in qbe.functions)
+    if not main_fn_exists:
+        if options.verbose:
+            print("Warning: No __main__ function defined in source, adding fallback exit.")
+        # Add the fallback __main__ that just exits with 0
+        qbe.functions.append(
+            QbeFunction(
+                name='$__main__',
+                export=True,
+                args=[QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')],
+                ret='w', # Exit code is typically 'w' (word)
+                blocks=[QbeBlock('@start', ['ret 0'])]
+            )
+        )
 
     # generate the QBE IR string
     ssa = str(qbe)
+    if options.verbose:
+        print("--- Generated QBE ---")
+        print(ssa)
+        print("---------------------")
 
     # write the qbe to a file
     qbe_file = cache_dir / f'{path.name}.qbe'
@@ -207,22 +202,46 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     subprocess.run(['ld', '-o', program, program.with_suffix('.o'), syscalls.with_suffix('.o')], check=True)
 
     # clean up qbe, assembly, and object files
-    subprocess.run(['rm', program.with_suffix('.o'), syscalls.with_suffix('.o')], check=True)
-    if options.emit_qbe:
+    program.with_suffix('.o').unlink(missing_ok=True)
+    syscalls.with_suffix('.o').unlink(missing_ok=True) # Keep syscalls.o optional
+
+    # Handle emit options
+    if options.emit_qbe is True:
         print(f'QBE output written to {qbe_file}')
-    else:
-        subprocess.run(['rm', qbe_file], check=True)
-    if options.emit_asm:
+    elif isinstance(options.emit_qbe, Path):
+        qbe_file.rename(options.emit_qbe)
+        print(f'QBE output written to {options.emit_qbe}')
+    else: # False
+        qbe_file.unlink(missing_ok=True)
+
+    if options.emit_asm is True:
         print(f'Assembly output written to {program.with_suffix(".s")}')
-        print(f'Syscall assembly output at {syscalls}')
-    else:
-        subprocess.run(['rm', program.with_suffix('.s')], check=True)
+        print(f'Syscall assembly used: {syscalls}')
+    elif isinstance(options.emit_asm, Path):
+        program.with_suffix('.s').rename(options.emit_asm)
+        print(f'Assembly output written to {options.emit_asm}')
+        print(f'Syscall assembly used: {syscalls}')
+    else: # False
+        program.with_suffix('.s').unlink(missing_ok=True)
 
 
     # Run the program
     if options.run_program:
         if options.verbose: print(f'./{program} {" ".join(args)}')
         os.execv(program, [program] + args)
+
+
+# Main compile entry point (modified slightly)
+def top_level_compile(ast: AST, scope: 'Scope', qbe: 'QbeModule') -> 'tuple[QbeModule, MetaInfo]':
+    """Top-level compilation function."""
+    if isinstance(ast, Void):
+        return qbe, MetaInfo()
+
+    # Top-level compilation starts without a specific block context.
+    # Handlers for top-level definitions (like Assign for functions) must manage this.
+    compile(ast, scope, qbe, None) # Start with current_block=None
+
+    return qbe, MetaInfo()
 
 
 
@@ -252,18 +271,7 @@ def get_qbe_target(arch_name: Arch, os_name: OS) -> QbeSystem:
     
     return qbe_target
 
-
-
-# def top_level_compile(ast: AST, scope: Scope) -> 'QbeModule':
-#     # TODO: pull in relevant files for os envm abd select relevant scope
-#     # os_env = determine_os_env()
-#     qbe = QbeModule()
-#     compile(ast, scope, qbe)
-#     return qbe
-
-# TODO: move this to something more central like utils
-# from ..python import MetaNamespaceDict
-
+# --- Scope and QBE Data Structures ---
 @dataclass
 class Scope(TypecheckScope):
     # TODO: note that these are only relevant for linux
@@ -325,7 +333,9 @@ class QbeFunction:
         args_str = ', '.join(map(str, self.args))
         ret_str = f'{self.ret} ' if self.ret else '' # QBE requires space after type if present
         # Filter out empty blocks before joining
-        blocks_str = '\n'.join(map(str, filter(lambda b: b.lines, self.blocks)))
+        # Ensure there's at least one block string, even if empty, to put inside {}
+        block_strs = [str(b) for b in self.blocks if b.label or b.lines]
+        blocks_str = '\n'.join(block_strs) if block_strs else ''
         # Ensure there's a newline between header and first block if blocks exist
         sep = '\n' if blocks_str else ''
         return f'{export_str}function {ret_str}{self.name}({args_str}) {{\n{blocks_str}{sep}}}'
@@ -352,15 +362,16 @@ class QbeModule:
 
 # --- Compilation Logic ---
 
-from typing import TypeVar, Optional
 T = TypeVar('T', bound=AST)
 class CompileFunc(Protocol):
-    def __call__(self, ast: T, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[str]:
+    def __call__(self, ast: T, scope: Scope, qbe: QbeModule, current_block: Optional[QbeBlock]) -> Optional[str]:
         """
-        Compiles the AST node, appending instructions to current_block.
+        Compiles the AST node, potentially adding instructions to current_block
+        (if provided and applicable, e.g., inside a function).
         Returns the QBE temporary variable name (%tmpN) or literal ('l 42')
         representing the result of the expression, or None if the node
-        represents an action with no return value (like Assign).
+        represents an action with no return value (like top-level Assign).
+        For top-level nodes like function definitions, current_block might be None.
         """
         ...
 
@@ -370,41 +381,96 @@ class MetaInfo:
     pass
 
 # --- Specific Compile Functions ---
+@cache
+def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
+    """Returns the dispatch map for compilation functions."""
+    return {
+        Assign: compile_assign,
+        Call: compile_call,
+        Int: compile_int,
+        Group: compile_group,
+        # Add other AST types here as they are implemented
+    }
 
-def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[str]:
-    """Handles top-level assignment, especially for __main__."""
-    # Check for the specific case: __main__ = FunctionLiteral(...)
-    if isinstance(ast.left, Identifier) and ast.left.name == '__main__':
-        if isinstance(ast.right, FunctionLiteral):
-            # Find the QBE function for __main__
-            main_func = next((f for f in qbe.functions if f.name == '$__main__'), None)
-            if not main_func:
-                # This shouldn't happen with the current setup, but good practice
-                raise ValueError("Could not find $__main__ QBE function stub.")
 
-            # Create the entry block if it doesn't exist
-            start_block = next((b for b in main_func.blocks if b.label == '@start'), None)
-            if start_block is None:
-                start_block = QbeBlock('@start')
-                main_func.blocks.insert(0, start_block) # Ensure it's the first block
+def compile(ast: AST, scope: Scope, qbe: QbeModule, current_block: Optional[QbeBlock]) -> Optional[str]:
+    """Dispatches compilation to the appropriate function based on AST node type."""
+    compile_fn_map = get_compile_fn_map()
 
-            # Compile the body of the function literal into the start block
-            compile_node(ast.right.body, scope, qbe, start_block)
+    ast_type = type(ast)
+    if ast_type in compile_fn_map:
+        return compile_fn_map[ast_type](ast, scope, qbe, current_block)
 
-            # Ensure the main function returns 0 (success exit code)
-            # Only add `ret 0` if the block doesn't already end with `ret` or `jmp`
-            if not start_block.lines or not (start_block.lines[-1].strip().startswith('ret') or start_block.lines[-1].strip().startswith('jmp')):
-                start_block.lines.append('ret 0')
+    raise NotImplementedError(f'QBE compilation not implemented for AST type: {ast_type}')
 
-            return None # Assignment itself doesn't produce a value
-        else:
-            raise NotImplementedError(f"Cannot assign non-function literal to __main__ yet. Got: {type(ast.right)}")
-    else:
-        # Handle general assignment (later)
-        raise NotImplementedError(f"General assignment compilation not implemented yet. Assigning to: {ast.left}")
 
-def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[str]:
+def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_block: Optional[QbeBlock]) -> Optional[str]:
+    """Handles assignments, creating functions when assigning FunctionLiterals."""
+    match ast:
+        case Assign(left=Identifier(name=func_name), right=FunctionLiteral(args=signature, body=body)):
+            # This assignment defines a function
+            if current_block is not None:
+                 # TODO: Handle nested function definitions later if needed
+                 raise NotImplementedError("Nested function definitions not yet supported.")
+
+            # Determine QBE function properties
+            qbe_func_name = f"${func_name}"
+            is_export = func_name == '__main__'
+            # TODO: Translate Dewy signature to QBE args
+            qbe_args = []
+            if func_name == '__main__':
+                 qbe_args = [QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')]
+            # else: Handle user function signatures later
+
+            # TODO: Determine return type from Dewy type info
+            qbe_ret_type = 'w' if func_name == '__main__' else None # Assume exit code for main, void otherwise
+
+            # Create the new QBE function
+            new_func = QbeFunction(
+                name=qbe_func_name,
+                export=is_export,
+                args=qbe_args,
+                ret=qbe_ret_type,
+                blocks=[] # Start with no blocks
+            )
+
+            # Create the entry block
+            start_block = QbeBlock('@start')
+            new_func.blocks.append(start_block)
+
+            # Add the function to the module *before* compiling body
+            # (needed if the body recursively calls itself)
+            qbe.functions.append(new_func)
+
+            # Compile the function body into the start block
+            # A new scope might be needed for the function body later
+            compile(body, scope, qbe, start_block)
+
+            # Add final return if necessary (especially for __main__)
+            if func_name == '__main__':
+                 if not start_block.lines or not (start_block.lines[-1].strip().startswith('ret') or start_block.lines[-1].strip().startswith('jmp')):
+                     start_block.lines.append('ret 0')
+            # else: Handle returns for user functions later
+
+            return None # Function definition itself doesn't yield a value here
+
+        case Assign(left=Identifier(name=var_name), right=value_ast):
+             # Handle variable assignment (later)
+             if current_block is None:
+                 raise NotImplementedError(f"Top-level variable assignment ('{var_name}') not yet supported.")
+             # Compile value, generate store instruction, etc.
+             raise NotImplementedError(f"Variable assignment compilation not implemented yet.")
+
+        case _:
+            # Handle other assignment targets (unpacking, etc.) later
+            raise NotImplementedError(f"Assignment compilation not implemented for target: {ast.left}")
+
+
+def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_block: Optional[QbeBlock]) -> Optional[str]:
     """Compiles a function call."""
+    if current_block is None:
+        raise ValueError("Cannot compile a function call outside of a function block.")
+
     # 1. Resolve the function name
     if not isinstance(ast.f, Identifier):
         # Later handle complex function expressions (e.g., (get_func())())
@@ -415,103 +481,57 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_block: QbeBloc
 
     # 2. Compile arguments
     qbe_args = []
+    arg_nodes = []
     if ast.args:
         if isinstance(ast.args, Group):
-            for arg_ast in ast.args.items:
-                arg_val = compile_node(arg_ast, scope, qbe, current_block)
-                if arg_val is None:
-                    raise ValueError(f"Argument expression did not produce a value: {arg_ast}")
-                # Determine argument type (simple for now)
-                # TODO: Use type information from scope/qbe._symbols
-                arg_type = 'l' # Assume long for now for syscalls
-                qbe_args.append(f"{arg_type} {arg_val}")
+            arg_nodes = ast.args.items
         else:
-            # Handle single argument not in a group
-            arg_val = compile_node(ast.args, scope, qbe, current_block)
-            if arg_val is None:
-                 raise ValueError(f"Argument expression did not produce a value: {ast.args}")
-            arg_type = 'l'
-            qbe_args.append(f"{arg_type} {arg_val}")
+            arg_nodes = [ast.args] # Handle single argument
+
+    for arg_ast in arg_nodes:
+        # Pass the *current* block for argument compilation
+        arg_val = compile(arg_ast, scope, qbe, current_block)
+        if arg_val is None:
+            raise ValueError(f"Argument expression did not produce a value: {arg_ast}")
+        # Determine argument type (simple for now)
+        # TODO: Use type information from scope/qbe._symbols
+        arg_type = 'l' # Assume long for now for syscalls
+        qbe_args.append(f"{arg_type} {arg_val}")
 
 
     # 3. Generate the call instruction
     args_str = ", ".join(qbe_args)
     call_instr = f"call {qbe_func_name}({args_str})"
 
-    # 4. Handle return value (if necessary)
-    # TODO: Check the return type of the function from scope/type info
-    # For syscalls, the convention often puts return in a specific register (%rax/%eax)
-    # QBE's `call` can assign the result to a temporary. For now, assume void return.
-    # If it did return:
-    #   ret_temp = qbe.get_temp()
-    #   ret_type = 'l' # Get from type info
-    #   call_instr = f"{ret_temp} = {ret_type} call {qbe_func_name}({args_str})"
-    #   current_block.lines.append(call_instr)
-    #   return ret_temp
+    # 4. Handle return value (if necessary) - Assume void for syscalls for now
+    # TODO: Check function return type and assign to temp if needed.
     current_block.lines.append(call_instr)
     return None # Syscalls here effectively return void in the Dewy sense
 
-def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[str]:
+def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_block: Optional[QbeBlock]) -> Optional[str]:
     """Returns the QBE representation of an integer literal."""
-    # Assume 'l' (long) for now. Could be 'w' (word) based on context/type info later.
-    return f"{ast.val}" # QBE uses direct integers for constants
+    # QBE uses direct integers for constants. Prepend type for clarity in instruction.
+    # The 'l' type is added by the instruction using this value (e.g., call)
+    return f"{ast.val}"
 
-def compile_group(ast: Group, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[str]:
-    """Compiles a group. Typically returns the result of the last expression."""
+def compile_group(ast: Group, scope: Scope, qbe: QbeModule, current_block: Optional[QbeBlock]) -> Optional[str]:
+    """Compiles a group. Returns the result of the last expression."""
+    if current_block is None and len(ast.items) > 0:
+        # This might happen if a Group is the top-level AST node after `compile` starts.
+        # This case needs refinement. Can a bare group be a valid top-level program?
+        # For now, assume it needs a block context.
+        raise ValueError("Cannot compile a Group node outside of a function block context.")
+        # OR, if valid: Compile last item, but where do instructions go? Needs thought.
+
     last_val = None
     for item in ast.items:
-        last_val = compile_node(item, scope, qbe, current_block)
-    # If the group was used as args, compile_call handles iteration.
-    # If used stand-alone, return the value of the last item.
+        # Ensure we pass the current_block down
+        last_val = compile(item, scope, qbe, current_block)
+
+    # The group itself evaluates to its last contained expression's value.
     return last_val
 
-def compile_node(ast: AST, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[str]:
-    """Dispatches compilation to the appropriate function based on AST node type."""
-    eval_fn_map = get_compile_fn_map()
-    ast_type = type(ast)
 
-    if ast_type in eval_fn_map:
-        # Cast to ensure the protocol is satisfied (mypy helper)
-        compile_func = cast(CompileFunc, eval_fn_map[ast_type])
-        return compile_func(ast, scope, qbe, current_block) # Pass current_block
-
-    # Fallback for nodes that might represent themselves directly (like Int handled above)
-    # Or raise error for unhandled types.
-    # if isinstance(ast, Int): return compile_int(ast, scope, qbe, current_block) # Example if Int wasn't mapped
-
-    raise NotImplementedError(f'QBE compilation not implemented for AST type: {ast_type}')
-
-
-@cache
-def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
-    """Returns the dispatch map for compilation functions."""
-    return {
-        Assign: compile_assign,
-        Call: compile_call,
-        Int: compile_int,
-        Group: compile_group, # Groups are handled contextually (e.g., by compile_call) or compile last expr
-        # Add other AST types here as they are implemented
-        # e.g., FunctionLiteral might create a new QbeFunction
-        #       Identifier might return a QBE variable name ('%var' or parameter name)
-        #       Add, Sub, etc. would generate corresponding QBE instructions
-    }
-
-
-# Main compile entry point (modified slightly)
-def compile(ast: AST, scope: Scope, qbe: QbeModule) -> tuple[QbeModule, MetaInfo]:
-    """Top-level compilation function."""
-    if isinstance(ast, Void):
-        return qbe, MetaInfo()
-
-    # For top-level, we don't have a 'current_block' initially.
-    # Top-level nodes like Assign (to __main__) will find/create their own blocks.
-    # We pass None initially, and specific handlers manage blocks.
-    # --- Revision: The top-level Assign(__main__) handler needs *a* block.
-    # Let's assume compile is called *after* the $__main__ stub exists.
-    # The handler for Assign(__main__) will specifically target $__main__.
-    compile_node(ast, scope, qbe, None) # Pass None, handlers must manage block context
-
-    return qbe, MetaInfo()
 
 
 # --- Builtin Class Definitions (Keep as is for now) ---
