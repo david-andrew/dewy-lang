@@ -4,7 +4,7 @@ from ...typecheck import (
     Scope as TypecheckScope,
     typecheck_and_resolve,
     typecheck_call, typecheck_index, typecheck_multiply,
-    register_typeof, short_circuit,
+    register_typeof, short_circuit, typeof, TypeExpr,
     CallableBase, IndexableBase, IndexerBase, MultipliableBase, ObjectBase,
 )
 from ...parser import top_level_parse, QJux
@@ -36,12 +36,13 @@ from ...syntax import (
 )
 
 from ...postparse import post_parse, FunctionLiteral, Signature, normalize_function_args
+# (Keep existing imports: BaseOptions, Backend, platform, dataclasses, Path, Protocol, Literal, cache, count, Namespace, ArgumentParser, subprocess, os)
 from ...utils import BaseOptions, Backend
 
 import platform
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, Literal
+from typing import Protocol, Literal, cast
 from functools import cache
 from itertools import count
 from argparse import Namespace, ArgumentParser
@@ -160,15 +161,29 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     if options.verbose:
         print(repr(ast))
 
-    # generate the program qbe
+    # Initialize QBE Module with __main__ function stub
     qbe = QbeModule([
         QbeFunction('$__main__', True, [QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')], 'w', [])
     ])
+
+    # Compile the AST into the QBE module
     qbe, meta_info = compile(ast, scope, qbe)
-    
-    # add a fallback exit block to the __main__ function
-    assert qbe.functions[0].name == '$__main__', 'Internal Error: expected __main__ as first function'
-    qbe.functions[0].blocks.append(QbeBlock('@__fallback_exit__', ['ret 0']))
+
+    # Add a fallback exit block to the __main__ function (if it exists and doesn't already have one or a ret)
+    main_fn = next((f for f in qbe.functions if f.name == '$__main__'), None)
+    if main_fn:
+        # Check if the last block already ends with ret or jmp
+        needs_fallback = True
+        if main_fn.blocks:
+            last_block_lines = main_fn.blocks[-1].lines
+            if last_block_lines and (last_block_lines[-1].strip().startswith('ret') or last_block_lines[-1].strip().startswith('jmp')):
+                 needs_fallback = False
+
+        if needs_fallback:
+            main_fn.blocks.append(QbeBlock('@__fallback_exit__', ['ret 0']))
+    else:
+       print("Warning: No $__main__ function generated.")
+
 
     # generate the QBE IR string
     ssa = str(qbe)
@@ -251,89 +266,41 @@ def get_qbe_target(arch_name: Arch, os_name: OS) -> QbeSystem:
 
 @dataclass
 class Scope(TypecheckScope):
-
     # TODO: note that these are only relevant for linux
     # so probably have default versions for other OS environments...
     @staticmethod
+    def _make_linux_syscall_builtin(n:int) -> 'Scope._var':
+        """Creates a syscall builtin for the given syscall number"""
+        return Scope._var(
+            DeclarationType.CONST, Type(Builtin),
+            Builtin(normalize_function_args(Group([
+                TypedIdentifier(Identifier('n'), Type(Int)),
+                *[TypedIdentifier(Identifier(f'a{i}'), Type(Int)) for i in range(n)]
+            ])), Type(Int))
+        )
+    @staticmethod
     def linux_default() -> 'Scope':
-        return Scope(vars={
-            '__syscall1__': Scope._var(
-                DeclarationType.CONST, Type(Builtin),
-                Builtin(normalize_function_args(Group([
-                    TypedIdentifier(Identifier('n'), Type(Int)),
-                    TypedIdentifier(Identifier('a0'), Type(Int))
-                ])), Type(Int))
-            ),
-            '__syscall2__': Scope._var(
-                DeclarationType.CONST, Type(Builtin),
-                Builtin(normalize_function_args(Group([
-                    TypedIdentifier(Identifier('n'), Type(Int)),
-                    TypedIdentifier(Identifier('a0'), Type(Int)),
-                    TypedIdentifier(Identifier('a1'), Type(Int))
-                ])), Type(Int))
-            ),
-            '__syscall3__': Scope._var(
-                DeclarationType.CONST, Type(Builtin),
-                Builtin(normalize_function_args(Group([
-                    TypedIdentifier(Identifier('n'), Type(Int)),
-                    TypedIdentifier(Identifier('a0'), Type(Int)),
-                    TypedIdentifier(Identifier('a1'), Type(Int)),
-                    TypedIdentifier(Identifier('a2'), Type(Int))
-                ])), Type(Int))
-            ),
-            '__syscall4__': Scope._var(
-                DeclarationType.CONST, Type(Builtin),
-                Builtin(normalize_function_args(Group([
-                    TypedIdentifier(Identifier('n'), Type(Int)),
-                    TypedIdentifier(Identifier('a0'), Type(Int)),
-                    TypedIdentifier(Identifier('a1'), Type(Int)),
-                    TypedIdentifier(Identifier('a2'), Type(Int)),
-                    TypedIdentifier(Identifier('a3'), Type(Int))
-                ])), Type(Int))
-            ),
-            '__syscall5__': Scope._var(
-                DeclarationType.CONST, Type(Builtin),
-                Builtin(normalize_function_args(Group([
-                    TypedIdentifier(Identifier('n'), Type(Int)),
-                    TypedIdentifier(Identifier('a0'), Type(Int)),
-                    TypedIdentifier(Identifier('a1'), Type(Int)),
-                    TypedIdentifier(Identifier('a2'), Type(Int)),
-                    TypedIdentifier(Identifier('a3'), Type(Int)),
-                    TypedIdentifier(Identifier('a4'), Type(Int))
-                ])), Type(Int))
-            ),
-            '__syscall6__': Scope._var(
-                DeclarationType.CONST, Type(Builtin),
-                Builtin(normalize_function_args(Group([
-                    TypedIdentifier(Identifier('n'), Type(Int)),
-                    TypedIdentifier(Identifier('a0'), Type(Int)),
-                    TypedIdentifier(Identifier('a1'), Type(Int)),
-                    TypedIdentifier(Identifier('a2'), Type(Int)),
-                    TypedIdentifier(Identifier('a3'), Type(Int)),
-                    TypedIdentifier(Identifier('a4'), Type(Int)),
-                    TypedIdentifier(Identifier('a5'), Type(Int))
-                ])), Type(Int))
-            ),
-        })
+        """A default scope for when compiling to linux. Contains merely __syscall1__ to __syscall6__"""
+        return Scope(vars={f'__syscall{i}__': Scope._make_linux_syscall_builtin(i) for i in range(1, 7)})
 
 
+    # # Add apple_default(), windows_default() etc. later
 
-# @dataclass
-# class CAST:
-#     ast: AST
-#     id: str | None = None
-
-
-# TODO: include user defined struct types...
-QbeType = Literal['w', 'l', 's', 'd', 'b', 'h'] | str
+# QBE Type definition (can be expanded later for structs etc.)
+QbeType = Literal['w', 'l', 's', 'd', 'b', 'h'] | str # Allow custom type names (structs)
 
 @dataclass
 class QbeBlock:
     label: str
-    lines: list[str]
+    lines: list[str] = field(default_factory=list)
 
     def __str__(self) -> str:
-        return '\n    '.join([self.label, *self.lines])
+        indent = '    '
+        # Ensure label starts with @, handle empty lines
+        label_str = self.label if self.label.startswith('@') else f'@{self.label}'
+        lines_str = '\n'.join(f'{indent}{line}' for line in self.lines if line.strip())
+        # Only add newline if there are lines
+        return f'{label_str}\n{lines_str}' if lines_str else label_str
 
 @dataclass
 class QbeArg:
@@ -341,7 +308,9 @@ class QbeArg:
     type: QbeType
 
     def __str__(self) -> str:
-        return f'{self.type} {self.name}'
+        # Handle potential custom types (structs) prepended with ':'
+        type_str = self.type if not self.type.startswith(':') else self.type[1:]
+        return f'{type_str} {self.name}'
 
 @dataclass
 class QbeFunction:
@@ -352,391 +321,206 @@ class QbeFunction:
     blocks: list[QbeBlock]
 
     def __str__(self) -> str:
-        export = 'export ' if self.export else ''
-        args = ', '.join(map(str, self.args))
-        ret = f'{self.ret} ' if self.ret else ''
-        blocks = '\n'.join(map(str, self.blocks))
-        return f'{export}function {ret}{self.name}({args}) {{\n{blocks}\n}}'
+        export_str = 'export ' if self.export else ''
+        args_str = ', '.join(map(str, self.args))
+        ret_str = f'{self.ret} ' if self.ret else '' # QBE requires space after type if present
+        # Filter out empty blocks before joining
+        blocks_str = '\n'.join(map(str, filter(lambda b: b.lines, self.blocks)))
+        # Ensure there's a newline between header and first block if blocks exist
+        sep = '\n' if blocks_str else ''
+        return f'{export_str}function {ret_str}{self.name}({args_str}) {{\n{blocks_str}{sep}}}'
+
 
 @dataclass
 class QbeModule:
     functions: list[QbeFunction] = field(default_factory=list)
     global_data: list[str] = field(default_factory=list)
-    _counter = count(0)
-    _symbols: dict[str, Type] = field(default_factory=dict)
+    _counter: count = field(default_factory=lambda: count(0))
+    _symbols: dict[str, TypeExpr] = field(default_factory=dict) # Map temp names to Dewy types
 
-    # TODO: function for getting identifiers, or next counter
-
+    def get_temp(self, prefix: str = "tmp") -> str:
+        """Gets the next available temporary variable name."""
+        return f"%{prefix}{next(self._counter)}"
 
     def __str__(self) -> str:
-        functions = '\n\n'.join(map(str, self.functions))
-        global_data = '\n'.join(self.global_data)
-        return f'{global_data}\n\n{functions}'.strip()
+        # Ensure proper spacing between sections
+        data_str = '\n'.join(self.global_data)
+        funcs_str = '\n\n'.join(map(str, self.functions))
+        sep1 = '\n\n' if data_str and funcs_str else '\n' if data_str or funcs_str else ''
+        return f'{data_str}{sep1}{funcs_str}'.strip()
 
 
-from typing import Protocol, TypeVar
+# --- Compilation Logic ---
+
+from typing import TypeVar, Optional
 T = TypeVar('T', bound=AST)
-U = TypeVar('U', bound=AST)
 class CompileFunc(Protocol):
-    def __call__(self, ast: T, scope: Scope, qbe: QbeModule) -> str | None:
+    def __call__(self, ast: T, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[str]:
         """
-        Converts the AST to corresponding QBE code.
-        If anything is expressed, the %temporary name of the expression is returned
-        the type of the %temporary is store in module._symbols[%temporary]
+        Compiles the AST node, appending instructions to current_block.
+        Returns the QBE temporary variable name (%tmpN) or literal ('l 42')
+        representing the result of the expression, or None if the node
+        represents an action with no return value (like Assign).
         """
+        ...
 
+@dataclass
+class MetaInfo:
+    """Placeholder for potential future metadata from compilation."""
+    pass
+
+# --- Specific Compile Functions ---
+
+def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[str]:
+    """Handles top-level assignment, especially for __main__."""
+    # Check for the specific case: __main__ = FunctionLiteral(...)
+    if isinstance(ast.left, Identifier) and ast.left.name == '__main__':
+        if isinstance(ast.right, FunctionLiteral):
+            # Find the QBE function for __main__
+            main_func = next((f for f in qbe.functions if f.name == '$__main__'), None)
+            if not main_func:
+                # This shouldn't happen with the current setup, but good practice
+                raise ValueError("Could not find $__main__ QBE function stub.")
+
+            # Create the entry block if it doesn't exist
+            start_block = next((b for b in main_func.blocks if b.label == '@start'), None)
+            if start_block is None:
+                start_block = QbeBlock('@start')
+                main_func.blocks.insert(0, start_block) # Ensure it's the first block
+
+            # Compile the body of the function literal into the start block
+            compile_node(ast.right.body, scope, qbe, start_block)
+
+            # Ensure the main function returns 0 (success exit code)
+            # Only add `ret 0` if the block doesn't already end with `ret` or `jmp`
+            if not start_block.lines or not (start_block.lines[-1].strip().startswith('ret') or start_block.lines[-1].strip().startswith('jmp')):
+                start_block.lines.append('ret 0')
+
+            return None # Assignment itself doesn't produce a value
+        else:
+            raise NotImplementedError(f"Cannot assign non-function literal to __main__ yet. Got: {type(ast.right)}")
+    else:
+        # Handle general assignment (later)
+        raise NotImplementedError(f"General assignment compilation not implemented yet. Assigning to: {ast.left}")
+
+def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[str]:
+    """Compiles a function call."""
+    # 1. Resolve the function name
+    if not isinstance(ast.f, Identifier):
+        # Later handle complex function expressions (e.g., (get_func())())
+        raise NotImplementedError(f"Cannot compile call to non-identifier function: {ast.f}")
+
+    func_name = ast.f.name
+    qbe_func_name = f"${func_name}" # Basic convention: prepend $
+
+    # 2. Compile arguments
+    qbe_args = []
+    if ast.args:
+        if isinstance(ast.args, Group):
+            for arg_ast in ast.args.items:
+                arg_val = compile_node(arg_ast, scope, qbe, current_block)
+                if arg_val is None:
+                    raise ValueError(f"Argument expression did not produce a value: {arg_ast}")
+                # Determine argument type (simple for now)
+                # TODO: Use type information from scope/qbe._symbols
+                arg_type = 'l' # Assume long for now for syscalls
+                qbe_args.append(f"{arg_type} {arg_val}")
+        else:
+            # Handle single argument not in a group
+            arg_val = compile_node(ast.args, scope, qbe, current_block)
+            if arg_val is None:
+                 raise ValueError(f"Argument expression did not produce a value: {ast.args}")
+            arg_type = 'l'
+            qbe_args.append(f"{arg_type} {arg_val}")
+
+
+    # 3. Generate the call instruction
+    args_str = ", ".join(qbe_args)
+    call_instr = f"call {qbe_func_name}({args_str})"
+
+    # 4. Handle return value (if necessary)
+    # TODO: Check the return type of the function from scope/type info
+    # For syscalls, the convention often puts return in a specific register (%rax/%eax)
+    # QBE's `call` can assign the result to a temporary. For now, assume void return.
+    # If it did return:
+    #   ret_temp = qbe.get_temp()
+    #   ret_type = 'l' # Get from type info
+    #   call_instr = f"{ret_temp} = {ret_type} call {qbe_func_name}({args_str})"
+    #   current_block.lines.append(call_instr)
+    #   return ret_temp
+    current_block.lines.append(call_instr)
+    return None # Syscalls here effectively return void in the Dewy sense
+
+def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[str]:
+    """Returns the QBE representation of an integer literal."""
+    # Assume 'l' (long) for now. Could be 'w' (word) based on context/type info later.
+    return f"{ast.val}" # QBE uses direct integers for constants
+
+def compile_group(ast: Group, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[str]:
+    """Compiles a group. Typically returns the result of the last expression."""
+    last_val = None
+    for item in ast.items:
+        last_val = compile_node(item, scope, qbe, current_block)
+    # If the group was used as args, compile_call handles iteration.
+    # If used stand-alone, return the value of the last item.
+    return last_val
+
+def compile_node(ast: AST, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[str]:
+    """Dispatches compilation to the appropriate function based on AST node type."""
+    eval_fn_map = get_compile_fn_map()
+    ast_type = type(ast)
+
+    if ast_type in eval_fn_map:
+        # Cast to ensure the protocol is satisfied (mypy helper)
+        compile_func = cast(CompileFunc, eval_fn_map[ast_type])
+        return compile_func(ast, scope, qbe, current_block) # Pass current_block
+
+    # Fallback for nodes that might represent themselves directly (like Int handled above)
+    # Or raise error for unhandled types.
+    # if isinstance(ast, Int): return compile_int(ast, scope, qbe, current_block) # Example if Int wasn't mapped
+
+    raise NotImplementedError(f'QBE compilation not implemented for AST type: {ast_type}')
 
 
 @cache
 def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
+    """Returns the dispatch map for compilation functions."""
     return {
-        # Declare: compile_declare,
-        QJux: compile_qjux,
+        Assign: compile_assign,
         Call: compile_call,
-        # Block: compile_block,
-        # Group: compile_group,
-        # Array: compile_array,
-        # Dict: compile_dict,
-        # PointsTo: compile_points_to,
-        # BidirDict: compile_bidir_dict,
-        # BidirPointsTo: compile_bidir_points_to,
-        # ObjectLiteral: compile_object_literal,
-        # Object: no_op,
-        # Access: compile_access,
-        # Index: compile_index,
-        # Assign: compile_assign,
-        # IterIn: compile_iter_in,
-        # FunctionLiteral: compile_function_literal,
-        # Closure: compile_closure,
-        # Builtin: compile_builtin,
-        String: compile_string,
-        # IString: compile_istring,
-        # Identifier: cannot_evaluate,
-        # Express: compile_express,
-        # Int: no_op,
-        # Float: no_op,
-        # Bool: no_op,
-        # Range: no_op,
-        # Flow: compile_flow,
-        # Default: compile_default,
-        # If: compile_if,
-        # Loop: compile_loop,
-        # UnaryPos: compile_unary_dispatch,
-        # UnaryNeg: compile_unary_dispatch,
-        # UnaryMul: compile_unary_dispatch,
-        # UnaryDiv: compile_unary_dispatch,
-        # Not: compile_unary_dispatch,
-        # Greater: compile_binary_dispatch,
-        # GreaterEqual: compile_binary_dispatch,
-        # Less: compile_binary_dispatch,
-        # LessEqual: compile_binary_dispatch,
-        # Equal: compile_binary_dispatch,
-        # And: compile_binary_dispatch,
-        # Or: compile_binary_dispatch,
-        # Xor: compile_binary_dispatch,
-        # Nand: compile_binary_dispatch,
-        # Nor: compile_binary_dispatch,
-        # Xnor: compile_binary_dispatch,
-        # Add: compile_binary_dispatch,
-        # Sub: compile_binary_dispatch,
-        # Mul: compile_binary_dispatch,
-        # Div: compile_binary_dispatch,
-        # Mod: compile_binary_dispatch,
-        # Pow: compile_binary_dispatch,
-        # AtHandle: compile_at_handle,
-        # Undefined: no_op,
-        # Void: no_op,
-        # #TODO: other AST types here
+        Int: compile_int,
+        Group: compile_group, # Groups are handled contextually (e.g., by compile_call) or compile last expr
+        # Add other AST types here as they are implemented
+        # e.g., FunctionLiteral might create a new QbeFunction
+        #       Identifier might return a QBE variable name ('%var' or parameter name)
+        #       Add, Sub, etc. would generate corresponding QBE instructions
     }
 
 
-@dataclass
-class MetaInfo: ...
-
-def compile(ast:AST, scope:Scope, qbe: QbeModule) -> tuple[QbeModule, MetaInfo]:
+# Main compile entry point (modified slightly)
+def compile(ast: AST, scope: Scope, qbe: QbeModule) -> tuple[QbeModule, MetaInfo]:
+    """Top-level compilation function."""
     if isinstance(ast, Void):
         return qbe, MetaInfo()
-    
-    compile_fn_map = get_compile_fn_map()
 
-    ast_type = type(ast)
-    if ast_type in compile_fn_map:
-        return compile_fn_map[ast_type](ast, scope, qbe)
-    pdb.set_trace()
-    raise NotImplementedError(f'AST type {ast_type} not implemented yet')
+    # For top-level, we don't have a 'current_block' initially.
+    # Top-level nodes like Assign (to __main__) will find/create their own blocks.
+    # We pass None initially, and specific handlers manage blocks.
+    # --- Revision: The top-level Assign(__main__) handler needs *a* block.
+    # Let's assume compile is called *after* the $__main__ stub exists.
+    # The handler for Assign(__main__) will specifically target $__main__.
+    compile_node(ast, scope, qbe, None) # Pass None, handlers must manage block context
 
-def compile_qjux(ast: QJux, scope: Scope, qbe: QbeModule) -> str:
-    if ast.call is not None and typecheck_call(ast.call, scope):
-        return compile_call(ast.call, scope, qbe)
-    if ast.index is not None and typecheck_index(ast.index, scope):
-        return compile_index(ast.index, scope, qbe)
-    if typecheck_multiply(ast.mul, scope):
-        return compile_binary_dispatch(ast.mul, scope, qbe)
-
-    raise ValueError(f'Typechecking failed to match a valid evaluation for QJux. {ast=}')
+    return qbe, MetaInfo()
 
 
-
-def compile_string(ast: String, scope: Scope, qbe: QbeModule) -> str:
-    pdb.set_trace()
-    ...
-
-def compile_call(call: Call, scope: Scope, qbe: QbeModule) -> str:
-    f = call.f
-
-    # get the expression of the group
-    if isinstance(f, Group):
-        pdb.set_trace()
-        f = evaluate(f, scope)
-
-    # get the value pointed to by the identifier
-    if isinstance(f, Identifier):
-        f = scope.get(f.name).value
-
-    # if this is a handle, do a partial evaluation rather than a call
-    if isinstance(f, AtHandle):
-        pdb.set_trace()
-        return apply_partial_eval(f.operand, call.args, scope)
-
-    # AST being called must be TypingCallable
-    assert isinstance(f, (PrototypeBuiltin, Closure)), f'expected Function or Builtin, got {f}'
-
-    # save the args of the call as metadata for the function AST
-    call_args, call_kwargs = collect_calling_args(call.args, scope)
-    scope.meta[f].call_args = call_args, call_kwargs
-
-    # run the function and return the result
-    if isinstance(f, PrototypeBuiltin):
-        return compile_call_pyaction(f, scope, qbe)
-    if isinstance(f, Closure):
-        return compile_call_closure(f, scope, qbe)
-
-    pdb.set_trace()
-    raise NotImplementedError(f'Function evaluation not implemented yet')
-
-
-
-
-
-#TODO: longer term this might also return a list/dict of spread args passed into the function
-def collect_calling_args(args: AST | None, scope: Scope) -> tuple[list[AST], dict[str, AST]]:
-    """
-    Collect the arguments that a function is being called with
-    e.g. `let fn = (a b c) => a + b + c; fn(1 c=2 3)`
-    then the calling args are [1, 3] and {c: 2}
-
-    Args:
-        args: the arguments being passed to the function. If None, then treat as a no-arg call
-        scope: the scope in which the function is being called
-
-    Returns:
-        a tuple of the positional arguments and keyword arguments
-    """
-    match args:
-        case None | Void(): return [], {}
-        case Identifier(name): return [scope.get(name).value], {}
-        case Assign(left=Identifier(name)|TypedIdentifier(id=Identifier(name)), right=right): return [], {name: right}
-        # case Assign(left=UnpackTarget() as target, right=right): raise NotImplementedError('UnpackTarget not implemented yet')
-        case Assign(): raise NotImplementedError('Assign not implemented yet') #called recursively if a calling arg was an keyword arg rather than positional
-        case CollectInto(right=right):
-            pdb.set_trace()
-            ... #right should be iterable, so extend with the values it expresses
-                #whether to add to args or kwargs depends on each type from right
-            val = evaluate(right, scope)
-            match val:
-                case Array(items): ... #return [collect_calling_args(i, scope) for i in items]
-        case Group(items):
-            call_args, call_kwargs = [], {}
-            for i in items:
-                a, kw = collect_calling_args(i, scope)
-                call_args.extend(a)
-                call_kwargs.update(kw)
-            return call_args, call_kwargs
-
-        #TODO: eventually it should just be anything that is left over is positional args rather than specifying them all out
-        case Int() | String() | IString() | Range() | Call() | Access() | Index() | Express() | QJux() | UnaryPrefixOp() | UnaryPostfixOp() | BinOp() | BroadcastOp():
-            return [args], {}
-        # case Call(): return [args], {}
-        case _:
-            pdb.set_trace()
-            raise NotImplementedError(f'collect_args not implemented yet for {args}')
-
-
-    raise NotImplementedError(f'collect_args not implemented yet for {args}')
-
-
-
-
-
-
-
-
-
-
-def compile_call_pyaction(f: PrototypeBuiltin, scope: Scope, qbe: QbeModule) -> str:
-    pdb.set_trace()
-    ...
-
-
-def compile_call_closure(f: 'Closure', scope: Scope, qbe: QbeModule) -> str:
-    pdb.set_trace()
-    ...
-
-
-
-
-
-# #TODO: consider adding a flag repr vs str, where initially str is used, but children get repr.
-# # as is, stringifying should put quotes around strings that are children of other objects
-# # but top level printed strings should not show their quotes
-# def py_stringify(ast: AST, scope: Scope, top_level:bool=False) -> str:
-#     # don't evaluate. already evaluated by resolve_calling_args
-#     ast = evaluate(ast, scope) if not isinstance(ast, (Builtin, Closure)) else ast
-#     match ast:
-#         # types that require special handling (i.e. because they have children that need to be stringified)
-#         case String(val): return val# if top_level else f'"{val}"'
-#         case Array(items): return f"[{' '.join(py_stringify(i, scope) for i in items)}]"
-#         case Dict(items): return f"[{' '.join(py_stringify(kv, scope) for kv in items)}]"
-#         case PointsTo(left, right): return f'{py_stringify(left, scope)}->{py_stringify(right, scope)}'
-#         case BidirDict(items): return f"[{' '.join(py_stringify(kv, scope) for kv in items)}]"
-#         case BidirPointsTo(left, right): return f'{py_stringify(left, scope)}<->{py_stringify(right, scope)}'
-#         case Range(left, right, brackets): return f'{brackets[0]}{py_stringify_range_operands(left, scope)}..{py_stringify_range_operands(right, scope)}{brackets[1]}'
-#         case Closure(fn): return f'{fn}'
-#         case FunctionLiteral() as fn: return f'{fn}'
-#         case Builtin() as fn: return f'{fn}'
-#         case Object() as obj: return f'{obj}'
-#         # case AtHandle() as at: return py_stringify(evaluate(at, scope), scope)
-
-#         # can use the built-in __str__ method for these types
-#         case Int() | Float() | Bool() | Undefined(): return str(ast)
-
-#         # TBD what other types need to be handled
-#         case _:
-#             pdb.set_trace()
-#             raise NotImplementedError(f'stringify not implemented for {type(ast)}')
-#     pdb.set_trace()
-
-
-#     raise NotImplementedError('stringify not implemented yet')
-
-# def py_stringify_range_operands(ast: AST, scope: Scope) -> str:
-#     """helper function to stringify range operands which may be a single value or a tuple (represented as an array)"""
-#     if isinstance(ast, Array):
-#         return f"{','.join(py_stringify(i, scope) for i in ast.items)}"
-#     return py_stringify(ast, scope)
-
-# def preprocess_py_print_args(args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]:
-#     py_args = [py_stringify(i, scope, top_level=True) for i in args]
-#     py_kwargs = {k: py_stringify(v, scope) for k, v in kwargs.items()}
-#     return py_args, py_kwargs
-
-
-# TODO
-# class BuiltinArgsPreprocessor(Protocol):
-#     def __call__(self, args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]:
-#         ...
-
+# --- Builtin Class Definitions (Keep as is for now) ---
 class Builtin(CallableBase):
     signature: Signature
-    # preprocessor: BuiltinArgsPreprocessor
-    # action: QbeFunction
     return_type: AST
-
-    def __str__(self):
-        return f'{self.signature}:> {self.return_type} => ...'
-
-    # def from_prototype(proto: PrototypeBuiltin, preprocessor: BuiltinArgsPreprocessor, action: QbeFunction) -> 'Builtin':
-    #     return Builtin(
-    #         signature=normalize_function_args(proto.args),
-    #         preprocessor=preprocessor,
-    #         action=action,
-    #         return_type=proto.return_type,
-    #     )
+    def __str__(self): return f'{self.signature}:> {self.return_type} => ...'
 
 class Closure(CallableBase):
     fn: FunctionLiteral
     scope: Scope
-
-    def __str__(self):
-        return f'{self.fn} with <Scope@{hex(id(self.scope))}>'
-
-
-"""
-# type :String = {l, w...} #long term want to just have unicode code points rather than utf-8 bytes
-type :String = {l, b...}
-
-"""
-
-# # TODO:
-# def preprocess_py_print_args(args: list[AST], kwargs: dict[str, AST], scope: Scope) -> tuple[list[Any], dict[str, Any]]: ...
-
-# builtin_map: dict[str, tuple[BuiltinArgsPreprocessor, QbeFunction]] = {
-#     'printl': (preprocess_py_print_args,
-#         QbeFunction(
-#             name='$printl',
-#             export=False,
-#             args=[QbeArg(r'%s', ':String')],
-#             ret=None,
-#             blocks=[
-#                 QbeBlock(
-#                     label='@start',
-#                     lines=[
-#                         'call $print(l %s)',
-#                         'call $__putl()'
-#                     ]
-#                 )
-#             ]
-#         )
-#     ),
-#     'print': (preprocess_py_print_args,
-#         QbeFunction(
-#             name='$print',
-#             export=False,
-#             args=[QbeArg(r'%s', ':String')],
-#             ret=None,
-#             blocks=[
-#                 QbeBlock(
-#                     label='@start',
-#                     lines=[
-#                         '%len =l loadl %s',
-#                         '%data =l add %s 8',
-#                         'call $__write(l %val, l %len)',
-#                     ]
-#                 )
-#             ]
-#         )
-#     ),
-#     'readl': (lambda *a: ([],{}),
-#         QbeFunction(
-#             name='$readl',
-#             export=False,
-#             args=[QbeArg('%s_ptr', 'l')],
-#             ret='l',
-#             blocks=[
-#                 QbeBlock(
-#                     label='@start',
-#                     lines=[
-#                         # '%data_ptr =l add %s_ptr 8',
-#                         # '%len =w call $getl(l %data_ptr)',
-#                     ]
-#                 )
-#             ]
-#         )
-#     ),
-# }
-
-# def insert_builtins(scope: Scope):
-#     """replace prototype builtin stubs with actual implementations"""
-#     for name, (preprocessor, action) in builtin_map.items():
-#         if name in scope.vars:
-#             assert isinstance((proto:=scope.vars[name].value), PrototypeBuiltin)
-#             scope.vars[name].value = Builtin.from_prototype(proto, preprocessor, action)
-#     # if 'printl' in scope.vars:
-#     #     assert isinstance((proto:=scope.vars['printl'].value), PrototypeBuiltin)
-#     #     scope.vars['printl'].value = Builtin.from_prototype(proto, preprocess_py_print_args, py_printl)
-#     # if 'print' in scope.vars:
-#     #     assert isinstance((proto:=scope.vars['print'].value), PrototypeBuiltin)
-#     #     scope.vars['print'].value = Builtin.from_prototype(proto, preprocess_py_print_args, py_print)
-#     # if 'readl' in scope.vars:
-#     #     assert isinstance((proto:=scope.vars['readl'].value), PrototypeBuiltin)
-#     #     scope.vars['readl'].value = Builtin.from_prototype(proto, lambda *a: ([],{}), py_readl)
+    def __str__(self): return f'{self.fn} with <Scope@{hex(id(self.scope))}>'
