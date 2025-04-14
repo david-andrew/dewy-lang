@@ -17,6 +17,14 @@ _start:
     syscall
 
 
+# 0-arg syscall
+.globl __syscall0__
+__syscall0__:
+        movq %rdi, %rax
+        syscall
+        ret
+
+
 # 1-arg syscall
 .globl __syscall1__
 __syscall1__:

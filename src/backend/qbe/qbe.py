@@ -289,7 +289,7 @@ class Scope(TypecheckScope):
     @staticmethod
     def linux_default() -> 'Scope':
         """A default scope for when compiling to linux. Contains merely __syscall1__ to __syscall6__"""
-        return Scope(vars={f'__syscall{i}__': Scope._make_linux_syscall_builtin(i) for i in range(1, 7)})
+        return Scope(vars={f'__syscall{i}__': Scope._make_linux_syscall_builtin(i) for i in range(0, 7)})
 
 
     # # Add apple_default(), windows_default() etc. later
