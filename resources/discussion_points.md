@@ -916,7 +916,7 @@ Then no matter how the scope is exited, the file will always be closed. And the 
 
 This is similar to python's weak references
 
-## Function overloading [`|` and `or`]
+## Function overloading [`&` and `and`]
 
 function overloading will be achieved by combining two or more function literals / function references and binding to a single variable. The question is which operator should be used to achieve this
 
@@ -929,14 +929,17 @@ overloaded = @func1 | @func2
 
 //Using `xor` normally for boolean/bitwise exclusive or
 overloaded = @func1 xor @func2
+
+//Using the `&` operator normally for type intersections:
+overloaded = @func1 & @func2
 ```
 
 Also an existing function could be updated to be overloaded, or further overloaded
 
 ```
 myfunc = (a:int b:str) => 'first version'
-myfunc |= (a:int b:int) => 'second version'
-myfunc |= (a:int b:int c:int) => 'third version'
+myfunc &= (a:int b:int) => 'second version'
+myfunc &= (a:int b:int c:int) => 'third version'
 ```
 
 or
@@ -947,7 +950,7 @@ myfunc xor= (a:int b:int) => 'second version'
 myfunc xor= (a:int b:int c:int) => 'third version'
 ```
 
-Pros and cons for both:
+Pros and cons for each:
 
 - `|` is probably more intuitive
 - `|` is mainly for types though
@@ -967,8 +970,51 @@ Point = (x:number y:number) => [
     __str__ = () => '({x}, {y})'
 ]
 
-__add__ |= (a:Point b:Point) => Point(a.x + b.x, a.y + b.y)
+__add__ &= (a:Point b:Point) => Point(a.x + b.x, a.y + b.y)
 ```
+
+After a long discussion with the wizard, I've landed on using `&` and `and`. Basically it comes down to a couple things. When dealing with types, what does `|` mean?
+
+```dewy
+my_var: A | B
+```
+
+To me that means that my_var is either `A` or `B` but not both at the same time. Which one it is is indeterminate until you type narrow. So if `A` and `B` are function signatures, it feels like the wrong fit for overloading/dispatch, because in dispatch you don't have to type narrow, instead the correct version is selected for you based on the calling argument types.
+What makes more sense to me is `&` intersection of types from typescript:
+
+```typescript
+type A = { id: number };
+type B = { name: string };
+type C = { isActive: boolean };
+
+type ABC = A & B & C;
+
+const example: ABC = {
+  id: 1,
+  name: "Alice",
+  isActive: true
+};
+```
+
+This feels very close to what an overloaded function object would be. All the versions of the function existing side by side, and then some process for going in and picking the exact one you want. In the typescript object case you manually pick by specifying the name, whereas in the dewy overloaded function case, you'd pick the specific overload by specifying the arguments, and the system would select based on which one's signature matches.
+
+
+```dewy
+func_int = (a:int) => 'got int {a}'
+func_str = (a:str b:str) => 'got strs {a}, {b}'
+
+// Combine using '&' or 'and'
+overloaded = @func_int & @func_str
+overloaded = @func_int and @func_str // equivalent
+
+// In-place combination
+func_int &= @func_str // func_int now refers to the overloaded version
+
+// Calling the overloaded function
+printl(overloaded(5))        // Calls the int version
+printl(overloaded('x' 'y')) // Calls the str version
+```
+
 
 ### also random note about in place overloading
 
