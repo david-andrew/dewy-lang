@@ -1028,8 +1028,8 @@ a += 15
 but for function overloading, since functions need to be @referenced, this is what happens
 
 ```
-myfunc |= (a:int b:int) => 'second version'
-// myfunc = @myfunc | ((a:int b:int) => 'second version')
+myfunc &= (a:int b:int) => 'second version'
+// myfunc = @myfunc & ((a:int b:int) => 'second version')
 ```
 
 that is to say, functions are @ referenced when part of an in-place operator
@@ -1037,13 +1037,23 @@ that is to say, functions are @ referenced when part of an in-place operator
 conceivably, we could also do something like this to maintain the symmetry of the notation:
 
 ```
-@myfunc |= (a:int b:int) => 'second version'
-// @myfunc = @myfunc | ((a:int b:int) => 'second version')
+@myfunc &= (a:int b:int) => 'second version'
+// @myfunc = @myfunc & ((a:int b:int) => 'second version')
 ```
 
 This implies that in the `@myfunc` on the left receiving the assignment the `@` is a no-op. which may or may not be what I want to do
 
-Clearly the first way is better though
+Clearly the first way is better though. Probably just make it one of the few cases of syntactic sugar (namely that we'll process a specific AST shape)
+```
+myfunc &= (a:int b:int) => 'second version'
+```
+should know that since the type of `myfunc` is a function that needs to be `@` before it can be modified in place, then the rewrite will add it automatically.
+
+```
+myfunc = @myfunc & (a:int b:int) => 'second version'
+```
+
+Basically in place operators are aware of the type being assigned to, and will apply any special rules needed for the assignment to make sense.
 
 ## Type syntax just forwards to type function
 
