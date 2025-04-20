@@ -156,7 +156,7 @@ class QJux(AST):
     """
     call: Call|None   # syntactically we might know if left is not callable
     index: Index|None # syntactically we definitely know if it's not index if right is not Array or Range
-    mul: Mul
+    mul: Mul          # generally we cannot tell until type checking if mul is valid or not
 
     def __str__(self):
         call = 'call | ' if self.call is not None else ''

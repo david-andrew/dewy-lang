@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod, ABCMeta
-from typing import get_args, get_origin, Generator, Any, Literal, Union, dataclass_transform, Callable as TypingCallable
+from typing import get_args, get_origin, Generator, Any, Literal, Union, dataclass_transform, Callable as TypingCallable, TypeVar
 from types import UnionType
 from dataclasses import dataclass, field, fields
 from enum import Enum, auto
@@ -9,9 +9,6 @@ from .tokenizer import Operator_t, escape_whitespace  # TODO: move into utils
 
 import pdb
 
-
-SideEffect = TypingCallable[[], None]
-no_op: SideEffect = lambda: None
 
 @dataclass_transform()
 class AST(ABC):
@@ -66,9 +63,9 @@ class AST(ABC):
         tee = '├── '
         last = '└── '
 
-        attrs_str = ', '.join(f'{k}={v}' for k, v in self.__iter_members__() if not isinstance(v, AST))
+        attrs_str = ', '.join(f'{k}={v}' for k, v in self.__iter_non_ast_props__())
         yield f'{self.__class__.__name__}({attrs_str})'
-        children = tuple((k, v) for k, v in self.__iter_members__() if isinstance(v, AST))
+        children: tuple[tuple[str, AST], ...] = tuple((k, v) for k, v in self.__iter_ast_props__())
         pointers = [tee] * (len(children) - 1) + [last]
         for (k, v), pointer in zip(children, pointers):
             extension = branch if pointer == tee else space
@@ -77,80 +74,85 @@ class AST(ABC):
             yield f'{prefix}{pointer}{name}{next(gen)}'     # first line gets name and pointer
             yield from gen                                  # rest of lines already have a prefix
 
-    def __iter_members_inner__(self) -> Generator[tuple[Any, str|int, Any], None, None]:
-        import pdb;
-        pdb.set_trace()
 
-    def __iter_members__(self) -> Generator[tuple[str, Any], 'AST', None]:
+    def __iter_ast_props__(self, *, visit_replacement:bool=True) -> Generator[tuple[str, 'AST'], 'AST', None]:
         """
-        A method for getting all properties on the AST instance (including child ASTs, and non-AST properties).
-        Returns a generator of tuples of the form (property_name, property_value)
-        Allows replacing the current AST with a new one during iteration via .send()
-        NOTE: Does not recurse into child ASTs
+        Iterate over all children ASTs of this AST (including those in containers, e.g. list[AST])
+        Allows for in place replacement of the current AST via .send()
+        
+        Arguments:
+            visit_replacement (bool): if True, then anytime .send(ast) is called, the iterator will visit that ast on the next step
+
+        Sends:
+            replacement (AST): an AST to replace the current AST with in the parent/container
+
+        Yields:
+            ast (AST): The current child AST        
         """
         for key, value in self.__dict__.items():
-            # any direct children are ASTs
+            # catch cases of something: AST | None
+            if value is None:
+                continue
+            
             if isinstance(value, AST):
-                replacement = yield key, value
-                if replacement is not None:
-                    setattr(self, key, replacement)
-                    yield
-
-            # any direct children are containers of ASTs
-            elif is_ast_container(self.__class__.__annotations__.get(key)):
-                if value is None:
-                    continue
-
-                if isinstance(value, list):
-                    for i, item in enumerate(value):
-                        replacement = yield '', item
-                        if replacement is not None:
-                            value[i] = replacement
-                            yield
-                # elif isinstance(value, some_other_container_type): ...
-                else:
-                    raise NotImplementedError(f'__iter_members__ over {type(value)} (from member "{key}") of {self} is not yet implemented')
-
-            # properties that are not ASTs
-            else:
-                if key.startswith('_'): # skip private properties
-                    continue
-                _ = yield key, value
-                assert _ is None, f'ILLEGAL: attempted to replace non-AST value "{key}" during __iter_members__ for ast {self}'
-
-    def __iter__(self) -> Generator['AST', None, None]:
-        """DEPRECATED: Use __iter_asts__ instead"""
-        raise DeprecationWarning(f'__iter__ is deprecated. Use __iter_asts__ instead')
-
-    def __iter_asts__(self) -> Generator['AST', None, None]:
-        """Return a generator of the direct children ASTs of the AST"""
-        for _, child in self.__iter_members__():
-            if isinstance(child, AST):
-                yield child
-
-
-    def __full_traversal_iter__(self, *, pre_effect:SideEffect=no_op, post_effect:SideEffect=no_op, visit_replacement:bool=False) -> Generator['AST', 'AST', None]:
-        """
-        Recursive in-order traversal of all child ASTs of the current AST instance
-        Has ability to replace the current AST with a new one during iteration via .send()
-        """
-        for _, child in (gen := self.__iter_members__()):
-            if isinstance(child, AST):
                 while True:
-                    replacement = yield child
+                    replacement = yield key, value
                     if replacement is not None:
-                        print(f'REPLACEMENT: {child} -> {replacement}')
-                        child = replacement
-                        gen.send(child)
+                        value = replacement
+                        setattr(self, key, value)
                         assert (yield) is None, 'ILLEGAL: Cannot .send() multiple times in a row. must allow next() (e.g. from loop iter) to be called first'
                         if visit_replacement:
                             continue
                     break
-                        # yield replacement # this allows the loop to receive the replacement too before processing it's children
-                    # child = replacement # traverse over all children of the replacement instead of the original
-                pre_effect()
-                yield from child.__full_traversal_iter__(pre_effect=pre_effect, post_effect=post_effect, visit_replacement=visit_replacement)
-                post_effect()
+                continue
+
+            if is_ast_container(self.__class__.__annotations__.get(key)):
+                if isinstance(value, list):
+                    for i, vi in enumerate(value):
+                        while True:
+                            replacement = yield '', vi
+                            if replacement is not None:
+                                vi = replacement
+                                value[i] = vi
+                                assert (yield) is None, 'ILLEGAL: Cannot .send() multiple times in a row. must allow next() (e.g. from loop iter) to be called first'
+                                if visit_replacement:
+                                    continue
+                            break
+                    continue
+                # elif isinstance(value, some_other_container_type)
+                else:
+                    pdb.set_trace()
+                    raise NotImplementedError(f'__iter_ast_props__ over {type(value)} (from member "{key}") of {self} is not yet implemented')
+
+
+          
+    def __iter_non_ast_props__(self) -> Generator[tuple[str, Any], None, None]:
+        """Iterate over the non-AST members of the AST, returning the key and value of each prop"""
+        for key, value in self.__dict__.items():
+            if isinstance(value, AST):
+                continue
+            if key.startswith('_'):
+                continue
+            yield key, value
+        
+    def __iter_asts__(self, *, visit_replacement:bool=True) -> Generator['AST', 'AST', None]:
+        """Return a generator of the direct children ASTs of the AST"""
+        yield from map_generator(lambda x: x[1], self.__iter_ast_props__(visit_replacement=visit_replacement))
+
+
+    def __iter_asts_full_traversal__(self, *, visit_replacement:bool=True):
+        """
+        Recursively pre-order traversal of all child ASTs of the current AST
+        Allows for in place replacement of the current AST via .send()
+        """
+        for child in (gen:= self.__iter_asts__(visit_replacement=visit_replacement)):
+            replacement = yield child
+            if replacement is not None:
+                child = replacement
+                gen.send(child)
+                assert (yield) is None, 'ILLEGAL: Cannot .send() multiple times in a row. must allow next() (e.g. from loop iter) to be called first'
+
+            yield from child.__iter_asts_full_traversal__(visit_replacement=visit_replacement)
 
 
     def is_settled(self) -> bool:
@@ -159,6 +161,22 @@ class AST(ABC):
             if not child.is_settled():
                 return False
         return True
+
+
+
+T = TypeVar('T')
+U = TypeVar('U')
+V = TypeVar('V')
+def map_generator(f: TypingCallable[[T], U], gen: Generator[T, V, None]) -> Generator[U, V, None]:
+    """Map a sendable generator to a new generator using the given function"""
+    gen = iter(gen)
+    try:
+        val = next(gen)
+        while True:
+            to_send = yield f(val) if val is not None else None
+            val = gen.send(to_send)
+    except StopIteration:
+        return
 
 
 def is_ast_container(type_hint: type | None) -> bool:

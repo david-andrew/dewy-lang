@@ -98,10 +98,12 @@ class ASTDict(dict[AST, T], Generic[T]):
         return super().__getitem__(ast_to_key(item))
     def __setitem__(self, item: AST, value: T) -> None:
         super().__setitem__(ast_to_key(item), value)
-    # def __delitem__(self, item: AST) -> None:
-    #     super().__delitem__(ast_to_key(item))
+    def __delitem__(self, item: AST) -> None:
+        super().__delitem__(ast_to_key(item))
     def __contains__(self, item: AST) -> bool:
         return super().__contains__(ast_to_key(item))
+    def get(self, item: AST, default: T | None = None) -> T | None:
+        return super().get(ast_to_key(item), default)
     
 
 # Scope class only used during parsing to keep track of callables
@@ -299,7 +301,8 @@ def typeof(ast: AST, scope: Scope, params:bool=False) -> TypeExpr:
 def top_level_typecheck_and_resolve(ast: AST, scope: Scope) -> tuple[AST, ASTDict[Scope]]:
     group = Group([ast])
     gen = group.__iter_asts__(visit_replacement=True)
-    scope_map: ASTDict[Scope] = ASTDict([(group, scope)])
+    scope_map: ASTDict[Scope] = ASTDict()
+    scope_map[group] = scope
     inner_typecheck_and_resolve(group, gen, scope_map)
 
     return group.items[0], scope_map

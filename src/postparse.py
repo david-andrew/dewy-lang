@@ -94,7 +94,7 @@ def post_parse(ast: AST) -> AST:
 def convert_prototype_identifiers(ast: AST) -> AST:
     """Convert all PrototypeIdentifiers to either Identifier or Express, depending on the context"""
     ast = Group([ast])
-    for i in (gen := ast.__full_traversal_iter__()):
+    for i in (gen := ast.__iter_asts_full_traversal__(visit_replacement=False)):
 
         # skip ASTs that don't have any Prototypes
         if i.is_settled():
@@ -175,7 +175,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
 #      because array unpack and object unpack can look the same syntactically
 def convert_prototype_to_unpack_target(ast: Array) -> UnpackTarget:
     """Convert an Array of PrototypeIdentifiers or other ASTs to an UnpackTarget"""
-    for i in (gen := ast.__full_traversal_iter__()):
+    for i in (gen := ast.__iter_asts_full_traversal__()):
         if i.is_settled():
             continue
 
@@ -197,7 +197,7 @@ def convert_prototype_to_unpack_target(ast: Array) -> UnpackTarget:
 def convert_prototype_tuples(ast: AST) -> AST:
     """For now, literally just turn all tuples into groups"""
     ast = Group([ast])
-    for i in (gen := ast.__full_traversal_iter__()):
+    for i in (gen := ast.__iter_asts_full_traversal__()):
         if isinstance(i, PrototypeTuple):
             gen.send(Group(i.items))
     return ast.items[0]
@@ -205,7 +205,7 @@ def convert_prototype_tuples(ast: AST) -> AST:
 def convert_bare_ranges(ast: AST) -> AST:
     """Convert all BareRanges to Ranges with inclusive bounds"""
     ast = Group([ast])
-    for i in (gen := ast.__full_traversal_iter__()):
+    for i in (gen := ast.__iter_asts_full_traversal__()):
         if isinstance(i, BareRange):
             gen.send(Range(i.left, i.right, '[]'))
     return ast.items[0]
@@ -214,7 +214,7 @@ def convert_bare_ranges(ast: AST) -> AST:
 def convert_bare_ellipses(ast: AST) -> AST:
     """Convert all remaining DotDotDots (that were not juxtaposed) to Ellipsis"""
     ast = Group([ast])
-    for i in (gen := ast.__full_traversal_iter__()):
+    for i in (gen := ast.__iter_asts_full_traversal__()):
         if isinstance(i, DotDotDot):
             gen.send(Ellipsis())
     return ast.items[0]
@@ -222,7 +222,7 @@ def convert_bare_ellipses(ast: AST) -> AST:
 
 def convert_prototype_function_literals(ast: AST) -> AST:
     ast = Group([ast])
-    for i in (gen := ast.__full_traversal_iter__()):
+    for i in (gen := ast.__iter_asts_full_traversal__()):
         if isinstance(i, PrototypeFunctionLiteral):
             args = normalize_function_args(i.args)
             gen.send(FunctionLiteral(args, i.body))
