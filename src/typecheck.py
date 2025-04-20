@@ -74,6 +74,12 @@ class MetaNamespace(SimpleNamespace):
         super().__setattr__(key, value)
 
 
+
+def ast_to_key(ast: AST) -> str:
+    """Convert an AST to a key for use in a dictionary. Note: relies on ASTs class and memory address"""
+    assert isinstance(ast, AST), f'ast_to_key only works on ASTs. {ast=}'
+    return f'::{ast.__class__.__name__}@{hex(id(ast))}'
+
 class MetaNamespaceDict(defaultdict):
     """A defaultdict that preprocesses AST keys to use the classname + memory address as the key"""
     def __init__(self):
@@ -82,9 +88,21 @@ class MetaNamespaceDict(defaultdict):
     # add preprocessing to both __getitem__ and __setitem__ to handle AST keys
     # apparently __setitem__ always calls __getitem__ so we only need to override __getitem__
     def __getitem__(self, item: AST) -> Any | None:
-        key = f'::{item.__class__.__name__}@{hex(id(item))}'
-        return super().__getitem__(key)
+        return super().__getitem__(ast_to_key(item))
 
+T = TypeVar('T')
+from typing import Generic
+class ASTDict(dict[AST, T], Generic[T]):
+    """A dict that preprocesses AST keys to use the classname + memory address as the key"""
+    def __getitem__(self, item: AST) -> T:
+        return super().__getitem__(ast_to_key(item))
+    def __setitem__(self, item: AST, value: T) -> None:
+        super().__setitem__(ast_to_key(item), value)
+    # def __delitem__(self, item: AST) -> None:
+    #     super().__delitem__(ast_to_key(item))
+    def __contains__(self, item: AST) -> bool:
+        return super().__contains__(ast_to_key(item))
+    
 
 # Scope class only used during parsing to keep track of callables
 @dataclass
@@ -95,6 +113,10 @@ class Scope:
         decltype: DeclarationType
         type: TypeExpr
         value: AST
+
+        def __repr__(self) -> str:
+            """Overwrite __repr__ so that we can format value with more compact __str__ rather than __repr__"""
+            return f'Scope._var(decltype={self.decltype!r}, type={self.type!r}, value={self.value})'
 
     parent: 'Scope | None' = None
     # callables: dict[str, AST | None] = field(default_factory=dict) #TODO: maybe replace str->AST with str->signature (where signature might be constructed based on the func structure)
@@ -273,42 +295,68 @@ def typeof(ast: AST, scope: Scope, params:bool=False) -> TypeExpr:
     raise NotImplementedError(f'typeof not implemented for {ast_type}')
 
 
-# def promote/coerce() -> Type: #or make_compatible
-# promotion_table = {...}
-# type_tree = {...}
-# TODO: perhaps ctx should be a dataclass that contains scope but also any other context needed? TBD...
-def typecheck_and_resolve(ast: AST, scope: Scope, ctx=None) -> tuple[AST, Scope]:
-    """Typecheck the given AST, and resolve any quantum ASTs to concrete selections based on the types"""
-    # ctx_stack: list[Literal['assigning', 'etc']] = []
 
-    ast = Group([ast])
-    for i in (gen := ast.__full_traversal_iter__()):
+def top_level_typecheck_and_resolve(ast: AST, scope: Scope) -> tuple[AST, ASTDict[Scope]]:
+    group = Group([ast])
+    gen = group.__iter_asts__(visit_replacement=True)
+    scope_map: ASTDict[Scope] = ASTDict([(group, scope)])
+    inner_typecheck_and_resolve(group, gen, scope_map)
 
-        match i:
+    return group.items[0], scope_map
+
+
+def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], scope_map: ASTDict[Scope]):
+
+    for ast in gen:
+        # if the specific AST has a scope, use it, otherwise use the parent's scope
+        # then ensure all ASTs processed have a scope
+        scope = scope_map.get(ast) or scope_map[parent]
+        scope_map[ast] = scope 
+
+        match ast:
             case Void(): ... 
-                # return ast, scope
-            case Identifier(): ... # TODO...
+            case Identifier(): ...
+            case Express(): ...
             case Signature(): ...
-            case Assign():
-                # TODO: put the identifier into the scope with the type of the right...
-                ...
+            case Declare(decltype=decltype, target=target):
+                # TODO: check that the type is valid if present...
+                # declare the variable in the scope...
+                match target:
+                    case Identifier(name=name):
+                        scope.declare(name, void, untyped, decltype)
+                    case TypedIdentifier(name=name, type=type):
+                        scope.declare(name, void, type, decltype)
+                    # case ReturnTyped(left=left, right=right): ... # TODO
+                    case UnpackTarget(target=target): pdb.set_trace()
+                    case Assign(left=left, right=right):
+                        if isinstance(left, Identifier):
+                            scope.declare(left.name, right, untyped, decltype)
+                        else:
+                            pdb.set_trace()
+                            raise NotImplementedError('Declare not implemented for target Assign with non-Identifier left side')
+                    case _:
+                        raise TypeError(f'INTERNAL ERROR: Declare received unexpected typeof target: {target}.')
+                
+            case Assign(left=left, right=right):
+                if isinstance(left, Identifier):
+                    scope.assign(left.name, right)
+                else:
+                    pdb.set_trace()
+                    raise NotImplementedError('Assign not implemented for non-Identifier left side')
+                # # TODO: handling  other assignment targets on the left...
 
-                # # TODO: handling identifier or other assignment targets on the left...
-                # typecheck_and_resolve(ast.right, scope)
-                # return ast, scope
             case Group(items=items): ...
-                # pdb.set_trace()
-                # ...
-                # results = []
-                # for item in items:
-                #     result = typecheck_and_resolve(item, scope)
-                #     results.append(result)
-                # pdb.set_trace()
-                # ...
+
+            case Block(items=items):
+                # make a new layer to the scope, and assign it to all the children
+                inner_scope = Scope(scope)
+                for item in items:
+                    scope_map[item] = inner_scope
+
             case FunctionLiteral(): ...
-                # typecheck_and_resolve(ast.body, scope)
-                # return ast, scope
+
             case QJux(call=call, mul=mul, index=index):
+                # print(f'visiting QJux {ast}')
                 valid_branches = []
                 if call is not None and is_call_valid(call, scope):
                     valid_branches.append(call)
@@ -321,10 +369,10 @@ def typecheck_and_resolve(ast: AST, scope: Scope, ctx=None) -> tuple[AST, Scope]
                 if len(valid_branches) > 1:
                     raise ValueError(f'ERROR: multiple valid branches for QJux. must have exactly one. {ast=}')
                 
-                # overwrite QJux with the valid branch
-                valid_branch, = valid_branches
-                typecheck_and_resolve(valid_branch, scope) #manually typechecking here since current __full_traversal_iter doesn't recurse into newly sent children... consider adjusting
+                # overwrite QJux with the valid branch. Then continue so we process the replacement before going to the children
+                valid_branch, = valid_branches                
                 gen.send(valid_branch)
+                continue 
 
                 # pdb.set_trace()
                 # ...
@@ -341,18 +389,199 @@ def typecheck_and_resolve(ast: AST, scope: Scope, ctx=None) -> tuple[AST, Scope]
                 ...
                 raise ValueError(f'INTERNAL ERROR: typecheck_and_resolve not implemented for {type(ast)}')
 
+        child_gen = ast.__iter_asts__(visit_replacement=True)
+        inner_typecheck_and_resolve(ast, child_gen, scope_map)
+
+
+
+# def typecheck_and_resolve(ast: AST, scope: Scope) -> AST | None:
+#     match ast:
+#         # TODO: all cases here
+#         case _: ...
+
+# def top_level_typecheck_and_resolve(root: AST, scope: Scope) -> tuple[AST, Scope]:
+#     ast = Group([ast])
+#     gen = ast.__iter_asts__()
+#     return typecheck_and_resolve_v2(ast, gen, scope)
+
+# def typecheck_and_resolve_v2(ast: AST, gen: Generator[AST, AST, None], scope: Scope) -> tuple[AST, Scope]:
+#     match ast:
+#         case Void(): ... 
+#             # return ast, scope
+#         case Identifier(): ... # TODO...
+#         case Express(): ...
+#         case Signature(): ...
+#         case Declare():
+#             # TODO: check that the type is valid if present...
+#             ...
+#         case Assign(left=left, right=right):
+#             if isinstance(left, Identifier):
+#                 scope.assign(left.name, right)
+#             else:
+#                 pdb.set_trace()
+#                 raise NotImplementedError('Assign not implemented for non-Identifier left side')
+#             # TODO: put the identifier into the scope with the type of the right...
+#             ...
+
+#             # # TODO: handling identifier or other assignment targets on the left...
+#             # typecheck_and_resolve(ast.right, scope)
+#             # return ast, scope
+#         case Group(items=items): ...
+#             # pdb.set_trace()
+#             # ...
+#             # results = []
+#             # for item in items:
+#             #     result = typecheck_and_resolve(item, scope)
+#             #     results.append(result)
+#             # pdb.set_trace()
+#             # ...
+#         case Block(items=items):
+#             # TODO: make a new layer to the scope
+#             ...
+#         case FunctionLiteral(): ...
+#             # typecheck_and_resolve(ast.body, scope)
+#             # return ast, scope
+#         case QJux(call=call, mul=mul, index=index):
+#             # print(f'visiting QJux {ast}')
+#             valid_branches = []
+#             if call is not None and is_call_valid(call, scope):
+#                 valid_branches.append(call)
+#             if index is not None and is_index_valid(index, scope):
+#                 valid_branches.append(index)
+#             if mul is not None and is_multiply_valid(mul, scope):
+#                 valid_branches.append(mul)
+#             if len(valid_branches) == 0:
+#                 raise ValueError(f'ERROR: no valid branches for QJux. must have at exactly one. {ast=}')
+#             if len(valid_branches) > 1:
+#                 raise ValueError(f'ERROR: multiple valid branches for QJux. must have exactly one. {ast=}')
+            
+#             # overwrite QJux with the valid branch
+#             valid_branch, = valid_branches
+#             # typecheck_and_resolve(valid_branch, scope) #manually typechecking here since current __full_traversal_iter doesn't recurse into newly sent children... consider adjusting
+#             gen.send(valid_branch)
+
+#             # pdb.set_trace()
+#             # ...
+#             # return valid_branches[0], scope
+#         case Call(f=f, args=args):
+#             # TODO: check if the signature of f agrees with the args...
+#             # print(f'skipping function typechecking...')
+#             ...
+        
+#         case Int(): ...
+        
+#         case _:
+#             pdb.set_trace()
+#             ...
+#             raise ValueError(f'INTERNAL ERROR: typecheck_and_resolve not implemented for {type(ast)}')
+
+
+#     for child in (gen:=ast.__iter_asts__()):
+#         typecheck_and_resolve(child, gen, scope)
+#     pdb.set_trace()
+
+# # def promote/coerce() -> Type: #or make_compatible
+# # promotion_table = {...}
+# # type_tree = {...}
+# # TODO: perhaps ctx should be a dataclass that contains scope but also any other context needed? TBD...
+# def typecheck_and_resolve(ast: AST, scope: Scope, ctx=None) -> tuple[AST, Scope]:
+#     """Typecheck the given AST, and resolve any quantum ASTs to concrete selections based on the types"""
+#     # ctx_stack: list[Literal['assigning', 'etc']] = []
+#     # scope_stack = [scope]
+#     # def pre_effect():
+#     #     nonlocal scope, scope_stack
+#     #     scope_stack.append(scope)
+#     # def post_effect():
+#     #     nonlocal scope, scope_stack
+#     #     scope = scope_stack.pop()
+
+#     ast = Group([ast])
+#     for i in (gen := ast.__full_traversal_iter__(visit_replacement=True)):#pre_effect=pre_effect, post_effect=post_effect)):
+
+#         print(f'visiting {i}')
+#         match i:
+#             case Void(): ... 
+#                 # return ast, scope
+#             case Identifier(): ... # TODO...
+#             case Express(): ...
+#             case Signature(): ...
+#             case Declare():
+#                 # TODO: check that the type is valid if present...
+#                 ...
+#             case Assign(left=left, right=right):
+#                 if isinstance(left, Identifier):
+#                     scope.assign(left.name, right)
+#                 else:
+#                     pdb.set_trace()
+#                     raise NotImplementedError('Assign not implemented for non-Identifier left side')
+#                 # TODO: put the identifier into the scope with the type of the right...
+#                 ...
+
+#                 # # TODO: handling identifier or other assignment targets on the left...
+#                 # typecheck_and_resolve(ast.right, scope)
+#                 # return ast, scope
+#             case Group(items=items): ...
+#                 # pdb.set_trace()
+#                 # ...
+#                 # results = []
+#                 # for item in items:
+#                 #     result = typecheck_and_resolve(item, scope)
+#                 #     results.append(result)
+#                 # pdb.set_trace()
+#                 # ...
+#             case Block(items=items):
+#                 # TODO: make a new layer to the scope
+#                 ...
+#             case FunctionLiteral(): ...
+#                 # typecheck_and_resolve(ast.body, scope)
+#                 # return ast, scope
+#             case QJux(call=call, mul=mul, index=index):
+#                 # print(f'visiting QJux {ast}')
+#                 valid_branches = []
+#                 if call is not None and is_call_valid(call, scope):
+#                     valid_branches.append(call)
+#                 if index is not None and is_index_valid(index, scope):
+#                     valid_branches.append(index)
+#                 if mul is not None and is_multiply_valid(mul, scope):
+#                     valid_branches.append(mul)
+#                 if len(valid_branches) == 0:
+#                     raise ValueError(f'ERROR: no valid branches for QJux. must have at exactly one. {ast=}')
+#                 if len(valid_branches) > 1:
+#                     raise ValueError(f'ERROR: multiple valid branches for QJux. must have exactly one. {ast=}')
+                
+#                 # overwrite QJux with the valid branch
+#                 valid_branch, = valid_branches
+#                 # typecheck_and_resolve(valid_branch, scope) #manually typechecking here since current __full_traversal_iter doesn't recurse into newly sent children... consider adjusting
+#                 gen.send(valid_branch)
+
+#                 # pdb.set_trace()
+#                 # ...
+#                 # return valid_branches[0], scope
+#             case Call(f=f, args=args):
+#                 # TODO: check if the signature of f agrees with the args...
+#                 # print(f'skipping function typechecking...')
+#                 ...
+            
+#             case Int(): ...
+            
+#             case _:
+#                 pdb.set_trace()
+#                 ...
+#                 raise ValueError(f'INTERNAL ERROR: typecheck_and_resolve not implemented for {type(ast)}')
+
         
 
-    return ast.items[0], scope
-    ...
-#     """Check if the given AST is well-formed from a type perspective"""
-#     match ast:
-#         case Call(): return typecheck_call(ast, scope)
-#         case Index(): return typecheck_index(ast, scope)
-#         case Mul(): return typecheck_binary_dispatch(ast, scope)
-#         case _: raise NotImplementedError(f'typecheck not implemented for {type(ast)}')
+#     pdb.set_trace()
+#     return ast.items[0], scope
+#     ...
+# #     """Check if the given AST is well-formed from a type perspective"""
+# #     match ast:
+# #         case Call(): return typecheck_call(ast, scope)
+# #         case Index(): return typecheck_index(ast, scope)
+# #         case Mul(): return typecheck_binary_dispatch(ast, scope)
+# #         case _: raise NotImplementedError(f'typecheck not implemented for {type(ast)}')
 
-# def infer_types(ast: AST, scope: Scope) -> AST:
+# # def infer_types(ast: AST, scope: Scope) -> AST:
 
 def is_call_valid(ast: Call, scope: Scope) -> bool:
     f_type = typeof(ast.f, scope)

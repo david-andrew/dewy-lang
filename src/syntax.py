@@ -10,6 +10,9 @@ from .tokenizer import Operator_t, escape_whitespace  # TODO: move into utils
 import pdb
 
 
+SideEffect = TypingCallable[[], None]
+no_op: SideEffect = lambda: None
+
 @dataclass_transform()
 class AST(ABC):
     def __init_subclass__(cls: type['AST'], **kwargs):
@@ -74,6 +77,10 @@ class AST(ABC):
             yield f'{prefix}{pointer}{name}{next(gen)}'     # first line gets name and pointer
             yield from gen                                  # rest of lines already have a prefix
 
+    def __iter_members_inner__(self) -> Generator[tuple[Any, str|int, Any], None, None]:
+        import pdb;
+        pdb.set_trace()
+
     def __iter_members__(self) -> Generator[tuple[str, Any], 'AST', None]:
         """
         A method for getting all properties on the AST instance (including child ASTs, and non-AST properties).
@@ -122,19 +129,28 @@ class AST(ABC):
                 yield child
 
 
-    def __full_traversal_iter__(self) -> Generator['AST', 'AST', None]:
+    def __full_traversal_iter__(self, *, pre_effect:SideEffect=no_op, post_effect:SideEffect=no_op, visit_replacement:bool=False) -> Generator['AST', 'AST', None]:
         """
         Recursive in-order traversal of all child ASTs of the current AST instance
         Has ability to replace the current AST with a new one during iteration via .send()
         """
         for _, child in (gen := self.__iter_members__()):
             if isinstance(child, AST):
-                replacement = yield child
-                if replacement is not None:
-                    gen.send(replacement)
-                    yield
-                    child = replacement # allow traversal over all children of the replacement
-                yield from child.__full_traversal_iter__()
+                while True:
+                    replacement = yield child
+                    if replacement is not None:
+                        print(f'REPLACEMENT: {child} -> {replacement}')
+                        child = replacement
+                        gen.send(child)
+                        assert (yield) is None, 'ILLEGAL: Cannot .send() multiple times in a row. must allow next() (e.g. from loop iter) to be called first'
+                        if visit_replacement:
+                            continue
+                    break
+                        # yield replacement # this allows the loop to receive the replacement too before processing it's children
+                    # child = replacement # traverse over all children of the replacement instead of the original
+                pre_effect()
+                yield from child.__full_traversal_iter__(pre_effect=pre_effect, post_effect=post_effect, visit_replacement=visit_replacement)
+                post_effect()
 
 
     def is_settled(self) -> bool:
@@ -702,7 +718,7 @@ class Parameterize(AST):
 class PrototypeIdentifier(PrototypeAST):
     name: str
     def __str__(self) -> str:
-        return f'{self.name}'
+        return f'ProtoId<{self.name}>'
 
 class Identifier(AST):
     name: str

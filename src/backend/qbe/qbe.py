@@ -2,7 +2,7 @@ from ...tokenizer import tokenize
 from ...postok import post_process
 from ...typecheck import (
     Scope as TypecheckScope,
-    typecheck_and_resolve,
+    top_level_typecheck_and_resolve,# typecheck_and_resolve,
     typecheck_call, typecheck_index, typecheck_multiply,
     register_typeof, short_circuit, typeof, TypeExpr,
     CallableBase, IndexableBase, IndexerBase, MultipliableBase, ObjectBase,
@@ -148,7 +148,7 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
 
     # typecheck and collapse any Quantum ASTs to a concrete selection
     scope = Scope.linux_default()
-    ast, scope = typecheck_and_resolve(ast, scope)
+    ast, scope_map = top_level_typecheck_and_resolve(ast, scope)
 
     # debug printing
     if options.verbose:
