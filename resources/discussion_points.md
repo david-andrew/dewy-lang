@@ -2794,3 +2794,100 @@ e.g. we have a compiler + decompiler available. we compile a .dewy file which cr
 At a high level I think this is hard because compiling from source to lower level isn't necessarily 1-to-1. e.g. any "optimization" done on the lower levels in principle should have zero affect on the original, so the unoptimized and optimized version of the lower level are both equally valid and thus there (perhaps?) isn't a clean way to represent the differences between the optimized and unoptimized versions back in the high level code...
 
 my first thought is if there was some sort of meta layer that sat on top of the high level code that you could toggle on and off, in that layer, you could enumerate out all the various optimizations/etc. being performed, and then the meta layer + the high level source would represent a 1-to-1 map down to the lower level. This feels vaguely like my ideas around being able to set various flags or settings in the code (e.g. things like units system, display numerical precision, showing/hiding warnings, etc.). This would just be a very systematized version targeted at all the ways optimizations (and other typically non-injective transformations from higher to lower level, if any). It almost feels like a sort of language mark-up. e.g. you'd have your high level source file, and then could toggle a view marking up all the facets of the source file that dictate exactly how it gets transformed into the corresponding low level source.
+
+
+
+
+## Imitating Declaration Consistency from Jai/Odin
+
+Odin and Jai make use of a "Declaration Consistency" that might be worth borrowing some ideas from
+
+```Odin
+// declarations
+name: Type = value;
+name := value;
+name: Type;
+
+// compiletime const
+name: Type : value;
+name :: value;
+
+
+// examples
+main :: func(argc: i32, argv: ^^u8) {
+    return 0;
+};
+
+foo :: struct {
+    a: i32;
+    b: f64;
+};
+
+A := 10;
+B :: 20;
+C: i32;
+```
+
+
+So for Dewy, the two main things to consider are:
+- getting rid of walrus operator so `:=` can serve as declarations. Then all declarations would need to include `:=`  or include a type
+    - question: how would one declare a value that should be type inferred, and doesn't have a value yet? `let name`
+- compiletime constant syntax. they use `::` or can split them up so the second `:` is in place of the equals sign. I think `::` is an okay operator, but I loathe `name: type : value` syntax
+
+
+My ideas:
+- for compiletime constant, just have `::` be the equals sign
+```dewy
+name: type :: value
+```
+
+- for declaring/assigning stuff, I think we're already pretty good.
+```
+// declarations
+let name: type = value
+let name = value
+let name: type
+
+// compiletime constants
+let name: type :: value
+let name :: value
+const name: type :: value
+const name :: value
+```
+
+And then there's the ability to skip `let`/`const` altogether
+
+```
+name: type = value
+name = value
+name: type
+name: type :: value
+name :: value
+```
+
+the only complaint about this stuff (which was a complaint from before) is that the behavior or `name = value` and `name :: value` would depend on if that variable was declared or not in a parent scope
+
+though it is sort of nice to know that any expression including the `:` is a new declaration and not a reassignment... technically it does solve the ambiguity of the complaint
+
+```dewy
+// declarations
+let name: type = value
+let name := value
+let name: type
+
+// compiletime constants
+let name: type :: value
+let name :: value
+const name: type :: value
+const name :: value
+
+name: type = value
+name := value  // name = value is reassignment
+name: type
+name: type :: value
+name :: value
+```
+
+The only problem is that I quite liked the simplicity of being able to be super lazy and just do `name = value` and have it work as a declaration in most cases
+
+Leaning towards not having `:` for all declarations since it messes up the simple case
