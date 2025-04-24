@@ -2890,4 +2890,20 @@ name :: value
 
 The only problem is that I quite liked the simplicity of being able to be super lazy and just do `name = value` and have it work as a declaration in most cases
 
-Leaning towards not having `:` for all declarations since it messes up the simple case
+Leaning towards not having `:` for all declarations since it messes up the simple case. Also in general, I think the Dewy approach for declarations is already pretty uniform. Everything is of the form `name = value` with optional annotations for type `name: type = value`
+
+```
+// examples
+main = (argc:int argv:str) => {
+    return 0
+};
+
+foo: type = [
+    a: int32
+    b: float64
+]
+
+A = 10
+B :: 20   //TBD if well do compiletime like this
+C: int32
+```
