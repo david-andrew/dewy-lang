@@ -143,10 +143,13 @@ class Scope:
     def assign(self, name:str, value:AST):
         assert len(DeclarationType.__members__) == 2, f'expected only 2 declaration types: let, const. found {DeclarationType.__members__}'
 
+        # cannot assign with void
+        assert value is not void, f"Attempted to assign void value to variable: {name=}. {value=}"
+
         # var is already declared in current scope
         if name in self.vars:
             var = self.vars[name]
-            assert var.decltype != DeclarationType.CONST, f"Attempted to assign to constant variable: {name=}{var=}. {value=}"
+            assert var.decltype != DeclarationType.CONST or var.value is void, f"Attempted to assign to constant variable: {name=}. {var=}. {value=}"
             var.value = value
             return
 
@@ -330,16 +333,18 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
                     case TypedIdentifier(name=name, type=type):
                         scope.declare(name, void, type, decltype)
                     # case ReturnTyped(left=left, right=right): ... # TODO
-                    case UnpackTarget(target=target): pdb.set_trace()
-                    case Assign(left=left, right=right):
+                    case UnpackTarget(target=target): pdb.set_trace(); ...
+                    case Assign(left=left):
                         if isinstance(left, Identifier):
-                            scope.declare(left.name, right, untyped, decltype)
+                            scope.declare(left.name, void, untyped, decltype) # note the assignment is handled by the child. We just declare the variable here
+                        elif isinstance(left, TypedIdentifier):
+                            scope.declare(left.id.name, void, left.type, decltype)
                         else:
                             pdb.set_trace()
                             raise NotImplementedError('Declare not implemented for target Assign with non-Identifier left side')
                     case _:
                         raise TypeError(f'INTERNAL ERROR: Declare received unexpected typeof target: {target}.')
-                
+
             case Assign(left=left, right=right):
                 if isinstance(left, Identifier):
                     scope.assign(left.name, right)
