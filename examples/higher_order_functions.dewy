@@ -1,0 +1,24 @@
+// Higher order functions
+
+// currently there is a parser bug where these are ambiguous and require more general QAST support
+
+f = () => () => () => 42
+
+// what happens here? is the result `42` or `() => () => 42`? probably the latter
+printl(f)   // () => () => 42
+printl(f()) // () => () => 42
+printl(f()()) // () => 42
+printl(f()()()) // 42
+// printl(f()()()()) // error
+
+// TBD if this would work
+printl((f))   // () => () => 42
+printl((f)()) // () => 42
+printl((f)()()) // 42
+
+
+
+g = (x) => (y) => (z) => x + y + z
+printl(g(1)) // (y) => (z) => x + y + z | with captured x=1
+printl(g(1)(2)) // (z) => x + y + z | with captured x=1, y=2
+printl(g(1)(2)(3)) // 6
