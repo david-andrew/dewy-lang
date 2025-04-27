@@ -433,10 +433,11 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
     return {
         Declare: compile_declare,
         Assign: compile_assign,
-        Call: compile_call,
-        Int: compile_int,
         Express: compile_express,
+        Call: compile_call,
         Group: compile_group,
+        Int: compile_int,
+        String: compile_string,
         # Add other AST types here as they are implemented
     }
 
@@ -452,12 +453,6 @@ def compile(ast: AST, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> 
     raise NotImplementedError(f'QBE compilation not implemented for AST type: {ast_type}')
 
 
-def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
-    """Returns the QBE representation of an integer literal."""
-    # QBE uses direct integers for constants. Prepend type for clarity in instruction.
-    # The 'l' type is added by the instruction using this value (e.g., call)
-    # TODO: check if the integer overflows, and return a big int
-    return IR( 'l', f"{ast.val}", Type(Int))
 
 
 def compile_declare(ast: Declare, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> None:
@@ -496,68 +491,6 @@ def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_block: Qbe
     return None
 
             
-    
-    pdb.set_trace()
-    ...
-    # match ast:
-    #     case Assign(left=Identifier(name=func_name), right=FunctionLiteral(args=signature, body=body)):
-    #         # This assignment defines a function
-    #         if current_block is not None:
-    #              # TODO: Handle nested function definitions later if needed
-    #              raise NotImplementedError("Nested function definitions not yet supported.")
-
-    #         # Determine QBE function properties
-    #         qbe_func_name = f"${func_name}"
-    #         is_export = func_name == '__main__'
-    #         # TODO: Translate Dewy signature to QBE args
-    #         qbe_args = []
-    #         if func_name == '__main__':
-    #              qbe_args = [QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')]
-    #         # else: Handle user function signatures later
-
-    #         # TODO: Determine return type from Dewy type info
-    #         qbe_ret_type = 'w' if func_name == '__main__' else None # Assume exit code for main, void otherwise
-
-    #         # Create the new QBE function
-    #         new_func = QbeFunction(
-    #             name=qbe_func_name,
-    #             export=is_export,
-    #             args=qbe_args,
-    #             ret=qbe_ret_type,
-    #             blocks=[] # Start with no blocks
-    #         )
-
-    #         # Create the entry block
-    #         start_block = QbeBlock('@start')
-    #         new_func.blocks.append(start_block)
-
-    #         # Add the function to the module *before* compiling body
-    #         # (needed if the body recursively calls itself)
-    #         qbe.functions.append(new_func)
-
-    #         # Compile the function body into the start block
-    #         # A new scope might be needed for the function body later
-    #         compile(body, scope, qbe, start_block)
-
-    #         # Add final return if necessary (especially for __main__)
-    #         if func_name == '__main__':
-    #              if not start_block.lines or not (start_block.lines[-1].strip().startswith('ret') or start_block.lines[-1].strip().startswith('jmp')):
-    #                  start_block.lines.append('ret 0')
-    #         # else: Handle returns for user functions later
-
-    #         return None # Function definition itself doesn't yield a value here
-
-    #     case Assign(left=Identifier(name=var_name), right=value_ast):
-    #          # Handle variable assignment (later)
-    #          if current_block is None:
-    #              raise NotImplementedError(f"Top-level variable assignment ('{var_name}') not yet supported.")
-    #          # Compile value, generate store instruction, etc.
-    #          raise NotImplementedError(f"Variable assignment compilation not implemented yet.")
-
-    #     case _:
-    #         # Handle other assignment targets (unpacking, etc.) later
-    #         raise NotImplementedError(f"Assignment compilation not implemented for target: {ast.left}")
-
 
 def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
     # get the previous IR for the original value that should be set
@@ -694,6 +627,18 @@ def compile_group(ast: Group, scope: Scope, qbe: QbeModule, current_block: QbeBl
     # return last_val
 
 
+def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+    """Returns the QBE representation of an integer literal."""
+    # QBE uses direct integers for constants. Prepend type for clarity in instruction.
+    # The 'l' type is added by the instruction using this value (e.g., call)
+    # TODO: check if the integer overflows, and return a big int
+    return IR( 'l', f"{ast.val}", Type(Int))
+
+
+def compile_string(ast: String, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+    """Returns the QBE representation of a string literal."""
+    pdb.set_trace()
+    ...
 
 
 # --- Builtin Class Definitions (Keep as is for now) ---
