@@ -244,6 +244,13 @@ class Type(AST):
         if self.parameters:
             return f'{self.t.__name__}{self.parameters}'
         return self.t.__name__
+    
+    # strictly for hashing
+    def __eq__(self, other):
+        return isinstance(other, Type) and self.t == other.t and self.parameters == other.parameters
+    
+    def __hash__(self):
+        return hash((self.t, self.parameters))
 
 
 

@@ -69,9 +69,12 @@ class Signature(AST):
 class FunctionLiteral(AST):
     args: Signature
     body: AST
+    return_type: AST = field(default_factory=lambda: untyped)
 
     def __str__(self):
-        return f'{self.args} => {self.body}'
+        if self.return_type is untyped:
+            return f'{self.args} => {self.body}'
+        return f'{self.args}:>{self.return_type} => {self.body}'
 
 
 

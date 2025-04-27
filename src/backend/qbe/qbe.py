@@ -164,21 +164,21 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     qbe = top_level_compile(ast, scope)
 
     # Check if __main__ was defined by the user's code. If not, add a fallback.
-    pdb.set_trace()
-    main_fn_exists = any(f.name == '$__main__' for f in qbe.functions)
-    if not main_fn_exists:
-        if options.verbose:
-            print("Warning: No __main__ function defined in source, adding fallback exit.")
-        # Add the fallback __main__ that just exits with 0
-        qbe.functions.append(
-            QbeFunction(
-                name='$__main__',
-                export=True,
-                args=[QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')],
-                ret='w', # Exit code is typically 'w' (word)
-                blocks=[QbeBlock('@start', ['ret 0'])]
-            )
-        )
+    # pdb.set_trace()
+    # main_fn_exists = any(f.name == '$__main__' for f in qbe.functions)
+    # if not main_fn_exists:
+    #     if options.verbose:
+    #         print("Warning: No __main__ function defined in source, adding fallback exit.")
+    #     # Add the fallback __main__ that just exits with 0
+    #     qbe.functions.append(
+    #         QbeFunction(
+    #             name='$__main__',
+    #             export=True,
+    #             args=[QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')],
+    #             ret='w', # Exit code is typically 'w' (word)
+    #             blocks=[QbeBlock('@start', ['ret 0'])]
+    #         )
+    #     )
 
     # generate the QBE IR string
     ssa = str(qbe)
@@ -241,22 +241,22 @@ def top_level_compile(ast: AST, scope: 'Scope') -> 'QbeModule':
     if not isinstance(ast, Group):
         ast = Group([ast])  # Wrap in a Group if not already
     qbe = QbeModule()
-    
-    qbe.functions.append(
-        QbeFunction(
-            name='$__main__',
-            export=True,
-            args=[QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')],
-            ret='w', # Exit code is typically 'w' (word)
-            blocks=[start_block:=QbeBlock('@start')]
-        )
+    __main__ = QbeFunction(
+        name='$__main__',
+        export=True,
+        args=[QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')],
+        ret='w', # Exit code is typically 'w' (word)
+        blocks=[start_block:=QbeBlock('@start')]
     )
+    qbe.functions.append(__main__)
 
     compile_group(ast, scope, qbe, start_block)
 
+    # Add a fallback block that will return from the main function
+    __main__.blocks.append(QbeBlock('@__fallback_exit__', ['ret 0']))
     # If the start block is empty, add a default return
-    if len(start_block.lines) == 0:
-        start_block.lines.append('ret 0')
+    # if len(start_block.lines) == 0:
+    #     start_block.lines.append('ret 0')
 
     return qbe
     
@@ -323,6 +323,14 @@ class Scope(TypecheckScope):
 # QBE Type definition (can be expanded later for structs etc.)
 QbeType = Literal['w', 'l', 's', 'd', 'b', 'h'] | str # Allow custom type names (structs)
 
+
+# how are specific dewy types represented as QBE values (what is physically passed around)
+# most things will probably be `l` and just be a void* pointer under the hood...
+dewy_qbe_type_map: dict[Type, QbeType] = {
+    Type(Int): 'l',
+    # TODO: add more...
+}
+
 @dataclass
 class QbeBlock:
     label: str
@@ -373,9 +381,9 @@ class QbeModule:
     global_data: list[str] = field(default_factory=list)
     _counter: count = field(default_factory=lambda: count(0))
     # _symbols: dict[str, TypeExpr] = field(default_factory=dict) # Map temp names to Dewy types
-    _symbols: dict[str, str] = field(default_factory=dict) # Map QBE IR names to names in the dewy scope
+    _symbols: dict[str, str] = field(default_factory=dict) # Map dewy scope names to QBE IR names
 
-    def get_temp(self, prefix: str = "") -> str:
+    def get_temp(self, prefix: str = ".") -> str:
         """Gets the next available temporary variable name."""
         return f"%{prefix}{next(self._counter)}"
 
@@ -394,6 +402,7 @@ class IR(AST):
     qbe_type: QbeType
     qbe_value: str # could be a literal value or a name
     dewy_type: Type
+    #TODO: something about the scope it's in... Or more specifically which QBE function it is in and can be accessed from
 
     def __str__(self) -> str:
         return f'IR(qbe=`{self.qbe_type} {self.qbe_value}`, type=`{self.dewy_type}`)'
@@ -426,6 +435,7 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         Assign: compile_assign,
         Call: compile_call,
         Int: compile_int,
+        Express: compile_express,
         Group: compile_group,
         # Add other AST types here as they are implemented
     }
@@ -478,8 +488,8 @@ def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_block: Qbe
                 raise ValueError(f'INTERNAL ERROR: attempting to assign some type that doesn\'t produce a value: {name}={right!r}')
             scope.assign(name, rhs)
             qid = qbe.get_temp()
-            qbe._symbols[qid] = name
-            current_block.lines.append(f'{qid} ={rhs.qbe_type} {rhs.qbe_value}')
+            qbe._symbols[name] = qid
+            current_block.lines.append(f'{qid} ={rhs.qbe_type} copy {rhs.qbe_value}')
         case _:
             raise NotImplementedError(f"Assignment target not implemented: left={ast.left}, right={ast.right}")    
 
@@ -549,9 +559,62 @@ def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_block: Qbe
     #         raise NotImplementedError(f"Assignment compilation not implemented for target: {ast.left}")
 
 
+def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+    # get the previous IR for the original value that should be set
+    ir_var = scope.get(ast.id.name)
+    ir = ir_var.value
+    assert isinstance(ir, IR), f'INTERNAL ERROR: expected IR AST in scope for id "{ast.id}", but got {ir!r}'
+
+    #TODO: need a check to verify the IR is contained in the same QBE function as it's being used...
+
+    # value should be in symbol table? there are cases where it wouldn't but that's advanced out of order compilation stuff...
+    assert ast.id.name in qbe._symbols, f'TBD if this is an internal error or not. Attempted to express a value which is not in the symbol table from compiling. {ast=!r}'
+    express_ir = IR(ir.qbe_type, qbe._symbols[ast.id.name], ir.dewy_type)
+
+    return express_ir
+
+
+    
+
+
 def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[IR]:
     """Compiles a function call."""
-    pdb.set_trace()
+    if not isinstance(ast.f, Identifier):
+        raise NotImplementedError(f"calling non-identifier functions is not implemented yet. {ast.f} called with args {ast.args}")
+    
+    # get the QBE name of the function
+    f_id = f'${ast.f.name}'
+
+    # get the return type of the function
+    f_var = scope.get(ast.f.name)
+    match f_var.value:
+        case FunctionLiteral(return_type=dewy_return_type) | Builtin(return_type=dewy_return_type) | Closure(FunctionLiteral(return_type=dewy_return_type)):
+            # dewy_return_type = return_type
+            if not isinstance(dewy_return_type, Type):
+                dewy_return_type = typeof(dewy_return_type, scope)
+            ret_type = dewy_qbe_type_map[dewy_return_type]
+        case _:
+            raise ValueError(f'Unrecognized AST type to call: {f_var.value!r}')
+    
+
+    # convert calling args into a group if not already
+    ast_args = ast.args
+    match ast_args:
+        case Group(): ... # already good
+        case Void() | None:  ast_args = Group([])
+        case _:       ast_args = Group([ast_args])
+    
+
+    qbe_args = [compile(arg, scope, qbe, current_block) for arg in ast_args.items]
+    assert not any(arg is None for arg in qbe_args), f"INTERNAL ERROR: function call arguments must produce values: {ast_args}"
+
+    args_str = ', '.join([f'{arg.qbe_type} {arg.qbe_value}' for arg in qbe_args])
+
+    # insert the call with the result being saved to a new temporary id
+    ret_id = qbe.get_temp()
+    current_block.lines.append(f'{ret_id} ={ret_type} call {f_id}({args_str})')
+
+    return IR(ret_type, ret_id, dewy_return_type)
     ...
     # if current_block is None:
     #     raise ValueError("Cannot compile a function call outside of a function block.")
@@ -596,16 +659,25 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_block: QbeBloc
 
 
 def compile_group(ast: Group, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[IR]:
-    """Compiles a group. Returns the result of the last expression."""
+    """Compiles a group"""
 
     results = []
     for item in ast.items:
-        results.append(compile(item, scope, qbe, current_block))
+        result = compile(item, scope, qbe, current_block)
+        if result is not None:
+            results.append(result)
     
-
     # depending on how many values are present in the result, handle the group differently
+    if len(results) == 0:
+        return None
+    elif len(results) == 1:
+        return results[0]
+
+
     pdb.set_trace()
     ...
+    raise NotImplementedError(f'groups that express more than 1 value are not implemented yet. {ast} => {list(map(str, results))}')
+
     # if current_block is None and len(ast.items) > 0:
     #     # This might happen if a Group is the top-level AST node after `compile` starts.
     #     # This case needs refinement. Can a bare group be a valid top-level program?
