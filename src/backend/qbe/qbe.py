@@ -383,9 +383,9 @@ class QbeModule:
     # _symbols: dict[str, TypeExpr] = field(default_factory=dict) # Map temp names to Dewy types
     _symbols: dict[str, str] = field(default_factory=dict) # Map dewy scope names to QBE IR names
 
-    def get_temp(self, prefix: str = ".") -> str:
+    def get_temp(self, prefix: str = "%") -> str:
         """Gets the next available temporary variable name."""
-        return f"%{prefix}{next(self._counter)}"
+        return f"{prefix}.{next(self._counter)}"
 
     def __str__(self) -> str:
         # Ensure proper spacing between sections
@@ -548,46 +548,6 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_block: QbeBloc
     current_block.lines.append(f'{ret_id} ={ret_type} call {f_id}({args_str})')
 
     return IR(ret_type, ret_id, dewy_return_type)
-    ...
-    # if current_block is None:
-    #     raise ValueError("Cannot compile a function call outside of a function block.")
-
-    # # 1. Resolve the function name
-    # if not isinstance(ast.f, Identifier):
-    #     # Later handle complex function expressions (e.g., (get_func())())
-    #     raise NotImplementedError(f"Cannot compile call to non-identifier function: {ast.f}")
-
-    # func_name = ast.f.name
-    # qbe_func_name = f"${func_name}" # Basic convention: prepend $
-
-    # # 2. Compile arguments
-    # qbe_args = []
-    # arg_nodes = []
-    # if ast.args:
-    #     if isinstance(ast.args, Group):
-    #         arg_nodes = ast.args.items
-    #     else:
-    #         arg_nodes = [ast.args] # Handle single argument
-
-    # for arg_ast in arg_nodes:
-    #     # Pass the *current* block for argument compilation
-    #     arg_val = compile(arg_ast, scope, qbe, current_block)
-    #     if arg_val is None:
-    #         raise ValueError(f"Argument expression did not produce a value: {arg_ast}")
-    #     # Determine argument type (simple for now)
-    #     # TODO: Use type information from scope/qbe._symbols
-    #     arg_type = 'l' # Assume long for now for syscalls
-    #     qbe_args.append(f"{arg_type} {arg_val}")
-
-
-    # # 3. Generate the call instruction
-    # args_str = ", ".join(qbe_args)
-    # call_instr = f"call {qbe_func_name}({args_str})"
-
-    # # 4. Handle return value (if necessary) - Assume void for syscalls for now
-    # # TODO: Check function return type and assign to temp if needed.
-    # current_block.lines.append(call_instr)
-    # return None # Syscalls here effectively return void in the Dewy sense
 
 
 
@@ -606,10 +566,12 @@ def compile_group(ast: Group, scope: Scope, qbe: QbeModule, current_block: QbeBl
     elif len(results) == 1:
         return results[0]
 
+    print('WARNING/TODO: group has multiple values. probably handle at the higher level')
+
 
     pdb.set_trace()
     ...
-    raise NotImplementedError(f'groups that express more than 1 value are not implemented yet. {ast} => {list(map(str, results))}')
+    # raise NotImplementedError(f'groups that express more than 1 value are not implemented yet. {ast} => {list(map(str, results))}')
 
     # if current_block is None and len(ast.items) > 0:
     #     # This might happen if a Group is the top-level AST node after `compile` starts.
@@ -637,8 +599,11 @@ def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_block: QbeBlock)
 
 def compile_string(ast: String, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
     """Returns the QBE representation of a string literal."""
-    pdb.set_trace()
-    ...
+    # data $greet = { b "Hello World!\n\0" }
+    data_id = qbe.get_temp('$')
+    str_data = f'"{repr(ast.val)[1:-1]}"'
+    qbe.global_data.append(f'data {data_id} = {{ b {str_data}, b 0 }}')
+    return IR('l', data_id, Type(String))
 
 
 # --- Builtin Class Definitions (Keep as is for now) ---

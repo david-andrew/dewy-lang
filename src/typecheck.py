@@ -605,11 +605,15 @@ def is_index_valid(ast: Index, scope: Scope) -> bool:
     ...
 
 def is_multiply_valid(ast: Mul, scope: Scope) -> bool:
+    # early short circuit for common case
     left_type = typeof(ast.left, scope)
+    if issubclass(left_type.t, (FunctionLiteral, CallableBase)):
+        return False
+    
+    # TBD this is technically true, but it implies you can call functions on the right side when you can't
+    # instead at this point it probably should just be a general case...
     right_type = typeof(ast.right, scope)
-
-    # early short circuit for common case 
-    if issubclass(left_type.t, (FunctionLiteral, CallableBase)) or issubclass(right_type.t, (FunctionLiteral, CallableBase)):
+    if issubclass(right_type.t, (FunctionLiteral, CallableBase)):
         return False
 
 
