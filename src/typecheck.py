@@ -206,6 +206,21 @@ class TypeofFunc(Protocol):
             Type: the type of the AST node
         """
 
+class TypeofCallFunc(Protocol):
+    def __call__(self, call: AST, args: AST|None, scope: Scope, params:bool=False):
+        """
+        Return the type that results from calling the given AST node.
+
+        Args:
+            call (AST): the AST node to determine the type of
+            args (AST|None): the arguments to the call. None means call with no args
+            scope (Scope): the scope in which the AST node is being evaluated
+            params (bool, optional): indicates if full type checking including parameterization should be done. Defaults to False.
+        
+        Returns:
+            Type: the type of the AST node
+        """
+
 def identity(ast: AST, scope: Scope, params:bool=False) -> Type:
     return Type(type(ast))
 
@@ -221,8 +236,14 @@ def cannot_typeof(ast: AST, scope: Scope, params:bool=False):
 
 
 _external_typeof_fn_map: dict[type[AST], TypeofFunc] = {}
+# TODO: would be cool if this could be a decorator (that figured out the type from the first arg)
 def register_typeof(cls: type[AST], fn: TypeofFunc):
     _external_typeof_fn_map[cls] = fn
+
+_external_typeof_call_fn_map: dict[type[AST], TypeofCallFunc] = {}
+# TODO: would be cool if this could be a decorator (that figured out the type from the first arg)
+def register_typeof_call(cls: type[AST], fn: TypeofCallFunc):
+    _external_typeof_call_fn_map[cls] = fn
 
 @cache
 def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
@@ -268,12 +289,13 @@ def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
         Less: short_circuit(Bool),
         LessEqual: short_circuit(Bool),
         Equal: short_circuit(Bool),
-        # And: typeof_binary_dispatch,
-        # Or: typeof_binary_dispatch,
-        # Xor: typeof_binary_dispatch,
-        # Nand: typeof_binary_dispatch,
-        # Nor: typeof_binary_dispatch,
-        # Xnor: typeof_binary_dispatch,
+        And: typeof_logical_binop,
+        Or: typeof_logical_binop,
+        Xor: typeof_logical_binop,
+        Nand: typeof_logical_binop,
+        Nor: typeof_logical_binop,
+        Xnor: typeof_logical_binop,
+        Not: lambda ast, scope, params: typeof(ast.operand, scope, params),
         # Add: typeof_binary_dispatch,
         # Sub: typeof_binary_dispatch,
         Mul: typeof_binary_dispatch,
@@ -300,7 +322,8 @@ def typeof(ast: AST, scope: Scope, params:bool=False) -> TypeExpr:
     raise NotImplementedError(f'typeof not implemented for {ast_type}')
 
 
-
+# TODO: split resolution and typechecking into separate functions
+#       resolution first, then typechecking since typechecking is hard when there are QASTs
 def top_level_typecheck_and_resolve(ast: AST, scope: Scope) -> tuple[AST, ASTDict[Scope]]:
     group = Group([ast])
     gen = group.__iter_asts__(visit_replacement=True)
@@ -391,6 +414,10 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
                 ...
             
             case Int() | String(): ...
+
+            case And() | Or() | Xor() | Nand() | Nor() | Xnor() | Not():
+                # TODO: check that the left and right are either int or bool
+                ...
             
             case _:
                 pdb.set_trace()
@@ -642,8 +669,25 @@ _callable_types = (PrototypeBuiltin, FunctionLiteral, CallableBase)
 #     _callable_types.append(cls)
 
 def typeof_call(ast: Call, scope: Scope, params:bool=False) -> TypeExpr:
+    f_type = type(ast.f)
+    if f_type in _external_typeof_call_fn_map:
+        return _external_typeof_call_fn_map[f_type](ast.f, ast.args, scope, params)
+    
+    if not isinstance(ast.f, Identifier):
+        raise NotImplementedError(f"calling non-identifier functions is not implemented yet. {ast.f} called with args {ast.args}")
+        # get the return type of the function
+    
+    f_var = scope.get(ast.f.name)
     pdb.set_trace()
-    ...
+    # match f_var.value:
+    #     case FunctionLiteral(return_type=dewy_return_type):# | Builtin(return_type=dewy_return_type) | Closure(FunctionLiteral(return_type=dewy_return_type)):
+    #         # dewy_return_type = return_type
+    #         if not isinstance(dewy_return_type, Type):
+    #             dewy_return_type = typeof(dewy_return_type, scope)
+    #         ret_type = dewy_qbe_type_map[dewy_return_type]
+    #     case _:
+    #         raise ValueError(f'Unrecognized AST type to call: {f_var.value!r}')
+    
 
 # def simple_typecheck_resolve_ast(ast: AST, scope: Scope) -> AST:
 #     """Resolve the AST to a type. This is a simple version that doesn't do any complex type checking"""
@@ -801,6 +845,23 @@ def typeof_express(ast: Express, scope: Scope, params:bool=False) -> TypeExpr:
 
     return typeof(var.value, scope, params)
 
+logical_binop_typemap = {
+    (Int, Int): Int,
+    (Bool, Bool): Bool,
+}
+def typeof_logical_binop(ast: And|Or|Xor|Nand|Nor|Xnor, scope: Scope, params:bool=False) -> TypeExpr:
+    """and or xor nand nor xnor"""
+    left_type = typeof(ast.left, scope)
+    right_type = typeof(ast.right, scope)
+
+    if not isinstance(left_type, Type) or not isinstance(right_type, Type):
+        raise NotImplementedError('typeof_logical_binop not implemented for non-Type left side')
+
+    key = (left_type.t, right_type.t)
+    if not key in logical_binop_typemap:
+        raise NotImplementedError(f'logical_binop_typemap not implemented for {key}. {ast=}')
+    
+    return Type(logical_binop_typemap[key])
 
 def typeof_binary_dispatch(ast: BinOp, scope: Scope, params:bool=False) -> TypeExpr:
     pdb.set_trace()

@@ -4,7 +4,7 @@ from ...typecheck import (
     Scope as TypecheckScope,
     top_level_typecheck_and_resolve,# typecheck_and_resolve,
     typecheck_call, typecheck_index, typecheck_multiply,
-    register_typeof, short_circuit, typeof, TypeExpr,
+    register_typeof, register_typeof_call, short_circuit, typeof, TypeExpr,
     CallableBase, IndexableBase, IndexerBase, MultipliableBase, ObjectBase,
 )
 from ...parser import top_level_parse, QJux
@@ -383,9 +383,9 @@ class QbeModule:
     # _symbols: dict[str, TypeExpr] = field(default_factory=dict) # Map temp names to Dewy types
     _symbols: dict[str, str] = field(default_factory=dict) # Map dewy scope names to QBE IR names
 
-    def get_temp(self, prefix: str = "%") -> str:
+    def get_temp(self, prefix: str = "%.") -> str:
         """Gets the next available temporary variable name."""
-        return f"{prefix}.{next(self._counter)}"
+        return f"{prefix}{next(self._counter)}"
 
     def __str__(self) -> str:
         # Ensure proper spacing between sections
@@ -438,6 +438,21 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         Group: compile_group,
         Int: compile_int,
         String: compile_string,
+        And: compile_base_logical_binop,
+        Or: compile_base_logical_binop,
+        Xor: compile_base_logical_binop,
+        Nand: compile_notted_logical_binop,
+        Nor: compile_notted_logical_binop,
+        Xnor: compile_notted_logical_binop,
+        Not: compile_not,
+        # Less: compile_less,
+        # LessEqual: compile_less_equal,
+        # Greater: compile_greater,
+        # GreaterEqual: compile_greater_equal,
+        # Equal: compile_equal,
+        # NotEqual: compile_not_equal,
+
+
         # Add other AST types here as they are implemented
     }
 
@@ -524,6 +539,7 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_block: QbeBloc
         case FunctionLiteral(return_type=dewy_return_type) | Builtin(return_type=dewy_return_type) | Closure(FunctionLiteral(return_type=dewy_return_type)):
             # dewy_return_type = return_type
             if not isinstance(dewy_return_type, Type):
+                pdb.set_trace()
                 dewy_return_type = typeof(dewy_return_type, scope)
             ret_type = dewy_qbe_type_map[dewy_return_type]
         case _:
@@ -600,11 +616,68 @@ def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_block: QbeBlock)
 def compile_string(ast: String, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
     """Returns the QBE representation of a string literal."""
     # data $greet = { b "Hello World!\n\0" }
-    data_id = qbe.get_temp('$')
+    data_id = qbe.get_temp('$str')
     str_data = f'"{repr(ast.val)[1:-1]}"'
+    # qbe.global_data.append(f'data {data_id}.len = {{ l {len(ast.val)} }}')
+    # qbe.global_data.append(f'data {data_id}.data = {{ b {str_data}, b 0 }}')
     qbe.global_data.append(f'data {data_id} = {{ b {str_data}, b 0 }}')
     return IR('l', data_id, Type(String))
 
+logical_binop_opcode_map = {
+    (And, Int, Int): 'and',
+    (Or, Int, Int): 'or',
+    (Xor, Int, Int): 'xor',
+
+}
+def compile_base_logical_binop(ast: And|Or|Xor, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+    """Compiles a base/builtin logical operation."""
+    left_ir = compile(ast.left, scope, qbe, current_block)
+    assert left_ir is not None, f"INTERNAL ERROR: left side of `{ast.__class__.__name__}` must produce a value: {ast.left!r}"
+    right_ir = compile(ast.right, scope, qbe, current_block)
+    assert right_ir is not None, f"INTERNAL ERROR: right side of `{ast.__class__.__name__}` must produce a value: {ast.right!r}"
+    assert left_ir.qbe_type == right_ir.qbe_type, f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.qbe_type} and {right_ir.qbe_type}"
+    dewy_res_type = typeof(ast, scope)
+
+    res_id = qbe.get_temp()
+    res_type = left_ir.qbe_type
+
+    # get the opcode name associated with this AST
+    key = (type(ast), left_ir.dewy_type.t, right_ir.dewy_type.t)
+    if key not in logical_binop_opcode_map:
+        raise NotImplementedError(f'logical binop not implemented for types {key=}. from {ast!r}')
+    opcode = logical_binop_opcode_map[key]
+
+
+    current_block.lines.append(f'{res_id} ={res_type} {opcode} {left_ir.qbe_value}, {right_ir.qbe_value}')
+    return IR(res_type, res_id, dewy_res_type)
+
+
+def compile_not(ast: Not, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+    """use xor x, -1 to handle NOT"""
+    operand_ir = compile(ast.operand, scope, qbe, current_block)
+    assert operand_ir is not None, f'INTERNAL ERROR: operand of `Not` must produce a value: {ast.operand!r}'
+    dewy_res_type = typeof(ast, scope)
+
+    res_id = qbe.get_temp()
+    res_type = operand_ir.qbe_type
+
+    current_block.lines.append(f'{res_id} ={res_type} xor {operand_ir.qbe_value}, -1')
+    return IR(res_type, res_id, dewy_res_type)
+
+
+def compile_notted_logical_binop(ast: Nand|Nor|Xnor, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+
+    match ast:
+        case Nand(): base_cls = And
+        case Nor():  base_cls = Or
+        case Xnor(): base_cls = Xor
+        case _:
+            raise NotImplementedError(f"INTERNAL ERROR: expected Nand, Nor, or Xnor, but got {ast!r}")
+    
+    composite_ast = Not(base_cls(ast.left, ast.right))
+    final_ir = compile_not(composite_ast, scope, qbe, current_block)
+    
+    return final_ir
 
 # --- Builtin Class Definitions (Keep as is for now) ---
 class Builtin(CallableBase):
@@ -616,3 +689,22 @@ class Closure(CallableBase):
     fn: FunctionLiteral
     scope: Scope
     def __str__(self): return f'{self.fn} with <Scope@{hex(id(self.scope))}>'
+
+
+def typeof_builtin(builtin: Builtin, scope: Scope, params:bool=False) -> TypeExpr:
+    """Returns the Dewy type of a builtin function."""
+    pdb.set_trace()
+    ...
+register_typeof_call(Builtin, typeof_builtin)
+
+def typeof_closure(closure: Closure, scope: Scope, params:bool=False) -> TypeExpr:
+    """Returns the Dewy type of a closure."""
+    pdb.set_trace()
+    ...
+register_typeof_call(Closure, typeof_closure)
+
+def typeof_ir(ir: IR, scope: Scope, params:bool=False) -> TypeExpr:
+    """Returns the Dewy type of an IR object."""
+    return ir.dewy_type
+
+register_typeof(IR, typeof_ir)
