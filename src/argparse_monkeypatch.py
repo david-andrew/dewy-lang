@@ -127,7 +127,7 @@ class CustomHelpFormatter(HelpFormatter):
 # --- 3. Custom ArgumentParser (Unchanged from previous working version) ---
 class CustomArgumentParser(argparse.ArgumentParser):
     # ... include the working _parse_known_args override ...
-    def _parse_known_args(self, arg_strings, namespace, intermixed):
+    def _parse_known_args(self, arg_strings, namespace, intermixed=False):
         # This is a near-verbatim copy of ArgumentParser._parse_known_args
         # from Python 3.8-3.11 (adjust imports/logic slightly if using a
         # very different version).
