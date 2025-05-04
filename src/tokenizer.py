@@ -531,9 +531,8 @@ alpha = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
 greek = set('ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψω')
 misc = set('_?!$&°')
 
-start_characters = (alpha | greek | misc) - {'?'}
+start_characters = (alpha | greek | misc)
 continue_characters = (alpha | digits | greek | misc)
-
 
 @peek_eat(Identifier_t)
 def eat_identifier(src: str) -> int | None:
@@ -541,21 +540,16 @@ def eat_identifier(src: str) -> int | None:
     Eat an identifier, return the number of characters eaten
 
     Identifiers:
-    - may not start with a number or a question mark
-    - may not end with a question mark
-    - may use (TODO enumerate the full chars list somewhere. for now copying from python)
+    - may not start with a number
+    - may not be an operator (handled by longest match + token precedence)
 
     """
-    if not src[0] in start_characters:
+    if src[0] not in start_characters:
         return None
 
     i = 1
     while i < len(src) and src[i] in continue_characters:
         i += 1
-
-    # while last character is ?, remove it
-    while i > 1 and src[i-1] == '?':
-        i -= 1
 
     return i
 
