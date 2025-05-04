@@ -42,6 +42,7 @@ import platform
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, Literal, TypeVar, Optional
+from types import SimpleNamespace
 from functools import cache
 from itertools import count
 from argparse import Namespace, ArgumentParser
@@ -402,6 +403,7 @@ class IR(AST):
     qbe_type: QbeType
     qbe_value: str # could be a literal value or a name
     dewy_type: Type
+    meta: SimpleNamespace = field(default_factory=SimpleNamespace)
     #TODO: something about the scope it's in... Or more specifically which QBE function it is in and can be accessed from
 
     def __str__(self) -> str:
@@ -421,10 +423,6 @@ class CompileFunc(Protocol):
         """
         ...
 
-@dataclass
-class MetaInfo:
-    """Placeholder for potential future metadata from compilation."""
-    pass
 
 # --- Specific Compile Functions ---
 @cache
@@ -451,6 +449,7 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         # GreaterEqual: compile_greater_equal,
         # Equal: compile_equal,
         # NotEqual: compile_not_equal,
+        Access: compile_access,
 
 
         # Add other AST types here as they are implemented
@@ -517,7 +516,7 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_block: Q
 
     # value should be in symbol table? there are cases where it wouldn't but that's advanced out of order compilation stuff...
     assert ast.id.name in qbe._symbols, f'TBD if this is an internal error or not. Attempted to express a value which is not in the symbol table from compiling. {ast=!r}'
-    express_ir = IR(ir.qbe_type, qbe._symbols[ast.id.name], ir.dewy_type)
+    express_ir = IR(ir.qbe_type, qbe._symbols[ast.id.name], ir.dewy_type, ir.meta)
 
     return express_ir
 
@@ -582,12 +581,16 @@ def compile_group(ast: Group, scope: Scope, qbe: QbeModule, current_block: QbeBl
     elif len(results) == 1:
         return results[0]
 
+
+    # if top level scope, doesn't matter if there were multiple values
+    # TODO: this isn't actually correct, because there could be an unscoped group at the top level... 
+    if scope.parent is None:
+        return
+
     print('WARNING/TODO: group has multiple values. probably handle at the higher level')
-
-
     pdb.set_trace()
     ...
-    # raise NotImplementedError(f'groups that express more than 1 value are not implemented yet. {ast} => {list(map(str, results))}')
+    raise NotImplementedError(f'groups that express more than 1 value are not implemented yet. {ast} => {list(map(str, results))}')
 
     # if current_block is None and len(ast.items) > 0:
     #     # This might happen if a Group is the top-level AST node after `compile` starts.
@@ -621,7 +624,9 @@ def compile_string(ast: String, scope: Scope, qbe: QbeModule, current_block: Qbe
     # qbe.global_data.append(f'data {data_id}.len = {{ l {len(ast.val)} }}')
     # qbe.global_data.append(f'data {data_id}.data = {{ b {str_data}, b 0 }}')
     qbe.global_data.append(f'data {data_id} = {{ b {str_data}, b 0 }}')
-    return IR('l', data_id, Type(String))
+    ir = IR('l', data_id, Type(String))
+    ir.meta.length = len(ast.val)
+    return ir
 
 logical_binop_opcode_map = {
     (And, Int, Int): 'and',
@@ -649,7 +654,7 @@ def compile_base_logical_binop(ast: And|Or|Xor, scope: Scope, qbe: QbeModule, cu
 
 
     current_block.lines.append(f'{res_id} ={res_type} {opcode} {left_ir.qbe_value}, {right_ir.qbe_value}')
-    return IR(res_type, res_id, dewy_res_type)
+    return IR(res_type, res_id, dewy_res_type) #TBD if there is any propagating of the left+right meta info here...
 
 
 def compile_not(ast: Not, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
@@ -662,7 +667,7 @@ def compile_not(ast: Not, scope: Scope, qbe: QbeModule, current_block: QbeBlock)
     res_type = operand_ir.qbe_type
 
     current_block.lines.append(f'{res_id} ={res_type} xor {operand_ir.qbe_value}, -1')
-    return IR(res_type, res_id, dewy_res_type)
+    return IR(res_type, res_id, dewy_res_type) #TBD if there is any propagating of the operand meta info here...
 
 
 def compile_notted_logical_binop(ast: Nand|Nor|Xnor, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
@@ -678,6 +683,40 @@ def compile_notted_logical_binop(ast: Nand|Nor|Xnor, scope: Scope, qbe: QbeModul
     final_ir = compile_not(composite_ast, scope, qbe, current_block)
     
     return final_ir
+
+
+
+
+def compile_access(ast: Access, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+    left = compile(ast.left, scope, qbe, current_block)
+    assert left is not None, f"INTERNAL ERROR: left side of `{ast.__class__.__name__}` must produce a value: {ast.left!r}"
+    if left.dewy_type.t == String:
+        if not isinstance(ast.right, Identifier):
+            raise ValueError(f"ERROR: can only access string members with identifiers, not {ast.right!r}. `{ast}`")
+        member = ast.right.name
+        if member == '_bytes_ptr':
+            return left # the string itself already is the bytes pointer
+        if member == '_bytes_length':
+            return IR('l', f'{left.meta.length}', Type(Int))
+        
+        raise NotImplementedError(f"ERROR: currently only support accessing `_bytes_ptr` and `_bytes_length` members of strings, not {member!r}. `{ast}`")
+    
+
+    
+    pdb.set_trace()
+    raise NotImplementedError(f"INTERNAL ERROR: Accessing type {left.dewy_type.t} is not implemented yet. {ast.left} -> {ast.right}")
+    
+    pdb.set_trace()
+    ...
+
+
+
+
+
+
+
+
+
 
 # --- Builtin Class Definitions (Keep as is for now) ---
 class Builtin(CallableBase):
