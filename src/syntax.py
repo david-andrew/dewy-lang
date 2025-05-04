@@ -461,6 +461,8 @@ class BinOp(AST, ABC):
 
 class Assign(BinOp):
     _op = '='
+class CompiletimeAssign(BinOp):
+    _op = '::'
 class PointsTo(BinOp):
     _op = '->'
 class BidirPointsTo(BinOp):
@@ -724,7 +726,8 @@ class ObjectLiteral(AST, Delimited):
 
 
 
-class DeclareGeneric(AST):
+class MakeGeneric(AST):
+    # e.g. you are creating something that is generic: myfn = <T>(a:T, b:T) => a + b
     left: TypeParam
     right: AST
 
@@ -733,6 +736,7 @@ class DeclareGeneric(AST):
 
 
 class Parameterize(AST):
+    # e.g. you are applying a type to an existing generic object: res = myfn<int64>(1 2)
     left: AST
     right: TypeParam
 
@@ -768,6 +772,11 @@ class TypedIdentifier(AST):
 class ReturnTyped(BinOp):
     _op = ':>'
 
+class SubTyped(BinOp):
+    _op = 'of'
+    _space = True
+    
+
 class UnpackTarget(AST):
     target: 'list[Identifier | TypedIdentifier | UnpackTarget | Assign | CollectInto]'
     def __str__(self) -> str:
@@ -785,7 +794,7 @@ class DeclarationType(Enum):
 
 class Declare(AST):
     decltype: DeclarationType
-    target: Identifier | TypedIdentifier | ReturnTyped | UnpackTarget | Assign
+    target: Identifier | TypedIdentifier | ReturnTyped | UnpackTarget | Assign | CompiletimeAssign #| CollectInto #TBD if can declare with collect into
 
     def __str__(self):
         return f'{self.decltype.name.lower()} {self.target}'

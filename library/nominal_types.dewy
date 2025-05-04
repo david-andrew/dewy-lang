@@ -32,8 +32,8 @@ const float32: type of float
 const float64: type of float
 const float128: type of float
 const float80: type of float  // perhaps this is a compiler error unless available on the architecture. OR if not available, user can determine if fallback is emulation vs floatN
-const rational<T of integer>: type of real = [numerator:T denominator:T]
-const fixedpoint<T of integer>: type of real = [base:T shift:T]
+const rational: type of real = <T of integer>[numerator:T denominator:T]
+const fixedpoint: type of real = <T of integer>[base:T shift:T]
 
 
 //vector  //TBD how to handle parametric types. but then again int can also have parameters, e.g. for the range
@@ -61,4 +61,6 @@ const linux_epoch: type of timepoint
 //TBD if we'll allow multiple-inheritance, but if so, it would look like this:
 const MyStr&Int: type of int & string = [
     // some implementation that conforms to both types...
+    i: integer
+    s: string
 ]

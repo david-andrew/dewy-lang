@@ -15,7 +15,7 @@ from .syntax import (
     Flowable, Flow, If, Loop, Default,
     PrototypeFunctionLiteral, PrototypeBuiltin, Call,
     Index,
-    PrototypeIdentifier, Identifier, TypedIdentifier, ReturnTyped, UnpackTarget, Assign,
+    PrototypeIdentifier, Identifier, TypedIdentifier, ReturnTyped, SubTyped, UnpackTarget, Assign, CompiletimeAssign,
     Int, Bool,
     Range, IterIn,
     BinOp,
@@ -27,7 +27,7 @@ from .syntax import (
     Backticks, CycleLeft, CycleRight, Suppress,
     BroadcastOp,
     DeclarationType,
-    DeclareGeneric, Parameterize,
+    MakeGeneric, Parameterize,
 )
 from .tokenizer import (
     Token,
@@ -240,13 +240,14 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.left, [Operator_t('xor'), Operator_t('xnor')]),
     (Associativity.left, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
     (Associativity.none,  [Operator_t('as'), Operator_t('transmute')]),
+    (Associativity.fail, [Operator_t('of')]),
     (Associativity.none, [Operator_t(':')]),
     (Associativity.right, [Operator_t(':>')]),
     (Associativity.right,  [Operator_t('=>')]),  # () => () => () => 42
     (Associativity.right, [Operator_t('|>')]),
     (Associativity.left, [Operator_t('<|')]),
     (Associativity.fail,  [Operator_t('->'), Operator_t('<->')]),
-    (Associativity.fail,  [Operator_t('=')]),
+    (Associativity.fail,  [Operator_t('='), Operator_t('::')]),
     (Associativity.none,  [Operator_t('else')]),
 ]))
 precedence_table: dict[Operator_t, int | qint] = {}
@@ -481,6 +482,7 @@ def build_bin_expr(left: AST, op: Token, right: AST) -> AST:
         case Operator_t(op='|>'): return Call(right, left)
         case Operator_t(op='<|'): return Call(left, right)
         case Operator_t(op='='): return Assign(left, right)
+        case Operator_t(op='::'): return CompiletimeAssign(left, right)
         case Operator_t(op='=>'): return PrototypeFunctionLiteral(left, right)
         case Operator_t(op='->'): return PointsTo(left, right)
         case Operator_t(op='<->'): return BidirPointsTo(left, right)
@@ -526,10 +528,11 @@ def build_bin_expr(left: AST, op: Token, right: AST) -> AST:
             #TBD if there are other things that can have type annotations beyond identifiers
             raise ValueError(f'ERROR: can only apply a type to an identifier. Got {left=}, {right=}')
         case Operator_t(op=':>'): return ReturnTyped(left, right)
+        case Operator_t(op='of'): return SubTyped(left, right)
 
         case TypeParamJuxtapose_t():
             if isinstance(left, TypeParam):
-                return DeclareGeneric(left, right)
+                return MakeGeneric(left, right)
             if isinstance(right, TypeParam):
                 return Parameterize(left, right)
             raise ValueError(f"INTERNAL ERROR: TypeParamJuxtapose must be attached to a type param. {left=}, {right=}")
@@ -662,6 +665,7 @@ def build_unary_postfix_expr(left: AST, op: Token) -> AST:
             return Call(left)
 
         case _:
+            pdb.set_trace()
             raise NotImplementedError(f"TODO: {op=}")
 
 def parse_string(token: String_t) -> String | IString:
@@ -815,7 +819,7 @@ def parse_flow(flow: Flow_t) -> Flowable:
 
 def parse_declare(declare: Declare_t) -> Declare:
     expr = parse_chain(declare.expr)
-    assert isinstance(expr, (PrototypeIdentifier, Identifier, TypedIdentifier, ReturnTyped, UnpackTarget, Assign)), f'ERROR: expected identifier, typed-identifier, or unpack target for declare expression, got {expr=}'
+    assert isinstance(expr, (PrototypeIdentifier, Identifier, TypedIdentifier, ReturnTyped, UnpackTarget, Assign, CompiletimeAssign)), f'ERROR: expected identifier, typed-identifier, or unpack target for declare expression, got {expr=}'
     match declare:
         case Declare_t(keyword=Keyword_t(src='let')): return Declare(DeclarationType.LET, expr)
         case Declare_t(keyword=Keyword_t(src='const')): return Declare(DeclarationType.CONST, expr)

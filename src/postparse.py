@@ -12,7 +12,7 @@ from .syntax import (
     Flowable, Flow, If, Loop, Default,
     PrototypeFunctionLiteral, PrototypeBuiltin, Call,
     Index,
-    PrototypeIdentifier, Express, Identifier, TypedIdentifier, ReturnTyped, UnpackTarget, Assign,
+    PrototypeIdentifier, Express, Identifier, TypedIdentifier, ReturnTyped, SubTyped, UnpackTarget, Assign,
     Int, Bool,
     Range, IterIn,
     Less, LessEqual, Greater, GreaterEqual, Equal, MemberIn,
@@ -23,7 +23,7 @@ from .syntax import (
     CycleLeft, CycleRight, Suppress,
     BroadcastOp,
     DeclarationType,
-    DeclareGeneric, Parameterize,
+    MakeGeneric, Parameterize,
 )
 from .parser import QJux
 
@@ -126,9 +126,11 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             case Assign(left=Array() as arr, right=right):
                 target = convert_prototype_to_unpack_target(arr)
                 gen.send(Assign(target, right))
+            case Assign(left=TypedIdentifier(id=_id, type=_type)): ... #typed identifiers are already converted
             case Assign():
                 pdb.set_trace()
                 ...
+            
             case IterIn(left=PrototypeIdentifier(name=name), right=right):
                 gen.send(IterIn(Identifier(name), right))
             case IterIn(left=Array() as arr, right=right):
@@ -163,10 +165,11 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 | PointsTo() | BidirPointsTo() | Equal() | Less() | LessEqual() | Greater() | GreaterEqual() | LeftShift() | RightShift() | LeftRotate() | RightRotate() | LeftRotateCarry() | RightRotateCarry() | Add() | Sub() | Mul() | Div() | IDiv() | Mod() | Pow() | And() | Or() | Xor() | Nand() | Nor() | Xnor() | MemberIn() \
                 | BroadcastOp() | SpreadOutFrom() | QJux() \
                 | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() | CycleLeft() | CycleRight() \
-                | TypedIdentifier():
+                | TypedIdentifier() | ReturnTyped() | SubTyped() | MakeGeneric() | Parameterize() | TypeParam():
                 ...
             #TBD cases: Type() | ListOfASTs() | BareRange() | Ellipsis() | Spread() | TypeParam() | Flowable() | Flow() | PrototypeBuiltin() | Builtin() | Express() | ReturnTyped() | SequenceUnpackTarget() | ObjectUnpackTarget() | DeclarationType() | DeclareGeneric() | Parameterize():
             case _:  # all others are traversed as normal
+                pdb.set_trace()
                 raise ValueError(f'Unhandled case {type(i)}')
             #     pdb.set_trace()
             #     ...

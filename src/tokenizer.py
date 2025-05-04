@@ -344,11 +344,11 @@ binary_operators = {
     '|', '&',
     'and', 'or', 'nand', 'nor', 'xor', 'xnor', '??',
     'else',
-    '=', ':=', 'as', 'in', 'transmute',
+    '=', '::', 'as', 'in', 'transmute', #':=' # walrus operator is redundant. Only add if people really need it, which I find unlikely
     '@?',
     '|>', '<|', '=>',
     '->', '<->', #'<-', #reverse arrow is dumb
-    '.', ':', ':>'
+    '.', ':', ':>', 'of',
 }
 opchain_starters = {'+', '-', '*', '/', '%', '^'}
 operators = sorted(
