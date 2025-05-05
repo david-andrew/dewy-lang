@@ -247,11 +247,11 @@ def top_level_compile(ast: AST, scope: 'Scope') -> 'QbeModule':
         export=True,
         args=[QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')],
         ret='w', # Exit code is typically 'w' (word)
-        blocks=[start_block:=QbeBlock('@start')]
+        blocks=[QbeBlock('@start')]
     )
     qbe.functions.append(__main__)
 
-    compile_group(ast, scope, qbe, start_block)
+    compile_group(ast, scope, qbe, __main__)
 
     # Add a fallback block that will return from the main function
     __main__.blocks.append(QbeBlock('@__fallback_exit__', ['ret 0']))
@@ -412,7 +412,7 @@ class IR(AST):
 
 T = TypeVar('T', bound=AST)
 class CompileFunc(Protocol):
-    def __call__(self, ast: T, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[IR]:
+    def __call__(self, ast: T, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR]:
         """
         Compiles the AST node, potentially adding instructions to current_block
         (if provided and applicable, e.g., inside a function).
@@ -449,6 +449,7 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         GreaterEqual: compile_compare,
         Equal: compile_compare,
         NotEqual: compile_compare,
+        Flow: compile_flow,
         Access: compile_access,
 
 
@@ -456,20 +457,20 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
     }
 
 
-def compile(ast: AST, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[IR]:
+def compile(ast: AST, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR]:
     """Dispatches compilation to the appropriate function based on AST node type."""
     compile_fn_map = get_compile_fn_map()
 
     ast_type = type(ast)
     if ast_type in compile_fn_map:
-        return compile_fn_map[ast_type](ast, scope, qbe, current_block)
+        return compile_fn_map[ast_type](ast, scope, qbe, current_func)
 
     raise NotImplementedError(f'QBE compilation not implemented for AST type: {ast_type}')
 
 
 
 
-def compile_declare(ast: Declare, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> None:
+def compile_declare(ast: Declare, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> None:
     """Handles variable declarations."""
     match ast.target:
         case Identifier(name=name):
@@ -477,14 +478,15 @@ def compile_declare(ast: Declare, scope: Scope, qbe: QbeModule, current_block: Q
             ...
         case Assign(left=Identifier(name=name)):
             scope.declare(name, void, untyped, ast.decltype)
-            compile_assign(ast.target, scope, qbe, current_block)
+            compile_assign(ast.target, scope, qbe, current_func)
         case _:
             raise NotImplementedError(f"Declaration target not implemented: {ast.target}")
 
     return None
 
-def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> None:
+def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> None:
     """Handles assignments, creating functions when assigning FunctionLiterals."""
+    current_block = current_func.blocks[-1]
     match ast:
         case Assign(left=Identifier(name=name), right=FunctionLiteral(args=signature, body=body)):
             pdb.set_trace()
@@ -492,7 +494,7 @@ def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_block: Qbe
             #TODO: save compiling the function literal for later...
             # defer_compile_fn(name, signature, body)
         case Assign(left=Identifier(name=name), right=right):
-            rhs = compile(right, scope, qbe, current_block)
+            rhs = compile(right, scope, qbe, current_func)
             if rhs is None:
                 raise ValueError(f'INTERNAL ERROR: attempting to assign some type that doesn\'t produce a value: {name}={right!r}')
             scope.assign(name, rhs)
@@ -506,7 +508,7 @@ def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_block: Qbe
 
             
 
-def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
     # get the previous IR for the original value that should be set
     ir_var = scope.get(ast.id.name)
     ir = ir_var.value
@@ -524,8 +526,8 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_block: Q
     
 
 
-def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[IR]:
-    """Compiles a function call."""
+def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR]:
+    """Compiles a function call."""    
     if not isinstance(ast.f, Identifier):
         raise NotImplementedError(f"calling non-identifier functions is not implemented yet. {ast.f} called with args {ast.args}")
     
@@ -553,25 +555,26 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_block: QbeBloc
         case _:       ast_args = Group([ast_args])
     
 
-    qbe_args = [compile(arg, scope, qbe, current_block) for arg in ast_args.items]
+    qbe_args = [compile(arg, scope, qbe, current_func) for arg in ast_args.items]
     assert not any(arg is None for arg in qbe_args), f"INTERNAL ERROR: function call arguments must produce values: {ast_args}"
 
     args_str = ', '.join([f'{arg.qbe_type} {arg.qbe_value}' for arg in qbe_args])
 
     # insert the call with the result being saved to a new temporary id
     ret_id = qbe.get_temp()
+    current_block = current_func.blocks[-1]
     current_block.lines.append(f'{ret_id} ={ret_type} call {f_id}({args_str})')
 
     return IR(ret_type, ret_id, dewy_return_type)
 
 
 
-def compile_group(ast: Group, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> Optional[IR]:
+def compile_group(ast: Group, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR]:
     """Compiles a group"""
 
     results = []
     for item in ast.items:
-        result = compile(item, scope, qbe, current_block)
+        result = compile(item, scope, qbe, current_func)
         if result is not None:
             results.append(result)
     
@@ -608,7 +611,7 @@ def compile_group(ast: Group, scope: Scope, qbe: QbeModule, current_block: QbeBl
     # return last_val
 
 
-def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
     """Returns the QBE representation of an integer literal."""
     # QBE uses direct integers for constants. Prepend type for clarity in instruction.
     # The 'l' type is added by the instruction using this value (e.g., call)
@@ -617,7 +620,7 @@ def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_block: QbeBlock)
     return IR( 'l', f"{ast.val}", Type(Int))
 
 
-def compile_string(ast: String, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+def compile_string(ast: String, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
     """Returns the QBE representation of a string literal."""
     # data $greet = { b "Hello World!\n\0" }
     data_id = qbe.get_temp('$str')
@@ -635,11 +638,11 @@ logical_binop_opcode_map = {
     (Xor, Int, Int): 'xor',
 
 }
-def compile_base_logical_binop(ast: And|Or|Xor, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+def compile_base_logical_binop(ast: And|Or|Xor, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
     """Compiles a base/builtin logical operation."""
-    left_ir = compile(ast.left, scope, qbe, current_block)
+    left_ir = compile(ast.left, scope, qbe, current_func)
     assert left_ir is not None, f"INTERNAL ERROR: left side of `{ast.__class__.__name__}` must produce a value: {ast.left!r}"
-    right_ir = compile(ast.right, scope, qbe, current_block)
+    right_ir = compile(ast.right, scope, qbe, current_func)
     assert right_ir is not None, f"INTERNAL ERROR: right side of `{ast.__class__.__name__}` must produce a value: {ast.right!r}"
     assert left_ir.qbe_type == right_ir.qbe_type, f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.qbe_type} and {right_ir.qbe_type}"
     dewy_res_type = typeof(ast, scope)
@@ -653,30 +656,40 @@ def compile_base_logical_binop(ast: And|Or|Xor, scope: Scope, qbe: QbeModule, cu
         raise NotImplementedError(f'logical binop not implemented for types {key=}. from {ast!r}')
     opcode = logical_binop_opcode_map[key]
 
-
+    # perform the logical operation
+    current_block = current_func.blocks[-1]
     current_block.lines.append(f'{res_id} ={res_type} {opcode} {left_ir.qbe_value}, {right_ir.qbe_value}')
+    
+    # if type was bool, need to mask the upper bits
+    # Note this is technically not SSA compliant as we reuse res_id, but QBE conveniently handles it properly
+    if left_ir.dewy_type.t == Bool:
+        current_block.lines.append(f'{res_id} ={res_type} and {res_id}, 1')
+    
     return IR(res_type, res_id, dewy_res_type) #TBD if there is any propagating of the left+right meta info here...
 
 
-def compile_not(ast: Not, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+def compile_not(ast: Not, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
     """use xor x, -1 to handle NOT"""
-    operand_ir = compile(ast.operand, scope, qbe, current_block)
+    operand_ir = compile(ast.operand, scope, qbe, current_func)
     assert operand_ir is not None, f'INTERNAL ERROR: operand of `Not` must produce a value: {ast.operand!r}'
     dewy_res_type = typeof(ast, scope)
 
     res_id = qbe.get_temp()
     res_type = operand_ir.qbe_type
 
+    # perform the not operation
+    current_block = current_func.blocks[-1]
     current_block.lines.append(f'{res_id} ={res_type} xor {operand_ir.qbe_value}, -1')
 
     # if type was bool, need to mask the upper bits
+    # Note this is technically not SSA compliant as we reuse res_id, but QBE conveniently handles it properly
     if operand_ir.dewy_type.t == Bool:
         current_block.lines.append(f'{res_id} ={res_type} and {res_id}, 1')
 
     return IR(res_type, res_id, dewy_res_type) #TBD if there is any propagating of the operand meta info here...
 
 
-def compile_notted_logical_binop(ast: Nand|Nor|Xnor, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+def compile_notted_logical_binop(ast: Nand|Nor|Xnor, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
 
     match ast:
         case Nand(): base_cls = And
@@ -686,34 +699,9 @@ def compile_notted_logical_binop(ast: Nand|Nor|Xnor, scope: Scope, qbe: QbeModul
             raise NotImplementedError(f"INTERNAL ERROR: expected Nand, Nor, or Xnor, but got {ast!r}")
     
     composite_ast = Not(base_cls(ast.left, ast.right))
-    final_ir = compile_not(composite_ast, scope, qbe, current_block)
+    final_ir = compile_not(composite_ast, scope, qbe, current_func)
     
     return final_ir
-
-
-
-
-def compile_access(ast: Access, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
-    left = compile(ast.left, scope, qbe, current_block)
-    assert left is not None, f"INTERNAL ERROR: left side of `{ast.__class__.__name__}` must produce a value: {ast.left!r}"
-    if left.dewy_type.t == String:
-        if not isinstance(ast.right, Identifier):
-            raise ValueError(f"ERROR: can only access string members with identifiers, not {ast.right!r}. `{ast}`")
-        member = ast.right.name
-        if member == '_bytes_ptr':
-            return left # the string itself already is the bytes pointer
-        if member == '_bytes_length':
-            return IR('l', f'{left.meta.length}', Type(Int))
-        
-        raise NotImplementedError(f"ERROR: currently only support accessing `_bytes_ptr` and `_bytes_length` members of strings, not {member!r}. `{ast}`")
-    
-
-    
-    pdb.set_trace()
-    raise NotImplementedError(f"INTERNAL ERROR: Accessing type {left.dewy_type.t} is not implemented yet. {ast.left} -> {ast.right}")
-    
-    pdb.set_trace()
-    ...
 
 
 
@@ -725,10 +713,10 @@ comparison_binop_opcode_map = {
     (Equal, Int): 'eq',
     (NotEqual, Int): 'ne',
 }
-def compile_compare(ast: Less|LessEqual|Greater|GreaterEqual|Equal|NotEqual, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
-    left_ir = compile(ast.left, scope, qbe, current_block)
+def compile_compare(ast: Less|LessEqual|Greater|GreaterEqual|Equal|NotEqual, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
+    left_ir = compile(ast.left, scope, qbe, current_func)
     assert left_ir is not None, f"INTERNAL ERROR: left side of `{ast.__class__.__name__}` must produce a value: {ast.left!r}"
-    right_ir = compile(ast.right, scope, qbe, current_block)
+    right_ir = compile(ast.right, scope, qbe, current_func)
     assert right_ir is not None, f"INTERNAL ERROR: right side of `{ast.__class__.__name__}` must produce a value: {ast.right!r}"
     assert left_ir.dewy_type.t == right_ir.dewy_type.t, f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.dewy_type.t} and {right_ir.dewy_type.t}"
     dewy_res_type = typeof(ast, scope)
@@ -749,15 +737,92 @@ def compile_compare(ast: Less|LessEqual|Greater|GreaterEqual|Equal|NotEqual, sco
     signed_marker = '' if type(ast) in (Equal, NotEqual) else 's'
     opcode = f'c{signed_marker}{comparison_opcode}{left_ir.qbe_type}'
 
-
+    # perform the comparison operation
+    current_block = current_func.blocks[-1]
     current_block.lines.append(f'{res_id} ={res_type} {opcode} {left_ir.qbe_value}, {right_ir.qbe_value}')
     return IR(res_type, res_id, dewy_res_type) 
 
 
+def compile_flow(ast: Flow, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> None | IR:
+
+    # create blocks for each branch
+    unique_num = qbe.get_temp('')
+    assert len(ast.branches) > 0, f"INTERNAL ERROR: Flow must have at least one branch: {ast}"
+
+    end_label = f'@.{unique_num}.flow.end'
+    for i, branch in enumerate(ast.branches):
+        base_label = f'@.{unique_num}.{i}.flow.{branch.__class__.__name__.lower()}'
+        
+        # determine the label of the next branch (i.e. if this one's condition is false)
+        if i < len(ast.branches) - 1: next_label = f'@.{unique_num}.{i+1}.flow.{ast.branches[i+1].__class__.__name__.lower()}.start'
+        else:                         next_label = end_label
+        
+        match branch:
+            # TODO: eventually these may return IR
+            case If():      compile_if(branch, scope, qbe, current_func, base_label, next_label, end_label)
+            case Loop():    compile_loop(branch, scope, qbe, current_func, base_label, next_label, end_label)
+            case Default(): compile_default(branch, scope, qbe, current_func, base_label, next_label, end_label)
+
+    current_func.blocks.append(QbeBlock(end_label))
+
+def compile_if(ast: If, scope: Scope, qbe: QbeModule, current_func: QbeFunction, base_label: str, next_label: str, end_label: str) -> IR|None:
+    # create the first block containing the condition for the if statement
+    start_block = QbeBlock(f'{base_label}.start')
+    current_func.blocks.append(start_block)
+    cond_ir = compile(ast.condition, scope, qbe, current_func)
+    start_block.lines.append(f'jnz {cond_ir.qbe_value}, {base_label}.body, {next_label}')
+
+    # create the body block
+    body_block = QbeBlock(f'{base_label}.body')
+    current_func.blocks.append(body_block)
+    body_ir = compile(ast.body, scope, qbe, current_func)
+    body_block.lines.append(f'jmp {end_label}')
+
+    # TODO: this could potentially return IR
+
+
+def compile_loop(ast: Loop, scope: Scope, qbe: QbeModule, current_func: QbeFunction, base_label: str, next_label: str, end_label: str) -> IR|None:
+    pdb.set_trace()
+    ...
+
+    # TODO: this could potentially return IR
+
+
+def compile_default(ast: Default, scope: Scope, qbe: QbeModule, current_func: QbeFunction, base_label: str, next_label: str, end_label: str) -> IR|None:
+    current_func.blocks.append(QbeBlock(f'{base_label}.start', [f'jmp {base_label}.body']))
+    body_block = QbeBlock(f'{base_label}.body')
+    current_func.blocks.append(body_block)
+    body_ir = compile(ast.body, scope, qbe, current_func)
+    body_block.lines.append(f'jmp {end_label}')
+
+
+    # TODO: this could potentially return IR
 
 
 
 
+
+def compile_access(ast: Access, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
+    left = compile(ast.left, scope, qbe, current_func)
+    assert left is not None, f"INTERNAL ERROR: left side of `{ast.__class__.__name__}` must produce a value: {ast.left!r}"
+    if left.dewy_type.t == String:
+        if not isinstance(ast.right, Identifier):
+            raise ValueError(f"ERROR: can only access string members with identifiers, not {ast.right!r}. `{ast}`")
+        member = ast.right.name
+        if member == '_bytes_ptr':
+            return left # the string itself already is the bytes pointer
+        if member == '_bytes_length':
+            return IR('l', f'{left.meta.length}', Type(Int))
+        
+        raise NotImplementedError(f"ERROR: currently only support accessing `_bytes_ptr` and `_bytes_length` members of strings, not {member!r}. `{ast}`")
+    
+
+    
+    pdb.set_trace()
+    raise NotImplementedError(f"INTERNAL ERROR: Accessing type {left.dewy_type.t} is not implemented yet. {ast.left} -> {ast.right}")
+    
+    pdb.set_trace()
+    ...
 
 
 # --- Builtin Class Definitions (Keep as is for now) ---

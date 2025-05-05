@@ -425,6 +425,11 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             case Greater() | GreaterEqual() | Less() | LessEqual() | Equal():# | NotEqual():
                 # TODO: verify that the left and right are the comparable types (can compare with each other)
                 ...
+            
+            case Flow() | If() | Loop() | Default():
+                #TODO: verify that condition is a boolean
+                ...
+            
             case _:
                 pdb.set_trace()
                 ...
