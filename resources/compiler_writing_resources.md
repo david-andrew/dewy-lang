@@ -1,3 +1,5 @@
+# Compiler Resources/Ideas
+
 - I made a language for the Nintendo DS
   - https://www.youtube.com/watch?v=jMIj893JJBg
   - talking about how to do typechecking, dealing with out of order dependencies in declarations (make a declarations DAG and go in that order)
@@ -26,3 +28,15 @@
   - https://www.kdab.com/mixing-c-and-rust-for-fun-and-profit-part-1/
   - mostly just for the idea of having good support for talking to other languages
   - the consensus I've reached is Dewy should let you use flags to specify a name-mangling scheme so that dewy binaries can talk natively to other language binaries, etc. 
+
+
+
+
+# Standard Library Resources/Ideas:
+- Printf and Non-Blocking C & C++ Logging for Debugging Concurrency Issues
+  - https://www.youtube.com/watch?v=QeXrPVD5LJA
+  - basically how to do logging at ~1 nanosecond scale by fancy mapping to data segments in compiled file
+  - in video they have to do an extra processing step, but perhaps we can automatically have `dewy` command call the processing step after the file is executed
+
+- When Nanoseconds Matter: Ultrafast Trading Systems in C++ - David Gross - CppCon 2024
+  - https://www.youtube.com/watch?v=sX2nF1fW7kI
