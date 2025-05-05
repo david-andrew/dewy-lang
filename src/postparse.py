@@ -84,6 +84,7 @@ def post_parse(ast: AST) -> AST:
     ast = convert_prototype_tuples(ast)
     ast = convert_bare_ranges(ast)
     ast = convert_bare_ellipses(ast)
+    ast = convert_bare_flows(ast)
     ast = convert_prototype_function_literals(ast)
     ast = convert_prototype_identifiers(ast)
 
@@ -223,6 +224,21 @@ def convert_bare_ellipses(ast: AST) -> AST:
     for i in (gen := ast.__iter_asts_full_traversal__()):
         if isinstance(i, DotDotDot):
             gen.send(Ellipsis())
+    return ast.items[0]
+
+
+def convert_bare_flows(ast: AST) -> AST:
+    ast = Group([ast])
+    for i in (gen := ast.__iter_asts_full_traversal__()):
+        if isinstance(i, Flow):
+            # this is the lazy/hacky way to do it
+            for branch in i.branches:
+                branch._is_in_flowable = True
+        if isinstance(i, Flowable):
+            if not hasattr(i, '_is_in_flowable'):
+                i._is_in_flowable = True
+                gen.send(Flow([i]))
+
     return ast.items[0]
 
 

@@ -504,7 +504,7 @@ def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_func: QbeF
             if rhs is None:
                 raise ValueError(f'INTERNAL ERROR: attempting to assign some type that doesn\'t produce a value: {name}={right!r}')
             scope.assign(name, rhs)
-            qid = qbe.get_temp()
+            qid = qbe._symbols.get(name) or qbe.get_temp() # see if a variable exists already. otherwise make a new one
             qbe._symbols[name] = qid
             current_block.lines.append(f'{qid} ={rhs.qbe_type} copy {rhs.qbe_value}')
         case _:
@@ -821,8 +821,23 @@ def compile_if(ast: If, scope: Scope, qbe: QbeModule, current_func: QbeFunction,
 
 
 def compile_loop(ast: Loop, scope: Scope, qbe: QbeModule, current_func: QbeFunction, base_label: str, next_label: str, end_label: str) -> IR|None:
-    pdb.set_trace()
-    ...
+    # create the first block containing the initial condition for the loop
+    start_block = QbeBlock(f'{base_label}.start')
+    current_func.blocks.append(start_block)
+    cond_ir = compile(ast.condition, scope, qbe, current_func)
+    start_block.lines.append(f'jnz {cond_ir.qbe_value}, {base_label}.body, {next_label}')
+
+    # create the continue block (reuse the compile of the start block)
+    continue_block = QbeBlock(f'{base_label}.continue', start_block.lines[:-1])
+    current_func.blocks.append(continue_block)
+    continue_block.lines.append(f'jnz {cond_ir.qbe_value}, {base_label}.body, {end_label}')
+
+    # create the body block
+    body_block = QbeBlock(f'{base_label}.body')
+    current_func.blocks.append(body_block)
+    body_ir = compile(ast.body, scope, qbe, current_func)
+    body_block.lines.append(f'jmp {base_label}.continue')
+
 
     # TODO: this could potentially return IR
 
