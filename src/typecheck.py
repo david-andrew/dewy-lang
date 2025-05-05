@@ -881,7 +881,7 @@ def typeof_logical_binop(ast: And|Or|Xor|Nand|Nor|Xnor, scope: Scope, params:boo
 
 def typeof_binary_dispatch(ast: BinOp, scope: Scope, params:bool=False) -> TypeExpr:
     # just do the easy cases for now
-    if isinstance(ast, (Add, Sub, Mul, Mod, IDiv, Pow)) and type(ast.left) == type(ast.right):
+    if isinstance(ast, (Add, Sub, Mul, Mod, IDiv, Pow)):
         left_type = typeof(ast.left, scope)
         right_type = typeof(ast.right, scope)
         if not isinstance(left_type, Type) or not isinstance(right_type, Type):
