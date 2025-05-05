@@ -228,7 +228,7 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reverse
     (Associativity.unary, [Operator_t('not'), Operator_t('~')]),
     (Associativity.right,  [Operator_t('^')]),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
-    (Associativity.left, [Operator_t('*'), Operator_t('/'), Operator_t('%')]),
+    (Associativity.left, [Operator_t('*'), Operator_t('/'), Operator_t('÷'), Operator_t('%')]),
     (Associativity.left, [Operator_t('+'), Operator_t('-')]),
     (Associativity.left, [*map(ShiftOperator_t, ['<<', '>>', '<<<', '>>>', '<<!', '!>>'])]),
     (Associativity.none,  [Comma_t(',')]),

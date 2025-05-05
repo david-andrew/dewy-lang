@@ -449,6 +449,12 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         GreaterEqual: compile_compare,
         Equal: compile_compare,
         NotEqual: compile_compare,
+        Add: compile_arithmetic_binop,
+        Sub: compile_arithmetic_binop,
+        Mul: compile_arithmetic_binop,
+        # Div: compile_arithmetic_binop,
+        IDiv: compile_arithmetic_binop,
+        Mod: compile_arithmetic_binop,
         Flow: compile_flow,
         Access: compile_access,
 
@@ -741,6 +747,39 @@ def compile_compare(ast: Less|LessEqual|Greater|GreaterEqual|Equal|NotEqual, sco
     current_block = current_func.blocks[-1]
     current_block.lines.append(f'{res_id} ={res_type} {opcode} {left_ir.qbe_value}, {right_ir.qbe_value}')
     return IR(res_type, res_id, dewy_res_type) 
+
+
+
+arithmetic_binop_opcode_map = {
+    (Add, Int, Int): 'add',
+    (Sub, Int, Int): 'sub',
+    (Mul, Int, Int): 'mul',
+    (IDiv, Int, Int): 'div',
+    (Mod, Int, Int): 'rem',
+}
+# TODO: note div/rem have unsigned versions, otherwise assume inputs are signed.
+def compile_arithmetic_binop(ast: Add|Sub|Mul|IDiv|Mod, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
+    left_ir = compile(ast.left, scope, qbe, current_func)
+    assert left_ir is not None, f"INTERNAL ERROR: left side of `{ast.__class__.__name__}` must produce a value: {ast.left!r}"
+    right_ir = compile(ast.right, scope, qbe, current_func)
+    assert right_ir is not None, f"INTERNAL ERROR: right side of `{ast.__class__.__name__}` must produce a value: {ast.right!r}"
+    assert left_ir.dewy_type.t == right_ir.dewy_type.t, f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.dewy_type.t} and {right_ir.dewy_type.t}"
+    dewy_res_type = typeof(ast, scope)
+
+    res_id = qbe.get_temp()
+    res_type = left_ir.qbe_type
+
+    # get the opcode name associated with this AST
+    key = (type(ast), left_ir.dewy_type.t, right_ir.dewy_type.t)
+    if key not in arithmetic_binop_opcode_map:
+        raise NotImplementedError(f'arithmetic binop not implemented for types {key=}. from {ast!r}')
+    opcode = arithmetic_binop_opcode_map[key]
+
+    # perform the arithmetic operation
+    current_block = current_func.blocks[-1]
+    current_block.lines.append(f'{res_id} ={res_type} {opcode} {left_ir.qbe_value}, {right_ir.qbe_value}')
+    
+    return IR(res_type, res_id, dewy_res_type)
 
 
 def compile_flow(ast: Flow, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> None | IR:

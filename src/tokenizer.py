@@ -339,7 +339,7 @@ valid_delim_closers = {
 unary_prefix_operators = {'+', '-', '*', '/', 'not', '~', '@'}#, '...'}
 unary_postfix_operators = {'?', ';'}
 binary_operators = {
-    '+', '-', '*', '/', '%', '^',
+    '+', '-', '*', '/', '÷', '%', '^',
     '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
     '|', '&',
     'and', 'or', 'nand', 'nor', 'xor', 'xnor', '??',

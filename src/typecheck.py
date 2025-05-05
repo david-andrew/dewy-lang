@@ -296,12 +296,13 @@ def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
         Nor: typeof_logical_binop,
         Xnor: typeof_logical_binop,
         Not: lambda ast, scope, params: typeof(ast.operand, scope, params),
-        # Add: typeof_binary_dispatch,
-        # Sub: typeof_binary_dispatch,
+        Add: typeof_binary_dispatch,
+        Sub: typeof_binary_dispatch,
         Mul: typeof_binary_dispatch,
-        # Div: typeof_binary_dispatch,
-        # Mod: typeof_binary_dispatch,
-        # Pow: typeof_binary_dispatch,
+        Div: typeof_binary_dispatch,
+        IDiv: typeof_binary_dispatch,
+        Mod: typeof_binary_dispatch,
+        Pow: typeof_binary_dispatch,
         AtHandle: typeof_at_handle,
         Undefined: identity,
         Void: identity,
@@ -424,6 +425,10 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
                 ...
             case Greater() | GreaterEqual() | Less() | LessEqual() | Equal():# | NotEqual():
                 # TODO: verify that the left and right are the comparable types (can compare with each other)
+                ...
+            
+            case Add() | Sub() | Mul() | Div() | IDiv() | Mod():
+                # TODO: verify left and right are compatible with the given operation
                 ...
             
             case Flow() | If() | Loop() | Default():
@@ -875,6 +880,17 @@ def typeof_logical_binop(ast: And|Or|Xor|Nand|Nor|Xnor, scope: Scope, params:boo
     return Type(logical_binop_typemap[key])
 
 def typeof_binary_dispatch(ast: BinOp, scope: Scope, params:bool=False) -> TypeExpr:
+    # just do the easy cases for now
+    if isinstance(ast, (Add, Sub, Mul, Mod, IDiv, Pow)) and type(ast.left) == type(ast.right):
+        left_type = typeof(ast.left, scope)
+        right_type = typeof(ast.right, scope)
+        if not isinstance(left_type, Type) or not isinstance(right_type, Type):
+            raise NotImplementedError(f'typeof_binary_dispatch not implemented for non-Type left/right side. {left_type=}, {right_type=}')
+        if left_type.t != right_type.t:
+            raise ValueError(f'INTERNAL ERROR: typeof_binary_dispatch called with mismatched types. {left_type=}, {right_type=}')
+        return left_type
+
+        
     pdb.set_trace()
     raise NotImplementedError('typeof_binary_dispatch not implemented')
 
