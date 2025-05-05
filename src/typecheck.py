@@ -422,7 +422,9 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             case And() | Or() | Xor() | Nand() | Nor() | Xnor() | Not():
                 # TODO: check that the left and right are either int or bool
                 ...
-            
+            case Greater() | GreaterEqual() | Less() | LessEqual() | Equal():# | NotEqual():
+                # TODO: verify that the left and right are the comparable types (can compare with each other)
+                ...
             case _:
                 pdb.set_trace()
                 ...

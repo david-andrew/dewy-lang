@@ -24,7 +24,7 @@ from ...syntax import (
     Int, Bool,
     Range, IterIn,
     BinOp,
-    Less, LessEqual, Greater, GreaterEqual, Equal, MemberIn,
+    Less, LessEqual, Greater, GreaterEqual, Equal, NotEqual, MemberIn,
     LeftShift, RightShift, LeftRotate, RightRotate, LeftRotateCarry, RightRotateCarry,
     Add, Sub, Mul, Div, IDiv, Mod, Pow,
     And, Or, Xor, Nand, Nor, Xnor,
@@ -443,12 +443,12 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         Nor: compile_notted_logical_binop,
         Xnor: compile_notted_logical_binop,
         Not: compile_not,
-        # Less: compile_less,
-        # LessEqual: compile_less_equal,
-        # Greater: compile_greater,
-        # GreaterEqual: compile_greater_equal,
-        # Equal: compile_equal,
-        # NotEqual: compile_not_equal,
+        Less: compile_compare,
+        LessEqual: compile_compare,
+        Greater: compile_compare,
+        GreaterEqual: compile_compare,
+        Equal: compile_compare,
+        NotEqual: compile_compare,
         Access: compile_access,
 
 
@@ -613,6 +613,7 @@ def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_block: QbeBlock)
     # QBE uses direct integers for constants. Prepend type for clarity in instruction.
     # The 'l' type is added by the instruction using this value (e.g., call)
     # TODO: check if the integer overflows, and return a big int
+    # TODO: use concrete integer type (i.e. probably int64, and then is BigInt if overflows)
     return IR( 'l', f"{ast.val}", Type(Int))
 
 
@@ -667,6 +668,11 @@ def compile_not(ast: Not, scope: Scope, qbe: QbeModule, current_block: QbeBlock)
     res_type = operand_ir.qbe_type
 
     current_block.lines.append(f'{res_id} ={res_type} xor {operand_ir.qbe_value}, -1')
+
+    # if type was bool, need to mask the upper bits
+    if operand_ir.dewy_type.t == Bool:
+        current_block.lines.append(f'{res_id} ={res_type} and {res_id}, 1')
+
     return IR(res_type, res_id, dewy_res_type) #TBD if there is any propagating of the operand meta info here...
 
 
@@ -710,6 +716,42 @@ def compile_access(ast: Access, scope: Scope, qbe: QbeModule, current_block: Qbe
     ...
 
 
+
+comparison_binop_opcode_map = {
+    (Less, Int): 'lt',
+    (LessEqual, Int): 'lt',
+    (Greater, Int): 'gt',
+    (GreaterEqual, Int): 'ge',
+    (Equal, Int): 'eq',
+    (NotEqual, Int): 'ne',
+}
+def compile_compare(ast: Less|LessEqual|Greater|GreaterEqual|Equal|NotEqual, scope: Scope, qbe: QbeModule, current_block: QbeBlock) -> IR:
+    left_ir = compile(ast.left, scope, qbe, current_block)
+    assert left_ir is not None, f"INTERNAL ERROR: left side of `{ast.__class__.__name__}` must produce a value: {ast.left!r}"
+    right_ir = compile(ast.right, scope, qbe, current_block)
+    assert right_ir is not None, f"INTERNAL ERROR: right side of `{ast.__class__.__name__}` must produce a value: {ast.right!r}"
+    assert left_ir.dewy_type.t == right_ir.dewy_type.t, f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.dewy_type.t} and {right_ir.dewy_type.t}"
+    dewy_res_type = typeof(ast, scope)
+    
+    res_id = qbe.get_temp()
+    res_type: QbeType = 'l' # booleans are represented as integers in QBE. 0 is false, 1 is true
+
+
+    # use signed comparisons for now
+    # TODO: in the future, signed/unsigned will be based on the type
+
+     # get the opcode name associated with this AST
+    key = (type(ast), left_ir.dewy_type.t)
+    if key not in comparison_binop_opcode_map:
+        raise NotImplementedError(f'comparison binop not implemented for types {key=}. from {ast!r}')
+    comparison_opcode = comparison_binop_opcode_map[key]
+    #TODO: could be unsigned depending on the operand types. also floating point comparisons don't get the signed/unsigned marker--they are always assumed signed
+    signed_marker = '' if type(ast) in (Equal, NotEqual) else 's'
+    opcode = f'c{signed_marker}{comparison_opcode}{left_ir.qbe_type}'
+
+
+    current_block.lines.append(f'{res_id} ={res_type} {opcode} {left_ir.qbe_value}, {right_ir.qbe_value}')
+    return IR(res_type, res_id, dewy_res_type) 
 
 
 

@@ -478,9 +478,9 @@ class Index(BinOp):
 class Equal(BinOp):
     _op = '=?'
 
-# covered by OpChain([Not, Equal])
-# class NotEqual(BinOp):
-#     _op = 'not=?'
+# covered by OpChain([Not, Equal]). but used at compile time
+class NotEqual(BinOp):
+    _op = 'not=?'
 
 class Less(BinOp):
     _op = '<?'
