@@ -261,7 +261,7 @@ def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
         # # Object: no_op,
         Access: typeof_access,
         Assign: short_circuit(Void),
-        # IterIn: typeof_iter_in,
+        IterIn: short_circuit(Bool), #typeof_iter_in,
         # FunctionLiteral: typeof_function_literal,
         # # Closure: typeof_closure,
         # # Builtin: typeof_builtin,
@@ -272,7 +272,7 @@ def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
         Int: identity,
         # # Float: no_op,
         Bool: identity,
-        # Range: no_op,
+        Range: identity,
         CycleLeft: lambda ast, scope, params: typeof(ast.operand, scope, params),
         CycleRight: lambda ast, scope, params: typeof(ast.operand, scope, params),
         # Flow: typeof_flow,
@@ -433,6 +433,14 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             
             case Flow() | If() | Loop() | Default():
                 #TODO: verify that condition is a boolean
+                ...
+
+            case IterIn():
+                # tbd if any type checking needed here.. probably not
+                ...
+            
+            case Range():
+                # TODO: check that the range bounds/step are valid
                 ...
             
             case _:
@@ -952,6 +960,11 @@ def typeof_access(ast: Access, scope: Scope, params:bool=False) -> TypeExpr:
     raise NotImplementedError(f'typeof_access not implemented for {type(ast)}')
 
 
+
+def typeof_iter_in(ast: IterIn, scope: Scope, params:bool=False) -> TypeExpr:
+    right = typeof(ast.right, scope, params)
+    pdb.set_trace()
+    ...
 
 
 

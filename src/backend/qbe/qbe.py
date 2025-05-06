@@ -457,6 +457,8 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         Mod: compile_arithmetic_binop,
         Flow: compile_flow,
         Access: compile_access,
+        IterIn: compile_iter_in,
+        Range: compile_range,
 
 
         # Add other AST types here as they are implemented
@@ -640,8 +642,11 @@ def compile_string(ast: String, scope: Scope, qbe: QbeModule, current_func: QbeF
 
 logical_binop_opcode_map = {
     (And, Int, Int): 'and',
+    (And, Bool, Bool): 'and',
     (Or, Int, Int): 'or',
+    (Or, Bool, Bool): 'or',
     (Xor, Int, Int): 'xor',
+    (Xor, Bool, Bool): 'xor',
 
 }
 def compile_base_logical_binop(ast: And|Or|Xor, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
@@ -828,9 +833,10 @@ def compile_loop(ast: Loop, scope: Scope, qbe: QbeModule, current_func: QbeFunct
     start_block.lines.append(f'jnz {cond_ir.qbe_value}, {base_label}.body, {next_label}')
 
     # create the continue block (reuse the compile of the start block)
-    continue_block = QbeBlock(f'{base_label}.continue', start_block.lines[:-1])
+    continue_block = QbeBlock(f'{base_label}.continue')#, start_block.lines[:-1])
     current_func.blocks.append(continue_block)
-    continue_block.lines.append(f'jnz {cond_ir.qbe_value}, {base_label}.body, {end_label}')
+    continue_ir = compile(ast.condition, scope, qbe, current_func)
+    continue_block.lines.append(f'jnz {continue_ir.qbe_value}, {base_label}.body, {end_label}')
 
     # create the body block
     body_block = QbeBlock(f'{base_label}.body')
@@ -875,6 +881,104 @@ def compile_access(ast: Access, scope: Scope, qbe: QbeModule, current_func: QbeF
     pdb.set_trace()
     raise NotImplementedError(f"INTERNAL ERROR: Accessing type {left.dewy_type.t} is not implemented yet. {ast.left} -> {ast.right}")
     
+    pdb.set_trace()
+    ...
+
+
+
+def compile_iter_in(ast: IterIn, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
+    if not isinstance(ast.left, Identifier):
+        raise NotImplementedError(f"iter in is not implement for unpack/etc. left side. {ast.left!r} in {ast.right!r}")
+    name = ast.left.name
+
+    current_block = current_func.blocks[-1]
+
+    # determine if the iterator is being used as part of a loop start condition
+    context: Literal['loop.start', 'loop.continue', None] = None
+    if current_block.label.endswith('loop.start'):
+        context = 'loop.start'
+    elif current_block.label.endswith('loop.continue'):
+        context = 'loop.continue'
+    else:
+        raise NotImplementedError(f"iter in is not implement for non-loop contexts ({current_block.label}). {ast})")
+
+    
+    if context == 'loop.start':
+        rhs = compile(ast.right, scope, qbe, current_func)
+        if rhs is None:
+            raise ValueError(f'INTERNAL ERROR: attempting to iterate over some type that doesn\'t produce a value: {name} in {ast.right!r}')
+        
+        iter_i_id = qbe._symbols.get(name) or qbe.get_temp() # see if a variable exists already. otherwise make a new one
+        qbe._symbols[name] = iter_i_id
+
+        if rhs.dewy_type.t == Range and rhs.meta.kind == (Int, Int):
+            scope.assign(name, IR('l', f'{rhs.meta.left}', Type(Int)))
+            current_block.lines.append(f'{iter_i_id} =l copy {rhs.meta.left}')
+            cmp_id = qbe.get_temp()
+            cmp_type = 'csltl' if rhs.meta.brackets[1] == ')' else 'cslel'
+            current_block.lines.append(f'{cmp_id} =l {cmp_type} {iter_i_id}, {rhs.meta.right}')
+            return IR('l', cmp_id, Type(Bool))
+        # elif ...: ...
+        else:
+            pdb.set_trace()
+            raise NotImplementedError(f"ERROR: iter in not implemented for type {rhs.dewy_type.t}. {ast.left} in {ast.right}")
+        
+
+        pdb.set_trace()
+        ...
+    if context == 'loop.continue':
+        rhs = compile(ast.right, scope, qbe, current_func)
+        if rhs is None:
+            raise ValueError(f'INTERNAL ERROR: attempting to iterate over some type that doesn\'t produce a value: {name} in {ast.right!r}')
+        
+        assert name in qbe._symbols, f"INTERNAL ERROR: iter in failed to find {name} in the symbol table. {ast.left} in {ast.right}"
+        iter_i_id = qbe._symbols.get(name) or qbe.get_temp() # see if a variable exists already. otherwise make a new one
+        qbe._symbols[name] = iter_i_id
+
+        if rhs.dewy_type.t == Range and rhs.meta.kind == (Int, Int):
+            current_block.lines.append(f'{iter_i_id} =l add {iter_i_id}, {rhs.meta.step}')
+            cmp_id = qbe.get_temp()
+            cmp_type = 'csltl' if rhs.meta.brackets[1] == ')' else 'cslel'
+            current_block.lines.append(f'{cmp_id} =l {cmp_type} {iter_i_id}, {rhs.meta.right}')
+            return IR('l', cmp_id, Type(Bool))
+        # elif ...: ...
+        else:
+            pdb.set_trace()
+            raise NotImplementedError(f"ERROR: iter in not implemented for type {rhs.dewy_type.t}. {ast.left} in {ast.right}")
+        
+    
+    pdb.set_trace()
+    ...
+
+
+def compile_range(ast: Range, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
+
+    left_ir = compile(ast.left, scope, qbe, current_func)
+    right_ir = compile(ast.right, scope, qbe, current_func)
+
+    # obnoxious limitation of pattern matching where we can't match types because they're not instances,
+    # and thus unqualified type names are interpreted as a capture pattern
+    # see: https://peps.python.org/pep-0636/#matching-against-constants-and-enums
+    from ... import syntax 
+
+    match left_ir, right_ir:
+        case None, None:
+            raise NotImplementedError(f"-inf..inf range not implemented yet. {ast.left!r}..{ast.right!r}")
+        case IR(dewy_type=Type(t=syntax.Int)), IR(dewy_type=Type(t=syntax.Int)):
+            ir = IR(':IIRange', f'{{{left_ir.qbe_type} {left_ir.qbe_value}, {right_ir.qbe_type} {right_ir.qbe_value}}}', Type(Range))
+            ir.meta.kind = (Int, Int)
+            ir.meta.left = int(left_ir.qbe_value)
+            ir.meta.step = 1
+            ir.meta.right = int(right_ir.qbe_value)
+            ir.meta.brackets = ast.brackets
+            return ir
+        
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f"Unimplemented range type: {left_ir.dewy_type.t}..{right_ir.dewy_type.t}. {ast.left}..{ast.right}")
+    #left or right could be void
+
+
     pdb.set_trace()
     ...
 
