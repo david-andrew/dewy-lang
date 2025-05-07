@@ -596,12 +596,6 @@ def post_process(tokens: list[Token]) -> None:
     if len(tokens) == 0:
         return
 
-    # find any instances of <else> without a flow keyword after, and convert to <else> <if> <true>
-    convert_bare_else(tokens)
-
-    # bundle up conditionals into single token expressions
-    bundle_conditionals(tokens)
-
     # combine operator chains into a single operator token
     make_chain_operators(tokens)
 
@@ -614,7 +608,12 @@ def post_process(tokens: list[Token]) -> None:
     # convert juxtapose tokens to more specific types if possible
     narrow_juxtapose(tokens)
 
+    # find any instances of <else> without a flow keyword after, and convert to <else> <if> <true>
+    convert_bare_else(tokens)
 
+    # bundle up conditionals into single token expressions
+    bundle_conditionals(tokens)
+    
     # make the actual list of chains
 
     # based on types, replace jux with jux_mul or jux_call

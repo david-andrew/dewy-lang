@@ -876,6 +876,9 @@ class EatTracker:
     tokens: list[Token]
 
 
+type_param_confusable_operators = {
+    op for op in operators if op.startswith('<') or op.startswith('>')
+}
 @full_eat()
 def eat_type_param(src: str) -> tuple[int, TypeParam_t] | None:
     """
@@ -885,7 +888,7 @@ def eat_type_param(src: str) -> tuple[int, TypeParam_t] | None:
     Type parameters may not start with `<<` or contain any shift operators (`<<`, `<<<`, `>>`, `>>>`)
     Internally encountered shift operators are considered to be delimiters for the type parameter
     """
-    if not src.startswith('<') or src.startswith('<<'):
+    if not src.startswith('<') or any(src.startswith(op) for op in type_param_confusable_operators): #src.startswith('<<'):
         return None
 
     i = 1
@@ -914,6 +917,10 @@ def eat_type_param(src: str) -> tuple[int, TypeParam_t] | None:
         i += n_eaten
 
     if i == len(src):
+        return None
+
+    # cannot end with an operator
+    if any(src[:i].startswith(op) for op in type_param_confusable_operators):
         return None
 
     return i + 1, TypeParam_t(body)
