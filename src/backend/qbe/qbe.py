@@ -429,6 +429,7 @@ class CompileFunc(Protocol):
 def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
     """Returns the dispatch map for compilation functions."""
     return {
+        Void: lambda ast, scope, qbe, current_func: None,
         Declare: compile_declare,
         Assign: compile_assign,
         Express: compile_express,
@@ -814,13 +815,14 @@ def compile_if(ast: If, scope: Scope, qbe: QbeModule, current_func: QbeFunction,
     start_block = QbeBlock(f'{base_label}.start')
     current_func.blocks.append(start_block)
     cond_ir = compile(ast.condition, scope, qbe, current_func)
-    start_block.lines.append(f'jnz {cond_ir.qbe_value}, {base_label}.body, {next_label}')
+    current_func.blocks[-1].lines.append(f'jnz {cond_ir.qbe_value}, {base_label}.body, {next_label}')
 
     # create the body block
     body_block = QbeBlock(f'{base_label}.body')
     current_func.blocks.append(body_block)
     body_ir = compile(ast.body, scope, qbe, current_func)
-    body_block.lines.append(f'jmp {end_label}')
+    # pdb.set_trace()
+    current_func.blocks[-1].lines.append(f'jmp {end_label}')
 
     # TODO: this could potentially return IR
 
@@ -830,19 +832,19 @@ def compile_loop(ast: Loop, scope: Scope, qbe: QbeModule, current_func: QbeFunct
     start_block = QbeBlock(f'{base_label}.start')
     current_func.blocks.append(start_block)
     cond_ir = compile(ast.condition, scope, qbe, current_func)
-    start_block.lines.append(f'jnz {cond_ir.qbe_value}, {base_label}.body, {next_label}')
+    current_func.blocks[-1].lines.append(f'jnz {cond_ir.qbe_value}, {base_label}.body, {next_label}')
 
     # create the continue block (reuse the compile of the start block)
     continue_block = QbeBlock(f'{base_label}.continue')#, start_block.lines[:-1])
     current_func.blocks.append(continue_block)
     continue_ir = compile(ast.condition, scope, qbe, current_func)
-    continue_block.lines.append(f'jnz {continue_ir.qbe_value}, {base_label}.body, {end_label}')
+    current_func.blocks[-1].lines.append(f'jnz {continue_ir.qbe_value}, {base_label}.body, {end_label}')
 
     # create the body block
     body_block = QbeBlock(f'{base_label}.body')
     current_func.blocks.append(body_block)
     body_ir = compile(ast.body, scope, qbe, current_func)
-    body_block.lines.append(f'jmp {base_label}.continue')
+    current_func.blocks[-1].lines.append(f'jmp {base_label}.continue')
 
 
     # TODO: this could potentially return IR
