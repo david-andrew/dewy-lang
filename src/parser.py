@@ -219,36 +219,44 @@ class Associativity(Enum):
 if-else-loop chain expr is more like a single unit, so it doesn't really have a precedence. but they act like they have the lowest precedence since the expressions they capture will be full chains only broken by space/seq
 the unary versions of + - * / % have the same precedence as their binary versions
 """
-operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = list(reversed([
-    (Associativity.unary, [Operator_t('@')]),
-    (Associativity.left, [Operator_t('.'), Juxtapose_t(None)]),  # jux-call, jux-index
+def opify(raw_table: list[tuple[Associativity, Sequence[str|Operator_t]]]) -> list[tuple[Associativity, Sequence[Operator_t]]]:
+    """
+    Convenience function so we don't need to write Operator_t('op'), we can just write 'op'
+    Converts all strings in the table to Operator_t. leaves existing Operator_t alone
+    """
+    return [(assoc, [Operator_t(op) if isinstance(op, str) else op for op in ops]) for assoc, ops in raw_table]
+
+
+operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = opify(reversed([
+    (Associativity.unary, ['@']),
+    (Associativity.left, ['.', Juxtapose_t(None)]),  # jux-call, jux-index
     (Associativity.none, [TypeParamJuxtapose_t(None)]),
     (Associativity.none, [EllipsisJuxtapose_t(None)]),  # jux-ellipsis
     (Associativity.none, [BackticksJuxtapose_t(None)]),  # jux-backticks
-    (Associativity.unary, [Operator_t('not'), Operator_t('~')]),
-    (Associativity.right,  [Operator_t('^')]),
+    (Associativity.unary, ['not', '~']),
+    (Associativity.right,  ['^']),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
-    (Associativity.left, [Operator_t('*'), Operator_t('/'), Operator_t('÷'), Operator_t('%')]),
-    (Associativity.left, [Operator_t('+'), Operator_t('-')]),
+    (Associativity.left, ['*', '/', '÷', 'idiv', '%']),
+    (Associativity.left, ['+', '-']),
     (Associativity.left, [*map(ShiftOperator_t, ['<<', '>>', '<<<', '>>>', '<<!', '!>>'])]),
     (Associativity.none,  [Comma_t(',')]),
     (Associativity.left, [RangeJuxtapose_t(None)]),  # jux-range
-    (Associativity.none, [Operator_t('in')]),
-    (Associativity.left, [Operator_t('=?'), Operator_t('>?'), Operator_t('<?'), Operator_t('>=?'), Operator_t('<=?')]),
-    (Associativity.unary, [Operator_t('?')]),
-    (Associativity.left, [Operator_t('and'), Operator_t('nand'), Operator_t('&')]),
-    (Associativity.left, [Operator_t('xor'), Operator_t('xnor')]),
-    (Associativity.left, [Operator_t('or'), Operator_t('nor'), Operator_t('|')]),
-    (Associativity.none,  [Operator_t('as'), Operator_t('transmute')]),
-    (Associativity.fail, [Operator_t('of')]),
-    (Associativity.none, [Operator_t(':')]),
-    (Associativity.right, [Operator_t(':>')]),
-    (Associativity.right,  [Operator_t('=>')]),  # () => () => () => 42
-    (Associativity.right, [Operator_t('|>')]),
-    (Associativity.left, [Operator_t('<|')]),
-    (Associativity.fail,  [Operator_t('->'), Operator_t('<->')]),
-    (Associativity.fail,  [Operator_t('='), Operator_t('::')]),
-    (Associativity.none,  [Operator_t('else')]),
+    (Associativity.none, ['in']),
+    (Associativity.left, ['=?', '>?', '<?', '>=?', '<=?']),
+    (Associativity.unary, ['?']),
+    (Associativity.left, ['and', 'nand', '&']),
+    (Associativity.left, ['xor', 'xnor']),
+    (Associativity.left, ['or', 'nor', '|']),
+    (Associativity.none,  ['as', 'transmute']),
+    (Associativity.fail, ['of']),
+    (Associativity.none, [':']),
+    (Associativity.right, [':>']),
+    (Associativity.right,  ['=>']),  # () => () => () => 42
+    (Associativity.right, ['|>']),
+    (Associativity.left, ['<|']),
+    (Associativity.fail,  ['->', '<->']),
+    (Associativity.fail,  ['=', '::']),
+    (Associativity.none,  ['else']),
 ]))
 precedence_table: dict[Operator_t, int | qint] = {}
 associativity_table: dict[int, Associativity] = {}
@@ -499,7 +507,7 @@ def build_bin_expr(left: AST, op: Token, right: AST) -> AST:
         case Operator_t(op='-'): return Sub(left, right)
         case Operator_t(op='*'): return Mul(left, right)
         case Operator_t(op='/'): return Div(left, right)
-        case Operator_t(op='÷'): return IDiv(left, right)
+        case Operator_t(op='÷'|'idiv'): return IDiv(left, right)
         case Operator_t(op='%'): return Mod(left, right)
         case Operator_t(op='^'): return Pow(left, right)
 

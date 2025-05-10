@@ -7,9 +7,9 @@ let place = 1
 loop place*10 <? x place*=10
 loop place >? 0
 (
-    let d = x ÷ place
+    let d = x idiv place
     x %= place
-    place ÷= 10
+    place idiv= 10
 
     if d =? 0      __syscall3__(SYSCALL_WRITE STDOUT '0' 1)
     else if d =? 1 __syscall3__(SYSCALL_WRITE STDOUT '1' 1)
