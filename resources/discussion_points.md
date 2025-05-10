@@ -2911,5 +2911,5 @@ C: int32
 
 
 ## t Strings
-Python is introducint t strings for templating (see: https://www.youtube.com/watch?v=_QYAoNCK574).
+Python is introducing t strings for templating (see: https://www.youtube.com/watch?v=_QYAoNCK574).
 I think dewy roughly covers most of the functionality already with juxtaposition and the ability to make little one letter functions you stick on the front of strings to process them. The one thing I think should be added is a `.template` member that all strings would have, and it returns the template for how the string was created (basically the same kind of object python's returns). That way any function can trivially access the template for how the string was made if they want, and take advantage of the ability to safely escape external content
