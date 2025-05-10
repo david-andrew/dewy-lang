@@ -1953,11 +1953,21 @@ Perhaps there is a better name instead of `local` though. `shadow`? Basically wa
 - `hereconst`
 - `loco`
 
+Actually probably just go with something like `local_only_const`
+
+
 Lastly I'm considering one that has the name and type declaration `fixed` but allows for the value to be overwritten. This might be for cases of shared methods that the user can append onto, e.g. `__add__`. Though probably we won't allow users to access the value directly, but rather access them through a function for registering new methods
 
 ```dewy
 private __add__:<T U V>(a:T b:U):> V
-const register__add__ = (func:typeof<__add__>) => __add__ |= func
+const register__add__ = (func:typeof<__add__>) => __add__ &= func
+```
+
+Or perhaps we should have a type: `const_overloadable` (or `overloadable_const`) meaning it is const, but can be overloaded via the overload operator
+
+```
+const_overloadable __add__:<T U V>(a:T b:U):> V
+__add__ &= (a:mytype b:mytype):>mytype => ...
 ```
 
 ### stdlib provided parameters and their declaration types
@@ -2587,13 +2597,13 @@ This should be the full list of dunder methods you can assign on objects and how
 - __lt__                // a <? b
 - __le__                // a <=? b
 - __eq__                // a =? b
+- __neq__               // a not=? b
 - __3way_compare__      // a <=> b    // could also be __spaceship__
 - __is__                // a is? b
 - __isnt__              // a isnt? b
-- __question__          // a?         // what does this do again? cast to a bool?
+- __question__          // (a)?         // take truthyness/falsyness of a value. note that parenthesis or whitespace are needed so the ? doesn't get counted as part of the identifier
 - __at__                // @a
 - __is_at__             // a @? b
-- __neq__               // a not=? b
 - __lshift__            // a >> b
 - __rshift__            // a << b
 - __lrotate__           // a >>> b
@@ -2612,7 +2622,7 @@ This should be the full list of dunder methods you can assign on objects and how
 - __member_in__         // a in? b
 - __iter_in__           // a in b   //e.g. loop a in b
 - __call__              // a(arg1 arg2 ...)  //todo. what if we just express the object, does that call it the same way zero arg functions are called? no shouldn't be
-- __dot__               // a.b    // tricky because `__dot__ = (lhs: tbd rhs: identifier):>tbd => ...` dealing with the identifier type is weird. I don't think dynamic lookup of members will be allowed so we have to statically ensure that rhs is always an identifier that is present in the object... probably not too different from how it will be done already with regular dot access
+- __access__               // a.b    // tricky because `__access__ = (lhs: tbd rhs: identifier):>tbd => ...` dealing with the identifier type is weird. I don't think dynamic lookup of members will be allowed so we have to statically ensure that rhs is always an identifier that is present in the object... probably not too different from how it will be done already with regular dot access
 - __range_left__        // a..    // these two are weird
 - __range_right__       // ..a
 - __index__             // a[b]
@@ -2623,15 +2633,15 @@ This should be the full list of dunder methods you can assign on objects and how
 - __spread_from__       // a...
 - __annotate__          // a:b
 - __fn_annotate__       // a:>b
-- __fn_ize__            // a=>b
+<!-- - __fn__                // a=>b    //tbd if overloading this is allowed. we expect a signature on the left, and an expression on the right. probably don't allow unless very compelling reason -->
 - __coalesce__          // a ?? b
 - __lcycle__            // `a
 - __rcycle__            // a`
 - __larrow__            // a -> b
-// - __rarrow__            // a <- b
+<!-- - __rarrow__            // a <- b  // right arrow is useless/redundant -->
 - __biarrow__           // a <-> b
-- __comma__             // a, b   // often will want to implement 2 `__comma__ = <T U>(l:T r:U) => l, r` and `__comma__ |= <T U>(l:T[] r:U) => [l... r]`
-- __else__              // a else b
+<!-- - __comma__             // a, b   // often will want to implement 2 `__comma__ = <T U>(l:T r:U) => l, r` and `__comma__ |= <T U>(l:T[] r:U) => [l... r]`... TBD what I'm talking about here.. I made comma just be syntax sugar for wrappring in parenthesis, i.e. `a, b, c` -> `(a b c)` -->
+<!-- - __else__              // a else b // tbd what this does. I'm not sure you can do `a else b` outside of a flow, which isn't really an operator -->
 - __suppress__          // a;
 
 // TBD on these, e.g. could make each __op_assign__ be generic over all ops. or spread them out. same idea with vectorize..
@@ -2650,6 +2660,46 @@ This should be the full list of dunder methods you can assign on objects and how
 // other magic variables/etc.
 - __file__
 - tbd...
+
+### Math sumbols for methods
+will have lots of math operators (which generally won't have built in functionality? unless obvious e.g. geometric algebra) but people can define for their own library types
+see: https://en.wikipedia.org/wiki/Mathematical_operators_and_symbols_in_Unicode and https://www.compart.com/en/unicode/category/Sm
+
+- __dot__               // a⋅b    // also a dot b
+- __wedge__             // a∧b    // also a wedge b
+- __circle__            // a∘b
+- __star__
+- __partial_derivative__// ∂a/∂x
+- __delta__             // ∆x     //perhaps this is equivalent to `∆ = x => x[1..] - x[..end-1]`
+- __nabla__             // ∇x     //compute the gradient of x
+<!-- - __compose__           // a∘b    // tbd maybe does something with functions, e.g. f=@a∘@b  f=...=>a(b(...)). IDK though it's pretty clunky -->
+- __sum__               // ∑(x)     // also sum(x)
+- __prod__              // ∏(x)     // also prod(x)
+- __circle_plus__       // a ⊕ b
+- __circle_minus__      // a ⊖ b
+- __tensor_product__    // a ⊗ b
+- __circle_dot__        // a ⊙ b    // potentially a synonym for xnor? probably not though
+- __circle_circle__     // a ⊚ b
+
+<!-- 
+U+220x 	∀ 	∁ 	∂ 	∃ 	∄ 	∅ 	∆ 	∇ 	∈ 	∉ 	∊ 	∋ 	∌ 	∍ 	∎ 	∏
+U+221x 	∐ 	∑ 	− 	∓ 	∔ 	∕ 	∖ 	∗ 	∘ 	∙ 	√ 	∛ 	∜ 	∝ 	∞ 	∟
+U+222x 	∠ 	∡ 	∢ 	∣ 	∤ 	∥ 	∦ 	∧ 	∨ 	∩ 	∪ 	∫ 	∬ 	∭ 	∮ 	∯
+U+223x 	∰ 	∱ 	∲ 	∳ 	∴ 	∵ 	∶ 	∷ 	∸ 	∹ 	∺ 	∻ 	∼ 	∽ 	∾ 	∿
+U+224x 	≀ 	≁ 	≂ 	≃ 	≄ 	≅ 	≆ 	≇ 	≈ 	≉ 	≊ 	≋ 	≌ 	≍ 	≎ 	≏
+U+225x 	≐ 	≑ 	≒ 	≓ 	≔ 	≕ 	≖ 	≗ 	≘ 	≙ 	≚ 	≛ 	≜ 	≝ 	≞ 	≟
+U+226x 	≠ 	≡ 	≢ 	≣ 	≤ 	≥ 	≦ 	≧ 	≨ 	≩ 	≪ 	≫ 	≬ 	≭ 	≮ 	≯
+U+227x 	≰ 	≱ 	≲ 	≳ 	≴ 	≵ 	≶ 	≷ 	≸ 	≹ 	≺ 	≻ 	≼ 	≽ 	≾ 	≿
+U+228x 	⊀ 	⊁ 	⊂ 	⊃ 	⊄ 	⊅ 	⊆ 	⊇ 	⊈ 	⊉ 	⊊ 	⊋ 	⊌ 	⊍ 	⊎ 	⊏
+U+229x 	⊐ 	⊑ 	⊒ 	⊓ 	⊔ 	⊕ 	⊖ 	⊗ 	⊘ 	⊙ 	⊚ 	⊛ 	⊜ 	⊝ 	⊞ 	⊟
+U+22Ax 	⊠ 	⊡ 	⊢ 	⊣ 	⊤ 	⊥ 	⊦ 	⊧ 	⊨ 	⊩ 	⊪ 	⊫ 	⊬ 	⊭ 	⊮ 	⊯
+U+22Bx 	⊰ 	⊱ 	⊲ 	⊳ 	⊴ 	⊵ 	⊶ 	⊷ 	⊸ 	⊹ 	⊺ 	⊻ 	⊼ 	⊽ 	⊾ 	⊿
+U+22Cx 	⋀ 	⋁ 	⋂ 	⋃ 	⋄ 	⋅ 	⋆ 	⋇ 	⋈ 	⋉ 	⋊ 	⋋ 	⋌ 	⋍ 	⋎ 	⋏
+U+22Dx 	⋐ 	⋑ 	⋒ 	⋓ 	⋔ 	⋕ 	⋖ 	⋗ 	⋘ 	⋙ 	⋚ 	⋛ 	⋜ 	⋝ 	⋞ 	⋟
+U+22Ex 	⋠ 	⋡ 	⋢ 	⋣ 	⋤ 	⋥ 	⋦ 	⋧ 	⋨ 	⋩ 	⋪ 	⋫ 	⋬ 	⋭ 	⋮ 	⋯
+U+22Fx 	⋰ 	⋱ 	⋲ 	⋳ 	⋴ 	⋵ 	⋶ 	⋷ 	⋸ 	⋹ 	⋺ 	⋻ 	⋼ 	⋽ 	⋾ 	⋿
+-->
+
 
 
 ## Piped member access operator
