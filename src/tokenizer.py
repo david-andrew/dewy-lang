@@ -379,6 +379,12 @@ number_bases = {
 }
 
 
+def is_based_digit(digit: str, base: str) -> bool:
+    """determine if a digit is valid in a given base"""
+    digits = number_bases[base]
+    return digit in digits
+
+
 # units = #actually units should probably not be specific tokens, but recognized identifiers since the user can make their own units
 
 
@@ -601,7 +607,7 @@ def eat_escape(src: str) -> int | None:
 
     if src[1] in 'uU':
         i = 2
-        while i < len(src) and src[i].isxdigit():
+        while i < len(src) and is_based_digit(src[i], '0x'):
             i += 1
         if i == 2:
             raise ValueError("invalid unicode escape sequence")
@@ -628,6 +634,7 @@ def eat_string(src: str) -> tuple[int, String_t] | None:
     returns the number of characters eaten and an instance of the String token, containing the list of tokens/string chunks/escape sequences
     """
 
+    # TODO: allow arbitrary number of quotes to delimit
     # determine the starting delimiter, or exit if there is none
     if src.startswith('"""') or src.startswith("'''"):
         delim = src[:3]

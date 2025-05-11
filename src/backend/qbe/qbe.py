@@ -41,7 +41,7 @@ from ...utils import BaseOptions, Backend
 import platform
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, Literal, TypeVar, Optional
+from typing import Protocol, Literal, TypeVar, Optional, Generator, Callable, Iterable
 from types import SimpleNamespace
 from functools import cache
 from itertools import count
@@ -437,6 +437,7 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         Group: compile_group,
         Int: compile_int,
         String: compile_string,
+        IString: compile_istring,
         And: compile_base_logical_binop,
         Or: compile_base_logical_binop,
         Xor: compile_base_logical_binop,
@@ -628,18 +629,69 @@ def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_func: QbeFunctio
     # TODO: use concrete integer type (i.e. probably int64, and then is BigInt if overflows)
     return IR( 'l', f"{ast.val}", Type(Int))
 
+U = TypeVar('U')
+V = TypeVar('V')
+def consecutive_groupby(key: Callable[[U], V], iterable: Iterable[U]) -> Generator[tuple[V, list[U]], None, None]:
+    """Groups consecutive elements in an iterable based on a key function."""
+    current_key = None
+    current_group = []
+    for item in iterable:
+        new_key = key(item)
+        if new_key != current_key:
+            if current_group:
+                yield current_key, current_group
+            current_key = new_key
+            current_group = [item]
+        else:
+            current_group.append(item)
+    if current_group:
+        yield current_key, current_group
+
+def string_to_qbe_repr(s: str, include_null_terminator: bool = True) -> tuple[str, int]:
+    """Convert a string to a QBE literal representation. For now uses utf-8 encoding."""
+    s_bytes = s.encode('utf-8')
+    bytes_itr = iter(s_bytes)
+    groups = consecutive_groupby(lambda c: 0x20 <= c <= 0x7E, bytes_itr)
+    groups = [''.join(map(chr, values)) if key else values for key, values in groups]
+
+    # combine printable characters into strings, leave non-printable as byte arrays
+    items = []
+    for element in groups:
+        if isinstance(element, str):
+            items.append(f'b "{element}"')
+        else:
+            # Non-printable characters are escaped
+            items.append('b ' + ' '.join(f'{c}' for c in element))
+    
+    # Append null terminator if requested
+    if include_null_terminator:
+        items.append('b 0') # Append null terminator
+    qbe_str = f'{{ {", ".join(items)}}}'
+
+    # Calculate the length of the string representation
+    length = sum(map(len, groups)) + int(include_null_terminator)
+
+    return qbe_str, length
+    
 
 def compile_string(ast: String, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
     """Returns the QBE representation of a string literal."""
-    # data $greet = { b "Hello World!\n\0" }
     data_id = qbe.get_temp('$str')
-    str_data = f'"{repr(ast.val)[1:-1]}"'
-    # qbe.global_data.append(f'data {data_id}.len = {{ l {len(ast.val)} }}')
-    # qbe.global_data.append(f'data {data_id}.data = {{ b {str_data}, b 0 }}')
-    qbe.global_data.append(f'data {data_id} = {{ b {str_data}, b 0 }}')
+    qbe_str_data, length = string_to_qbe_repr(ast.val)
+    qbe.global_data.append(f'data {data_id} = {qbe_str_data}')
     ir = IR('l', data_id, Type(String))
-    ir.meta.length = len(ast.val)
+    ir.meta.length = length
     return ir
+
+def compile_istring(ast: IString, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
+    """Compile an interpolated string. If no interpolated values, fallback to regular string."""
+    if all(isinstance(i, String) for i in ast.parts):
+        return compile_string(String(''.join(i.val for i in ast.parts)), scope, qbe, current_func)
+
+    pdb.set_trace()
+    ...
+    raise NotImplementedError(f"Interpolated strings not implemented yet: {ast!r}")
+
 
 logical_binop_opcode_map = {
     (And, Int, Int): 'and',
