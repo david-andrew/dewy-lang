@@ -643,7 +643,24 @@ def compile_istring(ast: IString, scope: Scope, qbe: QbeModule, current_func: Qb
 
     pdb.set_trace()
     ...
+    # TODO: consider this concrete representation:
+    #       compiles to a function that takes a callback, and for each component of the istring
+    #       calls the callback with the stringified current chunk from the istring
+    # something like this:
+    """
+    function l $use_istring_<N>(l %callback) {
+        # generate qbe for all chunks in the istring
+        # if chunk is already string
+        %chunk = $pointer to the string chunk
+        call %callback(l %chunk)
+
+        # otherwise, need to convert the chunk to a string which can then be passed to the callback
+        # or if chunk is another istring, can recurse into it with the current callback
+        # mainly it's when the chunk is a (non-const) variable that there needs to be a runtime conversion
+    }
+    """
     raise NotImplementedError(f"Interpolated strings not implemented yet: {ast!r}")
+
 
 
 logical_binop_opcode_map = {
