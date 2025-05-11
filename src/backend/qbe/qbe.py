@@ -41,10 +41,10 @@ from ...utils import BaseOptions, Backend
 import platform
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, Literal, TypeVar, Optional, Generator, Callable, Iterable
+from typing import Protocol, Literal, TypeVar, Optional
 from types import SimpleNamespace
 from functools import cache
-from itertools import count
+from itertools import count, groupby
 from argparse import Namespace, ArgumentParser
 import subprocess
 import os
@@ -164,23 +164,6 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
     scope = Scope.linux_default()
     qbe = top_level_compile(ast, scope)
 
-    # Check if __main__ was defined by the user's code. If not, add a fallback.
-    # pdb.set_trace()
-    # main_fn_exists = any(f.name == '$__main__' for f in qbe.functions)
-    # if not main_fn_exists:
-    #     if options.verbose:
-    #         print("Warning: No __main__ function defined in source, adding fallback exit.")
-    #     # Add the fallback __main__ that just exits with 0
-    #     qbe.functions.append(
-    #         QbeFunction(
-    #             name='$__main__',
-    #             export=True,
-    #             args=[QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')],
-    #             ret='w', # Exit code is typically 'w' (word)
-    #             blocks=[QbeBlock('@start', ['ret 0'])]
-    #         )
-    #     )
-
     # generate the QBE IR string
     ssa = str(qbe)
     if options.verbose:
@@ -255,21 +238,10 @@ def top_level_compile(ast: AST, scope: 'Scope') -> 'QbeModule':
 
     # Add a fallback block that will return from the main function
     __main__.blocks.append(QbeBlock('@__fallback_exit__', ['ret 0']))
-    # If the start block is empty, add a default return
-    # if len(start_block.lines) == 0:
-    #     start_block.lines.append('ret 0')
-
+   
     return qbe
     
-    # if isinstance(ast, Void):
-    #     return qbe, MetaInfo()
-
-    # Top-level compilation starts without a specific block context.
-    # Handlers for top-level definitions (like Assign for functions) must manage this.
-    compile(ast, scope, qbe, None) # Start with current_block=None
-
-    return qbe, MetaInfo()
-
+   
 
 
 qbe_backend = Backend[Options](
@@ -629,30 +601,11 @@ def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_func: QbeFunctio
     # TODO: use concrete integer type (i.e. probably int64, and then is BigInt if overflows)
     return IR( 'l', f"{ast.val}", Type(Int))
 
-U = TypeVar('U')
-V = TypeVar('V')
-def consecutive_groupby(key: Callable[[U], V], iterable: Iterable[U]) -> Generator[tuple[V, list[U]], None, None]:
-    """Groups consecutive elements in an iterable based on a key function."""
-    current_key = None
-    current_group = []
-    for item in iterable:
-        new_key = key(item)
-        if new_key != current_key:
-            if current_group:
-                yield current_key, current_group
-            current_key = new_key
-            current_group = [item]
-        else:
-            current_group.append(item)
-    if current_group:
-        yield current_key, current_group
 
 def string_to_qbe_repr(s: str, include_null_terminator: bool = True) -> tuple[str, int]:
     """Convert a string to a QBE literal representation. For now uses utf-8 encoding."""
-    s_bytes = s.encode('utf-8')
-    bytes_itr = iter(s_bytes)
-    groups = consecutive_groupby(lambda c: 0x20 <= c <= 0x7E, bytes_itr)
-    groups = [''.join(map(chr, values)) if key else values for key, values in groups]
+    groups = groupby(s.encode('utf-8'), lambda c: 0x20 <= c <= 0x7E)
+    groups = [''.join(map(chr, values)) if key else list(values) for key, values in groups]
 
     # combine printable characters into strings, leave non-printable as byte arrays
     items = []
