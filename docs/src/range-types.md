@@ -9,18 +9,18 @@ Ranges always contain a `..` and may include left and or right values that are j
 The syntax for ranges is inspired by Haskell syntax for ranges:
 
 ```dewy
-[first..]               // first to inf
-[..last]                // -inf to last
-[first..last]           // first to last
-[..]                    // -inf to inf
+[first..]               % first to inf
+[..last]                % -inf to last
+[first..last]           % first to last
+[..]                    % -inf to inf
 ```
 
 Like in haskell, you can use a tuple to include a second value to specify the step size.
 
 ```dewy
-[first,second..]        // first to inf, step size is second-first
-[first,second..last]    // first to last, step size is second-first
-[..2ndlast,last]        // -inf to last, step size is last-2ndlast
+[first,second..]        % first to inf, step size is second-first
+[first,second..last]    % first to last, step size is second-first
+[..2ndlast,last]        % -inf to last, step size is last-2ndlast
 ```
 
 > Note: `[first..2ndlast,last]` is explicitly **NOT ALLOWED**, as it can have unintuitive behavior, and is covered by `[first,second..last]`.
@@ -28,11 +28,11 @@ Like in haskell, you can use a tuple to include a second value to specify the st
 In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.
 
 ```dewy
-[first..last]   // first to last including first and last
-[first..last)   // first to last including first, excluding last
-(first..last]   // first to last excluding first, including last
-(first..last)   // first to last excluding first and last
-first..last     // same as [first..last]. Careful of precedence
+[first..last]   % first to last including first and last
+[first..last)   % first to last including first, excluding last
+(first..last]   % first to last excluding first, including last
+(first..last)   % first to last excluding first and last
+first..last     % same as [first..last]. Careful of precedence
 ```
 
 ### Juxtaposition
@@ -40,20 +40,20 @@ first..last     // same as [first..last]. Careful of precedence
 The left and right values are only considered part of the range if they are juxtaposed with the `..`. Values not juxtaposed with the range are considered separate expressions.
 
 ```dewy
-first..last     // first to last
-first ..last    // -inf to last. first is not part of the range
-first.. last    // first to inf. last is not part of the range
-first .. last   // -inf to inf. neither first or last are part of the range
+first..last     % first to last
+first ..last    % -inf to last. first is not part of the range
+first.. last    % first to inf. last is not part of the range
+first .. last   % -inf to inf. neither first or last are part of the range
 ```
 
 > Note: the range juxtaposition operator has a quite low precedence. Most operators will have higher precedence, meaning the left and right expressions don't need to be wrapped in parenthesis.
 > However, due to range juxtapose's low precedence, any range as part of an `in` expression (e.g. `a in [A..B]`) must be wrapped in range bounds (i.e. `[]`, `(]`, `[)`, `()`) to ensure the range is parsed correctly. `a in A..B` will be parsed as `(a in A)..B` .
 
 ```dewy
-first..last+1           // first to last+1
-first,second..last/2    // first to last/2, step size is second-first
-first/2,first..last+10  // first/2 to last+10, step size is first/2
-a in [first..last]      // iterate a over range first to last
+first..last+1           % first to last+1
+first,second..last/2    % first to last/2, step size is second-first
+first/2,first..last+10  % first/2 to last+10, step size is first/2
+a in [first..last]      % iterate a over range first to last
 ```
 
 Multiple ranges can be used to index into multidimensional matrices
@@ -64,7 +64,7 @@ my_array = [
     10 11 12 13 14 15 16 17 18 19
     20 21 22 23 24 25 26 27 28 29
 ]
-my_array[1.. 6..]     //returns [16 17 18 19; 26 27 28 29]
+my_array[1.. 6..]     %returns [16 17 18 19; 26 27 28 29]
 ```
 
 ## Numeric Ranges
@@ -74,11 +74,11 @@ Probably the most common type of range will be a numeric ranges which describes 
 Some simple examples include:
 
 ```dewy
-range1 = (1..5)  // 2 3 4
-range2 = (1..5]  // 2 3 4 5
-range3 = [1..5)  // 1 2 3 4
-range4 = [1..5]  // 1 2 3 4 5
-range5 = 1..5    // 1 2 3 4 5
+range1 = (1..5)  % 2 3 4
+range2 = (1..5]  % 2 3 4 5
+range3 = [1..5)  % 1 2 3 4
+range4 = [1..5]  % 1 2 3 4 5
+range5 = 1..5    % 1 2 3 4 5
 ```
 
 ## Ordinal Ranges
@@ -95,14 +95,14 @@ All alphabetical characters might be represented like so
 
 ```dewy
 alpha_range = ['a'..'z'] + ['A'..'Z']
-ascii_range = 'A'..'z' //this would include extra characters like '[\]^_{|}' etc.
+ascii_range = 'A'..'z' %this would include extra characters like '[\]^_{|}' etc.
 ```
 
 But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this
 
 ```dewy
 word_range = 'apple'..'zebra'
-'panda' in? word_range  //returns true
+'panda' in? word_range  %returns true
 ```
 
 which would create a range that consists of every possible 5 letter combination starting from the word `'apple'` and iterating through to the word `'zebra'`.
@@ -140,10 +140,10 @@ This prints `'5 4 3 2 1 0 '`.
 Ranges can be used in arithmetic expressions, often as a way to construct new ranges.
 
 ```dewy
-//division version
+%division version
 loop i in [0..4]/4 print'{i} '
 
-//multiplication version
+%multiplication version
 loop i in [0..4]*0.25 print'{i} '
 ```
 
@@ -169,9 +169,9 @@ Additionally you can construct more complex ranges by combining together multipl
 ```dewy
 complex_range = [1..5] + (15..20)
 loop i in complex_range
-    printl(i)           //prints 1 2 3 4 5 16 17 18 19
-7 in? complex_range     //returns false
-16 in? complex_range    //returns true
+    printl(i)           %prints 1 2 3 4 5 16 17 18 19
+7 in? complex_range     %returns false
+16 in? complex_range    %returns true
 ```
 
 The same range as above can be constructed using subtraction
@@ -185,9 +185,9 @@ complex_range = [1..20) - (5..15]
 You can also check if a value falls within a specified range
 
 ```dewy
-5 in? [1..5]         //returns true
-5 in? (1..5)         //returns false
-3.1415 in? (1..5)    //returns true
+5 in? [1..5]         %returns true
+5 in? (1..5)         %returns false
+3.1415 in? (1..5)    %returns true
 ```
 
 ### Indexing Sequences
@@ -198,7 +198,7 @@ ranges can be used to select values from a sequence. For example, say we want a 
 full_string = 'this is a string'
 
 substring = full_string[3..12]
-printl(substring) //prints 's is a str'
+printl(substring) %prints 's is a str'
 ```
 
 This works for any sequence type.
@@ -210,9 +210,9 @@ Also, because array access is a juxtapose expression, we can easily make the sel
 ```dewy
 full_string = 'this is a string'
 
-substring1 = full_string(3..12)  // ' is a st'
-substring2 = full_string[3..12)  // 's is a st'
-substring3 = full_string(3..12]  // ' is a str'
+substring1 = full_string(3..12)  % ' is a st'
+substring2 = full_string[3..12)  % 's is a st'
+substring3 = full_string(3..12]  % ' is a str'
 ```
 
 You can specify that a range continues to the end of the sequence, or starts from the beginning by omitting the value for that side. This will construct a range that goes to infinity in that direction, which will select all elements in that direction.
@@ -220,17 +220,17 @@ You can specify that a range continues to the end of the sequence, or starts fro
 ```dewy
 full_string = 'this is a string'
 
-substring_to_end = full_string[3..]      // 's is a string'
-substring_from_start = full_string[..12] // 'this is a str'
-whole_string = full_string[..]           //selects the whole string
+substring_to_end = full_string[3..]      % 's is a string'
+substring_from_start = full_string[..12] % 'this is a str'
+whole_string = full_string[..]           %selects the whole string
 ```
 
 Paired with the special `end` token which represents the index of the last element in a sequence, this provides the means to select any desired subset of a sequence.
 
 ```dewy
-arr[end]      // last element
-arr[end-1]    // second to last element
-arr[..end-3]  // first element to 4th to last element
-arr[5..end-3] // 5th element to 4th to last element
-arr[end-3..]  // 4th to last element to last element
+arr[end]      % last element
+arr[end-1]    % second to last element
+arr[..end-3]  % first element to 4th to last element
+arr[5..end-3] % 5th element to 4th to last element
+arr[end-3..]  % 4th to last element to last element
 ```

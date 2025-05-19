@@ -19,7 +19,7 @@ An infinite loop is one that never ends. They are constructed by hardcoding the 
 ```dewy
 loop true
 {
-    //do something repeatedly forever
+    %do something repeatedly forever
 }
 ```
 
@@ -32,7 +32,7 @@ A while loop is a loop that executes "while" some condition is true. A simple bo
 ```dewy
 loop i >? 0
 {
-    //while i is greater than 0, do something
+    %while i is greater than 0, do something
 }
 ```
 
@@ -258,7 +258,7 @@ This "generates" the array `[1 2 3 4 5 6 7 8 9 10]`, which we can then store int
 ```dewy
 my_array = [loop i in [1..10] {i}]
 
-//optional to omit the braces since only a single expression is in the body
+%optional to omit the braces since only a single expression is in the body
 my_array = [loop i in [1..10] i]
 ```
 
@@ -269,7 +269,7 @@ And thus we have created the simplest list generator.
 Generators can do a lot of interesting things. For example we can express multiple values on a single loop iteration
 
 ```dewy
-//note the braces are not optional in this case
+%note the braces are not optional in this case
 my_array = [loop i in [1..5] { i i^2 }]
 ```
 

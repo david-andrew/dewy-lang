@@ -6,7 +6,7 @@
 //I think there will be a #last macro that runs something last, and then the #main macro is only run if from main file
 #main {
     //list the functions to run
-    functions = 
+    functions =
     [
         @twelve_days_of_christmas
         @FizzBuzz
@@ -56,7 +56,7 @@ twelve_days_of_christmas = () => //function literal with no arguments
     loop i, day in #iteration, days
     {
         print("On the {day} day of Christmas, my true love gave to me") //string interpolation
-        loop j, gift in #iteration, gifts[..i].reversed 
+        loop j, gift in #iteration, gifts[..i].reversed
         {
             if j not =? i print("{gift},")
             else print("{if i is? 0 'And {gift.lowercase}' else '{gift}'}.\n") //example of nested string interpolation
@@ -71,7 +71,7 @@ FizzBuzz = () =>
 
     loop i in 1..100
     {
-        say = i .% words.keys .=? 0     //elementwise operation of % and =? //returns truth table
+        say = i .mod words.keys .=? 0     //elementwise operation of % and =? //returns truth table
         if words.keys[say].length >? 0
             loop word in words[words.keys[say]]  //note that indentation doesn't actually matter here.
                 printf(word)                     //each conditional happens to have only a single line, hence no need for {}s
@@ -84,7 +84,7 @@ FizzBuzz = () =>
 FizzBuzzBazzFoo = () =>
 {
     loop i in 1..100
-        match i%3, i%5, i%7, i%11   //want to be able to vectorize the input like i .% [3 5 7 11] as args. but need better syntax
+        match i%3, i%5, i%7, i%11   //want to be able to vectorize the input like i .mod [3 5 7 11] as args. but need better syntax
         {
             0, _, _, _ {printf('Fizz') continue}
             _, 0, _, _ {printf('Buzz') continue}
@@ -101,7 +101,7 @@ sum_squares1 = () =>
     //any overflow is seamlessly handled by the compiler
     sum_squares = ((1..100).^2).sum
     square_sum = (1..100).sum^2
-    
+
     print(sum_squares - square_sum)
 }
 
@@ -128,9 +128,9 @@ sum_multiples1 = () =>
     //the less specific you are, the slower it will run
     //this is because it will do more work in the background to make the interface nice for the user
     //e.g. no datatype will scale to fit as much data as needed
-    
+
     sum = 0     // least specific
-    
+
     loop i in 1..1000-1
         if (i%3)*(i%5) =? 0 //either a multiple of 3 or 5
             sum+=i
@@ -152,20 +152,20 @@ prime_factors = () =>
     }/
 
     goal = 600851475143
-    
+
     //create a list of primes up to the square root of goal
     primes = doublylinkedlist[2 3] //doubly linked list
     #loop1 loop i in [5 7 ... goal^/2]   //count by 2 starting from 5 up to sqrt(goal). also probably will add a root operator, e.g. \|4 for sqrt(4), and 3\|8 for cuberoot(8), and so forth
     {
         loop p in primes
             if i % p =? 0 continue #loop1 //continue the loop governed by i
-        
+
         primes.append(i)
     }
-    
+
     print(primes[end]) //since this is a doubly linked list, there probably would be a method like primes.last
-    
-    //note that while arrays can be set to be indexed with arbitrary start and end indices, if an index is accessed using +value or -value (e.g. primes[+10] or primes[-12]), the indexing is forced to be zero // actually this is no longer true. if indexing is not 0 based, then all values up to the first legal index are simply out of bounds for both + and - indexing. e.g. a = int[10 to 20], then a[10] is the first element, a[-10] is the last element, and any number < 10 or > 20 is out of bounds 
+
+    //note that while arrays can be set to be indexed with arbitrary start and end indices, if an index is accessed using +value or -value (e.g. primes[+10] or primes[-12]), the indexing is forced to be zero // actually this is no longer true. if indexing is not 0 based, then all values up to the first legal index are simply out of bounds for both + and - indexing. e.g. a = int[10 to 20], then a[10] is the first element, a[-10] is the last element, and any number < 10 or > 20 is out of bounds
     //i.e. if primes was set to start at 1, primes[+0] will return the first element, even if primes[0] would throw an error
     //indexing with a '+' indicates indexing from the start. indexing with a '-' indicates indexing from the end
     //the index value i means the ith value precisely, none of this in between mumbo jumbo.
@@ -207,7 +207,7 @@ compute_primes_alt = (uint n) => //parameter must be of type uint or more specif
         _ //catch all
         {
             primes = doublylinkedlist(@[2 3])
-            
+
             #outer loop candidate in [5 7 ...]
             {
                 loop p in primes if candidate % p =? 0 continue #outer
@@ -222,18 +222,18 @@ compute_primes_alt = (uint n) => //parameter must be of type uint or more specif
 
 //To-Do: implement a verification algorithm for checking the value of pi (see the first answer of the stack overflow below)
 //https://stackoverflow.com/questions/14283270/how-do-i-determine-whether-my-calculation-of-pi-is-accurate
-//Naive direct implementation of https://pi2e.ch/blog/2016/07/30/the-chudnovsky-formula/ 
+//Naive direct implementation of https://pi2e.ch/blog/2016/07/30/the-chudnovsky-formula/
 compute_pi = (n) =>
 {
     //this needs some way to specifiy the precision of pi in the calculation (i.e. need to be able to say we want n digits of precision for all calculations)
 
-    //Chudnovsky's formula converges at a steady 14.18 digits per term (Exact value is: Log(151931373056000)/Log(10) = 14.181647462725477655...) 
+    //Chudnovsky's formula converges at a steady 14.18 digits per term (Exact value is: Log(151931373056000)/Log(10) = 14.181647462725477655...)
 
     iterations = ceiling(n / 14.181647462725477655) // the Chudnovsky Formula converges at a rate of about 14 digits per iteration
     num pi = 0 //what if we also had a type dec for something like python's decimal class
     pi.precision = n //set the number of digits of precision for pi -> I think this will result in our version of a decimal representation
-    
-    
+
+
     //single-line madness for generating pi. This might have problems maintaining the precision specified... hard to tell
     //pi = (10005^/2 / 4270934400 * [(-1)^k * (6*k)!/((k!)^3*(3*k)!) * ((13591409 + 545140134*k)/640320^(3*k)) loop k in 0:iterations].sum)^-1
 
@@ -281,9 +281,9 @@ from decimal import Decimal as Dec, getcontext as gc
 
 def PI(maxK=70, prec=1008, disp=1007): # parameter defaults chosen to gain 1000+ digits within a few seconds
     gc().prec = prec
-    K, M, L, X, S = 6, 1, 13581409, 1, 13591408 
+    K, M, L, X, S = 6, 1, 13581409, 1, 13591408
     for k in range(1, maxK+1):
-        M = (K**3 - 16*K) * M // k**3 
+        M = (K**3 - 16*K) * M // k**3
         L += 545140134
         X *= -262537412640768000
         S += Dec(M * L) / X
@@ -295,7 +295,7 @@ def PI(maxK=70, prec=1008, disp=1007): # parameter defaults chosen to gain 1000+
 
 Pi = PI()
 print("\nFor greater precision and more digits (takes a few extra seconds) - Try")
-print("Pi = PI(317,4501,4500)") 
+print("Pi = PI(317,4501,4500)")
 print("Pi = PI(353,5022,5020)")
 
 }/

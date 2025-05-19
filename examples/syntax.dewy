@@ -21,7 +21,7 @@ my_string = '2 + 2 = {2+2}'
 s = "first 10 primes are: {
     primes = [2]
     loop i in [3, 5..) and primes.length <? 10
-        if i .% primes |> product not =? 0 
+        if i .mod primes |> product not =? 0
             primes.push(i)
     primes
 }"
@@ -32,11 +32,11 @@ s = "first 10 primes are: {
 primes = [
     2
     lazy i in [3, 5..)
-        if i .% #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
+        if i .mod #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
             i
 ][..10)
 
-%TBD if there is a parallel way to do this where the i .% primes dispatches each operation, and fails immediately on any returning false
+%TBD if there is a parallel way to do this where the i .mod primes dispatches each operation, and fails immediately on any returning false
 #label
 primes = [
     2
@@ -139,7 +139,7 @@ a+b
 x = loop i in [0..10] i %x=10
 
 y = [
-    if something 
+    if something
         x
     else loop i in something_else
         y

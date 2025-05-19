@@ -1,6 +1,6 @@
 # Units
 
-Dewy was designed from day 1 to include physical units such as kilogram, meter, second. 
+Dewy was designed from day 1 to include physical units such as kilogram, meter, second.
 
 ## A Simple Example
 
@@ -12,7 +12,7 @@ velocity = 30m/s
 energy = 1/2 * mass * velocity^2
 ```
 
-The `energy` variable now contains a value of `9000 joules`. For more complex unit expressions, sometimes it is necessary to use parentheses to group terms together. In general it is good style to do so, except for the simplest unit expressions. See [Operator Precedence](operators.md). 
+The `energy` variable now contains a value of `9000 joules`. For more complex unit expressions, sometimes it is necessary to use parentheses to group terms together. In general it is good style to do so, except for the simplest unit expressions. See [Operator Precedence](operators.md).
 
 Here are several more examples of unit expressions:
 
@@ -41,16 +41,16 @@ Here are several more examples of unit expressions:
 7.5(mol) * 6.022e23(particles/mol)
 15(kg * m^2 * s^-1 * A^-2 * K^2 * mol^-1 * cd^3) + 10(kg * m * s^-2 * A^-1 * K * mol^-2 * cd^2)
 
-F = 5kg * 2(m/s^2) // 10 N
-W = 20N * 10m * cos(45°) // 141.42 J
-V = 2A * 10Ω // 20 V
-P = 12V * 5A // 60 W
-KE = 0.5 * 8kg * (6(m/s))^2 // 144 J
-U = 75kg * 9.81(m/s^2) * 5m // 3678.75 J
-F = 200(N/m) * 0.05m // 10 N
-Q = 385(W/(m * K)) * 1m^2 * (100°C - 25°C) * 3600s / 0.01m // 990000 J
-P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 // 498420 Pa
-ρ = 50kg / 0.1m^3 // 500 kg/m^3
+F = 5kg * 2(m/s^2) % 10 N
+W = 20N * 10m * cos(45°) % 141.42 J
+V = 2A * 10Ω % 20 V
+P = 12V * 5A % 60 W
+KE = 0.5 * 8kg * (6(m/s))^2 % 144 J
+U = 75kg * 9.81(m/s^2) * 5m % 3678.75 J
+F = 200(N/m) * 0.05m % 10 N
+Q = 385(W/(m * K)) * 1m^2 * (100°C - 25°C) * 3600s / 0.01m % 990000 J
+P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3 % 498420 Pa
+ρ = 50kg / 0.1m^3 % 500 kg/m^3
 ```
 
 ## SI Prefixes
@@ -124,7 +124,7 @@ Non-SI units that may receive SI prefixes:
 
 (TODO: metric vs us vs etc. tons)
 
-> Note: in SI, the base unit for mass is `kg`/`kilograms`, not `g`/`grams`. `k`/`kilo` is provided as a convenience to allow for a mass base unit without a prefix. e.g. `kilokilo` would be equivalent to `1000(kilograms)`. 
+> Note: in SI, the base unit for mass is `kg`/`kilograms`, not `g`/`grams`. `k`/`kilo` is provided as a convenience to allow for a mass base unit without a prefix. e.g. `kilokilo` would be equivalent to `1000(kilograms)`.
 
 (TODO: exact durations of longer units. e.g. sidereal day vs solar day, etc.)
 
@@ -156,7 +156,7 @@ Non-SI units that may receive SI prefixes:
 | Equivalent Dose (of Ionising Radiation) | `Sv` | `sievert`/`sieverts` |
 | Catalytic Activity | `kat` | `katal`/`katals` |
 
-> Note: `Cal` is equivalent to `kcal` or `kilocalorie` (i.e. `1000(calories)`). 
+> Note: `Cal` is equivalent to `kcal` or `kilocalorie` (i.e. `1000(calories)`).
 
 ## Weird Units
 

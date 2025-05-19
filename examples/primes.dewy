@@ -4,7 +4,7 @@ primes = [2]
 loop candidate in 3,5..100 {
     no_factors = true
     loop p in primes and p*p <? candidate+1 {
-        if candidate % p =? 0 {
+        if candidate mod p =? 0 {
             no_factors = false
             % break %not supported yet..
         }

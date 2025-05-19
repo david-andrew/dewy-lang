@@ -2,7 +2,7 @@ taps = [3 -> 'Fizz' 5 -> 'Buzz' %{7 -> 'Bazz' 11 -> 'Bar'}%]
 range = [0..100)
 
 %indexing at [new ..] and [.. new] adds singleton dimensions wherever there is new
-word_bools = range[new ..] .% taps.keys[.. new] .=? 0
+word_bools = range[new ..] .mod taps.keys[.. new] .=? 0
 
 % ` means transpose, which behaves like python's zip()
 words_grid = [taps.values word_bools]`.map(

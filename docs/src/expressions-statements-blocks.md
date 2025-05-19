@@ -7,7 +7,7 @@ Dewy is an expression based language. An expression is literally just a value, o
 The simplest type of expression is any literal value, such as an integer for instance
 
 ```dewy
-42  //an integer expression
+42  %an integer expression
 ```
 
 This expression can easily be bound to a variable
@@ -19,7 +19,7 @@ my_expression = 42
 Calling a function is an expression if the function returns a value. For example, the `sqrt` function returns the square root of a value
 
 ```dewy
-my_expression = sqrt(64)  //returns 8
+my_expression = sqrt(64)  %returns 8
 ```
 
 And now `my_expression` contains the value `8`.
@@ -43,7 +43,7 @@ printl'Hello'
 This function call doesn't return a value. If you tried to store the result into a variable, you'd get a compilation error
 
 ```dewy
-my_var = printl'Hello'  // Error: can't assign void to a variable
+my_var = printl'Hello'  % Error: can't assign void to a variable
 ```
 
 Most expressions in Dewy will return something, but you can easily convert an expression into a `void` statement by appending a semicolon `;` to the end of the expression
@@ -74,8 +74,8 @@ A block is just a sequence of expressions or statements wrapped in either `{}` o
 Let's start with the simplest type of a block, the empty block
 
 ```dewy
-{ }  // an empty block
-( )  // also an empty block
+{ }  % an empty block
+( )  % also an empty block
 ```
 
 Empty blocks have type `void` since they don't contain any expressions, thus making the overall block not express anything.
@@ -83,13 +83,13 @@ Empty blocks have type `void` since they don't contain any expressions, thus mak
 Adding a single expression to a block makes the block itself express that value
 
 ```dewy
-{ 42 }  // a block that expresses the value 42
+{ 42 }  % a block that expresses the value 42
 ```
 
 Adding multiple expressions to a block makes the block express multiple values (TODO: link to generators)
 
 ```dewy
-{ 1 2 3 4 5 6 7 8 9 10 }  // a block that expresses the values 1 through 10
+{ 1 2 3 4 5 6 7 8 9 10 }  % a block that expresses the values 1 through 10
 ```
 
 TODO->rest of explanation of blocks.

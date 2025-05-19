@@ -68,7 +68,7 @@ Rational numbers are stored as two integers, the `numerator` and the `denominato
 TBD on the syntax for declaring a rational number. likely to be a function call e.g.
 
 ```dewy
-my_rational = rational(22 7) //rational approximation of pi
+my_rational = rational(22 7) %rational approximation of pi
 ```
 
 ### Real
@@ -106,7 +106,7 @@ Quaternions
 
 ```dewy
 q = 1 + 2i + 3j + 4k
-Q = 1 + 2I + 3J + 4K   // can use lower or uppercase
+Q = 1 + 2I + 3J + 4K   % can use lower or uppercase
 ```
 
 ## MISC.

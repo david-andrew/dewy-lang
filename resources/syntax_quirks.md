@@ -8,10 +8,10 @@ This is mainly for when a jux is next to a power. Juxtapose can mean either mult
 [HIGHEST]
 
 ...
-<jux call>  
+<jux call>
 ^
 <jux mul>
-/ * %
+* / // tdiv rdiv fdiv cdiv mod rem
 <jux range> //note jux range can be converted to an explicit operator since it will always appear next to a `..` token
 ...
 
@@ -29,7 +29,7 @@ s = 10 c = 20
 result = s(x)^2 + c(x)^2
 ```
 
-Because `s` and `c` are numbers, the jux is interpreted as multiplication, and thus power has a higher precedence (i.e. `s(x^2) + c(x^2)`). 
+Because `s` and `c` are numbers, the jux is interpreted as multiplication, and thus power has a higher precedence (i.e. `s(x^2) + c(x^2)`).
 
 In fact you can even overwrite the sin/cos functions and get the second behavior:
 ```
@@ -41,7 +41,7 @@ The particular precedence chosen is based on the arguments. If the left argument
 
 
 ## Ambiguous Jux Parses
-This is a corollary to jux representing two operators of different precedence. Basically the way that the different precedence levels will be handled is that at parse time, the type of the left operand of the jux will be checked to see if it is a function, indicating the higher precedence jux-call operator, or if it is numeric, indicating the lower precedence jux-mul operator. 
+This is a corollary to jux representing two operators of different precedence. Basically the way that the different precedence levels will be handled is that at parse time, the type of the left operand of the jux will be checked to see if it is a function, indicating the higher precedence jux-call operator, or if it is numeric, indicating the lower precedence jux-mul operator.
 
 Given this, it should be possible to construct a parse where if it is interpreted as jux-call, then the left operand is not a function, but if it is interpreted as jux-mul, then the left operand is not interpreted as a number. Though I seem to be having trouble constructing an example
 ```

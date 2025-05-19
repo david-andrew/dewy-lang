@@ -22,15 +22,15 @@ literal numbers in various bases can be specified using prefixes before the numb
 Some examples:
 
 ```dewy
-0b10101010  // 170
-0t121010    // 435
-0q123       // 27
-0s1432      // 380
-0o1234567   // 342391
-0xdeadbeef  // 3735928559
-0u1v2u3t    // 66156669
-0rz1b2c3    // 2118512019
-0yl1z2$3!   // 3231913341182
+0b10101010  % 170
+0t121010    % 435
+0q123       % 27
+0s1432      % 380
+0o1234567   % 342391
+0xdeadbeef  % 3735928559
+0u1v2u3t    % 66156669
+0rz1b2c3    % 2118512019
+0yl1z2$3!   % 3231913341182
 ```
 
 

@@ -190,7 +190,7 @@ class Associativity(Enum):
     (prefix) not
     ^                                   //right-associative
     <jux mul>
-    / * %
+    * / // tdiv rdiv fdiv cdiv mod rem
     + -
     << >> <<< >>> <<! !>>
     ,                                   //tuple maker
@@ -217,7 +217,7 @@ class Associativity(Enum):
 [Notes]
 .. for ranges is not an operator, it is an expression. it uses juxtapose to bind to left/right arguments (or empty), and type-checks left and right
 if-else-loop chain expr is more like a single unit, so it doesn't really have a precedence. but they act like they have the lowest precedence since the expressions they capture will be full chains only broken by space/seq
-the unary versions of + - * / % have the same precedence as their binary versions
+the unary versions of + - * / mod have the same precedence as their binary versions
 """
 def opify(raw_table: list[tuple[Associativity, Sequence[str|Operator_t]]]) -> list[tuple[Associativity, Sequence[Operator_t]]]:
     """
@@ -236,7 +236,7 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = opify(revers
     (Associativity.unary, ['not', '~']),
     (Associativity.right,  ['^']),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
-    (Associativity.left, ['*', '/', '//', 'tdiv', 'rdiv', 'cdiv', 'fdiv', '%']),
+    (Associativity.left, ['*', '/', '//', 'tdiv', 'rdiv', 'cdiv', 'fdiv', 'mod', 'rem']),
     (Associativity.left, ['+', '-']),
     (Associativity.left, [*map(ShiftOperator_t, ['<<', '>>', '<<<', '>>>', '<<!', '!>>'])]),
     (Associativity.none,  [Comma_t(',')]),
@@ -508,7 +508,11 @@ def build_bin_expr(left: AST, op: Token, right: AST) -> AST:
         case Operator_t(op='*'): return Mul(left, right)
         case Operator_t(op='/'): return Div(left, right)
         case Operator_t(op='//'|'tdiv'): return IDiv(left, right)
-        case Operator_t(op='%'): return Mod(left, right)
+        # case Operator_t(op='rdiv'): return RDiv(left, right) # TODO rounded div, tie breaking by rounding away from zero
+        # case Operator_t(op='cdiv'): return CDiv(left, right) # TODO ceiling div
+        # case Operator_t(op='fdiv'): return FDiv(left, right) # TODO floor div
+        case Operator_t(op='mod'): return Mod(left, right)
+        # case Operator_t(op='rem'): return Rem(left, right)
         case Operator_t(op='^'): return Pow(left, right)
 
         # comparison operators
@@ -850,7 +854,13 @@ opname_map = {
     '^': 'power',
     '*': 'multiply',
     '/': 'divide',
-    '%': 'modulus',
+    '//': 'truncated divide',
+    'tdiv': 'truncated divide',
+    'rdiv': 'rounded divide',
+    'cdiv': 'ceiling divide',
+    'fdiv': 'floor divide',
+    'mod': 'modulus',
+    'rem': 'remainder',
     '+': 'add',
     '-': 'subtract',
     '<<': 'left shift',

@@ -29,7 +29,7 @@ Lets say we want to define a new number system, say using chinese character. we 
 
 The first rule defines the individual digits to be used, and then the second rule defines a digit string as a sequence of at least 1 digit, concatenated together with a sequence of zero or more digits after it.
 
-Now if we want to be able to write out chinese numbers in our code, we need to the the compiler to include this new rule in the list of rules it uses to define the language. this is accomplished by using the reserved `#lex` hashtag function. Note that the hashtag function does not end with a semicolon. 
+Now if we want to be able to write out chinese numbers in our code, we need to the the compiler to include this new rule in the list of rules it uses to define the language. this is accomplished by using the reserved `#lex` hashtag function. Note that the hashtag function does not end with a semicolon.
 
 ```dewy
 #lex( #ch_digit_string )
@@ -45,30 +45,30 @@ These examples come directly from the rules used to build the syntax of Dewy up 
 
 ```dewy
 #decimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
-#decimal_prefix = '0D' | '0d'; //obviously optional
+#decimal_prefix = '0D' | '0d'; %obviously optional
 #decimal_digit_string = #decimal_digit, {#decimal_digit | '_'};
 #decimal_natural = [#decimal_prefix], #decimal_digit_string;
 #decimal_rational = #decimal_natural, '.', #decimal_digit_string;
 #decimal_floating_point = (#decimal_rational | #decimal_natural), [('e'|'E'), ['-'|'+'], (#decimal_rational | #decimal_natural)];
 
-//combine all into a single rule. This is actually not necessary, and will probably make parsing slightly more verbose...
+%combine all into a single rule. This is actually not necessary, and will probably make parsing slightly more verbose...
 #decimal_number = #decimal_natural | #decimal_rational | #decimal_floating_point;
 ```
 
-These will identifier numbers like 
+These will identifier numbers like
 
 ```dewy
-//TODO->examples of numbers that can be scanned by these rules
+%TODO->examples of numbers that can be scanned by these rules
 ```
 
 #### Identifiers and Hashtags
 
 ```dewy
-#lowercase_letter = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' 
+#lowercase_letter = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l'
     | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z';
-#uppercase_letter = 'A'| 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' 
+#uppercase_letter = 'A'| 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L'
     | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z';
-#symbols = '~' | '!' | '@' | '#' | '$' | '&' | '_' | '?'; 
+#symbols = '~' | '!' | '@' | '#' | '$' | '&' | '_' | '?';
 
 #identifier = (#uppercase_letter | #lowercase_letter | '_'), {#uppercase_letter | #lowercase_letter | #decimal_digit | #symbols };
 
@@ -78,7 +78,7 @@ These will identifier numbers like
 and some examples
 
 ```dewy
-//TODO
+%TODO
 ```
 
 
@@ -95,7 +95,7 @@ which match those words exactly. (TODO->note syntax for case insensitive)
 These are strings that ignore any string interpolation
 
 ```dewy
-#whitespace = ' '; //TODO->other whitespace via hex codes
+#whitespace = ' '; %TODO->other whitespace via hex codes
 #string_content = { #lowercase_letter | #uppercase_letter | #symbols | #decimal_digit | #whitespace };
 #string = ('"', #string_content, '"') | ("'", #string_content, "'");
 ```

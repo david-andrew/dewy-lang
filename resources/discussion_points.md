@@ -81,7 +81,7 @@ e.g.
 primes = [
     2
     lazy i in [3, 5..)
-        if i .% #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
+        if i .mod #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
             i
 ][..10)
 ```
@@ -118,7 +118,7 @@ So if a person wanted to make the original comprehension return a row vector ins
 primes = [
     2\
     lazy i in [3, 5..)
-        if i .% #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
+        if i .mod #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
             i\
 ][..10)
 ```
@@ -130,7 +130,7 @@ Or perhaps a better idea is instead of dealing with \ and ;, we could use the ty
 primes: int[1 10] = [
     2
     lazy i in [3, 5..)
-        if i .% #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
+        if i .mod #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
             i
 ][..10)
 
@@ -139,7 +139,7 @@ primes: int[1 10] = [
 primes: int[10 1] = [
     2
     lazy i in [3, 5..)
-        if i .% #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
+        if i .mod #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
             i
 ][..10)
 ```
@@ -605,7 +605,7 @@ For these, you can attach the unit directly to the number if it is just a single
 I'm leaning towards it just being a juxtapose operator, though tbd if it affects examples like this
 
 ```
-i .% #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
+i .mod #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
 ```
 
 The other weird thing to think about is that it flips the arguments around for the juxtaposition, e.g.

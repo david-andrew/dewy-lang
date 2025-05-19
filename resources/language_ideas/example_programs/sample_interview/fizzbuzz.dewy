@@ -48,7 +48,7 @@ words = [3 -> "Fizz" 5 -> "Buzz"] // 7->"Bazz"]
 
 loop i in 1:100
 {
-	say = i .% words.keys .=? 0		//elementwise operation of % and =? //returns truth table
+	say = i .mod words.keys .=? 0		//elementwise operation of % and =? //returns truth table
 	if words.keys[say].length >? 0
 	{
 		loop word in words[words.keys[say]]

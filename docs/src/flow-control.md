@@ -23,8 +23,8 @@ where `<condition>` must result in a boolean value, and `<expression>` can be an
 ```dewy
 if a >? b
 {
-    //do something
-    //do another thing
+    %do something
+    %do another thing
 }
 ```
 
