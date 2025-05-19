@@ -891,7 +891,7 @@ class EatTracker:
 
 
 type_param_confusable_operators = {
-    op for op in operators if op.startswith('<') or op.startswith('>')
+    op for op in operators + shift_operators if op.startswith('<') or op.startswith('>')
 }
 @full_eat()
 def eat_type_param(src: str) -> tuple[int, TypeParam_t] | None:

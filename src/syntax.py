@@ -79,7 +79,7 @@ class AST(ABC):
         """
         Iterate over all children ASTs of this AST (including those in containers, e.g. list[AST])
         Allows for in place replacement of the current AST via .send()
-        
+
         Arguments:
             visit_replacement (bool): if True, then anytime .send(ast) is called, the iterator will visit that ast on the next step
 
@@ -87,13 +87,13 @@ class AST(ABC):
             replacement (AST): an AST to replace the current AST with in the parent/container
 
         Yields:
-            ast (AST): The current child AST        
+            ast (AST): The current child AST
         """
         for key, value in self.__dict__.items():
             # catch cases of something: AST | None
             if value is None:
                 continue
-            
+
             if isinstance(value, AST):
                 while True:
                     replacement = yield key, value
@@ -125,7 +125,7 @@ class AST(ABC):
                     raise NotImplementedError(f'__iter_ast_props__ over {type(value)} (from member "{key}") of {self} is not yet implemented')
 
 
-          
+
     def __iter_non_ast_props__(self) -> Generator[tuple[str, Any], None, None]:
         """Iterate over the non-AST members of the AST, returning the key and value of each prop"""
         for key, value in self.__dict__.items():
@@ -134,7 +134,7 @@ class AST(ABC):
             if key.startswith('_'):
                 continue
             yield key, value
-        
+
     def __iter_asts__(self, *, visit_replacement:bool=True) -> Generator['AST', 'AST', None]:
         """Return a generator of the direct children ASTs of the AST"""
         yield from map_generator(lambda x: x[1], self.__iter_ast_props__(visit_replacement=visit_replacement))
@@ -244,11 +244,11 @@ class Type(AST):
         if self.parameters:
             return f'{self.t.__name__}{self.parameters}'
         return self.t.__name__
-    
+
     # strictly for hashing
     def __eq__(self, other):
         return isinstance(other, Type) and self.t == other.t and self.parameters == other.parameters
-    
+
     def __hash__(self):
         return hash((self.t, self.parameters))
 
@@ -528,7 +528,7 @@ class IDiv(BinOp):
     _op = '÷'
 
 class Mod(BinOp):
-    _op = '%'
+    _op = 'mod'
 
 class Pow(BinOp):
     _op = '^'
@@ -775,7 +775,7 @@ class ReturnTyped(BinOp):
 class SubTyped(BinOp):
     _op = 'of'
     _space = True
-    
+
 
 class UnpackTarget(AST):
     target: 'list[Identifier | TypedIdentifier | UnpackTarget | Assign | CollectInto]'
