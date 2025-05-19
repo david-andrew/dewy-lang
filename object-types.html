@@ -176,14 +176,14 @@
 ></iframe>
 <p>You can access the members of the object using the <code>.</code> accessor</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_obj.a%20%20//returns%20%27apple%27%0Amy_obj.c%20%20//returns%20%27cat%27&id=DewyIframe51"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_obj.a%20%20%25returns%20%27apple%27%0Amy_obj.c%20%20%25returns%20%27cat%27&id=DewyIframe51"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe51"
     frameBorder="0"
 ></iframe>
 <p>To create an object constructor (like many languages have classes that you can instantiate) we create a function that returns an object</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=constructor%20%3D%20%28param1%20param2%29%20%3D%3E%20%7B%0A%20%20%20%20return%20%5B%0A%20%20%20%20%20%20%20%20p1%20%3D%20param1%0A%20%20%20%20%20%20%20%20p2%20%3D%20param2%0A%20%20%20%20%5D%0A%7D%0A%0Amy_obj%20%3D%20constructor%2842%20%27pi%27%29%0Amy_obj.p1%20%20//returns%2042%0Amy_obj.p2%20%20//returns%20%27pi%27&id=DewyIframe52"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=constructor%20%3D%20%28param1%20param2%29%20%3D%3E%20%7B%0A%20%20%20%20return%20%5B%0A%20%20%20%20%20%20%20%20p1%20%3D%20param1%0A%20%20%20%20%20%20%20%20p2%20%3D%20param2%0A%20%20%20%20%5D%0A%7D%0A%0Amy_obj%20%3D%20constructor%2842%20%27pi%27%29%0Amy_obj.p1%20%20%25returns%2042%0Amy_obj.p2%20%20%25returns%20%27pi%27&id=DewyIframe52"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe52"
     frameBorder="0"
@@ -207,7 +207,7 @@
 <h2 id="dunder-methods"><a class="header" href="#dunder-methods">Dunder Methods</a></h2>
 <p>Similar to python, objects can define custom so-called &quot;double-underscore&quot; or &quot;dunder&quot; methods, which hook into the language's built-in functionality.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=//%20Define%20a%20point%20class%20with%20a%20custom%20add%20method%0APoint%20%3D%20%28x%3Anumber%20y%3Anumber%29%20%3D%3E%20%5B%0A%20%20%20%20x%20%3D%20x%20%20//TBD%20if%20these%20are%20necessary%20since%20x/y%20are%20already%20in%20scope%0A%20%20%20%20y%20%3D%20y%0A%20%20%20%20__add__%20%3D%20other%3APoint%20%3D%3E%20Point%28x%2Bother.x%20y%2Bother.y%29%0A%20%20%20%20__repr__%20%3D%20%28%29%20%3D%3E%20%27Point%28%7Bx%7D%2C%20%7By%7D%29%27%0A%20%20%20%20__str__%20%3D%20%28%29%20%3D%3E%20%27%28%7Bx%7D%2C%20%7By%7D%29%27%0A%5D%0A%0A//%20Create%20two%20points%20and%20add%20them%20together%0Ap1%20%3D%20Point%281%202%29%0Ap2%20%3D%20Point%283%204%29%0Ap3%20%3D%20p1%20%2B%20p2%0Aprintl%28p3%29%20%20//prints%20Point%284%206%29&id=DewyIframe55"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%25%20Define%20a%20point%20class%20with%20a%20custom%20add%20method%0APoint%20%3D%20%28x%3Anumber%20y%3Anumber%29%20%3D%3E%20%5B%0A%20%20%20%20x%20%3D%20x%20%20%25TBD%20if%20these%20are%20necessary%20since%20x/y%20are%20already%20in%20scope%0A%20%20%20%20y%20%3D%20y%0A%20%20%20%20__add__%20%3D%20other%3APoint%20%3D%3E%20Point%28x%2Bother.x%20y%2Bother.y%29%0A%20%20%20%20__repr__%20%3D%20%28%29%20%3D%3E%20%27Point%28%7Bx%7D%2C%20%7By%7D%29%27%0A%20%20%20%20__str__%20%3D%20%28%29%20%3D%3E%20%27%28%7Bx%7D%2C%20%7By%7D%29%27%0A%5D%0A%0A%25%20Create%20two%20points%20and%20add%20them%20together%0Ap1%20%3D%20Point%281%202%29%0Ap2%20%3D%20Point%283%204%29%0Ap3%20%3D%20p1%20%2B%20p2%0Aprintl%28p3%29%20%20%25prints%20Point%284%206%29&id=DewyIframe55"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe55"
     frameBorder="0"
