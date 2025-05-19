@@ -1,25 +1,25 @@
-// stdout, fprint/write, etc. builtins
+% stdout, fprint/write, etc. builtins
 
-Encoding = ...  //TODO type definition
-Stream = ...    //TODO type definition
+Encoding = ...  %TODO type definition
+Stream = ...    %TODO type definition
 
 write = (stream:Stream bytes:uint8[]) => ...
 read = () :> uint32[] => ...
 
-//fprint = (stream:Stream s:str encoding:Encoding #kw_only end:char|undefined=undefined) => {
-//    write(stream s.encode(encoding))
-//    if end isnt? undefined 
-//        write(stream end.encode(encoding))
-//}
+%fprint = (stream:Stream s:str encoding:Encoding #kw_only end:char|undefined=undefined) => {
+%    write(stream s.encode(encoding))
+%    if end isnt? undefined 
+%        write(stream end.encode(encoding))
+%}
 
-// print = @fprint(stream=stdout encoding='utf-8')
+% print = @fprint(stream=stdout encoding='utf-8')
 print = (s:str|any) => {
     if s isnt? str s = str(s)
     bytes = s.encode(stdout.encoding)
     write(stdout bytes)
 }
 
-// printl = @fprint(stream=stdout encoding='utf-8' end='\n')
+% printl = @fprint(stream=stdout encoding='utf-8' end='\n')
 printl = (s:str) => {
     bytes = [s.encode(stdout.encoding)... '\n']
     write(stdout bytes)

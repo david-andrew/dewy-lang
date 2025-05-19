@@ -339,7 +339,7 @@ valid_delim_closers = {
 unary_prefix_operators = {'+', '-', '*', '/', 'not', '~', '@'}#, '...'}
 unary_postfix_operators = {'?', ';'}
 binary_operators = {
-    '+', '-', '*', '/', '÷', 'idiv', '%', '^',
+    '+', '-', '*', '/', '//', 'tdiv', 'rdiv', 'cdiv', 'fdiv', 'mod', 'rem', '^',
     '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
     '|', '&',
     'and', 'or', 'nand', 'nor', 'xor', 'xnor', '??',
@@ -350,7 +350,7 @@ binary_operators = {
     '->', '<->', #'<-', #reverse arrow is dumb
     '.', ':', ':>', 'of',
 }
-opchain_starters = {'+', '-', '*', '/', '%', '^'}
+opchain_starters = {'+', '-', '*', '/', '//', 'tdiv', 'rdiv', 'cdiv', 'fdiv', 'mod', 'rem', '^'}
 operators = sorted(
     [*(unary_prefix_operators | unary_postfix_operators | binary_operators)],
     key=len,
@@ -464,7 +464,7 @@ def get_func_precedences(funcs: tuple[Callable]) -> tuple[int, ...]:
 @peek_eat(WhiteSpace_t)
 def eat_line_comment(src: str) -> int | None:
     """eat a line comment, return the number of characters eaten"""
-    if src.startswith('//'):
+    if src.startswith('%'):
         try:
             return src.index('\n') + 1
         except ValueError:
@@ -476,19 +476,19 @@ def eat_line_comment(src: str) -> int | None:
 def eat_block_comment(src: str) -> int | None:
     """
     Eat a block comment, return the number of characters eaten
-    Block comments are of the form /{ ... }/ and can be nested.
+    Block comments are of the form %{ ... }% and can be nested.
     """
-    if not src.startswith("/{"):
+    if not src.startswith("%{"):
         return None
 
     nesting_level = 0
     i = 0
 
     while i < len(src):
-        if src[i:].startswith('/{'):
+        if src[i:].startswith('%{'):
             nesting_level += 1
             i += 2
-        elif src[i:].startswith('}/'):
+        elif src[i:].startswith('}%'):
             nesting_level -= 1
             i += 2
 
@@ -575,7 +575,13 @@ def eat_hashtag(src: str) -> int | None:
 
     return None
 
-
+# TODO: Note there is a current gap in constructable strings with escapes.
+# e.g. my_str = 'something \u38762<something>'
+# any hex characters [0-9a-fA-F] cannot be in <something> because they are just consumed by the unicode codepoint
+# specifically \a \b \f \0 are all problems because since those are escaped, we can't escape to get the character itself
+# the possible solution is to introduce another escape character that puts nothing, and acts just as a delimiter
+# e.g. my_str = 'something \u38762\ <something>' // or 'something \u38762\d<something>' or etc.
+# `\ ` is interesting because space probably never needs to be literally delimited
 @peek_eat(Escape_t, whitelist=[String_t])
 def eat_escape(src: str) -> int | None:
     r"""
@@ -590,6 +596,7 @@ def eat_escape(src: str) -> int | None:
     - \a alert
     - \0 null
     - \u##..# or \U##..# for an arbitrary unicode character. May have any number of hex digits
+    - (TODO) `\ ` (slash-space) for delimiting the end of a unicode codepoint, so the following character isn't consumed by it
 
     or a \ followed by an unknown character. In this case, the escape converts to just the unknown character
     This is how to insert characters that are otherwise illegal inside a string, e.g.

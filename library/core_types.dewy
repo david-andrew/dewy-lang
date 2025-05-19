@@ -1,22 +1,22 @@
-// basic laying out the type hierarchy for nominal types in dewy
-// types are abstract if they have no function for making instances of them
-// otherwise they are concrete. This is mostly just for talking about them, the compiler shouldn't really care
+% basic laying out the type hierarchy for nominal types in dewy
+% types are abstract if they have no function for making instances of them
+% otherwise they are concrete. This is mostly just for talking about them, the compiler shouldn't really care
 
 
-// some of these should not be const but perhaps local_const
+% some of these should not be const but perhaps local_const
 
 
 const any: type = __top_type__
 const never: type = __bottom_type__
 
-// numeric stuff
+% numeric stuff
 const number: type of any
 const real: type of number
 const complex: type of number
 const integer: type of real
 const quaternion: type of number
-const boolean: type of any // tbd if boolean should inherit number or integer or we keep it distinct because it is used in different contexts
-const int1: type of integer // 1 bit. perhaps call this `bit` instead?
+const boolean: type of any % tbd if boolean should inherit number or integer or we keep it distinct because it is used in different contexts
+const int1: type of integer % 1 bit. perhaps call this `bit` instead?
 const uint8: type of integer
 const uint16: type of integer
 const uint32: type of integer
@@ -31,36 +31,36 @@ const float16: type of float
 const float32: type of float
 const float64: type of float
 const float128: type of float
-const float80: type of float  // perhaps this is a compiler error unless available on the architecture. OR if not available, user can determine if fallback is emulation vs floatN
+const float80: type of float  % perhaps this is a compiler error unless available on the architecture. OR if not available, user can determine if fallback is emulation vs floatN
 const rational: type of real = <T of integer>[numerator:T denominator:T]
 const fixedpoint: type of real = <T of integer>[base:T shift:T]
 
 
-//vector  //TBD how to handle parametric types. but then again int can also have parameters, e.g. for the range
+%vector  %TBD how to handle parametric types. but then again int can also have parameters, e.g. for the range
 
 
-// strings
-// tbd how string type will be defined
+% strings
+% tbd how string type will be defined
 const char: type of any = string<length=1>
 const string: type of any = array<char>
 const utf8_string: type of string
 const utf16_string: type of string
 const utf32_string: type of string
 const ascii_string: type of string
-// probably have types for each language too? since that determines grapheme clusters
+% probably have types for each language too? since that determines grapheme clusters
 const ipa_string: type of string
 
-// date/time
+% date/time
 const timespan: type of any
 const timepoint: type of any
 const linux_epoch: type of timepoint
-// etc. e.g. timezones, etc.
+% etc. e.g. timezones, etc.
 
 
 
-//TBD if we'll allow multiple-inheritance, but if so, it would look like this:
+%TBD if we'll allow multiple-inheritance, but if so, it would look like this:
 const MyStr&Int: type of int & string = [
-    // some implementation that conforms to both types...
+    % some implementation that conforms to both types...
     i: integer
     s: string
 ]

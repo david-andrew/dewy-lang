@@ -1,19 +1,19 @@
 
 
-// fast inverse square-root. see: https://en.wikipedia.org/wiki/Fast_inverse_square_root#Overview_of_the_code
+% fast inverse square-root. see: https://en.wikipedia.org/wiki/Fast_inverse_square_root#Overview_of_the_code
 fast_isqrt = (x:f32) => {
     let y:f32, i:u32
     
-    i = 0.5x transmute u32      // evil floating point bit level hacking
-    i = 0x5f3759df - (i >> 1)   // what the fuck?
+    i = 0.5x transmute u32      % evil floating point bit level hacking
+    i = 0x5f3759df - (i >> 1)   % what the fuck?
     y = i transmute f32
-    y *= 1.5 - (0.5x)y^2        // 1st iteration of newton's method
-    //y *= 1.5 - (0.5x)y^2      // 2nd iteration (optional)
+    y *= 1.5 - (0.5x)y^2        % 1st iteration of newton's method
+    %y *= 1.5 - (0.5x)y^2      % 2nd iteration (optional)
 
     return y
 }
 
 
-//TODO: use autodiff to calculate the derivative automatically?
-//isqrt = (x:number) => 1/x^0.5
-//diff(isqrt)
+%TODO: use autodiff to calculate the derivative automatically?
+%isqrt = (x:number) => 1/x^0.5
+%diff(isqrt)

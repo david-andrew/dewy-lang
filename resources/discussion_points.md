@@ -54,7 +54,7 @@ unit = [1 2 3]
 row = [1,2,3]
 // e.g. if we want a literal Nx1 column vector
 // tbd if better way to make this, but generally not necessary since 1D arrays are treated as column vectors
-col = [[1] [2] [3]] 
+col = [[1] [2] [3]]
 
 // Can make a 2D matrix by having a sequence of tuple expressions
 // whitespace is allowed between the commas, but doesn't look as good
@@ -1341,7 +1341,7 @@ let f = (c:str d:int) => {
 since I got rid of commas in most situations, I think the syntax is nicer, but people are liable to accidentally include commas in situations that they don't mean to, and get the wrong thing because they don't realize commas do something else.
 
 ```dewy
-a = (b, c, d) => b + c + d    
+a = (b, c, d) => b + c + d
 v = [1, 2, 3, 4, 5]
 ```
 for the first case, commas make it: `a = ([b c d]) => b + c + d`  which I think is a syntax error...
@@ -1743,7 +1743,7 @@ match x {
 Though this is tricky because how do we distinguish between a list with two elements that we just named `a` and `b` and an object with members a and b (also for objects, what if you only want to match against part of it, e.g. it has some member named `a` of some specific type, but the rest doesn't matter?)
 
 Probably keep `=>` since the left hand side is only ever used for declarations, so we know anything is specifying a literal pattern. If you want to match against values stored in variables, you might do something with `=?`
-    
+
 ```dewy
 myvar = 3
 
@@ -2463,8 +2463,8 @@ let x:int = 5
 let fn = (x:int) => x + 5
 [a:int b:int c:int] = [1, 2, 3]
 ```
- 
-TBD for others. We handle return type annotation with `:>` symbol. 
+
+TBD for others. We handle return type annotation with `:>` symbol.
 Typescript also has these cases which we may consider as possible things in dewy that may get a type annotation attached:
 
 ```typescript
@@ -2531,7 +2531,7 @@ sys=[
 
 I'm thinking that in cases where the dewy syntax conflicts with terminal syntax (such as bash/et. al.) e.g. because of spacing/etc. I think perhaps we'll have some sort of escaped string perhaps like I have shown above, i.e. `r\''content to be converted to a dewy object'`. What this does is provide the following string argument into dewy `"r'content to be converted to a dewy object"` (note the missing ending single quote). So the first `r\'` tells us that what follows needs extra processing, and then the following `'<content>'` uses quotes to prevent bash from separating it into multiple arguments.
 
-Conceivably we could require a trailing `\'` so that dewy receives a proper thing as an argument (e.g. `"r'content to be converted to a dewy object'"`) but 1. I think it's cumbersome, and 2. I think it's not necessary anyways since already doing different processing to how dewy would handle such an object like 
+Conceivably we could require a trailing `\'` so that dewy receives a proper thing as an argument (e.g. `"r'content to be converted to a dewy object'"`) but 1. I think it's cumbersome, and 2. I think it's not necessary anyways since already doing different processing to how dewy would handle such an object like
 ```dewy
 r'some content'
 ```
@@ -2585,7 +2585,7 @@ Basically I think in the standard library, there should be a ton of functionalit
 ## Dunder methods
 This should be the full list of dunder methods you can assign on objects and how they behave
 [basic operators]
-- __add__ = (lhs: tbd rhs: tbd) => 
+- __add__ = (lhs: tbd rhs: tbd) =>
     - probably just by setting the types you can get radd (e.g. putting the object's type on the right)
 - __sub__               // a - b
 - __mul__               // a * b   or a(b)  or (a)b  (assuming correct types)
@@ -2681,7 +2681,7 @@ see: https://en.wikipedia.org/wiki/Mathematical_operators_and_symbols_in_Unicode
 - __circle_dot__        // a ⊙ b    // potentially a synonym for xnor? probably not though
 - __circle_circle__     // a ⊚ b
 
-<!-- 
+<!--
 U+220x 	∀ 	∁ 	∂ 	∃ 	∄ 	∅ 	∆ 	∇ 	∈ 	∉ 	∊ 	∋ 	∌ 	∍ 	∎ 	∏
 U+221x 	∐ 	∑ 	− 	∓ 	∔ 	∕ 	∖ 	∗ 	∘ 	∙ 	√ 	∛ 	∜ 	∝ 	∞ 	∟
 U+222x 	∠ 	∡ 	∢ 	∣ 	∤ 	∥ 	∦ 	∧ 	∨ 	∩ 	∪ 	∫ 	∬ 	∭ 	∮ 	∯
@@ -2705,7 +2705,7 @@ U+22Fx 	⋰ 	⋱ 	⋲ 	⋳ 	⋴ 	⋵ 	⋶ 	⋷ 	⋸ 	⋹ 	⋺ 	⋻ 	⋼ 	⋽ 	�
 ## Piped member access operator
 pipelines are quite flexible at the moment
 ```
-a |> fn1 |> fn2, b, c, d |> fn3 
+a |> fn1 |> fn2, b, c, d |> fn3
 ```
 
 though I realized a case that makes it even more flexible. Basically if we could in a pipeline reach into and access members of an object (created by the previous pipeline to the left), it opens up a lot of convenient cases. Take this example
@@ -2733,7 +2733,7 @@ we have to do the thing in the python example where we wrap in parenthesis
 possible operators:
 - `|.>`
 - `|.|`    // I actually think I quite like this one. but feels like a bit of conflict with math things I might do later like norms, etc.
-- `[.]`    // this one is good, but perhaps difficult to parse? Also a bit of a fine line between indexing and this? or perhaps we just parse 
+- `[.]`    // this one is good, but perhaps difficult to parse? Also a bit of a fine line between indexing and this? or perhaps we just parse
 - `|->`    // llm recommended, only vaguely a fan
 - `/.\`
 
@@ -2787,7 +2787,7 @@ LLM suggested also we could use a pratt parser to handle this, where the `|.|` w
 
 Just another more complicated example
 ```dewy
-example = here / p'../gdc/examples.md' 
+example = here / p'../gdc/examples.md'
     |.| read_text(encoding='utf-32')
     |> parse_examples
     |> filter_examples
@@ -2963,3 +2963,15 @@ C: int32
 ## t Strings
 Python is introducing t strings for templating (see: https://www.youtube.com/watch?v=_QYAoNCK574).
 I think dewy roughly covers most of the functionality already with juxtaposition and the ability to make little one letter functions you stick on the front of strings to process them. The one thing I think should be added is a `.template` member that all strings would have, and it returns the template for how the string was created (basically the same kind of object python's returns). That way any function can trivially access the template for how the string was made if they want, and take advantage of the ability to safely escape external content
+
+
+## Integer Division, Modulus, and rounding
+I think integer division should round towards zero, instead of negative infinity (which typically follows from the behaviour of arithmetic shift right on negative numbers). So `-5 idiv 2` should return `-2` not `-3` (like python would).
+
+If you specifically want rounding to `-inf` then there should be a dedicated `floor_div` function (or perhaps infix operator?)
+
+The bigger question is for modulus. Should modulus also match this behavior of rounding towards zero or negative inf. I think this affects the sign of the value returned, e.g. `-5 % 2` -> `-1` vs `1`
+
+I think historically I've had both cases be useful. probably the way to do this is to have both `remainder` (or perhaps `rem`) which matches the sign of the dividend, and `modulus` (or `mod`) where the result is always positive. The key question then is, is the `%` operator remainder or modulus? perhaps we could also have a `%%` operator for the other one. OR we could get rid of the `%` operator altogether and just have `mod` and `rem` keywords
+
+if we remove `%` as an operator, then that opens up the possibility of making it something else. It could be an identifier, or it could be a comment like in matlab

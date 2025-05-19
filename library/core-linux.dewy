@@ -1,11 +1,11 @@
-// __syscall0__, __syscall1__, ... __syscall6__ are builtin (implemented in assembly)
-// __main__ is the entrypoint called in the assembly
-// everything else is implemented in dewy!
+% __syscall0__, __syscall1__, ... __syscall6__ are builtin (implemented in assembly)
+% __main__ is the entrypoint called in the assembly
+% everything else is implemented in dewy!
 
-// TBD how to set up this type
-//__ptr__: type<T> = uint64
+% TBD how to set up this type
+%__ptr__: type<T> = uint64
 
-// mostly just for reference
+% mostly just for reference
 __qbe_types__ = [
     b = uint8
     h = uint16
@@ -15,12 +15,12 @@ __qbe_types__ = [
     d = float64
 ]
 
-// TODO: some sort of indication that all of these are NOT PORTABLE
+% TODO: some sort of indication that all of these are NOT PORTABLE
 
-// TODO: select proper list of syscalls to include here
-//       this list was just a suggestion from ChatGPT
+% TODO: select proper list of syscalls to include here
+%       this list was just a suggestion from ChatGPT
 
-// File I/O & FD Management
+% File I/O & FD Management
 SYSCALL_READ        = 0
 SYSCALL_WRITE       = 1
 SYSCALL_OPEN        = 2
@@ -34,14 +34,14 @@ SYSCALL_DUP3        = 292
 SYSCALL_FCNTL       = 72
 SYSCALL_IOCTL       = 16
 
-// Memory Management
+% Memory Management
 SYSCALL_MMAP        = 9
 SYSCALL_MUNMAP      = 11
 SYSCALL_MPROTECT    = 10
 SYSCALL_BRK         = 12
 SYSCALL_MREMAP      = 25
 
-// Process Control
+% Process Control
 SYSCALL_FORK        = 57
 SYSCALL_CLONE       = 56
 SYSCALL_EXECVE      = 59
@@ -52,14 +52,14 @@ SYSCALL_GETPID      = 39
 SYSCALL_KILL        = 62
 SYSCALL_TGKILL      = 234
 
-// Time & Sleep
+% Time & Sleep
 SYSCALL_NANOSLEEP   = 35
 SYSCALL_CLOCK_GETTIME = 228
 
-// File System
-SYSCALL_STAT        = 4       // Deprecated on x86_64, use newfstatat
-SYSCALL_FSTAT       = 5       // "
-SYSCALL_LSTAT       = 6       // "
+% File System
+SYSCALL_STAT        = 4       % Deprecated on x86_64, use newfstatat
+SYSCALL_FSTAT       = 5       % "
+SYSCALL_LSTAT       = 6       % "
 SYSCALL_NEWFSTATAT  = 262
 SYSCALL_ACCESS      = 21
 SYSCALL_UNLINK      = 87
@@ -69,14 +69,14 @@ SYSCALL_RENAME      = 82
 SYSCALL_GETDENTS64  = 217
 
 
-// User / Group / UID / GID
+% User / Group / UID / GID
 SYSCALL_GETUID      = 102
 SYSCALL_GETGID      = 104
 SYSCALL_GETEUID     = 107
 SYSCALL_GETEGID     = 108
 
 
-// Misc
+% Misc
 SYSCALL_GETRANDOM   = 318
 SYSCALL_PRCTL       = 157
 SYSCALL_ARCH_PRCTL  = 158
@@ -95,9 +95,9 @@ __syscall6__ = (n:uint64 a0:uint64 a1:uint64 a2:uint64 a3:uint64 a4:uint64 a5:ui
 
 
 
-// Only the functions below will be available externally. all the syscalls should only be used within this file for implementing any functionality needed
-// this is to maintain portibility, namely we implement a common core of functions per each OS, and then can use them anywhere
-// TODO: some stronger indication that these are the portable functions that can be imported (perhaps consider just moving to a separate file? too complex though...)
+% Only the functions below will be available externally. all the syscalls should only be used within this file for implementing any functionality needed
+% this is to maintain portibility, namely we implement a common core of functions per each OS, and then can use them anywhere
+% TODO: some stronger indication that these are the portable functions that can be imported (perhaps consider just moving to a separate file? too complex though...)
 
 
 __exit__ = (status: uint32) :> noreturn => {

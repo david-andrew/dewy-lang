@@ -236,7 +236,7 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = opify(revers
     (Associativity.unary, ['not', '~']),
     (Associativity.right,  ['^']),
     (Associativity.left, [Juxtapose_t(None)]),  # jux-multiply
-    (Associativity.left, ['*', '/', '÷', 'idiv', '%']),
+    (Associativity.left, ['*', '/', '//', 'tdiv', 'rdiv', 'cdiv', 'fdiv', '%']),
     (Associativity.left, ['+', '-']),
     (Associativity.left, [*map(ShiftOperator_t, ['<<', '>>', '<<<', '>>>', '<<!', '!>>'])]),
     (Associativity.none,  [Comma_t(',')]),
@@ -507,7 +507,7 @@ def build_bin_expr(left: AST, op: Token, right: AST) -> AST:
         case Operator_t(op='-'): return Sub(left, right)
         case Operator_t(op='*'): return Mul(left, right)
         case Operator_t(op='/'): return Div(left, right)
-        case Operator_t(op='÷'|'idiv'): return IDiv(left, right)
+        case Operator_t(op='//'|'tdiv'): return IDiv(left, right)
         case Operator_t(op='%'): return Mod(left, right)
         case Operator_t(op='^'): return Pow(left, right)
 
