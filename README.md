@@ -74,7 +74,7 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [loop_or_iters.dewy](examples/loop_or_iters.dewy)               | [✓]    |
 | [nested_loop.dewy](examples/nested_loop.dewy)                   | [✓]    |
 | [block_printing.dewy](examples/block_printing.dewy)             | [✓]    |
-| [row_vs_col.dewy](examples/row_vs_col.dewy)                     | [✓]    |
+| [row_vs_col.dewy](examples/row_vs_col.dewy)                     | [✗]    |
 | [tensors.dewy](examples/tensors.dewy)                           | [✗]    |
 | [arrays.dewy](examples/arrays.dewy)                             | [✗]    |
 | [objects.dewy](examples/objects.dewy)                           | [✓]    |
