@@ -464,7 +464,7 @@ def get_func_precedences(funcs: tuple[Callable]) -> tuple[int, ...]:
 @peek_eat(WhiteSpace_t)
 def eat_line_comment(src: str) -> int | None:
     """eat a line comment, return the number of characters eaten"""
-    if src.startswith('%'):
+    if src.startswith('%') and not src.startswith('%{'):
         try:
             return src.index('\n') + 1
         except ValueError:
