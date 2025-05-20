@@ -2975,3 +2975,21 @@ The bigger question is for modulus. Should modulus also match this behavior of r
 I think historically I've had both cases be useful. probably the way to do this is to have both `remainder` (or perhaps `rem`) which matches the sign of the dividend, and `modulus` (or `mod`) where the result is always positive. The key question then is, is the `%` operator remainder or modulus? perhaps we could also have a `%%` operator for the other one. OR we could get rid of the `%` operator altogether and just have `mod` and `rem` keywords
 
 if we remove `%` as an operator, then that opens up the possibility of making it something else. It could be an identifier, or it could be a comment like in matlab
+
+### Note about precise division
+precise division `a / b` should behave differently based on the operand types. Basically if the operands are integer or rational, the result should be integer/rational. This way a lot of the stuff people write will naturally be precise (not have rounding error). The only time floating point division would occur is when `a` or `b` is floating point.
+
+`5 / 2` => `rational(5 2)`
+
+```dewy
+pythag_length = (a b) => (a^2 + b^2)^/2
+%{
+pythag_length(3 4)
+    => (3^2 + 4^2)^/2
+    => (9 + 16)^(1 / 2)
+    => 25^rational(1 2)
+    => 5
+}%
+```
+
+perhaps even if we did `pythag_length(3.0 4.0)` that might still just convert to rational because 3.0 and 4.0 are technically both still integers. I think any decimal values written out would be rational unless the container type is float or it is cast to float, etc.
