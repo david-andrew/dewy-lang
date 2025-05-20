@@ -484,6 +484,8 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         # Div: compile_arithmetic_binop,
         IDiv: compile_arithmetic_binop,
         Mod: compile_arithmetic_binop,
+        LeftShift: compile_arithmetic_binop,
+        RightShift: compile_arithmetic_binop,
         Flow: compile_flow,
         Access: compile_access,
         IterIn: compile_iter_in,
@@ -1000,6 +1002,8 @@ arithmetic_binop_opcode_map = {
     (Mul, Int, Int): 'mul',
     (IDiv, Int, Int): 'div',
     (Mod, Int, Int): 'rem',
+    (LeftShift, Int, Int): 'shl',
+    (RightShift, Int, Int): 'shr',  # for now treat all ints as unsigned (uint64) But need to make a distinction soon!
 }
 # TODO: note div/rem have unsigned versions, otherwise assume inputs are signed.
 def compile_arithmetic_binop(ast: Add|Sub|Mul|IDiv|Mod, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
