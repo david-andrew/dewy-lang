@@ -98,7 +98,6 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [primes.dewy](examples/primes.dewy)                             | [✓]    |
 | [primes2.dewy](examples/primes2.dewy)                           | [✗]    |
 | [mdbook_preprocessor.dewy](docs/plugins/src_to_iframe.dewy)     | [✗]    |
-| [random.dewy](examples/random.dewy)                             | [✗]    |
 | [fast_inverse_sqrt.dewy](examples/fast_inverse_sqrt.dewy)       | [✗]    |
 | [rule110.dewy](examples/rule110.dewy)                           | [✗]    |
 | [dewy_syntax_examples.dewy](examples/dewy_syntax_examples.dewy) | [✗]    |
