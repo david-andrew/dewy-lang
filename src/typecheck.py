@@ -431,6 +431,10 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
                 # TODO: verify left and right are compatible with the given operation
                 ...
             
+            case LeftShift() | RightShift() | LeftRotate() | RightRotate():
+                # TODO: verify the left operand is shiftable and the right operand is an int
+                ...
+            
             case Flow() | If() | Loop() | Default():
                 #TODO: verify that condition is a boolean
                 ...
@@ -441,6 +445,10 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             
             case Range():
                 # TODO: check that the range bounds/step are valid
+                ...
+            
+            case Type():
+                # TODO: probably will use this somewhere...
                 ...
             
             case _:

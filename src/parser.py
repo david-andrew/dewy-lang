@@ -41,6 +41,7 @@ from .tokenizer import (
     TypeParam_t,
     Undefined_t,
     Identifier_t,
+    Hashtag_t,
     Integer_t,
     Boolean_t,
     BasedNumber_t,
@@ -427,7 +428,7 @@ def unary_split_by_lowest_precedence(tokens: Chain[Token], ops: list[Token], idx
     left_idx = idxs[0]
     if left_op is not None:
         assert left_idx == 0, f'INTERNAL ERROR: expected left operator to be at the start of the list of tokens, got {left_idx=}, {tokens=}'
-    
+
     right_op = ops[-1] if is_unary_postfix_op(ops[-1]) else None
     right_idx = idxs[-1]
     if right_op is not None:
@@ -455,6 +456,7 @@ def parse_single(token: Token) -> AST:
     match token:
         case Undefined_t(): return undefined
         case Identifier_t(): return PrototypeIdentifier(token.src)
+        case Hashtag_t(): return PrototypeIdentifier(token.src)
         case Integer_t(): return Int(int(token.src))
         case Boolean_t(): return Bool(bool_to_bool(token.src))
         case BasedNumber_t(): return Int(based_number_to_int(token.src))
@@ -610,7 +612,7 @@ def build_bin_expr(left: AST, op: Token, right: AST) -> AST:
 
         case Operator_t(op='in'):
             return IterIn(left, right)
-        
+
         case OpChain_t(ops=list() as ops) if len(ops) > 1: #TODO: shouldn't be possible to make an OpChain with 1 or 0 ops
             for unary_op in reversed(ops[1:]):
                 right = build_unary_prefix_expr(unary_op, right)

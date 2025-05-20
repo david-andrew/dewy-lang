@@ -1,0 +1,15 @@
+% attempt to print out all the unicode characters
+const SYSCALL_WRITE = 1
+const STDOUT = 1
+
+% determine if big endian or little endian
+p = #alloc8(8)
+#storel(1 p)
+b = #loadub(p)
+is_little_endian = b =? 1
+
+% print out if little or big endian
+if is_little_endian
+    __syscall3__(SYSCALL_WRITE STDOUT 'little endian\n' 15)
+else
+    __syscall3__(SYSCALL_WRITE STDOUT 'big endian\n' 13)
