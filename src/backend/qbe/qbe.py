@@ -593,6 +593,16 @@ def compile_deferred_functions(scope: Scope, qbe: QbeModule) -> None:
         # add the function IR into the QBE module
         qbe.functions.append(QbeFunction(f'${name}', False, fn_ir.args, fn_ir.ret, fn_ir.blocks))
 
+typename_map: dict[str, tuple[Type, QbeType]] = {
+    'uint8': (Type(Int), 'l'),# 'ub'),
+    'uint16': (Type(Int), 'l'),# 'uh'),
+    'uint32': (Type(Int), 'l'),# 'w'),
+    'uint64': (Type(Int), 'l'),# 'l'),
+    'int8': (Type(Int), 'l'),# 'sb'),
+    'int16': (Type(Int), 'l'),# 'sh'),
+    'int32': (Type(Int), 'l'),# 'w'),
+    'int64': (Type(Int), 'l'),# 'l'),
+}
 # TODO: this is a special function, perhaps doesn't need to follow the same protocol/signature as the others
 def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> FunctionIR:
     """
@@ -606,12 +616,12 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
         raise NotImplementedError(f'Closure compilation not implemented yet: {ast!r}')
         # env =...
         # ast = FunctionLiteral(ast.args, ast.body, ast.return_type)
-        ast = FunctionLiteral(ast.args, ast.body, ast.return_type) 
+        ast = FunctionLiteral(ast.args, ast.body, ast.return_type)
 
     # For now, we only support pkwargs
     if ast.args.pargs or ast.args.kwargs:
         raise NotImplementedError(f'Positional arguments and keyword arguments are not supported yet: pargs={ast.args.pargs!r}, kwargs={ast.args.kwargs!r}')
-    
+
     # create a new scope for the function args and body to live in
     fn_scope = Scope([*scope][-1])
     current_func = QbeFunction('tmp_fn', False, [], None, [QbeBlock('@start')])
@@ -624,10 +634,15 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
                 fn_scope.assign(name, IR('l', arg_id, Type(Int)))
                 current_func._symbols[name] = arg_id
                 current_func.args.append(QbeArg(arg_id, 'l'))
-            case TypedIdentifier(name=name, type=type):
-                fn_scope.assign(name, IR('l', arg_id, type))
+            case TypedIdentifier(id=Identifier(name=name), type=type):
+                if not isinstance(type, Express):
+                    pdb.set_trace()
+                    raise NotImplementedError(f"currently don't support typed identifiers with anything other than express(type). got {type!r}")
+                typename = type.id.name
+                dewy_type, qbe_type = typename_map[typename]
+                fn_scope.assign(name, IR('l', arg_id, dewy_type))
                 current_func._symbols[name] = arg_id
-                current_func.args.append(QbeArg(arg_id, dewy_qbe_type_map[type]))
+                current_func.args.append(QbeArg(arg_id, qbe_type))
             case _:
                 raise NotImplementedError(f'ERROR: so far only identifiers are supported as function arguments. Got {arg!r}')
 
@@ -635,7 +650,7 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
 
     if res is None:
         return FunctionIR(current_func.args, None, None, current_func.blocks)
-    
+
     current_func.blocks[-1].lines.append(f'ret {res.qbe_value}')
     return FunctionIR(current_func.args, res.qbe_type, res.dewy_type, current_func.blocks)
 
@@ -694,14 +709,14 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
     # get the return type of the function
     f_var = scope.get(ast.f.name).value
     match f_var:
-        
+
         case Builtin(return_type=dewy_return_type):
             # dewy_return_type = return_type
             if not isinstance(dewy_return_type, Type):
                 pdb.set_trace()
                 dewy_return_type = typeof(dewy_return_type, scope)
             ret_type = dewy_qbe_type_map[dewy_return_type]
-        
+
         case DeferredFunctionIR():
             fn_ir = compile_fn_literal(f_var.fn, f_var.scope, f_var.qbe, f_var.current_func)
             qbe.functions.append(QbeFunction(f_id, False, fn_ir.args, fn_ir.ret, fn_ir.blocks))
@@ -714,14 +729,14 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
                 del root.meta.deferred_functions[ast.f.name]
             except KeyError:
                 print(f'WARNING: attempted to remove a deferred function that was not found in the scope. {f_id=}, {root.meta.deferred_functions=}')
-        
+
         case FunctionIR(ret=ret_type, dewy_return_type=dewy_return_type): ...
-        
+
         case FunctionLiteral(return_type=dewy_return_type) | Closure(FunctionLiteral(return_type=dewy_return_type)):
             # this seems like it would be if we compiled an immediately executed function. tbd...
             pdb.set_trace()
             ...
-        
+
         case _:
             pdb.set_trace()
             raise ValueError(f'Unrecognized AST type to call: {f_var.value!r}')
@@ -735,11 +750,11 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
     if ret_type is not None:
         ret_id = current_func.get_temp()
         ret_str = f'{ret_id} ={ret_type} '
-    
+
     # insert the call with the result being saved to a new temporary id
     current_block = current_func.blocks[-1]
     current_block.lines.append(f'{ret_str}call {f_id}({args_str})')
-    
+
     # only return IR if the function returns a value
     if ret_type is not None:
         return IR(ret_type, ret_id, dewy_return_type)

@@ -1,7 +1,7 @@
 % attempt to print out all the unicode characters
 
 
-put_unicode = u => (
+put_unicode = u:uint32 => (
     const SYSCALL_WRITE = 1
     const STDOUT = 1
     b0_offset = 0
@@ -12,7 +12,7 @@ put_unicode = u => (
     % makes a 64-bit buffer, we will treat as 8 bytes
     addr = #alloc8(8)
     let buf
-    
+
     if u <=? 0x7F (
         buf = u << b0_offset
         size = 1

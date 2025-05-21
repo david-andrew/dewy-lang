@@ -104,7 +104,7 @@ class ASTDict(dict[AST, T], Generic[T]):
         return super().__contains__(ast_to_key(item))
     def get(self, item: AST, default: T | None = None) -> T | None:
         return super().get(ast_to_key(item), default)
-    
+
 
 # Scope class only used during parsing to keep track of callables
 @dataclass
@@ -216,7 +216,7 @@ class TypeofCallFunc(Protocol):
             args (AST|None): the arguments to the call. None means call with no args
             scope (Scope): the scope in which the AST node is being evaluated
             params (bool, optional): indicates if full type checking including parameterization should be done. Defaults to False.
-        
+
         Returns:
             Type: the type of the AST node
         """
@@ -345,11 +345,12 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
         # if the specific AST has a scope, use it, otherwise use the parent's scope
         # then ensure all ASTs processed have a scope
         scope = scope_map.get(ast) or scope_map[parent]
-        scope_map[ast] = scope 
+        scope_map[ast] = scope
 
         match ast:
-            case Void(): ... 
+            case Void(): ...
             case Identifier(): ...
+            case TypedIdentifier(): ...
             case Express(): ...
             case Signature(): ...
             case Declare(decltype=decltype, target=target):
@@ -404,11 +405,11 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
                     raise ValueError(f'ERROR: no valid branches for QJux. must have at exactly one. {ast=}')
                 if len(valid_branches) > 1:
                     raise ValueError(f'ERROR: multiple valid branches for QJux. must have exactly one. {ast=}')
-                
+
                 # overwrite QJux with the valid branch. Then continue so we process the replacement before going to the children
-                valid_branch, = valid_branches                
+                valid_branch, = valid_branches
                 gen.send(valid_branch)
-                continue 
+                continue
 
                 # pdb.set_trace()
                 # ...
@@ -417,7 +418,7 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
                 # TODO: check if the signature of f agrees with the args...
                 # print(f'skipping function typechecking...')
                 ...
-            
+
             case Access(left=left, right=right):
                 # TODO: check that the member accessed exists on the left ast
                 ...
@@ -430,15 +431,15 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             case Greater() | GreaterEqual() | Less() | LessEqual() | Equal():# | NotEqual():
                 # TODO: verify that the left and right are the comparable types (can compare with each other)
                 ...
-            
+
             case Add() | Sub() | Mul() | Div() | IDiv() | Mod() | LeftShift() | RightShift() | LeftRotate() | RightRotate():
                 # TODO: verify left and right are compatible with the given operation
                 ...
-            
+
             case LeftShift() | RightShift() | LeftRotate() | RightRotate():
                 # TODO: verify the left operand is shiftable and the right operand is an int
                 ...
-            
+
             case Flow() | If() | Loop() | Default():
                 #TODO: verify that condition is a boolean
                 ...
@@ -446,15 +447,15 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             case IterIn():
                 # tbd if any type checking needed here.. probably not
                 ...
-            
+
             case Range():
                 # TODO: check that the range bounds/step are valid
                 ...
-            
+
             case Type():
                 # TODO: probably will use this somewhere...
                 ...
-            
+
             case _:
                 pdb.set_trace()
                 ...
@@ -477,7 +478,7 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
 
 # def typecheck_and_resolve_v2(ast: AST, gen: Generator[AST, AST, None], scope: Scope) -> tuple[AST, Scope]:
 #     match ast:
-#         case Void(): ... 
+#         case Void(): ...
 #             # return ast, scope
 #         case Identifier(): ... # TODO...
 #         case Express(): ...
@@ -525,7 +526,7 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
 #                 raise ValueError(f'ERROR: no valid branches for QJux. must have at exactly one. {ast=}')
 #             if len(valid_branches) > 1:
 #                 raise ValueError(f'ERROR: multiple valid branches for QJux. must have exactly one. {ast=}')
-            
+
 #             # overwrite QJux with the valid branch
 #             valid_branch, = valid_branches
 #             # typecheck_and_resolve(valid_branch, scope) #manually typechecking here since current __full_traversal_iter doesn't recurse into newly sent children... consider adjusting
@@ -538,9 +539,9 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
 #             # TODO: check if the signature of f agrees with the args...
 #             # print(f'skipping function typechecking...')
 #             ...
-        
+
 #         case Int(): ...
-        
+
 #         case _:
 #             pdb.set_trace()
 #             ...
@@ -571,7 +572,7 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
 
 #         print(f'visiting {i}')
 #         match i:
-#             case Void(): ... 
+#             case Void(): ...
 #                 # return ast, scope
 #             case Identifier(): ... # TODO...
 #             case Express(): ...
@@ -619,7 +620,7 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
 #                     raise ValueError(f'ERROR: no valid branches for QJux. must have at exactly one. {ast=}')
 #                 if len(valid_branches) > 1:
 #                     raise ValueError(f'ERROR: multiple valid branches for QJux. must have exactly one. {ast=}')
-                
+
 #                 # overwrite QJux with the valid branch
 #                 valid_branch, = valid_branches
 #                 # typecheck_and_resolve(valid_branch, scope) #manually typechecking here since current __full_traversal_iter doesn't recurse into newly sent children... consider adjusting
@@ -632,15 +633,15 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
 #                 # TODO: check if the signature of f agrees with the args...
 #                 # print(f'skipping function typechecking...')
 #                 ...
-            
+
 #             case Int(): ...
-            
+
 #             case _:
 #                 pdb.set_trace()
 #                 ...
 #                 raise ValueError(f'INTERNAL ERROR: typecheck_and_resolve not implemented for {type(ast)}')
 
-        
+
 
 #     pdb.set_trace()
 #     return ast.items[0], scope
@@ -672,7 +673,7 @@ def is_multiply_valid(ast: Mul, scope: Scope) -> bool:
     left_type = typeof(ast.left, scope)
     if issubclass(left_type.t, (FunctionLiteral, CallableBase)):
         return False
-    
+
     # TBD this is technically true, but it implies you can call functions on the right side when you can't
     # instead at this point it probably should just be a general case...
     right_type = typeof(ast.right, scope)
@@ -700,7 +701,7 @@ def typeof_identifier(ast: Identifier, scope: Scope, params:bool=False) -> TypeE
 # abstract base type to register new callable types
 class CallableBase(AST): ...
 #TODO: this is used by the interpreter. remove when compiler type checking is complete and can replace interpreter stuff
-_callable_types = (PrototypeBuiltin, FunctionLiteral, CallableBase)  
+_callable_types = (PrototypeBuiltin, FunctionLiteral, CallableBase)
 # def register_callable(cls: type[AST]):
 #     _callable_types.append(cls)
 
@@ -708,11 +709,11 @@ def typeof_call(ast: Call, scope: Scope, params:bool=False) -> TypeExpr:
     f_type = type(ast.f)
     if f_type in _external_typeof_call_fn_map:
         return _external_typeof_call_fn_map[f_type](ast.f, ast.args, scope, params)
-    
+
     if not isinstance(ast.f, Identifier):
         raise NotImplementedError(f"calling non-identifier functions is not implemented yet. {ast.f} called with args {ast.args}")
         # get the return type of the function
-    
+
     f_var = scope.get(ast.f.name)
     pdb.set_trace()
     # match f_var.value:
@@ -723,7 +724,7 @@ def typeof_call(ast: Call, scope: Scope, params:bool=False) -> TypeExpr:
     #         ret_type = dewy_qbe_type_map[dewy_return_type]
     #     case _:
     #         raise ValueError(f'Unrecognized AST type to call: {f_var.value!r}')
-    
+
 
 # def simple_typecheck_resolve_ast(ast: AST, scope: Scope) -> AST:
 #     """Resolve the AST to a type. This is a simple version that doesn't do any complex type checking"""
@@ -896,7 +897,7 @@ def typeof_logical_binop(ast: And|Or|Xor|Nand|Nor|Xnor, scope: Scope, params:boo
     key = (left_type.t, right_type.t)
     if not key in logical_binop_typemap:
         raise NotImplementedError(f'logical_binop_typemap not implemented for {key}. {ast=}')
-    
+
     return Type(logical_binop_typemap[key])
 
 def typeof_binary_dispatch(ast: BinOp, scope: Scope, params:bool=False) -> TypeExpr:
@@ -909,7 +910,7 @@ def typeof_binary_dispatch(ast: BinOp, scope: Scope, params:bool=False) -> TypeE
         if left_type.t != right_type.t:
             raise ValueError(f'INTERNAL ERROR: typeof_binary_dispatch called with mismatched types. {left_type=}, {right_type=}')
         return left_type
-        
+
     pdb.set_trace()
     raise NotImplementedError('typeof_binary_dispatch not implemented')
 
