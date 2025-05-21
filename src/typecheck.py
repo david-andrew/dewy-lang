@@ -262,7 +262,7 @@ def get_typeof_fn_map() -> dict[type[AST], TypeofFunc]:
         Access: typeof_access,
         Assign: short_circuit(Void),
         IterIn: short_circuit(Bool), #typeof_iter_in,
-        # FunctionLiteral: typeof_function_literal,
+        FunctionLiteral: short_circuit(FunctionLiteral), # typeof_function_literal, #TODO: long term should probably return the signature
         # # Closure: typeof_closure,
         # # Builtin: typeof_builtin,
         String: identity,

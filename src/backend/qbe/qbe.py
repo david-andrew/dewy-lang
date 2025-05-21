@@ -337,8 +337,10 @@ QbeType = Literal['w', 'l', 's', 'd', 'b', 'h'] | str # Allow custom type names 
 
 # how are specific dewy types represented as QBE values (what is physically passed around)
 # most things will probably be `l` and just be a void* pointer under the hood...
-dewy_qbe_type_map: dict[Type, QbeType] = {
+dewy_qbe_type_map: dict[Type, QbeType|None] = {
+    Type(Void): None,
     Type(Int): 'l',
+
     # TODO: add more...
 }
 
@@ -372,6 +374,12 @@ class QbeFunction:
     args: list[QbeArg]
     ret: QbeType | None
     blocks: list[QbeBlock]
+    _counter: count = field(default_factory=lambda: count(0))
+    _symbols: dict[str, str] = field(default_factory=dict) # Map dewy scope names to QBE IR names
+
+    def get_temp(self, prefix: str = "%.") -> str:
+        """Gets the next (fn scoped) available temporary variable name."""
+        return f"{prefix}{next(self._counter)}"
 
     def __str__(self) -> str:
         export_str = 'export ' if self.export else ''
@@ -392,10 +400,9 @@ class QbeModule:
     global_data: list[str] = field(default_factory=list)
     _counter: count = field(default_factory=lambda: count(0))
     # _symbols: dict[str, TypeExpr] = field(default_factory=dict) # Map temp names to Dewy types
-    _symbols: dict[str, str] = field(default_factory=dict) # Map dewy scope names to QBE IR names
 
-    def get_temp(self, prefix: str = "%.") -> str:
-        """Gets the next available temporary variable name."""
+    def get_global_temp(self, prefix: str) -> str:
+        """Gets the next (globally) available temporary variable name."""
         return f"{prefix}{next(self._counter)}"
 
     def __str__(self) -> str:
@@ -433,6 +440,12 @@ class DeferredFunctionIR(AST):
 
     def __str__(self) -> str:
         return f'DeferredFunctionIR(name={self.name}, fn={self.fn}, ...)'
+
+class FunctionIR(AST):
+    ...
+    def __str__(self) -> str:
+        return f'FunctionIR(...)'
+
 
 
 T = TypeVar('T', bound=AST)
@@ -537,8 +550,8 @@ def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_func: QbeF
             if rhs is None:
                 raise ValueError(f'INTERNAL ERROR: attempting to assign some type that doesn\'t produce a value: {name}={right!r}')
             scope.assign(name, rhs)
-            qid = qbe._symbols.get(name) or qbe.get_temp() # see if a variable exists already. otherwise make a new one
-            qbe._symbols[name] = qid
+            qid = current_func._symbols.get(name) or current_func.get_temp() # see if a variable exists already. otherwise make a new one
+            current_func._symbols[name] = qid
             current_block.lines.append(f'{qid} ={rhs.qbe_type} copy {rhs.qbe_value}')
         case _:
             raise NotImplementedError(f"Assignment target not implemented: left={ast.left}, right={ast.right}")
@@ -580,6 +593,27 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
     ir = compile_fn_literal(fn, scope, qbe, current_func)
     qbe.functions.append(QbeFunction(name, False, ir.meta.args, ir.meta.ret, ir.meta.blocks))
     """
+    env = None
+    if isinstance(ast, Closure):
+        # TODO: need to handle passing in the env pointer for closure variables...
+        pdb.set_trace()
+        raise NotImplementedError(f'Closure compilation not implemented yet: {ast!r}')
+        # env =...
+        # ast = FunctionLiteral(ast.args, ast.body, ast.return_type)
+        ast = FunctionLiteral(ast.args, ast.body, ast.return_type) 
+
+    # For now, we only support pkwargs
+    if ast.args.pargs or ast.args.kwargs:
+        raise NotImplementedError(f'Positional arguments and keyword arguments are not supported yet: pargs={ast.args.pargs!r}, kwargs={ast.args.kwargs!r}')
+    
+    # create a new scope for the function args and body to live in
+    fn_scope = Scope()
+    for arg in ast.args.pkwargs:
+        pdb.set_trace()
+
+    # For now, all args are of type `l` (long)
+    # fn_ir = QbeFunction('tmp_fn_name', False, [QbeArg(f'%arg{i}', 'l') for i in range(len(ast.args.pkwargs))], 'l' if ast.return_type is not void else None, [])
+    ast
     pdb.set_trace()
     ...
 
@@ -601,8 +635,8 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
     #TODO: need a check to verify the IR is contained in the same QBE function as it's being used...
 
     # value should be in symbol table? there are cases where it wouldn't but that's advanced out of order compilation stuff...
-    assert ast.id.name in qbe._symbols, f'TBD if this is an internal error or not. Attempted to express a value which is not in the symbol table from compiling. {ast=!r}'
-    express_ir = IR(ir.qbe_type, qbe._symbols[ast.id.name], ir.dewy_type, ir.meta)
+    assert ast.id.name in current_func._symbols, f'TBD if this is an internal error or not. Attempted to express a value which is not in the symbol table from compiling. {ast=!r}'
+    express_ir = IR(ir.qbe_type, current_func._symbols[ast.id.name], ir.dewy_type, ir.meta)
 
     return express_ir
 
@@ -633,37 +667,47 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
     f_id = f'${ast.f.name}'
 
     # get the return type of the function
-    f_var = scope.get(ast.f.name)
-    match f_var.value:
-        case FunctionLiteral(return_type=dewy_return_type) | Builtin(return_type=dewy_return_type) | Closure(FunctionLiteral(return_type=dewy_return_type)):
+    f_var = scope.get(ast.f.name).value
+    match f_var:
+        case Builtin(return_type=dewy_return_type):
             # dewy_return_type = return_type
             if not isinstance(dewy_return_type, Type):
                 pdb.set_trace()
                 dewy_return_type = typeof(dewy_return_type, scope)
             ret_type = dewy_qbe_type_map[dewy_return_type]
+        case DeferredFunctionIR():
+            fn_ir = compile_fn_literal(f_var.fn, f_var.scope, f_var.qbe, f_var.current_func)
+            pdb.set_trace()
+            ...
+            qbe.functions.append(QbeFunction(f_id, False, f_var.meta.args, f_var.meta.ret, f_var.meta.blocks))
+        case FunctionIR():
+            pdb.set_trace()
+            ...
+        case FunctionLiteral(return_type=dewy_return_type) | Closure(FunctionLiteral(return_type=dewy_return_type)):
+            # this seems like it would be if we compiled an immediately executed function. tbd...
+            pdb.set_trace()
+            ...
         case _:
+            pdb.set_trace()
             raise ValueError(f'Unrecognized AST type to call: {f_var.value!r}')
 
+    # compile args and convert into the expected format for QBE calling
+    args = compile_call_args(ast.args, scope, qbe, current_func)
+    args_str = ', '.join([f'{arg.qbe_type} {arg.qbe_value}' for arg in args])
 
-    # convert calling args into a group if not already
-    ast_args = ast.args
-    match ast_args:
-        case Group(): ... # already good
-        case Void() | None:  ast_args = Group([])
-        case _:       ast_args = Group([ast_args])
-
-
-    qbe_args = [compile(arg, scope, qbe, current_func) for arg in ast_args.items]
-    assert not any(arg is None for arg in qbe_args), f"INTERNAL ERROR: function call arguments must produce values: {ast_args}"
-
-    args_str = ', '.join([f'{arg.qbe_type} {arg.qbe_value}' for arg in qbe_args])
-
+    # create a temporary for the return if the function returns a value
+    ret_str = ''
+    if ret_type is not None:
+        ret_id = current_func.get_temp()
+        ret_str = f'{ret_id} ={ret_type} '
+    
     # insert the call with the result being saved to a new temporary id
-    ret_id = qbe.get_temp()
     current_block = current_func.blocks[-1]
-    current_block.lines.append(f'{ret_id} ={ret_type} call {f_id}({args_str})')
-
-    return IR(ret_type, ret_id, dewy_return_type)
+    current_block.lines.append(f'{ret_str}call {f_id}({args_str})')
+    
+    # only return IR if the function returns a value
+    if ret_type is not None:
+        return IR(ret_type, ret_id, dewy_return_type)
 
 """
 TODO: stack memory functions in qbe
@@ -737,7 +781,7 @@ def compile_call_hashtag(ast: Call, scope: Scope, qbe: QbeModule, current_func: 
         qbe_lhs = ''
         ir = None
         if res_type is not None:
-            res_id = qbe.get_temp()
+            res_id = current_func.get_temp()
             qbe_lhs = f'{res_id} ={res_type} '
             ir = IR(res_type, res_id, Type(Int))
         current_func.blocks[-1].lines.append(f'{qbe_lhs}{opcode} {", ".join(a.qbe_value for a in args)}')
@@ -847,7 +891,7 @@ def string_to_qbe_repr(s: str, include_null_terminator: bool = True) -> tuple[st
 
 def compile_string(ast: String, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
     """Returns the QBE representation of a string literal."""
-    data_id = qbe.get_temp('$str')
+    data_id = qbe.get_global_temp('$str')
     qbe_str_data, length = string_to_qbe_repr(ast.val)
     qbe.global_data.append(f'data {data_id} = {qbe_str_data}')
     ir = IR('l', data_id, Type(String))
@@ -899,7 +943,7 @@ def compile_base_logical_binop(ast: And|Or|Xor, scope: Scope, qbe: QbeModule, cu
     assert left_ir.qbe_type == right_ir.qbe_type, f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.qbe_type} and {right_ir.qbe_type}"
     dewy_res_type = typeof(ast, scope)
 
-    res_id = qbe.get_temp()
+    res_id = current_func.get_temp()
     res_type = left_ir.qbe_type
 
     # get the opcode name associated with this AST
@@ -926,7 +970,7 @@ def compile_not(ast: Not, scope: Scope, qbe: QbeModule, current_func: QbeFunctio
     assert operand_ir is not None, f'INTERNAL ERROR: operand of `Not` must produce a value: {ast.operand!r}'
     dewy_res_type = typeof(ast, scope)
 
-    res_id = qbe.get_temp()
+    res_id = current_func.get_temp()
     res_type = operand_ir.qbe_type
 
     # perform the not operation
@@ -973,7 +1017,7 @@ def compile_compare(ast: Less|LessEqual|Greater|GreaterEqual|Equal|NotEqual, sco
     assert left_ir.dewy_type.t == right_ir.dewy_type.t, f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.dewy_type.t} and {right_ir.dewy_type.t}"
     dewy_res_type = typeof(ast, scope)
 
-    res_id = qbe.get_temp()
+    res_id = current_func.get_temp()
     res_type: QbeType = 'l' # booleans are represented as integers in QBE. 0 is false, 1 is true
 
 
@@ -1014,7 +1058,7 @@ def compile_arithmetic_binop(ast: Add|Sub|Mul|IDiv|Mod, scope: Scope, qbe: QbeMo
     assert left_ir.dewy_type.t == right_ir.dewy_type.t, f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.dewy_type.t} and {right_ir.dewy_type.t}"
     dewy_res_type = typeof(ast, scope)
 
-    res_id = qbe.get_temp()
+    res_id = current_func.get_temp()
     res_type = left_ir.qbe_type
 
     # get the opcode name associated with this AST
@@ -1033,7 +1077,7 @@ def compile_arithmetic_binop(ast: Add|Sub|Mul|IDiv|Mod, scope: Scope, qbe: QbeMo
 def compile_flow(ast: Flow, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> None | IR:
 
     # create blocks for each branch
-    unique_num = qbe.get_temp('')
+    unique_num = current_func.get_temp('')
     assert len(ast.branches) > 0, f"INTERNAL ERROR: Flow must have at least one branch: {ast}"
 
     end_label = f'@.{unique_num}.flow.end'
@@ -1152,13 +1196,13 @@ def compile_iter_in(ast: IterIn, scope: Scope, qbe: QbeModule, current_func: Qbe
         if rhs is None:
             raise ValueError(f'INTERNAL ERROR: attempting to iterate over some type that doesn\'t produce a value: {name} in {ast.right!r}')
 
-        iter_i_id = qbe._symbols.get(name) or qbe.get_temp() # see if a variable exists already. otherwise make a new one
-        qbe._symbols[name] = iter_i_id
+        iter_i_id = current_func._symbols.get(name) or current_func.get_temp() # see if a variable exists already. otherwise make a new one
+        current_func._symbols[name] = iter_i_id
 
         if rhs.dewy_type.t == Range and rhs.meta.kind == (Int, Int):
             scope.assign(name, IR('l', f'{rhs.meta.left}', Type(Int)))
             current_block.lines.append(f'{iter_i_id} =l copy {rhs.meta.left}')
-            cmp_id = qbe.get_temp()
+            cmp_id = current_func.get_temp()
             cmp_type = 'csltl' if rhs.meta.brackets[1] == ')' else 'cslel'
             current_block.lines.append(f'{cmp_id} =l {cmp_type} {iter_i_id}, {rhs.meta.right}')
             return IR('l', cmp_id, Type(Bool))
@@ -1175,13 +1219,13 @@ def compile_iter_in(ast: IterIn, scope: Scope, qbe: QbeModule, current_func: Qbe
         if rhs is None:
             raise ValueError(f'INTERNAL ERROR: attempting to iterate over some type that doesn\'t produce a value: {name} in {ast.right!r}')
 
-        assert name in qbe._symbols, f"INTERNAL ERROR: iter in failed to find {name} in the symbol table. {ast.left} in {ast.right}"
-        iter_i_id = qbe._symbols.get(name) or qbe.get_temp() # see if a variable exists already. otherwise make a new one
-        qbe._symbols[name] = iter_i_id
+        assert name in current_func._symbols, f"INTERNAL ERROR: iter in failed to find {name} in the symbol table. {ast.left} in {ast.right}"
+        iter_i_id = current_func._symbols.get(name) or current_func.get_temp() # see if a variable exists already. otherwise make a new one
+        current_func._symbols[name] = iter_i_id
 
         if rhs.dewy_type.t == Range and rhs.meta.kind == (Int, Int):
             current_block.lines.append(f'{iter_i_id} =l add {iter_i_id}, {rhs.meta.step}')
-            cmp_id = qbe.get_temp()
+            cmp_id = current_func.get_temp()
             cmp_type = 'csltl' if rhs.meta.brackets[1] == ')' else 'cslel'
             current_block.lines.append(f'{cmp_id} =l {cmp_type} {iter_i_id}, {rhs.meta.right}')
             return IR('l', cmp_id, Type(Bool))
