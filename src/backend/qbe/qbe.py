@@ -442,7 +442,12 @@ class DeferredFunctionIR(AST):
         return f'DeferredFunctionIR(name={self.name}, fn={self.fn}, ...)'
 
 class FunctionIR(AST):
-    ...
+    # qbe.functions.append(QbeFunction(name, False, ir.meta.args, ir.meta.ret, ir.meta.blocks))
+    args: list[QbeArg]
+    ret: QbeType | None
+    dewy_return_type: Type | None
+    blocks: list[QbeBlock]
+    # meta: SimpleNamespace = field(default_factory=SimpleNamespace)
     def __str__(self) -> str:
         return f'FunctionIR(...)'
 
@@ -471,8 +476,8 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         Declare: compile_declare,
         Assign: compile_assign,
         Express: compile_express,
-        FunctionLiteral: compile_fn_literal,
-        Closure: compile_fn_literal,
+        # FunctionLiteral: compile_fn_literal,
+        # Closure: compile_fn_literal,
         Call: compile_call,
         Group: compile_group,
         Int: compile_int,
@@ -526,8 +531,9 @@ def compile_declare(ast: Declare, scope: Scope, qbe: QbeModule, current_func: Qb
     """Handles variable declarations."""
     match ast.target:
         case Identifier(name=name):
-            pdb.set_trace()
-            ...
+            scope.declare(name, void, untyped, ast.decltype)
+        case TypedIdentifier(name=name, type=type):
+            scope.declare(name, void, type, ast.decltype)
         case Assign(left=Identifier(name=name)):
             scope.declare(name, void, untyped, ast.decltype)
             compile_assign(ast.target, scope, qbe, current_func)
@@ -583,12 +589,12 @@ def compile_deferred_functions(scope: Scope, qbe: QbeModule) -> None:
         return
     for name, (fn, scope, qbe, current_func) in root.meta.deferred_functions.items():
         # compile the function
-        ir = compile_fn_literal(fn, scope, qbe, current_func)
+        fn_ir = compile_fn_literal(fn, scope, qbe, current_func)
         # add the function IR into the QBE module
-        qbe.functions.append(QbeFunction(name, False, ir.meta.args, ir.meta.ret, ir.meta.blocks))
+        qbe.functions.append(QbeFunction(f'${name}', False, fn_ir.args, fn_ir.ret, fn_ir.blocks))
 
-
-def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
+# TODO: this is a special function, perhaps doesn't need to follow the same protocol/signature as the others
+def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> FunctionIR:
     """
     ir = compile_fn_literal(fn, scope, qbe, current_func)
     qbe.functions.append(QbeFunction(name, False, ir.meta.args, ir.meta.ret, ir.meta.blocks))
@@ -607,15 +613,32 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
         raise NotImplementedError(f'Positional arguments and keyword arguments are not supported yet: pargs={ast.args.pargs!r}, kwargs={ast.args.kwargs!r}')
     
     # create a new scope for the function args and body to live in
-    fn_scope = Scope()
+    fn_scope = Scope([*scope][-1])
+    current_func = QbeFunction('tmp_fn', False, [], None, [QbeBlock('@start')])
     for arg in ast.args.pkwargs:
-        pdb.set_trace()
+        arg_id = current_func.get_temp()
+        match arg:
+            # TODO: hacky, for now we're declaring untyped types as int...
+            case Identifier(name=name):
+                fn_scope.declare(name, void, Type(Int), DeclarationType.LET)
+                fn_scope.assign(name, IR('l', arg_id, Type(Int)))
+                current_func._symbols[name] = arg_id
+                current_func.args.append(QbeArg(arg_id, 'l'))
+            case TypedIdentifier(name=name, type=type):
+                fn_scope.assign(name, IR('l', arg_id, type))
+                current_func._symbols[name] = arg_id
+                current_func.args.append(QbeArg(arg_id, dewy_qbe_type_map[type]))
+            case _:
+                raise NotImplementedError(f'ERROR: so far only identifiers are supported as function arguments. Got {arg!r}')
 
-    # For now, all args are of type `l` (long)
-    # fn_ir = QbeFunction('tmp_fn_name', False, [QbeArg(f'%arg{i}', 'l') for i in range(len(ast.args.pkwargs))], 'l' if ast.return_type is not void else None, [])
-    ast
-    pdb.set_trace()
-    ...
+    res = compile(ast.body, fn_scope, qbe, current_func)
+
+    if res is None:
+        return FunctionIR(current_func.args, None, None, current_func.blocks)
+    
+    current_func.blocks[-1].lines.append(f'ret {res.qbe_value}')
+    return FunctionIR(current_func.args, res.qbe_type, res.dewy_type, current_func.blocks)
+
 
 def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
     # get the previous IR for the original value that should be set
@@ -625,7 +648,9 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
 
     if isinstance(ir, DeferredFunctionIR):
         # the function must be compiled at this point since it's being used
-        ir = compile_fn_literal(ir.fn, ir.scope, ir.qbe, ir.current_func)
+        fn_ir = compile_fn_literal(ir.fn, ir.scope, ir.qbe, ir.current_func)
+        pdb.set_trace()
+        ...
 
     if ir.dewy_type.t in (FunctionLiteral, Closure):
         #TBD, not sure if this is even allowed
@@ -669,24 +694,34 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
     # get the return type of the function
     f_var = scope.get(ast.f.name).value
     match f_var:
+        
         case Builtin(return_type=dewy_return_type):
             # dewy_return_type = return_type
             if not isinstance(dewy_return_type, Type):
                 pdb.set_trace()
                 dewy_return_type = typeof(dewy_return_type, scope)
             ret_type = dewy_qbe_type_map[dewy_return_type]
+        
         case DeferredFunctionIR():
             fn_ir = compile_fn_literal(f_var.fn, f_var.scope, f_var.qbe, f_var.current_func)
-            pdb.set_trace()
-            ...
-            qbe.functions.append(QbeFunction(f_id, False, f_var.meta.args, f_var.meta.ret, f_var.meta.blocks))
-        case FunctionIR():
-            pdb.set_trace()
-            ...
+            qbe.functions.append(QbeFunction(f_id, False, fn_ir.args, fn_ir.ret, fn_ir.blocks))
+            scope.assign(ast.f.name, fn_ir) # the function is no longer deferred
+            dewy_return_type = fn_ir.dewy_return_type
+            ret_type = fn_ir.ret
+            # remove the function from the deferred functions
+            try:
+                root = list(scope)[-1]  # get the top most scope
+                del root.meta.deferred_functions[ast.f.name]
+            except KeyError:
+                print(f'WARNING: attempted to remove a deferred function that was not found in the scope. {f_id=}, {root.meta.deferred_functions=}')
+        
+        case FunctionIR(ret=ret_type, dewy_return_type=dewy_return_type): ...
+        
         case FunctionLiteral(return_type=dewy_return_type) | Closure(FunctionLiteral(return_type=dewy_return_type)):
             # this seems like it would be if we compiled an immediately executed function. tbd...
             pdb.set_trace()
             ...
+        
         case _:
             pdb.set_trace()
             raise ValueError(f'Unrecognized AST type to call: {f_var.value!r}')
@@ -1014,7 +1049,7 @@ def compile_compare(ast: Less|LessEqual|Greater|GreaterEqual|Equal|NotEqual, sco
     assert left_ir is not None, f"INTERNAL ERROR: left side of `{ast.__class__.__name__}` must produce a value: {ast.left!r}"
     right_ir = compile(ast.right, scope, qbe, current_func)
     assert right_ir is not None, f"INTERNAL ERROR: right side of `{ast.__class__.__name__}` must produce a value: {ast.right!r}"
-    assert left_ir.dewy_type.t == right_ir.dewy_type.t, f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.dewy_type.t} and {right_ir.dewy_type.t}"
+    assert left_ir.dewy_type.t == right_ir.dewy_type.t or untyped in (left_ir.dewy_type, right_ir.dewy_type), f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type (or untyped): {left_ir.dewy_type.t} and {right_ir.dewy_type.t}"
     dewy_res_type = typeof(ast, scope)
 
     res_id = current_func.get_temp()
@@ -1023,6 +1058,8 @@ def compile_compare(ast: Less|LessEqual|Greater|GreaterEqual|Equal|NotEqual, sco
 
     # use signed comparisons for now
     # TODO: in the future, signed/unsigned will be based on the type
+
+    # deal with untyped (TODO: type inference should manage this)
 
      # get the opcode name associated with this AST
     key = (type(ast), left_ir.dewy_type.t)
@@ -1055,7 +1092,7 @@ def compile_arithmetic_binop(ast: Add|Sub|Mul|IDiv|Mod, scope: Scope, qbe: QbeMo
     assert left_ir is not None, f"INTERNAL ERROR: left side of `{ast.__class__.__name__}` must produce a value: {ast.left!r}"
     right_ir = compile(ast.right, scope, qbe, current_func)
     assert right_ir is not None, f"INTERNAL ERROR: right side of `{ast.__class__.__name__}` must produce a value: {ast.right!r}"
-    assert left_ir.dewy_type.t == right_ir.dewy_type.t, f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.dewy_type.t} and {right_ir.dewy_type.t}"
+    assert left_ir.dewy_type.t == right_ir.dewy_type.t or untyped in (left_ir.dewy_type, right_ir.dewy_type), f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.dewy_type.t} and {right_ir.dewy_type.t}"
     dewy_res_type = typeof(ast, scope)
 
     res_id = current_func.get_temp()
