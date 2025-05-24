@@ -508,6 +508,7 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         GreaterEqual: compile_compare,
         Equal: compile_compare,
         NotEqual: compile_compare,
+        UnaryNeg: compile_unary_neg,
         Add: compile_arithmetic_binop,
         Sub: compile_arithmetic_binop,
         Mul: compile_arithmetic_binop,
@@ -1117,6 +1118,11 @@ def compile_compare(ast: Less|LessEqual|Greater|GreaterEqual|Equal|NotEqual, sco
     current_block.lines.append(f'{res_id} ={res_type} {opcode} {left_ir.qbe_value}, {right_ir.qbe_value}')
     return IR(res_type, res_id, dewy_res_type)
 
+
+def compile_unary_neg(ast: UnaryNeg, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR: 
+    # TODO: for now, unary negation is just a multiplication by -1
+    #       need to properly handle other types in the future
+    return compile_arithmetic_binop(Mul(Int(-1), ast.operand), scope, qbe, current_func)
 
 
 arithmetic_binop_opcode_map = {

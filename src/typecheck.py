@@ -435,6 +435,10 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             case Add() | Sub() | Mul() | Div() | IDiv() | Mod() | LeftShift() | RightShift() | LeftRotate() | RightRotate():
                 # TODO: verify left and right are compatible with the given operation
                 ...
+            
+            case UnaryNeg() | UnaryPos() | UnaryMul() | UnaryDiv():
+                # TODO: verify the operand is compatible with the unary operation
+                ...
 
             case LeftShift() | RightShift() | LeftRotate() | RightRotate():
                 # TODO: verify the left operand is shiftable and the right operand is an int
