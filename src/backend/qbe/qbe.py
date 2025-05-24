@@ -320,9 +320,19 @@ class Scope(TypecheckScope):
         """
         stackmem = {
             '#storel': Scope._make_qbe_builtin(['l', 'l']),
+            '#storew': Scope._make_qbe_builtin(['l', 'l']),
+            '#storeh': Scope._make_qbe_builtin(['l', 'l']),
+            '#storeb': Scope._make_qbe_builtin(['l', 'l']),
             '#loadl': Scope._make_qbe_builtin(['l'], 'l'),
+            '#loadsw': Scope._make_qbe_builtin(['l'], 'l'),
+            '#loaduw': Scope._make_qbe_builtin(['l'], 'l'),
+            '#loadsh': Scope._make_qbe_builtin(['l'], 'l'),
+            '#loaduh': Scope._make_qbe_builtin(['l'], 'l'),
+            '#loadsb': Scope._make_qbe_builtin(['l'], 'l'),
             '#loadub': Scope._make_qbe_builtin(['l'], 'l'),
+            '#alloc16': Scope._make_qbe_builtin(['l'], 'l'),
             '#alloc8': Scope._make_qbe_builtin(['l'], 'l'),
+            '#alloc4': Scope._make_qbe_builtin(['l'], 'l'),
         }
         scope = Scope(vars={**syscalls, **stackmem})
         # scope.meta[void].stackmem = stackmem # hack for now to let us know which functions are these specific qbe opcodes
@@ -376,6 +386,8 @@ class QbeFunction:
     blocks: list[QbeBlock]
     _counter: count = field(default_factory=lambda: count(0))
     _symbols: dict[str, str] = field(default_factory=dict) # Map dewy scope names to QBE IR names
+    _captures: dict[str, str] = field(default_factory=dict) # Map dewy (parent/captured) scope names to QBE IR names (noting all values in here are by reference)
+                                                            # additionally, this field is used to layout envptr passed into closure functions. relies on dictionary maintaining insertion order
 
     def get_temp(self, prefix: str = "%.") -> str:
         """Gets the next (fn scoped) available temporary variable name."""
@@ -649,6 +661,7 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
     res = compile(ast.body, fn_scope, qbe, current_func)
 
     if res is None:
+        current_func.blocks[-1].lines.append('ret')
         return FunctionIR(current_func.args, None, None, current_func.blocks)
 
     current_func.blocks[-1].lines.append(f'ret {res.qbe_value}')
@@ -674,9 +687,21 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
 
     #TODO: need a check to verify the IR is contained in the same QBE function as it's being used...
 
+    name = ast.id.name
     # value should be in symbol table? there are cases where it wouldn't but that's advanced out of order compilation stuff...
-    assert ast.id.name in current_func._symbols, f'TBD if this is an internal error or not. Attempted to express a value which is not in the symbol table from compiling. {ast=!r}'
-    express_ir = IR(ir.qbe_type, current_func._symbols[ast.id.name], ir.dewy_type, ir.meta)
+    if name in current_func._symbols: 
+        express_ir = IR(ir.qbe_type, current_func._symbols[name], ir.dewy_type, ir.meta)
+    elif name in current_func._captures:
+        # this is an already captured variable we can use by reference (auto-dereference)
+        pdb.set_trace()
+    elif scope.get(name, False) is not None:
+        # this is a closure variable that hasn't been marked as a capture yet
+        # mark it as needed in the capture, and use it by reference (auto-dereference)
+        pdb.set_trace()
+        ...
+    else:
+        pdb.set_trace()
+        raise ValueError(f'TBD if this is an internal error or not. Attempted to express a value which is not in the symbol table from compiling. {ast=!r}')
 
     return express_ir
 
@@ -691,6 +716,7 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
     if not isinstance(ast.f, Identifier):
         # create an anonymous function
         ir = compile(ast.f, scope, qbe, current_func)
+        # TODO: handle if function created any captures
         pdb.set_trace()
         # assert isinstance(ast.f, (FunctionLiteral, Closure)), f"INTERNAL ERROR: expected identifier or function literal for function call, but got {ast.f!r}"
         # ir = compile_fn_literal(ast.f, scope, qbe, current_func)
@@ -847,6 +873,7 @@ def compile_call_hashtag(ast: Call, scope: Scope, qbe: QbeModule, current_func: 
     raise NotImplementedError(f"Hashtag function calls are not implemented yet: {ast.f.name}({ast.args})")
 
 def compile_call_args(ast: AST|None, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> list[IR]:
+    # TODO: handle if any arg is a closure variable
     if ast is None:
         return []
 

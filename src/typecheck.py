@@ -715,6 +715,9 @@ def typeof_call(ast: Call, scope: Scope, params:bool=False) -> TypeExpr:
         # get the return type of the function
 
     f_var = scope.get(ast.f.name)
+    # TODO: need to be able to register e.g. a dict[type[AST], Callable[[AST], Type]]
+    # if is_index_valid(f_var.value, Builtin) # b.c. Builtin is only defined in the backend, not here...
+
     pdb.set_trace()
     # match f_var.value:
     #     case FunctionLiteral(return_type=dewy_return_type):# | Builtin(return_type=dewy_return_type) | Closure(FunctionLiteral(return_type=dewy_return_type)):
