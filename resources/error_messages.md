@@ -72,3 +72,25 @@ Adding the name parameter and using it above should generate a warning since the
 
 ## TBD other shadowing warnings
 ...
+
+
+
+## prefix operators that can also be binary operators causing confusing parse
+
+```dewy
+putl = () => __syscall3__(1 1 '\n' 1)
+-1234567890 |> put_int
+```
+
+these seem like unrelated lines, but actually because `-123456789` starts with a negative sign, it actually interpreted the negative as a binary operator rather than the unary negative sign. Unfortunately at the moment, the only ways of correcting the parse are either of these:
+```dewy
+putl = () => __syscall3__(1 1 '\n' 1);
+-1234567890 |> put_int
+
+putl = () => __syscall3__(1 1 '\n' 1)
+(-1234567890) |> put_int
+```
+
+This seems bad, because it means we basically can't use unary negative in any real programs without manually breaking the previous expression
+
+TBD if we'll adjust the syntax, or if we'll have a warning for this kind of situation
