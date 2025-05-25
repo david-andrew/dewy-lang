@@ -699,13 +699,17 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
     # get the previous IR for the original value that should be set
     ir_var = scope.get(ast.id.name)
     ir = ir_var.value
-    assert isinstance(ir, (IR, DeferredFunctionIR)), f'INTERNAL ERROR: expected IR AST in scope for id "{ast.id}", but got {ir!r}'
+    assert isinstance(ir, (IR, DeferredFunctionIR, QbeFunction)), f'INTERNAL ERROR: expected IR AST in scope for id "{ast.id}", but got {ir!r}'
 
     if isinstance(ir, DeferredFunctionIR):
         # the function must be compiled at this point since it's being used
-        fn_ir = compile_fn_literal(ir.fn, ir.scope, ir.qbe, ir.current_func, ir.name)
-        pdb.set_trace()
-        ...
+        ir = compile_fn_literal(ir.fn, ir.scope, ir.qbe, ir.current_func, f'${ir.name}')
+        scope.assign(ast.id.name, ir)  # update the scope with the compiled function
+        remove_deferred_function(scope, ast.id.name)  # remove from deferred functions
+
+    if isinstance(ir, QbeFunction):
+        # TBD if this is wrong, but seems like here it is being called with no args
+        return compile_call(Call(Identifier(ast.id.name), None), scope, qbe, current_func)
 
     if ir.dewy_type.t in (FunctionLiteral, Closure):
         #TBD, not sure if this is even allowed
@@ -736,6 +740,14 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
 def make_anonymous_function_name(qbe: QbeModule) -> str:
     """Generates a unique name for an anonymous function."""
     return f'.__anonymous__.{next(qbe._counter)}'
+
+
+def remove_deferred_function(scope: Scope, name: str) -> None:
+    try:
+        root = list(scope)[-1]  # get the top most scope
+        del root.meta.deferred_functions[name]
+    except KeyError:
+        print(f'WARNING: attempted to remove a deferred function that was not found in the scope. {f_id=}, {root.meta.deferred_functions=}')
 
 
 def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR]:
@@ -775,14 +787,10 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
             scope.assign(ast.f.name, fn_ir) # the function is no longer deferred
             dewy_return_type = fn_ir.dewy_return_type
             ret_type = fn_ir.ret
-            # remove the function from the deferred functions
-            try:
-                root = list(scope)[-1]  # get the top most scope
-                del root.meta.deferred_functions[ast.f.name]
-            except KeyError:
-                print(f'WARNING: attempted to remove a deferred function that was not found in the scope. {f_id=}, {root.meta.deferred_functions=}')
+            remove_deferred_function(scope, ast.f.name)
 
-        case FunctionIR(ret=ret_type, dewy_return_type=dewy_return_type): ...
+        # case FunctionIR(ret=ret_type, dewy_return_type=dewy_return_type): ...
+        case QbeFunction(ret=ret_type, dewy_return_type=dewy_return_type): ...
 
         case FunctionLiteral(return_type=dewy_return_type) | Closure(FunctionLiteral(return_type=dewy_return_type)):
             # this seems like it would be if we compiled an immediately executed function. tbd...

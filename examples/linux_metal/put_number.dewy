@@ -26,5 +26,9 @@ put_int = x:int64 => (
         __syscall3__(SYSCALL_WRITE STDOUT buf 1)
     )
 )
+putl = () => __syscall3__(1 1 '\n' 1)
 
 put_int(-1234567890)
+putl
+put_int(0xffff)
+putl
