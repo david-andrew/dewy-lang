@@ -230,6 +230,7 @@ def top_level_compile(ast: AST, scope: 'Scope') -> 'QbeModule':
         export=True,
         args=[QbeArg('%argc', 'l'), QbeArg('%argv', 'l'), QbeArg('%envp', 'l')],
         ret='w', # Exit code is typically 'w' (word)
+        dewy_return_type=Type(Int),
         blocks=[QbeBlock('@start')]
     )
     qbe.functions.append(__main__)
@@ -383,6 +384,7 @@ class QbeFunction:
     export: bool
     args: list[QbeArg]
     ret: QbeType | None
+    dewy_return_type: Type | None
     blocks: list[QbeBlock]
     _counter: count = field(default_factory=lambda: count(0))
     _symbols: dict[str, str] = field(default_factory=dict) # Map dewy scope names to QBE IR names
@@ -597,14 +599,17 @@ def defer_compile_assign_fn(name: str, fn: FunctionLiteral, scope: Scope, qbe: Q
 
 
 def compile_deferred_functions(scope: Scope, qbe: QbeModule) -> None:
+    # TODO: honestly if a function is ever compiled because of this, it probably means it's never used, meaning perhaps we can skip it (unless export was manually set to True...)
+    # Though library code will definitely compile functions that aren't used, so tbd how to handle. perhaps have an export keyword
     root = list(scope)[-1]
     if not hasattr(root.meta, 'deferred_functions'):
         return
     for name, (fn, scope, qbe, current_func) in root.meta.deferred_functions.items():
         # compile the function
-        fn_ir = compile_fn_literal(fn, scope, qbe, current_func)
+        fn = compile_fn_literal(fn, scope, qbe, current_func, name)
+        pdb.set_trace()
         # add the function IR into the QBE module
-        qbe.functions.append(QbeFunction(f'${name}', False, fn_ir.args, fn_ir.ret, fn_ir.blocks))
+        # qbe.functions.append(QbeFunction(f'${name}', False, fn_ir.args, fn_ir.ret, fn_ir.blocks))
 
 typename_map: dict[str, tuple[Type, QbeType]] = {
     'uint8': (Type(Int), 'l'),# 'ub'),
@@ -617,11 +622,23 @@ typename_map: dict[str, tuple[Type, QbeType]] = {
     'int64': (Type(Int), 'l'),# 'l'),
 }
 # TODO: this is a special function, perhaps doesn't need to follow the same protocol/signature as the others
-def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> FunctionIR:
+# TODO: make return QbeFunction instead of FunctionIR...
+def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeModule, current_func: QbeFunction, f_id:str|None) -> QbeFunction: #FunctionIR:
     """
-    ir = compile_fn_literal(fn, scope, qbe, current_func)
-    qbe.functions.append(QbeFunction(name, False, ir.meta.args, ir.meta.ret, ir.meta.blocks))
+    fn: QbeFunction = compile_fn_literal(fn, scope, qbe, current_func, name)
+
+    Args:
+        ast (FunctionLiteral|Closure): The function literal or closure to compile.
+        scope (Scope): The current scope in which the function is being compiled.
+        qbe (QbeModule): The QBE module to which the function will be added.
+        current_func (QbeFunction): The current function being compiled, if any.
+        f_id (str|None): Optional identifier for the function (should start with '$'). If None, an anonymous function name will be generated.
+
+    TBD on overloading. potentially handle outside of here by managing the name, e.g. `$.fn_name.0`, `$.fn_name.1`, ...
+    TBD on declaring the same named function in different independent scopes.
     """
+    # TODO: actually we determine if it's a closure during function compilation
+    # TODO: working with closures may involve `current_func` otherwise take it out from the args
     env = None
     if isinstance(ast, Closure):
         # TODO: need to handle passing in the env pointer for closure variables...
@@ -637,16 +654,17 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
 
     # create a new scope for the function args and body to live in
     fn_scope = Scope([*scope][-1])
-    current_func = QbeFunction('tmp_fn', False, [], None, [QbeBlock('@start')])
+    f_id = f_id or make_anonymous_function_name(qbe)
+    qbe_fn = QbeFunction(f_id, False, [], None, None, [QbeBlock('@start')])
     for arg in ast.args.pkwargs:
-        arg_id = current_func.get_temp()
+        arg_id = qbe_fn.get_temp()
         match arg:
             # TODO: hacky, for now we're declaring untyped types as int...
             case Identifier(name=name):
                 fn_scope.declare(name, void, Type(Int), DeclarationType.LET)
                 fn_scope.assign(name, IR('l', arg_id, Type(Int)))
-                current_func._symbols[name] = arg_id
-                current_func.args.append(QbeArg(arg_id, 'l'))
+                qbe_fn._symbols[name] = arg_id
+                qbe_fn.args.append(QbeArg(arg_id, 'l'))
             case TypedIdentifier(id=Identifier(name=name), type=type):
                 if not isinstance(type, Express):
                     pdb.set_trace()
@@ -654,19 +672,27 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
                 typename = type.id.name
                 dewy_type, qbe_type = typename_map[typename]
                 fn_scope.assign(name, IR('l', arg_id, dewy_type))
-                current_func._symbols[name] = arg_id
-                current_func.args.append(QbeArg(arg_id, qbe_type))
+                qbe_fn._symbols[name] = arg_id
+                qbe_fn.args.append(QbeArg(arg_id, qbe_type))
             case _:
                 raise NotImplementedError(f'ERROR: so far only identifiers are supported as function arguments. Got {arg!r}')
 
-    res = compile(ast.body, fn_scope, qbe, current_func)
+    res = compile(ast.body, fn_scope, qbe, qbe_fn)
 
     if res is None:
-        current_func.blocks[-1].lines.append('ret')
-        return FunctionIR(current_func.args, None, None, current_func.blocks)
+        qbe_fn.blocks[-1].lines.append('ret')
+        # return FunctionIR(qbe_fn.args, None, None, qbe_fn.blocks)
+    else:
+        qbe_fn.blocks[-1].lines.append(f'ret {res.qbe_value}')
+        qbe_fn.ret = res.qbe_type
+        qbe_fn.dewy_return_type = res.dewy_type
+        # return FunctionIR(qbe_fn.args, res.qbe_type, res.dewy_type, qbe_fn.blocks)
+    
+    # add the function to the QBE module
+    qbe.functions.append(qbe_fn)
 
-    current_func.blocks[-1].lines.append(f'ret {res.qbe_value}')
-    return FunctionIR(current_func.args, res.qbe_type, res.dewy_type, current_func.blocks)
+    return qbe_fn
+
 
 
 def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
@@ -677,7 +703,7 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
 
     if isinstance(ir, DeferredFunctionIR):
         # the function must be compiled at this point since it's being used
-        fn_ir = compile_fn_literal(ir.fn, ir.scope, ir.qbe, ir.current_func)
+        fn_ir = compile_fn_literal(ir.fn, ir.scope, ir.qbe, ir.current_func, ir.name)
         pdb.set_trace()
         ...
 
@@ -690,7 +716,7 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
 
     name = ast.id.name
     # value should be in symbol table? there are cases where it wouldn't but that's advanced out of order compilation stuff...
-    if name in current_func._symbols: 
+    if name in current_func._symbols:
         express_ir = IR(ir.qbe_type, current_func._symbols[name], ir.dewy_type, ir.meta)
     elif name in current_func._captures:
         # this is an already captured variable we can use by reference (auto-dereference)
@@ -709,7 +735,7 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
 
 def make_anonymous_function_name(qbe: QbeModule) -> str:
     """Generates a unique name for an anonymous function."""
-    return f'.anonymous_fn.{next(qbe._counter)}'
+    return f'.__anonymous__.{next(qbe._counter)}'
 
 
 def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR]:
@@ -721,10 +747,10 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
         pdb.set_trace()
         # assert isinstance(ast.f, (FunctionLiteral, Closure)), f"INTERNAL ERROR: expected identifier or function literal for function call, but got {ast.f!r}"
         # ir = compile_fn_literal(ast.f, scope, qbe, current_func)
-        name = make_anonymous_function_name(qbe)
-        scope.assign(name, ir)
-        qbe.functions.append(QbeFunction(name, False, ir.meta.args, ir.meta.ret, ir.meta.blocks))
-        ast.f = Identifier(name)  # Update the function call to use the new name
+        # name = make_anonymous_function_name(qbe)
+        # scope.assign(name, ir)
+        # qbe.functions.append(QbeFunction(name, False, ir.meta.args, ir.meta.ret, ir.meta.blocks))
+        # ast.f = Identifier(name)  # Update the function call to use the new name
 
 
     if ast.f.name.startswith('#'):
@@ -745,8 +771,7 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
             ret_type = dewy_qbe_type_map[dewy_return_type]
 
         case DeferredFunctionIR():
-            fn_ir = compile_fn_literal(f_var.fn, f_var.scope, f_var.qbe, f_var.current_func)
-            qbe.functions.append(QbeFunction(f_id, False, fn_ir.args, fn_ir.ret, fn_ir.blocks))
+            fn_ir = compile_fn_literal(f_var.fn, f_var.scope, f_var.qbe, f_var.current_func, f_id)
             scope.assign(ast.f.name, fn_ir) # the function is no longer deferred
             dewy_return_type = fn_ir.dewy_return_type
             ret_type = fn_ir.ret
@@ -1119,7 +1144,7 @@ def compile_compare(ast: Less|LessEqual|Greater|GreaterEqual|Equal|NotEqual, sco
     return IR(res_type, res_id, dewy_res_type)
 
 
-def compile_unary_neg(ast: UnaryNeg, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR: 
+def compile_unary_neg(ast: UnaryNeg, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
     # TODO: for now, unary negation is just a multiplication by -1
     #       need to properly handle other types in the future
     return compile_arithmetic_binop(Mul(Int(-1), ast.operand), scope, qbe, current_func)
