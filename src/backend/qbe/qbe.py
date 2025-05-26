@@ -498,7 +498,7 @@ class FunctionIR(AST):
 
 T = TypeVar('T', bound=AST)
 class CompileFunc(Protocol):
-    def __call__(self, ast: T, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR]:
+    def __call__(self, ast: T, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR|QbeFunction]:
         """
         Compiles the AST node, potentially adding instructions to current_block
         (if provided and applicable, e.g., inside a function).
@@ -520,8 +520,7 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         Assign: compile_assign,
         Express: compile_express,
         Suppress: compile_suppress,
-        # FunctionLiteral: compile_fn_literal,
-        # Closure: compile_fn_literal,
+        FunctionLiteral: compile_anonymous_fn_literal,
         Call: compile_call,
         Group: compile_group,
         Int: compile_int,
@@ -559,7 +558,7 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
     }
 
 
-def compile(ast: AST, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR]:
+def compile(ast: AST, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR|QbeFunction]:
     """Dispatches compilation to the appropriate function based on AST node type."""
     compile_fn_map = get_compile_fn_map()
 
@@ -640,6 +639,11 @@ def compile_deferred_functions(scope: Scope, qbe: QbeModule) -> None:
         pdb.set_trace()
         # add the function IR into the QBE module
         # qbe.functions.append(QbeFunction(f'${name}', False, fn_ir.args, fn_ir.ret, fn_ir.blocks))
+
+
+def compile_anonymous_fn_literal(ast: FunctionLiteral, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> QbeFunction:
+    f_id = make_anonymous_function_name(qbe)
+    return compile_fn_literal(ast, scope, qbe, current_func, f_id)
 
 typename_map: dict[str, tuple[Type, QbeType]] = {
     'uint8': (Type(Int), 'l'),# 'ub'),
@@ -796,7 +800,7 @@ def compile_suppress(ast: Suppress, scope: Scope, qbe: QbeModule, current_func: 
 
 def make_anonymous_function_name(qbe: QbeModule) -> str:
     """Generates a unique name for an anonymous function."""
-    return f'.__anonymous__.{next(qbe._counter)}'
+    return f'$.__anonymous__.{next(qbe._counter)}'
 
 
 def remove_deferred_function(scope: Scope, name: str) -> None:
@@ -812,21 +816,19 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
     if not isinstance(ast.f, Identifier):
         # create an anonymous function
         ir = compile(ast.f, scope, qbe, current_func)
-        # TODO: handle if function created any captures
-        pdb.set_trace()
-        # assert isinstance(ast.f, (FunctionLiteral, Closure)), f"INTERNAL ERROR: expected identifier or function literal for function call, but got {ast.f!r}"
-        # ir = compile_fn_literal(ast.f, scope, qbe, current_func)
-        # name = make_anonymous_function_name(qbe)
-        # scope.assign(name, ir)
-        # qbe.functions.append(QbeFunction(name, False, ir.meta.args, ir.meta.ret, ir.meta.blocks))
-        # ast.f = Identifier(name)  # Update the function call to use the new name
+        assert isinstance(ir, QbeFunction), f"INTERNAL ERROR: expected identifier or qbe function for function call, but got {ir!r}"
+        assert ir.name.startswith('$.__anonymous__.'), f"INTERNAL ERROR: expected anonymous function for function call, but got {ir.name!r}"
+        name = ir.name[1:] # remove the leading $
+        scope.assign(name, ir)  # assign the function to the scope
+        ast.f = Identifier(name)  # update the function call to use the new identifier
+        
 
+    # get the QBE name of the function
+    f_id = f'${ast.f.name}'
 
     if ast.f.name.startswith('#'):
         return compile_call_hashtag(ast, scope, qbe, current_func)
 
-    # get the QBE name of the function
-    f_id = f'${ast.f.name}'
 
     # get the return type of the function
     f_var: Builtin|DeferredFunctionIR|QbeFunction|FunctionLiteral = scope.get(ast.f.name).value
@@ -865,26 +867,24 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
 
     # create a stack allocated struct for passing down captured variables
     if captures:
-        current_func.blocks[-1].lines.append(f'%.envptr =l alloc8 {len(captures) * 8}') # allocate space for the captures
+        current_func.blocks[-1].lines.append(f'%.envarg =l alloc8 {len(captures) * 8}   # allocate space for the captures')
         for i, (name, ir) in enumerate(captures.items()):
             tmp = current_func.get_temp()
-            current_func.blocks[-1].lines.append(f'{tmp} =l add %.envptr, {i * 8}')     # create the pointer to the exact offset in the envptr
+            current_func.blocks[-1].lines.append(f'{tmp} =l add %.envarg, {i * 8}       # create the pointer to the exact offset of `{name}` in the envptr')
             if name in current_func._symbols:
-                current_func.blocks[-1].lines.append(f'storel {current_func._symbols[name]}, {tmp}')    # store the capture variable in the envptr
+                current_func.blocks[-1].lines.append(f'storel {current_func._symbols[name]}, {tmp}    # store the capture variable in the envptr')
             elif name in current_func._captures:
-                pdb.set_trace()
-                current_func.blocks[-1].lines.append(f'storel {current_func._captures[name].qbe_value}, {tmp}')    # store the capture variable in the envptr
+                current_func.blocks[-1].lines.append(f'storel {current_func._captures[name].qbe_value}, {tmp}    # store the capture variable in the envptr')
             elif (var:=scope.get(name, False)) is not None:
                 #propogate upwards
-                pdb.set_trace()
                 ir = current_func.capture_variable(name, var.value)
-                current_func.blocks[-1].lines.append(f'storel {ir.qbe_value}, {tmp}')    # store the capture variable in the envptr
+                current_func.blocks[-1].lines.append(f'storel {ir.qbe_value}, {tmp}    # store the capture variable in the envptr')
             else:
                 pdb.set_trace()
                 raise ValueError(f'ERROR: attempted to call function `{ast.f.name}` with captures, but the capture variable `{name}` was not found in the current scope or function symbols.')
 
         # insert the envptr as the first argument to the function call
-        args.insert(0, IR('env', '%.envptr', None))
+        args.insert(0, IR('env', '%.envarg', None))
 
     # create the string of arguments in QBE format
     args_str = ', '.join([f'{arg.qbe_type} {arg.qbe_value}' for arg in args])
