@@ -3,10 +3,12 @@ const SYSCALL_WRITE = 1
 const STDOUT = 1
 
 % determine if big endian or little endian
-p = #alloc8(8)
-#storel(1 p)
-b = #loadub(p)
-is_little_endian = b =? 1
+is_little_endian = () => {
+    p = #alloc8(8)
+    #storel(1 p)
+    b = #loadub(p)
+    b =? 1
+}
 
 % print out if little or big endian
 if is_little_endian

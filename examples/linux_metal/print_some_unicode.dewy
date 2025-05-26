@@ -2,50 +2,19 @@
 % attempt to print out all the unicode characters
 const SYSCALL_WRITE = 1
 const STDOUT = 1
-%
-%
-%
-% %is_little_endian = () => (
-% %    p = #alloc8(8)
-% %    #storel(p 1)
-% %    b = #loadub(p)
-% %    b =? 1
-% %)
-%
-% % TODO: implement calling anonymous functions immediately
-% is_little_endian = (() => (
-%     p = #alloc8(8)
-%     #storel(p 1)
-%     b = #loadub(p)
-%     b =? 1
-% ))()
-%
-% if is_little_endian
-%     __syscall3__(SYSCALL_WRITE STDOUT 'little endian\n' 15)
-% else
-%     __syscall3__(SYSCALL_WRITE STDOUT 'big endian\n' 13)
-
-
 
 
 buf = 0 % makes a 64-bit buffer, we will treat as 8 bytes
 addr = #alloc8(8)
 
 % amounts to shift to put the byte into our 64-bit buffer
-%if is_little_endian (
 b0_offset = 0
 b1_offset = 8
 b2_offset = 16
 b3_offset = 24
-%) else (
-%     % big endian. we will be using the first 4 bytes of the buffer
-%     b0_offset = 56
-%     b1_offset = 48
-%     b2_offset = 40
-%     b3_offset = 32
-% )
-%
-loop i in 0x1F600..0x1F64F (
+
+
+loop i in 0x1F600..0x1F64F {
     if i <=? 0x7F (
         buf = i << b0_offset
         size = 1
@@ -71,4 +40,4 @@ loop i in 0x1F600..0x1F64F (
 
     #storel(buf addr)
     __syscall3__(SYSCALL_WRITE STDOUT addr size)
-)
+}

@@ -3,7 +3,7 @@ const SYSCALL_WRITE = 1
 const STDOUT = 1
 
 
-put_unicode = u:uint32 => (
+put_unicode = u:uint32 => {
     b0_offset = 0
     b1_offset = 8
     b2_offset = 16
@@ -38,7 +38,7 @@ put_unicode = u:uint32 => (
 
     #storel(buf addr)
     __syscall3__(SYSCALL_WRITE STDOUT addr size)
-)
+}
 
 
 loop u in 0x0020..0x007E put_unicode(u)  % Basic Latin

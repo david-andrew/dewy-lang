@@ -523,6 +523,7 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         FunctionLiteral: compile_anonymous_fn_literal,
         Call: compile_call,
         Group: compile_group,
+        Block: compile_block,
         Int: compile_int,
         String: compile_string,
         IString: compile_istring,
@@ -1050,6 +1051,9 @@ def compile_group(ast: Group, scope: Scope, qbe: QbeModule, current_func: QbeFun
     # # The group itself evaluates to its last contained expression's value.
     # return last_val
 
+def compile_block(ast: Block, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR]:
+    # literally just a block with an extra scope layer
+    return compile_group(Group(ast.items), Scope(scope), qbe, current_func)
 
 def compile_int(ast: Int, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
     """Returns the QBE representation of an integer literal."""
