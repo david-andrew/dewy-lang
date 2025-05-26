@@ -275,6 +275,11 @@ def get_qbe_target(arch_name: Arch, os_name: OS) -> QbeSystem:
 # --- Scope and QBE Data Structures ---
 @dataclass
 class Scope(TypecheckScope):
+    def __hash__(self) -> int:
+        return hash(id(self))
+    def __eq__(self, value):
+        return isinstance(value, Scope) and self is value
+
     # TODO: note that these are only relevant for linux
     # so probably have default versions for other OS environments...
     @staticmethod
@@ -388,12 +393,28 @@ class QbeFunction:
     blocks: list[QbeBlock]
     _counter: count = field(default_factory=lambda: count(0))
     _symbols: dict[str, str] = field(default_factory=dict) # Map dewy scope names to QBE IR names
-    _captures: dict[str, str] = field(default_factory=dict) # Map dewy (parent/captured) scope names to QBE IR names (noting all values in here are by reference)
+    _captures: 'dict[str, IR]' = field(default_factory=dict) # Map dewy (parent/captured) scope names to QBE IR names (noting all values in here are by reference)
                                                             # additionally, this field is used to layout envptr passed into closure functions. relies on dictionary maintaining insertion order
 
     def get_temp(self, prefix: str = "%.") -> str:
         """Gets the next (fn scoped) available temporary variable name."""
         return f"{prefix}{next(self._counter)}"
+    
+    def capture_variable(self, name: str, value: 'IR') -> 'IR':
+        # this is a closure variable that hasn't been marked as a capture yet
+        # mark it as needed in the capture, and use it by reference (auto-dereference)
+
+        # collect the value from the envptr that will be passed into the function
+        offset = len(self._captures) * 8 # byte offset into the envptr
+        tmp0 = self.get_temp()
+        tmp1 = self.get_temp()
+        self.blocks[-1].lines.append(f'{tmp0} =l add %.envptr, {offset}')   # index into envptr to get captured `{name!r}` value'
+        self.blocks[-1].lines.append(f'{tmp1} =l loadl {tmp0}')             # load the value from the envptr
+        ir = IR(value.qbe_type, tmp1, value.dewy_type)
+        self._captures[name] = ir
+
+        return ir
+
 
     def __str__(self) -> str:
         export_str = 'export ' if self.export else ''
@@ -413,11 +434,17 @@ class QbeModule:
     functions: list[QbeFunction] = field(default_factory=list)
     global_data: list[str] = field(default_factory=list)
     _counter: count = field(default_factory=lambda: count(0))
+    # _scope_map: dict[Scope, QbeFunction] = field(default_factory=dict)  # Map Dewy scopes to QBE functions. used for closures to find parameters they capture
     # _symbols: dict[str, TypeExpr] = field(default_factory=dict) # Map temp names to Dewy types
 
     def get_global_temp(self, prefix: str) -> str:
         """Gets the next (globally) available temporary variable name."""
         return f"{prefix}{next(self._counter)}"
+    
+    # def append_fn(self, fn: QbeFunction, scope: Scope) -> None:
+    #     """Appends a function to the QBE module and associates it with a scope."""
+    #     self.functions.append(fn)
+    #     self._scope_map[scope] = fn
 
     def __str__(self) -> str:
         # Ensure proper spacing between sections
@@ -425,6 +452,8 @@ class QbeModule:
         funcs_str = '\n\n'.join(map(str, self.functions))
         sep1 = '\n\n' if data_str and funcs_str else '\n' if data_str or funcs_str else ''
         return f'{data_str}{sep1}{funcs_str}'.strip()
+
+
 
 
 # --- Compilation Logic ---
@@ -689,6 +718,11 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
         qbe_fn.dewy_return_type = res.dewy_type
         # return FunctionIR(qbe_fn.args, res.qbe_type, res.dewy_type, qbe_fn.blocks)
     
+    # add envptr to the signature if there were any captures
+    if qbe_fn._captures:
+        qbe_fn.args.insert(0, QbeArg('%.envptr', 'env'))  # envptr is always a pointer to the environment
+
+
     # add the function to the QBE module
     qbe.functions.append(qbe_fn)
 
@@ -712,10 +746,10 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
         # TBD if this is wrong, but seems like here it is being called with no args
         return compile_call(Call(Identifier(ast.id.name), None), scope, qbe, current_func)
 
-    if ir.dewy_type.t in (FunctionLiteral, Closure):
-        #TBD, not sure if this is even allowed
-        pdb.set_trace()
-        return compile_call_function
+    # if ir.dewy_type.t in (FunctionLiteral, Closure):
+    #     #TBD, not sure if this is even allowed
+    #     pdb.set_trace()
+    #     return compile_call_function
 
     #TODO: need a check to verify the IR is contained in the same QBE function as it's being used...
 
@@ -724,15 +758,30 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
     if name in current_func._symbols:
         express_ir = IR(ir.qbe_type, current_func._symbols[name], ir.dewy_type, ir.meta)
     elif name in current_func._captures:
+        express_ir = current_func._captures[name]
         # this is an already captured variable we can use by reference (auto-dereference)
         pdb.set_trace()
-    elif scope.get(name, False) is not None:
+    elif (var:=scope.get(name, False)) is not None:
         # this is a closure variable that hasn't been marked as a capture yet
         # mark it as needed in the capture, and use it by reference (auto-dereference)
-        pdb.set_trace()
-        ...
+
+        if not isinstance(var.value, IR):
+            raise ValueError(f'INTERNAL ERROR: expected to find an IR value for {name!r}, but it was not found. {var.value=}')
+        
+        express_ir = current_func.capture_variable(name, var.value)  # mark as a newly captured variable
+
+        # # collect the value from the envptr that will be passed into the function
+        # offset = len(current_func._captures) * 8 # byte offset into the envptr
+        # tmp0 = current_func.get_temp()
+        # tmp1 = current_func.get_temp()
+        # current_func.blocks[-1].lines.append(f'{tmp0} =l add %.envptr, {offset}')  # index into envptr to get captured `{name!r}` value'
+        # current_func.blocks[-1].lines.append(f'{tmp1} =l loadl {tmp0}')  # load the value from the envptr
+        # express_ir = IR(var.value.qbe_type, tmp1, var.value.dewy_type)
+        # current_func._captures[name] = express_ir
+
     else:
         pdb.set_trace()
+        raise ValueError(f'ERROR: tried to access non-existent variable `{name}` in function `{current_func.name}`.')
         raise ValueError(f'TBD if this is an internal error or not. Attempted to express a value which is not in the symbol table from compiling. {ast=!r}')
 
     return express_ir
@@ -755,7 +804,7 @@ def remove_deferred_function(scope: Scope, name: str) -> None:
         root = list(scope)[-1]  # get the top most scope
         del root.meta.deferred_functions[name]
     except KeyError:
-        print(f'WARNING: attempted to remove a deferred function that was not found in the scope. {f_id=}, {root.meta.deferred_functions=}')
+        print(f'WARNING: attempted to remove a deferred function that was not found in the scope. {name=}, {root.meta.deferred_functions=}')
 
 
 def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR]:
@@ -780,7 +829,8 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
     f_id = f'${ast.f.name}'
 
     # get the return type of the function
-    f_var = scope.get(ast.f.name).value
+    f_var: Builtin|DeferredFunctionIR|QbeFunction|FunctionLiteral = scope.get(ast.f.name).value
+    captures = None #keep track if we need to handle closure captured variables
     match f_var:
 
         case Builtin(return_type=dewy_return_type):
@@ -796,21 +846,47 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
             dewy_return_type = fn_ir.dewy_return_type
             ret_type = fn_ir.ret
             remove_deferred_function(scope, ast.f.name)
+            captures = fn_ir._captures
 
-        # case FunctionIR(ret=ret_type, dewy_return_type=dewy_return_type): ...
-        case QbeFunction(ret=ret_type, dewy_return_type=dewy_return_type): ...
+        # just unpack the values from the QBE function
+        case QbeFunction(ret=ret_type, dewy_return_type=dewy_return_type, _captures=captures): ...
 
-        case FunctionLiteral(return_type=dewy_return_type) | Closure(FunctionLiteral(return_type=dewy_return_type)):
+        case FunctionLiteral(return_type=dewy_return_type):# | Closure(FunctionLiteral(return_type=dewy_return_type)):
             # this seems like it would be if we compiled an immediately executed function. tbd...
             pdb.set_trace()
             ...
 
         case _:
             pdb.set_trace()
-            raise ValueError(f'Unrecognized AST type to call: {f_var.value!r}')
+            raise ValueError(f'Unrecognized AST type to call: {f_var!r}')
 
-    # compile args and convert into the expected format for QBE calling
+    # compile regular arguments passed in
     args = compile_call_args(ast.args, scope, qbe, current_func)
+
+    # create a stack allocated struct for passing down captured variables
+    if captures:
+        current_func.blocks[-1].lines.append(f'%.envptr =l alloc8 {len(captures) * 8}') # allocate space for the captures
+        for i, (name, ir) in enumerate(captures.items()):
+            tmp = current_func.get_temp()
+            current_func.blocks[-1].lines.append(f'{tmp} =l add %.envptr, {i * 8}')     # create the pointer to the exact offset in the envptr
+            if name in current_func._symbols:
+                current_func.blocks[-1].lines.append(f'storel {current_func._symbols[name]}, {tmp}')    # store the capture variable in the envptr
+            elif name in current_func._captures:
+                pdb.set_trace()
+                current_func.blocks[-1].lines.append(f'storel {current_func._captures[name].qbe_value}, {tmp}')    # store the capture variable in the envptr
+            elif (var:=scope.get(name, False)) is not None:
+                #propogate upwards
+                pdb.set_trace()
+                ir = current_func.capture_variable(name, var.value)
+                current_func.blocks[-1].lines.append(f'storel {ir.qbe_value}, {tmp}')    # store the capture variable in the envptr
+            else:
+                pdb.set_trace()
+                raise ValueError(f'ERROR: attempted to call function `{ast.f.name}` with captures, but the capture variable `{name}` was not found in the current scope or function symbols.')
+
+        # insert the envptr as the first argument to the function call
+        args.insert(0, IR('env', '%.envptr', None))
+
+    # create the string of arguments in QBE format
     args_str = ', '.join([f'{arg.qbe_type} {arg.qbe_value}' for arg in args])
 
     # create a temporary for the return if the function returns a value
