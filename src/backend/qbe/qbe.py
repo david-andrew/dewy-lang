@@ -490,6 +490,7 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         Declare: compile_declare,
         Assign: compile_assign,
         Express: compile_express,
+        Suppress: compile_suppress,
         # FunctionLiteral: compile_fn_literal,
         # Closure: compile_fn_literal,
         Call: compile_call,
@@ -737,6 +738,13 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
     return express_ir
 
 
+def compile_suppress(ast: Suppress, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> None:
+    """Handles suppressing an expression, which is a no-op in QBE."""
+    # In QBE, suppressing an expression means we don't need to do anything.
+    # The expression is evaluated but its result is not used.
+    compile(ast.operand, scope, qbe, current_func)
+    return None
+
 def make_anonymous_function_name(qbe: QbeModule) -> str:
     """Generates a unique name for an anonymous function."""
     return f'.__anonymous__.{next(qbe._counter)}'
@@ -911,6 +919,7 @@ def compile_call_args(ast: AST|None, scope: Scope, qbe: QbeModule, current_func:
     if ast is None:
         return []
 
+    # if isinstance(ast, Suppress):
     if not isinstance(ast, Group):
         ast = Group([ast])
 

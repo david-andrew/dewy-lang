@@ -127,6 +127,12 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             case Assign(left=Array() as arr, right=right):
                 target = convert_prototype_to_unpack_target(arr)
                 gen.send(Assign(target, right))
+            case Assign(left=Group() as group, right=right):
+                target = convert_prototype_to_unpack_target(group)
+                gen.send(Assign(target, right))
+            case Assign(left=ObjectLiteral() as obj, right=right):
+                target = convert_prototype_to_unpack_target(obj)
+                gen.send(Assign(target, right))
             case Assign(left=TypedIdentifier(id=_id, type=_type)): ... #typed identifiers are already converted
             case Assign():
                 pdb.set_trace()
@@ -166,7 +172,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 | PointsTo() | BidirPointsTo() | Equal() | Less() | LessEqual() | Greater() | GreaterEqual() | LeftShift() | RightShift() | LeftRotate() | RightRotate() | LeftRotateCarry() | RightRotateCarry() | Add() | Sub() | Mul() | Div() | IDiv() | Mod() | Pow() | And() | Or() | Xor() | Nand() | Nor() | Xnor() | MemberIn() \
                 | BroadcastOp() | SpreadOutFrom() | QJux() \
                 | Not() | UnaryPos() | UnaryNeg() | UnaryMul() | UnaryDiv() | CycleLeft() | CycleRight() \
-                | TypedIdentifier() | ReturnTyped() | SubTyped() | MakeGeneric() | Parameterize() | TypeParam():
+                | TypedIdentifier() | ReturnTyped() | SubTyped() | MakeGeneric() | Parameterize() | TypeParam() | Suppress():
                 ...
             #TBD cases: Type() | ListOfASTs() | BareRange() | Ellipsis() | Spread() | TypeParam() | Flowable() | Flow() | PrototypeBuiltin() | Builtin() | Express() | ReturnTyped() | SequenceUnpackTarget() | ObjectUnpackTarget() | DeclarationType() | DeclareGeneric() | Parameterize():
             case _:  # all others are traversed as normal
@@ -180,7 +186,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
 #TODO: maybe have one of these for Array, Object, Dict, BidirDict depending on what is to be unpacked
 #      hard though because also requires the type of whatever is being unpacked
 #      because array unpack and object unpack can look the same syntactically
-def convert_prototype_to_unpack_target(ast: Array) -> UnpackTarget:
+def convert_prototype_to_unpack_target(ast: Array|Group|ObjectLiteral) -> UnpackTarget:
     """Convert an Array of PrototypeIdentifiers or other ASTs to an UnpackTarget"""
     for i in (gen := ast.__iter_asts_full_traversal__()):
         if i.is_settled():
@@ -191,6 +197,15 @@ def convert_prototype_to_unpack_target(ast: Array) -> UnpackTarget:
                 gen.send(Identifier(name))
             case Assign(left=PrototypeIdentifier(name=name), right=right):
                 gen.send(Assign(Identifier(name), right))
+            case Assign(left=Array() as arr, right=right):
+                target = convert_prototype_to_unpack_target(arr)
+                gen.send(Assign(target, right))
+            case Assign(left=Group() as group, right=right):
+                target = convert_prototype_to_unpack_target(group)
+                gen.send(Assign(target, right))
+            case Assign(left=ObjectLiteral() as obj, right=right):
+                target = convert_prototype_to_unpack_target(obj)
+                gen.send(Assign(target, right))
             case Array() as arr:
                 gen.send(convert_prototype_to_unpack_target(arr))
             case CollectInto(): ...

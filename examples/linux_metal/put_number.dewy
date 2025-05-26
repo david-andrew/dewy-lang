@@ -26,9 +26,9 @@ put_int = x:int64 => (
         __syscall3__(SYSCALL_WRITE STDOUT buf 1)
     )
 )
-putl = () => __syscall3__(1 1 '\n' 1)
+putl = () => __syscall3__(1 1 '\n' 1);  % semicolon is needed so the negative is interpreted as a prefix operator rather than a binary operator
 
-put_int(-1234567890)
+-1234567890 |> put_int
 putl
-put_int(0xffff)
+0xffff |> put_int
 putl

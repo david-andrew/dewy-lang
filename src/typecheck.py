@@ -422,6 +422,8 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             case Access(left=left, right=right):
                 # TODO: check that the member accessed exists on the left ast
                 ...
+            
+            case Suppress(operand=operand): ... #generally suppress shouldn't care about the inner types
 
             case Int() | String() | IString(): ...
 

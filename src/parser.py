@@ -258,6 +258,7 @@ operator_groups: list[tuple[Associativity, Sequence[Operator_t]]] = opify(revers
     (Associativity.fail,  ['->', '<->']),
     (Associativity.fail,  ['=', '::']),
     (Associativity.none,  ['else']),
+    (Associativity.unary, [';']),  # postfix semicolon
 ]))
 precedence_table: dict[Operator_t, int | qint] = {}
 associativity_table: dict[int, Associativity] = {}
@@ -372,8 +373,9 @@ def split_by_lowest_precedence(tokens: Chain[Token]) -> tuple[Chain[Token], Toke
         return unary_split_by_lowest_precedence(tokens, ops, idxs)
 
     # filter out any unary operators
-    assocs, idxs, ops = zip(*[(a, i, op) for a, i, op in zip(assocs, idxs, ops) if a is not Associativity.unary])
-    assocs, idxs, ops = cast(list[Associativity], assocs), cast(list[int], idxs), cast(list[Token], ops)
+    # TODO: took these out because they were messing up suppressing expressions like `a + b;` not sure if this messes anything up
+    # assocs, idxs, ops = zip(*[(a, i, op) for a, i, op in zip(assocs, idxs, ops) if a is not Associativity.unary])
+    # assocs, idxs, ops = cast(list[Associativity], assocs), cast(list[int], idxs), cast(list[Token], ops)
 
     # continue handling binary operators as before
     ranks = [operator_precedence(op) for op in ops]
@@ -678,6 +680,9 @@ def build_unary_postfix_expr(left: AST, op: Token) -> AST:
         case Juxtapose_t():
             return Call(left)
 
+        case Operator_t(op=';'):
+            return Suppress(left)
+        
         case _:
             pdb.set_trace()
             raise NotImplementedError(f"TODO: {op=}")
