@@ -758,7 +758,11 @@ def eat_based_number(src: str) -> int | None:
     while i < len(src) and src[i] in digits or src[i] == '_':
         i += 1
 
-    return i if i > 2 else None
+    # TODO: this still isn't quite safe enough. if someone did something like `0q1237`, then we would tokenize `0q123` and `7` separately and then multiply them...
+    if i == 2 or (i < len(src) and src[i].isdigit()):
+        raise ValueError(f'Invalid digits for `{src[:2].lower()}` based number. Expected digits in {digits}, but got `{src[:max(i, 10)]}...`')
+    
+    return i# if i > 2 else None
 
 
 @peek_eat(Undefined_t)
