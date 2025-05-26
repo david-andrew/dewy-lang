@@ -1,10 +1,12 @@
+const SYSCALL_WRITE = 1
+const STDOUT = 1
+
+
 % TODO: make this handle large numbers close to the max int64 value (e.g. because place will overflow)
 % also what if number is INT64_MIN? multiplying by -1 will overflow
 % INT64_MIN = -9_223_372_036_854_775_808
 % INT64_MAX = 9_223_372_036_854_775_807
 put_int = x:int64 => (
-    const SYSCALL_WRITE = 1
-    const STDOUT = 1
 
     if x <? 0 (
         __syscall3__(SYSCALL_WRITE STDOUT '-' 1)
