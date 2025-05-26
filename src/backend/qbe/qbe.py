@@ -515,7 +515,7 @@ class CompileFunc(Protocol):
 def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
     """Returns the dispatch map for compilation functions."""
     return {
-        Void: lambda ast, scope, qbe, current_func: None,
+        Void: lambda *args, **kwargs: None,
         Declare: compile_declare,
         Assign: compile_assign,
         Express: compile_express,
@@ -687,7 +687,8 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
         raise NotImplementedError(f'Positional arguments and keyword arguments are not supported yet: pargs={ast.args.pargs!r}, kwargs={ast.args.kwargs!r}')
 
     # create a new scope for the function args and body to live in
-    fn_scope = Scope([*scope][-1])
+    # fn_scope = Scope([*scope][-1])
+    fn_scope = Scope(scope)
     f_id = f_id or make_anonymous_function_name(qbe)
     qbe_fn = QbeFunction(f_id, False, [], None, None, [QbeBlock('@start')])
     for arg in ast.args.pkwargs:
@@ -764,7 +765,6 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
     elif name in current_func._captures:
         express_ir = current_func._captures[name]
         # this is an already captured variable we can use by reference (auto-dereference)
-        pdb.set_trace()
     elif (var:=scope.get(name, False)) is not None:
         # this is a closure variable that hasn't been marked as a capture yet
         # mark it as needed in the capture, and use it by reference (auto-dereference)
