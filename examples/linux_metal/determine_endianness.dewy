@@ -1,8 +1,8 @@
-% attempt to print out all the unicode characters
 const SYSCALL_WRITE = 1
 const STDOUT = 1
 
 % determine if big endian or little endian
+% note that x86_64 is always little endian (and QBE will optimize this check away)
 is_little_endian = () => {
     p = #alloc8(8)
     #storel(1 p)
