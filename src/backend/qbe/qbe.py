@@ -404,33 +404,13 @@ class QbeFunction:
         # this is a closure variable that hasn't been marked as a capture yet
         # mark it as needed in the capture, and use it by reference (auto-dereference)
 
-        # collect the value from the envptr
-        offset = len(self._captures) * 8 # byte offset into the envptr
-        qbe_id = self._append_load_captured_variable_ir(name, offset)
-        ir = IR(value.qbe_type, qbe_id, value.dewy_type)
+        # set up the id for the captured variable and create an entry in _captures
+        qbe_id = f'%.captures.{len(self._captures)}'
+        ir = IR(value.qbe_type, qbe_id, value.dewy_type, value.meta)
         self._captures[name] = ir
 
         return ir
-    
-    def load_captured_variable(self, name: str) -> 'IR':
-        if name not in self._captures:
-            raise ValueError(f'INTERNAL ERROR: failed to load captured variable "{name}". not found in captures: {self._captures!r}')
-        
-        # collect the value from the envptr
-        idx = list(self._captures).index(name)  # get the index of the captured variable
-        offset = idx * 8  # byte offset into the envptr
-        qbe_id = self._append_load_captured_variable_ir(name, offset)
-        ir = self._captures[name]        
-        
-        return IR(ir.qbe_type, qbe_id, ir.dewy_type)  # return a new IR with the loaded value
 
-    def _append_load_captured_variable_ir(self, name: str, offset: int) -> str:
-        tmp0 = self.get_temp()
-        tmp1 = self.get_temp()
-        self.blocks[-1].lines.append(f'{tmp0} =l add %.envptr, {offset}  # index into envptr to get captured `{name}` value')
-        self.blocks[-1].lines.append(f'{tmp1} =l loadl {tmp0}  # load the value from the envptr')
-
-        return tmp1
 
 
 
@@ -742,10 +722,21 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
         qbe_fn.dewy_return_type = res.dewy_type
         # return FunctionIR(qbe_fn.args, res.qbe_type, res.dewy_type, qbe_fn.blocks)
     
-    # add envptr to the signature if there were any captures
+    # setup for any variables captured by the function
     if qbe_fn._captures:
+        # add envptr to the signature
         qbe_fn.args.insert(0, QbeArg('%.envptr', 'env'))  # envptr is always a pointer to the environment
+        
+        # collect all of the captured variables into temporaries that can be accessed later
+        capture_setup_lines = []
+        for idx, (name, ir) in enumerate(qbe_fn._captures.items()):
+            ptr = f'%.envptr.{idx}'
+            var = f'%.captures.{idx}'
+            capture_setup_lines.append(f'{ptr} =l add %.envptr, {idx * 8}     # index into envptr to get captured `{name}` value')
+            capture_setup_lines.append(f'{var} =l loadl {ptr}  # load the value from the envptr')
 
+        # insert the capture setup lines at the start of the first block
+        qbe_fn.blocks[0].lines[:0] = capture_setup_lines
 
     # add the function to the QBE module
     qbe.functions.append(qbe_fn)
@@ -783,7 +774,7 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
         express_ir = IR(ir.qbe_type, current_func._symbols[name], ir.dewy_type, ir.meta)
     elif name in current_func._captures:
         # this is an already captured variable, just get a fresh reference to it
-        express_ir = current_func.load_captured_variable(name)  # load the captured variable from the envptr
+        express_ir = current_func._captures[name]  # get the captured variable by reference
     elif (var:=scope.get(name, False)) is not None:
         if not isinstance(var.value, IR):
             raise ValueError(f'INTERNAL ERROR: expected to find an IR value for {name!r}, but it was not found. {var.value=}')
@@ -877,20 +868,22 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
 
     # create a stack allocated struct for passing down captured variables
     if captures:
-        current_func.blocks[-1].lines.append(f'%.envarg =l alloc8 {len(captures) * 8}   # allocate space for the captures')
+        current_func.blocks[-1].lines.append(f'%.envarg =l alloc8 {len(captures) * 8}        # allocate space for the captures')
         for i, (name, ir) in enumerate(captures.items()):
-            tmp = current_func.get_temp()
-            current_func.blocks[-1].lines.append(f'{tmp} =l add %.envarg, {i * 8}       # create the pointer to the exact offset of `{name}` in the envptr')
+            capture_ptr = current_func.get_temp()
+            current_func.blocks[-1].lines.append(f'{capture_ptr} =l add %.envarg, {i * 8}       # create the pointer to the exact offset of `{name}` in the envptr')
             if name in current_func._symbols:
-                current_func.blocks[-1].lines.append(f'storel {current_func._symbols[name]}, {tmp}    # store the capture variable in the envptr')
+                # pull the variable from the current function's symbol table and store it in the envptr
+                current_func.blocks[-1].lines.append(f'storel {current_func._symbols[name]}, {capture_ptr}              # store the capture variable in the envptr')
             elif name in current_func._captures:
-                # get fresh reference to the captured variable and store it in the envptr
-                ir = current_func.load_captured_variable(name)  # load the captured variable from the envptr
-                current_func.blocks[-1].lines.append(f'storel {ir.qbe_value}, {tmp}    # store the capture variable in the envptr')
+                # get the captured reference to the captured variable and store it in the envptr
+                ir = current_func._captures[name]  # get the captured variable by reference
+                current_func.blocks[-1].lines.append(f'storel {ir.qbe_value}, {capture_ptr}              # store the capture variable in the envptr')
+
             elif (var:=scope.get(name, False)) is not None:
                 # propogate upwards and store the capture variable in the envptr
                 ir = current_func.capture_variable(name, var.value)
-                current_func.blocks[-1].lines.append(f'storel {ir.qbe_value}, {tmp}    # store the capture variable in the envptr')
+                current_func.blocks[-1].lines.append(f'storel {ir.qbe_value}, {capture_ptr}              # store the capture variable in the envptr')
             else:
                 pdb.set_trace()
                 raise ValueError(f'ERROR: attempted to call function `{ast.f.name}` with captures, but the capture variable `{name}` was not found in the current scope or function symbols.')
