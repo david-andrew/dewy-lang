@@ -695,11 +695,16 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
     if ast.args.pargs or ast.args.kwargs:
         raise NotImplementedError(f'Positional arguments and keyword arguments are not supported yet: pargs={ast.args.pargs!r}, kwargs={ast.args.kwargs!r}')
 
+    # references to common blocks in functions
+    prologue = QbeBlock('@prologue')
+    start = QbeBlock('@start')
+    epilogue = QbeBlock('@epilogue')
+
     # create a new scope for the function args and body to live in
     # fn_scope = Scope([*scope][-1])
     fn_scope = Scope(scope)
     f_id = f_id or make_anonymous_function_name(qbe)
-    qbe_fn = QbeFunction(f_id, False, [], None, None, [QbeBlock('@start')])
+    qbe_fn = QbeFunction(f_id, False, [], None, None, [prologue, start])
     for arg in ast.args.pkwargs:
         arg_id = qbe_fn.get_temp()
         match arg:
@@ -723,14 +728,9 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
 
     res = compile(ast.body, fn_scope, qbe, qbe_fn)
 
-    if res is None:
-        qbe_fn.blocks[-1].lines.append('ret')
-        # return FunctionIR(qbe_fn.args, None, None, qbe_fn.blocks)
-    else:
-        qbe_fn.blocks[-1].lines.append(f'ret {res.qbe_value}')
-        qbe_fn.ret = res.qbe_type
-        qbe_fn.dewy_return_type = res.dewy_type
-        # return FunctionIR(qbe_fn.args, res.qbe_type, res.dewy_type, qbe_fn.blocks)
+    # insert the epilogue at the end. epilogue will be the common target for early returning from other blocks
+    qbe_fn.blocks.append(epilogue)
+
 
     # setup for any variables captured by the function
     if qbe_fn._captures:
@@ -738,15 +738,24 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
         qbe_fn.args.insert(0, QbeArg('%.envptr', 'env'))  # envptr is always a pointer to the environment
 
         # collect all of the captured variables into temporaries that can be accessed later
-        capture_setup_lines = []
         for idx, (name, ir) in enumerate(qbe_fn._captures.items()):
             ptr = f'%.envptr.{idx}'
             var = f'%.captures.{idx}'
-            capture_setup_lines.append(f'{ptr} =l add %.envptr, {idx * 8}     # index into envptr to get captured `{name}` value')
-            capture_setup_lines.append(f'{var} =l loadl {ptr}  # load the value from the envptr')
+            prologue.lines.append(f'{ptr} =l add %.envptr, {idx * 8}     # index into envptr to get captured `{name}` value')
+            prologue.lines.append(f'{var} =l loadl {ptr}  # load the value from the envptr')
+            epilogue.lines.append(f'storel {var}, {ptr}    # store any mutations to captured `{name}` back into the envptr')
 
-        # insert the capture setup lines at the start of the first block
-        qbe_fn.blocks[0].lines[:0] = capture_setup_lines
+
+    # handle return value from the function. return is only in epilogue, so all other blocks jump here if they want to return
+    if res is None:
+        epilogue.lines.append('ret')
+        # return FunctionIR(qbe_fn.args, None, None, qbe_fn.blocks)
+    else:
+        epilogue.lines.append(f'ret {res.qbe_value}')
+        qbe_fn.ret = res.qbe_type
+        qbe_fn.dewy_return_type = res.dewy_type
+        # return FunctionIR(qbe_fn.args, res.qbe_type, res.dewy_type, qbe_fn.blocks)
+
 
     # add the function to the QBE module
     qbe.functions.append(qbe_fn)
@@ -864,10 +873,10 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
         # just unpack the values from the QBE function
         case QbeFunction(ret=ret_type, dewy_return_type=dewy_return_type, _captures=captures): ...
 
-        case FunctionLiteral(return_type=dewy_return_type):# | Closure(FunctionLiteral(return_type=dewy_return_type)):
-            # this seems like it would be if we compiled an immediately executed function. tbd...
-            pdb.set_trace()
-            ...
+        # case FunctionLiteral(return_type=dewy_return_type):# | Closure(FunctionLiteral(return_type=dewy_return_type)):
+        #     # this seems like it would be if we compiled an immediately executed function. tbd...
+        #     pdb.set_trace()
+        #     ...
 
         case _:
             pdb.set_trace()
@@ -877,6 +886,7 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
     args = compile_call_args(ast.args, scope, qbe, current_func)
 
     # create a stack allocated struct for passing down captured variables
+    post_call_lines = [] # after function is called, we want to unpack any mutated values
     if captures:
         current_func.blocks[-1].lines.append(f'%.envarg =l alloc8 {len(captures) * 8}        # allocate space for the captures')
         for i, (name, ir) in enumerate(captures.items()):
@@ -884,20 +894,19 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
             current_func.blocks[-1].lines.append(f'{capture_ptr} =l add %.envarg, {i * 8}       # create the pointer to the exact offset of `{name}` in the envptr')
             if name in current_func._symbols:
                 # pull the variable from the current function's symbol table and store it in the envptr
-                current_func.blocks[-1].lines.append(f'storel {current_func._symbols[name]}, {capture_ptr}              # store the capture variable in the envptr')
+                qbe_id = current_func._symbols[name]
             elif name in current_func._captures:
                 # get the captured reference to the captured variable and store it in the envptr
-                ir = current_func._captures[name]  # get the captured variable by reference
-                current_func.blocks[-1].lines.append(f'storel {ir.qbe_value}, {capture_ptr}              # store the capture variable in the envptr')
-
+                qbe_id = current_func._captures[name].qbe_value  # get the captured variable by reference
             elif (var:=scope.get(name, False)) is not None:
                 # propogate upwards and store the capture variable in the envptr
-                ir = current_func.capture_variable(name, var.value)
-                current_func.blocks[-1].lines.append(f'storel {ir.qbe_value}, {capture_ptr}              # store the capture variable in the envptr')
+                qbe_id = current_func.capture_variable(name, var.value).qbe_value
             else:
                 pdb.set_trace()
                 raise ValueError(f'ERROR: attempted to call function `{ast.f.name}` with captures, but the capture variable `{name}` was not found in the current scope or function symbols.')
 
+            current_func.blocks[-1].lines.append(f'storel {qbe_id}, {capture_ptr}              # store the capture variable in the envptr')
+            post_call_lines.append(f'{qbe_id} =l loadl {capture_ptr}')
         # insert the envptr as the first argument to the function call
         args.insert(0, IR('env', '%.envarg', None))
 
@@ -910,9 +919,10 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
         ret_id = current_func.get_temp()
         ret_str = f'{ret_id} ={ret_type} '
 
-    # insert the call with the result being saved to a new temporary id
+    # insert the call with the result being saved to a new temporary id. Then add any post-call steps
     current_block = current_func.blocks[-1]
     current_block.lines.append(f'{ret_str}call {f_id}({args_str})')
+    current_block.lines.extend(post_call_lines)
 
     # only return IR if the function returns a value
     if ret_type is not None:
