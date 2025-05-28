@@ -644,10 +644,9 @@ def compile_deferred_functions(scope: Scope, qbe: QbeModule) -> None:
         return
     for name, (fn, scope, qbe, current_func) in root.meta.deferred_functions.items():
         # compile the function
-        fn = compile_fn_literal(fn, scope, qbe, current_func, name)
-        pdb.set_trace()
-        # add the function IR into the QBE module
-        # qbe.functions.append(QbeFunction(f'${name}', False, fn_ir.args, fn_ir.ret, fn_ir.blocks))
+        print(f'WARNING: unused function `{name}`')
+        f_id = f'${name}'
+        fn = compile_fn_literal(fn, scope, qbe, current_func, f_id)
 
 
 def compile_anonymous_fn_literal(ast: FunctionLiteral, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> QbeFunction:
