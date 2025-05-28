@@ -399,7 +399,7 @@ class QbeFunction:
     def get_temp(self, prefix: str = "%.") -> str:
         """Gets the next (fn scoped) available temporary variable name."""
         return f"{prefix}{next(self._counter)}"
-    
+
     def capture_variable(self, name: str, value: 'IR') -> 'IR':
         # this is a closure variable that hasn't been marked as a capture yet
         # mark it as needed in the capture, and use it by reference (auto-dereference)
@@ -438,7 +438,7 @@ class QbeModule:
     def get_global_temp(self, prefix: str) -> str:
         """Gets the next (globally) available temporary variable name."""
         return f"{prefix}{next(self._counter)}"
-    
+
     # def append_fn(self, fn: QbeFunction, scope: Scope) -> None:
     #     """Appends a function to the QBE module and associates it with a scope."""
     #     self.functions.append(fn)
@@ -598,9 +598,19 @@ def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_func: QbeF
             rhs = compile(right, scope, qbe, current_func)
             if rhs is None:
                 raise ValueError(f'INTERNAL ERROR: attempting to assign some type that doesn\'t produce a value: {name}={right!r}')
+
+            # handle if the variable existed yet or not
+            if (var:=scope.get(name, False)) is None or var.value is void:
+                qid = current_func.get_temp()
+                current_func._symbols[name] = qid
+            else:
+                qid = current_func._symbols.get(name)# or current_func.get_temp() # see if a variable exists already. otherwise make a new one
+                if qid is None:
+                    # handle if the variable was captured
+                    ir = current_func._captures.get(name) or current_func.capture_variable(name, var.value)
+                    qid = ir.qbe_value
+
             scope.assign(name, rhs)
-            qid = current_func._symbols.get(name) or current_func.get_temp() # see if a variable exists already. otherwise make a new one
-            current_func._symbols[name] = qid
             current_block.lines.append(f'{qid} ={rhs.qbe_type} copy {rhs.qbe_value}')
         case _:
             raise NotImplementedError(f"Assignment target not implemented: left={ast.left}, right={ast.right}")
@@ -721,12 +731,12 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
         qbe_fn.ret = res.qbe_type
         qbe_fn.dewy_return_type = res.dewy_type
         # return FunctionIR(qbe_fn.args, res.qbe_type, res.dewy_type, qbe_fn.blocks)
-    
+
     # setup for any variables captured by the function
     if qbe_fn._captures:
         # add envptr to the signature
         qbe_fn.args.insert(0, QbeArg('%.envptr', 'env'))  # envptr is always a pointer to the environment
-        
+
         # collect all of the captured variables into temporaries that can be accessed later
         capture_setup_lines = []
         for idx, (name, ir) in enumerate(qbe_fn._captures.items()):
@@ -778,7 +788,7 @@ def compile_express(ast: Express, scope: Scope, qbe: QbeModule, current_func: Qb
     elif (var:=scope.get(name, False)) is not None:
         if not isinstance(var.value, IR):
             raise ValueError(f'INTERNAL ERROR: expected to find an IR value for {name!r}, but it was not found. {var.value=}')
-        
+
         # this is closure variable that hasn't been marked as a capture yet
         # mark it as needed in the capture, and get a fresh reference to it
         express_ir = current_func.capture_variable(name, var.value)  # mark as a newly captured variable
@@ -822,7 +832,7 @@ def compile_call(ast: Call, scope: Scope, qbe: QbeModule, current_func: QbeFunct
         name = ir.name[1:] # remove the leading $
         scope.assign(name, ir)  # assign the function to the scope
         ast.f = Identifier(name)  # update the function call to use the new identifier
-        
+
 
     # get the QBE name of the function
     f_id = f'${ast.f.name}'
