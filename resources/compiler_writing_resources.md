@@ -40,3 +40,18 @@
 
 - When Nanoseconds Matter: Ultrafast Trading Systems in C++ - David Gross - CppCon 2024
   - https://www.youtube.com/watch?v=sX2nF1fW7kI
+
+
+
+
+# Various features from zig/rust:
+Zig is better than Rust (sometimes): https://www.youtube.com/watch?v=l9eFGToyjf8
+- optionals (stick with my `type|undefined` and `type|void` types)
+- `unreachable` keyword
+- consider `!!` operator as opposite of `??` for panicing on something being null. Though honestly could just do `thing ?? panic"shouldn't be possible"`
+- thing abour regexes possibly being invalid, probably should be done at compile-time. Also dewy should have much stronger support for actual parser-generators over regex
+- module imports: basically planning to do the zig version anyways with filepath-based imports
+- no changes from Dewy's existing let/const declaration system
+- TBD how to handle pointers in Dewy! I think in general the idea is to not have pointers from a developer point of view and things are reference and dereferenced automatically. But there certainly could be instances where being able to deal in pointers would be valuable
+- compiletime: basically taking from zig/jai
+- C interop: should add nice support for working with C. perhaps we could build in a C compiler and let it be as easy as calling C in zig? Or let the user point to a C compiler, and automatically generate shim C code for calling the C code from dewy
