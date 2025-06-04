@@ -20,7 +20,7 @@ put_int = x:int64 => {
 
         zero = '0'
         buf = #alloc8(1)
-        val = #loadub(zero) 
+        val = #loadub(zero)
         val += d  % TODO: can't do `#loadub(zero) + d` yet because typeof isn't implemented on Builtin
         #storeb(val buf)
         __syscall3__(SYSCALL_WRITE STDOUT buf 1)
@@ -28,13 +28,8 @@ put_int = x:int64 => {
 }
 putl = () => __syscall3__(1 1 '\n' 1)
 
-(-1234567890) |> put_int  % parenthesis is needed so the negative is interpreted as a prefix operator rather than a binary operator with the previous function body
-putl
-1456 |> put_int
-putl
-(-125690) |> put_int
-putl
-0q13232 |> put_int
-putl
-0xffff |> put_int
-putl
+(-1234567890) |> put_int putl  % parenthesis is needed so the negative is interpreted as a prefix operator rather than a binary operator with the previous function body
+1456 |> put_int putl
+(-125690) |> put_int putl
+0q13232 |> put_int putl
+0xffff |> put_int putl

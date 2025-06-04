@@ -16,7 +16,7 @@ Keyword = src:string => [
 ]
 
 
-eat_fn_type = src:string :> int?
+eat_fn_type = src:string :> int|void
 
 
 %{
@@ -26,7 +26,7 @@ eat_fn_type = src:string :> int?
 
     noting that keywords are case insensitive
 }%
-eat_keyword = src:string :> int? => {
+eat_keyword = src:string :> int|void => {
     keywords = ['in' 'as' 'loop' 'lazy' 'if' 'and' 'or' 'xor' 'nand' 'nor' 'xnor' 'not']
     max_len = [loop k in keywords k.length].max
     lower_src = src[..max_len].lowercase
