@@ -1,0 +1,448 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>One Loop to Rule them All - The Dewy Programming Language</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = null;
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../00-introduction.html">Introduction</a></li><li class="chapter-item expanded "><a href="../ch01/00-getting-started.html"><strong aria-hidden="true">1.</strong> Getting Started</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch01/xx-online-interpreter.html"><strong aria-hidden="true">1.1.</strong> Online Interpreter</a></li><li class="chapter-item expanded "><a href="../ch01/01-installation.html"><strong aria-hidden="true">1.2.</strong> Installation</a></li><li class="chapter-item expanded "><a href="../ch01/02-hello-world.html"><strong aria-hidden="true">1.3.</strong> Hello, World!</a></li></ol></li><li class="chapter-item expanded "><a href="../ch02/00-hello-many-worlds.html"><strong aria-hidden="true">2.</strong> Hello, Many Worlds!</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch02/01-gui.html"><strong aria-hidden="true">2.1.</strong> GUI</a></li><li class="chapter-item expanded "><a href="../ch02/02-graphics.html"><strong aria-hidden="true">2.2.</strong> Graphics</a></li><li class="chapter-item expanded "><a href="../ch02/03-audio.html"><strong aria-hidden="true">2.3.</strong> Audio</a></li><li class="chapter-item expanded "><a href="../ch02/04-networking.html"><strong aria-hidden="true">2.4.</strong> Networking</a></li><li class="chapter-item expanded "><a href="../ch02/05a-game-development.html"><strong aria-hidden="true">2.5.</strong> 2D Game Development</a></li><li class="chapter-item expanded "><a href="../ch02/05b-game-development.html"><strong aria-hidden="true">2.6.</strong> 3D Game Development</a></li><li class="chapter-item expanded "><a href="../ch02/06-web-development.html"><strong aria-hidden="true">2.7.</strong> Web Development</a></li><li class="chapter-item expanded "><a href="../ch02/07-databases.html"><strong aria-hidden="true">2.8.</strong> Databases</a></li><li class="chapter-item expanded "><a href="../ch02/08-cryptography.html"><strong aria-hidden="true">2.9.</strong> Cryptography</a></li><li class="chapter-item expanded "><a href="../ch02/09-operating-systems.html"><strong aria-hidden="true">2.10.</strong> Operating Systems</a></li><li class="chapter-item expanded "><a href="../ch02/10-compilers.html"><strong aria-hidden="true">2.11.</strong> Compilers</a></li><li class="chapter-item expanded "><a href="../ch02/11-scientific-computing.html"><strong aria-hidden="true">2.12.</strong> Scientific Computing</a></li><li class="chapter-item expanded "><a href="../ch02/12-robotics.html"><strong aria-hidden="true">2.13.</strong> Robotics</a></li><li class="chapter-item expanded "><a href="../ch02/13-machine-learning.html"><strong aria-hidden="true">2.14.</strong> Machine Learning</a></li></ol></li><li class="chapter-item expanded "><a href="../ch03/00-features.html"><strong aria-hidden="true">3.</strong> Language Features</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch03/expressions-statements-blocks.html"><strong aria-hidden="true">3.1.</strong> Expressions, Statements, and Blocks</a></li><li class="chapter-item expanded "><a href="../ch03/units.html"><strong aria-hidden="true">3.2.</strong> Units</a></li><li class="chapter-item expanded "><a href="../ch03/string-interpolation.html"><strong aria-hidden="true">3.3.</strong> String Interpolation</a></li><li class="chapter-item expanded "><a href="../ch03/basic-data-types.html"><strong aria-hidden="true">3.4.</strong> Basic Data Types</a></li><li class="chapter-item expanded "><a href="../ch03/container-types.html"><strong aria-hidden="true">3.5.</strong> Container Types</a></li><li class="chapter-item expanded "><a href="../ch03/range-types.html"><strong aria-hidden="true">3.6.</strong> Range Types</a></li><li class="chapter-item expanded "><a href="../ch03/object-types.html"><strong aria-hidden="true">3.7.</strong> Object Types</a></li><li class="chapter-item expanded "><a href="../ch03/function-types.html"><strong aria-hidden="true">3.8.</strong> Function Types</a></li><li class="chapter-item expanded "><a href="../ch03/operators.html"><strong aria-hidden="true">3.9.</strong> Operators</a></li><li class="chapter-item expanded "><a href="../ch03/number-bases.html"><strong aria-hidden="true">3.10.</strong> Number Bases</a></li><li class="chapter-item expanded "><a href="../ch03/basic-math.html"><strong aria-hidden="true">3.11.</strong> Basic Math</a></li><li class="chapter-item expanded "><a href="../ch03/linear-algebra.html"><strong aria-hidden="true">3.12.</strong> Linear Algebra</a></li><li class="chapter-item expanded "><a href="../ch03/functional-programming.html"><strong aria-hidden="true">3.13.</strong> Functional Programming</a></li><li class="chapter-item expanded "><a href="../ch03/meta-programming.html"><strong aria-hidden="true">3.14.</strong> Meta Programming</a></li><li class="chapter-item expanded "><a href="../ch03/flow-control.html"><strong aria-hidden="true">3.15.</strong> Flow Control</a></li><li class="chapter-item expanded "><a href="../ch03/loops.html" class="active"><strong aria-hidden="true">3.16.</strong> One Loop to Rule them All</a></li><li class="chapter-item expanded "><a href="../ch03/imports.html"><strong aria-hidden="true">3.17.</strong> Imports</a></li></ol></li><li class="chapter-item expanded "><a href="../ch04/00-stdlib.html"><strong aria-hidden="true">4.</strong> Standard Library</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch04/xx-data-structures.html"><strong aria-hidden="true">4.1.</strong> Data Structures</a></li><li class="chapter-item expanded "><a href="../ch04/xx-time.html"><strong aria-hidden="true">4.2.</strong> Time</a></li><li class="chapter-item expanded "><a href="../ch04/xx-plotting.html"><strong aria-hidden="true">4.3.</strong> Plotting</a></li><li class="chapter-item expanded "><a href="../ch04/xx-parsing.html"><strong aria-hidden="true">4.4.</strong> Parsing</a></li><li class="chapter-item expanded "><a href="../ch04/xx-parallelism.html"><strong aria-hidden="true">4.5.</strong> Parallelism</a></li></ol></li><li class="chapter-item expanded "><a href="../ch05/00-general.html"><strong aria-hidden="true">5.</strong> General Concepts</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch05/xx-sandboxes-harnesses.html"><strong aria-hidden="true">5.1.</strong> Sandboxes and Harnesses</a></li></ol></li><li class="chapter-item expanded "><a href="../ch06/00-case-studies.html"><strong aria-hidden="true">6.</strong> Advanced Case Studies</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch06/dewy-compiler.html"><strong aria-hidden="true">6.1.</strong> Dewy Compiler</a></li><li class="chapter-item expanded "><a href="../ch06/neo-mapping.html"><strong aria-hidden="true">6.2.</strong> Asteroid Detection</a></li></ol></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <!-- Track and set sidebar scroll position -->
+        <script>
+            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
+            sidebarScrollbox.addEventListener('click', function(e) {
+                if (e.target.tagName === 'A') {
+                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
+                }
+            }, { passive: true });
+            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
+            sessionStorage.removeItem('sidebar-scroll');
+            if (sidebarScrollTop) {
+                // preserve sidebar scroll position when navigating via links within sidebar
+                sidebarScrollbox.scrollTop = sidebarScrollTop;
+            } else {
+                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
+                var activeSection = document.querySelector('#sidebar .active');
+                if (activeSection) {
+                    activeSection.scrollIntoView({ block: 'center' });
+                }
+            }
+        </script>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">The Dewy Programming Language</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="one-loop-to-rule-them-all"><a class="header" href="#one-loop-to-rule-them-all">One Loop to Rule them All</a></h1>
+<p>Other languages make use of sometimes multiple keywords such as <code>for</code>, <code>while</code>, <code>do-while</code>, <code>for each</code>, etc., to handle looping over a piece of code. Dewy instead simply uses the <code>loop</code> keyword to handle all forms of looping.</p>
+<p>Syntactically, loops are quite simple. The syntax for a loop is:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20%3Ccondition%3E%20%3Cexpression%3E&id=DewyIframe83"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe83"
+    frameBorder="0"
+></iframe>
+<p>Where <code>&lt;condition&gt;</code> must result in a boolean determines if the loop continues, and <code>&lt;expression&gt;</code> which can be anything is executed each time the loop repeats.</p>
+<p>The various types of loops seen in other languages are formed simply by changing the <code>&lt;condition&gt;</code> part of the loop.</p>
+<h2 id="infinite-loops"><a class="header" href="#infinite-loops">Infinite Loops</a></h2>
+<p>An infinite loop is one that never ends. They are constructed by hardcoding the condition to <code>true</code>, which ensures that the loop will always repeat.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20true%0A%7B%0A%20%20%20%20%25do%20something%20repeatedly%20forever%0A%7D&id=DewyIframe84"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe84"
+    frameBorder="0"
+></iframe>
+<p>The only way to leave an infinite loop is via the <code>break</code>, and <code>return</code> keywords.</p>
+<h2 id="while-loops"><a class="header" href="#while-loops">While Loops</a></h2>
+<p>A while loop is a loop that executes &quot;while&quot; some condition is true. A simple boolean expression can be used as the condition. When the condition is false, the loop ends.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20%3E%3F%200%0A%7B%0A%20%20%20%20%25while%20i%20is%20greater%20than%200%2C%20do%20something%0A%7D&id=DewyIframe85"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe85"
+    frameBorder="0"
+></iframe>
+<h2 id="for-loops"><a class="header" href="#for-loops">For Loops</a></h2>
+<p>Many languages feature for loops, which iterate over some iterable object. The simplest case of this would be iterating over a range of numbers. In Dewy, the <code>in</code> operator manages iteration for loops. <code>in</code> has two aspects:</p>
+<ol>
+<li>the variable on the left is assigned with the next value of the iterable on the right (or <code>void</code> if there are no more values)</li>
+<li>the expression returns <code>true</code> or <code>false</code> depending on if there was a value to assign to the variable this iteration.</li>
+</ol>
+<p>This means that <code>in</code> expressions can be used to trivially construct a for-loop.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B1..5%5D%0A%7B%0A%20%20%20%20print%28%27%7Bi%7D%2C%20%27%29%0A%7D&id=DewyIframe86"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe86"
+    frameBorder="0"
+></iframe>
+<p>Which prints out <code>1, 2, 3, 4, 5, </code> to the console. Each iteration, <code>in</code> causes <code>i</code> to be assigned the next value in the sequence, while returning true for the loop condition. When the sequence is exhausted, <code>in</code> returns false, and the loop ends.</p>
+<p>For loops can also iterate over the items in any type of container. Iterating over a list looks like this</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20fruit%20in%20%5B%27apple%27%20%27banana%27%20%27peach%27%20%27pear%27%5D%0A%7B%0A%20%20%20%20print%28%27I%20like%20to%20eat%20%7Bfruit%7D%21%27%29%0A%7D&id=DewyIframe87"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe87"
+    frameBorder="0"
+></iframe>
+<p>Which prints the following to the console</p>
+<pre><code>I like to eat apple
+I like to eat banana
+I like to eat peach
+I like to eat pear
+</code></pre>
+<p>Items in a dictionary can be iterated over like so</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=ratings%20%3D%20%5B%0A%20%20%20%20%27star%20wars%27%20-%3E%2073%0A%20%20%20%20%27star%20trek%27%20-%3E%2089%0A%20%20%20%20%27star%20gate%27%20-%3E%2084%0A%20%20%20%20%27battlestar%20galactica%27%20-%3E%2087%0A%20%20%20%20%27legend%20of%20the%20galactic%20heroes%27%20-%3E%20100%0A%5D%0A%0Aloop%20%5Bshow%20rating%5D%20in%20ratings%0A%7B%0A%20%20%20%20printl%28%27I%20give%20%7Bshow%7D%20a%20%7Brating%7D%20out%20100%27%29%0A%7D&id=DewyIframe88"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe88"
+    frameBorder="0"
+></iframe>
+<p>This takes advantage of the fact that iterating over a dictionary returns each pair, which can then be unpacked into separate variables <code>show</code> and <code>rating</code>. This prints out the following to the console</p>
+<pre><code>I give star wars a 73 out of 100
+I give star trek a 89 out of 100
+I give star gate a 84 out of 100
+I give battlestar galactica a 87 out of 100
+I give legend of the galactic heroes a 100 out of 100
+</code></pre>
+<h3 id="multiple-conditions"><a class="header" href="#multiple-conditions">Multiple Conditions</a></h3>
+<p>A neat side effect of <code>in</code> statements returning a boolean is that it provides a free method for looping over multiple sequences simultaneously. Simply combine two <code>in</code> statements with a logical operator. The loop will continue until one sequence is exhausted, both, or something else, depending on which logical operator is used. The behavior <code>zip</code> from other languages can be achieved by combining sequences with <code>and</code></p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=names%20%3D%20%5B%27Alice%27%20%27Bob%27%20%27Charlie%27%5D%0Acolors%20%3D%20%5B%27Red%27%20%27Blue%27%20%27Green%27%20%27Yellow%27%5D%0A%0Aloop%20name%20in%20names%20and%20color%20in%20colors%0A%20%20%20%20printl%27%7Bname%7D%20chose%20%7Bcolor%7D%27&id=DewyIframe89"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe89"
+    frameBorder="0"
+></iframe>
+<p>In this case, the loop runs until either sequence is exhausted (as <code>and</code> requires both conditions to be true, so as soon as one is false, the loop ends). This prints out the following to the console</p>
+<pre><code>Alice chose Red
+Bob chose Blue
+Charlie chose Green
+</code></pre>
+<p>Other languages commonly have an <code>enumerate</code> function which will count how many iterations have occurred on top of looping over some sequence. This can be achieved by combining an infinite range with any sequence using <code>and</code>:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B0..%5D%20and%20fruit%20in%20%5B%27apple%27%20%27banana%27%20%27peach%27%20%27pear%27%5D%0A%20%20%20%20printl%27%7Bi%7D%29%20%7Bfruit%7D%27&id=DewyIframe90"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe90"
+    frameBorder="0"
+></iframe>
+<p><code>i</code> will never run out of values, so the loop continues so long as <code>fruit</code> has values remaining. This prints out the following to the console</p>
+<pre><code>0) apple
+1) banana
+2) peach
+3) pear
+</code></pre>
+<p>Using the <code>or</code> operator to combine sequences will loop until so long as either of the sequences have values remaining.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=A%20%3D%20%5B1%202%203%5D%0AB%20%3D%20%5B4%205%206%207%208%5D%0Aloop%20a%20in%20A%20or%20b%20in%20B%0A%20%20%20%20printl%5Ba%20b%5D&id=DewyIframe91"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe91"
+    frameBorder="0"
+></iframe>
+<p>Which prints</p>
+<pre><code>[1 4]
+[2 5]
+[3 6]
+[undefined 7]
+[undefined 8]
+</code></pre>
+<p>Since this is just combining boolean expressions, any combination of expressions that results in a boolean may be used.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=limit%20%3D%20time.now%20%2B%205%28minutes%29%0Aloop%20batch%20in%20batches%20and%20time.now%20%3C%3F%20limit%0A%20%20%20%20process%28batch%29&id=DewyIframe92"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe92"
+    frameBorder="0"
+></iframe>
+<p>As a similar approach, perhaps there might be iterators in this style where they don't have a fixed value, but instead track over some changing resource</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20batch%20in%20batches%20and%20t%20in%20timer%285%28minutes%29%29%0A%7B%0A%20%20%20%20process%28batch%29%0A%20%20%20%20printl%27timeout%20in%20%7Bt%7D%27%0A%7D&id=DewyIframe93"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe93"
+    frameBorder="0"
+></iframe>
+<h2 id="do-loop-do"><a class="header" href="#do-loop-do">Do Loop Do</a></h2>
+<p>The do-while version of the loop can be constructed by putting the <code>do</code> keyword before the body, and putting the <code>loop</code> keyword and its condition after the body. This means loop body is executed at least once before the condition is checked, at which point the loop could exit or continue.</p>
+<p>Basic do-while loop:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=i%20%3D%200%0Ado%0A%7B%0A%20%20%20%20i%20%2B%3D%201%0A%20%20%20%20printl%27this%20is%20a%20do-while%20loop%27%0A%7D%0Aloop%20i%20%3C%3F%2020&id=DewyIframe94"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe94"
+    frameBorder="0"
+></iframe>
+<p>do-loop over an iterator. On the first iteration, <code>i</code> will be undefined, while it will be available on subsequent iterations</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=do%20printl%27this%20is%20a%20do-for%20loop.%20i%3D%7Bi%7D%27%0Aloop%20i%20in%20%5B0..5%5D&id=DewyIframe95"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe95"
+    frameBorder="0"
+></iframe>
+<p>Which prints</p>
+<pre><code>this is a do-for loop. i=undefined
+this is a do-for loop. i=0
+this is a do-for loop. i=1
+this is a do-for loop. i=2
+this is a do-for loop. i=3
+this is a do-for loop. i=4
+this is a do-for loop. i=5
+</code></pre>
+<p>Technically you can construct an infinite do-while loop, but it's basically identical to a regular infinite loop</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=do%20printl%27this%20is%20a%20do-infinite%20loop%27%0Aloop%20true&id=DewyIframe96"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe96"
+    frameBorder="0"
+></iframe>
+<p>Lastly you can sandwich <code>loop</code> between two blocks using two <code>do</code> keywords (one before the first block, and one after the loop condition). This will give you a block executed before the condition and a block executed after the condition</p>
+<blockquote>
+<p>Note: the syntax for do-loop-do is still being finalized, and may change from this example</p>
+</blockquote>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=i%20%3D%200%0Ado%0A%7B%0A%20%20%20%20printl%27before%20condition%20is%20checked%27%0A%7D%0Aloop%20i%20%3C%3F%2020%20do%0A%7B%0A%20%20%20%20printl%27after%20condition%20is%20checked%27%0A%20%20%20%20i%20%2B%3D%201%0A%7D&id=DewyIframe97"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe97"
+    frameBorder="0"
+></iframe>
+<p>In this loop, the first block is guaranteed to execute at least once. Then we check the condition, and then if true, we execute the second block, then repeat the loop, execute the first block, and then check the condition again, repeating until the condition is false, or we have iterated over all elements.</p>
+<h2 id="break-continue-return-inside-loops"><a class="header" href="#break-continue-return-inside-loops">Break, Continue, Return inside Loops</a></h2>
+<p>TODO-&gt;write this. follows basic principles of other languages. extra is that you can use <code>#hashtags</code> to break/continue from inside nested loops</p>
+<h2 id="loop-generators"><a class="header" href="#loop-generators">Loop Generators</a></h2>
+<p>Let's look at this example</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B1..10%5D%20%7Bi%7D&id=DewyIframe98"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe98"
+    frameBorder="0"
+></iframe>
+<p>Every iteration of the loop, the current value of <code>i</code> is &quot;expressed&quot;, that is to say, the value could be stored in a variable or a container.</p>
+<p>Lets capture the expressed value in a container by wrapping the loop in <code>[]</code> brackets</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bloop%20i%20in%20%5B1..10%5D%20%7Bi%7D%5D&id=DewyIframe99"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe99"
+    frameBorder="0"
+></iframe>
+<p>This &quot;generates&quot; the array <code>[1 2 3 4 5 6 7 8 9 10]</code>, which we can then store into a variable</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_array%20%3D%20%5Bloop%20i%20in%20%5B1..10%5D%20%7Bi%7D%5D%0A%0A%25optional%20to%20omit%20the%20braces%20since%20only%20a%20single%20expression%20is%20in%20the%20body%0Amy_array%20%3D%20%5Bloop%20i%20in%20%5B1..10%5D%20i%5D&id=DewyIframe100"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe100"
+    frameBorder="0"
+></iframe>
+<p>And thus we have created the simplest list generator.</p>
+<h3 id="multiple-expressions-per-iteration"><a class="header" href="#multiple-expressions-per-iteration">Multiple Expressions per Iteration</a></h3>
+<p>Generators can do a lot of interesting things. For example we can express multiple values on a single loop iteration</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%25note%20the%20braces%20are%20not%20optional%20in%20this%20case%0Amy_array%20%3D%20%5Bloop%20i%20in%20%5B1..5%5D%20%7B%20i%20i%5E2%20%7D%5D&id=DewyIframe101"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe101"
+    frameBorder="0"
+></iframe>
+<p>producing the array <code>[1 1 2 4 3 9 4 16 5 25]</code>.</p>
+<p>We can also construct a dictionary by expressing with a <code>-&gt;</code> between two values</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=squares%20%3D%20%5Bloop%20i%20in%20%5B1..5%5D%20%7B%20i%20-%3E%20i%5E2%20%7D%5D&id=DewyIframe102"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe102"
+    frameBorder="0"
+></iframe>
+<p>which produces the dictionary <code>[1-&gt;1 2-&gt;4 3-&gt;9 4-&gt;16 5-&gt;25]</code> which points from values to their squares.</p>
+<h3 id="multidimensional-generators"><a class="header" href="#multidimensional-generators">Multidimensional Generators</a></h3>
+<p>You can generate a multidimensional array using multiple nested loops. For example</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=indices%20%3D%0A%5B%0A%20%20%20%20loop%20i%20in%20%5B1..5%5D%0A%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20loop%20j%20in%20%5B1..5%5D%0A%20%20%20%20%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20%20%20%20%20i%0A%20%20%20%20%20%20%20%20%20%20%20%20j%0A%20%20%20%20%20%20%20%20%5D%0A%20%20%20%20%5D%0A%5D&id=DewyIframe103"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe103"
+    frameBorder="0"
+></iframe>
+<p>which produces the following 3D array representing the indices of a 5x5 matrix as tuples</p>
+<pre><code>indices = [
+    [[1 1] [1 2] [1 3] [1 4] [1 5]]
+    [[2 1] [2 2] [2 3] [2 4] [2 5]]
+    [[3 1] [4 2] [3 3] [3 4] [3 5]]
+    [[4 1] [4 2] [4 3] [4 4] [4 5]]
+    [[5 1] [5 2] [5 3] [5 4] [5 5]]
+]
+</code></pre>
+<p>And so many more things are possible. Loop generators are about as flexible a feature as one could imagine. It's really up to you how you want to apply them</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../ch03/flow-control.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next" href="../ch03/imports.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../ch03/flow-control.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next" href="../ch03/imports.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../dewy_online_interpreter_handler.js"></script>
+
+
+    </div>
+    </body>
+</html>

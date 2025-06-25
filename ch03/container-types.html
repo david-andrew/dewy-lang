@@ -1,0 +1,270 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Container Types - The Dewy Programming Language</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = null;
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../00-introduction.html">Introduction</a></li><li class="chapter-item expanded "><a href="../ch01/00-getting-started.html"><strong aria-hidden="true">1.</strong> Getting Started</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch01/xx-online-interpreter.html"><strong aria-hidden="true">1.1.</strong> Online Interpreter</a></li><li class="chapter-item expanded "><a href="../ch01/01-installation.html"><strong aria-hidden="true">1.2.</strong> Installation</a></li><li class="chapter-item expanded "><a href="../ch01/02-hello-world.html"><strong aria-hidden="true">1.3.</strong> Hello, World!</a></li></ol></li><li class="chapter-item expanded "><a href="../ch02/00-hello-many-worlds.html"><strong aria-hidden="true">2.</strong> Hello, Many Worlds!</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch02/01-gui.html"><strong aria-hidden="true">2.1.</strong> GUI</a></li><li class="chapter-item expanded "><a href="../ch02/02-graphics.html"><strong aria-hidden="true">2.2.</strong> Graphics</a></li><li class="chapter-item expanded "><a href="../ch02/03-audio.html"><strong aria-hidden="true">2.3.</strong> Audio</a></li><li class="chapter-item expanded "><a href="../ch02/04-networking.html"><strong aria-hidden="true">2.4.</strong> Networking</a></li><li class="chapter-item expanded "><a href="../ch02/05a-game-development.html"><strong aria-hidden="true">2.5.</strong> 2D Game Development</a></li><li class="chapter-item expanded "><a href="../ch02/05b-game-development.html"><strong aria-hidden="true">2.6.</strong> 3D Game Development</a></li><li class="chapter-item expanded "><a href="../ch02/06-web-development.html"><strong aria-hidden="true">2.7.</strong> Web Development</a></li><li class="chapter-item expanded "><a href="../ch02/07-databases.html"><strong aria-hidden="true">2.8.</strong> Databases</a></li><li class="chapter-item expanded "><a href="../ch02/08-cryptography.html"><strong aria-hidden="true">2.9.</strong> Cryptography</a></li><li class="chapter-item expanded "><a href="../ch02/09-operating-systems.html"><strong aria-hidden="true">2.10.</strong> Operating Systems</a></li><li class="chapter-item expanded "><a href="../ch02/10-compilers.html"><strong aria-hidden="true">2.11.</strong> Compilers</a></li><li class="chapter-item expanded "><a href="../ch02/11-scientific-computing.html"><strong aria-hidden="true">2.12.</strong> Scientific Computing</a></li><li class="chapter-item expanded "><a href="../ch02/12-robotics.html"><strong aria-hidden="true">2.13.</strong> Robotics</a></li><li class="chapter-item expanded "><a href="../ch02/13-machine-learning.html"><strong aria-hidden="true">2.14.</strong> Machine Learning</a></li></ol></li><li class="chapter-item expanded "><a href="../ch03/00-features.html"><strong aria-hidden="true">3.</strong> Language Features</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch03/expressions-statements-blocks.html"><strong aria-hidden="true">3.1.</strong> Expressions, Statements, and Blocks</a></li><li class="chapter-item expanded "><a href="../ch03/units.html"><strong aria-hidden="true">3.2.</strong> Units</a></li><li class="chapter-item expanded "><a href="../ch03/string-interpolation.html"><strong aria-hidden="true">3.3.</strong> String Interpolation</a></li><li class="chapter-item expanded "><a href="../ch03/basic-data-types.html"><strong aria-hidden="true">3.4.</strong> Basic Data Types</a></li><li class="chapter-item expanded "><a href="../ch03/container-types.html" class="active"><strong aria-hidden="true">3.5.</strong> Container Types</a></li><li class="chapter-item expanded "><a href="../ch03/range-types.html"><strong aria-hidden="true">3.6.</strong> Range Types</a></li><li class="chapter-item expanded "><a href="../ch03/object-types.html"><strong aria-hidden="true">3.7.</strong> Object Types</a></li><li class="chapter-item expanded "><a href="../ch03/function-types.html"><strong aria-hidden="true">3.8.</strong> Function Types</a></li><li class="chapter-item expanded "><a href="../ch03/operators.html"><strong aria-hidden="true">3.9.</strong> Operators</a></li><li class="chapter-item expanded "><a href="../ch03/number-bases.html"><strong aria-hidden="true">3.10.</strong> Number Bases</a></li><li class="chapter-item expanded "><a href="../ch03/basic-math.html"><strong aria-hidden="true">3.11.</strong> Basic Math</a></li><li class="chapter-item expanded "><a href="../ch03/linear-algebra.html"><strong aria-hidden="true">3.12.</strong> Linear Algebra</a></li><li class="chapter-item expanded "><a href="../ch03/functional-programming.html"><strong aria-hidden="true">3.13.</strong> Functional Programming</a></li><li class="chapter-item expanded "><a href="../ch03/meta-programming.html"><strong aria-hidden="true">3.14.</strong> Meta Programming</a></li><li class="chapter-item expanded "><a href="../ch03/flow-control.html"><strong aria-hidden="true">3.15.</strong> Flow Control</a></li><li class="chapter-item expanded "><a href="../ch03/loops.html"><strong aria-hidden="true">3.16.</strong> One Loop to Rule them All</a></li><li class="chapter-item expanded "><a href="../ch03/imports.html"><strong aria-hidden="true">3.17.</strong> Imports</a></li></ol></li><li class="chapter-item expanded "><a href="../ch04/00-stdlib.html"><strong aria-hidden="true">4.</strong> Standard Library</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch04/xx-data-structures.html"><strong aria-hidden="true">4.1.</strong> Data Structures</a></li><li class="chapter-item expanded "><a href="../ch04/xx-time.html"><strong aria-hidden="true">4.2.</strong> Time</a></li><li class="chapter-item expanded "><a href="../ch04/xx-plotting.html"><strong aria-hidden="true">4.3.</strong> Plotting</a></li><li class="chapter-item expanded "><a href="../ch04/xx-parsing.html"><strong aria-hidden="true">4.4.</strong> Parsing</a></li><li class="chapter-item expanded "><a href="../ch04/xx-parallelism.html"><strong aria-hidden="true">4.5.</strong> Parallelism</a></li></ol></li><li class="chapter-item expanded "><a href="../ch05/00-general.html"><strong aria-hidden="true">5.</strong> General Concepts</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch05/xx-sandboxes-harnesses.html"><strong aria-hidden="true">5.1.</strong> Sandboxes and Harnesses</a></li></ol></li><li class="chapter-item expanded "><a href="../ch06/00-case-studies.html"><strong aria-hidden="true">6.</strong> Advanced Case Studies</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch06/dewy-compiler.html"><strong aria-hidden="true">6.1.</strong> Dewy Compiler</a></li><li class="chapter-item expanded "><a href="../ch06/neo-mapping.html"><strong aria-hidden="true">6.2.</strong> Asteroid Detection</a></li></ol></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <!-- Track and set sidebar scroll position -->
+        <script>
+            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
+            sidebarScrollbox.addEventListener('click', function(e) {
+                if (e.target.tagName === 'A') {
+                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
+                }
+            }, { passive: true });
+            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
+            sessionStorage.removeItem('sidebar-scroll');
+            if (sidebarScrollTop) {
+                // preserve sidebar scroll position when navigating via links within sidebar
+                sidebarScrollbox.scrollTop = sidebarScrollTop;
+            } else {
+                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
+                var activeSection = document.querySelector('#sidebar .active');
+                if (activeSection) {
+                    activeSection.scrollIntoView({ block: 'center' });
+                }
+            }
+        </script>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">The Dewy Programming Language</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="container-types"><a class="header" href="#container-types">Container Types</a></h1>
+<p>Container types are things like arrays, dictionaries, and sets. all containers are specified using square brackets <code>[]</code>, while the contents (or other factors) determine the type of container</p>
+<h2 id="arrays"><a class="header" href="#arrays">Arrays</a></h2>
+<p>An array is simple a list of values inside a container</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_array%20%3D%20%5B0%201%202%203%20%27apple%27%20%27banana%27%20%27peach%27%20true%5D%0Aprintl%28my_array%5B3%5D%29%20%20%25prints%20%273%27&id=DewyIframe24"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe24"
+    frameBorder="0"
+></iframe>
+<blockquote>
+<p>Note: values do not need commas to separate them. Also arrays can contain objects of different types, though arrays where all values are just a single type will be more efficient. Arrays are 0-indexed (with potentially the option to set an arbitrary index)</p>
+</blockquote>
+<p>TODO-&gt;explain how to make matrices and other linear algebra stuff.</p>
+<h2 id="dictionaries"><a class="header" href="#dictionaries">Dictionaries</a></h2>
+<p>A dictionary is a list of key-value pairs</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_dictionary%20%3D%20%5B%0A%20%20%20%20%27apple%27%20-%3E%2010%0A%20%20%20%20%27banana%27%20-%3E%2015%0A%20%20%20%20%27peach%27%20-%3E%203%0A%20%20%20%20%27pear%27%20-%3E%206%0A%5D%0Aprintl%28my_dictionary%5B%27peach%27%5D%29%20%20%25prints%20%273%27&id=DewyIframe25"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe25"
+    frameBorder="0"
+></iframe>
+<p>Again note the lack of a need for comma separation between key-value pairs.</p>
+<p>Additionally if you wish, you can define a bi-directional dictionary using a double-ended arrow:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_bidictionary%20%3D%20%5B%0A%20%20%20%200%20%3C-%3E%20%27zero%27%0A%20%20%20%201%20%3C-%3E%20%27one%27%0A%20%20%20%20%27two%27%20%3C-%3E%202%0A%20%20%20%203%20%3C-%3E%20%27three%27%0A%5D%0Aprintl%28my_bidictionary%5B%27three%27%5D%29%20%20%25prints%20%273%27%0Aprintl%28my_bidictionary%5B3%5D%29%20%20%20%20%20%20%20%20%25prints%20%27three%27&id=DewyIframe26"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe26"
+    frameBorder="0"
+></iframe>
+<blockquote>
+<p>Note: when creating a bidictionary, every arrow must by double-ended. As new elements are added, the bidictionary will maintain the bidirectional links between each element. Regular dictionaries will not maintin such links.</p>
+</blockquote>
+<h2 id="sets"><a class="header" href="#sets">Sets</a></h2>
+<p>A set is an unordered collection of elements</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_set%20%3D%20set%5B0%201%202%203%20%27apple%27%20%27banana%27%20%27peach%27%20true%5D%0Aprintl%283%20in%3F%20my_set%29%20%20%25prints%20%27true%27%0Aprintl%28%27pear%27%20in%3F%20my_set%29%20%20%25prints%20%27false%27&id=DewyIframe27"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe27"
+    frameBorder="0"
+></iframe>
+<h2 id="objects"><a class="header" href="#objects">Objects</a></h2>
+<p>See the entry on <strong>Object and Class Types</strong> for more details. But breifly, an object can be created by wrapping declarations in a container</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_obj%20%3D%20%5B%0A%20%20%20%20apple%20%3D%205%0A%20%20%20%20bananas%20%3D%200.89%0A%20%20%20%20buy_apples%20%3D%20q%20%3D%3E%20q%20%2A%20apples%0A%20%20%20%20buy_bananas%20%3D%20q%20%3D%3E%20q%20%2A%20bananas%0A%5D%0A%0Aprintl%28my_obj.apples%29%20%25prints%20out%205%0Aprintl%28my_obj.buy_bananas%2810%29%29%20%20%25prints%20out%208.9&id=DewyIframe28"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe28"
+    frameBorder="0"
+></iframe>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../ch03/basic-data-types.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next" href="../ch03/range-types.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../ch03/basic-data-types.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next" href="../ch03/range-types.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../dewy_online_interpreter_handler.js"></script>
+
+
+    </div>
+    </body>
+</html>

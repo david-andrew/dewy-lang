@@ -1,0 +1,406 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Range Types - The Dewy Programming Language</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = null;
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../00-introduction.html">Introduction</a></li><li class="chapter-item expanded "><a href="../ch01/00-getting-started.html"><strong aria-hidden="true">1.</strong> Getting Started</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch01/xx-online-interpreter.html"><strong aria-hidden="true">1.1.</strong> Online Interpreter</a></li><li class="chapter-item expanded "><a href="../ch01/01-installation.html"><strong aria-hidden="true">1.2.</strong> Installation</a></li><li class="chapter-item expanded "><a href="../ch01/02-hello-world.html"><strong aria-hidden="true">1.3.</strong> Hello, World!</a></li></ol></li><li class="chapter-item expanded "><a href="../ch02/00-hello-many-worlds.html"><strong aria-hidden="true">2.</strong> Hello, Many Worlds!</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch02/01-gui.html"><strong aria-hidden="true">2.1.</strong> GUI</a></li><li class="chapter-item expanded "><a href="../ch02/02-graphics.html"><strong aria-hidden="true">2.2.</strong> Graphics</a></li><li class="chapter-item expanded "><a href="../ch02/03-audio.html"><strong aria-hidden="true">2.3.</strong> Audio</a></li><li class="chapter-item expanded "><a href="../ch02/04-networking.html"><strong aria-hidden="true">2.4.</strong> Networking</a></li><li class="chapter-item expanded "><a href="../ch02/05a-game-development.html"><strong aria-hidden="true">2.5.</strong> 2D Game Development</a></li><li class="chapter-item expanded "><a href="../ch02/05b-game-development.html"><strong aria-hidden="true">2.6.</strong> 3D Game Development</a></li><li class="chapter-item expanded "><a href="../ch02/06-web-development.html"><strong aria-hidden="true">2.7.</strong> Web Development</a></li><li class="chapter-item expanded "><a href="../ch02/07-databases.html"><strong aria-hidden="true">2.8.</strong> Databases</a></li><li class="chapter-item expanded "><a href="../ch02/08-cryptography.html"><strong aria-hidden="true">2.9.</strong> Cryptography</a></li><li class="chapter-item expanded "><a href="../ch02/09-operating-systems.html"><strong aria-hidden="true">2.10.</strong> Operating Systems</a></li><li class="chapter-item expanded "><a href="../ch02/10-compilers.html"><strong aria-hidden="true">2.11.</strong> Compilers</a></li><li class="chapter-item expanded "><a href="../ch02/11-scientific-computing.html"><strong aria-hidden="true">2.12.</strong> Scientific Computing</a></li><li class="chapter-item expanded "><a href="../ch02/12-robotics.html"><strong aria-hidden="true">2.13.</strong> Robotics</a></li><li class="chapter-item expanded "><a href="../ch02/13-machine-learning.html"><strong aria-hidden="true">2.14.</strong> Machine Learning</a></li></ol></li><li class="chapter-item expanded "><a href="../ch03/00-features.html"><strong aria-hidden="true">3.</strong> Language Features</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch03/expressions-statements-blocks.html"><strong aria-hidden="true">3.1.</strong> Expressions, Statements, and Blocks</a></li><li class="chapter-item expanded "><a href="../ch03/units.html"><strong aria-hidden="true">3.2.</strong> Units</a></li><li class="chapter-item expanded "><a href="../ch03/string-interpolation.html"><strong aria-hidden="true">3.3.</strong> String Interpolation</a></li><li class="chapter-item expanded "><a href="../ch03/basic-data-types.html"><strong aria-hidden="true">3.4.</strong> Basic Data Types</a></li><li class="chapter-item expanded "><a href="../ch03/container-types.html"><strong aria-hidden="true">3.5.</strong> Container Types</a></li><li class="chapter-item expanded "><a href="../ch03/range-types.html" class="active"><strong aria-hidden="true">3.6.</strong> Range Types</a></li><li class="chapter-item expanded "><a href="../ch03/object-types.html"><strong aria-hidden="true">3.7.</strong> Object Types</a></li><li class="chapter-item expanded "><a href="../ch03/function-types.html"><strong aria-hidden="true">3.8.</strong> Function Types</a></li><li class="chapter-item expanded "><a href="../ch03/operators.html"><strong aria-hidden="true">3.9.</strong> Operators</a></li><li class="chapter-item expanded "><a href="../ch03/number-bases.html"><strong aria-hidden="true">3.10.</strong> Number Bases</a></li><li class="chapter-item expanded "><a href="../ch03/basic-math.html"><strong aria-hidden="true">3.11.</strong> Basic Math</a></li><li class="chapter-item expanded "><a href="../ch03/linear-algebra.html"><strong aria-hidden="true">3.12.</strong> Linear Algebra</a></li><li class="chapter-item expanded "><a href="../ch03/functional-programming.html"><strong aria-hidden="true">3.13.</strong> Functional Programming</a></li><li class="chapter-item expanded "><a href="../ch03/meta-programming.html"><strong aria-hidden="true">3.14.</strong> Meta Programming</a></li><li class="chapter-item expanded "><a href="../ch03/flow-control.html"><strong aria-hidden="true">3.15.</strong> Flow Control</a></li><li class="chapter-item expanded "><a href="../ch03/loops.html"><strong aria-hidden="true">3.16.</strong> One Loop to Rule them All</a></li><li class="chapter-item expanded "><a href="../ch03/imports.html"><strong aria-hidden="true">3.17.</strong> Imports</a></li></ol></li><li class="chapter-item expanded "><a href="../ch04/00-stdlib.html"><strong aria-hidden="true">4.</strong> Standard Library</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch04/xx-data-structures.html"><strong aria-hidden="true">4.1.</strong> Data Structures</a></li><li class="chapter-item expanded "><a href="../ch04/xx-time.html"><strong aria-hidden="true">4.2.</strong> Time</a></li><li class="chapter-item expanded "><a href="../ch04/xx-plotting.html"><strong aria-hidden="true">4.3.</strong> Plotting</a></li><li class="chapter-item expanded "><a href="../ch04/xx-parsing.html"><strong aria-hidden="true">4.4.</strong> Parsing</a></li><li class="chapter-item expanded "><a href="../ch04/xx-parallelism.html"><strong aria-hidden="true">4.5.</strong> Parallelism</a></li></ol></li><li class="chapter-item expanded "><a href="../ch05/00-general.html"><strong aria-hidden="true">5.</strong> General Concepts</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch05/xx-sandboxes-harnesses.html"><strong aria-hidden="true">5.1.</strong> Sandboxes and Harnesses</a></li></ol></li><li class="chapter-item expanded "><a href="../ch06/00-case-studies.html"><strong aria-hidden="true">6.</strong> Advanced Case Studies</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../ch06/dewy-compiler.html"><strong aria-hidden="true">6.1.</strong> Dewy Compiler</a></li><li class="chapter-item expanded "><a href="../ch06/neo-mapping.html"><strong aria-hidden="true">6.2.</strong> Asteroid Detection</a></li></ol></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <!-- Track and set sidebar scroll position -->
+        <script>
+            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
+            sidebarScrollbox.addEventListener('click', function(e) {
+                if (e.target.tagName === 'A') {
+                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
+                }
+            }, { passive: true });
+            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
+            sessionStorage.removeItem('sidebar-scroll');
+            if (sidebarScrollTop) {
+                // preserve sidebar scroll position when navigating via links within sidebar
+                sidebarScrollbox.scrollTop = sidebarScrollTop;
+            } else {
+                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
+                var activeSection = document.querySelector('#sidebar .active');
+                if (activeSection) {
+                    activeSection.scrollIntoView({ block: 'center' });
+                }
+            }
+        </script>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">The Dewy Programming Language</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="ranges"><a class="header" href="#ranges">Ranges</a></h1>
+<p>A range represents some span over a set of values. Typically ranges will be over numbers, however any orderable set could be used for a range (e.g. strings, dates, etc.). Ranges are frequently used for loops, indexing, and several other places.</p>
+<p>Ranges always contain a <code>..</code> and may include left and or right values that are juxtaposed, optionally specifying the bounds and step size.</p>
+<h2 id="range-syntax"><a class="header" href="#range-syntax">Range Syntax</a></h2>
+<p>The syntax for ranges is inspired by Haskell syntax for ranges:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bfirst..%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%25%20first%20to%20inf%0A%5B..last%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%25%20-inf%20to%20last%0A%5Bfirst..last%5D%20%20%20%20%20%20%20%20%20%20%20%25%20first%20to%20last%0A%5B..%5D%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%25%20-inf%20to%20inf&id=DewyIframe29"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe29"
+    frameBorder="0"
+></iframe>
+<p>Like in haskell, you can use a tuple to include a second value to specify the step size.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bfirst%2Csecond..%5D%20%20%20%20%20%20%20%20%25%20first%20to%20inf%2C%20step%20size%20is%20second-first%0A%5Bfirst%2Csecond..last%5D%20%20%20%20%25%20first%20to%20last%2C%20step%20size%20is%20second-first%0A%5B..2ndlast%2Clast%5D%20%20%20%20%20%20%20%20%25%20-inf%20to%20last%2C%20step%20size%20is%20last-2ndlast&id=DewyIframe30"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe30"
+    frameBorder="0"
+></iframe>
+<blockquote>
+<p>Note: <code>[first..2ndlast,last]</code> is explicitly <strong>NOT ALLOWED</strong>, as it can have unintuitive behavior, and is covered by <code>[first,second..last]</code>.</p>
+</blockquote>
+<p>In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bfirst..last%5D%20%20%20%25%20first%20to%20last%20including%20first%20and%20last%0A%5Bfirst..last%29%20%20%20%25%20first%20to%20last%20including%20first%2C%20excluding%20last%0A%28first..last%5D%20%20%20%25%20first%20to%20last%20excluding%20first%2C%20including%20last%0A%28first..last%29%20%20%20%25%20first%20to%20last%20excluding%20first%20and%20last%0Afirst..last%20%20%20%20%20%25%20same%20as%20%5Bfirst..last%5D.%20Careful%20of%20precedence&id=DewyIframe31"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe31"
+    frameBorder="0"
+></iframe>
+<h3 id="juxtaposition"><a class="header" href="#juxtaposition">Juxtaposition</a></h3>
+<p>The left and right values are only considered part of the range if they are juxtaposed with the <code>..</code>. Values not juxtaposed with the range are considered separate expressions.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=first..last%20%20%20%20%20%25%20first%20to%20last%0Afirst%20..last%20%20%20%20%25%20-inf%20to%20last.%20first%20is%20not%20part%20of%20the%20range%0Afirst..%20last%20%20%20%20%25%20first%20to%20inf.%20last%20is%20not%20part%20of%20the%20range%0Afirst%20..%20last%20%20%20%25%20-inf%20to%20inf.%20neither%20first%20or%20last%20are%20part%20of%20the%20range&id=DewyIframe32"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe32"
+    frameBorder="0"
+></iframe>
+<blockquote>
+<p>Note: the range juxtaposition operator has a quite low precedence. Most operators will have higher precedence, meaning the left and right expressions don't need to be wrapped in parenthesis.
+However, due to range juxtapose's low precedence, any range as part of an <code>in</code> expression (e.g. <code>a in [A..B]</code>) must be wrapped in range bounds (i.e. <code>[]</code>, <code>(]</code>, <code>[)</code>, <code>()</code>) to ensure the range is parsed correctly. <code>a in A..B</code> will be parsed as <code>(a in A)..B</code> .</p>
+</blockquote>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=first..last%2B1%20%20%20%20%20%20%20%20%20%20%20%25%20first%20to%20last%2B1%0Afirst%2Csecond..last/2%20%20%20%20%25%20first%20to%20last/2%2C%20step%20size%20is%20second-first%0Afirst/2%2Cfirst..last%2B10%20%20%25%20first/2%20to%20last%2B10%2C%20step%20size%20is%20first/2%0Aa%20in%20%5Bfirst..last%5D%20%20%20%20%20%20%25%20iterate%20a%20over%20range%20first%20to%20last&id=DewyIframe33"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe33"
+    frameBorder="0"
+></iframe>
+<p>Multiple ranges can be used to index into multidimensional matrices</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_array%20%3D%20%5B%0A%20%20%20%200%201%202%203%204%205%206%207%208%209%0A%20%20%20%2010%2011%2012%2013%2014%2015%2016%2017%2018%2019%0A%20%20%20%2020%2021%2022%2023%2024%2025%2026%2027%2028%2029%0A%5D%0Amy_array%5B1..%206..%5D%20%20%20%20%20%25returns%20%5B16%2017%2018%2019%3B%2026%2027%2028%2029%5D&id=DewyIframe34"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe34"
+    frameBorder="0"
+></iframe>
+<h2 id="numeric-ranges"><a class="header" href="#numeric-ranges">Numeric Ranges</a></h2>
+<p>Probably the most common type of range will be a numeric ranges which describes a span over real numbers.</p>
+<p>Some simple examples include:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=range1%20%3D%20%281..5%29%20%20%25%202%203%204%0Arange2%20%3D%20%281..5%5D%20%20%25%202%203%204%205%0Arange3%20%3D%20%5B1..5%29%20%20%25%201%202%203%204%0Arange4%20%3D%20%5B1..5%5D%20%20%25%201%202%203%204%205%0Arange5%20%3D%201..5%20%20%20%20%25%201%202%203%204%205&id=DewyIframe35"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe35"
+    frameBorder="0"
+></iframe>
+<h2 id="ordinal-ranges"><a class="header" href="#ordinal-ranges">Ordinal Ranges</a></h2>
+<p>Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.</p>
+<p>For example, the following range captures all characters in the range from <code>'a'</code> to <code>'z'</code> inclusive</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=ord_range%20%3D%20%27a%27..%27z%27&id=DewyIframe36"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe36"
+    frameBorder="0"
+></iframe>
+<p>All alphabetical characters might be represented like so</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=alpha_range%20%3D%20%5B%27a%27..%27z%27%5D%20%2B%20%5B%27A%27..%27Z%27%5D%0Aascii_range%20%3D%20%27A%27..%27z%27%20%25this%20would%20include%20extra%20characters%20like%20%27%5B%5C%5D%5E_%7B%7C%7D%27%20etc.&id=DewyIframe37"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe37"
+    frameBorder="0"
+></iframe>
+<p>But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=word_range%20%3D%20%27apple%27..%27zebra%27%0A%27panda%27%20in%3F%20word_range%20%20%25returns%20true&id=DewyIframe38"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe38"
+    frameBorder="0"
+></iframe>
+<p>which would create a range that consists of every possible 5 letter combination starting from the word <code>'apple'</code> and iterating through to the word <code>'zebra'</code>.</p>
+<blockquote>
+<p>Note: this is distinct from every dictionary word in that range, as it will include many many gibberish words.</p>
+</blockquote>
+<p>TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. <code>'apple2'</code> should come before <code>'apple10'</code>), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used</p>
+<h2 id="range-uses"><a class="header" href="#range-uses">Range Uses</a></h2>
+<p>Ranges have a variety of different uses in Dewy.</p>
+<h3 id="ranges-in-loops"><a class="header" href="#ranges-in-loops">Ranges in Loops</a></h3>
+<p>Probably the most common use is in conjunction with loops as a sequence to iterate over:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B0..5%5D%20print%27%7Bi%7D%20%27&id=DewyIframe39"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe39"
+    frameBorder="0"
+></iframe>
+<p>The above will print <code>'0 1 2 3 4 5 '</code>.</p>
+<p>To iterate over values in reverse, you can specify a reversed range:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B5%2C4..0%5D%20print%27%7Bi%7D%20%27&id=DewyIframe40"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe40"
+    frameBorder="0"
+></iframe>
+<p>This prints <code>'5 4 3 2 1 0 '</code>.</p>
+<blockquote>
+<p>Note: when specifying a reversed range, you must include the step size. Forgetting to specify the step size will result in an empty range, as ranges are normally increasing.</p>
+</blockquote>
+<h3 id="range-arithmetic"><a class="header" href="#range-arithmetic">Range Arithmetic</a></h3>
+<p>Ranges can be used in arithmetic expressions, often as a way to construct new ranges.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%25division%20version%0Aloop%20i%20in%20%5B0..4%5D/4%20print%27%7Bi%7D%20%27%0A%0A%25multiplication%20version%0Aloop%20i%20in%20%5B0..4%5D%2A0.25%20print%27%7Bi%7D%20%27&id=DewyIframe41"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe41"
+    frameBorder="0"
+></iframe>
+<p>Both of which will print <code>'0 0.25 0.5 0.75 1 '</code></p>
+<p>These are both equivalent to directly constructing the range <code>[0,0.25..1]</code>, however the arithmetic versions are frequently more convenient.</p>
+<p>This type of construction is closely related to the <code>linspace()</code>/<code>logspace()</code> functions in Dewy. TBD but <code>linspace</code>/<code>logspace</code> may in fact be implemented like so:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=linspace%20%3D%20%28interval%3Arange%20n%3Aint%3D10%29%20%3D%3E%20%7B%0A%20%20%20%20%5Bstart%20stop%5D%20%3D%20%5Binterval.start%20interval.stop%5D%0A%20%20%20%20step%20%3D%20%28stop-start%29/%28n-1%29%0A%20%20%20%20return%20start%2Cstart%2Bstep..stop%0A%7D%0Alogspace%20%3D%20%28interval%3Arange%20n%3Aint%3D10%20base%3Areal%3D10%29%20%3D%3E%20base%5Elinspace%28interval%20n%29&id=DewyIframe42"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe42"
+    frameBorder="0"
+></iframe>
+<h3 id="compound-range-construction"><a class="header" href="#compound-range-construction">Compound Range Construction</a></h3>
+<p>Additionally you can construct more complex ranges by combining together multiple ranges:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=complex_range%20%3D%20%5B1..5%5D%20%2B%20%2815..20%29%0Aloop%20i%20in%20complex_range%0A%20%20%20%20printl%28i%29%20%20%20%20%20%20%20%20%20%20%20%25prints%201%202%203%204%205%2016%2017%2018%2019%0A7%20in%3F%20complex_range%20%20%20%20%20%25returns%20false%0A16%20in%3F%20complex_range%20%20%20%20%25returns%20true&id=DewyIframe43"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe43"
+    frameBorder="0"
+></iframe>
+<p>The same range as above can be constructed using subtraction</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=complex_range%20%3D%20%5B1..20%29%20-%20%285..15%5D&id=DewyIframe44"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe44"
+    frameBorder="0"
+></iframe>
+<h3 id="interval-membership"><a class="header" href="#interval-membership">Interval Membership</a></h3>
+<p>You can also check if a value falls within a specified range</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=5%20in%3F%20%5B1..5%5D%20%20%20%20%20%20%20%20%20%25returns%20true%0A5%20in%3F%20%281..5%29%20%20%20%20%20%20%20%20%20%25returns%20false%0A3.1415%20in%3F%20%281..5%29%20%20%20%20%25returns%20true&id=DewyIframe45"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe45"
+    frameBorder="0"
+></iframe>
+<h3 id="indexing-sequences"><a class="header" href="#indexing-sequences">Indexing Sequences</a></h3>
+<p>ranges can be used to select values from a sequence. For example, say we want a substring we can do the following</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=full_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring%20%3D%20full_string%5B3..12%5D%0Aprintl%28substring%29%20%25prints%20%27s%20is%20a%20str%27&id=DewyIframe46"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe46"
+    frameBorder="0"
+></iframe>
+<p>This works for any sequence type.</p>
+<blockquote>
+<p>Note: only integer ranges can be used to index into sequences (TBD if this might be relaxed to real valued ranges).</p>
+</blockquote>
+<p>Also, because array access is a juxtapose expression, we can easily make the selection inclusive or exclusive on either side.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=full_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring1%20%3D%20full_string%283..12%29%20%20%25%20%27%20is%20a%20st%27%0Asubstring2%20%3D%20full_string%5B3..12%29%20%20%25%20%27s%20is%20a%20st%27%0Asubstring3%20%3D%20full_string%283..12%5D%20%20%25%20%27%20is%20a%20str%27&id=DewyIframe47"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe47"
+    frameBorder="0"
+></iframe>
+<p>You can specify that a range continues to the end of the sequence, or starts from the beginning by omitting the value for that side. This will construct a range that goes to infinity in that direction, which will select all elements in that direction.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=full_string%20%3D%20%27this%20is%20a%20string%27%0A%0Asubstring_to_end%20%3D%20full_string%5B3..%5D%20%20%20%20%20%20%25%20%27s%20is%20a%20string%27%0Asubstring_from_start%20%3D%20full_string%5B..12%5D%20%25%20%27this%20is%20a%20str%27%0Awhole_string%20%3D%20full_string%5B..%5D%20%20%20%20%20%20%20%20%20%20%20%25selects%20the%20whole%20string&id=DewyIframe48"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe48"
+    frameBorder="0"
+></iframe>
+<p>Paired with the special <code>end</code> token which represents the index of the last element in a sequence, this provides the means to select any desired subset of a sequence.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=arr%5Bend%5D%20%20%20%20%20%20%25%20last%20element%0Aarr%5Bend-1%5D%20%20%20%20%25%20second%20to%20last%20element%0Aarr%5B..end-3%5D%20%20%25%20first%20element%20to%204th%20to%20last%20element%0Aarr%5B5..end-3%5D%20%25%205th%20element%20to%204th%20to%20last%20element%0Aarr%5Bend-3..%5D%20%20%25%204th%20to%20last%20element%20to%20last%20element&id=DewyIframe49"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe49"
+    frameBorder="0"
+></iframe>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../ch03/container-types.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next" href="../ch03/object-types.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../ch03/container-types.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next" href="../ch03/object-types.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../dewy_online_interpreter_handler.js"></script>
+
+
+    </div>
+    </body>
+</html>
