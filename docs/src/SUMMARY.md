@@ -49,6 +49,9 @@
     - [Data Structures](ch04/xx-data-structures.md)
     - [Time](ch04/xx-time.md)
     - [Plotting](ch04/xx-plotting.md)
+    - [Parsing](ch04/xx-parsing.md)
+    - [Parallelism](ch04/xx-parallelism.md)
+
 - [General Concepts](ch05/00-general.md)
     - [Sandboxes and Harnesses](ch05/xx-sandboxes-harnesses.md)
 
