@@ -1,3 +1,7 @@
+% for convenience
+null: ptr<T> = 0
+
+
 % using SDL2 from dewy
 
 % --- Opaque Pointer Types ---
@@ -51,10 +55,22 @@ const GL_COLOR_BUFFER_BIT = 0x00004000
 
 
 
-% for convenience
-null: ptr<T> = 0
 
-main = () :> int => {
+
+
+
+
+
+
+
+
+
+
+
+% --- The Application Logic ---
+% This is the function that contains our actual SDL program.
+% It has the standard C main signature because that's what __libc_start_main expects to call.
+sdl_main = (argc: int, argv: ptr<ptr<char>>) :> int => {
     % 1. Initialize SDL
     % We only need the video subsystem for this example.
     if SDL_Init(SDL_INIT_VIDEO) <? 0 {
@@ -129,3 +145,53 @@ main = () :> int => {
 
     return 0
 }
+
+
+
+
+
+
+
+
+% --- FFI Declarations for the C Runtime Bootstrapping ---
+
+% We need to tell Dewy about the C startup/teardown functions.
+% We treat them as external function pointers provided by the linker from crti.o/crtn.o
+_init = () :> void => extern
+_fini = () :> void => extern
+MainFn:type = (argc:int argv:ptr<ptr<char>>) :> int
+
+
+% The full, correct FFI declaration for __libc_start_main.
+% It takes many arguments and does not return.
+__libc_start_main = (
+    main: MainFn
+    argc: int
+    argv: ptr
+    init: (():>void)
+    fini: (():>void)
+    rtld_fini: ptr
+    stack_end: ptr
+) :> noreturn => extern
+
+
+%% Call the cstdlib startup and pass in our main method
+% 1. Get the arguments passed from the shim.
+let argc = ... % get argc from wherever the shim places it (e.g., a register)
+let argv = ... % get argv
+let envp = ... % get envp
+
+% 2. The Final Step: Hand control over to the C library initializer.
+%    This is the last expression in the script. __libc_start_main will take over
+%    and eventually call our `sdl_main` function. It will never return.
+__libc_start_main(
+    @sdl_main,      % 1. Pointer to our application logic
+    argc,           % 2. The original argument count
+    argv,           % 3. The original argument vector
+    @_init,         % 4. Pointer to the .init function
+    @_fini,         % 5. Pointer to the .fini function
+    null,           % 6. rtld_fini (for dynamic linker)
+    null            % 7. stack_end (can often be null, was originally &argv[argc+1])
+)
+
+% nothing can happen below this point since __libc_start_main is noreturn
