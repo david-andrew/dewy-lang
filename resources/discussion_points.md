@@ -2993,3 +2993,108 @@ pythag_length(3 4)
 ```
 
 perhaps even if we did `pythag_length(3.0 4.0)` that might still just convert to rational because 3.0 and 4.0 are technically both still integers. I think any decimal values written out would be rational unless the container type is float or it is cast to float, etc.
+
+
+
+## Compiletime feature support checking
+Imagine you want to write a program that used environment variables. In principle, Dewy can execute in arbitary environments which may not contain certain features, so there should be a good typesafe way to fail compilation in such environments.
+
+I think manually writing it out, it might be something like this:
+```dewy
+% idea for compile-time
+if sys.env is? unsupported _::fail_compile'platform must support environment pointer'
+```
+
+though this is a bit verbose, and I actually imagine a more convenient feature might be something like
+```dewy
+require = <T>(val:T|unsupported msg:string=undefined) =>
+    if value is? unsupported
+        _::fail_compile(msg ?? '{val.__caller_scope_name__} is not supported on {sys.platform}')
+
+% requre certain system features to exist
+sys.env  |> require
+sys.argv |> require
+etc...   |> requrie
+```
+
+
+Perhaps also though, there should be a way to fail if any unsupported thing is used. perhaps this is just the default behavior anyways? e.g. most of the time, `unsupported` is going to come up due to environment/operating system features/constraints, so when you're writing the program, the IDE would mention something could be unsupported, but when you actually compile for a concrete operating system, it should collapse down to either the regular value, or unsupported rather than possibly either. In which case, trying to use something unsupported would just come up as a compiler error anyways. Probably this means that the user doesn't even need to specify `requirements` anyways, as by using a thing, the program is saying it requries that thing, and we can therefore error on compilation when that thing is not supported.
+
+## is? is for type checking, while =? is for equality checking
+I think I've decided that `is?` will not be for address checking, but for type checking, i.e.
+```dewy
+a is? int   % typeof(a) =? int
+```
+
+So now if you want to compare if two things have the same address, you manually just compare their addresses like so:
+```dewy
+@a =? @b
+```
+
+I think this is much more convenient than e.g. having an `isinstance` function or doing `typeof(val) => sometype`. Checking if something is some type is super common, so it should be super convenient to do such checks. the lhs is any value you want to check the type, and the rhs is any arbitrary type expression
+```
+a is? int|string
+a is? 5|10
+a is? A & B   % where A and B are some already defined types/structs
+```
+
+`is?` should return true for exact matches of the type expression, as well as for if the rhs has a parent type of the lhs
+```dewy
+a:uint32 = 42
+a is? number  % true
+```
+
+which maybe implies that there should be a strict version, e.g.
+
+```dewy
+% maybe don't add this operator...
+a strict_is? number  % false
+a strict_is? uint32  % true
+
+% however since I think this case is rarer, I think perhaps we just fallback on manually checking the type
+typeof(a) =? number  % false
+typeof(a) =? uint32  % true
+```
+
+
+
+## implicit union typing syntax sugar
+I think it's a pain in the butt in python/etc. to have to manually type annotate e.g. when something will be undefined
+```python
+def some_func(a:int|None=None): ...
+```
+
+Instead, the rule in dewy should be that if you set a value during the declaration of an identifier, and that value is not part of the type annotation, that the type annotation implicitly will include the value itself. Note that there should be a warning emitted if the value is not a common type for this use case like undefined, missing, etc
+
+```dewy
+a:int=undefined       % a:int|undefined = undefined
+b:int|string=missing  % b:int|string|missing = missing
+c:A&B=unsupported     % c:A&B|unsupported = unsupported
+d:D|A&B = never       % d:D|A&B|never = never  % not sure if users can assign `never` or if it's similar to void
+e:E=5                 % e:E|5 = 5   % also emits warning that here you should properly annotate since not a missing type
+e:E|5=5               %             % no more warning
+e=5                   % e:5 = 5     % gradual typed version, so probably no warning (unless we want warnings that you should type annotate things)
+f:F = ...             % f:F|... = ...  % tbd if this is a warning or not
+```
+
+
+
+## noreturn vs never
+`never` type is for when something can't happen, typically because you exhaustively checked all the cases, and so nothing possible is left at that point.
+
+```dewy
+a:A|B = ...
+if a is? A ...
+else if a is? B ...
+else ... % `a` and anything else is never in this block
+```
+
+`noreturn` is for annotating when functions will not return control back to the user. e.g.
+```dewy
+exit = code:uint8 :> noreturn => (
+    __syscall1__(SYSCALL_EXIT_GROUP code)
+    loop true __syscall1__(SYSCALL_EXIT code)
+)
+```
+
+philisophically, some languages use `never` as a return type annotation to mean `noreturn`, but I think it's valuable to keep them separate. `never` will typically be something the user sees in the IDE telling them a case cannot happen (rather than an annotation they might write out), whereas `noreturn` is an actual annotation they might use that will enforce constraints on the function, namely that it not return control back.
