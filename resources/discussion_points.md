@@ -3020,6 +3020,20 @@ etc...   |> requrie
 
 Perhaps also though, there should be a way to fail if any unsupported thing is used. perhaps this is just the default behavior anyways? e.g. most of the time, `unsupported` is going to come up due to environment/operating system features/constraints, so when you're writing the program, the IDE would mention something could be unsupported, but when you actually compile for a concrete operating system, it should collapse down to either the regular value, or unsupported rather than possibly either. In which case, trying to use something unsupported would just come up as a compiler error anyways. Probably this means that the user doesn't even need to specify `requirements` anyways, as by using a thing, the program is saying it requries that thing, and we can therefore error on compilation when that thing is not supported.
 
+Also note, this seems to imply that there maybe should be an IDE intellisense way to specify what the compile-target will be, so that if say you know you are only compiling for posix-linux, anytime you use a posix feature, the IDE won't be adding excessive noise by saying feature X might be unsupported. TBD what the syntax might be, perhaps something like
+
+```dewy
+sys.env   % typeof is dict<string string>|unsupported
+sys.argv  % typeof is array<string>|unsupported
+
+% compiletime check if some platform's features are present
+assert sys.platform.supports'posix'
+
+% types of any and all `posix` features from here onward no longer contain `|unsupported`
+sys.env   % typeof is dict<string string>
+sys.argv  % typeof is array<string>
+```
+
 ## is? is for type checking, while =? is for equality checking
 I think I've decided that `is?` will not be for address checking, but for type checking, i.e.
 ```dewy
