@@ -1,0 +1,90 @@
+%{
+In general, dewy is bare metal, so C stdlib won't be linked.
+However for bootstrapping language features (e.g. window management, etc.), making use of libraries
+that depend on C's runtime (e.g. SDL, etc.) is unavoidable.
+
+So this is an example of how you write a program that uses libraries that need the C runtime
+
+Compilation steps: (TODO: verify this)
+
+% make a C runtime object file
+ld -r -o dewy_c_runtime.o \
+   /usr/lib/x86_64-linux-gnu/crti.o \
+   /usr/lib/x86_64-linux-gnu/crtn.o \
+   --start-group \
+   /usr/lib/x86_64-linux-gnu/libc.a \
+   /usr/lib/gcc/x86_64-linux-gnu/$(gcc -dumpversion)/libgcc.a \
+   /usr/lib/gcc/x86_64-linux-gnu/$(gcc -dumpversion)/libgcc_eh.a \
+   --end-group
+
+% compile the dewy program (and include the C runtime)
+ld -o hello_c_program \
+   --entry _start \
+   my_shim.o \
+   hello_c.o \
+   /path/to/dewy/lib/dewy_c_runtime.o
+}%
+
+
+% for convenience
+ptr<T>: type = int
+MainFn: type = (argc:int argv: ptr<ptr<char>>) :> int
+
+
+% --- FFI Declarations for libc Functions ---
+printf = (format: string) :> int => extern
+malloc = (size: int) :> ptr => extern
+
+
+% --- FFI Declarations for the C Runtime Bootstrapping ---
+% Pointers to the C init/fini functions, provided by crti.o and crtn.o
+_init = ():>void => extern
+_fini = ():>void => extern
+
+
+% The C library startup function.
+__libc_start_main = (
+    main_ptr: MainFn
+    argc: int
+    argv: ptr
+    init: (():>void)
+    fini: (():>void)
+    rtld_fini: ptr
+    stack_end: ptr
+) :> noreturn => extern
+
+
+% --- The Application Logic ---
+% This is the function that will be run AFTER libc is initialized.
+% It has the standard C main signature.
+c_main = (argc:int argv:ptr<ptr<char>>) :> int => {
+
+    % The one and only thing we want to do: call a libc function.
+    printf"Hello from a libc function, called by Dewy!\n"
+
+    % Return a success exit code.
+    return 0
+}
+
+
+% --- Top-Level Script Execution ---
+
+% Define a null pointer for unused arguments
+null<T>: ptr<T> = 0
+
+%tbd, argc/argv might just already be present
+let argc = extern
+let argv = extern
+
+% Hand control over to the C library initializer.
+% It will set up the C environment and then call our `c_main` function.
+% This function call never returns.
+__libc_start_main(
+    @c_main      % 1. Pointer to our application logic
+    argc         % 2. The original argument count
+    argv         % 3. The original argument vector
+    @_init       % 4. Pointer to the .init function
+    @_fini       % 5. Pointer to the .fini function
+    null         % 6. rtld_fini (not used in static linking)
+    null         % 7. stack_end (not strictly needed here)
+)
