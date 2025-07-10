@@ -761,7 +761,7 @@ def eat_based_number(src: str) -> int | None:
     # TODO: this still isn't quite safe enough. if someone did something like `0q1237`, then we would tokenize `0q123` and `7` separately and then multiply them...
     if i == 2 or (i < len(src) and src[i].isdigit()):
         raise ValueError(f'Invalid digits for `{src[:2].lower()}` based number. Expected digits in {digits}, but got `{src[:max(i, 10)]}...`')
-    
+
     return i# if i > 2 else None
 
 
@@ -868,7 +868,9 @@ def eat_dotdot(src: str) -> int | None:
     """
     eat a dotdot, return the number of characters eaten
     """
-    return 2 if src.startswith('..') else None
+    if src.startswith('..') and not src.startswith('...'):
+        return 2
+    return None
 
 
 @peek_eat(DotDotDot_t)
@@ -876,7 +878,9 @@ def eat_dotdotdot(src: str) -> int | None:
     """
     eat a dotdotdot, return the number of characters eaten
     """
-    return 3 if src.startswith('...') else None
+    if src.startswith('...') and not src.startswith('....'):
+        return 3
+    return None
 
 
 @peek_eat(Backticks_t)
