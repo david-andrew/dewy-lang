@@ -293,16 +293,8 @@ class Void(AST):
 void = Void()
 
 
-# assign is just a binop?
-# perhaps bring this one back since it's syntax that distinguishes it, not type checking
-# class Assign(AST):
-#     # TODO: allow bind to take in an unpack structure
-#     target: Declare | Identifier | UnpackTarget
-#     value: AST
-
-#     def __str__(self):
-#         return f'{self.target} = {self.value}'
-
+class EmptyObjLiteral(AST):
+    def __str__(self): return '[]'
 
 class ListOfASTs(PrototypeAST):
     """Intermediate step for holding a list of ASTs that are probably captured by a container"""
@@ -799,6 +791,12 @@ class Declare(AST):
     def __str__(self):
         return f'{self.decltype.name.lower()} {self.target}'
 
+
+class Return(AST):
+    item: AST
+
+    def __str__(self):
+        return f'return {self.item}'
 
 
 if __name__ == '__main__':

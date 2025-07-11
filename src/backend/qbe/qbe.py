@@ -599,6 +599,9 @@ def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_func: QbeF
             if rhs is None:
                 raise ValueError(f'INTERNAL ERROR: attempting to assign some type that doesn\'t produce a value: {name}={right!r}')
 
+            # TODO: handle if rhs is a function
+            # if isinstance(rhs, QbeFunction):
+
             # handle if the variable existed yet or not
             if (var:=scope.get(name, False)) is None or var.value is void:
                 qid = current_func.get_temp()

@@ -7,10 +7,11 @@ from .syntax import (
     AST,
     Access,
     Declare,
+    Return,
     PointsTo, BidirPointsTo,
     Type,
     ListOfASTs, PrototypeTuple, Block, BareRange, DotDotDot, CollectInto, SpreadOutFrom, Array, Group, Range, ObjectLiteral, Dict, BidirDict, TypeParam,
-    Void, Undefined, void, undefined, untyped,
+    Void, Undefined, void, undefined, untyped, EmptyObjLiteral, #New, End,
     String, IString,
     Flowable, Flow, If, Loop, Default,
     PrototypeFunctionLiteral, PrototypeBuiltin, Call,
@@ -40,6 +41,7 @@ from .tokenizer import (
     Escape_t,
     TypeParam_t,
     Undefined_t,
+    Void_t,
     Identifier_t,
     Hashtag_t,
     Integer_t,
@@ -59,6 +61,7 @@ from .postok import (
     is_op, is_binop, is_unary_prefix_op, is_unary_postfix_op,
     Flow_t,
     Declare_t,
+    Return_t,
     OpChain_t,
     BroadcastOp_t,
     CombinedAssignmentOp_t,
@@ -309,13 +312,18 @@ def operator_associativity(op: Operator_t | int) -> Associativity|set[Associativ
     except:
         raise ValueError(f"Error: failed to determine associativity for operator {op}") from None
 
-
-
-def parse_chain(chain: Chain[Token]) -> AST:
+from typing import Literal, overload
+@overload
+def parse_chain(chain: Chain[Token], require_result:Literal[True]=True) -> AST: ...
+@overload
+def parse_chain(chain: Chain[Token], require_result:Literal[False]) -> AST|None: ...
+def parse_chain(chain: Chain[Token], require_result:bool=True) -> AST|None:
     assert isinstance(chain, Chain), f"ERROR: parse chain must be called on Chain[Token], got {type(chain)}"
 
     if len(chain) == 0:
-        return void
+        if require_result:
+            raise ValueError(f'Expected parse_chain to return something, but was given empty chain as input')
+        return None
     if len(chain) == 1:
         return parse_single(chain[0])
 
@@ -326,14 +334,14 @@ def parse_chain(chain: Chain[Token]) -> AST:
         ... #TODO: handle ambiguous precedence error by making a QAST
         return build_quantum_expr(e.ops, e.ranks, e.assocs, e.tokens)
 
-    left, right = parse_chain(left), parse_chain(right)
+    left, right = parse_chain(left, False), parse_chain(right, False)
 
-    assert not (left is void and right is void), f"Internal Error: both left and right returned void during parse chain, implying both left and right side of operator were empty, i.e. chain was invalid: {chain}"
+    assert left is not None or right is not None, f"Internal Error: both left and right returned void during parse chain, implying both left and right side of operator were empty, i.e. chain was invalid: {chain}"
 
     # 3 cases are prefix expr, postfix expr, or binary expr
-    if left is void:
+    if left is None:
         return build_unary_prefix_expr(op, right)
-    if right is void:
+    if right is None:
         return build_unary_postfix_expr(left, op)
     return build_bin_expr(left, op, right)
 
@@ -408,7 +416,7 @@ def split_by_lowest_precedence(tokens: Chain[Token]) -> tuple[Chain[Token], Toke
         case Associativity.unary: raise ValueError(f'INTERNAL ERROR: there should not be any unary operators in the list of operators at this point')
         case Associativity.none: i = op_idxs[-1]  # default to left. handled later in parsing
         case Associativity.fail: raise ValueError(f'Cannot handle multiple given operators in chain {tokens}, as lowest precedence operator is marked as un-associable.')
-
+        case _: raise ValueError(f'INTERNAL ERROR: unexpected associativity. {assoc=}')
     return Chain(tokens[:i]), tokens[i], Chain(tokens[i+1:])
 
 
@@ -446,8 +454,8 @@ def unary_split_by_lowest_precedence(tokens: Chain[Token], ops: list[Token], idx
         i = left_idx
     else:
         # use precedence to determine lower precedence op
-        left_rank = operator_precedence(left_op)
-        right_rank = operator_precedence(right_op)
+        left_rank = operator_precedence(left_op) if left_op is not None else -1
+        right_rank = operator_precedence(right_op) if right_op is not None else -1
         i = left_idx if left_rank <= right_rank else right_idx
 
     return Chain(tokens[:i]), tokens[i], Chain(tokens[i+1:])
@@ -457,6 +465,7 @@ def parse_single(token: Token) -> AST:
     """Parse a single token into an AST"""
     match token:
         case Undefined_t(): return undefined
+        case Void_t(): return void
         case Identifier_t(): return PrototypeIdentifier(token.src)
         case Hashtag_t(): return PrototypeIdentifier(token.src)
         case Integer_t(): return Int(int(token.src))
@@ -471,6 +480,7 @@ def parse_single(token: Token) -> AST:
         case TypeParam_t(): return parse_type_param(token)
         case Flow_t(): return parse_flow(token)
         case Declare_t(): return parse_declare(token)
+        case Return_t(): return Return(parse_chain(token.expr))
 
         case _:
             # TODO handle other types...
@@ -682,7 +692,7 @@ def build_unary_postfix_expr(left: AST, op: Token) -> AST:
 
         case Operator_t(op=';'):
             return Suppress(left)
-        
+
         case _:
             pdb.set_trace()
             raise NotImplementedError(f"TODO: {op=}")
@@ -758,8 +768,13 @@ def parse_block(block: Block_t) -> AST:
 
     delims = block.left + block.right
     match delims, inner:
-        case '()' | '{}' | '[]', Void():
+        case '()' | '{}' | '[]', None:
+            pdb.set_trace()
+            ...
+        case '()' | '{}', Void():
             return inner
+        case '[]', Void():
+            return EmptyObjLiteral()
         case '()', ListOfASTs():
             return Group(inner.asts)
         case '{}', ListOfASTs():

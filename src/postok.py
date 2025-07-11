@@ -60,7 +60,18 @@ class Flow_t(Token):
 
 
 # class Do_t(Token):...
-# class Return_t(Token):...
+
+
+class Return_t(Token):
+    def __init__(self, expr: Chain[Token]):
+        self.expr = expr
+
+    def __repr__(self) -> str:
+        return f'<Return_t: {self.expr}>'
+
+    def __iter__(self) -> Generator[list[Token], None, None]:
+        yield self.expr
+
 # class Express_t(Token):...
 
 
@@ -204,6 +215,7 @@ atom_tokens = (
     Backticks_t,
     Flow_t,
     Undefined_t,
+    Void_t,
 )
 
 # atoms that can be juxtaposed (so juxtaposes next to them shouldn't be removed)
@@ -405,9 +417,8 @@ def _get_next_keyword_expr(tokens: list[Token]) -> tuple[Token, list[Token]]:
             pdb.set_trace()
             ...
         case Keyword_t(src='return'):
-            # TBD how to do this one...
-            pdb.set_trace()
-            ...
+            expr, tokens = get_next_chain(tokens, tracker=ShouldBreakFlowTracker())
+            return Return_t(expr), tokens
         case Keyword_t(src='express'):
             pdb.set_trace()
             ...
@@ -613,7 +624,7 @@ def post_process(tokens: list[Token]) -> None:
 
     # bundle up conditionals into single token expressions
     bundle_conditionals(tokens)
-    
+
     # make the actual list of chains
 
     # based on types, replace jux with jux_mul or jux_call

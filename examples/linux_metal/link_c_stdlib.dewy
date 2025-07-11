@@ -1,4 +1,5 @@
 %{
+%{
 In general, dewy is bare metal, so C stdlib won't be linked.
 However for bootstrapping language features (e.g. window management, etc.), making use of libraries
 that depend on C's runtime (e.g. SDL, etc.) is unavoidable.
@@ -87,4 +88,38 @@ __libc_start_main(
     @_fini       % 5. Pointer to the .fini function
     null         % 6. rtld_fini (not used in static linking)
     null         % 7. stack_end (not strictly needed here)
+)
+}%
+
+
+
+%% Simplest Version
+printf = (format: cstring) :> int => extern
+malloc = (size: int) :> ptr => extern
+_init = ():>void => extern
+_fini = ():>void => extern
+
+__libc_start_main = (main_ptr argc argv init fini rtld_fini stack_end) :> noreturn => extern
+
+% our main function to be called by C runtime
+c_main = (argc argv) :> int => {
+    printf"Hello from a libc function, called by Dewy!\n"
+    return 0
+}
+
+
+% --- Top-Level Script Execution ---
+
+%tbd, argc/argv might just already be present
+let argc = extern
+let argv = extern
+
+__libc_start_main(
+    @c_main      % 1. Pointer to our application logic
+    argc         % 2. The original argument count
+    argv         % 3. The original argument vector
+    @_init       % 4. Pointer to the .init function
+    @_fini       % 5. Pointer to the .fini function
+    0            % 6. rtld_fini (not used in static linking)
+    0            % 7. stack_end (not strictly needed here)
 )
