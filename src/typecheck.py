@@ -422,7 +422,7 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             case Access(left=left, right=right):
                 # TODO: check that the member accessed exists on the left ast
                 ...
-            
+
             case Suppress(operand=operand): ... #generally suppress shouldn't care about the inner types
 
             case Int() | String() | IString(): ...
@@ -437,7 +437,7 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             case Add() | Sub() | Mul() | Div() | IDiv() | Mod() | LeftShift() | RightShift() | LeftRotate() | RightRotate():
                 # TODO: verify left and right are compatible with the given operation
                 ...
-            
+
             case UnaryNeg() | UnaryPos() | UnaryMul() | UnaryDiv():
                 # TODO: verify the operand is compatible with the unary operation
                 ...
@@ -461,6 +461,9 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             case Type():
                 # TODO: probably will use this somewhere...
                 ...
+
+            case AtHandle(operand=operand): ... #longer term, @handle should check that the inner thing can be referenced, and the type of the reference makes sense...
+
 
             case _:
                 pdb.set_trace()
