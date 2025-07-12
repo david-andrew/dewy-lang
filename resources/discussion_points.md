@@ -39,11 +39,12 @@ And then there's the `:=` operator which is a proper bind expression, but it ret
 Actually on further thought, I think bind should still be an expression, it's just that the bind expression returns `void`, thus even if it is in a context that captures expressions, it doesn't lead to anything. This way, we keep the "Everything is an expression" mantra.
 
 
-## Inline distinguishing row vector vs column vector [DONE: [a,b,c,...] separated by commas automatically makes a row vector]
-perhaps we actually got lucky, and can let tuples make a row vector since a tuple desugars to a list, so a tuple inside of an array would turn into an array inside an array
+## Inline distinguishing row vector vs column vector [`row[1 2 3]` and `col[1 2 3]` for shorthand to make proper 2D row vs col vectors. `[1 2 3]` is a 1D question]
+~~perhaps we actually got lucky, and can let tuples make a row vector since a tuple desugars to a list, so a tuple inside of an array would turn into an array inside an array~~
+This part is no longer applicable because parenthesis are non-semantic.
 
 ```dewy
-let row_vec = [1, 2, 3] //  desugars to [[1 2 3]]
+let row_vec = [1, 2, 3] %  desugars to [[1 2 3]]
 ```
 
 ```dewy
@@ -70,6 +71,56 @@ mat2 = [
 
 // Technically can also construct tensors like this, but currently a bit cumbersome
 tensor = [(1,2,3),(4,5,6),(7,8,9) (10,11,12),(13,14,15),(16,17,18) (19,20,21),(22,23,24),(25,26,27)]
+```
+
+### above maybe no longer works ([a,b,c,...] separated by commas automatically makes a row vector)
+Basically I changed the semantics of comma, so that commas don't make an array, they simply wrap the expressions in parenthesis
+Technically the above could still work, though we'd have to be careful about the semantics:
+```dewy
+[1 2 3 4]   % -> [1 2 3 4]
+[1,2,3,4]   % -> [(1 2 3 4)] -> [[1 2 3 4]] or [1 2 3 4]
+```
+Whether commas can add another dimension or not depends on the semantics of arrays and inner items that are grouped or not
+
+It might turn out to be really elegant that using parenthesis is the explicit way to add dimensions to an array, e.g.
+```dewy
+[((1 2) (3 4))]  % -> [[[1 2] [3 4]]] or [1 2 3 4] ...
+```
+though at that point, why not literally just use array brackets anyways? There's basically no point in the parenthesis, and it potentially conflicts with how parenthesis work normally, in that they are supposed to be purely non-semantic--for syntactic disambiguation only.
+
+I think ultimately, if you wanted to do a row vs column vector, there's `[[1 2 3 4]]` but not a good comparable version for column vectors.
+
+I think the solution is to just have functions `row` and `col` which you can use to make `(N,)` shaped arrays into `(N, 1)` and `(1, N)`. Basically just `row[1 2 3 4]` and `col[1 2 3 4]` for the single-line shorthand version. And then you can use either:
+1. the spatially laid out version for more complicated
+```dewy
+my_tensor = [
+    1 2 3
+    4 5 6
+    7 8 9
+
+    8 7 6
+    7 6 5
+    6 5 4
+
+    1 0 0
+    0 1 0
+    0 0 1
+]
+```
+
+2. just delimit with the right number of brackets
+```dewy
+my_tensor = [[[1 2 3] [4 5 6] [7 8 9]] [[8 7 6] [7 6 5] [6 5 4]] [[1 0 0] [0 1 0] [0 0 1]]]
+```
+
+3. interspersing the two:
+```dewy
+% TBD if this is the right ordering...
+my_tensor = [
+    [1 2 3] [4 5 6] [7 8 9]
+    [8 7 6] [7 6 5] [6 5 4]
+    [1 0 0] [0 1 0] [0 0 1]
+]
 ```
 
 ## will complex list comprehensions be column vectors if people use usual spacing?
