@@ -7,6 +7,7 @@ from .syntax import (
     PointsTo, BidirPointsTo,
     Type,
     ListOfASTs, PrototypeTuple, Block, BareRange, Ellipsis, DotDotDot, CollectInto, SpreadOutFrom, Array, Group, Range, ObjectLiteral, Dict, BidirDict, TypeParam,
+    Untyped,
     Void, Undefined, void, undefined, untyped,
     String, IString,
     Flowable, Flow, If, Loop, Default,
@@ -37,6 +38,7 @@ class Signature(AST):
     pargs:   list[AST] = field(default_factory=list)
     kwargs:  list[AST] = field(default_factory=list)
     #TODO: probably keep track of spread args i.e. "spargs"
+    rettype: AST = field(default=untyped)
 
     def _is_delimited(self) -> bool:
         n_args = len(self.pkwargs) + len(self.pargs) + len(self.kwargs)
@@ -52,17 +54,18 @@ class Signature(AST):
         pkwargs = ' '.join(str(i) for i in self.pkwargs)
         pargs   = ' '.join(str(i) for i in self.pargs)
         kwargs  = ' '.join(str(i) for i in self.kwargs)
+        rettype = f' :> {self.rettype}' if self.rettype is not untyped else ''
 
         if pargs:
             pargs = f' #pos_only {pargs}'
         if kwargs:
             kwargs = f' #kw_only {kwargs}'
 
-        s = f'{pkwargs}{pargs}{kwargs}'.strip()
+        s = f'{pkwargs}{pargs}{kwargs}'.lstrip()
 
         if self._is_delimited():
-            return s
-        return f'({s})'
+            return f'{s}{rettype}'
+        return f'({s}){rettype}'
 
 
 # basically just convert all the different types of args to a normalized format (i.e. group)
@@ -121,7 +124,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
                 gen.send(AtHandle(Identifier(name)))
             case AtHandle():
                 pdb.set_trace()
-                ...          
+                ...
             case Assign(left=PrototypeIdentifier(name=name), right=right):
                 gen.send(Assign(Identifier(name), right))
             case Assign(left=Array() as arr, right=right):
@@ -137,7 +140,7 @@ def convert_prototype_identifiers(ast: AST) -> AST:
             case Assign():
                 pdb.set_trace()
                 ...
-            
+
             case IterIn(left=PrototypeIdentifier(name=name), right=right):
                 gen.send(IterIn(Identifier(name), right))
             case IterIn(left=Array() as arr, right=right):
@@ -287,6 +290,7 @@ def normalize_function_arg(arg: AST) -> tuple[list[AST], list[AST], list[AST]]:
         #     #think about though. could use identifiers directly instead of strings
 
         case _:
+            pdb.set_trace()
             raise NotImplementedError(f'normalize_signature not implemented yet for {arg=}')
 
     return pkwarg, parg, kwarg
@@ -308,15 +312,23 @@ def normalize_function_arg(arg: AST) -> tuple[list[AST], list[AST], list[AST]]:
 
 def normalize_function_args(signature: AST) -> Signature:
     """Convert all the different function arg syntax options to a normalized format (group)"""
-    if not isinstance(signature, Group):
-        return Signature(*normalize_function_arg(signature))
 
+    # if return type specified, strip off of signature so we can process the args separately
+    rettype = untyped
+    if isinstance(signature, ReturnTyped):
+        signature, rettype = signature.left, signature.right
+
+    # non-grouped arguments count as the whole signature
+    if not isinstance(signature, Group):
+        signature = Group([signature])
+    #     return Signature(*normalize_function_arg(signature), rettype)
+
+    # process each argument
     pkwargs, pargs, kwargs = [], [], []
     for i in signature.items:
         pkw, p, kw = normalize_function_arg(i)
         pkwargs.extend(pkw)
         pargs.extend(p)
         kwargs.extend(kw)
-    return Signature(pkwargs, pargs, kwargs)
 
-
+    return Signature(pkwargs, pargs, kwargs, rettype)
