@@ -11,7 +11,7 @@ from .syntax import (
     PointsTo, BidirPointsTo,
     Type,
     ListOfASTs, PrototypeTuple, Block, BareRange, DotDotDot, CollectInto, SpreadOutFrom, Array, Group, Range, ObjectLiteral, Dict, BidirDict, TypeParam,
-    Void, Undefined, void, undefined, untyped, EmptyObjLiteral, #New, End,
+    Void, Undefined, void, undefined, untyped, extern, new, end, EmptyObjLiteral,
     String, IString,
     Flowable, Flow, If, Loop, Default,
     PrototypeFunctionLiteral, PrototypeBuiltin, Call,
@@ -40,8 +40,6 @@ from .tokenizer import (
     String_t,
     Escape_t,
     TypeParam_t,
-    Undefined_t,
-    Void_t,
     Identifier_t,
     Hashtag_t,
     Integer_t,
@@ -464,8 +462,6 @@ def unary_split_by_lowest_precedence(tokens: Chain[Token], ops: list[Token], idx
 def parse_single(token: Token) -> AST:
     """Parse a single token into an AST"""
     match token:
-        case Undefined_t(): return undefined
-        case Void_t(): return void
         case Identifier_t(): return PrototypeIdentifier(token.src)
         case Hashtag_t(): return PrototypeIdentifier(token.src)
         case Integer_t(): return Int(int(token.src))
@@ -481,6 +477,12 @@ def parse_single(token: Token) -> AST:
         case Flow_t(): return parse_flow(token)
         case Declare_t(): return parse_declare(token)
         case Return_t(): return Return(parse_chain(token.expr))
+        case Keyword_t(src='undefined'): return undefined
+        case Keyword_t(src='void'): return void
+        case Keyword_t(src='untyped'): return untyped
+        case Keyword_t(src='extern'): return extern
+        case Keyword_t(src='new'): return new
+        case Keyword_t(src='end'): return end
 
         case _:
             # TODO handle other types...

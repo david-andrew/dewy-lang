@@ -5,7 +5,7 @@ from .tokenizer import (
     binary_operators,
     opchain_starters,
     Token,
-    Keyword_t, Undefined_t, Void_t, End_t, New_t,
+    Keyword_t, #Undefined_t, Void_t, End_t, New_t,
     WhiteSpace_t, Escape_t,
     Identifier_t, Hashtag_t,
     Block_t, TypeParam_t,
@@ -214,8 +214,8 @@ atom_tokens = (
     DotDotDot_t,
     Backticks_t,
     Flow_t,
-    Undefined_t,
-    Void_t,
+    # Undefined_t,
+    # Void_t,
 )
 
 # atoms that can be juxtaposed (so juxtaposes next to them shouldn't be removed)
@@ -242,13 +242,16 @@ class ShouldBreakTracker(ABC):
 
 
 class ShouldBreakFlowTracker(ShouldBreakTracker):
-    def __init__(self):
+    def __init__(self, error_on_break:bool=False):
         self.flows_seen = 0
+        self.error_on_break = error_on_break
 
     def op_breaks_chain(self, token: Token) -> bool:
         # should only be operators
         if isinstance(token, Operator_t) and token.op == 'else':
             if self.flows_seen == 0:
+                if self.error_on_break:
+                    raise ValueError(f'Encountered an `else` in a context where it is not allowed. {token=}')
                 return True
             self.flows_seen -= 1
 
@@ -402,9 +405,11 @@ def _get_next_keyword_expr(tokens: list[Token]) -> tuple[Token, list[Token]]:
     if not isinstance(t, Keyword_t):
         raise ValueError(f"ERROR: expected keyword expression, got {t=}")
 
+    # seeing a common pattern here of a lot of <keyword> <expr> types,
+    # could replace it with a function that takes the keyword, and it's class constructor'
     match t:
         case Keyword_t(src='if' | 'loop' | 'lazy'):
-            cond, tokens = get_next_chain(tokens)
+            cond, tokens = get_next_chain(tokens, tracker=ShouldBreakFlowTracker(error_on_break=True))
             clause, tokens = get_next_chain(tokens, tracker=ShouldBreakFlowTracker())
             return Flow_t(t, cond, clause), tokens
         case Keyword_t(src='closing_else'):
@@ -423,8 +428,12 @@ def _get_next_keyword_expr(tokens: list[Token]) -> tuple[Token, list[Token]]:
             pdb.set_trace()
             ...
         case Keyword_t(src='let' | 'const' | 'local_const' | 'fixed_type'):
-            expr, tokens = get_next_chain(tokens)
+            expr, tokens = get_next_chain(tokens, tracker=ShouldBreakFlowTracker())
             return Declare_t(t, expr), tokens
+
+        # keywords that convert directly to expressions
+        case Keyword_t(src='extern'|'new'|'end'|'void'|'undefined'):
+            return t, tokens
 
 
     raise NotImplementedError("TODO: handle keyword based expressions")
@@ -497,7 +506,7 @@ def narrow_juxtapose(tokens: list[Token]) -> None:
     ellipsis_jux = EllipsisJuxtapose_t(None)
     backticks_jux = BackticksJuxtapose_t(None)
     type_param_jux = TypeParamJuxtapose_t(None)
-    undefined = Undefined_t(None)
+    undefined = Keyword_t('undefined') #Undefined_t(None)
     for i, token, stream in (gen := full_traverse_tokens(tokens)):
         left_is_jux = i > 0 and isinstance(stream[i-1], Juxtapose_t)
         right_is_jux = i + 1 < len(stream) and isinstance(stream[i+1], Juxtapose_t)

@@ -10,7 +10,7 @@ from .syntax import (
     PointsTo, BidirPointsTo,
     ListOfASTs, Block, Array, Group, Range, ObjectLiteral, Dict, BidirDict, UnpackTarget,
     TypedIdentifier,
-    Void, void, Undefined, undefined, untyped,
+    Void, void, Undefined, undefined, untyped, New, End, Extern, Ellipsis,
     String, IString,
     Flowable, Flow, If, Loop, Default,
     Identifier, Express, Declare,
@@ -464,6 +464,8 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
 
             case AtHandle(operand=operand): ... #longer term, @handle should check that the inner thing can be referenced, and the type of the reference makes sense...
 
+            # keyword singleton expressions
+            case Ellipsis() | Undefined() | New() | End() | Extern(): ... # | Void() #TBD if void can pass here...
 
             case _:
                 pdb.set_trace()

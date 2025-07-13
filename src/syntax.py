@@ -293,6 +293,50 @@ class Void(AST):
 void = Void()
 
 
+class Extern(AST):
+    """extern singleton"""
+    def __new__(cls):
+        if not hasattr(cls, 'instance'):
+            cls.instance = super(Extern, cls).__new__(cls)
+        return cls.instance
+
+    def __str__(self) -> str:
+        return 'extern'
+
+
+# extern shorthand, for convenience
+extern = Extern()
+
+
+class New(AST):
+    """new singleton"""
+    def __new__(cls):
+        if not hasattr(cls, 'instance'):
+            cls.instance = super(New, cls).__new__(cls)
+        return cls.instance
+
+    def __str__(self) -> str:
+        return 'new'
+
+
+# new shorthand, for convenience
+new = New()
+
+class End(AST):
+    """end singleton"""
+    def __new__(cls):
+        if not hasattr(cls, 'instance'):
+            cls.instance = super(End, cls).__new__(cls)
+        return cls.instance
+
+    def __str__(self) -> str:
+        return 'end'
+
+
+# end shorthand, for convenience
+end = End()
+
+
 class EmptyObjLiteral(AST):
     def __str__(self): return '[]'
 
