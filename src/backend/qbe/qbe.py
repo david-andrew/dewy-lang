@@ -15,7 +15,7 @@ from ...syntax import (
     PointsTo, BidirPointsTo,
     ListOfASTs, PrototypeTuple, Block, Array, Group, Range, ObjectLiteral, Dict, BidirDict, UnpackTarget,
     TypedIdentifier,
-    Void, void, Undefined, undefined, untyped,
+    Void, void, Undefined, undefined, untyped, Extern, extern, New, End,
     String, IString,
     Flowable, Flow, If, Loop, Default,
     Identifier, Express, Declare,
@@ -41,7 +41,7 @@ from ...utils import BaseOptions, Backend
 import platform
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, Literal, TypeVar, Optional
+from typing import Protocol, Literal, TypeVar, Optional, overload
 from types import SimpleNamespace
 from functools import cache
 from itertools import count, groupby
@@ -470,6 +470,13 @@ class IR(AST):
     def __repr__(self) -> str:
         return self.__str__()
 
+class SpecialValueIR(AST):
+    type: Literal['extern', 'end', 'new']
+
+    def __str__(self) -> str:
+        return f'SpecialValueIR(type={self.type})'
+
+
 class DeferredFunctionIR(AST):
     # type: Literal['function'] # TODO: potentially have multiple deferred types
     name: str
@@ -482,21 +489,21 @@ class DeferredFunctionIR(AST):
     def __str__(self) -> str:
         return f'DeferredFunctionIR(name={self.name}, fn={self.fn}, ...)'
 
-class FunctionIR(AST):
-    # qbe.functions.append(QbeFunction(name, False, ir.meta.args, ir.meta.ret, ir.meta.blocks))
-    args: list[QbeArg]
-    ret: QbeType | None
-    dewy_return_type: Type | None
-    blocks: list[QbeBlock]
-    # meta: SimpleNamespace = field(default_factory=SimpleNamespace)
-    def __str__(self) -> str:
-        return f'FunctionIR(...)'
+# class FunctionIR(AST):
+#     # qbe.functions.append(QbeFunction(name, False, ir.meta.args, ir.meta.ret, ir.meta.blocks))
+#     args: list[QbeArg]
+#     ret: QbeType | None
+#     dewy_return_type: Type | None
+#     blocks: list[QbeBlock]
+#     # meta: SimpleNamespace = field(default_factory=SimpleNamespace)
+#     def __str__(self) -> str:
+#         return f'FunctionIR(...)'
 
 
 
 T = TypeVar('T', bound=AST)
 class CompileFunc(Protocol):
-    def __call__(self, ast: T, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR|QbeFunction]:
+    def __call__(self, ast: T, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR|SpecialValueIR|QbeFunction]:
         """
         Compiles the AST node, potentially adding instructions to current_block
         (if provided and applicable, e.g., inside a function).
@@ -518,6 +525,10 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         Assign: compile_assign,
         Express: compile_express,
         Suppress: compile_suppress,
+        # Undefined: compile_undefined,
+        # New: compile_new,
+        # End: compile_end,
+        Extern: compile_extern,
         FunctionLiteral: compile_anonymous_fn_literal,
         Call: compile_call,
         Group: compile_group,
@@ -557,13 +568,21 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
     }
 
 
-def compile(ast: AST, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> Optional[IR|QbeFunction]:
+@overload
+def compile(ast: AST, scope: Scope, qbe: QbeModule, current_func: QbeFunction, *, allow_special_values:Literal[False]=False) -> Optional[IR|QbeFunction]: ...
+@overload
+def compile(ast: AST, scope: Scope, qbe: QbeModule, current_func: QbeFunction, *, allow_special_values:Literal[True]) -> Optional[IR|SpecialValueIR|QbeFunction]: ...
+def compile(ast: AST, scope: Scope, qbe: QbeModule, current_func: QbeFunction, *, allow_special_values:bool=False) -> Optional[IR|SpecialValueIR|QbeFunction]:
     """Dispatches compilation to the appropriate function based on AST node type."""
     compile_fn_map = get_compile_fn_map()
 
     ast_type = type(ast)
     if ast_type in compile_fn_map:
-        return compile_fn_map[ast_type](ast, scope, qbe, current_func)
+        res = compile_fn_map[ast_type](ast, scope, qbe, current_func)
+        if not allow_special_values and isinstance(res, SpecialValueIR):
+            pdb.set_trace()
+            raise ValueError(f'Expected regular IR or QbeFunction, but got SpecialValueIR in context where not allowed. {res=}, {ast=}')
+        return res
 
     raise NotImplementedError(f'QBE compilation not implemented for AST type: {ast_type}')
 
@@ -595,9 +614,17 @@ def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_func: QbeF
             # functions are compiled after all expressions in the current block have been done
             defer_compile_assign_fn(name, fn, scope, qbe, current_func)
         case Assign(left=Identifier(name=name), right=right):
-            rhs = compile(right, scope, qbe, current_func)
+            rhs = compile(right, scope, qbe, current_func, allow_special_values=True)
             if rhs is None:
                 raise ValueError(f'INTERNAL ERROR: attempting to assign some type that doesn\'t produce a value: {name}={right!r}')
+            if isinstance(rhs, SpecialValueIR):
+                if rhs.type != 'extern':
+                    raise ValueError(f'(currently) only special IR allowed to be assigned is `extern`. got {rhs=}. {ast=}')
+
+                #replace the RHS with a reference to the external symbol
+                var = scope.vars.get(name)
+                dewy_type = var.type if var is not None else untyped
+                rhs = IR('l', f'%{name}', dewy_type)
 
             # TODO: handle if rhs is a function
             # if isinstance(rhs, QbeFunction):
@@ -728,7 +755,12 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
             case _:
                 raise NotImplementedError(f'ERROR: so far only identifiers are supported as function arguments. Got {arg!r}')
 
-    res = compile(ast.body, fn_scope, qbe, qbe_fn)
+    res = compile(ast.body, fn_scope, qbe, qbe_fn, allow_special_values=True)
+
+    if isinstance(res, SpecialValueIR):
+        if res.type != 'extern':
+            raise ValueError(f'Only special value allowed for function bodies is `extern`. Got {res=}, {ast=}')
+        # basically if the function is an extern, throw away all the work being done here...
 
     # insert the epilogue at the end. epilogue will be the common target for early returning from other blocks
     qbe_fn.blocks.append(epilogue)
@@ -819,6 +851,11 @@ def compile_suppress(ast: Suppress, scope: Scope, qbe: QbeModule, current_func: 
     # The expression is evaluated but its result is not used.
     compile(ast.operand, scope, qbe, current_func)
     return None
+
+
+def compile_extern(ast: Extern, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> SpecialValueIR:
+    # values here are placeholders, and should be overwritten
+    return SpecialValueIR('extern')
 
 def make_anonymous_function_name(qbe: QbeModule) -> str:
     """Generates a unique name for an anonymous function."""
@@ -1297,6 +1334,7 @@ def compile_arithmetic_binop(ast: Add|Sub|Mul|IDiv|Mod, scope: Scope, qbe: QbeMo
     # get the opcode name associated with this AST
     key = (type(ast), left_ir.dewy_type.t, right_ir.dewy_type.t)
     if key not in arithmetic_binop_opcode_map:
+        pdb.set_trace()
         raise NotImplementedError(f'arithmetic binop not implemented for types {key=}. from {ast!r}')
     opcode = arithmetic_binop_opcode_map[key]
 

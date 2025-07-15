@@ -921,8 +921,18 @@ def typeof_binary_dispatch(ast: BinOp, scope: Scope, params:bool=False) -> TypeE
         right_type = typeof(ast.right, scope)
         if not isinstance(left_type, Type) or not isinstance(right_type, Type):
             raise NotImplementedError(f'typeof_binary_dispatch not implemented for non-Type left/right side. {left_type=}, {right_type=}')
+
+        # deal with possibly untyped values
+        if left_type is untyped and right_type is untyped:
+            raise ValueError(f'ERROR: typeof_binary_dispatch requires at least one side to not be `untyped`. Got {left_type=}, {right_type=}. {ast=}')
+        if left_type is untyped:
+            left_type = right_type
+        if right_type is untyped:
+            right_type = left_type
+
         if left_type.t != right_type.t:
             raise ValueError(f'INTERNAL ERROR: typeof_binary_dispatch called with mismatched types. {left_type=}, {right_type=}')
+
         return left_type
 
     pdb.set_trace()
