@@ -10,14 +10,15 @@ strlen = s_ptr => {
     loop #loadub(i) >? 0 i += 1
     i - s_ptr
 }
+endl = () => __syscall3__(SYSCALL_WRITE STDOUT '\n' 1)
 
-let ptr = 0 % just so the typing info propogates properly
+%let ptr = 0 % just so the typing info propogates properly
 ptr = argv
-%loop i in [0..argc) (
-i = 0
+loop i in [0..5)%argc)
 (
     argptr = #loadl(ptr)
     arglen = strlen(argptr)
     __syscall3__(SYSCALL_WRITE STDOUT argptr arglen)
-    %ptr += 8
+    endl
+    ptr += 8
 )

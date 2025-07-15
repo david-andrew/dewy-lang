@@ -215,8 +215,10 @@ def qbe_compiler(path: Path, args: list[str], options: Options) -> None:
 
     # Run the program
     if options.run_program:
-        if options.verbose: print(f'./{program} {" ".join(args)}')
-        os.execv(program, [program] + args)
+        if options.verbose:
+            # print(f'./{program} {" ".join(args)}')
+            print(f'dewy {path} {" ".join(args)}')
+        os.execv(program, ['dewy', path] + args)
 
 
 # Main compile entry point (modified slightly)
@@ -1328,11 +1330,21 @@ def compile_arithmetic_binop(ast: Add|Sub|Mul|IDiv|Mod, scope: Scope, qbe: QbeMo
     assert left_ir.dewy_type.t == right_ir.dewy_type.t or untyped in (left_ir.dewy_type, right_ir.dewy_type), f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.dewy_type.t} and {right_ir.dewy_type.t}"
     dewy_res_type = typeof(ast, scope)
 
+    # handle untyped. basically if one is untyped, it takes the type of the other side
+    left_dewy_type = left_ir.dewy_type
+    right_dewy_type = right_ir.dewy_type
+    if left_dewy_type is untyped and right_dewy_type is untyped:
+        raise ValueError(f'Cannot compile arithmetic when both left and right are untyped. {left_ir=}, {right_ir=}. {ast=}')
+    if left_dewy_type is untyped:
+        left_dewy_type = right_dewy_type
+    if right_dewy_type is untyped:
+        right_dewy_type = left_dewy_type
+
     res_id = current_func.get_temp()
     res_type = left_ir.qbe_type
 
     # get the opcode name associated with this AST
-    key = (type(ast), left_ir.dewy_type.t, right_ir.dewy_type.t)
+    key = (type(ast), left_dewy_type.t, right_dewy_type.t)
     if key not in arithmetic_binop_opcode_map:
         pdb.set_trace()
         raise NotImplementedError(f'arithmetic binop not implemented for types {key=}. from {ast!r}')
