@@ -538,6 +538,7 @@ def get_compile_fn_map() -> dict[type[AST], CompileFunc]:
         Int: compile_int,
         String: compile_string,
         IString: compile_istring,
+        Bool: compile_bool,
         And: compile_base_logical_binop,
         Or: compile_base_logical_binop,
         Xor: compile_base_logical_binop,
@@ -1189,6 +1190,12 @@ def compile_istring(ast: IString, scope: Scope, qbe: QbeModule, current_func: Qb
     raise NotImplementedError(f"Interpolated strings not implemented yet: {ast!r}")
 
 
+def compile_bool(ast: Bool, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
+    """Returns the QBE representation of a boolean literal."""
+    # QBE uses direct integers for constants. Prepend type for clarity in instruction.
+    # The 'l' type is added by the instruction using this value (e.g., call)
+    return IR('l', '1' if ast.val else '0', Type(Bool))
+
 
 logical_binop_opcode_map = {
     (And, Int, Int): 'and',
@@ -1210,6 +1217,11 @@ def compile_base_logical_binop(ast: And|Or|Xor, scope: Scope, qbe: QbeModule, cu
 
     res_id = current_func.get_temp()
     res_type = left_ir.qbe_type
+
+
+    # TODO: handling short-circuit evaluation
+    # basically just use branching to skip the right side if the left is the right value for the given operation
+    # NOTE: we would need to move the right_ir = compile(...) from above into a dedicated block so it only runs if we want it to
 
     # get the opcode name associated with this AST
     key = (type(ast), left_ir.dewy_type.t, right_ir.dewy_type.t)
@@ -1583,3 +1595,12 @@ def typeof_ir(ir: IR, scope: Scope, params:bool=False) -> TypeExpr:
     return ir.dewy_type
 
 register_typeof(IR, typeof_ir)
+
+
+def typeof_qbe_fn(fn: QbeFunction, scope: Scope, params: bool = False) -> TypeExpr:
+    """Returns the Dewy type of a QBE function."""
+    if fn.dewy_return_type is untyped:
+        raise NotImplementedError(f'TODO: need to do proper type inference for QBE functions. {fn.name} has untyped return type.')
+    return fn.dewy_return_type
+
+register_typeof(QbeFunction, typeof_qbe_fn)

@@ -425,7 +425,7 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
 
             case Suppress(operand=operand): ... #generally suppress shouldn't care about the inner types
 
-            case Int() | String() | IString(): ...
+            case Int() | String() | IString() | Bool(): ...
 
             case And() | Or() | Xor() | Nand() | Nor() | Xnor() | Not():
                 # TODO: check that the left and right are either int or bool
