@@ -1222,6 +1222,8 @@ def compile_base_logical_binop(ast: And|Or|Xor, scope: Scope, qbe: QbeModule, cu
     # TODO: handling short-circuit evaluation
     # basically just use branching to skip the right side if the left is the right value for the given operation
     # NOTE: we would need to move the right_ir = compile(...) from above into a dedicated block so it only runs if we want it to
+    # what about NAND, NOR, XOR, XNOR? actually they probably will be handled correctly? tbd...
+    # if dewy_res_type == Bool and isinstance(ast, (And, Or))
 
     # get the opcode name associated with this AST
     key = (type(ast), left_ir.dewy_type.t, right_ir.dewy_type.t)

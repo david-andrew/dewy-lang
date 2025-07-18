@@ -1,0 +1,17 @@
+% currently a bug because both sides are evaluated instead of short circuiting
+
+const SYSCALL_WRITE = 1
+const STDOUT = 1
+
+fn = () => {
+    s = 'testing if this was called or not\n'
+    __syscall3__(SYSCALL_WRITE STDOUT s s._bytes_length);
+    true
+}
+
+
+res = true and fn
+if res
+    __syscall3__(SYSCALL_WRITE STDOUT 'res was true\n' 13)
+else
+    __syscall3__(SYSCALL_WRITE STDOUT 'res was false\n' 14)
