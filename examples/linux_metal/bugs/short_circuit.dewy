@@ -4,13 +4,13 @@ const SYSCALL_WRITE = 1
 const STDOUT = 1
 
 fn = () => {
-    s = 'testing if this was called or not\n'
+    s = 'DID NOT SHORT CIRCUIT\n'
     __syscall3__(SYSCALL_WRITE STDOUT s s._bytes_length);
     true
 }
 
 
-res = true and fn
+res = true or fn
 if res
     __syscall3__(SYSCALL_WRITE STDOUT 'res was true\n' 13)
 else

@@ -611,7 +611,6 @@ def compile_declare(ast: Declare, scope: Scope, qbe: QbeModule, current_func: Qb
 
 def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> None:
     """Handles assignments, creating functions when assigning FunctionLiterals."""
-    current_block = current_func.blocks[-1]
     match ast:
         case Assign(left=Identifier(name=name), right=FunctionLiteral() as fn):
             # functions are compiled after all expressions in the current block have been done
@@ -644,6 +643,7 @@ def compile_assign(ast: Assign, scope: Scope, qbe: QbeModule, current_func: QbeF
                     qid = ir.qbe_value
 
             scope.assign(name, rhs)
+            current_block = current_func.blocks[-1]
             current_block.lines.append(f'{qid} ={rhs.qbe_type} copy {rhs.qbe_value}')
         case _:
             raise NotImplementedError(f"Assignment target not implemented: left={ast.left}, right={ast.right}")
@@ -712,6 +712,14 @@ def compile_fn_literal(ast: 'FunctionLiteral|Closure', scope: Scope, qbe: QbeMod
     TBD on overloading. potentially handle outside of here by managing the name, e.g. `$.fn_name.0`, `$.fn_name.1`, ...
     TBD on declaring the same named function in different independent scopes.
     """
+    # TODO: this should be more rigorous about checking if the name was defined or not. e.g. overloading, overwriting would just give back the original...
+    if f_id is not None and any([f.name == f_id for f in qbe.functions]):
+        # print(f'WARNING: attempted to compile a function "{f_id}" that was already compiled. Note there is a bug in how short circuit logical operators are handled which cause this to occur. Expected behavior for logical binops, but an actual error for anything else...')
+        fn, = [f for f in qbe.functions if f.name == f_id]
+        return fn
+    #     pdb.set_trace()
+    #     raise ValueError(f'INTERNAL ERROR: attempted to compile a function already compiled...')
+
     # TODO: actually we determine if it's a closure during function compilation
     # TODO: working with closures may involve `current_func` otherwise take it out from the args
     env = None
@@ -864,7 +872,7 @@ def make_anonymous_function_name(qbe: QbeModule) -> str:
     """Generates a unique name for an anonymous function."""
     return f'$.__anonymous__.{next(qbe._counter)}'
 
-
+# TODO: perhaps just include this in any calls to compile_fn_literal, so we don't have to worry about it...'
 def remove_deferred_function(scope: Scope, name: str) -> None:
     try:
         root = list(scope)[-1]  # get the top most scope
@@ -1208,22 +1216,53 @@ logical_binop_opcode_map = {
 }
 def compile_base_logical_binop(ast: And|Or|Xor, scope: Scope, qbe: QbeModule, current_func: QbeFunction) -> IR:
     """Compiles a base/builtin logical operation."""
+
     left_ir = compile(ast.left, scope, qbe, current_func)
     assert left_ir is not None, f"INTERNAL ERROR: left side of `{ast.__class__.__name__}` must produce a value: {ast.left!r}"
-    right_ir = compile(ast.right, scope, qbe, current_func)
-    assert right_ir is not None, f"INTERNAL ERROR: right side of `{ast.__class__.__name__}` must produce a value: {ast.right!r}"
-    assert left_ir.qbe_type == right_ir.qbe_type, f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.qbe_type} and {right_ir.qbe_type}"
-    dewy_res_type = typeof(ast, scope)
 
+    if isinstance(left_ir, QbeFunction):
+        pdb.set_trace()
+        raise NotImplementedError(f'TODO: handling logical operators on functions... {left_ir=}. {ast=}')
+
+    # determine the result id/type
+    dewy_res_type = typeof(ast, scope)  #causes fn to compile...
     res_id = current_func.get_temp()
     res_type = left_ir.qbe_type
 
+    # set up a base label
+    unique_num = current_func.get_temp('')
+    base_label = f'@.{unique_num}.{ast.__class__.__name__}'
+    finish_label = f'{base_label}.done'
+    noskip_label = f'{base_label}.no_short_circuit'
 
-    # TODO: handling short-circuit evaluation
-    # basically just use branching to skip the right side if the left is the right value for the given operation
-    # NOTE: we would need to move the right_ir = compile(...) from above into a dedicated block so it only runs if we want it to
-    # what about NAND, NOR, XOR, XNOR? actually they probably will be handled correctly? tbd...
-    # if dewy_res_type == Bool and isinstance(ast, (And, Or))
+
+    # handle short circuit result
+    if dewy_res_type == Type(Bool) and isinstance(ast, (And, Or)):
+        should_short_id = current_func.get_temp()
+        current_block = current_func.blocks[-1]
+        current_block.lines.append(f'{should_short_id} =l copy {left_ir.qbe_value}')
+        # jump (i.e. short-circuit) is if value is nonzero. so invert the value if AND which short circuits if it was zero
+        if isinstance(ast, And):
+            # TODO: probably could make this a single op, e.g. by subtracting 1 since just jump nonzero
+            current_block.lines.append(f'{should_short_id} =l xor {should_short_id}, -1')
+            current_block.lines.append(f'{should_short_id} =l and {should_short_id}, 1')
+
+        # copy left value into result id, and jump to the end label
+        current_block.lines.append(f'{res_id} ={res_type} copy {left_ir.qbe_value}')
+        current_block.lines.append(f'jnz {should_short_id}, {finish_label}, {noskip_label}')
+
+    # target block for when no short circuit happens
+    current_func.blocks.append(QbeBlock(noskip_label))
+
+
+    # compile the right side (only executes if not a short circuit)
+    right_ir = compile(ast.right, scope, qbe, current_func)
+    assert right_ir is not None, f"INTERNAL ERROR: right side of `{ast.__class__.__name__}` must produce a value: {ast.right!r}"
+    if isinstance(right_ir, QbeFunction):
+        raise NotImplementedError(f'TODO: handling logical operators on functions... {right_ir=}. {ast=}')
+
+    assert left_ir.qbe_type == right_ir.qbe_type, f"INTERNAL ERROR: `{ast.__class__.__name__}` operands must be the same type: {left_ir.qbe_type} and {right_ir.qbe_type}"
+
 
     # get the opcode name associated with this AST
     key = (type(ast), left_ir.dewy_type.t, right_ir.dewy_type.t)
@@ -1240,6 +1279,8 @@ def compile_base_logical_binop(ast: And|Or|Xor, scope: Scope, qbe: QbeModule, cu
     if left_ir.dewy_type.t == Bool:
         current_block.lines.append(f'{res_id} ={res_type} and {res_id}, 1')
 
+    # target block for when a short circuit happens
+    current_func.blocks.append(QbeBlock(finish_label))
     return IR(res_type, res_id, dewy_res_type) #TBD if there is any propagating of the left+right meta info here...
 
 
@@ -1606,3 +1647,10 @@ def typeof_qbe_fn(fn: QbeFunction, scope: Scope, params: bool = False) -> TypeEx
     return fn.dewy_return_type
 
 register_typeof(QbeFunction, typeof_qbe_fn)
+
+def typeof_deferred_fn(fn: DeferredFunctionIR, scope:Scope, params:bool=False) -> TypeExpr:
+
+    ir = compile_fn_literal(fn.fn, fn.scope, fn.qbe, fn.current_func, f'${fn.name}')
+    return typeof_qbe_fn(ir, scope, params)
+
+register_typeof(DeferredFunctionIR, typeof_deferred_fn)
