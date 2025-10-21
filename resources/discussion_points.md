@@ -3163,3 +3163,148 @@ exit = code:uint8 :> noreturn => (
 ```
 
 philisophically, some languages use `never` as a return type annotation to mean `noreturn`, but I think it's valuable to keep them separate. `never` will typically be something the user sees in the IDE telling them a case cannot happen (rather than an annotation they might write out), whereas `noreturn` is an actual annotation they might use that will enforce constraints on the function, namely that it not return control back.
+
+
+
+## Consider [] or () instead of <> for parametric types
+here are examples of parameterized code I collected from the above content
+```dewy
+dot = <T>(left:vector<T> right:vector<T>):> T => left .* right |> sum
+char = string<length=1>
+let myvar: vector<int length=5> = [1 2 3 4 5]
+
+
+
+
+option = <'opt1' | 'opt2' | 'opt3' | 'etc'>
+A = [
+    f = o:option => printl'you selected option {o}'
+]
+
+
+
+private __add__:<T U V>(a:T b:U):> V
+const register__add__ = (func:typeof<__add__>) => __add__ &= func
+const_overloadable __add__:<T U V>(a:T b:U):> V
+const fmt_type = <T>(pattern:str) :> (val: T) :> str
+
+let Word = [
+    character: str
+    pinyin: str
+    english: str
+    level: 'HSK1' | 'HSK2' | 'HSK3' | 'HSK4' | 'HSK5' | 'HSK6'
+]
+let data = csv<Word>'''
+爱,ài,"to love; affection; to be fond of; to like","HSK1"
+八,bā,"eight; 8","HSK1"
+爸爸,bà ba,"father (informal); CL:个[ge4] ,位[wei4]","HSK1"
+杯子,bēi zi,"cup; glass; CL:个[ge4] ,支[zhi1]","HSK1"
+... etc.
+
+'''
+
+
+let vect3:type = [
+    x:real
+    y:real
+    z:real
+]
+let vect3:type<T of real> = [x:T y:T z:T]
+
+
+
+
+let x:int<range=[0..10]> = 5
+let ascii:type = int<range=[0x20..0x7E)> //e.g. just printable ascii characters
+
+
+require = <T>(val:T|unsupported msg:string=undefined) =>
+    if value is? unsupported
+        _::fail_compile(msg ?? '{val.__caller_scope_name__} is not supported on {sys.platform}')
+sys.env   % typeof is dict<string string>|unsupported
+sys.argv  % typeof is array<string>|unsupported
+
+% compiletime check if some platform's features are present
+assert sys.platform.supports'posix'
+
+% types of any and all `posix` features from here onward no longer contain `|unsupported`
+sys.env   % typeof is dict<string string>
+sys.argv  % typeof is array<string>
+```
+
+pros of ()
+- basically turns parameterizations into function calls, which is sort of like what's already happening. types without parameters are basically a zero-arg function call presenting that type
+- named parameters come for free 
+cons of ()
+- (T) would need special handling and be harder to parse when making a generic function `sum = (T)(a:array(T)):>T => ...`
+
+pros of []
+- people familiar with python would understand
+cons of []
+- would need special handling of named parameters? or would need to support objects that are both list like and contain expressions-->still special handling
+- [T] probably needs special handling `sum = [T](a:array[T]):>T => ...`
+
+
+
+consider having <> for creating a generic, but either () or [] for actually parameterizing. probably () since it is essentially a function call! just unfortunately doesn't look as nice as []...
+
+
+```dewy
+dot = <T>(left:vector(T) right:vector(T)):> T => left .* right |> sum
+char = string(length=1)
+let myvar: vector(int length=5) = [1 2 3 4 5]
+
+
+
+
+option:type = 'opt1' | 'opt2' | 'opt3' | 'etc'
+A = [
+    f = o:option => printl'you selected option {o}'
+]
+
+
+
+private __add__:<T U V>(a:T b:U):> V
+const register__add__ = (func:typeof(__add__)) => __add__ &= func
+const_overloadable __add__:<T U V>(a:T b:U):> V
+const fmt_type = <T>(pattern:str) :> (val: T) :> str
+
+let Word = [
+    character: str
+    pinyin: str
+    english: str
+    level: 'HSK1' | 'HSK2' | 'HSK3' | 'HSK4' | 'HSK5' | 'HSK6'
+]
+let data = csv(Word)'''
+爱,ài,"to love; affection; to be fond of; to like","HSK1"
+八,bā,"eight; 8","HSK1"
+爸爸,bà ba,"father (informal); CL:个[ge4] ,位[wei4]","HSK1"
+杯子,bēi zi,"cup; glass; CL:个[ge4] ,支[zhi1]","HSK1"
+... etc.
+
+'''
+
+
+% tbd if this is reasonable...
+let vect3:type = (x:real y:real z:real) => [x y z]
+let vect3:type<T of real> = (x:T y:T z:T) => [x y z]
+
+
+
+let x:int(range=[0..10]) = 5
+let ascii:type = int(range=[0x20..0x7E)) //e.g. just printable ascii characters
+
+
+require = <T>(val:T|unsupported msg:string=undefined) =>
+    if value is? unsupported
+        _::fail_compile(msg ?? '{val.__caller_scope_name__} is not supported on {sys.platform}')
+sys.env   % typeof is dict(string string)|unsupported
+sys.argv  % typeof is array(string)|unsupported
+
+% compiletime check if some platform's features are present
+assert sys.platform.supports'posix'
+
+% types of any and all `posix` features from here onward no longer contain `|unsupported`
+sys.env   % typeof is dict(string string)
+sys.argv  % typeof is array(string)
+```
