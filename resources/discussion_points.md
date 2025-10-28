@@ -3308,3 +3308,55 @@ assert sys.platform.supports'posix'
 sys.env   % typeof is dict(string string)
 sys.argv  % typeof is array(string)
 ```
+
+
+However seems like after discussing a bit with gemini, ditching `<>` for paramaterization probably isn't such a great idea. `<>` has the benefit of being aesthetically distinct, making it easier for programmers to parse that something is a type rather than whatever the function returns. So the approach is to make `<>` into just another type of delimiter where inside is a type context.
+
+```
+x:<1 | 2 | 3 | 'apple'> = 3   % without <> 1|2|3|'apple' wouldn't be a valid expression. but in the context of types it makes perfect sense that they are all literal values.
+
+set<int>
+array<int|string length=5..>
+```
+I think under the hood, we'd probably still have something like
+
+```dewy
+sometype: type = [
+    __call__ = (t:type=untyped) => ...
+    __call__ &= (args to make an instance) :> sometype => ...
+    __type__ = ...
+    __type_parents__:array<type> = [any]
+]
+```
+i.e. `__call__` might still be used for both parameterization as well as instantiation or other things the user might want to do, but with `<>` as available delimiters, the user could always force something to be `type`. e.g. `<1>` is the type of the literal value `1`, so if you wanted to, you could do `sometype<1>` and it would call the first version
+
+tangent thought, but the syntax for making a parametric type I think looks maybe like this:
+```dewy
+sometype:type = <T>[
+    __type__ = ...
+]
+
+% perhaps it could go elsewhere, but the above seems the best
+<T>sometype:type<T> = [...]   % blegh!
+% basically I think `type` isn't parametric, so we should be safe to put the generic marker on the object itself
+```
+
+## What are types?
+I think a type is anything that has a `__type__` method. but what does `__type__` return? It returns a type, but that makes me question what are the other properties needed of a type object? Obviously types can be used as annotations. Also types should generally fit into the nominal type hierarchy graph. Perhaps this implies types include a connection into the type graph, and perhaps 
+
+
+
+I guess I'm just trying to figure out how type parameterization would work, and it seems like it would just be a certain kind of object
+
+```dewy
+array:type = [
+    __type__ = () => ...
+    __call__ = (t:type=untyped length:int=undefined):>type => ...
+]
+
+
+a:array
+b:array<int>
+c:array<int length=1>
+
+```
