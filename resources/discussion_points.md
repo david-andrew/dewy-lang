@@ -3360,3 +3360,37 @@ b:array<int>
 c:array<int length=1>
 
 ```
+alternate formulation to better support code reuse with parametric types
+```dewy
+make_array_type = (t:type=untyped length:int=undefined):>type => [
+    let t = t
+    let length = length
+    __type__ = () => ...
+    __call__ = if not (t =? untyped and length =? undefined)
+        @make_array_type
+    else
+        void
+]
+array:type = make_array_type()
+```
+
+## Allowing `void` literal to be assigned, but not identifiers that are void
+I think it might make sense to allow assigning `void` to something (e.g. the above example `__call__ = void`) generally which would be used to conditionally set something or have it be as if it was never set at all (as opposed to being set with some empty/none-like value)
+
+Basically it gives a consistent way to select between these two cases with a conditional without having to rewrite the whole objects
+```dewy
+case0 = [a=10 b=20]
+case1 = [a=10 b=20 c=42]
+
+% allowing void
+obj = [a=10 b=20 c=if condition 42 else void]
+
+% otherwise
+obj = if condition [a=10 b=20 c=42] else [a=10 b=20]
+
+% otherwise with a bit more reuse
+base = [a=10 b=20]
+obj = if condition base else [base... c=42]
+```
+
+I think in general, allowing for setting something to void for the case that it was never set is a nice symmetry that I think a lot of languages don't have and sort of dance around
