@@ -3394,3 +3394,63 @@ obj = if condition base else [base... c=42]
 ```
 
 I think in general, allowing for setting something to void for the case that it was never set is a nice symmetry that I think a lot of languages don't have and sort of dance around
+
+
+## Dealing with short-circuiting except for iterators [iterators don't express booleans, they express iterator objects. loop takes either bool or an iterator object]
+Basically there's a tension between the usual short circuiting behavior of boolean operators (`and`, `or`, etc.) Basically in most cases, they should short circuit:
+```dewy
+% would cause divide by zero without short circuiting
+if b isnt? 0 and a/b >? 10 ...
+```
+
+But for iterators in loops, we actually don't ever want to short circuit, we want all components in the expression to be evaluated so that the side effect of updating the iterator and setting the current value happen for all iterators
+```dewy
+loop i in 1..5 or j in 'a'..'z'
+    printl'i={i}, j={j}'
+```
+we'd expect output where each i and j get paired up like zip longest
+```
+1, a
+2, b
+3, c
+4, d
+5, e
+undefined, f
+undefined, g
+undefined, h
+...
+undefined, x
+undefined, y
+undefined, z
+```
+But the problem is the initial formulation for iterables (expresses a boolean, performs a side effect of setting the iterator value) doesn't work with short circuiting, it expects all parts to be evaluated. It seems the cleanest way to handle this is to make `loop` slightly less pure. It takes either a `bool` or an iterable object. `IterableObject`s have a custom overload on the boolean operators so that the produce `CompositeIterableObject`s when combined with other `IterableObject`s or `bool`s. Then on each step, an `IterableObject` does the side effect thing, and `loop` knows how to grab the current boolean value from it. Technically the QBE compiler will probably optimize away a lot of this object stuff for efficiency sake, but semantically this is how it should all work
+
+### a note on what iterator objects look like
+```
+loop i in 1..10 ...
+
+% i in 1..10
+(let i [
+    start=1
+    stop=10
+    exhauseted=false
+
+    % do side effect, return if there are more values
+    __next__ = ():>bool => {
+        if i is? undefined and not exhausted {
+            i = 1
+        }
+        else if i =? 10 {
+            i = undefined
+            exhausted = true
+        }
+        else { i += 1 }
+        return not exhausted
+    }
+])
+
+my_iter = [
+    __next__ = ():>bool => ...
+]
+```
+    %__done__ = ():>bool => ... % does the iterator have any more values
