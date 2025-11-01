@@ -3395,6 +3395,27 @@ array = [
 ]
 ```
 
+### Random note on the type of no-argument callable
+An interesting side effect of no-argument callables not requiring parenthesis is that from a types perspective, they also count as just their return type
+
+```dewy
+something = () => 42
+
+```
+The typeof `something` is `(():>int) & int`. I.e. it will work anywhere that needs a no-arg callable that returns int, as well as anywhere that needs just an int
+
+In principle, any optional arguments or overloads don't discount this feature so long as there exists a no-arg version of the function signature
+
+```dewy
+other = (a:int b:string) => a.repeat(b)
+other &= (c:bool=false d:frac=3/4) => 'c={c} d={d}'
+
+
+% Type of other:
+% ((a:int b:string):>string) & ((c:bool=false d:frac=3/4):>string) & string
+```
+
+
 ## Allowing `void` literal to be assigned, but not identifiers that are void
 I think it might make sense to allow assigning `void` to something (e.g. the above example `__call__ = void`) generally which would be used to conditionally set something or have it be as if it was never set at all (as opposed to being set with some empty/none-like value)
 
