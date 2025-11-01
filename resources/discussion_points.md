@@ -3374,6 +3374,27 @@ make_array_type = (t:type=untyped length:int=undefined):>type => [
 array:type = make_array_type()
 ```
 
+
+perhaps it is literally just this:
+```dewy
+type_interface = ([__type__:true] | [__type_parents__:array<type length=1..>]) & any   % `& any` means it is not restricted
+```
+i.e. you either have to set `__type__` to `true` or you have to assign `__type_parents__` to an array containing one or more parents that the type inherits from
+
+```
+parameterize_array = (t:type=untyped length:range<uint>=0..) => [
+    let t = t
+    let length = length
+    __type__ = true
+    __call__ = array.@__call__[1..] % TODO: this should be the other alternates of array.__call__ minus parameterize array?
+]
+array = [
+    __type__ = true
+    __call__ = @parameterize_array
+    __call__ &= <T>(seq:sequence<T>|iterable<T>|...):>array<T> => ... % make an array out of an arbitrary sequence
+]
+```
+
 ## Allowing `void` literal to be assigned, but not identifiers that are void
 I think it might make sense to allow assigning `void` to something (e.g. the above example `__call__ = void`) generally which would be used to conditionally set something or have it be as if it was never set at all (as opposed to being set with some empty/none-like value)
 
@@ -3427,30 +3448,38 @@ But the problem is the initial formulation for iterables (expresses a boolean, p
 
 ### a note on what iterator objects look like
 ```
+DoneIterating = [
+    __type__ = true
+    % __type_parents__ = [any]  % default setting for types
+]
+
+iter_interface = <T of not DoneIterating>[
+    __next__ = ():>T|DoneIterating => #todo
+] & any
+
+
+
 loop i in 1..10 ...
-
 % i in 1..10
-(let i [
-    start=1
-    stop=10
-    exhauseted=false
 
-    % do side effect, return if there are more values
-    __next__ = ():>bool => {
-        if i is? undefined and not exhausted {
-            i = 1
+[
+    var = @i  %tbd how this is treated
+    first = 1  %compute inclusive first element
+    last = 10  %compute inclusive final element
+    step = 1
+    cur:int = undefined
+    
+    __next__ = ():>int => {
+        if cur =? undefined {
+            cur = first
+            return cur
         }
-        else if i =? 10 {
-            i = undefined
-            exhausted = true
-        }
-        else { i += 1 }
-        return not exhausted
+        
+        if (step >? 0 and cur >=? last) or (step <? 0 and cur <=? last)
+            return DoneIterating
+        
+        cur += step
+        return cur
     }
-])
-
-my_iter = [
-    __next__ = ():>bool => ...
 ]
 ```
-    %__done__ = ():>bool => ... % does the iterator have any more values
