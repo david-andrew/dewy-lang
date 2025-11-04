@@ -3165,6 +3165,14 @@ exit = code:uint8 :> noreturn => (
 philisophically, some languages use `never` as a return type annotation to mean `noreturn`, but I think it's valuable to keep them separate. `never` will typically be something the user sees in the IDE telling them a case cannot happen (rather than an annotation they might write out), whereas `noreturn` is an actual annotation they might use that will enforce constraints on the function, namely that it not return control back.
 
 
+Additionally, `never` and `noreturn` will not inherit from `any`. Specifically this means that things that are of type `never` or `noreturn` can not be used in place of something requesting `any`:
+```
+a:any = exit()  % would throw a type error
+```
+`any` is the top of all things with actual values. `never` and `noreturn` do not fit this. This also implies there is no bottom type in the language, since neither of `never` or `noreturn` inherit from everything in `any`. I doubt I'll add one later as it's probably not useful, just mathematically symmetric, which isn't a good justification.
+
+Also, a funny other bottom type that may or not may be added: `absurd` for when it's actually not possible to have such a type. E.g. normally `int & string` would actually be possible because it just means the result has to structurally satisfy both int and string, but there could be cases where combining them wouldn't acually be possible, e.g. because they explicitly restrict combining with anything else. But probably I won't add `absurd` because I think `never` generally covers it
+
 
 ## Consider [] or () instead of <> for parametric types
 here are examples of parameterized code I collected from the above content
@@ -3504,3 +3512,21 @@ loop i in 1..10 ...
     }
 ]
 ```
+
+
+
+## naming convention for integer types
+In the nominal type tree
+- number of any
+- complex of number
+- real of complex
+- int of real
+- (int1 int8 int16 int32 int64 int00) of int  % concrete signed integer types
+- uint of int
+- (uint1 uint8 uint16 uint32 uint64 uint00) of uint  % concrete unsigned integer types
+
+% also `rational of real`, but not relevant here
+
+> Note that we probably don't need both `int1` and `uint1` as they're functionally identical. But it might be simpler to keep both and just have one be an alias for the other
+
+`int00`/`uint00` is for arbitrary width integers. The only other possible good idea I've seen is `intx` / `uintx`. But both are unintuitive enough to require some extra explanation anyways. `int∞`/`uint∞` are pretty intuitive, but dealing with unicode is a pain (though it could be an alias)
