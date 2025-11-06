@@ -8,7 +8,9 @@ import sys
 import pdb
 
 
-default_backend_name = 'qbe'
+default_backend_name = 'c' #'qbe'
+default_compiled_backend_name = default_backend_name
+default_interpreted_backend_name = 'python'
 
 
 def main():
@@ -53,15 +55,15 @@ def main():
     if args.file is None and not args.help:
         if args.interpret or args.compile or args.backend:
             print("Warning: backend selection flags [--interpret --compile --backend] are ignored in REPL mode")
-        args.backend = 'python'
+        args.backend = default_interpreted_backend_name
         args.interpret = False
         args.compile = False
 
     # identify the backend based on any flags provided
     if args.compile:
-        args.backend = 'qbe'
+        args.backend = default_compiled_backend_name
     elif args.interpret:
-        args.backend = 'python'
+        args.backend = default_interpreted_backend_name
     if args.backend is None:
         args.backend = default_backend_name
 
