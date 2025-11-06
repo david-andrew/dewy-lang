@@ -2326,6 +2326,31 @@ let p:vect3 = [x=1 y=2 z=3] //does p have `.length`?
 
 Perhaps declaring types on fields can do extra work when a concrete value is assigned, e.g. when doing `p:vect3 = [x=1 y=2 z=3]`, perhaps under the hood, there is an implicit `vect3[x=1 y=2 z=3]` called which attaches all the predefined fields/methods/etc. to the object.
 
+### slight updates
+Some slight updates for structs:
+1. in general, I don't like the idea that the type and the constructor have different identifiers (e.g. `vect3` type vs `Vect3` constructor). So struct objects should be able to also be callable
+```dewy
+let vect3:type = [
+    x:real
+    y:real
+    z:real
+    __call__ = (x:real y:real z:real):>vect3 => [let x=x let y=y let z=z] 
+]
+```
+I think you should be able to do it pretty simply like that. I think for this to work, (known) dunder methods wouldn't count towards anything interpreted as the struct's shape
+
+2. sort of implied from above, but you could use the struct shape directly rather than naming it:
+```dewy
+% naming the type
+T = [a:uint64 b:uint64]
+t:T = [a=1 b=2]
+printl't.a={t.a}\nt.b={t.b}'
+
+% using without a name
+t:[a:uint64 b:uint64] = [a:=1 b:=2]
+```
+> Side note: this makes me think I might include `:=` as an assignment operator that is basically syntax sugar for `id:=value` -> `let id=value`. It's sort of like saying `id:untyped=value`. The compiler can figure out if the values are ever accessed and make them const if not
+
 ### Other types
 
 For declaring types derived from other types, I'll have to think of more examples, but the main one I can think of is for integers with restricted ranges
