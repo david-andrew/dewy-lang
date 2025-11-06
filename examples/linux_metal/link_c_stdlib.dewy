@@ -94,12 +94,12 @@ __libc_start_main(
 
 
 %% Simplest Version
-printf = (format: cstring) :> int => extern
-malloc = (size: int) :> ptr => extern
-_init = ():>void => extern
-_fini = ():>void => extern
+printf:(format: cstring):>int = extern
+malloc:(size: int):>ptr = extern
+_init: ():>void = extern
+_fini: ():>void = extern
 
-__libc_start_main = (main_ptr argc argv init fini rtld_fini stack_end) :> noreturn => extern
+__libc_start_main: (main_ptr argc argv init fini rtld_fini stack_end) :> noreturn = extern
 
 % our main function to be called by C runtime
 c_main = (argc argv) :> int => {
