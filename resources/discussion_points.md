@@ -3517,15 +3517,15 @@ loop i in 1..10 ...
 
 ## naming convention for integer types
 In the nominal type tree
-- number of any
-- complex of number
-- real of complex
-- int of real
-- (int1 int8 int16 int32 int64 int00) of int  % concrete signed integer types
-- uint of int
-- (uint1 uint8 uint16 uint32 uint64 uint00) of uint  % concrete unsigned integer types
+- `number:type<any>`
+- `complex:type<number>`
+- `real:type<complex>`
+- `int:type<real>`
+- `(int1 int8 int16 int32 int64 int00) of int  % concrete signed integer types`
+- `uint:type<int>`
+- `(uint1 uint8 uint16 uint32 uint64 uint00) of uint  % concrete unsigned integer types`
 
-% also `rational of real`, but not relevant here
+% also `rational:type<real>`, but not relevant here
 
 > Note that we probably don't need both `int1` and `uint1` as they're functionally identical. But it might be simpler to keep both and just have one be an alias for the other
 
