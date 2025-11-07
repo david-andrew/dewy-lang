@@ -2,13 +2,20 @@ from ..utils import Backend, BaseOptions
 from ..tokenizer import tokenize
 from ..postok import post_process
 from ..parser import top_level_parse
-from ..postparse import post_parse
+from ..postparse import normalize_function_args, post_parse, Signature
 from ..typecheck import (
-    Scope,
+    Scope as TypecheckScope,
     top_level_typecheck_and_resolve,
+    CallableBase
 )
 from ..syntax import (
     AST,
+    DeclarationType,
+    Group,
+    Identifier,
+    Int,
+    Type, PrototypeBuiltin,
+    TypedIdentifier,
 )
 
 
@@ -49,7 +56,7 @@ def c_compiler(path: Path, args: list[str], options: Options) -> None:
     ast = post_parse(ast)
 
     # typecheck and collapse any Quantum ASTs to a concrete selection
-    scope = Scope()#.linux_default()
+    scope = Scope.c_default()
     ast, scope_map = top_level_typecheck_and_resolve(ast, scope)
 
     # debug printing
@@ -60,7 +67,7 @@ def c_compiler(path: Path, args: list[str], options: Options) -> None:
     # qbe = QbeModule()
 
     # Compile the AST into the QBE module. This will create functions as needed.
-    scope = Scope()#.linux_default()
+    scope = Scope.c_default()
     c = top_level_compile(ast, scope)
 
     pdb.set_trace()
@@ -134,5 +141,46 @@ c_backend = Backend[Options](
 )
 
 
+
+@dataclass
+class Scope(TypecheckScope):
+    def __hash__(self) -> int:
+        return hash(id(self))
+    def __eq__(self, value):
+        return self is value
+
+    @staticmethod
+    def c_default() -> 'Scope':
+        vars: dict[str, Scope._var] = {
+            "printf": Scope._var(
+                DeclarationType.CONST, Type(Builtin),
+                Builtin(normalize_function_args(Group([
+                    TypedIdentifier(Identifier('pattern'), Type(Int))
+                ])), Type(Int))
+            )
+        }
+
+        scope = Scope(vars=vars)
+        return scope
+
 @dataclass
 class CModule: ...
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class Builtin(CallableBase):
+    signature: Signature
+    return_type: AST
+    def __str__(self): return f'{self.signature}:> {self.return_type} => ...'
