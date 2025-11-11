@@ -45,7 +45,7 @@ from typing import Protocol, Literal, TypeVar, Optional, overload
 from types import SimpleNamespace
 from functools import cache
 from itertools import count, groupby
-from argparse import Namespace, ArgumentParser
+from ...myargparse import ArgumentParser, Namespace
 import subprocess
 import os
 

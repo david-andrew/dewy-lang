@@ -1,6 +1,5 @@
 from pathlib import Path
-from argparse import REMAINDER
-from .argparse_monkeypatch import CustomArgumentParser, CustomHelpFormatter, FlagOrEqualsValueAction
+from .myargparse import ArgumentParser, REMAINDER
 from .backend import backend_names, get_backend, python_repl, get_version
 from .utils import try_install_rich
 import sys
@@ -16,7 +15,7 @@ default_interpreted_backend_name = 'python'
 def main():
 
     # base argparser without backend-specific options
-    _base_parser = CustomArgumentParser(description='Dewy Compiler', add_help=False)
+    _base_parser = ArgumentParser(description='Dewy Compiler', add_help=False)
 
     # positional argument for the file to compile
     _base_parser.add_argument('file', nargs='?', help='.dewy file to run. If not provided, enter REPL mode')
@@ -38,7 +37,7 @@ def main():
     
 
     # make a first pass parser that includes a fake --help option so we can detect it without printing it out
-    pre_parser = CustomArgumentParser(parents=[_base_parser], description='Dewy Compiler', add_help=False)
+    pre_parser = ArgumentParser(parents=[_base_parser], description='Dewy Compiler', add_help=False)
     pre_parser.add_argument('-h', '--help', action='store_true') # placeholder to be replaced by help option
 
     # initial pass over the args to figure out which backend to use
@@ -69,8 +68,7 @@ def main():
 
     # augment the base argparser with backend-specific options
     backend = get_backend(args.backend)
-    main_parser = CustomArgumentParser(parents=[_base_parser], description=f'Dewy Compiler - Backend: {args.backend}', formatter_class=CustomHelpFormatter)
-    main_parser.register('action', 'flag_or_explicit', FlagOrEqualsValueAction)
+    main_parser = ArgumentParser(parents=[_base_parser], description=f'Dewy Compiler - Backend: {args.backend}')
     backend.make_argparser(main_parser)
 
     # reparse now that all the args have been specified
