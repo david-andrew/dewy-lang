@@ -17,6 +17,12 @@ from ..syntax import (
     Type, PrototypeBuiltin,
     TypedIdentifier,
     String, IString, Call,
+    Bool,
+    Add, Sub, Mul, IDiv, Mod,
+    Less, LessEqual, Greater, GreaterEqual, Equal, NotEqual,
+    And, Or, Xor, Not,
+    Flow, If, Default,
+    Assign, Declare, Express, Suppress,
 )
 
 
@@ -136,7 +142,7 @@ def top_level_compile(ast: AST, scope: 'Scope') -> 'CModule':
         body_lines=[],
     )
     compile_group(ast, scope, mod, main_fn)
-    main_fn.body_lines.append('return 0;')
+    add_line(main_fn, 'return 0;')
     mod.functions.append(main_fn)
     return mod
 
@@ -182,6 +188,8 @@ class CFunction:
     ret: str
     args: list[str] = field(default_factory=list)
     body_lines: list[str] = field(default_factory=list)
+    _symbols: dict[str, Type] = field(default_factory=dict)
+    _indent: int = 0
 
     def __str__(self) -> str:
         args_str = ', '.join(self.args)
@@ -229,6 +237,20 @@ def c_escape_string_literal(s: str) -> str:
                     out_chars.append(ch)
     return '"' + ''.join(out_chars) + '"'
 
+def c_type_of(t: Type) -> str:
+    if t.t == Int:
+        return 'int64_t'
+    if t.t == Bool:
+        return 'int32_t'
+    if t.t == String:
+        return 'const char *'
+    # default to integer type for now
+    return 'int64_t'
+
+def add_line(fn: CFunction, line: str) -> None:
+    indent = ' ' * 4 * fn._indent
+    fn.body_lines.append(f'{indent}{line}')
+
 # --- Minimal compile dispatch ---
 def compile(ast: AST, scope: Scope, mod: CModule, current_fn: CFunction) -> CExpr|None:
     match ast:
@@ -236,6 +258,10 @@ def compile(ast: AST, scope: Scope, mod: CModule, current_fn: CFunction) -> CExp
             return compile_group(ast, scope, mod, current_fn)
         case String(val=val):
             return CExpr(c_escape_string_literal(val), Type(String))
+        case Int(val=val):
+            return CExpr(str(val), Type(Int))
+        case Bool(val=val):
+            return CExpr('1' if val else '0', Type(Bool))
         case IString(parts=parts):
             if all(isinstance(p, String) for p in parts):
                 text = ''.join(p.val for p in parts)
@@ -243,6 +269,27 @@ def compile(ast: AST, scope: Scope, mod: CModule, current_fn: CFunction) -> CExp
             raise NotImplementedError('IString with non-String parts not supported yet')
         case Call(f=Identifier(name=name), args=args):
             return compile_call(name, args, scope, mod, current_fn)
+        case Add() | Sub() | Mul() | IDiv() | Mod():
+            return compile_arithmetic(ast, scope, mod, current_fn)
+        case Less() | LessEqual() | Greater() | GreaterEqual() | Equal() | NotEqual():
+            return compile_compare(ast, scope, mod, current_fn)
+        case And() | Or() | Xor():
+            return compile_logical(ast, scope, mod, current_fn)
+        case Not():
+            return compile_not(ast, scope, mod, current_fn)
+        case Assign():
+            return compile_assign(ast, scope, mod, current_fn)
+        case Declare():
+            return compile_declare(ast, scope, mod, current_fn)
+        case Express():
+            return compile_express(ast, scope, mod, current_fn)
+        case Suppress(operand=operand):
+            expr = compile(operand, scope, mod, current_fn)
+            if isinstance(expr, CExpr):
+                add_line(current_fn, f'{expr.code};')
+            return None
+        case Flow():
+            return compile_flow(ast, scope, mod, current_fn)
         case _:
             raise NotImplementedError(f'C codegen not implemented for AST type: {type(ast)}')
 
@@ -260,10 +307,116 @@ def compile_call(name: str, args_ast: AST|None, scope: Scope, mod: CModule, curr
             raise ValueError('printf requires an argument')
         arg = compile(args_ast, scope, mod, current_fn)
         assert isinstance(arg, CExpr)
-        current_fn.body_lines.append(f'printf({arg.code});')
+        add_line(current_fn, f'printf({arg.code});')
         return None
     raise NotImplementedError(f'Call to unknown function {name!r}')
 
+def compile_arithmetic(ast: Add|Sub|Mul|IDiv|Mod, scope: Scope, mod: CModule, current_fn: CFunction) -> CExpr:
+    left = compile(ast.left, scope, mod, current_fn); assert isinstance(left, CExpr)
+    right = compile(ast.right, scope, mod, current_fn); assert isinstance(right, CExpr)
+    op = {
+        Add: '+',
+        Sub: '-',
+        Mul: '*',
+        IDiv: '/',
+        Mod: '%',
+    }[type(ast)]
+    return CExpr(f'({left.code} {op} {right.code})', Type(Int))
+
+def compile_compare(ast: Less|LessEqual|Greater|GreaterEqual|Equal|NotEqual, scope: Scope, mod: CModule, current_fn: CFunction) -> CExpr:
+    left = compile(ast.left, scope, mod, current_fn); assert isinstance(left, CExpr)
+    right = compile(ast.right, scope, mod, current_fn); assert isinstance(right, CExpr)
+    op = {
+        Less: '<',
+        LessEqual: '<=',
+        Greater: '>',
+        GreaterEqual: '>=',
+        Equal: '==',
+        NotEqual: '!=',
+    }[type(ast)]
+    return CExpr(f'({left.code} {op} {right.code})', Type(Bool))
+
+def compile_logical(ast: And|Or|Xor, scope: Scope, mod: CModule, current_fn: CFunction) -> CExpr:
+    left = compile(ast.left, scope, mod, current_fn); assert isinstance(left, CExpr)
+    right = compile(ast.right, scope, mod, current_fn); assert isinstance(right, CExpr)
+    # choose logical vs bitwise based on operand type (bool => logical)
+    if left.dewy_type.t == Bool and right.dewy_type.t == Bool:
+        op = {And: '&&', Or: '||', Xor: '^'}[type(ast)]
+        return CExpr(f'({left.code} {op} {right.code})', Type(Bool))
+    else:
+        op = {And: '&', Or: '|', Xor: '^'}[type(ast)]
+        return CExpr(f'({left.code} {op} {right.code})', left.dewy_type or Type(Int))
+
+def compile_not(ast: Not, scope: Scope, mod: CModule, current_fn: CFunction) -> CExpr:
+    operand = compile(ast.operand, scope, mod, current_fn); assert isinstance(operand, CExpr)
+    if operand.dewy_type.t == Bool:
+        return CExpr(f'(!{operand.code})', Type(Bool))
+    return CExpr(f'(~{operand.code})', operand.dewy_type or Type(Int))
+
+def compile_assign(ast: Assign, scope: Scope, mod: CModule, current_fn: CFunction) -> None:
+    if not isinstance(ast.left, Identifier):
+        raise NotImplementedError('Only simple identifier assignment supported')
+    name = ast.left.name
+    rhs = compile(ast.right, scope, mod, current_fn); assert isinstance(rhs, CExpr)
+    if name not in current_fn._symbols:
+        # declare
+        ctype = c_type_of(rhs.dewy_type)
+        if ctype.endswith('_t'):
+            mod.includes.add('<stdint.h>')
+        add_line(current_fn, f'{ctype} {name} = {rhs.code};')
+        current_fn._symbols[name] = rhs.dewy_type
+    else:
+        add_line(current_fn, f'{name} = {rhs.code};')
+    return None
+
+def compile_declare(ast: Declare, scope: Scope, mod: CModule, current_fn: CFunction) -> None:
+    # For now, support only declare-with-assign of simple identifier
+    match ast.target:
+        case Assign(left=Identifier(name=name), right=right):
+            rhs = compile(right, scope, mod, current_fn); assert isinstance(rhs, CExpr)
+            if name not in current_fn._symbols:
+                ctype = c_type_of(rhs.dewy_type)
+                if ctype.endswith('_t'):
+                    mod.includes.add('<stdint.h>')
+                add_line(current_fn, f'{ctype} {name} = {rhs.code};')
+                current_fn._symbols[name] = rhs.dewy_type
+            else:
+                add_line(current_fn, f'{name} = {rhs.code};')
+        case Identifier(name=name):
+            # Minimal: declare uninitialized with 0/NULL based on type? Without a type, skip for now.
+            raise NotImplementedError('Bare declarations without initialization not yet supported')
+        case _:
+            raise NotImplementedError('Unsupported declaration form')
+    return None
+
+def compile_express(ast: Express, scope: Scope, mod: CModule, current_fn: CFunction) -> CExpr:
+    name = ast.id.name
+    if name in current_fn._symbols:
+        return CExpr(name, current_fn._symbols[name])
+    raise ValueError(f'Unknown variable {name} in current function')
+
+def compile_flow(ast: Flow, scope: Scope, mod: CModule, current_fn: CFunction) -> None:
+    # Render a simple if/else-if/else chain
+    first = True
+    for branch in ast.branches:
+        if isinstance(branch, If):
+            cond = compile(branch.condition, scope, mod, current_fn); assert isinstance(cond, CExpr)
+            prefix = 'if' if first else 'else if'
+            add_line(current_fn, f'{prefix} ({cond.code}) {{')
+            current_fn._indent += 1
+            compile(branch.body, scope, mod, current_fn)
+            current_fn._indent -= 1
+            add_line(current_fn, '}')
+            first = False
+        elif isinstance(branch, Default):
+            add_line(current_fn, 'else {')
+            current_fn._indent += 1
+            compile(branch.body, scope, mod, current_fn)
+            current_fn._indent -= 1
+            add_line(current_fn, '}')
+        else:
+            raise NotImplementedError(f'Unsupported flow branch {type(branch)}')
+    return None
 
 
 
