@@ -241,11 +241,19 @@ def c_type_of(t: Type) -> str:
     if t.t == Int:
         return 'int64_t'
     if t.t == Bool:
-        return 'int32_t'
+        return 'bool'
     if t.t == String:
         return 'const char *'
     # default to integer type for now
     return 'int64_t'
+
+def ensure_includes_for_ctype(mod: 'CModule', ctype: str) -> None:
+    if ctype.endswith('_t'):
+        mod.includes.add('<stdint.h>')
+    if ctype == 'bool':
+        mod.includes.add('<stdbool.h>')
+
+    raise NotImplementedError(f'Unsupported C type: {ctype}')
 
 def add_line(fn: CFunction, line: str) -> None:
     indent = ' ' * 4 * fn._indent
@@ -361,8 +369,7 @@ def compile_assign(ast: Assign, scope: Scope, mod: CModule, current_fn: CFunctio
     if name not in current_fn._symbols:
         # declare
         ctype = c_type_of(rhs.dewy_type)
-        if ctype.endswith('_t'):
-            mod.includes.add('<stdint.h>')
+        ensure_includes_for_ctype(mod, ctype)
         add_line(current_fn, f'{ctype} {name} = {rhs.code};')
         current_fn._symbols[name] = rhs.dewy_type
     else:
@@ -376,8 +383,7 @@ def compile_declare(ast: Declare, scope: Scope, mod: CModule, current_fn: CFunct
             rhs = compile(right, scope, mod, current_fn); assert isinstance(rhs, CExpr)
             if name not in current_fn._symbols:
                 ctype = c_type_of(rhs.dewy_type)
-                if ctype.endswith('_t'):
-                    mod.includes.add('<stdint.h>')
+                ensure_includes_for_ctype(mod, ctype)
                 add_line(current_fn, f'{ctype} {name} = {rhs.code};')
                 current_fn._symbols[name] = rhs.dewy_type
             else:
