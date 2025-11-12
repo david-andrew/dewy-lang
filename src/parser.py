@@ -11,7 +11,7 @@ from .syntax import (
     PointsTo, BidirPointsTo,
     Type,
     ListOfASTs, PrototypeTuple, Block, BareRange, DotDotDot, CollectInto, SpreadOutFrom, Array, Group, Range, ObjectLiteral, Dict, BidirDict, TypeParam,
-    Void, Undefined, void, undefined, untyped, extern, new, end, EmptyObjLiteral,
+    Void, Undefined, void, undefined, untyped, extern, intrinsic, new, end, EmptyObjLiteral,
     String, IString,
     Flowable, Flow, If, Loop, Default,
     PrototypeFunctionLiteral, PrototypeBuiltin, Call,
@@ -481,6 +481,7 @@ def parse_single(token: Token) -> AST:
         case Keyword_t(src='void'): return void
         case Keyword_t(src='untyped'): return untyped
         case Keyword_t(src='extern'): return extern
+        case Keyword_t(src='intrinsic'): return intrinsic
         case Keyword_t(src='new'): return new
         case Keyword_t(src='end'): return end
 

@@ -9,8 +9,8 @@ from .syntax import (
     Type, TypeParam,
     PointsTo, BidirPointsTo,
     ListOfASTs, Block, Array, Group, Range, ObjectLiteral, Dict, BidirDict, UnpackTarget,
-    TypedIdentifier,
-    Void, void, Undefined, undefined, untyped, New, End, Extern, Ellipsis,
+    TypedIdentifier, ReturnTyped,
+    Void, void, Undefined, undefined, untyped, New, End, Extern, Intrinsic, Ellipsis,
     String, IString,
     Flowable, Flow, If, Loop, Default,
     Identifier, Express, Declare,
@@ -56,7 +56,7 @@ class Fail(AST):
     def __str__(self) -> str:
         return '<Fail>'
 
-TypeExpr = Type | And | Or | Not | Literal | TBD | Fail
+TypeExpr = Type | And | Or | Not | Literal | TBD | Fail | ReturnTyped
 
 
 # TODO: consider moving metanamespace stuff into e.g. a utils/etc. file
@@ -172,7 +172,9 @@ class Scope:
             var = self.vars[name]
             assert var.decltype != DeclarationType.CONST, f"Attempted to {decltype.name.lower()} declare a value that is const in this current scope. {name=}{var=}. {value=}"
 
-        self.vars[name] = Scope._var(decltype, type, value)
+        # TODO: this strip group thing is a hack
+        #       need a more robust way to drill down to the actual type
+        self.vars[name] = Scope._var(decltype, strip_group(type), value)
 
     def let(self, name:str, value:AST, type:Type):
         self.declare(name, value, type, DeclarationType.LET)
@@ -350,7 +352,10 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
         match ast:
             case Void(): ...
             case Identifier(): ...
-            case TypedIdentifier(): ...
+            case TypedIdentifier():
+                ...
+                #TODO: some contexts we do declare, and some we don't. i.e. in a function declaration/signatureS, we don't declare
+                # scope.declare(ast.id.name, void, ast.type, DeclarationType.LET)
             case Express(): ...
             case Signature(): ...
             case Declare(decltype=decltype, target=target):
@@ -377,9 +382,12 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             case Assign(left=left, right=right):
                 if isinstance(left, Identifier):
                     scope.assign(left.name, right)
+                elif isinstance(left, TypedIdentifier):
+                    #TODO: check that the right is of the type of the left
+                    scope.declare(left.id.name, right, left.type, DeclarationType.LET)
                 else:
                     pdb.set_trace()
-                    raise NotImplementedError('Assign not implemented for non-Identifier left side')
+                    raise NotImplementedError('Assign not implemented for non-Identifier or TypedIdentifier left side')
                 # # TODO: handling  other assignment targets on the left...
 
             case Group(items=items): ...
@@ -461,11 +469,18 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
             case Type():
                 # TODO: probably will use this somewhere...
                 ...
+            
+            case ReturnTyped():
+                # if not isinstance(parent, Type):
+                #     gen.send(Type(ast))
+                    # continue # TBD, probably do need to check the children...
+                # pdb.set_trace()
+                ... # TBD if any checking happens here vs where the thing is actually declared/used
 
             case AtHandle(operand=operand): ... #longer term, @handle should check that the inner thing can be referenced, and the type of the reference makes sense...
 
             # keyword singleton expressions
-            case Ellipsis() | Undefined() | New() | End() | Extern(): ... # | Void() #TBD if void can pass here...
+            case Ellipsis() | Undefined() | New() | End() | Extern() | Intrinsic(): ... # | Void() #TBD if void can pass here...
 
             case _:
                 pdb.set_trace()
@@ -666,8 +681,26 @@ def inner_typecheck_and_resolve(parent: AST, gen: Generator[AST, AST, None], sco
 
 # # def infer_types(ast: AST, scope: Scope) -> AST:
 
+def strip_group(ast: AST) -> AST:
+    while isinstance(ast, Group):
+        assert len(ast.items) == 1, f'expected single item in Group, got {ast.items}'
+        ast = ast.items[0]
+    return ast
+
 def is_call_valid(ast: Call, scope: Scope) -> bool:
     f_type = typeof(ast.f, scope)
+    # if isinstance(f_type, ReturnTyped):
+    #     # TODO: check if args match the function signature.
+    #     #       for now, just skip
+    #     return True
+    
+    if isinstance(f_type, ReturnTyped):
+        return True
+    
+    if not hasattr(f_type, 't'):
+        pdb.set_trace()
+        raise ValueError(f'INTERNAL ERROR: typeof returned non-Type: {f_type}')
+    
     if issubclass(f_type.t, (FunctionLiteral, CallableBase)):
         # TODO: check if args match the function signature.
         #       for now, just skip
@@ -682,6 +715,8 @@ def is_index_valid(ast: Index, scope: Scope) -> bool:
 def is_multiply_valid(ast: Mul, scope: Scope) -> bool:
     # early short circuit for common case
     left_type = typeof(ast.left, scope)
+    if isinstance(left_type, ReturnTyped):
+        return False
     if issubclass(left_type.t, (FunctionLiteral, CallableBase)):
         return False
 
@@ -712,7 +747,7 @@ def typeof_identifier(ast: Identifier, scope: Scope, params:bool=False) -> TypeE
 # abstract base type to register new callable types
 class CallableBase(AST): ...
 #TODO: this is used by the interpreter. remove when compiler type checking is complete and can replace interpreter stuff
-_callable_types = (PrototypeBuiltin, FunctionLiteral, CallableBase)
+_callable_types = (PrototypeBuiltin, FunctionLiteral, CallableBase, ReturnTyped)
 # def register_callable(cls: type[AST]):
 #     _callable_types.append(cls)
 
@@ -891,7 +926,8 @@ def typeof_express(ast: Express, scope: Scope, params:bool=False) -> TypeExpr:
     var = scope.get(ast.id.name)
 
     # if we were told what the type is, return that (as it should be the main source of truth)
-    if isinstance(var.type, Type) and var.type is not untyped:
+    # TODO: perhaps we return this if it's not untyped/void/etc.
+    if isinstance(var.type, (Type, ReturnTyped)) and var.type is not untyped:
         return var.type
 
     return typeof(var.value, scope, params)

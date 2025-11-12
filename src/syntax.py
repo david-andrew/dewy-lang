@@ -308,6 +308,20 @@ class Extern(AST):
 extern = Extern()
 
 
+class Intrinsic(AST):
+    """intrinsic singleton"""
+    def __new__(cls):
+        if not hasattr(cls, 'instance'):
+            cls.instance = super(Intrinsic, cls).__new__(cls)
+        return cls.instance
+
+    def __str__(self) -> str:
+        return 'intrinsic'
+
+# intrinsic shorthand, for convenience
+intrinsic = Intrinsic()
+
+
 class New(AST):
     """new singleton"""
     def __new__(cls):

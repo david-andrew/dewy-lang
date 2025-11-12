@@ -166,12 +166,13 @@ class Scope(TypecheckScope):
     @staticmethod
     def c_default() -> 'Scope':
         vars: dict[str, Scope._var] = {
-            "printf": Scope._var(
-                DeclarationType.CONST, Type(Builtin),
-                Builtin(normalize_function_args(Group([
-                    TypedIdentifier(Identifier('format'), Type(String))
-                ])), Type(Int))
-            )
+            'type': Scope._var(DeclarationType.CONST, Type(Type), Type(Type))
+            # "printf": Scope._var(
+            #     DeclarationType.CONST, Type(Builtin),
+            #     Builtin(normalize_function_args(Group([
+            #         TypedIdentifier(Identifier('format'), Type(String))
+            #     ])), Type(Int))
+            # )
         }
 
         scope = Scope(vars=vars)

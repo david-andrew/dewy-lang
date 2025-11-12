@@ -432,7 +432,7 @@ def _get_next_keyword_expr(tokens: list[Token]) -> tuple[Token, list[Token]]:
             return Declare_t(t, expr), tokens
 
         # keywords that convert directly to expressions
-        case Keyword_t(src='extern'|'new'|'end'|'void'|'undefined'):
+        case Keyword_t(src='extern'|'intrinsic'|'new'|'end'|'void'|'undefined'|'untyped'):
             return t, tokens
 
 
