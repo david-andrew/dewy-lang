@@ -1,0 +1,752 @@
+from dataclasses import dataclass, field
+from pathlib import Path
+from bisect import bisect_right
+from os import PathLike
+from typing import Literal
+
+
+"""
+# Example error message formatting
+
+## Nu Shell Example
+```
+/Users/jt/Source/nushell) 10 / "bob"
+Error: nu::parser::unsupported_operation (link)
+
+  × Types mismatched for operation.
+   ╭─[entry #20:1:1]
+ 1 │ 10 / "bob"
+   · ─┬ ┬ ──┬──
+   ·  │ │   ╰─ string
+   ·  │ ╰─ doesn't support these values.
+   ·  ╰─ int
+   ╰───
+  help: Change int or string to be the right types and try again
+```
+
+## Dewy Error Examples in same style
+
+```
+Error: dewy.errors.E1234 (link)
+
+  × Unable to juxtapose identifier and string
+    ╭─[path/to/file.dewy:35:6]
+ 35 | printl'Hello, World'
+    ·      ╱╲
+    ·      ╰─ tried to juxtapose printl (string:>void) and 'Hello, World' (string)
+    ·         expected whitespace or operator between identifier and string
+    ╰───
+  help: insert a space or an operator
+```
+
+```
+Error: dewy.errors.E2234 (link)
+
+  × <high level explanation>
+    ╭─[path/to/file.dewy:35:6]
+ 35 | printl'Hello, World'
+    · ───┬──
+    ·    ╰─ <per token message>
+    ╰───
+  help: <some helpful hint>
+```
+
+```
+Error: dewy.errors.E2234 (link)
+
+  × <high level explanation>
+    ╭─[path/to/file.dewy:35:6]
+ 35 | printl'Hello, World'
+    · ───┬─╱╲─────┬───────
+    ·    │ │      ╰─ <message about the string token>
+    ·    │ ╰─ <message about the juxtapose token>
+    ·    ╰─ <message about the identifier token>
+    ╰───
+  help: <some helpful hint>
+```
+
+## Example of how to deal with really tight adjacent spans (including adjacent 0-width)
+
+```
+Error: dewy.errors.E3234 (link)
+
+  × <high level explanation>
+    ╭─[path/to/file.dewy:35:6]
+    ·  ╭─ <message about the `10` token>
+    ·  │╭─ <message about the `x` token>
+    ·  ││╭─ <message about the `(` token>
+    ·  │││╭─ <message about the `y` token>
+    ·  ││││╭─ <message about the `)` token>
+    · ─┴┴┴┴┴
+ 35 | 10x(y)
+    ·  ╱╳╲
+    ·  │╰─ <message about the x(y) juxtaposition>
+    ·  ╰─ <message about the 10x juxtaposition>
+    ╰───
+  help: <some helpful hint>
+```
+
+## and flipping the direction
+
+```
+Error: dewy.errors.E3234 (link)
+
+  × <high level explanation>
+    ╭─[path/to/file.dewy:35:6]
+    ·  ╭─ <message about the 10x juxtaposition>
+    ·  │╭─ <message about the x(y) juxtaposition>
+    ·  ╲╳╱
+ 35 | 10x(y)
+    · ─┬┬┬┬┬
+    ·  ││││╰─ <message about the `)` token>
+    ·  │││╰─ <message about the `y` token>
+    ·  ││╰─ <message about the `(` token>
+    ·  │╰─ <message about the `x` token>
+    ·  ╰─ <message about the `10` token>
+    ╰───
+  help: <some helpful hint>
+```
+
+## Dealing with expressions that span multiple lines
+
+```
+Error: dewy.errors.E3234 (link)
+
+  × <high level explanation>
+    ╭─[path/to/file.dewy:35:6]
+    ·  ╭─ <message about the 10x juxtaposition>
+    ·  │╭─ <message about the x(y) juxtaposition>
+    ·  ╲╳╱
+ 35 | 10x(y)
+    · ─┬┬┬┬┬
+    ·  ││││╰─ <message about the `)` token>
+    ·  │││╰─ <message about the `y` token>
+    ·  ││╰─ <message about the `(` token>
+    ·  │╰─ <message about the `x` token>
+    ·  ╰─ <message about the `10` token>
+ 36 | * 42 + 3^x
+    · ┬ ─┬ ┬ ┬┬┬
+    · │  │ │ ││╰─ <message about the `x` token>
+    · │  │ │ │╰─ <message about the `^` token>
+    · │  │ │ ╰─ <message about the `3` token>
+    · │  │ ╰─ <message about the `+` token>
+    · │  ╰─ <message about the `42` token>
+    · ╰─ <message about the `*` token>
+    ╰───
+  help: <some helpful hint>
+```
+
+
+
+```
+Error: dewy.errors.E3234 (link)
+
+  × <high level explanation>
+    ╭─[path/to/file.dewy:35:6]
+    ·  ╭─ <message about the `10` token>
+    ·  │╭─ <message about the `x` token>
+    ·  ││╭─ <message about the `(` token>
+    ·  │││╭─ <message about the `y` token>
+    ·  ││││╭─ <message about the `)` token>
+    · ─┴┴┴┴┴
+ 35 | 10x(y)
+ 36 | * 42 + 3^x
+    · ┬ ─┬ ┬ ┬┬┬
+    · │  │ │ ││╰─ <message about the `x` token>
+    · │  │ │ │╰─ <message about the `^` token>
+    · │  │ │ ╰─ <message about the `3` token>
+    · │  │ ╰─ <message about the `+` token>
+    · │  ╰─ <message about the `42` token>
+    · ╰─ <message about the `*` token>
+    ╰───
+  help: <some helpful hint>
+```
+
+
+
+"""
+
+PointerPlacement = Literal["above", "below"]
+
+
+@dataclass
+class Span:
+    """
+    python range rules, i.e. [start,stop), indices are in between items, not the indices of actual items. 
+    0-width implies pointing between characters
+    """
+    start:int
+    stop:int
+    
+    @property
+    def is_zero_width(self) -> bool:
+        return self.start == self.stop
+    
+    def clamp_to(self, lo:int, hi:int) -> "Span":
+        start = min(max(self.start, lo), hi)
+        stop = min(max(self.stop, lo), hi)
+        return Span(start, stop)
+
+
+@dataclass
+class PointerMessage:
+    span:Span
+    text:str
+    placement:PointerPlacement|None = None
+
+
+@dataclass
+class SrcFile:
+    location:Path|None
+    src:str
+    _line_starts:list[int] = field(default_factory=list)
+    
+    def __post_init__(self) -> None:
+        if not self._line_starts:
+            self._line_starts = self._compute_line_starts(self.src)
+    
+    @staticmethod
+    def _compute_line_starts(text:str) -> list[int]:
+        starts = [0]
+        for i, ch in enumerate(text):
+            if ch == "\n":
+                starts.append(i + 1)
+        return starts
+    
+    @classmethod
+    def from_text(cls, src:str, location:PathLike[str]|str|None=None) -> "SrcFile":
+        loc:Path|None = None if location is None else Path(location)
+        return cls(location=loc, src=src)
+    
+    def offset_to_row_col(self, index:int) -> tuple[int, int]:
+        index = max(0, min(index, len(self.src)))
+        line_idx = bisect_right(self._line_starts, index) - 1
+        line_start = self._line_starts[line_idx]
+        return (line_idx, index - line_start)
+    
+    def line_bounds(self, row:int) -> tuple[int, int]:
+        start = self._line_starts[row]
+        if row + 1 < len(self._line_starts):
+            end = self._line_starts[row + 1] - 1
+        else:
+            end = len(self.src)
+        return start, end
+    
+    def line_text(self, row:int) -> str:
+        start, end = self.line_bounds(row)
+        return self.src[start:end]
+
+
+@dataclass
+class _Segment:
+    pointer:PointerMessage
+    line_idx:int
+    start_col:int
+    end_col:int
+    anchor_col:int
+    placement:PointerPlacement|None
+    
+    @property
+    def is_zero_width(self) -> bool:
+        return self.start_col == self.end_col
+
+
+@dataclass
+class Error:
+    src_file:SrcFile
+    title:str
+    message:str
+    pointer_messages:list[PointerMessage|tuple[Span, str]]
+    hint:str|None=None
+    
+    def __post_init__(self) -> None:
+        normalized:list[PointerMessage] = []
+        for entry in self.pointer_messages:
+            if isinstance(entry, PointerMessage):
+                normalized.append(entry)
+            else:
+                span, text = entry
+                normalized.append(PointerMessage(span=span, text=text))
+        self.pointer_messages = normalized
+    
+    def __str__(self) -> str:
+        sf = self.src_file
+        loc = "input" if sf.location is None else str(sf.location)
+        first_index = min((pm.span.start for pm in self.pointer_messages), default=0)
+        row_idx, col_idx = sf.offset_to_row_col(first_index)
+        
+        segments = self._prepare_segments()
+        line_order = sorted({seg.line_idx for seg in segments})
+        if not line_order:
+            line_order = [row_idx]
+        max_line_no = max(line_order) + 1
+        line_no_width = len(str(max_line_no))
+        gutter_pad = " " * max(0, line_no_width - 1)
+        
+        body_indent = "  "
+        block_indent = "    "
+        
+        out:list[str] = []
+        out.append(f"Error: {self.title}")
+        out.append("")
+        out.append(f" × {self.message}")
+        out.append(f"{block_indent}{gutter_pad}╭─[{loc}:{row_idx+1}:{col_idx+1}]")
+        
+        segments_by_line:dict[int, list[_Segment]] = {}
+        for seg in segments:
+            segments_by_line.setdefault(seg.line_idx, []).append(seg)
+        
+        for line_idx in line_order:
+            per_line = segments_by_line.get(line_idx, [])
+            out.extend(self._render_line(line_idx, per_line, block_indent, line_no_width))
+        
+        out.append(f"{block_indent}{gutter_pad}╰───")
+        if self.hint:
+            out.append(f"{body_indent}help: {self.hint}")
+        return "\n".join(out)
+    
+    def _prepare_segments(self) -> list[_Segment]:
+        sf = self.src_file
+        segments:list[_Segment] = []
+        for pointer in self.pointer_messages:
+            start_row, _ = sf.offset_to_row_col(pointer.span.start)
+            end_row, _ = sf.offset_to_row_col(pointer.span.stop)
+            if start_row != end_row:
+                raise ValueError("spans cannot cross multiple lines yet")
+            line_idx = start_row
+            line_start, _ = sf.line_bounds(line_idx)
+            line_text = sf.line_text(line_idx)
+            line_len = len(line_text)
+            start_col = max(0, min(pointer.span.start - line_start, line_len))
+            end_col = max(0, min(pointer.span.stop - line_start, line_len))
+            if start_col > end_col:
+                start_col, end_col = end_col, start_col
+            if start_col == end_col:
+                if start_col > 0:
+                    start_col -= 1
+                    end_col = start_col
+                anchor_col = start_col
+            else:
+                anchor_col = start_col + ((end_col - start_col) - 1) // 2
+            segments.append(_Segment(
+                pointer=pointer,
+                line_idx=line_idx,
+                start_col=start_col,
+                end_col=end_col,
+                anchor_col=anchor_col,
+                placement=pointer.placement,
+            ))
+        
+        line_order = sorted({seg.line_idx for seg in segments})
+        positions = {line: idx for idx, line in enumerate(line_order)}
+        for seg in segments:
+            if seg.placement is None:
+                seg.placement = self._default_placement(positions[seg.line_idx], len(line_order))
+        
+        by_line:dict[int, list[_Segment]] = {}
+        for seg in segments:
+            siblings = by_line.setdefault(seg.line_idx, [])
+            siblings.append(seg)
+        for line_idx, siblings in by_line.items():
+            non_zero = [s for s in siblings if not s.is_zero_width]
+            non_zero.sort(key=lambda s: s.start_col)
+            for left, right in zip(non_zero, non_zero[1:]):
+                if left.end_col > right.start_col:
+                    raise ValueError(f"overlapping spans on line {line_idx+1}")
+        return segments
+    
+    @staticmethod
+    def _default_placement(order_idx:int, total_lines:int) -> PointerPlacement:
+        if total_lines == 1:
+            return "below"
+        if total_lines == 2:
+            return "above" if order_idx == 0 else "below"
+        return "below"
+    
+    def _render_line(
+        self,
+        line_idx:int,
+        segments:list[_Segment],
+        block_indent:str,
+        line_no_width:int,
+    ) -> list[str]:
+        sf = self.src_file
+        line_no = line_idx + 1
+        line_text = sf.line_text(line_idx)
+        
+        line_prefix = f"  {line_no:>{line_no_width}} | "
+        pointer_prefix = "  " + " " * (line_no_width + 1) + "· "
+        
+        above = [seg for seg in segments if seg.placement == "above"]
+        below = [seg for seg in segments if seg.placement == "below"]
+        
+        width = max(
+            len(line_text),
+            self._segments_width(above),
+            self._segments_width(below),
+        )
+        
+        output:list[str] = []
+        output.extend(self._render_pointer_layer(above, pointer_prefix, width, "above"))
+        output.append(f"{line_prefix}{line_text}")
+        output.extend(self._render_pointer_layer(below, pointer_prefix, width, "below"))
+        return output
+    
+    def _render_pointer_layer(
+        self,
+        segments:list[_Segment],
+        pointer_prefix:str,
+        width:int,
+        placement:PointerPlacement,
+    ) -> list[str]:
+        if not segments:
+            return []
+        baseline, effective_width = self._build_baseline(segments, max(width, 0), placement)
+        messages = self._build_message_lines(segments, effective_width, placement)
+        prefixed:list[str] = []
+        if placement == "above":
+            prefixed.extend(f"{pointer_prefix}{line}" for line in messages)
+            prefixed.append(f"{pointer_prefix}{baseline}")
+        else:
+            prefixed.append(f"{pointer_prefix}{baseline}")
+            prefixed.extend(f"{pointer_prefix}{line}" for line in messages)
+        return prefixed
+    
+    def _build_baseline(
+        self,
+        segments:list[_Segment],
+        width:int,
+        placement:PointerPlacement,
+    ) -> tuple[str, int]:
+        chars:list[str] = [" "] * width
+        
+        def ensure(idx:int) -> None:
+            if idx >= len(chars):
+                chars.extend([" "] * (idx - len(chars) + 1))
+        
+        for seg in segments:
+            if seg.is_zero_width:
+                continue
+            for idx in range(seg.start_col, seg.end_col):
+                ensure(idx)
+                chars[idx] = "─"
+        for seg in segments:
+            if seg.is_zero_width:
+                continue
+            ensure(seg.anchor_col)
+            chars[seg.anchor_col] = "┬" if placement == "below" else "┴"
+        
+        zero_segments = sorted((seg for seg in segments if seg.is_zero_width), key=lambda s: s.start_col)
+        i = 0
+        while i < len(zero_segments):
+            run_start = zero_segments[i].start_col
+            run_count = 1
+            j = i + 1
+            prev_col = run_start
+            while j < len(zero_segments):
+                col = zero_segments[j].start_col
+                if col <= prev_col + 1:
+                    run_count += 1
+                    prev_col = col
+                    j += 1
+                else:
+                    break
+            pattern = self._zero_pattern(run_count, placement)
+            for offset, ch in enumerate(pattern):
+                idx = run_start + offset
+                ensure(idx)
+                chars[idx] = ch
+            i = j
+        
+        baseline = "".join(chars).rstrip()
+        return baseline, len(chars)
+    
+    def _build_message_lines(
+        self,
+        segments:list[_Segment],
+        width:int,
+        placement:PointerPlacement,
+    ) -> list[str]:
+        if not segments:
+            return []
+        lines:list[str] = []
+        if placement == "below":
+            order = sorted(segments, key=lambda s: s.anchor_col, reverse=True)
+            pending = [seg.anchor_col for seg in order]
+            for seg in order:
+                line_chars = [" "] * width
+                for anchor in pending:
+                    if anchor == seg.anchor_col:
+                        continue
+                    if anchor >= len(line_chars):
+                        line_chars.extend([" "] * (anchor - len(line_chars) + 1))
+                    if line_chars[anchor] == " ":
+                        line_chars[anchor] = "│"
+                anchor = seg.anchor_col
+                if anchor >= len(line_chars):
+                    line_chars.extend([" "] * (anchor - len(line_chars) + 1))
+                line_chars[anchor] = "╰"
+                base = "".join(line_chars).rstrip()
+                text_lines = seg.pointer.text.splitlines() or [""]
+                first, *rest = text_lines
+                lines.append(f"{base}─ {first}")
+                if rest:
+                    continuation = " " * (anchor + 3)
+                    for chunk in rest:
+                        lines.append(f"{continuation}{chunk}")
+                pending.remove(anchor)
+        else:
+            order = sorted(segments, key=lambda s: s.anchor_col)
+            active:list[int] = []
+            for seg in order:
+                line_chars = [" "] * width
+                for anchor in active:
+                    if anchor >= len(line_chars):
+                        line_chars.extend([" "] * (anchor - len(line_chars) + 1))
+                    if line_chars[anchor] == " ":
+                        line_chars[anchor] = "│"
+                anchor = seg.anchor_col
+                if anchor >= len(line_chars):
+                    line_chars.extend([" "] * (anchor - len(line_chars) + 1))
+                line_chars[anchor] = "╭"
+                base = "".join(line_chars).rstrip()
+                text_lines = seg.pointer.text.splitlines() or [""]
+                first, *rest = text_lines
+                lines.append(f"{base}─ {first}")
+                if rest:
+                    continuation = " " * (anchor + 3)
+                    for chunk in rest:
+                        lines.append(f"{continuation}{chunk}")
+                active.append(anchor)
+        return lines
+    
+    @staticmethod
+    def _zero_pattern(count:int, placement:PointerPlacement) -> str:
+        if count <= 0:
+            return ""
+        middle = "╳" * max(0, count - 1)
+        if placement == "below":
+            return f"╱{middle}╲"
+        return f"╲{middle}╱"
+    
+    @staticmethod
+    def _segments_width(segments:list[_Segment]) -> int:
+        width = 0
+        zeros = sorted(seg.start_col for seg in segments if seg.is_zero_width)
+        if zeros:
+            run_start = zeros[0]
+            run_len = 1
+            prev = zeros[0]
+            for col in zeros[1:]:
+                if col <= prev + 1:
+                    run_len += 1
+                else:
+                    width = max(width, run_start + run_len)
+                    run_start = col
+                    run_len = 1
+                prev = col
+            width = max(width, run_start + run_len)
+        for seg in segments:
+            if seg.is_zero_width:
+                width = max(width, seg.start_col + 1, seg.anchor_col + 1)
+            else:
+                width = max(width, seg.end_col, seg.anchor_col + 1)
+        return width
+
+
+def main() -> None:
+    examples:list[Error] = []
+    
+    print_src = "printl'Hello, World'"
+    print_sf = SrcFile.from_text(print_src, "path/to/file.dewy")
+    ident_span = Span(0, 6)
+    juxta_span = Span(6, 6)
+    string_span = Span(6, len(print_src))
+    
+    examples.append(Error(
+        src_file=print_sf,
+        title="dewy.errors.E1234 (link)",
+        message="Unable to juxtapose identifier and string",
+        pointer_messages=[
+            PointerMessage(
+                span=juxta_span,
+                text="tried to juxtapose printl (string:>void) and 'Hello, World' (string)\nexpected whitespace or operator between identifier and string",
+            ),
+        ],
+        hint="insert a space or an operator",
+    ))
+    
+    examples.append(Error(
+        src_file=print_sf,
+        title="dewy.errors.E2234 (link)",
+        message="Token needs additional context",
+        pointer_messages=[
+            PointerMessage(
+                span=Span(0, 6),
+                text="<per token message>",
+            ),
+        ],
+        hint="<some helpful hint>",
+    ))
+    
+    examples.append(Error(
+        src_file=print_sf,
+        title="dewy.errors.E2234 (link)",
+        message="Highlight multiple adjacent tokens",
+        pointer_messages=[
+            PointerMessage(span=ident_span, text="<message about the identifier token>"),
+            PointerMessage(span=juxta_span, text="<message about the juxtapose token>"),
+            PointerMessage(span=string_span, text="<message about the string token>"),
+        ],
+        hint="<some helpful hint>",
+    ))
+    
+    tight_src = "10x(y)"
+    tight_sf = SrcFile.from_text(tight_src, "path/to/file.dewy")
+    tight_pointers = [
+        PointerMessage(span=Span(0, 2), text="<message about the `10` token>", placement="above"),
+        PointerMessage(span=Span(2, 3), text="<message about the `x` token>", placement="above"),
+        PointerMessage(span=Span(3, 4), text="<message about the `(` token>", placement="above"),
+        PointerMessage(span=Span(4, 5), text="<message about the `y` token>", placement="above"),
+        PointerMessage(span=Span(5, 6), text="<message about the `)` token>", placement="above"),
+        PointerMessage(span=Span(2, 2), text="<message about the 10x juxtaposition>", placement="below"),
+        PointerMessage(span=Span(3, 3), text="<message about the x(y) juxtaposition>", placement="below"),
+    ]
+    examples.append(Error(
+        src_file=tight_sf,
+        title="dewy.errors.E3234 (link)",
+        message="Dealing with tightly packed tokens",
+        pointer_messages=tight_pointers,
+        hint="<some helpful hint>",
+    ))
+    
+    flipped_pointers = [
+        PointerMessage(span=Span(2, 2), text="<message about the 10x juxtaposition>", placement="above"),
+        PointerMessage(span=Span(3, 3), text="<message about the x(y) juxtaposition>", placement="above"),
+        PointerMessage(span=Span(0, 2), text="<message about the `10` token>", placement="below"),
+        PointerMessage(span=Span(2, 3), text="<message about the `x` token>", placement="below"),
+        PointerMessage(span=Span(3, 4), text="<message about the `(` token>", placement="below"),
+        PointerMessage(span=Span(4, 5), text="<message about the `y` token>", placement="below"),
+        PointerMessage(span=Span(5, 6), text="<message about the `)` token>", placement="below"),
+    ]
+    examples.append(Error(
+        src_file=tight_sf,
+        title="dewy.errors.E3234 (link)",
+        message="Flipping pointer directions",
+        pointer_messages=flipped_pointers,
+        hint="<some helpful hint>",
+    ))
+    
+    multi_src = "10x(y)\n* 42 + 3^x"
+    multi_sf = SrcFile.from_text(multi_src, "path/to/file.dewy")
+    multi_pointers = [
+        PointerMessage(span=Span(2, 2), text="<message about the 10x juxtaposition>", placement="above"),
+        PointerMessage(span=Span(3, 3), text="<message about the x(y) juxtaposition>", placement="above"),
+        PointerMessage(span=Span(0, 2), text="<message about the `10` token>", placement="below"),
+        PointerMessage(span=Span(2, 3), text="<message about the `x` token>", placement="below"),
+        PointerMessage(span=Span(3, 4), text="<message about the `(` token>", placement="below"),
+        PointerMessage(span=Span(4, 5), text="<message about the `y` token>", placement="below"),
+        PointerMessage(span=Span(5, 6), text="<message about the `)` token>", placement="below"),
+        PointerMessage(span=Span(7, 8), text="<message about the `*` token>"),
+        PointerMessage(span=Span(8, 10), text="<message about the `42` token>"),
+        PointerMessage(span=Span(11, 12), text="<message about the `+` token>"),
+        PointerMessage(span=Span(13, 14), text="<message about the `3` token>"),
+        PointerMessage(span=Span(14, 15), text="<message about the `^` token>"),
+        PointerMessage(span=Span(15, 16), text="<message about the `x` token>"),
+    ]
+    examples.append(Error(
+        src_file=multi_sf,
+        title="dewy.errors.E3234 (link)",
+        message="Multi-line expression pointers",
+        pointer_messages=multi_pointers,
+        hint="<some helpful hint>",
+    ))
+    
+    stacked_pointers = [
+        PointerMessage(span=Span(0, 2), text="<message about the `10` token>", placement="above"),
+        PointerMessage(span=Span(2, 3), text="<message about the `x` token>", placement="above"),
+        PointerMessage(span=Span(3, 4), text="<message about the `(` token>", placement="above"),
+        PointerMessage(span=Span(4, 5), text="<message about the `y` token>", placement="above"),
+        PointerMessage(span=Span(5, 6), text="<message about the `)` token>", placement="above"),
+        PointerMessage(span=Span(7, 8), text="<message about the `*` token>", placement="below"),
+        PointerMessage(span=Span(8, 10), text="<message about the `42` token>", placement="below"),
+        PointerMessage(span=Span(11, 12), text="<message about the `+` token>", placement="below"),
+        PointerMessage(span=Span(13, 14), text="<message about the `3` token>", placement="below"),
+        PointerMessage(span=Span(14, 15), text="<message about the `^` token>", placement="below"),
+        PointerMessage(span=Span(15, 16), text="<message about the `x` token>", placement="below"),
+    ]
+    examples.append(Error(
+        src_file=multi_sf,
+        title="dewy.errors.E3234 (link)",
+        message="Upper line pointers above, lower line below",
+        pointer_messages=stacked_pointers,
+        hint="<some helpful hint>",
+    ))
+    
+    tri_src = "alpha beta\ngamma + delta\nepsilon & zeta"
+    tri_sf = SrcFile.from_text(tri_src, "path/to/file.dewy")
+    tri_pointers = [
+        PointerMessage(span=Span(0, 5), text="<message about alpha>"),
+        PointerMessage(span=Span(6, 10), text="<message about beta>"),
+        PointerMessage(span=Span(11, 16), text="<message about gamma>"),
+        PointerMessage(span=Span(17, 18), text="<message about `+`>"),
+        PointerMessage(span=Span(19, 24), text="<message about delta>"),
+        PointerMessage(span=Span(25, 32), text="<message about epsilon>"),
+        PointerMessage(span=Span(33, 34), text="<message about `&`>"),
+        PointerMessage(span=Span(35, 39), text="<message about zeta>"),
+    ]
+    examples.append(Error(
+        src_file=tri_sf,
+        title="dewy.errors.E4000 (link)",
+        message="Three-line spanning diagnostic",
+        pointer_messages=tri_pointers,
+        hint="defaults to showing all markers below for 3+ lines",
+    ))
+    
+    long_lines = [
+        "step 01: fetch inputs",
+        "step 02: decode config",
+        "step 03: allocate buffers",
+        "step 04: parse stream",
+        "step 05: transform blocks",
+        "step 06: stage outputs",
+        "step 07: compute checksum",
+        "step 08: sign payload",
+        "step 09: finalize partial sum",
+        "step 10: verify outputs",
+        "step 11: cleanup temp files",
+        "step 12: shutdown services",
+    ]
+    long_src = "\n".join(long_lines)
+    long_sf = SrcFile.from_text(long_src, "path/to/long_example.dewy")
+    
+    def span_cols(line_no:int, start:int, stop:int) -> Span:
+        base = long_sf._line_starts[line_no - 1]
+        return Span(base + start, base + stop)
+    
+    def span_text(line_no:int, snippet:str) -> Span:
+        row = line_no - 1
+        line_text = long_sf.line_text(row)
+        offset = line_text.index(snippet)
+        return span_cols(line_no, offset, offset + len(snippet))
+    
+    examples.append(Error(
+        src_file=long_sf,
+        title="dewy.errors.E5000 (link)",
+        message="Demonstrate multi-digit line numbers",
+        pointer_messages=[
+            PointerMessage(span=span_text(9, "finalize"), text="<message on line 9>", placement="above"),
+            PointerMessage(span=span_text(10, "verify outputs"), text="<message on line 10>"),
+            PointerMessage(span=span_text(12, "shutdown services"), text="<message on line 12>", placement="below"),
+        ],
+        hint="line numbers stay aligned even after 9",
+    ))
+    
+    for idx, error in enumerate(examples):
+        print(error)
+        if idx + 1 < len(examples):
+            print()
+
+
+if __name__ == "__main__":
+    main()

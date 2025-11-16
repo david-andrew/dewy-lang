@@ -28,25 +28,6 @@ T = TypeVar('T', bound=Phase)
 class AST(Generic[T], ABC): ...
 
 
-
-@dataclass
-class Span:
-    """
-    python range rules, i.e. [start,stop), indices are in between items, not the indices of actual items. 
-    0-width implies pointing between characters
-    """
-    start:int
-    stop:int
-
-@dataclass
-class SrcFile:
-    location:Path|None  # none means parsed from raw string?
-    src:str
-    _line_starts: list[int]
-
-    def offset_to_row_col(self, index:int) -> tuple[int, int]:
-        ...
-
 # For Token to src tracking
 # map from tokens to the index it is in the list[Token]
 tok_idx_max:dict[Token, int] = {}
