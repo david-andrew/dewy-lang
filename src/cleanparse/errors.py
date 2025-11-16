@@ -7,8 +7,8 @@ from pathlib import Path
 from .errors import Error, PointerMessage, Span, SrcFile, ColorTheme
 
 srcfile = SrcFile(
-    location=Path("path/to/file.dewy"),
-    src="printl'Hello, World'",
+    path=Path("path/to/file.dewy"),
+    body="printl'Hello, World'",
 )
 
 error = Error(
@@ -26,6 +26,21 @@ error = Error(
 
 print(error)
 ```
+
+For discussion on what to include in error messages, see: https://langdev.stackexchange.com/questions/1790/what-should-be-included-in-error-messages
+
+TODO features:
+- severity levels (error, warning, info, hint)
+- linking to error code documentation website
+- terminal link to location of error in source code
+- structured output mode (probably json)
+- stack traces (perhaps higher order messages consisting of a list of errors?)
+- spans overlapping multiple lines
+- displaying multiple surrounding lines for extra context. TBD how much to display.
+- consider making this into a python library. but Dewy  doesn't want dependencies, so ideally the library would pull from here
+- source code syntax highlighting (very long term goal)
+- automated tests for expected strings given example error structs
+- for unknown identifiers, look up possible similar identifiers for help message (handled by higher level process)
 """
 
 from dataclasses import dataclass, field
@@ -268,13 +283,13 @@ class PointerMessage:
 
 @dataclass
 class SrcFile:
-    location:Path|None
-    src:str
+    path:Path|None
+    body:str
     _line_starts:list[int] = field(default_factory=list)
     
     def __post_init__(self) -> None:
         if not self._line_starts:
-            self._line_starts = self._compute_line_starts(self.src)
+            self._line_starts = self._compute_line_starts(self.body)
     
     @staticmethod
     def _compute_line_starts(text:str) -> list[int]:
@@ -285,12 +300,12 @@ class SrcFile:
         return starts
     
     @classmethod
-    def from_text(cls, src:str, location:PathLike[str]|str|None=None) -> "SrcFile":
-        loc:Path|None = None if location is None else Path(location)
-        return cls(location=loc, src=src)
+    def from_text(cls, body:str, path:PathLike[str]|str|None=None) -> "SrcFile":
+        loc:Path|None = None if path is None else Path(path)
+        return cls(path=loc, body=body)
 
     def offset_to_row_col(self, index:int) -> tuple[int, int]:
-        index = max(0, min(index, len(self.src)))
+        index = max(0, min(index, len(self.body)))
         line_idx = bisect_right(self._line_starts, index) - 1
         line_start = self._line_starts[line_idx]
         return (line_idx, index - line_start)
@@ -300,12 +315,12 @@ class SrcFile:
         if row + 1 < len(self._line_starts):
             end = self._line_starts[row + 1] - 1
         else:
-            end = len(self.src)
+            end = len(self.body)
         return start, end
     
     def line_text(self, row:int) -> str:
         start, end = self.line_bounds(row)
-        return self.src[start:end]
+        return self.body[start:end]
 
 
 @dataclass
@@ -346,7 +361,7 @@ class Error:
     def __str__(self) -> str:
         sf = self.src_file
         theme = ColorTheme(self.use_color)
-        loc = "input" if sf.location is None else str(sf.location)
+        loc = "input" if sf.path is None else str(sf.path)
         first_index = min((pm.span.start for pm in self.pointer_messages), default=0)
         row_idx, col_idx = sf.offset_to_row_col(first_index)
         
