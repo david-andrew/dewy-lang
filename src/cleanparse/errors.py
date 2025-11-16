@@ -625,14 +625,14 @@ class Error:
         if placement == "below":
             chars.append(theme.pointer_char("╱", run_segments[0].color_code))
             if count > 1:
-                gray_cross = theme.pointer_char("╳", FG_DIM_GRAY)
-                chars.extend(gray_cross for _ in range(count - 1))
+                for seg in run_segments[1:]:
+                    chars.append(theme.pointer_char("╳", seg.color_code))
             chars.append(theme.pointer_char("╲", run_segments[-1].color_code))
         else:
             chars.append(theme.pointer_char("╲", run_segments[0].color_code))
             if count > 1:
-                gray_cross = theme.pointer_char("╳", FG_DIM_GRAY)
-                chars.extend(gray_cross for _ in range(count - 1))
+                for seg in run_segments[1:]:
+                    chars.append(theme.pointer_char("╳", seg.color_code))
             chars.append(theme.pointer_char("╱", run_segments[-1].color_code))
         return chars
     
