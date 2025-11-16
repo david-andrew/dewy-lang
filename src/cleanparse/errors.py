@@ -166,6 +166,46 @@ Error: dewy.errors.E3234 (link)
 
 """
 
+RESET = "\033[0m"
+FG_RED = "\033[31m"
+FG_GRAY = "\033[90m"
+POINTER_COLOR_CODES = ("\033[95m", "\033[96m", "\033[92m", "\033[93m", "\033[94m")
+
+
+class ColorTheme:
+    def __init__(self, enabled:bool=True) -> None:
+        self.enabled = enabled
+    
+    def _wrap(self, text:str, code:str|None) -> str:
+        if not self.enabled or not code:
+            return text
+        return f"{code}{text}{RESET}"
+    
+    def title(self, text:str) -> str:
+        return self._wrap(text, FG_RED)
+    
+    def error_marker(self, text:str) -> str:
+        return self._wrap(text, FG_RED)
+    
+    def line_number(self, text:str) -> str:
+        return self._wrap(text, FG_GRAY)
+    
+    def help_label(self, text:str) -> str:
+        return self._wrap(text, FG_GRAY)
+    
+    def pointer_text(self, text:str, color_code:str|None) -> str:
+        return self._wrap(text, color_code)
+    
+    def pointer_char(self, char:str, color_code:str|None) -> str:
+        return self._wrap(char, color_code)
+    
+    @property
+    def pointer_palette(self) -> tuple[str|None, ...]:
+        if not self.enabled:
+            return (None,)
+        return POINTER_COLOR_CODES
+
+
 PointerPlacement = Literal["above", "below"]
 
 
@@ -217,7 +257,7 @@ class SrcFile:
     def from_text(cls, src:str, location:PathLike[str]|str|None=None) -> "SrcFile":
         loc:Path|None = None if location is None else Path(location)
         return cls(location=loc, src=src)
-    
+
     def offset_to_row_col(self, index:int) -> tuple[int, int]:
         index = max(0, min(index, len(self.src)))
         line_idx = bisect_right(self._line_starts, index) - 1
@@ -245,6 +285,7 @@ class _Segment:
     end_col:int
     anchor_col:int
     placement:PointerPlacement|None
+    color_code:str|None
     
     @property
     def is_zero_width(self) -> bool:
@@ -258,6 +299,7 @@ class Error:
     message:str
     pointer_messages:list[PointerMessage|tuple[Span, str]]
     hint:str|None=None
+    use_color:bool=True
     
     def __post_init__(self) -> None:
         normalized:list[PointerMessage] = []
@@ -268,14 +310,15 @@ class Error:
                 span, text = entry
                 normalized.append(PointerMessage(span=span, text=text))
         self.pointer_messages = normalized
-    
+
     def __str__(self) -> str:
         sf = self.src_file
+        theme = ColorTheme(self.use_color)
         loc = "input" if sf.location is None else str(sf.location)
         first_index = min((pm.span.start for pm in self.pointer_messages), default=0)
         row_idx, col_idx = sf.offset_to_row_col(first_index)
         
-        segments = self._prepare_segments()
+        segments = self._prepare_segments(theme.pointer_palette)
         line_order = sorted({seg.line_idx for seg in segments})
         if not line_order:
             line_order = [row_idx]
@@ -287,9 +330,9 @@ class Error:
         block_indent = "    "
         
         out:list[str] = []
-        out.append(f"Error: {self.title}")
+        out.append(f"Error: {theme.title(self.title)}")
         out.append("")
-        out.append(f" × {self.message}")
+        out.append(f"{body_indent}{theme.error_marker('×')} {self.message}")
         out.append(f"{block_indent}{gutter_pad}╭─[{loc}:{row_idx+1}:{col_idx+1}]")
         
         segments_by_line:dict[int, list[_Segment]] = {}
@@ -298,17 +341,21 @@ class Error:
         
         for line_idx in line_order:
             per_line = segments_by_line.get(line_idx, [])
-            out.extend(self._render_line(line_idx, per_line, block_indent, line_no_width))
+            out.extend(self._render_line(line_idx, per_line, block_indent, line_no_width, theme))
         
         out.append(f"{block_indent}{gutter_pad}╰───")
         if self.hint:
-            out.append(f"{body_indent}help: {self.hint}")
+            out.append(f"{body_indent}{theme.help_label('help:')} {self.hint}")
         return "\n".join(out)
     
-    def _prepare_segments(self) -> list[_Segment]:
+    def _prepare_segments(self, palette:tuple[str|None, ...]) -> list[_Segment]:
         sf = self.src_file
         segments:list[_Segment] = []
+        palette_len = len(palette)
+        color_index = 0
         for pointer in self.pointer_messages:
+            color_code = palette[color_index % palette_len]
+            color_index += 1
             start_row, _ = sf.offset_to_row_col(pointer.span.start)
             end_row, _ = sf.offset_to_row_col(pointer.span.stop)
             if start_row != end_row:
@@ -335,6 +382,7 @@ class Error:
                 end_col=end_col,
                 anchor_col=anchor_col,
                 placement=pointer.placement,
+                color_code=color_code,
             ))
         
         line_order = sorted({seg.line_idx for seg in segments})
@@ -369,12 +417,14 @@ class Error:
         segments:list[_Segment],
         block_indent:str,
         line_no_width:int,
+        theme:ColorTheme,
     ) -> list[str]:
         sf = self.src_file
         line_no = line_idx + 1
         line_text = sf.line_text(line_idx)
         
-        line_prefix = f"  {line_no:>{line_no_width}} | "
+        line_no_text = theme.line_number(f"{line_no:>{line_no_width}}")
+        line_prefix = f"  {line_no_text} | "
         pointer_prefix = "  " + " " * (line_no_width + 1) + "· "
         
         above = [seg for seg in segments if seg.placement == "above"]
@@ -387,9 +437,9 @@ class Error:
         )
         
         output:list[str] = []
-        output.extend(self._render_pointer_layer(above, pointer_prefix, width, "above"))
+        output.extend(self._render_pointer_layer(above, pointer_prefix, width, "above", theme))
         output.append(f"{line_prefix}{line_text}")
-        output.extend(self._render_pointer_layer(below, pointer_prefix, width, "below"))
+        output.extend(self._render_pointer_layer(below, pointer_prefix, width, "below", theme))
         return output
     
     def _render_pointer_layer(
@@ -398,11 +448,12 @@ class Error:
         pointer_prefix:str,
         width:int,
         placement:PointerPlacement,
+        theme:ColorTheme,
     ) -> list[str]:
         if not segments:
             return []
-        baseline, effective_width = self._build_baseline(segments, max(width, 0), placement)
-        messages = self._build_message_lines(segments, effective_width, placement)
+        baseline, effective_width = self._build_baseline(segments, max(width, 0), placement, theme)
+        messages = self._build_message_lines(segments, effective_width, placement, theme)
         prefixed:list[str] = []
         if placement == "above":
             prefixed.extend(f"{pointer_prefix}{line}" for line in messages)
@@ -417,6 +468,7 @@ class Error:
         segments:list[_Segment],
         width:int,
         placement:PointerPlacement,
+        theme:ColorTheme,
     ) -> tuple[str, int]:
         chars:list[str] = [" "] * width
         
@@ -429,12 +481,13 @@ class Error:
                 continue
             for idx in range(seg.start_col, seg.end_col):
                 ensure(idx)
-                chars[idx] = "─"
+                chars[idx] = theme.pointer_char("─", seg.color_code)
         for seg in segments:
             if seg.is_zero_width:
                 continue
             ensure(seg.anchor_col)
-            chars[seg.anchor_col] = "┬" if placement == "below" else "┴"
+            marker = "┬" if placement == "below" else "┴"
+            chars[seg.anchor_col] = theme.pointer_char(marker, seg.color_code)
         
         zero_segments = sorted((seg for seg in segments if seg.is_zero_width), key=lambda s: s.start_col)
         i = 0
@@ -451,7 +504,8 @@ class Error:
                     j += 1
                 else:
                     break
-            pattern = self._zero_pattern(run_count, placement)
+            run_segments = zero_segments[i:j]
+            pattern = self._zero_pattern(run_segments, placement, theme)
             for offset, ch in enumerate(pattern):
                 idx = run_start + offset
                 ensure(idx)
@@ -466,68 +520,80 @@ class Error:
         segments:list[_Segment],
         width:int,
         placement:PointerPlacement,
+        theme:ColorTheme,
     ) -> list[str]:
         if not segments:
             return []
         lines:list[str] = []
         if placement == "below":
             order = sorted(segments, key=lambda s: s.anchor_col, reverse=True)
-            pending = [seg.anchor_col for seg in order]
+            pending = [(seg.anchor_col, seg.color_code) for seg in order]
             for seg in order:
                 line_chars = [" "] * width
-                for anchor in pending:
+                for anchor, color in pending:
                     if anchor == seg.anchor_col:
                         continue
                     if anchor >= len(line_chars):
                         line_chars.extend([" "] * (anchor - len(line_chars) + 1))
                     if line_chars[anchor] == " ":
-                        line_chars[anchor] = "│"
+                        line_chars[anchor] = theme.pointer_char("│", color)
                 anchor = seg.anchor_col
                 if anchor >= len(line_chars):
                     line_chars.extend([" "] * (anchor - len(line_chars) + 1))
-                line_chars[anchor] = "╰"
+                line_chars[anchor] = theme.pointer_char("╰", seg.color_code)
                 base = "".join(line_chars).rstrip()
                 text_lines = seg.pointer.text.splitlines() or [""]
                 first, *rest = text_lines
-                lines.append(f"{base}─ {first}")
+                colored_section = theme.pointer_text(f"─ {first}", seg.color_code)
+                lines.append(f"{base}{colored_section}")
                 if rest:
                     continuation = " " * (anchor + 3)
                     for chunk in rest:
-                        lines.append(f"{continuation}{chunk}")
-                pending.remove(anchor)
+                        lines.append(theme.pointer_text(f"{continuation}{chunk}", seg.color_code))
+                pending = [(a, c) for (a, c) in pending if a != anchor]
         else:
             order = sorted(segments, key=lambda s: s.anchor_col)
-            active:list[int] = []
+            active:list[tuple[int, str|None]] = []
             for seg in order:
                 line_chars = [" "] * width
-                for anchor in active:
+                for anchor, color in active:
                     if anchor >= len(line_chars):
                         line_chars.extend([" "] * (anchor - len(line_chars) + 1))
                     if line_chars[anchor] == " ":
-                        line_chars[anchor] = "│"
+                        line_chars[anchor] = theme.pointer_char("│", color)
                 anchor = seg.anchor_col
                 if anchor >= len(line_chars):
                     line_chars.extend([" "] * (anchor - len(line_chars) + 1))
-                line_chars[anchor] = "╭"
+                line_chars[anchor] = theme.pointer_char("╭", seg.color_code)
                 base = "".join(line_chars).rstrip()
                 text_lines = seg.pointer.text.splitlines() or [""]
                 first, *rest = text_lines
-                lines.append(f"{base}─ {first}")
+                colored_section = theme.pointer_text(f"─ {first}", seg.color_code)
+                lines.append(f"{base}{colored_section}")
                 if rest:
                     continuation = " " * (anchor + 3)
                     for chunk in rest:
-                        lines.append(f"{continuation}{chunk}")
-                active.append(anchor)
+                        lines.append(theme.pointer_text(f"{continuation}{chunk}", seg.color_code))
+                active.append((anchor, seg.color_code))
         return lines
     
     @staticmethod
-    def _zero_pattern(count:int, placement:PointerPlacement) -> str:
-        if count <= 0:
-            return ""
-        middle = "╳" * max(0, count - 1)
+    def _zero_pattern(run_segments:list[_Segment], placement:PointerPlacement, theme:ColorTheme) -> list[str]:
+        count = len(run_segments)
+        if count == 0:
+            return []
+        chars:list[str] = []
         if placement == "below":
-            return f"╱{middle}╲"
-        return f"╲{middle}╱"
+            chars.append(theme.pointer_char("╱", run_segments[0].color_code))
+            if count > 1:
+                chars.extend("╳" for _ in range(count - 1))
+            chars.append(theme.pointer_char("╲", run_segments[-1].color_code))
+        else:
+            chars.append(theme.pointer_char("╲", run_segments[0].color_code))
+            if count > 1:
+                chars.extend("╳" for _ in range(count - 1))
+            chars.append(theme.pointer_char("╱", run_segments[-1].color_code))
+        return chars
     
     @staticmethod
     def _segments_width(segments:list[_Segment]) -> int:
