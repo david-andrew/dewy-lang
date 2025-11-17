@@ -344,9 +344,9 @@ class _Segment:
 @dataclass
 class Error:
     src_file:SrcFile
-    title:str
-    message:str
-    pointer_messages:list[PointerMessage|tuple[Span, str]]
+    title:str|None=None
+    message:str|None=None
+    pointer_messages:list[PointerMessage|tuple[Span, str]]=field(default_factory=list)
     hint:str|None=None
     use_color:bool=True
     
@@ -379,9 +379,11 @@ class Error:
         block_indent = "    "
         
         out:list[str] = []
-        out.append(f"Error: {theme.title(self.title)}")
-        out.append("")
-        out.append(f"{body_indent}{theme.error_marker('×')} {self.message}")
+        if self.title:
+            out.append(f"Error: {theme.title(self.title)}")
+            out.append("")
+        if self.message:
+            out.append(f"{body_indent}{theme.error_marker('×')} {self.message}")
         out.append(f"{block_indent}{gutter_pad}╭─[{loc}:{row_idx+1}:{col_idx+1}]")
         
         segments_by_line:dict[int, list[_Segment]] = {}
@@ -770,13 +772,11 @@ class Error:
 
 def main() -> None:
     from textwrap import dedent
-
-    examples:list[Error] = []
     
     print_src = "printl'Hello, World'"
     print_sf = SrcFile.from_text(print_src, "path/to/file.dewy")
     
-    examples.append(Error(
+    e = Error(
         src_file=print_sf,
         title="dewy.errors.E1234 (link)",
         message="Unable to juxtapose identifier and string",
@@ -787,9 +787,10 @@ def main() -> None:
             ),
         ],
         hint="insert a space or an operator",
-    ))
+    )
+    print(e, end="\n\n")
     
-    examples.append(Error(
+    e = Error(
         src_file=print_sf,
         title="dewy.errors.E2234 (link)",
         message="Token needs additional context",
@@ -800,9 +801,10 @@ def main() -> None:
             ),
         ],
         hint="<some helpful hint>",
-    ))
+    )
+    print(e, end="\n\n")
     
-    examples.append(Error(
+    e = Error(
         src_file=print_sf,
         title="dewy.errors.E2234 (link)",
         message="Highlight multiple adjacent tokens",
@@ -812,11 +814,12 @@ def main() -> None:
             PointerMessage(span=Span(6, len(print_src)), message="<message about the string token>"),
         ],
         hint="<some helpful hint>",
-    ))
+    )
+    print(e, end="\n\n")
     
     tight_src = "10x(y)"
     tight_sf = SrcFile.from_text(tight_src, "path/to/file.dewy")
-    examples.append(Error(
+    e = Error(
         src_file=tight_sf,
         title="dewy.errors.E3234 (link)",
         message="Dealing with tightly packed tokens",
@@ -830,9 +833,10 @@ def main() -> None:
             PointerMessage(span=Span(3, 3), message="<message about the x(y) juxtaposition>"),#, placement="below"),
         ],
         hint="<some helpful hint>",
-    ))
+    )
+    print(e, end="\n\n")
     
-    examples.append(Error(
+    e = Error(
         src_file=tight_sf,
         title="dewy.errors.E3234 (link)",
         message="Flipping pointer directions",
@@ -846,7 +850,8 @@ def main() -> None:
             PointerMessage(span=Span(5, 6), message="<message about the `)` token>"),#, placement="below"),
         ],
         hint="<some helpful hint>",
-    ))
+    )
+    print(e, end="\n\n")
     
     multi_src = "10x(y)\n* 42 + 3^x"
     multi_sf = SrcFile.from_text(multi_src, "path/to/file.dewy")
@@ -865,15 +870,16 @@ def main() -> None:
         PointerMessage(span=Span(15, 16), message="<message about the `^` token>"),
         PointerMessage(span=Span(16, 17), message="<message about the `x` token>"),
     ]
-    examples.append(Error(
+    e = Error(
         src_file=multi_sf,
         title="dewy.errors.E3234 (link)",
         message="Multi-line expression pointers",
         pointer_messages=multi_pointers,
         hint="<some helpful hint>",
-    ))
+    )
+    print(e, end='\n\n')
     
-    examples.append(Error(
+    e = Error(
         src_file=multi_sf,
         title="dewy.errors.E3234 (link)",
         message="Upper line pointers above, lower line below",
@@ -891,12 +897,13 @@ def main() -> None:
             PointerMessage(span=Span(16, 17), message="<message about the `x` token>"),
         ],
         hint="<some helpful hint>",
-    ))
+    )
+    print(e, end="\n\n")
 
 
     triple_tight_src = "[a]5x(y)"
     triple_tight_sf = SrcFile.from_text(triple_tight_src, "path/to/file.dewy")
-    examples.append(Error(
+    e = Error(
         src_file=triple_tight_sf,
         title="dewy.errors.E3234 (link)",
         message="Triple tightly packed tokens",
@@ -914,10 +921,11 @@ def main() -> None:
             PointerMessage(span=Span(5, 5), message="<message about the `x(y)` juxtaposition>"),#, placement="below"),
         ],
         hint="<some helpful hint>",
-    ))
+    )
+    print(e, end="\n\n")
 
 
-    examples.append(Error(
+    e = Error(
         src_file=triple_tight_sf,
         title="dewy.errors.E3234 (link)",
         message="Unpositioned triple tightly packed tokens",
@@ -935,7 +943,8 @@ def main() -> None:
             PointerMessage(span=Span(5, 5), message="<message about the `x(y)` juxtaposition>"),
         ],
         hint="<some helpful hint>",
-    ))
+    )
+    print(e, end="\n\n")
 
 
     
@@ -951,18 +960,19 @@ def main() -> None:
         PointerMessage(span=Span(33, 34), message="<message about `&`>"),
         PointerMessage(span=Span(35, 39), message="<message about zeta>"),
     ]
-    examples.append(Error(
+    e = Error(
         src_file=tri_sf,
         title="dewy.errors.E4000 (link)",
         message="Three-line spanning diagnostic",
         pointer_messages=tri_pointers,
         hint="defaults to showing all markers below for 3+ lines",
-    ))
+    )
+    print(e, end="\n\n")
     
     multiline_block_src = "block start {\n  inner stuff\n} block end"
     multiline_block_sf = SrcFile.from_text(multiline_block_src, "path/to/block.dewy")
     full_span = Span(0, len(multiline_block_src))
-    examples.append(Error(
+    e = Error(
         src_file=multiline_block_sf,
         title="dewy.errors.E6000 (link)",
         message="Illustrate multi-line span pointer",
@@ -973,7 +983,8 @@ def main() -> None:
             ),
         ],
         hint="multi-line spans draw a single pointer after the block",
-    ))
+    )
+    print(e, end="\n\n")
     
     long_src = dedent("""\
         step 01: fetch inputs
@@ -1001,7 +1012,7 @@ def main() -> None:
         offset = line_text.index(snippet)
         return span_cols(line_no, offset, offset + len(snippet))
     
-    examples.append(Error(
+    e = Error(
         src_file=long_sf,
         title="dewy.errors.E5000 (link)",
         message="Demonstrate multi-digit line numbers",
@@ -1011,11 +1022,29 @@ def main() -> None:
             PointerMessage(span=span_text(12, "shutdown services"), message="<message on line 12>"),#, placement="below"),
         ],
         hint="line numbers stay aligned even after 9",
-    ))
+    )
+    print(e, end="\n\n")
     
-    for error in examples:
-        print(error)
-        print()
+    
+    py_src = dedent("""\
+        def repeat(message: str, times: int) -> str:
+            return message * times
+
+        result = repeat("hello", "3")
+        print(result)
+    """)
+
+    e = Error(
+        src_file=SrcFile.from_text(py_src, "path/to/py_example.py"),
+        title="type mismatch for argument `times`",
+        # message="Called `repeat` with 'str' instead of 'int' for argument `times`",
+        pointer_messages=[
+            PointerMessage(span=Span(82, 88), message="`repeat` function's second argument `times` expects an 'int'"),
+            PointerMessage(span=Span(98, 101), message="argument given is type 'str'"),
+        ],
+        hint='Consider changing string literal "3" to integer 3',
+    )
+    print(e)
 
 
 if __name__ == "__main__":
