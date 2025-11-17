@@ -283,11 +283,13 @@ class PointerMessage:
 
 @dataclass
 class SrcFile:
-    path:Path|None
+    path:PathLike[str]|None
     body:str
     _line_starts:list[int] = field(default_factory=list)
     
     def __post_init__(self) -> None:
+        if self.path is not None and not isinstance(self.path, Path):
+            self.path = Path(self.path)
         if not self._line_starts:
             self._line_starts = self._compute_line_starts(self.body)
     
@@ -300,9 +302,8 @@ class SrcFile:
         return starts
     
     @classmethod
-    def from_text(cls, body:str, path:PathLike[str]|str|None=None) -> "SrcFile":
-        loc:Path|None = None if path is None else Path(path)
-        return cls(path=loc, body=body)
+    def from_text(cls, body:str, path:PathLike[str]|None=None) -> "SrcFile":
+        return cls(path=path, body=body)
 
     def offset_to_row_col(self, index:int) -> tuple[int, int]:
         index = max(0, min(index, len(self.body)))
@@ -333,6 +334,7 @@ class _Segment:
     placement:PointerPlacement|None
     color_code:str|None
     auto_assigned:bool = False
+    render_pointer:bool = True
     
     @property
     def is_zero_width(self) -> bool:
@@ -403,34 +405,7 @@ class Error:
         for pointer in self.pointer_messages:
             color_code = palette[color_index % palette_len]
             color_index += 1
-            start_row, _ = sf.offset_to_row_col(pointer.span.start)
-            end_row, _ = sf.offset_to_row_col(pointer.span.stop)
-            if start_row != end_row:
-                raise ValueError("spans cannot cross multiple lines yet")
-            line_idx = start_row
-            line_start, _ = sf.line_bounds(line_idx)
-            line_text = sf.line_text(line_idx)
-            line_len = len(line_text)
-            start_col = max(0, min(pointer.span.start - line_start, line_len))
-            end_col = max(0, min(pointer.span.stop - line_start, line_len))
-            if start_col > end_col:
-                start_col, end_col = end_col, start_col
-            if start_col == end_col:
-                if start_col > 0:
-                    start_col -= 1
-                    end_col = start_col
-                anchor_col = start_col
-            else:
-                anchor_col = start_col + ((end_col - start_col) - 1) // 2
-            segments.append(_Segment(
-                pointer=pointer,
-                line_idx=line_idx,
-                start_col=start_col,
-                end_col=end_col,
-                anchor_col=anchor_col,
-                placement=pointer.placement,
-                color_code=color_code,
-            ))
+            segments.extend(self._build_segments_for_pointer(sf, pointer, color_code))
         
         line_to_segments:dict[int, list[_Segment]] = {}
         for seg in segments:
@@ -442,11 +417,95 @@ class Error:
             siblings = by_line.setdefault(seg.line_idx, [])
             siblings.append(seg)
         for line_idx, siblings in by_line.items():
-            non_zero = [s for s in siblings if not s.is_zero_width]
+            non_zero = [s for s in siblings if s.render_pointer and not s.is_zero_width]
             non_zero.sort(key=lambda s: s.start_col)
             for left, right in zip(non_zero, non_zero[1:]):
                 if left.end_col > right.start_col:
                     raise ValueError(f"overlapping spans on line {line_idx+1}")
+        return segments
+    
+    def _build_segments_for_pointer(self, sf:SrcFile, pointer:PointerMessage, color_code:str|None) -> list[_Segment]:
+        segments:list[_Segment] = []
+        start_row, _ = sf.offset_to_row_col(pointer.span.start)
+        end_row, _ = sf.offset_to_row_col(pointer.span.stop)
+        line_infos:list[dict[str, int]] = []
+        for line_idx in range(start_row, end_row + 1):
+            line_start, line_end = sf.line_bounds(line_idx)
+            line_len = line_end - line_start
+            if line_idx == start_row:
+                start_col = max(0, min(pointer.span.start - line_start, line_len))
+            else:
+                start_col = 0
+            if line_idx == end_row:
+                end_col = max(0, min(pointer.span.stop - line_start, line_len))
+            else:
+                end_col = line_len
+            if start_col > end_col:
+                start_col, end_col = end_col, start_col
+            line_infos.append({
+                "line_idx": line_idx,
+                "start_col": start_col,
+                "end_col": end_col,
+                "line_len": line_len,
+            })
+        
+        if len(line_infos) == 1:
+            info = line_infos[0]
+            start_col = info["start_col"]
+            end_col = info["end_col"]
+            if start_col == end_col:
+                if start_col > 0:
+                    start_col -= 1
+                    end_col = start_col
+                anchor_col = start_col
+            else:
+                anchor_col = start_col + ((end_col - start_col) - 1) // 2
+            segments.append(_Segment(
+                pointer=pointer,
+                line_idx=info["line_idx"],
+                start_col=start_col,
+                end_col=end_col,
+                anchor_col=anchor_col,
+                placement=pointer.placement,
+                color_code=color_code,
+            ))
+            return segments
+        
+        max_line_length = max(info["line_len"] for info in line_infos)
+        final_end_col = line_infos[-1]["end_col"]
+        baseline_end = max(max_line_length, final_end_col)
+        for info in line_infos[:-1]:
+            start_col = info["start_col"]
+            end_col = info["end_col"]
+            if start_col == end_col and start_col > 0:
+                start_col -= 1
+                end_col = start_col
+            anchor_col = start_col
+            segments.append(_Segment(
+                pointer=pointer,
+                line_idx=info["line_idx"],
+                start_col=start_col,
+                end_col=end_col,
+                anchor_col=anchor_col,
+                placement=pointer.placement,
+                color_code=color_code,
+                render_pointer=False,
+            ))
+        
+        final_info = line_infos[-1]
+        if baseline_end <= 0:
+            anchor_col = 0
+        else:
+            anchor_col = (baseline_end - 1) // 2
+        segments.append(_Segment(
+            pointer=pointer,
+            line_idx=final_info["line_idx"],
+            start_col=0,
+            end_col=baseline_end,
+            anchor_col=0 if baseline_end == 0 else min(max(anchor_col, 0), baseline_end - 1),
+            placement=pointer.placement,
+            color_code=color_code,
+        ))
         return segments
     
     def _assign_default_placements(self, line_to_segments:dict[int, list[_Segment]]) -> None:
@@ -511,8 +570,8 @@ class Error:
         line_prefix = f"  {line_no_text} | "
         pointer_prefix = "  " + " " * (line_no_width + 1) + "· "
         
-        above = [seg for seg in segments if seg.placement == "above"]
-        below = [seg for seg in segments if seg.placement == "below"]
+        above = [seg for seg in segments if seg.render_pointer and seg.placement == "above"]
+        below = [seg for seg in segments if seg.render_pointer and seg.placement == "below"]
         
         width = max(
             len(line_text),
@@ -534,10 +593,11 @@ class Error:
         placement:PointerPlacement,
         theme:ColorTheme,
     ) -> list[str]:
-        if not segments:
+        render_segments = [seg for seg in segments if seg.render_pointer]
+        if not render_segments:
             return []
-        baseline, effective_width = self._build_baseline(segments, max(width, 0), placement, theme)
-        messages = self._build_message_lines(segments, effective_width, placement, theme)
+        baseline, effective_width = self._build_baseline(render_segments, max(width, 0), placement, theme)
+        messages = self._build_message_lines(render_segments, effective_width, placement, theme)
         prefixed:list[str] = []
         if placement == "above":
             prefixed.extend(f"{pointer_prefix}{line}" for line in messages)
@@ -684,7 +744,7 @@ class Error:
     @staticmethod
     def _segments_width(segments:list[_Segment]) -> int:
         width = 0
-        zeros = sorted(seg.start_col for seg in segments if seg.is_zero_width)
+        zeros = sorted(seg.start_col for seg in segments if seg.render_pointer and seg.is_zero_width)
         if zeros:
             run_start = zeros[0]
             run_len = 1
@@ -699,6 +759,8 @@ class Error:
                 prev = col
             width = max(width, run_start + run_len)
         for seg in segments:
+            if not seg.render_pointer:
+                continue
             if seg.is_zero_width:
                 width = max(width, seg.start_col + 1, seg.anchor_col + 1)
             else:
@@ -895,6 +957,22 @@ def main() -> None:
         message="Three-line spanning diagnostic",
         pointer_messages=tri_pointers,
         hint="defaults to showing all markers below for 3+ lines",
+    ))
+    
+    multiline_block_src = "block start {\n  inner stuff\n} block end"
+    multiline_block_sf = SrcFile.from_text(multiline_block_src, "path/to/block.dewy")
+    full_span = Span(0, len(multiline_block_src))
+    examples.append(Error(
+        src_file=multiline_block_sf,
+        title="dewy.errors.E6000 (link)",
+        message="Illustrate multi-line span pointer",
+        pointer_messages=[
+            PointerMessage(
+                span=full_span,
+                message="<message covering the entire block>",
+            ),
+        ],
+        hint="multi-line spans draw a single pointer after the block",
     ))
     
     long_src = dedent("""\
