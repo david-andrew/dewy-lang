@@ -1,3 +1,5 @@
+from . import errors
+
 from typing import Generic, TypeAlias, TypeVar
 from abc import ABC
 from dataclasses import dataclass
