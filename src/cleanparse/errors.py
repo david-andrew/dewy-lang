@@ -4,7 +4,7 @@ Classes for displaying rich error messages.
 Usage:
 ```python
 from pathlib import Path
-from .errors import Error, PointerMessage, Span, SrcFile, ColorTheme
+from .errors import Error, Pointer, Span, SrcFile, ColorTheme
 
 srcfile = SrcFile(
     path=Path("path/to/file.dewy"),
@@ -12,11 +12,11 @@ srcfile = SrcFile(
 )
 
 error = Error(
-    src_file=srcfile,
+    srcfile=srcfile,
     title="dewy.errors.E1234",
     message="Unable to juxtapose identifier and string",
     pointer_messages=[
-        PointerMessage(
+        Pointer(
             span=Span(6, 6),
             message="tried to juxtapose printl (string:>void) and 'Hello, World' (string)\nexpected whitespace or operator between identifier and string",
         ),
@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from bisect import bisect_right
 from os import PathLike
-from typing import Literal
+from typing import Literal, NoReturn
 
 
 
@@ -113,7 +113,7 @@ class Span:
 
 
 @dataclass
-class PointerMessage:
+class Pointer:
     span:Span
     message:str
     placement:PointerPlacement|None = None
@@ -164,7 +164,7 @@ class SrcFile:
 
 @dataclass
 class _Segment:
-    pointer:PointerMessage
+    pointer:Pointer
     line_idx:int
     start_col:int
     end_col:int
@@ -181,25 +181,27 @@ class _Segment:
 
 @dataclass
 class Error:
-    src_file:SrcFile
+    srcfile:SrcFile
     title:str|None=None
     message:str|None=None
-    pointer_messages:list[PointerMessage|tuple[Span, str]]=field(default_factory=list)
+    pointer_messages:Pointer|tuple[Span, str]|list[Pointer|tuple[Span, str]]=field(default_factory=list)
     hint:str|None=None
     use_color:bool=True
     
     def __post_init__(self) -> None:
-        normalized:list[PointerMessage] = []
+        normalized:list[Pointer] = []
+        if isinstance(self.pointer_messages, (Pointer, tuple)):
+            self.pointer_messages = [self.pointer_messages]
         for entry in self.pointer_messages:
-            if isinstance(entry, PointerMessage):
+            if isinstance(entry, Pointer):
                 normalized.append(entry)
             else:
                 span, text = entry
-                normalized.append(PointerMessage(span=span, message=text))
+                normalized.append(Pointer(span=span, message=text))
         self.pointer_messages = normalized
 
     def __str__(self) -> str:
-        sf = self.src_file
+        sf = self.srcfile
         theme = ColorTheme(self.use_color)
         loc = "input" if sf.path is None else str(sf.path)
         first_index = min((pm.span.start for pm in self.pointer_messages), default=0)
@@ -238,7 +240,7 @@ class Error:
         return "\n".join(out)
     
     def _prepare_segments(self, palette:tuple[str|None, ...]) -> list[_Segment]:
-        sf = self.src_file
+        sf = self.srcfile
         segments:list[_Segment] = []
         palette_len = len(palette)
         color_index = 0
@@ -264,7 +266,7 @@ class Error:
                     raise ValueError(f"overlapping spans on line {line_idx+1}")
         return segments
     
-    def _build_segments_for_pointer(self, sf:SrcFile, pointer:PointerMessage, color_code:str|None) -> list[_Segment]:
+    def _build_segments_for_pointer(self, sf:SrcFile, pointer:Pointer, color_code:str|None) -> list[_Segment]:
         segments:list[_Segment] = []
         start_row, _ = sf.offset_to_row_col(pointer.span.start)
         end_row, _ = sf.offset_to_row_col(pointer.span.stop)
@@ -402,7 +404,7 @@ class Error:
         line_no_width:int,
         theme:ColorTheme,
     ) -> list[str]:
-        sf = self.src_file
+        sf = self.srcfile
         line_no = line_idx + 1
         line_text = sf.line_text(line_idx)
         
@@ -606,6 +608,10 @@ class Error:
             else:
                 width = max(width, seg.end_col, seg.anchor_col + 1)
         return width
+    
+    def throw(self) -> NoReturn:
+        print(self)
+        exit(1)
 
 
 def main() -> None:
@@ -615,11 +621,11 @@ def main() -> None:
     print_sf = SrcFile.from_text(print_src, "path/to/file.dewy")
     
     e = Error(
-        src_file=print_sf,
+        srcfile=print_sf,
         title="dewy.errors.E1234 (link)",
         message="Unable to juxtapose identifier and string",
         pointer_messages=[
-            PointerMessage(
+            Pointer(
                 span=Span(6, 6),
                 message="tried to juxtapose printl (string:>void) and 'Hello, World' (string)\nexpected whitespace or operator between identifier and string",
             ),
@@ -629,11 +635,11 @@ def main() -> None:
     print(e, end="\n\n")
     
     e = Error(
-        src_file=print_sf,
+        srcfile=print_sf,
         title="dewy.errors.E2234 (link)",
         message="Token needs additional context",
         pointer_messages=[
-            PointerMessage(
+            Pointer(
                 span=Span(0, 6),
                 message="<per token message>",
             ),
@@ -643,13 +649,13 @@ def main() -> None:
     print(e, end="\n\n")
     
     e = Error(
-        src_file=print_sf,
+        srcfile=print_sf,
         title="dewy.errors.E2234 (link)",
         message="Highlight multiple adjacent tokens",
         pointer_messages=[
-            PointerMessage(span=Span(0, 6), message="<message about the identifier token>"),
-            PointerMessage(span=Span(6, 6), message="<message about the juxtapose token>"),
-            PointerMessage(span=Span(6, len(print_src)), message="<message about the string token>"),
+            Pointer(span=Span(0, 6), message="<message about the identifier token>"),
+            Pointer(span=Span(6, 6), message="<message about the juxtapose token>"),
+            Pointer(span=Span(6, len(print_src)), message="<message about the string token>"),
         ],
         hint="<some helpful hint>",
     )
@@ -658,34 +664,34 @@ def main() -> None:
     tight_src = "10x(y)"
     tight_sf = SrcFile.from_text(tight_src, "path/to/file.dewy")
     e = Error(
-        src_file=tight_sf,
+        srcfile=tight_sf,
         title="dewy.errors.E3234 (link)",
         message="Dealing with tightly packed tokens",
         pointer_messages=[
-            PointerMessage(span=Span(0, 2), message="<message about the `10` token>"),#, placement="above"),
-            PointerMessage(span=Span(2, 3), message="<message about the `x` token>"),#, placement="above"),
-            PointerMessage(span=Span(3, 4), message="<message about the `(` token>"),#, placement="above"),
-            PointerMessage(span=Span(4, 5), message="<message about the `y` token>"),#, placement="above"),
-            PointerMessage(span=Span(5, 6), message="<message about the `)` token>"),#, placement="above"),
-            PointerMessage(span=Span(2, 2), message="<message about the 10x juxtaposition>"),#, placement="below"),
-            PointerMessage(span=Span(3, 3), message="<message about the x(y) juxtaposition>"),#, placement="below"),
+            Pointer(span=Span(0, 2), message="<message about the `10` token>"),#, placement="above"),
+            Pointer(span=Span(2, 3), message="<message about the `x` token>"),#, placement="above"),
+            Pointer(span=Span(3, 4), message="<message about the `(` token>"),#, placement="above"),
+            Pointer(span=Span(4, 5), message="<message about the `y` token>"),#, placement="above"),
+            Pointer(span=Span(5, 6), message="<message about the `)` token>"),#, placement="above"),
+            Pointer(span=Span(2, 2), message="<message about the 10x juxtaposition>"),#, placement="below"),
+            Pointer(span=Span(3, 3), message="<message about the x(y) juxtaposition>"),#, placement="below"),
         ],
         hint="<some helpful hint>",
     )
     print(e, end="\n\n")
     
     e = Error(
-        src_file=tight_sf,
+        srcfile=tight_sf,
         title="dewy.errors.E3234 (link)",
         message="Flipping pointer directions",
         pointer_messages=[
-            PointerMessage(span=Span(2, 2), message="<message about the 10x juxtaposition>"),#, placement="above"),
-            PointerMessage(span=Span(3, 3), message="<message about the x(y) juxtaposition>"),#, placement="above"),
-            PointerMessage(span=Span(0, 2), message="<message about the `10` token>"),#, placement="below"),
-            PointerMessage(span=Span(2, 3), message="<message about the `x` token>"),#, placement="below"),
-            PointerMessage(span=Span(3, 4), message="<message about the `(` token>"),#, placement="below"),
-            PointerMessage(span=Span(4, 5), message="<message about the `y` token>"),#, placement="below"),
-            PointerMessage(span=Span(5, 6), message="<message about the `)` token>"),#, placement="below"),
+            Pointer(span=Span(2, 2), message="<message about the 10x juxtaposition>"),#, placement="above"),
+            Pointer(span=Span(3, 3), message="<message about the x(y) juxtaposition>"),#, placement="above"),
+            Pointer(span=Span(0, 2), message="<message about the `10` token>"),#, placement="below"),
+            Pointer(span=Span(2, 3), message="<message about the `x` token>"),#, placement="below"),
+            Pointer(span=Span(3, 4), message="<message about the `(` token>"),#, placement="below"),
+            Pointer(span=Span(4, 5), message="<message about the `y` token>"),#, placement="below"),
+            Pointer(span=Span(5, 6), message="<message about the `)` token>"),#, placement="below"),
         ],
         hint="<some helpful hint>",
     )
@@ -694,22 +700,22 @@ def main() -> None:
     multi_src = "10x(y)\n* 42 + 3^x"
     multi_sf = SrcFile.from_text(multi_src, "path/to/file.dewy")
     multi_pointers = [
-        PointerMessage(span=Span(2, 2), message="<message about the 10x juxtaposition>"),#, placement="above"),
-        PointerMessage(span=Span(3, 3), message="<message about the x(y) juxtaposition>"),#, placement="above"),
-        PointerMessage(span=Span(0, 2), message="<message about the `10` token>"),#, placement="below"),
-        PointerMessage(span=Span(2, 3), message="<message about the `x` token>"),#, placement="below"),
-        PointerMessage(span=Span(3, 4), message="<message about the `(` token>"),#, placement="below"),
-        PointerMessage(span=Span(4, 5), message="<message about the `y` token>"),#, placement="below"),
-        PointerMessage(span=Span(5, 6), message="<message about the `)` token>"),#, placement="below"),
-        PointerMessage(span=Span(7, 8), message="<message about the `*` token>"),
-        PointerMessage(span=Span(9, 11), message="<message about the `42` token>"),
-        PointerMessage(span=Span(12, 13), message="<message about the `+` token>"),
-        PointerMessage(span=Span(14, 15), message="<message about the `3` token>"),
-        PointerMessage(span=Span(15, 16), message="<message about the `^` token>"),
-        PointerMessage(span=Span(16, 17), message="<message about the `x` token>"),
+        Pointer(span=Span(2, 2), message="<message about the 10x juxtaposition>"),#, placement="above"),
+        Pointer(span=Span(3, 3), message="<message about the x(y) juxtaposition>"),#, placement="above"),
+        Pointer(span=Span(0, 2), message="<message about the `10` token>"),#, placement="below"),
+        Pointer(span=Span(2, 3), message="<message about the `x` token>"),#, placement="below"),
+        Pointer(span=Span(3, 4), message="<message about the `(` token>"),#, placement="below"),
+        Pointer(span=Span(4, 5), message="<message about the `y` token>"),#, placement="below"),
+        Pointer(span=Span(5, 6), message="<message about the `)` token>"),#, placement="below"),
+        Pointer(span=Span(7, 8), message="<message about the `*` token>"),
+        Pointer(span=Span(9, 11), message="<message about the `42` token>"),
+        Pointer(span=Span(12, 13), message="<message about the `+` token>"),
+        Pointer(span=Span(14, 15), message="<message about the `3` token>"),
+        Pointer(span=Span(15, 16), message="<message about the `^` token>"),
+        Pointer(span=Span(16, 17), message="<message about the `x` token>"),
     ]
     e = Error(
-        src_file=multi_sf,
+        srcfile=multi_sf,
         title="dewy.errors.E3234 (link)",
         message="Multi-line expression pointers",
         pointer_messages=multi_pointers,
@@ -718,21 +724,21 @@ def main() -> None:
     print(e, end='\n\n')
     
     e = Error(
-        src_file=multi_sf,
+        srcfile=multi_sf,
         title="dewy.errors.E3234 (link)",
         message="Upper line pointers above, lower line below",
         pointer_messages=[
-            PointerMessage(span=Span(0, 2), message="<message about the `10` token>"),
-            PointerMessage(span=Span(2, 3), message="<message about the `x` token>"),
-            PointerMessage(span=Span(3, 4), message="<message about the `(` token>"),
-            PointerMessage(span=Span(4, 5), message="<message about the `y` token>"),
-            PointerMessage(span=Span(5, 6), message="<message about the `)` token>"),
-            PointerMessage(span=Span(7, 8), message="<message about the `*` token>"),
-            PointerMessage(span=Span(9, 11), message="<message about the `42` token>"),
-            PointerMessage(span=Span(12, 13), message="<message about the `+` token>"),
-            PointerMessage(span=Span(14, 15), message="<message about the `3` token>"),
-            PointerMessage(span=Span(15, 16), message="<message about the `^` token>"),
-            PointerMessage(span=Span(16, 17), message="<message about the `x` token>"),
+            Pointer(span=Span(0, 2), message="<message about the `10` token>"),
+            Pointer(span=Span(2, 3), message="<message about the `x` token>"),
+            Pointer(span=Span(3, 4), message="<message about the `(` token>"),
+            Pointer(span=Span(4, 5), message="<message about the `y` token>"),
+            Pointer(span=Span(5, 6), message="<message about the `)` token>"),
+            Pointer(span=Span(7, 8), message="<message about the `*` token>"),
+            Pointer(span=Span(9, 11), message="<message about the `42` token>"),
+            Pointer(span=Span(12, 13), message="<message about the `+` token>"),
+            Pointer(span=Span(14, 15), message="<message about the `3` token>"),
+            Pointer(span=Span(15, 16), message="<message about the `^` token>"),
+            Pointer(span=Span(16, 17), message="<message about the `x` token>"),
         ],
         hint="<some helpful hint>",
     )
@@ -742,21 +748,21 @@ def main() -> None:
     triple_tight_src = "[a]5x(y)"
     triple_tight_sf = SrcFile.from_text(triple_tight_src, "path/to/file.dewy")
     e = Error(
-        src_file=triple_tight_sf,
+        srcfile=triple_tight_sf,
         title="dewy.errors.E3234 (link)",
         message="Triple tightly packed tokens",
         pointer_messages=[
-            PointerMessage(span=Span(0, 1), message="<message about the `[` token>"),#, placement="above"),
-            PointerMessage(span=Span(1, 2), message="<message about the `a` token>"),#, placement="above"),
-            PointerMessage(span=Span(2, 3), message="<message about the `]` token>"),#, placement="above"),
-            PointerMessage(span=Span(3, 4), message="<message about the `5` token>"),#, placement="above"),
-            PointerMessage(span=Span(4, 5), message="<message about the `x` token>"),#, placement="above"),
-            PointerMessage(span=Span(5, 6), message="<message about the `(` token>"),#, placement="above"),
-            PointerMessage(span=Span(6, 7), message="<message about the `y` token>"),#, placement="above"),
-            PointerMessage(span=Span(7, 8), message="<message about the `)` token>"),#, placement="above"),
-            PointerMessage(span=Span(3, 3), message="<message about the `[a]5` juxtaposition>"),#, placement="below"),
-            PointerMessage(span=Span(4, 4), message="<message about the `5x` juxtaposition>"),#, placement="below"),
-            PointerMessage(span=Span(5, 5), message="<message about the `x(y)` juxtaposition>"),#, placement="below"),
+            Pointer(span=Span(0, 1), message="<message about the `[` token>"),#, placement="above"),
+            Pointer(span=Span(1, 2), message="<message about the `a` token>"),#, placement="above"),
+            Pointer(span=Span(2, 3), message="<message about the `]` token>"),#, placement="above"),
+            Pointer(span=Span(3, 4), message="<message about the `5` token>"),#, placement="above"),
+            Pointer(span=Span(4, 5), message="<message about the `x` token>"),#, placement="above"),
+            Pointer(span=Span(5, 6), message="<message about the `(` token>"),#, placement="above"),
+            Pointer(span=Span(6, 7), message="<message about the `y` token>"),#, placement="above"),
+            Pointer(span=Span(7, 8), message="<message about the `)` token>"),#, placement="above"),
+            Pointer(span=Span(3, 3), message="<message about the `[a]5` juxtaposition>"),#, placement="below"),
+            Pointer(span=Span(4, 4), message="<message about the `5x` juxtaposition>"),#, placement="below"),
+            Pointer(span=Span(5, 5), message="<message about the `x(y)` juxtaposition>"),#, placement="below"),
         ],
         hint="<some helpful hint>",
     )
@@ -764,21 +770,21 @@ def main() -> None:
 
 
     e = Error(
-        src_file=triple_tight_sf,
+        srcfile=triple_tight_sf,
         title="dewy.errors.E3234 (link)",
         message="Unpositioned triple tightly packed tokens",
         pointer_messages=[
-            PointerMessage(span=Span(0, 1), message="<message about the `[` token>"),
-            PointerMessage(span=Span(1, 2), message="<message about the `a` token>"),
-            PointerMessage(span=Span(2, 3), message="<message about the `]` token>"),
-            PointerMessage(span=Span(3, 4), message="<message about the `5` token>"),
-            PointerMessage(span=Span(4, 5), message="<message about the `x` token>"),
-            PointerMessage(span=Span(5, 6), message="<message about the `(` token>"),
-            PointerMessage(span=Span(6, 7), message="<message about the `y` token>"),
-            PointerMessage(span=Span(7, 8), message="<message about the `)` token>"),
-            PointerMessage(span=Span(3, 3), message="<message about the `[a]5` juxtaposition>"),
-            PointerMessage(span=Span(4, 4), message="<message about the `5x` juxtaposition>"),
-            PointerMessage(span=Span(5, 5), message="<message about the `x(y)` juxtaposition>"),
+            Pointer(span=Span(0, 1), message="<message about the `[` token>"),
+            Pointer(span=Span(1, 2), message="<message about the `a` token>"),
+            Pointer(span=Span(2, 3), message="<message about the `]` token>"),
+            Pointer(span=Span(3, 4), message="<message about the `5` token>"),
+            Pointer(span=Span(4, 5), message="<message about the `x` token>"),
+            Pointer(span=Span(5, 6), message="<message about the `(` token>"),
+            Pointer(span=Span(6, 7), message="<message about the `y` token>"),
+            Pointer(span=Span(7, 8), message="<message about the `)` token>"),
+            Pointer(span=Span(3, 3), message="<message about the `[a]5` juxtaposition>"),
+            Pointer(span=Span(4, 4), message="<message about the `5x` juxtaposition>"),
+            Pointer(span=Span(5, 5), message="<message about the `x(y)` juxtaposition>"),
         ],
         hint="<some helpful hint>",
     )
@@ -789,17 +795,17 @@ def main() -> None:
     tri_src = "alpha beta\ngamma + delta\nepsilon & zeta"
     tri_sf = SrcFile.from_text(tri_src, "path/to/file.dewy")
     tri_pointers = [
-        PointerMessage(span=Span(0, 5), message="<message about alpha>"),
-        PointerMessage(span=Span(6, 10), message="<message about beta>"),
-        PointerMessage(span=Span(11, 16), message="<message about gamma>"),
-        PointerMessage(span=Span(17, 18), message="<message about `+`>"),
-        PointerMessage(span=Span(19, 24), message="<message about delta>"),
-        PointerMessage(span=Span(25, 32), message="<message about epsilon>"),
-        PointerMessage(span=Span(33, 34), message="<message about `&`>"),
-        PointerMessage(span=Span(35, 39), message="<message about zeta>"),
+        Pointer(span=Span(0, 5), message="<message about alpha>"),
+        Pointer(span=Span(6, 10), message="<message about beta>"),
+        Pointer(span=Span(11, 16), message="<message about gamma>"),
+        Pointer(span=Span(17, 18), message="<message about `+`>"),
+        Pointer(span=Span(19, 24), message="<message about delta>"),
+        Pointer(span=Span(25, 32), message="<message about epsilon>"),
+        Pointer(span=Span(33, 34), message="<message about `&`>"),
+        Pointer(span=Span(35, 39), message="<message about zeta>"),
     ]
     e = Error(
-        src_file=tri_sf,
+        srcfile=tri_sf,
         title="dewy.errors.E4000 (link)",
         message="Three-line spanning diagnostic",
         pointer_messages=tri_pointers,
@@ -811,11 +817,11 @@ def main() -> None:
     multiline_block_sf = SrcFile.from_text(multiline_block_src, "path/to/block.dewy")
     full_span = Span(0, len(multiline_block_src))
     e = Error(
-        src_file=multiline_block_sf,
+        srcfile=multiline_block_sf,
         title="dewy.errors.E6000 (link)",
         message="Illustrate multi-line span pointer",
         pointer_messages=[
-            PointerMessage(
+            Pointer(
                 span=full_span,
                 message="<message covering the entire block>",
             ),
@@ -851,13 +857,13 @@ def main() -> None:
         return span_cols(line_no, offset, offset + len(snippet))
     
     e = Error(
-        src_file=long_sf,
+        srcfile=long_sf,
         title="dewy.errors.E5000 (link)",
         message="Demonstrate multi-digit line numbers",
         pointer_messages=[
-            PointerMessage(span=span_text(9, "finalize"), message="<message on line 9>"),#, placement="above"),
-            PointerMessage(span=span_text(10, "verify outputs"), message="<message on line 10>"),
-            PointerMessage(span=span_text(12, "shutdown services"), message="<message on line 12>"),#, placement="below"),
+            Pointer(span=span_text(9, "finalize"), message="<message on line 9>"),#, placement="above"),
+            Pointer(span=span_text(10, "verify outputs"), message="<message on line 10>"),
+            Pointer(span=span_text(12, "shutdown services"), message="<message on line 12>"),#, placement="below"),
         ],
         hint="line numbers stay aligned even after 9",
     )
@@ -873,12 +879,12 @@ def main() -> None:
     """)
 
     e = Error(
-        src_file=SrcFile.from_text(py_src, "path/to/py_example.py"),
+        srcfile=SrcFile.from_text(py_src, "path/to/py_example.py"),
         title="type mismatch for argument `times`",
         # message="Called `repeat` with 'str' instead of 'int' for argument `times`",
         pointer_messages=[
-            PointerMessage(span=Span(82, 88), message="`repeat` function's second argument `times` expects an 'int'"),
-            PointerMessage(span=Span(98, 101), message="argument given is type 'str'"),
+            Pointer(span=Span(82, 88), message="`repeat` function's second argument `times` expects an 'int'"),
+            Pointer(span=Span(98, 101), message="argument given is type 'str'"),
         ],
         hint='Consider changing string literal "3" to integer 3',
     )
