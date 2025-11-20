@@ -4,14 +4,14 @@ Classes for displaying rich error messages.
 Usage:
 ```python
 from pathlib import Path
-from .errors import Error, Pointer, Span, SrcFile, ColorTheme
+from .errors import Report, Pointer, Span, SrcFile, ColorTheme
 
 srcfile = SrcFile(
     path=Path("path/to/file.dewy"),
     body="printl'Hello, World'",
 )
 
-error = Error(
+error = Report(
     srcfile=srcfile,
     title="dewy.errors.E1234",
     message="Unable to juxtapose identifier and string",
@@ -45,12 +45,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from bisect import bisect_right
 from os import PathLike
-from typing import Literal, NoReturn
+from typing import Literal, NoReturn, TypeAlias, ClassVar
 
-
+Severity: TypeAlias = Literal["error", "warning", "info", "hint"]
 
 RESET = "\033[0m"
 FG_RED = "\033[31m"
+FG_YELLOW = "\033[33m"
+FG_BLUE = "\033[34m"
+FG_CYAN = "\033[36m"
 FG_DIM_GRAY = "\033[90m"
 FG_LIGHT_GRAY = "\033[38;5;245m"
 POINTER_COLOR_CODES = ("\033[95m", "\033[96m", "\033[92m", "\033[93m", "\033[94m")
@@ -65,11 +68,27 @@ class ColorTheme:
             return text
         return f"{code}{text}{RESET}"
     
-    def title(self, text:str) -> str:
-        return self._wrap(text, FG_RED)
+    def title(self, text:str, severity:Severity) -> str:
+        if severity == "error":
+            color = FG_RED
+        elif severity == "warning":
+            color = FG_YELLOW
+        elif severity == "info":
+            color = FG_BLUE
+        elif severity == "hint":
+            color = FG_CYAN
+        return self._wrap(text, color)
     
-    def error_marker(self, text:str) -> str:
-        return self._wrap(text, FG_RED)
+    def marker(self, text:str, severity:Severity) -> str:
+        if severity == "error":
+            color = FG_RED
+        elif severity == "warning":
+            color = FG_YELLOW
+        elif severity == "info":
+            color = FG_BLUE
+        elif severity == "hint":
+            color = FG_CYAN
+        return self._wrap(text, color)
     
     def line_number(self, text:str) -> str:
         return self._wrap(text, FG_LIGHT_GRAY)
@@ -180,8 +199,9 @@ class _Segment:
 
 
 @dataclass
-class Error:
+class Report:
     srcfile:SrcFile
+    severity:Severity
     title:str|None=None
     message:str|None=None
     pointer_messages:Pointer|tuple[Span, str]|list[Pointer|tuple[Span, str]]=field(default_factory=list)
@@ -220,10 +240,11 @@ class Error:
         
         out:list[str] = []
         if self.title:
-            out.append(f"Error: {theme.title(self.title)}")
+            out.append(f"{self.severity.title()}: {theme.title(self.title, self.severity)}")
             out.append("")
         if self.message:
-            out.append(f"{body_indent}{theme.error_marker('×')} {self.message}")
+            marker = "×" if self.severity == "error" else "•"
+            out.append(f"{body_indent}{theme.marker(marker, self.severity)} {self.message}")
         out.append(f"{block_indent}{gutter_pad}╭─[{loc}:{row_idx+1}:{col_idx+1}]")
         
         segments_by_line:dict[int, list[_Segment]] = {}
@@ -613,13 +634,31 @@ class Error:
         print(self)
         exit(1)
 
+@dataclass
+class Error(Report):
+    severity:Literal["error"] = field(default="error", init=False)
+
+@dataclass
+class Warning(Report):
+    severity:Literal["warning"] = field(default="warning", init=False)
+
+@dataclass
+class Info(Report):
+    severity:Literal["info"] = field(default="info", init=False)
+
+@dataclass
+class Hint(Report):
+    severity:Literal["hint"] = field(default="hint", init=False)
+
+
+
 
 def main() -> None:
     from textwrap import dedent
     
     print_src = "printl'Hello, World'"
     print_sf = SrcFile.from_text(print_src, "path/to/file.dewy")
-    
+
     e = Error(
         srcfile=print_sf,
         title="dewy.errors.E1234 (link)",
