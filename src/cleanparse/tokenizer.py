@@ -1,5 +1,5 @@
-from .errors import Span, Error, SrcFile, Pointer
-from .utils import truncate, classproperty, descendants
+from .errors import Span, Report, Error, Info, SrcFile, Pointer
+from .utils import truncate, descendants
 from typing import TypeAlias, ClassVar
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
@@ -158,6 +158,7 @@ class Hashtag(Token):
 
 class StringQuote(Token):
     valid_contexts = {Root, BlockBody, TypeBody, StringBody}
+    is_opening_quote: bool = None
 
     @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
@@ -191,8 +192,10 @@ class StringQuote(Token):
     def action_on_eat(self, ctx:Context) -> ContextAction:
         if isinstance(ctx, StringBody):
             if ctx.delimiter == self.src:
+                self.is_opening_quote = False
                 return Pop()
-            return None
+            raise ValueError(f"INTERNAL ERROR: attempted to eat StringQuote in a string body, but can only match the closing quote. {ctx.delimiter=} {self.src=}")
+        self.is_opening_quote = True
         return Push(StringBody(self.src))
 
 
@@ -236,6 +239,7 @@ class StringEscape(Token):
         - \a alert
         - \0 null
         - \u##..# or \U##..# for an arbitrary unicode character. May have any number of hex digits
+        - \x## for a raw byte value. Must be two hex digits [0-9a-fA-F].
         - (TODO) `\ ` (slash-space) for delimiting the end of a unicode codepoint, so the following character isn't consumed by it
 
         or a \ followed by an unknown character. In this case, the escape converts to just the unknown character
@@ -343,8 +347,8 @@ def test():
     tokens = tokenize(srcfile)
     # print(tokens)
 
-    # leverage Error to print out all tokens eaten
-    error = Error(
+    # leverage Report to print out all tokens eaten
+    error = Info(
         srcfile=srcfile,
         title="tokenizer test",
         pointer_messages=[Pointer(span=token.loc, message=token.__class__.__name__)
