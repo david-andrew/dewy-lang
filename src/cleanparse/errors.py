@@ -95,11 +95,8 @@ class ColorTheme:
     
     def help_label(self, text:str) -> str:
         return self._wrap(text, FG_LIGHT_GRAY)
-    
-    def pointer_text(self, text:str, color_code:str|None) -> str:
-        return self._wrap(text, color_code)
-    
-    def pointer_char(self, char:str, color_code:str|None) -> str:
+
+    def color_char(self, char:str, color_code:str|None) -> str:
         return self._wrap(char, color_code)
     
     @property
@@ -192,6 +189,8 @@ class _Segment:
     color_code:str|None
     auto_assigned:bool = False
     render_pointer:bool = True
+    show_message:bool = True
+    show_anchor:bool = True
     
     @property
     def is_zero_width(self) -> bool:
@@ -290,7 +289,10 @@ class Report:
     def _build_segments_for_pointer(self, sf:SrcFile, pointer:Pointer, color_code:str|None) -> list[_Segment]:
         segments:list[_Segment] = []
         start_row, _ = sf.offset_to_row_col(pointer.span.start)
-        end_row, _ = sf.offset_to_row_col(pointer.span.stop)
+        if pointer.span.is_zero_width:
+            end_row, _ = sf.offset_to_row_col(pointer.span.stop)
+        else:
+            end_row, _ = sf.offset_to_row_col(pointer.span.stop - 1)
         line_infos:list[dict[str, int]] = []
         for line_idx in range(start_row, end_row + 1):
             line_start, line_end = sf.line_bounds(line_idx)
@@ -299,7 +301,9 @@ class Report:
                 start_col = max(0, min(pointer.span.start - line_start, line_len))
             else:
                 start_col = 0
-            if line_idx == end_row:
+            if pointer.span.is_zero_width:
+                end_col = start_col
+            elif line_idx == end_row:
                 end_col = max(0, min(pointer.span.stop - line_start, line_len))
             else:
                 end_col = line_len
@@ -334,47 +338,52 @@ class Report:
             ))
             return segments
         
-        max_line_length = max(info["line_len"] for info in line_infos)
-        final_end_col = line_infos[-1]["end_col"]
-        baseline_end = max(max_line_length, final_end_col)
-        for info in line_infos[:-1]:
+        message_idx = len(line_infos) - 1
+        for idx in range(len(line_infos) - 1, -1, -1):
+            info = line_infos[idx]
+            if info["end_col"] > info["start_col"]:
+                message_idx = idx
+                break
+        for idx, info in enumerate(line_infos):
             start_col = info["start_col"]
             end_col = info["end_col"]
-            if start_col == end_col and start_col > 0:
+            is_message_line = idx == message_idx
+            if is_message_line and start_col == end_col and start_col > 0:
                 start_col -= 1
                 end_col = start_col
-            anchor_col = start_col
+            if is_message_line and start_col != end_col:
+                anchor_col = start_col + ((end_col - start_col) - 1) // 2
+            else:
+                anchor_col = start_col
+            render_pointer = True
+            show_anchor = is_message_line
+            if not is_message_line and start_col == end_col:
+                render_pointer = False
+                show_anchor = False
+            if pointer.placement is not None:
+                segment_placement = pointer.placement
+            elif is_message_line:
+                segment_placement = None
+            else:
+                segment_placement = "below"
             segments.append(_Segment(
                 pointer=pointer,
                 line_idx=info["line_idx"],
                 start_col=start_col,
                 end_col=end_col,
                 anchor_col=anchor_col,
-                placement=pointer.placement,
+                placement=segment_placement,
                 color_code=color_code,
-                render_pointer=False,
+                show_message=is_message_line,
+                show_anchor=show_anchor,
+                render_pointer=render_pointer,
             ))
-        
-        final_info = line_infos[-1]
-        if baseline_end <= 0:
-            anchor_col = 0
-        else:
-            anchor_col = (baseline_end - 1) // 2
-        segments.append(_Segment(
-            pointer=pointer,
-            line_idx=final_info["line_idx"],
-            start_col=0,
-            end_col=baseline_end,
-            anchor_col=0 if baseline_end == 0 else min(max(anchor_col, 0), baseline_end - 1),
-            placement=pointer.placement,
-            color_code=color_code,
-        ))
         return segments
     
     def _assign_default_placements(self, line_to_segments:dict[int, list[_Segment]]) -> None:
         for line_idx in sorted(line_to_segments):
             segments = line_to_segments[line_idx]
-            non_zero_anchors = {seg.anchor_col for seg in segments if not seg.is_zero_width}
+            non_zero_anchors = {seg.anchor_col for seg in segments if not seg.is_zero_width and seg.show_anchor}
             for seg in segments:
                 if seg.placement is not None:
                     continue
@@ -428,6 +437,7 @@ class Report:
         sf = self.srcfile
         line_no = line_idx + 1
         line_text = sf.line_text(line_idx)
+        line_display = self._line_display(line_text, segments, theme)
         
         line_no_text = theme.line_number(f"{line_no:>{line_no_width}}")
         line_prefix = f"  {line_no_text} | "
@@ -437,16 +447,35 @@ class Report:
         below = [seg for seg in segments if seg.render_pointer and seg.placement == "below"]
         
         width = max(
-            len(line_text),
+            len(line_display),
             self._segments_width(above),
             self._segments_width(below),
         )
         
         output:list[str] = []
         output.extend(self._render_pointer_layer(above, pointer_prefix, width, "above", theme))
-        output.append(f"{line_prefix}{line_text}")
+        output.append(f"{line_prefix}{line_display}")
         output.extend(self._render_pointer_layer(below, pointer_prefix, width, "below", theme))
         return output
+    
+    def _line_display(self, line_text:str, segments:list[_Segment], theme:ColorTheme) -> str:
+        marker = self._blank_line_marker(line_text, segments, theme)
+        if marker is not None:
+            return marker
+        return line_text
+    
+    @staticmethod
+    def _blank_line_marker(line_text:str, segments:list[_Segment], theme:ColorTheme) -> str|None:
+        if line_text.strip():
+            return None
+        dots = [
+            theme.color_char("|", seg.color_code)
+            for seg in segments
+            if not seg.render_pointer and not seg.show_message
+        ]
+        if not dots:
+            return None
+        return " ".join(dots)
     
     def _render_pointer_layer(
         self,
@@ -488,13 +517,13 @@ class Report:
                 continue
             for idx in range(seg.start_col, seg.end_col):
                 ensure(idx)
-                chars[idx] = theme.pointer_char("─", seg.color_code)
+                chars[idx] = theme.color_char("─", seg.color_code)
         for seg in segments:
-            if seg.is_zero_width:
+            if seg.is_zero_width or not seg.show_anchor:
                 continue
             ensure(seg.anchor_col)
             marker = "┬" if placement == "below" else "┴"
-            chars[seg.anchor_col] = theme.pointer_char(marker, seg.color_code)
+            chars[seg.anchor_col] = theme.color_char(marker, seg.color_code)
         
         zero_segments = sorted((seg for seg in segments if seg.is_zero_width), key=lambda s: s.start_col)
         i = 0
@@ -529,11 +558,12 @@ class Report:
         placement:PointerPlacement,
         theme:ColorTheme,
     ) -> list[str]:
-        if not segments:
+        message_segments = [seg for seg in segments if seg.show_message]
+        if not message_segments:
             return []
         lines:list[str] = []
         if placement == "below":
-            order = sorted(segments, key=lambda s: s.anchor_col, reverse=True)
+            order = sorted(message_segments, key=lambda s: s.anchor_col, reverse=True)
             pending = [(seg.anchor_col, seg.color_code) for seg in order]
             for seg in order:
                 line_chars = [" "] * width
@@ -543,23 +573,23 @@ class Report:
                     if anchor >= len(line_chars):
                         line_chars.extend([" "] * (anchor - len(line_chars) + 1))
                     if line_chars[anchor] == " ":
-                        line_chars[anchor] = theme.pointer_char("│", color)
+                        line_chars[anchor] = theme.color_char("│", color)
                 anchor = seg.anchor_col
                 if anchor >= len(line_chars):
                     line_chars.extend([" "] * (anchor - len(line_chars) + 1))
-                line_chars[anchor] = theme.pointer_char("╰", seg.color_code)
+                line_chars[anchor] = theme.color_char("╰", seg.color_code)
                 base = "".join(line_chars).rstrip()
                 text_lines = seg.pointer.message.splitlines() or [""]
                 first, *rest = text_lines
-                colored_section = theme.pointer_text(f"─ {first}", seg.color_code)
+                colored_section = theme.color_char(f"─ {first}", seg.color_code)
                 lines.append(f"{base}{colored_section}")
                 if rest:
                     continuation = " " * (anchor + 3)
                     for chunk in rest:
-                        lines.append(theme.pointer_text(f"{continuation}{chunk}", seg.color_code))
+                        lines.append(theme.color_char(f"{continuation}{chunk}", seg.color_code))
                 pending = [(a, c) for (a, c) in pending if a != anchor]
         else:
-            order = sorted(segments, key=lambda s: s.anchor_col)
+            order = sorted(message_segments, key=lambda s: s.anchor_col)
             active:list[tuple[int, str|None]] = []
             for seg in order:
                 line_chars = [" "] * width
@@ -567,20 +597,20 @@ class Report:
                     if anchor >= len(line_chars):
                         line_chars.extend([" "] * (anchor - len(line_chars) + 1))
                     if line_chars[anchor] == " ":
-                        line_chars[anchor] = theme.pointer_char("│", color)
+                        line_chars[anchor] = theme.color_char("│", color)
                 anchor = seg.anchor_col
                 if anchor >= len(line_chars):
                     line_chars.extend([" "] * (anchor - len(line_chars) + 1))
-                line_chars[anchor] = theme.pointer_char("╭", seg.color_code)
+                line_chars[anchor] = theme.color_char("╭", seg.color_code)
                 base = "".join(line_chars).rstrip()
                 text_lines = seg.pointer.message.splitlines() or [""]
                 first, *rest = text_lines
-                colored_section = theme.pointer_text(f"─ {first}", seg.color_code)
+                colored_section = theme.color_char(f"─ {first}", seg.color_code)
                 lines.append(f"{base}{colored_section}")
                 if rest:
                     continuation = " " * (anchor + 3)
                     for chunk in rest:
-                        lines.append(theme.pointer_text(f"{continuation}{chunk}", seg.color_code))
+                        lines.append(theme.color_char(f"{continuation}{chunk}", seg.color_code))
                 active.append((anchor, seg.color_code))
         return lines
     
@@ -591,17 +621,17 @@ class Report:
             return []
         chars:list[str] = []
         if placement == "below":
-            chars.append(theme.pointer_char("╱", run_segments[0].color_code))
+            chars.append(theme.color_char("╱", run_segments[0].color_code))
             if count > 1:
                 for seg in run_segments[1:]:
-                    chars.append(theme.pointer_char("╳", seg.color_code))
-            chars.append(theme.pointer_char("╲", run_segments[-1].color_code))
+                    chars.append(theme.color_char("╳", seg.color_code))
+            chars.append(theme.color_char("╲", run_segments[-1].color_code))
         else:
-            chars.append(theme.pointer_char("╲", run_segments[0].color_code))
+            chars.append(theme.color_char("╲", run_segments[0].color_code))
             if count > 1:
                 for seg in run_segments[1:]:
-                    chars.append(theme.pointer_char("╳", seg.color_code))
-            chars.append(theme.pointer_char("╱", run_segments[-1].color_code))
+                    chars.append(theme.color_char("╳", seg.color_code))
+            chars.append(theme.color_char("╱", run_segments[-1].color_code))
         return chars
     
     @staticmethod
@@ -625,9 +655,13 @@ class Report:
             if not seg.render_pointer:
                 continue
             if seg.is_zero_width:
-                width = max(width, seg.start_col + 1, seg.anchor_col + 1)
+                width = max(width, seg.start_col + 1)
+                if seg.show_anchor:
+                    width = max(width, seg.anchor_col + 1)
             else:
-                width = max(width, seg.end_col, seg.anchor_col + 1)
+                width = max(width, seg.end_col)
+                if seg.show_anchor:
+                    width = max(width, seg.anchor_col + 1)
         return width
     
     def throw(self) -> NoReturn:
