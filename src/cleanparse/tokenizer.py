@@ -1,4 +1,4 @@
-from .errors import Span, Report, Error, Info, SrcFile, Pointer
+from .errors import Span, Info, SrcFile, Pointer
 from .utils import truncate, descendants
 from typing import TypeAlias, ClassVar
 from dataclasses import dataclass
@@ -347,15 +347,16 @@ def test():
     tokens = tokenize(srcfile)
     # print(tokens)
 
-    # leverage Report to print out all tokens eaten
-    error = Info(
+    # leverage Error to print out all tokens eaten
+    report = Info(
         srcfile=srcfile,
         title="tokenizer test",
         pointer_messages=[Pointer(span=token.loc, message=token.__class__.__name__)
             for token in tokens
         ]
     )
-    print(error)
+    report.pointer_messages.append(Pointer(span=Span(6,6), message="<juxtapose>"))
+    print(report)
 
 if __name__ == '__main__':
     test()
