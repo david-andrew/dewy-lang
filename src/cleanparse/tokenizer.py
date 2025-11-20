@@ -1,15 +1,6 @@
-"""
-[Tasks]
-- somehow determine context stack updates after eating a normal token
-- make eat checks try the context's close function
-- string escape tokens
-- eat all tokens in hello world program
-"""
-
 from .errors import Span, Error, SrcFile, Pointer
-from .utils import truncate
-# from .meta import Tokenized, AST
-from typing import TypeAlias
+from .utils import truncate, classproperty, descendants
+from typing import TypeAlias, ClassVar
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
@@ -31,15 +22,47 @@ class StringBody(Context):
             return None
         return len(self.delimiter), StringQuote
 
+class RawStringBody(StringBody): ...
+
 @dataclass
 class BlockBody(Context):
     delimiter: str
     def close(self, src:str) -> 'tuple[int, type[Token]] | None':
         raise NotImplementedError("TODO: close based on matching delimiters")
  
-# Context:TypeAlias = Root | StringBody # | BlockBody
 
+@dataclass
+class TypeBody(Context):
+    def close(self, src:str) -> 'tuple[int, type[Token]] | None':
+        raise NotImplementedError("TODO: close based on matching delimiters")
 
+@dataclass
+class Push:
+    ctx: Context
+class Pop: ...
+
+ContextAction: TypeAlias = Push | Pop | None
+
+"""
+(potentially moot given how tokens handle context updates)
+Example case that is tricky with context.close
+
+sometype< x>?10 >
+
+`>?` is an operator, but if context closers always take precedence, then we'd get the `>` closing the type param block
+
+But a reverse case where we want higher precedence is:
+
+'this is a string'''
+the rule is the first quote at the end closes the string, and then the next two are recognized as an empty string
+<quote1>this is a string<quote1><juxtapose><quote1><quote1>
+<quote1>this is a string<quote3>
+I.e. when we're matching tokens, it'd be possible to see a triple quote token, which would beat the single quote on longest match,
+but the single quote should still take precedence since it closes the context
+---> one possible way around would be if somehow we could prevent longer quotes in the given context
+
+[solved string issue by having string token behave differently in StringBody]
+"""
 
 
 # TODO: expand the list of valid identifier characters
@@ -77,7 +100,15 @@ def is_based_digit(digit: str, base: str) -> bool:
 class Token(ABC):
     src: str
     loc: Span
+    valid_contexts: ClassVar[set[type[Context]]] = None # must be defined by subclass
 
+    def __init_subclass__(cls: type['Token'], **kwargs):
+        """verify that subclass has defined valid_contexts"""
+        if not hasattr(cls, 'valid_contexts') or cls.valid_contexts is None:
+            raise TypeError(f"subclass {cls.__name__} must define class level `valid_contexts = {{...}}`")
+        assert all(issubclass(ctx, Context) for ctx in cls.valid_contexts), f"all contexts in valid_contexts must be subclasses of Context. Invalid contexts: {cls.valid_contexts - {*descendants(Context)}}"
+        super().__init_subclass__(**kwargs)
+        
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}: {self.src}>"
     
@@ -85,10 +116,19 @@ class Token(ABC):
     @abstractmethod
     def eat(src:str, ctx:Context) -> int|None:
         """Try to eat a token, return the number of characters eaten or None"""
-
+    
+    def action_on_eat(self, ctx:Context) -> ContextAction:
+        """
+        Called when the token is eaten.
+        Return a new context to push onto the context stack or pop the current from the stack.
+        Return None to keep the current context.
+        """
+        return None
 
 
 class Identifier(Token):
+    valid_contexts = {Root, BlockBody, TypeBody}
+
     @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
         """
@@ -98,14 +138,14 @@ class Identifier(Token):
         """
         if src[0] not in start_characters:
             return None
-
         i = 1
         while i < len(src) and src[i] in continue_characters:
             i += 1
-
         return i
 
 class Hashtag(Token):
+    valid_contexts = {Root, BlockBody, TypeBody}
+
     @staticmethod
     def eat(src: str, ctx:Context) -> int | None:
         """hashtags are just special identifiers that start with #"""
@@ -117,19 +157,48 @@ class Hashtag(Token):
         return None
 
 class StringQuote(Token):
+    valid_contexts = {Root, BlockBody, TypeBody, StringBody}
+
     @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
         """string quotes are any odd-length sequence of either all single or all double quotes"""
-
+        # only match if the first character is a quote
         if src[0] not in '\'"':
             return None
+        
+        # in a string body, the only kind of quote that can be matched is the matching closing quote
+        if isinstance(ctx, StringBody):
+            if not src.startswith(ctx.delimiter):
+                return None
+            return len(ctx.delimiter)
+
+        # inside a string body, we may only match up to the delimiter length        
+        max_length = len(ctx.delimiter) if isinstance(ctx, StringBody) else float('inf')
+
+        # match 2 quotes at a time
         i = 1
-        quote_continuation = src[0] * 2
-        while src[i:].startswith(quote_continuation):
+        quote = src[0]
+        while i < max_length and src[i:].startswith(quote * 2):
             i += 2
+        
+        # if total is an even, this indicates empty string
+        # eat just the opening quote
+        if src[i:].startswith(quote):
+            return (i + 1) // 2
+
         return i
+    
+    def action_on_eat(self, ctx:Context) -> ContextAction:
+        if isinstance(ctx, StringBody):
+            if ctx.delimiter == self.src:
+                return Pop()
+            return None
+        return Push(StringBody(self.src))
+
 
 class StringChars(Token):
+    valid_contexts = {StringBody}
+
     @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
         """regular characters are anything except for the delimiter, an escape sequence, or a block opening"""
@@ -142,6 +211,8 @@ class StringChars(Token):
         return i or None
 
 class StringEscape(Token):
+    valid_contexts = {StringBody}
+
     # TODO: Note there is a current gap in constructable strings with escapes.
     # e.g. my_str = 'something \u38762<something>'
     # any hex characters [0-9a-fA-F] cannot be in <something> because they are just consumed by the unicode codepoint
@@ -149,6 +220,8 @@ class StringEscape(Token):
     # the possible solution is to introduce another escape character that puts nothing, and acts just as a delimiter
     # e.g. my_str = 'something \u38762\ <something>' // or 'something \u38762\d<something>' or etc.
     # `\ ` is interesting because space probably never needs to be literally delimited
+    # 'something {'\u38762'}<something>' technically works
+    # 'something \u{38762}<something>' is the common form a lot of other languages support. looks plausible for dewy.
     @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
         r"""
@@ -203,13 +276,6 @@ class StringEscape(Token):
 
 
 
-# Map from context to tokens that can appear in that context
-context_map: dict[type[Context], list[type[Token]]] = {
-    Root: [Identifier, StringQuote],
-    StringBody: [StringChars], #, StringEscape, BlockOpen],
-    # BlockBody: [BlockClose], #TODO: include the rest from Root
-}
-
 def tokenize(srcfile: SrcFile) -> list[Token]:
     ctx_stack: list[Context] = [Root()]
     tokens: list[Token] = []
@@ -219,7 +285,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     while i < len(src):
         # try to eat all allowed tokens at the current position
         ctx = ctx_stack[-1]
-        allowed_tokens = context_map[type(ctx)]
+        allowed_tokens = [t for t in descendants(Token) if type(ctx) in t.valid_contexts]
         matches = [(token_cls.eat(src[i:], ctx), token_cls) for token_cls in allowed_tokens]                
 
         # filter out matches that didn't eat anything
@@ -251,10 +317,16 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
         # add the token to the list of tokens
         length, token_cls = matches[0]
         token = token_cls(src[i:i+length], Span(i, i+length))
+        action = token.action_on_eat(ctx)
+        if action is not None:
+            if isinstance(action, Push):
+                ctx_stack.append(action.ctx)
+            elif isinstance(action, Pop):
+                ctx_stack.pop()
+            else:
+                raise ValueError(f"INTERNAL ERROR: invalid context action: {action=}. Expected Push or Pop")
         tokens.append(token)
         i += length
-
-    pdb.set_trace()
     
     return tokens
 
@@ -269,7 +341,17 @@ def test():
     src = path.read_text()
     srcfile = SrcFile(path, src)
     tokens = tokenize(srcfile)
-    print(tokens)
+    # print(tokens)
+
+    # leverage Error to print out all tokens eaten
+    error = Error(
+        srcfile=srcfile,
+        title="tokenizer test",
+        pointer_messages=[Pointer(span=token.loc, message=token.__class__.__name__)
+            for token in tokens
+        ]
+    )
+    print(error)
 
 if __name__ == '__main__':
     test()
