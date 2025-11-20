@@ -1,4 +1,4 @@
-from .errors import Span, Info, SrcFile, Pointer
+from .errors import Span, Info, Error, SrcFile, Pointer
 from .utils import truncate, descendants
 from typing import TypeAlias, ClassVar
 from dataclasses import dataclass
@@ -6,35 +6,28 @@ from abc import ABC, abstractmethod
 
 import pdb
 
-class Context(ABC):
-    @abstractmethod
-    def close(self, src:str) -> 'tuple[int, type[Token]] | None': ...
+##### CONTEXT CLASSES #####
 
-class Root(Context):
-    def close(self, src:str) -> 'tuple[int, type[Token]] | None':
-        return None
+class Context(ABC): ...
+
+class Root(Context): ...
 
 @dataclass
 class StringBody(Context):
-    delimiter: str
-    def close(self, src:str) -> 'tuple[int, type[Token]] | None':
-        if not src.startswith(self.delimiter):
-            return None
-        return len(self.delimiter), StringQuote
+    opening_quote: 'StringQuote'
 
 class RawStringBody(StringBody): ...
 
 @dataclass
 class BlockBody(Context):
-    delimiter: str
-    def close(self, src:str) -> 'tuple[int, type[Token]] | None':
-        raise NotImplementedError("TODO: close based on matching delimiters")
+    openening_delim: 'SquareBracket|Parenthesis|CurlyBrace'
  
-
 @dataclass
 class TypeBody(Context):
-    def close(self, src:str) -> 'tuple[int, type[Token]] | None':
-        raise NotImplementedError("TODO: close based on matching delimiters")
+    openening_delim: 'AngleBracket'
+
+
+##### Context Actions #####
 
 @dataclass
 class Push:
@@ -158,7 +151,7 @@ class Hashtag(Token):
 
 class StringQuote(Token):
     valid_contexts = {Root, BlockBody, TypeBody, StringBody}
-    is_opening_quote: bool = None
+    matching_quote: 'StringQuote' = None
 
     @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
@@ -169,12 +162,12 @@ class StringQuote(Token):
         
         # in a string body, the only kind of quote that can be matched is the matching closing quote
         if isinstance(ctx, StringBody):
-            if not src.startswith(ctx.delimiter):
+            if not src.startswith(ctx.opening_quote.src):
                 return None
-            return len(ctx.delimiter)
+            return len(ctx.opening_quote.src)
 
         # inside a string body, we may only match up to the delimiter length        
-        max_length = len(ctx.delimiter) if isinstance(ctx, StringBody) else float('inf')
+        max_length = len(ctx.opening_quote.src) if isinstance(ctx, StringBody) else float('inf')
 
         # match 2 quotes at a time
         i = 1
@@ -191,13 +184,23 @@ class StringQuote(Token):
     
     def action_on_eat(self, ctx:Context) -> ContextAction:
         if isinstance(ctx, StringBody):
-            if ctx.delimiter == self.src:
-                self.is_opening_quote = False
+            if ctx.opening_quote.src == self.src:
+                self.matching_quote = ctx.opening_quote
+                self.matching_quote.matching_quote = self
                 return Pop()
-            raise ValueError(f"INTERNAL ERROR: attempted to eat StringQuote in a string body, but can only match the closing quote. {ctx.delimiter=} {self.src=}")
-        self.is_opening_quote = True
-        return Push(StringBody(self.src))
+            raise ValueError(f"INTERNAL ERROR: attempted to eat StringQuote in a string body, but can only match the closing quote. {ctx.opening_quote.src=} {self.src=}")
+        return Push(StringBody(self))
 
+
+# TODO: perhaps have a block delim class that these inherit from
+class SquareBracket(Token):
+    valid_contexts = {Root, BlockBody, TypeBody}
+class Parenthesis(Token):
+    valid_contexts = {Root, BlockBody, TypeBody}
+class CurlyBrace(Token):
+    valid_contexts = {Root, BlockBody, TypeBody}
+class AngleBracket(Token):
+    valid_contexts = {Root, BlockBody, TypeBody}
 
 class StringChars(Token):
     valid_contexts = {StringBody}
@@ -208,7 +211,7 @@ class StringChars(Token):
         if not isinstance(ctx, StringBody):
             raise ValueError("INTERNAL ERROR: attempted to eat StringChars in a non-string context")
         i = 0
-        while i < len(src) and not src[i:].startswith(ctx.delimiter) and src[i] not in '\\{':
+        while i < len(src) and not src[i:].startswith(ctx.opening_quote.src) and src[i] not in r'\{':
             i += 1
         
         return i or None
@@ -239,7 +242,7 @@ class StringEscape(Token):
         - \a alert
         - \0 null
         - \u##..# or \U##..# for an arbitrary unicode character. May have any number of hex digits
-        - \x## for a raw byte value. Must be two hex digits [0-9a-fA-F].
+        - (TODO) \x## for a raw byte value. Must be two hex digits [0-9a-fA-F]. (or perhaps an even number of hex digits?)
         - (TODO) `\ ` (slash-space) for delimiting the end of a unicode codepoint, so the following character isn't consumed by it
 
         or a \ followed by an unknown character. In this case, the escape converts to just the unknown character
@@ -332,6 +335,24 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
         tokens.append(token)
         i += length
     
+    # ensure that the final context is a root
+    if not isinstance(ctx_stack[-1], Root):
+        error_stack = []
+        for ctx in ctx_stack:
+            match ctx:
+                case StringBody(opening_quote=o):
+                    error_stack.append(Error(srcfile, title=f"Missing string closing quote", pointer_messages=[
+                        Pointer(span=o.loc, message=f"String opened here"),
+                        Pointer(span=Span(o.loc.start+1, len(src)), message=f"String body"),
+                        Pointer(span=Span(len(src), len(src)), message=f"End of file without closing quote"),
+                    ]))
+                # TODO: other cases
+        
+        for error in error_stack:
+            print(error)
+        exit(1)
+    
+    
     return tokens
 
 
@@ -347,7 +368,7 @@ def test():
     tokens = tokenize(srcfile)
     # print(tokens)
 
-    # leverage Error to print out all tokens eaten
+    # to print out report of all tokens eaten
     report = Info(
         srcfile=srcfile,
         title="tokenizer test",
@@ -355,7 +376,7 @@ def test():
             for token in tokens
         ]
     )
-    report.pointer_messages.append(Pointer(span=Span(6,6), message="<juxtapose>"))
+    report.pointer_messages.append(Pointer(span=Span(6,6), message="<juxtapose>")) #DEBUG for hello world program
     print(report)
 
 if __name__ == '__main__':
