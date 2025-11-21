@@ -8,7 +8,9 @@ import pdb
 
 ##### CONTEXT CLASSES #####
 
-class Context(ABC): ...
+@dataclass
+class Context(ABC):
+    srcfile: SrcFile
 
 class Root(Context): ...
 
@@ -20,11 +22,11 @@ class RawStringBody(StringBody): ...
 
 @dataclass
 class BlockBody(Context):
-    openening_delim: 'SquareBracket|Parenthesis|CurlyBrace'
+    opening_delim: 'LeftSquareBracket|LeftParenthesis|LeftCurlyBrace'
  
 @dataclass
 class TypeBody(Context):
-    openening_delim: 'AngleBracket'
+    opening_delim: 'LeftAngleBracket'
 
 
 ##### Context Actions #####
@@ -189,18 +191,138 @@ class StringQuote(Token):
                 self.matching_quote.matching_quote = self
                 return Pop()
             raise ValueError(f"INTERNAL ERROR: attempted to eat StringQuote in a string body, but can only match the closing quote. {ctx.opening_quote.src=} {self.src=}")
-        return Push(StringBody(self))
+        return Push(StringBody(ctx.srcfile, self))
 
 
 # TODO: perhaps have a block delim class that these inherit from
-class SquareBracket(Token):
+
+# class LeftBracket(Token, ABC): ...
+
+
+# square brackets and parenthesis can mix and match for range syntax
+class LeftSquareBracket(Token):
     valid_contexts = {Root, BlockBody, TypeBody}
-class Parenthesis(Token):
+    matching_right: 'RightSquareBracket|RightParenthesis' = None
+    def eat(src:str, ctx:Context) -> int|None:
+        if src.startswith('['):
+            return 1
+        return None
+    def action_on_eat(self, ctx:Context): return Push(BlockBody(ctx.srcfile, self))
+
+class RightSquareBracket(Token):
+    valid_contexts = {BlockBody}
+    matching_left: 'LeftSquareBracket|LeftParenthesis' = None
+    def eat(src:str, ctx:Context) -> int|None:
+        if src.startswith(']'):
+            return 1
+        return None
+    def action_on_eat(self, ctx:Context):
+        assert isinstance(ctx, BlockBody)
+        if isinstance(ctx.opening_delim, LeftCurlyBrace):
+            error = Error(
+                srcfile=ctx.srcfile,
+                title=f"Mismatched opening and closing braces",
+                pointer_messages=[
+                    Pointer(span=ctx.opening_delim.loc, message=f"Opening brace"),
+                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `}}`"),
+                ],
+                hint=f"Did you forget a closing `}}`?"
+            )
+            error.throw()
+        ctx.opening_delim.matching_right = self
+        self.matching_left = ctx.opening_delim
+        return Pop()
+
+class LeftParenthesis(Token):
     valid_contexts = {Root, BlockBody, TypeBody}
-class CurlyBrace(Token):
+    matching_right: 'RightParenthesis|RightSquareBracket' = None
+    def eat(src:str, ctx:Context) -> int|None:
+        if src.startswith('('):
+            return 1
+        return None
+    def action_on_eat(self, ctx:Context): return Push(BlockBody(ctx.srcfile, self))
+
+class RightParenthesis(Token):
+    valid_contexts = {BlockBody}
+    matching_left: 'LeftParenthesis|LeftSquareBracket' = None
+    def eat(src:str, ctx:Context) -> int|None:
+        if src.startswith(')'):
+            return 1
+        return None
+    def action_on_eat(self, ctx:Context):
+        assert isinstance(ctx, BlockBody)
+        if isinstance(ctx.opening_delim, LeftCurlyBrace):
+            error = Error(
+                srcfile=ctx.srcfile,
+                title=f"Mismatched opening and closing braces",
+                pointer_messages=[
+                    Pointer(span=ctx.opening_delim.loc, message=f"Opening parenthesis"),
+                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `}}`"),
+                ],
+                hint=f"Did you forget a closing `}}`?"
+            )
+            error.throw()
+        ctx.opening_delim.matching_right = self
+        self.matching_left = ctx.opening_delim
+        return Pop()
+
+class LeftCurlyBrace(Token):
+    valid_contexts = {Root, BlockBody, TypeBody, StringBody}  #curly braces can be used in strings for interpolation
+    matching_right: 'RightCurlyBrace' = None
+    def eat(src:str, ctx:Context) -> int|None:
+        if src.startswith('{'):
+            return 1
+        return None
+    def action_on_eat(self, ctx:Context): return Push(BlockBody(ctx.srcfile, self))
+
+class RightCurlyBrace(Token):
+    valid_contexts = {BlockBody}
+    matching_left: 'LeftCurlyBrace' = None
+    def eat(src:str, ctx:Context) -> int|None:
+        if src.startswith('}'):
+            return 1
+        return None
+    def action_on_eat(self, ctx:Context):
+        assert isinstance(ctx, BlockBody)
+        if isinstance(ctx.opening_delim, (LeftSquareBracket, LeftParenthesis)):
+            term = 'bracket' if isinstance(ctx.opening_delim, LeftSquareBracket) else 'parenthesis'
+            error = Error(
+                srcfile=ctx.srcfile,
+                title=f"Mismatched opening and closing brackets/parentheses",
+                pointer_messages=[
+                    Pointer(span=ctx.opening_delim.loc, message=f"Opening {term}"),
+                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `]` or `)`"),
+                ],
+                hint=f"Did you forget a closing `)` or `]`?"
+            )
+            error.throw()
+        ctx.opening_delim.matching_right = self
+        self.matching_left = ctx.opening_delim
+        return Pop()
+
+class LeftAngleBracket(Token):
     valid_contexts = {Root, BlockBody, TypeBody}
-class AngleBracket(Token):
-    valid_contexts = {Root, BlockBody, TypeBody}
+    matching_right: 'RightAngleBracket' = None
+    def eat(src:str, ctx:Context) -> int|None:
+        if src.startswith('<'):
+            return 1
+        return None
+    def action_on_eat(self, ctx:Context): return Push(TypeBody(ctx.srcfile, self))
+
+class RightAngleBracket(Token):
+    valid_contexts = {TypeBody}
+    matching_left: 'LeftAngleBracket' = None
+    def eat(src:str, ctx:Context) -> int|None:
+        if src.startswith('>'):
+            return 1
+        return None
+    def action_on_eat(self, ctx:Context):
+        assert isinstance(ctx, TypeBody)
+        ctx.opening_delim.matching_right = self
+        self.matching_left = ctx.opening_delim
+        return Pop()
+
+
 
 class StringChars(Token):
     valid_contexts = {StringBody}
@@ -281,10 +403,42 @@ class StringEscape(Token):
 # class BlockClose(Token): ...
 # class WhiteSpace(Token): ...
 
-
+def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=None) -> list[Error]:
+    srcfile = ctx_stack[0].srcfile
+    src = srcfile.body
+    max_pos = len(src) if max_pos is None else min(max_pos, len(src))
+    
+    error_stack = []
+    for ctx in reversed(ctx_stack):
+        match ctx:
+            case StringBody(opening_quote=o):
+                error_stack.append(Error(srcfile, title=f"Missing string closing quote", pointer_messages=[
+                    Pointer(span=o.loc, message=f"String opened here"),
+                    Pointer(span=Span(o.loc.stop, max_pos), message=f"String body"),
+                    Pointer(span=Span(max_pos, max_pos), message=f"End without closing quote"),
+                ], hint=f"Did you forget a `{o.src}`?"))
+            case BlockBody(opening_delim=o):
+                possible_closers = '`}}`' if isinstance(o, LeftCurlyBrace) else '`]` or `)`'
+                error_stack.append(Error(srcfile, title=f"Missing block closing delimiter", pointer_messages=[
+                    Pointer(span=o.loc, message=f"Block opened here"),
+                    Pointer(span=Span(o.loc.stop, max_pos), message=f"Block body"),
+                    Pointer(span=Span(max_pos, max_pos), message=f"End without closing delimiter"),
+                ], hint=f"Did you forget a {possible_closers}?"))
+            case TypeBody(opening_delim=o):
+                error_stack.append(Error(srcfile, title=f"Missing type block closing chevron", pointer_messages=[
+                    Pointer(span=o.loc, message=f"Type block opened here"),
+                    Pointer(span=Span(o.loc.stop, max_pos), message=f"Type block body"),
+                    Pointer(span=Span(max_pos, max_pos), message=f"End without closing delimiter"),
+                ], hint=f"Did you forget a `>`?"))
+            case Root(): ... # root isn't an error (unless it somehow isn't the final context, but that should never happen)
+            case _:
+                raise NotImplementedError(f"INTERNAL ERROR: unhandled context: {ctx=}")
+            # TODO: other cases
+    
+    return error_stack
 
 def tokenize(srcfile: SrcFile) -> list[Token]:
-    ctx_stack: list[Context] = [Root()]
+    ctx_stack: list[Context] = [Root(srcfile)]
     tokens: list[Token] = []
     src = srcfile.body
 
@@ -314,12 +468,18 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
             error.throw()
         
         if len(matches) == 0:
+            # TODO: probably a better way to handle would be for looking for a selection of invalid tokens in the given context, 
+            # and indicating possible expected tokens for the context (typically unclosed blocks, etc.) 
             error = Error(
                 srcfile=srcfile,
-                title=f"no token matched. Context={ctx.__class__.__name__}",
+                title=f"no valid token matched. Context={ctx.__class__.__name__}",
                 pointer_messages=Pointer(span=Span(i, i), message=f"no token matched at position {i}: {truncate(src[i:])}"),
             )
-            error.throw()
+            print(error)
+            error_stack = collect_remaining_context_errors(ctx_stack, max_pos=i)
+            # for error in error_stack:
+            print(error_stack[0])
+            exit(1)
 
         # add the token to the list of tokens
         length, token_cls = matches[0]
@@ -337,17 +497,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     
     # ensure that the final context is a root
     if not isinstance(ctx_stack[-1], Root):
-        error_stack = []
-        for ctx in ctx_stack:
-            match ctx:
-                case StringBody(opening_quote=o):
-                    error_stack.append(Error(srcfile, title=f"Missing string closing quote", pointer_messages=[
-                        Pointer(span=o.loc, message=f"String opened here"),
-                        Pointer(span=Span(o.loc.start+1, len(src)), message=f"String body"),
-                        Pointer(span=Span(len(src), len(src)), message=f"End of file without closing quote"),
-                    ]))
-                # TODO: other cases
-        
+        error_stack = collect_remaining_context_errors(ctx_stack)
         for error in error_stack:
             print(error)
         exit(1)
