@@ -41,6 +41,9 @@
 - When Nanoseconds Matter: Ultrafast Trading Systems in C++ - David Gross - CppCon 2024
   - https://www.youtube.com/watch?v=sX2nF1fW7kI
 
+# Libraries to support
+- Clay: https://github.com/nicbarker/clay
+- Riley's General Framework for Windowing (RGFW): https://github.com/ColleagueRiley/RGFW
 
 
 
