@@ -1,6 +1,7 @@
 from .errors import Span, Info, Error, SrcFile, Pointer
 from .utils import truncate, descendants
-from typing import TypeAlias, ClassVar
+from typing import TypeAlias, ClassVar, get_origin, get_args, Union
+from types import UnionType
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
@@ -92,27 +93,25 @@ def is_based_digit(digit: str, base: str) -> bool:
 
 
 @dataclass
-class Token(ABC):
+class Token[T:Context](ABC):
     src: str
     loc: Span
-    valid_contexts: ClassVar[set[type[Context]]] = None # must be defined by subclass
+    valid_contexts: ClassVar[set[type[Context]]] = None # must be defined by subclass type parameters
 
     def __init_subclass__(cls: type['Token'], **kwargs):
-        """verify that subclass has defined valid_contexts"""
-        if not hasattr(cls, 'valid_contexts') or cls.valid_contexts is None:
-            raise TypeError(f"subclass {cls.__name__} must define class level `valid_contexts = {{...}}`")
-        assert all(issubclass(ctx, Context) for ctx in cls.valid_contexts), f"all contexts in valid_contexts must be subclasses of Context. Invalid contexts: {cls.valid_contexts - {*descendants(Context)}}"
+        # verify that subclasses parameterize Token with a context argument
         super().__init_subclass__(**kwargs)
+        cls.valid_contexts = set(get_ctx_params(cls))
         
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}: {self.src}>"
     
     @staticmethod
     @abstractmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:T) -> int|None:
         """Try to eat a token, return the number of characters eaten or None"""
     
-    def action_on_eat(self, ctx:Context) -> ContextAction:
+    def action_on_eat(self, ctx:T) -> ContextAction:
         """
         Called when the token is eaten.
         Return a new context to push onto the context stack or pop the current from the stack.
@@ -121,11 +120,28 @@ class Token(ABC):
         return None
 
 
-class Identifier(Token):
-    valid_contexts = {Root, BlockBody, TypeBody}
+def get_ctx_params(cls: type[Token]) -> list[type[Context]]:
+    """get the parameters of the Token class"""
+    for base in getattr(cls, '__orig_bases__', []):
+        if get_origin(base) is Token:
+            args = get_args(base)
+            if len(args) != 1:
+                raise ValueError(f"class {cls.__name__} must have exactly one type parameter argument. Got {len(args)} arguments: {args}")
+            
+            # if it's a union, pull out all the members, otherwise return the single parameter
+            arg = args[0]
+            if get_origin(arg) in (Union, UnionType):
+                params = list(get_args(arg))
+            else:
+                params = [arg]
+            assert all(issubclass(p, Context) for p in params), f"all context parameters in {cls.__name__}(Token[...]) must be subclasses of Context. Invalid parameters: {set(params) - {*descendants(Context)}}"
+            return params
+    raise ValueError(f"class {cls.__name__} does not parameterize Token with any contexts. Expected `class {cls.__name__}(Token[SomeContexts])`")
 
+GeneralBodyContexts: TypeAlias = Root|BlockBody|TypeBody
+class Identifier(Token[GeneralBodyContexts]):
     @staticmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """
         Identifiers:
         - may not start with a number
@@ -138,11 +154,9 @@ class Identifier(Token):
             i += 1
         return i
 
-class Hashtag(Token):
-    valid_contexts = {Root, BlockBody, TypeBody}
-
+class Hashtag(Token[GeneralBodyContexts]):
     @staticmethod
-    def eat(src: str, ctx:Context) -> int | None:
+    def eat(src: str, ctx:GeneralBodyContexts) -> int | None:
         """hashtags are just special identifiers that start with #"""
         if src.startswith('#'):
             i, _ = Identifier.eat(src[1:])
@@ -151,12 +165,12 @@ class Hashtag(Token):
 
         return None
 
-class StringQuote(Token):
-    valid_contexts = {Root, BlockBody, TypeBody, StringBody}
+BodyOrStringContexts: TypeAlias = Root|BlockBody|TypeBody|StringBody
+class StringQuote(Token[BodyOrStringContexts]):
     matching_quote: 'StringQuote' = None
 
     @staticmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:BodyOrStringContexts) -> int|None:
         """string quotes are any odd-length sequence of either all single or all double quotes"""
         # only match if the first character is a quote
         if src[0] not in '\'"':
@@ -184,7 +198,7 @@ class StringQuote(Token):
 
         return i
     
-    def action_on_eat(self, ctx:Context) -> ContextAction:
+    def action_on_eat(self, ctx:BodyOrStringContexts) -> ContextAction:
         if isinstance(ctx, StringBody):
             if ctx.opening_quote.src == self.src:
                 self.matching_quote = ctx.opening_quote
@@ -194,44 +208,29 @@ class StringQuote(Token):
         return Push(StringBody(ctx.srcfile, self))
 
 
-# TODO: perhaps have a block delim class that these inherit from
-# class GroupDelimiter(Token, ABC):
-#     #TODO: prevent complaining about valid contexts
-#     delimiter: str = None
-
-#     @classmethod
-#     def eat(cls, src:str, ctx:Context) -> int|None:
-#         if src.startswith(cls.delimiter):
-#             return 1
-#         return None
-
-# class RightGroupDelimiter(Token, ABC): ...
 
 # square brackets and parenthesis can mix and match for range syntax
-class LeftSquareBracket(Token):
-    valid_contexts = {Root, BlockBody, TypeBody}
+class LeftSquareBracket(Token[GeneralBodyContexts]):
     matching_right: 'RightSquareBracket|RightParenthesis' = None
     
     @staticmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         if src.startswith('['):
             return 1
         return None
     
-    def action_on_eat(self, ctx:Context): return Push(BlockBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(BlockBody(ctx.srcfile, self))
 
-class RightSquareBracket(Token):
-    valid_contexts = {BlockBody}
+class RightSquareBracket(Token[BlockBody]):
     matching_left: 'LeftSquareBracket|LeftParenthesis' = None
     
     @staticmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:BlockBody) -> int|None:
         if src.startswith(']'):
             return 1
         return None
     
-    def action_on_eat(self, ctx:Context):
-        assert isinstance(ctx, BlockBody)
+    def action_on_eat(self, ctx:BlockBody):
         if isinstance(ctx.opening_delim, LeftCurlyBrace):
             error = Error(
                 srcfile=ctx.srcfile,
@@ -247,30 +246,27 @@ class RightSquareBracket(Token):
         self.matching_left = ctx.opening_delim
         return Pop()
 
-class LeftParenthesis(Token):
-    valid_contexts = {Root, BlockBody, TypeBody}
+class LeftParenthesis(Token[GeneralBodyContexts]):
     matching_right: 'RightParenthesis|RightSquareBracket' = None
     
     @staticmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         if src.startswith('('):
             return 1
         return None
     
-    def action_on_eat(self, ctx:Context): return Push(BlockBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(BlockBody(ctx.srcfile, self))
 
-class RightParenthesis(Token):
-    valid_contexts = {BlockBody}
+class RightParenthesis(Token[BlockBody]):
     matching_left: 'LeftParenthesis|LeftSquareBracket' = None
     
     @staticmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:BlockBody) -> int|None:
         if src.startswith(')'):
             return 1
         return None
     
-    def action_on_eat(self, ctx:Context):
-        assert isinstance(ctx, BlockBody)
+    def action_on_eat(self, ctx:BlockBody):
         if isinstance(ctx.opening_delim, LeftCurlyBrace):
             error = Error(
                 srcfile=ctx.srcfile,
@@ -286,30 +282,27 @@ class RightParenthesis(Token):
         self.matching_left = ctx.opening_delim
         return Pop()
 
-class LeftCurlyBrace(Token):
-    valid_contexts = {Root, BlockBody, TypeBody, StringBody}  #curly braces can be used in strings for interpolation
+class LeftCurlyBrace(Token[BodyOrStringContexts]):
     matching_right: 'RightCurlyBrace' = None
     
     @staticmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:BodyOrStringContexts) -> int|None:
         if src.startswith('{'):
             return 1
         return None
     
-    def action_on_eat(self, ctx:Context): return Push(BlockBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:BodyOrStringContexts): return Push(BlockBody(ctx.srcfile, self))
 
-class RightCurlyBrace(Token):
-    valid_contexts = {BlockBody}
+class RightCurlyBrace(Token[BlockBody]):
     matching_left: 'LeftCurlyBrace' = None
     
     @staticmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:BlockBody) -> int|None:
         if src.startswith('}'):
             return 1
         return None
     
-    def action_on_eat(self, ctx:Context):
-        assert isinstance(ctx, BlockBody)
+    def action_on_eat(self, ctx:BlockBody):
         if isinstance(ctx.opening_delim, (LeftSquareBracket, LeftParenthesis)):
             term = 'bracket' if isinstance(ctx.opening_delim, LeftSquareBracket) else 'parenthesis'
             error = Error(
@@ -326,52 +319,45 @@ class RightCurlyBrace(Token):
         self.matching_left = ctx.opening_delim
         return Pop()
 
-class LeftAngleBracket(Token):
-    valid_contexts = {Root, BlockBody, TypeBody}
+class LeftAngleBracket(Token[GeneralBodyContexts]):
     matching_right: 'RightAngleBracket' = None
     
     @staticmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         if src.startswith('<'):
             return 1
         return None
     
-    def action_on_eat(self, ctx:Context): return Push(TypeBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(TypeBody(ctx.srcfile, self))
 
-class RightAngleBracket(Token):
-    valid_contexts = {TypeBody}
+class RightAngleBracket(Token[TypeBody]):
     matching_left: 'LeftAngleBracket' = None
     
     @staticmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:TypeBody) -> int|None:
         if src.startswith('>'):
             return 1
         return None
     
-    def action_on_eat(self, ctx:Context):
-        assert isinstance(ctx, TypeBody)
+    def action_on_eat(self, ctx:TypeBody):
         ctx.opening_delim.matching_right = self
         self.matching_left = ctx.opening_delim
         return Pop()
 
 
 
-class StringChars(Token):
-    valid_contexts = {StringBody}
+class StringChars(Token[StringBody]):
 
     @staticmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:StringBody) -> int|None:
         """regular characters are anything except for the delimiter, an escape sequence, or a block opening"""
-        if not isinstance(ctx, StringBody):
-            raise ValueError("INTERNAL ERROR: attempted to eat StringChars in a non-string context")
         i = 0
         while i < len(src) and not src[i:].startswith(ctx.opening_quote.src) and src[i] not in r'\{':
             i += 1
         
         return i or None
 
-class StringEscape(Token):
-    valid_contexts = {StringBody}
+class StringEscape(Token[StringBody]):
 
     # TODO: Note there is a current gap in constructable strings with escapes.
     # e.g. my_str = 'something \u38762<something>'
@@ -383,7 +369,7 @@ class StringEscape(Token):
     # 'something {'\u38762'}<something>' technically works
     # 'something \u{38762}<something>' is the common form a lot of other languages support. looks plausible for dewy.
     @staticmethod
-    def eat(src:str, ctx:Context) -> int|None:
+    def eat(src:str, ctx:StringBody) -> int|None:
         r"""
         Eat an escape sequence, return the number of characters eaten
         Escape sequences must be either a known escape sequence:
@@ -407,9 +393,6 @@ class StringEscape(Token):
         - \m converts to just a single character m
         - etc.
         """
-        if not isinstance(ctx, StringBody):
-            raise ValueError("INTERNAL ERROR: attempted to eat StringEscape in a non-string context")
-
         if not src.startswith('\\'):
             return None
 
@@ -431,9 +414,9 @@ class StringEscape(Token):
         return 2
 
 
-# class BlockOpen(Token): ...
-# class BlockClose(Token): ...
 # class WhiteSpace(Token): ...
+# class LineComment(Token): ...
+# class BlockComment(Token): ...
 
 def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=None) -> list[Error]:
     srcfile = ctx_stack[0].srcfile
