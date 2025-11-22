@@ -195,27 +195,41 @@ class StringQuote(Token):
 
 
 # TODO: perhaps have a block delim class that these inherit from
+# class GroupDelimiter(Token, ABC):
+#     #TODO: prevent complaining about valid contexts
+#     delimiter: str = None
 
-# class LeftBracket(Token, ABC): ...
+#     @classmethod
+#     def eat(cls, src:str, ctx:Context) -> int|None:
+#         if src.startswith(cls.delimiter):
+#             return 1
+#         return None
 
+# class RightGroupDelimiter(Token, ABC): ...
 
 # square brackets and parenthesis can mix and match for range syntax
 class LeftSquareBracket(Token):
     valid_contexts = {Root, BlockBody, TypeBody}
     matching_right: 'RightSquareBracket|RightParenthesis' = None
+    
+    @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
         if src.startswith('['):
             return 1
         return None
+    
     def action_on_eat(self, ctx:Context): return Push(BlockBody(ctx.srcfile, self))
 
 class RightSquareBracket(Token):
     valid_contexts = {BlockBody}
     matching_left: 'LeftSquareBracket|LeftParenthesis' = None
+    
+    @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
         if src.startswith(']'):
             return 1
         return None
+    
     def action_on_eat(self, ctx:Context):
         assert isinstance(ctx, BlockBody)
         if isinstance(ctx.opening_delim, LeftCurlyBrace):
@@ -236,19 +250,25 @@ class RightSquareBracket(Token):
 class LeftParenthesis(Token):
     valid_contexts = {Root, BlockBody, TypeBody}
     matching_right: 'RightParenthesis|RightSquareBracket' = None
+    
+    @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
         if src.startswith('('):
             return 1
         return None
+    
     def action_on_eat(self, ctx:Context): return Push(BlockBody(ctx.srcfile, self))
 
 class RightParenthesis(Token):
     valid_contexts = {BlockBody}
     matching_left: 'LeftParenthesis|LeftSquareBracket' = None
+    
+    @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
         if src.startswith(')'):
             return 1
         return None
+    
     def action_on_eat(self, ctx:Context):
         assert isinstance(ctx, BlockBody)
         if isinstance(ctx.opening_delim, LeftCurlyBrace):
@@ -269,19 +289,25 @@ class RightParenthesis(Token):
 class LeftCurlyBrace(Token):
     valid_contexts = {Root, BlockBody, TypeBody, StringBody}  #curly braces can be used in strings for interpolation
     matching_right: 'RightCurlyBrace' = None
+    
+    @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
         if src.startswith('{'):
             return 1
         return None
+    
     def action_on_eat(self, ctx:Context): return Push(BlockBody(ctx.srcfile, self))
 
 class RightCurlyBrace(Token):
     valid_contexts = {BlockBody}
     matching_left: 'LeftCurlyBrace' = None
+    
+    @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
         if src.startswith('}'):
             return 1
         return None
+    
     def action_on_eat(self, ctx:Context):
         assert isinstance(ctx, BlockBody)
         if isinstance(ctx.opening_delim, (LeftSquareBracket, LeftParenthesis)):
@@ -303,19 +329,25 @@ class RightCurlyBrace(Token):
 class LeftAngleBracket(Token):
     valid_contexts = {Root, BlockBody, TypeBody}
     matching_right: 'RightAngleBracket' = None
+    
+    @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
         if src.startswith('<'):
             return 1
         return None
+    
     def action_on_eat(self, ctx:Context): return Push(TypeBody(ctx.srcfile, self))
 
 class RightAngleBracket(Token):
     valid_contexts = {TypeBody}
     matching_left: 'LeftAngleBracket' = None
+    
+    @staticmethod
     def eat(src:str, ctx:Context) -> int|None:
         if src.startswith('>'):
             return 1
         return None
+    
     def action_on_eat(self, ctx:Context):
         assert isinstance(ctx, TypeBody)
         ctx.opening_delim.matching_right = self
@@ -468,8 +500,10 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
             error.throw()
         
         if len(matches) == 0:
-            # TODO: probably a better way to handle would be for looking for a selection of invalid tokens in the given context, 
-            # and indicating possible expected tokens for the context (typically unclosed blocks, etc.) 
+            # TODO: probably a better way to handle would be for checking if any upper contexts support the next token
+            # potentially could use as a trick to recover/resynchronize and parse more tokens
+            # TBD: what about the other way around, e.g. if the user didn't open a context they are trying to close?
+            # could check what contexts support the next token--starts to get pretty heavy / complex
             error = Error(
                 srcfile=srcfile,
                 title=f"no valid token matched. Context={ctx.__class__.__name__}",
