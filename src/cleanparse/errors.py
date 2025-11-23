@@ -130,9 +130,13 @@ class Span:
 
 @dataclass
 class Pointer:
-    span:Span
+    span:Span|list[Span]
     message:str
     placement:PointerPlacement|None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.span, Span):
+            self.span = [self.span]
 
 
 @dataclass
@@ -203,27 +207,22 @@ class Report:
     severity:Severity
     title:str|None=None
     message:str|None=None
-    pointer_messages:Pointer|tuple[Span, str]|list[Pointer|tuple[Span, str]]=field(default_factory=list)
+    pointer_messages:Pointer|list[Pointer]=field(default_factory=list)
     hint:str|None=None
     use_color:bool=True
     
     def __post_init__(self) -> None:
-        normalized:list[Pointer] = []
-        if isinstance(self.pointer_messages, (Pointer, tuple)):
+        if isinstance(self.pointer_messages, Pointer):
             self.pointer_messages = [self.pointer_messages]
-        for entry in self.pointer_messages:
-            if isinstance(entry, Pointer):
-                normalized.append(entry)
-            else:
-                span, text = entry
-                normalized.append(Pointer(span=span, message=text))
-        self.pointer_messages = normalized
 
     def __str__(self) -> str:
         sf = self.srcfile
         theme = ColorTheme(self.use_color)
         loc = "input" if sf.path is None else str(sf.path)
-        first_index = min((pm.span.start for pm in self.pointer_messages), default=0)
+        first_index = min(
+            (span.start for pm in self.pointer_messages for span in pm.span),
+            default=0,
+        )
         row_idx, col_idx = sf.offset_to_row_col(first_index)
         
         segments = self._prepare_segments(theme.pointer_palette)
@@ -256,7 +255,14 @@ class Report:
         
         out.append(f"{block_indent}{gutter_pad}╰───")
         if self.hint:
-            out.append(f"{body_indent}{theme.help_label('help:')} {self.hint}")
+            label_text = "help:"
+            label = theme.help_label(label_text)
+            first, *rest = self.hint.splitlines() or [""]
+            out.append(f"{body_indent}{label} {first}")
+            if rest:
+                continuation = " " * (len(body_indent) + len(label_text) + 1)
+                for chunk in rest:
+                    out.append(f"{continuation}{chunk}")
         return "\n".join(out)
     
     def _prepare_segments(self, palette:tuple[str|None, ...]) -> list[_Segment]:
@@ -288,33 +294,35 @@ class Report:
     
     def _build_segments_for_pointer(self, sf:SrcFile, pointer:Pointer, color_code:str|None) -> list[_Segment]:
         segments:list[_Segment] = []
-        start_row, _ = sf.offset_to_row_col(pointer.span.start)
-        if pointer.span.is_zero_width:
-            end_row, _ = sf.offset_to_row_col(pointer.span.stop)
-        else:
-            end_row, _ = sf.offset_to_row_col(pointer.span.stop - 1)
+        all_spans = sorted(pointer.span, key=lambda s: (s.start, s.stop))
         line_infos:list[dict[str, int]] = []
-        for line_idx in range(start_row, end_row + 1):
-            line_start, line_end = sf.line_bounds(line_idx)
-            line_len = line_end - line_start
-            if line_idx == start_row:
-                start_col = max(0, min(pointer.span.start - line_start, line_len))
+        for span in all_spans:
+            start_row, _ = sf.offset_to_row_col(span.start)
+            if span.is_zero_width:
+                end_row, _ = sf.offset_to_row_col(span.stop)
             else:
-                start_col = 0
-            if pointer.span.is_zero_width:
-                end_col = start_col
-            elif line_idx == end_row:
-                end_col = max(0, min(pointer.span.stop - line_start, line_len))
-            else:
-                end_col = line_len
-            if start_col > end_col:
-                start_col, end_col = end_col, start_col
-            line_infos.append({
-                "line_idx": line_idx,
-                "start_col": start_col,
-                "end_col": end_col,
-                "line_len": line_len,
-            })
+                end_row, _ = sf.offset_to_row_col(span.stop - 1)
+            for line_idx in range(start_row, end_row + 1):
+                line_start, line_end = sf.line_bounds(line_idx)
+                line_len = line_end - line_start
+                if line_idx == start_row:
+                    start_col = max(0, min(span.start - line_start, line_len))
+                else:
+                    start_col = 0
+                if span.is_zero_width:
+                    end_col = start_col
+                elif line_idx == end_row:
+                    end_col = max(0, min(span.stop - line_start, line_len))
+                else:
+                    end_col = line_len
+                if start_col > end_col:
+                    start_col, end_col = end_col, start_col
+                line_infos.append({
+                    "line_idx": line_idx,
+                    "start_col": start_col,
+                    "end_col": end_col,
+                    "line_len": line_len,
+                })
         
         if len(line_infos) == 1:
             info = line_infos[0]
