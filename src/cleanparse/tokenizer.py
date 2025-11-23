@@ -1,5 +1,5 @@
 from .errors import Span, Info, Error, SrcFile, Pointer
-from .utils import truncate, descendants
+from .utils import truncate, descendants, ordinalize
 from typing import TypeAlias, ClassVar, get_origin, get_args, Union
 from types import UnionType
 from dataclasses import dataclass
@@ -60,6 +60,7 @@ but the single quote should still take precedence since it closes the context
 [solved string issue by having string token behave differently in StringBody]
 """
 
+whitespace = {' ', '\t', '\n', '\r'} # TBD if we need \f and \v
 
 # TODO: expand the list of valid identifier characters
 digits = set('0123456789')
@@ -92,25 +93,37 @@ def is_based_digit(digit: str, base: str) -> bool:
 
 
 
+symbolic_operators = {
+    '~', '@', '`',
+    '?', ';',
+    '+', '-', '*', '/', '//', '^',
+    '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
+    '|', '&', '??',
+    '=', '::', ':=' # not a walrus operator. `x:=y` is sugar for `let x=y` (TODO: move this description to where ever we describe all operators, e.g. docs)
+    '@?',
+    '|>', '<|', '=>',
+    '->', '<->'
+    '.', '..', '...', ',', ':', ':>',
+}
+
+# shift operators are not allowed in type groups
+shift_operators = {'<<', '>>', '<<<', '>>>', '<<!', '!>>'}
+
+
 @dataclass
 class Token[T:Context](ABC):
     src: str
     loc: Span
     valid_contexts: ClassVar[set[type[Context]]] = None # must be defined by subclass type parameters
 
-    def __init_subclass__(cls: type['Token'], **kwargs):
-        # verify that subclasses parameterize Token with a context argument
-        super().__init_subclass__(**kwargs)
-        cls.valid_contexts = set(get_ctx_params(cls))
-        
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}: {self.src}>"
-    
+
     @staticmethod
     @abstractmethod
     def eat(src:str, ctx:T) -> int|None:
         """Try to eat a token, return the number of characters eaten or None"""
-    
+
     def action_on_eat(self, ctx:T) -> ContextAction:
         """
         Called when the token is eaten.
@@ -119,26 +132,103 @@ class Token[T:Context](ABC):
         """
         return None
 
+    def __init_subclass__(cls: type['Token'], **kwargs):
+        """verify that subclasses parameterize Token with a context argument and set the valid_contexts class variable"""
+        super().__init_subclass__(**kwargs)
+        cls.valid_contexts = set(cls._get_ctx_params())
 
-def get_ctx_params(cls: type[Token]) -> list[type[Context]]:
-    """get the parameters of the Token class"""
-    for base in getattr(cls, '__orig_bases__', []):
-        if get_origin(base) is Token:
-            args = get_args(base)
-            if len(args) != 1:
-                raise ValueError(f"class {cls.__name__} must have exactly one type parameter argument. Got {len(args)} arguments: {args}")
-            
-            # if it's a union, pull out all the members, otherwise return the single parameter
-            arg = args[0]
-            if get_origin(arg) in (Union, UnionType):
-                params = list(get_args(arg))
-            else:
-                params = [arg]
-            assert all(issubclass(p, Context) for p in params), f"all context parameters in {cls.__name__}(Token[...]) must be subclasses of Context. Invalid parameters: {set(params) - {*descendants(Context)}}"
-            return params
-    raise ValueError(f"class {cls.__name__} does not parameterize Token with any contexts. Expected `class {cls.__name__}(Token[SomeContexts])`")
+    @classmethod
+    def _get_ctx_params(cls: type['Token']) -> list[type[Context]]:
+        """get the type parameters of the child class (e.g. class Identifier(Token[GeneralBodyContexts])) -> [*GeneralBodyContexts]"""
+        for base in getattr(cls, '__orig_bases__', []):
+            if get_origin(base) is Token:
+                args = get_args(base)
+                if len(args) != 1:
+                    raise ValueError(f"class {cls.__name__} must have exactly one type parameter argument. Got {len(args)} arguments: {args}")
 
+                # if it's a union, pull out all the members, otherwise return the single parameter
+                arg = args[0]
+                if get_origin(arg) in (Union, UnionType):
+                    params = list(get_args(arg))
+                else:
+                    params = [arg]
+                assert all(issubclass(p, Context) for p in params), f"all context parameters in {cls.__name__}(Token[...]) must be subclasses of Context. Invalid parameters: {set(params) - {*descendants(Context)}}"
+                return params
+        raise ValueError(f"class {cls.__name__} does not parameterize Token with any contexts. Expected `class {cls.__name__}(Token[SomeContexts])`")
+
+
+
+##### TOKEN CLASSES #####
 GeneralBodyContexts: TypeAlias = Root|BlockBody|TypeBody
+
+class WhiteSpace(Token[GeneralBodyContexts]):
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        """white space is any sequence of whitespace characters"""
+        i = 0
+        while i < len(src) and src[i] in whitespace:
+            i += 1
+        return i or None
+
+
+class LineComment(Token[GeneralBodyContexts]):
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        """line comments are any sequence of characters after a % until the end of the line"""
+        if not src.startswith('%'):
+            return None
+        i = 1
+        while i < len(src) and src[i] != '\n':
+            i += 1
+        if i < len(src): # include the newline in the comment (if we're not EOF)
+            i += 1
+        return i
+
+
+class BlockComment(Token[GeneralBodyContexts]):
+    @staticmethod
+    def eat(src: str, ctx:GeneralBodyContexts) -> int | None:
+        """
+        Block comments are of the form %{ ... }% and can be nested.
+        """
+        if not src.startswith("%{"):
+            return None
+
+        openers: list[Span] = []
+        i = 0
+
+        while i < len(src):
+            if src[i:].startswith('%{'):
+                openers.append(Span(i, i + 2))
+                i += 2
+            elif src[i:].startswith('}%'):
+                openers.pop()
+                i += 2
+
+                if len(openers) == 0:
+                    return i
+            else:
+                i += 1
+
+        # error, unterminated block comment(s)
+        span_offset = ctx.srcfile.body.index(src)
+        plural = 's' if len(openers) > 1 else ''
+        error = Error(ctx.srcfile, title=f"{len(openers)} unterminated block comment{plural}", pointer_messages=[
+            *(Pointer(Span(opener.start + span_offset, opener.stop + span_offset), message=f"{ordinalize(i+1)} unterminated block comment opened here{f' (inside {ordinalize(i)})' if i > 0 else ''}")
+                for i, opener in enumerate(openers)
+            ),
+            Pointer(span=[
+                *(
+                    Span(o1.stop + span_offset, o2.start + span_offset)
+                    for o1, o2 in zip(openers, openers[1:]) if o2.start >= o1.stop
+                ),
+                Span(openers[-1].stop + span_offset, len(src) + span_offset)
+            ], message=f"Unbound block comment{plural}")
+        ], hint=f"Did you forget {len(openers)} closing `}}%`?\nBlock comments start with `%{{` and end with `}}%` and can be nested")
+        error.throw()
+
+
+
 class Identifier(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
@@ -543,7 +633,7 @@ def test():
             for token in tokens
         ]
     )
-    report.pointer_messages.append(Pointer(span=Span(6,6), message="<juxtapose>")) #DEBUG for hello world program
+    # report.pointer_messages.append(Pointer(span=Span(6,6), message="<juxtapose>")) #DEBUG for hello world program
     print(report)
 
 if __name__ == '__main__':

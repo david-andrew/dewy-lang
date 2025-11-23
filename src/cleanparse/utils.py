@@ -37,3 +37,32 @@ def descendants(cls: type[T]) -> Generator[type[T], None, None]:
     for subclass in cls.__subclasses__():
         yield subclass
         yield from descendants(subclass)
+
+
+
+
+def ordinalize(n: int) -> str:
+    """
+    Convert an integer into its ordinal numeral string.
+    Examples: 1 -> '1st', 2 -> '2nd', 3 -> '3rd', 4 -> '4th', 11 -> '11th', etc.
+    """
+    prefix = ''
+    if n < 0:
+        prefix = '-'
+        n *= -1
+
+    # Special case for numbers ending in 11, 12, 13
+    if 10 <= n % 100 <= 13:
+        suffix = "th"
+    else:
+        last_digit = n % 10
+        if last_digit == 1:
+            suffix = "st"
+        elif last_digit == 2:
+            suffix = "nd"
+        elif last_digit == 3:
+            suffix = "rd"
+        else:
+            suffix = "th"
+
+    return f"{prefix}{n}{suffix}"
