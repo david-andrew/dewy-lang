@@ -93,7 +93,7 @@ def is_based_digit(digit: str, base: str) -> bool:
 
 
 
-symbolic_operators = {
+symbolic_operators = sorted([
     '~', '@', '`',
     '?', ';',
     '+', '-', '*', '/', '//', '^',
@@ -104,10 +104,10 @@ symbolic_operators = {
     '|>', '<|', '=>',
     '->', '<->'
     '.', '..', '...', ',', ':', ':>',
-}
+], key=len, reverse=True)
 
 # shift operators are not allowed in type groups
-shift_operators = {'<<', '>>', '<<<', '>>>', '<<!', '!>>'}
+shift_operators = sorted(['<<', '>>', '<<<', '>>>', '<<!', '!>>'], key=len, reverse=True)
 
 
 @dataclass
@@ -159,7 +159,10 @@ class Token[T:Context](ABC):
 
 
 ##### TOKEN CLASSES #####
-GeneralBodyContexts: TypeAlias = Root|BlockBody|TypeBody
+GeneralBodyContexts: TypeAlias = Root | BlockBody | TypeBody
+BodyWithoutTypeContexts: TypeAlias = Root | BlockBody
+BodyOrStringContexts: TypeAlias = Root | BlockBody | TypeBody | StringBody
+
 
 class WhiteSpace(Token[GeneralBodyContexts]):
     @staticmethod
@@ -244,6 +247,27 @@ class Identifier(Token[GeneralBodyContexts]):
             i += 1
         return i
 
+
+class SymbolicOperator(Token[GeneralBodyContexts]):
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        """symbolic operators are any sequence of characters in the symbolic_operators set"""
+        for op in symbolic_operators:
+            if src.startswith(op):
+                return len(op)
+        return None
+
+
+class ShiftOperator(Token[BodyWithoutTypeContexts]):
+    @staticmethod
+    def eat(src:str, ctx:BodyWithoutTypeContexts) -> int|None:
+        """shift operators are any sequence of characters in the shift_operators set"""
+        for op in shift_operators:
+            if src.startswith(op):
+                return len(op)
+        return None
+
+
 class Hashtag(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src: str, ctx:GeneralBodyContexts) -> int | None:
@@ -255,7 +279,150 @@ class Hashtag(Token[GeneralBodyContexts]):
 
         return None
 
-BodyOrStringContexts: TypeAlias = Root|BlockBody|TypeBody|StringBody
+
+# square brackets and parenthesis can mix and match for range syntax
+class LeftSquareBracket(Token[GeneralBodyContexts]):
+    matching_right: 'RightSquareBracket|RightParenthesis' = None
+    
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        if src.startswith('['):
+            return 1
+        return None
+    
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(BlockBody(ctx.srcfile, self))
+
+
+class RightSquareBracket(Token[BlockBody]):
+    matching_left: 'LeftSquareBracket|LeftParenthesis' = None
+    
+    @staticmethod
+    def eat(src:str, ctx:BlockBody) -> int|None:
+        if src.startswith(']'):
+            return 1
+        return None
+    
+    def action_on_eat(self, ctx:BlockBody):
+        if isinstance(ctx.opening_delim, LeftCurlyBrace):
+            error = Error(
+                srcfile=ctx.srcfile,
+                title=f"Mismatched opening and closing braces",
+                pointer_messages=[
+                    Pointer(span=ctx.opening_delim.loc, message=f"Opening brace"),
+                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `}}`"),
+                ],
+                hint=f"Did you forget a closing `}}`?"
+            )
+            error.throw()
+        ctx.opening_delim.matching_right = self
+        self.matching_left = ctx.opening_delim
+        return Pop()
+
+
+class LeftParenthesis(Token[GeneralBodyContexts]):
+    matching_right: 'RightParenthesis|RightSquareBracket' = None
+    
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        if src.startswith('('):
+            return 1
+        return None
+    
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(BlockBody(ctx.srcfile, self))
+
+
+class RightParenthesis(Token[BlockBody]):
+    matching_left: 'LeftParenthesis|LeftSquareBracket' = None
+    
+    @staticmethod
+    def eat(src:str, ctx:BlockBody) -> int|None:
+        if src.startswith(')'):
+            return 1
+        return None
+    
+    def action_on_eat(self, ctx:BlockBody):
+        if isinstance(ctx.opening_delim, LeftCurlyBrace):
+            error = Error(
+                srcfile=ctx.srcfile,
+                title=f"Mismatched opening and closing braces",
+                pointer_messages=[
+                    Pointer(span=ctx.opening_delim.loc, message=f"Opening parenthesis"),
+                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `}}`"),
+                ],
+                hint=f"Did you forget a closing `}}`?"
+            )
+            error.throw()
+        ctx.opening_delim.matching_right = self
+        self.matching_left = ctx.opening_delim
+        return Pop()
+
+
+class LeftCurlyBrace(Token[BodyOrStringContexts]):
+    matching_right: 'RightCurlyBrace' = None
+    
+    @staticmethod
+    def eat(src:str, ctx:BodyOrStringContexts) -> int|None:
+        if src.startswith('{'):
+            return 1
+        return None
+    
+    def action_on_eat(self, ctx:BodyOrStringContexts): return Push(BlockBody(ctx.srcfile, self))
+
+
+class RightCurlyBrace(Token[BlockBody]):
+    matching_left: 'LeftCurlyBrace' = None
+    
+    @staticmethod
+    def eat(src:str, ctx:BlockBody) -> int|None:
+        if src.startswith('}'):
+            return 1
+        return None
+    
+    def action_on_eat(self, ctx:BlockBody):
+        if isinstance(ctx.opening_delim, (LeftSquareBracket, LeftParenthesis)):
+            term = 'bracket' if isinstance(ctx.opening_delim, LeftSquareBracket) else 'parenthesis'
+            error = Error(
+                srcfile=ctx.srcfile,
+                title=f"Mismatched opening and closing brackets/parentheses",
+                pointer_messages=[
+                    Pointer(span=ctx.opening_delim.loc, message=f"Opening {term}"),
+                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `]` or `)`"),
+                ],
+                hint=f"Did you forget a closing `)` or `]`?"
+            )
+            error.throw()
+        ctx.opening_delim.matching_right = self
+        self.matching_left = ctx.opening_delim
+        return Pop()
+
+
+class LeftAngleBracket(Token[GeneralBodyContexts]):
+    matching_right: 'RightAngleBracket' = None
+    
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        if src.startswith('<'):
+            return 1
+        return None
+    
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(TypeBody(ctx.srcfile, self))
+
+
+class RightAngleBracket(Token[TypeBody]):
+    matching_left: 'LeftAngleBracket' = None
+    
+    @staticmethod
+    def eat(src:str, ctx:TypeBody) -> int|None:
+        if src.startswith('>'):
+            return 1
+        return None
+    
+    def action_on_eat(self, ctx:TypeBody):
+        ctx.opening_delim.matching_right = self
+        self.matching_left = ctx.opening_delim
+        return Pop()
+
+
 class StringQuote(Token[BodyOrStringContexts]):
     matching_quote: 'StringQuote' = None
 
@@ -298,146 +465,7 @@ class StringQuote(Token[BodyOrStringContexts]):
         return Push(StringBody(ctx.srcfile, self))
 
 
-
-# square brackets and parenthesis can mix and match for range syntax
-class LeftSquareBracket(Token[GeneralBodyContexts]):
-    matching_right: 'RightSquareBracket|RightParenthesis' = None
-    
-    @staticmethod
-    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
-        if src.startswith('['):
-            return 1
-        return None
-    
-    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(BlockBody(ctx.srcfile, self))
-
-class RightSquareBracket(Token[BlockBody]):
-    matching_left: 'LeftSquareBracket|LeftParenthesis' = None
-    
-    @staticmethod
-    def eat(src:str, ctx:BlockBody) -> int|None:
-        if src.startswith(']'):
-            return 1
-        return None
-    
-    def action_on_eat(self, ctx:BlockBody):
-        if isinstance(ctx.opening_delim, LeftCurlyBrace):
-            error = Error(
-                srcfile=ctx.srcfile,
-                title=f"Mismatched opening and closing braces",
-                pointer_messages=[
-                    Pointer(span=ctx.opening_delim.loc, message=f"Opening brace"),
-                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `}}`"),
-                ],
-                hint=f"Did you forget a closing `}}`?"
-            )
-            error.throw()
-        ctx.opening_delim.matching_right = self
-        self.matching_left = ctx.opening_delim
-        return Pop()
-
-class LeftParenthesis(Token[GeneralBodyContexts]):
-    matching_right: 'RightParenthesis|RightSquareBracket' = None
-    
-    @staticmethod
-    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
-        if src.startswith('('):
-            return 1
-        return None
-    
-    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(BlockBody(ctx.srcfile, self))
-
-class RightParenthesis(Token[BlockBody]):
-    matching_left: 'LeftParenthesis|LeftSquareBracket' = None
-    
-    @staticmethod
-    def eat(src:str, ctx:BlockBody) -> int|None:
-        if src.startswith(')'):
-            return 1
-        return None
-    
-    def action_on_eat(self, ctx:BlockBody):
-        if isinstance(ctx.opening_delim, LeftCurlyBrace):
-            error = Error(
-                srcfile=ctx.srcfile,
-                title=f"Mismatched opening and closing braces",
-                pointer_messages=[
-                    Pointer(span=ctx.opening_delim.loc, message=f"Opening parenthesis"),
-                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `}}`"),
-                ],
-                hint=f"Did you forget a closing `}}`?"
-            )
-            error.throw()
-        ctx.opening_delim.matching_right = self
-        self.matching_left = ctx.opening_delim
-        return Pop()
-
-class LeftCurlyBrace(Token[BodyOrStringContexts]):
-    matching_right: 'RightCurlyBrace' = None
-    
-    @staticmethod
-    def eat(src:str, ctx:BodyOrStringContexts) -> int|None:
-        if src.startswith('{'):
-            return 1
-        return None
-    
-    def action_on_eat(self, ctx:BodyOrStringContexts): return Push(BlockBody(ctx.srcfile, self))
-
-class RightCurlyBrace(Token[BlockBody]):
-    matching_left: 'LeftCurlyBrace' = None
-    
-    @staticmethod
-    def eat(src:str, ctx:BlockBody) -> int|None:
-        if src.startswith('}'):
-            return 1
-        return None
-    
-    def action_on_eat(self, ctx:BlockBody):
-        if isinstance(ctx.opening_delim, (LeftSquareBracket, LeftParenthesis)):
-            term = 'bracket' if isinstance(ctx.opening_delim, LeftSquareBracket) else 'parenthesis'
-            error = Error(
-                srcfile=ctx.srcfile,
-                title=f"Mismatched opening and closing brackets/parentheses",
-                pointer_messages=[
-                    Pointer(span=ctx.opening_delim.loc, message=f"Opening {term}"),
-                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `]` or `)`"),
-                ],
-                hint=f"Did you forget a closing `)` or `]`?"
-            )
-            error.throw()
-        ctx.opening_delim.matching_right = self
-        self.matching_left = ctx.opening_delim
-        return Pop()
-
-class LeftAngleBracket(Token[GeneralBodyContexts]):
-    matching_right: 'RightAngleBracket' = None
-    
-    @staticmethod
-    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
-        if src.startswith('<'):
-            return 1
-        return None
-    
-    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(TypeBody(ctx.srcfile, self))
-
-class RightAngleBracket(Token[TypeBody]):
-    matching_left: 'LeftAngleBracket' = None
-    
-    @staticmethod
-    def eat(src:str, ctx:TypeBody) -> int|None:
-        if src.startswith('>'):
-            return 1
-        return None
-    
-    def action_on_eat(self, ctx:TypeBody):
-        ctx.opening_delim.matching_right = self
-        self.matching_left = ctx.opening_delim
-        return Pop()
-
-
-
 class StringChars(Token[StringBody]):
-
     @staticmethod
     def eat(src:str, ctx:StringBody) -> int|None:
         """regular characters are anything except for the delimiter, an escape sequence, or a block opening"""
@@ -446,6 +474,7 @@ class StringChars(Token[StringBody]):
             i += 1
         
         return i or None
+
 
 class StringEscape(Token[StringBody]):
 
@@ -503,10 +532,6 @@ class StringEscape(Token[StringBody]):
         # all other escape sequences (known or unknown) are just a single character
         return 2
 
-
-# class WhiteSpace(Token): ...
-# class LineComment(Token): ...
-# class BlockComment(Token): ...
 
 def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=None) -> list[Error]:
     srcfile = ctx_stack[0].srcfile
