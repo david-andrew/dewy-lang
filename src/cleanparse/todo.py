@@ -1,3 +1,13 @@
+"""
+Tasks:
+- next tokenization step for hello world: insert juxtapose
+- finish whole parsing process for hello world happy path
+- finish escape characters implementation to handle unicode and hex (requires ability to eat based numbers since variable width can use based numbers (or default to hex))
+- 
+"""
+
+
+
 
 # For AST to src tracking
 # start and stop indicate what tokens from the list[Token] the AST is made of

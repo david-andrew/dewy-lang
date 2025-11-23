@@ -1,5 +1,5 @@
 from .errors import Span, Info, Error, SrcFile, Pointer
-from .utils import truncate, descendants, ordinalize
+from .utils import truncate, descendants, ordinalize, first_line
 from typing import TypeAlias, ClassVar, get_origin, get_args, Union
 from types import UnionType
 from dataclasses import dataclass
@@ -477,16 +477,6 @@ class StringChars(Token[StringBody]):
 
 
 class StringEscape(Token[StringBody]):
-
-    # TODO: Note there is a current gap in constructable strings with escapes.
-    # e.g. my_str = 'something \u38762<something>'
-    # any hex characters [0-9a-fA-F] cannot be in <something> because they are just consumed by the unicode codepoint
-    # specifically \a \b \f \0 are all problems because since those are escaped, we can't escape to get the character itself
-    # the possible solution is to introduce another escape character that puts nothing, and acts just as a delimiter
-    # e.g. my_str = 'something \u38762\ <something>' // or 'something \u38762\d<something>' or etc.
-    # `\ ` is interesting because space probably never needs to be literally delimited
-    # 'something {'\u38762'}<something>' technically works
-    # 'something \u{38762}<something>' is the common form a lot of other languages support. looks plausible for dewy.
     @staticmethod
     def eat(src:str, ctx:StringBody) -> int|None:
         r"""
@@ -500,17 +490,18 @@ class StringEscape(Token[StringBody]):
         - \v vertical tab
         - \a alert
         - \0 null
-        - \u##..# or \U##..# for an arbitrary unicode character. May have any number of hex digits
-        - (TODO) \x## for a raw byte value. Must be two hex digits [0-9a-fA-F]. (or perhaps an even number of hex digits?)
-        - (TODO) `\ ` (slash-space) for delimiting the end of a unicode codepoint, so the following character isn't consumed by it
-
-        or a \ followed by an unknown character. In this case, the escape converts to just the unknown character
-        This is how to insert characters that are otherwise illegal inside a string, e.g.
-        - \' converts to just a single quote '
-        - \{ converts to just a single open brace {
-        - \\ converts to just a single backslash \
-        - \m converts to just a single character m
-        - etc.
+        - (TODO) \u#### or \U#### for a unicode codepoints. Must be four hex digits [0-9a-fA-F]
+        - (TODO) \u{##..##} or \U{##..##} for an arbitrary unicode character. Inside the braces defaults to hex, and users can get decimal by using the 0d prefix
+        - (TODO) \x## or \X## for a raw byte value. Must be two hex digits [0-9a-fA-F]
+        - (TODO) \x{##..##} or \X{##..##} for arbitrary byte sequences. Same idea as unicode--defaults to hex, and 0d prefix for decimal
+        
+        - catch all case: \ followed by any character not mentioned above. Converts to just the literal character itself without the backslash
+          This is how to insert characters that have special meaning in the string, e.g.
+          - \' converts to just a single quote '
+          - \{ converts to just a single open brace {
+          - \\ converts to just a single backslash \
+          - \m converts to just a single character m
+          - etc.
         """
         if not src.startswith('\\'):
             return None
@@ -605,12 +596,15 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
             error = Error(
                 srcfile=srcfile,
                 title=f"no valid token matched. Context={ctx.__class__.__name__}",
-                pointer_messages=Pointer(span=Span(i, i), message=f"no token matched at position {i}: {truncate(src[i:])}"),
+                pointer_messages=Pointer(span=Span(i, i), message=f"no token matched at position {i}: {truncate(first_line(src[i:]))}"),
             )
             print(error)
             error_stack = collect_remaining_context_errors(ctx_stack, max_pos=i)
             # for error in error_stack:
-            print(error_stack[0])
+            if len(error_stack) > 0:
+                print(error_stack[0])
+            print("-"*80)
+            print(tokens_to_report(tokens, srcfile))
             exit(1)
 
         # add the token to the list of tokens
@@ -637,6 +631,12 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     
     return tokens
 
+def tokens_to_report(tokens: list[Token], srcfile: SrcFile) -> Info:
+    return Info(
+        srcfile=srcfile,
+        title="Tokens consumed",
+        pointer_messages=[Pointer(span=token.loc, message=f"{token.__class__.__name__}") for token in tokens]
+    )
 
 def test():
     from ..myargparse import ArgumentParser
@@ -648,18 +648,9 @@ def test():
     src = path.read_text()
     srcfile = SrcFile(path, src)
     tokens = tokenize(srcfile)
-    # print(tokens)
 
-    # to print out report of all tokens eaten
-    report = Info(
-        srcfile=srcfile,
-        title="tokenizer test",
-        pointer_messages=[Pointer(span=token.loc, message=token.__class__.__name__)
-            for token in tokens
-        ]
-    )
-    # report.pointer_messages.append(Pointer(span=Span(6,6), message="<juxtapose>")) #DEBUG for hello world program
-    print(report)
+    # to print out report of all tokens eaten    
+    print(tokens_to_report(tokens, srcfile))
 
 if __name__ == '__main__':
     test()

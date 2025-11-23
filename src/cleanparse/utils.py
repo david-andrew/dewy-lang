@@ -1,5 +1,8 @@
 from typing import Generator
 
+def first_line(s:str) -> str:
+    return s.split('\n')[0]
+
 def truncate(s:str, max_len:int=50) -> str:
     if len(s) <= max_len:
         return s
