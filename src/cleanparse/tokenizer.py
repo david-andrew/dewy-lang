@@ -19,7 +19,9 @@ class Root(Context): ...
 class StringBody(Context):
     opening_quote: 'StringQuote'
 
-class RawStringBody(StringBody): ...
+@dataclass
+class RawStringBody(Context):
+    opening_quote: 'RawStringQuote'
 
 @dataclass
 class BlockBody(Context):
@@ -162,7 +164,7 @@ class Token[T:Context](ABC):
 GeneralBodyContexts: TypeAlias = Root | BlockBody | TypeBody
 BodyWithoutTypeContexts: TypeAlias = Root | BlockBody
 BodyOrStringContexts: TypeAlias = Root | BlockBody | TypeBody | StringBody
-
+BodyOrRawStringContexts: TypeAlias = Root | BlockBody | TypeBody | StringBody | RawStringBody
 
 class WhiteSpace(Token[GeneralBodyContexts]):
     @staticmethod
@@ -178,7 +180,7 @@ class LineComment(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """line comments are any sequence of characters after a % until the end of the line"""
-        if not src.startswith('%'):
+        if not src.startswith('%') or src.startswith('%{'):
             return None
         i = 1
         while i < len(src) and src[i] != '\n':
@@ -423,11 +425,11 @@ class RightAngleBracket(Token[TypeBody]):
         return Pop()
 
 
-class StringQuote(Token[BodyOrStringContexts]):
+class StringQuote(Token[BodyOrRawStringContexts]):
     matching_quote: 'StringQuote' = None
 
     @staticmethod
-    def eat(src:str, ctx:BodyOrStringContexts) -> int|None:
+    def eat(src:str, ctx:BodyOrRawStringContexts) -> int|None:
         """string quotes are any odd-length sequence of either all single or all double quotes"""
         # only match if the first character is a quote
         if src[0] not in '\'"':
@@ -438,14 +440,17 @@ class StringQuote(Token[BodyOrStringContexts]):
             if not src.startswith(ctx.opening_quote.src):
                 return None
             return len(ctx.opening_quote.src)
-
-        # inside a string body, we may only match up to the delimiter length        
-        max_length = len(ctx.opening_quote.src) if isinstance(ctx, StringBody) else float('inf')
+        
+        # in a raw string body, see if we match the opening quote (minus the r prefix)
+        if isinstance(ctx, RawStringBody):
+            if not src.startswith(ctx.opening_quote.src[1:]):
+                return None
+            return len(ctx.opening_quote.src[1:])
 
         # match 2 quotes at a time
         i = 1
         quote = src[0]
-        while i < max_length and src[i:].startswith(quote * 2):
+        while src[i:].startswith(quote * 2):
             i += 2
         
         # if total is an even, this indicates empty string
@@ -455,13 +460,27 @@ class StringQuote(Token[BodyOrStringContexts]):
 
         return i
     
-    def action_on_eat(self, ctx:BodyOrStringContexts) -> ContextAction:
+    def action_on_eat(self, ctx:BodyOrRawStringContexts) -> ContextAction:
+        
+        # inside a string body, a quote closes the string
         if isinstance(ctx, StringBody):
             if ctx.opening_quote.src == self.src:
                 self.matching_quote = ctx.opening_quote
                 self.matching_quote.matching_quote = self
                 return Pop()
+            # unreachable
             raise ValueError(f"INTERNAL ERROR: attempted to eat StringQuote in a string body, but can only match the closing quote. {ctx.opening_quote.src=} {self.src=}")
+        
+        # inside a raw string body, a quote closes the raw string
+        if isinstance(ctx, RawStringBody):
+            if ctx.opening_quote.src[1:] == self.src:
+                self.matching_quote = ctx.opening_quote
+                self.matching_quote.matching_quote = self
+                return Pop()
+            # unreachable
+            raise ValueError(f"INTERNAL ERROR: attempted to eat RawStringQuote in a raw string body, but can only match the closing quote. {ctx.opening_quote.src[1:]=} {self.src=}")
+        
+        # All other contexts, String quote opens a regular string body (not raw string)
         return Push(StringBody(ctx.srcfile, self))
 
 
@@ -523,6 +542,36 @@ class StringEscape(Token[StringBody]):
         # all other escape sequences (known or unknown) are just a single character
         return 2
 
+
+class RawStringQuote(Token[GeneralBodyContexts]):
+    matching_quote: 'StringQuote' = None
+    
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        """raw string quotes are r followed by any odd-length sequence of either all single or all double quotes"""
+        if not src.startswith('r"') and not src.startswith("r'"):
+            return None
+        i = StringQuote.eat(src[1:], ctx)  # eat the quote without the r prefix
+        if i is None:
+            # unreachable
+            raise ValueError(f"INTERNAL ERROR: attempted to eat RawStringQuote in a non-raw string body. {ctx=}")
+        
+        return i + 1
+    
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(RawStringBody(ctx.srcfile, self))
+
+
+class RawStringChars(Token[RawStringBody]):
+    @staticmethod
+    def eat(src:str, ctx:RawStringBody) -> int|None:
+        """regular characters are anything except for the delimiter"""
+        i = 0
+        while i < len(src) and not src[i:].startswith(ctx.opening_quote.src[1:]):
+            i += 1
+        
+        return i or None
+
+
 class KnownErrorCase(Protocol):
     def __call__(self, src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None: ...
 
@@ -559,8 +608,14 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
                     Pointer(span=Span(o.loc.stop, max_pos), message=f"String body"),
                     Pointer(span=Span(max_pos, max_pos), message=f"End without closing quote"),
                 ], hint=f"Did you forget a `{o.src}`?"))
+            case RawStringBody(opening_quote=o):
+                error_stack.append(Error(srcfile, title=f"Missing raw string closing quote", pointer_messages=[
+                    Pointer(span=o.loc, message=f"Raw string opened here"),
+                    Pointer(span=Span(o.loc.stop, max_pos), message=f"Raw string body"),
+                    Pointer(span=Span(max_pos, max_pos), message=f"End without closing quote"),
+                ], hint=f"Did you forget a `{o.src[1:]}`?"))
             case BlockBody(opening_delim=o):
-                possible_closers = '`}}`' if isinstance(o, LeftCurlyBrace) else '`]` or `)`'
+                possible_closers = '`}`' if isinstance(o, LeftCurlyBrace) else '`]` or `)`'
                 error_stack.append(Error(srcfile, title=f"Missing block closing delimiter", pointer_messages=[
                     Pointer(span=o.loc, message=f"Block opened here"),
                     Pointer(span=Span(o.loc.stop, max_pos), message=f"Block body"),
@@ -666,7 +721,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
 def tokens_to_report(tokens: list[Token], srcfile: SrcFile) -> Info:
     return Info(
         srcfile=srcfile,
-        title="Tokens consumed",
+        title="Tokens consumed so far",
         pointer_messages=[Pointer(span=token.loc, message=f"{token.__class__.__name__}") for token in tokens]
     )
 
