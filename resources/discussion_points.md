@@ -3555,3 +3555,42 @@ In the nominal type tree
 > Note that we probably don't need both `int1` and `uint1` as they're functionally identical. But it might be simpler to keep both and just have one be an alias for the other
 
 `int00`/`uint00` is for arbitrary width integers. The only other possible good idea I've seen is `intx` / `uintx`. But both are unintuitive enough to require some extra explanation anyways. `int∞`/`uint∞` are pretty intuitive, but dealing with unicode is a pain (though it could be an alias)
+
+
+## Rest-of-file strings
+Basically I think it would be a good idea to support a kind of string that only needs an opening delimiter, and consumes the rest of the file as the string. This is great for things that are mostly data, plus a bit of setup.
+
+```dewy
+kingdom = 'Bolognia'
+name = 'Dat'
+year = '1245'
+
+data = $$$\
+# The adventures of {name} in {kingdom}
+In the year {year}, {name} lived a quiet life far and away from the excitement of the great kingdom of {kingdom}. 
+...
+...
+more content...
+```
+
+It is treated literally as just another string, so can do whatever programmatic stuff you want with it, e.g. call functions on the string
+```
+markdown = (s:string) => {%{do something with the string}%}
+markdown$$$\
+# title
+## subtitle
+etc...
+```
+
+Notes:
+- can use regular string functionality or raw string by prepending an `r` (`$$$` vs `r$$$`)
+
+possible delimiters-
+- $$$
+- $$$EOF
+- #"   % not sure if this would work out unless we hardcode it into the tokenizer
+- #EOF"
+
+`$$$` is technically a valid identifier, but I think co-opting it for this could be ok
+
+slight problem, if I want to be able to juxtapose functions with `$$$`, `$` is a valid identifier character, so `my_func$$$` would just be parsed as a single identifier... either have to always parenthesize the function `(my_func)$$$` or perhaps we go with a delimiter that starts with `#` since that's currently not a valid identifier character `my_func#"`
