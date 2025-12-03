@@ -1,6 +1,6 @@
 from .errors import Span, Info, Error, SrcFile, Pointer
 from .utils import truncate, descendants, ordinalize, first_line
-from typing import TypeAlias, ClassVar, get_origin, get_args, Union
+from typing import TypeAlias, ClassVar, get_origin, get_args, Union, Protocol
 from types import UnionType
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
@@ -523,6 +523,27 @@ class StringEscape(Token[StringBody]):
         # all other escape sequences (known or unknown) are just a single character
         return 2
 
+class KnownErrorCase(Protocol):
+    def __call__(self, src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None: ...
+
+def shift_operator_inside_type_param(src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None:
+    if len(ctx_history) > 0 and isinstance(ctx_history[-1], TypeBody) and isinstance(tokens[-1], RightAngleBracket) and src[i:].startswith('>'):
+        return Error(
+            srcfile=ctx_stack[0].srcfile,
+            title=f"Shift operator inside type parameter",
+            pointer_messages=[
+                Pointer(span=Span(i-1, i+1), message=f"Shift operator"),
+                Pointer(span=Span(i, i), message=f"Tokenized as a type parameter closing delimiter"),
+            ],
+            hint=f"Shift operations may not be used directly within a type parameter.\nPerhaps you meant to wrap the expression in parentheses\ne.g. `something<(a >> b)>` instead of `something<a >> b>`"
+        )
+
+
+known_error_cases: list[KnownErrorCase] = [
+    shift_operator_inside_type_param,
+    # TODO: other known error cases
+]
+
 
 def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=None) -> list[Error]:
     srcfile = ctx_stack[0].srcfile
@@ -560,6 +581,7 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
 
 def tokenize(srcfile: SrcFile) -> list[Token]:
     ctx_stack: list[Context] = [Root(srcfile)]
+    ctx_history: list[Context] = []
     tokens: list[Token] = []
     src = srcfile.body
 
@@ -589,6 +611,11 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
             error.throw()
         
         if len(matches) == 0:
+            # check for known error cases
+            for known_err_case in known_error_cases:
+                error = known_err_case(src, i, tokens, ctx_stack, ctx_history)
+                if error:
+                    error.throw()
             # TODO: probably a better way to handle would be for checking if any upper contexts support the next token
             # potentially could use as a trick to recover/resynchronize and parse more tokens
             # TBD: what about the other way around, e.g. if the user didn't open a context they are trying to close?
@@ -599,6 +626,11 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
                 pointer_messages=Pointer(span=Span(i, i), message=f"no token matched at position {i}: {truncate(first_line(src[i:]))}"),
             )
             print(error)
+            """
+            TODO: special cases to check for and emit error messages:
+            - no recognized token. next=`>`, previous was `>` and previous ctx was TypeBody ==> appears you tried to use a shift operator inside a type param. wrap the shift expression in ()
+            """
+
             error_stack = collect_remaining_context_errors(ctx_stack, max_pos=i)
             # for error in error_stack:
             if len(error_stack) > 0:
@@ -615,7 +647,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
             if isinstance(action, Push):
                 ctx_stack.append(action.ctx)
             elif isinstance(action, Pop):
-                ctx_stack.pop()
+                ctx_history.append(ctx_stack.pop())
             else:
                 raise ValueError(f"INTERNAL ERROR: invalid context action: {action=}. Expected Push or Pop")
         tokens.append(token)
