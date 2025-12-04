@@ -41,7 +41,7 @@ primes = [
 primes = [
     2
     lazy i in [3, 5..)
-        if not parallel_or(p => i % p =? 0, #label.primes)
+        if not parallel_or(p => i mod p =? 0, #label.primes)
             i
 ][..10)
 %parallel or is like goroutines with cancel once any is true...should have it be more flexible, e.g. able to use any of the boolean keywords that can short circuit
