@@ -598,6 +598,17 @@ class RawStringChars(Token[RawStringBody]):
         
         return i or None
 
+class RestOfFileString(Token[Root]):
+    @staticmethod
+    def eat(src:str, ctx:Root) -> int|None:
+        """a string that has an opening delimiter but no closing delimiter (consumes until EOF)
+        Opening delimiters #\""" #'''
+        """
+        if not src.startswith('#"""') and not src.startswith("#'''"):
+            return None
+        return len(src)
+
+        
 class Number(Token[GeneralBodyContexts]):
     prefix: BasePrefix | None = None
     
