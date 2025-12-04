@@ -1,9 +1,10 @@
 from .errors import Span, Info, Error, SrcFile, Pointer
 from .utils import truncate, descendants, ordinalize, first_line
-from typing import TypeAlias, ClassVar, get_origin, get_args, Union, Protocol
+from typing import TypeAlias, ClassVar, get_origin, get_args, Union, Protocol, Literal
 from types import UnionType
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+from functools import cache
 
 import pdb
 
@@ -74,20 +75,22 @@ continue_characters = (alpha | digits | greek | misc)
 
 # note that the prefix is case insensitive, so call .lower() when matching the prefix
 # numbers may have _ as a separator (if _ is not in the set of digits)
-number_bases = {
+BasePrefix: TypeAlias = Literal['0b', '0t', '0q', '0s', '0o', '0d', '0z', '0x', '0u', '0r', '0y']
+number_bases: dict[BasePrefix, set[str]] = {
     '0b': {*'01'},  # binary
     '0t': {*'012'},  # ternary
     '0q': {*'0123'},  # quaternary
     '0s': {*'012345'},  # seximal
     '0o': {*'01234567'},  # octal
     '0d': {*'0123456789'},  # decimal
-    '0z': {*'0123456789xeXE'},  # dozenal
-    '0x': {*'0123456789abcdefABCDEF'},  # hexadecimal
+    '0z': {*'0123456789xeXE'},  # dozenal (case-insensitive)
+    '0x': {*'0123456789abcdefABCDEF'},  # hexadecimal (case-insensitive)
     '0u': {*'0123456789abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRSTUV'},  # base 32 (duotrigesimal)
     '0r': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'},  # base 36 (hexatrigesimal)
     '0y': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!$'},  # base 64 (tetrasexagesimal)
 }
 
+@cache
 def is_based_digit(digit: str, base: str) -> bool:
     """determine if a digit is valid in a given base"""
     digits = number_bases[base]
@@ -104,7 +107,7 @@ symbolic_operators = sorted([
     '=', '::', ':=' # not a walrus operator. `x:=y` is sugar for `let x=y` (TODO: move this description to where ever we describe all operators, e.g. docs)
     '@?',
     '|>', '<|', '=>',
-    '->', '<->'
+    '->', '<->',
     '.', '..', '...', ',', ':', ':>',
 ], key=len, reverse=True)
 
@@ -275,7 +278,7 @@ class Hashtag(Token[GeneralBodyContexts]):
     def eat(src: str, ctx:GeneralBodyContexts) -> int | None:
         """hashtags are just special identifiers that start with #"""
         if src.startswith('#'):
-            i, _ = Identifier.eat(src[1:])
+            i = Identifier.eat(src[1:], ctx)
             if i is not None:
                 return i + 1
 
@@ -571,6 +574,42 @@ class RawStringChars(Token[RawStringBody]):
         
         return i or None
 
+class Number(Token[GeneralBodyContexts]):
+    prefix: BasePrefix | None = None
+    
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        """a based number is a sequence of 1 or more digits, optionally preceded by a (case-insensitive) base prefix"""
+        # try all known bases
+        for base in number_bases.keys():
+            if src[:2].casefold().startswith(base):
+                i = 2
+                while i < len(src) and is_based_digit(src[i], base):
+                    i += 1
+                if i == 2:
+                    #TODO: somehow stash an error for later. e.g. if there was `0x` and no `x` declared, then there would be an error at type checking for trying to use an undeclared identifier (`0*x`)
+                    #      but there should be a note/hint based on this location, stating prefixes must have digits following, hence it wasn't identified as a number
+                    #      the note/hint would only show up if the main error overlapped this location
+                    return None
+                return i
+        
+        # try decimal with no prefix
+        i = 0
+        digits = number_bases['0d']
+        while i < len(src) and src[i] in digits:
+            i += 1
+        
+        return i or None
+    
+    def action_on_eat(self, ctx:GeneralBodyContexts):
+        if self.src[:2].casefold() in number_bases:
+            self.prefix = self.src[:2].casefold()
+
+        #doesn't modify the context stack
+        return None
+
+
+##### Bespoke error cases #####
 
 class KnownErrorCase(Protocol):
     def __call__(self, src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None: ...
@@ -634,6 +673,9 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
     
     return error_stack
 
+
+##### TOKENIZER #####
+
 def tokenize(srcfile: SrcFile) -> list[Token]:
     ctx_stack: list[Context] = [Root(srcfile)]
     ctx_history: list[Context] = []
@@ -685,7 +727,6 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
             TODO: special cases to check for and emit error messages:
             - no recognized token. next=`>`, previous was `>` and previous ctx was TypeBody ==> appears you tried to use a shift operator inside a type param. wrap the shift expression in ()
             """
-
             error_stack = collect_remaining_context_errors(ctx_stack, max_pos=i)
             # for error in error_stack:
             if len(error_stack) > 0:
