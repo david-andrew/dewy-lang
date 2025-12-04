@@ -605,22 +605,25 @@ class Number(Token[GeneralBodyContexts]):
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """a based number is a sequence of 1 or more digits, optionally preceded by a (case-insensitive) base prefix"""
         # try all known bases
-        for base in number_bases.keys():
+        for base, digits in number_bases.items():
+            # check if the src starts with the base prefix
             if src[:2].casefold().startswith(base):
                 i = 2
-                while i < len(src) and is_based_digit(src[i], base):
-                    i += 1
-                if i == 2:
-                    #TODO: somehow stash an error for later. e.g. if there was `0x` and no `x` declared, then there would be an error at type checking for trying to use an undeclared identifier (`0*x`)
-                    #      but there should be a note/hint based on this location, stating prefixes must have digits following, hence it wasn't identified as a number
-                    #      the note/hint would only show up if the main error overlapped this location
+                # Require at least one digit
+                if not (i < len(src) and src[i] in digits):
                     return None
+                # consume digits or underscores
+                while i < len(src) and (src[i] in digits or src[i] == '_'):
+                    i += 1
                 return i
         
         # try decimal with no prefix
         i = 0
         digits = number_bases['0d']
-        while i < len(src) and src[i] in digits:
+        if not (i < len(src) and src[i] in digits):
+            return None
+        # consume digits or underscores
+        while i < len(src) and (src[i] in digits or src[i] == '_'):
             i += 1
         
         return i or None
