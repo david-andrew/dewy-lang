@@ -1,4 +1,11 @@
 """
+[tasks]
+[ ] token matches prev and next context cases for error on no tokens matched
+[ ] report printout support overlapping spans: so long as they can be cleanly divided by top and bottom of line
+    - needed for the >> in type param context error (and potentially other cases)
+[ ] tokenize rest-of-file strings
+[ ] tokenize integers
+
 Tasks:
 - next tokenization step for hello world: insert juxtapose
 - finish whole parsing process for hello world happy path
@@ -7,6 +14,1038 @@ Tasks:
 """
 
 
+
+"""
+μ vs µ  (greek mu vs micro sign)
+
+†‡
+
+
+[operators to potentially include]
+U+2200
+∀
+For All
+
+U+2201
+∁
+Complement
+
+U+2202
+∂
+Partial Differential
+
+U+2203
+∃
+There Exists
+
+U+2204
+∄
+There Does Not Exist
+
+U+2205
+∅
+Empty Set
+
+U+2206
+∆
+Increment
+
+U+2207
+∇
+Nabla
+
+U+2208
+∈
+Element Of
+
+U+2209
+∉
+Not An Element Of
+
+U+220A
+∊
+Small Element Of
+
+U+220B
+∋
+Contains as Member
+
+U+220C
+∌
+Does Not Contain as Member
+
+U+220D
+∍
+Small Contains as Member
+
+U+220E
+∎
+End of Proof
+
+U+220F
+∏
+N-Ary Product
+
+U+2210
+∐
+N-Ary Coproduct
+
+U+2211
+∑
+N-Ary Summation
+
+U+2212
+−
+Minus Sign
+
+U+2213
+∓
+Minus-or-Plus Sign
+
+U+2214
+∔
+Dot Plus
+
+U+2215
+∕
+Division Slash
+
+U+2216
+∖
+Set Minus
+
+U+2217
+∗
+Asterisk Operator
+
+U+2218
+∘
+Ring Operator
+
+U+2219
+∙
+Bullet Operator
+
+U+221A
+√
+Square Root
+
+U+221B
+∛
+Cube Root
+
+U+221C
+∜
+Fourth Root
+
+U+221D
+∝
+Proportional To
+
+U+221E
+∞
+Infinity
+
+U+221F
+∟
+Right Angle
+
+U+2220
+∠
+Angle
+
+U+2221
+∡
+Measured Angle
+
+U+2222
+∢
+Spherical Angle
+
+U+2223
+∣
+Divides
+
+U+2224
+∤
+Does Not Divide
+
+U+2225
+∥
+Parallel To
+
+U+2226
+∦
+Not Parallel To
+
+U+2227
+∧
+Logical And
+
+U+2228
+∨
+Logical Or
+
+U+2229
+∩
+Intersection
+
+U+222A
+∪
+Union
+
+U+222B
+∫
+Integral
+
+U+222C
+∬
+Double Integral
+
+U+222D
+∭
+Triple Integral
+
+U+222E
+∮
+Contour Integral
+
+U+222F
+∯
+Surface Integral
+
+U+2230
+∰
+Volume Integral
+
+U+2231
+∱
+Clockwise Integral
+
+U+2232
+∲
+Clockwise Contour Integral
+
+U+2233
+∳
+Anticlockwise Contour Integral
+
+U+2234
+∴
+Therefore
+
+U+2235
+∵
+Because
+
+U+2236
+∶
+Ratio
+
+U+2237
+∷
+Proportion
+
+U+2238
+∸
+Dot Minus
+
+U+2239
+∹
+Excess
+
+U+223A
+∺
+Geometric Proportion
+
+U+223B
+∻
+Homothetic
+
+U+223C
+∼
+Tilde Operator
+
+U+223D
+∽
+Reversed Tilde
+
+U+223E
+∾
+Inverted Lazy S
+
+U+223F
+∿
+Sine Wave
+
+U+2240
+≀
+Wreath Product
+
+U+2241
+≁
+Not Tilde
+
+U+2242
+≂
+Minus Tilde
+
+U+2243
+≃
+Asymptotically Equal To
+
+U+2244
+≄
+Not Asymptotically Equal To
+
+U+2245
+≅
+Approximately Equal To
+
+U+2246
+≆
+Approximately But Not Actually Equal To
+
+U+2247
+≇
+Neither Approximately Nor Actually Equal To
+
+U+2248
+≈
+Almost Equal To
+
+U+2249
+≉
+Not Almost Equal To
+
+U+224A
+≊
+Almost Equal or Equal To
+
+U+224B
+≋
+Triple Tilde
+
+U+224C
+≌
+All Equal To
+
+U+224D
+≍
+Equivalent To
+
+U+224E
+≎
+Geometrically Equivalent To
+
+U+224F
+≏
+Difference Between
+
+U+2250
+≐
+Approaches the Limit
+
+U+2251
+≑
+Geometrically Equal To
+
+U+2252
+≒
+Approximately Equal to or the Image Of
+
+U+2253
+≓
+Image of or Approximately Equal To
+
+U+2254
+≔
+Colon Equals
+
+U+2255
+≕
+Equals Colon
+
+U+2256
+≖
+Ring In Equal To
+
+U+2257
+≗
+Ring Equal To
+
+U+2258
+≘
+Corresponds To
+
+U+2259
+≙
+Estimates
+
+U+225A
+≚
+Equiangular To
+
+U+225B
+≛
+Star Equals
+
+U+225C
+≜
+Delta Equal To
+
+U+225D
+≝
+Equal to By Definition
+
+U+225E
+≞
+Measured By
+
+U+225F
+≟
+Questioned Equal To
+
+U+2260
+≠
+Not Equal To
+
+U+2261
+≡
+Identical To
+
+U+2262
+≢
+Not Identical To
+
+U+2263
+≣
+Strictly Equivalent To
+
+U+2264
+≤
+Less-Than or Equal To
+
+U+2265
+≥
+Greater-Than or Equal To
+
+U+2266
+≦
+Less-Than Over Equal To
+
+U+2267
+≧
+Greater-Than Over Equal To
+
+U+2268
+≨
+Less-Than But Not Equal To
+
+U+2269
+≩
+Greater-Than But Not Equal To
+
+U+226A
+≪
+Much Less-Than
+
+U+226B
+≫
+Much Greater-Than
+
+U+226C
+≬
+Between
+
+U+226D
+≭
+Not Equivalent To
+
+U+226E
+≮
+Not Less-Than
+
+U+226F
+≯
+Not Greater-Than
+
+U+2270
+≰
+Neither Less-Than Nor Equal To
+
+U+2271
+≱
+Neither Greater-Than Nor Equal To
+
+U+2272
+≲
+Less-Than or Equivalent To
+
+U+2273
+≳
+Greater-Than or Equivalent To
+
+U+2274
+≴
+Neither Less-Than Nor Equivalent To
+
+U+2275
+≵
+Neither Greater-Than Nor Equivalent To
+
+U+2276
+≶
+Less-Than or Greater-Than
+
+U+2277
+≷
+Greater-Than or Less-Than
+
+U+2278
+≸
+Neither Less-Than Nor Greater-Than
+
+U+2279
+≹
+Neither Greater-Than Nor Less-Than
+
+U+227A
+≺
+Precedes
+
+U+227B
+≻
+Succeeds
+
+U+227C
+≼
+Precedes or Equal To
+
+U+227D
+≽
+Succeeds or Equal To
+
+U+227E
+≾
+Precedes or Equivalent To
+
+U+227F
+≿
+Succeeds or Equivalent To
+
+U+2280
+⊀
+Does Not Precede
+
+U+2281
+⊁
+Does Not Succeed
+
+U+2282
+⊂
+Subset Of
+
+U+2283
+⊃
+Superset Of
+
+U+2284
+⊄
+Not A Subset Of
+
+U+2285
+⊅
+Not A Superset Of
+
+U+2286
+⊆
+Subset of or Equal To
+
+U+2287
+⊇
+Superset of or Equal To
+
+U+2288
+⊈
+Neither A Subset of Nor Equal To
+
+U+2289
+⊉
+Neither A Superset of Nor Equal To
+
+U+228A
+⊊
+Subset of with Not Equal To
+
+U+228B
+⊋
+Superset of with Not Equal To
+
+U+228C
+⊌
+Multiset
+
+U+228D
+⊍
+Multiset Multiplication
+
+U+228E
+⊎
+Multiset Union
+
+U+228F
+⊏
+Square Image Of
+
+U+2290
+⊐
+Square Original Of
+
+U+2291
+⊑
+Square Image of or Equal To
+
+U+2292
+⊒
+Square Original of or Equal To
+
+U+2293
+⊓
+Square Cap
+
+U+2294
+⊔
+Square Cup
+
+U+2295
+⊕
+Circled Plus
+
+U+2296
+⊖
+Circled Minus
+
+U+2297
+⊗
+Circled Times
+
+U+2298
+⊘
+Circled Division Slash
+
+U+2299
+⊙
+Circled Dot Operator
+
+U+229A
+⊚
+Circled Ring Operator
+
+U+229B
+⊛
+Circled Asterisk Operator
+
+U+229C
+⊜
+Circled Equals
+
+U+229D
+⊝
+Circled Dash
+
+U+229E
+⊞
+Squared Plus
+
+U+229F
+⊟
+Squared Minus
+
+U+22A0
+⊠
+Squared Times
+
+U+22A1
+⊡
+Squared Dot Operator
+
+U+22A2
+⊢
+Right Tack
+
+U+22A3
+⊣
+Left Tack
+
+U+22A4
+⊤
+Down Tack
+
+U+22A5
+⊥
+Up Tack
+
+U+22A6
+⊦
+Assertion
+
+U+22A7
+⊧
+Models
+
+U+22A8
+⊨
+True
+
+U+22A9
+⊩
+Forces
+
+U+22AA
+⊪
+Triple Vertical Bar Right Turnstile
+
+U+22AB
+⊫
+Double Vertical Bar Double Right Turnstile
+
+U+22AC
+⊬
+Does Not Prove
+
+U+22AD
+⊭
+Not True
+
+U+22AE
+⊮
+Does Not Force
+
+U+22AF
+⊯
+Negated Double Vertical Bar Double Right Turnstile
+
+U+22B0
+⊰
+Precedes Under Relation
+
+U+22B1
+⊱
+Succeeds Under Relation
+
+U+22B2
+⊲
+Normal Subgroup Of
+
+U+22B3
+⊳
+Contains as Normal Subgroup
+
+U+22B4
+⊴
+Normal Subgroup of or Equal To
+
+U+22B5
+⊵
+Contains as Normal Subgroup or Equal To
+
+U+22B6
+⊶
+Original Of
+
+U+22B7
+⊷
+Image Of
+
+U+22B8
+⊸
+Multimap
+
+U+22B9
+⊹
+Hermitian Conjugate Matrix
+
+U+22BA
+⊺
+Intercalate
+
+U+22BB
+⊻
+Xor
+
+U+22BC
+⊼
+Nand
+
+U+22BD
+⊽
+Nor
+
+U+22BE
+⊾
+Right Angle with Arc
+
+U+22BF
+⊿
+Right Triangle
+
+U+22C0
+⋀
+N-Ary Logical And
+
+U+22C1
+⋁
+N-Ary Logical Or
+
+U+22C2
+⋂
+N-Ary Intersection
+
+U+22C3
+⋃
+N-Ary Union
+
+U+22C4
+⋄
+Diamond Operator
+
+U+22C5
+⋅
+Dot Operator
+
+U+22C6
+⋆
+Star Operator
+
+U+22C7
+⋇
+Division Times
+
+U+22C8
+⋈
+Bowtie
+
+U+22C9
+⋉
+Left Normal Factor Semidirect Product
+
+U+22CA
+⋊
+Right Normal Factor Semidirect Product
+
+U+22CB
+⋋
+Left Semidirect Product
+
+U+22CC
+⋌
+Right Semidirect Product
+
+U+22CD
+⋍
+Reversed Tilde Equals
+
+U+22CE
+⋎
+Curly Logical Or
+
+U+22CF
+⋏
+Curly Logical And
+
+U+22D0
+⋐
+Double Subset
+
+U+22D1
+⋑
+Double Superset
+
+U+22D2
+⋒
+Double Intersection
+
+U+22D3
+⋓
+Double Union
+
+U+22D4
+⋔
+Pitchfork
+
+U+22D5
+⋕
+Equal and Parallel To
+
+U+22D6
+⋖
+Less-Than with Dot
+
+U+22D7
+⋗
+Greater-Than with Dot
+
+U+22D8
+⋘
+Very Much Less-Than
+
+U+22D9
+⋙
+Very Much Greater-Than
+
+U+22DA
+⋚
+Less-Than Equal to or Greater-Than
+
+U+22DB
+⋛
+Greater-Than Equal to or Less-Than
+
+U+22DC
+⋜
+Equal to or Less-Than
+
+U+22DD
+⋝
+Equal to or Greater-Than
+
+U+22DE
+⋞
+Equal to or Precedes
+
+U+22DF
+⋟
+Equal to or Succeeds
+
+U+22E0
+⋠
+Does Not Precede or Equal
+
+U+22E1
+⋡
+Does Not Succeed or Equal
+
+U+22E2
+⋢
+Not Square Image of or Equal To
+
+U+22E3
+⋣
+Not Square Original of or Equal To
+
+U+22E4
+⋤
+Square Image of or Not Equal To
+
+U+22E5
+⋥
+Square Original of or Not Equal To
+
+U+22E6
+⋦
+Less-Than But Not Equivalent To
+
+U+22E7
+⋧
+Greater-Than But Not Equivalent To
+
+U+22E8
+⋨
+Precedes But Not Equivalent To
+
+U+22E9
+⋩
+Succeeds But Not Equivalent To
+
+U+22EA
+⋪
+Not Normal Subgroup Of
+
+U+22EB
+⋫
+Does Not Contain as Normal Subgroup
+
+U+22EC
+⋬
+Not Normal Subgroup of or Equal To
+
+U+22ED
+⋭
+Does Not Contain as Normal Subgroup or Equal
+
+U+22EE
+⋮
+Vertical Ellipsis
+
+U+22EF
+⋯
+Midline Horizontal Ellipsis
+
+U+22F0
+⋰
+Up Right Diagonal Ellipsis
+
+U+22F1
+⋱
+Down Right Diagonal Ellipsis
+
+U+22F2
+⋲
+Element of with Long Horizontal Stroke
+
+U+22F3
+⋳
+Element of with Vertical Bar at End of Horizontal Stroke
+
+U+22F4
+⋴
+Small Element of with Vertical Bar at End of Horizontal Stroke
+
+U+22F5
+⋵
+Element of with Dot Above
+
+U+22F6
+⋶
+Element of with Overbar
+
+U+22F7
+⋷
+Small Element of with Overbar
+
+U+22F8
+⋸
+Element of with Underbar
+
+U+22F9
+⋹
+Element of with Two Horizontal Strokes
+
+U+22FA
+⋺
+Contains with Long Horizontal Stroke
+
+U+22FB
+⋻
+Contains with Vertical Bar at End of Horizontal Stroke
+
+U+22FC
+⋼
+Small Contains with Vertical Bar at End of Horizontal Stroke
+
+U+22FD
+⋽
+Contains with Overbar
+
+U+22FE
+⋾
+Small Contains with Overbar
+
+U+22FF
+⋿
+Z Notation Bag Membership
+"""
 
 
 # For AST to src tracking
