@@ -18,7 +18,7 @@ class Root(Context): ...
 
 @dataclass
 class StringBody(Context):
-    opening_quote: 'StringQuote'
+    opening_quote: 'StringQuote|RestOfFileStringQuote'
 
 @dataclass
 class RawStringBody(Context):
@@ -70,9 +70,10 @@ digits = set('0123456789')
 alpha = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
 greek = set('ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψω')
 misc = set('_?!$°')
+# see https://symbl.cc/en/collections/superscript-and-subscript-letters/ for more sub/superscript characters
 subscripts   = set('₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₔₕₖₗₘₙₚₛₜ')
 superscripts = set('⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴮᴰᴱᴲᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᵐᵊᶿᵡꜝʱʴʵʶˠ')
-primes = set('′″‴⁗')
+primes = set('′″‴⁗') # suggested to actually only have the single prime, and allow it anywhere just like other decorations
 
 
 start_characters = (alpha | greek | misc)
@@ -81,7 +82,7 @@ decoration_characters = (superscripts | subscripts)
 
 # note that the prefix is case insensitive, so call .lower() when matching the prefix
 # numbers may have _ as a separator (if _ is not in the set of digits)
-BasePrefix: TypeAlias = Literal['0b', '0t', '0q', '0s', '0o', '0d', '0z', '0x', '0u', '0r', '0y']
+BasePrefix: TypeAlias = Literal['0b', '0t', '0q', '0s', '0o', '0d', '0z', '0x', '0u', '0r', '0g']
 number_bases: dict[BasePrefix, set[str]] = {
     '0b': {*'01'},  # binary
     '0t': {*'012'},  # ternary
@@ -93,7 +94,7 @@ number_bases: dict[BasePrefix, set[str]] = {
     '0x': {*'0123456789abcdefABCDEF'},  # hexadecimal (case-insensitive)
     '0u': {*'0123456789abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRSTUV'},  # base 32 (duotrigesimal)
     '0r': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'},  # base 36 (hexatrigesimal)
-    '0y': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!$'},  # base 64 (tetrasexagesimal)
+    '0g': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!$'},  # base 64 (tetrasexagesimal)
 }
 
 @cache
@@ -277,7 +278,7 @@ class Identifier(Token[GeneralBodyContexts]):
         return i
 
 
-class SymbolicOperator(Token[GeneralBodyContexts]):
+class Symbol(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """symbolic operators are any sequence of characters in the symbolic_operators set"""
@@ -287,7 +288,7 @@ class SymbolicOperator(Token[GeneralBodyContexts]):
         return None
 
 
-class ShiftOperator(Token[BodyWithoutTypeContexts]):
+class ShiftSymbol(Token[BodyWithoutTypeContexts]):
     @staticmethod
     def eat(src:str, ctx:BodyWithoutTypeContexts) -> int|None:
         """shift operators are any sequence of characters in the shift_operators set"""
@@ -464,14 +465,13 @@ class StringQuote(Token[BodyOrRawStringContexts]):
         
         # in a string body, the only kind of quote that can be matched is the matching closing quote
         if isinstance(ctx, StringBody):
-            if not src.startswith(ctx.opening_quote.src):
-                return None
+            if isinstance(ctx.opening_quote, RestOfFileStringQuote): return None
+            if not src.startswith(ctx.opening_quote.src): return None
             return len(ctx.opening_quote.src)
         
         # in a raw string body, see if we match the opening quote (minus the r prefix)
         if isinstance(ctx, RawStringBody):
-            if not src.startswith(ctx.opening_quote.src[1:]):
-                return None
+            if not src.startswith(ctx.opening_quote.src[1:]): return None
             return len(ctx.opening_quote.src[1:])
 
         # match 2 quotes at a time
@@ -491,12 +491,13 @@ class StringQuote(Token[BodyOrRawStringContexts]):
         
         # inside a string body, a quote closes the string
         if isinstance(ctx, StringBody):
+            assert not isinstance(ctx.opening_quote, RestOfFileStringQuote), "INTERNAL ERROR: attempted to eat RestOfFileStringQuote in a string body"
             if ctx.opening_quote.src == self.src:
                 self.matching_quote = ctx.opening_quote
                 self.matching_quote.matching_quote = self
                 return Pop()
             # unreachable
-            raise ValueError(f"INTERNAL ERROR: attempted to eat StringQuote in a string body, but can only match the closing quote. {ctx.opening_quote.src=} {self.src=}")
+            raise ValueError(f"INTERNAL ERROR: attempted to eat non-matching StringQuote in a string body, but can only match the closing quote. {ctx.opening_quote.src=} {self.src=}")
         
         # inside a raw string body, a quote closes the raw string
         if isinstance(ctx, RawStringBody):
@@ -516,7 +517,11 @@ class StringChars(Token[StringBody]):
     def eat(src:str, ctx:StringBody) -> int|None:
         """regular characters are anything except for the delimiter, an escape sequence, or a block opening"""
         i = 0
-        while i < len(src) and not src[i:].startswith(ctx.opening_quote.src) and src[i] not in r'\{':
+        while (
+            i < len(src)
+            and not (isinstance(ctx.opening_quote, StringQuote) and src[i:].startswith(ctx.opening_quote.src))
+            and src[i] not in r'\{'
+        ):
             i += 1
         
         return i or None
@@ -598,13 +603,25 @@ class RawStringChars(Token[RawStringBody]):
         
         return i or None
 
-class RestOfFileString(Token[Root]):
+class RestOfFileStringQuote(Token[Root]):
     @staticmethod
     def eat(src:str, ctx:Root) -> int|None:
         """a string that has an opening delimiter but no closing delimiter (consumes until EOF)
         Opening delimiters #\""" #'''
         """
         if not src.startswith('#"""') and not src.startswith("#'''"):
+            return None
+        return 4
+    
+    def action_on_eat(self, ctx:Root): return Push(StringBody(ctx.srcfile, self))
+
+class RawRestOfFileString(Token[Root]):
+    @staticmethod
+    def eat(src:str, ctx:Root) -> int|None:
+        """a raw string that has an opening delimiter but no closing delimiter (consumes until EOF)
+        Opening delimiters #r\""" #r'''
+        """
+        if not src.startswith('#r"""') and not src.startswith("#r'''"):
             return None
         return len(src)
 
@@ -746,6 +763,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
             error.throw()
         
         if len(matches) == 0:
+            pdb.set_trace()
             # check for known error cases
             for known_err_case in known_error_cases:
                 error = known_err_case(src, i, tokens, ctx_stack, ctx_history)
@@ -788,7 +806,11 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
         tokens.append(token)
         i += length
     
-    # ensure that the final context is a root
+    # pop any remaining rest-of-file string if present
+    if len(ctx_stack) == 2 and isinstance(ctx_stack[-1], StringBody) and isinstance(ctx_stack[-1].opening_quote, RestOfFileStringQuote):
+        ctx_stack.pop()
+
+    # ensure that the final context is a root 
     if not isinstance(ctx_stack[-1], Root):
         error_stack = collect_remaining_context_errors(ctx_stack)
         for error in error_stack:
