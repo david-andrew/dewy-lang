@@ -69,9 +69,15 @@ whitespace = {' ', '\t', '\n', '\r'} # TBD if we need \f and \v
 digits = set('0123456789')
 alpha = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
 greek = set('ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψω')
-misc = set('_?!$&°')
+misc = set('_?!$°')
+subscripts   = set('₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₔₕₖₗₘₙₚₛₜ')
+superscripts = set('⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴮᴰᴱᴲᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᵐᵊᶿᵡꜝʱʴʵʶˠ')
+primes = set('′″‴⁗')
+
+
 start_characters = (alpha | greek | misc)
 continue_characters = (alpha | digits | greek | misc)
+decoration_characters = (superscripts | subscripts)
 
 # note that the prefix is case insensitive, so call .lower() when matching the prefix
 # numbers may have _ as a separator (if _ is not in the set of digits)
@@ -98,6 +104,7 @@ def is_based_digit(digit: str, base: str) -> bool:
 
 
 
+
 symbolic_operators = sorted([
     '~', '@', '`',
     '?', ';',
@@ -111,7 +118,7 @@ symbolic_operators = sorted([
     '.', '..', '...', ',', ':', ':>',
 ], key=len, reverse=True)
 
-# shift operators are not allowed in type groups
+# shift operators are not allowed in type groups, so deal with them separately
 shift_operators = sorted(['<<', '>>', '<<<', '>>>', '<<!', '!>>'], key=len, reverse=True)
 
 
@@ -244,12 +251,29 @@ class Identifier(Token[GeneralBodyContexts]):
         Identifiers:
         - may not start with a number
         - may not be an operator (handled by longest match + token precedence)
+        - may contain decorator characters (superscripts/subscripts) anywhere (but must include at least one start character)
         """
-        if src[0] not in start_characters:
-            return None
-        i = 1
-        while i < len(src) and src[i] in continue_characters:
+        i = 0
+        
+        # Skip leading decorator characters
+        while i < len(src) and src[i] in decoration_characters:
             i += 1
+        
+        # Must have at least one start character
+        if i >= len(src) or src[i] not in start_characters:
+            return None
+        
+        # Consume the start character
+        i += 1
+        
+        # Continue consuming continue_characters or decorator characters
+        while i < len(src) and (src[i] in continue_characters or src[i] in decoration_characters):
+            i += 1
+        
+        # may optionally end with a prime
+        if i < len(src) and src[i] in primes:
+            i += 1
+        
         return i
 
 
@@ -727,6 +751,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
             TODO: special cases to check for and emit error messages:
             - no recognized token. next=`>`, previous was `>` and previous ctx was TypeBody ==> appears you tried to use a shift operator inside a type param. wrap the shift expression in ()
             """
+
             error_stack = collect_remaining_context_errors(ctx_stack, max_pos=i)
             # for error in error_stack:
             if len(error_stack) > 0:
