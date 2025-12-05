@@ -1,18 +1,25 @@
 """
 [tasks]
-[ ] token matches prev and next context cases for error on no tokens matched
+[ ] errors for no token matches, check prev and next context cases if they could have matched
 [ ] report printout support overlapping spans: so long as they can be cleanly divided by top and bottom of line
     - needed for the >> in type param context error (and potentially other cases)
-[ ] report printout support specifying color index for specific pointers (and ideally try to make sure the same color isn't used adjacently)
+[x] report printout support specifying color index for specific pointers (and ideally try to make sure the same color isn't used adjacently)
+    [x] make an example that forces color switching for a pointer of the same color_id (i.e. force a given token to touch at least 5 other token colors, where they all also touch enough other colors)
 [x] tokenize rest-of-file strings
 [x] tokenize integers
-[ ] #<<EOF for heredoc strings "#<<", <closing pattern>, newline, <string body>, <closing pattern>
 
-Tasks:
-- next tokenization step for hello world: insert juxtapose
-- finish whole parsing process for hello world happy path
-- finish escape characters implementation to handle unicode and hex (requires ability to eat based numbers since variable width can use based numbers (or default to hex))
-- 
+------ tokenizer features ------
+[ ] #"EOF" for heredoc strings `#"`, <delimiter>, `"`, <string body>, <delimiter>
+    - #r"EOF" for raw heredoc strings
+    - delimiter can be any identifier character as well as any symbol character except for quotes `"`, `'`
+[ ] fix string escapes to include unicode and hex escapes correctly
+    - `\x{...}` where inside interpolation is either a sequence of digits (assumed to be hex unless otherwise prefixed), or any other arbitrary expression that evaluates to an integer
+    - `\u{...}` where inside interpolation is either a sequence of digits (assumed to be hex unless otherwise prefixed), or any other arbitrary expression that evaluates to an integer
+[ ] select larger list of symbols to include
+
+------ slightly broader scope ------
+[ ] next tokenization step for hello world: insert juxtapose
+[ ] finish whole parsing process for hello world happy path
 """
 
 
