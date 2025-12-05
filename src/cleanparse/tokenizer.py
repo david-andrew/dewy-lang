@@ -18,11 +18,11 @@ class Root(Context): ...
 
 @dataclass
 class StringBody(Context):
-    opening_quote: 'StringQuote|RestOfFileStringQuote'
+    opening_quote: 'StringQuote|RestOfFileStringQuote|HeredocStringOpener'
 
 @dataclass
 class RawStringBody(Context):
-    opening_quote: 'RawStringQuote'
+    opening_quote: 'RawStringQuote|RawHeredocStringOpener'
 
 @dataclass
 class BlockBody(Context):
@@ -85,7 +85,7 @@ def is_based_digit(digit: str, base: str) -> bool:
 
 
 
-
+# TODO: consider if \ is useful as a symbol (or combined with other stuff) in non-string contexts
 symbolic_operators = sorted([
     '~', '@', '`',
     '?', ';',
@@ -101,6 +101,17 @@ symbolic_operators = sorted([
 
 # shift operators are not allowed in type groups, so deal with them separately
 shift_operators = sorted(['<<', '>>', '<<<', '>>>', '<<!', '!>>'], key=len, reverse=True)
+
+
+# legal characters for use in heredoc delimiters: any identifier character or symbol character except for quotes `"`, `'`
+legal_heredoc_delim_chars = (
+    start_characters |
+    continue_characters |
+    decoration_characters |
+    digits |
+    primes |
+    set(''.join(symbolic_operators + shift_operators + ['\\#%()[]{} '])) #include \, #, %, (), [], {}, and ` ` (<space>) manually since currently not in any symbol or identifier characters
+)
 
 
 @dataclass
@@ -156,6 +167,7 @@ GeneralBodyContexts: TypeAlias = Root | BlockBody | TypeBody
 BodyWithoutTypeContexts: TypeAlias = Root | BlockBody
 BodyOrStringContexts: TypeAlias = Root | BlockBody | TypeBody | StringBody
 BodyOrRawStringContexts: TypeAlias = Root | BlockBody | TypeBody | StringBody | RawStringBody
+StringContexts: TypeAlias = StringBody | RawStringBody
 
 class WhiteSpace(Token[GeneralBodyContexts]):
     @staticmethod
@@ -445,12 +457,13 @@ class StringQuote(Token[BodyOrRawStringContexts]):
         
         # in a string body, the only kind of quote that can be matched is the matching closing quote
         if isinstance(ctx, StringBody):
-            if isinstance(ctx.opening_quote, RestOfFileStringQuote): return None
+            if not isinstance(ctx.opening_quote, StringQuote): return None
             if not src.startswith(ctx.opening_quote.src): return None
             return len(ctx.opening_quote.src)
         
         # in a raw string body, see if we match the opening quote (minus the r prefix)
         if isinstance(ctx, RawStringBody):
+            if not isinstance(ctx.opening_quote, RawStringQuote): return None
             if not src.startswith(ctx.opening_quote.src[1:]): return None
             return len(ctx.opening_quote.src[1:])
 
@@ -468,10 +481,9 @@ class StringQuote(Token[BodyOrRawStringContexts]):
         return i
     
     def action_on_eat(self, ctx:BodyOrRawStringContexts) -> ContextAction:
-        
         # inside a string body, a quote closes the string
         if isinstance(ctx, StringBody):
-            assert not isinstance(ctx.opening_quote, RestOfFileStringQuote), "INTERNAL ERROR: attempted to eat RestOfFileStringQuote in a string body"
+            assert isinstance(ctx.opening_quote, StringQuote), f"INTERNAL ERROR: unexpected closing quote type that matched an opening StringQuote: (closer){self=}, (opener){ctx.opening_quote=}"
             if ctx.opening_quote.src == self.src:
                 self.matching_quote = ctx.opening_quote
                 self.matching_quote.matching_quote = self
@@ -481,6 +493,7 @@ class StringQuote(Token[BodyOrRawStringContexts]):
         
         # inside a raw string body, a quote closes the raw string
         if isinstance(ctx, RawStringBody):
+            assert isinstance(ctx.opening_quote, RawStringQuote), f"INTERNAL ERROR: unexpected closing quote type that matched an opening RawStringQuote: (closer){self=}, (opener){ctx.opening_quote=}"
             if ctx.opening_quote.src[1:] == self.src:
                 self.matching_quote = ctx.opening_quote
                 self.matching_quote.matching_quote = self
@@ -500,6 +513,7 @@ class StringChars(Token[StringBody]):
         while (
             i < len(src)
             and not (isinstance(ctx.opening_quote, StringQuote) and src[i:].startswith(ctx.opening_quote.src))
+            and not (isinstance(ctx.opening_quote, HeredocStringOpener) and src[i:].startswith(ctx.opening_quote.get_delim()))
             and src[i] not in r'\{'
         ):
             i += 1
@@ -579,7 +593,11 @@ class RawStringChars(Token[RawStringBody]):
     def eat(src:str, ctx:RawStringBody) -> int|None:
         """regular characters are anything except for the delimiter"""
         i = 0
-        while i < len(src) and not src[i:].startswith(ctx.opening_quote.src[1:]):
+        while (
+            i < len(src)
+            and not (isinstance(ctx.opening_quote, RawStringQuote) and src[i:].startswith(ctx.opening_quote.src[1:]))
+            and not (isinstance(ctx.opening_quote, RawHeredocStringOpener) and src[i:].startswith(ctx.opening_quote.get_delim()))
+        ):
             i += 1
         
         return i or None
@@ -606,7 +624,107 @@ class RawRestOfFileString(Token[Root]):
             return None
         return len(src)
 
+
+class HeredocStringOpener(Token[GeneralBodyContexts]):
+    matching_quote: 'HeredocStringCloser' = None
+
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        """heredoc string opening and closing quotes are `#"<delim>"` and `<delim>` respectively
+        <delim> is an arbitrary user-defined delimiter. May use any identifier or symbol characters in the language except for quotes `"`, `'`
+        """
+        if not src.startswith('#"') and not src.startswith("#'"):
+            return None
         
+        # consume the delimiter
+        i = 2
+        while i < len(src) and src[i] in legal_heredoc_delim_chars:
+            i += 1
+        if i == 2:
+            return None # probably an end-of-file string quote #""" or #''', or reached EOF. probably don't emit error here
+
+        # must have ended the delimiter with a matching quote
+        quote = src[1]
+        if not src[i:].startswith(quote):
+            return None #TODO: emit error here. basically saw `#"<delim>EOF` without the closing quote `"`
+
+        delim = src[2:i]
+
+        # ensure the delimiter isn't all space, and also may not start or end with space
+        if src[2:i].strip() == '':
+            offset = ctx.srcfile.body.index(src)
+            error = Error(
+                srcfile=ctx.srcfile,
+                title=f"Heredoc delimiter cannot be all space",
+                pointer_messages=Pointer(span=Span(offset + 2, offset + 2 + len(delim)), message=f"Heredoc delimiter"),
+                hint=f"Heredoc delimiters must contain at least one non-space character, and may not start or end with space"
+            )
+            error.throw()
+        # ensure the delimiter doesn't start or end with space
+        if delim.startswith(' ') or delim.endswith(' '):
+            offset = ctx.srcfile.body.index(src)
+            leading_space_length = len(delim) - len(delim.lstrip())
+            trailing_space_length = len(delim) - len(delim.rstrip())
+            pointer_messages=[
+                Pointer(span=Span(offset + 2+leading_space_length, offset + 2 + len(delim) - trailing_space_length), message=f"delimiter")
+            ]
+            if leading_space_length: pointer_messages.append(Pointer(span=Span(offset + 2, offset+2+leading_space_length), message=f"Leading space"))
+            if trailing_space_length: pointer_messages.append(Pointer(span=Span(offset + 2 + len(delim) - trailing_space_length, offset + 2 + len(delim)), message=f"Trailing space"))
+            error = Error(
+                srcfile=ctx.srcfile,
+                title=f"Heredoc delimiter cannot start or end with space",
+                pointer_messages=pointer_messages,
+                hint=f"Heredoc delimiters may not start or end with space. Remove any leading or trailing space from the delimiter, e.g. #{quote}{delim.strip()}{quote}"
+            )
+            error.throw()
+
+        return i + 1
+    
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(StringBody(ctx.srcfile, self))
+
+    def get_delim(self) -> str:
+        """get the delimiter from the string quote"""
+        return self.src[2:-1]
+    
+class HeredocStringCloser(Token[StringContexts]):
+    matching_quote: 'HeredocStringOpener|RawHeredocStringOpener' = None
+
+    @staticmethod
+    def eat(src:str, ctx:StringContexts) -> int|None:
+        """a heredoc string closer is a matching opening quote"""
+        if not isinstance(ctx.opening_quote, (HeredocStringOpener, RawHeredocStringOpener)):
+            return None
+        delimiter = ctx.opening_quote.get_delim()
+        print(f"{delimiter=}")
+        if not src.startswith(delimiter):
+            return None
+        return len(delimiter)
+    
+    def action_on_eat(self, ctx:StringContexts): return Pop()
+
+class RawHeredocStringOpener(Token[GeneralBodyContexts]):
+    matching_quote: 'HeredocStringCloser' = None
+
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        """raw heredoc string opening and closing quotes are `#r"<delim>"` and `<delim>` respectively
+        <delim> is an arbitrary user-defined delimiter. May use any identifier or symbol characters in the language except for quotes `"`, `'`
+        """
+        if not src.startswith('#r"') and not src.startswith("#r'"):
+            return None
+        i = HeredocStringOpener.eat('#'+src[2:], ctx)
+        if i is None:
+            return None
+        return i + 1  # +1 for the `r` in the prefix
+    
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(RawStringBody(ctx.srcfile, self))
+
+    def get_delim(self) -> str:
+        """get the delimiter from the string quote"""
+        return self.src[3:-1]
+
+
+
 class Number(Token[GeneralBodyContexts]):
     prefix: BasePrefix | None = None
     
