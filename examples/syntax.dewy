@@ -200,3 +200,39 @@ ones = n => {l = [...[1..n]] l.=1 l}
 ones(10) % [1 1 1 1 1 1 1 1 1 1]
 %alternate
 ones = n => [loop i in 1..n 1]
+
+
+
+% Heredoc strings
+
+#"%%% SOME CUSTOM DELIMITER %%%"
+This is a heredoc string with a custom delimiter.
+It will be parsed as a string until the delimiter is reached.
+It includes regular string functionality like {interpolation}, \{} \character escaping, etc.
+The delimiter is not included in the string.
+#%%% SOME CUSTOM DELIMITER %%%
+
+#r"==== RAW HEREDOC DELIMITER ===="
+This is a raw heredoc string with a custom delimiter.
+It will be parsed as a string until the delimiter is reached.
+It does not include {interpolation}, \{} \character escaping, etc.
+The delimiter is not included in the string.
+==== RAW HEREDOC DELIMITER ====
+
+
+% end of file string
+#"""
+this is a string that consumes the rest of the file
+there is no closing delimiter
+
+% comments are just regular string characters
+lorem ipsum dolor sit amet,
+consectetur adipiscing elit.
+Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+Ut enim ad minim veniam,
+
+supports {interpolation+42} and \{} \character escaping
+quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. 
+Excepteur sint occaecat cupidatat non proident,
+sunt in culpa qui officia deserunt mollit anim id est laborum.
