@@ -480,8 +480,24 @@ class Report:
         sf = self.srcfile
         segments:list[_Segment] = []
         
+        used_color_ids:set[int] = set()
         for pointer in self.pointer_messages:
-            segments.extend(self._build_segments_for_pointer(sf, pointer, None, pointer.color_id))
+            if pointer.color_id is not None:
+                used_color_ids.add(pointer.color_id)
+        
+        next_auto_color_id = 0
+        while next_auto_color_id in used_color_ids:
+            next_auto_color_id += 1
+        
+        for pointer in self.pointer_messages:
+            if pointer.color_id is None:
+                assigned_color_id = next_auto_color_id
+                next_auto_color_id += 1
+                while next_auto_color_id in used_color_ids:
+                    next_auto_color_id += 1
+            else:
+                assigned_color_id = pointer.color_id
+            segments.extend(self._build_segments_for_pointer(sf, pointer, None, assigned_color_id))
         
         line_to_segments:dict[int, list[_Segment]] = {}
         for seg in segments:
