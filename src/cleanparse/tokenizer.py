@@ -824,7 +824,7 @@ def tokens_to_report(tokens: list[Token], srcfile: SrcFile) -> Info:
     return Info(
         srcfile=srcfile,
         title="Tokens consumed so far",
-        pointer_messages=[Pointer(span=token.loc, message=f"{token.__class__.__name__}") for token in tokens]
+        pointer_messages=[Pointer(span=token.loc, message=f"{token.__class__.__name__}", color_id=hash(token.__class__)) for token in tokens],
     )
 
 def test():

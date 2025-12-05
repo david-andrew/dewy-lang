@@ -133,6 +133,7 @@ class Pointer:
     span:Span|list[Span]
     message:str
     placement:PointerPlacement|None = None
+    color_id:int|None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.span, Span):
@@ -191,6 +192,7 @@ class _Segment:
     anchor_col:int
     placement:PointerPlacement|None
     color_code:str|None
+    color_id:int|None = None
     auto_assigned:bool = False
     render_pointer:bool = True
     show_message:bool = True
@@ -265,15 +267,146 @@ class Report:
                     out.append(f"{continuation}{chunk}")
         return "\n".join(out)
     
+    @staticmethod
+    def _find_adjacent_segments(segments:list[_Segment]) -> dict[int, set[int]]:
+        """
+        Build adjacency graph for segments.
+        Two segments are adjacent if they are on the same line, have the same placement,
+        and their spans touch (left.end_col == right.start_col, or for zero-width,
+        start_col values are consecutive).
+        Returns a dict mapping segment id to set of adjacent segment ids.
+        """
+        adjacency:dict[int, set[int]] = {}
+        for seg in segments:
+            adjacency[id(seg)] = set()
+        
+        by_line_placement:dict[tuple[int, PointerPlacement|None], list[_Segment]] = {}
+        for seg in segments:
+            key = (seg.line_idx, seg.placement)
+            by_line_placement.setdefault(key, []).append(seg)
+        
+        for segs in by_line_placement.values():
+            segs.sort(key=lambda s: (s.start_col, s.end_col))
+            for i, left in enumerate(segs):
+                for right in segs[i+1:]:
+                    adjacent = False
+                    if left.is_zero_width and right.is_zero_width:
+                        if abs(left.start_col - right.start_col) <= 1:
+                            adjacent = True
+                    elif not left.is_zero_width and not right.is_zero_width:
+                        if left.end_col == right.start_col:
+                            adjacent = True
+                    elif left.is_zero_width:
+                        if left.start_col == right.start_col or left.start_col == right.start_col - 1:
+                            adjacent = True
+                    else:
+                        if right.start_col == left.end_col or right.start_col == left.end_col - 1:
+                            adjacent = True
+                    
+                    if adjacent:
+                        left_id = id(left)
+                        right_id = id(right)
+                        adjacency[left_id].add(right_id)
+                        adjacency[right_id].add(left_id)
+                    elif not left.is_zero_width and not right.is_zero_width:
+                        if left.end_col < right.start_col:
+                            break
+        
+        return adjacency
+    
+    def _assign_colors_to_segments(
+        self,
+        segments:list[_Segment],
+        palette:tuple[str|None, ...],
+        adjacency:dict[int, set[int]],
+    ) -> None:
+        """
+        Assign colors to segments based on color_id grouping and adjacency constraints.
+        - Segments with the same color_id always get the same color
+        - Adjacent segments with different color_ids must have different colors
+        - If there are fewer or equal color_ids than colors, assign sequentially
+        - Otherwise, use all colors while respecting adjacency constraints
+        """
+        palette_len = len(palette)
+        
+        id_to_seg:dict[int, _Segment] = {}
+        for seg in segments:
+            id_to_seg[id(seg)] = seg
+        
+        color_id_to_segments:dict[int|None, list[_Segment]] = {}
+        for seg in segments:
+            color_id_to_segments.setdefault(seg.color_id, []).append(seg)
+        
+        num_color_ids = len(color_id_to_segments)
+        
+        color_id_to_color:dict[int|None, str|None] = {}
+        segment_id_to_color:dict[int, str|None] = {}
+        
+        if num_color_ids <= palette_len:
+            color_index = 0
+            for color_id in sorted(color_id_to_segments.keys(), key=lambda x: x if x is not None else float('inf')):
+                color = palette[color_index % palette_len]
+                color_id_to_color[color_id] = color
+                for seg in color_id_to_segments[color_id]:
+                    seg_id = id(seg)
+                    segment_id_to_color[seg_id] = color
+                    seg.color_code = color
+                color_index += 1
+            return
+        
+        def get_adjacent_colors(seg_id:int, exclude_color_id:int|None) -> set[str|None]:
+            """Get colors used by adjacent segments with different color_ids."""
+            colors = set()
+            for adj_seg_id in adjacency.get(seg_id, set()):
+                adj_seg = id_to_seg[adj_seg_id]
+                if adj_seg.color_id != exclude_color_id and adj_seg_id in segment_id_to_color:
+                    colors.add(segment_id_to_color[adj_seg_id])
+            return colors
+        
+        def find_available_color(color_id:int|None, segments_in_group:list[_Segment]) -> str|None:
+            """Find a color for a color_id group that doesn't conflict with adjacent segments.
+            Tries to use all colors by preferring less-used colors."""
+            if color_id in color_id_to_color:
+                candidate_color = color_id_to_color[color_id]
+                adjacent_colors = set()
+                for seg in segments_in_group:
+                    adjacent_colors.update(get_adjacent_colors(id(seg), color_id))
+                if candidate_color not in adjacent_colors:
+                    return candidate_color
+            
+            color_usage:dict[str|None, int] = {}
+            for used_color in color_id_to_color.values():
+                color_usage[used_color] = color_usage.get(used_color, 0) + 1
+            
+            available_colors:list[tuple[str|None, int]] = []
+            for color in palette:
+                adjacent_colors = set()
+                for seg in segments_in_group:
+                    adjacent_colors.update(get_adjacent_colors(id(seg), color_id))
+                if color not in adjacent_colors:
+                    usage_count = color_usage.get(color, 0)
+                    available_colors.append((color, usage_count))
+            
+            if available_colors:
+                available_colors.sort(key=lambda x: x[1])
+                return available_colors[0][0]
+            
+            return palette[0] if palette else None
+        
+        for color_id, segs_in_group in color_id_to_segments.items():
+            color = find_available_color(color_id, segs_in_group)
+            color_id_to_color[color_id] = color
+            for seg in segs_in_group:
+                seg_id = id(seg)
+                segment_id_to_color[seg_id] = color
+                seg.color_code = color
+    
     def _prepare_segments(self, palette:tuple[str|None, ...]) -> list[_Segment]:
         sf = self.srcfile
         segments:list[_Segment] = []
-        palette_len = len(palette)
-        color_index = 0
+        
         for pointer in self.pointer_messages:
-            color_code = palette[color_index % palette_len]
-            color_index += 1
-            segments.extend(self._build_segments_for_pointer(sf, pointer, color_code))
+            segments.extend(self._build_segments_for_pointer(sf, pointer, None, pointer.color_id))
         
         line_to_segments:dict[int, list[_Segment]] = {}
         for seg in segments:
@@ -290,9 +423,13 @@ class Report:
             for left, right in zip(non_zero, non_zero[1:]):
                 if left.end_col > right.start_col:
                     raise ValueError(f"overlapping spans on line {line_idx+1}")
+        
+        adjacency = self._find_adjacent_segments(segments)
+        self._assign_colors_to_segments(segments, palette, adjacency)
+        
         return segments
     
-    def _build_segments_for_pointer(self, sf:SrcFile, pointer:Pointer, color_code:str|None) -> list[_Segment]:
+    def _build_segments_for_pointer(self, sf:SrcFile, pointer:Pointer, color_code:str|None, color_id:int|None=None) -> list[_Segment]:
         segments:list[_Segment] = []
         all_spans = sorted(pointer.span, key=lambda s: (s.start, s.stop))
         line_infos:list[dict[str, int]] = []
@@ -343,6 +480,7 @@ class Report:
                 anchor_col=anchor_col,
                 placement=pointer.placement,
                 color_code=color_code,
+                color_id=color_id,
             ))
             return segments
         
@@ -382,6 +520,7 @@ class Report:
                 anchor_col=anchor_col,
                 placement=segment_placement,
                 color_code=color_code,
+                color_id=color_id,
                 show_message=is_message_line,
                 show_anchor=show_anchor,
                 render_pointer=render_pointer,
