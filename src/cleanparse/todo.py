@@ -3,8 +3,10 @@
 [ ] token matches prev and next context cases for error on no tokens matched
 [ ] report printout support overlapping spans: so long as they can be cleanly divided by top and bottom of line
     - needed for the >> in type param context error (and potentially other cases)
-[ ] tokenize rest-of-file strings
-[ ] tokenize integers
+[ ] report printout support specifying color index for specific pointers (and ideally try to make sure the same color isn't used adjacently)
+[x] tokenize rest-of-file strings
+[x] tokenize integers
+[ ] #<<EOF for heredoc strings "#<<", <closing pattern>, newline, <string body>, <closing pattern>
 
 Tasks:
 - next tokenization step for hello world: insert juxtapose
