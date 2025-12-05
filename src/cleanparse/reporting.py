@@ -4,14 +4,14 @@ Classes for displaying rich error messages.
 Usage:
 ```python
 from pathlib import Path
-from .errors import Report, Pointer, Span, SrcFile, ColorTheme
+from .reporting import Error, Pointer, Span, SrcFile, ColorTheme
 
 srcfile = SrcFile(
     path=Path("path/to/file.dewy"),
     body="printl'Hello, World'",
 )
 
-error = Report(
+error = Error(
     srcfile=srcfile,
     title="dewy.errors.E1234",
     message="Unable to juxtapose identifier and string",
@@ -30,15 +30,15 @@ print(error)
 For discussion on what to include in error messages, see: https://langdev.stackexchange.com/questions/1790/what-should-be-included-in-error-messages
 
 TODO features:
-- severity levels (error, warning, info, hint)
-- linking to error code documentation website
-- terminal link to location of error in source code
-- structured output mode (probably json)
-- stack traces (perhaps higher order messages consisting of a list of errors?)
-- spans overlapping multiple lines
-- displaying multiple surrounding lines for extra context. TBD how much to display.
-- source code syntax highlighting (very long term goal)
-- for unknown identifiers, look up possible similar identifiers for help message (handled by higher level process)
+[x] severity levels (error, warning, info, hint)
+[ ] linking to error code documentation website
+[ ] terminal link to location of error in source code
+[ ] structured output mode (probably json)
+[ ] stack traces (perhaps higher order messages consisting of a list of errors?)
+[x] spans overlapping multiple lines
+[ ] displaying multiple surrounding lines for extra context. TBD how much to display.
+[ ] source code syntax highlighting (very long term goal)
+[.] for unknown identifiers, look up possible similar identifiers for help message (handled by higher level process)
 """
 
 from dataclasses import dataclass, field

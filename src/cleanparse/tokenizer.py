@@ -1,4 +1,4 @@
-from .errors import Span, Info, Error, SrcFile, Pointer
+from .reporting import Span, Info, Error, SrcFile, Pointer
 from .utils import truncate, descendants, ordinalize, first_line
 from typing import TypeAlias, ClassVar, get_origin, get_args, Union, Protocol, Literal
 from types import UnionType
