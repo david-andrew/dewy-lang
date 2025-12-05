@@ -42,26 +42,6 @@ class Pop: ...
 
 ContextAction: TypeAlias = Push | Pop | None
 
-"""
-(potentially moot given how tokens handle context updates)
-Example case that is tricky with context.close
-
-sometype< x>?10 >
-
-`>?` is an operator, but if context closers always take precedence, then we'd get the `>` closing the type param block
-
-But a reverse case where we want higher precedence is:
-
-'this is a string'''
-the rule is the first quote at the end closes the string, and then the next two are recognized as an empty string
-<quote1>this is a string<quote1><juxtapose><quote1><quote1>
-<quote1>this is a string<quote3>
-I.e. when we're matching tokens, it'd be possible to see a triple quote token, which would beat the single quote on longest match,
-but the single quote should still take precedence since it closes the context
----> one possible way around would be if somehow we could prevent longer quotes in the given context
-
-[solved string issue by having string token behave differently in StringBody]
-"""
 
 whitespace = {' ', '\t', '\n', '\r'} # TBD if we need \f and \v
 
@@ -558,6 +538,7 @@ class StringEscape(Token[StringBody]):
             return None
 
         if len(src) == 1:
+            # TODO: make this a full error report. incomplete escape + unterminated string + anything else on the stack
             raise ValueError("unterminated escape sequence")
 
         if src[1] in 'uU':
@@ -763,7 +744,6 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
             error.throw()
         
         if len(matches) == 0:
-            pdb.set_trace()
             # check for known error cases
             for known_err_case in known_error_cases:
                 error = known_err_case(src, i, tokens, ctx_stack, ctx_history)
@@ -779,10 +759,6 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
                 pointer_messages=Pointer(span=Span(i, i), message=f"no token matched at position {i}: {truncate(first_line(src[i:]))}"),
             )
             print(error)
-            """
-            TODO: special cases to check for and emit error messages:
-            - no recognized token. next=`>`, previous was `>` and previous ctx was TypeBody ==> appears you tried to use a shift operator inside a type param. wrap the shift expression in ()
-            """
 
             error_stack = collect_remaining_context_errors(ctx_stack, max_pos=i)
             # for error in error_stack:

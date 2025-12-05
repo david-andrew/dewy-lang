@@ -16,6 +16,7 @@
     - `\x{...}` where inside interpolation is either a sequence of digits (assumed to be hex unless otherwise prefixed), or any other arbitrary expression that evaluates to an integer
     - `\u{...}` where inside interpolation is either a sequence of digits (assumed to be hex unless otherwise prefixed), or any other arbitrary expression that evaluates to an integer
 [ ] select larger list of symbols to include
+[ ] symbol normalization e.g. μ vs µ  (greek mu vs micro sign), subscripts and superscripts, etc.
 
 ------ slightly broader scope ------
 [ ] next tokenization step for hello world: insert juxtapose
