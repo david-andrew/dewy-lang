@@ -56,7 +56,24 @@ FG_BLUE = "\033[34m"
 FG_CYAN = "\033[36m"
 FG_DIM_GRAY = "\033[90m"
 FG_LIGHT_GRAY = "\033[38;5;245m"
-POINTER_COLOR_CODES = ("\033[95m", "\033[96m", "\033[92m", "\033[93m", "\033[94m")
+POINTER_COLOR_CODES = (
+    # "\033[95m",      # Magenta (washed out compared to purple)
+    "\033[96m",      # Cyan
+    # "\033[90m",      # Gray   (too dark)
+    # "\033[91m",      # Red    (too red)
+    "\033[92m",      # Green
+    "\033[93m",      # Yellow
+    "\033[94m",      # Blue
+    # "\033[38;5;208m",  # Orange (too similar when next to pink)
+    "\033[38;5;135m",  # Purple
+    # "\033[38;5;141m",  # Light Purple (too similar to purple/magenta)
+    "\033[38;5;211m",  # Pink
+    "\033[38;5;214m",  # Light Orange
+    # "\033[38;5;246m",  # Medium-light gray
+    # "\033[38;5;248m",  # Light gray
+    # "\033[38;5;250m",  # Very light gray
+
+)
 
 
 class ColorTheme:
@@ -352,38 +369,74 @@ class Report:
                     segment_id_to_color[seg_id] = color
                     seg.color_code = color
                 color_index += 1
-            return
+        else:
+            def get_adjacent_colors(seg_id:int, exclude_color_id:int|None) -> set[str|None]:
+                """Get colors used by adjacent segments with different color_ids."""
+                colors = set()
+                for adj_seg_id in adjacency.get(seg_id, set()):
+                    adj_seg = id_to_seg[adj_seg_id]
+                    if adj_seg.color_id != exclude_color_id and adj_seg_id in segment_id_to_color:
+                        colors.add(segment_id_to_color[adj_seg_id])
+                return colors
+            
+            def find_available_color(color_id:int|None, segments_in_group:list[_Segment]) -> str|None:
+                """Find a color for a color_id group that doesn't conflict with adjacent segments.
+                Tries to use all colors by preferring less-used colors."""
+                if color_id in color_id_to_color:
+                    candidate_color = color_id_to_color[color_id]
+                    adjacent_colors = set()
+                    for seg in segments_in_group:
+                        adjacent_colors.update(get_adjacent_colors(id(seg), color_id))
+                    if candidate_color not in adjacent_colors:
+                        return candidate_color
+                
+                color_usage:dict[str|None, int] = {}
+                for used_color in color_id_to_color.values():
+                    color_usage[used_color] = color_usage.get(used_color, 0) + 1
+                
+                available_colors:list[tuple[str|None, int]] = []
+                for color in palette:
+                    adjacent_colors = set()
+                    for seg in segments_in_group:
+                        adjacent_colors.update(get_adjacent_colors(id(seg), color_id))
+                    if color not in adjacent_colors:
+                        usage_count = color_usage.get(color, 0)
+                        available_colors.append((color, usage_count))
+                
+                if available_colors:
+                    available_colors.sort(key=lambda x: x[1])
+                    return available_colors[0][0]
+                
+                return palette[0] if palette else None
+            
+            for color_id, segs_in_group in color_id_to_segments.items():
+                color = find_available_color(color_id, segs_in_group)
+                color_id_to_color[color_id] = color
+                for seg in segs_in_group:
+                    seg_id = id(seg)
+                    segment_id_to_color[seg_id] = color
+                    seg.color_code = color
         
-        def get_adjacent_colors(seg_id:int, exclude_color_id:int|None) -> set[str|None]:
-            """Get colors used by adjacent segments with different color_ids."""
-            colors = set()
+        def get_conflicting_segment(seg_id:int) -> int|None:
+            """Find an adjacent segment that has the same color and different color_id."""
+            seg = id_to_seg[seg_id]
+            seg_color = segment_id_to_color[seg_id]
             for adj_seg_id in adjacency.get(seg_id, set()):
                 adj_seg = id_to_seg[adj_seg_id]
-                if adj_seg.color_id != exclude_color_id and adj_seg_id in segment_id_to_color:
-                    colors.add(segment_id_to_color[adj_seg_id])
-            return colors
+                if adj_seg.color_id != seg.color_id and segment_id_to_color.get(adj_seg_id) == seg_color:
+                    return adj_seg_id
+            return None
         
-        def find_available_color(color_id:int|None, segments_in_group:list[_Segment]) -> str|None:
-            """Find a color for a color_id group that doesn't conflict with adjacent segments.
-            Tries to use all colors by preferring less-used colors."""
-            if color_id in color_id_to_color:
-                candidate_color = color_id_to_color[color_id]
-                adjacent_colors = set()
-                for seg in segments_in_group:
-                    adjacent_colors.update(get_adjacent_colors(id(seg), color_id))
-                if candidate_color not in adjacent_colors:
-                    return candidate_color
-            
+        def find_color_for_segment(seg_id:int, exclude_colors:set[str|None]) -> str|None:
+            """Find a color for a single segment that avoids excluded colors.
+            Returns None if no non-excluded color is available."""
             color_usage:dict[str|None, int] = {}
-            for used_color in color_id_to_color.values():
+            for used_color in segment_id_to_color.values():
                 color_usage[used_color] = color_usage.get(used_color, 0) + 1
             
             available_colors:list[tuple[str|None, int]] = []
             for color in palette:
-                adjacent_colors = set()
-                for seg in segments_in_group:
-                    adjacent_colors.update(get_adjacent_colors(id(seg), color_id))
-                if color not in adjacent_colors:
+                if color not in exclude_colors:
                     usage_count = color_usage.get(color, 0)
                     available_colors.append((color, usage_count))
             
@@ -391,15 +444,37 @@ class Report:
                 available_colors.sort(key=lambda x: x[1])
                 return available_colors[0][0]
             
-            return palette[0] if palette else None
+            return None
         
-        for color_id, segs_in_group in color_id_to_segments.items():
-            color = find_available_color(color_id, segs_in_group)
-            color_id_to_color[color_id] = color
-            for seg in segs_in_group:
+        changed = True
+        max_iterations = len(segments) * 2
+        iteration = 0
+        while changed and iteration < max_iterations:
+            changed = False
+            iteration += 1
+            for seg in segments:
                 seg_id = id(seg)
-                segment_id_to_color[seg_id] = color
-                seg.color_code = color
+                conflicting_id = get_conflicting_segment(seg_id)
+                if conflicting_id is not None:
+                    conflicting_seg = id_to_seg[conflicting_id]
+                    seg_color = segment_id_to_color[seg_id]
+                    conflicting_color = segment_id_to_color[conflicting_id]
+                    
+                    adjacent_colors = get_adjacent_colors(seg_id, seg.color_id)
+                    adjacent_colors.add(conflicting_color)
+                    
+                    new_color = find_color_for_segment(seg_id, adjacent_colors)
+                    if new_color is not None and new_color != seg_color:
+                        segment_id_to_color[seg_id] = new_color
+                        seg.color_code = new_color
+                        changed = True
+                    elif new_color is None:
+                        for color in palette:
+                            if color not in adjacent_colors:
+                                segment_id_to_color[seg_id] = color
+                                seg.color_code = color
+                                changed = True
+                                break
     
     def _prepare_segments(self, palette:tuple[str|None, ...]) -> list[_Segment]:
         sf = self.srcfile
