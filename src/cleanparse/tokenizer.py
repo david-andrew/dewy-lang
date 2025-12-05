@@ -18,11 +18,11 @@ class Root(Context): ...
 
 @dataclass
 class StringBody(Context):
-    opening_quote: 'StringQuote|RestOfFileStringQuote|HeredocStringOpener'
+    opening_quote: 'StringQuoteOpener|RestOfFileStringQuote|HeredocStringOpener'
 
 @dataclass
 class RawStringBody(Context):
-    opening_quote: 'RawStringQuote|RawHeredocStringOpener'
+    opening_quote: 'RawStringQuoteOpener|RawHeredocStringOpener'
 
 @dataclass
 class BlockBody(Context):
@@ -166,7 +166,6 @@ class Token[T:Context](ABC):
 GeneralBodyContexts: TypeAlias = Root | BlockBody | TypeBody
 BodyWithoutTypeContexts: TypeAlias = Root | BlockBody
 BodyOrStringContexts: TypeAlias = Root | BlockBody | TypeBody | StringBody
-BodyOrRawStringContexts: TypeAlias = Root | BlockBody | TypeBody | StringBody | RawStringBody
 StringContexts: TypeAlias = StringBody | RawStringBody
 
 class WhiteSpace(Token[GeneralBodyContexts]):
@@ -445,65 +444,97 @@ class RightAngleBracket(Token[TypeBody]):
         return Pop()
 
 
-class StringQuote(Token[BodyOrRawStringContexts]):
-    matching_quote: 'StringQuote' = None
+class StringQuoteOpener(Token[GeneralBodyContexts]):
+    matching_quote: 'StringQuoteCloser' = None
 
     @staticmethod
-    def eat(src:str, ctx:BodyOrRawStringContexts) -> int|None:
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """string quotes are any odd-length sequence of either all single or all double quotes"""
         # only match if the first character is a quote
         if src[0] not in '\'"':
             return None
         
-        # in a string body, the only kind of quote that can be matched is the matching closing quote
-        if isinstance(ctx, StringBody):
-            if not isinstance(ctx.opening_quote, StringQuote): return None
-            if not src.startswith(ctx.opening_quote.src): return None
-            return len(ctx.opening_quote.src)
+        # # in a string body, the only kind of quote that can be matched is the matching closing quote
+        # if isinstance(ctx, StringBody):
+        #     if not isinstance(ctx.opening_quote, StringQuote): return None
+        #     if not src.startswith(ctx.opening_quote.src): return None
+        #     return len(ctx.opening_quote.src)
         
-        # in a raw string body, see if we match the opening quote (minus the r prefix)
-        if isinstance(ctx, RawStringBody):
-            if not isinstance(ctx.opening_quote, RawStringQuote): return None
-            if not src.startswith(ctx.opening_quote.src[1:]): return None
-            return len(ctx.opening_quote.src[1:])
+        # # in a raw string body, see if we match the opening quote (minus the r prefix)
+        # if isinstance(ctx, RawStringBody):
+        #     if not isinstance(ctx.opening_quote, RawStringQuote): return None
+        #     if not src.startswith(ctx.opening_quote.src[1:]): return None
+        #     return len(ctx.opening_quote.src[1:])
 
-        # match 2 quotes at a time
+
+        # match opening quotes
         i = 1
         quote = src[0]
-        while src[i:].startswith(quote * 2):
-            i += 2
+        while src[i:].startswith(quote):
+            i += 1
         
-        # if total is an even, this indicates empty string
-        # eat just the opening quote
-        if src[i:].startswith(quote):
-            return (i + 1) // 2
-
+        # if total is an even, this indicates empty string, so only eat the first half
+        if i % 2 == 0:
+            return i // 2
+        
+        # otherwise, eat the entire opening quote
         return i
+
+
+        # # match 2 quotes at a time
+        # i = 1
+        # quote = src[0]
+        # while src[i:].startswith(quote * 2):
+        #     i += 2
+        
+        # # if total is an even, this indicates empty string
+        # # eat just the opening quote
+        # if src[i:].startswith(quote):
+        #     return (i + 1) // 2
+
+        # return i
     
-    def action_on_eat(self, ctx:BodyOrRawStringContexts) -> ContextAction:
+    def action_on_eat(self, ctx:GeneralBodyContexts) -> ContextAction:
         # inside a string body, a quote closes the string
-        if isinstance(ctx, StringBody):
-            assert isinstance(ctx.opening_quote, StringQuote), f"INTERNAL ERROR: unexpected closing quote type that matched an opening StringQuote: (closer){self=}, (opener){ctx.opening_quote=}"
-            if ctx.opening_quote.src == self.src:
-                self.matching_quote = ctx.opening_quote
-                self.matching_quote.matching_quote = self
-                return Pop()
-            # unreachable
-            raise ValueError(f"INTERNAL ERROR: attempted to eat non-matching StringQuote in a string body, but can only match the closing quote. {ctx.opening_quote.src=} {self.src=}")
+        # if isinstance(ctx, StringBody):
+        #     assert isinstance(ctx.opening_quote, StringQuote), f"INTERNAL ERROR: unexpected closing quote type that matched an opening StringQuote: (closer){self=}, (opener){ctx.opening_quote=}"
+        #     if ctx.opening_quote.src == self.src:
+        #         self.matching_quote = ctx.opening_quote
+        #         self.matching_quote.matching_quote = self
+        #         return Pop()
+        #     # unreachable
+        #     raise ValueError(f"INTERNAL ERROR: attempted to eat non-matching StringQuote in a string body, but can only match the closing quote. {ctx.opening_quote.src=} {self.src=}")
         
-        # inside a raw string body, a quote closes the raw string
-        if isinstance(ctx, RawStringBody):
-            assert isinstance(ctx.opening_quote, RawStringQuote), f"INTERNAL ERROR: unexpected closing quote type that matched an opening RawStringQuote: (closer){self=}, (opener){ctx.opening_quote=}"
-            if ctx.opening_quote.src[1:] == self.src:
-                self.matching_quote = ctx.opening_quote
-                self.matching_quote.matching_quote = self
-                return Pop()
-            # unreachable
-            raise ValueError(f"INTERNAL ERROR: attempted to eat RawStringQuote in a raw string body, but can only match the closing quote. {ctx.opening_quote.src[1:]=} {self.src=}")
+        # # inside a raw string body, a quote closes the raw string
+        # if isinstance(ctx, RawStringBody):
+        #     assert isinstance(ctx.opening_quote, RawStringQuote), f"INTERNAL ERROR: unexpected closing quote type that matched an opening RawStringQuote: (closer){self=}, (opener){ctx.opening_quote=}"
+        #     if ctx.opening_quote.src[1:] == self.src:
+        #         self.matching_quote = ctx.opening_quote
+        #         self.matching_quote.matching_quote = self
+        #         return Pop()
+        #     # unreachable
+        #     raise ValueError(f"INTERNAL ERROR: attempted to eat RawStringQuote in a raw string body, but can only match the closing quote. {ctx.opening_quote.src[1:]=} {self.src=}")
         
-        # All other contexts, String quote opens a regular string body (not raw string)
         return Push(StringBody(ctx.srcfile, self))
 
+class StringQuoteCloser(Token[StringContexts]):
+    matching_quote: 'StringQuoteOpener|RawStringQuoteOpener' = None
+
+    @staticmethod
+    def eat(src:str, ctx:StringContexts) -> int|None:
+        """a string quote closer is a matching opening quote"""
+        if isinstance(ctx.opening_quote, StringQuoteOpener) and src.startswith(ctx.opening_quote.src):
+            return len(ctx.opening_quote.src)
+        if isinstance(ctx.opening_quote, RawStringQuoteOpener) and src.startswith(ctx.opening_quote.src[1:]):
+            return len(ctx.opening_quote.src[1:])
+        # Heredoc delimiters can't match here, and rest-of-file strings don't have a closing quote
+        return None
+    
+    def action_on_eat(self, ctx:StringContexts):
+        assert isinstance(ctx.opening_quote, (StringQuoteOpener, RawStringQuoteOpener)), f"INTERNAL ERROR: attempted to eat StringQuoteCloser for non-matching opening quote: {ctx.opening_quote=}"
+        self.matching_quote = ctx.opening_quote
+        self.matching_quote.matching_quote = self
+        return Pop()
 
 class StringChars(Token[StringBody]):
     @staticmethod
@@ -512,7 +543,7 @@ class StringChars(Token[StringBody]):
         i = 0
         while (
             i < len(src)
-            and not (isinstance(ctx.opening_quote, StringQuote) and src[i:].startswith(ctx.opening_quote.src))
+            and not (isinstance(ctx.opening_quote, StringQuoteOpener) and src[i:].startswith(ctx.opening_quote.src))
             and not (isinstance(ctx.opening_quote, HeredocStringOpener) and src[i:].startswith(ctx.opening_quote.get_delim()))
             and src[i] not in r'\{'
         ):
@@ -570,19 +601,16 @@ class StringEscape(Token[StringBody]):
         return 2
 
 
-class RawStringQuote(Token[GeneralBodyContexts]):
-    matching_quote: 'StringQuote' = None
+class RawStringQuoteOpener(Token[GeneralBodyContexts]):
+    matching_quote: 'StringQuoteCloser' = None  # raw strings are closed by regular quotes
     
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """raw string quotes are r followed by any odd-length sequence of either all single or all double quotes"""
         if not src.startswith('r"') and not src.startswith("r'"):
             return None
-        i = StringQuote.eat(src[1:], ctx)  # eat the quote without the r prefix
-        if i is None:
-            # unreachable
-            raise ValueError(f"INTERNAL ERROR: attempted to eat RawStringQuote in a non-raw string body. {ctx=}")
-        
+        i = StringQuoteOpener.eat(src[1:], ctx)  # eat the quote without the r prefix
+        assert i is not None, f"INTERNAL ERROR: failed to get quote part of raw string opener when already verified its presence. {ctx=}, {src=}"
         return i + 1
     
     def action_on_eat(self, ctx:GeneralBodyContexts): return Push(RawStringBody(ctx.srcfile, self))
@@ -595,7 +623,7 @@ class RawStringChars(Token[RawStringBody]):
         i = 0
         while (
             i < len(src)
-            and not (isinstance(ctx.opening_quote, RawStringQuote) and src[i:].startswith(ctx.opening_quote.src[1:]))
+            and not (isinstance(ctx.opening_quote, RawStringQuoteOpener) and src[i:].startswith(ctx.opening_quote.src[1:]))  # matches just the quote part of the opener without the `r` prefix
             and not (isinstance(ctx.opening_quote, RawHeredocStringOpener) and src[i:].startswith(ctx.opening_quote.get_delim()))
         ):
             i += 1
@@ -695,7 +723,6 @@ class HeredocStringCloser(Token[StringContexts]):
         if not isinstance(ctx.opening_quote, (HeredocStringOpener, RawHeredocStringOpener)):
             return None
         delimiter = ctx.opening_quote.get_delim()
-        print(f"{delimiter=}")
         if not src.startswith(delimiter):
             return None
         return len(delimiter)
