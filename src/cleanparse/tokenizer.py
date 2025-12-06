@@ -1,3 +1,28 @@
+"""
+Tokenizer framework
+
+This module implements a small declarative framework for tokenizing Dewy source.
+
+Each concrete token is a subclass of `Token[T]`, where `T` is one or more
+`Context` types indicating where that token is valid (e.g. `Root`, `StringBody`, `BlockBody`, etc.).
+`Token.__init_subclass__` introspects the type parameter and builds a `valid_contexts` set for each token class.
+
+During `tokenize`, we never hard-code a list of token types. Instead, we:
+- look up all subclasses of `Token` via `descendants(Token)`,
+- filter them by whether the current context type appears in their `valid_contexts`,
+- then call `eat(src[i:], ctx)` on each allowed token class.
+
+Any token whose `eat` method returns a non-`None` length is considered a match.
+We keep only the longest matches, then resolve any remaining ambiguities via `token_precedence`.
+
+Each token class can also return a `Push` or `Pop` action from `action_on_eat`,
+which updates a stack of `Context` objects (for example when entering or
+leaving a block or string). This context stack controls which tokens are
+eligible to match at each position, and lets the tokenizer enforce context-
+sensitive rules (e.g. different tokens allowed inside strings vs. at the top
+level) in a purely declarative way.
+"""
+
 from .reporting import Span, Info, Error, SrcFile, Pointer
 from .utils import truncate, descendants, ordinalize, first_line
 from typing import TypeAlias, ClassVar, get_origin, get_args, Union, Protocol, Literal
@@ -12,6 +37,10 @@ import pdb
 ##### CHARACTER SETS AND USEFUL CONSTANTS #####
 
 whitespace = {' ', '\t', '\n', '\r'} # TBD if we need \f and \v
+line_comment_start: Literal['%'] = '%'
+block_comment_start: Literal['%{'] = '%{'
+block_comment_end: Literal['}%'] = '}%'
+
 
 # TODO: expand the list of valid identifier characters
 digits = set('0123456789')
@@ -98,7 +127,7 @@ legal_heredoc_delim_chars = (
 
 
 ##### CONTEXT CLASSES #####
-# i.e. current state the tokenizer is in
+# i.e. current state the tokenizer is in + any relevant state for that context
 
 @dataclass
 class Context(ABC):
@@ -125,7 +154,18 @@ class TypeBody(Context):
     opening_delim: 'LeftAngleBracket'
     default_base: BasePrefix = base10
 
+# convenient unions for common context combinations
+GeneralBodyContexts: TypeAlias = Root | BlockBody | TypeBody
+BodyWithoutTypeContexts: TypeAlias = Root | BlockBody
+BodyOrStringContexts: TypeAlias = Root | BlockBody | TypeBody | StringBody
+StringContexts: TypeAlias = StringBody | RawStringBody
+
+
 ##### CONTEXT ACTIONS #####
+# actions that can be taken when a token is eaten
+# - Push: push a new context onto the context stack
+# - Pop: pop the current context from the context stack
+# - None: keep the current context
 
 @dataclass
 class Push:
@@ -138,6 +178,37 @@ ContextAction: TypeAlias = Push | Pop | None
 
 @dataclass
 class Token[T:Context](ABC):
+    """
+    Base class for all tokens.
+
+    Each concrete token is a `Token[T]` where `T` is one or more `Context`
+    types (e.g. `Root`, `StringBody`, `BlockBody`). Subclasses declare where
+    they are valid by choosing appropriate type parameters; `__init_subclass__`
+    inspects those parameters and populates `valid_contexts` for the class.
+    
+    Example:
+        ```
+        class MyToken(Token[StringBody]): ...
+        ``` 
+        will only be considered when the current context is `StringBody`, while
+        ```
+        class AnotherToken(Token[GeneralBodyContexts]): ...
+        ``` 
+        will be considered in any of `Root`, `BlockBody`, or `TypeBody` contexts.
+
+    The main `tokenize` loop discovers token classes dynamically via
+    `descendants(Token)` and, at each position, filters them to those whose
+    `valid_contexts` contains the current context type. For each valid token
+    class it calls its `eat(src[i:], ctx)` method; eat methods return an integer length
+    to indicate a match (and how many characters it is) or `None` if no match. 
+    The tokenizer uses the longest match strategy to break ties, and may further
+    break ties using `token_precedence` if multiple longest matches have the same length.
+
+    After a token is instantiated, its `action_on_eat` result (`Push`, `Pop`,
+    or `None`) updates the context stack (if needed). This design lets token
+    classes declare both where they are legal and how they affect nesting
+    structure, without having to be manually registered in the tokenizer.
+    """
     src: str
     loc: Span
     valid_contexts: ClassVar[set[type[Context]]] = None # must be defined by subclass type parameters
@@ -148,13 +219,26 @@ class Token[T:Context](ABC):
     @staticmethod
     @abstractmethod
     def eat(src:str, ctx:T) -> int|None:
-        """Try to eat a token, return the number of characters eaten or None"""
+        """
+        Try to match a token
+        
+        Args:
+            src (str): the source string to match against, starting at the current position
+            ctx (Context): the current context mode the tokenizer is in
+        
+        Returns: 
+            int | None: The number of characters eaten if successful, or `None` if no match.
+        """
 
     def action_on_eat(self, ctx:T) -> ContextAction:
         """
-        Called when the token is eaten.
-        Return a new context to push onto the context stack or pop the current from the stack.
-        Return None to keep the current context.
+        If overridden, indicates actions to perform on the context stack when a token is eaten.
+
+        Args:
+            ctx (Context): the current context mode the tokenizer is in
+
+        Returns:
+            ContextAction: a `Push`, `Pop`, or `None` action to perform on the context stack.
         """
         return None
 
@@ -183,12 +267,9 @@ class Token[T:Context](ABC):
         raise ValueError(f"class {cls.__name__} does not parameterize Token with any contexts. Expected `class {cls.__name__}(Token[SomeContexts])`")
 
 
-
-##### TOKEN CLASSES #####
-GeneralBodyContexts: TypeAlias = Root | BlockBody | TypeBody
-BodyWithoutTypeContexts: TypeAlias = Root | BlockBody
-BodyOrStringContexts: TypeAlias = Root | BlockBody | TypeBody | StringBody
-StringContexts: TypeAlias = StringBody | RawStringBody
+##### TOKEN CLASSES: WHITESPACE AND COMMENTS #####
+# Tokens that consume layout-only characters or comments. These are valid in
+# general body contexts and usually don't affect the context stack.
 
 class WhiteSpace(Token[GeneralBodyContexts]):
     @staticmethod
@@ -204,8 +285,12 @@ class LineComment(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """line comments are any sequence of characters after a % until the end of the line"""
-        if not src.startswith('%') or src.startswith('%{'):
+        if not src.startswith(line_comment_start):
             return None
+        if src.startswith(block_comment_start):
+            return None # don't start a line comment if it is actually a block comment
+        
+        # consume until the end of the line
         i = 1
         while i < len(src) and src[i] != '\n':
             i += 1
@@ -220,17 +305,17 @@ class BlockComment(Token[GeneralBodyContexts]):
         """
         Block comments are of the form %{ ... }% and can be nested.
         """
-        if not src.startswith("%{"):
+        if not src.startswith(block_comment_start):
             return None
 
         openers: list[Span] = []
         i = 0
 
         while i < len(src):
-            if src[i:].startswith('%{'):
-                openers.append(Span(i, i + 2))
+            if src[i:].startswith(block_comment_start):
+                openers.append(Span(i, i + len(block_comment_start)))
                 i += 2
-            elif src[i:].startswith('}%'):
+            elif src[i:].startswith(block_comment_end):
                 openers.pop()
                 i += 2
 
@@ -257,6 +342,8 @@ class BlockComment(Token[GeneralBodyContexts]):
         error.throw()
 
 
+##### TOKEN CLASSES: IDENTIFIERS AND SYMBOLIC OPERATORS #####
+# Identifier-like things: plain identifiers and variants such as hashtags.
 
 class Identifier(Token[GeneralBodyContexts]):
     @staticmethod
@@ -323,7 +410,12 @@ class Hashtag(Token[GeneralBodyContexts]):
         return None
 
 
-# square brackets and parenthesis can mix and match for range syntax
+##### TOKEN CLASSES: DELIMITERS AND BLOCK / TYPE STRUCTURE #####
+# Bracket and brace tokens open and close `BlockBody` or `TypeBody` contexts.
+# Their `action_on_eat` methods push or pop the appropriate Context and also
+# record matching pairs to support better error messages on mismatches.
+
+# NOTE: square brackets and parenthesis can mix and match for range syntax, e.g. `[1..10)`
 class LeftSquareBracket(Token[GeneralBodyContexts]):
     matching_right: 'RightSquareBracket|RightParenthesis' = None
     
@@ -480,6 +572,11 @@ class RightAngleBracket(Token[TypeBody]):
         return Pop()
 
 
+##### TOKEN CLASSES: STRINGS AND STRING BODIES #####
+# String openers / closers and the tokens that consume within-string content.
+# These manage `StringBody` or `RawStringBody` contexts and handle normal
+# strings, raw strings, heredocs, and "rest-of-file" strings.
+
 class StringQuoteOpener(Token[GeneralBodyContexts]):
     matching_quote: 'StringQuoteCloser' = None
 
@@ -579,7 +676,7 @@ class StringEscape(Token[StringBody]):
 
         # hex/unicode 
         if escape_code in 'uUxX':
-            # parametric escape
+            # parametric escape handled separately
             if src[2:].startswith('{'): 
                 return None
             # verify that the next expected number of characters are hex digits
@@ -770,6 +867,10 @@ class RawHeredocStringOpener(Token[GeneralBodyContexts]):
         return self.src[3:-1]
 
 
+##### TOKEN CLASSES: NUMBERS #####
+# Based integer literals. The base may be given explicitly via a prefix or
+# implicitly via the current Context's `default_base` (e.g. inside certain
+# blocks). We record the resolved base prefix on the token in `action_on_eat`.
 
 class Number(Token[GeneralBodyContexts]):
     prefix: BasePrefix
@@ -811,6 +912,7 @@ class Number(Token[GeneralBodyContexts]):
         #doesn't modify the context stack
         return None
 
+
 ##### TOKEN CLASS PRECEDENCE #####
 # for now, just use a simple list of pairs specifying cases of A > B
 # TBD if we want a more global list, or what, but this should be good for now
@@ -821,7 +923,10 @@ token_precedence: set[tuple[type[Token], type[Token]]] = [
 ]
 
 
-##### BESPOKE ERROR CASES #####
+##### TOKENIZER ERROR CASES #####
+# Error-case helpers that recognize specific tokenizer situations (e.g. shift
+# operators in type parameters, ambiguous number vs identifier) and build
+# detailed error objects to report to the user.
 
 class NoMatchErrorCase(Protocol):
     def __call__(self, src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None: ...
@@ -914,7 +1019,9 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
     return error_stack
 
 
-##### TOKENIZER #####
+##### TOKENIZER MAIN LOOP #####
+# The main `tokenize` function drives the context-sensitive, declarative
+# tokenization process described in the module docstring.
 
 def tokenize(srcfile: SrcFile) -> list[Token]:
     ctx_stack: list[Context] = [Root(srcfile)]
@@ -1017,6 +1124,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     return tokens
 
 def tokens_to_report(tokens: list[Token], srcfile: SrcFile, show_whitespace: bool = False) -> Info:
+    """Convert a list of tokens to a report of the tokens consumed so far."""
     return Info(
         srcfile=srcfile,
         title="Tokens consumed so far",
