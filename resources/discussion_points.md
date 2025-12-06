@@ -3594,3 +3594,30 @@ possible delimiters-
 `$$$` is technically a valid identifier, but I think co-opting it for this could be ok
 
 slight problem, if I want to be able to juxtapose functions with `$$$`, `$` is a valid identifier character, so `my_func$$$` would just be parsed as a single identifier... either have to always parenthesize the function `(my_func)$$$` or perhaps we go with a delimiter that starts with `#` since that's currently not a valid identifier character `my_func#"`
+
+
+## unreachable
+have a keyword `unreachable` that basically is a compile-time check that that code path is unreachable. used to balance out cases where you want to actually do a check for explicitness, but it leaves a leftover case that is unreachable, but looks weird if you leave it off
+
+```
+if not src[1] in 'uUxX' return
+escape_code = src[1].lower
+
+expected_length = 2 + ( 
+    if escape_code =? 'u'
+        4
+    else if escape_code =? 'x'
+        2
+    else unreachable
+)
+```
+
+basically after the first if is false, the second one is guaranteed to be true, and we could just have it be a bare `else` block. But often we want to annotate the second case as well for clarity on what the two cases are. so we often end up with an awkward final block that is definitely unreachable, but the best one can typically do in other languages is comment it and raise some kind of exception. `unreachable` is an expression that basically forces the compiler to verify that that block can not be reached (perhaps if it can't be proven, we might have an `assert unreachable` which takes the programmer's word). Internally, the compiler can then be free to take out the final `else`, and replace the last `else if <condition>` with `else`, which improves performance while still allowing nice readability for developers.
+
+Note unreachable need not necessarily be in `if else if` cases, but basically anywhere where a code path is unreachable
+
+technically the above example might be more idiomatically accomplished with this:
+```
+expected_lenth = 2 + ['u'->4 'x'->2][escape_code]
+```
+but it is mainly for illustrating the point
