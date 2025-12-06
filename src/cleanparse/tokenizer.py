@@ -5,6 +5,7 @@ from types import UnionType
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from functools import cache
+from itertools import product
 
 import pdb
 
@@ -810,6 +811,15 @@ class Number(Token[GeneralBodyContexts]):
         #doesn't modify the context stack
         return None
 
+##### TOKEN CLASS PRECEDENCE #####
+# for now, just use a simple list of pairs specifying cases of A > B
+# TBD if we want a more global list, or what, but this should be good for now
+# CAUTION: ensure no cycles in precedence levels
+token_precedence: set[tuple[type[Token], type[Token]]] = [
+    (Symbol, Identifier),
+    # TODO: other cases...
+]
+
 
 ##### BESPOKE ERROR CASES #####
 
@@ -927,14 +937,24 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
         longest_match_length = matches[0][0] if len(matches) > 0 else 0
         matches = [match for match in matches if match[0] == longest_match_length]
 
-        # if there are multiple matches, TODO: resolve with precedence
+        # filter matches by precedence if any precedence rules apply
+        match_types = [match[1] for match in matches]
         if len(matches) > 1:
+            to_filter: set[type[Token]] = set()
+            for Higher, Lower in token_precedence:
+                if Higher in match_types and Lower in match_types:
+                    to_filter.add(Lower)
+            matches = [match for match in matches if match[1] not in to_filter]
+
+        # if there are still multiple matches
+        if len(matches) > 1:
+            # see if it matches a known error case
             for multiple_matched_err_case in known_multiple_matched_error_cases:
                 error = multiple_matched_err_case(src, i, tokens, ctx_stack, ctx_history, matches)
                 if error:
                     error.throw()
             
-            # fallback error (potentially can recover if we want to e.g. allow amgiguities to carry forward, etc.)
+            # fallback error (TBD, but potentially can recover if we want to e.g. allow ambiguities to carry forward, etc.)
             error = Error(
                 srcfile=srcfile,
                 title=f"multiple tokens matched. Context={ctx.__class__.__name__}",
@@ -996,11 +1016,15 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     
     return tokens
 
-def tokens_to_report(tokens: list[Token], srcfile: SrcFile) -> Info:
+def tokens_to_report(tokens: list[Token], srcfile: SrcFile, show_whitespace: bool = False) -> Info:
     return Info(
         srcfile=srcfile,
         title="Tokens consumed so far",
-        pointer_messages=[Pointer(span=token.loc, message=f"{token.__class__.__name__}", color_id=hash(token.__class__)) for token in tokens],
+        pointer_messages=[Pointer(
+            span=token.loc,
+            message=f"{token.__class__.__name__}",
+            color_id=hash(token.__class__)
+        ) for token in tokens if show_whitespace or not isinstance(token, WhiteSpace)],
     )
 
 def test():
