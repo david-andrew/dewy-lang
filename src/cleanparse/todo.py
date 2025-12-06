@@ -9,10 +9,10 @@
 [x] tokenize integers
 
 ------ tokenizer features ------
-[ ] #"EOF" for heredoc strings `#"`, <delimiter>, `"`, <string body>, <delimiter>
+[x] #"EOF" for heredoc strings `#"`, <delimiter>, `"`, <string body>, <delimiter>
     - #r"EOF" for raw heredoc strings
     - delimiter can be any identifier character as well as any symbol character except for quotes `"`, `'`
-[ ] fix string escapes to include unicode and hex escapes correctly
+[x] fix string escapes to include unicode and hex escapes correctly
     - `\x{...}` where inside interpolation is either a sequence of digits (assumed to be hex unless otherwise prefixed), or any other arbitrary expression that evaluates to an integer
     - `\u{...}` where inside interpolation is either a sequence of digits (assumed to be hex unless otherwise prefixed), or any other arbitrary expression that evaluates to an integer
 [ ] select larger list of symbols to include
