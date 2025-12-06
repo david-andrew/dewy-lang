@@ -26,7 +26,8 @@ class RawStringBody(Context):
 
 @dataclass
 class BlockBody(Context):
-    opening_delim: 'LeftSquareBracket|LeftParenthesis|LeftCurlyBrace'
+    opening_delim: 'LeftSquareBracket|LeftParenthesis|LeftCurlyBrace|ParametricStringEscape'
+    default_base: 'BasePrefix' = '0d'
  
 @dataclass
 class TypeBody(Context):
@@ -63,7 +64,9 @@ decoration_characters = (superscripts | subscripts)
 # note that the prefix is case insensitive, so call .lower() when matching the prefix
 # numbers may have _ as a separator (if _ is not in the set of digits)
 BasePrefix: TypeAlias = Literal['0b', '0t', '0q', '0s', '0o', '0d', '0z', '0x', '0u', '0r', '0g']
-number_bases: dict[BasePrefix, set[str]] = {
+base10: BasePrefix = '0d'
+base16: BasePrefix = '0x'
+base_digits: dict[BasePrefix, set[str]] = {
     '0b': {*'01'},  # binary
     '0t': {*'012'},  # ternary
     '0q': {*'0123'},  # quaternary
@@ -76,11 +79,24 @@ number_bases: dict[BasePrefix, set[str]] = {
     '0r': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'},  # base 36 (hexatrigesimal)
     '0g': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!$'},  # base 64 (tetrasexagesimal)
 }
+base_radixes: dict[BasePrefix, int] = {
+    '0b': 2,
+    '0t': 3,
+    '0q': 4,
+    '0s': 6,
+    '0o': 8,
+    '0d': 10,
+    '0z': 12,
+    '0x': 16,
+    '0u': 32,
+    '0r': 36,
+    '0g': 64,
+}
 
 @cache
 def is_based_digit(digit: str, base: str) -> bool:
     """determine if a digit is valid in a given base"""
-    digits = number_bases[base]
+    digits = base_digits[base]
     return digit in digits
 
 
@@ -324,20 +340,25 @@ class RightSquareBracket(Token[BlockBody]):
         return None
     
     def action_on_eat(self, ctx:BlockBody):
-        if isinstance(ctx.opening_delim, LeftCurlyBrace):
+        if isinstance(ctx.opening_delim, (LeftSquareBracket, LeftParenthesis)):
+            ctx.opening_delim.matching_right = self
+            self.matching_left = ctx.opening_delim
+            return Pop()
+
+        if isinstance(ctx.opening_delim, (LeftCurlyBrace, ParametricStringEscape)):
             error = Error(
                 srcfile=ctx.srcfile,
-                title=f"Mismatched opening and closing braces",
+                title=f"Mismatched opening and closing delimiters",
                 pointer_messages=[
-                    Pointer(span=ctx.opening_delim.loc, message=f"Opening brace"),
-                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `}}`"),
+                    Pointer(span=ctx.opening_delim.loc, message=f"Opening delimiter"),
+                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `}}` not `{self.src}`"),
                 ],
                 hint=f"Did you forget a closing `}}`?"
             )
             error.throw()
-        ctx.opening_delim.matching_right = self
-        self.matching_left = ctx.opening_delim
-        return Pop()
+
+        # unreachable
+        raise ValueError(f"INTERNAL ERROR: unhandled opening delimiter that was closed with a RightSquareBracket: {ctx.opening_delim=}")            
 
 
 class LeftParenthesis(Token[GeneralBodyContexts]):
@@ -362,20 +383,25 @@ class RightParenthesis(Token[BlockBody]):
         return None
     
     def action_on_eat(self, ctx:BlockBody):
-        if isinstance(ctx.opening_delim, LeftCurlyBrace):
+        if isinstance(ctx.opening_delim, (LeftSquareBracket, LeftParenthesis)):
+            ctx.opening_delim.matching_right = self
+            self.matching_left = ctx.opening_delim
+            return Pop()
+        
+        if isinstance(ctx.opening_delim, (LeftCurlyBrace, ParametricStringEscape)):
             error = Error(
                 srcfile=ctx.srcfile,
-                title=f"Mismatched opening and closing braces",
+                title=f"Mismatched opening and closing delimiters",
                 pointer_messages=[
-                    Pointer(span=ctx.opening_delim.loc, message=f"Opening parenthesis"),
-                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `}}`"),
+                    Pointer(span=ctx.opening_delim.loc, message=f"Opening delimiter"),
+                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `}}` not `{self.src}`"),
                 ],
                 hint=f"Did you forget a closing `}}`?"
             )
             error.throw()
-        ctx.opening_delim.matching_right = self
-        self.matching_left = ctx.opening_delim
-        return Pop()
+        
+        # unreachable
+        raise ValueError(f"INTERNAL ERROR: unhandled opening delimiter that was closed with a RightParenthesis: {ctx.opening_delim=}")            
 
 
 class LeftCurlyBrace(Token[BodyOrStringContexts]):
@@ -400,21 +426,25 @@ class RightCurlyBrace(Token[BlockBody]):
         return None
     
     def action_on_eat(self, ctx:BlockBody):
+        if isinstance(ctx.opening_delim, (LeftCurlyBrace, ParametricStringEscape)):
+            ctx.opening_delim.matching_right = self
+            self.matching_left = ctx.opening_delim
+            return Pop()
+        
         if isinstance(ctx.opening_delim, (LeftSquareBracket, LeftParenthesis)):
-            term = 'bracket' if isinstance(ctx.opening_delim, LeftSquareBracket) else 'parenthesis'
             error = Error(
                 srcfile=ctx.srcfile,
-                title=f"Mismatched opening and closing brackets/parentheses",
+                title=f"Mismatched opening and closing delimiters",
                 pointer_messages=[
-                    Pointer(span=ctx.opening_delim.loc, message=f"Opening {term}"),
+                    Pointer(span=ctx.opening_delim.loc, message=f"Opening delimiter"),
                     Pointer(span=self.loc, message=f"Mismatched closer. Expected `]` or `)`"),
                 ],
                 hint=f"Did you forget a closing `)` or `]`?"
             )
             error.throw()
-        ctx.opening_delim.matching_right = self
-        self.matching_left = ctx.opening_delim
-        return Pop()
+        
+        # unreachable
+        raise ValueError(f"INTERNAL ERROR: unhandled opening delimiter that was closed with a RightCurlyBrace: {ctx.opening_delim=}")            
 
 
 class LeftAngleBracket(Token[GeneralBodyContexts]):
@@ -454,19 +484,6 @@ class StringQuoteOpener(Token[GeneralBodyContexts]):
         if src[0] not in '\'"':
             return None
         
-        # # in a string body, the only kind of quote that can be matched is the matching closing quote
-        # if isinstance(ctx, StringBody):
-        #     if not isinstance(ctx.opening_quote, StringQuote): return None
-        #     if not src.startswith(ctx.opening_quote.src): return None
-        #     return len(ctx.opening_quote.src)
-        
-        # # in a raw string body, see if we match the opening quote (minus the r prefix)
-        # if isinstance(ctx, RawStringBody):
-        #     if not isinstance(ctx.opening_quote, RawStringQuote): return None
-        #     if not src.startswith(ctx.opening_quote.src[1:]): return None
-        #     return len(ctx.opening_quote.src[1:])
-
-
         # match opening quotes
         i = 1
         quote = src[0]
@@ -480,42 +497,7 @@ class StringQuoteOpener(Token[GeneralBodyContexts]):
         # otherwise, eat the entire opening quote
         return i
 
-
-        # # match 2 quotes at a time
-        # i = 1
-        # quote = src[0]
-        # while src[i:].startswith(quote * 2):
-        #     i += 2
-        
-        # # if total is an even, this indicates empty string
-        # # eat just the opening quote
-        # if src[i:].startswith(quote):
-        #     return (i + 1) // 2
-
-        # return i
-    
-    def action_on_eat(self, ctx:GeneralBodyContexts) -> ContextAction:
-        # inside a string body, a quote closes the string
-        # if isinstance(ctx, StringBody):
-        #     assert isinstance(ctx.opening_quote, StringQuote), f"INTERNAL ERROR: unexpected closing quote type that matched an opening StringQuote: (closer){self=}, (opener){ctx.opening_quote=}"
-        #     if ctx.opening_quote.src == self.src:
-        #         self.matching_quote = ctx.opening_quote
-        #         self.matching_quote.matching_quote = self
-        #         return Pop()
-        #     # unreachable
-        #     raise ValueError(f"INTERNAL ERROR: attempted to eat non-matching StringQuote in a string body, but can only match the closing quote. {ctx.opening_quote.src=} {self.src=}")
-        
-        # # inside a raw string body, a quote closes the raw string
-        # if isinstance(ctx, RawStringBody):
-        #     assert isinstance(ctx.opening_quote, RawStringQuote), f"INTERNAL ERROR: unexpected closing quote type that matched an opening RawStringQuote: (closer){self=}, (opener){ctx.opening_quote=}"
-        #     if ctx.opening_quote.src[1:] == self.src:
-        #         self.matching_quote = ctx.opening_quote
-        #         self.matching_quote.matching_quote = self
-        #         return Pop()
-        #     # unreachable
-        #     raise ValueError(f"INTERNAL ERROR: attempted to eat RawStringQuote in a raw string body, but can only match the closing quote. {ctx.opening_quote.src[1:]=} {self.src=}")
-        
-        return Push(StringBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:GeneralBodyContexts) -> ContextAction: return Push(StringBody(ctx.srcfile, self))
 
 class StringQuoteCloser(Token[StringContexts]):
     matching_quote: 'StringQuoteOpener|RawStringQuoteOpener' = None
@@ -557,6 +539,7 @@ class StringEscape(Token[StringBody]):
     def eat(src:str, ctx:StringBody) -> int|None:
         r"""
         Eat an escape sequence, return the number of characters eaten
+        
         Escape sequences must be either a known escape sequence:
         - \n newline
         - \r carriage return
@@ -566,18 +549,18 @@ class StringEscape(Token[StringBody]):
         - \v vertical tab
         - \a alert
         - \0 null
-        - (TODO) \u#### or \U#### for a unicode codepoints. Must be four hex digits [0-9a-fA-F]
-        - (TODO) \u{##..##} or \U{##..##} for an arbitrary unicode character. Inside the braces defaults to hex, and users can get decimal by using the 0d prefix
-        - (TODO) \x## or \X## for a raw byte value. Must be two hex digits [0-9a-fA-F]
-        - (TODO) \x{##..##} or \X{##..##} for arbitrary byte sequences. Same idea as unicode--defaults to hex, and 0d prefix for decimal
+        - \x## or \X## for a raw byte value. Must be two hex digits [0-9a-fA-F]
+        - \u#### or \U#### for a unicode codepoints. Must be four hex digits [0-9a-fA-F]
         
-        - catch all case: \ followed by any character not mentioned above. Converts to just the literal character itself without the backslash
-          This is how to insert characters that have special meaning in the string, e.g.
-          - \' converts to just a single quote '
-          - \{ converts to just a single open brace {
-          - \\ converts to just a single backslash \
-          - \m converts to just a single character m
-          - etc.
+        or the catch all case: 
+        - \ followed by any character not mentioned above converts to just the literal character itself without the backslash
+        This is how to insert characters that have special meaning in the string, e.g.
+        - \' converts to just a single quote '
+        - \{ converts to just a single open brace {
+        - \\ converts to just a single backslash \
+        - \m converts to just a single character m
+        - \  converts to just a single <space> character
+        - etc.
         """
         if not src.startswith('\\'):
             return None
@@ -585,21 +568,51 @@ class StringEscape(Token[StringBody]):
         if len(src) == 1:
             # TODO: make this a full error report. incomplete escape + unterminated string + anything else on the stack
             raise ValueError("unterminated escape sequence")
+        
+        escape_code = src[1]
 
-        if src[1] in 'uU':
+        # hex/unicode 
+        if escape_code in 'uUxX':
+            # parametric escape
+            if src[2:].startswith('{'): 
+                return None
+            # verify that the next expected number of characters are hex digits
+            # hex takes 2 digits, unicode takes 4
+            expected_len = 2 + (4 if escape_code in 'uU' else 2)
             i = 2
-            while i < len(src) and is_based_digit(src[i], '0x'):
+            while i < len(src) and i < expected_len and is_based_digit(src[i], base16):
                 i += 1
-            if i == 2:
-                raise ValueError("invalid unicode escape sequence")
+            if i != expected_len:
+                # TODO: full error report
+                raise ValueError("invalid hex escape sequence")
             return i
 
-        # if src[1] in 'nrtbfva0':
-        #     return 2
-
-        # all other escape sequences (known or unknown) are just a single character
+        # all other escape sequences (known or catch all) are just a single escape code
         return 2
 
+
+class ParametricStringEscape(Token[StringBody]):
+    matching_right: 'RightCurlyBrace' = None
+    @staticmethod
+    def eat(src:str, ctx:StringBody) -> int|None:
+        r"""
+        - \u{##..##} or \U{##..##} for an arbitrary unicode character. Inside the braces defaults to hex, and users can get decimal by using the 0d prefix
+        - \x{##..##} or \X{##..##} for arbitrary byte sequences. Same idea as unicode--defaults to hex, and 0d prefix for decimal
+        
+        The block can also be an arbitrary expression, so long as it evaluates to an integer
+        """
+        if len(src) < 3:
+            return None
+        if src[0] != '\\':
+            return None
+        if src[1] not in 'uUxX':
+            return None
+        if src[2] != '{':
+            return None
+        
+        return 3
+    
+    def action_on_eat(self, ctx:StringBody): return Push(BlockBody(ctx.srcfile, self, base16))
 
 class RawStringQuoteOpener(Token[GeneralBodyContexts]):
     matching_quote: 'StringQuoteCloser' = None  # raw strings are closed by regular quotes
@@ -759,7 +772,7 @@ class Number(Token[GeneralBodyContexts]):
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """a based number is a sequence of 1 or more digits, optionally preceded by a (case-insensitive) base prefix"""
         # try all known bases
-        for base, digits in number_bases.items():
+        for base, digits in base_digits.items():
             # check if the src starts with the base prefix
             if src[:2].casefold().startswith(base):
                 i = 2
@@ -771,9 +784,10 @@ class Number(Token[GeneralBodyContexts]):
                     i += 1
                 return i
         
-        # try decimal with no prefix
+        # try number with no prefix
+        base = ctx.default_base if isinstance(ctx, BlockBody) else base10
+        digits = base_digits[base]
         i = 0
-        digits = number_bases['0d']
         if not (i < len(src) and src[i] in digits):
             return None
         # consume digits or underscores
@@ -783,7 +797,7 @@ class Number(Token[GeneralBodyContexts]):
         return i or None
     
     def action_on_eat(self, ctx:GeneralBodyContexts):
-        if self.src[:2].casefold() in number_bases:
+        if self.src[:2].casefold() in base_digits:
             self.prefix = self.src[:2].casefold()
 
         #doesn't modify the context stack
@@ -792,8 +806,11 @@ class Number(Token[GeneralBodyContexts]):
 
 ##### Bespoke error cases #####
 
-class KnownErrorCase(Protocol):
+class NoMatchErrorCase(Protocol):
     def __call__(self, src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None: ...
+
+class MultipleMatchedErrorCase(Protocol):
+    def __call__(self, src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context], matches: list[tuple[int, type[Token]]]) -> Error|None: ...
 
 def shift_operator_inside_type_param(src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None:
     if len(ctx_history) > 0 and isinstance(ctx_history[-1], TypeBody) and isinstance(tokens[-1], RightAngleBracket) and src[i:].startswith('>'):
@@ -806,9 +823,34 @@ def shift_operator_inside_type_param(src: str, i: int, tokens: list[Token], ctx_
             ],
             hint=f"Shift operations may not be used directly within a type parameter.\nPerhaps you meant to wrap the expression in parentheses\ne.g. `something<(a >> b)>` instead of `something<a >> b>`"
         )
+def ambiguous_number_or_identifier_in_parametric_string_escape(src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context], matches: list[tuple[int, type[Token]]]) -> Error|None:
+    ctx = ctx_stack[-1]
+    match_types = {match_type for _, match_type in matches}
+    
+    if (
+        isinstance(ctx, BlockBody)
+        and base_radixes[ctx.default_base] > 10 # anything with more than 10 digits could use letters as digits
+        and len(matches) == 2
+        and match_types == {Number, Identifier}
+    ):
+        match_len = matches[0][0]
+        match_span = Span(i, i+match_len)
+        radix = base_radixes[ctx.default_base]
+        sequence = src[i:i+match_len]
+        
+        return Error(
+            srcfile=ctx.srcfile,
+            title=f"Ambiguous number or identifier in block body",
+            pointer_messages=[
+                Pointer(span=match_span, message=f"could be a base-{radix} number or an identifier"),
+            ],
+            hint=f"The current block is in base-{radix} mode.\nThe sequence `{sequence}` is both valid as a base-{radix} number and as an identifier.\nTo indicate a number:\n- add a leading `0` e.g. `0{sequence}`\n- add a base prefix e.g. `{ctx.default_base}{sequence}`\nTo indicate an identifier:\n- wrap in parentheses, e.g. `({sequence})`"
+        )
+known_multiple_matched_error_cases: list[NoMatchErrorCase] = [
+    ambiguous_number_or_identifier_in_parametric_string_escape,
+]
 
-
-known_error_cases: list[KnownErrorCase] = [
+known_no_match_error_cases: list[NoMatchErrorCase] = [
     shift_operator_inside_type_param,
     # TODO: other known error cases
 ]
@@ -880,6 +922,12 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
 
         # if there are multiple matches, TODO: resolve with precedence
         if len(matches) > 1:
+            for multiple_matched_err_case in known_multiple_matched_error_cases:
+                error = multiple_matched_err_case(src, i, tokens, ctx_stack, ctx_history, matches)
+                if error:
+                    error.throw()
+            
+            # fallback error (potentially can recover if we want to e.g. allow amgiguities to carry forward, etc.)
             error = Error(
                 srcfile=srcfile,
                 title=f"multiple tokens matched. Context={ctx.__class__.__name__}",
@@ -890,8 +938,8 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
         
         if len(matches) == 0:
             # check for known error cases
-            for known_err_case in known_error_cases:
-                error = known_err_case(src, i, tokens, ctx_stack, ctx_history)
+            for no_match_err_case in known_no_match_error_cases:
+                error = no_match_err_case(src, i, tokens, ctx_stack, ctx_history)
                 if error:
                     error.throw()
             # TODO: probably a better way to handle would be for checking if any upper contexts support the next token
