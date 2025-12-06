@@ -1,0 +1,10 @@
+
+const SYSCALL_WRITE = 1
+const STDOUT = 1
+my_str = 'hello from dewy!'
+
+
+loop i in 1..10 (
+    __syscall3__(SYSCALL_WRITE STDOUT my_str my_str._bytes_length)
+    i += 1
+)
