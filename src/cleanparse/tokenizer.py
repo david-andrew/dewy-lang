@@ -8,41 +8,7 @@ from functools import cache
 
 import pdb
 
-##### CONTEXT CLASSES #####
-
-@dataclass
-class Context(ABC):
-    srcfile: SrcFile
-
-class Root(Context): ...
-
-@dataclass
-class StringBody(Context):
-    opening_quote: 'StringQuoteOpener|RestOfFileStringQuote|HeredocStringOpener'
-
-@dataclass
-class RawStringBody(Context):
-    opening_quote: 'RawStringQuoteOpener|RawHeredocStringOpener'
-
-@dataclass
-class BlockBody(Context):
-    opening_delim: 'LeftSquareBracket|LeftParenthesis|LeftCurlyBrace|ParametricStringEscape'
-    default_base: 'BasePrefix' = '0d'
- 
-@dataclass
-class TypeBody(Context):
-    opening_delim: 'LeftAngleBracket'
-
-
-##### Context Actions #####
-
-@dataclass
-class Push:
-    ctx: Context
-class Pop: ...
-
-ContextAction: TypeAlias = Push | Pop | None
-
+##### CHARACTER SETS AND USEFUL CONSTANTS #####
 
 whitespace = {' ', '\t', '\n', '\r'} # TBD if we need \f and \v
 
@@ -129,6 +95,45 @@ legal_heredoc_delim_chars = (
     set(''.join(symbolic_operators + shift_operators + ['\\#%()[]{} '])) #include \, #, %, (), [], {}, and ` ` (<space>) manually since currently not in any symbol or identifier characters
 )
 
+
+##### CONTEXT CLASSES #####
+# i.e. current state the tokenizer is in
+
+@dataclass
+class Context(ABC):
+    srcfile: SrcFile
+
+class Root(Context):
+    default_base: BasePrefix = base10
+
+@dataclass
+class StringBody(Context):
+    opening_quote: 'StringQuoteOpener|RestOfFileStringQuote|HeredocStringOpener'
+
+@dataclass
+class RawStringBody(Context):
+    opening_quote: 'RawStringQuoteOpener|RawHeredocStringOpener'
+
+@dataclass
+class BlockBody(Context):
+    opening_delim: 'LeftSquareBracket|LeftParenthesis|LeftCurlyBrace|ParametricStringEscape'
+    default_base: BasePrefix = base10
+ 
+@dataclass
+class TypeBody(Context):
+    opening_delim: 'LeftAngleBracket'
+    default_base: BasePrefix = base10
+
+##### CONTEXT ACTIONS #####
+
+@dataclass
+class Push:
+    ctx: Context
+class Pop: ...
+
+ContextAction: TypeAlias = Push | Pop | None
+
+##### TOKEN CLASSES AND EATING LOGIC #####
 
 @dataclass
 class Token[T:Context](ABC):
@@ -766,7 +771,7 @@ class RawHeredocStringOpener(Token[GeneralBodyContexts]):
 
 
 class Number(Token[GeneralBodyContexts]):
-    prefix: BasePrefix | None = None
+    prefix: BasePrefix
     
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
@@ -799,12 +804,14 @@ class Number(Token[GeneralBodyContexts]):
     def action_on_eat(self, ctx:GeneralBodyContexts):
         if self.src[:2].casefold() in base_digits:
             self.prefix = self.src[:2].casefold()
+        else:
+            self.prefix = ctx.default_base
 
         #doesn't modify the context stack
         return None
 
 
-##### Bespoke error cases #####
+##### BESPOKE ERROR CASES #####
 
 class NoMatchErrorCase(Protocol):
     def __call__(self, src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None: ...
@@ -846,13 +853,13 @@ def ambiguous_number_or_identifier_in_parametric_string_escape(src: str, i: int,
             ],
             hint=f"The current block is in base-{radix} mode.\nThe sequence `{sequence}` is both valid as a base-{radix} number and as an identifier.\nTo indicate a number:\n- add a leading `0` e.g. `0{sequence}`\n- add a base prefix e.g. `{ctx.default_base}{sequence}`\nTo indicate an identifier:\n- wrap in parentheses, e.g. `({sequence})`"
         )
+
+# TODO: other known error cases
 known_multiple_matched_error_cases: list[NoMatchErrorCase] = [
     ambiguous_number_or_identifier_in_parametric_string_escape,
 ]
-
 known_no_match_error_cases: list[NoMatchErrorCase] = [
     shift_operator_inside_type_param,
-    # TODO: other known error cases
 ]
 
 
@@ -877,7 +884,7 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
                     Pointer(span=Span(max_pos, max_pos), message=f"End without closing quote"),
                 ], hint=f"Did you forget a `{o.src[1:]}`?"))
             case BlockBody(opening_delim=o):
-                possible_closers = '`}`' if isinstance(o, LeftCurlyBrace) else '`]` or `)`'
+                possible_closers = '`}`' if isinstance(o, (LeftCurlyBrace, ParametricStringEscape)) else '`]` or `)`'
                 error_stack.append(Error(srcfile, title=f"Missing block closing delimiter", pointer_messages=[
                     Pointer(span=o.loc, message=f"Block opened here"),
                     Pointer(span=Span(o.loc.stop, max_pos), message=f"Block body"),
