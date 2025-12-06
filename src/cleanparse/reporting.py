@@ -245,9 +245,13 @@ class Report:
         row_idx, col_idx = sf.offset_to_row_col(first_index)
         
         segments = self._prepare_segments(theme.pointer_palette)
-        line_order = sorted({seg.line_idx for seg in segments})
-        if not line_order:
+        lines_with_segments = sorted({seg.line_idx for seg in segments})
+        if not lines_with_segments:
             line_order = [row_idx]
+        else:
+            min_line = min(lines_with_segments)
+            max_line = max(lines_with_segments)
+            line_order = list(range(min_line, max_line + 1))
         max_line_no = max(line_order) + 1
         line_no_width = len(str(max_line_no))
         gutter_pad = " " * max(0, line_no_width - 1)
