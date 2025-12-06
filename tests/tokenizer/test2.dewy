@@ -1,0 +1,38 @@
+#"<<<CLOSING DELIMITER>>>""apple
+
+\xff\XA2\u123f\Ubf2a
+\u{(ffafabac123fad)}
+\u{ffafabac123fad}  % ambiguous error. can't tell if its a number of an identifier
+\x{0ffafabac123fad}
+\U{43 + 10}  % TODO: these literals are interpreted as base16, not base10... perhaps syntax highlighting should give literals of different bases different colors
+\u{apple * fortune}
+
+"{"{"{"{"{"{""}"}"}"}"}"}"
+
+%1x+r'c'"c{}"[]<>()%{}%%
+
+<<<CLOSING DELIMITER>>>
+
+%{
+
+% space-number, space-iden, space-symbol, space-quote, space-comment
+% number-iden, number-symbol, number-quote, number-comment
+% iden-symbol, iden-quote, iden-comment
+% symbol-quote, symbol-number, symbol
+
+ 10
+ x
+ +
+ "hello"
+ %comment
+10x
+10+
+10'hello'
+10%comment
+x+
+x"hello"
+x%comment
++'hello'
++10
++%comment
+}%
