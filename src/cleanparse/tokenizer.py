@@ -50,7 +50,7 @@ misc = set('_?!$°')
 # see https://symbl.cc/en/collections/superscript-and-subscript-letters/ for more sub/superscript characters
 subscripts   = set('₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₔₕₖₗₘₙₚₛₜ')
 superscripts = set('⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴮᴰᴱᴲᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᵐᵊᶿᵡꜝʱʴʵʶˠ')
-primes = set('′″‴⁗') # suggested to actually only have the single prime, and allow it anywhere just like other decorations
+primes = set('′″‴⁗') # TODO: suggested to actually only have the single prime, and allow it anywhere just like other decorations
 
 
 start_characters = (alpha | greek | misc)
@@ -670,8 +670,7 @@ class StringEscape(Token[StringBody]):
             return None
 
         if len(src) == 1:
-            # TODO: make this a full error report. incomplete escape + unterminated string + anything else on the stack
-            raise ValueError("unterminated escape sequence")
+            return None # incomplete_string_escape error
         
         escape_code = src[1]
 
@@ -687,8 +686,9 @@ class StringEscape(Token[StringBody]):
             while i < len(src) and i < expected_len and is_based_digit(src[i], base16):
                 i += 1
             if i != expected_len:
-                # TODO: full error report
-                raise ValueError("invalid hex escape sequence")
+                return None  # invalid_width_hex_escape error
+                # # TODO: full error report
+                # raise ValueError("invalid hex escape sequence")
             return i
 
         # all other escape sequences (known or catch all) are just a single escape code
@@ -970,12 +970,63 @@ def ambiguous_number_or_identifier_in_parametric_string_escape(src: str, i: int,
             hint=f"The current block is in base-{radix} mode.\nThe sequence `{sequence}` is both valid as a base-{radix} number and as an identifier.\nTo indicate a number:\n- add a leading `0` e.g. `0{sequence}`\n- add a base prefix e.g. `{ctx.default_base}{sequence}`\nTo indicate an identifier:\n- wrap in parentheses, e.g. `({sequence})`"
         )
 
+def incomplete_string_escape(src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None:
+    r"""Unterminated escape sequence in a string body. Can only happen if the \ is the last character in the string"""
+    ctx = ctx_stack[-1]
+    if not isinstance(ctx, StringBody):
+        return None
+    if not src[i:] == '\\':  # source ended with a backslash
+        return None
+
+    return Error(
+        srcfile=ctx.srcfile,
+        title="Incomplete escape sequence at end of string",
+        pointer_messages=Pointer(span=Span(i, i+1), message="incomplete escape sequence"),
+        hint="Finish the escape sequence (e.g. `\\n`, `\\xFF`, `\\u1234`) or remove the trailing backslash.",
+    )
+
+def invalid_width_hex_escape(src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None:
+    ctx = ctx_stack[-1]
+    if not isinstance(ctx, StringBody):
+        return None
+
+    if src[i:i+2] not in ('\\x', '\\X', '\\u', '\\U'):
+        return None
+    
+    # check the number of hex digits in the escape sequence
+    mode: Literal['x', 'u'] = src[i+1].lower()
+    expected_len = 2 + (4 if mode == 'u' else 2)
+    name = 'unicode' if mode == 'u' else 'hex'
+    j = 2
+    while i+j < len(src) and j < expected_len and is_based_digit(src[i+j], base16):
+        j += 1
+    if j == expected_len:
+        return None
+    remaining_expected = expected_len - j
+    found_plural = 's' if j-2 > 1 else ''
+    expected_plural = 's' if remaining_expected > 1 else ''
+    
+    example_digits = 'ff' if mode == 'x' else '38f6'
+    example_code = src[i:i+j] + example_digits[:expected_len-j]
+    return Error(
+        srcfile=ctx.srcfile,
+        title=f"Invalid width {name} escape sequence",
+        pointer_messages=[
+            Pointer(span=Span(i, i+2), message=f"{name.capitalize()} escape opened here"),
+            *([Pointer(span=Span(i+2, i+j), message=f"found {j-2} hex digit{found_plural}")] if j>2 else []),
+            Pointer(span=Span(i+j, i+j), message=f"Expected {remaining_expected} more hex digit{expected_plural}"),
+        ],
+        hint=f"{name.capitalize()} escape sequence must be {expected_len-2} characters long. E.g. `{example_code}`"
+    )
+
 # TODO: other known error cases
-known_multiple_matched_error_cases: list[NoMatchErrorCase] = [
+known_multiple_matched_error_cases: list[MultipleMatchedErrorCase] = [
     ambiguous_number_or_identifier_in_parametric_string_escape,
 ]
 known_no_match_error_cases: list[NoMatchErrorCase] = [
     shift_operator_inside_type_param,
+    incomplete_string_escape,
+    invalid_width_hex_escape,
 ]
 
 
@@ -1031,6 +1082,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     src = srcfile.body
 
     i = 0
+    error_count = 0
     while i < len(src):
         # try to eat all allowed tokens at the current position
         ctx = ctx_stack[-1]
@@ -1054,47 +1106,50 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
                     to_filter.add(Lower)
             matches = [match for match in matches if match[1] not in to_filter]
 
-        # if there are still multiple matches
+        # if there are still multiple matches, it's an error
         if len(matches) > 1:
             # see if it matches a known error case
-            for multiple_matched_err_case in known_multiple_matched_error_cases:
-                error = multiple_matched_err_case(src, i, tokens, ctx_stack, ctx_history, matches)
-                if error:
-                    error.throw()
+            errors = [error_case(src, i, tokens, ctx_stack, ctx_history, matches) for error_case in known_multiple_matched_error_cases]
+            errors = list(filter(None, errors))
+            if len(errors) > 0:
+                error_count += len(errors)
+                for error in errors:
+                    print(error)
+                break
             
-            # fallback error (TBD, but potentially can recover if we want to e.g. allow ambiguities to carry forward, etc.)
+            # fallback generic error
+            error_count += 1
             error = Error(
                 srcfile=srcfile,
                 title=f"multiple tokens matched. Context={ctx.__class__.__name__}",
                 pointer_messages=Pointer(span=Span(i, i+longest_match_length), message=f"multiple tokens matched at {i}..{i+longest_match_length}: {matches=}"),
                 hint="TODO: tokenizer implementation is not yet implemented for multiple token matches"
             )
-            error.throw()
+            print(error)    
+            break
         
+        # if there are no matches, it's an error
         if len(matches) == 0:
-            # check for known error cases
-            for no_match_err_case in known_no_match_error_cases:
-                error = no_match_err_case(src, i, tokens, ctx_stack, ctx_history)
-                if error:
-                    error.throw()
+            # see if it matches a known error case
+            errors = [error_case(src, i, tokens, ctx_stack, ctx_history) for error_case in known_no_match_error_cases]
+            errors = list(filter(None, errors))
+            if len(errors) > 0:
+                error_count += len(errors)
+                for error in errors:
+                    print(error)
+                break     
             # TODO: probably a better way to handle would be for checking if any upper contexts support the next token
             # potentially could use as a trick to recover/resynchronize and parse more tokens
             # TBD: what about the other way around, e.g. if the user didn't open a context they are trying to close?
             # could check what contexts support the next token--starts to get pretty heavy / complex
+            error_count += 1
             error = Error(
                 srcfile=srcfile,
                 title=f"no valid token matched. Context={ctx.__class__.__name__}",
                 pointer_messages=Pointer(span=Span(i, i), message=f"no token matched at position {i}: {truncate(first_line(src[i:]))}"),
             )
             print(error)
-
-            error_stack = collect_remaining_context_errors(ctx_stack, max_pos=i)
-            # for error in error_stack:
-            if len(error_stack) > 0:
-                print(error_stack[0])
-            print("-"*80)
-            print(tokens_to_report(tokens, srcfile))
-            exit(1)
+            break
 
         # add the token to the list of tokens
         length, token_cls = matches[0]
@@ -1117,10 +1172,15 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     # ensure that the final context is a root 
     if not isinstance(ctx_stack[-1], Root):
         error_stack = collect_remaining_context_errors(ctx_stack)
+        error_count += len(error_stack)
         for error in error_stack:
             print(error)
+        print("-"*80)
+        print(tokens_to_report(tokens, srcfile))
+
+    # if there were errors, exit with an error code
+    if error_count > 0:
         exit(1)
-    
     
     return tokens
 
