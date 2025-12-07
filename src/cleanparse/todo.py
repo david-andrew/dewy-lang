@@ -7,7 +7,9 @@
     [x] make an example that forces color switching for a pointer of the same color_id (i.e. force a given token to touch at least 5 other token colors, where they all also touch enough other colors)
 [x] tokenize rest-of-file strings
 [x] tokenize integers
-
+[ ] eat function supports returning error reports for cases where a lot of duplicated checking is needed to verify the error case with a known error function
+    ---> gpt suggests tokens having helper functions where all the shared logic can go (between eat function vs known error case function)
+[ ] error case in heredoc string opener unclosed delimiter case
 ------ tokenizer features ------
 [x] #"EOF" for heredoc strings `#"`, <delimiter>, `"`, <string body>, <delimiter>
     - #r"EOF" for raw heredoc strings
