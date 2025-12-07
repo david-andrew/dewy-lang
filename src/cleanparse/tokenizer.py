@@ -687,8 +687,6 @@ class StringEscape(Token[StringBody]):
                 i += 1
             if i != expected_len:
                 return None  # invalid_width_hex_escape error
-                # # TODO: full error report
-                # raise ValueError("invalid hex escape sequence")
             return i
 
         # all other escape sequences (known or catch all) are just a single escape code
@@ -791,7 +789,7 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
         # must have ended the delimiter with a matching quote
         quote = src[1]
         if not src[i:].startswith(quote):
-            return None #TODO: emit error here. basically saw `#"<delim>EOF` without the closing quote `"`
+            return None #TODO: emit error here. basically saw `#"<delim>EOF` without the closing quote `"` (also could have been `#"<delim>'` or end with some other symbol not in legal_heredoc_delim_chars)
 
         delim = src[2:i]
 
@@ -1065,8 +1063,8 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
                 ], hint=f"Did you forget a `>`?"))
             case Root(): ... # root isn't an error (unless it somehow isn't the final context, but that should never happen)
             case _:
+                # unreachable (unless you added a new context type and forgot to add a case for it)
                 raise NotImplementedError(f"INTERNAL ERROR: unhandled context: {ctx=}")
-            # TODO: other cases
     
     return error_stack
 
@@ -1119,11 +1117,12 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
             
             # fallback generic error
             error_count += 1
+            match_names = ', '.join([match[1].__name__ for match in matches])
             error = Error(
                 srcfile=srcfile,
-                title=f"multiple tokens matched. Context={ctx.__class__.__name__}",
-                pointer_messages=Pointer(span=Span(i, i+longest_match_length), message=f"multiple tokens matched at {i}..{i+longest_match_length}: {matches=}"),
-                hint="TODO: tokenizer implementation is not yet implemented for multiple token matches"
+                title=f"multiple tokens matched (fallback error case). Context={ctx.__class__.__name__}",
+                pointer_messages=Pointer(span=Span(i, i+longest_match_length), message=f"multiple tokens matched at span [{i}..{i+longest_match_length}): {match_names}"),
+                hint="disambiguation rules currently can't handle this case.\n1) Please manually disambiguate\n2) Probably this case should get a dedicated error function\n   consider opening an issue https://github.com/david-andrew/dewy-lang/issues"
             )
             print(error)    
             break
