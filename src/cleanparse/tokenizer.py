@@ -97,11 +97,11 @@ def is_based_digit(digit: str, base: str) -> bool:
 
 
 
-# TODO: consider if \ is useful as a symbol (or combined with other stuff) in non-string contexts
 symbolic_operators = sorted([
     '~', '@', '`',
     '?', ';',
     '+', '-', '*', '/', '//', '^',
+    '\\', # left divide e.g. given Ax=b, x=A\b, where A\B ≡ solve(A B) (note this is not the same as x=A⁻¹B) (TODO: move description to docs)
     '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
     '|', '&', '??',
     '=', '::', ':=' # not a walrus operator. `x:=y` is sugar for `let x=y` (TODO: move this description to where ever we describe all operators, e.g. docs)
@@ -122,7 +122,7 @@ legal_heredoc_delim_chars = (
     decoration_characters |
     digits |
     primes |
-    set(''.join(symbolic_operators + shift_operators + ['\\#%()[]{} '])) #include \, #, %, (), [], {}, and ` ` (<space>) manually since currently not in any symbol or identifier characters
+    set(''.join(symbolic_operators + shift_operators + ['#%()[]{} '])) #include #, %, (), [], {}, and ` ` (<space>) manually since currently not in any symbol or identifier characters
 )
 
 
