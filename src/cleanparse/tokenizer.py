@@ -643,7 +643,7 @@ class StringEscape(Token[StringBody]):
         r"""
         Eat an escape sequence, return the number of characters eaten
         
-        Escape sequences must be either a known escape sequence:
+        Predefined escape sequences:
         - \n newline
         - \r carriage return
         - \t tab
@@ -654,15 +654,16 @@ class StringEscape(Token[StringBody]):
         - \0 null
         - \x## or \X## for a raw byte value. Must be two hex digits [0-9a-fA-F]
         - \u#### or \U#### for a unicode codepoints. Must be four hex digits [0-9a-fA-F]
-        
-        or the catch all case: 
-        - \ followed by any character not mentioned above converts to just the literal character itself without the backslash
+        - \<newline> a special case that basically ignores the newline and continues the string. Useful for ignoring newlines in multiline strings.
+
+        Catch-all case:
+        - `\` followed by any character not mentioned above converts to just the literal character itself without the backslash
         This is how to insert characters that have special meaning in the string, e.g.
         - \' converts to just a single quote '
         - \{ converts to just a single open brace {
         - \\ converts to just a single backslash \
         - \m converts to just a single character m
-        - \  converts to just a single <space> character
+        - \<space> converts to just a single <space> character
         - etc.
         """
         if not src.startswith('\\'):

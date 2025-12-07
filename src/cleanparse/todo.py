@@ -21,6 +21,16 @@
 ------ slightly broader scope ------
 [ ] next tokenization step for hello world: insert juxtapose
 [ ] finish whole parsing process for hello world happy path
+
+
+
+------ misc ------
+[ ] TODO manager: (likely to use alstr/todo-to-issue-action )
+    - every comment starting with TODO receives a unique ID (git push hooks add them)
+    - every new TODO gets a git issue created for it
+    - every TODO with an ID that is removed closes the git issue
+- not handled by alstr/todo-to-issue-action, but would be ideal if LLM could write the issue description (rather than just quoting the comment)
+    
 """
 
 
