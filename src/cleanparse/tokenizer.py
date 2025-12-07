@@ -42,20 +42,18 @@ block_comment_start: Literal['%{'] = '%{'
 block_comment_end: Literal['}%'] = '}%'
 
 
-# TODO: expand the list of valid identifier characters
 digits = set('0123456789')
 alpha = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
 greek = set('ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψω')
-misc = set('_?!$°')
+misc = set('_‾?!$°')
 # see https://symbl.cc/en/collections/superscript-and-subscript-letters/ for more sub/superscript characters
-subscripts   = set('₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₔₕₖₗₘₙₚₛₜ')
-superscripts = set('⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴮᴰᴱᴲᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᵐᵊᶿᵡꜝʱʴʵʶˠ')
-primes = set('′″‴⁗') # TODO: suggested to actually only have the single prime, and allow it anywhere just like other decorations
-
+subscripts   = set('₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₔₕₖₗₘₙₚₛₜᵢᵣᵤᵥⱼᵦᵧᵨᵩᵪ')
+superscripts = set('⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴭᴮᴯᴰᴱᴲᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴽᴾᴿᵀᵁᵂᵃᵄᵅᵆᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐᵑⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᵊᵋᵌᶿꜝʱʴʵʶˠ')
+primes = set('′″‴⁗')
 
 start_characters = (alpha | greek | misc)
 continue_characters = (alpha | digits | greek | misc)
-decoration_characters = (superscripts | subscripts)
+decoration_characters = (superscripts | subscripts | primes)
 
 # note that the prefix is case insensitive, so call .lower() when matching the prefix
 # numbers may have _ as a separator (if _ is not in the set of digits)
@@ -121,7 +119,6 @@ legal_heredoc_delim_chars = (
     continue_characters |
     decoration_characters |
     digits |
-    primes |
     set(''.join(symbolic_operators + shift_operators + ['#%()[]{} '])) #include #, %, (), [], {}, and ` ` (<space>) manually since currently not in any symbol or identifier characters
 )
 
@@ -369,10 +366,6 @@ class Identifier(Token[GeneralBodyContexts]):
         
         # Continue consuming continue_characters or decorator characters
         while i < len(src) and (src[i] in continue_characters or src[i] in decoration_characters):
-            i += 1
-        
-        # may optionally end with a prime
-        if i < len(src) and src[i] in primes:
             i += 1
         
         return i
@@ -1145,7 +1138,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
             error = Error(
                 srcfile=srcfile,
                 title=f"no valid token matched. Context={ctx.__class__.__name__}",
-                pointer_messages=Pointer(span=Span(i, i), message=f"no token matched at position {i}: {truncate(first_line(src[i:]))}"),
+                pointer_messages=Pointer(span=Span(i, i), message=f"no valid token at position {i}: {truncate(first_line(src[i:]))}"),
             )
             print(error)
             break
