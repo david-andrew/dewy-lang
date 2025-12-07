@@ -49,6 +49,8 @@ from typing import Literal, NoReturn, TypeAlias, ClassVar
 
 Severity: TypeAlias = Literal["error", "warning", "info", "hint"]
 
+ColorName: TypeAlias = Literal["cyan", "green", "yellow", "blue", "purple", "pink", "light_orange", "red", "white"]
+
 RESET = "\033[0m"
 FG_RED = "\033[31m"
 FG_YELLOW = "\033[33m"
@@ -74,6 +76,18 @@ POINTER_COLOR_CODES = (
     # "\033[38;5;250m",  # Very light gray
 
 )
+
+COLOR_NAME_TO_CODE: dict[ColorName, str] = {
+    "cyan": "\033[96m",
+    "green": "\033[92m",
+    "yellow": "\033[93m",
+    "blue": "\033[94m",
+    "purple": "\033[38;5;135m",
+    "pink": "\033[38;5;211m",
+    "light_orange": "\033[38;5;214m",
+    "red": "\033[91m",
+    "white": "\033[97m",
+}
 
 
 class ColorTheme:
@@ -150,7 +164,7 @@ class Pointer:
     span:Span|list[Span]
     message:str
     placement:PointerPlacement|None = None
-    color_id:int|None = None
+    color:int|ColorName|None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.span, Span):
@@ -347,6 +361,7 @@ class Report:
         - Adjacent segments with different color_ids must have different colors
         - If there are fewer or equal color_ids than colors, assign sequentially
         - Otherwise, use all colors while respecting adjacency constraints
+        - Segments with pre-assigned color_code (from color names) are skipped
         """
         palette_len = len(palette)
         
@@ -354,8 +369,10 @@ class Report:
         for seg in segments:
             id_to_seg[id(seg)] = seg
         
+        segments_needing_assignment = [seg for seg in segments if seg.color_code is None]
+        
         color_id_to_segments:dict[int|None, list[_Segment]] = {}
-        for seg in segments:
+        for seg in segments_needing_assignment:
             color_id_to_segments.setdefault(seg.color_id, []).append(seg)
         
         num_color_ids = len(color_id_to_segments)
@@ -379,8 +396,11 @@ class Report:
                 colors = set()
                 for adj_seg_id in adjacency.get(seg_id, set()):
                     adj_seg = id_to_seg[adj_seg_id]
-                    if adj_seg.color_id != exclude_color_id and adj_seg_id in segment_id_to_color:
-                        colors.add(segment_id_to_color[adj_seg_id])
+                    if adj_seg.color_id != exclude_color_id:
+                        if adj_seg_id in segment_id_to_color:
+                            colors.add(segment_id_to_color[adj_seg_id])
+                        elif adj_seg.color_code is not None:
+                            colors.add(adj_seg.color_code)
                 return colors
             
             def find_available_color(color_id:int|None, segments_in_group:list[_Segment]) -> str|None:
@@ -424,10 +444,11 @@ class Report:
         def get_conflicting_segment(seg_id:int) -> int|None:
             """Find an adjacent segment that has the same color and different color_id."""
             seg = id_to_seg[seg_id]
-            seg_color = segment_id_to_color[seg_id]
+            seg_color = segment_id_to_color.get(seg_id) or seg.color_code
             for adj_seg_id in adjacency.get(seg_id, set()):
                 adj_seg = id_to_seg[adj_seg_id]
-                if adj_seg.color_id != seg.color_id and segment_id_to_color.get(adj_seg_id) == seg_color:
+                adj_seg_color = segment_id_to_color.get(adj_seg_id) or adj_seg.color_code
+                if adj_seg.color_id != seg.color_id and adj_seg_color == seg_color:
                     return adj_seg_id
             return None
         
@@ -451,21 +472,22 @@ class Report:
             return None
         
         changed = True
-        max_iterations = len(segments) * 2
+        max_iterations = len(segments_needing_assignment) * 2
         iteration = 0
         while changed and iteration < max_iterations:
             changed = False
             iteration += 1
-            for seg in segments:
+            for seg in segments_needing_assignment:
                 seg_id = id(seg)
                 conflicting_id = get_conflicting_segment(seg_id)
                 if conflicting_id is not None:
                     conflicting_seg = id_to_seg[conflicting_id]
-                    seg_color = segment_id_to_color[seg_id]
-                    conflicting_color = segment_id_to_color[conflicting_id]
+                    seg_color = segment_id_to_color.get(seg_id) or seg.color_code
+                    conflicting_color = segment_id_to_color.get(conflicting_id) or conflicting_seg.color_code
                     
                     adjacent_colors = get_adjacent_colors(seg_id, seg.color_id)
-                    adjacent_colors.add(conflicting_color)
+                    if conflicting_color is not None:
+                        adjacent_colors.add(conflicting_color)
                     
                     new_color = find_color_for_segment(seg_id, adjacent_colors)
                     if new_color is not None and new_color != seg_color:
@@ -486,22 +508,26 @@ class Report:
         
         used_color_ids:set[int] = set()
         for pointer in self.pointer_messages:
-            if pointer.color_id is not None:
-                used_color_ids.add(pointer.color_id)
+            if isinstance(pointer.color, int):
+                used_color_ids.add(pointer.color)
         
         next_auto_color_id = 0
         while next_auto_color_id in used_color_ids:
             next_auto_color_id += 1
         
         for pointer in self.pointer_messages:
-            if pointer.color_id is None:
+            if isinstance(pointer.color, str):
+                color_code = COLOR_NAME_TO_CODE[pointer.color]
+                segments.extend(self._build_segments_for_pointer(sf, pointer, color_code, None))
+            elif pointer.color is None:
                 assigned_color_id = next_auto_color_id
                 next_auto_color_id += 1
                 while next_auto_color_id in used_color_ids:
                     next_auto_color_id += 1
+                segments.extend(self._build_segments_for_pointer(sf, pointer, None, assigned_color_id))
             else:
-                assigned_color_id = pointer.color_id
-            segments.extend(self._build_segments_for_pointer(sf, pointer, None, assigned_color_id))
+                assigned_color_id = pointer.color
+                segments.extend(self._build_segments_for_pointer(sf, pointer, None, assigned_color_id))
         
         line_to_segments:dict[int, list[_Segment]] = {}
         for seg in segments:

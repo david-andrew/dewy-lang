@@ -1010,11 +1010,11 @@ def invalid_width_hex_escape(src: str, i: int, tokens: list[Token], ctx_stack: l
     example_code = src[i:i+j] + example_digits[:expected_len-j]
     return Error(
         srcfile=ctx.srcfile,
-        title=f"Invalid width {name} escape sequence",
+        title=f"{name.capitalize()} escape sequence is too short",
         pointer_messages=[
             Pointer(span=Span(i, i+2), message=f"{name.capitalize()} escape opened here"),
             *([Pointer(span=Span(i+2, i+j), message=f"found {j-2} hex digit{found_plural}")] if j>2 else []),
-            Pointer(span=Span(i+j, i+j), message=f"Expected {remaining_expected} more hex digit{expected_plural}"),
+            Pointer(span=Span(i+j, i+j), message=f"Expected {remaining_expected} more hex digit{expected_plural}", color='red'),
         ],
         hint=f"{name.capitalize()} escape sequence must be {expected_len-2} characters long. E.g. `{example_code}`"
     )
@@ -1192,7 +1192,7 @@ def tokens_to_report(tokens: list[Token], srcfile: SrcFile, show_whitespace: boo
         pointer_messages=[Pointer(
             span=token.loc,
             message=f"{token.__class__.__name__}",
-            color_id=hash(token.__class__)
+            color=hash(token.__class__)
         ) for token in tokens if show_whitespace or not isinstance(token, WhiteSpace)],
     )
 
