@@ -44,16 +44,19 @@ block_comment_end: Literal['}%'] = '}%'
 
 digits = set('0123456789')
 alpha = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
-greek = set('ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψω')
-misc = set('_‾?!$°')
-# see https://symbl.cc/en/collections/superscript-and-subscript-letters/ for more sub/superscript characters
+greek = set('ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεϵζηθικλμνξοπρςστυφχψω') # ϕϖϗϰϱϴ  perhaps just ϕϴ and they normalize to the greek versions
+latin = set('ÆØÞßẞæøþ')
+math = set('ℂℕℤℚℝℙℍℒℯℵ')
+units = set('℃℉℥ℨ')
+misc = set('_‾?!‽$¢£¥€§°†‡※')
 subscripts   = set('₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₔₕₖₗₘₙₚₛₜᵢᵣᵤᵥⱼᵦᵧᵨᵩᵪ')
-superscripts = set('⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴭᴮᴯᴰᴱᴲᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴽᴾᴿᵀᵁᵂᵃᵄᵅᵆᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐᵑⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᵊᵋᵌᶿꜝʱʴʵʶˠ')
+superscripts = set('⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᶿꜝ')
+misc_decorations = set('℠™©®')
 primes = set('′″‴⁗')
 
-start_characters = (alpha | greek | misc)
-continue_characters = (alpha | digits | greek | misc)
-decoration_characters = (superscripts | subscripts | primes)
+start_characters = (alpha | greek | latin | math | units | misc)
+continue_characters = (start_characters | digits)
+decoration_characters = (superscripts | subscripts | misc_decorations | primes)
 
 # note that the prefix is case insensitive, so call .lower() when matching the prefix
 # numbers may have _ as a separator (if _ is not in the set of digits)
@@ -107,6 +110,7 @@ symbolic_operators = sorted([
     '|>', '<|', '=>',
     '->', '<->',
     '.', '..', '...', ',', ':', ':>',
+    # ⁂ ‰ ‱
 ], key=len, reverse=True)
 
 # shift operators are not allowed in type groups, so deal with them separately
