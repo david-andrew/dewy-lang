@@ -25,7 +25,7 @@ level) in a purely declarative way.
 
 from .reporting import Span, Info, Error, SrcFile, Pointer
 from .utils import truncate, descendants, ordinalize, first_line
-from typing import TypeAlias, ClassVar, get_origin, get_args, Union, Protocol, Literal
+from typing import NoReturn, TypeAlias, ClassVar, get_origin, get_args, Union, Protocol, Literal
 from types import UnionType
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
@@ -669,54 +669,66 @@ class StringEscape(Token[StringBody]):
             return None
 
         if len(src) == 1:
-            return None # incomplete_string_escape error
+            StringEscape.throw_incomplete_string_escape(src, ctx)
         
+        prefix_len = 2
+
         # hex/unicode
         if src[1] in 'uUxX':
-            info = StringEscape.hex_escape_helper(src)
-            if info is None: return None
-            (expected_digits, actual_digits) = info
+            expected_digits = 4 if src[1] in 'uU' else 2
+            actual_digits = 0
+            while (
+                actual_digits < expected_digits
+                and prefix_len + actual_digits < len(src)
+                and is_based_digit(src[2 + actual_digits], base16)
+            ):
+                actual_digits += 1
             if actual_digits < expected_digits:
-                return None # invalid_width_hex_escape error (handled later)
-            return actual_digits + 2
-        
+                StringEscape.throw_invalid_width_hex_escape(src, ctx, expected_digits, actual_digits)
+            return prefix_len + actual_digits
+
         # all other escape sequences (known or catch all) are just a single escape code
         return 2
-
-
-        
+    
     @staticmethod
-    def hex_escape_helper(src: str) -> tuple[int, int] | None:
-        r"""
-        Helper for gathering info about fixed-width hex/unicode escape sequences
+    def throw_incomplete_string_escape(src: str, ctx: StringBody) -> NoReturn:
+        """Helper for when a string escape is incomplete"""
+        offset = ctx.srcfile.body.index(src)
+        error = Error(
+            srcfile=ctx.srcfile,
+            title="Incomplete escape sequence at end of string",
+            pointer_messages=Pointer(span=Span(offset, offset+1), message="incomplete escape sequence"),
+            hint="Finish the escape sequence (e.g. `\\n`, `\\xFF`, `\\u1234`) or remove the trailing backslash.",
+        )
+        error.throw()
 
-        Identifies how many digits are expected and how many are actually present
-        - expected_digits: 2 (hex byte) or 4 (unicode)
-        - actual_digits: number of hex digits actually present [0..expected_digits]
-        
-        Args:
-            src (str): the current location in source being tokenized
-        
-        Returns 
-            (int, int)|None: (expected_digits, actual_digits) for a fixed-width \x or \u escape or None if there's no escape present
-            Note: `actual_digits` will be strictly less than or equal to `expected_digits`. If they are not equal, it indicates an invalid_width_hex_escape
 
-        """
+    @staticmethod
+    def throw_invalid_width_hex_escape(src: str, ctx: StringBody, expected_digits: int, actual_digits: int) -> NoReturn:
+        """Helper for when a hex or unicode escape doesn't have enough digits"""
+        offset = ctx.srcfile.body.index(src)
+        
+        # build up error message
+        name = 'unicode' if src[1] in 'uU' else 'hex'
+        remaining_digits_expected = expected_digits - actual_digits
+        found_plural = 's' if actual_digits > 1 else ''
+        expected_plural = 's' if remaining_digits_expected > 1 else ''
+        example_digits = 'ff83' # just a random example of hex digits
         prefix_len = 2
-        if len(src) < prefix_len: return None
-        if src[0] != '\\' or src[1] not in 'xXuU': return None
-        if src[prefix_len:].startswith('{'): return None # parametric form \x{...} / \u{...} is *not* a fixed-width escape
+        example_code = src[:prefix_len+actual_digits] + example_digits[:expected_digits-actual_digits]
+        
+        error = Error(
+            srcfile=ctx.srcfile,
+            title=f"{name.capitalize()} escape sequence is too short",
+            pointer_messages=[
+                Pointer(span=Span(offset, offset+prefix_len), message=f"{name.capitalize()} escape opened here"),
+                *([Pointer(span=Span(offset+prefix_len, offset+prefix_len+actual_digits), message=f"found {actual_digits} hex digit{found_plural}")] if actual_digits > 0 else []),
+                Pointer(span=Span(offset+prefix_len+actual_digits, offset+prefix_len+expected_digits), message=f"Expected {remaining_digits_expected} more hex digit{expected_plural}", color='red'),
+            ],
+            hint=f"{name.capitalize()} escape sequence must be {expected_digits} hex digits long. E.g. `{example_code}`"
+        )
+        error.throw()
 
-        expected_digits = 4 if src[1] in 'uU' else 2
-        j = 0
-        while (
-            j < expected_digits
-            and prefix_len + j < len(src)
-            and is_based_digit(src[prefix_len + j], base16)
-        ):
-            j += 1
-
-        return expected_digits, j
 
 class ParametricStringEscape(Token[StringBody]):
     matching_right: 'RightCurlyBrace' = None
@@ -993,49 +1005,6 @@ def ambiguous_number_or_identifier_in_parametric_string_escape(src: str, i: int,
             hint=f"The current block is in base-{radix} mode.\nThe sequence `{sequence}` is both valid as a base-{radix} number and as an identifier.\nTo indicate a number:\n- add a leading `0` e.g. `0{sequence}`\n- add a base prefix e.g. `{ctx.default_base}{sequence}`\nTo indicate an identifier:\n- wrap in parentheses, e.g. `({sequence})`"
         )
 
-def incomplete_string_escape(src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None:
-    r"""Unterminated escape sequence in a string body. Can only happen if the \ is the last character in the string"""
-    ctx = ctx_stack[-1]
-    if not isinstance(ctx, StringBody):
-        return None
-    if not src[i:] == '\\':  # source ended with a backslash
-        return None
-
-    return Error(
-        srcfile=ctx.srcfile,
-        title="Incomplete escape sequence at end of string",
-        pointer_messages=Pointer(span=Span(i, i+1), message="incomplete escape sequence"),
-        hint="Finish the escape sequence (e.g. `\\n`, `\\xFF`, `\\u1234`) or remove the trailing backslash.",
-    )
-
-def invalid_width_hex_escape(src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None:
-    ctx = ctx_stack[-1]
-    if not isinstance(ctx, StringBody): return None
-
-    # use helper to check if number of digits is correct
-    info = StringEscape.hex_escape_helper(src[i:])
-    if info is None: return None # not a hex/unicode escape
-    expected_digits, actual_digits = info
-    if actual_digits == expected_digits: return None # no issue
-
-    # found digits doesn't match expected. build up error message
-    name = 'unicode' if src[i+1] in 'uU' else 'hex'
-    remaining_digits_expected = expected_digits - actual_digits
-    found_plural = 's' if actual_digits > 1 else ''
-    expected_plural = 's' if remaining_digits_expected > 1 else ''
-    example_digits = 'ff83' # just a random example of hex digits
-    prefix_len = 2
-    example_code = src[i:i+prefix_len+actual_digits] + example_digits[:expected_digits-actual_digits]
-    return Error(
-        srcfile=ctx.srcfile,
-        title=f"{name.capitalize()} escape sequence is too short",
-        pointer_messages=[
-            Pointer(span=Span(i, i+prefix_len), message=f"{name.capitalize()} escape opened here"),
-            *([Pointer(span=Span(i+prefix_len, i+prefix_len+actual_digits), message=f"found {actual_digits} hex digit{found_plural}")] if actual_digits > 0 else []),
-            Pointer(span=Span(i+prefix_len+actual_digits, i+prefix_len+expected_digits), message=f"Expected {remaining_digits_expected} more hex digit{expected_plural}", color='red'),
-        ],
-        hint=f"{name.capitalize()} escape sequence must be {expected_digits} hex digits long. E.g. `{example_code}`"
-    )
 
 # TODO: other known error cases
 known_multiple_matched_error_cases: list[MultipleMatchedErrorCase] = [
@@ -1043,8 +1012,6 @@ known_multiple_matched_error_cases: list[MultipleMatchedErrorCase] = [
 ]
 known_no_match_error_cases: list[NoMatchErrorCase] = [
     shift_operator_inside_type_param,
-    incomplete_string_escape,
-    invalid_width_hex_escape,
 ]
 
 
