@@ -669,7 +669,7 @@ class StringEscape(Token[StringBody]):
             return None
 
         if len(src) == 1:
-            StringEscape.throw_incomplete_string_escape(src, ctx)
+            StringEscape.error_incomplete_string_escape(src, ctx)
         
         prefix_len = 2
 
@@ -684,14 +684,14 @@ class StringEscape(Token[StringBody]):
             ):
                 actual_digits += 1
             if actual_digits < expected_digits:
-                StringEscape.throw_invalid_width_hex_escape(src, ctx, expected_digits, actual_digits)
+                StringEscape.error_invalid_width_hex_escape(src, ctx, expected_digits, actual_digits)
             return prefix_len + actual_digits
 
         # all other escape sequences (known or catch all) are just a single escape code
         return 2
     
     @staticmethod
-    def throw_incomplete_string_escape(src: str, ctx: StringBody) -> NoReturn:
+    def error_incomplete_string_escape(src: str, ctx: StringBody) -> NoReturn:
         """Helper for when a string escape is incomplete"""
         offset = ctx.srcfile.body.index(src)
         error = Error(
@@ -704,7 +704,7 @@ class StringEscape(Token[StringBody]):
 
 
     @staticmethod
-    def throw_invalid_width_hex_escape(src: str, ctx: StringBody, expected_digits: int, actual_digits: int) -> NoReturn:
+    def error_invalid_width_hex_escape(src: str, ctx: StringBody, expected_digits: int, actual_digits: int) -> NoReturn:
         """Helper for when a hex or unicode escape doesn't have enough digits"""
         offset = ctx.srcfile.body.index(src)
         
@@ -826,9 +826,47 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
         # must have ended the delimiter with a matching quote
         quote = src[1]
         if not src[i:].startswith(quote):
-            return None #TODO: emit error here. basically saw `#"<delim>EOF` without the closing quote `"` (also could have been `#"<delim>'` or end with some other symbol not in legal_heredoc_delim_chars)
+            HeredocStringOpener.error_incomplete_heredoc_delimiter(src, ctx, i)
 
+        # ensure delimiter doesn't start or end with space
+        HeredocStringOpener.check_error_heredoc_delimiter_space(src, ctx, i)
+
+        return i + 1
+    
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(StringBody(ctx.srcfile, self))
+
+    def get_delim(self) -> str:
+        """get the delimiter from the string quote"""
+        return self.src[2:-1]
+    
+    @staticmethod
+    def error_incomplete_heredoc_delimiter(src: str, ctx: GeneralBodyContexts, i: int) -> NoReturn:
+        """Helper for when a heredoc delimiter is incomplete"""
+        offset = ctx.srcfile.body.index(src)
+        quote = src[1]
+        wrong_quote = '"' if quote == "'" else "'"
+        wrong_quoted = src[i:].startswith(wrong_quote)
         delim = src[2:i]
+        example = f"#{quote}{delim}{quote}"
+        error = Error(
+            srcfile=ctx.srcfile,
+            title="Incomplete heredoc delimiter",
+            pointer_messages=[
+                Pointer(span=Span(offset, offset+1), message="heredoc start"),
+                Pointer(span=Span(offset+1, offset+2), message="heredoc delimiter opening quote"),
+                *([Pointer(span=Span(offset+2, offset+2+len(delim)), message=f"delimiter")] if len(delim) > 0 else []),
+                Pointer(span=Span(offset+2+len(delim), offset+2+len(delim)+1), message=f"Expected closing quote {quote} for heredoc delimiter"),
+            ],
+            hint=f'Did you mean to use {quote} to close instead of {wrong_quote} e.g. {example} not {example[:-1] + wrong_quote}' if wrong_quoted else f"Finish the heredoc delimiter (e.g. {example})",
+        )
+        error.throw()
+    
+    
+    @staticmethod
+    def check_error_heredoc_delimiter_space(src: str, ctx: GeneralBodyContexts, i: int) -> NoReturn|None:
+        """Helper to check if a heredoc delimiter starts or ends with space"""
+        delim = src[2:i]
+        quote = src[1]
 
         # ensure the delimiter isn't all space, and also may not start or end with space
         if src[2:i].strip() == '':
@@ -858,14 +896,9 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
             )
             error.throw()
 
-        return i + 1
-    
-    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(StringBody(ctx.srcfile, self))
 
-    def get_delim(self) -> str:
-        """get the delimiter from the string quote"""
-        return self.src[2:-1]
-    
+
+
 class HeredocStringCloser(Token[StringContexts]):
     matching_quote: 'HeredocStringOpener|RawHeredocStringOpener' = None
 
