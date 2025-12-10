@@ -36,27 +36,29 @@ import pdb
 
 ##### CHARACTER SETS AND USEFUL CONSTANTS #####
 
-whitespace = {' ', '\t', '\n', '\r'} # TBD if we need \f and \v
+whitespace = {' ', '\t', '\n', '\r'} # no \f and \v because they cause security issues and generally aren't needed
 line_comment_start: Literal['%'] = '%'
 block_comment_start: Literal['%{'] = '%{'
 block_comment_end: Literal['}%'] = '}%'
 
-
+# TODO: The specific set of digits is open for debate. The following are proposed:
+# latin = set('ÆØÞßæøþẞ')
+# misc = set('‽¢£¥€§†‡※')
+# units = set('℃℉℥ℨ')
+# math = set('ℂℕℤℚℝℙℍℒℯℵ')
+# Also `ϕϖϗϰϱϴ`, perhaps just `ϕϴ` which would normalize to the greek versions
 digits = set('0123456789')
 alpha = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
-greek = set('ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεϵζηθικλμνξοπρςστυφχψω') # ϕϖϗϰϱϴ  perhaps just ϕϴ and they normalize to the greek versions
-latin = set('ÆØÞßẞæøþ')
-math = set('ℂℕℤℚℝℙℍℒℯℵ')
-units = set('℃℉℥ℨ')
-misc = set('_‾?!‽$¢£¥€§°†‡※')
+greek = set('ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεϵζηθικλμνξοπρςστυφχψω')
+misc = set('_‾?!$°')
 subscripts   = set('₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₔₕₖₗₘₙₚₛₜᵢᵣᵤᵥⱼᵦᵧᵨᵩᵪ')
 superscripts = set('⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᶿꜝ')
 misc_decorations = set('℠™©®')
 primes = set('′″‴⁗')
 
-start_characters = (alpha | greek | latin | math | units | misc)
-continue_characters = (start_characters | digits)
-decoration_characters = (superscripts | subscripts | misc_decorations | primes)
+start_characters = alpha | greek | misc # | latin | units | math
+continue_characters = start_characters | digits
+decoration_characters = superscripts | subscripts | misc_decorations | primes
 
 # note that the prefix is case insensitive, so call .lower() when matching the prefix
 # numbers may have _ as a separator (if _ is not in the set of digits)
