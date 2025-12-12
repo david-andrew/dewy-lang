@@ -46,6 +46,7 @@ from pathlib import Path
 from bisect import bisect_right
 from os import PathLike
 from typing import Literal, NoReturn, TypeAlias, ClassVar
+import re
 
 Severity: TypeAlias = Literal["error", "warning", "info", "hint"]
 
@@ -58,6 +59,7 @@ FG_BLUE = "\033[34m"
 FG_CYAN = "\033[36m"
 FG_DIM_GRAY = "\033[90m"
 FG_LIGHT_GRAY = "\033[38;5;245m"
+FG_WHITE_ON_RED = "\033[1;97;41m"
 POINTER_COLOR_CODES = (
     # "\033[95m",      # Magenta (washed out compared to purple)
     "\033[96m",      # Cyan
@@ -76,6 +78,8 @@ POINTER_COLOR_CODES = (
     # "\033[38;5;250m",  # Very light gray
 
 )
+
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 COLOR_NAME_TO_CODE: dict[ColorName, str] = {
     "cyan": "\033[96m",
@@ -726,11 +730,30 @@ class Report:
         output.extend(self._render_pointer_layer(below, pointer_prefix, width, "below", theme))
         return output
     
+    @staticmethod
+    def _visible_length(text:str) -> int:
+        return len(ANSI_ESCAPE_RE.sub("", text))
+    
+    def _visualize_control_chars(self, line_text:str, theme:ColorTheme) -> str:
+        """Convert control characters like \f, \v, \r, \0, etc. to their visual representations ␌, ␋, ␍, ␀, etc."""
+        out:list[str] = []
+        for ch in line_text:
+            code = ord(ch)
+            if (code < 0x20 and ch not in ("\t", "\n")) or code == 0x7F:
+                if code == 0x7F:
+                    glyph = "\u2421"  # ␡
+                else:
+                    glyph = chr(0x2400 + code)
+                out.append(theme._wrap(glyph, FG_WHITE_ON_RED))
+            else:
+                out.append(ch)
+        return "".join(out)
+    
     def _line_display(self, line_text:str, segments:list[_Segment], theme:ColorTheme) -> str:
         marker = self._blank_line_marker(line_text, segments, theme)
         if marker is not None:
             return marker
-        return line_text
+        return self._visualize_control_chars(line_text, theme)
     
     @staticmethod
     def _blank_line_marker(line_text:str, segments:list[_Segment], theme:ColorTheme) -> str|None:

@@ -23,7 +23,7 @@ sensitive rules (e.g. different tokens allowed inside strings vs. at the top
 level) in a purely declarative way.
 """
 
-from .reporting import Span, Info, Error, SrcFile, Pointer
+from .reporting import Span, Info, Warning, Error, SrcFile, Pointer
 from .utils import truncate, descendants, ordinalize, first_line
 from typing import NoReturn, TypeAlias, ClassVar, get_origin, get_args, Union, Protocol, Literal
 from types import UnionType
@@ -36,7 +36,8 @@ import pdb
 
 ##### CHARACTER SETS AND USEFUL CONSTANTS #####
 
-whitespace = {' ', '\t', '\n', '\r'} # no \f and \v because they cause security issues and generally aren't needed
+whitespace = {' ', '\t', '\n', '\r'}
+ascii_control_chars = set(chr(i) for i in range(0x20) if i not in whitespace) | {'\x7F'} # most ascii<0x20 are ignored for security reasons
 line_comment_start: Literal['%'] = '%'
 block_comment_start: Literal['%{'] = '%{'
 block_comment_end: Literal['}%'] = '}%'
@@ -274,14 +275,27 @@ class Token[T:Context](ABC):
 # Tokens that consume layout-only characters or comments. These are valid in
 # general body contexts and usually don't affect the context stack.
 
+# TODO: want a warning if there is a lone \r not followed by \n
 class WhiteSpace(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """white space is any sequence of whitespace characters"""
         i = 0
         while i < len(src) and src[i] in whitespace:
+            if src[i] == '\r' and not src[i+1:].startswith('\n'):
+                WhiteSpace.warning_lone_carriage_return(src, i, ctx)
             i += 1
         return i or None
+    
+    @staticmethod
+    def warning_lone_carriage_return(src: str, i: int, ctx: GeneralBodyContexts) -> NoReturn:
+        warning = Warning(
+            srcfile=ctx.srcfile,
+            title=f"Lone carriage return",
+            pointer_messages=[Pointer(span=Span(i, i+1), message=f"\\r without \\n")],
+            hint=f"\\r should always be followed by \\n in Dewy source code. Recommend either removing the \\r or adding newline (\\r\\n)"
+        )
+        print(warning)
 
 
 class LineComment(Token[GeneralBodyContexts]):
@@ -1038,6 +1052,22 @@ def ambiguous_number_or_identifier_in_parametric_string_escape(src: str, i: int,
             hint=f"The current block is in base-{radix} mode.\nThe sequence `{sequence}` is both valid as a base-{radix} number and as an identifier.\nTo indicate a number:\n- add a leading `0` e.g. `0{sequence}`\n- add a base prefix e.g. `{ctx.default_base}{sequence}`\nTo indicate an identifier:\n- wrap in parentheses, e.g. `({sequence})`"
         )
 
+def illegal_control_chars(src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context]) -> Error|None:
+    j = i
+    while j < len(src) and src[j] in ascii_control_chars:
+        j += 1
+    if j == i:
+        return None
+    
+    plural = "s" if j - i > 1 else ""
+    
+    return Error(
+            srcfile=ctx_stack[0].srcfile,
+            title=f"Illegal control character",
+            pointer_messages=Pointer(span=Span(i, j), message=f"Control character{plural}"),
+            hint=f"Control characters are not allowed in Dewy source code (for security reasons). Please remove them."
+        )
+
 
 # TODO: other known error cases
 known_multiple_matched_error_cases: list[MultipleMatchedErrorCase] = [
@@ -1045,6 +1075,7 @@ known_multiple_matched_error_cases: list[MultipleMatchedErrorCase] = [
 ]
 known_no_match_error_cases: list[NoMatchErrorCase] = [
     shift_operator_inside_type_param,
+    illegal_control_chars,
 ]
 
 
