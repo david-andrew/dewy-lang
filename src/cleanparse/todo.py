@@ -1,5 +1,17 @@
 """
 [tasks]
+[ ] flag for spans where if set to true, and they would break a line, keep on the initial line and extend to end
+
+[ ] error report for TODOs
+[x] deduplicate effort in identifying if error case is true. basically in the token eat function, break out sub functions that are called by eat, and can also be called by the error checking function
+    ---> e.g. invalid_width_hex_escape has a lot of shared logic that could be factored into helpers in StringEscape's (static) methods
+
+[ ] error reporting improvement ideas:
+    [ ] consider allowing raising errors from within eat functions, so then we can throw inside tokenize() and print any stack remaining errors?
+        ---> or potentially Context(ABC) gets a member that eat functions can push to errors to
+    [ ] consider ability to eat broken tokens, so we can continue tokenizing, and then report everything at the end
+
+
 [ ] errors for no token matches, check prev and next context cases if they could have matched
 [ ] report printout support overlapping spans: so long as they can be cleanly divided by top and bottom of line
     - needed for the >> in type param context error (and potentially other cases)
@@ -7,9 +19,7 @@
     [x] make an example that forces color switching for a pointer of the same color_id (i.e. force a given token to touch at least 5 other token colors, where they all also touch enough other colors)
 [x] tokenize rest-of-file strings
 [x] tokenize integers
-[ ] eat function supports returning error reports for cases where a lot of duplicated checking is needed to verify the error case with a known error function
-    ---> gpt suggests tokens having helper functions where all the shared logic can go (between eat function vs known error case function)
-[ ] error case in heredoc string opener unclosed delimiter case
+[x] error case in heredoc string opener unclosed delimiter case
 ------ tokenizer features ------
 [x] #"EOF" for heredoc strings `#"`, <delimiter>, `"`, <string body>, <delimiter>
     - #r"EOF" for raw heredoc strings
@@ -17,7 +27,7 @@
 [x] fix string escapes to include unicode and hex escapes correctly
     - `\x{...}` where inside interpolation is either a sequence of digits (assumed to be hex unless otherwise prefixed), or any other arbitrary expression that evaluates to an integer
     - `\u{...}` where inside interpolation is either a sequence of digits (assumed to be hex unless otherwise prefixed), or any other arbitrary expression that evaluates to an integer
-[ ] select larger list of symbols to include
+[ ] select larger list of (math) symbols to include
 [ ] symbol normalization e.g. μ vs µ  (greek mu vs micro sign), subscripts and superscripts, etc.
 
 ------ slightly broader scope ------
