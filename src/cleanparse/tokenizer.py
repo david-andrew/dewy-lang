@@ -46,18 +46,18 @@ block_comment_end: Literal['}%'] = '}%'
 # latin = set('ÆØÞßæøþẞ')
 # misc = set('‽¢£¥€§†‡※')
 # units = set('℃℉℥ℨ')
-# math = set('ℂℕℤℚℝℙℍℒℯℵ')
 # Also `ϕϖϗϰϱϴ`, perhaps just `ϕϴ` which would normalize to the greek versions
 digits = set('0123456789')
 alpha = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
 greek = set('ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεϵζηθικλμνξοπρςστυφχψω')
+math = set('ℂℕℤℚℝℙℍ𝔼𝕊𝕋𝔽𝔾ℵℒ')
 misc = set('_‾?!$°')
-subscripts   = set('₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₔₕₖₗₘₙₚₛₜᵢᵣᵤᵥⱼᵦᵧᵨᵩᵪ')
+subscripts   = set('₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜᵢᵣᵤᵥⱼᵦᵧᵨᵩᵪ')
 superscripts = set('⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᶿꜝ')
 misc_decorations = set('℠™©®')
 primes = set('′″‴⁗')
 
-start_characters = alpha | greek | misc # | latin | units | math
+start_characters = alpha | greek | math | misc # | latin | units
 continue_characters = start_characters | digits
 decoration_characters = superscripts | subscripts | misc_decorations | primes
 
@@ -101,7 +101,7 @@ def is_based_digit(digit: str, base: str) -> bool:
 
 
 
-symbolic_operators = sorted([
+symbols = sorted([
     '~', '@', '`',
     '?', ';',
     '+', '-', '*', '/', '//', '^',
@@ -113,6 +113,7 @@ symbolic_operators = sorted([
     '|>', '<|', '=>',
     '->', '<->',
     '.', '..', '...', ',', ':', ':>',
+    '∞', '∅'
     # ⁂ ‰ ‱
 ], key=len, reverse=True)
 
@@ -126,7 +127,7 @@ legal_heredoc_delim_chars = (
     continue_characters |
     decoration_characters |
     digits |
-    set(''.join(symbolic_operators + shift_operators + ['#%()[]{} '])) #include #, %, (), [], {}, and ` ` (<space>) manually since currently not in any symbol or identifier characters
+    set(''.join(symbols + shift_operators + ['#%()[]{} '])) #include #, %, (), [], {}, and ` ` (<space>) manually since currently not in any symbol or identifier characters
 )
 
 
@@ -395,7 +396,7 @@ class Symbol(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """symbolic operators are any sequence of characters in the symbolic_operators set"""
-        for op in symbolic_operators:
+        for op in symbols:
             if src.startswith(op):
                 return len(op)
         return None
