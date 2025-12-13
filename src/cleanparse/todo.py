@@ -1,4 +1,35 @@
 """
+# parsing pipeline steps
+## tokenizer
+initial pass, simplest tokens
+
+## t2
+make compound tokens like string, block, float, etc.
+
+## juxtaposer
+invert whitespace for juxtapose (does this maybe go after flower?)
+
+## chainer/flower
+identify expression chains (so can do all <keyword><expr><expr>... style expressions (e.g. loops, if else, return, etc.))
+## pratt/shunt parse
+generally ignore chains (which are glorified list[Token]). first pass at parsing using my looped shunting algorithm
+
+## p2
+tbd next parsing ## passes, etc.
+
+## typer
+type checking. probably get rid of all ambiguous nodes at this point either by determining correct path via types or erroring
+should have final complete sharable AST trees which can be passed to backends
+
+## AST optim
+tbd for later
+
+## codegen
+given AST, produce output in the target backend
+
+
+
+
 [tasks]
 [ ] flag for spans where if set to true, and they would break a line, keep on the initial line and extend to end
 

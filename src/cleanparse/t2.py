@@ -1,19 +1,11 @@
 """
-t2
-build chains + flowables
-pratt/shunt parse
+t2 is the second phase of tokenization. Mainly building up a few types of compound tokens out of constituent parts. Namely:
+- strings
+- floats
+- blocks
+- opchains
 
-
-t2 tasks:
-- build strings
-- build floats
-- collect blocks as token with sub members
-- combine opchains
-
-t3 tasks:
-- insert juxtapose
-
-then parsing, typechecking, codegen, etc.
+Additionally symbols are separated into operators and identifiers. And identifiers from the previous step have keywords and keyword operators split off
 """
 
 
