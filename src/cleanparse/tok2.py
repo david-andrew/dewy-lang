@@ -1,4 +1,9 @@
 """
+t2
+build chains + flowables
+pratt/shunt parse
+
+
 t2 tasks:
 - build strings
 - build floats
@@ -35,10 +40,19 @@ class Float(Token2):
     0x1.0b1p10   % warn, mantissa halves have different bases
     0x1.8p10     % warn, different bases
     
-    literals?
-      nan
-      inf % tbd since we have our own separate `inf` that is not treated as a float..? or consider maybe it does map to float?.. tbd
+    p/P is only allowed for bases that are powers of 2, and means 2^exponent (instead of 10^exponent for e/E)
 
+    literals? probably not parsed here, but as identifiers
+      nan
+      inf
+    literals are treated as singleton types, and receive their bit pattern when used in a typed context
+    ```dewy
+    a:float64 = inf  % convert to ieee754 compatible float inf
+    b:int = inf`     % convert to symbolic InfinityType that can interact with ints as a singleton type
+    ```
+
+    suggested to have some set of string input functions for C/IEEE-754 notation
+    ieee754<float64>'0x1.8p10'
     """
     ...
 
@@ -72,9 +86,10 @@ class OpChain(Token2):
 
 
 # class Symbol(Token2): ...  # tbd if all the symbols here would just go under identifier, e.g. '∞', '∅'
-class InfixOperator(Token2): ...
-class PrefixOperator(Token2): ...
-class PostfixOperator(Token2): ...
+# class InfixOperator(Token2): ...
+# class PrefixOperator(Token2): ...
+# class PostfixOperator(Token2): ...
+class Operator(Token2): ...
 class Keyword(Token2): ... # e.g. if, loop, import, let, etc. any keyword that behaves differently syntactically e.g. `<keyword> <expr>`. Ignore keywords that can go in identifiers, e.g. `void`, `intrinsic`/`extern`, etc.
 class Identifier(Token2): ...
 class Hashtag(Token2): ...   
