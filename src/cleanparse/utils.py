@@ -69,3 +69,113 @@ def ordinalize(n: int) -> str:
             suffix = "th"
 
     return f"{prefix}{n}{suffix}"
+
+
+
+
+# from dataclasses import dataclass
+# from collections.abc import MutableSequence
+
+# @dataclass
+# class ListView(MutableSequence):
+#     data: list
+#     start: int = 0
+#     stop: int | None = None
+
+#     def __post_init__(self):
+#         if self.stop is None:
+#             self.stop = len(self.data)
+#         # basic normalization (supports negative indices)
+#         n = len(self.data)
+#         if self.start < 0:
+#             self.start += n
+#         if self.stop < 0:
+#             self.stop += n
+
+#     def __len__(self):
+#         return max(0, self.stop - self.start)
+
+#     def _check_index(self, i: int) -> int:
+#         if i < 0:
+#             i += len(self)
+#         if not (0 <= i < len(self)):
+#             raise IndexError(i)
+#         return self.start + i
+
+#     def __getitem__(self, i):
+#         if isinstance(i, slice):
+#             # return another view (still referencing same backing list)
+#             start, stop, step = i.indices(len(self))
+#             if step != 1:
+#                 raise ValueError("step != 1 not supported in this simple view")
+#             return ListView(self.data, self.start + start, self.start + stop)
+#         return self.data[self._check_index(i)]
+
+#     def __setitem__(self, i, value):
+#         self.data[self._check_index(i)] = value
+
+#     def __delitem__(self, i):
+#         del self.data[self._check_index(i)]
+#         self.stop -= 1  # keep view end aligned with backing changes
+
+#     def insert(self, i, value):
+#         # insert into backing list within view bounds
+#         if i < 0:
+#             i += len(self)
+#         i = max(0, min(i, len(self)))
+#         self.data.insert(self.start + i, value)
+#         self.stop += 1
+
+
+
+# from collections.abc import MutableSequence
+
+# class ListView(MutableSequence):
+#     def __init__(self, data, start=0, stop=None):
+#         self.data = data
+#         self.start = start
+#         self.stop = len(data) if stop is None else stop
+#         self._normalize()
+
+#     def _normalize(self):
+#         n = len(self.data)
+#         if self.start < 0:
+#             self.start += n
+#         if self.stop < 0:
+#             self.stop += n
+#         self.start = max(0, self.start)
+#         self.stop = min(n, self.stop)
+
+#     def __len__(self):
+#         return max(0, self.stop - self.start)
+
+#     def _check_index(self, i):
+#         if i < 0:
+#             i += len(self)
+#         if not 0 <= i < len(self):
+#             raise IndexError(i)
+#         return self.start + i
+
+#     def __getitem__(self, i):
+#         if isinstance(i, slice):
+#             start, stop, step = i.indices(len(self))
+#             if step != 1:
+#                 raise ValueError("slice steps other than 1 not supported")
+#             return ListView(self.data,
+#                             self.start + start,
+#                             self.start + stop)
+#         return self.data[self._check_index(i)]
+
+#     def __setitem__(self, i, value):
+#         self.data[self._check_index(i)] = value
+
+#     def __delitem__(self, i):
+#         del self.data[self._check_index(i)]
+#         self.stop -= 1
+
+#     def insert(self, i, value):
+#         if i < 0:
+#             i += len(self)
+#         i = max(0, min(i, len(self)))
+#         self.data.insert(self.start + i, value)
+#         self.stop += 1

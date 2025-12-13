@@ -49,7 +49,13 @@ class Float(Token2):
     ...
 
 class String(Token2):
+    opener: Span
+    body: Span
+    closer: Span|None
     """
+    any strings that contain only chars and or non-parametric escapes (i.e. the entire string is known and can be rendered without evaluating any interpolations or parametric escape expressions)
+
+
     <string_inner> = (chars|escape|block)*
 
     string = 
@@ -65,7 +71,14 @@ class String(Token2):
     we would select the appropriate one based on if there are any blocks present in the string
     (perhaps later in type checking, some interpolated strings could be converted to chars only if their expression is compiletime const)
     """
-    ...
+    def eat(tokens:list[Token1], ctx):
+        # modify tokens list in place?
+        ...
+
+class IString(Token2):
+    """
+    Any string that contains an expression or interpolation (includes parametric unicode+hex escapes)
+    """
 
 class Block(Token2):
     """
