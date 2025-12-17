@@ -1,4 +1,4 @@
-from typing import Generator
+from typing import Generator, Any
 
 def first_line(s:str) -> str:
     return s.split('\n')[0]
@@ -71,6 +71,9 @@ def ordinalize(n: int) -> str:
     return f"{prefix}{n}{suffix}"
 
 
+def index_of(item: Any, items: list) -> int|None:
+    """determine the index of the item in the list, or None if not found. Matches on Identity (i.e. `A is B`)"""
+    return next((i for i, t in enumerate(items) if t is item), None)
 
 
 # from dataclasses import dataclass

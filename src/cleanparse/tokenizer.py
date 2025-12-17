@@ -30,7 +30,7 @@ from types import UnionType
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from functools import cache
-from itertools import product
+
 
 import pdb
 
