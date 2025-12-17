@@ -58,3 +58,9 @@ Zig is better than Rust (sometimes): https://www.youtube.com/watch?v=l9eFGToyjf8
 - TBD how to handle pointers in Dewy! I think in general the idea is to not have pointers from a developer point of view and things are reference and dereferenced automatically. But there certainly could be instances where being able to deal in pointers would be valuable
 - compiletime: basically taking from zig/jai
 - C interop: should add nice support for working with C. perhaps we could build in a C compiler and let it be as easy as calling C in zig? Or let the user point to a C compiler, and automatically generate shim C code for calling the C code from dewy
+
+
+
+
+# Security
+- e.g. Go's secret mode: https://www.youtube.com/watch?v=GhYpMFRiw34
