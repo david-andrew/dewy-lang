@@ -3621,3 +3621,80 @@ technically the above example might be more idiomatically accomplished with this
 expected_lenth = 2 + ['u'->4 'x'->2][escape_code]
 ```
 but it is mainly for illustrating the point
+
+
+## How to input byte-arrays without tons of boilerplate? [thinking 0x'ffabcd' for big endian input, 0xffabcd transmute array<uint8> for little endian input, and perhaps 0x{} 0x() 0x(] 0x[) for making a block use a given base by default, allowing arrays like 0x[ff ab cd]]
+strings should not have a `\x` escape at all. Strings conceptually should just be a sequence of unicode codepoints, thus allowing `\x` in strings is smuggling in data representations when the representation should be agnostic until encoded to something like utf-8, etc.
+
+Therefore, we ought to have a convenient method for inputting byte arrays. The current way to do it are too verbose:
+```
+bytes:array<uint8> = [0x00 0xff 0xab 0x12 0x35 0xff 0xdc 0x00 0x12]
+```
+
+
+Options
+### hashtag for interpreting a hex literal as bytes
+```
+#bytes(0x00ffab1235ffdc0012)
+```
+cons:
+- requires tokenizer/parser to track leading zeros on numbers
+
+### byte literal token
+```
+% a naked byte literal. allow spaces and underscore
+bytes = 0x{00ffab1235ffdc0012}
+bytes = 0x{00 ff ab 12 35 ff dc 00 12}
+bytes = 0x{00_ff_ab_12_35_ff_dc_00_12}
+```
+
+cons:
+- breaks the idea that {} is always a block that you can put anything in. -- OR --- if allow {} to be a block, just a little bit tricky when other expressions
+- makes tokenizer1 mildly more complex (0x{ can open a block context)
+
+
+### byte-array string prefix
+```
+% token-level byte-array string prefix
+bytes = x"00ffab1235ffdc0012"
+bytes = 0x"00ffab1235ffdc0012"
+
+% or an array prefix?
+bytes = 0x[ff aa bb cc dd ee] 
+% though with this, spaces are necessary otherwise the byte order is messed up
+```
+
+
+### make use of context aware typing to handle numeric literals
+```
+bytes: array<uint8> = 0x00ffab1235ffdc0012
+```
+since we're strongly typed anyways, and literals are often interpreted by the type/context they are in, this could be quite tractible
+
+
+
+### Consensus
+in general, I think I'm leaning
+```
+a:array<uint8> = 0b"<sequence of bits>"
+b:array<uint8> = 0q"<sequence of base-4 digits>"
+c:array<uint8> = 0o"<sequence of base-8 digits>"
+d:array<uint8> = 0x"<sequence of hex digits>"
+e:array<uint8> = 0u"<sequence of base-32 digits>"
+f:array<uint8> = 0g"<sequence of base-64 digits>"
+```
+techincally you could cast to whatever array of width you want, e.g. uint1, uint2, uint3, etc. for bin, quat, oct respectively. But the default would be to decode and pack to an array of bytes. In general, these will be big endian since they are basically arrays, thus the least significant digit is always to the left. Numeric literals cast to a byte array would probably be little endian, as that is the common standard on modern machines. I think it will not be machine specific, but you will have to option to explicitly do a big-endian conversion
+```
+0xffaabbcc transmute array<uint8> =? 0x[ff aa bb cc]
+```
+I'm thinking if I allowed this with the non power of 2 bases, perhaps what it would do is do the optimal packing, i.e. 
+```
+val = 0
+base = ...
+for digit in reversed(digits):
+    val *= base
+    val += digit
+```
+
+
+For bases that would allow it, include separators: ` `, `_`, and `:`
