@@ -175,7 +175,6 @@ class String(Token2):
                 chunks.append(Block(Span(token.loc.start, token.matching_right.loc.stop), inner, '{}'))
                 token_iter.jump_forward(token.matching_right.idx - token.idx + 1) # skip inner tokens and closing brace
             else:
-                pdb.set_trace()
                 #unreachable
                 raise ValueError(f'INTERNAL ERROR: Invalid token in string body: {token}')
         
@@ -191,7 +190,11 @@ class String(Token2):
         return combined
 
 @dataclass
-class ParametricEscape(Token2): ...
+class ParametricEscape(Token2):
+    block: 'Block'
+    @staticmethod
+    def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, ParametricEscape]|None':
+        raise NotImplementedError()
 
 @dataclass
 class IString(Token2):
@@ -239,7 +242,12 @@ class Identifier(Token2):
 class Operator(Token2):
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Operator]|None':
-        raise NotImplementedError()
+        token = tokens[start]
+        # all symbols that are not symbolic identifiers are operators
+        if isinstance(token, (t1.Symbol, t1.ShiftSymbol)) and token.src not in symbolic_identifiers: 
+            return 1, Operator(token.loc, token.src)
+        return None
+            
 
 @dataclass
 class Keyword(Token2): # e.g. if, loop, import, let, etc. any keyword that behaves differently syntactically e.g. `<keyword> <expr>`. Ignore keywords that can go in identifiers, e.g. `void`, `intrinsic`/`extern`, etc.
@@ -252,9 +260,13 @@ class Keyword(Token2): # e.g. if, loop, import, let, etc. any keyword that behav
 
 @dataclass
 class Hashtag(Token2):
+    name: str
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Hashtag]|None':
-        raise NotImplementedError()
+        token = tokens[start]
+        if isinstance(token, t1.Hashtag):
+            return 1, Hashtag(token.loc, token.src[1:])
+        return None
 
 @dataclass
 class Integer(Token2):
@@ -266,7 +278,11 @@ class Integer(Token2):
 class Whitespace(Token2): # so we can invert later for juxtapose
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Whitespace]|None':
-        raise NotImplementedError()
+        i = 0
+        while start + i < len(tokens) and isinstance(tokens[start + i], (t1.WhiteSpace, t1.LineComment, t1.BlockComment)):
+            i += 1
+        if i == 0: return None
+        return i, Whitespace(Span(tokens[start].loc.start, tokens[start + i - 1].loc.stop))
 
 top_level_tokens: list[type[Token2]] = [
     Identifier,
@@ -275,10 +291,10 @@ top_level_tokens: list[type[Token2]] = [
     # ParametricEscape,
     Keyword,
     Hashtag,
-    Integer,
-    Float,
-    Block,
-    OpChain,
+    # Integer,  #either need to swap integer and float (and be careful about order) or add support for longest match
+    # Float,
+    # Block,
+    # OpChain,  # same deal with operators and opchains. opchains need to check first (but they will consume more tokens)
     Operator,
     Whitespace,
 ]
@@ -294,15 +310,10 @@ def tokenize2_inner(tokens:list[t1.Token], ctx:Context, start:int=0, stop:int=No
     if stop is None: stop = len(tokens)
     if stop > len(tokens): raise ValueError(f"INTERNAL ERROR: stop index out of range: {stop} > {len(tokens)}")
     while start < stop:
-        for token_cls in top_level_tokens:
-            res = token_cls.eat(tokens, ctx, start)
-            if res is not None:
-                num_eaten, token = res
-                processed.append(token)
-                start += num_eaten
-                break
-        else:
-            # TODO: proper error reporting
+        matches = [token_cls.eat(tokens, ctx, start) for token_cls in top_level_tokens]
+        matches = list(filter(None, matches))
+        if len(matches) == 0:
+            # TODO: more specific error reporting based on the case
             error = Error(
                 srcfile=ctx.srcfile,
                 title=f'No token found',
@@ -312,6 +323,25 @@ def tokenize2_inner(tokens:list[t1.Token], ctx:Context, start:int=0, stop:int=No
                 hint=f'TODO: better error analysis'
             )
             error.throw()
+        if len(matches) > 1:
+            # try for longest match, otherwise probably ambiguous error
+            longest_match_length = max(length for length, _ in matches)
+            matches = [(match_length, token) for match_length, token in matches if match_length == longest_match_length]
+            if len(matches) > 1:
+                # TODO: more specific error reporting based on the case
+                error = Error(
+                    srcfile=ctx.srcfile,
+                    title=f'Multiple tokens matched',
+                    pointer_messages=[
+                        Pointer(span=Span(tokens[0].loc.start, tokens[0].loc.start), message=f'Multiple tokens matched'),
+                    ],
+                    hint=f'The following tokens matched: {matches}\nTODO: provide better explanation for how to disambiguate'
+                )
+                error.throw()
+    
+        match_length, token = matches[0]
+        processed.append(token)
+        start += match_length
 
     return processed
 
