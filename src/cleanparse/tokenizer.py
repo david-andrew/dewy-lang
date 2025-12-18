@@ -667,7 +667,6 @@ class StringEscape(Token[StringBody]):
         - \v vertical tab
         - \a alert
         - \0 null
-        - \x## or \X## for a raw byte value. Must be two hex digits [0-9a-fA-F]
         - \u#### or \U#### for a unicode codepoints. Must be four hex digits [0-9a-fA-F]
         - \<newline> a special case that basically ignores the newline and continues the string. Useful for ignoring newlines in multiline strings.
 
@@ -690,8 +689,8 @@ class StringEscape(Token[StringBody]):
         prefix_len = 2
 
         # hex/unicode
-        if src[1] in 'uUxX':
-            expected_digits = 4 if src[1] in 'uU' else 2
+        if src[1] in 'uU':
+            expected_digits = 4
             actual_digits = 0
             while (
                 actual_digits < expected_digits
@@ -714,7 +713,7 @@ class StringEscape(Token[StringBody]):
             srcfile=ctx.srcfile,
             title="Incomplete escape sequence at end of string",
             pointer_messages=Pointer(span=Span(offset, offset+1), message="incomplete escape sequence"),
-            hint="Finish the escape sequence (e.g. `\\n`, `\\xFF`, `\\u1234`) or remove the trailing backslash.",
+            hint="Finish the escape sequence (e.g. `\\n`, `\\u1234`, etc.) or remove the trailing backslash.",
         )
         error.throw()
 
@@ -725,7 +724,7 @@ class StringEscape(Token[StringBody]):
         offset = ctx.srcfile.body.index(src)
         
         # build up error message
-        name = 'unicode' if src[1] in 'uU' else 'hex'
+        name = 'unicode'
         remaining_digits_expected = expected_digits - actual_digits
         found_plural = 's' if actual_digits > 1 else ''
         expected_plural = 's' if remaining_digits_expected > 1 else ''
@@ -751,20 +750,12 @@ class ParametricStringEscape(Token[StringBody]):
     @staticmethod
     def eat(src:str, ctx:StringBody) -> int|None:
         r"""
-        - \u{##..##} or \U{##..##} for an arbitrary unicode character. Inside the braces defaults to hex, and users can get decimal by using the 0d prefix
-        - \x{##..##} or \X{##..##} for arbitrary byte sequences. Same idea as unicode--defaults to hex, and 0d prefix for decimal
+        \u{##..##} or \U{##..##} for an arbitrary unicode character. Inside the braces defaults to hex, and users can get decimal by using the 0d prefix
         
         The block can also be an arbitrary expression, so long as it evaluates to an integer
         """
-        if len(src) < 3:
+        if not src[:3].lower() == '\\u{':
             return None
-        if src[0] != '\\':
-            return None
-        if src[1] not in 'uUxX':
-            return None
-        if src[2] != '{':
-            return None
-        
         return 3
     
     def action_on_eat(self, ctx:StringBody): return Push(BlockBody(ctx.srcfile, self, base16))
