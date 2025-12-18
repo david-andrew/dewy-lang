@@ -1,4 +1,4 @@
-from typing import Generator, Any
+from typing import Generator, Any, overload
 
 def first_line(s:str) -> str:
     return s.split('\n')[0]
@@ -71,114 +71,22 @@ def ordinalize(n: int) -> str:
     return f"{prefix}{n}{suffix}"
 
 
-def index_of(item: Any, items: list) -> int|None:
-    """determine the index of the item in the list, or None if not found. Matches on Identity (i.e. `A is B`)"""
-    return next((i for i, t in enumerate(items) if t is item), None)
 
+class JumpableIterator[T]:
+    def __init__(self, items: list[T], start: int = 0, stop: int | None = None) -> None:
+        self.items = items
+        self.i = start
+        self.stop = stop if stop is not None else len(items)
 
-# from dataclasses import dataclass
-# from collections.abc import MutableSequence
+    def __iter__(self) -> Generator[T, None, None]:
+        return self
 
-# @dataclass
-# class ListView(MutableSequence):
-#     data: list
-#     start: int = 0
-#     stop: int | None = None
-
-#     def __post_init__(self):
-#         if self.stop is None:
-#             self.stop = len(self.data)
-#         # basic normalization (supports negative indices)
-#         n = len(self.data)
-#         if self.start < 0:
-#             self.start += n
-#         if self.stop < 0:
-#             self.stop += n
-
-#     def __len__(self):
-#         return max(0, self.stop - self.start)
-
-#     def _check_index(self, i: int) -> int:
-#         if i < 0:
-#             i += len(self)
-#         if not (0 <= i < len(self)):
-#             raise IndexError(i)
-#         return self.start + i
-
-#     def __getitem__(self, i):
-#         if isinstance(i, slice):
-#             # return another view (still referencing same backing list)
-#             start, stop, step = i.indices(len(self))
-#             if step != 1:
-#                 raise ValueError("step != 1 not supported in this simple view")
-#             return ListView(self.data, self.start + start, self.start + stop)
-#         return self.data[self._check_index(i)]
-
-#     def __setitem__(self, i, value):
-#         self.data[self._check_index(i)] = value
-
-#     def __delitem__(self, i):
-#         del self.data[self._check_index(i)]
-#         self.stop -= 1  # keep view end aligned with backing changes
-
-#     def insert(self, i, value):
-#         # insert into backing list within view bounds
-#         if i < 0:
-#             i += len(self)
-#         i = max(0, min(i, len(self)))
-#         self.data.insert(self.start + i, value)
-#         self.stop += 1
-
-
-
-# from collections.abc import MutableSequence
-
-# class ListView(MutableSequence):
-#     def __init__(self, data, start=0, stop=None):
-#         self.data = data
-#         self.start = start
-#         self.stop = len(data) if stop is None else stop
-#         self._normalize()
-
-#     def _normalize(self):
-#         n = len(self.data)
-#         if self.start < 0:
-#             self.start += n
-#         if self.stop < 0:
-#             self.stop += n
-#         self.start = max(0, self.start)
-#         self.stop = min(n, self.stop)
-
-#     def __len__(self):
-#         return max(0, self.stop - self.start)
-
-#     def _check_index(self, i):
-#         if i < 0:
-#             i += len(self)
-#         if not 0 <= i < len(self):
-#             raise IndexError(i)
-#         return self.start + i
-
-#     def __getitem__(self, i):
-#         if isinstance(i, slice):
-#             start, stop, step = i.indices(len(self))
-#             if step != 1:
-#                 raise ValueError("slice steps other than 1 not supported")
-#             return ListView(self.data,
-#                             self.start + start,
-#                             self.start + stop)
-#         return self.data[self._check_index(i)]
-
-#     def __setitem__(self, i, value):
-#         self.data[self._check_index(i)] = value
-
-#     def __delitem__(self, i):
-#         del self.data[self._check_index(i)]
-#         self.stop -= 1
-
-#     def insert(self, i, value):
-#         if i < 0:
-#             i += len(self)
-#         i = max(0, min(i, len(self)))
-#         self.data.insert(self.start + i, value)
-#         self.stop += 1
+    def __next__(self) -> T:
+        if self.i >= self.stop or self.i >= len(self.items):
+            raise StopIteration
+        item = self.items[self.i]
+        self.i += 1
+        return item
+    
+    def jump_forward(self, offset:int) -> None:
+        self.i += offset
