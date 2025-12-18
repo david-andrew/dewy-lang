@@ -216,6 +216,7 @@ class Token[T:Context](ABC):
     """
     src: str
     loc: Span
+    idx: int
     valid_contexts: ClassVar[set[type[Context]]] = None # must be defined by subclass type parameters
 
     def __repr__(self) -> str:
@@ -1204,7 +1205,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
 
         # add the token to the list of tokens
         length, token_cls = matches[0]
-        token = token_cls(src[i:i+length], Span(i, i+length))
+        token = token_cls(src[i:i+length], Span(i, i+length), len(tokens))
         action = token.action_on_eat(ctx)
         if action is not None:
             if isinstance(action, Push):
@@ -1212,6 +1213,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
             elif isinstance(action, Pop):
                 ctx_history.append(ctx_stack.pop())
             else:
+                # unreachable
                 raise ValueError(f"INTERNAL ERROR: invalid context action: {action=}. Expected Push or Pop")
         tokens.append(token)
         i += length
