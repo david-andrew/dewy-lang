@@ -137,7 +137,9 @@ legal_heredoc_delim_chars = (
 @dataclass
 class Context(ABC):
     srcfile: SrcFile
+    tokens_so_far: 'list[Token]'
 
+@dataclass
 class Root(Context):
     default_base: BasePrefix = base10
 
@@ -440,7 +442,7 @@ class LeftSquareBracket(Token[GeneralBodyContexts]):
             return 1
         return None
     
-    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(BlockBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 
 class RightSquareBracket(Token[BlockBody]):
@@ -483,7 +485,7 @@ class LeftParenthesis(Token[GeneralBodyContexts]):
             return 1
         return None
     
-    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(BlockBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 
 class RightParenthesis(Token[BlockBody]):
@@ -526,7 +528,7 @@ class LeftCurlyBrace(Token[BodyOrStringContexts]):
             return 1
         return None
     
-    def action_on_eat(self, ctx:BodyOrStringContexts): return Push(BlockBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:BodyOrStringContexts): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 
 class RightCurlyBrace(Token[BlockBody]):
@@ -569,7 +571,7 @@ class LeftAngleBracket(Token[GeneralBodyContexts]):
             return 1
         return None
     
-    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(TypeBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(TypeBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 
 class RightAngleBracket(Token[TypeBody]):
@@ -615,7 +617,7 @@ class StringQuoteOpener(Token[GeneralBodyContexts]):
         # otherwise, eat the entire opening quote
         return i
 
-    def action_on_eat(self, ctx:GeneralBodyContexts) -> ContextAction: return Push(StringBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:GeneralBodyContexts) -> ContextAction: return Push(StringBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 class StringQuoteCloser(Token[StringContexts]):
     matching_quote: 'StringQuoteOpener|RawStringQuoteOpener' = None
@@ -758,7 +760,7 @@ class ParametricStringEscape(Token[StringBody]):
             return None
         return 3
     
-    def action_on_eat(self, ctx:StringBody): return Push(BlockBody(ctx.srcfile, self, base16))
+    def action_on_eat(self, ctx:StringBody): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self, base16))
 
 class RawStringQuoteOpener(Token[GeneralBodyContexts]):
     matching_quote: 'StringQuoteCloser' = None  # raw strings are closed by regular quotes
@@ -772,7 +774,7 @@ class RawStringQuoteOpener(Token[GeneralBodyContexts]):
         assert i is not None, f"INTERNAL ERROR: failed to get quote part of raw string opener when already verified its presence. {ctx=}, {src=}"
         return i + 1
     
-    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(RawStringBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(RawStringBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 
 class RawStringChars(Token[RawStringBody]):
@@ -799,7 +801,7 @@ class RestOfFileStringQuote(Token[Root]):
             return None
         return 4
     
-    def action_on_eat(self, ctx:Root): return Push(StringBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:Root): return Push(StringBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 class RawRestOfFileString(Token[Root]):
     @staticmethod
@@ -840,7 +842,7 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
 
         return i + 1
     
-    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(StringBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(StringBody(ctx.srcfile, ctx.tokens_so_far, self))
 
     def get_delim(self) -> str:
         """get the delimiter from the string quote"""
@@ -936,7 +938,7 @@ class RawHeredocStringOpener(Token[GeneralBodyContexts]):
             return None
         return i + 1  # +1 for the `r` in the prefix
     
-    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(RawStringBody(ctx.srcfile, self))
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(RawStringBody(ctx.srcfile, ctx.tokens_so_far, self))
 
     def get_delim(self) -> str:
         """get the delimiter from the string quote"""
@@ -988,6 +990,31 @@ class Number(Token[GeneralBodyContexts]):
         #doesn't modify the context stack
         return None
 
+class ExponentMarker(Token[GeneralBodyContexts]):
+    power: Number
+
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        """
+        an exponent marker is a single character `eE` or `pP` with a number before and a number after
+        This is specifically to disambiguate for floats where the exponent part is read as an identifier
+        e.g. 1e10 looks like <number 1><identifier e10>
+        """
+        if len(ctx.tokens_so_far) == 0 or not isinstance(ctx.tokens_so_far[-1], Number):
+            return None
+        if len(src) < 2:
+            return None
+        if not src[0] in 'eEpP':
+            return None
+        # don't check for +/- because it's not part of what we're trying to disambiguate
+        if (i:=Number.eat(src[1:], ctx)) is None:
+            return None
+        return i + 1
+    def action_on_eat(self, ctx:GeneralBodyContexts):
+        self.power = Number(self.src[1:], Span(self.loc.start+1, self.loc.stop), self.idx)
+        self.power.action_on_eat(ctx)
+        return None
+        
 
 ##### TOKEN CLASS PRECEDENCE #####
 # for now, just use a simple list of pairs specifying cases of A > B
@@ -995,6 +1022,7 @@ class Number(Token[GeneralBodyContexts]):
 # CAUTION: ensure no cycles in precedence levels
 token_precedence: set[tuple[type[Token], type[Token]]] = [
     (Symbol, Identifier),
+    (ExponentMarker, Identifier),
     # TODO: other cases...
 ]
 
@@ -1118,9 +1146,9 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
 # tokenization process described in the module docstring.
 
 def tokenize(srcfile: SrcFile) -> list[Token]:
-    ctx_stack: list[Context] = [Root(srcfile)]
-    ctx_history: list[Context] = []
     tokens: list[Token] = []
+    ctx_stack: list[Context] = [Root(srcfile, tokens_so_far=tokens)]
+    ctx_history: list[Context] = []
     src = srcfile.body
 
     i = 0
