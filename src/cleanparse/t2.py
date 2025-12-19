@@ -400,7 +400,6 @@ def tokenize2_inner(tokens:list[t1.Token], ctx:Context, start:int=0, stop:int=No
     while start < stop:
         matches = [token_cls.eat(tokens, ctx, start) for token_cls in top_level_tokens]
         matches = list(filter(None, matches))
-        print(matches)
         if len(matches) == 0:
             # TODO: more specific error reporting based on the case
             error = Error(
