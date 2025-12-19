@@ -11,7 +11,7 @@ Additionally symbols are separated into operators and identifiers. And identifie
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from itertools import groupby
-from .reporting import Span, SrcFile, Error, Pointer
+from .reporting import Span, SrcFile, Info, Error, Pointer
 from . import tokenizer as t1
 from .utils import JumpableIterator
 from typing import Literal
@@ -63,8 +63,27 @@ class InedibleToken2(Token2):
         raise NotImplementedError(f'{cls.__name__} should not be constructed via .eat(). Instead some other token should construct it directly via {cls.__name__}(...)')
 
 @dataclass
+class Exponent:
+    value: t1.Number
+    positive: bool=True # true for positive, false for negative, e.g. 1e-2 is positive=False
+    binary: bool=False  # true when the exponent is a power of 2 (e.g. 0x1.0x8p10)
+
+@dataclass
 class Float(Token2):
+    whole: t1.Number
+    fraction: t1.Number|None
+    exponent: Exponent|None
+    
     """
+    # TODO: 1e9 is technically an integer, so probably later we'll have to pull those out
+    Patterns:
+    <number><eEpP><number>
+    <number><eEpP><+-><number>
+    <number><dot><number>
+    <number><dot><number><eEpP><number>
+    <number><dot><number><eEpP><+-><number>
+
+    
     Patterns:
     3.14
     1.0
@@ -99,7 +118,57 @@ class Float(Token2):
     """
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Float]|None':
-        raise NotImplementedError()
+        if start + 2 >= len(tokens):
+            return None
+        ########## Whole number part ##########
+        if not isinstance(tokens[start], t1.Number):
+            return None
+        whole = tokens[start]
+
+        ########## Fractional part ##########
+        i = 1
+        fraction = None
+        if (
+            start + i + 1 < len(tokens)
+            and isinstance((dot:=tokens[start + i]), t1.Symbol) and dot.src == '.'
+            and isinstance(tokens[start + i + 1], t1.Number)
+        ):
+            fraction = tokens[start + i + 1]
+            i += 2
+        
+        ########## Exponent part ##########
+        exponent = None
+        # weird disambiguation case where the exponent part looked like an identifier
+        if start + i < len(tokens) and isinstance(marker:=tokens[start + i], t1.ExponentMarker):
+            exponent = Exponent(marker.power)
+            i += 1
+        # <eEpP><number>
+        elif (
+            start + i + 1 < len(tokens)
+            and isinstance((e:=tokens[start + i]), t1.Identifier) and e.src in 'eEpP'
+            and isinstance(tokens[start + i + 1], t1.Number)
+        ):
+            exponent = Exponent(tokens[start + i + 1], positive=True, binary=e.src in 'pP')
+            i += 2
+        # <eEpP><+-><number>
+        elif (
+            start + i + 2 < len(tokens)
+            and isinstance((e:=tokens[start + i]), t1.Identifier) and e.src in 'eEpP'
+            and isinstance((sign:=tokens[start + i + 1]), t1.Symbol) and sign.src in '+-'
+            and isinstance(tokens[start + i + 2], t1.Number)
+        ):
+            exponent = Exponent(tokens[start + i + 2], positive=sign.src == '+', binary=e.src in 'pP')
+            i += 3
+        
+
+        ########## Return result ##########
+        # not a float unless there was at least one of these
+        if fraction is None and exponent is None:
+            return None
+        
+        span = Span(whole.loc.start, tokens[start + i - 1].loc.stop)
+        return i, Float(span, whole, fraction, exponent)
+        
 
 @dataclass
 class String(Token2):
@@ -253,6 +322,8 @@ class Identifier(Token2):
 
 @dataclass
 class Operator(Token2):
+    symbol: str
+
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Operator]|None':
         token = tokens[start]
@@ -295,7 +366,7 @@ class Whitespace(Token2): # so we can invert later for juxtapose
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Whitespace]|None':
         i = 0
-        while start + i < len(tokens) and isinstance(tokens[start + i], (t1.WhiteSpace, t1.LineComment, t1.BlockComment)):
+        while start + i < len(tokens) and isinstance(tokens[start + i], (t1.Whitespace, t1.LineComment, t1.BlockComment)):
             i += 1
         if i == 0: return None
         return i, Whitespace(Span(tokens[start].loc.start, tokens[start + i - 1].loc.stop))
@@ -308,7 +379,7 @@ top_level_tokens: list[type[Token2]] = [
     Keyword,
     Hashtag,
     # Integer,
-    # Float,
+    Float,
     Block,
     # OpChain,
     Operator,
@@ -328,13 +399,14 @@ def tokenize2_inner(tokens:list[t1.Token], ctx:Context, start:int=0, stop:int=No
     while start < stop:
         matches = [token_cls.eat(tokens, ctx, start) for token_cls in top_level_tokens]
         matches = list(filter(None, matches))
+        print(matches)
         if len(matches) == 0:
             # TODO: more specific error reporting based on the case
             error = Error(
                 srcfile=ctx.srcfile,
                 title=f'No token found',
                 pointer_messages=[
-                    Pointer(span=Span(tokens[0].loc.start, tokens[0].loc.start), message=f'Unrecognized starting here'),
+                    Pointer(span=Span(tokens[start].loc.start, tokens[start].loc.start), message=f'Unrecognized starting here'),
                 ],
                 hint=f'TODO: better error analysis'
             )
@@ -373,7 +445,7 @@ def test():
     src = path.read_text()
     srcfile = SrcFile(path, src)
     tokens2 = tokenize2(srcfile)
-    print(tokens_to_report(tokens2, srcfile))
+    print(tokens_to_report(tokens2, srcfile, {Whitespace}))
 
 
 
