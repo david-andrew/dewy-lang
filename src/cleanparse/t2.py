@@ -45,6 +45,7 @@ escape_map: dict[str, str] = {
 class Context:
     srcfile: SrcFile
 
+
 @dataclass
 class Token2(ABC):
     loc: Span
@@ -52,6 +53,14 @@ class Token2(ABC):
     @staticmethod
     @abstractmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Token2]|None': ...
+
+
+@dataclass
+class InedibleToken2(Token2):
+    """For Token2's that are not constructed via the normal .eat() method. instead other tokens may construct them directly"""
+    @classmethod
+    def eat(cls, tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, InedibleToken2]|None':
+        raise NotImplementedError(f'{cls.__name__} should not be constructed via .eat(). Instead some other token should construct it directly via {cls.__name__}(...)')
 
 @dataclass
 class Float(Token2):
@@ -190,21 +199,13 @@ class String(Token2):
         return combined
 
 @dataclass
-class ParametricEscape(Token2):
+class ParametricEscape(InedibleToken2):
     block: 'Block'
-    @staticmethod
-    def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, ParametricEscape]|None':
-        raise NotImplementedError()
 
 @dataclass
-class IString(Token2):
+class IString(InedibleToken2):
+    """Any string that contains an expression or interpolation (includes parametric unicode+hex escapes)"""
     content: 'list[str | ParametricEscape | Block]'
-    """
-    Any string that contains an expression or interpolation (includes parametric unicode+hex escapes)
-    """
-    @staticmethod
-    def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, IString]|None':
-        raise NotImplementedError('IString does not implement eat. Instead use String.eat which may return an IString if any interpolations are present')
 
 @dataclass
 class Block(Token2):
@@ -215,7 +216,19 @@ class Block(Token2):
     """
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Block]|None':
-        raise NotImplementedError()
+        opener = tokens[start]
+
+        if not isinstance(opener, (t1.LeftCurlyBrace, t1.LeftParenthesis, t1.LeftSquareBracket, t1.LeftAngleBracket)):
+            return None
+
+        closer = opener.matching_right
+        delims = opener.src + closer.src
+        span = Span(opener.loc.start, closer.loc.stop)
+        body_start, body_stop = start + 1, closer.idx
+        inner = tokenize2_inner(tokens, ctx, body_start, body_stop)
+        assert delims in ['{}', '[]', '()', '[)', '(]', '<>'], f'INTERNAL ERROR: invalid block delimiter: {delims}'
+        return closer.idx - start + 1, Block(span, inner, delims)
+        
 
 @dataclass
 class OpChain(Token2):
@@ -270,6 +283,9 @@ class Hashtag(Token2):
 
 @dataclass
 class Integer(Token2):
+    value: int
+    base: t1.BasePrefix
+    leading_zeros: int
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Integer]|None':
         raise NotImplementedError()
@@ -287,14 +303,14 @@ class Whitespace(Token2): # so we can invert later for juxtapose
 top_level_tokens: list[type[Token2]] = [
     Identifier,
     String,
-    # IString,
-    # ParametricEscape,
+    # IString,           # not included in top level tokens because created by String.eat
+    # ParametricEscape,  # not included in top level tokens because created by String.eat
     Keyword,
     Hashtag,
-    # Integer,  #either need to swap integer and float (and be careful about order) or add support for longest match
+    # Integer,
     # Float,
-    # Block,
-    # OpChain,  # same deal with operators and opchains. opchains need to check first (but they will consume more tokens)
+    Block,
+    # OpChain,
     Operator,
     Whitespace,
 ]
