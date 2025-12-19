@@ -354,12 +354,13 @@ class Hashtag(Token2):
 
 @dataclass
 class Integer(Token2):
-    value: int
-    base: t1.BasePrefix
-    leading_zeros: int
+    value: t1.Number
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Integer]|None':
-        raise NotImplementedError()
+        token = tokens[start]
+        if isinstance(token, t1.Number):
+            return 1, Integer(token.loc, token)
+        return None
 
 @dataclass
 class Whitespace(Token2): # so we can invert later for juxtapose
@@ -378,7 +379,7 @@ top_level_tokens: list[type[Token2]] = [
     # ParametricEscape,  # not included in top level tokens because created by String.eat
     Keyword,
     Hashtag,
-    # Integer,
+    Integer,
     Float,
     Block,
     # OpChain,
