@@ -280,14 +280,14 @@ class Token[T:Context](ABC):
 # general body contexts and usually don't affect the context stack.
 
 # TODO: want a warning if there is a lone \r not followed by \n
-class WhiteSpace(Token[GeneralBodyContexts]):
+class Whitespace(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """white space is any sequence of whitespace characters"""
         i = 0
         while i < len(src) and src[i] in whitespace:
             if src[i] == '\r' and not src[i+1:].startswith('\n'):
-                WhiteSpace.warning_lone_carriage_return(src, i, ctx)
+                Whitespace.warning_lone_carriage_return(src, i, ctx)
             i += 1
         return i or None
     
@@ -1256,7 +1256,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     
     return tokens
 
-def tokens_to_report(tokens: list[Token], srcfile: SrcFile, show_whitespace: bool = False) -> Info:
+def tokens_to_report(tokens: list[Token], srcfile: SrcFile, blacklist: set[type[Token]] = set()) -> Info:
     """Convert a list of tokens to a report of the tokens consumed so far."""
     return Info(
         srcfile=srcfile,
@@ -1265,7 +1265,7 @@ def tokens_to_report(tokens: list[Token], srcfile: SrcFile, show_whitespace: boo
             span=token.loc,
             message=f"{token.__class__.__name__}",
             color=hash(token.__class__)
-        ) for token in tokens if show_whitespace or not isinstance(token, WhiteSpace)],
+        ) for token in tokens if token.__class__ not in blacklist],
     )
 
 def test():
@@ -1280,7 +1280,7 @@ def test():
     tokens = tokenize(srcfile)
 
     # to print out report of all tokens eaten    
-    print(tokens_to_report(tokens, srcfile))
+    print(tokens_to_report(tokens, srcfile, {Whitespace}))
 
 if __name__ == '__main__':
     test()
