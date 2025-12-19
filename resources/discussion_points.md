@@ -3698,3 +3698,64 @@ for digit in reversed(digits):
 
 
 For bases that would allow it, include separators: ` `, `_`, and `:`
+
+
+
+## String Representations
+How are strings represented internally, and how do we deal with the different semantics?
+One approach:
+- internally store strings as utf-8
+- have easy methods for converting to different formats
+    - graphemes
+    - unicode
+    - utf8
+    - utf16
+    - utf32
+- doing a conversion caches the converted value
+- indexing, slicing, iteration, etc. default to unicode level
+```
+a = '👨‍👩‍👧‍👦'        % (man, zwj, woman, zwj, girl, zwj, boy)
+a.length =? 7   % 7 unicode characters
+a[3] =? '\u200d'% zero-width-join. tbd if can do `a[3] =? 0x200d` i.e. compare string to int. maybe type system will allow
+loop i in a ... % iterates over man, zwj, woman, zwj, girl, zwj, boy
+
+b = a.graphemes % GraphemeString (just a view into the string object, compute graphemes of string, cache results on object)
+b.length =? 1   % just the single combined grapheme
+b[0] =? <tbd representation for whole graphemes>
+loop i in b ... % iterates over the single grapheme
+
+c:array<uint16> = a.utf16
+d:array<uint32> = a.utf32
+e:array<uint8> = a.utf8  % no-op
+
+
+
+type(a) =? array<scalar> =? ScalarString
+type(b) =? array<grapheme> =? GraphemeString
+type(c) =? array<uint16>
+type(d) =? array<uint32>
+type(e) =? array<uint8>
+```
+Note that under the hood, `a` probably won't be stored as `array<scalar>`. Instead it'll probably be stored as utf8 under the hood. TBD though
+
+Normalization is also a thing to think about
+```
+a = 'é'.grapheme
+b = 'é'.grapheme
+```
+i.e. a is a regular e with a COMBINING ACUTE ACCENT, and b is the single scalar U+00E9. `a =? b` would be false by default, but there should be easy ways to normalize, e.g.
+```
+a.nfd =? b.nfd   % compare decomposed normalized versions
+a.nfc =? b.nfc   % compare composed normalized versions
+
+% also support compatibility version
+a.nfkc
+a.nfkd
+```
+
+
+Also probably would be a good idea to warn on any strings that mix composed + decomposed unicode. Perhaps with types we can keep track of if strings are composed or decomposed or arbitrary (i.e. formed from arbitrary input), and if we ever notice composed+decomposed, we have a warning
+```
+type('é') =? string<scalar mode=decomposed>
+type('é') =? string<scalar mode=composed>
+```
