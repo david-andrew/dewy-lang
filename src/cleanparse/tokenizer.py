@@ -7,10 +7,11 @@ Each concrete token is a subclass of `Token[T]`, where `T` is one or more
 `Context` types indicating where that token is valid (e.g. `Root`, `StringBody`, `BlockBody`, etc.).
 `Token.__init_subclass__` introspects the type parameter and builds a `valid_contexts` set for each token class.
 
-During `tokenize`, we never hard-code a list of token types. Instead, we:
+During `tokenize`, we never hard-code a list of token types.
+Instead, we dynamically (with caching) determine which tokens are allowed in a given context:
 - look up all subclasses of `Token` via `descendants(Token)`,
 - filter them by whether the current context type appears in their `valid_contexts`,
-- then call `eat(src[i:], ctx)` on each allowed token class.
+- then call `eat(src[i:], ctx)` on each allowed token class remaining.
 
 Any token whose `eat` method returns a non-`None` length is considered a match.
 We keep only the longest matches, then resolve any remaining ambiguities via `token_precedence`.
@@ -61,11 +62,10 @@ start_characters = alpha | greek | math | misc # | latin | units
 continue_characters = start_characters | digits
 decoration_characters = superscripts | subscripts | misc_decorations | primes
 
-# note that the prefix is case insensitive, so call .lower() when matching the prefix
+# note that the prefix is case insensitive, so call .casefold() when matching the prefix
 # numbers may have _ as a separator (if _ is not in the set of digits)
 BasePrefix: TypeAlias = Literal['0b', '0t', '0q', '0s', '0o', '0d', '0z', '0x', '0u', '0r', '0g']
-base10: BasePrefix = '0d'
-base16: BasePrefix = '0x'
+base_prefixes: set[BasePrefix] = set(BasePrefix.__args__)
 base_digits: dict[BasePrefix, set[str]] = {
     '0b': {*'01'},  # binary
     '0t': {*'012'},  # ternary
@@ -93,8 +93,12 @@ base_radixes: dict[BasePrefix, int] = {
     '0g': 64,
 }
 
+# commonly used bases
+base10: BasePrefix = '0d'
+base16: BasePrefix = '0x'
+
 @cache
-def is_based_digit(digit: str, base: str) -> bool:
+def is_based_digit(digit: str, base: BasePrefix) -> bool:
     """determine if a digit is valid in a given base"""
     digits = base_digits[base]
     return digit in digits
@@ -139,6 +143,11 @@ class Context(ABC):
     srcfile: SrcFile
     tokens_so_far: 'list[Token]'
 
+    def current_tokenization_position(self) -> int:
+        """Return the current position in the source string that the tokenizer is at"""
+        if len(self.tokens_so_far) == 0: return 0
+        return self.tokens_so_far[-1].loc.stop
+
 @dataclass
 class Root(Context):
     default_base: BasePrefix = base10
@@ -149,7 +158,7 @@ class StringBody(Context):
 
 @dataclass
 class RawStringBody(Context):
-    opening_quote: 'RawStringQuoteOpener|RawHeredocStringOpener'
+    opening_quote: 'RawStringQuoteOpener|RawHeredocStringOpener|RawRestOfFileStringQuote'
 
 @dataclass
 class BlockBody(Context):
@@ -204,9 +213,10 @@ class Token[T:Context](ABC):
         will be considered in any of `Root`, `BlockBody`, or `TypeBody` contexts.
 
     The main `tokenize` loop discovers token classes dynamically via
-    `descendants(Token)` and, at each position, filters them to those whose
-    `valid_contexts` contains the current context type. For each valid token
-    class it calls its `eat(src[i:], ctx)` method; eat methods return an integer length
+    `descendants(Token)` and caches, for each `Context` type, the list of token
+    classes whose `valid_contexts` contains that context type. For each token
+    class allowed in the current context, it calls its `eat(src[i:], ctx)` method;
+    eat methods return an integer length
     to indicate a match (and how many characters it is) or `None` if no match. 
     The tokenizer uses the longest match strategy to break ties, and may further
     break ties using `token_precedence` if multiple longest matches have the same length.
@@ -292,7 +302,7 @@ class Whitespace(Token[GeneralBodyContexts]):
         return i or None
     
     @staticmethod
-    def warning_lone_carriage_return(src: str, i: int, ctx: GeneralBodyContexts) -> NoReturn:
+    def warning_lone_carriage_return(src: str, i: int, ctx: GeneralBodyContexts):
         warning = Warning(
             srcfile=ctx.srcfile,
             title=f"Lone carriage return",
@@ -346,7 +356,7 @@ class BlockComment(Token[GeneralBodyContexts]):
                 i += 1
 
         # error, unterminated block comment(s)
-        span_offset = ctx.srcfile.body.index(src)
+        span_offset = ctx.current_tokenization_position()
         plural = 's' if len(openers) > 1 else ''
         error = Error(ctx.srcfile, title=f"{len(openers)} unterminated block comment{plural}", pointer_messages=[
             *(Pointer(Span(opener.start + span_offset, opener.stop + span_offset), message=f"{ordinalize(i+1)} unterminated block comment opened here{f' (inside {ordinalize(i)})' if i > 0 else ''}")
@@ -710,7 +720,7 @@ class StringEscape(Token[StringBody]):
     @staticmethod
     def error_incomplete_string_escape(src: str, ctx: StringBody) -> NoReturn:
         """Helper for when a string escape is incomplete"""
-        offset = ctx.srcfile.body.index(src)
+        offset = ctx.current_tokenization_position()
         error = Error(
             srcfile=ctx.srcfile,
             title="Incomplete escape sequence at end of string",
@@ -723,7 +733,7 @@ class StringEscape(Token[StringBody]):
     @staticmethod
     def error_invalid_width_hex_escape(src: str, ctx: StringBody, expected_digits: int, actual_digits: int) -> NoReturn:
         """Helper for when a hex or unicode escape doesn't have enough digits"""
-        offset = ctx.srcfile.body.index(src)
+        offset = ctx.current_tokenization_position()
         
         # build up error message
         name = 'unicode'
@@ -803,7 +813,7 @@ class RestOfFileStringQuote(Token[Root]):
     
     def action_on_eat(self, ctx:Root): return Push(StringBody(ctx.srcfile, ctx.tokens_so_far, self))
 
-class RawRestOfFileString(Token[Root]):
+class RawRestOfFileStringQuote(Token[Root]):
     @staticmethod
     def eat(src:str, ctx:Root) -> int|None:
         """a raw string that has an opening delimiter but no closing delimiter (consumes until EOF)
@@ -811,7 +821,9 @@ class RawRestOfFileString(Token[Root]):
         """
         if not src.startswith('#r"""') and not src.startswith("#r'''"):
             return None
-        return len(src)
+        return 5
+    
+    def action_on_eat(self, ctx:Root): return Push(RawStringBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 
 class HeredocStringOpener(Token[GeneralBodyContexts]):
@@ -851,7 +863,7 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
     @staticmethod
     def error_incomplete_heredoc_delimiter(src: str, ctx: GeneralBodyContexts, i: int) -> NoReturn:
         """Helper for when a heredoc delimiter is incomplete"""
-        offset = ctx.srcfile.body.index(src)
+        offset = ctx.current_tokenization_position()
         quote = src[1]
         wrong_quote = '"' if quote == "'" else "'"
         wrong_quoted = src[i:].startswith(wrong_quote)
@@ -879,7 +891,7 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
 
         # ensure the delimiter isn't all space, and also may not start or end with space
         if src[2:i].strip() == '':
-            offset = ctx.srcfile.body.index(src)
+            offset = ctx.current_tokenization_position()
             error = Error(
                 srcfile=ctx.srcfile,
                 title=f"Heredoc delimiter cannot be all space",
@@ -889,7 +901,7 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
             error.throw()
         # ensure the delimiter doesn't start or end with space
         if delim.startswith(' ') or delim.endswith(' '):
-            offset = ctx.srcfile.body.index(src)
+            offset = ctx.current_tokenization_position()
             leading_space_length = len(delim) - len(delim.lstrip())
             trailing_space_length = len(delim) - len(delim.rstrip())
             pointer_messages=[
@@ -956,18 +968,19 @@ class Number(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """a based number is a sequence of 1 or more digits, optionally preceded by a (case-insensitive) base prefix"""
-        # try all known bases
-        for base, digits in base_digits.items():
-            # check if the src starts with the base prefix
-            if src[:2].casefold().startswith(base):
-                i = 2
-                # Require at least one digit
-                if not (i < len(src) and src[i] in digits):
-                    return None
-                # consume digits or underscores
-                while i < len(src) and (src[i] in digits or src[i] == '_'):
-                    i += 1
-                return i
+        
+        # try a number with a base prefix
+        if src[:2].casefold() in base_prefixes:
+            base = src[:2].casefold()
+            digits = base_digits[base]
+            i = 2
+            # Require at least one digit
+            if not (i < len(src) and src[i] in digits):
+                return None
+            # consume digits or underscores
+            while i < len(src) and (src[i] in digits or src[i] == '_'):
+                i += 1
+            return i
         
         # try number with no prefix
         base = ctx.default_base if isinstance(ctx, BlockBody) else base10
@@ -1020,7 +1033,7 @@ class ExponentMarker(Token[GeneralBodyContexts]):
 # for now, just use a simple list of pairs specifying cases of A > B
 # TBD if we want a more global list, or what, but this should be good for now
 # CAUTION: ensure no cycles in precedence levels
-token_precedence: set[tuple[type[Token], type[Token]]] = [
+token_precedence: list[tuple[type[Token], type[Token]]] = [
     (Symbol, Identifier),
     (ExponentMarker, Identifier),
     # TODO: other cases...
@@ -1144,6 +1157,12 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
 ##### TOKENIZER MAIN LOOP #####
 # The main `tokenize` function drives the context-sensitive, declarative
 # tokenization process described in the module docstring.
+@cache
+def get_allowed_tokens(ctx_type: type[Context]) -> list[type[Token]]:
+    """For a given context type, return all token types that are allowed in that context. Cached for performance
+    WARNING: because this is cached, creating new Token classes after this is called may not be reflected in the cached result
+    """
+    return [t for t in descendants(Token) if ctx_type in t.valid_contexts]
 
 def tokenize(srcfile: SrcFile) -> list[Token]:
     tokens: list[Token] = []
@@ -1156,7 +1175,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     while i < len(src):
         # try to eat all allowed tokens at the current position
         ctx = ctx_stack[-1]
-        allowed_tokens = [t for t in descendants(Token) if type(ctx) in t.valid_contexts]
+        allowed_tokens = get_allowed_tokens(type(ctx))
         matches = [(token_cls.eat(src[i:], ctx), token_cls) for token_cls in allowed_tokens]                
 
         # filter out matches that didn't eat anything
@@ -1239,6 +1258,8 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     
     # pop any remaining rest-of-file string if present
     if len(ctx_stack) == 2 and isinstance(ctx_stack[-1], StringBody) and isinstance(ctx_stack[-1].opening_quote, RestOfFileStringQuote):
+        ctx_stack.pop()
+    if len(ctx_stack) == 2 and isinstance(ctx_stack[-1], RawStringBody) and isinstance(ctx_stack[-1].opening_quote, RawRestOfFileStringQuote):
         ctx_stack.pop()
 
     # ensure that the final context is a root 

@@ -69,7 +69,7 @@ class Exponent:
     binary: bool=False  # true when the exponent is a power of 2 (e.g. 0x1.0x8p10)
 
 @dataclass
-class Float(Token2):
+class Real(Token2):
     whole: t1.Number
     fraction: t1.Number|None
     exponent: Exponent|None
@@ -117,7 +117,7 @@ class Float(Token2):
     ieee754<float64>'0x1.8p10'
     """
     @staticmethod
-    def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Float]|None':
+    def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Real]|None':
         if start + 2 >= len(tokens):
             return None
         ########## Whole number part ##########
@@ -167,7 +167,7 @@ class Float(Token2):
             return None
         
         span = Span(whole.loc.start, tokens[start + i - 1].loc.stop)
-        return i, Float(span, whole, fraction, exponent)
+        return i, Real(span, whole, fraction, exponent)
         
 
 @dataclass
@@ -200,7 +200,7 @@ class String(Token2):
             body_start, body_stop = start + 1, opener.matching_quote.idx
             span = Span(opener.loc.start, opener.matching_quote.loc.stop)
             eaten = body_stop - body_start + 2  # body len + 2 quotes
-        elif isinstance(opener, t1.RestOfFileStringQuote):
+        elif isinstance(opener, (t1.RestOfFileStringQuote, t1.RawRestOfFileStringQuote)):
             body_start, body_stop = start + 1, len(tokens) - 1
             span = Span(opener.loc.start, tokens[-1].loc.stop)
             eaten = len(tokens) - body_start + 1  # body len + just 1 opening quote
@@ -380,7 +380,7 @@ top_level_tokens: list[type[Token2]] = [
     Keyword,
     Hashtag,
     Integer,
-    Float,
+    Real,
     Block,
     # OpChain,
     Operator,
@@ -421,7 +421,7 @@ def tokenize2_inner(tokens:list[t1.Token], ctx:Context, start:int=0, stop:int=No
                     srcfile=ctx.srcfile,
                     title=f'Multiple tokens matched',
                     pointer_messages=[
-                        Pointer(span=Span(tokens[0].loc.start, tokens[0].loc.start), message=f'Multiple tokens matched'),
+                        Pointer(span=Span(tokens[start].loc.start, tokens[start].loc.start), message=f'Multiple tokens matched'),
                     ],
                     hint=f'The following tokens matched: {matches}\nTODO: provide better explanation for how to disambiguate'
                 )
