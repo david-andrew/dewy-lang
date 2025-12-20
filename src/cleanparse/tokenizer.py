@@ -161,21 +161,33 @@ class RawStringBody(Context):
     opening_quote: 'RawStringQuoteOpener|RawHeredocStringOpener|RawRestOfFileStringQuote'
 
 @dataclass
+class BasedStringBody(Context):
+    opening_quote: 'BasedStringQuoteOpener'
+    base: BasePrefix
+
+@dataclass
 class BlockBody(Context):
     opening_delim: 'LeftSquareBracket|LeftParenthesis|LeftCurlyBrace|ParametricStringEscape'
     default_base: BasePrefix = base10
  
+#  TODO: consider getting rid of this context, and using regular BlockBody
+#        the one thing to handle is that if default_base is set, I think identifiers should
+#        have lower precedence than numbers in that base, and to get an identifier, you just wrap it in parenthesis
+@dataclass
+class BasedBlockBody(Context):
+    opening_delim: 'BasedBlockOpener'
+    default_base: BasePrefix
+
 @dataclass
 class TypeBody(Context):
     opening_delim: 'LeftAngleBracket'
     default_base: BasePrefix = base10
 
 # convenient unions for common context combinations
+# TODO: consider making it each context defines what tokens are valid for it, rather than tokens select from valid contexts
 GeneralBodyContexts: TypeAlias = Root | BlockBody | TypeBody
 BodyWithoutTypeContexts: TypeAlias = Root | BlockBody
-BodyOrStringContexts: TypeAlias = Root | BlockBody | TypeBody | StringBody
-StringContexts: TypeAlias = StringBody | RawStringBody
-
+WhitespaceOrCommentContexts: TypeAlias = Root | BlockBody | TypeBody | BasedStringBody | BasedBlockBody
 
 ##### CONTEXT ACTIONS #####
 # actions that can be taken when a token is eaten
@@ -290,9 +302,9 @@ class Token[T:Context](ABC):
 # general body contexts and usually don't affect the context stack.
 
 # TODO: want a warning if there is a lone \r not followed by \n
-class Whitespace(Token[GeneralBodyContexts]):
+class Whitespace(Token[WhitespaceOrCommentContexts]):
     @staticmethod
-    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+    def eat(src:str, ctx:WhitespaceOrCommentContexts) -> int|None:
         """white space is any sequence of whitespace characters"""
         i = 0
         while i < len(src) and src[i] in whitespace:
@@ -302,7 +314,7 @@ class Whitespace(Token[GeneralBodyContexts]):
         return i or None
     
     @staticmethod
-    def warning_lone_carriage_return(src: str, i: int, ctx: GeneralBodyContexts):
+    def warning_lone_carriage_return(src: str, i: int, ctx: WhitespaceOrCommentContexts):
         warning = Warning(
             srcfile=ctx.srcfile,
             title=f"Lone carriage return",
@@ -312,9 +324,9 @@ class Whitespace(Token[GeneralBodyContexts]):
         print(warning)
 
 
-class LineComment(Token[GeneralBodyContexts]):
+class LineComment(Token[WhitespaceOrCommentContexts]):
     @staticmethod
-    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+    def eat(src:str, ctx:WhitespaceOrCommentContexts) -> int|None:
         """line comments are any sequence of characters after a % until the end of the line"""
         if not src.startswith(line_comment_start):
             return None
@@ -330,9 +342,9 @@ class LineComment(Token[GeneralBodyContexts]):
         return i
 
 
-class BlockComment(Token[GeneralBodyContexts]):
+class BlockComment(Token[WhitespaceOrCommentContexts]):
     @staticmethod
-    def eat(src: str, ctx:GeneralBodyContexts) -> int | None:
+    def eat(src: str, ctx:WhitespaceOrCommentContexts) -> int | None:
         """
         Block comments are of the form %{ ... }% and can be nested.
         """
@@ -455,17 +467,17 @@ class LeftSquareBracket(Token[GeneralBodyContexts]):
     def action_on_eat(self, ctx:GeneralBodyContexts): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 
-class RightSquareBracket(Token[BlockBody]):
-    matching_left: 'LeftSquareBracket|LeftParenthesis' = None
+class RightSquareBracket(Token[BlockBody|BasedBlockBody]):
+    matching_left: 'LeftSquareBracket|LeftParenthesis|BasedBlockOpener' = None
     
     @staticmethod
-    def eat(src:str, ctx:BlockBody) -> int|None:
+    def eat(src:str, ctx:BlockBody|BasedBlockBody) -> int|None:
         if src.startswith(']'):
             return 1
         return None
     
-    def action_on_eat(self, ctx:BlockBody):
-        if isinstance(ctx.opening_delim, (LeftSquareBracket, LeftParenthesis)):
+    def action_on_eat(self, ctx:BlockBody|BasedBlockBody):
+        if isinstance(ctx.opening_delim, (LeftSquareBracket, LeftParenthesis, BasedBlockOpener)):
             ctx.opening_delim.matching_right = self
             self.matching_left = ctx.opening_delim
             return Pop()
@@ -529,16 +541,16 @@ class RightParenthesis(Token[BlockBody]):
         raise ValueError(f"INTERNAL ERROR: unhandled opening delimiter that was closed with a RightParenthesis: {ctx.opening_delim=}")            
 
 
-class LeftCurlyBrace(Token[BodyOrStringContexts]):
+class LeftCurlyBrace(Token[Root|BlockBody|TypeBody|StringBody]):
     matching_right: 'RightCurlyBrace' = None
     
     @staticmethod
-    def eat(src:str, ctx:BodyOrStringContexts) -> int|None:
+    def eat(src:str, ctx:Root|BlockBody|TypeBody|StringBody) -> int|None:
         if src.startswith('{'):
             return 1
         return None
     
-    def action_on_eat(self, ctx:BodyOrStringContexts): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self))
+    def action_on_eat(self, ctx:Root|BlockBody|TypeBody|StringBody): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 
 class RightCurlyBrace(Token[BlockBody]):
@@ -599,6 +611,24 @@ class RightAngleBracket(Token[TypeBody]):
         return Pop()
 
 
+class BasedBlockOpener(Token[GeneralBodyContexts]):
+    matching_right: 'RightSquareBracket'
+    base: BasePrefix
+
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        if len(src) < 3:
+            return None
+        if not src[:2].casefold() in base_radixes:
+            return None
+        if not src[2] == '[':
+            return None
+        return 3
+    
+    def action_on_eat(self, ctx:GeneralBodyContexts):
+        self.base = self.src[:2].casefold()
+        return Push(BasedBlockBody(ctx.srcfile, ctx.tokens_so_far, self, self.base))
+
 ##### TOKEN CLASSES: STRINGS AND STRING BODIES #####
 # String openers / closers and the tokens that consume within-string content.
 # These manage `StringBody` or `RawStringBody` contexts and handle normal
@@ -629,21 +659,23 @@ class StringQuoteOpener(Token[GeneralBodyContexts]):
 
     def action_on_eat(self, ctx:GeneralBodyContexts) -> ContextAction: return Push(StringBody(ctx.srcfile, ctx.tokens_so_far, self))
 
-class StringQuoteCloser(Token[StringContexts]):
-    matching_quote: 'StringQuoteOpener|RawStringQuoteOpener' = None
+class StringQuoteCloser(Token[StringBody|RawStringBody|BasedStringBody]):
+    matching_quote: 'StringQuoteOpener|RawStringQuoteOpener|BasedStringQuoteOpener' = None
 
     @staticmethod
-    def eat(src:str, ctx:StringContexts) -> int|None:
+    def eat(src:str, ctx:StringBody|RawStringBody|BasedStringBody) -> int|None:
         """a string quote closer is a matching opening quote"""
         if isinstance(ctx.opening_quote, StringQuoteOpener) and src.startswith(ctx.opening_quote.src):
             return len(ctx.opening_quote.src)
         if isinstance(ctx.opening_quote, RawStringQuoteOpener) and src.startswith(ctx.opening_quote.src[1:]):
             return len(ctx.opening_quote.src[1:])
+        if isinstance(ctx.opening_quote, BasedStringQuoteOpener) and src.startswith(ctx.opening_quote.src[2:]):
+            return len(ctx.opening_quote.src[2:])
         # Heredoc delimiters can't match here, and rest-of-file strings don't have a closing quote
         return None
     
-    def action_on_eat(self, ctx:StringContexts):
-        assert isinstance(ctx.opening_quote, (StringQuoteOpener, RawStringQuoteOpener)), f"INTERNAL ERROR: attempted to eat StringQuoteCloser for non-matching opening quote: {ctx.opening_quote=}"
+    def action_on_eat(self, ctx:StringBody|RawStringBody|BasedStringBody):
+        assert isinstance(ctx.opening_quote, (StringQuoteOpener, RawStringQuoteOpener, BasedStringQuoteOpener)), f"INTERNAL ERROR: attempted to eat StringQuoteCloser for non-matching opening quote: {ctx.opening_quote=}"
         self.matching_quote = ctx.opening_quote
         self.matching_quote.matching_quote = self
         return Pop()
@@ -918,13 +950,11 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
             error.throw()
 
 
-
-
-class HeredocStringCloser(Token[StringContexts]):
+class HeredocStringCloser(Token[StringBody|RawStringBody]):
     matching_quote: 'HeredocStringOpener|RawHeredocStringOpener' = None
 
     @staticmethod
-    def eat(src:str, ctx:StringContexts) -> int|None:
+    def eat(src:str, ctx:StringBody|RawStringBody) -> int|None:
         """a heredoc string closer is a matching opening quote"""
         if not isinstance(ctx.opening_quote, (HeredocStringOpener, RawHeredocStringOpener)):
             return None
@@ -933,7 +963,8 @@ class HeredocStringCloser(Token[StringContexts]):
             return None
         return len(delimiter)
     
-    def action_on_eat(self, ctx:StringContexts): return Pop()
+    def action_on_eat(self, ctx:StringBody|RawStringBody): return Pop()
+
 
 class RawHeredocStringOpener(Token[GeneralBodyContexts]):
     matching_quote: 'HeredocStringCloser' = None
@@ -956,17 +987,45 @@ class RawHeredocStringOpener(Token[GeneralBodyContexts]):
         """get the delimiter from the string quote"""
         return self.src[3:-1]
 
+class BasedStringQuoteOpener(Token[GeneralBodyContexts]):
+    matching_quote: 'StringQuoteCloser'
+    base: BasePrefix
+
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        if len(src) < 3:
+            return None
+        if not src[:2].casefold() in base_radixes:
+            return None
+        # eat an opening quote
+        i = StringQuoteOpener.eat(src[2:], ctx)  # eat the quote without the r prefix
+        if i is None: return None
+        return i + 2
+
+    def action_on_eat(self, ctx:GeneralBodyContexts):
+        self.base = self.src[:2].casefold()
+        return Push(BasedStringBody(ctx.srcfile, ctx.tokens_so_far, self, self.base))
+
+class BasedStringChars(Token[BasedStringBody]):
+    @staticmethod
+    def eat(src:str, ctx:BasedStringBody) -> int|None:
+        # eat any digit in the base or whitespace or underscore
+        i = 0
+        digits = base_digits[ctx.base]
+        while i < len(src) and (src[i] in digits or src[i] == '_'):
+            i += 1
+        return i or None
 
 ##### TOKEN CLASSES: NUMBERS #####
 # Based integer literals. The base may be given explicitly via a prefix or
 # implicitly via the current Context's `default_base` (e.g. inside certain
 # blocks). We record the resolved base prefix on the token in `action_on_eat`.
 
-class Number(Token[GeneralBodyContexts]):
+class Number(Token[Root|BlockBody|TypeBody|BasedBlockBody]):
     prefix: BasePrefix
     
     @staticmethod
-    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+    def eat(src:str, ctx:Root|BlockBody|TypeBody|BasedBlockBody) -> int|None:
         """a based number is a sequence of 1 or more digits, optionally preceded by a (case-insensitive) base prefix"""
         
         # try a number with a base prefix
@@ -983,7 +1042,7 @@ class Number(Token[GeneralBodyContexts]):
             return i
         
         # try number with no prefix
-        base = ctx.default_base if isinstance(ctx, BlockBody) else base10
+        base = ctx.default_base if isinstance(ctx, (BlockBody, BasedBlockBody)) else base10
         digits = base_digits[base]
         i = 0
         if not (i < len(src) and src[i] in digits):
@@ -994,7 +1053,7 @@ class Number(Token[GeneralBodyContexts]):
         
         return i or None
     
-    def action_on_eat(self, ctx:GeneralBodyContexts):
+    def action_on_eat(self, ctx:Root|BlockBody|TypeBody|BasedBlockBody):
         if self.src[:2].casefold() in base_digits:
             self.prefix = self.src[:2].casefold()
         else:
@@ -1146,8 +1205,22 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
                     Pointer(span=Span(o.loc.stop, max_pos), message=f"Type block body"),
                     Pointer(span=Span(max_pos, max_pos), message=f"End without closing delimiter"),
                 ], hint=f"Did you forget a `>`?"))
+            case BasedStringBody(opening_quote=o):
+                error_stack.append(Error(srcfile, title="Missing based-string closing quote", pointer_messages=[
+                    Pointer(span=o.loc, message="Based string opened here"),
+                    Pointer(span=Span(o.loc.stop, max_pos), message="Based string body"),
+                    Pointer(span=Span(max_pos, max_pos), message="End without closing quote"),
+                ], hint=f"Did you forget a `{o.src[2:]}`?"))
+
+            case BasedBlockBody(opening_delim=o):
+                error_stack.append(Error(srcfile, title="Missing based-array closing delimiter", pointer_messages=[
+                    Pointer(span=o.loc, message="Based array opened here"),
+                    Pointer(span=Span(o.loc.stop, max_pos), message="Based array body"),
+                    Pointer(span=Span(max_pos, max_pos), message="End without closing delimiter"),
+                ], hint="Did you forget a `]`?"))
             case Root(): ... # root isn't an error (unless it somehow isn't the final context, but that should never happen)
             case _:
+                pdb.set_trace()
                 # unreachable (unless you added a new context type and forgot to add a case for it)
                 raise NotImplementedError(f"INTERNAL ERROR: unhandled context: {ctx=}")
     

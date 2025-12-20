@@ -297,7 +297,44 @@ class Block(Token2):
         inner = tokenize2_inner(tokens, ctx, body_start, body_stop)
         assert delims in ['{}', '[]', '()', '[)', '(]', '<>'], f'INTERNAL ERROR: invalid block delimiter: {delims}'
         return closer.idx - start + 1, Block(span, inner, delims)
+
+@dataclass
+class BasedString(Token2):
+    digits: 'list[t1.BasedStringChars]'
+    base: t1.BasePrefix
+    @staticmethod
+    def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, BasedString]|None':
+        opener = tokens[start]
+        if not isinstance(opener, t1.BasedStringQuoteOpener):
+            return None
         
+        closer = opener.matching_quote
+        span = Span(opener.loc.start, closer.loc.stop)
+        raw_body = tokens[opener.idx+1:closer.idx]
+        digits = [token for token in raw_body if isinstance(token, t1.BasedStringChars)]
+        return closer.idx - start + 1, BasedString(span, digits, opener.base)
+
+
+@dataclass
+class BasedArray(Token2):
+    inner: 'list[Integer]'
+    base: t1.BasePrefix
+    @staticmethod
+    def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, BasedArray]|None':
+        opener = tokens[start]
+        if not isinstance(opener, t1.BasedBlockOpener):
+            return None
+        
+        # tokenize the inner body
+        closer = opener.matching_right
+        span = Span(opener.loc.start, closer.loc.stop)
+        body_start, body_stop = start + 1, closer.idx
+        inner = tokenize2_inner(tokens, ctx, body_start, body_stop)
+        
+        # filter out any non integers
+        integers = [token for token in inner if isinstance(token, Integer)]
+        
+        return closer.idx - start + 1, BasedArray(span, integers, opener.base)
 
 @dataclass
 class OpChain(Token2):
@@ -382,6 +419,8 @@ top_level_tokens: list[type[Token2]] = [
     Integer,
     Real,
     Block,
+    BasedString,
+    BasedArray,
     # OpChain,
     Operator,
     Whitespace,
