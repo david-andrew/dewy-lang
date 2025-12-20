@@ -170,13 +170,6 @@ class BlockBody(Context):
     opening_delim: 'LeftSquareBracket|LeftParenthesis|LeftCurlyBrace|ParametricStringEscape'
     default_base: BasePrefix = base10
  
-#  TODO: consider getting rid of this context, and using regular BlockBody
-#        the one thing to handle is that if default_base is set, I think identifiers should
-#        have lower precedence than numbers in that base, and to get an identifier, you just wrap it in parenthesis
-@dataclass
-class BasedBlockBody(Context):
-    opening_delim: 'BasedBlockOpener'
-    default_base: BasePrefix
 
 @dataclass
 class TypeBody(Context):
@@ -187,7 +180,7 @@ class TypeBody(Context):
 # TODO: consider making it each context defines what tokens are valid for it, rather than tokens select from valid contexts
 GeneralBodyContexts: TypeAlias = Root | BlockBody | TypeBody
 BodyWithoutTypeContexts: TypeAlias = Root | BlockBody
-WhitespaceOrCommentContexts: TypeAlias = Root | BlockBody | TypeBody | BasedStringBody | BasedBlockBody
+WhitespaceOrCommentContexts: TypeAlias = Root | BlockBody | TypeBody | BasedStringBody# | BasedBlockBody
 
 ##### CONTEXT ACTIONS #####
 # actions that can be taken when a token is eaten
@@ -467,16 +460,16 @@ class LeftSquareBracket(Token[GeneralBodyContexts]):
     def action_on_eat(self, ctx:GeneralBodyContexts): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 
-class RightSquareBracket(Token[BlockBody|BasedBlockBody]):
+class RightSquareBracket(Token[BlockBody]):
     matching_left: 'LeftSquareBracket|LeftParenthesis|BasedBlockOpener' = None
     
     @staticmethod
-    def eat(src:str, ctx:BlockBody|BasedBlockBody) -> int|None:
+    def eat(src:str, ctx:BlockBody) -> int|None:
         if src.startswith(']'):
             return 1
         return None
     
-    def action_on_eat(self, ctx:BlockBody|BasedBlockBody):
+    def action_on_eat(self, ctx:BlockBody):
         if isinstance(ctx.opening_delim, (LeftSquareBracket, LeftParenthesis, BasedBlockOpener)):
             ctx.opening_delim.matching_right = self
             self.matching_left = ctx.opening_delim
@@ -627,7 +620,7 @@ class BasedBlockOpener(Token[GeneralBodyContexts]):
     
     def action_on_eat(self, ctx:GeneralBodyContexts):
         self.base = self.src[:2].casefold()
-        return Push(BasedBlockBody(ctx.srcfile, ctx.tokens_so_far, self, self.base))
+        return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self, self.base))
 
 ##### TOKEN CLASSES: STRINGS AND STRING BODIES #####
 # String openers / closers and the tokens that consume within-string content.
@@ -1021,11 +1014,11 @@ class BasedStringChars(Token[BasedStringBody]):
 # implicitly via the current Context's `default_base` (e.g. inside certain
 # blocks). We record the resolved base prefix on the token in `action_on_eat`.
 
-class Number(Token[Root|BlockBody|TypeBody|BasedBlockBody]):
+class Number(Token[GeneralBodyContexts]):
     prefix: BasePrefix
     
     @staticmethod
-    def eat(src:str, ctx:Root|BlockBody|TypeBody|BasedBlockBody) -> int|None:
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """a based number is a sequence of 1 or more digits, optionally preceded by a (case-insensitive) base prefix"""
         
         # try a number with a base prefix
@@ -1042,7 +1035,7 @@ class Number(Token[Root|BlockBody|TypeBody|BasedBlockBody]):
             return i
         
         # try number with no prefix
-        base = ctx.default_base if isinstance(ctx, (BlockBody, BasedBlockBody)) else base10
+        base = ctx.default_base if isinstance(ctx, BlockBody) else base10
         digits = base_digits[base]
         i = 0
         if not (i < len(src) and src[i] in digits):
@@ -1053,7 +1046,7 @@ class Number(Token[Root|BlockBody|TypeBody|BasedBlockBody]):
         
         return i or None
     
-    def action_on_eat(self, ctx:Root|BlockBody|TypeBody|BasedBlockBody):
+    def action_on_eat(self, ctx:GeneralBodyContexts):
         if self.src[:2].casefold() in base_digits:
             self.prefix = self.src[:2].casefold()
         else:
@@ -1094,6 +1087,7 @@ class ExponentMarker(Token[GeneralBodyContexts]):
 # CAUTION: ensure no cycles in precedence levels
 token_precedence: list[tuple[type[Token], type[Token]]] = [
     (Symbol, Identifier),
+    (Number, Identifier),
     (ExponentMarker, Identifier),
     # TODO: other cases...
 ]
@@ -1211,13 +1205,6 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
                     Pointer(span=Span(o.loc.stop, max_pos), message="Based string body"),
                     Pointer(span=Span(max_pos, max_pos), message="End without closing quote"),
                 ], hint=f"Did you forget a `{o.src[2:]}`?"))
-
-            case BasedBlockBody(opening_delim=o):
-                error_stack.append(Error(srcfile, title="Missing based-array closing delimiter", pointer_messages=[
-                    Pointer(span=o.loc, message="Based array opened here"),
-                    Pointer(span=Span(o.loc.stop, max_pos), message="Based array body"),
-                    Pointer(span=Span(max_pos, max_pos), message="End without closing delimiter"),
-                ], hint="Did you forget a `]`?"))
             case Root(): ... # root isn't an error (unless it somehow isn't the final context, but that should never happen)
             case _:
                 pdb.set_trace()
@@ -1342,7 +1329,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
         for error in error_stack:
             print(error)
         print("-"*80)
-        print(tokens_to_report(tokens, srcfile))
+        print(tokens_to_report(tokens, srcfile, {Whitespace}))
 
     # if there were errors, exit with an error code
     if error_count > 0:
