@@ -697,6 +697,7 @@ class StringEscape(Token[StringBody]):
         
         Predefined escape sequences:
         - \n newline
+        - \\n (i.e. \<newline>) a special case that basically ignores the newline and continues the string. Useful for ignoring newlines in multiline strings.
         - \r carriage return
         - \t tab
         - \b backspace
@@ -705,10 +706,9 @@ class StringEscape(Token[StringBody]):
         - \a alert
         - \0 null
         - \u#### or \U#### for a unicode codepoints. Must be four hex digits [0-9a-fA-F]
-        - \<newline> a special case that basically ignores the newline and continues the string. Useful for ignoring newlines in multiline strings.
 
         Catch-all case:
-        - `\` followed by any character not mentioned above converts to just the literal character itself without the backslash
+        - \ followed by any character not mentioned above converts to just the literal character itself without the backslash
         This is how to insert characters that have special meaning in the string, e.g.
         - \' converts to just a single quote '
         - \{ converts to just a single open brace {

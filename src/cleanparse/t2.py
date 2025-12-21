@@ -412,8 +412,8 @@ class Whitespace(Token2): # so we can invert later for juxtapose
 top_level_tokens: list[type[Token2]] = [
     Identifier,
     String,
-    # IString,           # not included in top level tokens because created by String.eat
-    # ParametricEscape,  # not included in top level tokens because created by String.eat
+      # IString,           # not included in top level tokens because created by String.eat
+      # ParametricEscape,  # not included in top level tokens because created by String.eat
     Keyword,
     Hashtag,
     Integer,
