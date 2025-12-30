@@ -75,7 +75,6 @@ class Real(Token2):
     exponent: Exponent|None
     
     """
-    # TODO: 1e9 is technically an integer, so probably later we'll have to pull those out
     Patterns:
     <number><eEpP><number>
     <number><eEpP><+-><number>
@@ -84,14 +83,14 @@ class Real(Token2):
     <number><dot><number><eEpP><+-><number>
 
     
-    Patterns:
+    Examples:
     3.14
     1.0
     1.23e4
     1.23E+4
     1.23e-4
-    0x1.8p10    % note `p` instead of `e` for exponent. 0x1.8p10 = 1.5 × 2¹⁰
-    0x1.fp-2    % bug: if number after dot is different base, tokenizer doesn't recognize it without a prefix.. perhaps make that the case (i.e. require user to specify prefix every time, warn if bases don't match in float)
+    0x1.0x8p10  % note `p` instead of `e` for exponent. 0x1.8p10 = 1.5 × 2¹⁰
+    % 0x1.fp-2  % note this won't parse as a float because no prefix was used for the number after the dot. <int 0x1><dot><identifier fp><operator -><int 2>
     1e10
     2E-23
 
@@ -110,7 +109,7 @@ class Real(Token2):
     literals are treated as singleton types, and receive their bit pattern when used in a typed context
     ```dewy
     a:float64 = inf  % convert to ieee754 compatible float inf
-    b:int = inf`     % convert to symbolic InfinityType that can interact with ints as a singleton type
+    b:int = inf      % convert to symbolic InfinityType that can interact with ints as a singleton type
     ```
 
     suggested to have some set of string input functions for C/IEEE-754 notation
@@ -358,6 +357,27 @@ class Identifier(Token2):
         return None
 
 @dataclass
+class Handle(Token2):
+    identifier: Identifier
+
+    @staticmethod
+    def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Handle]|None':
+        """"""
+        if start + 1 >= len(tokens):
+            return None
+        token = tokens[start]
+        if not isinstance(token, t1.Symbol) or token.src != '@':
+            return None
+        
+        res = Identifier.eat(tokens, ctx, start + 1)
+        if res is None:
+            return None
+        length, identifier = res
+        return length + 1, Handle(Span(token.loc.start, identifier.loc.stop), identifier)
+        
+        
+
+@dataclass
 class Operator(Token2):
     symbol: str
 
@@ -365,9 +385,11 @@ class Operator(Token2):
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Operator]|None':
         token = tokens[start]
         # all symbols that are not symbolic identifiers are operators
-        if isinstance(token, (t1.Symbol, t1.ShiftSymbol)) and token.src not in symbolic_identifiers: 
-            return 1, Operator(token.loc, token.src)
-        return None
+        if not isinstance(token, (t1.Symbol, t1.ShiftSymbol)) or token.src in symbolic_identifiers: 
+            return None
+        if token.src == '@':  # @ operator is handled by Handle
+            return None
+        return 1, Operator(token.loc, token.src)
             
 
 @dataclass
@@ -411,6 +433,7 @@ class Whitespace(Token2): # so we can invert later for juxtapose
 
 top_level_tokens: list[type[Token2]] = [
     Identifier,
+    Handle,
     String,
       # IString,           # not included in top level tokens because created by String.eat
       # ParametricEscape,  # not included in top level tokens because created by String.eat
