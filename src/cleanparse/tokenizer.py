@@ -726,7 +726,7 @@ class StringEscape(Token[StringBody]):
         prefix_len = 2
 
         # hex/unicode
-        if src[1] in 'uU':
+        if src[1] in 'uU' and not src[2:3] == '{':
             expected_digits = 4
             actual_digits = 0
             while (
