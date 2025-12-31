@@ -105,8 +105,19 @@ def postok(srcfile: SrcFile) -> list[t2.Token2]:
 
 def postok_inner(tokens: list[t2.Token2]) -> None:
     """apply postprocessing steps to the tokens"""
+    # remove whitespace and insert juxtapose tokens
     invert_whitespace(tokens)
-    # TODO: other steps in the process
+
+    # TODO: this/these might be handled in t2 via Opchain.eat. opchains don't need to deal with juxtapose
+    # # combine operator chains into a single operator token
+    # make_chain_operators(tokens)
+    # # convert any . operator next to a binary operator or opchain (e.g. .+ .^/-) into a broadcast operator
+    # make_broadcast_operators(tokens)
+    # # convert any combined assignment operators (e.g. += -= etc.) into a single token
+    # make_combined_assignment_operators(tokens)
+
+    # # bundle up conditionals into single token expressions
+    # bundle_conditionals(tokens)
 
 
 def test():
