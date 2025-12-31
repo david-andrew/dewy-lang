@@ -29,6 +29,12 @@ symbolic_identifiers: set[str] = {
     '?', '..', '...', '`', '∞', '∅',
 }
 
+# tokenized as identifiers, but are treated as operators (rather than identifiers)
+word_operators: set[str] = {
+    'and', 'or', 'xor', 'nand', 'nor', 'xnor', 'not',
+    'as', 'in', 'transmute', 'of', 'mod',
+}
+
 escape_map: dict[str, str] = {
     'n': '\n',
     '\n': '', # escaping a literal newline results in skipping the newline
@@ -348,7 +354,7 @@ class Identifier(Token2):
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Identifier]|None':
         token = tokens[start]
-        if isinstance(token, t1.Identifier) and token.src not in keywords:
+        if isinstance(token, t1.Identifier) and token.src not in keywords and token.src not in word_operators:
             return 1, Identifier(token.loc, token.src)
         elif isinstance(token, t1.Symbol) and token.src in symbolic_identifiers:
             return 1, Identifier(token.loc, token.src)
@@ -384,6 +390,11 @@ class Operator(Token2):
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Operator]|None':
         token = tokens[start]
+
+        # non-symbolic operators
+        if isinstance(token, t1.Identifier) and token.src in word_operators:
+            return 1, Operator(token.loc, token.src)
+
         # all symbols that are not symbolic identifiers are operators
         if not isinstance(token, (t1.Symbol, t1.ShiftSymbol)) or token.src in symbolic_identifiers: 
             return None
