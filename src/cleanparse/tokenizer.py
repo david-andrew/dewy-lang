@@ -956,7 +956,10 @@ class HeredocStringCloser(Token[StringBody|RawStringBody]):
             return None
         return len(delimiter)
     
-    def action_on_eat(self, ctx:StringBody|RawStringBody): return Pop()
+    def action_on_eat(self, ctx:StringBody|RawStringBody): 
+        ctx.opening_quote.matching_quote = self
+        self.matching_quote = ctx.opening_quote
+        return Pop()
 
 
 class RawHeredocStringOpener(Token[GeneralBodyContexts]):
