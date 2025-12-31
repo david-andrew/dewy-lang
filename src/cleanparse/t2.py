@@ -26,7 +26,7 @@ keywords: set[str] = {
 
 # tokenized as symbols, but are treated as identifiers (rather than operators)
 symbolic_identifiers: set[str] = {
-    '?', '..', '...', '∞', '∅',  # tbd about backticks '`' which are the roll operator. need a good way to track what side of the expression they attach to (or ambiguous if touch left and right)
+    '?', '..', '...', '`', '∞', '∅',
 }
 
 escape_map: dict[str, str] = {
@@ -394,6 +394,8 @@ class Operator(Token2):
 
 @dataclass
 class Keyword(Token2): # e.g. if, loop, import, let, etc. any keyword that behaves differently syntactically e.g. `<keyword> <expr>`. Ignore keywords that can go in identifiers, e.g. `void`, `intrinsic`/`extern`, etc.
+    name: str
+
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Keyword]|None':
         token = tokens[start]
