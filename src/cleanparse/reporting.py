@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from bisect import bisect_right
 from os import PathLike
-from typing import Literal, NoReturn, TypeAlias, ClassVar
+from typing import Literal, NoReturn, TypeAlias
 import re
 
 Severity: TypeAlias = Literal["error", "warning", "info", "hint"]

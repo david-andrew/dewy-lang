@@ -3,7 +3,7 @@ Post processing steps on tokens to prepare them for expression parsiing
 """
 
 from dataclasses import dataclass
-from .reporting import Span, SrcFile, Info, Error, Pointer, ReportException
+from .reporting import SrcFile, ReportException
 from . import t2
 from . import tokenizer as t1
 

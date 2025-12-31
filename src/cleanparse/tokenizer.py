@@ -310,9 +310,9 @@ class Whitespace(Token[WhitespaceOrCommentContexts]):
     def warning_lone_carriage_return(src: str, i: int, ctx: WhitespaceOrCommentContexts):
         warning = Warning(
             srcfile=ctx.srcfile,
-            title=f"Lone carriage return",
-            pointer_messages=[Pointer(span=Span(i, i+1), message=f"\\r without \\n")],
-            hint=f"\\r should always be followed by \\n in Dewy source code. Recommend either removing the \\r or adding newline (\\r\\n)"
+            title="Lone carriage return",
+            pointer_messages=[Pointer(span=Span(i, i+1), message="\\r without \\n")],
+            hint="\\r should always be followed by \\n in Dewy source code. Recommend either removing the \\r or adding newline (\\r\\n)"
         )
         print(warning)
 
@@ -478,12 +478,12 @@ class RightSquareBracket(Token[BlockBody]):
         if isinstance(ctx.opening_delim, (LeftCurlyBrace, ParametricStringEscape)):
             error = Error(
                 srcfile=ctx.srcfile,
-                title=f"Mismatched opening and closing delimiters",
+                title="Mismatched opening and closing delimiters",
                 pointer_messages=[
-                    Pointer(span=ctx.opening_delim.loc, message=f"Opening delimiter"),
+                    Pointer(span=ctx.opening_delim.loc, message="Opening delimiter"),
                     Pointer(span=self.loc, message=f"Mismatched closer. Expected `}}` not `{self.src}`"),
                 ],
-                hint=f"Did you forget a closing `}}`?"
+                hint="Did you forget a closing `}`?"
             )
             error.throw()
 
@@ -521,12 +521,12 @@ class RightParenthesis(Token[BlockBody]):
         if isinstance(ctx.opening_delim, (LeftCurlyBrace, ParametricStringEscape)):
             error = Error(
                 srcfile=ctx.srcfile,
-                title=f"Mismatched opening and closing delimiters",
+                title="Mismatched opening and closing delimiters",
                 pointer_messages=[
-                    Pointer(span=ctx.opening_delim.loc, message=f"Opening delimiter"),
+                    Pointer(span=ctx.opening_delim.loc, message="Opening delimiter"),
                     Pointer(span=self.loc, message=f"Mismatched closer. Expected `}}` not `{self.src}`"),
                 ],
-                hint=f"Did you forget a closing `}}`?"
+                hint="Did you forget a closing `}`?"
             )
             error.throw()
         
@@ -564,12 +564,12 @@ class RightCurlyBrace(Token[BlockBody]):
         if isinstance(ctx.opening_delim, (LeftSquareBracket, LeftParenthesis)):
             error = Error(
                 srcfile=ctx.srcfile,
-                title=f"Mismatched opening and closing delimiters",
+                title="Mismatched opening and closing delimiters",
                 pointer_messages=[
-                    Pointer(span=ctx.opening_delim.loc, message=f"Opening delimiter"),
-                    Pointer(span=self.loc, message=f"Mismatched closer. Expected `]` or `)`"),
+                    Pointer(span=ctx.opening_delim.loc, message="Opening delimiter"),
+                    Pointer(span=self.loc, message="Mismatched closer. Expected `]` or `)`"),
                 ],
-                hint=f"Did you forget a closing `)` or `]`?"
+                hint="Did you forget a closing `)` or `]`?"
             )
             error.throw()
         
@@ -612,7 +612,7 @@ class BasedBlockOpener(Token[GeneralBodyContexts]):
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         if len(src) < 3:
             return None
-        if not src[:2].casefold() in base_radixes:
+        if src[:2].casefold() not in base_radixes:
             return None
         if not src[2] == '[':
             return None
@@ -900,7 +900,7 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
             pointer_messages=[
                 Pointer(span=Span(offset, offset+1), message="heredoc start"),
                 Pointer(span=Span(offset+1, offset+2), message="heredoc delimiter opening quote"),
-                *([Pointer(span=Span(offset+2, offset+2+len(delim)), message=f"delimiter")] if len(delim) > 0 else []),
+                *([Pointer(span=Span(offset+2, offset+2+len(delim)), message="delimiter")] if len(delim) > 0 else []),
                 Pointer(span=Span(offset+2+len(delim), offset+2+len(delim)+1), message=f"Expected closing quote {quote} for heredoc delimiter"),
             ],
             hint=f'Did you mean to use {quote} to close instead of {wrong_quote} e.g. {example} not {example[:-1] + wrong_quote}' if wrong_quoted else f"Finish the heredoc delimiter (e.g. {example})",
@@ -919,9 +919,9 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
             offset = ctx.current_tokenization_position()
             error = Error(
                 srcfile=ctx.srcfile,
-                title=f"Heredoc delimiter cannot be all space",
-                pointer_messages=Pointer(span=Span(offset + 2, offset + 2 + len(delim)), message=f"Heredoc delimiter"),
-                hint=f"Heredoc delimiters must contain at least one non-space character, and may not start or end with space"
+                title="Heredoc delimiter cannot be all space",
+                pointer_messages=Pointer(span=Span(offset + 2, offset + 2 + len(delim)), message="Heredoc delimiter"),
+                hint="Heredoc delimiters must contain at least one non-space character, and may not start or end with space"
             )
             error.throw()
         # ensure the delimiter doesn't start or end with space
@@ -930,13 +930,13 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
             leading_space_length = len(delim) - len(delim.lstrip())
             trailing_space_length = len(delim) - len(delim.rstrip())
             pointer_messages=[
-                Pointer(span=Span(offset + 2+leading_space_length, offset + 2 + len(delim) - trailing_space_length), message=f"delimiter")
+                Pointer(span=Span(offset + 2+leading_space_length, offset + 2 + len(delim) - trailing_space_length), message="delimiter")
             ]
-            if leading_space_length: pointer_messages.append(Pointer(span=Span(offset + 2, offset+2+leading_space_length), message=f"Leading space"))
-            if trailing_space_length: pointer_messages.append(Pointer(span=Span(offset + 2 + len(delim) - trailing_space_length, offset + 2 + len(delim)), message=f"Trailing space"))
+            if leading_space_length: pointer_messages.append(Pointer(span=Span(offset + 2, offset+2+leading_space_length), message="Leading space"))
+            if trailing_space_length: pointer_messages.append(Pointer(span=Span(offset + 2 + len(delim) - trailing_space_length, offset + 2 + len(delim)), message="Trailing space"))
             error = Error(
                 srcfile=ctx.srcfile,
-                title=f"Heredoc delimiter cannot start or end with space",
+                title="Heredoc delimiter cannot start or end with space",
                 pointer_messages=pointer_messages,
                 hint=f"Heredoc delimiters may not start or end with space. Remove any leading or trailing space from the delimiter, e.g. #{quote}{delim.strip()}{quote}"
             )
@@ -991,7 +991,7 @@ class BasedStringQuoteOpener(Token[GeneralBodyContexts]):
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         if len(src) < 3:
             return None
-        if not src[:2].casefold() in base_radixes:
+        if src[:2].casefold() not in base_radixes:
             return None
         # eat an opening quote
         i = StringQuoteOpener.eat(src[2:], ctx)  # eat the quote without the r prefix
@@ -1072,7 +1072,7 @@ class ExponentMarker(Token[GeneralBodyContexts]):
             return None
         if len(src) < 2:
             return None
-        if not src[0] in 'eEpP':
+        if src[0] not in 'eEpP':
             return None
         # don't check for +/- because it's not part of what we're trying to disambiguate
         if (i:=Number.eat(src[1:], ctx)) is None:
@@ -1111,12 +1111,12 @@ def shift_operator_inside_type_param(src: str, i: int, tokens: list[Token], ctx_
     if len(ctx_history) > 0 and isinstance(ctx_history[-1], TypeBody) and isinstance(tokens[-1], RightAngleBracket) and src[i:].startswith('>'):
         return Error(
             srcfile=ctx_stack[0].srcfile,
-            title=f"Shift operator inside type parameter",
+            title="Shift operator inside type parameter",
             pointer_messages=[
-                Pointer(span=Span(i-1, i+1), message=f"Shift operator"),
-                Pointer(span=Span(i, i), message=f"Tokenized as a type parameter closing delimiter"),
+                Pointer(span=Span(i-1, i+1), message="Shift operator"),
+                Pointer(span=Span(i, i), message="Tokenized as a type parameter closing delimiter"),
             ],
-            hint=f"Shift operations may not be used directly within a type parameter.\nPerhaps you meant to wrap the expression in parentheses\ne.g. `something<(a >> b)>` instead of `something<a >> b>`"
+            hint="Shift operations may not be used directly within a type parameter.\nPerhaps you meant to wrap the expression in parentheses\ne.g. `something<(a >> b)>` instead of `something<a >> b>`"
         )
 def ambiguous_number_or_identifier_in_parametric_string_escape(src: str, i: int, tokens: list[Token], ctx_stack: list[Context], ctx_history: list[Context], matches: list[tuple[int, type[Token]]]) -> Error|None:
     ctx = ctx_stack[-1]
@@ -1135,7 +1135,7 @@ def ambiguous_number_or_identifier_in_parametric_string_escape(src: str, i: int,
         
         return Error(
             srcfile=ctx.srcfile,
-            title=f"Ambiguous number or identifier in block body",
+            title="Ambiguous number or identifier in block body",
             pointer_messages=[
                 Pointer(span=match_span, message=f"could be a base-{radix} number or an identifier"),
             ],
@@ -1153,9 +1153,9 @@ def illegal_control_chars(src: str, i: int, tokens: list[Token], ctx_stack: list
     
     return Error(
             srcfile=ctx_stack[0].srcfile,
-            title=f"Illegal control character",
+            title="Illegal control character",
             pointer_messages=Pointer(span=Span(i, j), message=f"Control character{plural}"),
-            hint=f"Control characters are not allowed in Dewy source code (for security reasons). Please remove them."
+            hint="Control characters are not allowed in Dewy source code (for security reasons). Please remove them."
         )
 
 
@@ -1178,30 +1178,30 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
     for ctx in reversed(ctx_stack):
         match ctx:
             case StringBody(opening_quote=o):
-                error_stack.append(Error(srcfile, title=f"Missing string closing quote", pointer_messages=[
-                    Pointer(span=o.loc, message=f"String opened here"),
-                    Pointer(span=Span(o.loc.stop, max_pos), message=f"String body"),
-                    Pointer(span=Span(max_pos, max_pos), message=f"End without closing quote"),
+                error_stack.append(Error(srcfile, title="Missing string closing quote", pointer_messages=[
+                    Pointer(span=o.loc, message="String opened here"),
+                    Pointer(span=Span(o.loc.stop, max_pos), message="String body"),
+                    Pointer(span=Span(max_pos, max_pos), message="End without closing quote"),
                 ], hint=f"Did you forget a `{o.src}`?"))
             case RawStringBody(opening_quote=o):
-                error_stack.append(Error(srcfile, title=f"Missing raw string closing quote", pointer_messages=[
-                    Pointer(span=o.loc, message=f"Raw string opened here"),
-                    Pointer(span=Span(o.loc.stop, max_pos), message=f"Raw string body"),
-                    Pointer(span=Span(max_pos, max_pos), message=f"End without closing quote"),
+                error_stack.append(Error(srcfile, title="Missing raw string closing quote", pointer_messages=[
+                    Pointer(span=o.loc, message="Raw string opened here"),
+                    Pointer(span=Span(o.loc.stop, max_pos), message="Raw string body"),
+                    Pointer(span=Span(max_pos, max_pos), message="End without closing quote"),
                 ], hint=f"Did you forget a `{o.src[1:]}`?"))
             case BlockBody(opening_delim=o):
                 possible_closers = '`}`' if isinstance(o, (LeftCurlyBrace, ParametricStringEscape)) else '`]` or `)`'
-                error_stack.append(Error(srcfile, title=f"Missing block closing delimiter", pointer_messages=[
-                    Pointer(span=o.loc, message=f"Block opened here"),
-                    Pointer(span=Span(o.loc.stop, max_pos), message=f"Block body"),
-                    Pointer(span=Span(max_pos, max_pos), message=f"End without closing delimiter"),
+                error_stack.append(Error(srcfile, title="Missing block closing delimiter", pointer_messages=[
+                    Pointer(span=o.loc, message="Block opened here"),
+                    Pointer(span=Span(o.loc.stop, max_pos), message="Block body"),
+                    Pointer(span=Span(max_pos, max_pos), message="End without closing delimiter"),
                 ], hint=f"Did you forget a {possible_closers}?"))
             case TypeBody(opening_delim=o):
-                error_stack.append(Error(srcfile, title=f"Missing type block closing chevron", pointer_messages=[
-                    Pointer(span=o.loc, message=f"Type block opened here"),
-                    Pointer(span=Span(o.loc.stop, max_pos), message=f"Type block body"),
-                    Pointer(span=Span(max_pos, max_pos), message=f"End without closing delimiter"),
-                ], hint=f"Did you forget a `>`?"))
+                error_stack.append(Error(srcfile, title="Missing type block closing chevron", pointer_messages=[
+                    Pointer(span=o.loc, message="Type block opened here"),
+                    Pointer(span=Span(o.loc.stop, max_pos), message="Type block body"),
+                    Pointer(span=Span(max_pos, max_pos), message="End without closing delimiter"),
+                ], hint="Did you forget a `>`?"))
             case BasedStringBody(opening_quote=o):
                 error_stack.append(Error(srcfile, title="Missing based-string closing quote", pointer_messages=[
                     Pointer(span=o.loc, message="Based string opened here"),

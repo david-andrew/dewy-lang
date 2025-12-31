@@ -11,12 +11,11 @@ Additionally symbols are separated into operators and identifiers. And identifie
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from itertools import groupby
-from .reporting import Span, SrcFile, Info, Error, Pointer, ReportException
+from .reporting import Span, SrcFile, Error, Pointer, ReportException
 from . import tokenizer as t1
 from .utils import JumpableIterator
 from typing import Literal, Generator
 
-import pdb
 
 keywords: set[str] = {
     'loop', 'do', 'if', 'else', 'match', 'return', 'yield', 'break', 'continue',
