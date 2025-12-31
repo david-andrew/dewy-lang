@@ -528,8 +528,8 @@ def peek_next_token(tokens:list[t1.Token], ctx:Context, start:int) -> 'Token2|t1
     try:
         return next(tokenize2_gen(tokens, ctx, start, len(tokens)))
     except Exception:
-        if start + 1 < len(tokens):
-            return tokens[start+1]
+        if start < len(tokens):
+            return tokens[start]
         return None
 
 

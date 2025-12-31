@@ -94,6 +94,13 @@ COLOR_NAME_TO_CODE: dict[ColorName, str] = {
 }
 
 
+class ReportException(Exception):
+    """Exception raised when a Report is thrown. Contains the report for handling."""
+    def __init__(self, report: "Report") -> None:
+        self.report = report
+        super().__init__(str(report))
+
+
 class ColorTheme:
     def __init__(self, enabled:bool=True) -> None:
         self.enabled = enabled
@@ -956,8 +963,7 @@ class Report:
         return width
     
     def throw(self) -> NoReturn:
-        print(self)
-        exit(1)
+        raise ReportException(self)
 
 @dataclass
 class Error(Report):
