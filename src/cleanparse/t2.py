@@ -490,11 +490,11 @@ def tokenize2_gen(tokens:list[t1.Token], ctx:Context, start:int=0, stop:int=None
             # TODO: more specific error reporting based on the case
             error = Error(
                 srcfile=ctx.srcfile,
-                title=f'No token found',
+                title='No token found',
                 pointer_messages=[
-                    Pointer(span=Span(tokens[start].loc.start, tokens[start].loc.start), message=f'Unrecognized starting here'),
+                    Pointer(span=Span(tokens[start].loc.start, tokens[start].loc.start), message='Unrecognized starting here'),
                 ],
-                hint=f'TODO: better error analysis'
+                hint='TODO: better error analysis'
             )
             error.throw()
         if len(matches) > 1:
@@ -505,9 +505,9 @@ def tokenize2_gen(tokens:list[t1.Token], ctx:Context, start:int=0, stop:int=None
                 # TODO: more specific error reporting based on the case
                 error = Error(
                     srcfile=ctx.srcfile,
-                    title=f'Multiple tokens matched',
+                    title='Multiple tokens matched',
                     pointer_messages=[
-                        Pointer(span=Span(tokens[start].loc.start, tokens[start].loc.start), message=f'Multiple tokens matched'),
+                        Pointer(span=Span(tokens[start].loc.start, tokens[start].loc.start), message='Multiple tokens matched'),
                     ],
                     hint=f'The following tokens matched: {matches}\nTODO: provide better explanation for how to disambiguate'
                 )
