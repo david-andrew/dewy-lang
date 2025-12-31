@@ -14,7 +14,7 @@ from itertools import groupby
 from .reporting import Span, SrcFile, Info, Error, Pointer
 from . import tokenizer as t1
 from .utils import JumpableIterator
-from typing import Literal
+from typing import Literal, Generator
 
 import pdb
 
@@ -241,20 +241,20 @@ class String(Token2):
             elif isinstance(token, t1.StringEscape):
                 chunks.append(String.get_escape_char(token))
             elif isinstance(token, t1.ParametricStringEscape):
-                raise NotImplementedError(f'parametric escapes not implemented yet')
+                raise NotImplementedError('parametric escapes not implemented yet')
                 #needs to process all the inner tokens of the block
             elif isinstance(token, t1.LeftCurlyBrace):
                 if token.matching_right.idx - token.idx == 1:
                     error = Error(
                         srcfile=ctx.srcfile,
-                        title=f'Empty interpolation block',
+                        title='Empty interpolation block',
                         pointer_messages=[
-                            Pointer(span=Span(token.loc.start, token.matching_right.loc.stop), message=f'Empty interpolation block'),
+                            Pointer(span=Span(token.loc.start, token.matching_right.loc.stop), message='Empty interpolation block'),
                         ],
-                        hint=f'Interpolation blocks must contain at least one token.\nIf you meant `{{}}` literally, use an escape, e.g. `\\{{}}`'
+                        hint='Interpolation blocks must contain at least one token.\nIf you meant `{{}}` literally, use an escape, e.g. `\\{{}}`'
                     )
                     error.throw()
-                inner = tokenize2_inner(tokens, ctx, token.idx+1, token.matching_right.idx)
+                inner = list(tokenize2_gen(tokens, ctx, token.idx+1, token.matching_right.idx))
                 chunks.append(Block(Span(token.loc.start, token.matching_right.loc.stop), inner, '{}'))
                 token_iter.jump_forward(token.matching_right.idx - token.idx + 1) # skip inner tokens and closing brace
             else:
@@ -299,7 +299,7 @@ class Block(Token2):
         delims = opener.src + closer.src
         span = Span(opener.loc.start, closer.loc.stop)
         body_start, body_stop = start + 1, closer.idx
-        inner = tokenize2_inner(tokens, ctx, body_start, body_stop)
+        inner = list(tokenize2_gen(tokens, ctx, body_start, body_stop))
         assert delims in ['{}', '[]', '()', '[)', '(]', '<>'], f'INTERNAL ERROR: invalid block delimiter: {delims}'
         return closer.idx - start + 1, Block(span, inner, delims)
 
@@ -334,7 +334,7 @@ class BasedArray(Token2):
         closer = opener.matching_right
         span = Span(opener.loc.start, closer.loc.stop)
         body_start, body_stop = start + 1, closer.idx
-        inner = tokenize2_inner(tokens, ctx, body_start, body_stop)
+        inner = list(tokenize2_gen(tokens, ctx, body_start, body_stop))
         
         # filter out any non integers
         integers = [token for token in inner if isinstance(token, Integer)]
@@ -358,7 +358,6 @@ class Identifier(Token2):
             return 1, Identifier(token.loc, token.src)
         elif isinstance(token, t1.Symbol) and token.src in symbolic_identifiers:
             return 1, Identifier(token.loc, token.src)
-        # TODO: are there any other things that are identifiers?
         
         return None
 
@@ -368,16 +367,28 @@ class Handle(Token2):
 
     @staticmethod
     def eat(tokens:list[t1.Token], ctx:Context, start:int) -> 'tuple[int, Handle]|None':
-        """"""
-        if start + 1 >= len(tokens):
-            return None
+        """handles are strictly <@><identifier>"""
         token = tokens[start]
         if not isinstance(token, t1.Symbol) or token.src != '@':
             return None
         
-        res = Identifier.eat(tokens, ctx, start + 1)
+        # check if an identifier follows
+        res = None
+        if start + 1 < len(tokens):
+            res = Identifier.eat(tokens, ctx, start + 1)
+        
         if res is None:
-            return None
+            next_token = peek_next_token(tokens, ctx, start + 1)
+            error = Error(
+                srcfile=ctx.srcfile,
+                title='Invalid handle',
+                pointer_messages=[
+                    Pointer(span=token.loc, message='handle without following identifier'),
+                    *([Pointer(span=next_token.loc, message=f"expected <Identifier>, got <{type(next_token).__name__}>", color='red')] if next_token is not None else []),
+                ],
+                hint='@ must be immediately followed by an identifier, e.g. `@my_variable`'
+            )
+            error.throw()
         length, identifier = res
         return length + 1, Handle(Span(token.loc.start, identifier.loc.stop), identifier)
         
@@ -466,10 +477,10 @@ def tokenize2(srcfile: SrcFile) -> list[Token2]:
     """Public API for second tokenization stage"""
     tokens = t1.tokenize(srcfile)
     ctx = Context(srcfile)
-    return tokenize2_inner(tokens, ctx)
+    return list(tokenize2_gen(tokens, ctx))
 
-def tokenize2_inner(tokens:list[t1.Token], ctx:Context, start:int=0, stop:int=None) -> list[Token2]:
-    processed: list[Token2] = []
+def tokenize2_gen(tokens:list[t1.Token], ctx:Context, start:int=0, stop:int=None) -> Generator[Token2, None, None]:
+    # processed: list[Token2] = []
     if stop is None: stop = len(tokens)
     if stop > len(tokens): raise ValueError(f"INTERNAL ERROR: stop index out of range: {stop} > {len(tokens)}")
     while start < stop:
@@ -503,10 +514,23 @@ def tokenize2_inner(tokens:list[t1.Token], ctx:Context, start:int=0, stop:int=No
                 error.throw()
     
         match_length, token = matches[0]
-        processed.append(token)
+        # processed.append(token)
+        yield token
         start += match_length
 
-    return processed
+    # return processed
+
+
+def peek_next_token(tokens:list[t1.Token], ctx:Context, start:int) -> 'Token2|t1.Token|None':
+    """Mostly for error reporting purposes. Try to get the next token2. Otherwise try to get the next token1. Otherwise return None"""
+    if start >= len(tokens):
+        return None
+    try:
+        return next(tokenize2_gen(tokens, ctx, start, len(tokens)))
+    except Exception:
+        if start + 1 < len(tokens):
+            return tokens[start+1]
+        return None
 
 
 def test():
