@@ -3,7 +3,7 @@ Post processing steps on tokens to prepare them for expression parsiing
 """
 
 from dataclasses import dataclass
-from .reporting import Span, SrcFile, Info, Error, Pointer
+from .reporting import Span, SrcFile, Info, Error, Pointer, ReportException
 from . import t2
 from . import tokenizer as t1
 
@@ -119,9 +119,13 @@ def test():
     path: Path = args.path
     src = path.read_text()
     srcfile = SrcFile(path, src)
-    tokens3 = postok(srcfile)
+    try:
+        tokens3 = postok(srcfile)
+    except ReportException as e:
+        print(e.report)
+        exit(1)
+    
     print(tokens_to_report(tokens3, srcfile))
-
 
 if __name__ == '__main__':
     test()

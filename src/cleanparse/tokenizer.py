@@ -24,7 +24,7 @@ sensitive rules (e.g. different tokens allowed inside strings vs. at the top
 level) in a purely declarative way.
 """
 
-from .reporting import Span, Info, Warning, Error, SrcFile, Pointer
+from .reporting import Span, Info, Warning, Error, SrcFile, Pointer, ReportException
 from .utils import truncate, descendants, ordinalize, first_line
 from typing import NoReturn, TypeAlias, ClassVar, get_origin, get_args, Union, Protocol, Literal
 from types import UnionType
@@ -1361,7 +1361,11 @@ def test():
     path: Path = args.path
     src = path.read_text()
     srcfile = SrcFile(path, src)
-    tokens = tokenize(srcfile)
+    try:
+        tokens = tokenize(srcfile)
+    except ReportException as e:
+        print(e.report)
+        exit(1)
 
     # to print out report of all tokens eaten    
     print(tokens_to_report(tokens, srcfile, {Whitespace}))

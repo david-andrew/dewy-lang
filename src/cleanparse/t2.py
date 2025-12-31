@@ -11,7 +11,7 @@ Additionally symbols are separated into operators and identifiers. And identifie
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from itertools import groupby
-from .reporting import Span, SrcFile, Info, Error, Pointer
+from .reporting import Span, SrcFile, Info, Error, Pointer, ReportException
 from . import tokenizer as t1
 from .utils import JumpableIterator
 from typing import Literal, Generator
@@ -543,10 +543,13 @@ def test():
     path: Path = args.path
     src = path.read_text()
     srcfile = SrcFile(path, src)
-    tokens2 = tokenize2(srcfile)
+    try:
+        tokens2 = tokenize2(srcfile)
+    except ReportException as e:
+        print(e.report)
+        exit(1)
+
     print(tokens_to_report(tokens2, srcfile, {Whitespace}))
-
-
 
 if __name__ == '__main__':
     test()
