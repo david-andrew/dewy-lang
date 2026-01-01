@@ -31,6 +31,16 @@ given AST, produce output in the target backend
 
 
 [tasks]
+[ ] implement parametric escapes in t1
+[ ] build opchains in t2/postok
+[ ] bundle conditionals in t2
+[ ] initial parse pass with pratt parser
+[x] make int literal only support up to base 16
+    [ ] write out why have both based strings and based arrays. (BLUF: based arrays are just normal arrays you sequence whatever you want, no bit packing/etc. strings are for fixed chunks (e.g. 2 hex digits for bytes, 8 bits for byte, etc.))
+
+
+
+
 [ ] flag for spans where if set to true, and they would break a line, keep on the initial line and extend to end
 
 [ ] error report for TODOs
