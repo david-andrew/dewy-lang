@@ -77,7 +77,7 @@ base_digits: dict[BasePrefix, set[str]] = {
     '0x': {*'0123456789abcdefABCDEF'},  # hexadecimal (case-insensitive)
     '0u': {*'0123456789abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRSTUV'},  # base 32 (duotrigesimal)
     '0r': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'},  # base 36 (hexatrigesimal)
-    '0g': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!$'},  # base 64 (tetrasexagesimal)
+    '0g': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-/_='},  # base 64 (tetrasexagesimal)
 }
 base_radixes: dict[BasePrefix, int] = {
     '0b': 2,
@@ -96,6 +96,7 @@ base_radixes: dict[BasePrefix, int] = {
 # commonly used bases
 base10: BasePrefix = '0d'
 base16: BasePrefix = '0x'
+MAX_NUMBER_BASE = 16  # maximum base for integer literals. Rest must be based strings or based arrays
 
 @cache
 def is_based_digit(digit: str, base: BasePrefix) -> bool:
@@ -1022,15 +1023,18 @@ class Number(Token[GeneralBodyContexts]):
     
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
-        """a based number is a sequence of 1 or more digits, optionally preceded by a (case-insensitive) base prefix"""
+        """a based number is a sequence of 1 or more digits, optionally preceded by a (case-insensitive) base prefix (up to base-16)"""
         
         # try a number with a base prefix
         if src[:2].casefold() in base_prefixes:
             base = src[:2].casefold()
             digits = base_digits[base]
+            if base_radixes[base] > MAX_NUMBER_BASE and len(src) > 2 and src[2] in digits: # skip if not a based number literal (e.g. based string)
+                Number.error_too_high_number_base(src, ctx, base)
             i = 2
             # Require at least one digit
             if not (i < len(src) and src[i] in digits):
+                # TODO: have error here if not a based string literal or based array literal
                 return None
             # consume digits or underscores
             while i < len(src) and (src[i] in digits or src[i] == '_'):
@@ -1057,6 +1061,24 @@ class Number(Token[GeneralBodyContexts]):
 
         #doesn't modify the context stack
         return None
+    
+
+    @staticmethod
+    def error_too_high_number_base(src: str, ctx:GeneralBodyContexts, base:BasePrefix):
+        radix = base_radixes[base]
+        digits_len = BasedStringChars.eat(src[2:], BasedStringBody(ctx.srcfile, ctx.tokens_so_far, None, base))
+        assert digits_len is not None, "INTERNAL ERROR: based string chars should have been eaten"
+        digits_str = src[2:2+digits_len]
+        error = Error(
+            srcfile=ctx.srcfile,
+            title="number base too high",
+            pointer_messages=[
+                Pointer(span=Span(ctx.current_tokenization_position(), ctx.current_tokenization_position()+len(base)), message=f"base-{radix} prefix"),
+                *([Pointer(span=Span(ctx.current_tokenization_position()+2, ctx.current_tokenization_position()+2+digits_len), message="unquoted digits", color='red')] if digits_len is not None else [])
+            ],
+            hint=f"Numeric literals only support up to base-{MAX_NUMBER_BASE} (Got base-{radix})\nTo represent larger bases, use a based string e.g. {base}'{digits_str}'"
+        )
+        error.throw()
 
 class ExponentMarker(Token[GeneralBodyContexts]):
     power: Number
