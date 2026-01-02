@@ -105,7 +105,7 @@ def is_based_digit(digit: str, base: BasePrefix) -> bool:
     return digit in digits
 
 
-
+# Symbols are case-insensitive (mainly relevant for `in?`, `is?`, `isnt?`)
 symbols = sorted([
     '~', '@', '`',
     '?', ';',
@@ -121,6 +121,7 @@ symbols = sorted([
     '∞', '∅'
     # ⁂ ‰ ‱
 ], key=len, reverse=True)
+LEN_LONGEST_SYMBOL = len(symbols[0])
 
 # shift operators are not allowed in type groups, so deal with them separately
 shift_operators = sorted(['<<', '>>', '<<<', '>>>', '<<!', '!>>'], key=len, reverse=True)
@@ -415,8 +416,9 @@ class Symbol(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """symbolic operators are any sequence of characters in the symbolic_operators set"""
+        chunk = src[:LEN_LONGEST_SYMBOL].casefold()
         for op in symbols:
-            if src.startswith(op):
+            if chunk.startswith(op):
                 return len(op)
         return None
 

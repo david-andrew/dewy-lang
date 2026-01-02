@@ -17,6 +17,7 @@ from .utils import JumpableIterator
 from typing import Literal, Generator
 
 
+# These are case insensitive
 keywords: set[str] = {
     'loop', 'do', 'if', 'else', 'match', 'return', 'yield', 'break', 'continue',
     'import', 'from', 'let', 'const', 'local_const', 'fixed_type',
@@ -353,7 +354,7 @@ class Identifier(Token):
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Identifier]|None':
         token = tokens[start]
-        if isinstance(token, t0.Identifier) and token.src not in keywords and token.src not in word_operators:
+        if isinstance(token, t0.Identifier) and token.src.casefold() not in keywords and token.src.casefold() not in word_operators:
             return 1, Identifier(token.loc, token.src)
         elif isinstance(token, t0.Symbol) and token.src in symbolic_identifiers:
             return 1, Identifier(token.loc, token.src)
@@ -402,15 +403,15 @@ class Operator(Token):
         token = tokens[start]
 
         # non-symbolic operators
-        if isinstance(token, t0.Identifier) and token.src in word_operators:
-            return 1, Operator(token.loc, token.src)
+        if isinstance(token, t0.Identifier) and token.src.casefold() in word_operators:
+            return 1, Operator(token.loc, token.src.casefold())
 
         # all symbols that are not symbolic identifiers are operators
         if not isinstance(token, (t0.Symbol, t0.ShiftSymbol)) or token.src in symbolic_identifiers: 
             return None
         if token.src == '@':  # @ operator is handled by Handle
             return None
-        return 1, Operator(token.loc, token.src)
+        return 1, Operator(token.loc, token.src.casefold())
             
 
 @dataclass
@@ -420,8 +421,8 @@ class Keyword(Token): # e.g. if, loop, import, let, etc. any keyword that behave
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Keyword]|None':
         token = tokens[start]
-        if isinstance(token, t0.Identifier) and token.src in keywords:
-            return 1, Keyword(token.loc, token.src)
+        if isinstance(token, t0.Identifier) and token.src.casefold() in keywords:
+            return 1, Keyword(token.loc, token.src.casefold())
         return None
 
 @dataclass
@@ -543,12 +544,12 @@ def test():
     src = path.read_text()
     srcfile = SrcFile(path, src)
     try:
-        tokens2 = tokenize2(srcfile)
+        tokens = tokenize2(srcfile)
     except ReportException as e:
         print(e.report)
         exit(1)
 
-    print(tokens_to_report(tokens2, srcfile, {Whitespace}))
+    print(tokens_to_report(tokens, srcfile, {Whitespace}))
 
 if __name__ == '__main__':
     test()

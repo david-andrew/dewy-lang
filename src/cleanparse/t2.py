@@ -130,12 +130,12 @@ def test():
     src = path.read_text()
     srcfile = SrcFile(path, src)
     try:
-        tokens3 = postok(srcfile)
+        tokens = postok(srcfile)
     except ReportException as e:
         print(e.report)
         exit(1)
     
-    print(tokens_to_report(tokens3, srcfile))
+    print(tokens_to_report(tokens, srcfile))
 
 if __name__ == '__main__':
     test()
