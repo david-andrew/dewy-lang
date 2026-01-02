@@ -2021,6 +2021,35 @@ const_overloadable __add__:<T U V>(a:T b:U):> V
 __add__ &= (a:mytype b:mytype):>mytype => ...
 ```
 
+### Further refinement
+- Redeclarable
+    - `const`
+    - `let`
+- Not redeclarable
+    - `final`: cannot be changed, cannot be redeclared
+        - `immutable`
+        - `static`
+        - tbd if necessary. Mainly would use for e.g. `final SYSCALL_WRITE=1` and such variables. But could declare them all in an library/namespace object `syscall = [READ=0 WRITE=1 OPEN=2 ...]`
+    - `local_const`: pretends to not be present in terms of lower scoped declarations/assignments
+        - `scoped_const`
+        - `isolated_const`
+    - `overload_only`: for functions where the only allowed action is adding an overload
+        - `extendable`
+        - `extenable_const`
+        - `overloadable_const`
+
+Why redeclaration is important
+```
+const A: array<T|Junk|None> = [...]
+% can do stuff with A, strongly typed
+
+const A: array<T|None> = clean_junk(A)
+% can do stuff with narrowed A, strongly typed
+
+const A: array<T> = filter_none(A)
+% can do stuff with narrowed A, strongly typed
+```
+
 ### stdlib provided parameters and their declaration types
 
 Local:
@@ -2062,6 +2091,13 @@ Logical errors that we can help with:
     - TBD but this should probably be granular and able to track if things are susceptible side-channel attacks
 - tracking anything that is read from input (e.g. `read`/`readl`) and preventing it from touching anything that has side effects. Though this prevents a lot of useful stuff people want to do, so probably there should be good structured mechanisms the language provides to e.g. process input and write it back as output but in a generally safe way (e.g. by forcing the user to have a resource tracking system they specify how much resources are allowed to be used in the process and then the process fails if that threshold is violated)
 - memory safety at compiletime
+
+look at the go runtime/secret mode, which lets you mark sections as secure, and will do things like:
+- not optimize away as a no-op zeroing memory
+- CPU registers used by the function are zeroed.
+- The stack used by that function is zeroed.
+- Heap allocations made by that function are erased once the GC determines they’re no longer reachable
+see: https://antonz.org/accepted/runtime-secret/
 
 ## closure explicit syntax for specifying what variables they capture
 
