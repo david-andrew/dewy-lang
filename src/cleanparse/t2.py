@@ -76,25 +76,11 @@ flows # note that if-else-if/if-else-loop/etc. should all be bundled up into one
 
 @dataclass
 class KeywordExpr(t1.InedibleToken):
-    keyword: t1.Keyword
-    args: list[list[t1.Token]]
+    parts: list[t1.Keyword | list[t1.Token]]
 
 @dataclass
 class FlowArm(t1.InedibleToken):
-    """
-    A single arm in a flow expression.
-
-    - For `if`:     parts = [cond, clause]
-    - For `match`:  parts = [scrutinee, clause]
-    - For `loop`:
-        - style="plain":                  parts = [cond, clause]
-        - style="post_do":                parts = [cond, post_clause]
-        - style="do_prefix":              parts = [pre_clause, cond]
-        - style="do_prefix_post_do":      parts = [pre_clause, cond, post_clause]
-    """
-    keyword: t1.Keyword
-    style: str
-    parts: list[list[t1.Token]]
+    parts: list[t1.Keyword | list[t1.Token]]
 
 @dataclass
 class Flow(t1.InedibleToken):
@@ -356,31 +342,25 @@ def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[s
         loop_kw = tokens[i]
         i += 1
         cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"do"})
-        parts: list[list[t1.Token]] = [pre, cond]
-        style = "do_prefix"
+        parts: list[t1.Keyword | list[t1.Token]] = [kw, pre, loop_kw, cond]
         if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name == "do":
+            do2 = tokens[i]
             i += 1
             post, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-            parts.append(post)
-            style = "do_prefix_post_do"
-        return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), loop_kw, style, parts), i
+            parts.extend([do2, post])
+        return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
 
     if kw.name in {"if", "match"}:
         cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
         clause, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-        parts = [cond, clause]
-        return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), kw, "plain", parts), i
+        parts: list[t1.Keyword | list[t1.Token]] = [kw, cond, clause]
+        return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
 
     if kw.name == "loop":
-        cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"do"})
-        if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name == "do":
-            i += 1
-            post, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-            parts = [cond, post]
-            return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), kw, "post_do", parts), i
+        cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
         clause, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-        parts = [cond, clause]
-        return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), kw, "plain", parts), i
+        parts: list[t1.Keyword | list[t1.Token]] = [kw, cond, clause]
+        return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
 
     raise ValueError(f"unexpected flow keyword {kw.name!r}")
 
@@ -396,7 +376,7 @@ def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
 
         if i >= len(tokens) or not (isinstance(tokens[i], t1.Keyword) and tokens[i].name == "else"):
             break
-        i += 1  # consume else
+        i += 1  # consume else (not stored; `else` is structural)
 
         if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name in {"if", "loop", "match", "do"}:
             continue
@@ -422,37 +402,39 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
     i = start + 1
     if kw.name in {"return", "yield"}:
         if i >= len(tokens) or is_stop_keyword(tokens[i], stop_keywords) or isinstance(tokens[i], t1.Semicolon):
-            return KeywordExpr(kw.loc, kw, []), i
+            return KeywordExpr(kw.loc, [kw]), i
         expr, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-        return KeywordExpr(Span(kw.loc.start, expr[-1].loc.stop), kw, [expr]), i
+        return KeywordExpr(Span(kw.loc.start, expr[-1].loc.stop), [kw, expr]), i
 
     if kw.name in {"break", "continue"}:
         if i < len(tokens) and isinstance(tokens[i], t1.Hashtag):
             ht = tokens[i]
-            return KeywordExpr(Span(kw.loc.start, ht.loc.stop), kw, [[ht]]), i + 1
-        return KeywordExpr(kw.loc, kw, []), i
+            return KeywordExpr(Span(kw.loc.start, ht.loc.stop), [kw, [ht]]), i + 1
+        return KeywordExpr(kw.loc, [kw]), i
 
     if kw.name in {"let", "const", "local_const", "overload_only"}:
         expr, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-        return KeywordExpr(Span(kw.loc.start, expr[-1].loc.stop), kw, [expr]), i
+        return KeywordExpr(Span(kw.loc.start, expr[-1].loc.stop), [kw, expr]), i
 
     if kw.name == "import":
         first, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"from"})
         if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name == "from":
+            from_kw = tokens[i]
             i += 1
             second, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-            return KeywordExpr(Span(kw.loc.start, second[-1].loc.stop), kw, [first, second]), i
-        return KeywordExpr(Span(kw.loc.start, first[-1].loc.stop), kw, [first]), i
+            return KeywordExpr(Span(kw.loc.start, second[-1].loc.stop), [kw, first, from_kw, second]), i
+        return KeywordExpr(Span(kw.loc.start, first[-1].loc.stop), [kw, first]), i
 
     if kw.name == "from":
         first, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"import"})
         if i >= len(tokens) or not (isinstance(tokens[i], t1.Keyword) and tokens[i].name == "import"):
             raise ValueError("`from` must be followed by `import`")
+        import_kw = tokens[i]
         i += 1
         second, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-        return KeywordExpr(Span(kw.loc.start, second[-1].loc.stop), kw, [first, second]), i
+        return KeywordExpr(Span(kw.loc.start, second[-1].loc.stop), [kw, first, import_kw, second]), i
 
-    return KeywordExpr(kw.loc, kw, []), i
+    return KeywordExpr(kw.loc, [kw]), i
 
 
 def bundle_keyword_exprs(tokens: list[t1.Token]) -> None:
