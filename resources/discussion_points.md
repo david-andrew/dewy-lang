@@ -1836,6 +1836,20 @@ fn(x)
 
 though I'm not really satisfied with the extra parenthesis needed, nor the handling of the default case. TBD
 
+### Match Block:
+perhaps we just make a special kind of container, sort of like a dict, but for matches:
+```
+match x [
+    [a b] => a + b
+    [a b 3] => a + b + c
+    [a b c] => a + b + c
+    5 => 'five'
+    _ => 0
+]
+```
+
+still TBD.. this really is just so similar to function overloading, and also to dictionaries...
+
 ## Debugging: Ability to dump program state at a point, and pick up from that point
 
 Basically, when debugging, say it takes a lot of time/computation to get to a particular point in your code that you're debugging. There should be a way to dump the program state right before that point, and then subsequent debugging runs can pick up directly from that point without having to go through all the previous computation again
