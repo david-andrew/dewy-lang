@@ -23,6 +23,9 @@ class BackticksJuxtapose(Juxtapose): ...
 class TypeParamJuxtapose(Juxtapose): ...
 
 @dataclass
+class InvertedComparisonOp(t1.Operator, t1.InedibleToken): ...
+
+@dataclass
 class PrefixChain(t1.InedibleToken):
     chain: list[t1.Operator]  # must be a list of unary prefix operators
 
@@ -40,11 +43,71 @@ class BroadcastOp(t1.InedibleToken):
 class CombinedAssignmentOp(t1.InedibleToken):
     op: t1.Operator | BinopChain | BroadcastOp   # must be a binary operator or a binary opchain or a broadcast operator
 
+
+"""
+keywords:
+'loop', 'do', 'if', 'else', 'match', 'return', 'yield', 'break', 'continue',
+'import', 'from', 'let', 'const', 'local_const', 'overload_only',
+
+patterns:
+flows # note that if-else-if/if-else-loop/etc. should all be bundled up into one higher level token
+  <loop><expr><expr>
+  <do><expr><loop><expr>
+  <do><expr><loop><expr><do><expr>
+  <if><expr><expr>
+<match><expr><expr>
+<return>
+<return><expr>
+<yield>
+<yield><expr>
+<break>
+<break><hashtag>
+<continue>
+<continue><hashtag>
+<import><expr>
+<import><expr><from><expr>
+<from><expr><import><expr>
+<let><expr>
+<const><expr>
+<local_const><expr>
+<overload_only><expr>
+
+"""
+
+@dataclass
+class KeywordExpr(t1.InedibleToken):
+    keyword: t1.Keyword
+    args: list[list[t1.Token]]
+
+@dataclass
+class FlowArm(t1.InedibleToken):
+    """
+    A single arm in a flow expression.
+
+    - For `if`:     parts = [cond, clause]
+    - For `match`:  parts = [scrutinee, clause]
+    - For `loop`:
+        - style="plain":                  parts = [cond, clause]
+        - style="post_do":                parts = [cond, post_clause]
+        - style="do_prefix":              parts = [pre_clause, cond]
+        - style="do_prefix_post_do":      parts = [pre_clause, cond, post_clause]
+    """
+    keyword: t1.Keyword
+    style: str
+    parts: list[list[t1.Token]]
+
+@dataclass
+class Flow(t1.InedibleToken):
+    arms: list[FlowArm]
+    default: list[t1.Token]|None=None
+    
+
 # tokens that can be juxtaposed with each other
 # note: operators and keywords do not participate in juxtaposition
 juxtaposable = {
     t1.Real,
     t1.String,
+    t1.IString,
     t1.Block,
     t1.BasedString,
     t1.BasedArray,
@@ -140,6 +203,19 @@ def invert_whitespace(tokens: list[t1.Token]) -> None:
         i += 1
 
 
+def make_inverted_comparisons(tokens: list[t1.Token]) -> None:
+    """`not` followed by a comparison operator becomes an inverted comparison operator"""
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        recurse_into(token, make_inverted_comparisons)
+        
+        if isinstance(token, t1.Operator) and token.symbol == 'not':
+            if len(tokens) > i+1 and is_binary_op(tokens[i+1]) and tokens[i+1].symbol in {'=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?'}:
+                tokens[i:i+2] = [InvertedComparisonOp(Span(token.loc.start, tokens[i+1].loc.stop), tokens[i+1].symbol)]
+        i += 1
+
+
 def make_chain_operators(tokens: list[t1.Token]) -> None:
     """Convert consecutive operator tokens into a single opchain token"""
     i = 0
@@ -188,8 +264,223 @@ def make_combined_assignment_operators(tokens: list[t1.Token]) -> None:
         i += 1
 
 
+def is_stop_keyword(token: t1.Token, stop: set[str]) -> bool:
+    return isinstance(token, t1.Keyword) and token.name in stop
+
+
+def is_primary(token: t1.Token) -> bool:
+    """Primary tokens that can appear where an atom/expression operand is expected."""
+    return isinstance(
+        token,
+        (
+            t1.Real,
+            t1.String,
+            t1.IString,
+            t1.Block,
+            t1.BasedString,
+            t1.BasedArray,
+            t1.Identifier,
+            t1.Handle,
+            t1.Hashtag,
+            t1.Integer,
+            KeywordExpr,
+            Flow,
+        ),
+    )
+
+
+def is_prefix_like(token: t1.Token) -> bool:
+    """Prefix operators or bundled prefix chains."""
+    return is_prefix_op(token) or isinstance(token, PrefixChain)
+
+
+def is_infix_like(token: t1.Token) -> bool:
+    """Binary/infix operators or bundled infix operators."""
+    return is_binary_op(token) or isinstance(
+        token,
+        (
+            Juxtapose,
+            RangeJuxtapose,
+            EllipsisJuxtapose,
+            BackticksJuxtapose,
+            TypeParamJuxtapose,
+            BinopChain,
+            BroadcastOp,
+            CombinedAssignmentOp,
+        ),
+    )
+
+
+def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[list[t1.Token], int]:
+    i = start
+    out: list[t1.Token] = []
+
+    while i < len(tokens) and not is_stop_keyword(tokens[i], stop_keywords) and is_prefix_like(tokens[i]):
+        out.append(tokens[i])
+        i += 1
+
+    if i >= len(tokens) or is_stop_keyword(tokens[i], stop_keywords) or isinstance(tokens[i], t1.Semicolon):
+        return out, i
+
+    token = tokens[i]
+    if isinstance(token, t1.Keyword):
+        atom, i = collect_keyword_atom(tokens, i, stop_keywords=stop_keywords)
+        out.append(atom)
+        return out, i
+
+    if not is_primary(token):
+        raise ValueError(f"expected primary token, got {token=}")
+    out.append(token)
+    return out, i + 1
+
+
+def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[list[t1.Token], int]:
+    i = start
+    out: list[t1.Token] = []
+
+    chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords)
+    out.extend(chunk)
+
+    while (
+        i < len(tokens)
+        and not is_stop_keyword(tokens[i], stop_keywords)
+        and not isinstance(tokens[i], t1.Semicolon)
+        and is_infix_like(tokens[i])
+    ):
+        out.append(tokens[i])
+        i += 1
+        chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords)
+        out.extend(chunk)
+
+    return out, i
+
+
+def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[FlowArm, int]:
+    kw = tokens[start]
+    if not isinstance(kw, t1.Keyword):
+        raise ValueError(f"expected flow keyword, got {kw=}")
+    i = start + 1
+
+    if kw.name == "do":
+        pre, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"loop"})
+        if i >= len(tokens) or not (isinstance(tokens[i], t1.Keyword) and tokens[i].name == "loop"):
+            raise ValueError("`do` must be followed by `loop`")
+        loop_kw = tokens[i]
+        i += 1
+        cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"do"})
+        parts: list[list[t1.Token]] = [pre, cond]
+        style = "do_prefix"
+        if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name == "do":
+            i += 1
+            post, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+            parts.append(post)
+            style = "do_prefix_post_do"
+        return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), loop_kw, style, parts), i
+
+    if kw.name in {"if", "match"}:
+        cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+        clause, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+        parts = [cond, clause]
+        return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), kw, "plain", parts), i
+
+    if kw.name == "loop":
+        cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"do"})
+        if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name == "do":
+            i += 1
+            post, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+            parts = [cond, post]
+            return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), kw, "post_do", parts), i
+        clause, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+        parts = [cond, clause]
+        return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), kw, "plain", parts), i
+
+    raise ValueError(f"unexpected flow keyword {kw.name!r}")
+
+
+def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[Flow, int]:
+    i = start
+    arms: list[FlowArm] = []
+    default: list[t1.Token] | None = None
+
+    while True:
+        arm, i = collect_flow_arm(tokens, i, stop_keywords=stop_keywords | {"else"})
+        arms.append(arm)
+
+        if i >= len(tokens) or not (isinstance(tokens[i], t1.Keyword) and tokens[i].name == "else"):
+            break
+        i += 1  # consume else
+
+        if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name in {"if", "loop", "match", "do"}:
+            continue
+
+        default, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"else"})
+        break
+
+    if default is not None:
+        end = arms[-1].loc.stop if not default else default[-1].loc.stop
+    else:
+        end = arms[-1].loc.stop
+    return Flow(Span(tokens[start].loc.start, end), arms, default), i
+
+
+def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[t1.Token, int]:
+    kw = tokens[start]
+    if not isinstance(kw, t1.Keyword):
+        raise ValueError(f"expected keyword, got {kw=}")
+
+    if kw.name in {"if", "loop", "match", "do"}:
+        return collect_flow(tokens, start, stop_keywords=stop_keywords)
+
+    i = start + 1
+    if kw.name in {"return", "yield"}:
+        if i >= len(tokens) or is_stop_keyword(tokens[i], stop_keywords) or isinstance(tokens[i], t1.Semicolon):
+            return KeywordExpr(kw.loc, kw, []), i
+        expr, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+        return KeywordExpr(Span(kw.loc.start, expr[-1].loc.stop), kw, [expr]), i
+
+    if kw.name in {"break", "continue"}:
+        if i < len(tokens) and isinstance(tokens[i], t1.Hashtag):
+            ht = tokens[i]
+            return KeywordExpr(Span(kw.loc.start, ht.loc.stop), kw, [[ht]]), i + 1
+        return KeywordExpr(kw.loc, kw, []), i
+
+    if kw.name in {"let", "const", "local_const", "overload_only"}:
+        expr, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+        return KeywordExpr(Span(kw.loc.start, expr[-1].loc.stop), kw, [expr]), i
+
+    if kw.name == "import":
+        first, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"from"})
+        if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name == "from":
+            i += 1
+            second, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+            return KeywordExpr(Span(kw.loc.start, second[-1].loc.stop), kw, [first, second]), i
+        return KeywordExpr(Span(kw.loc.start, first[-1].loc.stop), kw, [first]), i
+
+    if kw.name == "from":
+        first, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"import"})
+        if i >= len(tokens) or not (isinstance(tokens[i], t1.Keyword) and tokens[i].name == "import"):
+            raise ValueError("`from` must be followed by `import`")
+        i += 1
+        second, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+        return KeywordExpr(Span(kw.loc.start, second[-1].loc.stop), kw, [first, second]), i
+
+    return KeywordExpr(kw.loc, kw, []), i
+
+
 def bundle_conditionals(tokens: list[t1.Token]) -> None:
-    raise NotImplementedError("bundle_conditionals not implemented")
+
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        recurse_into(token, bundle_conditionals)
+
+        if isinstance(token, t1.Keyword) and token.name not in {"else"}:
+            atom, j = collect_keyword_atom(tokens, i, stop_keywords={"else"})
+            tokens[i:j] = [atom]
+            i += 1
+            continue
+
+        i += 1
 
 
 def postok(srcfile: SrcFile) -> list[t1.Token]:
@@ -204,6 +495,8 @@ def postok_inner(tokens: list[t1.Token]) -> None:
     # remove whitespace and insert juxtapose tokens
     invert_whitespace(tokens)
 
+    # combine not with comparison operators into a single token
+    make_inverted_comparisons(tokens)
     # combine operator chains into a single operator token
     make_chain_operators(tokens)
     # convert any . operator next to a binary operator or opchain (e.g. .+ .^/-) into a broadcast operator
@@ -211,8 +504,8 @@ def postok_inner(tokens: list[t1.Token]) -> None:
     # convert any combined assignment operators (e.g. += -= etc.) into a single token
     make_combined_assignment_operators(tokens)
 
-    # # bundle up conditionals into single token expressions
-    # bundle_conditionals(tokens)
+    # bundle up keyword expressions and flows into single atom tokens
+    bundle_conditionals(tokens)
 
 
 def test():
