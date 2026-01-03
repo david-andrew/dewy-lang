@@ -20,7 +20,7 @@ from typing import Literal, Generator
 # These are case insensitive
 keywords: set[str] = {
     'loop', 'do', 'if', 'else', 'match', 'return', 'yield', 'break', 'continue',
-    'import', 'from', 'let', 'const', 'local_const', 'fixed_type',
+    'import', 'from', 'let', 'const', 'local_const', 'overload_only',
     # 'extern', 'intrinsic', 'undefined', 'void', 'untyped', 'end', 'new' #TBD if these are keywords or just special identifiers
 }
 
