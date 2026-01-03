@@ -102,9 +102,9 @@ class Flow(t1.InedibleToken):
     default: list[t1.Token]|None=None
     
 
-# tokens that can be juxtaposed with each other
-# note: operators and keywords do not participate in juxtaposition
-juxtaposable = {
+# token categories used by the keyword/flow bundler.
+# Atom tokens may be juxtaposed with each other.
+atom_tokens: set[type[t1.Token]] = {
     t1.Real,
     t1.String,
     t1.IString,
@@ -115,7 +115,23 @@ juxtaposable = {
     t1.Handle,
     t1.Hashtag,
     t1.Integer,
+    KeywordExpr,
+    Flow,
 }
+
+
+# not including t1.Operator
+other_infix_tokens: set[type[t1.Token]] = { 
+    Juxtapose,
+    RangeJuxtapose,
+    EllipsisJuxtapose,
+    BackticksJuxtapose,
+    TypeParamJuxtapose,
+    BinopChain,
+    BroadcastOp,
+    CombinedAssignmentOp,
+}
+
 
 binary_ops: set[str] = {
     '+', '-', '*', '/', '//', '^',
@@ -194,7 +210,7 @@ def invert_whitespace(tokens: list[t1.Token]) -> None:
         recurse_into(tokens[i], invert_whitespace)
 
         # insert juxtapose if no whitespace between tokens
-        if i + 1 < len(tokens) and type(tokens[i]) in juxtaposable and type(tokens[i+1]) in juxtaposable:
+        if i + 1 < len(tokens) and type(tokens[i]) in atom_tokens and type(tokens[i+1]) in atom_tokens and tokens[i].loc.stop == tokens[i+1].loc.start:
             jux_type = get_jux_type(tokens[i], tokens[i+1], tokens[i-1] if i > 0 else None)
             tokens.insert(i+1, jux_type(t1.Span(tokens[i].loc.stop, tokens[i].loc.stop)))
             i += 1
@@ -268,25 +284,9 @@ def is_stop_keyword(token: t1.Token, stop: set[str]) -> bool:
     return isinstance(token, t1.Keyword) and token.name in stop
 
 
-def is_primary(token: t1.Token) -> bool:
-    """Primary tokens that can appear where an atom/expression operand is expected."""
-    return isinstance(
-        token,
-        (
-            t1.Real,
-            t1.String,
-            t1.IString,
-            t1.Block,
-            t1.BasedString,
-            t1.BasedArray,
-            t1.Identifier,
-            t1.Handle,
-            t1.Hashtag,
-            t1.Integer,
-            KeywordExpr,
-            Flow,
-        ),
-    )
+def is_atom(token: t1.Token) -> bool:
+    """Tokens that can appear where an atom/expression operand is expected."""
+    return type(token) in atom_tokens
 
 
 def is_prefix_like(token: t1.Token) -> bool:
@@ -296,19 +296,7 @@ def is_prefix_like(token: t1.Token) -> bool:
 
 def is_infix_like(token: t1.Token) -> bool:
     """Binary/infix operators or bundled infix operators."""
-    return is_binary_op(token) or isinstance(
-        token,
-        (
-            Juxtapose,
-            RangeJuxtapose,
-            EllipsisJuxtapose,
-            BackticksJuxtapose,
-            TypeParamJuxtapose,
-            BinopChain,
-            BroadcastOp,
-            CombinedAssignmentOp,
-        ),
-    )
+    return is_binary_op(token) or type(token) in other_infix_tokens
 
 
 def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[list[t1.Token], int]:
@@ -328,7 +316,7 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
         out.append(atom)
         return out, i
 
-    if not is_primary(token):
+    if not is_atom(token):
         raise ValueError(f"expected primary token, got {token=}")
     out.append(token)
     return out, i + 1
@@ -467,12 +455,12 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
     return KeywordExpr(kw.loc, kw, []), i
 
 
-def bundle_conditionals(tokens: list[t1.Token]) -> None:
+def bundle_keyword_exprs(tokens: list[t1.Token]) -> None:
 
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        recurse_into(token, bundle_conditionals)
+        recurse_into(token, bundle_keyword_exprs)
 
         if isinstance(token, t1.Keyword) and token.name not in {"else"}:
             atom, j = collect_keyword_atom(tokens, i, stop_keywords={"else"})
@@ -505,7 +493,8 @@ def postok_inner(tokens: list[t1.Token]) -> None:
     make_combined_assignment_operators(tokens)
 
     # bundle up keyword expressions and flows into single atom tokens
-    bundle_conditionals(tokens)
+    bundle_keyword_exprs(tokens)
+    invert_whitespace(tokens)  # insert juxtapose between any keyword/flow expressions that got added
 
 
 def test():
