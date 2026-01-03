@@ -105,6 +105,7 @@ def is_based_digit(digit: str, base: BasePrefix) -> bool:
     return digit in digits
 
 
+# Mostly operators, but also some special identifiers
 # Symbols are case-insensitive (mainly relevant for `in?`, `is?`, `isnt?`)
 symbols = sorted([
     '~', '@', '`',
@@ -113,7 +114,7 @@ symbols = sorted([
     '\\', # left divide e.g. given Ax=b, x=A\b, where A\B ≡ solve(A B) (note this is not the same as x=A⁻¹B) (TODO: move description to docs)
     '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
     '|', '&', '??',
-    '=', '::', ':=' # not a walrus operator. `x:=y` is sugar for `let x=y` (TODO: move this description to where ever we describe all operators, e.g. docs)
+    '=', '::', ':=', # not a walrus operator. `x:=y` is sugar for `let x=y` (TODO: move this description to where ever we describe all operators, e.g. docs)
     '@?',
     '|>', '<|', '=>',
     '->', '<->',

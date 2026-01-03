@@ -62,10 +62,10 @@ class Token(ABC):
 
 
 @dataclass
-class InedibleToken2(Token):
+class InedibleToken(Token):
     """For Token2's that are not constructed via the normal .eat() method. instead other tokens may construct them directly"""
     @classmethod
-    def eat(cls, tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, InedibleToken2]|None':
+    def eat(cls, tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, InedibleToken]|None':
         raise NotImplementedError(f'{cls.__name__} should not be constructed via .eat(). Instead some other token should construct it directly via {cls.__name__}(...)')
 
 @dataclass
@@ -254,7 +254,7 @@ class String(Token):
                         hint='Interpolation blocks must contain at least one token.\nIf you meant `{{}}` literally, use an escape, e.g. `\\{{}}`'
                     )
                     error.throw()
-                inner = list(tokenize2_gen(tokens, ctx, token.idx+1, token.matching_right.idx))
+                inner = list(tokenize_gen(tokens, ctx, token.idx+1, token.matching_right.idx))
                 chunks.append(Block(Span(token.loc.start, token.matching_right.loc.stop), inner, '{}'))
                 token_iter.jump_forward(token.matching_right.idx - token.idx + 1) # skip inner tokens and closing brace
             else:
@@ -273,11 +273,11 @@ class String(Token):
         return combined
 
 @dataclass
-class ParametricEscape(InedibleToken2):
+class ParametricEscape(InedibleToken):
     block: 'Block'
 
 @dataclass
-class IString(InedibleToken2):
+class IString(InedibleToken):
     """Any string that contains an expression or interpolation (includes parametric unicode+hex escapes)"""
     content: 'list[str | ParametricEscape | Block]'
 
@@ -299,7 +299,7 @@ class Block(Token):
         delims = opener.src + closer.src
         span = Span(opener.loc.start, closer.loc.stop)
         body_start, body_stop = start + 1, closer.idx
-        inner = list(tokenize2_gen(tokens, ctx, body_start, body_stop))
+        inner = list(tokenize_gen(tokens, ctx, body_start, body_stop))
         assert delims in ['{}', '[]', '()', '[)', '(]', '<>'], f'INTERNAL ERROR: invalid block delimiter: {delims}'
         return closer.idx - start + 1, Block(span, inner, delims)
 
@@ -334,18 +334,12 @@ class BasedArray(Token):
         closer = opener.matching_right
         span = Span(opener.loc.start, closer.loc.stop)
         body_start, body_stop = start + 1, closer.idx
-        inner = list(tokenize2_gen(tokens, ctx, body_start, body_stop))
+        inner = list(tokenize_gen(tokens, ctx, body_start, body_stop))
         
         # filter out any non integers
         integers = [token for token in inner if isinstance(token, Integer)]
         
         return closer.idx - start + 1, BasedArray(span, integers, opener.base)
-
-@dataclass
-class OpChain(Token):
-    @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, OpChain]|None':
-        raise NotImplementedError()
 
 @dataclass
 class Identifier(Token):
@@ -392,7 +386,15 @@ class Handle(Token):
         length, identifier = res
         return length + 1, Handle(Span(token.loc.start, identifier.loc.stop), identifier)
         
-        
+
+@dataclass
+class Semicolon(Token):
+    @staticmethod
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Semicolon]|None':
+        token = tokens[start]
+        if isinstance(token, t0.Symbol) and token.src == ';':
+            return 1, Semicolon(token.loc)
+        return None
 
 @dataclass
 class Operator(Token):
@@ -409,7 +411,7 @@ class Operator(Token):
         # all symbols that are not symbolic identifiers are operators
         if not isinstance(token, (t0.Symbol, t0.ShiftSymbol)) or token.src in symbolic_identifiers: 
             return None
-        if token.src == '@':  # @ operator is handled by Handle
+        if token.src in '@;':  # `@` and `;` operators are handled by Handle and Semicolon respectively
             return None
         return 1, Operator(token.loc, token.src.casefold())
             
@@ -470,16 +472,17 @@ top_level_tokens: list[type[Token]] = [
     BasedArray,
     # OpChain,
     Operator,
+    Semicolon,
     Whitespace,
 ]
 
-def tokenize2(srcfile: SrcFile) -> list[Token]:
+def tokenize(srcfile: SrcFile) -> list[Token]:
     """Public API for second tokenization stage"""
     tokens = t0.tokenize(srcfile)
     ctx = Context(srcfile)
-    return list(tokenize2_gen(tokens, ctx))
+    return list(tokenize_gen(tokens, ctx))
 
-def tokenize2_gen(tokens:list[t0.Token], ctx:Context, start:int=0, stop:int=None) -> Generator[Token, None, None]:
+def tokenize_gen(tokens:list[t0.Token], ctx:Context, start:int=0, stop:int=None) -> Generator[Token, None, None]:
     # processed: list[Token2] = []
     if stop is None: stop = len(tokens)
     if stop > len(tokens): raise ValueError(f"INTERNAL ERROR: stop index out of range: {stop} > {len(tokens)}")
@@ -526,7 +529,7 @@ def peek_next_token(tokens:list[t0.Token], ctx:Context, start:int) -> 'Token|t0.
     if start >= len(tokens):
         return None
     try:
-        return next(tokenize2_gen(tokens, ctx, start, len(tokens)))
+        return next(tokenize_gen(tokens, ctx, start, len(tokens)))
     except Exception:
         if start < len(tokens):
             return tokens[start]
@@ -544,7 +547,7 @@ def test():
     src = path.read_text()
     srcfile = SrcFile(path, src)
     try:
-        tokens = tokenize2(srcfile)
+        tokens = tokenize(srcfile)
     except ReportException as e:
         print(e.report)
         exit(1)
