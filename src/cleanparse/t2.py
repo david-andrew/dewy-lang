@@ -140,7 +140,6 @@ def invert_whitespace(tokens: list[t1.Token]) -> None:
         i += 1
 
 
-
 def make_chain_operators(tokens: list[t1.Token]) -> None:
     """Convert consecutive operator tokens into a single opchain token"""
     i = 0
@@ -161,7 +160,6 @@ def make_chain_operators(tokens: list[t1.Token]) -> None:
                 else:
                     tokens[i:i+j] = [PrefixChain(Span(tokens[i].loc.start, tokens[i+j-1].loc.stop), tokens[i:i+j])]
         i += 1
-
 
 
 def make_broadcast_operators(tokens: list[t1.Token]) -> None:
@@ -189,8 +187,10 @@ def make_combined_assignment_operators(tokens: list[t1.Token]) -> None:
                 tokens[i:i+2] = [CombinedAssignmentOp(Span(token.loc.start, tokens[i+1].loc.stop), tokens[i+1])]
         i += 1
 
+
 def bundle_conditionals(tokens: list[t1.Token]) -> None:
     raise NotImplementedError("bundle_conditionals not implemented")
+
 
 def postok(srcfile: SrcFile) -> list[t1.Token]:
     """apply postprocessing steps to the tokens"""

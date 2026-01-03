@@ -241,8 +241,12 @@ class String(Token):
             elif isinstance(token, t0.StringEscape):
                 chunks.append(String.get_escape_char(token))
             elif isinstance(token, t0.ParametricStringEscape):
-                raise NotImplementedError('parametric escapes not implemented yet')
-                #needs to process all the inner tokens of the block
+                closer = token.matching_right
+                span = Span(token.loc.start, closer.loc.stop)
+                body_start, body_stop = token.idx + 1, closer.idx
+                inner = list(tokenize_gen(tokens, ctx, body_start, body_stop))
+                chunks.append(ParametricEscape(span, inner))
+                token_iter.jump_forward(closer.idx - token.idx + 1) # skip inner tokens and closing brace
             elif isinstance(token, t0.LeftCurlyBrace):
                 if token.matching_right.idx - token.idx == 1:
                     error = Error(
@@ -274,7 +278,7 @@ class String(Token):
 
 @dataclass
 class ParametricEscape(InedibleToken):
-    block: 'Block'
+    inner: list[Token]
 
 @dataclass
 class IString(InedibleToken):
@@ -298,7 +302,7 @@ class Block(Token):
         closer = opener.matching_right
         delims = opener.src + closer.src
         span = Span(opener.loc.start, closer.loc.stop)
-        body_start, body_stop = start + 1, closer.idx
+        body_start, body_stop = opener.idx + 1, closer.idx
         inner = list(tokenize_gen(tokens, ctx, body_start, body_stop))
         assert delims in ['{}', '[]', '()', '[)', '(]', '<>'], f'INTERNAL ERROR: invalid block delimiter: {delims}'
         return closer.idx - start + 1, Block(span, inner, delims)
