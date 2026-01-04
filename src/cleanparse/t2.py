@@ -99,8 +99,8 @@ other_infix_tokens: set[type[t1.Token]] = {
     RangeJuxtapose,
     EllipsisJuxtapose,
     TypeParamJuxtapose,
-    BroadcastOp,
     CombinedAssignmentOp,
+    # BroadcastOp is handled separately because whether or not it is infix depends on the operator being broadcast over
 }
 
 
@@ -129,16 +129,11 @@ postfix_ops: set[str] = {
 
 # simple checks for it t1.Operator
 def is_binary_op(token: t1.Token) -> bool:
-    return isinstance(token, t1.Operator) and token.symbol in binary_ops
+    return isinstance(token, t1.Operator) and token.symbol in binary_ops or type(token) in other_infix_tokens or (isinstance(token, BroadcastOp) and is_binary_op(token.op))
 def is_prefix_op(token: t1.Token) -> bool:
-    return isinstance(token, t1.Operator) and token.symbol in prefix_ops
+    return isinstance(token, t1.Operator) and token.symbol in prefix_ops or (isinstance(token, BroadcastOp) and is_prefix_op(token.op))
 def is_postfix_op(token: t1.Token) -> bool:
     return isinstance(token, t1.Operator) and token.symbol in postfix_ops
-
-# slightly more complex check for bundling keyword expressions
-def is_infix_like(token: t1.Token) -> bool:
-    """Return True for binary/infix operators and bundled infix operator tokens."""
-    return is_binary_op(token) or type(token) in other_infix_tokens
 
 # check for special atoms that get known juxtapose tokens 
 def is_dotdot(token: t1.Token) -> bool:
@@ -255,7 +250,7 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
     Collect a single expression chunk starting at `start`.
 
     Chunk grammar (informal):
-      chunk := prefix_like* (keyword_atom | atom)
+      chunk := prefix_like* (keyword_atom | atom) postfix_like*
 
     Returns:
       (chunk_tokens, next_index)
@@ -274,13 +269,20 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
     if isinstance(token, t1.Keyword):
         atom, i = collect_keyword_atom(tokens, i, stop_keywords=stop_keywords)
         out.append(atom)
+        while i < len(tokens) and not is_stop_keyword(tokens[i], stop_keywords) and is_postfix_op(tokens[i]):
+            out.append(tokens[i])
+            i += 1
         return out, i
 
     if type(token) not in atom_tokens:
         # TODO: this should be a full error report
         raise ValueError(f"expected primary token, got {token=}")
     out.append(token)
-    return out, i + 1
+    i += 1
+    while i < len(tokens) and not is_stop_keyword(tokens[i], stop_keywords) and is_postfix_op(tokens[i]):
+        out.append(tokens[i])
+        i += 1
+    return out, i
 
 
 def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[list[t1.Token], int]:
@@ -291,7 +293,7 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     is directly consumable by a later expression parser (Pratt, etc.).
 
     Chain grammar (informal):
-      expr := chunk (infix_like chunk)*
+      expr := token*  (stopping before keywords in `stop_keywords` or a semicolon)
 
     Stops before:
     - any keyword in `stop_keywords`
@@ -303,19 +305,14 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     i = start
     out: list[t1.Token] = []
 
-    chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords)
-    out.extend(chunk)
-
-    while (
-        i < len(tokens)
-        and not is_stop_keyword(tokens[i], stop_keywords)
-        and not isinstance(tokens[i], t1.Semicolon)
-        and is_infix_like(tokens[i])
-    ):
-        out.append(tokens[i])
+    while i < len(tokens) and not is_stop_keyword(tokens[i], stop_keywords) and not isinstance(tokens[i], t1.Semicolon):
+        token = tokens[i]
+        if isinstance(token, t1.Keyword) and token.name != "else" and token.name not in stop_keywords:
+            atom, i = collect_keyword_atom(tokens, i, stop_keywords=stop_keywords)
+            out.append(atom)
+            continue
+        out.append(token)
         i += 1
-        chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords)
-        out.extend(chunk)
 
     return out, i
 
