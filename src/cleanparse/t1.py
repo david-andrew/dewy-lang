@@ -26,7 +26,7 @@ keywords: set[str] = {
 
 # tokenized as symbols, but are treated as identifiers (rather than operators)
 symbolic_identifiers: set[str] = {
-    '?', '..', '...', '`', '∞', '∅',
+    '?', '..', '...', '∞', '∅',
 }
 
 # tokenized as identifiers, but are treated as operators (rather than identifiers)

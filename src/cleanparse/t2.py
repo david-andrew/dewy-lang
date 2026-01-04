@@ -1,7 +1,7 @@
 """
 Post processing steps on tokens to prepare them for expression parsiing
 """
-from typing import Callable
+from typing import Callable, Literal
 from dataclasses import dataclass
 from .reporting import SrcFile, ReportException, Span
 from . import t1
@@ -17,31 +17,18 @@ class RangeJuxtapose(Juxtapose): ...
 class EllipsisJuxtapose(Juxtapose): ...
 
 @dataclass
-class BackticksJuxtapose(Juxtapose): ...
-
-@dataclass
 class TypeParamJuxtapose(Juxtapose): ...
 
 @dataclass
-class InvertedComparisonOp(t1.Operator, t1.InedibleToken): ...
-
-@dataclass
-class PrefixChain(t1.InedibleToken):
-    chain: list[t1.Operator]  # must be a list of unary prefix operators
-
-@dataclass
-class BinopChain(t1.InedibleToken):
-    start: t1.Operator
-    chain: PrefixChain
+class InvertedComparisonOp(t1.InedibleToken):
+    op: Literal['=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?']
 
 @dataclass
 class BroadcastOp(t1.InedibleToken):
-    op: t1.Operator | BinopChain  # must be a binary operator or an opchain
-    # unary broadcasts don't seem like a coherent concept, so ignore them for now.
+    op: t1.Operator
 
 @dataclass
-class CombinedAssignmentOp(t1.InedibleToken):
-    op: t1.Operator | BinopChain | BroadcastOp   # must be a binary operator or a binary opchain or a broadcast operator
+class CombinedAssignmentOp(t1.InedibleToken): ... # special case of = operator to the right of another operator
 
 
 """
@@ -111,9 +98,7 @@ other_infix_tokens: set[type[t1.Token]] = {
     Juxtapose,
     RangeJuxtapose,
     EllipsisJuxtapose,
-    BackticksJuxtapose,
     TypeParamJuxtapose,
-    BinopChain,
     BroadcastOp,
     CombinedAssignmentOp,
 }
@@ -134,9 +119,12 @@ binary_ops: set[str] = {
     'as', 'in', 'transmute', 'of', 'mod',
 }
 prefix_ops: set[str] = {
-    '~',
+    '~', 'not', '`',
     '+', '-', '*', '/', '//',
-    'not',
+}
+
+postfix_ops: set[str] = {
+    '`', ';', '?',
 }
 
 # simple checks for it t1.Operator
@@ -144,23 +132,28 @@ def is_binary_op(token: t1.Token) -> bool:
     return isinstance(token, t1.Operator) and token.symbol in binary_ops
 def is_prefix_op(token: t1.Token) -> bool:
     return isinstance(token, t1.Operator) and token.symbol in prefix_ops
+def is_postfix_op(token: t1.Token) -> bool:
+    return isinstance(token, t1.Operator) and token.symbol in postfix_ops
 
+# slightly more complex check for bundling keyword expressions
+def is_infix_like(token: t1.Token) -> bool:
+    """Return True for binary/infix operators and bundled infix operator tokens."""
+    return is_binary_op(token) or type(token) in other_infix_tokens
+
+# check for special atoms that get known juxtapose tokens 
 def is_dotdot(token: t1.Token) -> bool:
     return isinstance(token, t1.Identifier) and token.name == '..'
 def is_dotdotdot(token: t1.Token) -> bool:
     return isinstance(token, t1.Identifier) and token.name == '...'
-def is_backticks(token: t1.Token) -> bool:
-    return isinstance(token, t1.Identifier) and token.name == '`'
 def is_typeparam(token: t1.Token) -> bool:
     return isinstance(token, t1.Block) and token.delims == '<>'
 
 def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[Juxtapose]:
+    """For certain tokens, we alredy know which juxtapose (precedence level) they should have"""
     if is_dotdot(left) or is_dotdot(right):
         return RangeJuxtapose
     elif is_dotdotdot(left) or is_dotdotdot(right):
         return EllipsisJuxtapose
-    elif is_backticks(left) or is_backticks(right):
-        return BackticksJuxtapose
     elif is_typeparam(right) or (is_typeparam(left) and not isinstance(prev, TypeParamJuxtapose)):
         return TypeParamJuxtapose
     return Juxtapose
@@ -218,37 +211,16 @@ def make_inverted_comparisons(tokens: list[t1.Token]) -> None:
         i += 1
 
 
-def make_chain_operators(tokens: list[t1.Token]) -> None:
-    """Convert consecutive operator tokens into a single opchain token"""
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        recurse_into(token, make_chain_operators)
-        
-        if is_binary_op(token) or (i == 0 and is_prefix_op(token)):
-            j = 1
-            while i+j < len(tokens) and is_prefix_op(tokens[i+j]):
-                j += 1
-            if j > 1:
-                # Note about distinguishing operators that could be unary or binary:
-                # basically if it could be both, treat it as binary unless its the first token (which means it must be unary)
-                if is_binary_op(token) and i > 0 and not isinstance(tokens[i-1], t1.Semicolon): # semicolon is a special case that ends the previous expression
-                    prefix_chain = PrefixChain(Span(tokens[i+1].loc.start, tokens[i+j-1].loc.stop), tokens[i+1:i+j])
-                    tokens[i:i+j] = [BinopChain(Span(tokens[i].loc.start, tokens[i+j-1].loc.stop), token, prefix_chain)]
-                else:
-                    tokens[i:i+j] = [PrefixChain(Span(tokens[i].loc.start, tokens[i+j-1].loc.stop), tokens[i:i+j])]
-        i += 1
-
 
 def make_broadcast_operators(tokens: list[t1.Token]) -> None:
-    """Convert any . operator next to a binary operator or opchain into a broadcast operator"""
+    """Convert any . operator next to a unary or binary operator into a broadcast operator"""
     i = 0
     while i < len(tokens):
         token = tokens[i]
         recurse_into(token, make_broadcast_operators)
         
         if isinstance(token, t1.Operator) and token.symbol == '.':
-            if len(tokens) > i+1 and (is_binary_op(tokens[i+1]) or is_prefix_op(tokens[i+1]) or isinstance(tokens[i+1], BinopChain)):
+            if len(tokens) > i+1 and (is_binary_op(tokens[i+1]) or is_prefix_op(tokens[i+1])):
                 tokens[i:i+2] = [BroadcastOp(Span(token.loc.start, tokens[i+1].loc.stop), tokens[i+1])]
         i += 1
 
@@ -260,9 +232,9 @@ def make_combined_assignment_operators(tokens: list[t1.Token]) -> None:
         token = tokens[i]
         recurse_into(token, make_combined_assignment_operators)
         
-        if is_binary_op(token) or isinstance(token, BinopChain) or isinstance(token, BroadcastOp):
+        if is_binary_op(token) or isinstance(token, BroadcastOp):
             if len(tokens) > i+1 and isinstance(tokens[i+1], t1.Operator) and tokens[i+1].symbol == '=':
-                tokens[i:i+2] = [CombinedAssignmentOp(Span(token.loc.start, tokens[i+1].loc.stop), tokens[i+1])]
+                tokens[i+1] = CombinedAssignmentOp(tokens[i+1].loc)
         i += 1
 
 
@@ -276,26 +248,6 @@ def is_stop_keyword(token: t1.Token, stop: set[str]) -> bool:
     """
     return isinstance(token, t1.Keyword) and token.name in stop
 
-
-def is_atom(token: t1.Token) -> bool:
-    """
-    Return True for tokens that can appear as an operand (atom/primary) in an expression chain.
-
-    This is intentionally a whitelist used by the keyword-expression bundler's simple
-    expression collector (which only needs to delimit sub-expressions; it does not
-    build an AST).
-    """
-    return type(token) in atom_tokens
-
-
-def is_prefix_like(token: t1.Token) -> bool:
-    """Return True for unary/prefix operators and bundled unary/prefix op chains."""
-    return is_prefix_op(token) or isinstance(token, PrefixChain)
-
-
-def is_infix_like(token: t1.Token) -> bool:
-    """Return True for binary/infix operators and bundled infix operator tokens."""
-    return is_binary_op(token) or type(token) in other_infix_tokens
 
 
 def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[list[t1.Token], int]:
@@ -311,7 +263,7 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
     i = start
     out: list[t1.Token] = []
 
-    while i < len(tokens) and not is_stop_keyword(tokens[i], stop_keywords) and is_prefix_like(tokens[i]):
+    while i < len(tokens) and not is_stop_keyword(tokens[i], stop_keywords) and is_prefix_op(tokens[i]):
         out.append(tokens[i])
         i += 1
 
@@ -324,7 +276,8 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
         out.append(atom)
         return out, i
 
-    if not is_atom(token):
+    if type(token) not in atom_tokens:
+        # TODO: this should be a full error report
         raise ValueError(f"expected primary token, got {token=}")
     out.append(token)
     return out, i + 1
@@ -549,9 +502,7 @@ def postok_inner(tokens: list[t1.Token]) -> None:
 
     # combine not with comparison operators into a single token
     make_inverted_comparisons(tokens)
-    # combine operator chains into a single operator token
-    make_chain_operators(tokens)
-    # convert any . operator next to a binary operator or opchain (e.g. .+ .^/-) into a broadcast operator
+    # convert any . operator next to a binary operator (e.g. .+ .^/-) into a broadcast operator
     make_broadcast_operators(tokens)
     # convert any combined assignment operators (e.g. += -= etc.) into a single token
     make_combined_assignment_operators(tokens)
