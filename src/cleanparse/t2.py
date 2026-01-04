@@ -267,25 +267,47 @@ def make_combined_assignment_operators(tokens: list[t1.Token]) -> None:
 
 
 def is_stop_keyword(token: t1.Token, stop: set[str]) -> bool:
+    """
+    Return True if `token` is a keyword whose name is in `stop`.
+
+    `stop` is a set of keyword names that act as delimiters for `collect_expr`/`collect_chunk`:
+    when collecting an expression slice, we stop *before* these keywords so the caller can
+    interpret them structurally (e.g. `else`, `from`, `import`, `loop`, `do`).
+    """
     return isinstance(token, t1.Keyword) and token.name in stop
 
 
 def is_atom(token: t1.Token) -> bool:
-    """Tokens that can appear where an atom/expression operand is expected."""
+    """
+    Return True for tokens that can appear as an operand (atom/primary) in an expression chain.
+
+    This is intentionally a whitelist used by the keyword-expression bundler's simple
+    expression collector (which only needs to delimit sub-expressions; it does not
+    build an AST).
+    """
     return type(token) in atom_tokens
 
 
 def is_prefix_like(token: t1.Token) -> bool:
-    """Prefix operators or bundled prefix chains."""
+    """Return True for unary/prefix operators and bundled unary/prefix op chains."""
     return is_prefix_op(token) or isinstance(token, PrefixChain)
 
 
 def is_infix_like(token: t1.Token) -> bool:
-    """Binary/infix operators or bundled infix operators."""
+    """Return True for binary/infix operators and bundled infix operator tokens."""
     return is_binary_op(token) or type(token) in other_infix_tokens
 
 
 def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[list[t1.Token], int]:
+    """
+    Collect a single expression chunk starting at `start`.
+
+    Chunk grammar (informal):
+      chunk := prefix_like* (keyword_atom | atom)
+
+    Returns:
+      (chunk_tokens, next_index)
+    """
     i = start
     out: list[t1.Token] = []
 
@@ -309,6 +331,22 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
 
 
 def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[list[t1.Token], int]:
+    """
+    Collect a single expression chain starting at `start`.
+
+    This does not parse precedence; it only groups tokens into a contiguous chain that
+    is directly consumable by a later expression parser (Pratt, etc.).
+
+    Chain grammar (informal):
+      expr := chunk (infix_like chunk)*
+
+    Stops before:
+    - any keyword in `stop_keywords`
+    - a semicolon token
+
+    Returns:
+      (expr_tokens, next_index)
+    """
     i = start
     out: list[t1.Token] = []
 
@@ -330,6 +368,17 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
 
 
 def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[FlowArm, int]:
+    """
+    Collect a single flow arm (if/loop/match/do-loop) into a `FlowArm`.
+
+    The result is a mostly-unstructured "syntax skeleton":
+      FlowArm.parts := [Keyword, expr, Keyword, expr, ...]
+
+    Notes:
+    - This function consumes the arm's starting keyword at `tokens[start]`.
+    - It does not include `else` (that delimiter is handled by `collect_flow`).
+    - Each `expr` entry is a `list[t1.Token]` produced by `collect_expr`.
+    """
     kw = tokens[start]
     if not isinstance(kw, t1.Keyword):
         raise ValueError(f"expected flow keyword, got {kw=}")
@@ -366,6 +415,15 @@ def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[s
 
 
 def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[Flow, int]:
+    """
+    Collect an entire flow expression (if/loop/match/do-loop with optional else chains).
+
+    Structure:
+    - `Flow.arms` is a list of `FlowArm` tokens (each arm retains its own keywords).
+    - `Flow.default` is either None or a token list for the final default expression.
+
+    `else` is treated as structural and is consumed but not stored.
+    """
     i = start
     arms: list[FlowArm] = []
     default: list[t1.Token] | None = None
@@ -392,6 +450,21 @@ def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
 
 
 def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[t1.Token, int]:
+    """
+    Collect a keyword-driven expression into a single atom token.
+
+    Returns:
+      (atom_token, next_index)
+
+    The returned atom token is either:
+    - `Flow` for flow keywords (`if`, `loop`, `match`, `do`)
+    - `KeywordExpr` for other keywords
+
+    `KeywordExpr.parts` is a "syntax skeleton" alternating between structural keywords
+    and collected expression token lists, e.g.:
+      - `return <expr>`              -> [return_kw, expr]
+      - `from <expr> import <expr>`  -> [from_kw, expr, import_kw, expr]
+    """
     kw = tokens[start]
     if not isinstance(kw, t1.Keyword):
         raise ValueError(f"expected keyword, got {kw=}")
@@ -438,6 +511,15 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
 
 
 def bundle_keyword_exprs(tokens: list[t1.Token]) -> None:
+    """
+    Walk `tokens` and replace any keyword-started expression with a single atom token.
+
+    This is a post-tokenization bundling pass. It is recursive: blocks and interpolated
+    strings are traversed, so keyword expressions are bundled at all nesting levels.
+
+    `else` is not bundled as a standalone atom; it is only consumed structurally by
+    `collect_flow`.
+    """
 
     i = 0
     while i < len(tokens):
