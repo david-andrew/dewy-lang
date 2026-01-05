@@ -2,11 +2,24 @@
 Initial parsing pass. A simple pratt-style parser
 """
 
-from typing import Sequence
+from typing import Sequence, Callable, TypeAlias
 from dataclasses import dataclass
 from enum import Enum, auto
 from . import t1
 from . import t2
+
+
+Operator: TypeAlias = (
+      t1.Operator
+    | t2.Juxtapose
+    | t2.RangeJuxtapose
+    | t2.EllipsisJuxtapose
+    | t2.TypeParamJuxtapose
+    | t2.InvertedComparisonOp
+    | t2.CombinedAssignmentOp
+    | t2.BroadcastOp
+    | t1.Semicolon
+)
 
 
 @dataclass
@@ -30,7 +43,22 @@ class qint:
     def __ge__(self, other: 'int|qint') -> bool: return self.__gt__(other)
     def __le__(self, other: 'int|qint') -> bool: return self.__lt__(other)
     def __eq__(self, other: object) -> bool: return False
-
+    def __add__(self, other: int) -> 'qint':
+        if not isinstance(other, int):
+            raise NotImplementedError(f'Cannot add qint to {other=}')
+        return qint({v + other for v in self.values})
+    def __sub__(self, other: int) -> 'qint':
+        if not isinstance(other, int):
+            raise NotImplementedError(f'Cannot subtract qint from {other=}')
+        return qint({v - other for v in self.values})
+    def __mul__(self, other: int) -> 'qint':
+        if not isinstance(other, int):
+            raise NotImplementedError(f'Cannot multiply qint by {other=}')
+        return qint({v * other for v in self.values})
+    def __idiv__(self, other: int) -> 'qint':
+        if not isinstance(other, int):
+            raise NotImplementedError(f'Cannot divide qint by {other=}')
+        return qint({v // other for v in self.values})
 
 
 class Associativity(Enum):
@@ -40,6 +68,24 @@ class Associativity(Enum):
     postfix = auto()
     none = auto()
     fail = auto()
+
+
+
+BASE_BIND_POWER = 1   #TBD, but 0 probably for groups ()
+NO_BIND = -1
+def _convert_to_bp(precedence:int): 
+    return BASE_BIND_POWER+2*precedence
+
+bp_funcs: dict[Associativity, Callable[[int], tuple[int, int]]] = {
+    Associativity.left: lambda precedence: (_convert_to_bp(precedence), _convert_to_bp(precedence)+1),
+    Associativity.right: lambda precedence: (_convert_to_bp(precedence)+1, _convert_to_bp(precedence)),
+    Associativity.prefix: lambda precedence: (_convert_to_bp(precedence), NO_BIND),
+    Associativity.postfix: lambda precedence: (NO_BIND, _convert_to_bp(precedence)),
+    # TBD about these ones... perhaps make them just have bind_power(precedence) for both sides
+    Associativity.none: lambda precedence: (_convert_to_bp(precedence), _convert_to_bp(precedence)),
+    Associativity.fail: lambda precedence: (_convert_to_bp(precedence), _convert_to_bp(precedence)),
+}
+
 
 
 """
@@ -114,15 +160,22 @@ for i, (assoc, group) in enumerate(operator_groups):
             precedence_table[op] = qint(val.values | {i})
 
 
-# TODO: this should probably take an argument for indicating left or right side
-def operator_precedence(op: t1.Operator|t2.BroadcastOp|t2.CombinedAssignmentOp|t1.Semicolon) -> int | qint:
-    try:
-        if isinstance(op, t1.Operator):
-            return precedence_table[op]
-        if isinstance(op, t2.BroadcastOp):
-            return operator_precedence(op.op)
+# # TODO: this should probably take an argument for indicating left or right side
+# def operator_precedence(op: t1.Operator|t2.BroadcastOp|t2.CombinedAssignmentOp|t1.Semicolon) -> int | qint:
+#     try:
+#         if isinstance(op, t1.Operator):
+#             return precedence_table[op]
+#         if isinstance(op, t2.BroadcastOp):
+#             return operator_precedence(op.op)
         
-        return precedence_table[type(op)]
+#         return precedence_table[type(op)]
     
-    except Exception as e:
-        raise ValueError(f"INTERNAL ERROR: failed to determine precedence for unknown operator {op=}") from e
+#     except Exception as e:
+#         raise ValueError(f"INTERNAL ERROR: failed to determine precedence for unknown operator {op=}") from e
+
+
+@dataclass
+class Node:
+    op: Operator
+    left: 'Node' | t1.Token | None
+    right: 'Node' | t1.Token | None
