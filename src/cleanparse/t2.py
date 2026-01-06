@@ -133,7 +133,7 @@ def is_binary_op(token: t1.Token) -> bool:
 def is_prefix_op(token: t1.Token) -> bool:
     return isinstance(token, t1.Operator) and token.symbol in prefix_ops or (isinstance(token, BroadcastOp) and is_prefix_op(token.op))
 def is_postfix_op(token: t1.Token) -> bool:
-    return isinstance(token, t1.Operator) and token.symbol in postfix_ops
+    return isinstance(token, t1.Operator) and token.symbol in postfix_ops or (isinstance(token, BroadcastOp) and is_postfix_op(token.op)) # really only `?` could be broadcast
 
 # check for special atoms that get known juxtapose tokens 
 def is_dotdot(token: t1.Token) -> bool:
