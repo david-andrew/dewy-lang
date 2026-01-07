@@ -1,0 +1,23 @@
+% check order in dewy (https://www.youtube.com/watch?v=EEwREnUdbFs)
+ints = [5 2 4 3 1]
+
+% solution 0
+filter(0.. .not (ints .=? ints.sorted))
+
+% solution 1
+where(ints .not=? ints.sorted)
+
+% solution 2
+[loop i in 0.. and matched in (ints .=? ints.sorted) 
+    if not matched 
+        i
+]
+
+% solution 3
+[loop 
+    a in ints and 
+    b in ints.sorted and
+    i in 0..
+        if a not=? b 
+            i
+]
