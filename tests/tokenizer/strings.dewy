@@ -1,0 +1,87 @@
+% various syntax for creating strings
+'hello world'
+
+% multiline strings
+'hello
+world'
+
+% simple string escapes
+'hello \n world'
+
+% escapes that just insert the character itself
+'hello \' world'  % insert a single quote character `'`
+
+% <escape><newline> ignores that newline
+'\
+Hello, World!
+
+This is a 
+multiline string 
+without a newline 
+at the very start
+'
+
+
+% simple unicode escapes
+'\u270c' % ✌️ emoji
+
+% arbitrary unicode escapes
+'\u{1F419}' % 🐙 emoji
+
+christmas_tree = 0x1F384
+'unicode scalar {christmas_tree} is \u{christmas_tree}'  % unicode scalar 0x1F384 is 🎄
+% TODO: this implies that we keep metadata for the format int/etc literals were specified as, for default formatting when printing
+
+% raw strings
+r'hello world \ random { symbols }'
+
+r'hello
+world'
+
+% strings can use double quote
+"hello world"
+
+% strings can use odd-lengthed quotes as delimiters
+"""hello world"""
+"""""hello world"""""
+
+% string interpolation
+name = 'world'
+'hello {name}'
+
+
+
+% heredoc strings
+#"%%% SOME CUSTOM DELIMITER %%%"
+This is a heredoc string with a custom delimiter.
+It will be parsed as a string until the delimiter is reached.
+It includes regular string functionality like {interpolation}, \{} \character escaping, etc.
+The delimiter is not included in the string.
+#%%% SOME CUSTOM DELIMITER %%%
+
+% raw heredoc strings
+#r"==== RAW HEREDOC DELIMITER ===="
+This is a raw heredoc string with a custom delimiter.
+It will be parsed as a string until the delimiter is reached.
+It does not include {interpolation}, \{} \character escaping, etc.
+==== RAW HEREDOC DELIMITER ====
+
+
+% technically byte-strings are also a thing, but they evaluate to an array, not a string
+bytes = 0x'00ffab1235ffdc0012'
+
+% Rest-of-file strings
+printf#"""Hello, World!
+
+This string continues until the end of the file
+
+No closing delimiter is needed, nor would it match if present
+
+#""" doesn't close the string
+
+This is useful as a data format that can interpolate values defined above
+
+Think myfile.csv.dewy or somedata.json.dewy or mydoc.md.dewy files
+
+You can also make raw rest-of-file strings by using #r"""
+but it cannot be shown here because only one rest-of-file string is allowed per file
