@@ -179,6 +179,35 @@ for i, (assoc, group) in enumerate(reversed(operator_groups)):
             precedence_table[op] = qint(val.values | {i})
 
 
+def get_precedence(op: Operator) -> int | qint:
+    
+    if isinstance(op, t1.Operator):
+        return precedence_table[op.symbol]
+    if isinstance(op, t2.InvertedComparisonOp):
+        return precedence_table[op.op]
+    if isinstance(op, t2.CombinedAssignmentOp):
+        return precedence_table[op.op]
+    if isinstance(op, t2.BroadcastOp):
+        return precedence_table[op.op]
+    try:
+        return precedence_table[type(op)]
+    except KeyError:
+        import pdb; pdb.set_trace()
+        raise ValueError(f'INTERNAL ERROR: unexpected operator type for determining precedence. got {op=}')
+
+def get_bind_power(op: Operator) -> tuple[int, int] | tuple[qint, qint]:
+    precedence = get_precedence(op)
+    if isinstance(precedence, int):
+        return bind_power_table[precedence] 
+    left_bps, right_bps = zip(*[bind_power_table[p] for p in precedence.values])
+    return (qint(set(left_bps)), qint(set(right_bps)))
+
+def get_associativity(op: Operator) -> Associativity | list[Associativity]:
+    precedence = get_precedence(op)
+    if isinstance(precedence, int):
+        return associativity_table[precedence]
+    return [associativity_table[p] for p in precedence.values]
+
 @dataclass
 class AST: ...
 
@@ -210,7 +239,7 @@ class Postfix(AST):
 class Flat(AST):
     """node for flat operators that all combine to a single operation rather than a tree (e.g. comma separated expressions)"""
     op: Operator
-    items: list[AST]
+    items: tuple[AST, ...]
 
 
 
@@ -265,10 +294,10 @@ def reduce_loop(items: list[Operator|AST]) -> list[AST]:
     """repeatedly apply shunting reductions until no more occur. modifies `tokens` in place"""
     while True:
         l0 = len(items)
-        items = shunt_pass(items)
+        shunt_pass(items)
         if len(items) == l0:
             break
-    assert all(isinstance(AST, i) for i in items), "INTERNAL ERROR: shunt-loop produced list with non-ASTs"
+    assert all(isinstance(i, AST) for i in items), "INTERNAL ERROR: shunt-loop produced list with non-ASTs"
     return items
 
 def shunt_pass(items: list[Operator|AST]) -> None:
@@ -288,9 +317,9 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         # get binding power of left and right (if they are operators)
         left_bp, right_bp = NO_BIND, NO_BIND
         if isinstance(left_op, Operator):
-            _, left_bp = bind_power_table[left_op]
+            _, left_bp = get_bind_power(left_op)
         if isinstance(right_op, Operator):
-            right_bp, _ = bind_power_table[right_op]
+            right_bp, _ = get_bind_power(right_op)
         
         if left_bp == NO_BIND and right_bp == NO_BIND:
             continue
@@ -319,11 +348,9 @@ def shunt_pass(items: list[Operator|AST]) -> None:
 
         op = items[candidate_operator_idx]
         assert isinstance(op, Operator), f'INTERNAL ERROR: candidate operator is not an operator. got {op=}'
-        precedence = precedence_table[op]
-        if isinstance(precedence, int):
-            associativity = [associativity_table[precedence]]
-        else:
-            associativity = [associativity_table[p] for p in precedence.values]
+        associativity = get_associativity(op)
+        if not isinstance(associativity, list):
+            associativity = [associativity]
         
         reductions: list[tuple[AST, tuple(int, int)]] = []  # ast from reduction, and indices of tokens participating in the reduction
         for a in associativity:
@@ -350,7 +377,8 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         
         if len(reductions) == 0:
             continue
-        if len(reductions) > 1:
+        if len(reductions) > 1 and not all(reductions[0] == r for r in reductions):
+            import pdb; pdb.set_trace()
             raise ValueError(f'INTERNAL ERROR: multiple reductions found for {op=}. got {reductions=}')
         all_reductions.append(reductions[0])
         
