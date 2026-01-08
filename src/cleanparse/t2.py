@@ -168,56 +168,30 @@ def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> Non
     # TBD if other tokens may have inner tokens
 
 
-# # TODO: since we're determining juxtapose placement based on token spans rather than if there were no whitespace tokens between,
-# #       consider having previous tokenization steps just not insert any whitespace tokens in the first place
-# #       (this would involve adjustments to t0.tokenize, probably some annotation to make whitespace and comment tokens get thrown away)
-# def remove_whitespace(tokens: list[t1.Token]) -> None:
-#     """Remove whitespace tokens from the tokens list (recursively)"""
-#     tokens[:] = [token for token in tokens if not isinstance(token, t1.Whitespace)]
-#     for token in tokens:
-#         recurse_into(token, remove_whitespace)
+# TODO: since we're determining juxtapose placement based on token spans rather than if there were no whitespace tokens between,
+#       consider having previous tokenization steps just not insert any whitespace tokens in the first place
+#       (this would involve adjustments to t0.tokenize, probably some annotation to make whitespace and comment tokens get thrown away)
+def remove_whitespace(tokens: list[t1.Token]) -> None:
+    """Remove whitespace tokens from the tokens list (recursively)"""
+    tokens[:] = [token for token in tokens if not isinstance(token, t1.Whitespace)]
+    for token in tokens:
+        recurse_into(token, remove_whitespace)
 
 
-# def insert_juxtapose(tokens: list[t1.Token]) -> None:
-#     """
-#     Insert juxtapose tokens between adjacent (atom) tokens if their spans touch (which indicates there was no whitespace between them)
-#     TODO: this is vaguely inefficient with all the insertions. If this is a performance bottleneck, consider some type of e.g. heap or rope or etc. data structure
-#           alternatively, just do 1 pass to find where juxtaposes go, and then insert them all at once.
-#     """
-#     i = 0
-#     while i < len(tokens):
-#         # recursively handle inserting juxtaposes for blocks
-#         recurse_into(tokens[i], insert_juxtapose)
-
-#         # insert juxtapose if adjacent (atom) tokens' spans touch
-#         if i + 1 < len(tokens) and type(tokens[i]) in atom_tokens and type(tokens[i+1]) in atom_tokens and tokens[i].loc.stop == tokens[i+1].loc.start:
-#             jux_type = get_jux_type(tokens[i], tokens[i+1], tokens[i-1] if i > 0 else None)
-#             tokens.insert(i+1, jux_type(t1.Span(tokens[i].loc.stop, tokens[i].loc.stop)))
-#             i += 1
-
-#         # move to next token
-#         i += 1
-
-def invert_whitespace(tokens: list[t1.Token]) -> None:
+def insert_juxtapose(tokens: list[t1.Token]) -> None:
     """
-    removes all whitespace tokens, and insert juxtapose tokens between adjacent pairs (i.e. not separated by whitespace)
-    TODO: currently a pretty inefficient implementation. consider some type of e.g. heap or rope or etc. data structure if needed
+    Insert juxtapose tokens between adjacent (atom) tokens if their spans touch (which indicates there was no whitespace between them)
+    TODO: this is vaguely inefficient with all the insertions. If this is a performance bottleneck, consider some type of e.g. heap or rope or etc. data structure
+          alternatively, just do 1 pass to find where juxtaposes go, and then insert them all at once.
 
-    Args:
-        tokens (list[Token]): list of tokens to modify. This is modified in place.
+    Note: this function is idempotent, so it can be called multiple times, e.g. before andafter grouping up tokens to the token list
     """
-
     i = 0
     while i < len(tokens):
-        # delete whitespace if it comes up
-        if isinstance(tokens[i], t1.Whitespace):
-            tokens.pop(i)
-            continue
+        # recursively handle inserting juxtaposes for blocks
+        recurse_into(tokens[i], insert_juxtapose)
 
-        # recursively handle inverting whitespace for blocks
-        recurse_into(tokens[i], invert_whitespace)
-
-        # insert juxtapose if no whitespace between tokens
+        # insert juxtapose if adjacent (atom) tokens' spans touch
         if i + 1 < len(tokens) and type(tokens[i]) in atom_tokens and type(tokens[i+1]) in atom_tokens and tokens[i].loc.stop == tokens[i+1].loc.start:
             jux_type = get_jux_type(tokens[i], tokens[i+1], tokens[i-1] if i > 0 else None)
             tokens.insert(i+1, jux_type(t1.Span(tokens[i].loc.stop, tokens[i].loc.stop)))
@@ -225,7 +199,6 @@ def invert_whitespace(tokens: list[t1.Token]) -> None:
 
         # move to next token
         i += 1
-
 
 def make_inverted_comparisons(tokens: list[t1.Token]) -> None:
     """`not` followed by a comparison operator becomes an inverted comparison operator"""
@@ -533,7 +506,8 @@ def postok(srcfile: SrcFile) -> list[t1.Token]:
 def postok_inner(tokens: list[t1.Token]) -> None:
     """apply postprocessing steps to the tokens"""
     # remove whitespace and insert juxtapose tokens
-    invert_whitespace(tokens)
+    remove_whitespace(tokens)
+    insert_juxtapose(tokens)
 
     # combine not with comparison operators into a single token
     make_inverted_comparisons(tokens)
@@ -544,7 +518,9 @@ def postok_inner(tokens: list[t1.Token]) -> None:
 
     # bundle up keyword expressions and flows into single atom tokens
     bundle_keyword_exprs(tokens)
-    invert_whitespace(tokens)  # insert juxtapose between any keyword/flow expressions that got added
+    insert_juxtapose(tokens)  # insert juxtapose between any keyword/flow expressions that got added
+                              # can't skip first insert_juxtapose because they are necessary operators 
+                              # to allow bundle_keyword_exprs to work properly
 
 
 def test():
