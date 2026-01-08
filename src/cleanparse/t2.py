@@ -281,10 +281,10 @@ def is_stop_keyword(token: t1.Token, stop: set[str]) -> bool:
 
 def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[list[t1.Token], int]:
     """
-    Collect a single expression chunk starting at `start`.
+    Collect a single expression chunk starting at `start`. A chunk is basically an atop surrounded by prefix and postfix operators.
 
     Chunk grammar (informal):
-      chunk := prefix_like* (keyword_atom | atom) postfix_like*
+      chunk := prefix_like* atom postfix_like*
 
     Returns:
       (chunk_tokens, next_index)
@@ -327,7 +327,7 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     is directly consumable by a later expression parser (Pratt, etc.).
 
     Chain grammar (informal):
-      expr := token*  (stopping before keywords in `stop_keywords` or a semicolon)
+      expr := chunk (infix_op chunk)*
 
     Stops before:
     - any keyword in `stop_keywords`
@@ -339,14 +339,18 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     i = start
     out: list[t1.Token] = []
 
+    chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords)
+    if not chunk:
+        return out, i
+    out.extend(chunk)
+
     while i < len(tokens) and not is_stop_keyword(tokens[i], stop_keywords) and not isinstance(tokens[i], t1.Semicolon):
-        token = tokens[i]
-        if isinstance(token, t1.Keyword) and token.name != "else" and token.name not in stop_keywords:
-            atom, i = collect_keyword_atom(tokens, i, stop_keywords=stop_keywords)
-            out.append(atom)
-            continue
-        out.append(token)
+        if not is_binary_op(tokens[i]):
+            break
+        out.append(tokens[i])
         i += 1
+        chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords)
+        out.extend(chunk)
 
     return out, i
 
