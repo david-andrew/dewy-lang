@@ -31,6 +31,10 @@ class BroadcastOp(t1.InedibleToken):
 class CombinedAssignmentOp(t1.InedibleToken): ... # special case of = operator to the right of another operator
 
 
+@dataclass
+class OpFn(t1.InedibleToken):
+    op: t1.Operator
+
 """
 keywords:
 'loop', 'do', 'if', 'else', 'match', 'return', 'yield', 'break', 'continue',
@@ -163,6 +167,36 @@ def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> Non
             recurse_into(child, func)
     # TBD if other tokens may have inner tokens
 
+
+# # TODO: since we're determining juxtapose placement based on token spans rather than if there were no whitespace tokens between,
+# #       consider having previous tokenization steps just not insert any whitespace tokens in the first place
+# #       (this would involve adjustments to t0.tokenize, probably some annotation to make whitespace and comment tokens get thrown away)
+# def remove_whitespace(tokens: list[t1.Token]) -> None:
+#     """Remove whitespace tokens from the tokens list (recursively)"""
+#     tokens[:] = [token for token in tokens if not isinstance(token, t1.Whitespace)]
+#     for token in tokens:
+#         recurse_into(token, remove_whitespace)
+
+
+# def insert_juxtapose(tokens: list[t1.Token]) -> None:
+#     """
+#     Insert juxtapose tokens between adjacent (atom) tokens if their spans touch (which indicates there was no whitespace between them)
+#     TODO: this is vaguely inefficient with all the insertions. If this is a performance bottleneck, consider some type of e.g. heap or rope or etc. data structure
+#           alternatively, just do 1 pass to find where juxtaposes go, and then insert them all at once.
+#     """
+#     i = 0
+#     while i < len(tokens):
+#         # recursively handle inserting juxtaposes for blocks
+#         recurse_into(tokens[i], insert_juxtapose)
+
+#         # insert juxtapose if adjacent (atom) tokens' spans touch
+#         if i + 1 < len(tokens) and type(tokens[i]) in atom_tokens and type(tokens[i+1]) in atom_tokens and tokens[i].loc.stop == tokens[i+1].loc.start:
+#             jux_type = get_jux_type(tokens[i], tokens[i+1], tokens[i-1] if i > 0 else None)
+#             tokens.insert(i+1, jux_type(t1.Span(tokens[i].loc.stop, tokens[i].loc.stop)))
+#             i += 1
+
+#         # move to next token
+#         i += 1
 
 def invert_whitespace(tokens: list[t1.Token]) -> None:
     """

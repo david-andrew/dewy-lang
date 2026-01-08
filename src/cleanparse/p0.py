@@ -191,10 +191,10 @@ class Postfix(AST):
 
 # used for operators that are flat rather than have an associativity (namely comma separated expressions)
 @dataclass
-class Nary(AST):
-    """N-ary node for operators that """
-    op: Operator  # Typically this will be comma. consider making it exclusively comma?
-    items: list[AST|t1.Token]
+class Flat(AST):
+    """node for flat operators that all combine to a single operation rather than a tree (e.g. comma separated expressions)"""
+    op: Operator
+    items: list[AST]
 
 
 
