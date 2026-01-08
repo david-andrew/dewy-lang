@@ -20,6 +20,9 @@ class EllipsisJuxtapose(Juxtapose): ...
 class TypeParamJuxtapose(Juxtapose): ...
 
 @dataclass
+class SemicolonJuxtapose(Juxtapose): ...
+
+@dataclass
 class InvertedComparisonOp(t1.InedibleToken):
     op: Literal['=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?']
 
@@ -89,9 +92,10 @@ atom_tokens: set[type[t1.Token]] = {
     t1.BasedString,
     t1.BasedArray,
     t1.Identifier,
-    t1.Handle,
     t1.Hashtag,
     t1.Integer,
+    t1.Semicolon,
+    OpFn,
     KeywordExpr,
     Flow,
 }
@@ -103,6 +107,7 @@ other_infix_tokens: set[type[t1.Token]] = {
     RangeJuxtapose,
     EllipsisJuxtapose,
     TypeParamJuxtapose,
+    SemicolonJuxtapose,
     CombinedAssignmentOp,
     # BroadcastOp is handled separately because whether or not it is infix depends on the operator being broadcast over
 }
@@ -155,6 +160,8 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[J
         return EllipsisJuxtapose
     elif is_typeparam(right) or (is_typeparam(left) and not isinstance(prev, TypeParamJuxtapose)):
         return TypeParamJuxtapose
+    elif isinstance(right, t1.Semicolon):
+        return SemicolonJuxtapose
     return Juxtapose
 
 
@@ -296,7 +303,7 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
             i += 1
         return out, i
 
-    if type(token) not in atom_tokens:
+    if type(token) not in atom_tokens or isinstance(token, t1.Semicolon):
         # TODO: this should be a full error report
         raise ValueError(f"expected primary token, got {token=}")
     out.append(token)

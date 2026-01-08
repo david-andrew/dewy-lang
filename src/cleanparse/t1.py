@@ -26,7 +26,7 @@ keywords: set[str] = {
 
 # tokenized as symbols, but are treated as identifiers (rather than operators)
 symbolic_identifiers: set[str] = {
-    '?', '..', '...', '∞', '∅',
+    '?', '..', '...', '∞', '∅',  # technically `;` is also a symbolic identifier, but we give it it's own token class for convenience
 }
 
 # tokenized as identifiers, but are treated as operators (rather than identifiers)
@@ -360,38 +360,6 @@ class Identifier(Token):
         return None
 
 @dataclass
-class Handle(Token):
-    identifier: Identifier
-
-    @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Handle]|None':
-        """handles are strictly <@><identifier>"""
-        token = tokens[start]
-        if not isinstance(token, t0.Symbol) or token.src != '@':
-            return None
-        
-        # check if an identifier follows
-        res = None
-        if start + 1 < len(tokens):
-            res = Identifier.eat(tokens, ctx, start + 1)
-        
-        if res is None:
-            next_token = peek_next_token(tokens, ctx, start + 1)
-            error = Error(
-                srcfile=ctx.srcfile,
-                title='Invalid handle',
-                pointer_messages=[
-                    Pointer(span=token.loc, message='handle without following identifier'),
-                    *([Pointer(span=next_token.loc, message=f"expected <Identifier>, got <{type(next_token).__name__}>", color='red')] if next_token is not None else []),
-                ],
-                hint='@ must be immediately followed by an identifier, e.g. `@my_variable`'
-            )
-            error.throw()
-        length, identifier = res
-        return length + 1, Handle(Span(token.loc.start, identifier.loc.stop), identifier)
-        
-
-@dataclass
 class Semicolon(Token):
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Semicolon]|None':
@@ -415,7 +383,7 @@ class Operator(Token):
         # all symbols that are not symbolic identifiers are operators
         if not isinstance(token, (t0.Symbol, t0.ShiftSymbol)) or token.src in symbolic_identifiers: 
             return None
-        if token.src in '@;':  # `@` and `;` operators are handled by Handle and Semicolon respectively
+        if token.src == ';':  # `;` operator is handled by Semicolon
             return None
         return 1, Operator(token.loc, token.src.casefold())
             
@@ -463,7 +431,6 @@ class Whitespace(Token): # so we can invert later for juxtapose
 
 top_level_tokens: list[type[Token]] = [
     Identifier,
-    Handle,
     String,
       # IString,           # not included in top level tokens because created by String.eat
       # ParametricEscape,  # not included in top level tokens because created by String.eat
@@ -474,7 +441,6 @@ top_level_tokens: list[type[Token]] = [
     Block,
     BasedString,
     BasedArray,
-    # OpChain,
     Operator,
     Semicolon,
     Whitespace,

@@ -34,7 +34,7 @@ given AST, produce output in the target backend
 [Tasks]
 [x] split invert_whitespace into remove_whitespace and insert_juxtapose
 [x] op function literals
-[ ] make @ just a regular prefix op instead of consuming it in the tokenizer (so we can @ fn literals, and opfn e.g. cycleleft = @(`)(dir='left'))
+[x] make @ just a regular prefix op instead of consuming it in the tokenizer (so we can @ fn literals, and opfn e.g. cycleleft = @(`)(dir='left'))
 [ ] replace `//` with `idiv`/`÷` and then make comments be `//` and `/{}/` (also add note that normalize would convert `idiv` to `÷`)
 [ ] operator precedence parse
 

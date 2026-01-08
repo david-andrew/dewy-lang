@@ -16,10 +16,10 @@ Operator: TypeAlias = (
     | t2.RangeJuxtapose
     | t2.EllipsisJuxtapose
     | t2.TypeParamJuxtapose
+    | t2.SemicolonJuxtapose
     | t2.InvertedComparisonOp
     | t2.CombinedAssignmentOp
     | t2.BroadcastOp
-    | t1.Semicolon
 )
 
 _operator_set = get_args(Operator)
@@ -105,6 +105,7 @@ expressions that need to make sense given precedence table/rules:
 
 operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     # HIGHEST PRECEDENCE
+    (Associativity.prefix, ['@']),
     (Associativity.left, ['.', t2.Juxtapose]),  # jux-call, jux-index
     (Associativity.fail, [t2.TypeParamJuxtapose]),
     (Associativity.fail, [t2.EllipsisJuxtapose]),  # jux-ellipsis
@@ -135,7 +136,7 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.right, ['<|']),  # f3 <| f2 <| f1 <| x 
     (Associativity.fail,  ['->', '<->']),
     (Associativity.fail,  ['=', '::', ':=', t2.CombinedAssignmentOp]),
-    (Associativity.postfix, [t1.Semicolon]),  # postfix semicolon
+    (Associativity.left, [t2.SemicolonJuxtapose]),  # for suppression
     # LOWEST PRECEDENCE
 ]
 
@@ -185,7 +186,7 @@ class Prefix(AST):
 
 @dataclass
 class Postfix(AST):
-    op: t1.Operator|t1.Semicolon|t2.BroadcastOp
+    op: t1.Operator|t2.BroadcastOp
     item: AST
 
 
