@@ -31,9 +31,25 @@ given AST, produce output in the target backend
 
 
 [tasks]
-[ ] implement parametric escapes in t1
-[ ] build opchains in t2/postok
-[ ] bundle conditionals in t2
+[Tasks]
+[x] split invert_whitespace into remove_whitespace and insert_juxtapose
+[x] op function literals
+[ ] make @ just a regular prefix op instead of consuming it in the tokenizer (so we can @ fn literals, and opfn e.g. cycleleft = @(`)(dir='left'))
+[ ] replace `//` with `idiv`/`÷` and then make comments be `//` and `/{}/` (also add note that normalize would convert `idiv` to `÷`)
+[ ] operator precedence parse
+
+
+operator precedence parse test
+
+% all commas combine in a single step as a single flat comma operator
+1,2,3,4+5/6*7,8+9,0
+basically when counting backwards, we see 1,2 and as we're reducing it, we see if after 2 is a comma and something that came to that comma, and include it if so, and continue pulling the right most comma+ast in until there are no more commas. If there is a comma, and the thing next to it did not come to it, we can't do this flat comma yet!
+
+
+
+[x] implement parametric escapes in t1
+[-] build opchains in t2/postok
+[x] bundle conditionals in t2
 [ ] initial parse pass with pratt parser
 [x] make int literal only support up to base 16
     [ ] write out why have both based strings and based arrays. (BLUF: based arrays are just normal arrays you sequence whatever you want, no bit packing/etc. strings are for fixed chunks (e.g. 2 hex digits for bytes, 8 bits for byte, etc.))
