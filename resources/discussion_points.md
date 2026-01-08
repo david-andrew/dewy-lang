@@ -3857,6 +3857,18 @@ cycleright([1 2 3 ; 4 5 6])
 invert(true)
 ```
 
+### Allowing assignment and combined assignment operators for this? [probably]
+basically we could allow things like `(=)` or `(+=)` which might be useful for some algorithms
+```
+values = [1 2 3 4 5 6 7 8 9]
+
+% sum up values
+x = 0 
+values.reduce((+=) @x)
+```
+Oviously this is a trivial example, but more complex assignments could be done. Noting that this requires `@x` to clearly mean the place `x` lives. This could sort of work (though it gets a bit tricky when thinking about what `@some_fn` means since we use that to get the function without calling it). Perhaps `@` could even refer to locations in an array, e.g. `@arr[2..5 2,4..20]`, though the only problem with this is the precedence order of parsing the array index being lower than `@`
+
+More thought needed on the semantics of the place of a value, but I think I will allow it
 
 
 ## Multidimensional array literals in a single line

@@ -33,7 +33,7 @@ class CombinedAssignmentOp(t1.InedibleToken): ... # special case of = operator t
 
 @dataclass
 class OpFn(t1.InedibleToken):
-    op: t1.Operator
+    op: t1.Operator|BroadcastOp|CombinedAssignmentOp
 
 """
 keywords:
@@ -236,9 +236,24 @@ def make_combined_assignment_operators(tokens: list[t1.Token]) -> None:
         
         if is_binary_op(token) or isinstance(token, BroadcastOp):
             if len(tokens) > i+1 and isinstance(tokens[i+1], t1.Operator) and tokens[i+1].symbol == '=':
-                tokens[i+1] = CombinedAssignmentOp(tokens[i+1].loc)
+                tokens[i:i+2] = [CombinedAssignmentOp(tokens[i+1].loc)]
         i += 1
 
+
+def make_op_functions(tokens: list[t1.Token]) -> None:
+    """convert (op) into an identifier token for that operator"""
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        recurse_into(token, make_op_functions)
+        
+        if (isinstance(token, t1.Block) 
+            and token.delims == '()' 
+            and len(token.inner) == 1 
+            and isinstance(token.inner[0], (t1.Operator, BroadcastOp, CombinedAssignmentOp))
+        ):
+            tokens[i] = OpFn(token.loc, token.inner[0])
+        i += 1
 
 def is_stop_keyword(token: t1.Token, stop: set[str]) -> bool:
     """
@@ -515,6 +530,8 @@ def postok_inner(tokens: list[t1.Token]) -> None:
     make_broadcast_operators(tokens)
     # convert any combined assignment operators (e.g. += -= etc.) into a single token
     make_combined_assignment_operators(tokens)
+    # convert any (op) into an identifier token for that operator (e.g. (+=) -> +=)
+    make_op_functions(tokens)
 
     # bundle up keyword expressions and flows into single atom tokens
     bundle_keyword_exprs(tokens)
