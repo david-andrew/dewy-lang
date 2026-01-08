@@ -31,7 +31,9 @@ class BroadcastOp(t1.InedibleToken):
     op: t1.Operator
 
 @dataclass
-class CombinedAssignmentOp(t1.InedibleToken): ... # special case of = operator to the right of another operator
+class CombinedAssignmentOp(t1.InedibleToken):
+    op: t1.Operator|BroadcastOp
+    # special case of = operator to the right of another operator
 
 
 @dataclass
@@ -243,7 +245,7 @@ def make_combined_assignment_operators(tokens: list[t1.Token]) -> None:
         
         if is_binary_op(token) or isinstance(token, BroadcastOp):
             if len(tokens) > i+1 and isinstance(tokens[i+1], t1.Operator) and tokens[i+1].symbol == '=':
-                tokens[i:i+2] = [CombinedAssignmentOp(tokens[i+1].loc)]
+                tokens[i:i+2] = [CombinedAssignmentOp(token, Span(token.loc.start, tokens[i+1].loc.stop))]
         i += 1
 
 
