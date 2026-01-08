@@ -2,7 +2,7 @@
 Initial parsing pass. A simple pratt-style parser
 """
 
-from typing import Sequence, Callable, TypeAlias, get_args
+from typing import Sequence, Callable, TypeAlias, get_args, Literal
 from dataclasses import dataclass
 from enum import Enum, auto
 from . import t1
@@ -23,6 +23,21 @@ Operator: TypeAlias = (
 )
 
 _operator_set = get_args(Operator)
+
+def op_equals(left: Operator, right: Operator) -> bool:
+    if not isinstance(left, Operator) or not isinstance(right, Operator): return False # only check equality of operators
+    if type(left) != type(right): return False # ensure left and right are the same type of operator
+    if isinstance(left, t1.Operator):
+        return left.symbol == right.symbol
+    if isinstance(left, t2.InvertedComparisonOp):
+        return left.op == right.op
+    if isinstance(left, t2.CombinedAssignmentOp):
+        return op_equals(left.op, right.op)
+    if isinstance(left, t2.BroadcastOp):
+        return left.op == right.op
+
+    assert isinstance(left, (t2.Juxtapose, t2.RangeJuxtapose, t2.EllipsisJuxtapose, t2.TypeParamJuxtapose, t2.SemicolonJuxtapose)), f'INTERNAL ERROR: unexpected operator types. expected juxtapose. got {left=} and {right=}'
+    return True
 
 
 @dataclass
@@ -258,9 +273,117 @@ def reduce_loop(items: list[Operator|AST]) -> list[AST]:
 
 def shunt_pass(items: list[Operator|AST]) -> None:
     """apply a shunting reduction. modifies `tokens` in place"""
-    import pdb; pdb.set_trace()
-    ...
+    # identify items that could shift
+    ast_idxs = [i for i, item in enumerate(items) if isinstance(item, AST)]
+    reverse_ast_idxs_map = {idx: i for i, idx in enumerate(ast_idxs)} # so we can look up the index of an ast's shift dir in the shift_dirs list
+    candidate_operator_idxs: list[int] = []
+    
+    # determine the direction items would shift according to operator binding power of the adjacent operators
+    shift_dirs: list[Literal[-1, 0, 1]] = [0] * len(ast_idxs)
+    for i, ast_idx in enumerate(ast_idxs):
+        # get left and right items
+        left_op = items[ast_idx - 1] if ast_idx > 0 else None
+        right_op = items[ast_idx + 1] if ast_idx < len(items) - 1 else None
+        
+        # get binding power of left and right (if they are operators)
+        left_bp, right_bp = NO_BIND, NO_BIND
+        if isinstance(left_op, Operator):
+            _, left_bp = bind_power_table[left_op]
+        if isinstance(right_op, Operator):
+            right_bp, _ = bind_power_table[right_op]
+        
+        if left_bp == NO_BIND and right_bp == NO_BIND:
+            continue
+        
+        # determine direction of shift
+        if left_bp > right_bp:
+            shift_dirs[i] = -1
+            candidate_operator_idxs.append(ast_idx - 1)
+        elif left_bp < right_bp:
+            shift_dirs[i] = 1
+            candidate_operator_idxs.append(ast_idx + 1)
+        else:
+            raise ValueError(f"INTERNAL ERROR: left and right have identical binding power. this shouldn't be possible. got {left_bp=} and {right_bp=} for {left_op=} and {right_op=}")
+    
+    # identify reductions
+    all_reductions: list[tuple[AST, tuple(int, int)]] = []
+    for candidate_operator_idx in candidate_operator_idxs:
+        left_ast_idx = candidate_operator_idx - 1
+        right_ast_idx = candidate_operator_idx + 1
+        left_ast = items[left_ast_idx]
+        right_ast = items[right_ast_idx]
+        left_ast_shift_dir_idx = reverse_ast_idxs_map.get(left_ast_idx)  # index of the ast in the shift_dirs list
+        right_ast_shift_dir_idx = reverse_ast_idxs_map.get(right_ast_idx)  # index of the ast in the shift_dirs list
+        left_ast_shift_dir = shift_dirs[left_ast_shift_dir_idx] if left_ast_shift_dir_idx is not None else 0
+        right_ast_shift_dir = shift_dirs[right_ast_shift_dir_idx] if right_ast_shift_dir_idx is not None else 0
 
+        op = items[candidate_operator_idx]
+        assert isinstance(op, Operator), f'INTERNAL ERROR: candidate operator is not an operator. got {op=}'
+        precedence = precedence_table[op]
+        if isinstance(precedence, int):
+            associativity = [associativity_table[precedence]]
+        else:
+            associativity = [associativity_table[p] for p in precedence.values]
+        
+        reductions: list[tuple[AST, tuple(int, int)]] = []  # ast from reduction, and indices of tokens participating in the reduction
+        for a in associativity:
+            if (a == Associativity.left or a == Associativity.right) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
+                reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1)))
+            elif (a == Associativity.prefix) and (right_ast_shift_dir == -1):
+                reductions.append((Prefix(op, right_ast), (candidate_operator_idx, right_ast_idx+1)))
+            elif (a == Associativity.postfix) and (left_ast_shift_dir == 1):
+                reductions.append((Postfix(op, left_ast), (left_ast_idx, candidate_operator_idx+1)))
+            elif (a == Associativity.flat) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
+                # check for the whole flat chain
+                try:
+                    operands, indices = collect_flat_operands(left_ast, right_ast, right_ast_idx, items, reverse_ast_idxs_map, shift_dirs)
+                except Exception: #TODO: make this the exception of trying to unpack none
+                    continue
+                reductions.append((Flat(op, operands), indices))
+            elif (a == Associativity.fail) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
+                # TODO: full error report for these exceptions
+                if isinstance(left_ast, BinOp) and op_equals(left_ast.op, op):
+                    raise ValueError(f'USER ERROR: operator {op} is not allowed to be nested inside itself. got {left_ast.op=} and {op=}')
+                if isinstance(right_ast, BinOp) and op_equals(right_ast.op, op):
+                    raise ValueError(f'USER ERROR: operator {op} is not allowed to be nested inside itself. got {right_ast.op=} and {op=}')
+                reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1)))
+        
+        if len(reductions) == 0:
+            continue
+        if len(reductions) > 1:
+            raise ValueError(f'INTERNAL ERROR: multiple reductions found for {op=}. got {reductions=}')
+        all_reductions.append(reductions[0])
+        
+    
+    # apply reductions in reverse order to avoid index shifting issues
+    for reduction, (left_bound, right_bound) in reversed(all_reductions):
+        items[left_bound:right_bound] = [reduction]
+
+
+
+def collect_flat_operands(left_ast: AST, right_ast: AST, right_ast_idx: int, items: list[Operator|AST], reverse_ast_idxs_map: dict[int, int], shift_dirs: list[Literal[-1, 0, 1]]) -> list[AST]|None:
+    # check for the whole flat chain
+    operands: list[AST] = [left_ast, right_ast]
+    i = right_ast_idx + 1
+    while i < len(items) and op_equals(items[i], op):
+        next_ast_idx = i + 1
+        if next_ast_idx >= len(items):
+            raise ValueError(f'USER ERROR: missing operand for flat operator {op}. got {operands=}')
+        # next_ast = items[next_ast_idx]
+        next_ast_i = reverse_ast_idxs_map.get(next_ast_idx)
+        if next_ast_i is None:
+            import pdb; pdb.set_trace()
+            raise ValueError("INTERNAL ERROR: item didn't shift, indicating something is probably wrong...")
+        next_ast_shift_dir = shift_dirs[next_ast_i]
+        if next_ast_shift_dir == 0:
+            raise ValueError(f"INTERNAL ERROR: item didn't shift, indicating something is probably wrong... got {next_ast_shift_dir=} for {next_ast_idx=}")
+        if next_ast_shift_dir == 1:
+           #not ready to reduce yet
+            return None
+        operands.append(items[next_ast_idx])
+        i += 2
+
+    return operands
 
 
 
