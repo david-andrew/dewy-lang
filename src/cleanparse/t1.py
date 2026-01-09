@@ -326,7 +326,7 @@ class BasedString(Token):
 
 @dataclass
 class BasedArray(Token):
-    inner: 'list[Integer]'
+    inner: list[Token]
     base: t0.BasePrefix
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, BasedArray]|None':
@@ -339,11 +339,8 @@ class BasedArray(Token):
         span = Span(opener.loc.start, closer.loc.stop)
         body_start, body_stop = start + 1, closer.idx
         inner = list(tokenize_gen(tokens, ctx, body_start, body_stop))
-        
-        # filter out any non integers
-        integers = [token for token in inner if isinstance(token, Integer)]
-        
-        return closer.idx - start + 1, BasedArray(span, integers, opener.base)
+
+        return closer.idx - start + 1, BasedArray(span, inner, opener.base)
 
 @dataclass
 class Identifier(Token):
