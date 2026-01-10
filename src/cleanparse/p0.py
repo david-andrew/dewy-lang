@@ -26,6 +26,7 @@ Operator: TypeAlias = (
 _operator_set = get_args(Operator)
 
 def op_equals(left: Operator, right: Operator) -> bool:
+    """checks if two operators are the same kind (ignoring span/position)"""
     if not isinstance(left, _operator_set) or not isinstance(right, _operator_set): return False # only check equality of operators
     if type(left) is not type(right): return False # ensure left and right are the same type of operator
     if isinstance(left, t1.Operator):
@@ -155,6 +156,14 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.left, [t2.SemicolonJuxtapose]),  # for suppression
     # LOWEST PRECEDENCE
 ]
+
+def prefix_could_be_binop(op: Operator) -> bool:
+    """for the given prefix operator, checks if it could be a binop as well"""
+    if isinstance(op, t1.Operator):
+        return op.symbol in t2.binary_ops
+    if isinstance(op, t2.BroadcastOp):
+        return prefix_could_be_binop(op.op)
+    return False
 
 
 # TODO: adjust so operators have left and right precedence levels to support pratt parsing
@@ -319,11 +328,7 @@ def reduce_loop(items: list[Operator|AST]) -> list[AST]:
         shunt_pass(items)
         if len(items) == l0:
             break
-    try:
-        assert all(isinstance(i, AST) for i in items), "INTERNAL ERROR: shunt-loop produced list with non-ASTs"
-    except AssertionError:
-        pdb.set_trace()
-        ...
+    assert all(isinstance(i, AST) for i in items), "INTERNAL ERROR: shunt-loop produced list with non-ASTs"
     
     return items
 
@@ -370,8 +375,8 @@ def shunt_pass(items: list[Operator|AST]) -> None:
     for candidate_operator_idx in sorted(candidate_operator_idxs):
         left_ast_idx = candidate_operator_idx - 1
         right_ast_idx = candidate_operator_idx + 1
-        left_ast = items[left_ast_idx]
-        right_ast = items[right_ast_idx]
+        left_ast = items[left_ast_idx] if left_ast_idx >= 0 else None
+        right_ast = items[right_ast_idx] if right_ast_idx < len(items) else None
         left_ast_shift_dir_idx = reverse_ast_idxs_map.get(left_ast_idx)  # index of the ast in the shift_dirs list
         right_ast_shift_dir_idx = reverse_ast_idxs_map.get(right_ast_idx)  # index of the ast in the shift_dirs list
         left_ast_shift_dir = shift_dirs[left_ast_shift_dir_idx] if left_ast_shift_dir_idx is not None else 0
@@ -386,18 +391,23 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         reductions: list[tuple[AST, tuple(int, int)]] = []  # ast from reduction, and indices of tokens participating in the reduction
         for a in associativity:
             if (a == Associativity.left or a == Associativity.right) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
+                assert isinstance(left_ast, AST) and isinstance(right_ast, AST), f'INTERNAL ERROR: left and right ASTs are not ASTs. got {left_ast=}, {right_ast=}, {left_ast_idx=}, {right_ast_idx=}'
                 reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1)))
-            elif (a == Associativity.prefix) and (right_ast_shift_dir == -1):
+            elif (
+                (a == Associativity.prefix) 
+                and (right_ast_shift_dir == -1) 
+                and (not prefix_could_be_binop(op) or not isinstance(left_ast, AST))
+            ):
                 reductions.append((Prefix(op, right_ast), (candidate_operator_idx, right_ast_idx+1)))
             elif (a == Associativity.postfix) and (left_ast_shift_dir == 1):
                 reductions.append((Postfix(op, left_ast), (left_ast_idx, candidate_operator_idx+1)))
             elif (a == Associativity.flat) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 # check for the whole flat chain
-                try:
-                    operands, indices = collect_flat_operands(left_ast_idx, right_ast_idx, op, items, reverse_ast_idxs_map, shift_dirs)
-                except Exception: #TODO: make this the exception of trying to unpack none
+                res = collect_flat_operands(left_ast_idx, right_ast_idx, op, items, reverse_ast_idxs_map, shift_dirs)
+                if res is None:
                     continue
-                reductions.append((Flat(op, operands), indices))
+                operands, bounds = res
+                reductions.append((Flat(op, operands), bounds))
             elif (a == Associativity.fail) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 # TODO: full error report for these exceptions
                 if isinstance(left_ast, BinOp) and op_equals(left_ast.op, op):
@@ -408,14 +418,32 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         
         if len(reductions) == 0:
             continue
-        if len(reductions) > 1 and not all(reductions[0] == r for r in reductions):
+        if len(reductions) > 1:
+            # filter duplicates
+            tmp = []
+            for i, r in enumerate(reductions):
+                if r not in reductions[i+1:]:
+                    tmp.append(r)
+            reductions = tmp
+            # prefer binops over prefix/postfix
+            to_remove = []
+            for r0 in reductions:
+                r0_ast = r0[0]
+                if isinstance(r0_ast, Prefix):
+                    for r1 in reductions:
+                        r1_ast = r1[0]
+                        if isinstance(r1_ast, BinOp) and r1_ast.op == r0_ast.op: # compare directly instead of op_equals b/c spans must match too
+                            to_remove.append(r0)
+                            break
+            for r in to_remove:
+                reductions.remove(r)
+        if len(reductions) > 1:
             pdb.set_trace()
             raise ValueError(f'INTERNAL ERROR: multiple reductions found for {op=}. got {reductions=}')
         all_reductions.append(reductions[0])
         
     
     # apply reductions in reverse order to avoid index shifting issues
-    # pdb.set_trace()
     for reduction, (left_bound, right_bound) in reversed(all_reductions):
         items[left_bound:right_bound] = [reduction]
 
@@ -427,6 +455,28 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, i
     operands: list[AST] = [left_ast, right_ast]
     indices: list[int] = [left_ast_idx, right_ast_idx]
     i = right_ast_idx + 1
+
+    # verify to the left
+    j = left_ast_idx - 1
+    while j > 0 and op_equals(items[j], op):
+        prev_ast_idx = j - 1
+        if prev_ast_idx < 0:
+            raise ValueError(f'USER ERROR: missing operand for flat operator {op}. got {operands=}')
+        prev_ast_i = reverse_ast_idxs_map.get(prev_ast_idx)
+        if prev_ast_i is None:
+            pdb.set_trace()
+            raise ValueError("INTERNAL ERROR: item didn't shift, indicating something is probably wrong...")
+        prev_ast_shift_dir = shift_dirs[prev_ast_i]
+        if prev_ast_shift_dir == 0:
+            raise ValueError(f"INTERNAL ERROR: item didn't shift, indicating something is probably wrong... got {prev_ast_shift_dir=} for {prev_ast_idx=}")
+        if prev_ast_shift_dir == -1:
+            # not ready to reduce yet
+            return None
+        operands.insert(0, items[prev_ast_idx])
+        indices.insert(0, prev_ast_idx)
+        j -= 2
+
+    # verify to the right
     while i < len(items) and op_equals(items[i], op):
         next_ast_idx = i + 1
         if next_ast_idx >= len(items):
@@ -440,13 +490,15 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, i
         if next_ast_shift_dir == 0:
             raise ValueError(f"INTERNAL ERROR: item didn't shift, indicating something is probably wrong... got {next_ast_shift_dir=} for {next_ast_idx=}")
         if next_ast_shift_dir == 1:
-           #not ready to reduce yet
+            #not ready to reduce yet
             return None
         indices.append(next_ast_idx)
         operands.append(items[next_ast_idx])
         i += 2
 
-    return operands, indices
+    bounds = (indices[0], indices[-1]+1)
+
+    return operands, bounds
 
 
 
@@ -455,6 +507,11 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
     branch = "│   "
     tee = "├── "
     last = "└── "
+
+    @dataclass(frozen=True)
+    class TreeGroup:
+        label: str
+        items: list[object]
 
     def op_label(op: Operator) -> str:
         if isinstance(op, t1.Operator):
@@ -468,13 +525,12 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         return type(op).__name__
 
     def token_label(tok: t1.Token) -> str:
-        if isinstance(tok, t1.Identifier):
-            return f"Identifier({tok.name})"
-        if isinstance(tok, t1.Operator):
-            return f"Operator({tok.symbol})"
-        if isinstance(tok, t1.Integer):
-            return f"Integer({tok.value.src})"
-        if isinstance(tok, t1.Real):
+        if isinstance(tok, t1.Identifier): return f"Identifier({tok.name})"
+        if isinstance(tok, t1.Operator): return f"Operator({tok.symbol})"
+        if isinstance(tok, t1.Keyword): return f"Keyword({tok.name})"
+        if isinstance(tok, t1.Hashtag): return f"Hashtag({tok.name})"
+        if isinstance(tok, t1.Integer): return f"Integer({tok.value.src})"
+        if isinstance(tok, t1.Real): 
             frac = f".{tok.fraction.src}" if tok.fraction is not None else ""
             exp = ""
             if tok.exponent is not None:
@@ -487,45 +543,103 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
             if len(content) > 40:
                 content = content[:37] + "..."
             return f"String({content!r})"
-        if isinstance(tok, t1.Block):
-            return f"Block({tok.delims}, {len(tok.inner)} toks)"
+        if isinstance(tok, t1.Block): return f"Block(delims='{tok.delims}')"
+        if isinstance(tok, t1.BasedString): return f"BasedString({tok.base})"
+        if isinstance(tok, t1.BasedArray): return f"BasedArray({tok.base})"
+        if isinstance(tok, t1.ParametricEscape): return "ParametricEscape"
+        if isinstance(tok, t1.IString): return "IString"
+        if isinstance(tok, t2.BroadcastOp): return f"BroadcastOp({op_label(tok.op)})"
+        if isinstance(tok, t2.CombinedAssignmentOp): return f"CombinedAssignmentOp({op_label(tok.op)})"
+        if isinstance(tok, t2.OpFn): return f"OpFn({op_label(tok.op)})"
+        if isinstance(tok, t2.KeywordExpr): return "KeywordExpr"
+        if isinstance(tok, t2.FlowArm): return "FlowArm"
+        if isinstance(tok, t2.Flow): return "Flow"
         return type(tok).__name__
 
-    def node_label(node: AST) -> str:
-        if isinstance(node, Atom):
-            return f"Atom({token_label(node.item)})"
-        if isinstance(node, BinOp):
-            return f"BinOp({op_label(node.op)})"
-        if isinstance(node, Prefix):
-            return f"Prefix({op_label(node.op)})"
-        if isinstance(node, Postfix):
-            return f"Postfix({op_label(node.op)})"
-        if isinstance(node, Flat):
-            return f"Flat({op_label(node.op)})"
+    def text_label(text: str) -> str:
+        content = text.replace("\n", "\\n")
+        if len(content) > 40:
+            content = content[:37] + "..."
+        return f"Text({content!r})"
+
+    def item_label(item: object) -> str:
+        if isinstance(item, AST): return ast_label(item)
+        if isinstance(item, t1.Token): return token_label(item)
+        if isinstance(item, TreeGroup): return item.label
+        if isinstance(item, str): return text_label(item)
+        return type(item).__name__
+
+    def ast_label(node: AST) -> str:
+        if isinstance(node, Atom): return token_label(node.item)
+        if isinstance(node, BinOp): return f"BinOp({op_label(node.op)})"
+        if isinstance(node, Prefix): return f"Prefix({op_label(node.op)})"
+        if isinstance(node, Postfix): return f"Postfix({op_label(node.op)})"
+        if isinstance(node, Flat): return f"Flat({op_label(node.op)})"
+        if isinstance(node, Ambiguous): return f"Ambiguous({len(node.candidates)})"
         return type(node).__name__
 
-    def iter_children(node: AST) -> list[tuple[str, AST]]:
-        if isinstance(node, BinOp):
-            return [("left", node.left), ("right", node.right)]
-        if isinstance(node, (Prefix, Postfix)):
-            return [("item", node.item)]
-        if isinstance(node, Flat):
-            return [(f"items[{i}]", item) for i, item in enumerate(node.items)]
+    def iter_token_children(tok: t1.Token) -> list[tuple[str, object]]:
+        if isinstance(tok, t1.Block): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
+        if isinstance(tok, t1.ParametricEscape): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
+        if isinstance(tok, t1.BasedArray): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
+        if isinstance(tok, t1.BasedString):
+            digits = "".join(d.src for d in tok.digits)
+            return [("digits", digits)]
+        if isinstance(tok, t1.IString): return [(f"content[{i}]", child) for i, child in enumerate(tok.content)]
+        if isinstance(tok, t2.BroadcastOp): return [("op", tok.op)]
+        if isinstance(tok, t2.CombinedAssignmentOp): return [("op", tok.op)]
+        if isinstance(tok, t2.OpFn): return [("op", tok.op)]
+        if isinstance(tok, t2.KeywordExpr):
+            out: list[tuple[str, object]] = []
+            expr_i = 0
+            for i, part in enumerate(tok.parts):
+                if isinstance(part, list):
+                    out.append((f"parts[{i}]", TreeGroup(f"expr[{expr_i}]", cast(list[object], part))))
+                    expr_i += 1
+                else:
+                    out.append((f"parts[{i}]", part))
+            return out
+        if isinstance(tok, t2.FlowArm):
+            out: list[tuple[str, object]] = []
+            expr_i = 0
+            for i, part in enumerate(tok.parts):
+                if isinstance(part, list):
+                    out.append((f"parts[{i}]", TreeGroup(f"expr[{expr_i}]", cast(list[object], part))))
+                    expr_i += 1
+                else:
+                    out.append((f"parts[{i}]", part))
+            return out
+        if isinstance(tok, t2.Flow):
+            out: list[tuple[str, object]] = [(f"arms[{i}]", arm) for i, arm in enumerate(tok.arms)]
+            if tok.default is not None:
+                out.append(("default", TreeGroup("default", cast(list[object], tok.default))))
+            return out
+        return []
+
+    def iter_ast_children(node: AST) -> list[tuple[str, object]]:
+        if isinstance(node, BinOp): return [("left", node.left), ("right", node.right)]
+        if isinstance(node, (Prefix, Postfix)): return [("item", node.item)]
+        if isinstance(node, Flat): return [(f"items[{i}]", item) for i, item in enumerate(node.items)]
+        if isinstance(node, Atom): return iter_token_children(node.item)
         return []
 
     lines: list[str] = []
     root_prefix = space * level
-    lines.append(root_prefix + node_label(ast))
+    lines.append(root_prefix + item_label(ast))
 
-    def render(node: AST, prefix: str, edge_label: str, is_last: bool) -> None:
+    def render(item: object, prefix: str, edge_label: str, is_last: bool) -> None:
         connector = last if is_last else tee
-        lines.append(prefix + connector + f"{edge_label}: {node_label(node)}")
+        lines.append(prefix + connector + f"{edge_label}: {item_label(item)}")
         child_prefix = prefix + (space if is_last else branch)
-        children = iter_children(node)
+        children: list[tuple[str, object]]
+        if isinstance(item, AST): children = iter_ast_children(item)
+        elif isinstance(item, t1.Token): children = iter_token_children(item)
+        elif isinstance(item, TreeGroup): children = [(f"items[{i}]", child) for i, child in enumerate(item.items)]
+        else: children = []
         for i, (child_edge, child) in enumerate(children):
             render(child, child_prefix, child_edge, i == len(children) - 1)
 
-    children = iter_children(ast)
+    children = iter_ast_children(ast)
     for i, (edge_label, child) in enumerate(children):
         render(child, root_prefix, edge_label, i == len(children) - 1)
 
@@ -550,6 +664,7 @@ def test():
     for ast in asts:
         print(ast_to_tree_str(ast))
         print()
+    
 
 
 if __name__ == '__main__':
