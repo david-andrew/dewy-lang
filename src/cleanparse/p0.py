@@ -2,13 +2,14 @@
 Initial parsing pass. A simple pratt-style parser
 """
 
-from typing import Sequence, Callable, TypeAlias, get_args, Literal
+from typing import Sequence, Callable, TypeAlias, get_args, Literal, cast
 from dataclasses import dataclass
 from enum import Enum, auto
 from . import t1
 from . import t2
 from .reporting import SrcFile, ReportException
 
+import pdb
 
 Operator: TypeAlias = (
       t1.Operator
@@ -25,8 +26,8 @@ Operator: TypeAlias = (
 _operator_set = get_args(Operator)
 
 def op_equals(left: Operator, right: Operator) -> bool:
-    if not isinstance(left, Operator) or not isinstance(right, Operator): return False # only check equality of operators
-    if type(left) != type(right): return False # ensure left and right are the same type of operator
+    if not isinstance(left, _operator_set) or not isinstance(right, _operator_set): return False # only check equality of operators
+    if type(left) is not type(right): return False # ensure left and right are the same type of operator
     if isinstance(left, t1.Operator):
         return left.symbol == right.symbol
     if isinstance(left, t2.InvertedComparisonOp):
@@ -95,8 +96,8 @@ def _convert_to_bp(precedence:int):
 assoc_to_bp_funcs: dict[Associativity, Callable[[int], tuple[int, int]]] = {
     Associativity.left: lambda precedence: (_convert_to_bp(precedence), _convert_to_bp(precedence)+1),
     Associativity.right: lambda precedence: (_convert_to_bp(precedence)+1, _convert_to_bp(precedence)),
-    Associativity.prefix: lambda precedence: (_convert_to_bp(precedence), NO_BIND),
-    Associativity.postfix: lambda precedence: (NO_BIND, _convert_to_bp(precedence)),
+    Associativity.prefix: lambda precedence: (NO_BIND, _convert_to_bp(precedence)),
+    Associativity.postfix: lambda precedence: (_convert_to_bp(precedence), NO_BIND),
     Associativity.flat: lambda precedence: (_convert_to_bp(precedence)+1, _convert_to_bp(precedence)),  # flat parses as left to right, but uses N-ary node instead of regular node
     Associativity.fail: lambda precedence: (_convert_to_bp(precedence)+1, _convert_to_bp(precedence)),  # also parses left to right, but will error if a node ever is handed a child of the same operator
 }
@@ -192,7 +193,7 @@ def get_precedence(op: Operator) -> int | qint:
     try:
         return precedence_table[type(op)]
     except KeyError:
-        import pdb; pdb.set_trace()
+        pdb.set_trace()
         raise ValueError(f'INTERNAL ERROR: unexpected operator type for determining precedence. got {op=}')
 
 def get_bind_power(op: Operator) -> tuple[int, int] | tuple[qint, qint]:
@@ -200,7 +201,11 @@ def get_bind_power(op: Operator) -> tuple[int, int] | tuple[qint, qint]:
     if isinstance(precedence, int):
         return bind_power_table[precedence] 
     left_bps, right_bps = zip(*[bind_power_table[p] for p in precedence.values])
-    return (qint(set(left_bps)), qint(set(right_bps)))
+    left_bps = list(filter(lambda bp: bp != NO_BIND, left_bps))
+    right_bps = list(filter(lambda bp: bp != NO_BIND, right_bps))
+    left_bps = qint(set(left_bps)) if len(left_bps) > 1 else left_bps[0]
+    right_bps = qint(set(right_bps)) if len(right_bps) > 1 else right_bps[0]
+    return (left_bps, right_bps)
 
 def get_associativity(op: Operator) -> Associativity | list[Associativity]:
     precedence = get_precedence(op)
@@ -214,6 +219,24 @@ class AST: ...
 @dataclass
 class Atom(AST):
     item: t1.Token
+
+# TBD if we use these or just shove stuff into tokens (probably latter)
+# @dataclass
+# class Block(AST):
+#     inner: list[AST]
+#     delims: Literal['{}', '[]', '()', '[)', '(]', '<>']
+# @dataclass
+# class IString(AST):...
+# @dataclass
+# class ParametricEscape(AST):...
+# @dataclass
+# class BasedArray(AST):...
+# @dataclass
+# class KeywordExpr(AST):...
+# @dataclass
+# class FlowArm(AST):...
+# @dataclass
+# class Flow(AST):...
 
 @dataclass
 class BinOp(AST):
@@ -239,11 +262,16 @@ class Postfix(AST):
 class Flat(AST):
     """node for flat operators that all combine to a single operation rather than a tree (e.g. comma separated expressions)"""
     op: Operator
-    items: tuple[AST, ...]
+    items: list[AST]
 
 
 
+@dataclass
+class Ambiguous(AST):
+    candidates: list[AST]
 
+
+# TODO: make this return a single block AST instead of a list of ASTs...
 def parse(srcfile: SrcFile) -> list[AST]:
     """simple bottom up iterative shunting-esque algorithm driven by pratt-style binding powers"""
     """
@@ -271,24 +299,18 @@ def parse(srcfile: SrcFile) -> list[AST]:
     """
 
     tokens = t2.postok(srcfile)
-    return parse_inner(tokens)
+    parse_inner(tokens)
+    return cast(list[AST], tokens)
 
-def parse_inner(tokens: list[t1.Token]) -> list[AST]:
-    # TODO: figure out how to handle applying shunt loop to inner tokens...
+def parse_inner(tokens: list[t1.Token]) -> None:
+    """Modifies `tokens` in place, converting it from a list[Token] to a list[AST]"""
+    for i, t in enumerate(tokens):
+        if not isinstance(t, _operator_set):
+            t2.recurse_into(t, parse_inner)
+            tokens[i] = Atom(t)
     
-    # fn to convert all atom tokens to Atom ASTs and recurse into all inner tokens
-    def atomize(tokens: list[t1.Token]) -> list[AST|Operator]:
-        for i, t in enumerate(tokens):
-            if not isinstance(t, _operator_set):
-                t2.recurse_into(t, atomize)
-                tokens[i] = Atom(t)
-        return tokens
+    reduce_loop(tokens)
     
-    # apply conversion to top layer
-    items = atomize(tokens)
-
-    # perform the actual parsing
-    return reduce_loop(items)
 
 def reduce_loop(items: list[Operator|AST]) -> list[AST]:
     """repeatedly apply shunting reductions until no more occur. modifies `tokens` in place"""
@@ -297,7 +319,12 @@ def reduce_loop(items: list[Operator|AST]) -> list[AST]:
         shunt_pass(items)
         if len(items) == l0:
             break
-    assert all(isinstance(i, AST) for i in items), "INTERNAL ERROR: shunt-loop produced list with non-ASTs"
+    try:
+        assert all(isinstance(i, AST) for i in items), "INTERNAL ERROR: shunt-loop produced list with non-ASTs"
+    except AssertionError:
+        pdb.set_trace()
+        ...
+    
     return items
 
 def shunt_pass(items: list[Operator|AST]) -> None:
@@ -305,7 +332,7 @@ def shunt_pass(items: list[Operator|AST]) -> None:
     # identify items that could shift
     ast_idxs = [i for i, item in enumerate(items) if isinstance(item, AST)]
     reverse_ast_idxs_map = {idx: i for i, idx in enumerate(ast_idxs)} # so we can look up the index of an ast's shift dir in the shift_dirs list
-    candidate_operator_idxs: list[int] = []
+    candidate_operator_idxs: set[int] = set()
     
     # determine the direction items would shift according to operator binding power of the adjacent operators
     shift_dirs: list[Literal[-1, 0, 1]] = [0] * len(ast_idxs)
@@ -316,9 +343,9 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         
         # get binding power of left and right (if they are operators)
         left_bp, right_bp = NO_BIND, NO_BIND
-        if isinstance(left_op, Operator):
+        if isinstance(left_op, _operator_set):
             _, left_bp = get_bind_power(left_op)
-        if isinstance(right_op, Operator):
+        if isinstance(right_op, _operator_set):
             right_bp, _ = get_bind_power(right_op)
         
         if left_bp == NO_BIND and right_bp == NO_BIND:
@@ -327,16 +354,20 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         # determine direction of shift
         if left_bp > right_bp:
             shift_dirs[i] = -1
-            candidate_operator_idxs.append(ast_idx - 1)
+            candidate_operator_idxs.add(ast_idx - 1)
         elif left_bp < right_bp:
             shift_dirs[i] = 1
-            candidate_operator_idxs.append(ast_idx + 1)
-        else:
+            candidate_operator_idxs.add(ast_idx + 1)
+        elif left_bp == right_bp:
             raise ValueError(f"INTERNAL ERROR: left and right have identical binding power. this shouldn't be possible. got {left_bp=} and {right_bp=} for {left_op=} and {right_op=}")
-    
+        else:
+            # TODO: handle ambiguous case...
+            pdb.set_trace()
+            ...
+    # pdb.set_trace()
     # identify reductions
     all_reductions: list[tuple[AST, tuple(int, int)]] = []
-    for candidate_operator_idx in candidate_operator_idxs:
+    for candidate_operator_idx in sorted(candidate_operator_idxs):
         left_ast_idx = candidate_operator_idx - 1
         right_ast_idx = candidate_operator_idx + 1
         left_ast = items[left_ast_idx]
@@ -347,7 +378,7 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         right_ast_shift_dir = shift_dirs[right_ast_shift_dir_idx] if right_ast_shift_dir_idx is not None else 0
 
         op = items[candidate_operator_idx]
-        assert isinstance(op, Operator), f'INTERNAL ERROR: candidate operator is not an operator. got {op=}'
+        assert isinstance(op, _operator_set), f'INTERNAL ERROR: candidate operator is not an operator. got {op=}'
         associativity = get_associativity(op)
         if not isinstance(associativity, list):
             associativity = [associativity]
@@ -363,7 +394,7 @@ def shunt_pass(items: list[Operator|AST]) -> None:
             elif (a == Associativity.flat) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 # check for the whole flat chain
                 try:
-                    operands, indices = collect_flat_operands(left_ast, right_ast, right_ast_idx, items, reverse_ast_idxs_map, shift_dirs)
+                    operands, indices = collect_flat_operands(left_ast_idx, right_ast_idx, op, items, reverse_ast_idxs_map, shift_dirs)
                 except Exception: #TODO: make this the exception of trying to unpack none
                     continue
                 reductions.append((Flat(op, operands), indices))
@@ -378,20 +409,23 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         if len(reductions) == 0:
             continue
         if len(reductions) > 1 and not all(reductions[0] == r for r in reductions):
-            import pdb; pdb.set_trace()
+            pdb.set_trace()
             raise ValueError(f'INTERNAL ERROR: multiple reductions found for {op=}. got {reductions=}')
         all_reductions.append(reductions[0])
         
     
     # apply reductions in reverse order to avoid index shifting issues
+    # pdb.set_trace()
     for reduction, (left_bound, right_bound) in reversed(all_reductions):
         items[left_bound:right_bound] = [reduction]
 
 
 
-def collect_flat_operands(left_ast: AST, right_ast: AST, right_ast_idx: int, items: list[Operator|AST], reverse_ast_idxs_map: dict[int, int], shift_dirs: list[Literal[-1, 0, 1]]) -> list[AST]|None:
+def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, items: list[Operator|AST], reverse_ast_idxs_map: dict[int, int], shift_dirs: list[Literal[-1, 0, 1]]) -> list[AST]|None:
     # check for the whole flat chain
+    left_ast, right_ast = items[left_ast_idx], items[right_ast_idx]
     operands: list[AST] = [left_ast, right_ast]
+    indices: list[int] = [left_ast_idx, right_ast_idx]
     i = right_ast_idx + 1
     while i < len(items) and op_equals(items[i], op):
         next_ast_idx = i + 1
@@ -400,7 +434,7 @@ def collect_flat_operands(left_ast: AST, right_ast: AST, right_ast_idx: int, ite
         # next_ast = items[next_ast_idx]
         next_ast_i = reverse_ast_idxs_map.get(next_ast_idx)
         if next_ast_i is None:
-            import pdb; pdb.set_trace()
+            pdb.set_trace()
             raise ValueError("INTERNAL ERROR: item didn't shift, indicating something is probably wrong...")
         next_ast_shift_dir = shift_dirs[next_ast_i]
         if next_ast_shift_dir == 0:
@@ -408,17 +442,98 @@ def collect_flat_operands(left_ast: AST, right_ast: AST, right_ast_idx: int, ite
         if next_ast_shift_dir == 1:
            #not ready to reduce yet
             return None
+        indices.append(next_ast_idx)
         operands.append(items[next_ast_idx])
         i += 2
 
-    return operands
+    return operands, indices
 
 
+
+def ast_to_tree_str(ast: AST, level: int = 0) -> str:
+    space = "    "
+    branch = "│   "
+    tee = "├── "
+    last = "└── "
+
+    def op_label(op: Operator) -> str:
+        if isinstance(op, t1.Operator):
+            return op.symbol
+        if isinstance(op, t2.InvertedComparisonOp):
+            return f"not {op.op}"
+        if isinstance(op, t2.BroadcastOp):
+            return f".{op_label(op.op)}"
+        if isinstance(op, t2.CombinedAssignmentOp):
+            return f"{op_label(op.op)}="
+        return type(op).__name__
+
+    def token_label(tok: t1.Token) -> str:
+        if isinstance(tok, t1.Identifier):
+            return f"Identifier({tok.name})"
+        if isinstance(tok, t1.Operator):
+            return f"Operator({tok.symbol})"
+        if isinstance(tok, t1.Integer):
+            return f"Integer({tok.value.src})"
+        if isinstance(tok, t1.Real):
+            frac = f".{tok.fraction.src}" if tok.fraction is not None else ""
+            exp = ""
+            if tok.exponent is not None:
+                marker = "p" if tok.exponent.binary else "e"
+                sign = "" if tok.exponent.positive else "-"
+                exp = f"{marker}{sign}{tok.exponent.value.src}"
+            return f"Real({tok.whole.src}{frac}{exp})"
+        if isinstance(tok, t1.String):
+            content = tok.content.replace("\n", "\\n")
+            if len(content) > 40:
+                content = content[:37] + "..."
+            return f"String({content!r})"
+        if isinstance(tok, t1.Block):
+            return f"Block({tok.delims}, {len(tok.inner)} toks)"
+        return type(tok).__name__
+
+    def node_label(node: AST) -> str:
+        if isinstance(node, Atom):
+            return f"Atom({token_label(node.item)})"
+        if isinstance(node, BinOp):
+            return f"BinOp({op_label(node.op)})"
+        if isinstance(node, Prefix):
+            return f"Prefix({op_label(node.op)})"
+        if isinstance(node, Postfix):
+            return f"Postfix({op_label(node.op)})"
+        if isinstance(node, Flat):
+            return f"Flat({op_label(node.op)})"
+        return type(node).__name__
+
+    def iter_children(node: AST) -> list[tuple[str, AST]]:
+        if isinstance(node, BinOp):
+            return [("left", node.left), ("right", node.right)]
+        if isinstance(node, (Prefix, Postfix)):
+            return [("item", node.item)]
+        if isinstance(node, Flat):
+            return [(f"items[{i}]", item) for i, item in enumerate(node.items)]
+        return []
+
+    lines: list[str] = []
+    root_prefix = space * level
+    lines.append(root_prefix + node_label(ast))
+
+    def render(node: AST, prefix: str, edge_label: str, is_last: bool) -> None:
+        connector = last if is_last else tee
+        lines.append(prefix + connector + f"{edge_label}: {node_label(node)}")
+        child_prefix = prefix + (space if is_last else branch)
+        children = iter_children(node)
+        for i, (child_edge, child) in enumerate(children):
+            render(child, child_prefix, child_edge, i == len(children) - 1)
+
+    children = iter_children(ast)
+    for i, (edge_label, child) in enumerate(children):
+        render(child, root_prefix, edge_label, i == len(children) - 1)
+
+    return "\n".join(lines)
 
 
 def test():
     from ..myargparse import ArgumentParser
-    from .t0 import tokens_to_report # mildly hacky but Token2's duck-type to what this expects
     from pathlib import Path
     parser = ArgumentParser()
     parser.add_argument('path', type=Path, required=True, help='path to file to tokenize')
@@ -432,8 +547,10 @@ def test():
         print(e.report)
         exit(1)
     
-    print(asts)
-    # print(tokens_to_report(tokens, srcfile))
+    for ast in asts:
+        print(ast_to_tree_str(ast))
+        print()
+
 
 if __name__ == '__main__':
     test()
