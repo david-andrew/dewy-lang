@@ -168,13 +168,25 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[J
 
 
 def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> None:
-    """Helper to recursively apply a function to the inner tokens of a token (if it has any)"""
-    if isinstance(token, t1.Block):
+    """
+    Helper to recursively apply a function to the inner tokens of a token (if it has any)
+    It is expected that `func` will call `recurse_into` with itself as the callable.
+    """
+    if isinstance(token, (t1.Block, t1.ParametricEscape, t1.BasedArray)):
         func(token.inner)
     elif isinstance(token, t1.IString):
         for child in token.content:
             recurse_into(child, func)
-    # TBD if other tokens may have inner tokens
+    elif isinstance(token, (KeywordExpr, FlowArm)):
+        for part in token.parts:
+            if isinstance(part, list):
+                func(part)
+    elif isinstance(token, Flow):
+        func(token.arms)
+        if token.default is not None:
+            func(token.default)
+
+    # else no inner tokens. TODO: would be nice if we could error if there were any unhandled cases with inner tokens...
 
 
 # TODO: since we're determining juxtapose placement based on token spans rather than if there were no whitespace tokens between,
