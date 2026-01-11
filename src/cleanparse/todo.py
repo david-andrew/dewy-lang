@@ -32,6 +32,9 @@ given AST, produce output in the target backend
 
 [tasks]
 [x] `;` cannot participate in binops, prefix ops, or postfix ops (except for semicolon juxtapose)
+[ ] overhaul how juxtapose tokens are determined. basically they can be next to operators, so long as that op is part of a chain
+    [ ] semicolon cannot have juxtapose to right
+    [ ] semicolon juxtapose should be allowed if left is operator...
 [x] need backtick disambiguation. suspect when checking if could be postfix op, need to check that backtick has something to connect to
 [ ] replace `//` with `div`/`÷` and then make comments be `//` and `/{}/` (also add note that normalize would convert `idiv` to `÷`)
 [ ] add ${} interpolation strings (consider reworking strings in t0 since there's a lot of similar patterns. maybe make a string token factory)
