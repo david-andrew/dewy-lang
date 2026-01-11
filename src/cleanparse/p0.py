@@ -2,7 +2,7 @@
 Initial parsing pass. A simple pratt-style parser
 """
 
-from typing import Sequence, Callable, TypeAlias, get_args, Literal, cast
+from typing import Sequence, Callable, TypeAlias, Literal, cast
 from dataclasses import dataclass
 from enum import Enum, auto
 from . import t1
@@ -154,14 +154,6 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.left, [t2.SemicolonJuxtapose]),  # for suppression
     # LOWEST PRECEDENCE
 ]
-
-def prefix_could_be_binop(op: Operator) -> bool:
-    """for the given prefix operator, checks if it could be a binop as well"""
-    if isinstance(op, t1.Operator):
-        return op.symbol in t2.binary_ops
-    if isinstance(op, t2.BroadcastOp):
-        return prefix_could_be_binop(op.op)
-    return False
 
 
 # TODO: adjust so operators have left and right precedence levels to support pratt parsing
@@ -391,7 +383,7 @@ def shunt_pass(items: list[Operator|AST]) -> None:
             if (a == Associativity.left or a == Associativity.right) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 assert isinstance(left_ast, AST) and isinstance(right_ast, AST), f'INTERNAL ERROR: left and right ASTs are not ASTs. got {left_ast=}, {right_ast=}, {left_ast_idx=}, {right_ast_idx=}'
                 reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1)))
-            elif a == Associativity.prefix and (right_ast_shift_dir == -1) and (not prefix_could_be_binop(op) or not left_could_attach(left_ast_idx, items)): # TODO: perhaps still not right. problem case: --x. basically need to check that no chains exist to the left...
+            elif a == Associativity.prefix and (right_ast_shift_dir == -1) and (not t2.is_binary_op(op) or not left_could_attach(left_ast_idx, items)): # TODO: perhaps still not right. problem case: --x. basically need to check that no chains exist to the left...
                 reductions.append((Prefix(op, right_ast), (candidate_operator_idx, right_ast_idx+1)))
             elif (a == Associativity.postfix) and (left_ast_shift_dir == 1):
                 reductions.append((Postfix(op, left_ast), (left_ast_idx, candidate_operator_idx+1)))
