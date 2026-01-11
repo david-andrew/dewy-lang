@@ -3907,3 +3907,35 @@ a = [
     0 0 ; 0 1
 ]
 ```
+
+
+
+
+## interpolation strings with different block syntax
+Basically normal strings with `{}` for interpolation is great, except for in rare instances where you want to interpolate over something that contains lot of `{}` normally. E.g. if we wanted to have a `some_file.json.dewy`, either we'd have to escape every `\{` or we would have to use a raw string which basically defeats the purpose of it being .dewy since you can't interpolate raw strings.
+2 ideas to solve this:
+1. (simplest) add a `$""` string which opens interpolation blocks with `${}`
+2. (most flexible) add a string sort of like a heredoc string, but you define the block delimiters (instead of the string delimiters)
+
+I think probably though I'd just go with 1. because it's simple and pretty familiar to people (interpolation in javascript, bash, etc.)
+`some_file.json.dewy` example
+```dewy
+const userId = 42;
+const userName = "Alice";
+const isAdmin = true;
+
+#$"""
+{
+  "id": ${userId},
+  "name": "${userName}",
+  "roles": ["user", ${if isAdmin "admin" else "guest"}],
+  "createdAt": "${date.now.toISOString}"
+}
+```
+
+This implies I need to add 2 or 3 string types:
+- $""  regular string with $ prefix
+- #$""" rest of file string with $ prefix
+- (maybe) #$"delim" heredoc string with $ prefix
+
+> Note that if one wanted a literal `$` in the string, they would just escape it `\$`
