@@ -393,11 +393,7 @@ def shunt_pass(items: list[Operator|AST]) -> None:
             if (a == Associativity.left or a == Associativity.right) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 assert isinstance(left_ast, AST) and isinstance(right_ast, AST), f'INTERNAL ERROR: left and right ASTs are not ASTs. got {left_ast=}, {right_ast=}, {left_ast_idx=}, {right_ast_idx=}'
                 reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1)))
-            elif (
-                (a == Associativity.prefix) 
-                and (right_ast_shift_dir == -1) 
-                and (not prefix_could_be_binop(op) or not isinstance(left_ast, AST))
-            ):
+            elif a == Associativity.prefix and (right_ast_shift_dir == -1) and (not prefix_could_be_binop(op) or left_could_attach(left_ast_idx, items)): # TODO: perhaps still not right. problem case: --x. basically need to check that no chains exist to the left...
                 reductions.append((Prefix(op, right_ast), (candidate_operator_idx, right_ast_idx+1)))
             elif (a == Associativity.postfix) and (left_ast_shift_dir == 1):
                 reductions.append((Postfix(op, left_ast), (left_ast_idx, candidate_operator_idx+1)))
@@ -448,6 +444,48 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         items[left_bound:right_bound] = [reduction]
 
 
+def left_could_attach(left_ast_idx: int, items: list[Operator|AST]) -> bool:
+    """determine if the items left of a candidate prefix or binary operator connect to that binary operator
+    cases:
+    op was binop or prefix, e.g. `... - x`, return True
+    left is prefix or binary, then op is prefix, e.g. `... -- x` return True
+
+    other hard cases
+    +`-x
+    +``-x
+    `--x
+    `~-x
+    `?-x
+    """
+    i = left_ast_idx
+    while i > 0:
+        item = items[i]
+        # All ASTs except for semicolon can attach
+        if isinstance(item, AST):
+            if isinstance(item, Atom) and isinstance(item.item, t1.Semicolon):
+                return False
+            return True
+        
+        # type of op determines if the left is an expresison that could attach, or prefix to the current expression
+        if isinstance(item, _operator_set):
+            prefix = t2.is_prefix_op(item)
+            postfix = t2.is_postfix_op(item)
+            binary = t2.is_binary_op(item)
+            if binary:
+                return False
+            elif prefix and not postfix:
+                return False
+            elif postfix and not prefix:
+                return True
+            elif prefix and postfix:
+                i -= 1 # can't determine yet if the left is a separate expression or prefix to this one
+                continue
+            else: # unreachable
+                raise ValueError(f'INTERNAL ERROR: reached unreachable state. {binary=}, {prefix=}, {postfix=}')
+        
+        raise ValueError(f'INTERNAL ERROR: reached unreachable state. {item=}, {left_ast_idx=}, {items[left_ast_idx]=}, {i=}')
+    # no items to left that could attach
+    return False
 
 def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, items: list[Operator|AST], reverse_ast_idxs_map: dict[int, int], shift_dirs: list[Literal[-1, 0, 1]]) -> list[AST]|None:
     # check for the whole flat chain
@@ -461,10 +499,10 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, i
     while j > 0 and op_equals(items[j], op):
         prev_ast_idx = j - 1
         if prev_ast_idx < 0:
+            # TODO: full error report
             raise ValueError(f'USER ERROR: missing operand for flat operator {op}. got {operands=}')
         prev_ast_i = reverse_ast_idxs_map.get(prev_ast_idx)
         if prev_ast_i is None:
-            pdb.set_trace()
             raise ValueError("INTERNAL ERROR: item didn't shift, indicating something is probably wrong...")
         prev_ast_shift_dir = shift_dirs[prev_ast_i]
         if prev_ast_shift_dir == 0:
@@ -480,11 +518,10 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, i
     while i < len(items) and op_equals(items[i], op):
         next_ast_idx = i + 1
         if next_ast_idx >= len(items):
+            # TODO: full error report
             raise ValueError(f'USER ERROR: missing operand for flat operator {op}. got {operands=}')
-        # next_ast = items[next_ast_idx]
         next_ast_i = reverse_ast_idxs_map.get(next_ast_idx)
         if next_ast_i is None:
-            pdb.set_trace()
             raise ValueError("INTERNAL ERROR: item didn't shift, indicating something is probably wrong...")
         next_ast_shift_dir = shift_dirs[next_ast_i]
         if next_ast_shift_dir == 0:
@@ -582,9 +619,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(tok, t1.Block): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
         if isinstance(tok, t1.ParametricEscape): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
         if isinstance(tok, t1.BasedArray): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
-        if isinstance(tok, t1.BasedString):
-            digits = "".join(d.src for d in tok.digits)
-            return [("digits", digits)]
+        if isinstance(tok, t1.BasedString): return [("digits", "".join(d.src for d in tok.digits))]
         if isinstance(tok, t1.IString): return [(f"content[{i}]", child) for i, child in enumerate(tok.content)]
         if isinstance(tok, t2.BroadcastOp): return [("op", tok.op)]
         if isinstance(tok, t2.CombinedAssignmentOp): return [("op", tok.op)]
