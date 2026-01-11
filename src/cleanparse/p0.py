@@ -196,9 +196,9 @@ def get_precedence(op: Operator) -> int | qint:
     if isinstance(op, t2.InvertedComparisonOp):
         return precedence_table[op.op]
     if isinstance(op, t2.CombinedAssignmentOp):
-        return precedence_table[op.op]
+        return precedence_table['=']
     if isinstance(op, t2.BroadcastOp):
-        return precedence_table[op.op]
+        return get_precedence(op.op)
     try:
         return precedence_table[type(op)]
     except KeyError:
