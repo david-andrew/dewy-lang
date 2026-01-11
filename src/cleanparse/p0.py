@@ -393,7 +393,7 @@ def shunt_pass(items: list[Operator|AST]) -> None:
             if (a == Associativity.left or a == Associativity.right) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 assert isinstance(left_ast, AST) and isinstance(right_ast, AST), f'INTERNAL ERROR: left and right ASTs are not ASTs. got {left_ast=}, {right_ast=}, {left_ast_idx=}, {right_ast_idx=}'
                 reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1)))
-            elif a == Associativity.prefix and (right_ast_shift_dir == -1) and (not prefix_could_be_binop(op) or left_could_attach(left_ast_idx, items)): # TODO: perhaps still not right. problem case: --x. basically need to check that no chains exist to the left...
+            elif a == Associativity.prefix and (right_ast_shift_dir == -1) and (not prefix_could_be_binop(op) or not left_could_attach(left_ast_idx, items)): # TODO: perhaps still not right. problem case: --x. basically need to check that no chains exist to the left...
                 reductions.append((Prefix(op, right_ast), (candidate_operator_idx, right_ast_idx+1)))
             elif (a == Associativity.postfix) and (left_ast_shift_dir == 1):
                 reductions.append((Postfix(op, left_ast), (left_ast_idx, candidate_operator_idx+1)))
