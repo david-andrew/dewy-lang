@@ -31,12 +31,19 @@ given AST, produce output in the target backend
 
 
 [tasks]
+[ ] `;` cannot participate in binops, prefix ops, or postfix ops (except for semicolon juxtapose)
+[ ] need backtick disambiguation. suspect when checking if could be postfix op, need to check that backtick has something to connect to
+[ ] replace `//` with `idiv`/`÷` and then make comments be `//` and `/{}/` (also add note that normalize would convert `idiv` to `÷`)
+[ ] add ${} interpolation strings (consider reworking strings in t0 since there's a lot of similar patterns. maybe make a string token factory)
+
 [Tasks]
 [x] split invert_whitespace into remove_whitespace and insert_juxtapose
 [x] op function literals
 [x] make @ just a regular prefix op instead of consuming it in the tokenizer (so we can @ fn literals, and opfn e.g. cycleleft = @(`)(dir='left'))
-[ ] replace `//` with `idiv`/`÷` and then make comments be `//` and `/{}/` (also add note that normalize would convert `idiv` to `÷`)
-[ ] operator precedence parse
+[.] operator precedence parse
+    [x] primary impl
+    [x] recursing into inners
+    simplify/clean up?
 
 
 operator precedence parse test
