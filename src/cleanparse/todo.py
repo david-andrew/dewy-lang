@@ -31,9 +31,9 @@ given AST, produce output in the target backend
 
 
 [tasks]
-[ ] `;` cannot participate in binops, prefix ops, or postfix ops (except for semicolon juxtapose)
-[ ] need backtick disambiguation. suspect when checking if could be postfix op, need to check that backtick has something to connect to
-[ ] replace `//` with `idiv`/`÷` and then make comments be `//` and `/{}/` (also add note that normalize would convert `idiv` to `÷`)
+[x] `;` cannot participate in binops, prefix ops, or postfix ops (except for semicolon juxtapose)
+[x] need backtick disambiguation. suspect when checking if could be postfix op, need to check that backtick has something to connect to
+[ ] replace `//` with `div`/`÷` and then make comments be `//` and `/{}/` (also add note that normalize would convert `idiv` to `÷`)
 [ ] add ${} interpolation strings (consider reworking strings in t0 since there's a lot of similar patterns. maybe make a string token factory)
 
 [Tasks]

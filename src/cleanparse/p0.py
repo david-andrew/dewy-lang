@@ -318,6 +318,10 @@ def reduce_loop(items: list[Operator|AST]) -> list[AST]:
         shunt_pass(items)
         if len(items) == l0:
             break
+    
+    # during development, this might also be hit due to internal errors, e.g. bugs where something is not properly reducing
+    # TODO: this could be a user error, e.g. `A&;b&c`. Do full error reporting
+    # perhaps do: for each item in list, if is op, determine what kinds of reductions it could participate in and show error listing them vs what was present
     assert all(isinstance(i, AST) for i in items), "INTERNAL ERROR: shunt-loop produced list with non-ASTs"
     
     return items
@@ -326,15 +330,20 @@ def shunt_pass(items: list[Operator|AST]) -> None:
     """apply a shunting reduction. modifies `tokens` in place"""
     # identify items that could shift
     ast_idxs = [i for i, item in enumerate(items) if isinstance(item, AST)]
+    asts = cast(list[AST], [items[i] for i in ast_idxs])
     reverse_ast_idxs_map = {idx: i for i, idx in enumerate(ast_idxs)} # so we can look up the index of an ast's shift dir in the shift_dirs list
     candidate_operator_idxs: set[int] = set()
     
     # determine the direction items would shift according to operator binding power of the adjacent operators
     shift_dirs: list[Literal[-1, 0, 1]] = [0] * len(ast_idxs)
-    for i, ast_idx in enumerate(ast_idxs):
-        # get left and right items
+    for i, (ast, ast_idx) in enumerate(zip(asts, ast_idxs)):
+        # get left and/or right operators if present
         left_op = items[ast_idx - 1] if ast_idx > 0 else None
         right_op = items[ast_idx + 1] if ast_idx < len(items) - 1 else None
+
+        # semicolon is a special case that can only shift left if left is SemicolonJuxtapose
+        if isinstance(ast, Atom) and isinstance(ast.item, t1.Semicolon) and not isinstance(left_op, t2.SemicolonJuxtapose):
+            continue
         
         # get binding power of left and right (if they are operators)
         left_bp, right_bp = NO_BIND, NO_BIND
