@@ -23,11 +23,9 @@ Operator: TypeAlias = (
     | t2.BroadcastOp
 )
 
-_operator_set = get_args(Operator)
 
 def op_equals(left: Operator, right: Operator) -> bool:
     """checks if two operators are the same kind (ignoring span/position)"""
-    if not isinstance(left, _operator_set) or not isinstance(right, _operator_set): return False # only check equality of operators
     if type(left) is not type(right): return False # ensure left and right are the same type of operator
     if isinstance(left, t1.Operator):
         return left.symbol == right.symbol
@@ -314,7 +312,7 @@ def parse(srcfile: SrcFile) -> list[AST]:
 def parse_inner(tokens: list[t1.Token]) -> None:
     """Modifies `tokens` in place, converting it from a list[Token] to a list[AST]"""
     for i, t in enumerate(tokens):
-        if not isinstance(t, _operator_set):
+        if not isinstance(t, Operator):
             t2.recurse_into(t, parse_inner)
             tokens[i] = Atom(t)
     
@@ -348,9 +346,9 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         
         # get binding power of left and right (if they are operators)
         left_bp, right_bp = NO_BIND, NO_BIND
-        if isinstance(left_op, _operator_set):
+        if isinstance(left_op, Operator):
             _, left_bp = get_bind_power(left_op)
-        if isinstance(right_op, _operator_set):
+        if isinstance(right_op, Operator):
             right_bp, _ = get_bind_power(right_op)
         
         if left_bp == NO_BIND and right_bp == NO_BIND:
@@ -369,7 +367,7 @@ def shunt_pass(items: list[Operator|AST]) -> None:
             # TODO: handle ambiguous case...
             pdb.set_trace()
             ...
-    # pdb.set_trace()
+
     # identify reductions
     all_reductions: list[tuple[AST, tuple(int, int)]] = []
     for candidate_operator_idx in sorted(candidate_operator_idxs):
@@ -383,7 +381,7 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         right_ast_shift_dir = shift_dirs[right_ast_shift_dir_idx] if right_ast_shift_dir_idx is not None else 0
 
         op = items[candidate_operator_idx]
-        assert isinstance(op, _operator_set), f'INTERNAL ERROR: candidate operator is not an operator. got {op=}'
+        assert isinstance(op, Operator), f'INTERNAL ERROR: candidate operator is not an operator. got {op=}'
         associativity = get_associativity(op)
         if not isinstance(associativity, list):
             associativity = [associativity]
@@ -467,7 +465,7 @@ def left_could_attach(left_ast_idx: int, items: list[Operator|AST]) -> bool:
             return True
         
         # type of op determines if the left is an expresison that could attach, or prefix to the current expression
-        if isinstance(item, _operator_set):
+        if isinstance(item, Operator):
             prefix = t2.is_prefix_op(item)
             postfix = t2.is_postfix_op(item)
             binary = t2.is_binary_op(item)
@@ -496,7 +494,7 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, i
 
     # verify to the left
     j = left_ast_idx - 1
-    while j > 0 and op_equals(items[j], op):
+    while j > 0 and isinstance(items[j], Operator) and op_equals(items[j], op):
         prev_ast_idx = j - 1
         if prev_ast_idx < 0:
             # TODO: full error report
@@ -515,7 +513,7 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, i
         j -= 2
 
     # verify to the right
-    while i < len(items) and op_equals(items[i], op):
+    while i < len(items) and isinstance(items[i], Operator) and op_equals(items[i], op):
         next_ast_idx = i + 1
         if next_ast_idx >= len(items):
             # TODO: full error report
