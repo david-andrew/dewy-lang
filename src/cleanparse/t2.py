@@ -111,6 +111,7 @@ other_infix_tokens: set[type[t1.Token]] = {
     TypeParamJuxtapose,
     SemicolonJuxtapose,
     CombinedAssignmentOp,
+    InvertedComparisonOp,
     # BroadcastOp is handled separately because whether or not it is infix depends on the operator being broadcast over
 }
 
@@ -290,7 +291,7 @@ def is_stop_keyword(token: t1.Token, stop: set[str]) -> bool:
 
 def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[list[t1.Token], int]:
     """
-    Collect a single expression chunk starting at `start`. A chunk is basically an atop surrounded by prefix and postfix operators.
+    Collect a single expression chunk starting at `start`. A chunk is basically an atom surrounded by prefix and postfix operators.
 
     Chunk grammar (informal):
       chunk := prefix_like* atom postfix_like*
