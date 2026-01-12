@@ -219,31 +219,12 @@ class AST: ...
 class Atom(AST):
     item: t1.Token
 
-# TBD if we use these or just shove stuff into tokens (probably latter)
-# @dataclass
-# class Block(AST):
-#     inner: list[AST]
-#     delims: Literal['{}', '[]', '()', '[)', '(]', '<>']
-# @dataclass
-# class IString(AST):...
-# @dataclass
-# class ParametricEscape(AST):...
-# @dataclass
-# class BasedArray(AST):...
-# @dataclass
-# class KeywordExpr(AST):...
-# @dataclass
-# class FlowArm(AST):...
-# @dataclass
-# class Flow(AST):...
-
 @dataclass
 class BinOp(AST):
     """either a binary node, a prefix node, or a postfix node"""
     op: Operator
     left: AST
     right: AST
-
 
 @dataclass
 class Prefix(AST):
@@ -255,7 +236,6 @@ class Postfix(AST):
     op: t1.Operator|t2.BroadcastOp
     item: AST
 
-
 # used for operators that are flat rather than have an associativity (namely comma separated expressions)
 @dataclass
 class Flat(AST):
@@ -264,7 +244,9 @@ class Flat(AST):
     items: list[AST]
 
 
-
+# TBD how to set this up since don't have a whole AST when we see ambiguity, just reductions in a list
+# perhaps instead keep the reductions + AST/tokens they tend over
+# also ideally there would be maximal sharing when dealing with ambiguous cases.
 @dataclass
 class Ambiguous(AST):
     candidates: list[AST]
