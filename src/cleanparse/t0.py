@@ -39,9 +39,9 @@ import pdb
 
 whitespace = {' ', '\t', '\n', '\r'}
 ascii_control_chars = set(chr(i) for i in range(0x20) if i not in whitespace) | {'\x7F'} # most ascii<0x20 are ignored for security reasons
-line_comment_start: Literal['%'] = '%'
-block_comment_start: Literal['%{'] = '%{'
-block_comment_end: Literal['}%'] = '}%'
+line_comment_start: Literal['#'] = '#'
+block_comment_start: Literal['#{'] = '#{'
+block_comment_end: Literal['}#'] = '}#'
 
 # TODO: The specific set of digits is open for debate. The following are proposed:
 # latin = set('ÆØÞßæøþẞ')
@@ -52,7 +52,7 @@ digits = set('0123456789')
 alpha = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
 greek = set('ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεϵζηθικλμνξοπρςστυφχψω')
 math = set('ℂℕℤℚℝℙℍ𝔼𝕊𝕋𝔽𝔾ℵℒ')
-misc = set('_‾?!$°')
+misc = set('_‾!°')
 subscripts   = set('₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜᵢᵣᵤᵥⱼᵦᵧᵨᵩᵪ')
 superscripts = set('⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᶿꜝ')
 misc_decorations = set('℠™©®')
@@ -110,7 +110,7 @@ def is_based_digit(digit: str, base: BasePrefix) -> bool:
 symbols = sorted([
     '~', '@', '`',
     '?', ';',
-    '+', '-', '*', '/', '//', '^',
+    '+', '-', '*', '/', '//', '%', '^',
     '\\', # left divide e.g. given Ax=b, x=A\b, where A\B ≡ solve(A B) (note this is not the same as x=A⁻¹B) (TODO: move description to docs)
     '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
     '|', '&', '??',
@@ -134,7 +134,7 @@ legal_heredoc_delim_chars = (
     continue_characters |
     decoration_characters |
     digits |
-    set(''.join(symbols + shift_operators + ['#%()[]{} '])) #include #, %, (), [], {}, and ` ` (<space>) manually since currently not in any symbol or identifier characters
+    set(''.join(symbols + shift_operators + ['#()[]{} '])) #include #, (), [], {}, and ` ` (<space>) manually since currently not in any symbol or identifier characters
 )
 
 
@@ -323,7 +323,7 @@ class Whitespace(Token[WhitespaceOrCommentContexts]):
 class LineComment(Token[WhitespaceOrCommentContexts]):
     @staticmethod
     def eat(src:str, ctx:WhitespaceOrCommentContexts) -> int|None:
-        """line comments are any sequence of characters after a % until the end of the line"""
+        """line comments are any sequence of characters after a # until the end of the line"""
         if not src.startswith(line_comment_start):
             return None
         if src.startswith(block_comment_start):
@@ -342,7 +342,7 @@ class BlockComment(Token[WhitespaceOrCommentContexts]):
     @staticmethod
     def eat(src: str, ctx:WhitespaceOrCommentContexts) -> int | None:
         """
-        Block comments are of the form %{ ... }% and can be nested.
+        Block comments are of the form #{ ... }# and can be nested.
         """
         if not src.startswith(block_comment_start):
             return None
@@ -353,10 +353,10 @@ class BlockComment(Token[WhitespaceOrCommentContexts]):
         while i < len(src):
             if src[i:].startswith(block_comment_start):
                 openers.append(Span(i, i + len(block_comment_start)))
-                i += 2
+                i += len(block_comment_start)
             elif src[i:].startswith(block_comment_end):
                 openers.pop()
-                i += 2
+                i += len(block_comment_end)
 
                 if len(openers) == 0:
                     return i
@@ -377,7 +377,7 @@ class BlockComment(Token[WhitespaceOrCommentContexts]):
                 ),
                 Span(openers[-1].stop + span_offset, len(src) + span_offset)
             ], message=f"Unbound block comment{plural}")
-        ], hint=f"Did you forget {len(openers)} closing `}}%`?\nBlock comments start with `%{{` and end with `}}%` and can be nested")
+        ], hint=f"Did you forget {len(openers)} closing `{block_comment_end}`?\nBlock comments start with `{block_comment_start}` and end with `{block_comment_end}` and can be nested")
         error.throw()
 
 
@@ -434,11 +434,11 @@ class ShiftSymbol(Token[BodyWithoutTypeContexts]):
         return None
 
 
-class Hashtag(Token[GeneralBodyContexts]):
+class Metatag(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src: str, ctx:GeneralBodyContexts) -> int | None:
-        """hashtags are just special identifiers that start with #"""
-        if src.startswith('#'):
+        """metatags are just special identifiers that start with $"""
+        if src.startswith('$'):
             i = Identifier.eat(src[1:], ctx)
             if i is not None:
                 return i + 1
@@ -834,9 +834,9 @@ class RestOfFileStringQuote(Token[Root]):
     @staticmethod
     def eat(src:str, ctx:Root) -> int|None:
         """a string that has an opening delimiter but no closing delimiter (consumes until EOF)
-        Opening delimiters #\""" #'''
+        Opening delimiters $\""" $'''
         """
-        if not src.startswith('#"""') and not src.startswith("#'''"):
+        if not src.startswith('$"""') and not src.startswith("$'''"):
             return None
         return 4
     
@@ -846,9 +846,9 @@ class RawRestOfFileStringQuote(Token[Root]):
     @staticmethod
     def eat(src:str, ctx:Root) -> int|None:
         """a raw string that has an opening delimiter but no closing delimiter (consumes until EOF)
-        Opening delimiters #r\""" #r'''
+        Opening delimiters $r\""" $r'''
         """
-        if not src.startswith('#r"""') and not src.startswith("#r'''"):
+        if not src.startswith('$r"""') and not src.startswith("$r'''"):
             return None
         return 5
     
@@ -860,10 +860,10 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
 
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
-        """heredoc string opening and closing quotes are `#"<delim>"` and `<delim>` respectively
+        """heredoc string opening and closing quotes are `$"<delim>"` and `<delim>` respectively
         <delim> is an arbitrary user-defined delimiter. May use any identifier or symbol characters in the language except for quotes `"`, `'`
         """
-        if not src.startswith('#"') and not src.startswith("#'"):
+        if not src.startswith('$"') and not src.startswith("$'"):
             return None
         
         # consume the delimiter
@@ -942,7 +942,7 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
                 srcfile=ctx.srcfile,
                 title="Heredoc delimiter cannot start or end with space",
                 pointer_messages=pointer_messages,
-                hint=f"Heredoc delimiters may not start or end with space. Remove any leading or trailing space from the delimiter, e.g. #{quote}{delim.strip()}{quote}"
+                hint=f"Heredoc delimiters may not start or end with space. Remove any leading or trailing space from the delimiter, e.g. ${quote}{delim.strip()}{quote}"
             )
             error.throw()
 
@@ -971,12 +971,12 @@ class RawHeredocStringOpener(Token[GeneralBodyContexts]):
 
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
-        """raw heredoc string opening and closing quotes are `#r"<delim>"` and `<delim>` respectively
+        """raw heredoc string opening and closing quotes are `$r"<delim>"` and `<delim>` respectively
         <delim> is an arbitrary user-defined delimiter. May use any identifier or symbol characters in the language except for quotes `"`, `'`
         """
-        if not src.startswith('#r"') and not src.startswith("#r'"):
+        if not src.startswith('$r"') and not src.startswith("$r'"):
             return None
-        i = HeredocStringOpener.eat('#'+src[2:], ctx)
+        i = HeredocStringOpener.eat('$'+src[2:], ctx)
         if i is None:
             return None
         return i + 1  # +1 for the `r` in the prefix

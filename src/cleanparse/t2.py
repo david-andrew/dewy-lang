@@ -94,7 +94,7 @@ atom_tokens: set[type[t1.Token]] = {
     t1.BasedString,
     t1.BasedArray,
     t1.Identifier,
-    t1.Hashtag,
+    t1.Metatag,
     t1.Integer,
     t1.Semicolon,
     OpFn,
@@ -117,7 +117,7 @@ other_infix_tokens: set[type[t1.Token]] = {
 
 
 binary_ops: set[str] = {
-    '+', '-', '*', '/', '//', '^',
+    '+', '-', '*', '/', '//', '%', '^',
     '\\',
     '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
     '|', '&', '??',
@@ -128,7 +128,7 @@ binary_ops: set[str] = {
     '.', ',', ':', ':>',
     '<<', '>>', '<<<', '>>>', '<<!', '!>>',
     'and', 'or', 'xor', 'nand', 'nor', 'xnor',
-    'as', 'in', 'transmute', 'of', 'mod',
+    'as', 'in', 'transmute', 'of',
 }
 prefix_ops: set[str] = {
     '~', 'not', '`',
@@ -136,7 +136,7 @@ prefix_ops: set[str] = {
 }
 
 postfix_ops: set[str] = {
-    '`', ';', '?',
+    '`', '?',
 }
 
 # simple checks for it t1.Operator
@@ -478,7 +478,7 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
         return KeywordExpr(Span(kw.loc.start, expr[-1].loc.stop), [kw, expr]), i
 
     if kw.name in {"break", "continue"}:
-        if i < len(tokens) and isinstance(tokens[i], t1.Hashtag):
+        if i < len(tokens) and isinstance(tokens[i], t1.Metatag):
             ht = tokens[i]
             return KeywordExpr(Span(kw.loc.start, ht.loc.stop), [kw, [ht]]), i + 1
         return KeywordExpr(kw.loc, [kw]), i

@@ -32,7 +32,7 @@ symbolic_identifiers: set[str] = {
 # tokenized as identifiers, but are treated as operators (rather than identifiers)
 word_operators: set[str] = {
     'and', 'or', 'xor', 'nand', 'nor', 'xnor', 'not',
-    'as', 'in', 'transmute', 'of', 'mod',
+    'as', 'in', 'transmute', 'of',
 }
 
 escape_map: dict[str, str] = {
@@ -397,13 +397,13 @@ class Keyword(Token): # e.g. if, loop, import, let, etc. any keyword that behave
         return None
 
 @dataclass
-class Hashtag(Token):
+class Metatag(Token):
     name: str
     @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Hashtag]|None':
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Metatag]|None':
         token = tokens[start]
-        if isinstance(token, t0.Hashtag):
-            return 1, Hashtag(token.loc, token.src[1:])
+        if isinstance(token, t0.Metatag):
+            return 1, Metatag(token.loc, token.src[1:])
         return None
 
 @dataclass
@@ -432,7 +432,7 @@ top_level_tokens: list[type[Token]] = [
       # IString,           # not included in top level tokens because created by String.eat
       # ParametricEscape,  # not included in top level tokens because created by String.eat
     Keyword,
-    Hashtag,
+    Metatag,
     Integer,
     Real,
     Block,

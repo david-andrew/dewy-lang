@@ -131,7 +131,7 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.right,  ['^']),
     (Associativity.left, [t2.Juxtapose]),  # jux-multiply
     (Associativity.prefix, ['*', '/', '//']),
-    (Associativity.left, ['*', '/', '//', 'mod', '\\']),
+    (Associativity.left, ['*', '/', '//', '%', '\\']),
     (Associativity.prefix, ['+', '-']),
     (Associativity.left, ['+', '-']),
     (Associativity.left, ['<<', '>>', '<<<', '>>>', '<<!', '!>>']),
@@ -564,7 +564,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(tok, t1.Identifier): return f"Identifier({tok.name})"
         if isinstance(tok, t1.Operator): return f"Operator({tok.symbol})"
         if isinstance(tok, t1.Keyword): return f"Keyword({tok.name})"
-        if isinstance(tok, t1.Hashtag): return f"Hashtag({tok.name})"
+        if isinstance(tok, t1.Metatag): return f"Hashtag({tok.name})"
         if isinstance(tok, t1.Integer): return f"Integer({tok.value.src})"
         if isinstance(tok, t1.Real): 
             frac = f".{tok.fraction.src}" if tok.fraction is not None else ""
