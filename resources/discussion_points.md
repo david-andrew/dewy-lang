@@ -3121,20 +3121,22 @@ pythag_length(3 4)
 perhaps even if we did `pythag_length(3.0 4.0)` that might still just convert to rational because 3.0 and 4.0 are technically both still integers. I think any decimal values written out would be rational unless the container type is float or it is cast to float, etc.
 
 
-## Comment, Modulus, Hashtag, Handle, Integer Division [leaning `//` `/{}/` for comments, `[/]`or `idiv` for idiv, and `%` for mod]
+## Comment, Modulus, Hashtag, Handle, Integer Division [leaning `#` `#{}#` for comments, `//` for idiv, and `%` for mod, `$` for hashtags/labels]
 Basically I'm considering swapping some symbols around. Goal: reclaim `%` for modulus, and ideally something familiar for comments
 Options:
 | id | Modulus | Hashtag/label | at handle | Line Comment | Block Comment | Ingeger Division |
 |  0 |  `mod`  |      `#`      |    `@`    |     `%`      |     `%{}%`    |       `//`       |
-|  1 |   `%`   |      `@`      |    `$`    |     `#`      |     `#{}#`    |       `//`       |
+|  1 |   `%`   |      `@`      |    `$`    |     `#`      |     `#{}#`    |       `//`       | ***
+|  1b|   `%`   |      `$`      |    `@`    |     `#`      |     `#{}#`    |       `//`       |
 |  2 |   `%`   |      `#`      |    `@`    |     `$`      |     `${}$`    |       `//`       |
 |  3 |   `%`   |      `#`      |    `@`    |     `%%`     |     `%{}%`    |       `//`       |
-|  4 |   `%`   |      `#`      |    `@`    |     `//`     |     `/{}/`    | `[/]` or `idiv`  | ***
+|  4 |   `%`   |      `#`      |    `@`    |     `//`     |     `/{}/`    |    `÷` or `div`  | ***
 |  5 |   `%`   |      `#`      |    `@`    |     `///`    |     `/{}/`    |       `//`       |
 
 [thoughts on contendors]
 0. is the status quo
 1. is probably the biggest departure from current syntax. But it seems like it has everything managed decently well and would be relatively familiar to users. I just don't like $handles as much as @handles...
+1b. realized that we could just make hashtags take $ instead of at handles. so e.g. you get @f(a=1 b=2), and then you get labels `$ctx.a`, `$loop_i`, `$loop_j`, `$do_something`, `$loadub(8)`, etc. I think this one is actually quite great
 2. just very weird for users that `$` is for comments. but otherwise fits everything nicely 
 3. `%%` is a pain to write for every time you want a comment. But might still be the least churn
 4. return to the original comments, and find a different integer division symbol. Might go with this one since `[/]` evokes the idea of floor division. I will say, `%` for comments was charming, but using mod in matlab was a pain!
