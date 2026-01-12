@@ -62,20 +62,20 @@ that is, just a function that returns an object literal, no need for braces or `
 Similar to python, objects can define custom so-called "double-underscore" or "dunder" methods, which hook into the language's built-in functionality.
 
 ```dewy
-% Define a point class with a custom add method
+// Define a point class with a custom add method
 Point = (x:number y:number) => [
-    x = x  %TBD if these are necessary since x/y are already in scope
+    x = x  // TBD if these are necessary since x/y are already in scope
     y = y
     __add__ = other:Point => Point(x+other.x y+other.y)
     __repr__ = () => 'Point({x}, {y})'
     __str__ = () => '({x}, {y})'
 ]
 
-% Create two points and add them together
+// Create two points and add them together
 p1 = Point(1 2)
 p2 = Point(3 4)
 p3 = p1 + p2
-printl(p3)  %prints Point(4 6)
+printl(p3)  // prints Point(4 6)
 ```
 
 Though actually for `__add__`, it might make more sense for it to be global, and you add an alternate that gets dispatched on rather than including it in the object itself:

@@ -45,20 +45,20 @@ These examples come directly from the rules used to build the syntax of Dewy up 
 
 ```dewy
 #decimal_digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
-#decimal_prefix = '0D' | '0d'; %obviously optional
+#decimal_prefix = '0D' | '0d'; // obviously optional
 #decimal_digit_string = #decimal_digit, {#decimal_digit | '_'};
 #decimal_natural = [#decimal_prefix], #decimal_digit_string;
 #decimal_rational = #decimal_natural, '.', #decimal_digit_string;
 #decimal_floating_point = (#decimal_rational | #decimal_natural), [('e'|'E'), ['-'|'+'], (#decimal_rational | #decimal_natural)];
 
-%combine all into a single rule. This is actually not necessary, and will probably make parsing slightly more verbose...
+// combine all into a single rule. This is actually not necessary, and will probably make parsing slightly more verbose...
 #decimal_number = #decimal_natural | #decimal_rational | #decimal_floating_point;
 ```
 
 These will identifier numbers like
 
 ```dewy
-%TODO->examples of numbers that can be scanned by these rules
+// TODO->examples of numbers that can be scanned by these rules
 ```
 
 #### Identifiers and Hashtags
@@ -78,7 +78,7 @@ These will identifier numbers like
 and some examples
 
 ```dewy
-%TODO
+// TODO
 ```
 
 
@@ -95,7 +95,7 @@ which match those words exactly. (TODO->note syntax for case insensitive)
 These are strings that ignore any string interpolation
 
 ```dewy
-#whitespace = ' '; %TODO->other whitespace via hex codes
+#whitespace = ' '; // TODO->other whitespace via hex codes
 #string_content = { #lowercase_letter | #uppercase_letter | #symbols | #decimal_digit | #whitespace };
 #string = ('"', #string_content, '"') | ("'", #string_content, "'");
 ```

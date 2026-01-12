@@ -140,10 +140,10 @@ This prints `'5 4 3 2 1 0 '`.
 Ranges can be used in arithmetic expressions, often as a way to construct new ranges.
 
 ```dewy
-%division version
+// division version
 loop i in [0..4]/4 print'{i} '
 
-%multiplication version
+// multiplication version
 loop i in [0..4]*0.25 print'{i} '
 ```
 

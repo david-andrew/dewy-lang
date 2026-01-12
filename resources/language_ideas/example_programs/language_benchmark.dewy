@@ -71,7 +71,7 @@ FizzBuzz = () =>
 
     loop i in 1..100
     {
-        say = i .mod words.keys .=? 0     //elementwise operation of % and =? //returns truth table
+        say = i .% words.keys .=? 0     //elementwise operation of % and =? //returns truth table
         if words.keys[say].length >? 0
             loop word in words[words.keys[say]]  //note that indentation doesn't actually matter here.
                 printf(word)                     //each conditional happens to have only a single line, hence no need for {}s
@@ -84,7 +84,7 @@ FizzBuzz = () =>
 FizzBuzzBazzFoo = () =>
 {
     loop i in 1..100
-        match i%3, i%5, i%7, i%11   //want to be able to vectorize the input like i .mod [3 5 7 11] as args. but need better syntax
+        match i%3, i%5, i%7, i%11   //want to be able to vectorize the input like i .% [3 5 7 11] as args. but need better syntax
         {
             0, _, _, _ {printf('Fizz') continue}
             _, 0, _, _ {printf('Buzz') continue}
