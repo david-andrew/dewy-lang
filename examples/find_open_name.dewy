@@ -1,4 +1,4 @@
-% say we have a dict with many trials (potentially not contiguous) and we want an open space at the end
+# say we have a dict with many trials (potentially not contiguous) and we want an open space at the end
 reference_trials = [
     'trial_0' -> ...
     'trial_1' -> ...
@@ -9,18 +9,18 @@ reference_trials = [
     'trial_7' -> ...
     'trial_8' -> ...
     'trial_9' -> ...
-    % etc.
+    # etc.
 ]
 
 
-% the interesting part is this loop
+# the interesting part is this loop
 reference_trial_name = [i = trials.length __str__ = () => 'trial_{i}']
 loop '{reference_trial_name}' in? trials reference_trial_name.i += 1
 reference_name = reference_name.__str__
 
 
 
-%{
+#{
 Python version of the task. Note the repatition of the string `f'trial_{reference_trial_number}'`
 ```python
 reference_trial_number = len(trials)
@@ -28,4 +28,4 @@ while f'trial_{reference_trial_number}' in trials:
     reference_trial_number += 1
 reference_name = f'trial_{reference_trial_number}'
 ```
-}%
+}#

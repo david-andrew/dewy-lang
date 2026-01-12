@@ -1,34 +1,34 @@
-% for convenience
+# for convenience
 null: ptr<T> = 0
 
 
-% using SDL2 from dewy
+# using SDL2 from dewy
 
-% --- Opaque Pointer Types ---
+# --- Opaque Pointer Types ---
 SDL_Window: type = uint64
 SDL_GLContext: type = uint64
 
-% --- Structs ---
-% We only need to know the layout of the parts we access.
-% For SDL_Event, the 'type' field is always first.
+# --- Structs ---
+# We only need to know the layout of the parts we access.
+# For SDL_Event, the 'type' field is always first.
 SDL_Event: type = [
     type: uint32
-    % ... many other fields for different event types
+    # ... many other fields for different event types
 ]
 
-% --- Constants from SDL ---
+# --- Constants from SDL ---
 const SDL_INIT_VIDEO = 0x00000020
 const SDL_WINDOW_OPENGL = 0x00000002
-const SDL_QUIT = 0x100 % Event type for quit
+const SDL_QUIT = 0x100 # Event type for quit
 
-% Constants for setting OpenGL attributes
+# Constants for setting OpenGL attributes
 const SDL_GL_CONTEXT_MAJOR_VERSION = 0x11
 const SDL_GL_CONTEXT_MINOR_VERSION = 0x12
 const SDL_GL_CONTEXT_PROFILE_MASK = 0x15
 const SDL_GL_CONTEXT_PROFILE_CORE = 0x1
 const SDL_GL_DOUBLEBUFFER = 0x5
 
-% --- Functions from libSDL2.so ---
+# --- Functions from libSDL2.so ---
 SDL_Init = flags:uint32 :> int => extern
 SDL_Quit = () :> void => extern
 
@@ -40,15 +40,15 @@ SDL_GL_CreateContext = (window:SDL_Window) :> SDL_GLContext => extern
 SDL_GL_DeleteContext = (context:SDL_GLContext) :> void => extern
 
 SDL_GL_SwapWindow = (window:SDL_Window) :> void => extern
-SDL_PollEvent = (event:ptr<SDL_Event>) :> int => extern % returns 1 if event pending, 0 otherwise
+SDL_PollEvent = (event:ptr<SDL_Event>) :> int => extern # returns 1 if event pending, 0 otherwise
 
-% --- Functions from libGL.so ---
-% Note: On some platforms, you might need SDL_GL_GetProcAddress to load these.
-% But for basic GL 1/2, they are often linked directly.
+# --- Functions from libGL.so ---
+# Note: On some platforms, you might need SDL_GL_GetProcAddress to load these.
+# But for basic GL 1/2, they are often linked directly.
 glClearColor = (r: float32, g: float32, b: float32, a: float32) :> void => extern
 glClear = (mask: uint32) :> void => extern
 
-% GL Constant
+# GL Constant
 const GL_COLOR_BUFFER_BIT = 0x00004000
 
 
@@ -67,33 +67,33 @@ const GL_COLOR_BUFFER_BIT = 0x00004000
 
 
 
-% --- The Application Logic ---
-% This is the function that contains our actual SDL program.
-% It has the standard C main signature because that's what __libc_start_main expects to call.
+# --- The Application Logic ---
+# This is the function that contains our actual SDL program.
+# It has the standard C main signature because that's what __libc_start_main expects to call.
 sdl_main = (argc: int, argv: ptr<ptr<char>>) :> int => {
-    % 1. Initialize SDL
-    % We only need the video subsystem for this example.
+    # 1. Initialize SDL
+    # We only need the video subsystem for this example.
     if SDL_Init(SDL_INIT_VIDEO) <? 0 {
-        % We can't use SDL_GetError() without more FFI, so just a generic message.
+        # We can't use SDL_GetError() without more FFI, so just a generic message.
         printl"Error: Failed to initialize SDL.\n"
         return 1
     }
 
-    % 2. Set OpenGL Attributes Before Creating the Window
-    % This requests an OpenGL 3.3 Core Profile context.
+    # 2. Set OpenGL Attributes Before Creating the Window
+    # This requests an OpenGL 3.3 Core Profile context.
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION 3)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION 3)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK SDL_GL_CONTEXT_PROFILE_CORE)
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1)
 
-    % 3. Create a Window
+    # 3. Create a Window
     let window = SDL_CreateWindow(
-        "My Language on SDL+OpenGL" % Window title
-        100 % x position
-        100 % y position
-        800 % width
-        600 % height
-        SDL_WINDOW_OPENGL % Flags
+        "My Language on SDL+OpenGL" # Window title
+        100 # x position
+        100 # y position
+        800 # width
+        600 # height
+        SDL_WINDOW_OPENGL # Flags
     )
     if window =? null {
         printl"Error: Failed to create SDL window.\n"
@@ -101,7 +101,7 @@ sdl_main = (argc: int, argv: ptr<ptr<char>>) :> int => {
         return 1
     }
 
-    % 4. Create an OpenGL Context
+    # 4. Create an OpenGL Context
     let gl_context = SDL_GL_CreateContext(window)
     if gl_context =? null {
         printl"Error: Failed to create OpenGL context.\n"
@@ -112,32 +112,32 @@ sdl_main = (argc: int, argv: ptr<ptr<char>>) :> int => {
 
     printl"SDL and OpenGL initialized successfully. Entering main loop.\n"
 
-    % 5. The Main Loop
+    # 5. The Main Loop
     let running = true
     loop running {
-        let event: ptr<SDL_Event> = #alloc8<SDL_Event> % A buffer for event data
+        let event: ptr<SDL_Event> = $alloc8<SDL_Event> # A buffer for event data
 
-        % Process all pending events in the queue
+        # Process all pending events in the queue
         loop SDL_PollEvent(event) {
-            % Check the event type
+            # Check the event type
             if event.type =? SDL_QUIT {
                 running = false
             }
-            % You could check for keyboard/mouse events here too.
+            # You could check for keyboard/mouse events here too.
         }
 
-        % --- Our OpenGL Drawing Code ---
-        % Set the clear color to a dark purple
+        # --- Our OpenGL Drawing Code ---
+        # Set the clear color to a dark purple
         glClearColor(0.2 0.1 0.3 1.0)
-        % Clear the color buffer
+        # Clear the color buffer
         glClear(GL_COLOR_BUFFER_BIT)
 
-        % --- Present the new frame ---
-        % SDL handles the double-buffering logic.
+        # --- Present the new frame ---
+        # SDL handles the double-buffering logic.
         SDL_GL_SwapWindow(window)
     }
 
-    % 6. Cleanup
+    # 6. Cleanup
     printl"Exiting and cleaning up.\n"
     SDL_GL_DeleteContext(gl_context)
     SDL_DestroyWindow(window)
@@ -153,17 +153,17 @@ sdl_main = (argc: int, argv: ptr<ptr<char>>) :> int => {
 
 
 
-% --- FFI Declarations for the C Runtime Bootstrapping ---
+# --- FFI Declarations for the C Runtime Bootstrapping ---
 
-% We need to tell Dewy about the C startup/teardown functions.
-% We treat them as external function pointers provided by the linker from crti.o/crtn.o
+# We need to tell Dewy about the C startup/teardown functions.
+# We treat them as external function pointers provided by the linker from crti.o/crtn.o
 _init = () :> void => extern
 _fini = () :> void => extern
 MainFn:type = (argc:int argv:ptr<ptr<char>>) :> int
 
 
-% The full, correct FFI declaration for __libc_start_main.
-% It takes many arguments and does not return.
+# The full, correct FFI declaration for __libc_start_main.
+# It takes many arguments and does not return.
 __libc_start_main = (
     main: MainFn
     argc: int
@@ -175,23 +175,23 @@ __libc_start_main = (
 ) :> noreturn => extern
 
 
-%% Call the cstdlib startup and pass in our main method
-% 1. Get the arguments passed from the shim.
-let argc = ... % get argc from wherever the shim places it (e.g., a register)
-let argv = ... % get argv
-let envp = ... % get envp
+## Call the cstdlib startup and pass in our main method
+# 1. Get the arguments passed from the shim.
+let argc = ... # get argc from wherever the shim places it (e.g., a register)
+let argv = ... # get argv
+let envp = ... # get envp
 
-% 2. The Final Step: Hand control over to the C library initializer.
-%    This is the last expression in the script. __libc_start_main will take over
-%    and eventually call our `sdl_main` function. It will never return.
+# 2. The Final Step: Hand control over to the C library initializer.
+#    This is the last expression in the script. __libc_start_main will take over
+#    and eventually call our `sdl_main` function. It will never return.
 __libc_start_main(
-    @sdl_main,      % 1. Pointer to our application logic
-    argc,           % 2. The original argument count
-    argv,           % 3. The original argument vector
-    @_init,         % 4. Pointer to the .init function
-    @_fini,         % 5. Pointer to the .fini function
-    null,           % 6. rtld_fini (for dynamic linker)
-    null            % 7. stack_end (can often be null, was originally &argv[argc+1])
+    @sdl_main,      # 1. Pointer to our application logic
+    argc,           # 2. The original argument count
+    argv,           # 3. The original argument vector
+    @_init,         # 4. Pointer to the .init function
+    @_fini,         # 5. Pointer to the .fini function
+    null,           # 6. rtld_fini (for dynamic linker)
+    null            # 7. stack_end (can often be null, was originally &argv[argc+1])
 )
 
-% nothing can happen below this point since __libc_start_main is noreturn
+# nothing can happen below this point since __libc_start_main is noreturn

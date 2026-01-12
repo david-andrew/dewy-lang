@@ -1,4 +1,4 @@
-% attempt to print out all the unicode characters
+# attempt to print out all the unicode characters
 const SYSCALL_WRITE = 1
 const STDOUT = 1
 
@@ -9,8 +9,8 @@ put_unicode = u:uint32 => {
     b2_offset = 16
     b3_offset = 24
 
-    % makes a 64-bit buffer, we will treat as 8 bytes
-    addr = #alloc8(8)
+    # makes a 64-bit buffer, we will treat as 8 bytes
+    addr = $alloc8(8)
     let buf
 
     if u <=? 0x7F (
@@ -36,136 +36,136 @@ put_unicode = u:uint32 => {
               ((0x80 | (u & 0x3F))         << b3_offset)
     )
 
-    #storel(buf addr)
+    $storel(buf addr)
     __syscall3__(SYSCALL_WRITE STDOUT addr size)
 }
 
 
-loop u in 0x0020..0x007E put_unicode(u)  % Basic Latin
-loop u in 0x00A0..0x00FF put_unicode(u)  % Latin-1 Supplement
-loop u in 0x0100..0x017F put_unicode(u)  % Latin Extended-A
-loop u in 0x0180..0x024F put_unicode(u)  % Latin Extended-B
-loop u in 0x0250..0x02AF put_unicode(u)  % IPA Extensions
-loop u in 0x02B0..0x02FF put_unicode(u)  % Spacing Modifier Letters
-loop u in 0x0300..0x036F put_unicode(u)  % Combining Diacritical Marks
-loop u in 0x0370..0x03FF put_unicode(u)  % Greek and Coptic
-loop u in 0x0400..0x04FF put_unicode(u)  % Cyrillic
-loop u in 0x0500..0x052F put_unicode(u)  % Cyrillic Supplement
-loop u in 0x0530..0x058F put_unicode(u)  % Armenian
-loop u in 0x0590..0x05FF put_unicode(u)  % Hebrew
-loop u in 0x0600..0x06FF put_unicode(u)  % Arabic
-loop u in 0x0700..0x074F put_unicode(u)  % Syriac
-loop u in 0x0750..0x077F put_unicode(u)  % Arabic Supplement
-loop u in 0x0780..0x07BF put_unicode(u)  % Thaana
-loop u in 0x07C0..0x07FF put_unicode(u)  % N'Ko
-loop u in 0x0800..0x083F put_unicode(u)  % Samaritan
-loop u in 0x0840..0x085F put_unicode(u)  % Mandaic
-loop u in 0x0860..0x086F put_unicode(u)  % Syriac Supplement
-loop u in 0x08A0..0x08FF put_unicode(u)  % Arabic Extended-A
-loop u in 0x0900..0x097F put_unicode(u)  % Devanagari
-loop u in 0x0980..0x09FF put_unicode(u)  % Bengali
-loop u in 0x0A00..0x0A7F put_unicode(u)  % Gurmukhi
-loop u in 0x0A80..0x0AFF put_unicode(u)  % Gujarati
-loop u in 0x0B00..0x0B7F put_unicode(u)  % Oriya
-loop u in 0x0B80..0x0BFF put_unicode(u)  % Tamil
-loop u in 0x0C00..0x0C7F put_unicode(u)  % Telugu
-loop u in 0x0C80..0x0CFF put_unicode(u)  % Kannada
-loop u in 0x0D00..0x0D7F put_unicode(u)  % Malayalam
-loop u in 0x0D80..0x0DFF put_unicode(u)  % Sinhala
-loop u in 0x0E00..0x0E7F put_unicode(u)  % Thai
-loop u in 0x0E80..0x0EFF put_unicode(u)  % Lao
-loop u in 0x0F00..0x0FFF put_unicode(u)  % Tibetan
-loop u in 0x1000..0x109F put_unicode(u)  % Myanmar
-loop u in 0x10A0..0x10FF put_unicode(u)  % Georgian
-loop u in 0x1100..0x11FF put_unicode(u)  % Hangul Jamo
-loop u in 0x1200..0x137F put_unicode(u)  % Ethiopic
-loop u in 0x13A0..0x13FF put_unicode(u)  % Cherokee
-loop u in 0x1400..0x167F put_unicode(u)  % Unified Canadian Aboriginal Syllabics
-loop u in 0x1680..0x169F put_unicode(u)  % Ogham
-loop u in 0x16A0..0x16FF put_unicode(u)  % Runic
-loop u in 0x1700..0x171F put_unicode(u)  % Tagalog
-loop u in 0x1720..0x173F put_unicode(u)  % Hanunoo
-loop u in 0x1740..0x175F put_unicode(u)  % Buhid
-loop u in 0x1760..0x177F put_unicode(u)  % Tagbanwa
-loop u in 0x1780..0x17FF put_unicode(u)  % Khmer
-loop u in 0x1800..0x18AF put_unicode(u)  % Mongolian
-loop u in 0x1900..0x194F put_unicode(u)  % Limbu
-loop u in 0x1950..0x197F put_unicode(u)  % Tai Le
-loop u in 0x1980..0x19DF put_unicode(u)  % New Tai Lue
-loop u in 0x19E0..0x19FF put_unicode(u)  % Khmer Symbols
-loop u in 0x1A00..0x1A1F put_unicode(u)  % Buginese
-loop u in 0x1A20..0x1AAF put_unicode(u)  % Tai Tham
-loop u in 0x1B00..0x1B7F put_unicode(u)  % Balinese
-loop u in 0x1B80..0x1BBF put_unicode(u)  % Sundanese
-loop u in 0x1BC0..0x1BFF put_unicode(u)  % Batak
-loop u in 0x1C00..0x1C4F put_unicode(u)  % Lepcha
-loop u in 0x1C50..0x1C7F put_unicode(u)  % Ol Chiki
-loop u in 0x1CD0..0x1CFF put_unicode(u)  % Vedic Extensions
-loop u in 0x1D00..0x1D7F put_unicode(u)  % Phonetic Extensions
-loop u in 0x1D80..0x1DBF put_unicode(u)  % Phonetic Extensions Supplement
-loop u in 0x1DC0..0x1DFF put_unicode(u)  % Combining Diacritical Marks Supplement
-loop u in 0x1E00..0x1EFF put_unicode(u)  % Latin Extended Additional
-loop u in 0x1F00..0x1FFF put_unicode(u)  % Greek Extended
-loop u in 0x2000..0x206F put_unicode(u)  % General Punctuation
-loop u in 0x2070..0x209F put_unicode(u)  % Superscripts and Subscripts
-loop u in 0x20A0..0x20CF put_unicode(u)  % Currency Symbols
-loop u in 0x20D0..0x20FF put_unicode(u)  % Combining Diacritical Marks for Symbols
-loop u in 0x2100..0x214F put_unicode(u)  % Letterlike Symbols
-loop u in 0x2150..0x218F put_unicode(u)  % Number Forms
-loop u in 0x2190..0x21FF put_unicode(u)  % Arrows
-loop u in 0x2200..0x22FF put_unicode(u)  % Mathematical Operators
-loop u in 0x2300..0x23FF put_unicode(u)  % Miscellaneous Technical
-loop u in 0x2400..0x243F put_unicode(u)  % Control Pictures
-loop u in 0x2440..0x245F put_unicode(u)  % Optical Character Recognition
-loop u in 0x2460..0x24FF put_unicode(u)  % Enclosed Alphanumerics
-loop u in 0x2500..0x257F put_unicode(u)  % Box Drawing
-loop u in 0x2580..0x259F put_unicode(u)  % Block Elements
-loop u in 0x25A0..0x25FF put_unicode(u)  % Geometric Shapes
-loop u in 0x2600..0x26FF put_unicode(u)  % Miscellaneous Symbols
-loop u in 0x2700..0x27BF put_unicode(u)  % Dingbats
-loop u in 0x2800..0x28FF put_unicode(u)  % Braille Patterns
-loop u in 0x2E80..0x2EFF put_unicode(u)  % CJK Radicals Supplement
-loop u in 0x2F00..0x2FDF put_unicode(u)  % Kangxi Radicals
-loop u in 0x2FF0..0x2FFF put_unicode(u)  % Ideographic Description Characters
-loop u in 0x3000..0x303F put_unicode(u)  % CJK Symbols and Punctuation
-loop u in 0x3040..0x309F put_unicode(u)  % Hiragana
-loop u in 0x30A0..0x30FF put_unicode(u)  % Katakana
-loop u in 0x3100..0x312F put_unicode(u)  % Bopomofo
-loop u in 0x3130..0x318F put_unicode(u)  % Hangul Compatibility Jamo
-loop u in 0x3190..0x319F put_unicode(u)  % Kanbun
-loop u in 0x31A0..0x31BF put_unicode(u)  % Bopomofo Extended
-loop u in 0x31F0..0x31FF put_unicode(u)  % Katakana Phonetic Extensions
-loop u in 0x3200..0x32FF put_unicode(u)  % Enclosed CJK Letters and Months
-loop u in 0x3300..0x33FF put_unicode(u)  % CJK Compatibility
-loop u in 0x3400..0x4DBF put_unicode(u)  % CJK Unified Ideographs Extension A
-loop u in 0x4DC0..0x4DFF put_unicode(u)  % Yijing Hexagram Symbols
-loop u in 0x4E00..0x9FFF put_unicode(u)  % CJK Unified Ideographs
-loop u in 0xA000..0xA48F put_unicode(u)  % Yi Syllables
-loop u in 0xA490..0xA4CF put_unicode(u)  % Yi Radicals
-loop u in 0xAC00..0xD7AF put_unicode(u)  % Hangul Syllables
-loop u in 0xF900..0xFAFF put_unicode(u)  % CJK Compatibility Ideographs
-loop u in 0xFB00..0xFB4F put_unicode(u)  % Alphabetic Presentation Forms
-loop u in 0xFE00..0xFE0F put_unicode(u)  % Variation Selectors
-loop u in 0xFE10..0xFE1F put_unicode(u)  % Vertical Forms
-loop u in 0xFE20..0xFE2F put_unicode(u)  % Combining Half Marks
-loop u in 0xFE30..0xFE4F put_unicode(u)  % CJK Compatibility Forms
-loop u in 0xFE50..0xFE6F put_unicode(u)  % Small Form Variants
-loop u in 0xFF00..0xFFEF put_unicode(u)  % Halfwidth and Fullwidth Forms
-loop u in 0x1F000..0x1F02F put_unicode(u)  % Mahjong, Domino Tiles
-loop u in 0x1F100..0x1F1FF put_unicode(u)  % Enclosed Alphanumeric Supplement
-loop u in 0x1F300..0x1F5FF put_unicode(u)  % Misc Symbols & Pictographs
-loop u in 0x1F600..0x1F64F put_unicode(u)  % Emoticons
-loop u in 0x1F680..0x1F6FF put_unicode(u)  % Transport and Map Symbols
-loop u in 0x1F700..0x1F77F put_unicode(u)  % Alchemical Symbols
-loop u in 0x1F780..0x1F7FF put_unicode(u)  % Geometric Symbols Extended
-loop u in 0x1F800..0x1F8FF put_unicode(u)  % Supplemental Arrows-C
-loop u in 0x1F900..0x1F9FF put_unicode(u)  % Supplemental Symbols and Pictographs
-loop u in 0x1FA00..0x1FA6F put_unicode(u)  % Chess Symbols and more
-loop u in 0x1FA70..0x1FAFF put_unicode(u)  % Symbols and Pictographs Extended-A
-loop u in 0x20000..0x2A6DF put_unicode(u)  % CJK Unified Ideographs Extension B
-loop u in 0x2A700..0x2B73F put_unicode(u)  % Extension C
-loop u in 0x2B740..0x2B81F put_unicode(u)  % Extension D
-loop u in 0x2B820..0x2CEAF put_unicode(u)  % Extension E
-loop u in 0x2CEB0..0x2EBEF put_unicode(u)  % Extension F
-loop u in 0x30000..0x3134F put_unicode(u)  % Extension G
-loop u in 0x31350..0x323AF put_unicode(u)  % Extension H
+loop u in 0x0020..0x007E put_unicode(u)  # Basic Latin
+loop u in 0x00A0..0x00FF put_unicode(u)  # Latin-1 Supplement
+loop u in 0x0100..0x017F put_unicode(u)  # Latin Extended-A
+loop u in 0x0180..0x024F put_unicode(u)  # Latin Extended-B
+loop u in 0x0250..0x02AF put_unicode(u)  # IPA Extensions
+loop u in 0x02B0..0x02FF put_unicode(u)  # Spacing Modifier Letters
+loop u in 0x0300..0x036F put_unicode(u)  # Combining Diacritical Marks
+loop u in 0x0370..0x03FF put_unicode(u)  # Greek and Coptic
+loop u in 0x0400..0x04FF put_unicode(u)  # Cyrillic
+loop u in 0x0500..0x052F put_unicode(u)  # Cyrillic Supplement
+loop u in 0x0530..0x058F put_unicode(u)  # Armenian
+loop u in 0x0590..0x05FF put_unicode(u)  # Hebrew
+loop u in 0x0600..0x06FF put_unicode(u)  # Arabic
+loop u in 0x0700..0x074F put_unicode(u)  # Syriac
+loop u in 0x0750..0x077F put_unicode(u)  # Arabic Supplement
+loop u in 0x0780..0x07BF put_unicode(u)  # Thaana
+loop u in 0x07C0..0x07FF put_unicode(u)  # N'Ko
+loop u in 0x0800..0x083F put_unicode(u)  # Samaritan
+loop u in 0x0840..0x085F put_unicode(u)  # Mandaic
+loop u in 0x0860..0x086F put_unicode(u)  # Syriac Supplement
+loop u in 0x08A0..0x08FF put_unicode(u)  # Arabic Extended-A
+loop u in 0x0900..0x097F put_unicode(u)  # Devanagari
+loop u in 0x0980..0x09FF put_unicode(u)  # Bengali
+loop u in 0x0A00..0x0A7F put_unicode(u)  # Gurmukhi
+loop u in 0x0A80..0x0AFF put_unicode(u)  # Gujarati
+loop u in 0x0B00..0x0B7F put_unicode(u)  # Oriya
+loop u in 0x0B80..0x0BFF put_unicode(u)  # Tamil
+loop u in 0x0C00..0x0C7F put_unicode(u)  # Telugu
+loop u in 0x0C80..0x0CFF put_unicode(u)  # Kannada
+loop u in 0x0D00..0x0D7F put_unicode(u)  # Malayalam
+loop u in 0x0D80..0x0DFF put_unicode(u)  # Sinhala
+loop u in 0x0E00..0x0E7F put_unicode(u)  # Thai
+loop u in 0x0E80..0x0EFF put_unicode(u)  # Lao
+loop u in 0x0F00..0x0FFF put_unicode(u)  # Tibetan
+loop u in 0x1000..0x109F put_unicode(u)  # Myanmar
+loop u in 0x10A0..0x10FF put_unicode(u)  # Georgian
+loop u in 0x1100..0x11FF put_unicode(u)  # Hangul Jamo
+loop u in 0x1200..0x137F put_unicode(u)  # Ethiopic
+loop u in 0x13A0..0x13FF put_unicode(u)  # Cherokee
+loop u in 0x1400..0x167F put_unicode(u)  # Unified Canadian Aboriginal Syllabics
+loop u in 0x1680..0x169F put_unicode(u)  # Ogham
+loop u in 0x16A0..0x16FF put_unicode(u)  # Runic
+loop u in 0x1700..0x171F put_unicode(u)  # Tagalog
+loop u in 0x1720..0x173F put_unicode(u)  # Hanunoo
+loop u in 0x1740..0x175F put_unicode(u)  # Buhid
+loop u in 0x1760..0x177F put_unicode(u)  # Tagbanwa
+loop u in 0x1780..0x17FF put_unicode(u)  # Khmer
+loop u in 0x1800..0x18AF put_unicode(u)  # Mongolian
+loop u in 0x1900..0x194F put_unicode(u)  # Limbu
+loop u in 0x1950..0x197F put_unicode(u)  # Tai Le
+loop u in 0x1980..0x19DF put_unicode(u)  # New Tai Lue
+loop u in 0x19E0..0x19FF put_unicode(u)  # Khmer Symbols
+loop u in 0x1A00..0x1A1F put_unicode(u)  # Buginese
+loop u in 0x1A20..0x1AAF put_unicode(u)  # Tai Tham
+loop u in 0x1B00..0x1B7F put_unicode(u)  # Balinese
+loop u in 0x1B80..0x1BBF put_unicode(u)  # Sundanese
+loop u in 0x1BC0..0x1BFF put_unicode(u)  # Batak
+loop u in 0x1C00..0x1C4F put_unicode(u)  # Lepcha
+loop u in 0x1C50..0x1C7F put_unicode(u)  # Ol Chiki
+loop u in 0x1CD0..0x1CFF put_unicode(u)  # Vedic Extensions
+loop u in 0x1D00..0x1D7F put_unicode(u)  # Phonetic Extensions
+loop u in 0x1D80..0x1DBF put_unicode(u)  # Phonetic Extensions Supplement
+loop u in 0x1DC0..0x1DFF put_unicode(u)  # Combining Diacritical Marks Supplement
+loop u in 0x1E00..0x1EFF put_unicode(u)  # Latin Extended Additional
+loop u in 0x1F00..0x1FFF put_unicode(u)  # Greek Extended
+loop u in 0x2000..0x206F put_unicode(u)  # General Punctuation
+loop u in 0x2070..0x209F put_unicode(u)  # Superscripts and Subscripts
+loop u in 0x20A0..0x20CF put_unicode(u)  # Currency Symbols
+loop u in 0x20D0..0x20FF put_unicode(u)  # Combining Diacritical Marks for Symbols
+loop u in 0x2100..0x214F put_unicode(u)  # Letterlike Symbols
+loop u in 0x2150..0x218F put_unicode(u)  # Number Forms
+loop u in 0x2190..0x21FF put_unicode(u)  # Arrows
+loop u in 0x2200..0x22FF put_unicode(u)  # Mathematical Operators
+loop u in 0x2300..0x23FF put_unicode(u)  # Miscellaneous Technical
+loop u in 0x2400..0x243F put_unicode(u)  # Control Pictures
+loop u in 0x2440..0x245F put_unicode(u)  # Optical Character Recognition
+loop u in 0x2460..0x24FF put_unicode(u)  # Enclosed Alphanumerics
+loop u in 0x2500..0x257F put_unicode(u)  # Box Drawing
+loop u in 0x2580..0x259F put_unicode(u)  # Block Elements
+loop u in 0x25A0..0x25FF put_unicode(u)  # Geometric Shapes
+loop u in 0x2600..0x26FF put_unicode(u)  # Miscellaneous Symbols
+loop u in 0x2700..0x27BF put_unicode(u)  # Dingbats
+loop u in 0x2800..0x28FF put_unicode(u)  # Braille Patterns
+loop u in 0x2E80..0x2EFF put_unicode(u)  # CJK Radicals Supplement
+loop u in 0x2F00..0x2FDF put_unicode(u)  # Kangxi Radicals
+loop u in 0x2FF0..0x2FFF put_unicode(u)  # Ideographic Description Characters
+loop u in 0x3000..0x303F put_unicode(u)  # CJK Symbols and Punctuation
+loop u in 0x3040..0x309F put_unicode(u)  # Hiragana
+loop u in 0x30A0..0x30FF put_unicode(u)  # Katakana
+loop u in 0x3100..0x312F put_unicode(u)  # Bopomofo
+loop u in 0x3130..0x318F put_unicode(u)  # Hangul Compatibility Jamo
+loop u in 0x3190..0x319F put_unicode(u)  # Kanbun
+loop u in 0x31A0..0x31BF put_unicode(u)  # Bopomofo Extended
+loop u in 0x31F0..0x31FF put_unicode(u)  # Katakana Phonetic Extensions
+loop u in 0x3200..0x32FF put_unicode(u)  # Enclosed CJK Letters and Months
+loop u in 0x3300..0x33FF put_unicode(u)  # CJK Compatibility
+loop u in 0x3400..0x4DBF put_unicode(u)  # CJK Unified Ideographs Extension A
+loop u in 0x4DC0..0x4DFF put_unicode(u)  # Yijing Hexagram Symbols
+loop u in 0x4E00..0x9FFF put_unicode(u)  # CJK Unified Ideographs
+loop u in 0xA000..0xA48F put_unicode(u)  # Yi Syllables
+loop u in 0xA490..0xA4CF put_unicode(u)  # Yi Radicals
+loop u in 0xAC00..0xD7AF put_unicode(u)  # Hangul Syllables
+loop u in 0xF900..0xFAFF put_unicode(u)  # CJK Compatibility Ideographs
+loop u in 0xFB00..0xFB4F put_unicode(u)  # Alphabetic Presentation Forms
+loop u in 0xFE00..0xFE0F put_unicode(u)  # Variation Selectors
+loop u in 0xFE10..0xFE1F put_unicode(u)  # Vertical Forms
+loop u in 0xFE20..0xFE2F put_unicode(u)  # Combining Half Marks
+loop u in 0xFE30..0xFE4F put_unicode(u)  # CJK Compatibility Forms
+loop u in 0xFE50..0xFE6F put_unicode(u)  # Small Form Variants
+loop u in 0xFF00..0xFFEF put_unicode(u)  # Halfwidth and Fullwidth Forms
+loop u in 0x1F000..0x1F02F put_unicode(u)  # Mahjong, Domino Tiles
+loop u in 0x1F100..0x1F1FF put_unicode(u)  # Enclosed Alphanumeric Supplement
+loop u in 0x1F300..0x1F5FF put_unicode(u)  # Misc Symbols & Pictographs
+loop u in 0x1F600..0x1F64F put_unicode(u)  # Emoticons
+loop u in 0x1F680..0x1F6FF put_unicode(u)  # Transport and Map Symbols
+loop u in 0x1F700..0x1F77F put_unicode(u)  # Alchemical Symbols
+loop u in 0x1F780..0x1F7FF put_unicode(u)  # Geometric Symbols Extended
+loop u in 0x1F800..0x1F8FF put_unicode(u)  # Supplemental Arrows-C
+loop u in 0x1F900..0x1F9FF put_unicode(u)  # Supplemental Symbols and Pictographs
+loop u in 0x1FA00..0x1FA6F put_unicode(u)  # Chess Symbols and more
+loop u in 0x1FA70..0x1FAFF put_unicode(u)  # Symbols and Pictographs Extended-A
+loop u in 0x20000..0x2A6DF put_unicode(u)  # CJK Unified Ideographs Extension B
+loop u in 0x2A700..0x2B73F put_unicode(u)  # Extension C
+loop u in 0x2B740..0x2B81F put_unicode(u)  # Extension D
+loop u in 0x2B820..0x2CEAF put_unicode(u)  # Extension E
+loop u in 0x2CEB0..0x2EBEF put_unicode(u)  # Extension F
+loop u in 0x30000..0x3134F put_unicode(u)  # Extension G
+loop u in 0x31350..0x323AF put_unicode(u)  # Extension H

@@ -1,4 +1,4 @@
-% Some examples of Real literals
+# Some examples of Real literals
 1.23E+4
 
 3.14
@@ -6,12 +6,12 @@
 1.23e4
 1.23E+4
 1.23e-4
-0x1.8p10    % note `p` instead of `e` for exponent. 0x1.8p10 = 1.5 × 2¹⁰
-% 0x1.fp-2  % not a real: if number after dot is different base, tokenizer doesn't recognize it without a prefix. tokenizes as <identifier fp><op -><number 2>
+0x1.8p10    # note `p` instead of `e` for exponent. 0x1.8p10 = 1.5 × 2¹⁰
+# 0x1.fp-2  # not a real: if number after dot is different base, tokenizer doesn't recognize it without a prefix. tokenizes as <identifier fp><op -><number 2>
 1e10
 2E-23
 
-10.25p3  % all base 10. suggested to either warn or error (leaning warn b/c simpler to parse, just look for src[i] in 'eEpP')
+10.25p3  # all base 10. suggested to either warn or error (leaning warn b/c simpler to parse, just look for src[i] in 'eEpP')
 
 0x1.0x8p10   % special case <hex>.<hex>p<dec> gets no warning, even though base mismatch
 0x1.0x8p0xA  % no warning, though programmer being extra explicit
@@ -20,6 +20,6 @@
 
 
 
-% also want to have standard library IEEE-754 conversion
-ieee754<float32>'0x1.921fb6p+1'         % pi
-ieee754<float64>'0x1.921fb54442d18p+1'  % pi
+# also want to have standard library IEEE-754 conversion
+ieee754<float32>'0x1.921fb6p+1'         # pi
+ieee754<float64>'0x1.921fb54442d18p+1'  # pi

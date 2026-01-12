@@ -1,31 +1,31 @@
-% simplest case
+# simplest case
 x = 10
 plus_5 = () => x + 5
 printl(plus_5())
 
-% taking in args
+# taking in args
 x = 12
 my_closure = y => x + y
 printl(my_closure(-5))
 
 
-% returning a closure from a child scope
+# returning a closure from a child scope
 a = 13
 my_closure = {
     b = 10
-    fn = c => a + b + c % uses `b` from this scope and `a` from parent scope
+    fn = c => a + b + c # uses `b` from this scope and `a` from parent scope
     @fn
 }
 printl(my_closure(5))
 
 
 
-% print the handle to the closure itself
+# print the handle to the closure itself
 printl(@my_closure)
 printl(@printl)
 
 
-% some pathological cases
+# some pathological cases
 my_print = {
     x = 5
     s = 'string with internal reference to x={x}'
@@ -47,7 +47,7 @@ my_print
 
 
 
-% Very deeply nested closures combined with partial evaluation
+# Very deeply nested closures combined with partial evaluation
 X = 'xpple'
 Y = 'yanana'
 fn = {
@@ -63,10 +63,10 @@ fn = {
                 @fn
             }
             printl'fn={@fn}'
-            @fn(b=B) % note just B should evaluate the string on calling fn
+            @fn(b=B) # note just B should evaluate the string on calling fn
         }
         printl'fn={@fn}'
-        @fn(a=@A)  % note that @A should evaluate the string inside of the IString
+        @fn(a=@A)  # note that @A should evaluate the string inside of the IString
     }
     printl'fn={@fn}'
     @fn(z=Z d='manually assigning D' c='unused C')

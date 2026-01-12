@@ -1,35 +1,35 @@
 array_test = 0x[ 
     dead
-    (beef)   % you can force interpreting the number as an identifier by wrapping in parens 
+    (beef)   # you can force interpreting the number as an identifier by wrapping in parens 
     00 
     12_34 
 ]
 
 string_test = 0x"""
-    de_ad_be_ef   % Spaces and underscores
-    00112233      % Tight packing
-    aa            % Newlines handled?
+    de_ad_be_ef   # Spaces and underscores
+    00112233      # Tight packing
+    aa            # Newlines handled?
     bb            
 """
 
 binary_test = 0b"
-    1111_0000     % 0xF0
-    0000_1111     % 0x0F
+    1111_0000     # 0xF0
+    0000_1111     # 0x0F
 "
 
 
-% 1. Inline comments
-a = 0x" FF %{ This is the value 255 }% "
+# 1. Inline comments
+a = 0x" FF #{ This is the value 255 }# "
 
-% 2. Interleaved comments (The "Protocol" style)
+# 2. Interleaved comments (The "Protocol" style)
 b = 0x"
-    AA BB   % Header
-    CC      % Payload
-    00      % Null Terminator
+    AA BB   # Header
+    CC      # Payload
+    00      # Null Terminator
 "
 
-% 3. Comments with 'strange' characters
+# 3. Comments with 'strange' characters
 c = 0x"
-    11 % comments can have "quotes" inside them
-    22 % and hex digits like FFFF
+    11 # comments can have "quotes" inside them
+    22 # and hex digits like FFFF
 "

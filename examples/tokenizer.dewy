@@ -1,6 +1,6 @@
-%demo of manual dewy tokenizer written in dewy
+#demo of manual dewy tokenizer written in dewy
 
-% (template) instance of the token class
+# (template) instance of the token class
 TokenBase = [
     name = 'Token'
     __repr__ = () => '<{name}>'
@@ -8,7 +8,7 @@ TokenBase = [
 Token = type(TokenBase)
 
 
-% class constructor for Keyword token type
+# class constructor for Keyword token type
 Keyword = src:string => [
     ...TokenBase
     name = 'Keyword'
@@ -19,13 +19,13 @@ Keyword = src:string => [
 eat_fn_type = src:string :> int|void
 
 
-%{
+#{
     Eat a reserved keyword, return the number of characters eaten
 
-    #keyword = {in} | {as} | {loop} | {lazy} | {if} | {and} | {or} | {xor} | {nand} | {nor} | {xnor} | {not}; 
+    $keyword = {in} | {as} | {loop} | {lazy} | {if} | {and} | {or} | {xor} | {nand} | {nor} | {xnor} | {not}; 
 
     noting that keywords are case insensitive
-}%
+}#
 eat_keyword = src:string :> int|void => {
     keywords = ['in' 'as' 'loop' 'lazy' 'if' 'and' 'or' 'xor' 'nand' 'nor' 'xnor' 'not']
     max_len = [loop k in keywords k.length].max

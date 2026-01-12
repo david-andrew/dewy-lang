@@ -1,23 +1,23 @@
-% multiple layer break
-loop (#i i in 0..)
-    loop (#j j in 0..)
-        loop (#k k in 0..) {
-            if i =? 0 continue #i
-            if j mod 2 =? 0 continue #j
-            if i + j + k =? 42 break #i
+# multiple layer break
+loop ($i i in 0..)
+    loop ($j j in 0..)
+        loop ($k k in 0..) {
+            if i =? 0 continue $i
+            if j % 2 =? 0 continue $j
+            if i + j + k =? 42 break $i
         }
 
 
-% multiple layer break
+# multiple layer break
 loop i in 0.. {
-    #i
+    $i
     loop j in 0.. {
-        #j
+        $j
         loop k in 0..20 {
-            #k
-            if i =? 0 continue(#i)
-            if j % 2 =? 0 continue(#j)
-            if i + j + k =? 42 break(#i)
+            $k
+            if i =? 0 continue($i)
+            if j % 2 =? 0 continue($j)
+            if i + j + k =? 42 break($i)
         }
     }
 }

@@ -16,8 +16,8 @@ Dewy is a 100% expression-based language, meaning everything is formed from smal
 - `-` minus
 - `*` multiply
 - `/` divide
-- `//` truncated divide
-- `mod` modulus
+- `//` floor divide
+- `%` modulus
 - `^` exponent
 
 **logical and bitwise operations**
@@ -111,18 +111,18 @@ the elementwise operator `.` can be prepended to most binary operators to make i
 e.g.
 
 ```dewy
-%find the prime factors of 20
-a = [2 3 5 7 11 13 17 19]  %primes up to 20
-mods = 20 .mod a  %returns [0 2 0 6 9 7 3 1]
-is_factor = mods .=? 0 %returns [true false true false false false false]
-p_factors = a[is_factor] %returns [2 5]
+#find the prime factors of 20
+a = [2 3 5 7 11 13 17 19]  #primes up to 20
+mods = 20 .% a  #returns [0 2 0 6 9 7 3 1]
+is_factor = mods .=? 0 #returns [true false true false false false false]
+p_factors = a[is_factor] #returns [2 5]
 
-%above in a single line
-p_factors = [2 3 5 7 11 13 17 19][20 .mod [2 3 5 7 11 13 17 19] .=? 0]
+#above in a single line
+p_factors = [2 3 5 7 11 13 17 19][20 .% [2 3 5 7 11 13 17 19] .=? 0]
 
-%though it's probably cleaner in 2 lines
+#though it's probably cleaner in 2 lines
 primes = [2 3 5 7 11 13 17 19]
-p_factors = primes[20 .mod primes .=? 0]
+p_factors = primes[20 .% primes .=? 0]
 ```
 
 This works if either the either first operand is a list, or the second is a list, or both are lists with the exact same shape

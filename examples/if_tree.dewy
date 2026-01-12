@@ -1,13 +1,13 @@
-%TODO: uncomment when types are supported
-%{
-% simple xorshift+ generator
+#TODO: uncomment when types are supported
+#{
+# simple xorshift+ generator
 state:uint64 = 123456789
 rand = ():uint64 => {
     state xor= state >> 21
     state xor= state << 35
     state xor= state >> 4
     
-    return state * 2_685821_657736_338717 %TODO: divide by uint64.MAX (18_446744_073709_551615)
+    return state * 2_685821_657736_338717 #TODO: divide by uint64.MAX (18_446744_073709_551615)
 }
 half = 9_223372_036854_775807
 a = rand <? half
@@ -36,9 +36,9 @@ w = rand <? half
 x = rand <? half
 y = rand <? half
 z = rand <? half
-}%
+}#
 
-%manually specify bools
+#manually specify bools
 a = false
 b = true
 c = true

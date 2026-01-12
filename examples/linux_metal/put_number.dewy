@@ -1,10 +1,10 @@
 const SYSCALL_WRITE = 1
 const STDOUT = 1
 
-% TODO: make this handle large numbers close to the max int64 value (e.g. because place will overflow)
-% also what if number is INT64_MIN? multiplying by -1 will overflow
-% INT64_MIN = -9_223_372_036_854_775_808
-% INT64_MAX = 9_223_372_036_854_775_807
+# TODO: make this handle large numbers close to the max int64 value (e.g. because place will overflow)
+# also what if number is INT64_MIN? multiplying by -1 will overflow
+# INT64_MIN = -9_223_372_036_854_775_808
+# INT64_MAX = 9_223_372_036_854_775_807
 put_int = x:int64 => {
     if x <? 0 {
         __syscall3__(SYSCALL_WRITE STDOUT '-' 1)
@@ -15,20 +15,20 @@ put_int = x:int64 => {
     loop place*10 <? x place*=10
     loop place >? 0 {
         let d = x // place
-        x mod= place
+        x %= place
         place //= 10
 
         zero = '0'
-        buf = #alloc8(1)
-        val = #loadub(zero)
-        val += d  % TODO: can't do `#loadub(zero) + d` yet because typeof isn't implemented on Builtin
-        #storeb(val buf)
+        buf = $alloc8(1)
+        val = $loadub(zero)
+        val += d  # TODO: can't do `$loadub(zero) + d` yet because typeof isn't implemented on Builtin
+        $storeb(val buf)
         __syscall3__(SYSCALL_WRITE STDOUT buf 1)
     }
 }
 putl = () => __syscall3__(SYSCALL_WRITE STDOUT '\n' 1)
 
-(-1234567890) |> put_int putl  % parenthesis is needed so the negative is interpreted as a prefix operator rather than a binary operator with the previous function body
+(-1234567890) |> put_int putl  # parenthesis is needed so the negative is interpreted as a prefix operator rather than a binary operator with the previous function body
 1456 |> put_int putl
 (-125690) |> put_int putl
 0q13232 |> put_int putl

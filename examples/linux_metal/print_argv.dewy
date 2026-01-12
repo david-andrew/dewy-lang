@@ -8,16 +8,16 @@ let argv: uint64 = extern
 
 strlen = s_ptr => {
     let i = s_ptr
-    loop #loadub(i) >? 0 i += 1
+    loop $loadub(i) >? 0 i += 1
     i - s_ptr
 }
 endl = () => __syscall3__(SYSCALL_WRITE STDOUT '\n' 1)
 
-%let ptr = 0 % just so the typing info propogates properly
+#let ptr = 0 # just so the typing info propogates properly
 ptr = argv
-loop i in [0..5)%argc)
+loop i in [0..argc)
 (
-    argptr = #loadl(ptr)
+    argptr = $loadl(ptr)
     arglen = strlen(argptr)
     __syscall3__(SYSCALL_WRITE STDOUT argptr arglen)
     endl

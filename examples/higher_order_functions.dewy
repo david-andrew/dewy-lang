@@ -1,17 +1,17 @@
-% Higher order functions
+# Higher order functions
 
-% currently there is a parser bug where these are ambiguous and require more general QAST support
+# currently there is a parser bug where these are ambiguous and require more general QAST support
 
 f = () => () => () => 42
 
-% what happens here? is the result `42` or `() => () => 42`? probably the latter
+# what happens here? is the result `42` or `() => () => 42`? probably the latter
 printl(f)   % () => () => 42
 printl(f()) % () => () => 42
 printl(f()()) % () => 42
 printl(f()()()) % 42
-% printl(f()()()()) % error
+# printl(f()()()()) # error
 
-% TBD if this would work
+# TBD if this would work
 printl((f))   % () => () => 42
 printl((f)()) % () => 42
 printl((f)()()) % 42

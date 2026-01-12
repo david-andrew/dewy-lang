@@ -1,13 +1,13 @@
 
-% attempt to print out all the unicode characters
+# attempt to print out all the unicode characters
 const SYSCALL_WRITE = 1
 const STDOUT = 1
 
 
-buf = 0 % makes a 64-bit buffer, we will treat as 8 bytes
-addr = #alloc8(8)
+buf = 0 # makes a 64-bit buffer, we will treat as 8 bytes
+addr = $alloc8(8)
 
-% amounts to shift to put the byte into our 64-bit buffer
+# amounts to shift to put the byte into our 64-bit buffer
 b0_offset = 0
 b1_offset = 8
 b2_offset = 16
@@ -38,6 +38,6 @@ loop i in 0x1F600..0x1F64F {
               ((0x80 | (i & 0x3F))         << b3_offset)
     )
 
-    #storel(buf addr)
+    $storel(buf addr)
     __syscall3__(SYSCALL_WRITE STDOUT addr size)
 }

@@ -1,18 +1,18 @@
-%{simple program for generating prime numbers}%
+#{simple program for generating prime numbers}#
 printl(2)
 primes = [2]
 loop candidate in 3,5..100 {
     no_factors = true
     loop p in primes and p*p <? candidate+1 {
-        if candidate mod p =? 0 {
+        if candidate % p =? 0 {
             no_factors = false
-            % break %not supported yet..
+            # break #not supported yet..
         }
     }
     if no_factors {
         printl(candidate)
-        primes = primes + [candidate]  %TODO: this behavior actually will probably be removed in favor of the below. add between arrays will be like vector addition
-        %primes = [primes... candidate]
-        %primes.push(i) % not supported yet.. ambiguous parse since jux has qint precedence, while . equals the higher precedence
+        primes = primes + [candidate]  #TODO: this behavior actually will probably be removed in favor of the below. add between arrays will be like vector addition
+        #primes = [primes... candidate]
+        #primes.push(i) # not supported yet.. ambiguous parse since jux has qint precedence, while . equals the higher precedence
     }
 }

@@ -2,46 +2,46 @@
 // https://www.w3.org/TR/xml/#sec-notation
 
 
-#eps = 'ϵ' | '\\e' | "''" | '""' | "{}";                    // ϵ, \e, '', "", or {} indicates empty element, i.e. nullable
-#wschar = [\n\x20];                                         // ascii whitespace characters (restrict to newlines and spaces).
-#line_comment = '/\/' '\n'~* / '\n'~;                       // single line comment
-#block_string = ξ* - ξ* '}/';                               // inside of a block comment. Cannot end with block comment delimiter
-#block_comment = '/\{' (#block_comment | #block_string)* '}/';       // block comment, with allowed nested block comments
-#ws = (#wschar | #line_comment | #block_comment)*;          // optional whitespace sequence
-#anyset = '\\' [uUxX] | [VUξ];                              // V, U, ξ, \U, \u, \X, or \x used to indicate any unicode character
-#hex = '\\' [uUxX] [0-9a-fA-F]+ / [0-9a-fA-F];              // hex number literal. Basically skipping the number part makes it #any
-#number = [0-9]+ / [0-9];                                   // decimal number literal. Used to indicate # of repetitions
-#charsetchar = ξ - [\-\[\]] - #wschar;                      // characters allowed in a set are any unicode excluding '-', '[', or ']', and whitespace
-#item = #charsetchar | #escape | #hex;                      // items that make up character sets, i.e. raw chars, escape chars, or hex chars
-#charset = '[' (#ws #item (#ws '-' #ws #item)? #ws)+ ']';   // set of chars specified literally. Whitespace is ignored, and must be escaped.
+$eps = 'ϵ' | '\\e' | "''" | '""' | "{}";                    // ϵ, \e, '', "", or {} indicates empty element, i.e. nullable
+$wschar = [\n\x20];                                         // ascii whitespace characters (restrict to newlines and spaces).
+$line_comment = '/\/' '\n'~* / '\n'~;                       // single line comment
+$block_string = ξ* - ξ* '}/';                               // inside of a block comment. Cannot end with block comment delimiter
+$block_comment = '/\{' ($block_comment | $block_string)* '}/';       // block comment, with allowed nested block comments
+$ws = ($wschar | $line_comment | $block_comment)*;          // optional whitespace sequence
+$anyset = '\\' [uUxX] | [VUξ];                              // V, U, ξ, \U, \u, \X, or \x used to indicate any unicode character
+$hex = '\\' [uUxX] [0-9a-fA-F]+ / [0-9a-fA-F];              // hex number literal. Basically skipping the number part makes it $any
+$number = [0-9]+ / [0-9];                                   // decimal number literal. Used to indicate $ of repetitions
+$charsetchar = ξ - [\-\[\]] - $wschar;                      // characters allowed in a set are any unicode excluding '-', '[', or ']', and whitespace
+$item = $charsetchar | $escape | $hex;                      // items that make up character sets, i.e. raw chars, escape chars, or hex chars
+$charset = '[' ($ws $item ($ws '-' $ws $item)? $ws)+ ']';   // set of chars specified literally. Whitespace is ignored, and must be escaped.
 
 //paired grouping operators
-#group = '(' #ws #expr #ws ')';                             // group together/force precedence
-#char = '"' (ξ - '"' | #escape | #hex) '"';                 // "" single character
-#char = "'" (ξ - "'" | #escape | #hex) "'";                 // '' single character
-#caseless_char = "{" (ξ - [{}] | #escape | #hex) "}";       // {} single character where case is ignored
-#string = '"' (ξ - '"' | #escape | #hex)2+ '"';             // "" string of 2+ characters
-#string = "'" (ξ - "'" | #escape | #hex)2+ "'";             // '' string of 2+ characters
-#caseless_string = "{" (ξ - [{}] | #escape | #hex)2+ "}";   // {} string of 2+ characters where case is ignored for each character
-#escape = '\\' ξ;                                           // an escape character. Recognized escaped characters are \n \r \t \v \b \f \a. 
+$group = '(' $ws $expr $ws ')';                             // group together/force precedence
+$char = '"' (ξ - '"' | $escape | $hex) '"';                 // "" single character
+$char = "'" (ξ - "'" | $escape | $hex) "'";                 // '' single character
+$caseless_char = "{" (ξ - [{}] | $escape | $hex) "}";       // {} single character where case is ignored
+$string = '"' (ξ - '"' | $escape | $hex)2+ '"';             // "" string of 2+ characters
+$string = "'" (ξ - "'" | $escape | $hex)2+ "'";             // '' string of 2+ characters
+$caseless_string = "{" (ξ - [{}] | $escape | $hex)2+ "}";   // {} string of 2+ characters where case is ignored for each character
+$escape = '\\' ξ;                                           // an escape character. Recognized escaped characters are \n \r \t \v \b \f \a. 
                                                             // all others just put the second character literally. Common literals include \\ \' \" \[ \] \-
 
 //post operators
-#capture = #expr #ws '.';                                   // group to capture
-#star = #expr #ws (#number)? #ws '*';                       // zero or (number or more)
-#plus = #expr #ws (#number)? #ws '+';                       // (number or one) or more 
-#option = #expr #ws '?';                                    // optional
-#count = #expr #ws #number;                                 // exactly number of
-#compliment = #set #ws '~';                                 // compliment of. equivalent to #any - #set
+$capture = $expr $ws '.';                                   // group to capture
+$star = $expr $ws ($number)? $ws '*';                       // zero or (number or more)
+$plus = $expr $ws ($number)? $ws '+';                       // (number or one) or more 
+$option = $expr $ws '?';                                    // optional
+$count = $expr $ws $number;                                 // exactly number of
+$compliment = $set $ws '~';                                 // compliment of. equivalent to $any - $set
 
 //implicit operators
-#cat = #expr (#ws #expr)+;                                  // concatenate left and right
+$cat = $expr ($ws $expr)+;                                  // concatenate left and right
 
 //binary expr operators
-#or = (#expr #ws '|' #ws #expr) - #union;                   // left or right expression
-#reject = (#expr #ws '-' #ws #expr) - #diff;                // reduce left expression only if it is not also the right expression
-#nofollow = #expr #ws '/' #ws #expr;                        // reduce left expression only if not followed by right expression
-#greaterthan = #expr #ws '>' #ws #expr;                     // left expression has higher precedence than right expression
+$or = ($expr $ws '|' $ws $expr) - $union;                   // left or right expression
+$reject = ($expr $ws '-' $ws $expr) - $diff;                // reduce left expression only if it is not also the right expression
+$nofollow = $expr $ws '/' $ws $expr;                        // reduce left expression only if not followed by right expression
+$greaterthan = $expr $ws '>' $ws $expr;                     // left expression has higher precedence than right expression
 
 // filters that may (but probably won't) be added
 //#and = (#expr #ws '&' #ws #expr) - #intersect;            // reduce if left and right expression match. (why is this ever useful?)
@@ -49,17 +49,17 @@
 //#lessthan = #expr #ws '<' #ws #expr;                      // left expression has lower precedence than right expression. (case fully covered by greater than '>' filter)
 
 //binary set operators
-#diff = #set #ws '-' #ws #set;                              // everything in left that is not in right
-#intersect = #set #ws '&' #ws #set;                         // intersect of left and right. TODO->consider if we should add this as parser filter, rather than just restrict to sets
-#union = #set #ws '|' #ws #set;                             // union of left and right
+$diff = $set $ws '-' $ws $set;                              // everything in left that is not in right
+$intersect = $set $ws '&' $ws $set;                         // intersect of left and right. TODO->consider if we should add this as parser filter, rather than just restrict to sets
+$union = $set $ws '|' $ws $set;                             // union of left and right
 
 //syntax constructs
-#set = #anyset | #char | #caseless_char | #hex | #charset | #compliment | #diff | #intersect | #union;
-#expr = #eps | #set | #group | #capture | #string | #caseless_string | #star | #plus | #option | #count | #cat | #or | #greaterthan | #lessthan | #reject | #nofollow | #hashtag;
-#hashtag = '#' [a-zA-Z] [a-zA-Z0-9_]* / [a-zA-Z0-9_];
-#rule = #hashtag #ws '=' #ws #expr #ws ';';
-#grammar = (#ws #rule)* #ws;
-#start = #grammar;
+$set = $anyset | $char | $caseless_char | $hex | $charset | $compliment | $diff | $intersect | $union;
+$expr = $eps | $set | $group | $capture | $string | $caseless_string | $star | $plus | $option | $count | $cat | $or | $greaterthan | $lessthan | $reject | $nofollow | $hashtag;
+$hashtag = '$' [a-zA-Z] [a-zA-Z0-9_]* / [a-zA-Z0-9_];
+$rule = $hashtag $ws '=' $ws $expr $ws ';';
+$grammar = ($ws $rule)* $ws;
+$start = $grammar;
 
 
 
@@ -77,7 +77,7 @@
     Also meaning that `A*` is represented as `A+ | ϵ`
     `rule = A+` `__A = __A A | ϵ`, `rule = __A A`?
 
-    all expressions that reduce to a #set are combined / treated as a single unicode character set
+    all expressions that reduce to a $set are combined / treated as a single unicode character set
 
     all whitespace in charsets must either be escaped or in hex form
 

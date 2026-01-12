@@ -1,71 +1,71 @@
-%%%%%%%%%%%%%%% STRING INTERPOLATION %%%%%%%%%%%%%%%
+############### STRING INTERPOLATION ###############
 
-%{Todo: probably break each section for different syntaxes into different files?}%
+#{Todo: probably break each section for different syntaxes into different files?}#
 
-%silly example with keyword vs identifier
+#silly example with keyword vs identifier
 loop i i
 
 r'this is a raw string \'  expr  'a separate string later'
 
-% simple blocks
+# simple blocks
 {   }
-( %{comment inside}% )
+( #{comment inside}# )
 { 2+2 }
 ( 2+2 )
 
 
-%string interpolation
+#string interpolation
 my_string = '2 + 2 = {2+2}'
 
-%complex interpolation
+#complex interpolation
 s = "first 10 primes are: {
     primes = [2]
     loop i in [3, 5..) and primes.length <? 10
-        if i .mod primes |> product not =? 0
+        if i .% primes |> product not =? 0
             primes.push(i)
     primes
 }"
 
 
-%alternative prime generator + getting first 10 primes
-#ctx
+#alternative prime generator + getting first 10 primes
+$ctx
 primes = [
     2
     lazy i in [3, 5..)
-        if i .mod #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
+        if i .% $ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
             i
 ][..10)
 
-%TBD if there is a parallel way to do this where the i .mod primes dispatches each operation, and fails immediately on any returning false
-#label
+#TBD if there is a parallel way to do this where the i .% primes dispatches each operation, and fails immediately on any returning false
+$label
 primes = [
     2
     lazy i in [3, 5..)
-        if not parallel_or(p => i mod p =? 0, #label.primes)
+        if not parallel_or(p => i % p =? 0, $label.primes)
             i
 ][..10)
-%parallel or is like goroutines with cancel once any is true...should have it be more flexible, e.g. able to use any of the boolean keywords that can short circuit
-%actually probably don't want to need to specify that it's parallel. Instead if there's an operation over a vector, it gets parallelized if possible.
+#parallel or is like goroutines with cancel once any is true...should have it be more flexible, e.g. able to use any of the boolean keywords that can short circuit
+#actually probably don't want to need to specify that it's parallel. Instead if there's an operation over a vector, it gets parallelized if possible.
 
-%nested interpolation
+#nested interpolation
 s2 = 'this is an outer string, and {'this is an interior string with "{my_string}" in it'}'
 
 
 
 
 
-const add = (a:int b:int): int => { %{return sum of a and b}% }
-let div = (a:real b:real): real? => { %{return a / b}% }
+const add = (a:int b:int): int => { #{return sum of a and b}# }
+let div = (a:real b:real): real? => { #{return a / b}# }
 
-% function type with named default argument
+# function type with named default argument
 my_func = (s:string kwarg:bool=false): void => {}
 
-%you probably can do the verbose version as well (probably useful for when you're just defining the interface without the implementation)
+#you probably can do the verbose version as well (probably useful for when you're just defining the interface without the implementation)
 my_func: (s:string kwarg:bool=false): void
 
 
 
-% example annotations for function types
+# example annotations for function types
 () => ()
 () => void
 () => bool
@@ -75,19 +75,19 @@ a: int => bool
 <T>(T T) => T
 <T>(a:T b:T) => T
 
-% object type
+# object type
 [a:int? b:string]
 
-%? (optional) is sugar for |void
+#? (optional) is sugar for |void
 [a:int|void b:string]
 
-% operators juxtaposed to identifiers
+# operators juxtaposed to identifiers
 aorb
 a or b
 a+b
 
 
-%based number literals
+#based number literals
 0b1010_0011_0101_0110_1001_1010_1100_1111
 0B0101_1111_1010_1110_0011_0101_1001_1100
 
@@ -112,7 +112,7 @@ a+b
 0x1234_5678_9abc_def0_1234_5678_9abc_def0
 0XFEDC_BA98_7654_3210_fedc_ba98_7654_3210
 
-% high bases are only available via byte-strings or based arrays
+# high bases are only available via byte-strings or based arrays
 0u'0123456789abcdefghijklmnopqrstuv0123456'
 0U'VUTSRQPONMLKJIHGFEDCBA9876543210vutsrq'
 
@@ -122,22 +122,22 @@ a+b
 0g'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/'
 0g'/+ZYXWVUTSRQPONMLKJIHGFEDCBA9876543210zyxwvutsrqponmlkjihgfedcba'
 
-%Units TODO
+#Units TODO
 
 
 
 
-[a b c] = [1 2 3]                                       %a=1, b=2, c=3
-[a [b c]] = [1 [2 3]]                                   %a=1, b=2, c=3
-[a [b c] d] = [1 [2 3] 4]                               %a=1, b=2, c=3, d=4
-[a ...b] = [1 2 3 4]                                    %a=1, b=[2 3 4]
-[a ...b c] = [1 2 3 4 5]                                %a=1, b=[2 3 4], c=5
-[a ...b [c [...d e f]]] = [1 2 3 4 [5 [6 7 8 9 10]]]    %a=1, b=[2 3 4], c=5, d=[6 7 8], e=9, f=10
+[a b c] = [1 2 3]                                       #a=1, b=2, c=3
+[a [b c]] = [1 [2 3]]                                   #a=1, b=2, c=3
+[a [b c] d] = [1 [2 3] 4]                               #a=1, b=2, c=3, d=4
+[a ...b] = [1 2 3 4]                                    #a=1, b=[2 3 4]
+[a ...b c] = [1 2 3 4 5]                                #a=1, b=[2 3 4], c=5
+[a ...b [c [...d e f]]] = [1 2 3 4 [5 [6 7 8 9 10]]]    #a=1, b=[2 3 4], c=5, d=[6 7 8], e=9, f=10
 
 
 
-% silly things that are technically valid
-x = loop i in [0..10] i %x=10
+# silly things that are technically valid
+x = loop i in [0..10] i #x=10
 
 y = [
     if something
@@ -162,10 +162,10 @@ apple|banana
 
 
 
-%%%%%%%%%%%%%%% String prefixes %%%%%%%%%%%%%%%
+############### String prefixes ###############
 p = s:string => [
-    %process s based on / and \ separators
-    %store result in this object
+    #process s based on / and \ separators
+    #store result in this object
     route:array<string> = ...
     filename:string? = ...
     extension:string? = ...
@@ -173,47 +173,47 @@ p = s:string => [
 
 p"this/is/a/file/path.ext"
 
-%other prefixes
-re"[^i*&2@]"                            % regex literal
-t'my_token'                             %token literal. probably my version of enums
-r'this is a raw string'                 %raw string. technically handled during tokenizing, there is no r function
-(dewy)r'''printl("Hello, World!")'''    %dewy source code literal. uses raw string so that we don't have to worry about {}.
+#other prefixes
+re"[^i*&2@]"                            # regex literal
+t'my_token'                             #token literal. probably my version of enums
+r'this is a raw string'                 #raw string. technically handled during tokenizing, there is no r function
+(dewy)r'''printl("Hello, World!")'''    #dewy source code literal. uses raw string so that we don't have to worry about {}.
 
-ipa"ɛt vɔkavit dɛus aɾidam tɛɾam kɔngɾɛgatsiɔnɛskwɛ akwaɾum apɛlavit maɾia ɛt vidit dɛus kwɔd ɛsɛt bɔnum" %international phonetic alphabet literal
-(apl)r"life ← {⊃1 ⍵ ∨.∧ 3 4 = +/ +⌿ ¯1 0 1 ∘.⊖ ¯1 0 1 ⌽¨ ⊂⍵}"  %apl expression literal
-apl<|r"life ← {⊃1 ⍵ ∨.∧ 3 4 = +/ +⌿ ¯1 0 1 ∘.⊖ ¯1 0 1 ⌽¨ ⊂⍵}"  %same as above
+ipa"ɛt vɔkavit dɛus aɾidam tɛɾam kɔngɾɛgatsiɔnɛskwɛ akwaɾum apɛlavit maɾia ɛt vidit dɛus kwɔd ɛsɛt bɔnum" #international phonetic alphabet literal
+(apl)r"life ← {⊃1 ⍵ ∨.∧ 3 4 = +/ +⌿ ¯1 0 1 ∘.⊖ ¯1 0 1 ⌽¨ ⊂⍵}"  #apl expression literal
+apl<|r"life ← {⊃1 ⍵ ∨.∧ 3 4 = +/ +⌿ ¯1 0 1 ∘.⊖ ¯1 0 1 ⌽¨ ⊂⍵}"  #same as above
 
 '''this is a regular string with triple quotes'''
 """this is a regular string with triple quotes"""
 
-%%%%%%%%%%%%%%% object prefixes %%%%%%%%%%%%%%%
-%doubly linked list
+############### object prefixes ###############
+#doubly linked list
 dll[1 2 3 4 6 5 3 6 3 2]
 @linked_list(double=true)[1 2 3 4 6 5 3 6 3 2]
 
-%set literal syntax
+#set literal syntax
 set[4 3 6 4 6 4 2 2 4 5]
 
 
 
-% silly example for generating a list of ones
+# silly example for generating a list of ones
 ones = n => {l = [...[1..n]] l.=1 l}
-ones(10) % [1 1 1 1 1 1 1 1 1 1]
-%alternate
+ones(10) # [1 1 1 1 1 1 1 1 1 1]
+#alternate
 ones = n => [loop i in 1..n 1]
 
 
 
-% Heredoc strings
+# Heredoc strings
 
-#"%%% SOME CUSTOM DELIMITER %%%"
+$"%%% SOME CUSTOM DELIMITER %%%"
 This is a heredoc string with a custom delimiter.
 It will be parsed as a string until the delimiter is reached.
 It includes regular string functionality like {interpolation}, \{} \character escaping, etc.
 The delimiter is not included in the string.
-#%%% SOME CUSTOM DELIMITER %%%
+$%%% SOME CUSTOM DELIMITER %%%
 
-#r"==== RAW HEREDOC DELIMITER ===="
+$r"==== RAW HEREDOC DELIMITER ===="
 This is a raw heredoc string with a custom delimiter.
 It will be parsed as a string until the delimiter is reached.
 It does not include {interpolation}, \{} \character escaping, etc.
@@ -221,12 +221,12 @@ The delimiter is not included in the string.
 ==== RAW HEREDOC DELIMITER ====
 
 
-% end of file string
-#"""
+# end of file string
+$"""
 this is a string that consumes the rest of the file
 there is no closing delimiter
 
-% comments are just regular string characters
+# comments are just regular string characters
 lorem ipsum dolor sit amet,
 consectetur adipiscing elit.
 Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
