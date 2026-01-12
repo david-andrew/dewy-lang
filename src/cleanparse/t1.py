@@ -32,7 +32,7 @@ symbolic_identifiers: set[str] = {
 # tokenized as identifiers, but are treated as operators (rather than identifiers)
 word_operators: set[str] = {
     'and', 'or', 'xor', 'nand', 'nor', 'xnor', 'not',
-    'as', 'in', 'transmute', 'of', 'mod',
+    'as', 'in', 'transmute', 'of', 'div',
 }
 
 escape_map: dict[str, str] = {
@@ -95,17 +95,17 @@ class Real(Token):
     1.23e4
     1.23E+4
     1.23e-4
-    0x1.0x8p10  % note `p` instead of `e` for exponent. 0x1.8p10 = 1.5 × 2¹⁰
-    % 0x1.fp-2  % note this won't parse as a float because no prefix was used for the number after the dot. <int 0x1><dot><identifier fp><operator -><int 2>
+    0x1.0x8p10  // note `p` instead of `e` for exponent. 0x1.8p10 = 1.5 × 2¹⁰
+    // 0x1.fp-2  // note this won't parse as a float because no prefix was used for the number after the dot. <int 0x1><dot><identifier fp><operator -><int 2>
     1e10
     2E-23
 
-    10.25p3  % all base 10. suggested to either warn or error (leaning warn b/c simpler to parse, just look for src[i] in 'eEpP')
+    10.25p3  // all base 10. suggested to either warn or error (leaning warn b/c simpler to parse, just look for src[i] in 'eEpP')
 
-    0x1.0x8p10   % special case <hex>.<hex>p<dec> gets no warning, even though base mismatch
-    0x1.0x8p0xA  % no warning, though programmer being extra explicit
-    0x1.0b1p10   % warn, mantissa halves have different bases
-    0x1.8p10     % warn, different bases
+    0x1.0x8p10   // special case <hex>.<hex>p<dec> gets no warning, even though base mismatch
+    0x1.0x8p0xA  // no warning, though programmer being extra explicit
+    0x1.0b1p10   // warn, mantissa halves have different bases
+    0x1.8p10     // warn, different bases
     
     p/P is only allowed for bases that are powers of 2, and means 2^exponent (instead of 10^exponent for e/E)
 
@@ -114,8 +114,8 @@ class Real(Token):
       inf
     literals are treated as singleton types, and receive their bit pattern when used in a typed context
     ```dewy
-    a:float64 = inf  % convert to ieee754 compatible float inf
-    b:int = inf      % convert to symbolic InfinityType that can interact with ints as a singleton type
+    a:float64 = inf  // convert to ieee754 compatible float inf
+    b:int = inf      // convert to symbolic InfinityType that can interact with ints as a singleton type
     ```
 
     suggested to have some set of string input functions for C/IEEE-754 notation
@@ -375,7 +375,9 @@ class Operator(Token):
 
         # non-symbolic operators
         if isinstance(token, t0.Identifier) and token.src.casefold() in word_operators:
-            return 1, Operator(token.loc, token.src.casefold())
+            op = token.src.casefold()
+            if op == "div": op = "÷"  # special case `div` is an alias for `÷`
+            return 1, Operator(token.loc, op)
 
         # all symbols that are not symbolic identifiers are operators
         if not isinstance(token, (t0.Symbol, t0.ShiftSymbol)) or token.src in symbolic_identifiers: 

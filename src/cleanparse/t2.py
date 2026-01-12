@@ -117,7 +117,7 @@ other_infix_tokens: set[type[t1.Token]] = {
 
 
 binary_ops: set[str] = {
-    '+', '-', '*', '/', '//', '^',
+    '+', '-', '*', '/', '%', '÷', '^',
     '\\',
     '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
     '|', '&', '??',
@@ -128,11 +128,11 @@ binary_ops: set[str] = {
     '.', ',', ':', ':>',
     '<<', '>>', '<<<', '>>>', '<<!', '!>>',
     'and', 'or', 'xor', 'nand', 'nor', 'xnor',
-    'as', 'in', 'transmute', 'of', 'mod',
+    'as', 'in', 'transmute', 'of', 'div',
 }
 prefix_ops: set[str] = {
     '~', 'not', '`',
-    '+', '-', '*', '/', '//',
+    '+', '-', '*', '/', '÷', 'div',
 }
 
 postfix_ops: set[str] = {

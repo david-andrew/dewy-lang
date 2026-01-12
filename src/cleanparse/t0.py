@@ -39,9 +39,9 @@ import pdb
 
 whitespace = {' ', '\t', '\n', '\r'}
 ascii_control_chars = set(chr(i) for i in range(0x20) if i not in whitespace) | {'\x7F'} # most ascii<0x20 are ignored for security reasons
-line_comment_start: Literal['%'] = '%'
-block_comment_start: Literal['%{'] = '%{'
-block_comment_end: Literal['}%'] = '}%'
+line_comment_start: Literal['//'] = '//'
+block_comment_start: Literal['/{'] = '/{'
+block_comment_end: Literal['}/'] = '}/'
 
 # TODO: The specific set of digits is open for debate. The following are proposed:
 # latin = set('ÆØÞßæøþẞ')
@@ -110,7 +110,7 @@ def is_based_digit(digit: str, base: BasePrefix) -> bool:
 symbols = sorted([
     '~', '@', '`',
     '?', ';',
-    '+', '-', '*', '/', '//', '^',
+    '+', '-', '*', '/', '%', '÷', '^',
     '\\', # left divide e.g. given Ax=b, x=A\b, where A\B ≡ solve(A B) (note this is not the same as x=A⁻¹B) (TODO: move description to docs)
     '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
     '|', '&', '??',
@@ -323,14 +323,14 @@ class Whitespace(Token[WhitespaceOrCommentContexts]):
 class LineComment(Token[WhitespaceOrCommentContexts]):
     @staticmethod
     def eat(src:str, ctx:WhitespaceOrCommentContexts) -> int|None:
-        """line comments are any sequence of characters after a % until the end of the line"""
+        """line comments are any sequence of characters after a // until the end of the line"""
         if not src.startswith(line_comment_start):
             return None
         if src.startswith(block_comment_start):
             return None # don't start a line comment if it is actually a block comment
         
         # consume until the end of the line
-        i = 1
+        i = len(line_comment_start)
         while i < len(src) and src[i] != '\n':
             i += 1
         if i < len(src): # include the newline in the comment (if we're not EOF)
@@ -342,7 +342,7 @@ class BlockComment(Token[WhitespaceOrCommentContexts]):
     @staticmethod
     def eat(src: str, ctx:WhitespaceOrCommentContexts) -> int | None:
         """
-        Block comments are of the form %{ ... }% and can be nested.
+        Block comments are of the form /{ ... }/ and can be nested.
         """
         if not src.startswith(block_comment_start):
             return None
@@ -353,10 +353,10 @@ class BlockComment(Token[WhitespaceOrCommentContexts]):
         while i < len(src):
             if src[i:].startswith(block_comment_start):
                 openers.append(Span(i, i + len(block_comment_start)))
-                i += 2
+                i += len(block_comment_start)
             elif src[i:].startswith(block_comment_end):
                 openers.pop()
-                i += 2
+                i += len(block_comment_end)
 
                 if len(openers) == 0:
                     return i
@@ -377,7 +377,7 @@ class BlockComment(Token[WhitespaceOrCommentContexts]):
                 ),
                 Span(openers[-1].stop + span_offset, len(src) + span_offset)
             ], message=f"Unbound block comment{plural}")
-        ], hint=f"Did you forget {len(openers)} closing `}}%`?\nBlock comments start with `%{{` and end with `}}%` and can be nested")
+        ], hint=f"Did you forget {len(openers)} closing `{block_comment_end}`?\nBlock comments start with `{block_comment_start}` and end with `{block_comment_end}` and can be nested")
         error.throw()
 
 
