@@ -369,29 +369,29 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         if not isinstance(associativity, list):
             associativity = [associativity]
         
-        reductions: list[tuple[AST, tuple(int, int)]] = []  # ast from reduction, and indices of tokens participating in the reduction
+        reductions: list[tuple[AST, tuple[int, int], Associativity]] = []  # ast from reduction, and indices of tokens participating in the reduction
         for a in associativity:
             if (a == Associativity.left or a == Associativity.right) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 assert isinstance(left_ast, AST) and isinstance(right_ast, AST), f'INTERNAL ERROR: left and right ASTs are not ASTs. got {left_ast=}, {right_ast=}, {left_ast_idx=}, {right_ast_idx=}'
-                reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1)))
+                reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1), a))
             elif a == Associativity.prefix and (right_ast_shift_dir == -1) and (not t2.is_binary_op(op) or not left_could_attach(left_ast_idx, items)): # TODO: perhaps still not right. problem case: --x. basically need to check that no chains exist to the left...
-                reductions.append((Prefix(op, right_ast), (candidate_operator_idx, right_ast_idx+1)))
+                reductions.append((Prefix(op, right_ast), (candidate_operator_idx, right_ast_idx+1), a))
             elif (a == Associativity.postfix) and (left_ast_shift_dir == 1):
-                reductions.append((Postfix(op, left_ast), (left_ast_idx, candidate_operator_idx+1)))
+                reductions.append((Postfix(op, left_ast), (left_ast_idx, candidate_operator_idx+1), a))
             elif (a == Associativity.flat) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 # check for the whole flat chain
                 res = collect_flat_operands(left_ast_idx, right_ast_idx, op, items, reverse_ast_idxs_map, shift_dirs)
                 if res is None:
                     continue
                 operands, bounds = res
-                reductions.append((Flat(op, operands), bounds))
+                reductions.append((Flat(op, operands), bounds, a))
             elif (a == Associativity.fail) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 # TODO: full error report for these exceptions
                 if isinstance(left_ast, BinOp) and op_equals(left_ast.op, op):
                     raise ValueError(f'USER ERROR: operator {op} is not allowed to be nested inside itself. got {left_ast.op=} and {op=}')
                 if isinstance(right_ast, BinOp) and op_equals(right_ast.op, op):
                     raise ValueError(f'USER ERROR: operator {op} is not allowed to be nested inside itself. got {right_ast.op=} and {op=}')
-                reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1)))
+                reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1), a))
         
         if len(reductions) == 0:
             continue
@@ -414,6 +414,13 @@ def shunt_pass(items: list[Operator|AST]) -> None:
                             break
             for r in to_remove:
                 reductions.remove(r)
+
+            # if all prefix/postfix reductions, select the one with the highest binding power
+            if all(isinstance(r[0], (Prefix, Postfix)) for r in reductions):
+                bind_powers = [get_bind_power(ast.op)[0 if isinstance(ast,Postfix) else 1] for ast,_,_ in reductions]
+                max_bp = max(bind_powers)
+                reductions = [r for r, bp in zip(reductions, bind_powers) if bp == max_bp]
+                
         if len(reductions) > 1:
             pdb.set_trace()
             raise ValueError(f'INTERNAL ERROR: multiple reductions found for {op=}. got {reductions=}')
@@ -421,7 +428,7 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         
     
     # apply reductions in reverse order to avoid index shifting issues
-    for reduction, (left_bound, right_bound) in reversed(all_reductions):
+    for reduction, (left_bound, right_bound), _ in reversed(all_reductions):
         items[left_bound:right_bound] = [reduction]
 
 
