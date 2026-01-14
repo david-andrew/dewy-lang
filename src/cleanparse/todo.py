@@ -31,7 +31,8 @@ given AST, produce output in the target backend
 
 
 [tasks]
-[ ] A ` B should disambiguate based on the slight higher precedence of prefix over postfix. not sure how to handle... perhaps reductions could indicate a precedence?
+[ ] full error reporting in p0 at indicated locations
+[x] A ` B should disambiguate based on the slight higher precedence of prefix over postfix. not sure how to handle... perhaps reductions could indicate a precedence?
 [x] `;` cannot participate in binops, prefix ops, or postfix ops (except for semicolon juxtapose)
 [-] overhaul how juxtapose tokens are determined. basically they can be next to operators, so long as that op is part of a chain
 [x] actually just semicolon is special. if it is touching anything to the left, it gets semicolon juxtapose

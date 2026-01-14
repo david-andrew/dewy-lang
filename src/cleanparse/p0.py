@@ -136,7 +136,7 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.left, ['+', '-']),
     (Associativity.left, ['<<', '>>', '<<<', '>>>', '<<!', '!>>']),
     (Associativity.flat,  [',']),
-    (Associativity.left, [t2.RangeJuxtapose]),  # jux-range
+    (Associativity.flat, [t2.RangeJuxtapose]),  # jux-range
     (Associativity.fail, ['in']),    # A in B
     (Associativity.left, ['=?', '>?', '<?', '>=?', '<=?']),
     (Associativity.left, ['and', 'nand', '&']),
@@ -420,7 +420,7 @@ def shunt_pass(items: list[Operator|AST]) -> None:
                 bind_powers = [get_bind_power(ast.op)[0 if isinstance(ast,Postfix) else 1] for ast,_,_ in reductions]
                 max_bp = max(bind_powers)
                 reductions = [r for r, bp in zip(reductions, bind_powers) if bp == max_bp]
-                
+
         if len(reductions) > 1:
             pdb.set_trace()
             raise ValueError(f'INTERNAL ERROR: multiple reductions found for {op=}. got {reductions=}')
