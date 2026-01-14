@@ -131,7 +131,7 @@ binary_ops: set[str] = {
     'as', 'in', 'transmute', 'of',
 }
 prefix_ops: set[str] = {
-    '~', 'not', '`',
+    '@', '~', 'not', '`',
     '+', '-', '*', '/', '//',
 }
 
@@ -155,17 +155,77 @@ def is_dotdotdot(token: t1.Token) -> bool:
 def is_typeparam(token: t1.Token) -> bool:
     return isinstance(token, t1.Block) and token.kind == '<>'
 
-def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[Juxtapose]:
-    """For certain tokens, we alredy know which juxtapose (precedence level) they should have"""
-    if is_dotdot(left) or is_dotdot(right):
-        return RangeJuxtapose
-    elif is_dotdotdot(left) or is_dotdotdot(right):
-        return EllipsisJuxtapose
-    elif is_typeparam(right) or (is_typeparam(left) and not isinstance(prev, TypeParamJuxtapose)):
-        return TypeParamJuxtapose
-    elif isinstance(right, t1.Semicolon):
-        return SemicolonJuxtapose
-    return Juxtapose
+def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[Juxtapose]|None:
+    """
+    For certain tokens, we alredy know which juxtapose (precedence level) they should have
+    
+    General Juxtapose Rules:
+    - can always juxtapose atoms
+
+    Range/Ellipsis Jux Rules:
+    - can juxtapose any operator that is prefix or postfix
+    - cannot juxtapose binary (only) operators (As well as flat and fail)
+    
+    Type-param Jux Rules:
+    - does not occur next to operators
+    - may only juxtapose on one side. prefer left side over right side
+
+    Call/Mul Jux Rules:
+    - does not occur next to operators
+
+    Semicolon Jux Rules:
+    - jux anything to it's left
+    - cannot jux to right
+    """
+    # NOTE: the ordering here determines the precedence when multiple special juxtaposable types are next to each other
+    #       e.g. ...<A> would be ellipsis jux because we check it before type params. Ideally follow precedence table in p0.py,
+    #       but it feels like this is a more correct ordering of which trumps which.
+    
+    # Semicolon connects to anything on its left, and cannot connect to its right
+    if isinstance(left, t1.Semicolon):
+        return None
+    if isinstance(right, t1.Semicolon):
+        if not isinstance(left, SemicolonJuxtapose): 
+            return SemicolonJuxtapose
+        return None
+
+    # ... may juxtpose with prefix/postfix operators
+    if is_dotdotdot(left):
+        if type(right) in atom_tokens or is_prefix_op(right):
+            return EllipsisJuxtapose
+        return None
+    if is_dotdotdot(right):
+        if type(left) in atom_tokens or is_postfix_op(left):
+            return EllipsisJuxtapose
+        return None
+    
+    # .. may juxtpose with prefix/postfix operators
+    if is_dotdot(left):
+        if type(right) in atom_tokens or is_prefix_op(right):
+            return RangeJuxtapose
+        return None
+    if is_dotdot(right):
+        if type(left) in atom_tokens or is_postfix_op(left): 
+            return RangeJuxtapose
+        return None
+ 
+    # typeparam may not juxtapose with anything except for atoms
+    if is_typeparam(left):
+        if type(right) in atom_tokens and not isinstance(prev, TypeParamJuxtapose):
+            return TypeParamJuxtapose
+        return None
+    if is_typeparam(right):
+        if type(left) in atom_tokens:
+            return TypeParamJuxtapose
+        return None
+    
+
+    # juxt call and jux mul may only be between atoms
+    if type(left) in atom_tokens and type(right) in atom_tokens:
+        return Juxtapose
+    
+    # otherwise no jux
+    return None
 
 
 def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> None:
@@ -214,10 +274,11 @@ def insert_juxtapose(tokens: list[t1.Token]) -> None:
         recurse_into(tokens[i], insert_juxtapose)
 
         # insert juxtapose if adjacent (atom) tokens' spans touch
-        if i + 1 < len(tokens) and type(tokens[i]) in atom_tokens and type(tokens[i+1]) in atom_tokens and tokens[i].loc.stop == tokens[i+1].loc.start:
+        if i + 1 < len(tokens) and tokens[i].loc.stop == tokens[i+1].loc.start:
             jux_type = get_jux_type(tokens[i], tokens[i+1], tokens[i-1] if i > 0 else None)
-            tokens.insert(i+1, jux_type(t1.Span(tokens[i].loc.stop, tokens[i].loc.stop)))
-            i += 1
+            if jux_type is not None:
+                tokens.insert(i+1, jux_type(t1.Span(tokens[i].loc.stop, tokens[i].loc.stop)))
+                i += 1
 
         # move to next token
         i += 1

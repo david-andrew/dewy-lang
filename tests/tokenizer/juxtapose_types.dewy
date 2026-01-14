@@ -1,0 +1,97 @@
+a;b
+
+...;
+;..
+
+# valid juxtaposes where operators can be next to them
+# regular juxtapose (no jux at all)
+#A`B #ambiguous?
+A~B
+A?B
+A@B
+
+# [range juxtapose]
+# jux allowed
+..@A
+..<int>  # range jux supercedes type param jux 
+..`A
+..~A
+..*A
+../A
+..//A
+..+A
+..-A
+A?..
+A`..
+<int>..
+
+# no jux (forwards and backwards)
+A^..
+A%..
+A\..
+A>>..
+A<<..
+A,..
+A=?..
+A&..
+A:..
+A:>..
+A=>..
+A|>..
+A->..
+A=..
+A::..
+A:=..
+
+
+
+# ellipsis juxtapose
+# jux allowed
+...@A
+...<int>  # ellipses jux supercedes type param jux 
+...`A
+...~A
+...*A
+.../A
+...//A
+...+A
+...-A
+A?...
+A`...
+<int>...
+
+#no juxtapose
+A^...
+A%...
+A\...
+A>>...
+A<<...
+A,...
+A=?...
+A&...
+A:...
+A:>...
+A=>...
+A|>...
+A->...
+A=...
+A::...
+A:=...
+
+
+# type param juxtapose
+# probably in general no juxtapose if next to operators
+# no jux
+<A>@B
+<A>.B
+#<A>`B #ambiguous
+<A>~B
+B?<A>
+<A>^B
+<A>*B
+#etc.
+
+
+# semicolon juxtapose
+# no jux
+A;

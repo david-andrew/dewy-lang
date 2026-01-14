@@ -31,13 +31,16 @@ given AST, produce output in the target backend
 
 
 [tasks]
+[ ] A ` B should disambiguate based on the slight higher precedence of prefix over postfix. not sure how to handle... perhaps reductions could indicate a precedence?
 [x] `;` cannot participate in binops, prefix ops, or postfix ops (except for semicolon juxtapose)
-[ ] overhaul how juxtapose tokens are determined. basically they can be next to operators, so long as that op is part of a chain
-    [ ] semicolon cannot have juxtapose to right
-    [ ] semicolon juxtapose should be allowed if left is operator...
+[-] overhaul how juxtapose tokens are determined. basically they can be next to operators, so long as that op is part of a chain
+[x] actually just semicolon is special. if it is touching anything to the left, it gets semicolon juxtapose
+    [x] semicolon cannot have juxtapose to right
+    [x] semicolon juxtapose should be allowed if touching anything to the left
+    [x] .. also can juxtapose anything left or right regardless of if it is an operator or not
 [x] need backtick disambiguation. suspect when checking if could be postfix op, need to check that backtick has something to connect to
-[ ] replace `//` with `div`/`÷` and then make comments be `//` and `/{}/` (also add note that normalize would convert `idiv` to `÷`)
-[ ] add ${} interpolation strings (consider reworking strings in t0 since there's a lot of similar patterns. maybe make a string token factory)
+[x] replace `#` with `$` and then make comments be `#` and `#{}#`
+[x] add ${} interpolation strings (consider reworking strings in t0 since there's a lot of similar patterns. maybe make a string token factory)
 
 [Tasks]
 [x] split invert_whitespace into remove_whitespace and insert_juxtapose
