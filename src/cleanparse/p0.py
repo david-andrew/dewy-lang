@@ -2,12 +2,15 @@
 Initial parsing pass. A simple pratt-style parser
 """
 
-from typing import Sequence, Callable, TypeAlias, Literal, cast
+from textwrap import dedent
+from typing import NoReturn, Sequence, Callable, TypeAlias, Literal, cast
 from dataclasses import dataclass
 from enum import Enum, auto
+
 from . import t1
 from . import t2
-from .reporting import SrcFile, ReportException
+from .reporting import SrcFile, ReportException, Error, Pointer, Span
+from .utils import ordinalize
 
 import pdb
 
@@ -213,6 +216,10 @@ def get_associativity(op: Operator) -> Associativity | list[Associativity]:
     return [associativity_table[p] for p in precedence.values]
 
 @dataclass
+class Context:
+    srcfile: SrcFile
+
+@dataclass
 class AST: ...
 
 @dataclass
@@ -252,6 +259,68 @@ class Ambiguous(AST):
     candidates: list[AST]
 
 
+
+def validate(ast: AST, ctx: Context) -> NoReturn|None:
+    # special error cases when trying to make a reduction
+    # NOTE: if there become many more special cases to check, make a table that looks up functions given the operator
+    if isinstance(ast, Flat) and isinstance(ast.op, t2.RangeJuxtapose):
+        dotdot_idxs = [i for i, t in enumerate(ast.items) if isinstance(t, Atom) and t2.is_dotdot(t.item)]
+        jux_spans = []
+        for idx in dotdot_idxs:
+            dotdot_span = ast.items[idx].item.loc
+            if idx > 0:
+                jux_spans.append(Span(dotdot_span.start, dotdot_span.start))
+            if idx < len(ast.items) - 1:
+                jux_spans.append(Span(dotdot_span.stop, dotdot_span.stop))
+        if len(dotdot_idxs) > 1:
+            error = Error(
+                srcfile=ctx.srcfile,
+                title="multiple `..` tokens encountered in single range expression",
+                pointer_messages=[
+                    Pointer(ast.items[idx].item.loc, message=f"{ordinalize(i+1)} connected `..` token", placement='below')
+                    for i, idx in enumerate(dotdot_idxs)
+                ] + [
+                    Pointer(span, message='RangeJuxtapose', placement='above') for span in jux_spans
+                ],
+                hint=dedent("""\
+                    A range expression may only include one `..` token.
+                    Possible Fixes:
+                    - Insert whitespace next to `..` to create multiple range expressions 
+                    - wrap ranges in () or [] or (] or [) to explicitly delimit
+                    - remove any extra `..` so that there is only one per range
+                    
+                    Some examples of ranges:
+                    - first..             # first to inf
+                    - ..last              # -inf to last
+                    - first..last         # first to last
+                    - ..                  # -inf to inf
+                    
+                    Specifying a step size:
+                    - first,second..      # first to inf, step size is second-first
+                    - first,second..last  # first to last, step size is second-first
+                    - ..2ndlast,last      # -inf to last, step size is last-2ndlast
+                    
+                    Specifying inclusivity bounds:
+                    - [first..last]       # first to last including first and last
+                    - [first..last)       # first to last including first, excluding last
+                    - (first..last]       # first to last excluding first, including last
+                    - (first..last)       # first to last excluding first and last
+                    - first..last         # defaults to inclusive, i.e. [first..last]
+                    
+                    Range arguments attach via juxtaposition:
+                    - first..last         # first to last. Both sides are included
+                    - first ..last        # -inf to last. first is not part of the range
+                    - first.. last        # first to inf. last is not part of the range
+                    - first .. last       # -inf to inf. neither first or last are included
+                    """
+                ),
+
+            )
+            error.throw()
+
+
+
+
 # TODO: make this return a single block AST instead of a list of ASTs...
 def parse(srcfile: SrcFile) -> list[AST]:
     """simple bottom up iterative shunting-esque algorithm driven by pratt-style binding powers"""
@@ -280,24 +349,25 @@ def parse(srcfile: SrcFile) -> list[AST]:
     """
 
     tokens = t2.postok(srcfile)
-    parse_inner(tokens)
+    ctx = Context(srcfile=srcfile)
+    parse_inner(tokens, ctx)
     return cast(list[AST], tokens)
 
-def parse_inner(tokens: list[t1.Token]) -> None:
+def parse_inner(tokens: list[t1.Token], ctx: Context) -> None:
     """Modifies `tokens` in place, converting it from a list[Token] to a list[AST]"""
     for i, t in enumerate(tokens):
         if not isinstance(t, Operator):
-            t2.recurse_into(t, parse_inner)
+            t2.recurse_into(t, parse_inner, ctx)
             tokens[i] = Atom(t)
     
-    reduce_loop(tokens)
+    reduce_loop(tokens, ctx)
     
 
-def reduce_loop(items: list[Operator|AST]) -> list[AST]:
+def reduce_loop(items: list[Operator|AST], ctx: Context) -> list[AST]:
     """repeatedly apply shunting reductions until no more occur. modifies `tokens` in place"""
     while True:
         l0 = len(items)
-        shunt_pass(items)
+        shunt_pass(items, ctx)
         if len(items) == l0:
             break
     
@@ -308,7 +378,7 @@ def reduce_loop(items: list[Operator|AST]) -> list[AST]:
     
     return items
 
-def shunt_pass(items: list[Operator|AST]) -> None:
+def shunt_pass(items: list[Operator|AST], ctx: Context) -> None:
     """apply a shunting reduction. modifies `tokens` in place"""
     # identify items that could shift
     ast_idxs = [i for i, item in enumerate(items) if isinstance(item, AST)]
@@ -424,7 +494,11 @@ def shunt_pass(items: list[Operator|AST]) -> None:
         if len(reductions) > 1:
             pdb.set_trace()
             raise ValueError(f'INTERNAL ERROR: multiple reductions found for {op=}. got {reductions=}')
-        all_reductions.append(reductions[0])
+        
+        # validate the reduction before adding it to the list
+        reduction = reductions[0]
+        validate(reduction[0], ctx)
+        all_reductions.append(reduction)
         
     
     # apply reductions in reverse order to avoid index shifting issues
