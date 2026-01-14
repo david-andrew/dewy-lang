@@ -153,7 +153,7 @@ def is_dotdot(token: t1.Token) -> bool:
 def is_dotdotdot(token: t1.Token) -> bool:
     return isinstance(token, t1.Identifier) and token.name == '...'
 def is_typeparam(token: t1.Token) -> bool:
-    return isinstance(token, t1.Block) and token.delims == '<>'
+    return isinstance(token, t1.Block) and token.kind == '<>'
 
 def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[Juxtapose]:
     """For certain tokens, we alredy know which juxtapose (precedence level) they should have"""
@@ -270,7 +270,7 @@ def make_op_functions(tokens: list[t1.Token]) -> None:
         recurse_into(token, make_op_functions)
         
         if (isinstance(token, t1.Block) 
-            and token.delims == '()' 
+            and token.kind == '()' 
             and len(token.inner) == 1 
             and isinstance(token.inner[0], (t1.Operator, BroadcastOp, CombinedAssignmentOp))
         ):

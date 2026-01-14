@@ -201,11 +201,11 @@ class String(Token):
     # potentially find a way for IString to share this logic, since it's just a matter of checking what was in the string body
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, String]|None':
         opener = tokens[start]
-        if isinstance(opener, (t0.StringQuoteOpener, t0.RawStringQuoteOpener, t0.HeredocStringOpener, t0.RawHeredocStringOpener)):
+        if isinstance(opener, (t0.StringQuoteOpener, t0.RawStringQuoteOpener, t0.TemplateStringQuoteOpener, t0.HeredocStringOpener, t0.RawHeredocStringOpener, t0.TemplateHeredocStringOpener)):
             body_start, body_stop = start + 1, opener.matching_quote.idx
             span = Span(opener.loc.start, opener.matching_quote.loc.stop)
             eaten = body_stop - body_start + 2  # body len + 2 quotes
-        elif isinstance(opener, (t0.RestOfFileStringQuote, t0.RawRestOfFileStringQuote)):
+        elif isinstance(opener, (t0.RestOfFileStringQuote, t0.RawRestOfFileStringQuote, t0.TemplateRestOfFileStringQuote)):
             body_start, body_stop = start + 1, len(tokens) - 1
             span = Span(opener.loc.start, tokens[-1].loc.stop)
             eaten = len(tokens) - body_start + 1  # body len + just 1 opening quote
@@ -247,7 +247,7 @@ class String(Token):
                 inner = list(tokenize_gen(tokens, ctx, body_start, body_stop))
                 chunks.append(ParametricEscape(span, inner))
                 token_iter.jump_forward(closer.idx - token.idx + 1) # skip inner tokens and closing brace
-            elif isinstance(token, t0.LeftCurlyBrace):
+            elif isinstance(token, (t0.LeftCurlyBrace, t0.TemplateLeftCurlyBrace)):
                 if token.matching_right.idx - token.idx == 1:
                     error = Error(
                         srcfile=ctx.srcfile,
@@ -288,7 +288,7 @@ class IString(InedibleToken):
 @dataclass
 class Block(Token):
     inner: list[Token]
-    delims: Literal['{}', '[]', '()', '[)', '(]', '<>']
+    kind: Literal['{}', '[]', '()', '[)', '(]', '<>']
     """
     <opener><inner_tokens><matching closer>
     """

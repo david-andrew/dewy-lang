@@ -561,7 +561,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
             if len(content) > 40:
                 content = content[:37] + "..."
             return f"String({content!r})"
-        if isinstance(tok, t1.Block): return f"Block(delims='{tok.delims}')"
+        if isinstance(tok, t1.Block): return f"Block(kind='{tok.kind}')"
         if isinstance(tok, t1.BasedString): return f"BasedString({tok.base})"
         if isinstance(tok, t1.BasedArray): return f"BasedArray({tok.base})"
         if isinstance(tok, t1.ParametricEscape): return "ParametricEscape"

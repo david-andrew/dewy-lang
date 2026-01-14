@@ -164,13 +164,17 @@ class RawStringBody(Context):
     opening_quote: 'RawStringQuoteOpener|RawHeredocStringOpener|RawRestOfFileStringQuote'
 
 @dataclass
+class TemplateStringBody(Context):
+    opening_quote: 'TemplateStringQuoteOpener|TemplateHeredocStringOpener|TemplateRestOfFileStringQuote'
+
+@dataclass
 class BasedStringBody(Context):
     opening_quote: 'BasedStringQuoteOpener'
     base: BasePrefix
 
 @dataclass
 class BlockBody(Context):
-    opening_delim: 'LeftSquareBracket|LeftParenthesis|LeftCurlyBrace|ParametricStringEscape'
+    opening_delim: 'LeftSquareBracket|LeftParenthesis|LeftCurlyBrace|TemplateLeftCurlyBrace|ParametricStringEscape'
     default_base: BasePrefix = base10
  
 
@@ -183,7 +187,7 @@ class TypeBody(Context):
 # TODO: consider making it each context defines what tokens are valid for it, rather than tokens select from valid contexts
 GeneralBodyContexts: TypeAlias = Root | BlockBody | TypeBody
 BodyWithoutTypeContexts: TypeAlias = Root | BlockBody
-WhitespaceOrCommentContexts: TypeAlias = Root | BlockBody | TypeBody | BasedStringBody# | BasedBlockBody
+WhitespaceOrCommentContexts: TypeAlias = Root | BlockBody | TypeBody | BasedStringBody
 
 ##### CONTEXT ACTIONS #####
 # actions that can be taken when a token is eaten
@@ -550,8 +554,20 @@ class LeftCurlyBrace(Token[Root|BlockBody|TypeBody|StringBody]):
     def action_on_eat(self, ctx:Root|BlockBody|TypeBody|StringBody): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 
+class TemplateLeftCurlyBrace(Token[TemplateStringBody]):
+    matching_right: 'RightCurlyBrace' = None
+
+    @staticmethod
+    def eat(src:str, ctx:TemplateStringBody) -> int|None:
+        if src.startswith('${'):
+            return 2
+        return None
+    
+    def action_on_eat(self, ctx:TemplateStringBody): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self))
+
+
 class RightCurlyBrace(Token[BlockBody]):
-    matching_left: 'LeftCurlyBrace' = None
+    matching_left: 'LeftCurlyBrace|TemplateLeftCurlyBrace' = None
     
     @staticmethod
     def eat(src:str, ctx:BlockBody) -> int|None:
@@ -560,7 +576,7 @@ class RightCurlyBrace(Token[BlockBody]):
         return None
     
     def action_on_eat(self, ctx:BlockBody):
-        if isinstance(ctx.opening_delim, (LeftCurlyBrace, ParametricStringEscape)):
+        if isinstance(ctx.opening_delim, (LeftCurlyBrace, ParametricStringEscape, TemplateLeftCurlyBrace)):
             ctx.opening_delim.matching_right = self
             self.matching_left = ctx.opening_delim
             return Pop()
@@ -656,46 +672,65 @@ class StringQuoteOpener(Token[GeneralBodyContexts]):
 
     def action_on_eat(self, ctx:GeneralBodyContexts) -> ContextAction: return Push(StringBody(ctx.srcfile, ctx.tokens_so_far, self))
 
-class StringQuoteCloser(Token[StringBody|RawStringBody|BasedStringBody]):
-    matching_quote: 'StringQuoteOpener|RawStringQuoteOpener|BasedStringQuoteOpener' = None
+
+class StringQuoteCloser(Token[StringBody|RawStringBody|TemplateStringBody|BasedStringBody]):
+    matching_quote: 'StringQuoteOpener|RawStringQuoteOpener|TemplateStringQuoteOpener|BasedStringQuoteOpener' = None
 
     @staticmethod
-    def eat(src:str, ctx:StringBody|RawStringBody|BasedStringBody) -> int|None:
+    def eat(src:str, ctx:StringBody|RawStringBody|TemplateStringBody|BasedStringBody) -> int|None:
         """a string quote closer is a matching opening quote"""
         if isinstance(ctx.opening_quote, StringQuoteOpener) and src.startswith(ctx.opening_quote.src):
             return len(ctx.opening_quote.src)
         if isinstance(ctx.opening_quote, RawStringQuoteOpener) and src.startswith(ctx.opening_quote.src[1:]):
+            return len(ctx.opening_quote.src[1:])
+        if isinstance(ctx.opening_quote, TemplateStringQuoteOpener) and src.startswith(ctx.opening_quote.src[1:]):
             return len(ctx.opening_quote.src[1:])
         if isinstance(ctx.opening_quote, BasedStringQuoteOpener) and src.startswith(ctx.opening_quote.src[2:]):
             return len(ctx.opening_quote.src[2:])
         # Heredoc delimiters can't match here, and rest-of-file strings don't have a closing quote
         return None
     
-    def action_on_eat(self, ctx:StringBody|RawStringBody|BasedStringBody):
-        assert isinstance(ctx.opening_quote, (StringQuoteOpener, RawStringQuoteOpener, BasedStringQuoteOpener)), f"INTERNAL ERROR: attempted to eat StringQuoteCloser for non-matching opening quote: {ctx.opening_quote=}"
+    def action_on_eat(self, ctx:StringBody|RawStringBody|TemplateStringBody|BasedStringBody):
+        assert isinstance(ctx.opening_quote, (StringQuoteOpener, RawStringQuoteOpener, TemplateStringQuoteOpener, BasedStringQuoteOpener)), f"INTERNAL ERROR: attempted to eat StringQuoteCloser for non-matching opening quote: {ctx.opening_quote=}"
         self.matching_quote = ctx.opening_quote
         self.matching_quote.matching_quote = self
         return Pop()
 
-class StringChars(Token[StringBody]):
+
+class StringChars(Token[StringBody|TemplateStringBody]):
     @staticmethod
-    def eat(src:str, ctx:StringBody) -> int|None:
+    def eat(src:str, ctx:StringBody|TemplateStringBody) -> int|None:
         """regular characters are anything except for the delimiter, an escape sequence, or a block opening"""
+
+        # determine possible delimiters that wouldn't be part of string chars
+        if isinstance(ctx.opening_quote, StringQuoteOpener):
+            closing_quote = ctx.opening_quote.src
+        elif isinstance(ctx.opening_quote, TemplateStringQuoteOpener):
+            closing_quote = ctx.opening_quote.src[1:]
+        elif isinstance(ctx.opening_quote, (HeredocStringOpener, TemplateHeredocStringOpener)):
+            closing_quote = ctx.opening_quote.get_delim()
+        elif isinstance(ctx.opening_quote, (RestOfFileStringQuote, TemplateRestOfFileStringQuote)):
+            closing_quote = None  # rest-of-file strings don't have a closing quote
+        else:
+            raise ValueError(f"INTERNAL ERROR: attempted to eat StringChars for unrecognized opening quote: {ctx.opening_quote=}")
+        interpolation_block_opener = '${' if isinstance(ctx, TemplateStringBody) else '{'
+
+        # collect string characters until the closing delim, escape sequence, interpolation block, or EOF
         i = 0
         while (
             i < len(src)
-            and not (isinstance(ctx.opening_quote, StringQuoteOpener) and src[i:].startswith(ctx.opening_quote.src))
-            and not (isinstance(ctx.opening_quote, HeredocStringOpener) and src[i:].startswith(ctx.opening_quote.get_delim()))
-            and src[i] not in r'\{'
+            and (closing_quote is None or not src[i:].startswith(closing_quote))    # closing delim of the string 
+            and not src[i:].startswith(interpolation_block_opener)                  # start an interpolation block
+            and src[i] != '\\'                                                      # start an escape sequence
         ):
             i += 1
         
         return i or None
 
 
-class StringEscape(Token[StringBody]):
+class StringEscape(Token[StringBody|TemplateStringBody]):
     @staticmethod
-    def eat(src:str, ctx:StringBody) -> int|None:
+    def eat(src:str, ctx:StringBody|TemplateStringBody) -> int|None:
         r"""
         Eat an escape sequence, return the number of characters eaten
         
@@ -747,7 +782,7 @@ class StringEscape(Token[StringBody]):
         return 2
     
     @staticmethod
-    def error_incomplete_string_escape(src: str, ctx: StringBody) -> NoReturn:
+    def error_incomplete_string_escape(src: str, ctx: StringBody|TemplateStringBody) -> NoReturn:
         """Helper for when a string escape is incomplete"""
         offset = ctx.current_tokenization_position()
         error = Error(
@@ -760,7 +795,7 @@ class StringEscape(Token[StringBody]):
 
 
     @staticmethod
-    def error_invalid_width_hex_escape(src: str, ctx: StringBody, expected_digits: int, actual_digits: int) -> NoReturn:
+    def error_invalid_width_hex_escape(src: str, ctx: StringBody|TemplateStringBody, expected_digits: int, actual_digits: int) -> NoReturn:
         """Helper for when a hex or unicode escape doesn't have enough digits"""
         offset = ctx.current_tokenization_position()
         
@@ -786,10 +821,10 @@ class StringEscape(Token[StringBody]):
         error.throw()
 
 
-class ParametricStringEscape(Token[StringBody]):
+class ParametricStringEscape(Token[StringBody|TemplateStringBody]):
     matching_right: 'RightCurlyBrace' = None
     @staticmethod
-    def eat(src:str, ctx:StringBody) -> int|None:
+    def eat(src:str, ctx:StringBody|TemplateStringBody) -> int|None:
         r"""
         \u{##..##} or \U{##..##} for an arbitrary unicode character. Inside the braces defaults to hex, and users can get decimal by using the 0d prefix
         
@@ -799,7 +834,7 @@ class ParametricStringEscape(Token[StringBody]):
             return None
         return 3
     
-    def action_on_eat(self, ctx:StringBody): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self, base16))
+    def action_on_eat(self, ctx:StringBody|TemplateStringBody): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self, base16))
 
 class RawStringQuoteOpener(Token[GeneralBodyContexts]):
     matching_quote: 'StringQuoteCloser' = None  # raw strings are closed by regular quotes
@@ -830,6 +865,21 @@ class RawStringChars(Token[RawStringBody]):
         
         return i or None
 
+
+class TemplateStringQuoteOpener(Token[GeneralBodyContexts]):
+    matching_quote: 'StringQuoteCloser' = None  # template strings are closed by regular quotes
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        """dollar string quotes are t followed by any odd-length sequence of either all single or all double quotes"""
+        if not src.startswith('t"') and not src.startswith("t'"):
+            return None
+        i = StringQuoteOpener.eat(src[1:], ctx)  # eat the quote without the r prefix
+        assert i is not None, f"INTERNAL ERROR: failed to get quote part of raw string opener when already verified its presence. {ctx=}, {src=}"
+        return i + 1
+    
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(TemplateStringBody(ctx.srcfile, ctx.tokens_so_far, self))
+
+
 class RestOfFileStringQuote(Token[Root]):
     @staticmethod
     def eat(src:str, ctx:Root) -> int|None:
@@ -853,6 +903,19 @@ class RawRestOfFileStringQuote(Token[Root]):
         return 5
     
     def action_on_eat(self, ctx:Root): return Push(RawStringBody(ctx.srcfile, ctx.tokens_so_far, self))
+
+
+class TemplateRestOfFileStringQuote(Token[Root]):
+    @staticmethod
+    def eat(src:str, ctx:Root) -> int|None:
+        """a template string that has an opening delimiter but no closing delimiter (consumes until EOF)
+        Opening delimiters t\""" t'''
+        """
+        if not src.startswith('$t"""') and not src.startswith("$t'''"):
+            return None
+        return 5
+
+    def action_on_eat(self, ctx:Root): return Push(TemplateStringBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 
 class HeredocStringOpener(Token[GeneralBodyContexts]):
@@ -947,20 +1010,20 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
             error.throw()
 
 
-class HeredocStringCloser(Token[StringBody|RawStringBody]):
-    matching_quote: 'HeredocStringOpener|RawHeredocStringOpener' = None
+class HeredocStringCloser(Token[StringBody|RawStringBody|TemplateStringBody]):
+    matching_quote: 'HeredocStringOpener|RawHeredocStringOpener|TemplateHeredocStringOpener' = None
 
     @staticmethod
-    def eat(src:str, ctx:StringBody|RawStringBody) -> int|None:
+    def eat(src:str, ctx:StringBody|RawStringBody|TemplateStringBody) -> int|None:
         """a heredoc string closer is a matching opening quote"""
-        if not isinstance(ctx.opening_quote, (HeredocStringOpener, RawHeredocStringOpener)):
+        if not isinstance(ctx.opening_quote, (HeredocStringOpener, RawHeredocStringOpener, TemplateHeredocStringOpener)):
             return None
         delimiter = ctx.opening_quote.get_delim()
         if not src.startswith(delimiter):
             return None
         return len(delimiter)
     
-    def action_on_eat(self, ctx:StringBody|RawStringBody): 
+    def action_on_eat(self, ctx:StringBody|RawStringBody|TemplateStringBody): 
         ctx.opening_quote.matching_quote = self
         self.matching_quote = ctx.opening_quote
         return Pop()
@@ -986,6 +1049,30 @@ class RawHeredocStringOpener(Token[GeneralBodyContexts]):
     def get_delim(self) -> str:
         """get the delimiter from the string quote"""
         return self.src[3:-1]
+
+
+class TemplateHeredocStringOpener(Token[GeneralBodyContexts]):
+    matching_quote: 'HeredocStringCloser' = None
+
+    @staticmethod
+    def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        """template heredoc string opening and closing quotes are `$t"<delim>"` and `<delim>` respectively
+        <delim> is an arbitrary user-defined delimiter. May use any identifier or symbol characters in the language except for quotes `"`, `'`
+        """
+        if not src.startswith('$t"') and not src.startswith("$t'"):
+            return None
+        i = HeredocStringOpener.eat('$'+src[2:], ctx)
+        if i is None:
+            return None
+        return i + 1  # +1 for the `t` in the prefix
+    
+    def action_on_eat(self, ctx:GeneralBodyContexts): return Push(TemplateStringBody(ctx.srcfile, ctx.tokens_so_far, self))
+
+    def get_delim(self) -> str:
+        """get the delimiter from the string quote"""
+        return self.src[3:-1]
+
+
 
 class BasedStringQuoteOpener(Token[GeneralBodyContexts]):
     matching_quote: 'StringQuoteCloser'
@@ -1214,6 +1301,12 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
                     Pointer(span=Span(o.loc.stop, max_pos), message="Raw string body"),
                     Pointer(span=Span(max_pos, max_pos), message="End without closing quote"),
                 ], hint=f"Did you forget a `{o.src[1:]}`?"))
+            case TemplateStringBody(opening_quote=o):
+                error_stack.append(Error(srcfile, title="Missing template string closing quote", pointer_messages=[
+                    Pointer(span=o.loc, message="Template string opened here"),
+                    Pointer(span=Span(o.loc.stop, max_pos), message="Template string body"),
+                    Pointer(span=Span(max_pos, max_pos), message="End without closing quote"),
+                ], hint=f"Did you forget a `{o.src[1:]}`?"))
             case BlockBody(opening_delim=o):
                 possible_closers = '`}`' if isinstance(o, (LeftCurlyBrace, ParametricStringEscape)) else '`]` or `)`'
                 error_stack.append(Error(srcfile, title="Missing block closing delimiter", pointer_messages=[
@@ -1348,6 +1441,8 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     if len(ctx_stack) == 2 and isinstance(ctx_stack[-1], StringBody) and isinstance(ctx_stack[-1].opening_quote, RestOfFileStringQuote):
         ctx_stack.pop()
     if len(ctx_stack) == 2 and isinstance(ctx_stack[-1], RawStringBody) and isinstance(ctx_stack[-1].opening_quote, RawRestOfFileStringQuote):
+        ctx_stack.pop()
+    if len(ctx_stack) == 2 and isinstance(ctx_stack[-1], TemplateStringBody) and isinstance(ctx_stack[-1].opening_quote, TemplateRestOfFileStringQuote):
         ctx_stack.pop()
 
     # ensure that the final context is a root 
