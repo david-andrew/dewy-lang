@@ -32,6 +32,7 @@ given AST, produce output in the target backend
 
 [tasks]
 [ ] full error reporting in p0 at indicated locations
+[ ] when printing error report, take whole span of text being printed out, and dedent as much as possible (e.g. if we were just looking at something very nested and nothing surrounding it, we don't need all the indentation)
 [x] would be nice if associativity.flat could indicate a max number of the operator allowed (e.g. 2 for `..`, inf for `,`)
     ---> tbd because might be nicer just to handle it in p1
 [x] A ` B should disambiguate based on the slight higher precedence of prefix over postfix. not sure how to handle... perhaps reductions could indicate a precedence?
