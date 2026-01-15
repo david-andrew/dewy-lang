@@ -144,7 +144,7 @@ legal_heredoc_delim_chars = (
 @dataclass
 class Context(ABC):
     srcfile: SrcFile
-    tokens_so_far: 'list[Token]'
+    tokens_so_far: list[Token]
 
     def current_tokenization_position(self) -> int:
         """Return the current position in the source string that the tokenizer is at"""
@@ -157,30 +157,30 @@ class Root(Context):
 
 @dataclass
 class StringBody(Context):
-    opening_quote: 'StringQuoteOpener|RestOfFileStringQuote|HeredocStringOpener'
+    opening_quote: StringQuoteOpener | RestOfFileStringQuote | HeredocStringOpener
 
 @dataclass
 class RawStringBody(Context):
-    opening_quote: 'RawStringQuoteOpener|RawHeredocStringOpener|RawRestOfFileStringQuote'
+    opening_quote: RawStringQuoteOpener | RawHeredocStringOpener | RawRestOfFileStringQuote
 
 @dataclass
 class TemplateStringBody(Context):
-    opening_quote: 'TemplateStringQuoteOpener|TemplateHeredocStringOpener|TemplateRestOfFileStringQuote'
+    opening_quote: TemplateStringQuoteOpener | TemplateHeredocStringOpener | TemplateRestOfFileStringQuote
 
 @dataclass
 class BasedStringBody(Context):
-    opening_quote: 'BasedStringQuoteOpener'
+    opening_quote: BasedStringQuoteOpener
     base: BasePrefix
 
 @dataclass
 class BlockBody(Context):
-    opening_delim: 'LeftSquareBracket|LeftParenthesis|LeftCurlyBrace|TemplateLeftCurlyBrace|ParametricStringEscape'
+    opening_delim: LeftSquareBracket | LeftParenthesis | LeftCurlyBrace | TemplateLeftCurlyBrace | ParametricStringEscape
     default_base: BasePrefix = base10
  
 
 @dataclass
 class TypeBody(Context):
-    opening_delim: 'LeftAngleBracket'
+    opening_delim: LeftAngleBracket
     default_base: BasePrefix = base10
 
 # convenient unions for common context combinations
@@ -272,13 +272,13 @@ class Token[T:Context](ABC):
         """
         return None
 
-    def __init_subclass__(cls: type['Token'], **kwargs):
+    def __init_subclass__(cls: type[Token], **kwargs):
         """verify that subclasses parameterize Token with a context argument and set the valid_contexts class variable"""
         super().__init_subclass__(**kwargs)
         cls.valid_contexts = set(cls._get_ctx_params())
 
     @classmethod
-    def _get_ctx_params(cls: type['Token']) -> list[type[Context]]:
+    def _get_ctx_params(cls: type[Token]) -> list[type[Context]]:
         """get the type parameters of the child class (e.g. class Identifier(Token[GeneralBodyContexts])) -> [*GeneralBodyContexts]"""
         for base in getattr(cls, '__orig_bases__', []):
             if get_origin(base) is Token:

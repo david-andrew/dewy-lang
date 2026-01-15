@@ -96,7 +96,7 @@ COLOR_NAME_TO_CODE: dict[ColorName, str] = {
 
 class ReportException(Exception):
     """Exception raised when a Report is thrown. Contains the report for handling."""
-    def __init__(self, report: "Report") -> None:
+    def __init__(self, report: Report) -> None:
         self.report = report
         super().__init__(str(report))
 
@@ -164,7 +164,7 @@ class Span:
     def is_zero_width(self) -> bool:
         return self.start == self.stop
     
-    def clamp_to(self, lo:int, hi:int) -> "Span":
+    def clamp_to(self, lo:int, hi:int) -> Span:
         start = min(max(self.start, lo), hi)
         stop = min(max(self.stop, lo), hi)
         return Span(start, stop)
@@ -203,7 +203,7 @@ class SrcFile:
         return starts
     
     @classmethod
-    def from_text(cls, body:str, path:PathLike[str]|None=None) -> "SrcFile":
+    def from_text(cls, body:str, path:PathLike[str]|None=None) -> SrcFile:
         return cls(path=path, body=body)
 
     def offset_to_row_col(self, index:int) -> tuple[int, int]:

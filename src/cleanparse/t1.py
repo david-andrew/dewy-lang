@@ -58,14 +58,14 @@ class Token(ABC):
 
     @staticmethod
     @abstractmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Token]|None': ...
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Token]|None: ...
 
 
 @dataclass
 class InedibleToken(Token):
     """For Token2's that are not constructed via the normal .eat() method. instead other tokens may construct them directly"""
     @classmethod
-    def eat(cls, tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, InedibleToken]|None':
+    def eat(cls, tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, InedibleToken]|None:
         raise NotImplementedError(f'{cls.__name__} should not be constructed via .eat(). Instead some other token should construct it directly via {cls.__name__}(...)')
 
 @dataclass
@@ -122,7 +122,7 @@ class Real(Token):
     ieee754<float64>'0x1.8p10'
     """
     @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Real]|None':
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Real]|None:
         if start + 2 >= len(tokens):
             return None
         ########## Whole number part ##########
@@ -199,7 +199,7 @@ class String(Token):
     (perhaps later in type checking, some interpolated strings could be converted to chars only if their expression is compiletime const)
     """
     # potentially find a way for IString to share this logic, since it's just a matter of checking what was in the string body
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, String]|None':
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, String]|None:
         opener = tokens[start]
         if isinstance(opener, (t0.StringQuoteOpener, t0.RawStringQuoteOpener, t0.TemplateStringQuoteOpener, t0.HeredocStringOpener, t0.RawHeredocStringOpener, t0.TemplateHeredocStringOpener)):
             body_start, body_stop = start + 1, opener.matching_quote.idx
@@ -232,7 +232,7 @@ class String(Token):
             return escape.src[1] # all other escapes are just the literal next character
 
     @staticmethod
-    def body_to_string(tokens: list[t0.Token], ctx:Context, body_start:int, body_stop:int) -> 'str|list[str|ParametricEscape|Block]':
+    def body_to_string(tokens: list[t0.Token], ctx:Context, body_start:int, body_stop:int) -> str | list[str | ParametricEscape | Block]:
         chunks = []
         token_iter = JumpableIterator(tokens, body_start, body_stop)
         for token in token_iter:
@@ -283,7 +283,7 @@ class ParametricEscape(InedibleToken):
 @dataclass
 class IString(InedibleToken):
     """Any string that contains an expression or interpolation (includes parametric unicode+hex escapes)"""
-    content: 'list[str | ParametricEscape | Block]'
+    content: list[str | ParametricEscape | Block]
 
 @dataclass
 class Block(Token):
@@ -309,10 +309,10 @@ class Block(Token):
 
 @dataclass
 class BasedString(Token):
-    digits: 'list[t0.BasedStringChars]'
+    digits: list[t0.BasedStringChars]
     base: t0.BasePrefix
     @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, BasedString]|None':
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, BasedString]|None:
         opener = tokens[start]
         if not isinstance(opener, t0.BasedStringQuoteOpener):
             return None
@@ -329,7 +329,7 @@ class BasedArray(Token):
     inner: list[Token]
     base: t0.BasePrefix
     @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, BasedArray]|None':
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, BasedArray]|None:
         opener = tokens[start]
         if not isinstance(opener, t0.BasedBlockOpener):
             return None
@@ -347,7 +347,7 @@ class Identifier(Token):
     name: str
 
     @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Identifier]|None':
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Identifier]|None:
         token = tokens[start]
         if isinstance(token, t0.Identifier) and token.src.casefold() not in keywords and token.src.casefold() not in word_operators:
             return 1, Identifier(token.loc, token.src)
@@ -359,7 +359,7 @@ class Identifier(Token):
 @dataclass
 class Semicolon(Token):
     @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Semicolon]|None':
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Semicolon]|None:
         token = tokens[start]
         if isinstance(token, t0.Symbol) and token.src == ';':
             return 1, Semicolon(token.loc)
@@ -370,7 +370,7 @@ class Operator(Token):
     symbol: str
 
     @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Operator]|None':
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Operator]|None:
         token = tokens[start]
 
         # non-symbolic operators
@@ -390,7 +390,7 @@ class Keyword(Token): # e.g. if, loop, import, let, etc. any keyword that behave
     name: str
 
     @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Keyword]|None':
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Keyword]|None:
         token = tokens[start]
         if isinstance(token, t0.Identifier) and token.src.casefold() in keywords:
             return 1, Keyword(token.loc, token.src.casefold())
@@ -400,7 +400,7 @@ class Keyword(Token): # e.g. if, loop, import, let, etc. any keyword that behave
 class Metatag(Token):
     name: str
     @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Metatag]|None':
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Metatag]|None:
         token = tokens[start]
         if isinstance(token, t0.Metatag):
             return 1, Metatag(token.loc, token.src[1:])
@@ -410,7 +410,7 @@ class Metatag(Token):
 class Integer(Token):
     value: t0.Number
     @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Integer]|None':
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Integer]|None:
         token = tokens[start]
         if isinstance(token, t0.Number):
             return 1, Integer(token.loc, token)
@@ -419,7 +419,7 @@ class Integer(Token):
 @dataclass
 class Whitespace(Token): # so we can invert later for juxtapose
     @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Whitespace]|None':
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Whitespace]|None:
         i = 0
         while start + i < len(tokens) and isinstance(tokens[start + i], (t0.Whitespace, t0.LineComment, t0.BlockComment)):
             i += 1
@@ -449,7 +449,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     ctx = Context(srcfile)
     return list(tokenize_gen(tokens, ctx))
 
-def tokenize_gen(tokens:list[t0.Token], ctx:Context, start:int=0, stop:int=None) -> Generator[Token, None, None]:
+def tokenize_gen(tokens:list[t0.Token], ctx:Context, start:int=0, stop:int=None) -> Generator[Token]:
     # processed: list[Token2] = []
     if stop is None: stop = len(tokens)
     if stop > len(tokens): raise ValueError(f"INTERNAL ERROR: stop index out of range: {stop} > {len(tokens)}")
@@ -491,7 +491,7 @@ def tokenize_gen(tokens:list[t0.Token], ctx:Context, start:int=0, stop:int=None)
     # return processed
 
 
-def peek_next_token(tokens:list[t0.Token], ctx:Context, start:int) -> 'Token|t0.Token|None':
+def peek_next_token(tokens:list[t0.Token], ctx:Context, start:int) -> Token | t0.Token | None:
     """Mostly for error reporting purposes. Try to get the next token2. Otherwise try to get the next token1. Otherwise return None"""
     if start >= len(tokens):
         return None

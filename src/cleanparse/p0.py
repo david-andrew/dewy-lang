@@ -52,30 +52,30 @@ class qint:
     """
     values: set[int]
     def __post_init__(self): assert len(self.values) > 1, f'qint must have more than one value. Got {self.values}'
-    def __gt__(self, other: 'int|qint') -> bool: return all(v > other for v in self.values)
-    def __lt__(self, other: 'int|qint') -> bool: return all(v < other for v in self.values)
-    def __ge__(self, other: 'int|qint') -> bool: return self.__gt__(other)
-    def __le__(self, other: 'int|qint') -> bool: return self.__lt__(other)
+    def __gt__(self, other: int|qint) -> bool: return all(v > other for v in self.values)
+    def __lt__(self, other: int|qint) -> bool: return all(v < other for v in self.values)
+    def __ge__(self, other: int|qint) -> bool: return self.__gt__(other)
+    def __le__(self, other: int|qint) -> bool: return self.__lt__(other)
     def __eq__(self, other: object) -> bool: return False
-    def __add__(self, other: int) -> 'qint':
+    def __add__(self, other: int) -> qint:
         if not isinstance(other, int): return NotImplemented
         return qint({v + other for v in self.values})
-    def __radd__(self, other: int) -> 'qint': return self.__add__(other)
-    def __sub__(self, other: int) -> 'qint':
+    def __radd__(self, other: int) -> qint: return self.__add__(other)
+    def __sub__(self, other: int) -> qint:
         if not isinstance(other, int): return NotImplemented
         return qint({v - other for v in self.values})
-    def __rsub__(self, other: int) -> 'qint':
+    def __rsub__(self, other: int) -> qint:
         if not isinstance(other, int): return NotImplemented
         return qint({other - v for v in self.values})
-    def __mul__(self, other: int) -> 'qint':
+    def __mul__(self, other: int) -> qint:
         if not isinstance(other, int): return NotImplemented
         if other == 0: raise RuntimeError(f'Currently, multiplying by 0 is not allowed. got {self}*{other}. TBD if this was reasonable (would return int(0) instead of qint)')
         return qint({v * other for v in self.values})
-    def __rmul__(self, other: int) -> 'qint': return self.__mul__(other)
-    def __floordiv__(self, other: int) -> 'qint':
+    def __rmul__(self, other: int) -> qint: return self.__mul__(other)
+    def __floordiv__(self, other: int) -> qint:
         if not isinstance(other, int): return NotImplemented
         return qint({v // other for v in self.values})
-    def __rfloordiv__(self, other: int) -> 'qint':
+    def __rfloordiv__(self, other: int) -> qint:
         if not isinstance(other, int): return NotImplemented
         return qint({other // v for v in self.values})
 

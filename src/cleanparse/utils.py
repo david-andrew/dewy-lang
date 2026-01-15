@@ -1,4 +1,4 @@
-from typing import Generator, Any, overload
+from typing import Generator
 
 def first_line(s:str) -> str:
     return s.split('\n')[0]
@@ -34,9 +34,7 @@ class classproperty:
         return self.fget()
 
 
-from typing import TypeVar
-T = TypeVar('T')
-def descendants(cls: type[T]) -> Generator[type[T], None, None]:
+def descendants[T](cls: type[T]) -> Generator[type[T]]:
     for subclass in cls.__subclasses__():
         yield subclass
         yield from descendants(subclass)
@@ -78,7 +76,7 @@ class JumpableIterator[T]:
         self.i = start
         self.stop = stop if stop is not None else len(items)
 
-    def __iter__(self) -> Generator[T, None, None]:
+    def __iter__(self) -> Generator[T]:
         return self
 
     def __next__(self) -> T:
