@@ -32,6 +32,8 @@ given AST, produce output in the target backend
 
 [tasks]
 [ ] full error reporting in p0 at indicated locations
+[x] would be nice if associativity.flat could indicate a max number of the operator allowed (e.g. 2 for `..`, inf for `,`)
+    ---> tbd because might be nicer just to handle it in p1
 [x] A ` B should disambiguate based on the slight higher precedence of prefix over postfix. not sure how to handle... perhaps reductions could indicate a precedence?
 [x] `;` cannot participate in binops, prefix ops, or postfix ops (except for semicolon juxtapose)
 [-] overhaul how juxtapose tokens are determined. basically they can be next to operators, so long as that op is part of a chain

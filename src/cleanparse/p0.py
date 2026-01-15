@@ -260,63 +260,68 @@ class Ambiguous(AST):
 
 
 
-def validate(ast: AST, ctx: Context) -> NoReturn|None:
-    # special error cases when trying to make a reduction
-    # NOTE: if there become many more special cases to check, make a table that looks up functions given the operator
-    if isinstance(ast, Flat) and isinstance(ast.op, t2.RangeJuxtapose):
-        dotdot_idxs = [i for i, t in enumerate(ast.items) if isinstance(t, Atom) and t2.is_dotdot(t.item)]
-        jux_spans = []
-        for idx in dotdot_idxs:
-            dotdot_span = ast.items[idx].item.loc
-            if idx > 0:
-                jux_spans.append(Span(dotdot_span.start, dotdot_span.start))
-            if idx < len(ast.items) - 1:
-                jux_spans.append(Span(dotdot_span.stop, dotdot_span.stop))
-        if len(dotdot_idxs) > 1:
-            error = Error(
-                srcfile=ctx.srcfile,
-                title="multiple `..` tokens encountered in single range expression",
-                pointer_messages=[
-                    Pointer(ast.items[idx].item.loc, message=f"{ordinalize(i+1)} connected `..` token", placement='below')
-                    for i, idx in enumerate(dotdot_idxs)
-                ] + [
-                    Pointer(span, message='RangeJuxtapose', placement='above') for span in jux_spans
-                ],
-                hint=dedent("""\
-                    A range expression may only include one `..` token.
-                    Possible Fixes:
-                    - Insert whitespace next to `..` to create multiple range expressions 
-                    - wrap ranges in () or [] or (] or [) to explicitly delimit
-                    - remove any extra `..` so that there is only one per range
-                    
-                    Some examples of ranges:
-                    - first..             # first to inf
-                    - ..last              # -inf to last
-                    - first..last         # first to last
-                    - ..                  # -inf to inf
-                    
-                    Specifying a step size:
-                    - first,second..      # first to inf, step size is second-first
-                    - first,second..last  # first to last, step size is second-first
-                    - ..2ndlast,last      # -inf to last, step size is last-2ndlast
-                    
-                    Specifying inclusivity bounds:
-                    - [first..last]       # first to last including first and last
-                    - [first..last)       # first to last including first, excluding last
-                    - (first..last]       # first to last excluding first, including last
-                    - (first..last)       # first to last excluding first and last
-                    - first..last         # defaults to inclusive, i.e. [first..last]
-                    
-                    Range arguments attach via juxtaposition:
-                    - first..last         # first to last. Both sides are included
-                    - first ..last        # -inf to last. first is not part of the range
-                    - first.. last        # first to inf. last is not part of the range
-                    - first .. last       # -inf to inf. neither first or last are included
-                    """
-                ),
+# special error cases when trying to make a reduction
+# NOTE: if there become many more special cases to check, make a table that looks up functions given the operator
+def validate_flat(ast: Flat, ctx: Context) -> NoReturn|None:
+    # since rangejux is the only flat to check at the moment, have a simpler structure here
+    if not isinstance(ast.op, t2.RangeJuxtapose):
+        return
+    
+    # verify that .. only appears once in the range expression
+    dotdot_idxs = [i for i, t in enumerate(ast.items) if isinstance(t, Atom) and t2.is_dotdot(t.item)]
+    jux_spans = []
+    for idx in dotdot_idxs:
+        dotdot_span = ast.items[idx].item.loc
+        if idx > 0:
+            jux_spans.append(Span(dotdot_span.start, dotdot_span.start))
+        if idx < len(ast.items) - 1:
+            jux_spans.append(Span(dotdot_span.stop, dotdot_span.stop))
+    if len(dotdot_idxs) > 1:
+        error = Error(
+            srcfile=ctx.srcfile,
+            title="multiple `..` tokens encountered in single range expression",
+            pointer_messages=[
+                Pointer(ast.items[idx].item.loc, message=f"{ordinalize(i+1)} connected `..` token", placement='below')
+                for i, idx in enumerate(dotdot_idxs)
+            ] + [
+                Pointer(span, message='RangeJuxtapose', placement='above') for span in jux_spans
+            ],
+            # TODO (long term): probably would be better to somehow point to the docs...
+            hint=dedent("""\
+                A range expression may only include one `..` token.
+                Possible Fixes:
+                - Insert whitespace next to `..` to create multiple range expressions 
+                - wrap ranges in () or [] or (] or [) to explicitly delimit
+                - remove any extra `..` so that there is only one per range
+                
+                Some examples of ranges:
+                - first..             # first to inf
+                - ..last              # -inf to last
+                - first..last         # first to last
+                - ..                  # -inf to inf
+                
+                Specifying a step size:
+                - first,second..      # first to inf, step size is second-first
+                - first,second..last  # first to last, step size is second-first
+                - ..2ndlast,last      # -inf to last, step size is last-2ndlast
+                
+                Specifying inclusivity bounds:
+                - [first..last]       # first to last including first and last
+                - [first..last)       # first to last including first, excluding last
+                - (first..last]       # first to last excluding first, including last
+                - (first..last)       # first to last excluding first and last
+                - first..last         # defaults to inclusive, i.e. [first..last]
+                
+                Range arguments attach via juxtaposition:
+                - first..last         # first to last. Both sides are included
+                - first ..last        # -inf to last. first is not part of the range
+                - first.. last        # first to inf. last is not part of the range
+                - first .. last       # -inf to inf. neither first or last are included
+                """
+            ),
 
-            )
-            error.throw()
+        )
+        error.throw()
 
 
 
@@ -418,6 +423,9 @@ def shunt_pass(items: list[Operator|AST], ctx: Context) -> None:
             raise ValueError(f"INTERNAL ERROR: left and right have identical binding power. this shouldn't be possible. got {left_bp=} and {right_bp=} for {left_op=} and {right_op=}")
         else:
             # TODO: handle ambiguous case...
+            # perhaps set shift = qint(-1, 1)
+            # then when reducing, any shift that was qint makes an ambiguous node
+            # and then after all the reductions, something spreads out all the ambiguous nodes orthogonally to the list of items...
             pdb.set_trace()
             ...
 
@@ -454,7 +462,9 @@ def shunt_pass(items: list[Operator|AST], ctx: Context) -> None:
                 if res is None:
                     continue
                 operands, bounds = res
-                reductions.append((Flat(op, operands), bounds, a))
+                ast = Flat(op, operands)
+                validate_flat(ast, ctx)  # check that 
+                reductions.append((ast, bounds, a))
             elif (a == Associativity.fail) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 # TODO: full error report for these exceptions
                 if isinstance(left_ast, BinOp) and op_equals(left_ast.op, op):
@@ -495,17 +505,15 @@ def shunt_pass(items: list[Operator|AST], ctx: Context) -> None:
             pdb.set_trace()
             raise ValueError(f'INTERNAL ERROR: multiple reductions found for {op=}. got {reductions=}')
         
-        # validate the reduction before adding it to the list
-        reduction = reductions[0]
-        validate(reduction[0], ctx)
-        all_reductions.append(reduction)
+        # add the reduction to the list
+        all_reductions.append(reductions[0])
         
     
     # apply reductions in reverse order to avoid index shifting issues
     for reduction, (left_bound, right_bound), _ in reversed(all_reductions):
         items[left_bound:right_bound] = [reduction]
 
-
+# TODO: the description here is a bit confusing (and it says True twice). need to fix, but no longer understand how it works
 def left_could_attach(left_ast_idx: int, items: list[Operator|AST]) -> bool:
     """determine if the items left of a candidate prefix or binary operator connect to that binary operator
     cases:
@@ -549,7 +557,7 @@ def left_could_attach(left_ast_idx: int, items: list[Operator|AST]) -> bool:
     # no items to left that could attach
     return False
 
-def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, items: list[Operator|AST], reverse_ast_idxs_map: dict[int, int], shift_dirs: list[Literal[-1, 0, 1]]) -> list[AST]|None:
+def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, items: list[Operator|AST], reverse_ast_idxs_map: dict[int, int], shift_dirs: list[Literal[-1, 0, 1]]) -> tuple[list[AST], tuple[int, int]]|None:
     # check for the whole flat chain
     left_ast, right_ast = items[left_ast_idx], items[right_ast_idx]
     operands: list[AST] = [left_ast, right_ast]
