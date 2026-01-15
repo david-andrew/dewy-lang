@@ -31,6 +31,17 @@ given AST, produce output in the target backend
 
 
 [tasks]
+[ ] handling ambiguous parses:
+    - use existing Ambiguous: list[AST] struct
+    - make a proper struct/dataclass for Reduction()
+    - when going into the shunt pass, for a in associativity, cache those inputs if they produced a reduction (be careful to compare on identity rather than equality so that we only cache the actual right thing)
+    - the list of items should actually be possible to be a multi-list of items, with each sub list being one of the possible parses
+        - perhaps it is a set so we get auto-dedup, but maybe we manually have to track dedup
+    - parent context receives a list[AST] or multilist[AST], and if it was a multilist, we spawn make an Ambiguous node out of the reciever, containing the receiver containing one of each of the inner versions
+        - e.g. block.inner -> list[list[AST]]. for candidate:list[AST] in ambiguous_parsed_inners: Ambiguous.append(Block[candidate])
+    - for convenience, probably package up aspects of the shunt pass as separate functions, so its easier to deal with ambiguous vs regular case
+    - potentially can fold in some of the other ambiguous stuff (e.g. if multiple reductions occur? (but only we couldn't determine))
+
 [ ] full error reporting in p0 at indicated locations
 [ ] when printing error report, take whole span of text being printed out, and dedent as much as possible (e.g. if we were just looking at something very nested and nothing surrounding it, we don't need all the indentation)
 [x] would be nice if associativity.flat could indicate a max number of the operator allowed (e.g. 2 for `..`, inf for `,`)
