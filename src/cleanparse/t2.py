@@ -40,6 +40,7 @@ class CombinedAssignmentOp(t1.InedibleToken):
 class OpFn(t1.InedibleToken):
     op: t1.Operator|BroadcastOp|CombinedAssignmentOp
 
+
 """
 keywords:
 'loop', 'do', 'if', 'else', 'match', 'return', 'yield', 'break', 'continue',
@@ -72,17 +73,22 @@ flows # note that if-else-if/if-else-loop/etc. should all be bundled up into one
 
 @dataclass
 class KeywordExpr(t1.InedibleToken):
-    parts: list[t1.Keyword | list[t1.Token]]
+    parts: list[t1.Keyword | Chain]
 
 @dataclass
 class FlowArm(t1.InedibleToken):
-    parts: list[t1.Keyword | list[t1.Token]]
+    parts: list[t1.Keyword | Chain]
 
 @dataclass
 class Flow(t1.InedibleToken):
     arms: list[FlowArm]
-    default: list[t1.Token]|None=None
-    
+    default: Chain|None=None
+
+
+@dataclass
+class Chain(t1.InedibleToken):
+    items: list[t1.Token]
+
 
 # token categories used by the keyword/flow bundler.
 # Atom tokens may be juxtaposed with each other.
@@ -240,12 +246,14 @@ def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None], *args,
             recurse_into(child, func, *args, **kwargs)
     elif isinstance(token, (KeywordExpr, FlowArm)):
         for part in token.parts:
-            if isinstance(part, list):
-                func(part, *args, **kwargs)
+            if isinstance(part, Chain):
+                func(part.items, *args, **kwargs)
     elif isinstance(token, Flow):
         func(token.arms, *args, **kwargs)
         if token.default is not None:
-            func(token.default, *args, **kwargs)
+            func(token.default.items, *args, **kwargs)
+    elif isinstance(token, Chain):
+        func(token.items, *args, **kwargs)
 
     # else no inner tokens. TODO: would be nice if we could error if there were any unhandled cases with inner tokens...
 
@@ -390,7 +398,7 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
     return out, i
 
 
-def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[list[t1.Token], int]:
+def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[Chain, int]:
     """
     Collect a single expression chain starting at `start`.
 
@@ -408,22 +416,27 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
       (expr_tokens, next_index)
     """
     i = start
-    out: list[t1.Token] = []
+    items: list[t1.Token] = []
 
     chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords)
     if not chunk:
-        return out, i
-    out.extend(chunk)
+        # TODO: perhaps we should error here because no chunk was found when we expected one
+        # raise ValueError(f"expected chunk, got {tokens[i]=}")
+        return Chain(Span(tokens[start].loc.start, tokens[start].loc.start), items), i
+    items.extend(chunk)
 
+    # NOTE: this would be trickier if we had any postfix ops that could also be binary.
+    # for now, since we don't we can happily collect chunks that consume all postfix ops
+    # but if that changes, we'd sometimes have to check the last token in the chunk to see if it could connect to the next chunk 
     while i < len(tokens) and not is_stop_keyword(tokens[i], stop_keywords) and not isinstance(tokens[i], t1.Semicolon):
         if not is_binary_op(tokens[i]):
             break
-        out.append(tokens[i])
+        items.append(tokens[i])
         i += 1
         chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords)
-        out.extend(chunk)
+        items.extend(chunk)
 
-    return out, i
+    return Chain(Span(tokens[start].loc.start, tokens[i-1].loc.stop), items), i
 
 
 def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[FlowArm, int]:
@@ -450,7 +463,7 @@ def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[s
         loop_kw = tokens[i]
         i += 1
         cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"do"})
-        parts: list[t1.Keyword | list[t1.Token]] = [kw, pre, loop_kw, cond]
+        parts: list[t1.Keyword | Chain] = [kw, pre, loop_kw, cond]
         if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name == "do":
             do2 = tokens[i]
             i += 1
@@ -458,16 +471,10 @@ def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[s
             parts.extend([do2, post])
         return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
 
-    if kw.name in {"if", "match"}:
+    if kw.name in {"if", "match", "loop"}:
         cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
         clause, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-        parts: list[t1.Keyword | list[t1.Token]] = [kw, cond, clause]
-        return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
-
-    if kw.name == "loop":
-        cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-        clause, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-        parts: list[t1.Keyword | list[t1.Token]] = [kw, cond, clause]
+        parts: list[t1.Keyword | Chain] = [kw, cond, clause]
         return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
 
     raise ValueError(f"unexpected flow keyword {kw.name!r}")
@@ -485,7 +492,7 @@ def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     """
     i = start
     arms: list[FlowArm] = []
-    default: list[t1.Token] | None = None
+    default: Chain | None = None
 
     while True:
         arm, i = collect_flow_arm(tokens, i, stop_keywords=stop_keywords | {"else"})
@@ -501,8 +508,8 @@ def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
         default, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"else"})
         break
 
-    if default is not None:
-        end = arms[-1].loc.stop if not default else default[-1].loc.stop
+    if default is not None and default.items:
+        end = default.items[-1].loc.stop
     else:
         end = arms[-1].loc.stop
     return Flow(Span(tokens[start].loc.start, end), arms, default), i
@@ -621,6 +628,9 @@ def postok_inner(tokens: list[t1.Token]) -> None:
     insert_juxtapose(tokens)  # insert juxtapose between any keyword/flow expressions that got added
                               # can't skip first insert_juxtapose because they are necessary operators 
                               # to allow bundle_keyword_exprs to work properly
+    
+    # 
+    # make_chains(tokens)
 
 
 def test():
