@@ -1,14 +1,30 @@
 """
 Post processing steps on tokens to prepare them for expression parsiing
 """
-from typing import Callable, Literal, cast
+from typing import Callable, Literal, cast, TypeAlias
 from dataclasses import dataclass
 from .reporting import SrcFile, ReportException, Span
 from . import t1
 
+
+
 # various juxtapose operators, for handling precedence in cases known at tokenization time
 @dataclass
-class Juxtapose(t1.InedibleToken): ...
+class Juxtapose(t1.InedibleToken):
+    """abstract base class for all juxtapose operators"""
+    def __new__(cls, *args, **kwargs):
+        if cls is Juxtapose:
+            raise TypeError("Juxtapose is abstract; instantiate a specific subclass instead")
+        return super().__new__(cls)
+
+@dataclass
+class CallJuxtapose(Juxtapose): ...
+
+@dataclass
+class IndexJuxtapose(Juxtapose): ...
+
+@dataclass
+class MultiplyJuxtapose(Juxtapose): ...
 
 @dataclass
 class RangeJuxtapose(Juxtapose): ...
@@ -24,7 +40,7 @@ class SemicolonJuxtapose(Juxtapose): ...
 
 @dataclass
 class InvertedComparisonOp(t1.InedibleToken):
-    op: Literal['=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?']
+    op: Literal['=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '@?']
 
 @dataclass
 class BroadcastOp(t1.InedibleToken):
@@ -39,6 +55,76 @@ class CombinedAssignmentOp(t1.InedibleToken):
 @dataclass
 class OpFn(t1.InedibleToken):
     op: t1.Operator|BroadcastOp|CombinedAssignmentOp
+
+
+@dataclass
+class QOperator(t1.InedibleToken):
+    """
+    Quantum Operator: represents operator ambiguity at a given point. Mainly for vanilla juxtapose.
+    E.g. without type information, a plain juxtapose could be a call, index, or multiply
+    ```
+    x = 1
+    y = 2
+    z = [3]
+    
+    sin(x)   # call
+    x(y)     # multiply
+    x[y]     # index
+    (x)z     # index
+    # etc.
+    ```
+    """
+    options: list[Operator]
+
+# TODO: can't remove quotes around types b/c using old TypeAlias syntax compared to type Alias syntax
+#       but won't switch yet because type Alias semantics are different, and a pain in the butt.
+QOperatorTypeIsh: TypeAlias = 'Callable[[Span], QOperator]'
+def _qoperator_factory(options: list[type[Operator]]) -> QOperatorTypeIsh:
+    """
+    higher order function so we can return a class-ish object that is instantiated the same way as normal juxtapose tokens
+    Note: the options classes may not take any arguments except for the span (i.e. t1.Operator would raise exception)
+    """
+    def new(span: Span) -> QOperator:
+        return QOperator(span, [op(span) for op in options])
+    return new
+
+
+# concrete operator token types
+Operator: TypeAlias = (
+      t1.Operator
+    | QOperator
+    | CallJuxtapose
+    | IndexJuxtapose
+    | MultiplyJuxtapose
+    | RangeJuxtapose
+    | EllipsisJuxtapose
+    | TypeParamJuxtapose
+    | SemicolonJuxtapose
+    | InvertedComparisonOp
+    | CombinedAssignmentOp
+    | BroadcastOp
+)
+
+
+def op_equals(left: Operator, right: Operator) -> bool:
+    """checks if two operators are the same kind (ignoring span/position)"""
+    if type(left) is not type(right): return False # ensure left and right are the same type of operator
+    if isinstance(left, t1.Operator):
+        return left.symbol == right.symbol
+    if isinstance(left, InvertedComparisonOp):
+        return left.op == right.op
+    if isinstance(left, CombinedAssignmentOp):
+        return op_equals(left.op, right.op)
+    if isinstance(left, BroadcastOp):
+        return left.op == right.op
+    if isinstance(left, QOperator) or isinstance(right, QOperator):
+        # TODO: not sure how op equals should behave for QOperators. maybe just always return False? or check if inners are all equal modulo ordering
+        import pdb; pdb.set_trace()
+        ...
+
+    assert isinstance(left, (CallJuxtapose, IndexJuxtapose, MultiplyJuxtapose, RangeJuxtapose, EllipsisJuxtapose, TypeParamJuxtapose, SemicolonJuxtapose)), f'INTERNAL ERROR: unexpected operator types. expected juxtapose. got {left=} and {right=}'
+    return True
+
 
 
 """
@@ -75,6 +161,9 @@ flows # note that if-else-if/if-else-loop/etc. should all be bundled up into one
 class KeywordExpr(t1.InedibleToken):
     parts: list[t1.Keyword | Chain]
 
+# TODO: consider merging FlowArm and KeywordExpr into a single class
+#       if don't, then p0 merges them. TBD, might be necessary for parsing here...
+#       but perhaps can keep the exact functions here, and collect_flow_arm would just return a KeywordExpr anyways
 @dataclass
 class FlowArm(t1.InedibleToken):
     parts: list[t1.Keyword | Chain]
@@ -98,7 +187,7 @@ atom_tokens: set[type[t1.Token]] = {
     t1.IString,
     t1.Block,
     t1.BasedString,
-    t1.BasedArray,
+    # t1.BasedArray,
     t1.Identifier,
     t1.Metatag,
     t1.Integer,
@@ -111,7 +200,9 @@ atom_tokens: set[type[t1.Token]] = {
 
 # not including t1.Operator
 other_infix_tokens: set[type[t1.Token]] = { 
-    Juxtapose,
+    CallJuxtapose,
+    IndexJuxtapose,
+    MultiplyJuxtapose,
     RangeJuxtapose,
     EllipsisJuxtapose,
     TypeParamJuxtapose,
@@ -161,7 +252,7 @@ def is_dotdotdot(token: t1.Token) -> bool:
 def is_typeparam(token: t1.Token) -> bool:
     return isinstance(token, t1.Block) and token.kind == '<>'
 
-def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[Juxtapose]|None:
+def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[Juxtapose]|QOperatorTypeIsh|None:
     """
     For certain tokens, we alredy know which juxtapose (precedence level) they should have
     
@@ -226,35 +317,35 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[J
         return None
     
 
-    # juxt call and jux mul may only be between atoms
+    # jux call, jux index, or jux mul. may only be between atoms (i.e. no operators on either side)
     if type(left) in atom_tokens and type(right) in atom_tokens:
-        return Juxtapose
+        return _qoperator_factory([CallJuxtapose, IndexJuxtapose, MultiplyJuxtapose])
     
     # otherwise no jux
     return None
 
 
-def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None], *args, **kwargs) -> None:
+def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> None:
     """
     Helper to recursively apply a function to the inner tokens of a token (if it has any)
     It is expected that `func` will call `recurse_into` with itself as the callable.
     """
-    if isinstance(token, (t1.Block, t1.ParametricEscape, t1.BasedArray)):
-        func(token.inner, *args, **kwargs)
+    if isinstance(token, (t1.Block, t1.ParametricEscape)):
+        func(token.inner)
     elif isinstance(token, t1.IString):
         for child in token.content:
-            recurse_into(child, func, *args, **kwargs)
+            recurse_into(child, func)
     elif isinstance(token, (KeywordExpr, FlowArm)):
         for part in token.parts:
             if isinstance(part, Chain):
-                func(part.items, *args, **kwargs)
+                func(part.items)
     elif isinstance(token, Flow):
         for arm in token.arms:
-            recurse_into(arm, func, *args, **kwargs)
+            recurse_into(arm, func)
         if token.default is not None:
-            recurse_into(token.default, func, *args, **kwargs)
+            recurse_into(token.default, func)
     elif isinstance(token, Chain):
-        func(token.items, *args, **kwargs)
+        func(token.items)
 
     # else no inner tokens. TODO: would be nice if we could error if there were any unhandled cases with inner tokens...
 
@@ -417,6 +508,11 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     Returns:
       (expr_tokens, next_index)
     """
+    # free semicolons are their own expression
+    if start < len(tokens) and isinstance(tokens[start], t1.Semicolon):
+        semicolon = tokens[start]
+        return Chain(semicolon.loc, [semicolon]), start + 1
+
     i = start
     items: list[t1.Token] = []
 
@@ -424,6 +520,7 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     if not chunk:
         # TODO: perhaps we should error here because no chunk was found when we expected one
         # raise ValueError(f"expected chunk, got {tokens[i]=}")
+        import pdb; pdb.set_trace()
         return Chain(Span(tokens[start].loc.start, tokens[start].loc.start), items), i
     items.extend(chunk)
 
@@ -437,6 +534,11 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
         i += 1
         chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords)
         items.extend(chunk)
+
+    # if end of expression was juxtaposed with a semicolon, include it in the chain
+    if i > 0 and i < len(tokens) and isinstance(tokens[i-1], SemicolonJuxtapose) and isinstance(tokens[i], t1.Semicolon):
+        items.append(tokens[i])
+        i += 1
 
     return Chain(Span(tokens[start].loc.start, tokens[i-1].loc.stop), items), i
 
@@ -607,17 +709,21 @@ def make_chains(tokens: list[t1.Token]) -> None:
     """convert list[Token] into list[Chain] in place"""
     i = 0
     while i < len(tokens):
-        recurse_into(tokens[i], make_chains)
-        
         # this technically shouldn't happen... (unless maybe we hit chains during recurse_into?)
         if isinstance(tokens[i], Chain):
+            import pdb; pdb.set_trace()
+            # TODO: test on keyword_expressions.dewy to verify this does or doesn't
+            raise ValueError('INTERNAL ERROR: unexpected chain when making chains... unless maybe from keyword exprs...')
             i += 1
             continue
 
         expr, j = collect_expr(tokens, i, stop_keywords=set())
         tokens[i:j] = [expr]
         i += 1
-
+        
+        for t in expr.items:
+            recurse_into(t, make_chains)
+        
 
 
 def postok(srcfile: SrcFile) -> list[Chain]:
@@ -648,7 +754,7 @@ def postok_inner(tokens: list[t1.Token]) -> None:
                               # can't skip first insert_juxtapose because they are necessary operators 
                               # to allow bundle_keyword_exprs to work properly
     
-    # 
+    # convert all lists[Token] into list[Chain] so parsing doesn't have to separate separate expressions
     make_chains(tokens)
 
 

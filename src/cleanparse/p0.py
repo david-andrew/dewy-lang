@@ -7,6 +7,7 @@ from typing import NoReturn, Sequence, Callable, TypeAlias, Literal, cast
 from dataclasses import dataclass
 from enum import Enum, auto
 
+from . import t0
 from . import t1
 from . import t2
 from .reporting import SrcFile, ReportException, Error, Pointer, Span
@@ -14,33 +15,6 @@ from .utils import ordinalize
 
 import pdb
 
-Operator: TypeAlias = (
-      t1.Operator
-    | t2.Juxtapose
-    | t2.RangeJuxtapose
-    | t2.EllipsisJuxtapose
-    | t2.TypeParamJuxtapose
-    | t2.SemicolonJuxtapose
-    | t2.InvertedComparisonOp
-    | t2.CombinedAssignmentOp
-    | t2.BroadcastOp
-)
-
-
-def op_equals(left: Operator, right: Operator) -> bool:
-    """checks if two operators are the same kind (ignoring span/position)"""
-    if type(left) is not type(right): return False # ensure left and right are the same type of operator
-    if isinstance(left, t1.Operator):
-        return left.symbol == right.symbol
-    if isinstance(left, t2.InvertedComparisonOp):
-        return left.op == right.op
-    if isinstance(left, t2.CombinedAssignmentOp):
-        return op_equals(left.op, right.op)
-    if isinstance(left, t2.BroadcastOp):
-        return left.op == right.op
-
-    assert isinstance(left, (t2.Juxtapose, t2.RangeJuxtapose, t2.EllipsisJuxtapose, t2.TypeParamJuxtapose, t2.SemicolonJuxtapose)), f'INTERNAL ERROR: unexpected operator types. expected juxtapose. got {left=} and {right=}'
-    return True
 
 
 @dataclass
@@ -51,7 +25,9 @@ class qint:
     In the case of ambiguous precedences, the symbol table is needed for helping resolve the ambiguity
     """
     values: set[int]
-    def __post_init__(self): assert len(self.values) > 1, f'qint must have more than one value. Got {self.values}'
+    def __post_init__(self):
+        assert len(self.values) > 1, f'qint must have more than one value. Got {self.values}'
+        assert all(isinstance(v, int) for v in self.values), f'qint values must be integers. Got {self.values}'
     def __gt__(self, other: int|qint) -> bool: return all(v > other for v in self.values)
     def __lt__(self, other: int|qint) -> bool: return all(v < other for v in self.values)
     def __ge__(self, other: int|qint) -> bool: return self.__gt__(other)
@@ -124,15 +100,15 @@ expressions that need to make sense given precedence table/rules:
 operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     # HIGHEST PRECEDENCE
     (Associativity.prefix, ['@']),
-    (Associativity.left, ['.', t2.Juxtapose]),  # jux-call, jux-index
+    (Associativity.left, ['.', t2.CallJuxtapose, t2.IndexJuxtapose]),  # x.y sin(x) x[y]
     (Associativity.fail, [t2.TypeParamJuxtapose]),
-    (Associativity.fail, [t2.EllipsisJuxtapose]),  # jux-ellipsis
+    (Associativity.fail, [t2.EllipsisJuxtapose]),  # A...  ...B
     (Associativity.prefix, ['`']),
     (Associativity.postfix, ['`']),
     (Associativity.prefix, ['not', '~']),
     (Associativity.postfix, ['?']),
     (Associativity.right,  ['^']),
-    (Associativity.left, [t2.Juxtapose]),  # jux-multiply
+    (Associativity.left, [t2.MultiplyJuxtapose]),  # x(y) (x)y
     (Associativity.prefix, ['*', '/', '//']),
     (Associativity.left, ['*', '/', '//', '%', '\\']),
     (Associativity.prefix, ['+', '-']),
@@ -182,7 +158,7 @@ for i, (assoc, group) in enumerate(reversed(operator_groups)):
             precedence_table[op] = qint(val.values | {i})
 
 
-def get_precedence(op: Operator) -> int | qint:
+def get_precedence(op: t2.Operator) -> int | qint:
     
     if isinstance(op, t1.Operator):
         return precedence_table[op.symbol]
@@ -192,13 +168,15 @@ def get_precedence(op: Operator) -> int | qint:
         return precedence_table['=']
     if isinstance(op, t2.BroadcastOp):
         return get_precedence(op.op)
+    if isinstance(op, t2.QOperator):
+        return qint(set(get_precedence(o) for o in op.options))
     try:
         return precedence_table[type(op)]
     except KeyError:
         pdb.set_trace()
         raise ValueError(f'INTERNAL ERROR: unexpected operator type for determining precedence. got {op=}')
 
-def get_bind_power(op: Operator) -> tuple[int, int] | tuple[qint, qint]:
+def get_bind_power(op: t2.Operator) -> tuple[int, int] | tuple[qint, qint]:
     precedence = get_precedence(op)
     if isinstance(precedence, int):
         return bind_power_table[precedence] 
@@ -209,7 +187,7 @@ def get_bind_power(op: Operator) -> tuple[int, int] | tuple[qint, qint]:
     right_bps = qint(set(right_bps)) if len(right_bps) > 1 else right_bps[0]
     return (left_bps, right_bps)
 
-def get_associativity(op: Operator) -> Associativity | list[Associativity]:
+def get_associativity(op: t2.Operator) -> Associativity | list[Associativity]:
     precedence = get_precedence(op)
     if isinstance(precedence, int):
         return associativity_table[precedence]
@@ -219,17 +197,14 @@ def get_associativity(op: Operator) -> Associativity | list[Associativity]:
 class Context:
     srcfile: SrcFile
 
+# TODO: consider making ASTs include a span now that we don't keep the old tokens for containers
 @dataclass
 class AST: ...
 
 @dataclass
-class Atom(AST):
-    item: t1.Token
-
-@dataclass
 class BinOp(AST):
     """either a binary node, a prefix node, or a postfix node"""
-    op: Operator
+    op: t2.Operator
     left: AST
     right: AST
 
@@ -247,7 +222,7 @@ class Postfix(AST):
 @dataclass
 class Flat(AST):
     """node for flat operators that all combine to a single operation rather than a tree (e.g. comma separated expressions)"""
-    op: Operator
+    op: t2.Operator
     items: list[AST]
 
 
@@ -258,6 +233,32 @@ class Flat(AST):
 class Ambiguous(AST):
     candidates: list[AST]
 
+# ASTs that represent whole expressions that can be used as operands
+# most of these are just thin rewrites of their t1/t2 counterparts
+@dataclass
+class Block(AST):
+    inner: list[AST]
+    kind: Literal['{}', '[]', '()', '[)', '(]', '<>']
+    base: t0.BasePrefix | None
+
+@dataclass
+class ParametricEscape(AST):
+    inner: list[AST]
+@dataclass
+class IString(AST):
+    content: list[str | ParametricEscape | Block]
+@dataclass
+class KeywordExpr(AST):
+    parts: list[t1.Keyword | AST]
+@dataclass
+class Flow(AST):
+    arms: list[KeywordExpr]
+    default: AST|None=None
+
+@dataclass
+class Atom(AST):
+    """all non-container Tokens just get wrapped up into an Atom AST"""
+    item: t1.Token
 
 
 # special error cases when trying to make a reduction
@@ -327,19 +328,23 @@ def validate_flat(ast: Flat, ctx: Context) -> NoReturn|None:
 
 
 # TODO: make this return a single block AST instead of a list of ASTs...
+# NOTE: while Atom wraps around Tokens, any inner tokens will NOT have any Chains
+#       i.e. parsing process replaces all Chains with whatever AST that chain would produce
 def parse(srcfile: SrcFile) -> list[AST]:
-    """simple bottom up iterative shunting-esque algorithm driven by pratt-style binding powers"""
     """
+    simple bottom up iterative shunting-esque algorithm driven by pratt-style binding powers
+    
     Steps:
     1. collect all AST nodes
-    2. identify if node shifts left, right, none based on binding power of adjacent opererators
-    3. apply reductions:
-        - binary operators that recieve both left and right
+    2. identify if node shifts left, right, none based on binding power of adjacent operators
+    3. apply reductions to "fulfilled" operators:
+        TODO: note adjust the conditions mentioned here now that we are operating on Chains, not list[Token]
+        - binary operators that receive both left and right
         - unary prefix operators that receive right (if the thing to the left cannot end an expression (i.e. it is an operator, but not possibly a postfix operator))
         - unary postfix operators that receive left (simpler since no postfix operators are also binary operators)
         - flat operators that are a full alternating sequence of (arg, op, arg, op, ... op, arg) with no connecting operators on either side (if leftmost and rightmost operators shifted inward, there shouldn't be any connecting operators)
         - for fail associativity operators, treat like regular binary, but if a child AST would have the same operator as the parent node, error out
-    4. repeat until no new nodes constructed
+    4. repeat until no new reductions constructed
 
 
     tricky examples
@@ -353,22 +358,75 @@ def parse(srcfile: SrcFile) -> list[AST]:
     10? >? -x + /y  [<int 10><op ?><op >?><op -><>]
     """
 
-    tokens = t2.postok(srcfile)
+    chains = t2.postok(srcfile)
     ctx = Context(srcfile=srcfile)
-    parse_inner(tokens, ctx)
-    return cast(list[AST], tokens)
+    asts = [parse_chain(chain, ctx) for chain in chains]
+    return asts
 
-def parse_inner(tokens: list[t1.Token], ctx: Context) -> None:
-    """Modifies `tokens` in place, converting it from a list[Token] to a list[AST]"""
-    for i, t in enumerate(tokens):
-        if not isinstance(t, Operator):
-            t2.recurse_into(t, parse_inner, ctx)
-            tokens[i] = Atom(t)
+# TODO: consider making AST container types for each of the items that recursed into so we aren't shoving ASTs where tokens are expected...
+def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
+    assert isinstance(chain, t2.Chain), f'INTERNAL ERROR: parse_chain must be called on Chain, got {type(chain)}'
     
-    reduce_loop(tokens, ctx)
-    
+    items: list[t2.Operator|AST] = [] 
+    for t in chain.items:
+        # operators are added as is, to be used by the reduction loop
+        if isinstance(t, t2.Operator):
+            items.append(t)
+            continue
+        
+        # chains are not allowed at the top level of a chain
+        if isinstance(t, t2.Chain):
+            raise ValueError(f'INTERNAL ERROR: top level item in chain was another chain. .this shouldn\'t be possible. got {t=}')
 
-def reduce_loop(items: list[Operator|AST], ctx: Context) -> list[AST]:
+        # convert all other items into ASTs
+        if isinstance(t, (t1.Block, t1.ParametricEscape)):
+            ast = parse_block(t, ctx)
+        elif isinstance(t, t1.IString):
+            ast = parse_istring(t, ctx)
+        elif isinstance(t, t1.ParametricEscape):
+            ast = parse_parametric_escape(t, ctx)
+        elif isinstance(t, (t2.KeywordExpr, t2.FlowArm)):
+            ast = parse_keyword_expr_or_flow_arm(t, ctx)
+        elif isinstance(t, t2.Flow):
+            ast = parse_flow(t, ctx)
+        elif isinstance(t, (t1.Real, t1.String, t1.BasedString, t1.Identifier, t1.Semicolon, t1.Metatag, t1.Integer, t2.OpFn)):
+            ast = Atom(t)
+        items.append(ast)
+
+    reduce_loop(items, ctx)
+    assert len(items) == 1, f"INTERNAL ERROR: parse_chain produced {len(items)} items, expected 1"
+    return items[0]
+
+def parse_block(block: t1.Block|t1.ParametricEscape, ctx: Context) -> AST:
+    inner = parse_inner(block.inner, ctx)
+    return Block(inner=inner, kind=block.kind, base=block.base) #Block(span=block.loc, inner=inner)
+
+def parse_istring(istring: t1.IString, ctx: Context) -> AST:
+    pdb.set_trace()
+
+def parse_parametric_escape(parametric_escape: t1.ParametricEscape, ctx: Context) -> AST:
+    pdb.set_trace()
+
+def parse_keyword_expr_or_flow_arm(keyword_expr_or_flow_arm: t2.KeywordExpr|t2.FlowArm, ctx: Context) -> AST:
+    pdb.set_trace()
+
+def parse_flow(flow: t2.Flow, ctx: Context) -> AST:
+    pdb.set_trace()
+    
+from typing import Any
+def parse_inner(items: list[t2.Chain], ctx: Context) -> list[AST|Any]:
+    asts: list[AST] = []
+    for i in items:
+        if not isinstance(i, t2.Chain):
+            continue  # t1.IString, KeywordExpr, FlowArm, etc. contain non-chains that get dealt with later
+            pdb.set_trace()  # TODO: is there a case where this might happen? e.g. expression keywords?
+            raise ValueError(f'INTERNAL ERROR: unexpected item type. expected Chain, got {type(i)=}')
+
+        asts.append(parse_chain(i, ctx))
+    return asts
+
+
+def reduce_loop(items: list[t2.Operator|AST], ctx: Context) -> list[AST]:
     """repeatedly apply shunting reductions until no more occur. modifies `tokens` in place"""
     while True:
         l0 = len(items)
@@ -383,7 +441,7 @@ def reduce_loop(items: list[Operator|AST], ctx: Context) -> list[AST]:
     
     return items
 
-def shunt_pass(items: list[Operator|AST], ctx: Context) -> None:
+def shunt_pass(items: list[t2.Operator|AST], ctx: Context) -> None:
     """apply a shunting reduction. modifies `tokens` in place"""
     # identify items that could shift
     ast_idxs = [i for i, item in enumerate(items) if isinstance(item, AST)]
@@ -404,9 +462,9 @@ def shunt_pass(items: list[Operator|AST], ctx: Context) -> None:
         
         # get binding power of left and right (if they are operators)
         left_bp, right_bp = NO_BIND, NO_BIND
-        if isinstance(left_op, Operator):
+        if isinstance(left_op, t2.Operator):
             _, left_bp = get_bind_power(left_op)
-        if isinstance(right_op, Operator):
+        if isinstance(right_op, t2.Operator):
             right_bp, _ = get_bind_power(right_op)
         
         if left_bp == NO_BIND and right_bp == NO_BIND:
@@ -442,7 +500,7 @@ def shunt_pass(items: list[Operator|AST], ctx: Context) -> None:
         right_ast_shift_dir = shift_dirs[right_ast_shift_dir_idx] if right_ast_shift_dir_idx is not None else 0
 
         op = items[candidate_operator_idx]
-        assert isinstance(op, Operator), f'INTERNAL ERROR: candidate operator is not an operator. got {op=}'
+        assert isinstance(op, t2.Operator), f'INTERNAL ERROR: candidate operator is not an operator. got {op=}'
         associativity = get_associativity(op)
         if not isinstance(associativity, list):
             associativity = [associativity]
@@ -467,9 +525,9 @@ def shunt_pass(items: list[Operator|AST], ctx: Context) -> None:
                 reductions.append((ast, bounds, a))
             elif (a == Associativity.fail) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 # TODO: full error report for these exceptions
-                if isinstance(left_ast, BinOp) and op_equals(left_ast.op, op):
+                if isinstance(left_ast, BinOp) and t2.op_equals(left_ast.op, op):
                     raise ValueError(f'USER ERROR: operator {op} is not allowed to be nested inside itself. got {left_ast.op=} and {op=}')
-                if isinstance(right_ast, BinOp) and op_equals(right_ast.op, op):
+                if isinstance(right_ast, BinOp) and t2.op_equals(right_ast.op, op):
                     raise ValueError(f'USER ERROR: operator {op} is not allowed to be nested inside itself. got {right_ast.op=} and {op=}')
                 reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1), a))
         
@@ -514,7 +572,7 @@ def shunt_pass(items: list[Operator|AST], ctx: Context) -> None:
         items[left_bound:right_bound] = [reduction]
 
 # TODO: the description here is a bit confusing (and it says True twice). need to fix, but no longer understand how it works
-def left_could_attach(left_ast_idx: int, items: list[Operator|AST]) -> bool:
+def left_could_attach(left_ast_idx: int, items: list[t2.Operator|AST]) -> bool:
     """determine if the items left of a candidate prefix or binary operator connect to that binary operator
     cases:
     op was binop or prefix, e.g. `... - x`, return True
@@ -537,7 +595,7 @@ def left_could_attach(left_ast_idx: int, items: list[Operator|AST]) -> bool:
             return True
         
         # type of op determines if the left is an expresison that could attach, or prefix to the current expression
-        if isinstance(item, Operator):
+        if isinstance(item, t2.Operator):
             prefix = t2.is_prefix_op(item)
             postfix = t2.is_postfix_op(item)
             binary = t2.is_binary_op(item)
@@ -557,7 +615,7 @@ def left_could_attach(left_ast_idx: int, items: list[Operator|AST]) -> bool:
     # no items to left that could attach
     return False
 
-def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, items: list[Operator|AST], reverse_ast_idxs_map: dict[int, int], shift_dirs: list[Literal[-1, 0, 1]]) -> tuple[list[AST], tuple[int, int]]|None:
+def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: t2.Operator, items: list[t2.Operator|AST], reverse_ast_idxs_map: dict[int, int], shift_dirs: list[Literal[-1, 0, 1]]) -> tuple[list[AST], tuple[int, int]]|None:
     # check for the whole flat chain
     left_ast, right_ast = items[left_ast_idx], items[right_ast_idx]
     operands: list[AST] = [left_ast, right_ast]
@@ -566,7 +624,7 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, i
 
     # verify to the left
     j = left_ast_idx - 1
-    while j > 0 and isinstance(items[j], Operator) and op_equals(items[j], op):
+    while j > 0 and isinstance(items[j], t2.Operator) and t2.op_equals(items[j], op):
         prev_ast_idx = j - 1
         if prev_ast_idx < 0:
             # TODO: full error report
@@ -585,7 +643,7 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: Operator, i
         j -= 2
 
     # verify to the right
-    while i < len(items) and isinstance(items[i], Operator) and op_equals(items[i], op):
+    while i < len(items) and isinstance(items[i], t2.Operator) and t2.op_equals(items[i], op):
         next_ast_idx = i + 1
         if next_ast_idx >= len(items):
             # TODO: full error report
@@ -620,7 +678,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         label: str
         items: t2.Chain
 
-    def op_label(op: Operator) -> str:
+    def op_label(op: t2.Operator) -> str:
         if isinstance(op, t1.Operator):
             return op.symbol
         if isinstance(op, t2.InvertedComparisonOp):
@@ -629,6 +687,8 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
             return f".{op_label(op.op)}"
         if isinstance(op, t2.CombinedAssignmentOp):
             return f"{op_label(op.op)}="
+        if isinstance(op, t2.QOperator):
+            return f"QOperator({', '.join(op_label(o) for o in op.options)})"
         return type(op).__name__
 
     def token_label(tok: t1.Token) -> str:
@@ -650,10 +710,9 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
             if len(content) > 40:
                 content = content[:37] + "..."
             return f"String({content!r})"
-        if isinstance(tok, t1.Block): return f"Block(kind='{tok.kind}')"
         if isinstance(tok, t2.Chain): return "Chain"
         if isinstance(tok, t1.BasedString): return f"BasedString({tok.base})"
-        if isinstance(tok, t1.BasedArray): return f"BasedArray({tok.base})"
+        # if isinstance(tok, t1.BasedArray): return f"BasedArray({tok.base})"
         if isinstance(tok, t1.ParametricEscape): return "ParametricEscape"
         if isinstance(tok, t1.IString): return "IString"
         if isinstance(tok, t2.BroadcastOp): return f"BroadcastOp({op_label(tok.op)})"
@@ -684,13 +743,13 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(node, Postfix): return f"Postfix({op_label(node.op)})"
         if isinstance(node, Flat): return f"Flat({op_label(node.op)})"
         if isinstance(node, Ambiguous): return f"Ambiguous({len(node.candidates)})"
+        if isinstance(node, Block): return f"Block(kind='{node.kind}', base='{node.base}')"
+
         return type(node).__name__
 
     def iter_token_children(tok: t1.Token) -> list[tuple[str, object]]:
-        if isinstance(tok, t1.Block): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
         if isinstance(tok, t2.Chain): return [(f"inner[{i}]", child) for i, child in enumerate(tok.items)]
         if isinstance(tok, t1.ParametricEscape): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
-        if isinstance(tok, t1.BasedArray): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
         if isinstance(tok, t1.BasedString): return [("digits", "".join(d.src for d in tok.digits))]
         if isinstance(tok, t1.IString): return [(f"content[{i}]", child) for i, child in enumerate(tok.content)]
         if isinstance(tok, t2.BroadcastOp): return [("op", tok.op)]
@@ -728,6 +787,8 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(node, (Prefix, Postfix)): return [("item", node.item)]
         if isinstance(node, Flat): return [(f"items[{i}]", item) for i, item in enumerate(node.items)]
         if isinstance(node, Atom): return iter_token_children(node.item)
+        if isinstance(node, Block): return [(f"inner[{i}]", child) for i, child in enumerate(node.inner)]
+
         return []
 
     lines: list[str] = []

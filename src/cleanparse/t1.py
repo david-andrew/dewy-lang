@@ -289,6 +289,7 @@ class IString(InedibleToken):
 class Block(Token):
     inner: list[Token]
     kind: Literal['{}', '[]', '()', '[)', '(]', '<>']
+    base: t0.BasePrefix | None
     """
     <opener><inner_tokens><matching closer>
     """
@@ -296,16 +297,17 @@ class Block(Token):
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> 'tuple[int, Block]|None':
         opener = tokens[start]
 
-        if not isinstance(opener, (t0.LeftCurlyBrace, t0.LeftParenthesis, t0.LeftSquareBracket, t0.LeftAngleBracket)):
+        if not isinstance(opener, (t0.LeftCurlyBrace, t0.LeftParenthesis, t0.LeftSquareBracket, t0.LeftAngleBracket, t0.BasedBlockOpener)):
             return None
-
+        
+        base = opener.base if isinstance(opener, t0.BasedBlockOpener) else None
         closer = opener.matching_right
-        delims = opener.src + closer.src
+        delims = opener.src[-1] + closer.src   # opener.src[-1] accounts for an optional base prefix present in the opener
         span = Span(opener.loc.start, closer.loc.stop)
         body_start, body_stop = opener.idx + 1, closer.idx
         inner = list(tokenize_gen(tokens, ctx, body_start, body_stop))
         assert delims in ['{}', '[]', '()', '[)', '(]', '<>'], f'INTERNAL ERROR: invalid block delimiter: {delims}'
-        return closer.idx - start + 1, Block(span, inner, delims)
+        return closer.idx - start + 1, Block(span, inner, delims, base)
 
 @dataclass
 class BasedString(Token):
@@ -323,24 +325,24 @@ class BasedString(Token):
         digits = [token for token in raw_body if isinstance(token, t0.BasedStringChars)]
         return closer.idx - start + 1, BasedString(span, digits, opener.base)
 
-
-@dataclass
-class BasedArray(Token):
-    inner: list[Token]
-    base: t0.BasePrefix
-    @staticmethod
-    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, BasedArray]|None:
-        opener = tokens[start]
-        if not isinstance(opener, t0.BasedBlockOpener):
-            return None
+# # TODO: consider merging the class with regular Block class and just including the base prefix for both
+# @dataclass
+# class BasedArray(Token):
+#     inner: list[Token]
+#     base: t0.BasePrefix
+#     @staticmethod
+#     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Block]|None:
+#         opener = tokens[start]
+#         if not isinstance(opener, t0.BasedBlockOpener):
+#             return None
         
-        # tokenize the inner body
-        closer = opener.matching_right
-        span = Span(opener.loc.start, closer.loc.stop)
-        body_start, body_stop = start + 1, closer.idx
-        inner = list(tokenize_gen(tokens, ctx, body_start, body_stop))
+#         # tokenize the inner body
+#         closer = opener.matching_right
+#         span = Span(opener.loc.start, closer.loc.stop)
+#         body_start, body_stop = start + 1, closer.idx
+#         inner = list(tokenize_gen(tokens, ctx, body_start, body_stop))
 
-        return closer.idx - start + 1, BasedArray(span, inner, opener.base)
+#         return closer.idx - start + 1, BasedArray(span, inner, opener.base)
 
 @dataclass
 class Identifier(Token):
@@ -437,7 +439,7 @@ top_level_tokens: list[type[Token]] = [
     Real,
     Block,
     BasedString,
-    BasedArray,
+    # BasedArray,
     Operator,
     Semicolon,
     Whitespace,
