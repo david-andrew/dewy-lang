@@ -141,7 +141,7 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.flat,  [',']),
     (Associativity.flat, [t2.RangeJuxtapose]),  # jux-range
     (Associativity.fail, ['in']),    # A in B
-    (Associativity.left, ['=?', '>?', '<?', '>=?', '<=?']),
+    (Associativity.left, ['=?', '>?', '<?', '>=?', '<=?', 'is?', 'isnt?', 'in?', '@?']),
     (Associativity.left, ['and', 'nand', '&']),
     (Associativity.left, ['xor', 'xnor']),
     (Associativity.left, ['or', 'nor', '|']),
@@ -618,7 +618,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
     @dataclass(frozen=True)
     class TreeGroup:
         label: str
-        items: list[object]
+        items: t2.Chain
 
     def op_label(op: Operator) -> str:
         if isinstance(op, t1.Operator):
@@ -651,6 +651,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
                 content = content[:37] + "..."
             return f"String({content!r})"
         if isinstance(tok, t1.Block): return f"Block(kind='{tok.kind}')"
+        if isinstance(tok, t2.Chain): return "Chain"
         if isinstance(tok, t1.BasedString): return f"BasedString({tok.base})"
         if isinstance(tok, t1.BasedArray): return f"BasedArray({tok.base})"
         if isinstance(tok, t1.ParametricEscape): return "ParametricEscape"
@@ -687,6 +688,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
 
     def iter_token_children(tok: t1.Token) -> list[tuple[str, object]]:
         if isinstance(tok, t1.Block): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
+        if isinstance(tok, t2.Chain): return [(f"inner[{i}]", child) for i, child in enumerate(tok.items)]
         if isinstance(tok, t1.ParametricEscape): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
         if isinstance(tok, t1.BasedArray): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
         if isinstance(tok, t1.BasedString): return [("digits", "".join(d.src for d in tok.digits))]
@@ -739,7 +741,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         children: list[tuple[str, object]]
         if isinstance(item, AST): children = iter_ast_children(item)
         elif isinstance(item, t1.Token): children = iter_token_children(item)
-        elif isinstance(item, TreeGroup): children = [(f"items[{i}]", child) for i, child in enumerate(item.items)]
+        elif isinstance(item, TreeGroup): children = [(f"items[{i}]", child) for i, child in enumerate(item.items.items)]
         else: children = []
         for i, (child_edge, child) in enumerate(children):
             render(child, child_prefix, child_edge, i == len(children) - 1)
