@@ -1,7 +1,7 @@
 """
 Post processing steps on tokens to prepare them for expression parsiing
 """
-from typing import Callable, Literal
+from typing import Callable, Literal, cast
 from dataclasses import dataclass
 from .reporting import SrcFile, ReportException, Span
 from . import t1
@@ -249,9 +249,10 @@ def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None], *args,
             if isinstance(part, Chain):
                 func(part.items, *args, **kwargs)
     elif isinstance(token, Flow):
-        func(token.arms, *args, **kwargs)
+        for arm in token.arms:
+            recurse_into(arm, func, *args, **kwargs)
         if token.default is not None:
-            func(token.default.items, *args, **kwargs)
+            recurse_into(token.default, func, *args, **kwargs)
     elif isinstance(token, Chain):
         func(token.items, *args, **kwargs)
 
@@ -389,6 +390,7 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
 
     if type(token) not in atom_tokens or isinstance(token, t1.Semicolon):
         # TODO: this should be a full error report
+        import pdb; pdb.set_trace()
         raise ValueError(f"expected primary token, got {token=}")
     out.append(token)
     i += 1
@@ -601,15 +603,32 @@ def bundle_keyword_exprs(tokens: list[t1.Token]) -> None:
         i += 1
 
 
-def postok(srcfile: SrcFile) -> list[t1.Token]:
+def make_chains(tokens: list[t1.Token]) -> None:
+    """convert list[Token] into list[Chain] in place"""
+    i = 0
+    while i < len(tokens):
+        recurse_into(tokens[i], make_chains)
+        
+        # this technically shouldn't happen... (unless maybe we hit chains during recurse_into?)
+        if isinstance(tokens[i], Chain):
+            i += 1
+            continue
+
+        expr, j = collect_expr(tokens, i, stop_keywords=set())
+        tokens[i:j] = [expr]
+        i += 1
+
+
+
+def postok(srcfile: SrcFile) -> list[Chain]:
     """apply postprocessing steps to the tokens"""
     tokens = t1.tokenize(srcfile)
     postok_inner(tokens)
-    return tokens
+    return cast(list[Chain], tokens)
 
 
 def postok_inner(tokens: list[t1.Token]) -> None:
-    """apply postprocessing steps to the tokens"""
+    """apply postprocessing steps to the tokens. Converts list[Token] into list[Chain] in place"""
     # remove whitespace and insert juxtapose tokens
     remove_whitespace(tokens)
     insert_juxtapose(tokens)
@@ -630,7 +649,7 @@ def postok_inner(tokens: list[t1.Token]) -> None:
                               # to allow bundle_keyword_exprs to work properly
     
     # 
-    # make_chains(tokens)
+    make_chains(tokens)
 
 
 def test():
