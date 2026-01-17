@@ -1,7 +1,6 @@
 """
 Post processing steps on tokens to prepare them for expression parsiing
 """
-from src.cleanparse.t1 import Token
 from typing import Callable, Literal, cast, TypeAlias
 from dataclasses import dataclass, field
 from .reporting import SrcFile, ReportException, Span

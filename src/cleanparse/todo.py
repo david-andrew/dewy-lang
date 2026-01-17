@@ -33,7 +33,7 @@ given AST, produce output in the target backend
 [tasks]
 [x] remove FlowArm in favor of KeywordExpr
 [x] get pathological test working
-[ ] remove left prefix checking since we have chains now
+[ ] remove lookbehind check logic in p0 now that we have chains, we can just check directly if the index in the chain is 0 (or all preceeding things are prefix ops) or not to determine if there are any prefix connection
 [ ] full error reporting in t2 at indicated locations
 [ ] full error reporting in p0 at indicated locations
 
