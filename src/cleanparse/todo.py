@@ -31,10 +31,11 @@ given AST, produce output in the target backend
 
 
 [tasks]
-[ ] remove FlowArm in favor of KeywordExpr
-[ ] get pathological test working
+[x] remove FlowArm in favor of KeywordExpr
+[x] get pathological test working
 [ ] remove left prefix checking since we have chains now
-
+[ ] full error reporting in t2 at indicated locations
+[ ] full error reporting in p0 at indicated locations
 
 
 [ ] handling ambiguous parses:
@@ -48,7 +49,6 @@ given AST, produce output in the target backend
     - for convenience, probably package up aspects of the shunt pass as separate functions, so its easier to deal with ambiguous vs regular case
     - potentially can fold in some of the other ambiguous stuff (e.g. if multiple reductions occur? (but only we couldn't determine))
 
-[ ] full error reporting in p0 at indicated locations
 [ ] when printing error report, take whole span of text being printed out, and dedent as much as possible (e.g. if we were just looking at something very nested and nothing surrounding it, we don't need all the indentation)
 [x] would be nice if associativity.flat could indicate a max number of the operator allowed (e.g. 2 for `..`, inf for `,`)
     ---> tbd because might be nicer just to handle it in p1

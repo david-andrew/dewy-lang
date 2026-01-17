@@ -682,22 +682,19 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
     tee = "├── "
     last = "└── "
 
-    @dataclass(frozen=True)
-    class TreeGroup:
-        label: str
-        items: t2.Chain
+    TreeItem: TypeAlias = AST | t1.Token | t2.Operator | str
+
+    def truncate(s: str, max_len: int = 40) -> str:
+        if len(s) <= max_len:
+            return s
+        return s[:max_len - 3] + "..."
 
     def op_label(op: t2.Operator) -> str:
-        if isinstance(op, t1.Operator):
-            return op.symbol
-        if isinstance(op, t2.InvertedComparisonOp):
-            return f"not {op.op}"
-        if isinstance(op, t2.BroadcastOp):
-            return f".{op_label(op.op)}"
-        if isinstance(op, t2.CombinedAssignmentOp):
-            return f"{op_label(op.op)}="
-        if isinstance(op, t2.QOperator):
-            return f"QOperator({', '.join(op_label(o) for o in op.options)})"
+        if isinstance(op, t1.Operator): return op.symbol
+        if isinstance(op, t2.InvertedComparisonOp): return f"not {op.op}"
+        if isinstance(op, t2.BroadcastOp): return f".{op_label(op.op)}"
+        if isinstance(op, t2.CombinedAssignmentOp): return f"{op_label(op.op)}="
+        if isinstance(op, t2.QOperator): return f"QOperator({', '.join(op_label(o) for o in op.options)})"
         return type(op).__name__
 
     def token_label(tok: t1.Token) -> str:
@@ -706,7 +703,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(tok, t1.Keyword): return f"Keyword({tok.name})"
         if isinstance(tok, t1.Metatag): return f"Hashtag({tok.name})"
         if isinstance(tok, t1.Integer): return f"Integer({tok.value.src})"
-        if isinstance(tok, t1.Real): 
+        if isinstance(tok, t1.Real):
             frac = f".{tok.fraction.src}" if tok.fraction is not None else ""
             exp = ""
             if tok.exponent is not None:
@@ -714,31 +711,23 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
                 sign = "" if tok.exponent.positive else "-"
                 exp = f"{marker}{sign}{tok.exponent.value.src}"
             return f"Real({tok.whole.src}{frac}{exp})"
-        if isinstance(tok, t1.String):
-            content = tok.content.replace("\n", "\\n")
-            if len(content) > 40:
-                content = content[:37] + "..."
-            return f"String({content!r})"
+        if isinstance(tok, t1.String): return f"String({repr(truncate(tok.content.replace("\n", "\\n")))})"
         if isinstance(tok, t2.Chain): return "Chain"
         if isinstance(tok, t1.BasedString): return f"BasedString({tok.base})"
-        # if isinstance(tok, t1.BasedArray): return f"BasedArray({tok.base})"
         if isinstance(tok, t2.BroadcastOp): return f"BroadcastOp({op_label(tok.op)})"
         if isinstance(tok, t2.CombinedAssignmentOp): return f"CombinedAssignmentOp({op_label(tok.op)})"
         if isinstance(tok, t2.OpFn): return f"OpFn({op_label(tok.op)})"
         return type(tok).__name__
 
     def text_label(text: str) -> str:
-        content = text.replace("\n", "\\n")
-        if len(content) > 40:
-            content = content[:37] + "..."
-        return f"Text({content!r})"
+        return f"Text({repr(truncate(text.replace("\n", "\\n")))})"
 
-    def item_label(item: object) -> str:
+    def item_label(item: TreeItem) -> str:
         if isinstance(item, AST): return ast_label(item)
         if isinstance(item, t1.Token): return token_label(item)
-        if isinstance(item, TreeGroup): return item.label
+        if isinstance(item, t2.Operator): return f"Operator({op_label(item)})"
         if isinstance(item, str): return text_label(item)
-        return type(item).__name__
+        raise ValueError(f'INTERNAL ERROR: reached unreachable state. {item=}, {type(item)=}')
 
     def ast_label(node: AST) -> str:
         if isinstance(node, Atom): return token_label(node.item)
@@ -754,43 +743,42 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(node, Flow): return "Flow"
         return type(node).__name__
 
-    def iter_token_children(tok: t1.Token) -> list[tuple[str, object]]:
+    def iter_token_children(tok: t1.Token) -> list[tuple[str, TreeItem]]:
         if isinstance(tok, t2.Chain): return [(f"inner[{i}]", child) for i, child in enumerate(tok.items)]
         if isinstance(tok, t1.BasedString): return [("digits", "".join(d.src for d in tok.digits))]
         if isinstance(tok, t2.BroadcastOp): return [("op", tok.op)]
         if isinstance(tok, t2.CombinedAssignmentOp): return [("op", tok.op)]
         if isinstance(tok, t2.OpFn): return [("op", tok.op)]
-        
         return []
 
-    def iter_ast_children(node: AST) -> list[tuple[str, object]]:
+    def iter_ast_children(node: AST) -> list[tuple[str, TreeItem]]:
         if isinstance(node, BinOp): return [("left", node.left), ("right", node.right)]
         if isinstance(node, (Prefix, Postfix)): return [("item", node.item)]
         if isinstance(node, Flat): return [(f"items[{i}]", item) for i, item in enumerate(node.items)]
         if isinstance(node, Atom): return iter_token_children(node.item)
+        if isinstance(node, Ambiguous): return [(f"candidates[{i}]", child) for i, child in enumerate(node.candidates)]
         if isinstance(node, Block): return [(f"inner[{i}]", child) for i, child in enumerate(node.inner)]
         if isinstance(node, IString): return [(f"content[{i}]", child) for i, child in enumerate(node.content)]
         if isinstance(node, ParametricEscape): return [(f"inner[{i}]", child) for i, child in enumerate(node.inner)]
-        if isinstance(node, KeywordExpr):
-            return [(f"parts[{i}]", part) for i, part in enumerate(node.parts)]
-        if isinstance(node, Flow):
-            return [(f"arms[{i}]", arm) for i, arm in enumerate(node.arms)] + ([("default", node.default)] if node.default is not None else [])
-        
+        if isinstance(node, KeywordExpr): return [(f"parts[{i}]", part) for i, part in enumerate(node.parts)]
+        if isinstance(node, Flow): return [(f"arms[{i}]", arm) for i, arm in enumerate(node.arms)] + ([("default", node.default)] if node.default is not None else [])
         return []
 
     lines: list[str] = []
     root_prefix = space * level
     lines.append(root_prefix + item_label(ast))
 
-    def render(item: object, prefix: str, edge_label: str, is_last: bool) -> None:
+    def render(item: TreeItem, prefix: str, edge_label: str, is_last: bool) -> None:
         connector = last if is_last else tee
         lines.append(prefix + connector + f"{edge_label}: {item_label(item)}")
         child_prefix = prefix + (space if is_last else branch)
-        children: list[tuple[str, object]]
-        if isinstance(item, AST): children = iter_ast_children(item)
-        elif isinstance(item, t1.Token): children = iter_token_children(item)
-        elif isinstance(item, TreeGroup): children = [(f"items[{i}]", child) for i, child in enumerate(item.items.items)]
-        else: children = []
+        children: list[tuple[str, TreeItem]]
+        if isinstance(item, AST):
+            children = iter_ast_children(item)
+        elif isinstance(item, t1.Token):
+            children = iter_token_children(item)
+        else:
+            children = []
         for i, (child_edge, child) in enumerate(children):
             render(child, child_prefix, child_edge, i == len(children) - 1)
 
