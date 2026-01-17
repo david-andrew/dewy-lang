@@ -1,11 +1,13 @@
 """
 Post processing steps on tokens to prepare them for expression parsiing
 """
+from src.cleanparse.t1 import Token
 from typing import Callable, Literal, cast, TypeAlias
 from dataclasses import dataclass
 from .reporting import SrcFile, ReportException, Span
 from . import t1
 
+import pdb
 
 
 # various juxtapose operators, for handling precedence in cases known at tokenization time
@@ -119,7 +121,7 @@ def op_equals(left: Operator, right: Operator) -> bool:
         return left.op == right.op
     if isinstance(left, QOperator) or isinstance(right, QOperator):
         # TODO: not sure how op equals should behave for QOperators. maybe just always return False? or check if inners are all equal modulo ordering
-        import pdb; pdb.set_trace()
+        pdb.set_trace()
         ...
 
     assert isinstance(left, (CallJuxtapose, IndexJuxtapose, MultiplyJuxtapose, RangeJuxtapose, EllipsisJuxtapose, TypeParamJuxtapose, SemicolonJuxtapose)), f'INTERNAL ERROR: unexpected operator types. expected juxtapose. got {left=} and {right=}'
@@ -164,13 +166,13 @@ class KeywordExpr(t1.InedibleToken):
 # TODO: consider merging FlowArm and KeywordExpr into a single class
 #       if don't, then p0 merges them. TBD, might be necessary for parsing here...
 #       but perhaps can keep the exact functions here, and collect_flow_arm would just return a KeywordExpr anyways
-@dataclass
-class FlowArm(t1.InedibleToken):
-    parts: list[t1.Keyword | Chain]
+# @dataclass
+# class FlowArm(t1.InedibleToken):
+#     parts: list[t1.Keyword | Chain]
 
 @dataclass
 class Flow(t1.InedibleToken):
-    arms: list[FlowArm]
+    arms: list[KeywordExpr]
     default: Chain|None=None
 
 
@@ -285,6 +287,10 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[J
         if not isinstance(left, SemicolonJuxtapose): 
             return SemicolonJuxtapose
         return None
+    
+    # keyword expressions and flows cannot juxtpose with anything
+    if isinstance(left, (t1.Keyword, KeywordExpr, Flow)) or isinstance(right, (t1.Keyword, KeywordExpr, Flow)):
+        return None
 
     # ... may juxtpose with prefix/postfix operators
     if is_dotdotdot(left):
@@ -325,7 +331,7 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[J
     return None
 
 
-def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> None:
+def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None], apply_to_chains:bool=False) -> None:
     """
     Helper to recursively apply a function to the inner tokens of a token (if it has any)
     It is expected that `func` will call `recurse_into` with itself as the callable.
@@ -334,19 +340,24 @@ def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> Non
         func(token.inner)
     elif isinstance(token, t1.IString):
         for child in token.content:
-            recurse_into(child, func)
-    elif isinstance(token, (KeywordExpr, FlowArm)):
+            recurse_into(child, func, apply_to_chains)
+    elif isinstance(token, KeywordExpr):
         for part in token.parts:
-            if isinstance(part, Chain):
-                func(part.items)
+            recurse_into(part, func, apply_to_chains)
     elif isinstance(token, Flow):
         for arm in token.arms:
-            recurse_into(arm, func)
+            recurse_into(arm, func, apply_to_chains)
         if token.default is not None:
-            recurse_into(token.default, func)
+            recurse_into(token.default, func, apply_to_chains)
     elif isinstance(token, Chain):
-        func(token.items)
-
+        # Don't call func on the chain's items itself (e.g. because we're bundling up chains, and it's already a chain)
+        if apply_to_chains:
+            func(token.items)
+        else:
+            # skip applying the function to the chain layer itself, and just do it's inner items
+            for item in token.items:
+                recurse_into(item, func, apply_to_chains)
+    
     # else no inner tokens. TODO: would be nice if we could error if there were any unhandled cases with inner tokens...
 
 
@@ -360,7 +371,7 @@ def remove_whitespace(tokens: list[t1.Token]) -> None:
         recurse_into(token, remove_whitespace)
 
 
-def insert_juxtapose(tokens: list[t1.Token]) -> None:
+def insert_juxtapose(tokens: list[t1.Token], apply_to_chains:bool=True) -> None:
     """
     Insert juxtapose tokens between adjacent (atom) tokens if their spans touch (which indicates there was no whitespace between them)
     TODO: this is vaguely inefficient with all the insertions. If this is a performance bottleneck, consider some type of e.g. heap or rope or etc. data structure
@@ -371,7 +382,7 @@ def insert_juxtapose(tokens: list[t1.Token]) -> None:
     i = 0
     while i < len(tokens):
         # recursively handle inserting juxtaposes for blocks
-        recurse_into(tokens[i], insert_juxtapose)
+        recurse_into(tokens[i], insert_juxtapose, apply_to_chains)
 
         # insert juxtapose if adjacent (atom) tokens' spans touch
         if i + 1 < len(tokens) and tokens[i].loc.stop == tokens[i+1].loc.start:
@@ -481,7 +492,7 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
 
     if type(token) not in atom_tokens or isinstance(token, t1.Semicolon):
         # TODO: this should be a full error report
-        import pdb; pdb.set_trace()
+        pdb.set_trace()
         raise ValueError(f"expected primary token, got {token=}")
     out.append(token)
     i += 1
@@ -518,9 +529,11 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
 
     chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords)
     if not chunk:
+        # TODO: full error report, probably user error
         # TODO: perhaps we should error here because no chunk was found when we expected one
-        # raise ValueError(f"expected chunk, got {tokens[i]=}")
-        import pdb; pdb.set_trace()
+        # e.g. if its the end of the file and the user does `loop x` without a second expression, we'd probably hit this
+        pdb.set_trace()
+        raise ValueError(f"USER ERROR: expected chunk, got {tokens[i]=}")
         return Chain(Span(tokens[start].loc.start, tokens[start].loc.start), items), i
     items.extend(chunk)
 
@@ -543,7 +556,7 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     return Chain(Span(tokens[start].loc.start, tokens[i-1].loc.stop), items), i
 
 
-def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[FlowArm, int]:
+def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[KeywordExpr, int]:
     """
     Collect a single flow arm (if/loop/match/do-loop) into a `FlowArm`.
 
@@ -573,13 +586,13 @@ def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[s
             i += 1
             post, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
             parts.extend([do2, post])
-        return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
+        return KeywordExpr(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
 
     if kw.name in {"if", "match", "loop"}:
         cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
         clause, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
         parts: list[t1.Keyword | Chain] = [kw, cond, clause]
-        return FlowArm(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
+        return KeywordExpr(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
 
     raise ValueError(f"unexpected flow keyword {kw.name!r}")
 
@@ -589,13 +602,13 @@ def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     Collect an entire flow expression (if/loop/match/do-loop with optional else chains).
 
     Structure:
-    - `Flow.arms` is a list of `FlowArm` tokens (each arm retains its own keywords).
-    - `Flow.default` is either None or a token list for the final default expression.
+    - `Flow.arms` is a list of `KeywordExpr` tokens (each arm retains its own keywords).
+    - `Flow.default` is either None or a Chain for the final default expression.
 
     `else` is treated as structural and is consumed but not stored.
     """
     i = start
-    arms: list[FlowArm] = []
+    arms: list[KeywordExpr] = []
     default: Chain | None = None
 
     while True:
@@ -677,6 +690,7 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
         second, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
         return KeywordExpr(Span(kw.loc.start, second.items[-1].loc.stop), [kw, first, import_kw, second]), i
 
+    raise ValueError(f"INTERNAL ERROR: unexpected keyword {kw.name!r}")
     return KeywordExpr(kw.loc, [kw]), i
 
 
@@ -711,7 +725,7 @@ def make_chains(tokens: list[t1.Token]) -> None:
     while i < len(tokens):
         # this technically shouldn't happen... (unless maybe we hit chains during recurse_into?)
         if isinstance(tokens[i], Chain):
-            import pdb; pdb.set_trace()
+            pdb.set_trace()
             # TODO: test on keyword_expressions.dewy to verify this does or doesn't
             raise ValueError('INTERNAL ERROR: unexpected chain when making chains... unless maybe from keyword exprs...')
             i += 1
@@ -722,7 +736,7 @@ def make_chains(tokens: list[t1.Token]) -> None:
         i += 1
         
         for t in expr.items:
-            recurse_into(t, make_chains)
+            recurse_into(t, make_chains) # apply to chains=False because otherwise we'd wrap all chains in an extra chain layer
         
 
 
@@ -750,9 +764,6 @@ def postok_inner(tokens: list[t1.Token]) -> None:
 
     # bundle up keyword expressions and flows into single atom tokens
     bundle_keyword_exprs(tokens)
-    insert_juxtapose(tokens)  # insert juxtapose between any keyword/flow expressions that got added
-                              # can't skip first insert_juxtapose because they are necessary operators 
-                              # to allow bundle_keyword_exprs to work properly
     
     # convert all lists[Token] into list[Chain] so parsing doesn't have to separate separate expressions
     make_chains(tokens)

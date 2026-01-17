@@ -383,10 +383,8 @@ def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
             ast = parse_block(t, ctx)
         elif isinstance(t, t1.IString):
             ast = parse_istring(t, ctx)
-        elif isinstance(t, t1.ParametricEscape):
-            ast = parse_parametric_escape(t, ctx)
-        elif isinstance(t, (t2.KeywordExpr, t2.FlowArm)):
-            ast = parse_keyword_expr_or_flow_arm(t, ctx)
+        elif isinstance(t, t2.KeywordExpr):
+            ast = parse_keyword_expr(t, ctx)
         elif isinstance(t, t2.Flow):
             ast = parse_flow(t, ctx)
         elif isinstance(t, (t1.Real, t1.String, t1.BasedString, t1.Identifier, t1.Semicolon, t1.Metatag, t1.Integer, t2.OpFn)):
@@ -422,8 +420,14 @@ def parse_istring(istring: t1.IString, ctx: Context) -> IString:
     
     return IString(content)
 
-def parse_keyword_expr_or_flow_arm(keyword_expr_or_flow_arm: t2.KeywordExpr|t2.FlowArm, ctx: Context) -> KeywordExpr:
-    pdb.set_trace()
+def parse_keyword_expr(keyword_expr: t2.KeywordExpr, ctx: Context) -> KeywordExpr:
+    parts: list[t1.Keyword | AST] = []
+    for item in keyword_expr.parts:
+        if isinstance(item, t2.Chain):
+            parts.append(parse_chain(item, ctx))
+        else:
+            parts.append(item)
+    return KeywordExpr(parts)
 
 def parse_flow(flow: t2.Flow, ctx: Context) -> Flow:
     pdb.set_trace()
@@ -757,16 +761,6 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(tok, t2.CombinedAssignmentOp): return [("op", tok.op)]
         if isinstance(tok, t2.OpFn): return [("op", tok.op)]
         if isinstance(tok, t2.KeywordExpr):
-            out: list[tuple[str, object]] = []
-            expr_i = 0
-            for i, part in enumerate(tok.parts):
-                if isinstance(part, list):
-                    out.append((f"parts[{i}]", TreeGroup(f"expr[{expr_i}]", cast(list[object], part))))
-                    expr_i += 1
-                else:
-                    out.append((f"parts[{i}]", part))
-            return out
-        if isinstance(tok, t2.FlowArm):
             out: list[tuple[str, object]] = []
             expr_i = 0
             for i, part in enumerate(tok.parts):
