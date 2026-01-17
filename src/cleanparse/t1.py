@@ -259,7 +259,7 @@ class String(Token):
                     )
                     error.throw()
                 inner = list(tokenize_gen(tokens, ctx, token.idx+1, token.matching_right.idx))
-                chunks.append(Block(Span(token.loc.start, token.matching_right.loc.stop), inner, '{}'))
+                chunks.append(Block(Span(token.loc.start, token.matching_right.loc.stop), inner, '{}', None))
                 token_iter.jump_forward(token.matching_right.idx - token.idx + 1) # skip inner tokens and closing brace
             else:
                 #unreachable

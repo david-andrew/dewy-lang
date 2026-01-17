@@ -647,7 +647,7 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
         if i >= len(tokens) or is_stop_keyword(tokens[i], stop_keywords) or isinstance(tokens[i], t1.Semicolon):
             return KeywordExpr(kw.loc, [kw]), i
         expr, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-        return KeywordExpr(Span(kw.loc.start, expr[-1].loc.stop), [kw, expr]), i
+        return KeywordExpr(Span(kw.loc.start, expr.items[-1].loc.stop), [kw, expr]), i
 
     if kw.name in {"break", "continue"}:
         if i < len(tokens) and isinstance(tokens[i], t1.Metatag):
@@ -657,7 +657,7 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
 
     if kw.name in {"let", "const", "local_const", "overload_only"}:
         expr, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-        return KeywordExpr(Span(kw.loc.start, expr[-1].loc.stop), [kw, expr]), i
+        return KeywordExpr(Span(kw.loc.start, expr.items[-1].loc.stop), [kw, expr]), i
 
     if kw.name == "import":
         first, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"from"})
@@ -665,8 +665,8 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
             from_kw = tokens[i]
             i += 1
             second, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-            return KeywordExpr(Span(kw.loc.start, second[-1].loc.stop), [kw, first, from_kw, second]), i
-        return KeywordExpr(Span(kw.loc.start, first[-1].loc.stop), [kw, first]), i
+            return KeywordExpr(Span(kw.loc.start, second.items[-1].loc.stop), [kw, first, from_kw, second]), i
+        return KeywordExpr(Span(kw.loc.start, first.items[-1].loc.stop), [kw, first]), i
 
     if kw.name == "from":
         first, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"import"})
@@ -675,7 +675,7 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
         import_kw = tokens[i]
         i += 1
         second, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-        return KeywordExpr(Span(kw.loc.start, second[-1].loc.stop), [kw, first, import_kw, second]), i
+        return KeywordExpr(Span(kw.loc.start, second.items[-1].loc.stop), [kw, first, import_kw, second]), i
 
     return KeywordExpr(kw.loc, [kw]), i
 

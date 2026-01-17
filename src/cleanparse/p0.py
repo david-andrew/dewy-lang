@@ -397,33 +397,36 @@ def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
     assert len(items) == 1, f"INTERNAL ERROR: parse_chain produced {len(items)} items, expected 1"
     return items[0]
 
-def parse_block(block: t1.Block|t1.ParametricEscape, ctx: Context) -> AST:
-    inner = parse_inner(block.inner, ctx)
-    return Block(inner=inner, kind=block.kind, base=block.base) #Block(span=block.loc, inner=inner)
-
-def parse_istring(istring: t1.IString, ctx: Context) -> AST:
-    pdb.set_trace()
-
-def parse_parametric_escape(parametric_escape: t1.ParametricEscape, ctx: Context) -> AST:
-    pdb.set_trace()
-
-def parse_keyword_expr_or_flow_arm(keyword_expr_or_flow_arm: t2.KeywordExpr|t2.FlowArm, ctx: Context) -> AST:
-    pdb.set_trace()
-
-def parse_flow(flow: t2.Flow, ctx: Context) -> AST:
-    pdb.set_trace()
+def parse_block(block: t1.Block|t1.ParametricEscape, ctx: Context) -> Block:
+    inner = []
+    for item in block.inner:
+        if not isinstance(item, t2.Chain):
+            raise ValueError(f'INTERNAL ERROR: unexpected item type in Block.inner. expected Chain, got {type(item)=}')
+        inner.append(parse_chain(item, ctx))
     
-from typing import Any
-def parse_inner(items: list[t2.Chain], ctx: Context) -> list[AST|Any]:
-    asts: list[AST] = []
-    for i in items:
-        if not isinstance(i, t2.Chain):
-            continue  # t1.IString, KeywordExpr, FlowArm, etc. contain non-chains that get dealt with later
-            pdb.set_trace()  # TODO: is there a case where this might happen? e.g. expression keywords?
-            raise ValueError(f'INTERNAL ERROR: unexpected item type. expected Chain, got {type(i)=}')
+    if isinstance(block, t1.ParametricEscape):
+        return ParametricEscape(inner=inner)
 
-        asts.append(parse_chain(i, ctx))
-    return asts
+    return Block(inner=inner, kind=block.kind, base=block.base)
+
+def parse_istring(istring: t1.IString, ctx: Context) -> IString:
+    content = []
+    for item in istring.content:
+        if isinstance(item, str):
+            content.append(item)
+        elif isinstance(item, (t1.Block, t1.ParametricEscape)):
+            content.append(parse_block(item, ctx))
+        else:
+            # unreachable
+            raise ValueError(f'INTERNAL ERROR: unexpected item type in IString. content. got {type(item)=}')
+    
+    return IString(content)
+
+def parse_keyword_expr_or_flow_arm(keyword_expr_or_flow_arm: t2.KeywordExpr|t2.FlowArm, ctx: Context) -> KeywordExpr:
+    pdb.set_trace()
+
+def parse_flow(flow: t2.Flow, ctx: Context) -> Flow:
+    pdb.set_trace()
 
 
 def reduce_loop(items: list[t2.Operator|AST], ctx: Context) -> list[AST]:
@@ -713,8 +716,6 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(tok, t2.Chain): return "Chain"
         if isinstance(tok, t1.BasedString): return f"BasedString({tok.base})"
         # if isinstance(tok, t1.BasedArray): return f"BasedArray({tok.base})"
-        if isinstance(tok, t1.ParametricEscape): return "ParametricEscape"
-        if isinstance(tok, t1.IString): return "IString"
         if isinstance(tok, t2.BroadcastOp): return f"BroadcastOp({op_label(tok.op)})"
         if isinstance(tok, t2.CombinedAssignmentOp): return f"CombinedAssignmentOp({op_label(tok.op)})"
         if isinstance(tok, t2.OpFn): return f"OpFn({op_label(tok.op)})"
@@ -743,15 +744,15 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(node, Postfix): return f"Postfix({op_label(node.op)})"
         if isinstance(node, Flat): return f"Flat({op_label(node.op)})"
         if isinstance(node, Ambiguous): return f"Ambiguous({len(node.candidates)})"
-        if isinstance(node, Block): return f"Block(kind='{node.kind}', base='{node.base}')"
+        if isinstance(node, Block): return f"Block(kind='{node.kind}'{f", base={node.base}" if node.base else ""})"
+        if isinstance(node, IString): return "IString"
+        if isinstance(node, ParametricEscape): return "ParametricEscape"
 
         return type(node).__name__
 
     def iter_token_children(tok: t1.Token) -> list[tuple[str, object]]:
         if isinstance(tok, t2.Chain): return [(f"inner[{i}]", child) for i, child in enumerate(tok.items)]
-        if isinstance(tok, t1.ParametricEscape): return [(f"inner[{i}]", child) for i, child in enumerate(tok.inner)]
         if isinstance(tok, t1.BasedString): return [("digits", "".join(d.src for d in tok.digits))]
-        if isinstance(tok, t1.IString): return [(f"content[{i}]", child) for i, child in enumerate(tok.content)]
         if isinstance(tok, t2.BroadcastOp): return [("op", tok.op)]
         if isinstance(tok, t2.CombinedAssignmentOp): return [("op", tok.op)]
         if isinstance(tok, t2.OpFn): return [("op", tok.op)]
@@ -788,6 +789,10 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(node, Flat): return [(f"items[{i}]", item) for i, item in enumerate(node.items)]
         if isinstance(node, Atom): return iter_token_children(node.item)
         if isinstance(node, Block): return [(f"inner[{i}]", child) for i, child in enumerate(node.inner)]
+        if isinstance(node, IString): return [(f"content[{i}]", child) for i, child in enumerate(node.content)]
+
+        if isinstance(node, ParametricEscape): return [(f"inner[{i}]", child) for i, child in enumerate(node.inner)]
+
 
         return []
 
