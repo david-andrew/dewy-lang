@@ -232,6 +232,8 @@ def is_prefix_op(token: t1.Token) -> bool:
     return isinstance(token, t1.Operator) and token.symbol in prefix_ops or (isinstance(token, BroadcastOp) and is_prefix_op(token.op))
 def is_postfix_op(token: t1.Token) -> bool:
     return isinstance(token, t1.Operator) and token.symbol in postfix_ops or (isinstance(token, BroadcastOp) and is_postfix_op(token.op)) # really only `?` could be broadcast
+def is_comma(token: t1.Token) -> bool:
+    return isinstance(token, t1.Operator) and token.symbol == ','
 
 # check for special atoms that get known juxtapose tokens 
 def is_dotdot(token: t1.Token) -> bool:
@@ -241,7 +243,7 @@ def is_dotdotdot(token: t1.Token) -> bool:
 def is_typeparam(token: t1.Token) -> bool:
     return isinstance(token, t1.Block) and token.kind == '<>'
 
-def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[Juxtapose]|QJuxtaposeTypeIsh|None:
+def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[Juxtapose | QJuxtapose] | None:
     """
     For certain tokens, we alredy know which juxtapose (precedence level) they should have
     
@@ -376,6 +378,30 @@ def insert_juxtapose(tokens: list[t1.Token]) -> None:
 
         # move to next token
         i += 1
+
+
+def insert_comma_voids(tokens: list[t1.Token]) -> None:
+    """Insert void tokens between any instances of `,,` or comma at the beginning or end of a context"""
+    if len(tokens) == 0:
+        return
+    
+    i = 0
+    if is_comma(tokens[0]):
+        tokens.insert(0, t1.Identifier(Span(tokens[0].loc.start, tokens[0].loc.start), 'void'))
+        i += 1
+    
+    while i < len(tokens):
+        token = tokens[i]
+        recurse_into(token, insert_comma_voids)
+        
+        if i+1 < len(tokens) and is_comma(token) and is_comma(tokens[i+1]):
+            tokens.insert(i+1, t1.Identifier(Span(token.loc.stop, token.loc.stop), 'void'))
+            i += 1
+        i += 1
+    
+    if is_comma(tokens[-1]):
+        tokens.append(t1.Identifier(Span(tokens[-1].loc.stop, tokens[-1].loc.stop), 'void'))
+
 
 def make_inverted_comparisons(tokens: list[t1.Token]) -> None:
     """`not` followed by a comparison operator becomes an inverted comparison operator"""
@@ -732,6 +758,9 @@ def postok_inner(tokens: list[t1.Token]) -> None:
     # remove whitespace and insert juxtapose tokens
     remove_whitespace(tokens)
     insert_juxtapose(tokens)
+
+    # insert void between any instances of `,,` or comma at the beginning or end of a context
+    insert_comma_voids(tokens)
 
     # combine not with comparison operators into a single token
     make_inverted_comparisons(tokens)
