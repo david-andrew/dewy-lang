@@ -321,7 +321,6 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[J
         if type(left) in atom_tokens:
             return TypeParamJuxtapose
         return None
-    
 
     # jux call, jux index, or jux mul. may only be between atoms (i.e. no operators on either side)
     if type(left) in atom_tokens and type(right) in atom_tokens:
@@ -331,7 +330,7 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[J
     return None
 
 
-def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None], apply_to_chains:bool=False) -> None:
+def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> None:
     """
     Helper to recursively apply a function to the inner tokens of a token (if it has any)
     It is expected that `func` will call `recurse_into` with itself as the callable.
@@ -340,30 +339,27 @@ def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None], apply_
         func(token.inner)
     elif isinstance(token, t1.IString):
         for child in token.content:
-            recurse_into(child, func, apply_to_chains)
+            recurse_into(child, func)
     elif isinstance(token, KeywordExpr):
         for part in token.parts:
-            recurse_into(part, func, apply_to_chains)
+            recurse_into(part, func)
     elif isinstance(token, Flow):
         for arm in token.arms:
-            recurse_into(arm, func, apply_to_chains)
+            recurse_into(arm, func)
         if token.default is not None:
-            recurse_into(token.default, func, apply_to_chains)
+            recurse_into(token.default, func)
     elif isinstance(token, Chain):
-        # Don't call func on the chain's items itself (e.g. because we're bundling up chains, and it's already a chain)
-        if apply_to_chains:
-            func(token.items)
-        else:
-            # skip applying the function to the chain layer itself, and just do it's inner items
-            for item in token.items:
-                recurse_into(item, func, apply_to_chains)
+        # skip applying the function to the chain layer itself, and just do it's inner items
+        # this is because the only step using recurse_into after any chains would be present is make_chains,
+        # but we don't want to add an extra layer to something that is already a chain
+        # If there were operations that needed to look at the relationship between items in the chain (e.g. another insert_juxtapose)
+        # then we'd need to reconsider skipping the chain itself. but for now, keep it simple. 
+        for item in token.items:
+            recurse_into(item, func)
     
     # else no inner tokens. TODO: would be nice if we could error if there were any unhandled cases with inner tokens...
 
 
-# TODO: since we're determining juxtapose placement based on token spans rather than if there were no whitespace tokens between,
-#       consider having previous tokenization steps just not insert any whitespace tokens in the first place
-#       (this would involve adjustments to t0.tokenize, probably some annotation to make whitespace and comment tokens get thrown away)
 def remove_whitespace(tokens: list[t1.Token]) -> None:
     """Remove whitespace tokens from the tokens list (recursively)"""
     tokens[:] = [token for token in tokens if not isinstance(token, t1.Whitespace)]
@@ -371,7 +367,7 @@ def remove_whitespace(tokens: list[t1.Token]) -> None:
         recurse_into(token, remove_whitespace)
 
 
-def insert_juxtapose(tokens: list[t1.Token], apply_to_chains:bool=True) -> None:
+def insert_juxtapose(tokens: list[t1.Token]) -> None:
     """
     Insert juxtapose tokens between adjacent (atom) tokens if their spans touch (which indicates there was no whitespace between them)
     TODO: this is vaguely inefficient with all the insertions. If this is a performance bottleneck, consider some type of e.g. heap or rope or etc. data structure
@@ -382,7 +378,7 @@ def insert_juxtapose(tokens: list[t1.Token], apply_to_chains:bool=True) -> None:
     i = 0
     while i < len(tokens):
         # recursively handle inserting juxtaposes for blocks
-        recurse_into(tokens[i], insert_juxtapose, apply_to_chains)
+        recurse_into(tokens[i], insert_juxtapose)
 
         # insert juxtapose if adjacent (atom) tokens' spans touch
         if i + 1 < len(tokens) and tokens[i].loc.stop == tokens[i+1].loc.start:
@@ -723,20 +719,17 @@ def make_chains(tokens: list[t1.Token]) -> None:
     """convert list[Token] into list[Chain] in place"""
     i = 0
     while i < len(tokens):
-        # this technically shouldn't happen... (unless maybe we hit chains during recurse_into?)
+        # this technically shouldn't happen. maybe can take it out
         if isinstance(tokens[i], Chain):
-            pdb.set_trace()
-            # TODO: test on keyword_expressions.dewy to verify this does or doesn't
-            raise ValueError('INTERNAL ERROR: unexpected chain when making chains... unless maybe from keyword exprs...')
-            i += 1
-            continue
+            raise ValueError('INTERNAL ERROR: unexpected chain when making chains')
 
         expr, j = collect_expr(tokens, i, stop_keywords=set())
         tokens[i:j] = [expr]
         i += 1
         
+        # apply to the interior items in the chain
         for t in expr.items:
-            recurse_into(t, make_chains) # apply to chains=False because otherwise we'd wrap all chains in an extra chain layer
+            recurse_into(t, make_chains)
         
 
 

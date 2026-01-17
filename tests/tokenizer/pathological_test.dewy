@@ -9,13 +9,18 @@
 # parametric escape
 '\u{1234 + ffabc}'
 
-# # keyword expressions
-# from sys import argv
-# import argv from sys
-# 
-# # flow
-# a = if name =? 'hello' 'world' else 'default'
-# 
-# # return
-# return 1 + 2
-# 
+# keyword expressions
+from apple import banana
+import peach from pear
+
+# flow
+a = if name =? 'hello' 'world' else 'default'
+
+# return
+return 1 + 2
+
+
+# TODO: make a lint/warning if there are ever two tokens juxtaposed that do not have a juxtapose op
+#       filter out valid cases like ops next to each other. but here `...` next to `loop` keyword doesn't juxtapose
+#       warning hint should note that to juxtapose a keyword expression, wrap the expression in parens
+return ...loop x x

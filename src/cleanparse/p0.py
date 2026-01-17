@@ -430,7 +430,9 @@ def parse_keyword_expr(keyword_expr: t2.KeywordExpr, ctx: Context) -> KeywordExp
     return KeywordExpr(parts)
 
 def parse_flow(flow: t2.Flow, ctx: Context) -> Flow:
-    pdb.set_trace()
+    arms = [parse_keyword_expr(arm, ctx) for arm in flow.arms]
+    default = parse_chain(flow.default, ctx) if flow.default is not None else None
+    return Flow(arms=arms, default=default)
 
 
 def reduce_loop(items: list[t2.Operator|AST], ctx: Context) -> list[AST]:
@@ -723,9 +725,6 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(tok, t2.BroadcastOp): return f"BroadcastOp({op_label(tok.op)})"
         if isinstance(tok, t2.CombinedAssignmentOp): return f"CombinedAssignmentOp({op_label(tok.op)})"
         if isinstance(tok, t2.OpFn): return f"OpFn({op_label(tok.op)})"
-        if isinstance(tok, t2.KeywordExpr): return "KeywordExpr"
-        if isinstance(tok, t2.FlowArm): return "FlowArm"
-        if isinstance(tok, t2.Flow): return "Flow"
         return type(tok).__name__
 
     def text_label(text: str) -> str:
@@ -751,7 +750,8 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(node, Block): return f"Block(kind='{node.kind}'{f", base={node.base}" if node.base else ""})"
         if isinstance(node, IString): return "IString"
         if isinstance(node, ParametricEscape): return "ParametricEscape"
-
+        if isinstance(node, KeywordExpr): return "KeywordExpr"
+        if isinstance(node, Flow): return "Flow"
         return type(node).__name__
 
     def iter_token_children(tok: t1.Token) -> list[tuple[str, object]]:
@@ -760,21 +760,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(tok, t2.BroadcastOp): return [("op", tok.op)]
         if isinstance(tok, t2.CombinedAssignmentOp): return [("op", tok.op)]
         if isinstance(tok, t2.OpFn): return [("op", tok.op)]
-        if isinstance(tok, t2.KeywordExpr):
-            out: list[tuple[str, object]] = []
-            expr_i = 0
-            for i, part in enumerate(tok.parts):
-                if isinstance(part, list):
-                    out.append((f"parts[{i}]", TreeGroup(f"expr[{expr_i}]", cast(list[object], part))))
-                    expr_i += 1
-                else:
-                    out.append((f"parts[{i}]", part))
-            return out
-        if isinstance(tok, t2.Flow):
-            out: list[tuple[str, object]] = [(f"arms[{i}]", arm) for i, arm in enumerate(tok.arms)]
-            if tok.default is not None:
-                out.append(("default", TreeGroup("default", cast(list[object], tok.default))))
-            return out
+        
         return []
 
     def iter_ast_children(node: AST) -> list[tuple[str, object]]:
@@ -784,10 +770,12 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(node, Atom): return iter_token_children(node.item)
         if isinstance(node, Block): return [(f"inner[{i}]", child) for i, child in enumerate(node.inner)]
         if isinstance(node, IString): return [(f"content[{i}]", child) for i, child in enumerate(node.content)]
-
         if isinstance(node, ParametricEscape): return [(f"inner[{i}]", child) for i, child in enumerate(node.inner)]
-
-
+        if isinstance(node, KeywordExpr):
+            return [(f"parts[{i}]", part) for i, part in enumerate(node.parts)]
+        if isinstance(node, Flow):
+            return [(f"arms[{i}]", arm) for i, arm in enumerate(node.arms)] + ([("default", node.default)] if node.default is not None else [])
+        
         return []
 
     lines: list[str] = []
