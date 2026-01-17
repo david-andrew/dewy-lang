@@ -3,7 +3,7 @@ Post processing steps on tokens to prepare them for expression parsiing
 """
 from src.cleanparse.t1 import Token
 from typing import Callable, Literal, cast, TypeAlias
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from .reporting import SrcFile, ReportException, Span
 from . import t1
 
@@ -60,9 +60,9 @@ class OpFn(t1.InedibleToken):
 
 
 @dataclass
-class QOperator(t1.InedibleToken):
+class QJuxtapose(t1.InedibleToken):
     """
-    Quantum Operator: represents operator ambiguity at a given point. Mainly for vanilla juxtapose.
+    Quantum Juxtapose: represents operator ambiguity at a given point. Mainly for vanilla juxtapose.
     E.g. without type information, a plain juxtapose could be a call, index, or multiply
     ```
     x = 1
@@ -76,25 +76,18 @@ class QOperator(t1.InedibleToken):
     # etc.
     ```
     """
-    options: list[Operator]
+    options: list[CallJuxtapose|IndexJuxtapose|MultiplyJuxtapose] = field(default_factory=list)
 
-# TODO: can't remove quotes around types b/c using old TypeAlias syntax compared to type Alias syntax
-#       but won't switch yet because type Alias semantics are different, and a pain in the butt.
-QOperatorTypeIsh: TypeAlias = 'Callable[[Span], QOperator]'
-def _qoperator_factory(options: list[type[Operator]]) -> QOperatorTypeIsh:
-    """
-    higher order function so we can return a class-ish object that is instantiated the same way as normal juxtapose tokens
-    Note: the options classes may not take any arguments except for the span (i.e. t1.Operator would raise exception)
-    """
-    def new(span: Span) -> QOperator:
-        return QOperator(span, [op(span) for op in options])
-    return new
+    def __post_init__(self):
+        # initialize with all the possible options (taking the span from that was given to self)
+        self.options = [CallJuxtapose(self.loc), IndexJuxtapose(self.loc), MultiplyJuxtapose(self.loc)]
+
 
 
 # concrete operator token types
 Operator: TypeAlias = (
       t1.Operator
-    | QOperator
+    | QJuxtapose
     | CallJuxtapose
     | IndexJuxtapose
     | MultiplyJuxtapose
@@ -119,7 +112,7 @@ def op_equals(left: Operator, right: Operator) -> bool:
         return op_equals(left.op, right.op)
     if isinstance(left, BroadcastOp):
         return left.op == right.op
-    if isinstance(left, QOperator) or isinstance(right, QOperator):
+    if isinstance(left, QJuxtapose) or isinstance(right, QJuxtapose):
         # TODO: not sure how op equals should behave for QOperators. maybe just always return False? or check if inners are all equal modulo ordering
         pdb.set_trace()
         ...
@@ -163,12 +156,6 @@ flows # note that if-else-if/if-else-loop/etc. should all be bundled up into one
 class KeywordExpr(t1.InedibleToken):
     parts: list[t1.Keyword | Chain]
 
-# TODO: consider merging FlowArm and KeywordExpr into a single class
-#       if don't, then p0 merges them. TBD, might be necessary for parsing here...
-#       but perhaps can keep the exact functions here, and collect_flow_arm would just return a KeywordExpr anyways
-# @dataclass
-# class FlowArm(t1.InedibleToken):
-#     parts: list[t1.Keyword | Chain]
 
 @dataclass
 class Flow(t1.InedibleToken):
@@ -189,7 +176,6 @@ atom_tokens: set[type[t1.Token]] = {
     t1.IString,
     t1.Block,
     t1.BasedString,
-    # t1.BasedArray,
     t1.Identifier,
     t1.Metatag,
     t1.Integer,
@@ -205,6 +191,7 @@ other_infix_tokens: set[type[t1.Token]] = {
     CallJuxtapose,
     IndexJuxtapose,
     MultiplyJuxtapose,
+    QJuxtapose,
     RangeJuxtapose,
     EllipsisJuxtapose,
     TypeParamJuxtapose,
@@ -254,7 +241,7 @@ def is_dotdotdot(token: t1.Token) -> bool:
 def is_typeparam(token: t1.Token) -> bool:
     return isinstance(token, t1.Block) and token.kind == '<>'
 
-def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[Juxtapose]|QOperatorTypeIsh|None:
+def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[Juxtapose]|QJuxtaposeTypeIsh|None:
     """
     For certain tokens, we alredy know which juxtapose (precedence level) they should have
     
@@ -324,7 +311,7 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[J
 
     # jux call, jux index, or jux mul. may only be between atoms (i.e. no operators on either side)
     if type(left) in atom_tokens and type(right) in atom_tokens:
-        return _qoperator_factory([CallJuxtapose, IndexJuxtapose, MultiplyJuxtapose])
+        return QJuxtapose
     
     # otherwise no jux
     return None

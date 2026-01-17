@@ -168,13 +168,15 @@ def get_precedence(op: t2.Operator) -> int | qint:
         return precedence_table['=']
     if isinstance(op, t2.BroadcastOp):
         return get_precedence(op.op)
-    if isinstance(op, t2.QOperator):
+    if isinstance(op, t2.QJuxtapose):
         return qint(set(get_precedence(o) for o in op.options))
-    try:
-        return precedence_table[type(op)]
-    except KeyError:
-        pdb.set_trace()
-        raise ValueError(f'INTERNAL ERROR: unexpected operator type for determining precedence. got {op=}')
+
+    # simple operators, just look up in the table
+    precedence = precedence_table.get(type(op))
+    if precedence is not None:
+        return precedence
+    
+    raise ValueError(f'INTERNAL ERROR: unexpected operator type for determining precedence. got {op=}')
 
 def get_bind_power(op: t2.Operator) -> tuple[int, int] | tuple[qint, qint]:
     precedence = get_precedence(op)
@@ -694,7 +696,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(op, t2.InvertedComparisonOp): return f"not {op.op}"
         if isinstance(op, t2.BroadcastOp): return f".{op_label(op.op)}"
         if isinstance(op, t2.CombinedAssignmentOp): return f"{op_label(op.op)}="
-        if isinstance(op, t2.QOperator): return f"QOperator({', '.join(op_label(o) for o in op.options)})"
+        if isinstance(op, t2.QJuxtapose): return f"QJuxtapose({', '.join(op_label(o) for o in op.options)})"
         return type(op).__name__
 
     def token_label(tok: t1.Token) -> str:
