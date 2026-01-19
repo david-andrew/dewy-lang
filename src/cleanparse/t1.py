@@ -325,24 +325,6 @@ class BasedString(Token):
         digits = [token for token in raw_body if isinstance(token, t0.BasedStringChars)]
         return closer.idx - start + 1, BasedString(span, digits, opener.base)
 
-# # TODO: consider merging the class with regular Block class and just including the base prefix for both
-# @dataclass
-# class BasedArray(Token):
-#     inner: list[Token]
-#     base: t0.BasePrefix
-#     @staticmethod
-#     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Block]|None:
-#         opener = tokens[start]
-#         if not isinstance(opener, t0.BasedBlockOpener):
-#             return None
-        
-#         # tokenize the inner body
-#         closer = opener.matching_right
-#         span = Span(opener.loc.start, closer.loc.stop)
-#         body_start, body_stop = start + 1, closer.idx
-#         inner = list(tokenize_gen(tokens, ctx, body_start, body_stop))
-
-#         return closer.idx - start + 1, BasedArray(span, inner, opener.base)
 
 @dataclass
 class Identifier(Token):
@@ -439,7 +421,6 @@ top_level_tokens: list[type[Token]] = [
     Real,
     Block,
     BasedString,
-    # BasedArray,
     Operator,
     Semicolon,
     Whitespace,
@@ -452,7 +433,6 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     return list(tokenize_gen(tokens, ctx))
 
 def tokenize_gen(tokens:list[t0.Token], ctx:Context, start:int=0, stop:int=None) -> Generator[Token]:
-    # processed: list[Token2] = []
     if stop is None: stop = len(tokens)
     if stop > len(tokens): raise ValueError(f"INTERNAL ERROR: stop index out of range: {stop} > {len(tokens)}")
     while start < stop:
@@ -486,11 +466,9 @@ def tokenize_gen(tokens:list[t0.Token], ctx:Context, start:int=0, stop:int=None)
                 error.throw()
     
         match_length, token = matches[0]
-        # processed.append(token)
         yield token
         start += match_length
 
-    # return processed
 
 
 def peek_next_token(tokens:list[t0.Token], ctx:Context, start:int) -> Token | t0.Token | None:
