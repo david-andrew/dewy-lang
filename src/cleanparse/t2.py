@@ -3,7 +3,7 @@ Post processing steps on tokens to prepare them for expression parsiing
 """
 from typing import Callable, Literal, cast, TypeAlias
 from dataclasses import dataclass, field
-from .reporting import SrcFile, ReportException, Span
+from .reporting import SrcFile, ReportException, Span, Error, Pointer
 from . import t1
 
 import pdb
@@ -165,6 +165,11 @@ class Flow(t1.InedibleToken):
 @dataclass
 class Chain(t1.InedibleToken):
     items: list[t1.Token]
+
+
+@dataclass
+class Context:
+    srcfile: SrcFile
 
 
 # token categories used by the keyword/flow bundler.
@@ -469,7 +474,154 @@ def is_stop_keyword(token: t1.Token, stop: set[str]) -> bool:
 
 
 
-def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[list[t1.Token], int]:
+def _token_summary(token: t1.Token) -> str:
+    if isinstance(token, t1.Operator): return f"operator {token.symbol!r}"
+    if isinstance(token, t1.Identifier): return f"identifier {token.name!r}"
+    if isinstance(token, t1.Keyword): return f"keyword {token.name!r}"
+    if isinstance(token, t1.Semicolon): return "semicolon ';'"
+    if isinstance(token, t1.String): return "string literal"
+    if isinstance(token, t1.IString): return "template string"
+    if isinstance(token, t1.Integer): return "integer literal"
+    if isinstance(token, t1.Real): return "real literal"
+    if isinstance(token, t1.Block): return f"block {token.kind!r}"
+    if isinstance(token, t1.Metatag): return f"metatag {token.name!r}"
+    if isinstance(token, (Juxtapose, BroadcastOp, CombinedAssignmentOp, InvertedComparisonOp)): return type(token).__name__
+    if isinstance(token, (OpFn, KeywordExpr, Flow, Chain)): return type(token).__name__
+    return type(token).__name__
+
+
+def _throw_expected_expr_error(*, ctx: Context, tokens: list[t1.Token], start: int, token: t1.Token) -> None:
+    found = _token_summary(token)
+    prev = tokens[start - 1] if start > 0 else None
+
+    if prev is not None and is_binary_op(prev):
+        title = "Missing operand"
+        message = f"Expected an expression after {_token_summary(prev)}, but found {found}."
+        pointer_messages = [
+            Pointer(span=Span(prev.loc.start, prev.loc.stop), message="this operator expects an expression on its right"),
+            Pointer(span=Span(token.loc.start, token.loc.stop), message=f"found {found} here"),
+        ]
+        hint = f"Add an expression after {_token_summary(prev)} (or remove {found})."
+    elif is_binary_op(token):
+        title = "Missing left-hand operand"
+        message = f"Binary operators can't start an expression; found {found}."
+        pointer_messages = [
+            Pointer(span=Span(token.loc.start, token.loc.stop), message="this operator needs an expression on its left"),
+        ]
+        hint = "Add an expression before this operator."
+    else:
+        title = "Expected expression"
+        message = f"Expected an expression here, but found {found}."
+        pointer_messages = [
+            Pointer(span=Span(token.loc.start, token.loc.stop), message=f"{found} can't start an expression"),
+        ]
+        if is_postfix_op(token):
+            hint = f"{found} is postfix, so it must have an expression before it"
+        else:
+            hint = f"Insert an expression before {found} (or remove {found})."
+
+    Error(
+        srcfile=ctx.srcfile,
+        title=title,
+        message=message,
+        pointer_messages=pointer_messages,
+        hint=hint,
+    ).throw()
+
+
+def _throw_expected_chunk_error(*, ctx: Context, tokens: list[t1.Token], start: int, stop_keywords: set[str]) -> None:
+    """
+    `collect_chunk` returned no tokens when `collect_expr` expected one.
+    This mostly happens when a delimited construct (flow keyword, block, file, etc.)
+    ends before the next expression is present.
+    """
+    flow_kw = next(
+        (
+            t
+            for t in reversed(tokens[:start])
+            if isinstance(t, t1.Keyword) and t.name in {"loop", "if", "match", "do"}
+        ),
+        None,
+    )
+
+    if flow_kw is not None:
+        title = f"Incomplete `{flow_kw.name}` expression"
+        message = f"`{flow_kw.name}` expects more expressions, but the input ended early."
+        pointer_messages: list[Pointer] = [
+            Pointer(span=Span(flow_kw.loc.start, flow_kw.loc.stop), message=f"started `{flow_kw.name}` here"),
+        ]
+    else:
+        title = "Expected expression"
+        message = "Expected an expression here, but the input ended early."
+        pointer_messages = []
+
+    if start >= len(tokens):
+        at = tokens[-1].loc.stop if tokens else 0
+        pointer_messages.append(Pointer(span=Span(at, at), message="expected an expression here"))
+        hint = "Add the missing expression, or remove the unfinished construct."
+    else:
+        delim = tokens[start]
+        pointer_messages.append(Pointer(span=Span(delim.loc.start, delim.loc.stop), message=f"stopped before {_token_summary(delim)}"))
+        hint = f"Insert an expression before {_token_summary(delim)}."
+        if is_stop_keyword(delim, stop_keywords):
+            hint = f"Insert an expression before keyword {delim.name!r}."
+
+    Error(
+        srcfile=ctx.srcfile,
+        title=title,
+        message=message,
+        pointer_messages=pointer_messages,
+        hint=hint,
+    ).throw()
+
+
+def _throw_expected_loop_after_do(*, ctx: Context, do_kw: t1.Keyword, pre: Chain, tokens: list[t1.Token], i: int) -> None:
+    expected_at = pre.loc.stop
+    pointer_messages: list[Pointer] = [
+        Pointer(span=Span(do_kw.loc.start, do_kw.loc.stop), message="`do` starts a do-loop"),
+        Pointer(span=Span(expected_at, expected_at), message="expected keyword 'loop' here"),
+    ]
+
+    if i < len(tokens):
+        found = tokens[i]
+        pointer_messages.append(Pointer(span=Span(found.loc.start, found.loc.stop), message=f"found {_token_summary(found)}"))
+        hint = f"Use `do <body> loop <condition>`; insert `loop` before {_token_summary(found)}"
+    else:
+        hint = "Use `do <body> loop <condition>`; add the missing `loop <condition>`"
+
+    Error(
+        srcfile=ctx.srcfile,
+        title="Expected `loop` after `do`",
+        message="A `do` loop must be followed by the keyword `loop` and a condition expression.",
+        pointer_messages=pointer_messages,
+        hint=hint,
+    ).throw()
+
+
+def _throw_expected_import_after_from(*, ctx: Context, from_kw: t1.Keyword, first: Chain, tokens: list[t1.Token], i: int) -> None:
+    expected_at = first.loc.stop
+    pointer_messages: list[Pointer] = [
+        Pointer(span=Span(from_kw.loc.start, from_kw.loc.stop), message="`from` starts an import-from expression"),
+        Pointer(span=Span(expected_at, expected_at), message="expected keyword 'import' here"),
+    ]
+
+    if i < len(tokens):
+        found = tokens[i]
+        pointer_messages.append(Pointer(span=Span(found.loc.start, found.loc.stop), message=f"found {_token_summary(found)}"))
+        hint = f"Use `from <module> import <names>`; insert `import` before {_token_summary(found)}"
+    else:
+        hint = "Use `from <module> import <names>`; add the missing `import <names>`"
+
+    Error(
+        srcfile=ctx.srcfile,
+        title="Expected `import` after `from`",
+        message="A `from` import must be followed by the keyword `import` and an import expression.",
+        pointer_messages=pointer_messages,
+        hint=hint,
+    ).throw()
+
+
+def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str], ctx: Context) -> tuple[list[t1.Token], int]:
     """
     Collect a single expression chunk starting at `start`. A chunk is basically an atom surrounded by prefix and postfix operators.
 
@@ -491,7 +643,7 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
 
     token = tokens[i]
     if isinstance(token, t1.Keyword):
-        atom, i = collect_keyword_atom(tokens, i, stop_keywords=stop_keywords)
+        atom, i = collect_keyword_atom(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
         out.append(atom)
         while i < len(tokens) and not is_stop_keyword(tokens[i], stop_keywords) and is_postfix_op(tokens[i]):
             out.append(tokens[i])
@@ -499,9 +651,7 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
         return out, i
 
     if type(token) not in atom_tokens or isinstance(token, t1.Semicolon):
-        # TODO: this should be a full error report
-        pdb.set_trace()
-        raise ValueError(f"expected primary token, got {token=}")
+        _throw_expected_expr_error(ctx=ctx, tokens=tokens, start=i, token=token)
     out.append(token)
     i += 1
     while i < len(tokens) and not is_stop_keyword(tokens[i], stop_keywords) and is_postfix_op(tokens[i]):
@@ -510,7 +660,7 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
     return out, i
 
 
-def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[Chain, int]:
+def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str], ctx: Context) -> tuple[Chain, int]:
     """
     Collect a single expression chain starting at `start`.
 
@@ -535,14 +685,9 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     i = start
     items: list[t1.Token] = []
 
-    chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords)
+    chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
     if not chunk:
-        # TODO: full error report, probably user error
-        # TODO: perhaps we should error here because no chunk was found when we expected one
-        # e.g. if its the end of the file and the user does `loop x` without a second expression, we'd probably hit this
-        pdb.set_trace()
-        raise ValueError(f"USER ERROR: expected chunk, got {tokens[i]=}")
-        return Chain(Span(tokens[start].loc.start, tokens[start].loc.start), items), i
+        _throw_expected_chunk_error(ctx=ctx, tokens=tokens, start=i, stop_keywords=stop_keywords)
     items.extend(chunk)
 
     # NOTE: this would be trickier if we had any postfix ops that could also be binary.
@@ -553,7 +698,7 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
             break
         items.append(tokens[i])
         i += 1
-        chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords)
+        chunk, i = collect_chunk(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
         items.extend(chunk)
 
     # if end of expression was juxtaposed with a semicolon, include it in the chain
@@ -564,7 +709,7 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     return Chain(Span(tokens[start].loc.start, tokens[i-1].loc.stop), items), i
 
 
-def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[KeywordExpr, int]:
+def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[str], ctx: Context) -> tuple[KeywordExpr, int]:
     """
     Collect a single flow arm (if/loop/match/do-loop) into a `FlowArm`.
 
@@ -578,34 +723,34 @@ def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[s
     """
     kw = tokens[start]
     if not isinstance(kw, t1.Keyword):
-        raise ValueError(f"expected flow keyword, got {kw=}")
+        raise ValueError(f"INTERNAL ERROR: expected flow keyword, got {kw=}")
     i = start + 1
 
     if kw.name == "do":
-        pre, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"loop"})
+        pre, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"loop"}, ctx=ctx)
         if i >= len(tokens) or not (isinstance(tokens[i], t1.Keyword) and tokens[i].name == "loop"):
-            raise ValueError("`do` must be followed by `loop`")
+            _throw_expected_loop_after_do(ctx=ctx, do_kw=kw, pre=pre, tokens=tokens, i=i)
         loop_kw = tokens[i]
         i += 1
-        cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"do"})
+        cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"do"}, ctx=ctx)
         parts: list[t1.Keyword | Chain] = [kw, pre, loop_kw, cond]
         if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name == "do":
             do2 = tokens[i]
             i += 1
-            post, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+            post, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
             parts.extend([do2, post])
         return KeywordExpr(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
 
     if kw.name in {"if", "match", "loop"}:
-        cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
-        clause, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+        cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
+        clause, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
         parts: list[t1.Keyword | Chain] = [kw, cond, clause]
         return KeywordExpr(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
 
-    raise ValueError(f"unexpected flow keyword {kw.name!r}")
+    raise ValueError(f"INTERNAL ERROR: unexpected flow keyword {kw.name!r}")
 
 
-def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[Flow, int]:
+def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str], ctx: Context) -> tuple[Flow, int]:
     """
     Collect an entire flow expression (if/loop/match/do-loop with optional else chains).
 
@@ -620,7 +765,7 @@ def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     default: Chain | None = None
 
     while True:
-        arm, i = collect_flow_arm(tokens, i, stop_keywords=stop_keywords | {"else"})
+        arm, i = collect_flow_arm(tokens, i, stop_keywords=stop_keywords | {"else"}, ctx=ctx)
         arms.append(arm)
 
         if i >= len(tokens) or not (isinstance(tokens[i], t1.Keyword) and tokens[i].name == "else"):
@@ -630,7 +775,7 @@ def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
         if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name in {"if", "loop", "match", "do"}:
             continue
 
-        default, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"else"})
+        default, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"else"}, ctx=ctx)
         break
 
     if default is not None and default.items:
@@ -640,7 +785,7 @@ def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str])
     return Flow(Span(tokens[start].loc.start, end), arms, default), i
 
 
-def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]) -> tuple[t1.Token, int]:
+def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: set[str], ctx: Context) -> tuple[t1.Token, int]:
     """
     Collect a keyword-driven expression into a single atom token.
 
@@ -658,16 +803,16 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
     """
     kw = tokens[start]
     if not isinstance(kw, t1.Keyword):
-        raise ValueError(f"expected keyword, got {kw=}")
+        raise ValueError(f"INTERNAL ERROR: expected keyword, got {kw=}")
 
     if kw.name in {"if", "loop", "match", "do"}:
-        return collect_flow(tokens, start, stop_keywords=stop_keywords)
+        return collect_flow(tokens, start, stop_keywords=stop_keywords, ctx=ctx)
 
     i = start + 1
     if kw.name in {"return", "yield"}:
         if i >= len(tokens) or is_stop_keyword(tokens[i], stop_keywords) or isinstance(tokens[i], t1.Semicolon):
             return KeywordExpr(kw.loc, [kw]), i
-        expr, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+        expr, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
         return KeywordExpr(Span(kw.loc.start, expr.items[-1].loc.stop), [kw, expr]), i
 
     if kw.name in {"break", "continue"}:
@@ -677,32 +822,32 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
         return KeywordExpr(kw.loc, [kw]), i
 
     if kw.name in {"let", "const", "local_const", "overload_only"}:
-        expr, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+        expr, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
         return KeywordExpr(Span(kw.loc.start, expr.items[-1].loc.stop), [kw, expr]), i
 
     if kw.name == "import":
-        first, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"from"})
+        first, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"from"}, ctx=ctx)
         if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name == "from":
             from_kw = tokens[i]
             i += 1
-            second, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+            second, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
             return KeywordExpr(Span(kw.loc.start, second.items[-1].loc.stop), [kw, first, from_kw, second]), i
         return KeywordExpr(Span(kw.loc.start, first.items[-1].loc.stop), [kw, first]), i
 
     if kw.name == "from":
-        first, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"import"})
+        first, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"import"}, ctx=ctx)
         if i >= len(tokens) or not (isinstance(tokens[i], t1.Keyword) and tokens[i].name == "import"):
-            raise ValueError("`from` must be followed by `import`")
+            _throw_expected_import_after_from(ctx=ctx, from_kw=kw, first=first, tokens=tokens, i=i)
         import_kw = tokens[i]
         i += 1
-        second, i = collect_expr(tokens, i, stop_keywords=stop_keywords)
+        second, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
         return KeywordExpr(Span(kw.loc.start, second.items[-1].loc.stop), [kw, first, import_kw, second]), i
 
     raise ValueError(f"INTERNAL ERROR: unexpected keyword {kw.name!r}")
     return KeywordExpr(kw.loc, [kw]), i
 
 
-def bundle_keyword_exprs(tokens: list[t1.Token]) -> None:
+def bundle_keyword_exprs(tokens: list[t1.Token], *, ctx: Context) -> None:
     """
     Walk `tokens` and replace any keyword-started expression with a single atom token.
 
@@ -716,10 +861,10 @@ def bundle_keyword_exprs(tokens: list[t1.Token]) -> None:
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        recurse_into(token, bundle_keyword_exprs)
+        recurse_into(token, lambda inner: bundle_keyword_exprs(inner, ctx=ctx))
 
         if isinstance(token, t1.Keyword) and token.name not in {"else"}:
-            atom, j = collect_keyword_atom(tokens, i, stop_keywords={"else"})
+            atom, j = collect_keyword_atom(tokens, i, stop_keywords={"else"}, ctx=ctx)
             tokens[i:j] = [atom]
             i += 1
             continue
@@ -727,7 +872,7 @@ def bundle_keyword_exprs(tokens: list[t1.Token]) -> None:
         i += 1
 
 
-def make_chains(tokens: list[t1.Token]) -> None:
+def make_chains(tokens: list[t1.Token], *, ctx: Context) -> None:
     """convert list[Token] into list[Chain] in place"""
     i = 0
     while i < len(tokens):
@@ -735,24 +880,25 @@ def make_chains(tokens: list[t1.Token]) -> None:
         if isinstance(tokens[i], Chain):
             raise ValueError('INTERNAL ERROR: unexpected chain when making chains')
 
-        expr, j = collect_expr(tokens, i, stop_keywords=set())
+        expr, j = collect_expr(tokens, i, stop_keywords=set(), ctx=ctx)
         tokens[i:j] = [expr]
         i += 1
         
         # apply to the interior items in the chain
         for t in expr.items:
-            recurse_into(t, make_chains)
+            recurse_into(t, lambda inner: make_chains(inner, ctx=ctx))
         
 
 
 def postok(srcfile: SrcFile) -> list[Chain]:
     """apply postprocessing steps to the tokens"""
+    ctx = Context(srcfile)
     tokens = t1.tokenize(srcfile)
-    postok_inner(tokens)
+    postok_inner(tokens, ctx=ctx)
     return cast(list[Chain], tokens)
 
 
-def postok_inner(tokens: list[t1.Token]) -> None:
+def postok_inner(tokens: list[t1.Token], *, ctx: Context) -> None:
     """apply postprocessing steps to the tokens. Converts list[Token] into list[Chain] in place"""
     # remove whitespace and insert juxtapose tokens
     remove_whitespace(tokens)
@@ -771,10 +917,10 @@ def postok_inner(tokens: list[t1.Token]) -> None:
     make_op_functions(tokens)
 
     # bundle up keyword expressions and flows into single atom tokens
-    bundle_keyword_exprs(tokens)
+    bundle_keyword_exprs(tokens, ctx=ctx)
     
     # convert all lists[Token] into list[Chain] so parsing doesn't have to separate separate expressions
-    make_chains(tokens)
+    make_chains(tokens, ctx=ctx)
 
 
 def test():
