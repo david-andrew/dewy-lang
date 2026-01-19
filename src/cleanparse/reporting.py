@@ -40,7 +40,7 @@ TODO features:
 [ ] source code syntax highlighting (very long term goal)
 [.] for unknown identifiers, look up possible similar identifiers for help message (handled by higher level process)
 """
-
+from __future__ import annotations  # so older python versions (>=3.10) can use this module
 from dataclasses import dataclass, field
 from pathlib import Path
 from bisect import bisect_right
@@ -92,13 +92,6 @@ COLOR_NAME_TO_CODE: dict[ColorName, str] = {
     "red": "\033[91m",
     "white": "\033[97m",
 }
-
-
-class ReportException(Exception):
-    """Exception raised when a Report is thrown. Contains the report for handling."""
-    def __init__(self, report: Report) -> None:
-        self.report = report
-        super().__init__(str(report))
 
 
 class ColorTheme:
@@ -982,6 +975,12 @@ class Hint(Report):
     severity:Literal["hint"] = field(default="hint", init=False)
 
 
+
+class ReportException(Exception):
+    """Exception raised when a Report is thrown. Contains the report for handling."""
+    def __init__(self, report: Report) -> None:
+        self.report = report
+        super().__init__(str(report))
 
 
 def main() -> None:
