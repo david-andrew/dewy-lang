@@ -3990,3 +3990,42 @@ items: array<BaseType> & <self[42] of ChildType>
 Basically I'm trying to come up with a nice compact way to specify various conditional checks that people do. And I think either a nice short spelling, or using an `assert` would be ways to tell the compiler of those specifics.
 
 Also note, I think `assert` should definitely be a `the compiler will guarantee this is true` kind of check. But there could certainly be cases that are beyond the compiler, so there should probably be a different assert for that, perhaps `iguarantee` or `iclaim` or `iknow`
+
+
+
+## What does the `is?` operator do? [leaning towards type checking]
+should it be used to check if something is a type
+```
+# direct matching
+type(A) =? type(B)
+
+# matching all parent types
+type(A) in? [type(B) parents(B)...]
+```
+
+or is it for checking if two things have the same identity (in the python sense)
+```
+id(A) =? id(B)
+```
+
+I feel like the second is what the `@?` operator is for. I was thinking of adding an `istype?` operator for the first case, but it might be cleaner to make type checking use `is?`/`isnt?`
+
+```
+a: float64 = 3.14159
+b: int64 = 4
+
+a is? float64   # true
+a is? float32   # false
+a is? float     # true
+a is? real      # true
+a is? complex   # true
+a is? number    # true
+a is? string    # false
+
+b is? real      # true
+b is? integer   # true
+b isnt? bool    # true
+b is? ~string   # true
+```
+
+I think this is probably a pretty convenient thing, especially considering how often one would be doing type checking/making type guards for the compiler to check. And if one wants a narrow type check, they should do `type(A) =? type(B)`
