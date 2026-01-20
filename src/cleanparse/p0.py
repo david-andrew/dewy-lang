@@ -103,8 +103,8 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.left, ['.', t2.CallJuxtapose, t2.IndexJuxtapose]),  # x.y sin(x) x[y]
     (Associativity.fail, [t2.TypeParamJuxtapose]),
     (Associativity.fail, [t2.EllipsisJuxtapose]),  # A...  ...B
+    (Associativity.postfix, ['`']), #TODO/Note: at the moment, prefix vs postfix precedence of (`) is backed into the algorithm, and wouldn't listen to the ordering in the table...
     (Associativity.prefix, ['`']),
-    (Associativity.postfix, ['`']),
     (Associativity.prefix, ['not', '~']),
     (Associativity.postfix, ['?']),
     (Associativity.right,  ['^']),
@@ -263,6 +263,12 @@ class Atom(AST):
     item: t1.Token
 
 
+@dataclass
+class ProtoAST:
+    """transformation of t2.Chain that can be used at this phase. Comprises a single expression"""
+    items: list[AST|t2.Operator]
+
+
 # special error cases when trying to make a reduction
 # NOTE: if there become many more special cases to check, make a table that looks up functions given the operator
 def validate_flat(ast: Flat, ctx: Context) -> NoReturn|None:
@@ -380,7 +386,7 @@ def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
         if isinstance(t, t2.Chain):
             raise ValueError(f'INTERNAL ERROR: top level item in chain was another chain. .this shouldn\'t be possible. got {t=}')
 
-        # convert all other items into ASTs
+        # convert all other items (potentially recursively) into ASTs
         if isinstance(t, (t1.Block, t1.ParametricEscape)):
             ast = parse_block(t, ctx)
         elif isinstance(t, t1.IString):
@@ -393,9 +399,8 @@ def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
             ast = Atom(t)
         items.append(ast)
 
-    reduce_loop(items, ctx)
-    assert len(items) == 1, f"INTERNAL ERROR: parse_chain produced {len(items)} items, expected 1"
-    return items[0]
+    result = reduce_loop(ProtoAST(items), ctx)
+    return result
 
 def parse_block(block: t1.Block|t1.ParametricEscape, ctx: Context) -> Block:
     inner = []
@@ -437,26 +442,28 @@ def parse_flow(flow: t2.Flow, ctx: Context) -> Flow:
     return Flow(arms=arms, default=default)
 
 
-def reduce_loop(items: list[t2.Operator|AST], ctx: Context) -> list[AST]:
+def reduce_loop(chain: ProtoAST, ctx: Context) -> AST:
     """repeatedly apply shunting reductions until no more occur. modifies `tokens` in place"""
     while True:
-        l0 = len(items)
-        shunt_pass(items, ctx)
-        if len(items) == l0:
+        l0 = len(chain.items)
+        shunt_pass(chain, ctx)
+        if len(chain.items) == l0:
             break
     
     # during development, this might also be hit due to internal errors, e.g. bugs where something is not properly reducing
     # TODO: this could be a user error, e.g. `A&;b&c`. Do full error reporting
     # perhaps do: for each item in list, if is op, determine what kinds of reductions it could participate in and show error listing them vs what was present
-    assert all(isinstance(i, AST) for i in items), "INTERNAL ERROR: shunt-loop produced list with non-ASTs"
+    assert len(chain.items) == 1, f"INTERNAL ERROR: reduce_loop produced {len(chain.items)} items, expected 1"
+    item = chain.items[0]
+    assert isinstance(item, AST), f"INTERNAL ERROR: shunt-loop produced non-AST item. got {item=}"
     
-    return items
+    return item
 
-def shunt_pass(items: list[t2.Operator|AST], ctx: Context) -> None:
+def shunt_pass(chain: ProtoAST, ctx: Context) -> None:
     """apply a shunting reduction. modifies `tokens` in place"""
     # identify items that could shift
-    ast_idxs = [i for i, item in enumerate(items) if isinstance(item, AST)]
-    asts = cast(list[AST], [items[i] for i in ast_idxs])
+    ast_idxs = [i for i, item in enumerate(chain.items) if isinstance(item, AST)]
+    asts = cast(list[AST], [chain.items[i] for i in ast_idxs])
     reverse_ast_idxs_map = {idx: i for i, idx in enumerate(ast_idxs)} # so we can look up the index of an ast's shift dir in the shift_dirs list
     candidate_operator_idxs: set[int] = set()
     
@@ -464,8 +471,8 @@ def shunt_pass(items: list[t2.Operator|AST], ctx: Context) -> None:
     shift_dirs: list[Literal[-1, 0, 1]] = [0] * len(ast_idxs)
     for i, (ast, ast_idx) in enumerate(zip(asts, ast_idxs)):
         # get left and/or right operators if present
-        left_op = items[ast_idx - 1] if ast_idx > 0 else None
-        right_op = items[ast_idx + 1] if ast_idx < len(items) - 1 else None
+        left_op = chain.items[ast_idx - 1] if ast_idx > 0 else None
+        right_op = chain.items[ast_idx + 1] if ast_idx < len(chain.items) - 1 else None
 
         # semicolon is a special case that can only shift left if left is SemicolonJuxtapose
         if isinstance(ast, Atom) and isinstance(ast.item, t1.Semicolon) and not isinstance(left_op, t2.SemicolonJuxtapose):
@@ -503,14 +510,14 @@ def shunt_pass(items: list[t2.Operator|AST], ctx: Context) -> None:
     for candidate_operator_idx in sorted(candidate_operator_idxs):
         left_ast_idx = candidate_operator_idx - 1
         right_ast_idx = candidate_operator_idx + 1
-        left_ast = items[left_ast_idx] if left_ast_idx >= 0 else None
-        right_ast = items[right_ast_idx] if right_ast_idx < len(items) else None
+        left_ast = chain.items[left_ast_idx] if left_ast_idx >= 0 else None
+        right_ast = chain.items[right_ast_idx] if right_ast_idx < len(chain.items) else None
         left_ast_shift_dir_idx = reverse_ast_idxs_map.get(left_ast_idx)  # index of the ast in the shift_dirs list
         right_ast_shift_dir_idx = reverse_ast_idxs_map.get(right_ast_idx)  # index of the ast in the shift_dirs list
         left_ast_shift_dir = shift_dirs[left_ast_shift_dir_idx] if left_ast_shift_dir_idx is not None else 0
         right_ast_shift_dir = shift_dirs[right_ast_shift_dir_idx] if right_ast_shift_dir_idx is not None else 0
 
-        op = items[candidate_operator_idx]
+        op = chain.items[candidate_operator_idx]
         assert isinstance(op, t2.Operator), f'INTERNAL ERROR: candidate operator is not an operator. got {op=}'
         associativity = get_associativity(op)
         if not isinstance(associativity, list):
@@ -521,13 +528,15 @@ def shunt_pass(items: list[t2.Operator|AST], ctx: Context) -> None:
             if (a == Associativity.left or a == Associativity.right) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 assert isinstance(left_ast, AST) and isinstance(right_ast, AST), f'INTERNAL ERROR: left and right ASTs are not ASTs. got {left_ast=}, {right_ast=}, {left_ast_idx=}, {right_ast_idx=}'
                 reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1), a))
-            elif a == Associativity.prefix and (right_ast_shift_dir == -1) and (not t2.is_binary_op(op) or not left_could_attach(left_ast_idx, items)): # TODO: perhaps still not right. problem case: --x. basically need to check that no chains exist to the left...
+            elif a == Associativity.prefix and (right_ast_shift_dir == -1) and (not could_be_binop(candidate_operator_idx, chain) and not could_be_postfix(candidate_operator_idx, chain)):
+                assert isinstance(right_ast, AST), f'INTERNAL ERROR: right AST is not an AST. got {right_ast=}'
                 reductions.append((Prefix(op, right_ast), (candidate_operator_idx, right_ast_idx+1), a))
             elif (a == Associativity.postfix) and (left_ast_shift_dir == 1):
+                assert isinstance(left_ast, AST), f'INTERNAL ERROR: left AST is not an AST. got {left_ast=}'
                 reductions.append((Postfix(op, left_ast), (left_ast_idx, candidate_operator_idx+1), a))
             elif (a == Associativity.flat) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 # check for the whole flat chain
-                res = collect_flat_operands(left_ast_idx, right_ast_idx, op, items, reverse_ast_idxs_map, shift_dirs)
+                res = collect_flat_operands(left_ast_idx, right_ast_idx, op, chain, reverse_ast_idxs_map, shift_dirs)
                 if res is None:
                     continue
                 operands, bounds = res
@@ -580,62 +589,115 @@ def shunt_pass(items: list[t2.Operator|AST], ctx: Context) -> None:
     
     # apply reductions in reverse order to avoid index shifting issues
     for reduction, (left_bound, right_bound), _ in reversed(all_reductions):
-        items[left_bound:right_bound] = [reduction]
+        chain.items[left_bound:right_bound] = [reduction]
 
-# TODO: the description here is a bit confusing (and it says True twice). need to fix, but no longer understand how it works
-def left_could_attach(left_ast_idx: int, items: list[t2.Operator|AST]) -> bool:
-    """determine if the items left of a candidate prefix or binary operator connect to that binary operator
-    cases:
-    op was binop or prefix, e.g. `... - x`, return True
-    left is prefix or binary, then op is prefix, e.g. `... -- x` return True
+# TODO: a possibly cleaner approach than doing all this left checking of operators:
+#       have the parse break chains into chunks where chunks are are some atom surrounded by prefix and postix operators
+#       probably would use roughly the same process as is ues in t2.collect_chunk
+#       then we wouldn't need to determine if something were prefix or postfix, it would all just be attached to the single atom in the chunk 
 
-    other hard cases
-    +`-x
-    +``-x
-    `--x
-    `~-x
-    `?-x
+def could_be_binop(op_idx: int, chain: ProtoAST) -> bool:
     """
-    i = left_ast_idx
-    while i > 0:
-        item = items[i]
+    determine if the operator (which is both prefix and binary according to the precedence table) could actually be a binary operator in its current position
+    To be a binary operator, there would need to be a left operand that it connects to.
+    The parsing rule is that when an operator could be prefix or binary, it always picks binary.
+
+    example cases
+    (looking at `/` next to `y`)
+    x/y      -> True.  `/` could take `x` as a left operand
+    x-/y     -> False. `-` is binary, thus making `/` a prefix
+    x?/y     -> True. `?` is postfix only, therefore `/` could be binary
+    /y       -> False. `/` has nothing to the left to connect to
+    x+`/y    -> False. backtick (`) cannot connect to left `+` so backtick must be prefix, and therefore `/` cannot be binary
+    x+``/y   -> False. backtick (`) cannot connect to left `+` so backtick must be prefix, and therefore `/` cannot be binary
+    x`-/y    -> False. binary `-` means the `/` must be a prefix
+    x`~/y    -> False. `~` left of `/` is prefix only, therefore `/` must also be prefix
+    x`?/y    -> True. backtick (`) is postfix to `x`, and `?` is postfix only. Therefore `/` could be binary
+    x`````/y -> True. all backticks (`) are postfix to `x`
+    x``+``/y -> False. `+` in middle blocks right backticks (`) from connecting to `x`, so they must be prefixes on `y`
+    """
+    # early return if definitely not a binop
+    op = chain.items[op_idx]
+    assert isinstance(op, t2.Operator), f'INTERNAL ERROR: operator is not an operator. got {op=}'
+    if not t2.is_binary_op(op):
+        return False
+
+    i = op_idx - 1
+    while i >= 0:
+        item = chain.items[i]
         # All ASTs except for semicolon can attach
         if isinstance(item, AST):
             if isinstance(item, Atom) and isinstance(item.item, t1.Semicolon):
-                return False
+                return False  # semicolon cannot attach to anything
             return True
         
         # type of op determines if the left is an expresison that could attach, or prefix to the current expression
-        if isinstance(item, t2.Operator):
-            prefix = t2.is_prefix_op(item)
-            postfix = t2.is_postfix_op(item)
-            binary = t2.is_binary_op(item)
-            if binary:
-                return False
-            elif prefix and not postfix:
-                return False
-            elif postfix and not prefix:
-                return True
-            elif prefix and postfix:
-                i -= 1 # can't determine yet if the left is a separate expression or prefix to this one
-                continue
-            else: # unreachable
-                raise ValueError(f'INTERNAL ERROR: reached unreachable state. {binary=}, {prefix=}, {postfix=}')
+        prefix = t2.is_prefix_op(item)
+        postfix = t2.is_postfix_op(item)
+        binary = t2.is_binary_op(item)
+        if binary:
+            return False
+        if prefix and not postfix:
+            return False
+        if postfix and not prefix:
+            return True
+        if prefix and postfix:
+            i -= 1 # can't determine yet if the left is a separate expression or prefix to this one
+            continue
         
-        raise ValueError(f'INTERNAL ERROR: reached unreachable state. {item=}, {left_ast_idx=}, {items[left_ast_idx]=}, {i=}')
+        raise ValueError(f'INTERNAL ERROR: operator is neither prefix, postfix, nor binary. got {item=}, {binary=}, {prefix=}, {postfix=}')
+        
     # no items to left that could attach
     return False
 
-def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: t2.Operator, items: list[t2.Operator|AST], reverse_ast_idxs_map: dict[int, int], shift_dirs: list[Literal[-1, 0, 1]]) -> tuple[list[AST], tuple[int, int]]|None:
+# TODO: note that currently same symbol prefix and postfix operators always prefer the postfix one (regardless of ordering in the precedence table)
+#       a more ideal algorithm would be able to use the table to select the correct interpretation
+#       because the only operator that could be both prefix and postfix is backtick (`), it is fine to leave it as is
+def could_be_postfix(op_idx: int, chain: ProtoAST) -> bool:
+    """same idea as could_be_binop, but for postfix operators"""
+    # early return if definitely not a postfix
+    op = chain.items[op_idx]
+    assert isinstance(op, t2.Operator), f'INTERNAL ERROR: operator is not an operator. got {op=}'
+    if not t2.is_postfix_op(op):
+        return False
+
+    i = op_idx - 1
+
+    while i >= 0:
+        item = chain.items[i]
+        if isinstance(item, AST):
+            if isinstance(item, Atom) and isinstance(item.item, t1.Semicolon):
+                return False  # semicolon cannot attach to anything
+            return True
+        
+        prefix = t2.is_prefix_op(item)
+        postfix = t2.is_postfix_op(item)
+        binary = t2.is_binary_op(item)
+        if binary:
+            return False
+        if postfix and not prefix:
+            return True
+        if prefix and not postfix:
+            return False
+        if prefix and postfix:
+            i -= 1 # can't determine yet if the right is a separate expression or postfix to this one
+            continue
+        
+        raise ValueError(f'INTERNAL ERROR: operator is neither prefix, postfix, nor binary. got {item=}, {binary=}, {prefix=}, {postfix=}')
+        
+    # no items to right that could attach
+    return False
+
+def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: t2.Operator, chain: ProtoAST, reverse_ast_idxs_map: dict[int, int], shift_dirs: list[Literal[-1, 0, 1]]) -> tuple[list[AST], tuple[int, int]]|None:
     # check for the whole flat chain
-    left_ast, right_ast = items[left_ast_idx], items[right_ast_idx]
+    left_ast, right_ast = chain.items[left_ast_idx], chain.items[right_ast_idx]
     operands: list[AST] = [left_ast, right_ast]
     indices: list[int] = [left_ast_idx, right_ast_idx]
     i = right_ast_idx + 1
 
     # verify to the left
     j = left_ast_idx - 1
-    while j > 0 and isinstance(items[j], t2.Operator) and t2.op_equals(items[j], op):
+    while j > 0 and isinstance(chain.items[j], t2.Operator) and t2.op_equals(chain.items[j], op):
         prev_ast_idx = j - 1
         if prev_ast_idx < 0:
             # TODO: full error report
@@ -649,14 +711,14 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: t2.Operator
         if prev_ast_shift_dir == -1:
             # not ready to reduce yet
             return None
-        operands.insert(0, items[prev_ast_idx])
+        operands.insert(0, chain.items[prev_ast_idx])
         indices.insert(0, prev_ast_idx)
         j -= 2
 
     # verify to the right
-    while i < len(items) and isinstance(items[i], t2.Operator) and t2.op_equals(items[i], op):
+    while i < len(chain.items) and isinstance(chain.items[i], t2.Operator) and t2.op_equals(chain.items[i], op):
         next_ast_idx = i + 1
-        if next_ast_idx >= len(items):
+        if next_ast_idx >= len(chain.items):
             # TODO: full error report
             raise ValueError(f'USER ERROR: missing operand for flat operator {op}. got {operands=}')
         next_ast_i = reverse_ast_idxs_map.get(next_ast_idx)
@@ -669,7 +731,7 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: t2.Operator
             #not ready to reduce yet
             return None
         indices.append(next_ast_idx)
-        operands.append(items[next_ast_idx])
+        operands.append(chain.items[next_ast_idx])
         i += 2
 
     bounds = (indices[0], indices[-1]+1)
