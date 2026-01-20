@@ -1,7 +1,7 @@
 """
 Post processing steps on tokens to prepare them for expression parsiing
 """
-from typing import Callable, Literal, cast, TypeAlias
+from typing import Callable, Literal, cast, get_args, TypeAlias
 from dataclasses import dataclass, field
 from .reporting import SrcFile, ReportException, Span, Error, Pointer
 from . import t1
@@ -39,9 +39,11 @@ class TypeParamJuxtapose(Juxtapose): ...
 @dataclass
 class SemicolonJuxtapose(Juxtapose): ...
 
+ComparisonOp: TypeAlias = Literal['=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', 'istype?', '@?']
+INVERTABLE_COMPARISON_OPS: set[ComparisonOp] = set(get_args(ComparisonOp))
 @dataclass
 class InvertedComparisonOp(t1.InedibleToken):
-    op: Literal['=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '@?']
+    op: ComparisonOp
 
 @dataclass
 class BroadcastOp(t1.InedibleToken):
@@ -415,7 +417,7 @@ def make_inverted_comparisons(tokens: list[t1.Token]) -> None:
         recurse_into(token, make_inverted_comparisons)
         
         if isinstance(token, t1.Operator) and token.symbol == 'not':
-            if len(tokens) > i+1 and is_binary_op(tokens[i+1]) and tokens[i+1].symbol in {'=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?'}:
+            if len(tokens) > i+1 and is_binary_op(tokens[i+1]) and tokens[i+1].symbol in INVERTABLE_COMPARISON_OPS:
                 tokens[i:i+2] = [InvertedComparisonOp(Span(token.loc.start, tokens[i+1].loc.stop), tokens[i+1].symbol)]
         i += 1
 
