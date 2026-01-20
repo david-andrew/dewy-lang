@@ -3913,7 +3913,7 @@ a = [
 
 
 
-## interpolation strings with different block syntax
+## interpolation strings with different block syntax [template string syntax, i.e. parallel to raw string, but with t instead t'something ${...}']
 Basically normal strings with `{}` for interpolation is great, except for in rare instances where you want to interpolate over something that contains lot of `{}` normally. E.g. if we wanted to have a `some_file.json.dewy`, either we'd have to escape every `\{` or we would have to use a raw string which basically defeats the purpose of it being .dewy since you can't interpolate raw strings.
 2 ideas to solve this:
 1. (simplest) add a `$""` string which opens interpolation blocks with `${}`
@@ -3941,3 +3941,52 @@ This implies I need to add 2 or 3 string types:
 - (maybe) #$"delim" heredoc string with $ prefix
 
 > Note that if one wanted a literal `$` in the string, they would just escape it `\$`
+
+
+Decided that we will use the letter `t` to prefix strings that use this style of interpolation
+```
+answer = 42
+
+# regular string
+s = t'the answer is ${answer}'
+
+# herestring
+s = $t'DELIM'the answer is ${answer}DELIM
+
+# rest-of-file string
+s = $t'''The answer is ${answer}
+```
+
+
+
+
+## Doing convenient type system constraints
+basically there are lots of constraints that we as programmers check that don't easily get incorporated into the type system
+
+```
+BaseType
+ChildType
+
+a: array<BaseType> = [...]
+
+idx = 42
+if a[idx+1] istype? ChildType
+    some_fn(a)
+
+
+some_fn = (items:array<BaseType> idx:int) => {
+    assert ast[idx+1] istype? ChildType
+    item = ast[idx+1]
+    ...
+}
+```
+
+Basically the `assert` should tell the compier to enforce that `ast[idx+1]` is of type ChildType. So any calls into some_fn have to know that the array and index passed in have that property.
+
+I'm thinking this might be a decent way to spell types that are more complicated. E.g. `items` might be `array<BaseType>`, but if we checked that index `42` was some `ChildType`, in most typed languages, there's not a convenient way to spell that type. Some languages certainly might let you explicitly spell that type e.g. `items: [BaseType, BaseType, BaseType, ... BaseType, ChildType, BaseType, ... BaseType, BaseType, BaseType]`, but I doubt if any languages have a more convenient spelling of that type. Perhaps to spell it out in dewy, it might be:
+```
+items: array<BaseType> & <self[42] of ChildType>
+```
+Basically I'm trying to come up with a nice compact way to specify various conditional checks that people do. And I think either a nice short spelling, or using an `assert` would be ways to tell the compiler of those specifics.
+
+Also note, I think `assert` should definitely be a `the compiler will guarantee this is true` kind of check. But there could certainly be cases that are beyond the compiler, so there should probably be a different assert for that, perhaps `iguarantee` or `iclaim` or `iknow`
