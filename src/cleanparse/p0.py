@@ -498,6 +498,21 @@ def shunt_pass(chain: ProtoAST, ctx: Context) -> None:
         elif left_bp == right_bp:
             raise ValueError(f"INTERNAL ERROR: left and right have identical binding power. this shouldn't be possible. got {left_bp=} and {right_bp=} for {left_op=} and {right_op=}")
         else:
+
+            """
+            for each operator on left
+                for each operator on right
+                    determine shift dir for left vs right
+                    assert left != right, INTERNAL ERROR
+                    dir = sign(right-left) (or might be the other way around)
+                    if left > right
+                        insert into table: ambiguous_shift_map[i].append((dir, left_op))
+                    elif right > left
+                        insert into table: ambiguous_shift_map[i].append((dir, right_op))
+            shift_dirs[i] = 'multiple'
+            """
+
+
             # TODO: handle ambiguous case...
             # perhaps set shift = qint(-1, 1)
             # then when reducing, any shift that was qint makes an ambiguous node
