@@ -4100,3 +4100,75 @@ some_fn().something[10].some_property['key'].something_else
 - `some_property['key']` could fail for missing key error
 
 So it defintiely makes sense we would compiler check property when the value was there, but if it was error, then we'd just propogate/short-circuit on that error. Undefined safe navigation I think is a little too type-unsafe, so it should be handled more explicitly
+
+
+
+
+## Refinement types
+Bascially what is the concrete syntax we want to use to restrict values or indicate stuff about some type? I'm thinking perhaps something like this:
+```
+Positive = int & < x=>x>?0 >
+NonEmpty<T> = array<T a=>a.length>?0 >
+Length42<T> = array<T a=>a.length=?42 >
+```
+
+Minor complaints are that this is a tad verbose and also we'd need to establish that unnamed functions inside type contexts are always refinement functions.
+
+It would be nice if we could use the operator capture syntax, but for lists at least, I don't think it quite works
+
+```
+Positive = int< @(>?)(... 0) >
+NonEmpty<T> = array<T @(>?)(... 0)>
+
+#perhaps `_` could be a sort of unnamed placeholder for "whatever goes in this spot"
+NonEmpty<T> = array<T @(>?)(_.length 0)>
+Length42<T> = array<T @(=?)(_.length 42)>
+
+# or perhaps even just the bare property (wrapping to ensure separate from other contexts)
+NonEmpty<T> = array<T @(>?)((.length) 0)>
+Length42<T> = array<T @(=?)((.length) 42)>
+```
+
+though that is getting a bit too fancy/less readable, so perhaps we just stick mostly with the original lambda versions
+
+```
+greater_than_0 = x=>x >? 0
+greater_than_0 = @(>?)(... 0)
+
+```
+
+I think one thing that might work to simplify a bit is to be able to mix and match named properties with lambdas, e.g.
+```
+NonEmpty<T> = array<T length=@(>?)(... 0)>
+
+# or 
+greater_than_0 = @(>?)(_ 0)
+NonEmpty<T> = array<T length=@greater_than_0>
+```
+and yeah actually I think I like this a lot. Maybe it could be that you can have anonymous top level functions, or if you name a function then it is a refinement check on that particular property of the type
+
+```
+Vec2WithPositiveY<T of real> = 
+    array<
+        T 
+        length=?2
+        a=>(a dot [0 1]) >? 0
+    >
+
+# arbitrary dimensional
+onehot = (n l) => [
+    (loop i in [0..n) 0)
+    1 
+    (loop i in (n..l) 0)
+]
+VecWithPositiveY<T of real> =
+    array<
+        T
+        length=@(>=?)(... 2)
+        a=>(a dot onehot(1)) >? 0
+    >
+```
+though in this contrived example, it would be simpler to just do
+```
+VecWithPositiveY<T of real> = array<T length=@(>=?)(... 2) a=>a[1]>?0>
+```
