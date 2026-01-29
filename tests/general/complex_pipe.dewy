@@ -1,0 +1,68 @@
+#{
+Take a query string like `a=3&b=4`, parse it, coerce it to integers, compute a result (a^2+b^2)^/2
+}#
+
+
+#{
+Example from elixir:
+
+```elixir
+defmodule QueryMath do
+  def hypotenuse_from_query(query_string) do
+    query_string
+    |> URI.decode_query()
+    |> then(extract_ints!/1)
+    |> then(fn {a, b} -> :math.sqrt(a*a+b*b) end)
+    |> Float.round(2)
+    |> to_string()
+  end
+
+  defp extract_ints!(%{'a'=>a, "b"=>b}) do
+    {String.to_integer(a), String.to_integer(b)}
+  end
+
+  defp extract_ints!(_other) do
+    raise ArgumentError, 'unexpected query params a and b (e.g. a=3&b=4)'
+  end
+end
+```
+}#
+
+
+
+URI = [
+    decode_query = (q:string):>[string->string] => { #{ whatever URI parsing logic }# }
+]
+
+extract_params = (qd:<['a'->string 'b'->string]>):>[string string] => qd.values
+extract_params &= (qd:any) => error'Unexpected query params. Expected a and b, got {qd.keys}'
+
+check_ints = (x:[int int]) => x
+check_ints &= (x:any) => error'failed to parse integers from query param string. parse result: {x}'
+
+hypotenuse_from_query = (query:string):>string|error => 
+    query
+    |> URI.@decode_query
+    |> @extract_params
+    .|> int.@parse
+    |> @check_ints
+    .|> @(^)(... 2)       # square elements
+    |> @reduce(... (+))   # sum elements
+    |> @(^)(... 1/2)      # take square root
+    |> x=>fmt'.2f'x       # round and convert to string
+
+
+
+
+######### Some alternatives #########
+
+hypotenuse_from_query = (query:string):>string|error =>
+    query
+    |> URI.@decode_query
+    |> @extract_params
+    .|> int.@parse
+    |> @check_ints
+    |> x=>x.^2           # square elements
+    |> x=>(+)(x...)      # sum elements
+    |> x=>x^/2           # take square root
+    |> x=>fmt'.2f'x      # round and convert to string

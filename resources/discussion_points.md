@@ -474,7 +474,11 @@ see:
 
 Also related:
 
-- cursed units: https://www.youtube.com/watch?v=kkfIXUjkYqE
+cursed units / unit examples: 
+- Cursed Units: https://www.youtube.com/watch?v=kkfIXUjkYqE
+- Cursed Units 2: Curseder Units: https://www.youtube.com/watch?v=Zg7xe8MkJHs
+- Cursed Units 3: The British Empire Strikes Back: https://www.youtube.com/watch?v=PWbfVcDcfFw
+- Oilfield Units: a Measurement System so Cursed it made me Change Career: https://www.youtube.com/watch?v=sdWEGzWFcCc
 
 ## No need for zip function
 
@@ -3127,7 +3131,7 @@ Options:
 | id | Modulus | Hashtag/label | at handle | Line Comment | Block Comment | Ingeger Division |
 |  0 |  `mod`  |      `#`      |    `@`    |     `%`      |     `%{}%`    |       `//`       |
 |  1 |   `%`   |      `@`      |    `$`    |     `#`      |     `#{}#`    |       `//`       | ***
-|  1b|   `%`   |      `$`      |    `@`    |     `#`      |     `#{}#`    |       `//`       |
+|  1b|   `%`   |      `$`      |    `@`    |     `#`      |     `#{}#`    |       `//`       | [current choice]
 |  2 |   `%`   |      `#`      |    `@`    |     `$`      |     `${}$`    |       `//`       |
 |  3 |   `%`   |      `#`      |    `@`    |     `%%`     |     `%{}%`    |       `//`       |
 |  4 |   `%`   |      `#`      |    `@`    |     `//`     |     `/{}/`    |    `÷` or `div`  | ***
@@ -4029,3 +4033,70 @@ b is? ~string   # true
 ```
 
 I think this is probably a pretty convenient thing, especially considering how often one would be doing type checking/making type guards for the compiler to check. And if one wants a narrow type check, they should do `type(A) =? type(B)`
+
+
+## Safe navigation by default [probably: `.` and `|>` (and `<|`) short circuit on `error` type. `undefined` doesn't cause safe navigation]
+In general, it has always been the plan to include safe navigation by default. This was mainly going to be for property access, e.g.
+```dewy
+result = a.b.c.e('f').g
+```
+if for some reason `.c` turned out to be `undefined`, semantically everything after would be infected by the undefined, and the result would be undefined. (practically speaking, it would probably just short circuit) 
+
+
+
+but now that I think about it, pipes should also have safe naviation, especially if dealing with returning error types
+From tests/general/complex_pipe.dewy
+```dewy
+
+URI = [
+    decode_query = (q:string):>[string->string] => { #{ whatever URI parsing logic }# }
+]
+
+extract_params = (qd:<['a'->string 'b'->string]>):>[string string] => qd.values
+extract_params &= (qd:any) => error'Unexpected query params. Expected a and b, got {qd.keys}'
+
+
+
+hypotenuse_from_query = (query:string):>string|error =>
+    query
+    |> URI.@decode_query
+    |> @extract_params
+    .|> int.@parse
+    |> x=>x.^2           # square elements
+    |> x=>(+)(x...)      # sum elements
+    |> x=>x^/2           # take square root
+    |> x=>fmt'.2f'x  # round and convert to string
+```
+Basically several stages of the process could fail. `URI.decode_query` could return an error if failing to parse a valid query parameter, `extract_params` returns an error if the extracted query params don't match what was expected, int.@parse could return an error on the individual elements, etc.
+
+I think the general rule should be that a pipeline will short circuit if any error values come up (i.e. errors cannot be piped). Also probably safe navigation is only over errors, I'm thinking undefined probably would be piped around just fine.
+
+I was considering making it more based on typing, e.g. if the function could accept an error as input, allow it to be piped, but otherwise functions that don't accept the input would error out, but that doesn't really work very well with anonymous functions like in this example.
+
+The tricky thing to figure out is how to deal with cases where inner elements error out, e.g. `.|> int.@parse` the whole thing doesn't produce an error, but some inner elements might have errored. Either we 
+1) allow it to propagate because the outer thing isn't an error (it's an `array<int|error length=2>`), and then have a subsequent step to filter out the error,
+2) we could make it that any broadcast pipes will fail if any elements fail. 
+I think probably 1) is more self consistent/intuitive with the language, we'd just need an extra step
+```dewy
+query
+|> URI.@decode_query
+|> @extract_params
+.|> int.@parse
+|> x=>if all(x .is? int) x else error'failed to parse integers from query param string. parse result: {x}'
+|> x=>x.^2           # square elements
+|> x=>(+)(x...)      # sum elements
+|> x=>x^/2           # take square root
+|> x=>fmt'.2f'x  # round and convert to string
+```
+
+One final note, perhaps we unify member access safe navigation with pipe safe navigation and have it be that it's `error` that causes safe navigation to happen, not `undefined`.
+
+So a more realistic example of safe navigation for member access:
+```
+some_fn().something[10].some_property['key'].something_else
+```
+- `some_fn()` might fail for whatever reason
+- `something[10]` could fail for out of range error
+- `some_property['key']` could fail for missing key error
+
+So it defintiely makes sense we would compiler check property when the value was there, but if it was error, then we'd just propogate/short-circuit on that error. Undefined safe navigation I think is a little too type-unsafe, so it should be handled more explicitly
