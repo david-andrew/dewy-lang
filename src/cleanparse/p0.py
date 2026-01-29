@@ -453,10 +453,12 @@ def reduce_loop(chain: ProtoAST, ctx: Context) -> AST:
     # during development, this might also be hit due to internal errors, e.g. bugs where something is not properly reducing
     # TODO: this could be a user error, e.g. `A&;b&c`. Do full error reporting
     # perhaps do: for each item in list, if is op, determine what kinds of reductions it could participate in and show error listing them vs what was present
-    assert len(chain.items) == 1, f"INTERNAL ERROR: reduce_loop produced {len(chain.items)} items, expected 1"
+    if not len(chain.items) == 1:
+        raise ValueError(f"INTERNAL ERROR: reduce_loop produced {len(chain.items)} items, expected 1")
     item = chain.items[0]
-    assert isinstance(item, AST), f"INTERNAL ERROR: shunt-loop produced non-AST item. got {item=}"
-    
+    if not isinstance(item, AST):
+        raise ValueError(f"INTERNAL ERROR: shunt-loop produced non-AST item. got {item=}")
+
     return item
 
 def shunt_pass(chain: ProtoAST, ctx: Context) -> None:
