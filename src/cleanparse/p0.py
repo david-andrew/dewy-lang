@@ -3,7 +3,7 @@ Initial parsing pass. A simple pratt-style parser
 """
 
 from textwrap import dedent
-from typing import NoReturn, Sequence, Callable, TypeAlias, Literal, cast
+from typing import NoReturn, Sequence, Callable, TypeAlias, Literal, cast, overload, Never
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -18,13 +18,23 @@ import pdb
 
 
 @dataclass
-class qint:
+class qint[T=None]:
     """
     quantum int for dealing with precedences that are multiple values at the same time
     qint's can only be strictly greater or strictly less than other values. Otherwise it's ambiguous
     In the case of ambiguous precedences, the symbol table is needed for helping resolve the ambiguity
+
+    Optionally, qints may store some payload or metadata per each value by passing in a dict[int, T] rather than a set[int]
     """
-    values: set[int]
+    values: dict[int, T]
+    @overload
+    def __init__(self: qint[None], values: set[int]): ...
+    @overload
+    def __init__(self: qint[T], values: dict[int, T]): ...
+    def __init__(self, values: set[int]|dict[int, T]):
+        if isinstance(values, set): values = {v: None for v in values} # default to None if no payload is provided
+        self.values = values
+        self.__post_init__()
     def __post_init__(self):
         assert len(self.values) > 1, f'qint must have more than one value. Got {self.values}'
         assert all(isinstance(v, int) for v in self.values), f'qint values must be integers. Got {self.values}'
@@ -33,27 +43,37 @@ class qint:
     def __ge__(self, other: int|qint) -> bool: return self.__gt__(other)
     def __le__(self, other: int|qint) -> bool: return self.__lt__(other)
     def __eq__(self, other: object) -> bool: return False
-    def __add__(self, other: int) -> qint:
+    def __add__(self, other: int) -> qint[T]:
         if not isinstance(other, int): return NotImplemented
-        return qint({v + other for v in self.values})
-    def __radd__(self, other: int) -> qint: return self.__add__(other)
-    def __sub__(self, other: int) -> qint:
+        return qint({(v + other):p for v, p in self.values.items()})
+    def __radd__(self, other: int) -> qint[T]: return self.__add__(other)
+    def __sub__(self, other: int) -> qint[T]:
         if not isinstance(other, int): return NotImplemented
-        return qint({v - other for v in self.values})
-    def __rsub__(self, other: int) -> qint:
+        return qint({(v - other):p for v, p in self.values.items()})
+    def __rsub__(self, other: int) -> qint[T]:
         if not isinstance(other, int): return NotImplemented
-        return qint({other - v for v in self.values})
-    def __mul__(self, other: int) -> qint:
+        return qint({(other - v):p for v, p in self.values.items()})
+    def __mul__(self, other: int) -> qint[T]:
         if not isinstance(other, int): return NotImplemented
         if other == 0: raise RuntimeError(f'Currently, multiplying by 0 is not allowed. got {self}*{other}. TBD if this was reasonable (would return int(0) instead of qint)')
-        return qint({v * other for v in self.values})
-    def __rmul__(self, other: int) -> qint: return self.__mul__(other)
-    def __floordiv__(self, other: int) -> qint:
+        return qint({(v * other):p for v, p in self.values.items()})
+    def __rmul__(self, other: int) -> qint[T]: return self.__mul__(other)
+    def __floordiv__(self, other: int) -> qint[T]:
         if not isinstance(other, int): return NotImplemented
-        return qint({v // other for v in self.values})
-    def __rfloordiv__(self, other: int) -> qint:
+        return qint({(v // other):p for v, p in self.values.items()})
+    def __rfloordiv__(self, other: int) -> qint[T]:
         if not isinstance(other, int): return NotImplemented
-        return qint({other // v for v in self.values})
+        return qint({(other // v):p for v, p in self.values.items()})
+    @overload
+    def __getitem__(self: qint[None], key: int) -> Never: ...
+    @overload
+    def __getitem__(self: qint[T], key: int) -> T: ...
+    def __getitem__(self: qint[T], key: int) -> T:
+        return self.values[key]
+    def __repr__(self) -> str:
+        if all(v is None for v in self.values.values()):
+            return f'qint({repr(set(self.values.keys()))})'
+        return f'qint({repr(self.values)})'
 
 
 class Associativity(Enum):
