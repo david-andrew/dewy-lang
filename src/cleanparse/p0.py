@@ -6,6 +6,7 @@ from textwrap import dedent
 from typing import NoReturn, Sequence, Callable, TypeAlias, Literal, cast, overload, Never
 from dataclasses import dataclass
 from enum import Enum, auto
+from collections import defaultdict
 
 from . import t0
 from . import t1
@@ -541,6 +542,8 @@ ShiftDir: TypeAlias = Literal[-1, 0, 1]
 class ShiftMeta:
     left_op: list[t2.Operator]
     right_op: list[t2.Operator]
+    superior_operator_idx: int
+
 def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[list[ShiftMeta]]], set[int], dict[int, int]]:
     # identify items that could shift
     ast_idxs = [i for i, item in enumerate(chain.items) if isinstance(item, AST)]
@@ -599,9 +602,9 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[l
             op_shift_groups = concrete_groupby(op_shift_ranks, key=lambda x: x[1])
             
             # 3. for each operator group, all following groups that go in the other direction are subordinate to it
-            quantum_shift_dirs: list[tuple[ShiftDir, ShiftMeta]] = []
+            quantum_shift_dirs: dict[ShiftDir, list[ShiftMeta]] = defaultdict(list)
             is_dir_qjux = {-1: isinstance(left_op, t2.QJuxtapose), 1: isinstance(right_op, t2.QJuxtapose)}
-            for i, (shift_dir, group) in enumerate(op_shift_groups):
+            for j, (shift_dir, group) in enumerate(op_shift_groups):
                 if is_dir_qjux[shift_dir]:
                     superior_ops = [op for op, _, _ in group]
                 else:
@@ -610,7 +613,7 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[l
                 
                 #  collect the subordinate ops which are all operators strictly lower in precedence than the current superior ops group
                 subordinate_ops: list[t2.Operator] = []
-                for (_, subordinate_op_group) in op_shift_groups[i+1::2]:
+                for (_, subordinate_op_group) in op_shift_groups[j+1::2]:
                     subordinate_ops.extend([op for op, _, _ in subordinate_op_group])
                 if len(subordinate_ops) == 0:
                     continue # superior ops are not superior to anything, so they always lose
@@ -618,13 +621,15 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[l
                 
                 # build the meta according to the shift direction
                 if shift_dir == -1:
-                    shift_meta = ShiftMeta(superior_ops, subordinate_ops)
+                    shift_meta = ShiftMeta(superior_ops, subordinate_ops, ast_idx+shift_dir)
                 else:
-                    shift_meta = ShiftMeta(subordinate_ops, superior_ops)
-                quantum_shift_dirs.append((shift_dir, shift_meta))
+                    shift_meta = ShiftMeta(subordinate_ops, superior_ops, ast_idx+shift_dir)
+                quantum_shift_dirs[shift_dir].append(shift_meta)
+
+            # insert the ambiguous set of shift directions into the shift_dirs list
+            shift_dirs[i] = qint(quantum_shift_dirs)
             
-            pdb.set_trace()
-            ...
+            
     
     return shift_dirs, candidate_operator_idxs, reverse_ast_idxs_map
 
