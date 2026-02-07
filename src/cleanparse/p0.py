@@ -3,7 +3,6 @@ Initial parsing pass. A simple pratt-style parser
 """
 
 from textwrap import dedent
-from itertools import product
 from typing import NoReturn, Sequence, Callable, TypeAlias, Literal, cast, overload, Never
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -12,7 +11,7 @@ from . import t0
 from . import t1
 from . import t2
 from .reporting import SrcFile, ReportException, Error, Pointer, Span
-from .utils import ordinalize
+from .utils import ordinalize, concrete_groupby
 
 import pdb
 
@@ -540,9 +539,9 @@ ShiftDir: TypeAlias = Literal[-1, 0, 1]
 #       candidate_operator_idxs = [i+shift_dir for i, shift_dir in enumerate(shift_dirs) if shift_dir != 0]
 @dataclass
 class ShiftMeta:
-    left_op: t2.Operator
-    right_op: t2.Operator
-def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[ShiftMeta]], set[int], dict[int, int]]:
+    left_op: list[t2.Operator]
+    right_op: list[t2.Operator]
+def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[list[ShiftMeta]]], set[int], dict[int, int]]:
     # identify items that could shift
     ast_idxs = [i for i, item in enumerate(chain.items) if isinstance(item, AST)]
     asts = cast(list[AST], [chain.items[i] for i in ast_idxs])
@@ -550,7 +549,7 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[S
     candidate_operator_idxs: set[int] = set()
     
     # determine the direction items would shift according to operator binding power of the adjacent operators
-    shift_dirs: list[ShiftDir|qint[ShiftMeta]] = [0] * len(ast_idxs)
+    shift_dirs: list[ShiftDir|qint[list[ShiftMeta]]] = [0] * len(ast_idxs)
     for i, (ast, ast_idx) in enumerate(zip(asts, ast_idxs)):
         # get left and/or right operators if present
         left_op = chain.items[ast_idx - 1] if ast_idx > 0 else None
@@ -585,46 +584,45 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[S
             possible_left_ops = [left_op] if not isinstance(left_op, t2.QJuxtapose) else left_op.options
             possible_right_ops = [right_op] if not isinstance(right_op, t2.QJuxtapose) else right_op.options
             assert len(possible_left_ops) > 1 or len(possible_right_ops) > 1, f"INTERNAL ERROR: ambiguous binding powers didn't have multiple operator candidates. got {possible_left_ops=} and {possible_right_ops=}"
-            """
-            for each operator on left
-                for each operator on right
-                    determine shift dir for left vs right
-                    assert left != right, INTERNAL ERROR
-                    dir = sign(right-left) (or might be the other way around)
-                    if left > right
-                        insert into table: ambiguous_shift_map[i].append((dir, left_op))
-                    elif right > left
-                        insert into table: ambiguous_shift_map[i].append((dir, right_op))
-            shift_dirs[i] = 'multiple'
-            """
+
+
+            # algorithm to partition out unambiguous groups from the whole set
+            # 1. rank all operators by their binding power (careful to set binding power depending on if the op is on the left or right)
+            op_shift_ranks: list[tuple[t2.Operator, ShiftDir, int]] = [
+                (left_op, -1, get_bind_power(left_op)[1]) for left_op in possible_left_ops
+            ] + [
+                (right_op, 1, get_bind_power(right_op)[0]) for right_op in possible_right_ops
+            ]
+            op_shift_ranks.sort(key=lambda x: x[2], reverse=True)
+
+            # 2. group the operators by their shift direction. This should partition out sets of binding powers that are unambiguous
+            op_shift_groups = concrete_groupby(op_shift_ranks, key=lambda x: x[1])
+            
+            # 3. for each operator group, all following groups that go in the other direction are subordinate to it
             quantum_shift_dirs: list[tuple[ShiftDir, ShiftMeta]] = []
-            for left_op, right_op in product(possible_left_ops, possible_right_ops):
-                _, left_bp = get_bind_power(left_op)
-                right_bp, _ = get_bind_power(right_op)
-                assert isinstance(left_bp, int) and isinstance(right_bp, int), f"INTERNAL ERROR: left and right binding powers are not integers. got {left_bp=} and {right_bp=} for {left_op=} and {right_op=}"
-                assert left_bp != right_bp, f"INTERNAL ERROR: left and right have identical binding power. this shouldn't be possible. got {left_bp=} and {right_bp=} for {left_op=} and {right_op=}"
-                shift_dir = -1 if left_bp > right_bp else 1
-                quantum_shift_dirs.append((shift_dir, ShiftMeta(left_op, right_op)))
-
-
-            # deduplicate shift dirs by combining operators from cases that shifted the same way back into quantum operators
-            # TODO: need to work out how to actually do deduplication. this isn't right
-            #       might be just grouping all ops with the same precedence level so that bind power isn't a qint
-            # left_metas = [meta for dir, meta in quantum_shift_dirs if dir == -1]
-            # right_metas = [meta for dir, meta in quantum_shift_dirs if dir == 1]
-            # if len(left_metas) > 1:
-            #     assert all(isinstance(meta.left_op, t2.Juxtapose) for meta in left_metas) or all(meta.left_op == left_metas[0].left_op for meta in left_metas), f"INTERNAL ERROR: left operators are not all the same or not all Juxtapose. got {left_metas=}"
-            #     assert all(isinstance(meta.right_op, t2.Juxtapose) for meta in right_metas) or all(meta.right_op == right_metas[0].right_op for meta in right_metas), f"INTERNAL ERROR: right operators are not all the same or not all Juxtapose. got {right_metas=}"
-            #     left_meta_left_op_loc = left_metas[0].left_op.loc
-            #     left_meta_left_op = left_metas[0].left_op if not isinstance(left_metas[0].left_op, t2.Juxtapose) else t2.QJuxtapose(left_meta_left_op_loc, [meta.left_op for meta in left_metas])
-            #     pdb.set_trace()
-
-
-
-            # TODO: handle ambiguous case...
-            # perhaps set shift = qint(-1, 1)
-            # then when reducing, any shift that was qint makes an ambiguous node
-            # and then after all the reductions, something spreads out all the ambiguous nodes orthogonally to the list of items...
+            is_dir_qjux = {-1: isinstance(left_op, t2.QJuxtapose), 1: isinstance(right_op, t2.QJuxtapose)}
+            for i, (shift_dir, group) in enumerate(op_shift_groups):
+                if is_dir_qjux[shift_dir]:
+                    superior_ops = [op for op, _, _ in group]
+                else:
+                    assert len(group) == 1, f"INTERNAL ERROR: Non-juxtapose operator has multiple ambiguous alternatives. got {group=}"
+                    superior_ops = [group[0][0]]
+                
+                #  collect the subordinate ops which are all operators strictly lower in precedence than the current superior ops group
+                subordinate_ops: list[t2.Operator] = []
+                for (_, subordinate_op_group) in op_shift_groups[i+1::2]:
+                    subordinate_ops.extend([op for op, _, _ in subordinate_op_group])
+                if len(subordinate_ops) == 0:
+                    continue # superior ops are not superior to anything, so they always lose
+                
+                
+                # build the meta according to the shift direction
+                if shift_dir == -1:
+                    shift_meta = ShiftMeta(superior_ops, subordinate_ops)
+                else:
+                    shift_meta = ShiftMeta(subordinate_ops, superior_ops)
+                quantum_shift_dirs.append((shift_dir, shift_meta))
+            
             pdb.set_trace()
             ...
     

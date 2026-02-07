@@ -1,4 +1,5 @@
-from typing import Generator
+from typing import Generator, Callable, Iterable
+from itertools import groupby
 
 def first_line(s:str) -> str:
     return s.split('\n')[0]
@@ -88,3 +89,8 @@ class JumpableIterator[T]:
     
     def jump_forward(self, offset:int) -> None:
         self.i += offset
+
+
+def concrete_groupby[T, U](data: Iterable[T], key: Callable[[T], U]) -> list[tuple[U, list[T]]]:
+    """Convert the iterables returned by a groupby into a list of tuples of (key, group)"""
+    return [(k, list(g)) for k, g in groupby(data, key=key)]

@@ -77,10 +77,13 @@ class QJuxtapose(t1.InedibleToken):
     # etc.
     ```
     """
-    options: list[CallJuxtapose|IndexJuxtapose|MultiplyJuxtapose] = field(default_factory=list)
+    options: list[CallJuxtapose|IndexJuxtapose|MultiplyJuxtapose] = field(default=None)
 
     def __post_init__(self):
-        # initialize with all the possible options (taking the span from that was given to self)
+        # user provided options
+        if self.options is not None: return
+
+        # otherwise maximally ambiguous juxtapose (taking the span already attached to self)
         self.options = [CallJuxtapose(self.loc), IndexJuxtapose(self.loc), MultiplyJuxtapose(self.loc)]
 
 
