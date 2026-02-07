@@ -3,6 +3,7 @@ Initial parsing pass. A simple pratt-style parser
 """
 
 from textwrap import dedent
+from itertools import product
 from typing import NoReturn, Sequence, Callable, TypeAlias, Literal, cast, overload, Never
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -500,19 +501,48 @@ def reduce_loop(chains: list[ProtoAST], ctx: Context) -> AST:
 
 def shunt_pass(chains: list[ProtoAST], ctx: Context) -> None:
     """apply a shunting reduction. modifies `chains` in place (potentially adding new lists in the case of ambiguities)"""
+    new_chains: list[ProtoAST] = []
     for chain in chains:
-        shift_dirs, candidate_operator_idxs, reverse_ast_idxs_map = identify_shifts(chain, ctx)
+        raw_shift_dirs, candidate_operator_idxs, reverse_ast_idxs_map = identify_shifts(chain, ctx)
         
-        # TODO: for ambiguous cases, basically make cartesian product over ambiguous shift dirs, and then identify reductions for each one
-        reductions = identify_reductions(chain, shift_dirs, candidate_operator_idxs, reverse_ast_idxs_map, ctx)
+        # TODO: for now, just simple case
+        if not all(isinstance(shift_dir, int) for shift_dir in raw_shift_dirs):
+            pdb.set_trace()
+            all_shift_dirs = [...] 
+        else:
+            all_shift_dirs: list[list[ShiftDir]] = [raw_shift_dirs]
 
-        # apply reductions in reverse order to avoid index shifting issues
-        for reduction, (left_bound, right_bound), _ in reversed(reductions):
-            chain.items[left_bound:right_bound] = [reduction]
+        # make copies of the current chain for each of the extra ambiguous shift direction sets
+        ambiguous_cases = [chain]
+        for _ in range(len(all_shift_dirs)-1):
+            case = ProtoAST(chain.items.copy())
+            ambiguous_cases.append(case)
+            new_chains.append(case)
+
+        # TODO: for ambiguous cases, basically make cartesian product over ambiguous shift dirs, and then identify reductions for each one
+        for shift_dirs, case in zip(all_shift_dirs, ambiguous_cases):
+            reductions = identify_reductions(case, shift_dirs, candidate_operator_idxs, reverse_ast_idxs_map, ctx)
+
+            # apply reductions in reverse order to avoid index shifting issues
+            for reduction, (left_bound, right_bound), _ in reversed(reductions):
+                case.items[left_bound:right_bound] = [reduction]
+    
+    # include the new cases in the list of chains
+    chains.extend(new_chains)
 
 
 ShiftDir: TypeAlias = Literal[-1, 0, 1]
-def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir], set[int], dict[int, int]]:
+
+# TODO: replace candidate_operator_idxs with a more explicit pairing of each operator and a ShiftMeta
+#       otherwise we'd need to do some weird list of list of candidate operator idxs to handle when ambiguous cases come up
+#       when ambiguous cases can just include the shift direction in the ShiftMeta
+#       Alternatively, we could just not return candidate_operator_idxs, and just infer it from where shift_dirs != 0, and add the shift dir to that index
+#       candidate_operator_idxs = [i+shift_dir for i, shift_dir in enumerate(shift_dirs) if shift_dir != 0]
+@dataclass
+class ShiftMeta:
+    left_op: t2.Operator
+    right_op: t2.Operator
+def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[ShiftMeta]], set[int], dict[int, int]]:
     # identify items that could shift
     ast_idxs = [i for i, item in enumerate(chain.items) if isinstance(item, AST)]
     asts = cast(list[AST], [chain.items[i] for i in ast_idxs])
@@ -520,7 +550,7 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir], set[
     candidate_operator_idxs: set[int] = set()
     
     # determine the direction items would shift according to operator binding power of the adjacent operators
-    shift_dirs: list[ShiftDir] = [0] * len(ast_idxs)
+    shift_dirs: list[ShiftDir|qint[ShiftMeta]] = [0] * len(ast_idxs)
     for i, (ast, ast_idx) in enumerate(zip(asts, ast_idxs)):
         # get left and/or right operators if present
         left_op = chain.items[ast_idx - 1] if ast_idx > 0 else None
@@ -550,7 +580,11 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir], set[
         elif left_bp == right_bp:
             raise ValueError(f"INTERNAL ERROR: left and right have identical binding power. this shouldn't be possible. got {left_bp=} and {right_bp=} for {left_op=} and {right_op=}")
         else:
-
+            assert left_op is not None and right_op is not None, f'INTERNAL ERROR: left and right operators are not present. got {left_op=} and {right_op=}'
+            assert not isinstance(left_op, AST) and not isinstance(right_op, AST), f'INTERNAL ERROR: left and right operators are not operators. got {left_op=} and {right_op=}'
+            possible_left_ops = [left_op] if not isinstance(left_op, t2.QJuxtapose) else left_op.options
+            possible_right_ops = [right_op] if not isinstance(right_op, t2.QJuxtapose) else right_op.options
+            assert len(possible_left_ops) > 1 or len(possible_right_ops) > 1, f"INTERNAL ERROR: ambiguous binding powers didn't have multiple operator candidates. got {possible_left_ops=} and {possible_right_ops=}"
             """
             for each operator on left
                 for each operator on right
@@ -563,6 +597,28 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir], set[
                         insert into table: ambiguous_shift_map[i].append((dir, right_op))
             shift_dirs[i] = 'multiple'
             """
+            quantum_shift_dirs: list[tuple[ShiftDir, ShiftMeta]] = []
+            for left_op, right_op in product(possible_left_ops, possible_right_ops):
+                _, left_bp = get_bind_power(left_op)
+                right_bp, _ = get_bind_power(right_op)
+                assert isinstance(left_bp, int) and isinstance(right_bp, int), f"INTERNAL ERROR: left and right binding powers are not integers. got {left_bp=} and {right_bp=} for {left_op=} and {right_op=}"
+                assert left_bp != right_bp, f"INTERNAL ERROR: left and right have identical binding power. this shouldn't be possible. got {left_bp=} and {right_bp=} for {left_op=} and {right_op=}"
+                shift_dir = -1 if left_bp > right_bp else 1
+                quantum_shift_dirs.append((shift_dir, ShiftMeta(left_op, right_op)))
+
+
+            # deduplicate shift dirs by combining operators from cases that shifted the same way back into quantum operators
+            # TODO: need to work out how to actually do deduplication. this isn't right
+            #       might be just grouping all ops with the same precedence level so that bind power isn't a qint
+            # left_metas = [meta for dir, meta in quantum_shift_dirs if dir == -1]
+            # right_metas = [meta for dir, meta in quantum_shift_dirs if dir == 1]
+            # if len(left_metas) > 1:
+            #     assert all(isinstance(meta.left_op, t2.Juxtapose) for meta in left_metas) or all(meta.left_op == left_metas[0].left_op for meta in left_metas), f"INTERNAL ERROR: left operators are not all the same or not all Juxtapose. got {left_metas=}"
+            #     assert all(isinstance(meta.right_op, t2.Juxtapose) for meta in right_metas) or all(meta.right_op == right_metas[0].right_op for meta in right_metas), f"INTERNAL ERROR: right operators are not all the same or not all Juxtapose. got {right_metas=}"
+            #     left_meta_left_op_loc = left_metas[0].left_op.loc
+            #     left_meta_left_op = left_metas[0].left_op if not isinstance(left_metas[0].left_op, t2.Juxtapose) else t2.QJuxtapose(left_meta_left_op_loc, [meta.left_op for meta in left_metas])
+            #     pdb.set_trace()
+
 
 
             # TODO: handle ambiguous case...
