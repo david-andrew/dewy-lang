@@ -38,7 +38,7 @@ given AST, produce output in the target backend
 [..] full error reporting in p0 at indicated locations
 
 
-[ ] handling ambiguous parses:
+[x] handling ambiguous parses:
     - use existing Ambiguous: list[AST] struct
     - make a proper struct/dataclass for Reduction()
     - when going into the shunt pass, for a in associativity, cache those inputs if they produced a reduction (be careful to compare on identity rather than equality so that we only cache the actual right thing)
@@ -84,9 +84,9 @@ basically when counting backwards, we see 1,2 and as we're reducing it, we see i
 [x] implement parametric escapes in t1
 [-] build opchains in t2/postok
 [x] bundle conditionals in t2
-[ ] initial parse pass with pratt parser
+[x] initial parse pass with pratt parser
 [x] make int literal only support up to base 16
-    [ ] write out why have both based strings and based arrays. (BLUF: based arrays are just normal arrays you sequence whatever you want, no bit packing/etc. strings are for fixed chunks (e.g. 2 hex digits for bytes, 8 bits for byte, etc.))
+    [x] write out why have both based strings and based arrays. (BLUF: based arrays are just normal arrays you sequence whatever you want, no bit packing/etc. strings are for fixed chunks (e.g. 2 hex digits for bytes, 8 bits for byte, etc.))
 
 
 
