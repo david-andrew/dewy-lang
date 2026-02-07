@@ -395,7 +395,7 @@ def parse(srcfile: SrcFile) -> list[AST]:
 def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
     assert isinstance(chain, t2.Chain), f'INTERNAL ERROR: parse_chain must be called on Chain, got {type(chain)}'
     
-    items: list[t2.Operator|AST] = [] 
+    items: list[t2.Operator|AST] = []
     for t in chain.items:
         # operators are added as is, to be used by the reduction loop
         if isinstance(t, t2.Operator):
@@ -419,7 +419,7 @@ def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
             ast = Atom(t)
         items.append(ast)
 
-    result = reduce_loop(ProtoAST(items), ctx)
+    result = reduce_loop([ProtoAST(items)], ctx)
     return result
 
 def parse_block(block: t1.Block|t1.ParametricEscape, ctx: Context) -> Block:
@@ -462,27 +462,57 @@ def parse_flow(flow: t2.Flow, ctx: Context) -> Flow:
     return Flow(arms=arms, default=default)
 
 
-def reduce_loop(chain: ProtoAST, ctx: Context) -> AST:
-    """repeatedly apply shunting reductions until no more occur. modifies `tokens` in place"""
+def reduce_loop(chains: list[ProtoAST], ctx: Context) -> AST:
+    """
+    repeatedly apply shunting reductions until no more occur. modifies `tokens` in place
+    
+    Each chain in the list is an ambiguous alternative parse (initially there should only be one, but the list can grow if ambiguous operators are present)
+    If multiple chains are present at the end, an Ambiguous node is returned containing all the candidates
+    Otherwise the parsed AST is returned
+    """
     while True:
-        l0 = len(chain.items)
-        shunt_pass(chain, ctx)
-        if len(chain.items) == l0:
+        initial_lengths = [len(chain.items) for chain in chains]
+        shunt_pass(chains, ctx)
+
+        # exit loop if no reductions occurred
+        if all(len(chain.items) == initial_length for initial_length, chain in zip(initial_lengths, chains)):
             break
     
     # during development, this might also be hit due to internal errors, e.g. bugs where something is not properly reducing
     # TODO: this could be a user error, e.g. `A&;b&c`. Do full error reporting
     # perhaps do: for each item in list, if is op, determine what kinds of reductions it could participate in and show error listing them vs what was present
-    if not len(chain.items) == 1:
-        raise ValueError(f"INTERNAL ERROR: reduce_loop produced {len(chain.items)} items, expected 1")
-    item = chain.items[0]
-    if not isinstance(item, AST):
-        raise ValueError(f"INTERNAL ERROR: shunt-loop produced non-AST item. got {item=}")
+    candidates: list[AST] = []
+    for chain in chains:
+        if not len(chain.items) == 1:
+            raise ValueError(f"INTERNAL ERROR: reduce_loop produced {len(chain.items)} items, expected 1")
+        item = chain.items[0]
+        if not isinstance(item, AST):
+            raise ValueError(f"INTERNAL ERROR: shunt-loop produced non-AST item. got {item=}")
+        candidates.append(item)
+    
+    # multiple alternate parses means an ambiguous node
+    if len(candidates) > 1:
+        return Ambiguous(candidates)
 
-    return item
+    # unambiguous case
+    return candidates[0]
 
-def shunt_pass(chain: ProtoAST, ctx: Context) -> None:
-    """apply a shunting reduction. modifies `tokens` in place"""
+
+def shunt_pass(chains: list[ProtoAST], ctx: Context) -> None:
+    """apply a shunting reduction. modifies `chains` in place (potentially adding new lists in the case of ambiguities)"""
+    for chain in chains:
+        shift_dirs, candidate_operator_idxs, reverse_ast_idxs_map = identify_shifts(chain, ctx)
+        
+        # TODO: for ambiguous cases, basically make cartesian product over ambiguous shift dirs, and then identify reductions for each one
+        reductions = identify_reductions(chain, shift_dirs, candidate_operator_idxs, reverse_ast_idxs_map, ctx)
+
+        # apply reductions in reverse order to avoid index shifting issues
+        for reduction, (left_bound, right_bound), _ in reversed(reductions):
+            chain.items[left_bound:right_bound] = [reduction]
+
+
+ShiftDir: TypeAlias = Literal[-1, 0, 1]
+def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir], set[int], dict[int, int]]:
     # identify items that could shift
     ast_idxs = [i for i, item in enumerate(chain.items) if isinstance(item, AST)]
     asts = cast(list[AST], [chain.items[i] for i in ast_idxs])
@@ -490,7 +520,7 @@ def shunt_pass(chain: ProtoAST, ctx: Context) -> None:
     candidate_operator_idxs: set[int] = set()
     
     # determine the direction items would shift according to operator binding power of the adjacent operators
-    shift_dirs: list[Literal[-1, 0, 1]] = [0] * len(ast_idxs)
+    shift_dirs: list[ShiftDir] = [0] * len(ast_idxs)
     for i, (ast, ast_idx) in enumerate(zip(asts, ast_idxs)):
         # get left and/or right operators if present
         left_op = chain.items[ast_idx - 1] if ast_idx > 0 else None
@@ -541,7 +571,11 @@ def shunt_pass(chain: ProtoAST, ctx: Context) -> None:
             # and then after all the reductions, something spreads out all the ambiguous nodes orthogonally to the list of items...
             pdb.set_trace()
             ...
+    
+    return shift_dirs, candidate_operator_idxs, reverse_ast_idxs_map
 
+Reduction: TypeAlias = tuple[AST, tuple[int, int], Associativity]
+def identify_reductions(chain: ProtoAST, shift_dirs: list[ShiftDir], candidate_operator_idxs: set[int], reverse_ast_idxs_map: dict[int, int], ctx: Context) -> list[Reduction]:
     # identify reductions
     all_reductions: list[tuple[AST, tuple(int, int)]] = []
     for candidate_operator_idx in sorted(candidate_operator_idxs):
@@ -623,10 +657,8 @@ def shunt_pass(chain: ProtoAST, ctx: Context) -> None:
         # add the reduction to the list
         all_reductions.append(reductions[0])
         
-    
-    # apply reductions in reverse order to avoid index shifting issues
-    for reduction, (left_bound, right_bound), _ in reversed(all_reductions):
-        chain.items[left_bound:right_bound] = [reduction]
+    return all_reductions
+
 
 # TODO: a possibly cleaner approach than doing all this left checking of operators:
 #       have the parse break chains into chunks where chunks are are some atom surrounded by prefix and postix operators
