@@ -190,7 +190,10 @@ def get_precedence(op: t2.Operator) -> int | qint:
     if isinstance(op, t2.BroadcastOp):
         return get_precedence(op.op)
     if isinstance(op, t2.QJuxtapose):
-        return qint(set(get_precedence(o) for o in op.options))
+        precedences = {get_precedence(o) for o in op.options}
+        if len(precedences) == 1:
+            return precedences.pop()
+        return qint(precedences)
 
     # simple operators, just look up in the table
     precedence = precedence_table.get(type(op))
@@ -473,10 +476,11 @@ def reduce_loop(chains: list[ProtoAST], ctx: Context) -> AST:
     """
     while True:
         initial_lengths = [len(chain.items) for chain in chains]
+        initial_num_chains = len(chains)
         shunt_pass(chains, ctx)
 
         # exit loop if no reductions occurred
-        if all(len(chain.items) == initial_length for initial_length, chain in zip(initial_lengths, chains)):
+        if all(len(chain.items) == initial_length for initial_length, chain in zip(initial_lengths, chains)) and len(chains) == initial_num_chains:
             break
     
     # during development, this might also be hit due to internal errors, e.g. bugs where something is not properly reducing
@@ -502,36 +506,69 @@ def reduce_loop(chains: list[ProtoAST], ctx: Context) -> AST:
 def shunt_pass(chains: list[ProtoAST], ctx: Context) -> None:
     """apply a shunting reduction. modifies `chains` in place (potentially adding new lists in the case of ambiguities)"""
     new_chains: list[ProtoAST] = []
-    for chain in chains:
-        raw_shift_dirs, candidate_operator_idxs, reverse_ast_idxs_map = identify_shifts(chain, ctx)
-        
-        # TODO: for now, just simple case
-        if not all(isinstance(shift_dir, int) for shift_dir in raw_shift_dirs):
-            pdb.set_trace()
-            all_shift_dirs = [...] 
-        else:
-            all_shift_dirs: list[list[ShiftDir]] = [raw_shift_dirs]
+    for chain_idx, chain in enumerate(chains):
+        raw_shift_dirs, raw_candidate_operator_idxs, reverse_ast_idxs_map = identify_shifts(chain, ctx)
 
-        # make copies of the current chain for each of the extra ambiguous shift direction sets
-        ambiguous_cases = [chain]
-        for _ in range(len(all_shift_dirs)-1):
-            case = ProtoAST(chain.items.copy())
-            ambiguous_cases.append(case)
-            new_chains.append(case)
+        if all(isinstance(shift_dir, int) for shift_dir in raw_shift_dirs):
+            # simple case, just directly take the shift_dirs and candidate_operator_idxs
+            all_shift_dir_lists: list[list[ShiftDir]] = [raw_shift_dirs]
+            all_candidate_operator_idxs_sets: list[set[int]] = [raw_candidate_operator_idxs]
+            chain_copies = [chain]
+        else:
+            # break out variations for each possible candidate shift meta
+            
+            all_shift_dir_lists: list[list[ShiftDir]] = [[]]
+            all_candidate_operator_idxs_sets: list[set[int]] = [raw_candidate_operator_idxs]
+            chain_copies: list[ProtoAST] = [chain]
+
+            for shift_dir in raw_shift_dirs:
+                if isinstance(shift_dir, int):
+                    # simple case, just directly take the shift_dir since it's an int
+                    for shift_dir_list in all_shift_dir_lists:
+                        shift_dir_list.append(shift_dir)
+                    continue
+
+                # otherwise, we'll add variations for every option in the current shift dir
+                
+                # collect out all the shift candidate metas
+                shift_candidates: list[tuple[ShiftDir, ShiftMeta]] = []
+                for unambiguous_shift_dir, meta_list in shift_dir.values.items():
+                    shift_candidates.extend([(unambiguous_shift_dir, meta) for meta in meta_list])
+
+
+                # make copies of the current chains/shift_dir_lists/candidate_operator_idxs_sets for each of the extra ambiguous shift direction sets
+                initial_len_alternatives = len(all_shift_dir_lists)
+                all_shift_dir_lists = [shift_dir_list.copy() for _ in shift_candidates for shift_dir_list in all_shift_dir_lists]
+                all_candidate_operator_idxs_sets = [candidate_operator_idxs_set.copy() for _ in shift_candidates for candidate_operator_idxs_set in all_candidate_operator_idxs_sets]
+                chain_copies = [ProtoAST(chain_copy.items.copy()) for _ in shift_candidates for chain_copy in chain_copies]
+                for i, (unambiguous_shift_dir, meta) in enumerate(shift_candidates):
+                    offset = i * initial_len_alternatives
+                    for j in range(initial_len_alternatives):
+                        all_shift_dir_lists[offset + j].append(unambiguous_shift_dir)
+                        all_candidate_operator_idxs_sets[offset + j].add(meta.superior_op_idx)
+                        # replace the existing operators in the chain with the ones from the meta
+                        chain_copies[offset + j].items[meta.superior_op_idx] = meta.superior_op
+                        chain_copies[offset + j].items[meta.subordinate_op_idx] = meta.subordinate_op
+            
+            # bookkeeping to make sure chain updated in place and propogated to outer functions calling this
+            chains[chain_idx] = chain_copies[0]
+            new_chains.extend(chain_copies[1:])
+
 
         # TODO: for ambiguous cases, basically make cartesian product over ambiguous shift dirs, and then identify reductions for each one
-        for shift_dirs, case in zip(all_shift_dirs, ambiguous_cases):
-            reductions = identify_reductions(case, shift_dirs, candidate_operator_idxs, reverse_ast_idxs_map, ctx)
+        for shift_dirs, candidate_operator_idxs, chain_copy in zip(all_shift_dir_lists, all_candidate_operator_idxs_sets, chain_copies):
+            reductions = identify_reductions(chain_copy, shift_dirs, candidate_operator_idxs, reverse_ast_idxs_map, ctx)
 
             # apply reductions in reverse order to avoid index shifting issues
             for reduction, (left_bound, right_bound), _ in reversed(reductions):
-                case.items[left_bound:right_bound] = [reduction]
+                chain_copy.items[left_bound:right_bound] = [reduction]
     
     # include the new cases in the list of chains
     chains.extend(new_chains)
 
 
 ShiftDir: TypeAlias = Literal[-1, 0, 1]
+NonZeroShiftDir: TypeAlias = Literal[-1, 1]
 
 # TODO: replace candidate_operator_idxs with a more explicit pairing of each operator and a ShiftMeta
 #       otherwise we'd need to do some weird list of list of candidate operator idxs to handle when ambiguous cases come up
@@ -540,9 +577,10 @@ ShiftDir: TypeAlias = Literal[-1, 0, 1]
 #       candidate_operator_idxs = [i+shift_dir for i, shift_dir in enumerate(shift_dirs) if shift_dir != 0]
 @dataclass
 class ShiftMeta:
-    left_op: list[t2.Operator]
-    right_op: list[t2.Operator]
-    superior_operator_idx: int
+    superior_op: t2.Operator
+    subordinate_op: t2.Operator
+    superior_op_idx: int
+    subordinate_op_idx: int
 
 def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[list[ShiftMeta]]], set[int], dict[int, int]]:
     # identify items that could shift
@@ -591,7 +629,7 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[l
 
             # algorithm to partition out unambiguous groups from the whole set
             # 1. rank all operators by their binding power (careful to set binding power depending on if the op is on the left or right)
-            op_shift_ranks: list[tuple[t2.Operator, ShiftDir, int]] = [
+            op_shift_ranks: list[tuple[t2.Operator, NonZeroShiftDir, int]] = [
                 (left_op, -1, get_bind_power(left_op)[1]) for left_op in possible_left_ops
             ] + [
                 (right_op, 1, get_bind_power(right_op)[0]) for right_op in possible_right_ops
@@ -602,29 +640,33 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[l
             op_shift_groups = concrete_groupby(op_shift_ranks, key=lambda x: x[1])
             
             # 3. for each operator group, all following groups that go in the other direction are subordinate to it
-            quantum_shift_dirs: dict[ShiftDir, list[ShiftMeta]] = defaultdict(list)
-            is_dir_qjux = {-1: isinstance(left_op, t2.QJuxtapose), 1: isinstance(right_op, t2.QJuxtapose)}
+            quantum_shift_dirs: dict[NonZeroShiftDir, list[ShiftMeta]] = defaultdict(list)
+            is_dir_qjux: dict[NonZeroShiftDir, bool] = {-1: isinstance(left_op, t2.QJuxtapose), 1: isinstance(right_op, t2.QJuxtapose)}
             for j, (shift_dir, group) in enumerate(op_shift_groups):
+                shift_dir = cast(NonZeroShiftDir, shift_dir) # for some reason, concrete_groupby won't propagate the type of the key
                 if is_dir_qjux[shift_dir]:
                     superior_ops = [op for op, _, _ in group]
+                    assert all(isinstance(op, t2.Juxtapose) for op in superior_ops), f"INTERNAL ERROR: Superior operators should all be juxtaposes. got {superior_ops=}"
+                    superior_op = t2.QJuxtapose(superior_ops[0].loc, superior_ops) if len(superior_ops) > 1 else superior_ops[0]
                 else:
                     assert len(group) == 1, f"INTERNAL ERROR: Non-juxtapose operator has multiple ambiguous alternatives. got {group=}"
-                    superior_ops = [group[0][0]]
+                    superior_op = group[0][0]
                 
                 #  collect the subordinate ops which are all operators strictly lower in precedence than the current superior ops group
                 subordinate_ops: list[t2.Operator] = []
-                for (_, subordinate_op_group) in op_shift_groups[j+1::2]:
+                for (_, subordinate_op_group) in op_shift_groups[j+1::2]:  # alternating groups after the current one for all groups that are the opposite direction and have strictly lower precedence
                     subordinate_ops.extend([op for op, _, _ in subordinate_op_group])
                 if len(subordinate_ops) == 0:
                     continue # superior ops are not superior to anything, so they always lose
-                
-                
-                # build the meta according to the shift direction
-                if shift_dir == -1:
-                    shift_meta = ShiftMeta(superior_ops, subordinate_ops, ast_idx+shift_dir)
+                if is_dir_qjux[shift_dir*-1]:
+                    assert all(isinstance(op, t2.Juxtapose) for op in subordinate_ops), f"INTERNAL ERROR: Subordinate operators should all be juxtaposes. got {subordinate_ops=}"
+                    subordinate_op = t2.QJuxtapose(subordinate_ops[0].loc, subordinate_ops) if len(subordinate_ops) > 1 else subordinate_ops[0]
                 else:
-                    shift_meta = ShiftMeta(subordinate_ops, superior_ops, ast_idx+shift_dir)
-                quantum_shift_dirs[shift_dir].append(shift_meta)
+                    assert len(subordinate_ops) == 1, f"INTERNAL ERROR: Non-juxtapose operator has multiple ambiguous alternatives. got {subordinate_ops=}"
+                    subordinate_op = subordinate_ops[0]
+                
+                # add the shift meta to the list of shift metas for this shift direction
+                quantum_shift_dirs[shift_dir].append(ShiftMeta(superior_op, subordinate_op, ast_idx+shift_dir, ast_idx+shift_dir*-1))
 
             # insert the ambiguous set of shift directions into the shift_dirs list
             shift_dirs[i] = qint(quantum_shift_dirs)
