@@ -1,5 +1,5 @@
 """
-Post processing steps on tokens to prepare them for expression parsiing
+Post processing steps on tokens to prepare them for expression parsing
 """
 from typing import Callable, Literal, cast, get_args, TypeAlias
 from dataclasses import dataclass, field
