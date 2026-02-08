@@ -1,14 +1,14 @@
 
 
 # fast inverse square-root. see: https://en.wikipedia.org/wiki/Fast_inverse_square_root#Overview_of_the_code
-fast_isqrt = (x:f32) => {
-    let y:f32, i:u32
+fast_isqrt = (x:float32) => {
+    let (y:float32 i:uint32)
     
-    i = 0.5x transmute u32      % evil floating point bit level hacking
-    i = 0x5f3759df - (i >> 1)   % what the fuck?
-    y = i transmute f32
-    y *= 1.5 - (0.5x)y^2        % 1st iteration of newton's method
-    #y *= 1.5 - (0.5x)y^2      # 2nd iteration (optional)
+    i = 0.5x transmute uint32   # evil floating point bit level hacking
+    i = 0x5f3759df - (i >> 1)   # what the fuck?
+    y = i transmute float32
+    y *= 1.5 - (0.5x)y^2        # 1st iteration of newton's method
+    #y *= 1.5 - (0.5x)y^2       # 2nd iteration (optional)
 
     return y
 }
