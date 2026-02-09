@@ -1932,6 +1932,10 @@ in the meantime:
 
 Also look into cuda, opencl, halide, etc. graphics accelerated compute libraries
 
+This video provides a great approach for a simplified interface for interacting with vulcan/graphics APIs in general: https://www.youtube.com/watch?v=7bSzp-QildA  | (blog article): https://gamesbymason.com/blog/2026/vulkan/
+- I quite like the uniformity of the approach. It's very data oriented, and doesn't require so much interaction with the graphics APIs themselves. Basically just put everything on the GPU all at the start rather than doing each and everything through the graphics API
+- his GPU library: https://codeberg.org/games-by-Mason/mr_gpu
+
 ## Scopes, capitalization, combination identifiers, aliases
 
 ### capitalization/case-insensitive identifiers
