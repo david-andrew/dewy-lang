@@ -1,10 +1,11 @@
 """
 Post processing steps on tokens to prepare them for expression parsing
 """
+from textwrap import dedent
 from typing import Callable, Literal, cast, get_args, TypeAlias
 from dataclasses import dataclass, field
 from functools import partial
-from .reporting import SrcFile, ReportException, Span, Error, Pointer
+from .reporting import SrcFile, ReportException, Span, Error, Pointer, Warning
 from . import t1
 
 import pdb
@@ -293,10 +294,17 @@ juxtapose_blacklist: set[tuple[type[t1.Token], type[t1.Token]]] = {
     (t1.Integer, IndexJuxtapose),
     (t1.Real, IndexJuxtapose),
     (OpFn, IndexJuxtapose),
+    # things that CANNOT be indexes
+    (IndexJuxtapose, t1.String),
+    (IndexJuxtapose, t1.IString),
+    (IndexJuxtapose, t1.BasedString),
+    (IndexJuxtapose, t1.Integer),
+    (IndexJuxtapose, t1.Real),
+    (IndexJuxtapose, OpFn),
 }
 
 
-def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[Juxtapose | QJuxtapose] | None:
+def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None, *, ctx: Context) -> type[Juxtapose | QJuxtapose] | None:
     """
     For certain tokens, we alredy know which juxtapose (precedence level) they should have
     
@@ -373,12 +381,35 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[J
         option_types = []
         if (left_type, CallJuxtapose) not in juxtapose_blacklist:
             option_types.append(CallJuxtapose)
-        if (left_type, IndexJuxtapose) not in juxtapose_blacklist:
+        if (left_type, IndexJuxtapose) not in juxtapose_blacklist and (IndexJuxtapose, right_type) not in juxtapose_blacklist:
             option_types.append(IndexJuxtapose)
         if (left_type, MultiplyJuxtapose) not in juxtapose_blacklist and (MultiplyJuxtapose, right_type) not in juxtapose_blacklist:
             option_types.append(MultiplyJuxtapose)
         if len(option_types) > 0:
             return partial(QJuxtapose, _option_types=option_types)
+        # no options were present, so no juxtapose will be inserted. But the code can still proceed
+        left_src = ctx.srcfile.body[left.loc.start:left.loc.stop]
+        right_src = ctx.srcfile.body[right.loc.start:right.loc.stop]
+        report = Warning(
+            srcfile=ctx.srcfile,
+            title="Invalid types for juxtaposition",
+            message=f"Juxtaposition is not defined for <{left_type.__name__}> and <{right_type.__name__}>",
+            pointer_messages=[
+                Pointer(span=Span(left.loc.start, left.loc.stop), message="left expression"),
+                Pointer(span=Span(left.loc.stop, right.loc.start), message="juxtaposition"),
+                Pointer(span=Span(right.loc.start, right.loc.stop), message="right expression"),
+            ],
+            hint=dedent(f"""\
+                Juxtaposition ignored; parsed left and right as separate expressions
+                Recommend inserting explicit operator or whitespace for clarity e.g.:
+                  {left_src} {right_src}     # separate expressions
+                  {left_src} * {right_src}   # multiply
+                  {left_src} <| {right_src}  # call
+                  {left_src}[{right_src}]    # index
+                """
+            )
+        )
+        report.warn()
     
     # otherwise no jux
     return None
@@ -421,7 +452,7 @@ def remove_whitespace(tokens: list[t1.Token]) -> None:
         recurse_into(token, remove_whitespace)
 
 
-def insert_juxtapose(tokens: list[t1.Token]) -> None:
+def insert_juxtapose(tokens: list[t1.Token], *, ctx: Context) -> None:
     """
     Insert juxtapose tokens between adjacent (atom) tokens if their spans touch (which indicates there was no whitespace between them)
     TODO: this is vaguely inefficient with all the insertions. If this is a performance bottleneck, consider some type of e.g. heap or rope or etc. data structure
@@ -432,11 +463,11 @@ def insert_juxtapose(tokens: list[t1.Token]) -> None:
     i = 0
     while i < len(tokens):
         # recursively handle inserting juxtaposes for blocks
-        recurse_into(tokens[i], insert_juxtapose)
+        recurse_into(tokens[i], lambda inner: insert_juxtapose(inner, ctx=ctx))
 
         # insert juxtapose if adjacent (atom) tokens' spans touch
         if i + 1 < len(tokens) and tokens[i].loc.stop == tokens[i+1].loc.start:
-            jux_type = get_jux_type(tokens[i], tokens[i+1], tokens[i-1] if i > 0 else None)
+            jux_type = get_jux_type(tokens[i], tokens[i+1], tokens[i-1] if i > 0 else None, ctx=ctx)
             if jux_type is not None:
                 tokens.insert(i+1, jux_type(t1.Span(tokens[i].loc.stop, tokens[i].loc.stop)))
                 i += 1
@@ -963,7 +994,7 @@ def postok_inner(tokens: list[t1.Token], *, ctx: Context) -> None:
     """apply postprocessing steps to the tokens. Converts list[Token] into list[Chain] in place"""
     # remove whitespace and insert juxtapose tokens
     remove_whitespace(tokens)
-    insert_juxtapose(tokens)
+    insert_juxtapose(tokens, ctx=ctx)
 
     # insert void between any instances of `,,` or comma at the beginning or end of a context
     insert_comma_voids(tokens)

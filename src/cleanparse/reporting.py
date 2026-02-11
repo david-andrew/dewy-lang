@@ -47,6 +47,7 @@ from bisect import bisect_right
 from os import PathLike
 from typing import Literal, NoReturn, TypeAlias
 import re
+import sys
 
 Severity: TypeAlias = Literal["error", "warning", "info", "hint"]
 
@@ -957,6 +958,9 @@ class Report:
     
     def throw(self) -> NoReturn:
         raise ReportException(self)
+    
+    def warn(self) -> None:
+        sys.stderr.write(str(self) + "\n")
 
 @dataclass
 class Error(Report):
