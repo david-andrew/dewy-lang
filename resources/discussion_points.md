@@ -3881,6 +3881,75 @@ Oviously this is a trivial example, but more complex assignments could be done. 
 More thought needed on the semantics of the place of a value, but I think I will allow it
 
 
+### Allowing providing some arguments to opfunctions, i.e. Implicit partial eval of opfunctions [leaning to allow e.g. `(^2)` but TBD]
+for example
+```dewy
+square = (^2)
+```
+
+Basically this let's us not have to do more verbose partial evaluation
+```dewy
+square = @(^)(... 2)
+```
+
+I like how it can clean things up. And in principle it should be parsable, we'd just have to be able to recognize the case of a binary operator in a context missing it's left or right operand. The problem is distinguishing between error cases, e.g. if the operand can be anything arbitrary, then one might have just forgotten the right operand rather than was making a function:
+```dewy
+x(^(2/3+3.141592))
+```
+
+I think it might be okay for type checking to have the error, saying this turned into a function, which you then tried to multiply with x. So the tradeoff is clearer intent/error identification vs more elegant syntax. Technically this gets us closer to Julia's syntax which supports things like 
+```julia
+f = (+)
+f(2, 3)      # 5
+
+g = (*)
+g(4, 5)      # 20
+
+
+reduce(+, [1, 2, 3, 4])     # 10
+map(*, [1, 2, 3], [4, 5, 6])  # [4, 10, 18]
+filter(>(3), [1, 2, 3, 4, 5]) # [4, 5]
+```
+
+> NOTE: julia's example `filter(>(3) ...)` works the way it does becuase the language defines an explicit dispatch case for `>` taking a single argument as making a new function `>(a)` -> `x->x>a`. Dewy would uniformly apply arguments from left to right of the operator, so an equivalent in dewy would be `@(>)(... 3)`
+
+I think I'm almost certainly in favor of allowing this in dewy: any time a binary operator is encountered in a context without any, or missing operands, it can turn into an operator function. BIG PROBLEM though, what about unary forms of binary operators, e.g. `+`, `-`, `*`, `/`, `//`? Perhaps they are just special cases that cannot do the partial eval thing. So you can provide them literally, e.g. `reduce(+, [1 2 3 4 5])` letting the comma delimit literally, but you couldn't take the shortcut of producing a partial eval opfn with any of them: ~~`plus4 = (+4)`~~, you'd have to do the long version `plus4 = @(+)(4)`
+
+
+Actually a new potentially even better idea would be that you can make convenient partial eval versions of operators by passing something like `...` or `void` to one of the operands
+```
+greaterthan3 = ...>?3
+plus4 = ...+4
+minus5 = ...-5
+```
+
+basically `...` becomes a convenient way to make an unnamed placeholder value.
+I think combining this form with the ability to have a naked operator in some context (i.e. no operands) but not necessarily a group, I think that will be the best flexibility without the downside of muddying the user intent.
+```
+binops = [+, -, /, *, ^]
+loop op in binops 
+    printl(op(3 3))
+unops = [...>?5 ...<?5 ...=?5 ...+5 ...-5 .../5 ...*5 ...^5]
+loop op in unops
+    printl(op(2))
+
+# (output)
+# 6
+# 0
+# 1
+# 9
+# 27
+# false
+# true
+# false
+# 7
+# -3
+# 2/5
+# 10
+# 32
+```
+
+
 ## Multidimensional array literals in a single line
 matlab let you use `;` to indicate new dimensions. julia lets you use multiple `;` in a row for higher dimensions.
 
@@ -4176,3 +4245,19 @@ though in this contrived example, it would be simpler to just do
 ```
 VecWithPositiveY<T of real> = array<T length=@(>=?)(... 2) a=>a[1]>?0>
 ```
+
+
+
+## Implicit partial evaluation
+May we consider allowing implicit partial evaluation in cases where it's obvious the arguments are not complete. For example if a user passes `...` or `void` where an argument should go, which for partial eval indicates skipping over setting that argument, perhaps that could be an indicator enough to know it's partial eval without requiring the `@`. I think this mainly would be useful for making operator functions more elegant, but it might make other instances of partial evaluation less clear
+
+```dewy
+greaterthan3 = (>)(... 3)
+```
+currently if we wanted this, we have to include `@`
+```dewy
+greaterthan3 = @(>)(... 3)
+```
+but because there is obviously a `...` this shouldn't+couldn't be called
+
+Additionally, consider if using `...` as an operand might also implicitly make it into a function
