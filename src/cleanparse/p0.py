@@ -295,8 +295,9 @@ class ProtoAST:
 
 # special error cases when trying to make a reduction
 # NOTE: if there become many more special cases to check, make a table that looks up functions given the operator
+#       if no more error cases come up, consider renaming this to validate_flat_dotdot or something
 def validate_flat(ast: Flat, ctx: Context) -> NoReturn|None:
-    # since rangejux is the only flat to check at the moment, have a simpler structure here
+    # since rangejux is the only flat operator that has an error case to check at the moment, have a simpler structure here
     if not isinstance(ast.op, t2.RangeJuxtapose):
         return
     
@@ -526,6 +527,8 @@ def shunt_pass(chains: list[ProtoAST], ctx: Context) -> None:
                     # simple case, just directly take the shift_dir since it's an int
                     for shift_dir_list in all_shift_dir_lists:
                         shift_dir_list.append(shift_dir)
+                        # don't need to add to candidate_operator_idxs because unambiguous operators were already included in identify_shifts()
+                        # don't need to add a chain copy because unambiguous operators don't fan out any alternative cases over the existing ones
                     continue
 
                 # otherwise, we'll add variations for every option in the current shift dir
@@ -549,19 +552,19 @@ def shunt_pass(chains: list[ProtoAST], ctx: Context) -> None:
                         # replace the existing operators in the chain with the ones from the meta
                         chain_copies[offset + j].items[meta.superior_op_idx] = meta.superior_op
                         chain_copies[offset + j].items[meta.subordinate_op_idx] = meta.subordinate_op
-            
-            # bookkeeping to make sure chain updated in place and propogated to outer functions calling this
-            chains[chain_idx] = chain_copies[0]
-            new_chains.extend(chain_copies[1:])
 
 
-        # TODO: for ambiguous cases, basically make cartesian product over ambiguous shift dirs, and then identify reductions for each one
+        # for ambiguous cases, basically make cartesian product over ambiguous shift dirs, and then identify reductions for each one
         for shift_dirs, candidate_operator_idxs, chain_copy in zip(all_shift_dir_lists, all_candidate_operator_idxs_sets, chain_copies):
             reductions = identify_reductions(chain_copy, shift_dirs, candidate_operator_idxs, reverse_ast_idxs_map, ctx)
 
             # apply reductions in reverse order to avoid index shifting issues
             for reduction, (left_bound, right_bound), _ in reversed(reductions):
                 chain_copy.items[left_bound:right_bound] = [reduction]
+        
+        # bookkeeping to make sure chain updated in place and propogated to outer functions calling this
+        chains[chain_idx] = chain_copies[0]
+        new_chains.extend(chain_copies[1:])
     
     # include the new cases in the list of chains
     chains.extend(new_chains)
@@ -647,7 +650,7 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[l
                 if is_dir_qjux[shift_dir]:
                     superior_ops = [op for op, _, _ in group]
                     assert all(isinstance(op, t2.Juxtapose) for op in superior_ops), f"INTERNAL ERROR: Superior operators should all be juxtaposes. got {superior_ops=}"
-                    superior_op = t2.QJuxtapose(superior_ops[0].loc, superior_ops) if len(superior_ops) > 1 else superior_ops[0]
+                    superior_op = t2.QJuxtapose(superior_ops[0].loc, _option_types=list(map(type, superior_ops))) if len(superior_ops) > 1 else superior_ops[0]
                 else:
                     assert len(group) == 1, f"INTERNAL ERROR: Non-juxtapose operator has multiple ambiguous alternatives. got {group=}"
                     superior_op = group[0][0]
@@ -660,7 +663,7 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[l
                     continue # superior ops are not superior to anything, so they always lose
                 if is_dir_qjux[shift_dir*-1]:
                     assert all(isinstance(op, t2.Juxtapose) for op in subordinate_ops), f"INTERNAL ERROR: Subordinate operators should all be juxtaposes. got {subordinate_ops=}"
-                    subordinate_op = t2.QJuxtapose(subordinate_ops[0].loc, subordinate_ops) if len(subordinate_ops) > 1 else subordinate_ops[0]
+                    subordinate_op = t2.QJuxtapose(subordinate_ops[0].loc, _option_types=list(map(type, subordinate_ops))) if len(subordinate_ops) > 1 else subordinate_ops[0]
                 else:
                     assert len(subordinate_ops) == 1, f"INTERNAL ERROR: Non-juxtapose operator has multiple ambiguous alternatives. got {subordinate_ops=}"
                     subordinate_op = subordinate_ops[0]

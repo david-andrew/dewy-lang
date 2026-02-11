@@ -1,5 +1,5 @@
 """
-t2 is the second phase of tokenization. Mainly building up a few types of compound tokens out of constituent parts. Namely:
+Second phase of tokenization. Mainly building up a few types of compound tokens out of constituent parts. Namely:
 - strings
 - floats
 - blocks

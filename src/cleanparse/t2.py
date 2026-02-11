@@ -3,6 +3,7 @@ Post processing steps on tokens to prepare them for expression parsing
 """
 from typing import Callable, Literal, cast, get_args, TypeAlias
 from dataclasses import dataclass, field
+from functools import partial
 from .reporting import SrcFile, ReportException, Span, Error, Pointer
 from . import t1
 
@@ -77,16 +78,13 @@ class QJuxtapose(t1.InedibleToken):
     # etc.
     ```
     """
-    options: list[CallJuxtapose|IndexJuxtapose|MultiplyJuxtapose] = field(default=None)
+    options: list[CallJuxtapose|IndexJuxtapose|MultiplyJuxtapose] = field(init=False)
+    # default options are all possible cases. Use partial to set different cases here 
+    _option_types: list[type[CallJuxtapose|IndexJuxtapose|MultiplyJuxtapose]] = (CallJuxtapose, IndexJuxtapose, MultiplyJuxtapose)
 
     def __post_init__(self):
-        # user provided options
-        if self.options is not None: return
-
-        # otherwise maximally ambiguous juxtapose (taking the span already attached to self)
-        self.options = [CallJuxtapose(self.loc), IndexJuxtapose(self.loc), MultiplyJuxtapose(self.loc)]
-
-
+        # instantiate the options with the span already attached to self
+        self.options = [option_type(self.loc) for option_type in self._option_types]
 
 # concrete operator token types
 Operator: TypeAlias = (
@@ -252,6 +250,52 @@ def is_dotdotdot(token: t1.Token) -> bool:
 def is_typeparam(token: t1.Token) -> bool:
     return isinstance(token, t1.Block) and token.kind == '<>'
 
+
+"""
+non-exhaustive blacklist of some expressions involving juxtapose that are easy to catch and are not valid
+This is mainly just a convenience to prevent enormous exponential blowup when dealing with certain ambiguous parses
+
+If for some ungodly reason, a user wanted to overload a type to support these operations, parsing would still filter them out,
+so the user would have to use more explicit syntax to get the effect, e.g. 
+```dewy
+# explicit multiplication
+'some string' * 2  
+# explicit call
+$call('some string' (other arguments to call with))
+# explicit indexing
+$index((+) [2..10])
+```
+"""
+juxtapose_blacklist: set[tuple[type[t1.Token], type[t1.Token]]] = {
+    # things that CANNOT be multiplied via juxtaposition
+    # include left and right cases since multiply is commutative (and thus would be blacklisted from either side)
+    (t1.String, MultiplyJuxtapose),
+    (MultiplyJuxtapose, t1.String),
+    (t1.IString, MultiplyJuxtapose),
+    (MultiplyJuxtapose, t1.IString),
+    (t1.BasedString, MultiplyJuxtapose),
+    (MultiplyJuxtapose, t1.BasedString),
+    (t1.Integer, MultiplyJuxtapose),
+    (MultiplyJuxtapose, t1.Integer),
+    (t1.Real, MultiplyJuxtapose),
+    (MultiplyJuxtapose, t1.Real),
+    (OpFn, MultiplyJuxtapose),
+    (MultiplyJuxtapose, OpFn),
+
+    # things that CANNOT be called
+    (t1.String, CallJuxtapose),
+    (t1.IString, CallJuxtapose),
+    (t1.BasedString, CallJuxtapose),
+    (t1.Integer, CallJuxtapose),
+    (t1.Real, CallJuxtapose),
+
+    # things that CANNOT be indexed
+    (t1.Integer, IndexJuxtapose),
+    (t1.Real, IndexJuxtapose),
+    (OpFn, IndexJuxtapose),
+}
+
+
 def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[Juxtapose | QJuxtapose] | None:
     """
     For certain tokens, we alredy know which juxtapose (precedence level) they should have
@@ -277,6 +321,10 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[J
     # NOTE: the ordering here determines the precedence when multiple special juxtaposable types are next to each other
     #       e.g. ...<A> would be ellipsis jux because we check it before type params. Ideally follow precedence table in p0.py,
     #       but it feels like this is a more correct ordering of which trumps which.
+
+    # for convenience
+    left_type = type(left)
+    right_type = type(right)
     
     # Semicolon connects to anything on its left, and cannot connect to its right
     if isinstance(left, t1.Semicolon):
@@ -292,37 +340,45 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None) -> type[J
 
     # ... may juxtpose with prefix/postfix operators
     if is_dotdotdot(left):
-        if type(right) in atom_tokens or is_prefix_op(right):
+        if right_type in atom_tokens or is_prefix_op(right):
             return EllipsisJuxtapose
         return None
     if is_dotdotdot(right):
-        if type(left) in atom_tokens or is_postfix_op(left):
+        if left_type in atom_tokens or is_postfix_op(left):
             return EllipsisJuxtapose
         return None
     
     # .. may juxtpose with prefix/postfix operators
     if is_dotdot(left):
-        if type(right) in atom_tokens or is_prefix_op(right):
+        if right_type in atom_tokens or is_prefix_op(right):
             return RangeJuxtapose
         return None
     if is_dotdot(right):
-        if type(left) in atom_tokens or is_postfix_op(left): 
+        if left_type in atom_tokens or is_postfix_op(left): 
             return RangeJuxtapose
         return None
  
     # typeparam may not juxtapose with anything except for atoms
     if is_typeparam(left):
-        if type(right) in atom_tokens and not isinstance(prev, TypeParamJuxtapose):
+        if right_type in atom_tokens and not isinstance(prev, TypeParamJuxtapose):
             return TypeParamJuxtapose
         return None
     if is_typeparam(right):
-        if type(left) in atom_tokens:
+        if left_type in atom_tokens:
             return TypeParamJuxtapose
         return None
 
     # jux call, jux index, or jux mul. may only be between atoms (i.e. no operators on either side)
-    if type(left) in atom_tokens and type(right) in atom_tokens:
-        return QJuxtapose
+    if left_type in atom_tokens and right_type in atom_tokens:
+        option_types = []
+        if (left_type, CallJuxtapose) not in juxtapose_blacklist:
+            option_types.append(CallJuxtapose)
+        if (left_type, IndexJuxtapose) not in juxtapose_blacklist:
+            option_types.append(IndexJuxtapose)
+        if (left_type, MultiplyJuxtapose) not in juxtapose_blacklist and (MultiplyJuxtapose, right_type) not in juxtapose_blacklist:
+            option_types.append(MultiplyJuxtapose)
+        if len(option_types) > 0:
+            return partial(QJuxtapose, _option_types=option_types)
     
     # otherwise no jux
     return None
