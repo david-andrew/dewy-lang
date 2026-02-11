@@ -11,7 +11,7 @@ from collections import defaultdict
 from . import t0
 from . import t1
 from . import t2
-from .reporting import SrcFile, ReportException, Error, Pointer, Span
+from .reporting import SrcFile, ReportException, Error, Pointer, Span, Warning
 from .utils import ordinalize, concrete_groupby
 
 import pdb
@@ -225,7 +225,8 @@ class Context:
 
 # TODO: consider making ASTs include a span now that we don't keep the old tokens for containers
 @dataclass
-class AST: ...
+class AST:
+    loc: Span
 
 @dataclass
 class BinOp(AST):
@@ -421,10 +422,10 @@ def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
         elif isinstance(t, t2.Flow):
             ast = parse_flow(t, ctx)
         elif isinstance(t, (t1.Real, t1.String, t1.BasedString, t1.Identifier, t1.Semicolon, t1.Metatag, t1.Integer, t2.OpFn)):
-            ast = Atom(t)
+            ast = Atom(t.loc, t)
         items.append(ast)
 
-    result = reduce_loop([ProtoAST(items)], ctx)
+    result = reduce_loop(ProtoAST(items), ctx)
     return result
 
 def parse_block(block: t1.Block|t1.ParametricEscape, ctx: Context) -> Block:
@@ -435,9 +436,9 @@ def parse_block(block: t1.Block|t1.ParametricEscape, ctx: Context) -> Block:
         inner.append(parse_chain(item, ctx))
     
     if isinstance(block, t1.ParametricEscape):
-        return ParametricEscape(inner=inner)
+        return ParametricEscape(loc=block.loc, inner=inner)
 
-    return Block(inner=inner, kind=block.kind, base=block.base)
+    return Block(loc=block.loc, inner=inner, kind=block.kind, base=block.base)
 
 def parse_istring(istring: t1.IString, ctx: Context) -> IString:
     content = []
@@ -450,7 +451,7 @@ def parse_istring(istring: t1.IString, ctx: Context) -> IString:
             # unreachable
             raise ValueError(f'INTERNAL ERROR: unexpected item type in IString. content. got {type(item)=}')
     
-    return IString(content)
+    return IString(istring.loc, content)
 
 def parse_keyword_expr(keyword_expr: t2.KeywordExpr, ctx: Context) -> KeywordExpr:
     parts: list[t1.Keyword | AST] = []
@@ -459,15 +460,15 @@ def parse_keyword_expr(keyword_expr: t2.KeywordExpr, ctx: Context) -> KeywordExp
             parts.append(parse_chain(item, ctx))
         else:
             parts.append(item)
-    return KeywordExpr(parts)
+    return KeywordExpr(keyword_expr.loc, parts)
 
 def parse_flow(flow: t2.Flow, ctx: Context) -> Flow:
     arms = [parse_keyword_expr(arm, ctx) for arm in flow.arms]
     default = parse_chain(flow.default, ctx) if flow.default is not None else None
-    return Flow(arms=arms, default=default)
+    return Flow(loc=flow.loc, arms=arms, default=default)
 
 
-def reduce_loop(chains: list[ProtoAST], ctx: Context) -> AST:
+def reduce_loop(chain: ProtoAST, ctx: Context) -> AST:
     """
     repeatedly apply shunting reductions until no more occur. modifies `tokens` in place
     
@@ -475,6 +476,10 @@ def reduce_loop(chains: list[ProtoAST], ctx: Context) -> AST:
     If multiple chains are present at the end, an Ambiguous node is returned containing all the candidates
     Otherwise the parsed AST is returned
     """
+    _chain_items = chain.items.copy()  # used for reporting
+
+    chains: list[ProtoAST] = [chain]
+
     while True:
         initial_lengths = [len(chain.items) for chain in chains]
         initial_num_chains = len(chains)
@@ -496,12 +501,55 @@ def reduce_loop(chains: list[ProtoAST], ctx: Context) -> AST:
             raise ValueError(f"INTERNAL ERROR: shunt-loop produced non-AST item. got {item=}")
         candidates.append(item)
     
-    # multiple alternate parses means an ambiguous node
-    if len(candidates) > 1:
-        return Ambiguous(candidates)
-
     # unambiguous case
-    return candidates[0]
+    if len(candidates) == 1:
+        return candidates[0]
+    
+    # multiple alternate parses means an ambiguous node
+    if len(candidates) > 50:
+        qjuxs = [item for item in _chain_items if isinstance(item, t2.QJuxtapose)]
+        groups = concrete_groupby(_chain_items, key=lambda x: isinstance(x, t2.QJuxtapose))
+        unambiguous_src_template = "".join([
+            '{right_bracket}{replacement}{left_bracket}' if is_qjux else ctx.srcfile.body[group[0].loc.start:group[-1].loc.stop] for (is_qjux, group) in groups
+        ])
+        all_calls = unambiguous_src_template.format(replacement=' <| ', left_bracket='', right_bracket='')
+        all_multiplies = unambiguous_src_template.format(replacement=' * ', left_bracket='', right_bracket='')
+        all_indexes = unambiguous_src_template.format(replacement='', left_bracket='[', right_bracket=']')
+        all_indexes = ''.join(all_indexes.split(']', 1)) + ']'  # mildly hacky, move first `]` (which is unmatched) to the end so it matches with the unmatched `[`
+        report = Warning(
+            srcfile=ctx.srcfile,
+            title="Highly ambiguous expressions",
+            message=f"Expression has {len(candidates)} possible parses (before type checking/disambiguation)",
+            pointer_messages=[
+                Pointer(span=candidates[0].loc, message="highly ambiguous expression", placement='below'),
+                *[  Pointer(span=op.loc, message=f"this juxtapose could be any of <{"> | <".join(map(lambda x: x.__class__.__name__, op.options))}>", placement='above')
+                    for op in qjuxs
+                ]
+            ],
+            # TODO: the all indexes hint might actually not be correct, 
+            # e.g. if the user had an expression like a[b][c][d], this would just convert it to a[[b]][[c]][[d]], 
+            # which wouldn't fix the exponential blowup, and would also be incorrect. consider supporting `$index(a b) |> @$index(c) |> $index(d)` or something
+            # actually, need to look up. is `<|` supposed to work for call or index? tbd, otherwise a operator for index might be nice to include
+            hint=dedent(f"""\
+                disambiguation may be slow due to the large number of possible cases
+                recommend manual disambiguation by adding explicit operators:
+                  # e.g. replace all juxtaposes with explicit call operators
+                  {all_calls}
+                  
+                  # e.g. replace all juxtaposes with explicit multiply operators
+                  {all_multiplies}
+                  
+                  # e.g. replace all juxtaposes with explicit index operators
+                  {all_indexes}
+                  
+                  # or whatever combination is appropriate for your case
+            """),
+        )
+        report.warn()
+
+
+    return Ambiguous(candidates[0].loc, candidates)
+
 
 
 def shunt_pass(chains: list[ProtoAST], ctx: Context) -> None:
@@ -702,20 +750,20 @@ def identify_reductions(chain: ProtoAST, shift_dirs: list[ShiftDir], candidate_o
         for a in associativity:
             if (a == Associativity.left or a == Associativity.right) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 assert isinstance(left_ast, AST) and isinstance(right_ast, AST), f'INTERNAL ERROR: left and right ASTs are not ASTs. got {left_ast=}, {right_ast=}, {left_ast_idx=}, {right_ast_idx=}'
-                reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1), a))
+                reductions.append((BinOp(Span(left_ast.loc.start, right_ast.loc.stop), op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1), a))
             elif a == Associativity.prefix and (right_ast_shift_dir == -1) and (not could_be_binop(candidate_operator_idx, chain) and not could_be_postfix(candidate_operator_idx, chain)):
                 assert isinstance(right_ast, AST), f'INTERNAL ERROR: right AST is not an AST. got {right_ast=}'
-                reductions.append((Prefix(op, right_ast), (candidate_operator_idx, right_ast_idx+1), a))
+                reductions.append((Prefix(Span(op.loc.start, right_ast.loc.stop), op, right_ast), (candidate_operator_idx, right_ast_idx+1), a))
             elif (a == Associativity.postfix) and (left_ast_shift_dir == 1):
                 assert isinstance(left_ast, AST), f'INTERNAL ERROR: left AST is not an AST. got {left_ast=}'
-                reductions.append((Postfix(op, left_ast), (left_ast_idx, candidate_operator_idx+1), a))
+                reductions.append((Postfix(Span(left_ast.loc.start, op.loc.stop), op, left_ast), (left_ast_idx, candidate_operator_idx+1), a))
             elif (a == Associativity.flat) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
                 # check for the whole flat chain
                 res = collect_flat_operands(left_ast_idx, right_ast_idx, op, chain, reverse_ast_idxs_map, shift_dirs)
                 if res is None:
                     continue
                 operands, bounds = res
-                ast = Flat(op, operands)
+                ast = Flat(Span(operands[0].loc.start, operands[-1].loc.stop),op, operands)  #Note, because t2 inserts void into commas, we can always use the bounds of the operands since there will never be missing operands
                 validate_flat(ast, ctx)  # check that 
                 reductions.append((ast, bounds, a))
             elif (a == Associativity.fail) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
@@ -873,8 +921,8 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: t2.Operator
     while j > 0 and isinstance(chain.items[j], t2.Operator) and t2.op_equals(chain.items[j], op):
         prev_ast_idx = j - 1
         if prev_ast_idx < 0:
-            # TODO: full error report
-            raise ValueError(f'USER ERROR: missing operand for flat operator {op}. got {operands=}')
+            # shouldn't be possible to get here because we insert void into comma expressions that are missing operands
+            raise ValueError(f'INTERNAL ERROR: missing operand for flat operator {op}. got {operands=}')
         prev_ast_i = reverse_ast_idxs_map.get(prev_ast_idx)
         if prev_ast_i is None:
             raise ValueError("INTERNAL ERROR: item didn't shift, indicating something is probably wrong...")
@@ -892,8 +940,8 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: t2.Operator
     while i < len(chain.items) and isinstance(chain.items[i], t2.Operator) and t2.op_equals(chain.items[i], op):
         next_ast_idx = i + 1
         if next_ast_idx >= len(chain.items):
-            # TODO: full error report
-            raise ValueError(f'USER ERROR: missing operand for flat operator {op}. got {operands=}')
+            # shouldn't be possible to get here because we insert void into comma expressions that are missing operands
+            raise ValueError(f'INTERNAL ERROR: missing operand for flat operator {op}. got {operands=}')
         next_ast_i = reverse_ast_idxs_map.get(next_ast_idx)
         if next_ast_i is None:
             raise ValueError("INTERNAL ERROR: item didn't shift, indicating something is probably wrong...")
