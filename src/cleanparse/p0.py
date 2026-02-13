@@ -136,7 +136,7 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.left, ['+', '-']),
     (Associativity.left, ['<<', '>>', '<<<', '>>>', '<<!', '!>>']),
     (Associativity.flat,  [',']),
-    (Associativity.flat, [t2.RangeJuxtapose]),  # jux-range
+    (Associativity.fail, [t2.RangeJuxtapose]),  # jux-range 1..2..3
     (Associativity.fail, ['in']),    # A in B
     (Associativity.left, ['=?', '>?', '<?', '>=?', '<=?', 'is?', 'isnt?', 'in?', '@?']),
     (Associativity.left, ['and', 'nand', '&']),
@@ -297,7 +297,31 @@ class ProtoAST:
 # special error cases when trying to make a reduction
 # NOTE: if there become many more special cases to check, make a table that looks up functions given the operator
 #       if no more error cases come up, consider renaming this to validate_flat_dotdot or something
-def validate_flat(ast: Flat, ctx: Context) -> NoReturn|None:
+# TODO: this error message is suboptimal. e.g. `1..,2,..3` gives a wacky error message that doesn't really make sense
+#       `a of b of c` is a more straightforward example that hits this error and has the issue.
+def _throw_nested_nonassociative_operator_error(*, ctx: Context, outer_op: t2.Operator, inner_op: t2.Operator, left_expr: AST, right_expr: AST) -> NoReturn:
+    label = _op_label(outer_op)
+    left_expr_src = ctx.srcfile.body[left_expr.loc.start:left_expr.loc.stop]
+    right_expr_src = ctx.srcfile.body[right_expr.loc.start:right_expr.loc.stop]
+    Error(
+        srcfile=ctx.srcfile,
+        title="Non-associative operator nesting",
+        message=f"Operator `{label}` can't be nested inside itself.",
+        pointer_messages=[
+            Pointer(span=inner_op.loc, message=f"nested `{label}` here", placement="below"),
+            Pointer(span=outer_op.loc, message=f"outer `{label}` here", placement="above"),
+        ],
+        # TODO: this hint isn't very helpful.
+        # hint=dedent(f"""\
+        #     `{label}` is non-associative, so chaining it is not allowed.
+        #     Use parentheses to make more explicit, or rewrite to avoid nesting:
+        #       ({left_expr_src}) {right_expr_src}
+        #       {left_expr_src} ({right_expr_src})
+        # """),
+    ).throw()
+
+
+def validate_rangejux(ast: Flat, ctx: Context) -> NoReturn|None:
     # since rangejux is the only flat operator that has an error case to check at the moment, have a simpler structure here
     if not isinstance(ast.op, t2.RangeJuxtapose):
         return
@@ -764,15 +788,14 @@ def identify_reductions(chain: ProtoAST, shift_dirs: list[ShiftDir], candidate_o
                     continue
                 operands, bounds = res
                 ast = Flat(Span(operands[0].loc.start, operands[-1].loc.stop),op, operands)  #Note, because t2 inserts void into commas, we can always use the bounds of the operands since there will never be missing operands
-                validate_flat(ast, ctx)  # check that 
+                validate_rangejux(ast, ctx)  # check that 
                 reductions.append((ast, bounds, a))
             elif (a == Associativity.fail) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
-                # TODO: full error report for these exceptions
                 if isinstance(left_ast, BinOp) and t2.op_equals(left_ast.op, op):
-                    raise ValueError(f'USER ERROR: operator {op} is not allowed to be nested inside itself. got {left_ast.op=} and {op=}')
+                    _throw_nested_nonassociative_operator_error(ctx=ctx, outer_op=op, inner_op=left_ast.op, left_expr=left_ast, right_expr=right_ast)
                 if isinstance(right_ast, BinOp) and t2.op_equals(right_ast.op, op):
-                    raise ValueError(f'USER ERROR: operator {op} is not allowed to be nested inside itself. got {right_ast.op=} and {op=}')
-                reductions.append((BinOp(op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1), a))
+                    _throw_nested_nonassociative_operator_error(ctx=ctx, outer_op=op, inner_op=right_ast.op, left_expr=left_ast, right_expr=right_ast)
+                reductions.append((BinOp(Span(left_ast.loc.start, right_ast.loc.stop), op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1), a))
         
         if len(reductions) == 0:
             continue
@@ -960,6 +983,19 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: t2.Operator
     return operands, bounds
 
 
+def _op_label(op: t2.Operator) -> str:
+    if isinstance(op, t1.Operator):
+        return op.symbol
+    if isinstance(op, t2.InvertedComparisonOp):
+        return f"not {_op_label(op.op)}"
+    if isinstance(op, t2.BroadcastOp):
+        return f".{_op_label(op.op)}"
+    if isinstance(op, t2.CombinedAssignmentOp):
+        return f"{_op_label(op.op)}="
+    if isinstance(op, t2.QJuxtapose):
+        return f"QJuxtapose({', '.join(_op_label(o) for o in op.options)})"
+    return type(op).__name__
+
 
 def ast_to_tree_str(ast: AST, level: int = 0) -> str:
     space = "    "
@@ -973,14 +1009,6 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if len(s) <= max_len:
             return s
         return s[:max_len - 3] + "..."
-
-    def op_label(op: t2.Operator) -> str:
-        if isinstance(op, t1.Operator): return op.symbol
-        if isinstance(op, t2.InvertedComparisonOp): return f"not {op.op}"
-        if isinstance(op, t2.BroadcastOp): return f".{op_label(op.op)}"
-        if isinstance(op, t2.CombinedAssignmentOp): return f"{op_label(op.op)}="
-        if isinstance(op, t2.QJuxtapose): return f"QJuxtapose({', '.join(op_label(o) for o in op.options)})"
-        return type(op).__name__
 
     def token_label(tok: t1.Token) -> str:
         if isinstance(tok, t1.Identifier): return f"Identifier({tok.name})"
@@ -999,9 +1027,9 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(tok, t1.String): return f"String({repr(truncate(tok.content.replace("\n", "\\n")))})"
         if isinstance(tok, t2.Chain): return "Chain"
         if isinstance(tok, t1.BasedString): return f"BasedString({tok.base})"
-        if isinstance(tok, t2.BroadcastOp): return f"BroadcastOp({op_label(tok.op)})"
-        if isinstance(tok, t2.CombinedAssignmentOp): return f"CombinedAssignmentOp({op_label(tok.op)})"
-        if isinstance(tok, t2.OpFn): return f"OpFn({op_label(tok.op)})"
+        if isinstance(tok, t2.BroadcastOp): return f"BroadcastOp({_op_label(tok.op)})"
+        if isinstance(tok, t2.CombinedAssignmentOp): return f"CombinedAssignmentOp({_op_label(tok.op)})"
+        if isinstance(tok, t2.OpFn): return f"OpFn({_op_label(tok.op)})"
         return type(tok).__name__
 
     def text_label(text: str) -> str:
@@ -1010,16 +1038,16 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
     def item_label(item: TreeItem) -> str:
         if isinstance(item, AST): return ast_label(item)
         if isinstance(item, t1.Token): return token_label(item)
-        if isinstance(item, t2.Operator): return f"Operator({op_label(item)})"
+        if isinstance(item, t2.Operator): return f"Operator({_op_label(item)})"
         if isinstance(item, str): return text_label(item)
         raise ValueError(f'INTERNAL ERROR: reached unreachable state. {item=}, {type(item)=}')
 
     def ast_label(node: AST) -> str:
         if isinstance(node, Atom): return token_label(node.item)
-        if isinstance(node, BinOp): return f"BinOp({op_label(node.op)})"
-        if isinstance(node, Prefix): return f"Prefix({op_label(node.op)})"
-        if isinstance(node, Postfix): return f"Postfix({op_label(node.op)})"
-        if isinstance(node, Flat): return f"Flat({op_label(node.op)})"
+        if isinstance(node, BinOp): return f"BinOp({_op_label(node.op)})"
+        if isinstance(node, Prefix): return f"Prefix({_op_label(node.op)})"
+        if isinstance(node, Postfix): return f"Postfix({_op_label(node.op)})"
+        if isinstance(node, Flat): return f"Flat({_op_label(node.op)})"
         if isinstance(node, Ambiguous): return f"Ambiguous({len(node.candidates)})"
         if isinstance(node, Block): return f"Block(kind='{node.kind}'{f", base={node.base}" if node.base else ""})"
         if isinstance(node, IString): return "IString"
