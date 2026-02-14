@@ -960,7 +960,7 @@ class Report:
         raise ReportException(self)
     
     def warn(self) -> None:
-        sys.stderr.write(str(self) + "\n")
+        sys.stderr.write(str(self) + "\n\n")
 
 @dataclass
 class Error(Report):

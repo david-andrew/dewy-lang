@@ -538,8 +538,10 @@ def reduce_loop(chain: ProtoAST, ctx: Context) -> AST:
         ])
         all_calls = unambiguous_src_template.format(replacement=' <| ', left_bracket='', right_bracket='')
         all_multiplies = unambiguous_src_template.format(replacement=' * ', left_bracket='', right_bracket='')
-        all_indexes = unambiguous_src_template.format(replacement='', left_bracket='[', right_bracket=']')
-        all_indexes = ''.join(all_indexes.split(']', 1)) + ']'  # mildly hacky, move first `]` (which is unmatched) to the end so it matches with the unmatched `[`
+        # all_indexes = unambiguous_src_template.format(replacement='', left_bracket='[', right_bracket=']')
+        # all_indexes = ''.join(all_indexes.split(']', 1)) + ']'  # mildly hacky, move first `]` (which is unmatched) to the end so it matches with the unmatched `[`
+        all_parens = '('*unambiguous_src_template.count('{left_bracket}') + unambiguous_src_template.format(replacement='', left_bracket=')', right_bracket='')
+        all_parens = (''.join(all_parens.split(')', 1)))[1:]  # strip off the innermost parens since it doesn't group a juxtapose expression
         report = Warning(
             srcfile=ctx.srcfile,
             title="Highly ambiguous expressions",
@@ -563,8 +565,8 @@ def reduce_loop(chain: ProtoAST, ctx: Context) -> AST:
                   # e.g. replace all juxtaposes with explicit multiply operators
                   {all_multiplies}
                   
-                  # e.g. replace all juxtaposes with explicit index operators
-                  {all_indexes}
+                  # e.g. explicitly add parentheses
+                  {all_parens}
                   
                   # or whatever combination is appropriate for your case
             """),
