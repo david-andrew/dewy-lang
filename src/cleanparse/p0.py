@@ -552,10 +552,6 @@ def reduce_loop(chain: ProtoAST, ctx: Context) -> AST:
                     for op in qjuxs
                 ]
             ],
-            # TODO: the all indexes hint might actually not be correct, 
-            # e.g. if the user had an expression like a[b][c][d], this would just convert it to a[[b]][[c]][[d]], 
-            # which wouldn't fix the exponential blowup, and would also be incorrect. consider supporting `$index(a b) |> @$index(c) |> $index(d)` or something
-            # actually, need to look up. is `<|` supposed to work for call or index? tbd, otherwise a operator for index might be nice to include
             hint=dedent(f"""\
                 disambiguation may be slow due to the large number of possible cases
                 recommend manual disambiguation by adding explicit operators:
@@ -647,11 +643,6 @@ def shunt_pass(chains: list[ProtoAST], ctx: Context) -> None:
 ShiftDir: TypeAlias = Literal[-1, 0, 1]
 NonZeroShiftDir: TypeAlias = Literal[-1, 1]
 
-# TODO: replace candidate_operator_idxs with a more explicit pairing of each operator and a ShiftMeta
-#       otherwise we'd need to do some weird list of list of candidate operator idxs to handle when ambiguous cases come up
-#       when ambiguous cases can just include the shift direction in the ShiftMeta
-#       Alternatively, we could just not return candidate_operator_idxs, and just infer it from where shift_dirs != 0, and add the shift dir to that index
-#       candidate_operator_idxs = [i+shift_dir for i, shift_dir in enumerate(shift_dirs) if shift_dir != 0]
 @dataclass
 class ShiftMeta:
     superior_op: t2.Operator
