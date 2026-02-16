@@ -479,6 +479,7 @@ cursed units / unit examples:
 - Cursed Units 2: Curseder Units: https://www.youtube.com/watch?v=Zg7xe8MkJHs
 - Cursed Units 3: The British Empire Strikes Back: https://www.youtube.com/watch?v=PWbfVcDcfFw
 - Oilfield Units: a Measurement System so Cursed it made me Change Career: https://www.youtube.com/watch?v=sdWEGzWFcCc
+- decibels: https://www.youtube.com/watch?v=U6IKXUUydas
 
 ## No need for zip function
 
