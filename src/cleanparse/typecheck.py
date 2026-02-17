@@ -8,6 +8,18 @@ from . import t2
 from . import p0
 
 from .reporting import SrcFile, ReportException, Error, Pointer, Span
+from dataclasses import dataclass
+from typing import TypeAlias
+
+
+# TODO type expressions
+Type: TypeAlias = str | TypeAnd | TypeOr | TypeNot | TypeParam | TKeyOf | TValueOf | TFieldOf | TContainer
+
+
+@dataclass
+class AST:
+    type: Type  # All ASTs have a type. typechecking involves propogating the type upward through expressions
+
 
 def test():
     from ..myargparse import ArgumentParser
