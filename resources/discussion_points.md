@@ -1131,6 +1131,8 @@ let myvar: type(base=vector params=(int length=5)) = [1 2 3 4 5]
 - structural/complex constructed type "molecules" like in typescript (e.g. unions, intersections, structs, etc.), that don't necessarily fit into the type graph.
   TODO: more discussion, e.g. where do parametric types go? probably in the graph
 
+- slide+discussion showing confusion around naming of top vs dynamic types: https://www.youtube.com/live/kQjrcSMYpaA?si=ywEoHGv7nHGTWG4v&t=2149
+
 ## names for different declaration types
 
 There are three explicit declarations types (and one implicit type)
