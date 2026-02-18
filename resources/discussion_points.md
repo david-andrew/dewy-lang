@@ -2098,6 +2098,8 @@ in general memory safety is a given but other areas not handled by rust are impo
 - https://owasp.org/www-project-top-ten/
 - https://www.ibm.com/reports/threat-intelligence
 - jonathan blow on mitigating buffer overflow risks: https://www.youtube.com/watch?v=EJRdXxS_jqo
+- on qmail's strong security record: https://blog.acolyer.org/2018/01/17/some-thoughts-on-security-after-ten-years-of-qmail-1-0/
+    - high level idea is reduce amount of trusted code, trade speed for security within trusted code, etc.
 
 TODO: any other logical errors that come up, note them here. Basically we need to treat this the same way airplane crash investigations are handled (Root Cause Analysis / Safety Management System). Collect basically all case studies of known security vulnerabilities, categorize them by their root cause/flavor, and then adjust OS design, and language security features to mitigate them.
 
