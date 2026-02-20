@@ -27,9 +27,6 @@ I think noreturn will be a separate case from bottom
 
 TOP_TYPE: str = 'any'
 BOTTOM_TYPE: str = 'never'  # don't use `never`, as we are separating control flow/effects from actual types
-VOID_TYPE: str = 'void'
-# DYNAMIC_TYPE: str = 'untyped' # I think we might not support dynamic types. dynamic means the type is determined at runtime
-INFERRED_TYPE: str = 'untyped'
 _named_types: set[str] = {TOP_TYPE, BOTTOM_TYPE} # void and inferred don't participate in type expressions
 _type_parents: dict[str, set[str]] = defaultdict(set, {BOTTOM_TYPE: [TOP_TYPE]})
 _type_children: dict[str, set[str]] = defaultdict(set, {TOP_TYPE: [BOTTOM_TYPE]})
@@ -88,8 +85,16 @@ class TypeNot:
 
 Primitive: TypeAlias = str   # has to be in the _named_types set
 
+# Special Types that don't participate in type expressions or the type hierarchy
+VoidType: TypeAlias = Literal['void']
+InferredType: TypeAlias = Literal['untyped']
+NoReturnType: TypeAlias = Literal['noreturn']
+VOID_TYPE: VoidType = 'void'
+INFERRED_TYPE: InferredType = 'untyped'
+NORETURN_TYPE: NoReturnType = 'noreturn'
+
 TypeExpr: TypeAlias = Primitive | TypeAnd | TypeOr | TypeNot #| TypeParam | TKeyOf | TValueOf | TFieldOf | TContainer
-Type: TypeAlias = TypeExpr | Literal['void', 'untyped']
+Type: TypeAlias = TypeExpr | VoidType | InferredType | NoReturnType
 
 @dataclass
 class AST:
