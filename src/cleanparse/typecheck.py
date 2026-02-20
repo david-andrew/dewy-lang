@@ -44,7 +44,9 @@ def add_type(name: str, parent: str = TOP_TYPE) -> None:
 # insert basic types into the system
 system_types: list[str|tuple[str, str]] = [
     'undefined',
-    'string',
+    # 'unicode_scalar',  # Rune # Char # string<length=1>
+    'grapheme',
+    'string', # array<unicode_scalar> | array<grapheme>
     'bool',
     'number',
     ('real', 'number'),
