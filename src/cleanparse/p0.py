@@ -388,7 +388,7 @@ def validate_rangejux(ast: Flat, ctx: Context) -> NoReturn|None:
 # TODO: make this return a single block AST instead of a list of ASTs...
 # NOTE: while Atom wraps around Tokens, any inner tokens will NOT have any Chains
 #       i.e. parsing process replaces all Chains with whatever AST that chain would produce
-def parse(srcfile: SrcFile) -> list[AST]:
+def parse(srcfile: SrcFile) -> Block:
     """
     simple bottom up iterative shunting-esque algorithm driven by pratt-style binding powers
     
@@ -419,7 +419,7 @@ def parse(srcfile: SrcFile) -> list[AST]:
     chains = t2.postok(srcfile)
     ctx = Context(srcfile=srcfile)
     asts = [parse_chain(chain, ctx) for chain in chains]
-    return asts
+    return Block(loc=Span(asts[0].loc.start, asts[-1].loc.stop), inner=asts, kind='{}', base=None)
 
 # TODO: consider making AST container types for each of the items that recursed into so we aren't shoving ASTs where tokens are expected...
 def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
@@ -1105,7 +1105,7 @@ def test():
     src = path.read_text()
     srcfile = SrcFile(path, src)
     try:
-        asts = parse(srcfile)
+        asts = parse(srcfile).inner
     except ReportException as e:
         print(e.report)
         exit(1)
