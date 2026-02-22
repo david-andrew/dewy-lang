@@ -11,8 +11,8 @@ from collections import defaultdict
 from . import t0
 from . import t1
 from . import t2
-from .reporting import SrcFile, ReportException, Error, Pointer, Span, Warning
-from .utils import ordinalize, concrete_groupby
+from ..reporting import SrcFile, ReportException, Error, Pointer, Span, Warning
+from ..utils import ordinalize, concrete_groupby
 
 import pdb
 
@@ -1096,7 +1096,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
 
 
 def test():
-    from ..myargparse import ArgumentParser
+    from ...myargparse import ArgumentParser
     from pathlib import Path
     parser = ArgumentParser()
     parser.add_argument('path', type=Path, required=True, help='path to file to tokenize')

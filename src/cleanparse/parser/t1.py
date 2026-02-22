@@ -11,9 +11,9 @@ Additionally symbols are separated into operators and identifiers. And identifie
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from itertools import groupby
-from .reporting import Span, SrcFile, Error, Pointer, ReportException
+from ..reporting import Span, SrcFile, Error, Pointer, ReportException
 from . import t0
-from .utils import JumpableIterator
+from ..utils import JumpableIterator
 from typing import Literal, Generator
 
 
@@ -484,7 +484,7 @@ def peek_next_token(tokens:list[t0.Token], ctx:Context, start:int) -> Token | t0
 
 
 def test():
-    from ..myargparse import ArgumentParser
+    from ...myargparse import ArgumentParser
     from .t0 import tokens_to_report # mildly hacky but Token2's duck-type to what this expects
     from pathlib import Path
     parser = ArgumentParser()

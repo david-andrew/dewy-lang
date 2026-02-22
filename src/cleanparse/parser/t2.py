@@ -5,7 +5,7 @@ from textwrap import dedent
 from typing import Callable, Literal, cast, get_args, TypeAlias
 from dataclasses import dataclass, field
 from functools import partial
-from .reporting import SrcFile, ReportException, Span, Error, Pointer, Warning
+from ..reporting import SrcFile, ReportException, Span, Error, Pointer, Warning
 from . import t1
 
 import pdb
@@ -1016,7 +1016,7 @@ def postok_inner(tokens: list[t1.Token], *, ctx: Context) -> None:
 
 
 def test():
-    from ..myargparse import ArgumentParser
+    from ...myargparse import ArgumentParser
     from .t0 import tokens_to_report # mildly hacky but Token2's duck-type to what this expects
     from pathlib import Path
     parser = ArgumentParser()

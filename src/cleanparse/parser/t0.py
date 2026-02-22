@@ -24,8 +24,8 @@ sensitive rules (e.g. different tokens allowed inside strings vs. at the top
 level) in a purely declarative way.
 """
 
-from .reporting import Span, Info, Warning, Error, SrcFile, Pointer, ReportException
-from .utils import truncate, descendants, ordinalize, first_line
+from ..reporting import Span, Info, Warning, Error, SrcFile, Pointer, ReportException
+from ..utils import truncate, descendants, ordinalize, first_line
 from typing import NoReturn, TypeAlias, ClassVar, get_origin, get_args, Union, Protocol, Literal
 from types import UnionType
 from dataclasses import dataclass
@@ -1473,7 +1473,7 @@ def tokens_to_report(tokens: list[Token], srcfile: SrcFile, blacklist: set[type[
     )
 
 def test():
-    from ..myargparse import ArgumentParser
+    from ...myargparse import ArgumentParser
     from pathlib import Path
     parser = ArgumentParser()
     parser.add_argument('path', type=Path, required=True, help='path to file to tokenize')

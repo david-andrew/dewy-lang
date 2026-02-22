@@ -4,10 +4,10 @@ semantic analysis pass 0:
 - ambiguity resolution
 """
 
-from . import t2
-from . import p0
+from ..parser import t2, p0
+from . import hir
 
-from .reporting import SrcFile, ReportException, Error, Pointer, Span
+from ..reporting import SrcFile, ReportException, Error, Pointer, Span
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import TypeAlias, Literal
@@ -130,13 +130,13 @@ class AST:
 #     right: AST
 
 
-def typecheck_and_resolve(srcfile: SrcFile) -> AST:
+def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:
     block = p0.parse(srcfile)
     import pdb; pdb.set_trace()
 
 
 def test():
-    from ..myargparse import ArgumentParser
+    from ...myargparse import ArgumentParser
     from pathlib import Path
     parser = ArgumentParser()
     parser.add_argument('path', type=Path, required=True, help='path to file to tokenize')
