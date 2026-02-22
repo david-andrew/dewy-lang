@@ -20,3 +20,23 @@ Features (i.e. each should probably get an AST node)
 
 perhaps after this phase theres a second typechecking phase making use of all the rich type information built at this phase?
 """
+
+from dataclasses import dataclass
+from ..reporting import Span
+from . import ty
+
+# Type: TypeAlias = ty.TypeExpr
+
+@dataclass
+class AST:
+    span: Span
+    type: ty.Type # All ASTs have a type. typechecking involves propogating the type upward through expressions
+
+
+# BinaryOperator: TypeAlias = Literal['']
+
+# @dataclass
+# class BinOp(AST):
+#     op: BinaryOperator
+#     left: AST
+#     right: AST
