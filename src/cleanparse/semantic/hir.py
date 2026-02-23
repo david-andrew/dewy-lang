@@ -40,3 +40,49 @@ class AST:
 #     op: BinaryOperator
 #     left: AST
 #     right: AST
+
+
+"""
+primary language types to make hir nodes from:
+- undefined
+- void
+- untyped
+- noreturn
+- extern
+- intrinsic
+- new
+- end
+- bool
+- int
+- rational
+- float
+- string
+- istring
+- ellipsis
+
+[type expressions]
+- range<T> start, end, step. can we use generics to make inner elements have the same type?
+- iterator
+- iterator expression
+- function
+- array
+- dict
+- bidict
+- object
+- type block
+- parameterization
+- generic declaration
+- expression sequence...
+- unpack
+- collect
+- flow
+- if
+- loop
+- (match) ... tbd
+- assign (runtime or comptile bool flag)
+- binop
+- prefix op
+- postfix op
+- suppress
+- 
+"""
