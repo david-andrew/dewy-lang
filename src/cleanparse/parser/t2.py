@@ -85,6 +85,8 @@ class QJuxtapose(t1.InedibleToken):
 
     def __post_init__(self):
         # instantiate the options with the span already attached to self
+        if len(self._option_types) <= 1:
+            raise ValueError(f'INTERNAL ERROR: QJuxtapose must have more than one option. got {self._option_types=}')
         self.options = [option_type(self.loc) for option_type in self._option_types]
 
 # concrete operator token types
@@ -385,8 +387,11 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None, *, ctx: C
             option_types.append(IndexJuxtapose)
         if (left_type, MultiplyJuxtapose) not in juxtapose_blacklist and (MultiplyJuxtapose, right_type) not in juxtapose_blacklist:
             option_types.append(MultiplyJuxtapose)
-        if len(option_types) > 0:
+        if len(option_types) > 1:
             return partial(QJuxtapose, _option_types=option_types)
+        if len(option_types) == 1:
+            return option_types[0]
+        
         # no options were present, so no juxtapose will be inserted. But the code can still proceed
         left_src = ctx.srcfile.body[left.loc.start:left.loc.stop]
         right_src = ctx.srcfile.body[right.loc.start:right.loc.stop]
