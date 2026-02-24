@@ -29,9 +29,23 @@ from . import ty
 
 @dataclass
 class AST:
-    span: Span
+    loc: Span
     type: ty.Type # All ASTs have a type. typechecking involves propogating the type upward through expressions
 
+
+@dataclass
+class Identifier(AST):
+    name: str
+
+@dataclass
+class String(AST):
+    content: str
+
+
+@dataclass
+class Call(AST):
+    func: Identifier #|FunctionLiteral
+    args: list[AST] #TODO: named args, partial eval, etc.
 
 # BinaryOperator: TypeAlias = Literal['']
 
