@@ -92,6 +92,12 @@ class TypeOr:
 class TypeNot:
     type: TypeExpr
 
+
+@dataclass
+class TypeFunc:
+    args: list[TypeExpr]
+    ret: TypeExpr
+
 Primitive: TypeAlias = str   # has to be in the _named_types set
 
 # Special Types that don't participate in type expressions or the type hierarchy
