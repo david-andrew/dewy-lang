@@ -445,7 +445,7 @@ def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
             ast = parse_keyword_expr(t, ctx)
         elif isinstance(t, t2.Flow):
             ast = parse_flow(t, ctx)
-        elif isinstance(t, (t1.Real, t1.String, t1.BasedString, t1.Identifier, t1.Semicolon, t1.Metatag, t1.Integer, t2.OpFn)):
+        elif isinstance(t, (t1.Real, t1.String, t1.BasedString, t1.Identifier, t1.Semicolon, t1.Metatag, t1.Bool, t1.Integer, t2.OpFn)):
             ast = Atom(t.loc, t)
         items.append(ast)
 
@@ -1009,6 +1009,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(tok, t1.Keyword): return f"Keyword({tok.name})"
         if isinstance(tok, t1.Metatag): return f"Hashtag({tok.name})"
         if isinstance(tok, t1.Integer): return f"Integer({tok.value.src})"
+        if isinstance(tok, t1.Bool): return f"Bool({tok.value})"
         if isinstance(tok, t1.Real):
             frac = f".{tok.fraction.src}" if tok.fraction is not None else ""
             exp = ""

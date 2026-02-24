@@ -22,6 +22,7 @@ perhaps after this phase theres a second typechecking phase making use of all th
 """
 
 from dataclasses import dataclass
+from typing import Literal
 from ..reporting import Span
 from . import ty
 
@@ -32,6 +33,8 @@ class AST:
     loc: Span
     type: ty.Type # All ASTs have a type. typechecking involves propogating the type upward through expressions
 
+@dataclass
+class Void(AST): ...
 
 @dataclass
 class Identifier(AST):
@@ -46,6 +49,19 @@ class String(AST):
 class Call(AST):
     func: Identifier #|FunctionLiteral
     args: list[AST] #TODO: named args, partial eval, etc.
+
+@dataclass
+class Block(AST):
+    items: list[AST]
+    scoped: bool
+
+
+@dataclass
+class Range(AST):
+    bounds: Literal['[]', '[)', '(]', '()'] | None  #none means the range hasn't been wrapped, so bounds are assumed []
+    step_pair: tuple[AST, AST] | None
+    left: AST | None
+    right: AST | None
 
 # BinaryOperator: TypeAlias = Literal['']
 

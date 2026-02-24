@@ -29,6 +29,11 @@ symbolic_identifiers: set[str] = {
     '..', '...', '∞', '∅',  # technically `;` is also a symbolic identifier, but we give it it's own token class for convenience
 }
 
+# special case-insensitive identifiers that get their own container 
+bool_identifiers: set[str] = {
+    'true', 'false',
+}
+
 # tokenized as identifiers, but are treated as operators (rather than identifiers)
 word_operators: set[str] = {
     'and', 'or', 'xor', 'nand', 'nor', 'xnor', 'not',
@@ -333,7 +338,7 @@ class Identifier(Token):
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Identifier]|None:
         token = tokens[start]
-        if isinstance(token, t0.Identifier) and token.src.casefold() not in keywords and token.src.casefold() not in word_operators:
+        if isinstance(token, t0.Identifier) and token.src.casefold() not in keywords and token.src.casefold() not in word_operators and token.src.casefold() not in bool_identifiers:
             return 1, Identifier(token.loc, token.src)
         elif isinstance(token, t0.Symbol) and token.src in symbolic_identifiers:
             return 1, Identifier(token.loc, token.src)
@@ -391,6 +396,16 @@ class Metatag(Token):
         return None
 
 @dataclass
+class Bool(Token):
+    value: bool
+    @staticmethod
+    def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Bool]|None:
+        token = tokens[start]
+        if isinstance(token, t0.Identifier) and token.src.casefold() in bool_identifiers:
+            return 1, Bool(token.loc, token.src.casefold() == 'true')
+        return None
+
+@dataclass
 class Integer(Token):
     value: t0.Number
     @staticmethod
@@ -417,6 +432,7 @@ top_level_tokens: list[type[Token]] = [
       # ParametricEscape,  # not included in top level tokens because created by String.eat
     Keyword,
     Metatag,
+    Bool,
     Integer,
     Real,
     Block,

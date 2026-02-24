@@ -188,6 +188,7 @@ atom_tokens: set[type[t1.Token]] = {
     t1.BasedString,
     t1.Identifier,
     t1.Metatag,
+    t1.Bool,
     t1.Integer,
     t1.Semicolon,
     OpFn,
@@ -273,26 +274,30 @@ juxtapose_blacklist: set[tuple[type[t1.Token], type[t1.Token]]] = {
     # things that CANNOT be multiplied via juxtaposition
     # include left and right cases since multiply is commutative (and thus would be blacklisted from either side)
     (t1.String, MultiplyJuxtapose),
-    (MultiplyJuxtapose, t1.String),
     (t1.IString, MultiplyJuxtapose),
-    (MultiplyJuxtapose, t1.IString),
     (t1.BasedString, MultiplyJuxtapose),
-    (MultiplyJuxtapose, t1.BasedString),
+    (t1.Bool, MultiplyJuxtapose),
     (t1.Integer, MultiplyJuxtapose),
-    (MultiplyJuxtapose, t1.Integer),
     (t1.Real, MultiplyJuxtapose),
-    (MultiplyJuxtapose, t1.Real),
     (OpFn, MultiplyJuxtapose),
+    (MultiplyJuxtapose, t1.String),
+    (MultiplyJuxtapose, t1.IString),
+    (MultiplyJuxtapose, t1.BasedString),
+    (MultiplyJuxtapose, t1.Bool),
+    (MultiplyJuxtapose, t1.Integer),
+    (MultiplyJuxtapose, t1.Real),
     (MultiplyJuxtapose, OpFn),
 
     # things that CANNOT be called
     (t1.String, CallJuxtapose),
     (t1.IString, CallJuxtapose),
     (t1.BasedString, CallJuxtapose),
+    (t1.Bool, CallJuxtapose),
     (t1.Integer, CallJuxtapose),
     (t1.Real, CallJuxtapose),
 
     # things that CANNOT be indexed
+    (t1.Bool, IndexJuxtapose),
     (t1.Integer, IndexJuxtapose),
     (t1.Real, IndexJuxtapose),
     (OpFn, IndexJuxtapose),
@@ -300,7 +305,8 @@ juxtapose_blacklist: set[tuple[type[t1.Token], type[t1.Token]]] = {
     (IndexJuxtapose, t1.String),
     (IndexJuxtapose, t1.IString),
     (IndexJuxtapose, t1.BasedString),
-    (IndexJuxtapose, t1.Integer),
+    (IndexJuxtapose, t1.Bool),
+    (IndexJuxtapose, t1.Integer),  # needs to be boxed e.g. something[1] not (something)1
     (IndexJuxtapose, t1.Real),
     (IndexJuxtapose, OpFn),
 }
@@ -578,6 +584,7 @@ def _token_summary(token: t1.Token) -> str:
     if isinstance(token, t1.Semicolon): return "semicolon ';'"
     if isinstance(token, t1.String): return "string literal"
     if isinstance(token, t1.IString): return "template string"
+    if isinstance(token, t1.Bool): return f"boolean literal"
     if isinstance(token, t1.Integer): return "integer literal"
     if isinstance(token, t1.Real): return "real literal"
     if isinstance(token, t1.Block): return f"block {token.kind!r}"
