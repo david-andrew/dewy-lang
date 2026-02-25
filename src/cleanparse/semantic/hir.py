@@ -41,6 +41,15 @@ class Identifier(AST):
     name: str
 
 @dataclass
+class Bool(AST):
+    value: bool
+
+# @dataclass
+# class Int(AST):
+#     # prefix: 
+#     value: int
+
+@dataclass
 class String(AST):
     content: str
 
@@ -57,23 +66,22 @@ class Block(AST):
 
 
 @dataclass
+class TypeBlock(AST):
+    items: list[AST]
+
+
+@dataclass
 class Range(AST):
     bounds: Literal['[]', '[)', '(]', '()'] | None  #none means the range hasn't been wrapped, so bounds are assumed []
     step_pair: tuple[AST, AST] | None
     left: AST | None
     right: AST | None
 
-# BinaryOperator: TypeAlias = Literal['']
-
-# @dataclass
-# class BinOp(AST):
-#     op: BinaryOperator
-#     left: AST
-#     right: AST
 
 
 """
 primary language types to make hir nodes from:
+[named literals]
 - undefined
 - void
 - untyped
@@ -82,6 +90,8 @@ primary language types to make hir nodes from:
 - intrinsic
 - new
 - end
+
+[primitives]
 - bool
 - int
 - rational
@@ -109,10 +119,10 @@ primary language types to make hir nodes from:
 - if
 - loop
 - (match) ... tbd
-- assign (runtime or comptile bool flag)
+- assignment (`=` or `::` runtime or comptile bool flag)
+- declare (`let` or `const`, `:=`)
 - binop
 - prefix op
 - postfix op
 - suppress
-- 
 """
