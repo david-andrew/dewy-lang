@@ -133,25 +133,12 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
             case t2.QJuxtapose():
                 pdb.set_trace()
             case t2.CallJuxtapose():
-                if not isinstance(left.type, ty.TypeFunc):
-                    # TODO: full user error report
-                    # might have some early errors for things that are function-like, but different instances.
-                    # also what about partial eval
-                    pdb.set_trace() 
-                    raise ValueError(f'USER ERROR: Expected a function, got {left.type} for call expression {binop}')
-                # TODO: check the arguments of the function to make sure it matches the calling arguments
-                
-                if isinstance(right, hir.Block): 
-                    args = right.items
-                else:
-                    args = [right]
-
-                #TODO:perhaps we can make calls even more uniform here... e.g. dealing with named vs positional vs unpack vs collect vs etc. args
-                return hir.Call(Span(left.loc.start, right.loc.stop), left.type.ret, left, args)
-                pdb.set_trace()
+                # if isinstance(left, hir.AtHandle): return typecheck_partial_eval(left, right)
+                return typecheck_function_call(left, right)
             case t2.IndexJuxtapose():
                 pdb.set_trace()
             case t2.MultiplyJuxtapose():
+                # TODO: need table for binop compatibility
                 pdb.set_trace()
             case _:
                 pdb.set_trace()
@@ -164,11 +151,32 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
     pdb.set_trace()
 
 
-# def typecheck_function_call(left: hir.AST, right: hir.AST) -> hir.Call:
-#     pdb.set_trace()
+def typecheck_function_call(left: hir.AST, right: hir.AST) -> hir.Call:
+    if not isinstance(left.type, ty.TypeFunc):
+        # TODO: full user error report
+        # might have some early errors for things that are function-like, but different instances.
+        pdb.set_trace()
+        raise ValueError(f'USER ERROR: Expected a function, got {left.type} for call expression {left=}, {right=}')
+    
+    
+    if isinstance(right, hir.Block): 
+        args = right.items
+    else:
+        args = [right]
 
-# def typecheck_partial_eval(left: hir.AST, right: hir.AST) -> hir.Partial:
-#     pdb.set_trace()
+    # verify the arguments given match that of the signature
+    # TODO: more full type signature handling (named args, etc.)
+    for call_arg, sig_arg in zip(args, left.type.args):
+        if not ty.satisfies(call_arg.type, sig_arg):
+            # TODO: full user error report
+            pdb.set_trace()
+            raise ValueError(f'USER ERROR: Argument {call_arg} does not match signature argument {sig_arg} for call expression {left=}, {right=}')
+
+    return hir.Call(Span(left.loc.start, right.loc.stop), left.type.ret, left, args)
+
+
+def typecheck_partial_eval(left: hir.AST, right: hir.AST) -> hir.Partial:
+    pdb.set_trace()
 
 def tcr_identifier(id: t1.Identifier, *, ctx: Context) -> hir.AST:
     if id.name in ctx.declarations:

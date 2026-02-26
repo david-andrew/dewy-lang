@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import TypeAlias, Literal
 
+import pdb
+
 """
 Candidate type names:
 Top: 
@@ -108,8 +110,42 @@ VOID_TYPE: VoidType = 'void'
 INFERRED_TYPE: InferredType = 'untyped'
 NORETURN_TYPE: NoReturnType = 'noreturn'
 
-TypeExpr: TypeAlias = Primitive | TypeAnd | TypeOr | TypeNot #| TypeParam | TKeyOf | TValueOf | TFieldOf | TContainer
+TypeExpr: TypeAlias = Primitive | TypeAnd | TypeOr | TypeNot | TypeFunc #| TypeParam | TKeyOf | TValueOf | TFieldOf | TContainer
 Type: TypeAlias = TypeExpr | VoidType | InferredType | NoReturnType # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
 # TODO: type algebra/operations functions
+
+def is_subtype(t: Primitive, target: Primitive) -> bool:
+    """Check if `t` is a subtype of `target`"""
+    if t == target: return True
+    frontier = [t]
+    while frontier:
+        current = frontier.pop()
+        if current == target: return True
+        frontier.extend(_type_parents[current])
+    return False
+    
+
+def satisfies(t: TypeExpr, target: TypeExpr) -> bool:
+    """Check if `t` satisfies the `target` type expression"""
+    # TODO: t at the moment basically has to be primitive. but can't certain type expressions of t match certain targets?
+    if not isinstance(t, Primitive): print(f'DEBUG WARNING: in `satisfies`, encountered `t` that is not a primitive type. {t=}')
+
+    if isinstance(target, Primitive):
+        if not isinstance(t, Primitive): return False
+        return is_subtype(t, target)
+    if isinstance(target, TypeOr):
+        return any(satisfies(t, item) for item in target.items)
+    if isinstance(target, TypeAnd):
+        return all(satisfies(t, item) for item in target.items)
+    if isinstance(target, TypeNot):
+        return not satisfies(t, target.type)
+    if isinstance(target, TypeFunc):
+        if isinstance(t, TypeFunc):
+            return all(satisfies(t_arg, target_arg) for t_arg, target_arg in zip(t.args, target.args)) and satisfies(t.ret, target.ret)
+        return False
+
+    pdb.set_trace()
+    # should be unreachable, but indicates unhandled case
+    return False

@@ -54,10 +54,17 @@ class String(AST):
     content: str
 
 
+# TODO:perhaps we can make the call dataclass even more uniform here... 
+# e.g. dealing with named vs positional vs unpack vs collect vs etc. args
+# TODO: also `func` might not be an identifier... might be a func literal, opfn etc.
 @dataclass
 class Call(AST):
     func: Identifier #|FunctionLiteral
     args: list[AST] #TODO: named args, partial eval, etc.
+
+@dataclass
+class Partial(AST):
+    ... # TODO
 
 @dataclass
 class Block(AST):
