@@ -138,12 +138,12 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.flat,  [',']),
     (Associativity.fail, [t2.RangeJuxtapose]),  # jux-range 1..2..3
     (Associativity.fail, ['in']),    # A in B
-    (Associativity.left, ['=?', '>?', '<?', '>=?', '<=?', 'is?', 'isnt?', 'in?', '@?']),
+    (Associativity.left, ['=?', '>?', '<?', '>=?', '<=?', 'is?', 'has?', 'of?', 'isnt?', 'in?', '@?']),
     (Associativity.left, ['and', 'nand', '&']),
     (Associativity.left, ['xor', 'xnor']),
     (Associativity.left, ['or', 'nor', '|']),
     (Associativity.left,  ['as', 'transmute']),  # A as B as C as D
-    (Associativity.fail, ['of']),
+    (Associativity.fail, ['of', 'has']), # T of SomeType. T has SomeTrait. no `is` since not really a coherent operation on types
     (Associativity.fail, [':']),    # A:B:C
     (Associativity.left, [':>']),   # A:>B:>C
     (Associativity.right,  ['=>']), # () => () => () => 42

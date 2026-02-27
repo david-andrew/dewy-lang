@@ -4182,7 +4182,7 @@ So it defintiely makes sense we would compiler check property when the value was
 
 
 
-## Refinement types
+## Refinement types / subtyping
 Bascially what is the concrete syntax we want to use to restrict values or indicate stuff about some type? I'm thinking perhaps something like this:
 ```
 Positive = int & < x=>x>?0 >
@@ -4266,3 +4266,66 @@ greaterthan3 = @(>)(... 3)
 but because there is obviously a `...` this shouldn't+couldn't be called
 
 Additionally, consider if using `...` as an operand might also implicitly make it into a function
+
+
+
+
+
+
+## words for subtyping vs having traits [`T of SomeType`, `T has SomeTrait`, `x is? SomeType`, `x isnt? SomeType`, `t has? SomeTrait`, `t of? SomeType`]
+current is 
+```dewy
+# declaring a type with some properties (typically in a generic context)
+T of SomeType
+T has SomeTrait
+
+# checking for certain constraints on a given instance
+x is? SomeType
+x isnt? SomeType
+t has? SomeTrait
+t of? SomeType
+``` 
+
+can `is?` be called on types? ostensibly they would only pass if it was `t is? type`
+can `has?` be called on instances? e.g. `int has? PartialOrder` is true, but would `5 has? PartialOrder` be coherent?
+can `of?` be use on an instance? doesn't seem coherent. `x of? SomeType`... probably not
+
+
+Pretty good for single things, but what about if we want to do multiple traits or multiple parents, or both?
+
+```dewy
+T of (Type1 Type2 Type3 ...)
+T has (Trait1 Trait2 Trait3 ...)
+
+# probably also allow the same effect via type expressions
+T of Type1 and Type2 and Type3
+T has Trait1 and Trait2 and Trait3 
+
+# what about something that is in the type tree and has traits?
+(T of Type1) and (T has Trait1)
+(T of Type1 T has Trait1)
+some_fn = <T of type1 T has trait1>(x:T) => ...
+
+#what if we allow combining the two operators as a single expression
+some_fn = <T of type1 has trait1>
+```
+
+
+
+does supporting `T has Trait1 and Trait2 and Trait3` mean that we can use traits directly as type annotations? probably.
+I think the difference between Traits and Types as they are shown here is basically just that Types would exist in the nominal type tree
+while traits would be more defined by structure
+
+```
+# todo, how do you add new types into the type tree?
+Type1: type<Parent>
+
+Trait1 = <[
+    some_method:< ():>bool >
+]>
+
+
+x: Type1
+y: Trait1
+x: Type1 & Trait1
+```
