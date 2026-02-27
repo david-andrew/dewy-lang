@@ -17,6 +17,10 @@ Bottom:
 I think noreturn will be a separate case from bottom
 """
 
+# TODO: probably convert most of this into a class so that you just make a fresh instance when type checking a program
+# rather than assuming that we will only type-check a single program
+
+
 TOP_TYPE: str = 'any'
 BOTTOM_TYPE: str = 'never'  # don't use `never`, as we are separating control flow/effects from actual types
 _named_types: set[str] = {TOP_TYPE, BOTTOM_TYPE} # void and inferred don't participate in type expressions
@@ -149,3 +153,43 @@ def satisfies(t: TypeExpr, target: TypeExpr) -> bool:
     pdb.set_trace()
     # should be unreachable, but indicates unhandled case
     return False
+
+# TODO: come up with canonical names for each operator (e.g. division/mod)
+system_binops: list[tuple[str, TypeExpr, TypeExpr]] = [
+    ('__add__', 'number', 'number'),      #TODO: type here should be anything that is ring or group or ...
+    ('__sub__', 'number', 'number'),
+    ('__mul__', 'number', 'number'),
+    ('__idiv__', 'number', 'number'),
+    ('__mod__', 'number', 'number'),
+    ('__tdiv__', 'number', 'number'),
+    ('__pow__', 'number', 'number'),
+   
+    # Don't worry about these for now...    
+    # ('__lshift__', 'int', 'int'),
+    # ('__rshift__', 'int', 'int'),
+    # ('__lrotate__', 'int', 'int'),
+    # ('__rrotate__', 'int', 'int'),
+    
+    # ('__eq__', 'any', 'any'),
+    # ('__neq__', 'any', 'any'),
+    # # ('__gt__', 'comparable', 'comparable'),   #TODO: type here is anything that is partial orderable... but also have to be comparable to its own type...
+    # # ('__lt__', 'comparable', 'comparable'),   #      basically what would our notation for traits on generic types be?   <T>   T<traits=comparable>
+    # # ('__gte__', 'comparable', 'comparable'),
+    # # ('__lte__', 'comparable', 'comparable'),   __gt__ = <T has PartialOrder>(left:T right:T):>bool => ...
+
+    # ('__is__', 'any', 'type'),
+    # ('__isnt__', 'any', 'type'),
+
+
+    # TODO: what about iterators  e.g. `x in X and y in Y`
+    ('__and__', 'bool', 'bool'),
+    ('__or__', 'bool', 'bool'),
+    ('__nand__', 'bool', 'bool'),
+    ('__nor__', 'bool', 'bool'),
+    ('__xor__', 'bool', 'bool'),
+    ('__xnor__', 'bool', 'bool'),
+]
+
+
+# system_prefixops: list[tuple[str, TypeExpr]] = []
+# system_postfixops: list[tuple[str, TypeExpr]] = []
