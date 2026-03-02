@@ -67,7 +67,7 @@ system_types: list[str|tuple[str, str]] = [
     ('int64', 'int'),
 
     # tbd string stuff
-    'char',     # unicode scalar # rune # char # string<length=1>
+    'uscalar',     # char # unicode scalar # rune # char # string<length=1>
     'grapheme', 
     'string',   # array<unicode_scalar> | array<grapheme>
     
