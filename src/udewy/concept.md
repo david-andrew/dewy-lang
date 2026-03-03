@@ -90,17 +90,22 @@ Restrictions:
 - other operators: `|>`, `*`, `//`, `%`, `+`, `-`, `.`, `,`, `=?`, `not=?`, `>?`, `<?`, `>=?`, `<=?`, `and`, `or`, `not`
 - all expressions must be fully parenthesized to indicate precedence. (tbd) consider allowing skipping parenthesis, and things are just parsed from left to right regardless (note that it allows programs to deviate in behavior if we include multiple operators of different precedence in the same expression). 
 - semicolons are probably mandatory for ending expressions
+- (tbd) commas are mandatory for separating arguments in functions. also array literals
 - strict flow syntax `if (cond) {} else {}`, `if (cond) {} else if (cond) {} else {}` etc.
-- data types:
+- data types (everything is an integer under the hood!):
     - `string` (no interpolation)
     - `int64`
     - `array<int64>`
     - (maybe) basic structs with named members...
 - all variables are declared with `let name = ...` pattern. no destructuring. no using variables immediately without declaring them first. declarations must have an initial value
 - no typing? or super minimal typing mandatory in all relevant places. no type checking. maybe also no type unions (e.g. something can't be int|undefined?.. but that would be pretty hard to go without.)
+    - require type annotations in function signatures (and return type), but ignore them! they can help with simplifying the parser
 - all fn arguments are position only
 - ranges don't support step size. also require bounds parenthesis/brackets
 - no express feature. must use return.
+- functions may only be declared at the top level
+- probably no ranges `[a..b)`
+
 
 Some example programs:
 ```udewy
@@ -111,14 +116,18 @@ if (x =? 1) {
 ```
 
 ```udewy
-loop (i in [0..100)) {
+let i:int = 0
+loop (i <? 100) {
     if ((i % 15) =? 0) {
-        ('FizzBuzz' |> printl);
+        printl("FizzBuzz");
     } else {
         if ((i % 3) =? 0) {
-            ('Fizz' |> printl);
+            printl("Fizz");
+        } else if ((i % 5) =? 0) {
+            printl("Buzz")
         } else {
-            (i |> printl);
+            let s:int = tostr(i);
+            printl(s);
         }
     }
 }
@@ -127,23 +136,78 @@ loop (i in [0..100)) {
 
 ```udewy
 if ((x >? 5) and (x <? 10)) {
-    ("x is in range" |> printl);
+    printl("x is in range");
 }
 ```
 
 
 ```udewy
-let fib = (n: int) => {
+let fib = (n:int):>int => {
     if (n < 2) {
         return n;
     } else {
-        return (((n - 1) |> fib) + ((n - 2) |> fib));
+        return ((fib(n - 1)) + (fib(n - 2)));
     }
 };
-((10 |> fib) |> printl);
-
+printl(fib(10));
 ```
 
+
+```udewy
+# 1. Root level function (pointer stored in 'is_even')
+let is_even = (n:int):>bool => {
+    # 3. Boolean operators return 0 or 1
+    return ((n % 2) =? 0);
+};
+
+let main = ():>void => {
+    # 1. Scoping: 'result' is local to main
+    let result:bool = false; 
+    
+    # 2. Function pointer usage
+    result = is_even(42);
+    
+    # 3. If checks for != 0
+    if (result) {
+        printl("It is even");
+    }
+};
+```
+
+
+
+udewy
+```
+# A helper function you would implement in the subset
+# It takes two pointers (int64s) and returns 1 if contents match, 0 otherwise
+let str_eq = (s1:string, s2:string):>bool => {
+    # 1. Check length (first 8 bytes at the pointer)
+    # Note: using a hypothetical `peek` intrinsic or assembly insert for memory access
+    let len1:int = s1.length; #__peek__(s1);
+    let len2:int = s2.length; #__peek__(s2);
+    
+    if (len1 not=? len2) { return false; }
+    
+    # ... loop through bytes comparing them ...
+    return true;
+};
+
+let main = ():>void => {
+    let msg1:string = "status";
+    let msg2:string = "status";
+    
+    # This works because they likely point to the same interned address 
+    # OR they are different addresses and this returns false (pointer inequality)
+    if (msg1 =? msg2) { 
+        printl("Same pointer");
+    }
+
+    # This is the robust way to do it in Stage 2
+    if (str_eq(msg1, msg2)) {
+        printl("Same content");
+    }
+};
+```
 
 ## Stage 3: udewy -> full dewy compiler
 ...

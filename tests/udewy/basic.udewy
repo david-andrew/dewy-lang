@@ -1,0 +1,29 @@
+# A helper function you would implement in the subset
+# It takes two pointers (int64s) and returns 1 if contents match, 0 otherwise
+let str_eq = (s1:string, s2:string):>bool => {
+    # 1. Check length (first 8 bytes at the pointer)
+    # Note: using a hypothetical `peek` intrinsic or assembly insert for memory access
+    let len1:int = s1.length; #__peek__(s1);
+    let len2:int = s2.length; #__peek__(s2);
+    
+    if (len1 not=? len2) { return false; }
+    
+    # ... loop through bytes comparing them ...
+    return true;
+};
+
+let main = ():>void => {
+    let msg1:string = "status";
+    let msg2:string = "status";
+    
+    # This works because they likely point to the same interned address 
+    # OR they are different addresses and this returns false (pointer inequality)
+    if (msg1 =? msg2) { 
+        printl("Same pointer");
+    }
+
+    # This is the robust way to do it in Stage 2
+    if (str_eq(msg1, msg2)) {
+        printl("Same content");
+    }
+};
