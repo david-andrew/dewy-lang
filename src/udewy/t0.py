@@ -130,6 +130,7 @@ def tokenize(src:str)->list[PackedToken]:
         # running sanity check(s) for prototype tokens that shouldn't be in the final output
         # check here so that we can maintain a single pass tokenizer
         if len(toks) > 1 and (kindof(toks[-2]) == _TK_COLON or kindof(toks[-2]) == _TK_FN_COLON):
+            pdb.set_trace()
             raise SyntaxError(f"colon must be followed by a type annotation at {i}: {src[i]!r}")
         
         # current character
@@ -164,7 +165,7 @@ def tokenize(src:str)->list[PackedToken]:
             elif str_left_eq("not", text):      toks.append(pack(NO_VALUE, start, TK_NOT))
             elif str_left_eq("true", text):     toks.append(pack(TRUE_VALUE, start, TK_NUMBER))
             elif str_left_eq("false", text):    toks.append(pack(FALSE_VALUE, start, TK_NUMBER))
-            elif str_left_eq("void", text):     toks.append(pack(NO_VALUE, start, TK_NUMBER))
+            # elif str_left_eq("void", text):     toks.append(pack(NO_VALUE, start, TK_NUMBER))
             elif str_left_eq("if", text):       toks.append(pack(NO_VALUE, start, TK_IF))
             elif str_left_eq("loop", text):     toks.append(pack(NO_VALUE, start, TK_LOOP))
             elif str_left_eq("else", text):     toks.append(pack(NO_VALUE, start, TK_ELSE))
