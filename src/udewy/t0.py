@@ -25,48 +25,50 @@ PackedToken: TypeAlias = int
 _counter = count(0)
 def auto(): return next(_counter)
 
-TK_EOF:         TokenKind = auto()
-TK_IDENT:       TokenKind = auto()    # (TK_IDENT, length, start)        # basic identifier. used for all identifiers except for function calls and indexes
-TK_IDENT_CALL:  TokenKind = auto()    # (TK_CALL_IDENT, length, start)   # an identifier followed by a paren. e.g. `some_fn(`
-TK_IDENT_INDEX: TokenKind = auto()    # (TK_IDENT_INDEX, length, start)  # an identifier followed by a bracket. e.g. `some_arr[`
-TK_IDENT_DOT:   TokenKind = auto()    # (TK_IDENT_DOT, length, start)    # an identifier followed by a dot. e.g. `some_obj.`
-TK_NUM:         TokenKind = auto()
-TK_STRING:      TokenKind = auto()    # (TK_STRING, length, start)
-TK_LET:         TokenKind = auto()
-TK_IF:          TokenKind = auto()
-TK_LOOP:        TokenKind = auto()
-TK_ELSE:        TokenKind = auto()
-TK_RETURN:      TokenKind = auto()
-TK_BREAK:       TokenKind = auto()
-TK_CONTINUE:    TokenKind = auto()
-TK_PLUS:        TokenKind = auto()
-TK_MINUS:       TokenKind = auto()
-TK_MUL:         TokenKind = auto()
-TK_IDIV:        TokenKind = auto()
-TK_MOD:         TokenKind = auto()
-TK_LPAREN:      TokenKind = auto()
-TK_RPAREN:      TokenKind = auto()
-TK_LBRACE:      TokenKind = auto()
-TK_RBRACE:      TokenKind = auto()
-TK_LBRACKET:    TokenKind = auto()
-TK_RBRACKET:    TokenKind = auto()
-TK_ASSIGN:      TokenKind = auto()
-TK_EQ:          TokenKind = auto()
-TK_NOT_EQ:      TokenKind = auto()
-TK_GT:          TokenKind = auto()
-TK_GT_EQ:       TokenKind = auto()
-TK_LT:          TokenKind = auto()
-TK_LT_EQ:       TokenKind = auto()
-TK_AND:         TokenKind = auto()
-TK_OR:          TokenKind = auto()
-TK_NOT:         TokenKind = auto()
-_TK_COLON:      TokenKind = auto()  # should not appear in the final output 
-_TK_FN_COLON:   TokenKind = auto()  # should not appear in the final output 
-TK_TYPE:        TokenKind = auto()
-TK_FN_TYPE:     TokenKind = auto()
-TK_FN_ARROW:    TokenKind = auto()
-TK_PIPE:        TokenKind = auto() # TBD if included or not. single arg piping
-# TK_SEMICOLON:   TokenKind = auto()  # TODO: perhaps we can remove semicolons?
+TK_EOF:          TokenKind = auto()
+TK_IDENT:        TokenKind = auto()    # (TK_IDENT, length, start)        # basic identifier. used for all identifiers except for function calls and indexes
+TK_IDENT_CALL:   TokenKind = auto()    # (TK_CALL_IDENT, length, start)   # an identifier followed by a paren. e.g. `some_fn(`
+TK_IDENT_INDEX:  TokenKind = auto()    # (TK_IDENT_INDEX, length, start)  # an identifier followed by a bracket. e.g. `some_arr[`
+TK_IDENT_DOT:    TokenKind = auto()    # (TK_IDENT_DOT, length, start)    # an identifier followed by a dot. e.g. `some_obj.`
+TK_STRING:       TokenKind = auto()    # (TK_STRING, length, start)
+TK_NUMBER:       TokenKind = auto()
+TK_LET:          TokenKind = auto()
+TK_IF:           TokenKind = auto()
+TK_LOOP:         TokenKind = auto()
+TK_ELSE:         TokenKind = auto()
+TK_RETURN:       TokenKind = auto()
+TK_BREAK:        TokenKind = auto()
+TK_CONTINUE:     TokenKind = auto()
+TK_PLUS:         TokenKind = auto()
+TK_MINUS:        TokenKind = auto()
+TK_MUL:          TokenKind = auto()
+TK_IDIV:         TokenKind = auto()
+TK_MOD:          TokenKind = auto()
+TK_LEFT_PAREN:   TokenKind = auto()
+TK_RIGHT_PAREN:  TokenKind = auto()
+TK_LEFT_BRACE:   TokenKind = auto()
+TK_RIGHT_BRACE:  TokenKind = auto()
+TK_LEFT_BRACKET: TokenKind = auto()
+TK_RIGHT_BRACKET:TokenKind = auto()
+TK_ASSIGN:       TokenKind = auto()
+TK_EQ:           TokenKind = auto()
+TK_NOT_EQ:       TokenKind = auto()
+TK_GT:           TokenKind = auto()
+TK_GT_EQ:        TokenKind = auto()
+TK_LT:           TokenKind = auto()
+TK_LT_EQ:        TokenKind = auto()
+TK_AND:          TokenKind = auto()
+TK_OR:           TokenKind = auto()
+TK_BIT_NOT:      TokenKind = auto()
+TK_LEFT_SHIFT:   TokenKind = auto()
+TK_RIGHT_SHIFT:  TokenKind = auto()
+TK_NOT:          TokenKind = auto()
+_TK_COLON:       TokenKind = auto()  # should not appear in the final output 
+_TK_FN_COLON:    TokenKind = auto()  # should not appear in the final output 
+TK_TYPE:         TokenKind = auto()
+TK_FN_TYPE:      TokenKind = auto()
+TK_FN_ARROW:     TokenKind = auto()
+TK_PIPE:         TokenKind = auto() # TBD if included or not. single arg piping
 
 # placehold for tokens that don't have a value
 TRUE_VALUE: TokenValue = 1
@@ -158,9 +160,9 @@ def tokenize(src:str)->list[PackedToken]:
             elif str_left_eq("not", text):# and (i >= n or src[i] != '='):  # one special case since `not=?` is checked after
                 toks.append(pack_token(TK_NOT, NO_VALUE, start))
             elif str_left_eq("true", text):
-                toks.append(pack_token(TK_NUM, TRUE_VALUE, start))
+                toks.append(pack_token(TK_NUMBER, TRUE_VALUE, start))
             elif str_left_eq("false", text):
-                toks.append(pack_token(TK_NUM, FALSE_VALUE, start))
+                toks.append(pack_token(TK_NUMBER, FALSE_VALUE, start))
             elif str_left_eq("if", text):
                 toks.append(pack_token(TK_IF, NO_VALUE, start))
             elif str_left_eq("loop", text):
@@ -202,7 +204,7 @@ def tokenize(src:str)->list[PackedToken]:
             while i < n and is_digit(src[i]):
                 val = val * 10 + (ord(src[i]) - 48)
                 i += 1
-            toks.append(pack_token(TK_NUM, val, start))
+            toks.append(pack_token(TK_NUMBER, val, start))
             continue
         
         # string
@@ -267,22 +269,31 @@ def tokenize(src:str)->list[PackedToken]:
             toks.append(pack_token(TK_PIPE, NO_VALUE, i))
             i += 2
             continue
+        if str_left_eq("<<", src[i:]):
+            toks.append(pack_token(TK_LEFT_SHIFT, NO_VALUE, i))
+            i += 2
+            continue
+        if str_left_eq(">>", src[i:]):
+            toks.append(pack_token(TK_RIGHT_SHIFT, NO_VALUE, i))
+            i += 2
+            continue
+        
 
         # single-character tokens
         i += 1
-        if c == "+": toks.append(pack_token(TK_PLUS, NO_VALUE, i)); continue
-        if c == "-": toks.append(pack_token(TK_MINUS, NO_VALUE, i)); continue
-        if c == "*": toks.append(pack_token(TK_MUL, NO_VALUE, i)); continue
-        if c == "%": toks.append(pack_token(TK_MOD, NO_VALUE, i)); continue
-        if c == "(": toks.append(pack_token(TK_LPAREN, NO_VALUE, i)); continue
-        if c == ")": toks.append(pack_token(TK_RPAREN, NO_VALUE, i)); continue
-        if c == "{": toks.append(pack_token(TK_LBRACE, NO_VALUE, i)); continue
-        if c == "}": toks.append(pack_token(TK_RBRACE, NO_VALUE, i)); continue
-        if c == "[": toks.append(pack_token(TK_LBRACKET, NO_VALUE, i)); continue
-        if c == "]": toks.append(pack_token(TK_RBRACKET, NO_VALUE, i)); continue
-        if c == "=": toks.append(pack_token(TK_ASSIGN, NO_VALUE, i)); continue
-        # if c == ";": toks.append(pack_token(TK_SEMICOLON, NO_VALUE, i)); continue   # TODO: seeing if we can go without it
-        if c == ":": toks.append(pack_token(_TK_COLON, NO_VALUE, i)); continue
+        if c == "+": toks.append(pack_token(TK_PLUS, NO_VALUE, i));          continue
+        if c == "-": toks.append(pack_token(TK_MINUS, NO_VALUE, i));         continue
+        if c == "*": toks.append(pack_token(TK_MUL, NO_VALUE, i));           continue
+        if c == "%": toks.append(pack_token(TK_MOD, NO_VALUE, i));           continue
+        if c == "~": toks.append(pack_token(TK_BIT_NOT, NO_VALUE, i));       continue
+        if c == "(": toks.append(pack_token(TK_LEFT_PAREN, NO_VALUE, i));    continue
+        if c == ")": toks.append(pack_token(TK_RIGHT_PAREN, NO_VALUE, i));   continue
+        if c == "{": toks.append(pack_token(TK_LEFT_BRACE, NO_VALUE, i));    continue
+        if c == "}": toks.append(pack_token(TK_RIGHT_BRACE, NO_VALUE, i));   continue
+        if c == "[": toks.append(pack_token(TK_LEFT_BRACKET, NO_VALUE, i));  continue
+        if c == "]": toks.append(pack_token(TK_RIGHT_BRACKET, NO_VALUE, i)); continue
+        if c == "=": toks.append(pack_token(TK_ASSIGN, NO_VALUE, i));        continue
+        if c == ":": toks.append(pack_token(_TK_COLON, NO_VALUE, i));        continue
         i -= 1  # undo the increment above
 
 
@@ -328,7 +339,7 @@ def dump_token(token:PackedToken, src:str):
     elif kind == TK_STRING:
         length, start = value, location
         value = src[start:start+length]
-    elif kind == TK_NUM:
+    elif kind == TK_NUMBER:
         value = value
     else:
         value = None
