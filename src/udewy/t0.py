@@ -25,38 +25,48 @@ PackedToken: TypeAlias = int
 _counter = count(0)
 def auto(): return next(_counter)
 
-TK_EOF:     TokenKind = auto()
-TK_IDENT:   TokenKind = auto()    # (TK_IDENT, length, start)
-TK_NUM:     TokenKind = auto()
-TK_STRING:  TokenKind = auto()    # (TK_STRING, length, start)
-TK_LET:     TokenKind = auto()
-TK_PLUS:    TokenKind = auto()
-TK_MINUS:   TokenKind = auto()
-TK_MUL:     TokenKind = auto()
-TK_IDIV:    TokenKind = auto()
-TK_LPAREN:  TokenKind = auto()
-TK_RPAREN:  TokenKind = auto()
-TK_LBRACE:  TokenKind = auto()
-TK_RBRACE:  TokenKind = auto()
-TK_LBRACKET:TokenKind = auto()
-TK_RBRACKET:TokenKind = auto()
-TK_ASSIGN:  TokenKind = auto()
-TK_EQ:      TokenKind = auto()
-TK_NOT_EQ:  TokenKind = auto()
-TK_GT:      TokenKind = auto()
-TK_GT_EQ:   TokenKind = auto()
-TK_LT:      TokenKind = auto()
-TK_LT_EQ:   TokenKind = auto()
-TK_AND:     TokenKind = auto()
-TK_OR:      TokenKind = auto()
-TK_NOT:     TokenKind = auto()
-TK_COLON:   TokenKind = auto()
-TK_COMMA:   TokenKind = auto()
-TK_DOT:     TokenKind = auto()
-TK_FN_COLON:TokenKind = auto()
-TK_FN_ARROW:TokenKind = auto()
-TK_PIPE:    TokenKind = auto()
-TK_SEMI:    TokenKind = auto()
+TK_EOF:         TokenKind = auto()
+TK_IDENT:       TokenKind = auto()    # (TK_IDENT, length, start)        # basic identifier. used for all identifiers except for function calls and indexes
+TK_IDENT_CALL:  TokenKind = auto()    # (TK_CALL_IDENT, length, start)   # an identifier followed by a paren. e.g. `some_fn(`
+TK_IDENT_INDEX: TokenKind = auto()    # (TK_IDENT_INDEX, length, start)  # an identifier followed by a bracket. e.g. `some_arr[`
+TK_IDENT_DOT:   TokenKind = auto()    # (TK_IDENT_DOT, length, start)    # an identifier followed by a dot. e.g. `some_obj.`
+TK_NUM:         TokenKind = auto()
+TK_STRING:      TokenKind = auto()    # (TK_STRING, length, start)
+TK_LET:         TokenKind = auto()
+TK_IF:          TokenKind = auto()
+TK_LOOP:        TokenKind = auto()
+TK_ELSE:        TokenKind = auto()
+TK_RETURN:      TokenKind = auto()
+TK_BREAK:       TokenKind = auto()
+TK_CONTINUE:    TokenKind = auto()
+TK_PLUS:        TokenKind = auto()
+TK_MINUS:       TokenKind = auto()
+TK_MUL:         TokenKind = auto()
+TK_IDIV:        TokenKind = auto()
+TK_MOD:         TokenKind = auto()
+TK_LPAREN:      TokenKind = auto()
+TK_RPAREN:      TokenKind = auto()
+TK_LBRACE:      TokenKind = auto()
+TK_RBRACE:      TokenKind = auto()
+TK_LBRACKET:    TokenKind = auto()
+TK_RBRACKET:    TokenKind = auto()
+TK_ASSIGN:      TokenKind = auto()
+TK_EQ:          TokenKind = auto()
+TK_NOT_EQ:      TokenKind = auto()
+TK_GT:          TokenKind = auto()
+TK_GT_EQ:       TokenKind = auto()
+TK_LT:          TokenKind = auto()
+TK_LT_EQ:       TokenKind = auto()
+TK_AND:         TokenKind = auto()
+TK_OR:          TokenKind = auto()
+TK_NOT:         TokenKind = auto()
+_TK_COLON:      TokenKind = auto()  # should not appear in the final output 
+_TK_FN_COLON:   TokenKind = auto()  # should not appear in the final output 
+TK_TYPE:        TokenKind = auto()
+TK_FN_TYPE:     TokenKind = auto()
+TK_FN_ARROW:    TokenKind = auto()
+TK_PIPE:        TokenKind = auto() # TBD if included or not. single arg piping
+# TK_SEMICOLON:   TokenKind = auto()  # TODO: perhaps we can remove semicolons?
 
 # placehold for tokens that don't have a value
 TRUE_VALUE: TokenValue = 1
@@ -111,6 +121,12 @@ def tokenize(src:str)->list[PackedToken]:
     toks: list[PackedToken] = []  # this would be a stack in the assembly impl
 
     while i < n:
+        # running sanity check(s) for prototype tokens that shouldn't be in the final output
+        # check here so that we can maintain a single pass tokenizer
+        if len(toks) > 1 and (unpack_token(toks[-2])[0] == _TK_COLON or unpack_token(toks[-2])[0] == _TK_FN_COLON):
+            raise SyntaxError(f"colon must be followed by a type annotation at {i}: {src[i]!r}")
+        
+        # current character
         c = src[i]
 
         # whitespace
@@ -139,14 +155,43 @@ def tokenize(src:str)->list[PackedToken]:
                 toks.append(pack_token(TK_AND, NO_VALUE, start))
             elif str_left_eq("or", text):
                 toks.append(pack_token(TK_OR, NO_VALUE, start))
-            elif str_left_eq("not", text):
+            elif str_left_eq("not", text):# and (i >= n or src[i] != '='):  # one special case since `not=?` is checked after
                 toks.append(pack_token(TK_NOT, NO_VALUE, start))
             elif str_left_eq("true", text):
                 toks.append(pack_token(TK_NUM, TRUE_VALUE, start))
             elif str_left_eq("false", text):
                 toks.append(pack_token(TK_NUM, FALSE_VALUE, start))
+            elif str_left_eq("if", text):
+                toks.append(pack_token(TK_IF, NO_VALUE, start))
+            elif str_left_eq("loop", text):
+                toks.append(pack_token(TK_LOOP, NO_VALUE, start))
+            elif str_left_eq("else", text):
+                toks.append(pack_token(TK_ELSE, NO_VALUE, start))
+            elif str_left_eq("return", text):
+                toks.append(pack_token(TK_RETURN, NO_VALUE, start))
+            elif str_left_eq("break", text):
+                toks.append(pack_token(TK_BREAK, NO_VALUE, start))
+            elif str_left_eq("continue", text):
+                toks.append(pack_token(TK_CONTINUE, NO_VALUE, start))
+            elif i < n and src[i] == '(':
+                toks.append(pack_token(TK_IDENT_CALL, len(text), start))
+                i += 1 # consume the '('
+            elif i < n and src[i] == '[':
+                toks.append(pack_token(TK_IDENT_INDEX, len(text), start))
+                i += 1 # consume the '['
+            elif i < n and src[i] == '.':
+                toks.append(pack_token(TK_IDENT_DOT, len(text), start))
+                i += 1 # consume the '.'
+            elif unpack_token(toks[-1])[0] == _TK_COLON:
+                toks.pop()
+                toks.append(pack_token(TK_TYPE, len(text), start))
+                continue
+            elif unpack_token(toks[-1])[0] == _TK_FN_COLON:
+                toks.pop()
+                toks.append(pack_token(TK_FN_TYPE, len(text), start))
+                continue
             else:
-                # store the identifier text location + length
+                # regular identifier
                 toks.append(pack_token(TK_IDENT, len(text), start))
             continue
 
@@ -164,12 +209,10 @@ def tokenize(src:str)->list[PackedToken]:
         if c == '"':
             start = i
             i += 1
-            while i < n and (src[i] != '"' or src[i-1] == '\\'):
-                print(f"i: {i}, src[i]: {src[i]}")
+            while i < n and src[i] != '"':
                 if src[i] == '{' or src[i] == '}':
-                    pdb.set_trace()
                     raise SyntaxError(f"interpolation not supported in udewy strings at {i}: {src[start:i]!r}")
-                if src[i] == '\\': i += 1 # skip escape characters, so checking `\"` is aligned properly and we wouldn't accidentally match e.g. `\\"` as not the end of the string
+                if src[i] == '\\': i += 1 # skip escape characters, properly handles escaping quotes
                 i += 1
             if src[i] != '"':
                 raise SyntaxError(f"unterminated string at {i}: {src[start:i]!r}")
@@ -185,13 +228,17 @@ def tokenize(src:str)->list[PackedToken]:
             i += 2
             continue
         if str_left_eq("=?", src[i:]):
-            toks.append(pack_token(TK_EQ, NO_VALUE, i))
+            if toks[-1] == TK_NOT:
+                toks.pop()
+                toks.append(pack_token(TK_NOT_EQ, NO_VALUE, i))
+            else:
+                toks.append(pack_token(TK_EQ, NO_VALUE, i))
             i += 2
             continue
-        if str_left_eq("!=?", src[i:]):
-            toks.append(pack_token(TK_NOT_EQ, NO_VALUE, i))
-            i += 3
-            continue
+        # if str_left_eq("not=?", src[i:]):
+        #     toks.append(pack_token(TK_NOT_EQ, NO_VALUE, i))
+        #     i += 5
+        #     continue
         if str_left_eq(">=?", src[i:]):
             toks.append(pack_token(TK_GT_EQ, NO_VALUE, i))
             i += 3
@@ -209,7 +256,7 @@ def tokenize(src:str)->list[PackedToken]:
             i += 2
             continue
         if str_left_eq(":>", src[i:]):
-            toks.append(pack_token(TK_FN_COLON, NO_VALUE, i))
+            toks.append(pack_token(_TK_FN_COLON, NO_VALUE, i))
             i += 2
             continue
         if str_left_eq("=>", src[i:]):
@@ -226,6 +273,7 @@ def tokenize(src:str)->list[PackedToken]:
         if c == "+": toks.append(pack_token(TK_PLUS, NO_VALUE, i)); continue
         if c == "-": toks.append(pack_token(TK_MINUS, NO_VALUE, i)); continue
         if c == "*": toks.append(pack_token(TK_MUL, NO_VALUE, i)); continue
+        if c == "%": toks.append(pack_token(TK_MOD, NO_VALUE, i)); continue
         if c == "(": toks.append(pack_token(TK_LPAREN, NO_VALUE, i)); continue
         if c == ")": toks.append(pack_token(TK_RPAREN, NO_VALUE, i)); continue
         if c == "{": toks.append(pack_token(TK_LBRACE, NO_VALUE, i)); continue
@@ -233,10 +281,8 @@ def tokenize(src:str)->list[PackedToken]:
         if c == "[": toks.append(pack_token(TK_LBRACKET, NO_VALUE, i)); continue
         if c == "]": toks.append(pack_token(TK_RBRACKET, NO_VALUE, i)); continue
         if c == "=": toks.append(pack_token(TK_ASSIGN, NO_VALUE, i)); continue
-        if c == ";": toks.append(pack_token(TK_SEMI, NO_VALUE, i)); continue
-        if c == ":": toks.append(pack_token(TK_COLON, NO_VALUE, i)); continue
-        if c == ",": toks.append(pack_token(TK_COMMA, NO_VALUE, i)); continue
-        if c == ".": toks.append(pack_token(TK_DOT, NO_VALUE, i)); continue
+        # if c == ";": toks.append(pack_token(TK_SEMICOLON, NO_VALUE, i)); continue   # TODO: seeing if we can go without it
+        if c == ":": toks.append(pack_token(_TK_COLON, NO_VALUE, i)); continue
         i -= 1  # undo the increment above
 
 
@@ -249,7 +295,48 @@ def tokenize(src:str)->list[PackedToken]:
 
 
 
-# TODO: little globals() helper for printing out tokens
+# Some convenient debug helpers (not written in assembly-ish style)
+def kind_to_str(kind:TokenKind)->str:
+    for name, value in globals().items():
+        if not name.startswith("TK_"): continue
+        if value == kind:
+            return name
+    raise ValueError(f"unknown token kind: {kind}")
+
+def dump_token(token:PackedToken, src:str):
+    kind, value, location = unpack_token(token)
+    kind_str = kind_to_str(kind)
+
+    if kind == TK_IDENT:
+        length, start = value, location
+        value = src[start:start+length]
+    elif kind == TK_IDENT_CALL:
+        length, start = value, location
+        value = src[start:start+length] + "("
+    elif kind == TK_IDENT_INDEX:
+        length, start = value, location
+        value = src[start:start+length] + "["
+    elif kind == TK_IDENT_DOT:
+        length, start = value, location
+        value = src[start:start+length] + "."
+    elif kind == TK_TYPE:
+        length, start = value, location
+        value = ':' +src[start:start+length]
+    elif kind == TK_FN_TYPE:
+        length, start = value, location
+        value = ':>' + src[start:start+length]
+    elif kind == TK_STRING:
+        length, start = value, location
+        value = src[start:start+length]
+    elif kind == TK_NUM:
+        value = value
+    else:
+        value = None
+    
+    if value is not None:
+        return f"({kind_str} {value})"
+    
+    return f'({kind_str})'
 
 
 
@@ -262,4 +349,4 @@ if __name__ == "__main__":
         src = f.read()
     toks = tokenize(src)
     for tok in toks:
-        print(unpack_token(tok))
+        print(dump_token(tok, src))

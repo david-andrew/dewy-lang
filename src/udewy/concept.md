@@ -86,11 +86,13 @@ Restrictions:
 - only `#` comments
 - `|>` for all function calls
 - `*` for multiply
-- (TBD) would be ideal if we had an explicit operator for indexing, e.g. `|@>`
-- other operators: `|>`, `*`, `//`, `%`, `+`, `-`, `.`, `,`, `=?`, `not=?`, `>?`, `<?`, `>=?`, `<=?`, `and`, `or`, `not`
-- all expressions must be fully parenthesized to indicate precedence. (tbd) consider allowing skipping parenthesis, and things are just parsed from left to right regardless (note that it allows programs to deviate in behavior if we include multiple operators of different precedence in the same expression). 
-- semicolons are probably mandatory for ending expressions
-- (tbd) commas are mandatory for separating arguments in functions. also array literals
+- all returns must include an expression (`void` if want no return)
+- other operators: `|>`, `*`, `//`, `%`, `+`, `-`, `.`, `=?`, `not=?`, `>?`, `<?`, `>=?`, `<=?`, `and`, `or`, `not`, `<<`, `>>`, `~`
+    - `~` is separate from `not`. `~` inverts all bits, `not` inverts a boolean (i.e. just the last bit)
+    - `and`, and `or` probably can serve as both bitwise and logical
+- ~~all expressions must be fully parenthesized to indicate precedence. (tbd) consider allowing skipping parenthesis, and things are just parsed from left to right regardless (note that it allows programs to deviate in behavior if we include multiple operators of different precedence in the same expression). ~~ Expressions need not be parenthesized, but expressions will always be parsed from left to right. Perhaps we can track if an expression ever consumed a lower precedence operator before a higher precedence one, and error out
+- ~~semicolons are probably mandatory for ending expressions~~ no semicolons at all
+- ~~(tbd) commas are mandatory for separating arguments in functions. also array literals~~ no commas at all
 - strict flow syntax `if (cond) {} else {}`, `if (cond) {} else if (cond) {} else {}` etc.
 - data types (everything is an integer under the hood!):
     - `string` (no interpolation)
@@ -98,36 +100,35 @@ Restrictions:
     - `array<int64>`
     - (maybe) basic structs with named members...
 - all variables are declared with `let name = ...` pattern. no destructuring. no using variables immediately without declaring them first. declarations must have an initial value
-- no typing? or super minimal typing mandatory in all relevant places. no type checking. maybe also no type unions (e.g. something can't be int|undefined?.. but that would be pretty hard to go without.)
-    - require type annotations in function signatures (and return type), but ignore them! they can help with simplifying the parser
+    - can also use `const`, but there is no enforcement of `let` vs `const`
+- ~~no typing? or super minimal typing mandatory in all relevant places. no type checking. maybe also no type unions (e.g. something can't be int|undefined?.. but that would be pretty hard to go without.)~~
+    - require type annotations in variable declarations, function signatures, and return type. Actual value is ignored, but type annotations are used to guide parsing.
 - all fn arguments are position only
-- ranges don't support step size. also require bounds parenthesis/brackets
-- no express feature. must use return.
+- ~~ranges don't support step size. also require bounds parenthesis/brackets~~ no ranges
+- no express feature. must use return. Return must include an expression (`void` if want to not return anything)
 - functions may only be declared at the top level
-- probably no ranges `[a..b)`
 
 
 Some example programs:
 ```udewy
 if (x =? 1) {
-    ('One' |> printl);
+    printl("One")
 }
 
 ```
 
 ```udewy
 let i:int = 0
-loop (i <? 100) {
-    if ((i % 15) =? 0) {
-        printl("FizzBuzz");
+loop i <? 100 {
+    if i % 15 =? 0 {
+        printl("FizzBuzz")
     } else {
-        if ((i % 3) =? 0) {
-            printl("Fizz");
-        } else if ((i % 5) =? 0) {
+        if i % 3 =? 0 {
+            printl("Fizz")
+        } else if i % 5 =? 0 {
             printl("Buzz")
         } else {
-            let s:int = tostr(i);
-            printl(s);
+            printl(int2str(i))
         }
     }
 }
@@ -135,8 +136,8 @@ loop (i <? 100) {
 
 
 ```udewy
-if ((x >? 5) and (x <? 10)) {
-    printl("x is in range");
+if (x >? 5) and (x <? 10) {
+    printl("x is in range")
 }
 ```
 
@@ -144,12 +145,12 @@ if ((x >? 5) and (x <? 10)) {
 ```udewy
 let fib = (n:int):>int => {
     if (n < 2) {
-        return n;
+        return n
     } else {
-        return ((fib(n - 1)) + (fib(n - 2)));
+        return fib(n - 1) + fib(n - 2)
     }
 };
-printl(fib(10));
+printl(int2str(fib(10)))
 ```
 
 
@@ -157,21 +158,21 @@ printl(fib(10));
 # 1. Root level function (pointer stored in 'is_even')
 let is_even = (n:int):>bool => {
     # 3. Boolean operators return 0 or 1
-    return ((n % 2) =? 0);
-};
+    return n % 2 =? 0
+}
 
 let main = ():>void => {
     # 1. Scoping: 'result' is local to main
-    let result:bool = false; 
+    let result:bool = false
     
     # 2. Function pointer usage
-    result = is_even(42);
+    result = is_even(42)
     
     # 3. If checks for != 0
     if (result) {
-        printl("It is even");
+        printl("It is even")
     }
-};
+}
 ```
 
 
@@ -180,33 +181,37 @@ udewy
 ```
 # A helper function you would implement in the subset
 # It takes two pointers (int64s) and returns 1 if contents match, 0 otherwise
-let str_eq = (s1:string, s2:string):>bool => {
+let str_eq = (s1:string s2:string):>bool => {
     # 1. Check length (first 8 bytes at the pointer)
     # Note: using a hypothetical `peek` intrinsic or assembly insert for memory access
-    let len1:int = s1.length; #__peek__(s1);
-    let len2:int = s2.length; #__peek__(s2);
+    let len1:int = s1.length
+    let len2:int = s2.length
     
-    if (len1 not=? len2) { return false; }
-    
-    # ... loop through bytes comparing them ...
-    return true;
-};
+    if len1 not=? len2 { return false }
+    let i:int = 0
+    loop i <? len1 {
+        if s1[i] not=? s2[i] { return false }
+        i = i + 1
+    }
+
+    return true
+}
 
 let main = ():>void => {
-    let msg1:string = "status";
-    let msg2:string = "status";
+    let msg1:string = "status"
+    let msg2:string = "status"
     
     # This works because they likely point to the same interned address 
     # OR they are different addresses and this returns false (pointer inequality)
-    if (msg1 =? msg2) { 
-        printl("Same pointer");
+    if msg1 =? msg2 { 
+        printl("Same pointer")
     }
 
     # This is the robust way to do it in Stage 2
-    if (str_eq(msg1, msg2)) {
-        printl("Same content");
+    if (str_eq(msg1 msg2)) {
+        printl("Same content")
     }
-};
+}
 ```
 
 ## Stage 3: udewy -> full dewy compiler
