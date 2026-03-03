@@ -7,25 +7,24 @@ output
 
 """
 
-from typing import TypeAlias
 from itertools import count
 
 import pdb
 
 
 # some basic type aliases
-char: TypeAlias = str # length=1
-TokenKind: TypeAlias = int
-TokenValue: TypeAlias = int
-Location: TypeAlias = int
-Token: TypeAlias = tuple[TokenKind, TokenValue, Location]
-PackedToken: TypeAlias = int
+type char = str # length=1
+type TokenKind = int
+type TokenValue = int
+type Location = int
+type Token = tuple[TokenKind, TokenValue, Location]
+type PackedToken = int
 
 # ----- Token kinds -----
 _counter = count(0)
 def auto(): return next(_counter)
 
-TK_EOF:          TokenKind = auto()
+# TK_EOF:          TokenKind = auto()
 TK_IDENT:        TokenKind = auto()    # (TK_IDENT, length, start)        # basic identifier. used for all identifiers except for function calls and indexes
 TK_IDENT_CALL:   TokenKind = auto()    # (TK_CALL_IDENT, length, start)   # an identifier followed by a paren. e.g. `some_fn(`
 TK_IDENT_INDEX:  TokenKind = auto()    # (TK_IDENT_INDEX, length, start)  # an identifier followed by a bracket. e.g. `some_arr[`
@@ -96,18 +95,6 @@ def str_left_eq(prefix:str, s:str)->bool:
         i += 1
     return True
 
-def str_eq(s1:str, s2:str)->bool:
-    """Check if the two strings are equal"""
-    if len(s1) != len(s2):
-        return False
-    i = 0
-    end = len(s1)
-    while i < end:
-        if s1[i] != s2[i]:
-            return False
-        i += 1
-    return True
-
 def is_alpha(c:char)->bool:
     o = ord(c)
     return (65 <= o <= 90) or (97 <= o <= 122) or (c == "_")
@@ -115,6 +102,10 @@ def is_alpha(c:char)->bool:
 def is_digit(c:char)->bool:
     o = ord(c)
     return 48 <= o <= 57
+
+def is_hex(c:char)->bool:
+    o = ord(c)
+    return (48 <= o <= 57) or (65 <= o <= 70) or (97 <= o <= 102)
 
 
 def tokenize(src:str)->list[PackedToken]:
@@ -195,6 +186,29 @@ def tokenize(src:str)->list[PackedToken]:
             else:
                 # regular identifier
                 toks.append(pack_token(TK_IDENT, len(text), start))
+            continue
+
+        # hex number
+        if i+2 < n and src[i] == '0' and src[i+1] == 'x':
+            start = i
+            i += 2
+            val = 0
+            while i < n and is_hex(src[i]):
+                digit_val = ord(src[i]) - 48 if 48 <= ord(src[i]) <= 57 else ord(src[i]) - 55
+                val = val * 16 + digit_val
+                i += 1
+            toks.append(pack_token(TK_NUMBER, val, start))
+            continue
+        
+        # binary number
+        if i+2 < n and src[i] == '0' and src[i+1] == 'b':
+            start = i
+            i += 2
+            val = 0
+            while i < n and (src[i] == '0' or src[i] == '1'):
+                val = val * 2 + (ord(src[i]) - 48)
+                i += 1
+            toks.append(pack_token(TK_NUMBER, val, start))
             continue
 
         # number (decimal int)
@@ -301,7 +315,7 @@ def tokenize(src:str)->list[PackedToken]:
         pdb.set_trace()
         raise SyntaxError(f"bad character at {i}: {c!r}")
 
-    toks.append(pack_token(TK_EOF, NO_VALUE, n))
+    # toks.append(pack_token(TK_EOF, NO_VALUE, n))
     return toks
 
 
