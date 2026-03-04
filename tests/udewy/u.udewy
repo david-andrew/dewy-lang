@@ -1,137 +1,2051 @@
-###! utils.dewy
-const T:bool = true
-const F:bool = false
+# udewy bootstrapped compiler
+# Compiles udewy source to x86_64 GNU assembly
 
-const _len_offset:int = 0
-const _data_offset:int = 8
-const _underscore:int = 0x5F
+# ============================================================================
+# Constants
+# ============================================================================
 
-const deref = (ptr:int):>int => {
-    # TBD how dereferencing is handled. perhaps it might just be an intrinsic
+# Syscall numbers
+const SYS_READ:int = 0
+const SYS_WRITE:int = 1
+const SYS_OPEN:int = 2
+const SYS_CLOSE:int = 3
+const SYS_MMAP:int = 9
+const SYS_EXIT:int = 60
+
+# File descriptors
+const STDIN:int = 0
+const STDOUT:int = 1
+const STDERR:int = 2
+
+# mmap constants
+const PROT_READ:int = 1
+const PROT_WRITE:int = 2
+const MAP_PRIVATE:int = 2
+const MAP_ANONYMOUS:int = 32
+
+# Memory sizes
+const ARENA_SIZE:int = 0x1000000
+const MAX_TOKENS:int = 65536
+const MAX_FUNCTIONS:int = 1024
+const MAX_GLOBALS:int = 1024
+const MAX_CONSTS:int = 1024
+const MAX_SCOPES:int = 64
+const MAX_VARS_PER_SCOPE:int = 64
+const OUTPUT_BUF_SIZE:int = 0x100000
+
+# Token kinds (must match t0.py)
+const TK_IDENT:int = 0
+const TK_IDENT_CALL:int = 1
+const TK_STRING:int = 2
+const TK_TYPE_PARAM:int = 3
+const TK_VOID:int = 4
+const TK_NUMBER:int = 5
+const TK_LET:int = 6
+const TK_IF:int = 7
+const TK_LOOP:int = 8
+const TK_ELSE:int = 9
+const TK_RETURN:int = 10
+const TK_BREAK:int = 11
+const TK_CONTINUE:int = 12
+const TK_PLUS:int = 14
+const TK_MINUS:int = 15
+const TK_MUL:int = 16
+const TK_IDIV:int = 17
+const TK_MOD:int = 18
+const TK_EQ:int = 19
+const TK_NOT_EQ:int = 20
+const TK_GT:int = 21
+const TK_GT_EQ:int = 22
+const TK_LT:int = 23
+const TK_LT_EQ:int = 24
+const TK_AND:int = 25
+const TK_OR:int = 26
+const TK_XOR:int = 27
+const TK_NOT:int = 28
+const TK_LEFT_SHIFT:int = 29
+const TK_RIGHT_SHIFT:int = 30
+const TK_ASSIGN:int = 32
+const TK_UPDATE_ASSIGN:int = 33
+const TK_EXPR_CALL:int = 34
+const TK_LEFT_PAREN:int = 35
+const TK_RIGHT_PAREN:int = 36
+const TK_LEFT_BRACE:int = 37
+const TK_RIGHT_BRACE:int = 38
+const TK_LEFT_BRACKET:int = 39
+const TK_RIGHT_BRACKET:int = 40
+const TK_COLON:int = 41
+const TK_FN_COLON:int = 42
+const TK_TYPE:int = 43
+const TK_FN_TYPE:int = 44
+const TK_FN_ARROW:int = 45
+const TK_PIPE:int = 46
+
+const TRUE_VAL:int = 0xFFFFFFFFFFFFFFFF
+const FALSE_VAL:int = 0
+
+# Precedence levels
+const PREC_OR:int = 1
+const PREC_XOR:int = 2
+const PREC_AND:int = 3
+const PREC_EQ:int = 4
+const PREC_CMP:int = 5
+const PREC_SHIFT:int = 6
+const PREC_ADD:int = 7
+const PREC_MUL:int = 8
+const PREC_PIPE:int = 9
+
+# ============================================================================
+# Global state (pointers to mmap'd memory)
+# ============================================================================
+
+# Source code
+const g_src:int = 0
+const g_src_len:int = 0
+const g_src_idx:int = 0
+
+# Token array: each token is 16 bytes (value:8, location:4, kind:2, padding:2)
+const g_tokens:int = 0
+const g_tok_count:int = 0
+const g_tok_idx:int = 0
+
+# Function table: each entry is 40 bytes
+const g_fn_table:int = 0
+const g_fn_count:int = 0
+
+# Global variable table: each entry is 24 bytes
+const g_global_table:int = 0
+const g_global_count:int = 0
+
+# Const table: each entry is 24 bytes
+const g_const_table:int = 0
+const g_const_count:int = 0
+
+# Scope stack: array of scope pointers
+const g_scope_stack:int = 0
+const g_scope_depth:int = 0
+
+# Each scope is 8 + MAX_VARS_PER_SCOPE * 24 bytes
+
+# Output buffer
+const g_output:int = 0
+const g_output_len:int = 0
+
+# Code generation state
+const g_next_label:int = 0
+const g_stack_offset:int = 0
+const g_loop_start:int = 0
+const g_loop_end:int = 0
+const g_fn_epilogue:int = 0
+
+# ============================================================================
+# Memory management
+# ============================================================================
+
+let g_arena:int = 0
+let g_arena_ptr:int = 0
+
+let arena_init = ():>void => {
+    g_arena = __syscall6__(SYS_MMAP 0 ARENA_SIZE (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) 0 - 1 0)
+    g_arena_ptr = g_arena
+    return void
 }
 
-### get the length of a string or array
-const len = (ptr<string|array<any>>):>int => {   # note the `id<typeexpr>` syntax instead of `id: typeexpr`
-    return deref(ptr+_len_offset)
+let arena_alloc = (size:int):>int => {
+    let ptr:int = g_arena_ptr
+    g_arena_ptr = g_arena_ptr + size
+    return ptr
 }
 
-###! t0.dewy
+# ============================================================================
+# Output helpers
+# ============================================================================
 
-### Check if the prefix is a left substring of the string
-const str_left_eq = (prefix:string s:string):>bool => {
-    if len(prefix) >? len(s) {
-        return false
+let out_ptr:int = 0
+let out_len:int = 0
+
+let out_init = ():>void => {
+    out_ptr = arena_alloc(OUTPUT_BUF_SIZE)
+    out_len = 0
+    return void
+}
+
+let out_char = (c:int):>void => {
+    __store8__(c out_ptr + out_len)
+    out_len = out_len + 1
+    return void
+}
+
+let out_str = (s:int):>void => {
+    let len:int = __load__(s + 0 - 8)
+    let i:int = 0
+    loop i <? len {
+        let c:int = __load8__(s + i)
+        out_char(c)
+        i = i + 1
     }
-    i = 0
-    end = len(prefix)
-    loop i <? end {
-        if (prefix+i|>deref) not=? (s+i|>deref) {
-            return false
+    return void
+}
+
+let out_int = (n:int):>void => {
+    if n <? 0 {
+        out_char(45)
+        n = 0 - n
+    }
+    if n =? 0 {
+        out_char(48)
+        return void
+    }
+    let buf:int = arena_alloc(24)
+    let i:int = 0
+    loop n >? 0 {
+        let digit:int = n % 10
+        __store8__(digit + 48 buf + i)
+        n = n // 10
+        i = i + 1
+    }
+    loop i >? 0 {
+        i = i - 1
+        out_char(__load8__(buf + i))
+    }
+    return void
+}
+
+let out_flush = ():>void => {
+    __syscall3__(SYS_WRITE STDOUT out_ptr out_len)
+    return void
+}
+
+let out_line = (s:int):>void => {
+    out_str("    ")
+    out_str(s)
+    out_char(10)
+    return void
+}
+
+let out_label = (prefix:int n:int):>void => {
+    out_str(prefix)
+    out_int(n)
+    out_str(":\n")
+    return void
+}
+
+# ============================================================================
+# Character classification (inline for performance)
+# ============================================================================
+
+let is_alpha = (c:int):>int => {
+    if (c >=? 65) and (c <=? 90) { return TRUE_VAL }
+    if (c >=? 97) and (c <=? 122) { return TRUE_VAL }
+    if c =? 95 { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let is_digit = (c:int):>int => {
+    if (c >=? 48) and (c <=? 57) { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let is_hex = (c:int):>int => {
+    if (c >=? 48) and (c <=? 57) { return TRUE_VAL }
+    if (c >=? 65) and (c <=? 70) { return TRUE_VAL }
+    if (c >=? 97) and (c <=? 102) { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let is_space = (c:int):>int => {
+    if c =? 32 { return TRUE_VAL }
+    if c =? 9 { return TRUE_VAL }
+    if c =? 10 { return TRUE_VAL }
+    if c =? 13 { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+# ============================================================================
+# String comparison
+# ============================================================================
+
+let str_eq_len = (s1:int len1:int s2:int len2:int):>int => {
+    if len1 not=? len2 { return FALSE_VAL }
+    let i:int = 0
+    loop i <? len1 {
+        if __load8__(s1 + i) not=? __load8__(s2 + i) {
+            return FALSE_VAL
         }
-        i += 1
+        i = i + 1
     }
-    return true
+    return TRUE_VAL
 }
 
-const is_alpha = (c:char):>bool => { return _is_alpha_lookup+c |> deref }
-const is_digit = (c:char):>bool => { return _is_digit_lookup+c |> deref }
-const is_hex   = (c:char):>bool => { return _is_hex_lookup+c |> deref }
+let str_match = (s:int start:int len:int target:int):>int => {
+    let tlen:int = __load__(target + 0 - 8)
+    return str_eq_len(s + start len target tlen)
+}
 
-# alt non-table version
-# const is_alpha = (c:char):>bool => { return ((65 <=? c) and (c <= 90)) or ((97 <=? c) and (c <=? 122)) or (c =? _underscore) }
+let str_prefix = (s:int pos:int target:int):>int => {
+    let tlen:int = __load__(target + 0 - 8)
+    let i:int = 0
+    loop i <? tlen {
+        if __load8__(s + pos + i) not=? __load8__(target + i) {
+            return FALSE_VAL
+        }
+        i = i + 1
+    }
+    return TRUE_VAL
+}
 
+# ============================================================================
+# Token storage
+# ============================================================================
 
-###! tables.dewy
-# table of ascii characters identifying which are valid hex digits
-# usage: `if is_hex+c|>deref {...}`
+let tok_ptr:int = 0
+let tok_count:int = 0
 
+let tok_init = ():>void => {
+    tok_ptr = arena_alloc(MAX_TOKENS * 16)
+    tok_count = 0
+    return void
+}
 
-const _is_hex_lookup:array<bool> = [
-# xx   x0 |  x1 |  x2 |  x3 |  x4 |  x5 |  x6 |  x7 |  x8 |  x9 |  xA |  xB |  xC |  xD |  xE |  xF  
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 0x  NUL | SOH | STX | ETX | EOT | ENQ | ACK | BEL |  BS |  HT |  LF |  VT |  FF |  CR |  SO |  SI
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 1x  DLE | DC1 | DC2 | DC3 | DC4 | NAK | SYN | ETB | CAN |  EM | SUB | ESC |  FS |  GS |  RS |  US
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 2x   SP |  !  |  "  |  #  |  $  |  %  |  &  |  '  |  (  |  )  |  *  |  +  |  ,  |  -  |  .  |  /
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 3x   0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  |  :  |  ;  |  <  |  =  |  >  |  ?
-       T     T     T     T     T     T     T     T     T     T     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 4x   @  |  A  |  B  |  C  |  D  |  E  |  F  |  G  |  H  |  I  |  J  |  K  |  L  |  M  |  N  |  O
-       F     T     T     T     T     T     T     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 5x   P  |  Q  |  R  |  S  |  T  |  U  |  V  |  W  |  X  |  Y  |  Z  |  [  |  \  |  ]  |  ^  |  _
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 6x   `  |  a  |  b  |  c  |  d  |  e  |  f  |  g  |  h  |  i  |  j  |  k  |  l  |  m  |  n  |  o
-       F     T     T     T     T     T     T     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 7x   p  |  q  |  r  |  s  |  t  |  u  |  v  |  w  |  x  |  y  |  z  |  {  |  |  |  }  |  ~  | DEL
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-]
+let tok_add = (value:int loc:int kind:int):>void => {
+    let off:int = tok_count * 16
+    __store__(value tok_ptr + off)
+    __store__(loc tok_ptr + off + 8)
+    __store__(kind tok_ptr + off + 12)
+    tok_count = tok_count + 1
+    return void
+}
 
+let tok_kind = (idx:int):>int => {
+    return __load__(tok_ptr + (idx * 16) + 12) and 0xFFFF
+}
 
+let tok_loc = (idx:int):>int => {
+    return __load__(tok_ptr + (idx * 16) + 8) and 0xFFFFFFFF
+}
 
-const _is_alpha_lookup:array<bool> = [
-# xx   x0 |  x1 |  x2 |  x3 |  x4 |  x5 |  x6 |  x7 |  x8 |  x9 |  xA |  xB |  xC |  xD |  xE |  xF  
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 0x  NUL | SOH | STX | ETX | EOT | ENQ | ACK | BEL |  BS |  HT |  LF |  VT |  FF |  CR |  SO |  SI
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 1x  DLE | DC1 | DC2 | DC3 | DC4 | NAK | SYN | ETB | CAN |  EM | SUB | ESC |  FS |  GS |  RS |  US
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 2x   SP |  !  |  "  |  #  |  $  |  %  |  &  |  '  |  (  |  )  |  *  |  +  |  ,  |  -  |  .  |  /
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 3x   0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  |  :  |  ;  |  <  |  =  |  >  |  ?
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 4x   @  |  A  |  B  |  C  |  D  |  E  |  F  |  G  |  H  |  I  |  J  |  K  |  L  |  M  |  N  |  O
-       F     T     T     T     T     T     T     T     T     T     T     T     T     T     T     T
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 5x   P  |  Q  |  R  |  S  |  T  |  U  |  V  |  W  |  X  |  Y  |  Z  |  [  |  \  |  ]  |  ^  |  _
-       T     T     T     T     T     T     T     T     T     T     T     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 6x   `  |  a  |  b  |  c  |  d  |  e  |  f  |  g  |  h  |  i  |  j  |  k  |  l  |  m  |  n  |  o
-       F     T     T     T     T     T     T     T     T     T     T     T     T     T     T     T
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 7x   p  |  q  |  r  |  s  |  t  |  u  |  v  |  w  |  x  |  y  |  z  |  {  |  |  |  }  |  ~  | DEL
-       F     T     T     T     T     T     T     T     T     T     T     F     F     F     F     F
-]
+let tok_value = (idx:int):>int => {
+    return __load__(tok_ptr + (idx * 16))
+}
 
+# ============================================================================
+# Tokenizer
+# ============================================================================
 
+let src_ptr:int = 0
+let src_len:int = 0
 
-const _is_digit_lookup:array<bool> = [
-# xx   x0 |  x1 |  x2 |  x3 |  x4 |  x5 |  x6 |  x7 |  x8 |  x9 |  xA |  xB |  xC |  xD |  xE |  xF  
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 0x  NUL | SOH | STX | ETX | EOT | ENQ | ACK | BEL |  BS |  HT |  LF |  VT |  FF |  CR |  SO |  SI
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 1x  DLE | DC1 | DC2 | DC3 | DC4 | NAK | SYN | ETB | CAN |  EM | SUB | ESC |  FS |  GS |  RS |  US
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 2x   SP |  !  |  "  |  #  |  $  |  %  |  &  |  '  |  (  |  )  |  *  |  +  |  ,  |  -  |  .  |  /
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 3x   0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  |  :  |  ;  |  <  |  =  |  >  |  ?
-       T     T     T     T     T     T     T     T     T     T     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 4x   @  |  A  |  B  |  C  |  D  |  E  |  F  |  G  |  H  |  I  |  J  |  K  |  L  |  M  |  N  |  O
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 5x   P  |  Q  |  R  |  S  |  T  |  U  |  V  |  W  |  X  |  Y  |  Z  |  [  |  \  |  ]  |  ^  |  _
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 6x   `  |  a  |  b  |  c  |  d  |  e  |  f  |  g  |  h  |  i  |  j  |  k  |  l  |  m  |  n  |  o
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
-# 7x   p  |  q  |  r  |  s  |  t  |  u  |  v  |  w  |  x  |  y  |  z  |  {  |  |  |  }  |  ~  | DEL
-       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
-]
+let tokenize = ():>void => {
+    let i:int = 0
+    let n:int = src_len
+    
+    loop i <? n {
+        let c:int = __load8__(src_ptr + i)
+        
+        # Skip whitespace
+        if is_space(c) {
+            i = i + 1
+            continue
+        }
+        
+        # Skip comments
+        if c =? 35 {
+            i = i + 1
+            loop (i <? n) and (__load8__(src_ptr + i) not=? 10) {
+                i = i + 1
+            }
+            continue
+        }
+        
+        # Identifier or keyword
+        if is_alpha(c) {
+            let start:int = i
+            i = i + 1
+            loop (i <? n) and (is_alpha(__load8__(src_ptr + i)) or is_digit(__load8__(src_ptr + i))) {
+                i = i + 1
+            }
+            let len:int = i - start
+            
+            if str_match(src_ptr start len "let") {
+                tok_add(0 start TK_LET)
+            } else if str_match(src_ptr start len "const") {
+                tok_add(0 start TK_LET)
+            } else if str_match(src_ptr start len "if") {
+                tok_add(0 start TK_IF)
+            } else if str_match(src_ptr start len "else") {
+                tok_add(0 start TK_ELSE)
+            } else if str_match(src_ptr start len "loop") {
+                tok_add(0 start TK_LOOP)
+            } else if str_match(src_ptr start len "return") {
+                tok_add(0 start TK_RETURN)
+            } else if str_match(src_ptr start len "break") {
+                tok_add(0 start TK_BREAK)
+            } else if str_match(src_ptr start len "continue") {
+                tok_add(0 start TK_CONTINUE)
+            } else if str_match(src_ptr start len "and") {
+                tok_add(0 start TK_AND)
+            } else if str_match(src_ptr start len "or") {
+                tok_add(0 start TK_OR)
+            } else if str_match(src_ptr start len "xor") {
+                tok_add(0 start TK_XOR)
+            } else if str_match(src_ptr start len "not") {
+                tok_add(0 start TK_NOT)
+            } else if str_match(src_ptr start len "true") {
+                tok_add(TRUE_VAL start TK_NUMBER)
+            } else if str_match(src_ptr start len "false") {
+                tok_add(FALSE_VAL start TK_NUMBER)
+            } else if str_match(src_ptr start len "void") {
+                if (tok_count >? 0) and (tok_kind(tok_count - 1) =? TK_COLON) {
+                    tok_count = tok_count - 1
+                    tok_add(len start TK_TYPE)
+                } else if (tok_count >? 0) and (tok_kind(tok_count - 1) =? TK_FN_COLON) {
+                    tok_count = tok_count - 1
+                    tok_add(len start TK_FN_TYPE)
+                } else {
+                    tok_add(0 start TK_VOID)
+                }
+            } else if (i <? n) and (__load8__(src_ptr + i) =? 40) {
+                tok_add(len start TK_IDENT_CALL)
+                i = i + 1
+            } else if (tok_count >? 0) and (tok_kind(tok_count - 1) =? TK_COLON) {
+                tok_count = tok_count - 1
+                tok_add(len start TK_TYPE)
+            } else if (tok_count >? 0) and (tok_kind(tok_count - 1) =? TK_FN_COLON) {
+                tok_count = tok_count - 1
+                tok_add(len start TK_FN_TYPE)
+            } else {
+                tok_add(len start TK_IDENT)
+            }
+            continue
+        }
+        
+        # Hex number
+        if (c =? 48) and ((i + 1) <? n) and (__load8__(src_ptr + i + 1) =? 120) {
+            let start:int = i
+            i = i + 2
+            let val:int = 0
+            loop (i <? n) and (is_hex(__load8__(src_ptr + i)) or (__load8__(src_ptr + i) =? 95)) {
+                let d:int = __load8__(src_ptr + i)
+                if d not=? 95 {
+                    let dv:int = 0
+                    if (d >=? 48) and (d <=? 57) {
+                        dv = d - 48
+                    } else if (d >=? 65) and (d <=? 70) {
+                        dv = d - 55
+                    } else {
+                        dv = d - 87
+                    }
+                    val = (val << 4) or dv
+                }
+                i = i + 1
+            }
+            tok_add(val start TK_NUMBER)
+            continue
+        }
+        
+        # Binary number
+        if (c =? 48) and ((i + 1) <? n) and (__load8__(src_ptr + i + 1) =? 98) {
+            let start:int = i
+            i = i + 2
+            let val:int = 0
+            loop (i <? n) and ((__load8__(src_ptr + i) =? 48) or (__load8__(src_ptr + i) =? 49) or (__load8__(src_ptr + i) =? 95)) {
+                let d:int = __load8__(src_ptr + i)
+                if d not=? 95 {
+                    val = (val << 1) or (d - 48)
+                }
+                i = i + 1
+            }
+            tok_add(val start TK_NUMBER)
+            continue
+        }
+        
+        # Decimal number
+        if is_digit(c) {
+            let start:int = i
+            let val:int = 0
+            loop (i <? n) and is_digit(__load8__(src_ptr + i)) {
+                val = (val * 10) + (__load8__(src_ptr + i) - 48)
+                i = i + 1
+            }
+            tok_add(val start TK_NUMBER)
+            continue
+        }
+        
+        # String
+        if c =? 34 {
+            let start:int = i
+            i = i + 1
+            loop (i <? n) and (__load8__(src_ptr + i) not=? 34) {
+                if __load8__(src_ptr + i) =? 92 {
+                    i = i + 1
+                }
+                i = i + 1
+            }
+            i = i + 1
+            tok_add(i - start start TK_STRING)
+            continue
+        }
+        
+        # Multi-char operators
+        if str_prefix(src_ptr i "//") {
+            tok_add(0 i TK_IDIV)
+            i = i + 2
+            continue
+        }
+        if str_prefix(src_ptr i "=?") {
+            if (tok_count >? 0) and (tok_kind(tok_count - 1) =? TK_NOT) {
+                tok_count = tok_count - 1
+                tok_add(0 i TK_NOT_EQ)
+            } else {
+                tok_add(0 i TK_EQ)
+            }
+            i = i + 2
+            continue
+        }
+        if str_prefix(src_ptr i ">=?") {
+            tok_add(0 i TK_GT_EQ)
+            i = i + 3
+            continue
+        }
+        if str_prefix(src_ptr i "<=?") {
+            tok_add(0 i TK_LT_EQ)
+            i = i + 3
+            continue
+        }
+        if str_prefix(src_ptr i ">?") {
+            tok_add(0 i TK_GT)
+            i = i + 2
+            continue
+        }
+        if str_prefix(src_ptr i "<?") {
+            tok_add(0 i TK_LT)
+            i = i + 2
+            continue
+        }
+        if str_prefix(src_ptr i ":>") {
+            tok_add(0 i TK_FN_COLON)
+            i = i + 2
+            continue
+        }
+        if str_prefix(src_ptr i "=>") {
+            tok_add(0 i TK_FN_ARROW)
+            i = i + 2
+            continue
+        }
+        if str_prefix(src_ptr i "|>") {
+            tok_add(0 i TK_PIPE)
+            i = i + 2
+            continue
+        }
+        if str_prefix(src_ptr i "<<") {
+            tok_add(0 i TK_LEFT_SHIFT)
+            i = i + 2
+            continue
+        }
+        if str_prefix(src_ptr i ">>") {
+            tok_add(0 i TK_RIGHT_SHIFT)
+            i = i + 2
+            continue
+        }
+        if str_prefix(src_ptr i ")(") {
+            tok_add(0 i TK_RIGHT_PAREN)
+            tok_add(0 i TK_EXPR_CALL)
+            i = i + 2
+            continue
+        }
+        
+        # Type parameter
+        if c =? 60 {
+            let start:int = i
+            let depth:int = 1
+            i = i + 1
+            loop (i <? n) and (depth >? 0) {
+                let tc:int = __load8__(src_ptr + i)
+                if tc =? 60 { depth = depth + 1 }
+                if tc =? 62 { depth = depth - 1 }
+                i = i + 1
+            }
+            tok_add(i - start start TK_TYPE_PARAM)
+            continue
+        }
+        
+        # Single-char tokens
+        i = i + 1
+        if c =? 43 { tok_add(0 i TK_PLUS) continue }
+        if c =? 45 { tok_add(0 i TK_MINUS) continue }
+        if c =? 42 { tok_add(0 i TK_MUL) continue }
+        if c =? 37 { tok_add(0 i TK_MOD) continue }
+        if c =? 40 { tok_add(0 i TK_LEFT_PAREN) continue }
+        if c =? 41 { tok_add(0 i TK_RIGHT_PAREN) continue }
+        if c =? 123 { tok_add(0 i TK_LEFT_BRACE) continue }
+        if c =? 125 { tok_add(0 i TK_RIGHT_BRACE) continue }
+        if c =? 91 { tok_add(0 i TK_LEFT_BRACKET) continue }
+        if c =? 93 { tok_add(0 i TK_RIGHT_BRACKET) continue }
+        if c =? 58 { tok_add(0 i TK_COLON) continue }
+        if c =? 61 {
+            if tok_count >? 0 {
+                let pk:int = tok_kind(tok_count - 1)
+                if (pk >? 13) and (pk <? 31) {
+                    tok_count = tok_count - 1
+                    tok_add(pk i TK_UPDATE_ASSIGN)
+                    continue
+                }
+            }
+            tok_add(0 i TK_ASSIGN)
+            continue
+        }
+    }
+    return void
+}
 
-###! p0.dewy
+# ============================================================================
+# Symbol tables
+# ============================================================================
+
+let fn_ptr:int = 0
+let fn_count:int = 0
+
+let fn_init = ():>void => {
+    fn_ptr = arena_alloc(MAX_FUNCTIONS * 40)
+    fn_count = 0
+    return void
+}
+
+let fn_lookup = (name_start:int name_len:int):>int => {
+    let i:int = 0
+    loop i <? fn_count {
+        let off:int = i * 40
+        let s:int = __load__(fn_ptr + off)
+        let l:int = __load__(fn_ptr + off + 8)
+        if str_eq_len(src_ptr + name_start name_len src_ptr + s l) {
+            return i
+        }
+        i = i + 1
+    }
+    return 0 - 1
+}
+
+let fn_add = (name_start:int name_len:int label_id:int num_args:int is_def:int):>int => {
+    let idx:int = fn_count
+    let off:int = fn_count * 40
+    __store__(name_start fn_ptr + off)
+    __store__(name_len fn_ptr + off + 8)
+    __store__(label_id fn_ptr + off + 16)
+    __store__(num_args fn_ptr + off + 24)
+    __store__(is_def fn_ptr + off + 32)
+    fn_count = fn_count + 1
+    return idx
+}
+
+let fn_get_label = (idx:int):>int => {
+    return __load__(fn_ptr + (idx * 40) + 16)
+}
+
+let fn_set_defined = (idx:int num_args:int):>void => {
+    let off:int = idx * 40
+    __store__(num_args fn_ptr + off + 24)
+    __store__(1 fn_ptr + off + 32)
+    return void
+}
+
+let fn_is_defined = (idx:int):>int => {
+    return __load__(fn_ptr + (idx * 40) + 32)
+}
+
+# Global variables
+let glob_ptr:int = 0
+let glob_count:int = 0
+
+let glob_init = ():>void => {
+    glob_ptr = arena_alloc(MAX_GLOBALS * 24)
+    glob_count = 0
+    return void
+}
+
+let glob_lookup = (name_start:int name_len:int):>int => {
+    let i:int = 0
+    loop i <? glob_count {
+        let off:int = i * 24
+        let s:int = __load__(glob_ptr + off)
+        let l:int = __load__(glob_ptr + off + 8)
+        if str_eq_len(src_ptr + name_start name_len src_ptr + s l) {
+            return i
+        }
+        i = i + 1
+    }
+    return 0 - 1
+}
+
+let glob_add = (name_start:int name_len:int label_id:int):>int => {
+    let idx:int = glob_count
+    let off:int = glob_count * 24
+    __store__(name_start glob_ptr + off)
+    __store__(name_len glob_ptr + off + 8)
+    __store__(label_id glob_ptr + off + 16)
+    glob_count = glob_count + 1
+    return idx
+}
+
+let glob_get_label = (idx:int):>int => {
+    return __load__(glob_ptr + (idx * 24) + 16)
+}
+
+# Const table
+let const_ptr:int = 0
+let const_count:int = 0
+
+let const_init = ():>void => {
+    const_ptr = arena_alloc(MAX_CONSTS * 24)
+    const_count = 0
+    return void
+}
+
+let const_lookup = (name_start:int name_len:int):>int => {
+    let i:int = 0
+    loop i <? const_count {
+        let off:int = i * 24
+        let s:int = __load__(const_ptr + off)
+        let l:int = __load__(const_ptr + off + 8)
+        if str_eq_len(src_ptr + name_start name_len src_ptr + s l) {
+            return i
+        }
+        i = i + 1
+    }
+    return 0 - 1
+}
+
+let const_add = (name_start:int name_len:int value:int):>int => {
+    let idx:int = const_count
+    let off:int = const_count * 24
+    __store__(name_start const_ptr + off)
+    __store__(name_len const_ptr + off + 8)
+    __store__(value const_ptr + off + 16)
+    const_count = const_count + 1
+    return idx
+}
+
+let const_get_value = (idx:int):>int => {
+    return __load__(const_ptr + (idx * 24) + 16)
+}
+
+# Scope stack for local variables
+let scope_ptr:int = 0
+let scope_depth:int = 0
+
+let scope_init = ():>void => {
+    scope_ptr = arena_alloc(MAX_SCOPES * 8)
+    scope_depth = 0
+    return void
+}
+
+let scope_push = ():>void => {
+    let new_scope:int = arena_alloc(8 + (MAX_VARS_PER_SCOPE * 24))
+    __store__(0 new_scope)
+    __store__(new_scope scope_ptr + (scope_depth * 8))
+    scope_depth = scope_depth + 1
+    return void
+}
+
+let scope_pop = ():>void => {
+    scope_depth = scope_depth - 1
+    return void
+}
+
+let var_lookup = (name_start:int name_len:int):>int => {
+    let si:int = scope_depth - 1
+    loop si >=? 0 {
+        let scp:int = __load__(scope_ptr + (si * 8))
+        let vcount:int = __load__(scp)
+        let vi:int = 0
+        loop vi <? vcount {
+            let off:int = 8 + (vi * 24)
+            let s:int = __load__(scp + off)
+            let l:int = __load__(scp + off + 8)
+            if str_eq_len(src_ptr + name_start name_len src_ptr + s l) {
+                return __load__(scp + off + 16)
+            }
+            vi = vi + 1
+        }
+        si = si - 1
+    }
+    return 0x7FFFFFFFFFFFFFFF
+}
+
+let var_add = (name_start:int name_len:int stack_off:int):>void => {
+    let scp:int = __load__(scope_ptr + ((scope_depth - 1) * 8))
+    let vcount:int = __load__(scp)
+    let off:int = 8 + (vcount * 24)
+    __store__(name_start scp + off)
+    __store__(name_len scp + off + 8)
+    __store__(stack_off scp + off + 16)
+    __store__(vcount + 1 scp)
+    return void
+}
+
+# ============================================================================
+# Code generation state
+# ============================================================================
+
+let next_label:int = 0
+let stack_offset:int = 0
+let loop_start_label:int = 0
+let loop_end_label:int = 0
+let fn_epilogue_label:int = 0
+
+# ============================================================================
+# Parser helpers
+# ============================================================================
+
+let cur_tok:int = 0
+
+let expect = (kind:int):>void => {
+    if tok_kind(cur_tok) not=? kind {
+        out_str("Parse error: unexpected token\n")
+        out_flush()
+        __syscall1__(SYS_EXIT 1)
+    }
+    cur_tok = cur_tok + 1
+    return void
+}
+
+let get_prec = (kind:int):>int => {
+    if kind =? TK_OR { return PREC_OR }
+    if kind =? TK_XOR { return PREC_XOR }
+    if kind =? TK_AND { return PREC_AND }
+    if (kind =? TK_EQ) or (kind =? TK_NOT_EQ) { return PREC_EQ }
+    if (kind =? TK_GT) or (kind =? TK_LT) or (kind =? TK_GT_EQ) or (kind =? TK_LT_EQ) { return PREC_CMP }
+    if (kind =? TK_LEFT_SHIFT) or (kind =? TK_RIGHT_SHIFT) { return PREC_SHIFT }
+    if (kind =? TK_PLUS) or (kind =? TK_MINUS) { return PREC_ADD }
+    if (kind =? TK_MUL) or (kind =? TK_IDIV) or (kind =? TK_MOD) { return PREC_MUL }
+    if kind =? TK_PIPE { return PREC_PIPE }
+    return 0
+}
+
+let is_binop = (kind:int):>int => {
+    if get_prec(kind) >? 0 { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let name_eq_intrinsic = (start:int len:int target:int):>int => {
+    let tlen:int = __load__(target + 0 - 8)
+    return str_eq_len(src_ptr + start len target tlen)
+}
+
+let is_intrinsic = (start:int len:int):>int => {
+    if name_eq_intrinsic(start len "__syscall0__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__syscall1__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__syscall2__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__syscall3__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__syscall4__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__syscall5__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__syscall6__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__load__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__store__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__load8__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__store8__") { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+# ============================================================================
+# Data section accumulator
+# ============================================================================
+
+let data_ptr:int = 0
+let data_len:int = 0
+
+let data_init = ():>void => {
+    data_ptr = arena_alloc(OUTPUT_BUF_SIZE)
+    data_len = 0
+    return void
+}
+
+let data_char = (c:int):>void => {
+    __store8__(c data_ptr + data_len)
+    data_len = data_len + 1
+    return void
+}
+
+let data_str = (s:int):>void => {
+    let len:int = __load__(s + 0 - 8)
+    let i:int = 0
+    loop i <? len {
+        data_char(__load8__(s + i))
+        i = i + 1
+    }
+    return void
+}
+
+let data_int = (n:int):>void => {
+    if n <? 0 {
+        data_char(45)
+        n = 0 - n
+    }
+    if n =? 0 {
+        data_char(48)
+        return void
+    }
+    let buf:int = arena_alloc(24)
+    let i:int = 0
+    loop n >? 0 {
+        let digit:int = n % 10
+        __store8__(digit + 48 buf + i)
+        n = n // 10
+        i = i + 1
+    }
+    loop i >? 0 {
+        i = i - 1
+        data_char(__load8__(buf + i))
+    }
+    return void
+}
+
+let data_line = (s:int):>void => {
+    data_str("    ")
+    data_str(s)
+    data_char(10)
+    return void
+}
+
+let data_label = (prefix:int n:int):>void => {
+    data_str(prefix)
+    data_int(n)
+    data_str(":\n")
+    return void
+}
+
+# ============================================================================
+# Intrinsic code generation
+# ============================================================================
+
+let emit_intrinsic = (start:int len:int nargs:int):>void => {
+    if name_eq_intrinsic(start len "__load__") {
+        out_line("movq (%rax), %rax")
+    } else if name_eq_intrinsic(start len "__store__") {
+        out_line("popq %rbx")
+        out_line("movq %rbx, (%rax)")
+        out_line("xorq %rax, %rax")
+    } else if name_eq_intrinsic(start len "__load8__") {
+        out_line("movzbq (%rax), %rax")
+    } else if name_eq_intrinsic(start len "__store8__") {
+        out_line("popq %rbx")
+        out_line("movb %bl, (%rax)")
+        out_line("xorq %rax, %rax")
+    } else if name_eq_intrinsic(start len "__syscall0__") {
+        out_line("syscall")
+    } else if name_eq_intrinsic(start len "__syscall1__") {
+        out_line("movq %rax, %rdi")
+        out_line("popq %rax")
+        out_line("syscall")
+    } else if name_eq_intrinsic(start len "__syscall2__") {
+        out_line("movq %rax, %rsi")
+        out_line("popq %rdi")
+        out_line("popq %rax")
+        out_line("syscall")
+    } else if name_eq_intrinsic(start len "__syscall3__") {
+        out_line("movq %rax, %rdx")
+        out_line("popq %rsi")
+        out_line("popq %rdi")
+        out_line("popq %rax")
+        out_line("syscall")
+    } else if name_eq_intrinsic(start len "__syscall4__") {
+        out_line("movq %rax, %r10")
+        out_line("popq %rdx")
+        out_line("popq %rsi")
+        out_line("popq %rdi")
+        out_line("popq %rax")
+        out_line("syscall")
+    } else if name_eq_intrinsic(start len "__syscall5__") {
+        out_line("movq %rax, %r8")
+        out_line("popq %r10")
+        out_line("popq %rdx")
+        out_line("popq %rsi")
+        out_line("popq %rdi")
+        out_line("popq %rax")
+        out_line("syscall")
+    } else if name_eq_intrinsic(start len "__syscall6__") {
+        out_line("movq %rax, %r9")
+        out_line("popq %r8")
+        out_line("popq %r10")
+        out_line("popq %rdx")
+        out_line("popq %rsi")
+        out_line("popq %rdi")
+        out_line("popq %rax")
+        out_line("syscall")
+    }
+    return void
+}
+
+# ============================================================================
+# Expression parsing
+# ============================================================================
+
+let parse_atom = ():>void => {
+    let kind:int = tok_kind(cur_tok)
+    
+    if kind =? TK_NUMBER {
+        let val:int = tok_value(cur_tok)
+        out_str("    movq $")
+        out_int(val)
+        out_str(", %rax\n")
+        cur_tok = cur_tok + 1
+        return void
+    }
+    
+    if kind =? TK_VOID {
+        out_line("xorq %rax, %rax")
+        cur_tok = cur_tok + 1
+        return void
+    }
+    
+    if kind =? TK_STRING {
+        let start:int = tok_loc(cur_tok)
+        let len:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        let label_id:int = next_label
+        next_label = next_label + 1
+        
+        data_label(".Lstr" label_id)
+        
+        let slen:int = 0
+        let si:int = start + 1
+        let send:int = start + len - 1
+        loop si <? send {
+            let c:int = __load8__(src_ptr + si)
+            if c =? 92 {
+                si = si + 1
+            }
+            slen = slen + 1
+            si = si + 1
+        }
+        
+        data_str("    .quad ")
+        data_int(slen)
+        data_char(10)
+        
+        data_str("    .byte ")
+        si = start + 1
+        let first:int = 1
+        loop si <? send {
+            if first =? 0 {
+                data_str(", ")
+            }
+            first = 0
+            let c:int = __load8__(src_ptr + si)
+            if c =? 92 {
+                si = si + 1
+                c = __load8__(src_ptr + si)
+                if c =? 110 { c = 10 }
+                else if c =? 116 { c = 9 }
+                else if c =? 114 { c = 13 }
+                else if c =? 48 { c = 0 }
+            }
+            data_int(c)
+            si = si + 1
+        }
+        data_char(10)
+        
+        out_str("    leaq .Lstr")
+        out_int(label_id)
+        out_str("+8(%rip), %rax\n")
+        return void
+    }
+    
+    if kind =? TK_IDENT {
+        let start:int = tok_loc(cur_tok)
+        let len:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        let off:int = var_lookup(start len)
+        if off not=? 0x7FFFFFFFFFFFFFFF {
+            out_str("    movq ")
+            out_int(off)
+            out_str("(%rbp), %rax\n")
+            return void
+        }
+        
+        let gi:int = glob_lookup(start len)
+        if gi >=? 0 {
+            out_str("    movq .Lglobal")
+            out_int(glob_get_label(gi))
+            out_str("(%rip), %rax\n")
+            return void
+        }
+        
+        let fi:int = fn_lookup(start len)
+        if fi >=? 0 {
+            out_str("    leaq .Lfn")
+            out_int(fn_get_label(fi))
+            out_str("(%rip), %rax\n")
+            return void
+        }
+        
+        let label_id:int = next_label
+        next_label = next_label + 1
+        fn_add(start len label_id 0 0)
+        out_str("    leaq .Lfn")
+        out_int(label_id)
+        out_str("(%rip), %rax\n")
+        return void
+    }
+    
+    if kind =? TK_IDENT_CALL {
+        let start:int = tok_loc(cur_tok)
+        let len:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        let nargs:int = 0
+        loop tok_kind(cur_tok) not=? TK_RIGHT_PAREN {
+            parse_expr(0)
+            out_line("pushq %rax")
+            nargs = nargs + 1
+        }
+        expect(TK_RIGHT_PAREN)
+        
+        if is_intrinsic(start len) {
+            if nargs >? 0 {
+                out_line("popq %rax")
+            }
+            emit_intrinsic(start len nargs)
+        } else {
+            let ai:int = nargs - 1
+            loop ai >=? 0 {
+                if ai =? 0 { out_line("popq %rdi") }
+                else if ai =? 1 { out_line("popq %rsi") }
+                else if ai =? 2 { out_line("popq %rdx") }
+                else if ai =? 3 { out_line("popq %rcx") }
+                else if ai =? 4 { out_line("popq %r8") }
+                else if ai =? 5 { out_line("popq %r9") }
+                ai = ai - 1
+            }
+            
+            let fi:int = fn_lookup(start len)
+            if fi <? 0 {
+                let label_id:int = next_label
+                next_label = next_label + 1
+                fi = fn_add(start len label_id nargs 0)
+            }
+            out_str("    call .Lfn")
+            out_int(fn_get_label(fi))
+            out_char(10)
+        }
+        return void
+    }
+    
+    if kind =? TK_LEFT_PAREN {
+        cur_tok = cur_tok + 1
+        parse_expr(0)
+        expect(TK_RIGHT_PAREN)
+        return void
+    }
+    
+    if kind =? TK_LEFT_BRACKET {
+        cur_tok = cur_tok + 1
+        
+        let elems:int = arena_alloc(1024 * 8)
+        let nelem:int = 0
+        let all_const:int = 1
+        
+        loop tok_kind(cur_tok) not=? TK_RIGHT_BRACKET {
+            let ek:int = tok_kind(cur_tok)
+            if ek =? TK_NUMBER {
+                __store__(tok_value(cur_tok) elems + (nelem * 8))
+                cur_tok = cur_tok + 1
+            } else if ek =? TK_IDENT {
+                let es:int = tok_loc(cur_tok)
+                let el:int = tok_value(cur_tok)
+                let ci:int = const_lookup(es el)
+                if ci >=? 0 {
+                    __store__(const_get_value(ci) elems + (nelem * 8))
+                    cur_tok = cur_tok + 1
+                } else {
+                    all_const = 0
+                    break
+                }
+            } else {
+                all_const = 0
+                break
+            }
+            nelem = nelem + 1
+        }
+        
+        if all_const {
+            expect(TK_RIGHT_BRACKET)
+            let label_id:int = next_label
+            next_label = next_label + 1
+            
+            data_label(".Larr" label_id)
+            data_str("    .quad ")
+            data_int(nelem)
+            data_char(10)
+            
+            let ei:int = 0
+            loop ei <? nelem {
+                data_str("    .quad ")
+                data_int(__load__(elems + (ei * 8)))
+                data_char(10)
+                ei = ei + 1
+            }
+            
+            out_str("    leaq .Larr")
+            out_int(label_id)
+            out_str("+8(%rip), %rax\n")
+        } else {
+            let cnt:int = 0
+            loop tok_kind(cur_tok) not=? TK_RIGHT_BRACKET {
+                cnt = cnt + 1
+                parse_expr(0)
+                out_line("pushq %rax")
+            }
+            expect(TK_RIGHT_BRACKET)
+            nelem = nelem + cnt
+            
+            let arr_sz:int = 8 + (nelem * 8)
+            out_str("    subq $")
+            out_int(arr_sz)
+            out_str(", %rsp\n")
+            out_str("    movq $")
+            out_int(nelem)
+            out_str(", (%rsp)\n")
+            
+            let ei:int = nelem - 1
+            loop ei >=? 0 {
+                out_line("popq %rax")
+                out_str("    movq %rax, ")
+                out_int(8 + (ei * 8))
+                out_str("(%rsp)\n")
+                ei = ei - 1
+            }
+            out_line("leaq 8(%rsp), %rax")
+        }
+        return void
+    }
+    
+    if kind =? TK_NOT {
+        cur_tok = cur_tok + 1
+        parse_atom()
+        out_line("notq %rax")
+        return void
+    }
+    
+    if kind =? TK_MINUS {
+        cur_tok = cur_tok + 1
+        if tok_kind(cur_tok) =? TK_NUMBER {
+            let val:int = tok_value(cur_tok)
+            out_str("    movq $")
+            out_int(0 - val)
+            out_str(", %rax\n")
+            cur_tok = cur_tok + 1
+        } else {
+            parse_atom()
+            out_line("negq %rax")
+        }
+        return void
+    }
+    
+    out_str("Parse error: unexpected token in expr\n")
+    out_flush()
+    __syscall1__(SYS_EXIT 1)
+    return void
+}
+
+let parse_expr_impl = (min_prec:int):>void => {
+    parse_atom()
+    
+    loop cur_tok <? tok_count {
+        let kind:int = tok_kind(cur_tok)
+        
+        if kind =? TK_EXPR_CALL {
+            out_line("pushq %rax")
+            cur_tok = cur_tok + 1
+            
+            let nargs:int = 0
+            loop tok_kind(cur_tok) not=? TK_RIGHT_PAREN {
+                parse_expr(0)
+                out_line("pushq %rax")
+                nargs = nargs + 1
+            }
+            expect(TK_RIGHT_PAREN)
+            
+            let ai:int = nargs - 1
+            loop ai >=? 0 {
+                if ai =? 0 { out_line("popq %rdi") }
+                else if ai =? 1 { out_line("popq %rsi") }
+                else if ai =? 2 { out_line("popq %rdx") }
+                else if ai =? 3 { out_line("popq %rcx") }
+                else if ai =? 4 { out_line("popq %r8") }
+                else if ai =? 5 { out_line("popq %r9") }
+                ai = ai - 1
+            }
+            out_line("popq %rax")
+            out_line("call *%rax")
+            continue
+        }
+        
+        if not is_binop(kind) {
+            break
+        }
+        
+        let prec:int = get_prec(kind)
+        if (prec >? min_prec) and (min_prec >? 0) {
+            out_str("Precedence error: use parentheses\n")
+            out_flush()
+            __syscall1__(SYS_EXIT 1)
+        }
+        
+        cur_tok = cur_tok + 1
+        out_line("pushq %rax")
+        
+        if kind =? TK_PIPE {
+            parse_atom()
+            out_line("movq %rax, %r11")
+            out_line("popq %rdi")
+            out_line("call *%r11")
+        } else {
+            parse_atom()
+            out_line("movq %rax, %rcx")
+            out_line("popq %rax")
+            
+            if kind =? TK_PLUS { out_line("addq %rcx, %rax") }
+            else if kind =? TK_MINUS { out_line("subq %rcx, %rax") }
+            else if kind =? TK_MUL { out_line("imulq %rcx, %rax") }
+            else if kind =? TK_IDIV {
+                out_line("cqto")
+                out_line("idivq %rcx")
+            }
+            else if kind =? TK_MOD {
+                out_line("cqto")
+                out_line("idivq %rcx")
+                out_line("movq %rdx, %rax")
+            }
+            else if kind =? TK_LEFT_SHIFT { out_line("shlq %cl, %rax") }
+            else if kind =? TK_RIGHT_SHIFT { out_line("sarq %cl, %rax") }
+            else if kind =? TK_AND { out_line("andq %rcx, %rax") }
+            else if kind =? TK_OR { out_line("orq %rcx, %rax") }
+            else if kind =? TK_XOR { out_line("xorq %rcx, %rax") }
+            else if kind =? TK_EQ {
+                out_line("cmpq %rcx, %rax")
+                out_line("sete %al")
+                out_line("movzbq %al, %rax")
+                out_line("negq %rax")
+            }
+            else if kind =? TK_NOT_EQ {
+                out_line("cmpq %rcx, %rax")
+                out_line("setne %al")
+                out_line("movzbq %al, %rax")
+                out_line("negq %rax")
+            }
+            else if kind =? TK_GT {
+                out_line("cmpq %rcx, %rax")
+                out_line("setg %al")
+                out_line("movzbq %al, %rax")
+                out_line("negq %rax")
+            }
+            else if kind =? TK_LT {
+                out_line("cmpq %rcx, %rax")
+                out_line("setl %al")
+                out_line("movzbq %al, %rax")
+                out_line("negq %rax")
+            }
+            else if kind =? TK_GT_EQ {
+                out_line("cmpq %rcx, %rax")
+                out_line("setge %al")
+                out_line("movzbq %al, %rax")
+                out_line("negq %rax")
+            }
+            else if kind =? TK_LT_EQ {
+                out_line("cmpq %rcx, %rax")
+                out_line("setle %al")
+                out_line("movzbq %al, %rax")
+                out_line("negq %rax")
+            }
+        }
+        
+        min_prec = prec
+    }
+    return void
+}
+
+let parse_expr = (min_prec:int):>void => {
+    parse_expr_impl(min_prec)
+    return void
+}
+
+# ============================================================================
+# Statement parsing
+# ============================================================================
+
+let skip_type_annot = ():>void => {
+    if tok_kind(cur_tok) =? TK_TYPE {
+        cur_tok = cur_tok + 1
+        if tok_kind(cur_tok) =? TK_TYPE_PARAM {
+            cur_tok = cur_tok + 1
+        }
+    } else if tok_kind(cur_tok) =? TK_TYPE_PARAM {
+        cur_tok = cur_tok + 1
+    }
+    return void
+}
+
+let skip_fn_type = ():>void => {
+    if tok_kind(cur_tok) =? TK_FN_TYPE {
+        cur_tok = cur_tok + 1
+        if tok_kind(cur_tok) =? TK_TYPE_PARAM {
+            cur_tok = cur_tok + 1
+        }
+    }
+    return void
+}
+
+let parse_var_decl = ():>void => {
+    cur_tok = cur_tok + 1
+    
+    let start:int = tok_loc(cur_tok)
+    let len:int = tok_value(cur_tok)
+    cur_tok = cur_tok + 1
+    
+    skip_type_annot()
+    expect(TK_ASSIGN)
+    parse_expr(0)
+    
+    let off:int = stack_offset
+    stack_offset = stack_offset - 8
+    var_add(start len off)
+    
+    out_str("    movq %rax, ")
+    out_int(off)
+    out_str("(%rbp)\n")
+    return void
+}
+
+let parse_fn_decl = ():>void => {
+    cur_tok = cur_tok + 1
+    
+    let name_start:int = tok_loc(cur_tok)
+    let name_len:int = tok_value(cur_tok)
+    cur_tok = cur_tok + 1
+    
+    expect(TK_ASSIGN)
+    expect(TK_LEFT_PAREN)
+    
+    let params_ptr:int = arena_alloc(64 * 16)
+    let nparam:int = 0
+    
+    loop tok_kind(cur_tok) not=? TK_RIGHT_PAREN {
+        let ps:int = tok_loc(cur_tok)
+        let pl:int = tok_value(cur_tok)
+        __store__(ps params_ptr + (nparam * 16))
+        __store__(pl params_ptr + (nparam * 16) + 8)
+        nparam = nparam + 1
+        cur_tok = cur_tok + 1
+        skip_type_annot()
+    }
+    expect(TK_RIGHT_PAREN)
+    skip_fn_type()
+    expect(TK_FN_ARROW)
+    expect(TK_LEFT_BRACE)
+    
+    let fi:int = fn_lookup(name_start name_len)
+    let label_id:int = 0
+    if fi >=? 0 {
+        fn_set_defined(fi nparam)
+        label_id = fn_get_label(fi)
+    } else {
+        label_id = next_label
+        next_label = next_label + 1
+        fn_add(name_start name_len label_id nparam 1)
+    }
+    
+    if str_eq_len(src_ptr + name_start name_len "main" 4) {
+        out_str("__main__:\n")
+    }
+    out_label(".Lfn" label_id)
+    
+    out_line("pushq %rbp")
+    out_line("movq %rsp, %rbp")
+    out_line("subq $256, %rsp")
+    out_line("movq %rbx, -8(%rbp)")
+    out_line("movq %r12, -16(%rbp)")
+    out_line("movq %r13, -24(%rbp)")
+    out_line("movq %r14, -32(%rbp)")
+    out_line("movq %r15, -40(%rbp)")
+    
+    scope_push()
+    
+    let saved_offset:int = stack_offset
+    stack_offset = 0 - 48
+    
+    let saved_loop_start:int = loop_start_label
+    let saved_loop_end:int = loop_end_label
+    loop_start_label = 0
+    loop_end_label = 0
+    
+    let saved_epilogue:int = fn_epilogue_label
+    fn_epilogue_label = label_id
+    
+    let pi:int = 0
+    loop pi <? nparam {
+        let ps:int = __load__(params_ptr + (pi * 16))
+        let pl:int = __load__(params_ptr + (pi * 16) + 8)
+        
+        if pi =? 0 {
+            out_str("    movq %rdi, ")
+            out_int(stack_offset)
+            out_str("(%rbp)\n")
+        } else if pi =? 1 {
+            out_str("    movq %rsi, ")
+            out_int(stack_offset)
+            out_str("(%rbp)\n")
+        } else if pi =? 2 {
+            out_str("    movq %rdx, ")
+            out_int(stack_offset)
+            out_str("(%rbp)\n")
+        } else if pi =? 3 {
+            out_str("    movq %rcx, ")
+            out_int(stack_offset)
+            out_str("(%rbp)\n")
+        } else if pi =? 4 {
+            out_str("    movq %r8, ")
+            out_int(stack_offset)
+            out_str("(%rbp)\n")
+        } else if pi =? 5 {
+            out_str("    movq %r9, ")
+            out_int(stack_offset)
+            out_str("(%rbp)\n")
+        }
+        
+        var_add(ps pl stack_offset)
+        stack_offset = stack_offset - 8
+        pi = pi + 1
+    }
+    
+    loop tok_kind(cur_tok) not=? TK_RIGHT_BRACE {
+        parse_statement()
+    }
+    expect(TK_RIGHT_BRACE)
+    
+    out_str(".Lfn")
+    out_int(label_id)
+    out_str("_epilogue:\n")
+    out_line("movq -8(%rbp), %rbx")
+    out_line("movq -16(%rbp), %r12")
+    out_line("movq -24(%rbp), %r13")
+    out_line("movq -32(%rbp), %r14")
+    out_line("movq -40(%rbp), %r15")
+    out_line("movq %rbp, %rsp")
+    out_line("popq %rbp")
+    out_line("ret")
+    
+    scope_pop()
+    stack_offset = saved_offset
+    loop_start_label = saved_loop_start
+    loop_end_label = saved_loop_end
+    fn_epilogue_label = saved_epilogue
+    return void
+}
+
+let parse_if = ():>void => {
+    let end_id:int = next_label
+    next_label = next_label + 1
+    
+    let else_id:int = next_label
+    next_label = next_label + 1
+    
+    cur_tok = cur_tok + 1
+    parse_expr(0)
+    
+    out_line("testq %rax, %rax")
+    out_str("    jz .Lelse")
+    out_int(else_id)
+    out_char(10)
+    
+    expect(TK_LEFT_BRACE)
+    scope_push()
+    loop tok_kind(cur_tok) not=? TK_RIGHT_BRACE {
+        parse_statement()
+    }
+    expect(TK_RIGHT_BRACE)
+    scope_pop()
+    
+    out_str("    jmp .Lif_end")
+    out_int(end_id)
+    out_char(10)
+    out_label(".Lelse" else_id)
+    
+    loop tok_kind(cur_tok) =? TK_ELSE {
+        cur_tok = cur_tok + 1
+        
+        if tok_kind(cur_tok) =? TK_IF {
+            cur_tok = cur_tok + 1
+            
+            else_id = next_label
+            next_label = next_label + 1
+            
+            parse_expr(0)
+            out_line("testq %rax, %rax")
+            out_str("    jz .Lelse")
+            out_int(else_id)
+            out_char(10)
+            
+            expect(TK_LEFT_BRACE)
+            scope_push()
+            loop tok_kind(cur_tok) not=? TK_RIGHT_BRACE {
+                parse_statement()
+            }
+            expect(TK_RIGHT_BRACE)
+            scope_pop()
+            
+            out_str("    jmp .Lif_end")
+            out_int(end_id)
+            out_char(10)
+            out_label(".Lelse" else_id)
+        } else {
+            expect(TK_LEFT_BRACE)
+            scope_push()
+            loop tok_kind(cur_tok) not=? TK_RIGHT_BRACE {
+                parse_statement()
+            }
+            expect(TK_RIGHT_BRACE)
+            scope_pop()
+            break
+        }
+    }
+    
+    out_label(".Lif_end" end_id)
+    return void
+}
+
+let parse_loop = ():>void => {
+    let start_id:int = next_label
+    next_label = next_label + 1
+    
+    let end_id:int = next_label
+    next_label = next_label + 1
+    
+    let saved_start:int = loop_start_label
+    let saved_end:int = loop_end_label
+    loop_start_label = start_id
+    loop_end_label = end_id
+    
+    cur_tok = cur_tok + 1
+    
+    out_label(".Lloop_start" start_id)
+    parse_expr(0)
+    out_line("testq %rax, %rax")
+    out_str("    jz .Lloop_end")
+    out_int(end_id)
+    out_char(10)
+    
+    expect(TK_LEFT_BRACE)
+    scope_push()
+    loop tok_kind(cur_tok) not=? TK_RIGHT_BRACE {
+        parse_statement()
+    }
+    expect(TK_RIGHT_BRACE)
+    scope_pop()
+    
+    out_str("    jmp .Lloop_start")
+    out_int(start_id)
+    out_char(10)
+    out_label(".Lloop_end" end_id)
+    
+    loop_start_label = saved_start
+    loop_end_label = saved_end
+    return void
+}
+
+let parse_return = ():>void => {
+    cur_tok = cur_tok + 1
+    parse_expr(0)
+    out_str("    jmp .Lfn")
+    out_int(fn_epilogue_label)
+    out_str("_epilogue\n")
+    return void
+}
+
+let parse_break = ():>void => {
+    cur_tok = cur_tok + 1
+    out_str("    jmp .Lloop_end")
+    out_int(loop_end_label)
+    out_char(10)
+    return void
+}
+
+let parse_continue = ():>void => {
+    cur_tok = cur_tok + 1
+    out_str("    jmp .Lloop_start")
+    out_int(loop_start_label)
+    out_char(10)
+    return void
+}
+
+let parse_assign_or_expr = ():>void => {
+    if tok_kind(cur_tok) =? TK_IDENT {
+        let nk:int = tok_kind(cur_tok + 1)
+        
+        if nk =? TK_ASSIGN {
+            let start:int = tok_loc(cur_tok)
+            let len:int = tok_value(cur_tok)
+            cur_tok = cur_tok + 2
+            
+            parse_expr(0)
+            
+            let off:int = var_lookup(start len)
+            if off not=? 0x7FFFFFFFFFFFFFFF {
+                out_str("    movq %rax, ")
+                out_int(off)
+                out_str("(%rbp)\n")
+            } else {
+                let gi:int = glob_lookup(start len)
+                if gi >=? 0 {
+                    out_str("    movq %rax, .Lglobal")
+                    out_int(glob_get_label(gi))
+                    out_str("(%rip)\n")
+                }
+            }
+            return void
+        }
+        
+        if nk =? TK_UPDATE_ASSIGN {
+            let start:int = tok_loc(cur_tok)
+            let len:int = tok_value(cur_tok)
+            let op_kind:int = tok_value(cur_tok + 1)
+            cur_tok = cur_tok + 2
+            
+            let off:int = var_lookup(start len)
+            let is_local:int = 1
+            let gi:int = 0
+            if off =? 0x7FFFFFFFFFFFFFFF {
+                is_local = 0
+                gi = glob_lookup(start len)
+            }
+            
+            if is_local {
+                out_str("    movq ")
+                out_int(off)
+                out_str("(%rbp), %rbx\n")
+            } else {
+                out_str("    movq .Lglobal")
+                out_int(glob_get_label(gi))
+                out_str("(%rip), %rbx\n")
+            }
+            out_line("pushq %rbx")
+            
+            parse_expr(0)
+            
+            out_line("movq %rax, %rcx")
+            out_line("popq %rax")
+            
+            if op_kind =? TK_PLUS { out_line("addq %rcx, %rax") }
+            else if op_kind =? TK_MINUS { out_line("subq %rcx, %rax") }
+            else if op_kind =? TK_MUL { out_line("imulq %rcx, %rax") }
+            else if op_kind =? TK_IDIV {
+                out_line("cqto")
+                out_line("idivq %rcx")
+            }
+            else if op_kind =? TK_MOD {
+                out_line("cqto")
+                out_line("idivq %rcx")
+                out_line("movq %rdx, %rax")
+            }
+            else if op_kind =? TK_LEFT_SHIFT { out_line("shlq %cl, %rax") }
+            else if op_kind =? TK_RIGHT_SHIFT { out_line("sarq %cl, %rax") }
+            else if op_kind =? TK_AND { out_line("andq %rcx, %rax") }
+            else if op_kind =? TK_OR { out_line("orq %rcx, %rax") }
+            else if op_kind =? TK_XOR { out_line("xorq %rcx, %rax") }
+            
+            if is_local {
+                out_str("    movq %rax, ")
+                out_int(off)
+                out_str("(%rbp)\n")
+            } else {
+                out_str("    movq %rax, .Lglobal")
+                out_int(glob_get_label(gi))
+                out_str("(%rip)\n")
+            }
+            return void
+        }
+    }
+    
+    parse_expr(0)
+    return void
+}
+
+let parse_statement_impl = ():>void => {
+    let kind:int = tok_kind(cur_tok)
+    
+    if kind =? TK_LET {
+        if tok_kind(cur_tok + 2) =? TK_ASSIGN {
+            if tok_kind(cur_tok + 3) =? TK_LEFT_PAREN {
+                parse_fn_decl()
+                return void
+            }
+        }
+        parse_var_decl()
+        return void
+    }
+    
+    if kind =? TK_IF {
+        parse_if()
+        return void
+    }
+    
+    if kind =? TK_LOOP {
+        parse_loop()
+        return void
+    }
+    
+    if kind =? TK_RETURN {
+        parse_return()
+        return void
+    }
+    
+    if kind =? TK_BREAK {
+        parse_break()
+        return void
+    }
+    
+    if kind =? TK_CONTINUE {
+        parse_continue()
+        return void
+    }
+    
+    parse_assign_or_expr()
+    return void
+}
+
+let parse_statement = ():>void => {
+    parse_statement_impl()
+    return void
+}
+
+# ============================================================================
+# Top-level parsing
+# ============================================================================
+
+let parse_global_var = ():>void => {
+    cur_tok = cur_tok + 1
+    
+    let name_start:int = tok_loc(cur_tok)
+    let name_len:int = tok_value(cur_tok)
+    cur_tok = cur_tok + 1
+    
+    skip_type_annot()
+    expect(TK_ASSIGN)
+    
+    let kind:int = tok_kind(cur_tok)
+    
+    if kind =? TK_NUMBER {
+        let val:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        const_add(name_start name_len val)
+        
+        let label_id:int = next_label
+        next_label = next_label + 1
+        glob_add(name_start name_len label_id)
+        
+        data_label(".Lglobal" label_id)
+        data_str("    .quad ")
+        data_int(val)
+        data_char(10)
+        return void
+    }
+    
+    if kind =? TK_STRING {
+        let start:int = tok_loc(cur_tok)
+        let len:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        let str_id:int = next_label
+        next_label = next_label + 1
+        
+        data_label(".Lstr" str_id)
+        
+        let slen:int = 0
+        let si:int = start + 1
+        let send:int = start + len - 1
+        loop si <? send {
+            let c:int = __load8__(src_ptr + si)
+            if c =? 92 { si = si + 1 }
+            slen = slen + 1
+            si = si + 1
+        }
+        
+        data_str("    .quad ")
+        data_int(slen)
+        data_char(10)
+        
+        data_str("    .byte ")
+        si = start + 1
+        let first:int = 1
+        loop si <? send {
+            if first =? 0 { data_str(", ") }
+            first = 0
+            let c:int = __load8__(src_ptr + si)
+            if c =? 92 {
+                si = si + 1
+                c = __load8__(src_ptr + si)
+                if c =? 110 { c = 10 }
+                else if c =? 116 { c = 9 }
+                else if c =? 114 { c = 13 }
+                else if c =? 48 { c = 0 }
+            }
+            data_int(c)
+            si = si + 1
+        }
+        data_char(10)
+        
+        let label_id:int = next_label
+        next_label = next_label + 1
+        glob_add(name_start name_len label_id)
+        
+        data_label(".Lglobal" label_id)
+        data_str("    .quad .Lstr")
+        data_int(str_id)
+        data_str("+8\n")
+        return void
+    }
+    
+    if kind =? TK_LEFT_BRACKET {
+        cur_tok = cur_tok + 1
+        
+        let elems:int = arena_alloc(1024 * 8)
+        let nelem:int = 0
+        
+        loop tok_kind(cur_tok) not=? TK_RIGHT_BRACKET {
+            let ek:int = tok_kind(cur_tok)
+            if ek =? TK_NUMBER {
+                __store__(tok_value(cur_tok) elems + (nelem * 8))
+                cur_tok = cur_tok + 1
+            } else if ek =? TK_IDENT {
+                let es:int = tok_loc(cur_tok)
+                let el:int = tok_value(cur_tok)
+                let ci:int = const_lookup(es el)
+                if ci >=? 0 {
+                    __store__(const_get_value(ci) elems + (nelem * 8))
+                } else {
+                    out_str("Error: non-const in global array\n")
+                    out_flush()
+                    __syscall1__(SYS_EXIT 1)
+                }
+                cur_tok = cur_tok + 1
+            }
+            nelem = nelem + 1
+        }
+        expect(TK_RIGHT_BRACKET)
+        
+        let arr_id:int = next_label
+        next_label = next_label + 1
+        
+        data_label(".Larr" arr_id)
+        data_str("    .quad ")
+        data_int(nelem)
+        data_char(10)
+        
+        let ei:int = 0
+        loop ei <? nelem {
+            data_str("    .quad ")
+            data_int(__load__(elems + (ei * 8)))
+            data_char(10)
+            ei = ei + 1
+        }
+        
+        let label_id:int = next_label
+        next_label = next_label + 1
+        glob_add(name_start name_len label_id)
+        
+        data_label(".Lglobal" label_id)
+        data_str("    .quad .Larr")
+        data_int(arr_id)
+        data_str("+8\n")
+        return void
+    }
+    
+    out_str("Error: global must have const init\n")
+    out_flush()
+    __syscall1__(SYS_EXIT 1)
+    return void
+}
+
+let parse_program = ():>void => {
+    loop cur_tok <? tok_count {
+        let kind:int = tok_kind(cur_tok)
+        
+        if kind =? TK_LET {
+            if tok_kind(cur_tok + 2) =? TK_ASSIGN {
+                if tok_kind(cur_tok + 3) =? TK_LEFT_PAREN {
+                    parse_fn_decl()
+                    continue
+                }
+            }
+            parse_global_var()
+            continue
+        }
+        
+        out_str("Error: only let/const at top level\n")
+        out_flush()
+        __syscall1__(SYS_EXIT 1)
+    }
+    return void
+}
+
+# ============================================================================
+# Main entry point
+# ============================================================================
+
+let main = (argc:int argv:int):>int => {
+    arena_init()
+    out_init()
+    data_init()
+    tok_init()
+    fn_init()
+    glob_init()
+    const_init()
+    scope_init()
+    
+    if argc <? 2 {
+        out_str("Usage: udewy <file.udewy>\n")
+        out_flush()
+        return 1
+    }
+    
+    let filename:int = __load__(argv + 8)
+    let fd:int = __syscall2__(SYS_OPEN filename 0)
+    if fd <? 0 {
+        out_str("Error: cannot open file\n")
+        out_flush()
+        return 1
+    }
+    
+    src_ptr = arena_alloc(0x100000)
+    src_len = __syscall3__(SYS_READ fd src_ptr 0x100000)
+    __syscall1__(SYS_CLOSE fd)
+    
+    tokenize()
+    
+    cur_tok = 0
+    next_label = 0
+    stack_offset = 0 - 8
+    loop_start_label = 0
+    loop_end_label = 0
+    fn_epilogue_label = 0
+    
+    out_str(".text\n")
+    out_str(".globl __main__\n\n")
+    
+    parse_program()
+    
+    out_str("\n.data\n")
+    
+    let di:int = 0
+    loop di <? data_len {
+        out_char(__load8__(data_ptr + di))
+        di = di + 1
+    }
+    
+    out_str("\n.section .note.GNU-stack,\"\",@progbits\n")
+    
+    out_flush()
+    return 0
+}

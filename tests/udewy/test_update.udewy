@@ -1,0 +1,14 @@
+# Test update assignment (+=) and break
+let main = ():>int => {
+    let sum:int = 0
+    let i:int = 0
+    loop i <? 100 {
+        sum += i
+        i += 1
+        if i >? 10 {
+            break
+        }
+    }
+    # sum should be 0+1+2+...+10 = 55
+    return sum
+}

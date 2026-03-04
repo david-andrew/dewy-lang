@@ -1,0 +1,16 @@
+# Test recursion with fibonacci
+let fib = (n:int):>int => {
+    if n <? 2 {
+        return n
+    } else {
+        return fib(n - 1) + fib(n - 2)
+    }
+}
+
+let main = ():>int => {
+    # fib(10) = 55
+    let result:int = fib(10)
+    
+    # Return fib(10), we can verify via exit code
+    return result
+}

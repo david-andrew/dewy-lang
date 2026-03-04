@@ -1,0 +1,144 @@
+# Comprehensive test of udewy features
+
+# Global constants
+const SYS_WRITE:int = 1
+const STDOUT:int = 1
+
+# Helper to print a string
+let print = (s:int):>void => {
+    let len:int = __load__(s + 0 - 8)
+    __syscall3__(SYS_WRITE STDOUT s len)
+    return void
+}
+
+# Recursive fibonacci
+let fib = (n:int):>int => {
+    if n <? 2 {
+        return n
+    } else {
+        return fib(n - 1) + fib(n - 2)
+    }
+}
+
+# Print a single digit
+let print_digit = (d:int):>void => {
+    let buf:int = "0"
+    let c:int = d + 48
+    __store8__(c buf)
+    __syscall3__(SYS_WRITE STDOUT buf 1)
+    return void
+}
+
+# Print two-digit number (0-99)
+let print_num = (n:int):>void => {
+    if n >=? 10 {
+        print_digit(n // 10)
+    }
+    print_digit(n % 10)
+    return void
+}
+
+# Test arithmetic
+let test_arithmetic = ():>int => {
+    let a:int = 10
+    let b:int = 3
+    
+    # Test basic ops
+    let sum:int = a + b
+    let diff:int = a - b
+    let prod:int = a * b
+    let quot:int = a // b
+    let rem:int = a % b
+    
+    # Test shifts
+    let shifted:int = 1 << 4
+    let unshifted:int = shifted >> 2
+    
+    # Test boolean ops
+    let and_result:int = 0xFF and 0x0F
+    let or_result:int = 0xF0 or 0x0F
+    let xor_result:int = 0xFF xor 0x0F
+    let not_result:int = not 0
+    
+    return sum + diff + prod + quot + rem + shifted + unshifted + and_result
+}
+
+# Test control flow
+let test_control = ():>int => {
+    let count:int = 0
+    
+    # Test if/else if/else
+    let x:int = 5
+    if x <? 3 {
+        count = 1
+    } else if x <? 7 {
+        count = 2
+    } else {
+        count = 3
+    }
+    
+    # Test loop with break
+    let i:int = 0
+    loop i <? 100 {
+        if i >=? 10 {
+            break
+        }
+        count += 1
+        i += 1
+    }
+    
+    # Test loop with continue
+    let sum:int = 0
+    let j:int = 0
+    loop j <? 10 {
+        j += 1
+        if (j % 2) =? 0 {
+            continue
+        }
+        sum += j
+    }
+    
+    return count + sum
+}
+
+# Test pipe operator
+let double = (x:int):>int => {
+    return x * 2
+}
+
+let test_pipe = ():>int => {
+    let result:int = 5 |> double |> double
+    return result
+}
+
+# Main entry point
+let main = ():>int => {
+    print("Testing udewy compiler\n")
+    
+    # Test arithmetic
+    let arith:int = test_arithmetic()
+    print("Arithmetic: ")
+    print_num(arith)
+    print("\n")
+    
+    # Test control flow
+    let ctrl:int = test_control()
+    print("Control: ")
+    print_num(ctrl)
+    print("\n")
+    
+    # Test pipe
+    let pipe:int = test_pipe()
+    print("Pipe: ")
+    print_num(pipe)
+    print("\n")
+    
+    # Test fibonacci
+    let f:int = fib(10)
+    print("Fib(10): ")
+    print_num(f)
+    print("\n")
+    
+    print("All tests passed!\n")
+    return 0
+}

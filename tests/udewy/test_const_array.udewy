@@ -1,0 +1,26 @@
+# Test const propagation in arrays
+const T:int = 0xFFFFFFFFFFFFFFFF
+const F:int = 0
+
+# Array using const values - should go to .data section
+const lookup_table:array<int> = [T F T F F T]
+
+let main = ():>int => {
+    # Access the array
+    let ptr:int = lookup_table
+    let len:int = __load__(ptr + 0 - 8)
+    
+    # Sum all elements (should be 3 * -1 = -3 in two's complement, or count 1s)
+    let sum:int = 0
+    let i:int = 0
+    loop i <? len {
+        let elem:int = __load__(ptr + (i * 8))
+        if elem not=? 0 {
+            sum = sum + 1
+        }
+        i = i + 1
+    }
+    
+    # sum should be 3 (three T values)
+    return sum
+}

@@ -1,0 +1,14 @@
+# Test pipe operator
+let double = (x:int):>int => {
+    return x * 2
+}
+
+let add_one = (x:int):>int => {
+    return x + 1
+}
+
+let main = ():>int => {
+    # (5 |> double |> add_one) = (5 * 2) + 1 = 11
+    let result:int = 5 |> double |> add_one
+    return result
+}

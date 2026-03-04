@@ -107,6 +107,17 @@ def str_left_eq(prefix:str, s:str)->bool:
         i += 1
     return True
 
+def str_eq(a:str, b:str)->bool:
+    """Check if two strings are equal"""
+    if len(a) != len(b):
+        return False
+    i = 0
+    while i < len(a):
+        if a[i] != b[i]:
+            return False
+        i += 1
+    return True
+
 def is_alpha(c:char)->bool:
     o = ord(c)
     return (65 <= o <= 90) or (97 <= o <= 122) or (c == "_")
@@ -155,21 +166,21 @@ def tokenize(src:str)->list[PackedToken]:
                 i += 1
             text = src[start:i]
             
-            # specific keywords
-            if   str_left_eq("let", text):      toks.append(pack(NO_VALUE, start, TK_LET))
-            elif str_left_eq("const", text):    toks.append(pack(NO_VALUE, start, TK_LET))
-            elif str_left_eq("and", text):      toks.append(pack(NO_VALUE, start, TK_AND))
-            elif str_left_eq("or", text):       toks.append(pack(NO_VALUE, start, TK_OR))
-            elif str_left_eq("xor", text):      toks.append(pack(NO_VALUE, start, TK_XOR))
-            elif str_left_eq("not", text):      toks.append(pack(NO_VALUE, start, TK_NOT))
-            elif str_left_eq("true", text):     toks.append(pack(TRUE_VALUE, start, TK_NUMBER))
-            elif str_left_eq("false", text):    toks.append(pack(FALSE_VALUE, start, TK_NUMBER))
-            elif str_left_eq("if", text):       toks.append(pack(NO_VALUE, start, TK_IF))
-            elif str_left_eq("loop", text):     toks.append(pack(NO_VALUE, start, TK_LOOP))
-            elif str_left_eq("else", text):     toks.append(pack(NO_VALUE, start, TK_ELSE))
-            elif str_left_eq("return", text):   toks.append(pack(NO_VALUE, start, TK_RETURN))
-            elif str_left_eq("break", text):    toks.append(pack(NO_VALUE, start, TK_BREAK))
-            elif str_left_eq("continue", text): toks.append(pack(NO_VALUE, start, TK_CONTINUE))
+            # specific keywords (must be exact match, not prefix)
+            if   str_eq("let", text):      toks.append(pack(NO_VALUE, start, TK_LET))
+            elif str_eq("const", text):    toks.append(pack(NO_VALUE, start, TK_LET))
+            elif str_eq("and", text):      toks.append(pack(NO_VALUE, start, TK_AND))
+            elif str_eq("or", text):       toks.append(pack(NO_VALUE, start, TK_OR))
+            elif str_eq("xor", text):      toks.append(pack(NO_VALUE, start, TK_XOR))
+            elif str_eq("not", text):      toks.append(pack(NO_VALUE, start, TK_NOT))
+            elif str_eq("true", text):     toks.append(pack(TRUE_VALUE, start, TK_NUMBER))
+            elif str_eq("false", text):    toks.append(pack(FALSE_VALUE, start, TK_NUMBER))
+            elif str_eq("if", text):       toks.append(pack(NO_VALUE, start, TK_IF))
+            elif str_eq("loop", text):     toks.append(pack(NO_VALUE, start, TK_LOOP))
+            elif str_eq("else", text):     toks.append(pack(NO_VALUE, start, TK_ELSE))
+            elif str_eq("return", text):   toks.append(pack(NO_VALUE, start, TK_RETURN))
+            elif str_eq("break", text):    toks.append(pack(NO_VALUE, start, TK_BREAK))
+            elif str_eq("continue", text): toks.append(pack(NO_VALUE, start, TK_CONTINUE))
             
             # special cases of identifiers preceded or followed by something
             elif i < n and src[i] == '(':
@@ -183,7 +194,7 @@ def tokenize(src:str)->list[PackedToken]:
                 toks.append(pack(i - start, start, TK_FN_TYPE))
             
             # check `void` after the special cases because `:void` should become a type, not a bare void
-            elif str_left_eq("void", text): toks.append(pack(NO_VALUE, start, TK_VOID))
+            elif str_eq("void", text): toks.append(pack(NO_VALUE, start, TK_VOID))
             
             # regular identifier
             else: toks.append(pack(i - start, start, TK_IDENT))

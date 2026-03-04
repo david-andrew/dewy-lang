@@ -1,0 +1,11 @@
+# Hello world using syscalls
+const SYS_WRITE:int = 1
+const STDOUT:int = 1
+
+let main = ():>int => {
+    let msg:int = "Hello from udewy!\n"
+    # Get length from the word before the string data
+    let len:int = __load__(msg + 0 - 8)
+    __syscall3__(SYS_WRITE STDOUT msg len)
+    return 0
+}
