@@ -34,6 +34,48 @@ const PROT_WRITE:int = 2
 const MAP_PRIVATE:int = 2
 const MAP_ANONYMOUS:int = 32
 
+# ASCII character codes
+const CH_NUL:int = 0
+const CH_TAB:int = 9
+const CH_LF:int = 10
+const CH_CR:int = 13
+const CH_SPACE:int = 32
+const CH_HASH:int = 35
+const CH_DQUOTE:int = 34
+const CH_PERCENT:int = 37
+const CH_LPAREN:int = 40
+const CH_RPAREN:int = 41
+const CH_STAR:int = 42
+const CH_PLUS:int = 43
+const CH_MINUS:int = 45
+const CH_DOT:int = 46
+const CH_SLASH:int = 47
+const CH_0:int = 48
+const CH_1:int = 49
+const CH_9:int = 57
+const CH_COLON:int = 58
+const CH_LT:int = 60
+const CH_EQ:int = 61
+const CH_GT:int = 62
+const CH_A:int = 65
+const CH_F:int = 70
+const CH_Z:int = 90
+const CH_LBRACKET:int = 91
+const CH_BACKSLASH:int = 92
+const CH_RBRACKET:int = 93
+const CH_UNDERSCORE:int = 95
+const CH_a:int = 97
+const CH_b:int = 98
+const CH_c:int = 99
+const CH_f:int = 102
+const CH_n:int = 110
+const CH_r:int = 114
+const CH_t:int = 116
+const CH_x:int = 120
+const CH_z:int = 122
+const CH_LBRACE:int = 123
+const CH_RBRACE:int = 125
+
 # Memory sizes
 const ARENA_SIZE:int = 0x1000000
 const MAX_TOKENS:int = 65536
@@ -174,7 +216,7 @@ let arena_alloc = (size:int):>int => {
 let out_ptr:int = 0
 let out_len:int = 0
 
-let out_init = ():>void => {
+let out_init = ():>void => { 
     out_ptr = arena_alloc(OUTPUT_BUF_SIZE)
     out_len = 0
     return void
@@ -245,29 +287,29 @@ let out_label = (prefix:int n:int):>void => {
 # ============================================================================
 
 let is_alpha = (c:int):>int => {
-    if (c >=? 65) and (c <=? 90) { return TRUE_VAL }
-    if (c >=? 97) and (c <=? 122) { return TRUE_VAL }
-    if c =? 95 { return TRUE_VAL }
+    if (c >=? CH_A) and (c <=? CH_Z) { return TRUE_VAL }
+    if (c >=? CH_a) and (c <=? CH_z) { return TRUE_VAL }
+    if c =? CH_UNDERSCORE { return TRUE_VAL }
     return FALSE_VAL
 }
 
 let is_digit = (c:int):>int => {
-    if (c >=? 48) and (c <=? 57) { return TRUE_VAL }
+    if (c >=? CH_0) and (c <=? CH_9) { return TRUE_VAL }
     return FALSE_VAL
 }
 
 let is_hex = (c:int):>int => {
-    if (c >=? 48) and (c <=? 57) { return TRUE_VAL }
-    if (c >=? 65) and (c <=? 70) { return TRUE_VAL }
-    if (c >=? 97) and (c <=? 102) { return TRUE_VAL }
+    if (c >=? CH_0) and (c <=? CH_9) { return TRUE_VAL }
+    if (c >=? CH_A) and (c <=? CH_F) { return TRUE_VAL }
+    if (c >=? CH_a) and (c <=? CH_f) { return TRUE_VAL }
     return FALSE_VAL
 }
 
 let is_space = (c:int):>int => {
-    if c =? 32 { return TRUE_VAL }
-    if c =? 9 { return TRUE_VAL }
-    if c =? 10 { return TRUE_VAL }
-    if c =? 13 { return TRUE_VAL }
+    if c =? CH_SPACE { return TRUE_VAL }
+    if c =? CH_TAB { return TRUE_VAL }
+    if c =? CH_LF { return TRUE_VAL }
+    if c =? CH_CR { return TRUE_VAL }
     return FALSE_VAL
 }
 
@@ -359,9 +401,9 @@ let tokenize = ():>void => {
         }
         
         # Skip comments
-        if c =? 35 {
+        if c =? CH_HASH {
             i = i + 1
-            loop (i <? n) and (__load8__(src_ptr + i) not=? 10) {
+            loop (i <? n) and (__load8__(src_ptr + i) not=? CH_LF) {
                 i = i + 1
             }
             continue
@@ -414,7 +456,7 @@ let tokenize = ():>void => {
                 } else {
                     tok_add(0 start TK_VOID)
                 }
-            } else if (i <? n) and (__load8__(src_ptr + i) =? 40) {
+            } else if (i <? n) and (__load8__(src_ptr + i) =? CH_LPAREN) {
                 tok_add(len start TK_IDENT_CALL)
                 i = i + 1
             } else if (tok_count >? 0) and (tok_kind(tok_count - 1) =? TK_COLON) {
@@ -430,17 +472,17 @@ let tokenize = ():>void => {
         }
         
         # Hex number
-        if (c =? 48) and ((i + 1) <? n) and (__load8__(src_ptr + i + 1) =? 120) {
+        if (c =? CH_0) and ((i + 1) <? n) and (__load8__(src_ptr + i + 1) =? CH_x) {
             let start:int = i
             i = i + 2
             let val:int = 0
-            loop (i <? n) and (is_hex(__load8__(src_ptr + i)) or (__load8__(src_ptr + i) =? 95)) {
+            loop (i <? n) and (is_hex(__load8__(src_ptr + i)) or (__load8__(src_ptr + i) =? CH_UNDERSCORE)) {
                 let d:int = __load8__(src_ptr + i)
-                if d not=? 95 {
+                if d not=? CH_UNDERSCORE {
                     let dv:int = 0
-                    if (d >=? 48) and (d <=? 57) {
-                        dv = d - 48
-                    } else if (d >=? 65) and (d <=? 70) {
+                    if (d >=? CH_0) and (d <=? CH_9) {
+                        dv = d - CH_0
+                    } else if (d >=? CH_A) and (d <=? CH_F) {
                         dv = d - 55
                     } else {
                         dv = d - 87
@@ -454,14 +496,14 @@ let tokenize = ():>void => {
         }
         
         # Binary number
-        if (c =? 48) and ((i + 1) <? n) and (__load8__(src_ptr + i + 1) =? 98) {
+        if (c =? CH_0) and ((i + 1) <? n) and (__load8__(src_ptr + i + 1) =? CH_b) {
             let start:int = i
             i = i + 2
             let val:int = 0
-            loop (i <? n) and ((__load8__(src_ptr + i) =? 48) or (__load8__(src_ptr + i) =? 49) or (__load8__(src_ptr + i) =? 95)) {
+            loop (i <? n) and ((__load8__(src_ptr + i) =? CH_0) or (__load8__(src_ptr + i) =? CH_1) or (__load8__(src_ptr + i) =? CH_UNDERSCORE)) {
                 let d:int = __load8__(src_ptr + i)
-                if d not=? 95 {
-                    val = (val << 1) or (d - 48)
+                if d not=? CH_UNDERSCORE {
+                    val = (val << 1) or (d - CH_0)
                 }
                 i = i + 1
             }
@@ -482,11 +524,11 @@ let tokenize = ():>void => {
         }
         
         # String
-        if c =? 34 {
+        if c =? CH_DQUOTE {
             let start:int = i
             i = i + 1
-            loop (i <? n) and (__load8__(src_ptr + i) not=? 34) {
-                if __load8__(src_ptr + i) =? 92 {
+            loop (i <? n) and (__load8__(src_ptr + i) not=? CH_DQUOTE) {
+                if __load8__(src_ptr + i) =? CH_BACKSLASH {
                     i = i + 1
                 }
                 i = i + 1
@@ -565,14 +607,14 @@ let tokenize = ():>void => {
         }
         
         # Type parameter
-        if c =? 60 {
+        if c =? CH_LT {
             let start:int = i
             let depth:int = 1
             i = i + 1
             loop (i <? n) and (depth >? 0) {
                 let tc:int = __load8__(src_ptr + i)
-                if tc =? 60 { depth = depth + 1 }
-                if tc =? 62 { depth = depth - 1 }
+                if tc =? CH_LT { depth = depth + 1 }
+                if tc =? CH_GT { depth = depth - 1 }
                 i = i + 1
             }
             tok_add(i - start start TK_TYPE_PARAM)
@@ -581,18 +623,18 @@ let tokenize = ():>void => {
         
         # Single-char tokens
         i = i + 1
-        if c =? 43 { tok_add(0 i TK_PLUS) continue }
-        if c =? 45 { tok_add(0 i TK_MINUS) continue }
-        if c =? 42 { tok_add(0 i TK_MUL) continue }
-        if c =? 37 { tok_add(0 i TK_MOD) continue }
-        if c =? 40 { tok_add(0 i TK_LEFT_PAREN) continue }
-        if c =? 41 { tok_add(0 i TK_RIGHT_PAREN) continue }
-        if c =? 123 { tok_add(0 i TK_LEFT_BRACE) continue }
-        if c =? 125 { tok_add(0 i TK_RIGHT_BRACE) continue }
-        if c =? 91 { tok_add(0 i TK_LEFT_BRACKET) continue }
-        if c =? 93 { tok_add(0 i TK_RIGHT_BRACKET) continue }
-        if c =? 58 { tok_add(0 i TK_COLON) continue }
-        if c =? 61 {
+        if c =? CH_PLUS { tok_add(0 i TK_PLUS) continue }
+        if c =? CH_MINUS { tok_add(0 i TK_MINUS) continue }
+        if c =? CH_STAR { tok_add(0 i TK_MUL) continue }
+        if c =? CH_PERCENT { tok_add(0 i TK_MOD) continue }
+        if c =? CH_LPAREN { tok_add(0 i TK_LEFT_PAREN) continue }
+        if c =? CH_RPAREN { tok_add(0 i TK_RIGHT_PAREN) continue }
+        if c =? CH_LBRACE { tok_add(0 i TK_LEFT_BRACE) continue }
+        if c =? CH_RBRACE { tok_add(0 i TK_RIGHT_BRACE) continue }
+        if c =? CH_LBRACKET { tok_add(0 i TK_LEFT_BRACKET) continue }
+        if c =? CH_RBRACKET { tok_add(0 i TK_RIGHT_BRACKET) continue }
+        if c =? CH_COLON { tok_add(0 i TK_COLON) continue }
+        if c =? CH_EQ {
             if tok_count >? 0 {
                 let pk:int = tok_kind(tok_count - 1)
                 if (pk >? 13) and (pk <? 31) {
@@ -1022,7 +1064,7 @@ let parse_atom = ():>void => {
         let send:int = start + len - 1
         loop si <? send {
             let c:int = __load8__(src_ptr + si)
-            if c =? 92 {
+            if c =? CH_BACKSLASH {
                 si = si + 1
             }
             slen = slen + 1
@@ -1031,7 +1073,7 @@ let parse_atom = ():>void => {
         
         data_str("    .quad ")
         data_int(slen)
-        data_char(10)
+        data_char(CH_LF)
         
         data_str("    .byte ")
         si = start + 1
@@ -1042,13 +1084,13 @@ let parse_atom = ():>void => {
             }
             first = 0
             let c:int = __load8__(src_ptr + si)
-            if c =? 92 {
+            if c =? CH_BACKSLASH {
                 si = si + 1
                 c = __load8__(src_ptr + si)
-                if c =? 110 { c = 10 }
-                else if c =? 116 { c = 9 }
-                else if c =? 114 { c = 13 }
-                else if c =? 48 { c = 0 }
+                if c =? CH_n { c = CH_LF }
+                else if c =? CH_t { c = CH_TAB }
+                else if c =? CH_r { c = CH_CR }
+                else if c =? CH_0 { c = CH_NUL }
             }
             data_int(c)
             si = si + 1
@@ -1877,14 +1919,14 @@ let parse_global_var = ():>void => {
         let send:int = start + len - 1
         loop si <? send {
             let c:int = __load8__(src_ptr + si)
-            if c =? 92 { si = si + 1 }
+            if c =? CH_BACKSLASH { si = si + 1 }
             slen = slen + 1
             si = si + 1
         }
         
         data_str("    .quad ")
         data_int(slen)
-        data_char(10)
+        data_char(CH_LF)
         
         data_str("    .byte ")
         si = start + 1
@@ -1893,18 +1935,18 @@ let parse_global_var = ():>void => {
             if first =? 0 { data_str(", ") }
             first = 0
             let c:int = __load8__(src_ptr + si)
-            if c =? 92 {
+            if c =? CH_BACKSLASH {
                 si = si + 1
                 c = __load8__(src_ptr + si)
-                if c =? 110 { c = 10 }
-                else if c =? 116 { c = 9 }
-                else if c =? 114 { c = 13 }
-                else if c =? 48 { c = 0 }
+                if c =? CH_n { c = CH_LF }
+                else if c =? CH_t { c = CH_TAB }
+                else if c =? CH_r { c = CH_CR }
+                else if c =? CH_0 { c = CH_NUL }
             }
             data_int(c)
             si = si + 1
         }
-        data_char(10)
+        data_char(CH_LF)
         
         let label_id:int = next_label
         next_label = next_label + 1
@@ -2044,7 +2086,7 @@ let str_copy = (dst:int s:int):>int => {
 
 let str_copy_cstr = (dst:int s:int):>int => {
     let i:int = 0
-    loop __load8__(s + i) not=? 0 {
+    loop __load8__(s + i) not=? CH_NUL {
         __store8__(__load8__(s + i) dst + i)
         i = i + 1
     }
@@ -2063,14 +2105,14 @@ let make_path = (dir:int name:int ext:int):>int => {
 
 let get_basename = (path:int):>int => {
     let plen:int = 0
-    loop __load8__(path + plen) not=? 0 {
+    loop __load8__(path + plen) not=? CH_NUL {
         plen = plen + 1
     }
     
     let last_slash:int = 0 - 1
     let i:int = 0
     loop i <? plen {
-        if __load8__(path + i) =? 47 {
+        if __load8__(path + i) =? CH_SLASH {
             last_slash = i
         }
         i = i + 1
@@ -2081,7 +2123,7 @@ let get_basename = (path:int):>int => {
     let last_dot:int = plen
     i = plen - 1
     loop i >? start {
-        if __load8__(path + i) =? 46 {
+        if __load8__(path + i) =? CH_DOT {
             last_dot = i
             break
         }
@@ -2124,7 +2166,7 @@ let main = (argc:int argv:int):>int => {
     let arg_idx:int = 1
     
     let first_arg:int = __load__(argv + 8)
-    if (__load8__(first_arg) =? 45) and (__load8__(first_arg + 1) =? 99) and (__load8__(first_arg + 2) =? 0) {
+    if (__load8__(first_arg) =? CH_MINUS) and (__load8__(first_arg + 1) =? CH_c) and (__load8__(first_arg + 2) =? CH_NUL) {
         compile_only = 1
         arg_idx = 2
     }
@@ -2190,7 +2232,7 @@ let main = (argc:int argv:int):>int => {
     if compile_only {
         __syscall3__(SYS_WRITE STDOUT "Compiled: " 10)
         let olen:int = 0
-        loop __load8__(exe_path + olen) not=? 0 {
+        loop __load8__(exe_path + olen) not=? CH_NUL {
             olen = olen + 1
         }
         __syscall3__(SYS_WRITE STDOUT exe_path olen)
