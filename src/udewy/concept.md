@@ -128,6 +128,25 @@ Restrictions:
         val[d][f]
         val[d][g]
         ```
+        - actually, accessing members via indexing is going to break semantics with full dewy since we don't know the type being indexed in to, we need to manually multiply the index by the size of elements. **Probably going to take out indexing** in favor of just doing arithmetic directly on pointers
+        ```udewy
+        let a:int=0<<3
+        let b:int=1<<3
+        let c:int=2<<3
+        let d:int=3<<3
+            let e:int=0<<3
+            let f:int=1<<3
+            let g:int=2<<3
+        
+        val:my_struct = ...
+
+        val+a    # val.a
+        val+b    # val.b
+        val+c    # val.c
+        val+d+e  # val.d.e
+        val+d+f  # val.d.f
+        val+d+g  # val.d.g
+        ```
 - all variables are declared with `let name:type = ...` pattern. no destructuring. no using variables immediately without declaring them first. declarations must have an initial value
     - can also use `const`, but there is no enforcement of `let` vs `const`
 - ~~no typing? or super minimal typing mandatory in all relevant places. no type checking. maybe also no type unions (e.g. something can't be int|undefined?.. but that would be pretty hard to go without.)~~

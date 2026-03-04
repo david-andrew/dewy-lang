@@ -20,12 +20,11 @@ type PackedToken = int  # 128-bit integer: vvvv_vvvv_vvvv_vvvv llll_llll_llll_kk
 _counter = count(0)
 def auto(): return next(_counter)
 
-# TK_EOF:          TokenKind = auto()
 TK_IDENT:        TokenKind = auto()    # (length, start, TK_IDENT)        # basic identifier. used for all identifiers except for function calls and indexes
 TK_IDENT_CALL:   TokenKind = auto()    # (length, start, TK_IDENT_CALL)   # an identifier followed by a paren. e.g. `some_fn(`
-TK_IDENT_INDEX:  TokenKind = auto()    # (length, start, TK_IDENT_INDEX)  # an identifier followed by a bracket. e.g. `some_arr[`
 TK_STRING:       TokenKind = auto()    # (length, start, TK_STRING)
 TK_TYPE_PARAM:   TokenKind = auto()    # (length, start, TK_TYPE_PARAM)  # a type parameter. e.g. `<T>` or `<int|string|undefined>`
+TK_VOID:         TokenKind = auto()
 TK_NUMBER:       TokenKind = auto()
 TK_LET:          TokenKind = auto()
 TK_IF:           TokenKind = auto()
@@ -58,7 +57,7 @@ _END_CAN_BE_IN_PLACE_ASSIGNMENT_OP:int = auto()  # not a TokenKind, just an inde
 
 TK_ASSIGN:       TokenKind = auto()    # (NO_VALUE, start, TK_ASSIGN)
 TK_UPDATE_ASSIGN:TokenKind = auto()    # (kind, start, TK_UPDATE_ASSIGN) # an equals sign after an operator token, i.e. `+=`, `-=`, `*=`, `//=`, `%=`
-TK_EXPR_CALL:    TokenKind = auto()    # closing paren followed by opening paren i.e. `)(...)`
+TK_EXPR_CALL:    TokenKind = auto()    # closing paren followed by opening paren i.e. `)(...)`. means do a function call on the result of the left expression in parens
 TK_LEFT_PAREN:   TokenKind = auto()
 TK_RIGHT_PAREN:  TokenKind = auto()
 TK_LEFT_BRACE:   TokenKind = auto()
@@ -68,9 +67,9 @@ TK_RIGHT_BRACKET:TokenKind = auto()
 _TK_COLON:       TokenKind = auto()    # should not appear in the final output 
 _TK_FN_COLON:    TokenKind = auto()    # should not appear in the final output 
 TK_TYPE:         TokenKind = auto()
-TK_FN_TYPE:      TokenKind = auto()
-TK_FN_ARROW:     TokenKind = auto()
-TK_PIPE:         TokenKind = auto()
+TK_FN_TYPE:      TokenKind = auto()    # `:>` e.g. `let foo = ():>bar => { ... }`
+TK_FN_ARROW:     TokenKind = auto()    # `=>`
+TK_PIPE:         TokenKind = auto()    # `|>` e.g. `x |> f1 |> f2 |> f3`
 
 # placehold for tokens that don't have a value
 TRUE_VALUE: TokenValue = 0xFFFF_FFFF_FFFF_FFFF
@@ -165,7 +164,6 @@ def tokenize(src:str)->list[PackedToken]:
             elif str_left_eq("not", text):      toks.append(pack(NO_VALUE, start, TK_NOT))
             elif str_left_eq("true", text):     toks.append(pack(TRUE_VALUE, start, TK_NUMBER))
             elif str_left_eq("false", text):    toks.append(pack(FALSE_VALUE, start, TK_NUMBER))
-            # elif str_left_eq("void", text):     toks.append(pack(NO_VALUE, start, TK_NUMBER))
             elif str_left_eq("if", text):       toks.append(pack(NO_VALUE, start, TK_IF))
             elif str_left_eq("loop", text):     toks.append(pack(NO_VALUE, start, TK_LOOP))
             elif str_left_eq("else", text):     toks.append(pack(NO_VALUE, start, TK_ELSE))
@@ -177,15 +175,15 @@ def tokenize(src:str)->list[PackedToken]:
             elif i < n and src[i] == '(':
                 toks.append(pack(i - start, start, TK_IDENT_CALL))
                 i += 1 # consume the '('
-            elif i < n and src[i] == '[':
-                toks.append(pack(i - start, start, TK_IDENT_INDEX))
-                i += 1 # consume the '['
             elif len(toks) > 0 and kindof(toks[-1]) == _TK_COLON:
                 toks.pop()
                 toks.append(pack(i - start, start, TK_TYPE))
             elif len(toks) > 0 and kindof(toks[-1]) == _TK_FN_COLON:
                 toks.pop()
                 toks.append(pack(i - start, start, TK_FN_TYPE))
+            
+            # check `void` after the special cases because `:void` should become a type, not a bare void
+            elif str_left_eq("void", text): toks.append(pack(NO_VALUE, start, TK_VOID))
             
             # regular identifier
             else: toks.append(pack(i - start, start, TK_IDENT))
@@ -358,7 +356,6 @@ def dump_token(token:PackedToken, src:str):
 
     if kind == TK_IDENT:         value = src[location:location+value]
     elif kind == TK_IDENT_CALL:  value = src[location:location+value] + "("
-    elif kind == TK_IDENT_INDEX: value = src[location:location+value] + "["
     elif kind == TK_TYPE:        value = ':' +src[location:location+value]
     elif kind == TK_FN_TYPE:     value = ':>' + src[location:location+value]
     elif kind == TK_TYPE_PARAM:  value = src[location:location+value]  # <> already included in range

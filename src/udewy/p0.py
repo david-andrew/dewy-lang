@@ -12,7 +12,6 @@ type VarName = str
 type VarDecl = tuple[VarName, Address]
 type Scope = tuple[list[VarDecl], Scope|None]
 
-#TODO: probably get rid of structs since they add so much complexity / basically require type checking
 """
 udewy Grammar:
 
@@ -20,7 +19,7 @@ program ::= statement*
 
 statement ::= 
       fn_decl        # may only appear at the top level
-    | var_decl
+    | var_decl       # 
     | assign_stmnt
     | if_stmnt
     | loop_stmnt
@@ -29,18 +28,18 @@ statement ::=
     | return_stmnt
     | expr
 
-fn_decl ::= id '=' '(' (id type)* ')' fn_type '=>' '{' statement* '}'
-var_decl ::= id type ('=' expr)?
+fn_decl ::= id '=' '(' (id var_type_note)* ')' fn_type_note '=>' '{' statement* '}'
+var_decl ::= id var_type_note ('=' expr)?
 assign_stmnt ::= (id '=' expr) | (id in_place_op expr)
 if_stmnt ::= 'if' expr '{' statement* '}' else_if_stmnt* else_stmnt?
-else_if_stmnt ::= 'else if' expr '{' statement* '}' else_if_stmnt* else_stmnt?
+else_if_stmnt ::= 'else if' expr '{' statement* '}'
 else_stmnt ::= 'else' '{' statement* '}'
 loop_stmnt ::= 'loop' expr '{' statement* '}'
 break_stmnt ::= 'break'
 continue_stmnt ::= 'continue'
 return_stmnt ::= 'return' expr   # expr is mandatory. use `void` if don't want to return anything
 
-# note: expressions don't have precedence and are parsed left-associative. 
+# note: expressions don't have precedence and instead all operators are parsed as left-associative. 
 # Would be nice if parser could detect when this breaks precedence order of full dewy and emit an error
 # e.g. `1 * 2 + 3` is fine, but `1 + 2 * 3` would throw an error
 # perhaps we could keep a running min_precedence when parsing expr, and if any new operator has higher precedence, we error 
@@ -66,39 +65,52 @@ expr ::=
     | (expr '>=?' expr)
     | (expr '<=?' expr)
     | ('(' expr ')')
-    | ('[' expr* ']')
+    | ('[' expr* ']')   # array literal, becomes a list of int64
     
     # calls
     | (expr '|>' expr)        # right expr is assumed to be a fn pointer
     | (ident_call expr* ')')
     | (expr expr_call expr* ')')
-    
-    # index
-    | (expr ident_index expr* ']')
-    
-    # dot access
-    | (expr ident_dot expr* '.')   # this converts to a regular index access using the named member's index in the struct declaration
-    
+
     # basic atoms
     | id
     | num
     | '-' num
     | str
+    | void   # main use is `return void` or `let foo = (...):>void` => {...}. most other uses break semantics with full dewy
 
 var_type_note ::= type | (type type_param) | type_param   # e.g. `:int` `:array<int>` `<int>` (in context examples: `x:int` `y:array<int>` `x<int>` `a<int|string>`)
 fn_type_note ::= fn_type | (fn_type fn_type_param)        # e.g. `:>int` `:>array<int>` # udewy won't support `:> <arbitrary_type_block>` without some identifier in between, even though it would be a valid dewy type expression
 
-# atoms from tokenization
+# atoms from tokenization (handled in t0.py)
 id ::= [a-zA-Z_][a-zA-Z0-9_]*
 num ::= [0-9]+ | '0x'[0-9a-fA-F]+ | '0b'[01]+ | 'true' | 'false'
 str ::= '"' ( ~'"' | ('\'ξ) )* '"'   # note ξ is any ascii character (i.e. [0x09 0x0a 0x0d 0x20-0x7e])
 type ::= ':' id
-type_param ::= '<' (type or type expressions or etc) '>'  # inside is unchecked
+type_param ::= '<' (type or type expressions or etc) '>'  # inside can be anything and is is not checked for correctness
 fn_type ::= ':>' id
 ident_call ::= id '('
 expr_call ::= '('  # where prev was ')' (i.e. `(expr)(...)`)
-ident_index ::= id '['
+
+
+
+
+
+# Notes:
+- types are only present for grammar disambiguation. udewy does no type checking
+- everything is an integer under the hood
+    - strings are a pointer to a length-prefixed block of bytes
+    - arrays are a pointer to a length-prefixed block of integers
+    - booleans are a single integer (false=0, true=-1)
+    - numbers are a single integer
+    - functions are a pointer to a code label
+- for indexing/struct access, we will simply do pointer arithmetic, and be sure to bookkeep element sizes. There is no index nor dot access operators in udewy.
+- note no semicolons at all. Generally all cases should be decidable with no or minimal fixed lookahead.
+- udewy should be valid dewy code. any udewy code that passes the full compiler should have the same behavior
+- as noted, expressions do not require parenthesis, but precedence/associativity are ignored, so it is often recommended
+
 """
+
 
 def parse(toks:list[t0.PackedToken], backend=x84_64) -> str:
     # TODO: recursive descent parser for LL(1) grammar
