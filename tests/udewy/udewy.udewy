@@ -2115,23 +2115,28 @@ let main = (argc:int argv:int):>int => {
     scope_init()
     
     if argc <? 2 {
-        __syscall3__(SYS_WRITE STDERR "Usage: udewy <file.udewy> [-o output]\n" 38)
+        __syscall3__(SYS_WRITE STDERR "Usage: udewy [-c] <file.udewy> [args...]\n" 41)
+        __syscall3__(SYS_WRITE STDERR "  -c    Compile only, don't run\n" 32)
         return 1
     }
     
-    let filename:int = __load__(argv + 8)
-    let output_name:int = 0
+    let compile_only:int = 0
+    let arg_idx:int = 1
     
-    if argc >=? 4 {
-        let arg2:int = __load__(argv + 16)
-        if (__load8__(arg2) =? 45) and (__load8__(arg2 + 1) =? 111) {
-            output_name = __load__(argv + 24)
-        }
+    let first_arg:int = __load__(argv + 8)
+    if (__load8__(first_arg) =? 45) and (__load8__(first_arg + 1) =? 99) and (__load8__(first_arg + 2) =? 0) {
+        compile_only = 1
+        arg_idx = 2
     }
     
-    if output_name =? 0 {
-        output_name = get_basename(filename)
+    if arg_idx >=? argc {
+        __syscall3__(SYS_WRITE STDERR "Error: No input file specified\n" 31)
+        return 1
     }
+    
+    let filename:int = __load__(argv + (arg_idx * 8))
+    let script_args_start:int = arg_idx + 1
+    let script_argc:int = argc - script_args_start
     
     let fd:int = __syscall2__(SYS_OPEN filename 0)
     if fd <? 0 {
@@ -2172,6 +2177,7 @@ let main = (argc:int argv:int):>int => {
     let basename:int = get_basename(filename)
     let asm_path:int = make_path("__dewycache__/" basename ".s\0")
     let obj_path:int = make_path("__dewycache__/" basename ".o\0")
+    let exe_path:int = make_path("__dewycache__/" basename "\0")
     let runtime_obj:int = "__dewycache__/runtime.o\0"
     let runtime_src:int = "src/udewy/runtime.s\0"
     
@@ -2179,15 +2185,30 @@ let main = (argc:int argv:int):>int => {
     
     run_cmd("/usr/bin/as\0" asm_path "-o\0" obj_path 0)
     run_cmd("/usr/bin/as\0" runtime_src "-o\0" runtime_obj 0)
-    run_cmd("/usr/bin/ld\0" obj_path runtime_obj "-o\0" output_name)
+    run_cmd("/usr/bin/ld\0" obj_path runtime_obj "-o\0" exe_path)
     
-    __syscall3__(SYS_WRITE STDOUT "Compiled: " 10)
-    let olen:int = 0
-    loop __load8__(output_name + olen) not=? 0 {
-        olen = olen + 1
+    if compile_only {
+        __syscall3__(SYS_WRITE STDOUT "Compiled: " 10)
+        let olen:int = 0
+        loop __load8__(exe_path + olen) not=? 0 {
+            olen = olen + 1
+        }
+        __syscall3__(SYS_WRITE STDOUT exe_path olen)
+        __syscall3__(SYS_WRITE STDOUT "\n" 1)
+        return 0
     }
-    __syscall3__(SYS_WRITE STDOUT output_name olen)
-    __syscall3__(SYS_WRITE STDOUT "\n" 1)
     
-    return 0
+    let new_argv:int = arena_alloc((script_argc + 2) * 8)
+    __store__(exe_path new_argv)
+    let ai:int = 0
+    loop ai <? script_argc {
+        __store__(__load__(argv + ((script_args_start + ai) * 8)) new_argv + ((ai + 1) * 8))
+        ai = ai + 1
+    }
+    __store__(0 new_argv + ((script_argc + 1) * 8))
+    
+    __syscall3__(SYS_EXECVE exe_path new_argv 0)
+    
+    __syscall3__(SYS_WRITE STDERR "Error: failed to execute\n" 25)
+    return 1
 }
