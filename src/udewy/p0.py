@@ -1468,6 +1468,7 @@ def parse(toks: list, src: str) -> str:
     output.extend(data)
     output.append("")
     output.append(".section .note.GNU-stack,\"\",@progbits")
+    output.append("")
     
     return "\n".join(output)
 
@@ -1478,14 +1479,43 @@ def parse(toks: list, src: str) -> str:
 
 if __name__ == "__main__":
     import sys
+    import subprocess
+    from pathlib import Path
     
-    if len(sys.argv) != 2:
-        print("Usage: python -m udewy.p0 <file.udewy>")
+    if len(sys.argv) < 2:
+        print("Usage: python -m src.udewy.p0 <file.udewy> [-o output]")
         sys.exit(1)
     
-    with open(sys.argv[1], "r") as f:
-        src = f.read()
+    input_file = Path(sys.argv[1])
     
+    output_name = None
+    i = 2
+    while i < len(sys.argv):
+        if sys.argv[i] == "-o" and i + 1 < len(sys.argv):
+            output_name = sys.argv[i + 1]
+            i += 2
+        else:
+            i += 1
+    
+    if output_name is None:
+        output_name = input_file.stem
+    
+    src = input_file.read_text()
     toks = t0.tokenize(src)
     asm = parse(toks, src)
-    print(asm)
+    
+    cache_dir = Path("__dewycache__")
+    cache_dir.mkdir(exist_ok=True)
+    
+    runtime_path = Path(__file__).parent / "runtime.s"
+    asm_path = cache_dir / f"{input_file.stem}.s"
+    obj_path = cache_dir / f"{input_file.stem}.o"
+    runtime_obj_path = cache_dir / "runtime.o"
+    
+    asm_path.write_text(asm)
+    
+    subprocess.run(["as", str(asm_path), "-o", str(obj_path)], check=True)
+    subprocess.run(["as", str(runtime_path), "-o", str(runtime_obj_path)], check=True)
+    subprocess.run(["ld", str(obj_path), str(runtime_obj_path), "-o", output_name], check=True)
+    
+    print(f"Compiled: {output_name}")
