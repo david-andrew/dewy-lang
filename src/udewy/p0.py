@@ -101,14 +101,16 @@ expr_call ::= '('  # where prev was ')' (i.e. `(expr)(...)`)
 - everything is an integer under the hood
     - strings are a pointer to a length-prefixed block of bytes
     - arrays are a pointer to a length-prefixed block of integers
-    - booleans are a single integer (false=0, true=-1)
+    - booleans are a single integer (false=0, true=-1) so bitwise operations on bool values are closed / behave like logical operations
     - numbers are a single integer
     - functions are a pointer to a code label
 - for indexing/struct access, we will simply do pointer arithmetic, and be sure to bookkeep element sizes. There is no index nor dot access operators in udewy.
 - note no semicolons at all. Generally all cases should be decidable with no or minimal fixed lookahead.
 - udewy should be valid dewy code. any udewy code that passes the full compiler should have the same behavior
 - as noted, expressions do not require parenthesis, but precedence/associativity are ignored, so it is often recommended
-
+- no imports. the program is a single file running from top to bottom
+- functions can be used before declared. generally this should make a placeholder of sorts until the function declaration happens, or error if it is never declared
+- initial target is x84_64 (linux)
 """
 
 

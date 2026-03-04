@@ -2,14 +2,51 @@
 const T:bool = true
 const F:bool = false
 
+const _len_offset:int = 0
+const _data_offset:int = 8
+const _underscore:int = 0x5F
+
+const deref = (ptr:int):>int => {
+    # TBD how dereferencing is handled. perhaps it might just be an intrinsic
+}
+
+### get the length of a string or array
+const len = (ptr<string|array<any>>):>int => {   # note the `id<typeexpr>` syntax instead of `id: typeexpr`
+    return deref(ptr+_len_offset)
+}
+
 ###! t0.dewy
+
+### Check if the prefix is a left substring of the string
+const str_left_eq = (prefix:string s:string):>bool => {
+    if len(prefix) >? len(s) {
+        return false
+    }
+    i = 0
+    end = len(prefix)
+    loop i <? end {
+        if (prefix+i|>deref) not=? (s+i|>deref) {
+            return false
+        }
+        i += 1
+    }
+    return true
+}
+
+const is_alpha = (c:char):>bool => { return _is_alpha_lookup+c |> deref }
+const is_digit = (c:char):>bool => { return _is_digit_lookup+c |> deref }
+const is_hex   = (c:char):>bool => { return _is_hex_lookup+c |> deref }
+
+# alt non-table version
+# const is_alpha = (c:char):>bool => { return ((65 <=? c) and (c <= 90)) or ((97 <=? c) and (c <=? 122)) or (c =? _underscore) }
+
 
 ###! tables.dewy
 # table of ascii characters identifying which are valid hex digits
-# usage: `if is_hex[c] {...}`
+# usage: `if is_hex+c|>deref {...}`
 
 
-const is_hex:array<bool> = [
+const _is_hex_lookup:array<bool> = [
 # xx   x0 |  x1 |  x2 |  x3 |  x4 |  x5 |  x6 |  x7 |  x8 |  x9 |  xA |  xB |  xC |  xD |  xE |  xF  
 # --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
 # 0x  NUL | SOH | STX | ETX | EOT | ENQ | ACK | BEL |  BS |  HT |  LF |  VT |  FF |  CR |  SO |  SI
@@ -32,6 +69,66 @@ const is_hex:array<bool> = [
 # --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
 # 6x   `  |  a  |  b  |  c  |  d  |  e  |  f  |  g  |  h  |  i  |  j  |  k  |  l  |  m  |  n  |  o
        F     T     T     T     T     T     T     F     F     F     F     F     F     F     F     F
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 7x   p  |  q  |  r  |  s  |  t  |  u  |  v  |  w  |  x  |  y  |  z  |  {  |  |  |  }  |  ~  | DEL
+       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
+]
+
+
+
+const _is_alpha_lookup:array<bool> = [
+# xx   x0 |  x1 |  x2 |  x3 |  x4 |  x5 |  x6 |  x7 |  x8 |  x9 |  xA |  xB |  xC |  xD |  xE |  xF  
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 0x  NUL | SOH | STX | ETX | EOT | ENQ | ACK | BEL |  BS |  HT |  LF |  VT |  FF |  CR |  SO |  SI
+       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 1x  DLE | DC1 | DC2 | DC3 | DC4 | NAK | SYN | ETB | CAN |  EM | SUB | ESC |  FS |  GS |  RS |  US
+       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 2x   SP |  !  |  "  |  #  |  $  |  %  |  &  |  '  |  (  |  )  |  *  |  +  |  ,  |  -  |  .  |  /
+       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 3x   0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  |  :  |  ;  |  <  |  =  |  >  |  ?
+       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 4x   @  |  A  |  B  |  C  |  D  |  E  |  F  |  G  |  H  |  I  |  J  |  K  |  L  |  M  |  N  |  O
+       F     T     T     T     T     T     T     T     T     T     T     T     T     T     T     T
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 5x   P  |  Q  |  R  |  S  |  T  |  U  |  V  |  W  |  X  |  Y  |  Z  |  [  |  \  |  ]  |  ^  |  _
+       T     T     T     T     T     T     T     T     T     T     T     F     F     F     F     F
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 6x   `  |  a  |  b  |  c  |  d  |  e  |  f  |  g  |  h  |  i  |  j  |  k  |  l  |  m  |  n  |  o
+       F     T     T     T     T     T     T     T     T     T     T     T     T     T     T     T
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 7x   p  |  q  |  r  |  s  |  t  |  u  |  v  |  w  |  x  |  y  |  z  |  {  |  |  |  }  |  ~  | DEL
+       F     T     T     T     T     T     T     T     T     T     T     F     F     F     F     F
+]
+
+
+
+const _is_digit_lookup:array<bool> = [
+# xx   x0 |  x1 |  x2 |  x3 |  x4 |  x5 |  x6 |  x7 |  x8 |  x9 |  xA |  xB |  xC |  xD |  xE |  xF  
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 0x  NUL | SOH | STX | ETX | EOT | ENQ | ACK | BEL |  BS |  HT |  LF |  VT |  FF |  CR |  SO |  SI
+       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 1x  DLE | DC1 | DC2 | DC3 | DC4 | NAK | SYN | ETB | CAN |  EM | SUB | ESC |  FS |  GS |  RS |  US
+       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 2x   SP |  !  |  "  |  #  |  $  |  %  |  &  |  '  |  (  |  )  |  *  |  +  |  ,  |  -  |  .  |  /
+       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 3x   0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  |  :  |  ;  |  <  |  =  |  >  |  ?
+       T     T     T     T     T     T     T     T     T     T     F     F     F     F     F     F
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 4x   @  |  A  |  B  |  C  |  D  |  E  |  F  |  G  |  H  |  I  |  J  |  K  |  L  |  M  |  N  |  O
+       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 5x   P  |  Q  |  R  |  S  |  T  |  U  |  V  |  W  |  X  |  Y  |  Z  |  [  |  \  |  ]  |  ^  |  _
+       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
+# --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
+# 6x   `  |  a  |  b  |  c  |  d  |  e  |  f  |  g  |  h  |  i  |  j  |  k  |  l  |  m  |  n  |  o
+       F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
 # --------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----
 # 7x   p  |  q  |  r  |  s  |  t  |  u  |  v  |  w  |  x  |  y  |  z  |  {  |  |  |  }  |  ~  | DEL
        F     F     F     F     F     F     F     F     F     F     F     F     F     F     F     F
