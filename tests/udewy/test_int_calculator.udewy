@@ -1,0 +1,251 @@
+# Integer calculator app for udewy
+# Supports: + - * / ^ and parentheses
+
+const SYS_READ:int = 0
+const SYS_WRITE:int = 1
+const SYS_MMAP:int = 9
+const SYS_EXIT:int = 60
+
+const STDIN:int = 0
+const STDOUT:int = 1
+
+const PROT_READ:int = 1
+const PROT_WRITE:int = 2
+const MAP_PRIVATE:int = 2
+const MAP_ANONYMOUS:int = 32
+
+const CH_NUL:int = 0
+const CH_SPACE:int = 32
+const CH_TAB:int = 9
+const CH_LF:int = 10
+const CH_CR:int = 13
+const CH_LPAREN:int = 40
+const CH_RPAREN:int = 41
+const CH_STAR:int = 42
+const CH_PLUS:int = 43
+const CH_MINUS:int = 45
+const CH_SLASH:int = 47
+const CH_0:int = 48
+const CH_9:int = 57
+const CH_CARET:int = 94
+
+let src_ptr:int = 0
+let src_len:int = 0
+let pos:int = 0
+let parse_error:int = 0
+
+let write = (s:int):>void => {
+    let n:int = __load__(s - 8)
+    __syscall3__(SYS_WRITE STDOUT s n)
+    return void
+}
+
+let out_char = (c:int):>void => {
+    let buf:int = " "
+    __store8__(c buf)
+    __syscall3__(SYS_WRITE STDOUT buf 1)
+    return void
+}
+
+let print_int = (x:int):>void => {
+    if x <? 0 {
+        out_char(CH_MINUS)
+        x = 0 - x
+    }
+
+    if x =? 0 {
+        out_char(CH_0)
+        return void
+    }
+
+    let digits = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+    let n:int = 0
+    loop x >? 0 {
+        __store__((x % 10) + CH_0 digits + (n * 8))
+        x = x // 10
+        n = n + 1
+    }
+
+    n = n - 1
+    loop n >=? 0 {
+        out_char(__load__(digits + (n * 8)))
+        n = n - 1
+    }
+    return void
+}
+
+let is_digit = (c:int):>int => {
+    if (c >=? CH_0) and (c <=? CH_9) {
+        return 1
+    }
+    return 0
+}
+
+let skip_ws = ():>void => {
+    loop pos <? src_len {
+        let c:int = __load8__(src_ptr + pos)
+        if (c =? CH_SPACE) or (c =? CH_TAB) or (c =? CH_LF) or (c =? CH_CR) {
+            pos = pos + 1
+            continue
+        }
+        break
+    }
+    return void
+}
+
+let peek = ():>int => {
+    skip_ws()
+    if pos >=? src_len {
+        return CH_NUL
+    }
+    return __load8__(src_ptr + pos)
+}
+
+let consume = (ch:int):>int => {
+    if peek() =? ch {
+        pos = pos + 1
+        return 1
+    }
+    return 0
+}
+
+let ipow = (base:int exp:int):>int => {
+    let result:int = 1
+    loop exp >? 0 {
+        result = result * base
+        exp = exp - 1
+    }
+    return result
+}
+
+let parse_expr = ():>int => {
+    let value:int = parse_term()
+    loop 1 {
+        let c:int = peek()
+        if c =? CH_PLUS {
+            pos = pos + 1
+            value = value + parse_term()
+            continue
+        }
+        if c =? CH_MINUS {
+            pos = pos + 1
+            value = value - parse_term()
+            continue
+        }
+        break
+    }
+    return value
+}
+
+let parse_term = ():>int => {
+    let value:int = parse_power()
+    loop 1 {
+        let c:int = peek()
+        if c =? CH_STAR {
+            pos = pos + 1
+            value = value * parse_power()
+            continue
+        }
+        if c =? CH_SLASH {
+            pos = pos + 1
+            value = value // parse_power()
+            continue
+        }
+        break
+    }
+    return value
+}
+
+let parse_power = ():>int => {
+    let left:int = parse_factor()
+    if consume(CH_CARET) {
+        let right:int = parse_power()
+        if right <? 0 {
+            parse_error = 1
+            return 0
+        }
+        return ipow(left right)
+    }
+    return left
+}
+
+let parse_number = ():>int => {
+    skip_ws()
+    let sign:int = 1
+    if consume(CH_MINUS) {
+        sign = 0 - 1
+    }
+
+    skip_ws()
+    if is_digit(peek()) =? 0 {
+        parse_error = 1
+        return 0
+    }
+
+    let value:int = 0
+    loop (pos <? src_len) and is_digit(__load8__(src_ptr + pos)) {
+        value = (value * 10) + (__load8__(src_ptr + pos) - CH_0)
+        pos = pos + 1
+    }
+    return value * sign
+}
+
+let parse_factor = ():>int => {
+    if consume(CH_LPAREN) {
+        let v:int = parse_expr()
+        if consume(CH_RPAREN) =? 0 {
+            parse_error = 1
+            return 0
+        }
+        return v
+    }
+    return parse_number()
+}
+
+let main = ():>int => {
+    let buf_ptr:int = __syscall6__(SYS_MMAP 0 4096 (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) 0 - 1 0)
+    loop 1 {
+        write(">>> ")
+        let read_len:int = __syscall3__(SYS_READ STDIN buf_ptr 4095)
+        if read_len <=? 0 {
+            return 0
+        }
+
+        let chunk_pos:int = 0
+        loop chunk_pos <? read_len {
+            let line_start:int = chunk_pos
+            loop chunk_pos <? read_len {
+                let c:int = __load8__(buf_ptr + chunk_pos)
+                if (c =? CH_LF) or (c =? CH_CR) {
+                    break
+                }
+                chunk_pos = chunk_pos + 1
+            }
+
+            src_ptr = buf_ptr + line_start
+            src_len = chunk_pos - line_start
+            if src_len >? 0 {
+                parse_error = 0
+                pos = 0
+                let result:int = parse_expr()
+                skip_ws()
+
+                if parse_error or (pos <? src_len) {
+                    write("Parse error\n")
+                } else {
+                    print_int(result)
+                    write("\n")
+                }
+            }
+
+            if chunk_pos <? read_len {
+                let sep:int = __load8__(buf_ptr + chunk_pos)
+                chunk_pos = chunk_pos + 1
+                if (sep =? CH_CR) and (chunk_pos <? read_len) and (__load8__(buf_ptr + chunk_pos) =? CH_LF) {
+                    chunk_pos = chunk_pos + 1
+                }
+            }
+        }
+    }
+    return 0
+}
