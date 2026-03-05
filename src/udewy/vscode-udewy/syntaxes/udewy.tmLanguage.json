@@ -1,0 +1,213 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Udewy",
+  "scopeName": "source.udewy",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#path-string" },
+    { "include": "#string" },
+    { "include": "#number" },
+    { "include": "#constant" },
+    { "include": "#intrinsic" },
+    { "include": "#type-annotation" },
+    { "include": "#function-definition" },
+    { "include": "#word-operator" },
+    { "include": "#keyword" },
+    { "include": "#function-call" },
+    { "include": "#operator" },
+    { "include": "#identifier" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.number-sign.udewy",
+      "match": "#.*$"
+    },
+    "path-string": {
+      "begin": "(p)(\")",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.call.udewy" },
+        "2": { "name": "punctuation.definition.string.begin.udewy" }
+      },
+      "end": "\"",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.udewy" }
+      },
+      "name": "string.quoted.double.udewy",
+      "patterns": [
+        {
+          "name": "constant.character.escape.udewy",
+          "match": "\\\\(?:[ntr0\"\\\\]|.)"
+        }
+      ]
+    },
+    "string": {
+      "name": "string.quoted.double.udewy",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.udewy",
+          "match": "\\\\(?:[ntr0\"\\\\]|.)"
+        }
+      ]
+    },
+    "number": {
+      "patterns": [
+        {
+          "match": "\\b(0x)([0-9A-Fa-f_]+)\\b",
+          "captures": {
+            "1": { "name": "storage.type.numeric.prefix.udewy" },
+            "2": { "name": "constant.numeric.hex.udewy" }
+          }
+        },
+        {
+          "match": "\\b(0b)([01_]+)\\b",
+          "captures": {
+            "1": { "name": "storage.type.numeric.prefix.udewy" },
+            "2": { "name": "constant.numeric.binary.udewy" }
+          }
+        },
+        {
+          "name": "constant.numeric.decimal.udewy",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        {
+          "name": "keyword.control.udewy",
+          "match": "\\b(if|else|loop|return|break|continue|import)\\b"
+        },
+        {
+          "name": "keyword.declaration.udewy",
+          "match": "\\b(let|const)\\b"
+        }
+      ]
+    },
+    "constant": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.true.udewy",
+          "match": "\\btrue\\b"
+        },
+        {
+          "name": "constant.language.boolean.false.udewy",
+          "match": "\\bfalse\\b"
+        },
+        {
+          "name": "constant.language.void.udewy",
+          "match": "\\bvoid\\b"
+        }
+      ]
+    },
+    "intrinsic": {
+      "name": "support.function.builtin.udewy",
+      "match": "\\b(__syscall[0-6]__|__load__|__store__|__load8__|__store8__)\\b"
+    },
+    "word-operator": {
+      "name": "keyword.other.udewy",
+      "match": "\\b(and|or|xor|not|transmute)\\b"
+    },
+    "operator": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.udewy",
+          "match": ">=\\?|<=\\?|>\\?|<\\?|=\\?"
+        },
+        {
+          "name": "keyword.operator.assignment.compound.udewy",
+          "match": "\\+=|-=|\\*=|//=|%=|<<=|>>="
+        },
+        {
+          "name": "keyword.operator.arrow.udewy",
+          "match": "=>|\\|>"
+        },
+        {
+          "name": "keyword.operator.arithmetic.udewy",
+          "match": "//"
+        },
+        {
+          "name": "keyword.operator.bitwise.udewy",
+          "match": "<<|>>"
+        },
+        {
+          "name": "keyword.operator.assignment.udewy",
+          "match": "(?<![=!<>:])=(?![=>?])"
+        },
+        {
+          "name": "keyword.operator.arithmetic.udewy",
+          "match": "[+\\-*%]"
+        }
+      ]
+    },
+    "type-annotation": {
+      "patterns": [
+        {
+          "match": "(:>)\\s*([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "punctuation.separator.return-type.udewy" },
+            "2": { "name": "entity.name.type.udewy" }
+          }
+        },
+        {
+          "match": "(:)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "punctuation.separator.type.udewy" },
+            "2": { "name": "entity.name.type.udewy" }
+          }
+        }
+      ]
+    },
+    "function-definition": {
+      "match": "\\b(let|const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*\\(",
+      "captures": {
+        "1": { "name": "keyword.declaration.udewy" },
+        "2": { "name": "entity.name.function.udewy" }
+      }
+    },
+    "function-call": {
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\(",
+      "captures": {
+        "1": { "name": "entity.name.function.call.udewy" }
+      }
+    },
+    "identifier": {
+      "name": "variable.other.udewy",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.section.braces.begin.udewy",
+          "match": "\\{"
+        },
+        {
+          "name": "punctuation.section.braces.end.udewy",
+          "match": "\\}"
+        },
+        {
+          "name": "punctuation.section.brackets.begin.udewy",
+          "match": "\\["
+        },
+        {
+          "name": "punctuation.section.brackets.end.udewy",
+          "match": "\\]"
+        },
+        {
+          "name": "punctuation.section.parens.begin.udewy",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.section.parens.end.udewy",
+          "match": "\\)"
+        },
+        {
+          "name": "punctuation.separator.angle.udewy",
+          "match": "[<>]"
+        }
+      ]
+    }
+  }
+}

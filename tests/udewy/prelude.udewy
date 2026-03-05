@@ -1,0 +1,282 @@
+# low-level prelude for udewy programs
+# import with: import p"prelude.udewy"
+#
+# call arena_init() before using arena_alloc(), str_to_cstr(), or print_int()
+
+# ============================================================================
+# Common constants
+# ============================================================================
+
+const FALSE_VAL:uint64 = false transmute uint64
+const TRUE_VAL:uint64 = true transmute uint64
+
+const NULL:int = 0
+
+# File descriptors
+const STDIN:int = 0
+const STDOUT:int = 1
+const STDERR:int = 2
+
+# Linux x86_64 syscalls
+const SYS_READ:int = 0
+const SYS_WRITE:int = 1
+const SYS_OPEN:int = 2
+const SYS_CLOSE:int = 3
+const SYS_MMAP:int = 9
+const SYS_EXIT:int = 60
+
+# Open flags
+const O_RDONLY:int = 0
+const O_WRONLY:int = 1
+const O_CREAT:int = 64
+const O_TRUNC:int = 512
+
+# mmap flags
+const PROT_READ:int = 1
+const PROT_WRITE:int = 2
+const MAP_PRIVATE:int = 2
+const MAP_ANONYMOUS:int = 32
+
+# Common character codes
+const CH_NUL:int = 0
+const CH_TAB:int = 9
+const CH_LF:int = 10
+const CH_CR:int = 13
+const CH_SPACE:int = 32
+const CH_MINUS:int = 45
+const CH_0:int = 48
+
+# ============================================================================
+# Memory and container helpers
+# ============================================================================
+
+let len_of = (ptr:int):>int => {
+    return __load__(ptr - 8)
+}
+
+let load_i64 = (ptr:int idx:int):>int => {
+    return __load__(ptr + (idx << 3))
+}
+
+let store_i64 = (ptr:int idx:int val:int):>void => {
+    __store__(val ptr + (idx << 3))
+    return void
+}
+
+let load_u8 = (ptr:int idx:int):>int => {
+    return __load8__(ptr + idx)
+}
+
+let store_u8 = (ptr:int idx:int val:int):>void => {
+    __store8__(val ptr + idx)
+    return void
+}
+
+let copy_bytes = (dst:int src:int len:int):>void => {
+    let i:int = 0
+    loop i <? len {
+        __store8__(__load8__(src + i) dst + i)
+        i = i + 1
+    }
+    return void
+}
+
+let zero_bytes = (dst:int len:int):>void => {
+    let i:int = 0
+    loop i <? len {
+        __store8__(0 dst + i)
+        i = i + 1
+    }
+    return void
+}
+
+# ============================================================================
+# String and c-string helpers
+# ============================================================================
+
+let str_len = (s:int):>int => {
+    return len_of(s)
+}
+
+let str_eq_len = (s1:int len1:int s2:int len2:int):>int => {
+    if len1 not=? len2 {
+        return FALSE_VAL
+    }
+
+    let i:int = 0
+    loop i <? len1 {
+        if __load8__(s1 + i) not=? __load8__(s2 + i) {
+            return FALSE_VAL
+        }
+        i = i + 1
+    }
+
+    return TRUE_VAL
+}
+
+let str_eq = (s1:int s2:int):>int => {
+    return str_eq_len(s1 str_len(s1) s2 str_len(s2))
+}
+
+let str_prefix = (s:int prefix:int):>int => {
+    let prefix_len:int = str_len(prefix)
+    let i:int = 0
+    loop i <? prefix_len {
+        if __load8__(s + i) not=? __load8__(prefix + i) {
+            return FALSE_VAL
+        }
+        i = i + 1
+    }
+    return TRUE_VAL
+}
+
+let str_copy = (dst:int s:int):>int => {
+    let slen:int = str_len(s)
+    copy_bytes(dst s slen)
+    return slen
+}
+
+let cstr_len = (s:int):>int => {
+    let i:int = 0
+    loop __load8__(s + i) not=? CH_NUL {
+        i = i + 1
+    }
+    return i
+}
+
+let cstr_eq = (a:int b:int):>int => {
+    let i:int = 0
+    loop true {
+        let ca:int = __load8__(a + i)
+        let cb:int = __load8__(b + i)
+        if ca not=? cb {
+            return FALSE_VAL
+        }
+        if ca =? CH_NUL {
+            return TRUE_VAL
+        }
+        i = i + 1
+    }
+    return FALSE_VAL
+}
+
+let str_copy_cstr = (dst:int s:int):>int => {
+    let i:int = 0
+    loop __load8__(s + i) not=? CH_NUL {
+        __store8__(__load8__(s + i) dst + i)
+        i = i + 1
+    }
+    return i
+}
+
+# ============================================================================
+# Syscall helpers
+# ============================================================================
+
+let read = (fd:int buf:int len:int):>int => {
+    return __syscall3__(SYS_READ fd buf len)
+}
+
+let write = (fd:int buf:int len:int):>int => {
+    return __syscall3__(SYS_WRITE fd buf len)
+}
+
+let write_str = (fd:int s:int):>int => {
+    return write(fd s str_len(s))
+}
+
+let close = (fd:int):>int => {
+    return __syscall1__(SYS_CLOSE fd)
+}
+
+let exit = (code:int):>void => {
+    __syscall1__(SYS_EXIT code)
+    return void
+}
+
+let mmap_rw = (size:int):>int => {
+    return __syscall6__(SYS_MMAP 0 size (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) (0 - 1) 0)
+}
+
+# ============================================================================
+# Simple arena allocator
+# ============================================================================
+
+const PRELUDE_ARENA_SIZE:int = 0x100000
+
+let g_arena:int = 0
+let g_arena_ptr:int = 0
+
+let arena_init = ():>void => {
+    g_arena = mmap_rw(PRELUDE_ARENA_SIZE)
+    g_arena_ptr = g_arena
+    return void
+}
+
+let arena_alloc = (size:int):>int => {
+    let ptr:int = g_arena_ptr
+    g_arena_ptr = g_arena_ptr + size
+    return ptr
+}
+
+let str_to_cstr = (s:int):>int => {
+    let slen:int = str_len(s)
+    let buf:int = arena_alloc(slen + 1)
+    copy_bytes(buf s slen)
+    __store8__(CH_NUL buf + slen)
+    return buf
+}
+
+# ============================================================================
+# Minimal stdout helpers
+# ============================================================================
+
+let print = (s:int):>int => {
+    return write_str(STDOUT s)
+}
+
+let printl = (s:int):>int => {
+    let rc:int = print(s)
+    write(STDOUT "\n" 1)
+    return rc
+}
+
+let eprint = (s:int):>int => {
+    return write_str(STDERR s)
+}
+
+let eprintl = (s:int):>int => {
+    let rc:int = eprint(s)
+    write(STDERR "\n" 1)
+    return rc
+}
+
+let print_int = (n:int):>void => {
+    if n =? 0 {
+        write(STDOUT "0" 1)
+        return void
+    }
+
+    let buf:int = arena_alloc(24)
+    let start:int = 24
+    let neg:int = FALSE_VAL
+
+    if n <? 0 {
+        n = 0 - n
+        neg = TRUE_VAL
+    }
+
+    loop n >? 0 {
+        start = start - 1
+        __store8__((n % 10) + CH_0 buf + start)
+        n = n // 10
+    }
+
+    if neg {
+        start = start - 1
+        __store8__(CH_MINUS buf + start)
+    }
+
+    write(STDOUT buf + start 24 - start)
+    return void
+}
