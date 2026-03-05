@@ -592,86 +592,8 @@ def parse_atom(toks: list, idx: int, src: str, code: list, data: list,
                 # Reference points to data after length prefix
                 elem_directives.append(f"{str_label}+8")
             
-            # Nested array literal
-            elif elem_kind == t0.TK_LEFT_BRACKET:
-                # Recursively parse the nested array
-                # This will emit the nested array to .data and leave its address in rax
-                # But we need to capture the label, not emit code
-                # So we'll parse it specially here
-                idx = idx + 1
-                nested_directives = []
-                
-                # Parse nested array elements recursively
-                while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACKET:
-                    nested_kind = tok_kind(toks, idx)
-                    
-                    if nested_kind == t0.TK_NUMBER:
-                        nested_directives.append(str(tok_value(toks, idx)))
-                        idx = idx + 1
-                    elif nested_kind == t0.TK_IDENT:
-                        ns = tok_name_start(toks, idx)
-                        nl = tok_name_len(toks, idx)
-                        found, val = const_lookup(const_table, src, ns, nl)
-                        if found:
-                            nested_directives.append(str(val))
-                            idx = idx + 1
-                        else:
-                            fn_idx = fn_lookup(fn_table, src, ns, nl)
-                            if fn_idx >= 0:
-                                entry = fn_table[fn_idx]
-                                nested_directives.append(f".Lfn{entry[2]}")
-                                idx = idx + 1
-                            else:
-                                raise SyntaxError(f"Unknown identifier in nested array at {tok_loc(toks, idx)}")
-                    elif nested_kind == t0.TK_STRING:
-                        # Handle string in nested array
-                        start = tok_loc(toks, idx)
-                        length = tok_value(toks, idx)
-                        str_content = src[start + 1 : start + length - 1]
-                        idx = idx + 1
-                        processed = []
-                        i = 0
-                        while i < len(str_content):
-                            if str_content[i] == '\\' and i + 1 < len(str_content):
-                                c = str_content[i + 1]
-                                val = escape_code_to_value(c)
-                                if val != -1:
-                                    processed.append(val)
-                                i = i + 2
-                            else:
-                                processed.append(ord(str_content[i]))
-                                i = i + 1
-                        str_label_id = ctx["next_label"]
-                        ctx["next_label"] = ctx["next_label"] + 1
-                        str_label = f".Lstr{str_label_id}"
-                        emit_data_label(data, str_label)
-                        emit_data(data, f"    .quad {len(processed)}")
-                        if len(processed) > 0:
-                            bytes_str = ", ".join([str(b) for b in processed])
-                            emit_data(data, f"    .byte {bytes_str}")
-                        nested_directives.append(f"{str_label}+8")
-                    else:
-                        raise SyntaxError(f"Unsupported element type in nested array at {tok_loc(toks, idx)}")
-                
-                idx = expect(toks, idx, t0.TK_RIGHT_BRACKET, src)
-                
-                # Emit nested array to data section
-                nested_label_id = ctx["next_label"]
-                ctx["next_label"] = ctx["next_label"] + 1
-                nested_label = f".Larr{nested_label_id}"
-                
-                emit_data_label(data, nested_label)
-                emit_data(data, f"    .quad {len(nested_directives)}")
-                i = 0
-                while i < len(nested_directives):
-                    emit_data(data, f"    .quad {nested_directives[i]}")
-                    i = i + 1
-                
-                # Reference points to data after length prefix
-                elem_directives.append(f"{nested_label}+8")
-            
             else:
-                raise SyntaxError(f"Array elements must be compile-time constants (numbers, strings, const identifiers, functions, or nested arrays) at {tok_loc(toks, idx)}")
+                raise SyntaxError(f"Array elements must be compile-time constants (numbers, strings, const identifiers, or functions) at {tok_loc(toks, idx)}")
         
         idx = expect(toks, idx, t0.TK_RIGHT_BRACKET, src)
         
@@ -1507,66 +1429,6 @@ def parse_program(toks: list, src: str, code: list, data: list,
                             bytes_str = ", ".join([str(b) for b in processed])
                             emit_data(data, f"    .byte {bytes_str}")
                         elem_directives.append(f".Lstr{str_lbl_id}+8")
-                    
-                    elif elem_kind == t0.TK_LEFT_BRACKET:
-                        # Nested array
-                        idx = idx + 1
-                        nested_directives = []
-                        while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACKET:
-                            nk = tok_kind(toks, idx)
-                            if nk == t0.TK_NUMBER:
-                                nested_directives.append(str(tok_value(toks, idx)))
-                                idx = idx + 1
-                            elif nk == t0.TK_IDENT:
-                                ns2 = tok_name_start(toks, idx)
-                                nl2 = tok_name_len(toks, idx)
-                                found, val = const_lookup(const_table, src, ns2, nl2)
-                                if found:
-                                    nested_directives.append(str(val))
-                                    idx = idx + 1
-                                else:
-                                    fn_idx = fn_lookup(fn_table, src, ns2, nl2)
-                                    if fn_idx >= 0:
-                                        entry = fn_table[fn_idx]
-                                        nested_directives.append(f".Lfn{entry[2]}")
-                                        idx = idx + 1
-                                    else:
-                                        raise SyntaxError(f"Unknown identifier in nested array at {tok_loc(toks, idx)}")
-                            elif nk == t0.TK_STRING:
-                                start = tok_loc(toks, idx)
-                                length = tok_value(toks, idx)
-                                str_content = src[start + 1 : start + length - 1]
-                                idx = idx + 1
-                                processed = []
-                                j = 0
-                                while j < len(str_content):
-                                    if str_content[j] == '\\' and j + 1 < len(str_content):
-                                        c = str_content[j + 1]
-                                        val = escape_code_to_value(c)
-                                        if val != -1:
-                                            processed.append(val)
-                                        j = j + 2
-                                    else:
-                                        processed.append(ord(str_content[j]))
-                                        j = j + 1
-                                nested_str_id = ctx["next_label"]
-                                ctx["next_label"] = ctx["next_label"] + 1
-                                emit_data_label(data, f".Lstr{nested_str_id}")
-                                emit_data(data, f"    .quad {len(processed)}")
-                                if len(processed) > 0:
-                                    bytes_str = ", ".join([str(b) for b in processed])
-                                    emit_data(data, f"    .byte {bytes_str}")
-                                nested_directives.append(f".Lstr{nested_str_id}+8")
-                            else:
-                                raise SyntaxError(f"Unsupported element in nested array at {tok_loc(toks, idx)}")
-                        idx = expect(toks, idx, t0.TK_RIGHT_BRACKET, src)
-                        nested_arr_id = ctx["next_label"]
-                        ctx["next_label"] = ctx["next_label"] + 1
-                        emit_data_label(data, f".Larr{nested_arr_id}")
-                        emit_data(data, f"    .quad {len(nested_directives)}")
-                        for nd in nested_directives:
-                            emit_data(data, f"    .quad {nd}")
-                        elem_directives.append(f".Larr{nested_arr_id}+8")
                     
                     else:
                         raise SyntaxError(f"Unsupported element type in global array at {tok_loc(toks, idx)}")

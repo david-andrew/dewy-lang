@@ -25,9 +25,6 @@ let greetings = ["hello\n" "world\n" "udewy\n"]
 # Function pointer array (we store them but can't call indirectly yet)
 let ops = [double triple]
 
-# Nested array
-let matrix = [[1 2 3] [4 5 6]]
-
 # Const values in array
 const ZERO = 0
 const ONE = 1
@@ -43,15 +40,10 @@ let main = ():>int => {
     # Test const array - check value at index 1 is 1
     let second:int = __load__(consts + 8)
     if second =? 1 {
-        # Test nested array - load first inner array
-        let inner:int = __load__(matrix)
-        let first_elem:int = __load__(inner)
-        if first_elem =? 1 {
-            # Test function array just exists (load first pointer)
-            let fp:int = __load__(ops)
-            if fp >? 0 {
-                exit(0)
-            }
+        # Test function array just exists (load first pointer)
+        let fp:int = __load__(ops)
+        if fp >? 0 {
+            exit(0)
         }
     }
     
