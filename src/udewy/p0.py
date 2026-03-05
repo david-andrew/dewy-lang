@@ -509,111 +509,200 @@ def parse_atom(toks: list, idx: int, src: str, code: list, data: list,
         idx = expect(toks, idx, t0.TK_RIGHT_PAREN, src)
         return idx
     
-    # Array literal
+    # Array literal - all elements must be compile-time constants
+    # Supported: numbers, true/false, const identifiers, function references, strings, nested arrays
     if kind == t0.TK_LEFT_BRACKET:
-        start_idx = idx
         idx = idx + 1
         
-        # First pass: try to collect all elements as compile-time constants
-        const_elements = []
-        all_const = True
-        elem_count = 0
-        scan_idx = idx
+        # Collect elements - each is either a numeric value or a label reference string
+        # Format: list of strings to emit as .quad directives
+        elem_directives = []
         
-        while scan_idx < len(toks) and tok_kind(toks, scan_idx) != t0.TK_RIGHT_BRACKET:
-            elem_count = elem_count + 1
-            if tok_kind(toks, scan_idx) == t0.TK_NUMBER:
-                const_elements.append(tok_value(toks, scan_idx))
-                scan_idx = scan_idx + 1
-            elif tok_kind(toks, scan_idx) == t0.TK_IDENT:
-                name_start = tok_name_start(toks, scan_idx)
-                name_len = tok_name_len(toks, scan_idx)
+        while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACKET:
+            elem_kind = tok_kind(toks, idx)
+            
+            # Number literal (includes true/false)
+            if elem_kind == t0.TK_NUMBER:
+                val = tok_value(toks, idx)
+                elem_directives.append(str(val))
+                idx = idx + 1
+            
+            # Identifier - check const table, then function table
+            elif elem_kind == t0.TK_IDENT:
+                name_start = tok_name_start(toks, idx)
+                name_len = tok_name_len(toks, idx)
+                
+                # Check const table first
                 found, val = const_lookup(const_table, src, name_start, name_len)
                 if found:
-                    const_elements.append(val)
-                    scan_idx = scan_idx + 1
+                    elem_directives.append(str(val))
+                    idx = idx + 1
                 else:
-                    # Not a const - need runtime evaluation
-                    all_const = False
-                    break
-            else:
-                # Some other expression - need runtime evaluation
-                all_const = False
-                break
-        
-        if all_const:
-            # All elements are constants - emit to .data section
-            idx = scan_idx
-            idx = expect(toks, idx, t0.TK_RIGHT_BRACKET, src)
+                    # Check function table
+                    fn_idx = fn_lookup(fn_table, src, name_start, name_len)
+                    if fn_idx >= 0:
+                        entry = fn_table[fn_idx]
+                        label = f".Lfn{entry[2]}"
+                        elem_directives.append(label)
+                        idx = idx + 1
+                    else:
+                        # Unknown identifier - might be forward reference to function
+                        # Create forward reference
+                        label_id = ctx["next_label"]
+                        ctx["next_label"] = ctx["next_label"] + 1
+                        fn_declare(fn_table, name_start, name_len, label_id, 0, False)
+                        label = f".Lfn{label_id}"
+                        elem_directives.append(label)
+                        idx = idx + 1
             
-            label_id = ctx["next_label"]
-            ctx["next_label"] = ctx["next_label"] + 1
-            label = f".Larr{label_id}"
-            
-            emit_data_label(data, label)
-            emit_data(data, f"    .quad {len(const_elements)}")  # length prefix
-            i = 0
-            while i < len(const_elements):
-                emit_data(data, f"    .quad {const_elements[i]}")
-                i = i + 1
-            
-            # Load address (points to first element, after length)
-            emit(code, f"leaq {label}+8(%rip), %rax")
-            return idx
-        else:
-            # Some runtime values - build array on stack
-            # Need to re-parse and evaluate each element
-            idx = start_idx + 1  # restart after [
-            
-            # Count elements first (scan to ])
-            # Track bracket depth and paren depth to only count top-level expressions
-            elem_count = 0
-            bracket_depth = 1
-            paren_depth = 0
-            count_idx = idx
-            while count_idx < len(toks) and bracket_depth > 0:
-                k = tok_kind(toks, count_idx)
-                if k == t0.TK_LEFT_BRACKET:
-                    bracket_depth = bracket_depth + 1
-                elif k == t0.TK_RIGHT_BRACKET:
-                    bracket_depth = bracket_depth - 1
-                    if bracket_depth == 0:
-                        break
-                # Count elements only at top level (bracket depth 1, paren depth 0)
-                # BEFORE updating paren depth so IDENT_CALL counts as element
-                if bracket_depth == 1 and paren_depth == 0:
-                    if k == t0.TK_NUMBER or k == t0.TK_IDENT or k == t0.TK_STRING or k == t0.TK_IDENT_CALL or k == t0.TK_LEFT_PAREN or k == t0.TK_LEFT_BRACKET or k == t0.TK_MINUS or k == t0.TK_NOT:
-                        elem_count = elem_count + 1
-                # Update paren depth AFTER counting
-                if k == t0.TK_LEFT_PAREN or k == t0.TK_IDENT_CALL:
-                    paren_depth = paren_depth + 1
-                elif k == t0.TK_RIGHT_PAREN:
-                    paren_depth = paren_depth - 1
-                count_idx = count_idx + 1
-            
-            # Allocate stack space: 8 bytes for length + 8 bytes per element
-            arr_size = 8 + elem_count * 8
-            emit(code, f"subq ${arr_size}, %rsp")
-            
-            # Store length
-            emit(code, f"movq ${elem_count}, (%rsp)")
-            
-            # Evaluate and store each element
-            elem_idx = 0
-            while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACKET:
-                # Parse the expression for this element
-                idx = parse_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx, 0)
+            # String literal
+            elif elem_kind == t0.TK_STRING:
+                start = tok_loc(toks, idx)
+                length = tok_value(toks, idx)
+                str_content = src[start + 1 : start + length - 1]
+                idx = idx + 1
                 
-                # Store element at offset (skip length prefix)
-                offset = 8 + elem_idx * 8
-                emit(code, f"movq %rax, {offset}(%rsp)")
-                elem_idx = elem_idx + 1
+                # Process escape sequences
+                processed = []
+                i = 0
+                while i < len(str_content):
+                    if str_content[i] == '\\' and i + 1 < len(str_content):
+                        c = str_content[i + 1]
+                        if c == 'n':
+                            processed.append(10)
+                        elif c == 't':
+                            processed.append(9)
+                        elif c == 'r':
+                            processed.append(13)
+                        elif c == '\\':
+                            processed.append(92)
+                        elif c == '"':
+                            processed.append(34)
+                        elif c == '0':
+                            processed.append(0)
+                        else:
+                            processed.append(ord(c))
+                        i = i + 2
+                    else:
+                        processed.append(ord(str_content[i]))
+                        i = i + 1
+                
+                # Emit string to data section
+                str_label_id = ctx["next_label"]
+                ctx["next_label"] = ctx["next_label"] + 1
+                str_label = f".Lstr{str_label_id}"
+                
+                emit_data_label(data, str_label)
+                emit_data(data, f"    .quad {len(processed)}")
+                if len(processed) > 0:
+                    bytes_str = ", ".join([str(b) for b in processed])
+                    emit_data(data, f"    .byte {bytes_str}")
+                
+                # Reference points to data after length prefix
+                elem_directives.append(f"{str_label}+8")
             
-            idx = expect(toks, idx, t0.TK_RIGHT_BRACKET, src)
+            # Nested array literal
+            elif elem_kind == t0.TK_LEFT_BRACKET:
+                # Recursively parse the nested array
+                # This will emit the nested array to .data and leave its address in rax
+                # But we need to capture the label, not emit code
+                # So we'll parse it specially here
+                idx = idx + 1
+                nested_directives = []
+                
+                # Parse nested array elements recursively
+                while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACKET:
+                    nested_kind = tok_kind(toks, idx)
+                    
+                    if nested_kind == t0.TK_NUMBER:
+                        nested_directives.append(str(tok_value(toks, idx)))
+                        idx = idx + 1
+                    elif nested_kind == t0.TK_IDENT:
+                        ns = tok_name_start(toks, idx)
+                        nl = tok_name_len(toks, idx)
+                        found, val = const_lookup(const_table, src, ns, nl)
+                        if found:
+                            nested_directives.append(str(val))
+                            idx = idx + 1
+                        else:
+                            fn_idx = fn_lookup(fn_table, src, ns, nl)
+                            if fn_idx >= 0:
+                                entry = fn_table[fn_idx]
+                                nested_directives.append(f".Lfn{entry[2]}")
+                                idx = idx + 1
+                            else:
+                                raise SyntaxError(f"Unknown identifier in nested array at {tok_loc(toks, idx)}")
+                    elif nested_kind == t0.TK_STRING:
+                        # Handle string in nested array
+                        start = tok_loc(toks, idx)
+                        length = tok_value(toks, idx)
+                        str_content = src[start + 1 : start + length - 1]
+                        idx = idx + 1
+                        processed = []
+                        i = 0
+                        while i < len(str_content):
+                            if str_content[i] == '\\' and i + 1 < len(str_content):
+                                c = str_content[i + 1]
+                                if c == 'n': processed.append(10)
+                                elif c == 't': processed.append(9)
+                                elif c == 'r': processed.append(13)
+                                elif c == '\\': processed.append(92)
+                                elif c == '"': processed.append(34)
+                                elif c == '0': processed.append(0)
+                                else: processed.append(ord(c))
+                                i = i + 2
+                            else:
+                                processed.append(ord(str_content[i]))
+                                i = i + 1
+                        str_label_id = ctx["next_label"]
+                        ctx["next_label"] = ctx["next_label"] + 1
+                        str_label = f".Lstr{str_label_id}"
+                        emit_data_label(data, str_label)
+                        emit_data(data, f"    .quad {len(processed)}")
+                        if len(processed) > 0:
+                            bytes_str = ", ".join([str(b) for b in processed])
+                            emit_data(data, f"    .byte {bytes_str}")
+                        nested_directives.append(f"{str_label}+8")
+                    else:
+                        raise SyntaxError(f"Unsupported element type in nested array at {tok_loc(toks, idx)}")
+                
+                idx = expect(toks, idx, t0.TK_RIGHT_BRACKET, src)
+                
+                # Emit nested array to data section
+                nested_label_id = ctx["next_label"]
+                ctx["next_label"] = ctx["next_label"] + 1
+                nested_label = f".Larr{nested_label_id}"
+                
+                emit_data_label(data, nested_label)
+                emit_data(data, f"    .quad {len(nested_directives)}")
+                i = 0
+                while i < len(nested_directives):
+                    emit_data(data, f"    .quad {nested_directives[i]}")
+                    i = i + 1
+                
+                # Reference points to data after length prefix
+                elem_directives.append(f"{nested_label}+8")
             
-            # Load address of first element (after length)
-            emit(code, "leaq 8(%rsp), %rax")
-            return idx
+            else:
+                raise SyntaxError(f"Array elements must be compile-time constants (numbers, strings, const identifiers, functions, or nested arrays) at {tok_loc(toks, idx)}")
+        
+        idx = expect(toks, idx, t0.TK_RIGHT_BRACKET, src)
+        
+        # Emit array to data section
+        label_id = ctx["next_label"]
+        ctx["next_label"] = ctx["next_label"] + 1
+        label = f".Larr{label_id}"
+        
+        emit_data_label(data, label)
+        emit_data(data, f"    .quad {len(elem_directives)}")  # length prefix
+        i = 0
+        while i < len(elem_directives):
+            emit_data(data, f"    .quad {elem_directives[i]}")
+            i = i + 1
+        
+        # Load address (points to first element, after length)
+        emit(code, f"leaq {label}+8(%rip), %rax")
+        return idx
     
     # Unary not
     if kind == t0.TK_NOT:
@@ -826,6 +915,10 @@ def parse_var_decl(toks: list, idx: int, src: str, code: list, data: list,
     offset = ctx["stack_offset"]
     ctx["stack_offset"] = offset - 8
     
+    # Check for stack overflow (1024 bytes allocated, offsets -48 to -1024 are valid)
+    if offset < -1024:
+        raise SyntaxError(f"Too many local variables in function (stack overflow at offset {offset})")
+    
     var_declare(scope_stack, name_start, name_len, offset)
     emit(code, f"movq %rax, {offset}(%rbp)")
     
@@ -901,9 +994,9 @@ def parse_fn_decl(toks: list, idx: int, src: str, code: list, data: list,
     emit(code, "pushq %rbp")
     emit(code, "movq %rsp, %rbp")
     
-    # Allocate space for local variables (fixed 256 bytes, 32 slots)
+    # Allocate space for local variables (fixed 1024 bytes, 128 slots)
     # This comes BEFORE saving callee-saved registers so locals are at known offsets
-    emit(code, "subq $256, %rsp")
+    emit(code, "subq $1024, %rsp")
     
     # Save callee-saved registers we might use (at fixed positions in local area)
     emit(code, "movq %rbx, -8(%rbp)")
@@ -935,6 +1028,11 @@ def parse_fn_decl(toks: list, idx: int, src: str, code: list, data: list,
         
         var_declare(scope_stack, param_start, param_len, stack_offset)
         stack_offset = stack_offset - 8
+        
+        # Check for stack overflow
+        if stack_offset < -1024:
+            raise SyntaxError(f"Too many parameters in function (stack overflow)")
+        
         i = i + 1
     
     # Save stack offset for local variables
@@ -1376,36 +1474,144 @@ def parse_program(toks: list, src: str, code: list, data: list,
                 emit_data_label(data, f".Lglobal{label_id}")
                 emit_data(data, f"    .quad .Lstr{str_label_id}+8")
             elif tok_kind(toks, idx) == t0.TK_LEFT_BRACKET:
-                # Array literal
+                # Array literal - supports numbers, strings, const ids, function refs, nested arrays
                 idx = idx + 1
-                elements = []
+                elem_directives = []
+                
                 while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACKET:
-                    if tok_kind(toks, idx) == t0.TK_NUMBER:
-                        elements.append(tok_value(toks, idx))
+                    elem_kind = tok_kind(toks, idx)
+                    
+                    if elem_kind == t0.TK_NUMBER:
+                        elem_directives.append(str(tok_value(toks, idx)))
                         idx = idx + 1
-                    elif tok_kind(toks, idx) == t0.TK_IDENT:
+                    
+                    elif elem_kind == t0.TK_IDENT:
                         ns = tok_name_start(toks, idx)
                         nl = tok_name_len(toks, idx)
-                        # Check const_table for identifier
                         found, val = const_lookup(const_table, src, ns, nl)
                         if found:
-                            elements.append(val)
+                            elem_directives.append(str(val))
+                            idx = idx + 1
                         else:
-                            raise SyntaxError(f"Only constant values in global array at {tok_loc(toks, idx)}")
+                            fn_idx = fn_lookup(fn_table, src, ns, nl)
+                            if fn_idx >= 0:
+                                entry = fn_table[fn_idx]
+                                elem_directives.append(f".Lfn{entry[2]}")
+                                idx = idx + 1
+                            else:
+                                # Forward function reference
+                                label_id_fn = ctx["next_label"]
+                                ctx["next_label"] = ctx["next_label"] + 1
+                                fn_declare(fn_table, ns, nl, label_id_fn, 0, False)
+                                elem_directives.append(f".Lfn{label_id_fn}")
+                                idx = idx + 1
+                    
+                    elif elem_kind == t0.TK_STRING:
+                        start = tok_loc(toks, idx)
+                        length = tok_value(toks, idx)
+                        str_content = src[start + 1 : start + length - 1]
                         idx = idx + 1
+                        processed = []
+                        i = 0
+                        while i < len(str_content):
+                            if str_content[i] == '\\' and i + 1 < len(str_content):
+                                c = str_content[i + 1]
+                                if c == 'n': processed.append(10)
+                                elif c == 't': processed.append(9)
+                                elif c == 'r': processed.append(13)
+                                elif c == '\\': processed.append(92)
+                                elif c == '"': processed.append(34)
+                                elif c == '0': processed.append(0)
+                                else: processed.append(ord(c))
+                                i = i + 2
+                            else:
+                                processed.append(ord(str_content[i]))
+                                i = i + 1
+                        str_lbl_id = ctx["next_label"]
+                        ctx["next_label"] = ctx["next_label"] + 1
+                        emit_data_label(data, f".Lstr{str_lbl_id}")
+                        emit_data(data, f"    .quad {len(processed)}")
+                        if len(processed) > 0:
+                            bytes_str = ", ".join([str(b) for b in processed])
+                            emit_data(data, f"    .byte {bytes_str}")
+                        elem_directives.append(f".Lstr{str_lbl_id}+8")
+                    
+                    elif elem_kind == t0.TK_LEFT_BRACKET:
+                        # Nested array
+                        idx = idx + 1
+                        nested_directives = []
+                        while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACKET:
+                            nk = tok_kind(toks, idx)
+                            if nk == t0.TK_NUMBER:
+                                nested_directives.append(str(tok_value(toks, idx)))
+                                idx = idx + 1
+                            elif nk == t0.TK_IDENT:
+                                ns2 = tok_name_start(toks, idx)
+                                nl2 = tok_name_len(toks, idx)
+                                found, val = const_lookup(const_table, src, ns2, nl2)
+                                if found:
+                                    nested_directives.append(str(val))
+                                    idx = idx + 1
+                                else:
+                                    fn_idx = fn_lookup(fn_table, src, ns2, nl2)
+                                    if fn_idx >= 0:
+                                        entry = fn_table[fn_idx]
+                                        nested_directives.append(f".Lfn{entry[2]}")
+                                        idx = idx + 1
+                                    else:
+                                        raise SyntaxError(f"Unknown identifier in nested array at {tok_loc(toks, idx)}")
+                            elif nk == t0.TK_STRING:
+                                start = tok_loc(toks, idx)
+                                length = tok_value(toks, idx)
+                                str_content = src[start + 1 : start + length - 1]
+                                idx = idx + 1
+                                processed = []
+                                j = 0
+                                while j < len(str_content):
+                                    if str_content[j] == '\\' and j + 1 < len(str_content):
+                                        c = str_content[j + 1]
+                                        if c == 'n': processed.append(10)
+                                        elif c == 't': processed.append(9)
+                                        elif c == 'r': processed.append(13)
+                                        elif c == '\\': processed.append(92)
+                                        elif c == '"': processed.append(34)
+                                        elif c == '0': processed.append(0)
+                                        else: processed.append(ord(c))
+                                        j = j + 2
+                                    else:
+                                        processed.append(ord(str_content[j]))
+                                        j = j + 1
+                                nested_str_id = ctx["next_label"]
+                                ctx["next_label"] = ctx["next_label"] + 1
+                                emit_data_label(data, f".Lstr{nested_str_id}")
+                                emit_data(data, f"    .quad {len(processed)}")
+                                if len(processed) > 0:
+                                    bytes_str = ", ".join([str(b) for b in processed])
+                                    emit_data(data, f"    .byte {bytes_str}")
+                                nested_directives.append(f".Lstr{nested_str_id}+8")
+                            else:
+                                raise SyntaxError(f"Unsupported element in nested array at {tok_loc(toks, idx)}")
+                        idx = expect(toks, idx, t0.TK_RIGHT_BRACKET, src)
+                        nested_arr_id = ctx["next_label"]
+                        ctx["next_label"] = ctx["next_label"] + 1
+                        emit_data_label(data, f".Larr{nested_arr_id}")
+                        emit_data(data, f"    .quad {len(nested_directives)}")
+                        for nd in nested_directives:
+                            emit_data(data, f"    .quad {nd}")
+                        elem_directives.append(f".Larr{nested_arr_id}+8")
+                    
                     else:
-                        raise SyntaxError(f"Only constant values in global array at {tok_loc(toks, idx)}")
+                        raise SyntaxError(f"Unsupported element type in global array at {tok_loc(toks, idx)}")
+                
                 idx = expect(toks, idx, t0.TK_RIGHT_BRACKET, src)
                 
                 arr_label_id = ctx["next_label"]
                 ctx["next_label"] = ctx["next_label"] + 1
                 
                 emit_data_label(data, f".Larr{arr_label_id}")
-                emit_data(data, f"    .quad {len(elements)}")
-                i = 0
-                while i < len(elements):
-                    emit_data(data, f"    .quad {elements[i]}")
-                    i = i + 1
+                emit_data(data, f"    .quad {len(elem_directives)}")
+                for ed in elem_directives:
+                    emit_data(data, f"    .quad {ed}")
                 
                 label_id = ctx["next_label"]
                 ctx["next_label"] = ctx["next_label"] + 1

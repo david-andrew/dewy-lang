@@ -1194,82 +1194,259 @@ let parse_atom = ():>void => {
     if kind =? TK_LEFT_BRACKET {
         cur_tok = cur_tok + 1
         
-        let elems:int = arena_alloc(1024 * 8)
+        # Each element: 16 bytes (kind:8, value:8)
+        # kind: 0=number, 1=fnref, 2=strref, 3=arrref
+        let elems:int = arena_alloc(1024 * 16)
         let nelem:int = 0
-        let all_const:int = 1
         
         loop tok_kind(cur_tok) not=? TK_RIGHT_BRACKET {
             let ek:int = tok_kind(cur_tok)
+            let eoff:int = nelem * 16
+            
             if ek =? TK_NUMBER {
-                __store__(tok_value(cur_tok) elems + (nelem * 8))
+                __store__(0 elems + eoff)
+                __store__(tok_value(cur_tok) elems + eoff + 8)
                 cur_tok = cur_tok + 1
+                nelem = nelem + 1
             } else if ek =? TK_IDENT {
                 let es:int = tok_loc(cur_tok)
                 let el:int = tok_value(cur_tok)
+                cur_tok = cur_tok + 1
+                
                 let ci:int = const_lookup(es el)
                 if ci >=? 0 {
-                    __store__(const_get_value(ci) elems + (nelem * 8))
-                    cur_tok = cur_tok + 1
+                    __store__(0 elems + eoff)
+                    __store__(const_get_value(ci) elems + eoff + 8)
                 } else {
-                    all_const = 0
-                    break
+                    let fi:int = fn_lookup(es el)
+                    if fi >=? 0 {
+                        __store__(1 elems + eoff)
+                        __store__(fn_get_label(fi) elems + eoff + 8)
+                    } else {
+                        # Forward function reference
+                        let fwd_id:int = next_label
+                        next_label = next_label + 1
+                        fn_add(es el fwd_id 0 0)
+                        __store__(1 elems + eoff)
+                        __store__(fwd_id elems + eoff + 8)
+                    }
                 }
+                nelem = nelem + 1
+            } else if ek =? TK_STRING {
+                let start:int = tok_loc(cur_tok)
+                let len:int = tok_value(cur_tok)
+                cur_tok = cur_tok + 1
+                
+                let label_id:int = next_label
+                next_label = next_label + 1
+                
+                data_label(".Lstr" label_id)
+                
+                let slen:int = 0
+                let si:int = start + 1
+                let send:int = start + len - 1
+                loop si <? send {
+                    let c:int = __load8__(src_ptr + si)
+                    if c =? CH_BACKSLASH {
+                        si = si + 1
+                    }
+                    slen = slen + 1
+                    si = si + 1
+                }
+                
+                data_str("    .quad ")
+                data_int(slen)
+                data_char(CH_LF)
+                
+                data_str("    .byte ")
+                si = start + 1
+                let first:int = 1
+                loop si <? send {
+                    if first =? 0 {
+                        data_str(", ")
+                    }
+                    first = 0
+                    let c:int = __load8__(src_ptr + si)
+                    if c =? CH_BACKSLASH {
+                        si = si + 1
+                        c = __load8__(src_ptr + si)
+                        if c =? CH_n { c = CH_LF }
+                        else if c =? CH_t { c = CH_TAB }
+                        else if c =? CH_r { c = CH_CR }
+                        else if c =? CH_0 { c = CH_NUL }
+                    }
+                    data_int(c)
+                    si = si + 1
+                }
+                data_char(10)
+                
+                __store__(2 elems + eoff)
+                __store__(label_id elems + eoff + 8)
+                nelem = nelem + 1
+            } else if ek =? TK_LEFT_BRACKET {
+                # Nested array
+                cur_tok = cur_tok + 1
+                let nested:int = arena_alloc(1024 * 16)
+                let nnested:int = 0
+                
+                loop tok_kind(cur_tok) not=? TK_RIGHT_BRACKET {
+                    let nk:int = tok_kind(cur_tok)
+                    let noff:int = nnested * 16
+                    
+                    if nk =? TK_NUMBER {
+                        __store__(0 nested + noff)
+                        __store__(tok_value(cur_tok) nested + noff + 8)
+                        cur_tok = cur_tok + 1
+                        nnested = nnested + 1
+                    } else if nk =? TK_IDENT {
+                        let ns:int = tok_loc(cur_tok)
+                        let nl:int = tok_value(cur_tok)
+                        cur_tok = cur_tok + 1
+                        let nci:int = const_lookup(ns nl)
+                        if nci >=? 0 {
+                            __store__(0 nested + noff)
+                            __store__(const_get_value(nci) nested + noff + 8)
+                        } else {
+                            let nfi:int = fn_lookup(ns nl)
+                            if nfi >=? 0 {
+                                __store__(1 nested + noff)
+                                __store__(fn_get_label(nfi) nested + noff + 8)
+                            } else {
+                                out_str("Error: unknown ident in nested array\n")
+                                out_flush()
+                                __syscall1__(SYS_EXIT 1)
+                            }
+                        }
+                        nnested = nnested + 1
+                    } else if nk =? TK_STRING {
+                        let start:int = tok_loc(cur_tok)
+                        let len:int = tok_value(cur_tok)
+                        cur_tok = cur_tok + 1
+                        let label_id:int = next_label
+                        next_label = next_label + 1
+                        data_label(".Lstr" label_id)
+                        
+                        let slen:int = 0
+                        let si:int = start + 1
+                        let send:int = start + len - 1
+                        loop si <? send {
+                            let c:int = __load8__(src_ptr + si)
+                            if c =? CH_BACKSLASH {
+                                si = si + 1
+                            }
+                            slen = slen + 1
+                            si = si + 1
+                        }
+                        
+                        data_str("    .quad ")
+                        data_int(slen)
+                        data_char(CH_LF)
+                        
+                        data_str("    .byte ")
+                        si = start + 1
+                        let first:int = 1
+                        loop si <? send {
+                            if first =? 0 {
+                                data_str(", ")
+                            }
+                            first = 0
+                            let c:int = __load8__(src_ptr + si)
+                            if c =? CH_BACKSLASH {
+                                si = si + 1
+                                c = __load8__(src_ptr + si)
+                                if c =? CH_n { c = CH_LF }
+                                else if c =? CH_t { c = CH_TAB }
+                                else if c =? CH_r { c = CH_CR }
+                                else if c =? CH_0 { c = CH_NUL }
+                            }
+                            data_int(c)
+                            si = si + 1
+                        }
+                        data_char(10)
+                        
+                        __store__(2 nested + noff)
+                        __store__(label_id nested + noff + 8)
+                        nnested = nnested + 1
+                    } else {
+                        out_str("Error: unsupported in nested array\n")
+                        out_flush()
+                        __syscall1__(SYS_EXIT 1)
+                    }
+                }
+                expect(TK_RIGHT_BRACKET)
+                
+                let narr_id:int = next_label
+                next_label = next_label + 1
+                data_label(".Larr" narr_id)
+                data_str("    .quad ")
+                data_int(nnested)
+                data_char(10)
+                let ni:int = 0
+                loop ni <? nnested {
+                    let nkind:int = __load__(nested + (ni * 16))
+                    let nval:int = __load__(nested + (ni * 16) + 8)
+                    if nkind =? 0 {
+                        data_str("    .quad ")
+                        data_int(nval)
+                        data_char(10)
+                    } else if nkind =? 1 {
+                        data_str("    .quad .Lfn")
+                        data_int(nval)
+                        data_char(10)
+                    } else if nkind =? 2 {
+                        data_str("    .quad .Lstr")
+                        data_int(nval)
+                        data_str("+8\n")
+                    }
+                    ni = ni + 1
+                }
+                
+                __store__(3 elems + eoff)
+                __store__(narr_id elems + eoff + 8)
+                nelem = nelem + 1
             } else {
-                all_const = 0
-                break
+                out_str("Error: array elements must be compile-time constants\n")
+                out_flush()
+                __syscall1__(SYS_EXIT 1)
             }
-            nelem = nelem + 1
+        }
+        expect(TK_RIGHT_BRACKET)
+        
+        let arr_id:int = next_label
+        next_label = next_label + 1
+        
+        data_label(".Larr" arr_id)
+        data_str("    .quad ")
+        data_int(nelem)
+        data_char(10)
+        
+        let ei:int = 0
+        loop ei <? nelem {
+            let ekind:int = __load__(elems + (ei * 16))
+            let eval:int = __load__(elems + (ei * 16) + 8)
+            if ekind =? 0 {
+                data_str("    .quad ")
+                data_int(eval)
+                data_char(10)
+            } else if ekind =? 1 {
+                data_str("    .quad .Lfn")
+                data_int(eval)
+                data_char(10)
+            } else if ekind =? 2 {
+                data_str("    .quad .Lstr")
+                data_int(eval)
+                data_str("+8\n")
+            } else if ekind =? 3 {
+                data_str("    .quad .Larr")
+                data_int(eval)
+                data_str("+8\n")
+            }
+            ei = ei + 1
         }
         
-        if all_const {
-            expect(TK_RIGHT_BRACKET)
-            let label_id:int = next_label
-            next_label = next_label + 1
-            
-            data_label(".Larr" label_id)
-            data_str("    .quad ")
-            data_int(nelem)
-            data_char(10)
-            
-            let ei:int = 0
-            loop ei <? nelem {
-                data_str("    .quad ")
-                data_int(__load__(elems + (ei * 8)))
-                data_char(10)
-                ei = ei + 1
-            }
-            
-            out_str("    leaq .Larr")
-            out_int(label_id)
-            out_str("+8(%rip), %rax\n")
-        } else {
-            let cnt:int = 0
-            loop tok_kind(cur_tok) not=? TK_RIGHT_BRACKET {
-                cnt = cnt + 1
-                parse_expr(0)
-                out_line("pushq %rax")
-            }
-            expect(TK_RIGHT_BRACKET)
-            nelem = nelem + cnt
-            
-            let arr_sz:int = 8 + (nelem * 8)
-            out_str("    subq $")
-            out_int(arr_sz)
-            out_str(", %rsp\n")
-            out_str("    movq $")
-            out_int(nelem)
-            out_str(", (%rsp)\n")
-            
-            let ei:int = nelem - 1
-            loop ei >=? 0 {
-                out_line("popq %rax")
-                out_str("    movq %rax, ")
-                out_int(8 + (ei * 8))
-                out_str("(%rsp)\n")
-                ei = ei - 1
-            }
-            out_line("leaq 8(%rsp), %rax")
-        }
+        out_str("    leaq .Larr")
+        out_int(arr_id)
+        out_str("+8(%rip), %rax\n")
         return void
     }
     
@@ -1462,6 +1639,14 @@ let parse_var_decl = ():>void => {
     
     let off:int = stack_offset
     stack_offset = stack_offset - 8
+    
+    # Check for stack overflow (1024 bytes allocated)
+    if off <? (0 - 1024) {
+        out_str("Error: too many local variables (stack overflow)\n")
+        out_flush()
+        __syscall1__(SYS_EXIT 1)
+    }
+    
     var_add(start len off)
     
     out_str("    movq %rax, ")
@@ -1515,7 +1700,7 @@ let parse_fn_decl = ():>void => {
     
     out_line("pushq %rbp")
     out_line("movq %rsp, %rbp")
-    out_line("subq $256, %rsp")
+    out_line("subq $1024, %rsp")
     out_line("movq %rbx, -8(%rbp)")
     out_line("movq %r12, -16(%rbp)")
     out_line("movq %r13, -24(%rbp)")
@@ -1568,6 +1753,14 @@ let parse_fn_decl = ():>void => {
         
         var_add(ps pl stack_offset)
         stack_offset = stack_offset - 8
+        
+        # Check for stack overflow
+        if stack_offset <? (0 - 1024) {
+            out_str("Error: too many parameters (stack overflow)\n")
+            out_flush()
+            __syscall1__(SYS_EXIT 1)
+        }
+        
         pi = pi + 1
     }
     
@@ -1962,28 +2155,221 @@ let parse_global_var = ():>void => {
     if kind =? TK_LEFT_BRACKET {
         cur_tok = cur_tok + 1
         
-        let elems:int = arena_alloc(1024 * 8)
+        # Each element: 16 bytes (kind:8, value:8)
+        # kind: 0=number, 1=fnref, 2=strref, 3=arrref
+        let elems:int = arena_alloc(1024 * 16)
         let nelem:int = 0
         
         loop tok_kind(cur_tok) not=? TK_RIGHT_BRACKET {
             let ek:int = tok_kind(cur_tok)
+            let eoff:int = nelem * 16
+            
             if ek =? TK_NUMBER {
-                __store__(tok_value(cur_tok) elems + (nelem * 8))
+                __store__(0 elems + eoff)
+                __store__(tok_value(cur_tok) elems + eoff + 8)
                 cur_tok = cur_tok + 1
+                nelem = nelem + 1
             } else if ek =? TK_IDENT {
                 let es:int = tok_loc(cur_tok)
                 let el:int = tok_value(cur_tok)
+                cur_tok = cur_tok + 1
+                
                 let ci:int = const_lookup(es el)
                 if ci >=? 0 {
-                    __store__(const_get_value(ci) elems + (nelem * 8))
+                    __store__(0 elems + eoff)
+                    __store__(const_get_value(ci) elems + eoff + 8)
                 } else {
-                    out_str("Error: non-const in global array\n")
-                    out_flush()
-                    __syscall1__(SYS_EXIT 1)
+                    let fi:int = fn_lookup(es el)
+                    if fi >=? 0 {
+                        __store__(1 elems + eoff)
+                        __store__(fn_get_label(fi) elems + eoff + 8)
+                    } else {
+                        # Forward function reference
+                        let fwd_id:int = next_label
+                        next_label = next_label + 1
+                        fn_add(es el fwd_id 0 0)
+                        __store__(1 elems + eoff)
+                        __store__(fwd_id elems + eoff + 8)
+                    }
                 }
+                nelem = nelem + 1
+            } else if ek =? TK_STRING {
+                let start:int = tok_loc(cur_tok)
+                let len:int = tok_value(cur_tok)
                 cur_tok = cur_tok + 1
+                
+                let label_id:int = next_label
+                next_label = next_label + 1
+                
+                data_label(".Lstr" label_id)
+                
+                let slen:int = 0
+                let si:int = start + 1
+                let send:int = start + len - 1
+                loop si <? send {
+                    let c:int = __load8__(src_ptr + si)
+                    if c =? CH_BACKSLASH {
+                        si = si + 1
+                    }
+                    slen = slen + 1
+                    si = si + 1
+                }
+                
+                data_str("    .quad ")
+                data_int(slen)
+                data_char(CH_LF)
+                
+                data_str("    .byte ")
+                si = start + 1
+                let first:int = 1
+                loop si <? send {
+                    if first =? 0 {
+                        data_str(", ")
+                    }
+                    first = 0
+                    let c:int = __load8__(src_ptr + si)
+                    if c =? CH_BACKSLASH {
+                        si = si + 1
+                        c = __load8__(src_ptr + si)
+                        if c =? CH_n { c = CH_LF }
+                        else if c =? CH_t { c = CH_TAB }
+                        else if c =? CH_r { c = CH_CR }
+                        else if c =? CH_0 { c = CH_NUL }
+                    }
+                    data_int(c)
+                    si = si + 1
+                }
+                data_char(10)
+                
+                __store__(2 elems + eoff)
+                __store__(label_id elems + eoff + 8)
+                nelem = nelem + 1
+            } else if ek =? TK_LEFT_BRACKET {
+                # Nested array
+                cur_tok = cur_tok + 1
+                let nested:int = arena_alloc(1024 * 16)
+                let nnested:int = 0
+                
+                loop tok_kind(cur_tok) not=? TK_RIGHT_BRACKET {
+                    let nk:int = tok_kind(cur_tok)
+                    let noff:int = nnested * 16
+                    
+                    if nk =? TK_NUMBER {
+                        __store__(0 nested + noff)
+                        __store__(tok_value(cur_tok) nested + noff + 8)
+                        cur_tok = cur_tok + 1
+                        nnested = nnested + 1
+                    } else if nk =? TK_IDENT {
+                        let ns:int = tok_loc(cur_tok)
+                        let nl:int = tok_value(cur_tok)
+                        cur_tok = cur_tok + 1
+                        let nci:int = const_lookup(ns nl)
+                        if nci >=? 0 {
+                            __store__(0 nested + noff)
+                            __store__(const_get_value(nci) nested + noff + 8)
+                        } else {
+                            let nfi:int = fn_lookup(ns nl)
+                            if nfi >=? 0 {
+                                __store__(1 nested + noff)
+                                __store__(fn_get_label(nfi) nested + noff + 8)
+                            } else {
+                                out_str("Error: unknown ident in nested array\n")
+                                out_flush()
+                                __syscall1__(SYS_EXIT 1)
+                            }
+                        }
+                        nnested = nnested + 1
+                    } else if nk =? TK_STRING {
+                        let start:int = tok_loc(cur_tok)
+                        let len:int = tok_value(cur_tok)
+                        cur_tok = cur_tok + 1
+                        let label_id:int = next_label
+                        next_label = next_label + 1
+                        data_label(".Lstr" label_id)
+                        
+                        let slen:int = 0
+                        let si:int = start + 1
+                        let send:int = start + len - 1
+                        loop si <? send {
+                            let c:int = __load8__(src_ptr + si)
+                            if c =? CH_BACKSLASH {
+                                si = si + 1
+                            }
+                            slen = slen + 1
+                            si = si + 1
+                        }
+                        
+                        data_str("    .quad ")
+                        data_int(slen)
+                        data_char(CH_LF)
+                        
+                        data_str("    .byte ")
+                        si = start + 1
+                        let first:int = 1
+                        loop si <? send {
+                            if first =? 0 {
+                                data_str(", ")
+                            }
+                            first = 0
+                            let c:int = __load8__(src_ptr + si)
+                            if c =? CH_BACKSLASH {
+                                si = si + 1
+                                c = __load8__(src_ptr + si)
+                                if c =? CH_n { c = CH_LF }
+                                else if c =? CH_t { c = CH_TAB }
+                                else if c =? CH_r { c = CH_CR }
+                                else if c =? CH_0 { c = CH_NUL }
+                            }
+                            data_int(c)
+                            si = si + 1
+                        }
+                        data_char(10)
+                        
+                        __store__(2 nested + noff)
+                        __store__(label_id nested + noff + 8)
+                        nnested = nnested + 1
+                    } else {
+                        out_str("Error: unsupported in nested array\n")
+                        out_flush()
+                        __syscall1__(SYS_EXIT 1)
+                    }
+                }
+                expect(TK_RIGHT_BRACKET)
+                
+                let narr_id:int = next_label
+                next_label = next_label + 1
+                data_label(".Larr" narr_id)
+                data_str("    .quad ")
+                data_int(nnested)
+                data_char(10)
+                let ni:int = 0
+                loop ni <? nnested {
+                    let nkind:int = __load__(nested + (ni * 16))
+                    let nval:int = __load__(nested + (ni * 16) + 8)
+                    if nkind =? 0 {
+                        data_str("    .quad ")
+                        data_int(nval)
+                        data_char(10)
+                    } else if nkind =? 1 {
+                        data_str("    .quad .Lfn")
+                        data_int(nval)
+                        data_char(10)
+                    } else if nkind =? 2 {
+                        data_str("    .quad .Lstr")
+                        data_int(nval)
+                        data_str("+8\n")
+                    }
+                    ni = ni + 1
+                }
+                
+                __store__(3 elems + eoff)
+                __store__(narr_id elems + eoff + 8)
+                nelem = nelem + 1
+            } else {
+                out_str("Error: array elements must be compile-time constants\n")
+                out_flush()
+                __syscall1__(SYS_EXIT 1)
             }
-            nelem = nelem + 1
         }
         expect(TK_RIGHT_BRACKET)
         
@@ -1997,9 +2383,25 @@ let parse_global_var = ():>void => {
         
         let ei:int = 0
         loop ei <? nelem {
-            data_str("    .quad ")
-            data_int(__load__(elems + (ei * 8)))
-            data_char(10)
+            let ekind:int = __load__(elems + (ei * 16))
+            let eval:int = __load__(elems + (ei * 16) + 8)
+            if ekind =? 0 {
+                data_str("    .quad ")
+                data_int(eval)
+                data_char(10)
+            } else if ekind =? 1 {
+                data_str("    .quad .Lfn")
+                data_int(eval)
+                data_char(10)
+            } else if ekind =? 2 {
+                data_str("    .quad .Lstr")
+                data_int(eval)
+                data_str("+8\n")
+            } else if ekind =? 3 {
+                data_str("    .quad .Larr")
+                data_int(eval)
+                data_str("+8\n")
+            }
             ei = ei + 1
         }
         

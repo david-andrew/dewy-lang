@@ -1,0 +1,59 @@
+# Test array support with various element types
+
+# Helper for exit syscall
+let exit = (code:int):>void => {
+    __syscall1__(60 code)
+}
+
+# Helper for write syscall  
+let write = (fd:int buf:int len:int):>int => {
+    return __syscall3__(1 fd buf len)
+}
+
+# Function to be referenced in array
+let double = (x:int):>int => {
+    return x * 2
+}
+
+let triple = (x:int):>int => {
+    return x * 3
+}
+
+# String array
+let greetings = ["hello\n" "world\n" "udewy\n"]
+
+# Function pointer array (we store them but can't call indirectly yet)
+let ops = [double triple]
+
+# Nested array
+let matrix = [[1 2 3] [4 5 6]]
+
+# Const values in array
+const ZERO = 0
+const ONE = 1
+const TWO = 2
+let consts = [ZERO ONE TWO]
+
+let main = ():>int => {
+    # Test string array - load first string and print "hello\n"
+    let str_ptr:int = __load__(greetings)
+    let str_len:int = __load__(str_ptr - 8)
+    write(1 str_ptr str_len)
+    
+    # Test const array - check value at index 1 is 1
+    let second:int = __load__(consts + 8)
+    if second =? 1 {
+        # Test nested array - load first inner array
+        let inner:int = __load__(matrix)
+        let first_elem:int = __load__(inner)
+        if first_elem =? 1 {
+            # Test function array just exists (load first pointer)
+            let fp:int = __load__(ops)
+            if fp >? 0 {
+                exit(0)
+            }
+        }
+    }
+    
+    exit(1)
+}
