@@ -3,7 +3,120 @@ Parser and x86_64 code generator for udewy
 Designed in low-level style for future translation to assembly
 """
 
+from pathlib import Path
+from os import PathLike
+
 from . import t0
+
+
+# ============================================================================
+# Import preprocessing
+# ============================================================================
+
+def process_imports(source: str, source_path: PathLike, imported: set[Path] | None = None) -> str:
+    """
+    Process import statements, recursively including imported files.
+    Returns the combined source with all imports prepended.
+    """
+    source_path = Path(source_path).resolve()
+    
+    if imported is None:
+        imported = set()
+    
+    if source_path in imported:
+        return ""
+    imported.add(source_path)
+    
+    source_dir = source_path.parent
+    result_parts: list[str] = []
+    remaining = source
+    
+    i = 0
+    n = len(remaining)
+    
+    while i < n:
+        # skip whitespace
+        while i < n and remaining[i] in ' \t\r\n':
+            i = i + 1
+        if i >= n:
+            break
+        
+        # skip comments
+        if remaining[i] == '#':
+            while i < n and remaining[i] != '\n':
+                i = i + 1
+            continue
+        
+        # check for import statement
+        if remaining[i:i+6] == 'import':
+            start = i
+            i = i + 6
+            
+            # skip whitespace
+            while i < n and remaining[i] in ' \t':
+                i = i + 1
+            
+            # expect p"
+            if i < n and remaining[i] == 'p' and i + 1 < n and remaining[i + 1] == '"':
+                i = i + 2  # skip p"
+                path_start = i
+                
+                # read until closing quote
+                while i < n and remaining[i] != '"':
+                    if remaining[i] == '\\':
+                        i = i + 1
+                    i = i + 1
+                
+                if i >= n:
+                    raise SyntaxError(f"Unterminated path string in import at position {start}")
+                
+                import_path_str = remaining[path_start:i]
+                i = i + 1  # skip closing quote
+                
+                # resolve path relative to source file
+                import_path = (source_dir / import_path_str).resolve()
+                
+                if not import_path.exists():
+                    raise FileNotFoundError(f"Import file not found: {import_path}")
+                
+                # recursively process the imported file
+                import_content = import_path.read_text()
+                processed_import = process_imports(import_content, import_path, imported)
+                
+                # add the processed import content
+                if processed_import:
+                    result_parts.append(processed_import)
+                
+                # replace the import statement with empty (we've handled it)
+                remaining = remaining[:start] + remaining[i:]
+                n = len(remaining)
+                i = start
+            else:
+                # not a valid import, continue
+                i = i + 1
+        else:
+            # not an import, skip to next whitespace/newline to find next potential statement
+            while i < n and remaining[i] not in ' \t\r\n':
+                if remaining[i] == '"':
+                    # skip strings
+                    i = i + 1
+                    while i < n and remaining[i] != '"':
+                        if remaining[i] == '\\':
+                            i = i + 1
+                        i = i + 1
+                    if i < n:
+                        i = i + 1
+                elif remaining[i] == '#':
+                    # skip to end of line
+                    while i < n and remaining[i] != '\n':
+                        i = i + 1
+                else:
+                    i = i + 1
+    
+    # add the remaining source (with import statements removed)
+    result_parts.append(remaining)
+    
+    return '\n'.join(result_parts)
 
 # ============================================================================
 # Type aliases (for documentation, not enforced)
@@ -643,6 +756,7 @@ def parse_expr(toks: list, idx: int, src: str, code: list, data: list,
     
     # Parse left-hand side (atom or call expression)
     idx = parse_atom(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+    idx = skip_cast_annotation(toks, idx)
     
     # Handle binary operators (left to right, validate precedence)
     while idx < len(toks):
@@ -694,6 +808,7 @@ def parse_expr(toks: list, idx: int, src: str, code: list, data: list,
         if kind == t0.TK_PIPE:
             # Parse RHS (should be function name or expression)
             idx = parse_atom(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+            idx = skip_cast_annotation(toks, idx)
             # rax = function pointer, stack top = argument
             emit(code, "movq %rax, %r11")  # save fn ptr
             emit(code, "popq %rdi")        # arg1
@@ -701,6 +816,7 @@ def parse_expr(toks: list, idx: int, src: str, code: list, data: list,
         else:
             # Parse right operand
             idx = parse_atom(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+            idx = skip_cast_annotation(toks, idx)
             
             # Pop left operand to rbx
             emit(code, "movq %rax, %rcx")  # right in rcx
@@ -791,6 +907,20 @@ def skip_fn_type_annotation(toks: list, idx: int) -> int:
         idx = idx + 1
         if idx < len(toks) and tok_kind(toks, idx) == t0.TK_TYPE_PARAM:
             idx = idx + 1
+    return idx
+
+def skip_cast_annotation(toks: list, idx: int) -> int:
+    """Skip cast annotation: transmute (ident type_param? | type_param)"""
+    if idx < len(toks) and tok_kind(toks, idx) == t0.TK_TRANSMUTE:
+        idx = idx + 1
+        if idx < len(toks):
+            kind = tok_kind(toks, idx)
+            if kind == t0.TK_IDENT:
+                idx = idx + 1
+                if idx < len(toks) and tok_kind(toks, idx) == t0.TK_TYPE_PARAM:
+                    idx = idx + 1
+            elif kind == t0.TK_TYPE_PARAM:
+                idx = idx + 1
     return idx
 
 
@@ -1537,7 +1667,8 @@ if __name__ == "__main__":
     input_file = Path(sys.argv[arg_idx])
     script_args = sys.argv[arg_idx + 1:]
     
-    src = input_file.read_text()
+    raw_src = input_file.read_text()
+    src = process_imports(raw_src, input_file)
     toks = t0.tokenize(src)
     asm = parse(toks, src)
     

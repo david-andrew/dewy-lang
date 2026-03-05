@@ -68,7 +68,11 @@ const CH_a:int = 97
 const CH_b:int = 98
 const CH_c:int = 99
 const CH_f:int = 102
+const CH_i:int = 105
+const CH_m:int = 109
 const CH_n:int = 110
+const CH_o:int = 111
+const CH_p:int = 112
 const CH_r:int = 114
 const CH_t:int = 116
 const CH_x:int = 120
@@ -90,51 +94,54 @@ const OUTPUT_BUF_SIZE:int = 0x100000
 const TK_IDENT:int = 0
 const TK_IDENT_CALL:int = 1
 const TK_STRING:int = 2
-const TK_TYPE_PARAM:int = 3
-const TK_VOID:int = 4
-const TK_NUMBER:int = 5
-const TK_LET:int = 6
-const TK_IF:int = 7
-const TK_LOOP:int = 8
-const TK_ELSE:int = 9
-const TK_RETURN:int = 10
-const TK_BREAK:int = 11
-const TK_CONTINUE:int = 12
-const TK_PLUS:int = 14
-const TK_MINUS:int = 15
-const TK_MUL:int = 16
-const TK_IDIV:int = 17
-const TK_MOD:int = 18
-const TK_EQ:int = 19
-const TK_NOT_EQ:int = 20
-const TK_GT:int = 21
-const TK_GT_EQ:int = 22
-const TK_LT:int = 23
-const TK_LT_EQ:int = 24
-const TK_AND:int = 25
-const TK_OR:int = 26
-const TK_XOR:int = 27
-const TK_NOT:int = 28
-const TK_LEFT_SHIFT:int = 29
-const TK_RIGHT_SHIFT:int = 30
-const TK_ASSIGN:int = 32
-const TK_UPDATE_ASSIGN:int = 33
-const TK_EXPR_CALL:int = 34
-const TK_LEFT_PAREN:int = 35
-const TK_RIGHT_PAREN:int = 36
-const TK_LEFT_BRACE:int = 37
-const TK_RIGHT_BRACE:int = 38
-const TK_LEFT_BRACKET:int = 39
-const TK_RIGHT_BRACKET:int = 40
-const TK_COLON:int = 41
-const TK_FN_COLON:int = 42
-const TK_TYPE:int = 43
-const TK_FN_TYPE:int = 44
-const TK_FN_ARROW:int = 45
-const TK_PIPE:int = 46
+const TK_PATH_STRING:int = 3
+const TK_TYPE_PARAM:int = 4
+const TK_VOID:int = 5
+const TK_NUMBER:int = 6
+const TK_LET:int = 7
+const TK_IF:int = 8
+const TK_LOOP:int = 9
+const TK_ELSE:int = 10
+const TK_RETURN:int = 11
+const TK_BREAK:int = 12
+const TK_CONTINUE:int = 13
+const TK_IMPORT:int = 14
+const TK_PLUS:int = 16
+const TK_MINUS:int = 17
+const TK_MUL:int = 18
+const TK_IDIV:int = 19
+const TK_MOD:int = 20
+const TK_EQ:int = 21
+const TK_NOT_EQ:int = 22
+const TK_GT:int = 23
+const TK_GT_EQ:int = 24
+const TK_LT:int = 25
+const TK_LT_EQ:int = 26
+const TK_AND:int = 27
+const TK_OR:int = 28
+const TK_XOR:int = 29
+const TK_NOT:int = 30
+const TK_LEFT_SHIFT:int = 31
+const TK_RIGHT_SHIFT:int = 32
+const TK_ASSIGN:int = 34
+const TK_UPDATE_ASSIGN:int = 35
+const TK_EXPR_CALL:int = 36
+const TK_LEFT_PAREN:int = 37
+const TK_RIGHT_PAREN:int = 38
+const TK_LEFT_BRACE:int = 39
+const TK_RIGHT_BRACE:int = 40
+const TK_LEFT_BRACKET:int = 41
+const TK_RIGHT_BRACKET:int = 42
+const TK_COLON:int = 43
+const TK_FN_COLON:int = 44
+const TK_TYPE:int = 45
+const TK_FN_TYPE:int = 46
+const TK_FN_ARROW:int = 47
+const TK_PIPE:int = 48
+const TK_TRANSMUTE:int = 49
 
-const TRUE_VAL:int = 0xFFFFFFFFFFFFFFFF
-const FALSE_VAL:int = 0
+const TRUE_VAL:int =  0xFFFF_FFFF_FFFF_FFFF
+const FALSE_VAL:int = 0x0000_0000_0000_0000
 
 # Precedence levels
 const PREC_OR:int = 1
@@ -443,6 +450,8 @@ let tokenize = ():>void => {
                 tok_add(0 start TK_BREAK)
             } else if str_match(src_ptr start len "continue") {
                 tok_add(0 start TK_CONTINUE)
+            } else if str_match(src_ptr start len "import") {
+                tok_add(0 start TK_IMPORT)
             } else if str_match(src_ptr start len "and") {
                 tok_add(0 start TK_AND)
             } else if str_match(src_ptr start len "or") {
@@ -455,6 +464,8 @@ let tokenize = ():>void => {
                 tok_add(TRUE_VAL start TK_NUMBER)
             } else if str_match(src_ptr start len "false") {
                 tok_add(FALSE_VAL start TK_NUMBER)
+            } else if str_match(src_ptr start len "transmute") {
+                tok_add(0 start TK_TRANSMUTE)
             } else if str_match(src_ptr start len "void") {
                 if (tok_count >? 0) and (tok_kind(tok_count - 1) =? TK_COLON) {
                     tok_count = tok_count - 1
@@ -529,6 +540,21 @@ let tokenize = ():>void => {
                 i = i + 1
             }
             tok_add(val start TK_NUMBER)
+            continue
+        }
+        
+        # Path string p"..."
+        if (c =? CH_p) and ((i + 1) <? n) and (__load8__(src_ptr + i + 1) =? CH_DQUOTE) {
+            let start:int = i
+            i = i + 2
+            loop (i <? n) and (__load8__(src_ptr + i) not=? CH_DQUOTE) {
+                if __load8__(src_ptr + i) =? CH_BACKSLASH {
+                    i = i + 1
+                }
+                i = i + 1
+            }
+            i = i + 1
+            tok_add(i - start start TK_PATH_STRING)
             continue
         }
         
@@ -646,7 +672,7 @@ let tokenize = ():>void => {
         if c =? CH_EQ {
             if tok_count >? 0 {
                 let pk:int = tok_kind(tok_count - 1)
-                if (pk >? 13) and (pk <? 31) {
+                if (pk >? 15) and (pk <? 33) {
                     tok_count = tok_count - 1
                     tok_add(pk i TK_UPDATE_ASSIGN)
                     continue
@@ -1374,6 +1400,7 @@ let parse_atom = ():>void => {
 
 let parse_expr_impl = (min_prec:int):>void => {
     parse_atom()
+    skip_cast_annot()
     
     loop cur_tok <? tok_count {
         let kind:int = tok_kind(cur_tok)
@@ -1421,11 +1448,13 @@ let parse_expr_impl = (min_prec:int):>void => {
         
         if kind =? TK_PIPE {
             parse_atom()
+            skip_cast_annot()
             out_line("movq %rax, %r11")
             out_line("popq %rdi")
             out_line("call *%r11")
         } else {
             parse_atom()
+            skip_cast_annot()
             out_line("movq %rax, %rcx")
             out_line("popq %rax")
             
@@ -1514,6 +1543,21 @@ let skip_fn_type = ():>void => {
     if tok_kind(cur_tok) =? TK_FN_TYPE {
         cur_tok = cur_tok + 1
         if tok_kind(cur_tok) =? TK_TYPE_PARAM {
+            cur_tok = cur_tok + 1
+        }
+    }
+    return void
+}
+
+let skip_cast_annot = ():>void => {
+    if tok_kind(cur_tok) =? TK_TRANSMUTE {
+        cur_tok = cur_tok + 1
+        if tok_kind(cur_tok) =? TK_IDENT {
+            cur_tok = cur_tok + 1
+            if tok_kind(cur_tok) =? TK_TYPE_PARAM {
+                cur_tok = cur_tok + 1
+            }
+        } else if tok_kind(cur_tok) =? TK_TYPE_PARAM {
             cur_tok = cur_tok + 1
         }
     }
@@ -2226,6 +2270,261 @@ let parse_program = ():>void => {
 }
 
 # ============================================================================
+# Import processing
+# ============================================================================
+
+const MAX_IMPORTS:int = 256
+
+let imported_paths:int = 0
+let imported_count:int = 0
+
+let imports_init = ():>void => {
+    imported_paths = arena_alloc(MAX_IMPORTS * 256)
+    imported_count = 0
+    return void
+}
+
+let cstr_eq = (a:int b:int):>int => {
+    let i:int = 0
+    loop true {
+        let ca:int = __load8__(a + i)
+        let cb:int = __load8__(b + i)
+        if ca not=? cb { return FALSE_VAL }
+        if ca =? CH_NUL { return TRUE_VAL }
+        i = i + 1
+    }
+    return FALSE_VAL
+}
+
+let is_already_imported = (path:int):>int => {
+    let i:int = 0
+    loop i <? imported_count {
+        if cstr_eq(imported_paths + (i * 256) path) {
+            return TRUE_VAL
+        }
+        i = i + 1
+    }
+    return FALSE_VAL
+}
+
+let mark_imported = (path:int):>void => {
+    let dst:int = imported_paths + (imported_count * 256)
+    let i:int = 0
+    loop __load8__(path + i) not=? CH_NUL {
+        __store8__(__load8__(path + i) dst + i)
+        i = i + 1
+    }
+    __store8__(CH_NUL dst + i)
+    imported_count = imported_count + 1
+    return void
+}
+
+let get_dir_from_path = (path:int):>int => {
+    let buf:int = arena_alloc(256)
+    let plen:int = 0
+    loop __load8__(path + plen) not=? CH_NUL {
+        plen = plen + 1
+    }
+    
+    let last_slash:int = 0 - 1
+    let i:int = 0
+    loop i <? plen {
+        if __load8__(path + i) =? CH_SLASH {
+            last_slash = i
+        }
+        i = i + 1
+    }
+    
+    if last_slash <? 0 {
+        __store8__(CH_DOT buf)
+        __store8__(CH_SLASH buf + 1)
+        __store8__(CH_NUL buf + 2)
+        return buf
+    }
+    
+    i = 0
+    loop i <=? last_slash {
+        __store8__(__load8__(path + i) buf + i)
+        i = i + 1
+    }
+    __store8__(CH_NUL buf + i)
+    return buf
+}
+
+let join_path = (dir:int file:int):>int => {
+    let buf:int = arena_alloc(512)
+    let pos:int = 0
+    
+    loop __load8__(dir + pos) not=? CH_NUL {
+        __store8__(__load8__(dir + pos) buf + pos)
+        pos = pos + 1
+    }
+    
+    if (pos >? 0) and (__load8__(buf + pos - 1) not=? CH_SLASH) {
+        __store8__(CH_SLASH buf + pos)
+        pos = pos + 1
+    }
+    
+    let i:int = 0
+    loop __load8__(file + i) not=? CH_NUL {
+        __store8__(__load8__(file + i) buf + pos)
+        pos = pos + 1
+        i = i + 1
+    }
+    __store8__(CH_NUL buf + pos)
+    return buf
+}
+
+let read_file_content = (path:int):>int => {
+    let fd:int = __syscall2__(SYS_OPEN path 0)
+    if fd <? 0 { return 0 }
+    
+    let content:int = arena_alloc(0x100000)
+    let len:int = __syscall3__(SYS_READ fd content 0x100000)
+    __syscall1__(SYS_CLOSE fd)
+    
+    if len <? 0 { return 0 }
+    
+    let result:int = arena_alloc(16)
+    __store__(content result)
+    __store__(len result + 8)
+    return result
+}
+
+let combined_src:int = 0
+let combined_len:int = 0
+let combined_cap:int = 0
+
+let combined_init = ():>void => {
+    combined_cap = 0x400000
+    combined_src = arena_alloc(combined_cap)
+    combined_len = 0
+    return void
+}
+
+let combined_append = (data:int len:int):>void => {
+    let i:int = 0
+    loop i <? len {
+        __store8__(__load8__(data + i) combined_src + combined_len)
+        combined_len = combined_len + 1
+        i = i + 1
+    }
+    return void
+}
+
+let combined_append_char = (c:int):>void => {
+    __store8__(c combined_src + combined_len)
+    combined_len = combined_len + 1
+    return void
+}
+
+let process_imports = (content:int clen:int dir:int):>void => {
+    let i:int = 0
+    
+    loop i <? clen {
+        let c:int = __load8__(content + i)
+        
+        if is_space(c) {
+            combined_append_char(c)
+            i = i + 1
+            continue
+        }
+        
+        if c =? CH_HASH {
+            loop (i <? clen) and (__load8__(content + i) not=? CH_LF) {
+                combined_append_char(__load8__(content + i))
+                i = i + 1
+            }
+            continue
+        }
+        
+        if str_prefix(content i "import") {
+            let start:int = i
+            i = i + 6
+            
+            loop (i <? clen) and ((__load8__(content + i) =? CH_SPACE) or (__load8__(content + i) =? CH_TAB)) {
+                i = i + 1
+            }
+            
+            if (i <? clen) and (__load8__(content + i) =? CH_p) and ((i + 1) <? clen) and (__load8__(content + i + 1) =? CH_DQUOTE) {
+                i = i + 2
+                let path_start:int = i
+                
+                loop (i <? clen) and (__load8__(content + i) not=? CH_DQUOTE) {
+                    if __load8__(content + i) =? CH_BACKSLASH {
+                        i = i + 1
+                    }
+                    i = i + 1
+                }
+                
+                let path_len:int = i - path_start
+                i = i + 1
+                
+                let import_rel:int = arena_alloc(path_len + 1)
+                let j:int = 0
+                loop j <? path_len {
+                    __store8__(__load8__(content + path_start + j) import_rel + j)
+                    j = j + 1
+                }
+                __store8__(CH_NUL import_rel + path_len)
+                
+                let import_path:int = join_path(dir import_rel)
+                
+                if not is_already_imported(import_path) {
+                    mark_imported(import_path)
+                    
+                    let file_info:int = read_file_content(import_path)
+                    if file_info not=? 0 {
+                        let file_content:int = __load__(file_info)
+                        let file_len:int = __load__(file_info + 8)
+                        let import_dir:int = get_dir_from_path(import_path)
+                        
+                        process_imports(file_content file_len import_dir)
+                        combined_append_char(CH_LF)
+                    }
+                }
+                continue
+            } else {
+                i = start
+            }
+        }
+        
+        loop (i <? clen) and (not is_space(__load8__(content + i))) {
+            let cc:int = __load8__(content + i)
+            combined_append_char(cc)
+            
+            if cc =? CH_DQUOTE {
+                i = i + 1
+                loop (i <? clen) and (__load8__(content + i) not=? CH_DQUOTE) {
+                    if __load8__(content + i) =? CH_BACKSLASH {
+                        combined_append_char(__load8__(content + i))
+                        i = i + 1
+                    }
+                    combined_append_char(__load8__(content + i))
+                    i = i + 1
+                }
+                if i <? clen {
+                    combined_append_char(__load8__(content + i))
+                    i = i + 1
+                }
+                continue
+            }
+            
+            if cc =? CH_HASH {
+                loop (i <? clen) and (__load8__(content + i) not=? CH_LF) {
+                    combined_append_char(__load8__(content + i))
+                    i = i + 1
+                }
+                continue
+            }
+            
+            i = i + 1
+        }
+    }
+    return void
+}
+
+# ============================================================================
 # Process execution helpers
 # ============================================================================
 
@@ -2338,6 +2637,8 @@ let main = (argc:int argv:int):>int => {
     glob_init()
     const_init()
     scope_init()
+    imports_init()
+    combined_init()
     
     if argc <? 2 {
         __syscall3__(SYS_WRITE STDERR "Usage: udewy [-c] <file.udewy> [args...]\n" 41)
@@ -2363,15 +2664,21 @@ let main = (argc:int argv:int):>int => {
     let script_args_start:int = arg_idx + 1
     let script_argc:int = argc - script_args_start
     
-    let fd:int = __syscall2__(SYS_OPEN filename 0)
-    if fd <? 0 {
+    let file_info:int = read_file_content(filename)
+    if file_info =? 0 {
         __syscall3__(SYS_WRITE STDERR "Error: cannot open file\n" 24)
         return 1
     }
     
-    src_ptr = arena_alloc(0x100000)
-    src_len = __syscall3__(SYS_READ fd src_ptr 0x100000)
-    __syscall1__(SYS_CLOSE fd)
+    let raw_src:int = __load__(file_info)
+    let raw_len:int = __load__(file_info + 8)
+    let src_dir:int = get_dir_from_path(filename)
+    
+    mark_imported(filename)
+    process_imports(raw_src raw_len src_dir)
+    
+    src_ptr = combined_src
+    src_len = combined_len
     
     tokenize()
     

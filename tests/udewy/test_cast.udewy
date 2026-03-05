@@ -1,0 +1,28 @@
+# Test cast annotations (transmute) - purely no-op annotations
+let main = ():>int => {
+    # basic cast with transmute
+    let x:int = 42 transmute int
+
+    let y:int = 17 transmute <int | string>
+
+    # cast with type parameter
+    let w:int = y transmute <int>
+
+    # cast with ident + type parameter
+    let v:int = x transmute array<int>
+
+    # cast in arithmetic (binds tighter than operators)
+    let sum:int = (x transmute int) + (y transmute int)
+
+    # cast on parenthesized expression
+    let p:int = (x + y) transmute int
+
+    # cast on function call result
+    let q:int = add(x y) transmute int
+
+    return sum  # should be 59
+}
+
+let add = (a:int b:int):>int => {
+    return a + b
+}

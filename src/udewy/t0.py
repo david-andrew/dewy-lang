@@ -23,6 +23,7 @@ def auto(): return next(_counter)
 TK_IDENT:        TokenKind = auto()    # (length, start, TK_IDENT)        # basic identifier. used for all identifiers except for function calls and indexes
 TK_IDENT_CALL:   TokenKind = auto()    # (length, start, TK_IDENT_CALL)   # an identifier followed by a paren. e.g. `some_fn(`
 TK_STRING:       TokenKind = auto()    # (length, start, TK_STRING)
+TK_PATH_STRING:  TokenKind = auto()    # (length, start, TK_PATH_STRING)  # path string p"..." - same as string but with p prefix
 TK_TYPE_PARAM:   TokenKind = auto()    # (length, start, TK_TYPE_PARAM)  # a type parameter. e.g. `<T>` or `<int|string|undefined>`
 TK_VOID:         TokenKind = auto()
 TK_NUMBER:       TokenKind = auto()
@@ -33,6 +34,7 @@ TK_ELSE:         TokenKind = auto()
 TK_RETURN:       TokenKind = auto()
 TK_BREAK:        TokenKind = auto()
 TK_CONTINUE:     TokenKind = auto()
+TK_IMPORT:       TokenKind = auto()
 
 # operators that can be in place operators 
 _START_CAN_BE_IN_PLACE_ASSIGNMENT_OP:int = auto()  # not a TokenKind, just an index marker
@@ -70,6 +72,7 @@ TK_TYPE:         TokenKind = auto()
 TK_FN_TYPE:      TokenKind = auto()    # `:>` e.g. `let foo = ():>bar => { ... }`
 TK_FN_ARROW:     TokenKind = auto()    # `=>`
 TK_PIPE:         TokenKind = auto()    # `|>` e.g. `x |> f1 |> f2 |> f3`
+TK_TRANSMUTE:    TokenKind = auto()    # `transmute` i.e. `<expr> transmute <(ident typeparam?)|typeparam>` e.g. `true transmute uint64`, `[1 2 3 4] transmute array<string>`, `foo transmute <int | string | bool>`, etc.
 
 # placehold for tokens that don't have a value
 TRUE_VALUE: TokenValue = 0xFFFF_FFFF_FFFF_FFFF
@@ -140,7 +143,6 @@ def tokenize(src:str)->list[PackedToken]:
         # running sanity check(s) for prototype tokens that shouldn't be in the final output
         # check here so that we can maintain a single pass tokenizer
         if len(toks) > 1 and (kindof(toks[-2]) == _TK_COLON or kindof(toks[-2]) == _TK_FN_COLON):
-            pdb.set_trace()
             raise SyntaxError(f"colon must be followed by a type annotation at {i}: {src[i]!r}")
         
         # current character
@@ -167,20 +169,22 @@ def tokenize(src:str)->list[PackedToken]:
             text = src[start:i]
             
             # specific keywords (must be exact match, not prefix)
-            if   str_eq("let", text):      toks.append(pack(NO_VALUE, start, TK_LET))
-            elif str_eq("const", text):    toks.append(pack(NO_VALUE, start, TK_LET))
-            elif str_eq("and", text):      toks.append(pack(NO_VALUE, start, TK_AND))
-            elif str_eq("or", text):       toks.append(pack(NO_VALUE, start, TK_OR))
-            elif str_eq("xor", text):      toks.append(pack(NO_VALUE, start, TK_XOR))
-            elif str_eq("not", text):      toks.append(pack(NO_VALUE, start, TK_NOT))
-            elif str_eq("true", text):     toks.append(pack(TRUE_VALUE, start, TK_NUMBER))
-            elif str_eq("false", text):    toks.append(pack(FALSE_VALUE, start, TK_NUMBER))
-            elif str_eq("if", text):       toks.append(pack(NO_VALUE, start, TK_IF))
-            elif str_eq("loop", text):     toks.append(pack(NO_VALUE, start, TK_LOOP))
-            elif str_eq("else", text):     toks.append(pack(NO_VALUE, start, TK_ELSE))
-            elif str_eq("return", text):   toks.append(pack(NO_VALUE, start, TK_RETURN))
-            elif str_eq("break", text):    toks.append(pack(NO_VALUE, start, TK_BREAK))
-            elif str_eq("continue", text): toks.append(pack(NO_VALUE, start, TK_CONTINUE))
+            if   str_eq("let", text):       toks.append(pack(NO_VALUE, start, TK_LET))
+            elif str_eq("const", text):     toks.append(pack(NO_VALUE, start, TK_LET))
+            elif str_eq("and", text):       toks.append(pack(NO_VALUE, start, TK_AND))
+            elif str_eq("or", text):        toks.append(pack(NO_VALUE, start, TK_OR))
+            elif str_eq("xor", text):       toks.append(pack(NO_VALUE, start, TK_XOR))
+            elif str_eq("not", text):       toks.append(pack(NO_VALUE, start, TK_NOT))
+            elif str_eq("true", text):      toks.append(pack(TRUE_VALUE, start, TK_NUMBER))
+            elif str_eq("false", text):     toks.append(pack(FALSE_VALUE, start, TK_NUMBER))
+            elif str_eq("if", text):        toks.append(pack(NO_VALUE, start, TK_IF))
+            elif str_eq("loop", text):      toks.append(pack(NO_VALUE, start, TK_LOOP))
+            elif str_eq("else", text):      toks.append(pack(NO_VALUE, start, TK_ELSE))
+            elif str_eq("return", text):    toks.append(pack(NO_VALUE, start, TK_RETURN))
+            elif str_eq("break", text):     toks.append(pack(NO_VALUE, start, TK_BREAK))
+            elif str_eq("continue", text):  toks.append(pack(NO_VALUE, start, TK_CONTINUE))
+            elif str_eq("import", text):    toks.append(pack(NO_VALUE, start, TK_IMPORT))
+            elif str_eq("transmute", text): toks.append(pack(NO_VALUE, start, TK_TRANSMUTE))
             
             # special cases of identifiers preceded or followed by something
             elif i < n and src[i] == '(':
@@ -234,6 +238,19 @@ def tokenize(src:str)->list[PackedToken]:
                 val = val * 10 + (ord(src[i]) - 48)
                 i += 1
             toks.append(pack(val, start, TK_NUMBER))
+            continue
+        
+        # path string p"..."
+        if c == 'p' and i + 1 < n and src[i + 1] == '"':
+            start = i
+            i += 2  # skip 'p"'
+            while i < n and src[i] != '"':
+                if src[i] == '\\': i += 1
+                i += 1
+            if i >= n or src[i] != '"':
+                raise SyntaxError(f"unterminated path string at {i}: {src[start:i]!r}")
+            i += 1
+            toks.append(pack(i - start, start, TK_PATH_STRING))
             continue
         
         # string
@@ -371,6 +388,7 @@ def dump_token(token:PackedToken, src:str):
     elif kind == TK_FN_TYPE:     value = ':>' + src[location:location+value]
     elif kind == TK_TYPE_PARAM:  value = src[location:location+value]  # <> already included in range
     elif kind == TK_STRING:      value = src[location:location+value]
+    elif kind == TK_PATH_STRING: value = src[location:location+value]
     elif kind == TK_NUMBER:      value = value
     else:                        value = None
     

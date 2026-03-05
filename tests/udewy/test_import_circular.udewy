@@ -1,0 +1,8 @@
+# Test circular imports - imports A which imports B which imports A
+import p"test_import_a.udewy"
+
+let main = ():>int => {
+    let x:int = func_a(5)
+    x = func_b(x)
+    return x
+}
