@@ -62,6 +62,19 @@ def get_name(src: str, start: int, length: int) -> str:
     """Extract name string from src (for labels/debugging)"""
     return src[start:start + length]
 
+def escape_code_to_value(c: str) -> int:
+    """Convert escape code to ordinal value, -1 means skip this character"""
+    if c == 'n': return 10
+    if c == '\n': return -1 #pass
+    if c == 't': return 9
+    if c == 'r': return 13
+    # if c == '\\': return 92  #unnecessary because \ is just itself
+    # if c == '"': return 34  #unnecessary because " is just itself
+    if c == '0': return 0
+    
+    # all other characters are just themselves
+    return ord(c)
+
 # ============================================================================
 # Symbol table operations (low-level style with linear search)
 # ============================================================================
@@ -374,20 +387,9 @@ def parse_atom(toks: list, idx: int, src: str, code: list, data: list,
         while i < len(str_content):
             if str_content[i] == '\\' and i + 1 < len(str_content):
                 c = str_content[i + 1]
-                if c == 'n':
-                    processed.append(10)
-                elif c == 't':
-                    processed.append(9)
-                elif c == 'r':
-                    processed.append(13)
-                elif c == '\\':
-                    processed.append(92)
-                elif c == '"':
-                    processed.append(34)
-                elif c == '0':
-                    processed.append(0)
-                else:
-                    processed.append(ord(c))
+                val = escape_code_to_value(c)
+                if val != -1:
+                    processed.append(val)
                 i = i + 2
             else:
                 processed.append(ord(str_content[i]))
@@ -568,20 +570,9 @@ def parse_atom(toks: list, idx: int, src: str, code: list, data: list,
                 while i < len(str_content):
                     if str_content[i] == '\\' and i + 1 < len(str_content):
                         c = str_content[i + 1]
-                        if c == 'n':
-                            processed.append(10)
-                        elif c == 't':
-                            processed.append(9)
-                        elif c == 'r':
-                            processed.append(13)
-                        elif c == '\\':
-                            processed.append(92)
-                        elif c == '"':
-                            processed.append(34)
-                        elif c == '0':
-                            processed.append(0)
-                        else:
-                            processed.append(ord(c))
+                        val = escape_code_to_value(c)
+                        if val != -1:
+                            processed.append(val)
                         i = i + 2
                     else:
                         processed.append(ord(str_content[i]))
@@ -643,13 +634,9 @@ def parse_atom(toks: list, idx: int, src: str, code: list, data: list,
                         while i < len(str_content):
                             if str_content[i] == '\\' and i + 1 < len(str_content):
                                 c = str_content[i + 1]
-                                if c == 'n': processed.append(10)
-                                elif c == 't': processed.append(9)
-                                elif c == 'r': processed.append(13)
-                                elif c == '\\': processed.append(92)
-                                elif c == '"': processed.append(34)
-                                elif c == '0': processed.append(0)
-                                else: processed.append(ord(c))
+                                val = escape_code_to_value(c)
+                                if val != -1:
+                                    processed.append(val)
                                 i = i + 2
                             else:
                                 processed.append(ord(str_content[i]))
@@ -1438,20 +1425,9 @@ def parse_program(toks: list, src: str, code: list, data: list,
                 while i < len(str_content):
                     if str_content[i] == '\\' and i + 1 < len(str_content):
                         c = str_content[i + 1]
-                        if c == 'n':
-                            processed.append(10)
-                        elif c == 't':
-                            processed.append(9)
-                        elif c == 'r':
-                            processed.append(13)
-                        # elif c == '\\':
-                        #     processed.append(92)
-                        # elif c == '"':
-                        #     processed.append(34)
-                        elif c == '0':
-                            processed.append(0)
-                        else:
-                            processed.append(ord(c))
+                        val = escape_code_to_value(c)
+                        if val != -1:
+                            processed.append(val)
                         i = i + 2
                     else:
                         processed.append(ord(str_content[i]))
@@ -1516,13 +1492,9 @@ def parse_program(toks: list, src: str, code: list, data: list,
                         while i < len(str_content):
                             if str_content[i] == '\\' and i + 1 < len(str_content):
                                 c = str_content[i + 1]
-                                if c == 'n': processed.append(10)
-                                elif c == 't': processed.append(9)
-                                elif c == 'r': processed.append(13)
-                                elif c == '\\': processed.append(92)
-                                elif c == '"': processed.append(34)
-                                elif c == '0': processed.append(0)
-                                else: processed.append(ord(c))
+                                val = escape_code_to_value(c)
+                                if val != -1:
+                                    processed.append(val)
                                 i = i + 2
                             else:
                                 processed.append(ord(str_content[i]))
@@ -1570,13 +1542,9 @@ def parse_program(toks: list, src: str, code: list, data: list,
                                 while j < len(str_content):
                                     if str_content[j] == '\\' and j + 1 < len(str_content):
                                         c = str_content[j + 1]
-                                        if c == 'n': processed.append(10)
-                                        elif c == 't': processed.append(9)
-                                        elif c == 'r': processed.append(13)
-                                        elif c == '\\': processed.append(92)
-                                        elif c == '"': processed.append(34)
-                                        elif c == '0': processed.append(0)
-                                        else: processed.append(ord(c))
+                                        val = escape_code_to_value(c)
+                                        if val != -1:
+                                            processed.append(val)
                                         j = j + 2
                                     else:
                                         processed.append(ord(str_content[j]))

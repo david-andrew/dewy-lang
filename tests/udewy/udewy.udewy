@@ -346,6 +346,15 @@ let str_prefix = (s:int pos:int target:int):>int => {
     return TRUE_VAL
 }
 
+let escape_char = (c:int):>int => {
+    if c =? CH_n { return CH_LF }
+    if c =? CH_LF { return 0 - 1 }
+    if c =? CH_t { return CH_TAB }
+    if c =? CH_r { return CH_CR }
+    if c =? CH_0 { return CH_NUL }
+    return c
+}
+
 # ============================================================================
 # Token storage
 # ============================================================================
@@ -1066,6 +1075,11 @@ let parse_atom = ():>void => {
             let c:int = __load8__(src_ptr + si)
             if c =? CH_BACKSLASH {
                 si = si + 1
+                c = __load8__(src_ptr + si)
+                if c =? CH_LF {
+                    si = si + 1
+                    continue
+                }
             }
             slen = slen + 1
             si = si + 1
@@ -1079,19 +1093,19 @@ let parse_atom = ():>void => {
         si = start + 1
         let first:int = 1
         loop si <? send {
+            let c:int = __load8__(src_ptr + si)
+            if c =? CH_BACKSLASH {
+                si = si + 1
+                c = escape_char(__load8__(src_ptr + si))
+                if c =? (0 - 1) {
+                    si = si + 1
+                    continue
+                }
+            }
             if first =? 0 {
                 data_str(", ")
             }
             first = 0
-            let c:int = __load8__(src_ptr + si)
-            if c =? CH_BACKSLASH {
-                si = si + 1
-                c = __load8__(src_ptr + si)
-                if c =? CH_n { c = CH_LF }
-                else if c =? CH_t { c = CH_TAB }
-                else if c =? CH_r { c = CH_CR }
-                else if c =? CH_0 { c = CH_NUL }
-            }
             data_int(c)
             si = si + 1
         }
@@ -1249,6 +1263,11 @@ let parse_atom = ():>void => {
                     let c:int = __load8__(src_ptr + si)
                     if c =? CH_BACKSLASH {
                         si = si + 1
+                        c = __load8__(src_ptr + si)
+                        if c =? CH_LF {
+                            si = si + 1
+                            continue
+                        }
                     }
                     slen = slen + 1
                     si = si + 1
@@ -1262,19 +1281,19 @@ let parse_atom = ():>void => {
                 si = start + 1
                 let first:int = 1
                 loop si <? send {
+                    let c:int = __load8__(src_ptr + si)
+                    if c =? CH_BACKSLASH {
+                        si = si + 1
+                        c = escape_char(__load8__(src_ptr + si))
+                        if c =? (0 - 1) {
+                            si = si + 1
+                            continue
+                        }
+                    }
                     if first =? 0 {
                         data_str(", ")
                     }
                     first = 0
-                    let c:int = __load8__(src_ptr + si)
-                    if c =? CH_BACKSLASH {
-                        si = si + 1
-                        c = __load8__(src_ptr + si)
-                        if c =? CH_n { c = CH_LF }
-                        else if c =? CH_t { c = CH_TAB }
-                        else if c =? CH_r { c = CH_CR }
-                        else if c =? CH_0 { c = CH_NUL }
-                    }
                     data_int(c)
                     si = si + 1
                 }
@@ -1333,6 +1352,11 @@ let parse_atom = ():>void => {
                             let c:int = __load8__(src_ptr + si)
                             if c =? CH_BACKSLASH {
                                 si = si + 1
+                                c = __load8__(src_ptr + si)
+                                if c =? CH_LF {
+                                    si = si + 1
+                                    continue
+                                }
                             }
                             slen = slen + 1
                             si = si + 1
@@ -1346,19 +1370,19 @@ let parse_atom = ():>void => {
                         si = start + 1
                         let first:int = 1
                         loop si <? send {
+                            let c:int = __load8__(src_ptr + si)
+                            if c =? CH_BACKSLASH {
+                                si = si + 1
+                                c = escape_char(__load8__(src_ptr + si))
+                                if c =? (0 - 1) {
+                                    si = si + 1
+                                    continue
+                                }
+                            }
                             if first =? 0 {
                                 data_str(", ")
                             }
                             first = 0
-                            let c:int = __load8__(src_ptr + si)
-                            if c =? CH_BACKSLASH {
-                                si = si + 1
-                                c = __load8__(src_ptr + si)
-                                if c =? CH_n { c = CH_LF }
-                                else if c =? CH_t { c = CH_TAB }
-                                else if c =? CH_r { c = CH_CR }
-                                else if c =? CH_0 { c = CH_NUL }
-                            }
                             data_int(c)
                             si = si + 1
                         }
@@ -2112,7 +2136,14 @@ let parse_global_var = ():>void => {
         let send:int = start + len - 1
         loop si <? send {
             let c:int = __load8__(src_ptr + si)
-            if c =? CH_BACKSLASH { si = si + 1 }
+            if c =? CH_BACKSLASH {
+                si = si + 1
+                c = __load8__(src_ptr + si)
+                if c =? CH_LF {
+                    si = si + 1
+                    continue
+                }
+            }
             slen = slen + 1
             si = si + 1
         }
@@ -2125,17 +2156,17 @@ let parse_global_var = ():>void => {
         si = start + 1
         let first:int = 1
         loop si <? send {
-            if first =? 0 { data_str(", ") }
-            first = 0
             let c:int = __load8__(src_ptr + si)
             if c =? CH_BACKSLASH {
                 si = si + 1
-                c = __load8__(src_ptr + si)
-                if c =? CH_n { c = CH_LF }
-                else if c =? CH_t { c = CH_TAB }
-                else if c =? CH_r { c = CH_CR }
-                else if c =? CH_0 { c = CH_NUL }
+                c = escape_char(__load8__(src_ptr + si))
+                if c =? (0 - 1) {
+                    si = si + 1
+                    continue
+                }
             }
+            if first =? 0 { data_str(", ") }
+            first = 0
             data_int(c)
             si = si + 1
         }
@@ -2210,6 +2241,11 @@ let parse_global_var = ():>void => {
                     let c:int = __load8__(src_ptr + si)
                     if c =? CH_BACKSLASH {
                         si = si + 1
+                        c = __load8__(src_ptr + si)
+                        if c =? CH_LF {
+                            si = si + 1
+                            continue
+                        }
                     }
                     slen = slen + 1
                     si = si + 1
@@ -2223,19 +2259,19 @@ let parse_global_var = ():>void => {
                 si = start + 1
                 let first:int = 1
                 loop si <? send {
+                    let c:int = __load8__(src_ptr + si)
+                    if c =? CH_BACKSLASH {
+                        si = si + 1
+                        c = escape_char(__load8__(src_ptr + si))
+                        if c =? (0 - 1) {
+                            si = si + 1
+                            continue
+                        }
+                    }
                     if first =? 0 {
                         data_str(", ")
                     }
                     first = 0
-                    let c:int = __load8__(src_ptr + si)
-                    if c =? CH_BACKSLASH {
-                        si = si + 1
-                        c = __load8__(src_ptr + si)
-                        if c =? CH_n { c = CH_LF }
-                        else if c =? CH_t { c = CH_TAB }
-                        else if c =? CH_r { c = CH_CR }
-                        else if c =? CH_0 { c = CH_NUL }
-                    }
                     data_int(c)
                     si = si + 1
                 }
@@ -2294,6 +2330,11 @@ let parse_global_var = ():>void => {
                             let c:int = __load8__(src_ptr + si)
                             if c =? CH_BACKSLASH {
                                 si = si + 1
+                                c = __load8__(src_ptr + si)
+                                if c =? CH_LF {
+                                    si = si + 1
+                                    continue
+                                }
                             }
                             slen = slen + 1
                             si = si + 1
@@ -2307,19 +2348,19 @@ let parse_global_var = ():>void => {
                         si = start + 1
                         let first:int = 1
                         loop si <? send {
+                            let c:int = __load8__(src_ptr + si)
+                            if c =? CH_BACKSLASH {
+                                si = si + 1
+                                c = escape_char(__load8__(src_ptr + si))
+                                if c =? (0 - 1) {
+                                    si = si + 1
+                                    continue
+                                }
+                            }
                             if first =? 0 {
                                 data_str(", ")
                             }
                             first = 0
-                            let c:int = __load8__(src_ptr + si)
-                            if c =? CH_BACKSLASH {
-                                si = si + 1
-                                c = __load8__(src_ptr + si)
-                                if c =? CH_n { c = CH_LF }
-                                else if c =? CH_t { c = CH_TAB }
-                                else if c =? CH_r { c = CH_CR }
-                                else if c =? CH_0 { c = CH_NUL }
-                            }
                             data_int(c)
                             si = si + 1
                         }
