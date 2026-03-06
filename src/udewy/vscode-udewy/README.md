@@ -1,47 +1,41 @@
-# Udewy Language Support for VS Code
+# udewy Language Support for VS Code
 
-Syntax highlighting for the Udewy programming language.
+Syntax highlighting and basic editor support for the **udewy** programming language (`.udewy`).
 
 ## Features
 
 - Syntax highlighting for `.udewy` files
-- Bracket matching and auto-closing
-- Comment toggling with `#`
+- Bracket matching + auto-closing (`()`, `[]`, `{}`, `""`)
+- Line comments with `#`
+- Indentation + folding based on `{ ... }`
 
-## Installation
+## Usage
 
-### From Source (Development)
+- Open a `.udewy` file and VS Code should automatically use the `udewy` language mode.
+- If it doesn’t, use the language picker and choose `udewy`.
 
-1. Copy or symlink this folder to your VS Code extensions directory:
+## Highlighted language constructs
 
-   ```bash
-   # Linux
-   ln -s /path/to/editors/vscode-udewy ~/.vscode/extensions/udewy
+The grammar aims to highlight the following (non-exhaustive) constructs:
 
-   # macOS
-   ln -s /path/to/editors/vscode-udewy ~/.vscode/extensions/udewy
-
-   # Windows (PowerShell as Admin)
-   New-Item -ItemType SymbolicLink -Path "$env:USERPROFILE\.vscode\extensions\udewy" -Target "C:\path\to\editors\vscode-udewy"
-   ```
-
-2. Restart VS Code or run `Developer: Reload Window`
-
-### Package as VSIX
-
-1. Install vsce: `npm install -g @vscode/vsce`
-2. Package: `vsce package`
-3. Install the generated `.vsix` file via VS Code
-
-## Language Syntax
-
-Udewy is highlighted with support for:
-
-- **Keywords**: `let`, `const`, `if`, `else`, `loop`, `return`, `break`, `continue`
-- **Operators**: `and`, `or`, `xor`, `not`, `=?`, `>?`, `<?`, `>=?`, `<=?`, `:>`, `=>`, `|>`
+- **Keywords**: `let`, `const`, `if`, `else`, `loop`, `return`, `break`, `continue`, `import`
+- **Word operators**: `and`, `or`, `xor`, `not`, `transmute`
+- **Operators**: `=?`, `>?`, `<?`, `>=?`, `<=?`, `=>`, `|>`, `=`, `+=`, `-=`, `*=`, `//=`, `%=`, `<<`, `>>`, `<<=`, `>>=`, `//`, `+`, `-`, `*`, `%`
 - **Constants**: `true`, `false`, `void`
-- **Intrinsics**: `__syscall0__` through `__syscall6__`, `__load__`, `__store__`, etc.
-- **Type annotations**: `:type` and `:>returnType`
+- **Intrinsics**: `__syscall0__` … `__syscall6__`, `__load__`, `__store__`, `__load8__`, `__store8__`
+- **Type annotations**: `:Type` and `:>ReturnType`
+- **Strings**: `"double quoted"` with escape sequences, and path strings like `p"..."` (highlighted as strings)
+- **Numbers**: decimal (`123`), hex (`0xDEAD_BEEF`), binary (`0b1010_0101`)
 - **Comments**: `# line comment`
-- **Strings**: `"double quoted"` with escape sequences
-- **Numbers**: decimal, `0x` hex, `0b` binary
+
+## Limitations
+
+This extension currently provides a TextMate grammar + language configuration (highlighting, brackets, comments, folding). It does not include language-server features like go-to-definition, rename, diagnostics, or formatting.
+
+## Repository
+
+The extension lives in the `dewy-lang` repository: `https://github.com/david-andrew/dewy-lang`.
+
+## License
+
+GPL-3.0
