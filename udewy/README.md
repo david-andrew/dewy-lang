@@ -1,4 +1,9 @@
-# udewy
+<p align="center">
+  <img src="https://raw.githubusercontent.com/david-andrew/dewy-lang/master/assets/udewy_logo_128x128.png" alt="Dewy logo" />
+</p>
+
+
+# The μDewy Subset Programming Language
 
 udewy (μdewy, /mjuː ˈduːi/) is a strict subset of the Dewy programming language, designed for bootstrapping. It serves as an intermediate step in a trusted computing base, providing a language simple enough to implement in assembly while being expressive enough to write a real compiler.
 
