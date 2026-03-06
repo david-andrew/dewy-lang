@@ -13,10 +13,10 @@ udewy (μdewy, /mjuː ˈduːi/) is a strict subset of the Dewy programming langu
 
 ```bash
 # Run a udewy program
-python -m src.udewy.p0 tests/udewy/test_hello.udewy
+python -m udewy.p0 udewy/tests/test_hello.udewy
 
 # Compile only (don't run)
-python -m src.udewy.p0 -c tests/udewy/test_hello.udewy
+python -m udewy.p0 -c udewy/tests/test_hello.udewy
 ```
 
 The compiler produces x86_64 Linux executables in `__dewycache__/`.
@@ -293,8 +293,6 @@ let arr:int = buffer transmute array<byte>
 ```
 
 `transmute` preserves the underlying bits while changing the type annotation. It allows udewy code that manipulates raw integers to be valid in the strictly-typed full Dewy.
-
-**Note**: `as` (value casts) are intentionally not supported—they would change bit representations in full Dewy but be no-ops in udewy, causing incompatibility.
 
 ## Intrinsics
 
