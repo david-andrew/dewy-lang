@@ -391,6 +391,14 @@ def is_intrinsic(src: str, name_start: int, name_len: int) -> bool:
         return True
     if name_eq_str(src, name_start, name_len, "__store8__"):
         return True
+    if name_eq_str(src, name_start, name_len, "__load16__"):
+        return True
+    if name_eq_str(src, name_start, name_len, "__store16__"):
+        return True
+    if name_eq_str(src, name_start, name_len, "__load32__"):
+        return True
+    if name_eq_str(src, name_start, name_len, "__store32__"):
+        return True
     return False
 
 # ============================================================================
@@ -417,6 +425,22 @@ def emit_intrinsic_call(code: list, src: str, name_start: int, name_len: int, nu
         emit(code, "popq %rbx")         # val
         emit(code, "movb %bl, (%rax)")  # store low byte
         emit(code, "xorq %rax, %rax")   # return 0
+    elif name == "__load16__":
+        # load 16-bit from address in rax, zero-extend
+        emit(code, "movzwq (%rax), %rax")
+    elif name == "__store16__":
+        # store 16-bit: args are (val, ptr)
+        emit(code, "popq %rbx")
+        emit(code, "movw %bx, (%rax)")
+        emit(code, "xorq %rax, %rax")
+    elif name == "__load32__":
+        # load 32-bit from address in rax, zero-extend
+        emit(code, "movl (%rax), %eax")
+    elif name == "__store32__":
+        # store 32-bit: args are (val, ptr)
+        emit(code, "popq %rbx")
+        emit(code, "movl %ebx, (%rax)")
+        emit(code, "xorq %rax, %rax")
     elif name == "__syscall0__":
         # syscall num in rax
         emit(code, "syscall")
@@ -726,27 +750,32 @@ def parse_atom(toks: list, idx: int, src: str, code: list, data: list,
         emit(code, f"leaq {label}+8(%rip), %rax")
         return idx
     
-    # Unary not
+    raise SyntaxError(f"Unexpected token in expression: {t0.dump_token(toks[idx], src)} at {tok_loc(toks, idx)}")
+
+
+def parse_prefix(toks: list, idx: int, src: str, code: list, data: list,
+                 fn_table: list, scope_stack: list, global_table: list, const_table: list,
+                 ctx: dict) -> int:
+    """Parse a prefix expression, emit code, result in rax. Returns new idx."""
+    kind = tok_kind(toks, idx)
+
     if kind == t0.TK_NOT:
         idx = idx + 1
-        idx = parse_atom(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+        idx = parse_prefix(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
         emit(code, "notq %rax")
         return idx
-    
-    # Unary minus (for negative numbers)
+
     if kind == t0.TK_MINUS:
         idx = idx + 1
         if tok_kind(toks, idx) == t0.TK_NUMBER:
             val = tok_value(toks, idx)
             emit(code, f"movq ${-val}, %rax")
             return idx + 1
-        else:
-            # General case: negate expression
-            idx = parse_atom(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
-            emit(code, "negq %rax")
-            return idx
-    
-    raise SyntaxError(f"Unexpected token in expression: {t0.dump_token(toks[idx], src)} at {tok_loc(toks, idx)}")
+        idx = parse_prefix(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+        emit(code, "negq %rax")
+        return idx
+
+    return parse_atom(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
 
 
 def parse_expr(toks: list, idx: int, src: str, code: list, data: list,
@@ -754,8 +783,8 @@ def parse_expr(toks: list, idx: int, src: str, code: list, data: list,
                ctx: dict, min_prec: int) -> int:
     """Parse expression with precedence validation. Result in rax."""
     
-    # Parse left-hand side (atom or call expression)
-    idx = parse_atom(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+    # Parse left-hand side (prefix expression)
+    idx = parse_prefix(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
     idx = skip_cast_annotation(toks, idx)
     
     # Handle binary operators (left to right, validate precedence)
@@ -807,7 +836,7 @@ def parse_expr(toks: list, idx: int, src: str, code: list, data: list,
         # Handle pipe specially - RHS is function to call with LHS as arg
         if kind == t0.TK_PIPE:
             # Parse RHS (should be function name or expression)
-            idx = parse_atom(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+            idx = parse_prefix(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
             idx = skip_cast_annotation(toks, idx)
             # rax = function pointer, stack top = argument
             emit(code, "movq %rax, %r11")  # save fn ptr
@@ -815,7 +844,7 @@ def parse_expr(toks: list, idx: int, src: str, code: list, data: list,
             emit(code, "call *%r11")
         else:
             # Parse right operand
-            idx = parse_atom(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+            idx = parse_prefix(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
             idx = skip_cast_annotation(toks, idx)
             
             # Pop left operand to rbx
@@ -1070,7 +1099,7 @@ def parse_fn_decl(toks: list, idx: int, src: str, code: list, data: list,
         
         # Check for stack overflow
         if stack_offset < -1024:
-            raise SyntaxError(f"Too many parameters in function (stack overflow)")
+            raise SyntaxError("Too many parameters in function (stack overflow)")
         
         i = i + 1
     
@@ -1649,7 +1678,7 @@ if __name__ == "__main__":
     from pathlib import Path
     
     if len(sys.argv) < 2:
-        print("Usage: python -m src.udewy.p0 [-c] <file.udewy> [args...]")
+        print("Usage: python -m udewy.p0 [-c] <file.udewy> [args...]")
         print("  -c    Compile only, don't run")
         sys.exit(1)
     

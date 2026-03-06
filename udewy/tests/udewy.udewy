@@ -930,6 +930,10 @@ let is_intrinsic = (start:int len:int):>int => {
     if name_eq_intrinsic(start len "__store__") { return TRUE_VAL }
     if name_eq_intrinsic(start len "__load8__") { return TRUE_VAL }
     if name_eq_intrinsic(start len "__store8__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__load16__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__store16__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__load32__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__store32__") { return TRUE_VAL }
     return FALSE_VAL
 }
 
@@ -1016,6 +1020,18 @@ let emit_intrinsic = (start:int len:int nargs:int):>void => {
     } else if name_eq_intrinsic(start len "__store8__") {
         out_line("popq %rbx")
         out_line("movb %bl, (%rax)")
+        out_line("xorq %rax, %rax")
+    } else if name_eq_intrinsic(start len "__load16__") {
+        out_line("movzwq (%rax), %rax")
+    } else if name_eq_intrinsic(start len "__store16__") {
+        out_line("popq %rbx")
+        out_line("movw %bx, (%rax)")
+        out_line("xorq %rax, %rax")
+    } else if name_eq_intrinsic(start len "__load32__") {
+        out_line("movl (%rax), %eax")
+    } else if name_eq_intrinsic(start len "__store32__") {
+        out_line("popq %rbx")
+        out_line("movl %ebx, (%rax)")
         out_line("xorq %rax, %rax")
     } else if name_eq_intrinsic(start len "__syscall0__") {
         out_line("syscall")
@@ -1370,9 +1386,18 @@ let parse_atom = ():>void => {
         return void
     }
     
+    out_str("Parse error: unexpected token in expr\n")
+    out_flush()
+    __syscall1__(SYS_EXIT 1)
+    return void
+}
+
+let parse_prefix = ():>void => {
+    let kind:int = tok_kind(cur_tok)
+    
     if kind =? TK_NOT {
         cur_tok = cur_tok + 1
-        parse_atom()
+        parse_prefix()
         out_line("notq %rax")
         return void
     }
@@ -1386,20 +1411,18 @@ let parse_atom = ():>void => {
             out_str(", %rax\n")
             cur_tok = cur_tok + 1
         } else {
-            parse_atom()
+            parse_prefix()
             out_line("negq %rax")
         }
         return void
     }
     
-    out_str("Parse error: unexpected token in expr\n")
-    out_flush()
-    __syscall1__(SYS_EXIT 1)
+    parse_atom()
     return void
 }
 
 let parse_expr_impl = (min_prec:int):>void => {
-    parse_atom()
+    parse_prefix()
     skip_cast_annot()
     
     loop cur_tok <? tok_count {
@@ -1447,13 +1470,13 @@ let parse_expr_impl = (min_prec:int):>void => {
         out_line("pushq %rax")
         
         if kind =? TK_PIPE {
-            parse_atom()
+            parse_prefix()
             skip_cast_annot()
             out_line("movq %rax, %r11")
             out_line("popq %rdi")
             out_line("call *%r11")
         } else {
-            parse_atom()
+            parse_prefix()
             skip_cast_annot()
             out_line("movq %rax, %rcx")
             out_line("popq %rax")
@@ -2711,7 +2734,7 @@ let main = (argc:int argv:int):>int => {
     let obj_path:int = make_path("__dewycache__/" basename ".o\0")
     let exe_path:int = make_path("__dewycache__/" basename "\0")
     let runtime_obj:int = "__dewycache__/runtime.o\0"
-    let runtime_src:int = "src/udewy/runtime.s\0"
+    let runtime_src:int = "udewy/runtime.s\0"
     
     write_file(asm_path out_ptr out_len)
     

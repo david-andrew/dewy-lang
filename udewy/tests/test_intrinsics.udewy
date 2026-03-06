@@ -1,0 +1,39 @@
+# Test 16-bit/32-bit intrinsics and unary negation of expressions
+
+let double = (x:int):>int => {
+    return x * 2
+}
+
+let main = ():>int => {
+    let neg:int = -(1 + (2 * 3))
+    if neg not=? (0 - 7) {
+        return 1
+    }
+
+    let neg_call:int = -double(5)
+    if neg_call not=? (0 - 10) {
+        return 2
+    }
+
+    let buf:int = "wxyz"
+
+    if __load16__(buf) not=? 0x7877 {
+        return 3
+    }
+
+    __store16__(0x6261 buf)
+    if (__load8__(buf) not=? 97) or (__load8__(buf + 1) not=? 98) {
+        return 4
+    }
+
+    __store32__(0x44434241 buf)
+    if __load32__(buf) not=? 0x44434241 {
+        return 5
+    }
+
+    if __load16__(buf + 1) not=? 0x4342 {
+        return 6
+    }
+
+    return 0
+}

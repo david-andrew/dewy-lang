@@ -22,7 +22,7 @@ The grammar aims to highlight the following (non-exhaustive) constructs:
 - **Word operators**: `and`, `or`, `xor`, `not`, `transmute`
 - **Operators**: `=?`, `>?`, `<?`, `>=?`, `<=?`, `=>`, `|>`, `=`, `+=`, `-=`, `*=`, `//=`, `%=`, `<<`, `>>`, `<<=`, `>>=`, `//`, `+`, `-`, `*`, `%`
 - **Constants**: `true`, `false`, `void`
-- **Intrinsics**: `__syscall0__` … `__syscall6__`, `__load__`, `__store__`, `__load8__`, `__store8__`
+- **Intrinsics**: `__syscall0__` … `__syscall6__`, `__load__`, `__store__`, `__load8__`, `__store8__`, `__load16__`, `__store16__`, `__load32__`, `__store32__`
 - **Type annotations**: `:Type` and `:>ReturnType`
 - **Strings**: `"double quoted"` with escape sequences, and path strings like `p"..."` (highlighted as strings)
 - **Numbers**: decimal (`123`), hex (`0xDEAD_BEEF`), binary (`0b1010_0101`)

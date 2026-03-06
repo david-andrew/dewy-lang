@@ -118,6 +118,13 @@ let fn_ptr:int = get_handler()
 | `//` | Integer division |
 | `%` | Modulo |
 
+Prefix unary operators bind to expressions:
+
+```udewy
+let x:int = -(a + b)
+let y:int = not flags
+```
+
 #### Comparison (return `true` or `false`)
 | Operator | Description |
 |----------|-------------|
@@ -308,7 +315,17 @@ __store__(value address)
 # 8-bit load/store
 let byte:int = __load8__(address)
 __store8__(byte_value address)
+
+# 16-bit load/store
+let word:int = __load16__(address)
+__store16__(word_value address)
+
+# 32-bit load/store
+let dword:int = __load32__(address)
+__store32__(dword_value address)
 ```
+
+`__load8__`, `__load16__`, and `__load32__` zero-extend their results to 64 bits.
 
 ### System Calls
 
@@ -420,10 +437,10 @@ The bootstrapped udewy compiler is in `tests/udewy/udewy.udewy` (~2500 lines). I
 
 ```bash
 # Build the self-hosted compiler
-python -m src.udewy.p0 -c tests/udewy/udewy.udewy
+python -m udewy.p0 -c udewy/tests/udewy.udewy
 
 # Use it to compile a program
-./__dewycache__/udewy tests/udewy/test_hello.udewy
+./__dewycache__/udewy udewy/tests/test_hello.udewy
 ```
 
 ## Imports
