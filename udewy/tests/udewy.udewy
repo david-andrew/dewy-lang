@@ -2729,12 +2729,14 @@ let main = (argc:int argv:int):>int => {
     
     __syscall2__(SYS_MKDIR "__dewycache__\0" 0x1FF)
     
+    let compiler_path:int = __load__(argv)
+    let compiler_dir:int = get_dir_from_path(compiler_path)
     let basename:int = get_basename(filename)
     let asm_path:int = make_path("__dewycache__/" basename ".s\0")
     let obj_path:int = make_path("__dewycache__/" basename ".o\0")
     let exe_path:int = make_path("__dewycache__/" basename "\0")
     let runtime_obj:int = "__dewycache__/runtime.o\0"
-    let runtime_src:int = "udewy/runtime.s\0"
+    let runtime_src:int = join_path(compiler_dir "../udewy/runtime.s\0")
     
     write_file(asm_path out_ptr out_len)
     
