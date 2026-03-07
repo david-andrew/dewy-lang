@@ -17,9 +17,21 @@ python -m udewy.p0 udewy/tests/test_hello.udewy
 
 # Compile only (don't run)
 python -m udewy.p0 -c udewy/tests/test_hello.udewy
+
+# Select a backend explicitly
+python -m udewy.p0 --backend x86_64 udewy/tests/test_hello.udewy
+python -m udewy.p0 --backend wasm32 -c udewy/tests/test_hello.udewy
 ```
 
-The compiler produces x86_64 Linux executables in `__dewycache__/`.
+The compiler always writes build artifacts into `__dewycache__/`. In normal mode it then runs the produced artifact with the remaining arguments, so it behaves like an interpreter front-end.
+
+Current backends:
+- `x86_64` - builds and runs Linux x86_64 executables
+- `wasm32` - generates browser-hosted wasm artifacts and a JS launcher
+- `riscv` - generates RISC-V assembly, and will assemble/run if the matching cross tools are installed
+- `arm` - generates AArch64 assembly, and will assemble/run if the matching cross tools are installed
+
+For `wasm32`, compile-only mode produces `__dewycache__/NAME.html`, `NAME.js`, `NAME.wat`, and `NAME.wasm`. Run mode starts a simple HTTP server rooted at the directory where `udewy` was invoked and opens the generated launcher in the browser.
 
 ## Language Overview
 
@@ -339,6 +351,8 @@ __syscall5__(syscall_num arg1 arg2 arg3 arg4 arg5)
 __syscall6__(syscall_num arg1 arg2 arg3 arg4 arg5 arg6)
 ```
 
+On native backends these lower to the target platform's syscall path. On `wasm32`, they lower to imported JavaScript host functions instead of Linux syscalls.
+
 Common syscall numbers (Linux x86_64):
 
 ```udewy
@@ -414,10 +428,11 @@ let store_i64 = (arr:int idx:int val:int):>void => {
 
 The udewy compiler (`p0.py`) is a single-pass compiler that:
 1. Tokenizes source (`t0.py`)
-2. Parses and emits x86_64 assembly directly
-3. Invokes the system assembler (`as`) and linker (`ld`)
+2. Parses against a shared backend contract
+3. Lets the selected backend emit target-specific artifacts
+4. Invokes the backend's build/run path
 
-A minimal runtime (`runtime.s`) provides the `_start` entry point and syscall wrappers.
+The `x86_64` backend uses the checked-in `runtime.s` file for its `_start` entry point. Other backends provide their own target-specific entry/build behavior.
 
 ### Forward References
 
@@ -505,9 +520,10 @@ udewy deliberately omits features to keep the compiler simple and auditable:
 
 ## Files
 
-- `p0.py` - Parser and x86_64 code generator
+- `p0.py` - Parser and backend-selecting compiler driver
 - `t0.py` - Tokenizer
-- `runtime.s` - Minimal runtime (entry point, syscall wrappers)
+- `backend/` - Target-specific code generators
+- `runtime.s` - x86_64 runtime (entry point, syscall wrappers)
 - `concept.md` - Original design notes (may be outdated)
 
 ## Example: Fibonacci

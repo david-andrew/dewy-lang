@@ -15,7 +15,7 @@ Dewy is a general purpose programming language with a focus on engineering.
 The main compiler for the language is being reweritten from scratch under [src/cleanparse/](src/cleanparse)
 
 ### udewy
-The micro subset, udewy, is largely feature complete and available under [udewy/](udewy/). Currently only supports linux x86_64.
+The micro subset, udewy, is largely feature complete and available under [udewy/](udewy/). The Python compiler now has backend selection for `x86_64`, `wasm32`, `riscv`, and `arm`, with `x86_64` currently being the most complete native runtime path.
 
 A vscode extension for syntax highlighting is available at https://marketplace.visualstudio.com/items?itemName=RedFoxLabs.udewy
 
