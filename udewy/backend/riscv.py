@@ -1,0 +1,580 @@
+"""
+RISC-V backend for udewy.
+
+Generates GNU assembler syntax targeting RISC-V 64-bit Linux with LP64 ABI.
+"""
+
+from pathlib import Path
+
+
+class RiscvBackend:
+    """
+    RISC-V code generator implementing the Backend protocol.
+    
+    Value stack model:
+    - Top of stack is always in a0 after an expression
+    - save_value() pushes a0 to physical stack
+    - restore_value() pops from physical stack to a0
+    - Binary operators save left, compute right, then operate
+    
+    Calling convention (RISC-V LP64):
+    - Arguments: a0-a7 (8 registers)
+    - Return value: a0
+    - Callee-saved: s0-s11, ra
+    - Stack pointer: sp (16-byte aligned)
+    
+    Syscall convention:
+    - Syscall number in a7
+    - Arguments in a0-a5
+    - Result in a0
+    """
+    
+    def __init__(self) -> None:
+        self._code: list[str] = []
+        self._data: list[str] = []
+        self._next_label: int = 0
+        
+        # Function state
+        self._current_fn_epilogue: str = ""
+        self._stack_offset: int = -64  # Start after callee-saved area
+        self._param_slots: list[int] = []
+        
+        # Control flow state
+        self._if_stack: list[tuple[str, str, bool]] = []  # (else_label, end_label, else_emitted)
+        self._loop_stack: list[tuple[str, str]] = []  # (start_label, end_label)
+        
+        # Symbol tracking
+        self._fn_labels: dict[int, str] = {}
+        self._global_labels: dict[int, str] = {}
+        self._string_labels: dict[int, str] = {}
+        self._array_labels: dict[int, str] = {}
+    
+    def _emit(self, instr: str) -> None:
+        """Emit an instruction."""
+        self._code.append("    " + instr)
+    
+    def _emit_label(self, label: str) -> None:
+        """Emit a label."""
+        self._code.append(label + ":")
+    
+    def _emit_data(self, directive: str) -> None:
+        """Emit to data section."""
+        self._data.append(directive)
+    
+    def _emit_data_label(self, label: str) -> None:
+        """Emit label to data section."""
+        self._data.append(label + ":")
+    
+    def _new_label(self, prefix: str = "L") -> str:
+        """Generate a new unique label."""
+        label = f".{prefix}{self._next_label}"
+        self._next_label += 1
+        return label
+    
+    # ========================================================================
+    # Module lifecycle
+    # ========================================================================
+    
+    def begin_module(self) -> None:
+        """Initialize the module for code generation."""
+        pass
+    
+    def finish_module(self) -> str:
+        """Finalize and return the generated assembly."""
+        output = []
+        output.append(".text")
+        output.append(".globl _start")
+        output.append("")
+        
+        # Emit _start entry point
+        output.append("_start:")
+        output.append(".option push")
+        output.append(".option norelax")
+        output.append("    la gp, __global_pointer$")  # init global pointer
+        output.append(".option pop")
+        output.append("    li s0, 0")               # clear frame pointer
+        output.append("    ld a0, 0(sp)")           # argc
+        output.append("    addi a1, sp, 8")         # argv
+        output.append("    andi sp, sp, -16")       # align stack
+        output.append("    call __main__")
+        output.append("    li a7, 93")              # exit syscall
+        output.append("    ecall")
+        output.append("")
+        
+        output.extend(self._code)
+        output.append("")
+        output.append(".data")
+        output.extend(self._data)
+        output.append("")
+        output.append(".section .note.GNU-stack,\"\",@progbits")
+        output.append("")
+        return "\n".join(output)
+    
+    # ========================================================================
+    # Data section
+    # ========================================================================
+    
+    def intern_string(self, content: bytes) -> int:
+        """Add a string constant to the data section."""
+        label_id = self._next_label
+        label = self._new_label("str")
+        self._string_labels[label_id] = label
+        
+        self._emit_data_label(label)
+        self._emit_data(f"    .dword {len(content)}")
+        if len(content) > 0:
+            bytes_str = ", ".join(str(b) for b in content)
+            self._emit_data(f"    .byte {bytes_str}")
+        
+        return label_id
+    
+    def intern_array(self, elements: list[int | str]) -> int:
+        """Add an array constant to the data section."""
+        label_id = self._next_label
+        label = self._new_label("arr")
+        self._array_labels[label_id] = label
+        
+        self._emit_data_label(label)
+        self._emit_data(f"    .dword {len(elements)}")
+        for elem in elements:
+            self._emit_data(f"    .dword {elem}")
+        
+        return label_id
+    
+    def define_global(self, name_id: int, value: int | str) -> int:
+        """Define a global variable."""
+        label_id = self._next_label
+        label = self._new_label("global")
+        self._global_labels[label_id] = label
+        
+        self._emit_data_label(label)
+        self._emit_data(f"    .dword {value}")
+        
+        return label_id
+    
+    def push_string_ref(self, label_id: int) -> None:
+        """Push address of string data onto value stack."""
+        label = self._string_labels[label_id]
+        self._emit(f"la a0, {label}")
+        self._emit("addi a0, a0, 8")
+
+    def push_array_ref(self, label_id: int) -> None:
+        """Push address of array data onto value stack."""
+        label = self._array_labels[label_id]
+        self._emit(f"la a0, {label}")
+        self._emit("addi a0, a0, 8")
+    
+    def push_global_ref(self, label_id: int) -> None:
+        """Push address of global onto value stack."""
+        label = self._global_labels[label_id]
+        self._emit(f"la a0, {label}")
+    
+    def load_global(self, label_id: int) -> None:
+        """Load value of global onto value stack."""
+        label = self._global_labels[label_id]
+        self._emit(f"la t0, {label}")
+        self._emit("ld a0, 0(t0)")
+    
+    def store_global(self, label_id: int) -> None:
+        """Pop value from stack and store to global."""
+        label = self._global_labels[label_id]
+        self._emit(f"la t0, {label}")
+        self._emit("sd a0, 0(t0)")
+    
+    # ========================================================================
+    # Functions
+    # ========================================================================
+    
+    def declare_function(self, name_id: int, num_params: int) -> int:
+        """Declare a function."""
+        label_id = self._next_label
+        label = self._new_label("fn")
+        self._fn_labels[label_id] = label
+        return label_id
+    
+    def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
+        """Begin function definition."""
+        label = self._fn_labels[label_id]
+        
+        if is_main:
+            self._emit_label("__main__")
+        self._emit_label(label)
+        
+        # Prologue - allocate frame (1024 bytes for locals + callee-saved)
+        self._emit("addi sp, sp, -1024")
+        
+        # Save callee-saved registers and return address
+        self._emit("sd ra, 1016(sp)")
+        self._emit("sd s0, 1008(sp)")
+        self._emit("sd s1, 1000(sp)")
+        self._emit("sd s2, 992(sp)")
+        self._emit("sd s3, 984(sp)")
+        self._emit("sd s4, 976(sp)")
+        self._emit("sd s5, 968(sp)")
+        self._emit("sd s6, 960(sp)")
+        self._emit("sd s7, 952(sp)")
+        self._emit("sd s8, 944(sp)")
+        self._emit("sd s9, 936(sp)")
+        self._emit("sd s10, 928(sp)")
+        self._emit("sd s11, 920(sp)")
+        
+        # Set frame pointer
+        self._emit("addi s0, sp, 1024")
+        
+        # Set up parameters - copy from arg registers to stack
+        arg_regs = ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"]
+        self._param_slots = []
+        self._stack_offset = -64  # After callee-saved area
+        
+        for i in range(param_count):
+            slot = self._stack_offset
+            self._param_slots.append(slot)
+            
+            if i < 8:
+                self._emit(f"sd {arg_regs[i]}, {slot}(s0)")
+            else:
+                # Load from caller's stack frame
+                caller_offset = (i - 8) * 8
+                self._emit(f"ld t0, {caller_offset}(s0)")
+                self._emit(f"sd t0, {slot}(s0)")
+            
+            self._stack_offset -= 8
+        
+        self._current_fn_epilogue = f"{label}_epilogue"
+    
+    def end_function(self) -> None:
+        """End function definition."""
+        self._emit_label(self._current_fn_epilogue)
+        
+        # Restore callee-saved registers
+        self._emit("ld ra, 1016(sp)")
+        self._emit("ld s0, 1008(sp)")
+        self._emit("ld s1, 1000(sp)")
+        self._emit("ld s2, 992(sp)")
+        self._emit("ld s3, 984(sp)")
+        self._emit("ld s4, 976(sp)")
+        self._emit("ld s5, 968(sp)")
+        self._emit("ld s6, 960(sp)")
+        self._emit("ld s7, 952(sp)")
+        self._emit("ld s8, 944(sp)")
+        self._emit("ld s9, 936(sp)")
+        self._emit("ld s10, 928(sp)")
+        self._emit("ld s11, 920(sp)")
+        
+        # Deallocate frame and return
+        self._emit("addi sp, sp, 1024")
+        self._emit("ret")
+    
+    def load_param(self, index: int) -> None:
+        """Push parameter value onto the value stack."""
+        slot = self._param_slots[index]
+        self._emit(f"ld a0, {slot}(s0)")
+
+    def alloc_local(self) -> int:
+        """Allocate a local variable slot."""
+        slot = self._stack_offset
+        self._stack_offset -= 8
+        return slot
+
+    def load_local(self, slot: int) -> None:
+        """Push local variable value onto the value stack."""
+        self._emit(f"ld a0, {slot}(s0)")
+
+    def store_local(self, slot: int) -> None:
+        """Pop value from stack and store to local variable."""
+        self._emit(f"sd a0, {slot}(s0)")
+    
+    # ========================================================================
+    # Value stack operations
+    # ========================================================================
+    
+    def push_const_i64(self, value: int) -> None:
+        """Push a 64-bit integer constant onto the value stack."""
+        if -2048 <= value <= 2047:
+            self._emit(f"li a0, {value}")
+        else:
+            # Load large constant via lui/addi sequence
+            self._emit(f"li a0, {value}")
+    
+    def push_void(self) -> None:
+        """Push void (zero) onto the value stack."""
+        self._emit("li a0, 0")
+    
+    def push_fn_ref(self, label_id: int) -> None:
+        """Push address of function onto the value stack."""
+        label = self._fn_labels[label_id]
+        self._emit(f"la a0, {label}")
+    
+    def dup_value(self) -> None:
+        """Duplicate the top value on the stack."""
+        pass
+    
+    def pop_value(self) -> None:
+        """Discard the top value on the stack."""
+        pass
+    
+    def save_value(self) -> None:
+        """Save the top value to physical stack."""
+        self._emit("addi sp, sp, -8")
+        self._emit("sd a0, 0(sp)")
+    
+    def restore_value(self) -> None:
+        """Restore a previously saved value."""
+        self._emit("ld a0, 0(sp)")
+        self._emit("addi sp, sp, 8")
+    
+    # ========================================================================
+    # Operators
+    # ========================================================================
+    
+    def unary_op(self, op: str) -> None:
+        """Apply unary operator to top of stack."""
+        if op == "neg":
+            self._emit("neg a0, a0")
+        elif op == "not":
+            self._emit("not a0, a0")
+    
+    def binary_op(self, op: str) -> None:
+        """Apply binary operator to top two values on stack."""
+        # Right operand in a0, left on stack
+        self._emit("mv t0, a0")        # right in t0
+        self._emit("ld a0, 0(sp)")     # left in a0
+        self._emit("addi sp, sp, 8")   # pop
+        
+        if op == "+":
+            self._emit("add a0, a0, t0")
+        elif op == "-":
+            self._emit("sub a0, a0, t0")
+        elif op == "*":
+            self._emit("mul a0, a0, t0")
+        elif op == "//":
+            self._emit("div a0, a0, t0")
+        elif op == "%":
+            self._emit("rem a0, a0, t0")
+        elif op == "<<":
+            self._emit("sll a0, a0, t0")
+        elif op == ">>":
+            self._emit("sra a0, a0, t0")
+        elif op == "and":
+            self._emit("and a0, a0, t0")
+        elif op == "or":
+            self._emit("or a0, a0, t0")
+        elif op == "xor":
+            self._emit("xor a0, a0, t0")
+        elif op == "=?":
+            self._emit("sub t1, a0, t0")
+            self._emit("seqz a0, t1")
+            self._emit("neg a0, a0")
+        elif op == "not=?":
+            self._emit("sub t1, a0, t0")
+            self._emit("snez a0, t1")
+            self._emit("neg a0, a0")
+        elif op == ">?":
+            self._emit("sgt a0, a0, t0")
+            self._emit("neg a0, a0")
+        elif op == "<?":
+            self._emit("slt a0, a0, t0")
+            self._emit("neg a0, a0")
+        elif op == ">=?":
+            self._emit("slt a0, a0, t0")
+            self._emit("seqz a0, a0")
+            self._emit("neg a0, a0")
+        elif op == "<=?":
+            self._emit("sgt a0, a0, t0")
+            self._emit("seqz a0, a0")
+            self._emit("neg a0, a0")
+    
+    def pipe_call(self) -> None:
+        """Handle pipe operator: call function with left as arg."""
+        self._emit("mv t5, a0")      # save fn ptr
+        self._emit("ld a0, 0(sp)")   # arg1
+        self._emit("addi sp, sp, 8")
+        self._emit("jalr ra, t5, 0")
+    
+    # ========================================================================
+    # Memory operations
+    # ========================================================================
+    
+    def load_mem(self, width: int) -> None:
+        """Load from memory address in a0."""
+        if width == 64:
+            self._emit("ld a0, 0(a0)")
+        elif width == 32:
+            self._emit("lwu a0, 0(a0)")
+        elif width == 16:
+            self._emit("lhu a0, 0(a0)")
+        elif width == 8:
+            self._emit("lbu a0, 0(a0)")
+    
+    def store_mem(self, width: int) -> None:
+        """Store to memory. Stack: [value addr] -> pushes 0."""
+        self._emit("ld t0, 0(sp)")   # value
+        self._emit("addi sp, sp, 8")
+        if width == 64:
+            self._emit("sd t0, 0(a0)")
+        elif width == 32:
+            self._emit("sw t0, 0(a0)")
+        elif width == 16:
+            self._emit("sh t0, 0(a0)")
+        elif width == 8:
+            self._emit("sb t0, 0(a0)")
+        self._emit("li a0, 0")
+    
+    # ========================================================================
+    # Calls
+    # ========================================================================
+    
+    def prepare_args(self, num_args: int) -> None:
+        """Pop arguments from stack into registers for a call."""
+        regs = ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"]
+        for i in range(min(num_args, 8) - 1, -1, -1):
+            self._emit(f"ld {regs[i]}, 0(sp)")
+            self._emit("addi sp, sp, 8")
+    
+    def call_direct(self, label_id: int, num_args: int) -> None:
+        """Call a function directly by label."""
+        self.prepare_args(num_args)
+        label = self._fn_labels[label_id]
+        self._emit(f"call {label}")
+    
+    def call_indirect(self, num_args: int) -> None:
+        """Call a function indirectly via pointer."""
+        self.prepare_args(num_args)
+        self._emit("ld t5, 0(sp)")   # fn ptr
+        self._emit("addi sp, sp, 8")
+        self._emit("jalr ra, t5, 0")
+    
+    def syscall(self, num_args: int) -> None:
+        """Invoke a syscall using ecall."""
+        # Args pushed in order: syscall_num, arg1, arg2, ...
+        # Last arg is in a0, rest on stack (syscall_num is deepest)
+        # Need: a7=syscall_num, a0-a5=args
+        if num_args == 1:
+            # Only syscall_num in a0
+            self._emit("mv a7, a0")
+            self._emit("ecall")
+        elif num_args == 2:
+            # a0=arg1, stack=[syscall_num]
+            self._emit("mv t0, a0")      # save arg1
+            self._emit("ld a7, 0(sp)")   # syscall_num
+            self._emit("addi sp, sp, 8")
+            self._emit("mv a0, t0")
+            self._emit("ecall")
+        elif num_args == 3:
+            # a0=arg2, stack=[syscall_num, arg1]
+            self._emit("mv a1, a0")      # arg2 -> a1
+            self._emit("ld a0, 0(sp)")   # arg1 -> a0
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a7, 0(sp)")   # syscall_num -> a7
+            self._emit("addi sp, sp, 8")
+            self._emit("ecall")
+        elif num_args == 4:
+            # a0=arg3, stack=[syscall_num, arg1, arg2]
+            self._emit("mv a2, a0")      # arg3 -> a2
+            self._emit("ld a1, 0(sp)")   # arg2 -> a1
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a0, 0(sp)")   # arg1 -> a0
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a7, 0(sp)")   # syscall_num -> a7
+            self._emit("addi sp, sp, 8")
+            self._emit("ecall")
+        elif num_args == 5:
+            # a0=arg4, stack=[syscall_num, arg1, arg2, arg3]
+            self._emit("mv a3, a0")
+            self._emit("ld a2, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a1, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a0, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a7, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ecall")
+        elif num_args == 6:
+            # a0=arg5, stack=[syscall_num, arg1, arg2, arg3, arg4]
+            self._emit("mv a4, a0")
+            self._emit("ld a3, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a2, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a1, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a0, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a7, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ecall")
+        elif num_args == 7:
+            # a0=arg6, stack=[syscall_num, arg1, arg2, arg3, arg4, arg5]
+            self._emit("mv a5, a0")
+            self._emit("ld a4, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a3, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a2, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a1, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a0, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ld a7, 0(sp)")
+            self._emit("addi sp, sp, 8")
+            self._emit("ecall")
+    
+    # ========================================================================
+    # Control flow
+    # ========================================================================
+    
+    def begin_if(self) -> None:
+        """Begin an if statement."""
+        else_label = self._new_label("else")
+        end_label = self._new_label("if_end")
+        self._if_stack.append((else_label, end_label, False))
+        
+        self._emit("beqz a0, " + else_label)
+    
+    def begin_else(self) -> None:
+        """Begin the else branch."""
+        else_label, end_label, _ = self._if_stack[-1]
+        self._if_stack[-1] = (else_label, end_label, True)
+        self._emit(f"j {end_label}")
+        self._emit_label(else_label)
+    
+    def end_if(self) -> None:
+        """End an if statement."""
+        else_label, end_label, else_emitted = self._if_stack.pop()
+        if not else_emitted:
+            self._emit_label(else_label)
+        self._emit_label(end_label)
+    
+    def begin_loop(self) -> None:
+        """Begin a loop."""
+        start_label = self._new_label("loop_start")
+        end_label = self._new_label("loop_end")
+        self._loop_stack.append((start_label, end_label))
+        self._emit_label(start_label)
+    
+    def begin_loop_body(self) -> None:
+        """Begin the loop body after condition check."""
+        _, end_label = self._loop_stack[-1]
+        self._emit(f"beqz a0, {end_label}")
+    
+    def end_loop(self) -> None:
+        """End a loop."""
+        start_label, end_label = self._loop_stack.pop()
+        self._emit(f"j {start_label}")
+        self._emit_label(end_label)
+    
+    def emit_break(self) -> None:
+        """Emit a break statement."""
+        _, end_label = self._loop_stack[-1]
+        self._emit(f"j {end_label}")
+    
+    def emit_continue(self) -> None:
+        """Emit a continue statement."""
+        start_label, _ = self._loop_stack[-1]
+        self._emit(f"j {start_label}")
+    
+    def emit_return(self) -> None:
+        """Emit a return statement."""
+        self._emit(f"j {self._current_fn_epilogue}")

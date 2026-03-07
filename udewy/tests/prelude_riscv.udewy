@@ -1,0 +1,63 @@
+# RISC-V Linux syscall constants for udewy
+# import with: import p"prelude_riscv.udewy"
+
+# File descriptors
+const STDIN:int = 0
+const STDOUT:int = 1
+const STDERR:int = 2
+
+# Syscall numbers (RISC-V Linux - uses unified syscall table)
+const SYS_GETCWD:int = 17
+const SYS_DUP:int = 23
+const SYS_DUP3:int = 24
+const SYS_IOCTL:int = 29
+const SYS_MKDIRAT:int = 34
+const SYS_UNLINKAT:int = 35
+const SYS_FTRUNCATE:int = 46
+const SYS_OPENAT:int = 56
+const SYS_CLOSE:int = 57
+const SYS_PIPE2:int = 59
+const SYS_LSEEK:int = 62
+const SYS_READ:int = 63
+const SYS_WRITE:int = 64
+const SYS_READV:int = 65
+const SYS_WRITEV:int = 66
+const SYS_FSTAT:int = 80
+const SYS_EXIT:int = 93
+const SYS_EXIT_GROUP:int = 94
+const SYS_KILL:int = 129
+const SYS_GETPID:int = 172
+const SYS_GETUID:int = 174
+const SYS_GETEUID:int = 175
+const SYS_GETGID:int = 176
+const SYS_GETEGID:int = 177
+const SYS_BRK:int = 214
+const SYS_MUNMAP:int = 215
+const SYS_MMAP:int = 222
+const SYS_WAIT4:int = 260
+const SYS_EXECVE:int = 221
+const SYS_CLOCK_GETTIME:int = 113
+const SYS_CLONE:int = 220
+const SYS_CHDIR:int = 49
+
+# AT_FDCWD for *at syscalls (openat, mkdirat, etc.)
+# Note: AT_FDCWD is -100, but udewy doesn't support negative const literals
+# Use: let AT_FDCWD:int = 0 - 100  in your code if needed
+
+# Open flags (same across architectures)
+const O_RDONLY:int = 0
+const O_WRONLY:int = 1
+const O_RDWR:int = 2
+const O_CREAT:int = 64
+const O_TRUNC:int = 512
+const O_APPEND:int = 1024
+
+# mmap flags (same across architectures)
+const PROT_NONE:int = 0
+const PROT_READ:int = 1
+const PROT_WRITE:int = 2
+const PROT_EXEC:int = 4
+const MAP_SHARED:int = 1
+const MAP_PRIVATE:int = 2
+const MAP_ANONYMOUS:int = 32
+const MAP_FIXED:int = 16

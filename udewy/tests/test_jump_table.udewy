@@ -16,37 +16,37 @@ let stack_ptr:int = 0
 
 # Opcode handler functions
 let op_push = (val:int):>int => {
-    __store__(val calc_stack + (stack_ptr * 8))
+    __store64__(val calc_stack + (stack_ptr * 8))
     stack_ptr = stack_ptr + 1
     return 0
 }
 
 let op_add = (unused:int):>int => {
     stack_ptr = stack_ptr - 1
-    let b:int = __load__(calc_stack + (stack_ptr * 8))
+    let b:int = __load64__(calc_stack + (stack_ptr * 8))
     stack_ptr = stack_ptr - 1
-    let a:int = __load__(calc_stack + (stack_ptr * 8))
-    __store__(a + b calc_stack + (stack_ptr * 8))
+    let a:int = __load64__(calc_stack + (stack_ptr * 8))
+    __store64__(a + b calc_stack + (stack_ptr * 8))
     stack_ptr = stack_ptr + 1
     return 0
 }
 
 let op_sub = (unused:int):>int => {
     stack_ptr = stack_ptr - 1
-    let b:int = __load__(calc_stack + (stack_ptr * 8))
+    let b:int = __load64__(calc_stack + (stack_ptr * 8))
     stack_ptr = stack_ptr - 1
-    let a:int = __load__(calc_stack + (stack_ptr * 8))
-    __store__(a - b calc_stack + (stack_ptr * 8))
+    let a:int = __load64__(calc_stack + (stack_ptr * 8))
+    __store64__(a - b calc_stack + (stack_ptr * 8))
     stack_ptr = stack_ptr + 1
     return 0
 }
 
 let op_mul = (unused:int):>int => {
     stack_ptr = stack_ptr - 1
-    let b:int = __load__(calc_stack + (stack_ptr * 8))
+    let b:int = __load64__(calc_stack + (stack_ptr * 8))
     stack_ptr = stack_ptr - 1
-    let a:int = __load__(calc_stack + (stack_ptr * 8))
-    __store__(a * b calc_stack + (stack_ptr * 8))
+    let a:int = __load64__(calc_stack + (stack_ptr * 8))
+    __store64__(a * b calc_stack + (stack_ptr * 8))
     stack_ptr = stack_ptr + 1
     return 0
 }
@@ -83,7 +83,7 @@ let print_num = (n:int):>void => {
 }
 
 let print = (s:int):>void => {
-    let len:int = __load__(s - 8)
+    let len:int = __load64__(s - 8)
     __syscall3__(1 1 s len)
     return void
 }
@@ -91,19 +91,19 @@ let print = (s:int):>void => {
 # Execute bytecode program
 # Note: Since udewy doesn't support indirect function calls yet,
 # we use explicit dispatch. With indirect calls, we could do:
-#   let handler:int = __load__(dispatch_table + (opcode * 8))
+#   let handler:int = __load64__(dispatch_table + (opcode * 8))
 #   handler(arg)
 let execute = (program:int len:int):>int => {
     let pc:int = 0
     
     loop pc <? len {
-        let opcode:int = __load__(program + (pc * 8))
+        let opcode:int = __load64__(program + (pc * 8))
         pc = pc + 1
         
         # Manual dispatch (would be single indirect call with full support)
         if opcode =? 0 {
             # PUSH: get value from next position
-            let val:int = __load__(program + (pc * 8))
+            let val:int = __load64__(program + (pc * 8))
             pc = pc + 1
             op_push(val)
         } else if opcode =? 1 {
@@ -115,7 +115,7 @@ let execute = (program:int len:int):>int => {
         } else if opcode =? 4 {
             # HALT: return top of stack
             stack_ptr = stack_ptr - 1
-            return __load__(calc_stack + (stack_ptr * 8))
+            return __load64__(calc_stack + (stack_ptr * 8))
         }
     }
     
@@ -128,7 +128,7 @@ let main = ():>int => {
     let program = [0 3 0 5 1 0 10 0 2 2 3 4]
     
     # Get program length
-    let prog_len:int = __load__(program - 8)
+    let prog_len:int = __load64__(program - 8)
     
     print("Calculator result: ")
     let result:int = execute(program prog_len)

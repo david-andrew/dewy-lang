@@ -1,5 +1,10 @@
-# low-level prelude for udewy programs
+# low-level prelude for udewy programs (x86_64 Linux)
 # import with: import p"prelude.udewy"
+#
+# NOTE: This prelude uses x86_64 syscall numbers. For other architectures, use:
+#   - prelude_x86_64.udewy (x86_64 Linux)
+#   - prelude_riscv.udewy  (RISC-V Linux)
+#   - prelude_arm.udewy    (ARM64/AArch64 Linux)
 #
 # call arena_init() before using arena_alloc(), str_to_cstr(), or print_int()
 
@@ -51,15 +56,15 @@ const CH_0:int = 48
 # ============================================================================
 
 let len_of = (ptr:int):>int => {
-    return __load__(ptr - 8)
+    return __load64__(ptr - 8)
 }
 
 let load_i64 = (ptr:int idx:int):>int => {
-    return __load__(ptr + (idx << 3))
+    return __load64__(ptr + (idx << 3))
 }
 
 let store_i64 = (ptr:int idx:int val:int):>void => {
-    __store__(val ptr + (idx << 3))
+    __store64__(val ptr + (idx << 3))
     return void
 }
 

@@ -12,14 +12,28 @@ udewy (μdewy, /mjuː ˈduːi/) is a strict subset of the Dewy programming langu
 ## Quick Start
 
 ```bash
-# Run a udewy program
+# Run a udewy program (default x86_64 target)
 python -m udewy.p0 udewy/tests/test_hello.udewy
 
 # Compile only (don't run)
 python -m udewy.p0 -c udewy/tests/test_hello.udewy
+
+# Target a different backend
+python -m udewy.p0 --target wasm32 udewy/tests/test_hello.udewy
+python -m udewy.p0 --target riscv udewy/tests/test_hello.udewy
+python -m udewy.p0 --target arm udewy/tests/test_hello.udewy
 ```
 
-The compiler produces x86_64 Linux executables in `__dewycache__/`.
+The compiler produces artifacts in `__dewycache__/`.
+
+### Supported Targets
+
+| Target | Output | Requirements |
+|--------|--------|--------------|
+| `x86_64` (default) | Linux ELF executable | GNU as, ld |
+| `wasm32` | WebAssembly + JS shim | wat2wasm (wabt), Node.js |
+| `riscv` | RISC-V 64-bit executable | riscv64-linux-gnu toolchain, qemu-riscv64 |
+| `arm` | AArch64 executable | aarch64-linux-gnu toolchain, qemu-aarch64 |
 
 ## Language Overview
 
@@ -33,7 +47,7 @@ const STDOUT:int = 1
 
 let main = ():>int => {
     let msg:int = "Hello from udewy!\n"
-    let len:int = __load__(msg - 8)  # length prefix
+    let len:int = __load64__(msg - 8)  # length prefix
     __syscall3__(SYS_WRITE STDOUT msg len)
     return 0
 }
@@ -259,7 +273,7 @@ Strings are pointers to data with a length prefix:
 
 ```udewy
 let msg:int = "Hello\n"
-let len:int = __load__(msg - 8)  # get length
+let len:int = __load64__(msg - 8)  # get length
 let first_char:int = __load8__(msg)  # get first byte
 ```
 
@@ -279,8 +293,8 @@ Array literals create static data with a length prefix:
 
 ```udewy
 let nums = [1 2 3 4 5]
-let len:int = __load__(nums - 8)  # 5
-let third:int = __load__(nums + (2 * 8))  # 3
+let len:int = __load64__(nums - 8)  # 5
+let third:int = __load64__(nums + (2 * 8))  # 3
 ```
 
 Arrays can contain numbers, strings, const identifiers, or function references:
@@ -309,8 +323,8 @@ udewy provides low-level intrinsics for memory access and system calls:
 
 ```udewy
 # 64-bit load/store
-let val:int = __load__(address)
-__store__(value address)
+let val:int = __load64__(address)
+__store64__(value address)
 
 # 8-bit load/store
 let byte:int = __load8__(address)
@@ -368,9 +382,9 @@ let arr = [10 20 30]
 #                  ↑
 #                  arr points here
 
-let len:int = __load__(arr - 8)      # 3
-let first:int = __load__(arr)        # 10
-let second:int = __load__(arr + 8)   # 20
+let len:int = __load64__(arr - 8)      # 3
+let first:int = __load64__(arr)        # 10
+let second:int = __load64__(arr + 8)   # 20
 ```
 
 ### Simulating Structs
@@ -388,11 +402,11 @@ const PERSON_SIZE:int = 24
 let person:int = alloc(PERSON_SIZE)
 
 # Access fields
-__store__(name_ptr person + PERSON_NAME)
-__store__(25 person + PERSON_AGE)
-__store__(180 person + PERSON_HEIGHT)
+__store64__(name_ptr person + PERSON_NAME)
+__store64__(25 person + PERSON_AGE)
+__store64__(180 person + PERSON_HEIGHT)
 
-let age:int = __load__(person + PERSON_AGE)
+let age:int = __load64__(person + PERSON_AGE)
 ```
 
 ### Helper Functions
@@ -401,11 +415,11 @@ For cleaner code, define indexing helpers:
 
 ```udewy
 let load_i64 = (arr:int idx:int):>int => {
-    return __load__(arr + (idx << 3))
+    return __load64__(arr + (idx << 3))
 }
 
 let store_i64 = (arr:int idx:int val:int):>void => {
-    __store__(val arr + (idx << 3))
+    __store64__(val arr + (idx << 3))
     return void
 }
 ```
@@ -417,7 +431,7 @@ The udewy compiler (`p0.py`) is a single-pass compiler that:
 2. Parses and emits x86_64 assembly directly
 3. Invokes the system assembler (`as`) and linker (`ld`)
 
-A minimal runtime (`runtime.s`) provides the `_start` entry point and syscall wrappers.
+Each backend emits a `_start` entry point that calls `__main__` and handles exit.
 
 ### Forward References
 
@@ -507,7 +521,7 @@ udewy deliberately omits features to keep the compiler simple and auditable:
 
 - `p0.py` - Parser and x86_64 code generator
 - `t0.py` - Tokenizer
-- `runtime.s` - Minimal runtime (entry point, syscall wrappers)
+- `backend/` - Target-specific code generators (x86_64, riscv, arm, wasm)
 - `concept.md` - Original design notes (may be outdated)
 
 ## Example: Fibonacci
@@ -541,8 +555,8 @@ let alloc = (size:int):>int => {
 
 let main = ():>int => {
     let buffer:int = alloc(4096)
-    __store__(42 buffer)
-    return __load__(buffer)  # returns 42
+    __store64__(42 buffer)
+    return __load64__(buffer)  # returns 42
 }
 ```
 

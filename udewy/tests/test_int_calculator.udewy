@@ -35,7 +35,7 @@ let pos:int = 0
 let parse_error:int = 0
 
 let write = (s:int):>void => {
-    let n:int = __load__(s - 8)
+    let n:int = __load64__(s - 8)
     __syscall3__(SYS_WRITE STDOUT s n)
     return void
 }
@@ -61,14 +61,14 @@ let print_int = (x:int):>void => {
     let digits = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
     let n:int = 0
     loop x >? 0 {
-        __store__((x % 10) + CH_0 digits + (n * 8))
+        __store64__((x % 10) + CH_0 digits + (n * 8))
         x = x // 10
         n = n + 1
     }
 
     n = n - 1
     loop n >=? 0 {
-        out_char(__load__(digits + (n * 8)))
+        out_char(__load64__(digits + (n * 8)))
         n = n - 1
     }
     return void

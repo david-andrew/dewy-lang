@@ -1,0 +1,58 @@
+# x86_64 Linux syscall constants for udewy
+# import with: import p"prelude_x86_64.udewy"
+
+# File descriptors
+const STDIN:int = 0
+const STDOUT:int = 1
+const STDERR:int = 2
+
+# Syscall numbers (x86_64 Linux)
+const SYS_READ:int = 0
+const SYS_WRITE:int = 1
+const SYS_OPEN:int = 2
+const SYS_CLOSE:int = 3
+const SYS_STAT:int = 4
+const SYS_FSTAT:int = 5
+const SYS_LSEEK:int = 8
+const SYS_MMAP:int = 9
+const SYS_MUNMAP:int = 11
+const SYS_BRK:int = 12
+const SYS_IOCTL:int = 16
+const SYS_PIPE:int = 22
+const SYS_DUP:int = 32
+const SYS_DUP2:int = 33
+const SYS_GETPID:int = 39
+const SYS_FORK:int = 57
+const SYS_EXECVE:int = 59
+const SYS_EXIT:int = 60
+const SYS_WAIT4:int = 61
+const SYS_KILL:int = 62
+const SYS_GETCWD:int = 79
+const SYS_CHDIR:int = 80
+const SYS_MKDIR:int = 83
+const SYS_RMDIR:int = 84
+const SYS_UNLINK:int = 87
+const SYS_GETUID:int = 102
+const SYS_GETGID:int = 104
+const SYS_GETEUID:int = 107
+const SYS_GETEGID:int = 108
+const SYS_CLOCK_GETTIME:int = 228
+const SYS_EXIT_GROUP:int = 231
+
+# Open flags (same across architectures)
+const O_RDONLY:int = 0
+const O_WRONLY:int = 1
+const O_RDWR:int = 2
+const O_CREAT:int = 64
+const O_TRUNC:int = 512
+const O_APPEND:int = 1024
+
+# mmap flags (same across architectures)
+const PROT_NONE:int = 0
+const PROT_READ:int = 1
+const PROT_WRITE:int = 2
+const PROT_EXEC:int = 4
+const MAP_SHARED:int = 1
+const MAP_PRIVATE:int = 2
+const MAP_ANONYMOUS:int = 32
+const MAP_FIXED:int = 16

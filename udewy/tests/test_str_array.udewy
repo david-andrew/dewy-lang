@@ -2,8 +2,8 @@
 let greetings = ["hello\n" "world\n"]
 
 let main = ():>int => {
-    let str_ptr:int = __load__(greetings)
-    let str_len:int = __load__(str_ptr - 8)
+    let str_ptr:int = __load64__(greetings)
+    let str_len:int = __load64__(str_ptr - 8)
     __syscall3__(1 1 str_ptr str_len)
     return 0
 }

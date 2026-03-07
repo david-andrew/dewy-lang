@@ -1,12 +1,16 @@
 """
-Parser and x86_64 code generator for udewy
-Designed in low-level style for future translation to assembly
+Parser and code generator for udewy
+Uses a backend protocol for target-specific code generation.
 """
 
 from pathlib import Path
 from os import PathLike
 
 from . import t0
+from .backend.x86_64 import X86_64Backend
+from .backend.wasm import Wasm32Backend
+from .backend.riscv import RiscvBackend
+from .backend.arm import ArmBackend
 
 
 # ============================================================================
@@ -118,39 +122,31 @@ def process_imports(source: str, source_path: PathLike, imported: set[Path] | No
     
     return '\n'.join(result_parts)
 
+
 # ============================================================================
-# Type aliases (for documentation, not enforced)
+# Type aliases
 # ============================================================================
 type PackedToken = int
 type TokenIdx = int
 
-# ============================================================================
-# Parser state - all mutable state passed explicitly
-# ============================================================================
+# Function table entry: [name_start, name_len, label_id, num_args, is_defined]
+type FnEntry = list
 
-# Function table entry: (name_start, name_len, label_id, num_args, is_defined)
-# name_start/len index into src string
-# label_id is the numeric label for the function
-# is_defined tracks if we've seen the actual definition vs just a forward reference
-type FnEntry = list  # [name_start, name_len, label_id, num_args, is_defined]
+# Variable entry: [name_start, name_len, stack_offset_or_slot]
+type VarEntry = list
 
-# Variable entry: (name_start, name_len, stack_offset)
-# stack_offset is negative relative to rbp for locals
-type VarEntry = list  # [name_start, name_len, stack_offset]
+# Global variable entry: [name_start, name_len, label_id]
+type GlobalEntry = list
 
-# Global variable entry: (name_start, name_len, label_id)
-type GlobalEntry = list  # [name_start, name_len, label_id]
+# Const entry: [name_start, name_len, value]
+type ConstEntry = list
 
-# Const entry: (name_start, name_len, value)
-# value is the computed integer value of the const
-type ConstEntry = list  # [name_start, name_len, value]
 
 # ============================================================================
-# Helper functions for name comparison (low-level style)
+# Helper functions for name comparison
 # ============================================================================
 
 def name_eq(src: str, start1: int, len1: int, start2: int, len2: int) -> bool:
-    """Compare two identifier spans in src"""
     if len1 != len2:
         return False
     i = 0
@@ -160,8 +156,8 @@ def name_eq(src: str, start1: int, len1: int, start2: int, len2: int) -> bool:
         i = i + 1
     return True
 
+
 def name_eq_str(src: str, start: int, length: int, target: str) -> bool:
-    """Compare an identifier span to a literal string"""
     if length != len(target):
         return False
     i = 0
@@ -171,29 +167,25 @@ def name_eq_str(src: str, start: int, length: int, target: str) -> bool:
         i = i + 1
     return True
 
+
 def get_name(src: str, start: int, length: int) -> str:
-    """Extract name string from src (for labels/debugging)"""
     return src[start:start + length]
 
+
 def escape_code_to_value(c: str) -> int:
-    """Convert escape code to ordinal value, -1 means skip this character"""
     if c == 'n': return 10
-    if c == '\n': return -1 #pass
+    if c == '\n': return -1
     if c == 't': return 9
     if c == 'r': return 13
-    # if c == '\\': return 92  #unnecessary because \ is just itself
-    # if c == '"': return 34  #unnecessary because " is just itself
     if c == '0': return 0
-    
-    # all other characters are just themselves
     return ord(c)
 
+
 # ============================================================================
-# Symbol table operations (low-level style with linear search)
+# Symbol table operations
 # ============================================================================
 
 def fn_lookup(fn_table: list, src: str, name_start: int, name_len: int) -> int:
-    """Find function in table, returns index or -1"""
     i = 0
     while i < len(fn_table):
         entry = fn_table[i]
@@ -202,14 +194,14 @@ def fn_lookup(fn_table: list, src: str, name_start: int, name_len: int) -> int:
         i = i + 1
     return -1
 
+
 def fn_declare(fn_table: list, name_start: int, name_len: int, label_id: int, num_args: int, is_defined: bool) -> int:
-    """Add function to table, returns index"""
     idx = len(fn_table)
     fn_table.append([name_start, name_len, label_id, num_args, is_defined])
     return idx
 
+
 def var_lookup(scope_stack: list, src: str, name_start: int, name_len: int) -> tuple[int, int]:
-    """Find variable in scope chain. Returns (scope_idx, var_idx) or (-1, -1)"""
     scope_idx = len(scope_stack) - 1
     while scope_idx >= 0:
         scope = scope_stack[scope_idx]
@@ -222,12 +214,12 @@ def var_lookup(scope_stack: list, src: str, name_start: int, name_len: int) -> t
         scope_idx = scope_idx - 1
     return (-1, -1)
 
-def var_declare(scope_stack: list, name_start: int, name_len: int, stack_offset: int) -> None:
-    """Add variable to current scope"""
-    scope_stack[-1].append([name_start, name_len, stack_offset])
+
+def var_declare(scope_stack: list, name_start: int, name_len: int, slot: int) -> None:
+    scope_stack[-1].append([name_start, name_len, slot])
+
 
 def global_lookup(global_table: list, src: str, name_start: int, name_len: int) -> int:
-    """Find global in table, returns index or -1"""
     i = 0
     while i < len(global_table):
         entry = global_table[i]
@@ -236,14 +228,14 @@ def global_lookup(global_table: list, src: str, name_start: int, name_len: int) 
         i = i + 1
     return -1
 
+
 def global_declare(global_table: list, name_start: int, name_len: int, label_id: int) -> int:
-    """Add global to table, returns index"""
     idx = len(global_table)
     global_table.append([name_start, name_len, label_id])
     return idx
 
+
 def const_lookup(const_table: list, src: str, name_start: int, name_len: int) -> tuple[bool, int]:
-    """Find const in table, returns (found, value)"""
     i = 0
     while i < len(const_table):
         entry = const_table[i]
@@ -252,93 +244,69 @@ def const_lookup(const_table: list, src: str, name_start: int, name_len: int) ->
         i = i + 1
     return (False, 0)
 
+
 def const_declare(const_table: list, name_start: int, name_len: int, value: int) -> int:
-    """Add const to table, returns index"""
     idx = len(const_table)
     const_table.append([name_start, name_len, value])
     return idx
 
+
 def push_scope(scope_stack: list) -> None:
-    """Enter new scope"""
     scope_stack.append([])
 
+
 def pop_scope(scope_stack: list) -> None:
-    """Exit current scope"""
     scope_stack.pop()
 
-# ============================================================================
-# Assembly emission helpers
-# ============================================================================
-
-def emit(code: list, instr: str) -> None:
-    """Emit an instruction to code buffer"""
-    code.append("    " + instr)
-
-def emit_label(code: list, label: str) -> None:
-    """Emit a label"""
-    code.append(label + ":")
-
-def emit_comment(code: list, comment: str) -> None:
-    """Emit a comment"""
-    code.append("    # " + comment)
-
-def emit_data(data: list, directive: str) -> None:
-    """Emit to data section"""
-    data.append(directive)
-
-def emit_data_label(data: list, label: str) -> None:
-    """Emit label to data section"""
-    data.append(label + ":")
 
 # ============================================================================
 # Token access helpers
 # ============================================================================
 
 def tok_kind(toks: list, idx: int) -> int:
-    """Get kind of token at idx"""
     return t0.kindof(toks[idx])
 
+
 def tok_value(toks: list, idx: int) -> int:
-    """Get value of token at idx"""
     return toks[idx] >> 64
 
+
 def tok_loc(toks: list, idx: int) -> int:
-    """Get location of token at idx"""
     return (toks[idx] >> 16) & 0xFFFF_FFFF_FFFF
 
+
 def tok_name_start(toks: list, idx: int) -> int:
-    """For IDENT/IDENT_CALL/TYPE/FN_TYPE, get start position in src"""
     return tok_loc(toks, idx)
 
+
 def tok_name_len(toks: list, idx: int) -> int:
-    """For IDENT/IDENT_CALL/TYPE/FN_TYPE, get length"""
     return tok_value(toks, idx)
 
+
 def expect(toks: list, idx: int, kind: int, src: str) -> int:
-    """Assert current token is expected kind, return next idx"""
     if idx >= len(toks):
         raise SyntaxError(f"Unexpected end of input, expected {t0.kind_to_str(kind)}")
     if tok_kind(toks, idx) != kind:
         raise SyntaxError(f"Expected {t0.kind_to_str(kind)}, got {t0.dump_token(toks[idx], src)} at position {tok_loc(toks, idx)}")
     return idx + 1
 
+
 # ============================================================================
-# Operator precedence (for left-to-right validation)
-# Higher number = higher precedence (binds tighter)
+# Operator precedence
 # ============================================================================
 
 PREC_OR = 1
 PREC_XOR = 2
 PREC_AND = 3
-PREC_EQ = 4      # =? not=?
-PREC_CMP = 5     # >? <? >=? <=?
-PREC_SHIFT = 6   # << >>
-PREC_ADD = 7     # + -
-PREC_MUL = 8     # * // %
-PREC_PIPE = 9    # |>
+PREC_EQ = 4
+PREC_CMP = 5
+PREC_SHIFT = 6
+PREC_ADD = 7
+PREC_MUL = 8
+PREC_PIPE = 9
+
 
 def get_precedence(kind: int) -> int:
-    """Get precedence of binary operator token kind"""
     if kind == t0.TK_OR:
         return PREC_OR
     if kind == t0.TK_XOR:
@@ -359,166 +327,102 @@ def get_precedence(kind: int) -> int:
         return PREC_PIPE
     return 0
 
+
 def is_binop(kind: int) -> bool:
-    """Check if token kind is a binary operator"""
     return get_precedence(kind) > 0
+
+
+def kind_to_op(kind: int) -> str:
+    if kind == t0.TK_PLUS: return "+"
+    if kind == t0.TK_MINUS: return "-"
+    if kind == t0.TK_MUL: return "*"
+    if kind == t0.TK_IDIV: return "//"
+    if kind == t0.TK_MOD: return "%"
+    if kind == t0.TK_LEFT_SHIFT: return "<<"
+    if kind == t0.TK_RIGHT_SHIFT: return ">>"
+    if kind == t0.TK_AND: return "and"
+    if kind == t0.TK_OR: return "or"
+    if kind == t0.TK_XOR: return "xor"
+    if kind == t0.TK_EQ: return "=?"
+    if kind == t0.TK_NOT_EQ: return "not=?"
+    if kind == t0.TK_GT: return ">?"
+    if kind == t0.TK_LT: return "<?"
+    if kind == t0.TK_GT_EQ: return ">=?"
+    if kind == t0.TK_LT_EQ: return "<=?"
+    return ""
+
 
 # ============================================================================
 # Intrinsic detection
 # ============================================================================
 
 def is_intrinsic(src: str, name_start: int, name_len: int) -> bool:
-    """Check if name is an intrinsic"""
-    if name_eq_str(src, name_start, name_len, "__syscall0__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__syscall1__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__syscall2__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__syscall3__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__syscall4__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__syscall5__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__syscall6__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__load__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__store__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__load8__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__store8__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__load16__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__store16__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__load32__"):
-        return True
-    if name_eq_str(src, name_start, name_len, "__store32__"):
-        return True
+    if name_eq_str(src, name_start, name_len, "__syscall0__"): return True
+    if name_eq_str(src, name_start, name_len, "__syscall1__"): return True
+    if name_eq_str(src, name_start, name_len, "__syscall2__"): return True
+    if name_eq_str(src, name_start, name_len, "__syscall3__"): return True
+    if name_eq_str(src, name_start, name_len, "__syscall4__"): return True
+    if name_eq_str(src, name_start, name_len, "__syscall5__"): return True
+    if name_eq_str(src, name_start, name_len, "__syscall6__"): return True
+    if name_eq_str(src, name_start, name_len, "__load64__"): return True
+    if name_eq_str(src, name_start, name_len, "__store64__"): return True
+    if name_eq_str(src, name_start, name_len, "__load8__"): return True
+    if name_eq_str(src, name_start, name_len, "__store8__"): return True
+    if name_eq_str(src, name_start, name_len, "__load16__"): return True
+    if name_eq_str(src, name_start, name_len, "__store16__"): return True
+    if name_eq_str(src, name_start, name_len, "__load32__"): return True
+    if name_eq_str(src, name_start, name_len, "__store32__"): return True
     return False
 
-# ============================================================================
-# Code generation for intrinsics
-# ============================================================================
 
-def emit_intrinsic_call(code: list, src: str, name_start: int, name_len: int, num_args: int) -> None:
-    """Emit inline code for intrinsic. Args are on stack, top = last arg."""
+def emit_intrinsic(backend, src: str, name_start: int, name_len: int, num_args: int) -> None:
+    """Emit intrinsic call via backend."""
     name = get_name(src, name_start, name_len)
     
-    if name == "__load__":
-        # load 64-bit from address in rax
-        emit(code, "movq (%rax), %rax")
-    elif name == "__store__":
-        # store: args are (val, ptr) - ptr in rax, val on stack
-        emit(code, "popq %rbx")         # val
-        emit(code, "movq %rbx, (%rax)") # store val to ptr
-        emit(code, "xorq %rax, %rax")   # return 0
+    if name == "__load64__":
+        backend.load_mem(64)
+    elif name == "__store64__":
+        backend.store_mem(64)
     elif name == "__load8__":
-        # load byte from address in rax, zero-extend
-        emit(code, "movzbq (%rax), %rax")
+        backend.load_mem(8)
     elif name == "__store8__":
-        # store byte: args are (val, ptr)
-        emit(code, "popq %rbx")         # val
-        emit(code, "movb %bl, (%rax)")  # store low byte
-        emit(code, "xorq %rax, %rax")   # return 0
+        backend.store_mem(8)
     elif name == "__load16__":
-        # load 16-bit from address in rax, zero-extend
-        emit(code, "movzwq (%rax), %rax")
+        backend.load_mem(16)
     elif name == "__store16__":
-        # store 16-bit: args are (val, ptr)
-        emit(code, "popq %rbx")
-        emit(code, "movw %bx, (%rax)")
-        emit(code, "xorq %rax, %rax")
+        backend.store_mem(16)
     elif name == "__load32__":
-        # load 32-bit from address in rax, zero-extend
-        emit(code, "movl (%rax), %eax")
+        backend.load_mem(32)
     elif name == "__store32__":
-        # store 32-bit: args are (val, ptr)
-        emit(code, "popq %rbx")
-        emit(code, "movl %ebx, (%rax)")
-        emit(code, "xorq %rax, %rax")
-    elif name == "__syscall0__":
-        # syscall num in rax
-        emit(code, "syscall")
-    elif name == "__syscall1__":
-        # num, arg1
-        emit(code, "movq %rax, %rdi")   # arg1
-        emit(code, "popq %rax")         # syscall num
-        emit(code, "syscall")
-    elif name == "__syscall2__":
-        # num, arg1, arg2
-        emit(code, "movq %rax, %rsi")   # arg2
-        emit(code, "popq %rdi")         # arg1
-        emit(code, "popq %rax")         # syscall num
-        emit(code, "syscall")
-    elif name == "__syscall3__":
-        # num, arg1, arg2, arg3
-        emit(code, "movq %rax, %rdx")   # arg3
-        emit(code, "popq %rsi")         # arg2
-        emit(code, "popq %rdi")         # arg1
-        emit(code, "popq %rax")         # syscall num
-        emit(code, "syscall")
-    elif name == "__syscall4__":
-        # num, arg1, arg2, arg3, arg4
-        emit(code, "movq %rax, %r10")   # arg4
-        emit(code, "popq %rdx")         # arg3
-        emit(code, "popq %rsi")         # arg2
-        emit(code, "popq %rdi")         # arg1
-        emit(code, "popq %rax")         # syscall num
-        emit(code, "syscall")
-    elif name == "__syscall5__":
-        # num, arg1, arg2, arg3, arg4, arg5
-        emit(code, "movq %rax, %r8")    # arg5
-        emit(code, "popq %r10")         # arg4
-        emit(code, "popq %rdx")         # arg3
-        emit(code, "popq %rsi")         # arg2
-        emit(code, "popq %rdi")         # arg1
-        emit(code, "popq %rax")         # syscall num
-        emit(code, "syscall")
-    elif name == "__syscall6__":
-        # num, arg1, arg2, arg3, arg4, arg5, arg6
-        emit(code, "movq %rax, %r9")    # arg6
-        emit(code, "popq %r8")          # arg5
-        emit(code, "popq %r10")         # arg4
-        emit(code, "popq %rdx")         # arg3
-        emit(code, "popq %rsi")         # arg2
-        emit(code, "popq %rdi")         # arg1
-        emit(code, "popq %rax")         # syscall num
-        emit(code, "syscall")
+        backend.store_mem(32)
+    elif name.startswith("__syscall"):
+        backend.syscall(num_args)
+
 
 # ============================================================================
-# Expression parsing and code generation
+# Expression parsing
 # ============================================================================
 
-def parse_atom(toks: list, idx: int, src: str, code: list, data: list,
+def parse_atom(toks: list, idx: int, src: str, backend,
                fn_table: list, scope_stack: list, global_table: list, const_table: list,
                ctx: dict) -> int:
-    """Parse an atomic expression, emit code, result in rax. Returns new idx."""
+    """Parse an atomic expression, emit via backend. Returns new idx."""
     kind = tok_kind(toks, idx)
     
-    # Number literal
     if kind == t0.TK_NUMBER:
         val = tok_value(toks, idx)
-        emit(code, f"movq ${val}, %rax")
+        backend.push_const_i64(val)
         return idx + 1
     
-    # Void
     if kind == t0.TK_VOID:
-        emit(code, "xorq %rax, %rax")
+        backend.push_void()
         return idx + 1
     
-    # String literal
     if kind == t0.TK_STRING:
         start = tok_loc(toks, idx)
         length = tok_value(toks, idx)
-        # String includes quotes, extract content
         str_content = src[start + 1 : start + length - 1]
         
-        # Process escape sequences
         processed = []
         i = 0
         while i < len(str_content):
@@ -532,176 +436,110 @@ def parse_atom(toks: list, idx: int, src: str, code: list, data: list,
                 processed.append(ord(str_content[i]))
                 i = i + 1
         
-        # Emit to data section with length prefix
-        label_id = ctx["next_label"]
-        ctx["next_label"] = ctx["next_label"] + 1
-        label = f".Lstr{label_id}"
-        
-        emit_data_label(data, label)
-        emit_data(data, f"    .quad {len(processed)}")  # length prefix
-        # Emit bytes
-        if len(processed) > 0:
-            bytes_str = ", ".join([str(b) for b in processed])
-            emit_data(data, f"    .byte {bytes_str}")
-        
-        # Load address of data (skip length prefix for pointer to start of string data)
-        emit(code, f"leaq {label}+8(%rip), %rax")
+        label_id = backend.intern_string(bytes(processed))
+        backend.push_string_ref(label_id)
         return idx + 1
     
-    # Identifier (variable reference)
     if kind == t0.TK_IDENT:
         name_start = tok_name_start(toks, idx)
         name_len = tok_name_len(toks, idx)
         
-        # Check local variables first
         scope_idx, var_idx = var_lookup(scope_stack, src, name_start, name_len)
         if scope_idx >= 0:
             entry = scope_stack[scope_idx][var_idx]
-            offset = entry[2]
-            emit(code, f"movq {offset}(%rbp), %rax")
+            slot = entry[2]
+            backend.load_local(slot)
             return idx + 1
         
-        # Check globals
         glob_idx = global_lookup(global_table, src, name_start, name_len)
         if glob_idx >= 0:
             entry = global_table[glob_idx]
-            label = f".Lglobal{entry[2]}"
-            emit(code, f"movq {label}(%rip), %rax")
+            backend.load_global(entry[2])
             return idx + 1
         
-        # Check functions (load address)
         fn_idx = fn_lookup(fn_table, src, name_start, name_len)
         if fn_idx >= 0:
             entry = fn_table[fn_idx]
-            label = f".Lfn{entry[2]}"
-            emit(code, f"leaq {label}(%rip), %rax")
+            backend.push_fn_ref(entry[2])
             return idx + 1
         
-        # Unknown identifier - create forward reference as function
-        label_id = ctx["next_label"]
-        ctx["next_label"] = ctx["next_label"] + 1
+        label_id = backend.declare_function(0, 0)
         fn_declare(fn_table, name_start, name_len, label_id, 0, False)
-        label = f".Lfn{label_id}"
-        emit(code, f"leaq {label}(%rip), %rax")
+        backend.push_fn_ref(label_id)
         return idx + 1
     
-    # Function call: ident(args...)
     if kind == t0.TK_IDENT_CALL:
         name_start = tok_name_start(toks, idx)
         name_len = tok_name_len(toks, idx)
         idx = idx + 1
         
-        # Parse arguments, push to stack
         arg_count = 0
         while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_PAREN:
-            idx = parse_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx, 0)
-            emit(code, "pushq %rax")
+            idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
+            backend.save_value()
             arg_count = arg_count + 1
         
         idx = expect(toks, idx, t0.TK_RIGHT_PAREN, src)
         
-        # Check if intrinsic
         if is_intrinsic(src, name_start, name_len):
-            # Pop last arg back to rax for intrinsic
             if arg_count > 0:
-                emit(code, "popq %rax")
-            emit_intrinsic_call(code, src, name_start, name_len, arg_count)
-            # Intrinsics consume all their args from stack, no cleanup needed
+                backend.restore_value()
+            emit_intrinsic(backend, src, name_start, name_len, arg_count)
         else:
-            # Regular function call - use System V calling convention
-            # Args are on stack in reverse order (first arg deepest)
-            # Pop into registers: rdi, rsi, rdx, rcx, r8, r9
-            regs = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
-            
-            # Pop args into temp storage, then move to registers
-            # Stack has args in order: first pushed = first arg = deepest
-            # We need to reverse them
-            if arg_count > 0:
-                # Pop all to get them in correct order
-                i = arg_count - 1
-                while i >= 0:
-                    if i < 6:
-                        emit(code, f"popq {regs[i]}")
-                    else:
-                        # Leave extra args on stack for now
-                        pass
-                    i = i - 1
-            
-            # Look up or create function
             fn_idx = fn_lookup(fn_table, src, name_start, name_len)
             if fn_idx < 0:
-                # Forward reference
-                label_id = ctx["next_label"]
-                ctx["next_label"] = ctx["next_label"] + 1
+                label_id = backend.declare_function(0, arg_count)
                 fn_idx = fn_declare(fn_table, name_start, name_len, label_id, arg_count, False)
             
             entry = fn_table[fn_idx]
-            label = f".Lfn{entry[2]}"
-            emit(code, f"call {label}")
+            backend.call_direct(entry[2], arg_count)
         
         return idx
     
-    # Parenthesized expression
     if kind == t0.TK_LEFT_PAREN:
         idx = idx + 1
-        idx = parse_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx, 0)
+        idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
         idx = expect(toks, idx, t0.TK_RIGHT_PAREN, src)
         return idx
     
-    # Array literal - all elements must be compile-time constants
-    # Supported: numbers, true/false, const identifiers, function references, strings, nested arrays
     if kind == t0.TK_LEFT_BRACKET:
         idx = idx + 1
-        
-        # Collect elements - each is either a numeric value or a label reference string
-        # Format: list of strings to emit as .quad directives
         elem_directives = []
         
         while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACKET:
             elem_kind = tok_kind(toks, idx)
             
-            # Number literal (includes true/false)
             if elem_kind == t0.TK_NUMBER:
                 val = tok_value(toks, idx)
-                elem_directives.append(str(val))
+                elem_directives.append(val)
                 idx = idx + 1
             
-            # Identifier - check const table, then function table
             elif elem_kind == t0.TK_IDENT:
-                name_start = tok_name_start(toks, idx)
-                name_len = tok_name_len(toks, idx)
+                ns = tok_name_start(toks, idx)
+                nl = tok_name_len(toks, idx)
                 
-                # Check const table first
-                found, val = const_lookup(const_table, src, name_start, name_len)
+                found, val = const_lookup(const_table, src, ns, nl)
                 if found:
-                    elem_directives.append(str(val))
+                    elem_directives.append(val)
                     idx = idx + 1
                 else:
-                    # Check function table
-                    fn_idx = fn_lookup(fn_table, src, name_start, name_len)
+                    fn_idx = fn_lookup(fn_table, src, ns, nl)
                     if fn_idx >= 0:
                         entry = fn_table[fn_idx]
-                        label = f".Lfn{entry[2]}"
-                        elem_directives.append(label)
+                        elem_directives.append(backend._fn_labels[entry[2]])
                         idx = idx + 1
                     else:
-                        # Unknown identifier - might be forward reference to function
-                        # Create forward reference
-                        label_id = ctx["next_label"]
-                        ctx["next_label"] = ctx["next_label"] + 1
-                        fn_declare(fn_table, name_start, name_len, label_id, 0, False)
-                        label = f".Lfn{label_id}"
-                        elem_directives.append(label)
+                        label_id = backend.declare_function(0, 0)
+                        fn_declare(fn_table, ns, nl, label_id, 0, False)
+                        elem_directives.append(backend._fn_labels[label_id])
                         idx = idx + 1
             
-            # String literal
             elif elem_kind == t0.TK_STRING:
                 start = tok_loc(toks, idx)
                 length = tok_value(toks, idx)
                 str_content = src[start + 1 : start + length - 1]
                 idx = idx + 1
                 
-                # Process escape sequences
                 processed = []
                 i = 0
                 while i < len(str_content):
@@ -715,108 +553,66 @@ def parse_atom(toks: list, idx: int, src: str, code: list, data: list,
                         processed.append(ord(str_content[i]))
                         i = i + 1
                 
-                # Emit string to data section
-                str_label_id = ctx["next_label"]
-                ctx["next_label"] = ctx["next_label"] + 1
-                str_label = f".Lstr{str_label_id}"
-                
-                emit_data_label(data, str_label)
-                emit_data(data, f"    .quad {len(processed)}")
-                if len(processed) > 0:
-                    bytes_str = ", ".join([str(b) for b in processed])
-                    emit_data(data, f"    .byte {bytes_str}")
-                
-                # Reference points to data after length prefix
-                elem_directives.append(f"{str_label}+8")
+                str_label_id = backend.intern_string(bytes(processed))
+                elem_directives.append(f"{backend._string_labels[str_label_id]}+8")
             
             else:
-                raise SyntaxError(f"Array elements must be compile-time constants (numbers, strings, const identifiers, or functions) at {tok_loc(toks, idx)}")
+                raise SyntaxError(f"Array elements must be constants at {tok_loc(toks, idx)}")
         
         idx = expect(toks, idx, t0.TK_RIGHT_BRACKET, src)
         
-        # Emit array to data section
-        label_id = ctx["next_label"]
-        ctx["next_label"] = ctx["next_label"] + 1
-        label = f".Larr{label_id}"
-        
-        emit_data_label(data, label)
-        emit_data(data, f"    .quad {len(elem_directives)}")  # length prefix
-        i = 0
-        while i < len(elem_directives):
-            emit_data(data, f"    .quad {elem_directives[i]}")
-            i = i + 1
-        
-        # Load address (points to first element, after length)
-        emit(code, f"leaq {label}+8(%rip), %rax")
+        label_id = backend.intern_array(elem_directives)
+        backend.push_array_ref(label_id)
         return idx
     
-    raise SyntaxError(f"Unexpected token in expression: {t0.dump_token(toks[idx], src)} at {tok_loc(toks, idx)}")
+    raise SyntaxError(f"Unexpected token: {t0.dump_token(toks[idx], src)} at {tok_loc(toks, idx)}")
 
 
-def parse_prefix(toks: list, idx: int, src: str, code: list, data: list,
+def parse_prefix(toks: list, idx: int, src: str, backend,
                  fn_table: list, scope_stack: list, global_table: list, const_table: list,
                  ctx: dict) -> int:
-    """Parse a prefix expression, emit code, result in rax. Returns new idx."""
     kind = tok_kind(toks, idx)
 
     if kind == t0.TK_NOT:
         idx = idx + 1
-        idx = parse_prefix(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
-        emit(code, "notq %rax")
+        idx = parse_prefix(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
+        backend.unary_op("not")
         return idx
 
     if kind == t0.TK_MINUS:
         idx = idx + 1
         if tok_kind(toks, idx) == t0.TK_NUMBER:
             val = tok_value(toks, idx)
-            emit(code, f"movq ${-val}, %rax")
+            backend.push_const_i64(-val)
             return idx + 1
-        idx = parse_prefix(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
-        emit(code, "negq %rax")
+        idx = parse_prefix(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
+        backend.unary_op("neg")
         return idx
 
-    return parse_atom(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+    return parse_atom(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
 
 
-def parse_expr(toks: list, idx: int, src: str, code: list, data: list,
+def parse_expr(toks: list, idx: int, src: str, backend,
                fn_table: list, scope_stack: list, global_table: list, const_table: list,
                ctx: dict, min_prec: int) -> int:
-    """Parse expression with precedence validation. Result in rax."""
-    
-    # Parse left-hand side (prefix expression)
-    idx = parse_prefix(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+    idx = parse_prefix(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
     idx = skip_cast_annotation(toks, idx)
     
-    # Handle binary operators (left to right, validate precedence)
     while idx < len(toks):
         kind = tok_kind(toks, idx)
         
-        # Check for expr call: )(
         if kind == t0.TK_EXPR_CALL:
-            # Result of previous expression is function pointer in rax
-            emit(code, "pushq %rax")  # Save function pointer
+            backend.save_value()
             idx = idx + 1
             
-            # Parse arguments
             arg_count = 0
             while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_PAREN:
-                idx = parse_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx, 0)
-                emit(code, "pushq %rax")
+                idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
+                backend.save_value()
                 arg_count = arg_count + 1
             
             idx = expect(toks, idx, t0.TK_RIGHT_PAREN, src)
-            
-            # Set up call - pop args to registers
-            regs = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
-            i = arg_count - 1
-            while i >= 0:
-                if i < 6:
-                    emit(code, f"popq {regs[i]}")
-                i = i - 1
-            
-            # Pop function pointer and call
-            emit(code, "popq %rax")
-            emit(code, "call *%rax")
+            backend.call_indirect(arg_count)
             continue
         
         if not is_binop(kind):
@@ -824,98 +620,31 @@ def parse_expr(toks: list, idx: int, src: str, code: list, data: list,
         
         prec = get_precedence(kind)
         
-        # Check precedence: in left-to-right parsing, we error if precedence increases
         if prec > min_prec and min_prec > 0:
-            raise SyntaxError(f"Operator precedence violation: use parentheses to clarify at position {tok_loc(toks, idx)}")
+            raise SyntaxError(f"Operator precedence violation at {tok_loc(toks, idx)}")
         
         idx = idx + 1
+        backend.save_value()
         
-        # Save left operand
-        emit(code, "pushq %rax")
-        
-        # Handle pipe specially - RHS is function to call with LHS as arg
         if kind == t0.TK_PIPE:
-            # Parse RHS (should be function name or expression)
-            idx = parse_prefix(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+            idx = parse_prefix(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
             idx = skip_cast_annotation(toks, idx)
-            # rax = function pointer, stack top = argument
-            emit(code, "movq %rax, %r11")  # save fn ptr
-            emit(code, "popq %rdi")        # arg1
-            emit(code, "call *%r11")
+            backend.pipe_call()
         else:
-            # Parse right operand
-            idx = parse_prefix(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+            idx = parse_prefix(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
             idx = skip_cast_annotation(toks, idx)
-            
-            # Pop left operand to rbx
-            emit(code, "movq %rax, %rcx")  # right in rcx
-            emit(code, "popq %rax")        # left in rax
-            
-            # Emit operation
-            if kind == t0.TK_PLUS:
-                emit(code, "addq %rcx, %rax")
-            elif kind == t0.TK_MINUS:
-                emit(code, "subq %rcx, %rax")
-            elif kind == t0.TK_MUL:
-                emit(code, "imulq %rcx, %rax")
-            elif kind == t0.TK_IDIV:
-                emit(code, "cqto")              # sign extend rax to rdx:rax
-                emit(code, "idivq %rcx")        # rax = quotient
-            elif kind == t0.TK_MOD:
-                emit(code, "cqto")
-                emit(code, "idivq %rcx")
-                emit(code, "movq %rdx, %rax")   # remainder in rdx
-            elif kind == t0.TK_LEFT_SHIFT:
-                emit(code, "shlq %cl, %rax")
-            elif kind == t0.TK_RIGHT_SHIFT:
-                emit(code, "sarq %cl, %rax")    # arithmetic shift
-            elif kind == t0.TK_AND:
-                emit(code, "andq %rcx, %rax")
-            elif kind == t0.TK_OR:
-                emit(code, "orq %rcx, %rax")
-            elif kind == t0.TK_XOR:
-                emit(code, "xorq %rcx, %rax")
-            elif kind == t0.TK_EQ:
-                emit(code, "cmpq %rcx, %rax")
-                emit(code, "sete %al")
-                emit(code, "movzbq %al, %rax")
-                emit(code, "negq %rax")         # 0 -> 0, 1 -> -1 (all 1s)
-            elif kind == t0.TK_NOT_EQ:
-                emit(code, "cmpq %rcx, %rax")
-                emit(code, "setne %al")
-                emit(code, "movzbq %al, %rax")
-                emit(code, "negq %rax")
-            elif kind == t0.TK_GT:
-                emit(code, "cmpq %rcx, %rax")
-                emit(code, "setg %al")
-                emit(code, "movzbq %al, %rax")
-                emit(code, "negq %rax")
-            elif kind == t0.TK_LT:
-                emit(code, "cmpq %rcx, %rax")
-                emit(code, "setl %al")
-                emit(code, "movzbq %al, %rax")
-                emit(code, "negq %rax")
-            elif kind == t0.TK_GT_EQ:
-                emit(code, "cmpq %rcx, %rax")
-                emit(code, "setge %al")
-                emit(code, "movzbq %al, %rax")
-                emit(code, "negq %rax")
-            elif kind == t0.TK_LT_EQ:
-                emit(code, "cmpq %rcx, %rax")
-                emit(code, "setle %al")
-                emit(code, "movzbq %al, %rax")
-                emit(code, "negq %rax")
+            backend.binary_op(kind_to_op(kind))
         
         min_prec = prec
     
     return idx
+
 
 # ============================================================================
 # Statement parsing
 # ============================================================================
 
 def skip_type_annotation(toks: list, idx: int) -> int:
-    """Skip type annotation tokens (:type or :type<param> or <param>)"""
     if idx >= len(toks):
         return idx
     kind = tok_kind(toks, idx)
@@ -927,8 +656,8 @@ def skip_type_annotation(toks: list, idx: int) -> int:
         idx = idx + 1
     return idx
 
+
 def skip_fn_type_annotation(toks: list, idx: int) -> int:
-    """Skip function return type annotation (:>type or :>type<param>)"""
     if idx >= len(toks):
         return idx
     kind = tok_kind(toks, idx)
@@ -938,8 +667,8 @@ def skip_fn_type_annotation(toks: list, idx: int) -> int:
             idx = idx + 1
     return idx
 
+
 def skip_cast_annotation(toks: list, idx: int) -> int:
-    """Skip cast annotation: transmute (ident type_param? | type_param)"""
     if idx < len(toks) and tok_kind(toks, idx) == t0.TK_TRANSMUTE:
         idx = idx + 1
         if idx < len(toks):
@@ -953,524 +682,303 @@ def skip_cast_annotation(toks: list, idx: int) -> int:
     return idx
 
 
-def parse_var_decl(toks: list, idx: int, src: str, code: list, data: list,
+def parse_var_decl(toks: list, idx: int, src: str, backend,
                    fn_table: list, scope_stack: list, global_table: list, const_table: list,
                    ctx: dict) -> int:
-    """Parse variable declaration: let name:type = expr"""
-    # Skip 'let' or 'const'
     idx = idx + 1
     
-    # Get name
     if tok_kind(toks, idx) != t0.TK_IDENT:
-        raise SyntaxError(f"Expected identifier after let, got {t0.dump_token(toks[idx], src)}")
+        raise SyntaxError(f"Expected identifier after let")
     
     name_start = tok_name_start(toks, idx)
     name_len = tok_name_len(toks, idx)
     idx = idx + 1
     
-    # Skip type annotation
     idx = skip_type_annotation(toks, idx)
     
-    # Check for = (might not have initializer in some contexts, but we require it)
     if idx >= len(toks) or tok_kind(toks, idx) != t0.TK_ASSIGN:
-        raise SyntaxError(f"Expected '=' in variable declaration at {tok_loc(toks, idx)}")
+        raise SyntaxError(f"Expected '=' at {tok_loc(toks, idx)}")
     idx = idx + 1
     
-    # Parse initializer expression
-    idx = parse_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx, 0)
+    idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
     
-    # Allocate stack space and store
-    offset = ctx["stack_offset"]
-    ctx["stack_offset"] = offset - 8
-    
-    # Check for stack overflow (1024 bytes allocated, offsets -48 to -1024 are valid)
-    if offset < -1024:
-        raise SyntaxError(f"Too many local variables in function (stack overflow at offset {offset})")
-    
-    var_declare(scope_stack, name_start, name_len, offset)
-    emit(code, f"movq %rax, {offset}(%rbp)")
+    slot = backend.alloc_local()
+    var_declare(scope_stack, name_start, name_len, slot)
+    backend.store_local(slot)
     
     return idx
 
 
-def parse_fn_decl(toks: list, idx: int, src: str, code: list, data: list,
+def parse_fn_decl(toks: list, idx: int, src: str, backend,
                   fn_table: list, scope_stack: list, global_table: list, const_table: list,
                   ctx: dict) -> int:
-    """Parse function declaration: let name = (args):>rettype => { body }"""
-    # Skip 'let' or 'const'
     idx = idx + 1
     
-    # Get name
     name_start = tok_name_start(toks, idx)
     name_len = tok_name_len(toks, idx)
+    fn_name = get_name(src, name_start, name_len)
     idx = idx + 1
     
-    # Skip '='
     idx = expect(toks, idx, t0.TK_ASSIGN, src)
-    
-    # Skip '('
     idx = expect(toks, idx, t0.TK_LEFT_PAREN, src)
     
-    # Parse parameters
-    params = []  # list of (name_start, name_len)
+    params = []
     while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_PAREN:
         if tok_kind(toks, idx) != t0.TK_IDENT:
-            raise SyntaxError(f"Expected parameter name, got {t0.dump_token(toks[idx], src)}")
+            raise SyntaxError(f"Expected parameter name")
         param_start = tok_name_start(toks, idx)
         param_len = tok_name_len(toks, idx)
         params.append((param_start, param_len))
         idx = idx + 1
-        
-        # Skip type annotation
         idx = skip_type_annotation(toks, idx)
     
     idx = expect(toks, idx, t0.TK_RIGHT_PAREN, src)
-    
-    # Skip return type annotation
     idx = skip_fn_type_annotation(toks, idx)
-    
-    # Skip '=>'
     idx = expect(toks, idx, t0.TK_FN_ARROW, src)
-    
-    # Skip '{'
     idx = expect(toks, idx, t0.TK_LEFT_BRACE, src)
     
-    # Register or update function in table
     fn_idx = fn_lookup(fn_table, src, name_start, name_len)
     if fn_idx >= 0:
-        # Update existing forward reference
         entry = fn_table[fn_idx]
         entry[3] = len(params)
         entry[4] = True
         label_id = entry[2]
     else:
-        # New function
-        label_id = ctx["next_label"]
-        ctx["next_label"] = ctx["next_label"] + 1
+        label_id = backend.declare_function(0, len(params))
         fn_declare(fn_table, name_start, name_len, label_id, len(params), True)
     
-    # Generate function label
-    fn_name = get_name(src, name_start, name_len)
-    label = f".Lfn{label_id}"
+    is_main = fn_name == "main"
+    backend.begin_function(label_id, fn_name, len(params), is_main)
     
-    # Check for main function
-    if fn_name == "main":
-        emit_label(code, "__main__")
-    emit_label(code, label)
-    
-    # Function prologue
-    emit(code, "pushq %rbp")
-    emit(code, "movq %rsp, %rbp")
-    
-    # Allocate space for local variables (fixed 1024 bytes, 128 slots)
-    # This comes BEFORE saving callee-saved registers so locals are at known offsets
-    emit(code, "subq $1024, %rsp")
-    
-    # Save callee-saved registers we might use (at fixed positions in local area)
-    emit(code, "movq %rbx, -8(%rbp)")
-    emit(code, "movq %r12, -16(%rbp)")
-    emit(code, "movq %r13, -24(%rbp)")
-    emit(code, "movq %r14, -32(%rbp)")
-    emit(code, "movq %r15, -40(%rbp)")
-    
-    # Create new scope for function body
     push_scope(scope_stack)
     
-    # Set up parameters as local variables
-    # Args come in: rdi, rsi, rdx, rcx, r8, r9, then stack
-    arg_regs = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
-    stack_offset = -48  # Start locals at -48 (after saved regs area)
+    for i, (param_start, param_len) in enumerate(params):
+        slot = backend._param_slots[i]
+        var_declare(scope_stack, param_start, param_len, slot)
     
-    i = 0
-    while i < len(params):
-        param_start, param_len = params[i]
-        
-        if i < 6:
-            # Copy from register to stack
-            emit(code, f"movq {arg_regs[i]}, {stack_offset}(%rbp)")
-        else:
-            # Copy from caller's stack frame
-            caller_offset = 16 + (i - 6) * 8  # +16 for return addr and saved rbp
-            emit(code, f"movq {caller_offset}(%rbp), %rax")
-            emit(code, f"movq %rax, {stack_offset}(%rbp)")
-        
-        var_declare(scope_stack, param_start, param_len, stack_offset)
-        stack_offset = stack_offset - 8
-        
-        # Check for stack overflow
-        if stack_offset < -1024:
-            raise SyntaxError("Too many parameters in function (stack overflow)")
-        
-        i = i + 1
-    
-    # Save stack offset for local variables
-    saved_stack_offset = ctx["stack_offset"]
-    ctx["stack_offset"] = stack_offset
-    
-    # Save loop context
-    saved_loop_start = ctx["loop_start_label"]
-    saved_loop_end = ctx["loop_end_label"]
-    ctx["loop_start_label"] = ""
-    ctx["loop_end_label"] = ""
-    
-    # Set epilogue label for return statements
-    saved_epilogue = ctx["current_fn_epilogue"]
-    ctx["current_fn_epilogue"] = f".Lfn{label_id}_epilogue"
-    
-    # Parse function body
     while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACE:
-        idx = parse_statement(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+        idx = parse_statement(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
     
     idx = expect(toks, idx, t0.TK_RIGHT_BRACE, src)
     
-    # Implicit return (in case no explicit return)
-    emit_label(code, f".Lfn{label_id}_epilogue")
-    emit(code, "movq -8(%rbp), %rbx")
-    emit(code, "movq -16(%rbp), %r12")
-    emit(code, "movq -24(%rbp), %r13")
-    emit(code, "movq -32(%rbp), %r14")
-    emit(code, "movq -40(%rbp), %r15")
-    emit(code, "movq %rbp, %rsp")
-    emit(code, "popq %rbp")
-    emit(code, "ret")
-    
-    # Restore context
+    backend.end_function()
     pop_scope(scope_stack)
-    ctx["stack_offset"] = saved_stack_offset
-    ctx["loop_start_label"] = saved_loop_start
-    ctx["loop_end_label"] = saved_loop_end
-    ctx["current_fn_epilogue"] = saved_epilogue
     
     return idx
 
 
-def parse_if_stmnt(toks: list, idx: int, src: str, code: list, data: list,
+def parse_if_stmnt(toks: list, idx: int, src: str, backend,
                    fn_table: list, scope_stack: list, global_table: list, const_table: list,
                    ctx: dict) -> int:
-    """Parse if statement: if expr { body } else if expr { body } else { body }"""
-    # Generate labels
-    end_label_id = ctx["next_label"]
-    ctx["next_label"] = ctx["next_label"] + 1
-    end_label = f".Lif_end{end_label_id}"
-    
-    else_label_id = ctx["next_label"]
-    ctx["next_label"] = ctx["next_label"] + 1
-    else_label = f".Lelse{else_label_id}"
-    
-    # Skip 'if'
     idx = idx + 1
     
-    # Parse condition
-    idx = parse_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx, 0)
+    idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
+    backend.begin_if()
     
-    # Test condition (check if any bit is set)
-    emit(code, "testq %rax, %rax")
-    emit(code, f"jz {else_label}")
-    
-    # Parse then block
     idx = expect(toks, idx, t0.TK_LEFT_BRACE, src)
     push_scope(scope_stack)
     
     while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACE:
-        idx = parse_statement(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+        idx = parse_statement(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
     
     idx = expect(toks, idx, t0.TK_RIGHT_BRACE, src)
     pop_scope(scope_stack)
     
-    emit(code, f"jmp {end_label}")
-    emit_label(code, else_label)
+    nested_if_count = 1
     
-    # Check for else if / else
     while idx < len(toks) and tok_kind(toks, idx) == t0.TK_ELSE:
         idx = idx + 1
         
         if idx < len(toks) and tok_kind(toks, idx) == t0.TK_IF:
-            # else if
+            backend.begin_else()
             idx = idx + 1
             
-            else_label_id = ctx["next_label"]
-            ctx["next_label"] = ctx["next_label"] + 1
-            else_label = f".Lelse{else_label_id}"
+            idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
+            backend.begin_if()
+            nested_if_count = nested_if_count + 1
             
-            # Parse condition
-            idx = parse_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx, 0)
-            emit(code, "testq %rax, %rax")
-            emit(code, f"jz {else_label}")
-            
-            # Parse block
             idx = expect(toks, idx, t0.TK_LEFT_BRACE, src)
             push_scope(scope_stack)
             
             while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACE:
-                idx = parse_statement(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+                idx = parse_statement(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
             
             idx = expect(toks, idx, t0.TK_RIGHT_BRACE, src)
             pop_scope(scope_stack)
-            
-            emit(code, f"jmp {end_label}")
-            emit_label(code, else_label)
         else:
-            # else block
+            backend.begin_else()
             idx = expect(toks, idx, t0.TK_LEFT_BRACE, src)
             push_scope(scope_stack)
             
             while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACE:
-                idx = parse_statement(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+                idx = parse_statement(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
             
             idx = expect(toks, idx, t0.TK_RIGHT_BRACE, src)
             pop_scope(scope_stack)
-            break
+            
+            for _ in range(nested_if_count):
+                backend.end_if()
+            return idx
     
-    emit_label(code, end_label)
+    for _ in range(nested_if_count):
+        backend.end_if()
     return idx
 
 
-def parse_loop_stmnt(toks: list, idx: int, src: str, code: list, data: list,
+def parse_loop_stmnt(toks: list, idx: int, src: str, backend,
                      fn_table: list, scope_stack: list, global_table: list, const_table: list,
                      ctx: dict) -> int:
-    """Parse loop statement: loop expr { body }"""
-    # Generate labels
-    start_label_id = ctx["next_label"]
-    ctx["next_label"] = ctx["next_label"] + 1
-    start_label = f".Lloop_start{start_label_id}"
-    
-    end_label_id = ctx["next_label"]
-    ctx["next_label"] = ctx["next_label"] + 1
-    end_label = f".Lloop_end{end_label_id}"
-    
-    # Save outer loop labels
-    saved_start = ctx["loop_start_label"]
-    saved_end = ctx["loop_end_label"]
-    ctx["loop_start_label"] = start_label
-    ctx["loop_end_label"] = end_label
-    
-    # Skip 'loop'
     idx = idx + 1
     
-    # Loop start
-    emit_label(code, start_label)
+    backend.begin_loop()
     
-    # Parse condition
-    idx = parse_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx, 0)
+    idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
+    backend.begin_loop_body()
     
-    # Test condition
-    emit(code, "testq %rax, %rax")
-    emit(code, f"jz {end_label}")
-    
-    # Parse body
     idx = expect(toks, idx, t0.TK_LEFT_BRACE, src)
     push_scope(scope_stack)
     
     while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_BRACE:
-        idx = parse_statement(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+        idx = parse_statement(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
     
     idx = expect(toks, idx, t0.TK_RIGHT_BRACE, src)
     pop_scope(scope_stack)
     
-    # Jump back to start
-    emit(code, f"jmp {start_label}")
-    emit_label(code, end_label)
-    
-    # Restore outer loop labels
-    ctx["loop_start_label"] = saved_start
-    ctx["loop_end_label"] = saved_end
-    
+    backend.end_loop()
     return idx
 
 
-def parse_return_stmnt(toks: list, idx: int, src: str, code: list, data: list,
+def parse_return_stmnt(toks: list, idx: int, src: str, backend,
                        fn_table: list, scope_stack: list, global_table: list, const_table: list,
                        ctx: dict) -> int:
-    """Parse return statement: return expr"""
-    # Skip 'return'
     idx = idx + 1
-    
-    # Parse expression (result goes in rax)
-    idx = parse_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx, 0)
-    
-    # Jump to function epilogue
-    emit(code, f"jmp {ctx['current_fn_epilogue']}")
-    
+    idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
+    backend.emit_return()
     return idx
 
 
-def parse_break_stmnt(toks: list, idx: int, src: str, code: list, data: list,
+def parse_break_stmnt(toks: list, idx: int, src: str, backend,
                       fn_table: list, scope_stack: list, global_table: list, const_table: list,
                       ctx: dict) -> int:
-    """Parse break statement"""
     idx = idx + 1
-    
-    if ctx["loop_end_label"] == "":
-        raise SyntaxError(f"break outside of loop at {tok_loc(toks, idx - 1)}")
-    
-    emit(code, f"jmp {ctx['loop_end_label']}")
+    backend.emit_break()
     return idx
 
 
-def parse_continue_stmnt(toks: list, idx: int, src: str, code: list, data: list,
+def parse_continue_stmnt(toks: list, idx: int, src: str, backend,
                          fn_table: list, scope_stack: list, global_table: list, const_table: list,
                          ctx: dict) -> int:
-    """Parse continue statement"""
     idx = idx + 1
-    
-    if ctx["loop_start_label"] == "":
-        raise SyntaxError(f"continue outside of loop at {tok_loc(toks, idx - 1)}")
-    
-    emit(code, f"jmp {ctx['loop_start_label']}")
+    backend.emit_continue()
     return idx
 
 
-def parse_assign_or_expr(toks: list, idx: int, src: str, code: list, data: list,
+def parse_assign_or_expr(toks: list, idx: int, src: str, backend,
                          fn_table: list, scope_stack: list, global_table: list, const_table: list,
                          ctx: dict) -> int:
-    """Parse assignment or expression statement"""
-    # Check if this is identifier followed by = or update-assign
     if tok_kind(toks, idx) == t0.TK_IDENT:
         if idx + 1 < len(toks):
             next_kind = tok_kind(toks, idx + 1)
             
             if next_kind == t0.TK_ASSIGN:
-                # Simple assignment
                 name_start = tok_name_start(toks, idx)
                 name_len = tok_name_len(toks, idx)
-                idx = idx + 2  # skip ident and =
+                idx = idx + 2
                 
-                # Parse RHS
-                idx = parse_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx, 0)
+                idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
                 
-                # Find variable
                 scope_idx, var_idx = var_lookup(scope_stack, src, name_start, name_len)
                 if scope_idx >= 0:
                     entry = scope_stack[scope_idx][var_idx]
-                    offset = entry[2]
-                    emit(code, f"movq %rax, {offset}(%rbp)")
+                    backend.store_local(entry[2])
                 else:
                     glob_idx = global_lookup(global_table, src, name_start, name_len)
                     if glob_idx >= 0:
                         entry = global_table[glob_idx]
-                        label = f".Lglobal{entry[2]}"
-                        emit(code, f"movq %rax, {label}(%rip)")
+                        backend.store_global(entry[2])
                     else:
-                        raise SyntaxError(f"Undefined variable for assignment at {tok_loc(toks, idx)}")
+                        raise SyntaxError(f"Undefined variable")
                 
                 return idx
             
             elif next_kind == t0.TK_UPDATE_ASSIGN:
-                # Update assignment (+=, -=, etc.)
                 name_start = tok_name_start(toks, idx)
                 name_len = tok_name_len(toks, idx)
-                op_kind = tok_value(toks, idx + 1)  # The operator kind stored in value
-                idx = idx + 2  # skip ident and op=
+                op_kind = tok_value(toks, idx + 1)
+                idx = idx + 2
                 
-                # Find variable and load current value
                 scope_idx, var_idx = var_lookup(scope_stack, src, name_start, name_len)
                 if scope_idx >= 0:
                     entry = scope_stack[scope_idx][var_idx]
-                    offset = entry[2]
-                    var_loc = f"{offset}(%rbp)"
+                    slot = entry[2]
+                    backend.load_local(slot)
                 else:
                     glob_idx = global_lookup(global_table, src, name_start, name_len)
                     if glob_idx >= 0:
                         entry = global_table[glob_idx]
-                        var_loc = f".Lglobal{entry[2]}(%rip)"
+                        slot = entry[2]
+                        backend.load_global(slot)
                     else:
-                        raise SyntaxError(f"Undefined variable for assignment at {tok_loc(toks, idx)}")
+                        raise SyntaxError(f"Undefined variable")
                 
-                # Load current value
-                emit(code, f"movq {var_loc}, %rbx")
-                emit(code, "pushq %rbx")
+                backend.save_value()
+                idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
+                backend.binary_op(kind_to_op(op_kind))
                 
-                # Parse RHS
-                idx = parse_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx, 0)
+                if scope_idx >= 0:
+                    backend.store_local(slot)
+                else:
+                    backend.store_global(slot)
                 
-                # rax = RHS, pop old value to rbx
-                emit(code, "movq %rax, %rcx")
-                emit(code, "popq %rax")
-                
-                # Apply operation
-                if op_kind == t0.TK_PLUS:
-                    emit(code, "addq %rcx, %rax")
-                elif op_kind == t0.TK_MINUS:
-                    emit(code, "subq %rcx, %rax")
-                elif op_kind == t0.TK_MUL:
-                    emit(code, "imulq %rcx, %rax")
-                elif op_kind == t0.TK_IDIV:
-                    emit(code, "cqto")
-                    emit(code, "idivq %rcx")
-                elif op_kind == t0.TK_MOD:
-                    emit(code, "cqto")
-                    emit(code, "idivq %rcx")
-                    emit(code, "movq %rdx, %rax")
-                elif op_kind == t0.TK_LEFT_SHIFT:
-                    emit(code, "shlq %cl, %rax")
-                elif op_kind == t0.TK_RIGHT_SHIFT:
-                    emit(code, "sarq %cl, %rax")
-                elif op_kind == t0.TK_AND:
-                    emit(code, "andq %rcx, %rax")
-                elif op_kind == t0.TK_OR:
-                    emit(code, "orq %rcx, %rax")
-                elif op_kind == t0.TK_XOR:
-                    emit(code, "xorq %rcx, %rax")
-                
-                # Store result
-                emit(code, f"movq %rax, {var_loc}")
                 return idx
     
-    # Just an expression statement
-    return parse_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx, 0)
+    return parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
 
 
-def parse_statement(toks: list, idx: int, src: str, code: list, data: list,
+def parse_statement(toks: list, idx: int, src: str, backend,
                     fn_table: list, scope_stack: list, global_table: list, const_table: list,
                     ctx: dict) -> int:
-    """Parse a single statement, emit code, return new idx"""
     kind = tok_kind(toks, idx)
     
     if kind == t0.TK_LET:
-        # Check if function declaration (look for '(' after ident and '=')
         if idx + 3 < len(toks):
             if tok_kind(toks, idx + 2) == t0.TK_ASSIGN and tok_kind(toks, idx + 3) == t0.TK_LEFT_PAREN:
-                return parse_fn_decl(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
-        return parse_var_decl(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+                return parse_fn_decl(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
+        return parse_var_decl(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
     
     if kind == t0.TK_IF:
-        return parse_if_stmnt(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+        return parse_if_stmnt(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
     
     if kind == t0.TK_LOOP:
-        return parse_loop_stmnt(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+        return parse_loop_stmnt(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
     
     if kind == t0.TK_RETURN:
-        return parse_return_stmnt(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+        return parse_return_stmnt(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
     
     if kind == t0.TK_BREAK:
-        return parse_break_stmnt(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+        return parse_break_stmnt(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
     
     if kind == t0.TK_CONTINUE:
-        return parse_continue_stmnt(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+        return parse_continue_stmnt(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
     
-    # Assignment or expression
-    return parse_assign_or_expr(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+    return parse_assign_or_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
 
 
-def parse_program(toks: list, src: str, code: list, data: list,
+def parse_program(toks: list, src: str, backend,
                   fn_table: list, scope_stack: list, global_table: list, const_table: list,
                   ctx: dict) -> None:
-    """Parse entire program (top-level statements)"""
     idx = 0
     
     while idx < len(toks):
         kind = tok_kind(toks, idx)
         
-        # At top level, only allow function declarations and global variable declarations
         if kind == t0.TK_LET:
-            # Check if function or variable
             if idx + 3 < len(toks):
                 if tok_kind(toks, idx + 2) == t0.TK_ASSIGN and tok_kind(toks, idx + 3) == t0.TK_LEFT_PAREN:
-                    idx = parse_fn_decl(toks, idx, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
+                    idx = parse_fn_decl(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
                     continue
             
-            # Global variable declaration
-            idx = idx + 1  # skip let
+            idx = idx + 1
             
             name_start = tok_name_start(toks, idx)
             name_len = tok_name_len(toks, idx)
@@ -1479,28 +987,20 @@ def parse_program(toks: list, src: str, code: list, data: list,
             idx = skip_type_annotation(toks, idx)
             idx = expect(toks, idx, t0.TK_ASSIGN, src)
             
-            # For globals, only allow constant expressions
             if tok_kind(toks, idx) == t0.TK_NUMBER:
                 val = tok_value(toks, idx)
                 idx = idx + 1
                 
-                # Add to const_table for compile-time array literal resolution
                 const_declare(const_table, name_start, name_len, val)
-                
-                label_id = ctx["next_label"]
-                ctx["next_label"] = ctx["next_label"] + 1
+                label_id = backend.define_global(0, val)
                 global_declare(global_table, name_start, name_len, label_id)
                 
-                emit_data_label(data, f".Lglobal{label_id}")
-                emit_data(data, f"    .quad {val}")
             elif tok_kind(toks, idx) == t0.TK_STRING:
-                # String constant
                 start = tok_loc(toks, idx)
                 length = tok_value(toks, idx)
                 str_content = src[start + 1 : start + length - 1]
                 idx = idx + 1
                 
-                # Process escapes
                 processed = []
                 i = 0
                 while i < len(str_content):
@@ -1514,24 +1014,11 @@ def parse_program(toks: list, src: str, code: list, data: list,
                         processed.append(ord(str_content[i]))
                         i = i + 1
                 
-                str_label_id = ctx["next_label"]
-                ctx["next_label"] = ctx["next_label"] + 1
-                
-                emit_data_label(data, f".Lstr{str_label_id}")
-                emit_data(data, f"    .quad {len(processed)}")
-                if len(processed) > 0:
-                    bytes_str = ", ".join([str(b) for b in processed])
-                    emit_data(data, f"    .byte {bytes_str}")
-                
-                # Global holds pointer to string data
-                label_id = ctx["next_label"]
-                ctx["next_label"] = ctx["next_label"] + 1
+                str_label_id = backend.intern_string(bytes(processed))
+                label_id = backend.define_global(0, f"{backend._string_labels[str_label_id]}+8")
                 global_declare(global_table, name_start, name_len, label_id)
                 
-                emit_data_label(data, f".Lglobal{label_id}")
-                emit_data(data, f"    .quad .Lstr{str_label_id}+8")
             elif tok_kind(toks, idx) == t0.TK_LEFT_BRACKET:
-                # Array literal - supports numbers, strings, const ids, function refs, nested arrays
                 idx = idx + 1
                 elem_directives = []
                 
@@ -1539,7 +1026,7 @@ def parse_program(toks: list, src: str, code: list, data: list,
                     elem_kind = tok_kind(toks, idx)
                     
                     if elem_kind == t0.TK_NUMBER:
-                        elem_directives.append(str(tok_value(toks, idx)))
+                        elem_directives.append(tok_value(toks, idx))
                         idx = idx + 1
                     
                     elif elem_kind == t0.TK_IDENT:
@@ -1547,20 +1034,18 @@ def parse_program(toks: list, src: str, code: list, data: list,
                         nl = tok_name_len(toks, idx)
                         found, val = const_lookup(const_table, src, ns, nl)
                         if found:
-                            elem_directives.append(str(val))
+                            elem_directives.append(val)
                             idx = idx + 1
                         else:
                             fn_idx = fn_lookup(fn_table, src, ns, nl)
                             if fn_idx >= 0:
                                 entry = fn_table[fn_idx]
-                                elem_directives.append(f".Lfn{entry[2]}")
+                                elem_directives.append(backend._fn_labels[entry[2]])
                                 idx = idx + 1
                             else:
-                                # Forward function reference
-                                label_id_fn = ctx["next_label"]
-                                ctx["next_label"] = ctx["next_label"] + 1
+                                label_id_fn = backend.declare_function(0, 0)
                                 fn_declare(fn_table, ns, nl, label_id_fn, 0, False)
-                                elem_directives.append(f".Lfn{label_id_fn}")
+                                elem_directives.append(backend._fn_labels[label_id_fn])
                                 idx = idx + 1
                     
                     elif elem_kind == t0.TK_STRING:
@@ -1580,92 +1065,57 @@ def parse_program(toks: list, src: str, code: list, data: list,
                             else:
                                 processed.append(ord(str_content[i]))
                                 i = i + 1
-                        str_lbl_id = ctx["next_label"]
-                        ctx["next_label"] = ctx["next_label"] + 1
-                        emit_data_label(data, f".Lstr{str_lbl_id}")
-                        emit_data(data, f"    .quad {len(processed)}")
-                        if len(processed) > 0:
-                            bytes_str = ", ".join([str(b) for b in processed])
-                            emit_data(data, f"    .byte {bytes_str}")
-                        elem_directives.append(f".Lstr{str_lbl_id}+8")
+                        str_lbl_id = backend.intern_string(bytes(processed))
+                        elem_directives.append(f"{backend._string_labels[str_lbl_id]}+8")
                     
                     else:
                         raise SyntaxError(f"Unsupported element type in global array at {tok_loc(toks, idx)}")
                 
                 idx = expect(toks, idx, t0.TK_RIGHT_BRACKET, src)
                 
-                arr_label_id = ctx["next_label"]
-                ctx["next_label"] = ctx["next_label"] + 1
-                
-                emit_data_label(data, f".Larr{arr_label_id}")
-                emit_data(data, f"    .quad {len(elem_directives)}")
-                for ed in elem_directives:
-                    emit_data(data, f"    .quad {ed}")
-                
-                label_id = ctx["next_label"]
-                ctx["next_label"] = ctx["next_label"] + 1
+                arr_label_id = backend.intern_array(elem_directives)
+                label_id = backend.define_global(0, f"{backend._array_labels[arr_label_id]}+8")
                 global_declare(global_table, name_start, name_len, label_id)
-                
-                emit_data_label(data, f".Lglobal{label_id}")
-                emit_data(data, f"    .quad .Larr{arr_label_id}+8")
             else:
                 raise SyntaxError(f"Global variables must have constant initializers at {tok_loc(toks, idx)}")
         else:
-            raise SyntaxError(f"Only function and variable declarations allowed at top level, got {t0.dump_token(toks[idx], src)}")
+            raise SyntaxError(f"Only declarations allowed at top level, got {t0.dump_token(toks[idx], src)}")
 
 
 # ============================================================================
 # Main entry point
 # ============================================================================
 
-def parse(toks: list, src: str) -> str:
-    """Parse tokens and generate x86_64 assembly"""
+def parse(toks: list, src: str, target: str = "x86_64") -> str:
+    """Parse tokens and generate code for the specified target."""
     
-    # Output buffers
-    code: list[str] = []
-    data: list[str] = []
+    if target == "x86_64":
+        backend = X86_64Backend()
+    elif target == "wasm32":
+        backend = Wasm32Backend()
+    elif target == "riscv":
+        backend = RiscvBackend()
+    elif target == "arm":
+        backend = ArmBackend()
+    else:
+        raise ValueError(f"Unknown target: {target}")
     
-    # Symbol tables
+    backend.begin_module()
+    
     fn_table: list = []
     global_table: list = []
-    const_table: list = []  # Const values for compile-time evaluation
-    scope_stack: list = [[]]  # Start with global scope
+    const_table: list = []
+    scope_stack: list = [[]]
+    ctx = {}
     
-    # Context for codegen
-    ctx = {
-        "next_label": 0,
-        "stack_offset": -8,
-        "loop_start_label": "",
-        "loop_end_label": "",
-        "current_fn_epilogue": "",
-    }
+    parse_program(toks, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
     
-    # Parse program
-    parse_program(toks, src, code, data, fn_table, scope_stack, global_table, const_table, ctx)
-    
-    # Check for undefined forward references
-    i = 0
-    while i < len(fn_table):
-        entry = fn_table[i]
+    for entry in fn_table:
         if not entry[4]:
             name = get_name(src, entry[0], entry[1])
             raise SyntaxError(f"Undefined function: {name}")
-        i = i + 1
     
-    # Assemble output
-    output = []
-    output.append(".text")
-    output.append(".globl __main__")
-    output.append("")
-    output.extend(code)
-    output.append("")
-    output.append(".data")
-    output.extend(data)
-    output.append("")
-    output.append(".section .note.GNU-stack,\"\",@progbits")
-    output.append("")
-    
-    return "\n".join(output)
+    return backend.finish_module()
 
 
 # ============================================================================
@@ -1678,16 +1128,25 @@ if __name__ == "__main__":
     from pathlib import Path
     
     if len(sys.argv) < 2:
-        print("Usage: python -m udewy.p0 [-c] <file.udewy> [args...]")
-        print("  -c    Compile only, don't run")
+        print("Usage: python -m udewy.p0 [-c] [--target TARGET] <file.udewy> [args...]")
+        print("  -c              Compile only, don't run")
+        print("  --target TARGET Target backend (x86_64, wasm32, riscv, arm)")
         sys.exit(1)
     
     compile_only = False
+    target = "x86_64"
     arg_idx = 1
     
-    if sys.argv[arg_idx] == "-c":
-        compile_only = True
-        arg_idx += 1
+    while arg_idx < len(sys.argv) and sys.argv[arg_idx].startswith("-"):
+        if sys.argv[arg_idx] == "-c":
+            compile_only = True
+            arg_idx += 1
+        elif sys.argv[arg_idx] == "--target":
+            arg_idx += 1
+            target = sys.argv[arg_idx]
+            arg_idx += 1
+        else:
+            break
     
     if arg_idx >= len(sys.argv):
         print("Error: No input file specified")
@@ -1699,25 +1158,239 @@ if __name__ == "__main__":
     raw_src = input_file.read_text()
     src = process_imports(raw_src, input_file)
     toks = t0.tokenize(src)
-    asm = parse(toks, src)
+    asm = parse(toks, src, target)
     
     cache_dir = Path("__dewycache__")
     cache_dir.mkdir(exist_ok=True)
     
-    runtime_path = Path(__file__).parent / "runtime.s"
-    asm_path = cache_dir / f"{input_file.stem}.s"
-    obj_path = cache_dir / f"{input_file.stem}.o"
-    runtime_obj_path = cache_dir / "runtime.o"
-    exe_path = cache_dir / input_file.stem
+    if target == "x86_64":
+        asm_path = cache_dir / f"{input_file.stem}.s"
+        obj_path = cache_dir / f"{input_file.stem}.o"
+        exe_path = cache_dir / input_file.stem
+        
+        asm_path.write_text(asm)
+        
+        subprocess.run(["as", str(asm_path), "-o", str(obj_path)], check=True)
+        subprocess.run(["ld", str(obj_path), "-o", str(exe_path)], check=True)
+        
+        if compile_only:
+            print(f"Compiled: {exe_path}")
+        else:
+            result = subprocess.run([str(exe_path)] + script_args)
+            sys.exit(result.returncode)
     
-    asm_path.write_text(asm)
+    elif target == "wasm32":
+        wat_path = cache_dir / f"{input_file.stem}.wat"
+        wasm_path = cache_dir / f"{input_file.stem}.wasm"
+        js_path = cache_dir / f"{input_file.stem}.js"
+        html_path = cache_dir / f"{input_file.stem}.html"
+        
+        wat_path.write_text(asm)
+        
+        # Convert WAT to WASM using wat2wasm if available
+        try:
+            subprocess.run(["wat2wasm", str(wat_path), "-o", str(wasm_path)], check=True)
+        except FileNotFoundError:
+            print("Warning: wat2wasm not found, WAT file generated but not converted to WASM")
+            print(f"Install wabt: https://github.com/WebAssembly/wabt")
+            print(f"WAT file: {wat_path}")
+            if compile_only:
+                sys.exit(0)
+            else:
+                sys.exit(1)
+        
+        # Generate JS shim
+        js_shim = '''
+const memory = new WebAssembly.Memory({ initial: 1 });
+
+const imports = {
+    env: {
+        memory: memory,
+        syscall0: (num) => {
+            console.log(`syscall0(${num})`);
+            return 0n;
+        },
+        syscall1: (num, a1) => {
+            if (num === 60n) {
+                console.log(`exit(${a1})`);
+                return a1;
+            }
+            console.log(`syscall1(${num}, ${a1})`);
+            return 0n;
+        },
+        syscall2: (num, a1, a2) => {
+            console.log(`syscall2(${num}, ${a1}, ${a2})`);
+            return 0n;
+        },
+        syscall3: (num, a1, a2, a3) => {
+            if (num === 1n) {
+                const view = new Uint8Array(memory.buffer);
+                const start = Number(a2);
+                const len = Number(a3);
+                const bytes = view.slice(start, start + len);
+                const text = new TextDecoder().decode(bytes);
+                if (Number(a1) === 1) {
+                    process.stdout.write(text);
+                } else if (Number(a1) === 2) {
+                    process.stderr.write(text);
+                }
+                return BigInt(len);
+            }
+            console.log(`syscall3(${num}, ${a1}, ${a2}, ${a3})`);
+            return 0n;
+        },
+        syscall4: (num, a1, a2, a3, a4) => {
+            console.log(`syscall4(${num}, ${a1}, ${a2}, ${a3}, ${a4})`);
+            return 0n;
+        },
+        syscall5: (num, a1, a2, a3, a4, a5) => {
+            console.log(`syscall5(${num}, ${a1}, ${a2}, ${a3}, ${a4}, ${a5})`);
+            return 0n;
+        },
+        syscall6: (num, a1, a2, a3, a4, a5, a6) => {
+            console.log(`syscall6(${num}, ${a1}, ${a2}, ${a3}, ${a4}, ${a5}, ${a6})`);
+            return 0n;
+        },
+    }
+};
+
+async function run() {
+    const fs = require('fs');
+    const wasmBuffer = fs.readFileSync('WASM_PATH');
+    const { instance } = await WebAssembly.instantiate(wasmBuffer, imports);
     
-    subprocess.run(["as", str(asm_path), "-o", str(obj_path)], check=True)
-    subprocess.run(["as", str(runtime_path), "-o", str(runtime_obj_path)], check=True)
-    subprocess.run(["ld", str(obj_path), str(runtime_obj_path), "-o", str(exe_path)], check=True)
+    const result = instance.exports.main();
+    console.log(`\\nExit code: ${result}`);
+    process.exit(Number(result));
+}
+
+run().catch(err => {
+    console.error(err);
+    process.exit(1);
+});
+'''.replace('WASM_PATH', str(wasm_path))
+        
+        js_path.write_text(js_shim)
+        
+        # Generate HTML for browser
+        html_content = f'''<!DOCTYPE html>
+<html>
+<head>
+    <title>{input_file.stem}</title>
+</head>
+<body>
+    <h1>{input_file.stem}</h1>
+    <pre id="output"></pre>
+    <script>
+const memory = new WebAssembly.Memory({{ initial: 1 }});
+const output = document.getElementById('output');
+
+const imports = {{
+    env: {{
+        memory: memory,
+        syscall0: (num) => {{ output.textContent += `syscall0(${{num}})\\n`; return 0n; }},
+        syscall1: (num, a1) => {{
+            if (num === 60n) {{ output.textContent += `exit(${{a1}})\\n`; return a1; }}
+            return 0n;
+        }},
+        syscall2: (num, a1, a2) => {{ return 0n; }},
+        syscall3: (num, a1, a2, a3) => {{
+            if (num === 1n) {{
+                const view = new Uint8Array(memory.buffer);
+                const start = Number(a2);
+                const len = Number(a3);
+                const bytes = view.slice(start, start + len);
+                const text = new TextDecoder().decode(bytes);
+                output.textContent += text;
+                return BigInt(len);
+            }}
+            return 0n;
+        }},
+        syscall4: (num, a1, a2, a3, a4) => {{ return 0n; }},
+        syscall5: (num, a1, a2, a3, a4, a5) => {{ return 0n; }},
+        syscall6: (num, a1, a2, a3, a4, a5, a6) => {{ return 0n; }},
+    }}
+}};
+
+fetch('{wasm_path.name}')
+    .then(r => r.arrayBuffer())
+    .then(bytes => WebAssembly.instantiate(bytes, imports))
+    .then(result => {{
+        const ret = result.instance.exports.main();
+        output.textContent += `\\nExit code: ${{ret}}`;
+    }})
+    .catch(err => {{
+        output.textContent += `Error: ${{err}}`;
+    }});
+    </script>
+</body>
+</html>
+'''
+        html_path.write_text(html_content)
+        
+        if compile_only:
+            print(f"Compiled: {wasm_path}")
+            print(f"JS shim: {js_path}")
+            print(f"HTML: {html_path}")
+        else:
+            # Run with Node.js
+            result = subprocess.run(["node", str(js_path)] + script_args)
+            sys.exit(result.returncode)
     
-    if compile_only:
-        print(f"Compiled: {exe_path}")
+    elif target == "riscv":
+        asm_path = cache_dir / f"{input_file.stem}.s"
+        obj_path = cache_dir / f"{input_file.stem}.o"
+        exe_path = cache_dir / input_file.stem
+        
+        asm_path.write_text(asm)
+        
+        # Try different toolchain prefixes
+        for prefix in ["riscv64-linux-gnu-", "riscv64-elf-", "riscv64-unknown-elf-"]:
+            try:
+                subprocess.run([f"{prefix}as", str(asm_path), "-o", str(obj_path)], check=True)
+                subprocess.run([f"{prefix}ld", str(obj_path), "-o", str(exe_path)], check=True)
+                break
+            except FileNotFoundError:
+                continue
+        else:
+            print("Error: RISC-V toolchain not found")
+            print(f"Install one of: riscv64-linux-gnu-*, riscv64-elf-*")
+            print(f"Assembly file: {asm_path}")
+            sys.exit(1)
+        
+        if compile_only:
+            print(f"Compiled: {exe_path}")
+        else:
+            result = subprocess.run(["qemu-riscv64", str(exe_path)] + script_args)
+            sys.exit(result.returncode)
+    
+    elif target == "arm":
+        asm_path = cache_dir / f"{input_file.stem}.s"
+        obj_path = cache_dir / f"{input_file.stem}.o"
+        exe_path = cache_dir / input_file.stem
+        
+        asm_path.write_text(asm)
+        
+        # Try different toolchain prefixes
+        for prefix in ["aarch64-linux-gnu-", "aarch64-elf-", "aarch64-unknown-elf-"]:
+            try:
+                subprocess.run([f"{prefix}as", str(asm_path), "-o", str(obj_path)], check=True)
+                subprocess.run([f"{prefix}ld", str(obj_path), "-o", str(exe_path)], check=True)
+                break
+            except FileNotFoundError:
+                continue
+        else:
+            print("Error: AArch64 toolchain not found")
+            print(f"Install one of: aarch64-linux-gnu-*, aarch64-elf-*")
+            print(f"Assembly file: {asm_path}")
+            sys.exit(1)
+        
+        if compile_only:
+            print(f"Compiled: {exe_path}")
+        else:
+            result = subprocess.run(["qemu-aarch64", str(exe_path)] + script_args)
+            sys.exit(result.returncode)
+    
     else:
-        result = subprocess.run([str(exe_path)] + script_args)
-        sys.exit(result.returncode)
+        print(f"Target {target} not yet implemented")
+        sys.exit(1)
