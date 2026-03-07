@@ -1,0 +1,140 @@
+# Bootstrap compiler prelude - platform-agnostic constants and helpers
+# This file should be imported first in all bootstrap modules
+
+# ============================================================================
+# Boolean values
+# ============================================================================
+
+const TRUE:int = 0xFFFF_FFFF_FFFF_FFFF
+const FALSE:int = 0
+const NULL:int = 0
+
+# ============================================================================
+# File descriptors
+# ============================================================================
+
+const STDIN:int = 0
+const STDOUT:int = 1
+const STDERR:int = 2
+
+# ============================================================================
+# ASCII character codes
+# ============================================================================
+
+const CH_NUL:int = 0
+const CH_TAB:int = 9
+const CH_LF:int = 10
+const CH_CR:int = 13
+const CH_SPACE:int = 32
+const CH_BANG:int = 33
+const CH_DQUOTE:int = 34
+const CH_HASH:int = 35
+const CH_PERCENT:int = 37
+const CH_AMP:int = 38
+const CH_SQUOTE:int = 39
+const CH_LPAREN:int = 40
+const CH_RPAREN:int = 41
+const CH_STAR:int = 42
+const CH_PLUS:int = 43
+const CH_COMMA:int = 44
+const CH_MINUS:int = 45
+const CH_DOT:int = 46
+const CH_SLASH:int = 47
+const CH_0:int = 48
+const CH_1:int = 49
+const CH_9:int = 57
+const CH_COLON:int = 58
+const CH_SEMI:int = 59
+const CH_LT:int = 60
+const CH_EQ:int = 61
+const CH_GT:int = 62
+const CH_QUESTION:int = 63
+const CH_AT:int = 64
+const CH_A:int = 65
+const CH_F:int = 70
+const CH_Z:int = 90
+const CH_LBRACKET:int = 91
+const CH_BACKSLASH:int = 92
+const CH_RBRACKET:int = 93
+const CH_CARET:int = 94
+const CH_UNDERSCORE:int = 95
+const CH_BACKTICK:int = 96
+const CH_a:int = 97
+const CH_b:int = 98
+const CH_c:int = 99
+const CH_f:int = 102
+const CH_i:int = 105
+const CH_m:int = 109
+const CH_n:int = 110
+const CH_o:int = 111
+const CH_p:int = 112
+const CH_r:int = 114
+const CH_t:int = 116
+const CH_v:int = 118
+const CH_x:int = 120
+const CH_z:int = 122
+const CH_LBRACE:int = 123
+const CH_PIPE:int = 124
+const CH_RBRACE:int = 125
+
+# ============================================================================
+# Character classification
+# ============================================================================
+
+let is_alpha = (c:int):>int => {
+    if (c >=? CH_A) and (c <=? CH_Z) { return TRUE }
+    if (c >=? CH_a) and (c <=? CH_z) { return TRUE }
+    return FALSE
+}
+
+let is_digit = (c:int):>int => {
+    if (c >=? CH_0) and (c <=? CH_9) { return TRUE }
+    return FALSE
+}
+
+let is_hex = (c:int):>int => {
+    if is_digit(c) { return TRUE }
+    if (c >=? CH_A) and (c <=? CH_F) { return TRUE }
+    if (c >=? CH_a) and (c <=? CH_f) { return TRUE }
+    return FALSE
+}
+
+let is_space = (c:int):>int => {
+    if c =? CH_SPACE { return TRUE }
+    if c =? CH_TAB { return TRUE }
+    if c =? CH_LF { return TRUE }
+    if c =? CH_CR { return TRUE }
+    return FALSE
+}
+
+let is_alnum = (c:int):>int => {
+    if is_alpha(c) { return TRUE }
+    if is_digit(c) { return TRUE }
+    return FALSE
+}
+
+let is_ident_start = (c:int):>int => {
+    if is_alpha(c) { return TRUE }
+    if c =? CH_UNDERSCORE { return TRUE }
+    return FALSE
+}
+
+let is_ident_char = (c:int):>int => {
+    if is_alnum(c) { return TRUE }
+    if c =? CH_UNDERSCORE { return TRUE }
+    return FALSE
+}
+
+# ============================================================================
+# Escape character handling
+# ============================================================================
+
+let escape_char = (c:int):>int => {
+    if c =? CH_n { return CH_LF }
+    if c =? CH_t { return CH_TAB }
+    if c =? CH_r { return CH_CR }
+    if c =? CH_0 { return CH_NUL }
+    if c =? CH_BACKSLASH { return CH_BACKSLASH }
+    if c =? CH_DQUOTE { return CH_DQUOTE }
+    return c
+}

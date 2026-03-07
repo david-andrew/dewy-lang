@@ -1,0 +1,95 @@
+# x86_64 Linux syscall numbers for the bootstrap compiler
+# The bootstrap compiler itself runs on x86_64 Linux
+
+import p"prelude.udewy"
+
+# ============================================================================
+# x86_64 Linux syscall numbers
+# ============================================================================
+
+const SYS_READ:int = 0
+const SYS_WRITE:int = 1
+const SYS_OPEN:int = 2
+const SYS_CLOSE:int = 3
+const SYS_STAT:int = 4
+const SYS_FSTAT:int = 5
+const SYS_MMAP:int = 9
+const SYS_MUNMAP:int = 11
+const SYS_BRK:int = 12
+const SYS_FORK:int = 57
+const SYS_EXECVE:int = 59
+const SYS_EXIT:int = 60
+const SYS_WAIT4:int = 61
+const SYS_GETCWD:int = 79
+const SYS_CHDIR:int = 80
+const SYS_MKDIR:int = 83
+const SYS_CREAT:int = 85
+
+# ============================================================================
+# Open flags
+# ============================================================================
+
+const O_RDONLY:int = 0
+const O_WRONLY:int = 1
+const O_RDWR:int = 2
+const O_CREAT:int = 64
+const O_TRUNC:int = 512
+const O_APPEND:int = 1024
+
+# ============================================================================
+# mmap flags
+# ============================================================================
+
+const PROT_NONE:int = 0
+const PROT_READ:int = 1
+const PROT_WRITE:int = 2
+const PROT_EXEC:int = 4
+const MAP_SHARED:int = 1
+const MAP_PRIVATE:int = 2
+const MAP_ANONYMOUS:int = 32
+const MAP_FIXED:int = 16
+
+# ============================================================================
+# Syscall wrappers
+# ============================================================================
+
+let sys_read = (fd:int buf:int count:int):>int => {
+    return __syscall3__(SYS_READ fd buf count)
+}
+
+let sys_write = (fd:int buf:int count:int):>int => {
+    return __syscall3__(SYS_WRITE fd buf count)
+}
+
+let sys_open = (path:int flags:int mode:int):>int => {
+    return __syscall3__(SYS_OPEN path flags mode)
+}
+
+let sys_close = (fd:int):>int => {
+    return __syscall1__(SYS_CLOSE fd)
+}
+
+let sys_exit = (code:int):>void => {
+    __syscall1__(SYS_EXIT code)
+    return void
+}
+
+let sys_mmap = (addr:int len:int prot:int flags:int fd:int off:int):>int => {
+    return __syscall6__(SYS_MMAP addr len prot flags fd off)
+}
+
+let sys_mkdir = (path:int mode:int):>int => {
+    return __syscall2__(SYS_MKDIR path mode)
+}
+
+let sys_fork = ():>int => {
+    return __syscall0__(SYS_FORK)
+}
+
+let sys_execve = (path:int argv:int envp:int):>int => {
+    return __syscall3__(SYS_EXECVE path argv envp)
+}
+
+let sys_wait4 = (pid:int status:int options:int rusage:int):>int => {
+    return __syscall4__(SYS_WAIT4 pid status options rusage)
+}

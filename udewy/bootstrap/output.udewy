@@ -1,0 +1,152 @@
+# Output buffer management for code generation
+# Manages text and data section output
+
+import p"prelude.udewy"
+import p"syscalls.udewy"
+import p"memory.udewy"
+import p"strings.udewy"
+
+# ============================================================================
+# Output buffer constants
+# ============================================================================
+
+const OUTPUT_BUF_SIZE:int = 0x100000
+
+# ============================================================================
+# Text section output (code)
+# ============================================================================
+
+let text_buf:int = 0
+let text_ptr:int = 0
+let text_fd:int = 0
+
+let text_init = ():>void => {
+    text_buf = arena_alloc(OUTPUT_BUF_SIZE)
+    text_ptr = 0
+    return void
+}
+
+let text_char = (c:int):>void => {
+    __store8__(c text_buf + text_ptr)
+    text_ptr = text_ptr + 1
+    return void
+}
+
+let text_str = (s:int):>void => {
+    let len:int = __load64__(s - 8)
+    let i:int = 0
+    loop i <? len {
+        text_char(__load8__(s + i))
+        i = i + 1
+    }
+    return void
+}
+
+let text_cstr = (s:int):>void => {
+    let i:int = 0
+    loop __load8__(s + i) not=? 0 {
+        text_char(__load8__(s + i))
+        i = i + 1
+    }
+    return void
+}
+
+let text_int = (n:int):>void => {
+    let buf = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+    let len:int = int_to_str(n buf)
+    let i:int = 0
+    loop i <? len {
+        text_char(__load8__(buf + i))
+        i = i + 1
+    }
+    return void
+}
+
+let text_hex = (n:int):>void => {
+    text_str("0x")
+    let buf = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+    let len:int = int_to_hex(n buf)
+    let i:int = 0
+    loop i <? len {
+        text_char(__load8__(buf + i))
+        i = i + 1
+    }
+    return void
+}
+
+let text_line = (s:int):>void => {
+    text_str(s)
+    text_char(CH_LF)
+    return void
+}
+
+let text_label = (prefix:int n:int):>void => {
+    text_str(prefix)
+    text_int(n)
+    return void
+}
+
+let text_flush = ():>void => {
+    sys_write(text_fd text_buf text_ptr)
+    text_ptr = 0
+    return void
+}
+
+# ============================================================================
+# Data section output
+# ============================================================================
+
+let data_buf:int = 0
+let data_ptr:int = 0
+
+let data_init = ():>void => {
+    data_buf = arena_alloc(OUTPUT_BUF_SIZE)
+    data_ptr = 0
+    return void
+}
+
+let data_char = (c:int):>void => {
+    __store8__(c data_buf + data_ptr)
+    data_ptr = data_ptr + 1
+    return void
+}
+
+let data_str = (s:int):>void => {
+    let len:int = __load64__(s - 8)
+    let i:int = 0
+    loop i <? len {
+        data_char(__load8__(s + i))
+        i = i + 1
+    }
+    return void
+}
+
+let data_int = (n:int):>void => {
+    let buf = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+    let len:int = int_to_str(n buf)
+    let i:int = 0
+    loop i <? len {
+        data_char(__load8__(buf + i))
+        i = i + 1
+    }
+    return void
+}
+
+let data_line = (s:int):>void => {
+    data_str(s)
+    data_char(CH_LF)
+    return void
+}
+
+let data_label = (prefix:int n:int):>void => {
+    data_str(prefix)
+    data_int(n)
+    data_str(":\n")
+    return void
+}
+
+let data_flush = ():>void => {
+    sys_write(text_fd data_buf data_ptr)
+    data_ptr = 0
+    return void
+}

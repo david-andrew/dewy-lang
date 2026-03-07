@@ -1,0 +1,355 @@
+# Backend abstraction for the bootstrap compiler
+# Routes code generation calls to the selected backend
+
+import p"prelude.udewy"
+import p"output.udewy"
+import p"symbols.udewy"
+import p"backend_x86_64.udewy"
+import p"backend_riscv.udewy"
+import p"backend_arm.udewy"
+
+# ============================================================================
+# Backend selection
+# ============================================================================
+
+const BACKEND_X86_64:int = 0
+const BACKEND_RISCV:int = 1
+const BACKEND_ARM:int = 2
+
+let current_backend:int = 0
+
+let backend_set = (backend:int):>void => {
+    current_backend = backend
+    return void
+}
+
+# ============================================================================
+# Dispatched backend operations
+# ============================================================================
+
+let backend_emit_prologue = (frame_size:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_prologue(frame_size)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_prologue(frame_size)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_prologue(frame_size)
+    }
+    return void
+}
+
+let backend_emit_epilogue = (frame_size:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_epilogue()
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_epilogue(frame_size)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_epilogue(frame_size)
+    }
+    return void
+}
+
+let backend_emit_push = ():>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_push()
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_push()
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_push()
+    }
+    return void
+}
+
+let backend_emit_mov_imm = (val:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_mov_imm(val)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_mov_imm(val)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_mov_imm(val)
+    }
+    return void
+}
+
+let backend_emit_load_global = (label_id:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_load_global(label_id)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_load_global(label_id)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_load_global(label_id)
+    }
+    return void
+}
+
+let backend_emit_store_global = (label_id:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_store_global(label_id)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_store_global(label_id)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_store_global(label_id)
+    }
+    return void
+}
+
+let backend_emit_load_local = (offset:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_load_local(offset)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_load_local(offset)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_load_local(offset)
+    }
+    return void
+}
+
+let backend_emit_store_local = (offset:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_store_local(offset)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_store_local(offset)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_store_local(offset)
+    }
+    return void
+}
+
+let backend_emit_load_string = (label_id:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_load_string(label_id)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_load_string(label_id)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_load_string(label_id)
+    }
+    return void
+}
+
+let backend_emit_load_array = (label_id:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_load_array(label_id)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_load_array(label_id)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_load_array(label_id)
+    }
+    return void
+}
+
+let backend_emit_binop = (op:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_binop(op)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_binop(op)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_binop(op)
+    }
+    return void
+}
+
+let backend_emit_unary = (op:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_unary(op)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_unary(op)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_unary(op)
+    }
+    return void
+}
+
+let backend_emit_call = (label_id:int num_args:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_call(label_id num_args)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_call(label_id num_args)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_call(label_id num_args)
+    }
+    return void
+}
+
+let backend_emit_call_name = (name:int num_args:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_call_name(name num_args)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_call_name(name num_args)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_call_name(name num_args)
+    }
+    return void
+}
+
+let backend_emit_cond_jump = (label_id:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_cond_jump(label_id)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_cond_jump(label_id)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_cond_jump(label_id)
+    }
+    return void
+}
+
+let backend_emit_jump = (prefix:int label_id:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_jump(prefix label_id)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_jump(prefix label_id)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_jump(prefix label_id)
+    }
+    return void
+}
+
+let backend_emit_label_out = (prefix:int label_id:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_label_out(prefix label_id)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_label_out(prefix label_id)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_label_out(prefix label_id)
+    }
+    return void
+}
+
+let backend_emit_intrinsic = (name:int num_args:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_intrinsic(name num_args)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_intrinsic(name num_args)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_intrinsic(name num_args)
+    }
+    return void
+}
+
+let backend_emit_file_header = ():>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_file_header()
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_file_header()
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_file_header()
+    }
+    return void
+}
+
+let backend_emit_start = ():>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_start()
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_start()
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_start()
+    }
+    return void
+}
+
+let backend_emit_data_section = ():>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_data_section()
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_data_section()
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_data_section()
+    }
+    return void
+}
+
+let backend_emit_fn_label = (label_id:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_fn_label(label_id)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_fn_label(label_id)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_fn_label(label_id)
+    }
+    return void
+}
+
+let backend_emit_fn_label_name = (name:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_fn_label_name(name)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_fn_label_name(name)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_fn_label_name(name)
+    }
+    return void
+}
+
+let backend_emit_store_arg_to_local = (arg_idx:int offset:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        emit_store_arg_to_local(arg_idx offset)
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_store_arg_to_local(arg_idx offset)
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_store_arg_to_local(arg_idx offset)
+    }
+    return void
+}
+
+let backend_emit_load_fn_ref = (label_id:int):>void => {
+    if current_backend =? BACKEND_X86_64 {
+        text_str("    leaq .Lfn")
+        text_int(label_id)
+        text_line("(%rip), %rax")
+    } else if current_backend =? BACKEND_RISCV {
+        text_str("    la a0, .Lfn")
+        text_int(label_id)
+        text_char(CH_LF)
+    } else if current_backend =? BACKEND_ARM {
+        text_str("    adrp x0, .Lfn")
+        text_int(label_id)
+        text_char(CH_LF)
+        text_str("    add x0, x0, :lo12:.Lfn")
+        text_int(label_id)
+        text_char(CH_LF)
+    }
+    return void
+}
+
+let backend_emit_indexed_store = ():>void => {
+    # Expects address on stack, value in result register
+    # Stores value to address
+    if current_backend =? BACKEND_X86_64 {
+        emit_pop("%rcx")
+        text_line("    movq %rax, (%rcx)")
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_pop("t0")
+        text_line("    sd a0, 0(t0)")
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_pop("x1")
+        text_line("    str x0, [x1]")
+    }
+    return void
+}
+
+let backend_emit_index_calc = ():>void => {
+    # Calculate index * 8, expects index in result register
+    if current_backend =? BACKEND_X86_64 {
+        text_line("    shlq $3, %rax")
+    } else if current_backend =? BACKEND_RISCV {
+        text_line("    slli a0, a0, 3")
+    } else if current_backend =? BACKEND_ARM {
+        text_line("    lsl x0, x0, #3")
+    }
+    return void
+}
+
+let backend_emit_add_to_saved = ():>void => {
+    # Add result register to top of stack, result in result register
+    if current_backend =? BACKEND_X86_64 {
+        emit_pop("%rcx")
+        text_line("    addq %rcx, %rax")
+    } else if current_backend =? BACKEND_RISCV {
+        riscv_emit_pop("t0")
+        text_line("    add a0, a0, t0")
+    } else if current_backend =? BACKEND_ARM {
+        arm_emit_pop("x1")
+        text_line("    add x0, x0, x1")
+    }
+    return void
+}

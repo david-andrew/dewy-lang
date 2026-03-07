@@ -1,0 +1,125 @@
+# String utilities for the bootstrap compiler
+
+import p"prelude.udewy"
+import p"memory.udewy"
+
+# ============================================================================
+# String comparison
+# ============================================================================
+
+let str_eq_len = (s1:int len1:int s2:int len2:int):>int => {
+    if len1 not=? len2 { return FALSE }
+    let i:int = 0
+    loop i <? len1 {
+        let c1:int = __load8__(s1 + i)
+        let c2:int = __load8__(s2 + i)
+        if c1 not=? c2 { return FALSE }
+        i = i + 1
+    }
+    return TRUE
+}
+
+let str_eq = (s1:int s2:int):>int => {
+    let len1:int = __load64__(s1 - 8)
+    let len2:int = __load64__(s2 - 8)
+    return str_eq_len(s1 len1 s2 len2)
+}
+
+let str_match = (s:int start:int len:int target:int):>int => {
+    let target_len:int = __load64__(target - 8)
+    return str_eq_len(s + start len target target_len)
+}
+
+# ============================================================================
+# String prefix checking
+# ============================================================================
+
+let str_prefix = (s:int pos:int target:int):>int => {
+    let target_len:int = __load64__(target - 8)
+    let i:int = 0
+    loop i <? target_len {
+        let c1:int = __load8__(s + pos + i)
+        let c2:int = __load8__(target + i)
+        if c1 not=? c2 { return FALSE }
+        i = i + 1
+    }
+    return TRUE
+}
+
+# ============================================================================
+# String length of null-terminated strings
+# ============================================================================
+
+let str_len_cstr = (s:int):>int => {
+    let len:int = 0
+    loop __load8__(s + len) not=? 0 {
+        len = len + 1
+    }
+    return len
+}
+
+# ============================================================================
+# Integer to string conversion
+# ============================================================================
+
+let int_to_str = (n:int buf:int):>int => {
+    let neg:int = FALSE
+    if n <? 0 {
+        neg = TRUE
+        n = 0 - n
+    }
+    let tmp = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+    let len:int = 0
+    if n =? 0 {
+        __store8__(CH_0 tmp)
+        len = 1
+    } else {
+        loop n >? 0 {
+            let digit:int = n % 10
+            __store8__(CH_0 + digit tmp + len)
+            len = len + 1
+            n = n // 10
+        }
+    }
+    let pos:int = 0
+    if neg {
+        __store8__(CH_MINUS buf)
+        pos = 1
+    }
+    let i:int = len - 1
+    loop i >=? 0 {
+        __store8__(__load8__(tmp + i) buf + pos)
+        pos = pos + 1
+        i = i - 1
+    }
+    return pos
+}
+
+# ============================================================================
+# Hex to string conversion
+# ============================================================================
+
+let int_to_hex = (n:int buf:int):>int => {
+    let digits:int = "0123456789abcdef"
+    let tmp = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+    let len:int = 0
+    if n =? 0 {
+        __store8__(CH_0 tmp)
+        len = 1
+    } else {
+        loop n >? 0 {
+            let digit:int = n and 15
+            __store8__(__load8__(digits + digit) tmp + len)
+            len = len + 1
+            n = n >> 4
+        }
+    }
+    let pos:int = 0
+    let i:int = len - 1
+    loop i >=? 0 {
+        __store8__(__load8__(tmp + i) buf + pos)
+        pos = pos + 1
+        i = i - 1
+    }
+    return pos
+}

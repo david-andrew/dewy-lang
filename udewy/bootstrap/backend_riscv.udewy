@@ -1,0 +1,415 @@
+# RISC-V 64-bit backend for the bootstrap compiler
+# Generates GNU assembly for RISC-V Linux
+
+import p"prelude.udewy"
+import p"output.udewy"
+import p"symbols.udewy"
+
+# ============================================================================
+# RISC-V code generation helpers
+# ============================================================================
+
+let riscv_emit_prologue = (frame_size:int):>void => {
+    let total:int = frame_size + 32
+    total = (total + 15) and -16
+    text_str("    addi sp, sp, -")
+    text_int(total)
+    text_char(CH_LF)
+    text_str("    sd ra, ")
+    text_int(total - 8)
+    text_line("(sp)")
+    text_str("    sd s0, ")
+    text_int(total - 16)
+    text_line("(sp)")
+    text_str("    addi s0, sp, ")
+    text_int(total)
+    text_char(CH_LF)
+    return void
+}
+
+let riscv_emit_epilogue = (frame_size:int):>void => {
+    let total:int = frame_size + 32
+    total = (total + 15) and -16
+    text_str("    ld ra, ")
+    text_int(total - 8)
+    text_line("(sp)")
+    text_str("    ld s0, ")
+    text_int(total - 16)
+    text_line("(sp)")
+    text_str("    addi sp, sp, ")
+    text_int(total)
+    text_char(CH_LF)
+    text_line("    ret")
+    return void
+}
+
+let riscv_emit_push = ():>void => {
+    text_line("    addi sp, sp, -8")
+    text_line("    sd a0, 0(sp)")
+    return void
+}
+
+let riscv_emit_pop = (reg:int):>void => {
+    text_str("    ld ")
+    text_str(reg)
+    text_line(", 0(sp)")
+    text_line("    addi sp, sp, 8")
+    return void
+}
+
+let riscv_emit_mov_imm = (val:int):>void => {
+    text_str("    li a0, ")
+    text_int(val)
+    text_char(CH_LF)
+    return void
+}
+
+let riscv_emit_load_global = (label_id:int):>void => {
+    text_str("    la t0, .Lglobal")
+    text_int(label_id)
+    text_char(CH_LF)
+    text_line("    ld a0, 0(t0)")
+    return void
+}
+
+let riscv_emit_store_global = (label_id:int):>void => {
+    text_str("    la t0, .Lglobal")
+    text_int(label_id)
+    text_char(CH_LF)
+    text_line("    sd a0, 0(t0)")
+    return void
+}
+
+let riscv_emit_load_local = (offset:int):>void => {
+    text_str("    ld a0, ")
+    text_int(offset)
+    text_line("(s0)")
+    return void
+}
+
+let riscv_emit_store_local = (offset:int):>void => {
+    text_str("    sd a0, ")
+    text_int(offset)
+    text_line("(s0)")
+    return void
+}
+
+let riscv_emit_load_string = (label_id:int):>void => {
+    text_str("    la a0, .Lstr")
+    text_int(label_id)
+    text_char(CH_LF)
+    text_line("    addi a0, a0, 8")
+    return void
+}
+
+let riscv_emit_load_array = (label_id:int):>void => {
+    text_str("    la a0, .Larr")
+    text_int(label_id)
+    text_char(CH_LF)
+    text_line("    addi a0, a0, 8")
+    return void
+}
+
+# ============================================================================
+# Binary operation emission
+# ============================================================================
+
+let riscv_emit_binop = (op:int):>void => {
+    riscv_emit_pop("t0")
+    
+    if op =? TK_PLUS {
+        text_line("    add a0, t0, a0")
+        return void
+    }
+    if op =? TK_MINUS {
+        text_line("    sub a0, t0, a0")
+        return void
+    }
+    if op =? TK_MUL {
+        text_line("    mul a0, t0, a0")
+        return void
+    }
+    if op =? TK_IDIV {
+        text_line("    div a0, t0, a0")
+        return void
+    }
+    if op =? TK_MOD {
+        text_line("    rem a0, t0, a0")
+        return void
+    }
+    if op =? TK_AND {
+        text_line("    and a0, t0, a0")
+        return void
+    }
+    if op =? TK_OR {
+        text_line("    or a0, t0, a0")
+        return void
+    }
+    if op =? TK_XOR {
+        text_line("    xor a0, t0, a0")
+        return void
+    }
+    if op =? TK_LEFT_SHIFT {
+        text_line("    sll a0, t0, a0")
+        return void
+    }
+    if op =? TK_RIGHT_SHIFT {
+        text_line("    sra a0, t0, a0")
+        return void
+    }
+    if op =? TK_EQ {
+        text_line("    sub a0, t0, a0")
+        text_line("    seqz a0, a0")
+        text_line("    neg a0, a0")
+        return void
+    }
+    if op =? TK_NOT_EQ {
+        text_line("    sub a0, t0, a0")
+        text_line("    snez a0, a0")
+        text_line("    neg a0, a0")
+        return void
+    }
+    if op =? TK_GT {
+        text_line("    slt a0, a0, t0")
+        text_line("    neg a0, a0")
+        return void
+    }
+    if op =? TK_GT_EQ {
+        text_line("    slt a0, t0, a0")
+        text_line("    xori a0, a0, 1")
+        text_line("    neg a0, a0")
+        return void
+    }
+    if op =? TK_LT {
+        text_line("    slt a0, t0, a0")
+        text_line("    neg a0, a0")
+        return void
+    }
+    if op =? TK_LT_EQ {
+        text_line("    slt a0, a0, t0")
+        text_line("    xori a0, a0, 1")
+        text_line("    neg a0, a0")
+        return void
+    }
+    return void
+}
+
+# ============================================================================
+# Unary operation emission
+# ============================================================================
+
+let riscv_emit_unary = (op:int):>void => {
+    if op =? TK_MINUS {
+        text_line("    neg a0, a0")
+        return void
+    }
+    if op =? TK_NOT {
+        text_line("    not a0, a0")
+        return void
+    }
+    return void
+}
+
+# ============================================================================
+# Function call emission
+# ============================================================================
+
+let riscv_emit_call = (label_id:int num_args:int):>void => {
+    if num_args >=? 8 { riscv_emit_pop("a7") }
+    if num_args >=? 7 { riscv_emit_pop("a6") }
+    if num_args >=? 6 { riscv_emit_pop("a5") }
+    if num_args >=? 5 { riscv_emit_pop("a4") }
+    if num_args >=? 4 { riscv_emit_pop("a3") }
+    if num_args >=? 3 { riscv_emit_pop("a2") }
+    if num_args >=? 2 { riscv_emit_pop("a1") }
+    if num_args >=? 1 { riscv_emit_pop("a0") }
+    
+    text_str("    call .Lfn")
+    text_int(label_id)
+    text_char(CH_LF)
+    return void
+}
+
+let riscv_emit_call_name = (name:int num_args:int):>void => {
+    if num_args >=? 8 { riscv_emit_pop("a7") }
+    if num_args >=? 7 { riscv_emit_pop("a6") }
+    if num_args >=? 6 { riscv_emit_pop("a5") }
+    if num_args >=? 5 { riscv_emit_pop("a4") }
+    if num_args >=? 4 { riscv_emit_pop("a3") }
+    if num_args >=? 3 { riscv_emit_pop("a2") }
+    if num_args >=? 2 { riscv_emit_pop("a1") }
+    if num_args >=? 1 { riscv_emit_pop("a0") }
+    
+    text_str("    call ")
+    text_str(name)
+    text_char(CH_LF)
+    return void
+}
+
+# ============================================================================
+# Control flow emission
+# ============================================================================
+
+let riscv_emit_cond_jump = (label_id:int):>void => {
+    text_str("    beqz a0, .Lelse")
+    text_int(label_id)
+    text_char(CH_LF)
+    return void
+}
+
+let riscv_emit_jump = (prefix:int label_id:int):>void => {
+    text_str("    j ")
+    text_str(prefix)
+    text_int(label_id)
+    text_char(CH_LF)
+    return void
+}
+
+let riscv_emit_label_out = (prefix:int label_id:int):>void => {
+    text_str(prefix)
+    text_int(label_id)
+    text_line(":")
+    return void
+}
+
+# ============================================================================
+# Intrinsic emission
+# ============================================================================
+
+let riscv_emit_intrinsic = (name:int num_args:int):>void => {
+    # For syscalls: syscall number in a7, args in a0-a5
+    if str_prefix(name 0 "__syscall") {
+        text_line("    mv a7, a0")
+        if num_args >=? 2 { riscv_emit_pop("a0") }
+        if num_args >=? 3 { riscv_emit_pop("a1") }
+        if num_args >=? 4 { riscv_emit_pop("a2") }
+        if num_args >=? 5 { riscv_emit_pop("a3") }
+        if num_args >=? 6 { riscv_emit_pop("a4") }
+        if num_args >=? 7 { riscv_emit_pop("a5") }
+        # Reverse: pop in reverse order
+        if num_args >=? 7 { text_line("    mv t0, a5") }
+        if num_args >=? 6 { text_line("    mv t1, a4") }
+        if num_args >=? 5 { text_line("    mv t2, a3") }
+        if num_args >=? 4 { text_line("    mv t3, a2") }
+        if num_args >=? 3 { text_line("    mv t4, a1") }
+        if num_args >=? 2 { text_line("    mv t5, a0") }
+        # Now put in correct order
+        if num_args >=? 2 { text_line("    mv a0, t5") }
+        if num_args >=? 3 { text_line("    mv a1, t4") }
+        if num_args >=? 4 { text_line("    mv a2, t3") }
+        if num_args >=? 5 { text_line("    mv a3, t2") }
+        if num_args >=? 6 { text_line("    mv a4, t1") }
+        if num_args >=? 7 { text_line("    mv a5, t0") }
+        text_line("    ecall")
+        return void
+    }
+    
+    if str_eq(name "__load64__") {
+        text_line("    ld a0, 0(a0)")
+        return void
+    }
+    if str_eq(name "__store64__") {
+        riscv_emit_pop("t0")
+        text_line("    sd t0, 0(a0)")
+        return void
+    }
+    if str_eq(name "__load32__") {
+        text_line("    lw a0, 0(a0)")
+        return void
+    }
+    if str_eq(name "__store32__") {
+        riscv_emit_pop("t0")
+        text_line("    sw t0, 0(a0)")
+        return void
+    }
+    if str_eq(name "__load16__") {
+        text_line("    lhu a0, 0(a0)")
+        return void
+    }
+    if str_eq(name "__store16__") {
+        riscv_emit_pop("t0")
+        text_line("    sh t0, 0(a0)")
+        return void
+    }
+    if str_eq(name "__load8__") {
+        text_line("    lbu a0, 0(a0)")
+        return void
+    }
+    if str_eq(name "__store8__") {
+        riscv_emit_pop("t0")
+        text_line("    sb t0, 0(a0)")
+        return void
+    }
+    
+    return void
+}
+
+# ============================================================================
+# Module structure emission
+# ============================================================================
+
+let riscv_emit_file_header = ():>void => {
+    text_line(".text")
+    text_line(".globl _start")
+    text_char(CH_LF)
+    return void
+}
+
+let riscv_emit_start = ():>void => {
+    text_line("_start:")
+    text_line(".option push")
+    text_line(".option norelax")
+    text_line("    la gp, __global_pointer$")
+    text_line(".option pop")
+    text_line("    mv s0, zero")
+    text_line("    ld a0, 0(sp)")
+    text_line("    addi a1, sp, 8")
+    text_line("    andi sp, sp, -16")
+    text_line("    call __main__")
+    text_line("    li a7, 93")
+    text_line("    ecall")
+    text_char(CH_LF)
+    return void
+}
+
+let riscv_emit_data_section = ():>void => {
+    text_line(".data")
+    return void
+}
+
+# ============================================================================
+# Function emission
+# ============================================================================
+
+let riscv_emit_fn_label = (label_id:int):>void => {
+    text_str(".Lfn")
+    text_int(label_id)
+    text_line(":")
+    return void
+}
+
+let riscv_emit_fn_label_name = (name:int):>void => {
+    text_str(name)
+    text_line(":")
+    return void
+}
+
+# ============================================================================
+# Argument passing
+# ============================================================================
+
+let riscv_emit_load_arg = (arg_idx:int):>void => {
+    text_str("    mv a0, a")
+    text_int(arg_idx)
+    text_char(CH_LF)
+    return void
+}
+
+let riscv_emit_store_arg_to_local = (arg_idx:int offset:int):>void => {
+    text_str("    sd a")
+    text_int(arg_idx)
+    text_str(", ")
+    text_int(offset)
+    text_line("(s0)")
+    return void
+}

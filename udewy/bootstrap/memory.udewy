@@ -1,0 +1,79 @@
+# Memory management for the bootstrap compiler
+# Arena allocator and memory utilities
+
+import p"prelude.udewy"
+import p"syscalls.udewy"
+
+# ============================================================================
+# Memory size constants
+# ============================================================================
+
+const ARENA_SIZE:int = 0x1000000
+
+# ============================================================================
+# Arena allocator state
+# ============================================================================
+
+let arena_base:int = 0
+let arena_ptr:int = 0
+
+# ============================================================================
+# Arena allocator implementation
+# ============================================================================
+
+let arena_init = ():>void => {
+    arena_base = sys_mmap(0 ARENA_SIZE (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) (0-1) 0)
+    arena_ptr = arena_base
+    return void
+}
+
+let arena_alloc = (size:int):>int => {
+    let ptr:int = arena_ptr
+    arena_ptr = arena_ptr + size
+    return ptr
+}
+
+let arena_reset = ():>void => {
+    arena_ptr = arena_base
+    return void
+}
+
+# ============================================================================
+# Low-level memory operations
+# ============================================================================
+
+let mem_copy = (dst:int src:int len:int):>void => {
+    let i:int = 0
+    loop i <? len {
+        __store8__(__load8__(src + i) dst + i)
+        i = i + 1
+    }
+    return void
+}
+
+let mem_set = (dst:int val:int len:int):>void => {
+    let i:int = 0
+    loop i <? len {
+        __store8__(val dst + i)
+        i = i + 1
+    }
+    return void
+}
+
+let mem_zero = (dst:int len:int):>void => {
+    mem_set(dst 0 len)
+    return void
+}
+
+# ============================================================================
+# Pointer array helpers
+# ============================================================================
+
+let ptr_get = (arr:int idx:int):>int => {
+    return __load64__(arr + (idx << 3))
+}
+
+let ptr_set = (arr:int idx:int val:int):>void => {
+    __store64__(val arr + (idx << 3))
+    return void
+}

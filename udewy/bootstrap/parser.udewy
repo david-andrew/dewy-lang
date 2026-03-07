@@ -1,0 +1,1245 @@
+# Parser and code generator for the bootstrap compiler
+# Parses udewy source and emits code via the backend abstraction
+
+import p"prelude.udewy"
+import p"memory.udewy"
+import p"strings.udewy"
+import p"output.udewy"
+import p"tokens.udewy"
+import p"symbols.udewy"
+import p"backend.udewy"
+
+# ============================================================================
+# Parser state
+# ============================================================================
+
+let cur_tok:int = 0
+let next_label:int = 0
+
+# Loop stack for break/continue
+const MAX_LOOP_DEPTH:int = 32
+let loop_stack:int = 0
+let loop_depth:int = 0
+
+let parser_init = ():>void => {
+    loop_stack = arena_alloc(MAX_LOOP_DEPTH * 16)
+    loop_depth = 0
+    next_label = 0
+    return void
+}
+
+# ============================================================================
+# Helper functions
+# ============================================================================
+
+let alloc_label = ():>int => {
+    let id:int = next_label
+    next_label = next_label + 1
+    return id
+}
+
+let expect = (kind:int):>void => {
+    if tok_kind(cur_tok) not=? kind {
+        sys_write(STDERR "Parse error: unexpected token\n" 31)
+        sys_exit(1)
+    }
+    cur_tok = cur_tok + 1
+    return void
+}
+
+# ============================================================================
+# Precedence handling
+# ============================================================================
+
+const PREC_OR:int = 1
+const PREC_XOR:int = 2
+const PREC_AND:int = 3
+const PREC_EQ:int = 4
+const PREC_CMP:int = 5
+const PREC_SHIFT:int = 6
+const PREC_ADD:int = 7
+const PREC_MUL:int = 8
+
+let get_prec = (kind:int):>int => {
+    if kind =? TK_OR { return PREC_OR }
+    if kind =? TK_XOR { return PREC_XOR }
+    if kind =? TK_AND { return PREC_AND }
+    if (kind =? TK_EQ) or (kind =? TK_NOT_EQ) { return PREC_EQ }
+    if (kind =? TK_GT) or (kind =? TK_GT_EQ) or (kind =? TK_LT) or (kind =? TK_LT_EQ) { return PREC_CMP }
+    if (kind =? TK_LEFT_SHIFT) or (kind =? TK_RIGHT_SHIFT) { return PREC_SHIFT }
+    if (kind =? TK_PLUS) or (kind =? TK_MINUS) { return PREC_ADD }
+    if (kind =? TK_MUL) or (kind =? TK_IDIV) or (kind =? TK_MOD) { return PREC_MUL }
+    return 0
+}
+
+let is_binop = (kind:int):>int => {
+    if get_prec(kind) >? 0 { return TRUE }
+    return FALSE
+}
+
+# ============================================================================
+# Intrinsic detection
+# ============================================================================
+
+let intrinsic_names = [
+    "__syscall0__"
+    "__syscall1__"
+    "__syscall2__"
+    "__syscall3__"
+    "__syscall4__"
+    "__syscall5__"
+    "__syscall6__"
+    "__load8__"
+    "__load16__"
+    "__load32__"
+    "__load64__"
+    "__store8__"
+    "__store16__"
+    "__store32__"
+    "__store64__"
+    0 0 0 0 0 0 0 0 0
+]
+
+let is_intrinsic = (start:int len:int):>int => {
+    let i:int = 0
+    loop ptr_get(intrinsic_names i) not=? 0 {
+        let name:int = ptr_get(intrinsic_names i)
+        if str_match(src_ptr start len name) {
+            return TRUE
+        }
+        i = i + 1
+    }
+    return FALSE
+}
+
+let get_intrinsic_name = (start:int len:int):>int => {
+    let i:int = 0
+    loop ptr_get(intrinsic_names i) not=? 0 {
+        let name:int = ptr_get(intrinsic_names i)
+        if str_match(src_ptr start len name) {
+            return name
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+# Forward declarations handled via function ordering
+
+# ============================================================================
+# Parse atom (leaf expression)
+# ============================================================================
+
+let parse_atom_impl = ():>void => {
+    let kind:int = tok_kind(cur_tok)
+    
+    # Numbers
+    if kind =? TK_NUMBER {
+        let val:int = tok_value(cur_tok)
+        backend_emit_mov_imm(val)
+        cur_tok = cur_tok + 1
+        return void
+    }
+    
+    # Void
+    if kind =? TK_VOID {
+        backend_emit_mov_imm(0)
+        cur_tok = cur_tok + 1
+        return void
+    }
+    
+    # Strings
+    if kind =? TK_STRING {
+        let start:int = tok_loc(cur_tok)
+        let len:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        let label_id:int = alloc_label()
+        
+        data_label(".Lstr" label_id)
+        
+        # Calculate actual string length (accounting for escapes)
+        let slen:int = 0
+        let si:int = start + 1
+        let send:int = start + len - 1
+        loop si <? send {
+            let c:int = __load8__(src_ptr + si)
+            if c =? CH_BACKSLASH {
+                si = si + 1
+                c = __load8__(src_ptr + si)
+                if c =? CH_LF {
+                    si = si + 1
+                    continue
+                }
+            }
+            slen = slen + 1
+            si = si + 1
+        }
+        
+        # Emit length quad
+        data_str("    .quad ")
+        data_int(slen)
+        data_char(CH_LF)
+        
+        # Emit bytes
+        data_str("    .byte ")
+        si = start + 1
+        let first:int = TRUE
+        loop si <? send {
+            let c:int = __load8__(src_ptr + si)
+            if c =? CH_BACKSLASH {
+                si = si + 1
+                let ec:int = __load8__(src_ptr + si)
+                if ec =? CH_LF {
+                    si = si + 1
+                    continue
+                }
+                c = escape_char(ec)
+            }
+            if not first {
+                data_str(", ")
+            }
+            first = FALSE
+            data_int(c)
+            si = si + 1
+        }
+        data_str(", 0\n")
+        
+        backend_emit_load_string(label_id)
+        return void
+    }
+    
+    # Array literals
+    if kind =? TK_LEFT_BRACKET {
+        cur_tok = cur_tok + 1
+        
+        let label_id:int = alloc_label()
+        let elem_count:int = 0
+        
+        data_label(".Larr" label_id)
+        data_str("    .quad 0\n")
+        
+        loop tok_kind(cur_tok) not=? TK_RIGHT_BRACKET {
+            let k:int = tok_kind(cur_tok)
+            if k =? TK_NUMBER {
+                data_str("    .quad ")
+                data_int(tok_value(cur_tok))
+                data_char(CH_LF)
+                cur_tok = cur_tok + 1
+            } else if k =? TK_STRING {
+                # Handle string in array - emit string and store pointer
+                let sstart:int = tok_loc(cur_tok)
+                let slen:int = tok_value(cur_tok)
+                cur_tok = cur_tok + 1
+                
+                let str_label:int = alloc_label()
+                data_label(".Lstr" str_label)
+                
+                let actual_len:int = 0
+                let ssi:int = sstart + 1
+                let ssend:int = sstart + slen - 1
+                loop ssi <? ssend {
+                    let sc:int = __load8__(src_ptr + ssi)
+                    if sc =? CH_BACKSLASH {
+                        ssi = ssi + 1
+                    }
+                    actual_len = actual_len + 1
+                    ssi = ssi + 1
+                }
+                
+                data_str("    .quad ")
+                data_int(actual_len)
+                data_char(CH_LF)
+                data_str("    .byte ")
+                ssi = sstart + 1
+                let sfirst:int = TRUE
+                loop ssi <? ssend {
+                    let sc:int = __load8__(src_ptr + ssi)
+                    if sc =? CH_BACKSLASH {
+                        ssi = ssi + 1
+                        sc = escape_char(__load8__(src_ptr + ssi))
+                    }
+                    if not sfirst { data_str(", ") }
+                    sfirst = FALSE
+                    data_int(sc)
+                    ssi = ssi + 1
+                }
+                data_str(", 0\n")
+            } else if k =? TK_IDENT {
+                # Handle identifier - could be const or function name
+                let istart:int = tok_loc(cur_tok)
+                let ilen:int = tok_value(cur_tok)
+                cur_tok = cur_tok + 1
+                
+                # Check if it's a const
+                let ci:int = const_lookup(istart ilen)
+                if ci >=? 0 {
+                    data_str("    .quad ")
+                    data_int(const_get_value(ci))
+                    data_char(CH_LF)
+                } else {
+                    # Check if it's a function
+                    let fi:int = fn_lookup(istart ilen)
+                    if fi >=? 0 {
+                        data_str("    .quad .Lfn")
+                        data_int(fn_get_label(fi))
+                        data_char(CH_LF)
+                    } else {
+                        # Unknown identifier - emit 0
+                        data_str("    .quad 0\n")
+                    }
+                }
+            } else {
+                # Unknown token type - emit 0 and skip
+                data_str("    .quad 0\n")
+                cur_tok = cur_tok + 1
+            }
+            elem_count = elem_count + 1
+        }
+        expect(TK_RIGHT_BRACKET)
+        
+        backend_emit_load_array(label_id)
+        return void
+    }
+    
+    # Address-of operator
+    if kind =? TK_EXPR_CALL {
+        cur_tok = cur_tok + 1
+        
+        let name_start:int = tok_loc(cur_tok)
+        let name_len:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        expect(TK_LEFT_BRACKET)
+        
+        # First get base address
+        let off:int = var_lookup(name_start name_len)
+        if off not=? -99999 {
+            backend_emit_load_local(off)
+        } else {
+            let gi:int = glob_lookup(name_start name_len)
+            if gi >=? 0 {
+                backend_emit_load_global(glob_get_label(gi))
+            }
+        }
+        
+        backend_emit_push()
+        parse_expr_impl(0)
+        expect(TK_RIGHT_BRACKET)
+        
+        # Calculate address: base + (index * 8)
+        # Stack has: base, rax has index
+        backend_emit_index_calc()      # rax = index * 8
+        backend_emit_add_to_saved()    # rax = base + rax
+        
+        return void
+    }
+    
+    # Parenthesized expression
+    if kind =? TK_LEFT_PAREN {
+        cur_tok = cur_tok + 1
+        parse_expr_impl(0)
+        expect(TK_RIGHT_PAREN)
+        return void
+    }
+    
+    # Function call
+    if kind =? TK_IDENT_CALL {
+        let start:int = tok_loc(cur_tok)
+        let len:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        let nargs:int = 0
+        loop tok_kind(cur_tok) not=? TK_RIGHT_PAREN {
+            parse_expr_impl(0)
+            backend_emit_push()
+            nargs = nargs + 1
+        }
+        expect(TK_RIGHT_PAREN)
+        
+        # Check for intrinsic
+        if is_intrinsic(start len) {
+            let iname:int = get_intrinsic_name(start len)
+            backend_emit_intrinsic(iname nargs)
+        } else {
+            # Check for const first
+            let ci:int = const_lookup(start len)
+            if ci >=? 0 {
+                backend_emit_mov_imm(const_get_value(ci))
+                return void
+            }
+            
+            # Regular function call
+            let fi:int = fn_lookup(start len)
+            if fi <? 0 {
+                let label_id:int = alloc_label()
+                fi = fn_add(start len label_id nargs FALSE)
+            }
+            backend_emit_call(fn_get_label(fi) nargs)
+        }
+        return void
+    }
+    
+    # Identifier
+    if kind =? TK_IDENT {
+        let start:int = tok_loc(cur_tok)
+        let len:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        # Check constants first
+        let ci:int = const_lookup(start len)
+        if ci >=? 0 {
+            backend_emit_mov_imm(const_get_value(ci))
+            return void
+        }
+        
+        # Check local variables
+        let off:int = var_lookup(start len)
+        if off not=? -99999 {
+            backend_emit_load_local(off)
+            return void
+        }
+        
+        # Check global variables
+        let gi:int = glob_lookup(start len)
+        if gi >=? 0 {
+            backend_emit_load_global(glob_get_label(gi))
+            return void
+        }
+        
+        # Check functions (for function references)
+        let fi:int = fn_lookup(start len)
+        if fi >=? 0 {
+            backend_emit_load_fn_ref(fn_get_label(fi))
+            return void
+        }
+        
+        # Unknown identifier - assume forward function reference
+        let label_id:int = alloc_label()
+        fn_add(start len label_id 0 FALSE)
+        backend_emit_load_fn_ref(label_id)
+        return void
+    }
+    
+    return void
+}
+
+# ============================================================================
+# Parse prefix (unary) operators
+# ============================================================================
+
+let parse_prefix_impl = ():>void => {
+    let kind:int = tok_kind(cur_tok)
+    
+    if kind =? TK_MINUS {
+        cur_tok = cur_tok + 1
+        # Check if next token is a number for negative literals
+        if tok_kind(cur_tok) =? TK_NUMBER {
+            let val:int = tok_value(cur_tok)
+            backend_emit_mov_imm(0 - val)
+            cur_tok = cur_tok + 1
+            return void
+        }
+        parse_prefix_impl()
+        backend_emit_unary(TK_MINUS)
+        return void
+    }
+    
+    if kind =? TK_NOT {
+        cur_tok = cur_tok + 1
+        parse_prefix_impl()
+        backend_emit_unary(TK_NOT)
+        return void
+    }
+    
+    parse_atom_impl()
+    return void
+}
+
+# ============================================================================
+# Parse expression with precedence
+# ============================================================================
+
+let parse_expr_impl = (min_prec:int):>void => {
+    parse_prefix_impl()
+    
+    loop TRUE {
+        let kind:int = tok_kind(cur_tok)
+        
+        if not is_binop(kind) {
+            break
+        }
+        
+        let prec:int = get_prec(kind)
+        if prec <? min_prec {
+            break
+        }
+        
+        cur_tok = cur_tok + 1
+        backend_emit_push()
+        parse_expr_impl(prec + 1)
+        backend_emit_binop(kind)
+    }
+    
+    # Handle pipe operator
+    if tok_kind(cur_tok) =? TK_PIPE {
+        cur_tok = cur_tok + 1
+        backend_emit_push()
+        
+        let start:int = tok_loc(cur_tok)
+        let len:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        # Parse additional args if present
+        let nargs:int = 1
+        loop tok_kind(cur_tok) not=? TK_RIGHT_PAREN {
+            parse_expr_impl(0)
+            backend_emit_push()
+            nargs = nargs + 1
+        }
+        expect(TK_RIGHT_PAREN)
+        
+        if is_intrinsic(start len) {
+            let iname:int = get_intrinsic_name(start len)
+            backend_emit_intrinsic(iname nargs)
+        } else {
+            let fi:int = fn_lookup(start len)
+            if fi <? 0 {
+                let label_id:int = alloc_label()
+                fi = fn_add(start len label_id nargs FALSE)
+            }
+            backend_emit_call(fn_get_label(fi) nargs)
+        }
+    }
+    
+    return void
+}
+
+# ============================================================================
+# Skip type annotations
+# ============================================================================
+
+let skip_type_annot = ():>void => {
+    if tok_kind(cur_tok) =? TK_COLON {
+        cur_tok = cur_tok + 1
+        # Skip array type [N]T
+        if tok_kind(cur_tok) =? TK_LEFT_BRACKET {
+            cur_tok = cur_tok + 1
+            if tok_kind(cur_tok) =? TK_NUMBER {
+                cur_tok = cur_tok + 1
+            }
+            expect(TK_RIGHT_BRACKET)
+        }
+        # Skip type name
+        if tok_kind(cur_tok) =? TK_IDENT {
+            cur_tok = cur_tok + 1
+        }
+    }
+    return void
+}
+
+let skip_fn_type = ():>void => {
+    if tok_kind(cur_tok) =? TK_FN_COLON {
+        cur_tok = cur_tok + 1
+        # Skip return type (can be TK_IDENT like "int" or TK_VOID)
+        if tok_kind(cur_tok) =? TK_IDENT {
+            cur_tok = cur_tok + 1
+        } else if tok_kind(cur_tok) =? TK_VOID {
+            cur_tok = cur_tok + 1
+        }
+    }
+    return void
+}
+
+# ============================================================================
+# Parse variable declaration
+# ============================================================================
+
+let parse_var_decl = ():>void => {
+    expect(TK_LET)
+    
+    let name_start:int = tok_loc(cur_tok)
+    let name_len:int = tok_value(cur_tok)
+    cur_tok = cur_tok + 1
+    
+    skip_type_annot()
+    expect(TK_ASSIGN)
+    
+    parse_expr_impl(0)
+    
+    let off:int = stack_alloc(8)
+    var_add(name_start name_len off)
+    backend_emit_store_local(off)
+    
+    return void
+}
+
+# ============================================================================
+# Parse function declaration
+# ============================================================================
+
+let parse_fn_decl = ():>void => {
+    expect(TK_LET)
+    
+    let name_start:int = tok_loc(cur_tok)
+    let name_len:int = tok_value(cur_tok)
+    cur_tok = cur_tok + 1
+    
+    skip_type_annot()
+    expect(TK_ASSIGN)
+    expect(TK_LEFT_PAREN)
+    
+    # Collect parameter info
+    let params = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+    let nparams:int = 0
+    
+    loop tok_kind(cur_tok) not=? TK_RIGHT_PAREN {
+        let pstart:int = tok_loc(cur_tok)
+        let plen:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        ptr_set(params nparams * 2 pstart)
+        ptr_set(params nparams * 2 + 1 plen)
+        nparams = nparams + 1
+        
+        skip_type_annot()
+    }
+    expect(TK_RIGHT_PAREN)
+    skip_fn_type()
+    expect(TK_FN_ARROW)
+    expect(TK_LEFT_BRACE)
+    
+    # Register function
+    let label_id:int = 0
+    let fi:int = fn_lookup(name_start name_len)
+    if fi >=? 0 {
+        label_id = fn_get_label(fi)
+        fn_set_defined(fi nparams)
+    } else {
+        label_id = alloc_label()
+        fn_add(name_start name_len label_id nparams TRUE)
+    }
+    
+    # Check if this is main
+    let is_main:int = str_match(src_ptr name_start name_len "main")
+    
+    # Emit function label
+    if is_main {
+        backend_emit_fn_label_name("__main__")
+    } else {
+        backend_emit_fn_label(label_id)
+    }
+    
+    # Set up new scope
+    scope_push()
+    stack_reset()
+    
+    # Reserve space for parameters as locals
+    let pi:int = 0
+    loop pi <? nparams {
+        let pstart:int = ptr_get(params pi * 2)
+        let plen:int = ptr_get(params pi * 2 + 1)
+        let off:int = stack_alloc(8)
+        var_add(pstart plen off)
+        pi = pi + 1
+    }
+    
+    # Placeholder for frame size (will emit actual prologue after parsing body)
+    let body_start:int = text_ptr
+    
+    # Parse function body
+    loop tok_kind(cur_tok) not=? TK_RIGHT_BRACE {
+        parse_statement_impl()
+    }
+    expect(TK_RIGHT_BRACE)
+    
+    let frame_size:int = stack_get_max()
+    frame_size = (frame_size + 15) and -16
+    
+    scope_pop()
+    
+    # We need to emit the prologue before the body
+    # This is tricky in a single-pass compiler, so we use a large enough frame
+    # For now, emit prologue inline with calculated frame size
+    # Actually, we need to re-architect this...
+    
+    # For bootstrap simplicity, emit prologue/epilogue with fixed large frame
+    # In practice, 1024 bytes is enough for most functions
+    
+    return void
+}
+
+# ============================================================================
+# Parse if statement
+# ============================================================================
+
+let parse_if = ():>void => {
+    expect(TK_IF)
+    
+    let else_label:int = alloc_label()
+    let end_label:int = alloc_label()
+    
+    parse_expr_impl(0)
+    backend_emit_cond_jump(else_label)
+    
+    expect(TK_LEFT_BRACE)
+    scope_push()
+    loop tok_kind(cur_tok) not=? TK_RIGHT_BRACE {
+        parse_statement_impl()
+    }
+    expect(TK_RIGHT_BRACE)
+    scope_pop()
+    
+    if tok_kind(cur_tok) =? TK_ELSE {
+        cur_tok = cur_tok + 1
+        backend_emit_jump(".Lend" end_label)
+        backend_emit_label_out(".Lelse" else_label)
+        
+        if tok_kind(cur_tok) =? TK_IF {
+            parse_if()
+        } else {
+            expect(TK_LEFT_BRACE)
+            scope_push()
+            loop tok_kind(cur_tok) not=? TK_RIGHT_BRACE {
+                parse_statement_impl()
+            }
+            expect(TK_RIGHT_BRACE)
+            scope_pop()
+        }
+        backend_emit_label_out(".Lend" end_label)
+    } else {
+        backend_emit_label_out(".Lelse" else_label)
+    }
+    
+    return void
+}
+
+# ============================================================================
+# Parse loop statement
+# ============================================================================
+
+let parse_loop = ():>void => {
+    expect(TK_LOOP)
+    
+    let start_label:int = alloc_label()
+    let end_label:int = alloc_label()
+    
+    # Push loop labels onto stack
+    __store64__(start_label loop_stack + (loop_depth * 16))
+    __store64__(end_label loop_stack + (loop_depth * 16) + 8)
+    loop_depth = loop_depth + 1
+    
+    backend_emit_label_out(".Lloop" start_label)
+    
+    # Parse condition
+    parse_expr_impl(0)
+    backend_emit_cond_jump(end_label)
+    
+    expect(TK_LEFT_BRACE)
+    scope_push()
+    loop tok_kind(cur_tok) not=? TK_RIGHT_BRACE {
+        parse_statement_impl()
+    }
+    expect(TK_RIGHT_BRACE)
+    scope_pop()
+    
+    backend_emit_jump(".Lloop" start_label)
+    backend_emit_label_out(".Lend" end_label)
+    
+    loop_depth = loop_depth - 1
+    return void
+}
+
+# ============================================================================
+# Parse return statement
+# ============================================================================
+
+let parse_return = ():>void => {
+    expect(TK_RETURN)
+    
+    if tok_kind(cur_tok) =? TK_VOID {
+        backend_emit_mov_imm(0)
+        cur_tok = cur_tok + 1
+    } else {
+        parse_expr_impl(0)
+    }
+    
+    # Emit epilogue inline for simplicity
+    emit_epilogue()
+    return void
+}
+
+# ============================================================================
+# Parse break statement
+# ============================================================================
+
+let parse_break = ():>void => {
+    expect(TK_BREAK)
+    let end_label:int = __load64__(loop_stack + ((loop_depth - 1) * 16) + 8)
+    backend_emit_jump(".Lend" end_label)
+    return void
+}
+
+# ============================================================================
+# Parse continue statement
+# ============================================================================
+
+let parse_continue = ():>void => {
+    expect(TK_CONTINUE)
+    let start_label:int = __load64__(loop_stack + ((loop_depth - 1) * 16))
+    backend_emit_jump(".Lloop" start_label)
+    return void
+}
+
+# ============================================================================
+# Parse assignment or expression statement
+# ============================================================================
+
+let parse_assign_or_expr = ():>void => {
+    let kind:int = tok_kind(cur_tok)
+    
+    if kind =? TK_IDENT {
+        let start:int = tok_loc(cur_tok)
+        let len:int = tok_value(cur_tok)
+        
+        # Check if this is an assignment
+        let peek:int = cur_tok + 1
+        if tok_kind(peek) =? TK_ASSIGN {
+            cur_tok = cur_tok + 2
+            parse_expr_impl(0)
+            
+            let off:int = var_lookup(start len)
+            if off not=? -99999 {
+                backend_emit_store_local(off)
+            } else {
+                let gi:int = glob_lookup(start len)
+                if gi >=? 0 {
+                    backend_emit_store_global(glob_get_label(gi))
+                }
+            }
+            return void
+        }
+        
+        # Check for indexed assignment: x[i] = val
+        if tok_kind(peek) =? TK_LEFT_BRACKET {
+            cur_tok = cur_tok + 1
+            expect(TK_LEFT_BRACKET)
+            
+            # Get base address
+            let off:int = var_lookup(start len)
+            if off not=? -99999 {
+                backend_emit_load_local(off)
+            } else {
+                let gi:int = glob_lookup(start len)
+                if gi >=? 0 {
+                    backend_emit_load_global(glob_get_label(gi))
+                }
+            }
+            backend_emit_push()
+            
+            # Parse index
+            parse_expr_impl(0)
+            expect(TK_RIGHT_BRACKET)
+            
+            # Calculate address: base + (index * 8)
+            backend_emit_index_calc()
+            backend_emit_add_to_saved()
+            
+            if tok_kind(cur_tok) =? TK_ASSIGN {
+                cur_tok = cur_tok + 1
+                backend_emit_push()
+                parse_expr_impl(0)
+                backend_emit_indexed_store()
+            }
+            return void
+        }
+    }
+    
+    # Expression statement
+    parse_expr_impl(0)
+    return void
+}
+
+# ============================================================================
+# Parse statement
+# ============================================================================
+
+let parse_statement_impl = ():>void => {
+    let kind:int = tok_kind(cur_tok)
+    
+    if kind =? TK_LET {
+        # Check if function or variable declaration
+        if tok_kind(cur_tok + 2) =? TK_ASSIGN {
+            if tok_kind(cur_tok + 3) =? TK_LEFT_PAREN {
+                parse_fn_decl()
+                return void
+            }
+        }
+        parse_var_decl()
+        return void
+    }
+    
+    if kind =? TK_IF {
+        parse_if()
+        return void
+    }
+    
+    if kind =? TK_LOOP {
+        parse_loop()
+        return void
+    }
+    
+    if kind =? TK_RETURN {
+        parse_return()
+        return void
+    }
+    
+    if kind =? TK_BREAK {
+        parse_break()
+        return void
+    }
+    
+    if kind =? TK_CONTINUE {
+        parse_continue()
+        return void
+    }
+    
+    parse_assign_or_expr()
+    return void
+}
+
+# ============================================================================
+# Parse global variable/const declaration
+# ============================================================================
+
+let parse_global_var = ():>void => {
+    expect(TK_LET)
+    
+    let name_start:int = tok_loc(cur_tok)
+    let name_len:int = tok_value(cur_tok)
+    cur_tok = cur_tok + 1
+    
+    skip_type_annot()
+    expect(TK_ASSIGN)
+    
+    let kind:int = tok_kind(cur_tok)
+    
+    if kind =? TK_NUMBER {
+        let val:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        let label_id:int = alloc_label()
+        glob_add(name_start name_len label_id)
+        
+        data_label(".Lglobal" label_id)
+        data_str("    .quad ")
+        data_int(val)
+        data_char(CH_LF)
+        return void
+    }
+    
+    if kind =? TK_STRING {
+        let sstart:int = tok_loc(cur_tok)
+        let slen:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        
+        let label_id:int = alloc_label()
+        let str_label:int = alloc_label()
+        
+        glob_add(name_start name_len label_id)
+        
+        # Emit string data
+        data_label(".Lstr" str_label)
+        
+        let actual_len:int = 0
+        let si:int = sstart + 1
+        let send:int = sstart + slen - 1
+        loop si <? send {
+            let c:int = __load8__(src_ptr + si)
+            if c =? CH_BACKSLASH {
+                si = si + 1
+            }
+            actual_len = actual_len + 1
+            si = si + 1
+        }
+        
+        data_str("    .quad ")
+        data_int(actual_len)
+        data_char(CH_LF)
+        data_str("    .byte ")
+        si = sstart + 1
+        let first:int = TRUE
+        loop si <? send {
+            let c:int = __load8__(src_ptr + si)
+            if c =? CH_BACKSLASH {
+                si = si + 1
+                c = escape_char(__load8__(src_ptr + si))
+            }
+            if not first { data_str(", ") }
+            first = FALSE
+            data_int(c)
+            si = si + 1
+        }
+        data_str(", 0\n")
+        
+        data_label(".Lglobal" label_id)
+        data_str("    .quad .Lstr")
+        data_int(str_label)
+        data_str("+8\n")
+        return void
+    }
+    
+    if kind =? TK_LEFT_BRACKET {
+        cur_tok = cur_tok + 1
+        
+        let label_id:int = alloc_label()
+        let arr_label:int = alloc_label()
+        
+        glob_add(name_start name_len label_id)
+        
+        # Emit array data
+        data_label(".Larr" arr_label)
+        data_str("    .quad 0\n")
+        
+        loop tok_kind(cur_tok) not=? TK_RIGHT_BRACKET {
+            let k:int = tok_kind(cur_tok)
+            if k =? TK_NUMBER {
+                data_str("    .quad ")
+                data_int(tok_value(cur_tok))
+                data_char(CH_LF)
+                cur_tok = cur_tok + 1
+            } else if k =? TK_STRING {
+                # Handle string in array
+                let sstart:int = tok_loc(cur_tok)
+                let slen:int = tok_value(cur_tok)
+                cur_tok = cur_tok + 1
+                
+                let str_label:int = alloc_label()
+                data_label(".Lstr" str_label)
+                
+                let actual_len:int = 0
+                let ssi:int = sstart + 1
+                let ssend:int = sstart + slen - 1
+                loop ssi <? ssend {
+                    let sc:int = __load8__(src_ptr + ssi)
+                    if sc =? CH_BACKSLASH {
+                        ssi = ssi + 1
+                    }
+                    actual_len = actual_len + 1
+                    ssi = ssi + 1
+                }
+                
+                data_str("    .quad ")
+                data_int(actual_len)
+                data_char(CH_LF)
+                data_str("    .byte ")
+                ssi = sstart + 1
+                let sfirst:int = TRUE
+                loop ssi <? ssend {
+                    let sc:int = __load8__(src_ptr + ssi)
+                    if sc =? CH_BACKSLASH {
+                        ssi = ssi + 1
+                        sc = escape_char(__load8__(src_ptr + ssi))
+                    }
+                    if not sfirst { data_str(", ") }
+                    sfirst = FALSE
+                    data_int(sc)
+                    ssi = ssi + 1
+                }
+                data_str(", 0\n")
+                
+                data_str("    .quad .Lstr")
+                data_int(str_label)
+                data_str("+8\n")
+            } else if k =? TK_IDENT {
+                # Handle identifier - const or function
+                let istart:int = tok_loc(cur_tok)
+                let ilen:int = tok_value(cur_tok)
+                cur_tok = cur_tok + 1
+                
+                let ci:int = const_lookup(istart ilen)
+                if ci >=? 0 {
+                    data_str("    .quad ")
+                    data_int(const_get_value(ci))
+                    data_char(CH_LF)
+                } else {
+                    let fi:int = fn_lookup(istart ilen)
+                    if fi >=? 0 {
+                        data_str("    .quad .Lfn")
+                        data_int(fn_get_label(fi))
+                        data_char(CH_LF)
+                    } else {
+                        data_str("    .quad 0\n")
+                    }
+                }
+            } else {
+                data_str("    .quad 0\n")
+                cur_tok = cur_tok + 1
+            }
+        }
+        expect(TK_RIGHT_BRACKET)
+        
+        # Emit global variable pointing to array
+        data_label(".Lglobal" label_id)
+        data_str("    .quad .Larr")
+        data_int(arr_label)
+        data_str("+8\n")
+        return void
+    }
+    
+    return void
+}
+
+# ============================================================================
+# Parse const declaration
+# ============================================================================
+
+let parse_const = ():>void => {
+    expect(TK_CONST)
+    
+    let name_start:int = tok_loc(cur_tok)
+    let name_len:int = tok_value(cur_tok)
+    cur_tok = cur_tok + 1
+    
+    skip_type_annot()
+    expect(TK_ASSIGN)
+    
+    if tok_kind(cur_tok) =? TK_NUMBER {
+        let val:int = tok_value(cur_tok)
+        cur_tok = cur_tok + 1
+        const_add(name_start name_len val)
+    } else if tok_kind(cur_tok) =? TK_MINUS {
+        cur_tok = cur_tok + 1
+        if tok_kind(cur_tok) =? TK_NUMBER {
+            let val:int = 0 - tok_value(cur_tok)
+            cur_tok = cur_tok + 1
+            const_add(name_start name_len val)
+        }
+    }
+    
+    return void
+}
+
+# ============================================================================
+# Parse program
+# ============================================================================
+
+let parse_program = ():>void => {
+    cur_tok = 0
+    
+    # Emit header
+    backend_emit_file_header()
+    backend_emit_start()
+    
+    # Parse all declarations
+    loop tok_kind(cur_tok) not=? TK_EOF {
+        let kind:int = tok_kind(cur_tok)
+        
+        if kind =? TK_IMPORT {
+            # Skip imports for now (handled by preprocessing)
+            cur_tok = cur_tok + 1
+            cur_tok = cur_tok + 1
+            continue
+        }
+        
+        if kind =? TK_CONST {
+            parse_const()
+            continue
+        }
+        
+        if kind =? TK_LET {
+            # Check if function or variable
+            if tok_kind(cur_tok + 2) =? TK_ASSIGN {
+                if tok_kind(cur_tok + 3) =? TK_LEFT_PAREN {
+                    # Function declaration
+                    expect(TK_LET)
+                    
+                    let name_start:int = tok_loc(cur_tok)
+                    let name_len:int = tok_value(cur_tok)
+                    cur_tok = cur_tok + 1
+                    
+                    skip_type_annot()
+                    expect(TK_ASSIGN)
+                    expect(TK_LEFT_PAREN)
+                    
+                    # Collect parameters
+                    let nparams:int = 0
+                    let param_starts = [0 0 0 0 0 0 0 0]
+                    let param_lens = [0 0 0 0 0 0 0 0]
+                    
+                    loop tok_kind(cur_tok) not=? TK_RIGHT_PAREN {
+                        ptr_set(param_starts nparams tok_loc(cur_tok))
+                        ptr_set(param_lens nparams tok_value(cur_tok))
+                        cur_tok = cur_tok + 1
+                        nparams = nparams + 1
+                        skip_type_annot()
+                    }
+                    expect(TK_RIGHT_PAREN)
+                    skip_fn_type()
+                    expect(TK_FN_ARROW)
+                    expect(TK_LEFT_BRACE)
+                    
+                    # Register/lookup function
+                    let label_id:int = 0
+                    let fi:int = fn_lookup(name_start name_len)
+                    if fi >=? 0 {
+                        label_id = fn_get_label(fi)
+                        fn_set_defined(fi nparams)
+                    } else {
+                        label_id = alloc_label()
+                        fn_add(name_start name_len label_id nparams TRUE)
+                    }
+                    
+                    let is_main:int = str_match(src_ptr name_start name_len "main")
+                    
+                    if is_main {
+                        backend_emit_fn_label_name("__main__")
+                    } else {
+                        backend_emit_fn_label(label_id)
+                    }
+                    
+                    # Setup scope and stack
+                    scope_push()
+                    stack_reset()
+                    
+                    # Emit prologue with max frame size
+                    let frame_size:int = 1024
+                    backend_emit_prologue(frame_size)
+                    
+                    # Store parameters as locals
+                    let pi:int = 0
+                    loop pi <? nparams {
+                        let off:int = stack_alloc(8)
+                        var_add(ptr_get(param_starts pi) ptr_get(param_lens pi) off)
+                        backend_emit_store_arg_to_local(pi off)
+                        pi = pi + 1
+                    }
+                    
+                    # Parse body
+                    loop tok_kind(cur_tok) not=? TK_RIGHT_BRACE {
+                        parse_statement_impl()
+                    }
+                    expect(TK_RIGHT_BRACE)
+                    
+                    # Emit epilogue
+                    backend_emit_epilogue(frame_size)
+                    text_char(CH_LF)
+                    
+                    scope_pop()
+                    continue
+                }
+            }
+            parse_global_var()
+            continue
+        }
+        
+        # Unknown token - skip
+        cur_tok = cur_tok + 1
+    }
+    
+    # Emit data section
+    backend_emit_data_section()
+    data_flush()
+    
+    return void
+}

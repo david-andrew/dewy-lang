@@ -1,0 +1,423 @@
+# ARM64 (AArch64) backend for the bootstrap compiler
+# Generates GNU assembly for ARM64 Linux
+
+import p"prelude.udewy"
+import p"output.udewy"
+import p"symbols.udewy"
+
+# ============================================================================
+# ARM64 code generation helpers
+# ============================================================================
+
+let arm_emit_prologue = (frame_size:int):>void => {
+    let total:int = frame_size + 32
+    total = (total + 15) and -16
+    text_str("    sub sp, sp, #")
+    text_int(total)
+    text_char(CH_LF)
+    text_str("    stp x29, x30, [sp, #")
+    text_int(total - 16)
+    text_line("]")
+    text_str("    add x29, sp, #")
+    text_int(total - 16)
+    text_char(CH_LF)
+    return void
+}
+
+let arm_emit_epilogue = (frame_size:int):>void => {
+    let total:int = frame_size + 32
+    total = (total + 15) and -16
+    text_str("    ldp x29, x30, [sp, #")
+    text_int(total - 16)
+    text_line("]")
+    text_str("    add sp, sp, #")
+    text_int(total)
+    text_char(CH_LF)
+    text_line("    ret")
+    return void
+}
+
+let arm_emit_push = ():>void => {
+    text_line("    str x0, [sp, #-16]!")
+    return void
+}
+
+let arm_emit_pop = (reg:int):>void => {
+    text_str("    ldr ")
+    text_str(reg)
+    text_line(", [sp], #16")
+    return void
+}
+
+let arm_emit_mov_imm = (val:int):>void => {
+    if (val >=? -65536) and (val <=? 65535) {
+        text_str("    mov x0, #")
+        text_int(val)
+        text_char(CH_LF)
+    } else {
+        text_str("    ldr x0, =")
+        text_int(val)
+        text_char(CH_LF)
+    }
+    return void
+}
+
+let arm_emit_load_global = (label_id:int):>void => {
+    text_str("    adrp x1, .Lglobal")
+    text_int(label_id)
+    text_char(CH_LF)
+    text_str("    add x1, x1, :lo12:.Lglobal")
+    text_int(label_id)
+    text_char(CH_LF)
+    text_line("    ldr x0, [x1]")
+    return void
+}
+
+let arm_emit_store_global = (label_id:int):>void => {
+    text_str("    adrp x1, .Lglobal")
+    text_int(label_id)
+    text_char(CH_LF)
+    text_str("    add x1, x1, :lo12:.Lglobal")
+    text_int(label_id)
+    text_char(CH_LF)
+    text_line("    str x0, [x1]")
+    return void
+}
+
+let arm_emit_load_local = (offset:int):>void => {
+    text_str("    ldr x0, [x29, #")
+    text_int(offset)
+    text_line("]")
+    return void
+}
+
+let arm_emit_store_local = (offset:int):>void => {
+    text_str("    str x0, [x29, #")
+    text_int(offset)
+    text_line("]")
+    return void
+}
+
+let arm_emit_load_string = (label_id:int):>void => {
+    text_str("    adrp x0, .Lstr")
+    text_int(label_id)
+    text_char(CH_LF)
+    text_str("    add x0, x0, :lo12:.Lstr")
+    text_int(label_id)
+    text_char(CH_LF)
+    text_line("    add x0, x0, #8")
+    return void
+}
+
+let arm_emit_load_array = (label_id:int):>void => {
+    text_str("    adrp x0, .Larr")
+    text_int(label_id)
+    text_char(CH_LF)
+    text_str("    add x0, x0, :lo12:.Larr")
+    text_int(label_id)
+    text_char(CH_LF)
+    text_line("    add x0, x0, #8")
+    return void
+}
+
+# ============================================================================
+# Binary operation emission
+# ============================================================================
+
+let arm_emit_binop = (op:int):>void => {
+    arm_emit_pop("x1")
+    
+    if op =? TK_PLUS {
+        text_line("    add x0, x1, x0")
+        return void
+    }
+    if op =? TK_MINUS {
+        text_line("    sub x0, x1, x0")
+        return void
+    }
+    if op =? TK_MUL {
+        text_line("    mul x0, x1, x0")
+        return void
+    }
+    if op =? TK_IDIV {
+        text_line("    sdiv x0, x1, x0")
+        return void
+    }
+    if op =? TK_MOD {
+        text_line("    sdiv x2, x1, x0")
+        text_line("    msub x0, x2, x0, x1")
+        return void
+    }
+    if op =? TK_AND {
+        text_line("    and x0, x1, x0")
+        return void
+    }
+    if op =? TK_OR {
+        text_line("    orr x0, x1, x0")
+        return void
+    }
+    if op =? TK_XOR {
+        text_line("    eor x0, x1, x0")
+        return void
+    }
+    if op =? TK_LEFT_SHIFT {
+        text_line("    lsl x0, x1, x0")
+        return void
+    }
+    if op =? TK_RIGHT_SHIFT {
+        text_line("    asr x0, x1, x0")
+        return void
+    }
+    if op =? TK_EQ {
+        text_line("    cmp x1, x0")
+        text_line("    cset x0, eq")
+        text_line("    neg x0, x0")
+        return void
+    }
+    if op =? TK_NOT_EQ {
+        text_line("    cmp x1, x0")
+        text_line("    cset x0, ne")
+        text_line("    neg x0, x0")
+        return void
+    }
+    if op =? TK_GT {
+        text_line("    cmp x1, x0")
+        text_line("    cset x0, gt")
+        text_line("    neg x0, x0")
+        return void
+    }
+    if op =? TK_GT_EQ {
+        text_line("    cmp x1, x0")
+        text_line("    cset x0, ge")
+        text_line("    neg x0, x0")
+        return void
+    }
+    if op =? TK_LT {
+        text_line("    cmp x1, x0")
+        text_line("    cset x0, lt")
+        text_line("    neg x0, x0")
+        return void
+    }
+    if op =? TK_LT_EQ {
+        text_line("    cmp x1, x0")
+        text_line("    cset x0, le")
+        text_line("    neg x0, x0")
+        return void
+    }
+    return void
+}
+
+# ============================================================================
+# Unary operation emission
+# ============================================================================
+
+let arm_emit_unary = (op:int):>void => {
+    if op =? TK_MINUS {
+        text_line("    neg x0, x0")
+        return void
+    }
+    if op =? TK_NOT {
+        text_line("    mvn x0, x0")
+        return void
+    }
+    return void
+}
+
+# ============================================================================
+# Function call emission
+# ============================================================================
+
+let arm_emit_call = (label_id:int num_args:int):>void => {
+    if num_args >=? 8 { arm_emit_pop("x7") }
+    if num_args >=? 7 { arm_emit_pop("x6") }
+    if num_args >=? 6 { arm_emit_pop("x5") }
+    if num_args >=? 5 { arm_emit_pop("x4") }
+    if num_args >=? 4 { arm_emit_pop("x3") }
+    if num_args >=? 3 { arm_emit_pop("x2") }
+    if num_args >=? 2 { arm_emit_pop("x1") }
+    if num_args >=? 1 { arm_emit_pop("x0") }
+    
+    text_str("    bl .Lfn")
+    text_int(label_id)
+    text_char(CH_LF)
+    return void
+}
+
+let arm_emit_call_name = (name:int num_args:int):>void => {
+    if num_args >=? 8 { arm_emit_pop("x7") }
+    if num_args >=? 7 { arm_emit_pop("x6") }
+    if num_args >=? 6 { arm_emit_pop("x5") }
+    if num_args >=? 5 { arm_emit_pop("x4") }
+    if num_args >=? 4 { arm_emit_pop("x3") }
+    if num_args >=? 3 { arm_emit_pop("x2") }
+    if num_args >=? 2 { arm_emit_pop("x1") }
+    if num_args >=? 1 { arm_emit_pop("x0") }
+    
+    text_str("    bl ")
+    text_str(name)
+    text_char(CH_LF)
+    return void
+}
+
+# ============================================================================
+# Control flow emission
+# ============================================================================
+
+let arm_emit_cond_jump = (label_id:int):>void => {
+    text_line("    cbz x0, .Lelse")
+    text_int(label_id)
+    text_char(CH_LF)
+    return void
+}
+
+let arm_emit_jump = (prefix:int label_id:int):>void => {
+    text_str("    b ")
+    text_str(prefix)
+    text_int(label_id)
+    text_char(CH_LF)
+    return void
+}
+
+let arm_emit_label_out = (prefix:int label_id:int):>void => {
+    text_str(prefix)
+    text_int(label_id)
+    text_line(":")
+    return void
+}
+
+# ============================================================================
+# Intrinsic emission
+# ============================================================================
+
+let arm_emit_intrinsic = (name:int num_args:int):>void => {
+    if str_prefix(name 0 "__syscall") {
+        text_line("    mov x8, x0")
+        if num_args >=? 2 { arm_emit_pop("x0") }
+        if num_args >=? 3 { arm_emit_pop("x1") }
+        if num_args >=? 4 { arm_emit_pop("x2") }
+        if num_args >=? 5 { arm_emit_pop("x3") }
+        if num_args >=? 6 { arm_emit_pop("x4") }
+        if num_args >=? 7 { arm_emit_pop("x5") }
+        if num_args >=? 7 { text_line("    mov x9, x5") }
+        if num_args >=? 6 { text_line("    mov x10, x4") }
+        if num_args >=? 5 { text_line("    mov x11, x3") }
+        if num_args >=? 4 { text_line("    mov x12, x2") }
+        if num_args >=? 3 { text_line("    mov x13, x1") }
+        if num_args >=? 2 { text_line("    mov x14, x0") }
+        if num_args >=? 2 { text_line("    mov x0, x14") }
+        if num_args >=? 3 { text_line("    mov x1, x13") }
+        if num_args >=? 4 { text_line("    mov x2, x12") }
+        if num_args >=? 5 { text_line("    mov x3, x11") }
+        if num_args >=? 6 { text_line("    mov x4, x10") }
+        if num_args >=? 7 { text_line("    mov x5, x9") }
+        text_line("    svc #0")
+        return void
+    }
+    
+    if str_eq(name "__load64__") {
+        text_line("    ldr x0, [x0]")
+        return void
+    }
+    if str_eq(name "__store64__") {
+        arm_emit_pop("x1")
+        text_line("    str x1, [x0]")
+        return void
+    }
+    if str_eq(name "__load32__") {
+        text_line("    ldr w0, [x0]")
+        return void
+    }
+    if str_eq(name "__store32__") {
+        arm_emit_pop("x1")
+        text_line("    str w1, [x0]")
+        return void
+    }
+    if str_eq(name "__load16__") {
+        text_line("    ldrh w0, [x0]")
+        return void
+    }
+    if str_eq(name "__store16__") {
+        arm_emit_pop("x1")
+        text_line("    strh w1, [x0]")
+        return void
+    }
+    if str_eq(name "__load8__") {
+        text_line("    ldrb w0, [x0]")
+        return void
+    }
+    if str_eq(name "__store8__") {
+        arm_emit_pop("x1")
+        text_line("    strb w1, [x0]")
+        return void
+    }
+    
+    return void
+}
+
+# ============================================================================
+# Module structure emission
+# ============================================================================
+
+let arm_emit_file_header = ():>void => {
+    text_line(".text")
+    text_line(".globl _start")
+    text_char(CH_LF)
+    return void
+}
+
+let arm_emit_start = ():>void => {
+    text_line("_start:")
+    text_line("    mov x29, xzr")
+    text_line("    ldr x0, [sp]")
+    text_line("    add x1, sp, #8")
+    text_line("    mov x9, sp")
+    text_line("    bic x9, x9, #15")
+    text_line("    mov sp, x9")
+    text_line("    bl __main__")
+    text_line("    mov x8, #93")
+    text_line("    svc #0")
+    text_char(CH_LF)
+    return void
+}
+
+let arm_emit_data_section = ():>void => {
+    text_line(".data")
+    return void
+}
+
+# ============================================================================
+# Function emission
+# ============================================================================
+
+let arm_emit_fn_label = (label_id:int):>void => {
+    text_str(".Lfn")
+    text_int(label_id)
+    text_line(":")
+    return void
+}
+
+let arm_emit_fn_label_name = (name:int):>void => {
+    text_str(name)
+    text_line(":")
+    return void
+}
+
+# ============================================================================
+# Argument passing
+# ============================================================================
+
+let arm_emit_load_arg = (arg_idx:int):>void => {
+    text_str("    mov x0, x")
+    text_int(arg_idx)
+    text_char(CH_LF)
+    return void
+}
+
+let arm_emit_store_arg_to_local = (arg_idx:int offset:int):>void => {
+    text_str("    str x")
+    text_int(arg_idx)
+    text_str(", [x29, #")
+    text_int(offset)
+    text_line("]")
+    return void
+}

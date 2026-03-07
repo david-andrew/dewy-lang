@@ -1,0 +1,230 @@
+# udewy Bootstrap Compiler
+# A multi-backend self-hosting compiler written in udewy
+#
+# Usage: ./udewyc input.udewy [-o output.s] [--target x86_64|riscv|arm]
+
+import p"prelude.udewy"
+import p"syscalls.udewy"
+import p"memory.udewy"
+import p"strings.udewy"
+import p"output.udewy"
+import p"tokens.udewy"
+import p"symbols.udewy"
+import p"backend.udewy"
+import p"parser.udewy"
+
+# ============================================================================
+# File I/O helpers
+# ============================================================================
+
+let read_file = (path:int):>int => {
+    let fd:int = sys_open(path O_RDONLY 0)
+    if fd <? 0 {
+        sys_write(STDERR "Error: cannot open input file\n" 30)
+        sys_exit(1)
+    }
+    
+    let buf:int = arena_alloc(0x100000)
+    let n:int = sys_read(fd buf 0x100000)
+    sys_close(fd)
+    
+    return buf
+}
+
+let write_output = (path:int buf:int len:int):>void => {
+    let fd:int = sys_open(path (O_WRONLY or O_CREAT or O_TRUNC) 420)
+    if fd <? 0 {
+        sys_write(STDERR "Error: cannot create output file\n" 33)
+        sys_exit(1)
+    }
+    sys_write(fd buf len)
+    sys_close(fd)
+    return void
+}
+
+# ============================================================================
+# Path manipulation
+# ============================================================================
+
+let get_basename = (path:int):>int => {
+    let len:int = str_len_cstr(path)
+    let i:int = len - 1
+    loop i >=? 0 {
+        if __load8__(path + i) =? CH_SLASH {
+            return path + i + 1
+        }
+        i = i - 1
+    }
+    return path
+}
+
+let strip_extension = (path:int out:int):>int => {
+    let base:int = get_basename(path)
+    let len:int = str_len_cstr(base)
+    let dot:int = -1
+    let i:int = len - 1
+    loop i >=? 0 {
+        if __load8__(base + i) =? CH_DOT {
+            dot = i
+            break
+        }
+        i = i - 1
+    }
+    if dot <? 0 { dot = len }
+    mem_copy(out base dot)
+    __store8__(0 out + dot)
+    return dot
+}
+
+# ============================================================================
+# Command line parsing
+# ============================================================================
+
+let input_path:int = 0
+let output_path:int = 0
+let target_str:int = 0
+
+let parse_args = (argc:int argv:int):>void => {
+    let i:int = 1
+    loop i <? argc {
+        let arg:int = ptr_get(argv i)
+        
+        # Check for -o flag
+        if str_prefix(arg 0 "-o") {
+            i = i + 1
+            if i <? argc {
+                output_path = ptr_get(argv i)
+            }
+            i = i + 1
+            continue
+        }
+        
+        # Check for --target flag
+        if str_prefix(arg 0 "--target") {
+            i = i + 1
+            if i <? argc {
+                target_str = ptr_get(argv i)
+            }
+            i = i + 1
+            continue
+        }
+        
+        # Input file
+        if __load8__(arg) not=? CH_MINUS {
+            input_path = arg
+        }
+        
+        i = i + 1
+    }
+    return void
+}
+
+let select_backend = ():>void => {
+    if target_str =? 0 {
+        backend_set(BACKEND_X86_64)
+        return void
+    }
+    
+    if str_prefix(target_str 0 "x86") {
+        backend_set(BACKEND_X86_64)
+    } else if str_prefix(target_str 0 "riscv") {
+        backend_set(BACKEND_RISCV)
+    } else if str_prefix(target_str 0 "arm") {
+        backend_set(BACKEND_ARM)
+    } else if str_prefix(target_str 0 "aarch64") {
+        backend_set(BACKEND_ARM)
+    } else {
+        backend_set(BACKEND_X86_64)
+    }
+    return void
+}
+
+# ============================================================================
+# Import processing
+# ============================================================================
+
+let processed_imports = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+let num_imports:int = 0
+
+let is_imported = (path_start:int path_len:int):>int => {
+    let i:int = 0
+    loop i <? num_imports {
+        let entry:int = ptr_get(processed_imports i)
+        if entry not=? 0 {
+            if str_eq_len(src_ptr + path_start path_len entry str_len_cstr(entry)) {
+                return TRUE
+            }
+        }
+        i = i + 1
+    }
+    return FALSE
+}
+
+let mark_imported = (path_start:int path_len:int):>void => {
+    let copy:int = arena_alloc(path_len + 1)
+    mem_copy(copy src_ptr + path_start path_len)
+    __store8__(0 copy + path_len)
+    ptr_set(processed_imports num_imports copy)
+    num_imports = num_imports + 1
+    return void
+}
+
+# ============================================================================
+# Main entry point
+# ============================================================================
+
+let main = (argc:int argv:int):>int => {
+    # Initialize subsystems
+    arena_init()
+    text_init()
+    data_init()
+    tok_init()
+    fn_init()
+    glob_init()
+    const_init()
+    scope_init()
+    parser_init()
+    
+    # Parse command line
+    parse_args(argc argv)
+    
+    if input_path =? 0 {
+        sys_write(STDERR "Usage: udewyc input.udewy [-o output.s] [--target x86_64|riscv|arm]\n" 65)
+        return 1
+    }
+    
+    # Select backend
+    select_backend()
+    
+    # Read input file
+    let content:int = read_file(input_path)
+    src_ptr = content
+    src_len = str_len_cstr(content)
+    
+    # Tokenize
+    tokenize()
+    
+    # Set up output
+    if output_path =? 0 {
+        # Default output to stdout
+        text_fd = STDOUT
+    } else {
+        text_fd = sys_open(output_path (O_WRONLY or O_CREAT or O_TRUNC) 420)
+        if text_fd <? 0 {
+            sys_write(STDERR "Error: cannot create output file\n" 33)
+            return 1
+        }
+    }
+    
+    # Parse and generate code
+    parse_program()
+    
+    # Flush output
+    text_flush()
+    
+    if output_path not=? 0 {
+        sys_close(text_fd)
+    }
+    
+    return 0
+}

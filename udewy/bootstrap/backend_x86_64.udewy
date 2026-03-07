@@ -1,0 +1,460 @@
+# x86_64 backend for the bootstrap compiler
+# Generates GNU assembly for x86_64 Linux
+
+import p"prelude.udewy"
+import p"output.udewy"
+import p"symbols.udewy"
+
+# ============================================================================
+# x86_64 code generation helpers
+# ============================================================================
+
+let emit_prologue = (frame_size:int):>void => {
+    text_line("    pushq %rbp")
+    text_line("    movq %rsp, %rbp")
+    if frame_size >? 0 {
+        text_str("    subq $")
+        text_int(frame_size)
+        text_line(", %rsp")
+    }
+    text_line("    movq %rbx, -8(%rbp)")
+    text_line("    movq %r12, -16(%rbp)")
+    text_line("    movq %r13, -24(%rbp)")
+    text_line("    movq %r14, -32(%rbp)")
+    text_line("    movq %r15, -40(%rbp)")
+    return void
+}
+
+let emit_epilogue = ():>void => {
+    text_line("    movq -8(%rbp), %rbx")
+    text_line("    movq -16(%rbp), %r12")
+    text_line("    movq -24(%rbp), %r13")
+    text_line("    movq -32(%rbp), %r14")
+    text_line("    movq -40(%rbp), %r15")
+    text_line("    movq %rbp, %rsp")
+    text_line("    popq %rbp")
+    text_line("    ret")
+    return void
+}
+
+let emit_push = ():>void => {
+    text_line("    pushq %rax")
+    return void
+}
+
+let emit_pop = (reg:int):>void => {
+    text_str("    popq ")
+    text_str(reg)
+    text_char(CH_LF)
+    return void
+}
+
+let emit_mov_imm = (val:int):>void => {
+    text_str("    movq $")
+    text_int(val)
+    text_line(", %rax")
+    return void
+}
+
+let emit_load_global = (label_id:int):>void => {
+    text_str("    movq .Lglobal")
+    text_int(label_id)
+    text_line("(%rip), %rax")
+    return void
+}
+
+let emit_store_global = (label_id:int):>void => {
+    text_str("    movq %rax, .Lglobal")
+    text_int(label_id)
+    text_line("(%rip)")
+    return void
+}
+
+let emit_load_local = (offset:int):>void => {
+    text_str("    movq ")
+    text_int(offset)
+    text_line("(%rbp), %rax")
+    return void
+}
+
+let emit_store_local = (offset:int):>void => {
+    text_str("    movq %rax, ")
+    text_int(offset)
+    text_line("(%rbp)")
+    return void
+}
+
+let emit_load_string = (label_id:int):>void => {
+    text_str("    leaq .Lstr")
+    text_int(label_id)
+    text_line("+8(%rip), %rax")
+    return void
+}
+
+let emit_load_array = (label_id:int):>void => {
+    text_str("    leaq .Larr")
+    text_int(label_id)
+    text_line("+8(%rip), %rax")
+    return void
+}
+
+# ============================================================================
+# Binary operation emission
+# ============================================================================
+
+let emit_binop = (op:int):>void => {
+    emit_pop("%rcx")
+    
+    if op =? TK_PLUS {
+        text_line("    addq %rcx, %rax")
+        return void
+    }
+    if op =? TK_MINUS {
+        text_line("    subq %rax, %rcx")
+        text_line("    movq %rcx, %rax")
+        return void
+    }
+    if op =? TK_MUL {
+        text_line("    imulq %rcx, %rax")
+        return void
+    }
+    if op =? TK_IDIV {
+        text_line("    xchgq %rax, %rcx")
+        text_line("    cqo")
+        text_line("    idivq %rcx")
+        return void
+    }
+    if op =? TK_MOD {
+        text_line("    xchgq %rax, %rcx")
+        text_line("    cqo")
+        text_line("    idivq %rcx")
+        text_line("    movq %rdx, %rax")
+        return void
+    }
+    if op =? TK_AND {
+        text_line("    andq %rcx, %rax")
+        return void
+    }
+    if op =? TK_OR {
+        text_line("    orq %rcx, %rax")
+        return void
+    }
+    if op =? TK_XOR {
+        text_line("    xorq %rcx, %rax")
+        return void
+    }
+    if op =? TK_LEFT_SHIFT {
+        text_line("    xchgq %rax, %rcx")
+        text_line("    shlq %cl, %rax")
+        return void
+    }
+    if op =? TK_RIGHT_SHIFT {
+        text_line("    xchgq %rax, %rcx")
+        text_line("    sarq %cl, %rax")
+        return void
+    }
+    if op =? TK_EQ {
+        text_line("    cmpq %rax, %rcx")
+        text_line("    sete %al")
+        text_line("    movzbq %al, %rax")
+        text_line("    negq %rax")
+        return void
+    }
+    if op =? TK_NOT_EQ {
+        text_line("    cmpq %rax, %rcx")
+        text_line("    setne %al")
+        text_line("    movzbq %al, %rax")
+        text_line("    negq %rax")
+        return void
+    }
+    if op =? TK_GT {
+        text_line("    cmpq %rax, %rcx")
+        text_line("    setg %al")
+        text_line("    movzbq %al, %rax")
+        text_line("    negq %rax")
+        return void
+    }
+    if op =? TK_GT_EQ {
+        text_line("    cmpq %rax, %rcx")
+        text_line("    setge %al")
+        text_line("    movzbq %al, %rax")
+        text_line("    negq %rax")
+        return void
+    }
+    if op =? TK_LT {
+        text_line("    cmpq %rax, %rcx")
+        text_line("    setl %al")
+        text_line("    movzbq %al, %rax")
+        text_line("    negq %rax")
+        return void
+    }
+    if op =? TK_LT_EQ {
+        text_line("    cmpq %rax, %rcx")
+        text_line("    setle %al")
+        text_line("    movzbq %al, %rax")
+        text_line("    negq %rax")
+        return void
+    }
+    return void
+}
+
+# ============================================================================
+# Unary operation emission
+# ============================================================================
+
+let emit_unary = (op:int):>void => {
+    if op =? TK_MINUS {
+        text_line("    negq %rax")
+        return void
+    }
+    if op =? TK_NOT {
+        text_line("    notq %rax")
+        return void
+    }
+    return void
+}
+
+# ============================================================================
+# Function call emission
+# ============================================================================
+
+let emit_call = (label_id:int num_args:int):>void => {
+    # Pop arguments into correct registers (in reverse order)
+    if num_args >=? 6 { emit_pop("%r9") }
+    if num_args >=? 5 { emit_pop("%r8") }
+    if num_args >=? 4 { emit_pop("%rcx") }
+    if num_args >=? 3 { emit_pop("%rdx") }
+    if num_args >=? 2 { emit_pop("%rsi") }
+    if num_args >=? 1 { emit_pop("%rdi") }
+    
+    text_str("    call .Lfn")
+    text_int(label_id)
+    text_char(CH_LF)
+    return void
+}
+
+let emit_call_name = (name:int num_args:int):>void => {
+    if num_args >=? 6 { emit_pop("%r9") }
+    if num_args >=? 5 { emit_pop("%r8") }
+    if num_args >=? 4 { emit_pop("%rcx") }
+    if num_args >=? 3 { emit_pop("%rdx") }
+    if num_args >=? 2 { emit_pop("%rsi") }
+    if num_args >=? 1 { emit_pop("%rdi") }
+    
+    text_str("    call ")
+    text_str(name)
+    text_char(CH_LF)
+    return void
+}
+
+# ============================================================================
+# Control flow emission
+# ============================================================================
+
+let emit_cond_jump = (label_id:int):>void => {
+    text_line("    testq %rax, %rax")
+    text_str("    jz .Lelse")
+    text_int(label_id)
+    text_char(CH_LF)
+    return void
+}
+
+let emit_jump = (prefix:int label_id:int):>void => {
+    text_str("    jmp ")
+    text_str(prefix)
+    text_int(label_id)
+    text_char(CH_LF)
+    return void
+}
+
+let emit_label_out = (prefix:int label_id:int):>void => {
+    text_str(prefix)
+    text_int(label_id)
+    text_line(":")
+    return void
+}
+
+# ============================================================================
+# Intrinsic emission
+# ============================================================================
+
+let emit_intrinsic = (name:int num_args:int):>void => {
+    if str_prefix(name 0 "__syscall") {
+        # For syscalls: pop args in reverse order, then pop syscall number into %rax
+        # Args are: syscall_num, arg1, arg2, ..., argN (N = num_args - 1)
+        # Stack (top to bottom): argN, ..., arg2, arg1, syscall_num
+        # Need: argN->%r?, ..., arg3->%rdx, arg2->%rsi, arg1->%rdi, syscall_num->%rax
+        if num_args >=? 7 {
+            text_line("    popq %rax")
+            text_line("    movq %rax, %r9")
+            emit_pop("%r8")
+            emit_pop("%r10")
+            emit_pop("%rdx")
+            emit_pop("%rsi")
+            emit_pop("%rdi")
+        } else if num_args >=? 6 {
+            text_line("    popq %rax")
+            text_line("    movq %rax, %r8")
+            emit_pop("%r10")
+            emit_pop("%rdx")
+            emit_pop("%rsi")
+            emit_pop("%rdi")
+        } else if num_args >=? 5 {
+            text_line("    popq %rax")
+            text_line("    movq %rax, %r10")
+            emit_pop("%rdx")
+            emit_pop("%rsi")
+            emit_pop("%rdi")
+        } else if num_args >=? 4 {
+            text_line("    popq %rax")
+            text_line("    movq %rax, %rdx")
+            emit_pop("%rsi")
+            emit_pop("%rdi")
+        } else if num_args >=? 3 {
+            text_line("    popq %rax")
+            text_line("    movq %rax, %rsi")
+            emit_pop("%rdi")
+        } else if num_args >=? 2 {
+            text_line("    popq %rax")
+            text_line("    movq %rax, %rdi")
+        }
+        emit_pop("%rax")
+        text_line("    syscall")
+        return void
+    }
+    
+    # For non-syscall intrinsics, pop args normally
+    if num_args >=? 2 {
+        emit_pop("%rdi")
+    }
+    
+    if str_eq(name "__load64__") {
+        text_line("    movq (%rax), %rax")
+        return void
+    }
+    if str_eq(name "__store64__") {
+        text_line("    movq %rdi, (%rax)")
+        return void
+    }
+    if str_eq(name "__load32__") {
+        text_line("    movl (%rax), %eax")
+        return void
+    }
+    if str_eq(name "__store32__") {
+        text_line("    movl %edi, (%rax)")
+        return void
+    }
+    if str_eq(name "__load16__") {
+        text_line("    movzwq (%rax), %rax")
+        return void
+    }
+    if str_eq(name "__store16__") {
+        text_line("    movw %di, (%rax)")
+        return void
+    }
+    if str_eq(name "__load8__") {
+        text_line("    movzbq (%rax), %rax")
+        return void
+    }
+    if str_eq(name "__store8__") {
+        text_line("    movb %dil, (%rax)")
+        return void
+    }
+    
+    return void
+}
+
+# ============================================================================
+# Module structure emission
+# ============================================================================
+
+let emit_file_header = ():>void => {
+    text_line(".text")
+    text_line(".globl _start")
+    text_char(CH_LF)
+    return void
+}
+
+let emit_start = ():>void => {
+    text_line("_start:")
+    text_line("    xorq %rbp, %rbp")
+    text_line("    movq (%rsp), %rdi")
+    text_line("    leaq 8(%rsp), %rsi")
+    text_line("    andq $-16, %rsp")
+    text_line("    call __main__")
+    text_line("    movq %rax, %rdi")
+    text_line("    movq $60, %rax")
+    text_line("    syscall")
+    text_char(CH_LF)
+    return void
+}
+
+let emit_data_section = ():>void => {
+    text_line(".data")
+    return void
+}
+
+# ============================================================================
+# Function emission
+# ============================================================================
+
+let emit_fn_label = (label_id:int):>void => {
+    text_str(".Lfn")
+    text_int(label_id)
+    text_line(":")
+    return void
+}
+
+let emit_fn_label_name = (name:int):>void => {
+    text_str(name)
+    text_line(":")
+    return void
+}
+
+# ============================================================================
+# Argument passing
+# ============================================================================
+
+let emit_load_arg = (arg_idx:int):>void => {
+    if arg_idx =? 0 { text_line("    movq %rdi, %rax") }
+    else if arg_idx =? 1 { text_line("    movq %rsi, %rax") }
+    else if arg_idx =? 2 { text_line("    movq %rdx, %rax") }
+    else if arg_idx =? 3 { text_line("    movq %rcx, %rax") }
+    else if arg_idx =? 4 { text_line("    movq %r8, %rax") }
+    else if arg_idx =? 5 { text_line("    movq %r9, %rax") }
+    return void
+}
+
+let emit_store_arg_to_local = (arg_idx:int offset:int):>void => {
+    if arg_idx =? 0 { 
+        text_str("    movq %rdi, ")
+        text_int(offset)
+        text_line("(%rbp)")
+    }
+    else if arg_idx =? 1 { 
+        text_str("    movq %rsi, ")
+        text_int(offset)
+        text_line("(%rbp)")
+    }
+    else if arg_idx =? 2 { 
+        text_str("    movq %rdx, ")
+        text_int(offset)
+        text_line("(%rbp)")
+    }
+    else if arg_idx =? 3 { 
+        text_str("    movq %rcx, ")
+        text_int(offset)
+        text_line("(%rbp)")
+    }
+    else if arg_idx =? 4 { 
+        text_str("    movq %r8, ")
+        text_int(offset)
+        text_line("(%rbp)")
+    }
+    else if arg_idx =? 5 { 
+        text_str("    movq %r9, ")
+        text_int(offset)
+        text_line("(%rbp)")
+    }
+    return void
+}
