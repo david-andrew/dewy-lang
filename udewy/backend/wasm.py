@@ -60,6 +60,7 @@ class Wasm32Backend:
         # Setup imports for syscalls
         self._setup_imports()
     
+    # TODO: going to get rid of syscall emulation here. instead will come up with a reasonable set of browser functions that js will provide
     def _setup_imports(self) -> None:
         """Setup JS host function imports for syscalls."""
         syscall_imports = [

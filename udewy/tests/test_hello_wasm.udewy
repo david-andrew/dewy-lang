@@ -1,0 +1,26 @@
+# WebAssembly browser test
+# Prints messages using syscalls (captured by JS shim in browser)
+
+const SYS_WRITE:int = 1
+const STDOUT:int = 1
+
+let main = ():>int => {
+    let msg1:int = "=== WASM Backend Test ===\n"
+    let len1:int = __load64__(msg1 + 0 - 8)
+    __syscall3__(SYS_WRITE STDOUT msg1 len1)
+
+    let msg2:int = "If you see this, it works!\n"
+    let len2:int = __load64__(msg2 + 0 - 8)
+    __syscall3__(SYS_WRITE STDOUT msg2 len2)
+
+    # Simple math test
+    let a:int = 7
+    let b:int = 6
+    let result:int = a * b
+
+    let msg3:int = "7 * 6 = 42 (check exit code)\n"
+    let len3:int = __load64__(msg3 + 0 - 8)
+    __syscall3__(SYS_WRITE STDOUT msg3 len3)
+
+    return result
+}
