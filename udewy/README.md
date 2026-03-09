@@ -31,9 +31,27 @@ The compiler produces artifacts in `__dewycache__/`.
 | Target | Output | Requirements |
 |--------|--------|--------------|
 | `x86_64` (default) | Linux ELF executable | GNU as, ld |
-| `wasm32` | WebAssembly + JS shim | wat2wasm (wabt), Node.js |
+| `wasm32` | Single HTML with embedded WASM | wat2wasm (wabt) |
 | `riscv` | RISC-V 64-bit executable | riscv64-linux-gnu toolchain, qemu-riscv64 |
 | `arm` | AArch64 executable | aarch64-linux-gnu toolchain, qemu-aarch64 |
+
+#### WASM Target Options
+
+```bash
+# Default: single HTML file with embedded base64 WASM (can open directly in browser)
+python -m udewy.p0 -c --target wasm32 program.udewy
+
+# Split mode: separate .wasm file (requires serving via HTTP)
+python -m udewy.p0 -c --target wasm32 --split-wasm program.udewy
+```
+
+The WASM backend provides browser-focused host functions instead of Linux syscall emulation:
+- `host_log(ptr, len)` - Output text to console and page
+- `host_exit(code)` - Signal program exit  
+- `host_time()` - Current timestamp in milliseconds
+- `host_random()` - Random 64-bit integer
+
+Linux syscalls are automatically translated to these browser equivalents (e.g., `write` → `host_log`).
 
 ## Ill-formed vs Well-formed udewy
 udewy is intented to be compatible with the full dewy language. However the required simplicity of the udewy compiler makes it difficult to catch many cases that would not compile under full dewy, or would have different runtime behavior. These typically relate to type safety where because udewy does no type checking, it is possible to write programs that compile in udewy but are invalid nonetheless. Strong programmer discipline is required to write well formed udewy programs, and cases requiring attention will be detailed in this document.

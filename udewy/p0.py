@@ -365,6 +365,17 @@ def is_intrinsic(src: str, name_start: int, name_len: int) -> bool:
     if name_eq_str(src, name_start, name_len, "__syscall4__"): return True
     if name_eq_str(src, name_start, name_len, "__syscall5__"): return True
     if name_eq_str(src, name_start, name_len, "__syscall6__"): return True
+    # WASM host functions
+    if name_eq_str(src, name_start, name_len, "__host_log__"): return True
+    if name_eq_str(src, name_start, name_len, "__host_exit__"): return True
+    if name_eq_str(src, name_start, name_len, "__host_time__"): return True
+    if name_eq_str(src, name_start, name_len, "__host_random__"): return True
+    # WASM DOM functions
+    if name_eq_str(src, name_start, name_len, "__dom_set_text__"): return True
+    if name_eq_str(src, name_start, name_len, "__dom_append__"): return True
+    if name_eq_str(src, name_start, name_len, "__dom_clear__"): return True
+    if name_eq_str(src, name_start, name_len, "__dom_append_int__"): return True
+    if name_eq_str(src, name_start, name_len, "__log_int__"): return True
     if name_eq_str(src, name_start, name_len, "__load64__"): return True
     if name_eq_str(src, name_start, name_len, "__store64__"): return True
     if name_eq_str(src, name_start, name_len, "__load8__"): return True
@@ -399,6 +410,26 @@ def emit_intrinsic(backend, src: str, name_start: int, name_len: int, num_args: 
     # TODO: backend should own __syscallN__ and potentially other intrinsics
     elif name.startswith("__syscall"):
         backend.syscall(num_args)
+    # WASM host functions (only available on wasm32 backend)
+    elif name == "__host_log__":
+        backend.emit_host_log()
+    elif name == "__host_exit__":
+        backend.emit_host_exit()
+    elif name == "__host_time__":
+        backend.emit_host_time()
+    elif name == "__host_random__":
+        backend.emit_host_random()
+    # WASM DOM functions
+    elif name == "__dom_set_text__":
+        backend.emit_host_dom_set_text()
+    elif name == "__dom_append__":
+        backend.emit_host_dom_append()
+    elif name == "__dom_clear__":
+        backend.emit_host_dom_clear()
+    elif name == "__dom_append_int__":
+        backend.emit_host_dom_append_int()
+    elif name == "__log_int__":
+        backend.emit_host_log_int()
 
 
 # ============================================================================
@@ -934,7 +965,9 @@ def parse_assign_or_expr(toks: list, idx: int, src: str, backend,
                 
                 return idx
     
-    return parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
+    idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
+    backend.pop_value()  # Drop unused expression value
+    return idx
 
 
 def parse_statement(toks: list, idx: int, src: str, backend,
@@ -1130,13 +1163,15 @@ if __name__ == "__main__":
     from pathlib import Path
     
     if len(sys.argv) < 2:
-        print("Usage: python -m udewy.p0 [-c] [--target TARGET] <file.udewy> [args...]")
+        print("Usage: python -m udewy.p0 [-c] [--target TARGET] [--split-wasm] <file.udewy> [args...]")
         print("  -c              Compile only, don't run")
         print("  --target TARGET Target backend (x86_64, wasm32, riscv, arm)")
+        print("  --split-wasm    For wasm32: output separate .wasm file instead of embedded HTML")
         sys.exit(1)
     
     compile_only = False
     target = "x86_64"
+    split_wasm = False
     arg_idx = 1
     
     while arg_idx < len(sys.argv) and sys.argv[arg_idx].startswith("-"):
@@ -1146,6 +1181,9 @@ if __name__ == "__main__":
         elif sys.argv[arg_idx] == "--target":
             arg_idx += 1
             target = sys.argv[arg_idx]
+            arg_idx += 1
+        elif sys.argv[arg_idx] == "--split-wasm":
+            split_wasm = True
             arg_idx += 1
         else:
             break
@@ -1182,14 +1220,15 @@ if __name__ == "__main__":
             sys.exit(result.returncode)
     
     elif target == "wasm32":
+        import base64
+        
         wat_path = cache_dir / f"{input_file.stem}.wat"
         wasm_path = cache_dir / f"{input_file.stem}.wasm"
-        js_path = cache_dir / f"{input_file.stem}.js"
         html_path = cache_dir / f"{input_file.stem}.html"
         
         wat_path.write_text(asm)
         
-        # Convert WAT to WASM using wat2wasm if available
+        # Convert WAT to WASM using wat2wasm
         try:
             subprocess.run(["wat2wasm", str(wat_path), "-o", str(wasm_path)], check=True)
         except FileNotFoundError:
@@ -1201,143 +1240,203 @@ if __name__ == "__main__":
             else:
                 sys.exit(1)
         
-        # Generate JS shim
-        js_shim = '''
+        # Browser host function implementations (shared by both output modes)
+        host_functions_js = '''
 const memory = new WebAssembly.Memory({ initial: 1 });
+let outputElement = null;
+
+function decodeString(ptr, len) {
+    const view = new Uint8Array(memory.buffer);
+    const bytes = view.slice(Number(ptr), Number(ptr) + Number(len));
+    return new TextDecoder().decode(bytes);
+}
+
+function appendOutput(text) {
+    console.log(text);
+    if (outputElement) {
+        outputElement.textContent += text;
+    }
+}
 
 const imports = {
     env: {
         memory: memory,
-        syscall0: (num) => {
+        // Direct browser APIs
+        host_log: (ptr, len) => {
+            const text = decodeString(ptr, len);
+            console.log(text);
+            return len;
+        },
+        host_exit: (code) => {
+            appendOutput(`\\nExit code: ${code}\\n`);
+            return code;
+        },
+        host_time: () => BigInt(Date.now()),
+        host_random: () => BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
+        // DOM manipulation
+        host_dom_set_text: (ptr, len) => {
+            const text = decodeString(ptr, len);
+            if (outputElement) {
+                outputElement.textContent = text;
+            }
+            return 0n;
+        },
+        host_dom_append: (ptr, len) => {
+            const text = decodeString(ptr, len);
+            if (outputElement) {
+                outputElement.textContent += text;
+            }
+            return len;
+        },
+        host_dom_clear: () => {
+            if (outputElement) {
+                outputElement.textContent = '';
+            }
+            return 0n;
+        },
+        host_dom_append_int: (value) => {
+            if (outputElement) {
+                outputElement.textContent += String(value);
+            }
+            return value;
+        },
+        host_log_int: (value) => {
+            console.log(String(value));
+            return value;
+        },
+        // Syscall routing (translates Linux syscalls to browser equivalents)
+        host_syscall0: (num) => {
             console.log(`syscall0(${num})`);
             return 0n;
         },
-        syscall1: (num, a1) => {
-            if (num === 60n) {
-                console.log(`exit(${a1})`);
-                return a1;
+        host_syscall1: (num, a1) => {
+            if (num === 60n) { // exit
+                return imports.env.host_exit(a1);
             }
             console.log(`syscall1(${num}, ${a1})`);
             return 0n;
         },
-        syscall2: (num, a1, a2) => {
+        host_syscall2: (num, a1, a2) => {
             console.log(`syscall2(${num}, ${a1}, ${a2})`);
             return 0n;
         },
-        syscall3: (num, a1, a2, a3) => {
-            if (num === 1n) {
-                const view = new Uint8Array(memory.buffer);
-                const start = Number(a2);
-                const len = Number(a3);
-                const bytes = view.slice(start, start + len);
-                const text = new TextDecoder().decode(bytes);
-                if (Number(a1) === 1) {
-                    process.stdout.write(text);
-                } else if (Number(a1) === 2) {
-                    process.stderr.write(text);
-                }
-                return BigInt(len);
+        host_syscall3: (num, a1, a2, a3) => {
+            if (num === 1n) { // write(fd, ptr, len)
+                return imports.env.host_log(a2, a3);
             }
             console.log(`syscall3(${num}, ${a1}, ${a2}, ${a3})`);
             return 0n;
         },
-        syscall4: (num, a1, a2, a3, a4) => {
-            console.log(`syscall4(${num}, ${a1}, ${a2}, ${a3}, ${a4})`);
-            return 0n;
-        },
-        syscall5: (num, a1, a2, a3, a4, a5) => {
-            console.log(`syscall5(${num}, ${a1}, ${a2}, ${a3}, ${a4}, ${a5})`);
-            return 0n;
-        },
-        syscall6: (num, a1, a2, a3, a4, a5, a6) => {
-            console.log(`syscall6(${num}, ${a1}, ${a2}, ${a3}, ${a4}, ${a5}, ${a6})`);
-            return 0n;
-        },
     }
 };
-
-async function run() {
-    const fs = require('fs');
-    const wasmBuffer = fs.readFileSync('WASM_PATH');
-    const { instance } = await WebAssembly.instantiate(wasmBuffer, imports);
-    
-    const result = instance.exports.main();
-    console.log(`\\nExit code: ${result}`);
-    process.exit(Number(result));
-}
-
-run().catch(err => {
-    console.error(err);
-    process.exit(1);
-});
-'''.replace('WASM_PATH', str(wasm_path))
+'''
         
-        js_path.write_text(js_shim)
-        
-        # Generate HTML for browser
-        html_content = f'''<!DOCTYPE html>
+        if split_wasm:
+            # Split mode: separate .wasm file that gets fetched
+            html_content = f'''<!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
     <title>{input_file.stem}</title>
+    <style>
+        body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }}
+        h1 {{ color: #333; }}
+        #output {{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; min-height: 100px; }}
+    </style>
 </head>
 <body>
     <h1>{input_file.stem}</h1>
     <pre id="output"></pre>
     <script>
-const memory = new WebAssembly.Memory({{ initial: 1 }});
-const output = document.getElementById('output');
+{host_functions_js}
 
-const imports = {{
-    env: {{
-        memory: memory,
-        syscall0: (num) => {{ output.textContent += `syscall0(${{num}})\\n`; return 0n; }},
-        syscall1: (num, a1) => {{
-            if (num === 60n) {{ output.textContent += `exit(${{a1}})\\n`; return a1; }}
-            return 0n;
-        }},
-        syscall2: (num, a1, a2) => {{ return 0n; }},
-        syscall3: (num, a1, a2, a3) => {{
-            if (num === 1n) {{
-                const view = new Uint8Array(memory.buffer);
-                const start = Number(a2);
-                const len = Number(a3);
-                const bytes = view.slice(start, start + len);
-                const text = new TextDecoder().decode(bytes);
-                output.textContent += text;
-                return BigInt(len);
-            }}
-            return 0n;
-        }},
-        syscall4: (num, a1, a2, a3, a4) => {{ return 0n; }},
-        syscall5: (num, a1, a2, a3, a4, a5) => {{ return 0n; }},
-        syscall6: (num, a1, a2, a3, a4, a5, a6) => {{ return 0n; }},
+async function run() {{
+    outputElement = document.getElementById('output');
+    try {{
+        const response = await fetch('{wasm_path.name}');
+        const bytes = await response.arrayBuffer();
+        const {{ instance }} = await WebAssembly.instantiate(bytes, imports);
+        const result = instance.exports.main();
+        appendOutput(`\\nExit code: ${{result}}`);
+    }} catch (err) {{
+        appendOutput(`Error: ${{err}}`);
     }}
-}};
+}}
 
-fetch('{wasm_path.name}')
-    .then(r => r.arrayBuffer())
-    .then(bytes => WebAssembly.instantiate(bytes, imports))
-    .then(result => {{
-        const ret = result.instance.exports.main();
-        output.textContent += `\\nExit code: ${{ret}}`;
-    }})
-    .catch(err => {{
-        output.textContent += `Error: ${{err}}`;
-    }});
+run();
     </script>
 </body>
 </html>
 '''
-        html_path.write_text(html_content)
-        
-        if compile_only:
-            print(f"Compiled: {wasm_path}")
-            print(f"JS shim: {js_path}")
-            print(f"HTML: {html_path}")
+            html_path.write_text(html_content)
+            
+            if compile_only:
+                print(f"Compiled: {wasm_path}")
+                print(f"HTML: {html_path}")
+            else:
+                # For split mode, need to serve files
+                print(f"Split mode output:")
+                print(f"  WASM: {wasm_path}")
+                print(f"  HTML: {html_path}")
+                print(f"Serve with: python -m http.server -d {cache_dir}")
         else:
-            # Run with Node.js
-            result = subprocess.run(["node", str(js_path)] + script_args)
-            sys.exit(result.returncode)
+            # Default: single HTML file with embedded base64 WASM
+            wasm_bytes = wasm_path.read_bytes()
+            wasm_b64 = base64.b64encode(wasm_bytes).decode('ascii')
+            
+            html_content = f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{input_file.stem}</title>
+    <style>
+        body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }}
+        h1 {{ color: #333; }}
+        #output {{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; min-height: 100px; }}
+    </style>
+</head>
+<body>
+    <h1>{input_file.stem}</h1>
+    <pre id="output"></pre>
+
+    <script id="wasm-module" type="application/wasm-b64">
+{wasm_b64}
+    </script>
+
+    <script>
+{host_functions_js}
+
+async function loadEmbeddedWasm() {{
+    const b64 = document.getElementById('wasm-module').textContent.trim();
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    return WebAssembly.instantiate(bytes, imports);
+}}
+
+async function run() {{
+    outputElement = document.getElementById('output');
+    try {{
+        const {{ instance }} = await loadEmbeddedWasm();
+        const result = instance.exports.main();
+        appendOutput(`\\nExit code: ${{result}}`);
+    }} catch (err) {{
+        appendOutput(`Error: ${{err}}`);
+    }}
+}}
+
+run();
+    </script>
+</body>
+</html>
+'''
+            html_path.write_text(html_content)
+            
+            if compile_only:
+                print(f"Compiled: {html_path}")
+                print(f"(single file with embedded WASM)")
+            else:
+                # Can open directly in browser, but for CLI execution use a simple server
+                print(f"Output: {html_path}")
+                print(f"Open in browser or serve with: python -m http.server -d {cache_dir}")
     
     elif target == "riscv":
         asm_path = cache_dir / f"{input_file.stem}.s"

@@ -1,13 +1,19 @@
 """
 wasm32 backend for udewy.
 
-Generates WebAssembly Text format (WAT) with a JavaScript shim for execution.
+Generates WebAssembly Text format (WAT) with browser-focused host function imports.
 
 Semantic choices:
 - All udewy values are i64 (wasm i64)
 - Pointers are i64 values but truncated to i32 at every memory operation
 - Strings/arrays use the same length-prefixed layout (length at ptr-8)
-- Linux syscalls become imported JS host functions
+- Browser functionality via imported JS host functions (no syscall emulation)
+
+Host functions provided by JS:
+- host_log(ptr, len): Output text to console/output element
+- host_exit(code): Signal program exit
+- host_time() -> i64: Current timestamp in milliseconds
+- host_random() -> i64: Random 64-bit integer
 """
 
 from pathlib import Path
@@ -60,20 +66,28 @@ class Wasm32Backend:
         # Setup imports for syscalls
         self._setup_imports()
     
-    # TODO: going to get rid of syscall emulation here. instead will come up with a reasonable set of browser functions that js will provide
     def _setup_imports(self) -> None:
-        """Setup JS host function imports for syscalls."""
-        syscall_imports = [
-            '(import "env" "syscall0" (func $syscall0 (param i64) (result i64)))',
-            '(import "env" "syscall1" (func $syscall1 (param i64 i64) (result i64)))',
-            '(import "env" "syscall2" (func $syscall2 (param i64 i64 i64) (result i64)))',
-            '(import "env" "syscall3" (func $syscall3 (param i64 i64 i64 i64) (result i64)))',
-            '(import "env" "syscall4" (func $syscall4 (param i64 i64 i64 i64 i64) (result i64)))',
-            '(import "env" "syscall5" (func $syscall5 (param i64 i64 i64 i64 i64 i64) (result i64)))',
-            '(import "env" "syscall6" (func $syscall6 (param i64 i64 i64 i64 i64 i64 i64) (result i64)))',
+        """Setup JS host function imports for browser functionality."""
+        host_imports = [
+            # Direct browser APIs
+            '(import "env" "host_log" (func $host_log (param i64 i64) (result i64)))',
+            '(import "env" "host_exit" (func $host_exit (param i64) (result i64)))',
+            '(import "env" "host_time" (func $host_time (result i64)))',
+            '(import "env" "host_random" (func $host_random (result i64)))',
+            # DOM manipulation
+            '(import "env" "host_dom_set_text" (func $host_dom_set_text (param i64 i64) (result i64)))',
+            '(import "env" "host_dom_append" (func $host_dom_append (param i64 i64) (result i64)))',
+            '(import "env" "host_dom_clear" (func $host_dom_clear (result i64)))',
+            '(import "env" "host_dom_append_int" (func $host_dom_append_int (param i64) (result i64)))',
+            '(import "env" "host_log_int" (func $host_log_int (param i64) (result i64)))',
+            # Syscall routing (translates Linux syscalls to browser equivalents)
+            '(import "env" "host_syscall0" (func $host_syscall0 (param i64) (result i64)))',
+            '(import "env" "host_syscall1" (func $host_syscall1 (param i64 i64) (result i64)))',
+            '(import "env" "host_syscall2" (func $host_syscall2 (param i64 i64 i64) (result i64)))',
+            '(import "env" "host_syscall3" (func $host_syscall3 (param i64 i64 i64 i64) (result i64)))',
         ]
-        self._imports.extend(syscall_imports)
-        self._next_fn_index = 7  # 7 syscall imports
+        self._imports.extend(host_imports)
+        self._next_fn_index = 13  # 13 host function imports
     
     def _new_label(self, prefix: str = "L") -> str:
         label = f"${prefix}{self._next_label}"
@@ -120,7 +134,7 @@ class Wasm32Backend:
         
         # Data segments
         for offset, data in self._data_segments:
-            hex_data = " ".join(f"\\{b:02x}" for b in data)
+            hex_data = "".join(f"\\{b:02x}" for b in data)
             output.append(f'  (data (i32.const {offset}) "{hex_data}")')
         
         # Export main
@@ -277,6 +291,10 @@ class Wasm32Backend:
         # Build function signature
         params = " ".join(f"(param $p{i} i64)" for i in range(param_count))
         self._current_fn.append(f"  (func {fn_name} {params} (result i64)")
+        
+        # Pre-allocate scratch locals for swap operations
+        self._current_fn.append("    (local $swap0 i64)")
+        self._current_fn.append("    (local $swap1 i32)")
         
         # Param slots for compatibility with x86 backend
         self._param_slots = list(range(param_count))
@@ -443,14 +461,13 @@ class Wasm32Backend:
     
     def store_mem(self, width: int) -> None:
         """Store to memory. Stack: [value addr] -> pushes 0."""
-        # Need to swap because wasm store expects [addr value]
-        # We have [value addr] on stack
-        # Use a local to swap
-        self._emit("i32.wrap_i64")  # Convert addr to i32
-        # Stack: [value addr32]
-        # wasm store expects: addr32 value
-        # We need to swap - this is tricky without locals
-        # For now, emit inefficient but correct code using globals
+        # WASM store expects [addr value], we have [value addr]
+        # Use scratch locals to swap
+        self._emit("i32.wrap_i64")      # Convert addr to i32: [value addr32]
+        self._emit("local.set $swap1")  # Save addr32: [value]
+        self._emit("local.set $swap0")  # Save value: []
+        self._emit("local.get $swap1")  # Push addr32: [addr32]
+        self._emit("local.get $swap0")  # Push value: [addr32 value]
         if width == 64:
             self._emit("i64.store")
         elif width == 32:
@@ -480,9 +497,51 @@ class Wasm32Backend:
         self._emit(f"call_indirect (type $fn{num_args})")
     
     def syscall(self, num_args: int) -> None:
-        """Invoke a syscall via imported JS function."""
-        # Args are on stack: syscall_num arg1 arg2 ...
-        self._emit(f"call $syscall{num_args - 1}")
+        """Translate syscall to browser host function.
+        
+        Maps Linux syscalls to browser-appropriate host functions:
+        - write(fd, ptr, len) -> host_log(ptr, len) for fd 1 or 2
+        - exit(code) -> host_exit(code)
+        """
+        # For now, just call a generic syscall handler that routes based on syscall number
+        # The JS shim will need to handle the translation
+        self._emit(f"call $host_syscall{num_args - 1}")
+    
+    def emit_host_log(self) -> None:
+        """Emit a call to host_log(ptr, len). Stack: [ptr len] -> [bytes_written]"""
+        self._emit("call $host_log")
+    
+    def emit_host_exit(self) -> None:
+        """Emit a call to host_exit(code). Stack: [code] -> [code]"""
+        self._emit("call $host_exit")
+    
+    def emit_host_time(self) -> None:
+        """Emit a call to host_time(). Stack: [] -> [timestamp_ms]"""
+        self._emit("call $host_time")
+    
+    def emit_host_random(self) -> None:
+        """Emit a call to host_random(). Stack: [] -> [random_i64]"""
+        self._emit("call $host_random")
+    
+    def emit_host_dom_set_text(self) -> None:
+        """Emit a call to host_dom_set_text(ptr, len). Stack: [ptr len] -> [0]"""
+        self._emit("call $host_dom_set_text")
+    
+    def emit_host_dom_append(self) -> None:
+        """Emit a call to host_dom_append(ptr, len). Stack: [ptr len] -> [len]"""
+        self._emit("call $host_dom_append")
+    
+    def emit_host_dom_clear(self) -> None:
+        """Emit a call to host_dom_clear(). Stack: [] -> [0]"""
+        self._emit("call $host_dom_clear")
+    
+    def emit_host_dom_append_int(self) -> None:
+        """Emit a call to host_dom_append_int(value). Stack: [value] -> [value]"""
+        self._emit("call $host_dom_append_int")
+    
+    def emit_host_log_int(self) -> None:
+        """Emit a call to host_log_int(value). Stack: [value] -> [value]"""
+        self._emit("call $host_log_int")
     
     # ========================================================================
     # Control flow
@@ -492,7 +551,7 @@ class Wasm32Backend:
         """Begin an if statement."""
         self._emit("i64.const 0")
         self._emit("i64.ne")
-        self._emit("if (result i64)")
+        self._emit("if")
         self._block_depth += 1
         self._if_stack.append(self._block_depth)
     
@@ -502,7 +561,6 @@ class Wasm32Backend:
     
     def end_if(self) -> None:
         """End an if statement."""
-        self._emit("i64.const 0")  # Default value for if
         self._emit("end")
         self._if_stack.pop()
         self._block_depth -= 1

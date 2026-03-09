@@ -1,26 +1,103 @@
 # WebAssembly browser test
-# Prints messages using syscalls (captured by JS shim in browser)
+# Uses browser host functions provided by the JS runtime
 
-const SYS_WRITE:int = 1
-const STDOUT:int = 1
+# Buffer for int_to_str: 8 bytes length prefix + 21 bytes for digits (max i64 + sign)
+# We use a string literal as a buffer - the actual content will be overwritten
+let int_buf:int = "                     "
+
+# Convert integer to string, returns pointer to string data
+let int_to_str = (n:int):>int => {
+    let buf:int = int_buf
+    let is_neg:int = 0
+    let val:int = n
+    
+    # Handle negative
+    if n <? 0 {
+        is_neg = 1
+        val = 0 - n
+    }
+    
+    # Handle zero case
+    if val =? 0 {
+        __store8__(48 buf)  # '0' = 48
+        __store64__(1 buf - 8)
+        return buf
+    }
+    
+    # Write digits from end of buffer, working backwards
+    let pos:int = 20
+    loop val >? 0 {
+        let digit:int = val % 10
+        __store8__(digit + 48 buf + pos)  # '0' = 48
+        pos = pos - 1
+        val = val // 10
+    }
+    
+    # Add minus sign if negative
+    if is_neg {
+        __store8__(45 buf + pos)  # '-' = 45
+        pos = pos - 1
+    }
+    
+    # Calculate length and starting position
+    let start:int = pos + 1
+    let len:int = 21 - start
+    
+    # Copy result to beginning of buffer and set length
+    let i:int = 0
+    loop i <? len {
+        let c:int = __load8__(buf + start + i)
+        __store8__(c buf + i)
+        i = i + 1
+    }
+    __store64__(len buf - 8)
+    
+    return buf
+}
+
+# Helper to print string to DOM
+let print = (s:int):>int => {
+    let len:int = __load64__(s - 8)
+    __dom_append__(s len)
+    return 0
+}
+
+# Helper to print string to console
+let log = (s:int):>int => {
+    let len:int = __load64__(s - 8)
+    __host_log__(s len)
+    return 0
+}
 
 let main = ():>int => {
-    let msg1:int = "=== WASM Backend Test ===\n"
-    let len1:int = __load64__(msg1 + 0 - 8)
-    __syscall3__(SYS_WRITE STDOUT msg1 len1)
-
-    let msg2:int = "If you see this, it works!\n"
-    let len2:int = __load64__(msg2 + 0 - 8)
-    __syscall3__(SYS_WRITE STDOUT msg2 len2)
-
+    print("=== WASM Backend Test ===\n\n")
+    
+    # Test host_time
+    print("Timestamp (ms): ")
+    let t:int = __host_time__()
+    print(int_to_str(t))
+    print("\n")
+    
+    # Test host_random  
+    print("Random number: ")
+    let r:int = __host_random__()
+    print(int_to_str(r))
+    print("\n")
+    
     # Simple math test
-    let a:int = 7
-    let b:int = 6
-    let result:int = a * b
-
-    let msg3:int = "7 * 6 = 42 (check exit code)\n"
-    let len3:int = __load64__(msg3 + 0 - 8)
-    __syscall3__(SYS_WRITE STDOUT msg3 len3)
-
+    print("\n7 * 6 = ")
+    let result:int = 7 * 6
+    print(int_to_str(result))
+    print("\n")
+    
+    # Test negative number
+    print("-123 = ")
+    print(int_to_str(0 - 123))
+    print("\n")
+    
+    # Console logging
+    log("Console: timestamp = ")
+    log(int_to_str(t))
+    
     return result
 }
