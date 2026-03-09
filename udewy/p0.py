@@ -357,6 +357,7 @@ def kind_to_op(kind: int) -> str:
 # ============================================================================
 
 def is_intrinsic(src: str, name_start: int, name_len: int) -> bool:
+    # TODO: restructure so backends own the __syscallN__ intrinsics
     if name_eq_str(src, name_start, name_len, "__syscall0__"): return True
     if name_eq_str(src, name_start, name_len, "__syscall1__"): return True
     if name_eq_str(src, name_start, name_len, "__syscall2__"): return True
@@ -395,6 +396,7 @@ def emit_intrinsic(backend, src: str, name_start: int, name_len: int, num_args: 
         backend.load_mem(32)
     elif name == "__store32__":
         backend.store_mem(32)
+    # TODO: backend should own __syscallN__ and potentially other intrinsics
     elif name.startswith("__syscall"):
         backend.syscall(num_args)
 

@@ -5,7 +5,7 @@
 
 # The μDewy Subset Programming Language
 
-udewy (μdewy, /mjuː ˈduːi/) is a strict subset of the Dewy programming language, designed for bootstrapping. It serves as an intermediate step in a trusted computing base, providing a language simple enough to implement in assembly while being expressive enough to write a real compiler.
+udewy (μdewy, "micro-dewy") is a strict subset of the Dewy programming language, designed for bootstrapping. It serves as an intermediate step in a trusted computing base, providing a language simple enough to implement in assembly while being expressive enough to write a real compiler.
 
 **Key principle**: Any valid udewy program should compile and behave identically under both the udewy compiler and the full Dewy compiler.
 
@@ -34,6 +34,9 @@ The compiler produces artifacts in `__dewycache__/`.
 | `wasm32` | WebAssembly + JS shim | wat2wasm (wabt), Node.js |
 | `riscv` | RISC-V 64-bit executable | riscv64-linux-gnu toolchain, qemu-riscv64 |
 | `arm` | AArch64 executable | aarch64-linux-gnu toolchain, qemu-aarch64 |
+
+## Ill-formed vs Well-formed udewy
+udewy is intented to be compatible with the full dewy language. However the required simplicity of the udewy compiler makes it difficult to catch many cases that would not compile under full dewy, or would have different runtime behavior. These typically relate to type safety where because udewy does no type checking, it is possible to write programs that compile in udewy but are invalid nonetheless. Strong programmer discipline is required to write well formed udewy programs, and cases requiring attention will be detailed in this document.
 
 ## Language Overview
 
@@ -157,7 +160,7 @@ let y:int = not flags
 | `xor` | Bitwise XOR |
 | `not` | Bitwise NOT |
 | `<<` | Left shift |
-| `>>` | Arithmetic right shift |
+| `>>` | right shift (unsigned) |
 
 #### Other
 | Operator | Description |
@@ -220,6 +223,8 @@ if condition {
 ```
 
 Conditions check if **any bit is set** (non-zero = true, zero = false).
+
+> NOTE: dewy requires all conditions to be strictly `bool` typed. Using a non-bool for a condition Would fail dewy type-checking, so doing so in udewy is ill-formed.
 
 #### Loop
 
@@ -304,6 +309,21 @@ let handlers = [on_start on_update on_stop]
 let messages = ["error" "warning" "info"]
 ```
 
+> NOTE: arrays are defined in static memory, meaning their values may be modified, and only the single instance is shared between all uses. Arrays should be assumed to contain garbage from previous iterations if they are ever modified. e.g.
+```udewy
+let put_int = (n:int):>void => {
+    let buf = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]  
+    let len:int = int_to_str(n buf)
+    let i:int = 0
+    loop i <? len {
+        data_char(__load8__(buf + i))
+        i = i + 1
+    }
+    return void
+}
+```
+> The array `buf` will be filled with garbage from previous calls that used it.
+
 ### Type Casts (transmute)
 
 The `transmute` keyword is a no-op in udewy but exists for Dewy compatibility:
@@ -316,6 +336,10 @@ let arr:int = buffer transmute array<byte>
 `transmute` preserves the underlying bits while changing the type annotation. It allows udewy code that manipulates raw integers to be valid in the strictly-typed full Dewy.
 
 ## Intrinsics
+
+udewy provides a few intrinsics. However, the majority of udewy intrinsics are provided by specific backends.
+
+### udewy intrinsics
 
 udewy provides low-level intrinsics for memory access and system calls:
 
@@ -341,7 +365,18 @@ __store32__(dword_value address)
 
 `__load8__`, `__load16__`, and `__load32__` zero-extend their results to 64 bits.
 
-### System Calls
+### Misc Operations
+
+```udewy
+# signed shift right (i.e. "arithmetic shift right")
+__signed_shr__(value num_bits)
+```
+
+`__signed_shr__` maintains the sign of the input by filling in leading bits with the sign bit
+
+TODO: alloc/address intrinsics for stack allocating values and getting their address
+
+### (x86_64, riscv, aarch64) Linux System Calls
 
 ```udewy
 __syscall0__(syscall_num)
@@ -354,6 +389,7 @@ __syscall6__(syscall_num arg1 arg2 arg3 arg4 arg5 arg6)
 ```
 
 Common syscall numbers (Linux x86_64):
+TODO: need to note that syscall consts are numbered correctly per each backend
 
 ```udewy
 const SYS_READ:int = 0
@@ -410,6 +446,7 @@ let age:int = __load64__(person + PERSON_AGE)
 ```
 
 ### Helper Functions
+TODO: stuff like this will be in a set of common files
 
 For cleaner code, define indexing helpers:
 
@@ -425,6 +462,8 @@ let store_i64 = (arr:int idx:int val:int):>void => {
 ```
 
 ## Compilation Model
+TODO: update to note how it works with the multiple backends
+also note how the trusted base version would be compiled direct targeting a single backend
 
 The udewy compiler (`p0.py`) is a single-pass compiler that:
 1. Tokenizes source (`t0.py`)
@@ -438,6 +477,7 @@ Each backend emits a `_start` entry point that calls `__main__` and handles exit
 Functions can be called before they're defined. Unknown identifiers are treated as forward function references and resolved at the end of compilation.
 
 ### Calling Convention
+TODO: per backend relevant notes...
 
 udewy uses the System V AMD64 ABI:
 - Arguments in: `rdi`, `rsi`, `rdx`, `rcx`, `r8`, `r9`
@@ -446,6 +486,7 @@ udewy uses the System V AMD64 ABI:
 - Callee-saved: `rbx`, `rbp`, `r12-r15`
 
 ## Self-Hosting
+TODO: notes about new bootstrap compiler structure (also probably will rename some stuff, and possibly have an extra helper program to pull in the right imports given the specified backedn, rather than importing everything all at once).
 
 The bootstrapped udewy compiler is in `tests/udewy/udewy.udewy` (~2500 lines). It demonstrates that the language is complete enough for real-world use while remaining simple enough to audit.
 
@@ -466,6 +507,8 @@ import p"utils.udewy"
 import p"lib/helpers.udewy"
 ```
 
+TODO: note that imports need to be first in a file. or they need to be top level (TBD). but also should enforce constraint on the compiler?
+
 ### How It Works
 
 - Paths are relative to the importing file
@@ -482,6 +525,8 @@ import p"./sibling.udewy"        # relative to current file
 import p"../parent/file.udewy"   # parent directory
 import p"lib/module.udewy"       # subdirectory
 ```
+
+TODO: path literals should support both `~` for home directory, and `/` for root directory relative paths.
 
 ### Example
 
@@ -513,6 +558,7 @@ udewy deliberately omits features to keep the compiler simple and auditable:
 - **No value casts** (`as`): Would behave differently than in full Dewy
 - **No string interpolation**: Strings are simple byte sequences
 - **No closures or nested functions**: Functions only at top level
+- **No function overloading**: Function may only have one version per unique name
 - **No short-circuit evaluation**: Both sides of `and`/`or` are always evaluated
 - **No floating-point**: Everything is 64-bit integers
 - **No garbage collection**: Manual memory management via syscalls
