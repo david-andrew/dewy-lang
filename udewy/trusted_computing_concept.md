@@ -1,43 +1,62 @@
-# μDewy
-super strict subsets of dewy that are parsable by early stages in the trusted computing base. Goal is 100% auditable software chain up to full DewyOS
+# Trusted Computing Base
+(TBD: describe goal of trusted computing base)
 
-## Stage 0: raw byte in memory -> read ascii bytes from stdin
+## Stage 0: Monitor
 a tiny machine-code monitor written in hexadecimal. This program does exactly one thing: reads ASCII hexadecimal characters from standard input, loads them into memory as executable bytes, and jumps to them.
-- Audit burden: Almost zero. A person with an ISA manual can verify 300 bytes of hex in an afternoon.
-- Prior Art: hex0 from the live-bootstrap project.
 
-> This will necessarily not be valid dewy
-> would be cool if the stdin that it reads could be valid dewy
+### Bootstrapping
+manually entered one byte at a time on the host system
 
-```dewy
-# ignore comment lines starting with #
-# non-comment lines, ignore anything not a hexidecimal digit
-# todo: can't use hex string with 0x b/c 0 interpreted as hex for monitor input
-# potentially could use 0x if we design whatever programs to work with an extra 0 at the start
-# allowing it to be a based string means we could include comments in the string
-0x"
+### Input:
+ASCII hexidecimal characters from stdin. e.g.
+
+```
 8a 87 14 3f f9 b1 e1 bd d7 28 09 79 57 c3 87 bb
 73 d7 e7 3e af fb 16 d1 77 0b f4 48 66 81 ff b1 
 c2 7d 3a b1 8b 9a 36 34 7e cf d9 76 6d 0e fb e3 
 d6 2d 2a cb 15 e3 13 93 30 79 93 8e dc c2 78 44 
 bc b1 06 f2 59 16 b1 87 96 cd 5a 7a 15 0c 12 f8 
 91 e8 50 26 d6 a5 c8 c7 d3 1a 1a 1a 99 56 67 e1 
-57 83 d7 69 
-" |> __run_hx_monitor__ # careful to use identifier without any hex chars
+57 83 d7 69
 ```
 
+Grammar
+```
+input ::= (junk* hex)* junk*
+hex ::= [0-9A-Fa-f]
+junk ::= ~hex
+```
 
-## Stage 1 ascii bytes -> read assembly
+> Note: this is necessarily not valid dewy syntax. Conforming to dewy syntax is unproductive at this level
+
+### Output:
+No output. Directly executes bytes loaded.
+
+### Expected size: 
+~300 bytes of hex
+
+### Audit Burden
+Almost zero. A person with an ISA manual can verify 300 bytes of hex in an afternoon.
+
+### Prior Art
+hex0 from the live-bootstrap project.
+
+
+
+## Stage 1: Assembler
 Using Stage 0, write a minimal Assembler. It doesn't need to support the whole CPU architecture, just the instructions intended to be use. It supports named labels and basic macros.
-- Audit burden: Very low. It's essentially a dictionary mapping string mnemonics to byte opcodes.
 
-> would be cool if the input to this stage could be valid dewy
+### Bootsrapping
+Write out the bytes for the assembler code, and then pass them into stdin of stage 0
+
+### Input
+Assembly program code written out in ascii passed into stdin
+
 
 ```dewy
-; " 
+; x86_64"
 ; ------------------------------------------------------------
 ; Mock bytecode interpreter core (x86-64, AT&T-ish neutral style)
-; This is a *fragment* intended as "assembly instructions" mock-up.
 ; ------------------------------------------------------------
 
 ; Opcode values (mock)
@@ -76,210 +95,84 @@ op_unused:
 ; " |> __run_x86_64__
 ```
 
-just a note that these are seeming more like polyglot programs rather than valid dewy prgrams because the stage0/stage1 interpreters don't interpret the plumbing that is needed to have dewy run them correctly (i.e. piping a string into a function). And the fact that comment characters are used strategically. 
-
-Basically stage0 and stage1 might be better off just directly being bytes and assembly without also being valid dewy
-
-## Stage 2: assembler -> μdewy
-A very very strict subset of dewy designed to be simple enough that a parser could be implemented in assembly
-Restrictions:
-- only `#` comments
-- `|>` or `id(...)` or `(some_expr)(...)` for function calls
-- `*` for multiply
-- all returns must include an expression (`void` if want no return)
-- other operators: `|>`, `*`, `//`, `%`, `+`, `-`, `.`, `=?`, `not=?`, `>?`, `<?`, `>=?`, `<=?`, `and`, `or`, `not`, `<<`, `>>`
-    - no unary `-`. to get negative numbers, `0-something`. Unless it is really simple to include `'-' <NUM>` in the grammar for listing expressions
-    - TBD support for in-place assignment, e.g. `+=`, `-=`, `*=`, `//=`, `%=`. Ideally nice if could include, or even a smaller subset. 
-    - ~~`~` is separate from `not`. `~` inverts all bits, `not` inverts a boolean (i.e. just the last bit)~~
-        - actually, could have a single unified `not` like dewy if all conditionals just look at the last bit. e.g. `if (cond & 0x1) {...}`
-        - alternatively we could make `true = 0xffff_ffff_ffff_ffff` and `false = 0x0000_0000_0000_0000`. zero performance penalty, just programmers have to be aware/can't use booleans in arithmetic (though ok since not valid dewy anyways)
-        - not clear which is better. first make (some_bool =? true) or (some_bool+some_val) unreliable. second makes authoring boolean tables a bit of a pain (have to define T and F instead of just 0 and 1). But the second might be better in that it encourages authoring code that is more idiomatically correct in the full language. Basically the programmer should only ever use bools officially generated by the language (e.g. `a>?b`, `true`, `a and b or c`), and never make bools themself (e.g. `my_table:array<bool> = [0 1 0 0 1 0 0 1]`)
-    - `and`, and `or` probably can serve as both bitwise and logical
-- ~~all expressions must be fully parenthesized to indicate precedence. (tbd) consider allowing skipping parenthesis, and things are just parsed from left to right regardless (note that it allows programs to deviate in behavior if we include multiple operators of different precedence in the same expression). ~~ Expressions need not be parenthesized, but expressions will always be parsed from left to right. Perhaps we can track if an expression ever consumed a lower precedence operator before a higher precedence one, and error out
-- ~~semicolons are probably mandatory for ending expressions~~ no semicolons at all
-- ~~(tbd) commas are mandatory for separating arguments in functions. also array literals~~ no commas at all
-- strict flow syntax `if (cond) {} else {}`, `if (cond) {} else if (cond) {} else {}` etc.
-- data types (everything is an integer under the hood!):
-    - `string` (no interpolation)
-    - `int64`
-    - `array<int64>`
-    - ~~(maybe) basic structs with named members...~~
-        - actually no structs. instead the strategy is to declare integer offsets used as indices
-        ```udewy
-        # in general, should use more distinct names to prevent overlap
-        # my_struct:type = [a:int b:string c:bool d:inner]
-        # inner:type = [e:int f:int g:int]
-        let a:int=0
-        let b:int=1
-        let c:int=2
-        let d:int=3
-          let e:int=0
-          let f:int=1
-          let g:int=2
-        
-        # get an instance of the struct
-        val:my_struct = some_fn(...)
-        
-        # accessing members
-        val[a]
-        val[b]
-        val[c]
-        val[d][e]
-        val[d][f]
-        val[d][g]
-        ```
-        - actually, accessing members via indexing is going to break semantics with full dewy since we don't know the type being indexed in to, we need to manually multiply the index by the size of elements. **Probably going to take out indexing** in favor of just doing arithmetic directly on pointers
-        ```udewy
-        let a:int=0<<3
-        let b:int=1<<3
-        let c:int=2<<3
-        let d:int=3<<3
-            let e:int=0<<3
-            let f:int=1<<3
-            let g:int=2<<3
-        
-        val:my_struct = ...
-
-        val+a    # val.a
-        val+b    # val.b
-        val+c    # val.c
-        val+d+e  # val.d.e
-        val+d+f  # val.d.f
-        val+d+g  # val.d.g
-        ```
-- all variables are declared with `let name:type = ...` pattern. no destructuring. no using variables immediately without declaring them first. declarations must have an initial value
-    - can also use `const`, but there is no enforcement of `let` vs `const`
-- ~~no typing? or super minimal typing mandatory in all relevant places. no type checking. maybe also no type unions (e.g. something can't be int|undefined?.. but that would be pretty hard to go without.)~~
-    - require type annotations in variable declarations, function signatures, and return type. Actual value is ignored, but type annotations are used to guide parsing.
-- fn declarations: `let name = (arg1:type1 arg2:type2 ...):>rettype => {}`
-- all fn arguments are position only
-- ~~ranges don't support step size. also require bounds parenthesis/brackets~~ no ranges
-- no express feature. must use return. Return must include an expression (`void` if want to not return anything)
-- functions may only be declared at the top level
-    - all functions are treated as forward declared. when an unknown identifier is found while parsing, make a placeholder entry in the function table for it
-- no imports. all code must be a single file...
-    - perhaps we can have a comment convention `###! some/file/path.dewy`, and then an IDE extension that makes it look like multiple files
-    ```udewy
-    ###! globals.dewy
-    let SOMETHING:int = 42
-    #let File:type = [head:int size:int ...]  # type declaration should be done as comments
-    ...
-
-    ###! utils.dewy
-    let readfile = (path:string):>File => ...
-
-    ###! t0.dewy
-    let tokenize = (src:string):>array<token> => ...
+> would be cool if the input to this stage could be valid dewy. But might still be unproductive--TBD, e.g. string prefix funcs might be able to validate stuff, etc. These are seeming more like polyglot programs rather than valid dewy prgrams because the stage1 interpreter doesn't interpret the plumbing that is needed to have dewy run them correctly (i.e. piping a string into a function). And the fact that comment characters are used strategically.
 
 
-    ###! p0.dewy
 
-    ```
+### Output
+(TBD) probably just execute the assembly program passed in
 
-Some example programs:
-```udewy
-if (x =? 1) {
-    printl("One")
-}
+### Expected Size
+~1000 lines of raw machine code (i.e. assembly in hex format)
 
+### Audit Burden
+Very low. It's essentially a dictionary mapping string mnemonics to byte opcodes.
+
+### Prior Art
+6502 ASM
+GNU AS
+etc.
+
+
+## μDewy: Strict Dewy Subset Language
+udewy will be a strict subset of the full dewy programming language. It will be about as powerful as the B programming language, e.g. everything is an integer under the hood, basic flow control and function definitions, etc. Most interactions will be behind function interfaces designed to make stuff more ergonomic (and also support making udewy programs compatible with full dewy).
+
+### Bootsrapping
+TBD exact details. Will be written in the assembly supported by stage 1. But probably will also interact with OS functionality like file loading, memory, etc.
+
+### Input
+udewy source code
+
+### Output
+binary executable
+
+### Expected Size
+~2-5k lines of assembly (depending on backend support, etc. Probably aim lower and pick a single backend)
+
+### Audit Burden
+Medium Low. udewy is designed to be very simple. The grammar is LL(1) so a basic recursive descent parser can be utilized, and the subset of included features from dewy is deliberately minimal, simplifying the required implementation machinery.
+
+### Prior Art
+B programming language
+Project Oberon / Oberon Programming Language
+
+Also relevant is how project oberon interleaves OS functionality into the bootstrap process for each of the language layers
 ```
-
-```udewy
-let i:int = 0
-loop i <? 100 {
-    if i % 15 =? 0 {
-        printl("FizzBuzz")
-    } else {
-        if i % 3 =? 0 {
-            printl("Fizz")
-        } else if i % 5 =? 0 {
-            printl("Buzz")
-        } else {
-            printl(int2str(i))
-        }
-    }
-}
+ROM monitor / firmware
+        ↓
+machine bootstrap loader
+        ↓
+very small runtime + module loader
+        ↓
+basic kernel services (memory, files, devices)
+        ↓
+text system and UI
+        ↓
+compiler
+        ↓
+tools and applications
 ```
+E.g. we'll need to think about how the OS is interleaved in our trusted computing base. This is because the Oberon Programming Language (and presumably udewy) will need to make use of various OS features like interacting with files, stdin/stdout, etc.
 
 
-```udewy
-if (x >? 5) and (x <? 10) {
-    printl("x is in range")
-}
-```
+## Dewy: Fully Features Programming Language
 
+### Bootsrapping
 
-```udewy
-let fib = (n:int):>int => {
-    if (n < 2) {
-        return n
-    } else {
-        return fib(n - 1) + fib(n - 2)
-    }
-};
-printl(int2str(fib(10)))
-```
+### Input
 
+### Output
 
-```udewy
-# 1. Root level function (pointer stored in 'is_even')
-let is_even = (n:int):>bool => {
-    # 3. Boolean operators return 0 or 1
-    return n % 2 =? 0
-}
+### Audit Burden
 
-let main = ():>void => {
-    # 1. Scoping: 'result' is local to main
-    let result:bool = false
-    
-    # 2. Function pointer usage
-    result = is_even(42)
-    
-    # 3. If checks for != 0
-    if (result) {
-        printl("It is even")
-    }
-}
-```
+### Prior Art
 
 
 
-udewy
-```
-# A helper function you would implement in the subset
-# It takes two pointers (int64s) and returns 1 if contents match, 0 otherwise
-let str_eq = (s1:string s2:string):>bool => {
-    # 1. Check length (first 8 bytes at the pointer)
-    # Note: using a hypothetical `peek` intrinsic or assembly insert for memory access
-    let len1:int = s1.length
-    let len2:int = s2.length
-    
-    if len1 not=? len2 { return false }
-    let i:int = 0
-    loop i <? len1 {
-        if s1[i] not=? s2[i] { return false }
-        i = i + 1
-    }
 
-    return true
-}
-
-let main = ():>void => {
-    let msg1:string = "status"
-    let msg2:string = "status"
-    
-    # This works because they likely point to the same interned address 
-    # OR they are different addresses and this returns false (pointer inequality)
-    if msg1 =? msg2 { 
-        printl("Same pointer")
-    }
-
-    # This is the robust way to do it in Stage 2
-    if (str_eq(msg1 msg2)) {
-        printl("Same content")
-    }
-}
-```
-
-## Stage 3: udewy -> full dewy compiler
-...
+## Open Questions
+- what architecture/ISA will be the primary target? perhaps target riscv, and then can cross compile to anything else?
+- how will the OS be interleaved in the language bootstrapping? depends on what features udewy needs for the full compiler. likely:
+    - files/file loading
+    - stdin/stdout
+    - basic memory allocation
