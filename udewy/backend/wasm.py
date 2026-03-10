@@ -597,3 +597,66 @@ class Wasm32Backend:
     def emit_return(self) -> None:
         """Emit a return statement."""
         self._emit("return")
+    
+    # ========================================================================
+    # Intrinsics
+    # ========================================================================
+    
+    _CORE_INTRINSICS = {
+        "__load8__", "__load16__", "__load32__", "__load64__",
+        "__store8__", "__store16__", "__store32__", "__store64__",
+        "__signed_shr__",
+    }
+    
+    _PLATFORM_INTRINSICS = {
+        "__host_log__", "__host_exit__", "__host_time__", "__host_random__",
+        "__dom_set_text__", "__dom_append__", "__dom_clear__",
+        "__dom_append_int__", "__log_int__",
+    }
+    
+    def is_intrinsic(self, name: str) -> bool:
+        """Check if name is an intrinsic supported by this backend."""
+        return name in self._CORE_INTRINSICS or name in self._PLATFORM_INTRINSICS
+    
+    def emit_intrinsic(self, name: str, num_args: int) -> None:
+        """Emit code for an intrinsic call."""
+        if name == "__load8__":
+            self.load_mem(8)
+        elif name == "__load16__":
+            self.load_mem(16)
+        elif name == "__load32__":
+            self.load_mem(32)
+        elif name == "__load64__":
+            self.load_mem(64)
+        elif name == "__store8__":
+            self.store_mem(8)
+        elif name == "__store16__":
+            self.store_mem(16)
+        elif name == "__store32__":
+            self.store_mem(32)
+        elif name == "__store64__":
+            self.store_mem(64)
+        elif name == "__signed_shr__":
+            self.signed_shr()
+        elif name == "__host_log__":
+            self.emit_host_log()
+        elif name == "__host_exit__":
+            self.emit_host_exit()
+        elif name == "__host_time__":
+            self.emit_host_time()
+        elif name == "__host_random__":
+            self.emit_host_random()
+        elif name == "__dom_set_text__":
+            self.emit_host_dom_set_text()
+        elif name == "__dom_append__":
+            self.emit_host_dom_append()
+        elif name == "__dom_clear__":
+            self.emit_host_dom_clear()
+        elif name == "__dom_append_int__":
+            self.emit_host_dom_append_int()
+        elif name == "__log_int__":
+            self.emit_host_log_int()
+    
+    def get_builtin_constants(self) -> dict[str, int]:
+        """WASM browser backend has no built-in constants."""
+        return {}

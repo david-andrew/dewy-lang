@@ -584,3 +584,105 @@ class RiscvBackend:
     def emit_return(self) -> None:
         """Emit a return statement."""
         self._emit(f"j {self._current_fn_epilogue}")
+    
+    # ========================================================================
+    # Intrinsics
+    # ========================================================================
+    
+    _CORE_INTRINSICS = {
+        "__load8__", "__load16__", "__load32__", "__load64__",
+        "__store8__", "__store16__", "__store32__", "__store64__",
+        "__signed_shr__",
+    }
+    
+    _PLATFORM_INTRINSICS = {
+        "__syscall0__", "__syscall1__", "__syscall2__", "__syscall3__",
+        "__syscall4__", "__syscall5__", "__syscall6__",
+    }
+    
+    def is_intrinsic(self, name: str) -> bool:
+        """Check if name is an intrinsic supported by this backend."""
+        return name in self._CORE_INTRINSICS or name in self._PLATFORM_INTRINSICS
+    
+    def emit_intrinsic(self, name: str, num_args: int) -> None:
+        """Emit code for an intrinsic call."""
+        if name == "__load8__":
+            self.load_mem(8)
+        elif name == "__load16__":
+            self.load_mem(16)
+        elif name == "__load32__":
+            self.load_mem(32)
+        elif name == "__load64__":
+            self.load_mem(64)
+        elif name == "__store8__":
+            self.store_mem(8)
+        elif name == "__store16__":
+            self.store_mem(16)
+        elif name == "__store32__":
+            self.store_mem(32)
+        elif name == "__store64__":
+            self.store_mem(64)
+        elif name == "__signed_shr__":
+            self.signed_shr()
+        elif name.startswith("__syscall"):
+            self.syscall(num_args)
+    
+    def get_builtin_constants(self) -> dict[str, int]:
+        """Return RISC-V Linux syscall numbers and common constants."""
+        return {
+            # File descriptors
+            "STDIN": 0,
+            "STDOUT": 1,
+            "STDERR": 2,
+            # Syscall numbers (RISC-V Linux)
+            "SYS_GETCWD": 17,
+            "SYS_DUP": 23,
+            "SYS_DUP3": 24,
+            "SYS_IOCTL": 29,
+            "SYS_MKDIRAT": 34,
+            "SYS_UNLINKAT": 35,
+            "SYS_FTRUNCATE": 46,
+            "SYS_FACCESSAT": 48,
+            "SYS_CHDIR": 49,
+            "SYS_OPENAT": 56,
+            "SYS_CLOSE": 57,
+            "SYS_PIPE2": 59,
+            "SYS_LSEEK": 62,
+            "SYS_READ": 63,
+            "SYS_WRITE": 64,
+            "SYS_READV": 65,
+            "SYS_WRITEV": 66,
+            "SYS_FSTAT": 80,
+            "SYS_EXIT": 93,
+            "SYS_EXIT_GROUP": 94,
+            "SYS_KILL": 129,
+            "SYS_GETPID": 172,
+            "SYS_GETUID": 174,
+            "SYS_GETEUID": 175,
+            "SYS_GETGID": 176,
+            "SYS_GETEGID": 177,
+            "SYS_BRK": 214,
+            "SYS_MUNMAP": 215,
+            "SYS_CLONE": 220,
+            "SYS_EXECVE": 221,
+            "SYS_MMAP": 222,
+            "SYS_WAIT4": 260,
+            # Open flags (same across Linux architectures)
+            "O_RDONLY": 0,
+            "O_WRONLY": 1,
+            "O_RDWR": 2,
+            "O_CREAT": 64,
+            "O_TRUNC": 512,
+            "O_APPEND": 1024,
+            # mmap flags
+            "PROT_NONE": 0,
+            "PROT_READ": 1,
+            "PROT_WRITE": 2,
+            "PROT_EXEC": 4,
+            "MAP_SHARED": 1,
+            "MAP_PRIVATE": 2,
+            "MAP_ANONYMOUS": 32,
+            "MAP_FIXED": 16,
+            # AT_FDCWD for *at syscalls
+            "AT_FDCWD": -100,
+        }

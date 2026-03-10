@@ -235,13 +235,19 @@ def global_declare(global_table: list, name_start: int, name_len: int, label_id:
     return idx
 
 
-def const_lookup(const_table: list, src: str, name_start: int, name_len: int) -> tuple[bool, int]:
+def const_lookup(const_table: list, src: str, name_start: int, name_len: int, builtin_consts: dict | None = None) -> tuple[bool, int]:
+    # First check user-defined constants
     i = 0
     while i < len(const_table):
         entry = const_table[i]
         if name_eq(src, entry[0], entry[1], name_start, name_len):
             return (True, entry[2])
         i = i + 1
+    # Then check backend-provided builtin constants
+    if builtin_consts is not None:
+        name = get_name(src, name_start, name_len)
+        if name in builtin_consts:
+            return (True, builtin_consts[name])
     return (False, 0)
 
 
@@ -352,86 +358,17 @@ def kind_to_op(kind: int) -> str:
 
 
 # ============================================================================
-# Intrinsic detection
+# Intrinsic detection (delegated to backend)
 # ============================================================================
 
-def is_intrinsic(src: str, name_start: int, name_len: int) -> bool:
-    # TODO: restructure so backends own the __syscallN__ intrinsics
-    if name_eq_str(src, name_start, name_len, "__syscall0__"): return True
-    if name_eq_str(src, name_start, name_len, "__syscall1__"): return True
-    if name_eq_str(src, name_start, name_len, "__syscall2__"): return True
-    if name_eq_str(src, name_start, name_len, "__syscall3__"): return True
-    if name_eq_str(src, name_start, name_len, "__syscall4__"): return True
-    if name_eq_str(src, name_start, name_len, "__syscall5__"): return True
-    if name_eq_str(src, name_start, name_len, "__syscall6__"): return True
-    # WASM host functions
-    if name_eq_str(src, name_start, name_len, "__host_log__"): return True
-    if name_eq_str(src, name_start, name_len, "__host_exit__"): return True
-    if name_eq_str(src, name_start, name_len, "__host_time__"): return True
-    if name_eq_str(src, name_start, name_len, "__host_random__"): return True
-    # WASM DOM functions
-    if name_eq_str(src, name_start, name_len, "__dom_set_text__"): return True
-    if name_eq_str(src, name_start, name_len, "__dom_append__"): return True
-    if name_eq_str(src, name_start, name_len, "__dom_clear__"): return True
-    if name_eq_str(src, name_start, name_len, "__dom_append_int__"): return True
-    if name_eq_str(src, name_start, name_len, "__log_int__"): return True
-    if name_eq_str(src, name_start, name_len, "__load64__"): return True
-    if name_eq_str(src, name_start, name_len, "__store64__"): return True
-    if name_eq_str(src, name_start, name_len, "__load8__"): return True
-    if name_eq_str(src, name_start, name_len, "__store8__"): return True
-    if name_eq_str(src, name_start, name_len, "__load16__"): return True
-    if name_eq_str(src, name_start, name_len, "__store16__"): return True
-    if name_eq_str(src, name_start, name_len, "__load32__"): return True
-    if name_eq_str(src, name_start, name_len, "__store32__"): return True
-    if name_eq_str(src, name_start, name_len, "__signed_shr__"): return True
-    return False
+def is_intrinsic(backend, name: str) -> bool:
+    """Check if the given name is an intrinsic supported by the backend."""
+    return backend.is_intrinsic(name)
 
 
-def emit_intrinsic(backend, src: str, name_start: int, name_len: int, num_args: int) -> None:
+def emit_intrinsic(backend, name: str, num_args: int) -> None:
     """Emit intrinsic call via backend."""
-    name = get_name(src, name_start, name_len)
-    
-    if name == "__load64__":
-        backend.load_mem(64)
-    elif name == "__store64__":
-        backend.store_mem(64)
-    elif name == "__load8__":
-        backend.load_mem(8)
-    elif name == "__store8__":
-        backend.store_mem(8)
-    elif name == "__load16__":
-        backend.load_mem(16)
-    elif name == "__store16__":
-        backend.store_mem(16)
-    elif name == "__load32__":
-        backend.load_mem(32)
-    elif name == "__store32__":
-        backend.store_mem(32)
-    # TODO: backend should own __syscallN__ and potentially other intrinsics
-    elif name.startswith("__syscall"):
-        backend.syscall(num_args)
-    # WASM host functions (only available on wasm32 backend)
-    elif name == "__host_log__":
-        backend.emit_host_log()
-    elif name == "__host_exit__":
-        backend.emit_host_exit()
-    elif name == "__host_time__":
-        backend.emit_host_time()
-    elif name == "__host_random__":
-        backend.emit_host_random()
-    # WASM DOM functions
-    elif name == "__dom_set_text__":
-        backend.emit_host_dom_set_text()
-    elif name == "__dom_append__":
-        backend.emit_host_dom_append()
-    elif name == "__dom_clear__":
-        backend.emit_host_dom_clear()
-    elif name == "__dom_append_int__":
-        backend.emit_host_dom_append_int()
-    elif name == "__log_int__":
-        backend.emit_host_log_int()
-    elif name == "__signed_shr__":
-        backend.signed_shr()
+    backend.emit_intrinsic(name, num_args)
 
 
 # ============================================================================
@@ -492,6 +429,12 @@ def parse_atom(toks: list, idx: int, src: str, backend,
             backend.load_global(entry[2])
             return idx + 1
         
+        # Check constants (user-defined and backend-provided builtins)
+        found, val = const_lookup(const_table, src, name_start, name_len, ctx.get("builtin_consts"))
+        if found:
+            backend.push_const_i64(val)
+            return idx + 1
+        
         fn_idx = fn_lookup(fn_table, src, name_start, name_len)
         if fn_idx >= 0:
             entry = fn_table[fn_idx]
@@ -516,10 +459,11 @@ def parse_atom(toks: list, idx: int, src: str, backend,
         
         idx = expect(toks, idx, t0.TK_RIGHT_PAREN, src)
         
-        if is_intrinsic(src, name_start, name_len):
+        name = get_name(src, name_start, name_len)
+        if is_intrinsic(backend, name):
             if arg_count > 0:
                 backend.restore_value()
-            emit_intrinsic(backend, src, name_start, name_len, arg_count)
+            emit_intrinsic(backend, name, arg_count)
         else:
             fn_idx = fn_lookup(fn_table, src, name_start, name_len)
             if fn_idx < 0:
@@ -553,7 +497,7 @@ def parse_atom(toks: list, idx: int, src: str, backend,
                 ns = tok_name_start(toks, idx)
                 nl = tok_name_len(toks, idx)
                 
-                found, val = const_lookup(const_table, src, ns, nl)
+                found, val = const_lookup(const_table, src, ns, nl, ctx.get("builtin_consts"))
                 if found:
                     elem_directives.append(val)
                     idx = idx + 1
@@ -1069,7 +1013,7 @@ def parse_program(toks: list, src: str, backend,
                     elif elem_kind == t0.TK_IDENT:
                         ns = tok_name_start(toks, idx)
                         nl = tok_name_len(toks, idx)
-                        found, val = const_lookup(const_table, src, ns, nl)
+                        found, val = const_lookup(const_table, src, ns, nl, ctx.get("builtin_consts"))
                         if found:
                             elem_directives.append(val)
                             idx = idx + 1
@@ -1143,7 +1087,10 @@ def parse(toks: list, src: str, target: str = "x86_64") -> str:
     global_table: list = []
     const_table: list = []
     scope_stack: list = [[]]
-    ctx = {}
+    
+    # Get backend-provided builtin constants (syscall numbers, etc.)
+    builtin_consts = backend.get_builtin_constants()
+    ctx = {"builtin_consts": builtin_consts}
     
     parse_program(toks, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
     

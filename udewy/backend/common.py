@@ -335,6 +335,41 @@ class Backend(Protocol):
         Return value should be on top of stack.
         """
         ...
+    
+    # ========================================================================
+    # Intrinsics
+    # ========================================================================
+    
+    def is_intrinsic(self, name: str) -> bool:
+        """
+        Check if the given name is an intrinsic supported by this backend.
+        
+        Backends should return True for both core intrinsics (load/store, etc.)
+        and any platform-specific intrinsics they support.
+        """
+        ...
+    
+    def emit_intrinsic(self, name: str, num_args: int) -> None:
+        """
+        Emit code for an intrinsic call.
+        
+        Called after arguments have been pushed to the stack.
+        The backend is responsible for consuming the arguments and
+        leaving the result on the stack.
+        """
+        ...
+    
+    def get_builtin_constants(self) -> dict[str, int]:
+        """
+        Return a dictionary of built-in constants provided by this backend.
+        
+        These constants are automatically available in udewy programs
+        targeting this backend. Typically used for syscall numbers on
+        Linux backends.
+        
+        Returns: dict mapping constant name to value
+        """
+        ...
 
 
 # Type alias for backend constructors

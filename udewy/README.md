@@ -40,9 +40,7 @@ The compiler produces artifacts in `__dewycache__/`.
 ### Hello World
 
 ```udewy
-const SYS_WRITE:int = 1
-const STDOUT:int = 1
-
+# SYS_WRITE and STDOUT are builtin constants provided by the x86_64 backend
 let main = ():>int => {
     let msg:int = "Hello from udewy!\n"
     let len:int = __load64__(msg - 8)
@@ -759,11 +757,30 @@ Intrinsics fall into two categories:
 
 1. **Core intrinsics** - Implemented by all backends (memory operations, `__signed_shr__`)
 2. **Platform intrinsics** - Provided by specific backends for their target environment
+3. **Builtin constants** - Backends can provide named constants automatically available to programs
 
 For example:
-- Linux backends provide `__syscall0__` through `__syscall6__`
-- The WASM browser backend provides `__host_log__`, `__host_time__`, etc.
+- Linux backends provide `__syscall0__` through `__syscall6__` intrinsics, plus builtin constants for syscall numbers (`SYS_WRITE`, `SYS_EXIT`, etc.) and common flags
+- The WASM browser backend provides `__host_log__`, `__host_time__`, etc. for browser interaction
 - A hypothetical Windows backend would provide different intrinsics for Win32 API calls
+
+### Builtin Constants
+
+Linux backends automatically provide constants for:
+- **Syscall numbers**: `SYS_READ`, `SYS_WRITE`, `SYS_OPEN`, `SYS_CLOSE`, `SYS_EXIT`, etc.
+- **File descriptors**: `STDIN`, `STDOUT`, `STDERR`
+- **Open flags**: `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_CREAT`, `O_TRUNC`, `O_APPEND`
+- **Memory mapping flags**: `PROT_READ`, `PROT_WRITE`, `PROT_EXEC`, `MAP_SHARED`, `MAP_PRIVATE`, `MAP_ANONYMOUS`
+
+These constants are available without explicit declaration:
+
+```udewy
+# No need to declare SYS_WRITE - it's provided by the x86_64 backend
+let msg = "Hello\n"
+__syscall3__(SYS_WRITE STDOUT @msg __load64__(msg))
+```
+
+Note: Syscall numbers differ between architectures. x86_64 uses the traditional Linux syscall numbers, while RISC-V and AArch64 use the newer unified syscall table (e.g., `SYS_OPENAT` instead of `SYS_OPEN`).
 
 ### Writing Portable Code
 
@@ -928,11 +945,7 @@ let main = ():>int => {
 ## Memory Allocation with mmap
 
 ```udewy
-const SYS_MMAP:int = 9
-const PROT_READ:int = 1
-const PROT_WRITE:int = 2
-const MAP_PRIVATE:int = 2
-const MAP_ANONYMOUS:int = 32
+# SYS_MMAP, PROT_*, MAP_* constants are provided by the x86_64 backend
 
 let alloc = (size:int):>int => {
     return __syscall6__(SYS_MMAP 0 size (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) (0 - 1) 0)
@@ -1002,22 +1015,74 @@ Syscall convention:
 - Arguments in `rdi`, `rsi`, `rdx`, `r10`, `r8`, `r9`
 - Return value in `rax`
 
-## A.4 Common Syscall Numbers (x86_64 Linux)
+## A.4 Builtin Constants
 
-```udewy
-const SYS_READ:int = 0
-const SYS_WRITE:int = 1
-const SYS_OPEN:int = 2
-const SYS_CLOSE:int = 3
-const SYS_STAT:int = 4
-const SYS_FSTAT:int = 5
-const SYS_LSEEK:int = 8
-const SYS_MMAP:int = 9
-const SYS_MUNMAP:int = 11
-const SYS_BRK:int = 12
-const SYS_EXIT:int = 60
-const SYS_EXIT_GROUP:int = 231
-```
+The x86_64 backend provides the following constants automatically (no declaration needed):
+
+**Syscall Numbers:**
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `SYS_READ` | 0 | Read from file descriptor |
+| `SYS_WRITE` | 1 | Write to file descriptor |
+| `SYS_OPEN` | 2 | Open file |
+| `SYS_CLOSE` | 3 | Close file descriptor |
+| `SYS_STAT` | 4 | Get file status |
+| `SYS_FSTAT` | 5 | Get file status by fd |
+| `SYS_LSEEK` | 8 | Reposition file offset |
+| `SYS_MMAP` | 9 | Map memory |
+| `SYS_MUNMAP` | 11 | Unmap memory |
+| `SYS_BRK` | 12 | Change data segment size |
+| `SYS_IOCTL` | 16 | Device control |
+| `SYS_PIPE` | 22 | Create pipe |
+| `SYS_DUP` | 32 | Duplicate fd |
+| `SYS_DUP2` | 33 | Duplicate fd to specific number |
+| `SYS_GETPID` | 39 | Get process ID |
+| `SYS_FORK` | 57 | Create child process |
+| `SYS_EXECVE` | 59 | Execute program |
+| `SYS_EXIT` | 60 | Exit process |
+| `SYS_WAIT4` | 61 | Wait for process |
+| `SYS_KILL` | 62 | Send signal |
+| `SYS_GETCWD` | 79 | Get current directory |
+| `SYS_CHDIR` | 80 | Change directory |
+| `SYS_MKDIR` | 83 | Create directory |
+| `SYS_RMDIR` | 84 | Remove directory |
+| `SYS_CREAT` | 85 | Create file |
+| `SYS_UNLINK` | 87 | Delete file |
+| `SYS_GETUID` | 102 | Get user ID |
+| `SYS_GETGID` | 104 | Get group ID |
+| `SYS_GETEUID` | 107 | Get effective user ID |
+| `SYS_GETEGID` | 108 | Get effective group ID |
+| `SYS_CLOCK_GETTIME` | 228 | Get time |
+| `SYS_EXIT_GROUP` | 231 | Exit all threads |
+
+**File Descriptors:**
+| Constant | Value |
+|----------|-------|
+| `STDIN` | 0 |
+| `STDOUT` | 1 |
+| `STDERR` | 2 |
+
+**Open Flags:**
+| Constant | Value |
+|----------|-------|
+| `O_RDONLY` | 0 |
+| `O_WRONLY` | 1 |
+| `O_RDWR` | 2 |
+| `O_CREAT` | 64 |
+| `O_TRUNC` | 512 |
+| `O_APPEND` | 1024 |
+
+**Memory Mapping:**
+| Constant | Value |
+|----------|-------|
+| `PROT_NONE` | 0 |
+| `PROT_READ` | 1 |
+| `PROT_WRITE` | 2 |
+| `PROT_EXEC` | 4 |
+| `MAP_SHARED` | 1 |
+| `MAP_PRIVATE` | 2 |
+| `MAP_FIXED` | 16 |
+| `MAP_ANONYMOUS` | 32 |
 
 ---
 
@@ -1053,19 +1118,47 @@ Syscall convention:
 - Arguments in `a0`-`a5`
 - Return value in `a0`
 
-## B.4 Common Syscall Numbers (RISC-V Linux)
+## B.4 Builtin Constants
 
-```udewy
-const SYS_READ:int = 63
-const SYS_WRITE:int = 64
-const SYS_OPENAT:int = 56
-const SYS_CLOSE:int = 57
-const SYS_MMAP:int = 222
-const SYS_EXIT:int = 93
-const SYS_EXIT_GROUP:int = 94
-```
+The RISC-V backend provides constants automatically. RISC-V Linux uses the unified "new-style" syscall table.
 
-**Note:** RISC-V Linux uses different syscall numbers than x86_64. Programs using syscalls must use the correct constants for the target architecture.
+**Syscall Numbers:**
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `SYS_GETCWD` | 17 | Get current directory |
+| `SYS_DUP` | 23 | Duplicate fd |
+| `SYS_DUP3` | 24 | Duplicate fd with flags |
+| `SYS_IOCTL` | 29 | Device control |
+| `SYS_MKDIRAT` | 34 | Create directory (relative) |
+| `SYS_UNLINKAT` | 35 | Delete file (relative) |
+| `SYS_FTRUNCATE` | 46 | Truncate file |
+| `SYS_FACCESSAT` | 48 | Check file access |
+| `SYS_CHDIR` | 49 | Change directory |
+| `SYS_OPENAT` | 56 | Open file (relative) |
+| `SYS_CLOSE` | 57 | Close fd |
+| `SYS_PIPE2` | 59 | Create pipe |
+| `SYS_LSEEK` | 62 | Seek in file |
+| `SYS_READ` | 63 | Read from fd |
+| `SYS_WRITE` | 64 | Write to fd |
+| `SYS_FSTAT` | 80 | Get file status |
+| `SYS_EXIT` | 93 | Exit process |
+| `SYS_EXIT_GROUP` | 94 | Exit all threads |
+| `SYS_KILL` | 129 | Send signal |
+| `SYS_GETPID` | 172 | Get process ID |
+| `SYS_GETUID` | 174 | Get user ID |
+| `SYS_GETEUID` | 175 | Get effective user ID |
+| `SYS_GETGID` | 176 | Get group ID |
+| `SYS_GETEGID` | 177 | Get effective group ID |
+| `SYS_BRK` | 214 | Change data segment size |
+| `SYS_MUNMAP` | 215 | Unmap memory |
+| `SYS_CLONE` | 220 | Create process |
+| `SYS_EXECVE` | 221 | Execute program |
+| `SYS_MMAP` | 222 | Map memory |
+| `SYS_WAIT4` | 260 | Wait for process |
+
+**Note:** RISC-V uses `*at` syscalls (e.g., `SYS_OPENAT` instead of `SYS_OPEN`). Use `AT_FDCWD` (-100) as the directory fd for current directory.
+
+File descriptor, open flag, and mmap constants are the same as x86_64 (see Addendum A).
 
 ---
 
@@ -1096,19 +1189,9 @@ Syscall convention:
 - Arguments in `x0`-`x5`
 - Return value in `x0`
 
-## C.4 Common Syscall Numbers (AArch64 Linux)
+## C.4 Builtin Constants
 
-```udewy
-const SYS_READ:int = 63
-const SYS_WRITE:int = 64
-const SYS_OPENAT:int = 56
-const SYS_CLOSE:int = 57
-const SYS_MMAP:int = 222
-const SYS_EXIT:int = 93
-const SYS_EXIT_GROUP:int = 94
-```
-
-**Note:** AArch64 Linux syscall numbers are the same as RISC-V Linux.
+AArch64 Linux uses the same unified syscall table as RISC-V Linux. All builtin constants (syscall numbers, file descriptors, flags) are identical to RISC-V (see Addendum B).
 
 ---
 
