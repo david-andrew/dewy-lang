@@ -50,7 +50,7 @@ let get_basename = (path:int):>int => {
     let len:int = str_len_cstr(path)
     let i:int = len - 1
     loop i >=? 0 {
-        if __load8__(path + i) =? CH_SLASH {
+        if __load_u8__(path + i) =? CH_SLASH {
             return path + i + 1
         }
         i = i - 1
@@ -64,7 +64,7 @@ let strip_extension = (path:int out:int):>int => {
     let dot:int = -1
     let i:int = len - 1
     loop i >=? 0 {
-        if __load8__(base + i) =? CH_DOT {
+        if __load_u8__(base + i) =? CH_DOT {
             dot = i
             break
         }
@@ -72,7 +72,7 @@ let strip_extension = (path:int out:int):>int => {
     }
     if dot <? 0 { dot = len }
     mem_copy(out base dot)
-    __store8__(0 out + dot)
+    __store_u8__(0 out + dot)
     return dot
 }
 
@@ -110,7 +110,7 @@ let parse_args = (argc:int argv:int):>void => {
         }
         
         # Input file
-        if __load8__(arg) not=? CH_MINUS {
+        if __load_u8__(arg) not=? CH_MINUS {
             input_path = arg
         }
         
@@ -163,7 +163,7 @@ let is_imported = (path_start:int path_len:int):>int => {
 let mark_imported = (path_start:int path_len:int):>void => {
     let copy:int = arena_alloc(path_len + 1)
     mem_copy(copy src_ptr + path_start path_len)
-    __store8__(0 copy + path_len)
+    __store_u8__(0 copy + path_len)
     ptr_set(processed_imports num_imports copy)
     num_imports = num_imports + 1
     return void

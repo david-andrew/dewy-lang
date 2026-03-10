@@ -35,14 +35,14 @@ let pos:int = 0
 let parse_error:int = 0
 
 let write = (s:int):>void => {
-    let n:int = __load64__(s - 8)
+    let n:int = __load__(s - 8)
     __syscall3__(SYS_WRITE STDOUT s n)
     return void
 }
 
 let out_char = (c:int):>void => {
     let buf:int = " "
-    __store8__(c buf)
+    __store_u8__(c buf)
     __syscall3__(SYS_WRITE STDOUT buf 1)
     return void
 }
@@ -61,14 +61,14 @@ let print_int = (x:int):>void => {
     let digits = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
     let n:int = 0
     loop x >? 0 {
-        __store64__((x % 10) + CH_0 digits + (n * 8))
+        __store__((x % 10) + CH_0 digits + (n * 8))
         x = x // 10
         n = n + 1
     }
 
     n = n - 1
     loop n >=? 0 {
-        out_char(__load64__(digits + (n * 8)))
+        out_char(__load__(digits + (n * 8)))
         n = n - 1
     }
     return void
@@ -83,7 +83,7 @@ let is_digit = (c:int):>int => {
 
 let skip_ws = ():>void => {
     loop pos <? src_len {
-        let c:int = __load8__(src_ptr + pos)
+        let c:int = __load_u8__(src_ptr + pos)
         if (c =? CH_SPACE) or (c =? CH_TAB) or (c =? CH_LF) or (c =? CH_CR) {
             pos = pos + 1
             continue
@@ -98,7 +98,7 @@ let peek = ():>int => {
     if pos >=? src_len {
         return CH_NUL
     }
-    return __load8__(src_ptr + pos)
+    return __load_u8__(src_ptr + pos)
 }
 
 let consume = (ch:int):>int => {
@@ -183,8 +183,8 @@ let parse_number = ():>int => {
     }
 
     let value:int = 0
-    loop (pos <? src_len) and is_digit(__load8__(src_ptr + pos)) {
-        value = (value * 10) + (__load8__(src_ptr + pos) - CH_0)
+    loop (pos <? src_len) and is_digit(__load_u8__(src_ptr + pos)) {
+        value = (value * 10) + (__load_u8__(src_ptr + pos) - CH_0)
         pos = pos + 1
     }
     return value * sign
@@ -215,7 +215,7 @@ let main = ():>int => {
         loop chunk_pos <? read_len {
             let line_start:int = chunk_pos
             loop chunk_pos <? read_len {
-                let c:int = __load8__(buf_ptr + chunk_pos)
+                let c:int = __load_u8__(buf_ptr + chunk_pos)
                 if (c =? CH_LF) or (c =? CH_CR) {
                     break
                 }
@@ -239,9 +239,9 @@ let main = ():>int => {
             }
 
             if chunk_pos <? read_len {
-                let sep:int = __load8__(buf_ptr + chunk_pos)
+                let sep:int = __load_u8__(buf_ptr + chunk_pos)
                 chunk_pos = chunk_pos + 1
-                if (sep =? CH_CR) and (chunk_pos <? read_len) and (__load8__(buf_ptr + chunk_pos) =? CH_LF) {
+                if (sep =? CH_CR) and (chunk_pos <? read_len) and (__load_u8__(buf_ptr + chunk_pos) =? CH_LF) {
                     chunk_pos = chunk_pos + 1
                 }
             }

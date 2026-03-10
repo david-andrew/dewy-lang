@@ -112,14 +112,6 @@ A simple arena allocator provides all dynamic memory. This avoids the complexity
 
 Expression evaluation uses the hardware stack for temporaries. Each backend implements push/pop operations appropriate to its calling convention.
 
-## Differences from Original Compiler
-
-1. **Modular Structure**: Split into multiple files with clear responsibilities
-2. **Multi-Backend**: Supports x86_64, RISC-V, and ARM64 targets
-3. **Proper Negative Literals**: Uses `-42` directly instead of `0-42`
-4. **Cleaner Intrinsics**: Updated to use `__load64__`/`__store64__` naming
-5. **Import Support**: Uses udewy's import system for modularity
-
 ## Self-Hosting
 
 The bootstrap compiler can compile itself (once the Python compiler builds it first):

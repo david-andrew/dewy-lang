@@ -27,16 +27,16 @@ let text_init = ():>void => {
 }
 
 let text_char = (c:int):>void => {
-    __store8__(c text_buf + text_ptr)
+    __store_u8__(c text_buf + text_ptr)
     text_ptr = text_ptr + 1
     return void
 }
 
 let text_str = (s:int):>void => {
-    let len:int = __load64__(s - 8)
+    let len:int = __load__(s - 8)
     let i:int = 0
     loop i <? len {
-        text_char(__load8__(s + i))
+        text_char(__load_u8__(s + i))
         i = i + 1
     }
     return void
@@ -44,8 +44,8 @@ let text_str = (s:int):>void => {
 
 let text_cstr = (s:int):>void => {
     let i:int = 0
-    loop __load8__(s + i) not=? 0 {
-        text_char(__load8__(s + i))
+    loop __load_u8__(s + i) not=? 0 {
+        text_char(__load_u8__(s + i))
         i = i + 1
     }
     return void
@@ -56,7 +56,7 @@ let text_int = (n:int):>void => {
     let len:int = int_to_str(n buf)
     let i:int = 0
     loop i <? len {
-        text_char(__load8__(buf + i))
+        text_char(__load_u8__(buf + i))
         i = i + 1
     }
     return void
@@ -68,7 +68,7 @@ let text_hex = (n:int):>void => {
     let len:int = int_to_hex(n buf)
     let i:int = 0
     loop i <? len {
-        text_char(__load8__(buf + i))
+        text_char(__load_u8__(buf + i))
         i = i + 1
     }
     return void
@@ -106,16 +106,16 @@ let data_init = ():>void => {
 }
 
 let data_char = (c:int):>void => {
-    __store8__(c data_buf + data_ptr)
+    __store_u8__(c data_buf + data_ptr)
     data_ptr = data_ptr + 1
     return void
 }
 
 let data_str = (s:int):>void => {
-    let len:int = __load64__(s - 8)
+    let len:int = __load__(s - 8)
     let i:int = 0
     loop i <? len {
-        data_char(__load8__(s + i))
+        data_char(__load_u8__(s + i))
         i = i + 1
     }
     return void
@@ -126,7 +126,7 @@ let data_int = (n:int):>void => {
     let len:int = int_to_str(n buf)
     let i:int = 0
     loop i <? len {
-        data_char(__load8__(buf + i))
+        data_char(__load_u8__(buf + i))
         i = i + 1
     }
     return void

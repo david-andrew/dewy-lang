@@ -35,8 +35,8 @@ let fn_lookup = (name_start:int name_len:int):>int => {
     let i:int = 0
     loop i <? fn_count {
         let addr:int = fn_table + (i * FN_ENTRY_SIZE)
-        let start:int = __load64__(addr)
-        let len:int = __load64__(addr + 8)
+        let start:int = __load__(addr)
+        let len:int = __load__(addr + 8)
         if str_eq_len(src_ptr + name_start name_len src_ptr + start len) {
             return i
         }
@@ -47,33 +47,33 @@ let fn_lookup = (name_start:int name_len:int):>int => {
 
 let fn_add = (name_start:int name_len:int label_id:int num_args:int is_def:int):>int => {
     let addr:int = fn_table + (fn_count * FN_ENTRY_SIZE)
-    __store64__(name_start addr)
-    __store64__(name_len addr + 8)
-    __store64__(label_id addr + 16)
-    __store64__(num_args addr + 24)
-    __store64__(is_def addr + 32)
+    __store__(name_start addr)
+    __store__(name_len addr + 8)
+    __store__(label_id addr + 16)
+    __store__(num_args addr + 24)
+    __store__(is_def addr + 32)
     let idx:int = fn_count
     fn_count = fn_count + 1
     return idx
 }
 
 let fn_get_label = (idx:int):>int => {
-    return __load64__(fn_table + (idx * FN_ENTRY_SIZE) + 16)
+    return __load__(fn_table + (idx * FN_ENTRY_SIZE) + 16)
 }
 
 let fn_get_num_args = (idx:int):>int => {
-    return __load64__(fn_table + (idx * FN_ENTRY_SIZE) + 24)
+    return __load__(fn_table + (idx * FN_ENTRY_SIZE) + 24)
 }
 
 let fn_set_defined = (idx:int num_args:int):>void => {
     let addr:int = fn_table + (idx * FN_ENTRY_SIZE)
-    __store64__(num_args addr + 24)
-    __store64__(TRUE addr + 32)
+    __store__(num_args addr + 24)
+    __store__(TRUE addr + 32)
     return void
 }
 
 let fn_is_defined = (idx:int):>int => {
-    return __load64__(fn_table + (idx * FN_ENTRY_SIZE) + 32)
+    return __load__(fn_table + (idx * FN_ENTRY_SIZE) + 32)
 }
 
 # ============================================================================
@@ -95,8 +95,8 @@ let glob_lookup = (name_start:int name_len:int):>int => {
     let i:int = 0
     loop i <? glob_count {
         let addr:int = glob_table + (i * GLOB_ENTRY_SIZE)
-        let start:int = __load64__(addr)
-        let len:int = __load64__(addr + 8)
+        let start:int = __load__(addr)
+        let len:int = __load__(addr + 8)
         if str_eq_len(src_ptr + name_start name_len src_ptr + start len) {
             return i
         }
@@ -107,16 +107,16 @@ let glob_lookup = (name_start:int name_len:int):>int => {
 
 let glob_add = (name_start:int name_len:int label_id:int):>int => {
     let addr:int = glob_table + (glob_count * GLOB_ENTRY_SIZE)
-    __store64__(name_start addr)
-    __store64__(name_len addr + 8)
-    __store64__(label_id addr + 16)
+    __store__(name_start addr)
+    __store__(name_len addr + 8)
+    __store__(label_id addr + 16)
     let idx:int = glob_count
     glob_count = glob_count + 1
     return idx
 }
 
 let glob_get_label = (idx:int):>int => {
-    return __load64__(glob_table + (idx * GLOB_ENTRY_SIZE) + 16)
+    return __load__(glob_table + (idx * GLOB_ENTRY_SIZE) + 16)
 }
 
 # ============================================================================
@@ -138,8 +138,8 @@ let const_lookup = (name_start:int name_len:int):>int => {
     let i:int = 0
     loop i <? const_count {
         let addr:int = const_table + (i * CONST_ENTRY_SIZE)
-        let start:int = __load64__(addr)
-        let len:int = __load64__(addr + 8)
+        let start:int = __load__(addr)
+        let len:int = __load__(addr + 8)
         if str_eq_len(src_ptr + name_start name_len src_ptr + start len) {
             return i
         }
@@ -150,16 +150,16 @@ let const_lookup = (name_start:int name_len:int):>int => {
 
 let const_add = (name_start:int name_len:int value:int):>int => {
     let addr:int = const_table + (const_count * CONST_ENTRY_SIZE)
-    __store64__(name_start addr)
-    __store64__(name_len addr + 8)
-    __store64__(value addr + 16)
+    __store__(name_start addr)
+    __store__(name_len addr + 8)
+    __store__(value addr + 16)
     let idx:int = const_count
     const_count = const_count + 1
     return idx
 }
 
 let const_get_value = (idx:int):>int => {
-    return __load64__(const_table + (idx * CONST_ENTRY_SIZE) + 16)
+    return __load__(const_table + (idx * CONST_ENTRY_SIZE) + 16)
 }
 
 # ============================================================================
@@ -176,14 +176,14 @@ let scope_init = ():>void => {
     scope_stack = arena_alloc(MAX_SCOPES * 8)
     scope_vars = arena_alloc(MAX_SCOPES * MAX_VARS_PER_SCOPE * SCOPE_VAR_SIZE)
     scope_depth = 0
-    __store64__(0 scope_stack)
+    __store__(0 scope_stack)
     return void
 }
 
 let scope_push = ():>void => {
-    let prev_count:int = __load64__(scope_stack + (scope_depth * 8))
+    let prev_count:int = __load__(scope_stack + (scope_depth * 8))
     scope_depth = scope_depth + 1
-    __store64__(prev_count scope_stack + (scope_depth * 8))
+    __store__(prev_count scope_stack + (scope_depth * 8))
     return void
 }
 
@@ -196,18 +196,18 @@ let var_lookup = (name_start:int name_len:int):>int => {
     let d:int = scope_depth
     loop d >=? 0 {
         let base:int = scope_vars + (d * MAX_VARS_PER_SCOPE * SCOPE_VAR_SIZE)
-        let count:int = __load64__(scope_stack + (d * 8))
+        let count:int = __load__(scope_stack + (d * 8))
         let prev:int = 0
         if d >? 0 {
-            prev = __load64__(scope_stack + ((d - 1) * 8))
+            prev = __load__(scope_stack + ((d - 1) * 8))
         }
         let i:int = prev
         loop i <? count {
             let addr:int = scope_vars + (i * SCOPE_VAR_SIZE)
-            let start:int = __load64__(addr)
-            let len:int = __load64__(addr + 8)
+            let start:int = __load__(addr)
+            let len:int = __load__(addr + 8)
             if str_eq_len(src_ptr + name_start name_len src_ptr + start len) {
-                return __load64__(addr + 16)
+                return __load__(addr + 16)
             }
             i = i + 1
         }
@@ -217,12 +217,12 @@ let var_lookup = (name_start:int name_len:int):>int => {
 }
 
 let var_add = (name_start:int name_len:int stack_off:int):>void => {
-    let count:int = __load64__(scope_stack + (scope_depth * 8))
+    let count:int = __load__(scope_stack + (scope_depth * 8))
     let addr:int = scope_vars + (count * SCOPE_VAR_SIZE)
-    __store64__(name_start addr)
-    __store64__(name_len addr + 8)
-    __store64__(stack_off addr + 16)
-    __store64__(count + 1 scope_stack + (scope_depth * 8))
+    __store__(name_start addr)
+    __store__(name_len addr + 8)
+    __store__(stack_off addr + 16)
+    __store__(count + 1 scope_stack + (scope_depth * 8))
     return void
 }
 

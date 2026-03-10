@@ -21,9 +21,13 @@ let riscv_emit_prologue = (frame_size:int):>void => {
     text_str("    sd s0, ")
     text_int(total - 16)
     text_line("(sp)")
+    text_str("    sd s1, ")
+    text_int(total - 24)
+    text_line("(sp)")
     text_str("    addi s0, sp, ")
     text_int(total)
     text_char(CH_LF)
+    text_line("    mv s1, sp")
     return void
 }
 
@@ -35,6 +39,9 @@ let riscv_emit_epilogue = (frame_size:int):>void => {
     text_line("(sp)")
     text_str("    ld s0, ")
     text_int(total - 16)
+    text_line("(sp)")
+    text_str("    ld s1, ")
+    text_int(total - 24)
     text_line("(sp)")
     text_str("    addi sp, sp, ")
     text_int(total)
@@ -304,40 +311,96 @@ let riscv_emit_intrinsic = (name:int num_args:int):>void => {
         return void
     }
     
-    if str_eq(name "__load64__") {
+    if str_eq(name "__load_u64__") or str_eq(name "__load_i64__") or str_eq(name "__load__") {
         text_line("    ld a0, 0(a0)")
         return void
     }
-    if str_eq(name "__store64__") {
+    if str_eq(name "__store_u64__") or str_eq(name "__store_i64__") or str_eq(name "__store__") {
         riscv_emit_pop("t0")
         text_line("    sd t0, 0(a0)")
         return void
     }
-    if str_eq(name "__load32__") {
+    if str_eq(name "__load_u32__") {
+        text_line("    lwu a0, 0(a0)")
+        return void
+    }
+    if str_eq(name "__load_i32__") {
         text_line("    lw a0, 0(a0)")
         return void
     }
-    if str_eq(name "__store32__") {
+    if str_eq(name "__store_u32__") or str_eq(name "__store_i32__") {
         riscv_emit_pop("t0")
         text_line("    sw t0, 0(a0)")
         return void
     }
-    if str_eq(name "__load16__") {
+    if str_eq(name "__load_u16__") {
         text_line("    lhu a0, 0(a0)")
         return void
     }
-    if str_eq(name "__store16__") {
+    if str_eq(name "__load_i16__") {
+        text_line("    lh a0, 0(a0)")
+        return void
+    }
+    if str_eq(name "__store_u16__") or str_eq(name "__store_i16__") {
         riscv_emit_pop("t0")
         text_line("    sh t0, 0(a0)")
         return void
     }
-    if str_eq(name "__load8__") {
+    if str_eq(name "__load_u8__") {
         text_line("    lbu a0, 0(a0)")
         return void
     }
-    if str_eq(name "__store8__") {
+    if str_eq(name "__load_i8__") {
+        text_line("    lb a0, 0(a0)")
+        return void
+    }
+    if str_eq(name "__store_u8__") or str_eq(name "__store_i8__") {
         riscv_emit_pop("t0")
         text_line("    sb t0, 0(a0)")
+        return void
+    }
+    if str_eq(name "__unsigned_idiv__") {
+        riscv_emit_pop("t0")
+        text_line("    divu a0, t0, a0")
+        return void
+    }
+    if str_eq(name "__unsigned_mod__") {
+        riscv_emit_pop("t0")
+        text_line("    remu a0, t0, a0")
+        return void
+    }
+    if str_eq(name "__unsigned_lt__") {
+        riscv_emit_pop("t0")
+        text_line("    sltu a0, t0, a0")
+        text_line("    neg a0, a0")
+        return void
+    }
+    if str_eq(name "__unsigned_gt__") {
+        riscv_emit_pop("t0")
+        text_line("    sltu a0, a0, t0")
+        text_line("    neg a0, a0")
+        return void
+    }
+    if str_eq(name "__unsigned_lte__") {
+        riscv_emit_pop("t0")
+        text_line("    sltu a0, a0, t0")
+        text_line("    seqz a0, a0")
+        text_line("    neg a0, a0")
+        return void
+    }
+    if str_eq(name "__unsigned_gte__") {
+        riscv_emit_pop("t0")
+        text_line("    sltu a0, t0, a0")
+        text_line("    seqz a0, a0")
+        text_line("    neg a0, a0")
+        return void
+    }
+    if str_eq(name "__alloca__") {
+        text_line("    addi a0, a0, 7")
+        text_line("    andi a0, a0, -8")
+        text_line("    mv t0, s1")
+        text_line("    add s1, s1, a0")
+        text_line("    mv a0, t0")
         return void
     }
     

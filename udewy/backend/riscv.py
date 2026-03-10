@@ -220,6 +220,7 @@ class RiscvBackend:
         
         # Set frame pointer
         self._emit("addi s0, sp, 1024")
+        self._emit("mv s1, sp")
         
         # Set up parameters - copy from arg registers to stack
         arg_regs = ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"]
@@ -395,16 +396,25 @@ class RiscvBackend:
     # Memory operations
     # ========================================================================
     
-    def load_mem(self, width: int) -> None:
+    def load_mem(self, width: int, signed: bool = False) -> None:
         """Load from memory address in a0."""
         if width == 64:
             self._emit("ld a0, 0(a0)")
         elif width == 32:
-            self._emit("lwu a0, 0(a0)")
+            if signed:
+                self._emit("lw a0, 0(a0)")
+            else:
+                self._emit("lwu a0, 0(a0)")
         elif width == 16:
-            self._emit("lhu a0, 0(a0)")
+            if signed:
+                self._emit("lh a0, 0(a0)")
+            else:
+                self._emit("lhu a0, 0(a0)")
         elif width == 8:
-            self._emit("lbu a0, 0(a0)")
+            if signed:
+                self._emit("lb a0, 0(a0)")
+            else:
+                self._emit("lbu a0, 0(a0)")
     
     def store_mem(self, width: int) -> None:
         """Store to memory. Stack: [value addr] -> pushes 0."""
@@ -422,9 +432,49 @@ class RiscvBackend:
     
     def signed_shr(self) -> None:
         """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
-        self._emit("ld t0, 0(sp)")   # shift amount (was saved first)
+        self._emit("mv t0, a0")
+        self._emit("ld a0, 0(sp)")
         self._emit("addi sp, sp, 8")
         self._emit("sra a0, a0, t0")
+
+    def unsigned_idiv(self) -> None:
+        """Unsigned division. Stack: [left right] -> quotient."""
+        self._emit("mv t0, a0")
+        self._emit("ld a0, 0(sp)")
+        self._emit("addi sp, sp, 8")
+        self._emit("divu a0, a0, t0")
+
+    def unsigned_mod(self) -> None:
+        """Unsigned remainder. Stack: [left right] -> remainder."""
+        self._emit("mv t0, a0")
+        self._emit("ld a0, 0(sp)")
+        self._emit("addi sp, sp, 8")
+        self._emit("remu a0, a0, t0")
+
+    def unsigned_cmp(self, kind: str) -> None:
+        """Unsigned comparison returning udewy booleans."""
+        self._emit("mv t0, a0")
+        self._emit("ld a0, 0(sp)")
+        self._emit("addi sp, sp, 8")
+        if kind == "gt":
+            self._emit("sltu a0, t0, a0")
+        elif kind == "lt":
+            self._emit("sltu a0, a0, t0")
+        elif kind == "gte":
+            self._emit("sltu a0, a0, t0")
+            self._emit("seqz a0, a0")
+        elif kind == "lte":
+            self._emit("sltu a0, t0, a0")
+            self._emit("seqz a0, a0")
+        self._emit("neg a0, a0")
+
+    def alloca(self) -> None:
+        """Allocate temporary stack storage and return its address."""
+        self._emit("addi a0, a0, 7")
+        self._emit("andi a0, a0, -8")
+        self._emit("mv t0, s1")
+        self._emit("add s1, s1, a0")
+        self._emit("mv a0, t0")
     
     # ========================================================================
     # Calls
@@ -590,9 +640,14 @@ class RiscvBackend:
     # ========================================================================
     
     _CORE_INTRINSICS = {
-        "__load8__", "__load16__", "__load32__", "__load64__",
-        "__store8__", "__store16__", "__store32__", "__store64__",
+        "__load_u8__", "__load_u16__", "__load_u32__", "__load_u64__",
+        "__store_u8__", "__store_u16__", "__store_u32__", "__store_u64__",
+        "__load_i8__", "__load_i16__", "__load_i32__", "__load_i64__",
+        "__store_i8__", "__store_i16__", "__store_i32__", "__store_i64__",
+        "__load__", "__store__", "__alloca__",
         "__signed_shr__",
+        "__unsigned_idiv__", "__unsigned_mod__",
+        "__unsigned_lt__", "__unsigned_gt__", "__unsigned_lte__", "__unsigned_gte__",
     }
     
     _PLATFORM_INTRINSICS = {
@@ -606,24 +661,54 @@ class RiscvBackend:
     
     def emit_intrinsic(self, name: str, num_args: int) -> None:
         """Emit code for an intrinsic call."""
-        if name == "__load8__":
-            self.load_mem(8)
-        elif name == "__load16__":
-            self.load_mem(16)
-        elif name == "__load32__":
-            self.load_mem(32)
-        elif name == "__load64__":
-            self.load_mem(64)
-        elif name == "__store8__":
+        if name == "__load_u8__":
+            self.load_mem(8, signed=False)
+        elif name == "__load_u16__":
+            self.load_mem(16, signed=False)
+        elif name == "__load_u32__":
+            self.load_mem(32, signed=False)
+        elif name == "__load_u64__" or name == "__load__":
+            self.load_mem(64, signed=False)
+        elif name == "__store_u8__":
             self.store_mem(8)
-        elif name == "__store16__":
+        elif name == "__store_u16__":
             self.store_mem(16)
-        elif name == "__store32__":
+        elif name == "__store_u32__":
             self.store_mem(32)
-        elif name == "__store64__":
+        elif name == "__store_u64__" or name == "__store__":
+            self.store_mem(64)
+        elif name == "__load_i8__":
+            self.load_mem(8, signed=True)
+        elif name == "__load_i16__":
+            self.load_mem(16, signed=True)
+        elif name == "__load_i32__":
+            self.load_mem(32, signed=True)
+        elif name == "__load_i64__":
+            self.load_mem(64, signed=True)
+        elif name == "__store_i8__":
+            self.store_mem(8)
+        elif name == "__store_i16__":
+            self.store_mem(16)
+        elif name == "__store_i32__":
+            self.store_mem(32)
+        elif name == "__store_i64__":
             self.store_mem(64)
         elif name == "__signed_shr__":
             self.signed_shr()
+        elif name == "__unsigned_idiv__":
+            self.unsigned_idiv()
+        elif name == "__unsigned_mod__":
+            self.unsigned_mod()
+        elif name == "__unsigned_lt__":
+            self.unsigned_cmp("lt")
+        elif name == "__unsigned_gt__":
+            self.unsigned_cmp("gt")
+        elif name == "__unsigned_lte__":
+            self.unsigned_cmp("lte")
+        elif name == "__unsigned_gte__":
+            self.unsigned_cmp("gte")
+        elif name == "__alloca__":
+            self.alloca()
         elif name.startswith("__syscall"):
             self.syscall(num_args)
     

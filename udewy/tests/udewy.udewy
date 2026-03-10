@@ -230,16 +230,16 @@ let out_init = ():>void => {
 }
 
 let out_char = (c:int):>void => {
-    __store8__(c out_ptr + out_len)
+    __store_u8__(c out_ptr + out_len)
     out_len = out_len + 1
     return void
 }
 
 let out_str = (s:int):>void => {
-    let len:int = __load64__(s + 0 - 8)
+    let len:int = __load__(s + 0 - 8)
     let i:int = 0
     loop i <? len {
-        let c:int = __load8__(s + i)
+        let c:int = __load_u8__(s + i)
         out_char(c)
         i = i + 1
     }
@@ -259,13 +259,13 @@ let out_int = (n:int):>void => {
     let i:int = 0
     loop n >? 0 {
         let digit:int = n % 10
-        __store8__(digit + 48 buf + i)
+        __store_u8__(digit + 48 buf + i)
         n = n // 10
         i = i + 1
     }
     loop i >? 0 {
         i = i - 1
-        out_char(__load8__(buf + i))
+        out_char(__load_u8__(buf + i))
     }
     return void
 }
@@ -328,7 +328,7 @@ let str_eq_len = (s1:int len1:int s2:int len2:int):>int => {
     if len1 not=? len2 { return FALSE_VAL }
     let i:int = 0
     loop i <? len1 {
-        if __load8__(s1 + i) not=? __load8__(s2 + i) {
+        if __load_u8__(s1 + i) not=? __load_u8__(s2 + i) {
             return FALSE_VAL
         }
         i = i + 1
@@ -337,15 +337,15 @@ let str_eq_len = (s1:int len1:int s2:int len2:int):>int => {
 }
 
 let str_match = (s:int start:int len:int target:int):>int => {
-    let tlen:int = __load64__(target + 0 - 8)
+    let tlen:int = __load__(target + 0 - 8)
     return str_eq_len(s + start len target tlen)
 }
 
 let str_prefix = (s:int pos:int target:int):>int => {
-    let tlen:int = __load64__(target + 0 - 8)
+    let tlen:int = __load__(target + 0 - 8)
     let i:int = 0
     loop i <? tlen {
-        if __load8__(s + pos + i) not=? __load8__(target + i) {
+        if __load_u8__(s + pos + i) not=? __load_u8__(target + i) {
             return FALSE_VAL
         }
         i = i + 1
@@ -377,23 +377,23 @@ let tok_init = ():>void => {
 
 let tok_add = (value:int loc:int kind:int):>void => {
     let off:int = tok_count * 16
-    __store64__(value tok_ptr + off)
-    __store64__(loc tok_ptr + off + 8)
-    __store64__(kind tok_ptr + off + 12)
+    __store__(value tok_ptr + off)
+    __store__(loc tok_ptr + off + 8)
+    __store__(kind tok_ptr + off + 12)
     tok_count = tok_count + 1
     return void
 }
 
 let tok_kind = (idx:int):>int => {
-    return __load64__(tok_ptr + (idx * 16) + 12) and 0xFFFF
+    return __load__(tok_ptr + (idx * 16) + 12) and 0xFFFF
 }
 
 let tok_loc = (idx:int):>int => {
-    return __load64__(tok_ptr + (idx * 16) + 8) and 0xFFFFFFFF
+    return __load__(tok_ptr + (idx * 16) + 8) and 0xFFFFFFFF
 }
 
 let tok_value = (idx:int):>int => {
-    return __load64__(tok_ptr + (idx * 16))
+    return __load__(tok_ptr + (idx * 16))
 }
 
 # ============================================================================
@@ -408,7 +408,7 @@ let tokenize = ():>void => {
     let n:int = src_len
     
     loop i <? n {
-        let c:int = __load8__(src_ptr + i)
+        let c:int = __load_u8__(src_ptr + i)
         
         # Skip whitespace
         if is_space(c) {
@@ -419,7 +419,7 @@ let tokenize = ():>void => {
         # Skip comments
         if c =? CH_HASH {
             i = i + 1
-            loop (i <? n) and (__load8__(src_ptr + i) not=? CH_LF) {
+            loop (i <? n) and (__load_u8__(src_ptr + i) not=? CH_LF) {
                 i = i + 1
             }
             continue
@@ -429,7 +429,7 @@ let tokenize = ():>void => {
         if is_alpha(c) {
             let start:int = i
             i = i + 1
-            loop (i <? n) and (is_alpha(__load8__(src_ptr + i)) or is_digit(__load8__(src_ptr + i))) {
+            loop (i <? n) and (is_alpha(__load_u8__(src_ptr + i)) or is_digit(__load_u8__(src_ptr + i))) {
                 i = i + 1
             }
             let len:int = i - start
@@ -476,7 +476,7 @@ let tokenize = ():>void => {
                 } else {
                     tok_add(0 start TK_VOID)
                 }
-            } else if (i <? n) and (__load8__(src_ptr + i) =? CH_LPAREN) {
+            } else if (i <? n) and (__load_u8__(src_ptr + i) =? CH_LPAREN) {
                 tok_add(len start TK_IDENT_CALL)
                 i = i + 1
             } else if (tok_count >? 0) and (tok_kind(tok_count - 1) =? TK_COLON) {
@@ -492,12 +492,12 @@ let tokenize = ():>void => {
         }
         
         # Hex number
-        if (c =? CH_0) and ((i + 1) <? n) and (__load8__(src_ptr + i + 1) =? CH_x) {
+        if (c =? CH_0) and ((i + 1) <? n) and (__load_u8__(src_ptr + i + 1) =? CH_x) {
             let start:int = i
             i = i + 2
             let val:int = 0
-            loop (i <? n) and (is_hex(__load8__(src_ptr + i)) or (__load8__(src_ptr + i) =? CH_UNDERSCORE)) {
-                let d:int = __load8__(src_ptr + i)
+            loop (i <? n) and (is_hex(__load_u8__(src_ptr + i)) or (__load_u8__(src_ptr + i) =? CH_UNDERSCORE)) {
+                let d:int = __load_u8__(src_ptr + i)
                 if d not=? CH_UNDERSCORE {
                     let dv:int = 0
                     if (d >=? CH_0) and (d <=? CH_9) {
@@ -516,12 +516,12 @@ let tokenize = ():>void => {
         }
         
         # Binary number
-        if (c =? CH_0) and ((i + 1) <? n) and (__load8__(src_ptr + i + 1) =? CH_b) {
+        if (c =? CH_0) and ((i + 1) <? n) and (__load_u8__(src_ptr + i + 1) =? CH_b) {
             let start:int = i
             i = i + 2
             let val:int = 0
-            loop (i <? n) and ((__load8__(src_ptr + i) =? CH_0) or (__load8__(src_ptr + i) =? CH_1) or (__load8__(src_ptr + i) =? CH_UNDERSCORE)) {
-                let d:int = __load8__(src_ptr + i)
+            loop (i <? n) and ((__load_u8__(src_ptr + i) =? CH_0) or (__load_u8__(src_ptr + i) =? CH_1) or (__load_u8__(src_ptr + i) =? CH_UNDERSCORE)) {
+                let d:int = __load_u8__(src_ptr + i)
                 if d not=? CH_UNDERSCORE {
                     val = (val << 1) or (d - CH_0)
                 }
@@ -535,8 +535,8 @@ let tokenize = ():>void => {
         if is_digit(c) {
             let start:int = i
             let val:int = 0
-            loop (i <? n) and is_digit(__load8__(src_ptr + i)) {
-                val = (val * 10) + (__load8__(src_ptr + i) - 48)
+            loop (i <? n) and is_digit(__load_u8__(src_ptr + i)) {
+                val = (val * 10) + (__load_u8__(src_ptr + i) - 48)
                 i = i + 1
             }
             tok_add(val start TK_NUMBER)
@@ -544,11 +544,11 @@ let tokenize = ():>void => {
         }
         
         # Path string p"..."
-        if (c =? CH_p) and ((i + 1) <? n) and (__load8__(src_ptr + i + 1) =? CH_DQUOTE) {
+        if (c =? CH_p) and ((i + 1) <? n) and (__load_u8__(src_ptr + i + 1) =? CH_DQUOTE) {
             let start:int = i
             i = i + 2
-            loop (i <? n) and (__load8__(src_ptr + i) not=? CH_DQUOTE) {
-                if __load8__(src_ptr + i) =? CH_BACKSLASH {
+            loop (i <? n) and (__load_u8__(src_ptr + i) not=? CH_DQUOTE) {
+                if __load_u8__(src_ptr + i) =? CH_BACKSLASH {
                     i = i + 1
                 }
                 i = i + 1
@@ -562,8 +562,8 @@ let tokenize = ():>void => {
         if c =? CH_DQUOTE {
             let start:int = i
             i = i + 1
-            loop (i <? n) and (__load8__(src_ptr + i) not=? CH_DQUOTE) {
-                if __load8__(src_ptr + i) =? CH_BACKSLASH {
+            loop (i <? n) and (__load_u8__(src_ptr + i) not=? CH_DQUOTE) {
+                if __load_u8__(src_ptr + i) =? CH_BACKSLASH {
                     i = i + 1
                 }
                 i = i + 1
@@ -647,7 +647,7 @@ let tokenize = ():>void => {
             let depth:int = 1
             i = i + 1
             loop (i <? n) and (depth >? 0) {
-                let tc:int = __load8__(src_ptr + i)
+                let tc:int = __load_u8__(src_ptr + i)
                 if tc =? CH_LT { depth = depth + 1 }
                 if tc =? CH_GT { depth = depth - 1 }
                 i = i + 1
@@ -702,8 +702,8 @@ let fn_lookup = (name_start:int name_len:int):>int => {
     let i:int = 0
     loop i <? fn_count {
         let off:int = i * 40
-        let s:int = __load64__(fn_ptr + off)
-        let l:int = __load64__(fn_ptr + off + 8)
+        let s:int = __load__(fn_ptr + off)
+        let l:int = __load__(fn_ptr + off + 8)
         if str_eq_len(src_ptr + name_start name_len src_ptr + s l) {
             return i
         }
@@ -715,28 +715,28 @@ let fn_lookup = (name_start:int name_len:int):>int => {
 let fn_add = (name_start:int name_len:int label_id:int num_args:int is_def:int):>int => {
     let idx:int = fn_count
     let off:int = fn_count * 40
-    __store64__(name_start fn_ptr + off)
-    __store64__(name_len fn_ptr + off + 8)
-    __store64__(label_id fn_ptr + off + 16)
-    __store64__(num_args fn_ptr + off + 24)
-    __store64__(is_def fn_ptr + off + 32)
+    __store__(name_start fn_ptr + off)
+    __store__(name_len fn_ptr + off + 8)
+    __store__(label_id fn_ptr + off + 16)
+    __store__(num_args fn_ptr + off + 24)
+    __store__(is_def fn_ptr + off + 32)
     fn_count = fn_count + 1
     return idx
 }
 
 let fn_get_label = (idx:int):>int => {
-    return __load64__(fn_ptr + (idx * 40) + 16)
+    return __load__(fn_ptr + (idx * 40) + 16)
 }
 
 let fn_set_defined = (idx:int num_args:int):>void => {
     let off:int = idx * 40
-    __store64__(num_args fn_ptr + off + 24)
-    __store64__(1 fn_ptr + off + 32)
+    __store__(num_args fn_ptr + off + 24)
+    __store__(1 fn_ptr + off + 32)
     return void
 }
 
 let fn_is_defined = (idx:int):>int => {
-    return __load64__(fn_ptr + (idx * 40) + 32)
+    return __load__(fn_ptr + (idx * 40) + 32)
 }
 
 # Global variables
@@ -753,8 +753,8 @@ let glob_lookup = (name_start:int name_len:int):>int => {
     let i:int = 0
     loop i <? glob_count {
         let off:int = i * 24
-        let s:int = __load64__(glob_ptr + off)
-        let l:int = __load64__(glob_ptr + off + 8)
+        let s:int = __load__(glob_ptr + off)
+        let l:int = __load__(glob_ptr + off + 8)
         if str_eq_len(src_ptr + name_start name_len src_ptr + s l) {
             return i
         }
@@ -766,15 +766,15 @@ let glob_lookup = (name_start:int name_len:int):>int => {
 let glob_add = (name_start:int name_len:int label_id:int):>int => {
     let idx:int = glob_count
     let off:int = glob_count * 24
-    __store64__(name_start glob_ptr + off)
-    __store64__(name_len glob_ptr + off + 8)
-    __store64__(label_id glob_ptr + off + 16)
+    __store__(name_start glob_ptr + off)
+    __store__(name_len glob_ptr + off + 8)
+    __store__(label_id glob_ptr + off + 16)
     glob_count = glob_count + 1
     return idx
 }
 
 let glob_get_label = (idx:int):>int => {
-    return __load64__(glob_ptr + (idx * 24) + 16)
+    return __load__(glob_ptr + (idx * 24) + 16)
 }
 
 # Const table
@@ -791,8 +791,8 @@ let const_lookup = (name_start:int name_len:int):>int => {
     let i:int = 0
     loop i <? const_count {
         let off:int = i * 24
-        let s:int = __load64__(const_ptr + off)
-        let l:int = __load64__(const_ptr + off + 8)
+        let s:int = __load__(const_ptr + off)
+        let l:int = __load__(const_ptr + off + 8)
         if str_eq_len(src_ptr + name_start name_len src_ptr + s l) {
             return i
         }
@@ -804,15 +804,15 @@ let const_lookup = (name_start:int name_len:int):>int => {
 let const_add = (name_start:int name_len:int value:int):>int => {
     let idx:int = const_count
     let off:int = const_count * 24
-    __store64__(name_start const_ptr + off)
-    __store64__(name_len const_ptr + off + 8)
-    __store64__(value const_ptr + off + 16)
+    __store__(name_start const_ptr + off)
+    __store__(name_len const_ptr + off + 8)
+    __store__(value const_ptr + off + 16)
     const_count = const_count + 1
     return idx
 }
 
 let const_get_value = (idx:int):>int => {
-    return __load64__(const_ptr + (idx * 24) + 16)
+    return __load__(const_ptr + (idx * 24) + 16)
 }
 
 # Scope stack for local variables
@@ -827,8 +827,8 @@ let scope_init = ():>void => {
 
 let scope_push = ():>void => {
     let new_scope:int = arena_alloc(8 + (MAX_VARS_PER_SCOPE * 24))
-    __store64__(0 new_scope)
-    __store64__(new_scope scope_ptr + (scope_depth * 8))
+    __store__(0 new_scope)
+    __store__(new_scope scope_ptr + (scope_depth * 8))
     scope_depth = scope_depth + 1
     return void
 }
@@ -841,15 +841,15 @@ let scope_pop = ():>void => {
 let var_lookup = (name_start:int name_len:int):>int => {
     let si:int = scope_depth - 1
     loop si >=? 0 {
-        let scp:int = __load64__(scope_ptr + (si * 8))
-        let vcount:int = __load64__(scp)
+        let scp:int = __load__(scope_ptr + (si * 8))
+        let vcount:int = __load__(scp)
         let vi:int = 0
         loop vi <? vcount {
             let off:int = 8 + (vi * 24)
-            let s:int = __load64__(scp + off)
-            let l:int = __load64__(scp + off + 8)
+            let s:int = __load__(scp + off)
+            let l:int = __load__(scp + off + 8)
             if str_eq_len(src_ptr + name_start name_len src_ptr + s l) {
-                return __load64__(scp + off + 16)
+                return __load__(scp + off + 16)
             }
             vi = vi + 1
         }
@@ -859,13 +859,13 @@ let var_lookup = (name_start:int name_len:int):>int => {
 }
 
 let var_add = (name_start:int name_len:int stack_off:int):>void => {
-    let scp:int = __load64__(scope_ptr + ((scope_depth - 1) * 8))
-    let vcount:int = __load64__(scp)
+    let scp:int = __load__(scope_ptr + ((scope_depth - 1) * 8))
+    let vcount:int = __load__(scp)
     let off:int = 8 + (vcount * 24)
-    __store64__(name_start scp + off)
-    __store64__(name_len scp + off + 8)
-    __store64__(stack_off scp + off + 16)
-    __store64__(vcount + 1 scp)
+    __store__(name_start scp + off)
+    __store__(name_len scp + off + 8)
+    __store__(stack_off scp + off + 16)
+    __store__(vcount + 1 scp)
     return void
 }
 
@@ -914,7 +914,7 @@ let is_binop = (kind:int):>int => {
 }
 
 let name_eq_intrinsic = (start:int len:int target:int):>int => {
-    let tlen:int = __load64__(target + 0 - 8)
+    let tlen:int = __load__(target + 0 - 8)
     return str_eq_len(src_ptr + start len target tlen)
 }
 
@@ -926,14 +926,14 @@ let is_intrinsic = (start:int len:int):>int => {
     if name_eq_intrinsic(start len "__syscall4__") { return TRUE_VAL }
     if name_eq_intrinsic(start len "__syscall5__") { return TRUE_VAL }
     if name_eq_intrinsic(start len "__syscall6__") { return TRUE_VAL }
-    if name_eq_intrinsic(start len "__load64__") { return TRUE_VAL }
-    if name_eq_intrinsic(start len "__store64__") { return TRUE_VAL }
-    if name_eq_intrinsic(start len "__load8__") { return TRUE_VAL }
-    if name_eq_intrinsic(start len "__store8__") { return TRUE_VAL }
-    if name_eq_intrinsic(start len "__load16__") { return TRUE_VAL }
-    if name_eq_intrinsic(start len "__store16__") { return TRUE_VAL }
-    if name_eq_intrinsic(start len "__load32__") { return TRUE_VAL }
-    if name_eq_intrinsic(start len "__store32__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__load__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__store_u64__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__load_u8__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__store_u8__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__load_u16__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__store_u16__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__load_u32__") { return TRUE_VAL }
+    if name_eq_intrinsic(start len "__store_u32__") { return TRUE_VAL }
     return FALSE_VAL
 }
 
@@ -951,16 +951,16 @@ let data_init = ():>void => {
 }
 
 let data_char = (c:int):>void => {
-    __store8__(c data_ptr + data_len)
+    __store_u8__(c data_ptr + data_len)
     data_len = data_len + 1
     return void
 }
 
 let data_str = (s:int):>void => {
-    let len:int = __load64__(s + 0 - 8)
+    let len:int = __load__(s + 0 - 8)
     let i:int = 0
     loop i <? len {
-        data_char(__load8__(s + i))
+        data_char(__load_u8__(s + i))
         i = i + 1
     }
     return void
@@ -979,13 +979,13 @@ let data_int = (n:int):>void => {
     let i:int = 0
     loop n >? 0 {
         let digit:int = n % 10
-        __store8__(digit + 48 buf + i)
+        __store_u8__(digit + 48 buf + i)
         n = n // 10
         i = i + 1
     }
     loop i >? 0 {
         i = i - 1
-        data_char(__load8__(buf + i))
+        data_char(__load_u8__(buf + i))
     }
     return void
 }
@@ -1009,27 +1009,27 @@ let data_label = (prefix:int n:int):>void => {
 # ============================================================================
 
 let emit_intrinsic = (start:int len:int nargs:int):>void => {
-    if name_eq_intrinsic(start len "__load64__") {
+    if name_eq_intrinsic(start len "__load_u64__") {
         out_line("movq (%rax), %rax")
-    } else if name_eq_intrinsic(start len "__store64__") {
+    } else if name_eq_intrinsic(start len "__store_u64__") {
         out_line("popq %rbx")
         out_line("movq %rbx, (%rax)")
         out_line("xorq %rax, %rax")
-    } else if name_eq_intrinsic(start len "__load8__") {
+    } else if name_eq_intrinsic(start len "__load_u8__") {
         out_line("movzbq (%rax), %rax")
-    } else if name_eq_intrinsic(start len "__store8__") {
+    } else if name_eq_intrinsic(start len "__store_u8__") {
         out_line("popq %rbx")
         out_line("movb %bl, (%rax)")
         out_line("xorq %rax, %rax")
-    } else if name_eq_intrinsic(start len "__load16__") {
+    } else if name_eq_intrinsic(start len "__load_u16__") {
         out_line("movzwq (%rax), %rax")
-    } else if name_eq_intrinsic(start len "__store16__") {
+    } else if name_eq_intrinsic(start len "__store_u16__") {
         out_line("popq %rbx")
         out_line("movw %bx, (%rax)")
         out_line("xorq %rax, %rax")
-    } else if name_eq_intrinsic(start len "__load32__") {
+    } else if name_eq_intrinsic(start len "__load_u32__") {
         out_line("movl (%rax), %eax")
-    } else if name_eq_intrinsic(start len "__store32__") {
+    } else if name_eq_intrinsic(start len "__store_u32__") {
         out_line("popq %rbx")
         out_line("movl %ebx, (%rax)")
         out_line("xorq %rax, %rax")
@@ -1114,10 +1114,10 @@ let parse_atom = ():>void => {
         let si:int = start + 1
         let send:int = start + len - 1
         loop si <? send {
-            let c:int = __load8__(src_ptr + si)
+            let c:int = __load_u8__(src_ptr + si)
             if c =? CH_BACKSLASH {
                 si = si + 1
-                c = __load8__(src_ptr + si)
+                c = __load_u8__(src_ptr + si)
                 if c =? CH_LF {
                     si = si + 1
                     continue
@@ -1135,10 +1135,10 @@ let parse_atom = ():>void => {
         si = start + 1
         let first:int = 1
         loop si <? send {
-            let c:int = __load8__(src_ptr + si)
+            let c:int = __load_u8__(src_ptr + si)
             if c =? CH_BACKSLASH {
                 si = si + 1
-                c = escape_char(__load8__(src_ptr + si))
+                c = escape_char(__load_u8__(src_ptr + si))
                 if c =? (0 - 1) {
                     si = si + 1
                     continue
@@ -1260,8 +1260,8 @@ let parse_atom = ():>void => {
             let eoff:int = nelem * 16
             
             if ek =? TK_NUMBER {
-                __store64__(0 elems + eoff)
-                __store64__(tok_value(cur_tok) elems + eoff + 8)
+                __store__(0 elems + eoff)
+                __store__(tok_value(cur_tok) elems + eoff + 8)
                 cur_tok = cur_tok + 1
                 nelem = nelem + 1
             } else if ek =? TK_IDENT {
@@ -1271,20 +1271,20 @@ let parse_atom = ():>void => {
                 
                 let ci:int = const_lookup(es el)
                 if ci >=? 0 {
-                    __store64__(0 elems + eoff)
-                    __store64__(const_get_value(ci) elems + eoff + 8)
+                    __store__(0 elems + eoff)
+                    __store__(const_get_value(ci) elems + eoff + 8)
                 } else {
                     let fi:int = fn_lookup(es el)
                     if fi >=? 0 {
-                        __store64__(1 elems + eoff)
-                        __store64__(fn_get_label(fi) elems + eoff + 8)
+                        __store__(1 elems + eoff)
+                        __store__(fn_get_label(fi) elems + eoff + 8)
                     } else {
                         # Forward function reference
                         let fwd_id:int = next_label
                         next_label = next_label + 1
                         fn_add(es el fwd_id 0 0)
-                        __store64__(1 elems + eoff)
-                        __store64__(fwd_id elems + eoff + 8)
+                        __store__(1 elems + eoff)
+                        __store__(fwd_id elems + eoff + 8)
                     }
                 }
                 nelem = nelem + 1
@@ -1302,10 +1302,10 @@ let parse_atom = ():>void => {
                 let si:int = start + 1
                 let send:int = start + len - 1
                 loop si <? send {
-                    let c:int = __load8__(src_ptr + si)
+                    let c:int = __load_u8__(src_ptr + si)
                     if c =? CH_BACKSLASH {
                         si = si + 1
-                        c = __load8__(src_ptr + si)
+                        c = __load_u8__(src_ptr + si)
                         if c =? CH_LF {
                             si = si + 1
                             continue
@@ -1323,10 +1323,10 @@ let parse_atom = ():>void => {
                 si = start + 1
                 let first:int = 1
                 loop si <? send {
-                    let c:int = __load8__(src_ptr + si)
+                    let c:int = __load_u8__(src_ptr + si)
                     if c =? CH_BACKSLASH {
                         si = si + 1
-                        c = escape_char(__load8__(src_ptr + si))
+                        c = escape_char(__load_u8__(src_ptr + si))
                         if c =? (0 - 1) {
                             si = si + 1
                             continue
@@ -1341,8 +1341,8 @@ let parse_atom = ():>void => {
                 }
                 data_char(10)
                 
-                __store64__(2 elems + eoff)
-                __store64__(label_id elems + eoff + 8)
+                __store__(2 elems + eoff)
+                __store__(label_id elems + eoff + 8)
                 nelem = nelem + 1
             } else {
                 out_str("Error: array elements must be compile-time constants\n")
@@ -1362,8 +1362,8 @@ let parse_atom = ():>void => {
         
         let ei:int = 0
         loop ei <? nelem {
-            let ekind:int = __load64__(elems + (ei * 16))
-            let eval:int = __load64__(elems + (ei * 16) + 8)
+            let ekind:int = __load__(elems + (ei * 16))
+            let eval:int = __load__(elems + (ei * 16) + 8)
             if ekind =? 0 {
                 data_str("    .quad ")
                 data_int(eval)
@@ -1632,8 +1632,8 @@ let parse_fn_decl = ():>void => {
     loop tok_kind(cur_tok) not=? TK_RIGHT_PAREN {
         let ps:int = tok_loc(cur_tok)
         let pl:int = tok_value(cur_tok)
-        __store64__(ps params_ptr + (nparam * 16))
-        __store64__(pl params_ptr + (nparam * 16) + 8)
+        __store__(ps params_ptr + (nparam * 16))
+        __store__(pl params_ptr + (nparam * 16) + 8)
         nparam = nparam + 1
         cur_tok = cur_tok + 1
         skip_type_annot()
@@ -1683,8 +1683,8 @@ let parse_fn_decl = ():>void => {
     
     let pi:int = 0
     loop pi <? nparam {
-        let ps:int = __load64__(params_ptr + (pi * 16))
-        let pl:int = __load64__(params_ptr + (pi * 16) + 8)
+        let ps:int = __load__(params_ptr + (pi * 16))
+        let pl:int = __load__(params_ptr + (pi * 16) + 8)
         
         if pi =? 0 {
             out_str("    movq %rdi, ")
@@ -2072,10 +2072,10 @@ let parse_global_var = ():>void => {
         let si:int = start + 1
         let send:int = start + len - 1
         loop si <? send {
-            let c:int = __load8__(src_ptr + si)
+            let c:int = __load_u8__(src_ptr + si)
             if c =? CH_BACKSLASH {
                 si = si + 1
-                c = __load8__(src_ptr + si)
+                c = __load_u8__(src_ptr + si)
                 if c =? CH_LF {
                     si = si + 1
                     continue
@@ -2093,10 +2093,10 @@ let parse_global_var = ():>void => {
         si = start + 1
         let first:int = 1
         loop si <? send {
-            let c:int = __load8__(src_ptr + si)
+            let c:int = __load_u8__(src_ptr + si)
             if c =? CH_BACKSLASH {
                 si = si + 1
-                c = escape_char(__load8__(src_ptr + si))
+                c = escape_char(__load_u8__(src_ptr + si))
                 if c =? (0 - 1) {
                     si = si + 1
                     continue
@@ -2133,8 +2133,8 @@ let parse_global_var = ():>void => {
             let eoff:int = nelem * 16
             
             if ek =? TK_NUMBER {
-                __store64__(0 elems + eoff)
-                __store64__(tok_value(cur_tok) elems + eoff + 8)
+                __store__(0 elems + eoff)
+                __store__(tok_value(cur_tok) elems + eoff + 8)
                 cur_tok = cur_tok + 1
                 nelem = nelem + 1
             } else if ek =? TK_IDENT {
@@ -2144,20 +2144,20 @@ let parse_global_var = ():>void => {
                 
                 let ci:int = const_lookup(es el)
                 if ci >=? 0 {
-                    __store64__(0 elems + eoff)
-                    __store64__(const_get_value(ci) elems + eoff + 8)
+                    __store__(0 elems + eoff)
+                    __store__(const_get_value(ci) elems + eoff + 8)
                 } else {
                     let fi:int = fn_lookup(es el)
                     if fi >=? 0 {
-                        __store64__(1 elems + eoff)
-                        __store64__(fn_get_label(fi) elems + eoff + 8)
+                        __store__(1 elems + eoff)
+                        __store__(fn_get_label(fi) elems + eoff + 8)
                     } else {
                         # Forward function reference
                         let fwd_id:int = next_label
                         next_label = next_label + 1
                         fn_add(es el fwd_id 0 0)
-                        __store64__(1 elems + eoff)
-                        __store64__(fwd_id elems + eoff + 8)
+                        __store__(1 elems + eoff)
+                        __store__(fwd_id elems + eoff + 8)
                     }
                 }
                 nelem = nelem + 1
@@ -2175,10 +2175,10 @@ let parse_global_var = ():>void => {
                 let si:int = start + 1
                 let send:int = start + len - 1
                 loop si <? send {
-                    let c:int = __load8__(src_ptr + si)
+                    let c:int = __load_u8__(src_ptr + si)
                     if c =? CH_BACKSLASH {
                         si = si + 1
-                        c = __load8__(src_ptr + si)
+                        c = __load_u8__(src_ptr + si)
                         if c =? CH_LF {
                             si = si + 1
                             continue
@@ -2196,10 +2196,10 @@ let parse_global_var = ():>void => {
                 si = start + 1
                 let first:int = 1
                 loop si <? send {
-                    let c:int = __load8__(src_ptr + si)
+                    let c:int = __load_u8__(src_ptr + si)
                     if c =? CH_BACKSLASH {
                         si = si + 1
-                        c = escape_char(__load8__(src_ptr + si))
+                        c = escape_char(__load_u8__(src_ptr + si))
                         if c =? (0 - 1) {
                             si = si + 1
                             continue
@@ -2214,8 +2214,8 @@ let parse_global_var = ():>void => {
                 }
                 data_char(10)
                 
-                __store64__(2 elems + eoff)
-                __store64__(label_id elems + eoff + 8)
+                __store__(2 elems + eoff)
+                __store__(label_id elems + eoff + 8)
                 nelem = nelem + 1
             } else {
                 out_str("Error: array elements must be compile-time constants\n")
@@ -2235,8 +2235,8 @@ let parse_global_var = ():>void => {
         
         let ei:int = 0
         loop ei <? nelem {
-            let ekind:int = __load64__(elems + (ei * 16))
-            let eval:int = __load64__(elems + (ei * 16) + 8)
+            let ekind:int = __load__(elems + (ei * 16))
+            let eval:int = __load__(elems + (ei * 16) + 8)
             if ekind =? 0 {
                 data_str("    .quad ")
                 data_int(eval)
@@ -2310,8 +2310,8 @@ let imports_init = ():>void => {
 let cstr_eq = (a:int b:int):>int => {
     let i:int = 0
     loop true {
-        let ca:int = __load8__(a + i)
-        let cb:int = __load8__(b + i)
+        let ca:int = __load_u8__(a + i)
+        let cb:int = __load_u8__(b + i)
         if ca not=? cb { return FALSE_VAL }
         if ca =? CH_NUL { return TRUE_VAL }
         i = i + 1
@@ -2333,11 +2333,11 @@ let is_already_imported = (path:int):>int => {
 let mark_imported = (path:int):>void => {
     let dst:int = imported_paths + (imported_count * 256)
     let i:int = 0
-    loop __load8__(path + i) not=? CH_NUL {
-        __store8__(__load8__(path + i) dst + i)
+    loop __load_u8__(path + i) not=? CH_NUL {
+        __store_u8__(__load_u8__(path + i) dst + i)
         i = i + 1
     }
-    __store8__(CH_NUL dst + i)
+    __store_u8__(CH_NUL dst + i)
     imported_count = imported_count + 1
     return void
 }
@@ -2345,32 +2345,32 @@ let mark_imported = (path:int):>void => {
 let get_dir_from_path = (path:int):>int => {
     let buf:int = arena_alloc(256)
     let plen:int = 0
-    loop __load8__(path + plen) not=? CH_NUL {
+    loop __load_u8__(path + plen) not=? CH_NUL {
         plen = plen + 1
     }
     
     let last_slash:int = 0 - 1
     let i:int = 0
     loop i <? plen {
-        if __load8__(path + i) =? CH_SLASH {
+        if __load_u8__(path + i) =? CH_SLASH {
             last_slash = i
         }
         i = i + 1
     }
     
     if last_slash <? 0 {
-        __store8__(CH_DOT buf)
-        __store8__(CH_SLASH buf + 1)
-        __store8__(CH_NUL buf + 2)
+        __store_u8__(CH_DOT buf)
+        __store_u8__(CH_SLASH buf + 1)
+        __store_u8__(CH_NUL buf + 2)
         return buf
     }
     
     i = 0
     loop i <=? last_slash {
-        __store8__(__load8__(path + i) buf + i)
+        __store_u8__(__load_u8__(path + i) buf + i)
         i = i + 1
     }
-    __store8__(CH_NUL buf + i)
+    __store_u8__(CH_NUL buf + i)
     return buf
 }
 
@@ -2378,23 +2378,23 @@ let join_path = (dir:int file:int):>int => {
     let buf:int = arena_alloc(512)
     let pos:int = 0
     
-    loop __load8__(dir + pos) not=? CH_NUL {
-        __store8__(__load8__(dir + pos) buf + pos)
+    loop __load_u8__(dir + pos) not=? CH_NUL {
+        __store_u8__(__load_u8__(dir + pos) buf + pos)
         pos = pos + 1
     }
     
-    if (pos >? 0) and (__load8__(buf + pos - 1) not=? CH_SLASH) {
-        __store8__(CH_SLASH buf + pos)
+    if (pos >? 0) and (__load_u8__(buf + pos - 1) not=? CH_SLASH) {
+        __store_u8__(CH_SLASH buf + pos)
         pos = pos + 1
     }
     
     let i:int = 0
-    loop __load8__(file + i) not=? CH_NUL {
-        __store8__(__load8__(file + i) buf + pos)
+    loop __load_u8__(file + i) not=? CH_NUL {
+        __store_u8__(__load_u8__(file + i) buf + pos)
         pos = pos + 1
         i = i + 1
     }
-    __store8__(CH_NUL buf + pos)
+    __store_u8__(CH_NUL buf + pos)
     return buf
 }
 
@@ -2409,8 +2409,8 @@ let read_file_content = (path:int):>int => {
     if len <? 0 { return 0 }
     
     let result:int = arena_alloc(16)
-    __store64__(content result)
-    __store64__(len result + 8)
+    __store__(content result)
+    __store__(len result + 8)
     return result
 }
 
@@ -2428,7 +2428,7 @@ let combined_init = ():>void => {
 let combined_append = (data:int len:int):>void => {
     let i:int = 0
     loop i <? len {
-        __store8__(__load8__(data + i) combined_src + combined_len)
+        __store_u8__(__load_u8__(data + i) combined_src + combined_len)
         combined_len = combined_len + 1
         i = i + 1
     }
@@ -2436,7 +2436,7 @@ let combined_append = (data:int len:int):>void => {
 }
 
 let combined_append_char = (c:int):>void => {
-    __store8__(c combined_src + combined_len)
+    __store_u8__(c combined_src + combined_len)
     combined_len = combined_len + 1
     return void
 }
@@ -2445,7 +2445,7 @@ let process_imports = (content:int clen:int dir:int):>void => {
     let i:int = 0
     
     loop i <? clen {
-        let c:int = __load8__(content + i)
+        let c:int = __load_u8__(content + i)
         
         if is_space(c) {
             combined_append_char(c)
@@ -2454,8 +2454,8 @@ let process_imports = (content:int clen:int dir:int):>void => {
         }
         
         if c =? CH_HASH {
-            loop (i <? clen) and (__load8__(content + i) not=? CH_LF) {
-                combined_append_char(__load8__(content + i))
+            loop (i <? clen) and (__load_u8__(content + i) not=? CH_LF) {
+                combined_append_char(__load_u8__(content + i))
                 i = i + 1
             }
             continue
@@ -2465,16 +2465,16 @@ let process_imports = (content:int clen:int dir:int):>void => {
             let start:int = i
             i = i + 6
             
-            loop (i <? clen) and ((__load8__(content + i) =? CH_SPACE) or (__load8__(content + i) =? CH_TAB)) {
+            loop (i <? clen) and ((__load_u8__(content + i) =? CH_SPACE) or (__load_u8__(content + i) =? CH_TAB)) {
                 i = i + 1
             }
             
-            if (i <? clen) and (__load8__(content + i) =? CH_p) and ((i + 1) <? clen) and (__load8__(content + i + 1) =? CH_DQUOTE) {
+            if (i <? clen) and (__load_u8__(content + i) =? CH_p) and ((i + 1) <? clen) and (__load_u8__(content + i + 1) =? CH_DQUOTE) {
                 i = i + 2
                 let path_start:int = i
                 
-                loop (i <? clen) and (__load8__(content + i) not=? CH_DQUOTE) {
-                    if __load8__(content + i) =? CH_BACKSLASH {
+                loop (i <? clen) and (__load_u8__(content + i) not=? CH_DQUOTE) {
+                    if __load_u8__(content + i) =? CH_BACKSLASH {
                         i = i + 1
                     }
                     i = i + 1
@@ -2486,10 +2486,10 @@ let process_imports = (content:int clen:int dir:int):>void => {
                 let import_rel:int = arena_alloc(path_len + 1)
                 let j:int = 0
                 loop j <? path_len {
-                    __store8__(__load8__(content + path_start + j) import_rel + j)
+                    __store_u8__(__load_u8__(content + path_start + j) import_rel + j)
                     j = j + 1
                 }
-                __store8__(CH_NUL import_rel + path_len)
+                __store_u8__(CH_NUL import_rel + path_len)
                 
                 let import_path:int = join_path(dir import_rel)
                 
@@ -2498,8 +2498,8 @@ let process_imports = (content:int clen:int dir:int):>void => {
                     
                     let file_info:int = read_file_content(import_path)
                     if file_info not=? 0 {
-                        let file_content:int = __load64__(file_info)
-                        let file_len:int = __load64__(file_info + 8)
+                        let file_content:int = __load__(file_info)
+                        let file_len:int = __load__(file_info + 8)
                         let import_dir:int = get_dir_from_path(import_path)
                         
                         process_imports(file_content file_len import_dir)
@@ -2512,30 +2512,30 @@ let process_imports = (content:int clen:int dir:int):>void => {
             }
         }
         
-        loop (i <? clen) and (not is_space(__load8__(content + i))) {
-            let cc:int = __load8__(content + i)
+        loop (i <? clen) and (not is_space(__load_u8__(content + i))) {
+            let cc:int = __load_u8__(content + i)
             combined_append_char(cc)
             
             if cc =? CH_DQUOTE {
                 i = i + 1
-                loop (i <? clen) and (__load8__(content + i) not=? CH_DQUOTE) {
-                    if __load8__(content + i) =? CH_BACKSLASH {
-                        combined_append_char(__load8__(content + i))
+                loop (i <? clen) and (__load_u8__(content + i) not=? CH_DQUOTE) {
+                    if __load_u8__(content + i) =? CH_BACKSLASH {
+                        combined_append_char(__load_u8__(content + i))
                         i = i + 1
                     }
-                    combined_append_char(__load8__(content + i))
+                    combined_append_char(__load_u8__(content + i))
                     i = i + 1
                 }
                 if i <? clen {
-                    combined_append_char(__load8__(content + i))
+                    combined_append_char(__load_u8__(content + i))
                     i = i + 1
                 }
                 continue
             }
             
             if cc =? CH_HASH {
-                loop (i <? clen) and (__load8__(content + i) not=? CH_LF) {
-                    combined_append_char(__load8__(content + i))
+                loop (i <? clen) and (__load_u8__(content + i) not=? CH_LF) {
+                    combined_append_char(__load_u8__(content + i))
                     i = i + 1
                 }
                 continue
@@ -2553,12 +2553,12 @@ let process_imports = (content:int clen:int dir:int):>void => {
 
 let run_cmd = (prog:int arg1:int arg2:int arg3:int arg4:int):>int => {
     let argv_buf:int = arena_alloc(48)
-    __store64__(prog argv_buf)
-    __store64__(arg1 argv_buf + 8)
-    __store64__(arg2 argv_buf + 16)
-    __store64__(arg3 argv_buf + 24)
-    __store64__(arg4 argv_buf + 32)
-    __store64__(0 argv_buf + 40)
+    __store__(prog argv_buf)
+    __store__(arg1 argv_buf + 8)
+    __store__(arg2 argv_buf + 16)
+    __store__(arg3 argv_buf + 24)
+    __store__(arg4 argv_buf + 32)
+    __store__(0 argv_buf + 40)
     
     let pid:int = __syscall0__(SYS_FORK)
     if pid =? 0 {
@@ -2568,7 +2568,7 @@ let run_cmd = (prog:int arg1:int arg2:int arg3:int arg4:int):>int => {
     
     let status_buf:int = arena_alloc(8)
     __syscall4__(SYS_WAIT4 pid status_buf 0 0)
-    return __load64__(status_buf)
+    return __load__(status_buf)
 }
 
 let write_file = (path:int content:int len:int):>int => {
@@ -2580,10 +2580,10 @@ let write_file = (path:int content:int len:int):>int => {
 }
 
 let str_copy = (dst:int s:int):>int => {
-    let slen:int = __load64__(s + 0 - 8)
+    let slen:int = __load__(s + 0 - 8)
     let i:int = 0
     loop i <? slen {
-        __store8__(__load8__(s + i) dst + i)
+        __store_u8__(__load_u8__(s + i) dst + i)
         i = i + 1
     }
     return slen
@@ -2591,8 +2591,8 @@ let str_copy = (dst:int s:int):>int => {
 
 let str_copy_cstr = (dst:int s:int):>int => {
     let i:int = 0
-    loop __load8__(s + i) not=? CH_NUL {
-        __store8__(__load8__(s + i) dst + i)
+    loop __load_u8__(s + i) not=? CH_NUL {
+        __store_u8__(__load_u8__(s + i) dst + i)
         i = i + 1
     }
     return i
@@ -2604,20 +2604,20 @@ let make_path = (dir:int name:int ext:int):>int => {
     pos = pos + str_copy(buf + pos dir)
     pos = pos + str_copy(buf + pos name)
     pos = pos + str_copy(buf + pos ext)
-    __store8__(0 buf + pos)
+    __store_u8__(0 buf + pos)
     return buf
 }
 
 let get_basename = (path:int):>int => {
     let plen:int = 0
-    loop __load8__(path + plen) not=? CH_NUL {
+    loop __load_u8__(path + plen) not=? CH_NUL {
         plen = plen + 1
     }
     
     let last_slash:int = 0 - 1
     let i:int = 0
     loop i <? plen {
-        if __load8__(path + i) =? CH_SLASH {
+        if __load_u8__(path + i) =? CH_SLASH {
             last_slash = i
         }
         i = i + 1
@@ -2628,7 +2628,7 @@ let get_basename = (path:int):>int => {
     let last_dot:int = plen
     i = plen - 1
     loop i >? start {
-        if __load8__(path + i) =? CH_DOT {
+        if __load_u8__(path + i) =? CH_DOT {
             last_dot = i
             break
         }
@@ -2637,13 +2637,13 @@ let get_basename = (path:int):>int => {
     
     let name_len:int = last_dot - start
     let buf:int = arena_alloc(8 + name_len + 1)
-    __store64__(name_len buf)
+    __store__(name_len buf)
     i = 0
     loop i <? name_len {
-        __store8__(__load8__(path + start + i) buf + 8 + i)
+        __store_u8__(__load_u8__(path + start + i) buf + 8 + i)
         i = i + 1
     }
-    __store8__(0 buf + 8 + name_len)
+    __store_u8__(0 buf + 8 + name_len)
     return buf + 8
 }
 
@@ -2672,8 +2672,8 @@ let main = (argc:int argv:int):>int => {
     let compile_only:int = 0
     let arg_idx:int = 1
     
-    let first_arg:int = __load64__(argv + 8)
-    if (__load8__(first_arg) =? CH_MINUS) and (__load8__(first_arg + 1) =? CH_c) and (__load8__(first_arg + 2) =? CH_NUL) {
+    let first_arg:int = __load__(argv + 8)
+    if (__load_u8__(first_arg) =? CH_MINUS) and (__load_u8__(first_arg + 1) =? CH_c) and (__load_u8__(first_arg + 2) =? CH_NUL) {
         compile_only = 1
         arg_idx = 2
     }
@@ -2683,7 +2683,7 @@ let main = (argc:int argv:int):>int => {
         return 1
     }
     
-    let filename:int = __load64__(argv + (arg_idx * 8))
+    let filename:int = __load__(argv + (arg_idx * 8))
     let script_args_start:int = arg_idx + 1
     let script_argc:int = argc - script_args_start
     
@@ -2693,8 +2693,8 @@ let main = (argc:int argv:int):>int => {
         return 1
     }
     
-    let raw_src:int = __load64__(file_info)
-    let raw_len:int = __load64__(file_info + 8)
+    let raw_src:int = __load__(file_info)
+    let raw_len:int = __load__(file_info + 8)
     let src_dir:int = get_dir_from_path(filename)
     
     mark_imported(filename)
@@ -2730,7 +2730,7 @@ let main = (argc:int argv:int):>int => {
     
     let di:int = 0
     loop di <? data_len {
-        out_char(__load8__(data_ptr + di))
+        out_char(__load_u8__(data_ptr + di))
         di = di + 1
     }
     
@@ -2751,7 +2751,7 @@ let main = (argc:int argv:int):>int => {
     if compile_only {
         __syscall3__(SYS_WRITE STDOUT "Compiled: " 10)
         let olen:int = 0
-        loop __load8__(exe_path + olen) not=? CH_NUL {
+        loop __load_u8__(exe_path + olen) not=? CH_NUL {
             olen = olen + 1
         }
         __syscall3__(SYS_WRITE STDOUT exe_path olen)
@@ -2760,13 +2760,13 @@ let main = (argc:int argv:int):>int => {
     }
     
     let new_argv:int = arena_alloc((script_argc + 2) * 8)
-    __store64__(exe_path new_argv)
+    __store__(exe_path new_argv)
     let ai:int = 0
     loop ai <? script_argc {
-        __store64__(__load64__(argv + ((script_args_start + ai) * 8)) new_argv + ((ai + 1) * 8))
+        __store__(__load__(argv + ((script_args_start + ai) * 8)) new_argv + ((ai + 1) * 8))
         ai = ai + 1
     }
-    __store64__(0 new_argv + ((script_argc + 1) * 8))
+    __store__(0 new_argv + ((script_argc + 1) * 8))
     
     __syscall3__(SYS_EXECVE exe_path new_argv 0)
     

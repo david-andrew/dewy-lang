@@ -45,7 +45,7 @@ The compiler produces artifacts in `__dewycache__/`.
 # SYS_WRITE and STDOUT are builtin constants provided by the x86_64 backend
 let main = ():>int => {
     let msg:int = "Hello from udewy!\n"
-    let len:int = __load64__(msg - 8)
+    let len:int = __load__(msg - 8)
     __syscall3__(SYS_WRITE STDOUT msg len)
     return 0
 }
@@ -581,9 +581,9 @@ let arr = [10 20 30]
 #                  ↑
 #                  arr points here
 
-let len:int = __load64__(arr - 8)      # 3
-let first:int = __load64__(arr)        # 10
-let second:int = __load64__(arr + 8)   # 20
+let len:int = __load__(arr - 8)      # 3
+let first:int = __load__(arr)        # 10
+let second:int = __load__(arr + 8)   # 20
 ```
 
 ### Static vs Dynamic Data
@@ -616,11 +616,11 @@ const PERSON_SIZE:int = 24
 
 let person:int = alloc(PERSON_SIZE)
 
-__store64__(name_ptr person + PERSON_NAME)
-__store64__(25 person + PERSON_AGE)
-__store64__(180 person + PERSON_HEIGHT)
+__store__(name_ptr person + PERSON_NAME)
+__store__(25 person + PERSON_AGE)
+__store__(180 person + PERSON_HEIGHT)
 
-let age:int = __load64__(person + PERSON_AGE)
+let age:int = __load__(person + PERSON_AGE)
 ```
 
 ---
@@ -662,24 +662,43 @@ These intrinsics provide direct memory access:
 
 | Intrinsic | Description |
 |-----------|-------------|
-| `__load8__(addr)` | Load byte from `addr`, zero-extend to 64-bit |
-| `__load16__(addr)` | Load 16-bit value from `addr`, zero-extend to 64-bit |
-| `__load32__(addr)` | Load 32-bit value from `addr`, zero-extend to 64-bit |
-| `__load64__(addr)` | Load 64-bit value from `addr` |
-| `__store8__(val, addr)` | Store low 8 bits of `val` to `addr`, return 0 |
-| `__store16__(val, addr)` | Store low 16 bits of `val` to `addr`, return 0 |
-| `__store32__(val, addr)` | Store low 32 bits of `val` to `addr`, return 0 |
-| `__store64__(val, addr)` | Store 64-bit `val` to `addr`, return 0 |
+| `__load__(addr)` | Shorthand for `__load_u64__(addr)` |
+| `__load_u8__(addr)` | Load unsigned 8-bit value from `addr`, zero-extend to 64-bit |
+| `__load_u16__(addr)` | Load unsigned 16-bit value from `addr`, zero-extend to 64-bit |
+| `__load_u32__(addr)` | Load unsigned 32-bit value from `addr`, zero-extend to 64-bit |
+| `__load_u64__(addr)` | Load unsigned 64-bit value from `addr` |
+| `__load_i8__(addr)` | Load signed 8-bit value from `addr`, sign-extend to 64-bit |
+| `__load_i16__(addr)` | Load signed 16-bit value from `addr`, sign-extend to 64-bit |
+| `__load_i32__(addr)` | Load signed 32-bit value from `addr`, sign-extend to 64-bit |
+| `__load_i64__(addr)` | Load signed 64-bit value from `addr` |
+| `__store__(val, addr)` | Shorthand for `__store_u64__(val, addr)` |
+| `__store_u8__(val, addr)` | Store low 8 bits of `val` to `addr`, return 0 |
+| `__store_u16__(val, addr)` | Store low 16 bits of `val` to `addr`, return 0 |
+| `__store_u32__(val, addr)` | Store low 32 bits of `val` to `addr`, return 0 |
+| `__store_u64__(val, addr)` | Store 64-bit `val` to `addr`, return 0 |
+| `__store_i8__(val, addr)` | Store low 8 bits of `val` to `addr`, return 0 |
+| `__store_i16__(val, addr)` | Store low 16 bits of `val` to `addr`, return 0 |
+| `__store_i32__(val, addr)` | Store low 32 bits of `val` to `addr`, return 0 |
+| `__store_i64__(val, addr)` | Store 64-bit `val` to `addr`, return 0 |
+| `__alloca__(size)` | Allocate `size` bytes of temporary storage and return an 8-byte-aligned address |
 
-**Note:** All loads zero-extend (not sign-extend) to 64 bits.
+Signed and unsigned 64-bit loads/stores are identical at runtime; both spellings exist to make programmer intent explicit. `__load__`/`__store__` are convenience shorthands for the unsigned 64-bit forms. For stores, signedness affects only intent and documentation; the stored bit pattern is the low `N` bits of `val`.
+
+`__alloca__(size)` reserves temporary storage whose lifetime lasts until the current function returns. The returned address is aligned to 8 bytes, and the reserved size is rounded up to a multiple of 8. Native backends typically implement this with function-local stack storage; the wasm backend uses a function-scoped stack region in linear memory.
 
 ## 2.2 Arithmetic Operations
 
 | Intrinsic | Description |
 |-----------|-------------|
 | `__signed_shr__(val, bits)` | Arithmetic (signed) right shift; fills vacated bits with the sign bit |
+| `__unsigned_idiv__(lhs, rhs)` | Unsigned 64-bit division |
+| `__unsigned_mod__(lhs, rhs)` | Unsigned 64-bit remainder |
+| `__unsigned_lt__(lhs, rhs)` | Unsigned less-than comparison |
+| `__unsigned_gt__(lhs, rhs)` | Unsigned greater-than comparison |
+| `__unsigned_lte__(lhs, rhs)` | Unsigned less-than-or-equal comparison |
+| `__unsigned_gte__(lhs, rhs)` | Unsigned greater-than-or-equal comparison |
 
-Use `__signed_shr__` when you need sign-preserving right shift. The `>>` operator always performs unsigned (logical) shift.
+Use `__signed_shr__` when you need sign-preserving right shift. The `>>` operator always performs unsigned (logical) shift. Likewise, `//`, `%`, and relational operators remain signed by default; use the unsigned intrinsics when you need unsigned interpretation.
 
 ---
 
@@ -716,7 +735,7 @@ To write well-formed udewy:
 1. **Use `__signed_shr__`** when arithmetic shift is needed for signed values
 2. **Avoid relying on short-circuit evaluation** - side effects in `and`/`or` operands will always occur
 3. **Implement content comparison functions** for string/array equality
-4. **Track signedness manually** for relational comparisons
+4. **Use unsigned intrinsics explicitly** when raw unsigned interpretation matters
 5. **Use parentheses liberally** to make precedence explicit
 6. **Test with increasing compiler strictness** as the Dewy compiler matures
 
@@ -763,7 +782,7 @@ Each backend implements the parser protocol and provides:
 
 Intrinsics fall into two categories:
 
-1. **Core intrinsics** - Implemented by all backends (memory operations, `__signed_shr__`)
+1. **Core intrinsics** - Implemented by all backends (memory operations, `__signed_shr__`, unsigned arithmetic/comparison intrinsics)
 2. **Platform intrinsics** - Provided by specific backends for their target environment
 3. **Builtin constants** - Backends can provide named constants automatically available to programs
 
@@ -785,7 +804,8 @@ These constants are available without explicit declaration:
 ```udewy
 # No need to declare SYS_WRITE - it's provided by the x86_64 backend
 let msg = "Hello\n"
-__syscall3__(SYS_WRITE STDOUT @msg __load64__(msg))
+let len = __load__(msg - 8)
+__syscall3__(SYS_WRITE STDOUT msg len)
 ```
 
 Note: Syscall numbers differ between architectures. x86_64 uses the traditional Linux syscall numbers, while RISC-V and AArch64 use the newer unified syscall table (e.g., `SYS_OPENAT` instead of `SYS_OPEN`).
@@ -964,8 +984,8 @@ let alloc = (size:int):>int => {
 
 let main = ():>int => {
     let buffer:int = alloc(4096)
-    __store64__(42 buffer)
-    return __load64__(buffer)  # returns 42
+    __store__(42 buffer)
+    return __load__(buffer)  # returns 42
 }
 ```
 

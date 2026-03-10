@@ -41,6 +41,9 @@ class Wasm32Backend:
         self._current_fn_name: str = ""
         self._local_count: int = 0
         self._param_count: int = 0
+        self._stack_local: str = "$stack_base"
+        self._alloc_size_local: str = "$alloc_size"
+        self._alloc_ptr_local: str = "$alloc_ptr"
         
         # Control flow state - track block nesting depth
         self._if_stack: list[int] = []  # block depths
@@ -117,7 +120,8 @@ class Wasm32Backend:
         output.append("(module")
         
         # Memory import (for JS interop)
-        output.append('  (import "env" "memory" (memory 1))')
+        output.append('  (import "env" "memory" (memory 2))')
+        output.append('  (global $stack_ptr (mut i32) (i32.const 131072))')
         
         # Syscall imports
         for imp in self._imports:
@@ -290,6 +294,11 @@ class Wasm32Backend:
         # Pre-allocate scratch locals for swap operations
         self._current_fn.append("    (local $swap0 i64)")
         self._current_fn.append("    (local $swap1 i32)")
+        self._current_fn.append(f"    (local {self._stack_local} i32)")
+        self._current_fn.append(f"    (local {self._alloc_size_local} i32)")
+        self._current_fn.append(f"    (local {self._alloc_ptr_local} i32)")
+        self._emit("global.get $stack_ptr")
+        self._emit(f"local.set {self._stack_local}")
         
         # Param slots for compatibility with x86 backend
         self._param_slots = list(range(param_count))
@@ -297,6 +306,8 @@ class Wasm32Backend:
     def end_function(self) -> None:
         """End function definition."""
         # Default return 0 if nothing on stack
+        self._emit(f"local.get {self._stack_local}")
+        self._emit("global.set $stack_ptr")
         self._emit("i64.const 0")
         self._emit("return")
         self._current_fn.append("  )")
@@ -441,18 +452,27 @@ class Wasm32Backend:
     # Memory operations
     # ========================================================================
     
-    def load_mem(self, width: int) -> None:
+    def load_mem(self, width: int, signed: bool = False) -> None:
         """Load from memory address on top of stack."""
         # Truncate i64 address to i32
         self._emit("i32.wrap_i64")
         if width == 64:
             self._emit("i64.load")
         elif width == 32:
-            self._emit("i64.load32_u")
+            if signed:
+                self._emit("i64.load32_s")
+            else:
+                self._emit("i64.load32_u")
         elif width == 16:
-            self._emit("i64.load16_u")
+            if signed:
+                self._emit("i64.load16_s")
+            else:
+                self._emit("i64.load16_u")
         elif width == 8:
-            self._emit("i64.load8_u")
+            if signed:
+                self._emit("i64.load8_s")
+            else:
+                self._emit("i64.load8_u")
     
     def store_mem(self, width: int) -> None:
         """Store to memory. Stack: [value addr] -> pushes 0."""
@@ -476,6 +496,44 @@ class Wasm32Backend:
     def signed_shr(self) -> None:
         """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
         self._emit("i64.shr_s")
+
+    def alloca(self) -> None:
+        """Allocate temporary linear-memory storage and return its address."""
+        self._emit("i32.wrap_i64")
+        self._emit("i32.const 7")
+        self._emit("i32.add")
+        self._emit("i32.const -8")
+        self._emit("i32.and")
+        self._emit(f"local.set {self._alloc_size_local}")
+        self._emit("global.get $stack_ptr")
+        self._emit(f"local.get {self._alloc_size_local}")
+        self._emit("i32.sub")
+        self._emit(f"local.tee {self._alloc_ptr_local}")
+        self._emit("global.set $stack_ptr")
+        self._emit(f"local.get {self._alloc_ptr_local}")
+        self._emit("i64.extend_i32_u")
+
+    def unsigned_idiv(self) -> None:
+        """Unsigned division. Stack: [left right] -> quotient."""
+        self._emit("i64.div_u")
+
+    def unsigned_mod(self) -> None:
+        """Unsigned remainder. Stack: [left right] -> remainder."""
+        self._emit("i64.rem_u")
+
+    def unsigned_cmp(self, kind: str) -> None:
+        """Unsigned comparison returning udewy booleans."""
+        if kind == "gt":
+            self._emit("i64.gt_u")
+        elif kind == "lt":
+            self._emit("i64.lt_u")
+        elif kind == "gte":
+            self._emit("i64.ge_u")
+        elif kind == "lte":
+            self._emit("i64.le_u")
+        self._emit("i64.extend_i32_s")
+        self._emit("i64.const 0")
+        self._emit("i64.sub")
     
     # ========================================================================
     # Calls
@@ -596,6 +654,8 @@ class Wasm32Backend:
     
     def emit_return(self) -> None:
         """Emit a return statement."""
+        self._emit(f"local.get {self._stack_local}")
+        self._emit("global.set $stack_ptr")
         self._emit("return")
     
     # ========================================================================
@@ -603,9 +663,14 @@ class Wasm32Backend:
     # ========================================================================
     
     _CORE_INTRINSICS = {
-        "__load8__", "__load16__", "__load32__", "__load64__",
-        "__store8__", "__store16__", "__store32__", "__store64__",
+        "__load_u8__", "__load_u16__", "__load_u32__", "__load_u64__",
+        "__store_u8__", "__store_u16__", "__store_u32__", "__store_u64__",
+        "__load_i8__", "__load_i16__", "__load_i32__", "__load_i64__",
+        "__store_i8__", "__store_i16__", "__store_i32__", "__store_i64__",
+        "__load__", "__store__", "__alloca__",
         "__signed_shr__",
+        "__unsigned_idiv__", "__unsigned_mod__",
+        "__unsigned_lt__", "__unsigned_gt__", "__unsigned_lte__", "__unsigned_gte__",
     }
     
     _PLATFORM_INTRINSICS = {
@@ -620,24 +685,54 @@ class Wasm32Backend:
     
     def emit_intrinsic(self, name: str, num_args: int) -> None:
         """Emit code for an intrinsic call."""
-        if name == "__load8__":
-            self.load_mem(8)
-        elif name == "__load16__":
-            self.load_mem(16)
-        elif name == "__load32__":
-            self.load_mem(32)
-        elif name == "__load64__":
-            self.load_mem(64)
-        elif name == "__store8__":
+        if name == "__load_u8__":
+            self.load_mem(8, signed=False)
+        elif name == "__load_u16__":
+            self.load_mem(16, signed=False)
+        elif name == "__load_u32__":
+            self.load_mem(32, signed=False)
+        elif name == "__load_u64__" or name == "__load__":
+            self.load_mem(64, signed=False)
+        elif name == "__store_u8__":
             self.store_mem(8)
-        elif name == "__store16__":
+        elif name == "__store_u16__":
             self.store_mem(16)
-        elif name == "__store32__":
+        elif name == "__store_u32__":
             self.store_mem(32)
-        elif name == "__store64__":
+        elif name == "__store_u64__" or name == "__store__":
+            self.store_mem(64)
+        elif name == "__load_i8__":
+            self.load_mem(8, signed=True)
+        elif name == "__load_i16__":
+            self.load_mem(16, signed=True)
+        elif name == "__load_i32__":
+            self.load_mem(32, signed=True)
+        elif name == "__load_i64__":
+            self.load_mem(64, signed=True)
+        elif name == "__store_i8__":
+            self.store_mem(8)
+        elif name == "__store_i16__":
+            self.store_mem(16)
+        elif name == "__store_i32__":
+            self.store_mem(32)
+        elif name == "__store_i64__":
             self.store_mem(64)
         elif name == "__signed_shr__":
             self.signed_shr()
+        elif name == "__unsigned_idiv__":
+            self.unsigned_idiv()
+        elif name == "__unsigned_mod__":
+            self.unsigned_mod()
+        elif name == "__unsigned_lt__":
+            self.unsigned_cmp("lt")
+        elif name == "__unsigned_gt__":
+            self.unsigned_cmp("gt")
+        elif name == "__unsigned_lte__":
+            self.unsigned_cmp("lte")
+        elif name == "__unsigned_gte__":
+            self.unsigned_cmp("gte")
+        elif name == "__alloca__":
+            self.alloca()
         elif name == "__host_log__":
             self.emit_host_log()
         elif name == "__host_exit__":

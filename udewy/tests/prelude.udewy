@@ -56,31 +56,31 @@ const CH_0:int = 48
 # ============================================================================
 
 let len_of = (ptr:int):>int => {
-    return __load64__(ptr - 8)
+    return __load__(ptr - 8)
 }
 
 let load_i64 = (ptr:int idx:int):>int => {
-    return __load64__(ptr + (idx << 3))
+    return __load__(ptr + (idx << 3))
 }
 
 let store_i64 = (ptr:int idx:int val:int):>void => {
-    __store64__(val ptr + (idx << 3))
+    __store__(val ptr + (idx << 3))
     return void
 }
 
 let load_u8 = (ptr:int idx:int):>int => {
-    return __load8__(ptr + idx)
+    return __load_u8__(ptr + idx)
 }
 
 let store_u8 = (ptr:int idx:int val:int):>void => {
-    __store8__(val ptr + idx)
+    __store_u8__(val ptr + idx)
     return void
 }
 
 let copy_bytes = (dst:int src:int len:int):>void => {
     let i:int = 0
     loop i <? len {
-        __store8__(__load8__(src + i) dst + i)
+        __store_u8__(__load_u8__(src + i) dst + i)
         i = i + 1
     }
     return void
@@ -89,7 +89,7 @@ let copy_bytes = (dst:int src:int len:int):>void => {
 let zero_bytes = (dst:int len:int):>void => {
     let i:int = 0
     loop i <? len {
-        __store8__(0 dst + i)
+        __store_u8__(0 dst + i)
         i = i + 1
     }
     return void
@@ -110,7 +110,7 @@ let str_eq_len = (s1:int len1:int s2:int len2:int):>int => {
 
     let i:int = 0
     loop i <? len1 {
-        if __load8__(s1 + i) not=? __load8__(s2 + i) {
+        if __load_u8__(s1 + i) not=? __load_u8__(s2 + i) {
             return FALSE_VAL
         }
         i = i + 1
@@ -127,7 +127,7 @@ let str_prefix = (s:int prefix:int):>int => {
     let prefix_len:int = str_len(prefix)
     let i:int = 0
     loop i <? prefix_len {
-        if __load8__(s + i) not=? __load8__(prefix + i) {
+        if __load_u8__(s + i) not=? __load_u8__(prefix + i) {
             return FALSE_VAL
         }
         i = i + 1
@@ -143,7 +143,7 @@ let str_copy = (dst:int s:int):>int => {
 
 let cstr_len = (s:int):>int => {
     let i:int = 0
-    loop __load8__(s + i) not=? CH_NUL {
+    loop __load_u8__(s + i) not=? CH_NUL {
         i = i + 1
     }
     return i
@@ -152,8 +152,8 @@ let cstr_len = (s:int):>int => {
 let cstr_eq = (a:int b:int):>int => {
     let i:int = 0
     loop true {
-        let ca:int = __load8__(a + i)
-        let cb:int = __load8__(b + i)
+        let ca:int = __load_u8__(a + i)
+        let cb:int = __load_u8__(b + i)
         if ca not=? cb {
             return FALSE_VAL
         }
@@ -167,8 +167,8 @@ let cstr_eq = (a:int b:int):>int => {
 
 let str_copy_cstr = (dst:int s:int):>int => {
     let i:int = 0
-    loop __load8__(s + i) not=? CH_NUL {
-        __store8__(__load8__(s + i) dst + i)
+    loop __load_u8__(s + i) not=? CH_NUL {
+        __store_u8__(__load_u8__(s + i) dst + i)
         i = i + 1
     }
     return i
@@ -228,7 +228,7 @@ let str_to_cstr = (s:int):>int => {
     let slen:int = str_len(s)
     let buf:int = arena_alloc(slen + 1)
     copy_bytes(buf s slen)
-    __store8__(CH_NUL buf + slen)
+    __store_u8__(CH_NUL buf + slen)
     return buf
 }
 
@@ -273,13 +273,13 @@ let print_int = (n:int):>void => {
 
     loop n >? 0 {
         start = start - 1
-        __store8__((n % 10) + CH_0 buf + start)
+        __store_u8__((n % 10) + CH_0 buf + start)
         n = n // 10
     }
 
     if neg {
         start = start - 1
-        __store8__(CH_MINUS buf + start)
+        __store_u8__(CH_MINUS buf + start)
     }
 
     write(STDOUT buf + start 24 - start)

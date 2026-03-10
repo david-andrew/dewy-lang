@@ -45,7 +45,7 @@ let arena_reset = ():>void => {
 let mem_copy = (dst:int src:int len:int):>void => {
     let i:int = 0
     loop i <? len {
-        __store8__(__load8__(src + i) dst + i)
+        __store_u8__(__load_u8__(src + i) dst + i)
         i = i + 1
     }
     return void
@@ -54,7 +54,7 @@ let mem_copy = (dst:int src:int len:int):>void => {
 let mem_set = (dst:int val:int len:int):>void => {
     let i:int = 0
     loop i <? len {
-        __store8__(val dst + i)
+        __store_u8__(val dst + i)
         i = i + 1
     }
     return void
@@ -70,10 +70,10 @@ let mem_zero = (dst:int len:int):>void => {
 # ============================================================================
 
 let ptr_get = (arr:int idx:int):>int => {
-    return __load64__(arr + (idx << 3))
+    return __load__(arr + (idx << 3))
 }
 
 let ptr_set = (arr:int idx:int val:int):>void => {
-    __store64__(val arr + (idx << 3))
+    __store__(val arr + (idx << 3))
     return void
 }

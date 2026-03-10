@@ -17,22 +17,71 @@ let main = ():>int => {
 
     let buf:int = "wxyz"
 
-    if __load16__(buf) not=? 0x7877 {
+    if __load_u16__(buf) not=? 0x7877 {
         return 3
     }
 
-    __store16__(0x6261 buf)
-    if (__load8__(buf) not=? 97) or (__load8__(buf + 1) not=? 98) {
+    __store_u16__(0x6261 buf)
+    if (__load_u8__(buf) not=? 97) or (__load_u8__(buf + 1) not=? 98) {
         return 4
     }
 
-    __store32__(0x44434241 buf)
-    if __load32__(buf) not=? 0x44434241 {
+    __store_u32__(0x44434241 buf)
+    if __load_u32__(buf) not=? 0x44434241 {
         return 5
     }
 
-    if __load16__(buf + 1) not=? 0x4342 {
+    if __load_u16__(buf + 1) not=? 0x4342 {
         return 6
+    }
+
+    __store_u8__(0xFF buf)
+    if __load_i8__(buf) not=? (0 - 1) {
+        return 7
+    }
+
+    if __unsigned_idiv__(0xFFFF_FFFF_FFFF_FFFF 2) not=? 0x7FFF_FFFF_FFFF_FFFF {
+        return 8
+    }
+
+    if __unsigned_mod__(0xFFFF_FFFF_FFFF_FFFF 2) not=? 1 {
+        return 9
+    }
+
+    if __unsigned_gt__(0xFFFF_FFFF_FFFF_FFFF 1) =? 0 {
+        return 10
+    }
+
+    if __unsigned_lt__(1 0xFFFF_FFFF_FFFF_FFFF) =? 0 {
+        return 11
+    }
+
+    if __unsigned_gte__(0xFFFF_FFFF_FFFF_FFFF 0xFFFF_FFFF_FFFF_FFFF) =? 0 {
+        return 12
+    }
+
+    if __unsigned_lte__(1 1) =? 0 {
+        return 13
+    }
+
+    let tmp:int = __alloca__(24)
+    __store__(0x0102_0304_0506_0708 tmp)
+    __store_u64__(0x1112_1314_1516_1718 tmp + 8)
+    __store_u32__(0xAABB_CCDD tmp + 16)
+    if __load__(tmp) not=? 0x0102_0304_0506_0708 {
+        return 14
+    }
+    if __load_u64__(tmp + 8) not=? 0x1112_1314_1516_1718 {
+        return 15
+    }
+    if __load_u32__(tmp + 16) not=? 0xAABB_CCDD {
+        return 16
+    }
+
+    let tmp2:int = __alloca__(1)
+    let tmp3:int = __alloca__(1)
+    if (tmp3 - tmp2) not=? 8 {
+        return 17
     }
 
     return 0

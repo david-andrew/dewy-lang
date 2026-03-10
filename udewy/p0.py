@@ -1188,7 +1188,7 @@ if __name__ == "__main__":
         
         # Browser host function implementations (shared by both output modes)
         host_functions_js = '''
-const memory = new WebAssembly.Memory({ initial: 1 });
+const memory = new WebAssembly.Memory({ initial: 2 });
 let outputElement = null;
 
 function decodeString(ptr, len) {

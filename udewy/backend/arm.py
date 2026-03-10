@@ -221,6 +221,7 @@ class ArmBackend:
         
         # Set frame pointer to base of frame
         self._emit("add x29, sp, #928")
+        self._emit("mov x19, sp")
         
         # Set up parameters - copy from arg registers to stack
         # Parameters stored at negative offsets from x29
@@ -387,16 +388,25 @@ class ArmBackend:
     # Memory operations
     # ========================================================================
     
-    def load_mem(self, width: int) -> None:
+    def load_mem(self, width: int, signed: bool = False) -> None:
         """Load from memory address in x0."""
         if width == 64:
             self._emit("ldr x0, [x0]")
         elif width == 32:
-            self._emit("ldr w0, [x0]")
+            if signed:
+                self._emit("ldrsw x0, [x0]")
+            else:
+                self._emit("ldr w0, [x0]")
         elif width == 16:
-            self._emit("ldrh w0, [x0]")
+            if signed:
+                self._emit("ldrsh x0, [x0]")
+            else:
+                self._emit("ldrh w0, [x0]")
         elif width == 8:
-            self._emit("ldrb w0, [x0]")
+            if signed:
+                self._emit("ldrsb x0, [x0]")
+            else:
+                self._emit("ldrb w0, [x0]")
     
     def store_mem(self, width: int) -> None:
         """Store to memory. Stack: [value addr] -> pushes 0."""
@@ -413,8 +423,44 @@ class ArmBackend:
     
     def signed_shr(self) -> None:
         """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
-        self._emit("ldr x9, [sp], #16")  # shift amount (was saved first)
+        self._emit("mov x9, x0")
+        self._emit("ldr x0, [sp], #16")
         self._emit("asr x0, x0, x9")
+
+    def unsigned_idiv(self) -> None:
+        """Unsigned division. Stack: [left right] -> quotient."""
+        self._emit("mov x9, x0")
+        self._emit("ldr x0, [sp], #16")
+        self._emit("udiv x0, x0, x9")
+
+    def unsigned_mod(self) -> None:
+        """Unsigned remainder. Stack: [left right] -> remainder."""
+        self._emit("mov x9, x0")
+        self._emit("ldr x0, [sp], #16")
+        self._emit("udiv x10, x0, x9")
+        self._emit("msub x0, x10, x9, x0")
+
+    def unsigned_cmp(self, kind: str) -> None:
+        """Unsigned comparison returning udewy booleans."""
+        self._emit("mov x9, x0")
+        self._emit("ldr x0, [sp], #16")
+        self._emit("cmp x0, x9")
+        if kind == "gt":
+            self._emit("csetm x0, hi")
+        elif kind == "lt":
+            self._emit("csetm x0, lo")
+        elif kind == "gte":
+            self._emit("csetm x0, hs")
+        elif kind == "lte":
+            self._emit("csetm x0, ls")
+
+    def alloca(self) -> None:
+        """Allocate temporary stack storage and return its address."""
+        self._emit("add x0, x0, #7")
+        self._emit("and x0, x0, #-8")
+        self._emit("mov x9, x19")
+        self._emit("add x19, x19, x0")
+        self._emit("mov x0, x9")
     
     # ========================================================================
     # Calls
@@ -557,9 +603,14 @@ class ArmBackend:
     # ========================================================================
     
     _CORE_INTRINSICS = {
-        "__load8__", "__load16__", "__load32__", "__load64__",
-        "__store8__", "__store16__", "__store32__", "__store64__",
+        "__load_u8__", "__load_u16__", "__load_u32__", "__load_u64__",
+        "__store_u8__", "__store_u16__", "__store_u32__", "__store_u64__",
+        "__load_i8__", "__load_i16__", "__load_i32__", "__load_i64__",
+        "__store_i8__", "__store_i16__", "__store_i32__", "__store_i64__",
+        "__load__", "__store__", "__alloca__",
         "__signed_shr__",
+        "__unsigned_idiv__", "__unsigned_mod__",
+        "__unsigned_lt__", "__unsigned_gt__", "__unsigned_lte__", "__unsigned_gte__",
     }
     
     _PLATFORM_INTRINSICS = {
@@ -573,24 +624,54 @@ class ArmBackend:
     
     def emit_intrinsic(self, name: str, num_args: int) -> None:
         """Emit code for an intrinsic call."""
-        if name == "__load8__":
-            self.load_mem(8)
-        elif name == "__load16__":
-            self.load_mem(16)
-        elif name == "__load32__":
-            self.load_mem(32)
-        elif name == "__load64__":
-            self.load_mem(64)
-        elif name == "__store8__":
+        if name == "__load_u8__":
+            self.load_mem(8, signed=False)
+        elif name == "__load_u16__":
+            self.load_mem(16, signed=False)
+        elif name == "__load_u32__":
+            self.load_mem(32, signed=False)
+        elif name == "__load_u64__" or name == "__load__":
+            self.load_mem(64, signed=False)
+        elif name == "__store_u8__":
             self.store_mem(8)
-        elif name == "__store16__":
+        elif name == "__store_u16__":
             self.store_mem(16)
-        elif name == "__store32__":
+        elif name == "__store_u32__":
             self.store_mem(32)
-        elif name == "__store64__":
+        elif name == "__store_u64__" or name == "__store__":
+            self.store_mem(64)
+        elif name == "__load_i8__":
+            self.load_mem(8, signed=True)
+        elif name == "__load_i16__":
+            self.load_mem(16, signed=True)
+        elif name == "__load_i32__":
+            self.load_mem(32, signed=True)
+        elif name == "__load_i64__":
+            self.load_mem(64, signed=True)
+        elif name == "__store_i8__":
+            self.store_mem(8)
+        elif name == "__store_i16__":
+            self.store_mem(16)
+        elif name == "__store_i32__":
+            self.store_mem(32)
+        elif name == "__store_i64__":
             self.store_mem(64)
         elif name == "__signed_shr__":
             self.signed_shr()
+        elif name == "__unsigned_idiv__":
+            self.unsigned_idiv()
+        elif name == "__unsigned_mod__":
+            self.unsigned_mod()
+        elif name == "__unsigned_lt__":
+            self.unsigned_cmp("lt")
+        elif name == "__unsigned_gt__":
+            self.unsigned_cmp("gt")
+        elif name == "__unsigned_lte__":
+            self.unsigned_cmp("lte")
+        elif name == "__unsigned_gte__":
+            self.unsigned_cmp("gte")
+        elif name == "__alloca__":
+            self.alloca()
         elif name.startswith("__syscall"):
             self.syscall(num_args)
     

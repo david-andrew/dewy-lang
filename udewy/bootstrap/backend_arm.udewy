@@ -18,9 +18,13 @@ let arm_emit_prologue = (frame_size:int):>void => {
     text_str("    stp x29, x30, [sp, #")
     text_int(total - 16)
     text_line("]")
+    text_str("    stp x19, x20, [sp, #")
+    text_int(total - 32)
+    text_line("]")
     text_str("    add x29, sp, #")
     text_int(total - 16)
     text_char(CH_LF)
+    text_line("    mov x19, sp")
     return void
 }
 
@@ -29,6 +33,9 @@ let arm_emit_epilogue = (frame_size:int):>void => {
     total = (total + 15) and -16
     text_str("    ldp x29, x30, [sp, #")
     text_int(total - 16)
+    text_line("]")
+    text_str("    ldp x19, x20, [sp, #")
+    text_int(total - 32)
     text_line("]")
     text_str("    add sp, sp, #")
     text_int(total)
@@ -314,40 +321,95 @@ let arm_emit_intrinsic = (name:int num_args:int):>void => {
         return void
     }
     
-    if str_eq(name "__load64__") {
+    if str_eq(name "__load_u64__") or str_eq(name "__load_i64__") or str_eq(name "__load__") {
         text_line("    ldr x0, [x0]")
         return void
     }
-    if str_eq(name "__store64__") {
+    if str_eq(name "__store_u64__") or str_eq(name "__store_i64__") or str_eq(name "__store__") {
         arm_emit_pop("x1")
         text_line("    str x1, [x0]")
         return void
     }
-    if str_eq(name "__load32__") {
+    if str_eq(name "__load_u32__") {
         text_line("    ldr w0, [x0]")
         return void
     }
-    if str_eq(name "__store32__") {
+    if str_eq(name "__load_i32__") {
+        text_line("    ldrsw x0, [x0]")
+        return void
+    }
+    if str_eq(name "__store_u32__") or str_eq(name "__store_i32__") {
         arm_emit_pop("x1")
         text_line("    str w1, [x0]")
         return void
     }
-    if str_eq(name "__load16__") {
+    if str_eq(name "__load_u16__") {
         text_line("    ldrh w0, [x0]")
         return void
     }
-    if str_eq(name "__store16__") {
+    if str_eq(name "__load_i16__") {
+        text_line("    ldrsh x0, [x0]")
+        return void
+    }
+    if str_eq(name "__store_u16__") or str_eq(name "__store_i16__") {
         arm_emit_pop("x1")
         text_line("    strh w1, [x0]")
         return void
     }
-    if str_eq(name "__load8__") {
+    if str_eq(name "__load_u8__") {
         text_line("    ldrb w0, [x0]")
         return void
     }
-    if str_eq(name "__store8__") {
+    if str_eq(name "__load_i8__") {
+        text_line("    ldrsb x0, [x0]")
+        return void
+    }
+    if str_eq(name "__store_u8__") or str_eq(name "__store_i8__") {
         arm_emit_pop("x1")
         text_line("    strb w1, [x0]")
+        return void
+    }
+    if str_eq(name "__unsigned_idiv__") {
+        arm_emit_pop("x1")
+        text_line("    udiv x0, x1, x0")
+        return void
+    }
+    if str_eq(name "__unsigned_mod__") {
+        arm_emit_pop("x1")
+        text_line("    udiv x2, x1, x0")
+        text_line("    msub x0, x2, x0, x1")
+        return void
+    }
+    if str_eq(name "__unsigned_lt__") {
+        arm_emit_pop("x1")
+        text_line("    cmp x1, x0")
+        text_line("    csetm x0, lo")
+        return void
+    }
+    if str_eq(name "__unsigned_gt__") {
+        arm_emit_pop("x1")
+        text_line("    cmp x1, x0")
+        text_line("    csetm x0, hi")
+        return void
+    }
+    if str_eq(name "__unsigned_lte__") {
+        arm_emit_pop("x1")
+        text_line("    cmp x1, x0")
+        text_line("    csetm x0, ls")
+        return void
+    }
+    if str_eq(name "__unsigned_gte__") {
+        arm_emit_pop("x1")
+        text_line("    cmp x1, x0")
+        text_line("    csetm x0, hs")
+        return void
+    }
+    if str_eq(name "__alloca__") {
+        text_line("    add x0, x0, #7")
+        text_line("    and x0, x0, #-8")
+        text_line("    mov x9, x19")
+        text_line("    add x19, x19, x0")
+        text_line("    mov x0, x9")
         return void
     }
     

@@ -13,10 +13,10 @@ let main = ():>int => {
     
     # Sum all elements: 2 + 3 + 5 + 16 = 26
     let sum:int = 0
-    let len:int = __load64__(arr + 0 - 8)
+    let len:int = __load__(arr + 0 - 8)
     let i:int = 0
     loop i <? len {
-        let elem:int = __load64__(arr + (i * 8))
+        let elem:int = __load__(arr + (i * 8))
         sum = sum + elem
         i = i + 1
     }

@@ -89,14 +89,31 @@ let intrinsic_names = [
     "__syscall4__"
     "__syscall5__"
     "__syscall6__"
-    "__load8__"
-    "__load16__"
-    "__load32__"
-    "__load64__"
-    "__store8__"
-    "__store16__"
-    "__store32__"
-    "__store64__"
+    "__load_u8__"
+    "__load_u16__"
+    "__load_u32__"
+    "__load_u64__"
+    "__load__"
+    "__store_u8__"
+    "__store_u16__"
+    "__store_u32__"
+    "__store_u64__"
+    "__store__"
+    "__load_i8__"
+    "__load_i16__"
+    "__load_i32__"
+    "__load_i64__"
+    "__store_i8__"
+    "__store_i16__"
+    "__store_i32__"
+    "__store_i64__"
+    "__unsigned_idiv__"
+    "__unsigned_mod__"
+    "__unsigned_lt__"
+    "__unsigned_gt__"
+    "__unsigned_lte__"
+    "__unsigned_gte__"
+    "__alloca__"
     0 0 0 0 0 0 0 0 0
 ]
 
@@ -163,10 +180,10 @@ let parse_atom_impl = ():>void => {
         let si:int = start + 1
         let send:int = start + len - 1
         loop si <? send {
-            let c:int = __load8__(src_ptr + si)
+            let c:int = __load_u8__(src_ptr + si)
             if c =? CH_BACKSLASH {
                 si = si + 1
-                c = __load8__(src_ptr + si)
+                c = __load_u8__(src_ptr + si)
                 if c =? CH_LF {
                     si = si + 1
                     continue
@@ -186,10 +203,10 @@ let parse_atom_impl = ():>void => {
         si = start + 1
         let first:int = TRUE
         loop si <? send {
-            let c:int = __load8__(src_ptr + si)
+            let c:int = __load_u8__(src_ptr + si)
             if c =? CH_BACKSLASH {
                 si = si + 1
-                let ec:int = __load8__(src_ptr + si)
+                let ec:int = __load_u8__(src_ptr + si)
                 if ec =? CH_LF {
                     si = si + 1
                     continue
@@ -239,7 +256,7 @@ let parse_atom_impl = ():>void => {
                 let ssi:int = sstart + 1
                 let ssend:int = sstart + slen - 1
                 loop ssi <? ssend {
-                    let sc:int = __load8__(src_ptr + ssi)
+                    let sc:int = __load_u8__(src_ptr + ssi)
                     if sc =? CH_BACKSLASH {
                         ssi = ssi + 1
                     }
@@ -254,10 +271,10 @@ let parse_atom_impl = ():>void => {
                 ssi = sstart + 1
                 let sfirst:int = TRUE
                 loop ssi <? ssend {
-                    let sc:int = __load8__(src_ptr + ssi)
+                    let sc:int = __load_u8__(src_ptr + ssi)
                     if sc =? CH_BACKSLASH {
                         ssi = ssi + 1
-                        sc = escape_char(__load8__(src_ptr + ssi))
+                        sc = escape_char(__load_u8__(src_ptr + ssi))
                     }
                     if not sfirst { data_str(", ") }
                     sfirst = FALSE
@@ -725,8 +742,8 @@ let parse_loop = ():>void => {
     let end_label:int = alloc_label()
     
     # Push loop labels onto stack
-    __store64__(start_label loop_stack + (loop_depth * 16))
-    __store64__(end_label loop_stack + (loop_depth * 16) + 8)
+    __store__(start_label loop_stack + (loop_depth * 16))
+    __store__(end_label loop_stack + (loop_depth * 16) + 8)
     loop_depth = loop_depth + 1
     
     backend_emit_label_out(".Lloop" start_label)
@@ -775,7 +792,7 @@ let parse_return = ():>void => {
 
 let parse_break = ():>void => {
     expect(TK_BREAK)
-    let end_label:int = __load64__(loop_stack + ((loop_depth - 1) * 16) + 8)
+    let end_label:int = __load__(loop_stack + ((loop_depth - 1) * 16) + 8)
     backend_emit_jump(".Lend" end_label)
     return void
 }
@@ -786,7 +803,7 @@ let parse_break = ():>void => {
 
 let parse_continue = ():>void => {
     expect(TK_CONTINUE)
-    let start_label:int = __load64__(loop_stack + ((loop_depth - 1) * 16))
+    let start_label:int = __load__(loop_stack + ((loop_depth - 1) * 16))
     backend_emit_jump(".Lloop" start_label)
     return void
 }
@@ -955,7 +972,7 @@ let parse_global_var = ():>void => {
         let si:int = sstart + 1
         let send:int = sstart + slen - 1
         loop si <? send {
-            let c:int = __load8__(src_ptr + si)
+            let c:int = __load_u8__(src_ptr + si)
             if c =? CH_BACKSLASH {
                 si = si + 1
             }
@@ -970,10 +987,10 @@ let parse_global_var = ():>void => {
         si = sstart + 1
         let first:int = TRUE
         loop si <? send {
-            let c:int = __load8__(src_ptr + si)
+            let c:int = __load_u8__(src_ptr + si)
             if c =? CH_BACKSLASH {
                 si = si + 1
-                c = escape_char(__load8__(src_ptr + si))
+                c = escape_char(__load_u8__(src_ptr + si))
             }
             if not first { data_str(", ") }
             first = FALSE
@@ -1021,7 +1038,7 @@ let parse_global_var = ():>void => {
                 let ssi:int = sstart + 1
                 let ssend:int = sstart + slen - 1
                 loop ssi <? ssend {
-                    let sc:int = __load8__(src_ptr + ssi)
+                    let sc:int = __load_u8__(src_ptr + ssi)
                     if sc =? CH_BACKSLASH {
                         ssi = ssi + 1
                     }
@@ -1036,10 +1053,10 @@ let parse_global_var = ():>void => {
                 ssi = sstart + 1
                 let sfirst:int = TRUE
                 loop ssi <? ssend {
-                    let sc:int = __load8__(src_ptr + ssi)
+                    let sc:int = __load_u8__(src_ptr + ssi)
                     if sc =? CH_BACKSLASH {
                         ssi = ssi + 1
-                        sc = escape_char(__load8__(src_ptr + ssi))
+                        sc = escape_char(__load_u8__(src_ptr + ssi))
                     }
                     if not sfirst { data_str(", ") }
                     sfirst = FALSE

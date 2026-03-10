@@ -216,12 +216,13 @@ class Backend(Protocol):
     # Memory operations (intrinsics)
     # ========================================================================
     
-    def load_mem(self, width: int) -> None:
+    def load_mem(self, width: int, signed: bool = False) -> None:
         """
         Load from memory address on top of stack.
         
         Pops address, pushes loaded value.
         Width is 8, 16, 32, or 64 bits.
+        Signed loads sign-extend for sub-64-bit widths.
         """
         ...
     

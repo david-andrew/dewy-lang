@@ -3,7 +3,7 @@ import p"prelude_riscv.udewy"
 
 let main = ():>int => {
     let msg:int = "Hello from RISC-V!\n"
-    let len:int = __load64__(msg + 0 - 8)
+    let len:int = __load__(msg + 0 - 8)
     __syscall3__(SYS_WRITE STDOUT msg len)
     return 0
 }

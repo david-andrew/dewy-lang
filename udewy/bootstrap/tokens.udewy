@@ -82,23 +82,23 @@ let tok_init = ():>void => {
 
 let tok_add = (value:int loc:int kind:int):>void => {
     let addr:int = tokens_base + (num_tokens * TOKEN_SIZE)
-    __store64__(value addr)
-    __store64__(loc addr + 8)
-    __store64__(kind addr + 16)
+    __store__(value addr)
+    __store__(loc addr + 8)
+    __store__(kind addr + 16)
     num_tokens = num_tokens + 1
     return void
 }
 
 let tok_kind = (idx:int):>int => {
-    return __load64__(tokens_base + (idx * TOKEN_SIZE) + 16)
+    return __load__(tokens_base + (idx * TOKEN_SIZE) + 16)
 }
 
 let tok_loc = (idx:int):>int => {
-    return __load64__(tokens_base + (idx * TOKEN_SIZE) + 8)
+    return __load__(tokens_base + (idx * TOKEN_SIZE) + 8)
 }
 
 let tok_value = (idx:int):>int => {
-    return __load64__(tokens_base + (idx * TOKEN_SIZE))
+    return __load__(tokens_base + (idx * TOKEN_SIZE))
 }
 
 # ============================================================================
@@ -139,7 +139,7 @@ let tokenize = ():>void => {
     let pos:int = 0
     
     loop pos <? src_len {
-        let c:int = __load8__(src_ptr + pos)
+        let c:int = __load_u8__(src_ptr + pos)
         
         # Skip whitespace
         if is_space(c) {
@@ -149,7 +149,7 @@ let tokenize = ():>void => {
         
         # Skip comments
         if c =? CH_HASH {
-            loop (pos <? src_len) and (__load8__(src_ptr + pos) not=? CH_LF) {
+            loop (pos <? src_len) and (__load_u8__(src_ptr + pos) not=? CH_LF) {
                 pos = pos + 1
             }
             continue
@@ -158,7 +158,7 @@ let tokenize = ():>void => {
         # Identifiers and keywords
         if is_ident_start(c) {
             let start:int = pos
-            loop (pos <? src_len) and is_ident_char(__load8__(src_ptr + pos)) {
+            loop (pos <? src_len) and is_ident_char(__load_u8__(src_ptr + pos)) {
                 pos = pos + 1
             }
             let len:int = pos - start
@@ -172,10 +172,10 @@ let tokenize = ():>void => {
             
             # Check if this is a function call (followed by '(')
             let peek:int = pos
-            loop (peek <? src_len) and is_space(__load8__(src_ptr + peek)) {
+            loop (peek <? src_len) and is_space(__load_u8__(src_ptr + peek)) {
                 peek = peek + 1
             }
-            if __load8__(src_ptr + peek) =? CH_LPAREN {
+            if __load_u8__(src_ptr + peek) =? CH_LPAREN {
                 tok_add(len start TK_IDENT_CALL)
                 pos = peek + 1
             } else {
@@ -190,11 +190,11 @@ let tokenize = ():>void => {
             let value:int = 0
             
             if (c =? CH_0) and (pos + 1 <? src_len) {
-                let c2:int = __load8__(src_ptr + pos + 1)
+                let c2:int = __load_u8__(src_ptr + pos + 1)
                 if c2 =? CH_x {
                     pos = pos + 2
-                    loop (pos <? src_len) and is_hex(__load8__(src_ptr + pos)) {
-                        let d:int = __load8__(src_ptr + pos)
+                    loop (pos <? src_len) and is_hex(__load_u8__(src_ptr + pos)) {
+                        let d:int = __load_u8__(src_ptr + pos)
                         if d >=? CH_a { d = d - CH_a + 10 }
                         else if d >=? CH_A { d = d - CH_A + 10 }
                         else { d = d - CH_0 }
@@ -206,8 +206,8 @@ let tokenize = ():>void => {
                 }
                 if c2 =? CH_b {
                     pos = pos + 2
-                    loop (pos <? src_len) and ((__load8__(src_ptr + pos) =? CH_0) or (__load8__(src_ptr + pos) =? CH_1)) {
-                        value = (value << 1) + (__load8__(src_ptr + pos) - CH_0)
+                    loop (pos <? src_len) and ((__load_u8__(src_ptr + pos) =? CH_0) or (__load_u8__(src_ptr + pos) =? CH_1)) {
+                        value = (value << 1) + (__load_u8__(src_ptr + pos) - CH_0)
                         pos = pos + 1
                     }
                     tok_add(value start TK_NUMBER)
@@ -215,16 +215,16 @@ let tokenize = ():>void => {
                 }
             }
             
-            loop (pos <? src_len) and is_digit(__load8__(src_ptr + pos)) {
-                value = (value * 10) + (__load8__(src_ptr + pos) - CH_0)
+            loop (pos <? src_len) and is_digit(__load_u8__(src_ptr + pos)) {
+                value = (value * 10) + (__load_u8__(src_ptr + pos) - CH_0)
                 pos = pos + 1
             }
             
             # Handle underscore separators (e.g., 1_000_000)
-            loop (pos <? src_len) and (__load8__(src_ptr + pos) =? CH_UNDERSCORE) and is_digit(__load8__(src_ptr + pos + 1)) {
+            loop (pos <? src_len) and (__load_u8__(src_ptr + pos) =? CH_UNDERSCORE) and is_digit(__load_u8__(src_ptr + pos + 1)) {
                 pos = pos + 1
-                loop (pos <? src_len) and is_digit(__load8__(src_ptr + pos)) {
-                    value = (value * 10) + (__load8__(src_ptr + pos) - CH_0)
+                loop (pos <? src_len) and is_digit(__load_u8__(src_ptr + pos)) {
+                    value = (value * 10) + (__load_u8__(src_ptr + pos) - CH_0)
                     pos = pos + 1
                 }
             }
@@ -236,11 +236,11 @@ let tokenize = ():>void => {
         # Negative numbers
         if c =? CH_MINUS {
             let peek:int = pos + 1
-            if (peek <? src_len) and is_digit(__load8__(src_ptr + peek)) {
+            if (peek <? src_len) and is_digit(__load_u8__(src_ptr + peek)) {
                 pos = pos + 1
                 let value:int = 0
-                loop (pos <? src_len) and is_digit(__load8__(src_ptr + pos)) {
-                    value = (value * 10) + (__load8__(src_ptr + pos) - CH_0)
+                loop (pos <? src_len) and is_digit(__load_u8__(src_ptr + pos)) {
+                    value = (value * 10) + (__load_u8__(src_ptr + pos) - CH_0)
                     pos = pos + 1
                 }
                 tok_add(0 - value peek - 1 TK_NUMBER)
@@ -252,8 +252,8 @@ let tokenize = ():>void => {
         if c =? CH_DQUOTE {
             let start:int = pos
             pos = pos + 1
-            loop (pos <? src_len) and (__load8__(src_ptr + pos) not=? CH_DQUOTE) {
-                if __load8__(src_ptr + pos) =? CH_BACKSLASH {
+            loop (pos <? src_len) and (__load_u8__(src_ptr + pos) not=? CH_DQUOTE) {
+                if __load_u8__(src_ptr + pos) =? CH_BACKSLASH {
                     pos = pos + 1
                 }
                 pos = pos + 1
@@ -265,10 +265,10 @@ let tokenize = ():>void => {
         }
         
         # Path strings (p"...")
-        if (c =? CH_p) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_DQUOTE) {
+        if (c =? CH_p) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_DQUOTE) {
             let start:int = pos
             pos = pos + 2
-            loop (pos <? src_len) and (__load8__(src_ptr + pos) not=? CH_DQUOTE) {
+            loop (pos <? src_len) and (__load_u8__(src_ptr + pos) not=? CH_DQUOTE) {
                 pos = pos + 1
             }
             pos = pos + 1
@@ -278,79 +278,79 @@ let tokenize = ():>void => {
         }
         
         # Multi-character operators
-        if (c =? CH_COLON) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_GT) {
+        if (c =? CH_COLON) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_GT) {
             tok_add(2 pos TK_FN_COLON)
             pos = pos + 2
             continue
         }
         
-        if (c =? CH_EQ) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_GT) {
+        if (c =? CH_EQ) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_GT) {
             tok_add(2 pos TK_FN_ARROW)
             pos = pos + 2
             continue
         }
         
-        if (c =? CH_EQ) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_QUESTION) {
+        if (c =? CH_EQ) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_QUESTION) {
             tok_add(2 pos TK_EQ)
             pos = pos + 2
             continue
         }
         
-        if (c =? CH_LT) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_GT) and (pos + 2 <? src_len) and (__load8__(src_ptr + pos + 2) =? CH_QUESTION) {
+        if (c =? CH_LT) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_GT) and (pos + 2 <? src_len) and (__load_u8__(src_ptr + pos + 2) =? CH_QUESTION) {
             tok_add(3 pos TK_NOT_EQ)
             pos = pos + 3
             continue
         }
         
-        if (c =? CH_GT) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_QUESTION) {
+        if (c =? CH_GT) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_QUESTION) {
             tok_add(2 pos TK_GT)
             pos = pos + 2
             continue
         }
         
-        if (c =? CH_GT) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_EQ) and (pos + 2 <? src_len) and (__load8__(src_ptr + pos + 2) =? CH_QUESTION) {
+        if (c =? CH_GT) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_EQ) and (pos + 2 <? src_len) and (__load_u8__(src_ptr + pos + 2) =? CH_QUESTION) {
             tok_add(3 pos TK_GT_EQ)
             pos = pos + 3
             continue
         }
         
-        if (c =? CH_LT) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_QUESTION) {
+        if (c =? CH_LT) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_QUESTION) {
             tok_add(2 pos TK_LT)
             pos = pos + 2
             continue
         }
         
-        if (c =? CH_LT) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_EQ) and (pos + 2 <? src_len) and (__load8__(src_ptr + pos + 2) =? CH_QUESTION) {
+        if (c =? CH_LT) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_EQ) and (pos + 2 <? src_len) and (__load_u8__(src_ptr + pos + 2) =? CH_QUESTION) {
             tok_add(3 pos TK_LT_EQ)
             pos = pos + 3
             continue
         }
         
-        if (c =? CH_LT) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_LT) {
+        if (c =? CH_LT) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_LT) {
             tok_add(2 pos TK_LEFT_SHIFT)
             pos = pos + 2
             continue
         }
         
-        if (c =? CH_GT) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_GT) {
+        if (c =? CH_GT) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_GT) {
             tok_add(2 pos TK_RIGHT_SHIFT)
             pos = pos + 2
             continue
         }
         
-        if (c =? CH_SLASH) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_SLASH) {
+        if (c =? CH_SLASH) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_SLASH) {
             tok_add(2 pos TK_IDIV)
             pos = pos + 2
             continue
         }
         
-        if (c =? CH_PIPE) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_GT) {
+        if (c =? CH_PIPE) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_GT) {
             tok_add(2 pos TK_PIPE)
             pos = pos + 2
             continue
         }
         
-        if (c =? CH_PLUS) and (pos + 1 <? src_len) and (__load8__(src_ptr + pos + 1) =? CH_PLUS) {
+        if (c =? CH_PLUS) and (pos + 1 <? src_len) and (__load_u8__(src_ptr + pos + 1) =? CH_PLUS) {
             tok_add(2 pos TK_CONCAT)
             pos = pos + 2
             continue

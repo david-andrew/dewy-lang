@@ -19,8 +19,8 @@ let int_to_str = (n:int):>int => {
     
     # Handle zero case
     if val =? 0 {
-        __store8__(48 buf)  # '0' = 48
-        __store64__(1 buf - 8)
+        __store_u8__(48 buf)  # '0' = 48
+        __store__(1 buf - 8)
         return buf
     }
     
@@ -28,14 +28,14 @@ let int_to_str = (n:int):>int => {
     let pos:int = 20
     loop val >? 0 {
         let digit:int = val % 10
-        __store8__(digit + 48 buf + pos)  # '0' = 48
+        __store_u8__(digit + 48 buf + pos)  # '0' = 48
         pos = pos - 1
         val = val // 10
     }
     
     # Add minus sign if negative
     if is_neg {
-        __store8__(45 buf + pos)  # '-' = 45
+        __store_u8__(45 buf + pos)  # '-' = 45
         pos = pos - 1
     }
     
@@ -46,25 +46,25 @@ let int_to_str = (n:int):>int => {
     # Copy result to beginning of buffer and set length
     let i:int = 0
     loop i <? len {
-        let c:int = __load8__(buf + start + i)
-        __store8__(c buf + i)
+        let c:int = __load_u8__(buf + start + i)
+        __store_u8__(c buf + i)
         i = i + 1
     }
-    __store64__(len buf - 8)
+    __store__(len buf - 8)
     
     return buf
 }
 
 # Helper to print string to DOM
 let print = (s:int):>int => {
-    let len:int = __load64__(s - 8)
+    let len:int = __load__(s - 8)
     __dom_append__(s len)
     return 0
 }
 
 # Helper to print string to console
 let log = (s:int):>int => {
-    let len:int = __load64__(s - 8)
+    let len:int = __load__(s - 8)
     __host_log__(s len)
     return 0
 }

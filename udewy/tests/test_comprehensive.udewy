@@ -6,7 +6,7 @@ const STDOUT:int = 1
 
 # Helper to print a string
 let print = (s:int):>void => {
-    let len:int = __load64__(s + 0 - 8)
+    let len:int = __load__(s + 0 - 8)
     __syscall3__(SYS_WRITE STDOUT s len)
     return void
 }
@@ -24,7 +24,7 @@ let fib = (n:int):>int => {
 let print_digit = (d:int):>void => {
     let buf:int = "0"
     let c:int = d + 48
-    __store8__(c buf)
+    __store_u8__(c buf)
     __syscall3__(SYS_WRITE STDOUT buf 1)
     return void
 }

@@ -199,6 +199,7 @@ class X86_64Backend:
         self._emit("movq %r13, -24(%rbp)")
         self._emit("movq %r14, -32(%rbp)")
         self._emit("movq %r15, -40(%rbp)")
+        self._emit("leaq -1024(%rbp), %r15")
         
         # Set up parameters
         arg_regs = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
@@ -375,16 +376,25 @@ class X86_64Backend:
     # Memory operations
     # ========================================================================
     
-    def load_mem(self, width: int) -> None:
+    def load_mem(self, width: int, signed: bool = False) -> None:
         """Load from memory address in rax."""
         if width == 64:
             self._emit("movq (%rax), %rax")
         elif width == 32:
-            self._emit("movl (%rax), %eax")
+            if signed:
+                self._emit("movslq (%rax), %rax")
+            else:
+                self._emit("movl (%rax), %eax")
         elif width == 16:
-            self._emit("movzwq (%rax), %rax")
+            if signed:
+                self._emit("movswq (%rax), %rax")
+            else:
+                self._emit("movzwq (%rax), %rax")
         elif width == 8:
-            self._emit("movzbq (%rax), %rax")
+            if signed:
+                self._emit("movsbq (%rax), %rax")
+            else:
+                self._emit("movzbq (%rax), %rax")
     
     def store_mem(self, width: int) -> None:
         """Store to memory. Stack: [value addr] -> pushes 0."""
@@ -401,8 +411,48 @@ class X86_64Backend:
     
     def signed_shr(self) -> None:
         """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
-        self._emit("popq %rcx")  # shift amount (was saved first)
+        self._emit("movq %rax, %rcx")
+        self._emit("popq %rax")
         self._emit("sarq %cl, %rax")
+
+    def unsigned_idiv(self) -> None:
+        """Unsigned division. Stack: [left right] -> quotient."""
+        self._emit("movq %rax, %rcx")
+        self._emit("popq %rax")
+        self._emit("xorq %rdx, %rdx")
+        self._emit("divq %rcx")
+
+    def unsigned_mod(self) -> None:
+        """Unsigned remainder. Stack: [left right] -> remainder."""
+        self._emit("movq %rax, %rcx")
+        self._emit("popq %rax")
+        self._emit("xorq %rdx, %rdx")
+        self._emit("divq %rcx")
+        self._emit("movq %rdx, %rax")
+
+    def unsigned_cmp(self, kind: str) -> None:
+        """Unsigned comparison returning udewy booleans."""
+        self._emit("movq %rax, %rcx")
+        self._emit("popq %rax")
+        self._emit("cmpq %rcx, %rax")
+        if kind == "gt":
+            self._emit("seta %al")
+        elif kind == "lt":
+            self._emit("setb %al")
+        elif kind == "gte":
+            self._emit("setae %al")
+        elif kind == "lte":
+            self._emit("setbe %al")
+        self._emit("movzbq %al, %rax")
+        self._emit("negq %rax")
+
+    def alloca(self) -> None:
+        """Allocate temporary stack storage and return its address."""
+        self._emit("addq $7, %rax")
+        self._emit("andq $-8, %rax")
+        self._emit("movq %r15, %rcx")
+        self._emit("addq %rax, %r15")
+        self._emit("movq %rcx, %rax")
     
     # ========================================================================
     # Calls
@@ -540,9 +590,14 @@ class X86_64Backend:
     
     # Core intrinsics supported by all backends
     _CORE_INTRINSICS = {
-        "__load8__", "__load16__", "__load32__", "__load64__",
-        "__store8__", "__store16__", "__store32__", "__store64__",
+        "__load_u8__", "__load_u16__", "__load_u32__", "__load_u64__",
+        "__store_u8__", "__store_u16__", "__store_u32__", "__store_u64__",
+        "__load_i8__", "__load_i16__", "__load_i32__", "__load_i64__",
+        "__store_i8__", "__store_i16__", "__store_i32__", "__store_i64__",
+        "__load__", "__store__", "__alloca__",
         "__signed_shr__",
+        "__unsigned_idiv__", "__unsigned_mod__",
+        "__unsigned_lt__", "__unsigned_gt__", "__unsigned_lte__", "__unsigned_gte__",
     }
     
     # Platform-specific intrinsics for x86_64 Linux
@@ -557,24 +612,54 @@ class X86_64Backend:
     
     def emit_intrinsic(self, name: str, num_args: int) -> None:
         """Emit code for an intrinsic call."""
-        if name == "__load8__":
-            self.load_mem(8)
-        elif name == "__load16__":
-            self.load_mem(16)
-        elif name == "__load32__":
-            self.load_mem(32)
-        elif name == "__load64__":
-            self.load_mem(64)
-        elif name == "__store8__":
+        if name == "__load_u8__":
+            self.load_mem(8, signed=False)
+        elif name == "__load_u16__":
+            self.load_mem(16, signed=False)
+        elif name == "__load_u32__":
+            self.load_mem(32, signed=False)
+        elif name == "__load_u64__" or name == "__load__":
+            self.load_mem(64, signed=False)
+        elif name == "__store_u8__":
             self.store_mem(8)
-        elif name == "__store16__":
+        elif name == "__store_u16__":
             self.store_mem(16)
-        elif name == "__store32__":
+        elif name == "__store_u32__":
             self.store_mem(32)
-        elif name == "__store64__":
+        elif name == "__store_u64__" or name == "__store__":
+            self.store_mem(64)
+        elif name == "__load_i8__":
+            self.load_mem(8, signed=True)
+        elif name == "__load_i16__":
+            self.load_mem(16, signed=True)
+        elif name == "__load_i32__":
+            self.load_mem(32, signed=True)
+        elif name == "__load_i64__":
+            self.load_mem(64, signed=True)
+        elif name == "__store_i8__":
+            self.store_mem(8)
+        elif name == "__store_i16__":
+            self.store_mem(16)
+        elif name == "__store_i32__":
+            self.store_mem(32)
+        elif name == "__store_i64__":
             self.store_mem(64)
         elif name == "__signed_shr__":
             self.signed_shr()
+        elif name == "__unsigned_idiv__":
+            self.unsigned_idiv()
+        elif name == "__unsigned_mod__":
+            self.unsigned_mod()
+        elif name == "__unsigned_lt__":
+            self.unsigned_cmp("lt")
+        elif name == "__unsigned_gt__":
+            self.unsigned_cmp("gt")
+        elif name == "__unsigned_lte__":
+            self.unsigned_cmp("lte")
+        elif name == "__unsigned_gte__":
+            self.unsigned_cmp("gte")
+        elif name == "__alloca__":
+            self.alloca()
         elif name.startswith("__syscall"):
             self.syscall(num_args)
     
