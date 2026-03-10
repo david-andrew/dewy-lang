@@ -23,7 +23,6 @@ def auto(): return next(_counter)
 TK_IDENT:        TokenKind = auto()    # (length, start, TK_IDENT)        # basic identifier. used for all identifiers except for function calls and indexes
 TK_IDENT_CALL:   TokenKind = auto()    # (length, start, TK_IDENT_CALL)   # an identifier followed by a paren. e.g. `some_fn(`
 TK_STRING:       TokenKind = auto()    # (length, start, TK_STRING)
-TK_PATH_STRING:  TokenKind = auto()    # (length, start, TK_PATH_STRING)  # path string p"..." - same as string but with p prefix
 TK_TYPE_PARAM:   TokenKind = auto()    # (length, start, TK_TYPE_PARAM)  # a type parameter. e.g. `<T>` or `<int|string|undefined>`
 TK_VOID:         TokenKind = auto()
 TK_NUMBER:       TokenKind = auto()
@@ -34,7 +33,6 @@ TK_ELSE:         TokenKind = auto()
 TK_RETURN:       TokenKind = auto()
 TK_BREAK:        TokenKind = auto()
 TK_CONTINUE:     TokenKind = auto()
-TK_IMPORT:       TokenKind = auto()
 
 # operators that can be in place operators 
 _START_CAN_BE_IN_PLACE_ASSIGNMENT_OP:int = auto()  # not a TokenKind, just an index marker
@@ -183,7 +181,7 @@ def tokenize(src:str)->list[PackedToken]:
             elif str_eq("return", text):    toks.append(pack(NO_VALUE, start, TK_RETURN))
             elif str_eq("break", text):     toks.append(pack(NO_VALUE, start, TK_BREAK))
             elif str_eq("continue", text):  toks.append(pack(NO_VALUE, start, TK_CONTINUE))
-            elif str_eq("import", text):    toks.append(pack(NO_VALUE, start, TK_IMPORT))
+            elif str_eq("import", text):    raise SyntaxError(f"`import` is a preprocessing directive and may only appear in the leading import prelude at {start}")
             elif str_eq("transmute", text): toks.append(pack(NO_VALUE, start, TK_TRANSMUTE))
             
             # special cases of identifiers preceded or followed by something
@@ -239,19 +237,6 @@ def tokenize(src:str)->list[PackedToken]:
                     val = val * 10 + (ord(src[i]) - 48)
                 i += 1
             toks.append(pack(val, start, TK_NUMBER))
-            continue
-        
-        # path string p"..."
-        if c == 'p' and i + 1 < n and src[i + 1] == '"':
-            start = i
-            i += 2  # skip 'p"'
-            while i < n and src[i] != '"':
-                if src[i] == '\\': i += 1
-                i += 1
-            if i >= n or src[i] != '"':
-                raise SyntaxError(f"unterminated path string at {i}: {src[start:i]!r}")
-            i += 1
-            toks.append(pack(i - start, start, TK_PATH_STRING))
             continue
         
         # string
@@ -389,7 +374,6 @@ def dump_token(token:PackedToken, src:str):
     elif kind == TK_FN_TYPE:     value = ':>' + src[location:location+value]
     elif kind == TK_TYPE_PARAM:  value = src[location:location+value]  # <> already included in range
     elif kind == TK_STRING:      value = src[location:location+value]
-    elif kind == TK_PATH_STRING: value = src[location:location+value]
     elif kind == TK_NUMBER:      value = value
     else:                        value = None
     

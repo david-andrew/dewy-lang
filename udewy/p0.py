@@ -19,8 +19,8 @@ from .backend.arm import ArmBackend
 
 def process_imports(source: str, source_path: PathLike, imported: set[Path] | None = None) -> str:
     """
-    Process import statements, recursively including imported files.
-    Returns the combined source with all imports prepended.
+    Process leading import directives, recursively including imported files.
+    Returns the combined source with imported content prepended.
     """
     source_path = Path(source_path).resolve()
     
@@ -33,92 +33,89 @@ def process_imports(source: str, source_path: PathLike, imported: set[Path] | No
     
     source_dir = source_path.parent
     result_parts: list[str] = []
-    remaining = source
-    
+    body_parts: list[str] = []
+
     i = 0
-    n = len(remaining)
-    
-    while i < n:
-        # skip whitespace
-        while i < n and remaining[i] in ' \t\r\n':
-            i = i + 1
+    body_cursor = 0
+    n = len(source)
+
+    def skip_trivia(idx: int) -> int:
+        while idx < n:
+            if source[idx] in ' \t\r\n':
+                idx = idx + 1
+                continue
+            if source[idx] == '#':
+                while idx < n and source[idx] != '\n':
+                    idx = idx + 1
+                continue
+            break
+        return idx
+
+    def is_ident_char(c: str) -> bool:
+        return c == '_' or ('a' <= c <= 'z') or ('A' <= c <= 'Z') or ('0' <= c <= '9')
+
+    while True:
+        i = skip_trivia(i)
         if i >= n:
             break
-        
-        # skip comments
-        if remaining[i] == '#':
-            while i < n and remaining[i] != '\n':
+
+        if source[i:i + 6] != 'import':
+            break
+
+        end_kw = i + 6
+        if end_kw < n and is_ident_char(source[end_kw]):
+            break
+
+        body_parts.append(source[body_cursor:i])
+
+        i = end_kw
+        while i < n and source[i] in ' \t':
+            i = i + 1
+
+        if i >= n or source[i] != 'p' or i + 1 >= n or source[i + 1] != '"':
+            raise SyntaxError(f"Expected path string after import at position {end_kw}")
+
+        i = i + 2
+        path_start = i
+
+        while i < n and source[i] != '"':
+            if source[i] == '\\':
                 i = i + 1
-            continue
-        
-        # check for import statement
-        if remaining[i:i+6] == 'import':
-            start = i
-            i = i + 6
-            
-            # skip whitespace
-            while i < n and remaining[i] in ' \t':
+            i = i + 1
+
+        if i >= n:
+            raise SyntaxError(f"Unterminated path string in import at position {path_start - 2}")
+
+        import_path_str = source[path_start:i]
+        i = i + 1
+
+        while i < n and source[i] in ' \t':
+            i = i + 1
+
+        if i < n and source[i] == '#':
+            while i < n and source[i] != '\n':
                 i = i + 1
-            
-            # expect p"
-            if i < n and remaining[i] == 'p' and i + 1 < n and remaining[i + 1] == '"':
-                i = i + 2  # skip p"
-                path_start = i
-                
-                # read until closing quote
-                while i < n and remaining[i] != '"':
-                    if remaining[i] == '\\':
-                        i = i + 1
-                    i = i + 1
-                
-                if i >= n:
-                    raise SyntaxError(f"Unterminated path string in import at position {start}")
-                
-                import_path_str = remaining[path_start:i]
-                i = i + 1  # skip closing quote
-                
-                # resolve path relative to source file
-                import_path = (source_dir / import_path_str).resolve()
-                
-                if not import_path.exists():
-                    raise FileNotFoundError(f"Import file not found: {import_path}")
-                
-                # recursively process the imported file
-                import_content = import_path.read_text()
-                processed_import = process_imports(import_content, import_path, imported)
-                
-                # add the processed import content
-                if processed_import:
-                    result_parts.append(processed_import)
-                
-                # replace the import statement with empty (we've handled it)
-                remaining = remaining[:start] + remaining[i:]
-                n = len(remaining)
-                i = start
-            else:
-                # not a valid import, continue
-                i = i + 1
-        else:
-            # not an import, skip to next whitespace/newline to find next potential statement
-            while i < n and remaining[i] not in ' \t\r\n':
-                if remaining[i] == '"':
-                    # skip strings
-                    i = i + 1
-                    while i < n and remaining[i] != '"':
-                        if remaining[i] == '\\':
-                            i = i + 1
-                        i = i + 1
-                    if i < n:
-                        i = i + 1
-                elif remaining[i] == '#':
-                    # skip to end of line
-                    while i < n and remaining[i] != '\n':
-                        i = i + 1
-                else:
-                    i = i + 1
-    
-    # add the remaining source (with import statements removed)
-    result_parts.append(remaining)
+
+        if i < n and source[i] not in '\r\n':
+            raise SyntaxError(f"Unexpected trailing content after import at position {i}")
+
+        while i < n and source[i] in '\r\n':
+            i = i + 1
+
+        import_path = (source_dir / import_path_str).resolve()
+
+        if not import_path.exists():
+            raise FileNotFoundError(f"Import file not found: {import_path}")
+
+        import_content = import_path.read_text()
+        processed_import = process_imports(import_content, import_path, imported)
+        if processed_import:
+            result_parts.append(processed_import)
+
+        body_cursor = i
+
+    body_parts.append(source[body_cursor:])
+    result_parts.append(''.join(body_parts))
     
     return '\n'.join(result_parts)
 

@@ -7,7 +7,7 @@
 
 udewy (μdewy, "micro-dewy") is a strict subset of the Dewy programming language, designed for bootstrapping. It serves as an intermediate step in a trusted computing base, providing a language simple enough to implement in assembly while being expressive enough to write a real compiler.
 
-**Key principle**: Any valid udewy program should compile and behave identically under both the udewy compiler and the full Dewy compiler.
+**Key principle**: Any well-formed udewy program should compile and behave identically under both the udewy compiler and the full Dewy compiler.
 
 This document serves as the **definitive specification** for the udewy language. There is no implementation-defined behavior; all semantics are fully specified here.
 
@@ -27,6 +27,8 @@ python -m udewy.p0 --target arm udewy/tests/test_hello.udewy
 ```
 
 The compiler produces artifacts in `__dewycache__/`.
+
+> NOTE: long-term goals is for the default compile target to match the host machine/OS
 
 ### Supported Targets
 
@@ -57,7 +59,7 @@ let main = ():>int => {
 
 ### Character Set
 
-udewy source files are encoded in ASCII. UTF-8 is compatible in contexts where extended characters are allowed (string literals).
+udewy source files are encoded in ASCII. UTF-8 is compatible in contexts where extended characters are allowed (e.g. string literals).
 
 Valid ASCII characters:
 - Letters: `A-Z`, `a-z`
@@ -94,6 +96,8 @@ Identifiers are case-sensitive. The following are reserved keywords and cannot b
 let  const  if  else  loop  break  continue  return  
 import  transmute  and  or  xor  not  true  false  void
 ```
+
+> NOTE: `import` is a preprocessing-only directive. It is recognized before any actual code; any `import` that reaches tokenization is an error.
 
 ### Number Literals
 
@@ -158,16 +162,17 @@ The last rule means `\"` produces a double-quote character and `\\` produces a b
 **Line continuation:** A backslash immediately before a newline causes that newline to be skipped:
 
 ```udewy
-let long:int = "This is a very \
+let long:int = "\
+This is a very \
 long string that appears \
 on one line"
 ```
 
-**Memory layout:** String literals are stored in static memory with an 8-byte length prefix. The variable holds a pointer to the first character (after the length). See [Memory Layout](#15-memory-layout).
+**Memory layout:** String literals are stored in static memory with an 8-byte length prefix. The variable holds a pointer to the first character (after the length). See [Memory Layout](#16-memory-layout).
 
 ### Path Literals
 
-Path literals use the `p"..."` syntax and behave identically to regular strings but signal that the content represents a file path:
+Path Literals use the `p"..."` syntax. They are only recognized by the import preprocessor and are not part of the regular token stream or parser grammar:
 
 ```udewy
 import p"utils.udewy"
@@ -203,7 +208,6 @@ Type annotations are syntactically required in variable declarations and functio
 **Variable type annotation** (`:type`):
 ```udewy
 let x:int = 42
-let ptr:array<int> = some_array
 ```
 
 **Parameterized types** (`:type<param>` or `<param>` alone):
@@ -212,16 +216,16 @@ let arr:array<int> = [1 2 3]
 let mixed<int|string> = value    # type param without colon
 ```
 
-The content inside `<>` is parsed but not validated. This allows complex type expressions that udewy couldn't otherwise parse:
+The content inside `<>` is not validated. This allows complex type expressions that udewy couldn't otherwise parse:
 ```udewy
-let x<int|undefined> = 10  # type param alone, no colon before <>
+let x<(int & Something<10>) | undefined> = 10
 ```
 
-**Function return type** (`:>type` or `:> <param>`):
+**Function return type** (`:>type`, `:>type<param>` or `:> <param>`):
 ```udewy
 let add = (a:int b:int):>int => { return a + b }
 let get_value = ():>result<int> => { ... }
-let flexible = ():> <A|B|C> => { ... }  # complex return type
+let flexible = ():> <A&B|C<int>> => { ... }  # complex return type
 ```
 
 ### The `transmute` Keyword
@@ -375,7 +379,7 @@ Elements may be:
 - String literals
 - Identifiers referencing constants or functions
 
-Array literals are stored in static memory with an 8-byte length prefix. See [Memory Layout](#15-memory-layout).
+Array literals are stored in static memory with an 8-byte length prefix. See [Memory Layout](#16-memory-layout).
 
 ### Function Calls
 
@@ -489,9 +493,9 @@ return void      # return from a void function
 
 The return expression is **mandatory**. Use `return void` for functions that don't return a meaningful value.
 
-### Import
+### Import Directives
 
-Import statements bring definitions from other udewy files into scope:
+Import directives bring definitions from other udewy files into scope:
 
 ```udewy
 import p"utils.udewy"
@@ -500,9 +504,12 @@ import p"lib/helpers.udewy"
 
 **Semantics:**
 - Paths are relative to the importing file's directory
+- Imports are recognized only in the leading import prelude at the top of a file
 - Imports are processed recursively (imported files can import other files)
 - Each file is only included once (circular imports are handled by tracking what's been imported)
 - Imported content is prepended to the source
+- After preprocessing, import directives are removed from the source before tokenization and parsing
+- `import` remains a reserved word; if it reaches tokenization, the tokenizer reports an error
 
 ---
 
@@ -727,12 +734,13 @@ The udewy compiler is a **single-pass compiler** with:
 
 ## 4.2 Import Processing
 
-Before parsing, import statements are processed:
+Before tokenization, leading import directives are processed:
 
-1. Parse import statements at the beginning of the file
+1. Parse the leading import prelude at the beginning of the file
 2. For each import, recursively process the imported file
 3. Prepend imported content to the main source
-4. Track imported files to prevent duplicate inclusion
+4. Remove import directives from the source being compiled
+5. Track imported files to prevent duplicate inclusion
 
 ## 4.3 Backend Architecture
 
@@ -819,13 +827,15 @@ Unknown identifiers during parsing are assumed to be forward references to funct
 # Part 5: Formal Grammar
 
 ```
+source_file     ::= import_directive* program
+
+import_directive ::= 'import' path_string
+path_string     ::= 'p' STRING
+
 program         ::= top_level_stmt*
 
-top_level_stmt  ::= import_stmt
-                  | fn_decl
+top_level_stmt  ::= fn_decl
                   | const_decl
-
-import_stmt     ::= 'import' path_string
 
 fn_decl         ::= ('let' | 'const') IDENT '=' '(' param_list ')' fn_type_annot '=>' block
 
@@ -902,10 +912,11 @@ decimal         ::= [0-9][0-9_]*
 hex             ::= '0x' [0-9a-fA-F_]+
 binary          ::= '0b' [01_]+
 STRING          ::= '"' string_char* '"'
-path_string     ::= 'p' STRING
 string_char     ::= <any char except '"' or '\'>
                   | '\' <any char>
 ```
+
+> NOTE: `import_directive` and `path_string` are consumed during preprocessing and do not appear in the token stream seen by the parser. The word `import` remains reserved, so any surviving `import` is rejected during tokenization.
 
 ---
 
@@ -1247,15 +1258,16 @@ python -m udewy.p0 -c --target wasm32 --split-wasm program.udewy
 
 ---
 
-# Pronunciation
+# Misc
+## Pronunciation
 
 The name can be pronounced several ways depending on how you read the Greek letter μ (mu):
 
-| Pronunciation | IPA | Reading |
-|---------------|-----|---------|
-| MY-kroh dew-ee | /ˌmaɪkroʊ ˈduːi/ | μ as "micro" |
-| MYOO dew-ee | /mjuː ˈduːi/ | μ as "mu" |
-| YOO dew-ee | /juː ˈduːi/ | μ as "u" |
+| Reading      | Pronunciation  | IPA              |
+|--------------|----------------|------------------|
+| μ as "micro" | MY-kroh dew-ee | /ˌmaɪkroʊ ˈduːi/ |
+| μ as "mu"    | MYOO dew-ee    | /mjuː ˈduːi/     |
+| μ as "u"     | YOO dew-ee     | /juː ˈduːi/      |
 
 All are equally correct.
 
