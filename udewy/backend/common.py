@@ -235,6 +235,15 @@ class Backend(Protocol):
         """
         ...
     
+    def signed_shr(self) -> None:
+        """
+        Signed (arithmetic) right shift.
+        
+        Stack: [... value bits] -> [... result]
+        Pops shift amount and value, pushes value >> bits with sign extension.
+        """
+        ...
+    
     # ========================================================================
     # Calls
     # ========================================================================

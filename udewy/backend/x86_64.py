@@ -323,7 +323,7 @@ class X86_64Backend:
         elif op == "<<":
             self._emit("shlq %cl, %rax")
         elif op == ">>":
-            self._emit("sarq %cl, %rax")
+            self._emit("shrq %cl, %rax")
         elif op == "and":
             self._emit("andq %rcx, %rax")
         elif op == "or":
@@ -398,6 +398,11 @@ class X86_64Backend:
         elif width == 8:
             self._emit("movb %bl, (%rax)")
         self._emit("xorq %rax, %rax")  # return 0
+    
+    def signed_shr(self) -> None:
+        """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
+        self._emit("popq %rcx")  # shift amount (was saved first)
+        self._emit("sarq %cl, %rax")
     
     # ========================================================================
     # Calls

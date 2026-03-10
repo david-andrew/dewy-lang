@@ -354,7 +354,7 @@ class RiscvBackend:
         elif op == "<<":
             self._emit("sll a0, a0, t0")
         elif op == ">>":
-            self._emit("sra a0, a0, t0")
+            self._emit("srl a0, a0, t0")
         elif op == "and":
             self._emit("and a0, a0, t0")
         elif op == "or":
@@ -419,6 +419,12 @@ class RiscvBackend:
         elif width == 8:
             self._emit("sb t0, 0(a0)")
         self._emit("li a0, 0")
+    
+    def signed_shr(self) -> None:
+        """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
+        self._emit("ld t0, 0(sp)")   # shift amount (was saved first)
+        self._emit("addi sp, sp, 8")
+        self._emit("sra a0, a0, t0")
     
     # ========================================================================
     # Calls

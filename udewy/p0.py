@@ -298,12 +298,11 @@ def expect(toks: list, idx: int, kind: int, src: str) -> int:
 PREC_OR = 1
 PREC_XOR = 2
 PREC_AND = 3
-PREC_EQ = 4
-PREC_CMP = 5
-PREC_SHIFT = 6
-PREC_ADD = 7
-PREC_MUL = 8
-PREC_PIPE = 9
+PREC_CMP = 4
+PREC_SHIFT = 5
+PREC_ADD = 6
+PREC_MUL = 7
+PREC_PIPE = 8
 
 
 def get_precedence(kind: int) -> int:
@@ -314,7 +313,7 @@ def get_precedence(kind: int) -> int:
     if kind == t0.TK_AND:
         return PREC_AND
     if kind == t0.TK_EQ or kind == t0.TK_NOT_EQ:
-        return PREC_EQ
+        return PREC_CMP
     if kind == t0.TK_GT or kind == t0.TK_LT or kind == t0.TK_GT_EQ or kind == t0.TK_LT_EQ:
         return PREC_CMP
     if kind == t0.TK_LEFT_SHIFT or kind == t0.TK_RIGHT_SHIFT:
@@ -384,6 +383,7 @@ def is_intrinsic(src: str, name_start: int, name_len: int) -> bool:
     if name_eq_str(src, name_start, name_len, "__store16__"): return True
     if name_eq_str(src, name_start, name_len, "__load32__"): return True
     if name_eq_str(src, name_start, name_len, "__store32__"): return True
+    if name_eq_str(src, name_start, name_len, "__signed_shr__"): return True
     return False
 
 
@@ -430,6 +430,8 @@ def emit_intrinsic(backend, src: str, name_start: int, name_len: int, num_args: 
         backend.emit_host_dom_append_int()
     elif name == "__log_int__":
         backend.emit_host_log_int()
+    elif name == "__signed_shr__":
+        backend.signed_shr()
 
 
 # ============================================================================
@@ -1303,29 +1305,6 @@ const imports = {
         host_log_int: (value) => {
             console.log(String(value));
             return value;
-        },
-        // Syscall routing (translates Linux syscalls to browser equivalents)
-        host_syscall0: (num) => {
-            console.log(`syscall0(${num})`);
-            return 0n;
-        },
-        host_syscall1: (num, a1) => {
-            if (num === 60n) { // exit
-                return imports.env.host_exit(a1);
-            }
-            console.log(`syscall1(${num}, ${a1})`);
-            return 0n;
-        },
-        host_syscall2: (num, a1, a2) => {
-            console.log(`syscall2(${num}, ${a1}, ${a2})`);
-            return 0n;
-        },
-        host_syscall3: (num, a1, a2, a3) => {
-            if (num === 1n) { // write(fd, ptr, len)
-                return imports.env.host_log(a2, a3);
-            }
-            console.log(`syscall3(${num}, ${a1}, ${a2}, ${a3})`);
-            return 0n;
         },
     }
 };

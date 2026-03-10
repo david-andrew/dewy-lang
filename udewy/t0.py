@@ -234,8 +234,9 @@ def tokenize(src:str)->list[PackedToken]:
         if is_digit(c):
             start = i
             val = 0
-            while i < n and is_digit(src[i]):
-                val = val * 10 + (ord(src[i]) - 48)
+            while i < n and (is_digit(src[i]) or src[i] == '_'):
+                if src[i] != '_':
+                    val = val * 10 + (ord(src[i]) - 48)
                 i += 1
             toks.append(pack(val, start, TK_NUMBER))
             continue

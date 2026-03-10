@@ -80,14 +80,9 @@ class Wasm32Backend:
             '(import "env" "host_dom_clear" (func $host_dom_clear (result i64)))',
             '(import "env" "host_dom_append_int" (func $host_dom_append_int (param i64) (result i64)))',
             '(import "env" "host_log_int" (func $host_log_int (param i64) (result i64)))',
-            # Syscall routing (translates Linux syscalls to browser equivalents)
-            '(import "env" "host_syscall0" (func $host_syscall0 (param i64) (result i64)))',
-            '(import "env" "host_syscall1" (func $host_syscall1 (param i64 i64) (result i64)))',
-            '(import "env" "host_syscall2" (func $host_syscall2 (param i64 i64 i64) (result i64)))',
-            '(import "env" "host_syscall3" (func $host_syscall3 (param i64 i64 i64 i64) (result i64)))',
         ]
         self._imports.extend(host_imports)
-        self._next_fn_index = 13  # 13 host function imports
+        self._next_fn_index = 9  # 9 host function imports
     
     def _new_label(self, prefix: str = "L") -> str:
         label = f"${prefix}{self._next_label}"
@@ -397,7 +392,7 @@ class Wasm32Backend:
         elif op == "<<":
             self._emit("i64.shl")
         elif op == ">>":
-            self._emit("i64.shr_s")
+            self._emit("i64.shr_u")
         elif op == "and":
             self._emit("i64.and")
         elif op == "or":
@@ -478,6 +473,10 @@ class Wasm32Backend:
             self._emit("i64.store8")
         self._emit("i64.const 0")
     
+    def signed_shr(self) -> None:
+        """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
+        self._emit("i64.shr_s")
+    
     # ========================================================================
     # Calls
     # ========================================================================
@@ -497,15 +496,12 @@ class Wasm32Backend:
         self._emit(f"call_indirect (type $fn{num_args})")
     
     def syscall(self, num_args: int) -> None:
-        """Translate syscall to browser host function.
-        
-        Maps Linux syscalls to browser-appropriate host functions:
-        - write(fd, ptr, len) -> host_log(ptr, len) for fd 1 or 2
-        - exit(code) -> host_exit(code)
-        """
-        # For now, just call a generic syscall handler that routes based on syscall number
-        # The JS shim will need to handle the translation
-        self._emit(f"call $host_syscall{num_args - 1}")
+        """Syscalls are not supported on WASM. Use host function intrinsics instead."""
+        raise NotImplementedError(
+            "Syscalls are not supported on the WASM backend. "
+            "Use WASM host function intrinsics (__host_log__, __host_exit__, etc.) instead, "
+            "or create a platform abstraction layer."
+        )
     
     def emit_host_log(self) -> None:
         """Emit a call to host_log(ptr, len). Stack: [ptr len] -> [bytes_written]"""

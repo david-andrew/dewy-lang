@@ -351,7 +351,7 @@ class ArmBackend:
         elif op == "<<":
             self._emit("lsl x0, x0, x9")
         elif op == ">>":
-            self._emit("asr x0, x0, x9")
+            self._emit("lsr x0, x0, x9")
         elif op == "and":
             self._emit("and x0, x0, x9")
         elif op == "or":
@@ -410,6 +410,11 @@ class ArmBackend:
         elif width == 8:
             self._emit("strb w9, [x0]")
         self._emit("mov x0, #0")
+    
+    def signed_shr(self) -> None:
+        """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
+        self._emit("ldr x9, [sp], #16")  # shift amount (was saved first)
+        self._emit("asr x0, x0, x9")
     
     # ========================================================================
     # Calls
