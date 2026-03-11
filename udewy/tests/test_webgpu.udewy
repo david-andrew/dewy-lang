@@ -1,0 +1,23 @@
+# WebGPU plasma demo
+# Replicates the canvas plasma effect but runs entirely on the GPU
+# Uses built-in plasma shader (WGSL shader is defined in JS)
+
+let width:int = 0
+let height:int = 0
+let initialized:int = 0
+
+let main = ():>int => {
+    # Initialize WebGPU on first frame
+    if initialized =? 0 {
+        width = __window_width__()
+        height = __window_height__()
+        __webgpu_init_plasma__(width height)
+        initialized = 1
+    }
+    
+    # Update time and render
+    __webgpu_set_time__(__frame_time__())
+    __webgpu_render__()
+    
+    return 0
+}
