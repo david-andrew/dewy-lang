@@ -7,9 +7,9 @@ Generates GNU assembler syntax targeting AArch64 Linux with AAPCS64 ABI.
 from pathlib import Path
 
 from .. import t0
+from .common import Backend
 
-
-class ArmBackend:
+class ArmBackend(Backend):
     """
     AArch64 code generator implementing the Backend protocol.
     

@@ -5,12 +5,11 @@ Generates GNU assembler syntax targeting Linux x86_64 with System V ABI.
 """
 
 from pathlib import Path
-from os import PathLike
 
 from .. import t0
+from .common import Backend
 
-
-class X86_64Backend:
+class X86_64Backend(Backend):
     """
     x86_64 code generator implementing the Backend protocol.
     

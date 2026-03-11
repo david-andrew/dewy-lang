@@ -7,9 +7,9 @@ Generates GNU assembler syntax targeting RISC-V 64-bit Linux with LP64 ABI.
 from pathlib import Path
 
 from .. import t0
+from .common import Backend
 
-
-class RiscvBackend:
+class RiscvBackend(Backend):
     """
     RISC-V code generator implementing the Backend protocol.
     

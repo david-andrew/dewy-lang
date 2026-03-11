@@ -19,9 +19,9 @@ Host functions provided by JS:
 from pathlib import Path
 
 from .. import t0
+from .common import Backend
 
-
-class Wasm32Backend:
+class Wasm32Backend(Backend):
     """
     WebAssembly code generator implementing the Backend protocol.
     
