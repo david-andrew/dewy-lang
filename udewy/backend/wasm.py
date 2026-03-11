@@ -83,9 +83,18 @@ class Wasm32Backend:
             '(import "env" "host_dom_clear" (func $host_dom_clear (result i64)))',
             '(import "env" "host_dom_append_int" (func $host_dom_append_int (param i64) (result i64)))',
             '(import "env" "host_log_int" (func $host_log_int (param i64) (result i64)))',
+            # Canvas graphics
+            '(import "env" "host_canvas_init" (func $host_canvas_init (param i64 i64) (result i64)))',
+            '(import "env" "host_canvas_width" (func $host_canvas_width (result i64)))',
+            '(import "env" "host_canvas_height" (func $host_canvas_height (result i64)))',
+            '(import "env" "host_canvas_present" (func $host_canvas_present (result i64)))',
+            '(import "env" "host_frame_count" (func $host_frame_count (result i64)))',
+            '(import "env" "host_frame_time" (func $host_frame_time (result i64)))',
+            '(import "env" "host_window_width" (func $host_window_width (result i64)))',
+            '(import "env" "host_window_height" (func $host_window_height (result i64)))',
         ]
         self._imports.extend(host_imports)
-        self._next_fn_index = 9  # 9 host function imports
+        self._next_fn_index = 17  # 17 host function imports
     
     def _new_label(self, prefix: str = "L") -> str:
         label = f"${prefix}{self._next_label}"
@@ -119,13 +128,16 @@ class Wasm32Backend:
         output = []
         output.append("(module")
         
-        # Memory import (for JS interop)
-        output.append('  (import "env" "memory" (memory 2))')
-        output.append('  (global $stack_ptr (mut i32) (i32.const 131072))')
+        # Memory import (for JS interop) - must come first
+        # 16 pages = 1MB, enough for reasonable canvas sizes
+        output.append('  (import "env" "memory" (memory 16))')
         
-        # Syscall imports
+        # Host function imports - must come before any definitions
         for imp in self._imports:
             output.append(f"  {imp}")
+        
+        # Global definitions - after imports, before functions
+        output.append('  (global $stack_ptr (mut i32) (i32.const 131072))')
         
         # Functions
         for fn in self._functions:
@@ -252,9 +264,13 @@ class Wasm32Backend:
         self._emit("i64.load")
     
     def store_global(self, label_id: int) -> None:
-        """Pop value from stack and store to global."""
+        """Pop value from stack and store to global. Stack: [value] -> []"""
         offset = self._global_offsets[label_id]
-        self._emit(f"i32.const {offset}")
+        # WASM i64.store expects [addr, value], but we have [value]
+        # Use scratch local to reorder
+        self._emit("local.set $swap0")  # Save value
+        self._emit(f"i32.const {offset}")  # Push address
+        self._emit("local.get $swap0")  # Push value back
         self._emit("i64.store")
     
     # ========================================================================
@@ -597,6 +613,38 @@ class Wasm32Backend:
         """Emit a call to host_log_int(value). Stack: [value] -> [value]"""
         self._emit("call $host_log_int")
     
+    def emit_canvas_init(self) -> None:
+        """Emit a call to host_canvas_init(width, height). Stack: [width height] -> [buffer_ptr]"""
+        self._emit("call $host_canvas_init")
+    
+    def emit_canvas_width(self) -> None:
+        """Emit a call to host_canvas_width(). Stack: [] -> [width]"""
+        self._emit("call $host_canvas_width")
+    
+    def emit_canvas_height(self) -> None:
+        """Emit a call to host_canvas_height(). Stack: [] -> [height]"""
+        self._emit("call $host_canvas_height")
+    
+    def emit_canvas_present(self) -> None:
+        """Emit a call to host_canvas_present(). Stack: [] -> [0]"""
+        self._emit("call $host_canvas_present")
+    
+    def emit_frame_count(self) -> None:
+        """Emit a call to host_frame_count(). Stack: [] -> [frame_number]"""
+        self._emit("call $host_frame_count")
+    
+    def emit_frame_time(self) -> None:
+        """Emit a call to host_frame_time(). Stack: [] -> [ms_since_start]"""
+        self._emit("call $host_frame_time")
+    
+    def emit_window_width(self) -> None:
+        """Emit a call to host_window_width(). Stack: [] -> [width]"""
+        self._emit("call $host_window_width")
+    
+    def emit_window_height(self) -> None:
+        """Emit a call to host_window_height(). Stack: [] -> [height]"""
+        self._emit("call $host_window_height")
+    
     # ========================================================================
     # Control flow
     # ========================================================================
@@ -677,6 +725,9 @@ class Wasm32Backend:
         "__host_log__", "__host_exit__", "__host_time__", "__host_random__",
         "__dom_set_text__", "__dom_append__", "__dom_clear__",
         "__dom_append_int__", "__log_int__",
+        "__canvas_init__", "__canvas_width__", "__canvas_height__",
+        "__canvas_present__", "__frame_count__", "__frame_time__",
+        "__window_width__", "__window_height__",
     }
     
     def is_intrinsic(self, name: str) -> bool:
@@ -751,6 +802,22 @@ class Wasm32Backend:
             self.emit_host_dom_append_int()
         elif name == "__log_int__":
             self.emit_host_log_int()
+        elif name == "__canvas_init__":
+            self.emit_canvas_init()
+        elif name == "__canvas_width__":
+            self.emit_canvas_width()
+        elif name == "__canvas_height__":
+            self.emit_canvas_height()
+        elif name == "__canvas_present__":
+            self.emit_canvas_present()
+        elif name == "__frame_count__":
+            self.emit_frame_count()
+        elif name == "__frame_time__":
+            self.emit_frame_time()
+        elif name == "__window_width__":
+            self.emit_window_width()
+        elif name == "__window_height__":
+            self.emit_window_height()
     
     def get_builtin_constants(self) -> dict[str, int]:
         """WASM browser backend has no built-in constants."""

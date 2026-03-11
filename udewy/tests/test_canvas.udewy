@@ -1,0 +1,130 @@
+# Canvas demo - animated plasma-like pattern
+# Uses canvas intrinsics to draw an animated visual effect that fills the window
+
+let width:int = 0
+let height:int = 0
+let buffer:int = 0
+
+# Simple sine approximation using parabolic segments (scaled by 256)
+# Input: angle in range 0-1023 (maps to 0-2pi)
+# Output: sine * 256 in range -256 to 256
+let sin256 = (angle:int):>int => {
+    let a:int = angle % 1024
+    if a <? 0 {
+        a = a + 1024
+    }
+    
+    # Reduce to first quadrant
+    let quad:int = a // 256
+    let x:int = a % 256
+    
+    # Parabolic approximation for quarter period
+    let y:int = 0
+    let term:int = 0
+    if quad =? 0 {
+        term = 512 - x
+        y = (x * term) // 256
+    }
+    if quad =? 1 {
+        x = 256 - x
+        term = 512 - x
+        y = (x * term) // 256
+    }
+    if quad =? 2 {
+        term = 512 - x
+        y = 0 - ((x * term) // 256)
+    }
+    if quad =? 3 {
+        x = 256 - x
+        term = 512 - x
+        y = 0 - ((x * term) // 256)
+    }
+    
+    return y
+}
+
+# Cosine using sine
+let cos256 = (angle:int):>int => {
+    return sin256(angle + 256)
+}
+
+# Set a pixel in the buffer (RGBA format)
+let set_pixel = (x:int y:int r:int g:int b:int):>int => {
+    let base:int = y * width
+    let offset:int = (base + x) * 4
+    let addr:int = buffer + offset
+    __store_u8__(r addr)
+    __store_u8__(g addr + 1)
+    __store_u8__(b addr + 2)
+    __store_u8__(255 addr + 3)
+    return 0
+}
+
+# Clamp value to 0-255
+let clamp255 = (v:int):>int => {
+    if v <? 0 {
+        return 0
+    }
+    if v >? 255 {
+        return 255
+    }
+    return v
+}
+
+# Render one frame of the plasma effect
+let render_frame = ():>int => {
+    let t:int = __frame_time__() // 4
+    
+    let y:int = 0
+    loop y <? height {
+        let x:int = 0
+        loop x <? width {
+            # Create plasma effect using overlapping sine waves
+            let arg1:int = (x * 4) + t
+            let v1:int = sin256(arg1)
+            
+            let arg2:int = (y * 4) + (t * 2)
+            let v2:int = sin256(arg2)
+            
+            let arg3:int = ((x + y) * 3) + t
+            let v3:int = sin256(arg3)
+            
+            let tpart:int = (t * 3) // 2
+            let arg4:int = ((x - y) * 2) + tpart
+            let v4:int = cos256(arg4)
+            
+            # Combine waves
+            let combined:int = v1 + v2 + v3 + v4
+            
+            # Map to colors (each wave contributes -256 to 256, so combined is -1024 to 1024)
+            let r:int = clamp255(128 + (combined // 8))
+            let gpart:int = (v1 - v2) + v3
+            let g:int = clamp255(128 + (gpart // 6))
+            let bpart:int = v2 + v4
+            let b:int = clamp255(128 + (bpart // 4))
+            
+            set_pixel(x y r g b)
+            
+            x = x + 1
+        }
+        y = y + 1
+    }
+    
+    return 0
+}
+
+let main = ():>int => {
+    # Use a scaled-down resolution for performance
+    # Canvas will be stretched to fill window via CSS
+    width = 320
+    height = 240
+    buffer = __canvas_init__(width height)
+    
+    # Render current frame
+    render_frame()
+    
+    # Present to screen
+    __canvas_present__()
+    
+    return 0
+}

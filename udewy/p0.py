@@ -1066,7 +1066,6 @@ def parse_program(toks: list, src: str, backend,
 
 def parse(toks: list, src: str, target: str = "x86_64") -> str:
     """Parse tokens and generate code for the specified target."""
-    
     if target == "x86_64":
         backend = X86_64Backend()
     elif target == "wasm32":
@@ -1188,8 +1187,20 @@ if __name__ == "__main__":
         
         # Browser host function implementations (shared by both output modes)
         host_functions_js = '''
-const memory = new WebAssembly.Memory({ initial: 2 });
+const memory = new WebAssembly.Memory({ initial: 16 });
 let outputElement = null;
+
+// Canvas state
+let canvas = null;
+let ctx = null;
+let canvasBuffer = null;
+let canvasBufferPtr = 0;
+let canvasWidth = 0;
+let canvasHeight = 0;
+let frameCount = 0;
+let startTime = 0;
+let canvasMode = false;
+let wasmInstance = null;
 
 function decodeString(ptr, len) {
     const view = new Uint8Array(memory.buffer);
@@ -1250,8 +1261,69 @@ const imports = {
             console.log(String(value));
             return value;
         },
+        // Canvas graphics
+        host_canvas_init: (width, height) => {
+            // Only initialize once - subsequent calls return existing buffer
+            if (canvas && canvasMode) {
+                return BigInt(canvasBufferPtr);
+            }
+            
+            canvasWidth = Number(width);
+            canvasHeight = Number(height);
+            canvasMode = true;
+            startTime = performance.now();
+            
+            // Create or resize canvas
+            canvas = document.getElementById('canvas');
+            if (!canvas) {
+                canvas = document.createElement('canvas');
+                canvas.id = 'canvas';
+                document.body.insertBefore(canvas, document.body.firstChild);
+            }
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            canvas.style.display = 'block';
+            ctx = canvas.getContext('2d');
+            
+            // Hide text output in canvas mode
+            if (outputElement) {
+                outputElement.style.display = 'none';
+            }
+            const h1 = document.querySelector('h1');
+            if (h1) h1.style.display = 'none';
+            
+            // Allocate buffer in WASM memory (RGBA: 4 bytes per pixel)
+            // Use a fixed location after the stack (at 256KB)
+            canvasBufferPtr = 262144;
+            
+            return BigInt(canvasBufferPtr);
+        },
+        host_canvas_width: () => BigInt(canvasWidth),
+        host_canvas_height: () => BigInt(canvasHeight),
+        host_canvas_present: () => {
+            if (!ctx || !canvas) return 0n;
+            
+            // Read pixel data from WASM memory
+            const view = new Uint8ClampedArray(memory.buffer, canvasBufferPtr, canvasWidth * canvasHeight * 4);
+            const imageData = new ImageData(view, canvasWidth, canvasHeight);
+            ctx.putImageData(imageData, 0, 0);
+            
+            return 0n;
+        },
+        host_frame_count: () => BigInt(frameCount),
+        host_frame_time: () => BigInt(Math.floor(performance.now() - startTime)),
+        host_window_width: () => BigInt(window.innerWidth),
+        host_window_height: () => BigInt(window.innerHeight),
     }
 };
+
+function animationLoop() {
+    if (!canvasMode || !wasmInstance) return;
+    
+    frameCount++;
+    wasmInstance.exports.main();
+    requestAnimationFrame(animationLoop);
+}
 '''
         
         if split_wasm:
@@ -1263,8 +1335,11 @@ const imports = {
     <title>{input_file.stem}</title>
     <style>
         body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }}
+        body.canvas-mode {{ max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; }}
         h1 {{ color: #333; }}
         #output {{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; min-height: 100px; }}
+        #canvas {{ display: none; image-rendering: pixelated; }}
+        body.canvas-mode #canvas {{ display: block; width: 100vw; height: 100vh; }}
     </style>
 </head>
 <body>
@@ -1279,8 +1354,14 @@ async function run() {{
         const response = await fetch('{wasm_path.name}');
         const bytes = await response.arrayBuffer();
         const {{ instance }} = await WebAssembly.instantiate(bytes, imports);
+        wasmInstance = instance;
         const result = instance.exports.main();
-        appendOutput(`\\nExit code: ${{result}}`);
+        if (canvasMode) {{
+            document.body.classList.add('canvas-mode');
+            requestAnimationFrame(animationLoop);
+        }} else {{
+            appendOutput(`\\nExit code: ${{result}}`);
+        }}
     }} catch (err) {{
         appendOutput(`Error: ${{err}}`);
     }}
@@ -1314,8 +1395,11 @@ run();
     <title>{input_file.stem}</title>
     <style>
         body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }}
+        body.canvas-mode {{ max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; }}
         h1 {{ color: #333; }}
         #output {{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; min-height: 100px; }}
+        #canvas {{ display: none; image-rendering: pixelated; }}
+        body.canvas-mode #canvas {{ display: block; width: 100vw; height: 100vh; }}
     </style>
 </head>
 <body>
@@ -1339,8 +1423,14 @@ async function run() {{
     outputElement = document.getElementById('output');
     try {{
         const {{ instance }} = await loadEmbeddedWasm();
+        wasmInstance = instance;
         const result = instance.exports.main();
-        appendOutput(`\\nExit code: ${{result}}`);
+        if (canvasMode) {{
+            document.body.classList.add('canvas-mode');
+            requestAnimationFrame(animationLoop);
+        }} else {{
+            appendOutput(`\\nExit code: ${{result}}`);
+        }}
     }} catch (err) {{
         appendOutput(`Error: ${{err}}`);
     }}
