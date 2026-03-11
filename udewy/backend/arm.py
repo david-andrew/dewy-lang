@@ -735,3 +735,38 @@ class ArmBackend:
             # AT_FDCWD for *at syscalls
             "AT_FDCWD": -100,
         }
+    
+    def compile_and_link(self, code: str, input_name: str, cache_dir: Path, **options) -> Path:
+        """Compile and link AArch64 assembly to executable."""
+        import subprocess
+        
+        asm_path = cache_dir / f"{input_name}.s"
+        obj_path = cache_dir / f"{input_name}.o"
+        exe_path = cache_dir / input_name
+        
+        asm_path.write_text(code)
+        
+        # Try different toolchain prefixes
+        for prefix in ["aarch64-linux-gnu-", "aarch64-elf-", "aarch64-unknown-elf-"]:
+            try:
+                subprocess.run([f"{prefix}as", str(asm_path), "-o", str(obj_path)], check=True)
+                subprocess.run([f"{prefix}ld", str(obj_path), "-o", str(exe_path)], check=True)
+                return exe_path
+            except FileNotFoundError:
+                continue
+        
+        raise RuntimeError(
+            "AArch64 toolchain not found.\n"
+            f"Install one of: aarch64-linux-gnu-*, aarch64-elf-*\n"
+            f"Assembly file generated at: {asm_path}"
+        )
+    
+    def run(self, output_path: Path, args: list[str]) -> int | None:
+        """Run the compiled executable via QEMU."""
+        import subprocess
+        result = subprocess.run(["qemu-aarch64", str(output_path)] + args)
+        return result.returncode
+    
+    def get_compile_message(self, output_path: Path, **options) -> str:
+        """Get compilation success message."""
+        return f"Compiled: {output_path}"

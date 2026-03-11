@@ -822,3 +822,307 @@ class Wasm32Backend:
     def get_builtin_constants(self) -> dict[str, int]:
         """WASM browser backend has no built-in constants."""
         return {}
+    
+    def compile_and_link(self, code: str, input_name: str, cache_dir: Path, **options) -> Path:
+        """Compile WAT to WASM and generate HTML wrapper."""
+        import subprocess
+        import base64
+        
+        split_wasm = options.get('split_wasm', False)
+        
+        wat_path = cache_dir / f"{input_name}.wat"
+        wasm_path = cache_dir / f"{input_name}.wasm"
+        html_path = cache_dir / f"{input_name}.html"
+        
+        wat_path.write_text(code)
+        
+        # Convert WAT to WASM
+        try:
+            subprocess.run(["wat2wasm", str(wat_path), "-o", str(wasm_path)], check=True)
+        except FileNotFoundError:
+            raise RuntimeError(
+                "wat2wasm not found. Install wabt: https://github.com/WebAssembly/wabt\n"
+                f"WAT file generated at: {wat_path}"
+            )
+        
+        # Generate HTML with JS host functions
+        host_functions_js = self._get_host_functions_js()
+        
+        if split_wasm:
+            html_content = self._get_split_html_template(input_name, wasm_path.name, host_functions_js)
+        else:
+            wasm_bytes = wasm_path.read_bytes()
+            wasm_b64 = base64.b64encode(wasm_bytes).decode('ascii')
+            html_content = self._get_embedded_html_template(input_name, wasm_b64, host_functions_js)
+        
+        html_path.write_text(html_content)
+        
+        return html_path if not split_wasm else wasm_path
+    
+    def run(self, output_path: Path, args: list[str]) -> int | None:
+        """WASM runs in browser - return None to indicate manual running needed."""
+        return None
+    
+    def get_compile_message(self, output_path: Path, **options) -> str:
+        """Get compilation success message."""
+        split_wasm = options.get('split_wasm', False)
+        cache_dir = output_path.parent
+        
+        if split_wasm:
+            html_path = output_path.with_suffix('.html')
+            return (
+                f"Split mode output:\n"
+                f"  WASM: {output_path}\n"
+                f"  HTML: {html_path}\n"
+                f"Serve with: python -m http.server -d {cache_dir}"
+            )
+        else:
+            return (
+                f"Compiled: {output_path}\n"
+                f"(single file with embedded WASM)"
+            )
+    
+    def _get_host_functions_js(self) -> str:
+        """Return JavaScript code implementing WASM host functions."""
+        return '''
+const memory = new WebAssembly.Memory({ initial: 16 });
+let outputElement = null;
+
+// Canvas state
+let canvas = null;
+let ctx = null;
+let canvasBuffer = null;
+let canvasBufferPtr = 0;
+let canvasWidth = 0;
+let canvasHeight = 0;
+let frameCount = 0;
+let startTime = 0;
+let canvasMode = false;
+let wasmInstance = null;
+
+function decodeString(ptr, len) {
+    const view = new Uint8Array(memory.buffer);
+    const bytes = view.slice(Number(ptr), Number(ptr) + Number(len));
+    return new TextDecoder().decode(bytes);
+}
+
+function appendOutput(text) {
+    console.log(text);
+    if (outputElement) {
+        outputElement.textContent += text;
+    }
+}
+
+const imports = {
+    env: {
+        memory: memory,
+        // Direct browser APIs
+        host_log: (ptr, len) => {
+            const text = decodeString(ptr, len);
+            console.log(text);
+            return len;
+        },
+        host_exit: (code) => {
+            appendOutput(`\\nExit code: ${code}\\n`);
+            return code;
+        },
+        host_time: () => BigInt(Date.now()),
+        host_random: () => BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
+        // DOM manipulation
+        host_dom_set_text: (ptr, len) => {
+            const text = decodeString(ptr, len);
+            if (outputElement) {
+                outputElement.textContent = text;
+            }
+            return 0n;
+        },
+        host_dom_append: (ptr, len) => {
+            const text = decodeString(ptr, len);
+            if (outputElement) {
+                outputElement.textContent += text;
+            }
+            return len;
+        },
+        host_dom_clear: () => {
+            if (outputElement) {
+                outputElement.textContent = '';
+            }
+            return 0n;
+        },
+        host_dom_append_int: (value) => {
+            if (outputElement) {
+                outputElement.textContent += String(value);
+            }
+            return value;
+        },
+        host_log_int: (value) => {
+            console.log(String(value));
+            return value;
+        },
+        // Canvas graphics
+        host_canvas_init: (width, height) => {
+            // Only initialize once - subsequent calls return existing buffer
+            if (canvas && canvasMode) {
+                return BigInt(canvasBufferPtr);
+            }
+            
+            canvasWidth = Number(width);
+            canvasHeight = Number(height);
+            canvasMode = true;
+            startTime = performance.now();
+            
+            // Create or resize canvas
+            canvas = document.getElementById('canvas');
+            if (!canvas) {
+                canvas = document.createElement('canvas');
+                canvas.id = 'canvas';
+                document.body.insertBefore(canvas, document.body.firstChild);
+            }
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            canvas.style.display = 'block';
+            ctx = canvas.getContext('2d');
+            
+            // Hide text output in canvas mode
+            if (outputElement) {
+                outputElement.style.display = 'none';
+            }
+            const h1 = document.querySelector('h1');
+            if (h1) h1.style.display = 'none';
+            
+            // Allocate buffer in WASM memory (RGBA: 4 bytes per pixel)
+            // Use a fixed location after the stack (at 256KB)
+            canvasBufferPtr = 262144;
+            
+            return BigInt(canvasBufferPtr);
+        },
+        host_canvas_width: () => BigInt(canvasWidth),
+        host_canvas_height: () => BigInt(canvasHeight),
+        host_canvas_present: () => {
+            if (!ctx || !canvas) return 0n;
+            
+            // Read pixel data from WASM memory
+            const view = new Uint8ClampedArray(memory.buffer, canvasBufferPtr, canvasWidth * canvasHeight * 4);
+            const imageData = new ImageData(view, canvasWidth, canvasHeight);
+            ctx.putImageData(imageData, 0, 0);
+            
+            return 0n;
+        },
+        host_frame_count: () => BigInt(frameCount),
+        host_frame_time: () => BigInt(Math.floor(performance.now() - startTime)),
+        host_window_width: () => BigInt(window.innerWidth),
+        host_window_height: () => BigInt(window.innerHeight),
+    }
+};
+
+function animationLoop() {
+    if (!canvasMode || !wasmInstance) return;
+    
+    frameCount++;
+    wasmInstance.exports.main();
+    requestAnimationFrame(animationLoop);
+}
+'''
+    
+    def _get_split_html_template(self, title: str, wasm_filename: str, host_js: str) -> str:
+        """Return HTML template for split WASM mode."""
+        return f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{title}</title>
+    <style>
+        body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }}
+        body.canvas-mode {{ max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; }}
+        h1 {{ color: #333; }}
+        #output {{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; min-height: 100px; }}
+        #canvas {{ display: none; image-rendering: pixelated; }}
+        body.canvas-mode #canvas {{ display: block; width: 100vw; height: 100vh; }}
+    </style>
+</head>
+<body>
+    <h1>{title}</h1>
+    <pre id="output"></pre>
+    <script>
+{host_js}
+
+async function run() {{
+    outputElement = document.getElementById('output');
+    try {{
+        const response = await fetch('{wasm_filename}');
+        const bytes = await response.arrayBuffer();
+        const {{ instance }} = await WebAssembly.instantiate(bytes, imports);
+        wasmInstance = instance;
+        const result = instance.exports.main();
+        if (canvasMode) {{
+            document.body.classList.add('canvas-mode');
+            requestAnimationFrame(animationLoop);
+        }} else {{
+            appendOutput(`\\nExit code: ${{result}}`);
+        }}
+    }} catch (err) {{
+        appendOutput(`Error: ${{err}}`);
+    }}
+}}
+
+run();
+    </script>
+</body>
+</html>
+'''
+    
+    def _get_embedded_html_template(self, title: str, wasm_b64: str, host_js: str) -> str:
+        """Return HTML template with embedded base64 WASM."""
+        return f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{title}</title>
+    <style>
+        body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }}
+        body.canvas-mode {{ max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; }}
+        h1 {{ color: #333; }}
+        #output {{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; min-height: 100px; }}
+        #canvas {{ display: none; image-rendering: pixelated; }}
+        body.canvas-mode #canvas {{ display: block; width: 100vw; height: 100vh; }}
+    </style>
+</head>
+<body>
+    <h1>{title}</h1>
+    <pre id="output"></pre>
+
+    <script id="wasm-module" type="application/wasm-b64">
+{wasm_b64}
+    </script>
+
+    <script>
+{host_js}
+
+async function loadEmbeddedWasm() {{
+    const b64 = document.getElementById('wasm-module').textContent.trim();
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    return WebAssembly.instantiate(bytes, imports);
+}}
+
+async function run() {{
+    outputElement = document.getElementById('output');
+    try {{
+        const {{ instance }} = await loadEmbeddedWasm();
+        wasmInstance = instance;
+        const result = instance.exports.main();
+        if (canvasMode) {{
+            document.body.classList.add('canvas-mode');
+            requestAnimationFrame(animationLoop);
+        }} else {{
+            appendOutput(`\\nExit code: ${{result}}`);
+        }}
+    }} catch (err) {{
+        appendOutput(`Error: ${{err}}`);
+    }}
+}}
+
+run();
+    </script>
+</body>
+</html>
+'''

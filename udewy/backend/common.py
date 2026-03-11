@@ -371,6 +371,55 @@ class Backend(Protocol):
         Returns: dict mapping constant name to value
         """
         ...
+    
+    # ========================================================================
+    # Compilation and execution
+    # ========================================================================
+    
+    def compile_and_link(self, code: str, input_name: str, cache_dir: Path, **options) -> Path:
+        """
+        Compile and link the generated code.
+        
+        Takes the output of finish_module() and produces an executable or
+        runnable artifact. Returns path to the primary output file.
+        
+        Args:
+            code: The generated code (assembly, WAT, etc.) from finish_module()
+            input_name: Name of the input file (without extension)
+            cache_dir: Directory to write output files
+            **options: Backend-specific options (e.g., split_wasm for WASM)
+        
+        Returns:
+            Path to the primary output file
+        """
+        ...
+    
+    def run(self, output_path: Path, args: list[str]) -> int | None:
+        """
+        Run the compiled output.
+        
+        Args:
+            output_path: Path to the compiled output (from compile_and_link)
+            args: Command-line arguments to pass to the program
+        
+        Returns:
+            Exit code of the program, or None if running is not supported
+            (e.g., WASM needs a browser)
+        """
+        ...
+    
+    def get_compile_message(self, output_path: Path, **options) -> str:
+        """
+        Get a message to display after successful compilation.
+        
+        Args:
+            output_path: Path to the compiled output
+            **options: Backend-specific options
+        
+        Returns:
+            Human-readable message about the output
+        """
+        ...
 
 
 # Type alias for backend constructors

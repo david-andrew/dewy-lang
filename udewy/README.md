@@ -1264,9 +1264,57 @@ Instead of syscalls, the WASM backend provides browser-focused host functions:
 | `__dom_append_int__(value)` | 1 | Append integer as text |
 | `__log_int__(value)` | 1 | Log integer to console |
 
-> These are subject to change
+## D.5 Canvas Graphics Intrinsics
 
-## D.5 Build Options
+The WASM backend provides intrinsics for canvas-based graphics with animation support:
+
+| Intrinsic | Args | Description |
+|-----------|------|-------------|
+| `__canvas_init__(width, height)` | 2 | Initialize canvas and return RGBA pixel buffer pointer |
+| `__canvas_width__()` | 0 | Get current canvas width |
+| `__canvas_height__()` | 0 | Get current canvas height |
+| `__canvas_present__()` | 0 | Copy pixel buffer to canvas (display frame) |
+| `__frame_count__()` | 0 | Get current animation frame number |
+| `__frame_time__()` | 0 | Get milliseconds since canvas initialization |
+| `__window_width__()` | 0 | Get browser window inner width |
+| `__window_height__()` | 0 | Get browser window inner height |
+
+**Usage:**
+
+1. Call `__canvas_init__(width, height)` to create a canvas and get a pointer to the pixel buffer
+2. Write RGBA pixels (4 bytes per pixel) to the buffer: `[R, G, B, A, R, G, B, A, ...]`
+3. Call `__canvas_present__()` to display the frame
+4. The runtime automatically calls `main()` each animation frame when canvas mode is active
+
+**Example:**
+
+```udewy
+let buffer:int = 0
+let width:int = 320
+let height:int = 240
+
+let set_pixel = (x:int y:int r:int g:int b:int):>int => {
+    let offset:int = ((y * width) + x) * 4
+    let addr:int = buffer + offset
+    __store_u8__(r addr)
+    __store_u8__(g addr + 1)
+    __store_u8__(b addr + 2)
+    __store_u8__(255 addr + 3)
+    return 0
+}
+
+let main = ():>int => {
+    buffer = __canvas_init__(width height)
+    let t:int = __frame_time__()
+    
+    # Draw something based on time...
+    
+    __canvas_present__()
+    return 0
+}
+```
+
+## D.6 Build Options
 
 ```bash
 # Default: single HTML file with embedded base64 WASM

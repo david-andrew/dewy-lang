@@ -720,3 +720,28 @@ class X86_64Backend:
             "MAP_ANONYMOUS": 32,
             "MAP_FIXED": 16,
         }
+    
+    def compile_and_link(self, code: str, input_name: str, cache_dir: Path, **options) -> Path:
+        """Compile and link x86_64 assembly to ELF executable."""
+        import subprocess
+        
+        asm_path = cache_dir / f"{input_name}.s"
+        obj_path = cache_dir / f"{input_name}.o"
+        exe_path = cache_dir / input_name
+        
+        asm_path.write_text(code)
+        
+        subprocess.run(["as", str(asm_path), "-o", str(obj_path)], check=True)
+        subprocess.run(["ld", str(obj_path), "-o", str(exe_path)], check=True)
+        
+        return exe_path
+    
+    def run(self, output_path: Path, args: list[str]) -> int | None:
+        """Run the compiled executable."""
+        import subprocess
+        result = subprocess.run([str(output_path)] + args)
+        return result.returncode
+    
+    def get_compile_message(self, output_path: Path, **options) -> str:
+        """Get compilation success message."""
+        return f"Compiled: {output_path}"
