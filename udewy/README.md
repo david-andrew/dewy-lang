@@ -1314,7 +1314,42 @@ let main = ():>int => {
 }
 ```
 
-## D.6 Build Options
+## D.6 Pointer Input Intrinsics
+
+The WASM backend exposes basic pointer state for browser-interactive programs:
+
+| Intrinsic | Args | Description |
+|-----------|------|-------------|
+| `__pointer_x__()` | 0 | Get the current pointer x coordinate in canvas pixels |
+| `__pointer_y__()` | 0 | Get the current pointer y coordinate in canvas pixels |
+| `__pointer_down__()` | 0 | Get whether the primary pointer button is currently down |
+
+When a canvas or WebGL surface is active, coordinates are reported relative to that surface and scaled to its backing pixel resolution.
+
+## D.7 WebGL Shader Intrinsics
+
+The WASM backend also provides a minimal WebGL path for fullscreen fragment shader demos driven by udewy strings and integer uniforms:
+
+| Intrinsic | Args | Description |
+|-----------|------|-------------|
+| `__webgl_init__(shader_ptr, shader_len, width, height)` | 4 | Compile a fragment shader string and initialize a fullscreen WebGL canvas |
+| `__webgl_uniform1i__(name_ptr, name_len, value)` | 3 | Set an `int` uniform on the active shader program |
+| `__webgl_uniform2i__(name_ptr, name_len, x, y)` | 4 | Set an `ivec2` uniform on the active shader program |
+| `__webgl_uniform1iv__(name_ptr, name_len, values_ptr, count)` | 4 | Set an `int[count]` uniform array from udewy memory |
+| `__webgl_uniform2iv__(name_ptr, name_len, values_ptr, count)` | 4 | Set an `ivec2[count]` uniform array from udewy memory |
+| `__webgl_render__()` | 0 | Draw the active fullscreen shader |
+
+**Usage:**
+
+1. Store your fragment shader source as a normal udewy string
+2. Use `__load__(shader - 8)` to recover its byte length
+3. Call `__webgl_init__(shader, shader_len, width, height)` once
+4. Update uniforms each frame with `__webgl_uniform1i__`, `__webgl_uniform2i__`, `__webgl_uniform1iv__`, or `__webgl_uniform2iv__`
+5. Call `__webgl_render__()` to draw
+
+The runtime provides a built-in passthrough vertex shader with an `a_position` attribute, so user programs only need to supply fragment shader code.
+
+## D.8 Build Options
 
 ```bash
 # Default: single HTML file with embedded base64 WASM

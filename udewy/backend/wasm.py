@@ -94,6 +94,10 @@ class Wasm32Backend(Backend):
             '(import "env" "host_frame_time" (func $host_frame_time (result i64)))',
             '(import "env" "host_window_width" (func $host_window_width (result i64)))',
             '(import "env" "host_window_height" (func $host_window_height (result i64)))',
+            # Pointer input
+            '(import "env" "host_pointer_x" (func $host_pointer_x (result i64)))',
+            '(import "env" "host_pointer_y" (func $host_pointer_y (result i64)))',
+            '(import "env" "host_pointer_down" (func $host_pointer_down (result i64)))',
             # Audio (one-shot)
             '(import "env" "host_audio_init" (func $host_audio_init (param i64 i64 i64) (result i64)))',
             '(import "env" "host_audio_play" (func $host_audio_play (result i64)))',
@@ -102,14 +106,16 @@ class Wasm32Backend(Backend):
             '(import "env" "host_audio_stream_init" (func $host_audio_stream_init (param i64 i64) (result i64)))',
             '(import "env" "host_audio_stream_write" (func $host_audio_stream_write (result i64)))',
             '(import "env" "host_audio_stream_needs_samples" (func $host_audio_stream_needs_samples (result i64)))',
-            # WebGPU
-            '(import "env" "host_webgpu_init" (func $host_webgpu_init (param i64 i64 i64 i64) (result i64)))',
-            '(import "env" "host_webgpu_init_plasma" (func $host_webgpu_init_plasma (param i64 i64) (result i64)))',
-            '(import "env" "host_webgpu_set_time" (func $host_webgpu_set_time (param i64) (result i64)))',
-            '(import "env" "host_webgpu_render" (func $host_webgpu_render (result i64)))',
+            # WebGL fullscreen shader
+            '(import "env" "host_webgl_init" (func $host_webgl_init (param i64 i64 i64 i64) (result i64)))',
+            '(import "env" "host_webgl_uniform1i" (func $host_webgl_uniform1i (param i64 i64 i64) (result i64)))',
+            '(import "env" "host_webgl_uniform2i" (func $host_webgl_uniform2i (param i64 i64 i64 i64) (result i64)))',
+            '(import "env" "host_webgl_uniform1iv" (func $host_webgl_uniform1iv (param i64 i64 i64 i64) (result i64)))',
+            '(import "env" "host_webgl_uniform2iv" (func $host_webgl_uniform2iv (param i64 i64 i64 i64) (result i64)))',
+            '(import "env" "host_webgl_render" (func $host_webgl_render (result i64)))',
         ]
         self._imports.extend(host_imports)
-        self._next_fn_index = 27  # 27 host function imports
+        self._next_fn_index = 32  # 32 host function imports
     
     def _new_label(self, prefix: str = "L") -> str:
         label = f"${prefix}{self._next_label}"
@@ -660,6 +666,18 @@ class Wasm32Backend(Backend):
         """Emit a call to host_window_height(). Stack: [] -> [height]"""
         self._emit("call $host_window_height")
     
+    def emit_pointer_x(self) -> None:
+        """Emit a call to host_pointer_x(). Stack: [] -> [x]"""
+        self._emit("call $host_pointer_x")
+    
+    def emit_pointer_y(self) -> None:
+        """Emit a call to host_pointer_y(). Stack: [] -> [y]"""
+        self._emit("call $host_pointer_y")
+    
+    def emit_pointer_down(self) -> None:
+        """Emit a call to host_pointer_down(). Stack: [] -> [down]"""
+        self._emit("call $host_pointer_down")
+    
     def emit_audio_init(self) -> None:
         """Emit a call to host_audio_init(sample_rate, num_samples, channels). Stack: [sr ns ch] -> [buffer_ptr]"""
         self._emit("call $host_audio_init")
@@ -684,21 +702,29 @@ class Wasm32Backend(Backend):
         """Emit a call to host_audio_stream_needs_samples(). Stack: [] -> [bool]"""
         self._emit("call $host_audio_stream_needs_samples")
     
-    def emit_webgpu_init(self) -> None:
-        """Emit a call to host_webgpu_init(shader_ptr, shader_len, width, height). Stack: [ptr len w h] -> [0]"""
-        self._emit("call $host_webgpu_init")
+    def emit_webgl_init(self) -> None:
+        """Emit a call to host_webgl_init(shader_ptr, shader_len, width, height). Stack: [ptr len w h] -> [0]"""
+        self._emit("call $host_webgl_init")
     
-    def emit_webgpu_init_plasma(self) -> None:
-        """Emit a call to host_webgpu_init_plasma(width, height). Stack: [w h] -> [0]"""
-        self._emit("call $host_webgpu_init_plasma")
+    def emit_webgl_uniform1i(self) -> None:
+        """Emit a call to host_webgl_uniform1i(name_ptr, name_len, value). Stack: [ptr len value] -> [0]"""
+        self._emit("call $host_webgl_uniform1i")
     
-    def emit_webgpu_set_time(self) -> None:
-        """Emit a call to host_webgpu_set_time(time_ms). Stack: [time] -> [0]"""
-        self._emit("call $host_webgpu_set_time")
+    def emit_webgl_uniform2i(self) -> None:
+        """Emit a call to host_webgl_uniform2i(name_ptr, name_len, x, y). Stack: [ptr len x y] -> [0]"""
+        self._emit("call $host_webgl_uniform2i")
     
-    def emit_webgpu_render(self) -> None:
-        """Emit a call to host_webgpu_render(). Stack: [] -> [0]"""
-        self._emit("call $host_webgpu_render")
+    def emit_webgl_uniform1iv(self) -> None:
+        """Emit a call to host_webgl_uniform1iv(name_ptr, name_len, values_ptr, count). Stack: [ptr len values count] -> [0]"""
+        self._emit("call $host_webgl_uniform1iv")
+    
+    def emit_webgl_uniform2iv(self) -> None:
+        """Emit a call to host_webgl_uniform2iv(name_ptr, name_len, values_ptr, count). Stack: [ptr len values count] -> [0]"""
+        self._emit("call $host_webgl_uniform2iv")
+    
+    def emit_webgl_render(self) -> None:
+        """Emit a call to host_webgl_render(). Stack: [] -> [0]"""
+        self._emit("call $host_webgl_render")
     
     # ========================================================================
     # Control flow
@@ -783,9 +809,11 @@ class Wasm32Backend(Backend):
         "__canvas_init__", "__canvas_width__", "__canvas_height__",
         "__canvas_present__", "__frame_count__", "__frame_time__",
         "__window_width__", "__window_height__",
+        "__pointer_x__", "__pointer_y__", "__pointer_down__",
         "__audio_init__", "__audio_play__", "__audio_sample_rate__",
         "__audio_stream_init__", "__audio_stream_write__", "__audio_stream_needs_samples__",
-        "__webgpu_init__", "__webgpu_init_plasma__", "__webgpu_set_time__", "__webgpu_render__",
+        "__webgl_init__", "__webgl_uniform1i__", "__webgl_uniform2i__",
+        "__webgl_uniform1iv__", "__webgl_uniform2iv__", "__webgl_render__",
     }
     
     def is_intrinsic(self, name: str) -> bool:
@@ -876,6 +904,12 @@ class Wasm32Backend(Backend):
             self.emit_window_width()
         elif name == "__window_height__":
             self.emit_window_height()
+        elif name == "__pointer_x__":
+            self.emit_pointer_x()
+        elif name == "__pointer_y__":
+            self.emit_pointer_y()
+        elif name == "__pointer_down__":
+            self.emit_pointer_down()
         elif name == "__audio_init__":
             self.emit_audio_init()
         elif name == "__audio_play__":
@@ -888,14 +922,18 @@ class Wasm32Backend(Backend):
             self.emit_audio_stream_write()
         elif name == "__audio_stream_needs_samples__":
             self.emit_audio_stream_needs_samples()
-        elif name == "__webgpu_init__":
-            self.emit_webgpu_init()
-        elif name == "__webgpu_init_plasma__":
-            self.emit_webgpu_init_plasma()
-        elif name == "__webgpu_set_time__":
-            self.emit_webgpu_set_time()
-        elif name == "__webgpu_render__":
-            self.emit_webgpu_render()
+        elif name == "__webgl_init__":
+            self.emit_webgl_init()
+        elif name == "__webgl_uniform1i__":
+            self.emit_webgl_uniform1i()
+        elif name == "__webgl_uniform2i__":
+            self.emit_webgl_uniform2i()
+        elif name == "__webgl_uniform1iv__":
+            self.emit_webgl_uniform1iv()
+        elif name == "__webgl_uniform2iv__":
+            self.emit_webgl_uniform2iv()
+        elif name == "__webgl_render__":
+            self.emit_webgl_render()
     
     def get_builtin_constants(self) -> dict[str, int]:
         """WASM browser backend has no built-in constants."""
@@ -989,14 +1027,16 @@ let audioPendingPlay = false;
 // Audio streaming state
 let audioStreamMode = false;
 
-// WebGPU state
-let gpuDevice = null;
-let gpuContext = null;
-let gpuPipeline = null;
-let gpuUniformBuffer = null;
-let gpuBindGroup = null;
-let gpuCanvas = null;
-let webgpuMode = false;
+// WebGL fullscreen shader state
+let webglCanvas = null;
+let webglContext = null;
+let webglProgram = null;
+let webglPositionBuffer = null;
+let webglMode = false;
+let pointerInstalled = false;
+let pointerX = 0;
+let pointerY = 0;
+let pointerDown = false;
 let audioStreamBufferSize = 0;
 let audioStreamStarted = false;
 let audioScriptNode = null;
@@ -1016,8 +1056,106 @@ function decodeString(ptr, len) {
     return new TextDecoder().decode(bytes);
 }
 
+function decodeI64Array(ptr, count) {
+    const values = new Int32Array(Number(count));
+    const view = new DataView(memory.buffer);
+    const base = Number(ptr);
+    for (let i = 0; i < Number(count); i++) {
+        values[i] = Number(view.getBigInt64(base + (i * 8), true));
+    }
+    return values;
+}
+
 function appendOutput(text) {
     console.log(text);
+}
+
+function getInputCanvas() {
+    return webglCanvas || canvas;
+}
+
+function clampPointer(value, limit) {
+    if (limit <= 0) return 0;
+    if (value < 0) return 0;
+    if (value >= limit) return limit - 1;
+    return value;
+}
+
+function updatePointerFromEvent(event) {
+    const targetCanvas = getInputCanvas();
+    if (!targetCanvas) {
+        pointerX = Math.floor(event.clientX);
+        pointerY = Math.floor(event.clientY);
+        return;
+    }
+
+    const rect = targetCanvas.getBoundingClientRect();
+    const scaleX = rect.width ? targetCanvas.width / rect.width : 1;
+    const scaleY = rect.height ? targetCanvas.height / rect.height : 1;
+    const localX = Math.floor((event.clientX - rect.left) * scaleX);
+    const localY = Math.floor((event.clientY - rect.top) * scaleY);
+
+    pointerX = clampPointer(localX, targetCanvas.width);
+    pointerY = clampPointer(localY, targetCanvas.height);
+}
+
+function ensurePointerHandlers() {
+    if (pointerInstalled) return;
+    pointerInstalled = true;
+
+    window.addEventListener('pointermove', (event) => {
+        updatePointerFromEvent(event);
+    });
+
+    window.addEventListener('pointerdown', (event) => {
+        pointerDown = true;
+        updatePointerFromEvent(event);
+    });
+
+    window.addEventListener('pointerup', (event) => {
+        pointerDown = false;
+        updatePointerFromEvent(event);
+    });
+
+    window.addEventListener('pointercancel', () => {
+        pointerDown = false;
+    });
+}
+
+function compileWebglShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        const info = gl.getShaderInfoLog(shader) || 'unknown shader compile error';
+        gl.deleteShader(shader);
+        throw new Error(info);
+    }
+    return shader;
+}
+
+function createWebglProgram(gl, fragmentSource) {
+    const vertexSource = `
+attribute vec2 a_position;
+
+void main() {
+    gl_Position = vec4(a_position, 0.0, 1.0);
+}
+`;
+    const vertexShader = compileWebglShader(gl, gl.VERTEX_SHADER, vertexSource);
+    const fragmentShader = compileWebglShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        const info = gl.getProgramInfoLog(program) || 'unknown program link error';
+        gl.deleteProgram(program);
+        throw new Error(info);
+    }
+    return program;
 }
 
 const imports = {
@@ -1088,6 +1226,7 @@ const imports = {
             canvas.width = canvasWidth;
             canvas.height = canvasHeight;
             canvas.style.display = 'block';
+            ensurePointerHandlers();
             ctx = canvas.getContext('2d');
             
             // Hide text output in canvas mode
@@ -1117,6 +1256,9 @@ const imports = {
         host_frame_time: () => BigInt(Math.floor(performance.now() - startTime)),
         host_window_width: () => BigInt(window.innerWidth),
         host_window_height: () => BigInt(window.innerHeight),
+        host_pointer_x: () => BigInt(pointerX),
+        host_pointer_y: () => BigInt(pointerY),
+        host_pointer_down: () => (pointerDown ? 1n : 0n),
         // Audio
         host_audio_init: (sampleRate, numSamples, channels) => {
             audioSampleRate = Number(sampleRate);
@@ -1294,171 +1436,124 @@ const imports = {
             if (audioWriteBuffer === 1 && !audioBuffer1Ready) return -1n;
             return 0n;
         },
-        // WebGPU
-        host_webgpu_init_plasma: async (width, height) => {
-            // Built-in plasma shader
-            const plasmaShader = `
-struct Uniforms {
-    time: f32,
-    width: f32,
-    height: f32,
-    padding: f32,
-}
+        // WebGL fullscreen fragment shader
+        host_webgl_init: (shaderPtr, shaderLen, width, height) => {
+            if (webglMode) return 0n;
 
-@group(0) @binding(0) var<uniform> u: Uniforms;
-
-@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
-    let pos = array(vec2f(-1, -1), vec2f(3, -1), vec2f(-1, 3));
-    return vec4f(pos[i], 0, 1);
-}
-
-@fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
-    let uv = pos.xy / vec2f(u.width, u.height);
-    let t = u.time * 0.25;
-    
-    let x = uv.x * 10.0;
-    let y = uv.y * 10.0;
-    
-    let v1 = sin(x + t);
-    let v2 = sin(y + t * 2.0);
-    let v3 = sin((x + y) * 0.75 + t);
-    let v4 = cos((x - y) * 0.5 + t * 1.5);
-    
-    let combined = (v1 + v2 + v3 + v4) * 0.25;
-    
-    let r = 0.5 + combined * 0.5;
-    let g = 0.5 + (v1 - v2 + v3) * 0.15;
-    let b = 0.5 + (v2 + v4) * 0.2;
-    
-    return vec4f(r, g, b, 1.0);
-}
-`;
-            return await imports.env.host_webgpu_init(0n, 0n, width, height, plasmaShader);
-        },
-        host_webgpu_init: async (shaderPtr, shaderLen, width, height, providedShader) => {
-            if (webgpuMode) return 0n;
-            
             const w = Number(width);
             const h = Number(height);
-            
-            // Check WebGPU support
-            if (!navigator.gpu) {
-                console.error('WebGPU not supported');
-                if (outputElement) outputElement.textContent = 'WebGPU not supported in this browser';
+            const fragmentSource = decodeString(shaderPtr, shaderLen);
+
+            webglCanvas = document.getElementById('canvas');
+            if (!webglCanvas) {
+                webglCanvas = document.createElement('canvas');
+                webglCanvas.id = 'canvas';
+                document.body.insertBefore(webglCanvas, document.body.firstChild);
+            }
+            webglCanvas.width = w;
+            webglCanvas.height = h;
+            webglCanvas.style.display = 'block';
+            ensurePointerHandlers();
+
+            webglContext = webglCanvas.getContext('webgl');
+            if (!webglContext) {
+                console.error('WebGL not supported');
+                if (outputElement) {
+                    outputElement.textContent = 'WebGL not supported in this browser';
+                }
                 return -1n;
             }
-            
-            // Get shader code - either provided directly or from WASM memory
-            const shaderCode = providedShader || decodeString(shaderPtr, shaderLen);
-            
-            // Initialize WebGPU
-            const adapter = await navigator.gpu.requestAdapter();
-            if (!adapter) {
-                console.error('No WebGPU adapter found');
+
+            try {
+                webglProgram = createWebglProgram(webglContext, fragmentSource);
+            } catch (err) {
+                console.error('WebGL shader setup failed:', err);
+                if (outputElement) {
+                    outputElement.textContent = `WebGL shader setup failed:\n${String(err)}`;
+                }
                 return -1n;
             }
-            
-            gpuDevice = await adapter.requestDevice();
-            
-            // Create canvas
-            gpuCanvas = document.getElementById('canvas');
-            if (!gpuCanvas) {
-                gpuCanvas = document.createElement('canvas');
-                gpuCanvas.id = 'canvas';
-                document.body.insertBefore(gpuCanvas, document.body.firstChild);
+
+            webglPositionBuffer = webglContext.createBuffer();
+            webglContext.bindBuffer(webglContext.ARRAY_BUFFER, webglPositionBuffer);
+            webglContext.bufferData(
+                webglContext.ARRAY_BUFFER,
+                new Float32Array([
+                    -1.0, -1.0,
+                    3.0, -1.0,
+                    -1.0, 3.0,
+                ]),
+                webglContext.STATIC_DRAW,
+            );
+
+            webglContext.useProgram(webglProgram);
+            const positionLocation = webglContext.getAttribLocation(webglProgram, 'a_position');
+            if (positionLocation >= 0) {
+                webglContext.enableVertexAttribArray(positionLocation);
+                webglContext.vertexAttribPointer(positionLocation, 2, webglContext.FLOAT, false, 0, 0);
             }
-            gpuCanvas.width = w;
-            gpuCanvas.height = h;
-            gpuCanvas.style.display = 'block';
-            gpuCanvas.style.width = '100vw';
-            gpuCanvas.style.height = '100vh';
-            document.body.style.margin = '0';
-            document.body.style.overflow = 'hidden';
-            document.body.style.background = '#000';
-            
-            if (outputElement) outputElement.style.display = 'none';
-            
-            gpuContext = gpuCanvas.getContext('webgpu');
-            const format = navigator.gpu.getPreferredCanvasFormat();
-            gpuContext.configure({ device: gpuDevice, format: format });
-            
-            // Create uniform buffer for time
-            gpuUniformBuffer = gpuDevice.createBuffer({
-                size: 16,  // 4 floats: time, width, height, padding
-                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-            });
-            
-            // Create shader module
-            const shaderModule = gpuDevice.createShaderModule({ code: shaderCode });
-            
-            // Create pipeline
-            gpuPipeline = gpuDevice.createRenderPipeline({
-                layout: 'auto',
-                vertex: {
-                    module: shaderModule,
-                    entryPoint: 'vs',
-                },
-                fragment: {
-                    module: shaderModule,
-                    entryPoint: 'fs',
-                    targets: [{ format: format }],
-                },
-            });
-            
-            // Create bind group
-            gpuBindGroup = gpuDevice.createBindGroup({
-                layout: gpuPipeline.getBindGroupLayout(0),
-                entries: [{
-                    binding: 0,
-                    resource: { buffer: gpuUniformBuffer },
-                }],
-            });
-            
-            webgpuMode = true;
+
+            if (outputElement) {
+                outputElement.style.display = 'none';
+            }
+
+            webglMode = true;
             startTime = performance.now();
-            
             return 0n;
         },
-        host_webgpu_set_time: (timeMs) => {
-            if (!webgpuMode || !gpuDevice) return 0n;
-            
-            const t = Number(timeMs) / 1000.0;  // Convert to seconds
-            const w = gpuCanvas.width;
-            const h = gpuCanvas.height;
-            
-            gpuDevice.queue.writeBuffer(gpuUniformBuffer, 0, new Float32Array([t, w, h, 0]));
-            
+        host_webgl_uniform1i: (namePtr, nameLen, value) => {
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            const name = decodeString(namePtr, nameLen);
+            const location = webglContext.getUniformLocation(webglProgram, name);
+            if (location === null) return -1n;
+            webglContext.useProgram(webglProgram);
+            webglContext.uniform1i(location, Number(value));
             return 0n;
         },
-        host_webgpu_render: () => {
-            if (!webgpuMode || !gpuDevice) return 0n;
-            
-            const commandEncoder = gpuDevice.createCommandEncoder();
-            const textureView = gpuContext.getCurrentTexture().createView();
-            
-            const renderPass = commandEncoder.beginRenderPass({
-                colorAttachments: [{
-                    view: textureView,
-                    clearValue: { r: 0, g: 0, b: 0, a: 1 },
-                    loadOp: 'clear',
-                    storeOp: 'store',
-                }],
-            });
-            
-            renderPass.setPipeline(gpuPipeline);
-            renderPass.setBindGroup(0, gpuBindGroup);
-            renderPass.draw(3);  // Fullscreen triangle
-            renderPass.end();
-            
-            gpuDevice.queue.submit([commandEncoder.finish()]);
-            
+        host_webgl_uniform2i: (namePtr, nameLen, x, y) => {
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            const name = decodeString(namePtr, nameLen);
+            const location = webglContext.getUniformLocation(webglProgram, name);
+            if (location === null) return -1n;
+            webglContext.useProgram(webglProgram);
+            webglContext.uniform2i(location, Number(x), Number(y));
+            return 0n;
+        },
+        host_webgl_uniform1iv: (namePtr, nameLen, valuesPtr, count) => {
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            const name = decodeString(namePtr, nameLen);
+            const location = webglContext.getUniformLocation(webglProgram, name);
+            if (location === null) return -1n;
+            webglContext.useProgram(webglProgram);
+            webglContext.uniform1iv(location, decodeI64Array(valuesPtr, count));
+            return 0n;
+        },
+        host_webgl_uniform2iv: (namePtr, nameLen, valuesPtr, count) => {
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            const name = decodeString(namePtr, nameLen);
+            const location = webglContext.getUniformLocation(webglProgram, name);
+            if (location === null) return -1n;
+            webglContext.useProgram(webglProgram);
+            webglContext.uniform2iv(location, decodeI64Array(valuesPtr, Number(count) * 2));
+            return 0n;
+        },
+        host_webgl_render: () => {
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            webglContext.viewport(0, 0, webglCanvas.width, webglCanvas.height);
+            webglContext.useProgram(webglProgram);
+            webglContext.drawArrays(webglContext.TRIANGLES, 0, 3);
             return 0n;
         },
     }
 };
 
 function animationLoop() {
-    if ((!canvasMode && !audioStreamMode && !webgpuMode) || !wasmInstance) return;
+    if ((!canvasMode && !audioStreamMode && !webglMode) || !wasmInstance) return;
 
     frameCount++;
     wasmInstance.exports.main();
@@ -1496,10 +1591,10 @@ async function run() {{
         wasmInstance = instance;
         const result = instance.exports.main();
         console.log('Exit code:', result);
-        if (canvasMode) {{
+        if (canvasMode || webglMode) {{
             document.body.classList.add('canvas-mode');
             requestAnimationFrame(animationLoop);
-        }} else if (audioStreamMode || webgpuMode) {{
+        }} else if (audioStreamMode) {{
             requestAnimationFrame(animationLoop);
         }}
     }} catch (err) {{
@@ -1552,10 +1647,10 @@ async function run() {{
         wasmInstance = instance;
         const result = instance.exports.main();
         console.log('Exit code:', result);
-        if (canvasMode) {{
+        if (canvasMode || webglMode) {{
             document.body.classList.add('canvas-mode');
             requestAnimationFrame(animationLoop);
-        }} else if (audioStreamMode || webgpuMode) {{
+        }} else if (audioStreamMode) {{
             requestAnimationFrame(animationLoop);
         }}
     }} catch (err) {{

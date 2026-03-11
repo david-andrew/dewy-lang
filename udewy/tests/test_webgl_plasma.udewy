@@ -1,0 +1,48 @@
+# WebGL plasma demo
+# Fullscreen shader version of the canvas plasma effect
+
+let width:int = 0
+let height:int = 0
+let initialized:int = 0
+let shader:int = "precision mediump float;
+uniform int u_time_ms;
+uniform ivec2 u_resolution;
+
+void main() \{
+    vec2 resolution = vec2(float(u_resolution.x), float(u_resolution.y));
+    vec2 uv = gl_FragCoord.xy / resolution;
+    float t = float(u_time_ms) * 0.001;
+    float x = uv.x * 10.0;
+    float y = uv.y * 10.0;
+    float v1 = sin(x + t);
+    float v2 = sin(y + (t * 2.0));
+    float v3 = sin((x + y) * 0.75 + t);
+    float v4 = cos((x - y) * 0.5 + (t * 1.5));
+    float combined = (v1 + v2 + v3 + v4) * 0.25;
+    float r = 0.5 + (combined * 0.5);
+    float g = 0.5 + ((v1 - v2 + v3) * 0.15);
+    float b = 0.5 + ((v2 + v4) * 0.2);
+    gl_FragColor = vec4(r, g, b, 1.0);
+\}
+"
+let u_time_ms:int = "u_time_ms"
+let u_resolution:int = "u_resolution"
+
+let str_len = (s:int):>int => {
+    return __load__(s - 8)
+}
+
+let main = ():>int => {
+    if initialized =? 0 {
+        width = __window_width__()
+        height = __window_height__()
+        __webgl_init__(shader str_len(shader) width height)
+        initialized = 1
+    }
+
+    __webgl_uniform1i__(u_time_ms str_len(u_time_ms) __frame_time__())
+    __webgl_uniform2i__(u_resolution str_len(u_resolution) width height)
+    __webgl_render__()
+
+    return 0
+}
