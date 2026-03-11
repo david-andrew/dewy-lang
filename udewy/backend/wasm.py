@@ -979,9 +979,6 @@ function decodeString(ptr, len) {
 
 function appendOutput(text) {
     console.log(text);
-    if (outputElement) {
-        outputElement.textContent += text;
-    }
 }
 
 const imports = {
@@ -1058,8 +1055,6 @@ const imports = {
             if (outputElement) {
                 outputElement.style.display = 'none';
             }
-            const h1 = document.querySelector('h1');
-            if (h1) h1.style.display = 'none';
             
             // Allocate buffer in WASM memory (RGBA: 4 bytes per pixel)
             // Use a fixed location after the stack (at 256KB)
@@ -1282,14 +1277,13 @@ function animationLoop() {
     <style>
         body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }}
         body.canvas-mode {{ max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; }}
-        h1 {{ color: #333; }}
-        #output {{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; min-height: 100px; }}
+        #output {{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; }}
+        #output:empty {{ display: none; }}
         #canvas {{ display: none; image-rendering: pixelated; }}
         body.canvas-mode #canvas {{ display: block; width: 100vw; height: 100vh; }}
     </style>
 </head>
 <body>
-    <h1>{title}</h1>
     <pre id="output"></pre>
     <script>
 {host_js}
@@ -1302,17 +1296,15 @@ async function run() {{
         const {{ instance }} = await WebAssembly.instantiate(bytes, imports);
         wasmInstance = instance;
         const result = instance.exports.main();
+        console.log('Exit code:', result);
         if (canvasMode) {{
             document.body.classList.add('canvas-mode');
             requestAnimationFrame(animationLoop);
         }} else if (audioStreamMode) {{
-            // Audio-only mode - still need animation loop
             requestAnimationFrame(animationLoop);
-        }} else {{
-            appendOutput(`\\nExit code: ${{result}}`);
         }}
     }} catch (err) {{
-        appendOutput(`Error: ${{err}}`);
+        console.error('Error:', err);
     }}
 }}
 
@@ -1332,14 +1324,13 @@ run();
     <style>
         body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }}
         body.canvas-mode {{ max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; }}
-        h1 {{ color: #333; }}
-        #output {{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; min-height: 100px; }}
+        #output {{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; }}
+        #output:empty {{ display: none; }}
         #canvas {{ display: none; image-rendering: pixelated; }}
         body.canvas-mode #canvas {{ display: block; width: 100vw; height: 100vh; }}
     </style>
 </head>
 <body>
-    <h1>{title}</h1>
     <pre id="output"></pre>
 
     <script id="wasm-module" type="application/wasm-b64">
@@ -1361,17 +1352,15 @@ async function run() {{
         const {{ instance }} = await loadEmbeddedWasm();
         wasmInstance = instance;
         const result = instance.exports.main();
+        console.log('Exit code:', result);
         if (canvasMode) {{
             document.body.classList.add('canvas-mode');
             requestAnimationFrame(animationLoop);
         }} else if (audioStreamMode) {{
-            // Audio-only mode - still need animation loop
             requestAnimationFrame(animationLoop);
-        }} else {{
-            appendOutput(`\\nExit code: ${{result}}`);
         }}
     }} catch (err) {{
-        appendOutput(`Error: ${{err}}`);
+        console.error('Error:', err);
     }}
 }}
 
