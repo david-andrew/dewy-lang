@@ -338,26 +338,6 @@ def is_binop(kind: int) -> bool:
     return get_precedence(kind) > 0
 
 
-def kind_to_op(kind: int) -> str:
-    if kind == t0.TK_PLUS: return "+"
-    if kind == t0.TK_MINUS: return "-"
-    if kind == t0.TK_MUL: return "*"
-    if kind == t0.TK_IDIV: return "//"
-    if kind == t0.TK_MOD: return "%"
-    if kind == t0.TK_LEFT_SHIFT: return "<<"
-    if kind == t0.TK_RIGHT_SHIFT: return ">>"
-    if kind == t0.TK_AND: return "and"
-    if kind == t0.TK_OR: return "or"
-    if kind == t0.TK_XOR: return "xor"
-    if kind == t0.TK_EQ: return "=?"
-    if kind == t0.TK_NOT_EQ: return "not=?"
-    if kind == t0.TK_GT: return ">?"
-    if kind == t0.TK_LT: return "<?"
-    if kind == t0.TK_GT_EQ: return ">=?"
-    if kind == t0.TK_LT_EQ: return "<=?"
-    return ""
-
-
 # ============================================================================
 # Intrinsic detection (delegated to backend)
 # ============================================================================
@@ -556,7 +536,7 @@ def parse_prefix(toks: list, idx: int, src: str, backend,
     if kind == t0.TK_NOT:
         idx = idx + 1
         idx = parse_prefix(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
-        backend.unary_op("not")
+        backend.unary_op(t0.TK_NOT)
         return idx
 
     if kind == t0.TK_MINUS:
@@ -566,7 +546,7 @@ def parse_prefix(toks: list, idx: int, src: str, backend,
             backend.push_const_i64(-val)
             return idx + 1
         idx = parse_prefix(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
-        backend.unary_op("neg")
+        backend.unary_op(t0.TK_MINUS)
         return idx
 
     return parse_atom(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
@@ -613,7 +593,7 @@ def parse_expr(toks: list, idx: int, src: str, backend,
         else:
             idx = parse_prefix(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx)
             idx = skip_cast_annotation(toks, idx)
-            backend.binary_op(kind_to_op(kind))
+            backend.binary_op(kind)
         
         min_prec = prec
     
@@ -903,7 +883,7 @@ def parse_assign_or_expr(toks: list, idx: int, src: str, backend,
                 
                 backend.save_value()
                 idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
-                backend.binary_op(kind_to_op(op_kind))
+                backend.binary_op(op_kind)
                 
                 if scope_idx >= 0:
                     backend.store_local(slot)

@@ -7,6 +7,8 @@ Generates GNU assembler syntax targeting Linux x86_64 with System V ABI.
 from pathlib import Path
 from os import PathLike
 
+from .. import t0
+
 
 class X86_64Backend:
     """
@@ -292,14 +294,14 @@ class X86_64Backend:
     # Operators
     # ========================================================================
     
-    def unary_op(self, op: str) -> None:
+    def unary_op(self, op_kind: int) -> None:
         """Apply unary operator to top of stack."""
-        if op == "neg":
+        if op_kind == t0.TK_MINUS:
             self._emit("negq %rax")
-        elif op == "not":
+        elif op_kind == t0.TK_NOT:
             self._emit("notq %rax")
     
-    def binary_op(self, op: str) -> None:
+    def binary_op(self, op_kind: int) -> None:
         """
         Apply binary operator to top two values on stack.
         
@@ -308,55 +310,55 @@ class X86_64Backend:
         self._emit("movq %rax, %rcx")  # right in rcx
         self._emit("popq %rax")        # left in rax
         
-        if op == "+":
+        if op_kind == t0.TK_PLUS:
             self._emit("addq %rcx, %rax")
-        elif op == "-":
+        elif op_kind == t0.TK_MINUS:
             self._emit("subq %rcx, %rax")
-        elif op == "*":
+        elif op_kind == t0.TK_MUL:
             self._emit("imulq %rcx, %rax")
-        elif op == "//":
+        elif op_kind == t0.TK_IDIV:
             self._emit("cqto")
             self._emit("idivq %rcx")
-        elif op == "%":
+        elif op_kind == t0.TK_MOD:
             self._emit("cqto")
             self._emit("idivq %rcx")
             self._emit("movq %rdx, %rax")
-        elif op == "<<":
+        elif op_kind == t0.TK_LEFT_SHIFT:
             self._emit("shlq %cl, %rax")
-        elif op == ">>":
+        elif op_kind == t0.TK_RIGHT_SHIFT:
             self._emit("shrq %cl, %rax")
-        elif op == "and":
+        elif op_kind == t0.TK_AND:
             self._emit("andq %rcx, %rax")
-        elif op == "or":
+        elif op_kind == t0.TK_OR:
             self._emit("orq %rcx, %rax")
-        elif op == "xor":
+        elif op_kind == t0.TK_XOR:
             self._emit("xorq %rcx, %rax")
-        elif op == "=?":
+        elif op_kind == t0.TK_EQ:
             self._emit("cmpq %rcx, %rax")
             self._emit("sete %al")
             self._emit("movzbq %al, %rax")
             self._emit("negq %rax")
-        elif op == "not=?":
+        elif op_kind == t0.TK_NOT_EQ:
             self._emit("cmpq %rcx, %rax")
             self._emit("setne %al")
             self._emit("movzbq %al, %rax")
             self._emit("negq %rax")
-        elif op == ">?":
+        elif op_kind == t0.TK_GT:
             self._emit("cmpq %rcx, %rax")
             self._emit("setg %al")
             self._emit("movzbq %al, %rax")
             self._emit("negq %rax")
-        elif op == "<?":
+        elif op_kind == t0.TK_LT:
             self._emit("cmpq %rcx, %rax")
             self._emit("setl %al")
             self._emit("movzbq %al, %rax")
             self._emit("negq %rax")
-        elif op == ">=?":
+        elif op_kind == t0.TK_GT_EQ:
             self._emit("cmpq %rcx, %rax")
             self._emit("setge %al")
             self._emit("movzbq %al, %rax")
             self._emit("negq %rax")
-        elif op == "<=?":
+        elif op_kind == t0.TK_LT_EQ:
             self._emit("cmpq %rcx, %rax")
             self._emit("setle %al")
             self._emit("movzbq %al, %rax")

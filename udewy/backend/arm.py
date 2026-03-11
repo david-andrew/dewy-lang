@@ -6,6 +6,8 @@ Generates GNU assembler syntax targeting AArch64 Linux with AAPCS64 ABI.
 
 from pathlib import Path
 
+from .. import t0
+
 
 class ArmBackend:
     """
@@ -325,56 +327,56 @@ class ArmBackend:
     # Operators
     # ========================================================================
     
-    def unary_op(self, op: str) -> None:
+    def unary_op(self, op_kind: int) -> None:
         """Apply unary operator to top of stack."""
-        if op == "neg":
+        if op_kind == t0.TK_MINUS:
             self._emit("neg x0, x0")
-        elif op == "not":
+        elif op_kind == t0.TK_NOT:
             self._emit("mvn x0, x0")
     
-    def binary_op(self, op: str) -> None:
+    def binary_op(self, op_kind: int) -> None:
         """Apply binary operator to top two values on stack."""
         # Right operand in x0, left on stack
         self._emit("mov x9, x0")       # right in x9
         self._emit("ldr x0, [sp], #16")  # left in x0, pop
         
-        if op == "+":
+        if op_kind == t0.TK_PLUS:
             self._emit("add x0, x0, x9")
-        elif op == "-":
+        elif op_kind == t0.TK_MINUS:
             self._emit("sub x0, x0, x9")
-        elif op == "*":
+        elif op_kind == t0.TK_MUL:
             self._emit("mul x0, x0, x9")
-        elif op == "//":
+        elif op_kind == t0.TK_IDIV:
             self._emit("sdiv x0, x0, x9")
-        elif op == "%":
+        elif op_kind == t0.TK_MOD:
             self._emit("sdiv x10, x0, x9")
             self._emit("msub x0, x10, x9, x0")
-        elif op == "<<":
+        elif op_kind == t0.TK_LEFT_SHIFT:
             self._emit("lsl x0, x0, x9")
-        elif op == ">>":
+        elif op_kind == t0.TK_RIGHT_SHIFT:
             self._emit("lsr x0, x0, x9")
-        elif op == "and":
+        elif op_kind == t0.TK_AND:
             self._emit("and x0, x0, x9")
-        elif op == "or":
+        elif op_kind == t0.TK_OR:
             self._emit("orr x0, x0, x9")
-        elif op == "xor":
+        elif op_kind == t0.TK_XOR:
             self._emit("eor x0, x0, x9")
-        elif op == "=?":
+        elif op_kind == t0.TK_EQ:
             self._emit("cmp x0, x9")
             self._emit("csetm x0, eq")
-        elif op == "not=?":
+        elif op_kind == t0.TK_NOT_EQ:
             self._emit("cmp x0, x9")
             self._emit("csetm x0, ne")
-        elif op == ">?":
+        elif op_kind == t0.TK_GT:
             self._emit("cmp x0, x9")
             self._emit("csetm x0, gt")
-        elif op == "<?":
+        elif op_kind == t0.TK_LT:
             self._emit("cmp x0, x9")
             self._emit("csetm x0, lt")
-        elif op == ">=?":
+        elif op_kind == t0.TK_GT_EQ:
             self._emit("cmp x0, x9")
             self._emit("csetm x0, ge")
-        elif op == "<=?":
+        elif op_kind == t0.TK_LT_EQ:
             self._emit("cmp x0, x9")
             self._emit("csetm x0, le")
     

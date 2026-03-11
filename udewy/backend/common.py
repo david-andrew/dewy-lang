@@ -188,27 +188,26 @@ class Backend(Protocol):
     # Operators
     # ========================================================================
     
-    def unary_op(self, op: str) -> None:
+    def unary_op(self, op_kind: int) -> None:
         """
         Apply unary operator to top of stack.
         
-        Supported operators:
-        - 'neg': arithmetic negation
-        - 'not': bitwise not
+        Supported operators (token kinds from t0):
+        - TK_MINUS: arithmetic negation
+        - TK_NOT: bitwise not
         """
         ...
     
-    def binary_op(self, op: str) -> None:
+    def binary_op(self, op_kind: int) -> None:
         """
         Apply binary operator to top two values on stack.
         
         Pops two values (right then left), pushes result.
         
-        Supported operators:
-        - Arithmetic: '+', '-', '*', '//', '%'
-        - Bitwise: 'and', 'or', 'xor', '<<', '>>'
-        - Comparison: '=?', 'not=?', '<?', '>?', '<=?', '>=?'
-        - Pipe: '|>' (special handling - call RHS with LHS as arg)
+        Supported operators (token kinds from t0):
+        - Arithmetic: TK_PLUS, TK_MINUS, TK_MUL, TK_IDIV, TK_MOD
+        - Bitwise: TK_AND, TK_OR, TK_XOR, TK_LEFT_SHIFT, TK_RIGHT_SHIFT
+        - Comparison: TK_EQ, TK_NOT_EQ, TK_LT, TK_GT, TK_LT_EQ, TK_GT_EQ
         """
         ...
     

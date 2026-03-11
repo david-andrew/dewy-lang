@@ -18,6 +18,8 @@ Host functions provided by JS:
 
 from pathlib import Path
 
+from .. import t0
+
 
 class Wasm32Backend:
     """
@@ -395,63 +397,63 @@ class Wasm32Backend:
     # Operators
     # ========================================================================
     
-    def unary_op(self, op: str) -> None:
+    def unary_op(self, op_kind: int) -> None:
         """Apply unary operator to top of stack."""
-        if op == "neg":
+        if op_kind == t0.TK_MINUS:
             self._emit("i64.const -1")
             self._emit("i64.mul")
-        elif op == "not":
+        elif op_kind == t0.TK_NOT:
             self._emit("i64.const -1")
             self._emit("i64.xor")
     
-    def binary_op(self, op: str) -> None:
+    def binary_op(self, op_kind: int) -> None:
         """Apply binary operator to top two values on stack."""
-        if op == "+":
+        if op_kind == t0.TK_PLUS:
             self._emit("i64.add")
-        elif op == "-":
+        elif op_kind == t0.TK_MINUS:
             self._emit("i64.sub")
-        elif op == "*":
+        elif op_kind == t0.TK_MUL:
             self._emit("i64.mul")
-        elif op == "//":
+        elif op_kind == t0.TK_IDIV:
             self._emit("i64.div_s")
-        elif op == "%":
+        elif op_kind == t0.TK_MOD:
             self._emit("i64.rem_s")
-        elif op == "<<":
+        elif op_kind == t0.TK_LEFT_SHIFT:
             self._emit("i64.shl")
-        elif op == ">>":
+        elif op_kind == t0.TK_RIGHT_SHIFT:
             self._emit("i64.shr_u")
-        elif op == "and":
+        elif op_kind == t0.TK_AND:
             self._emit("i64.and")
-        elif op == "or":
+        elif op_kind == t0.TK_OR:
             self._emit("i64.or")
-        elif op == "xor":
+        elif op_kind == t0.TK_XOR:
             self._emit("i64.xor")
-        elif op == "=?":
+        elif op_kind == t0.TK_EQ:
             self._emit("i64.eq")
             self._emit("i64.extend_i32_s")
             self._emit("i64.const 0")
             self._emit("i64.sub")
-        elif op == "not=?":
+        elif op_kind == t0.TK_NOT_EQ:
             self._emit("i64.ne")
             self._emit("i64.extend_i32_s")
             self._emit("i64.const 0")
             self._emit("i64.sub")
-        elif op == ">?":
+        elif op_kind == t0.TK_GT:
             self._emit("i64.gt_s")
             self._emit("i64.extend_i32_s")
             self._emit("i64.const 0")
             self._emit("i64.sub")
-        elif op == "<?":
+        elif op_kind == t0.TK_LT:
             self._emit("i64.lt_s")
             self._emit("i64.extend_i32_s")
             self._emit("i64.const 0")
             self._emit("i64.sub")
-        elif op == ">=?":
+        elif op_kind == t0.TK_GT_EQ:
             self._emit("i64.ge_s")
             self._emit("i64.extend_i32_s")
             self._emit("i64.const 0")
             self._emit("i64.sub")
-        elif op == "<=?":
+        elif op_kind == t0.TK_LT_EQ:
             self._emit("i64.le_s")
             self._emit("i64.extend_i32_s")
             self._emit("i64.const 0")
