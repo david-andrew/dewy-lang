@@ -94,9 +94,13 @@ class Wasm32Backend(Backend):
             '(import "env" "host_frame_time" (func $host_frame_time (result i64)))',
             '(import "env" "host_window_width" (func $host_window_width (result i64)))',
             '(import "env" "host_window_height" (func $host_window_height (result i64)))',
+            # Audio
+            '(import "env" "host_audio_init" (func $host_audio_init (param i64 i64 i64) (result i64)))',
+            '(import "env" "host_audio_play" (func $host_audio_play (result i64)))',
+            '(import "env" "host_audio_sample_rate" (func $host_audio_sample_rate (result i64)))',
         ]
         self._imports.extend(host_imports)
-        self._next_fn_index = 17  # 17 host function imports
+        self._next_fn_index = 20  # 20 host function imports
     
     def _new_label(self, prefix: str = "L") -> str:
         label = f"${prefix}{self._next_label}"
@@ -647,6 +651,18 @@ class Wasm32Backend(Backend):
         """Emit a call to host_window_height(). Stack: [] -> [height]"""
         self._emit("call $host_window_height")
     
+    def emit_audio_init(self) -> None:
+        """Emit a call to host_audio_init(sample_rate, num_samples, channels). Stack: [sr ns ch] -> [buffer_ptr]"""
+        self._emit("call $host_audio_init")
+    
+    def emit_audio_play(self) -> None:
+        """Emit a call to host_audio_play(). Stack: [] -> [0]"""
+        self._emit("call $host_audio_play")
+    
+    def emit_audio_sample_rate(self) -> None:
+        """Emit a call to host_audio_sample_rate(). Stack: [] -> [sample_rate]"""
+        self._emit("call $host_audio_sample_rate")
+    
     # ========================================================================
     # Control flow
     # ========================================================================
@@ -730,6 +746,7 @@ class Wasm32Backend(Backend):
         "__canvas_init__", "__canvas_width__", "__canvas_height__",
         "__canvas_present__", "__frame_count__", "__frame_time__",
         "__window_width__", "__window_height__",
+        "__audio_init__", "__audio_play__", "__audio_sample_rate__",
     }
     
     def is_intrinsic(self, name: str) -> bool:
@@ -820,6 +837,12 @@ class Wasm32Backend(Backend):
             self.emit_window_width()
         elif name == "__window_height__":
             self.emit_window_height()
+        elif name == "__audio_init__":
+            self.emit_audio_init()
+        elif name == "__audio_play__":
+            self.emit_audio_play()
+        elif name == "__audio_sample_rate__":
+            self.emit_audio_sample_rate()
     
     def get_builtin_constants(self) -> dict[str, int]:
         """WASM browser backend has no built-in constants."""
@@ -901,6 +924,14 @@ let frameCount = 0;
 let startTime = 0;
 let canvasMode = false;
 let wasmInstance = null;
+
+// Audio state
+let audioCtx = null;
+let audioSampleRate = 44100;
+let audioNumSamples = 0;
+let audioChannels = 1;
+let audioBufferPtr = 0;
+let audioPendingPlay = false;
 
 function decodeString(ptr, len) {
     const view = new Uint8Array(memory.buffer);
@@ -1014,6 +1045,67 @@ const imports = {
         host_frame_time: () => BigInt(Math.floor(performance.now() - startTime)),
         host_window_width: () => BigInt(window.innerWidth),
         host_window_height: () => BigInt(window.innerHeight),
+        // Audio
+        host_audio_init: (sampleRate, numSamples, channels) => {
+            audioSampleRate = Number(sampleRate);
+            audioNumSamples = Number(numSamples);
+            audioChannels = Number(channels);
+            // Allocate buffer after canvas buffer (at 768KB)
+            // Each sample is i16 (2 bytes), per channel
+            audioBufferPtr = 786432;
+            return BigInt(audioBufferPtr);
+        },
+        host_audio_play: () => {
+            if (!audioCtx) {
+                audioCtx = new AudioContext({ sampleRate: audioSampleRate });
+            }
+            
+            function doPlay() {
+                const buffer = audioCtx.createBuffer(audioChannels, audioNumSamples, audioSampleRate);
+                const view = new Int16Array(memory.buffer, audioBufferPtr, audioNumSamples * audioChannels);
+                
+                // Convert i16 samples to f32 and copy to AudioBuffer
+                for (let ch = 0; ch < audioChannels; ch++) {
+                    const channelData = buffer.getChannelData(ch);
+                    for (let i = 0; i < audioNumSamples; i++) {
+                        const idx = audioChannels > 1 ? i * audioChannels + ch : i;
+                        channelData[i] = view[idx] / 32768.0;
+                    }
+                }
+                
+                const source = audioCtx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(audioCtx.destination);
+                source.start();
+            }
+            
+            // Handle browser autoplay policy
+            if (audioCtx.state === 'suspended') {
+                audioPendingPlay = true;
+                // Show play button
+                let playBtn = document.getElementById('audio-play-btn');
+                if (!playBtn) {
+                    playBtn = document.createElement('button');
+                    playBtn.id = 'audio-play-btn';
+                    playBtn.textContent = '🔊 Click to Play Audio';
+                    playBtn.style.cssText = 'font-size: 1.5em; padding: 1em 2em; margin: 1em; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 8px;';
+                    playBtn.onclick = async () => {
+                        await audioCtx.resume();
+                        playBtn.remove();
+                        if (audioPendingPlay) {
+                            audioPendingPlay = false;
+                            doPlay();
+                        }
+                    };
+                    document.body.insertBefore(playBtn, document.body.firstChild);
+                }
+                appendOutput('\\n[Audio ready - click button to play]\\n');
+            } else {
+                doPlay();
+            }
+            return 0n;
+        },
+        host_audio_sample_rate: () => BigInt(audioSampleRate),
     }
 };
 

@@ -1,0 +1,75 @@
+# Simple audio test - generate a single 440Hz sine wave
+
+# Sine approximation (scaled by 256, input 0-1023 maps to 0-2pi)
+let sin256 = (angle:int):>int => {
+    let a:int = angle % 1024
+    if a <? 0 {
+        a = a + 1024
+    }
+    
+    let quad:int = a // 256
+    let x:int = a % 256
+    
+    let y:int = 0
+    let term:int = 0
+    if quad =? 0 {
+        term = 512 - x
+        y = (x * term) // 256
+    }
+    if quad =? 1 {
+        x = 256 - x
+        term = 512 - x
+        y = (x * term) // 256
+    }
+    if quad =? 2 {
+        term = 512 - x
+        y = 0 - ((x * term) // 256)
+    }
+    if quad =? 3 {
+        x = 256 - x
+        term = 512 - x
+        y = 0 - ((x * term) // 256)
+    }
+    
+    return y
+}
+
+let main = ():>int => {
+    let sample_rate:int = 44100
+    let duration_ms:int = 2000
+    let num_samples:int = (sample_rate * duration_ms) // 1000
+    let freq:int = 440
+    
+    # Initialize audio buffer
+    let buf:int = __audio_init__(sample_rate num_samples 1)
+    
+    __dom_append__("Generating " 11)
+    __dom_append_int__(num_samples)
+    __dom_append__(" samples at " 12)
+    __dom_append_int__(freq)
+    __dom_append__("Hz...\n" 6)
+    
+    # Generate sine wave
+    let i:int = 0
+    loop i <? num_samples {
+        # phase = (i * freq * 1024) / sample_rate
+        let phase:int = (i * freq * 1024) // sample_rate
+        let sine:int = sin256(phase)
+        
+        # Scale sine (-256..256) to i16 range (~half volume)
+        let sample:int = sine * 64
+        
+        # Store as i16 (2 bytes per sample)
+        let addr:int = buf + (i * 2)
+        __store_u16__(sample addr)
+        
+        i = i + 1
+    }
+    
+    __dom_append__("Playing audio...\n" 17)
+    
+    # Play the audio
+    __audio_play__()
+    
+    return 0
+}

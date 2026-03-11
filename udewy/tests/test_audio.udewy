@@ -1,0 +1,139 @@
+# Audio demo - generate a simple melody from scratch
+# Uses audio intrinsics to synthesize and play sound
+
+# Simple sine approximation using parabolic segments (scaled by 256)
+# Input: angle in range 0-1023 (maps to 0-2pi)
+# Output: sine * 256 in range -256 to 256
+let sin256 = (angle:int):>int => {
+    let a:int = angle % 1024
+    if a <? 0 {
+        a = a + 1024
+    }
+    
+    let quad:int = a // 256
+    let x:int = a % 256
+    
+    let y:int = 0
+    let term:int = 0
+    if quad =? 0 {
+        term = 512 - x
+        y = (x * term) // 256
+    }
+    if quad =? 1 {
+        x = 256 - x
+        term = 512 - x
+        y = (x * term) // 256
+    }
+    if quad =? 2 {
+        term = 512 - x
+        y = 0 - ((x * term) // 256)
+    }
+    if quad =? 3 {
+        x = 256 - x
+        term = 512 - x
+        y = 0 - ((x * term) // 256)
+    }
+    
+    return y
+}
+
+# Generate a sine wave tone at given frequency
+# Writes i16 samples to buffer, returns number of samples written
+let gen_tone = (buf:int freq:int duration_ms:int sample_rate:int amplitude:int):>int => {
+    let num_samples:int = (sample_rate * duration_ms) // 1000
+    
+    let i:int = 0
+    loop i <? num_samples {
+        # phase = (i * freq * 1024) / sample_rate (scaled to 0-1023 range)
+        let phase:int = (i * freq * 1024) // sample_rate
+        let sine:int = sin256(phase)
+        
+        # Scale sine (-256..256) to i16 range with amplitude control
+        # amplitude is 0-128 (128 = full volume)
+        let sample:int = (sine * amplitude)
+        
+        # Store as i16 (2 bytes)
+        let addr:int = buf + (i * 2)
+        __store_u16__(sample addr)
+        
+        i = i + 1
+    }
+    
+    return num_samples
+}
+
+# Apply simple exponential decay envelope to buffer
+let apply_decay = (buf:int num_samples:int):>int => {
+    let i:int = 0
+    loop i <? num_samples {
+        let addr:int = buf + (i * 2)
+        let sample:int = __load_i16__(addr)
+        
+        # Decay factor: starts at 256, decreases linearly
+        let decay:int = 256 - ((i * 192) // num_samples)
+        if decay <? 64 {
+            decay = 64
+        }
+        sample = (sample * decay) // 256
+        
+        __store_u16__(sample addr)
+        i = i + 1
+    }
+    return 0
+}
+
+let main = ():>int => {
+    let sample_rate:int = 44100
+    let channels:int = 1
+    
+    # Notes: C4=262, D4=294, E4=330, F4=349, G4=392, A4=440, B4=494, C5=523
+    let note_c:int = 262
+    let note_d:int = 294
+    let note_e:int = 330
+    let note_f:int = 349
+    let note_g:int = 392
+    let note_a:int = 440
+    
+    # Each note duration in ms
+    let note_dur:int = 300
+    let samples_per_note:int = (sample_rate * note_dur) // 1000
+    
+    # Total samples for 6 notes
+    let total_samples:int = samples_per_note * 6
+    
+    # Initialize audio and get buffer pointer
+    let buf:int = __audio_init__(sample_rate total_samples channels)
+    
+    # Generate a simple melody: C D E F G A
+    let offset:int = 0
+    
+    gen_tone(buf + offset note_c note_dur sample_rate 100)
+    apply_decay(buf + offset samples_per_note)
+    offset = offset + (samples_per_note * 2)
+    
+    gen_tone(buf + offset note_d note_dur sample_rate 100)
+    apply_decay(buf + offset samples_per_note)
+    offset = offset + (samples_per_note * 2)
+    
+    gen_tone(buf + offset note_e note_dur sample_rate 100)
+    apply_decay(buf + offset samples_per_note)
+    offset = offset + (samples_per_note * 2)
+    
+    gen_tone(buf + offset note_f note_dur sample_rate 100)
+    apply_decay(buf + offset samples_per_note)
+    offset = offset + (samples_per_note * 2)
+    
+    gen_tone(buf + offset note_g note_dur sample_rate 100)
+    apply_decay(buf + offset samples_per_note)
+    offset = offset + (samples_per_note * 2)
+    
+    gen_tone(buf + offset note_a note_dur sample_rate 100)
+    apply_decay(buf + offset samples_per_note)
+    
+    # Play the generated audio
+    __audio_play__()
+    
+    __dom_append__("Audio generated and playing!" 28)
+    
+    return 0
+}
