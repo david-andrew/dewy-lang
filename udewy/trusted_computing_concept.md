@@ -1,5 +1,5 @@
 # Trusted Computing Base
-(TBD: describe goal of trusted computing base)
+Goal is 100% auditable software chain up to full DewyOS
 
 ## Stage 0: Monitor
 a tiny machine-code monitor written in hexadecimal. This program does exactly one thing: reads ASCII hexadecimal characters from standard input, loads them into memory as executable bytes, and jumps to them.
@@ -153,6 +153,24 @@ compiler
 tools and applications
 ```
 E.g. we'll need to think about how the OS is interleaved in our trusted computing base. This is because the Oberon Programming Language (and presumably udewy) will need to make use of various OS features like interacting with files, stdin/stdout, etc.
+
+
+## TBD mDewy: milli-dewy,
+if need extra layer between μDewy and full Dewy, mDewy would be it
+- structs (dot accessing members)
+- arrays with known element sizes
+- C-level type checking
+- tbd other necessary features for max power, min impl requirements
+### Bootsrapping
+
+### Input
+
+### Output
+
+### Audit Burden
+
+### Prior Art
+
 
 
 ## Dewy: Fully Features Programming Language
