@@ -1,0 +1,116 @@
+# Continuous audio streaming test - no visuals
+# Generates an evolving drone sound
+
+let sample_rate:int = 44100
+let buffer_size:int = 8192
+let audio_buf:int = 0
+
+# Audio parameters
+let base_freq:int = 110
+let phase1:int = 0
+let phase2:int = 0
+let phase3:int = 0
+
+# Time tracking for modulation
+let time_acc:int = 0
+
+# Sine approximation (scaled by 256, input 0-1023 maps to 0-2pi)
+let sin256 = (angle:int):>int => {
+    let a:int = angle % 1024
+    if a <? 0 {
+        a = a + 1024
+    }
+    
+    let quad:int = a // 256
+    let x:int = a % 256
+    
+    let y:int = 0
+    let term:int = 0
+    if quad =? 0 {
+        term = 512 - x
+        y = (x * term) // 256
+    }
+    if quad =? 1 {
+        x = 256 - x
+        term = 512 - x
+        y = (x * term) // 256
+    }
+    if quad =? 2 {
+        term = 512 - x
+        y = 0 - ((x * term) // 256)
+    }
+    if quad =? 3 {
+        x = 256 - x
+        term = 512 - x
+        y = 0 - ((x * term) // 256)
+    }
+    
+    return y
+}
+
+# Generate audio buffer
+let generate_audio = ():>int => {
+    # Slowly modulate frequencies based on accumulated time
+    let mod1:int = sin256(time_acc // 50) // 2
+    let mod2:int = sin256(time_acc // 73) // 3
+    let mod3:int = sin256(time_acc // 97) // 4
+    
+    let freq1:int = base_freq + mod1
+    let freq2:int = (base_freq * 3) // 2 + mod2
+    let freq3:int = base_freq * 2 + mod3
+    
+    # Phase increments per sample (scaled by 1024)
+    let phase_inc1:int = (freq1 * 1024) // sample_rate
+    let phase_inc2:int = (freq2 * 1024) // sample_rate
+    let phase_inc3:int = (freq3 * 1024) // sample_rate
+    
+    let i:int = 0
+    loop i <? buffer_size {
+        # Generate three sine waves and mix
+        let s1:int = sin256(phase1)
+        let s2:int = (sin256(phase2) * 2) // 3
+        let s3:int = sin256(phase3) // 2
+        
+        let mixed:int = (s1 + s2 + s3) // 3
+        
+        # Scale to i16 range
+        let sample:int = mixed * 80
+        
+        # Store to audio buffer
+        __store_u16__(sample audio_buf + (i * 2))
+        
+        # Advance phases
+        phase1 = (phase1 + phase_inc1) % 1024
+        phase2 = (phase2 + phase_inc2) % 1024
+        phase3 = (phase3 + phase_inc3) % 1024
+        
+        i = i + 1
+    }
+    
+    # Advance time accumulator (ms per buffer)
+    let ms_per_buffer:int = (buffer_size * 1000) // sample_rate
+    time_acc = time_acc + ms_per_buffer
+    
+    # Queue buffer and get next buffer pointer
+    audio_buf = __audio_stream_write__()
+    
+    return 0
+}
+
+let main = ():>int => {
+    # Initialize audio streaming (only on first frame)
+    if audio_buf =? 0 {
+        audio_buf = __audio_stream_init__(sample_rate buffer_size)
+        __dom_append__("Continuous audio streaming test\n" 33)
+        __dom_append__("Generating evolving drone at " 29)
+        __dom_append_int__(base_freq)
+        __dom_append__("Hz base frequency\n" 18)
+    }
+    
+    # Generate audio only when needed
+    if __audio_stream_needs_samples__() {
+        generate_audio()
+    }
+    
+    return 0
+}

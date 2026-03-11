@@ -1,0 +1,210 @@
+# Audiovisual demo - canvas graphics with continuous audio
+# Generates a drone/ambient sound that evolves over time
+# Visuals show the audio waveform directly from the audio buffer
+
+let width:int = 0
+let height:int = 0
+let canvas_buf:int = 0
+let audio_buf:int = 0
+let sample_rate:int = 44100
+let buffer_size:int = 8192
+
+# Audio parameters (evolve over time)
+let base_freq:int = 110
+let phase1:int = 0
+let phase2:int = 0
+let phase3:int = 0
+
+# Simple sine approximation (scaled by 256, input 0-1023 maps to 0-2pi)
+let sin256 = (angle:int):>int => {
+    let a:int = angle % 1024
+    if a <? 0 {
+        a = a + 1024
+    }
+    
+    let quad:int = a // 256
+    let x:int = a % 256
+    
+    let y:int = 0
+    let term:int = 0
+    if quad =? 0 {
+        term = 512 - x
+        y = (x * term) // 256
+    }
+    if quad =? 1 {
+        x = 256 - x
+        term = 512 - x
+        y = (x * term) // 256
+    }
+    if quad =? 2 {
+        term = 512 - x
+        y = 0 - ((x * term) // 256)
+    }
+    if quad =? 3 {
+        x = 256 - x
+        term = 512 - x
+        y = 0 - ((x * term) // 256)
+    }
+    
+    return y
+}
+
+# Set pixel in canvas buffer
+let set_pixel = (x:int y:int r:int g:int b:int):>int => {
+    let offset:int = ((y * width) + x) * 4
+    let addr:int = canvas_buf + offset
+    __store_u8__(r addr)
+    __store_u8__(g addr + 1)
+    __store_u8__(b addr + 2)
+    __store_u8__(255 addr + 3)
+    return 0
+}
+
+# Clamp to 0-255
+let clamp = (v:int):>int => {
+    if v <? 0 { return 0 }
+    if v >? 255 { return 255 }
+    return v
+}
+
+# Generate audio buffer
+let generate_audio = ():>int => {
+    let t:int = __frame_time__()
+    
+    # Slowly modulate frequencies based on time
+    let mod1:int = sin256(t // 50) // 2
+    let mod2:int = sin256(t // 73) // 3
+    
+    let freq1:int = base_freq + mod1
+    let freq2:int = (base_freq * 3) // 2 + mod2
+    let freq3:int = base_freq * 2 + (mod1 // 2)
+    
+    # Phase increments per sample (scaled by 1024)
+    let phase_inc1:int = (freq1 * 1024) // sample_rate
+    let phase_inc2:int = (freq2 * 1024) // sample_rate
+    let phase_inc3:int = (freq3 * 1024) // sample_rate
+    
+    let i:int = 0
+    loop i <? buffer_size {
+        # Generate three sine waves and mix
+        let s1:int = sin256(phase1)
+        let s2:int = (sin256(phase2) * 2) // 3
+        let s3:int = sin256(phase3) // 2
+        
+        let mixed:int = (s1 + s2 + s3) // 3
+        
+        # Scale to i16 range
+        let sample:int = mixed * 80
+        
+        # Store to audio buffer
+        __store_u16__(sample audio_buf + (i * 2))
+        
+        # Advance phases
+        phase1 = (phase1 + phase_inc1) % 1024
+        phase2 = (phase2 + phase_inc2) % 1024
+        phase3 = (phase3 + phase_inc3) % 1024
+        
+        i = i + 1
+    }
+    
+    # Queue buffer for playback and get next buffer pointer
+    audio_buf = __audio_stream_write__()
+    
+    return 0
+}
+
+# Render waveform from audio buffer
+let render_frame = ():>int => {
+    # Clear to dark background
+    let y:int = 0
+    loop y <? height {
+        let x:int = 0
+        let bg_b:int = 15 + (y // 12)
+        loop x <? width {
+            set_pixel(x y 8 8 bg_b)
+            x = x + 1
+        }
+        y = y + 1
+    }
+    
+    # Draw center line
+    y = height // 2
+    let x:int = 0
+    loop x <? width {
+        set_pixel(x y 30 30 50)
+        x = x + 1
+    }
+    
+    # Draw waveform from audio buffer
+    # Sample every few samples to fit buffer_size into width
+    let samples_per_pixel:int = buffer_size // width
+    let center_y:int = height // 2
+    
+    x = 0
+    loop x <? width {
+        # Read sample from audio buffer (i16)
+        let sample_idx:int = x * samples_per_pixel
+        let sample:int = __load_i16__(audio_buf + (sample_idx * 2))
+        
+        # Scale to screen (-32768..32767 -> screen coords)
+        let wave_y:int = center_y - ((sample * (height // 3)) // 20000)
+        
+        # Clamp
+        if wave_y <? 0 { wave_y = 0 }
+        if wave_y >=? height { wave_y = height - 1 }
+        
+        # Color based on amplitude
+        let amp:int = sample
+        if amp <? 0 { amp = 0 - amp }
+        amp = amp // 100
+        let r:int = clamp(80 + amp)
+        let g:int = clamp(180 - (amp // 2))
+        let b:int = clamp(255 - (amp // 3))
+        
+        # Draw vertical line from center to wave
+        let y1:int = center_y
+        let y2:int = wave_y
+        if y1 >? y2 {
+            let tmp:int = y1
+            y1 = y2
+            y2 = tmp
+        }
+        let dy:int = y1
+        loop dy <=? y2 {
+            set_pixel(x dy r g b)
+            dy = dy + 1
+        }
+        
+        # Bright point at wave
+        set_pixel(x wave_y 255 255 255)
+        
+        x = x + 1
+    }
+    
+    return 0
+}
+
+let main = ():>int => {
+    # Initialize canvas
+    width = 320
+    height = 240
+    canvas_buf = __canvas_init__(width height)
+    
+    # Initialize audio streaming (only on first frame)
+    if audio_buf =? 0 {
+        audio_buf = __audio_stream_init__(sample_rate buffer_size)
+    }
+    
+    # Generate audio only when the system needs more samples
+    if __audio_stream_needs_samples__() {
+        generate_audio()
+    }
+    
+    # Render visuals
+    render_frame()
+    
+    # Present canvas
+    __canvas_present__()
+    
+    return 0
+}

@@ -94,13 +94,17 @@ class Wasm32Backend(Backend):
             '(import "env" "host_frame_time" (func $host_frame_time (result i64)))',
             '(import "env" "host_window_width" (func $host_window_width (result i64)))',
             '(import "env" "host_window_height" (func $host_window_height (result i64)))',
-            # Audio
+            # Audio (one-shot)
             '(import "env" "host_audio_init" (func $host_audio_init (param i64 i64 i64) (result i64)))',
             '(import "env" "host_audio_play" (func $host_audio_play (result i64)))',
             '(import "env" "host_audio_sample_rate" (func $host_audio_sample_rate (result i64)))',
+            # Audio (streaming)
+            '(import "env" "host_audio_stream_init" (func $host_audio_stream_init (param i64 i64) (result i64)))',
+            '(import "env" "host_audio_stream_write" (func $host_audio_stream_write (result i64)))',
+            '(import "env" "host_audio_stream_needs_samples" (func $host_audio_stream_needs_samples (result i64)))',
         ]
         self._imports.extend(host_imports)
-        self._next_fn_index = 20  # 20 host function imports
+        self._next_fn_index = 23  # 23 host function imports
     
     def _new_label(self, prefix: str = "L") -> str:
         label = f"${prefix}{self._next_label}"
@@ -663,6 +667,18 @@ class Wasm32Backend(Backend):
         """Emit a call to host_audio_sample_rate(). Stack: [] -> [sample_rate]"""
         self._emit("call $host_audio_sample_rate")
     
+    def emit_audio_stream_init(self) -> None:
+        """Emit a call to host_audio_stream_init(sample_rate, buffer_size). Stack: [sr bs] -> [buffer_ptr]"""
+        self._emit("call $host_audio_stream_init")
+    
+    def emit_audio_stream_write(self) -> None:
+        """Emit a call to host_audio_stream_write(). Stack: [] -> [next_buffer_ptr]"""
+        self._emit("call $host_audio_stream_write")
+    
+    def emit_audio_stream_needs_samples(self) -> None:
+        """Emit a call to host_audio_stream_needs_samples(). Stack: [] -> [bool]"""
+        self._emit("call $host_audio_stream_needs_samples")
+    
     # ========================================================================
     # Control flow
     # ========================================================================
@@ -747,6 +763,7 @@ class Wasm32Backend(Backend):
         "__canvas_present__", "__frame_count__", "__frame_time__",
         "__window_width__", "__window_height__",
         "__audio_init__", "__audio_play__", "__audio_sample_rate__",
+        "__audio_stream_init__", "__audio_stream_write__", "__audio_stream_needs_samples__",
     }
     
     def is_intrinsic(self, name: str) -> bool:
@@ -843,6 +860,12 @@ class Wasm32Backend(Backend):
             self.emit_audio_play()
         elif name == "__audio_sample_rate__":
             self.emit_audio_sample_rate()
+        elif name == "__audio_stream_init__":
+            self.emit_audio_stream_init()
+        elif name == "__audio_stream_write__":
+            self.emit_audio_stream_write()
+        elif name == "__audio_stream_needs_samples__":
+            self.emit_audio_stream_needs_samples()
     
     def get_builtin_constants(self) -> dict[str, int]:
         """WASM browser backend has no built-in constants."""
@@ -925,13 +948,28 @@ let startTime = 0;
 let canvasMode = false;
 let wasmInstance = null;
 
-// Audio state
+// Audio state (one-shot mode)
 let audioCtx = null;
 let audioSampleRate = 44100;
 let audioNumSamples = 0;
 let audioChannels = 1;
 let audioBufferPtr = 0;
 let audioPendingPlay = false;
+
+// Audio streaming state
+let audioStreamMode = false;
+let audioStreamBufferSize = 0;
+let audioStreamStarted = false;
+let audioScriptNode = null;
+
+// Double-buffer for audio: WASM writes to one, audio reads from other
+let audioWriteBuffer = 0;  // 0 or 1
+let audioReadBuffer = 0;
+let audioBuffer0Ready = false;
+let audioBuffer1Ready = false;
+const AUDIO_SCRIPT_BUFFER_SIZE = 8192;  // Larger buffer for less crackling
+const AUDIO_BUFFER_0_OFFSET = 786432;
+const AUDIO_BUFFER_1_OFFSET = 786432 + (AUDIO_SCRIPT_BUFFER_SIZE * 2);  // samples * 2 bytes
 
 function decodeString(ptr, len) {
     const view = new Uint8Array(memory.buffer);
@@ -1106,12 +1144,128 @@ const imports = {
             return 0n;
         },
         host_audio_sample_rate: () => BigInt(audioSampleRate),
+        // Audio streaming using ScriptProcessorNode with double-buffering
+        host_audio_stream_init: (sampleRate, bufferSize) => {
+            audioSampleRate = Number(sampleRate);
+            audioStreamBufferSize = AUDIO_SCRIPT_BUFFER_SIZE;
+            audioChannels = 1;
+            audioStreamMode = true;
+            audioStreamStarted = false;
+            audioWriteBuffer = 0;
+            audioReadBuffer = 0;
+            audioBuffer0Ready = false;
+            audioBuffer1Ready = false;
+            
+            if (!audioCtx) {
+                audioCtx = new AudioContext({ sampleRate: audioSampleRate });
+            }
+            
+            // Create ScriptProcessorNode with larger buffer
+            audioScriptNode = audioCtx.createScriptProcessor(AUDIO_SCRIPT_BUFFER_SIZE, 0, 1);
+            
+            audioScriptNode.onaudioprocess = (e) => {
+                const output = e.outputBuffer.getChannelData(0);
+                const bufSize = AUDIO_SCRIPT_BUFFER_SIZE;
+                
+                // Read from the ready buffer
+                let bufferOffset, hasData;
+                if (audioReadBuffer === 0 && audioBuffer0Ready) {
+                    bufferOffset = AUDIO_BUFFER_0_OFFSET;
+                    hasData = true;
+                    audioBuffer0Ready = false;
+                    audioReadBuffer = 1;
+                } else if (audioReadBuffer === 1 && audioBuffer1Ready) {
+                    bufferOffset = AUDIO_BUFFER_1_OFFSET;
+                    hasData = true;
+                    audioBuffer1Ready = false;
+                    audioReadBuffer = 0;
+                } else if (audioBuffer0Ready) {
+                    bufferOffset = AUDIO_BUFFER_0_OFFSET;
+                    hasData = true;
+                    audioBuffer0Ready = false;
+                    audioReadBuffer = 1;
+                } else if (audioBuffer1Ready) {
+                    bufferOffset = AUDIO_BUFFER_1_OFFSET;
+                    hasData = true;
+                    audioBuffer1Ready = false;
+                    audioReadBuffer = 0;
+                } else {
+                    hasData = false;
+                }
+                
+                if (hasData) {
+                    const view = new Int16Array(memory.buffer, bufferOffset, bufSize);
+                    for (let i = 0; i < bufSize; i++) {
+                        output[i] = view[i] / 32768.0;
+                    }
+                } else {
+                    // Silence if no buffer ready
+                    for (let i = 0; i < bufSize; i++) {
+                        output[i] = 0;
+                    }
+                }
+            };
+            
+            // Return pointer to write buffer 0
+            audioBufferPtr = AUDIO_BUFFER_0_OFFSET;
+            return BigInt(audioBufferPtr);
+        },
+        host_audio_stream_write: () => {
+            if (!audioStreamMode || !audioCtx) return 0n;
+            
+            // Handle autoplay policy
+            if (audioCtx.state === 'suspended') {
+                let playBtn = document.getElementById('audio-play-btn');
+                if (!playBtn) {
+                    playBtn = document.createElement('button');
+                    playBtn.id = 'audio-play-btn';
+                    playBtn.textContent = '🔊 Click to Enable Audio';
+                    playBtn.style.cssText = 'position:fixed; top:10px; left:10px; z-index:9999; font-size:1.2em; padding:0.5em 1em; cursor:pointer; background:#4CAF50; color:white; border:none; border-radius:8px;';
+                    playBtn.onclick = async () => {
+                        await audioCtx.resume();
+                        playBtn.remove();
+                        audioScriptNode.connect(audioCtx.destination);
+                        audioStreamStarted = true;
+                    };
+                    document.body.appendChild(playBtn);
+                }
+                return 0n;
+            }
+            
+            // Connect on first write if not suspended
+            if (!audioStreamStarted) {
+                audioScriptNode.connect(audioCtx.destination);
+                audioStreamStarted = true;
+            }
+            
+            // Mark current write buffer as ready and switch to other buffer
+            if (audioWriteBuffer === 0) {
+                audioBuffer0Ready = true;
+                audioWriteBuffer = 1;
+                audioBufferPtr = AUDIO_BUFFER_1_OFFSET;
+            } else {
+                audioBuffer1Ready = true;
+                audioWriteBuffer = 0;
+                audioBufferPtr = AUDIO_BUFFER_0_OFFSET;
+            }
+            
+            // Return next buffer pointer for WASM to write to
+            return BigInt(audioBufferPtr);
+        },
+        host_audio_stream_needs_samples: () => {
+            // Returns true (-1) if we need more samples, false (0) if buffers are full
+            if (!audioStreamMode) return 0n;
+            // Need samples if the current write buffer is not marked ready
+            if (audioWriteBuffer === 0 && !audioBuffer0Ready) return -1n;
+            if (audioWriteBuffer === 1 && !audioBuffer1Ready) return -1n;
+            return 0n;
+        },
     }
 };
 
 function animationLoop() {
-    if (!canvasMode || !wasmInstance) return;
-    
+    if ((!canvasMode && !audioStreamMode) || !wasmInstance) return;
+
     frameCount++;
     wasmInstance.exports.main();
     requestAnimationFrame(animationLoop);
@@ -1150,6 +1304,9 @@ async function run() {{
         const result = instance.exports.main();
         if (canvasMode) {{
             document.body.classList.add('canvas-mode');
+            requestAnimationFrame(animationLoop);
+        }} else if (audioStreamMode) {{
+            // Audio-only mode - still need animation loop
             requestAnimationFrame(animationLoop);
         }} else {{
             appendOutput(`\\nExit code: ${{result}}`);
@@ -1206,6 +1363,9 @@ async function run() {{
         const result = instance.exports.main();
         if (canvasMode) {{
             document.body.classList.add('canvas-mode');
+            requestAnimationFrame(animationLoop);
+        }} else if (audioStreamMode) {{
+            // Audio-only mode - still need animation loop
             requestAnimationFrame(animationLoop);
         }} else {{
             appendOutput(`\\nExit code: ${{result}}`);
