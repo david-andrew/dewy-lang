@@ -672,15 +672,15 @@ These intrinsics provide direct memory access:
 | `__load_i16__(addr)` | Load signed 16-bit value from `addr`, sign-extend to 64-bit |
 | `__load_i32__(addr)` | Load signed 32-bit value from `addr`, sign-extend to 64-bit |
 | `__load_i64__(addr)` | Load signed 64-bit value from `addr` |
-| `__store__(val, addr)` | Shorthand for `__store_u64__(val, addr)` |
-| `__store_u8__(val, addr)` | Store low 8 bits of `val` to `addr`, return 0 |
-| `__store_u16__(val, addr)` | Store low 16 bits of `val` to `addr`, return 0 |
-| `__store_u32__(val, addr)` | Store low 32 bits of `val` to `addr`, return 0 |
-| `__store_u64__(val, addr)` | Store 64-bit `val` to `addr`, return 0 |
-| `__store_i8__(val, addr)` | Store low 8 bits of `val` to `addr`, return 0 |
-| `__store_i16__(val, addr)` | Store low 16 bits of `val` to `addr`, return 0 |
-| `__store_i32__(val, addr)` | Store low 32 bits of `val` to `addr`, return 0 |
-| `__store_i64__(val, addr)` | Store 64-bit `val` to `addr`, return 0 |
+| `__store__(val addr)` | Shorthand for `__store_u64__(val addr)` |
+| `__store_u8__(val addr)` | Store low 8 bits of `val` to `addr`, return 0 |
+| `__store_u16__(val addr)` | Store low 16 bits of `val` to `addr`, return 0 |
+| `__store_u32__(val addr)` | Store low 32 bits of `val` to `addr`, return 0 |
+| `__store_u64__(val addr)` | Store 64-bit `val` to `addr`, return 0 |
+| `__store_i8__(val addr)` | Store low 8 bits of `val` to `addr`, return 0 |
+| `__store_i16__(val addr)` | Store low 16 bits of `val` to `addr`, return 0 |
+| `__store_i32__(val addr)` | Store low 32 bits of `val` to `addr`, return 0 |
+| `__store_i64__(val addr)` | Store 64-bit `val` to `addr`, return 0 |
 | `__alloca__(size)` | Allocate `size` bytes of temporary storage and return an 8-byte-aligned address |
 | `__static_alloca__(size)` | Allocate `size` bytes of writable static storage and return its address |
 
@@ -694,13 +694,13 @@ Signed and unsigned 64-bit loads/stores are identical at runtime; both spellings
 
 | Intrinsic | Description |
 |-----------|-------------|
-| `__signed_shr__(val, bits)` | Arithmetic (signed) right shift; fills vacated bits with the sign bit |
-| `__unsigned_idiv__(lhs, rhs)` | Unsigned 64-bit division |
-| `__unsigned_mod__(lhs, rhs)` | Unsigned 64-bit remainder |
-| `__unsigned_lt__(lhs, rhs)` | Unsigned less-than comparison |
-| `__unsigned_gt__(lhs, rhs)` | Unsigned greater-than comparison |
-| `__unsigned_lte__(lhs, rhs)` | Unsigned less-than-or-equal comparison |
-| `__unsigned_gte__(lhs, rhs)` | Unsigned greater-than-or-equal comparison |
+| `__signed_shr__(val bits)` | Arithmetic (signed) right shift; fills vacated bits with the sign bit |
+| `__unsigned_idiv__(lhs rhs)` | Unsigned 64-bit division |
+| `__unsigned_mod__(lhs rhs)` | Unsigned 64-bit remainder |
+| `__unsigned_lt__(lhs rhs)` | Unsigned less-than comparison |
+| `__unsigned_gt__(lhs rhs)` | Unsigned greater-than comparison |
+| `__unsigned_lte__(lhs rhs)` | Unsigned less-than-or-equal comparison |
+| `__unsigned_gte__(lhs rhs)` | Unsigned greater-than-or-equal comparison |
 
 Use `__signed_shr__` when you need sign-preserving right shift. The `>>` operator always performs unsigned (logical) shift. Likewise, `//`, `%`, and relational operators remain signed by default; use the unsigned intrinsics when you need unsigned interpretation.
 
@@ -1037,12 +1037,12 @@ Additional arguments beyond 6 are passed on the stack.
 
 ```udewy
 __syscall0__(num)
-__syscall1__(num, arg1)
-__syscall2__(num, arg1, arg2)
-__syscall3__(num, arg1, arg2, arg3)
-__syscall4__(num, arg1, arg2, arg3, arg4)
-__syscall5__(num, arg1, arg2, arg3, arg4, arg5)
-__syscall6__(num, arg1, arg2, arg3, arg4, arg5, arg6)
+__syscall1__(num arg1)
+__syscall2__(num arg1 arg2)
+__syscall3__(num arg1 arg2 arg3)
+__syscall4__(num arg1 arg2 arg3 arg4)
+__syscall5__(num arg1 arg2 arg3 arg4 arg5)
+__syscall6__(num arg1 arg2 arg3 arg4 arg5 arg6)
 ```
 
 Syscall convention:
@@ -1144,7 +1144,7 @@ The x86_64 backend provides the following constants automatically (no declaratio
 Same syntax as x86_64:
 ```udewy
 __syscall0__(num)
-__syscall1__(num, arg1)
+__syscall1__(num arg1)
 # ... etc.
 ```
 
@@ -1251,7 +1251,7 @@ Instead of syscalls, the WASM backend provides browser-focused host functions:
 
 | Intrinsic | Args | Description |
 |-----------|------|-------------|
-| `__host_log__(ptr, len)` | 2 | Output text to browser console |
+| `__host_log__(ptr len)` | 2 | Output text to browser console |
 | `__host_exit__(code)` | 1 | Signal program exit |
 | `__host_time__()` | 0 | Current timestamp in milliseconds |
 | `__host_random__()` | 0 | Random 64-bit integer |
@@ -1262,8 +1262,8 @@ Instead of syscalls, the WASM backend provides browser-focused host functions:
 
 | Intrinsic | Args | Description |
 |-----------|------|-------------|
-| `__dom_set_text__(ptr, len)` | 2 | Set output element text content |
-| `__dom_append__(ptr, len)` | 2 | Append text to output element |
+| `__dom_set_text__(ptr len)` | 2 | Set output element text content |
+| `__dom_append__(ptr len)` | 2 | Append text to output element |
 | `__dom_clear__()` | 0 | Clear output element |
 | `__dom_append_int__(value)` | 1 | Append integer as text |
 | `__log_int__(value)` | 1 | Log integer to console |
@@ -1274,7 +1274,7 @@ The WASM backend provides intrinsics for canvas-based graphics with animation su
 
 | Intrinsic | Args | Description |
 |-----------|------|-------------|
-| `__canvas_init__(width, height)` | 2 | Initialize canvas and return RGBA pixel buffer pointer |
+| `__canvas_init__(width height)` | 2 | Initialize canvas and return RGBA pixel buffer pointer |
 | `__canvas_width__()` | 0 | Get current canvas width |
 | `__canvas_height__()` | 0 | Get current canvas height |
 | `__canvas_present__()` | 0 | Copy pixel buffer to canvas (display frame) |
@@ -1286,7 +1286,7 @@ The WASM backend provides intrinsics for canvas-based graphics with animation su
 
 **Usage:**
 
-1. Call `__canvas_init__(width, height)` to create a canvas and get a pointer to the pixel buffer
+1. Call `__canvas_init__(width height)` to create a canvas and get a pointer to the pixel buffer
 2. Optionally call `__canvas_set_aspect_lock__(true)` to keep the displayed canvas centered at its current aspect ratio as the browser window resizes
 3. Call `__canvas_set_aspect_lock__(false)` later if you want to return to unrestricted fullscreen scaling
 4. Write RGBA pixels (4 bytes per pixel) to the buffer: `[R, G, B, A, R, G, B, A, ...]`
@@ -1343,9 +1343,9 @@ The WASM backend also exposes keyboard state using browser `KeyboardEvent.code` 
 
 | Intrinsic | Args | Description |
 |-----------|------|-------------|
-| `__key_down__(code_ptr, code_len)` | 2 | Get whether a key is currently held down |
-| `__key_pressed__(code_ptr, code_len)` | 2 | Get whether a key transitioned from up to down since the last animation frame |
-| `__key_released__(code_ptr, code_len)` | 2 | Get whether a key transitioned from down to up since the last animation frame |
+| `__key_down__(code_ptr code_len)` | 2 | Get whether a key is currently held down |
+| `__key_pressed__(code_ptr code_len)` | 2 | Get whether a key transitioned from up to down since the last animation frame |
+| `__key_released__(code_ptr code_len)` | 2 | Get whether a key transitioned from down to up since the last animation frame |
 
 These intrinsics are intended for animated WASM programs running under canvas or WebGL, where `main()` is called once per frame.
 
@@ -1355,18 +1355,18 @@ The WASM backend also provides a minimal WebGL path for fullscreen fragment shad
 
 | Intrinsic | Args | Description |
 |-----------|------|-------------|
-| `__webgl_init__(shader_ptr, shader_len, width, height)` | 4 | Compile a fragment shader string and initialize a fullscreen WebGL canvas |
-| `__webgl_uniform1i__(name_ptr, name_len, value)` | 3 | Set an `int` uniform on the active shader program |
-| `__webgl_uniform2i__(name_ptr, name_len, x, y)` | 4 | Set an `ivec2` uniform on the active shader program |
-| `__webgl_uniform1iv__(name_ptr, name_len, values_ptr, count)` | 4 | Set an `int[count]` uniform array from udewy memory |
-| `__webgl_uniform2iv__(name_ptr, name_len, values_ptr, count)` | 4 | Set an `ivec2[count]` uniform array from udewy memory |
+| `__webgl_init__(shader_ptr shader_len width height)` | 4 | Compile a fragment shader string and initialize a fullscreen WebGL canvas |
+| `__webgl_uniform1i__(name_ptr name_len value)` | 3 | Set an `int` uniform on the active shader program |
+| `__webgl_uniform2i__(name_ptr name_len x y)` | 4 | Set an `ivec2` uniform on the active shader program |
+| `__webgl_uniform1iv__(name_ptr name_len values_ptr count)` | 4 | Set an `int[count]` uniform array from udewy memory |
+| `__webgl_uniform2iv__(name_ptr name_len values_ptr count)` | 4 | Set an `ivec2[count]` uniform array from udewy memory |
 | `__webgl_render__()` | 0 | Draw the active fullscreen shader |
 
 **Usage:**
 
 1. Store your fragment shader source as a normal udewy string
 2. Use `__load__(shader - 8)` to recover its byte length
-3. Call `__webgl_init__(shader, shader_len, width, height)` once
+3. Call `__webgl_init__(shader shader_len width height)` once
 4. Update uniforms each frame with `__webgl_uniform1i__`, `__webgl_uniform2i__`, `__webgl_uniform1iv__`, or `__webgl_uniform2iv__`
 5. Call `__webgl_render__()` to draw
 
