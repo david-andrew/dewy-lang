@@ -352,6 +352,33 @@ def emit_intrinsic(backend, name: str, num_args: int) -> None:
     backend.emit_intrinsic(name, num_args)
 
 
+def parse_static_alloca_size(toks: list, idx: int, src: str, const_table: list, ctx: dict) -> tuple[int, int]:
+    """Parse the single compile-time size argument to __static_alloca__."""
+    if idx >= len(toks):
+        raise SyntaxError("__static_alloca__ expects one constant size argument")
+
+    kind = tok_kind(toks, idx)
+    if kind == t0.TK_NUMBER:
+        size = tok_value(toks, idx)
+        idx = idx + 1
+    elif kind == t0.TK_IDENT:
+        name_start = tok_name_start(toks, idx)
+        name_len = tok_name_len(toks, idx)
+        found, size = const_lookup(const_table, src, name_start, name_len, ctx.get("builtin_consts"))
+        if not found:
+            raise SyntaxError(f"__static_alloca__ size must be a compile-time constant at {tok_loc(toks, idx)}")
+        idx = idx + 1
+    else:
+        raise SyntaxError(f"__static_alloca__ size must be a compile-time constant at {tok_loc(toks, idx)}")
+
+    if idx >= len(toks) or tok_kind(toks, idx) != t0.TK_RIGHT_PAREN:
+        raise SyntaxError(f"__static_alloca__ expects exactly one constant size argument at {tok_loc(toks, idx)}")
+    if size < 0:
+        raise SyntaxError(f"__static_alloca__ size must be non-negative at {tok_loc(toks, idx - 1)}")
+
+    return size, idx + 1
+
+
 # ============================================================================
 # Expression parsing
 # ============================================================================
@@ -431,6 +458,13 @@ def parse_atom(toks: list, idx: int, src: str, backend,
         name_start = tok_name_start(toks, idx)
         name_len = tok_name_len(toks, idx)
         idx = idx + 1
+        name = get_name(src, name_start, name_len)
+
+        if name == "__static_alloca__":
+            size, idx = parse_static_alloca_size(toks, idx, src, const_table, ctx)
+            label_id = backend.intern_static(size)
+            backend.push_static_ref(label_id)
+            return idx
         
         arg_count = 0
         while idx < len(toks) and tok_kind(toks, idx) != t0.TK_RIGHT_PAREN:
@@ -440,7 +474,6 @@ def parse_atom(toks: list, idx: int, src: str, backend,
         
         idx = expect(toks, idx, t0.TK_RIGHT_PAREN, src)
         
-        name = get_name(src, name_start, name_len)
         if is_intrinsic(backend, name):
             if arg_count > 0:
                 backend.restore_value()
@@ -1037,6 +1070,18 @@ def parse_program(toks: list, src: str, backend,
                 
                 arr_label_id = backend.intern_array(elem_directives)
                 label_id = backend.define_global(0, f"{backend._array_labels[arr_label_id]}+8")
+                global_declare(global_table, name_start, name_len, label_id)
+            elif tok_kind(toks, idx) == t0.TK_IDENT_CALL:
+                call_name_start = tok_name_start(toks, idx)
+                call_name_len = tok_name_len(toks, idx)
+                call_name = get_name(src, call_name_start, call_name_len)
+                if call_name != "__static_alloca__":
+                    raise SyntaxError(f"Global variables must have constant initializers at {tok_loc(toks, idx)}")
+
+                idx = idx + 1
+                size, idx = parse_static_alloca_size(toks, idx, src, const_table, ctx)
+                static_label_id = backend.intern_static(size)
+                label_id = backend.define_global(0, backend._static_labels[static_label_id])
                 global_declare(global_table, name_start, name_len, label_id)
             else:
                 raise SyntaxError(f"Global variables must have constant initializers at {tok_loc(toks, idx)}")

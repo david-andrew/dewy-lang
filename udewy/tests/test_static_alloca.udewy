@@ -1,0 +1,34 @@
+const BUF_SIZE:int = 16
+
+let global_buf:int = __static_alloca__(BUF_SIZE)
+
+let get_local_static = ():>int => {
+    return __static_alloca__(BUF_SIZE)
+}
+
+let main = ():>int => {
+    let a:int = get_local_static()
+    let b:int = get_local_static()
+
+    if a not=? b {
+        return 1
+    }
+    if a =? global_buf {
+        return 2
+    }
+    if __load_u64__(a) not=? 0 {
+        return 3
+    }
+
+    __store_u64__(123 a)
+    if __load_u64__(a) not=? 123 {
+        return 4
+    }
+
+    __store_u64__(456 global_buf)
+    if __load_u64__(global_buf) not=? 456 {
+        return 5
+    }
+
+    return 0
+}

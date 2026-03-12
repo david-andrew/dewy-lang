@@ -62,6 +62,8 @@ class Wasm32Backend(Backend):
         self._string_labels: dict[int, str] = {}
         self._array_offsets: dict[int, int] = {}
         self._array_labels: dict[int, str] = {}
+        self._static_offsets: dict[int, int] = {}
+        self._static_labels: dict[int, str] = {}
         
         # Track which functions are defined
         self._defined_fns: set[int] = set()
@@ -241,7 +243,7 @@ class Wasm32Backend(Backend):
             actual_value = value
         elif isinstance(value, str):
             # Parse the reference to extract the actual offset
-            # Format: ".strN+8" or ".arrN+8" or ".globalN"
+            # Format: ".strN+8", ".arrN+8", or a raw static/global label
             if "+8" in value:
                 # It's a reference to string/array data (skip length prefix)
                 ref_part = value.replace("+8", "")
@@ -258,7 +260,17 @@ class Wasm32Backend(Backend):
                     else:
                         actual_value = 0
             else:
-                actual_value = 0
+                for sid, slabel in self._static_labels.items():
+                    if slabel == value:
+                        actual_value = self._static_offsets[sid]
+                        break
+                else:
+                    for gid, glabel in self._global_labels.items():
+                        if glabel == value:
+                            actual_value = self._global_offsets[gid]
+                            break
+                    else:
+                        actual_value = 0
         else:
             actual_value = 0
         
@@ -267,6 +279,17 @@ class Wasm32Backend(Backend):
         self._global_offsets[label_id] = offset
         self._global_labels[label_id] = f".global{label_id}"
         
+        return label_id
+
+    def intern_static(self, size: int) -> int:
+        """Add a zero-initialized static storage block to the data section."""
+        label_id = self._next_label
+        self._next_label += 1
+
+        offset = self._alloc_data(b"\x00" * size)
+        self._static_offsets[label_id] = offset
+        self._static_labels[label_id] = f".static{label_id}"
+
         return label_id
     
     def push_string_ref(self, label_id: int) -> None:
@@ -282,6 +305,11 @@ class Wasm32Backend(Backend):
     def push_global_ref(self, label_id: int) -> None:
         """Push address of global onto value stack."""
         offset = self._global_offsets[label_id]
+        self._emit(f"i64.const {offset}")
+
+    def push_static_ref(self, label_id: int) -> None:
+        """Push address of raw static storage onto value stack."""
+        offset = self._static_offsets[label_id]
         self._emit(f"i64.const {offset}")
     
     def load_global(self, label_id: int) -> None:
@@ -818,7 +846,7 @@ class Wasm32Backend(Backend):
         "__store_u8__", "__store_u16__", "__store_u32__", "__store_u64__",
         "__load_i8__", "__load_i16__", "__load_i32__", "__load_i64__",
         "__store_i8__", "__store_i16__", "__store_i32__", "__store_i64__",
-        "__load__", "__store__", "__alloca__",
+        "__load__", "__store__", "__alloca__", "__static_alloca__",
         "__signed_shr__",
         "__unsigned_idiv__", "__unsigned_mod__",
         "__unsigned_lt__", "__unsigned_gt__", "__unsigned_lte__", "__unsigned_gte__",

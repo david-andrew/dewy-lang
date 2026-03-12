@@ -74,6 +74,15 @@ class Backend(ABC):
         Returns a handle/label_id for the global.
         """
     
+    @abstractmethod
+    def intern_static(self, size: int) -> int:
+        """
+        Add a zero-initialized static storage block to the data section.
+
+        The block has no length prefix and is returned as raw writable storage.
+        Returns a handle/label_id that can be used with push_static_ref.
+        """
+    
     
     @abstractmethod
     def push_string_ref(self, label_id: int) -> None:
@@ -86,6 +95,10 @@ class Backend(ABC):
     @abstractmethod
     def push_global_ref(self, label_id: int) -> None:
         """Push address of global onto value stack."""
+
+    @abstractmethod
+    def push_static_ref(self, label_id: int) -> None:
+        """Push address of raw static storage onto value stack."""
     
     @abstractmethod
     def load_global(self, label_id: int) -> None:

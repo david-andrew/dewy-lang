@@ -45,6 +45,7 @@ class X86_64Backend(Backend):
         self._global_labels: dict[int, str] = {}
         self._string_labels: dict[int, str] = {}
         self._array_labels: dict[int, str] = {}
+        self._static_labels: dict[int, str] = {}
     
     def _emit(self, instr: str) -> None:
         """Emit an instruction."""
@@ -145,6 +146,18 @@ class X86_64Backend(Backend):
         self._emit_data(f"    .quad {value}")
         
         return label_id
+
+    def intern_static(self, size: int) -> int:
+        """Add a zero-initialized static storage block to the data section."""
+        label_id = self._next_label
+        label = self._new_label("static")
+        self._static_labels[label_id] = label
+
+        self._emit_data_label(label)
+        if size > 0:
+            self._emit_data(f"    .zero {size}")
+
+        return label_id
     
     def push_string_ref(self, label_id: int) -> None:
         """Push address of string data onto value stack."""
@@ -159,6 +172,11 @@ class X86_64Backend(Backend):
     def push_global_ref(self, label_id: int) -> None:
         """Push address of global onto value stack."""
         label = self._global_labels[label_id]
+        self._emit(f"leaq {label}(%rip), %rax")
+
+    def push_static_ref(self, label_id: int) -> None:
+        """Push address of raw static storage onto value stack."""
+        label = self._static_labels[label_id]
         self._emit(f"leaq {label}(%rip), %rax")
     
     def load_global(self, label_id: int) -> None:
@@ -596,7 +614,7 @@ class X86_64Backend(Backend):
         "__store_u8__", "__store_u16__", "__store_u32__", "__store_u64__",
         "__load_i8__", "__load_i16__", "__load_i32__", "__load_i64__",
         "__store_i8__", "__store_i16__", "__store_i32__", "__store_i64__",
-        "__load__", "__store__", "__alloca__",
+        "__load__", "__store__", "__alloca__", "__static_alloca__",
         "__signed_shr__",
         "__unsigned_idiv__", "__unsigned_mod__",
         "__unsigned_lt__", "__unsigned_gt__", "__unsigned_lte__", "__unsigned_gte__",

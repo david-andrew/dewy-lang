@@ -682,10 +682,13 @@ These intrinsics provide direct memory access:
 | `__store_i32__(val, addr)` | Store low 32 bits of `val` to `addr`, return 0 |
 | `__store_i64__(val, addr)` | Store 64-bit `val` to `addr`, return 0 |
 | `__alloca__(size)` | Allocate `size` bytes of temporary storage and return an 8-byte-aligned address |
+| `__static_alloca__(size)` | Allocate `size` bytes of writable static storage and return its address |
 
 Signed and unsigned 64-bit loads/stores are identical at runtime; both spellings exist to make programmer intent explicit. `__load__`/`__store__` are convenience shorthands for the unsigned 64-bit forms. For stores, signedness affects only intent and documentation; the stored bit pattern is the low `N` bits of `val`.
 
 `__alloca__(size)` reserves temporary storage whose lifetime lasts until the current function returns. The returned address is aligned to 8 bytes, and the reserved size is rounded up to a multiple of 8. Native backends typically implement this with function-local stack storage; the wasm backend uses a function-scoped stack region in linear memory.
+
+`__static_alloca__(size)` reserves writable storage in the program's static data area. The storage is zero-initialized, has a single shared instance for the entire program, and is not tied to any function call frame. Its `size` argument must be a compile-time constant, which may be either a number literal or an identifier that resolves to a constant in the same way array literal elements do.
 
 ## 2.2 Arithmetic Operations
 
