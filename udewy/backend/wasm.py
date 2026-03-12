@@ -91,8 +91,7 @@ class Wasm32Backend(Backend):
             '(import "env" "host_canvas_width" (func $host_canvas_width (result i64)))',
             '(import "env" "host_canvas_height" (func $host_canvas_height (result i64)))',
             '(import "env" "host_canvas_present" (func $host_canvas_present (result i64)))',
-            '(import "env" "host_canvas_lock_aspect" (func $host_canvas_lock_aspect (result i64)))',
-            '(import "env" "host_canvas_unlock_aspect" (func $host_canvas_unlock_aspect (result i64)))',
+            '(import "env" "host_canvas_set_aspect_lock" (func $host_canvas_set_aspect_lock (param i64) (result i64)))',
             '(import "env" "host_frame_count" (func $host_frame_count (result i64)))',
             '(import "env" "host_frame_time" (func $host_frame_time (result i64)))',
             '(import "env" "host_window_width" (func $host_window_width (result i64)))',
@@ -213,7 +212,7 @@ class Wasm32Backend(Backend):
         elem_bytes = b""
         for elem in elements:
             if isinstance(elem, int):
-                elem_bytes += elem.to_bytes(8, 'little', signed=True)
+                elem_bytes += (elem & 0xFFFF_FFFF_FFFF_FFFF).to_bytes(8, 'little', signed=False)
             elif isinstance(elem, str) and "+8" in elem:
                 # String/array reference
                 ref_part = elem.replace("+8", "")
@@ -222,7 +221,7 @@ class Wasm32Backend(Backend):
                     if slabel == ref_part:
                         ref_offset = self._string_offsets[sid] + 8
                         break
-                elem_bytes += ref_offset.to_bytes(8, 'little', signed=True)
+                elem_bytes += (ref_offset & 0xFFFF_FFFF_FFFF_FFFF).to_bytes(8, 'little', signed=False)
             else:
                 elem_bytes += b"\x00" * 8
         
@@ -263,7 +262,7 @@ class Wasm32Backend(Backend):
         else:
             actual_value = 0
         
-        data = actual_value.to_bytes(8, 'little', signed=True)
+        data = (actual_value & 0xFFFF_FFFF_FFFF_FFFF).to_bytes(8, 'little', signed=False)
         offset = self._alloc_data(data)
         self._global_offsets[label_id] = offset
         self._global_labels[label_id] = f".global{label_id}"
@@ -657,13 +656,9 @@ class Wasm32Backend(Backend):
         """Emit a call to host_canvas_present(). Stack: [] -> [0]"""
         self._emit("call $host_canvas_present")
 
-    def emit_canvas_lock_aspect(self) -> None:
-        """Emit a call to host_canvas_lock_aspect(). Stack: [] -> [0]"""
-        self._emit("call $host_canvas_lock_aspect")
-
-    def emit_canvas_unlock_aspect(self) -> None:
-        """Emit a call to host_canvas_unlock_aspect(). Stack: [] -> [0]"""
-        self._emit("call $host_canvas_unlock_aspect")
+    def emit_canvas_set_aspect_lock(self) -> None:
+        """Emit a call to host_canvas_set_aspect_lock(enabled). Stack: [enabled] -> [0]"""
+        self._emit("call $host_canvas_set_aspect_lock")
     
     def emit_frame_count(self) -> None:
         """Emit a call to host_frame_count(). Stack: [] -> [frame_number]"""
@@ -834,7 +829,7 @@ class Wasm32Backend(Backend):
         "__dom_set_text__", "__dom_append__", "__dom_clear__",
         "__dom_append_int__", "__log_int__",
         "__canvas_init__", "__canvas_width__", "__canvas_height__",
-        "__canvas_present__", "__canvas_lock_aspect__", "__canvas_unlock_aspect__", "__frame_count__", "__frame_time__",
+        "__canvas_present__", "__canvas_set_aspect_lock__", "__frame_count__", "__frame_time__",
         "__window_width__", "__window_height__",
         "__pointer_x__", "__pointer_y__", "__pointer_down__",
         "__key_down__", "__key_pressed__", "__key_released__",
@@ -924,10 +919,8 @@ class Wasm32Backend(Backend):
             self.emit_canvas_height()
         elif name == "__canvas_present__":
             self.emit_canvas_present()
-        elif name == "__canvas_lock_aspect__":
-            self.emit_canvas_lock_aspect()
-        elif name == "__canvas_unlock_aspect__":
-            self.emit_canvas_unlock_aspect()
+        elif name == "__canvas_set_aspect_lock__":
+            self.emit_canvas_set_aspect_lock()
         elif name == "__frame_count__":
             self.emit_frame_count()
         elif name == "__frame_time__":
@@ -1620,12 +1613,12 @@ const imports = {
             
             return 0n;
         },
-        host_canvas_lock_aspect: () => {
-            lockCanvasAspect();
-            return 0n;
-        },
-        host_canvas_unlock_aspect: () => {
-            unlockCanvasAspect();
+        host_canvas_set_aspect_lock: (enabled) => {
+            if (Number(enabled) !== 0) {
+                lockCanvasAspect();
+            } else {
+                unlockCanvasAspect();
+            }
             return 0n;
         },
         host_frame_count: () => BigInt(frameCount),

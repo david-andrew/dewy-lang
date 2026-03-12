@@ -61,7 +61,7 @@ let player_mode:int = 1
 let current_stage:int = 0
 let current_pace:int = 1
 let menu_row:int = 0
-let aspect_locked:int = 1
+let aspect_locked:int = true
 let serve_side:int = 0
 let winner_side:int = 0
 let serve_timer:int = 0
@@ -293,19 +293,15 @@ let apply_pace_settings = (pace:int):>int => {
 
 let apply_aspect_lock = (lock:int):>int => {
     aspect_locked = lock
-    if aspect_locked =? 1 {
-        __canvas_lock_aspect__()
-    } else {
-        __canvas_unlock_aspect__()
-    }
+    __canvas_set_aspect_lock__(aspect_locked)
     return 0
 }
 
 let toggle_aspect_lock = ():>int => {
-    if aspect_locked =? 1 {
-        apply_aspect_lock(0)
+    if aspect_locked {
+        apply_aspect_lock(false)
     } else {
-        apply_aspect_lock(1)
+        apply_aspect_lock(true)
     }
     return 0
 }
@@ -1099,7 +1095,7 @@ let draw_title = ():>int => {
     if ((__frame_count__() // 24) % 2) =? 0 {
         draw_text_center(text_start 172 1 255 255 255)
     }
-    if aspect_locked =? 1 {
+    if aspect_locked {
         draw_text(text_aspect_lock 236 8 1 255 255 255)
     } else {
         draw_text(text_aspect_free 248 8 1 255 255 255)
