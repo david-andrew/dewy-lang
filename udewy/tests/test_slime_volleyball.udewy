@@ -8,6 +8,17 @@ const STATE_GAME_OVER:int = 3
 const MODE_CPU:int = 1
 const MODE_TWO_PLAYER:int = 2
 
+const MENU_MODE:int = 0
+const MENU_STAGE:int = 1
+const MENU_PACE:int = 2
+
+const STAGE_EARTH:int = 0
+const STAGE_MOON:int = 1
+
+const PACE_FULL:int = 0
+const PACE_CALM:int = 1
+const PACE_SLOW:int = 2
+
 const WIDTH:int = 320
 const HEIGHT:int = 180
 const GROUND_Y:int = 152
@@ -16,44 +27,68 @@ const NET_HALF_W:int = 4
 const NET_H:int = 38
 const SLIME_R:int = 18
 const BALL_R:int = 6
+const PHYS_SCALE:int = 6
 const SLIME_SPEED:int = 3
-const SLIME_JUMP:int = 11
-const PLAYER_GRAVITY:int = 1
-const BALL_GRAVITY:int = 0
+const SLIME_JUMP_FP:int = 66
+const EARTH_PLAYER_GRAVITY_FP:int = 6
+const EARTH_BALL_GRAVITY_FP:int = 6
+const MOON_PLAYER_GRAVITY_FP:int = 1
+const MOON_BALL_GRAVITY_FP:int = 1
+const JUMP_HEIGHT_FP:int = 363
+const SERVE_BALL_VY_FP:int = 48
+const HIT_BALL_VY_FP:int = 42
 const SCORE_TO_WIN:int = 5
 const SERVE_DELAY:int = 35
+const JUMP_BUFFER_FRAMES:int = 4
 
 let canvas_buf:int = 0
 let audio_buf:int = 0
 let initialized:int = 0
 let game_state:int = 0
 let selected_mode:int = 1
+let selected_stage:int = 0
+let selected_pace:int = 1
 let player_mode:int = 1
+let current_stage:int = 0
+let current_pace:int = 1
+let menu_row:int = 0
 let serve_side:int = 0
 let winner_side:int = 0
 let serve_timer:int = 0
 let impact_timer:int = 0
 let point_flash_timer:int = 0
+let player_gravity_fp:int = 6
+let ball_gravity_fp:int = 6
+let jump_velocity_fp:int = 66
+let sim_rate_num:int = 3
+let sim_rate_den:int = 4
+let sim_rate_accum:int = 0
+let left_jump_buffer:int = 0
+let right_jump_buffer:int = 0
 
 let left_score:int = 0
 let right_score:int = 0
 
 let left_x:int = 80
 let left_y:int = 152
-let left_vy:int = 0
+let left_y_fp:int = 912
+let left_vy_fp:int = 0
 let left_move_dir:int = 0
 
 let right_x:int = 240
 let right_y:int = 152
-let right_vy:int = 0
+let right_y_fp:int = 912
+let right_vy_fp:int = 0
 let right_move_dir:int = 0
 
 let ball_x:int = 90
 let ball_y:int = 84
 let ball_vx:int = 0
-let ball_vy:int = 0
+let ball_y_fp:int = 504
+let ball_vy_fp:int = 0
 let ball_prev_x:int = 90
 let ball_prev_y:int = 84
+let ball_prev_y_fp:int = 504
 
 let font_rows:int = [
     0 0 0 0 0
@@ -97,17 +132,28 @@ let font_rows:int = [
 
 let key_a:int = "KeyA"
 let key_d:int = "KeyD"
+let key_s:int = "KeyS"
 let key_w:int = "KeyW"
 let key_left:int = "ArrowLeft"
 let key_right:int = "ArrowRight"
 let key_up:int = "ArrowUp"
+let key_down_code:int = "ArrowDown"
 let key_space:int = "Space"
 let key_enter:int = "Enter"
+let key_escape:int = "Escape"
 
 let text_title_1:int = "SLIME"
 let text_title_2:int = "VOLLEY"
+let text_mode:int = "MODE"
+let text_stage:int = "STAGE"
+let text_pace:int = "PACE"
 let text_menu_1:int = "1P CPU"
 let text_menu_2:int = "2P"
+let text_stage_earth:int = "EARTH"
+let text_stage_moon:int = "MOON"
+let text_pace_full:int = "FULL"
+let text_pace_calm:int = "CALM"
+let text_pace_slow:int = "SLOW"
 let text_start:int = "SPACE START"
 let text_left_wins:int = "LEFT WINS"
 let text_right_wins:int = "RIGHT WINS"
@@ -154,6 +200,58 @@ let abs_int = (v:int):>int => {
         return 0 - v
     }
     return v
+}
+
+let isqrt = (n:int):>int => {
+    let bit:int = 1
+    loop (bit * bit) <=? n {
+        bit = bit + 1
+    }
+    return bit - 1
+}
+
+let to_fp = (value:int):>int => {
+    return value * PHYS_SCALE
+}
+
+let from_fp = (value:int):>int => {
+    return value // PHYS_SCALE
+}
+
+let sync_positions = ():>int => {
+    left_y = from_fp(left_y_fp)
+    right_y = from_fp(right_y_fp)
+    ball_y = from_fp(ball_y_fp)
+    ball_prev_y = from_fp(ball_prev_y_fp)
+    return 0
+}
+
+let apply_stage_settings = (stage:int):>int => {
+    current_stage = stage
+    player_gravity_fp = EARTH_PLAYER_GRAVITY_FP
+    ball_gravity_fp = EARTH_BALL_GRAVITY_FP
+    if current_stage =? STAGE_MOON {
+        player_gravity_fp = MOON_PLAYER_GRAVITY_FP
+        ball_gravity_fp = MOON_BALL_GRAVITY_FP
+    }
+    jump_velocity_fp = isqrt((player_gravity_fp * JUMP_HEIGHT_FP * 2))
+    return 0
+}
+
+let apply_pace_settings = (pace:int):>int => {
+    current_pace = pace
+    sim_rate_num = 3
+    sim_rate_den = 4
+    if current_pace =? PACE_CALM {
+        sim_rate_num = 1
+        sim_rate_den = 2
+    }
+    if current_pace =? PACE_SLOW {
+        sim_rate_num = 1
+        sim_rate_den = 3
+    }
+    sim_rate_accum = 0
+    return 0
 }
 
 let arr_get = (arr:int idx:int):>int => {
@@ -347,14 +445,17 @@ let play_sound = (kind:int):>int => {
 }
 
 let set_round_positions = ():>int => {
+    let ground_fp:int = to_fp(GROUND_Y)
     left_x = 80
     left_y = GROUND_Y
-    left_vy = 0
+    left_y_fp = ground_fp
+    left_vy_fp = 0
     left_move_dir = 0
 
     right_x = 240
     right_y = GROUND_Y
-    right_vy = 0
+    right_y_fp = ground_fp
+    right_vy_fp = 0
     right_move_dir = 0
 
     if serve_side =? 0 {
@@ -364,15 +465,22 @@ let set_round_positions = ():>int => {
     }
     ball_y = GROUND_Y - SLIME_R - BALL_R - 4
     ball_vx = 0
-    ball_vy = 0
+    ball_y_fp = to_fp(ball_y)
+    ball_prev_y_fp = ball_y_fp
+    ball_vy_fp = 0
     serve_timer = SERVE_DELAY
     impact_timer = 0
     point_flash_timer = 12
+    left_jump_buffer = 0
+    right_jump_buffer = 0
+    sync_positions()
     return 0
 }
 
 let start_match = (mode:int):>int => {
     player_mode = mode
+    apply_stage_settings(selected_stage)
+    apply_pace_settings(selected_pace)
     left_score = 0
     right_score = 0
     winner_side = 0
@@ -380,6 +488,26 @@ let start_match = (mode:int):>int => {
     game_state = STATE_SERVE
     set_round_positions()
     play_sound(3)
+    return 0
+}
+
+let sample_input_buffers = ():>int => {
+    if key_pressed(key_w) {
+        left_jump_buffer = JUMP_BUFFER_FRAMES
+    }
+    if key_pressed(key_up) {
+        right_jump_buffer = JUMP_BUFFER_FRAMES
+    }
+    return 0
+}
+
+let decay_input_buffers = ():>int => {
+    if left_jump_buffer >? 0 {
+        left_jump_buffer = left_jump_buffer - 1
+    }
+    if right_jump_buffer >? 0 {
+        right_jump_buffer = right_jump_buffer - 1
+    }
     return 0
 }
 
@@ -412,6 +540,7 @@ let award_point = (side:int):>int => {
 }
 
 let update_left_player = ():>int => {
+    let ground_fp:int = to_fp(GROUND_Y)
     left_move_dir = 0
     if key_down(key_a) {
         left_move_dir = 0 - 1
@@ -420,8 +549,9 @@ let update_left_player = ():>int => {
         left_move_dir = 1
     }
     if left_y =? GROUND_Y {
-        if key_pressed(key_w) {
-            left_vy = 0 - SLIME_JUMP
+        if left_jump_buffer >? 0 {
+            left_vy_fp = 0 - jump_velocity_fp
+            left_jump_buffer = 0
             play_sound(1)
         }
     }
@@ -434,16 +564,19 @@ let update_left_player = ():>int => {
         left_x = NET_X - NET_HALF_W - SLIME_R
     }
 
-    left_y = left_y + left_vy
-    left_vy = left_vy + PLAYER_GRAVITY
-    if left_y >? GROUND_Y {
+    left_y_fp = left_y_fp + left_vy_fp
+    left_vy_fp = left_vy_fp + player_gravity_fp
+    if left_y_fp >? ground_fp {
+        left_y_fp = ground_fp
         left_y = GROUND_Y
-        left_vy = 0
+        left_vy_fp = 0
     }
+    left_y = from_fp(left_y_fp)
     return 0
 }
 
 let update_right_ai = ():>int => {
+    let ground_fp:int = to_fp(GROUND_Y)
     right_move_dir = 0
     let target_x:int = 240
     if ball_x >? NET_X {
@@ -466,8 +599,8 @@ let update_right_ai = ():>int => {
         if ball_x >? (NET_X + 10) {
             if abs_int(ball_x - right_x) <? 26 {
                 if ball_y <? (right_y - 8) {
-                    if ball_vy >? 0 {
-                        right_vy = 0 - SLIME_JUMP
+                    if ball_vy_fp >? 0 {
+                        right_vy_fp = 0 - jump_velocity_fp
                         play_sound(1)
                     }
                 }
@@ -483,16 +616,19 @@ let update_right_ai = ():>int => {
         right_x = WIDTH - SLIME_R
     }
 
-    right_y = right_y + right_vy
-    right_vy = right_vy + PLAYER_GRAVITY
-    if right_y >? GROUND_Y {
+    right_y_fp = right_y_fp + right_vy_fp
+    right_vy_fp = right_vy_fp + player_gravity_fp
+    if right_y_fp >? ground_fp {
+        right_y_fp = ground_fp
         right_y = GROUND_Y
-        right_vy = 0
+        right_vy_fp = 0
     }
+    right_y = from_fp(right_y_fp)
     return 0
 }
 
 let update_right_player = ():>int => {
+    let ground_fp:int = to_fp(GROUND_Y)
     right_move_dir = 0
     if key_down(key_left) {
         right_move_dir = 0 - 1
@@ -501,8 +637,9 @@ let update_right_player = ():>int => {
         right_move_dir = 1
     }
     if right_y =? GROUND_Y {
-        if key_pressed(key_up) {
-            right_vy = 0 - SLIME_JUMP
+        if right_jump_buffer >? 0 {
+            right_vy_fp = 0 - jump_velocity_fp
+            right_jump_buffer = 0
             play_sound(1)
         }
     }
@@ -515,12 +652,14 @@ let update_right_player = ():>int => {
         right_x = WIDTH - SLIME_R
     }
 
-    right_y = right_y + right_vy
-    right_vy = right_vy + PLAYER_GRAVITY
-    if right_y >? GROUND_Y {
+    right_y_fp = right_y_fp + right_vy_fp
+    right_vy_fp = right_vy_fp + player_gravity_fp
+    if right_y_fp >? ground_fp {
+        right_y_fp = ground_fp
         right_y = GROUND_Y
-        right_vy = 0
+        right_vy_fp = 0
     }
+    right_y = from_fp(right_y_fp)
     return 0
 }
 
@@ -531,6 +670,7 @@ let collide_ball_with_slime = (slime_x:int slime_y:int slime_push:int):>int => {
     if ball_y <=? slime_y {
         if ((dx * dx) + (dy * dy)) <=? (total_r * total_r) {
             ball_y = slime_y - total_r
+            ball_y_fp = to_fp(ball_y)
             ball_vx = (dx // 3) + slime_push
             if ball_vx =? 0 {
                 if dx <? 0 {
@@ -539,7 +679,7 @@ let collide_ball_with_slime = (slime_x:int slime_y:int slime_push:int):>int => {
                     ball_vx = 1
                 }
             }
-            ball_vy = 0 - (7 + (abs_int(dx) // 4))
+            ball_vy_fp = 0 - ((7 + (abs_int(dx) // 4)) * PHYS_SCALE)
             impact_timer = 4
             play_sound(2)
             return 1
@@ -550,11 +690,13 @@ let collide_ball_with_slime = (slime_x:int slime_y:int slime_push:int):>int => {
 
 let update_ball = ():>int => {
     ball_prev_x = ball_x
+    ball_prev_y_fp = ball_y_fp
     ball_prev_y = ball_y
 
     ball_x = ball_x + ball_vx
-    ball_y = ball_y + ball_vy
-    ball_vy = ball_vy + BALL_GRAVITY
+    ball_y_fp = ball_y_fp + ball_vy_fp
+    ball_vy_fp = ball_vy_fp + ball_gravity_fp
+    ball_y = from_fp(ball_y_fp)
 
     if ball_x <? BALL_R {
         ball_x = BALL_R
@@ -571,9 +713,10 @@ let update_ball = ():>int => {
         }
     }
     if ball_y <? BALL_R {
+        ball_y_fp = to_fp(BALL_R)
         ball_y = BALL_R
-        if ball_vy <? 0 {
-            ball_vy = 0 - ball_vy
+        if ball_vy_fp <? 0 {
+            ball_vy_fp = 0 - ball_vy_fp
             play_sound(2)
         }
     }
@@ -586,9 +729,10 @@ let update_ball = ():>int => {
             if (ball_y + BALL_R) >=? net_top {
                 if (ball_y - BALL_R) <=? GROUND_Y {
                     if (ball_prev_y + BALL_R) <=? net_top {
+                        ball_y_fp = to_fp(net_top - BALL_R)
                         ball_y = net_top - BALL_R
-                        if ball_vy >? 0 {
-                            ball_vy = 0 - ball_vy
+                        if ball_vy_fp >? 0 {
+                            ball_vy_fp = 0 - ball_vy_fp
                         }
                     } else {
                         if ball_x <? NET_X {
@@ -629,17 +773,47 @@ let update_ball = ():>int => {
 }
 
 let update_title = ():>int => {
-    if key_pressed(key_a) {
-        selected_mode = MODE_CPU
+    if key_pressed(key_w) or key_pressed(key_up) {
+        menu_row = menu_row - 1
+        if menu_row <? MENU_MODE {
+            menu_row = MENU_PACE
+        }
     }
-    if key_pressed(key_left) {
-        selected_mode = MODE_CPU
+    if key_pressed(key_s) or key_pressed(key_down_code) {
+        menu_row = menu_row + 1
+        if menu_row >? MENU_PACE {
+            menu_row = MENU_MODE
+        }
     }
-    if key_pressed(key_d) {
-        selected_mode = MODE_TWO_PLAYER
+    if menu_row =? MENU_MODE {
+        if key_pressed(key_a) or key_pressed(key_left) {
+            selected_mode = MODE_CPU
+        }
+        if key_pressed(key_d) or key_pressed(key_right) {
+            selected_mode = MODE_TWO_PLAYER
+        }
     }
-    if key_pressed(key_right) {
-        selected_mode = MODE_TWO_PLAYER
+    if menu_row =? MENU_STAGE {
+        if key_pressed(key_a) or key_pressed(key_left) {
+            selected_stage = STAGE_EARTH
+        }
+        if key_pressed(key_d) or key_pressed(key_right) {
+            selected_stage = STAGE_MOON
+        }
+    }
+    if menu_row =? MENU_PACE {
+        if key_pressed(key_a) or key_pressed(key_left) {
+            selected_pace = selected_pace - 1
+            if selected_pace <? PACE_FULL {
+                selected_pace = PACE_SLOW
+            }
+        }
+        if key_pressed(key_d) or key_pressed(key_right) {
+            selected_pace = selected_pace + 1
+            if selected_pace >? PACE_SLOW {
+                selected_pace = PACE_FULL
+            }
+        }
     }
     if key_pressed(key_space) or key_pressed(key_enter) {
         start_match(selected_mode)
@@ -654,11 +828,12 @@ let update_serve = ():>int => {
         ball_x = right_x
     }
     ball_y = GROUND_Y - SLIME_R - BALL_R - 4
+    ball_y_fp = to_fp(ball_y)
 
     serve_timer = serve_timer - 1
     if serve_timer <=? 0 {
         game_state = STATE_PLAY
-        ball_vy = -8
+        ball_vy_fp = 0 - SERVE_BALL_VY_FP
         if serve_side =? 0 {
             ball_vx = 3
         } else {
@@ -680,10 +855,37 @@ let update_match = ():>int => {
     return 0
 }
 
-let draw_background = ():>int => {
-    fill_rect(0 0 WIDTH GROUND_Y 92 198 255)
-    fill_rect(0 GROUND_Y WIDTH (HEIGHT - GROUND_Y) 212 196 126)
-    fill_rect(0 (GROUND_Y - 4) WIDTH 4 230 220 160)
+let run_match_steps = ():>int => {
+    sim_rate_accum = sim_rate_accum + sim_rate_num
+    loop sim_rate_accum >=? sim_rate_den {
+        sim_rate_accum = sim_rate_accum - sim_rate_den
+        if game_state =? STATE_SERVE {
+            update_serve()
+        }
+        if game_state =? STATE_PLAY {
+            update_match()
+        }
+    }
+    return 0
+}
+
+let draw_background = (stage:int):>int => {
+    if stage =? STAGE_MOON {
+        fill_rect(0 0 WIDTH GROUND_Y 20 22 42)
+        fill_rect(0 GROUND_Y WIDTH (HEIGHT - GROUND_Y) 148 148 160)
+        fill_rect(0 (GROUND_Y - 4) WIDTH 4 188 188 196)
+        fill_rect(26 22 2 2 255 255 255)
+        fill_rect(82 44 2 2 255 255 255)
+        fill_rect(140 26 2 2 255 255 255)
+        fill_rect(210 38 2 2 255 255 255)
+        fill_rect(284 18 2 2 255 255 255)
+        fill_circle(258 42 14 226 226 214)
+    } else {
+        fill_rect(0 0 WIDTH GROUND_Y 92 198 255)
+        fill_rect(0 GROUND_Y WIDTH (HEIGHT - GROUND_Y) 212 196 126)
+        fill_rect(0 (GROUND_Y - 4) WIDTH 4 230 220 160)
+        fill_circle(258 34 14 255 238 120)
+    }
     fill_rect((NET_X - NET_HALF_W) (GROUND_Y - NET_H) (NET_HALF_W * 2) NET_H 236 236 236)
     fill_rect((NET_X - NET_HALF_W - 1) (GROUND_Y - NET_H) 1 NET_H 20 30 40)
     fill_rect((NET_X + NET_HALF_W) (GROUND_Y - NET_H) 1 NET_H 20 30 40)
@@ -700,7 +902,7 @@ let draw_ball_shadow = ():>int => {
 }
 
 let draw_match_scene = ():>int => {
-    draw_background()
+    draw_background(current_stage)
 
     if point_flash_timer >? 0 {
         fill_rect(0 0 WIDTH 10 255 255 255)
@@ -737,10 +939,10 @@ let draw_match_scene = ():>int => {
 }
 
 let draw_title = ():>int => {
-    draw_background()
+    draw_background(selected_stage)
     let t:int = __frame_time__() // 6
     let preview_x:int = (WIDTH // 2) + (sin256(t) // 12)
-    let preview_y:int = 86 + (sin256((t * 2)) // 28)
+    let preview_y:int = 84 + (sin256((t * 2)) // 28)
     fill_slime(88 GROUND_Y SLIME_R 78 188 106 1)
     fill_slime(232 GROUND_Y SLIME_R 252 112 106 (0 - 1))
     fill_circle(preview_x preview_y BALL_R 250 250 250)
@@ -748,18 +950,62 @@ let draw_title = ():>int => {
     draw_text_center(text_title_1 18 6 255 255 255)
     draw_text_center(text_title_2 52 5 24 56 92)
 
+    draw_text(text_mode 28 104 2 255 255 255)
+    if menu_row =? MENU_MODE {
+        fill_rect(20 100 130 22 255 255 255)
+        draw_text(text_mode 28 104 2 24 56 92)
+    }
     if selected_mode =? MODE_CPU {
-        fill_rect(74 104 92 18 255 255 255)
-        draw_text(text_menu_1 84 109 3 24 56 92)
-        draw_text(text_menu_2 220 109 3 255 255 255)
+        fill_rect(162 100 86 20 255 255 255)
+        draw_text(text_menu_1 172 105 3 24 56 92)
+        draw_text(text_menu_2 268 105 3 255 255 255)
     } else {
-        draw_text(text_menu_1 84 109 3 255 255 255)
-        fill_rect(212 104 34 18 255 255 255)
-        draw_text(text_menu_2 220 109 3 24 56 92)
+        draw_text(text_menu_1 172 105 3 255 255 255)
+        fill_rect(260 100 28 20 255 255 255)
+        draw_text(text_menu_2 268 105 3 24 56 92)
+    }
+
+    draw_text(text_stage 24 130 2 255 255 255)
+    if menu_row =? MENU_STAGE {
+        fill_rect(20 126 130 22 255 255 255)
+        draw_text(text_stage 24 130 2 24 56 92)
+    }
+    if selected_stage =? STAGE_EARTH {
+        fill_rect(162 126 74 20 255 255 255)
+        draw_text(text_stage_earth 170 131 3 24 56 92)
+        draw_text(text_stage_moon 252 131 3 255 255 255)
+    } else {
+        draw_text(text_stage_earth 170 131 3 255 255 255)
+        fill_rect(244 126 56 20 255 255 255)
+        draw_text(text_stage_moon 252 131 3 24 56 92)
+    }
+
+    draw_text(text_pace 32 156 2 255 255 255)
+    if menu_row =? MENU_PACE {
+        fill_rect(20 152 130 22 255 255 255)
+        draw_text(text_pace 32 156 2 24 56 92)
+    }
+    if selected_pace =? PACE_FULL {
+        fill_rect(160 152 58 20 255 255 255)
+        draw_text(text_pace_full 166 157 2 24 56 92)
+        draw_text(text_pace_calm 226 157 2 255 255 255)
+        draw_text(text_pace_slow 278 157 2 255 255 255)
+    } else {
+        if selected_pace =? PACE_CALM {
+            draw_text(text_pace_full 166 157 2 255 255 255)
+            fill_rect(220 152 50 20 255 255 255)
+            draw_text(text_pace_calm 226 157 2 24 56 92)
+            draw_text(text_pace_slow 278 157 2 255 255 255)
+        } else {
+            draw_text(text_pace_full 166 157 2 255 255 255)
+            draw_text(text_pace_calm 226 157 2 255 255 255)
+            fill_rect(272 152 48 20 255 255 255)
+            draw_text(text_pace_slow 278 157 2 24 56 92)
+        }
     }
 
     if ((__frame_count__() // 24) % 2) =? 0 {
-        draw_text_center(text_start 136 3 255 255 255)
+        draw_text_center(text_start 172 1 255 255 255)
     }
     return 0
 }
@@ -781,10 +1027,20 @@ let draw_game_over = ():>int => {
     return 0
 }
 
+let return_to_menu = ():>int => {
+    game_state = STATE_TITLE
+    selected_mode = player_mode
+    selected_stage = current_stage
+    selected_pace = current_pace
+    menu_row = MENU_MODE
+    left_jump_buffer = 0
+    right_jump_buffer = 0
+    return 0
+}
+
 let update_game_over = ():>int => {
     if key_pressed(key_space) or key_pressed(key_enter) {
-        game_state = STATE_TITLE
-        selected_mode = player_mode
+        return_to_menu()
     }
     return 0
 }
@@ -797,16 +1053,24 @@ let main = ():>int => {
         initialized = 1
     }
 
+    sample_input_buffers()
+
+    if game_state not=? STATE_TITLE {
+        if key_pressed(key_escape) {
+            return_to_menu()
+        }
+    }
+
     if game_state =? STATE_TITLE {
         update_title()
         draw_title()
     }
     if game_state =? STATE_SERVE {
-        update_serve()
+        run_match_steps()
         draw_match_scene()
     }
     if game_state =? STATE_PLAY {
-        update_match()
+        run_match_steps()
         draw_match_scene()
     }
     if game_state =? STATE_GAME_OVER {
@@ -814,6 +1078,7 @@ let main = ():>int => {
         draw_game_over()
     }
 
+    decay_input_buffers()
     __canvas_present__()
     return 0
 }
