@@ -14,6 +14,9 @@ const MENU_PACE:int = 2
 
 const STAGE_EARTH:int = 0
 const STAGE_MOON:int = 1
+const STAGE_MARS:int = 2
+const STAGE_JUPITER:int = 3
+const STAGE_STATION:int = 4
 
 const PACE_FULL:int = 0
 const PACE_CALM:int = 1
@@ -34,6 +37,12 @@ const EARTH_PLAYER_GRAVITY_FP:int = 6
 const EARTH_BALL_GRAVITY_FP:int = 6
 const MOON_PLAYER_GRAVITY_FP:int = 1
 const MOON_BALL_GRAVITY_FP:int = 1
+const MARS_PLAYER_GRAVITY_FP:int = 2
+const MARS_BALL_GRAVITY_FP:int = 2
+const JUPITER_PLAYER_GRAVITY_FP:int = 15
+const JUPITER_BALL_GRAVITY_FP:int = 15
+const STATION_PLAYER_GRAVITY_FP:int = 6
+const STATION_BALL_GRAVITY_FP:int = 0
 const JUMP_HEIGHT_FP:int = 363
 const SERVE_BALL_VY_FP:int = 48
 const HIT_BALL_VY_FP:int = 42
@@ -151,6 +160,9 @@ let text_menu_1:int = "1P CPU"
 let text_menu_2:int = "2P"
 let text_stage_earth:int = "EARTH"
 let text_stage_moon:int = "MOON"
+let text_stage_mars:int = "MARS"
+let text_stage_jupiter:int = "JUPITER"
+let text_stage_station:int = "STATION"
 let text_pace_full:int = "FULL"
 let text_pace_calm:int = "CALM"
 let text_pace_slow:int = "SLOW"
@@ -226,6 +238,22 @@ let sync_positions = ():>int => {
     return 0
 }
 
+let stage_name = (stage:int):>int => {
+    if stage =? STAGE_EARTH {
+        return text_stage_earth
+    }
+    if stage =? STAGE_MOON {
+        return text_stage_moon
+    }
+    if stage =? STAGE_MARS {
+        return text_stage_mars
+    }
+    if stage =? STAGE_JUPITER {
+        return text_stage_jupiter
+    }
+    return text_stage_station
+}
+
 let apply_stage_settings = (stage:int):>int => {
     current_stage = stage
     player_gravity_fp = EARTH_PLAYER_GRAVITY_FP
@@ -233,6 +261,15 @@ let apply_stage_settings = (stage:int):>int => {
     if current_stage =? STAGE_MOON {
         player_gravity_fp = MOON_PLAYER_GRAVITY_FP
         ball_gravity_fp = MOON_BALL_GRAVITY_FP
+    } else if current_stage =? STAGE_MARS {
+        player_gravity_fp = MARS_PLAYER_GRAVITY_FP
+        ball_gravity_fp = MARS_BALL_GRAVITY_FP
+    } else if current_stage =? STAGE_JUPITER {
+        player_gravity_fp = JUPITER_PLAYER_GRAVITY_FP
+        ball_gravity_fp = JUPITER_BALL_GRAVITY_FP
+    } else if current_stage =? STAGE_STATION {
+        player_gravity_fp = STATION_PLAYER_GRAVITY_FP
+        ball_gravity_fp = STATION_BALL_GRAVITY_FP
     }
     jump_velocity_fp = isqrt((player_gravity_fp * JUMP_HEIGHT_FP * 2))
     return 0
@@ -245,8 +282,7 @@ let apply_pace_settings = (pace:int):>int => {
     if current_pace =? PACE_CALM {
         sim_rate_num = 1
         sim_rate_den = 2
-    }
-    if current_pace =? PACE_SLOW {
+    } else if current_pace =? PACE_SLOW {
         sim_rate_num = 1
         sim_rate_den = 3
     }
@@ -391,6 +427,14 @@ let draw_text_center = (text:int y:int scale:int r:int g:int b:int):>int => {
     return 0
 }
 
+let draw_text_right = (text:int right_x:int y:int scale:int r:int g:int b:int):>int => {
+    let len:int = str_len(text)
+    let text_w:int = (((len * 4) - 1) * scale)
+    let x:int = right_x - text_w
+    draw_text(text x y scale r g b)
+    return 0
+}
+
 let draw_digit = (value:int x:int y:int scale:int r:int g:int b:int):>int => {
     draw_char((48 + value) x y scale r g b)
     return 0
@@ -526,13 +570,11 @@ let award_point = (side:int):>int => {
             play_sound(4)
             return 0
         }
-    } else {
-        if right_score >=? SCORE_TO_WIN {
-            winner_side = 1
-            game_state = STATE_GAME_OVER
-            play_sound(4)
-            return 0
-        }
+    } else if right_score >=? SCORE_TO_WIN {
+        winner_side = 1
+        game_state = STATE_GAME_OVER
+        play_sound(4)
+        return 0
     }
     game_state = STATE_SERVE
     set_round_positions()
@@ -795,10 +837,16 @@ let update_title = ():>int => {
     }
     if menu_row =? MENU_STAGE {
         if key_pressed(key_a) or key_pressed(key_left) {
-            selected_stage = STAGE_EARTH
+            selected_stage = selected_stage - 1
+            if selected_stage <? STAGE_EARTH {
+                selected_stage = STAGE_STATION
+            }
         }
         if key_pressed(key_d) or key_pressed(key_right) {
-            selected_stage = STAGE_MOON
+            selected_stage = selected_stage + 1
+            if selected_stage >? STAGE_STATION {
+                selected_stage = STAGE_EARTH
+            }
         }
     }
     if menu_row =? MENU_PACE {
@@ -880,6 +928,32 @@ let draw_background = (stage:int):>int => {
         fill_rect(210 38 2 2 255 255 255)
         fill_rect(284 18 2 2 255 255 255)
         fill_circle(258 42 14 226 226 214)
+    } else if stage =? STAGE_MARS {
+        fill_rect(0 0 WIDTH GROUND_Y 196 116 88)
+        fill_rect(0 GROUND_Y WIDTH (HEIGHT - GROUND_Y) 176 92 70)
+        fill_rect(0 (GROUND_Y - 4) WIDTH 4 226 156 124)
+        fill_circle(46 34 16 255 228 162)
+        fill_rect(208 30 20 2 255 194 164)
+        fill_rect(220 42 28 2 255 194 164)
+    } else if stage =? STAGE_JUPITER {
+        fill_rect(0 0 WIDTH GROUND_Y 214 176 124)
+        fill_rect(0 30 WIDTH 16 196 132 82)
+        fill_rect(0 62 WIDTH 14 228 206 154)
+        fill_rect(0 94 WIDTH 16 182 118 72)
+        fill_rect(0 GROUND_Y WIDTH (HEIGHT - GROUND_Y) 196 144 104)
+        fill_rect(0 (GROUND_Y - 4) WIDTH 4 236 214 172)
+        fill_rect(234 82 24 10 210 126 90)
+    } else if stage =? STAGE_STATION {
+        fill_rect(0 0 WIDTH GROUND_Y 10 12 18)
+        fill_rect(0 GROUND_Y WIDTH (HEIGHT - GROUND_Y) 120 128 140)
+        fill_rect(0 (GROUND_Y - 4) WIDTH 4 176 184 196)
+        fill_rect(18 16 2 2 255 255 255)
+        fill_rect(64 40 2 2 255 255 255)
+        fill_rect(118 22 2 2 255 255 255)
+        fill_rect(192 34 2 2 255 255 255)
+        fill_rect(274 20 2 2 255 255 255)
+        fill_rect(236 48 34 8 176 184 196)
+        fill_rect(248 40 10 24 176 184 196)
     } else {
         fill_rect(0 0 WIDTH GROUND_Y 92 198 255)
         fill_rect(0 GROUND_Y WIDTH (HEIGHT - GROUND_Y) 212 196 126)
@@ -970,15 +1044,8 @@ let draw_title = ():>int => {
         fill_rect(20 126 130 22 255 255 255)
         draw_text(text_stage 24 130 2 24 56 92)
     }
-    if selected_stage =? STAGE_EARTH {
-        fill_rect(162 126 74 20 255 255 255)
-        draw_text(text_stage_earth 170 131 3 24 56 92)
-        draw_text(text_stage_moon 252 131 3 255 255 255)
-    } else {
-        draw_text(text_stage_earth 170 131 3 255 255 255)
-        fill_rect(244 126 56 20 255 255 255)
-        draw_text(text_stage_moon 252 131 3 24 56 92)
-    }
+    fill_rect(156 126 150 20 255 255 255)
+    draw_text_right(stage_name(selected_stage) 300 131 3 24 56 92)
 
     draw_text(text_pace 32 156 2 255 255 255)
     if menu_row =? MENU_PACE {
@@ -990,18 +1057,16 @@ let draw_title = ():>int => {
         draw_text(text_pace_full 166 157 2 24 56 92)
         draw_text(text_pace_calm 226 157 2 255 255 255)
         draw_text(text_pace_slow 278 157 2 255 255 255)
+    } else if selected_pace =? PACE_CALM {
+        draw_text(text_pace_full 166 157 2 255 255 255)
+        fill_rect(220 152 50 20 255 255 255)
+        draw_text(text_pace_calm 226 157 2 24 56 92)
+        draw_text(text_pace_slow 278 157 2 255 255 255)
     } else {
-        if selected_pace =? PACE_CALM {
-            draw_text(text_pace_full 166 157 2 255 255 255)
-            fill_rect(220 152 50 20 255 255 255)
-            draw_text(text_pace_calm 226 157 2 24 56 92)
-            draw_text(text_pace_slow 278 157 2 255 255 255)
-        } else {
-            draw_text(text_pace_full 166 157 2 255 255 255)
-            draw_text(text_pace_calm 226 157 2 255 255 255)
-            fill_rect(272 152 48 20 255 255 255)
-            draw_text(text_pace_slow 278 157 2 24 56 92)
-        }
+        draw_text(text_pace_full 166 157 2 255 255 255)
+        draw_text(text_pace_calm 226 157 2 255 255 255)
+        fill_rect(272 152 48 20 255 255 255)
+        draw_text(text_pace_slow 278 157 2 24 56 92)
     }
 
     if ((__frame_count__() // 24) % 2) =? 0 {
@@ -1016,12 +1081,10 @@ let draw_game_over = ():>int => {
     fill_rect(48 44 224 60 255 255 255)
     if winner_side =? 0 {
         draw_text_center(text_left_wins 54 4 24 56 92)
+    } else if player_mode =? MODE_CPU {
+        draw_text_center(text_cpu_wins 54 4 24 56 92)
     } else {
-        if player_mode =? MODE_CPU {
-            draw_text_center(text_cpu_wins 54 4 24 56 92)
-        } else {
-            draw_text_center(text_right_wins 54 4 24 56 92)
-        }
+        draw_text_center(text_right_wins 54 4 24 56 92)
     }
     draw_text_center(text_play_again 84 3 24 56 92)
     return 0
