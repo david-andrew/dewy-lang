@@ -99,6 +99,10 @@ class Wasm32Backend(Backend):
             '(import "env" "host_pointer_x" (func $host_pointer_x (result i64)))',
             '(import "env" "host_pointer_y" (func $host_pointer_y (result i64)))',
             '(import "env" "host_pointer_down" (func $host_pointer_down (result i64)))',
+            # Keyboard input
+            '(import "env" "host_key_down" (func $host_key_down (param i64 i64) (result i64)))',
+            '(import "env" "host_key_pressed" (func $host_key_pressed (param i64 i64) (result i64)))',
+            '(import "env" "host_key_released" (func $host_key_released (param i64 i64) (result i64)))',
             # Audio (one-shot)
             '(import "env" "host_audio_init" (func $host_audio_init (param i64 i64 i64) (result i64)))',
             '(import "env" "host_audio_play" (func $host_audio_play (result i64)))',
@@ -116,7 +120,7 @@ class Wasm32Backend(Backend):
             '(import "env" "host_webgl_render" (func $host_webgl_render (result i64)))',
         ]
         self._imports.extend(host_imports)
-        self._next_fn_index = 32  # 32 host function imports
+        self._next_fn_index = 35  # 35 host function imports
     
     def _new_label(self, prefix: str = "L") -> str:
         label = f"${prefix}{self._next_label}"
@@ -679,6 +683,18 @@ class Wasm32Backend(Backend):
         """Emit a call to host_pointer_down(). Stack: [] -> [down]"""
         self._emit("call $host_pointer_down")
     
+    def emit_key_down(self) -> None:
+        """Emit a call to host_key_down(code_ptr, code_len). Stack: [ptr len] -> [down]"""
+        self._emit("call $host_key_down")
+    
+    def emit_key_pressed(self) -> None:
+        """Emit a call to host_key_pressed(code_ptr, code_len). Stack: [ptr len] -> [pressed]"""
+        self._emit("call $host_key_pressed")
+    
+    def emit_key_released(self) -> None:
+        """Emit a call to host_key_released(code_ptr, code_len). Stack: [ptr len] -> [released]"""
+        self._emit("call $host_key_released")
+    
     def emit_audio_init(self) -> None:
         """Emit a call to host_audio_init(sample_rate, num_samples, channels). Stack: [sr ns ch] -> [buffer_ptr]"""
         self._emit("call $host_audio_init")
@@ -811,6 +827,7 @@ class Wasm32Backend(Backend):
         "__canvas_present__", "__frame_count__", "__frame_time__",
         "__window_width__", "__window_height__",
         "__pointer_x__", "__pointer_y__", "__pointer_down__",
+        "__key_down__", "__key_pressed__", "__key_released__",
         "__audio_init__", "__audio_play__", "__audio_sample_rate__",
         "__audio_stream_init__", "__audio_stream_write__", "__audio_stream_needs_samples__",
         "__webgl_init__", "__webgl_uniform1i__", "__webgl_uniform2i__",
@@ -911,6 +928,12 @@ class Wasm32Backend(Backend):
             self.emit_pointer_y()
         elif name == "__pointer_down__":
             self.emit_pointer_down()
+        elif name == "__key_down__":
+            self.emit_key_down()
+        elif name == "__key_pressed__":
+            self.emit_key_pressed()
+        elif name == "__key_released__":
+            self.emit_key_released()
         elif name == "__audio_init__":
             self.emit_audio_init()
         elif name == "__audio_play__":
@@ -1146,9 +1169,13 @@ let webglProgram = null;
 let webglPositionBuffer = null;
 let webglMode = false;
 let pointerInstalled = false;
+let keyboardInstalled = false;
 let pointerX = 0;
 let pointerY = 0;
 let pointerDown = false;
+const keysDown = new Set();
+const keysPressedFrame = new Set();
+const keysReleasedFrame = new Set();
 let audioStreamBufferSize = 0;
 let audioStreamStarted = false;
 let audioScriptNode = null;
@@ -1231,6 +1258,50 @@ function ensurePointerHandlers() {
 
     window.addEventListener('pointercancel', () => {
         pointerDown = false;
+    });
+}
+
+function clearKeyboardFrameState() {
+    keysPressedFrame.clear();
+    keysReleasedFrame.clear();
+}
+
+function releaseAllKeys() {
+    keysDown.clear();
+    clearKeyboardFrameState();
+}
+
+function ensureKeyboardHandlers() {
+    if (keyboardInstalled) return;
+    keyboardInstalled = true;
+
+    window.addEventListener('keydown', (event) => {
+        const code = event.code || event.key;
+        if (canvasMode || webglMode) {
+            event.preventDefault();
+        }
+        if (!keysDown.has(code)) {
+            keysPressedFrame.add(code);
+        }
+        keysDown.add(code);
+    });
+
+    window.addEventListener('keyup', (event) => {
+        const code = event.code || event.key;
+        if (canvasMode || webglMode) {
+            event.preventDefault();
+        }
+        if (keysDown.has(code)) {
+            keysReleasedFrame.add(code);
+        }
+        keysDown.delete(code);
+    });
+
+    window.addEventListener('blur', releaseAllKeys);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            releaseAllKeys();
+        }
     });
 }
 
@@ -1371,6 +1442,18 @@ const imports = {
         host_pointer_x: () => BigInt(pointerX),
         host_pointer_y: () => BigInt(pointerY),
         host_pointer_down: () => (pointerDown ? 1n : 0n),
+        host_key_down: (ptr, len) => {
+            ensureKeyboardHandlers();
+            return keysDown.has(decodeString(ptr, len)) ? 1n : 0n;
+        },
+        host_key_pressed: (ptr, len) => {
+            ensureKeyboardHandlers();
+            return keysPressedFrame.has(decodeString(ptr, len)) ? 1n : 0n;
+        },
+        host_key_released: (ptr, len) => {
+            ensureKeyboardHandlers();
+            return keysReleasedFrame.has(decodeString(ptr, len)) ? 1n : 0n;
+        },
         // Audio
         host_audio_init: (sampleRate, numSamples, channels) => {
             audioSampleRate = Number(sampleRate);
@@ -1669,6 +1752,7 @@ function animationLoop() {
 
     frameCount++;
     wasmInstance.exports.main();
+    clearKeyboardFrameState();
     requestAnimationFrame(animationLoop);
 }
 '''

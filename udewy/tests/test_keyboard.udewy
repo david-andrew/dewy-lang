@@ -1,0 +1,164 @@
+# WASM keyboard input demo
+# Arrow keys or WASD move the square, Space cycles the palette
+
+let width:int = 320
+let height:int = 240
+let buffer:int = 0
+let initialized:int = 0
+let player_x:int = 148
+let player_y:int = 108
+let player_size:int = 24
+let move_speed:int = 3
+let palette:int = 0
+let flash_frames:int = 0
+
+let key_left:int = "ArrowLeft"
+let key_right:int = "ArrowRight"
+let key_up:int = "ArrowUp"
+let key_down_code:int = "ArrowDown"
+let key_a:int = "KeyA"
+let key_d:int = "KeyD"
+let key_w:int = "KeyW"
+let key_s:int = "KeyS"
+let key_space:int = "Space"
+
+let str_len = (s:int):>int => {
+    return __load__(s - 8)
+}
+
+let key_down = (code:int):>int => {
+    return __key_down__(code str_len(code))
+}
+
+let key_pressed = (code:int):>int => {
+    return __key_pressed__(code str_len(code))
+}
+
+let key_released = (code:int):>int => {
+    return __key_released__(code str_len(code))
+}
+
+let set_pixel = (x:int y:int r:int g:int b:int):>int => {
+    let offset:int = ((y * width) + x) * 4
+    let addr:int = buffer + offset
+    __store_u8__(r addr)
+    __store_u8__(g addr + 1)
+    __store_u8__(b addr + 2)
+    __store_u8__(255 addr + 3)
+    return 0
+}
+
+let fill_rect = (x:int y:int w:int h:int r:int g:int b:int):>int => {
+    let yy:int = y
+    loop yy <? (y + h) {
+        let xx:int = x
+        loop xx <? (x + w) {
+            set_pixel(xx yy r g b)
+            xx = xx + 1
+        }
+        yy = yy + 1
+    }
+    return 0
+}
+
+let clamp_player = ():>int => {
+    if player_x <? 0 {
+        player_x = 0
+    }
+    if player_y <? 0 {
+        player_y = 0
+    }
+    if player_x >? (width - player_size) {
+        player_x = width - player_size
+    }
+    if player_y >? (height - player_size) {
+        player_y = height - player_size
+    }
+    return 0
+}
+
+let update_input = ():>int => {
+    if key_down(key_left) or key_down(key_a) {
+        player_x = player_x - move_speed
+    }
+    if key_down(key_right) or key_down(key_d) {
+        player_x = player_x + move_speed
+    }
+    if key_down(key_up) or key_down(key_w) {
+        player_y = player_y - move_speed
+    }
+    if key_down(key_down_code) or key_down(key_s) {
+        player_y = player_y + move_speed
+    }
+
+    if key_pressed(key_space) {
+        palette = palette + 1
+        if palette >? 2 {
+            palette = 0
+        }
+    }
+
+    if key_released(key_space) {
+        flash_frames = 6
+    }
+
+    clamp_player()
+    return 0
+}
+
+let draw_scene = ():>int => {
+    let bg_r:int = 14
+    let bg_g:int = 18
+    let bg_b:int = 28
+    let player_r:int = 70
+    let player_g:int = 190
+    let player_b:int = 255
+
+    if palette =? 1 {
+        bg_r = 24
+        bg_g = 10
+        bg_b = 24
+        player_r = 255
+        player_g = 130
+        player_b = 90
+    }
+    if palette =? 2 {
+        bg_r = 8
+        bg_g = 26
+        bg_b = 18
+        player_r = 240
+        player_g = 250
+        player_b = 120
+    }
+
+    if flash_frames >? 0 {
+        bg_r = bg_r + 36
+        bg_g = bg_g + 36
+        bg_b = bg_b + 36
+        flash_frames = flash_frames - 1
+    }
+
+    fill_rect(0 0 width height bg_r bg_g bg_b)
+    fill_rect(player_x player_y player_size player_size player_r player_g player_b)
+
+    if key_down(key_space) {
+        fill_rect((player_x - 4) (player_y - 4) (player_size + 8) 4 255 255 255)
+        fill_rect((player_x - 4) (player_y + player_size) (player_size + 8) 4 255 255 255)
+        fill_rect((player_x - 4) player_y 4 player_size 255 255 255)
+        fill_rect((player_x + player_size) player_y 4 player_size 255 255 255)
+    }
+
+    return 0
+}
+
+let main = ():>int => {
+    if initialized =? 0 {
+        buffer = __canvas_init__(width height)
+        initialized = 1
+    }
+
+    update_input()
+    draw_scene()
+    __canvas_present__()
+    return 0
+}

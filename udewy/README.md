@@ -1327,7 +1327,19 @@ The WASM backend exposes basic pointer state for browser-interactive programs:
 
 When a canvas or WebGL surface is active, coordinates are reported relative to that surface and scaled to its backing pixel resolution.
 
-## D.7 WebGL Shader Intrinsics
+## D.7 Keyboard Input Intrinsics
+
+The WASM backend also exposes keyboard state using browser `KeyboardEvent.code` strings such as `ArrowLeft`, `ArrowRight`, `KeyW`, and `Space`:
+
+| Intrinsic | Args | Description |
+|-----------|------|-------------|
+| `__key_down__(code_ptr, code_len)` | 2 | Get whether a key is currently held down |
+| `__key_pressed__(code_ptr, code_len)` | 2 | Get whether a key transitioned from up to down since the last animation frame |
+| `__key_released__(code_ptr, code_len)` | 2 | Get whether a key transitioned from down to up since the last animation frame |
+
+These intrinsics are intended for animated WASM programs running under canvas or WebGL, where `main()` is called once per frame.
+
+## D.8 WebGL Shader Intrinsics
 
 The WASM backend also provides a minimal WebGL path for fullscreen fragment shader demos driven by udewy strings and integer uniforms:
 
@@ -1350,7 +1362,7 @@ The WASM backend also provides a minimal WebGL path for fullscreen fragment shad
 
 The runtime provides a built-in passthrough vertex shader with an `a_position` attribute, so user programs only need to supply fragment shader code.
 
-## D.8 Build Options
+## D.9 Build Options
 
 ```bash
 # Default: single HTML file with embedded base64 WASM
