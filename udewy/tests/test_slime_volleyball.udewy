@@ -1,0 +1,819 @@
+# Minimal Slime Volleyball demo for WASM
+
+const STATE_TITLE:int = 0
+const STATE_SERVE:int = 1
+const STATE_PLAY:int = 2
+const STATE_GAME_OVER:int = 3
+
+const MODE_CPU:int = 1
+const MODE_TWO_PLAYER:int = 2
+
+const WIDTH:int = 320
+const HEIGHT:int = 180
+const GROUND_Y:int = 152
+const NET_X:int = 160
+const NET_HALF_W:int = 4
+const NET_H:int = 38
+const SLIME_R:int = 18
+const BALL_R:int = 6
+const SLIME_SPEED:int = 3
+const SLIME_JUMP:int = 11
+const PLAYER_GRAVITY:int = 1
+const BALL_GRAVITY:int = 0
+const SCORE_TO_WIN:int = 5
+const SERVE_DELAY:int = 35
+
+let canvas_buf:int = 0
+let audio_buf:int = 0
+let initialized:int = 0
+let game_state:int = 0
+let selected_mode:int = 1
+let player_mode:int = 1
+let serve_side:int = 0
+let winner_side:int = 0
+let serve_timer:int = 0
+let impact_timer:int = 0
+let point_flash_timer:int = 0
+
+let left_score:int = 0
+let right_score:int = 0
+
+let left_x:int = 80
+let left_y:int = 152
+let left_vy:int = 0
+let left_move_dir:int = 0
+
+let right_x:int = 240
+let right_y:int = 152
+let right_vy:int = 0
+let right_move_dir:int = 0
+
+let ball_x:int = 90
+let ball_y:int = 84
+let ball_vx:int = 0
+let ball_vy:int = 0
+let ball_prev_x:int = 90
+let ball_prev_y:int = 84
+
+let font_rows:int = [
+    0 0 0 0 0
+    7 5 5 5 7
+    2 6 2 2 7
+    7 1 7 4 7
+    7 1 7 1 7
+    5 5 7 1 1
+    7 4 7 1 7
+    7 4 7 5 7
+    7 1 1 1 1
+    7 5 7 5 7
+    7 5 7 1 7
+    2 5 7 5 5
+    6 5 6 5 6
+    3 4 4 4 3
+    6 5 5 5 6
+    7 4 6 4 7
+    7 4 6 4 4
+    3 4 5 5 3
+    5 5 7 5 5
+    7 2 2 2 7
+    1 1 1 5 2
+    5 5 6 5 5
+    4 4 4 4 7
+    5 7 7 5 5
+    5 7 7 7 5
+    2 5 5 5 2
+    6 5 6 4 4
+    2 5 5 2 1
+    6 5 6 5 5
+    3 4 2 1 6
+    7 2 2 2 2
+    5 5 5 5 7
+    5 5 5 5 2
+    5 5 7 7 5
+    5 5 2 5 5
+    5 5 2 2 2
+    7 1 2 4 7
+]
+
+let key_a:int = "KeyA"
+let key_d:int = "KeyD"
+let key_w:int = "KeyW"
+let key_left:int = "ArrowLeft"
+let key_right:int = "ArrowRight"
+let key_up:int = "ArrowUp"
+let key_space:int = "Space"
+let key_enter:int = "Enter"
+
+let text_title_1:int = "SLIME"
+let text_title_2:int = "VOLLEY"
+let text_menu_1:int = "1P CPU"
+let text_menu_2:int = "2P"
+let text_start:int = "SPACE START"
+let text_left_wins:int = "LEFT WINS"
+let text_right_wins:int = "RIGHT WINS"
+let text_cpu_wins:int = "CPU WINS"
+let text_play_again:int = "SPACE MENU"
+
+let sin256 = (angle:int):>int => {
+    let a:int = angle % 1024
+    if a <? 0 {
+        a = a + 1024
+    }
+
+    let quad:int = a // 256
+    let x:int = a % 256
+    let y:int = 0
+    let term:int = 0
+    if quad =? 0 {
+        term = 512 - x
+        y = (x * term) // 256
+    }
+    if quad =? 1 {
+        x = 256 - x
+        term = 512 - x
+        y = (x * term) // 256
+    }
+    if quad =? 2 {
+        term = 512 - x
+        y = 0 - ((x * term) // 256)
+    }
+    if quad =? 3 {
+        x = 256 - x
+        term = 512 - x
+        y = 0 - ((x * term) // 256)
+    }
+    return y
+}
+
+let str_len = (s:int):>int => {
+    return __load__(s - 8)
+}
+
+let abs_int = (v:int):>int => {
+    if v <? 0 {
+        return 0 - v
+    }
+    return v
+}
+
+let arr_get = (arr:int idx:int):>int => {
+    return __load__(arr + (idx * 8))
+}
+
+let key_down = (code:int):>int => {
+    return __key_down__(code str_len(code))
+}
+
+let key_pressed = (code:int):>int => {
+    return __key_pressed__(code str_len(code))
+}
+
+let set_pixel = (x:int y:int r:int g:int b:int):>int => {
+    if x <? 0 { return 0 }
+    if y <? 0 { return 0 }
+    if x >=? WIDTH { return 0 }
+    if y >=? HEIGHT { return 0 }
+    let offset:int = ((y * WIDTH) + x) * 4
+    let addr:int = canvas_buf + offset
+    __store_u8__(r addr)
+    __store_u8__(g addr + 1)
+    __store_u8__(b addr + 2)
+    __store_u8__(255 addr + 3)
+    return 0
+}
+
+let fill_rect = (x:int y:int w:int h:int r:int g:int b:int):>int => {
+    let yy:int = y
+    loop yy <? (y + h) {
+        let xx:int = x
+        loop xx <? (x + w) {
+            set_pixel(xx yy r g b)
+            xx = xx + 1
+        }
+        yy = yy + 1
+    }
+    return 0
+}
+
+let fill_circle = (cx:int cy:int radius:int r:int g:int b:int):>int => {
+    let yy:int = cy - radius
+    let rr:int = radius * radius
+    loop yy <=? (cy + radius) {
+        let xx:int = cx - radius
+        loop xx <=? (cx + radius) {
+            let dx:int = xx - cx
+            let dy:int = yy - cy
+            if ((dx * dx) + (dy * dy)) <=? rr {
+                set_pixel(xx yy r g b)
+            }
+            xx = xx + 1
+        }
+        yy = yy + 1
+    }
+    return 0
+}
+
+let fill_slime = (cx:int cy:int radius:int body_r:int body_g:int body_b:int eye_dir:int):>int => {
+    let yy:int = cy - radius
+    let rr:int = radius * radius
+    loop yy <=? cy {
+        let xx:int = cx - radius
+        loop xx <=? (cx + radius) {
+            let dx:int = xx - cx
+            let dy:int = yy - cy
+            if ((dx * dx) + (dy * dy)) <=? rr {
+                set_pixel(xx yy body_r body_g body_b)
+            }
+            xx = xx + 1
+        }
+        yy = yy + 1
+    }
+
+    let eye_y:int = cy - (radius // 2)
+    let eye_shift:int = eye_dir * 2
+    fill_rect((cx - 7 + eye_shift) eye_y 4 4 255 255 255)
+    fill_rect((cx + 3 + eye_shift) eye_y 4 4 255 255 255)
+    fill_rect((cx - 5 + eye_shift) (eye_y + 1) 2 2 20 20 20)
+    fill_rect((cx + 5 + eye_shift) (eye_y + 1) 2 2 20 20 20)
+    return 0
+}
+
+let font_index = (code:int):>int => {
+    if code =? 32 {
+        return 0
+    }
+    if code >=? 48 {
+        if code <=? 57 {
+            return (code - 47)
+        }
+    }
+    if code >=? 65 {
+        if code <=? 90 {
+            return (11 + code - 65)
+        }
+    }
+    return 0
+}
+
+let draw_char = (code:int x:int y:int scale:int r:int g:int b:int):>int => {
+    let idx:int = font_index(code)
+    let row:int = 0
+    loop row <? 5 {
+        let pattern:int = arr_get(font_rows ((idx * 5) + row))
+        let col:int = 0
+        loop col <? 3 {
+            let mask:int = 1 << (2 - col)
+            if pattern and mask {
+                fill_rect((x + (col * scale)) (y + (row * scale)) scale scale r g b)
+            }
+            col = col + 1
+        }
+        row = row + 1
+    }
+    return 0
+}
+
+let draw_text = (text:int x:int y:int scale:int r:int g:int b:int):>int => {
+    let i:int = 0
+    let advance:int = 4 * scale
+    let len:int = str_len(text)
+    loop i <? len {
+        let code:int = __load_u8__(text + i)
+        draw_char(code (x + (i * advance)) y scale r g b)
+        i = i + 1
+    }
+    return 0
+}
+
+let draw_text_center = (text:int y:int scale:int r:int g:int b:int):>int => {
+    let len:int = str_len(text)
+    let text_w:int = (((len * 4) - 1) * scale)
+    let x:int = (WIDTH - text_w) // 2
+    draw_text(text x y scale r g b)
+    return 0
+}
+
+let draw_digit = (value:int x:int y:int scale:int r:int g:int b:int):>int => {
+    draw_char((48 + value) x y scale r g b)
+    return 0
+}
+
+let play_sound = (kind:int):>int => {
+    if audio_buf =? 0 {
+        return 0
+    }
+
+    let sample_rate:int = 22050
+    let num_samples:int = 1024
+    let freq:int = 460
+    let slide:int = 0
+    let volume:int = 120
+    if kind =? 1 {
+        freq = 620
+        slide = 2
+        volume = 96
+    }
+    if kind =? 2 {
+        freq = 860
+        slide = 0 - 3
+        volume = 112
+    }
+    if kind =? 3 {
+        freq = 420
+        slide = 3
+        volume = 120
+    }
+    if kind =? 4 {
+        freq = 300
+        slide = 5
+        volume = 128
+    }
+
+    let phase:int = 0
+    let i:int = 0
+    loop i <? num_samples {
+        let env:int = ((num_samples - i) * volume) // num_samples
+        let cur_freq:int = freq + ((slide * i) // 32)
+        if cur_freq <? 80 {
+            cur_freq = 80
+        }
+        phase = (phase + ((cur_freq * 1024) // sample_rate)) % 1024
+        let sample:int = (sin256(phase) * env) // 2
+        __store_u16__(sample (audio_buf + (i * 2)))
+        i = i + 1
+    }
+    __audio_play__()
+    return 0
+}
+
+let set_round_positions = ():>int => {
+    left_x = 80
+    left_y = GROUND_Y
+    left_vy = 0
+    left_move_dir = 0
+
+    right_x = 240
+    right_y = GROUND_Y
+    right_vy = 0
+    right_move_dir = 0
+
+    if serve_side =? 0 {
+        ball_x = left_x
+    } else {
+        ball_x = right_x
+    }
+    ball_y = GROUND_Y - SLIME_R - BALL_R - 4
+    ball_vx = 0
+    ball_vy = 0
+    serve_timer = SERVE_DELAY
+    impact_timer = 0
+    point_flash_timer = 12
+    return 0
+}
+
+let start_match = (mode:int):>int => {
+    player_mode = mode
+    left_score = 0
+    right_score = 0
+    winner_side = 0
+    serve_side = 0
+    game_state = STATE_SERVE
+    set_round_positions()
+    play_sound(3)
+    return 0
+}
+
+let award_point = (side:int):>int => {
+    if side =? 0 {
+        left_score = left_score + 1
+    } else {
+        right_score = right_score + 1
+    }
+    serve_side = side
+    play_sound(3)
+    if side =? 0 {
+        if left_score >=? SCORE_TO_WIN {
+            winner_side = 0
+            game_state = STATE_GAME_OVER
+            play_sound(4)
+            return 0
+        }
+    } else {
+        if right_score >=? SCORE_TO_WIN {
+            winner_side = 1
+            game_state = STATE_GAME_OVER
+            play_sound(4)
+            return 0
+        }
+    }
+    game_state = STATE_SERVE
+    set_round_positions()
+    return 0
+}
+
+let update_left_player = ():>int => {
+    left_move_dir = 0
+    if key_down(key_a) {
+        left_move_dir = 0 - 1
+    }
+    if key_down(key_d) {
+        left_move_dir = 1
+    }
+    if left_y =? GROUND_Y {
+        if key_pressed(key_w) {
+            left_vy = 0 - SLIME_JUMP
+            play_sound(1)
+        }
+    }
+
+    left_x = left_x + (left_move_dir * SLIME_SPEED)
+    if left_x <? SLIME_R {
+        left_x = SLIME_R
+    }
+    if left_x >? (NET_X - NET_HALF_W - SLIME_R) {
+        left_x = NET_X - NET_HALF_W - SLIME_R
+    }
+
+    left_y = left_y + left_vy
+    left_vy = left_vy + PLAYER_GRAVITY
+    if left_y >? GROUND_Y {
+        left_y = GROUND_Y
+        left_vy = 0
+    }
+    return 0
+}
+
+let update_right_ai = ():>int => {
+    right_move_dir = 0
+    let target_x:int = 240
+    if ball_x >? NET_X {
+        target_x = ball_x
+    }
+    if target_x <? (NET_X + NET_HALF_W + SLIME_R) {
+        target_x = NET_X + NET_HALF_W + SLIME_R
+    }
+    if target_x >? (WIDTH - SLIME_R) {
+        target_x = WIDTH - SLIME_R
+    }
+    if right_x <? (target_x - 2) {
+        right_move_dir = 1
+    }
+    if right_x >? (target_x + 2) {
+        right_move_dir = 0 - 1
+    }
+
+    if right_y =? GROUND_Y {
+        if ball_x >? (NET_X + 10) {
+            if abs_int(ball_x - right_x) <? 26 {
+                if ball_y <? (right_y - 8) {
+                    if ball_vy >? 0 {
+                        right_vy = 0 - SLIME_JUMP
+                        play_sound(1)
+                    }
+                }
+            }
+        }
+    }
+
+    right_x = right_x + (right_move_dir * SLIME_SPEED)
+    if right_x <? (NET_X + NET_HALF_W + SLIME_R) {
+        right_x = NET_X + NET_HALF_W + SLIME_R
+    }
+    if right_x >? (WIDTH - SLIME_R) {
+        right_x = WIDTH - SLIME_R
+    }
+
+    right_y = right_y + right_vy
+    right_vy = right_vy + PLAYER_GRAVITY
+    if right_y >? GROUND_Y {
+        right_y = GROUND_Y
+        right_vy = 0
+    }
+    return 0
+}
+
+let update_right_player = ():>int => {
+    right_move_dir = 0
+    if key_down(key_left) {
+        right_move_dir = 0 - 1
+    }
+    if key_down(key_right) {
+        right_move_dir = 1
+    }
+    if right_y =? GROUND_Y {
+        if key_pressed(key_up) {
+            right_vy = 0 - SLIME_JUMP
+            play_sound(1)
+        }
+    }
+
+    right_x = right_x + (right_move_dir * SLIME_SPEED)
+    if right_x <? (NET_X + NET_HALF_W + SLIME_R) {
+        right_x = NET_X + NET_HALF_W + SLIME_R
+    }
+    if right_x >? (WIDTH - SLIME_R) {
+        right_x = WIDTH - SLIME_R
+    }
+
+    right_y = right_y + right_vy
+    right_vy = right_vy + PLAYER_GRAVITY
+    if right_y >? GROUND_Y {
+        right_y = GROUND_Y
+        right_vy = 0
+    }
+    return 0
+}
+
+let collide_ball_with_slime = (slime_x:int slime_y:int slime_push:int):>int => {
+    let dx:int = ball_x - slime_x
+    let dy:int = ball_y - slime_y
+    let total_r:int = SLIME_R + BALL_R
+    if ball_y <=? slime_y {
+        if ((dx * dx) + (dy * dy)) <=? (total_r * total_r) {
+            ball_y = slime_y - total_r
+            ball_vx = (dx // 3) + slime_push
+            if ball_vx =? 0 {
+                if dx <? 0 {
+                    ball_vx = 0 - 1
+                } else {
+                    ball_vx = 1
+                }
+            }
+            ball_vy = 0 - (7 + (abs_int(dx) // 4))
+            impact_timer = 4
+            play_sound(2)
+            return 1
+        }
+    }
+    return 0
+}
+
+let update_ball = ():>int => {
+    ball_prev_x = ball_x
+    ball_prev_y = ball_y
+
+    ball_x = ball_x + ball_vx
+    ball_y = ball_y + ball_vy
+    ball_vy = ball_vy + BALL_GRAVITY
+
+    if ball_x <? BALL_R {
+        ball_x = BALL_R
+        if ball_vx <? 0 {
+            ball_vx = 0 - ball_vx
+            play_sound(2)
+        }
+    }
+    if ball_x >? (WIDTH - BALL_R) {
+        ball_x = WIDTH - BALL_R
+        if ball_vx >? 0 {
+            ball_vx = 0 - ball_vx
+            play_sound(2)
+        }
+    }
+    if ball_y <? BALL_R {
+        ball_y = BALL_R
+        if ball_vy <? 0 {
+            ball_vy = 0 - ball_vy
+            play_sound(2)
+        }
+    }
+
+    let net_left:int = NET_X - NET_HALF_W
+    let net_right:int = NET_X + NET_HALF_W
+    let net_top:int = GROUND_Y - NET_H
+    if (ball_x + BALL_R) >=? net_left {
+        if (ball_x - BALL_R) <=? net_right {
+            if (ball_y + BALL_R) >=? net_top {
+                if (ball_y - BALL_R) <=? GROUND_Y {
+                    if (ball_prev_y + BALL_R) <=? net_top {
+                        ball_y = net_top - BALL_R
+                        if ball_vy >? 0 {
+                            ball_vy = 0 - ball_vy
+                        }
+                    } else {
+                        if ball_x <? NET_X {
+                            ball_x = net_left - BALL_R
+                            if ball_vx >? 0 {
+                                ball_vx = 0 - ball_vx
+                            }
+                        } else {
+                            ball_x = net_right + BALL_R
+                            if ball_vx <? 0 {
+                                ball_vx = 0 - ball_vx
+                            }
+                        }
+                    }
+                    impact_timer = 3
+                    play_sound(2)
+                }
+            }
+        }
+    }
+
+    if collide_ball_with_slime(left_x left_y (left_move_dir * 2)) {
+        return 0
+    }
+    if collide_ball_with_slime(right_x right_y (right_move_dir * 2)) {
+        return 0
+    }
+
+    if (ball_y + BALL_R) >=? GROUND_Y {
+        if ball_x <? NET_X {
+            award_point(1)
+        } else {
+            award_point(0)
+        }
+        return 0
+    }
+    return 0
+}
+
+let update_title = ():>int => {
+    if key_pressed(key_a) {
+        selected_mode = MODE_CPU
+    }
+    if key_pressed(key_left) {
+        selected_mode = MODE_CPU
+    }
+    if key_pressed(key_d) {
+        selected_mode = MODE_TWO_PLAYER
+    }
+    if key_pressed(key_right) {
+        selected_mode = MODE_TWO_PLAYER
+    }
+    if key_pressed(key_space) or key_pressed(key_enter) {
+        start_match(selected_mode)
+    }
+    return 0
+}
+
+let update_serve = ():>int => {
+    if serve_side =? 0 {
+        ball_x = left_x
+    } else {
+        ball_x = right_x
+    }
+    ball_y = GROUND_Y - SLIME_R - BALL_R - 4
+
+    serve_timer = serve_timer - 1
+    if serve_timer <=? 0 {
+        game_state = STATE_PLAY
+        ball_vy = -8
+        if serve_side =? 0 {
+            ball_vx = 3
+        } else {
+            ball_vx = 0 - 3
+        }
+        play_sound(1)
+    }
+    return 0
+}
+
+let update_match = ():>int => {
+    update_left_player()
+    if player_mode =? MODE_CPU {
+        update_right_ai()
+    } else {
+        update_right_player()
+    }
+    update_ball()
+    return 0
+}
+
+let draw_background = ():>int => {
+    fill_rect(0 0 WIDTH GROUND_Y 92 198 255)
+    fill_rect(0 GROUND_Y WIDTH (HEIGHT - GROUND_Y) 212 196 126)
+    fill_rect(0 (GROUND_Y - 4) WIDTH 4 230 220 160)
+    fill_rect((NET_X - NET_HALF_W) (GROUND_Y - NET_H) (NET_HALF_W * 2) NET_H 236 236 236)
+    fill_rect((NET_X - NET_HALF_W - 1) (GROUND_Y - NET_H) 1 NET_H 20 30 40)
+    fill_rect((NET_X + NET_HALF_W) (GROUND_Y - NET_H) 1 NET_H 20 30 40)
+    return 0
+}
+
+let draw_ball_shadow = ():>int => {
+    let shadow_w:int = 8 + ((GROUND_Y - ball_y) // 12)
+    if shadow_w <? 6 {
+        shadow_w = 6
+    }
+    fill_rect((ball_x - (shadow_w // 2)) (GROUND_Y - 3) shadow_w 2 120 106 72)
+    return 0
+}
+
+let draw_match_scene = ():>int => {
+    draw_background()
+
+    if point_flash_timer >? 0 {
+        fill_rect(0 0 WIDTH 10 255 255 255)
+        point_flash_timer = point_flash_timer - 1
+    }
+
+    draw_ball_shadow()
+    fill_circle(ball_x ball_y BALL_R 250 250 250)
+    if impact_timer >? 0 {
+        fill_circle(ball_x ball_y (BALL_R + impact_timer + 1) 255 228 96)
+        impact_timer = impact_timer - 1
+    }
+
+    let left_eye_dir:int = 0
+    let right_eye_dir:int = 0
+    if ball_x <? left_x {
+        left_eye_dir = 0 - 1
+    }
+    if ball_x >? left_x {
+        left_eye_dir = 1
+    }
+    if ball_x <? right_x {
+        right_eye_dir = 0 - 1
+    }
+    if ball_x >? right_x {
+        right_eye_dir = 1
+    }
+    fill_slime(left_x left_y SLIME_R 78 188 106 left_eye_dir)
+    fill_slime(right_x right_y SLIME_R 252 112 106 right_eye_dir)
+
+    draw_digit(left_score 118 14 4 255 255 255)
+    draw_digit(right_score 190 14 4 255 255 255)
+    return 0
+}
+
+let draw_title = ():>int => {
+    draw_background()
+    let t:int = __frame_time__() // 6
+    let preview_x:int = (WIDTH // 2) + (sin256(t) // 12)
+    let preview_y:int = 86 + (sin256((t * 2)) // 28)
+    fill_slime(88 GROUND_Y SLIME_R 78 188 106 1)
+    fill_slime(232 GROUND_Y SLIME_R 252 112 106 (0 - 1))
+    fill_circle(preview_x preview_y BALL_R 250 250 250)
+
+    draw_text_center(text_title_1 18 6 255 255 255)
+    draw_text_center(text_title_2 52 5 24 56 92)
+
+    if selected_mode =? MODE_CPU {
+        fill_rect(74 104 92 18 255 255 255)
+        draw_text(text_menu_1 84 109 3 24 56 92)
+        draw_text(text_menu_2 220 109 3 255 255 255)
+    } else {
+        draw_text(text_menu_1 84 109 3 255 255 255)
+        fill_rect(212 104 34 18 255 255 255)
+        draw_text(text_menu_2 220 109 3 24 56 92)
+    }
+
+    if ((__frame_count__() // 24) % 2) =? 0 {
+        draw_text_center(text_start 136 3 255 255 255)
+    }
+    return 0
+}
+
+let draw_game_over = ():>int => {
+    draw_match_scene()
+    fill_rect(44 40 232 68 24 56 92)
+    fill_rect(48 44 224 60 255 255 255)
+    if winner_side =? 0 {
+        draw_text_center(text_left_wins 54 4 24 56 92)
+    } else {
+        if player_mode =? MODE_CPU {
+            draw_text_center(text_cpu_wins 54 4 24 56 92)
+        } else {
+            draw_text_center(text_right_wins 54 4 24 56 92)
+        }
+    }
+    draw_text_center(text_play_again 84 3 24 56 92)
+    return 0
+}
+
+let update_game_over = ():>int => {
+    if key_pressed(key_space) or key_pressed(key_enter) {
+        game_state = STATE_TITLE
+        selected_mode = player_mode
+    }
+    return 0
+}
+
+let main = ():>int => {
+    if initialized =? 0 {
+        canvas_buf = __canvas_init__(WIDTH HEIGHT)
+        audio_buf = __audio_init__(22050 1024 1)
+        set_round_positions()
+        initialized = 1
+    }
+
+    if game_state =? STATE_TITLE {
+        update_title()
+        draw_title()
+    }
+    if game_state =? STATE_SERVE {
+        update_serve()
+        draw_match_scene()
+    }
+    if game_state =? STATE_PLAY {
+        update_match()
+        draw_match_scene()
+    }
+    if game_state =? STATE_GAME_OVER {
+        update_game_over()
+        draw_game_over()
+    }
+
+    __canvas_present__()
+    return 0
+}
