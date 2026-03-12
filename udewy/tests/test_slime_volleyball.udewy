@@ -5,6 +5,7 @@ const STATE_SERVE:int = 1
 const STATE_PLAY:int = 2
 const STATE_GAME_OVER:int = 3
 
+const MODE_CPU_VS_CPU:int = 0
 const MODE_CPU:int = 1
 const MODE_TWO_PLAYER:int = 2
 
@@ -47,7 +48,6 @@ const JUMP_HEIGHT_FP:int = 363
 const SERVE_BALL_VY_FP:int = 48
 const HIT_BALL_VY_FP:int = 42
 const SCORE_TO_WIN:int = 5
-const SERVE_DELAY:int = 35
 const JUMP_BUFFER_FRAMES:int = 4
 
 let canvas_buf:int = 0
@@ -64,7 +64,6 @@ let menu_row:int = 0
 let aspect_locked:int = true
 let serve_side:int = 0
 let winner_side:int = 0
-let serve_timer:int = 0
 let impact_timer:int = 0
 let point_flash_timer:int = 0
 let player_gravity_fp:int = 6
@@ -158,7 +157,8 @@ let text_title_2:int = "VOLLEY"
 let text_mode:int = "MODE"
 let text_stage:int = "STAGE"
 let text_pace:int = "PACE"
-let text_menu_1:int = "1P CPU"
+let text_menu_0:int = "0P"
+let text_menu_1:int = "1P"
 let text_menu_2:int = "2P"
 let text_stage_earth:int = "EARTH"
 let text_stage_moon:int = "MOON"
@@ -523,12 +523,13 @@ let set_round_positions = ():>int => {
     } else {
         ball_x = right_x
     }
-    ball_y = GROUND_Y - SLIME_R - BALL_R - 4
+    ball_y = GROUND_Y - SLIME_R - BALL_R
     ball_vx = 0
     ball_y_fp = to_fp(ball_y)
+    ball_prev_x = ball_x
+    ball_prev_y = ball_y
     ball_prev_y_fp = ball_y_fp
-    ball_vy_fp = 0
-    serve_timer = SERVE_DELAY
+    ball_vy_fp = 0 - SERVE_BALL_VY_FP
     impact_timer = 0
     point_flash_timer = 12
     left_jump_buffer = 0
@@ -611,6 +612,58 @@ let update_left_player = ():>int => {
             left_vy_fp = 0 - jump_velocity_fp
             left_jump_buffer = 0
             play_sound(1)
+        }
+    }
+
+    left_x = left_x + (left_move_dir * SLIME_SPEED)
+    if left_x <? SLIME_R {
+        left_x = SLIME_R
+    }
+    if left_x >? (NET_X - NET_HALF_W - SLIME_R) {
+        left_x = NET_X - NET_HALF_W - SLIME_R
+    }
+
+    left_y_fp = left_y_fp + left_vy_fp
+    left_vy_fp = left_vy_fp + player_gravity_fp
+    if left_y_fp >? ground_fp {
+        left_y_fp = ground_fp
+        left_y = GROUND_Y
+        left_vy_fp = 0
+    }
+    left_y = from_fp(left_y_fp)
+    return 0
+}
+
+let update_left_ai = ():>int => {
+    let ground_fp:int = to_fp(GROUND_Y)
+    left_move_dir = 0
+    let target_x:int = 80
+    if ball_x <? NET_X {
+        target_x = ball_x
+    }
+    if target_x <? SLIME_R {
+        target_x = SLIME_R
+    }
+    if target_x >? (NET_X - NET_HALF_W - SLIME_R) {
+        target_x = NET_X - NET_HALF_W - SLIME_R
+    }
+    if left_x <? (target_x - 2) {
+        left_move_dir = 1
+    }
+    if left_x >? (target_x + 2) {
+        left_move_dir = 0 - 1
+    }
+
+    if left_y =? GROUND_Y {
+        if ball_x <? (NET_X - 10) {
+            if abs_int(ball_x - left_x) <? 26 {
+                if ball_y <? (left_y - 8) {
+                    if ball_vy_fp >? 0 {
+                        left_vy_fp = 0 - jump_velocity_fp
+                        play_sound(1)
+                    }
+                }
+            }
         }
     }
 
@@ -721,23 +774,66 @@ let update_right_player = ():>int => {
     return 0
 }
 
-let collide_ball_with_slime = (slime_x:int slime_y:int slime_push:int):>int => {
+let update_players = ():>int => {
+    if player_mode =? MODE_CPU_VS_CPU {
+        update_left_ai()
+        update_right_ai()
+    } else if player_mode =? MODE_CPU {
+        update_left_player()
+        update_right_ai()
+    } else {
+        update_left_player()
+        update_right_player()
+    }
+    return 0
+}
+
+let collide_ball_with_slime = (slime_x:int slime_y:int slime_push:int slime_side:int):>int => {
     let dx:int = ball_x - slime_x
     let dy:int = ball_y - slime_y
     let total_r:int = SLIME_R + BALL_R
+    let keep_serve_bounce:int = false
     if ball_y <=? slime_y {
         if ((dx * dx) + (dy * dy)) <=? (total_r * total_r) {
             ball_y = slime_y - total_r
             ball_y_fp = to_fp(ball_y)
             ball_vx = (dx // 3) + slime_push
             if ball_vx =? 0 {
-                if dx <? 0 {
-                    ball_vx = 0 - 1
-                } else {
-                    ball_vx = 1
+                if game_state =? STATE_SERVE {
+                    if slime_side =? serve_side {
+                        if slime_push =? 0 {
+                            if slime_y =? GROUND_Y {
+                                if abs_int(dx) <=? 6 {
+                                    keep_serve_bounce = true
+                                }
+                            }
+                        }
+                    }
+                }
+                if keep_serve_bounce {
+                    ball_vx = 0
+                } else if ball_vx =? 0 {
+                    if dx <? 0 {
+                        ball_vx = 0 - 1
+                    } else {
+                        ball_vx = 1
+                    }
                 }
             }
             ball_vy_fp = 0 - ((7 + (abs_int(dx) // 4)) * PHYS_SCALE)
+            if game_state =? STATE_SERVE {
+                if slime_side =? serve_side {
+                    if slime_push not=? 0 {
+                        game_state = STATE_PLAY
+                    } else if slime_y not=? GROUND_Y {
+                        game_state = STATE_PLAY
+                    } else if abs_int(dx) >? 7 {
+                        game_state = STATE_PLAY
+                    }
+                } else {
+                    game_state = STATE_PLAY
+                }
+            }
             impact_timer = 4
             play_sound(2)
             return 1
@@ -812,10 +908,10 @@ let update_ball = ():>int => {
         }
     }
 
-    if collide_ball_with_slime(left_x left_y (left_move_dir * 2)) {
+    if collide_ball_with_slime(left_x left_y (left_move_dir * 2) 0) {
         return 0
     }
-    if collide_ball_with_slime(right_x right_y (right_move_dir * 2)) {
+    if collide_ball_with_slime(right_x right_y (right_move_dir * 2) 1) {
         return 0
     }
 
@@ -848,10 +944,16 @@ let update_title = ():>int => {
     }
     if menu_row =? MENU_MODE {
         if key_pressed(key_a) or key_pressed(key_left) {
-            selected_mode = MODE_CPU
+            selected_mode = selected_mode - 1
+            if selected_mode <? MODE_CPU_VS_CPU {
+                selected_mode = MODE_TWO_PLAYER
+            }
         }
         if key_pressed(key_d) or key_pressed(key_right) {
-            selected_mode = MODE_TWO_PLAYER
+            selected_mode = selected_mode + 1
+            if selected_mode >? MODE_TWO_PLAYER {
+                selected_mode = MODE_CPU_VS_CPU
+            }
         }
     }
     if menu_row =? MENU_STAGE {
@@ -889,35 +991,13 @@ let update_title = ():>int => {
 }
 
 let update_serve = ():>int => {
-    if serve_side =? 0 {
-        ball_x = left_x
-    } else {
-        ball_x = right_x
-    }
-    ball_y = GROUND_Y - SLIME_R - BALL_R - 4
-    ball_y_fp = to_fp(ball_y)
-
-    serve_timer = serve_timer - 1
-    if serve_timer <=? 0 {
-        game_state = STATE_PLAY
-        ball_vy_fp = 0 - SERVE_BALL_VY_FP
-        if serve_side =? 0 {
-            ball_vx = 3
-        } else {
-            ball_vx = 0 - 3
-        }
-        play_sound(1)
-    }
+    update_players()
+    update_ball()
     return 0
 }
 
 let update_match = ():>int => {
-    update_left_player()
-    if player_mode =? MODE_CPU {
-        update_right_ai()
-    } else {
-        update_right_player()
-    }
+    update_players()
     update_ball()
     return 0
 }
@@ -1048,14 +1128,21 @@ let draw_title = ():>int => {
         fill_rect(20 100 130 22 255 255 255)
         draw_text(text_mode 28 104 2 24 56 92)
     }
-    if selected_mode =? MODE_CPU {
-        fill_rect(162 100 86 20 255 255 255)
-        draw_text(text_menu_1 172 105 3 24 56 92)
-        draw_text(text_menu_2 268 105 3 255 255 255)
+    if selected_mode =? MODE_CPU_VS_CPU {
+        fill_rect(160 100 32 20 255 255 255)
+        draw_text(text_menu_0 166 105 3 24 56 92)
+        draw_text(text_menu_1 214 105 3 255 255 255)
+        draw_text(text_menu_2 262 105 3 255 255 255)
+    } else if selected_mode =? MODE_CPU {
+        draw_text(text_menu_0 166 105 3 255 255 255)
+        fill_rect(208 100 32 20 255 255 255)
+        draw_text(text_menu_1 214 105 3 24 56 92)
+        draw_text(text_menu_2 262 105 3 255 255 255)
     } else {
-        draw_text(text_menu_1 172 105 3 255 255 255)
-        fill_rect(260 100 28 20 255 255 255)
-        draw_text(text_menu_2 268 105 3 24 56 92)
+        draw_text(text_menu_0 166 105 3 255 255 255)
+        draw_text(text_menu_1 214 105 3 255 255 255)
+        fill_rect(256 100 32 20 255 255 255)
+        draw_text(text_menu_2 262 105 3 24 56 92)
     }
 
     draw_text(text_stage 24 130 2 255 255 255)
