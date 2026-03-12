@@ -173,32 +173,29 @@ let text_cpu_wins:int = "CPU WINS"
 let text_play_again:int = "SPACE MENU"
 
 let sin256 = (angle:int):>int => {
-    let a:int = angle % 1024
-    if a <? 0 {
-        a = a + 1024
-    }
+    let a:int = angle and 0x3FF
 
-    let quad:int = a // 256
-    let x:int = a % 256
+    let quad:int = a >> 8
+    let x:int = a and 0xFF
     let y:int = 0
     let term:int = 0
     if quad =? 0 {
-        term = 512 - x
-        y = (x * term) // 256
+        term = 0x200 - x
+        y = (x * term) >> 8
     }
     if quad =? 1 {
-        x = 256 - x
-        term = 512 - x
-        y = (x * term) // 256
+        x = 0x100 - x
+        term = 0x200 - x
+        y = (x * term) >> 8
     }
     if quad =? 2 {
-        term = 512 - x
-        y = 0 - ((x * term) // 256)
+        term = 0x200 - x
+        y = 0 - ((x * term) >> 8)
     }
     if quad =? 3 {
-        x = 256 - x
-        term = 512 - x
-        y = 0 - ((x * term) // 256)
+        x = 0x100 - x
+        term = 0x200 - x
+        y = 0 - ((x * term) >> 8)
     }
     return y
 }
