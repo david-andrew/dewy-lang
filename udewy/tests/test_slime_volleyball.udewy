@@ -61,6 +61,7 @@ let player_mode:int = 1
 let current_stage:int = 0
 let current_pace:int = 1
 let menu_row:int = 0
+let aspect_locked:int = 1
 let serve_side:int = 0
 let winner_side:int = 0
 let serve_timer:int = 0
@@ -150,6 +151,7 @@ let key_down_code:int = "ArrowDown"
 let key_space:int = "Space"
 let key_enter:int = "Enter"
 let key_escape:int = "Escape"
+let key_f:int = "KeyF"
 
 let text_title_1:int = "SLIME"
 let text_title_2:int = "VOLLEY"
@@ -166,6 +168,8 @@ let text_stage_station:int = "STATION"
 let text_pace_full:int = "FULL"
 let text_pace_calm:int = "CALM"
 let text_pace_slow:int = "SLOW"
+let text_aspect_lock:int = "F LOCKED"
+let text_aspect_free:int = "F FREE"
 let text_start:int = "SPACE START"
 let text_left_wins:int = "LEFT WINS"
 let text_right_wins:int = "RIGHT WINS"
@@ -284,6 +288,25 @@ let apply_pace_settings = (pace:int):>int => {
         sim_rate_den = 3
     }
     sim_rate_accum = 0
+    return 0
+}
+
+let apply_aspect_lock = (lock:int):>int => {
+    aspect_locked = lock
+    if aspect_locked =? 1 {
+        __canvas_lock_aspect__()
+    } else {
+        __canvas_unlock_aspect__()
+    }
+    return 0
+}
+
+let toggle_aspect_lock = ():>int => {
+    if aspect_locked =? 1 {
+        apply_aspect_lock(0)
+    } else {
+        apply_aspect_lock(1)
+    }
     return 0
 }
 
@@ -812,6 +835,9 @@ let update_ball = ():>int => {
 }
 
 let update_title = ():>int => {
+    if key_pressed(key_f) {
+        toggle_aspect_lock()
+    }
     if key_pressed(key_w) or key_pressed(key_up) {
         menu_row = menu_row - 1
         if menu_row <? MENU_MODE {
@@ -1073,6 +1099,11 @@ let draw_title = ():>int => {
     if ((__frame_count__() // 24) % 2) =? 0 {
         draw_text_center(text_start 172 1 255 255 255)
     }
+    if aspect_locked =? 1 {
+        draw_text(text_aspect_lock 236 8 1 255 255 255)
+    } else {
+        draw_text(text_aspect_free 248 8 1 255 255 255)
+    }
     return 0
 }
 
@@ -1112,6 +1143,7 @@ let update_game_over = ():>int => {
 let main = ():>int => {
     if initialized =? 0 {
         canvas_buf = __canvas_init__(WIDTH HEIGHT)
+        apply_aspect_lock(1)
         audio_buf = __audio_init__(22050 1024 1)
         set_round_positions()
         initialized = 1

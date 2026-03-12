@@ -1275,6 +1275,8 @@ The WASM backend provides intrinsics for canvas-based graphics with animation su
 | `__canvas_width__()` | 0 | Get current canvas width |
 | `__canvas_height__()` | 0 | Get current canvas height |
 | `__canvas_present__()` | 0 | Copy pixel buffer to canvas (display frame) |
+| `__canvas_lock_aspect__()` | 0 | Lock display scaling to the canvas's current aspect ratio |
+| `__canvas_unlock_aspect__()` | 0 | Unlock aspect ratio and allow free fullscreen scaling |
 | `__frame_count__()` | 0 | Get current animation frame number |
 | `__frame_time__()` | 0 | Get milliseconds since canvas initialization |
 | `__window_width__()` | 0 | Get browser window inner width |
@@ -1283,9 +1285,13 @@ The WASM backend provides intrinsics for canvas-based graphics with animation su
 **Usage:**
 
 1. Call `__canvas_init__(width, height)` to create a canvas and get a pointer to the pixel buffer
-2. Write RGBA pixels (4 bytes per pixel) to the buffer: `[R, G, B, A, R, G, B, A, ...]`
-3. Call `__canvas_present__()` to display the frame
-4. The runtime automatically calls `main()` each animation frame when canvas mode is active
+2. Optionally call `__canvas_lock_aspect__()` to keep the displayed canvas centered at its current aspect ratio as the browser window resizes
+3. Call `__canvas_unlock_aspect__()` later if you want to return to unrestricted fullscreen scaling
+4. Write RGBA pixels (4 bytes per pixel) to the buffer: `[R, G, B, A, R, G, B, A, ...]`
+5. Call `__canvas_present__()` to display the frame
+6. The runtime automatically calls `main()` each animation frame when canvas mode is active
+
+`__canvas_lock_aspect__()` uses the canvas's current backing dimensions, typically the `width` and `height` passed to `__canvas_init__()`, as the aspect ratio to preserve.
 
 **Example:**
 

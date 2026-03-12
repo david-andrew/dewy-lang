@@ -91,6 +91,8 @@ class Wasm32Backend(Backend):
             '(import "env" "host_canvas_width" (func $host_canvas_width (result i64)))',
             '(import "env" "host_canvas_height" (func $host_canvas_height (result i64)))',
             '(import "env" "host_canvas_present" (func $host_canvas_present (result i64)))',
+            '(import "env" "host_canvas_lock_aspect" (func $host_canvas_lock_aspect (result i64)))',
+            '(import "env" "host_canvas_unlock_aspect" (func $host_canvas_unlock_aspect (result i64)))',
             '(import "env" "host_frame_count" (func $host_frame_count (result i64)))',
             '(import "env" "host_frame_time" (func $host_frame_time (result i64)))',
             '(import "env" "host_window_width" (func $host_window_width (result i64)))',
@@ -654,6 +656,14 @@ class Wasm32Backend(Backend):
     def emit_canvas_present(self) -> None:
         """Emit a call to host_canvas_present(). Stack: [] -> [0]"""
         self._emit("call $host_canvas_present")
+
+    def emit_canvas_lock_aspect(self) -> None:
+        """Emit a call to host_canvas_lock_aspect(). Stack: [] -> [0]"""
+        self._emit("call $host_canvas_lock_aspect")
+
+    def emit_canvas_unlock_aspect(self) -> None:
+        """Emit a call to host_canvas_unlock_aspect(). Stack: [] -> [0]"""
+        self._emit("call $host_canvas_unlock_aspect")
     
     def emit_frame_count(self) -> None:
         """Emit a call to host_frame_count(). Stack: [] -> [frame_number]"""
@@ -824,7 +834,7 @@ class Wasm32Backend(Backend):
         "__dom_set_text__", "__dom_append__", "__dom_clear__",
         "__dom_append_int__", "__log_int__",
         "__canvas_init__", "__canvas_width__", "__canvas_height__",
-        "__canvas_present__", "__frame_count__", "__frame_time__",
+        "__canvas_present__", "__canvas_lock_aspect__", "__canvas_unlock_aspect__", "__frame_count__", "__frame_time__",
         "__window_width__", "__window_height__",
         "__pointer_x__", "__pointer_y__", "__pointer_down__",
         "__key_down__", "__key_pressed__", "__key_released__",
@@ -914,6 +924,10 @@ class Wasm32Backend(Backend):
             self.emit_canvas_height()
         elif name == "__canvas_present__":
             self.emit_canvas_present()
+        elif name == "__canvas_lock_aspect__":
+            self.emit_canvas_lock_aspect()
+        elif name == "__canvas_unlock_aspect__":
+            self.emit_canvas_unlock_aspect()
         elif name == "__frame_count__":
             self.emit_frame_count()
         elif name == "__frame_time__":
@@ -1150,6 +1164,8 @@ let frameCount = 0;
 let startTime = 0;
 let canvasMode = false;
 let wasmInstance = null;
+let canvasAspectWidth = 0;
+let canvasAspectHeight = 0;
 
 // Audio state (one-shot mode)
 let audioCtx = null;
@@ -1209,6 +1225,61 @@ function decodeI64Array(ptr, count) {
 
 function appendOutput(text) {
     console.log(text);
+}
+
+function getDisplayCanvas() {
+    return webglCanvas || canvas;
+}
+
+function updateCanvasLayout() {
+    const displayCanvas = getDisplayCanvas();
+    if (!displayCanvas || (!canvasMode && !webglMode)) {
+        return;
+    }
+
+    if (canvasAspectWidth > 0 && canvasAspectHeight > 0) {
+        const targetAspect = canvasAspectWidth / canvasAspectHeight;
+        let displayWidth = window.innerWidth;
+        let displayHeight = Math.floor(displayWidth / targetAspect);
+        if (displayHeight > window.innerHeight) {
+            displayHeight = window.innerHeight;
+            displayWidth = Math.floor(displayHeight * targetAspect);
+        }
+
+        displayCanvas.style.position = 'fixed';
+        displayCanvas.style.left = '50%';
+        displayCanvas.style.top = '50%';
+        displayCanvas.style.transform = 'translate(-50%, -50%)';
+        displayCanvas.style.width = `${displayWidth}px`;
+        displayCanvas.style.height = `${displayHeight}px`;
+    } else {
+        displayCanvas.style.position = 'fixed';
+        displayCanvas.style.left = '0';
+        displayCanvas.style.top = '0';
+        displayCanvas.style.transform = 'none';
+        displayCanvas.style.width = '100vw';
+        displayCanvas.style.height = '100vh';
+    }
+}
+
+window.addEventListener('resize', updateCanvasLayout);
+
+function lockCanvasAspect() {
+    const displayCanvas = getDisplayCanvas();
+    if (displayCanvas) {
+        canvasAspectWidth = displayCanvas.width;
+        canvasAspectHeight = displayCanvas.height;
+    } else if (canvasWidth > 0 && canvasHeight > 0) {
+        canvasAspectWidth = canvasWidth;
+        canvasAspectHeight = canvasHeight;
+    }
+    updateCanvasLayout();
+}
+
+function unlockCanvasAspect() {
+    canvasAspectWidth = 0;
+    canvasAspectHeight = 0;
+    updateCanvasLayout();
 }
 
 function hideAudioPrompt() {
@@ -1321,7 +1392,7 @@ function requestAudioUnlock(forceRetry=false) {
 }
 
 function getInputCanvas() {
-    return webglCanvas || canvas;
+    return getDisplayCanvas();
 }
 
 function clampPointer(value, limit) {
@@ -1522,6 +1593,7 @@ const imports = {
             canvas.width = canvasWidth;
             canvas.height = canvasHeight;
             canvas.style.display = 'block';
+            updateCanvasLayout();
             ensurePointerHandlers();
             ctx = canvas.getContext('2d');
             
@@ -1546,6 +1618,14 @@ const imports = {
             const imageData = new ImageData(view, canvasWidth, canvasHeight);
             ctx.putImageData(imageData, 0, 0);
             
+            return 0n;
+        },
+        host_canvas_lock_aspect: () => {
+            lockCanvasAspect();
+            return 0n;
+        },
+        host_canvas_unlock_aspect: () => {
+            unlockCanvasAspect();
             return 0n;
         },
         host_frame_count: () => BigInt(frameCount),
@@ -1697,6 +1777,7 @@ const imports = {
             webglCanvas.width = w;
             webglCanvas.height = h;
             webglCanvas.style.display = 'block';
+            updateCanvasLayout();
             ensurePointerHandlers();
 
             webglContext = webglCanvas.getContext('webgl');
@@ -1743,6 +1824,7 @@ const imports = {
 
             webglMode = true;
             startTime = performance.now();
+            updateCanvasLayout();
             return 0n;
         },
         host_webgl_uniform1i: (namePtr, nameLen, value) => {
