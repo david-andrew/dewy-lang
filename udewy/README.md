@@ -21,6 +21,7 @@ python -m udewy.p0 udewy/tests/test_hello.udewy
 python -m udewy.p0 -c udewy/tests/test_hello.udewy
 
 # Target a different backend
+# For wasm32, this opens the generated HTML in your browser
 python -m udewy.p0 --target wasm32 udewy/tests/test_hello.udewy
 python -m udewy.p0 --target riscv udewy/tests/test_hello.udewy
 python -m udewy.p0 --target arm udewy/tests/test_hello.udewy
@@ -1355,9 +1356,18 @@ The runtime provides a built-in passthrough vertex shader with an `a_position` a
 # Default: single HTML file with embedded base64 WASM
 python -m udewy.p0 -c --target wasm32 program.udewy
 
-# Split mode: separate .wasm file (requires HTTP server)
+# Run the embedded HTML directly in your browser
+python -m udewy.p0 --target wasm32 program.udewy
+
+# Serve over HTTP instead of opening file:// directly
+python -m udewy.p0 --target wasm32 --serve-wasm program.udewy
+
+# Split mode: separate .wasm file (served automatically when run)
 python -m udewy.p0 -c --target wasm32 --split-wasm program.udewy
+python -m udewy.p0 --target wasm32 --split-wasm program.udewy
 ```
+
+When served with `--serve-wasm` or `--split-wasm`, the local server exits automatically after the browser tab closes.
 
 ---
 

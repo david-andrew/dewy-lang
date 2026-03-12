@@ -4,6 +4,7 @@ RISC-V backend for udewy.
 Generates GNU assembler syntax targeting RISC-V 64-bit Linux with LP64 ABI.
 """
 
+from os import PathLike
 from pathlib import Path
 
 from .. import t0
@@ -799,9 +800,10 @@ class RiscvBackend(Backend):
             f"Assembly file generated at: {asm_path}"
         )
     
-    def run(self, output_path: Path, args: list[str]) -> int | None:
+    def run(self, output_path: PathLike, args: list[str], **options) -> int | None:
         """Run the compiled executable via QEMU."""
         import subprocess
+        output_path = Path(output_path)
         result = subprocess.run(["qemu-riscv64", str(output_path)] + args)
         return result.returncode
     

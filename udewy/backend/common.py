@@ -12,8 +12,9 @@ The protocol uses a virtual value stack model:
 - Only explicit local/global storage persists values
 """
 
-from pathlib import Path
 from abc import ABC, abstractmethod
+from os import PathLike
+from pathlib import Path
 
 class Backend(ABC):
     """
@@ -393,13 +394,14 @@ class Backend(ABC):
         """
     
     @abstractmethod
-    def run(self, output_path: Path, args: list[str]) -> int | None:
+    def run(self, output_path: PathLike, args: list[str], **options) -> int | None:
         """
         Run the compiled output.
         
         Args:
             output_path: Path to the compiled output (from compile_and_link)
             args: Command-line arguments to pass to the program
+            **options: Backend-specific runtime options
         
         Returns:
             Exit code of the program, or None if running is not supported

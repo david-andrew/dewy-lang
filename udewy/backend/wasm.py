@@ -16,6 +16,7 @@ Host functions provided by JS:
 - host_random() -> i64: Random 64-bit integer
 """
 
+from os import PathLike
 from pathlib import Path
 
 from .. import t0
@@ -975,9 +976,20 @@ class Wasm32Backend(Backend):
         
         return html_path if not split_wasm else wasm_path
     
-    def run(self, output_path: Path, args: list[str]) -> int | None:
-        """WASM runs in browser - return None to indicate manual running needed."""
-        return None
+    def run(self, output_path: PathLike, args: list[str], **options) -> int | None:
+        """Open or serve the generated HTML wrapper."""
+        output_path = Path(output_path)
+        split_wasm = options.get("split_wasm", False)
+        serve_wasm = options.get("serve_wasm", False)
+        html_path = output_path if output_path.suffix == ".html" else output_path.with_suffix(".html")
+        
+        if split_wasm or serve_wasm:
+            self._serve_html(html_path)
+            return 0
+        
+        print(f"Opening {html_path}")
+        self._open_browser(html_path.resolve().as_uri())
+        return 0
     
     def get_compile_message(self, output_path: Path, **options) -> str:
         """Get compilation success message."""
@@ -995,8 +1007,108 @@ class Wasm32Backend(Backend):
         else:
             return (
                 f"Compiled: {output_path}\n"
-                f"(single file with embedded WASM)"
+                f"(single file with embedded WASM)\n"
+                f"Open directly in a browser, or serve with: python -m http.server -d {cache_dir}"
             )
+    
+    def _open_browser(self, target: str) -> None:
+        """Launch the browser without tying its output to the terminal."""
+        import os
+        import subprocess
+        import sys
+        import webbrowser
+        
+        if sys.platform.startswith("linux"):
+            command = ["xdg-open", target]
+        elif sys.platform == "darwin":
+            command = ["open", target]
+        elif sys.platform == "win32":
+            os.startfile(target)
+            return
+        else:
+            webbrowser.open(target)
+            return
+        
+        try:
+            subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except FileNotFoundError:
+            webbrowser.open(target)
+    
+    def _serve_html(self, html_path: Path) -> None:
+        """Serve a generated WASM HTML file over HTTP until interrupted."""
+        from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+        import time
+        
+        html_path = html_path.resolve()
+        cache_dir = html_path.parent
+        startup_timeout = 30.0
+        heartbeat_timeout = 15.0
+        state = {
+            "page_loaded": False,
+            "last_seen": time.monotonic(),
+            "shutdown_requested": False,
+        }
+        
+        class WasmServeHandler(SimpleHTTPRequestHandler):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, directory=str(cache_dir), **kwargs)
+            
+            def log_message(self, format: str, *args) -> None:
+                if self.path.startswith("/__udewy_"):
+                    return
+                super().log_message(format, *args)
+            
+            def do_GET(self) -> None:
+                if self.path == "/__udewy_heartbeat__":
+                    state["page_loaded"] = True
+                    state["last_seen"] = time.monotonic()
+                    self.send_response(204)
+                    self.end_headers()
+                    return
+                
+                if self.path == f"/{html_path.name}":
+                    state["page_loaded"] = True
+                    state["last_seen"] = time.monotonic()
+                
+                super().do_GET()
+            
+            def do_POST(self) -> None:
+                if self.path == "/__udewy_close__":
+                    state["shutdown_requested"] = True
+                    self.send_response(204)
+                    self.end_headers()
+                    return
+                
+                self.send_error(404)
+        
+        with ThreadingHTTPServer(("127.0.0.1", 0), WasmServeHandler) as server:
+            server.timeout = 0.5
+            host, port = server.server_address
+            url = f"http://{host}:{port}/{html_path.name}"
+            print(f"Serving {html_path} at {url}")
+            print("The server exits when the tab closes")
+            self._open_browser(url)
+            try:
+                deadline = time.monotonic() + startup_timeout
+                while True:
+                    server.handle_request()
+                    now = time.monotonic()
+                    if state["shutdown_requested"]:
+                        print("Stopped WASM server")
+                        break
+                    if state["page_loaded"] and now - state["last_seen"] > heartbeat_timeout:
+                        print("Stopped WASM server after browser disconnect")
+                        break
+                    if not state["page_loaded"] and now > deadline:
+                        print("Stopped WASM server after waiting for the browser")
+                        break
+            except KeyboardInterrupt:
+                print("\nStopped WASM server")
     
     def _get_host_functions_js(self) -> str:
         """Return JavaScript code implementing WASM host functions."""
@@ -1561,6 +1673,30 @@ function animationLoop() {
 }
 '''
     
+    def _get_server_lifecycle_js(self) -> str:
+        """Return JS hooks for shutting down the local HTTP server."""
+        return '''
+function setupServerLifecycle() {
+    if (window.location.protocol !== 'http:' && window.location.protocol !== 'https:') {
+        return;
+    }
+
+    const heartbeat = () => {
+        fetch('/__udewy_heartbeat__', { cache: 'no-store' }).catch(() => {});
+    };
+
+    heartbeat();
+    const timer = setInterval(heartbeat, 2000);
+    const notifyClose = () => {
+        clearInterval(timer);
+        navigator.sendBeacon('/__udewy_close__', '');
+    };
+
+    window.addEventListener('pagehide', notifyClose, { once: true });
+    window.addEventListener('beforeunload', notifyClose, { once: true });
+}
+'''
+    
     def _get_split_html_template(self, title: str, wasm_filename: str, host_js: str) -> str:
         """Return HTML template for split WASM mode."""
         return f'''<!DOCTYPE html>
@@ -1581,9 +1717,11 @@ function animationLoop() {
     <pre id="output"></pre>
     <script>
 {host_js}
+{self._get_server_lifecycle_js()}
 
 async function run() {{
     outputElement = document.getElementById('output');
+    setupServerLifecycle();
     try {{
         const response = await fetch('{wasm_filename}');
         const bytes = await response.arrayBuffer();
@@ -1633,6 +1771,7 @@ run();
 
     <script>
 {host_js}
+{self._get_server_lifecycle_js()}
 
 async function loadEmbeddedWasm() {{
     const b64 = document.getElementById('wasm-module').textContent.trim();
@@ -1642,6 +1781,7 @@ async function loadEmbeddedWasm() {{
 
 async function run() {{
     outputElement = document.getElementById('output');
+    setupServerLifecycle();
     try {{
         const {{ instance }} = await loadEmbeddedWasm();
         wasmInstance = instance;

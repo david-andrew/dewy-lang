@@ -1085,26 +1085,25 @@ def parse(toks: list, src: str, target: str = "x86_64") -> tuple[str, "Backend"]
             raise SyntaxError(f"Undefined function: {name}")
     
     return backend.finish_module(), backend
-
-
 # ============================================================================
 # CLI entry point
 # ============================================================================
 
 if __name__ == "__main__":
     import sys
-    from pathlib import Path
     
     if len(sys.argv) < 2:
-        print("Usage: python -m udewy.p0 [-c] [--target TARGET] [--split-wasm] <file.udewy> [args...]")
+        print("Usage: python -m udewy.p0 [-c] [--target TARGET] [--split-wasm] [--serve-wasm] <file.udewy> [args...]")
         print("  -c              Compile only, don't run")
         print("  --target TARGET Target backend (x86_64, wasm32, riscv, arm)")
         print("  --split-wasm    For wasm32: output separate .wasm file instead of embedded HTML")
+        print("  --serve-wasm    For wasm32: serve the generated HTML over HTTP")
         sys.exit(1)
     
     compile_only = False
     target = "x86_64"
     split_wasm = False
+    serve_wasm = False
     arg_idx = 1
     
     while arg_idx < len(sys.argv) and sys.argv[arg_idx].startswith("-"):
@@ -1117,6 +1116,9 @@ if __name__ == "__main__":
             arg_idx += 1
         elif sys.argv[arg_idx] == "--split-wasm":
             split_wasm = True
+            arg_idx += 1
+        elif sys.argv[arg_idx] == "--serve-wasm":
+            serve_wasm = True
             arg_idx += 1
         else:
             break
@@ -1151,9 +1153,8 @@ if __name__ == "__main__":
     if compile_only:
         print(backend.get_compile_message(output_path, split_wasm=split_wasm))
     else:
-        exit_code = backend.run(output_path, script_args)
+        exit_code = backend.run(output_path, script_args, split_wasm=split_wasm, serve_wasm=serve_wasm)
         if exit_code is not None:
             sys.exit(exit_code)
         else:
-            # Backend doesn't support direct execution (e.g., WASM)
             print(backend.get_compile_message(output_path, split_wasm=split_wasm))
