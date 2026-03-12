@@ -1158,6 +1158,8 @@ let audioNumSamples = 0;
 let audioChannels = 1;
 let audioBufferPtr = 0;
 let audioPendingPlay = false;
+let audioResumePending = false;
+let audioPromptTimer = null;
 
 // Audio streaming state
 let audioStreamMode = false;
@@ -1209,6 +1211,115 @@ function appendOutput(text) {
     console.log(text);
 }
 
+function hideAudioPrompt() {
+    if (audioPromptTimer !== null) {
+        clearTimeout(audioPromptTimer);
+        audioPromptTimer = null;
+    }
+    const overlay = document.getElementById('audio-play-overlay');
+    if (overlay) {
+        overlay.remove();
+    }
+}
+
+function showAudioPrompt() {
+    let overlay = document.getElementById('audio-play-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'audio-play-overlay';
+        overlay.style.cssText = 'position:fixed; top:16px; left:16px; z-index:9999; pointer-events:none;';
+
+        const button = document.createElement('button');
+        button.id = 'audio-play-btn';
+        button.textContent = 'Click to Enable Audio';
+        button.style.cssText = 'pointer-events:auto; font-size:1em; padding:0.75em 1em; cursor:pointer; background:rgba(24,24,24,0.92); color:white; border:1px solid rgba(255,255,255,0.18); border-radius:999px; box-shadow:0 4px 16px rgba(0,0,0,0.35);';
+        button.onclick = () => {
+            requestAudioUnlock(true);
+        };
+
+        overlay.appendChild(button);
+        document.body.appendChild(overlay);
+    }
+}
+
+function playAudioBuffer() {
+    const buffer = audioCtx.createBuffer(audioChannels, audioNumSamples, audioSampleRate);
+    const view = new Int16Array(memory.buffer, audioBufferPtr, audioNumSamples * audioChannels);
+
+    for (let ch = 0; ch < audioChannels; ch++) {
+        const channelData = buffer.getChannelData(ch);
+        for (let i = 0; i < audioNumSamples; i++) {
+            const idx = audioChannels > 1 ? i * audioChannels + ch : i;
+            channelData[i] = view[idx] / 32768.0;
+        }
+    }
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioCtx.destination);
+    source.start();
+}
+
+function flushPendingAudio() {
+    if (!audioCtx || audioCtx.state !== 'running') {
+        return;
+    }
+
+    hideAudioPrompt();
+
+    if (audioPendingPlay) {
+        audioPendingPlay = false;
+        playAudioBuffer();
+    }
+
+    if (audioStreamMode && !audioStreamStarted && audioScriptNode) {
+        audioScriptNode.connect(audioCtx.destination);
+        audioStreamStarted = true;
+    }
+}
+
+function scheduleAudioPrompt() {
+    if (audioPromptTimer !== null) {
+        return;
+    }
+
+    audioPromptTimer = window.setTimeout(() => {
+        audioPromptTimer = null;
+        if (audioCtx && audioCtx.state !== 'running') {
+            showAudioPrompt();
+        }
+    }, 150);
+}
+
+function requestAudioUnlock(forceRetry=false) {
+    if (!audioCtx) {
+        return;
+    }
+
+    if (audioCtx.state === 'running') {
+        flushPendingAudio();
+        return;
+    }
+
+    scheduleAudioPrompt();
+
+    if (audioResumePending && !forceRetry) {
+        return;
+    }
+
+    audioResumePending = true;
+    Promise.resolve(audioCtx.resume())
+        .catch(() => null)
+        .then(() => {
+            audioResumePending = false;
+            if (audioCtx && audioCtx.state === 'running') {
+                flushPendingAudio();
+            } else {
+                showAudioPrompt();
+            }
+        });
+}
+
 function getInputCanvas() {
     return webglCanvas || canvas;
 }
@@ -1249,6 +1360,7 @@ function ensurePointerHandlers() {
     window.addEventListener('pointerdown', (event) => {
         pointerDown = true;
         updatePointerFromEvent(event);
+        requestAudioUnlock(true);
     });
 
     window.addEventListener('pointerup', (event) => {
@@ -1284,6 +1396,7 @@ function ensureKeyboardHandlers() {
             keysPressedFrame.add(code);
         }
         keysDown.add(code);
+        requestAudioUnlock(true);
     });
 
     window.addEventListener('keyup', (event) => {
@@ -1468,50 +1581,9 @@ const imports = {
             if (!audioCtx) {
                 audioCtx = new AudioContext({ sampleRate: audioSampleRate });
             }
-            
-            function doPlay() {
-                const buffer = audioCtx.createBuffer(audioChannels, audioNumSamples, audioSampleRate);
-                const view = new Int16Array(memory.buffer, audioBufferPtr, audioNumSamples * audioChannels);
-                
-                // Convert i16 samples to f32 and copy to AudioBuffer
-                for (let ch = 0; ch < audioChannels; ch++) {
-                    const channelData = buffer.getChannelData(ch);
-                    for (let i = 0; i < audioNumSamples; i++) {
-                        const idx = audioChannels > 1 ? i * audioChannels + ch : i;
-                        channelData[i] = view[idx] / 32768.0;
-                    }
-                }
-                
-                const source = audioCtx.createBufferSource();
-                source.buffer = buffer;
-                source.connect(audioCtx.destination);
-                source.start();
-            }
-            
-            // Handle browser autoplay policy
-            if (audioCtx.state === 'suspended') {
-                audioPendingPlay = true;
-                // Show play button
-                let playBtn = document.getElementById('audio-play-btn');
-                if (!playBtn) {
-                    playBtn = document.createElement('button');
-                    playBtn.id = 'audio-play-btn';
-                    playBtn.textContent = '🔊 Click to Play Audio';
-                    playBtn.style.cssText = 'font-size: 1.5em; padding: 1em 2em; margin: 1em; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 8px;';
-                    playBtn.onclick = async () => {
-                        await audioCtx.resume();
-                        playBtn.remove();
-                        if (audioPendingPlay) {
-                            audioPendingPlay = false;
-                            doPlay();
-                        }
-                    };
-                    document.body.insertBefore(playBtn, document.body.firstChild);
-                }
-                appendOutput('\\n[Audio ready - click button to play]\\n');
-            } else {
-                doPlay();
-            }
+
+            audioPendingPlay = true;
+            requestAudioUnlock();
             return 0n;
         },
         host_audio_sample_rate: () => BigInt(audioSampleRate),
@@ -1583,31 +1655,8 @@ const imports = {
         },
         host_audio_stream_write: () => {
             if (!audioStreamMode || !audioCtx) return 0n;
-            
-            // Handle autoplay policy
-            if (audioCtx.state === 'suspended') {
-                let playBtn = document.getElementById('audio-play-btn');
-                if (!playBtn) {
-                    playBtn = document.createElement('button');
-                    playBtn.id = 'audio-play-btn';
-                    playBtn.textContent = '🔊 Click to Enable Audio';
-                    playBtn.style.cssText = 'position:fixed; top:10px; left:10px; z-index:9999; font-size:1.2em; padding:0.5em 1em; cursor:pointer; background:#4CAF50; color:white; border:none; border-radius:8px;';
-                    playBtn.onclick = async () => {
-                        await audioCtx.resume();
-                        playBtn.remove();
-                        audioScriptNode.connect(audioCtx.destination);
-                        audioStreamStarted = true;
-                    };
-                    document.body.appendChild(playBtn);
-                }
-                return 0n;
-            }
-            
-            // Connect on first write if not suspended
-            if (!audioStreamStarted) {
-                audioScriptNode.connect(audioCtx.destination);
-                audioStreamStarted = true;
-            }
+
+            requestAudioUnlock();
             
             // Mark current write buffer as ready and switch to other buffer
             if (audioWriteBuffer === 0) {
