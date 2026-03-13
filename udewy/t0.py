@@ -152,6 +152,15 @@ def is_hex(c:char)->bool:
     return (48 <= o <= 57) or (65 <= o <= 70) or (97 <= o <= 102)
 
 
+def hex_value(c: char) -> int:
+    o = ord(c)
+    if 48 <= o <= 57:
+        return o - 48
+    if 65 <= o <= 70:
+        return o - 55
+    return o - 87
+
+
 def tokenize(src:str)->list[PackedToken]:
     n = len(src)
     i = 0
@@ -215,8 +224,7 @@ def tokenize(src:str)->list[PackedToken]:
             val = 0
             while i < n and (is_hex(src[i]) or src[i] == '_'):
                 if src[i] != '_':
-                    digit_val = ord(src[i]) - 48 if 48 <= ord(src[i]) <= 57 else ord(src[i]) - 55
-                    val = val << 4 | digit_val
+                    val = val << 4 | hex_value(src[i])
                 i += 1
             toks.append(pack(val, start, TK_NUMBER))
             continue
@@ -250,9 +258,12 @@ def tokenize(src:str)->list[PackedToken]:
             i += 1
             while i < n and src[i] != '"':
                 if src[i] == '{' or src[i] == '}': raise SyntaxError(f"interpolation not supported in udewy strings at {i}: {src[start:i]!r}")
-                if src[i] == '\\': i += 1 # skip escape characters, properly handles escaping quotes
+                if src[i] == '\\':
+                    i += 1
+                    if i >= n:
+                        raise SyntaxError(f"unterminated string at {i}: {src[start:i]!r}")
                 i += 1
-            if src[i] != '"':
+            if i >= n or src[i] != '"':
                 raise SyntaxError(f"unterminated string at {i}: {src[start:i]!r}")
             i += 1
             # store the string text location + length
@@ -298,6 +309,8 @@ def tokenize(src:str)->list[PackedToken]:
                 if src[i] == '>':
                     stack -= 1
                 i += 1
+            if stack != 0:
+                raise SyntaxError(f"unterminated type parameter at {start}: {src[start:i]!r}")
             toks.append(pack(i - start, start, TK_TYPE_PARAM))
             continue
 

@@ -199,18 +199,22 @@ class Backend(ABC):
     @abstractmethod    
     def save_value(self) -> None:
         """
-        Save the top value to backend-managed temporary storage.
+        Preserve the current top value for later backend operations.
         
-        Used when the parser needs to preserve a value across other operations.
-        Must be balanced with restore_value.
+        The parser uses this before operations that need to keep an earlier value
+        alive while evaluating more expressions. A backend may spill the value to
+        physical storage, keep it in an auxiliary stack, or rely on a native
+        operand stack as long as later parser-driven operations see the expected
+        logical ordering.
         """
 
     @abstractmethod
     def restore_value(self) -> None:
         """
-        Restore a previously saved value to the top of the stack.
+        Re-expose the most recently preserved value on top of the value stack.
         
-        Must be preceded by save_value.
+        This is only used in the parser paths that explicitly need the saved
+        value again as the visible top-of-stack value.
         """
     
     # ========================================================================
@@ -238,6 +242,16 @@ class Backend(ABC):
         - Arithmetic: TK_PLUS, TK_MINUS, TK_MUL, TK_IDIV, TK_MOD
         - Bitwise: TK_AND, TK_OR, TK_XOR, TK_LEFT_SHIFT, TK_RIGHT_SHIFT
         - Comparison: TK_EQ, TK_NOT_EQ, TK_LT, TK_GT, TK_LT_EQ, TK_GT_EQ
+        """
+
+    @abstractmethod
+    def pipe_call(self) -> None:
+        """
+        Apply the pipe operator.
+
+        Logical stack order is [... left_value fn_ptr]. The backend should call
+        the function pointer with the left value as its first argument and leave
+        the result on the value stack.
         """
     
     # ========================================================================
@@ -293,6 +307,15 @@ class Backend(ABC):
         
         Stack: [... fn_ptr arg1 arg2 ... argN] -> [... result]
         Function pointer was pushed, then args were pushed.
+        """
+
+    @abstractmethod
+    def max_call_args(self) -> int | None:
+        """
+        Return the maximum number of call arguments this backend can marshal.
+
+        Return None when the backend has no practical fixed limit at the code
+        generation layer.
         """
 
     @abstractmethod    

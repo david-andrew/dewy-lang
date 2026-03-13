@@ -532,6 +532,9 @@ class RiscvBackend(Backend):
         self._emit("ld t5, 0(sp)")   # fn ptr
         self._emit("addi sp, sp, 8")
         self._emit("jalr ra, t5, 0")
+
+    def max_call_args(self) -> int:
+        return 8
     
     def syscall(self, num_args: int) -> None:
         """Invoke a syscall using ecall."""

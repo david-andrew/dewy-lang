@@ -56,6 +56,9 @@ class Wasm32Backend(Backend):
         # Symbol tracking
         self._fn_labels: dict[int, str] = {}
         self._fn_indices: dict[int, int] = {}
+        self._fn_param_counts: dict[int, int] = {}
+        self._fn_table_ids: list[int] = []
+        self._indirect_arities: set[int] = set()
         self._global_offsets: dict[int, int] = {}
         self._global_labels: dict[int, str] = {}
         self._string_offsets: dict[int, int] = {}
@@ -68,7 +71,7 @@ class Wasm32Backend(Backend):
         # Track which functions are defined
         self._defined_fns: set[int] = set()
         
-        # Next function index (after imports)
+        # Next table index for user-defined functions
         self._next_fn_index: int = 0
         
         # Setup imports for syscalls
@@ -123,7 +126,6 @@ class Wasm32Backend(Backend):
             '(import "env" "host_webgl_render" (func $host_webgl_render (result i64)))',
         ]
         self._imports.extend(host_imports)
-        self._next_fn_index = 35  # 35 host function imports
     
     def _new_label(self, prefix: str = "L") -> str:
         label = f"${prefix}{self._next_label}"
@@ -143,6 +145,28 @@ class Wasm32Backend(Backend):
         if self._data_offset % 8 != 0:
             self._data_offset += 8 - (self._data_offset % 8)
         return offset
+
+    def _fn_type_name(self, arity: int) -> str:
+        return f"$type_fn{arity}"
+
+    def _spill_top_value(self) -> None:
+        self._emit("local.set $swap0")
+        self._emit("global.get $stack_ptr")
+        self._emit("i32.const 8")
+        self._emit("i32.sub")
+        self._emit("local.tee $swap1")
+        self._emit("global.set $stack_ptr")
+        self._emit("local.get $swap1")
+        self._emit("local.get $swap0")
+        self._emit("i64.store")
+
+    def _restore_saved_value(self) -> None:
+        self._emit("global.get $stack_ptr")
+        self._emit("i64.load")
+        self._emit("global.get $stack_ptr")
+        self._emit("i32.const 8")
+        self._emit("i32.add")
+        self._emit("global.set $stack_ptr")
     
     # ========================================================================
     # Module lifecycle
@@ -164,13 +188,24 @@ class Wasm32Backend(Backend):
         # Host function imports - must come before any definitions
         for imp in self._imports:
             output.append(f"  {imp}")
+
+        for arity in sorted(self._indirect_arities):
+            params = " ".join("(param i64)" for _ in range(arity))
+            output.append(f"  (type {self._fn_type_name(arity)} (func {params} (result i64)))")
         
         # Global definitions - after imports, before functions
         output.append('  (global $stack_ptr (mut i32) (i32.const 131072))')
+
+        if self._fn_table_ids:
+            output.append(f"  (table {len(self._fn_table_ids)} funcref)")
         
         # Functions
         for fn in self._functions:
             output.append(fn)
+
+        if self._fn_table_ids:
+            refs = " ".join(self._fn_labels[label_id] for label_id in self._fn_table_ids)
+            output.append(f"  (elem (i32.const 0) {refs})")
         
         # Data segments
         for offset, data in self._data_segments:
@@ -351,6 +386,8 @@ class Wasm32Backend(Backend):
         fn_name = f"$fn{label_id}"
         self._fn_labels[label_id] = fn_name
         self._fn_indices[label_id] = self._next_fn_index
+        self._fn_param_counts[label_id] = num_params
+        self._fn_table_ids.append(label_id)
         self._next_fn_index += 1
         return label_id
     
@@ -363,6 +400,7 @@ class Wasm32Backend(Backend):
             self._fn_labels[label_id] = fn_name
         else:
             fn_name = self._fn_labels.get(label_id, f"$fn{label_id}")
+        self._fn_param_counts[label_id] = param_count
         
         self._current_fn_name = fn_name
         self._current_fn = []
@@ -437,7 +475,7 @@ class Wasm32Backend(Backend):
         self._emit("i64.const 0")
     
     def push_fn_ref(self, label_id: int) -> None:
-        """Push function index onto the value stack."""
+        """Push function table index onto the value stack."""
         fn_idx = self._fn_indices.get(label_id, 0)
         self._emit(f"i64.const {fn_idx}")
     
@@ -526,10 +564,9 @@ class Wasm32Backend(Backend):
     
     def pipe_call(self) -> None:
         """Handle pipe operator."""
-        # Stack: [arg fn_ptr]
-        # For wasm, we'd need indirect calls via table
-        # For now, just swap and call
-        self._emit("call_indirect (type $fn1)")
+        self._indirect_arities.add(1)
+        self._emit("i32.wrap_i64")
+        self._emit(f"call_indirect (type {self._fn_type_name(1)})")
     
     # ========================================================================
     # Memory operations
@@ -633,8 +670,22 @@ class Wasm32Backend(Backend):
     
     def call_indirect(self, num_args: int) -> None:
         """Call a function indirectly via table."""
+        self._indirect_arities.add(num_args)
+        for _ in range(num_args + 1):
+            self._spill_top_value()
+
+        self._restore_saved_value()
         self._emit("i32.wrap_i64")
-        self._emit(f"call_indirect (type $fn{num_args})")
+        self._emit("local.set $swap1")
+
+        for _ in range(num_args):
+            self._restore_saved_value()
+
+        self._emit("local.get $swap1")
+        self._emit(f"call_indirect (type {self._fn_type_name(num_args)})")
+
+    def max_call_args(self) -> int | None:
+        return None
     
     def syscall(self, num_args: int) -> None:
         """Syscalls are not supported on WASM. Use host function intrinsics instead."""

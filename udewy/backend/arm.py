@@ -517,6 +517,9 @@ class ArmBackend(Backend):
         self.prepare_args(num_args)
         self._emit("ldr x9, [sp], #16")  # fn ptr
         self._emit("blr x9")
+
+    def max_call_args(self) -> int:
+        return 8
     
     def syscall(self, num_args: int) -> None:
         """Invoke a syscall using svc #0."""

@@ -507,6 +507,9 @@ class X86_64Backend(Backend):
         self.prepare_args(num_args)
         self._emit("popq %rax")  # fn ptr
         self._emit("call *%rax")
+
+    def max_call_args(self) -> int:
+        return 6
     
     def syscall(self, num_args: int) -> None:
         """Invoke a syscall."""

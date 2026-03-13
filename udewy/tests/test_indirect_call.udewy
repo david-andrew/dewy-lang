@@ -1,0 +1,15 @@
+# Test computed function-pointer calls and pipe calls through a variable.
+let double = (x:int):>int => {
+    return x * 2
+}
+
+let choose = ():>int => {
+    return double
+}
+
+let main = ():>int => {
+    let fn_ptr:int = choose()
+    let indirect:int = (fn_ptr)(5)
+    let piped:int = 6 |> fn_ptr
+    return indirect + piped
+}
