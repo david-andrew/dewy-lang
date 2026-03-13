@@ -201,6 +201,18 @@ class RiscvBackend(Backend):
         label = self._global_labels[label_id]
         self._emit(f"la t0, {label}")
         self._emit("sd a0, 0(t0)")
+
+    def function_ref(self, label_id: int) -> str:
+        return self._fn_labels[label_id]
+
+    def string_ref(self, label_id: int) -> str:
+        return f"{self._string_labels[label_id]}+8"
+
+    def array_ref(self, label_id: int) -> str:
+        return f"{self._array_labels[label_id]}+8"
+
+    def static_ref(self, label_id: int) -> str:
+        return self._static_labels[label_id]
     
     # ========================================================================
     # Functions

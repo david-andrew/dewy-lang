@@ -107,6 +107,22 @@ class Backend(ABC):
     @abstractmethod
     def store_global(self, label_id: int) -> None:
         """Pop value from stack and store to global."""
+
+    @abstractmethod
+    def function_ref(self, label_id: int) -> int | str:
+        """Return a backend-native constant reference to a function."""
+
+    @abstractmethod
+    def string_ref(self, label_id: int) -> int | str:
+        """Return a backend-native constant reference to string data."""
+
+    @abstractmethod
+    def array_ref(self, label_id: int) -> int | str:
+        """Return a backend-native constant reference to array data."""
+
+    @abstractmethod
+    def static_ref(self, label_id: int) -> int | str:
+        """Return a backend-native constant reference to static storage."""
     
     # ========================================================================
     # Functions

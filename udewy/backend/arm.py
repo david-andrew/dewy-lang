@@ -206,6 +206,18 @@ class ArmBackend(Backend):
         self._emit(f"adrp x9, {label}")
         self._emit(f"add x9, x9, :lo12:{label}")
         self._emit("str x0, [x9]")
+
+    def function_ref(self, label_id: int) -> str:
+        return self._fn_labels[label_id]
+
+    def string_ref(self, label_id: int) -> str:
+        return f"{self._string_labels[label_id]}+8"
+
+    def array_ref(self, label_id: int) -> str:
+        return f"{self._array_labels[label_id]}+8"
+
+    def static_ref(self, label_id: int) -> str:
+        return self._static_labels[label_id]
     
     # ========================================================================
     # Functions

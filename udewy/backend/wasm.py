@@ -327,6 +327,18 @@ class Wasm32Backend(Backend):
         self._emit(f"i32.const {offset}")  # Push address
         self._emit("local.get $swap0")  # Push value back
         self._emit("i64.store")
+
+    def function_ref(self, label_id: int) -> int:
+        return self._fn_indices.get(label_id, 0)
+
+    def string_ref(self, label_id: int) -> int:
+        return self._string_offsets[label_id] + 8
+
+    def array_ref(self, label_id: int) -> int:
+        return self._array_offsets[label_id] + 8
+
+    def static_ref(self, label_id: int) -> int:
+        return self._static_offsets[label_id]
     
     # ========================================================================
     # Functions

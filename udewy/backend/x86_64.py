@@ -188,6 +188,18 @@ class X86_64Backend(Backend):
         """Pop value from stack and store to global."""
         label = self._global_labels[label_id]
         self._emit(f"movq %rax, {label}(%rip)")
+
+    def function_ref(self, label_id: int) -> str:
+        return self._fn_labels[label_id]
+
+    def string_ref(self, label_id: int) -> str:
+        return f"{self._string_labels[label_id]}+8"
+
+    def array_ref(self, label_id: int) -> str:
+        return f"{self._array_labels[label_id]}+8"
+
+    def static_ref(self, label_id: int) -> str:
+        return self._static_labels[label_id]
     
     # ========================================================================
     # Functions

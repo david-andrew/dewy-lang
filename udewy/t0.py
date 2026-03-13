@@ -5,16 +5,13 @@ designed to be straightforward to translate to assembly or etc. low level code
 
 from itertools import count
 
-import pdb
-
-
 # some basic type aliases
-type char = str # length=1
-type TokenKind = int
-type TokenValue = int
-type Location = int
-type Token = tuple[TokenValue, Location, TokenKind]
-type PackedToken = int  # 128-bit integer: vvvv_vvvv_vvvv_vvvv llll_llll_llll_kkkk (v=value, l=location, k=kind)
+char = str  # length=1
+TokenKind = int
+TokenValue = int
+Location = int
+Token = tuple[TokenValue, Location, TokenKind]
+PackedToken = int  # 128-bit integer: vvvv_vvvv_vvvv_vvvv llll_llll_llll_kkkk (v=value, l=location, k=kind)
 
 # ----- Token kinds -----
 _counter = count(0)
@@ -77,6 +74,52 @@ TRUE_VALUE: TokenValue = 0xFFFF_FFFF_FFFF_FFFF
 FALSE_VALUE: TokenValue = 0x0000_0000_0000_0000
 NO_VALUE: TokenValue = 0 # i.e. placeholder for tokens that don't have a value
 
+KEYWORD_TOKENS: dict[str, tuple[TokenValue, TokenKind]] = {
+    "let": (NO_VALUE, TK_LET),
+    "const": (NO_VALUE, TK_LET),
+    "and": (NO_VALUE, TK_AND),
+    "or": (NO_VALUE, TK_OR),
+    "xor": (NO_VALUE, TK_XOR),
+    "not": (NO_VALUE, TK_NOT),
+    "true": (TRUE_VALUE, TK_NUMBER),
+    "false": (FALSE_VALUE, TK_NUMBER),
+    "if": (NO_VALUE, TK_IF),
+    "loop": (NO_VALUE, TK_LOOP),
+    "else": (NO_VALUE, TK_ELSE),
+    "return": (NO_VALUE, TK_RETURN),
+    "break": (NO_VALUE, TK_BREAK),
+    "continue": (NO_VALUE, TK_CONTINUE),
+    "transmute": (NO_VALUE, TK_TRANSMUTE),
+}
+
+MULTI_CHAR_TOKENS: tuple[tuple[str, TokenKind], ...] = (
+    (">=?", TK_GT_EQ),
+    ("<=?", TK_LT_EQ),
+    ("//", TK_IDIV),
+    ("=?", TK_EQ),
+    (">?", TK_GT),
+    ("<?", TK_LT),
+    (":>", _TK_FN_COLON),
+    ("=>", TK_FN_ARROW),
+    ("|>", TK_PIPE),
+    ("<<", TK_LEFT_SHIFT),
+    (">>", TK_RIGHT_SHIFT),
+)
+
+SINGLE_CHAR_TOKENS: dict[str, TokenKind] = {
+    "+": TK_PLUS,
+    "-": TK_MINUS,
+    "*": TK_MUL,
+    "%": TK_MOD,
+    "(": TK_LEFT_PAREN,
+    ")": TK_RIGHT_PAREN,
+    "{": TK_LEFT_BRACE,
+    "}": TK_RIGHT_BRACE,
+    "[": TK_LEFT_BRACKET,
+    "]": TK_RIGHT_BRACKET,
+    ":": _TK_COLON,
+}
+
 
 def pack(value:TokenValue, location:Location, kind:TokenKind)->PackedToken:
     """
@@ -95,29 +138,6 @@ def unpack(packed:PackedToken)->Token:
 
 def kindof(packed:PackedToken)->TokenKind:
     return packed & 0xFFFF
-
-def str_left_eq(prefix:str, s:str)->bool:
-    """Check if the prefix is a left substring of the string"""
-    if len(prefix) > len(s):
-        return False
-    i = 0
-    end = len(prefix)
-    while i < end:
-        if prefix[i] != s[i]:
-            return False
-        i += 1
-    return True
-
-def str_eq(a:str, b:str)->bool:
-    """Check if two strings are equal"""
-    if len(a) != len(b):
-        return False
-    i = 0
-    while i < len(a):
-        if a[i] != b[i]:
-            return False
-        i += 1
-    return True
 
 def is_alpha(c:char)->bool:
     o = ord(c)
@@ -140,7 +160,7 @@ def tokenize(src:str)->list[PackedToken]:
     while i < n:
         # running sanity check(s) for prototype tokens that shouldn't be in the final output
         # check here so that we can maintain a single pass tokenizer
-        if len(toks) > 1 and (kindof(toks[-2]) == _TK_COLON or kindof(toks[-2]) == _TK_FN_COLON):
+        if len(toks) > 1 and kindof(toks[-2]) in (_TK_COLON, _TK_FN_COLON):
             raise SyntaxError(f"colon must be followed by a type annotation at {i}: {src[i]!r}")
         
         # current character
@@ -165,42 +185,27 @@ def tokenize(src:str)->list[PackedToken]:
             while i < n and (is_alpha(src[i]) or is_digit(src[i])):
                 i += 1
             text = src[start:i]
-            
-            # specific keywords (must be exact match, not prefix)
-            if   str_eq("let", text):       toks.append(pack(NO_VALUE, start, TK_LET))
-            elif str_eq("const", text):     toks.append(pack(NO_VALUE, start, TK_LET))
-            elif str_eq("and", text):       toks.append(pack(NO_VALUE, start, TK_AND))
-            elif str_eq("or", text):        toks.append(pack(NO_VALUE, start, TK_OR))
-            elif str_eq("xor", text):       toks.append(pack(NO_VALUE, start, TK_XOR))
-            elif str_eq("not", text):       toks.append(pack(NO_VALUE, start, TK_NOT))
-            elif str_eq("true", text):      toks.append(pack(TRUE_VALUE, start, TK_NUMBER))
-            elif str_eq("false", text):     toks.append(pack(FALSE_VALUE, start, TK_NUMBER))
-            elif str_eq("if", text):        toks.append(pack(NO_VALUE, start, TK_IF))
-            elif str_eq("loop", text):      toks.append(pack(NO_VALUE, start, TK_LOOP))
-            elif str_eq("else", text):      toks.append(pack(NO_VALUE, start, TK_ELSE))
-            elif str_eq("return", text):    toks.append(pack(NO_VALUE, start, TK_RETURN))
-            elif str_eq("break", text):     toks.append(pack(NO_VALUE, start, TK_BREAK))
-            elif str_eq("continue", text):  toks.append(pack(NO_VALUE, start, TK_CONTINUE))
-            elif str_eq("import", text):    raise SyntaxError(f"`import` is a preprocessing directive and may only appear in the leading import prelude at {start}")
-            elif str_eq("transmute", text): toks.append(pack(NO_VALUE, start, TK_TRANSMUTE))
-            
-            # special cases of identifiers preceded or followed by something
+
+            keyword = KEYWORD_TOKENS.get(text)
+            if keyword is not None:
+                value, kind = keyword
+                toks.append(pack(value, start, kind))
+            elif text == "import":
+                raise SyntaxError(f"`import` is a preprocessing directive and may only appear in the leading import prelude at {start}")
             elif i < n and src[i] == '(':
                 toks.append(pack(i - start, start, TK_IDENT_CALL))
-                i += 1 # consume the '('
-            elif len(toks) > 0 and kindof(toks[-1]) == _TK_COLON:
+                i += 1  # consume the '('
+            elif toks and kindof(toks[-1]) == _TK_COLON:
                 toks.pop()
                 toks.append(pack(i - start, start, TK_TYPE))
-            elif len(toks) > 0 and kindof(toks[-1]) == _TK_FN_COLON:
+            elif toks and kindof(toks[-1]) == _TK_FN_COLON:
                 toks.pop()
                 toks.append(pack(i - start, start, TK_FN_TYPE))
-            
-            # check `void` after the special cases because `:void` should become a type, not a bare void
-            elif str_eq("void", text): toks.append(pack(NO_VALUE, start, TK_VOID))
-            
-            # regular identifier
-            else: toks.append(pack(i - start, start, TK_IDENT))
-            
+            elif text == "void":
+                # `:void` should become a type token, not a bare void keyword.
+                toks.append(pack(NO_VALUE, start, TK_VOID))
+            else:
+                toks.append(pack(i - start, start, TK_IDENT))
             continue
 
         # hex number
@@ -254,60 +259,30 @@ def tokenize(src:str)->list[PackedToken]:
             toks.append(pack(i - start, start, TK_STRING))
             continue
         
-
         # multi-character tokens
-        if str_left_eq("//", src[i:]):
-            toks.append(pack(NO_VALUE, i, TK_IDIV))
+        if src.startswith(")(", i):
+            toks.append(pack(NO_VALUE, i, TK_RIGHT_PAREN))
+            toks.append(pack(NO_VALUE, i, TK_EXPR_CALL))
             i += 2
             continue
-        if str_left_eq("=?", src[i:]):
-            if kindof(toks[-1]) == TK_NOT:
+
+        if src.startswith("=?", i):
+            if toks and kindof(toks[-1]) == TK_NOT:
                 toks.pop()
                 toks.append(pack(NO_VALUE, i, TK_NOT_EQ))
             else:
                 toks.append(pack(NO_VALUE, i, TK_EQ))
             i += 2
             continue
-        if str_left_eq(">=?", src[i:]):
-            toks.append(pack(NO_VALUE, i, TK_GT_EQ))
-            i += 3
-            continue
-        if str_left_eq("<=?", src[i:]):
-            toks.append(pack(NO_VALUE, i, TK_LT_EQ))
-            i += 3
-            continue
-        if str_left_eq(">?", src[i:]):
-            toks.append(pack(NO_VALUE, i, TK_GT))
-            i += 2
-            continue
-        if str_left_eq("<?", src[i:]):
-            toks.append(pack(NO_VALUE, i, TK_LT))
-            i += 2
-            continue
-        if str_left_eq(":>", src[i:]):
-            toks.append(pack(NO_VALUE, i, _TK_FN_COLON))
-            i += 2
-            continue
-        if str_left_eq("=>", src[i:]):
-            toks.append(pack(NO_VALUE, i, TK_FN_ARROW))
-            i += 2
-            continue
-        if str_left_eq("|>", src[i:]):
-            toks.append(pack(NO_VALUE, i, TK_PIPE))
-            i += 2
-            continue
-        if str_left_eq("<<", src[i:]):
-            toks.append(pack(NO_VALUE, i, TK_LEFT_SHIFT))
-            i += 2
-            continue
-        if str_left_eq(">>", src[i:]):
-            toks.append(pack(NO_VALUE, i, TK_RIGHT_SHIFT))
-            i += 2
-            continue
-        if str_left_eq(")(", src[i:]):
-            toks.append(pack(NO_VALUE, i, TK_RIGHT_PAREN))
-            toks.append(pack(NO_VALUE, i, TK_EXPR_CALL))
-            i += 2
+
+        matched_multi = False
+        for text, kind in MULTI_CHAR_TOKENS:
+            if src.startswith(text, i):
+                toks.append(pack(NO_VALUE, i, kind))
+                i += len(text)
+                matched_multi = True
+                break
+        if matched_multi:
             continue
     
         # type parameter
@@ -315,29 +290,26 @@ def tokenize(src:str)->list[PackedToken]:
             stack = 1
             start = i
             i += 1
-            while i < n and stack > 0: #src[i] != '>':
-                if src[i] == '#': raise SyntaxError(f"udewy doesn't support comments inside type parameters at {i}: {src[start:i]!r}")
-                if src[i] == '<': stack += 1
-                if src[i] == '>': stack -= 1
+            while i < n and stack > 0:
+                if src[i] == '#':
+                    raise SyntaxError(f"udewy doesn't support comments inside type parameters at {i}: {src[start:i]!r}")
+                if src[i] == '<':
+                    stack += 1
+                if src[i] == '>':
+                    stack -= 1
                 i += 1
             toks.append(pack(i - start, start, TK_TYPE_PARAM))
             continue
 
         # single-character tokens
-        i += 1
-        if c == "+": toks.append(pack(NO_VALUE, i, TK_PLUS));          continue
-        if c == "-": toks.append(pack(NO_VALUE, i, TK_MINUS));         continue
-        if c == "*": toks.append(pack(NO_VALUE, i, TK_MUL));           continue
-        if c == "%": toks.append(pack(NO_VALUE, i, TK_MOD));           continue
-        if c == "(": toks.append(pack(NO_VALUE, i, TK_LEFT_PAREN));    continue
-        if c == ")": toks.append(pack(NO_VALUE, i, TK_RIGHT_PAREN));   continue
-        if c == "{": toks.append(pack(NO_VALUE, i, TK_LEFT_BRACE));    continue
-        if c == "}": toks.append(pack(NO_VALUE, i, TK_RIGHT_BRACE));   continue
-        if c == "[": toks.append(pack(NO_VALUE, i, TK_LEFT_BRACKET));  continue
-        if c == "]": toks.append(pack(NO_VALUE, i, TK_RIGHT_BRACKET)); continue
-        if c == ":": toks.append(pack(NO_VALUE, i, _TK_COLON));        continue
+        token_kind = SINGLE_CHAR_TOKENS.get(c)
+        if token_kind is not None:
+            toks.append(pack(NO_VALUE, i, token_kind))
+            i += 1
+            continue
         if c == "=":
-            if len(toks) == 0: raise SyntaxError(f"unexpected equals sign at {i}: {src[i:]!r}")
+            if not toks:
+                raise SyntaxError(f"unexpected equals sign at {i}: {src[i:]!r}")
             prior_kind = kindof(toks[-1])
             # if the prior token is an operator that can be an in place operator
             if prior_kind > _START_CAN_BE_IN_PLACE_ASSIGNMENT_OP and prior_kind < _END_CAN_BE_IN_PLACE_ASSIGNMENT_OP:
@@ -345,6 +317,7 @@ def tokenize(src:str)->list[PackedToken]:
                 toks.append(pack(prior_kind, i, TK_UPDATE_ASSIGN))
             else:
                 toks.append(pack(NO_VALUE, i, TK_ASSIGN))
+            i += 1
             continue
 
         # note if any checks are done after this, need to undo the increment of i
