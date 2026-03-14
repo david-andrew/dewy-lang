@@ -257,28 +257,12 @@ def pop_scope(scope_stack: ScopeStack) -> None:
     scope_stack.pop()
 
 
-# ============================================================================
-# Token access helpers
-# ============================================================================
-
-def tok_kind(toks: list[t0.Token], idx: int) -> t0.Kind:
-    return toks[idx].kind
-
-
-def tok_value(toks: list[t0.Token], idx: int) -> int | t0.Kind:
-    return toks[idx].value
-
-
-def tok_loc(toks: list[t0.Token], idx: int) -> int:
+def tok_name_start(toks: list[t0.Token], idx: int) -> int:
     return toks[idx].location
 
 
-def tok_name_start(toks: list[t0.Token], idx: int) -> int:
-    return tok_loc(toks, idx)
-
-
 def tok_name_len(toks: list[t0.Token], idx: int) -> int:
-    value = tok_value(toks, idx)
+    value = toks[idx].value
     assert isinstance(value, int)
     return value
 
@@ -286,21 +270,21 @@ def tok_name_len(toks: list[t0.Token], idx: int) -> int:
 def expect(toks: list[t0.Token], idx: int, kind: t0.Kind, src: str) -> int:
     if idx >= len(toks):
         raise SyntaxError(f"Unexpected end of input, expected {kind.name}")
-    if tok_kind(toks, idx) != kind:
-        raise SyntaxError(f"Expected {kind.name}, got {t0.dump_token(toks[idx], src)} at position {tok_loc(toks, idx)}")
+    if toks[idx].kind != kind:
+        raise SyntaxError(f"Expected {kind.name}, got {t0.dump_token(toks[idx], src)} at position {toks[idx].location}")
     return idx + 1
 
 
 def looks_like_fn_decl(toks: list[t0.Token], idx: int) -> bool:
     if idx + 3 >= len(toks):
         return False
-    if tok_kind(toks, idx + 2) != t0.Kind.TK_ASSIGN or tok_kind(toks, idx + 3) != t0.Kind.TK_LEFT_PAREN:
+    if toks[idx + 2].kind != t0.Kind.TK_ASSIGN or toks[idx + 3].kind != t0.Kind.TK_LEFT_PAREN:
         return False
 
     depth = 1
     scan = idx + 4
     while scan < len(toks) and depth > 0:
-        kind = tok_kind(toks, scan)
+        kind = toks[scan].kind
         if kind == t0.Kind.TK_LEFT_PAREN:
             depth = depth + 1
         elif kind == t0.Kind.TK_RIGHT_PAREN:
@@ -309,36 +293,36 @@ def looks_like_fn_decl(toks: list[t0.Token], idx: int) -> bool:
 
     if depth != 0 or scan >= len(toks):
         return False
-    if tok_kind(toks, scan) != t0.Kind.TK_FN_TYPE:
+    if toks[scan].kind != t0.Kind.TK_FN_TYPE:
         return False
 
     scan = scan + 1
-    if scan < len(toks) and tok_kind(toks, scan) == t0.Kind.TK_TYPE_PARAM:
+    if scan < len(toks) and toks[scan].kind == t0.Kind.TK_TYPE_PARAM:
         scan = scan + 1
-    return scan < len(toks) and tok_kind(toks, scan) == t0.Kind.TK_FN_ARROW
+    return scan < len(toks) and toks[scan].kind == t0.Kind.TK_FN_ARROW
 
 
 def require_type_annotation(toks: list[t0.Token], idx: int, subject: str, src: str) -> int:
     if idx >= len(toks):
         raise SyntaxError(f"Expected type annotation for {subject} before end of input")
-    kind = tok_kind(toks, idx)
+    kind = toks[idx].kind
     if kind == t0.Kind.TK_TYPE:
         idx = idx + 1
-        if idx < len(toks) and tok_kind(toks, idx) == t0.Kind.TK_TYPE_PARAM:
+        if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TYPE_PARAM:
             idx = idx + 1
         return idx
     if kind == t0.Kind.TK_TYPE_PARAM:
         return idx + 1
-    raise SyntaxError(f"Expected type annotation for {subject} at position {tok_loc(toks, idx)}")
+    raise SyntaxError(f"Expected type annotation for {subject} at position {toks[idx].location}")
 
 
 def require_fn_type_annotation(toks: list[t0.Token], idx: int, fn_name: str) -> int:
     if idx >= len(toks):
         raise SyntaxError(f"Expected return type annotation for function {fn_name!r} before end of input")
-    if tok_kind(toks, idx) != t0.Kind.TK_FN_TYPE:
-        raise SyntaxError(f"Expected return type annotation for function {fn_name!r} at position {tok_loc(toks, idx)}")
+    if toks[idx].kind != t0.Kind.TK_FN_TYPE:
+        raise SyntaxError(f"Expected return type annotation for function {fn_name!r} at position {toks[idx].location}")
     idx = idx + 1
-    if idx < len(toks) and tok_kind(toks, idx) == t0.Kind.TK_TYPE_PARAM:
+    if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TYPE_PARAM:
         idx = idx + 1
     return idx
 
@@ -439,9 +423,9 @@ def parse_static_alloca_size(
     if idx >= len(toks):
         raise SyntaxError("__static_alloca__ expects one constant size argument")
 
-    kind = tok_kind(toks, idx)
+    kind = toks[idx].kind
     if kind == t0.Kind.TK_NUMBER:
-        size_value = tok_value(toks, idx)
+        size_value = toks[idx].value
         assert isinstance(size_value, int)
         size = size_value
         idx = idx + 1
@@ -449,15 +433,15 @@ def parse_static_alloca_size(
         name = get_token_name(toks, idx, src)
         size = const_lookup(const_table, name, ctx.builtin_consts)
         if size is None:
-            raise SyntaxError(f"__static_alloca__ size must be a compile-time constant at {tok_loc(toks, idx)}")
+            raise SyntaxError(f"__static_alloca__ size must be a compile-time constant at {toks[idx].location}")
         idx = idx + 1
     else:
-        raise SyntaxError(f"__static_alloca__ size must be a compile-time constant at {tok_loc(toks, idx)}")
+        raise SyntaxError(f"__static_alloca__ size must be a compile-time constant at {toks[idx].location}")
 
-    if idx >= len(toks) or tok_kind(toks, idx) != t0.Kind.TK_RIGHT_PAREN:
-        raise SyntaxError(f"__static_alloca__ expects exactly one constant size argument at {tok_loc(toks, idx)}")
+    if idx >= len(toks) or toks[idx].kind != t0.Kind.TK_RIGHT_PAREN:
+        raise SyntaxError(f"__static_alloca__ expects exactly one constant size argument at {toks[idx].location}")
     if size < 0:
-        raise SyntaxError(f"__static_alloca__ size must be non-negative at {tok_loc(toks, idx - 1)}")
+        raise SyntaxError(f"__static_alloca__ size must be non-negative at {toks[idx - 1].location}")
 
     return size, idx + 1
 
@@ -478,10 +462,10 @@ def parse_atom(
     ctx: ParseContext,
 ) -> int:
     """Parse an atomic expression, emit via backend. Returns new idx."""
-    kind = tok_kind(toks, idx)
+    kind = toks[idx].kind
     
     if kind == t0.Kind.TK_NUMBER:
-        value = tok_value(toks, idx)
+        value = toks[idx].value
         assert isinstance(value, int)
         val = value
         backend.push_const_i64(val)
@@ -493,7 +477,7 @@ def parse_atom(
     
     if kind == t0.Kind.TK_STRING:
         label_id = backend.intern_string(
-            decode_string_literal(src, tok_loc(toks, idx), tok_name_len(toks, idx))
+            decode_string_literal(src, toks[idx].location, tok_name_len(toks, idx))
         )
         backend.push_string_ref(label_id)
         return idx + 1
@@ -521,12 +505,12 @@ def parse_atom(
             backend.push_fn_ref(entry.label_id)
             return idx + 1
 
-        entry = note_function_reference(backend, fn_table, name, None, tok_loc(toks, idx))
+        entry = note_function_reference(backend, fn_table, name, None, toks[idx].location)
         backend.push_fn_ref(entry.label_id)
         return idx + 1
 
     if kind == t0.Kind.TK_IDENT_CALL:
-        call_loc = tok_loc(toks, idx)
+        call_loc = toks[idx].location
         name = get_token_name(toks, idx, src)
         idx = idx + 1
 
@@ -537,7 +521,7 @@ def parse_atom(
             return idx
 
         arg_count = 0
-        while idx < len(toks) and tok_kind(toks, idx) != t0.Kind.TK_RIGHT_PAREN:
+        while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_PAREN:
             idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
             backend.save_value()
             arg_count = arg_count + 1
@@ -565,11 +549,11 @@ def parse_atom(
         idx = idx + 1
         elem_directives: list[int | str] = []
 
-        while idx < len(toks) and tok_kind(toks, idx) != t0.Kind.TK_RIGHT_BRACKET:
-            elem_kind = tok_kind(toks, idx)
+        while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_BRACKET:
+            elem_kind = toks[idx].kind
 
             if elem_kind == t0.Kind.TK_NUMBER:
-                value = tok_value(toks, idx)
+                value = toks[idx].value
                 assert isinstance(value, int)
                 elem_directives.append(value)
                 idx = idx + 1
@@ -580,19 +564,19 @@ def parse_atom(
                 if value is not None:
                     elem_directives.append(value)
                 else:
-                    entry = note_function_reference(backend, fn_table, name, None, tok_loc(toks, idx))
+                    entry = note_function_reference(backend, fn_table, name, None, toks[idx].location)
                     elem_directives.append(backend.function_ref(entry.label_id))
                 idx = idx + 1
 
             elif elem_kind == t0.Kind.TK_STRING:
                 str_label_id = backend.intern_string(
-                    decode_string_literal(src, tok_loc(toks, idx), tok_name_len(toks, idx))
+                    decode_string_literal(src, toks[idx].location, tok_name_len(toks, idx))
                 )
                 idx = idx + 1
                 elem_directives.append(backend.string_ref(str_label_id))
             
             else:
-                raise SyntaxError(f"Array elements must be constants at {tok_loc(toks, idx)}")
+                raise SyntaxError(f"Array elements must be constants at {toks[idx].location}")
         
         idx = expect(toks, idx, t0.Kind.TK_RIGHT_BRACKET, src)
         
@@ -600,7 +584,7 @@ def parse_atom(
         backend.push_array_ref(label_id)
         return idx
 
-    raise SyntaxError(f"Unexpected token: {t0.dump_token(toks[idx], src)} at {tok_loc(toks, idx)}")
+    raise SyntaxError(f"Unexpected token: {t0.dump_token(toks[idx], src)} at {toks[idx].location}")
 
 
 def parse_prefix(
@@ -614,7 +598,7 @@ def parse_prefix(
     const_table: ConstTable,
     ctx: ParseContext,
 ) -> int:
-    kind = tok_kind(toks, idx)
+    kind = toks[idx].kind
 
     if kind == t0.Kind.TK_NOT:
         idx = idx + 1
@@ -624,8 +608,8 @@ def parse_prefix(
 
     if kind == t0.Kind.TK_MINUS:
         idx = idx + 1
-        if tok_kind(toks, idx) == t0.Kind.TK_NUMBER:
-            value = tok_value(toks, idx)
+        if toks[idx].kind == t0.Kind.TK_NUMBER:
+            value = toks[idx].value
             assert isinstance(value, int)
             val = value
             backend.push_const_i64(-val)
@@ -653,20 +637,20 @@ def parse_expr(
     idx = skip_cast_annotation(toks, idx)
     
     while idx < len(toks):
-        kind = tok_kind(toks, idx)
+        kind = toks[idx].kind
         
         if kind == t0.Kind.TK_EXPR_CALL:
             backend.save_value()
             idx = idx + 1
             
             arg_count = 0
-            while idx < len(toks) and tok_kind(toks, idx) != t0.Kind.TK_RIGHT_PAREN:
+            while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_PAREN:
                 idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
                 backend.save_value()
                 arg_count = arg_count + 1
             
             idx = expect(toks, idx, t0.Kind.TK_RIGHT_PAREN, src)
-            validate_call_arity(backend, arg_count, tok_loc(toks, idx - 1))
+            validate_call_arity(backend, arg_count, toks[idx - 1].location)
             backend.call_indirect(arg_count)
             continue
         
@@ -676,7 +660,7 @@ def parse_expr(
         prec = get_precedence(kind)
         
         if prec > min_prec and min_prec > 0:
-            raise SyntaxError(f"Operator precedence violation at {tok_loc(toks, idx)}")
+            raise SyntaxError(f"Operator precedence violation at {toks[idx].location}")
         
         idx = idx + 1
         backend.save_value()
@@ -702,10 +686,10 @@ def parse_expr(
 def skip_type_annotation(toks: list, idx: int) -> int:
     if idx >= len(toks):
         return idx
-    kind = tok_kind(toks, idx)
+    kind = toks[idx].kind
     if kind == t0.Kind.TK_TYPE:
         idx = idx + 1
-        if idx < len(toks) and tok_kind(toks, idx) == t0.Kind.TK_TYPE_PARAM:
+        if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TYPE_PARAM:
             idx = idx + 1
     elif kind == t0.Kind.TK_TYPE_PARAM:
         idx = idx + 1
@@ -715,22 +699,22 @@ def skip_type_annotation(toks: list, idx: int) -> int:
 def skip_fn_type_annotation(toks: list, idx: int) -> int:
     if idx >= len(toks):
         return idx
-    kind = tok_kind(toks, idx)
+    kind = toks[idx].kind
     if kind == t0.Kind.TK_FN_TYPE:
         idx = idx + 1
-        if idx < len(toks) and tok_kind(toks, idx) == t0.Kind.TK_TYPE_PARAM:
+        if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TYPE_PARAM:
             idx = idx + 1
     return idx
 
 
 def skip_cast_annotation(toks: list, idx: int) -> int:
-    if idx < len(toks) and tok_kind(toks, idx) == t0.Kind.TK_TRANSMUTE:
+    if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TRANSMUTE:
         idx = idx + 1
         if idx < len(toks):
-            kind = tok_kind(toks, idx)
+            kind = toks[idx].kind
             if kind == t0.Kind.TK_IDENT:
                 idx = idx + 1
-                if idx < len(toks) and tok_kind(toks, idx) == t0.Kind.TK_TYPE_PARAM:
+                if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TYPE_PARAM:
                     idx = idx + 1
             elif kind == t0.Kind.TK_TYPE_PARAM:
                 idx = idx + 1
@@ -750,7 +734,7 @@ def parse_var_decl(
 ) -> int:
     idx = idx + 1
     
-    if tok_kind(toks, idx) != t0.Kind.TK_IDENT:
+    if toks[idx].kind != t0.Kind.TK_IDENT:
         raise SyntaxError("Expected identifier after let")
     
     name = get_token_name(toks, idx, src)
@@ -758,8 +742,8 @@ def parse_var_decl(
     
     idx = require_type_annotation(toks, idx, f"variable {name!r}", src)
     
-    if idx >= len(toks) or tok_kind(toks, idx) != t0.Kind.TK_ASSIGN:
-        raise SyntaxError(f"Expected '=' at {tok_loc(toks, idx)}")
+    if idx >= len(toks) or toks[idx].kind != t0.Kind.TK_ASSIGN:
+        raise SyntaxError(f"Expected '=' at {toks[idx].location}")
     idx = idx + 1
     
     idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
@@ -791,9 +775,9 @@ def parse_fn_decl(
     idx = expect(toks, idx, t0.Kind.TK_LEFT_PAREN, src)
     
     params: list[str] = []
-    while idx < len(toks) and tok_kind(toks, idx) != t0.Kind.TK_RIGHT_PAREN:
-        if tok_kind(toks, idx) != t0.Kind.TK_IDENT:
-            raise SyntaxError(f"Expected parameter name at position {tok_loc(toks, idx)}")
+    while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_PAREN:
+        if toks[idx].kind != t0.Kind.TK_IDENT:
+            raise SyntaxError(f"Expected parameter name at position {toks[idx].location}")
         param_name = get_token_name(toks, idx, src)
         params.append(param_name)
         idx = idx + 1
@@ -807,10 +791,10 @@ def parse_fn_decl(
     entry = fn_lookup(fn_table, fn_name)
     if entry is not None:
         if entry.is_defined:
-            raise SyntaxError(f"Function {fn_name!r} is already defined at position {tok_loc(toks, idx - 1)}")
+            raise SyntaxError(f"Function {fn_name!r} is already defined at position {toks[idx - 1].location}")
         if entry.num_args is not None and entry.num_args != len(params):
             raise SyntaxError(
-                f"Function {fn_name!r} defined with {len(params)} arguments after being used with {entry.num_args} at position {tok_loc(toks, idx - 1)}"
+                f"Function {fn_name!r} defined with {len(params)} arguments after being used with {entry.num_args} at position {toks[idx - 1].location}"
             )
         entry.num_args = len(params)
         entry.is_defined = True
@@ -836,7 +820,7 @@ def parse_fn_decl(
     
     idx = expect(toks, idx, t0.Kind.TK_RIGHT_BRACE, src)
     if not body_returns:
-        raise SyntaxError(f"Function {fn_name!r} must explicitly return before position {tok_loc(toks, idx - 1)}")
+        raise SyntaxError(f"Function {fn_name!r} must explicitly return before position {toks[idx - 1].location}")
     
     backend.end_function()
     pop_scope(scope_stack)
@@ -871,10 +855,10 @@ def parse_if_stmnt(
     nested_if_count = 1
     saw_final_else = False
     
-    while idx < len(toks) and tok_kind(toks, idx) == t0.Kind.TK_ELSE:
+    while idx < len(toks) and toks[idx].kind == t0.Kind.TK_ELSE:
         idx = idx + 1
         
-        if idx < len(toks) and tok_kind(toks, idx) == t0.Kind.TK_IF:
+        if idx < len(toks) and toks[idx].kind == t0.Kind.TK_IF:
             backend.begin_else()
             idx = idx + 1
             
@@ -969,7 +953,7 @@ def parse_break_stmnt(
     ctx: ParseContext,
 ) -> int:
     if ctx.loop_depth == 0:
-        raise SyntaxError(f"`break` may only appear inside a loop at position {tok_loc(toks, idx)}")
+        raise SyntaxError(f"`break` may only appear inside a loop at position {toks[idx].location}")
     idx = idx + 1
     backend.emit_break()
     return idx
@@ -987,7 +971,7 @@ def parse_continue_stmnt(
     ctx: ParseContext,
 ) -> int:
     if ctx.loop_depth == 0:
-        raise SyntaxError(f"`continue` may only appear inside a loop at position {tok_loc(toks, idx)}")
+        raise SyntaxError(f"`continue` may only appear inside a loop at position {toks[idx].location}")
     idx = idx + 1
     backend.emit_continue()
     return idx
@@ -1004,9 +988,9 @@ def parse_assign_or_expr(
     const_table: ConstTable,
     ctx: ParseContext,
 ) -> int:
-    if tok_kind(toks, idx) == t0.Kind.TK_IDENT:
+    if toks[idx].kind == t0.Kind.TK_IDENT:
         if idx + 1 < len(toks):
-            next_kind = tok_kind(toks, idx + 1)
+            next_kind = toks[idx + 1].kind
             
             if next_kind == t0.Kind.TK_ASSIGN:
                 name = get_token_name(toks, idx, src)
@@ -1022,13 +1006,13 @@ def parse_assign_or_expr(
                     if global_label is not None:
                         backend.store_global(global_label)
                     else:
-                        raise SyntaxError(f"Undefined variable {name!r} at position {tok_loc(toks, idx - 2)}")
+                        raise SyntaxError(f"Undefined variable {name!r} at position {toks[idx - 2].location}")
                 
                 return idx
             
             elif next_kind == t0.Kind.TK_UPDATE_ASSIGN:
                 name = get_token_name(toks, idx, src)
-                op_kind = tok_value(toks, idx + 1)
+                op_kind = toks[idx + 1].value
                 assert isinstance(op_kind, t0.Kind)
                 idx = idx + 2
                 
@@ -1042,7 +1026,7 @@ def parse_assign_or_expr(
                         slot = global_label
                         backend.load_global(slot)
                     else:
-                        raise SyntaxError(f"Undefined variable {name!r} at position {tok_loc(toks, idx - 2)}")
+                        raise SyntaxError(f"Undefined variable {name!r} at position {toks[idx - 2].location}")
                 
                 backend.save_value()
                 idx = parse_expr(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx, 0)
@@ -1071,11 +1055,11 @@ def parse_statement(
     const_table: ConstTable,
     ctx: ParseContext,
 ) -> tuple[int, bool]:
-    kind = tok_kind(toks, idx)
+    kind = toks[idx].kind
     
     if kind == t0.Kind.TK_LET:
         if looks_like_fn_decl(toks, idx):
-            raise SyntaxError(f"Functions may only be declared at top level at position {tok_loc(toks, idx)}")
+            raise SyntaxError(f"Functions may only be declared at top level at position {toks[idx].location}")
         return parse_var_decl(toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx), False
     
     if kind == t0.Kind.TK_IF:
@@ -1108,7 +1092,7 @@ def parse_block(
     ctx: ParseContext,
 ) -> tuple[int, bool]:
     block_returns = False
-    while idx < len(toks) and tok_kind(toks, idx) != t0.Kind.TK_RIGHT_BRACE:
+    while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_BRACE:
         idx, statement_returns = parse_statement(
             toks, idx, src, backend, fn_table, scope_stack, global_table, const_table, ctx
         )
@@ -1130,7 +1114,7 @@ def parse_program(
     idx = 0
     
     while idx < len(toks):
-        kind = tok_kind(toks, idx)
+        kind = toks[idx].kind
         
         if kind == t0.Kind.TK_LET:
             if looks_like_fn_decl(toks, idx):
@@ -1145,8 +1129,8 @@ def parse_program(
             idx = require_type_annotation(toks, idx, f"constant {name!r}", src)
             idx = expect(toks, idx, t0.Kind.TK_ASSIGN, src)
             
-            if tok_kind(toks, idx) == t0.Kind.TK_NUMBER:
-                value = tok_value(toks, idx)
+            if toks[idx].kind == t0.Kind.TK_NUMBER:
+                value = toks[idx].value
                 assert isinstance(value, int)
                 val = value
                 idx = idx + 1
@@ -1155,23 +1139,23 @@ def parse_program(
                 label_id = backend.define_global(0, val)
                 global_declare(global_table, name, label_id)
                 
-            elif tok_kind(toks, idx) == t0.Kind.TK_STRING:
+            elif toks[idx].kind == t0.Kind.TK_STRING:
                 str_label_id = backend.intern_string(
-                    decode_string_literal(src, tok_loc(toks, idx), tok_name_len(toks, idx))
+                    decode_string_literal(src, toks[idx].location, tok_name_len(toks, idx))
                 )
                 idx = idx + 1
                 label_id = backend.define_global(0, backend.string_ref(str_label_id))
                 global_declare(global_table, name, label_id)
                 
-            elif tok_kind(toks, idx) == t0.Kind.TK_LEFT_BRACKET:
+            elif toks[idx].kind == t0.Kind.TK_LEFT_BRACKET:
                 idx = idx + 1
                 elem_directives: list[int | str] = []
                 
-                while idx < len(toks) and tok_kind(toks, idx) != t0.Kind.TK_RIGHT_BRACKET:
-                    elem_kind = tok_kind(toks, idx)
+                while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_BRACKET:
+                    elem_kind = toks[idx].kind
                     
                     if elem_kind == t0.Kind.TK_NUMBER:
-                        value = tok_value(toks, idx)
+                        value = toks[idx].value
                         assert isinstance(value, int)
                         elem_directives.append(value)
                         idx = idx + 1
@@ -1183,30 +1167,30 @@ def parse_program(
                             elem_directives.append(value)
                         else:
                             entry = note_function_reference(
-                                backend, fn_table, ident_name, None, tok_loc(toks, idx)
+                                backend, fn_table, ident_name, None, toks[idx].location
                             )
                             elem_directives.append(backend.function_ref(entry.label_id))
                         idx = idx + 1
                     
                     elif elem_kind == t0.Kind.TK_STRING:
                         str_lbl_id = backend.intern_string(
-                            decode_string_literal(src, tok_loc(toks, idx), tok_name_len(toks, idx))
+                            decode_string_literal(src, toks[idx].location, tok_name_len(toks, idx))
                         )
                         idx = idx + 1
                         elem_directives.append(backend.string_ref(str_lbl_id))
                     
                     else:
-                        raise SyntaxError(f"Unsupported element type in global array at {tok_loc(toks, idx)}")
+                        raise SyntaxError(f"Unsupported element type in global array at {toks[idx].location}")
                 
                 idx = expect(toks, idx, t0.Kind.TK_RIGHT_BRACKET, src)
                 
                 arr_label_id = backend.intern_array(elem_directives)
                 label_id = backend.define_global(0, backend.array_ref(arr_label_id))
                 global_declare(global_table, name, label_id)
-            elif tok_kind(toks, idx) == t0.Kind.TK_IDENT_CALL:
+            elif toks[idx].kind == t0.Kind.TK_IDENT_CALL:
                 call_name = get_token_name(toks, idx, src)
                 if call_name != "__static_alloca__":
-                    raise SyntaxError(f"Global variables must have constant initializers at {tok_loc(toks, idx)}")
+                    raise SyntaxError(f"Global variables must have constant initializers at {toks[idx].location}")
 
                 idx = idx + 1
                 size, idx = parse_static_alloca_size(toks, idx, src, const_table, ctx)
@@ -1214,7 +1198,7 @@ def parse_program(
                 label_id = backend.define_global(0, backend.static_ref(static_label_id))
                 global_declare(global_table, name, label_id)
             else:
-                raise SyntaxError(f"Global variables must have constant initializers at {tok_loc(toks, idx)}")
+                raise SyntaxError(f"Global variables must have constant initializers at {toks[idx].location}")
         else:
             raise SyntaxError(f"Only declarations allowed at top level, got {t0.dump_token(toks[idx], src)}")
 

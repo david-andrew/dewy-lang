@@ -43,7 +43,7 @@ class Kind(Enum):
     TK_NOT           = auto()
     TK_LEFT_SHIFT    = auto()
     TK_RIGHT_SHIFT   = auto()
-    TK_ASSIGN        = auto()    # (NO_VALUE, start, TK_ASSIGN)
+    TK_ASSIGN        = auto()    # (None, start, TK_ASSIGN)
     TK_UPDATE_ASSIGN = auto()    # (kind, start, TK_UPDATE_ASSIGN) # an equals sign after an operator token, i.e. `+=`, `-=`, `*=`, `//=`, `%=`
     TK_EXPR_CALL     = auto()    # closing paren followed by opening paren i.e. `)(...)`. means do a function call on the result of the left expression in parens
     TK_LEFT_PAREN    = auto()
@@ -81,28 +81,26 @@ POSSIBLE_IN_PLACE_OPS: set[Kind] = {
     Kind.TK_RIGHT_SHIFT,
 }
 
-# placehold for tokens that don't have a value
+# placeholder for tokens that don't have a value
 TRUE_VALUE: Value = 0xFFFF_FFFF_FFFF_FFFF
 FALSE_VALUE: Value = 0x0000_0000_0000_0000
-# TODO: replace with None
-NO_VALUE: Value = 0 # i.e. placeholder for tokens that don't have a value
 
-KEYWORD_TOKENS: dict[str, tuple[Value, Kind]] = {
-    "let":        (NO_VALUE,    Kind.TK_LET),
-    "const":      (NO_VALUE,    Kind.TK_LET),
-    "and":        (NO_VALUE,    Kind.TK_AND),
-    "or":         (NO_VALUE,    Kind.TK_OR),
-    "xor":        (NO_VALUE,    Kind.TK_XOR),
-    "not":        (NO_VALUE,    Kind.TK_NOT),
+KEYWORD_TOKENS: dict[str, tuple[Value | None, Kind]] = {
+    "let":        (None,        Kind.TK_LET),
+    "const":      (None,        Kind.TK_LET),
+    "and":        (None,        Kind.TK_AND),
+    "or":         (None,        Kind.TK_OR),
+    "xor":        (None,        Kind.TK_XOR),
+    "not":        (None,        Kind.TK_NOT),
     "true":       (TRUE_VALUE,  Kind.TK_NUMBER),
     "false":      (FALSE_VALUE, Kind.TK_NUMBER),
-    "if":         (NO_VALUE,    Kind.TK_IF),
-    "loop":       (NO_VALUE,    Kind.TK_LOOP),
-    "else":       (NO_VALUE,    Kind.TK_ELSE),
-    "return":     (NO_VALUE,    Kind.TK_RETURN),
-    "break":      (NO_VALUE,    Kind.TK_BREAK),
-    "continue":   (NO_VALUE,    Kind.TK_CONTINUE),
-    "transmute":  (NO_VALUE,    Kind.TK_TRANSMUTE),
+    "if":         (None,        Kind.TK_IF),
+    "loop":       (None,        Kind.TK_LOOP),
+    "else":       (None,        Kind.TK_ELSE),
+    "return":     (None,        Kind.TK_RETURN),
+    "break":      (None,        Kind.TK_BREAK),
+    "continue":   (None,        Kind.TK_CONTINUE),
+    "transmute":  (None,        Kind.TK_TRANSMUTE),
 }
 
 # sorted by length so that we take longest match
@@ -139,7 +137,7 @@ SYMBOL_TOKENS: list[tuple[str, Kind]] = [
 
 @dataclass
 class Token:
-    value: int | Kind
+    value: Value | Kind | None
     location: Location
     kind: Kind
 
@@ -215,7 +213,7 @@ def tokenize(src:str)->list[Token]:
                 toks.append(Token(i - start, start, Kind.TK_FN_TYPE))
             elif text == "void":
                 # `:void` should become a type token, not a bare void keyword.
-                toks.append(Token(NO_VALUE, start, Kind.TK_VOID))
+                toks.append(Token(None, start, Kind.TK_VOID))
             else:
                 toks.append(Token(i - start, start, Kind.TK_IDENT))
             continue
@@ -275,15 +273,15 @@ def tokenize(src:str)->list[Token]:
         
         # multi-character tokens
         if src.startswith(")(", i):
-            toks.append(Token(NO_VALUE, i, Kind.TK_RIGHT_PAREN))
-            toks.append(Token(NO_VALUE, i, Kind.TK_EXPR_CALL))
+            toks.append(Token(None, i, Kind.TK_RIGHT_PAREN))
+            toks.append(Token(None, i, Kind.TK_EXPR_CALL))
             i += 2
             continue
 
         # special case of "not" followed by "=?" -> "not=?"
         if src.startswith("=?", i) and toks and toks[-1].kind == Kind.TK_NOT:
             toks.pop()
-            toks.append(Token(NO_VALUE, i, Kind.TK_NOT_EQ))
+            toks.append(Token(None, i, Kind.TK_NOT_EQ))
             i += 2
             continue
     
@@ -298,7 +296,7 @@ def tokenize(src:str)->list[Token]:
         matched_symbol = False
         for text, kind in SYMBOL_TOKENS:
             if src.startswith(text, i):
-                toks.append(Token(NO_VALUE, i, kind))
+                toks.append(Token(None, i, kind))
                 i += len(text)
                 matched_symbol = True
                 break
