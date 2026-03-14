@@ -76,6 +76,9 @@ system_types: list[str|tuple[str, str]] = [
     'dict',
     'set',
     'object',
+
+    # tbd misc stuff
+    'ID' # a generic thing representing some way to identify something. implementations may use specific data types like int, string, etc., but conceptually an ID is basically it's own separate thing
 ]
 for t in system_types:
     if isinstance(t, tuple): add_type(*t) 
