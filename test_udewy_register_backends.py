@@ -127,6 +127,18 @@ def test_virtual_stack_cache_and_spill_codegen(target: str) -> None:
         assert expected in code
 
 
+@pytest.mark.parametrize("target", TARGETS)
+def test_syscall_intrinsic_arity_is_checked(target: str) -> None:
+    src = """
+let main = ():>int => {
+    return __syscall3__(SYS_WRITE STDOUT 1)
+}
+"""
+
+    with pytest.raises(SyntaxError, match=r"Intrinsic '__syscall3__' expects 4 arguments, got 3 arguments"):
+        parse_udewy(src, target)
+
+
 @pytest.mark.parametrize(
     ("source", "expected_exit"),
     [

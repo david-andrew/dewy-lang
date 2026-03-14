@@ -84,6 +84,28 @@ let main = ():>void => {
     parse_udewy(src)
 
 
+def test_core_intrinsic_arity_is_checked() -> None:
+    src = """
+let main = ():>int => {
+    return __load__()
+}
+"""
+
+    with pytest.raises(SyntaxError, match=r"Intrinsic '__load__' expects 1 argument, got 0"):
+        parse_udewy(src)
+
+
+def test_wasm_intrinsic_arity_is_checked() -> None:
+    src = """
+let main = ():>int => {
+    return __host_time__(1)
+}
+"""
+
+    with pytest.raises(SyntaxError, match=r"Intrinsic '__host_time__' expects 0 arguments, got 1 argument"):
+        parse_udewy(src)
+
+
 def test_array_literal_accepts_const_string_aliases() -> None:
     src = """
 let main = ():>void => {

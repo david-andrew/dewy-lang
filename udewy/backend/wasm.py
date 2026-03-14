@@ -20,7 +20,7 @@ from os import PathLike
 from pathlib import Path
 
 from .. import t0
-from .common import Backend
+from .common import Backend, CORE_INTRINSIC_ARITIES
 
 class Wasm32Backend(Backend):
     """
@@ -904,35 +904,53 @@ class Wasm32Backend(Backend):
     # Intrinsics
     # ========================================================================
     
-    _CORE_INTRINSICS = {
-        "__load_u8__", "__load_u16__", "__load_u32__", "__load_u64__",
-        "__store_u8__", "__store_u16__", "__store_u32__", "__store_u64__",
-        "__load_i8__", "__load_i16__", "__load_i32__", "__load_i64__",
-        "__store_i8__", "__store_i16__", "__store_i32__", "__store_i64__",
-        "__load__", "__store__", "__alloca__", "__static_alloca__",
-        "__signed_shr__",
-        "__unsigned_idiv__", "__unsigned_mod__",
-        "__unsigned_lt__", "__unsigned_gt__", "__unsigned_lte__", "__unsigned_gte__",
+    _PLATFORM_INTRINSIC_ARITIES = {
+        "__host_log__": 2,
+        "__host_exit__": 1,
+        "__host_time__": 0,
+        "__host_random__": 0,
+        "__dom_set_text__": 2,
+        "__dom_append__": 2,
+        "__dom_clear__": 0,
+        "__dom_append_int__": 1,
+        "__log_int__": 1,
+        "__canvas_init__": 2,
+        "__canvas_width__": 0,
+        "__canvas_height__": 0,
+        "__canvas_present__": 0,
+        "__canvas_set_aspect_lock__": 1,
+        "__frame_count__": 0,
+        "__frame_time__": 0,
+        "__window_width__": 0,
+        "__window_height__": 0,
+        "__pointer_x__": 0,
+        "__pointer_y__": 0,
+        "__pointer_down__": 0,
+        "__key_down__": 2,
+        "__key_pressed__": 2,
+        "__key_released__": 2,
+        "__audio_init__": 3,
+        "__audio_play__": 0,
+        "__audio_sample_rate__": 0,
+        "__audio_stream_init__": 2,
+        "__audio_stream_write__": 0,
+        "__audio_stream_needs_samples__": 0,
+        "__webgl_init__": 4,
+        "__webgl_uniform1i__": 3,
+        "__webgl_uniform2i__": 4,
+        "__webgl_uniform1iv__": 4,
+        "__webgl_uniform2iv__": 4,
+        "__webgl_render__": 0,
     }
-    
-    _PLATFORM_INTRINSICS = {
-        "__host_log__", "__host_exit__", "__host_time__", "__host_random__",
-        "__dom_set_text__", "__dom_append__", "__dom_clear__",
-        "__dom_append_int__", "__log_int__",
-        "__canvas_init__", "__canvas_width__", "__canvas_height__",
-        "__canvas_present__", "__canvas_set_aspect_lock__", "__frame_count__", "__frame_time__",
-        "__window_width__", "__window_height__",
-        "__pointer_x__", "__pointer_y__", "__pointer_down__",
-        "__key_down__", "__key_pressed__", "__key_released__",
-        "__audio_init__", "__audio_play__", "__audio_sample_rate__",
-        "__audio_stream_init__", "__audio_stream_write__", "__audio_stream_needs_samples__",
-        "__webgl_init__", "__webgl_uniform1i__", "__webgl_uniform2i__",
-        "__webgl_uniform1iv__", "__webgl_uniform2iv__", "__webgl_render__",
-    }
+    _INTRINSIC_ARITIES = CORE_INTRINSIC_ARITIES | _PLATFORM_INTRINSIC_ARITIES
     
     def is_intrinsic(self, name: str) -> bool:
         """Check if name is an intrinsic supported by this backend."""
-        return name in self._CORE_INTRINSICS or name in self._PLATFORM_INTRINSICS
+        return name in self._INTRINSIC_ARITIES
+
+    def intrinsic_arity(self, name: str) -> int | None:
+        """Return the expected arity for a supported intrinsic."""
+        return self._INTRINSIC_ARITIES.get(name)
     
     def emit_intrinsic(self, name: str, num_args: int) -> None:
         """Emit code for an intrinsic call."""

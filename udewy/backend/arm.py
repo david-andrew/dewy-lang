@@ -8,7 +8,7 @@ from os import PathLike
 from pathlib import Path
 
 from .. import t0
-from .common import Backend
+from .common import Backend, CORE_INTRINSIC_ARITIES, LINUX_SYSCALL_INTRINSIC_ARITIES
 
 class ArmBackend(Backend):
     """
@@ -707,25 +707,15 @@ class ArmBackend(Backend):
     # Intrinsics
     # ========================================================================
     
-    _CORE_INTRINSICS = {
-        "__load_u8__", "__load_u16__", "__load_u32__", "__load_u64__",
-        "__store_u8__", "__store_u16__", "__store_u32__", "__store_u64__",
-        "__load_i8__", "__load_i16__", "__load_i32__", "__load_i64__",
-        "__store_i8__", "__store_i16__", "__store_i32__", "__store_i64__",
-        "__load__", "__store__", "__alloca__", "__static_alloca__",
-        "__signed_shr__",
-        "__unsigned_idiv__", "__unsigned_mod__",
-        "__unsigned_lt__", "__unsigned_gt__", "__unsigned_lte__", "__unsigned_gte__",
-    }
-    
-    _PLATFORM_INTRINSICS = {
-        "__syscall0__", "__syscall1__", "__syscall2__", "__syscall3__",
-        "__syscall4__", "__syscall5__", "__syscall6__",
-    }
+    _INTRINSIC_ARITIES = CORE_INTRINSIC_ARITIES | LINUX_SYSCALL_INTRINSIC_ARITIES
     
     def is_intrinsic(self, name: str) -> bool:
         """Check if name is an intrinsic supported by this backend."""
-        return name in self._CORE_INTRINSICS or name in self._PLATFORM_INTRINSICS
+        return name in self._INTRINSIC_ARITIES
+
+    def intrinsic_arity(self, name: str) -> int | None:
+        """Return the expected arity for a supported intrinsic."""
+        return self._INTRINSIC_ARITIES.get(name)
     
     def emit_intrinsic(self, name: str, num_args: int) -> None:
         """Emit code for an intrinsic call."""

@@ -15,7 +15,42 @@ The protocol uses a virtual value stack model:
 from abc import ABC, abstractmethod
 from os import PathLike
 from pathlib import Path
+
 from .. import t0
+
+CORE_INTRINSIC_ARITIES: dict[str, int] = {
+    "__load_u8__": 1,
+    "__load_u16__": 1,
+    "__load_u32__": 1,
+    "__load_u64__": 1,
+    "__store_u8__": 2,
+    "__store_u16__": 2,
+    "__store_u32__": 2,
+    "__store_u64__": 2,
+    "__load_i8__": 1,
+    "__load_i16__": 1,
+    "__load_i32__": 1,
+    "__load_i64__": 1,
+    "__store_i8__": 2,
+    "__store_i16__": 2,
+    "__store_i32__": 2,
+    "__store_i64__": 2,
+    "__load__": 1,
+    "__store__": 2,
+    "__alloca__": 1,
+    "__static_alloca__": 1,
+    "__signed_shr__": 2,
+    "__unsigned_idiv__": 2,
+    "__unsigned_mod__": 2,
+    "__unsigned_lt__": 2,
+    "__unsigned_gt__": 2,
+    "__unsigned_lte__": 2,
+    "__unsigned_gte__": 2,
+}
+
+LINUX_SYSCALL_INTRINSIC_ARITIES: dict[str, int] = {
+    f"__syscall{i}__": i + 1 for i in range(7)
+}
 
 class Backend(ABC):
     """
@@ -400,6 +435,14 @@ class Backend(ABC):
         
         Backends should return True for both core intrinsics (load/store, etc.)
         and any platform-specific intrinsics they support.
+        """
+
+    @abstractmethod
+    def intrinsic_arity(self, name: str) -> int | None:
+        """
+        Return the expected arity for a supported intrinsic.
+
+        Return None when the intrinsic is not supported by this backend.
         """
     
     @abstractmethod

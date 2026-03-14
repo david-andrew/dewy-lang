@@ -558,6 +558,18 @@ def validate_call_arity(backend: Backend, arg_count: int, loc: int) -> None:
         )
 
 
+def validate_intrinsic_arity(backend: Backend, name: str, arg_count: int, loc: int) -> None:
+    expected = backend.intrinsic_arity(name)
+    if expected is None:
+        raise SyntaxError(f"Unsupported intrinsic {name!r} at position {loc}")
+    if expected != arg_count:
+        expected_label = "argument" if expected == 1 else "arguments"
+        actual_label = "argument" if arg_count == 1 else "arguments"
+        raise SyntaxError(
+            f"Intrinsic {name!r} expects {expected} {expected_label}, got {arg_count} {actual_label} at position {loc}"
+        )
+
+
 def note_function_reference(
     backend: Backend,
     fn_table: FunctionTable,
@@ -742,6 +754,7 @@ def parse_atom( toks: list[t0.Token], idx: int, state: ParseState) -> int:
         idx = expect(toks, idx, t0.Kind.TK_RIGHT_PAREN, state)
 
         if is_intrinsic(backend, name):
+            validate_intrinsic_arity(backend, name, arg_count, call_loc)
             if arg_count > 0:
                 backend.restore_value()
             emit_intrinsic(backend, name, arg_count)
