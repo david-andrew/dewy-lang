@@ -31,6 +31,8 @@ class RiscvBackend(Backend):
     - Arguments in a0-a5
     - Result in a0
     """
+    _ARG_REGS = ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"]
+    _VALUE_CACHE_REGS = ["s2", "s3", "s4"]
     
     def __init__(self) -> None:
         self._code: list[str] = []
@@ -41,6 +43,8 @@ class RiscvBackend(Backend):
         self._current_fn_epilogue: str = ""
         self._stack_offset: int = -64  # Start after callee-saved area
         self._param_slots: list[int] = []
+        self._saved_depth: int = 0
+        self._spilled_depth: int = 0
         
         # Control flow state
         self._if_stack: list[tuple[str, str, bool]] = []  # (else_label, end_label, else_emitted)
@@ -74,6 +78,73 @@ class RiscvBackend(Backend):
         label = f".{prefix}{self._next_label}"
         self._next_label += 1
         return label
+
+    def _save_reg(self, reg: str) -> None:
+        if self._spilled_depth > 0:
+            self._emit("addi sp, sp, -16")
+            self._emit(f"sd {reg}, 0(sp)")
+            self._spilled_depth += 1
+        elif self._saved_depth < len(self._VALUE_CACHE_REGS):
+            self._emit(f"mv {self._VALUE_CACHE_REGS[self._saved_depth]}, {reg}")
+        else:
+            for cache_reg in self._VALUE_CACHE_REGS[:self._saved_depth]:
+                self._emit("addi sp, sp, -16")
+                self._emit(f"sd {cache_reg}, 0(sp)")
+            self._emit("addi sp, sp, -16")
+            self._emit(f"sd {reg}, 0(sp)")
+            self._spilled_depth = self._saved_depth + 1
+        self._saved_depth += 1
+
+    def _pop_saved_into(self, reg: str) -> None:
+        self._saved_depth -= 1
+        if self._spilled_depth > 0:
+            self._emit(f"ld {reg}, 0(sp)")
+            self._emit("addi sp, sp, 16")
+            self._spilled_depth -= 1
+        elif self._saved_depth < len(self._VALUE_CACHE_REGS):
+            cache_reg = self._VALUE_CACHE_REGS[self._saved_depth]
+            if cache_reg != reg:
+                self._emit(f"mv {reg}, {cache_reg}")
+    
+    def _prepare_call_args(self, num_args: int, fn_reg: str | None = None) -> int:
+        reg_count = min(num_args, len(self._ARG_REGS))
+        stack_count = num_args - reg_count
+        stack_bytes = ((stack_count * 8) + 15) & -16
+        consumed_values = num_args + (1 if fn_reg is not None else 0)
+
+        if self._spilled_depth > 0:
+            self._emit("mv t6, sp")
+            if stack_bytes > 0:
+                self._emit(f"addi sp, sp, -{stack_bytes}")
+                for offset in range(stack_count):
+                    src_offset = (stack_count - 1 - offset) * 16
+                    self._emit(f"ld t0, {src_offset}(t6)")
+                    self._emit(f"sd t0, {offset * 8}(sp)")
+
+            for reg_idx in range(reg_count - 1, -1, -1):
+                src_offset = (stack_count + (reg_count - 1 - reg_idx)) * 16
+                self._emit(f"ld {self._ARG_REGS[reg_idx]}, {src_offset}(t6)")
+
+            if fn_reg is not None:
+                self._emit(f"ld {fn_reg}, {num_args * 16}(t6)")
+
+            self._saved_depth -= consumed_values
+            self._spilled_depth -= consumed_values
+            return stack_bytes + consumed_values * 16
+
+        if stack_bytes > 0:
+            self._emit(f"addi sp, sp, -{stack_bytes}")
+            for offset in range(stack_count - 1, -1, -1):
+                self._pop_saved_into("t0")
+                self._emit(f"sd t0, {offset * 8}(sp)")
+
+        for reg_idx in range(reg_count - 1, -1, -1):
+            self._pop_saved_into(self._ARG_REGS[reg_idx])
+
+        if fn_reg is not None:
+            self._pop_saved_into(fn_reg)
+
+        return stack_bytes
     
     # ========================================================================
     # Module lifecycle
@@ -228,6 +299,8 @@ class RiscvBackend(Backend):
     def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
         """Begin function definition."""
         label = self._fn_labels[label_id]
+        self._saved_depth = 0
+        self._spilled_depth = 0
         
         if is_main:
             self._emit_label("__main__")
@@ -256,7 +329,6 @@ class RiscvBackend(Backend):
         self._emit("mv s1, sp")
         
         # Set up parameters - copy from arg registers to stack
-        arg_regs = ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"]
         self._param_slots = []
         self._stack_offset = -64  # After callee-saved area
         
@@ -265,7 +337,7 @@ class RiscvBackend(Backend):
             self._param_slots.append(slot)
             
             if i < 8:
-                self._emit(f"sd {arg_regs[i]}, {slot}(s0)")
+                self._emit(f"sd {self._ARG_REGS[i]}, {slot}(s0)")
             else:
                 # Load from caller's stack frame
                 caller_offset = (i - 8) * 8
@@ -341,7 +413,7 @@ class RiscvBackend(Backend):
     
     def dup_value(self) -> None:
         """Duplicate the top value on the stack."""
-        pass
+        self._save_reg("a0")
     
     def pop_value(self) -> None:
         """Discard the top value on the stack."""
@@ -349,13 +421,11 @@ class RiscvBackend(Backend):
     
     def save_value(self) -> None:
         """Save the top value to physical stack."""
-        self._emit("addi sp, sp, -8")
-        self._emit("sd a0, 0(sp)")
+        self._save_reg("a0")
     
     def restore_value(self) -> None:
         """Restore a previously saved value."""
-        self._emit("ld a0, 0(sp)")
-        self._emit("addi sp, sp, 8")
+        self._pop_saved_into("a0")
     
     # ========================================================================
     # Operators
@@ -372,8 +442,7 @@ class RiscvBackend(Backend):
         """Apply binary operator to top two values on stack."""
         # Right operand in a0, left on stack
         self._emit("mv t0, a0")        # right in t0
-        self._emit("ld a0, 0(sp)")     # left in a0
-        self._emit("addi sp, sp, 8")   # pop
+        self._pop_saved_into("a0")     # left in a0
         
         if op_kind == t0.Kind.TK_PLUS:
             self._emit("add a0, a0, t0")
@@ -421,8 +490,7 @@ class RiscvBackend(Backend):
     def pipe_call(self) -> None:
         """Handle pipe operator: call function with left as arg."""
         self._emit("mv t5, a0")      # save fn ptr
-        self._emit("ld a0, 0(sp)")   # arg1
-        self._emit("addi sp, sp, 8")
+        self._pop_saved_into("a0")   # arg1
         self._emit("jalr ra, t5, 0")
     
     # ========================================================================
@@ -451,8 +519,7 @@ class RiscvBackend(Backend):
     
     def store_mem(self, width: int) -> None:
         """Store to memory. Stack: [value addr] -> pushes 0."""
-        self._emit("ld t0, 0(sp)")   # value
-        self._emit("addi sp, sp, 8")
+        self._pop_saved_into("t0")   # value
         if width == 64:
             self._emit("sd t0, 0(a0)")
         elif width == 32:
@@ -466,29 +533,25 @@ class RiscvBackend(Backend):
     def signed_shr(self) -> None:
         """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
         self._emit("mv t0, a0")
-        self._emit("ld a0, 0(sp)")
-        self._emit("addi sp, sp, 8")
+        self._pop_saved_into("a0")
         self._emit("sra a0, a0, t0")
 
     def unsigned_idiv(self) -> None:
         """Unsigned division. Stack: [left right] -> quotient."""
         self._emit("mv t0, a0")
-        self._emit("ld a0, 0(sp)")
-        self._emit("addi sp, sp, 8")
+        self._pop_saved_into("a0")
         self._emit("divu a0, a0, t0")
 
     def unsigned_mod(self) -> None:
         """Unsigned remainder. Stack: [left right] -> remainder."""
         self._emit("mv t0, a0")
-        self._emit("ld a0, 0(sp)")
-        self._emit("addi sp, sp, 8")
+        self._pop_saved_into("a0")
         self._emit("remu a0, a0, t0")
 
     def unsigned_cmp(self, kind: str) -> None:
         """Unsigned comparison returning udewy booleans."""
         self._emit("mv t0, a0")
-        self._emit("ld a0, 0(sp)")
-        self._emit("addi sp, sp, 8")
+        self._pop_saved_into("a0")
         if kind == "gt":
             self._emit("sltu a0, t0, a0")
         elif kind == "lt":
@@ -513,28 +576,23 @@ class RiscvBackend(Backend):
     # Calls
     # ========================================================================
     
-    def prepare_args(self, num_args: int) -> None:
-        """Pop arguments from stack into registers for a call."""
-        regs = ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"]
-        for i in range(min(num_args, 8) - 1, -1, -1):
-            self._emit(f"ld {regs[i]}, 0(sp)")
-            self._emit("addi sp, sp, 8")
-    
     def call_direct(self, label_id: int, num_args: int) -> None:
         """Call a function directly by label."""
-        self.prepare_args(num_args)
+        stack_bytes = self._prepare_call_args(num_args)
         label = self._fn_labels[label_id]
         self._emit(f"call {label}")
+        if stack_bytes > 0:
+            self._emit(f"addi sp, sp, {stack_bytes}")
     
     def call_indirect(self, num_args: int) -> None:
         """Call a function indirectly via pointer."""
-        self.prepare_args(num_args)
-        self._emit("ld t5, 0(sp)")   # fn ptr
-        self._emit("addi sp, sp, 8")
+        stack_bytes = self._prepare_call_args(num_args, "t5")
         self._emit("jalr ra, t5, 0")
+        if stack_bytes > 0:
+            self._emit(f"addi sp, sp, {stack_bytes}")
 
-    def max_call_args(self) -> int:
-        return 8
+    def max_call_args(self) -> int | None:
+        return None
     
     def syscall(self, num_args: int) -> None:
         """Invoke a syscall using ecall."""
@@ -548,69 +606,48 @@ class RiscvBackend(Backend):
         elif num_args == 2:
             # a0=arg1, stack=[syscall_num]
             self._emit("mv t0, a0")      # save arg1
-            self._emit("ld a7, 0(sp)")   # syscall_num
-            self._emit("addi sp, sp, 8")
+            self._pop_saved_into("a7")   # syscall_num
             self._emit("mv a0, t0")
             self._emit("ecall")
         elif num_args == 3:
             # a0=arg2, stack=[syscall_num, arg1]
             self._emit("mv a1, a0")      # arg2 -> a1
-            self._emit("ld a0, 0(sp)")   # arg1 -> a0
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a7, 0(sp)")   # syscall_num -> a7
-            self._emit("addi sp, sp, 8")
+            self._pop_saved_into("a0")   # arg1 -> a0
+            self._pop_saved_into("a7")   # syscall_num -> a7
             self._emit("ecall")
         elif num_args == 4:
             # a0=arg3, stack=[syscall_num, arg1, arg2]
             self._emit("mv a2, a0")      # arg3 -> a2
-            self._emit("ld a1, 0(sp)")   # arg2 -> a1
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a0, 0(sp)")   # arg1 -> a0
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a7, 0(sp)")   # syscall_num -> a7
-            self._emit("addi sp, sp, 8")
+            self._pop_saved_into("a1")   # arg2 -> a1
+            self._pop_saved_into("a0")   # arg1 -> a0
+            self._pop_saved_into("a7")   # syscall_num -> a7
             self._emit("ecall")
         elif num_args == 5:
             # a0=arg4, stack=[syscall_num, arg1, arg2, arg3]
             self._emit("mv a3, a0")
-            self._emit("ld a2, 0(sp)")
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a1, 0(sp)")
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a0, 0(sp)")
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a7, 0(sp)")
-            self._emit("addi sp, sp, 8")
+            self._pop_saved_into("a2")
+            self._pop_saved_into("a1")
+            self._pop_saved_into("a0")
+            self._pop_saved_into("a7")
             self._emit("ecall")
         elif num_args == 6:
             # a0=arg5, stack=[syscall_num, arg1, arg2, arg3, arg4]
             self._emit("mv a4, a0")
-            self._emit("ld a3, 0(sp)")
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a2, 0(sp)")
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a1, 0(sp)")
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a0, 0(sp)")
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a7, 0(sp)")
-            self._emit("addi sp, sp, 8")
+            self._pop_saved_into("a3")
+            self._pop_saved_into("a2")
+            self._pop_saved_into("a1")
+            self._pop_saved_into("a0")
+            self._pop_saved_into("a7")
             self._emit("ecall")
         elif num_args == 7:
             # a0=arg6, stack=[syscall_num, arg1, arg2, arg3, arg4, arg5]
             self._emit("mv a5, a0")
-            self._emit("ld a4, 0(sp)")
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a3, 0(sp)")
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a2, 0(sp)")
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a1, 0(sp)")
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a0, 0(sp)")
-            self._emit("addi sp, sp, 8")
-            self._emit("ld a7, 0(sp)")
-            self._emit("addi sp, sp, 8")
+            self._pop_saved_into("a4")
+            self._pop_saved_into("a3")
+            self._pop_saved_into("a2")
+            self._pop_saved_into("a1")
+            self._pop_saved_into("a0")
+            self._pop_saved_into("a7")
             self._emit("ecall")
     
     # ========================================================================

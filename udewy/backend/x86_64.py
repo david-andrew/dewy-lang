@@ -25,6 +25,8 @@ class X86_64Backend(Backend):
     - Return value: rax
     - Callee-saved: rbx, r12, r13, r14, r15
     """
+    _ARG_REGS = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
+    _VALUE_CACHE_REGS = ["%r12", "%r13", "%r14"]
     
     def __init__(self) -> None:
         self._code: list[str] = []
@@ -35,6 +37,8 @@ class X86_64Backend(Backend):
         self._current_fn_epilogue: str = ""
         self._stack_offset: int = -48  # Start after callee-saved area
         self._param_slots: list[int] = []
+        self._saved_depth: int = 0
+        self._spilled_depth: int = 0
         
         # Control flow state
         self._if_stack: list[tuple[str, str, bool]] = []  # (else_label, end_label, else_emitted)
@@ -68,6 +72,73 @@ class X86_64Backend(Backend):
         label = f".{prefix}{self._next_label}"
         self._next_label += 1
         return label
+
+    def _save_reg(self, reg: str) -> None:
+        if self._spilled_depth > 0:
+            self._emit("subq $16, %rsp")
+            self._emit(f"movq {reg}, (%rsp)")
+            self._spilled_depth += 1
+        elif self._saved_depth < len(self._VALUE_CACHE_REGS):
+            self._emit(f"movq {reg}, {self._VALUE_CACHE_REGS[self._saved_depth]}")
+        else:
+            for cache_reg in self._VALUE_CACHE_REGS[:self._saved_depth]:
+                self._emit("subq $16, %rsp")
+                self._emit(f"movq {cache_reg}, (%rsp)")
+            self._emit("subq $16, %rsp")
+            self._emit(f"movq {reg}, (%rsp)")
+            self._spilled_depth = self._saved_depth + 1
+        self._saved_depth += 1
+
+    def _pop_saved_into(self, reg: str) -> None:
+        self._saved_depth -= 1
+        if self._spilled_depth > 0:
+            self._emit(f"movq (%rsp), {reg}")
+            self._emit("addq $16, %rsp")
+            self._spilled_depth -= 1
+        elif self._saved_depth < len(self._VALUE_CACHE_REGS):
+            cache_reg = self._VALUE_CACHE_REGS[self._saved_depth]
+            if cache_reg != reg:
+                self._emit(f"movq {cache_reg}, {reg}")
+    
+    def _prepare_call_args(self, num_args: int, fn_reg: str | None = None) -> int:
+        reg_count = min(num_args, len(self._ARG_REGS))
+        stack_count = num_args - reg_count
+        stack_bytes = ((stack_count * 8) + 15) & -16
+        consumed_values = num_args + (1 if fn_reg is not None else 0)
+
+        if self._spilled_depth > 0:
+            self._emit("movq %rsp, %r10")
+            if stack_bytes > 0:
+                self._emit(f"subq ${stack_bytes}, %rsp")
+                for offset in range(stack_count):
+                    src_offset = (stack_count - 1 - offset) * 16
+                    self._emit(f"movq {src_offset}(%r10), %rax")
+                    self._emit(f"movq %rax, {offset * 8}(%rsp)")
+
+            for reg_idx in range(reg_count - 1, -1, -1):
+                src_offset = (stack_count + (reg_count - 1 - reg_idx)) * 16
+                self._emit(f"movq {src_offset}(%r10), {self._ARG_REGS[reg_idx]}")
+
+            if fn_reg is not None:
+                self._emit(f"movq {num_args * 16}(%r10), {fn_reg}")
+
+            self._saved_depth -= consumed_values
+            self._spilled_depth -= consumed_values
+            return stack_bytes + consumed_values * 16
+
+        if stack_bytes > 0:
+            self._emit(f"subq ${stack_bytes}, %rsp")
+            for offset in range(stack_count - 1, -1, -1):
+                self._pop_saved_into("%rax")
+                self._emit(f"movq %rax, {offset * 8}(%rsp)")
+
+        for reg_idx in range(reg_count - 1, -1, -1):
+            self._pop_saved_into(self._ARG_REGS[reg_idx])
+
+        if fn_reg is not None:
+            self._pop_saved_into(fn_reg)
+
+        return stack_bytes
     
     # ========================================================================
     # Module lifecycle
@@ -215,6 +286,8 @@ class X86_64Backend(Backend):
     def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
         """Begin function definition."""
         label = self._fn_labels[label_id]
+        self._saved_depth = 0
+        self._spilled_depth = 0
         
         if is_main:
             self._emit_label("__main__")
@@ -234,7 +307,6 @@ class X86_64Backend(Backend):
         self._emit("leaq -1024(%rbp), %r15")
         
         # Set up parameters
-        arg_regs = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
         self._param_slots = []
         self._stack_offset = -48
         
@@ -243,7 +315,7 @@ class X86_64Backend(Backend):
             self._param_slots.append(slot)
             
             if i < 6:
-                self._emit(f"movq {arg_regs[i]}, {slot}(%rbp)")
+                self._emit(f"movq {self._ARG_REGS[i]}, {slot}(%rbp)")
             else:
                 caller_offset = 16 + (i - 6) * 8
                 self._emit(f"movq {caller_offset}(%rbp), %rax")
@@ -305,8 +377,7 @@ class X86_64Backend(Backend):
     
     def dup_value(self) -> None:
         """Duplicate the top value on the stack."""
-        self._emit("pushq %rax")
-        self._emit("popq %rax")
+        self._save_reg("%rax")
     
     def pop_value(self) -> None:
         """Discard the top value on the stack."""
@@ -314,11 +385,11 @@ class X86_64Backend(Backend):
     
     def save_value(self) -> None:
         """Save the top value to physical stack."""
-        self._emit("pushq %rax")
+        self._save_reg("%rax")
     
     def restore_value(self) -> None:
         """Restore a previously saved value."""
-        self._emit("popq %rax")
+        self._pop_saved_into("%rax")
     
     # ========================================================================
     # Operators
@@ -338,7 +409,7 @@ class X86_64Backend(Backend):
         Assumes left operand was saved via save_value(), right is in rax.
         """
         self._emit("movq %rax, %rcx")  # right in rcx
-        self._emit("popq %rax")        # left in rax
+        self._pop_saved_into("%rax")   # left in rax
         
         if op_kind == t0.Kind.TK_PLUS:
             self._emit("addq %rcx, %rax")
@@ -401,7 +472,7 @@ class X86_64Backend(Backend):
         Right (function pointer) is in rax, left (arg) was saved.
         """
         self._emit("movq %rax, %r11")  # save fn ptr
-        self._emit("popq %rdi")        # arg1
+        self._pop_saved_into("%rdi")   # arg1
         self._emit("call *%r11")
     
     # ========================================================================
@@ -430,7 +501,7 @@ class X86_64Backend(Backend):
     
     def store_mem(self, width: int) -> None:
         """Store to memory. Stack: [value addr] -> pushes 0."""
-        self._emit("popq %rbx")  # value
+        self._pop_saved_into("%rbx")  # value
         if width == 64:
             self._emit("movq %rbx, (%rax)")
         elif width == 32:
@@ -444,20 +515,20 @@ class X86_64Backend(Backend):
     def signed_shr(self) -> None:
         """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
         self._emit("movq %rax, %rcx")
-        self._emit("popq %rax")
+        self._pop_saved_into("%rax")
         self._emit("sarq %cl, %rax")
 
     def unsigned_idiv(self) -> None:
         """Unsigned division. Stack: [left right] -> quotient."""
         self._emit("movq %rax, %rcx")
-        self._emit("popq %rax")
+        self._pop_saved_into("%rax")
         self._emit("xorq %rdx, %rdx")
         self._emit("divq %rcx")
 
     def unsigned_mod(self) -> None:
         """Unsigned remainder. Stack: [left right] -> remainder."""
         self._emit("movq %rax, %rcx")
-        self._emit("popq %rax")
+        self._pop_saved_into("%rax")
         self._emit("xorq %rdx, %rdx")
         self._emit("divq %rcx")
         self._emit("movq %rdx, %rax")
@@ -465,7 +536,7 @@ class X86_64Backend(Backend):
     def unsigned_cmp(self, kind: str) -> None:
         """Unsigned comparison returning udewy booleans."""
         self._emit("movq %rax, %rcx")
-        self._emit("popq %rax")
+        self._pop_saved_into("%rax")
         self._emit("cmpq %rcx, %rax")
         if kind == "gt":
             self._emit("seta %al")
@@ -490,26 +561,23 @@ class X86_64Backend(Backend):
     # Calls
     # ========================================================================
     
-    def prepare_args(self, num_args: int) -> None:
-        """Pop arguments from stack into registers for a call."""
-        regs = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
-        for i in range(min(num_args, 6) - 1, -1, -1):
-            self._emit(f"popq {regs[i]}")
-    
     def call_direct(self, label_id: int, num_args: int) -> None:
         """Call a function directly by label."""
-        self.prepare_args(num_args)
+        stack_bytes = self._prepare_call_args(num_args)
         label = self._fn_labels[label_id]
         self._emit(f"call {label}")
+        if stack_bytes > 0:
+            self._emit(f"addq ${stack_bytes}, %rsp")
     
     def call_indirect(self, num_args: int) -> None:
         """Call a function indirectly via pointer."""
-        self.prepare_args(num_args)
-        self._emit("popq %rax")  # fn ptr
-        self._emit("call *%rax")
+        stack_bytes = self._prepare_call_args(num_args, "%r11")
+        self._emit("call *%r11")
+        if stack_bytes > 0:
+            self._emit(f"addq ${stack_bytes}, %rsp")
 
-    def max_call_args(self) -> int:
-        return 6
+    def max_call_args(self) -> int | None:
+        return None
     
     def syscall(self, num_args: int) -> None:
         """Invoke a syscall."""
@@ -521,42 +589,42 @@ class X86_64Backend(Backend):
         elif num_args == 2:
             # rax=num, arg1 on stack -> rdi
             self._emit("movq %rax, %rdi")
-            self._emit("popq %rax")
+            self._pop_saved_into("%rax")
             self._emit("syscall")
         elif num_args == 3:
             self._emit("movq %rax, %rsi")
-            self._emit("popq %rdi")
-            self._emit("popq %rax")
+            self._pop_saved_into("%rdi")
+            self._pop_saved_into("%rax")
             self._emit("syscall")
         elif num_args == 4:
             self._emit("movq %rax, %rdx")
-            self._emit("popq %rsi")
-            self._emit("popq %rdi")
-            self._emit("popq %rax")
+            self._pop_saved_into("%rsi")
+            self._pop_saved_into("%rdi")
+            self._pop_saved_into("%rax")
             self._emit("syscall")
         elif num_args == 5:
             self._emit("movq %rax, %r10")
-            self._emit("popq %rdx")
-            self._emit("popq %rsi")
-            self._emit("popq %rdi")
-            self._emit("popq %rax")
+            self._pop_saved_into("%rdx")
+            self._pop_saved_into("%rsi")
+            self._pop_saved_into("%rdi")
+            self._pop_saved_into("%rax")
             self._emit("syscall")
         elif num_args == 6:
             self._emit("movq %rax, %r8")
-            self._emit("popq %r10")
-            self._emit("popq %rdx")
-            self._emit("popq %rsi")
-            self._emit("popq %rdi")
-            self._emit("popq %rax")
+            self._pop_saved_into("%r10")
+            self._pop_saved_into("%rdx")
+            self._pop_saved_into("%rsi")
+            self._pop_saved_into("%rdi")
+            self._pop_saved_into("%rax")
             self._emit("syscall")
         elif num_args == 7:
             self._emit("movq %rax, %r9")
-            self._emit("popq %r8")
-            self._emit("popq %r10")
-            self._emit("popq %rdx")
-            self._emit("popq %rsi")
-            self._emit("popq %rdi")
-            self._emit("popq %rax")
+            self._pop_saved_into("%r8")
+            self._pop_saved_into("%r10")
+            self._pop_saved_into("%rdx")
+            self._pop_saved_into("%rsi")
+            self._pop_saved_into("%rdi")
+            self._pop_saved_into("%rax")
             self._emit("syscall")
     
     # ========================================================================

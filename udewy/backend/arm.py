@@ -32,6 +32,8 @@ class ArmBackend(Backend):
     - Result in x0
     - svc #0 instruction
     """
+    _ARG_REGS = ["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"]
+    _VALUE_CACHE_REGS = ["x20", "x21", "x22", "x23"]
     
     def __init__(self) -> None:
         self._code: list[str] = []
@@ -42,6 +44,8 @@ class ArmBackend(Backend):
         self._current_fn_epilogue: str = ""
         self._stack_offset: int = -96  # Start after callee-saved area
         self._param_slots: list[int] = []
+        self._saved_depth: int = 0
+        self._spilled_depth: int = 0
         
         # Control flow state
         self._if_stack: list[tuple[str, str, bool]] = []
@@ -75,6 +79,72 @@ class ArmBackend(Backend):
         label = f".{prefix}{self._next_label}"
         self._next_label += 1
         return label
+
+    def _save_reg(self, reg: str) -> None:
+        if self._spilled_depth > 0:
+            self._emit("sub sp, sp, #16")
+            self._emit(f"str {reg}, [sp]")
+            self._spilled_depth += 1
+        elif self._saved_depth < len(self._VALUE_CACHE_REGS):
+            self._emit(f"mov {self._VALUE_CACHE_REGS[self._saved_depth]}, {reg}")
+        else:
+            for cache_reg in self._VALUE_CACHE_REGS[:self._saved_depth]:
+                self._emit("sub sp, sp, #16")
+                self._emit(f"str {cache_reg}, [sp]")
+            self._emit("sub sp, sp, #16")
+            self._emit(f"str {reg}, [sp]")
+            self._spilled_depth = self._saved_depth + 1
+        self._saved_depth += 1
+
+    def _pop_saved_into(self, reg: str) -> None:
+        self._saved_depth -= 1
+        if self._spilled_depth > 0:
+            self._emit(f"ldr {reg}, [sp], #16")
+            self._spilled_depth -= 1
+        elif self._saved_depth < len(self._VALUE_CACHE_REGS):
+            cache_reg = self._VALUE_CACHE_REGS[self._saved_depth]
+            if cache_reg != reg:
+                self._emit(f"mov {reg}, {cache_reg}")
+    
+    def _prepare_call_args(self, num_args: int, fn_reg: str | None = None) -> int:
+        reg_count = min(num_args, len(self._ARG_REGS))
+        stack_count = num_args - reg_count
+        stack_bytes = ((stack_count * 8) + 15) & -16
+        consumed_values = num_args + (1 if fn_reg is not None else 0)
+
+        if self._spilled_depth > 0:
+            self._emit("mov x10, sp")
+            if stack_bytes > 0:
+                self._emit(f"sub sp, sp, #{stack_bytes}")
+                for offset in range(stack_count):
+                    src_offset = (stack_count - 1 - offset) * 16
+                    self._emit(f"ldr x9, [x10, #{src_offset}]")
+                    self._emit(f"str x9, [sp, #{offset * 8}]")
+
+            for reg_idx in range(reg_count - 1, -1, -1):
+                src_offset = (stack_count + (reg_count - 1 - reg_idx)) * 16
+                self._emit(f"ldr {self._ARG_REGS[reg_idx]}, [x10, #{src_offset}]")
+
+            if fn_reg is not None:
+                self._emit(f"ldr {fn_reg}, [x10, #{num_args * 16}]")
+
+            self._saved_depth -= consumed_values
+            self._spilled_depth -= consumed_values
+            return stack_bytes + consumed_values * 16
+
+        if stack_bytes > 0:
+            self._emit(f"sub sp, sp, #{stack_bytes}")
+            for offset in range(stack_count - 1, -1, -1):
+                self._pop_saved_into("x9")
+                self._emit(f"str x9, [sp, #{offset * 8}]")
+
+        for reg_idx in range(reg_count - 1, -1, -1):
+            self._pop_saved_into(self._ARG_REGS[reg_idx])
+
+        if fn_reg is not None:
+            self._pop_saved_into(fn_reg)
+
+        return stack_bytes
     
     # ========================================================================
     # Module lifecycle
@@ -233,6 +303,8 @@ class ArmBackend(Backend):
     def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
         """Begin function definition."""
         label = self._fn_labels[label_id]
+        self._saved_depth = 0
+        self._spilled_depth = 0
         
         if is_main:
             self._emit_label("__main__")
@@ -259,7 +331,6 @@ class ArmBackend(Backend):
         
         # Set up parameters - copy from arg registers to stack
         # Parameters stored at negative offsets from x29
-        arg_regs = ["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"]
         self._param_slots = []
         self._stack_offset = -16  # Start below saved regs area
         
@@ -268,11 +339,11 @@ class ArmBackend(Backend):
             self._param_slots.append(slot)
             
             if i < 8:
-                self._emit(f"str {arg_regs[i]}, [x29, #{slot}]")
+                self._emit(f"str {self._ARG_REGS[i]}, [x29, #{slot}]")
             else:
                 # Load from caller's stack frame
-                caller_offset = (i - 8 + 12) * 8  # +12 to skip saved regs (6 pairs)
-                self._emit(f"ldr x9, [x29, #{96 + caller_offset}]")
+                caller_offset = 96 + (i - 8) * 8
+                self._emit(f"ldr x9, [x29, #{caller_offset}]")
                 self._emit(f"str x9, [x29, #{slot}]")
             
             self._stack_offset -= 8
@@ -341,7 +412,7 @@ class ArmBackend(Backend):
     
     def dup_value(self) -> None:
         """Duplicate the top value on the stack."""
-        pass
+        self._save_reg("x0")
     
     def pop_value(self) -> None:
         """Discard the top value on the stack."""
@@ -349,11 +420,11 @@ class ArmBackend(Backend):
     
     def save_value(self) -> None:
         """Save the top value to physical stack."""
-        self._emit("str x0, [sp, #-16]!")
+        self._save_reg("x0")
     
     def restore_value(self) -> None:
         """Restore a previously saved value."""
-        self._emit("ldr x0, [sp], #16")
+        self._pop_saved_into("x0")
     
     # ========================================================================
     # Operators
@@ -370,7 +441,7 @@ class ArmBackend(Backend):
         """Apply binary operator to top two values on stack."""
         # Right operand in x0, left on stack
         self._emit("mov x9, x0")       # right in x9
-        self._emit("ldr x0, [sp], #16")  # left in x0, pop
+        self._pop_saved_into("x0")     # left in x0
         
         if op_kind == t0.Kind.TK_PLUS:
             self._emit("add x0, x0, x9")
@@ -415,7 +486,7 @@ class ArmBackend(Backend):
     def pipe_call(self) -> None:
         """Handle pipe operator: call function with left as arg."""
         self._emit("mov x9, x0")       # save fn ptr
-        self._emit("ldr x0, [sp], #16")  # arg1
+        self._pop_saved_into("x0")     # arg1
         self._emit("blr x9")
     
     # ========================================================================
@@ -444,7 +515,7 @@ class ArmBackend(Backend):
     
     def store_mem(self, width: int) -> None:
         """Store to memory. Stack: [value addr] -> pushes 0."""
-        self._emit("ldr x9, [sp], #16")  # value
+        self._pop_saved_into("x9")     # value
         if width == 64:
             self._emit("str x9, [x0]")
         elif width == 32:
@@ -458,26 +529,26 @@ class ArmBackend(Backend):
     def signed_shr(self) -> None:
         """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
         self._emit("mov x9, x0")
-        self._emit("ldr x0, [sp], #16")
+        self._pop_saved_into("x0")
         self._emit("asr x0, x0, x9")
 
     def unsigned_idiv(self) -> None:
         """Unsigned division. Stack: [left right] -> quotient."""
         self._emit("mov x9, x0")
-        self._emit("ldr x0, [sp], #16")
+        self._pop_saved_into("x0")
         self._emit("udiv x0, x0, x9")
 
     def unsigned_mod(self) -> None:
         """Unsigned remainder. Stack: [left right] -> remainder."""
         self._emit("mov x9, x0")
-        self._emit("ldr x0, [sp], #16")
+        self._pop_saved_into("x0")
         self._emit("udiv x10, x0, x9")
         self._emit("msub x0, x10, x9, x0")
 
     def unsigned_cmp(self, kind: str) -> None:
         """Unsigned comparison returning udewy booleans."""
         self._emit("mov x9, x0")
-        self._emit("ldr x0, [sp], #16")
+        self._pop_saved_into("x0")
         self._emit("cmp x0, x9")
         if kind == "gt":
             self._emit("csetm x0, hi")
@@ -500,26 +571,23 @@ class ArmBackend(Backend):
     # Calls
     # ========================================================================
     
-    def prepare_args(self, num_args: int) -> None:
-        """Pop arguments from stack into registers for a call."""
-        regs = ["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"]
-        for i in range(min(num_args, 8) - 1, -1, -1):
-            self._emit(f"ldr {regs[i]}, [sp], #16")
-    
     def call_direct(self, label_id: int, num_args: int) -> None:
         """Call a function directly by label."""
-        self.prepare_args(num_args)
+        stack_bytes = self._prepare_call_args(num_args)
         label = self._fn_labels[label_id]
         self._emit(f"bl {label}")
+        if stack_bytes > 0:
+            self._emit(f"add sp, sp, #{stack_bytes}")
     
     def call_indirect(self, num_args: int) -> None:
         """Call a function indirectly via pointer."""
-        self.prepare_args(num_args)
-        self._emit("ldr x9, [sp], #16")  # fn ptr
+        stack_bytes = self._prepare_call_args(num_args, "x9")
         self._emit("blr x9")
+        if stack_bytes > 0:
+            self._emit(f"add sp, sp, #{stack_bytes}")
 
-    def max_call_args(self) -> int:
-        return 8
+    def max_call_args(self) -> int | None:
+        return None
     
     def syscall(self, num_args: int) -> None:
         """Invoke a syscall using svc #0."""
@@ -533,48 +601,48 @@ class ArmBackend(Backend):
         elif num_args == 2:
             # x0=arg1, stack=[syscall_num]
             self._emit("mov x9, x0")         # save arg1
-            self._emit("ldr x8, [sp], #16")  # syscall_num
+            self._pop_saved_into("x8")       # syscall_num
             self._emit("mov x0, x9")
             self._emit("svc #0")
         elif num_args == 3:
             # x0=arg2, stack=[syscall_num, arg1]
             self._emit("mov x1, x0")         # arg2 -> x1
-            self._emit("ldr x0, [sp], #16")  # arg1 -> x0
-            self._emit("ldr x8, [sp], #16")  # syscall_num -> x8
+            self._pop_saved_into("x0")       # arg1 -> x0
+            self._pop_saved_into("x8")       # syscall_num -> x8
             self._emit("svc #0")
         elif num_args == 4:
             # x0=arg3, stack=[syscall_num, arg1, arg2]
             self._emit("mov x2, x0")         # arg3 -> x2
-            self._emit("ldr x1, [sp], #16")  # arg2 -> x1
-            self._emit("ldr x0, [sp], #16")  # arg1 -> x0
-            self._emit("ldr x8, [sp], #16")  # syscall_num -> x8
+            self._pop_saved_into("x1")       # arg2 -> x1
+            self._pop_saved_into("x0")       # arg1 -> x0
+            self._pop_saved_into("x8")       # syscall_num -> x8
             self._emit("svc #0")
         elif num_args == 5:
             # x0=arg4, stack=[syscall_num, arg1, arg2, arg3]
             self._emit("mov x3, x0")
-            self._emit("ldr x2, [sp], #16")
-            self._emit("ldr x1, [sp], #16")
-            self._emit("ldr x0, [sp], #16")
-            self._emit("ldr x8, [sp], #16")
+            self._pop_saved_into("x2")
+            self._pop_saved_into("x1")
+            self._pop_saved_into("x0")
+            self._pop_saved_into("x8")
             self._emit("svc #0")
         elif num_args == 6:
             # x0=arg5, stack=[syscall_num, arg1, arg2, arg3, arg4]
             self._emit("mov x4, x0")
-            self._emit("ldr x3, [sp], #16")
-            self._emit("ldr x2, [sp], #16")
-            self._emit("ldr x1, [sp], #16")
-            self._emit("ldr x0, [sp], #16")
-            self._emit("ldr x8, [sp], #16")
+            self._pop_saved_into("x3")
+            self._pop_saved_into("x2")
+            self._pop_saved_into("x1")
+            self._pop_saved_into("x0")
+            self._pop_saved_into("x8")
             self._emit("svc #0")
         elif num_args == 7:
             # x0=arg6, stack=[syscall_num, arg1, arg2, arg3, arg4, arg5]
             self._emit("mov x5, x0")
-            self._emit("ldr x4, [sp], #16")
-            self._emit("ldr x3, [sp], #16")
-            self._emit("ldr x2, [sp], #16")
-            self._emit("ldr x1, [sp], #16")
-            self._emit("ldr x0, [sp], #16")
-            self._emit("ldr x8, [sp], #16")
+            self._pop_saved_into("x4")
+            self._pop_saved_into("x3")
+            self._pop_saved_into("x2")
+            self._pop_saved_into("x1")
+            self._pop_saved_into("x0")
+            self._pop_saved_into("x8")
             self._emit("svc #0")
     
     # ========================================================================
