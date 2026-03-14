@@ -784,6 +784,14 @@ udewy's compilation model is designed to be **modular with respect to target pla
 - **Operating System:** System call interface and conventions (Linux, Windows, macOS, bare metal, browser, etc.)
 - **Output Format:** Executable format (ELF, PE, Mach-O, WASM, etc.)
 
+### Parser / Backend Boundary
+
+The parser (`p0.py`) is responsible for parsing udewy source and translating the result into calls on the abstract `Backend` interface. It should not contain target-specific logic or special-case knowledge about concrete backends.
+
+Concrete backends are responsible for responding to those abstract operations in whatever way is appropriate for their target. They may differ in calling conventions, instruction selection, intrinsic support, output format, and runtime environment, but those differences should be expressed through the `Backend` protocol rather than through extra coupling with the parser.
+
+In general, the parser and the concrete backends should only know about each other through what is described by `Backend` in `backend/common.py`. Changes to `Backend` should therefore be relatively rare and made only when they provide a clear architectural benefit, such as substantially simplifying the parser/backend relationship, removing complexity, or enabling an important capability that cleanly belongs in the shared abstraction.
+
 ### Backend Responsibilities
 
 Each backend implements the parser protocol and provides:
@@ -1044,6 +1052,15 @@ Each addendum specifies the platform intrinsics and conventions for that backend
 
 Additional arguments beyond 6 are passed on the stack.
 
+## A.2.1 Codegen Notes
+
+The x86_64 backend still follows udewy's logical value-stack model, but it does not map every `save_value()` directly to a machine `push`.
+
+- The current visible expression result stays in `rax`.
+- A small prefix of the logical saved-value stack is cached in callee-saved registers before falling back to spill slots on the real stack.
+- When a call has more than 6 arguments, the extra arguments are written into an outbound stack-argument area and the first 6 are placed in `rdi`, `rsi`, `rdx`, `rcx`, `r8`, and `r9`.
+- Call lowering also keeps the machine stack aligned to the ABI-required 16-byte boundary.
+
 ## A.3 Syscall Intrinsics
 
 ```udewy
@@ -1150,6 +1167,17 @@ The x86_64 backend provides the following constants automatically (no declaratio
 | Callee-saved | `s0`-`s11`, `ra` |
 | Stack pointer | `sp` (16-byte aligned) |
 
+Additional arguments beyond 8 are passed on the stack.
+
+## B.2.1 Codegen Notes
+
+The RISC-V backend uses the same basic strategy as x86_64: it preserves udewy's logical value-stack behavior, but keeps the shallow part of that stack in registers.
+
+- The current visible expression result stays in `a0`.
+- A small prefix of saved values is cached in callee-saved registers before deeper values spill to the real stack.
+- Calls place the first 8 arguments in `a0`-`a7` and marshal any remaining arguments into an outbound stack area.
+- Call lowering maintains the required 16-byte stack alignment at the actual call instruction.
+
 ## B.3 Syscall Intrinsics
 
 Same syntax as x86_64:
@@ -1225,6 +1253,17 @@ File descriptor, open flag, and mmap constants are the same as x86_64 (see Adden
 | Return value | `x0` |
 | Callee-saved | `x19`-`x28`, `sp`, `fp` |
 | Link register | `lr` (`x30`) |
+
+Additional arguments beyond 8 are passed on the stack.
+
+## C.2.1 Codegen Notes
+
+The AArch64 backend also keeps the parser-visible stack model, but uses registers for the shallow saved-value stack instead of immediately spilling everything.
+
+- The current visible expression result stays in `x0`.
+- A small prefix of saved values is cached in callee-saved registers, with deeper values spilling to stack slots.
+- Calls place the first 8 arguments in `x0`-`x7` and place overflow arguments in the outbound call stack area.
+- Because AArch64 already requires 16-byte stack alignment and the backend spills in 16-byte slots, this path stays naturally aligned.
 
 ## C.3 Syscall Intrinsics
 
@@ -1421,7 +1460,7 @@ All are equally correct.
 
 # Files
 
-- `p0.py` - Parser and code generator
+- `p0.py` - Parser
 - `t0.py` - Tokenizer
 - `backend/` - Target-specific code generators
   - `x86_64.py` - x86_64 Linux
