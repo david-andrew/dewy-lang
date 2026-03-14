@@ -378,7 +378,16 @@ let messages = ["error" "warning" "info"]
 Elements may be:
 - Number literals
 - String literals
-- Identifiers referencing constants or functions
+- Identifiers referencing compile-time stable values or functions
+
+A value is **compile-time stable** when the compiler can determine it completely during compilation and knows that the binding cannot later change. In practice this includes:
+- Number literals
+- String literals
+- Array literals
+- Static storage addresses produced by `__static_alloca__(...)`
+- Backend-provided builtin constants
+- `const` bindings initialized from other compile-time stable values
+- Function identifiers, since functions are top-level only and cannot be redefined or reassigned
 
 Array literals are stored in static memory with an 8-byte length prefix. See [Memory Layout](#16-memory-layout).
 
@@ -411,7 +420,7 @@ const BUFFER_SIZE:int = 1024
 let data<array<int>> = [1 2 3]
 ```
 
-`let` and `const` are **semantically identical**—there is no enforcement of immutability. Use `const` to document values that should not change.
+`let` declares a mutable binding. `const` declares an immutable binding and cannot be assigned after its initializer.
 
 ### Assignment
 
@@ -419,6 +428,8 @@ Simple assignment:
 ```udewy
 x = 42
 ```
+
+The assignment target must be a `let` binding. Assigning to a `const` is a compile-time error.
 
 **Compound assignment** operators combine a binary operation with assignment:
 
@@ -688,7 +699,7 @@ Signed and unsigned 64-bit loads/stores are identical at runtime; both spellings
 
 `__alloca__(size)` reserves temporary storage whose lifetime lasts until the current function returns. The returned address is aligned to 8 bytes, and the reserved size is rounded up to a multiple of 8. Native backends typically implement this with function-local stack storage; the wasm backend uses a function-scoped stack region in linear memory.
 
-`__static_alloca__(size)` reserves writable storage in the program's static data area. The storage is zero-initialized, has a single shared instance for the entire program, and is not tied to any function call frame. Its `size` argument must be a compile-time constant, which may be either a number literal or an identifier that resolves to a constant in the same way array literal elements do.
+`__static_alloca__(size)` reserves writable storage in the program's static data area. The storage is zero-initialized, has a single shared instance for the entire program, and is not tied to any function call frame. Its `size` argument must be a compile-time stable integer value, which may be provided directly as a number literal or indirectly through a `const` binding or backend-provided builtin constant.
 
 ## 2.2 Arithmetic Operations
 
@@ -917,7 +928,7 @@ atom            ::= NUMBER
                   | '[' array_elem* ']'
 
 arg_list        ::= expr*
-array_elem      ::= NUMBER | STRING | IDENT
+array_elem      ::= NUMBER | STRING | IDENT  # IDENT must resolve to a compile-time stable value or function
 
 cast_annot      ::= 'transmute' (IDENT type_param? | type_param)
 
@@ -927,7 +938,7 @@ binop           ::= '+' | '-' | '*' | '//' | '%'
                   | 'and' | 'or' | 'xor'
                   | '|>'
 
-const_expr      ::= NUMBER | STRING | '[' array_elem* ']'
+const_expr      ::= NUMBER | STRING | IDENT | '[' array_elem* ']'
 
 # Lexical elements
 IDENT           ::= [a-zA-Z_][a-zA-Z0-9_]*

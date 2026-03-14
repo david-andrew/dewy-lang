@@ -8,6 +8,7 @@ but it uses ordinary Python data structures for symbol tracking.
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
+from typing import Literal
 
 from . import t0
 from .backend.x86_64 import X86_64Backend
@@ -140,6 +141,29 @@ class FunctionEntry:
     is_defined: bool
 
 
+StableValueKind = Literal["int", "function", "string", "array", "static"]
+
+
+@dataclass(frozen=True)
+class StableValue:
+    kind: StableValueKind
+    value: int
+
+
+@dataclass
+class LocalEntry:
+    slot: int
+    is_const: bool
+    const_value: StableValue | None = None
+
+
+@dataclass
+class GlobalEntry:
+    label_id: int | None
+    is_const: bool
+    const_value: StableValue | None = None
+
+
 @dataclass
 class ParseContext:
     builtin_consts: dict[str, int]
@@ -147,9 +171,8 @@ class ParseContext:
 
 
 FunctionTable = dict[str, FunctionEntry]
-GlobalTable = dict[str, int]
-ConstTable = dict[str, int]
-Scope = dict[str, int]
+GlobalTable = dict[str, GlobalEntry]
+Scope = dict[str, LocalEntry]
 ScopeStack = list[Scope]
 
 @dataclass
@@ -158,7 +181,6 @@ class ParseState:
     backend: Backend
     fn_table: FunctionTable
     global_table: GlobalTable
-    const_table: ConstTable
     scope_stack: ScopeStack
     ctx: ParseContext
 
@@ -220,39 +242,234 @@ def fn_declare(
     return entry
 
 
-def var_lookup(scope_stack: ScopeStack, name: str) -> int | None:
+def is_decl_kind(kind: t0.Kind) -> bool:
+    return kind in (t0.Kind.TK_LET, t0.Kind.TK_CONST)
+
+
+def var_lookup(scope_stack: ScopeStack, name: str) -> LocalEntry | None:
     for scope in reversed(scope_stack):
-        slot = scope.get(name)
-        if slot is not None:
-            return slot
+        entry = scope.get(name)
+        if entry is not None:
+            return entry
     return None
 
 
-def var_declare(scope_stack: ScopeStack, name: str, slot: int) -> None:
-    scope_stack[-1][name] = slot
+def var_declare(scope_stack: ScopeStack, name: str, entry: LocalEntry) -> LocalEntry:
+    scope_stack[-1][name] = entry
+    return entry
 
 
-def global_lookup(global_table: GlobalTable, name: str) -> int | None:
+def global_lookup(global_table: GlobalTable, name: str) -> GlobalEntry | None:
     return global_table.get(name)
 
 
-def global_declare(global_table: GlobalTable, name: str, label_id: int) -> int:
-    global_table[name] = label_id
-    return label_id
+def global_declare(global_table: GlobalTable, name: str, entry: GlobalEntry) -> GlobalEntry:
+    global_table[name] = entry
+    return entry
 
 
-def const_lookup(const_table: ConstTable, name: str, builtin_consts: dict[str, int] | None = None) -> int | None:
-    value = const_table.get(name)
-    if value is not None:
-        return value
+def stable_value_to_directive(backend: Backend, stable_value: StableValue) -> int | str:
+    if stable_value.kind == "int":
+        return stable_value.value
+    if stable_value.kind == "function":
+        return backend.function_ref(stable_value.value)
+    if stable_value.kind == "string":
+        return backend.string_ref(stable_value.value)
+    if stable_value.kind == "array":
+        return backend.array_ref(stable_value.value)
+    if stable_value.kind == "static":
+        return backend.static_ref(stable_value.value)
+    raise ValueError(f"Unknown stable value kind: {stable_value.kind}")
+
+
+def push_stable_value(backend: Backend, stable_value: StableValue) -> None:
+    if stable_value.kind == "int":
+        backend.push_const_i64(stable_value.value)
+        return
+    if stable_value.kind == "function":
+        backend.push_fn_ref(stable_value.value)
+        return
+    if stable_value.kind == "string":
+        backend.push_string_ref(stable_value.value)
+        return
+    if stable_value.kind == "array":
+        backend.push_array_ref(stable_value.value)
+        return
+    if stable_value.kind == "static":
+        backend.push_static_ref(stable_value.value)
+        return
+    raise ValueError(f"Unknown stable value kind: {stable_value.kind}")
+
+
+def lookup_stable_value(
+    scope_stack: ScopeStack,
+    global_table: GlobalTable,
+    name: str,
+    builtin_consts: dict[str, int] | None = None,
+) -> StableValue | None:
+    for scope in reversed(scope_stack):
+        local_entry = scope.get(name)
+        if local_entry is not None:
+            return local_entry.const_value
+
+    global_entry = global_table.get(name)
+    if global_entry is not None:
+        return global_entry.const_value
+
     if builtin_consts is not None:
-        return builtin_consts.get(name)
+        value = builtin_consts.get(name)
+        if value is not None:
+            return StableValue("int", value)
     return None
 
 
-def const_declare(const_table: ConstTable, name: str, value: int) -> int:
-    const_table[name] = value
-    return value
+def lookup_stable_int(
+    scope_stack: ScopeStack,
+    global_table: GlobalTable,
+    name: str,
+    builtin_consts: dict[str, int] | None = None,
+) -> int | None:
+    stable_value = lookup_stable_value(scope_stack, global_table, name, builtin_consts)
+    if stable_value is None or stable_value.kind != "int":
+        return None
+    return stable_value.value
+
+
+def try_parse_stable_expr(
+    toks: list[t0.Token],
+    idx: int,
+    state: ParseState,
+    emit_runtime: bool = True,
+) -> tuple[int, StableValue] | None:
+    if idx >= len(toks):
+        return None
+
+    backend = state.backend
+    kind = toks[idx].kind
+
+    if kind == t0.Kind.TK_NUMBER:
+        value = toks[idx].value
+        assert isinstance(value, int)
+        stable_value = StableValue("int", value)
+        if emit_runtime:
+            push_stable_value(backend, stable_value)
+        return idx + 1, stable_value
+
+    if kind == t0.Kind.TK_MINUS and idx + 1 < len(toks) and toks[idx + 1].kind == t0.Kind.TK_NUMBER:
+        value = toks[idx + 1].value
+        assert isinstance(value, int)
+        stable_value = StableValue("int", -value)
+        if emit_runtime:
+            push_stable_value(backend, stable_value)
+        return idx + 2, stable_value
+
+    if kind == t0.Kind.TK_STRING:
+        label_id = backend.intern_string(
+            decode_string_literal(state.src, toks[idx].location, tok_name_len(toks, idx))
+        )
+        stable_value = StableValue("string", label_id)
+        if emit_runtime:
+            push_stable_value(backend, stable_value)
+        return idx + 1, stable_value
+
+    if kind == t0.Kind.TK_IDENT:
+        name = get_token_name(toks, idx, state.src)
+        resolved_stable_value = lookup_stable_value(
+            state.scope_stack, state.global_table, name, state.ctx.builtin_consts
+        )
+        if resolved_stable_value is not None:
+            if emit_runtime:
+                push_stable_value(backend, resolved_stable_value)
+            return idx + 1, resolved_stable_value
+
+        if var_lookup(state.scope_stack, name) is not None or global_lookup(state.global_table, name) is not None:
+            return None
+
+        entry = note_function_reference(backend, state.fn_table, name, None, toks[idx].location)
+        stable_value = StableValue("function", entry.label_id)
+        if emit_runtime:
+            push_stable_value(backend, stable_value)
+        return idx + 1, stable_value
+
+    if kind == t0.Kind.TK_LEFT_PAREN:
+        result = try_parse_stable_expr(toks, idx + 1, state, emit_runtime=emit_runtime)
+        if result is None:
+            return None
+        new_idx, stable_value = result
+        if new_idx >= len(toks) or toks[new_idx].kind != t0.Kind.TK_RIGHT_PAREN:
+            return None
+        return new_idx + 1, stable_value
+
+    if kind == t0.Kind.TK_LEFT_BRACKET:
+        elem_directives, new_idx = parse_array_elements(toks, idx + 1, state)
+        label_id = backend.intern_array(elem_directives)
+        stable_value = StableValue("array", label_id)
+        if emit_runtime:
+            push_stable_value(backend, stable_value)
+        return new_idx, stable_value
+
+    if kind == t0.Kind.TK_IDENT_CALL:
+        name = get_token_name(toks, idx, state.src)
+        if name != "__static_alloca__":
+            return None
+
+        new_idx = idx + 1
+        size, new_idx = parse_static_alloca_size(toks, new_idx, state)
+        label_id = backend.intern_static(size)
+        stable_value = StableValue("static", label_id)
+        if emit_runtime:
+            push_stable_value(backend, stable_value)
+        return new_idx, stable_value
+
+    return None
+
+
+def parse_const_only_ident(name: str, loc: int, state: ParseState) -> int | str | None:
+    stable_value = lookup_stable_value(state.scope_stack, state.global_table, name, state.ctx.builtin_consts)
+    if stable_value is not None:
+        return stable_value_to_directive(state.backend, stable_value)
+
+    if var_lookup(state.scope_stack, name) is not None or global_lookup(state.global_table, name) is not None:
+        return None
+
+    entry = note_function_reference(state.backend, state.fn_table, name, None, loc)
+    return state.backend.function_ref(entry.label_id)
+
+
+def parse_array_elements(toks: list[t0.Token], idx: int, state: ParseState) -> tuple[list[int | str], int]:
+    backend = state.backend
+    elem_directives: list[int | str] = []
+
+    while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_BRACKET:
+        elem_kind = toks[idx].kind
+
+        if elem_kind == t0.Kind.TK_NUMBER:
+            value = toks[idx].value
+            assert isinstance(value, int)
+            elem_directives.append(value)
+            idx = idx + 1
+
+        elif elem_kind == t0.Kind.TK_IDENT:
+            name = get_token_name(toks, idx, state.src)
+            directive = parse_const_only_ident(name, toks[idx].location, state)
+            if directive is not None:
+                elem_directives.append(directive)
+            else:
+                raise SyntaxError(f"Array elements must be constants at {toks[idx].location}")
+            idx = idx + 1
+
+        elif elem_kind == t0.Kind.TK_STRING:
+            str_label_id = backend.intern_string(
+                decode_string_literal(state.src, toks[idx].location, tok_name_len(toks, idx))
+            )
+            idx = idx + 1
+            elem_directives.append(backend.string_ref(str_label_id))
+
+        else:
+            raise SyntaxError(f"Array elements must be constants at {toks[idx].location}")
+
+    idx = expect(toks, idx, t0.Kind.TK_RIGHT_BRACKET, state)
+    return elem_directives, idx
 
 
 def push_scope(scope_stack: ScopeStack) -> None:
@@ -432,7 +649,7 @@ def parse_static_alloca_size(toks: list[t0.Token], idx: int, state: ParseState) 
         idx = idx + 1
     elif kind == t0.Kind.TK_IDENT:
         name = get_token_name(toks, idx, state.src)
-        size = const_lookup(state.const_table, name, state.ctx.builtin_consts)
+        size = lookup_stable_int(state.scope_stack, state.global_table, name, state.ctx.builtin_consts)
         if size is None:
             raise SyntaxError(f"__static_alloca__ size must be a compile-time constant at {toks[idx].location}")
         idx = idx + 1
@@ -477,17 +694,21 @@ def parse_atom( toks: list[t0.Token], idx: int, state: ParseState) -> int:
     if kind == t0.Kind.TK_IDENT:
         name = get_token_name(toks, idx, state.src)
 
-        slot = var_lookup(state.scope_stack, name)
-        if slot is not None:
-            backend.load_local(slot)
+        local_entry = var_lookup(state.scope_stack, name)
+        if local_entry is not None:
+            backend.load_local(local_entry.slot)
             return idx + 1
 
-        global_label = global_lookup(state.global_table, name)
-        if global_label is not None:
-            backend.load_global(global_label)
+        global_entry = global_lookup(state.global_table, name)
+        if global_entry is not None:
+            if global_entry.label_id is not None:
+                backend.load_global(global_entry.label_id)
+            else:
+                assert global_entry.const_value is not None
+                push_stable_value(backend, global_entry.const_value)
             return idx + 1
 
-        value = const_lookup(state.const_table, name, state.ctx.builtin_consts)
+        value = state.ctx.builtin_consts.get(name)
         if value is not None:
             backend.push_const_i64(value)
             return idx + 1
@@ -539,39 +760,7 @@ def parse_atom( toks: list[t0.Token], idx: int, state: ParseState) -> int:
 
     if kind == t0.Kind.TK_LEFT_BRACKET:
         idx = idx + 1
-        elem_directives: list[int | str] = []
-
-        while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_BRACKET:
-            elem_kind = toks[idx].kind
-
-            if elem_kind == t0.Kind.TK_NUMBER:
-                value = toks[idx].value
-                assert isinstance(value, int)
-                elem_directives.append(value)
-                idx = idx + 1
-
-            elif elem_kind == t0.Kind.TK_IDENT:
-                name = get_token_name(toks, idx, state.src)
-                value = const_lookup(state.const_table, name, state.ctx.builtin_consts)
-                if value is not None:
-                    elem_directives.append(value)
-                else:
-                    entry = note_function_reference(backend, state.fn_table, name, None, toks[idx].location)
-                    elem_directives.append(backend.function_ref(entry.label_id))
-                idx = idx + 1
-
-            elif elem_kind == t0.Kind.TK_STRING:
-                str_label_id = backend.intern_string(
-                    decode_string_literal(state.src, toks[idx].location, tok_name_len(toks, idx))
-                )
-                idx = idx + 1
-                elem_directives.append(backend.string_ref(str_label_id))
-            
-            else:
-                raise SyntaxError(f"Array elements must be constants at {toks[idx].location}")
-        
-        idx = expect(toks, idx, t0.Kind.TK_RIGHT_BRACKET, state)
-        
+        elem_directives, idx = parse_array_elements(toks, idx, state)
         label_id = backend.intern_array(elem_directives)
         backend.push_array_ref(label_id)
         return idx
@@ -696,24 +885,35 @@ def skip_cast_annotation(toks: list[t0.Token], idx: int) -> int:
 
 def parse_var_decl(toks: list[t0.Token], idx: int, state: ParseState) -> int:
     backend = state.backend
+    decl_kind = toks[idx].kind
+    is_const = decl_kind == t0.Kind.TK_CONST
     idx = idx + 1
     
     if toks[idx].kind != t0.Kind.TK_IDENT:
-        raise SyntaxError("Expected identifier after let")
+        raise SyntaxError("Expected identifier after declaration keyword")
     
     name = get_token_name(toks, idx, state.src)
     idx = idx + 1
     
-    idx = require_type_annotation(toks, idx, f"variable {name!r}", state)
+    subject = "constant" if is_const else "variable"
+    idx = require_type_annotation(toks, idx, f"{subject} {name!r}", state)
     
     if idx >= len(toks) or toks[idx].kind != t0.Kind.TK_ASSIGN:
         raise SyntaxError(f"Expected '=' at {toks[idx].location}")
     idx = idx + 1
-    
-    idx = parse_expr(toks, idx, state, 0)
-    
+
+    const_value: StableValue | None = None
+    if is_const:
+        stable_result = try_parse_stable_expr(toks, idx, state)
+        if stable_result is not None:
+            idx, const_value = stable_result
+        else:
+            idx = parse_expr(toks, idx, state, 0)
+    else:
+        idx = parse_expr(toks, idx, state, 0)
+
     slot = backend.alloc_local()
-    var_declare(state.scope_stack, name, slot)
+    var_declare(state.scope_stack, name, LocalEntry(slot=slot, is_const=is_const, const_value=const_value))
     backend.store_local(slot)
     
     return idx
@@ -767,7 +967,7 @@ def parse_fn_decl(toks: list[t0.Token], idx: int, state: ParseState) -> int:
         slot = backend.alloc_local()
         backend.load_param(i)
         backend.store_local(slot)
-        var_declare(state.scope_stack, param_name, slot)
+        var_declare(state.scope_stack, param_name, LocalEntry(slot=slot, is_const=False))
     
     idx, body_returns = parse_block(toks, idx, state)
     
@@ -889,13 +1089,18 @@ def parse_assign_or_expr(toks: list[t0.Token], idx: int, state: ParseState) -> i
                 
                 idx = parse_expr(toks, idx, state, 0)
 
-                slot = var_lookup(state.scope_stack, name)
-                if slot is not None:
-                    backend.store_local(slot)
+                local_entry = var_lookup(state.scope_stack, name)
+                if local_entry is not None:
+                    if local_entry.is_const:
+                        raise SyntaxError(f"Cannot assign to constant {name!r} at position {toks[idx - 2].location}")
+                    backend.store_local(local_entry.slot)
                 else:
-                    global_label = global_lookup(state.global_table, name)
-                    if global_label is not None:
-                        backend.store_global(global_label)
+                    global_entry = global_lookup(state.global_table, name)
+                    if global_entry is not None:
+                        if global_entry.is_const:
+                            raise SyntaxError(f"Cannot assign to constant {name!r} at position {toks[idx - 2].location}")
+                        assert global_entry.label_id is not None
+                        backend.store_global(global_entry.label_id)
                     else:
                         raise SyntaxError(f"Undefined variable {name!r} at position {toks[idx - 2].location}")
                 
@@ -907,22 +1112,27 @@ def parse_assign_or_expr(toks: list[t0.Token], idx: int, state: ParseState) -> i
                 assert isinstance(op_kind, t0.Kind)
                 idx = idx + 2
                 
-                local_slot = var_lookup(state.scope_stack, name)
-                if local_slot is not None:
-                    backend.load_local(local_slot)
+                local_entry = var_lookup(state.scope_stack, name)
+                if local_entry is not None:
+                    if local_entry.is_const:
+                        raise SyntaxError(f"Cannot assign to constant {name!r} at position {toks[idx - 2].location}")
+                    backend.load_local(local_entry.slot)
                     backend.save_value()
                     idx = parse_expr(toks, idx, state, 0)
                     backend.binary_op(op_kind)
-                    backend.store_local(local_slot)
+                    backend.store_local(local_entry.slot)
                 else:
-                    global_label = global_lookup(state.global_table, name)
-                    if global_label is None:
+                    global_entry = global_lookup(state.global_table, name)
+                    if global_entry is None:
                         raise SyntaxError(f"Undefined variable {name!r} at position {toks[idx - 2].location}")
-                    backend.load_global(global_label)
+                    if global_entry.is_const:
+                        raise SyntaxError(f"Cannot assign to constant {name!r} at position {toks[idx - 2].location}")
+                    assert global_entry.label_id is not None
+                    backend.load_global(global_entry.label_id)
                     backend.save_value()
                     idx = parse_expr(toks, idx, state, 0)
                     backend.binary_op(op_kind)
-                    backend.store_global(global_label)
+                    backend.store_global(global_entry.label_id)
                 
                 return idx
     
@@ -934,7 +1144,7 @@ def parse_assign_or_expr(toks: list[t0.Token], idx: int, state: ParseState) -> i
 def parse_statement(toks: list[t0.Token], idx: int, state: ParseState) -> tuple[int, bool]:
     kind = toks[idx].kind
     
-    if kind == t0.Kind.TK_LET:
+    if is_decl_kind(kind):
         if looks_like_fn_decl(toks, idx):
             raise SyntaxError(f"Functions may only be declared at top level at position {toks[idx].location}")
         return parse_var_decl(toks, idx, state), False
@@ -973,89 +1183,33 @@ def parse_program(toks: list[t0.Token], state: ParseState) -> None:
     while idx < len(toks):
         kind = toks[idx].kind
         
-        if kind == t0.Kind.TK_LET:
+        if is_decl_kind(kind):
             if looks_like_fn_decl(toks, idx):
                 idx = parse_fn_decl(toks, idx, state)
                 continue
-            
+
+            is_const = kind == t0.Kind.TK_CONST
             idx = idx + 1
             
             name = get_token_name(toks, idx, state.src)
             idx = idx + 1
             
-            idx = require_type_annotation(toks, idx, f"constant {name!r}", state)
+            subject = "constant" if is_const else "variable"
+            idx = require_type_annotation(toks, idx, f"{subject} {name!r}", state)
             idx = expect(toks, idx, t0.Kind.TK_ASSIGN, state)
-            
-            if toks[idx].kind == t0.Kind.TK_NUMBER:
-                value = toks[idx].value
-                assert isinstance(value, int)
-                val = value
-                idx = idx + 1
-                
-                const_declare(state.const_table, name, val)
-                label_id = backend.define_global(0, val)
-                global_declare(state.global_table, name, label_id)
-                
-            elif toks[idx].kind == t0.Kind.TK_STRING:
-                str_label_id = backend.intern_string(
-                    decode_string_literal(state.src, toks[idx].location, tok_name_len(toks, idx))
-                )
-                idx = idx + 1
-                label_id = backend.define_global(0, backend.string_ref(str_label_id))
-                global_declare(state.global_table, name, label_id)
-                
-            elif toks[idx].kind == t0.Kind.TK_LEFT_BRACKET:
-                idx = idx + 1
-                elem_directives: list[int | str] = []
-                
-                while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_BRACKET:
-                    elem_kind = toks[idx].kind
-                    
-                    if elem_kind == t0.Kind.TK_NUMBER:
-                        value = toks[idx].value
-                        assert isinstance(value, int)
-                        elem_directives.append(value)
-                        idx = idx + 1
-                    
-                    elif elem_kind == t0.Kind.TK_IDENT:
-                        ident_name = get_token_name(toks, idx, state.src)
-                        value = const_lookup(state.const_table, ident_name, state.ctx.builtin_consts)
-                        if value is not None:
-                            elem_directives.append(value)
-                        else:
-                            entry = note_function_reference(
-                                backend, state.fn_table, ident_name, None, toks[idx].location
-                            )
-                            elem_directives.append(backend.function_ref(entry.label_id))
-                        idx = idx + 1
-                    
-                    elif elem_kind == t0.Kind.TK_STRING:
-                        str_lbl_id = backend.intern_string(
-                            decode_string_literal(state.src, toks[idx].location, tok_name_len(toks, idx))
-                        )
-                        idx = idx + 1
-                        elem_directives.append(backend.string_ref(str_lbl_id))
-                    
-                    else:
-                        raise SyntaxError(f"Unsupported element type in global array at {toks[idx].location}")
-                
-                idx = expect(toks, idx, t0.Kind.TK_RIGHT_BRACKET, state)
-                
-                arr_label_id = backend.intern_array(elem_directives)
-                label_id = backend.define_global(0, backend.array_ref(arr_label_id))
-                global_declare(state.global_table, name, label_id)
-            elif toks[idx].kind == t0.Kind.TK_IDENT_CALL:
-                call_name = get_token_name(toks, idx, state.src)
-                if call_name != "__static_alloca__":
-                    raise SyntaxError(f"Global variables must have constant initializers at {toks[idx].location}")
 
-                idx = idx + 1
-                size, idx = parse_static_alloca_size(toks, idx, state)
-                static_label_id = backend.intern_static(size)
-                label_id = backend.define_global(0, backend.static_ref(static_label_id))
-                global_declare(state.global_table, name, label_id)
-            else:
+            stable_result = try_parse_stable_expr(toks, idx, state, emit_runtime=False)
+            if stable_result is None:
                 raise SyntaxError(f"Global variables must have constant initializers at {toks[idx].location}")
+            idx, stable_value = stable_result
+
+            directive = stable_value_to_directive(backend, stable_value)
+            label_id = backend.define_global(0, directive)
+            global_declare(
+                state.global_table,
+                name,
+                GlobalEntry(label_id=label_id, is_const=is_const, const_value=stable_value if is_const else None),
+            )
         else:
             raise SyntaxError(f"Only declarations allowed at top level, got {t0.dump_token(toks[idx], state.src)}")
 
@@ -1087,7 +1241,6 @@ def parse(toks: list[t0.Token], src: str, target: str = "x86_64") -> tuple[str, 
     
     fn_table: FunctionTable = {}
     global_table: GlobalTable = {}
-    const_table: ConstTable = {}
     scope_stack: ScopeStack = [{}]
     ctx = ParseContext(builtin_consts=backend.get_builtin_constants())
     state = ParseState(
@@ -1095,7 +1248,6 @@ def parse(toks: list[t0.Token], src: str, target: str = "x86_64") -> tuple[str, 
         backend=backend,
         fn_table=fn_table,
         global_table=global_table,
-        const_table=const_table,
         scope_stack=scope_stack,
         ctx=ctx,
     )

@@ -21,6 +21,7 @@ class Kind(Enum):
     TK_VOID          = auto()
     TK_NUMBER        = auto()
     TK_LET           = auto()
+    TK_CONST         = auto()
     TK_IF            = auto()
     TK_LOOP          = auto()
     TK_ELSE          = auto()
@@ -88,7 +89,7 @@ FALSE_VALUE: Value = 0x0000_0000_0000_0000
 
 KEYWORD_TOKENS: dict[str, tuple[Value | None, Kind]] = {
     "let":        (None,        Kind.TK_LET),
-    "const":      (None,        Kind.TK_LET),
+    "const":      (None,        Kind.TK_CONST),
     "and":        (None,        Kind.TK_AND),
     "or":         (None,        Kind.TK_OR),
     "xor":        (None,        Kind.TK_XOR),
