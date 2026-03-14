@@ -502,61 +502,61 @@ class Wasm32Backend(Backend):
     
     def unary_op(self, op_kind: int) -> None:
         """Apply unary operator to top of stack."""
-        if op_kind == t0.TK_MINUS:
+        if op_kind == t0.Kind.TK_MINUS:
             self._emit("i64.const -1")
             self._emit("i64.mul")
-        elif op_kind == t0.TK_NOT:
+        elif op_kind == t0.Kind.TK_NOT:
             self._emit("i64.const -1")
             self._emit("i64.xor")
     
     def binary_op(self, op_kind: int) -> None:
         """Apply binary operator to top two values on stack."""
-        if op_kind == t0.TK_PLUS:
+        if op_kind == t0.Kind.TK_PLUS:
             self._emit("i64.add")
-        elif op_kind == t0.TK_MINUS:
+        elif op_kind == t0.Kind.TK_MINUS:
             self._emit("i64.sub")
-        elif op_kind == t0.TK_MUL:
+        elif op_kind == t0.Kind.TK_MUL:
             self._emit("i64.mul")
-        elif op_kind == t0.TK_IDIV:
+        elif op_kind == t0.Kind.TK_IDIV:
             self._emit("i64.div_s")
-        elif op_kind == t0.TK_MOD:
+        elif op_kind == t0.Kind.TK_MOD:
             self._emit("i64.rem_s")
-        elif op_kind == t0.TK_LEFT_SHIFT:
+        elif op_kind == t0.Kind.TK_LEFT_SHIFT:
             self._emit("i64.shl")
-        elif op_kind == t0.TK_RIGHT_SHIFT:
+        elif op_kind == t0.Kind.TK_RIGHT_SHIFT:
             self._emit("i64.shr_u")
-        elif op_kind == t0.TK_AND:
+        elif op_kind == t0.Kind.TK_AND:
             self._emit("i64.and")
-        elif op_kind == t0.TK_OR:
+        elif op_kind == t0.Kind.TK_OR:
             self._emit("i64.or")
-        elif op_kind == t0.TK_XOR:
+        elif op_kind == t0.Kind.TK_XOR:
             self._emit("i64.xor")
-        elif op_kind == t0.TK_EQ:
+        elif op_kind == t0.Kind.TK_EQ:
             self._emit("i64.eq")
             self._emit("i64.extend_i32_s")
             self._emit("i64.const 0")
             self._emit("i64.sub")
-        elif op_kind == t0.TK_NOT_EQ:
+        elif op_kind == t0.Kind.TK_NOT_EQ:
             self._emit("i64.ne")
             self._emit("i64.extend_i32_s")
             self._emit("i64.const 0")
             self._emit("i64.sub")
-        elif op_kind == t0.TK_GT:
+        elif op_kind == t0.Kind.TK_GT:
             self._emit("i64.gt_s")
             self._emit("i64.extend_i32_s")
             self._emit("i64.const 0")
             self._emit("i64.sub")
-        elif op_kind == t0.TK_LT:
+        elif op_kind == t0.Kind.TK_LT:
             self._emit("i64.lt_s")
             self._emit("i64.extend_i32_s")
             self._emit("i64.const 0")
             self._emit("i64.sub")
-        elif op_kind == t0.TK_GT_EQ:
+        elif op_kind == t0.Kind.TK_GT_EQ:
             self._emit("i64.ge_s")
             self._emit("i64.extend_i32_s")
             self._emit("i64.const 0")
             self._emit("i64.sub")
-        elif op_kind == t0.TK_LT_EQ:
+        elif op_kind == t0.Kind.TK_LT_EQ:
             self._emit("i64.le_s")
             self._emit("i64.extend_i32_s")
             self._emit("i64.const 0")

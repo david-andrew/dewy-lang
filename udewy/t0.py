@@ -2,8 +2,8 @@
 Tokenizer for udewy
 designed to be straightforward to translate to assembly or etc. low level code
 """
-from enum import Enum, auto
 from dataclasses import dataclass
+from enum import Enum, auto
 
 
 # some basic type aliases
@@ -26,9 +26,6 @@ class Kind(Enum):
     TK_RETURN        = auto()
     TK_BREAK         = auto()
     TK_CONTINUE      = auto()
-
-    # # operators that can be in place operators 
-    # _START_CAN_BE_IN_PLACE_ASSIGNMENT_OP:int = auto()  # not a TokenKind, just an index marker
     TK_PLUS          = auto()
     TK_MINUS         = auto()
     TK_MUL           = auto()
@@ -46,8 +43,6 @@ class Kind(Enum):
     TK_NOT           = auto()
     TK_LEFT_SHIFT    = auto()
     TK_RIGHT_SHIFT   = auto()
-    # _END_CAN_BE_IN_PLACE_ASSIGNMENT_OP:int = auto()  # not a TokenKind, just an index marker
-
     TK_ASSIGN        = auto()    # (NO_VALUE, start, TK_ASSIGN)
     TK_UPDATE_ASSIGN = auto()    # (kind, start, TK_UPDATE_ASSIGN) # an equals sign after an operator token, i.e. `+=`, `-=`, `*=`, `//=`, `%=`
     TK_EXPR_CALL     = auto()    # closing paren followed by opening paren i.e. `)(...)`. means do a function call on the result of the left expression in parens
@@ -65,6 +60,7 @@ class Kind(Enum):
     TK_PIPE          = auto()    # `|>` e.g. `x |> f1 |> f2 |> f3`
     TK_TRANSMUTE     = auto()    # `transmute` i.e. `<expr> transmute <(ident typeparam?)|typeparam>` e.g. `true transmute uint64`, `[1 2 3 4] transmute array<string>`, `foo transmute <int | string | bool>`, etc.
 
+# operators that can be in place operators 
 POSSIBLE_IN_PLACE_OPS: set[Kind] = {
     Kind.TK_PLUS,
     Kind.TK_MINUS,
@@ -88,6 +84,7 @@ POSSIBLE_IN_PLACE_OPS: set[Kind] = {
 # placehold for tokens that don't have a value
 TRUE_VALUE: Value = 0xFFFF_FFFF_FFFF_FFFF
 FALSE_VALUE: Value = 0x0000_0000_0000_0000
+# TODO: replace with None
 NO_VALUE: Value = 0 # i.e. placeholder for tokens that don't have a value
 
 KEYWORD_TOKENS: dict[str, tuple[Value, Kind]] = {
@@ -142,7 +139,7 @@ SYMBOL_TOKENS: list[tuple[str, Kind]] = [
 
 @dataclass
 class Token:
-    value: Value
+    value: int | Kind
     location: Location
     kind: Kind
 
@@ -292,8 +289,8 @@ def tokenize(src:str)->list[Token]:
     
         # special case of in place assignment operator
         if src[i] == '=' and toks and toks[-1].kind in POSSIBLE_IN_PLACE_OPS:
-            toks.pop()
-            toks.append(Token(NO_VALUE, i, Kind.TK_UPDATE_ASSIGN))
+            op_kind = toks.pop().kind
+            toks.append(Token(op_kind, i, Kind.TK_UPDATE_ASSIGN))
             i += 1
             continue
 
@@ -330,8 +327,6 @@ def tokenize(src:str)->list[Token]:
         raise SyntaxError(f"Unrecognized token at {i}: {src[i]!r}\nTokens so far\n{toks}")
 
     return toks
-
-
 
 
 def dump_token(token:Token, src:str):

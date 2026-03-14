@@ -326,9 +326,9 @@ class X86_64Backend(Backend):
     
     def unary_op(self, op_kind: int) -> None:
         """Apply unary operator to top of stack."""
-        if op_kind == t0.TK_MINUS:
+        if op_kind == t0.Kind.TK_MINUS:
             self._emit("negq %rax")
-        elif op_kind == t0.TK_NOT:
+        elif op_kind == t0.Kind.TK_NOT:
             self._emit("notq %rax")
     
     def binary_op(self, op_kind: int) -> None:
@@ -340,55 +340,55 @@ class X86_64Backend(Backend):
         self._emit("movq %rax, %rcx")  # right in rcx
         self._emit("popq %rax")        # left in rax
         
-        if op_kind == t0.TK_PLUS:
+        if op_kind == t0.Kind.TK_PLUS:
             self._emit("addq %rcx, %rax")
-        elif op_kind == t0.TK_MINUS:
+        elif op_kind == t0.Kind.TK_MINUS:
             self._emit("subq %rcx, %rax")
-        elif op_kind == t0.TK_MUL:
+        elif op_kind == t0.Kind.TK_MUL:
             self._emit("imulq %rcx, %rax")
-        elif op_kind == t0.TK_IDIV:
+        elif op_kind == t0.Kind.TK_IDIV:
             self._emit("cqto")
             self._emit("idivq %rcx")
-        elif op_kind == t0.TK_MOD:
+        elif op_kind == t0.Kind.TK_MOD:
             self._emit("cqto")
             self._emit("idivq %rcx")
             self._emit("movq %rdx, %rax")
-        elif op_kind == t0.TK_LEFT_SHIFT:
+        elif op_kind == t0.Kind.TK_LEFT_SHIFT:
             self._emit("shlq %cl, %rax")
-        elif op_kind == t0.TK_RIGHT_SHIFT:
+        elif op_kind == t0.Kind.TK_RIGHT_SHIFT:
             self._emit("shrq %cl, %rax")
-        elif op_kind == t0.TK_AND:
+        elif op_kind == t0.Kind.TK_AND:
             self._emit("andq %rcx, %rax")
-        elif op_kind == t0.TK_OR:
+        elif op_kind == t0.Kind.TK_OR:
             self._emit("orq %rcx, %rax")
-        elif op_kind == t0.TK_XOR:
+        elif op_kind == t0.Kind.TK_XOR:
             self._emit("xorq %rcx, %rax")
-        elif op_kind == t0.TK_EQ:
+        elif op_kind == t0.Kind.TK_EQ:
             self._emit("cmpq %rcx, %rax")
             self._emit("sete %al")
             self._emit("movzbq %al, %rax")
             self._emit("negq %rax")
-        elif op_kind == t0.TK_NOT_EQ:
+        elif op_kind == t0.Kind.TK_NOT_EQ:
             self._emit("cmpq %rcx, %rax")
             self._emit("setne %al")
             self._emit("movzbq %al, %rax")
             self._emit("negq %rax")
-        elif op_kind == t0.TK_GT:
+        elif op_kind == t0.Kind.TK_GT:
             self._emit("cmpq %rcx, %rax")
             self._emit("setg %al")
             self._emit("movzbq %al, %rax")
             self._emit("negq %rax")
-        elif op_kind == t0.TK_LT:
+        elif op_kind == t0.Kind.TK_LT:
             self._emit("cmpq %rcx, %rax")
             self._emit("setl %al")
             self._emit("movzbq %al, %rax")
             self._emit("negq %rax")
-        elif op_kind == t0.TK_GT_EQ:
+        elif op_kind == t0.Kind.TK_GT_EQ:
             self._emit("cmpq %rcx, %rax")
             self._emit("setge %al")
             self._emit("movzbq %al, %rax")
             self._emit("negq %rax")
-        elif op_kind == t0.TK_LT_EQ:
+        elif op_kind == t0.Kind.TK_LT_EQ:
             self._emit("cmpq %rcx, %rax")
             self._emit("setle %al")
             self._emit("movzbq %al, %rax")

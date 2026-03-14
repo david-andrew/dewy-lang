@@ -361,9 +361,9 @@ class ArmBackend(Backend):
     
     def unary_op(self, op_kind: int) -> None:
         """Apply unary operator to top of stack."""
-        if op_kind == t0.TK_MINUS:
+        if op_kind == t0.Kind.TK_MINUS:
             self._emit("neg x0, x0")
-        elif op_kind == t0.TK_NOT:
+        elif op_kind == t0.Kind.TK_NOT:
             self._emit("mvn x0, x0")
     
     def binary_op(self, op_kind: int) -> None:
@@ -372,43 +372,43 @@ class ArmBackend(Backend):
         self._emit("mov x9, x0")       # right in x9
         self._emit("ldr x0, [sp], #16")  # left in x0, pop
         
-        if op_kind == t0.TK_PLUS:
+        if op_kind == t0.Kind.TK_PLUS:
             self._emit("add x0, x0, x9")
-        elif op_kind == t0.TK_MINUS:
+        elif op_kind == t0.Kind.TK_MINUS:
             self._emit("sub x0, x0, x9")
-        elif op_kind == t0.TK_MUL:
+        elif op_kind == t0.Kind.TK_MUL:
             self._emit("mul x0, x0, x9")
-        elif op_kind == t0.TK_IDIV:
+        elif op_kind == t0.Kind.TK_IDIV:
             self._emit("sdiv x0, x0, x9")
-        elif op_kind == t0.TK_MOD:
+        elif op_kind == t0.Kind.TK_MOD:
             self._emit("sdiv x10, x0, x9")
             self._emit("msub x0, x10, x9, x0")
-        elif op_kind == t0.TK_LEFT_SHIFT:
+        elif op_kind == t0.Kind.TK_LEFT_SHIFT:
             self._emit("lsl x0, x0, x9")
-        elif op_kind == t0.TK_RIGHT_SHIFT:
+        elif op_kind == t0.Kind.TK_RIGHT_SHIFT:
             self._emit("lsr x0, x0, x9")
-        elif op_kind == t0.TK_AND:
+        elif op_kind == t0.Kind.TK_AND:
             self._emit("and x0, x0, x9")
-        elif op_kind == t0.TK_OR:
+        elif op_kind == t0.Kind.TK_OR:
             self._emit("orr x0, x0, x9")
-        elif op_kind == t0.TK_XOR:
+        elif op_kind == t0.Kind.TK_XOR:
             self._emit("eor x0, x0, x9")
-        elif op_kind == t0.TK_EQ:
+        elif op_kind == t0.Kind.TK_EQ:
             self._emit("cmp x0, x9")
             self._emit("csetm x0, eq")
-        elif op_kind == t0.TK_NOT_EQ:
+        elif op_kind == t0.Kind.TK_NOT_EQ:
             self._emit("cmp x0, x9")
             self._emit("csetm x0, ne")
-        elif op_kind == t0.TK_GT:
+        elif op_kind == t0.Kind.TK_GT:
             self._emit("cmp x0, x9")
             self._emit("csetm x0, gt")
-        elif op_kind == t0.TK_LT:
+        elif op_kind == t0.Kind.TK_LT:
             self._emit("cmp x0, x9")
             self._emit("csetm x0, lt")
-        elif op_kind == t0.TK_GT_EQ:
+        elif op_kind == t0.Kind.TK_GT_EQ:
             self._emit("cmp x0, x9")
             self._emit("csetm x0, ge")
-        elif op_kind == t0.TK_LT_EQ:
+        elif op_kind == t0.Kind.TK_LT_EQ:
             self._emit("cmp x0, x9")
             self._emit("csetm x0, le")
     
