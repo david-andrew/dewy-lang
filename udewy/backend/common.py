@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from os import PathLike
 from pathlib import Path
 
-from .. import t0
+from .. import t1
 
 CORE_INTRINSIC_ARITIES: dict[str, int] = {
     "__load_u8__": 1,
@@ -258,23 +258,23 @@ class Backend(ABC):
     # ========================================================================
     
     @abstractmethod
-    def unary_op(self, op_kind: t0.Kind) -> None:
+    def unary_op(self, op_kind: t1.Kind) -> None:
         """
         Apply unary operator to top of stack.
         
-        Supported operators (token kinds from t0):
+        Supported operators (token kinds from t1):
         - TK_MINUS: arithmetic negation
         - TK_NOT: bitwise not
         """
     
     @abstractmethod
-    def binary_op(self, op_kind: t0.Kind) -> None:
+    def binary_op(self, op_kind: t1.Kind) -> None:
         """
         Apply binary operator to top two values on stack.
         
         Pops two values (right then left), pushes result.
         
-        Supported operators (token kinds from t0):
+        Supported operators (token kinds from t1):
         - Arithmetic: TK_PLUS, TK_MINUS, TK_MUL, TK_IDIV, TK_MOD
         - Bitwise: TK_AND, TK_OR, TK_XOR, TK_LEFT_SHIFT, TK_RIGHT_SHIFT
         - Comparison: TK_EQ, TK_NOT_EQ, TK_LT, TK_GT, TK_LT_EQ, TK_GT_EQ

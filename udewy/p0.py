@@ -10,7 +10,7 @@ from os import PathLike
 from pathlib import Path
 from typing import Literal
 
-from . import t0
+from . import t1
 from .backend.x86_64 import X86_64Backend
 from .backend.wasm import Wasm32Backend
 from .backend.riscv import RiscvBackend
@@ -44,7 +44,7 @@ def process_imports(source: str, source_path: PathLike, imported: set[Path] | No
     body_cursor = 0
     n = len(source)
 
-    # TODO: pull / combine pieces of this from t0
+    # TODO: pull / combine pieces of this from t1
     def skip_trivia(idx: int) -> int:
         while idx < n:
             if source[idx] in ' \t\r\n':
@@ -57,7 +57,7 @@ def process_imports(source: str, source_path: PathLike, imported: set[Path] | No
             break
         return idx
 
-    # TODO: pull this from t0
+    # TODO: pull this from t1
     def is_ident_char(c: str) -> bool:
         return c == '_' or ('a' <= c <= 'z') or ('A' <= c <= 'Z') or ('0' <= c <= '9')
 
@@ -193,7 +193,7 @@ def get_name(src: str, start: int, length: int) -> str:
     return src[start:start + length]
 
 
-def get_token_name(toks: list[t0.Token], idx: int, src: str) -> str:
+def get_token_name(toks: list[t1.Token], idx: int, src: str) -> str:
     return get_name(src, tok_name_start(toks, idx), tok_name_len(toks, idx))
 
 
@@ -242,8 +242,8 @@ def fn_declare(
     return entry
 
 
-def is_decl_kind(kind: t0.Kind) -> bool:
-    return kind in (t0.Kind.TK_LET, t0.Kind.TK_CONST)
+def is_decl_kind(kind: t1.Kind) -> bool:
+    return kind in (t1.Kind.TK_LET, t1.Kind.TK_CONST)
 
 
 def var_lookup(scope_stack: ScopeStack, name: str) -> LocalEntry | None:
@@ -336,7 +336,7 @@ def lookup_stable_int(
 
 
 def try_parse_stable_expr(
-    toks: list[t0.Token],
+    toks: list[t1.Token],
     idx: int,
     state: ParseState,
     emit_runtime: bool = True,
@@ -347,7 +347,7 @@ def try_parse_stable_expr(
     backend = state.backend
     kind = toks[idx].kind
 
-    if kind == t0.Kind.TK_NUMBER:
+    if kind == t1.Kind.TK_NUMBER:
         value = toks[idx].value
         assert isinstance(value, int)
         stable_value = StableValue("int", value)
@@ -355,7 +355,7 @@ def try_parse_stable_expr(
             push_stable_value(backend, stable_value)
         return idx + 1, stable_value
 
-    if kind == t0.Kind.TK_MINUS and idx + 1 < len(toks) and toks[idx + 1].kind == t0.Kind.TK_NUMBER:
+    if kind == t1.Kind.TK_MINUS and idx + 1 < len(toks) and toks[idx + 1].kind == t1.Kind.TK_NUMBER:
         value = toks[idx + 1].value
         assert isinstance(value, int)
         stable_value = StableValue("int", -value)
@@ -363,7 +363,7 @@ def try_parse_stable_expr(
             push_stable_value(backend, stable_value)
         return idx + 2, stable_value
 
-    if kind == t0.Kind.TK_STRING:
+    if kind == t1.Kind.TK_STRING:
         label_id = backend.intern_string(
             decode_string_literal(state.src, toks[idx].location, tok_name_len(toks, idx))
         )
@@ -372,7 +372,7 @@ def try_parse_stable_expr(
             push_stable_value(backend, stable_value)
         return idx + 1, stable_value
 
-    if kind == t0.Kind.TK_IDENT:
+    if kind == t1.Kind.TK_IDENT:
         name = get_token_name(toks, idx, state.src)
         resolved_stable_value = lookup_stable_value(
             state.scope_stack, state.global_table, name, state.ctx.builtin_consts
@@ -391,16 +391,16 @@ def try_parse_stable_expr(
             push_stable_value(backend, stable_value)
         return idx + 1, stable_value
 
-    if kind == t0.Kind.TK_LEFT_PAREN:
+    if kind == t1.Kind.TK_LEFT_PAREN:
         result = try_parse_stable_expr(toks, idx + 1, state, emit_runtime=emit_runtime)
         if result is None:
             return None
         new_idx, stable_value = result
-        if new_idx >= len(toks) or toks[new_idx].kind != t0.Kind.TK_RIGHT_PAREN:
+        if new_idx >= len(toks) or toks[new_idx].kind != t1.Kind.TK_RIGHT_PAREN:
             return None
         return new_idx + 1, stable_value
 
-    if kind == t0.Kind.TK_LEFT_BRACKET:
+    if kind == t1.Kind.TK_LEFT_BRACKET:
         elem_directives, new_idx = parse_array_elements(toks, idx + 1, state)
         label_id = backend.intern_array(elem_directives)
         stable_value = StableValue("array", label_id)
@@ -408,7 +408,7 @@ def try_parse_stable_expr(
             push_stable_value(backend, stable_value)
         return new_idx, stable_value
 
-    if kind == t0.Kind.TK_IDENT_CALL:
+    if kind == t1.Kind.TK_IDENT_CALL:
         name = get_token_name(toks, idx, state.src)
         if name != "__static_alloca__":
             return None
@@ -436,20 +436,20 @@ def parse_const_only_ident(name: str, loc: int, state: ParseState) -> int | str 
     return state.backend.function_ref(entry.label_id)
 
 
-def parse_array_elements(toks: list[t0.Token], idx: int, state: ParseState) -> tuple[list[int | str], int]:
+def parse_array_elements(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[list[int | str], int]:
     backend = state.backend
     elem_directives: list[int | str] = []
 
-    while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_BRACKET:
+    while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_BRACKET:
         elem_kind = toks[idx].kind
 
-        if elem_kind == t0.Kind.TK_NUMBER:
+        if elem_kind == t1.Kind.TK_NUMBER:
             value = toks[idx].value
             assert isinstance(value, int)
             elem_directives.append(value)
             idx = idx + 1
 
-        elif elem_kind == t0.Kind.TK_IDENT:
+        elif elem_kind == t1.Kind.TK_IDENT:
             name = get_token_name(toks, idx, state.src)
             directive = parse_const_only_ident(name, toks[idx].location, state)
             if directive is not None:
@@ -458,7 +458,7 @@ def parse_array_elements(toks: list[t0.Token], idx: int, state: ParseState) -> t
                 raise SyntaxError(f"Array elements must be constants at {toks[idx].location}")
             idx = idx + 1
 
-        elif elem_kind == t0.Kind.TK_STRING:
+        elif elem_kind == t1.Kind.TK_STRING:
             str_label_id = backend.intern_string(
                 decode_string_literal(state.src, toks[idx].location, tok_name_len(toks, idx))
             )
@@ -468,7 +468,7 @@ def parse_array_elements(toks: list[t0.Token], idx: int, state: ParseState) -> t
         else:
             raise SyntaxError(f"Array elements must be constants at {toks[idx].location}")
 
-    idx = expect(toks, idx, t0.Kind.TK_RIGHT_BRACKET, state)
+    idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACKET, state)
     return elem_directives, idx
 
 
@@ -480,72 +480,72 @@ def pop_scope(scope_stack: ScopeStack) -> None:
     scope_stack.pop()
 
 
-def tok_name_start(toks: list[t0.Token], idx: int) -> int:
+def tok_name_start(toks: list[t1.Token], idx: int) -> int:
     return toks[idx].location
 
 
-def tok_name_len(toks: list[t0.Token], idx: int) -> int:
+def tok_name_len(toks: list[t1.Token], idx: int) -> int:
     value = toks[idx].value
     assert isinstance(value, int)
     return value
 
 
-def expect(toks: list[t0.Token], idx: int, kind: t0.Kind, state: ParseState) -> int:
+def expect(toks: list[t1.Token], idx: int, kind: t1.Kind, state: ParseState) -> int:
     if idx >= len(toks):
         raise SyntaxError(f"Unexpected end of input, expected {kind.name}")
     if toks[idx].kind != kind:
-        raise SyntaxError(f"Expected {kind.name}, got {t0.dump_token(toks[idx], state.src)} at position {toks[idx].location}")
+        raise SyntaxError(f"Expected {kind.name}, got {t1.dump_token(toks[idx], state.src)} at position {toks[idx].location}")
     return idx + 1
 
 
-def looks_like_fn_decl(toks: list[t0.Token], idx: int) -> bool:
+def looks_like_fn_decl(toks: list[t1.Token], idx: int) -> bool:
     if idx + 3 >= len(toks):
         return False
-    if toks[idx + 2].kind != t0.Kind.TK_ASSIGN or toks[idx + 3].kind != t0.Kind.TK_LEFT_PAREN:
+    if toks[idx + 2].kind != t1.Kind.TK_ASSIGN or toks[idx + 3].kind != t1.Kind.TK_LEFT_PAREN:
         return False
 
     depth = 1
     scan = idx + 4
     while scan < len(toks) and depth > 0:
         kind = toks[scan].kind
-        if kind == t0.Kind.TK_LEFT_PAREN:
+        if kind == t1.Kind.TK_LEFT_PAREN:
             depth = depth + 1
-        elif kind == t0.Kind.TK_RIGHT_PAREN:
+        elif kind == t1.Kind.TK_RIGHT_PAREN:
             depth = depth - 1
         scan = scan + 1
 
     if depth != 0 or scan >= len(toks):
         return False
-    if toks[scan].kind != t0.Kind.TK_FN_TYPE:
+    if toks[scan].kind != t1.Kind.TK_FN_TYPE:
         return False
 
     scan = scan + 1
-    if scan < len(toks) and toks[scan].kind == t0.Kind.TK_TYPE_PARAM:
+    if scan < len(toks) and toks[scan].kind == t1.Kind.TK_TYPE_PARAM:
         scan = scan + 1
-    return scan < len(toks) and toks[scan].kind == t0.Kind.TK_FN_ARROW
+    return scan < len(toks) and toks[scan].kind == t1.Kind.TK_FN_ARROW
 
 
-def require_type_annotation(toks: list[t0.Token], idx: int, subject: str, state: ParseState) -> int:
+def require_type_annotation(toks: list[t1.Token], idx: int, subject: str, state: ParseState) -> int:
     if idx >= len(toks):
         raise SyntaxError(f"Expected type annotation for {subject} before end of input")
     kind = toks[idx].kind
-    if kind == t0.Kind.TK_TYPE:
+    if kind == t1.Kind.TK_TYPE:
         idx = idx + 1
-        if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TYPE_PARAM:
+        if idx < len(toks) and toks[idx].kind == t1.Kind.TK_TYPE_PARAM:
             idx = idx + 1
         return idx
-    if kind == t0.Kind.TK_TYPE_PARAM:
+    if kind == t1.Kind.TK_TYPE_PARAM:
         return idx + 1
     raise SyntaxError(f"Expected type annotation for {subject} at position {toks[idx].location}")
 
 
-def require_fn_type_annotation(toks: list[t0.Token], idx: int, fn_name: str, state: ParseState) -> int:
+def require_fn_type_annotation(toks: list[t1.Token], idx: int, fn_name: str, state: ParseState) -> int:
     if idx >= len(toks):
         raise SyntaxError(f"Expected return type annotation for function {fn_name!r} before end of input")
-    if toks[idx].kind != t0.Kind.TK_FN_TYPE:
+    if toks[idx].kind != t1.Kind.TK_FN_TYPE:
         raise SyntaxError(f"Expected return type annotation for function {fn_name!r} at position {toks[idx].location}")
     idx = idx + 1
-    if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TYPE_PARAM:
+    if idx < len(toks) and toks[idx].kind == t1.Kind.TK_TYPE_PARAM:
         idx = idx + 1
     return idx
 
@@ -607,29 +607,29 @@ PREC_MUL = 7
 PREC_PIPE = 8
 
 
-def get_precedence(kind: t0.Kind) -> int:
-    if kind == t0.Kind.TK_OR:
+def get_precedence(kind: t1.Kind) -> int:
+    if kind == t1.Kind.TK_OR:
         return PREC_OR
-    if kind == t0.Kind.TK_XOR:
+    if kind == t1.Kind.TK_XOR:
         return PREC_XOR
-    if kind == t0.Kind.TK_AND:
+    if kind == t1.Kind.TK_AND:
         return PREC_AND
-    if kind == t0.Kind.TK_EQ or kind == t0.Kind.TK_NOT_EQ:
+    if kind == t1.Kind.TK_EQ or kind == t1.Kind.TK_NOT_EQ:
         return PREC_CMP
-    if kind == t0.Kind.TK_GT or kind == t0.Kind.TK_LT or kind == t0.Kind.TK_GT_EQ or kind == t0.Kind.TK_LT_EQ:
+    if kind == t1.Kind.TK_GT or kind == t1.Kind.TK_LT or kind == t1.Kind.TK_GT_EQ or kind == t1.Kind.TK_LT_EQ:
         return PREC_CMP
-    if kind == t0.Kind.TK_LEFT_SHIFT or kind == t0.Kind.TK_RIGHT_SHIFT:
+    if kind == t1.Kind.TK_LEFT_SHIFT or kind == t1.Kind.TK_RIGHT_SHIFT:
         return PREC_SHIFT
-    if kind == t0.Kind.TK_PLUS or kind == t0.Kind.TK_MINUS:
+    if kind == t1.Kind.TK_PLUS or kind == t1.Kind.TK_MINUS:
         return PREC_ADD
-    if kind == t0.Kind.TK_MUL or kind == t0.Kind.TK_IDIV or kind == t0.Kind.TK_MOD:
+    if kind == t1.Kind.TK_MUL or kind == t1.Kind.TK_IDIV or kind == t1.Kind.TK_MOD:
         return PREC_MUL
-    if kind == t0.Kind.TK_PIPE:
+    if kind == t1.Kind.TK_PIPE:
         return PREC_PIPE
     return 0
 
 
-def is_binop(kind: t0.Kind) -> bool:
+def is_binop(kind: t1.Kind) -> bool:
     return get_precedence(kind) > 0
 
 
@@ -647,19 +647,19 @@ def emit_intrinsic(backend: Backend, name: str, num_args: int) -> None:
     backend.emit_intrinsic(name, num_args)
 
 
-def parse_static_alloca_size(toks: list[t0.Token], idx: int, state: ParseState) -> tuple[int, int]:
+def parse_static_alloca_size(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[int, int]:
     """Parse the single compile-time size argument to __static_alloca__."""
     if idx >= len(toks):
         raise SyntaxError("__static_alloca__ expects one constant size argument")
 
     kind = toks[idx].kind
     size: int | None
-    if kind == t0.Kind.TK_NUMBER:
+    if kind == t1.Kind.TK_NUMBER:
         size_value = toks[idx].value
         assert isinstance(size_value, int)
         size = size_value
         idx = idx + 1
-    elif kind == t0.Kind.TK_IDENT:
+    elif kind == t1.Kind.TK_IDENT:
         name = get_token_name(toks, idx, state.src)
         size = lookup_stable_int(state.scope_stack, state.global_table, name, state.ctx.builtin_consts)
         if size is None:
@@ -668,7 +668,7 @@ def parse_static_alloca_size(toks: list[t0.Token], idx: int, state: ParseState) 
     else:
         raise SyntaxError(f"__static_alloca__ size must be a compile-time constant at {toks[idx].location}")
 
-    if idx >= len(toks) or toks[idx].kind != t0.Kind.TK_RIGHT_PAREN:
+    if idx >= len(toks) or toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
         raise SyntaxError(f"__static_alloca__ expects exactly one constant size argument at {toks[idx].location}")
     if size < 0:
         raise SyntaxError(f"__static_alloca__ size must be non-negative at {toks[idx - 1].location}")
@@ -680,30 +680,30 @@ def parse_static_alloca_size(toks: list[t0.Token], idx: int, state: ParseState) 
 # Expression parsing
 # ============================================================================
 
-def parse_atom( toks: list[t0.Token], idx: int, state: ParseState) -> int:
+def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
     """Parse an atomic expression, emit via backend. Returns new idx."""
     backend = state.backend
     kind = toks[idx].kind
     
-    if kind == t0.Kind.TK_NUMBER:
+    if kind == t1.Kind.TK_NUMBER:
         value = toks[idx].value
         assert isinstance(value, int)
         val = value
         backend.push_const_i64(val)
         return idx + 1
     
-    if kind == t0.Kind.TK_VOID:
+    if kind == t1.Kind.TK_VOID:
         backend.push_void()
         return idx + 1
     
-    if kind == t0.Kind.TK_STRING:
+    if kind == t1.Kind.TK_STRING:
         label_id = backend.intern_string(
             decode_string_literal(state.src, toks[idx].location, tok_name_len(toks, idx))
         )
         backend.push_string_ref(label_id)
         return idx + 1
     
-    if kind == t0.Kind.TK_IDENT:
+    if kind == t1.Kind.TK_IDENT:
         name = get_token_name(toks, idx, state.src)
 
         local_entry = var_lookup(state.scope_stack, name)
@@ -734,7 +734,7 @@ def parse_atom( toks: list[t0.Token], idx: int, state: ParseState) -> int:
         backend.push_fn_ref(entry.label_id)
         return idx + 1
 
-    if kind == t0.Kind.TK_IDENT_CALL:
+    if kind == t1.Kind.TK_IDENT_CALL:
         call_loc = toks[idx].location
         name = get_token_name(toks, idx, state.src)
         idx = idx + 1
@@ -746,12 +746,12 @@ def parse_atom( toks: list[t0.Token], idx: int, state: ParseState) -> int:
             return idx
 
         arg_count = 0
-        while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_PAREN:
+        while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
             idx = parse_expr(toks, idx, state, 0)
             backend.save_value()
             arg_count = arg_count + 1
 
-        idx = expect(toks, idx, t0.Kind.TK_RIGHT_PAREN, state)
+        idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
 
         if is_intrinsic(backend, name):
             validate_intrinsic_arity(backend, name, arg_count, call_loc)
@@ -765,48 +765,48 @@ def parse_atom( toks: list[t0.Token], idx: int, state: ParseState) -> int:
 
         return idx
 
-    if kind == t0.Kind.TK_LEFT_PAREN:
+    if kind == t1.Kind.TK_LEFT_PAREN:
         idx = idx + 1
         idx = parse_expr(toks, idx, state, 0)
-        idx = expect(toks, idx, t0.Kind.TK_RIGHT_PAREN, state)
+        idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
         return idx
 
-    if kind == t0.Kind.TK_LEFT_BRACKET:
+    if kind == t1.Kind.TK_LEFT_BRACKET:
         idx = idx + 1
         elem_directives, idx = parse_array_elements(toks, idx, state)
         label_id = backend.intern_array(elem_directives)
         backend.push_array_ref(label_id)
         return idx
 
-    raise SyntaxError(f"Unexpected token: {t0.dump_token(toks[idx], state.src)} at {toks[idx].location}")
+    raise SyntaxError(f"Unexpected token: {t1.dump_token(toks[idx], state.src)} at {toks[idx].location}")
 
 
-def parse_prefix( toks: list[t0.Token], idx: int, state: ParseState) -> int:
+def parse_prefix( toks: list[t1.Token], idx: int, state: ParseState) -> int:
     backend = state.backend
     kind = toks[idx].kind
 
-    if kind == t0.Kind.TK_NOT:
+    if kind == t1.Kind.TK_NOT:
         idx = idx + 1
         idx = parse_prefix(toks, idx, state)
-        backend.unary_op(t0.Kind.TK_NOT)
+        backend.unary_op(t1.Kind.TK_NOT)
         return idx
 
-    if kind == t0.Kind.TK_MINUS:
+    if kind == t1.Kind.TK_MINUS:
         idx = idx + 1
-        if toks[idx].kind == t0.Kind.TK_NUMBER:
+        if toks[idx].kind == t1.Kind.TK_NUMBER:
             value = toks[idx].value
             assert isinstance(value, int)
             val = value
             backend.push_const_i64(-val)
             return idx + 1
         idx = parse_prefix(toks, idx, state)
-        backend.unary_op(t0.Kind.TK_MINUS)
+        backend.unary_op(t1.Kind.TK_MINUS)
         return idx
 
     return parse_atom(toks, idx, state)
 
 
-def parse_expr(toks: list[t0.Token], idx: int, state: ParseState, min_prec: int) -> int:
+def parse_expr(toks: list[t1.Token], idx: int, state: ParseState, min_prec: int) -> int:
     backend = state.backend
     idx = parse_prefix(toks, idx, state)
     idx = skip_cast_annotation(toks, idx)
@@ -814,17 +814,17 @@ def parse_expr(toks: list[t0.Token], idx: int, state: ParseState, min_prec: int)
     while idx < len(toks):
         kind = toks[idx].kind
         
-        if kind == t0.Kind.TK_EXPR_CALL:
+        if kind == t1.Kind.TK_EXPR_CALL:
             backend.save_value()
             idx = idx + 1
             
             arg_count = 0
-            while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_PAREN:
+            while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
                 idx = parse_expr(toks, idx, state, 0)
                 backend.save_value()
                 arg_count = arg_count + 1
             
-            idx = expect(toks, idx, t0.Kind.TK_RIGHT_PAREN, state)
+            idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
             validate_call_arity(backend, arg_count, toks[idx - 1].location)
             backend.call_indirect(arg_count)
             continue
@@ -840,7 +840,7 @@ def parse_expr(toks: list[t0.Token], idx: int, state: ParseState, min_prec: int)
         idx = idx + 1
         backend.save_value()
         
-        if kind == t0.Kind.TK_PIPE:
+        if kind == t1.Kind.TK_PIPE:
             idx = parse_prefix(toks, idx, state)
             idx = skip_cast_annotation(toks, idx)
             backend.pipe_call()
@@ -858,51 +858,51 @@ def parse_expr(toks: list[t0.Token], idx: int, state: ParseState, min_prec: int)
 # Statement parsing
 # ============================================================================
 
-def skip_type_annotation(toks: list[t0.Token], idx: int) -> int:
+def skip_type_annotation(toks: list[t1.Token], idx: int) -> int:
     if idx >= len(toks):
         return idx
     kind = toks[idx].kind
-    if kind == t0.Kind.TK_TYPE:
+    if kind == t1.Kind.TK_TYPE:
         idx = idx + 1
-        if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TYPE_PARAM:
+        if idx < len(toks) and toks[idx].kind == t1.Kind.TK_TYPE_PARAM:
             idx = idx + 1
-    elif kind == t0.Kind.TK_TYPE_PARAM:
+    elif kind == t1.Kind.TK_TYPE_PARAM:
         idx = idx + 1
     return idx
 
 
-def skip_fn_type_annotation(toks: list[t0.Token], idx: int) -> int:
+def skip_fn_type_annotation(toks: list[t1.Token], idx: int) -> int:
     if idx >= len(toks):
         return idx
     kind = toks[idx].kind
-    if kind == t0.Kind.TK_FN_TYPE:
+    if kind == t1.Kind.TK_FN_TYPE:
         idx = idx + 1
-        if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TYPE_PARAM:
+        if idx < len(toks) and toks[idx].kind == t1.Kind.TK_TYPE_PARAM:
             idx = idx + 1
     return idx
 
 
-def skip_cast_annotation(toks: list[t0.Token], idx: int) -> int:
-    if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TRANSMUTE:
+def skip_cast_annotation(toks: list[t1.Token], idx: int) -> int:
+    if idx < len(toks) and toks[idx].kind == t1.Kind.TK_TRANSMUTE:
         idx = idx + 1
         if idx < len(toks):
             kind = toks[idx].kind
-            if kind == t0.Kind.TK_IDENT:
+            if kind == t1.Kind.TK_IDENT:
                 idx = idx + 1
-                if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TYPE_PARAM:
+                if idx < len(toks) and toks[idx].kind == t1.Kind.TK_TYPE_PARAM:
                     idx = idx + 1
-            elif kind == t0.Kind.TK_TYPE_PARAM:
+            elif kind == t1.Kind.TK_TYPE_PARAM:
                 idx = idx + 1
     return idx
 
 
-def parse_var_decl(toks: list[t0.Token], idx: int, state: ParseState) -> int:
+def parse_var_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     backend = state.backend
     decl_kind = toks[idx].kind
-    is_const = decl_kind == t0.Kind.TK_CONST
+    is_const = decl_kind == t1.Kind.TK_CONST
     idx = idx + 1
     
-    if toks[idx].kind != t0.Kind.TK_IDENT:
+    if toks[idx].kind != t1.Kind.TK_IDENT:
         raise SyntaxError("Expected identifier after declaration keyword")
     
     name = get_token_name(toks, idx, state.src)
@@ -911,7 +911,7 @@ def parse_var_decl(toks: list[t0.Token], idx: int, state: ParseState) -> int:
     subject = "constant" if is_const else "variable"
     idx = require_type_annotation(toks, idx, f"{subject} {name!r}", state)
     
-    if idx >= len(toks) or toks[idx].kind != t0.Kind.TK_ASSIGN:
+    if idx >= len(toks) or toks[idx].kind != t1.Kind.TK_ASSIGN:
         raise SyntaxError(f"Expected '=' at {toks[idx].location}")
     idx = idx + 1
 
@@ -932,29 +932,29 @@ def parse_var_decl(toks: list[t0.Token], idx: int, state: ParseState) -> int:
     return idx
 
 
-def parse_fn_decl(toks: list[t0.Token], idx: int, state: ParseState) -> int:
+def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     backend = state.backend
     idx = idx + 1
     
     fn_name = get_token_name(toks, idx, state.src)
     idx = idx + 1
     
-    idx = expect(toks, idx, t0.Kind.TK_ASSIGN, state)
-    idx = expect(toks, idx, t0.Kind.TK_LEFT_PAREN, state)
+    idx = expect(toks, idx, t1.Kind.TK_ASSIGN, state)
+    idx = expect(toks, idx, t1.Kind.TK_LEFT_PAREN, state)
     
     params: list[str] = []
-    while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_PAREN:
-        if toks[idx].kind != t0.Kind.TK_IDENT:
+    while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
+        if toks[idx].kind != t1.Kind.TK_IDENT:
             raise SyntaxError(f"Expected parameter name at position {toks[idx].location}")
         param_name = get_token_name(toks, idx, state.src)
         params.append(param_name)
         idx = idx + 1
         idx = require_type_annotation(toks, idx, f"parameter {param_name!r}", state)
     
-    idx = expect(toks, idx, t0.Kind.TK_RIGHT_PAREN, state)
+    idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
     idx = require_fn_type_annotation(toks, idx, fn_name, state)
-    idx = expect(toks, idx, t0.Kind.TK_FN_ARROW, state)
-    idx = expect(toks, idx, t0.Kind.TK_LEFT_BRACE, state)
+    idx = expect(toks, idx, t1.Kind.TK_FN_ARROW, state)
+    idx = expect(toks, idx, t1.Kind.TK_LEFT_BRACE, state)
     
     entry = fn_lookup(state.fn_table, fn_name)
     if entry is not None:
@@ -984,7 +984,7 @@ def parse_fn_decl(toks: list[t0.Token], idx: int, state: ParseState) -> int:
     
     idx, body_returns = parse_block(toks, idx, state)
     
-    idx = expect(toks, idx, t0.Kind.TK_RIGHT_BRACE, state)
+    idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACE, state)
     if not body_returns:
         raise SyntaxError(f"Function {fn_name!r} must explicitly return before position {toks[idx - 1].location}")
     
@@ -994,26 +994,26 @@ def parse_fn_decl(toks: list[t0.Token], idx: int, state: ParseState) -> int:
     return idx
 
 
-def parse_if_stmnt(toks: list[t0.Token], idx: int, state: ParseState) -> tuple[int, bool]:
+def parse_if_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[int, bool]:
     backend = state.backend
     idx = idx + 1
     
     idx = parse_expr(toks, idx, state, 0)
     backend.begin_if()
     
-    idx = expect(toks, idx, t0.Kind.TK_LEFT_BRACE, state)
+    idx = expect(toks, idx, t1.Kind.TK_LEFT_BRACE, state)
     push_scope(state.scope_stack)
     idx, all_branches_return = parse_block(toks, idx, state)
-    idx = expect(toks, idx, t0.Kind.TK_RIGHT_BRACE, state)
+    idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACE, state)
     pop_scope(state.scope_stack)
 
     nested_if_count = 1
     saw_final_else = False
     
-    while idx < len(toks) and toks[idx].kind == t0.Kind.TK_ELSE:
+    while idx < len(toks) and toks[idx].kind == t1.Kind.TK_ELSE:
         idx = idx + 1
         
-        if idx < len(toks) and toks[idx].kind == t0.Kind.TK_IF:
+        if idx < len(toks) and toks[idx].kind == t1.Kind.TK_IF:
             backend.begin_else()
             idx = idx + 1
             
@@ -1021,19 +1021,19 @@ def parse_if_stmnt(toks: list[t0.Token], idx: int, state: ParseState) -> tuple[i
             backend.begin_if()
             nested_if_count = nested_if_count + 1
             
-            idx = expect(toks, idx, t0.Kind.TK_LEFT_BRACE, state)
+            idx = expect(toks, idx, t1.Kind.TK_LEFT_BRACE, state)
             push_scope(state.scope_stack)
             idx, branch_returns = parse_block(toks, idx, state)
-            idx = expect(toks, idx, t0.Kind.TK_RIGHT_BRACE, state)
+            idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACE, state)
             pop_scope(state.scope_stack)
             all_branches_return = all_branches_return and branch_returns
         else:
             saw_final_else = True
             backend.begin_else()
-            idx = expect(toks, idx, t0.Kind.TK_LEFT_BRACE, state)
+            idx = expect(toks, idx, t1.Kind.TK_LEFT_BRACE, state)
             push_scope(state.scope_stack)
             idx, else_returns = parse_block(toks, idx, state)
-            idx = expect(toks, idx, t0.Kind.TK_RIGHT_BRACE, state)
+            idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACE, state)
             pop_scope(state.scope_stack)
             
             for _ in range(nested_if_count):
@@ -1045,7 +1045,7 @@ def parse_if_stmnt(toks: list[t0.Token], idx: int, state: ParseState) -> tuple[i
     return idx, all_branches_return and saw_final_else
 
 
-def parse_loop_stmnt(toks: list[t0.Token], idx: int, state: ParseState) -> int:
+def parse_loop_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     backend = state.backend
     idx = idx + 1
     
@@ -1054,19 +1054,19 @@ def parse_loop_stmnt(toks: list[t0.Token], idx: int, state: ParseState) -> int:
     idx = parse_expr(toks, idx, state, 0)
     backend.begin_loop_body()
     
-    idx = expect(toks, idx, t0.Kind.TK_LEFT_BRACE, state)
+    idx = expect(toks, idx, t1.Kind.TK_LEFT_BRACE, state)
     push_scope(state.scope_stack)
     state.ctx.loop_depth = state.ctx.loop_depth + 1
     idx, _ = parse_block(toks, idx, state)
     state.ctx.loop_depth = state.ctx.loop_depth - 1
-    idx = expect(toks, idx, t0.Kind.TK_RIGHT_BRACE, state)
+    idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACE, state)
     pop_scope(state.scope_stack)
     
     backend.end_loop()
     return idx
 
 
-def parse_return_stmnt(toks: list[t0.Token], idx: int, state: ParseState) -> int:
+def parse_return_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     backend = state.backend
     idx = idx + 1
     idx = parse_expr(toks, idx, state, 0)
@@ -1074,7 +1074,7 @@ def parse_return_stmnt(toks: list[t0.Token], idx: int, state: ParseState) -> int
     return idx
 
 
-def parse_break_stmnt(toks: list[t0.Token], idx: int, state: ParseState) -> int:
+def parse_break_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     if state.ctx.loop_depth == 0:
         raise SyntaxError(f"`break` may only appear inside a loop at position {toks[idx].location}")
     idx = idx + 1
@@ -1082,7 +1082,7 @@ def parse_break_stmnt(toks: list[t0.Token], idx: int, state: ParseState) -> int:
     return idx
 
 
-def parse_continue_stmnt(toks: list[t0.Token], idx: int, state: ParseState) -> int:
+def parse_continue_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     if state.ctx.loop_depth == 0:
         raise SyntaxError(f"`continue` may only appear inside a loop at position {toks[idx].location}")
     idx = idx + 1
@@ -1090,13 +1090,13 @@ def parse_continue_stmnt(toks: list[t0.Token], idx: int, state: ParseState) -> i
     return idx
 
 
-def parse_assign_or_expr(toks: list[t0.Token], idx: int, state: ParseState) -> int:
+def parse_assign_or_expr(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     backend = state.backend
-    if toks[idx].kind == t0.Kind.TK_IDENT:
+    if toks[idx].kind == t1.Kind.TK_IDENT:
         if idx + 1 < len(toks):
             next_kind = toks[idx + 1].kind
             
-            if next_kind == t0.Kind.TK_ASSIGN:
+            if next_kind == t1.Kind.TK_ASSIGN:
                 name = get_token_name(toks, idx, state.src)
                 idx = idx + 2
                 
@@ -1119,10 +1119,10 @@ def parse_assign_or_expr(toks: list[t0.Token], idx: int, state: ParseState) -> i
                 
                 return idx
             
-            elif next_kind == t0.Kind.TK_UPDATE_ASSIGN:
+            elif next_kind == t1.Kind.TK_UPDATE_ASSIGN:
                 name = get_token_name(toks, idx, state.src)
                 op_kind = toks[idx + 1].value
-                assert isinstance(op_kind, t0.Kind)
+                assert isinstance(op_kind, t1.Kind)
                 idx = idx + 2
                 
                 local_entry = var_lookup(state.scope_stack, name)
@@ -1154,7 +1154,7 @@ def parse_assign_or_expr(toks: list[t0.Token], idx: int, state: ParseState) -> i
     return idx
 
 
-def parse_statement(toks: list[t0.Token], idx: int, state: ParseState) -> tuple[int, bool]:
+def parse_statement(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[int, bool]:
     kind = toks[idx].kind
     
     if is_decl_kind(kind):
@@ -1162,34 +1162,34 @@ def parse_statement(toks: list[t0.Token], idx: int, state: ParseState) -> tuple[
             raise SyntaxError(f"Functions may only be declared at top level at position {toks[idx].location}")
         return parse_var_decl(toks, idx, state), False
     
-    if kind == t0.Kind.TK_IF:
+    if kind == t1.Kind.TK_IF:
         return parse_if_stmnt(toks, idx, state)
     
-    if kind == t0.Kind.TK_LOOP:
+    if kind == t1.Kind.TK_LOOP:
         return parse_loop_stmnt(toks, idx, state), False
     
-    if kind == t0.Kind.TK_RETURN:
+    if kind == t1.Kind.TK_RETURN:
         return parse_return_stmnt(toks, idx, state), True
     
-    if kind == t0.Kind.TK_BREAK:
+    if kind == t1.Kind.TK_BREAK:
         return parse_break_stmnt(toks, idx, state), False
     
-    if kind == t0.Kind.TK_CONTINUE:
+    if kind == t1.Kind.TK_CONTINUE:
         return parse_continue_stmnt(toks, idx, state), False
     
     return parse_assign_or_expr(toks, idx, state), False
 
 
-def parse_block(toks: list[t0.Token], idx: int, state: ParseState) -> tuple[int, bool]:
+def parse_block(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[int, bool]:
     block_returns = False
-    while idx < len(toks) and toks[idx].kind != t0.Kind.TK_RIGHT_BRACE:
+    while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_BRACE:
         idx, statement_returns = parse_statement(toks, idx, state)
         if statement_returns:
             block_returns = True
     return idx, block_returns
 
 
-def parse_program(toks: list[t0.Token], state: ParseState) -> None:
+def parse_program(toks: list[t1.Token], state: ParseState) -> None:
     backend = state.backend
     idx = 0
     
@@ -1201,7 +1201,7 @@ def parse_program(toks: list[t0.Token], state: ParseState) -> None:
                 idx = parse_fn_decl(toks, idx, state)
                 continue
 
-            is_const = kind == t0.Kind.TK_CONST
+            is_const = kind == t1.Kind.TK_CONST
             idx = idx + 1
             
             name = get_token_name(toks, idx, state.src)
@@ -1209,7 +1209,7 @@ def parse_program(toks: list[t0.Token], state: ParseState) -> None:
             
             subject = "constant" if is_const else "variable"
             idx = require_type_annotation(toks, idx, f"{subject} {name!r}", state)
-            idx = expect(toks, idx, t0.Kind.TK_ASSIGN, state)
+            idx = expect(toks, idx, t1.Kind.TK_ASSIGN, state)
 
             stable_result = try_parse_stable_expr(toks, idx, state, emit_runtime=False)
             if stable_result is None:
@@ -1224,14 +1224,14 @@ def parse_program(toks: list[t0.Token], state: ParseState) -> None:
                 GlobalEntry(label_id=label_id, is_const=is_const, const_value=stable_value if is_const else None),
             )
         else:
-            raise SyntaxError(f"Only declarations allowed at top level, got {t0.dump_token(toks[idx], state.src)}")
+            raise SyntaxError(f"Only declarations allowed at top level, got {t1.dump_token(toks[idx], state.src)}")
 
 
 # ============================================================================
 # Main entry point
 # ============================================================================
 
-def parse(toks: list[t0.Token], src: str, target: str = "x86_64") -> tuple[str, Backend]:
+def parse(toks: list[t1.Token], src: str, target: str = "x86_64") -> tuple[str, Backend]:
     """Parse tokens and generate code for the specified target.
     
     Returns:
@@ -1272,76 +1272,3 @@ def parse(toks: list[t0.Token], src: str, target: str = "x86_64") -> tuple[str, 
             raise SyntaxError(f"Undefined function: {name}")
     
     return backend.finish_module(), backend
-# ============================================================================
-# CLI entry point
-# ============================================================================
-
-if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) < 2:
-        print("Usage: python -m udewy.p0 [-c] [--target TARGET] [--split-wasm] [--serve-wasm] <file.udewy> [args...]")
-        print("  -c              Compile only, don't run")
-        print("  --target TARGET Target backend (x86_64, wasm32, riscv, arm)")
-        print("  --split-wasm    For wasm32: output separate .wasm file instead of embedded HTML")
-        print("  --serve-wasm    For wasm32: serve the generated HTML over HTTP")
-        sys.exit(1)
-    
-    compile_only = False
-    target = "x86_64"
-    split_wasm = False
-    serve_wasm = False
-    arg_idx = 1
-    
-    while arg_idx < len(sys.argv) and sys.argv[arg_idx].startswith("-"):
-        if sys.argv[arg_idx] == "-c":
-            compile_only = True
-            arg_idx += 1
-        elif sys.argv[arg_idx] == "--target":
-            arg_idx += 1
-            target = sys.argv[arg_idx]
-            arg_idx += 1
-        elif sys.argv[arg_idx] == "--split-wasm":
-            split_wasm = True
-            arg_idx += 1
-        elif sys.argv[arg_idx] == "--serve-wasm":
-            serve_wasm = True
-            arg_idx += 1
-        else:
-            break
-    
-    if arg_idx >= len(sys.argv):
-        print("Error: No input file specified")
-        sys.exit(1)
-    
-    input_file = Path(sys.argv[arg_idx])
-    script_args = sys.argv[arg_idx + 1:]
-    
-    raw_src = input_file.read_text()
-    src = process_imports(raw_src, input_file)
-    toks = t0.tokenize(src)
-    asm, backend = parse(toks, src, target)
-    
-    cache_dir = Path("__dewycache__")
-    cache_dir.mkdir(exist_ok=True)
-    
-    # Use the backend to compile and link
-    try:
-        output_path = backend.compile_and_link(
-            asm, 
-            input_file.stem, 
-            cache_dir,
-            split_wasm=split_wasm
-        )
-    except RuntimeError as e:
-        print(f"Error: {e}")
-        sys.exit(1)
-    
-    if compile_only:
-        print(backend.get_compile_message(output_path, split_wasm=split_wasm))
-    else:
-        exit_code = backend.run(output_path, script_args, split_wasm=split_wasm, serve_wasm=serve_wasm)
-        if exit_code is not None:
-            sys.exit(exit_code)
-        else:
-            print(backend.get_compile_message(output_path, split_wasm=split_wasm))

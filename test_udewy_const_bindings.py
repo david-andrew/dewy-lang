@@ -1,10 +1,10 @@
 import pytest
 
-from udewy import p0, t0
+from udewy import p0, t1
 
 
 def parse_udewy(src: str) -> tuple[str, object]:
-    toks = t0.tokenize(src)
+    toks = t1.tokenize(src)
     return p0.parse(toks, src, target="wasm32")
 
 

@@ -7,7 +7,7 @@ Generates GNU assembler syntax targeting RISC-V 64-bit Linux with LP64 ABI.
 from os import PathLike
 from pathlib import Path
 
-from .. import t0
+from .. import t1
 from .common import Backend, CORE_INTRINSIC_ARITIES, LINUX_SYSCALL_INTRINSIC_ARITIES
 
 class RiscvBackend(Backend):
@@ -431,58 +431,58 @@ class RiscvBackend(Backend):
     # Operators
     # ========================================================================
     
-    def unary_op(self, op_kind: t0.Kind) -> None:
+    def unary_op(self, op_kind: t1.Kind) -> None:
         """Apply unary operator to top of stack."""
-        if op_kind == t0.Kind.TK_MINUS:
+        if op_kind == t1.Kind.TK_MINUS:
             self._emit("neg a0, a0")
-        elif op_kind == t0.Kind.TK_NOT:
+        elif op_kind == t1.Kind.TK_NOT:
             self._emit("not a0, a0")
     
-    def binary_op(self, op_kind: t0.Kind) -> None:
+    def binary_op(self, op_kind: t1.Kind) -> None:
         """Apply binary operator to top two values on stack."""
         # Right operand in a0, left on stack
         self._emit("mv t0, a0")        # right in t0
         self._pop_saved_into("a0")     # left in a0
         
-        if op_kind == t0.Kind.TK_PLUS:
+        if op_kind == t1.Kind.TK_PLUS:
             self._emit("add a0, a0, t0")
-        elif op_kind == t0.Kind.TK_MINUS:
+        elif op_kind == t1.Kind.TK_MINUS:
             self._emit("sub a0, a0, t0")
-        elif op_kind == t0.Kind.TK_MUL:
+        elif op_kind == t1.Kind.TK_MUL:
             self._emit("mul a0, a0, t0")
-        elif op_kind == t0.Kind.TK_IDIV:
+        elif op_kind == t1.Kind.TK_IDIV:
             self._emit("div a0, a0, t0")
-        elif op_kind == t0.Kind.TK_MOD:
+        elif op_kind == t1.Kind.TK_MOD:
             self._emit("rem a0, a0, t0")
-        elif op_kind == t0.Kind.TK_LEFT_SHIFT:
+        elif op_kind == t1.Kind.TK_LEFT_SHIFT:
             self._emit("sll a0, a0, t0")
-        elif op_kind == t0.Kind.TK_RIGHT_SHIFT:
+        elif op_kind == t1.Kind.TK_RIGHT_SHIFT:
             self._emit("srl a0, a0, t0")
-        elif op_kind == t0.Kind.TK_AND:
+        elif op_kind == t1.Kind.TK_AND:
             self._emit("and a0, a0, t0")
-        elif op_kind == t0.Kind.TK_OR:
+        elif op_kind == t1.Kind.TK_OR:
             self._emit("or a0, a0, t0")
-        elif op_kind == t0.Kind.TK_XOR:
+        elif op_kind == t1.Kind.TK_XOR:
             self._emit("xor a0, a0, t0")
-        elif op_kind == t0.Kind.TK_EQ:
+        elif op_kind == t1.Kind.TK_EQ:
             self._emit("sub t1, a0, t0")
             self._emit("seqz a0, t1")
             self._emit("neg a0, a0")
-        elif op_kind == t0.Kind.TK_NOT_EQ:
+        elif op_kind == t1.Kind.TK_NOT_EQ:
             self._emit("sub t1, a0, t0")
             self._emit("snez a0, t1")
             self._emit("neg a0, a0")
-        elif op_kind == t0.Kind.TK_GT:
+        elif op_kind == t1.Kind.TK_GT:
             self._emit("sgt a0, a0, t0")
             self._emit("neg a0, a0")
-        elif op_kind == t0.Kind.TK_LT:
+        elif op_kind == t1.Kind.TK_LT:
             self._emit("slt a0, a0, t0")
             self._emit("neg a0, a0")
-        elif op_kind == t0.Kind.TK_GT_EQ:
+        elif op_kind == t1.Kind.TK_GT_EQ:
             self._emit("slt a0, a0, t0")
             self._emit("seqz a0, a0")
             self._emit("neg a0, a0")
-        elif op_kind == t0.Kind.TK_LT_EQ:
+        elif op_kind == t1.Kind.TK_LT_EQ:
             self._emit("sgt a0, a0, t0")
             self._emit("seqz a0, a0")
             self._emit("neg a0, a0")

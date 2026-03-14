@@ -349,7 +349,7 @@ def dump_token(token:Token, src:str):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) != 2:
-        print("Usage: python t0.py <file>")
+        print("Usage: python t1.py <file>")
         sys.exit(1)
     with open(sys.argv[1], "r") as f:
         src = f.read()

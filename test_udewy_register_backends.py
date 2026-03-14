@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from udewy import p0, t0
+from udewy import p0, t1
 
 
 TARGETS = ["x86_64", "riscv", "arm"]
@@ -83,7 +83,7 @@ SPILL_EXPECTATIONS = {
 
 
 def parse_udewy(src: str, target: str) -> tuple[str, object]:
-    toks = t0.tokenize(src)
+    toks = t1.tokenize(src)
     return p0.parse(toks, src, target=target)
 
 
