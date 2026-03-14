@@ -400,7 +400,7 @@ def get_precedence(kind: t0.Kind) -> int:
     return 0
 
 
-def is_binop(kind: int) -> bool:
+def is_binop(kind: t0.Kind) -> bool:
     return get_precedence(kind) > 0
 
 
@@ -408,12 +408,12 @@ def is_binop(kind: int) -> bool:
 # Intrinsic detection (delegated to backend)
 # ============================================================================
 
-def is_intrinsic(backend, name: str) -> bool:
+def is_intrinsic(backend: Backend, name: str) -> bool:
     """Check if the given name is an intrinsic supported by the backend."""
     return backend.is_intrinsic(name)
 
 
-def emit_intrinsic(backend, name: str, num_args: int) -> None:
+def emit_intrinsic(backend: Backend, name: str, num_args: int) -> None:
     """Emit intrinsic call via backend."""
     backend.emit_intrinsic(name, num_args)
 
@@ -424,6 +424,7 @@ def parse_static_alloca_size(toks: list[t0.Token], idx: int, state: ParseState) 
         raise SyntaxError("__static_alloca__ expects one constant size argument")
 
     kind = toks[idx].kind
+    size: int | None
     if kind == t0.Kind.TK_NUMBER:
         size_value = toks[idx].value
         assert isinstance(size_value, int)
@@ -655,7 +656,7 @@ def parse_expr(toks: list[t0.Token], idx: int, state: ParseState, min_prec: int)
 # Statement parsing
 # ============================================================================
 
-def skip_type_annotation(toks: list, idx: int) -> int:
+def skip_type_annotation(toks: list[t0.Token], idx: int) -> int:
     if idx >= len(toks):
         return idx
     kind = toks[idx].kind
@@ -668,7 +669,7 @@ def skip_type_annotation(toks: list, idx: int) -> int:
     return idx
 
 
-def skip_fn_type_annotation(toks: list, idx: int) -> int:
+def skip_fn_type_annotation(toks: list[t0.Token], idx: int) -> int:
     if idx >= len(toks):
         return idx
     kind = toks[idx].kind
@@ -679,7 +680,7 @@ def skip_fn_type_annotation(toks: list, idx: int) -> int:
     return idx
 
 
-def skip_cast_annotation(toks: list, idx: int) -> int:
+def skip_cast_annotation(toks: list[t0.Token], idx: int) -> int:
     if idx < len(toks) and toks[idx].kind == t0.Kind.TK_TRANSMUTE:
         idx = idx + 1
         if idx < len(toks):
@@ -906,26 +907,22 @@ def parse_assign_or_expr(toks: list[t0.Token], idx: int, state: ParseState) -> i
                 assert isinstance(op_kind, t0.Kind)
                 idx = idx + 2
                 
-                slot = var_lookup(state.scope_stack, name)
-                is_local = slot is not None
-                if is_local:
-                    backend.load_local(slot)
+                local_slot = var_lookup(state.scope_stack, name)
+                if local_slot is not None:
+                    backend.load_local(local_slot)
+                    backend.save_value()
+                    idx = parse_expr(toks, idx, state, 0)
+                    backend.binary_op(op_kind)
+                    backend.store_local(local_slot)
                 else:
                     global_label = global_lookup(state.global_table, name)
-                    if global_label is not None:
-                        slot = global_label
-                        backend.load_global(slot)
-                    else:
+                    if global_label is None:
                         raise SyntaxError(f"Undefined variable {name!r} at position {toks[idx - 2].location}")
-                
-                backend.save_value()
-                idx = parse_expr(toks, idx, state, 0)
-                backend.binary_op(op_kind)
-                
-                if is_local:
-                    backend.store_local(slot)
-                else:
-                    backend.store_global(slot)
+                    backend.load_global(global_label)
+                    backend.save_value()
+                    idx = parse_expr(toks, idx, state, 0)
+                    backend.binary_op(op_kind)
+                    backend.store_global(global_label)
                 
                 return idx
     
@@ -1074,6 +1071,7 @@ def parse(toks: list[t0.Token], src: str, target: str = "x86_64") -> tuple[str, 
         Tuple of (generated_code, backend) where backend can be used for
         compile_and_link and run operations.
     """
+    backend: Backend
     if target == "x86_64":
         backend = X86_64Backend()
     elif target == "wasm32":

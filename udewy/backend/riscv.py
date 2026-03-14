@@ -361,14 +361,14 @@ class RiscvBackend(Backend):
     # Operators
     # ========================================================================
     
-    def unary_op(self, op_kind: int) -> None:
+    def unary_op(self, op_kind: t0.Kind) -> None:
         """Apply unary operator to top of stack."""
         if op_kind == t0.Kind.TK_MINUS:
             self._emit("neg a0, a0")
         elif op_kind == t0.Kind.TK_NOT:
             self._emit("not a0, a0")
     
-    def binary_op(self, op_kind: int) -> None:
+    def binary_op(self, op_kind: t0.Kind) -> None:
         """Apply binary operator to top two values on stack."""
         # Right operand in a0, left on stack
         self._emit("mv t0, a0")        # right in t0

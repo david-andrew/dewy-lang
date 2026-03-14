@@ -500,7 +500,7 @@ class Wasm32Backend(Backend):
     # Operators
     # ========================================================================
     
-    def unary_op(self, op_kind: int) -> None:
+    def unary_op(self, op_kind: t0.Kind) -> None:
         """Apply unary operator to top of stack."""
         if op_kind == t0.Kind.TK_MINUS:
             self._emit("i64.const -1")
@@ -509,7 +509,7 @@ class Wasm32Backend(Backend):
             self._emit("i64.const -1")
             self._emit("i64.xor")
     
-    def binary_op(self, op_kind: int) -> None:
+    def binary_op(self, op_kind: t0.Kind) -> None:
         """Apply binary operator to top two values on stack."""
         if op_kind == t0.Kind.TK_PLUS:
             self._emit("i64.add")
@@ -1209,7 +1209,8 @@ class Wasm32Backend(Backend):
         
         with ThreadingHTTPServer(("127.0.0.1", 0), WasmServeHandler) as server:
             server.timeout = 0.5
-            host, port = server.server_address
+            host, port, *_ = server.server_address
+            host = host.decode() if isinstance(host, bytes) else host
             url = f"http://{host}:{port}/{html_path.name}"
             print(f"Serving {html_path} at {url}")
             print("The server exits when the tab closes")

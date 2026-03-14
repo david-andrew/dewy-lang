@@ -4,6 +4,7 @@ designed to be straightforward to translate to assembly or etc. low level code
 """
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import cast
 
 
 # some basic type aliases
@@ -326,24 +327,21 @@ def tokenize(src:str)->list[Token]:
 
     return toks
 
-
 def dump_token(token:Token, src:str):
-    value = token.value
     location = token.location
-    kind = token.kind
 
-    if kind == Kind.TK_IDENT:         value = src[location:location+value]
-    elif kind == Kind.TK_IDENT_CALL:  value = src[location:location+value] + "("
-    elif kind == Kind.TK_TYPE:        value = ':' +src[location:location+value]
-    elif kind == Kind.TK_FN_TYPE:     value = ':>' + src[location:location+value]
-    elif kind == Kind.TK_TYPE_PARAM:  value = src[location:location+value]  # <> already included in range
-    elif kind == Kind.TK_STRING:      value = src[location:location+value]
-    elif kind == Kind.TK_NUMBER:      value = value
-    else:                        value = None
+    value: str | int | None = None
+    if   token.kind == Kind.TK_IDENT:       value =        src[location:location+cast(int, token.value)]
+    elif token.kind == Kind.TK_IDENT_CALL:  value =        src[location:location+cast(int, token.value)] + "("
+    elif token.kind == Kind.TK_TYPE:        value = ':' +  src[location:location+cast(int, token.value)]
+    elif token.kind == Kind.TK_FN_TYPE:     value = ':>' + src[location:location+cast(int, token.value)]
+    elif token.kind == Kind.TK_TYPE_PARAM:  value =        src[location:location+cast(int, token.value)]  # <> already included in range
+    elif token.kind == Kind.TK_STRING:      value =        src[location:location+cast(int, token.value)]
+    elif token.kind == Kind.TK_NUMBER:      value =        cast(int, token.value)
     
     if value is not None:
-        return f"({kind.name} {value})"
-    return f'({kind.name})'
+        return f"({token.kind.name} {value})"
+    return f'({token.kind.name})'
 
 
 

@@ -15,6 +15,7 @@ The protocol uses a virtual value stack model:
 from abc import ABC, abstractmethod
 from os import PathLike
 from pathlib import Path
+from .. import t0
 
 class Backend(ABC):
     """
@@ -222,7 +223,7 @@ class Backend(ABC):
     # ========================================================================
     
     @abstractmethod
-    def unary_op(self, op_kind: int) -> None:
+    def unary_op(self, op_kind: t0.Kind) -> None:
         """
         Apply unary operator to top of stack.
         
@@ -232,7 +233,7 @@ class Backend(ABC):
         """
     
     @abstractmethod
-    def binary_op(self, op_kind: int) -> None:
+    def binary_op(self, op_kind: t0.Kind) -> None:
         """
         Apply binary operator to top two values on stack.
         
