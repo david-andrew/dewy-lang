@@ -34,6 +34,8 @@ class ArmBackend(Backend):
     """
     _ARG_REGS = ["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"]
     _VALUE_CACHE_REGS = ["x20", "x21", "x22", "x23"]
+    _SAVE_AREA_BYTES = 96
+    _MAX_STACK_ADJUST_IMM = 4080
     
     def __init__(self) -> None:
         self._code: list[str] = []
@@ -46,6 +48,8 @@ class ArmBackend(Backend):
         self._param_slots: list[int] = []
         self._saved_depth: int = 0
         self._spilled_depth: int = 0
+        self._min_slot_offset: int = 0
+        self._frame_setup_index: int = -1
         
         # Control flow state
         self._if_stack: list[tuple[str, str, bool]] = []
@@ -79,6 +83,75 @@ class ArmBackend(Backend):
         label = f".{prefix}{self._next_label}"
         self._next_label += 1
         return label
+
+    def _note_slot(self, slot: int) -> None:
+        if slot < self._min_slot_offset:
+            self._min_slot_offset = slot
+
+    def _local_area_bytes(self) -> int:
+        required_bytes = max(0, -self._min_slot_offset)
+        return (required_bytes + 15) & -16
+
+    def _sp_adjust_instrs(self, op: str, amount: int) -> list[str]:
+        instrs: list[str] = []
+        while amount > 0:
+            chunk = min(amount, self._MAX_STACK_ADJUST_IMM)
+            chunk &= -16
+            instrs.append(f"    {op} sp, sp, #{chunk}")
+            amount -= chunk
+        return instrs
+
+    def _frame_pointer_setup_instrs(self, local_bytes: int) -> list[str]:
+        instrs = ["    mov x29, sp"]
+        remaining = local_bytes
+        while remaining > 0:
+            chunk = min(remaining, 4095)
+            instrs.append(f"    add x29, x29, #{chunk}")
+            remaining -= chunk
+        return instrs
+
+    def _frame_slot_operand(self, slot: int) -> str | None:
+        if -256 <= slot <= 255:
+            return f"[x29, #{slot}]"
+        if slot >= 0 and slot % 8 == 0 and slot <= 32760:
+            return f"[x29, #{slot}]"
+        return None
+
+    def _materialize_frame_addr(self, reg: str, slot: int) -> None:
+        if slot == 0:
+            self._emit(f"mov {reg}, x29")
+            return
+        if slot > 0:
+            remaining = slot
+            self._emit(f"mov {reg}, x29")
+            while remaining > 0:
+                chunk = min(remaining, 4095)
+                self._emit(f"add {reg}, {reg}, #{chunk}")
+                remaining -= chunk
+            return
+
+        remaining = -slot
+        self._emit(f"mov {reg}, x29")
+        while remaining > 0:
+            chunk = min(remaining, 4095)
+            self._emit(f"sub {reg}, {reg}, #{chunk}")
+            remaining -= chunk
+
+    def _load_frame_slot(self, dst: str, slot: int) -> None:
+        operand = self._frame_slot_operand(slot)
+        if operand is not None:
+            self._emit(f"ldr {dst}, {operand}")
+            return
+        self._materialize_frame_addr("x9", slot)
+        self._emit(f"ldr {dst}, [x9]")
+
+    def _store_frame_slot(self, src: str, slot: int) -> None:
+        operand = self._frame_slot_operand(slot)
+        if operand is not None:
+            self._emit(f"str {src}, {operand}")
+            return
+        self._materialize_frame_addr("x9", slot)
+        self._emit(f"str {src}, [x9]")
 
     def _save_reg(self, reg: str) -> None:
         if self._spilled_depth > 0:
@@ -305,16 +378,13 @@ class ArmBackend(Backend):
         label = self._fn_labels[label_id]
         self._saved_depth = 0
         self._spilled_depth = 0
+        self._min_slot_offset = 0
         
         if is_main:
             self._emit_label("__main__")
         self._emit_label(label)
         
-        # Prologue - save fp/lr with pre-index, then allocate frame
-        # Frame layout (1024 bytes total):
-        #   sp+0 to sp+80: callee-saved registers (x19-x28)
-        #   sp+80 to sp+96: fp (x29), lr (x30)
-        #   sp+96 to sp+1024: locals (928 bytes)
+        # Prologue - save fp/lr with pre-index, then allocate the fixed frame.
         self._emit("stp x29, x30, [sp, #-96]!")   # save fp, lr and decrement sp by 96
         self._emit("stp x27, x28, [sp, #80]")
         self._emit("stp x25, x26, [sp, #64]")
@@ -322,12 +392,8 @@ class ArmBackend(Backend):
         self._emit("stp x21, x22, [sp, #32]")
         self._emit("stp x19, x20, [sp, #16]")
         
-        # Allocate space for locals
-        self._emit("sub sp, sp, #928")
-        
-        # Set frame pointer to base of frame
-        self._emit("add x29, sp, #928")
-        self._emit("mov x19, sp")
+        self._frame_setup_index = len(self._code)
+        self._emit("    # local frame setup")
         
         # Set up parameters - copy from arg registers to stack
         # Parameters stored at negative offsets from x29
@@ -337,14 +403,15 @@ class ArmBackend(Backend):
         for i in range(param_count):
             slot = self._stack_offset
             self._param_slots.append(slot)
+            self._note_slot(slot)
             
             if i < 8:
-                self._emit(f"str {self._ARG_REGS[i]}, [x29, #{slot}]")
+                self._store_frame_slot(self._ARG_REGS[i], slot)
             else:
                 # Load from caller's stack frame
                 caller_offset = 96 + (i - 8) * 8
-                self._emit(f"ldr x9, [x29, #{caller_offset}]")
-                self._emit(f"str x9, [x29, #{slot}]")
+                self._load_frame_slot("x9", caller_offset)
+                self._store_frame_slot("x9", slot)
             
             self._stack_offset -= 8
         
@@ -352,10 +419,15 @@ class ArmBackend(Backend):
     
     def end_function(self) -> None:
         """End function definition."""
+        local_bytes = self._local_area_bytes()
+        self._code[self._frame_setup_index:self._frame_setup_index + 1] = (
+            self._sp_adjust_instrs("sub", local_bytes)
+            + self._frame_pointer_setup_instrs(local_bytes)
+        )
         self._emit_label(self._current_fn_epilogue)
         
-        # Deallocate locals
-        self._emit("add sp, sp, #928")
+        # Drop any dynamic stack allocations before restoring saved registers.
+        self._emit("mov sp, x29")
         
         # Restore callee-saved registers
         self._emit("ldp x19, x20, [sp, #16]")
@@ -370,21 +442,22 @@ class ArmBackend(Backend):
     def load_param(self, index: int) -> None:
         """Push parameter value onto the value stack."""
         slot = self._param_slots[index]
-        self._emit(f"ldr x0, [x29, #{slot}]")
+        self._load_frame_slot("x0", slot)
     
     def alloc_local(self) -> int:
         """Allocate a local variable slot."""
         slot = self._stack_offset
         self._stack_offset -= 8
+        self._note_slot(slot)
         return slot
 
     def load_local(self, slot: int) -> None:
         """Push local variable value onto the value stack."""
-        self._emit(f"ldr x0, [x29, #{slot}]")
+        self._load_frame_slot("x0", slot)
 
     def store_local(self, slot: int) -> None:
         """Pop value from stack and store to local variable."""
-        self._emit(f"str x0, [x29, #{slot}]")
+        self._store_frame_slot("x0", slot)
     
     # ========================================================================
     # Value stack operations
@@ -409,10 +482,6 @@ class ArmBackend(Backend):
         label = self._fn_labels[label_id]
         self._emit(f"adrp x0, {label}")
         self._emit(f"add x0, x0, :lo12:{label}")
-    
-    def dup_value(self) -> None:
-        """Duplicate the top value on the stack."""
-        self._save_reg("x0")
     
     def pop_value(self) -> None:
         """Discard the top value on the stack."""
@@ -561,10 +630,10 @@ class ArmBackend(Backend):
 
     def alloca(self) -> None:
         """Allocate temporary stack storage and return its address."""
-        self._emit("add x0, x0, #7")
-        self._emit("and x0, x0, #-8")
-        self._emit("mov x9, x19")
-        self._emit("add x19, x19, x0")
+        self._emit("add x0, x0, #15")
+        self._emit("and x0, x0, #-16")
+        self._emit("sub x9, sp, x0")
+        self._emit("mov sp, x9")
         self._emit("mov x0, x9")
     
     # ========================================================================

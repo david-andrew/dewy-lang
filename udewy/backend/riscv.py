@@ -33,6 +33,8 @@ class RiscvBackend(Backend):
     """
     _ARG_REGS = ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"]
     _VALUE_CACHE_REGS = ["s2", "s3", "s4"]
+    _SAVE_AREA_BYTES = 112
+    _MAX_STACK_ADJUST_IMM = 2032
     
     def __init__(self) -> None:
         self._code: list[str] = []
@@ -45,6 +47,8 @@ class RiscvBackend(Backend):
         self._param_slots: list[int] = []
         self._saved_depth: int = 0
         self._spilled_depth: int = 0
+        self._min_slot_offset: int = 0
+        self._frame_setup_index: int = -1
         
         # Control flow state
         self._if_stack: list[tuple[str, str, bool]] = []  # (else_label, end_label, else_emitted)
@@ -78,6 +82,42 @@ class RiscvBackend(Backend):
         label = f".{prefix}{self._next_label}"
         self._next_label += 1
         return label
+
+    def _note_slot(self, slot: int) -> None:
+        if slot < self._min_slot_offset:
+            self._min_slot_offset = slot
+
+    def _frame_bytes(self) -> int:
+        required_bytes = max(self._SAVE_AREA_BYTES, -self._min_slot_offset)
+        return (required_bytes + 15) & -16
+
+    def _sp_adjust_instrs(self, amount: int) -> list[str]:
+        instrs: list[str] = []
+        if amount >= 0:
+            remaining = amount
+            while remaining > 0:
+                chunk = min(remaining, self._MAX_STACK_ADJUST_IMM)
+                chunk &= -16
+                instrs.append(f"    addi sp, sp, {chunk}")
+                remaining -= chunk
+            return instrs
+
+        remaining = -amount
+        while remaining > 0:
+            chunk = min(remaining, self._MAX_STACK_ADJUST_IMM)
+            chunk &= -16
+            instrs.append(f"    addi sp, sp, -{chunk}")
+            remaining -= chunk
+        return instrs
+
+    def _set_frame_pointer_instrs(self, frame_bytes: int) -> list[str]:
+        instrs = ["    mv s0, sp"]
+        remaining = frame_bytes
+        while remaining > 0:
+            chunk = min(remaining, 2047)
+            instrs.append(f"    addi s0, s0, {chunk}")
+            remaining -= chunk
+        return instrs
 
     def _save_reg(self, reg: str) -> None:
         if self._spilled_depth > 0:
@@ -301,40 +341,23 @@ class RiscvBackend(Backend):
         label = self._fn_labels[label_id]
         self._saved_depth = 0
         self._spilled_depth = 0
+        self._min_slot_offset = 0
         
         if is_main:
             self._emit_label("__main__")
         self._emit_label(label)
         
-        # Prologue - allocate frame (1024 bytes for locals + callee-saved)
-        self._emit("addi sp, sp, -1024")
-        
-        # Save callee-saved registers and return address
-        self._emit("sd ra, 1016(sp)")
-        self._emit("sd s0, 1008(sp)")
-        self._emit("sd s1, 1000(sp)")
-        self._emit("sd s2, 992(sp)")
-        self._emit("sd s3, 984(sp)")
-        self._emit("sd s4, 976(sp)")
-        self._emit("sd s5, 968(sp)")
-        self._emit("sd s6, 960(sp)")
-        self._emit("sd s7, 952(sp)")
-        self._emit("sd s8, 944(sp)")
-        self._emit("sd s9, 936(sp)")
-        self._emit("sd s10, 928(sp)")
-        self._emit("sd s11, 920(sp)")
-        
-        # Set frame pointer
-        self._emit("addi s0, sp, 1024")
-        self._emit("mv s1, sp")
+        self._frame_setup_index = len(self._code)
+        self._emit("    # frame setup")
         
         # Set up parameters - copy from arg registers to stack
         self._param_slots = []
-        self._stack_offset = -64  # After callee-saved area
+        self._stack_offset = -self._SAVE_AREA_BYTES
         
         for i in range(param_count):
             slot = self._stack_offset
             self._param_slots.append(slot)
+            self._note_slot(slot)
             
             if i < 8:
                 self._emit(f"sd {self._ARG_REGS[i]}, {slot}(s0)")
@@ -350,25 +373,45 @@ class RiscvBackend(Backend):
     
     def end_function(self) -> None:
         """End function definition."""
+        frame_bytes = self._frame_bytes()
+        self._code[self._frame_setup_index:self._frame_setup_index + 1] = (
+            self._sp_adjust_instrs(-frame_bytes)
+            + ["    mv t0, s0"]
+            + self._set_frame_pointer_instrs(frame_bytes)
+            + [
+                "    sd ra, -8(s0)",
+                "    sd t0, -16(s0)",
+                "    sd s1, -24(s0)",
+                "    sd s2, -32(s0)",
+                "    sd s3, -40(s0)",
+                "    sd s4, -48(s0)",
+                "    sd s5, -56(s0)",
+                "    sd s6, -64(s0)",
+                "    sd s7, -72(s0)",
+                "    sd s8, -80(s0)",
+                "    sd s9, -88(s0)",
+                "    sd s10, -96(s0)",
+                "    sd s11, -104(s0)",
+            ]
+        )
         self._emit_label(self._current_fn_epilogue)
         
         # Restore callee-saved registers
-        self._emit("ld ra, 1016(sp)")
-        self._emit("ld s0, 1008(sp)")
-        self._emit("ld s1, 1000(sp)")
-        self._emit("ld s2, 992(sp)")
-        self._emit("ld s3, 984(sp)")
-        self._emit("ld s4, 976(sp)")
-        self._emit("ld s5, 968(sp)")
-        self._emit("ld s6, 960(sp)")
-        self._emit("ld s7, 952(sp)")
-        self._emit("ld s8, 944(sp)")
-        self._emit("ld s9, 936(sp)")
-        self._emit("ld s10, 928(sp)")
-        self._emit("ld s11, 920(sp)")
-        
-        # Deallocate frame and return
-        self._emit("addi sp, sp, 1024")
+        self._emit("ld s1, -24(s0)")
+        self._emit("ld s2, -32(s0)")
+        self._emit("ld s3, -40(s0)")
+        self._emit("ld s4, -48(s0)")
+        self._emit("ld s5, -56(s0)")
+        self._emit("ld s6, -64(s0)")
+        self._emit("ld s7, -72(s0)")
+        self._emit("ld s8, -80(s0)")
+        self._emit("ld s9, -88(s0)")
+        self._emit("ld s10, -96(s0)")
+        self._emit("ld s11, -104(s0)")
+        self._emit("ld ra, -8(s0)")
+        self._emit("ld t0, -16(s0)")
+        self._emit("mv sp, s0")
+        self._emit("mv s0, t0")
         self._emit("ret")
     
     def load_param(self, index: int) -> None:
@@ -380,6 +423,7 @@ class RiscvBackend(Backend):
         """Allocate a local variable slot."""
         slot = self._stack_offset
         self._stack_offset -= 8
+        self._note_slot(slot)
         return slot
 
     def load_local(self, slot: int) -> None:
@@ -410,10 +454,6 @@ class RiscvBackend(Backend):
         """Push address of function onto the value stack."""
         label = self._fn_labels[label_id]
         self._emit(f"la a0, {label}")
-    
-    def dup_value(self) -> None:
-        """Duplicate the top value on the stack."""
-        self._save_reg("a0")
     
     def pop_value(self) -> None:
         """Discard the top value on the stack."""
@@ -566,10 +606,10 @@ class RiscvBackend(Backend):
 
     def alloca(self) -> None:
         """Allocate temporary stack storage and return its address."""
-        self._emit("addi a0, a0, 7")
-        self._emit("andi a0, a0, -8")
-        self._emit("mv t0, s1")
-        self._emit("add s1, s1, a0")
+        self._emit("addi a0, a0, 15")
+        self._emit("andi a0, a0, -16")
+        self._emit("sub t0, sp, a0")
+        self._emit("mv sp, t0")
         self._emit("mv a0, t0")
     
     # ========================================================================

@@ -27,6 +27,7 @@ class X86_64Backend(Backend):
     """
     _ARG_REGS = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
     _VALUE_CACHE_REGS = ["%r12", "%r13", "%r14"]
+    _FIXED_FRAME_BYTES = 48
     
     def __init__(self) -> None:
         self._code: list[str] = []
@@ -39,6 +40,8 @@ class X86_64Backend(Backend):
         self._param_slots: list[int] = []
         self._saved_depth: int = 0
         self._spilled_depth: int = 0
+        self._min_slot_offset: int = 0
+        self._frame_subtract_index: int = -1
         
         # Control flow state
         self._if_stack: list[tuple[str, str, bool]] = []  # (else_label, end_label, else_emitted)
@@ -72,6 +75,14 @@ class X86_64Backend(Backend):
         label = f".{prefix}{self._next_label}"
         self._next_label += 1
         return label
+
+    def _note_slot(self, slot: int) -> None:
+        if slot < self._min_slot_offset:
+            self._min_slot_offset = slot
+
+    def _frame_bytes(self) -> int:
+        required_bytes = max(self._FIXED_FRAME_BYTES, -self._min_slot_offset)
+        return (required_bytes + 15) & -16
 
     def _save_reg(self, reg: str) -> None:
         if self._spilled_depth > 0:
@@ -288,6 +299,7 @@ class X86_64Backend(Backend):
         label = self._fn_labels[label_id]
         self._saved_depth = 0
         self._spilled_depth = 0
+        self._min_slot_offset = 0
         
         if is_main:
             self._emit_label("__main__")
@@ -296,7 +308,8 @@ class X86_64Backend(Backend):
         # Prologue
         self._emit("pushq %rbp")
         self._emit("movq %rsp, %rbp")
-        self._emit("subq $1024, %rsp")
+        self._frame_subtract_index = len(self._code)
+        self._emit("    # frame setup")
         
         # Save callee-saved registers
         self._emit("movq %rbx, -8(%rbp)")
@@ -304,7 +317,6 @@ class X86_64Backend(Backend):
         self._emit("movq %r13, -24(%rbp)")
         self._emit("movq %r14, -32(%rbp)")
         self._emit("movq %r15, -40(%rbp)")
-        self._emit("leaq -1024(%rbp), %r15")
         
         # Set up parameters
         self._param_slots = []
@@ -313,6 +325,7 @@ class X86_64Backend(Backend):
         for i in range(param_count):
             slot = self._stack_offset
             self._param_slots.append(slot)
+            self._note_slot(slot)
             
             if i < 6:
                 self._emit(f"movq {self._ARG_REGS[i]}, {slot}(%rbp)")
@@ -327,6 +340,8 @@ class X86_64Backend(Backend):
     
     def end_function(self) -> None:
         """End function definition."""
+        frame_bytes = self._frame_bytes()
+        self._code[self._frame_subtract_index] = f"    subq ${frame_bytes}, %rsp"
         self._emit_label(self._current_fn_epilogue)
         
         # Restore callee-saved registers
@@ -348,6 +363,7 @@ class X86_64Backend(Backend):
         """Allocate a local variable slot."""
         slot = self._stack_offset
         self._stack_offset -= 8
+        self._note_slot(slot)
         return slot
     
     def load_local(self, slot: int) -> None:
@@ -374,10 +390,6 @@ class X86_64Backend(Backend):
         """Push address of function onto the value stack."""
         label = self._fn_labels[label_id]
         self._emit(f"leaq {label}(%rip), %rax")
-    
-    def dup_value(self) -> None:
-        """Duplicate the top value on the stack."""
-        self._save_reg("%rax")
     
     def pop_value(self) -> None:
         """Discard the top value on the stack."""
@@ -553,9 +565,8 @@ class X86_64Backend(Backend):
         """Allocate temporary stack storage and return its address."""
         self._emit("addq $7, %rax")
         self._emit("andq $-8, %rax")
-        self._emit("movq %r15, %rcx")
-        self._emit("addq %rax, %r15")
-        self._emit("movq %rcx, %rax")
+        self._emit("subq %rax, %rsp")
+        self._emit("movq %rsp, %rax")
     
     # ========================================================================
     # Calls

@@ -2,6 +2,7 @@ import pytest
 
 from udewy import p0, t1
 from udewy.backend import get_backend
+from udewy.backend.wasm import Wasm32Backend
 
 def parse_udewy(src: str) -> str:
     toks = t1.tokenize(src)
@@ -161,3 +162,17 @@ let main = ():>void => {
 """
 
     parse_udewy(src)
+
+
+def test_wasm_global_initializer_rejects_unknown_data_reference() -> None:
+    backend = Wasm32Backend()
+
+    with pytest.raises(ValueError, match=r"Unknown wasm data reference"):
+        backend.define_global(0, ".missing+8")
+
+
+def test_wasm_array_literal_rejects_unknown_data_reference() -> None:
+    backend = Wasm32Backend()
+
+    with pytest.raises(ValueError, match=r"Unknown wasm data reference"):
+        backend.intern_array([".missing+8"])

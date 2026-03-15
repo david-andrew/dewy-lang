@@ -220,10 +220,6 @@ class Backend(ABC):
     @abstractmethod
     def push_fn_ref(self, label_id: int) -> None:
         """Push address of function onto the value stack."""
-    
-    @abstractmethod
-    def dup_value(self) -> None:
-        """Duplicate the top value on the stack."""
 
     @abstractmethod
     def pop_value(self) -> None:

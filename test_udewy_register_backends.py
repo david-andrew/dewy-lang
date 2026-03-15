@@ -9,6 +9,7 @@ from udewy.backend import get_backend, Backend
 
 
 TARGETS = ["x86_64", "riscv", "arm"]
+MANY_LOCALS_COUNT = 200
 
 
 DIRECT_OVERFLOW_SOURCE = """
@@ -61,6 +62,24 @@ let main = ():>int => {
 }
 """
 
+ALLOCA_ALIGNMENT_SOURCE = """
+let main = ():>int => {
+    let tmp2:int = __alloca__(1)
+    let tmp3:int = __alloca__(1)
+    return tmp2 - tmp3
+}
+"""
+
+
+MANY_LOCALS_SOURCE = "\n".join(
+    [
+        "let main = ():>int => {",
+        *[f"    let v{i}:int = {i}" for i in range(MANY_LOCALS_COUNT)],
+        f"    return v0 + v{MANY_LOCALS_COUNT - 1}",
+        "}",
+    ]
+)
+
 
 DIRECT_EXPECTATIONS = {
     "x86_64": ["subq $32, %rsp", "movq %rax, 24(%rsp)", "movq %rax, 0(%rsp)", "movq 16(%rbp), %rax", "movq 40(%rbp), %rax"],
@@ -80,6 +99,24 @@ SPILL_EXPECTATIONS = {
     "x86_64": ["movq %rax, %r12", "movq %rax, %r13", "movq %rax, %r14", "subq $16, %rsp", "movq %rax, (%rsp)"],
     "riscv": ["mv s2, a0", "mv s3, a0", "mv s4, a0", "addi sp, sp, -16", "sd a0, 0(sp)"],
     "arm": ["mov x20, x0", "mov x21, x0", "mov x22, x0", "mov x23, x0", "sub sp, sp, #16", "str x0, [sp]"],
+}
+
+ALLOCA_ALIGNMENT_EXPECTATIONS = {
+    "x86_64": ["andq $-8, %rax", "subq %rax, %rsp"],
+    "riscv": ["andi a0, a0, -16", "sub t0, sp, a0"],
+    "arm": ["and x0, x0, #-16", "sub x9, sp, x0"],
+}
+
+ALLOCA_ALIGNMENT_RESULTS = {
+    "x86_64": 8,
+    "riscv": 16,
+    "arm": 16,
+}
+
+MANY_LOCALS_EXPECTATIONS = {
+    "x86_64": [f"subq $1648, %rsp", f"movq %rax, -1640(%rbp)", f"movq -1640(%rbp), %rax"],
+    "riscv": [f"addi sp, sp, -1712", f"sd a0, -1704(s0)", f"ld a0, -1704(s0)"],
+    "arm": [f"sub sp, sp, #1616", f"sub x9, x9, #1608", f"str x0, [x9]", f"ldr x0, [x9]"],
 }
 
 
@@ -132,6 +169,24 @@ def test_virtual_stack_cache_and_spill_codegen(target: str) -> None:
 
 
 @pytest.mark.parametrize("target", TARGETS)
+def test_alloca_alignment_codegen(target: str) -> None:
+    backend = get_backend(target)
+    code = parse_udewy(ALLOCA_ALIGNMENT_SOURCE, backend)
+
+    for expected in ALLOCA_ALIGNMENT_EXPECTATIONS[target]:
+        assert expected in code
+
+
+@pytest.mark.parametrize("target", TARGETS)
+def test_fixed_frames_expand_for_many_locals(target: str) -> None:
+    backend = get_backend(target)
+    code = parse_udewy(MANY_LOCALS_SOURCE, backend)
+
+    for expected in MANY_LOCALS_EXPECTATIONS[target]:
+        assert expected in code
+
+
+@pytest.mark.parametrize("target", TARGETS)
 def test_syscall_intrinsic_arity_is_checked(target: str) -> None:
     src = """
 let main = ():>int => {
@@ -147,13 +202,15 @@ let main = ():>int => {
 @pytest.mark.parametrize(
     ("source", "expected_exit"),
     [
+        (ALLOCA_ALIGNMENT_SOURCE, None),
         (DIRECT_OVERFLOW_SOURCE, 55),
         (INDIRECT_OVERFLOW_SOURCE, 55),
         (SPILL_SOURCE, 78),
+        (MANY_LOCALS_SOURCE, 199),
     ],
 )
 @pytest.mark.parametrize("target", TARGETS)
-def test_register_backends_run_overflow_calls(target: str, source: str, expected_exit: int) -> None:
+def test_register_backends_run_overflow_calls(target: str, source: str, expected_exit: int | None) -> None:
     if not toolchain_available(target):
         pytest.skip(f"{target} toolchain not available")
 
@@ -164,4 +221,7 @@ def test_register_backends_run_overflow_calls(target: str, source: str, expected
         output_path = backend.compile_and_link(code, "overflow", Path(tmp_dir))
         exit_code = backend.run(output_path, [])
 
-    assert exit_code == expected_exit
+    if expected_exit is None:
+        assert exit_code == ALLOCA_ALIGNMENT_RESULTS[target]
+    else:
+        assert exit_code == expected_exit

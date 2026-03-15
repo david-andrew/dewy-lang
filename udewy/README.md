@@ -697,7 +697,7 @@ These intrinsics provide direct memory access:
 
 Signed and unsigned 64-bit loads/stores are identical at runtime; both spellings exist to make programmer intent explicit. `__load__`/`__store__` are convenience shorthands for the unsigned 64-bit forms. For stores, signedness affects only intent and documentation; the stored bit pattern is the low `N` bits of `val`.
 
-`__alloca__(size)` reserves temporary storage whose lifetime lasts until the current function returns. The returned address is aligned to 8 bytes, and the reserved size is rounded up to a multiple of 8. Native backends typically implement this with function-local stack storage; the wasm backend uses a function-scoped stack region in linear memory.
+`__alloca__(size)` reserves temporary storage whose lifetime lasts until the current function returns. The returned address is aligned to at least 8 bytes, and native backends may round the reserved size up further to preserve ABI stack alignment. Native backends typically implement this with function-local stack storage; the wasm backend uses a function-scoped stack region in linear memory.
 
 `__static_alloca__(size)` reserves writable storage in the program's static data area. The storage is zero-initialized, has a single shared instance for the entire program, and is not tied to any function call frame. Its `size` argument must be a compile-time stable integer value, which may be provided directly as a number literal or indirectly through a `const` binding or backend-provided builtin constant.
 
@@ -1061,6 +1061,12 @@ The x86_64 backend still follows udewy's logical value-stack model, but it does 
 - When a call has more than 6 arguments, the extra arguments are written into an outbound stack-argument area and the first 6 are placed in `rdi`, `rsi`, `rdx`, `rcx`, `r8`, and `r9`.
 - Call lowering also keeps the machine stack aligned to the ABI-required 16-byte boundary.
 
+## A.2.2 `__alloca__` Alignment
+
+- `__alloca__` returns an address aligned to 8 bytes.
+- Successive small allocations therefore advance in 8-byte units on this backend.
+- The backend still pads the machine stack as needed at call boundaries to satisfy the System V ABI.
+
 ## A.3 Syscall Intrinsics
 
 ```udewy
@@ -1178,6 +1184,12 @@ The RISC-V backend uses the same basic strategy as x86_64: it preserves udewy's 
 - Calls place the first 8 arguments in `a0`-`a7` and marshal any remaining arguments into an outbound stack area.
 - Call lowering maintains the required 16-byte stack alignment at the actual call instruction.
 
+## B.2.2 `__alloca__` Alignment
+
+- `__alloca__` returns an address aligned to 16 bytes.
+- Successive small allocations therefore advance in 16-byte units on this backend.
+- This stronger alignment matches the backend's stack-alignment requirements.
+
 ## B.3 Syscall Intrinsics
 
 Same syntax as x86_64:
@@ -1265,6 +1277,12 @@ The AArch64 backend also keeps the parser-visible stack model, but uses register
 - Calls place the first 8 arguments in `x0`-`x7` and place overflow arguments in the outbound call stack area.
 - Because AArch64 already requires 16-byte stack alignment and the backend spills in 16-byte slots, this path stays naturally aligned.
 
+## C.2.2 `__alloca__` Alignment
+
+- `__alloca__` returns an address aligned to 16 bytes.
+- Successive small allocations therefore advance in 16-byte units on this backend.
+- This stronger alignment matches the backend's stack-alignment requirements.
+
 ## C.3 Syscall Intrinsics
 
 Same syntax as x86_64. Invoked via `svc #0`.
@@ -1294,6 +1312,12 @@ AArch64 Linux uses the same unified syscall table as RISC-V Linux. All builtin c
 - All udewy values are `i64` in WASM
 - Memory addresses are `i64` but truncated to `i32` at every memory operation
 - Strings and arrays use the same length-prefixed layout as native backends
+
+## D.2.1 `__alloca__` Alignment
+
+- `__alloca__` returns an address aligned to 8 bytes.
+- Successive small allocations therefore advance in 8-byte units on this backend.
+- Because wasm uses a linear-memory bump pointer rather than a native ABI stack, it does not need the stronger 16-byte rule used by some native backends.
 
 ## D.3 Host Function Intrinsics
 

@@ -131,6 +131,25 @@ class Wasm32Backend(Backend):
         label = f"${prefix}{self._next_label}"
         self._next_label += 1
         return label
+
+    def _resolve_data_ref(self, value: str) -> int:
+        if value.endswith("+8"):
+            ref_part = value.removesuffix("+8")
+            for sid, slabel in self._string_labels.items():
+                if slabel == ref_part:
+                    return self._string_offsets[sid] + 8
+            for aid, alabel in self._array_labels.items():
+                if alabel == ref_part:
+                    return self._array_offsets[aid] + 8
+            raise ValueError(f"Unknown wasm data reference: {value}")
+
+        for sid, slabel in self._static_labels.items():
+            if slabel == value:
+                return self._static_offsets[sid]
+        for gid, glabel in self._global_labels.items():
+            if glabel == value:
+                return self._global_offsets[gid]
+        raise ValueError(f"Unknown wasm data reference: {value}")
     
     def _emit(self, instr: str) -> None:
         """Emit an instruction to current function."""
@@ -250,17 +269,11 @@ class Wasm32Backend(Backend):
         for elem in elements:
             if isinstance(elem, int):
                 elem_bytes += (elem & 0xFFFF_FFFF_FFFF_FFFF).to_bytes(8, 'little', signed=False)
-            elif isinstance(elem, str) and "+8" in elem:
-                # String/array reference
-                ref_part = elem.replace("+8", "")
-                ref_offset = 0
-                for sid, slabel in self._string_labels.items():
-                    if slabel == ref_part:
-                        ref_offset = self._string_offsets[sid] + 8
-                        break
+            elif isinstance(elem, str):
+                ref_offset = self._resolve_data_ref(elem)
                 elem_bytes += (ref_offset & 0xFFFF_FFFF_FFFF_FFFF).to_bytes(8, 'little', signed=False)
             else:
-                elem_bytes += b"\x00" * 8
+                raise TypeError(f"Unsupported wasm array element directive: {elem!r}")
         
         full_data = length_bytes + elem_bytes
         offset = self._alloc_data(full_data)
@@ -277,37 +290,9 @@ class Wasm32Backend(Backend):
         if isinstance(value, int):
             actual_value = value
         elif isinstance(value, str):
-            # Parse the reference to extract the actual offset
-            # Format: ".strN+8", ".arrN+8", or a raw static/global label
-            if "+8" in value:
-                # It's a reference to string/array data (skip length prefix)
-                ref_part = value.replace("+8", "")
-                # Find the base offset from our labels
-                for sid, slabel in self._string_labels.items():
-                    if slabel == ref_part:
-                        actual_value = self._string_offsets[sid] + 8
-                        break
-                else:
-                    for aid, alabel in self._array_labels.items():
-                        if alabel == ref_part:
-                            actual_value = self._array_offsets[aid] + 8
-                            break
-                    else:
-                        actual_value = 0
-            else:
-                for sid, slabel in self._static_labels.items():
-                    if slabel == value:
-                        actual_value = self._static_offsets[sid]
-                        break
-                else:
-                    for gid, glabel in self._global_labels.items():
-                        if glabel == value:
-                            actual_value = self._global_offsets[gid]
-                            break
-                    else:
-                        actual_value = 0
+            actual_value = self._resolve_data_ref(value)
         else:
-            actual_value = 0
+            raise TypeError(f"Unsupported wasm global initializer: {value!r}")
         
         data = (actual_value & 0xFFFF_FFFF_FFFF_FFFF).to_bytes(8, 'little', signed=False)
         offset = self._alloc_data(data)
@@ -364,7 +349,7 @@ class Wasm32Backend(Backend):
         self._emit("i64.store")
 
     def function_ref(self, label_id: int) -> int:
-        return self._fn_indices.get(label_id, 0)
+        return self._fn_indices[label_id]
 
     def string_ref(self, label_id: int) -> int:
         return self._string_offsets[label_id] + 8
@@ -476,13 +461,8 @@ class Wasm32Backend(Backend):
     
     def push_fn_ref(self, label_id: int) -> None:
         """Push function table index onto the value stack."""
-        fn_idx = self._fn_indices.get(label_id, 0)
+        fn_idx = self._fn_indices[label_id]
         self._emit(f"i64.const {fn_idx}")
-    
-    def dup_value(self) -> None:
-        """Duplicate the top value - wasm doesn't have dup, use local."""
-        # This would need a temp local; for now just note it's not ideal
-        pass
     
     def pop_value(self) -> None:
         """Discard the top value on the stack."""
