@@ -5,10 +5,11 @@ designed to be straightforward to translate to assembly or etc. low level code
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import cast
+from . import t0
 
 
 # some basic type aliases
-char = str  # length=1
+# char = str  # length=1
 Value = int
 Location = int
 
@@ -143,29 +144,6 @@ class Token:
     location: Location
     kind: Kind
 
-whitespace: set[char] = {' ', '\t', '\n', '\r'}
-
-def is_alpha(c:char)->bool:
-    return ('A' <= c <= 'Z') or ('a' <= c <= 'z') or (c == "_")
-
-def is_digit(c:char)->bool:
-    return '0' <= c <= '9'
-
-def is_hex(c:char)->bool:
-    return is_digit(c) or ('A' <= c <= 'F') or ('a' <= c <= 'f')
-
-
-def hex_value(c: char) -> int:
-    if '0' <= c <= '9':
-        return ord(c) - ord('0')
-    if 'A' <= c <= 'F':
-        return ord(c) - ord('A') + 10
-    if 'a' <= c <= 'f':
-        return ord(c) - ord('a') + 10
-    
-    raise ValueError(f"invalid hex digit: {c}")
-
-
 
 def tokenize(src:str)->list[Token]:
     n = len(src)
@@ -179,7 +157,7 @@ def tokenize(src:str)->list[Token]:
             raise SyntaxError(f"colon must be followed by a type annotation at {i}: {src[i]!r}")
         
         # whitespace
-        if src[i] in whitespace: #c == " " or c == "\t" or c == "\r" or c == "\n":
+        if src[i] in t0.whitespace: #c == " " or c == "\t" or c == "\r" or c == "\n":
             i += 1
             continue
 
@@ -191,10 +169,10 @@ def tokenize(src:str)->list[Token]:
             continue
 
         # identifier or keyword
-        if is_alpha(src[i]):
+        if t0.is_alpha(src[i]) or src[i] == '_':
             start = i
             i += 1
-            while i < n and (is_alpha(src[i]) or is_digit(src[i])):
+            while i < n and (t0.is_ident(src[i])):
                 i += 1
             text = src[start:i]
 
@@ -225,9 +203,9 @@ def tokenize(src:str)->list[Token]:
             start = i
             i += 2
             val = 0
-            while i < n and (is_hex(src[i]) or src[i] == '_'):
+            while i < n and (t0.is_hex(src[i]) or src[i] == '_'):
                 if src[i] != '_':
-                    val = val << 4 | hex_value(src[i])
+                    val = val << 4 | t0.hex_value(src[i])
                 i += 1
             toks.append(Token(val, start, Kind.TK_NUMBER))
             continue
@@ -245,10 +223,10 @@ def tokenize(src:str)->list[Token]:
             continue
 
         # number (decimal int)
-        if is_digit(src[i]):
+        if t0.is_digit(src[i]):
             start = i
             val = 0
-            while i < n and (is_digit(src[i]) or src[i] == '_'):
+            while i < n and (t0.is_digit(src[i]) or src[i] == '_'):
                 if src[i] != '_':
                     val = val * 10 + (ord(src[i]) - ord('0'))
                 i += 1
@@ -258,18 +236,7 @@ def tokenize(src:str)->list[Token]:
         # string
         if src[i] == '"':
             start = i
-            i += 1
-            while i < n and src[i] != '"':
-                if src[i] == '{' or src[i] == '}': raise SyntaxError(f"interpolation not supported in udewy strings at {i}: {src[start:i]!r}")
-                if src[i] == '\\':
-                    i += 1
-                    if i >= n:
-                        raise SyntaxError(f"unterminated string at {i}: {src[start:i]!r}")
-                i += 1
-            if i >= n or src[i] != '"':
-                raise SyntaxError(f"unterminated string at {i}: {src[start:i]!r}")
-            i += 1
-            # store the string text location + length
+            i = t0.string_end(src, start)
             toks.append(Token(i - start, start, Kind.TK_STRING))
             continue
         
@@ -348,11 +315,15 @@ def dump_token(token:Token, src:str):
 
 if __name__ == "__main__":
     import sys
+    from . import t0
+    from pathlib import Path
+
     if len(sys.argv) != 2:
-        print("Usage: python t1.py <file>")
+        print("Usage: python -m udewy.t1 <file.udewy>")
         sys.exit(1)
-    with open(sys.argv[1], "r") as f:
-        src = f.read()
-    toks = tokenize(src)
+
+    source_path = Path(sys.argv[1])
+    source = t0.load_program_source(source_path)
+    toks = tokenize(source)
     for tok in toks:
-        print(dump_token(tok, src))
+        print(dump_token(tok, source))

@@ -70,12 +70,9 @@ class Backend(ABC):
         """Initialize the module for code generation."""
     
     @abstractmethod
-    def finish_module(self) -> bytes | str:
+    def finish_module(self) -> str:
         """
-        Finalize and return the generated artifact.
-        
-        Returns either raw bytes (for binary formats) or a string
-        (for text assembly formats).
+        Finalize and return a string of the generated artifact (assembly, WAT, etc.).
         """
     
     # ========================================================================

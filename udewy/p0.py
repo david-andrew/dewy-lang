@@ -6,129 +6,16 @@ but it uses ordinary Python data structures for symbol tracking.
 """
 
 from dataclasses import dataclass
-from os import PathLike
-from pathlib import Path
 from typing import Literal
 
 from . import t1
-from .backend.x86_64 import X86_64Backend
-from .backend.wasm import Wasm32Backend
-from .backend.riscv import RiscvBackend
-from .backend.arm import ArmBackend
-from .backend.common import Backend
+from .backend import Backend
+
+
 
 
 # ============================================================================
-# Import preprocessing
-# ============================================================================
-
-def process_imports(source: str, source_path: PathLike, imported: set[Path] | None = None) -> str:
-    """
-    Process leading import directives, recursively including imported files.
-    Returns the combined source with imported content prepended.
-    """
-    source_path = Path(source_path).resolve()
-    
-    if imported is None:
-        imported = set()
-    
-    if source_path in imported:
-        return ""
-    imported.add(source_path)
-    
-    source_dir = source_path.parent
-    result_parts: list[str] = []
-    body_parts: list[str] = []
-
-    i = 0
-    body_cursor = 0
-    n = len(source)
-
-    # TODO: pull / combine pieces of this from t1
-    def skip_trivia(idx: int) -> int:
-        while idx < n:
-            if source[idx] in ' \t\r\n':
-                idx = idx + 1
-                continue
-            if source[idx] == '#':
-                while idx < n and source[idx] != '\n':
-                    idx = idx + 1
-                continue
-            break
-        return idx
-
-    # TODO: pull this from t1
-    def is_ident_char(c: str) -> bool:
-        return c == '_' or ('a' <= c <= 'z') or ('A' <= c <= 'Z') or ('0' <= c <= '9')
-
-    while True:
-        i = skip_trivia(i)
-        if i >= n:
-            break
-
-        if source[i:i + 6] != 'import':
-            break
-
-        end_kw = i + 6
-        if end_kw < n and is_ident_char(source[end_kw]):
-            break
-
-        body_parts.append(source[body_cursor:i])
-
-        i = end_kw
-        while i < n and source[i] in ' \t':
-            i = i + 1
-
-        if i >= n or source[i] != 'p' or i + 1 >= n or source[i + 1] != '"':
-            raise SyntaxError(f"Expected path string after import at position {end_kw}")
-
-        i = i + 2
-        path_start = i
-
-        while i < n and source[i] != '"':
-            if source[i] == '\\':
-                i = i + 1
-            i = i + 1
-
-        if i >= n:
-            raise SyntaxError(f"Unterminated path string in import at position {path_start - 2}")
-
-        import_path_str = source[path_start:i]
-        i = i + 1
-
-        while i < n and source[i] in ' \t':
-            i = i + 1
-
-        if i < n and source[i] == '#':
-            while i < n and source[i] != '\n':
-                i = i + 1
-
-        if i < n and source[i] not in '\r\n':
-            raise SyntaxError(f"Unexpected trailing content after import at position {i}")
-
-        while i < n and source[i] in '\r\n':
-            i = i + 1
-
-        import_path = (source_dir / import_path_str).resolve()
-
-        if not import_path.exists():
-            raise FileNotFoundError(f"Import file not found: {import_path}")
-
-        import_content = import_path.read_text()
-        processed_import = process_imports(import_content, import_path, imported)
-        if processed_import:
-            result_parts.append(processed_import)
-
-        body_cursor = i
-
-    body_parts.append(source[body_cursor:])
-    result_parts.append(''.join(body_parts))
-    
-    return '\n'.join(result_parts)
-
-
-# ============================================================================
-# Frontend state
+# Parser state
 # ============================================================================
 
 TokenIdx = int
@@ -1231,25 +1118,13 @@ def parse_program(toks: list[t1.Token], state: ParseState) -> None:
 # Main entry point
 # ============================================================================
 
-def parse(toks: list[t1.Token], src: str, target: str = "x86_64") -> tuple[str, Backend]:
+def parse(toks: list[t1.Token], src: str, backend: Backend) -> str:
     """Parse tokens and generate code for the specified target.
     
     Returns:
-        Tuple of (generated_code, backend) where backend can be used for
-        compile_and_link and run operations.
+        Generated code as a string or bytes.
     """
-    backend: Backend
-    if target == "x86_64":
-        backend = X86_64Backend()
-    elif target == "wasm32":
-        backend = Wasm32Backend()
-    elif target == "riscv":
-        backend = RiscvBackend()
-    elif target == "arm":
-        backend = ArmBackend()
-    else:
-        raise ValueError(f"Unknown target: {target}")
-    
+
     backend.begin_module()
     
     fn_table: FunctionTable = {}
@@ -1271,4 +1146,36 @@ def parse(toks: list[t1.Token], src: str, target: str = "x86_64") -> tuple[str, 
         if not entry.is_defined:
             raise SyntaxError(f"Undefined function: {name}")
     
-    return backend.finish_module(), backend
+    return backend.finish_module()
+
+
+
+
+# simple print out the generated artifact
+if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+    from . import t0, t1
+    from .backend import get_backend, BackendName
+    from typing import cast
+    
+    # get target from command line arguments
+    if '--target' in sys.argv:
+        target_idx = sys.argv.index('--target')
+        target = cast(BackendName, sys.argv[target_idx + 1])
+        sys.argv.pop(target_idx)
+        sys.argv.pop(target_idx)
+    else:
+        target = "x86_64"
+
+    if len(sys.argv) < 2:
+        print("Usage: python -m udewy.p0 [--target TARGET] <file.udewy>")
+        sys.exit(1)
+    
+    source_path = Path(sys.argv[1])
+    backend = get_backend(target)
+    source = t0.load_program_source(source_path)
+    toks = t1.tokenize(source)
+    asm = parse(toks, source, backend)
+    
+    print(asm)

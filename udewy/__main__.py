@@ -1,10 +1,12 @@
 from pathlib import Path
-from . import t1, p0
-
+from . import t0, t1, p0
+from .backend import BackendName, get_backend
+from typing import cast
 
 # ============================================================================
 # CLI entry point
 # ============================================================================
+
 
 if __name__ == "__main__":
     import sys
@@ -18,7 +20,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     compile_only = False
-    target = "x86_64"
+    target: BackendName = "x86_64"
     split_wasm = False
     serve_wasm = False
     arg_idx = 1
@@ -29,7 +31,7 @@ if __name__ == "__main__":
             arg_idx += 1
         elif sys.argv[arg_idx] == "--target":
             arg_idx += 1
-            target = sys.argv[arg_idx]
+            target = cast(BackendName, sys.argv[arg_idx])
             arg_idx += 1
         elif sys.argv[arg_idx] == "--split-wasm":
             split_wasm = True
@@ -47,10 +49,10 @@ if __name__ == "__main__":
     input_file = Path(sys.argv[arg_idx])
     script_args = sys.argv[arg_idx + 1:]
     
-    raw_src = input_file.read_text()
-    src = p0.process_imports(raw_src, input_file)
+    backend = get_backend(target)
+    src = t0.load_program_source(input_file)
     toks = t1.tokenize(src)
-    asm, backend = p0.parse(toks, src, target)
+    asm = p0.parse(toks, src, backend)
     
     cache_dir = Path("__dewycache__")
     cache_dir.mkdir(exist_ok=True)
