@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from udewy import p0, t1
+from udewy.backend import get_backend, Backend
 
 
 TARGETS = ["x86_64", "riscv", "arm"]
@@ -82,9 +83,9 @@ SPILL_EXPECTATIONS = {
 }
 
 
-def parse_udewy(src: str, target: str) -> tuple[str, object]:
+def parse_udewy(src: str, backend: Backend) -> str:
     toks = t1.tokenize(src)
-    return p0.parse(toks, src, target=target)
+    return p0.parse(toks, src, backend)
 
 
 def toolchain_available(target: str) -> bool:
@@ -105,7 +106,8 @@ def toolchain_available(target: str) -> bool:
 
 @pytest.mark.parametrize("target", TARGETS)
 def test_direct_overflow_call_codegen(target: str) -> None:
-    code, _ = parse_udewy(DIRECT_OVERFLOW_SOURCE, target)
+    backend = get_backend(target)
+    code = parse_udewy(DIRECT_OVERFLOW_SOURCE, backend)
 
     for expected in DIRECT_EXPECTATIONS[target]:
         assert expected in code
@@ -113,7 +115,8 @@ def test_direct_overflow_call_codegen(target: str) -> None:
 
 @pytest.mark.parametrize("target", TARGETS)
 def test_indirect_overflow_call_codegen(target: str) -> None:
-    code, _ = parse_udewy(INDIRECT_OVERFLOW_SOURCE, target)
+    backend = get_backend(target)
+    code = parse_udewy(INDIRECT_OVERFLOW_SOURCE, backend)
 
     for expected in INDIRECT_EXPECTATIONS[target]:
         assert expected in code
@@ -121,7 +124,8 @@ def test_indirect_overflow_call_codegen(target: str) -> None:
 
 @pytest.mark.parametrize("target", TARGETS)
 def test_virtual_stack_cache_and_spill_codegen(target: str) -> None:
-    code, _ = parse_udewy(SPILL_SOURCE, target)
+    backend = get_backend(target)
+    code = parse_udewy(SPILL_SOURCE, backend)
 
     for expected in SPILL_EXPECTATIONS[target]:
         assert expected in code
@@ -136,7 +140,8 @@ let main = ():>int => {
 """
 
     with pytest.raises(SyntaxError, match=r"Intrinsic '__syscall3__' expects 4 arguments, got 3 arguments"):
-        parse_udewy(src, target)
+        backend = get_backend(target)
+        parse_udewy(src, backend)
 
 
 @pytest.mark.parametrize(
@@ -152,7 +157,8 @@ def test_register_backends_run_overflow_calls(target: str, source: str, expected
     if not toolchain_available(target):
         pytest.skip(f"{target} toolchain not available")
 
-    code, backend = parse_udewy(source, target)
+    backend = get_backend(target)
+    code = parse_udewy(source, backend)
 
     with TemporaryDirectory() as tmp_dir:
         output_path = backend.compile_and_link(code, "overflow", Path(tmp_dir))

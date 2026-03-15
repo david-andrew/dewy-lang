@@ -1,11 +1,12 @@
 import pytest
 
 from udewy import p0, t1
+from udewy.backend import get_backend
 
-
-def parse_udewy(src: str) -> tuple[str, object]:
+def parse_udewy(src: str) -> str:
     toks = t1.tokenize(src)
-    return p0.parse(toks, src, target="wasm32")
+    backend = get_backend("wasm32")
+    return p0.parse(toks, src, backend)
 
 
 def test_local_const_assignment_is_rejected() -> None:
