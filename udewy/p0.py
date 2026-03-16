@@ -524,15 +524,6 @@ def is_binop(kind: t1.Kind) -> bool:
 # Intrinsic detection (delegated to backend)
 # ============================================================================
 
-def is_intrinsic(backend: Backend, name: str) -> bool:
-    """Check if the given name is an intrinsic supported by the backend."""
-    return backend.is_intrinsic(name)
-
-
-def emit_intrinsic(backend: Backend, name: str, num_args: int) -> None:
-    """Emit intrinsic call via backend."""
-    backend.emit_intrinsic(name, num_args)
-
 
 def parse_static_alloca_size(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[int, int]:
     """Parse the single compile-time size argument to __static_alloca__."""
@@ -640,11 +631,11 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
 
         idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
 
-        if is_intrinsic(backend, name):
+        if backend.is_intrinsic(name):
             validate_intrinsic_arity(backend, name, arg_count, call_loc)
             if arg_count > 0:
                 backend.restore_value()
-            emit_intrinsic(backend, name, arg_count)
+            backend.emit_intrinsic(name, arg_count)
         else:
             validate_call_arity(backend, arg_count, call_loc)
             entry = note_function_reference(backend, state.fn_table, name, arg_count, call_loc)
