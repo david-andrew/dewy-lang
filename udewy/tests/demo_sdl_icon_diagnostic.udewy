@@ -1,0 +1,73 @@
+import p"../third_party/sdl/sdl.udewy"
+
+const SYS_WRITE:int = 1
+const STDOUT:int = 1
+
+let write_ptr = (ptr:int len:int):>void => {
+    __syscall3__(SYS_WRITE STDOUT ptr len)
+    return 0
+}
+
+let write_str = (s:int):>void => {
+    write_ptr(s __load__(s - 8))
+    return 0
+}
+
+let cstr_len = (s:int):>int => {
+    let len:int = 0
+    loop __load_u8__(s + len) not=? 0 {
+        len += 1
+    }
+    return len
+}
+
+let write_cstr = (s:int):>void => {
+    write_ptr(s cstr_len(s))
+    return 0
+}
+
+let write_sdl_error = ():>void => {
+    let err:int = SDL_GetError()
+    if __load_u8__(err) =? 0 {
+        write_str("SDL_GetError: <empty>\n")
+        return 0
+    }
+    write_str("SDL_GetError: ")
+    write_cstr(err)
+    write_str("\n")
+    return 0
+}
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO) =? 0 {
+        write_str("SDL_Init failed\n")
+        write_sdl_error()
+        return 10
+    }
+
+    let title:int = "udewy sdl icon diagnostic\0"
+    let window:int = SDL_CreateWindow(title 640 480 SDL_WINDOW_RESIZABLE)
+    if window =? 0 {
+        write_str("SDL_CreateWindow failed\n")
+        write_sdl_error()
+        SDL_Quit()
+        return 11
+    }
+
+    let icon_result:int = SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)
+    if icon_result =? 0 {
+        write_str("SDL_SetWindowIconFromUdewyData returned 0\n")
+        write_sdl_error()
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 12
+    }
+
+    write_str("SDL_SetWindowIconFromUdewyData returned success\n")
+    SDL_ShowWindow(window)
+    SDL_Delay(1500)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}

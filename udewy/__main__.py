@@ -1,6 +1,7 @@
 from pathlib import Path
 from . import t0, t1, p0
 from .backend import BackendName, get_backend
+from .backend.common import RunOptions
 from typing import cast
 
 # ============================================================================
@@ -74,7 +75,13 @@ if __name__ == "__main__":
     if compile_only:
         print(backend.get_compile_message(output_path, split_wasm=split_wasm))
     else:
-        exit_code = backend.run(output_path, script_args, split_wasm=split_wasm, serve_wasm=serve_wasm)
+        run_options = RunOptions(
+            split_wasm=split_wasm,
+            serve_wasm=serve_wasm,
+            input_file=input_file,
+            link_artifacts=[Path(path) for path in loaded.link_artifacts],
+        )
+        exit_code = backend.run(output_path, script_args, run_options)
         if exit_code is not None:
             sys.exit(exit_code)
         else:

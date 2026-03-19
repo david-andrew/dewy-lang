@@ -20,7 +20,7 @@ from os import PathLike
 from pathlib import Path
 
 from .. import t1
-from .common import Backend, CORE_INTRINSIC_ARITIES
+from .common import Backend, CORE_INTRINSIC_ARITIES, RunOptions
 
 class Wasm32Backend(Backend):
     """
@@ -1125,11 +1125,13 @@ class Wasm32Backend(Backend):
         
         return html_path if not split_wasm else wasm_path
     
-    def run(self, output_path: PathLike, args: list[str], **options) -> int | None:
+    def run(self, output_path: PathLike, args: list[str], options: RunOptions | None = None) -> int | None:
         """Open or serve the generated HTML wrapper."""
         output_path = Path(output_path)
-        split_wasm = options.get("split_wasm", False)
-        serve_wasm = options.get("serve_wasm", False)
+        if options is None:
+            options = RunOptions()
+        split_wasm = options.split_wasm
+        serve_wasm = options.serve_wasm
         html_path = output_path if output_path.suffix == ".html" else output_path.with_suffix(".html")
         
         if split_wasm or serve_wasm:

@@ -13,6 +13,7 @@ The protocol uses a virtual value stack model:
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from os import PathLike
 from pathlib import Path
 
@@ -51,6 +52,15 @@ CORE_INTRINSIC_ARITIES: dict[str, int] = {
 LINUX_SYSCALL_INTRINSIC_ARITIES: dict[str, int] = {
     f"__syscall{i}__": i + 1 for i in range(7)
 }
+
+
+@dataclass
+class RunOptions:
+    split_wasm: bool = False
+    serve_wasm: bool = False
+    input_file: Path | None = None
+    link_artifacts: list[Path] = field(default_factory=list)
+    env: dict[str, str] | None = None
 
 class Backend(ABC):
     """
@@ -513,14 +523,14 @@ class Backend(ABC):
         """
     
     @abstractmethod
-    def run(self, output_path: PathLike, args: list[str], **options) -> int | None:
+    def run(self, output_path: PathLike, args: list[str], options: RunOptions | None = None) -> int | None:
         """
         Run the compiled output.
         
         Args:
             output_path: Path to the compiled output (from compile_and_link)
             args: Command-line arguments to pass to the program
-            **options: Backend-specific runtime options
+            options: Backend-specific runtime options
         
         Returns:
             Exit code of the program, or None if running is not supported

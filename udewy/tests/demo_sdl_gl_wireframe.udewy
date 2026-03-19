@@ -72,6 +72,7 @@ let main = ():>int => {
         SDL_Quit()
         return 7
     }
+    SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)
 
     let gl_context:int = SDL_GL_CreateContext(window)
     if gl_context =? 0 {

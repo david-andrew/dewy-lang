@@ -1,27 +1,50 @@
-import p"SDL3-shared-bundle/link.udewy"
+import p"artifacts/link.udewy"
+import p"artifacts/default_window_icon.udewy"
 
 # Minimal SDL3 bindings for udewy.
 # These declarations target the SDL link bundle produced by setup_sdl.py.
 
+const SDL_INIT_AUDIO:int = 0x00000010
 const SDL_INIT_VIDEO:int = 0x00000020
 const SDL_EVENT_QUIT:int = 0x00000100
 const SDL_WINDOW_OPENGL:int = 0x00000002
 const SDL_WINDOW_RESIZABLE:int = 0x00000020
 const SDL_EVENT_SIZE:int = 128
+const SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK:int = 0xFFFF_FFFF
+const SDL_AUDIO_S16LE:int = 0x8010
+const SDL_AUDIO_SPEC_SIZE:int = 12
+const SDL_SCANCODE_A:int = 4
+const SDL_SCANCODE_D:int = 7
+const SDL_SCANCODE_S:int = 22
+const SDL_SCANCODE_W:int = 26
+const SDL_SCANCODE_RETURN:int = 40
+const SDL_SCANCODE_ESCAPE:int = 41
+const SDL_SCANCODE_SPACE:int = 44
+const SDL_SCANCODE_LEFT:int = 80
+const SDL_SCANCODE_RIGHT:int = 79
+const SDL_SCANCODE_DOWN:int = 81
+const SDL_SCANCODE_UP:int = 82
 const SDL_GL_DOUBLEBUFFER:int = 5
 const SDL_GL_DEPTH_SIZE:int = 6
 const SDL_GL_CONTEXT_MAJOR_VERSION:int = 17
 const SDL_GL_CONTEXT_MINOR_VERSION:int = 18
 const SDL_GL_CONTEXT_PROFILE_MASK:int = 20
 const SDL_GL_CONTEXT_PROFILE_COMPATIBILITY:int = 0x0002
+const SDL_PIXELFORMAT_RGBA8888:int = 0x16462004
+const SDL_PIXELFORMAT_ABGR8888:int = 0x16762004
+const SDL_UDEWY_ICON_MAGIC:int = 0x55444557_5949434f
+const SDL_UDEWY_ICON_FORMAT_VERSION:int = 0x00000001_00000001
 
 const GL_COLOR_BUFFER_BIT:int = 0x00004000
 const GL_DEPTH_BUFFER_BIT:int = 0x00000100
 const GL_DEPTH_TEST:int = 0x0B71
+const GL_CULL_FACE:int = 0x0B44
 const GL_LEQUAL:int = 0x0203
 const GL_MODELVIEW:int = 0x1700
 const GL_PROJECTION:int = 0x1701
 const GL_LINES:int = 0x0001
+const GL_TRIANGLES:int = 0x0004
+const GL_QUADS:int = 0x0007
 
 let SDL_Init = (flags:int):>int => extern
 let SDL_SetMainReady = ():>void => extern
@@ -32,6 +55,7 @@ let SDL_CreateWindow = (title:int width:int height:int flags:int):>int => extern
 let SDL_DestroyWindow = (window:int):>void => extern
 let SDL_ShowWindow = (window:int):>int => extern
 let SDL_GetWindowSizeInPixels = (window:int w:int h:int):>int => extern
+let SDL_SetWindowIcon = (window:int icon:int):>int => extern
 
 let SDL_PollEvent = (event:int):>int => extern
 let SDL_Delay = (ms:int):>void => extern
@@ -45,8 +69,17 @@ let SDL_RenderPresent = (renderer:int):>int => extern
 let SDL_DestroyRenderer = (renderer:int):>void => extern
 let SDL_GetWindowSurface = (window:int):>int => extern
 let SDL_UpdateWindowSurface = (window:int):>int => extern
+let SDL_CreateSurfaceFrom = (width:int height:int format:int pixels:int pitch:int):>int => extern
+let SDL_DestroySurface = (surface:int):>void => extern
 let SDL_MapSurfaceRGBA = (surface:int r:int g:int b:int a:int):>int => extern
 let SDL_FillSurfaceRect = (surface:int rect:int color:int):>int => extern
+let SDL_GetKeyboardState = (numkeys:int):>int => extern
+let SDL_OpenAudioDeviceStream = (devid:int spec:int callback:int userdata:int):>int => extern
+let SDL_PutAudioStreamData = (stream:int buf:int len:int):>int => extern
+let SDL_GetAudioStreamQueued = (stream:int):>int => extern
+let SDL_ClearAudioStream = (stream:int):>int => extern
+let SDL_ResumeAudioStreamDevice = (stream:int):>int => extern
+let SDL_DestroyAudioStream = (stream:int):>void => extern
 let SDL_GL_SetAttribute = (attr:int value:int):>int => extern
 let SDL_GL_CreateContext = (window:int):>int => extern
 let SDL_GL_MakeCurrent = (window:int context:int):>int => extern
@@ -55,22 +88,113 @@ let SDL_GL_SwapWindow = (window:int):>int => extern
 let SDL_GL_DestroyContext = (context:int):>int => extern
 
 let glEnable = (cap:int):>void => extern
+let glDisable = (cap:int):>void => extern
 let glDepthFunc = (func:int):>void => extern
 let glClear = (mask:int):>void => extern
 let glViewport = (x:int y:int width:int height:int):>void => extern
 let glMatrixMode = (mode:int):>void => extern
 let glLoadIdentity = ():>void => extern
+let glPushMatrix = ():>void => extern
+let glPopMatrix = ():>void => extern
 let glBegin = (mode:int):>void => extern
 let glEnd = ():>void => extern
 let glClearColor = (r:int g:int b:int a:int):>void => extern
 let glOrtho = (left:int right:int bottom:int top:int near_val:int far_val:int):>void => extern
+let glFrustum = (left:int right:int bottom:int top:int near_val:int far_val:int):>void => extern
 let glTranslatef = (x:int y:int z:int):>void => extern
 let glRotatef = (angle:int x:int y:int z:int):>void => extern
+let glScalef = (x:int y:int z:int):>void => extern
 let glColor3f = (r:int g:int b:int):>void => extern
 let glVertex3f = (x:int y:int z:int):>void => extern
 
+let sdl_icon_endian_mode:int = 0
+
 let SDL_EventType = (event:int):>int => {
     return __load_u32__(event)
+}
+
+let SDL_ScancodeDown = (keyboard:int scancode:int):>int => {
+    return __load_u8__(keyboard + scancode)
+}
+
+let SDL_SetAudioSpec = (spec:int format:int channels:int freq:int):>void => {
+    __store_u16__(format spec)
+    __store_u16__(0 spec + 2)
+    __store_u32__(channels spec + 4)
+    __store_u32__(freq spec + 8)
+    return 0
+}
+
+let SDL_IconEndianMode = ():>int => {
+    if sdl_icon_endian_mode not=? 0 {
+        return sdl_icon_endian_mode
+    }
+
+    let probe:int = __alloca__(8)
+    __store_u64__(0x01020304_05060708 probe)
+    if __load_u8__(probe) =? 1 {
+        sdl_icon_endian_mode = 1
+    } else {
+        sdl_icon_endian_mode = 2
+    }
+    return sdl_icon_endian_mode
+}
+
+let SDL_RGBA32PixelFormat = ():>int => {
+    if SDL_IconEndianMode() =? 1 {
+        return SDL_PIXELFORMAT_RGBA8888
+    }
+    return SDL_PIXELFORMAT_ABGR8888
+}
+
+let SDL_WriteRGBA32Pixel = (buf:int offset:int pixel:int):>void => {
+    __store_u8__(((pixel >> 24) and 255) (buf + offset))
+    __store_u8__(((pixel >> 16) and 255) (buf + offset + 1))
+    __store_u8__(((pixel >> 8) and 255) (buf + offset + 2))
+    __store_u8__((pixel and 255) (buf + offset + 3))
+    return 0
+}
+
+let SDL_SetWindowIconFromUdewyData = (window:int icon_data:int):>int => {
+    if __load_u64__(icon_data) not=? SDL_UDEWY_ICON_MAGIC {
+        return 0
+    }
+    if __load_u64__(icon_data + 8) not=? SDL_UDEWY_ICON_FORMAT_VERSION {
+        return 0
+    }
+
+    let width:int = __load_u64__(icon_data + 16)
+    let height:int = __load_u64__(icon_data + 24)
+    let packed_word_count:int = __load_u64__(icon_data + 32)
+    let pixel_count:int = width * height
+    let pixel_buf:int = __alloca__(pixel_count * 4)
+    let word_idx:int = 0
+    let pixel_idx:int = 0
+    loop word_idx <? packed_word_count {
+        let word:int = __load_u64__(icon_data + 40 + (word_idx * 8))
+        let pixel0:int = (word >> 32) and 0xFFFF_FFFF
+        SDL_WriteRGBA32Pixel(pixel_buf (pixel_idx * 4) pixel0)
+        pixel_idx += 1
+        if pixel_idx <? pixel_count {
+            let pixel1:int = word and 0xFFFF_FFFF
+            SDL_WriteRGBA32Pixel(pixel_buf (pixel_idx * 4) pixel1)
+            pixel_idx += 1
+        }
+        word_idx += 1
+    }
+
+    let surface:int = SDL_CreateSurfaceFrom(width height SDL_RGBA32PixelFormat() pixel_buf width * 4)
+    if surface =? 0 {
+        return 0
+    }
+
+    let ok:int = SDL_SetWindowIcon(window surface)
+    SDL_DestroySurface(surface)
+    return ok
+}
+
+let SDL_SetDefaultWindowIcon = (window:int):>int => {
+    return SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)
 }
 
 let GL_F32_FromInt = (value:int):>int => {
@@ -91,6 +215,11 @@ let GL_Ortho = (left:int right:int bottom:int top:int near_val:int far_val:int):
     return 0
 }
 
+let GL_Frustum = (left:int right:int bottom:int top:int near_val:int far_val:int):>void => {
+    __call_extern_xmm_mixed_6__(glFrustum 2 left 2 right 2 bottom 2 top 2 near_val 2 far_val)
+    return 0
+}
+
 let GL_Translatef = (x:int y:int z:int):>void => {
     __call_extern_xmm_mixed_3__(glTranslatef 1 x 1 y 1 z)
     return 0
@@ -98,6 +227,11 @@ let GL_Translatef = (x:int y:int z:int):>void => {
 
 let GL_Rotatef = (angle:int x:int y:int z:int):>void => {
     __call_extern_xmm_mixed_4__(glRotatef 1 angle 1 x 1 y 1 z)
+    return 0
+}
+
+let GL_Scalef = (x:int y:int z:int):>void => {
+    __call_extern_xmm_mixed_3__(glScalef 1 x 1 y 1 z)
     return 0
 }
 

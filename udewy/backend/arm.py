@@ -8,7 +8,7 @@ from os import PathLike
 from pathlib import Path
 
 from .. import t1
-from .common import Backend, CORE_INTRINSIC_ARITIES, LINUX_SYSCALL_INTRINSIC_ARITIES
+from .common import Backend, CORE_INTRINSIC_ARITIES, LINUX_SYSCALL_INTRINSIC_ARITIES, RunOptions
 
 class ArmBackend(Backend):
     """
@@ -1052,7 +1052,7 @@ class ArmBackend(Backend):
             f"Assembly file generated at: {asm_path}"
         )
     
-    def run(self, output_path: PathLike, args: list[str], **options) -> int | None:
+    def run(self, output_path: PathLike, args: list[str], options: RunOptions | None = None) -> int | None:
         """Run the compiled executable via QEMU."""
         import subprocess
         output_path = Path(output_path)

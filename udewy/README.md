@@ -1547,6 +1547,94 @@ When served with `--serve-wasm` or `--split-wasm`, the local server exits automa
 
 ---
 
+# Addendum E: External Libraries
+
+This addendum documents the external native libraries currently supported by the repository's checked-in helper code and setup scripts.
+
+## E.1 SDL
+
+The SDL integration lives under `udewy/third_party/sdl/`.
+
+**Current backend support:**
+
+- Supported today: `x86_64` Linux
+- Not currently supported by this SDL setup: `riscv`, `arm`, `wasm32`
+
+The current SDL bundle is built locally by `udewy/third_party/sdl/setup_sdl.py` for the host Linux machine and stages host-native artifacts into `udewy/third_party/sdl/artifacts/`. Because those artifacts are native link inputs for the current machine, they are only wired up for the x86_64 Linux backend in the current repository workflow.
+
+### E.1.1 Using SDL
+
+Get started like this:
+
+```bash
+# Build the local SDL bundle and generate the default udewy icon module
+python udewy/third_party/sdl/setup_sdl.py
+
+# Generate a custom icon module next to your source image
+# This writes my_icon.udewy and exports the default symbol MY_ICON
+python udewy/third_party/sdl/generate_udewy_icon.py my_icon.png
+```
+
+Import the SDL wrapper from your udewy program:
+
+```udewy
+import p"../third_party/sdl/sdl.udewy"
+```
+
+The wrapper provides the low-level SDL extern declarations together with a few convenience helpers written in udewy, including `SDL_SetWindowIconFromUdewyData(window icon_data)` and `SDL_SetDefaultWindowIcon(window)`.
+
+### E.1.2 Generated Icon Modules
+
+The SDL helper can load packed icon data from a generated `.udewy` module without adding any new language semantics.
+
+By default, `generate_udewy_icon.py` writes the generated module using the input filename with a `.udewy` extension and exports a symbol matching that filename stem in uppercase. For example:
+
+```bash
+python udewy/third_party/sdl/generate_udewy_icon.py my_icon.png
+# writes my_icon.udewy
+# exports MY_ICON
+```
+
+Use `--symbol` if you want to override the exported symbol name, or pass an explicit output path if you want the generated `.udewy` file somewhere else.
+
+The generated module exports one `array<uint64>` symbol. Its layout is:
+
+- word 0: icon magic
+- word 1: format/version word
+- word 2: width
+- word 3: height
+- word 4: packed-word count
+- words 5+: packed pixels, two pixels per `uint64`, written as `0xRRGGBBAA_RRGGBBAA`
+
+The generator writes eight packed words per line for readability, but the runtime format is just a normal udewy array literal.
+
+Use a generated icon module from SDL code like this:
+
+```udewy
+import p"../third_party/sdl/sdl.udewy"
+import p"./my_icon.udewy"
+
+let main = ():>int => {
+    let title:int = "icon demo\0"
+    let window:int = SDL_CreateWindow(title 640 480 SDL_WINDOW_RESIZABLE)
+    SDL_SetWindowIconFromUdewyData(window MY_ICON)
+    # ...
+}
+```
+
+`sdl.udewy` also imports a generated default icon module and exposes it as `SDL_DEFAULT_WINDOW_ICON_DATA`. Programs that want the bundled logo can call `SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)` or `SDL_SetDefaultWindowIcon(window)`.
+
+On Linux desktops, successful `SDL_SetWindowIcon` calls do not guarantee that the dock or launcher will show the new icon. This repository's SDL setup is Wayland-first, and compositor support still determines whether runtime icon changes appear in task switchers or docks.
+
+For the `python -m udewy path/to/program.udewy` workflow on GNOME/Wayland, udewy also prepares a desktop-entry fallback:
+
+- the desktop file is written directly to `~/.local/share/applications/<app_id>.desktop`
+- the basename before `.desktop` must match the SDL app ID
+- the `Icon=` entry points at an absolute PNG path
+- udewy sets `SDL_APP_ID` before launching the compiled binary so GNOME can match the running window to that desktop entry
+
+---
+
 # Misc
 ## Pronunciation
 

@@ -1,0 +1,1260 @@
+import p"../third_party/sdl/sdl.udewy"
+
+const STATE_TITLE:int = 0
+const STATE_RACE:int = 1
+const STATE_FINISH:int = 2
+
+const TRACK_SAMPLES:int = 320
+const TRACK_TOTAL_FP:int = 81920
+const TRACK_HALF_WIDTH:int = 160
+const TRACK_WALL_HEIGHT:int = 34
+const TRACK_MAP_RANGE:int = 1600
+const TRACK_BYTES:int = 2560
+const START_PROGRESS_FP:int = 46080
+
+const FP_SHIFT:int = 8
+const FP_ONE:int = 256
+const FP_MASK:int = 255
+
+const TOTAL_LAPS:int = 3
+const CPU_COUNT:int = 4
+const RACER_COUNT:int = 5
+const CPU_BYTES:int = 32
+
+const HOVER_HEIGHT:int = 18
+const CAMERA_BACK_SAMPLES:int = 18
+const CAMERA_LOOK_SAMPLES:int = 22
+const AUDIO_SAMPLES:int = 2048
+const AUDIO_BYTES:int = 4096
+
+const F32_ZERO:int = 0x00000000
+const F32_ONE:int = 0x3f800000
+const F32_HALF:int = 0x3f000000
+const F32_QUARTER:int = 0x3e800000
+const F32_POINT_FIVE:int = 0x3f000000
+const F32_THREE_QUARTER:int = 0x3f400000
+const F32_POINT_TWO:int = 0x3e4ccccd
+const F32_POINT_THREE:int = 0x3e99999a
+const F32_POINT_SIX:int = 0x3f19999a
+const F32_POINT_EIGHT:int = 0x3f4ccccd
+const F32_POINT_NINE:int = 0x3f666666
+
+const F64_NEG_FOUR:int = __i64_to_f64_bits__(-4)
+const F64_NEG_TWO:int = __i64_to_f64_bits__(-2)
+const F64_NEG_ONE:int = __i64_to_f64_bits__(-1)
+const F64_ZERO:int = __i64_to_f64_bits__(0)
+const F64_ONE:int = __i64_to_f64_bits__(1)
+const F64_TWO:int = __i64_to_f64_bits__(2)
+const F64_FOUR:int = __i64_to_f64_bits__(4)
+const F64_FIVE:int = __i64_to_f64_bits__(5)
+const F64_FORTY:int = __i64_to_f64_bits__(40)
+const F64_TWO_THOUSAND:int = __i64_to_f64_bits__(2000)
+
+let glyph_mu:int = [0 0 17 21 21 21 25]
+let glyph_Z:int = [31 1 2 4 8 16 31]
+let glyph_E:int = [31 16 30 16 16 16 31]
+let glyph_R:int = [30 17 17 30 20 18 17]
+let glyph_O:int = [14 17 17 17 17 17 14]
+let glyph_S:int = [15 16 14 1 1 17 14]
+let glyph_P:int = [30 17 17 30 16 16 16]
+let glyph_A:int = [14 17 17 31 17 17 17]
+let glyph_C:int = [14 17 16 16 16 17 14]
+let glyph_D:int = [30 17 17 17 17 17 30]
+let glyph_F:int = [31 16 30 16 16 16 16]
+let glyph_I:int = [14 4 4 4 4 4 14]
+let glyph_N:int = [17 25 21 19 17 17 17]
+let glyph_H:int = [17 17 17 31 17 17 17]
+let glyph_G:int = [14 17 16 23 17 17 14]
+let glyph_K:int = [17 18 20 24 20 18 17]
+let glyph_L:int = [16 16 16 16 16 16 31]
+let glyph_M:int = [17 27 21 21 17 17 17]
+let glyph_T:int = [31 4 4 4 4 4 4]
+
+let glyph_0:int = [14 17 19 21 25 17 14]
+let glyph_1:int = [4 12 4 4 4 4 14]
+let glyph_2:int = [14 17 1 2 4 8 31]
+let glyph_3:int = [30 1 1 14 1 1 30]
+let glyph_4:int = [2 6 10 18 31 2 2]
+let glyph_5:int = [31 16 30 1 1 17 14]
+let glyph_6:int = [14 16 30 17 17 17 14]
+let glyph_7:int = [31 1 2 4 8 8 8]
+let glyph_8:int = [14 17 17 14 17 17 14]
+let glyph_9:int = [14 17 17 15 1 2 28]
+
+let game_state:int = 0
+let frame_count:int = 0
+let finish_timer:int = 0
+let start_timer:int = 0
+let result_rank:int = 1
+let player_rank:int = 1
+
+let key_left:int = 0
+let key_right:int = 0
+let key_up:int = 0
+let key_down:int = 0
+let key_confirm:int = 0
+let key_back:int = 0
+let press_confirm:int = 0
+let press_back:int = 0
+
+let player_progress_fp:int = 0
+let player_speed_fp:int = 0
+let player_lane:int = 0
+let player_lane_vel:int = 0
+let player_lap:int = 0
+let player_roll_bias:int = 0
+let player_scrape:int = 0
+
+let cpu_progress_fp:int = 0
+let cpu_speed_fp:int = 0
+let cpu_lane:int = 0
+let cpu_lane_vel:int = 0
+let cpu_lap:int = 0
+
+let audio_stream:int = 0
+let audio_buf:int = 0
+let engine_phase:int = 0
+let fx_phase:int = 0
+let fx_freq:int = 0
+let fx_timer:int = 0
+
+let track_cx:int = 0
+let track_cy:int = 0
+let track_cz:int = 0
+let track_rx:int = 0
+let track_ry:int = 0
+let track_rz:int = 0
+let track_ux:int = 0
+let track_uy:int = 0
+let track_uz:int = 0
+let track_roll:int = 0
+
+let scratch_a:int = 0
+let scratch_b:int = 0
+let scratch_c:int = 0
+let scratch_d:int = 0
+let scratch_e:int = 0
+let scratch_f:int = 0
+
+let camera_ready:int = 0
+let camera_x:int = 0
+let camera_y:int = 0
+let camera_z:int = 0
+
+let abs_i = (value:int):>int => {
+    if value <? 0 {
+        return 0 - value
+    }
+    return value
+}
+
+let clamp_i = (value:int low:int high:int):>int => {
+    if value <? low {
+        return low
+    }
+    if value >? high {
+        return high
+    }
+    return value
+}
+
+let wrap_progress = (value:int):>int => {
+    let wrapped:int = value % TRACK_TOTAL_FP
+    if wrapped <? 0 {
+        wrapped += TRACK_TOTAL_FP
+    }
+    return wrapped
+}
+
+let wrap_roll = (angle:int):>int => {
+    let wrapped:int = angle % 1024
+    if wrapped <? 0 {
+        wrapped += 1024
+    }
+    if wrapped >? 512 {
+        wrapped -= 1024
+    }
+    return wrapped
+}
+
+let sin256 = (angle:int):>int => {
+    let a:int = angle % 1024
+    if a <? 0 {
+        a += 1024
+    }
+    let quad:int = a // 256
+    let x:int = a % 256
+    if quad =? 0 {
+        return (x * (512 - x)) // 256
+    }
+    if quad =? 1 {
+        return ((256 - x) * (256 + x)) // 256
+    }
+    if quad =? 2 {
+        return 0 - ((x * (512 - x)) // 256)
+    }
+    return 0 - (((256 - x) * (256 + x)) // 256)
+}
+
+let cos256 = (angle:int):>int => {
+    return sin256(angle + 256)
+}
+
+let isqrt = (n:int):>int => {
+    let bit:int = 1
+    loop (bit * bit) <=? n {
+        bit += 1
+    }
+    return bit - 1
+}
+
+let dir_yaw_units = (dx:int dz:int):>int => {
+    let best_angle:int = 0
+    let best_score:int = 0 - 9_999_999
+    let angle:int = 0
+    loop angle <? 1024 {
+        let vx:int = 0 - sin256(angle)
+        let vz:int = 0 - cos256(angle)
+        let score:int = (dx * vx) + (dz * vz)
+        if score >? best_score {
+            best_score = score
+            best_angle = angle
+        }
+        angle += 16
+    }
+    return best_angle
+}
+
+let dir_pitch_units = (horizontal:int dy:int):>int => {
+    let best_angle:int = 0
+    let best_score:int = 0 - 9_999_999
+    let angle:int = 0 - 128
+    loop angle <=? 128 {
+        let score:int = (horizontal * cos256(angle)) + (dy * sin256(angle))
+        if score >? best_score {
+            best_score = score
+            best_angle = angle
+        }
+        angle += 8
+    }
+    return best_angle
+}
+
+let load_arr = (arr:int idx:int):>int => {
+    return __load__(arr + (idx * 8))
+}
+
+let store_arr = (arr:int idx:int value:int):>void => {
+    __store__(value arr + (idx * 8))
+    return 0
+}
+
+let interp_track = (arr:int progress:int):>int => {
+    let wrapped:int = wrap_progress(progress)
+    let idx:int = wrapped >> FP_SHIFT
+    let frac:int = wrapped and FP_MASK
+    let next:int = idx + 1
+    if next >=? TRACK_SAMPLES {
+        next = 0
+    }
+    let a:int = load_arr(arr idx)
+    let b:int = load_arr(arr next)
+    return a + (((b - a) * frac) // FP_ONE)
+}
+
+let normalize3 = (x:int y:int z:int out:int):>void => {
+    let mag:int = isqrt((x * x) + (y * y) + (z * z))
+    __store__((x * 256) // mag out + 0)
+    __store__((y * 256) // mag out + 8)
+    __store__((z * 256) // mag out + 16)
+    return 0
+}
+
+let sample_track_point = (progress:int lane:int lift:int out:int):>void => {
+    let cx:int = interp_track(track_cx progress)
+    let cy:int = interp_track(track_cy progress)
+    let cz:int = interp_track(track_cz progress)
+    let rx:int = interp_track(track_rx progress)
+    let ry:int = interp_track(track_ry progress)
+    let rz:int = interp_track(track_rz progress)
+    let ux:int = interp_track(track_ux progress)
+    let uy:int = interp_track(track_uy progress)
+    let uz:int = interp_track(track_uz progress)
+    __store__(cx + ((rx * lane) // 256) + ((ux * lift) // 256) out + 0)
+    __store__(cy + ((ry * lane) // 256) + ((uy * lift) // 256) out + 8)
+    __store__(cz + ((rz * lane) // 256) + ((uz * lift) // 256) out + 16)
+    return 0
+}
+
+let sample_forward = (progress:int out:int):>void => {
+    sample_track_point(progress + (FP_ONE * 2) 0 0 scratch_e)
+    sample_track_point(progress - (FP_ONE * 2) 0 0 scratch_f)
+    let dx:int = __load__(scratch_e + 0) - __load__(scratch_f + 0)
+    let dy:int = __load__(scratch_e + 8) - __load__(scratch_f + 8)
+    let dz:int = __load__(scratch_e + 16) - __load__(scratch_f + 16)
+    normalize3(dx dy dz out)
+    return 0
+}
+
+let world_vertex = (x:int y:int z:int):>void => {
+    GL_Vertex3f(GL_F32_FromInt(x) GL_F32_FromInt(y) GL_F32_FromInt(z))
+    return 0
+}
+
+let tri3 = (x0:int y0:int z0:int x1:int y1:int z1:int x2:int y2:int z2:int r:int g:int b:int):>void => {
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(r g b)
+    world_vertex(x0 y0 z0)
+    world_vertex(x1 y1 z1)
+    world_vertex(x2 y2 z2)
+    glEnd()
+    return 0
+}
+
+let quad3 = (x0:int y0:int z0:int x1:int y1:int z1:int x2:int y2:int z2:int x3:int y3:int z3:int r:int g:int b:int):>void => {
+    glBegin(GL_QUADS)
+    GL_Color3f(r g b)
+    world_vertex(x0 y0 z0)
+    world_vertex(x1 y1 z1)
+    world_vertex(x2 y2 z2)
+    world_vertex(x3 y3 z3)
+    glEnd()
+    return 0
+}
+
+let bar2 = (x:int y:int w:int h:int r:int g:int b:int):>void => {
+    quad3(x y 0 (x + w) y 0 (x + w) (y + h) 0 x (y + h) 0 r g b)
+    return 0
+}
+
+let digit_glyph = (value:int):>int => {
+    if value =? 0 {
+        return glyph_0
+    }
+    if value =? 1 {
+        return glyph_1
+    }
+    if value =? 2 {
+        return glyph_2
+    }
+    if value =? 3 {
+        return glyph_3
+    }
+    if value =? 4 {
+        return glyph_4
+    }
+    if value =? 5 {
+        return glyph_5
+    }
+    if value =? 6 {
+        return glyph_6
+    }
+    if value =? 7 {
+        return glyph_7
+    }
+    if value =? 8 {
+        return glyph_8
+    }
+    return glyph_9
+}
+
+let draw_glyph = (glyph:int x:int y:int scale:int r:int g:int b:int):>void => {
+    let row:int = 0
+    loop row <? 7 {
+        let bits:int = __load__(glyph + (row * 8))
+        let col:int = 0
+        loop col <? 5 {
+            if ((bits >> (4 - col)) and 1) not=? 0 {
+                bar2(x + (col * scale) y + (row * scale) scale (scale - 1) r g b)
+            }
+            col += 1
+        }
+        row += 1
+    }
+    return 0
+}
+
+let draw_digit = (value:int x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(digit_glyph(value) x y scale r g b)
+    return 0
+}
+
+let draw_number = (value:int digits:int x:int y:int scale:int r:int g:int b:int):>void => {
+    let remaining:int = value
+    let place:int = digits - 1
+    loop place >=? 0 {
+        let div:int = 1
+        let j:int = 0
+        loop j <? place {
+            div *= 10
+            j += 1
+        }
+        let digit:int = (remaining // div) % 10
+        draw_digit(digit x + ((digits - 1 - place) * scale * 6) y scale r g b)
+        place -= 1
+    }
+    return 0
+}
+
+let draw_word_muzero = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_mu x y scale r g b)
+    draw_glyph(glyph_Z x + (scale * 6) y scale r g b)
+    draw_glyph(glyph_E x + (scale * 12) y scale r g b)
+    draw_glyph(glyph_R x + (scale * 18) y scale r g b)
+    draw_glyph(glyph_O x + (scale * 24) y scale r g b)
+    return 0
+}
+
+let draw_word_space = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_S x y scale r g b)
+    draw_glyph(glyph_P x + (scale * 6) y scale r g b)
+    draw_glyph(glyph_A x + (scale * 12) y scale r g b)
+    draw_glyph(glyph_C x + (scale * 18) y scale r g b)
+    draw_glyph(glyph_E x + (scale * 24) y scale r g b)
+    return 0
+}
+
+let draw_word_finish = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_F x y scale r g b)
+    draw_glyph(glyph_I x + (scale * 6) y scale r g b)
+    draw_glyph(glyph_N x + (scale * 12) y scale r g b)
+    draw_glyph(glyph_I x + (scale * 18) y scale r g b)
+    draw_glyph(glyph_S x + (scale * 24) y scale r g b)
+    draw_glyph(glyph_H x + (scale * 30) y scale r g b)
+    return 0
+}
+
+let draw_word_rank = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_R x y scale r g b)
+    draw_glyph(glyph_A x + (scale * 6) y scale r g b)
+    draw_glyph(glyph_N x + (scale * 12) y scale r g b)
+    draw_glyph(glyph_K x + (scale * 18) y scale r g b)
+    return 0
+}
+
+let draw_word_lap = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_L x y scale r g b)
+    draw_glyph(glyph_A x + (scale * 6) y scale r g b)
+    draw_glyph(glyph_P x + (scale * 12) y scale r g b)
+    return 0
+}
+
+let draw_word_speed = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_S x y scale r g b)
+    draw_glyph(glyph_P x + (scale * 6) y scale r g b)
+    draw_glyph(glyph_E x + (scale * 12) y scale r g b)
+    draw_glyph(glyph_E x + (scale * 18) y scale r g b)
+    draw_glyph(glyph_D x + (scale * 24) y scale r g b)
+    return 0
+}
+
+let draw_word_go = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_G x y scale r g b)
+    draw_glyph(glyph_O x + (scale * 6) y scale r g b)
+    return 0
+}
+
+let play_fx = (freq:int length:int):>void => {
+    fx_freq = freq
+    fx_timer = length
+    return 0
+}
+
+let fill_audio = (stream:int):>void => {
+    if stream =? 0 {
+        return 0
+    }
+    let queued:int = SDL_GetAudioStreamQueued(stream)
+    if queued >? AUDIO_BYTES {
+        return 0
+    }
+    let engine_freq:int = 16 + (player_speed_fp // 6)
+    if game_state =? STATE_TITLE {
+        engine_freq = 28 + ((frame_count // 2) % 26)
+    } else if start_timer >? 0 {
+        engine_freq = 18 + (((150 - start_timer) * 28) // 150)
+    }
+    let i:int = 0
+    loop i <? AUDIO_SAMPLES {
+        engine_phase += engine_freq
+        let sample:int = (sin256(engine_phase) * 56) + ((sin256((engine_phase * 2) + 128) * 18) // 1)
+        if fx_timer >? 0 {
+            fx_phase += fx_freq
+            sample += sin256(fx_phase) * 36
+            fx_timer -= 1
+        }
+        __store_u16__(sample audio_buf + (i * 2))
+        i += 1
+    }
+    SDL_PutAudioStreamData(stream audio_buf AUDIO_BYTES)
+    return 0
+}
+
+let init_track = ():>void => {
+    track_cx = __static_alloca__(TRACK_BYTES)
+    track_cy = __static_alloca__(TRACK_BYTES)
+    track_cz = __static_alloca__(TRACK_BYTES)
+    track_rx = __static_alloca__(TRACK_BYTES)
+    track_ry = __static_alloca__(TRACK_BYTES)
+    track_rz = __static_alloca__(TRACK_BYTES)
+    track_ux = __static_alloca__(TRACK_BYTES)
+    track_uy = __static_alloca__(TRACK_BYTES)
+    track_uz = __static_alloca__(TRACK_BYTES)
+    track_roll = __static_alloca__(TRACK_BYTES)
+    let i:int = 0
+    loop i <? TRACK_SAMPLES {
+        let a:int = (i * 1024) // TRACK_SAMPLES
+        let radius:int = 900 + ((sin256((a * 2) + 64) * 180) // 256) + ((sin256((a * 5) + 200) * 90) // 256)
+        let x:int = (cos256(a) * radius) // 256
+        let z:int = (sin256(a) * radius) // 256
+        let y:int = 70 + ((sin256(a - 100) * 200) // 256) + ((sin256((a * 3) + 320) * 84) // 256)
+        let bank:int = ((sin256((a * 2) + 160) * 52) // 256) + ((sin256((a * 5) + 64) * 18) // 256)
+        let twist:int = 0
+        if (a >=? 224) and (a <? 352) {
+            twist = ((a - 224) * 1024) // 128
+        } else if (a >=? 352) and (a <? 480) {
+            twist = 1024 - (((a - 352) * 1024) // 128)
+        }
+        let roll:int = bank + twist
+        let roll_s:int = sin256(roll)
+        let roll_c:int = cos256(roll)
+        let radial_x:int = cos256(a)
+        let radial_z:int = sin256(a)
+        store_arr(track_cx i x)
+        store_arr(track_cy i y)
+        store_arr(track_cz i z)
+        # Mirror the track cross-section so the visible road surface stays upright on screen.
+        store_arr(track_rx i (0 - ((radial_x * roll_c) // 256)))
+        store_arr(track_ry i (0 - roll_s))
+        store_arr(track_rz i (0 - ((radial_z * roll_c) // 256)))
+        store_arr(track_ux i ((radial_x * roll_s) // 256))
+        store_arr(track_uy i (0 - roll_c))
+        store_arr(track_uz i ((radial_z * roll_s) // 256))
+        store_arr(track_roll i roll)
+        i += 1
+    }
+    return 0
+}
+
+let reset_race = ():>void => {
+    player_progress_fp = START_PROGRESS_FP
+    player_speed_fp = 0
+    player_lane = 0
+    player_lane_vel = 0
+    player_lap = 0
+    player_roll_bias = 0
+    player_scrape = 0
+    player_rank = 1
+    result_rank = 1
+    finish_timer = 0
+    start_timer = 150
+    camera_ready = 0
+    let i:int = 0
+    loop i <? CPU_COUNT {
+        store_arr(cpu_progress_fp i wrap_progress(START_PROGRESS_FP + ((i + 1) * 1500)))
+        store_arr(cpu_speed_fp i 0)
+        store_arr(cpu_lane i ((i * 80) - 120))
+        store_arr(cpu_lane_vel i 0)
+        store_arr(cpu_lap i 0)
+        i += 1
+    }
+    play_fx(64 2800)
+    return 0
+}
+
+let update_input = (keyboard:int):>void => {
+    let prev_confirm:int = key_confirm
+    let prev_back:int = key_back
+    key_left = SDL_ScancodeDown(keyboard SDL_SCANCODE_A) or SDL_ScancodeDown(keyboard SDL_SCANCODE_LEFT)
+    key_right = SDL_ScancodeDown(keyboard SDL_SCANCODE_D) or SDL_ScancodeDown(keyboard SDL_SCANCODE_RIGHT)
+    key_up = SDL_ScancodeDown(keyboard SDL_SCANCODE_W) or SDL_ScancodeDown(keyboard SDL_SCANCODE_UP)
+    key_down = SDL_ScancodeDown(keyboard SDL_SCANCODE_S) or SDL_ScancodeDown(keyboard SDL_SCANCODE_DOWN)
+    key_confirm = SDL_ScancodeDown(keyboard SDL_SCANCODE_SPACE) or SDL_ScancodeDown(keyboard SDL_SCANCODE_RETURN)
+    key_back = SDL_ScancodeDown(keyboard SDL_SCANCODE_ESCAPE)
+    press_confirm = (key_confirm not=? 0) and (prev_confirm =? 0)
+    press_back = (key_back not=? 0) and (prev_back =? 0)
+    return 0
+}
+
+let racer_total = (lap:int progress:int):>int => {
+    return (lap * TRACK_TOTAL_FP) + progress
+}
+
+let update_rank = ():>void => {
+    let rank:int = 1
+    let player_total:int = racer_total(player_lap player_progress_fp)
+    let i:int = 0
+    loop i <? CPU_COUNT {
+        let cpu_total:int = racer_total(load_arr(cpu_lap i) load_arr(cpu_progress_fp i))
+        if cpu_total >? player_total {
+            rank += 1
+        }
+        i += 1
+    }
+    player_rank = rank
+    return 0
+}
+
+let update_cpus = ():>void => {
+    let i:int = 0
+    loop i <? CPU_COUNT {
+        let progress:int = load_arr(cpu_progress_fp i)
+        let speed:int = load_arr(cpu_speed_fp i)
+        let lane:int = load_arr(cpu_lane i)
+        let lane_vel:int = load_arr(cpu_lane_vel i)
+        let lap:int = load_arr(cpu_lap i)
+        let phase:int = (((progress >> FP_SHIFT) * 1024) // TRACK_SAMPLES) + (i * 141) + (frame_count * 2)
+        let lane_target:int = (sin256(phase) * 110) // 256
+        lane_vel += (lane_target - lane) // 18
+        lane_vel -= lane_vel // 7
+        lane_vel = clamp_i(lane_vel (0 - 48) 48)
+        lane += lane_vel // 5
+        lane = clamp_i(lane (0 - 124) 124)
+        let target_speed:int = 126 + (i * 9) + ((sin256(phase + 200) * 12) // 256)
+        if start_timer >? 0 {
+            target_speed = 0
+        }
+        if speed <? target_speed {
+            speed += 2 + (i and 1)
+        } else if speed >? target_speed {
+            speed -= 2
+        }
+        progress += speed
+        if progress >=? TRACK_TOTAL_FP {
+            progress -= TRACK_TOTAL_FP
+            lap += 1
+        }
+        store_arr(cpu_progress_fp i progress)
+        store_arr(cpu_speed_fp i speed)
+        store_arr(cpu_lane i lane)
+        store_arr(cpu_lane_vel i lane_vel)
+        store_arr(cpu_lap i lap)
+        i += 1
+    }
+    return 0
+}
+
+let update_player = ():>void => {
+    if start_timer >? 0 {
+        start_timer -= 1
+        if start_timer =? 100 {
+            play_fx(96 1800)
+        }
+        if start_timer =? 50 {
+            play_fx(128 1800)
+        }
+        if start_timer =? 1 {
+            play_fx(220 2600)
+        }
+        return 0
+    }
+    let sample_idx:int = player_progress_fp >> FP_SHIFT
+    let a:int = (sample_idx * 1024) // TRACK_SAMPLES
+    let curve_pull:int = (sin256((a * 2) + 160) * player_speed_fp) // 2048
+    if key_up not=? 0 {
+        player_speed_fp += 3
+    } else {
+        player_speed_fp -= 1
+    }
+    if key_down not=? 0 {
+        player_speed_fp -= 5
+    }
+    if key_left not=? 0 {
+        player_lane_vel -= 7 + (player_speed_fp // 48)
+        player_roll_bias -= 8
+    }
+    if key_right not=? 0 {
+        player_lane_vel += 7 + (player_speed_fp // 48)
+        player_roll_bias += 8
+    }
+    player_lane_vel += curve_pull
+    player_lane_vel -= player_lane_vel // 12
+    player_lane += player_lane_vel // 6
+    player_lane = clamp_i(player_lane (0 - 200) 200)
+    player_roll_bias -= player_roll_bias // 7
+    let grip_drag:int = abs_i(player_lane_vel) // 18
+    let target_max:int = 182 - grip_drag
+    if abs_i(player_lane) >? 126 {
+        target_max -= 26
+        player_scrape = 10
+        player_speed_fp -= 7
+    } else if player_scrape >? 0 {
+        player_scrape -= 1
+    }
+    if player_speed_fp >? target_max {
+        player_speed_fp -= 3
+    }
+    player_speed_fp = clamp_i(player_speed_fp 0 188)
+    player_progress_fp += player_speed_fp
+    if player_progress_fp >=? TRACK_TOTAL_FP {
+        player_progress_fp -= TRACK_TOTAL_FP
+        player_lap += 1
+        if player_lap <? TOTAL_LAPS {
+            play_fx(250 2600)
+        }
+    }
+    return 0
+}
+
+let player_finish_check = ():>void => {
+    if player_lap >=? TOTAL_LAPS {
+        result_rank = player_rank
+        game_state = STATE_FINISH
+        finish_timer = 0
+        play_fx(180 4000)
+    }
+    return 0
+}
+
+let draw_track = ():>void => {
+    let i:int = 0
+    loop i <? TRACK_SAMPLES {
+        let next:int = i + 1
+        if next >=? TRACK_SAMPLES {
+            next = 0
+        }
+        let cx0:int = load_arr(track_cx i)
+        let cy0:int = load_arr(track_cy i)
+        let cz0:int = load_arr(track_cz i)
+        let cx1:int = load_arr(track_cx next)
+        let cy1:int = load_arr(track_cy next)
+        let cz1:int = load_arr(track_cz next)
+        let rx0:int = load_arr(track_rx i)
+        let ry0:int = load_arr(track_ry i)
+        let rz0:int = load_arr(track_rz i)
+        let rx1:int = load_arr(track_rx next)
+        let ry1:int = load_arr(track_ry next)
+        let rz1:int = load_arr(track_rz next)
+        let ux0:int = load_arr(track_ux i)
+        let uy0:int = load_arr(track_uy i)
+        let uz0:int = load_arr(track_uz i)
+        let ux1:int = load_arr(track_ux next)
+        let uy1:int = load_arr(track_uy next)
+        let uz1:int = load_arr(track_uz next)
+
+        let left0_x:int = cx0 - ((rx0 * TRACK_HALF_WIDTH) // 256)
+        let left0_y:int = cy0 - ((ry0 * TRACK_HALF_WIDTH) // 256)
+        let left0_z:int = cz0 - ((rz0 * TRACK_HALF_WIDTH) // 256)
+        let right0_x:int = cx0 + ((rx0 * TRACK_HALF_WIDTH) // 256)
+        let right0_y:int = cy0 + ((ry0 * TRACK_HALF_WIDTH) // 256)
+        let right0_z:int = cz0 + ((rz0 * TRACK_HALF_WIDTH) // 256)
+
+        let left1_x:int = cx1 - ((rx1 * TRACK_HALF_WIDTH) // 256)
+        let left1_y:int = cy1 - ((ry1 * TRACK_HALF_WIDTH) // 256)
+        let left1_z:int = cz1 - ((rz1 * TRACK_HALF_WIDTH) // 256)
+        let right1_x:int = cx1 + ((rx1 * TRACK_HALF_WIDTH) // 256)
+        let right1_y:int = cy1 + ((ry1 * TRACK_HALF_WIDTH) // 256)
+        let right1_z:int = cz1 + ((rz1 * TRACK_HALF_WIDTH) // 256)
+
+        let left0_top_x:int = left0_x + ((ux0 * TRACK_WALL_HEIGHT) // 256)
+        let left0_top_y:int = left0_y + ((uy0 * TRACK_WALL_HEIGHT) // 256)
+        let left0_top_z:int = left0_z + ((uz0 * TRACK_WALL_HEIGHT) // 256)
+        let left1_top_x:int = left1_x + ((ux1 * TRACK_WALL_HEIGHT) // 256)
+        let left1_top_y:int = left1_y + ((uy1 * TRACK_WALL_HEIGHT) // 256)
+        let left1_top_z:int = left1_z + ((uz1 * TRACK_WALL_HEIGHT) // 256)
+
+        let right0_top_x:int = right0_x + ((ux0 * TRACK_WALL_HEIGHT) // 256)
+        let right0_top_y:int = right0_y + ((uy0 * TRACK_WALL_HEIGHT) // 256)
+        let right0_top_z:int = right0_z + ((uz0 * TRACK_WALL_HEIGHT) // 256)
+        let right1_top_x:int = right1_x + ((ux1 * TRACK_WALL_HEIGHT) // 256)
+        let right1_top_y:int = right1_y + ((uy1 * TRACK_WALL_HEIGHT) // 256)
+        let right1_top_z:int = right1_z + ((uz1 * TRACK_WALL_HEIGHT) // 256)
+
+        let road_r:int = F32_POINT_TWO
+        let road_g:int = F32_POINT_THREE
+        let road_b:int = F32_POINT_SIX
+        if (i % 20) <? 10 {
+            road_r = F32_QUARTER
+            road_g = F32_POINT_THREE
+            road_b = F32_POINT_EIGHT
+        }
+        quad3(left0_x left0_y left0_z right0_x right0_y right0_z right1_x right1_y right1_z left1_x left1_y left1_z road_r road_g road_b)
+
+        if (i % 16) <? 8 {
+            let lane_half:int = 10
+            let center0_left_x:int = cx0 - ((rx0 * lane_half) // 256)
+            let center0_left_y:int = cy0 - ((ry0 * lane_half) // 256)
+            let center0_left_z:int = cz0 - ((rz0 * lane_half) // 256)
+            let center0_right_x:int = cx0 + ((rx0 * lane_half) // 256)
+            let center0_right_y:int = cy0 + ((ry0 * lane_half) // 256)
+            let center0_right_z:int = cz0 + ((rz0 * lane_half) // 256)
+            let center1_left_x:int = cx1 - ((rx1 * lane_half) // 256)
+            let center1_left_y:int = cy1 - ((ry1 * lane_half) // 256)
+            let center1_left_z:int = cz1 - ((rz1 * lane_half) // 256)
+            let center1_right_x:int = cx1 + ((rx1 * lane_half) // 256)
+            let center1_right_y:int = cy1 + ((ry1 * lane_half) // 256)
+            let center1_right_z:int = cz1 + ((rz1 * lane_half) // 256)
+            quad3(center0_left_x center0_left_y center0_left_z center0_right_x center0_right_y center0_right_z center1_right_x center1_right_y center1_right_z center1_left_x center1_left_y center1_left_z F32_ONE F32_ONE F32_ONE)
+        }
+
+        quad3(left0_x left0_y left0_z left0_top_x left0_top_y left0_top_z left1_top_x left1_top_y left1_top_z left1_x left1_y left1_z F32_POINT_EIGHT F32_POINT_TWO F32_POINT_NINE)
+        quad3(right0_x right0_y right0_z right1_x right1_y right1_z right1_top_x right1_top_y right1_top_z right0_top_x right0_top_y right0_top_z F32_POINT_EIGHT F32_POINT_TWO F32_POINT_NINE)
+        quad3(left0_top_x left0_top_y left0_top_z right0_top_x right0_top_y right0_top_z right1_top_x right1_top_y right1_top_z left1_top_x left1_top_y left1_top_z F32_POINT_THREE F32_POINT_TWO F32_POINT_THREE)
+        i += 1
+    }
+    return 0
+}
+
+let draw_craft = (progress:int lane:int lift:int body_r:int body_g:int body_b:int glow_r:int glow_g:int glow_b:int):>void => {
+    sample_track_point(progress lane (0 - lift) scratch_a)
+    sample_forward(progress scratch_b)
+    let fx:int = __load__(scratch_b + 0)
+    let fy:int = __load__(scratch_b + 8)
+    let fz:int = __load__(scratch_b + 16)
+    let rx:int = interp_track(track_rx progress)
+    let ry:int = interp_track(track_ry progress)
+    let rz:int = interp_track(track_rz progress)
+    let ux:int = 0 - interp_track(track_ux progress)
+    let uy:int = 0 - interp_track(track_uy progress)
+    let uz:int = 0 - interp_track(track_uz progress)
+    let cx:int = __load__(scratch_a + 0)
+    let cy:int = __load__(scratch_a + 8)
+    let cz:int = __load__(scratch_a + 16)
+
+    let nose_x:int = cx + ((fx * 34) // 256) + ((ux * 4) // 256)
+    let nose_y:int = cy + ((fy * 34) // 256) + ((uy * 4) // 256)
+    let nose_z:int = cz + ((fz * 34) // 256) + ((uz * 4) // 256)
+
+    let tail_x:int = cx - ((fx * 24) // 256)
+    let tail_y:int = cy - ((fy * 24) // 256)
+    let tail_z:int = cz - ((fz * 24) // 256)
+
+    let canopy_x:int = cx + ((ux * 14) // 256)
+    let canopy_y:int = cy + ((uy * 14) // 256)
+    let canopy_z:int = cz + ((uz * 14) // 256)
+
+    let left_x:int = cx - ((rx * 22) // 256) - ((fx * 10) // 256)
+    let left_y:int = cy - ((ry * 22) // 256) - ((fy * 10) // 256)
+    let left_z:int = cz - ((rz * 22) // 256) - ((fz * 10) // 256)
+
+    let right_x:int = cx + ((rx * 22) // 256) - ((fx * 10) // 256)
+    let right_y:int = cy + ((ry * 22) // 256) - ((fy * 10) // 256)
+    let right_z:int = cz + ((rz * 22) // 256) - ((fz * 10) // 256)
+
+    let left_tail_x:int = tail_x - ((rx * 12) // 256)
+    let left_tail_y:int = tail_y - ((ry * 12) // 256)
+    let left_tail_z:int = tail_z - ((rz * 12) // 256)
+
+    let right_tail_x:int = tail_x + ((rx * 12) // 256)
+    let right_tail_y:int = tail_y + ((ry * 12) // 256)
+    let right_tail_z:int = tail_z + ((rz * 12) // 256)
+
+    tri3(nose_x nose_y nose_z left_x left_y left_z canopy_x canopy_y canopy_z glow_r glow_g glow_b)
+    tri3(nose_x nose_y nose_z canopy_x canopy_y canopy_z right_x right_y right_z glow_r glow_g glow_b)
+    tri3(left_x left_y left_z left_tail_x left_tail_y left_tail_z tail_x tail_y tail_z body_r body_g body_b)
+    tri3(right_x right_y right_z tail_x tail_y tail_z right_tail_x right_tail_y right_tail_z body_r body_g body_b)
+    tri3(left_x left_y left_z tail_x tail_y tail_z right_x right_y right_z body_r body_g body_b)
+    return 0
+}
+
+let cpu_body_r = (idx:int):>int => {
+    if idx =? 0 {
+        return F32_POINT_EIGHT
+    }
+    if idx =? 1 {
+        return F32_POINT_TWO
+    }
+    if idx =? 2 {
+        return F32_ONE
+    }
+    return F32_POINT_NINE
+}
+
+let cpu_body_g = (idx:int):>int => {
+    if idx =? 0 {
+        return F32_POINT_THREE
+    }
+    if idx =? 1 {
+        return F32_POINT_EIGHT
+    }
+    if idx =? 2 {
+        return F32_POINT_EIGHT
+    }
+    return F32_POINT_NINE
+}
+
+let cpu_body_b = (idx:int):>int => {
+    if idx =? 0 {
+        return F32_POINT_TWO
+    }
+    if idx =? 1 {
+        return F32_POINT_THREE
+    }
+    if idx =? 2 {
+        return F32_POINT_TWO
+    }
+    return F32_POINT_THREE
+}
+
+let cpu_glow_r = (idx:int):>int => {
+    if idx =? 0 {
+        return F32_ONE
+    }
+    if idx =? 1 {
+        return F32_POINT_SIX
+    }
+    if idx =? 2 {
+        return F32_ONE
+    }
+    return F32_ONE
+}
+
+let cpu_glow_g = (idx:int):>int => {
+    if idx =? 0 {
+        return F32_POINT_SIX
+    }
+    if idx =? 1 {
+        return F32_ONE
+    }
+    if idx =? 2 {
+        return F32_POINT_NINE
+    }
+    return F32_POINT_EIGHT
+}
+
+let cpu_glow_b = (idx:int):>int => {
+    if idx =? 0 {
+        return F32_HALF
+    }
+    if idx =? 1 {
+        return F32_POINT_SIX
+    }
+    if idx =? 2 {
+        return F32_POINT_FIVE
+    }
+    return F32_POINT_TWO
+}
+
+let draw_racers = ():>void => {
+    let i:int = 0
+    loop i <? CPU_COUNT {
+        draw_craft(load_arr(cpu_progress_fp i) load_arr(cpu_lane i) HOVER_HEIGHT cpu_body_r(i) cpu_body_g(i) cpu_body_b(i) cpu_glow_r(i) cpu_glow_g(i) cpu_glow_b(i))
+        i += 1
+    }
+    let player_glow:int = F32_POINT_EIGHT
+    if player_scrape >? 0 {
+        player_glow = F32_ONE
+    }
+    draw_craft(player_progress_fp player_lane HOVER_HEIGHT F32_POINT_TWO F32_POINT_THREE F32_POINT_EIGHT player_glow player_glow F32_ONE)
+    return 0
+}
+
+let set_perspective = ():>void => {
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    GL_Frustum(F64_NEG_FOUR F64_FOUR F64_NEG_TWO F64_TWO F64_FIVE F64_TWO_THOUSAND)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    return 0
+}
+
+let set_overlay = (screen_w:int screen_h:int):>void => {
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    GL_Ortho(F64_ZERO GL_F64_FromInt(screen_w) GL_F64_FromInt(screen_h) F64_ZERO F64_NEG_ONE F64_ONE)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    return 0
+}
+
+let apply_camera = (progress:int lane:int):>void => {
+    sample_track_point(progress lane (0 - HOVER_HEIGHT) scratch_c)
+    sample_forward(progress scratch_d)
+    let focus_x:int = __load__(scratch_c + 0)
+    let focus_y:int = __load__(scratch_c + 8)
+    let focus_z:int = __load__(scratch_c + 16)
+    let fx:int = __load__(scratch_d + 0)
+    let fy:int = __load__(scratch_d + 8)
+    let fz:int = __load__(scratch_d + 16)
+    let desired_x:int = focus_x - ((fx * (CAMERA_BACK_SAMPLES * 28)) // 256)
+    let desired_y:int = focus_y + 62 - ((fy * 8) // 256)
+    let desired_z:int = focus_z - ((fz * (CAMERA_BACK_SAMPLES * 28)) // 256)
+    if camera_ready =? 0 {
+        camera_x = desired_x
+        camera_y = desired_y
+        camera_z = desired_z
+        camera_ready = 1
+    } else {
+        camera_x += (desired_x - camera_x) // 4
+        camera_y += (desired_y - camera_y) // 4
+        camera_z += (desired_z - camera_z) // 4
+    }
+    let look_x:int = focus_x + ((fx * (CAMERA_LOOK_SAMPLES * 12)) // 256)
+    let look_y:int = focus_y + 6 + ((fy * 24) // 256)
+    let look_z:int = focus_z + ((fz * (CAMERA_LOOK_SAMPLES * 12)) // 256)
+    let dx:int = look_x - camera_x
+    let dy:int = look_y - camera_y
+    let dz:int = look_z - camera_z
+    let horizontal:int = isqrt((dx * dx) + (dz * dz))
+    let yaw_units:int = dir_yaw_units(dx dz)
+    let pitch_units:int = dir_pitch_units(horizontal dy)
+    let yaw_deg:int = (yaw_units * 360) // 1024
+    let pitch_deg:int = (pitch_units * 360) // 1024
+    let roll_deg:int = player_roll_bias // 18
+    GL_Rotatef(GL_F32_FromInt(0 - roll_deg) F32_ZERO F32_ZERO F32_ONE)
+    GL_Rotatef(GL_F32_FromInt(0 - pitch_deg) F32_ONE F32_ZERO F32_ZERO)
+    GL_Rotatef(GL_F32_FromInt(0 - yaw_deg) F32_ZERO F32_ONE F32_ZERO)
+    GL_Translatef(GL_F32_FromInt(0 - camera_x) GL_F32_FromInt(0 - camera_y) GL_F32_FromInt(0 - camera_z))
+    return 0
+}
+
+let draw_minimap = (screen_w:int screen_h:int):>void => {
+    let panel_x:int = screen_w - 238
+    let panel_y:int = 20
+    let panel_w:int = 208
+    let panel_h:int = 150
+    bar2(panel_x panel_y panel_w panel_h F32_POINT_TWO F32_POINT_TWO F32_POINT_THREE)
+    bar2(panel_x + 4 panel_y + 4 (panel_w - 8) (panel_h - 8) F32_ZERO F32_ZERO F32_ZERO)
+    let i:int = 0
+    loop i <? TRACK_SAMPLES {
+        let map_x:int = panel_x + 14 + (((load_arr(track_cx i) + TRACK_MAP_RANGE) * (panel_w - 28)) // (TRACK_MAP_RANGE * 2))
+        let map_y:int = panel_y + 14 + (((load_arr(track_cz i) + TRACK_MAP_RANGE) * (panel_h - 28)) // (TRACK_MAP_RANGE * 2))
+        bar2(map_x map_y 3 3 F32_POINT_SIX F32_POINT_EIGHT F32_ONE)
+        i += 4
+    }
+    let player_sample:int = player_progress_fp >> FP_SHIFT
+    let player_x:int = panel_x + 12 + (((load_arr(track_cx player_sample) + TRACK_MAP_RANGE) * (panel_w - 24)) // (TRACK_MAP_RANGE * 2))
+    let player_y:int = panel_y + 12 + (((load_arr(track_cz player_sample) + TRACK_MAP_RANGE) * (panel_h - 24)) // (TRACK_MAP_RANGE * 2))
+    bar2(player_x - 3 player_y - 3 7 7 F32_ONE F32_ONE F32_ONE)
+    i = 0
+    loop i <? CPU_COUNT {
+        let cpu_sample:int = load_arr(cpu_progress_fp i) >> FP_SHIFT
+        let cpu_x:int = panel_x + 12 + (((load_arr(track_cx cpu_sample) + TRACK_MAP_RANGE) * (panel_w - 24)) // (TRACK_MAP_RANGE * 2))
+        let cpu_y:int = panel_y + 12 + (((load_arr(track_cz cpu_sample) + TRACK_MAP_RANGE) * (panel_h - 24)) // (TRACK_MAP_RANGE * 2))
+        bar2(cpu_x - 2 cpu_y - 2 5 5 cpu_body_r(i) cpu_body_g(i) cpu_body_b(i))
+        i += 1
+    }
+    return 0
+}
+
+let draw_hud = (screen_w:int screen_h:int):>void => {
+    bar2(16 16 200 88 F32_POINT_TWO F32_POINT_TWO F32_POINT_THREE)
+    draw_word_rank(30 28 3 F32_POINT_EIGHT F32_POINT_EIGHT F32_ONE)
+    draw_number(player_rank 1 34 56 4 F32_ONE F32_ONE F32_ONE)
+    draw_number(RACER_COUNT 1 82 56 4 F32_POINT_EIGHT F32_POINT_EIGHT F32_ONE)
+    bar2(68 70 10 4 F32_ONE F32_ONE F32_ONE)
+
+    draw_word_lap(134 28 3 F32_POINT_EIGHT F32_POINT_EIGHT F32_ONE)
+    draw_number((player_lap + 1) 1 136 56 4 F32_ONE F32_ONE F32_ONE)
+    draw_number(TOTAL_LAPS 1 184 56 4 F32_POINT_EIGHT F32_POINT_EIGHT F32_ONE)
+    bar2(170 70 10 4 F32_ONE F32_ONE F32_ONE)
+
+    bar2(16 (screen_h - 96) 256 72 F32_POINT_TWO F32_POINT_TWO F32_POINT_THREE)
+    draw_word_speed(30 (screen_h - 84) 3 F32_POINT_EIGHT F32_POINT_EIGHT F32_ONE)
+    draw_number(player_speed_fp * 10 4 36 (screen_h - 56) 4 F32_ONE F32_ONE F32_ONE)
+    draw_minimap(screen_w screen_h)
+
+    if start_timer >? 0 {
+        let pulse:int = (start_timer // 8) % 2
+        if pulse =? 0 {
+            glPushMatrix()
+            GL_Translatef(GL_F32_FromInt((screen_w // 2) - 60) GL_F32_FromInt((screen_h // 2) - 30) F32_ZERO)
+            GL_Scalef(F32_THREE_QUARTER F32_THREE_QUARTER F32_ONE)
+            if start_timer >? 50 {
+                draw_number((start_timer // 50) + 1 1 0 0 12 F32_ONE F32_POINT_EIGHT F32_ONE)
+            } else {
+                draw_word_go(0 0 12 F32_ONE F32_ONE F32_ONE)
+            }
+            glPopMatrix()
+        }
+    }
+    return 0
+}
+
+let draw_finish_overlay = (screen_w:int screen_h:int):>void => {
+    bar2((screen_w // 2) - 220 (screen_h // 2) - 120 440 240 F32_POINT_TWO F32_POINT_TWO F32_POINT_THREE)
+    glPushMatrix()
+    GL_Translatef(GL_F32_FromInt((screen_w // 2) - 150) GL_F32_FromInt((screen_h // 2) - 86) F32_ZERO)
+    GL_Scalef(F32_THREE_QUARTER F32_THREE_QUARTER F32_ONE)
+    draw_word_finish(0 0 10 F32_ONE F32_POINT_EIGHT F32_ONE)
+    glPopMatrix()
+    draw_word_rank((screen_w // 2) - 84 (screen_h // 2) - 8 4 F32_POINT_EIGHT F32_POINT_EIGHT F32_ONE)
+    draw_number(result_rank 1 (screen_w // 2) + 28 (screen_h // 2) - 6 6 F32_ONE F32_ONE F32_ONE)
+    draw_word_space((screen_w // 2) - 76 (screen_h // 2) + 60 3 F32_POINT_EIGHT F32_POINT_EIGHT F32_ONE)
+    return 0
+}
+
+let draw_title_overlay = (screen_w:int screen_h:int):>void => {
+    bar2(0 0 screen_w screen_h F32_ZERO F32_ZERO F32_ZERO)
+    glPushMatrix()
+    GL_Translatef(GL_F32_FromInt((screen_w // 2) - 220) GL_F32_FromInt(80) F32_ZERO)
+    GL_Scalef(F32_ONE F32_ONE F32_ONE)
+    draw_word_muzero(0 0 14 F32_ONE F32_POINT_EIGHT F32_ONE)
+    glPopMatrix()
+    draw_word_space((screen_w // 2) - 78 (screen_h - 110) 4 F32_POINT_EIGHT F32_POINT_EIGHT F32_ONE)
+    draw_word_speed((screen_w // 2) - 76 (screen_h - 62) 3 F32_POINT_SIX F32_POINT_EIGHT F32_ONE)
+    draw_number(999 3 (screen_w // 2) + 48 (screen_h - 64) 3 F32_ONE F32_ONE F32_ONE)
+    return 0
+}
+
+let draw_world = ():>void => {
+    draw_track()
+    draw_racers()
+    return 0
+}
+
+let render_scene = (screen_w:int screen_h:int):>void => {
+    glViewport(0 0 screen_w screen_h)
+    GL_ClearColor(F32_ZERO F32_ZERO F32_POINT_TWO F32_ONE)
+    glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+    glEnable(GL_DEPTH_TEST)
+    set_perspective()
+    if game_state =? STATE_TITLE {
+        apply_camera((frame_count * 72) % TRACK_TOTAL_FP 0)
+    } else {
+        apply_camera(player_progress_fp player_lane)
+    }
+    draw_world()
+
+    glDisable(GL_DEPTH_TEST)
+    set_overlay(screen_w screen_h)
+    if game_state =? STATE_TITLE {
+        draw_title_overlay(screen_w screen_h)
+    } else {
+        draw_hud(screen_w screen_h)
+        if game_state =? STATE_FINISH {
+            draw_finish_overlay(screen_w screen_h)
+        }
+    }
+    glEnable(GL_DEPTH_TEST)
+    return 0
+}
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO + SDL_INIT_AUDIO) =? 0 {
+        return 1
+    }
+
+    if SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1) =? 0 {
+        SDL_Quit()
+        return 2
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE 24) =? 0 {
+        SDL_Quit()
+        return 3
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION 2) =? 0 {
+        SDL_Quit()
+        return 4
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION 1) =? 0 {
+        SDL_Quit()
+        return 5
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK SDL_GL_CONTEXT_PROFILE_COMPATIBILITY) =? 0 {
+        SDL_Quit()
+        return 6
+    }
+
+    let title:int = "muZero\0"
+    let window:int = SDL_CreateWindow(title 1280 720 SDL_WINDOW_OPENGL + SDL_WINDOW_RESIZABLE)
+    if window =? 0 {
+        SDL_Quit()
+        return 7
+    }
+    SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)
+
+    let gl_context:int = SDL_GL_CreateContext(window)
+    if gl_context =? 0 {
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 8
+    }
+    if SDL_GL_MakeCurrent(window gl_context) =? 0 {
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 9
+    }
+    SDL_GL_SetSwapInterval(1)
+
+    let spec:int = __static_alloca__(SDL_AUDIO_SPEC_SIZE)
+    SDL_SetAudioSpec(spec SDL_AUDIO_S16LE 1 44100)
+    audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK spec 0 0)
+    if audio_stream not=? 0 {
+        SDL_ResumeAudioStreamDevice(audio_stream)
+    }
+    audio_buf = __static_alloca__(AUDIO_BYTES)
+
+    cpu_progress_fp = __static_alloca__(CPU_BYTES)
+    cpu_speed_fp = __static_alloca__(CPU_BYTES)
+    cpu_lane = __static_alloca__(CPU_BYTES)
+    cpu_lane_vel = __static_alloca__(CPU_BYTES)
+    cpu_lap = __static_alloca__(CPU_BYTES)
+
+    scratch_a = __static_alloca__(24)
+    scratch_b = __static_alloca__(24)
+    scratch_c = __static_alloca__(24)
+    scratch_d = __static_alloca__(24)
+    scratch_e = __static_alloca__(24)
+    scratch_f = __static_alloca__(24)
+
+    init_track()
+    reset_race()
+    game_state = STATE_TITLE
+
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let size:int = __static_alloca__(8)
+    let running:int = 1
+
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDisable(GL_CULL_FACE)
+
+    loop running not=? 0 {
+        let has_event:int = SDL_PollEvent(event)
+        loop has_event not=? 0 {
+            if SDL_EventType(event) =? SDL_EVENT_QUIT {
+                running = 0
+            }
+            has_event = SDL_PollEvent(event)
+        }
+
+        let keyboard:int = SDL_GetKeyboardState(0)
+        update_input(keyboard)
+
+        if press_back not=? 0 {
+            if game_state =? STATE_TITLE {
+                running = 0
+            } else {
+                game_state = STATE_TITLE
+                play_fx(96 1800)
+            }
+        }
+
+        if game_state =? STATE_TITLE {
+            if press_confirm not=? 0 {
+                reset_race()
+                game_state = STATE_RACE
+            }
+        } else if game_state =? STATE_RACE {
+            update_player()
+            update_cpus()
+            update_rank()
+            player_finish_check()
+        } else if game_state =? STATE_FINISH {
+            finish_timer += 1
+            if press_confirm not=? 0 {
+                game_state = STATE_TITLE
+                play_fx(96 1800)
+            }
+        }
+
+        fill_audio(audio_stream)
+
+        SDL_GetWindowSizeInPixels(window size size + 4)
+        render_scene(__load_u32__(size) __load_u32__(size + 4))
+        SDL_GL_SwapWindow(window)
+        SDL_Delay(16)
+        frame_count += 1
+    }
+
+    if audio_stream not=? 0 {
+        SDL_DestroyAudioStream(audio_stream)
+    }
+    SDL_GL_DestroyContext(gl_context)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}

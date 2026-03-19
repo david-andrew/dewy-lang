@@ -1,0 +1,181 @@
+import p"../third_party/sdl/sdl.udewy"
+
+# Native SDL audio proof. Press A/Left for a low tone and D/Right for a high tone.
+
+const SAMPLE_RATE:int = 44100
+const TONE_SAMPLES:int = 11025
+const TONE_BYTES:int = 22050
+
+let sin256 = (angle:int):>int => {
+    let a:int = angle % 1024
+    if a <? 0 {
+        a += 1024
+    }
+
+    let quad:int = a // 256
+    let x:int = a % 256
+    let y:int = 0
+    if quad =? 0 {
+        y = (x * (512 - x)) // 256
+    }
+    if quad =? 1 {
+        y = ((256 - x) * (256 + x)) // 256
+    }
+    if quad =? 2 {
+        y = 0 - ((x * (512 - x)) // 256)
+    }
+    if quad =? 3 {
+        y = 0 - (((256 - x) * (256 + x)) // 256)
+    }
+    return y
+}
+
+let fill_tone = (buf:int freq:int sparkle:int):>void => {
+    let i:int = 0
+    loop i <? TONE_SAMPLES {
+        let phase:int = (i * freq * 1024) // SAMPLE_RATE
+        let carrier:int = sin256(phase)
+        let overtone:int = sin256((phase * 3) + sparkle) // 4
+        let fade:int = 256 - ((i * 224) // TONE_SAMPLES)
+        if fade <? 32 {
+            fade = 32
+        }
+        let sample:int = ((carrier + overtone) * 64 * fade) // 256
+        __store_u16__(sample buf + (i * 2))
+        i += 1
+    }
+    return 0
+}
+
+let queue_tone = (stream:int buf:int freq:int sparkle:int):>void => {
+    fill_tone(buf freq sparkle)
+    SDL_ClearAudioStream(stream)
+    SDL_PutAudioStreamData(stream buf TONE_BYTES)
+    return 0
+}
+
+let set_rect = (rect:int x:int y:int w:int h:int):>void => {
+    __store_u32__(x rect)
+    __store_u32__(y rect + 4)
+    __store_u32__(w rect + 8)
+    __store_u32__(h rect + 12)
+    return 0
+}
+
+let draw_panel = (renderer:int rect:int x:int y:int w:int h:int r:int g:int b:int):>void => {
+    set_rect(rect x y w h)
+    SDL_SetRenderDrawColor(renderer r g b 255)
+    SDL_SetRenderViewport(renderer rect)
+    SDL_RenderFillRect(renderer 0)
+    return 0
+}
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO + SDL_INIT_AUDIO) =? 0 {
+        return 1
+    }
+
+    let title:int = "udewy sdl audio tones\0"
+    let window:int = SDL_CreateWindow(title 720 240 SDL_WINDOW_RESIZABLE)
+    if window =? 0 {
+        SDL_Quit()
+        return 2
+    }
+    SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)
+
+    let renderer:int = SDL_CreateRenderer(window 0)
+    if renderer =? 0 {
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 3
+    }
+
+    let spec:int = __static_alloca__(SDL_AUDIO_SPEC_SIZE)
+    SDL_SetAudioSpec(spec SDL_AUDIO_S16LE 1 SAMPLE_RATE)
+    let stream:int = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK spec 0 0)
+    if stream =? 0 {
+        SDL_DestroyRenderer(renderer)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 4
+    }
+    if SDL_ResumeAudioStreamDevice(stream) =? 0 {
+        SDL_DestroyAudioStream(stream)
+        SDL_DestroyRenderer(renderer)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 5
+    }
+
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let rect:int = __static_alloca__(16)
+    let size:int = __static_alloca__(8)
+    let audio_buf:int = __static_alloca__(TONE_BYTES)
+    let prev_left:int = 0
+    let prev_right:int = 0
+    let pulse_left:int = 12
+    let pulse_right:int = 0
+    let running:int = 1
+
+    queue_tone(stream audio_buf 220 0)
+
+    loop running not=? 0 {
+        let has_event:int = SDL_PollEvent(event)
+        loop has_event not=? 0 {
+            if SDL_EventType(event) =? SDL_EVENT_QUIT {
+                running = 0
+            }
+            has_event = SDL_PollEvent(event)
+        }
+
+        let keyboard:int = SDL_GetKeyboardState(0)
+        let left_down:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_A) or SDL_ScancodeDown(keyboard SDL_SCANCODE_LEFT)
+        let right_down:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_D) or SDL_ScancodeDown(keyboard SDL_SCANCODE_RIGHT)
+
+        if (left_down not=? 0) and (prev_left =? 0) {
+            queue_tone(stream audio_buf 220 0)
+            pulse_left = 12
+        }
+        if (right_down not=? 0) and (prev_right =? 0) {
+            queue_tone(stream audio_buf 440 192)
+            pulse_right = 12
+        }
+        prev_left = left_down
+        prev_right = right_down
+
+        if pulse_left >? 0 {
+            pulse_left -= 1
+        }
+        if pulse_right >? 0 {
+            pulse_right -= 1
+        }
+
+        SDL_GetCurrentRenderOutputSize(renderer size size + 4)
+        let width:int = __load_u32__(size)
+        let height:int = __load_u32__(size + 4)
+
+        SDL_SetRenderViewport(renderer 0)
+        SDL_SetRenderDrawColor(renderer 8 8 28 255)
+        SDL_RenderClear(renderer)
+
+        draw_panel(renderer rect (width // 8) (height // 4) (width // 3) (height // 2) (40 + (pulse_left * 12)) 120 255)
+        draw_panel(renderer rect ((width * 13) // 24) (height // 4) (width // 3) (height // 2) 255 (90 + (pulse_right * 10)) 80)
+
+        let queued:int = SDL_GetAudioStreamQueued(stream)
+        if queued >? 0 {
+            let meter_w:int = (queued * width) // TONE_BYTES
+            draw_panel(renderer rect 0 (height - 24) meter_w 24 255 255 255)
+        }
+
+        SDL_SetRenderViewport(renderer 0)
+        SDL_RenderPresent(renderer)
+        SDL_Delay(16)
+    }
+
+    SDL_DestroyAudioStream(stream)
+    SDL_DestroyRenderer(renderer)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}

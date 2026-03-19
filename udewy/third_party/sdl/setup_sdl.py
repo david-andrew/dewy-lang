@@ -8,6 +8,8 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
+from generate_udewy_icon import generate_icon_module
+
 
 RELEASE_API_URL = "https://api.github.com/repos/libsdl-org/SDL/releases/latest"
 USER_AGENT = "udewy-sdl-setup"
@@ -26,8 +28,10 @@ OPTIONAL_SHARED_PACKAGES = (
     "gbm",
     "libdrm",
 )
-BUNDLE_DIR_NAME = "SDL3-shared-bundle"
+BUNDLE_DIR_NAME = "artifacts"
 BUNDLE_LINK_NAME = "link.udewy"
+DEFAULT_ICON_MODULE_NAME = "default_window_icon.udewy"
+DEFAULT_ICON_SYMBOL_NAME = "SDL_DEFAULT_WINDOW_ICON_DATA"
 CMAKE_FLAGS = (
     "-DCMAKE_BUILD_TYPE=Release",
     "-DCMAKE_C_COMPILER=clang",
@@ -47,7 +51,7 @@ CMAKE_FLAGS = (
     "-DSDL_GPU=OFF",
     "-DSDL_RENDER=ON",
     "-DSDL_RENDER_VULKAN=OFF",
-    "-DSDL_AUDIO=OFF",
+    "-DSDL_AUDIO=ON",
     "-DSDL_JOYSTICK=OFF",
     "-DSDL_HAPTIC=OFF",
     "-DSDL_HIDAPI=OFF",
@@ -225,6 +229,16 @@ def pkg_config_libs(package: str, *, env: dict[str, str], static: bool) -> list[
     return shlex.split(output)
 
 
+def pkg_config_variable(package: str, variable: str, *, env: dict[str, str]) -> str:
+    return subprocess.run(
+        ["pkg-config", f"--variable={variable}", package],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
 def default_library_search_dirs() -> list[Path]:
     output = run_capture(["ld", "--verbose"])
     search_dirs: list[Path] = []
@@ -249,17 +263,17 @@ def resolve_shared_library_path(library_stem: str, search_dirs: list[Path]) -> P
 
 def collect_link_artifacts(install_dir: Path) -> list[Path]:
     env = configured_pkg_config_env(install_dir)
-    tokens: list[str] = []
+    sdl_libdir = Path(pkg_config_variable("sdl3", "libdir", env=env))
+    tokens = pkg_config_libs("sdl3", env=env, static=True)
     for package in REQUIRED_PACKAGES:
         tokens.extend(pkg_config_libs(package, env=env, static=False))
     for package in OPTIONAL_SHARED_PACKAGES:
         if pkg_config_exists(package, env=env):
             tokens.extend(pkg_config_libs(package, env=env, static=False))
-
     tokens.extend(["-lc", "-lm", "-ldl", "-lpthread", "-lrt"])
 
-    search_dirs = [install_dir / "lib64", *default_library_search_dirs()]
-    artifacts: list[Path] = [install_dir / "lib64" / "libSDL3.a"]
+    search_dirs = [sdl_libdir, *default_library_search_dirs()]
+    artifacts: list[Path] = [sdl_libdir / "libSDL3.a"]
     seen: set[Path] = set()
     missing_shared: list[str] = []
 
@@ -280,6 +294,8 @@ def collect_link_artifacts(install_dir: Path) -> list[Path]:
             continue
 
         if token.startswith("-l"):
+            if token == "-lSDL3":
+                continue
             shared_path = resolve_shared_library_path(f"lib{token[2:]}", search_dirs)
             if shared_path is None:
                 missing_name = f"lib{token[2:]}.so"
@@ -322,8 +338,39 @@ def write_link_bundle(bundle_link: Path, link_artifacts: list[Path]) -> None:
     bundle_link.write_text("\n".join(lines) + "\n")
 
 
+def stage_bundle_artifacts(bundle_dir: Path, install_dir: Path, link_artifacts: list[Path]) -> list[Path]:
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    staged_artifacts: list[Path] = []
+    install_dir = install_dir.resolve()
+    for artifact in link_artifacts:
+        artifact = artifact.resolve()
+        if artifact.is_relative_to(install_dir):
+            staged_artifact = bundle_dir / artifact.name
+            shutil.copy2(artifact, staged_artifact)
+            staged_artifacts.append(staged_artifact)
+            continue
+        staged_artifacts.append(artifact)
+    return staged_artifacts
+
+
+def remove_intermediate_results(*, archive_path: Path, source_dir: Path, build_dir: Path, install_dir: Path) -> None:
+    archive_path.unlink(missing_ok=True)
+    shutil.rmtree(source_dir, ignore_errors=True)
+    shutil.rmtree(build_dir, ignore_errors=True)
+    shutil.rmtree(install_dir, ignore_errors=True)
+
+
+def write_default_icon_module(bundle_dir: Path, root_dir: Path) -> Path:
+    return generate_icon_module(
+        root_dir / "assets" / "udewy_logo_128x128.png",
+        bundle_dir / DEFAULT_ICON_MODULE_NAME,
+        symbol_name=DEFAULT_ICON_SYMBOL_NAME,
+    )
+
+
 def main() -> None:
     here = Path(__file__).resolve().parent
+    root_dir = here.parent.parent.parent
     build_dir = here / "SDL3-build-wayland-render"
     install_dir = here / "SDL3-install-wayland-render"
     bundle_dir = here / BUNDLE_DIR_NAME
@@ -365,13 +412,27 @@ def main() -> None:
     )
     run(["cmake", "--build", str(build_dir), f"-j{jobs}"])
     run(["cmake", "--install", str(build_dir)])
-    write_link_bundle(bundle_link, collect_link_artifacts(install_dir))
+    staged_link_artifacts = stage_bundle_artifacts(
+        bundle_dir,
+        install_dir,
+        collect_link_artifacts(install_dir),
+    )
+    write_default_icon_module(bundle_dir, root_dir)
+    write_link_bundle(bundle_link, staged_link_artifacts)
+    remove_intermediate_results(
+        archive_path=archive_path,
+        source_dir=source_dir,
+        build_dir=build_dir,
+        install_dir=install_dir,
+    )
 
     print()
     print("SDL3 setup complete.")
     print()
-    print("Built artifact:")
+    print("Built artifacts:")
+    print(f"  {BUNDLE_DIR_NAME}/libSDL3.a")
     print(f"  {BUNDLE_DIR_NAME}/{BUNDLE_LINK_NAME}")
+    print(f"  {BUNDLE_DIR_NAME}/{DEFAULT_ICON_MODULE_NAME}")
     print()
     print("udewy import prelude:")
     print(f'import p"{BUNDLE_DIR_NAME}/{BUNDLE_LINK_NAME}"')

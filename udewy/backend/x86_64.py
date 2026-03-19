@@ -8,7 +8,8 @@ from os import PathLike
 from pathlib import Path
 
 from .. import t1
-from .common import Backend, CORE_INTRINSIC_ARITIES, LINUX_SYSCALL_INTRINSIC_ARITIES
+from .common import Backend, CORE_INTRINSIC_ARITIES, LINUX_SYSCALL_INTRINSIC_ARITIES, RunOptions
+from . import sdl_desktop
 
 class X86_64Backend(Backend):
     """
@@ -986,11 +987,19 @@ class X86_64Backend(Backend):
         
         return exe_path
     
-    def run(self, output_path: PathLike, args: list[str], **options) -> int | None:
+    def run(self, output_path: PathLike, args: list[str], options: RunOptions | None = None) -> int | None:
         """Run the compiled executable."""
         import subprocess
         output_path = Path(output_path)
-        result = subprocess.run([str(output_path)] + args)
+        if options is None:
+            options = RunOptions()
+        env = sdl_desktop.apply_run_hook(
+            input_file=options.input_file,
+            output_path=output_path,
+            link_artifacts=options.link_artifacts,
+            env=options.env,
+        )
+        result = subprocess.run([str(output_path)] + args, env=env)
         return result.returncode
     
     def get_compile_message(self, output_path: Path, **options) -> str:

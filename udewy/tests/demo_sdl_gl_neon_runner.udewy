@@ -1,0 +1,877 @@
+import p"../third_party/sdl/sdl.udewy"
+
+const STATE_TITLE:int = 0
+const STATE_RACE:int = 1
+const STATE_FINISH:int = 2
+const MENU_START:int = 0
+const MENU_CPUS:int = 1
+const MENU_SOUND:int = 2
+const MAX_CPUS:int = 4
+const TRACK_LENGTH:int = 2400
+const TRACK_GOAL:int = 7200
+const AUDIO_CHUNK_SAMPLES:int = 2048
+const AUDIO_CHUNK_BYTES:int = 4096
+const OVERLAY_W:int = 320
+const OVERLAY_H:int = 180
+
+const F32_ZERO:int = __i64_to_f32_bits__(0)
+const F32_ONE:int = __i64_to_f32_bits__(1)
+const F32_QUARTER:int = 0x3e800000
+const F32_HALF:int = 0x3f000000
+const F32_THREE_QUARTER:int = 0x3f400000
+const F32_EIGHTH:int = 0x3e000000
+
+const F64_ZERO:int = __i64_to_f64_bits__(0)
+const F64_ONE:int = __i64_to_f64_bits__(1)
+const F64_TWO:int = __i64_to_f64_bits__(2)
+const F64_NEG_ONE:int = __i64_to_f64_bits__(-1)
+const F64_NEG_NINETY:int = __i64_to_f64_bits__(-90)
+const F64_POS_NINETY:int = __i64_to_f64_bits__(90)
+const F64_POS_ONE_EIGHTY:int = __i64_to_f64_bits__(180)
+const F64_POS_TWO_TWENTY:int = __i64_to_f64_bits__(220)
+const F64_POS_THREE_TWENTY:int = __i64_to_f64_bits__(320)
+
+let glyph_mu:int = [0 0 17 17 17 21 24]
+let glyph_Z:int = [31 1 2 4 8 16 31]
+let glyph_E:int = [31 16 30 16 16 16 31]
+let glyph_R:int = [30 17 17 30 20 18 17]
+let glyph_O:int = [14 17 17 17 17 17 14]
+let glyph_S:int = [15 16 14 1 1 17 14]
+let glyph_T:int = [31 4 4 4 4 4 4]
+let glyph_A:int = [14 17 17 31 17 17 17]
+let glyph_C:int = [14 17 16 16 16 17 14]
+let glyph_P:int = [30 17 17 30 16 16 16]
+let glyph_U:int = [17 17 17 17 17 17 14]
+let glyph_N:int = [17 25 21 19 17 17 17]
+let glyph_D:int = [30 17 17 17 17 17 30]
+let glyph_F:int = [31 16 30 16 16 16 16]
+
+let glyph_1:int = [4 12 4 4 4 4 14]
+let glyph_2:int = [14 17 1 2 4 8 31]
+let glyph_3:int = [30 1 1 14 1 1 30]
+let glyph_4:int = [2 6 10 18 31 2 2]
+let glyph_5:int = [31 16 30 1 1 17 14]
+
+let lane_marks:int = [0 5 10 15 20]
+
+let game_state:int = 0
+let menu_row:int = 0
+let selected_cpus:int = 3
+let sound_on:int = 1
+let frame_count:int = 0
+
+let player_x:int = 0
+let player_vel_x:int = 0
+let player_heading:int = 0
+let player_speed:int = 0
+let player_distance:int = 0
+let player_shield:int = 100
+let player_rank:int = 1
+let result_rank:int = 1
+let finish_timer:int = 0
+let steer_tilt:int = 0
+let crash_flash:int = 0
+
+let cpu_xs:int = [0 0 0 0]
+let cpu_progress:int = [120 240 360 480]
+let cpu_speed_seed:int = [5 6 5 7]
+
+let key_left:int = 0
+let key_right:int = 0
+let key_up:int = 0
+let key_down:int = 0
+let key_confirm:int = 0
+let key_back:int = 0
+let press_left:int = 0
+let press_right:int = 0
+let press_up:int = 0
+let press_down:int = 0
+let press_confirm:int = 0
+let press_back:int = 0
+
+let audio_stream:int = 0
+let audio_buf:int = 0
+let engine_phase:int = 0
+let fx_phase:int = 0
+let fx_freq:int = 0
+let fx_timer:int = 0
+let fx_total:int = 1
+
+let abs_i = (value:int):>int => {
+    if value <? 0 {
+        return 0 - value
+    }
+    return value
+}
+
+let clamp_i = (value:int low:int high:int):>int => {
+    if value <? low {
+        return low
+    }
+    if value >? high {
+        return high
+    }
+    return value
+}
+
+let sin256 = (angle:int):>int => {
+    let a:int = angle % 1024
+    if a <? 0 {
+        a += 1024
+    }
+    let quad:int = a // 256
+    let x:int = a % 256
+    if quad =? 0 {
+        return (x * (512 - x)) // 256
+    }
+    if quad =? 1 {
+        return ((256 - x) * (256 + x)) // 256
+    }
+    if quad =? 2 {
+        return 0 - ((x * (512 - x)) // 256)
+    }
+    return 0 - (((256 - x) * (256 + x)) // 256)
+}
+
+let lane_x = (lane:int):>int => {
+    return __load__(lane_marks + (lane * 8)) - 10
+}
+
+let track_curve = (distance:int):>int => {
+    return (sin256(distance // 5) + (sin256(distance // 17) // 2)) // 18
+}
+
+let track_bank = (distance:int):>int => {
+    return (sin256((distance // 7) + 180) + (sin256(distance // 19) // 2)) // 52
+}
+
+let vertex3 = (x:int y:int z:int):>void => {
+    GL_Vertex3f(GL_F32_FromInt(x) GL_F32_FromInt(y) GL_F32_FromInt(z))
+    return 0
+}
+
+let quad3 = (x0:int y0:int z0:int x1:int y1:int z1:int x2:int y2:int z2:int x3:int y3:int z3:int r:int g:int b:int):>void => {
+    glBegin(GL_QUADS)
+    GL_Color3f(r g b)
+    vertex3(x0 y0 z0)
+    vertex3(x1 y1 z1)
+    vertex3(x2 y2 z2)
+    vertex3(x3 y3 z3)
+    glEnd()
+    return 0
+}
+
+let tri3 = (x0:int y0:int z0:int x1:int y1:int z1:int x2:int y2:int z2:int r:int g:int b:int):>void => {
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(r g b)
+    vertex3(x0 y0 z0)
+    vertex3(x1 y1 z1)
+    vertex3(x2 y2 z2)
+    glEnd()
+    return 0
+}
+
+let bar2 = (x:int y:int w:int h:int r:int g:int b:int):>void => {
+    quad3(x y 0 (x + w) y 0 (x + w) (y + h) 0 x (y + h) 0 r g b)
+    return 0
+}
+
+let draw_glyph = (glyph:int x:int y:int scale:int r:int g:int b:int):>void => {
+    let row:int = 0
+    loop row <? 7 {
+        let bits:int = __load__(glyph + (row * 8))
+        let col:int = 0
+        loop col <? 5 {
+            if ((bits >> (4 - col)) and 1) not=? 0 {
+                bar2(x + (col * scale) y + (row * scale) (scale - 1) (scale - 1) r g b)
+            }
+            col += 1
+        }
+        row += 1
+    }
+    return 0
+}
+
+let draw_digit = (value:int x:int y:int scale:int r:int g:int b:int):>void => {
+    if value =? 1 {
+        draw_glyph(glyph_1 x y scale r g b)
+    }
+    if value =? 2 {
+        draw_glyph(glyph_2 x y scale r g b)
+    }
+    if value =? 3 {
+        draw_glyph(glyph_3 x y scale r g b)
+    }
+    if value =? 4 {
+        draw_glyph(glyph_4 x y scale r g b)
+    }
+    if value =? 5 {
+        draw_glyph(glyph_5 x y scale r g b)
+    }
+    return 0
+}
+
+let draw_word_muzero = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_mu x y scale r g b)
+    draw_glyph(glyph_Z x + (scale * 6) y scale r g b)
+    draw_glyph(glyph_E x + (scale * 12) y scale r g b)
+    draw_glyph(glyph_R x + (scale * 18) y scale r g b)
+    draw_glyph(glyph_O x + (scale * 24) y scale r g b)
+    return 0
+}
+
+let draw_word_start = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_S x y scale r g b)
+    draw_glyph(glyph_T x + (scale * 6) y scale r g b)
+    draw_glyph(glyph_A x + (scale * 12) y scale r g b)
+    draw_glyph(glyph_R x + (scale * 18) y scale r g b)
+    draw_glyph(glyph_T x + (scale * 24) y scale r g b)
+    return 0
+}
+
+let draw_word_cpus = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_C x y scale r g b)
+    draw_glyph(glyph_P x + (scale * 6) y scale r g b)
+    draw_glyph(glyph_U x + (scale * 12) y scale r g b)
+    draw_glyph(glyph_S x + (scale * 18) y scale r g b)
+    return 0
+}
+
+let draw_word_sound = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_S x y scale r g b)
+    draw_glyph(glyph_O x + (scale * 6) y scale r g b)
+    draw_glyph(glyph_U x + (scale * 12) y scale r g b)
+    draw_glyph(glyph_N x + (scale * 18) y scale r g b)
+    draw_glyph(glyph_D x + (scale * 24) y scale r g b)
+    return 0
+}
+
+let draw_word_on = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_O x y scale r g b)
+    draw_glyph(glyph_N x + (scale * 6) y scale r g b)
+    return 0
+}
+
+let draw_word_off = (x:int y:int scale:int r:int g:int b:int):>void => {
+    draw_glyph(glyph_O x y scale r g b)
+    draw_glyph(glyph_F x + (scale * 6) y scale r g b)
+    draw_glyph(glyph_F x + (scale * 12) y scale r g b)
+    return 0
+}
+
+let trigger_fx = (freq:int samples:int):>void => {
+    fx_freq = freq
+    fx_timer = samples
+    fx_total = samples
+    return 0
+}
+
+let fill_audio_chunk = ():>void => {
+    let engine_freq:int = 46 + (menu_row * 4)
+    if game_state =? STATE_RACE {
+        engine_freq = 54 + (player_speed * 7)
+    }
+    if game_state =? STATE_FINISH {
+        engine_freq = 64
+    }
+    let engine_step:int = (engine_freq * 1024) // 44100
+    let i:int = 0
+    loop i <? AUDIO_CHUNK_SAMPLES {
+        let engine:int = (sin256(engine_phase) * 8) + ((sin256((engine_phase * 2) + 96) * 3) // 2)
+        let fx:int = 0
+        if fx_timer >? 0 {
+            let fx_step:int = (fx_freq * 1024) // 44100
+            let fx_level:int = (fx_timer * 28) // fx_total
+            fx = (sin256(fx_phase) * fx_level) // 6
+            fx_phase = (fx_phase + fx_step) % 1024
+            fx_timer -= 1
+        }
+        let sample:int = (engine + fx) * 14
+        __store_u16__(sample audio_buf + (i * 2))
+        engine_phase = (engine_phase + engine_step) % 1024
+        i += 1
+    }
+    return 0
+}
+
+let update_audio = ():>void => {
+    if audio_stream =? 0 {
+        return 0
+    }
+    if sound_on =? 0 {
+        SDL_ClearAudioStream(audio_stream)
+        return 0
+    }
+    if SDL_GetAudioStreamQueued(audio_stream) <=? AUDIO_CHUNK_BYTES {
+        fill_audio_chunk()
+        SDL_PutAudioStreamData(audio_stream audio_buf AUDIO_CHUNK_BYTES)
+    }
+    return 0
+}
+
+let sample_input = (keyboard:int):>void => {
+    let next_left:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_A) or SDL_ScancodeDown(keyboard SDL_SCANCODE_LEFT)
+    let next_right:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_D) or SDL_ScancodeDown(keyboard SDL_SCANCODE_RIGHT)
+    let next_up:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_W) or SDL_ScancodeDown(keyboard SDL_SCANCODE_UP)
+    let next_down:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_S) or SDL_ScancodeDown(keyboard SDL_SCANCODE_DOWN)
+    let next_confirm:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_RETURN) or SDL_ScancodeDown(keyboard SDL_SCANCODE_SPACE)
+    let next_back:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_ESCAPE)
+
+    press_left = (next_left not=? 0) and (key_left =? 0)
+    press_right = (next_right not=? 0) and (key_right =? 0)
+    press_up = (next_up not=? 0) and (key_up =? 0)
+    press_down = (next_down not=? 0) and (key_down =? 0)
+    press_confirm = (next_confirm not=? 0) and (key_confirm =? 0)
+    press_back = (next_back not=? 0) and (key_back =? 0)
+
+    key_left = next_left
+    key_right = next_right
+    key_up = next_up
+    key_down = next_down
+    key_confirm = next_confirm
+    key_back = next_back
+    return 0
+}
+
+let reset_cpu = (idx:int):>void => {
+    let lane:int = (idx + 1) % 5
+    __store__(lane_x(lane) cpu_xs + (idx * 8))
+    __store__(120 + (idx * 140) cpu_progress + (idx * 8))
+    return 0
+}
+
+let start_race = ():>void => {
+    game_state = STATE_RACE
+    player_x = 0
+    player_vel_x = 0
+    player_heading = 0
+    player_speed = 0
+    player_distance = 0
+    player_shield = 100
+    player_rank = 1
+    steer_tilt = 0
+    crash_flash = 0
+    let i:int = 0
+    loop i <? MAX_CPUS {
+        reset_cpu(i)
+        i += 1
+    }
+    trigger_fx(240 6000)
+    return 0
+}
+
+let update_title = ():>void => {
+    if press_up not=? 0 {
+        menu_row -= 1
+        if menu_row <? 0 {
+            menu_row = 2
+        }
+        trigger_fx(180 2000)
+    }
+    if press_down not=? 0 {
+        menu_row += 1
+        if menu_row >? 2 {
+            menu_row = 0
+        }
+        trigger_fx(180 2000)
+    }
+    if menu_row =? MENU_START {
+        if press_confirm not=? 0 {
+            start_race()
+        }
+    }
+    if menu_row =? MENU_CPUS {
+        if press_left not=? 0 {
+            selected_cpus -= 1
+            if selected_cpus <? 1 {
+                selected_cpus = 1
+            }
+            trigger_fx(220 2000)
+        }
+        if press_right not=? 0 {
+            selected_cpus += 1
+            if selected_cpus >? MAX_CPUS {
+                selected_cpus = MAX_CPUS
+            }
+            trigger_fx(220 2000)
+        }
+        if press_confirm not=? 0 {
+            start_race()
+        }
+    }
+    if menu_row =? MENU_SOUND {
+        if (press_left not=? 0) or (press_right not=? 0) or (press_confirm not=? 0) {
+            sound_on = 1 - sound_on
+            if sound_on not=? 0 {
+                trigger_fx(300 2600)
+            } else {
+                SDL_ClearAudioStream(audio_stream)
+            }
+        }
+    }
+    return 0
+}
+
+let update_race = ():>void => {
+    if press_back not=? 0 {
+        game_state = STATE_TITLE
+        trigger_fx(140 3000)
+        return 0
+    }
+
+    if key_up not=? 0 {
+        player_speed = clamp_i(player_speed + 1 0 18)
+    } else {
+        player_speed = clamp_i(player_speed - 1 0 18)
+    }
+    if key_down not=? 0 {
+        player_speed = clamp_i(player_speed - 2 0 18)
+    }
+
+    let steer:int = 0
+    if key_left not=? 0 {
+        steer -= 1
+    }
+    if key_right not=? 0 {
+        steer += 1
+    }
+    if steer not=? 0 {
+        player_heading = clamp_i(player_heading + (steer * (1 + (player_speed // 5))) (-18) 18)
+        steer_tilt = clamp_i(steer_tilt + (steer * (2 + (player_speed // 6))) (-14) 14)
+        player_vel_x = clamp_i(player_vel_x + (steer * (1 + (player_speed // 7))) (-12) 12)
+    }
+    if steer =? 0 {
+        if player_heading >? 0 {
+            player_heading -= 1
+        }
+        if player_heading <? 0 {
+            player_heading += 1
+        }
+        if steer_tilt >? 0 {
+            steer_tilt -= 1
+        }
+        if steer_tilt <? 0 {
+            steer_tilt += 1
+        }
+    }
+    if player_vel_x >? 0 {
+        player_vel_x -= 1
+    }
+    if player_vel_x <? 0 {
+        player_vel_x += 1
+    }
+
+    player_x += player_vel_x + (player_heading // 4)
+    if player_x >? 12 {
+        player_x = 12
+        player_speed = clamp_i(player_speed - 3 0 18)
+        player_shield = clamp_i(player_shield - 1 0 100)
+        crash_flash = 8
+        trigger_fx(120 2500)
+    }
+    if player_x <? (-12) {
+        player_x = -12
+        player_speed = clamp_i(player_speed - 3 0 18)
+        player_shield = clamp_i(player_shield - 1 0 100)
+        crash_flash = 8
+        trigger_fx(120 2500)
+    }
+
+    player_distance += player_speed
+    if crash_flash >? 0 {
+        crash_flash -= 1
+    }
+
+    let ahead:int = 0
+    let i:int = 0
+    loop i <? selected_cpus {
+        let progress_addr:int = cpu_progress + (i * 8)
+        let x_addr:int = cpu_xs + (i * 8)
+        let progress:int = __load__(progress_addr)
+        let step:int = __load__(cpu_speed_seed + (i * 8))
+        if progress <? player_distance {
+            step += 1
+        }
+        if player_speed >? 10 {
+            step += 1
+        }
+        progress += step
+        let target_lane:int = ((progress // (96 + (i * 16))) + i) % 5
+        let target_x:int = lane_x(target_lane) + track_curve(progress)
+        let x:int = __load__(x_addr)
+        if x <? target_x {
+            __store__(x + 1 x_addr)
+        }
+        if x >? target_x {
+            __store__(x - 1 x_addr)
+        }
+        __store__(progress progress_addr)
+        if progress >? player_distance {
+            ahead += 1
+        }
+
+        let gap:int = progress - player_distance
+        if (gap >=? 0) and (gap <=? 18) and (abs_i(__load__(x_addr) - (player_x + track_curve(player_distance))) <=? 3) {
+            player_speed = clamp_i(player_speed - 3 0 18)
+            player_shield = clamp_i(player_shield - 2 0 100)
+            crash_flash = 10
+            trigger_fx(110 5000)
+        }
+        i += 1
+    }
+    player_rank = ahead + 1
+
+    if player_distance >=? TRACK_GOAL {
+        result_rank = player_rank
+        finish_timer = 240
+        game_state = STATE_FINISH
+        trigger_fx(320 8000)
+    }
+    return 0
+}
+
+let update_finish = ():>void => {
+    if finish_timer >? 0 {
+        finish_timer -= 1
+    }
+    if (press_confirm not=? 0) or (press_back not=? 0) {
+        game_state = STATE_TITLE
+        trigger_fx(160 2500)
+    }
+    return 0
+}
+
+let draw_ship = (x:int z:int yaw:int roll:int bob:int r:int g:int b:int):>void => {
+    let left_y:int = bob - (roll // 5)
+    let right_y:int = bob + (roll // 5)
+    let deck_y:int = bob + 1
+    let nose_x:int = x + (yaw // 3)
+    let nose_y:int = bob + 1 + (abs_i(roll) // 10)
+    let nose_z:int = z - 10
+    quad3((x - 3) left_y z (x + 3) right_y z (x + 2) right_y (z - 6) (x - 2) left_y (z - 6) r g b)
+    quad3((x - 1) deck_y (z - 1) (x + 1) deck_y (z - 1) (x + 1) deck_y (z - 5) (x - 1) deck_y (z - 5) r g b)
+    tri3((x - 2) left_y (z - 6) nose_x nose_y nose_z (x + 2) right_y (z - 6) r g b)
+    tri3((x - 4) left_y (z - 1) (x - 1) deck_y (z - 4) (x - 1) deck_y z r g b)
+    tri3((x + 4) right_y (z - 1) (x + 1) deck_y (z - 4) (x + 1) deck_y z r g b)
+    quad3((x - 1) bob (z + 1) x (bob - 1) (z + 5) x bob (z + 1) (x - 1) bob (z + 1) F32_ONE F32_ONE F32_ONE)
+    quad3(x bob (z + 1) (x + 1) bob (z + 1) (x + 1) (bob - 1) (z + 5) x bob (z + 1) F32_ONE F32_ONE F32_ONE)
+    return 0
+}
+
+let draw_track_world = (distance:int):>void => {
+    let i:int = 0
+    loop i <? 34 {
+        let world0:int = distance + (i * 10)
+        let world1:int = distance + ((i + 1) * 10)
+        let curve0:int = track_curve(world0)
+        let curve1:int = track_curve(world1)
+        let bank0:int = track_bank(world0)
+        let bank1:int = track_bank(world1)
+        let z0:int = 0 - (i * 10)
+        let z1:int = 0 - ((i + 1) * 10)
+        let road_l0_y:int = 0 - bank0
+        let road_r0_y:int = bank0
+        let road_l1_y:int = 0 - bank1
+        let road_r1_y:int = bank1
+        let outer_l0_y:int = road_l0_y - 3
+        let outer_r0_y:int = road_r0_y - 3
+        let outer_l1_y:int = road_l1_y - 3
+        let outer_r1_y:int = road_r1_y - 3
+        let wall_l0_y:int = road_l0_y + 8
+        let wall_r0_y:int = road_r0_y + 8
+        let wall_l1_y:int = road_l1_y + 8
+        let wall_r1_y:int = road_r1_y + 8
+
+        quad3((curve0 - 46) outer_l0_y z0 (curve0 - 16) road_l0_y z0 (curve1 - 16) road_l1_y z1 (curve1 - 46) outer_l1_y z1 F32_HALF F32_QUARTER F32_QUARTER)
+        quad3((curve0 + 16) road_r0_y z0 (curve0 + 46) outer_r0_y z0 (curve1 + 46) outer_r1_y z1 (curve1 + 16) road_r1_y z1 F32_HALF F32_QUARTER F32_QUARTER)
+        quad3((curve0 - 16) road_l0_y z0 (curve0 + 16) road_r0_y z0 (curve1 + 16) road_r1_y z1 (curve1 - 16) road_l1_y z1 F32_QUARTER F32_QUARTER F32_QUARTER)
+        quad3((curve0 - 17) road_l0_y z0 (curve0 - 16) road_l0_y z0 (curve1 - 16) road_l1_y z1 (curve1 - 17) road_l1_y z1 F32_ONE F32_HALF F32_QUARTER)
+        quad3((curve0 + 16) road_r0_y z0 (curve0 + 17) road_r0_y z0 (curve1 + 17) road_r1_y z1 (curve1 + 16) road_r1_y z1 F32_ONE F32_HALF F32_QUARTER)
+        quad3((curve0 - 18) road_l0_y z0 (curve0 - 17) road_l0_y z0 (curve1 - 17) road_l1_y z1 (curve1 - 18) road_l1_y z1 F32_ONE F32_QUARTER F32_HALF)
+        quad3((curve0 + 17) road_r0_y z0 (curve0 + 18) road_r0_y z0 (curve1 + 18) road_r1_y z1 (curve1 + 17) road_r1_y z1 F32_ONE F32_QUARTER F32_HALF)
+        quad3((curve0 - 17) road_l0_y z0 (curve0 - 17) wall_l0_y z0 (curve1 - 17) wall_l1_y z1 (curve1 - 17) road_l1_y z1 F32_ONE F32_EIGHTH F32_HALF)
+        quad3((curve0 + 17) road_r0_y z0 (curve0 + 17) wall_r0_y z0 (curve1 + 17) wall_r1_y z1 (curve1 + 17) road_r1_y z1 F32_ONE F32_EIGHTH F32_HALF)
+
+        if (i % 3) not=? 1 {
+            quad3((curve0 - 7) ((road_l0_y + road_r0_y) // 2) z0 (curve0 - 6) ((road_l0_y + road_r0_y) // 2) z0 (curve1 - 6) ((road_l1_y + road_r1_y) // 2) z1 (curve1 - 7) ((road_l1_y + road_r1_y) // 2) z1 F32_QUARTER F32_ONE F32_ONE)
+            quad3((curve0 + 6) ((road_l0_y + road_r0_y) // 2) z0 (curve0 + 7) ((road_l0_y + road_r0_y) // 2) z0 (curve1 + 7) ((road_l1_y + road_r1_y) // 2) z1 (curve1 + 6) ((road_l1_y + road_r1_y) // 2) z1 F32_QUARTER F32_ONE F32_ONE)
+        }
+
+        if ((distance // 10) + i) % 2 =? 0 {
+            quad3((curve0 - 1) ((road_l0_y + road_r0_y) // 2) z0 (curve0 + 1) ((road_l0_y + road_r0_y) // 2) z0 (curve1 + 1) ((road_l1_y + road_r1_y) // 2) z1 (curve1 - 1) ((road_l1_y + road_r1_y) // 2) z1 F32_ONE F32_ONE F32_ONE)
+        }
+
+        if (i % 5) =? 0 {
+            quad3((curve0 - 32) 0 z0 (curve0 - 27) 26 z0 (curve1 - 27) 26 z1 (curve1 - 32) 0 z1 F32_QUARTER F32_QUARTER F32_ONE)
+            quad3((curve0 + 27) 26 z0 (curve0 + 32) 0 z0 (curve1 + 32) 0 z1 (curve1 + 27) 26 z1 F32_QUARTER F32_QUARTER F32_ONE)
+        }
+        if (i % 7) =? 2 {
+            quad3((curve0 - 54) 4 z0 (curve0 - 44) 18 z0 (curve1 - 44) 18 z1 (curve1 - 54) 4 z1 F32_ONE F32_QUARTER F32_HALF)
+            quad3((curve0 + 44) 18 z0 (curve0 + 54) 4 z0 (curve1 + 54) 4 z1 (curve1 + 44) 18 z1 F32_ONE F32_QUARTER F32_HALF)
+        }
+        i += 1
+    }
+
+    i = 0
+    loop i <? selected_cpus {
+        let progress:int = __load__(cpu_progress + (i * 8))
+        let gap:int = progress - player_distance
+        let ship_z:int = (-20) - (gap // 2)
+        if (ship_z <=? (-12)) and (ship_z >=? (-180)) {
+            let ship_x:int = __load__(cpu_xs + (i * 8))
+            let ship_yaw:int = track_curve(progress + 24) - track_curve(progress)
+            let ship_bob:int = sin256((progress * 3) + (frame_count * 24)) // 128
+            let ship_roll:int = track_bank(progress) * 2
+            if i % 2 =? 0 {
+                draw_ship(ship_x ship_z ship_yaw ship_roll ship_bob F32_ONE F32_HALF F32_QUARTER)
+            } else {
+                draw_ship(ship_x ship_z ship_yaw ship_roll ship_bob F32_QUARTER F32_ONE F32_THREE_QUARTER)
+            }
+        }
+        i += 1
+    }
+
+    let player_world_x:int = player_x + track_curve(player_distance)
+    let player_bob:int = sin256((player_distance * 4) + (frame_count * 28)) // 128
+    if crash_flash not=? 0 {
+        draw_ship(player_world_x (-18) player_heading steer_tilt player_bob F32_ONE F32_QUARTER F32_QUARTER)
+    } else {
+        draw_ship(player_world_x (-18) player_heading steer_tilt player_bob F32_EIGHTH F32_ONE F32_ONE)
+    }
+    return 0
+}
+
+let set_perspective = ():>void => {
+    let look_ahead:int = player_distance + 40
+    if game_state not=? STATE_RACE {
+        look_ahead = frame_count * 6
+    }
+    let camera_yaw:int = (track_curve(look_ahead) - track_curve(look_ahead - 20)) + player_heading
+    let camera_bank:int = (track_bank(look_ahead) * 3) + (steer_tilt // 2)
+    let camera_bob:int = sin256((player_distance * 4) + (frame_count * 24)) // 192
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    GL_Frustum(F64_NEG_ONE F64_ONE F64_NEG_ONE F64_ONE F64_TWO F64_POS_TWO_TWENTY)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    GL_Translatef(F32_ZERO GL_F32_FromInt((-5) + camera_bob) GL_F32_FromInt(-8))
+    GL_Rotatef(GL_F32_FromInt(10 + (player_speed // 4)) F32_ONE F32_ZERO F32_ZERO)
+    GL_Rotatef(GL_F32_FromInt(camera_yaw) F32_ZERO F32_ONE F32_ZERO)
+    GL_Rotatef(GL_F32_FromInt(camera_bank) F32_ZERO F32_ZERO F32_ONE)
+    return 0
+}
+
+let set_overlay = ():>void => {
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    GL_Ortho(F64_ZERO F64_POS_THREE_TWENTY F64_POS_ONE_EIGHTY F64_ZERO F64_NEG_ONE F64_ONE)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    return 0
+}
+
+let draw_menu_row = (row:int y:int highlight:int):>void => {
+    if highlight not=? 0 {
+        bar2(58 y 204 20 F32_ONE F32_HALF F32_QUARTER)
+        bar2(62 (y + 3) 196 14 F32_QUARTER F32_EIGHTH F32_EIGHTH)
+    } else {
+        bar2(64 y 192 20 F32_QUARTER F32_QUARTER F32_HALF)
+    }
+    if row =? MENU_START {
+        draw_word_start(96 (y + 4) 3 F32_ONE F32_ONE F32_ONE)
+    }
+    if row =? MENU_CPUS {
+        draw_word_cpus(86 (y + 4) 3 F32_ONE F32_ONE F32_ONE)
+        draw_digit(selected_cpus 208 (y + 3) 3 F32_ONE F32_ONE F32_ONE)
+    }
+    if row =? MENU_SOUND {
+        draw_word_sound(78 (y + 4) 3 F32_ONE F32_ONE F32_ONE)
+        if sound_on not=? 0 {
+            draw_word_on(210 (y + 4) 3 F32_ONE F32_ONE F32_ONE)
+        } else {
+            draw_word_off(198 (y + 4) 3 F32_ONE F32_ONE F32_ONE)
+        }
+    }
+    return 0
+}
+
+let render_title = ():>void => {
+    draw_word_muzero(74 18 6 F32_ONE F32_HALF F32_QUARTER)
+    bar2(82 66 156 3 F32_QUARTER F32_ONE F32_ONE)
+    draw_menu_row(MENU_START 84 (menu_row =? MENU_START))
+    draw_menu_row(MENU_CPUS 110 (menu_row =? MENU_CPUS))
+    draw_menu_row(MENU_SOUND 136 (menu_row =? MENU_SOUND))
+    return 0
+}
+
+let render_finish = ():>void => {
+    draw_word_muzero(74 20 6 F32_ONE F32_HALF F32_QUARTER)
+    bar2(96 84 128 36 F32_QUARTER F32_QUARTER F32_HALF)
+    draw_digit(result_rank 148 90 5 F32_ONE F32_ONE F32_ONE)
+    draw_menu_row(MENU_START 134 1)
+    return 0
+}
+
+let render_hud = ():>void => {
+    let speed_w:int = player_speed * 5
+    let shield_w:int = player_shield
+    bar2(14 146 100 16 F32_QUARTER F32_QUARTER F32_HALF)
+    bar2(18 151 speed_w 6 F32_ONE F32_HALF F32_QUARTER)
+    bar2(206 146 100 16 F32_QUARTER F32_QUARTER F32_HALF)
+    bar2((302 - shield_w) 151 shield_w 6 F32_QUARTER F32_ONE F32_ONE)
+
+    let lap:int = (player_distance // TRACK_LENGTH) + 1
+    if lap >? 3 {
+        lap = 3
+    }
+    draw_digit(lap 28 118 3 F32_ONE F32_ONE F32_ONE)
+    draw_digit(player_rank 274 118 3 F32_ONE F32_ONE F32_ONE)
+    return 0
+}
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO + SDL_INIT_AUDIO) =? 0 {
+        return 1
+    }
+
+    if SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1) =? 0 {
+        SDL_Quit()
+        return 2
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE 24) =? 0 {
+        SDL_Quit()
+        return 3
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION 2) =? 0 {
+        SDL_Quit()
+        return 4
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION 1) =? 0 {
+        SDL_Quit()
+        return 5
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK SDL_GL_CONTEXT_PROFILE_COMPATIBILITY) =? 0 {
+        SDL_Quit()
+        return 6
+    }
+
+    let title:int = "muZero\0"
+    let window:int = SDL_CreateWindow(title 960 720 (SDL_WINDOW_OPENGL + SDL_WINDOW_RESIZABLE))
+    if window =? 0 {
+        SDL_Quit()
+        return 7
+    }
+    SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)
+
+    let gl_context:int = SDL_GL_CreateContext(window)
+    if gl_context =? 0 {
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 8
+    }
+    if SDL_GL_MakeCurrent(window gl_context) =? 0 {
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 9
+    }
+    if SDL_GL_SetSwapInterval(1) =? 0 {
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 10
+    }
+
+    let spec:int = __static_alloca__(SDL_AUDIO_SPEC_SIZE)
+    SDL_SetAudioSpec(spec SDL_AUDIO_S16LE 1 44100)
+    audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK spec 0 0)
+    if audio_stream =? 0 {
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 11
+    }
+    if SDL_ResumeAudioStreamDevice(audio_stream) =? 0 {
+        SDL_DestroyAudioStream(audio_stream)
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 12
+    }
+
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let size:int = __static_alloca__(8)
+    audio_buf = __static_alloca__(AUDIO_CHUNK_BYTES)
+    let running:int = 1
+
+    loop running not=? 0 {
+        let has_event:int = SDL_PollEvent(event)
+        loop has_event not=? 0 {
+            if SDL_EventType(event) =? SDL_EVENT_QUIT {
+                running = 0
+            }
+            has_event = SDL_PollEvent(event)
+        }
+
+        sample_input(SDL_GetKeyboardState(0))
+        if game_state =? STATE_TITLE {
+            update_title()
+        }
+        if game_state =? STATE_RACE {
+            update_race()
+        }
+        if game_state =? STATE_FINISH {
+            update_finish()
+        }
+        update_audio()
+
+        SDL_GetWindowSizeInPixels(window size size + 4)
+        let width:int = __load_u32__(size)
+        let height:int = __load_u32__(size + 4)
+        glViewport(0 0 width height)
+
+        if game_state =? STATE_RACE {
+            if crash_flash not=? 0 {
+                GL_ClearColor(F32_QUARTER F32_EIGHTH F32_EIGHTH F32_ONE)
+            } else {
+                GL_ClearColor(F32_ZERO F32_ZERO F32_QUARTER F32_ONE)
+            }
+        } else {
+            GL_ClearColor(F32_ZERO F32_ZERO F32_QUARTER F32_ONE)
+        }
+        glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+
+        set_perspective()
+        if game_state =? STATE_RACE {
+            draw_track_world(player_distance)
+        } else {
+            draw_track_world(frame_count * 4)
+        }
+
+        glClear(GL_DEPTH_BUFFER_BIT)
+        set_overlay()
+        if game_state =? STATE_TITLE {
+            render_title()
+        }
+        if game_state =? STATE_RACE {
+            render_hud()
+        }
+        if game_state =? STATE_FINISH {
+            render_finish()
+        }
+
+        SDL_GL_SwapWindow(window)
+        SDL_Delay(16)
+        frame_count += 1
+    }
+
+    SDL_DestroyAudioStream(audio_stream)
+    SDL_GL_DestroyContext(gl_context)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}
