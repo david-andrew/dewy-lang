@@ -497,7 +497,7 @@ class Backend(ABC):
             input_name: Name of the input file (without extension)
             cache_dir: Directory to write output files
             **options: Backend-specific options (e.g., split_wasm for WASM,
-                link_artifacts and link_flags for native targets)
+                link_artifacts for native targets)
         
         Returns:
             Path to the primary output file

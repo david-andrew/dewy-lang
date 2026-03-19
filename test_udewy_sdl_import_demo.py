@@ -8,7 +8,7 @@ from udewy.backend import get_backend
 def test_sdl_demo_collects_link_artifact() -> None:
     loaded = t0.load_program(Path("udewy/tests/demo_sdl3.udewy"))
     assert any(path.endswith("third_party/sdl/SDL3-install-wayland-render/lib64/libSDL3.a") for path in loaded.link_artifacts)
-    assert loaded.link_flags == ["-pthread", "-lm"]
+    assert any(".so" in Path(path).name for path in loaded.link_artifacts)
 
 
 def test_sdl_demo_compiles_with_imported_artifact() -> None:
@@ -22,7 +22,6 @@ def test_sdl_demo_compiles_with_imported_artifact() -> None:
             "demo_sdl3_test",
             Path(tmp_dir_name),
             link_artifacts=loaded.link_artifacts,
-            link_flags=loaded.link_flags,
         )
 
     assert output_path.name == "demo_sdl3_test"

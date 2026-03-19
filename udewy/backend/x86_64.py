@@ -854,7 +854,7 @@ class X86_64Backend(Backend):
             "MAP_ANONYMOUS": 32,
             "MAP_FIXED": 16,
         }
-    
+
     def compile_and_link(self, code: str, input_name: str, cache_dir: Path, **options) -> Path:
         """Compile and link x86_64 assembly to ELF executable."""
         import subprocess
@@ -862,31 +862,35 @@ class X86_64Backend(Backend):
         asm_path = cache_dir / f"{input_name}.s"
         obj_path = cache_dir / f"{input_name}.o"
         exe_path = cache_dir / input_name
-        raw_link_artifacts = [str(path) for path in options.get("link_artifacts", [])]
-        link_flags = [str(flag) for flag in options.get("link_flags", [])]
-        use_clang_driver = bool(raw_link_artifacts or link_flags)
-        link_artifacts = [str(Path(artifact)) for artifact in raw_link_artifacts]
+        link_artifacts = [Path(path) for path in options.get("link_artifacts", [])]
+        static_artifacts = [str(path) for path in link_artifacts if ".so" not in path.name]
+        shared_artifacts = [str(path) for path in link_artifacts if ".so" in path.name]
         
         asm_path.write_text(code)
         
         subprocess.run(["as", str(asm_path), "-o", str(obj_path)], check=True)
-        if use_clang_driver:
-            subprocess.run(
-                [
-                    "clang",
-                    "-no-pie",
-                    "-nostartfiles",
-                    "-Wl,-e,_start",
-                    str(obj_path),
-                    *link_artifacts,
-                    *link_flags,
-                    "-o",
-                    str(exe_path),
-                ],
-                check=True,
-            )
+        if shared_artifacts:
+            dynamic_linker = None
+            for candidate in (
+                Path("/usr/lib64/ld-linux-x86-64.so.2"),
+                Path("/lib64/ld-linux-x86-64.so.2"),
+            ):
+                if candidate.exists():
+                    dynamic_linker = candidate
+                    break
+            if dynamic_linker is None:
+                raise RuntimeError("Could not find the x86_64 Linux dynamic linker for shared-library linking")
+
+            command = ["ld", "-e", "_start", "--dynamic-linker", str(dynamic_linker), str(obj_path)]
+            if static_artifacts:
+                command.extend(["--start-group", *static_artifacts, "--end-group"])
+            command.extend(shared_artifacts)
         else:
-            subprocess.run(["ld", str(obj_path), *link_artifacts, "-o", str(exe_path)], check=True)
+            command = ["ld", "-static", "-e", "_start", str(obj_path)]
+            if static_artifacts:
+                command.extend(["--start-group", *static_artifacts, "--end-group"])
+        command.extend(["-o", str(exe_path)])
+        subprocess.run(command, check=True)
         
         return exe_path
     

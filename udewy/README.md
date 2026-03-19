@@ -515,21 +515,17 @@ Import directives bring definitions from other udewy files into scope:
 import p"utils.udewy"
 import p"lib/helpers.udewy"
 import p"../third_party/libfoo.a"
-$cc_pthread
-$cc_lm
 ```
 
 **Semantics:**
 - Paths are relative to the importing file's directory
-- Imports and `$...` meta directives are recognized only in the leading prelude at the top of a file
+- Imports are recognized only in the leading prelude at the top of a file
 - Imports ending in `.udewy` are treated as udewy source and processed recursively
 - Imported paths with any other suffix are treated as direct external link artifacts, not source
+- Native artifacts are expected to be fully prepared for the final backend link step; native targets hand them directly to the system linker
 - Each imported source file or artifact path is only included once
-- Each supported meta directive is only applied once
 - Imported udewy source is prepended to the source being compiled
-- Top-level meta directives expand into backend link flags during preprocessing
-- Currently supported meta directives are `$cc_pthread` and `$cc_lm`
-- After preprocessing, import directives and meta directives are removed from the source before tokenization and parsing
+- After preprocessing, import directives are removed from the source before tokenization and parsing
 - `import` remains a reserved word; if it reaches tokenization, the tokenizer reports an error
 
 ---

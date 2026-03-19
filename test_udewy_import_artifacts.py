@@ -19,8 +19,6 @@ const VALUE:int = 41
         """
 import p"lib.udewy"
 import p"libnative.a"
-$cc_pthread
-$cc_lm
 
 let main = ():>int => {
     return VALUE + 1
@@ -32,50 +30,34 @@ let main = ():>int => {
 
     assert "const VALUE:int = 41" in loaded.source
     assert "import p\"libnative.a\"" not in loaded.source
-    assert "$cc_pthread" not in loaded.source
-    assert "$cc_lm" not in loaded.source
     assert loaded.link_artifacts == [str(artifact.resolve())]
-    assert loaded.link_flags == ["-pthread", "-lm"]
 
 
-def test_unknown_meta_directive_is_rejected(tmp_path: Path) -> None:
-    program = tmp_path / "main.udewy"
-    program.write_text(
-        """
-$cc_not_real
-
-let main = ():>int => {
-    return 0
-}
-"""
-    )
-
-    try:
-        t0.load_program(program)
-    except SyntaxError as exc:
-        assert "Unknown udewy meta directive $cc_not_real" in str(exc)
-    else:
-        raise AssertionError("expected unknown meta directive to raise SyntaxError")
-
-
-def test_meta_directives_and_imports_can_be_interleaved(tmp_path: Path) -> None:
+def test_duplicate_imported_artifact_is_only_linked_once(tmp_path: Path) -> None:
     artifact = tmp_path / "libnative.a"
     artifact.write_text("")
 
-    library = tmp_path / "lib.udewy"
-    library.write_text(
+    inner = tmp_path / "inner.udewy"
+    inner.write_text(
         """
+import p"libnative.a"
+
 const VALUE:int = 7
 """
     )
 
+    library = tmp_path / "lib.udewy"
+    library.write_text(
+        """
+import p"inner.udewy"
+import p"libnative.a"
+"""
+    )
+
     program = tmp_path / "main.udewy"
     program.write_text(
         """
-$cc_lm
-import p"libnative.a"
 import p"lib.udewy"
-$cc_pthread
 
 let main = ():>int => {
     return VALUE
@@ -87,4 +69,3 @@ let main = ():>int => {
 
     assert "const VALUE:int = 7" in loaded.source
     assert loaded.link_artifacts == [str(artifact.resolve())]
-    assert loaded.link_flags == ["-lm", "-pthread"]

@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -10,7 +11,7 @@ from pathlib import Path
 
 RELEASE_API_URL = "https://api.github.com/repos/libsdl-org/SDL/releases/latest"
 USER_AGENT = "udewy-sdl-setup"
-REQUIRED_TOOLS = ("cmake", "clang", "pkg-config")
+REQUIRED_TOOLS = ("clang", "cmake", "ld", "pkg-config")
 REQUIRED_PACKAGES = (
     "wayland-client",
     "wayland-cursor",
@@ -21,6 +22,12 @@ REQUIRED_PACKAGES = (
     "glesv2",
     "gl",
 )
+OPTIONAL_SHARED_PACKAGES = (
+    "gbm",
+    "libdrm",
+)
+BUNDLE_DIR_NAME = "SDL3-shared-bundle"
+BUNDLE_LINK_NAME = "link.udewy"
 CMAKE_FLAGS = (
     "-DCMAKE_BUILD_TYPE=Release",
     "-DCMAKE_C_COMPILER=clang",
@@ -126,6 +133,7 @@ def check_pkg_config_deps() -> None:
         "Expected tools:",
         "  cmake",
         "  clang",
+        "  ld",
         "  pkg-config",
         "",
         "Expected development libraries visible through pkg-config:",
@@ -166,10 +174,160 @@ def run(command: list[str], *, cwd: Path | None = None) -> None:
     subprocess.run(command, cwd=cwd, check=True)
 
 
+def run_capture(command: list[str], *, cwd: Path | None = None) -> str:
+    return subprocess.run(command, cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def configured_pkg_config_env(install_dir: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    install_pkgconfig_dirs: list[Path] = []
+    for candidate in (
+        install_dir / "lib64" / "pkgconfig",
+        install_dir / "lib" / "pkgconfig",
+        install_dir / "share" / "pkgconfig",
+    ):
+        if candidate.is_dir() and candidate not in install_pkgconfig_dirs:
+            install_pkgconfig_dirs.append(candidate)
+
+    for pc_file in install_dir.rglob("*.pc"):
+        pc_dir = pc_file.parent
+        if pc_dir not in install_pkgconfig_dirs:
+            install_pkgconfig_dirs.append(pc_dir)
+
+    existing = env.get("PKG_CONFIG_PATH", "")
+    joined_install_dirs = ":".join(str(path) for path in install_pkgconfig_dirs)
+    if joined_install_dirs and existing:
+        env["PKG_CONFIG_PATH"] = f"{joined_install_dirs}:{existing}"
+    elif joined_install_dirs:
+        env["PKG_CONFIG_PATH"] = joined_install_dirs
+    elif existing:
+        env["PKG_CONFIG_PATH"] = existing
+    return env
+
+
+def pkg_config_exists(package: str, *, env: dict[str, str]) -> bool:
+    result = subprocess.run(["pkg-config", "--exists", package], env=env, check=False)
+    return result.returncode == 0
+
+
+def pkg_config_libs(package: str, *, env: dict[str, str], static: bool) -> list[str]:
+    command = ["pkg-config"]
+    if static:
+        command.append("--static")
+    command.extend(["--libs", package])
+    output = subprocess.run(
+        command,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return shlex.split(output)
+
+
+def default_library_search_dirs() -> list[Path]:
+    output = run_capture(["ld", "--verbose"])
+    search_dirs: list[Path] = []
+    for match in re.finditer(r'SEARCH_DIR\("=([^"]+)"\)', output):
+        path = Path(match.group(1))
+        if path not in search_dirs:
+            search_dirs.append(path)
+    return search_dirs
+
+
+def resolve_shared_library_path(library_stem: str, search_dirs: list[Path]) -> Path | None:
+    for directory in search_dirs:
+        exact = directory / f"{library_stem}.so"
+        if exact.exists():
+            return exact.resolve()
+        matches = sorted(directory.glob(f"{library_stem}.so*"))
+        if matches:
+            return matches[0].resolve()
+
+    return None
+
+
+def collect_link_artifacts(install_dir: Path) -> list[Path]:
+    env = configured_pkg_config_env(install_dir)
+    tokens: list[str] = []
+    for package in REQUIRED_PACKAGES:
+        tokens.extend(pkg_config_libs(package, env=env, static=False))
+    for package in OPTIONAL_SHARED_PACKAGES:
+        if pkg_config_exists(package, env=env):
+            tokens.extend(pkg_config_libs(package, env=env, static=False))
+
+    tokens.extend(["-lc", "-lm", "-ldl", "-lpthread", "-lrt"])
+
+    search_dirs = [install_dir / "lib64", *default_library_search_dirs()]
+    artifacts: list[Path] = [install_dir / "lib64" / "libSDL3.a"]
+    seen: set[Path] = set()
+    missing_shared: list[str] = []
+
+    def add_artifact(path: Path) -> None:
+        resolved = path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            artifacts.append(resolved)
+
+    for token in tokens:
+        if token == "-pthread":
+            token = "-lpthread"
+
+        if token.startswith("-L"):
+            search_dir = Path(token[2:]).resolve()
+            if search_dir not in search_dirs:
+                search_dirs.insert(0, search_dir)
+            continue
+
+        if token.startswith("-l"):
+            shared_path = resolve_shared_library_path(f"lib{token[2:]}", search_dirs)
+            if shared_path is None:
+                missing_name = f"lib{token[2:]}.so"
+                if missing_name not in missing_shared:
+                    missing_shared.append(missing_name)
+                continue
+            add_artifact(shared_path)
+            continue
+
+        if ".so" in token:
+            shared_path = Path(token)
+            if not shared_path.is_absolute():
+                shared_path = (install_dir / shared_path).resolve()
+            if not shared_path.exists():
+                raise RuntimeError(f"Shared library not found: {shared_path}")
+            add_artifact(shared_path)
+            continue
+
+        raise RuntimeError(f"Unsupported pkg-config linker token: {token}")
+
+    if missing_shared:
+        raise RuntimeError(
+            "Could not resolve the shared-library inputs needed for the SDL udewy link bundle. "
+            f"Missing shared libraries: {' '.join(missing_shared)}"
+        )
+
+    return artifacts
+
+
+def write_link_bundle(bundle_link: Path, link_artifacts: list[Path]) -> None:
+    bundle_link.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    source_dir = bundle_link.parent
+    for artifact in link_artifacts:
+        if artifact.is_relative_to(source_dir.parent):
+            import_path = os.path.relpath(artifact, source_dir)
+        else:
+            import_path = str(artifact)
+        lines.append(f'import p"{import_path}"')
+    bundle_link.write_text("\n".join(lines) + "\n")
+
+
 def main() -> None:
     here = Path(__file__).resolve().parent
     build_dir = here / "SDL3-build-wayland-render"
     install_dir = here / "SDL3-install-wayland-render"
+    bundle_dir = here / BUNDLE_DIR_NAME
+    bundle_link = bundle_dir / BUNDLE_LINK_NAME
 
     require_tools()
     configure_pkg_config_path()
@@ -191,6 +349,7 @@ def main() -> None:
 
     shutil.rmtree(build_dir, ignore_errors=True)
     shutil.rmtree(install_dir, ignore_errors=True)
+    shutil.rmtree(bundle_dir, ignore_errors=True)
 
     jobs = os.cpu_count() or 4
     run(
@@ -206,22 +365,21 @@ def main() -> None:
     )
     run(["cmake", "--build", str(build_dir), f"-j{jobs}"])
     run(["cmake", "--install", str(build_dir)])
+    write_link_bundle(bundle_link, collect_link_artifacts(install_dir))
 
     print()
     print("SDL3 setup complete.")
     print()
     print("Built artifact:")
-    print("  SDL3-install-wayland-render/lib64/libSDL3.a")
+    print(f"  {BUNDLE_DIR_NAME}/{BUNDLE_LINK_NAME}")
     print()
-    print("udewy import/link prelude:")
-    print('import p"SDL3-install-wayland-render/lib64/libSDL3.a"')
-    print("$cc_pthread")
-    print("$cc_lm")
+    print("udewy import prelude:")
+    print(f'import p"{BUNDLE_DIR_NAME}/{BUNDLE_LINK_NAME}"')
     print()
     print("Notes:")
-    print("- This reproduces the working Wayland renderer-enabled SDL3 build used for the udewy SDL demo.")
-    print("- The resulting artifact is a static libSDL3.a, but it still expects a usable Wayland/EGL/OpenGL stack on the host.")
-    print("- If the build fails, the first thing to check is whether pkg-config can find the required Wayland, xkbcommon, libdecor, EGL, GLES, and GL development packages.")
+    print("- The final udewy step still uses as/ld only.")
+    print("- SDL itself is linked from the local static libSDL3.a, while its transitive graphics/runtime dependencies are linked as shared libraries available on this machine.")
+    print("- The generated bundle is a plain udewy import wrapper, not a custom manifest format.")
 
 
 if __name__ == "__main__":

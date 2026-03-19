@@ -85,27 +85,18 @@ def string_end(src: str, start: int) -> int:
 class LoadedProgram:
     source: str
     link_artifacts: list[str]
-    link_flags: list[str]
-
-
-META_DIRECTIVES: dict[str, tuple[str, ...]] = {
-    "cc_pthread": ("-pthread",),
-    "cc_lm": ("-lm",),
-}
 
 
 @dataclass
 class _LoadState:
     imported_sources: set[Path]
     imported_artifacts: set[Path]
-    imported_link_flags: set[str]
 
 
 def _make_state(imported_sources: set[Path] | None = None) -> _LoadState:
     return _LoadState(
         imported_sources=set() if imported_sources is None else imported_sources,
         imported_artifacts=set(),
-        imported_link_flags=set(),
     )
 
 
@@ -140,24 +131,6 @@ def _parse_import_directive(src: str, idx: int) -> tuple[str, int] | None:
     return import_path, next_idx
 
 
-def _parse_meta_directive(src: str, idx: int) -> tuple[str, int] | None:
-    if idx >= len(src) or src[idx] != "$":
-        return None
-
-    idx += 1
-    if idx >= len(src) or not is_ident_start(src[idx]):
-        raise SyntaxError(f"Expected meta directive name after $ at position {idx}")
-
-    name_start = idx
-    idx += 1
-    while idx < len(src) and is_ident(src[idx]):
-        idx += 1
-
-    directive = src[name_start:idx]
-    next_idx = _consume_directive_line_end(src, idx, "meta directive")
-    return directive, next_idx
-
-
 def _load_imported_path(
     import_path_str: str,
     source_dir: Path,
@@ -171,36 +144,22 @@ def _load_imported_path(
         return _load_program(import_path, state)
 
     if import_path in state.imported_artifacts:
-        return LoadedProgram("", [], [])
+        return LoadedProgram("", [])
 
     state.imported_artifacts.add(import_path)
-    return LoadedProgram("", [str(import_path)], [])
-
-
-def _load_meta_directive(directive: str, state: _LoadState) -> list[str]:
-    flags = META_DIRECTIVES.get(directive)
-    if flags is None:
-        raise SyntaxError(f"Unknown udewy meta directive ${directive}")
-
-    new_flags: list[str] = []
-    for flag in flags:
-        if flag not in state.imported_link_flags:
-            state.imported_link_flags.add(flag)
-            new_flags.append(flag)
-    return new_flags
+    return LoadedProgram("", [str(import_path)])
 
 
 def _load_program(source_path: Path, state: _LoadState) -> LoadedProgram:
     source_path = source_path.resolve()
     if source_path in state.imported_sources:
-        return LoadedProgram("", [], [])
+        return LoadedProgram("", [])
     state.imported_sources.add(source_path)
 
     source = source_path.read_text()
     source_dir = source_path.parent
     imported_sources: list[str] = []
     link_artifacts: list[str] = []
-    link_flags: list[str] = []
     body_parts: list[str] = []
 
     idx = 0
@@ -211,41 +170,33 @@ def _load_program(source_path: Path, state: _LoadState) -> LoadedProgram:
             break
 
         parsed_import = _parse_import_directive(source, idx)
-        parsed_meta = None if parsed_import is not None else _parse_meta_directive(source, idx)
-        if parsed_import is None and parsed_meta is None:
+        if parsed_import is None:
             break
 
         body_parts.append(source[body_cursor:idx])
 
-        if parsed_import is not None:
-            import_path, idx = parsed_import
-            loaded = _load_imported_path(import_path, source_dir, state)
-            if loaded.source:
-                imported_sources.append(loaded.source)
-            link_artifacts.extend(loaded.link_artifacts)
-            link_flags.extend(loaded.link_flags)
-        else:
-            directive, idx = parsed_meta
-            link_flags.extend(_load_meta_directive(directive, state))
+        import_path, idx = parsed_import
+        loaded = _load_imported_path(import_path, source_dir, state)
+        if loaded.source:
+            imported_sources.append(loaded.source)
+        link_artifacts.extend(loaded.link_artifacts)
 
         body_cursor = idx
 
     body_parts.append(source[body_cursor:])
     combined_source = "\n".join([*imported_sources, "".join(body_parts)])
-    return LoadedProgram(combined_source, link_artifacts, link_flags)
+    return LoadedProgram(combined_source, link_artifacts)
 
 
 def load_program(
     source_path: PathLike,
 ) -> LoadedProgram:
     """
-    Load the full udewy source, imported native link artifacts, and top-level
-    meta link directives.
+    Load the full udewy source and imported native link artifacts.
 
     Imports ending in `.udewy` are treated as udewy source and recursively
     prepended to the current file. Any other imported path is treated as a
     direct external artifact that should be handed to the backend linker.
-    Leading `$...` meta directives are expanded into backend link flags.
     """
 
     return _load_program(Path(source_path), _make_state())

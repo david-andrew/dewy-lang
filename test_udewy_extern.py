@@ -85,6 +85,12 @@ long triple(long x) {
 
     backend = get_backend("x86_64")
     code = parse_udewy(EXTERN_SOURCE, backend)
+    recorded_commands: list[str] = []
+    real_run = subprocess.run
+
+    def recording_run(command: list[str], *args, **kwargs):
+        recorded_commands.append(Path(command[0]).name)
+        return real_run(command, *args, **kwargs)
 
     with TemporaryDirectory() as tmp_dir_name:
         tmp_dir = Path(tmp_dir_name)
@@ -93,7 +99,69 @@ long triple(long x) {
         c_path.write_text(c_source)
         subprocess.run(["cc", "-c", str(c_path), "-o", str(obj_path)], check=True)
 
-        output_path = backend.compile_and_link(code, "extern_demo", tmp_dir, link_artifacts=[str(obj_path)])
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(subprocess, "run", recording_run)
+            output_path = backend.compile_and_link(code, "extern_demo", tmp_dir, link_artifacts=[str(obj_path)])
         exit_code = backend.run(output_path, [])
 
     assert exit_code == 21
+    assert "clang" not in recorded_commands
+    assert recorded_commands[:2] == ["as", "ld"]
+
+
+def test_x86_64_can_link_shared_library_artifact() -> None:
+    if which("cc") is None or which("as") is None or which("ld") is None:
+        pytest.skip("x86_64 shared-library link toolchain not available")
+
+    libc_candidates = [Path("/usr/lib64/libc.so.6"), Path("/lib64/libc.so.6")]
+    libc_path = next((path for path in libc_candidates if path.exists()), None)
+    if libc_path is None:
+        pytest.skip("shared libc not available")
+
+    c_source = """
+long call_strlen(void);
+
+long call_strlen(void) {
+    extern unsigned long strlen(const char *);
+    return (long)strlen("abcd");
+}
+"""
+
+    backend = get_backend("x86_64")
+    code = parse_udewy(
+        """
+let call_strlen = ():>int => extern
+
+let main = ():>int => {
+    return call_strlen()
+}
+""",
+        backend,
+    )
+    recorded_commands: list[str] = []
+    real_run = subprocess.run
+
+    def recording_run(command: list[str], *args, **kwargs):
+        recorded_commands.append(Path(command[0]).name)
+        return real_run(command, *args, **kwargs)
+
+    with TemporaryDirectory() as tmp_dir_name:
+        tmp_dir = Path(tmp_dir_name)
+        c_path = tmp_dir / "externs.c"
+        obj_path = tmp_dir / "externs.o"
+        c_path.write_text(c_source)
+        subprocess.run(["cc", "-c", str(c_path), "-o", str(obj_path)], check=True)
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(subprocess, "run", recording_run)
+            output_path = backend.compile_and_link(
+                code,
+                "extern_shared_demo",
+                tmp_dir,
+                link_artifacts=[str(obj_path), str(libc_path)],
+            )
+        exit_code = backend.run(output_path, [])
+
+    assert exit_code == 4
+    assert "clang" not in recorded_commands
+    assert recorded_commands[:2] == ["as", "ld"]

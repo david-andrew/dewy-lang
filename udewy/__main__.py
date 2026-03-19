@@ -66,7 +66,6 @@ if __name__ == "__main__":
             cache_dir,
             split_wasm=split_wasm,
             link_artifacts=loaded.link_artifacts,
-            link_flags=loaded.link_flags,
         )
     except RuntimeError as e:
         print(f"Error: {e}")
