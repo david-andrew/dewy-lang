@@ -5,7 +5,7 @@ The frontend stays single-pass and emits directly through the backend protocol,
 but it uses ordinary Python data structures for symbol tracking.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from . import t1
@@ -72,6 +72,11 @@ class ParseState:
     global_table: GlobalTable
     scope_stack: ScopeStack
     ctx: ParseContext
+    global_init_label_ids: list[int] = field(default_factory=list)
+    next_global_init_index: int = 0
+
+
+_GLOBALS_INIT_NAME = "__udewy_globals_init__"
 
 # ============================================================================
 # Helper functions
@@ -189,6 +194,12 @@ def push_stable_value(backend: Backend, stable_value: StableValue) -> None:
         backend.push_static_ref(stable_value.value)
         return
     raise ValueError(f"Unknown stable value kind: {stable_value.kind}")
+
+
+def next_global_init_name(state: ParseState) -> str:
+    name = f"__udewy_global_init_{state.next_global_init_index}__"
+    state.next_global_init_index += 1
+    return name
 
 
 def lookup_stable_value(
@@ -460,6 +471,56 @@ def validate_intrinsic_arity(backend: Backend, name: str, arg_count: int, loc: i
         )
 
 
+def mixed_xmm_intrinsic_arg_slots(name: str) -> int | None:
+    prefix = "__call_extern_xmm_mixed_"
+    suffix = "__"
+    if not name.startswith(prefix) or not name.endswith(suffix):
+        return None
+    value = name[len(prefix) : -len(suffix)]
+    if not value.isdigit():
+        return None
+    arg_slots = int(value)
+    if arg_slots < 1 or arg_slots > 8:
+        return None
+    return arg_slots
+
+
+def parse_mixed_xmm_intrinsic_call(
+    name: str,
+    toks: list[t1.Token],
+    idx: int,
+    state: ParseState,
+    call_loc: int,
+) -> tuple[int, int, list[int]]:
+    arg_slots = mixed_xmm_intrinsic_arg_slots(name)
+    if arg_slots is None:
+        raise SyntaxError(f"Unsupported mixed intrinsic {name!r} at position {call_loc}")
+
+    idx = parse_expr(toks, idx, state, 0)
+    state.backend.save_value()
+    arg_count = 1
+    type_tags: list[int] = []
+
+    for _ in range(arg_slots):
+        parsed = try_parse_stable_expr(toks, idx, state, emit_runtime=False)
+        if parsed is None:
+            raise SyntaxError(f"Expected compile-time type tag for intrinsic {name!r} at position {call_loc}")
+        idx, stable_type = parsed
+        arg_count = arg_count + 1
+        if stable_type.kind != "int" or stable_type.value not in (0, 1, 2):
+            raise SyntaxError(
+                f"Mixed XMM intrinsic {name!r} requires type tags 0, 1, or 2 at position {call_loc}"
+            )
+        type_tags.append(stable_type.value)
+
+        idx = parse_expr(toks, idx, state, 0)
+        state.backend.save_value()
+        arg_count = arg_count + 1
+
+    idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
+    return idx, arg_count, type_tags
+
+
 def note_function_reference(
     backend: Backend,
     fn_table: FunctionTable,
@@ -651,20 +712,32 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
             backend.push_static_ref(label_id)
             return idx
 
-        arg_count = 0
-        while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
-            idx = parse_expr(toks, idx, state, 0)
-            backend.save_value()
-            arg_count = arg_count + 1
-
-        idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
-
         if backend.is_intrinsic(name):
+            intrinsic_data: object | None = None
+            if mixed_xmm_intrinsic_arg_slots(name) is not None:
+                idx, arg_count, type_tags = parse_mixed_xmm_intrinsic_call(name, toks, idx, state, call_loc)
+                intrinsic_data = {"type_tags": type_tags}
+            else:
+                arg_count = 0
+                while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
+                    idx = parse_expr(toks, idx, state, 0)
+                    backend.save_value()
+                    arg_count = arg_count + 1
+
+                idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
+
             validate_intrinsic_arity(backend, name, arg_count, call_loc)
             if arg_count > 0:
                 backend.restore_value()
-            backend.emit_intrinsic(name, arg_count)
+            backend.emit_intrinsic(name, arg_count, intrinsic_data)
         else:
+            arg_count = 0
+            while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
+                idx = parse_expr(toks, idx, state, 0)
+                backend.save_value()
+                arg_count = arg_count + 1
+
+            idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
             validate_call_arity(backend, arg_count, call_loc)
             entry = note_function_reference(backend, state.fn_table, name, arg_count, call_loc)
             backend.call_direct(entry.label_id, arg_count)
@@ -1136,16 +1209,29 @@ def parse_program(toks: list[t1.Token], state: ParseState) -> None:
                 continue
 
             stable_result = try_parse_stable_expr(toks, idx, state, emit_runtime=False)
-            if stable_result is None:
-                raise SyntaxError(f"Global variables must have constant initializers at {toks[idx].location}")
-            idx, stable_value = stable_result
+            if stable_result is not None:
+                idx, stable_value = stable_result
+                directive = stable_value_to_directive(backend, stable_value)
+                label_id = backend.define_global(None, directive)
+                const_value = stable_value if is_const else None
+            else:
+                label_id = backend.define_global(None, 0)
+                const_value = None
 
-            directive = stable_value_to_directive(backend, stable_value)
-            label_id = backend.define_global(None, directive)
+                init_name = next_global_init_name(state)
+                init_label_id = backend.declare_function(init_name, 0)
+                state.global_init_label_ids.append(init_label_id)
+                backend.begin_function(init_label_id, init_name, 0, False)
+                idx = parse_expr(toks, idx, state, 0)
+                backend.store_global(label_id)
+                backend.push_void()
+                backend.emit_return()
+                backend.end_function()
+
             global_declare(
                 state.global_table,
                 name,
-                GlobalEntry(label_id=label_id, is_const=is_const, const_value=stable_value if is_const else None),
+                GlobalEntry(label_id=label_id, is_const=is_const, const_value=const_value),
             )
         else:
             raise SyntaxError(f"Only declarations allowed at top level, got {t1.dump_token(toks[idx], state.src)}")
@@ -1178,6 +1264,19 @@ def parse(toks: list[t1.Token], src: str, backend: Backend) -> str:
     )
     
     parse_program(toks, state)
+
+    if state.global_init_label_ids:
+        backend.set_module_init(_GLOBALS_INIT_NAME)
+        init_label_id = backend.declare_function(_GLOBALS_INIT_NAME, 0)
+        backend.begin_function(init_label_id, _GLOBALS_INIT_NAME, 0, False)
+        for label_id in state.global_init_label_ids:
+            backend.call_direct(label_id, 0)
+            backend.pop_value()
+        backend.push_void()
+        backend.emit_return()
+        backend.end_function()
+    else:
+        backend.set_module_init(None)
     
     for name, entry in fn_table.items():
         if not entry.is_defined:

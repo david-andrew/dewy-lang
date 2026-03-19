@@ -165,3 +165,94 @@ let main = ():>int => {
     assert exit_code == 4
     assert "clang" not in recorded_commands
     assert recorded_commands[:2] == ["as", "ld"]
+
+
+def test_x86_64_runs_runtime_global_initializers_before_main() -> None:
+    if which("as") is None or which("ld") is None:
+        pytest.skip("x86_64 runtime-global-init toolchain not available")
+
+    src = """
+let seed:int = helper()
+const twice:int = seed + seed
+
+let helper = ():>int => {
+    return 7
+}
+
+let main = ():>int => {
+    return twice
+}
+"""
+
+    backend = get_backend("x86_64")
+    code = parse_udewy(src, backend)
+
+    with TemporaryDirectory() as tmp_dir_name:
+        tmp_dir = Path(tmp_dir_name)
+        output_path = backend.compile_and_link(code, "runtime_global_init_demo", tmp_dir)
+        exit_code = backend.run(output_path, [])
+
+    assert exit_code == 14
+
+
+def test_x86_64_can_call_mixed_xmm_intrinsic() -> None:
+    if which("cc") is None or which("as") is None or which("ld") is None:
+        pytest.skip("x86_64 mixed XMM toolchain not available")
+
+    c_source = """
+long mix_value(float a, long b, double c, float d) {
+    return (long)a + (b * 10) + ((long)c * 100) + ((long)d * 1000);
+}
+"""
+
+    src = """
+let mix_value = (a:int b:int c:int d:int):>int => extern
+
+let main = ():>int => {
+    return __call_extern_xmm_mixed_4__(
+        mix_value
+        1 __i64_to_f32_bits__(2)
+        0 3
+        2 __i64_to_f64_bits__(4)
+        1 __i64_to_f32_bits__(5)
+    )
+}
+"""
+
+    backend = get_backend("x86_64")
+    code = parse_udewy(src, backend)
+
+    with TemporaryDirectory() as tmp_dir_name:
+        tmp_dir = Path(tmp_dir_name)
+        c_path = tmp_dir / "mixed.c"
+        obj_path = tmp_dir / "mixed.o"
+        c_path.write_text(c_source)
+        subprocess.run(["cc", "-c", str(c_path), "-o", str(obj_path)], check=True)
+
+        output_path = backend.compile_and_link(code, "mixed_xmm_demo", tmp_dir, link_artifacts=[str(obj_path)])
+        exit_code = backend.run(output_path, [])
+
+    assert exit_code == 56
+
+
+@pytest.mark.parametrize("target", ["x86_64", "arm"])
+def test_mixed_xmm_intrinsic_codegen(target: BackendName) -> None:
+    backend = get_backend(target)
+    code = parse_udewy(
+        """
+let mix_value = (a:int b:int c:int d:int):>int => extern
+
+let main = ():>int => {
+    return __call_extern_xmm_mixed_4__(
+        mix_value
+        1 __i64_to_f32_bits__(2)
+        0 3
+        2 __i64_to_f64_bits__(4)
+        1 __i64_to_f32_bits__(5)
+    )
+}
+""",
+        backend,
+    )
+
+    assert ".extern mix_value" in code

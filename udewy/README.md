@@ -389,6 +389,8 @@ A value is **compile-time stable** when the compiler can determine it completely
 - `const` bindings initialized from other compile-time stable values
 - Function identifiers, since functions are top-level only and cannot be redefined or reassigned
 
+Top-level `let` and `const` bindings may also use non-stable initializer expressions. Those initializers are lowered into a synthetic startup pass that runs once before `main`, in declaration order. Such bindings remain ordinary runtime globals, so they do **not** count as compile-time stable unless their initializer was already compile-time stable.
+
 Array literals are stored in static memory with an 8-byte length prefix. See [Memory Layout](#16-memory-layout).
 
 ### Function Calls
@@ -1093,6 +1095,33 @@ The x86_64 backend still follows udewy's logical value-stack model, but it does 
 - Successive small allocations therefore advance in 8-byte units on this backend.
 - The backend still pads the machine stack as needed at call boundaries to satisfy the System V ABI.
 
+## A.2.3 Mixed GP / FP Extern Intrinsics
+
+The x86_64 backend supports mixed integer/pointer and floating-point extern calls through the intrinsic family:
+
+```udewy
+__call_extern_xmm_mixed_1__(fn type0 value0)
+__call_extern_xmm_mixed_2__(fn type0 value0 type1 value1)
+...
+__call_extern_xmm_mixed_8__(fn type0 value0 ... type7 value7)
+```
+
+Rules:
+- `fn` is an extern function reference
+- each `typeN` must be a compile-time integer literal
+- `0` means pass `valueN` through the normal integer/pointer calling convention
+- `1` means treat the low 32 bits of `valueN` as raw `f32` bits and pass them in the next XMM argument register
+- `2` means treat all 64 bits of `valueN` as raw `f64` bits and pass them in the next XMM argument register
+
+This backend also provides:
+
+```udewy
+__i64_to_f32_bits__(value)
+__i64_to_f64_bits__(value)
+```
+
+These convert a signed integer value into IEEE-754 `f32` / `f64` bit patterns, returned as ordinary udewy integers.
+
 ## A.3 Syscall Intrinsics
 
 ```udewy
@@ -1308,6 +1337,31 @@ The AArch64 backend also keeps the parser-visible stack model, but uses register
 - `__alloca__` returns an address aligned to 16 bytes.
 - Successive small allocations therefore advance in 16-byte units on this backend.
 - This stronger alignment matches the backend's stack-alignment requirements.
+
+## C.2.3 Mixed GP / FP Extern Intrinsics
+
+The AArch64 backend supports the same mixed extern intrinsic family as x86_64:
+
+```udewy
+__call_extern_xmm_mixed_1__(fn type0 value0)
+__call_extern_xmm_mixed_2__(fn type0 value0 type1 value1)
+...
+__call_extern_xmm_mixed_8__(fn type0 value0 ... type7 value7)
+```
+
+Rules:
+- `0` passes the value through the general-purpose argument registers `x0`-`x7`
+- `1` treats the low 32 bits as raw `f32` bits and passes them in the next floating-point argument register
+- `2` treats all 64 bits as raw `f64` bits and passes them in the next floating-point argument register
+
+This backend also provides:
+
+```udewy
+__i64_to_f32_bits__(value)
+__i64_to_f64_bits__(value)
+```
+
+These convert signed integers to `f32` / `f64` bit patterns while keeping udewy's runtime representation as integers.
 
 ## C.3 Syscall Intrinsics
 

@@ -74,6 +74,15 @@ class Backend(ABC):
         """
         Finalize and return a string of the generated artifact (assembly, WAT, etc.).
         """
+
+    @abstractmethod
+    def set_module_init(self, name: str | None) -> None:
+        """
+        Register an optional synthetic module initializer.
+
+        Backends should run this initializer exactly once before user-visible entry
+        points when a name is provided.
+        """
     
     # ========================================================================
     # Data section - strings, arrays, globals
@@ -459,7 +468,7 @@ class Backend(ABC):
         """
     
     @abstractmethod
-    def emit_intrinsic(self, name: str, num_args: int) -> None:
+    def emit_intrinsic(self, name: str, num_args: int, intrinsic_data: object | None = None) -> None:
         """
         Emit code for an intrinsic call.
         

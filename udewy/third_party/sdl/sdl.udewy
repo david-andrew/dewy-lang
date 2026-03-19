@@ -5,8 +5,23 @@ import p"SDL3-shared-bundle/link.udewy"
 
 const SDL_INIT_VIDEO:int = 0x00000020
 const SDL_EVENT_QUIT:int = 0x00000100
+const SDL_WINDOW_OPENGL:int = 0x00000002
 const SDL_WINDOW_RESIZABLE:int = 0x00000020
 const SDL_EVENT_SIZE:int = 128
+const SDL_GL_DOUBLEBUFFER:int = 5
+const SDL_GL_DEPTH_SIZE:int = 6
+const SDL_GL_CONTEXT_MAJOR_VERSION:int = 17
+const SDL_GL_CONTEXT_MINOR_VERSION:int = 18
+const SDL_GL_CONTEXT_PROFILE_MASK:int = 20
+const SDL_GL_CONTEXT_PROFILE_COMPATIBILITY:int = 0x0002
+
+const GL_COLOR_BUFFER_BIT:int = 0x00004000
+const GL_DEPTH_BUFFER_BIT:int = 0x00000100
+const GL_DEPTH_TEST:int = 0x0B71
+const GL_LEQUAL:int = 0x0203
+const GL_MODELVIEW:int = 0x1700
+const GL_PROJECTION:int = 0x1701
+const GL_LINES:int = 0x0001
 
 let SDL_Init = (flags:int):>int => extern
 let SDL_SetMainReady = ():>void => extern
@@ -16,6 +31,7 @@ let SDL_GetError = ():>int => extern
 let SDL_CreateWindow = (title:int width:int height:int flags:int):>int => extern
 let SDL_DestroyWindow = (window:int):>void => extern
 let SDL_ShowWindow = (window:int):>int => extern
+let SDL_GetWindowSizeInPixels = (window:int w:int h:int):>int => extern
 
 let SDL_PollEvent = (event:int):>int => extern
 let SDL_Delay = (ms:int):>void => extern
@@ -31,7 +47,66 @@ let SDL_GetWindowSurface = (window:int):>int => extern
 let SDL_UpdateWindowSurface = (window:int):>int => extern
 let SDL_MapSurfaceRGBA = (surface:int r:int g:int b:int a:int):>int => extern
 let SDL_FillSurfaceRect = (surface:int rect:int color:int):>int => extern
+let SDL_GL_SetAttribute = (attr:int value:int):>int => extern
+let SDL_GL_CreateContext = (window:int):>int => extern
+let SDL_GL_MakeCurrent = (window:int context:int):>int => extern
+let SDL_GL_SetSwapInterval = (interval:int):>int => extern
+let SDL_GL_SwapWindow = (window:int):>int => extern
+let SDL_GL_DestroyContext = (context:int):>int => extern
+
+let glEnable = (cap:int):>void => extern
+let glDepthFunc = (func:int):>void => extern
+let glClear = (mask:int):>void => extern
+let glViewport = (x:int y:int width:int height:int):>void => extern
+let glMatrixMode = (mode:int):>void => extern
+let glLoadIdentity = ():>void => extern
+let glBegin = (mode:int):>void => extern
+let glEnd = ():>void => extern
+let glClearColor = (r:int g:int b:int a:int):>void => extern
+let glOrtho = (left:int right:int bottom:int top:int near_val:int far_val:int):>void => extern
+let glTranslatef = (x:int y:int z:int):>void => extern
+let glRotatef = (angle:int x:int y:int z:int):>void => extern
+let glColor3f = (r:int g:int b:int):>void => extern
+let glVertex3f = (x:int y:int z:int):>void => extern
 
 let SDL_EventType = (event:int):>int => {
     return __load_u32__(event)
+}
+
+let GL_F32_FromInt = (value:int):>int => {
+    return __i64_to_f32_bits__(value)
+}
+
+let GL_F64_FromInt = (value:int):>int => {
+    return __i64_to_f64_bits__(value)
+}
+
+let GL_ClearColor = (r:int g:int b:int a:int):>void => {
+    __call_extern_xmm_mixed_4__(glClearColor 1 r 1 g 1 b 1 a)
+    return 0
+}
+
+let GL_Ortho = (left:int right:int bottom:int top:int near_val:int far_val:int):>void => {
+    __call_extern_xmm_mixed_6__(glOrtho 2 left 2 right 2 bottom 2 top 2 near_val 2 far_val)
+    return 0
+}
+
+let GL_Translatef = (x:int y:int z:int):>void => {
+    __call_extern_xmm_mixed_3__(glTranslatef 1 x 1 y 1 z)
+    return 0
+}
+
+let GL_Rotatef = (angle:int x:int y:int z:int):>void => {
+    __call_extern_xmm_mixed_4__(glRotatef 1 angle 1 x 1 y 1 z)
+    return 0
+}
+
+let GL_Color3f = (r:int g:int b:int):>void => {
+    __call_extern_xmm_mixed_3__(glColor3f 1 r 1 g 1 b)
+    return 0
+}
+
+let GL_Vertex3f = (x:int y:int z:int):>void => {
+    __call_extern_xmm_mixed_3__(glVertex3f 1 x 1 y 1 z)
+    return 0
 }

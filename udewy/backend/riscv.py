@@ -41,6 +41,7 @@ class RiscvBackend(Backend):
         self._data: list[str] = []
         self._next_label: int = 0
         self._extern_symbols: set[str] = set()
+        self._module_init_name: str | None = None
         
         # Function state
         self._current_fn_epilogue: str = ""
@@ -194,6 +195,9 @@ class RiscvBackend(Backend):
     def begin_module(self) -> None:
         """Initialize the module for code generation."""
         pass
+
+    def set_module_init(self, name: str | None) -> None:
+        self._module_init_name = name
     
     def finish_module(self) -> str:
         """Finalize and return the generated assembly."""
@@ -214,6 +218,8 @@ class RiscvBackend(Backend):
         output.append("    ld a0, 0(sp)")           # argc
         output.append("    addi a1, sp, 8")         # argv
         output.append("    andi sp, sp, -16")       # align stack
+        if self._module_init_name is not None:
+            output.append(f"    call {self._module_init_name}")
         output.append("    call __main__")
         output.append("    li a7, 94")              # exit_group syscall
         output.append("    ecall")
@@ -794,7 +800,7 @@ class RiscvBackend(Backend):
         """Return the expected arity for a supported intrinsic."""
         return self._INTRINSIC_ARITIES.get(name)
     
-    def emit_intrinsic(self, name: str, num_args: int) -> None:
+    def emit_intrinsic(self, name: str, num_args: int, intrinsic_data: object | None = None) -> None:
         """Emit code for an intrinsic call."""
         if name == "__load_u8__":
             self.load_mem(8, signed=False)

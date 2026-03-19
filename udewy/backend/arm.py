@@ -36,12 +36,14 @@ class ArmBackend(Backend):
     _VALUE_CACHE_REGS = ["x20", "x21", "x22", "x23"]
     _SAVE_AREA_BYTES = 96
     _MAX_STACK_ADJUST_IMM = 4080
+    _FP_ARG_REGS = [f"v{i}" for i in range(8)]
     
     def __init__(self) -> None:
         self._code: list[str] = []
         self._data: list[str] = []
         self._next_label: int = 0
         self._extern_symbols: set[str] = set()
+        self._module_init_name: str | None = None
         
         # Function state
         self._current_fn_epilogue: str = ""
@@ -227,6 +229,9 @@ class ArmBackend(Backend):
     def begin_module(self) -> None:
         """Initialize the module for code generation."""
         pass
+
+    def set_module_init(self, name: str | None) -> None:
+        self._module_init_name = name
     
     def finish_module(self) -> str:
         """Finalize and return the generated assembly."""
@@ -245,6 +250,8 @@ class ArmBackend(Backend):
         output.append("    mov x9, sp")             # align stack to 16 bytes
         output.append("    bic x9, x9, #15")
         output.append("    mov sp, x9")
+        if self._module_init_name is not None:
+            output.append(f"    bl {self._module_init_name}")
         output.append("    bl __main__")
         output.append("    mov x8, #94")            # exit_group syscall
         output.append("    svc #0")
@@ -745,6 +752,67 @@ class ArmBackend(Backend):
             self._pop_saved_into("x0")
             self._pop_saved_into("x8")
             self._emit("svc #0")
+
+    def _mixed_intrinsic_arg_slots(self, name: str) -> int | None:
+        prefix = "__call_extern_xmm_mixed_"
+        suffix = "__"
+        if not name.startswith(prefix) or not name.endswith(suffix):
+            return None
+        value = name[len(prefix) : -len(suffix)]
+        if not value.isdigit():
+            return None
+        arg_slots = int(value)
+        if arg_slots < 1 or arg_slots > 8:
+            return None
+        return arg_slots
+
+    def _emit_move_to_fp(self, kind: int, fp_reg: str) -> None:
+        if kind == 1:
+            fp_scalar = fp_reg.replace("v", "s", 1)
+            self._emit(f"fmov {fp_scalar}, w0")
+            return
+        if kind == 2:
+            fp_scalar = fp_reg.replace("v", "d", 1)
+            self._emit(f"fmov {fp_scalar}, x0")
+            return
+        raise RuntimeError(f"unsupported FP intrinsic kind: {kind}")
+
+    def _call_extern_fp_mixed(self, type_tags: list[int]) -> None:
+        gp_slots: list[int] = []
+        fp_slots: list[int] = []
+        gp_count = 0
+        fp_count = 0
+        for kind in type_tags:
+            if kind == 0:
+                gp_slots.append(gp_count)
+                fp_slots.append(-1)
+                gp_count += 1
+            elif kind in (1, 2):
+                gp_slots.append(-1)
+                fp_slots.append(fp_count)
+                fp_count += 1
+            else:
+                raise RuntimeError(f"unsupported mixed FP intrinsic kind: {kind}")
+
+        if gp_count > len(self._ARG_REGS):
+            raise RuntimeError("mixed FP intrinsic exceeds supported GP argument register count")
+        if fp_count > len(self._FP_ARG_REGS):
+            raise RuntimeError("mixed FP intrinsic exceeds supported FP argument register count")
+
+        for arg_index in range(len(type_tags) - 1, -1, -1):
+            kind = type_tags[arg_index]
+            if kind == 0:
+                dst_reg = self._ARG_REGS[gp_slots[arg_index]]
+                if dst_reg != "x0":
+                    self._emit(f"mov {dst_reg}, x0")
+            else:
+                self._emit_move_to_fp(kind, self._FP_ARG_REGS[fp_slots[arg_index]])
+
+            if arg_index > 0:
+                self._pop_saved_into("x0")
+
+        self._pop_saved_into("x9")
+        self._emit("blr x9")
     
     # ========================================================================
     # Control flow
@@ -808,17 +876,27 @@ class ArmBackend(Backend):
     # Intrinsics
     # ========================================================================
     
-    _INTRINSIC_ARITIES = CORE_INTRINSIC_ARITIES | LINUX_SYSCALL_INTRINSIC_ARITIES
+    _INTRINSIC_ARITIES = (
+        CORE_INTRINSIC_ARITIES
+        | LINUX_SYSCALL_INTRINSIC_ARITIES
+        | {
+            "__i64_to_f32_bits__": 1,
+            "__i64_to_f64_bits__": 1,
+        }
+    )
     
     def is_intrinsic(self, name: str) -> bool:
         """Check if name is an intrinsic supported by this backend."""
-        return name in self._INTRINSIC_ARITIES
+        return name in self._INTRINSIC_ARITIES or self._mixed_intrinsic_arg_slots(name) is not None
 
     def intrinsic_arity(self, name: str) -> int | None:
         """Return the expected arity for a supported intrinsic."""
+        mixed_args = self._mixed_intrinsic_arg_slots(name)
+        if mixed_args is not None:
+            return 1 + (mixed_args * 2)
         return self._INTRINSIC_ARITIES.get(name)
     
-    def emit_intrinsic(self, name: str, num_args: int) -> None:
+    def emit_intrinsic(self, name: str, num_args: int, intrinsic_data: object | None = None) -> None:
         """Emit code for an intrinsic call."""
         if name == "__load_u8__":
             self.load_mem(8, signed=False)
@@ -868,8 +946,24 @@ class ArmBackend(Backend):
             self.unsigned_cmp("gte")
         elif name == "__alloca__":
             self.alloca()
+        elif name == "__i64_to_f32_bits__":
+            self._emit("scvtf s0, x0")
+            self._emit("fmov w0, s0")
+        elif name == "__i64_to_f64_bits__":
+            self._emit("scvtf d0, x0")
+            self._emit("fmov x0, d0")
         elif name.startswith("__syscall"):
             self.syscall(num_args)
+        else:
+            mixed_args = self._mixed_intrinsic_arg_slots(name)
+            if mixed_args is None:
+                raise RuntimeError(f"unsupported intrinsic {name!r}")
+            if not isinstance(intrinsic_data, dict) or "type_tags" not in intrinsic_data:
+                raise RuntimeError(f"missing type tags for intrinsic {name!r}")
+            type_tags = intrinsic_data["type_tags"]
+            if not isinstance(type_tags, list) or len(type_tags) != mixed_args:
+                raise RuntimeError(f"invalid type tags for intrinsic {name!r}")
+            self._call_extern_fp_mixed(type_tags)
     
     def get_builtin_constants(self) -> dict[str, int]:
         """Return AArch64 Linux syscall numbers and common constants."""

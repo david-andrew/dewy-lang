@@ -25,3 +25,19 @@ def test_sdl_demo_compiles_with_imported_artifact() -> None:
         )
 
     assert output_path.name == "demo_sdl3_test"
+
+
+def test_sdl_opengl_demo_compiles_with_imported_artifacts() -> None:
+    backend = get_backend("x86_64")
+    loaded = t0.load_program(Path("udewy/tests/demo_sdl_gl_wireframe.udewy"))
+    code = p0.parse(t1.tokenize(loaded.source), loaded.source, backend)
+
+    with TemporaryDirectory() as tmp_dir_name:
+        output_path = backend.compile_and_link(
+            code,
+            "demo_sdl_gl_wireframe_test",
+            Path(tmp_dir_name),
+            link_artifacts=loaded.link_artifacts,
+        )
+
+    assert output_path.name == "demo_sdl_gl_wireframe_test"

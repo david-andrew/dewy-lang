@@ -1,0 +1,141 @@
+import p"../third_party/sdl/sdl.udewy"
+
+const F32_ZERO:int = __i64_to_f32_bits__(0)
+const F32_ONE:int = __i64_to_f32_bits__(1)
+const F32_NEG_ONE:int = __i64_to_f32_bits__(-1)
+
+const F64_NEG_TWO:int = __i64_to_f64_bits__(-2)
+const F64_POS_TWO:int = __i64_to_f64_bits__(2)
+const F64_NEG_TEN:int = __i64_to_f64_bits__(-10)
+const F64_POS_TEN:int = __i64_to_f64_bits__(10)
+
+let draw_edge = (ax:int ay:int az:int bx:int by:int bz:int):>void => {
+    GL_Vertex3f(ax ay az)
+    GL_Vertex3f(bx by bz)
+    return 0
+}
+
+let draw_cube = ():>void => {
+    glBegin(GL_LINES)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
+
+    draw_edge(F32_NEG_ONE F32_NEG_ONE F32_NEG_ONE F32_ONE F32_NEG_ONE F32_NEG_ONE)
+    draw_edge(F32_ONE F32_NEG_ONE F32_NEG_ONE F32_ONE F32_ONE F32_NEG_ONE)
+    draw_edge(F32_ONE F32_ONE F32_NEG_ONE F32_NEG_ONE F32_ONE F32_NEG_ONE)
+    draw_edge(F32_NEG_ONE F32_ONE F32_NEG_ONE F32_NEG_ONE F32_NEG_ONE F32_NEG_ONE)
+
+    draw_edge(F32_NEG_ONE F32_NEG_ONE F32_ONE F32_ONE F32_NEG_ONE F32_ONE)
+    draw_edge(F32_ONE F32_NEG_ONE F32_ONE F32_ONE F32_ONE F32_ONE)
+    draw_edge(F32_ONE F32_ONE F32_ONE F32_NEG_ONE F32_ONE F32_ONE)
+    draw_edge(F32_NEG_ONE F32_ONE F32_ONE F32_NEG_ONE F32_NEG_ONE F32_ONE)
+
+    draw_edge(F32_NEG_ONE F32_NEG_ONE F32_NEG_ONE F32_NEG_ONE F32_NEG_ONE F32_ONE)
+    draw_edge(F32_ONE F32_NEG_ONE F32_NEG_ONE F32_ONE F32_NEG_ONE F32_ONE)
+    draw_edge(F32_ONE F32_ONE F32_NEG_ONE F32_ONE F32_ONE F32_ONE)
+    draw_edge(F32_NEG_ONE F32_ONE F32_NEG_ONE F32_NEG_ONE F32_ONE F32_ONE)
+
+    glEnd()
+    return 0
+}
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO) =? 0 {
+        return 1
+    }
+
+    if SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1) =? 0 {
+        SDL_Quit()
+        return 2
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE 24) =? 0 {
+        SDL_Quit()
+        return 3
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION 2) =? 0 {
+        SDL_Quit()
+        return 4
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION 1) =? 0 {
+        SDL_Quit()
+        return 5
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK SDL_GL_CONTEXT_PROFILE_COMPATIBILITY) =? 0 {
+        SDL_Quit()
+        return 6
+    }
+
+    let title:int = "udewy opengl wireframe\0"
+    let window_flags:int = SDL_WINDOW_OPENGL + SDL_WINDOW_RESIZABLE
+    let window:int = SDL_CreateWindow(title 800 600 window_flags)
+    if window =? 0 {
+        SDL_Quit()
+        return 7
+    }
+
+    let gl_context:int = SDL_GL_CreateContext(window)
+    if gl_context =? 0 {
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 8
+    }
+
+    if SDL_GL_MakeCurrent(window gl_context) =? 0 {
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 9
+    }
+    if SDL_GL_SetSwapInterval(1) =? 0 {
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 10
+    }
+
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let size:int = __static_alloca__(8)
+    let frame:int = 0
+    let running:int = 1
+
+    loop running not=? 0 {
+        let has_event:int = SDL_PollEvent(event)
+        loop has_event not=? 0 {
+            if SDL_EventType(event) =? SDL_EVENT_QUIT {
+                running = 0
+            }
+            has_event = SDL_PollEvent(event)
+        }
+
+        SDL_GetWindowSizeInPixels(window size size + 4)
+        let width:int = __load_u32__(size)
+        let height:int = __load_u32__(size + 4)
+
+        glViewport(0 0 width height)
+        GL_ClearColor(F32_ZERO F32_ZERO F32_ZERO F32_ONE)
+        glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        GL_Ortho(F64_NEG_TWO F64_POS_TWO F64_NEG_TWO F64_POS_TWO F64_NEG_TEN F64_POS_TEN)
+
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+        GL_Rotatef(GL_F32_FromInt(frame % 360) F32_ONE F32_ZERO F32_ZERO)
+        GL_Rotatef(GL_F32_FromInt((frame * 2) % 360) F32_ZERO F32_ONE F32_ZERO)
+
+        draw_cube()
+        SDL_GL_SwapWindow(window)
+
+        SDL_Delay(16)
+        frame = frame + 1
+    }
+
+    SDL_GL_DestroyContext(gl_context)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}

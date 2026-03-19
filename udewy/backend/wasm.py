@@ -39,6 +39,8 @@ class Wasm32Backend(Backend):
         self._data_segments: list[tuple[int, bytes]] = []
         self._next_label: int = 0
         self._data_offset: int = 1024  # Start data after initial memory
+        self._module_init_name: str | None = None
+        self._user_main_name = "$__main__"
         
         # Function state
         self._current_fn_name: str = ""
@@ -194,6 +196,9 @@ class Wasm32Backend(Backend):
     def begin_module(self) -> None:
         """Initialize the module for code generation."""
         pass
+
+    def set_module_init(self, name: str | None) -> None:
+        self._module_init_name = name
     
     def finish_module(self) -> str:
         """Finalize and return the generated WAT."""
@@ -214,6 +219,8 @@ class Wasm32Backend(Backend):
         
         # Global definitions - after imports, before functions
         output.append('  (global $stack_ptr (mut i32) (i32.const 131072))')
+        if self._module_init_name is not None:
+            output.append('  (global $__udewy_module_init_done (mut i32) (i32.const 0))')
 
         if self._fn_table_ids:
             output.append(f"  (table {len(self._fn_table_ids)} funcref)")
@@ -221,6 +228,19 @@ class Wasm32Backend(Backend):
         # Functions
         for fn in self._functions:
             output.append(fn)
+
+        output.append("  (func $main (result i64)")
+        if self._module_init_name is not None:
+            output.append("    global.get $__udewy_module_init_done")
+            output.append("    if")
+            output.append("    else")
+            output.append("      i32.const 1")
+            output.append("      global.set $__udewy_module_init_done")
+            output.append(f"      call ${self._module_init_name}")
+            output.append("      drop")
+            output.append("    end")
+        output.append(f"    call {self._user_main_name}")
+        output.append("  )")
 
         if self._fn_table_ids:
             refs = " ".join(self._fn_labels[label_id] for label_id in self._fn_table_ids)
@@ -371,7 +391,12 @@ class Wasm32Backend(Backend):
         """Declare a function."""
         label_id = self._next_label
         self._next_label += 1
-        fn_name = f"$fn{label_id}" if name is None else f"${name}"
+        if name is None:
+            fn_name = f"$fn{label_id}"
+        elif name == "main":
+            fn_name = self._user_main_name
+        else:
+            fn_name = f"${name}"
         self._fn_labels[label_id] = fn_name
         self._fn_indices[label_id] = self._next_fn_index
         self._fn_param_counts[label_id] = num_params
@@ -388,12 +413,8 @@ class Wasm32Backend(Backend):
     def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
         """Begin function definition."""
         self._defined_fns.add(label_id)
-        
-        if is_main:
-            fn_name = "$main"
-            self._fn_labels[label_id] = fn_name
-        else:
-            fn_name = self._fn_labels.get(label_id, f"$fn{label_id}")
+
+        fn_name = self._fn_labels.get(label_id, f"$fn{label_id}")
         self._fn_param_counts[label_id] = param_count
         
         self._current_fn_name = fn_name
@@ -941,7 +962,7 @@ class Wasm32Backend(Backend):
         """Return the expected arity for a supported intrinsic."""
         return self._INTRINSIC_ARITIES.get(name)
     
-    def emit_intrinsic(self, name: str, num_args: int) -> None:
+    def emit_intrinsic(self, name: str, num_args: int, intrinsic_data: object | None = None) -> None:
         """Emit code for an intrinsic call."""
         if name == "__load_u8__":
             self.load_mem(8, signed=False)
