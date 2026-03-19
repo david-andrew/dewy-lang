@@ -33,6 +33,7 @@ class X86_64Backend(Backend):
         self._code: list[str] = []
         self._data: list[str] = []
         self._next_label: int = 0
+        self._extern_symbols: set[str] = set()
         
         # Function state
         self._current_fn_epilogue: str = ""
@@ -164,6 +165,8 @@ class X86_64Backend(Backend):
         output = []
         output.append(".text")
         output.append(".globl _start")
+        for symbol in sorted(self._extern_symbols):
+            output.append(f".extern {symbol}")
         output.append("")
         
         # Emit _start entry point
@@ -174,13 +177,17 @@ class X86_64Backend(Backend):
         output.append("    andq $-16, %rsp")        # align stack
         output.append("    call __main__")
         output.append("    movq %rax, %rdi")        # exit code
-        output.append("    movq $60, %rax")         # exit syscall
+        output.append("    movq $231, %rax")        # exit_group syscall
         output.append("    syscall")
         output.append("")
         
         output.extend(self._code)
         output.append("")
         output.append(".data")
+        output.append(".hidden __dso_handle")
+        output.append(".weak __dso_handle")
+        output.append("__dso_handle:")
+        output.append("    .quad 0")
         output.extend(self._data)
         output.append("")
         output.append(".section .note.GNU-stack,\"\",@progbits")
@@ -218,15 +225,27 @@ class X86_64Backend(Backend):
         
         return label_id
     
-    def define_global(self, name_id: int, value: int | str) -> int:
+    def define_global(self, name: str | None, value: int | str) -> int:
         """Define a global variable."""
         label_id = self._next_label
-        label = self._new_label("global")
+        if name is None:
+            label = self._new_label("global")
+        else:
+            label = name
+            self._next_label += 1
         self._global_labels[label_id] = label
         
         self._emit_data_label(label)
         self._emit_data(f"    .quad {value}")
         
+        return label_id
+
+    def declare_extern_global(self, name: str) -> int:
+        """Declare an externally provided global variable."""
+        label_id = self._next_label
+        self._next_label += 1
+        self._global_labels[label_id] = name
+        self._extern_symbols.add(name)
         return label_id
 
     def intern_static(self, size: int) -> int:
@@ -287,11 +306,24 @@ class X86_64Backend(Backend):
     # Functions
     # ========================================================================
     
-    def declare_function(self, name_id: int, num_params: int) -> int:
+    def declare_function(self, name: str | None, num_params: int) -> int:
         """Declare a function."""
         label_id = self._next_label
-        label = self._new_label("fn")
+        if name is None:
+            label = self._new_label("fn")
+        else:
+            label = name
+            self._next_label += 1
         self._fn_labels[label_id] = label
+        return label_id
+
+    def bind_extern_function(self, label_id: int, name: str) -> None:
+        self._fn_labels[label_id] = name
+        self._extern_symbols.add(name)
+
+    def declare_extern_function(self, name: str, num_params: int) -> int:
+        label_id = self.declare_function(name, num_params)
+        self._extern_symbols.add(name)
         return label_id
     
     def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
@@ -830,11 +862,31 @@ class X86_64Backend(Backend):
         asm_path = cache_dir / f"{input_name}.s"
         obj_path = cache_dir / f"{input_name}.o"
         exe_path = cache_dir / input_name
+        raw_link_artifacts = [str(path) for path in options.get("link_artifacts", [])]
+        link_flags = [str(flag) for flag in options.get("link_flags", [])]
+        use_clang_driver = bool(raw_link_artifacts or link_flags)
+        link_artifacts = [str(Path(artifact)) for artifact in raw_link_artifacts]
         
         asm_path.write_text(code)
         
         subprocess.run(["as", str(asm_path), "-o", str(obj_path)], check=True)
-        subprocess.run(["ld", str(obj_path), "-o", str(exe_path)], check=True)
+        if use_clang_driver:
+            subprocess.run(
+                [
+                    "clang",
+                    "-no-pie",
+                    "-nostartfiles",
+                    "-Wl,-e,_start",
+                    str(obj_path),
+                    *link_artifacts,
+                    *link_flags,
+                    "-o",
+                    str(exe_path),
+                ],
+                check=True,
+            )
+        else:
+            subprocess.run(["ld", str(obj_path), *link_artifacts, "-o", str(exe_path)], check=True)
         
         return exe_path
     

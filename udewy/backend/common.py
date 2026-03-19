@@ -99,11 +99,19 @@ class Backend(ABC):
         """
     
     @abstractmethod
-    def define_global(self, name_id: int, value: int | str) -> int:
+    def define_global(self, name: str | None, value: int | str) -> int:
         """
         Define a global variable with an initial value.
         
         Value can be an integer or a label reference (string).
+        Returns a handle/label_id for the global.
+        """
+
+    @abstractmethod
+    def declare_extern_global(self, name: str) -> int:
+        """
+        Declare a global variable whose storage is provided by a linked artifact.
+
         Returns a handle/label_id for the global.
         """
     
@@ -162,10 +170,22 @@ class Backend(ABC):
     # ========================================================================
     
     @abstractmethod
-    def declare_function(self, name_id: int, num_params: int) -> int:
+    def declare_function(self, name: str | None, num_params: int) -> int:
         """
         Declare a function (forward reference or definition).
         
+        Returns a function label_id.
+        """
+
+    @abstractmethod
+    def bind_extern_function(self, label_id: int, name: str) -> None:
+        """Bind an existing function label to an externally provided symbol."""
+
+    @abstractmethod
+    def declare_extern_function(self, name: str, num_params: int) -> int:
+        """
+        Declare a function whose implementation is provided by a linked artifact.
+
         Returns a function label_id.
         """
     
@@ -476,7 +496,8 @@ class Backend(ABC):
             code: The generated code (assembly, WAT, etc.) from finish_module()
             input_name: Name of the input file (without extension)
             cache_dir: Directory to write output files
-            **options: Backend-specific options (e.g., split_wasm for WASM)
+            **options: Backend-specific options (e.g., split_wasm for WASM,
+                link_artifacts and link_flags for native targets)
         
         Returns:
             Path to the primary output file

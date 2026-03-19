@@ -26,6 +26,7 @@ class FunctionEntry:
     label_id: int
     num_args: int | None
     is_defined: bool
+    is_extern: bool = False
 
 
 StableValueKind = Literal["int", "function", "string", "array", "static"]
@@ -49,6 +50,7 @@ class GlobalEntry:
     label_id: int | None
     is_const: bool
     const_value: StableValue | None = None
+    is_extern: bool = False
 
 
 @dataclass
@@ -123,8 +125,9 @@ def fn_declare(
     label_id: int,
     num_args: int | None,
     is_defined: bool,
+    is_extern: bool = False,
 ) -> FunctionEntry:
-    entry = FunctionEntry(label_id=label_id, num_args=num_args, is_defined=is_defined)
+    entry = FunctionEntry(label_id=label_id, num_args=num_args, is_defined=is_defined, is_extern=is_extern)
     fn_table[name] = entry
     return entry
 
@@ -466,7 +469,7 @@ def note_function_reference(
 ) -> FunctionEntry:
     entry = fn_lookup(fn_table, name)
     if entry is None:
-        label_id = backend.declare_function(0, num_args or 0)
+        label_id = backend.declare_function(name, num_args or 0)
         return fn_declare(fn_table, name, label_id, num_args, False)
 
     if num_args is not None:
@@ -477,6 +480,31 @@ def note_function_reference(
                 f"Function {name!r} used with conflicting arities {entry.num_args} and {num_args} at position {loc}"
             )
 
+    return entry
+
+
+def declare_extern_function(
+    state: ParseState,
+    name: str,
+    num_args: int,
+    loc: int,
+) -> FunctionEntry:
+    entry = fn_lookup(state.fn_table, name)
+    if entry is None:
+        label_id = state.backend.declare_extern_function(name, num_args)
+        return fn_declare(state.fn_table, name, label_id, num_args, True, is_extern=True)
+
+    if entry.is_defined:
+        raise SyntaxError(f"Function {name!r} is already declared at position {loc}")
+    if entry.num_args is not None and entry.num_args != num_args:
+        raise SyntaxError(
+            f"Function {name!r} declared extern with {num_args} arguments after being used with {entry.num_args} at position {loc}"
+        )
+
+    entry.num_args = num_args
+    entry.is_defined = True
+    entry.is_extern = True
+    state.backend.bind_extern_function(entry.label_id, name)
     return entry
 
 
@@ -793,6 +821,9 @@ def parse_var_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
         raise SyntaxError(f"Expected '=' at {toks[idx].location}")
     idx = idx + 1
 
+    if idx < len(toks) and toks[idx].kind == t1.Kind.TK_EXTERN:
+        raise SyntaxError(f"`extern` declarations are only allowed at top level at position {toks[idx].location}")
+
     const_value: StableValue | None = None
     if is_const:
         stable_result = try_parse_stable_expr(toks, idx, state)
@@ -832,6 +863,11 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
     idx = require_fn_type_annotation(toks, idx, fn_name, state)
     idx = expect(toks, idx, t1.Kind.TK_FN_ARROW, state)
+
+    if idx < len(toks) and toks[idx].kind == t1.Kind.TK_EXTERN:
+        declare_extern_function(state, fn_name, len(params), toks[idx].location)
+        return idx + 1
+
     idx = expect(toks, idx, t1.Kind.TK_LEFT_BRACE, state)
     
     entry = fn_lookup(state.fn_table, fn_name)
@@ -846,7 +882,7 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
         entry.is_defined = True
         label_id = entry.label_id
     else:
-        label_id = backend.declare_function(0, len(params))
+        label_id = backend.declare_function(fn_name, len(params))
         fn_declare(state.fn_table, fn_name, label_id, len(params), True)
     
     is_main = fn_name == "main"
@@ -1089,13 +1125,23 @@ def parse_program(toks: list[t1.Token], state: ParseState) -> None:
             idx = require_type_annotation(toks, idx, f"{subject} {name!r}", state)
             idx = expect(toks, idx, t1.Kind.TK_ASSIGN, state)
 
+            if idx < len(toks) and toks[idx].kind == t1.Kind.TK_EXTERN:
+                label_id = backend.declare_extern_global(name)
+                global_declare(
+                    state.global_table,
+                    name,
+                    GlobalEntry(label_id=label_id, is_const=is_const, is_extern=True),
+                )
+                idx = idx + 1
+                continue
+
             stable_result = try_parse_stable_expr(toks, idx, state, emit_runtime=False)
             if stable_result is None:
                 raise SyntaxError(f"Global variables must have constant initializers at {toks[idx].location}")
             idx, stable_value = stable_result
 
             directive = stable_value_to_directive(backend, stable_value)
-            label_id = backend.define_global(0, directive)
+            label_id = backend.define_global(None, directive)
             global_declare(
                 state.global_table,
                 name,

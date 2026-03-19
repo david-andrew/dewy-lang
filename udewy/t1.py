@@ -29,6 +29,7 @@ class Kind(Enum):
     TK_RETURN        = auto()
     TK_BREAK         = auto()
     TK_CONTINUE      = auto()
+    TK_EXTERN        = auto()
     TK_PLUS          = auto()
     TK_MINUS         = auto()
     TK_MUL           = auto()
@@ -103,6 +104,7 @@ KEYWORD_TOKENS: dict[str, tuple[Value | None, Kind]] = {
     "return":     (None,        Kind.TK_RETURN),
     "break":      (None,        Kind.TK_BREAK),
     "continue":   (None,        Kind.TK_CONTINUE),
+    "extern":     (None,        Kind.TK_EXTERN),
     "transmute":  (None,        Kind.TK_TRANSMUTE),
 }
 
@@ -169,10 +171,10 @@ def tokenize(src:str)->list[Token]:
             continue
 
         # identifier or keyword
-        if t0.is_alpha(src[i]) or src[i] == '_':
+        if t0.is_ident_start(src[i]):
             start = i
             i += 1
-            while i < n and (t0.is_ident(src[i])):
+            while i < n and t0.is_ident(src[i]):
                 i += 1
             text = src[start:i]
 

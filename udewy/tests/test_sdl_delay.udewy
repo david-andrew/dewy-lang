@@ -1,0 +1,11 @@
+import p"../third_party/sdl/sdl.udewy"
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO) =? 0 {
+        return 1
+    }
+    SDL_Delay(5000)
+    SDL_Quit()
+    return 0
+}

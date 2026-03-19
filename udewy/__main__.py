@@ -50,7 +50,8 @@ if __name__ == "__main__":
     script_args = sys.argv[arg_idx + 1:]
     
     backend = get_backend(target)
-    src = t0.load_program_source(input_file)
+    loaded = t0.load_program(input_file)
+    src = loaded.source
     toks = t1.tokenize(src)
     asm = p0.parse(toks, src, backend)
     
@@ -63,7 +64,9 @@ if __name__ == "__main__":
             asm, 
             input_file.stem, 
             cache_dir,
-            split_wasm=split_wasm
+            split_wasm=split_wasm,
+            link_artifacts=loaded.link_artifacts,
+            link_flags=loaded.link_flags,
         )
     except RuntimeError as e:
         print(f"Error: {e}")

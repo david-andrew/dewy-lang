@@ -1,0 +1,39 @@
+import p"SDL3-install-wayland-render/lib64/libSDL3.a"
+$cc_pthread
+$cc_lm
+
+# Minimal SDL3 bindings for udewy.
+# These declarations target the vendored SDL3 build used by the x86_64 Linux demo.
+
+const SDL_INIT_VIDEO:int = 0x00000020
+const SDL_EVENT_QUIT:int = 0x00000100
+const SDL_WINDOW_RESIZABLE:int = 0x00000020
+const SDL_EVENT_SIZE:int = 128
+
+let SDL_Init = (flags:int):>int => extern
+let SDL_SetMainReady = ():>void => extern
+let SDL_Quit = ():>void => extern
+let SDL_GetError = ():>int => extern
+
+let SDL_CreateWindow = (title:int width:int height:int flags:int):>int => extern
+let SDL_DestroyWindow = (window:int):>void => extern
+let SDL_ShowWindow = (window:int):>int => extern
+
+let SDL_PollEvent = (event:int):>int => extern
+let SDL_Delay = (ms:int):>void => extern
+let SDL_CreateRenderer = (window:int name:int):>int => extern
+let SDL_GetCurrentRenderOutputSize = (renderer:int w:int h:int):>int => extern
+let SDL_SetRenderDrawColor = (renderer:int r:int g:int b:int a:int):>int => extern
+let SDL_SetRenderViewport = (renderer:int rect:int):>int => extern
+let SDL_RenderClear = (renderer:int):>int => extern
+let SDL_RenderFillRect = (renderer:int rect:int):>int => extern
+let SDL_RenderPresent = (renderer:int):>int => extern
+let SDL_DestroyRenderer = (renderer:int):>void => extern
+let SDL_GetWindowSurface = (window:int):>int => extern
+let SDL_UpdateWindowSurface = (window:int):>int => extern
+let SDL_MapSurfaceRGBA = (surface:int r:int g:int b:int a:int):>int => extern
+let SDL_FillSurfaceRect = (surface:int rect:int color:int):>int => extern
+
+let SDL_EventType = (event:int):>int => {
+    return __load_u32__(event)
+}

@@ -282,7 +282,7 @@ class Wasm32Backend(Backend):
         
         return label_id
     
-    def define_global(self, name_id: int, value: int | str) -> int:
+    def define_global(self, name: str | None, value: int | str) -> int:
         """Define a global variable."""
         label_id = self._next_label
         self._next_label += 1
@@ -300,6 +300,9 @@ class Wasm32Backend(Backend):
         self._global_labels[label_id] = f".global{label_id}"
         
         return label_id
+
+    def declare_extern_global(self, name: str) -> int:
+        raise RuntimeError("extern globals are not supported on the wasm32 backend")
 
     def intern_static(self, size: int) -> int:
         """Add a zero-initialized static storage block to the data section."""
@@ -364,17 +367,23 @@ class Wasm32Backend(Backend):
     # Functions
     # ========================================================================
     
-    def declare_function(self, name_id: int, num_params: int) -> int:
+    def declare_function(self, name: str | None, num_params: int) -> int:
         """Declare a function."""
         label_id = self._next_label
         self._next_label += 1
-        fn_name = f"$fn{label_id}"
+        fn_name = f"$fn{label_id}" if name is None else f"${name}"
         self._fn_labels[label_id] = fn_name
         self._fn_indices[label_id] = self._next_fn_index
         self._fn_param_counts[label_id] = num_params
         self._fn_table_ids.append(label_id)
         self._next_fn_index += 1
         return label_id
+
+    def bind_extern_function(self, label_id: int, name: str) -> None:
+        raise RuntimeError("extern functions are not supported on the wasm32 backend")
+
+    def declare_extern_function(self, name: str, num_params: int) -> int:
+        raise RuntimeError("extern functions are not supported on the wasm32 backend")
     
     def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
         """Begin function definition."""

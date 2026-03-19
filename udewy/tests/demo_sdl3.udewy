@@ -1,0 +1,139 @@
+import p"../third_party/sdl/sdl.udewy"
+
+let set_rect = (rect:int x:int y:int w:int h:int):>void => {
+    __store_u32__(x rect + 0)
+    __store_u32__(y rect + 4)
+    __store_u32__(w rect + 8)
+    __store_u32__(h rect + 12)
+    return 0
+}
+
+let triangle = (value:int period:int):>int => {
+    let pos:int = value % period
+    let half:int = period // 2
+    if pos <? half {
+        return pos
+    }
+    return period - pos
+}
+
+let scale_to = (value:int extent:int base:int):>int => {
+    return (value * extent) // base
+}
+
+let draw_block = (renderer:int rect:int x:int y:int w:int h:int r:int g:int b:int):>void => {
+    set_rect(rect x y w h)
+    SDL_SetRenderDrawColor(renderer r g b 255)
+    SDL_SetRenderViewport(renderer rect)
+    SDL_RenderFillRect(renderer 0)
+    return 0
+}
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO) =? 0 {
+        return 1
+    }
+
+    let title:int = "udewy sdl3\0"
+    let window:int = SDL_CreateWindow(title 640 480 SDL_WINDOW_RESIZABLE)
+    if window =? 0 {
+        SDL_Quit()
+        return 2
+    }
+
+    SDL_ShowWindow(window)
+
+    let renderer:int = SDL_CreateRenderer(window 0)
+    if renderer =? 0 {
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 3
+    }
+
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let rect:int = __static_alloca__(16)
+    let render_size:int = __static_alloca__(8)
+    let frame_count:int = 0
+    let running:int = 1
+    loop running not=? 0 {
+        let has_event:int = SDL_PollEvent(event)
+        loop has_event not=? 0 {
+            if SDL_EventType(event) =? SDL_EVENT_QUIT {
+                running = 0
+            }
+            has_event = SDL_PollEvent(event)
+        }
+
+        let bg_red_wave:int = triangle(frame_count 96)
+        let bg_green_phase:int = frame_count + 30
+        let bg_green_wave:int = triangle(bg_green_phase 128)
+        let bg_blue_phase:int = frame_count + 60
+        let bg_blue_wave:int = triangle(bg_blue_phase 160)
+        let bg_red:int = 12 + (bg_red_wave // 8)
+        let bg_green:int = 18 + (bg_green_wave // 6)
+        let bg_blue:int = 28 + (bg_blue_wave // 5)
+        SDL_GetCurrentRenderOutputSize(renderer render_size render_size + 4)
+        let screen_w:int = __load_u32__(render_size)
+        let screen_h:int = __load_u32__(render_size + 4)
+        SDL_SetRenderViewport(renderer 0)
+        SDL_SetRenderDrawColor(renderer bg_red bg_green bg_blue 255)
+        SDL_RenderClear(renderer)
+
+        let stripe:int = 0
+        loop stripe <? 18 {
+            let wave_phase:int = (frame_count * 2) + (stripe * 19)
+            let wave:int = triangle(wave_phase 240)
+            let x:int = scale_to(stripe * 36 screen_w 640)
+            let w:int = scale_to(28 screen_w 640)
+            let h:int = scale_to(48 + (wave * 3) screen_h 480)
+            let y:int = scale_to(440 screen_h 480) - h
+            let r_phase:int = (stripe * 11) + frame_count
+            let g_phase:int = (stripe * 17) + (frame_count * 2)
+            let b_phase:int = (stripe * 23) + (frame_count * 3)
+            let r:int = 30 + (r_phase % 180)
+            let g:int = 80 + (g_phase % 140)
+            let b:int = 120 + (b_phase % 110)
+            draw_block(renderer rect x y w h r g b)
+            stripe += 1
+        }
+
+        let core_phase:int = frame_count * 3
+        let core_pulse:int = triangle(core_phase 120)
+        let core_size:int = scale_to(70 + core_pulse screen_h 480)
+        let core_x:int = (screen_w // 2) - (core_size // 2)
+        let core_y:int = scale_to(190 screen_h 480) - (core_size // 2)
+        draw_block(renderer rect core_x core_y core_size core_size 240 210 90)
+
+        let orb0_x_phase:int = frame_count * 5
+        let orb0_y_phase:int = (frame_count * 3) + 80
+        let orb0_x:int = scale_to(80 + triangle(orb0_x_phase 960) screen_w 640)
+        let orb0_y:int = scale_to(70 + triangle(orb0_y_phase 520) screen_h 480)
+        let orb0_size:int = scale_to(34 screen_h 480)
+        draw_block(renderer rect orb0_x orb0_y orb0_size orb0_size 255 110 110)
+
+        let orb1_x_phase:int = (frame_count * 4) + 90
+        let orb1_y_phase:int = (frame_count * 5) + 40
+        let orb1_x:int = scale_to(520 - triangle(orb1_x_phase 700) screen_w 640)
+        let orb1_y:int = scale_to(90 + triangle(orb1_y_phase 420) screen_h 480)
+        let orb1_size:int = scale_to(26 screen_h 480)
+        draw_block(renderer rect orb1_x orb1_y orb1_size orb1_size 120 240 255)
+
+        let orb2_x_phase:int = (frame_count * 6) + 40
+        let orb2_y_phase:int = (frame_count * 4) + 10
+        let orb2_x:int = scale_to(260 + triangle(orb2_x_phase 220) screen_w 640)
+        let orb2_y:int = scale_to(320 + triangle(orb2_y_phase 160) screen_h 480)
+        let orb2_size:int = scale_to(18 screen_h 480)
+        draw_block(renderer rect orb2_x orb2_y orb2_size orb2_size 255 255 255)
+
+        SDL_SetRenderViewport(renderer 0)
+        SDL_RenderPresent(renderer)
+        SDL_Delay(16)
+        frame_count += 1
+    }
+
+    SDL_DestroyRenderer(renderer)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}

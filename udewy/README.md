@@ -94,8 +94,8 @@ identifier ::= [a-zA-Z_][a-zA-Z0-9_]*
 Identifiers are case-sensitive. The following are reserved keywords and cannot be used as identifiers:
 
 ```
-let  const  if  else  loop  break  continue  return  
-import  transmute  and  or  xor  not  true  false  void
+let  const  if  else  loop  break  continue  return
+import  extern  transmute  and  or  xor  not  true  false  void
 ```
 
 > NOTE: `import` is a preprocessing-only directive. It is recognized before any actual code; any `import` that reaches tokenization is an error.
@@ -422,6 +422,8 @@ let data<array<int>> = [1 2 3]
 
 `let` declares a mutable binding. `const` declares an immutable binding and cannot be assigned after its initializer.
 
+At local scope, the initializer must be a normal expression. `extern` initializers are not allowed inside function bodies.
+
 ### Assignment
 
 Simple assignment:
@@ -512,15 +514,22 @@ Import directives bring definitions from other udewy files into scope:
 ```udewy
 import p"utils.udewy"
 import p"lib/helpers.udewy"
+import p"../third_party/libfoo.a"
+$cc_pthread
+$cc_lm
 ```
 
 **Semantics:**
 - Paths are relative to the importing file's directory
-- Imports are recognized only in the leading import prelude at the top of a file
-- Imports are processed recursively (imported files can import other files)
-- Each file is only included once (circular imports are handled by tracking what's been imported)
-- Imported content is prepended to the source
-- After preprocessing, import directives are removed from the source before tokenization and parsing
+- Imports and `$...` meta directives are recognized only in the leading prelude at the top of a file
+- Imports ending in `.udewy` are treated as udewy source and processed recursively
+- Imported paths with any other suffix are treated as direct external link artifacts, not source
+- Each imported source file or artifact path is only included once
+- Each supported meta directive is only applied once
+- Imported udewy source is prepended to the source being compiled
+- Top-level meta directives expand into backend link flags during preprocessing
+- Currently supported meta directives are `$cc_pthread` and `$cc_lm`
+- After preprocessing, import directives and meta directives are removed from the source before tokenization and parsing
 - `import` remains a reserved word; if it reaches tokenization, the tokenizer reports an error
 
 ---
@@ -547,6 +556,25 @@ let greet = ():>void => {
 - Parameters are space-separated (no commas)
 - All functions must explicitly `return`
 - Functions may only be declared at **top level** (no nested functions)
+
+### External Declarations
+
+udewy supports top-level external declarations for functions and globals provided by linked artifacts:
+
+```udewy
+let SDL_Init = (flags:int):>bool => extern
+let SDL_Quit = ():>void => extern
+let errno:int = extern
+```
+
+Extern declarations use the same syntax as ordinary top-level declarations, but replace the function body or initializer with the `extern` keyword.
+
+**Rules:**
+- Extern declarations are only valid at **top level**
+- Local extern declarations are a compile-time error
+- Extern functions participate in normal forward-reference resolution by name
+- Extern globals and functions are resolved by the native linker, not by udewy source imports
+- Backends that do not support native external linking may reject `extern`
 
 ### Forward References
 
@@ -792,6 +820,8 @@ Concrete backends are responsible for responding to those abstract operations in
 
 In general, the parser and the concrete backends should only know about each other through what is described by `Backend` in `backend/common.py`. Changes to `Backend` should therefore be relatively rare and made only when they provide a clear architectural benefit, such as substantially simplifying the parser/backend relationship, removing complexity, or enabling an important capability that cleanly belongs in the shared abstraction.
 
+udewy-native programs that do not rely on `extern` declarations use udewy's own entry point and do not require C runtime startup code. When `extern` declarations are used, the final link additionally depends on whatever artifacts are provided to satisfy those extern symbols.
+
 ### Backend Responsibilities
 
 Each backend implements the parser protocol and provides:
@@ -880,9 +910,9 @@ program         ::= top_level_stmt*
 top_level_stmt  ::= fn_decl
                   | const_decl
 
-fn_decl         ::= ('let' | 'const') IDENT '=' '(' param_list ')' fn_type_annot '=>' block
+fn_decl         ::= ('let' | 'const') IDENT '=' '(' param_list ')' fn_type_annot '=>' (block | 'extern')
 
-const_decl      ::= ('let' | 'const') IDENT type_annot '=' const_expr
+const_decl      ::= ('let' | 'const') IDENT type_annot '=' (const_expr | 'extern')
 
 param_list      ::= (IDENT type_annot)*
 
