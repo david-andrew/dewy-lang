@@ -1,0 +1,1062 @@
+import p"../third_party/sdl/sdl.udewy"
+import p"fzero_fix32.udewy"
+
+const STATE_TITLE:int = 0
+const STATE_RACE:int = 1
+
+const NSEG:int = 24
+const MAX_TRIS:int = 64
+const MAX_WALLS:int = 64
+const MAX_CARS:int = 11
+const CAR_STRIDE:int = 80
+const TRI_STRIDE:int = 72
+
+const F32_ZERO:int = __i64_to_f32_bits__(0)
+const F32_ONE:int = __i64_to_f32_bits__(1)
+const F32_HALF:int = 0x3f000000
+const F32_NEG_ONE:int = __i64_to_f32_bits__(-1)
+const F32_0_02:int = 0x3ca3d70a
+const F32_0_1:int = 0x3dcccccd
+const F32_0_001:int = 0x3a83126f
+const F32_RCP_16:int = 0x3d800000
+const F32_SCALE_16:int = 0x37800000
+const F32_0_35:int = 0x3eb33333
+const F32_0_8:int = 0x3f4ccccd
+const F32_0_4:int = 0x3ecccccd
+const F32_0_6:int = 0x3f19999a
+
+const F64_ZERO:int = __i64_to_f64_bits__(0)
+const F64_ONE:int = __i64_to_f64_bits__(1)
+const F64_NEG_ONE:int = 0xbff0000000000000
+const F64_TWO:int = __i64_to_f64_bits__(2)
+const F64_NEG_TWO:int = __i64_to_f64_bits__(-2)
+const F64_ONE:int = 0x3ff0000000000000
+const F64_NEG_ONE:int = 0xbff0000000000000
+const F64_POINT_SIX:int = 0x3fe3333333333333
+const F64_NEG_POINT_SIX:int = 0xbfe3333333333333
+const F64_NEAR:int = __i64_to_f64_bits__(1)
+const F64_FAR:int = __i64_to_f64_bits__(800)
+
+let track_cx:int = [0xe00000000 0xd85e0cf2f 0xc1fd5c5a6 0x9e6454cd7 0x700000000 0x39f9b8258 0x0 0xfffffffc60647da8 0xfffffff900000001 0xfffffff619bab329 0xfffffff3e02a3a5a 0xfffffff27a1f30d1 0xfffffff200000000 0xfffffff27a1f30d1 0xfffffff3e02a3a5a 0xfffffff619bab329 0xfffffff900000000 0xfffffffc60647da8 0x0 0x39f9b8258 0x700000000 0x9e6454cd7 0xc1fd5c5a6 0xd85e0cf2f 0xe00000000]
+let track_cy:int = [0x0 0x16a09e667 0x200000000 0x16a09e667 0x0 0xfffffffe95f61999 0xfffffffe00000000 0xfffffffe95f61999 0x0 0x16a09e667 0x200000000 0x16a09e667 0x0 0xfffffffe95f61999 0xfffffffe00000000 0xfffffffe95f61999 0x0 0x16a09e667 0x200000000 0x16a09e667 0x0 0xfffffffe95f61999 0xfffffffe00000000 0xfffffffe95f61999 0x0]
+let track_cz:int = [0x0 0x39f9b8258 0x6ffffffff 0x9e6454cd7 0xc1fd5c5a6 0xd85e0cf2f 0xe00000000 0xd85e0cf2f 0xc1fd5c5a6 0x9e6454cd7 0x6ffffffff 0x39f9b8258 0x0 0xfffffffc60647da8 0xfffffff900000001 0xfffffff619bab329 0xfffffff3e02a3a5a 0xfffffff27a1f30d1 0xfffffff200000000 0xfffffff27a1f30d1 0xfffffff3e02a3a5a 0xfffffff619bab329 0xfffffff900000000 0xfffffffc60647da8 0x0]
+
+let g_tris:int = 0
+let g_tri_tan:int = 0
+let g_tri_count:int = 0
+let g_walls:int = 0
+let g_wall_count:int = 0
+let g_cars:int = 0
+
+let game_state:int = STATE_TITLE
+let lap_count:int = 0
+let key_enter:int = 0
+let key_esc:int = 0
+let key_w:int = 0
+let key_s:int = 0
+let key_a:int = 0
+let key_d:int = 0
+
+let scratch_a:int = 0
+let scratch_b:int = 0
+let scratch_c:int = 0
+let scratch_d:int = 0
+let scratch_e:int = 0
+let scratch_f:int = 0
+let scratch_g:int = 0
+let scratch_pick:int = 0
+let scratch_closest:int = 0
+let key_count_buf:int = 0
+let key_space:int = 0
+let cam_pos:int = 0
+let cam_right:int = 0
+let cam_up:int = 0
+let cam_forward:int = 0
+
+let car_store_arr = (base:int idx:int px:int py:int pz:int vx:int vy:int vz:int fx:int fy:int fz:int):>void => {
+    let o:int = base + (idx * CAR_STRIDE)
+    __store__(px o)
+    __store__(py (o + 8))
+    __store__(pz (o + 16))
+    __store__(vx (o + 24))
+    __store__(vy (o + 32))
+    __store__(vz (o + 40))
+    __store__(fx (o + 48))
+    __store__(fy (o + 56))
+    __store__(fz (o + 64))
+    return 0
+}
+
+let car_load_f = (base:int idx:int out:int):>void => {
+    let o:int = base + (idx * CAR_STRIDE)
+    __store__(__load__((o + 48)) out)
+    __store__(__load__((o + 56)) (out + 8))
+    __store__(__load__((o + 64)) (out + 16))
+    return 0
+}
+
+let car_store_f = (base:int idx:int f:int):>void => {
+    let o:int = base + (idx * CAR_STRIDE)
+    __store__(__load__(f) (o + 48))
+    __store__(__load__((f + 8)) (o + 56))
+    __store__(__load__((f + 16)) (o + 64))
+    return 0
+}
+
+let car_load_p = (base:int idx:int out:int):>void => {
+    let o:int = base + (idx * CAR_STRIDE)
+    __store__(__load__(o) out)
+    __store__(__load__((o + 8)) (out + 8))
+    __store__(__load__((o + 16)) (out + 16))
+    return 0
+}
+
+let car_load_v = (base:int idx:int out:int):>void => {
+    let o:int = base + (idx * CAR_STRIDE)
+    __store__(__load__((o + 24)) out)
+    __store__(__load__((o + 32)) (out + 8))
+    __store__(__load__((o + 40)) (out + 16))
+    return 0
+}
+
+let car_store_p = (base:int idx:int p:int):>void => {
+    let o:int = base + (idx * CAR_STRIDE)
+    __store__(__load__(p) o)
+    __store__(__load__((p + 8)) (o + 8))
+    __store__(__load__((p + 16)) (o + 16))
+    return 0
+}
+
+let car_store_v = (base:int idx:int v:int):>void => {
+    let o:int = base + (idx * CAR_STRIDE)
+    __store__(__load__(v) (o + 24))
+    __store__(__load__((v + 8)) (o + 32))
+    __store__(__load__((v + 16)) (o + 40))
+    return 0
+}
+
+let tri_load_v0 = (tri_base:int ti:int out:int):>void => {
+    let o:int = tri_base + (ti * TRI_STRIDE)
+    vec3_copy(out o)
+    return 0
+}
+
+let tri_load_v1 = (tri_base:int ti:int out:int):>void => {
+    let o:int = tri_base + (ti * TRI_STRIDE) + 24
+    vec3_copy(out o)
+    return 0
+}
+
+let tri_load_v2 = (tri_base:int ti:int out:int):>void => {
+    let o:int = tri_base + (ti * TRI_STRIDE) + 48
+    vec3_copy(out o)
+    return 0
+}
+
+let tri_load_tan = (tan_base:int ti:int out:int):>void => {
+    let o:int = tan_base + (ti * 24)
+    vec3_copy(out o)
+    return 0
+}
+
+let clamp_fix = (x:int lo:int hi:int):>int => {
+    if x <? lo {
+        return lo
+    }
+    if x >? hi {
+        return hi
+    }
+    return x
+}
+
+let fix_dot3 = (ax:int ay:int az:int bx:int by:int bz:int):>int => {
+    return fix_mul(ax bx) + fix_mul(ay by) + fix_mul(az bz)
+}
+
+let vec3_dot3 = (a:int b:int):>int => {
+    return vec3_dot(a b)
+}
+
+let dist2_3 = (ax:int ay:int az:int bx:int by:int bz:int):>int => {
+    let dx:int = ax - bx
+    let dy:int = ay - by
+    let dz:int = az - bz
+    return fix_mul(dx dx) + fix_mul(dy dy) + fix_mul(dz dz)
+}
+
+let closest_on_segment = (px:int py:int pz:int ax:int ay:int az:int bx:int by:int bz:int out_q:int):>void => {
+    let abx:int = bx - ax
+    let aby:int = by - ay
+    let abz:int = bz - az
+    let apx:int = px - ax
+    let apy:int = py - ay
+    let apz:int = pz - az
+    let num:int = fix_dot3(apx apy apz abx aby abz)
+    let den:int = fix_dot3(abx aby abz abx aby abz)
+    let t:int = FIX_ONE
+    if den not=? 0 {
+        t = fix_div(num den)
+        t = clamp_fix(t 0 FIX_ONE)
+    }
+    __store__((ax + fix_mul(abx t)) out_q)
+    __store__((ay + fix_mul(aby t)) (out_q + 8))
+    __store__((az + fix_mul(abz t)) (out_q + 16))
+    return 0
+}
+
+let triangle_normal_raw = (v0:int v1:int v2:int out_n:int):>void => {
+    let e0:int = __alloca__(24)
+    let e1:int = __alloca__(24)
+    vec3_sub(e0 v1 v0)
+    vec3_sub(e1 v2 v0)
+    vec3_cross(out_n e0 e1)
+    vec3_normalize(out_n out_n)
+    return 0
+}
+
+let point_tri_closest = (p:int v0:int v1:int v2:int out_q:int n_out:int):>void => {
+    triangle_normal_raw(v0 v1 v2 n_out)
+    let nx:int = __load__(n_out)
+    let ny:int = __load__(n_out + 8)
+    let nz:int = __load__(n_out + 16)
+    let v0x:int = __load__(v0)
+    let v0y:int = __load__(v0 + 8)
+    let v0z:int = __load__(v0 + 16)
+    let px:int = __load__(p)
+    let py:int = __load__(p + 8)
+    let pz:int = __load__(p + 16)
+    let d:int = fix_dot3((px - v0x) (py - v0y) (pz - v0z) nx ny nz)
+    __store__((px - fix_mul(nx d)) out_q)
+    __store__((py - fix_mul(ny d)) (out_q + 8))
+    __store__((pz - fix_mul(nz d)) (out_q + 16))
+
+    let qx:int = __load__(out_q)
+    let qy:int = __load__(out_q + 8)
+    let qz:int = __load__(out_q + 16)
+    let e0x:int = __load__(v1) - v0x
+    let e0y:int = __load__(v1 + 8) - v0y
+    let e0z:int = __load__(v1 + 16) - v0z
+    let e1x:int = __load__(v2) - v0x
+    let e1y:int = __load__(v2 + 8) - v0y
+    let e1z:int = __load__(v2 + 16) - v0z
+    let cx:int = qx - v0x
+    let cy:int = qy - v0y
+    let cz:int = qz - v0z
+    let d00:int = fix_dot3(e0x e0y e0z e0x e0y e0z)
+    let d01:int = fix_dot3(e0x e0y e0z e1x e1y e1z)
+    let d11:int = fix_dot3(e1x e1y e1z e1x e1y e1z)
+    let d20:int = fix_dot3(cx cy cz e0x e0y e0z)
+    let d21:int = fix_dot3(cx cy cz e1x e1y e1z)
+    let denom:int = fix_mul(d00 d11) - fix_mul(d01 d01)
+    let v:int = 0
+    let w:int = 0
+    if denom not=? 0 {
+        v = fix_div((fix_mul(d11 d20) - fix_mul(d01 d21)) denom)
+        w = fix_div((fix_mul(d00 d21) - fix_mul(d01 d20)) denom)
+    }
+    let u:int = FIX_ONE - v - w
+    if u >=? 0 {
+        if v >=? 0 {
+            if w >=? 0 {
+                return 0
+            }
+        }
+    }
+    let c0:int = __alloca__(24)
+    let c1:int = __alloca__(24)
+    let c2:int = __alloca__(24)
+    closest_on_segment(qx qy qz __load__(v0) __load__(v0 + 8) __load__(v0 + 16) __load__(v1) __load__(v1 + 8) __load__(v1 + 16) c0)
+    closest_on_segment(qx qy qz __load__(v1) __load__(v1 + 8) __load__(v1 + 16) __load__(v2) __load__(v2 + 8) __load__(v2 + 16) c1)
+    closest_on_segment(qx qy qz __load__(v2) __load__(v2 + 8) __load__(v2 + 16) __load__(v0) __load__(v0 + 8) __load__(v0 + 16) c2)
+    let d2c:int = dist2_3(qx qy qz __load__(c0) __load__(c0 + 8) __load__(c0 + 16))
+    let d2d:int = dist2_3(qx qy qz __load__(c1) __load__(c1 + 8) __load__(c1 + 16))
+    let d2e:int = dist2_3(qx qy qz __load__(c2) __load__(c2 + 8) __load__(c2 + 16))
+    let pick:int = c0
+    if d2d <? d2c {
+        pick = c1
+        d2c = d2d
+    }
+    if d2e <? d2c {
+        pick = c2
+    }
+    vec3_copy(out_q pick)
+    return 0
+}
+
+let find_best_tri = (p:int tri_base:int tan_base:int tri_count:int out_q:int out_n:int out_tan:int out_index:int):>void => {
+    let best:int = 0 - 1
+    let best_d:int = 0x7FFF_FFFF_FFFF_FFFF
+    let nb:int = __alloca__(24)
+    let pos_snap:int = __alloca__(24)
+    let tv0:int = __alloca__(24)
+    let tv1:int = __alloca__(24)
+    let tv2:int = __alloca__(24)
+    vec3_copy(pos_snap p)
+    let ti:int = 0
+    loop ti <? tri_count {
+        tri_load_v0(tri_base ti tv0)
+        tri_load_v1(tri_base ti tv1)
+        tri_load_v2(tri_base ti tv2)
+        point_tri_closest(pos_snap tv0 tv1 tv2 scratch_d out_n)
+        let dx:int = __load__(pos_snap) - __load__(scratch_d)
+        let dy:int = __load__(pos_snap + 8) - __load__(scratch_d + 8)
+        let dz:int = __load__(pos_snap + 16) - __load__(scratch_d + 16)
+        let d2:int = fix_mul(dx dx) + fix_mul(dy dy) + fix_mul(dz dz)
+        if d2 <? best_d {
+            best_d = d2
+            best = ti
+            vec3_copy(out_q scratch_d)
+            vec3_copy(nb out_n)
+            tri_load_tan(tan_base ti out_tan)
+        }
+        ti = ti + 1
+    }
+    if best >? (0 - 1) {
+        vec3_copy(out_n nb)
+    }
+    __store__(best out_index)
+    return 0
+}
+
+let orient_normal_up = (n:int):>void => {
+    if __load__(n + 8) <? 0 {
+        __store__((0 - __load__(n)) n)
+        __store__((0 - __load__((n + 8))) (n + 8))
+        __store__((0 - __load__((n + 16))) (n + 16))
+    }
+    return 0
+}
+
+let rotate_forward = (f:int n:int steer:int):>void => {
+    vec3_cross(scratch_g n f)
+    vec3_normalize(scratch_g scratch_g)
+    let c:int = FIX_ONE - (fix_mul(steer steer) // 8)
+    if c <? 0 {
+        c = 0
+    }
+    let s:int = steer
+    __store__((fix_mul(__load__(f) c) + fix_mul(__load__(scratch_g) s)) f)
+    __store__((fix_mul(__load__((f + 8)) c) + fix_mul(__load__((scratch_g + 8)) s)) (f + 8))
+    __store__((fix_mul(__load__((f + 16)) c) + fix_mul(__load__((scratch_g + 16)) s)) (f + 16))
+    return 0
+}
+
+let sphere_wall_resolve = (p:int v:int f:int rad:int walls:int wall_count:int):>void => {
+    let wi:int = 0
+    loop wi <? wall_count {
+        let o:int = walls + (wi * 48)
+        let ax:int = __load__(o)
+        let ay:int = __load__(o + 8)
+        let az:int = __load__(o + 16)
+        let bx:int = __load__(o + 24)
+        let by:int = __load__(o + 32)
+        let bz:int = __load__(o + 40)
+        closest_on_segment(__load__(p) __load__(p + 8) __load__(p + 16) ax ay az bx by bz scratch_b)
+        let qx:int = __load__(scratch_b)
+        let qy:int = __load__(scratch_b + 8)
+        let qz:int = __load__(scratch_b + 16)
+        let px:int = __load__(p)
+        let py:int = __load__(p + 8)
+        let pz:int = __load__(p + 16)
+        let dx:int = px - qx
+        let dy:int = py - qy
+        let dz:int = pz - qz
+        let d2:int = fix_mul(dx dx) + fix_mul(dy dy) + fix_mul(dz dz)
+        let r2:int = fix_mul(rad rad)
+        if d2 <? r2 {
+            let dist:int = fix_sqrt(d2)
+            if dist =? 0 {
+                dist = FIX_ONE // 256
+            }
+            let push:int = rad - dist
+            let nx:int = fix_div(dx dist)
+            let ny:int = fix_div(dy dist)
+            let nz:int = fix_div(dz dist)
+            __store__((px + fix_mul(nx push)) p)
+            __store__((py + fix_mul(ny push)) (p + 8))
+            __store__((pz + fix_mul(nz push)) (p + 16))
+            
+            # Reflect velocity
+            if v not=? 0 {
+                let vx:int = __load__(v)
+                let vy:int = __load__(v + 8)
+                let vz:int = __load__(v + 16)
+                let vn:int = fix_mul(vx nx) + fix_mul(vy ny) + fix_mul(vz nz)
+                if vn <? 0 {
+                    # Bounce with some damping (e.g. 1.5x reflection impulse instead of 2.0x to lose speed)
+                    let imp:int = 0 - fix_mul(vn (FIX_ONE + (FIX_ONE // 2)))
+                    __store__((vx + fix_mul(nx imp)) v)
+                    __store__((vy + fix_mul(ny imp)) (v + 8))
+                    __store__((vz + fix_mul(nz imp)) (v + 16))
+                }
+            }
+            # Reflect forward vector
+            if f not=? 0 {
+                let fx:int = __load__(f)
+                let fy:int = __load__(f + 8)
+                let fz:int = __load__(f + 16)
+                let fn:int = fix_mul(fx nx) + fix_mul(fy ny) + fix_mul(fz nz)
+                if fn <? 0 {
+                    let imp:int = 0 - fix_mul(fn (FIX_ONE * 2))
+                    __store__((fx + fix_mul(nx imp)) f)
+                    __store__((fy + fix_mul(ny imp)) (f + 8))
+                    __store__((fz + fix_mul(nz imp)) (f + 16))
+                    vec3_normalize(f f)
+                }
+            }
+        }
+        wi = wi + 1
+    }
+    return 0
+}
+
+let sphere_pair_resolve = (pa:int pb:int va:int vb:int rad:int):>void => {
+    let ax:int = __load__(pa)
+    let ay:int = __load__(pa + 8)
+    let az:int = __load__(pa + 16)
+    let bx:int = __load__(pb)
+    let by:int = __load__(pb + 8)
+    let bz:int = __load__(pb + 16)
+    let dx:int = bx - ax
+    let dy:int = by - ay
+    let dz:int = bz - az
+    let d2:int = fix_mul(dx dx) + fix_mul(dy dy) + fix_mul(dz dz)
+    let min_d:int = rad + rad
+    let min2:int = fix_mul(min_d min_d)
+    if d2 >=? min2 {
+        return 0
+    }
+    let dist:int = fix_sqrt(d2)
+    if dist =? 0 {
+        dist = FIX_ONE // 256
+    }
+    let nx:int = fix_div(dx dist)
+    let ny:int = fix_div(dy dist)
+    let nz:int = fix_div(dz dist)
+    let pen:int = min_d - dist
+    let hx:int = fix_mul(nx pen) // 2
+    let hy:int = fix_mul(ny pen) // 2
+    let hz:int = fix_mul(nz pen) // 2
+    __store__((ax - hx) pa)
+    __store__((ay - hy) (pa + 8))
+    __store__((az - hz) (pa + 16))
+    __store__((bx + hx) pb)
+    __store__((by + hy) (pb + 8))
+    __store__((bz + hz) (pb + 16))
+    let vax:int = __load__(va)
+    let vay:int = __load__(va + 8)
+    let vaz:int = __load__(va + 16)
+    let vbx:int = __load__(vb)
+    let vby:int = __load__(vb + 8)
+    let vbz:int = __load__(vb + 16)
+    let rv:int = fix_mul((vbx - vax) nx) + fix_mul((vby - vay) ny) + fix_mul((vbz - vaz) nz)
+    let imp:int = rv // 3
+    __store__((vax + fix_mul(nx imp)) va)
+    __store__((vay + fix_mul(ny imp)) (va + 8))
+    __store__((vaz + fix_mul(nz imp)) (va + 16))
+    __store__((vbx - fix_mul(nx imp)) vb)
+    __store__((vby - fix_mul(ny imp)) (vb + 8))
+    __store__((vbz - fix_mul(nz imp)) (vb + 16))
+    return 0
+}
+
+# Q32.32 → float: 1/16 meter grid; pair with glScalef(RCP_16) so sub-meter detail survives.
+# Scale to 1/65536 units, then GL_Scalef down.
+let fix_to_gl = (x:int):>int => {
+    return __i64_to_f32_bits__(__signed_shr__(x 16))
+}
+
+let draw_rect_i = (x0:int y0:int x1:int y1:int r:int g:int b:int):>void => {
+    GL_Color3f(r g b)
+    GL_Vertex3f(GL_F32_FromInt(x0) GL_F32_FromInt(y0) F32_ZERO)
+    GL_Vertex3f(GL_F32_FromInt(x1) GL_F32_FromInt(y0) F32_ZERO)
+    GL_Vertex3f(GL_F32_FromInt(x1) GL_F32_FromInt(y1) F32_ZERO)
+    GL_Vertex3f(GL_F32_FromInt(x0) GL_F32_FromInt(y1) F32_ZERO)
+    return 0
+}
+
+let set_camera = (p:int f:int n:int):>void => {
+    let chase_back:int = 0x500000000 # 5.0
+    let chase_up:int = 0x180000000   # 1.5
+    let look_ahead:int = 0xa00000000 # 10.0
+    vec3_copy(cam_pos p)
+    vec3_mad(cam_pos cam_pos f (0 - chase_back))
+    vec3_mad(cam_pos cam_pos n chase_up)
+
+    vec3_copy(cam_forward p)
+    vec3_mad(cam_forward cam_forward f look_ahead)
+    vec3_sub(cam_forward cam_forward cam_pos)
+    vec3_normalize(cam_forward cam_forward)
+
+    vec3_cross(cam_right cam_forward n)
+    vec3_normalize(cam_right cam_right)
+    vec3_cross(cam_up cam_right cam_forward)
+    vec3_normalize(cam_up cam_up)
+    return 0
+}
+
+let cam_vertex = (wx:int wy:int wz:int):>void => {
+    let rx:int = wx - __load__(cam_pos)
+    let ry:int = wy - __load__(cam_pos + 8)
+    let rz:int = wz - __load__(cam_pos + 16)
+    let vx:int = fix_dot3(rx ry rz __load__(cam_right) __load__(cam_right + 8) __load__(cam_right + 16))
+    let vy:int = fix_dot3(rx ry rz __load__(cam_up) __load__(cam_up + 8) __load__(cam_up + 16))
+    let vz:int = 0 - fix_dot3(rx ry rz __load__(cam_forward) __load__(cam_forward + 8) __load__(cam_forward + 16))
+    GL_Vertex3f(fix_to_gl(vx) fix_to_gl(vy) fix_to_gl(vz))
+    return 0
+}
+
+let draw_track = (tri_base:int tri_count:int):>void => {
+    glBegin(GL_TRIANGLES)
+    let ti:int = 0
+    loop ti <? tri_count {
+        let o:int = tri_base + (ti * TRI_STRIDE)
+        
+        # Checkerboard pattern using triangle index
+        # Each segment has 2 triangles. So segment index is ti // 2.
+        # We can alternate colors every 4 segments to make it obvious.
+        let seg:int = ti // 2
+        let stripe:int = (seg // 4) % 2
+        if stripe =? 0 {
+            GL_Color3f(F32_0_02 F32_0_02 F32_HALF) # Dark blue
+        } else {
+            GL_Color3f(F32_0_1 F32_0_1 F32_0_8)    # Lighter blue
+        }
+
+        cam_vertex(__load__(o) __load__(o + 8) __load__(o + 16))
+        cam_vertex(__load__(o + 24) __load__(o + 32) __load__(o + 40))
+        cam_vertex(__load__(o + 48) __load__(o + 56) __load__(o + 64))
+        ti = ti + 1
+    }
+    glEnd()
+    return 0
+}
+
+let draw_walls = (wall_base:int wall_count:int):>void => {
+    glBegin(GL_LINES)
+    let wi:int = 0
+    loop wi <? wall_count {
+        let o:int = wall_base + (wi * 48)
+        GL_Color3f(F32_ONE F32_0_4 F32_ZERO) # Bright orange boundary
+        cam_vertex(__load__(o) __load__(o + 8) __load__(o + 16))
+        cam_vertex(__load__(o + 24) __load__(o + 32) __load__(o + 40))
+        
+        # Also draw some vertical posts for speed lines!
+        # The wall goes up by 0.5 units (FIX_HALF)
+        # Actually, let's just draw the line and then another line above it.
+        # It requires adding up vector, which we don't have stored here easily.
+        # Just the edge lines are fine.
+        wi = wi + 1
+    }
+    glEnd()
+    return 0
+}
+
+let draw_ship = (p:int f:int n:int col_r:int col_g:int col_b:int):>void => {
+    vec3_cross(scratch_c n f)
+    vec3_normalize(scratch_c scratch_c)
+    let ship_nose:int = FIX_ONE + FIX_HALF
+    let ship_wing:int = FIX_HALF
+    let ship_tail:int = FIX_ONE
+    vec3_scale(scratch_d f ship_nose)
+    vec3_scale(scratch_e scratch_c ship_wing)
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(col_r col_g col_b)
+    let px:int = __load__(p)
+    let py:int = __load__(p + 8)
+    let pz:int = __load__(p + 16)
+    let fx:int = __load__(f)
+    let fy:int = __load__(f + 8)
+    let fz:int = __load__(f + 16)
+    let rx:int = __load__(scratch_c)
+    let ry:int = __load__(scratch_c + 8)
+    let rz:int = __load__(scratch_c + 16)
+    let bx:int = __load__(scratch_d)
+    let by:int = __load__(scratch_d + 8)
+    let bz:int = __load__(scratch_d + 16)
+    let wx:int = __load__(scratch_e)
+    let wy:int = __load__(scratch_e + 8)
+    let wz:int = __load__(scratch_e + 16)
+    let ax:int = px + bx + wx
+    let ay:int = py + by + wy
+    let az:int = pz + bz + wz
+    let bx2:int = px + bx - wx
+    let by2:int = py + by - wy
+    let bz2:int = pz + bz - wz
+    let cx:int = px - fix_mul(fx ship_tail)
+    let cy:int = py - fix_mul(fy ship_tail)
+    let cz:int = pz - fix_mul(fz ship_tail)
+    cam_vertex(ax ay az)
+    cam_vertex(bx2 by2 bz2)
+    cam_vertex(cx cy cz)
+    glEnd()
+    return 0
+}
+
+let draw_title = ():>void => {
+    glBegin(GL_QUADS)
+    # Background
+    draw_rect_i(0 0 1000 600 F32_0_02 F32_0_02 F32_0_1)
+    
+    # Stripes
+    draw_rect_i(0 150 1000 170 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(0 430 1000 450 F32_0_8 F32_0_4 F32_0_02)
+    
+    # Text box
+    draw_rect_i(200 220 800 380 F32_0_1 F32_0_1 F32_0_1)
+    
+    # "uZero"
+    # u
+    draw_rect_i(250 250 270 350 F32_0_02 F32_0_02 F32_HALF)
+    draw_rect_i(310 250 330 370 F32_0_02 F32_0_02 F32_HALF)
+    draw_rect_i(270 330 310 350 F32_0_02 F32_0_02 F32_HALF)
+    
+    # Z
+    draw_rect_i(380 250 480 270 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(380 330 480 350 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(450 270 480 290 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(420 290 450 310 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(380 310 420 330 F32_0_8 F32_0_4 F32_0_02)
+    
+    # e
+    draw_rect_i(520 250 600 270 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(520 290 600 310 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(520 330 600 350 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(520 270 540 330 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(580 270 600 290 F32_0_8 F32_0_4 F32_0_02)
+    
+    # r
+    draw_rect_i(640 250 660 350 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(660 250 720 270 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(700 270 720 290 F32_0_8 F32_0_4 F32_0_02)
+    
+    # o
+    draw_rect_i(760 250 840 270 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(760 330 840 350 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(760 270 780 330 F32_0_8 F32_0_4 F32_0_02)
+    draw_rect_i(820 270 840 330 F32_0_8 F32_0_4 F32_0_02)
+
+    # Prompt
+    draw_rect_i(350 480 650 500 F32_ONE F32_ONE F32_ONE)
+    glEnd()
+    return 0
+}
+
+let init_track = ():>void => {
+    let width:int = FIX_ONE + FIX_ONE + FIX_ONE
+    let hw:int = width // 2
+    let upx:int = 0
+    let upy:int = FIX_ONE
+    let upz:int = 0
+    let tri_i:int = 0
+    let wi:int = 0
+    let i:int = 0
+    loop i <? NSEG {
+        let ip:int = i + 1
+        let im:int = i - 1
+        if im <? 0 {
+            im = NSEG - 1
+        }
+        let cix:int = __load__(track_cx + (i * 8))
+        let ciy:int = __load__(track_cy + (i * 8))
+        let ciz:int = __load__(track_cz + (i * 8))
+        let cnx:int = __load__(track_cx + (ip * 8)) - __load__(track_cx + (im * 8))
+        let cny:int = __load__(track_cy + (ip * 8)) - __load__(track_cy + (im * 8))
+        let cnz:int = __load__(track_cz + (ip * 8)) - __load__(track_cz + (im * 8))
+        vec3_set(scratch_a cnx cny cnz)
+        vec3_normalize(scratch_a scratch_a)
+        vec3_set(scratch_b upx upy upz)
+        vec3_cross(scratch_c scratch_b scratch_a)
+        vec3_normalize(scratch_c scratch_c)
+        let rx:int = __load__(scratch_c)
+        let ry:int = __load__(scratch_c + 8)
+        let rz:int = __load__(scratch_c + 16)
+        let tx:int = __load__(scratch_a)
+        let ty:int = __load__(scratch_a + 8)
+        let tz:int = __load__(scratch_a + 16)
+        let cpx:int = __load__(track_cx + (ip * 8))
+        let cpy:int = __load__(track_cy + (ip * 8))
+        let cpz:int = __load__(track_cz + (ip * 8))
+        let tnx:int = cpx - cix
+        let tny:int = cpy - ciy
+        let tnz:int = cpz - ciz
+        vec3_set(scratch_d tnx tny tnz)
+        vec3_normalize(scratch_d scratch_d)
+        let lx0:int = cix + fix_mul(rx hw)
+        let ly0:int = ciy + fix_mul(ry hw)
+        let lz0:int = ciz + fix_mul(rz hw)
+        let rx0:int = cix - fix_mul(rx hw)
+        let ry0:int = ciy - fix_mul(ry hw)
+        let rz0:int = ciz - fix_mul(rz hw)
+        let lx1:int = cpx + fix_mul(rx hw)
+        let ly1:int = cpy + fix_mul(ry hw)
+        let lz1:int = cpz + fix_mul(rz hw)
+        let rx1:int = cpx - fix_mul(rx hw)
+        let ry1:int = cpy - fix_mul(ry hw)
+        let rz1:int = cpz - fix_mul(rz hw)
+        let o:int = g_tris + (tri_i * TRI_STRIDE)
+        __store__(lx0 o)
+        __store__(ly0 (o + 8))
+        __store__(lz0 (o + 16))
+        __store__(rx0 (o + 24))
+        __store__(ry0 (o + 32))
+        __store__(rz0 (o + 40))
+        __store__(rx1 (o + 48))
+        __store__(ry1 (o + 56))
+        __store__(rz1 (o + 64))
+        let to:int = g_tri_tan + (tri_i * 24)
+        __store__(__load__(scratch_d) to)
+        __store__(__load__((scratch_d + 8)) (to + 8))
+        __store__(__load__((scratch_d + 16)) (to + 16))
+        tri_i = tri_i + 1
+        let o2:int = g_tris + (tri_i * TRI_STRIDE)
+        __store__(lx0 o2)
+        __store__(ly0 (o2 + 8))
+        __store__(lz0 (o2 + 16))
+        __store__(rx1 (o2 + 24))
+        __store__(ry1 (o2 + 32))
+        __store__(rz1 (o2 + 40))
+        __store__(lx1 (o2 + 48))
+        __store__(ly1 (o2 + 56))
+        __store__(lz1 (o2 + 64))
+        let to2:int = g_tri_tan + (tri_i * 24)
+        __store__(__load__(scratch_d) to2)
+        __store__(__load__((scratch_d + 8)) (to2 + 8))
+        __store__(__load__((scratch_d + 16)) (to2 + 16))
+        tri_i = tri_i + 1
+        let wo:int = g_walls + (wi * 48)
+        __store__(lx0 wo)
+        __store__(ly0 (wo + 8))
+        __store__(lz0 (wo + 16))
+        __store__(lx1 (wo + 24))
+        __store__(ly1 (wo + 32))
+        __store__(lz1 (wo + 40))
+        wi = wi + 1
+        let wo2:int = g_walls + (wi * 48)
+        __store__(rx0 wo2)
+        __store__(ry0 (wo2 + 8))
+        __store__(rz0 (wo2 + 16))
+        __store__(rx1 (wo2 + 24))
+        __store__(ry1 (wo2 + 32))
+        __store__(rz1 (wo2 + 40))
+        wi = wi + 1
+        i = i + 1
+    }
+    g_tri_count = tri_i
+    g_wall_count = wi
+    return 0
+}
+
+let reset_cars = ():>void => {
+    car_store_arr(g_cars 0 0xe00000000 0 0 0 0 0 FIX_ONE 0 0)
+    car_store_arr(g_cars 1 0xc1fd5c5a6 0 0x39f9b8258 0 0 0 0 FIX_ONE 0)
+    car_store_arr(g_cars 2 0xc1fd5c5a6 0 0xfffffffc60647da8 0 0 0 0 0xffffffff00000000 0)
+    car_store_arr(g_cars 3 0x9e6454cd7 0 0x9e6454cd7 0 0 0 0xffffffff00000000 0 FIX_ONE)
+    car_store_arr(g_cars 4 0x9e6454cd7 0 0xfffffff619bab329 0 0 0 FIX_ONE 0 FIX_ONE)
+    car_store_arr(g_cars 5 0x700000000 0 0xc1fd5c5a6 0 0 0 FIX_HALF 0 FIX_ONE)
+    car_store_arr(g_cars 6 0x700000000 0 0xfffffff3e02a3a5a 0 0 0 0xffffffff80000000 0 FIX_ONE)
+    car_store_arr(g_cars 7 0x39f9b8258 0 0xd85e0cf2f 0 0 0 FIX_ONE FIX_HALF 0)
+    car_store_arr(g_cars 8 0x39f9b8258 0 0xfffffff27a1f30d1 0 0 0 FIX_ONE 0xffffffff80000000 0)
+    car_store_arr(g_cars 9 0 0 0xe00000000 0 0 0 0 0 FIX_ONE)
+    car_store_arr(g_cars 10 0 0 0xfffffff200000000 0 0 0 0 0 0xffffffff00000000)
+    return 0
+}
+
+let sim_car = (idx:int is_player:int steer:int throttle:int brake:int):>void => {
+    let DT:int = FIX_ONE // 60
+    let HOVER:int = FIX_ONE // 3
+    let RAD:int = FIX_ONE // 3
+    let THR:int = FIX_ONE // 24
+    let BRK:int = FIX_ONE // 12
+    let DRAG:int = FIX_ONE // 100
+    let STEER_MAG:int = FIX_ONE // 48
+    car_load_p(g_cars idx scratch_a)
+    car_load_v(g_cars idx scratch_b)
+    car_load_f(g_cars idx scratch_c)
+    find_best_tri(scratch_a g_tris g_tri_tan g_tri_count scratch_d scratch_e scratch_f scratch_pick)
+    let tidx:int = __load__(scratch_pick)
+    if tidx <? 0 {
+        return 0
+    }
+    vec3_copy(scratch_closest scratch_d)
+    orient_normal_up(scratch_e)
+    let nx:int = __load__(scratch_e)
+    let ny:int = __load__(scratch_e + 8)
+    let nz:int = __load__(scratch_e + 16)
+    let vn:int = vec3_dot3(scratch_b scratch_e)
+    let kvn:int = FIX_ONE - (FIX_ONE // 256)
+    let dampn:int = 0 - fix_mul(vn kvn)
+    vec3_mad(scratch_b scratch_b scratch_e dampn)
+    if is_player not=? 0 {
+        let st:int = fix_mul(STEER_MAG steer)
+        rotate_forward(scratch_c scratch_e st)
+    } else {
+        let ttx:int = __load__(scratch_f)
+        let tty:int = __load__(scratch_f + 8)
+        let ttz:int = __load__(scratch_f + 16)
+        vec3_set(scratch_d ttx tty ttz)
+        vec3_project_plane(scratch_d scratch_d scratch_e)
+        vec3_normalize(scratch_d scratch_d)
+        vec3_cross(scratch_g scratch_c scratch_d)
+        let turn:int = vec3_dot3(scratch_g scratch_e)
+        let sm6:int = STEER_MAG // 2
+        let st2:int = fix_mul(sm6 turn)
+        rotate_forward(scratch_c scratch_e st2)
+    }
+    vec3_project_plane(scratch_c scratch_c scratch_e)
+    vec3_normalize(scratch_c scratch_c)
+    let th:int = throttle
+    if is_player =? 0 {
+        th = FIX_ONE
+    }
+    let acc:int = fix_mul(THR th)
+    if brake not=? 0 {
+        acc = 0 - fix_mul(BRK brake)
+    }
+    vec3_mad(scratch_b scratch_b scratch_c fix_mul(acc DT))
+    let drag_s:int = 0 - fix_mul(DRAG DT)
+    vec3_mad(scratch_b scratch_b scratch_b drag_s)
+    vec3_mad(scratch_a scratch_a scratch_b DT)
+    let qx:int = __load__(scratch_closest)
+    let qy:int = __load__(scratch_closest + 8)
+    let qz:int = __load__(scratch_closest + 16)
+    let px:int = __load__(scratch_a)
+    let py:int = __load__(scratch_a + 8)
+    let pz:int = __load__(scratch_a + 16)
+    let hx:int = px - qx
+    let hy:int = py - qy
+    let hz:int = pz - qz
+    let h:int = fix_dot3(hx hy hz nx ny nz)
+    let tgt:int = HOVER
+    let err:int = h - tgt
+    let hspring:int = FIX_ONE // 8
+    vec3_mad(scratch_b scratch_b scratch_e fix_mul(err hspring))
+    car_store_p(g_cars idx scratch_a)
+    car_store_v(g_cars idx scratch_b)
+    car_store_f(g_cars idx scratch_c)
+    return 0
+}
+
+let main = ():>int => {
+    scratch_a = __static_alloca__(64)
+    scratch_b = __static_alloca__(64)
+    scratch_c = __static_alloca__(64)
+    scratch_d = __static_alloca__(64)
+    scratch_e = __static_alloca__(64)
+    scratch_f = __static_alloca__(64)
+    scratch_g = __static_alloca__(64)
+    scratch_pick = __static_alloca__(8)
+    scratch_closest = __static_alloca__(24)
+    key_count_buf = __static_alloca__(8)
+    cam_pos = __static_alloca__(24)
+    cam_right = __static_alloca__(24)
+    cam_up = __static_alloca__(24)
+    cam_forward = __static_alloca__(24)
+
+    g_tris = __static_alloca__(4608)
+    g_tri_tan = __static_alloca__(1536)
+    g_walls = __static_alloca__(3072)
+    g_cars = __static_alloca__(880)
+
+    init_track()
+    reset_cars()
+
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO) =? 0 {
+        return 1
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1) =? 0 {
+        SDL_Quit()
+        return 2
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE 24) =? 0 {
+        SDL_Quit()
+        return 3
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION 2) =? 0 {
+        SDL_Quit()
+        return 4
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION 1) =? 0 {
+        SDL_Quit()
+        return 5
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK SDL_GL_CONTEXT_PROFILE_COMPATIBILITY) =? 0 {
+        SDL_Quit()
+        return 6
+    }
+
+    let title:int = "udewy f-zero style\0"
+    let window:int = SDL_CreateWindow(title 960 540 SDL_WINDOW_OPENGL + SDL_WINDOW_RESIZABLE)
+    if window =? 0 {
+        SDL_Quit()
+        return 7
+    }
+    SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)
+
+    let gl_context:int = SDL_GL_CreateContext(window)
+    if gl_context =? 0 {
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 8
+    }
+    if SDL_GL_MakeCurrent(window gl_context) =? 0 {
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 9
+    }
+    SDL_GL_SetSwapInterval(1)
+
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDisable(GL_CULL_FACE)
+
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let size:int = __static_alloca__(8)
+    let running:int = 1
+
+    loop running not=? 0 {
+        let kb:int = SDL_GetKeyboardState(key_count_buf)
+        key_esc = SDL_ScancodeDown(kb SDL_SCANCODE_ESCAPE)
+        key_enter = SDL_ScancodeDown(kb SDL_SCANCODE_RETURN)
+        key_space = SDL_ScancodeDown(kb SDL_SCANCODE_SPACE)
+        key_w = SDL_ScancodeDown(kb SDL_SCANCODE_W)
+        key_s = SDL_ScancodeDown(kb SDL_SCANCODE_S)
+        key_a = SDL_ScancodeDown(kb SDL_SCANCODE_A)
+        key_d = SDL_ScancodeDown(kb SDL_SCANCODE_D)
+        if SDL_ScancodeDown(kb SDL_SCANCODE_UP) not=? 0 {
+            key_w = 1
+        }
+        if SDL_ScancodeDown(kb SDL_SCANCODE_DOWN) not=? 0 {
+            key_s = 1
+        }
+        if SDL_ScancodeDown(kb SDL_SCANCODE_LEFT) not=? 0 {
+            key_a = 1
+        }
+        if SDL_ScancodeDown(kb SDL_SCANCODE_RIGHT) not=? 0 {
+            key_d = 1
+        }
+
+        let has_event:int = SDL_PollEvent(event)
+        loop has_event not=? 0 {
+            if SDL_EventType(event) =? SDL_EVENT_QUIT {
+                running = 0
+            }
+            has_event = SDL_PollEvent(event)
+        }
+
+        if game_state =? STATE_TITLE {
+            if (key_enter not=? 0) or (key_space not=? 0) {
+                game_state = STATE_RACE
+                reset_cars()
+            }
+        } else {
+            let st:int = 0
+            if key_a not=? 0 {
+                st = 0 - FIX_ONE
+            }
+            if key_d not=? 0 {
+                st = FIX_ONE
+            }
+            let th:int = 0
+            if (key_w not=? 0) or (key_space not=? 0) {
+                th = FIX_ONE
+            }
+            let br:int = 0
+            if key_s not=? 0 {
+                br = FIX_ONE
+            }
+            sim_car(0 1 st th br)
+            let ai:int = 1
+            loop ai <? MAX_CARS {
+                sim_car(ai 0 0 0 0)
+                ai = ai + 1
+            }
+            let ci:int = 0
+            loop ci <? MAX_CARS {
+                car_load_p(g_cars ci scratch_a)
+                car_load_v(g_cars ci scratch_b)
+                car_load_f(g_cars ci scratch_c)
+                sphere_wall_resolve(scratch_a scratch_b scratch_c (FIX_ONE // 3) g_walls g_wall_count)
+                car_store_p(g_cars ci scratch_a)
+                car_store_v(g_cars ci scratch_b)
+                car_store_f(g_cars ci scratch_c)
+                ci = ci + 1
+            }
+            let i2:int = 0
+            loop i2 <? MAX_CARS {
+                let j2:int = i2 + 1
+                loop j2 <? MAX_CARS {
+                    car_load_p(g_cars i2 scratch_a)
+                    car_load_p(g_cars j2 scratch_b)
+                    car_load_v(g_cars i2 scratch_c)
+                    car_load_v(g_cars j2 scratch_d)
+                    sphere_pair_resolve(scratch_a scratch_b scratch_c scratch_d ((FIX_ONE // 2) + (FIX_ONE // 3)))
+                    car_store_v(g_cars i2 scratch_c)
+                    car_store_v(g_cars j2 scratch_d)
+                    car_store_p(g_cars i2 scratch_a)
+                    car_store_p(g_cars j2 scratch_b)
+                    j2 = j2 + 1
+                }
+                i2 = i2 + 1
+            }
+        }
+
+        SDL_GetWindowSizeInPixels(window size size + 4)
+        let width:int = __load_u32__(size)
+        let height:int = __load_u32__(size + 4)
+
+        glViewport(0 0 width height)
+        GL_ClearColor(F32_0_02 F32_0_02 F32_0_1 F32_ONE)
+        glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+
+        if game_state =? STATE_TITLE {
+            glMatrixMode(GL_PROJECTION)
+            glLoadIdentity()
+            GL_Ortho(GL_F64_FromInt(0) GL_F64_FromInt(1000) GL_F64_FromInt(600) GL_F64_FromInt(0) F64_NEG_ONE F64_ONE)
+            glMatrixMode(GL_MODELVIEW)
+            glLoadIdentity()
+            draw_title()
+        } else {
+            car_load_p(g_cars 0 scratch_a)
+            car_load_f(g_cars 0 scratch_b)
+            find_best_tri(scratch_a g_tris g_tri_tan g_tri_count scratch_c scratch_d scratch_e scratch_pick)
+            set_camera(scratch_a scratch_b scratch_d)
+
+            glMatrixMode(GL_PROJECTION)
+            glLoadIdentity()
+            GL_Frustum(F64_NEG_ONE F64_ONE F64_NEG_POINT_SIX F64_POINT_SIX F64_NEAR F64_FAR)
+            glMatrixMode(GL_MODELVIEW)
+            glLoadIdentity()
+            GL_Scalef(F32_SCALE_16 F32_SCALE_16 F32_SCALE_16)
+
+            draw_track(g_tris g_tri_count)
+            draw_walls(g_walls g_wall_count)
+
+            let draw_i:int = 0
+            loop draw_i <? MAX_CARS {
+                car_load_p(g_cars draw_i scratch_a)
+                car_load_f(g_cars draw_i scratch_b)
+                find_best_tri(scratch_a g_tris g_tri_tan g_tri_count scratch_c scratch_d scratch_e scratch_pick)
+                if draw_i =? 0 {
+                    draw_ship(scratch_a scratch_b scratch_d F32_HALF F32_HALF F32_ONE)
+                } else {
+                    draw_ship(scratch_a scratch_b scratch_d F32_ONE F32_0_02 F32_0_02)
+                }
+                draw_i = draw_i + 1
+            }
+        }
+
+        SDL_GL_SwapWindow(window)
+        SDL_Delay(16)
+        if key_esc not=? 0 {
+            running = 0
+        }
+    }
+
+    SDL_GL_DestroyContext(gl_context)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}
