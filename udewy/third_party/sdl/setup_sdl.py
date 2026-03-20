@@ -178,6 +178,40 @@ def run(command: list[str], *, cwd: Path | None = None) -> None:
     subprocess.run(command, cwd=cwd, check=True)
 
 
+# Written at CMake configure time; not the same as per-config SDL_build_config.h under include-config-*/.
+_SDL_BUILD_CONFIG_INTERMEDIATE = Path("CMakeFiles") / "SDL_build_config.h.intermediate"
+
+# Playback-capable drivers (exclude DUMMY / DISK and *_DYNAMIC lines).
+_SDL_REAL_AUDIO_DRIVER_MACROS = (
+    "SDL_AUDIO_DRIVER_ALSA",
+    "SDL_AUDIO_DRIVER_PIPEWIRE",
+    "SDL_AUDIO_DRIVER_PULSEAUDIO",
+    "SDL_AUDIO_DRIVER_JACK",
+    "SDL_AUDIO_DRIVER_SNDIO",
+    "SDL_AUDIO_DRIVER_OSS",
+)
+
+
+def assert_sdl_real_audio_backend_configured(build_dir: Path) -> None:
+    header = build_dir / _SDL_BUILD_CONFIG_INTERMEDIATE
+    if not header.is_file():
+        raise RuntimeError(
+            f"Expected SDL build config header after configure (SDL version mismatch?): {header}"
+        )
+
+    text = header.read_text()
+    for macro in _SDL_REAL_AUDIO_DRIVER_MACROS:
+        if re.search(rf"^#define {macro}\s+1\s*$", text, re.MULTILINE):
+            return
+
+    raise RuntimeError(
+        "SDL3 configured with -DSDL_AUDIO=ON but no playback audio driver was enabled in "
+        f"{_SDL_BUILD_CONFIG_INTERMEDIATE.as_posix()} (only CMake warnings, e.g. missing ALSA). "
+        "Install dev packages for at least one of: ALSA, PipeWire, PulseAudio, JACK, sndio, or OSS "
+        "(e.g. Fedora: alsa-lib-devel; Debian: libasound2-dev)."
+    )
+
+
 def run_capture(command: list[str], *, cwd: Path | None = None) -> str:
     return subprocess.run(command, cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
@@ -410,6 +444,7 @@ def main() -> None:
             *CMAKE_FLAGS,
         ]
     )
+    assert_sdl_real_audio_backend_configured(build_dir)
     run(["cmake", "--build", str(build_dir), f"-j{jobs}"])
     run(["cmake", "--install", str(build_dir)])
     staged_link_artifacts = stage_bundle_artifacts(
