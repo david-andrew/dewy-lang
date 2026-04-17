@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
 
+from .errors import error
+
 # ============================================================================
 # Import preprocessing
 # ============================================================================
@@ -70,14 +72,14 @@ def string_end(src: str, start: int) -> int:
     idx = start + 1
     while idx < len(src) and src[idx] != '"':
         if src[idx] in "{}":
-            raise SyntaxError(f"interpolation not supported in udewy strings at {idx}: {src[start:idx]!r}")
+            error(src, idx, "interpolation not supported in udewy strings")
         if src[idx] == "\\":
             idx += 1
             if idx >= len(src):
-                raise SyntaxError(f"unterminated string at {idx}: {src[start:idx]!r}")
+                error(src, idx, "unterminated string")
         idx += 1
     if idx >= len(src) or src[idx] != '"':
-        raise SyntaxError(f"unterminated string at {idx}: {src[start:idx]!r}")
+        error(src, idx, "unterminated string")
     return idx + 1
 
 
@@ -105,7 +107,7 @@ def _consume_directive_line_end(src: str, idx: int, context: str) -> int:
         idx += 1
     idx = skip_comment(src, idx)
     if idx < len(src) and src[idx] not in vertical_whitespace:
-        raise SyntaxError(f"Unexpected trailing content after {context} at position {idx}")
+        error(src, idx, f"Unexpected trailing content after {context}")
     return skip_whitespace(src, idx)
 
 
@@ -122,7 +124,7 @@ def _parse_import_directive(src: str, idx: int) -> tuple[str, int] | None:
         idx += 1
 
     if idx >= len(src) or src[idx] != "p" or idx + 1 >= len(src) or src[idx + 1] != '"':
-        raise SyntaxError(f"Expected path string after import at position {end_kw}")
+        error(src, end_kw, "Expected path string after import")
 
     string_start = idx + 1
     end_idx = string_end(src, string_start)

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import cast
 from . import t0
+from .errors import error
 
 
 # some basic type aliases
@@ -156,7 +157,7 @@ def tokenize(src:str)->list[Token]:
         # running sanity check(s) for prototype tokens that shouldn't be in the final output
         # check here so that we can maintain a single pass tokenizer
         if len(toks) > 1 and toks[-2].kind in (Kind._TK_COLON, Kind._TK_FN_COLON):
-            raise SyntaxError(f"colon must be followed by a type annotation at {i}: {src[i]!r}")
+            error(src, i, f"colon must be followed by a type annotation, got {src[i]!r}")
         
         # whitespace
         if src[i] in t0.whitespace: #c == " " or c == "\t" or c == "\r" or c == "\n":
@@ -183,7 +184,7 @@ def tokenize(src:str)->list[Token]:
                 value, kind = keyword
                 toks.append(Token(value, start, kind))
             elif text == "import":
-                raise SyntaxError(f"`import` is a preprocessing directive and may only appear in the leading import prelude at {start}")
+                error(src, start, "`import` is a preprocessing directive and may only appear in the leading import prelude")
             elif i < n and src[i] == '(':
                 toks.append(Token(i - start, start, Kind.TK_IDENT_CALL))
                 i += 1  # consume the '('
@@ -281,19 +282,18 @@ def tokenize(src:str)->list[Token]:
             i += 1
             while i < n and stack > 0:
                 if src[i] == '#':
-                    raise SyntaxError(f"udewy doesn't support comments inside type parameters at {i}: {src[start:i]!r}")
+                    error(src, i, "udewy doesn't support comments inside type parameters")
                 if src[i] == '<':
                     stack += 1
                 if src[i] == '>':
                     stack -= 1
                 i += 1
             if stack != 0:
-                raise SyntaxError(f"unterminated type parameter at {start}: {src[start:i]!r}")
+                error(src, start, "unterminated type parameter")
             toks.append(Token(i - start, start, Kind.TK_TYPE_PARAM))
             continue
 
-        # unknown character
-        raise SyntaxError(f"Unrecognized token at {i}: {src[i]!r}\nTokens so far\n{toks}")
+        error(src, i, f"Unrecognized token {src[i]!r}")
 
     return toks
 

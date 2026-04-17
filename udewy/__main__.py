@@ -53,8 +53,12 @@ if __name__ == "__main__":
     backend = get_backend(target)
     loaded = t0.load_program(input_file)
     src = loaded.source
-    toks = t1.tokenize(src)
-    asm = p0.parse(toks, src, backend)
+    try:
+        toks = t1.tokenize(src)
+        asm = p0.parse(toks, src, backend)
+    except SyntaxError as e:
+        print(f"SyntaxError: {e}")
+        sys.exit(1)
     
     cache_dir = Path("__dewycache__")
     cache_dir.mkdir(exist_ok=True)

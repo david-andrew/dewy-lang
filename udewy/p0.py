@@ -10,6 +10,7 @@ from typing import Literal
 
 from . import t1
 from .backend import Backend
+from .errors import error
 
 
 
@@ -286,7 +287,7 @@ def try_parse_stable_expr(
         if var_lookup(state.scope_stack, name) is not None or global_lookup(state.global_table, name) is not None:
             return None
 
-        entry = note_function_reference(backend, state.fn_table, name, None, toks[idx].location)
+        entry = note_function_reference(backend, state.fn_table, name, None, toks[idx].location, state.src)
         stable_value = StableValue("function", entry.label_id)
         if emit_runtime:
             push_stable_value(backend, stable_value)
@@ -333,7 +334,7 @@ def parse_const_only_ident(name: str, loc: int, state: ParseState) -> int | str 
     if var_lookup(state.scope_stack, name) is not None or global_lookup(state.global_table, name) is not None:
         return None
 
-    entry = note_function_reference(state.backend, state.fn_table, name, None, loc)
+    entry = note_function_reference(state.backend, state.fn_table, name, None, loc, state.src)
     return state.backend.function_ref(entry.label_id)
 
 
@@ -356,7 +357,7 @@ def parse_array_elements(toks: list[t1.Token], idx: int, state: ParseState) -> t
             if directive is not None:
                 elem_directives.append(directive)
             else:
-                raise SyntaxError(f"Array elements must be constants at {toks[idx].location}")
+                error(state.src, toks[idx].location, "Array elements must be constants")
             idx = idx + 1
 
         elif elem_kind == t1.Kind.TK_STRING:
@@ -367,7 +368,7 @@ def parse_array_elements(toks: list[t1.Token], idx: int, state: ParseState) -> t
             elem_directives.append(backend.string_ref(str_label_id))
 
         else:
-            raise SyntaxError(f"Array elements must be constants at {toks[idx].location}")
+            error(state.src, toks[idx].location, "Array elements must be constants")
 
     idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACKET, state)
     return elem_directives, idx
@@ -393,9 +394,9 @@ def tok_name_len(toks: list[t1.Token], idx: int) -> int:
 
 def expect(toks: list[t1.Token], idx: int, kind: t1.Kind, state: ParseState) -> int:
     if idx >= len(toks):
-        raise SyntaxError(f"Unexpected end of input, expected {kind.name}")
+        error(state.src, len(state.src), f"Unexpected end of input, expected {kind.name}")
     if toks[idx].kind != kind:
-        raise SyntaxError(f"Expected {kind.name}, got {t1.dump_token(toks[idx], state.src)} at position {toks[idx].location}")
+        error(state.src, toks[idx].location, f"Expected {kind.name}, got {t1.dump_token(toks[idx], state.src)}")
     return idx + 1
 
 
@@ -428,7 +429,7 @@ def looks_like_fn_decl(toks: list[t1.Token], idx: int) -> bool:
 
 def require_type_annotation(toks: list[t1.Token], idx: int, subject: str, state: ParseState) -> int:
     if idx >= len(toks):
-        raise SyntaxError(f"Expected type annotation for {subject} before end of input")
+        error(state.src, len(state.src), f"Expected type annotation for {subject} before end of input")
     kind = toks[idx].kind
     if kind == t1.Kind.TK_TYPE:
         idx = idx + 1
@@ -437,38 +438,34 @@ def require_type_annotation(toks: list[t1.Token], idx: int, subject: str, state:
         return idx
     if kind == t1.Kind.TK_TYPE_PARAM:
         return idx + 1
-    raise SyntaxError(f"Expected type annotation for {subject} at position {toks[idx].location}")
+    error(state.src, toks[idx].location, f"Expected type annotation for {subject}")
 
 
 def require_fn_type_annotation(toks: list[t1.Token], idx: int, fn_name: str, state: ParseState) -> int:
     if idx >= len(toks):
-        raise SyntaxError(f"Expected return type annotation for function {fn_name!r} before end of input")
+        error(state.src, len(state.src), f"Expected return type annotation for function {fn_name!r} before end of input")
     if toks[idx].kind != t1.Kind.TK_FN_TYPE:
-        raise SyntaxError(f"Expected return type annotation for function {fn_name!r} at position {toks[idx].location}")
+        error(state.src, toks[idx].location, f"Expected return type annotation for function {fn_name!r}")
     idx = idx + 1
     if idx < len(toks) and toks[idx].kind == t1.Kind.TK_TYPE_PARAM:
         idx = idx + 1
     return idx
 
 
-def validate_call_arity(backend: Backend, arg_count: int, loc: int) -> None:
+def validate_call_arity(backend: Backend, arg_count: int, loc: int, src: str) -> None:
     max_args = backend.max_call_args()
     if max_args is not None and arg_count > max_args:
-        raise SyntaxError(
-            f"Calls with {arg_count} arguments exceed the backend limit of {max_args} at position {loc}"
-        )
+        error(src, loc, f"Calls with {arg_count} arguments exceed the backend limit of {max_args}")
 
 
-def validate_intrinsic_arity(backend: Backend, name: str, arg_count: int, loc: int) -> None:
+def validate_intrinsic_arity(backend: Backend, name: str, arg_count: int, loc: int, src: str) -> None:
     expected = backend.intrinsic_arity(name)
     if expected is None:
-        raise SyntaxError(f"Unsupported intrinsic {name!r} at position {loc}")
+        error(src, loc, f"Unsupported intrinsic {name!r}")
     if expected != arg_count:
         expected_label = "argument" if expected == 1 else "arguments"
         actual_label = "argument" if arg_count == 1 else "arguments"
-        raise SyntaxError(
-            f"Intrinsic {name!r} expects {expected} {expected_label}, got {arg_count} {actual_label} at position {loc}"
-        )
+        error(src, loc, f"Intrinsic {name!r} expects {expected} {expected_label}, got {arg_count} {actual_label}")
 
 
 def mixed_xmm_intrinsic_arg_slots(name: str) -> int | None:
@@ -494,7 +491,7 @@ def parse_mixed_xmm_intrinsic_call(
 ) -> tuple[int, int, list[int]]:
     arg_slots = mixed_xmm_intrinsic_arg_slots(name)
     if arg_slots is None:
-        raise SyntaxError(f"Unsupported mixed intrinsic {name!r} at position {call_loc}")
+        error(state.src, call_loc, f"Unsupported mixed intrinsic {name!r}")
 
     idx = parse_expr(toks, idx, state, 0)
     state.backend.save_value()
@@ -504,13 +501,11 @@ def parse_mixed_xmm_intrinsic_call(
     for _ in range(arg_slots):
         parsed = try_parse_stable_expr(toks, idx, state, emit_runtime=False)
         if parsed is None:
-            raise SyntaxError(f"Expected compile-time type tag for intrinsic {name!r} at position {call_loc}")
+            error(state.src, call_loc, f"Expected compile-time type tag for intrinsic {name!r}")
         idx, stable_type = parsed
         arg_count = arg_count + 1
         if stable_type.kind != "int" or stable_type.value not in (0, 1, 2):
-            raise SyntaxError(
-                f"Mixed XMM intrinsic {name!r} requires type tags 0, 1, or 2 at position {call_loc}"
-            )
+            error(state.src, call_loc, f"Mixed XMM intrinsic {name!r} requires type tags 0, 1, or 2")
         type_tags.append(stable_type.value)
 
         idx = parse_expr(toks, idx, state, 0)
@@ -527,6 +522,7 @@ def note_function_reference(
     name: str,
     num_args: int | None,
     loc: int,
+    src: str,
 ) -> FunctionEntry:
     entry = fn_lookup(fn_table, name)
     if entry is None:
@@ -537,9 +533,7 @@ def note_function_reference(
         if entry.num_args is None:
             entry.num_args = num_args
         elif entry.num_args != num_args:
-            raise SyntaxError(
-                f"Function {name!r} used with conflicting arities {entry.num_args} and {num_args} at position {loc}"
-            )
+            error(src, loc, f"Function {name!r} used with conflicting arities {entry.num_args} and {num_args}")
 
     return entry
 
@@ -556,11 +550,9 @@ def declare_extern_function(
         return fn_declare(state.fn_table, name, label_id, num_args, True, is_extern=True)
 
     if entry.is_defined:
-        raise SyntaxError(f"Function {name!r} is already declared at position {loc}")
+        error(state.src, loc, f"Function {name!r} is already declared")
     if entry.num_args is not None and entry.num_args != num_args:
-        raise SyntaxError(
-            f"Function {name!r} declared extern with {num_args} arguments after being used with {entry.num_args} at position {loc}"
-        )
+        error(state.src, loc, f"Function {name!r} declared extern with {num_args} arguments after being used with {entry.num_args}")
 
     entry.num_args = num_args
     entry.is_defined = True
@@ -617,7 +609,7 @@ def is_binop(kind: t1.Kind) -> bool:
 def parse_static_alloca_size(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[int, int]:
     """Parse the single compile-time size argument to __static_alloca__."""
     if idx >= len(toks):
-        raise SyntaxError("__static_alloca__ expects one constant size argument")
+        error(state.src, len(state.src), "__static_alloca__ expects one constant size argument")
 
     kind = toks[idx].kind
     size: int | None
@@ -630,15 +622,15 @@ def parse_static_alloca_size(toks: list[t1.Token], idx: int, state: ParseState) 
         name = get_token_name(toks, idx, state.src)
         size = lookup_stable_int(state.scope_stack, state.global_table, name, state.ctx.builtin_consts)
         if size is None:
-            raise SyntaxError(f"__static_alloca__ size must be a compile-time constant at {toks[idx].location}")
+            error(state.src, toks[idx].location, "__static_alloca__ size must be a compile-time constant")
         idx = idx + 1
     else:
-        raise SyntaxError(f"__static_alloca__ size must be a compile-time constant at {toks[idx].location}")
+        error(state.src, toks[idx].location, "__static_alloca__ size must be a compile-time constant")
 
     if idx >= len(toks) or toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
-        raise SyntaxError(f"__static_alloca__ expects exactly one constant size argument at {toks[idx].location}")
+        error(state.src, toks[idx].location, "__static_alloca__ expects exactly one constant size argument")
     if size < 0:
-        raise SyntaxError(f"__static_alloca__ size must be non-negative at {toks[idx - 1].location}")
+        error(state.src, toks[idx - 1].location, "__static_alloca__ size must be non-negative")
 
     return size, idx + 1
 
@@ -697,7 +689,7 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
             backend.push_fn_ref(entry.label_id)
             return idx + 1
 
-        entry = note_function_reference(backend, state.fn_table, name, None, toks[idx].location)
+        entry = note_function_reference(backend, state.fn_table, name, None, toks[idx].location, state.src)
         backend.push_fn_ref(entry.label_id)
         return idx + 1
 
@@ -726,7 +718,7 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
 
                 idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
 
-            validate_intrinsic_arity(backend, name, arg_count, call_loc)
+            validate_intrinsic_arity(backend, name, arg_count, call_loc, state.src)
             if arg_count > 0:
                 backend.restore_value()
             backend.emit_intrinsic(name, arg_count, intrinsic_data)
@@ -738,8 +730,8 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
                 arg_count = arg_count + 1
 
             idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
-            validate_call_arity(backend, arg_count, call_loc)
-            entry = note_function_reference(backend, state.fn_table, name, arg_count, call_loc)
+            validate_call_arity(backend, arg_count, call_loc, state.src)
+            entry = note_function_reference(backend, state.fn_table, name, arg_count, call_loc, state.src)
             backend.call_direct(entry.label_id, arg_count)
 
         return idx
@@ -757,7 +749,7 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
         backend.push_array_ref(label_id)
         return idx
 
-    raise SyntaxError(f"Unexpected token: {t1.dump_token(toks[idx], state.src)} at {toks[idx].location}")
+    error(state.src, toks[idx].location, f"Unexpected token: {t1.dump_token(toks[idx], state.src)}")
 
 
 def parse_prefix( toks: list[t1.Token], idx: int, state: ParseState) -> int:
@@ -804,7 +796,7 @@ def parse_expr(toks: list[t1.Token], idx: int, state: ParseState, min_prec: int)
                 arg_count = arg_count + 1
             
             idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
-            validate_call_arity(backend, arg_count, toks[idx - 1].location)
+            validate_call_arity(backend, arg_count, toks[idx - 1].location, state.src)
             backend.call_indirect(arg_count)
             continue
         
@@ -814,7 +806,7 @@ def parse_expr(toks: list[t1.Token], idx: int, state: ParseState, min_prec: int)
         prec = get_precedence(kind)
         
         if prec > min_prec and min_prec > 0:
-            raise SyntaxError(f"Operator precedence violation at {toks[idx].location}")
+            error(state.src, toks[idx].location, "Operator precedence violation")
         
         idx = idx + 1
         backend.save_value()
@@ -882,7 +874,7 @@ def parse_var_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     idx = idx + 1
     
     if toks[idx].kind != t1.Kind.TK_IDENT:
-        raise SyntaxError("Expected identifier after declaration keyword")
+        error(state.src, toks[idx].location, "Expected identifier after declaration keyword")
     
     name = get_token_name(toks, idx, state.src)
     idx = idx + 1
@@ -891,11 +883,11 @@ def parse_var_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     idx = require_type_annotation(toks, idx, f"{subject} {name!r}", state)
     
     if idx >= len(toks) or toks[idx].kind != t1.Kind.TK_ASSIGN:
-        raise SyntaxError(f"Expected '=' at {toks[idx].location}")
+        error(state.src, toks[idx].location, "Expected '='")
     idx = idx + 1
 
     if idx < len(toks) and toks[idx].kind == t1.Kind.TK_EXTERN:
-        raise SyntaxError(f"`extern` declarations are only allowed at top level at position {toks[idx].location}")
+        error(state.src, toks[idx].location, "`extern` declarations are only allowed at top level")
 
     const_value: StableValue | None = None
     if is_const:
@@ -927,7 +919,7 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     params: list[str] = []
     while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
         if toks[idx].kind != t1.Kind.TK_IDENT:
-            raise SyntaxError(f"Expected parameter name at position {toks[idx].location}")
+            error(state.src, toks[idx].location, "Expected parameter name")
         param_name = get_token_name(toks, idx, state.src)
         params.append(param_name)
         idx = idx + 1
@@ -946,11 +938,10 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     entry = fn_lookup(state.fn_table, fn_name)
     if entry is not None:
         if entry.is_defined:
-            raise SyntaxError(f"Function {fn_name!r} is already defined at position {toks[idx - 1].location}")
+            error(state.src, toks[idx - 1].location, f"Function {fn_name!r} is already defined")
         if entry.num_args is not None and entry.num_args != len(params):
-            raise SyntaxError(
-                f"Function {fn_name!r} defined with {len(params)} arguments after being used with {entry.num_args} at position {toks[idx - 1].location}"
-            )
+            error(state.src, toks[idx - 1].location,
+                  f"Function {fn_name!r} defined with {len(params)} arguments after being used with {entry.num_args}")
         entry.num_args = len(params)
         entry.is_defined = True
         label_id = entry.label_id
@@ -973,7 +964,7 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     
     idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACE, state)
     if not body_returns:
-        raise SyntaxError(f"Function {fn_name!r} must explicitly return before position {toks[idx - 1].location}")
+        error(state.src, toks[idx - 1].location, f"Function {fn_name!r} must explicitly return")
     
     backend.end_function()
     pop_scope(state.scope_stack)
@@ -1063,7 +1054,7 @@ def parse_return_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> int
 
 def parse_break_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     if state.ctx.loop_depth == 0:
-        raise SyntaxError(f"`break` may only appear inside a loop at position {toks[idx].location}")
+        error(state.src, toks[idx].location, "`break` may only appear inside a loop")
     idx = idx + 1
     state.backend.emit_break()
     return idx
@@ -1071,7 +1062,7 @@ def parse_break_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> int:
 
 def parse_continue_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     if state.ctx.loop_depth == 0:
-        raise SyntaxError(f"`continue` may only appear inside a loop at position {toks[idx].location}")
+        error(state.src, toks[idx].location, "`continue` may only appear inside a loop")
     idx = idx + 1
     state.backend.emit_continue()
     return idx
@@ -1092,17 +1083,17 @@ def parse_assign_or_expr(toks: list[t1.Token], idx: int, state: ParseState) -> i
                 local_entry = var_lookup(state.scope_stack, name)
                 if local_entry is not None:
                     if local_entry.is_const:
-                        raise SyntaxError(f"Cannot assign to constant {name!r} at position {toks[idx - 2].location}")
+                        error(state.src, toks[idx - 2].location, f"Cannot assign to constant {name!r}")
                     backend.store_local(local_entry.slot)
                 else:
                     global_entry = global_lookup(state.global_table, name)
                     if global_entry is not None:
                         if global_entry.is_const:
-                            raise SyntaxError(f"Cannot assign to constant {name!r} at position {toks[idx - 2].location}")
+                            error(state.src, toks[idx - 2].location, f"Cannot assign to constant {name!r}")
                         assert global_entry.label_id is not None
                         backend.store_global(global_entry.label_id)
                     else:
-                        raise SyntaxError(f"Undefined variable {name!r} at position {toks[idx - 2].location}")
+                        error(state.src, toks[idx - 2].location, f"Undefined variable {name!r}")
                 
                 return idx
             
@@ -1115,7 +1106,7 @@ def parse_assign_or_expr(toks: list[t1.Token], idx: int, state: ParseState) -> i
                 local_entry = var_lookup(state.scope_stack, name)
                 if local_entry is not None:
                     if local_entry.is_const:
-                        raise SyntaxError(f"Cannot assign to constant {name!r} at position {toks[idx - 2].location}")
+                        error(state.src, toks[idx - 2].location, f"Cannot assign to constant {name!r}")
                     backend.load_local(local_entry.slot)
                     backend.save_value()
                     idx = parse_expr(toks, idx, state, 0)
@@ -1124,9 +1115,9 @@ def parse_assign_or_expr(toks: list[t1.Token], idx: int, state: ParseState) -> i
                 else:
                     global_entry = global_lookup(state.global_table, name)
                     if global_entry is None:
-                        raise SyntaxError(f"Undefined variable {name!r} at position {toks[idx - 2].location}")
+                        error(state.src, toks[idx - 2].location, f"Undefined variable {name!r}")
                     if global_entry.is_const:
-                        raise SyntaxError(f"Cannot assign to constant {name!r} at position {toks[idx - 2].location}")
+                        error(state.src, toks[idx - 2].location, f"Cannot assign to constant {name!r}")
                     assert global_entry.label_id is not None
                     backend.load_global(global_entry.label_id)
                     backend.save_value()
@@ -1146,7 +1137,7 @@ def parse_statement(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[
     
     if is_decl_kind(kind):
         if looks_like_fn_decl(toks, idx):
-            raise SyntaxError(f"Functions may only be declared at top level at position {toks[idx].location}")
+            error(state.src, toks[idx].location, "Functions may only be declared at top level")
         return parse_var_decl(toks, idx, state), False
     
     if kind == t1.Kind.TK_IF:
@@ -1234,7 +1225,7 @@ def parse_program(toks: list[t1.Token], state: ParseState) -> None:
                 GlobalEntry(label_id=label_id, is_const=is_const, const_value=const_value),
             )
         else:
-            raise SyntaxError(f"Only declarations allowed at top level, got {t1.dump_token(toks[idx], state.src)}")
+            error(state.src, toks[idx].location, f"Only declarations allowed at top level, got {t1.dump_token(toks[idx], state.src)}")
 
 
 # ============================================================================
