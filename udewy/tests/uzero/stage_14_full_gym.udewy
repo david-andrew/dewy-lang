@@ -3,13 +3,13 @@ import p"./uzero_core.udewy"
 # ============================================================================
 # uZero Stage 14: full gym (every obstacle in one chained circuit).
 #
-# All approved obstacles from prior stages composed into a single ~3.3 km
+# All approved obstacles from prior stages composed into a single ~3.9 km
 # course running along -Z from spawn, with a sphere-and-hole capstone at
 # the far end. Each obstacle keeps its standalone geometry; query_surface
 # dispatches to the right helper based on which Z window (or 3D shell)
 # the craft is in, defaulting to flat ground in the gaps.
 #
-# Layout (mostly centered on x = 0; sphere outer ramp is offset):
+# Layout (mostly centered on x = 0; sphere outer ramp is offset to +X):
 #
 #   z range            length   obstacle
 #   ----------------   ------   ---------------------------------------
@@ -25,19 +25,24 @@ import p"./uzero_core.udewy"
 #   [-1450, -2250]     800 m    corkscrew (1 full twist)  -- stage 09
 #   [-2250, -2400]     150 m    open straight
 #   [-2400, -2700]     300 m    wall corridor             -- stage 13
-#   [-2700, -2900]     200 m    open straight (sphere approach)
-#   [-2900, -3300]     400 m    SPHERE FINALE             -- stage 14 v2
-#                                 - inner ramp x=0 lifts to (0, 110, -3100),
-#                                   the +Z polar point of a R=100 sphere
-#                                   centered at (0, 110, -3200). Player
-#                                   launches into the polar-cap hole and
-#                                   coasts through ~1 s of cavity flight
-#                                   before the magnet grabs the inner wall.
-#                                 - outer ramp x=+50 lifts to (50, 39.3,
-#                                   -3150), which sits exactly on the
-#                                   sphere's outer +Z+X surface. Player
-#                                   transitions cleanly onto the outside.
-#                                 - hole half-angle 45 deg (~141 m wide
+#   [-2700, -3900]    1200 m    SPHERE FINALE             -- stage 14 v2
+#                                 - sphere is R=300 (3x v1), centered at
+#                                   (0, 310, -3600). Bottom of shell sits
+#                                   10 m above the floor.
+#                                 - inner ramp x=0 climbs 600 m at 27.3 deg
+#                                   to (0, 310, -3300), which is the +Z
+#                                   polar point of the sphere = the hole
+#                                   center. Craft launches into the polar
+#                                   cap hole and freefalls into the cavity
+#                                   before the inner wall magnet grabs.
+#                                 - outer ramp x=+40 climbs 590 m at 42 deg
+#                                   to (40, 531, -3401), which sits on the
+#                                   sphere's upper +Z+X face. Slope chosen
+#                                   so the ramp's plane normal lies within
+#                                   ~8 deg of the sphere's outward normal
+#                                   at the lip -- visually flush, no upward
+#                                   "lip lip" against the curved surface.
+#                                 - hole half-angle 45 deg (~424 m wide
 #                                   opening). Direction-z above cos(45)
 #                                   returns no surface so the magnet does
 #                                   not grab while the craft is in the
@@ -65,8 +70,8 @@ const SDL_SCANCODE_R:int = 21
 # ---------- Physics ---------------------------------------------------------
 
 const HOVER_HEIGHT:int = 98304           # 1.5 m above the surface
-const TOP_SPEED:int = 163840
-const BOOST_BONUS:int = 65536
+const TOP_SPEED:int = 229376             # 3.5 m/frame (= old boost ceiling)
+const BOOST_BONUS:int = 98304            # +1.5 m/frame -> 5.0 m/frame boost ceiling
 const THRUST_ACCEL:int = 1638
 const BRAKE_DECEL:int = 3277
 const BOOST_THRUST_MULT:int = 196608
@@ -182,44 +187,55 @@ const WALL_Z_SEGMENTS:int = 30
 # Tangent friction while in contact: cvz *= (1 - WALL_FRICTION) per frame.
 const WALL_FRICTION:int = 2621           # 0.04 (Q16)
 
-# ---------- Sphere (center z=-3200, R=100, hole on +Z face) -----------------
+# ---------- Sphere (center z=-3600, R=300, hole on +Z face) -----------------
+# 3x v1 sphere per user request. Bottom of shell sits at y = 10 (10 m above
+# ground) so the inner cavity clears the floor.
 
 const SPHERE_CX:int = 0
-const SPHERE_CY:int = 7208960            # 110 m  (10 m above ground -> cavity clears the floor)
-const SPHERE_CZ:int = -209715200         # -3200 m
-const SPHERE_R:int = 6553600             # 100 m
-const SPHERE_REACH:int = 655360          # 10 m  shell-proximity gate for surface query
+const SPHERE_CY:int = 20316160           # 310 m
+const SPHERE_CZ:int = -235929600         # -3600 m
+const SPHERE_R:int = 19660800            # 300 m
+const SPHERE_REACH:int = 1966080         # 30 m  shell-proximity gate for surface query (scaled)
 const SPHERE_HOLE_COS:int = 46341        # cos(45 deg) -- direction-z above this is in the hole
-const SPHERE_LAT_BANDS:int = 16          # latitude bands (drawing); polar axis used here is +Z
-const SPHERE_LON_BANDS:int = 32
+const SPHERE_LAT_BANDS:int = 48          # ~3.75 deg / ~20 m of arc per band
+const SPHERE_LON_BANDS:int = 96
 
 # ---------- Sphere inner-access ramp (centered x=0, leads INTO the hole) ----
+# Lip lands exactly at the sphere's +Z polar point (0, 310, -3300), which is
+# the hole center. Slope = atan(310 / 600) ~ 27.3 deg.
 
-const Z_INNER_NEAR:int = -190054400      # -2900 m  ramp toe near spawn
-const Z_INNER_FAR:int = -203161600       # -3100 m  ramp lip = sphere +Z polar point
-const INNER_RAMP_LENGTH:int = 13107200   # 200 m
-const INNER_RAMP_HEIGHT:int = 7208960    # 110 m   = SPHERE_CY (lip lands at hole center)
+const Z_INNER_NEAR:int = -176947200      # -2700 m  ramp toe (right after wall corridor end)
+const Z_INNER_FAR:int = -216268800       # -3300 m  ramp lip = sphere +Z polar point
+const INNER_RAMP_LENGTH:int = 39321600   # 600 m
+const INNER_RAMP_HEIGHT:int = 20316160   # 310 m   = SPHERE_CY (lip lands at hole center)
 const INNER_RAMP_HALF_W:int = 983040     # 15 m
-const INNER_RAMP_TAN:int = 36045         # 0.55  (110/200)
-const INNER_RAMP_SIN:int = 31588         # sin(atan(0.55)) ~ 0.482
-const INNER_RAMP_COS:int = 57409         # cos(atan(0.55)) ~ 0.876
-const INNER_RAMP_Z_SEGMENTS:int = 40
+const INNER_RAMP_TAN:int = 33861         # 310/600 = 0.5167
+const INNER_RAMP_SIN:int = 30084         # sin(atan(0.5167)) ~ 0.459
+const INNER_RAMP_COS:int = 58238         # cos(atan(0.5167)) ~ 0.889
+const INNER_RAMP_Z_SEGMENTS:int = 80
 const INNER_RAMP_W_SEGMENTS:int = 6
 
-# ---------- Sphere outer-access ramp (centered x=+50, lands on +Z+X face) ---
-# Lip point chosen so it lies exactly on the sphere outer shell:
-#   (50, 39.3, -3150) - SPHERE_CENTER = (50, -70.7, +50), magnitude = 100 = R.
+# ---------- Sphere outer-access ramp (centered x=+40, lands on upper +Z face)
+# Lip at (40, 531, -3401) sits on the sphere upper hemisphere; the sphere's
+# outward normal there is roughly (0.133, 0.737, 0.663). The ramp slope (42
+# deg) is chosen so the ramp's plane normal (0, 0.743, 0.669) is within ~8
+# deg of the sphere normal -- close to tangent at the contact point. The
+# ramp axis stays straight along -Z (no banking) so it remains drivable like
+# the others. Base at z=-2811 keeps it well past the wall corridor
+# (z >= -2700). xc=+40 (rather than +30) leaves a 5 m gap between the inner
+# and outer ramps' side-wall collision footprints so they don't fight each
+# other when the craft drives down the alley between them.
 
-const OUTER_RAMP_X_CENTER:int = 3276800  # +50 m
-const Z_OUTER_NEAR:int = -193331200      # -2950 m
-const Z_OUTER_FAR:int = -206438400       # -3150 m
-const OUTER_RAMP_LENGTH:int = 13107200   # 200 m
-const OUTER_RAMP_HEIGHT:int = 2575565    # 39.3 m  (lands right on sphere outer surface)
+const OUTER_RAMP_X_CENTER:int = 2621440  # +40 m
+const Z_OUTER_NEAR:int = -184221696      # -2811 m
+const Z_OUTER_FAR:int = -222887936       # -3401 m
+const OUTER_RAMP_LENGTH:int = 38666240   # 590 m
+const OUTER_RAMP_HEIGHT:int = 34799616   # 531 m   (= 590 * tan(42 deg))
 const OUTER_RAMP_HALF_W:int = 983040     # 15 m
-const OUTER_RAMP_TAN:int = 12878         # 0.1965
-const OUTER_RAMP_SIN:int = 12642         # sin(atan(0.1965)) ~ 0.193
-const OUTER_RAMP_COS:int = 64304         # cos(atan(0.1965)) ~ 0.981
-const OUTER_RAMP_Z_SEGMENTS:int = 40
+const OUTER_RAMP_TAN:int = 58982         # 0.900   (= tan(42 deg) approx 0.9004)
+const OUTER_RAMP_SIN:int = 43837         # sin(atan(0.9)) = 0.6687
+const OUTER_RAMP_COS:int = 48706         # cos(atan(0.9)) = 0.7431
+const OUTER_RAMP_Z_SEGMENTS:int = 80
 const OUTER_RAMP_W_SEGMENTS:int = 6
 
 # ---------- Obstacle colours ------------------------------------------------
@@ -315,8 +331,8 @@ const COL_SPHERE_RIM_B:int = 6553
 
 # ---------- Ground -----------------------------------------------------------
 
-const TILE_SIZE:int = 3276800            # 50 m  (coarser than per-stage to keep tri count sane on a 3.3 km course)
-const HALF_TILES:int = 80                # +/- 4000 m -> 160x160 = 25600 quads, covers full course + sphere
+const TILE_SIZE:int = 3276800            # 50 m  (coarser than per-stage to keep tri count sane on a ~3.9 km course)
+const HALF_TILES:int = 100               # +/- 5000 m -> 200x200 = 40000 quads, covers full course + 3x sphere
 const GROUND_Y:int = 0
 
 const COL_TILE_A_R:int = 8519
@@ -583,10 +599,12 @@ let surface_sphere = (x:int y:int z:int):>int => {
     if dist <? (SPHERE_R - SPHERE_REACH) {
         return 0
     }
-    let inv_d:int = fp_div(FP_ONE dist)
-    let dx:int = fp_mul(rel_x inv_d)
-    let dy:int = fp_mul(rel_y inv_d)
-    let dz:int = fp_mul(rel_z inv_d)
+    # Direct fp_div rather than (1/dist)*rel_x: with R=300 m, inv_d truncates
+    # to only ~218 Q16 ULPs and the projected surface point jitters by several
+    # metres between frames. fp_div(rel_x, dist) keeps full Q16 precision.
+    let dx:int = fp_div(rel_x dist)
+    let dy:int = fp_div(rel_y dist)
+    let dz:int = fp_div(rel_z dist)
     if dz >? SPHERE_HOLE_COS {
         return 0
     }
@@ -679,6 +697,56 @@ let wall_collide = ():>void => {
 
         if touching not=? 0 {
             cvz -= fp_mul(cvz WALL_FRICTION)
+        }
+    }
+    return 0
+}
+
+# Ramp solid-wall collision. A linear-slope ramp is treated as a solid
+# wedge with three blocking faces:
+#   - left  side at x = xc - hw       (vertical triangle)
+#   - right side at x = xc + hw       (vertical triangle)
+#   - back  wall at z = z_far         (vertical rectangle, full ramp height)
+# The sloped top is left to the magnet snap; the bottom rests on the ground.
+# Any craft whose center sits inside the wedge's expanded forbidden zone
+# (footprint widened by CRAFT_HALF_W on each face) gets pushed out the
+# nearer of those three faces and the inward velocity component is zeroed.
+# Used for the stage-11 ramp and both sphere-access ramps so the magnet
+# can't snap a craft up onto the ramp top from the side or from behind.
+let ramp_side_collide = (xc:int hw:int z_near:int z_far:int tan_q:int):>void => {
+    let height:int = fp_mul(z_near - z_far tan_q)
+    let r_face:int = xc + hw + CRAFT_HALF_W
+    let l_face:int = xc - hw - CRAFT_HALF_W
+    let z_back_face:int = z_far - CRAFT_HALF_W
+
+    # Side walls: inside the ramp's plan footprint AND below the local
+    # sloped top -> push out to the nearer +/-X face.
+    if (cz <=? z_near) and (cz >=? z_far) {
+        let surface_y:int = fp_mul(z_near - cz tan_q)
+        if cy <? surface_y {
+            if (cx <? r_face) and (cx >? l_face) {
+                let to_right:int = r_face - cx
+                let to_left:int = cx - l_face
+                if to_right <? to_left {
+                    cx = r_face
+                    if cvx <? 0 { cvx = 0 }
+                } else {
+                    cx = l_face
+                    if cvx >? 0 { cvx = 0 }
+                }
+            }
+        }
+    }
+
+    # Back wall: vertical face at z=z_far rising from y=0 to y=height (the
+    # ramp's max height at the lip), bounded in x by the ramp footprint.
+    # Block craft trying to drive into the back of the ramp from past the
+    # lip (cz on the -Z side of z_far): push them back to z_back_face and
+    # zero any +Z velocity component pulling them into the wall.
+    if (cz <? z_far) and (cz >? z_back_face) {
+        if (cy <? height) and (cx <? r_face) and (cx >? l_face) {
+            cz = z_back_face
+            if cvz >? 0 { cvz = 0 }
         }
     }
     return 0
@@ -935,8 +1003,13 @@ let physics_step = ():>void => {
     cz += cvz
 
     # Wall clamp before the magnet snap so the snap operates on the
-    # corrected position (avoids a one-frame visual penetration).
+    # corrected position (avoids a one-frame visual penetration). Same
+    # idea for ramp side-walls: don't let the craft phase through a ramp
+    # side and then get yanked up to the top by the magnet.
     wall_collide()
+    ramp_side_collide(0 RAMP_HALF_W Z_RAMP_NEAR Z_RAMP_FAR RAMP_TAN)
+    ramp_side_collide(0 INNER_RAMP_HALF_W Z_INNER_NEAR Z_INNER_FAR INNER_RAMP_TAN)
+    ramp_side_collide(OUTER_RAMP_X_CENTER OUTER_RAMP_HALF_W Z_OUTER_NEAR Z_OUTER_FAR OUTER_RAMP_TAN)
 
     # Magnet snap: pull craft toward hover target along the new surface normal.
     query_surface(cx cy cz)
@@ -1425,7 +1498,7 @@ let draw_inner_ramp = ():>void => {
     return 0
 }
 
-# ---- Sphere outer-access ramp (centered x=+50) ----
+# ---- Sphere outer-access ramp (centered x=+30, slope ~42 deg) ----
 let draw_outer_ramp = ():>void => {
     let r_a:int = q16_to_f32(COL_OUTER_RAMP_A_R)
     let g_a:int = q16_to_f32(COL_OUTER_RAMP_A_G)
