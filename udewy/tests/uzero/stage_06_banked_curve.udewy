@@ -1,0 +1,932 @@
+import p"./uzero_core.udewy"
+
+# ============================================================================
+# uZero Stage 06: one banked curve obstacle.
+#
+# A 90-degree banked arc (inner radius 60 m, outer 120 m, 25 deg bank) sits
+# ahead of the spawn point. Arc center = (60, 0, -60) in world. The player
+# drives -Z out of spawn; at z = -60 they hit the arc's inner edge and begin
+# turning right while the surface tilts inward. After 90 deg they exit
+# heading +X at about (60, 0, -120).
+#
+# Surface geometry per (x, z):
+#   rel = (x - ARC_CX, 0, z - ARC_CZ)
+#   if rel_x <= 0 and rel_z <= 0 and R_IN <= |rel| <= R_OUT:
+#       y = (|rel| - R_IN) * tan(bank)
+#       N = (-sin(bank) * rel_x/r, cos(bank), -sin(bank) * rel_z/r)
+#   else:
+#       flat ground (y = 0, N = +Y)
+#
+# Walls block crossing into the solid wedge from outside (where snapping up
+# to the surface would otherwise feel unphysical):
+#   - outer radial wall (cylindrical at r = R_OUT, full height of bank)
+#   - entry end-cap wall  (vertical face at rel_z = 0)
+#   - exit end-cap wall   (vertical face at rel_x = 0)
+# Driving off the OUTER edge from above remains free (gravity / airborne).
+#
+# Sign-off goal: entering, banking through the curve, and exiting feels
+# coherent. Driving straight through without steering shows the visual bank
+# rotating with position, and you eventually drop off the outer edge.
+#
+# Controls: WASD/arrows + Q/E strafe, Space = boost, R = respawn, Esc = quit.
+# ============================================================================
+
+const SDL_SCANCODE_E:int = 8
+const SDL_SCANCODE_Q:int = 20
+const SDL_SCANCODE_R:int = 21
+
+# ---------- Physics ---------------------------------------------------------
+
+const HOVER_HEIGHT:int = 98304           # 1.5 m above whichever surface
+const TOP_SPEED:int = 163840
+const BOOST_BONUS:int = 65536
+const THRUST_ACCEL:int = 1638
+const BRAKE_DECEL:int = 3277
+const BOOST_THRUST_MULT:int = 196608
+const STRAFE_RATE:int = 32768
+
+const STEER_BASE:int = 12
+const STEER_MIN:int = 8
+
+const LATERAL_GRIP:int = 9830
+const DRAG_COAST:int = 100
+const DRAG_THRUST:int = 327
+
+const HEADING_CAP_SPEED:int = 6553
+
+# Magnet snap: cy += (target_y - cy) * SNAP_ALPHA. Higher = stickier.
+const SNAP_ALPHA:int = 19660             # 0.30 -> ~3-frame settle
+
+# Airborne / gravity. When craft is more than AIR_GAP above the hover target,
+# the magnet disengages and gravity acts on cvy. Real gravity at 60 Hz is
+# ~178 Q16 (1 g); arcade feel needs much more since top speed is exaggerated.
+const AIR_GAP:int = 65536                # 1 m clearance -> airborne
+const GRAVITY:int = 6000                 # ~325 m/s^2 (~33 g) -- arcade snap
+
+# Push craft this far back from a wall after a hit, so it won't re-collide
+# next frame.
+const WALL_OFFSET:int = 6553             # 0.1 m
+
+# Surface-up smoothing for visual basis. Physics uses raw normal, visual
+# lerps toward it so the craft doesn't pop on hard edges.
+const UP_ALPHA:int = 13107               # 0.20
+
+# ---------- Camera ----------------------------------------------------------
+
+const CAM_BACK:int = 983040
+const CAM_LIFT:int = 262144
+const CAM_PITCH_UNITS:int = -28
+const POS_ALPHA:int = 11796              # 0.18
+const YAW_ALPHA:int = 7864               # 0.12
+const BANK_GAIN:int = 6
+const BANK_MAX:int = 50
+const BANK_ALPHA:int = 13107
+const FOV_PUNCH:int = 26214
+
+# ---------- Banked curve ----------------------------------------------------
+
+const ARC_CX:int = 3932160               # 60 m, arc center x
+const ARC_CZ:int = -3932160              # -60 m, arc center z
+const ARC_R_IN:int = 3932160             # 60 m
+const ARC_R_OUT:int = 7864320            # 120 m
+const ARC_WIDTH:int = 3932160            # R_OUT - R_IN = 60 m
+# Bank = 25 deg. sin ~= 0.4226, cos ~= 0.9063, tan ~= 0.4663.
+const ARC_SIN_BANK:int = 27691
+const ARC_COS_BANK:int = 59395
+const ARC_TAN_BANK:int = 30561
+const ARC_MAX_RISE:int = 1834647         # ~28 m: width * tan(bank)
+
+# Arc start/end angles in 1024-units (512 = pi). Arc sweeps from alpha = 512
+# (rel_x = -R, rel_z = 0, entry pointing -Z) to alpha = 768 (rel_x = 0,
+# rel_z = -R, exit pointing +X). 256 units = 90 deg.
+const ARC_A0:int = 512
+const ARC_A1:int = 768
+const ARC_SEGMENTS:int = 32              # number of tessellation segments
+
+const COL_ARC_R:int = 52428              # 0.80 lavender-ish
+const COL_ARC_G:int = 32768              # 0.50
+const COL_ARC_B:int = 62258              # 0.95
+const COL_ARC_EDGE_R:int = 62258
+const COL_ARC_EDGE_G:int = 13107
+const COL_ARC_EDGE_B:int = 45875
+
+# ---------- Ground -----------------------------------------------------------
+
+const TILE_SIZE:int = 655360
+const HALF_TILES:int = 80
+const GROUND_Y:int = 0
+
+const COL_TILE_A_R:int = 8519
+const COL_TILE_A_G:int = 11796
+const COL_TILE_A_B:int = 16384
+const COL_TILE_B_R:int = 13107
+const COL_TILE_B_G:int = 19660
+const COL_TILE_B_B:int = 26214
+
+const COL_SKY_R:int = 2621
+const COL_SKY_G:int = 3932
+const COL_SKY_B:int = 8192
+
+# ---------- Globals ----------------------------------------------------------
+
+let running:int = 1
+let frame_count:int = 0
+
+let cx:int = 0
+let cy:int = 98304
+let cz:int = 0
+let cvx:int = 0
+let cvy:int = 0
+let cvz:int = 0
+let cyaw:int = 0
+let prev_cyaw:int = 0
+
+# Craft physics basis (full 3D, derived each frame from yaw + surface normal).
+let fx:int = 0
+let fy:int = 0
+let fz:int = -65536
+let rx:int = 65536
+let ry:int = 0
+let rz:int = 0
+let ux:int = 0
+let uy:int = 65536
+let uz:int = 0
+
+# Smoothed up vector for the craft visual basis (lerps toward physics up).
+let su_x:int = 0
+let su_y:int = 65536
+let su_z:int = 0
+
+# Visual basis (smoothed up + bank roll).
+let vrx:int = 65536
+let vry:int = 0
+let vrz:int = 0
+let vux:int = 0
+let vuy:int = 65536
+let vuz:int = 0
+let vfx:int = 0
+let vfy:int = 0
+let vfz:int = -65536
+
+# Camera state.
+let chase_yaw_q:int = 0
+let cam_x:int = 0
+let cam_y:int = 360448
+let cam_z:int = 983040
+let bank:int = 0
+let cur_fov_top_q16:int = 131072
+
+# Surface query result (set by query_surface).
+let surf_y:int = 0
+let surf_nx:int = 0
+let surf_ny:int = 65536
+let surf_nz:int = 0
+
+# ---------- Input ------------------------------------------------------------
+
+let in_thrust:int = 0
+let in_brake:int = 0
+let in_steer_l:int = 0
+let in_steer_r:int = 0
+let in_strafe_l:int = 0
+let in_strafe_r:int = 0
+let in_boost:int = 0
+let in_respawn:int = 0
+let in_respawn_prev:int = 0
+let in_quit:int = 0
+
+let update_input = (keyboard:int):>void => {
+    in_thrust = SDL_ScancodeDown(keyboard SDL_SCANCODE_W) or SDL_ScancodeDown(keyboard SDL_SCANCODE_UP)
+    in_brake = SDL_ScancodeDown(keyboard SDL_SCANCODE_S) or SDL_ScancodeDown(keyboard SDL_SCANCODE_DOWN)
+    in_steer_l = SDL_ScancodeDown(keyboard SDL_SCANCODE_A) or SDL_ScancodeDown(keyboard SDL_SCANCODE_LEFT)
+    in_steer_r = SDL_ScancodeDown(keyboard SDL_SCANCODE_D) or SDL_ScancodeDown(keyboard SDL_SCANCODE_RIGHT)
+    in_strafe_l = SDL_ScancodeDown(keyboard SDL_SCANCODE_Q)
+    in_strafe_r = SDL_ScancodeDown(keyboard SDL_SCANCODE_E)
+    in_boost = SDL_ScancodeDown(keyboard SDL_SCANCODE_SPACE)
+    let r_now:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_R)
+    in_respawn = (r_now not=? 0) and (in_respawn_prev =? 0)
+    in_respawn_prev = r_now
+    in_quit = SDL_ScancodeDown(keyboard SDL_SCANCODE_ESCAPE)
+    return 0
+}
+
+# ---------- Surface query ---------------------------------------------------
+
+# Stamps surf_y/surf_n* for the world position (x, z). Defaults to flat
+# ground; returns banked-arc surface when (x, z) is inside the arc sector.
+let query_surface = (x:int z:int):>void => {
+    surf_y = 0
+    surf_nx = 0
+    surf_ny = FP_ONE
+    surf_nz = 0
+    let rel_x:int = x - ARC_CX
+    let rel_z:int = z - ARC_CZ
+    if (rel_x <=? 0) and (rel_z <=? 0) {
+        let r_sq:int = (rel_x * rel_x) + (rel_z * rel_z)
+        let r:int = fp_sqrt(r_sq)
+        if (r >=? ARC_R_IN) and (r <=? ARC_R_OUT) {
+            surf_y = fp_mul(r - ARC_R_IN ARC_TAN_BANK)
+            let ux:int = fp_div(rel_x r)
+            let uz:int = fp_div(rel_z r)
+            surf_nx = 0 - fp_mul(ARC_SIN_BANK ux)
+            surf_ny = ARC_COS_BANK
+            surf_nz = 0 - fp_mul(ARC_SIN_BANK uz)
+        }
+    }
+    return 0
+}
+
+# Block crossings into the arc's solid wedge. Three walls:
+#   - outer cylindrical wall at r = R_OUT
+#   - entry vertical face at rel_z = 0 (x in [-R_OUT, -R_IN])
+#   - exit  vertical face at rel_x = 0 (z in [-R_OUT, -R_IN])
+# Each only fires when craft is below the local surface height + hover gap.
+let check_arc_walls = (prev_x:int prev_z:int):>void => {
+    let rel_x:int = cx - ARC_CX
+    let rel_z:int = cz - ARC_CZ
+    let prev_rel_x:int = prev_x - ARC_CX
+    let prev_rel_z:int = prev_z - ARC_CZ
+
+    # Outer radial wall: only inside the arc sector.
+    if (rel_x <=? 0) and (rel_z <=? 0) {
+        let r:int = fp_sqrt((rel_x * rel_x) + (rel_z * rel_z))
+        let prev_r:int = fp_sqrt((prev_rel_x * prev_rel_x) + (prev_rel_z * prev_rel_z))
+        if (r <? ARC_R_OUT) and (prev_r >=? ARC_R_OUT) and (cy <? (ARC_MAX_RISE + HOVER_HEIGHT)) {
+            let target_r:int = ARC_R_OUT + WALL_OFFSET
+            let scale:int = fp_div(target_r r)
+            cx = ARC_CX + fp_mul(rel_x scale)
+            cz = ARC_CZ + fp_mul(rel_z scale)
+            let r_x:int = fp_div(rel_x r)
+            let r_z:int = fp_div(rel_z r)
+            let v_dot_r:int = fp_mul(cvx r_x) + fp_mul(cvz r_z)
+            if v_dot_r <? 0 {
+                cvx -= fp_mul(r_x v_dot_r)
+                cvz -= fp_mul(r_z v_dot_r)
+            }
+        }
+    }
+
+    # Entry end-cap wall at rel_z = 0, rel_x in [-R_OUT, -R_IN].
+    if (rel_x <=? (0 - ARC_R_IN)) and (rel_x >=? (0 - ARC_R_OUT)) and (rel_z <=? 0) and (prev_rel_z >? 0) {
+        let r_here:int = 0 - rel_x
+        let surf_h:int = fp_mul(r_here - ARC_R_IN ARC_TAN_BANK)
+        if cy <? (surf_h + HOVER_HEIGHT) {
+            cz = ARC_CZ + WALL_OFFSET
+            if cvz <? 0 {
+                cvz = 0
+            }
+        }
+    }
+
+    # Exit end-cap wall at rel_x = 0, rel_z in [-R_OUT, -R_IN].
+    if (rel_z <=? (0 - ARC_R_IN)) and (rel_z >=? (0 - ARC_R_OUT)) and (rel_x <=? 0) and (prev_rel_x >? 0) {
+        let r_here:int = 0 - rel_z
+        let surf_h:int = fp_mul(r_here - ARC_R_IN ARC_TAN_BANK)
+        if cy <? (surf_h + HOVER_HEIGHT) {
+            cx = ARC_CX + WALL_OFFSET
+            if cvx <? 0 {
+                cvx = 0
+            }
+        }
+    }
+    return 0
+}
+
+# ---------- Physics step -----------------------------------------------------
+
+let reset_craft = ():>void => {
+    cx = 0
+    cy = HOVER_HEIGHT
+    cz = 0
+    cvx = 0
+    cvy = 0
+    cvz = 0
+    cyaw = 0
+    prev_cyaw = 0
+    chase_yaw_q = 0
+    cam_x = 0
+    cam_y = HOVER_HEIGHT + CAM_LIFT
+    cam_z = CAM_BACK
+    bank = 0
+    su_x = 0
+    su_y = FP_ONE
+    su_z = 0
+    return 0
+}
+
+let physics_step = ():>void => {
+    prev_cyaw = cyaw
+    let prev_cx:int = cx
+    let prev_cz:int = cz
+
+    # Surface at the current position. Drives basis if grounded; if we're
+    # significantly above hover height we're airborne and use world up
+    # instead so the craft flies freely without being plane-locked.
+    query_surface(cx cz)
+    let surf_y_now:int = surf_y
+    let target_y_now:int = surf_y_now + HOVER_HEIGHT
+    let airborne:int = 0
+    if (cy - target_y_now) >? AIR_GAP {
+        airborne = 1
+    }
+    let nx:int = surf_nx
+    let ny:int = surf_ny
+    let nz:int = surf_nz
+    if airborne not=? 0 {
+        nx = 0
+        ny = FP_ONE
+        nz = 0
+    }
+
+    let speed_xyz:int = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    let speed_norm:int = 0
+    if TOP_SPEED >? 0 {
+        speed_norm = (speed_xyz << 16) // (TOP_SPEED + 1)
+    }
+    if speed_norm >? FP_ONE {
+        speed_norm = FP_ONE
+    }
+    if speed_norm <? 0 {
+        speed_norm = 0
+    }
+
+    let steer_in:int = 0
+    if in_steer_l not=? 0 {
+        steer_in -= 1
+    }
+    if in_steer_r not=? 0 {
+        steer_in += 1
+    }
+    let steer_rate:int = STEER_BASE - fp_mul((STEER_BASE - STEER_MIN) speed_norm)
+    let proposed_yaw:int = cyaw + (steer_in * steer_rate)
+    proposed_yaw = proposed_yaw % ANG_TURN
+    if proposed_yaw <? 0 {
+        proposed_yaw += ANG_TURN
+    }
+
+    # Build candidate forward in world XZ from yaw, then project onto surface
+    # plane and normalize. R = F x N (in plane, perpendicular to F).
+    let yfx:int = sin_fp(proposed_yaw)
+    let yfz:int = 0 - cos_fp(proposed_yaw)
+    let yf_dot_n:int = fp_mul(yfx nx) + fp_mul(yfz nz)
+    let pfx:int = yfx - fp_mul(nx yf_dot_n)
+    let pfy:int = 0 - fp_mul(ny yf_dot_n)
+    let pfz:int = yfz - fp_mul(nz yf_dot_n)
+    let pf_mag:int = fp_sqrt((pfx * pfx) + (pfy * pfy) + (pfz * pfz))
+    if pf_mag <? 1024 {
+        pf_mag = FP_ONE
+    }
+    let prop_fx:int = fp_div(pfx pf_mag)
+    let prop_fy:int = fp_div(pfy pf_mag)
+    let prop_fz:int = fp_div(pfz pf_mag)
+
+    # Heading cap: above HEADING_CAP_SPEED, reject steer that would put the
+    # heading more than 90 deg from horizontal velocity (xz only).
+    let speed_xz:int = fp_sqrt((cvx * cvx) + (cvz * cvz))
+    let accept:int = 1
+    if speed_xz >? HEADING_CAP_SPEED {
+        let prop_dot:int = fp_mul(prop_fx cvx) + fp_mul(prop_fz cvz)
+        if prop_dot <? 0 {
+            accept = 0
+        }
+    }
+    if accept not=? 0 {
+        cyaw = proposed_yaw
+        fx = prop_fx
+        fy = prop_fy
+        fz = prop_fz
+    } else {
+        # Re-project the existing fwd onto the (possibly new) surface plane.
+        let fdotn:int = fp_mul(fx nx) + fp_mul(fy ny) + fp_mul(fz nz)
+        let nfx:int = fx - fp_mul(nx fdotn)
+        let nfy:int = fy - fp_mul(ny fdotn)
+        let nfz:int = fz - fp_mul(nz fdotn)
+        let nfm:int = fp_sqrt((nfx * nfx) + (nfy * nfy) + (nfz * nfz))
+        if nfm >? 1024 {
+            fx = fp_div(nfx nfm)
+            fy = fp_div(nfy nfm)
+            fz = fp_div(nfz nfm)
+        }
+    }
+
+    # Up = surface normal. Right = F x N (in plane).
+    ux = nx
+    uy = ny
+    uz = nz
+    rx = fp_mul(fy nz) - fp_mul(fz ny)
+    ry = fp_mul(fz nx) - fp_mul(fx nz)
+    rz = fp_mul(fx ny) - fp_mul(fy nx)
+
+    let thrust:int = 0
+    let thrust_active:int = 0
+    if in_thrust not=? 0 {
+        thrust = THRUST_ACCEL
+        thrust_active = 1
+        if in_boost not=? 0 {
+            thrust = fp_mul(THRUST_ACCEL BOOST_THRUST_MULT)
+        }
+    }
+    if thrust not=? 0 {
+        cvx += fp_mul(fx thrust)
+        cvy += fp_mul(fy thrust)
+        cvz += fp_mul(fz thrust)
+    }
+
+    if in_brake not=? 0 {
+        let fwd_speed:int = fp_mul(cvx fx) + fp_mul(cvy fy) + fp_mul(cvz fz)
+        if fwd_speed >? 0 {
+            let brake:int = BRAKE_DECEL
+            if brake >? fwd_speed {
+                brake = fwd_speed
+            }
+            cvx -= fp_mul(fx brake)
+            cvy -= fp_mul(fy brake)
+            cvz -= fp_mul(fz brake)
+        }
+    }
+
+    # Strafe = direct position translation along right axis (in plane).
+    let strafe:int = 0
+    if in_strafe_l not=? 0 {
+        strafe -= STRAFE_RATE
+    }
+    if in_strafe_r not=? 0 {
+        strafe += STRAFE_RATE
+    }
+    if strafe not=? 0 {
+        cx += fp_mul(rx strafe)
+        cy += fp_mul(ry strafe)
+        cz += fp_mul(rz strafe)
+    }
+
+    # Grip + drag only matter when grounded; in air the craft drifts ballistically.
+    if airborne =? 0 {
+        let side_dot:int = fp_mul(cvx rx) + fp_mul(cvy ry) + fp_mul(cvz rz)
+        let side_kill:int = fp_mul(side_dot LATERAL_GRIP)
+        cvx -= fp_mul(rx side_kill)
+        cvy -= fp_mul(ry side_kill)
+        cvz -= fp_mul(rz side_kill)
+
+        let drag:int = DRAG_COAST
+        if thrust_active not=? 0 {
+            drag = DRAG_THRUST
+        }
+        let fwd_dot:int = fp_mul(cvx fx) + fp_mul(cvy fy) + fp_mul(cvz fz)
+        let drag_force:int = fp_mul(fwd_dot drag)
+        cvx -= fp_mul(fx drag_force)
+        cvy -= fp_mul(fy drag_force)
+        cvz -= fp_mul(fz drag_force)
+    }
+
+    let max_speed:int = TOP_SPEED
+    if in_boost not=? 0 {
+        max_speed = TOP_SPEED + BOOST_BONUS
+    }
+    let cur_speed:int = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    if cur_speed >? max_speed {
+        cvx = fp_div(fp_mul(cvx max_speed) cur_speed)
+        cvy = fp_div(fp_mul(cvy max_speed) cur_speed)
+        cvz = fp_div(fp_mul(cvz max_speed) cur_speed)
+    }
+
+    if airborne not=? 0 {
+        cvy -= GRAVITY
+    } else {
+        # Project velocity onto the surface plane (keeps motion tangent).
+        let cv_dot_n:int = fp_mul(cvx nx) + fp_mul(cvy ny) + fp_mul(cvz nz)
+        cvx -= fp_mul(nx cv_dot_n)
+        cvy -= fp_mul(ny cv_dot_n)
+        cvz -= fp_mul(nz cv_dot_n)
+    }
+
+    cx += cvx
+    cy += cvy
+    cz += cvz
+
+    check_arc_walls(prev_cx prev_cz)
+
+    # Magnet snap: only engages when within AIR_GAP of the hover target;
+    # while airborne the craft falls (or rises) under gravity alone.
+    query_surface(cx cz)
+    let target_y_post:int = surf_y + HOVER_HEIGHT
+    let post_gap:int = cy - target_y_post
+    if post_gap <=? AIR_GAP {
+        cy += fp_mul((0 - post_gap) SNAP_ALPHA)
+    }
+
+    # Visual up smooths toward surface normal when grounded, world up in air.
+    let target_ux:int = surf_nx
+    let target_uy:int = surf_ny
+    let target_uz:int = surf_nz
+    if post_gap >? AIR_GAP {
+        target_ux = 0
+        target_uy = FP_ONE
+        target_uz = 0
+    }
+    su_x += fp_mul(target_ux - su_x UP_ALPHA)
+    su_y += fp_mul(target_uy - su_y UP_ALPHA)
+    su_z += fp_mul(target_uz - su_z UP_ALPHA)
+    let su_mag:int = fp_sqrt((su_x * su_x) + (su_y * su_y) + (su_z * su_z))
+    if su_mag >? 1024 {
+        su_x = fp_div(su_x su_mag)
+        su_y = fp_div(su_y su_mag)
+        su_z = fp_div(su_z su_mag)
+    }
+
+    if in_respawn not=? 0 {
+        reset_craft()
+    }
+    return 0
+}
+
+# ---------- Smoothed chase + visual basis -----------------------------------
+
+let update_chase = ():>void => {
+    let speed:int = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    let sn_clamp:int = 0
+    if TOP_SPEED >? 0 {
+        sn_clamp = (speed << 16) // TOP_SPEED
+    }
+    if sn_clamp >? FP_ONE {
+        sn_clamp = FP_ONE
+    }
+
+    let cyaw_q:int = cyaw << FP_SHIFT
+    let half_q:int = ANG_HALF_TURN << FP_SHIFT
+    let turn_q:int = ANG_TURN << FP_SHIFT
+    let dy_q:int = cyaw_q - chase_yaw_q
+    if dy_q >? half_q {
+        dy_q -= turn_q
+    }
+    if dy_q <? (0 - half_q) {
+        dy_q += turn_q
+    }
+    chase_yaw_q += fp_mul(dy_q YAW_ALPHA)
+    chase_yaw_q = chase_yaw_q % turn_q
+    if chase_yaw_q <? 0 {
+        chase_yaw_q += turn_q
+    }
+    let chase_yaw:int = __signed_shr__(chase_yaw_q FP_SHIFT)
+    let chase_fx:int = sin_fp(chase_yaw)
+    let chase_fz:int = 0 - cos_fp(chase_yaw)
+
+    let target_x:int = cx - fp_mul(chase_fx CAM_BACK)
+    let target_y:int = cy + CAM_LIFT
+    let target_z:int = cz - fp_mul(chase_fz CAM_BACK)
+    cam_x += fp_mul(target_x - cam_x POS_ALPHA)
+    cam_y += fp_mul(target_y - cam_y POS_ALPHA)
+    cam_z += fp_mul(target_z - cam_z POS_ALPHA)
+
+    let scale:int = FP_ONE + fp_mul(sn_clamp FOV_PUNCH)
+    cur_fov_top_q16 = fp_mul(131072 scale)
+
+    let dyaw:int = cyaw - prev_cyaw
+    if dyaw >? ANG_HALF_TURN {
+        dyaw -= ANG_TURN
+    }
+    if dyaw <? (0 - ANG_HALF_TURN) {
+        dyaw += ANG_TURN
+    }
+    let bank_target:int = fp_mul((dyaw * BANK_GAIN) sn_clamp)
+    if bank_target >? BANK_MAX {
+        bank_target = BANK_MAX
+    }
+    if bank_target <? (0 - BANK_MAX) {
+        bank_target = 0 - BANK_MAX
+    }
+    bank += fp_mul(bank_target - bank BANK_ALPHA)
+
+    # Visual basis: align to smoothed-up, then roll about forward by bank.
+    # First reproject forward onto the smoothed-up plane.
+    let fdotu:int = fp_mul(fx su_x) + fp_mul(fy su_y) + fp_mul(fz su_z)
+    let vfx0:int = fx - fp_mul(su_x fdotu)
+    let vfy0:int = fy - fp_mul(su_y fdotu)
+    let vfz0:int = fz - fp_mul(su_z fdotu)
+    let vfm:int = fp_sqrt((vfx0 * vfx0) + (vfy0 * vfy0) + (vfz0 * vfz0))
+    if vfm <? 1024 {
+        vfm = FP_ONE
+    }
+    vfx = fp_div(vfx0 vfm)
+    vfy = fp_div(vfy0 vfm)
+    vfz = fp_div(vfz0 vfm)
+    # Right (no roll) = vfwd x su.
+    let r0x:int = fp_mul(vfy su_z) - fp_mul(vfz su_y)
+    let r0y:int = fp_mul(vfz su_x) - fp_mul(vfx su_z)
+    let r0z:int = fp_mul(vfx su_y) - fp_mul(vfy su_x)
+    # Apply roll about vfwd: new_R = R*cos - U*sin, new_U = U*cos + R*sin.
+    let cos_r:int = cos_fp(bank)
+    let sin_r:int = sin_fp(bank)
+    vrx = fp_mul(r0x cos_r) - fp_mul(su_x sin_r)
+    vry = fp_mul(r0y cos_r) - fp_mul(su_y sin_r)
+    vrz = fp_mul(r0z cos_r) - fp_mul(su_z sin_r)
+    vux = fp_mul(su_x cos_r) + fp_mul(r0x sin_r)
+    vuy = fp_mul(su_y cos_r) + fp_mul(r0y sin_r)
+    vuz = fp_mul(su_z cos_r) + fp_mul(r0z sin_r)
+    return 0
+}
+
+# ---------- Rendering -------------------------------------------------------
+
+let set_perspective = (screen_w:int screen_h:int):>void => {
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    let aspect_q16:int = (screen_w << 16) // screen_h
+    let near_q16:int = 2 * FP_ONE
+    let top_q16:int = cur_fov_top_q16
+    let right_q16:int = fp_mul(top_q16 aspect_q16)
+    GL_Frustum(q16_to_f64(0 - right_q16) q16_to_f64(right_q16) q16_to_f64(0 - top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    return 0
+}
+
+let apply_camera = ():>void => {
+    let chase_yaw:int = __signed_shr__(chase_yaw_q FP_SHIFT)
+    let yaw_deg:int = (chase_yaw * 360) // ANG_TURN
+    let pitch_deg:int = (CAM_PITCH_UNITS * 360) // ANG_TURN
+    GL_Rotatef(__i64_to_f32_bits__(0 - pitch_deg) F32_ONE F32_ZERO F32_ZERO)
+    GL_Rotatef(__i64_to_f32_bits__(yaw_deg) F32_ZERO F32_ONE F32_ZERO)
+    GL_Translatef(q16_to_f32(0 - cam_x) q16_to_f32(0 - cam_y) q16_to_f32(0 - cam_z))
+    return 0
+}
+
+let draw_ground = ():>void => {
+    let i:int = 0 - HALF_TILES
+    loop i <? HALF_TILES {
+        let j:int = 0 - HALF_TILES
+        loop j <? HALF_TILES {
+            let x0:int = i * TILE_SIZE
+            let x1:int = (i + 1) * TILE_SIZE
+            let z0:int = j * TILE_SIZE
+            let z1:int = (j + 1) * TILE_SIZE
+            let dark:int = (i + j) and 1
+            let r:int = COL_TILE_A_R
+            let g:int = COL_TILE_A_G
+            let b:int = COL_TILE_A_B
+            if dark =? 0 {
+                r = COL_TILE_B_R
+                g = COL_TILE_B_G
+                b = COL_TILE_B_B
+            }
+            glBegin(GL_QUADS)
+            GL_Color3f(q16_to_f32(r) q16_to_f32(g) q16_to_f32(b))
+            world_v3(x0 GROUND_Y z0)
+            world_v3(x1 GROUND_Y z0)
+            world_v3(x1 GROUND_Y z1)
+            world_v3(x0 GROUND_Y z1)
+            glEnd()
+            j += 1
+        }
+        i += 1
+    }
+    return 0
+}
+
+let draw_arc = ():>void => {
+    # Tessellate 90 deg arc into ARC_SEGMENTS quads spanning inner->outer.
+    # Each segment builds one quad with 4 corners (inner_lo, outer_hi at i
+    # and i+1). Normal-of-bank is implicit in the height profile.
+    let angle_span:int = ARC_A1 - ARC_A0
+    let color_r:int = q16_to_f32(COL_ARC_R)
+    let color_g:int = q16_to_f32(COL_ARC_G)
+    let color_b:int = q16_to_f32(COL_ARC_B)
+    let edge_r:int = q16_to_f32(COL_ARC_EDGE_R)
+    let edge_g:int = q16_to_f32(COL_ARC_EDGE_G)
+    let edge_b:int = q16_to_f32(COL_ARC_EDGE_B)
+
+    let i:int = 0
+    loop i <? ARC_SEGMENTS {
+        let a0:int = ARC_A0 + ((i * angle_span) // ARC_SEGMENTS)
+        let a1:int = ARC_A0 + (((i + 1) * angle_span) // ARC_SEGMENTS)
+        let c0:int = cos_fp(a0)
+        let s0:int = sin_fp(a0)
+        let c1:int = cos_fp(a1)
+        let s1:int = sin_fp(a1)
+
+        let xi0:int = ARC_CX + fp_mul(ARC_R_IN c0)
+        let zi0:int = ARC_CZ + fp_mul(ARC_R_IN s0)
+        let xo0:int = ARC_CX + fp_mul(ARC_R_OUT c0)
+        let zo0:int = ARC_CZ + fp_mul(ARC_R_OUT s0)
+        let xi1:int = ARC_CX + fp_mul(ARC_R_IN c1)
+        let zi1:int = ARC_CZ + fp_mul(ARC_R_IN s1)
+        let xo1:int = ARC_CX + fp_mul(ARC_R_OUT c1)
+        let zo1:int = ARC_CZ + fp_mul(ARC_R_OUT s1)
+
+        # Alternate light/dark bands on the surface for speed cues.
+        let band:int = i and 1
+        let rr:int = color_r
+        let gg:int = color_g
+        let bb:int = color_b
+        if band =? 0 {
+            rr = edge_r
+            gg = edge_g
+            bb = edge_b
+        }
+        glBegin(GL_QUADS)
+        GL_Color3f(rr gg bb)
+        world_v3(xi0 0 zi0)
+        world_v3(xi1 0 zi1)
+        world_v3(xo1 ARC_MAX_RISE zo1)
+        world_v3(xo0 ARC_MAX_RISE zo0)
+        glEnd()
+
+        # Outer-edge vertical face (the raised-edge wall), so the bank reads
+        # clearly from below.
+        glBegin(GL_QUADS)
+        GL_Color3f(q16_to_f32(19660) q16_to_f32(19660) q16_to_f32(26214))
+        world_v3(xo0 0 zo0)
+        world_v3(xo1 0 zo1)
+        world_v3(xo1 ARC_MAX_RISE zo1)
+        world_v3(xo0 ARC_MAX_RISE zo0)
+        glEnd()
+        i += 1
+    }
+    return 0
+}
+
+let craft_emit = (lx:int ly:int lz:int):>void => {
+    let wx:int = cx + fp_mul(vrx lx) + fp_mul(vux ly) + fp_mul(vfx lz)
+    let wy:int = cy + fp_mul(vry lx) + fp_mul(vuy ly) + fp_mul(vfy lz)
+    let wz:int = cz + fp_mul(vrz lx) + fp_mul(vuz ly) + fp_mul(vfz lz)
+    world_v3(wx wy wz)
+    return 0
+}
+
+let draw_craft = ():>void => {
+    let nose_z:int = 229376
+    let tail_z:int = 0 - 131072
+    let wing_x:int = 163840
+    let body_y_top:int = 39321
+    let body_y_bot:int = 0 - 13107
+    let canopy_z:int = 65536
+    let canopy_y:int = 78643
+
+    let body_r:int = q16_to_f32(13107)
+    let body_g:int = q16_to_f32(45875)
+    let body_b:int = q16_to_f32(58982)
+    let belly_r:int = q16_to_f32(6553)
+    let belly_g:int = q16_to_f32(13107)
+    let belly_b:int = q16_to_f32(32768)
+    let side_r:int = q16_to_f32(6553)
+    let side_g:int = q16_to_f32(26214)
+    let side_b:int = q16_to_f32(45875)
+    let canopy_r:int = q16_to_f32(58982)
+    let canopy_g:int = q16_to_f32(58982)
+    let canopy_b:int = F32_ONE
+    let glow_r:int = F32_ONE
+    let glow_g:int = q16_to_f32(45875)
+    let glow_b:int = q16_to_f32(6553)
+
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(body_r body_g body_b)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(wing_x body_y_top tail_z)
+    glEnd()
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(belly_r belly_g belly_b)
+    craft_emit(0 body_y_bot nose_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    glEnd()
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(side_r side_g side_b)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 body_y_bot nose_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    glEnd()
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(side_r side_g side_b)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(wing_x body_y_top tail_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 body_y_bot nose_z)
+    glEnd()
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(canopy_r canopy_g canopy_b)
+    craft_emit(0 canopy_y canopy_z)
+    craft_emit(0 - 26214 body_y_top 0)
+    craft_emit(26214 body_y_top 0)
+    glEnd()
+    let glow_x:int = 65536
+    let glow_y_bot:int = 0
+    let glow_y_top:int = 26214
+    glBegin(GL_QUADS)
+    GL_Color3f(glow_r glow_g glow_b)
+    craft_emit(0 - glow_x glow_y_bot tail_z)
+    craft_emit(glow_x glow_y_bot tail_z)
+    craft_emit(glow_x glow_y_top tail_z)
+    craft_emit(0 - glow_x glow_y_top tail_z)
+    glEnd()
+    return 0
+}
+
+let render_scene = (sw:int sh:int):>void => {
+    glViewport(0 0 sw sh)
+    GL_ClearColor(q16_to_f32(COL_SKY_R) q16_to_f32(COL_SKY_G) q16_to_f32(COL_SKY_B) F32_ONE)
+    glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDisable(GL_CULL_FACE)
+    set_perspective(sw sh)
+    apply_camera()
+    draw_ground()
+    draw_arc()
+    draw_craft()
+    return 0
+}
+
+# ---------- Main loop --------------------------------------------------------
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO) =? 0 {
+        return 1
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1) =? 0 {
+        SDL_Quit()
+        return 2
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE 24) =? 0 {
+        SDL_Quit()
+        return 3
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION 2) =? 0 {
+        SDL_Quit()
+        return 4
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION 1) =? 0 {
+        SDL_Quit()
+        return 5
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK SDL_GL_CONTEXT_PROFILE_COMPATIBILITY) =? 0 {
+        SDL_Quit()
+        return 6
+    }
+
+    let title:int = "uZero Stage 06: Banked Curve\0"
+    let window:int = SDL_CreateWindow(title 1280 720 SDL_WINDOW_OPENGL + SDL_WINDOW_RESIZABLE)
+    if window =? 0 {
+        SDL_Quit()
+        return 7
+    }
+    SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)
+
+    let gl_context:int = SDL_GL_CreateContext(window)
+    if gl_context =? 0 {
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 8
+    }
+    if SDL_GL_MakeCurrent(window gl_context) =? 0 {
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 9
+    }
+    SDL_GL_SetSwapInterval(1)
+
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let size:int = __static_alloca__(8)
+
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDisable(GL_CULL_FACE)
+
+    reset_craft()
+
+    loop running not=? 0 {
+        let has_event:int = SDL_PollEvent(event)
+        loop has_event not=? 0 {
+            if SDL_EventType(event) =? SDL_EVENT_QUIT {
+                running = 0
+            }
+            has_event = SDL_PollEvent(event)
+        }
+
+        let keyboard:int = SDL_GetKeyboardState(0)
+        update_input(keyboard)
+        if in_quit not=? 0 {
+            running = 0
+        }
+
+        physics_step()
+        update_chase()
+
+        SDL_GetWindowSizeInPixels(window size size + 4)
+        render_scene(__load_u32__(size) __load_u32__(size + 4))
+        SDL_GL_SwapWindow(window)
+        SDL_Delay(16)
+        frame_count += 1
+    }
+
+    SDL_GL_DestroyContext(gl_context)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}

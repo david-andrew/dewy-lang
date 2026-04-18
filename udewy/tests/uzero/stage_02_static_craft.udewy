@@ -1,0 +1,428 @@
+import p"./uzero_core.udewy"
+
+# ============================================================================
+# uZero Stage 02: static low-poly hover-craft at the origin.
+#
+# Same scene as stage 01 (checkered ground + free-fly camera) plus a single
+# hover-craft sitting at world origin with identity orientation. The craft is
+# emitted via local-to-world transform using its basis vectors -- exactly the
+# same code path that will move the craft around the world in later stages.
+#
+# Sign-off goal: mesh proportions look right, no missing or duplicated faces,
+# no z-fighting on the hull, looks correct from in-front / behind / above /
+# below / inside (fly into the body and look out).
+# ============================================================================
+
+# ---------- SDL scancode extras ----------------------------------------------
+
+const SDL_SCANCODE_C:int = 6
+const SDL_SCANCODE_E:int = 8
+const SDL_SCANCODE_F:int = 9
+const SDL_SCANCODE_Q:int = 20
+const SDL_SCANCODE_R:int = 21
+const SDL_SCANCODE_LSHIFT:int = 225
+
+# ---------- Tunables ---------------------------------------------------------
+
+const MOVE_SPEED:int = 32768
+const MOVE_BOOST:int = 131072
+const TURN_RATE:int = 8
+const PITCH_LIMIT:int = 248
+
+const TILE_SIZE:int = 327680
+const HALF_TILES:int = 32
+const GROUND_Y:int = 0
+
+const COL_TILE_A_R:int = 8519
+const COL_TILE_A_G:int = 11796
+const COL_TILE_A_B:int = 16384
+const COL_TILE_B_R:int = 13107
+const COL_TILE_B_G:int = 19660
+const COL_TILE_B_B:int = 26214
+
+const COL_SKY_R:int = 2621
+const COL_SKY_G:int = 3932
+const COL_SKY_B:int = 8192
+
+# ---------- Globals ----------------------------------------------------------
+
+let running:int = 1
+let frame_count:int = 0
+
+let cam_x:int = 0
+let cam_y:int = 327680
+let cam_z:int = 1310720
+let cam_yaw:int = 0
+let cam_pitch:int = -24
+
+# Craft state. Stage 02 keeps everything fixed; later stages mutate these.
+# World convention: +X right, +Y up, -Z forward, so identity orientation has
+# fwd = (0, 0, -1), right = (1, 0, 0), up = (0, 1, 0).
+let cx:int = 0
+let cy:int = 98304        # 1.5 m hover so the body sits above the ground
+let cz:int = 0
+
+let fx:int = 0
+let fy:int = 0
+let fz:int = -65536       # -FP_ONE
+let rx:int = 65536        #  FP_ONE
+let ry:int = 0
+let rz:int = 0
+let ux:int = 0
+let uy:int = 65536        #  FP_ONE
+let uz:int = 0
+
+# ---------- Input ------------------------------------------------------------
+
+let in_fwd:int = 0
+let in_back:int = 0
+let in_left:int = 0
+let in_right:int = 0
+let in_up:int = 0
+let in_down:int = 0
+let in_yaw_l:int = 0
+let in_yaw_r:int = 0
+let in_pitch_u:int = 0
+let in_pitch_d:int = 0
+let in_boost:int = 0
+let in_quit:int = 0
+
+let update_input = (keyboard:int):>void => {
+    in_fwd = SDL_ScancodeDown(keyboard SDL_SCANCODE_W) or SDL_ScancodeDown(keyboard SDL_SCANCODE_UP)
+    in_back = SDL_ScancodeDown(keyboard SDL_SCANCODE_S) or SDL_ScancodeDown(keyboard SDL_SCANCODE_DOWN)
+    in_left = SDL_ScancodeDown(keyboard SDL_SCANCODE_A) or SDL_ScancodeDown(keyboard SDL_SCANCODE_LEFT)
+    in_right = SDL_ScancodeDown(keyboard SDL_SCANCODE_D) or SDL_ScancodeDown(keyboard SDL_SCANCODE_RIGHT)
+    in_up = SDL_ScancodeDown(keyboard SDL_SCANCODE_SPACE)
+    in_down = SDL_ScancodeDown(keyboard SDL_SCANCODE_C)
+    in_yaw_l = SDL_ScancodeDown(keyboard SDL_SCANCODE_Q)
+    in_yaw_r = SDL_ScancodeDown(keyboard SDL_SCANCODE_E)
+    in_pitch_u = SDL_ScancodeDown(keyboard SDL_SCANCODE_R)
+    in_pitch_d = SDL_ScancodeDown(keyboard SDL_SCANCODE_F)
+    in_boost = SDL_ScancodeDown(keyboard SDL_SCANCODE_LSHIFT)
+    in_quit = SDL_ScancodeDown(keyboard SDL_SCANCODE_ESCAPE)
+    return 0
+}
+
+# ---------- Camera step ------------------------------------------------------
+
+let camera_step = ():>void => {
+    if in_yaw_l not=? 0 {
+        cam_yaw -= TURN_RATE
+    }
+    if in_yaw_r not=? 0 {
+        cam_yaw += TURN_RATE
+    }
+    if in_pitch_u not=? 0 {
+        cam_pitch += TURN_RATE
+    }
+    if in_pitch_d not=? 0 {
+        cam_pitch -= TURN_RATE
+    }
+    if cam_pitch >? PITCH_LIMIT {
+        cam_pitch = PITCH_LIMIT
+    }
+    if cam_pitch <? (0 - PITCH_LIMIT) {
+        cam_pitch = 0 - PITCH_LIMIT
+    }
+    cam_yaw = cam_yaw % ANG_TURN
+    if cam_yaw <? 0 {
+        cam_yaw += ANG_TURN
+    }
+
+    let speed:int = MOVE_SPEED
+    if in_boost not=? 0 {
+        speed = MOVE_BOOST
+    }
+
+    let sy:int = sin_fp(cam_yaw)
+    let cy_:int = cos_fp(cam_yaw)
+    let sp:int = sin_fp(cam_pitch)
+    let cp:int = cos_fp(cam_pitch)
+
+    let fwd_x:int = fp_mul(sy cp)
+    let fwd_y:int = sp
+    let fwd_z:int = 0 - fp_mul(cy_ cp)
+
+    let right_x:int = cy_
+    let right_z:int = sy
+
+    let move_f:int = 0
+    if in_fwd not=? 0 {
+        move_f += speed
+    }
+    if in_back not=? 0 {
+        move_f -= speed
+    }
+    let move_s:int = 0
+    if in_right not=? 0 {
+        move_s += speed
+    }
+    if in_left not=? 0 {
+        move_s -= speed
+    }
+    let move_u:int = 0
+    if in_up not=? 0 {
+        move_u += speed
+    }
+    if in_down not=? 0 {
+        move_u -= speed
+    }
+
+    cam_x += fp_mul(fwd_x move_f) + fp_mul(right_x move_s)
+    cam_y += fp_mul(fwd_y move_f) + move_u
+    cam_z += fp_mul(fwd_z move_f) + fp_mul(right_z move_s)
+    return 0
+}
+
+# ---------- Rendering -------------------------------------------------------
+
+let set_perspective = (screen_w:int screen_h:int):>void => {
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    let aspect_q16:int = (screen_w << 16) // screen_h
+    let near_q16:int = 2 * FP_ONE
+    let top_q16:int = near_q16
+    let right_q16:int = fp_mul(top_q16 aspect_q16)
+    GL_Frustum(q16_to_f64(0 - right_q16) q16_to_f64(right_q16) q16_to_f64(0 - top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    return 0
+}
+
+let apply_camera = ():>void => {
+    let yaw_deg:int = (cam_yaw * 360) // ANG_TURN
+    let pitch_deg:int = (cam_pitch * 360) // ANG_TURN
+    GL_Rotatef(__i64_to_f32_bits__(0 - pitch_deg) F32_ONE F32_ZERO F32_ZERO)
+    GL_Rotatef(__i64_to_f32_bits__(yaw_deg) F32_ZERO F32_ONE F32_ZERO)
+    GL_Translatef(q16_to_f32(0 - cam_x) q16_to_f32(0 - cam_y) q16_to_f32(0 - cam_z))
+    return 0
+}
+
+let draw_ground = ():>void => {
+    let i:int = 0 - HALF_TILES
+    loop i <? HALF_TILES {
+        let j:int = 0 - HALF_TILES
+        loop j <? HALF_TILES {
+            let x0:int = i * TILE_SIZE
+            let x1:int = (i + 1) * TILE_SIZE
+            let z0:int = j * TILE_SIZE
+            let z1:int = (j + 1) * TILE_SIZE
+            let dark:int = (i + j) and 1
+            let r:int = COL_TILE_A_R
+            let g:int = COL_TILE_A_G
+            let b:int = COL_TILE_A_B
+            if dark =? 0 {
+                r = COL_TILE_B_R
+                g = COL_TILE_B_G
+                b = COL_TILE_B_B
+            }
+            glBegin(GL_QUADS)
+            GL_Color3f(q16_to_f32(r) q16_to_f32(g) q16_to_f32(b))
+            world_v3(x0 GROUND_Y z0)
+            world_v3(x1 GROUND_Y z0)
+            world_v3(x1 GROUND_Y z1)
+            world_v3(x0 GROUND_Y z1)
+            glEnd()
+            j += 1
+        }
+        i += 1
+    }
+    return 0
+}
+
+# Local-to-world helper. Local frame: +x right wing, +y up, +z forward (nose).
+# Mapped into the craft's world basis (rx/ry/rz, ux/uy/uz, fx/fy/fz).
+let craft_emit = (lx:int ly:int lz:int):>void => {
+    let wx:int = cx + fp_mul(rx lx) + fp_mul(ux ly) + fp_mul(fx lz)
+    let wy:int = cy + fp_mul(ry lx) + fp_mul(uy ly) + fp_mul(fy lz)
+    let wz:int = cz + fp_mul(rz lx) + fp_mul(uz ly) + fp_mul(fz lz)
+    world_v3(wx wy wz)
+    return 0
+}
+
+# Low-poly hover-craft. Dimensions in Q16 m:
+#   nose   z = +3.5 m
+#   tail   z = -2.0 m
+#   wings  x = +/- 2.5 m
+#   hull   y in [-0.2, +0.6]
+#   canopy z = +1.0 m, y = +1.2 m
+let draw_craft = ():>void => {
+    let nose_z:int = 229376
+    let tail_z:int = 0 - 131072
+    let wing_x:int = 163840
+    let body_y_top:int = 39321
+    let body_y_bot:int = 0 - 13107
+    let canopy_z:int = 65536
+    let canopy_y:int = 78643
+
+    let body_r:int = q16_to_f32(13107)
+    let body_g:int = q16_to_f32(45875)
+    let body_b:int = q16_to_f32(58982)
+    let belly_r:int = q16_to_f32(6553)
+    let belly_g:int = q16_to_f32(13107)
+    let belly_b:int = q16_to_f32(32768)
+    let side_r:int = q16_to_f32(6553)
+    let side_g:int = q16_to_f32(26214)
+    let side_b:int = q16_to_f32(45875)
+    let canopy_r:int = q16_to_f32(58982)
+    let canopy_g:int = q16_to_f32(58982)
+    let canopy_b:int = F32_ONE
+    let glow_r:int = F32_ONE
+    let glow_g:int = q16_to_f32(45875)
+    let glow_b:int = q16_to_f32(6553)
+
+    # Top hull (CCW seen from above)
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(body_r body_g body_b)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(wing_x body_y_top tail_z)
+    glEnd()
+    # Bottom hull (CCW seen from below)
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(belly_r belly_g belly_b)
+    craft_emit(0 body_y_bot nose_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    glEnd()
+    # Left side (two tris filling the gap between top + bottom along the left edge)
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(side_r side_g side_b)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 body_y_bot nose_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    glEnd()
+    # Right side
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(side_r side_g side_b)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(wing_x body_y_top tail_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 body_y_bot nose_z)
+    glEnd()
+    # Canopy (small tri sitting on top of the hull, just behind the nose)
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(canopy_r canopy_g canopy_b)
+    craft_emit(0 canopy_y canopy_z)
+    craft_emit(0 - 26214 body_y_top 0)
+    craft_emit(26214 body_y_top 0)
+    glEnd()
+    # Tail engine glow: a clearly-visible rectangle inset on the back face.
+    let glow_x:int = 65536           # +/- 1.0 m wide
+    let glow_y_bot:int = 0           # 0.0 m, just above the belly
+    let glow_y_top:int = 26214       # 0.4 m, just below the canopy line
+    glBegin(GL_QUADS)
+    GL_Color3f(glow_r glow_g glow_b)
+    craft_emit(0 - glow_x glow_y_bot tail_z)
+    craft_emit(glow_x glow_y_bot tail_z)
+    craft_emit(glow_x glow_y_top tail_z)
+    craft_emit(0 - glow_x glow_y_top tail_z)
+    glEnd()
+    return 0
+}
+
+let render_scene = (sw:int sh:int):>void => {
+    glViewport(0 0 sw sh)
+    GL_ClearColor(q16_to_f32(COL_SKY_R) q16_to_f32(COL_SKY_G) q16_to_f32(COL_SKY_B) F32_ONE)
+    glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDisable(GL_CULL_FACE)
+    set_perspective(sw sh)
+    apply_camera()
+    draw_ground()
+    draw_craft()
+    return 0
+}
+
+# ---------- Main loop --------------------------------------------------------
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO) =? 0 {
+        return 1
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1) =? 0 {
+        SDL_Quit()
+        return 2
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE 24) =? 0 {
+        SDL_Quit()
+        return 3
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION 2) =? 0 {
+        SDL_Quit()
+        return 4
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION 1) =? 0 {
+        SDL_Quit()
+        return 5
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK SDL_GL_CONTEXT_PROFILE_COMPATIBILITY) =? 0 {
+        SDL_Quit()
+        return 6
+    }
+
+    let title:int = "uZero Stage 02: Static Craft\0"
+    let window:int = SDL_CreateWindow(title 1280 720 SDL_WINDOW_OPENGL + SDL_WINDOW_RESIZABLE)
+    if window =? 0 {
+        SDL_Quit()
+        return 7
+    }
+    SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)
+
+    let gl_context:int = SDL_GL_CreateContext(window)
+    if gl_context =? 0 {
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 8
+    }
+    if SDL_GL_MakeCurrent(window gl_context) =? 0 {
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 9
+    }
+    SDL_GL_SetSwapInterval(1)
+
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let size:int = __static_alloca__(8)
+
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDisable(GL_CULL_FACE)
+
+    loop running not=? 0 {
+        let has_event:int = SDL_PollEvent(event)
+        loop has_event not=? 0 {
+            if SDL_EventType(event) =? SDL_EVENT_QUIT {
+                running = 0
+            }
+            has_event = SDL_PollEvent(event)
+        }
+
+        let keyboard:int = SDL_GetKeyboardState(0)
+        update_input(keyboard)
+        if in_quit not=? 0 {
+            running = 0
+        }
+
+        camera_step()
+
+        SDL_GetWindowSizeInPixels(window size size + 4)
+        render_scene(__load_u32__(size) __load_u32__(size + 4))
+        SDL_GL_SwapWindow(window)
+        SDL_Delay(16)
+        frame_count += 1
+    }
+
+    SDL_GL_DestroyContext(gl_context)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}

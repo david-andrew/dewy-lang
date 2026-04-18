@@ -1,0 +1,357 @@
+import p"./uzero_core.udewy"
+
+# ============================================================================
+# uZero Stage 01: free-fly camera over a checkered ground plane.
+#
+# Goal: verify the perspective math, the Q16 -> float boundary, and that we
+# can move the view around without it "going crazy".
+#
+# No craft, no physics, no obstacles, no audio, no HUD.
+#
+# Controls:
+#   W / Up        forward
+#   S / Down      backward
+#   A / Left      strafe left
+#   D / Right     strafe right
+#   Space         ascend (world +Y)
+#   C             descend (world -Y)
+#   Q             yaw left
+#   E             yaw right
+#   R             pitch up
+#   F             pitch down
+#   Left Shift    boost (4x speed)
+#   Esc           quit
+#
+# World convention: +X right, +Y up, -Z forward (matches OpenGL eye space).
+# Camera basis is built analytically from yaw/pitch -- no atan2.
+# ============================================================================
+
+# ---------- SDL scancode extras ----------------------------------------------
+
+const SDL_SCANCODE_C:int = 6
+const SDL_SCANCODE_E:int = 8
+const SDL_SCANCODE_F:int = 9
+const SDL_SCANCODE_Q:int = 20
+const SDL_SCANCODE_R:int = 21
+const SDL_SCANCODE_LSHIFT:int = 225
+
+# ---------- Tunables ---------------------------------------------------------
+
+# Movement speed (Q16 m/frame at 60fps -> 0.5 m/frame ~= 30 m/s)
+const MOVE_SPEED:int = 32768
+const MOVE_BOOST:int = 131072            # 2.0 m/frame in shift-boost
+# Yaw/pitch rate in angle-units per frame
+const TURN_RATE:int = 8                  # 8 * (360/1024) ~= 2.81 deg/frame
+const PITCH_LIMIT:int = 248              # ~87 deg, just under straight-up
+
+# Ground checker
+const TILE_SIZE:int = 327680             # 5 m tiles
+const HALF_TILES:int = 32                # 32 tiles each side of origin -> 320 m total
+const GROUND_Y:int = 0
+
+const COL_TILE_A_R:int = 8519            # 0.13
+const COL_TILE_A_G:int = 11796           # 0.18
+const COL_TILE_A_B:int = 16384           # 0.25
+const COL_TILE_B_R:int = 13107           # 0.20
+const COL_TILE_B_G:int = 19660           # 0.30
+const COL_TILE_B_B:int = 26214           # 0.40
+const COL_GRID_R:int = 32768             # 0.50
+const COL_GRID_G:int = 39321             # 0.60
+const COL_GRID_B:int = 49152             # 0.75
+
+# Sky / clear
+const COL_SKY_R:int = 2621               # 0.04
+const COL_SKY_G:int = 3932               # 0.06
+const COL_SKY_B:int = 8192               # 0.125
+
+# ---------- Globals ----------------------------------------------------------
+
+let running:int = 1
+let frame_count:int = 0
+
+# Free-fly camera state (Q16 position; angle-units rotation).
+let cam_x:int = 0
+let cam_y:int = 327680                   # start 5 m off the ground
+let cam_z:int = 1310720                  # 20 m back from origin
+let cam_yaw:int = 0                      # 0 = facing -Z (north)
+let cam_pitch:int = -24                  # tilt down ~8 deg so we see the floor
+
+# ---------- Input ------------------------------------------------------------
+
+let in_fwd:int = 0
+let in_back:int = 0
+let in_left:int = 0
+let in_right:int = 0
+let in_up:int = 0
+let in_down:int = 0
+let in_yaw_l:int = 0
+let in_yaw_r:int = 0
+let in_pitch_u:int = 0
+let in_pitch_d:int = 0
+let in_boost:int = 0
+let in_quit:int = 0
+
+let update_input = (keyboard:int):>void => {
+    in_fwd = SDL_ScancodeDown(keyboard SDL_SCANCODE_W) or SDL_ScancodeDown(keyboard SDL_SCANCODE_UP)
+    in_back = SDL_ScancodeDown(keyboard SDL_SCANCODE_S) or SDL_ScancodeDown(keyboard SDL_SCANCODE_DOWN)
+    in_left = SDL_ScancodeDown(keyboard SDL_SCANCODE_A) or SDL_ScancodeDown(keyboard SDL_SCANCODE_LEFT)
+    in_right = SDL_ScancodeDown(keyboard SDL_SCANCODE_D) or SDL_ScancodeDown(keyboard SDL_SCANCODE_RIGHT)
+    in_up = SDL_ScancodeDown(keyboard SDL_SCANCODE_SPACE)
+    in_down = SDL_ScancodeDown(keyboard SDL_SCANCODE_C)
+    in_yaw_l = SDL_ScancodeDown(keyboard SDL_SCANCODE_Q)
+    in_yaw_r = SDL_ScancodeDown(keyboard SDL_SCANCODE_E)
+    in_pitch_u = SDL_ScancodeDown(keyboard SDL_SCANCODE_R)
+    in_pitch_d = SDL_ScancodeDown(keyboard SDL_SCANCODE_F)
+    in_boost = SDL_ScancodeDown(keyboard SDL_SCANCODE_LSHIFT)
+    in_quit = SDL_ScancodeDown(keyboard SDL_SCANCODE_ESCAPE)
+    return 0
+}
+
+# ---------- Camera step ------------------------------------------------------
+
+# Camera basis from (yaw, pitch). World: +X right, +Y up, -Z forward.
+# fwd  = ( sin(yaw) * cos(pitch),  sin(pitch), -cos(yaw) * cos(pitch))
+# right=( cos(yaw),                0,            sin(yaw))
+# up   = (-sin(yaw) * sin(pitch),  cos(pitch),  cos(yaw) * sin(pitch))
+let camera_step = ():>void => {
+    if in_yaw_l not=? 0 {
+        cam_yaw -= TURN_RATE
+    }
+    if in_yaw_r not=? 0 {
+        cam_yaw += TURN_RATE
+    }
+    if in_pitch_u not=? 0 {
+        cam_pitch += TURN_RATE
+    }
+    if in_pitch_d not=? 0 {
+        cam_pitch -= TURN_RATE
+    }
+    if cam_pitch >? PITCH_LIMIT {
+        cam_pitch = PITCH_LIMIT
+    }
+    if cam_pitch <? (0 - PITCH_LIMIT) {
+        cam_pitch = 0 - PITCH_LIMIT
+    }
+    cam_yaw = cam_yaw % ANG_TURN
+    if cam_yaw <? 0 {
+        cam_yaw += ANG_TURN
+    }
+
+    let speed:int = MOVE_SPEED
+    if in_boost not=? 0 {
+        speed = MOVE_BOOST
+    }
+
+    let sy:int = sin_fp(cam_yaw)
+    let cy:int = cos_fp(cam_yaw)
+    let sp:int = sin_fp(cam_pitch)
+    let cp:int = cos_fp(cam_pitch)
+
+    let fwd_x:int = fp_mul(sy cp)
+    let fwd_y:int = sp
+    let fwd_z:int = 0 - fp_mul(cy cp)
+
+    let right_x:int = cy
+    let right_z:int = sy
+
+    let move_f:int = 0
+    if in_fwd not=? 0 {
+        move_f += speed
+    }
+    if in_back not=? 0 {
+        move_f -= speed
+    }
+    let move_s:int = 0
+    if in_right not=? 0 {
+        move_s += speed
+    }
+    if in_left not=? 0 {
+        move_s -= speed
+    }
+    let move_u:int = 0
+    if in_up not=? 0 {
+        move_u += speed
+    }
+    if in_down not=? 0 {
+        move_u -= speed
+    }
+
+    cam_x += fp_mul(fwd_x move_f) + fp_mul(right_x move_s)
+    cam_y += fp_mul(fwd_y move_f) + move_u
+    cam_z += fp_mul(fwd_z move_f) + fp_mul(right_z move_s)
+    return 0
+}
+
+# ---------- Rendering -------------------------------------------------------
+
+let set_perspective = (screen_w:int screen_h:int):>void => {
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    let aspect_q16:int = (screen_w << 16) // screen_h
+    let near_q16:int = 2 * FP_ONE
+    let top_q16:int = near_q16
+    let right_q16:int = fp_mul(top_q16 aspect_q16)
+    GL_Frustum(q16_to_f64(0 - right_q16) q16_to_f64(right_q16) q16_to_f64(0 - top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    return 0
+}
+
+# cam_yaw uses the compass convention (positive = clockwise viewed from above),
+# so the world is un-rotated by +yaw about Y. Pitch follows the right-hand rule,
+# so it un-rotates by -pitch about X. 360/1024 = 0.3515625.
+let apply_camera = ():>void => {
+    let yaw_deg:int = (cam_yaw * 360) // ANG_TURN
+    let pitch_deg:int = (cam_pitch * 360) // ANG_TURN
+    GL_Rotatef(__i64_to_f32_bits__(0 - pitch_deg) F32_ONE F32_ZERO F32_ZERO)
+    GL_Rotatef(__i64_to_f32_bits__(yaw_deg) F32_ZERO F32_ONE F32_ZERO)
+    GL_Translatef(q16_to_f32(0 - cam_x) q16_to_f32(0 - cam_y) q16_to_f32(0 - cam_z))
+    return 0
+}
+
+# Checkered ground spanning [-HALF_TILES*TILE_SIZE, +HALF_TILES*TILE_SIZE]^2.
+let draw_ground = ():>void => {
+    let i:int = 0 - HALF_TILES
+    loop i <? HALF_TILES {
+        let j:int = 0 - HALF_TILES
+        loop j <? HALF_TILES {
+            let x0:int = i * TILE_SIZE
+            let x1:int = (i + 1) * TILE_SIZE
+            let z0:int = j * TILE_SIZE
+            let z1:int = (j + 1) * TILE_SIZE
+            let dark:int = (i + j) and 1
+            let r:int = COL_TILE_A_R
+            let g:int = COL_TILE_A_G
+            let b:int = COL_TILE_A_B
+            if dark =? 0 {
+                r = COL_TILE_B_R
+                g = COL_TILE_B_G
+                b = COL_TILE_B_B
+            }
+            glBegin(GL_QUADS)
+            GL_Color3f(q16_to_f32(r) q16_to_f32(g) q16_to_f32(b))
+            world_v3(x0 GROUND_Y z0)
+            world_v3(x1 GROUND_Y z0)
+            world_v3(x1 GROUND_Y z1)
+            world_v3(x0 GROUND_Y z1)
+            glEnd()
+            j += 1
+        }
+        i += 1
+    }
+    # Bright origin cross-hair so orientation is unambiguous.
+    let arm:int = 655360
+    glBegin(GL_QUADS)
+    GL_Color3f(F32_ONE q16_to_f32(13107) q16_to_f32(13107))
+    world_v3(0 - arm 6553 0 - 13107)
+    world_v3(arm 6553 0 - 13107)
+    world_v3(arm 6553 13107)
+    world_v3(0 - arm 6553 13107)
+    GL_Color3f(q16_to_f32(13107) q16_to_f32(58982) q16_to_f32(13107))
+    world_v3(0 - 13107 6553 0 - arm)
+    world_v3(13107 6553 0 - arm)
+    world_v3(13107 6553 arm)
+    world_v3(0 - 13107 6553 arm)
+    glEnd()
+    return 0
+}
+
+let render_scene = (sw:int sh:int):>void => {
+    glViewport(0 0 sw sh)
+    GL_ClearColor(q16_to_f32(COL_SKY_R) q16_to_f32(COL_SKY_G) q16_to_f32(COL_SKY_B) F32_ONE)
+    glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDisable(GL_CULL_FACE)
+    set_perspective(sw sh)
+    apply_camera()
+    draw_ground()
+    return 0
+}
+
+# ---------- Main loop --------------------------------------------------------
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO) =? 0 {
+        return 1
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1) =? 0 {
+        SDL_Quit()
+        return 2
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE 24) =? 0 {
+        SDL_Quit()
+        return 3
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION 2) =? 0 {
+        SDL_Quit()
+        return 4
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION 1) =? 0 {
+        SDL_Quit()
+        return 5
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK SDL_GL_CONTEXT_PROFILE_COMPATIBILITY) =? 0 {
+        SDL_Quit()
+        return 6
+    }
+
+    let title:int = "uZero Stage 01: Free-fly\0"
+    let window:int = SDL_CreateWindow(title 1280 720 SDL_WINDOW_OPENGL + SDL_WINDOW_RESIZABLE)
+    if window =? 0 {
+        SDL_Quit()
+        return 7
+    }
+    SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)
+
+    let gl_context:int = SDL_GL_CreateContext(window)
+    if gl_context =? 0 {
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 8
+    }
+    if SDL_GL_MakeCurrent(window gl_context) =? 0 {
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 9
+    }
+    SDL_GL_SetSwapInterval(1)
+
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let size:int = __static_alloca__(8)
+
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDisable(GL_CULL_FACE)
+
+    loop running not=? 0 {
+        let has_event:int = SDL_PollEvent(event)
+        loop has_event not=? 0 {
+            if SDL_EventType(event) =? SDL_EVENT_QUIT {
+                running = 0
+            }
+            has_event = SDL_PollEvent(event)
+        }
+
+        let keyboard:int = SDL_GetKeyboardState(0)
+        update_input(keyboard)
+        if in_quit not=? 0 {
+            running = 0
+        }
+
+        camera_step()
+
+        SDL_GetWindowSizeInPixels(window size size + 4)
+        render_scene(__load_u32__(size) __load_u32__(size + 4))
+        SDL_GL_SwapWindow(window)
+        SDL_Delay(16)
+        frame_count += 1
+    }
+
+    SDL_GL_DestroyContext(gl_context)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}

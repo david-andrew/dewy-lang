@@ -1,0 +1,910 @@
+import p"./uzero_core.udewy"
+
+# ============================================================================
+# uZero Stage 08: vertical loop, lightly corkscrewed.
+#
+# Flat checker ground at y = 0. A vertical loop of radius R = 12 m sits ahead
+# of spawn with its axis along +X (cylinder lying on its side). The track is
+# the INSIDE of that cylinder, swept along X for one track width W = 8 m.
+# The track corkscrews so each full revolution drifts one track width in +X:
+# entry occupies x in [-W/2, +W/2], exit in [+W/2, +3W/2]. Entry and exit
+# share an edge at x = +W/2 instead of overlapping.
+#
+# Geometry:
+#   - Loop axis line: { (x, R, Zloop) : x in R }.
+#   - Track surface, parameterized by (phi, w) for phi in [0, 2 pi),
+#     w in [-W/2, +W/2]:
+#         X_center(phi) = (phi / 2 pi) * W
+#         pos(phi, w) = (X_center(phi) + w,
+#                        R - R cos(phi),
+#                        Zloop - R sin(phi))
+#   - Inward surface normal (pure YZ; the X tangent doesn't tilt the normal):
+#         n(phi) = (0, cos(phi), sin(phi))
+#   - At phi = 0 the surface coincides with the ground (y = 0, n = +Y), so
+#     entering the loop is seamless -- no walls, no engagement triggers.
+#
+# Surface query:
+#   - rel_y = cy - R, rel_z = cz - Zloop, dist_to_axis = sqrt(rel_y^2 + rel_z^2)
+#   - phi = atan2(-rel_z, -rel_y); X_center = (phi / 2 pi) * W; w = cx - X_center
+#   - If |w| < W/2 AND dist_to_axis < R + margin -> on loop. Otherwise ground.
+#
+# All physics, magnet snap, 3D orientation, chase camera, slope gravity,
+# and camera-clearance clamp carry over verbatim from stage 07. The only
+# delta is query_surface and the rendering of the loop strip.
+#
+# Sign-off goal: drive forward, ride the loop all the way around, exit on
+# flat ground one track width to the +X. Camera and orientation should never
+# flip; gravity should pull the craft slightly downhill anywhere on the loop
+# without any input.
+#
+# Controls: WASD/arrows + Q/E strafe, Space = boost, R = respawn, Esc = quit.
+# ============================================================================
+
+const SDL_SCANCODE_E:int = 8
+const SDL_SCANCODE_Q:int = 20
+const SDL_SCANCODE_R:int = 21
+
+# ---------- Physics ---------------------------------------------------------
+
+const HOVER_HEIGHT:int = 98304           # 1.5 m above the surface
+const TOP_SPEED:int = 163840
+const BOOST_BONUS:int = 65536
+const THRUST_ACCEL:int = 1638
+const BRAKE_DECEL:int = 3277
+const BOOST_THRUST_MULT:int = 196608
+const STRAFE_RATE:int = 32768
+
+const STEER_BASE:int = 12
+const STEER_MIN:int = 8
+
+const LATERAL_GRIP:int = 9830
+const DRAG_COAST:int = 100
+const DRAG_THRUST:int = 327
+
+const SNAP_ALPHA:int = 19660             # 0.30 -> ~3-frame settle
+const AIR_GAP:int = 65536                # 1 m clearance -> airborne
+const GRAVITY:int = 6000
+
+# Tangential slope gravity. While grounded, world gravity is split into a
+# normal component (cancelled by the magnet) and a tangent component (added
+# to velocity, makes the craft drift downhill). Kept small so thrust easily
+# overpowers it but a craft left idle on a slope will slide.
+const SLOPE_GRAVITY:int = 300
+
+# When grounded the physics up snaps directly to the surface normal -- no
+# smoothing -- so the craft conforms to the track instantly. Visual basis
+# also tracks physics directly. Only the camera basis is smoothed (below)
+# so the chase still trails. UP_ALPHA is the airborne settle rate (decays
+# the craft's last "tilted" up back toward world up while in the air).
+const UP_ALPHA_AIR:int = 6553            # 0.10  -- mild airborne settle
+
+# ---------- Camera ----------------------------------------------------------
+
+const CAM_BACK:int = 983040              # 15 m behind craft
+const CAM_LIFT:int = 262144              #  4 m above craft
+const POS_ALPHA:int = 11796              # 0.18  camera position lerp
+const ORIENT_ALPHA:int = 13107           # 0.20  camera orientation lerp
+const FOV_PUNCH:int = 26214
+const MIN_CAM_CLEAR:int = 131072         # 2 m  minimum cam clearance over surface
+
+# ---------- Loop ------------------------------------------------------------
+
+const LOOP_R:int = 3932160               # 60 m  loop radius
+const LOOP_YC:int = 3932160              # 60 m  loop center y (= R, so bottom touches ground)
+const LOOP_ZC:int = -13107200            # -200 m loop center z (well forward of spawn)
+const LOOP_W:int = 2621440               # 40 m  track width and corkscrew offset per revolution
+const LOOP_HALF_W:int = 1310720          # 20 m
+const LOOP_MARGIN:int = 196608           # 3 m   how close to R counts as "on loop"
+const LOOP_PHI_SEGMENTS:int = 64
+const LOOP_W_SEGMENTS:int = 8
+
+const COL_LOOP_A_R:int = 39321           # alternating quad colors
+const COL_LOOP_A_G:int = 19660
+const COL_LOOP_A_B:int = 52428
+const COL_LOOP_B_R:int = 26214
+const COL_LOOP_B_G:int = 13107
+const COL_LOOP_B_B:int = 39321
+
+# ---------- Ground -----------------------------------------------------------
+
+const TILE_SIZE:int = 655360             # 10 m
+const HALF_TILES:int = 80
+const GROUND_Y:int = 0
+
+const COL_TILE_A_R:int = 8519
+const COL_TILE_A_G:int = 11796
+const COL_TILE_A_B:int = 16384
+const COL_TILE_B_R:int = 13107
+const COL_TILE_B_G:int = 19660
+const COL_TILE_B_B:int = 26214
+
+const COL_SKY_R:int = 2621
+const COL_SKY_G:int = 3932
+const COL_SKY_B:int = 8192
+
+# ---------- Globals ----------------------------------------------------------
+
+let running:int = 1
+let frame_count:int = 0
+
+let cx:int = 0
+let cy:int = 98304                       # HOVER_HEIGHT (1.5 m above ground)
+let cz:int = 0
+let cvx:int = 0
+let cvy:int = 0
+let cvz:int = 0
+
+# Physics orientation (orthonormal basis).
+let fx:int = 0
+let fy:int = 0
+let fz:int = -65536
+let rx:int = 65536
+let ry:int = 0
+let rz:int = 0
+let ux:int = 0
+let uy:int = 65536
+let uz:int = 0
+
+# Visual basis (smoothed, lags physics for camera + craft render).
+let vfx:int = 0
+let vfy:int = 0
+let vfz:int = -65536
+let vrx:int = 65536
+let vry:int = 0
+let vrz:int = 0
+let vux:int = 0
+let vuy:int = 65536
+let vuz:int = 0
+
+# Camera basis (further smoothed, used to build the view matrix).
+let cam_x:int = 0
+let cam_y:int = 360448                   # cy + CAM_LIFT
+let cam_z:int = 983040                   # CAM_BACK
+let cam_fx:int = 0
+let cam_fy:int = 0
+let cam_fz:int = -65536
+let cam_ux:int = 0
+let cam_uy:int = 65536
+let cam_uz:int = 0
+let cur_fov_top_q16:int = 131072
+
+# Surface query result: 3D surface point + outward normal.
+let surf_x:int = 0
+let surf_y:int = 65536
+let surf_z:int = 0
+let surf_nx:int = 0
+let surf_ny:int = 65536
+let surf_nz:int = 0
+
+# ---------- Input ------------------------------------------------------------
+
+let in_thrust:int = 0
+let in_brake:int = 0
+let in_steer_l:int = 0
+let in_steer_r:int = 0
+let in_strafe_l:int = 0
+let in_strafe_r:int = 0
+let in_boost:int = 0
+let in_respawn:int = 0
+let in_respawn_prev:int = 0
+let in_quit:int = 0
+
+let update_input = (keyboard:int):>void => {
+    in_thrust = SDL_ScancodeDown(keyboard SDL_SCANCODE_W) or SDL_ScancodeDown(keyboard SDL_SCANCODE_UP)
+    in_brake = SDL_ScancodeDown(keyboard SDL_SCANCODE_S) or SDL_ScancodeDown(keyboard SDL_SCANCODE_DOWN)
+    in_steer_l = SDL_ScancodeDown(keyboard SDL_SCANCODE_A) or SDL_ScancodeDown(keyboard SDL_SCANCODE_LEFT)
+    in_steer_r = SDL_ScancodeDown(keyboard SDL_SCANCODE_D) or SDL_ScancodeDown(keyboard SDL_SCANCODE_RIGHT)
+    in_strafe_l = SDL_ScancodeDown(keyboard SDL_SCANCODE_Q)
+    in_strafe_r = SDL_ScancodeDown(keyboard SDL_SCANCODE_E)
+    in_boost = SDL_ScancodeDown(keyboard SDL_SCANCODE_SPACE)
+    let r_now:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_R)
+    in_respawn = (r_now not=? 0) and (in_respawn_prev =? 0)
+    in_respawn_prev = r_now
+    in_quit = SDL_ScancodeDown(keyboard SDL_SCANCODE_ESCAPE)
+    return 0
+}
+
+# ---------- Surface query ---------------------------------------------------
+
+# Surface query: if (x, y, z) lies inside the loop's lateral envelope and is
+# within R + LOOP_MARGIN of the loop axis, return the loop surface point and
+# inward normal. Otherwise default to flat ground.
+let query_surface = (x:int y:int z:int):>void => {
+    let rel_y:int = y - LOOP_YC
+    let rel_z:int = z - LOOP_ZC
+    let dist_to_axis:int = fp_sqrt((rel_y * rel_y) + (rel_z * rel_z))
+    let on_loop:int = 0
+    if (dist_to_axis <? (LOOP_R + LOOP_MARGIN)) and (dist_to_axis >? 0) {
+        let phi:int = atan2_fp(0 - rel_z 0 - rel_y)
+        let x_center:int = (phi * LOOP_W) // ANG_TURN
+        let w:int = x - x_center
+        if (w >=? (0 - LOOP_HALF_W)) and (w <=? LOOP_HALF_W) {
+            on_loop = 1
+            let cphi:int = cos_fp(phi)
+            let sphi:int = sin_fp(phi)
+            surf_x = x
+            surf_y = LOOP_YC - fp_mul(LOOP_R cphi)
+            surf_z = LOOP_ZC - fp_mul(LOOP_R sphi)
+            surf_nx = 0
+            surf_ny = cphi
+            surf_nz = sphi
+        }
+    }
+    if on_loop =? 0 {
+        surf_x = x
+        surf_y = GROUND_Y
+        surf_z = z
+        surf_nx = 0
+        surf_ny = FP_ONE
+        surf_nz = 0
+    }
+    return 0
+}
+
+# Signed distance along the surface normal from craft to its hover target.
+# Positive: craft is above hover target (further from surface than H).
+# Negative: craft is embedded (closer to surface than H).
+let normal_gap = (px:int py:int pz:int):>int => {
+    let target_x:int = surf_x + fp_mul(HOVER_HEIGHT surf_nx)
+    let target_y:int = surf_y + fp_mul(HOVER_HEIGHT surf_ny)
+    let target_z:int = surf_z + fp_mul(HOVER_HEIGHT surf_nz)
+    return fp_mul(px - target_x surf_nx) + fp_mul(py - target_y surf_ny) + fp_mul(pz - target_z surf_nz)
+}
+
+# ---------- Orientation helpers ---------------------------------------------
+
+# Re-project forward to be perpendicular to up; renormalize.
+let reortho_forward = ():>void => {
+    let f_dot_u:int = fp_mul(fx ux) + fp_mul(fy uy) + fp_mul(fz uz)
+    fx -= fp_mul(ux f_dot_u)
+    fy -= fp_mul(uy f_dot_u)
+    fz -= fp_mul(uz f_dot_u)
+    let m:int = fp_sqrt((fx * fx) + (fy * fy) + (fz * fz))
+    if m >? 1024 {
+        fx = fp_div(fx m)
+        fy = fp_div(fy m)
+        fz = fp_div(fz m)
+    }
+    return 0
+}
+
+# right = forward x up.
+let update_right = ():>void => {
+    rx = fp_mul(fy uz) - fp_mul(fz uy)
+    ry = fp_mul(fz ux) - fp_mul(fx uz)
+    rz = fp_mul(fx uy) - fp_mul(fy ux)
+    return 0
+}
+
+# Rotate forward around up by `angle` units (1024 per turn, positive = right).
+# Rodrigues with k = up: f' = f*cos + (k x f)*sin; with k = up and f orthogonal
+# to k that's just f' = f*cos + right*sin.
+let rotate_forward = (angle:int):>void => {
+    let c:int = cos_fp(angle)
+    let s:int = sin_fp(angle)
+    let nfx:int = fp_mul(fx c) + fp_mul(rx s)
+    let nfy:int = fp_mul(fy c) + fp_mul(ry s)
+    let nfz:int = fp_mul(fz c) + fp_mul(rz s)
+    fx = nfx
+    fy = nfy
+    fz = nfz
+    update_right()
+    return 0
+}
+
+# ---------- Physics step -----------------------------------------------------
+
+let reset_craft = ():>void => {
+    cx = 0
+    cy = HOVER_HEIGHT
+    cz = 0
+    cvx = 0
+    cvy = 0
+    cvz = 0
+    fx = 0
+    fy = 0
+    fz = 0 - FP_ONE
+    ux = 0
+    uy = FP_ONE
+    uz = 0
+    rx = FP_ONE
+    ry = 0
+    rz = 0
+    vfx = fx
+    vfy = fy
+    vfz = fz
+    vux = ux
+    vuy = uy
+    vuz = uz
+    vrx = rx
+    vry = ry
+    vrz = rz
+    cam_fx = fx
+    cam_fy = fy
+    cam_fz = fz
+    cam_ux = ux
+    cam_uy = uy
+    cam_uz = uz
+    cam_x = cx - fp_mul(CAM_BACK fx) + fp_mul(CAM_LIFT ux)
+    cam_y = cy - fp_mul(CAM_BACK fy) + fp_mul(CAM_LIFT uy)
+    cam_z = cz - fp_mul(CAM_BACK fz) + fp_mul(CAM_LIFT uz)
+    return 0
+}
+
+let physics_step = ():>void => {
+    # Surface at current pos.
+    query_surface(cx cy cz)
+    let gap_now:int = normal_gap(cx cy cz)
+    let airborne:int = 0
+    if gap_now >? AIR_GAP {
+        airborne = 1
+    }
+
+    # Grounded: physics up = surface normal exactly. Airborne: hold the
+    # current up *unless* the player is inputting -- in which case ease back
+    # toward world up so they regain control. (Touching the ground re-snaps.)
+    # Anti-antipodal kick: lerp + renormalize is degenerate at exactly 180
+    # degrees, so nudge ux off the Y axis when nearly inverted.
+    if airborne =? 0 {
+        ux = surf_nx
+        uy = surf_ny
+        uz = surf_nz
+    } else {
+        let any_input:int = in_thrust or in_brake or in_steer_l or in_steer_r or in_strafe_l or in_strafe_r or in_boost
+        if any_input not=? 0 {
+            if uy <? -58982 {
+                if (ux >? -6553) and (ux <? 6553) {
+                    ux += 6553
+                }
+            }
+            ux += fp_mul((0 - ux) UP_ALPHA_AIR)
+            uy += fp_mul(FP_ONE - uy UP_ALPHA_AIR)
+            uz += fp_mul((0 - uz) UP_ALPHA_AIR)
+            let um:int = fp_sqrt((ux * ux) + (uy * uy) + (uz * uz))
+            if um >? 1024 {
+                ux = fp_div(ux um)
+                uy = fp_div(uy um)
+                uz = fp_div(uz um)
+            }
+        }
+    }
+    reortho_forward()
+    update_right()
+
+    # Steering: rotate forward around up.
+    let speed_xyz:int = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    let speed_norm:int = 0
+    if TOP_SPEED >? 0 {
+        speed_norm = (speed_xyz << 16) // (TOP_SPEED + 1)
+    }
+    if speed_norm >? FP_ONE {
+        speed_norm = FP_ONE
+    }
+    if speed_norm <? 0 {
+        speed_norm = 0
+    }
+    let steer_in:int = 0
+    if in_steer_l not=? 0 {
+        steer_in -= 1
+    }
+    if in_steer_r not=? 0 {
+        steer_in += 1
+    }
+    let steer_rate:int = STEER_BASE - fp_mul((STEER_BASE - STEER_MIN) speed_norm)
+    if steer_in not=? 0 {
+        rotate_forward(steer_in * steer_rate)
+    }
+
+    # Thrust along forward.
+    let thrust:int = 0
+    let thrust_active:int = 0
+    if in_thrust not=? 0 {
+        thrust = THRUST_ACCEL
+        thrust_active = 1
+        if in_boost not=? 0 {
+            thrust = fp_mul(THRUST_ACCEL BOOST_THRUST_MULT)
+        }
+    }
+    if thrust not=? 0 {
+        cvx += fp_mul(fx thrust)
+        cvy += fp_mul(fy thrust)
+        cvz += fp_mul(fz thrust)
+    }
+
+    # Brake: kill forward component of velocity.
+    if in_brake not=? 0 {
+        let fwd_speed:int = fp_mul(cvx fx) + fp_mul(cvy fy) + fp_mul(cvz fz)
+        if fwd_speed >? 0 {
+            let brake:int = BRAKE_DECEL
+            if brake >? fwd_speed {
+                brake = fwd_speed
+            }
+            cvx -= fp_mul(fx brake)
+            cvy -= fp_mul(fy brake)
+            cvz -= fp_mul(fz brake)
+        }
+    }
+
+    # Strafe: direct position translation along right.
+    let strafe:int = 0
+    if in_strafe_l not=? 0 {
+        strafe -= STRAFE_RATE
+    }
+    if in_strafe_r not=? 0 {
+        strafe += STRAFE_RATE
+    }
+    if strafe not=? 0 {
+        cx += fp_mul(rx strafe)
+        cy += fp_mul(ry strafe)
+        cz += fp_mul(rz strafe)
+    }
+
+    # Grip + drag (only when grounded).
+    if airborne =? 0 {
+        let side_dot:int = fp_mul(cvx rx) + fp_mul(cvy ry) + fp_mul(cvz rz)
+        let side_kill:int = fp_mul(side_dot LATERAL_GRIP)
+        cvx -= fp_mul(rx side_kill)
+        cvy -= fp_mul(ry side_kill)
+        cvz -= fp_mul(rz side_kill)
+
+        let drag:int = DRAG_COAST
+        if thrust_active not=? 0 {
+            drag = DRAG_THRUST
+        }
+        let fwd_dot:int = fp_mul(cvx fx) + fp_mul(cvy fy) + fp_mul(cvz fz)
+        let drag_force:int = fp_mul(fwd_dot drag)
+        cvx -= fp_mul(fx drag_force)
+        cvy -= fp_mul(fy drag_force)
+        cvz -= fp_mul(fz drag_force)
+    }
+
+    # Top speed clamp.
+    let max_speed:int = TOP_SPEED
+    if in_boost not=? 0 {
+        max_speed = TOP_SPEED + BOOST_BONUS
+    }
+    let cur_speed:int = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    if cur_speed >? max_speed {
+        cvx = fp_div(fp_mul(cvx max_speed) cur_speed)
+        cvy = fp_div(fp_mul(cvy max_speed) cur_speed)
+        cvz = fp_div(fp_mul(cvz max_speed) cur_speed)
+    }
+
+    # Gravity (world -Y) when airborne; otherwise project velocity onto the
+    # tangent plane so gravity & inertia don't drag the craft into the surface.
+    if airborne not=? 0 {
+        cvy -= GRAVITY
+    } else {
+        let cv_dot_n:int = fp_mul(cvx surf_nx) + fp_mul(cvy surf_ny) + fp_mul(cvz surf_nz)
+        cvx -= fp_mul(surf_nx cv_dot_n)
+        cvy -= fp_mul(surf_ny cv_dot_n)
+        cvz -= fp_mul(surf_nz cv_dot_n)
+
+        # Tangential slope gravity: g_tan = g - (g . n) n with g = (0, -SG, 0).
+        let proj:int = fp_mul(SLOPE_GRAVITY surf_ny)
+        cvx += fp_mul(surf_nx proj)
+        cvy += fp_mul(surf_ny proj) - SLOPE_GRAVITY
+        cvz += fp_mul(surf_nz proj)
+    }
+
+    cx += cvx
+    cy += cvy
+    cz += cvz
+
+    # Magnet snap: pull craft toward hover target along the new surface normal.
+    query_surface(cx cy cz)
+    let post_gap:int = normal_gap(cx cy cz)
+    if post_gap <=? AIR_GAP {
+        let snap_amt:int = fp_mul(0 - post_gap SNAP_ALPHA)
+        cx += fp_mul(snap_amt surf_nx)
+        cy += fp_mul(snap_amt surf_ny)
+        cz += fp_mul(snap_amt surf_nz)
+    }
+
+    if in_respawn not=? 0 {
+        reset_craft()
+    }
+    return 0
+}
+
+# ---------- Visual + camera basis -------------------------------------------
+
+# Visual basis is the physics basis verbatim (craft mesh hugs the surface
+# instantly). Camera basis still lerps toward physics so the chase trails.
+let update_chase = ():>void => {
+    vfx = fx
+    vfy = fy
+    vfz = fz
+    vux = ux
+    vuy = uy
+    vuz = uz
+    vrx = rx
+    vry = ry
+    vrz = rz
+
+    cam_fx += fp_mul(vfx - cam_fx ORIENT_ALPHA)
+    cam_fy += fp_mul(vfy - cam_fy ORIENT_ALPHA)
+    cam_fz += fp_mul(vfz - cam_fz ORIENT_ALPHA)
+    cam_ux += fp_mul(vux - cam_ux ORIENT_ALPHA)
+    cam_uy += fp_mul(vuy - cam_uy ORIENT_ALPHA)
+    cam_uz += fp_mul(vuz - cam_uz ORIENT_ALPHA)
+    let cum:int = fp_sqrt((cam_ux * cam_ux) + (cam_uy * cam_uy) + (cam_uz * cam_uz))
+    if cum >? 1024 {
+        cam_ux = fp_div(cam_ux cum)
+        cam_uy = fp_div(cam_uy cum)
+        cam_uz = fp_div(cam_uz cum)
+    }
+    let cf_dot_cu:int = fp_mul(cam_fx cam_ux) + fp_mul(cam_fy cam_uy) + fp_mul(cam_fz cam_uz)
+    cam_fx -= fp_mul(cam_ux cf_dot_cu)
+    cam_fy -= fp_mul(cam_uy cf_dot_cu)
+    cam_fz -= fp_mul(cam_uz cf_dot_cu)
+    let cfm:int = fp_sqrt((cam_fx * cam_fx) + (cam_fy * cam_fy) + (cam_fz * cam_fz))
+    if cfm >? 1024 {
+        cam_fx = fp_div(cam_fx cfm)
+        cam_fy = fp_div(cam_fy cfm)
+        cam_fz = fp_div(cam_fz cfm)
+    }
+
+    let target_cam_x:int = cx - fp_mul(CAM_BACK cam_fx) + fp_mul(CAM_LIFT cam_ux)
+    let target_cam_y:int = cy - fp_mul(CAM_BACK cam_fy) + fp_mul(CAM_LIFT cam_uy)
+    let target_cam_z:int = cz - fp_mul(CAM_BACK cam_fz) + fp_mul(CAM_LIFT cam_uz)
+    cam_x += fp_mul(target_cam_x - cam_x POS_ALPHA)
+    cam_y += fp_mul(target_cam_y - cam_y POS_ALPHA)
+    cam_z += fp_mul(target_cam_z - cam_z POS_ALPHA)
+
+    # Keep the camera at least MIN_CAM_CLEAR above the closest surface so it
+    # doesn't dip through the loop on tight curves / high-speed lag. Mutates
+    # surf_* but the next physics_step re-queries before using them.
+    query_surface(cam_x cam_y cam_z)
+    let cam_clear:int = fp_mul(cam_x - surf_x surf_nx) + fp_mul(cam_y - surf_y surf_ny) + fp_mul(cam_z - surf_z surf_nz)
+    if cam_clear <? MIN_CAM_CLEAR {
+        let push:int = MIN_CAM_CLEAR - cam_clear
+        cam_x += fp_mul(push surf_nx)
+        cam_y += fp_mul(push surf_ny)
+        cam_z += fp_mul(push surf_nz)
+    }
+
+    let speed:int = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    let sn:int = 0
+    if TOP_SPEED >? 0 {
+        sn = (speed << 16) // TOP_SPEED
+    }
+    if sn >? FP_ONE {
+        sn = FP_ONE
+    }
+    let scale:int = FP_ONE + fp_mul(sn FOV_PUNCH)
+    cur_fov_top_q16 = fp_mul(131072 scale)
+    return 0
+}
+
+# ---------- Rendering -------------------------------------------------------
+
+let set_perspective = (screen_w:int screen_h:int):>void => {
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    let aspect_q16:int = (screen_w << 16) // screen_h
+    let top_q16:int = cur_fov_top_q16
+    let right_q16:int = fp_mul(top_q16 aspect_q16)
+    GL_Frustum(q16_to_f64(0 - right_q16) q16_to_f64(right_q16) q16_to_f64(0 - top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    return 0
+}
+
+# Build the world->camera view matrix from the camera basis (cam_fx/fy/fz,
+# cam_ux/uy/uz, derived right) and cam position. OpenGL is column-major.
+#
+#   right = cam_fwd x cam_up
+#   V = | rx   ux  -fx   -dot(R, cam) |
+#       | ry   uy  -fy   -dot(U, cam) |
+#       | rz   uz  -fz    dot(F, cam) |
+#       |  0    0    0       1        |
+let apply_camera = ():>void => {
+    let crx:int = fp_mul(cam_fy cam_uz) - fp_mul(cam_fz cam_uy)
+    let cry:int = fp_mul(cam_fz cam_ux) - fp_mul(cam_fx cam_uz)
+    let crz:int = fp_mul(cam_fx cam_uy) - fp_mul(cam_fy cam_ux)
+
+    let neg_dot_r:int = 0 - (fp_mul(crx cam_x) + fp_mul(cry cam_y) + fp_mul(crz cam_z))
+    let neg_dot_u:int = 0 - (fp_mul(cam_ux cam_x) + fp_mul(cam_uy cam_y) + fp_mul(cam_uz cam_z))
+    let dot_f:int = fp_mul(cam_fx cam_x) + fp_mul(cam_fy cam_y) + fp_mul(cam_fz cam_z)
+
+    let mat:int = __static_alloca__(64)
+    __store_u32__(q16_to_f32(crx) mat + 0)
+    __store_u32__(q16_to_f32(cam_ux) mat + 4)
+    __store_u32__(q16_to_f32(0 - cam_fx) mat + 8)
+    __store_u32__(0 mat + 12)
+
+    __store_u32__(q16_to_f32(cry) mat + 16)
+    __store_u32__(q16_to_f32(cam_uy) mat + 20)
+    __store_u32__(q16_to_f32(0 - cam_fy) mat + 24)
+    __store_u32__(0 mat + 28)
+
+    __store_u32__(q16_to_f32(crz) mat + 32)
+    __store_u32__(q16_to_f32(cam_uz) mat + 36)
+    __store_u32__(q16_to_f32(0 - cam_fz) mat + 40)
+    __store_u32__(0 mat + 44)
+
+    __store_u32__(q16_to_f32(neg_dot_r) mat + 48)
+    __store_u32__(q16_to_f32(neg_dot_u) mat + 52)
+    __store_u32__(q16_to_f32(dot_f) mat + 56)
+    __store_u32__(F32_ONE mat + 60)
+
+    glLoadMatrixf(mat)
+    return 0
+}
+
+let draw_ground = ():>void => {
+    let i:int = 0 - HALF_TILES
+    loop i <? HALF_TILES {
+        let j:int = 0 - HALF_TILES
+        loop j <? HALF_TILES {
+            let x0:int = i * TILE_SIZE
+            let x1:int = (i + 1) * TILE_SIZE
+            let z0:int = j * TILE_SIZE
+            let z1:int = (j + 1) * TILE_SIZE
+            let dark:int = (i + j) and 1
+            let r:int = COL_TILE_A_R
+            let g:int = COL_TILE_A_G
+            let b:int = COL_TILE_A_B
+            if dark =? 0 {
+                r = COL_TILE_B_R
+                g = COL_TILE_B_G
+                b = COL_TILE_B_B
+            }
+            glBegin(GL_QUADS)
+            GL_Color3f(q16_to_f32(r) q16_to_f32(g) q16_to_f32(b))
+            world_v3(x0 GROUND_Y z0)
+            world_v3(x1 GROUND_Y z0)
+            world_v3(x1 GROUND_Y z1)
+            world_v3(x0 GROUND_Y z1)
+            glEnd()
+            j += 1
+        }
+        i += 1
+    }
+    return 0
+}
+
+# Tessellate the corkscrewed loop strip. Each cell is one (phi-segment,
+# w-segment) quad; checkered (phi + w) for motion cues.
+let draw_loop = ():>void => {
+    let r_a:int = q16_to_f32(COL_LOOP_A_R)
+    let g_a:int = q16_to_f32(COL_LOOP_A_G)
+    let b_a:int = q16_to_f32(COL_LOOP_A_B)
+    let r_b:int = q16_to_f32(COL_LOOP_B_R)
+    let g_b:int = q16_to_f32(COL_LOOP_B_G)
+    let b_b:int = q16_to_f32(COL_LOOP_B_B)
+
+    let pi:int = 0
+    loop pi <? LOOP_PHI_SEGMENTS {
+        let phi0:int = (pi * ANG_TURN) // LOOP_PHI_SEGMENTS
+        let phi1:int = ((pi + 1) * ANG_TURN) // LOOP_PHI_SEGMENTS
+        let xc0:int = (phi0 * LOOP_W) // ANG_TURN
+        let xc1:int = (phi1 * LOOP_W) // ANG_TURN
+        let cphi0:int = cos_fp(phi0)
+        let sphi0:int = sin_fp(phi0)
+        let cphi1:int = cos_fp(phi1)
+        let sphi1:int = sin_fp(phi1)
+        let y0:int = LOOP_YC - fp_mul(LOOP_R cphi0)
+        let z0:int = LOOP_ZC - fp_mul(LOOP_R sphi0)
+        let y1:int = LOOP_YC - fp_mul(LOOP_R cphi1)
+        let z1:int = LOOP_ZC - fp_mul(LOOP_R sphi1)
+
+        let wi:int = 0
+        loop wi <? LOOP_W_SEGMENTS {
+            let w0:int = (0 - LOOP_HALF_W) + ((wi * LOOP_W) // LOOP_W_SEGMENTS)
+            let w1:int = (0 - LOOP_HALF_W) + (((wi + 1) * LOOP_W) // LOOP_W_SEGMENTS)
+            let x00:int = xc0 + w0
+            let x01:int = xc0 + w1
+            let x10:int = xc1 + w0
+            let x11:int = xc1 + w1
+
+            let cell:int = (pi + wi) and 1
+            let rr:int = r_a
+            let gg:int = g_a
+            let bb:int = b_a
+            if cell =? 0 {
+                rr = r_b
+                gg = g_b
+                bb = b_b
+            }
+            glBegin(GL_QUADS)
+            GL_Color3f(rr gg bb)
+            world_v3(x00 y0 z0)
+            world_v3(x01 y0 z0)
+            world_v3(x11 y1 z1)
+            world_v3(x10 y1 z1)
+            glEnd()
+            wi += 1
+        }
+        pi += 1
+    }
+    return 0
+}
+
+let craft_emit = (lx:int ly:int lz:int):>void => {
+    let wx:int = cx + fp_mul(vrx lx) + fp_mul(vux ly) + fp_mul(vfx lz)
+    let wy:int = cy + fp_mul(vry lx) + fp_mul(vuy ly) + fp_mul(vfy lz)
+    let wz:int = cz + fp_mul(vrz lx) + fp_mul(vuz ly) + fp_mul(vfz lz)
+    world_v3(wx wy wz)
+    return 0
+}
+
+let draw_craft = ():>void => {
+    let nose_z:int = 229376
+    let tail_z:int = 0 - 131072
+    let wing_x:int = 163840
+    let body_y_top:int = 39321
+    let body_y_bot:int = 0 - 13107
+    let canopy_z:int = 65536
+    let canopy_y:int = 78643
+
+    let body_r:int = q16_to_f32(13107)
+    let body_g:int = q16_to_f32(45875)
+    let body_b:int = q16_to_f32(58982)
+    let belly_r:int = q16_to_f32(6553)
+    let belly_g:int = q16_to_f32(13107)
+    let belly_b:int = q16_to_f32(32768)
+    let side_r:int = q16_to_f32(6553)
+    let side_g:int = q16_to_f32(26214)
+    let side_b:int = q16_to_f32(45875)
+    let canopy_r:int = q16_to_f32(58982)
+    let canopy_g:int = q16_to_f32(58982)
+    let canopy_b:int = F32_ONE
+    let glow_r:int = F32_ONE
+    let glow_g:int = q16_to_f32(45875)
+    let glow_b:int = q16_to_f32(6553)
+
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(body_r body_g body_b)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(wing_x body_y_top tail_z)
+    glEnd()
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(belly_r belly_g belly_b)
+    craft_emit(0 body_y_bot nose_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    glEnd()
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(side_r side_g side_b)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 body_y_bot nose_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    glEnd()
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(side_r side_g side_b)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(wing_x body_y_top tail_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 body_y_bot nose_z)
+    glEnd()
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(canopy_r canopy_g canopy_b)
+    craft_emit(0 canopy_y canopy_z)
+    craft_emit(0 - 26214 body_y_top 0)
+    craft_emit(26214 body_y_top 0)
+    glEnd()
+    let glow_x:int = 65536
+    let glow_y_bot:int = 0
+    let glow_y_top:int = 26214
+    glBegin(GL_QUADS)
+    GL_Color3f(glow_r glow_g glow_b)
+    craft_emit(0 - glow_x glow_y_bot tail_z)
+    craft_emit(glow_x glow_y_bot tail_z)
+    craft_emit(glow_x glow_y_top tail_z)
+    craft_emit(0 - glow_x glow_y_top tail_z)
+    glEnd()
+    return 0
+}
+
+let render_scene = (sw:int sh:int):>void => {
+    glViewport(0 0 sw sh)
+    GL_ClearColor(q16_to_f32(COL_SKY_R) q16_to_f32(COL_SKY_G) q16_to_f32(COL_SKY_B) F32_ONE)
+    glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDisable(GL_CULL_FACE)
+    set_perspective(sw sh)
+    apply_camera()
+    draw_ground()
+    draw_loop()
+    draw_craft()
+    return 0
+}
+
+# ---------- Main loop --------------------------------------------------------
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO) =? 0 {
+        return 1
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1) =? 0 {
+        SDL_Quit()
+        return 2
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE 24) =? 0 {
+        SDL_Quit()
+        return 3
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION 2) =? 0 {
+        SDL_Quit()
+        return 4
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION 1) =? 0 {
+        SDL_Quit()
+        return 5
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK SDL_GL_CONTEXT_PROFILE_COMPATIBILITY) =? 0 {
+        SDL_Quit()
+        return 6
+    }
+
+    let title:int = "uZero Stage 08: Loop\0"
+    let window:int = SDL_CreateWindow(title 1280 720 SDL_WINDOW_OPENGL + SDL_WINDOW_RESIZABLE)
+    if window =? 0 {
+        SDL_Quit()
+        return 7
+    }
+    SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)
+
+    let gl_context:int = SDL_GL_CreateContext(window)
+    if gl_context =? 0 {
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 8
+    }
+    if SDL_GL_MakeCurrent(window gl_context) =? 0 {
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 9
+    }
+    SDL_GL_SetSwapInterval(1)
+
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let size:int = __static_alloca__(8)
+
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDisable(GL_CULL_FACE)
+
+    reset_craft()
+
+    loop running not=? 0 {
+        let has_event:int = SDL_PollEvent(event)
+        loop has_event not=? 0 {
+            if SDL_EventType(event) =? SDL_EVENT_QUIT {
+                running = 0
+            }
+            has_event = SDL_PollEvent(event)
+        }
+
+        let keyboard:int = SDL_GetKeyboardState(0)
+        update_input(keyboard)
+        if in_quit not=? 0 {
+            running = 0
+        }
+
+        physics_step()
+        update_chase()
+
+        SDL_GetWindowSizeInPixels(window size size + 4)
+        render_scene(__load_u32__(size) __load_u32__(size + 4))
+        SDL_GL_SwapWindow(window)
+        SDL_Delay(16)
+        frame_count += 1
+    }
+
+    SDL_GL_DestroyContext(gl_context)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}
