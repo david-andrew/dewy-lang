@@ -52,8 +52,18 @@ const TOP_SPEED:int = 229376             # 3.5 m/frame (= old boost ceiling)
 const BOOST_BONUS:int = 98304            # +1.5 m/frame -> 5.0 m/frame boost ceiling
 const THRUST_ACCEL:int = 1638
 const BRAKE_DECEL:int = 3277
-const BOOST_THRUST_MULT:int = 196608
 const STRAFE_RATE:int = 32768
+
+# Boost is a discrete, edge-triggered action (F-Zero GX style): one press
+# spends a chunk of the shared energy bar, gives an instant forward impulse
+# of BOOST_IMPULSE m/frame, and lifts the top-speed cap for BOOST_DURATION
+# frames so drag/grip don't immediately scrub the kick. Holding does
+# nothing; you have to release and re-press to fire again.
+const BOOST_IMPULSE:int = 65536          # 1.0 m/frame instant velocity bump
+const BOOST_DURATION:int = 30            # frames the elevated speed cap holds
+const ENERGY_FULL:int = 65536            # FP_ONE -- full bar
+const BOOST_COST_Q:int = 19660           # 0.30 of bar per boost (-> 3 boosts when full)
+const ENERGY_REGEN_Q:int = 328           # ~0.005 / frame -> ~3.3 s to refill from empty
 
 const STEER_BASE:int = 12
 const STEER_MIN:int = 8
@@ -136,6 +146,39 @@ const SPEED_LINE_OVERSHOOT_PX:int = 24    # extend lines past the edge so they t
 # Per-streak state: { phase_q, angle_idx, start_r_q } as three int64 fields.
 const SPEED_LINE_STRIDE:int = 24
 const SPEED_LINE_STATE_BYTES:int = 1920   # SPEED_LINES_N * SPEED_LINE_STRIDE
+
+# Sparks. A fixed-size pool of short-lived 3D particles emitted whenever
+# wall_collide / ramp_side_collide produce a non-trivial impulse. New sparks
+# overwrite the oldest slot via a wrapping head pointer (no free-slot search).
+# Each particle: { x, y, z, vx, vy, vz, life } -- 7 int64 fields, 56-byte stride.
+const SPARK_MAX:int = 192
+const SPARK_STRIDE:int = 56
+const SPARK_BUF_BYTES:int = 10752         # SPARK_MAX * SPARK_STRIDE
+const SPARK_LIFE_DECAY:int = 2185         # ~30-frame lifetime (FP_ONE / 30)
+const SPARK_BASE_SPEED:int = 65536        # 1.0 m/frame outward kick
+const SPARK_SPEED_VAR:int = 65536         # +/- 1.0 m/frame variation
+const SPARK_JITTER:int = 19660            # 0.3 m/frame tangential scatter
+const SPARK_UP_BIAS:int = 9830            # 0.15 m/frame upward kick (sparky arc)
+const SPARK_GRAVITY:int = 1310            # 0.02 m/frame^2 (lighter than craft gravity)
+const SPARK_TAIL_Q:int = 49152            # 0.75 -- tail length = vel * this
+# Impulse threshold and per-particle cost in Q16 m/frame. Below the threshold
+# we stay silent (no sparks on gentle contact); above it the burst size grows
+# with how hard the collision pushed back.
+const SPARK_IMPULSE_THRESHOLD:int = 6553  # 0.10 m/frame (light scrape)
+const SPARK_IMPULSE_PER_PARTICLE:int = 16384 # 0.25 m/frame per spark
+const SPARK_MAX_BURST:int = 24            # cap per-collision burst
+
+# HUD layout (F-Zero GX inspired). Energy bar in the top-right; large
+# 7-segment km/h speedometer in the bottom-right.
+const HUD_MARGIN_PX:int = 20
+const HUD_BAR_W_PX:int = 220
+const HUD_BAR_H_PX:int = 18
+const HUD_BAR_BORDER_PX:int = 2
+const HUD_DIGIT_W_PX:int = 30
+const HUD_DIGIT_H_PX:int = 54
+const HUD_DIGIT_GAP_PX:int = 6
+const HUD_SEG_THICK_PX:int = 6
+const HUD_KMH_PER_FRAME:int = 216        # 60 fps * 3.6 -> Q16 m/frame * this // FP_ONE = km/h
 
 const MIN_CAM_CLEAR:int = 131072         # 2 m  minimum cam clearance over surface
 
@@ -430,6 +473,13 @@ let vis_boost_norm:int = 0
 # angle, origin, and lifetime offset -- no shared phase, no pinwheel.
 const SPEED_LINE_STATE:int = __static_alloca__(SPEED_LINE_STATE_BYTES)
 
+# Spark pool. Wrapping head pointer = next slot to overwrite.
+const SPARK_BUF:int = __static_alloca__(SPARK_BUF_BYTES)
+let spark_head:int = 0
+# Tracks airborne state across frames so physics_step can detect the
+# airborne -> grounded transition (i.e. landing) and trigger a spark burst.
+let was_airborne:int = 1
+
 # Engine trail ring buffer state. trail_buf is a static block of TRAIL_LEN
 # samples; trail_head is the next write slot; trail_count saturates at
 # TRAIL_LEN. (Functions below.)
@@ -466,9 +516,15 @@ let in_steer_r:int = 0
 let in_strafe_l:int = 0
 let in_strafe_r:int = 0
 let in_boost:int = 0
+let in_boost_prev:int = 0
 let in_respawn:int = 0
 let in_respawn_prev:int = 0
 let in_quit:int = 0
+
+# Boost / shared energy bar state. energy is Q16 in [0, ENERGY_FULL];
+# boost_active_frames counts down while the speed cap is lifted post-press.
+let energy:int = 65536                   # start full
+let boost_active_frames:int = 0
 
 let update_input = (keyboard:int):>void => {
     in_thrust = SDL_ScancodeDown(keyboard SDL_SCANCODE_W) or SDL_ScancodeDown(keyboard SDL_SCANCODE_UP)
@@ -913,6 +969,8 @@ let reset_craft = ():>void => {
     cam_z = cz - fp_mul(CAM_BACK fz) + fp_mul(CAM_LIFT uz)
     trail_head = 0
     trail_count = 0
+    energy = ENERGY_FULL
+    boost_active_frames = 0
     return 0
 }
 
@@ -924,6 +982,20 @@ let physics_step = ():>void => {
     if gap_now >? AIR_GAP {
         airborne = 1
     }
+
+    # Landing detection: previous frame ended airborne, this frame starts
+    # grounded -> the magnet snap happened last frame, fire a spark burst.
+    # Direction is the surface normal so sparks fan up off the contact;
+    # burst size scales with horizontal speed (higher = bigger skid spray).
+    if (was_airborne not=? 0) and (airborne =? 0) {
+        let speed_xy:int = fp_sqrt((cvx * cvx) + (cvz * cvz))
+        let burst:int = 6 + (speed_xy // 32768)
+        if burst >? SPARK_MAX_BURST {
+            burst = SPARK_MAX_BURST
+        }
+        spark_emit(cx cy cz surf_nx surf_ny surf_nz burst)
+    }
+    was_airborne = airborne
 
     # Grounded: physics up = surface normal exactly. Airborne: hold the
     # current up *unless* the player is inputting -- in which case ease back
@@ -980,20 +1052,38 @@ let physics_step = ():>void => {
         rotate_forward(steer_in * steer_rate)
     }
 
-    # Thrust along forward.
+    # Thrust along forward (continuous, no boost bonus -- boost is discrete).
     let thrust:int = 0
     let thrust_active:int = 0
     if in_thrust not=? 0 {
         thrust = THRUST_ACCEL
         thrust_active = 1
-        if in_boost not=? 0 {
-            thrust = fp_mul(THRUST_ACCEL BOOST_THRUST_MULT)
-        }
     }
     if thrust not=? 0 {
         cvx += fp_mul(fx thrust)
         cvy += fp_mul(fy thrust)
         cvz += fp_mul(fz thrust)
+    }
+
+    # Edge-triggered boost: fire only on the press transition, only if
+    # there's enough energy. Adds an instant forward impulse and lifts the
+    # speed cap for BOOST_DURATION frames so the kick can settle before
+    # drag/grip eat it.
+    let boost_pressed:int = (in_boost not=? 0) and (in_boost_prev =? 0)
+    in_boost_prev = in_boost
+    if (boost_pressed not=? 0) and (energy >=? BOOST_COST_Q) {
+        cvx += fp_mul(fx BOOST_IMPULSE)
+        cvy += fp_mul(fy BOOST_IMPULSE)
+        cvz += fp_mul(fz BOOST_IMPULSE)
+        boost_active_frames = BOOST_DURATION
+        energy -= BOOST_COST_Q
+    }
+    if boost_active_frames >? 0 {
+        boost_active_frames -= 1
+    }
+    energy += ENERGY_REGEN_Q
+    if energy >? ENERGY_FULL {
+        energy = ENERGY_FULL
     }
 
     # Brake: kill forward component of velocity.
@@ -1043,9 +1133,11 @@ let physics_step = ():>void => {
         cvz -= fp_mul(fz drag_force)
     }
 
-    # Top speed clamp.
+    # Top speed clamp. The boost cap stays elevated for the full
+    # boost_active_frames window after the press, then snaps back so drag
+    # gradually pulls speed down to the normal ceiling.
     let max_speed:int = TOP_SPEED
-    if in_boost not=? 0 {
+    if boost_active_frames >? 0 {
         max_speed = TOP_SPEED + BOOST_BONUS
     }
     let cur_speed:int = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
@@ -1080,10 +1172,32 @@ let physics_step = ():>void => {
     # corrected position (avoids a one-frame visual penetration). Same
     # idea for ramp side-walls: don't let the craft phase through a ramp
     # side and then get yanked up to the top by the magnet.
+    # Snapshot velocity so we can read off the impulse the collision
+    # functions applied (delta v = sparks).
+    let pre_cvx:int = cvx
+    let pre_cvy:int = cvy
+    let pre_cvz:int = cvz
     wall_collide()
     ramp_side_collide(0 RAMP_HALF_W Z_RAMP_NEAR Z_RAMP_FAR RAMP_TAN)
     ramp_side_collide(0 INNER_RAMP_HALF_W Z_INNER_NEAR Z_INNER_FAR INNER_RAMP_TAN)
     ramp_side_collide(OUTER_RAMP_X_CENTER OUTER_RAMP_HALF_W Z_OUTER_NEAR Z_OUTER_FAR OUTER_RAMP_TAN)
+
+    # Spark spawn: any collision that zeroed an inward velocity component
+    # shows up as a non-trivial dv in the opposite (outward) direction.
+    let dvx:int = cvx - pre_cvx
+    let dvy:int = cvy - pre_cvy
+    let dvz:int = cvz - pre_cvz
+    let imp_mag:int = fp_sqrt((dvx * dvx) + (dvy * dvy) + (dvz * dvz))
+    if imp_mag >? SPARK_IMPULSE_THRESHOLD {
+        let burst:int = (imp_mag - SPARK_IMPULSE_THRESHOLD) // SPARK_IMPULSE_PER_PARTICLE + 1
+        if burst >? SPARK_MAX_BURST {
+            burst = SPARK_MAX_BURST
+        }
+        let nx:int = fp_div(dvx imp_mag)
+        let ny:int = fp_div(dvy imp_mag)
+        let nz:int = fp_div(dvz imp_mag)
+        spark_emit(cx cy cz nx ny nz burst)
+    }
 
     # Magnet snap: pull craft toward hover target along the new surface normal.
     query_surface(cx cy cz)
@@ -1964,6 +2078,118 @@ let draw_trail = ():>void => {
     return 0
 }
 
+# Spawn `count` particles at (px, py, pz) with outward unit direction
+# (nx, ny, nz). Each spark gets a random speed around SPARK_BASE_SPEED,
+# tangential jitter, and a small upward bias so the burst arcs up before
+# falling. Slots are overwritten in ring-buffer order so we never search
+# for free space.
+let spark_emit = (px:int py:int pz:int nx:int ny:int nz:int count:int):>void => {
+    let i:int = 0
+    loop i <? count {
+        let slot:int = SPARK_BUF + (spark_head * SPARK_STRIDE)
+        spark_head = (spark_head + 1) % SPARK_MAX
+
+        let speed:int = SPARK_BASE_SPEED + xs_range(SPARK_SPEED_VAR) - (SPARK_SPEED_VAR // 2)
+        let jx:int = xs_range(SPARK_JITTER * 2) - SPARK_JITTER
+        let jy:int = xs_range(SPARK_JITTER * 2) - SPARK_JITTER
+        let jz:int = xs_range(SPARK_JITTER * 2) - SPARK_JITTER
+
+        let vx:int = fp_mul(nx speed) + jx
+        let vy:int = fp_mul(ny speed) + jy + SPARK_UP_BIAS
+        let vz:int = fp_mul(nz speed) + jz
+
+        __store__(px slot)
+        __store__(py (slot + 8))
+        __store__(pz (slot + 16))
+        __store__(vx (slot + 24))
+        __store__(vy (slot + 32))
+        __store__(vz (slot + 40))
+        __store__(FP_ONE (slot + 48))
+        i += 1
+    }
+    return 0
+}
+
+# Step every live particle: position += velocity, vy -= gravity, life decays.
+# Done unconditionally on dead slots too -- the only state that matters is
+# the life field, which the draw loop checks.
+let spark_step = ():>void => {
+    let i:int = 0
+    loop i <? SPARK_MAX {
+        let slot:int = SPARK_BUF + (i * SPARK_STRIDE)
+        let life:int = __load__(slot + 48)
+        if life >? 0 {
+            let x:int = __load__(slot)
+            let y:int = __load__(slot + 8)
+            let z:int = __load__(slot + 16)
+            let vx:int = __load__(slot + 24)
+            let vy:int = __load__(slot + 32)
+            let vz:int = __load__(slot + 40)
+
+            x += vx
+            y += vy
+            z += vz
+            vy -= SPARK_GRAVITY
+            life -= SPARK_LIFE_DECAY
+            if life <? 0 {
+                life = 0
+            }
+
+            __store__(x slot)
+            __store__(y (slot + 8))
+            __store__(z (slot + 16))
+            __store__(vy (slot + 32))
+            __store__(life (slot + 48))
+        }
+        i += 1
+    }
+    return 0
+}
+
+# Render live sparks as additive 3D streaks. Color shifts hot-yellow ->
+# orange -> red as life decays; the "tail" end fades to transparent so
+# every spark reads as a moving point trailed by motion blur.
+let draw_sparks = ():>void => {
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA GL_ONE)
+    glDepthMask(0)
+    GL_LineWidth(GL_F32_FromInt(2))
+
+    glBegin(GL_LINES)
+    let i:int = 0
+    loop i <? SPARK_MAX {
+        let slot:int = SPARK_BUF + (i * SPARK_STRIDE)
+        let life:int = __load__(slot + 48)
+        if life >? 0 {
+            let x:int = __load__(slot)
+            let y:int = __load__(slot + 8)
+            let z:int = __load__(slot + 16)
+            let vx:int = __load__(slot + 24)
+            let vy:int = __load__(slot + 32)
+            let vz:int = __load__(slot + 40)
+
+            let tx:int = x - fp_mul(vx SPARK_TAIL_Q)
+            let ty:int = y - fp_mul(vy SPARK_TAIL_Q)
+            let tz:int = z - fp_mul(vz SPARK_TAIL_Q)
+
+            let g_q:int = fp_mul(life FP_ONE)
+            let b_q:int = fp_mul(life 19660)
+            let a_q:int = life
+
+            GL_Color4f(F32_ONE q16_to_f32(g_q) q16_to_f32(b_q) q16_to_f32(a_q))
+            world_v3(x y z)
+            GL_Color4f(F32_ONE q16_to_f32(g_q) q16_to_f32(b_q) F32_ZERO)
+            world_v3(tx ty tz)
+        }
+        i += 1
+    }
+    glEnd()
+
+    glDepthMask(1)
+    glDisable(GL_BLEND)
+    return 0
+}
+
 # Seed the xorshift+ stream and populate every speed-line slot with an
 # independent random phase / angle / origin. Called once at startup so
 # streaks are already scattered the first frame they're visible.
@@ -2229,6 +2455,192 @@ let draw_craft = ():>void => {
     return 0
 }
 
+# ---------- HUD --------------------------------------------------------------
+# F-Zero GX inspired overlay: gradient energy bar (top-right) plus large
+# 7-segment km/h speedometer (bottom-right). All drawn in a 2D ortho pass
+# after the 3D scene with depth test off.
+
+# Emit one screen-space rectangle as a GL_QUADS quad. Caller is responsible
+# for calling glBegin(GL_QUADS) / glEnd() and setting color before/between.
+let hud_quad = (x0:int y0:int x1:int y1:int):>void => {
+    GL_Vertex3f(GL_F32_FromInt(x0) GL_F32_FromInt(y0) F32_ZERO)
+    GL_Vertex3f(GL_F32_FromInt(x0) GL_F32_FromInt(y1) F32_ZERO)
+    GL_Vertex3f(GL_F32_FromInt(x1) GL_F32_FromInt(y1) F32_ZERO)
+    GL_Vertex3f(GL_F32_FromInt(x1) GL_F32_FromInt(y0) F32_ZERO)
+    return 0
+}
+
+# 7-segment bitmap masks. Bits: T=1 TL=2 TR=4 M=8 BL=16 BR=32 B=64.
+let digit_mask = (d:int):>int => {
+    if d =? 0 { return 119 }
+    if d =? 1 { return 36 }
+    if d =? 2 { return 93 }
+    if d =? 3 { return 109 }
+    if d =? 4 { return 46 }
+    if d =? 5 { return 107 }
+    if d =? 6 { return 123 }
+    if d =? 7 { return 37 }
+    if d =? 8 { return 127 }
+    if d =? 9 { return 111 }
+    return 0
+}
+
+# Emit one digit's lit segments as quads at (x, y) with cell dims (w, h)
+# and segment thickness t. Must be inside an active glBegin(GL_QUADS).
+let draw_digit = (x:int y:int d:int w:int h:int t:int):>void => {
+    let mask:int = digit_mask(d)
+    let half_t:int = t // 2
+    let mid:int = y + (h // 2)
+    if (mask and 1) not=? 0 {
+        hud_quad(x + t y x + w - t y + t)
+    }
+    if (mask and 2) not=? 0 {
+        hud_quad(x y + t x + t mid - half_t)
+    }
+    if (mask and 4) not=? 0 {
+        hud_quad(x + w - t y + t x + w mid - half_t)
+    }
+    if (mask and 8) not=? 0 {
+        hud_quad(x + t mid - half_t x + w - t mid + half_t)
+    }
+    if (mask and 16) not=? 0 {
+        hud_quad(x mid + half_t x + t y + h - t)
+    }
+    if (mask and 32) not=? 0 {
+        hud_quad(x + w - t mid + half_t x + w y + h - t)
+    }
+    if (mask and 64) not=? 0 {
+        hud_quad(x + t y + h - t x + w - t y + h)
+    }
+    return 0
+}
+
+# Right-aligned integer renderer. Emits up to max_digits cells anchored at
+# right_x (digits grow leftwards). Stops as soon as the value runs out.
+let draw_number_right = (right_x:int y:int value:int max_digits:int w:int h:int t:int gap:int):>void => {
+    if value <? 0 { value = 0 }
+    let v:int = value
+    let i:int = 0
+    loop i <? max_digits {
+        let d:int = v % 10
+        v = v // 10
+        let dx:int = right_x - w - (i * (w + gap))
+        draw_digit(dx y d w h t)
+        i += 1
+        if v =? 0 {
+            return 0
+        }
+    }
+    return 0
+}
+
+# Energy bar with bordered backdrop and a left=red -> right=gradient fill.
+# Right-edge color follows the current energy level (red at 0, yellow at
+# 50%, green at full); a sin pulse modulates alpha while a boost is active.
+let draw_energy_bar = (sw:int sh:int):>void => {
+    let bar_x:int = sw - HUD_MARGIN_PX - HUD_BAR_W_PX
+    let bar_y:int = HUD_MARGIN_PX
+    let bw:int = HUD_BAR_W_PX
+    let bh:int = HUD_BAR_H_PX
+    let bdr:int = HUD_BAR_BORDER_PX
+
+    # Backdrop: dim translucent panel framing the bar.
+    GL_Color4f(F32_ZERO F32_ZERO F32_ZERO q16_to_f32(45875))
+    glBegin(GL_QUADS)
+    hud_quad(bar_x - bdr bar_y - bdr bar_x + bw + bdr bar_y + bh + bdr)
+    glEnd()
+
+    let fill_w:int = (bw * energy) // ENERGY_FULL
+    if fill_w >? 0 {
+        let r_right:int = FP_ONE
+        let g_right:int = 0
+        if energy >=? FP_HALF {
+            r_right = FP_ONE - ((energy - FP_HALF) << 1)
+            if r_right <? 0 { r_right = 0 }
+            g_right = FP_ONE
+        } else {
+            r_right = FP_ONE
+            g_right = energy << 1
+            if g_right >? FP_ONE { g_right = FP_ONE }
+        }
+
+        let alpha_q:int = 60293        # 0.92
+        if boost_active_frames >? 0 {
+            let phase:int = (boost_active_frames * 64) % ANG_TURN
+            let s:int = sin_fp(phase)
+            alpha_q = 52428 + (s // 8)  # ~0.6 .. 1.0 pulse
+            if alpha_q >? FP_ONE { alpha_q = FP_ONE }
+            if alpha_q <? 0 { alpha_q = 0 }
+        }
+
+        glBegin(GL_QUADS)
+        GL_Color4f(F32_ONE F32_ZERO F32_ZERO q16_to_f32(alpha_q))
+        GL_Vertex3f(GL_F32_FromInt(bar_x) GL_F32_FromInt(bar_y) F32_ZERO)
+        GL_Vertex3f(GL_F32_FromInt(bar_x) GL_F32_FromInt(bar_y + bh) F32_ZERO)
+        GL_Color4f(q16_to_f32(r_right) q16_to_f32(g_right) F32_ZERO q16_to_f32(alpha_q))
+        GL_Vertex3f(GL_F32_FromInt(bar_x + fill_w) GL_F32_FromInt(bar_y + bh) F32_ZERO)
+        GL_Vertex3f(GL_F32_FromInt(bar_x + fill_w) GL_F32_FromInt(bar_y) F32_ZERO)
+        glEnd()
+    }
+
+    # Bright outline over the panel edge so the bar reads cleanly even on
+    # a busy background.
+    GL_Color4f(F32_ONE F32_ONE F32_ONE q16_to_f32(45875))
+    glBegin(GL_QUADS)
+    hud_quad(bar_x - bdr bar_y - bdr bar_x + bw + bdr bar_y)             # top
+    hud_quad(bar_x - bdr bar_y + bh bar_x + bw + bdr bar_y + bh + bdr)   # bot
+    hud_quad(bar_x - bdr bar_y bar_x bar_y + bh)                         # left
+    hud_quad(bar_x + bw bar_y bar_x + bw + bdr bar_y + bh)               # right
+    glEnd()
+    return 0
+}
+
+let draw_speedometer = (sw:int sh:int):>void => {
+    let kmh:int = (vis_speed * HUD_KMH_PER_FRAME) // FP_ONE
+    let right_x:int = sw - HUD_MARGIN_PX
+    let y:int = sh - HUD_MARGIN_PX - HUD_DIGIT_H_PX
+
+    let r:int = F32_ONE
+    let g:int = F32_ONE
+    let b:int = F32_ONE
+    if boost_active_frames >? 0 {
+        # Hot orange wash while boost is active.
+        g = q16_to_f32(45875)   # 0.7
+        b = q16_to_f32(13107)   # 0.2
+    }
+    GL_Color4f(r g b q16_to_f32(60293))
+
+    glBegin(GL_QUADS)
+    draw_number_right(right_x y kmh 4 HUD_DIGIT_W_PX HUD_DIGIT_H_PX HUD_SEG_THICK_PX HUD_DIGIT_GAP_PX)
+    glEnd()
+    return 0
+}
+
+let draw_hud = (sw:int sh:int):>void => {
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    GL_Ortho(q16_to_f64(0) q16_to_f64(sw * FP_ONE) q16_to_f64(sh * FP_ONE) q16_to_f64(0) q16_to_f64(0 - FP_ONE) q16_to_f64(FP_ONE))
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA)
+
+    draw_energy_bar(sw sh)
+    draw_speedometer(sw sh)
+
+    glDisable(GL_BLEND)
+    glEnable(GL_DEPTH_TEST)
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+    glPopMatrix()
+    return 0
+}
+
 let render_scene = (sw:int sh:int):>void => {
     glViewport(0 0 sw sh)
     GL_ClearColor(q16_to_f32(COL_SKY_R) q16_to_f32(COL_SKY_G) q16_to_f32(COL_SKY_B) F32_ONE)
@@ -2250,7 +2662,9 @@ let render_scene = (sw:int sh:int):>void => {
     draw_sphere()
     draw_craft()
     draw_trail()
+    draw_sparks()
     draw_speed_lines(sw sh)
+    draw_hud(sw sh)
     return 0
 }
 
@@ -2332,6 +2746,7 @@ let main = ():>int => {
         physics_step()
         update_chase()
         trail_push()
+        spark_step()
 
         SDL_GetWindowSizeInPixels(window size size + 4)
         render_scene(__load_u32__(size) __load_u32__(size + 4))
