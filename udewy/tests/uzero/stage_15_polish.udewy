@@ -125,8 +125,8 @@ const BOB_FREQ_DEN:int = 1               # denominator
 # TRAIL_LEN * 48 bytes of static storage. The trail emits from the
 # physics state (not visual) so bob/lean don't wobble the trail itself.
 const TRAIL_LEN:int = 36                 # ~0.6 s of history at 60 Hz
-const TRAIL_STRIDE:int = 48              # bytes per sample
-const TRAIL_BUF_BYTES:int = 1728         # TRAIL_LEN * TRAIL_STRIDE
+const TRAIL_STRIDE:int = 56              # bytes per sample (pos3 + right3 + boost_q)
+const TRAIL_BUF_BYTES:int = 2016         # TRAIL_LEN * TRAIL_STRIDE
 const TRAIL_HALF_W:int = 49152           # 0.75 m peak ribbon half-width
 const TRAIL_OFFSET_BACK:int = 131072     # 2 m behind craft (matches mesh tail)
 const TRAIL_OFFSET_UP:int = 13107        # 0.2 m up (matches glow plate)
@@ -2007,6 +2007,12 @@ let trail_push = ():>void => {
     let ex:int = cx + fp_mul(ux TRAIL_OFFSET_UP) - fp_mul(fx TRAIL_OFFSET_BACK)
     let ey:int = cy + fp_mul(uy TRAIL_OFFSET_UP) - fp_mul(fy TRAIL_OFFSET_BACK)
     let ez:int = cz + fp_mul(uz TRAIL_OFFSET_UP) - fp_mul(fz TRAIL_OFFSET_BACK)
+    # Boost intensity at emission time, Q16 in [0, FP_ONE]. Stored per-sample
+    # so the afterburner flare persists in the ribbon even after boost ends.
+    let boost_q:int = 0
+    if boost_active_frames >? 0 {
+        boost_q = (boost_active_frames * FP_ONE) // BOOST_DURATION
+    }
     let o:int = TRAIL_BUF + (trail_head * TRAIL_STRIDE)
     __store__(ex o)
     __store__(ey (o + 8))
@@ -2014,6 +2020,7 @@ let trail_push = ():>void => {
     __store__(rx (o + 24))
     __store__(ry (o + 32))
     __store__(rz (o + 40))
+    __store__(boost_q (o + 48))
     trail_head = (trail_head + 1) % TRAIL_LEN
     if trail_count <? TRAIL_LEN {
         trail_count += 1
@@ -2046,25 +2053,43 @@ let draw_trail = ():>void => {
         let drx:int = __load__((o + 24))
         let dry:int = __load__((o + 32))
         let drz:int = __load__((o + 40))
+        let boost_q:int = __load__(o + 48)
 
         # Age fraction: 0 at oldest sample, FP_ONE at newest.
         let age_q:int = (i * FP_ONE) // denom
-        # Width tapers from 25% (oldest) to 100% (newest) of TRAIL_HALF_W.
+        # Width tapers from 25% (oldest) to 100% (newest) of TRAIL_HALF_W,
+        # then up to 2.5x while a boost is active at this sample.
         let w_scale:int = FP_QUARTER + ((age_q * 3) // 4)
-        let w:int = fp_mul(TRAIL_HALF_W w_scale)
+        let w_boost:int = FP_ONE + fp_mul(boost_q 98304)    # 1.0 .. 2.5
+        let w:int = fp_mul(TRAIL_HALF_W fp_mul(w_scale w_boost))
         let wx:int = fp_mul(drx w)
         let wy:int = fp_mul(dry w)
         let wz:int = fp_mul(drz w)
 
         # Alpha cubes for a stronger fade near the tail; cap newest at 0.85.
+        # Boost lifts the floor so old hot segments stay punchy.
         let a_q:int = fp_mul(fp_mul(age_q age_q) age_q)
         a_q = fp_mul(a_q 55705)
+        let a_boost_floor:int = fp_mul(boost_q 45875)       # up to ~0.7
+        if a_q <? a_boost_floor {
+            a_q = a_boost_floor
+        }
         let af:int = q16_to_f32(a_q)
 
-        # Color shifts from deep red (oldest) to bright orange (newest).
-        let r_q:int = 39321 + ((age_q * 26214) // FP_ONE)   # 0.6 -> 1.0
-        let g_q:int = 6553 + ((age_q * 39322) // FP_ONE)    # 0.1 -> 0.7
-        let b_q:int = (age_q * 13107) // FP_ONE             # 0.0 -> 0.2
+        # Base color: deep red (oldest) -> bright orange (newest).
+        # Afterburner color: deep cyan (oldest) -> white-cyan (newest).
+        # Lerp base toward afterburner by boost_q.
+        let r_base:int = 39321 + ((age_q * 26214) // FP_ONE)    # 0.6 -> 1.0
+        let g_base:int = 6553 + ((age_q * 39322) // FP_ONE)     # 0.1 -> 0.7
+        let b_base:int = (age_q * 13107) // FP_ONE              # 0.0 -> 0.2
+
+        let r_aft:int = 26214 + ((age_q * 39322) // FP_ONE)     # 0.4 -> 1.0
+        let g_aft:int = 45875 + ((age_q * 19661) // FP_ONE)     # 0.7 -> 1.0
+        let b_aft:int = FP_ONE                                  # 1.0
+
+        let r_q:int = r_base + fp_mul(boost_q (r_aft - r_base))
+        let g_q:int = g_base + fp_mul(boost_q (g_aft - g_base))
+        let b_q:int = b_base + fp_mul(boost_q (b_aft - b_base))
         GL_Color4f(q16_to_f32(r_q) q16_to_f32(g_q) q16_to_f32(b_q) af)
 
         world_v3(px - wx py - wy pz - wz)
@@ -2402,9 +2427,24 @@ let draw_craft = ():>void => {
     let canopy_r:int = q16_to_f32(58982)
     let canopy_g:int = q16_to_f32(58982)
     let canopy_b:int = F32_ONE
-    let glow_r:int = F32_ONE
-    let glow_g:int = q16_to_f32(45875)
-    let glow_b:int = q16_to_f32(6553)
+    # Engine glow color/size shifts toward bright cyan-white afterburner
+    # while a boost window is active.
+    let boost_q:int = 0
+    if boost_active_frames >? 0 {
+        boost_q = (boost_active_frames * FP_ONE) // BOOST_DURATION
+    }
+    let base_r:int = FP_ONE
+    let base_g:int = 45875
+    let base_b:int = 6553
+    let aft_r:int = 58982          # 0.9
+    let aft_g:int = FP_ONE
+    let aft_b:int = FP_ONE
+    let glow_r_q:int = base_r + fp_mul(boost_q (aft_r - base_r))
+    let glow_g_q:int = base_g + fp_mul(boost_q (aft_g - base_g))
+    let glow_b_q:int = base_b + fp_mul(boost_q (aft_b - base_b))
+    let glow_r:int = q16_to_f32(glow_r_q)
+    let glow_g:int = q16_to_f32(glow_g_q)
+    let glow_b:int = q16_to_f32(glow_b_q)
 
     glBegin(GL_TRIANGLES)
     GL_Color3f(body_r body_g body_b)
@@ -2442,9 +2482,11 @@ let draw_craft = ():>void => {
     craft_emit(0 - 26214 body_y_top 0)
     craft_emit(26214 body_y_top 0)
     glEnd()
-    let glow_x:int = 65536
+    # Base nozzle quad, scaled up to ~1.7x while boosting.
+    let glow_scale:int = FP_ONE + fp_mul(boost_q 45875)         # 1.0 .. 1.7
+    let glow_x:int = fp_mul(65536 glow_scale)
     let glow_y_bot:int = 0
-    let glow_y_top:int = 26214
+    let glow_y_top:int = fp_mul(26214 glow_scale)
     glBegin(GL_QUADS)
     GL_Color3f(glow_r glow_g glow_b)
     craft_emit(0 - glow_x glow_y_bot tail_z)
@@ -2452,6 +2494,34 @@ let draw_craft = ():>void => {
     craft_emit(glow_x glow_y_top tail_z)
     craft_emit(0 - glow_x glow_y_top tail_z)
     glEnd()
+
+    # Afterburner flare: an additively blended halo that streaks behind
+    # the nozzle while boost is active. Larger than the base nozzle and
+    # positioned slightly further back so it reads as exhaust plume.
+    if boost_q >? 0 {
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA GL_ONE)
+        glDepthMask(0)
+
+        let halo_x:int = fp_mul(glow_x 26214)                   # ~+60% wider
+        halo_x = (halo_x // FP_ONE) + glow_x
+        let halo_y_top:int = fp_mul(glow_y_top 26214)
+        halo_y_top = (halo_y_top // FP_ONE) + glow_y_top
+        let halo_y_bot:int = 0 - (halo_y_top // 3)
+        let halo_z:int = tail_z - fp_mul(boost_q 65536)         # up to 1 m back
+        let halo_a:int = q16_to_f32(fp_mul(boost_q 52428))      # peaks ~0.8
+
+        glBegin(GL_QUADS)
+        GL_Color4f(glow_r glow_g glow_b halo_a)
+        craft_emit(0 - halo_x halo_y_bot halo_z)
+        craft_emit(halo_x halo_y_bot halo_z)
+        craft_emit(halo_x halo_y_top halo_z)
+        craft_emit(0 - halo_x halo_y_top halo_z)
+        glEnd()
+
+        glDepthMask(1)
+        glDisable(GL_BLEND)
+    }
     return 0
 }
 
