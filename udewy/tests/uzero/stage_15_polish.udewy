@@ -27,6 +27,13 @@ import p"./uzero_core.udewy"
 #      craft. Width and color taper from a hot orange head to a deep red
 #      tail; the trail tracks the physics path (no bob/lean) for stability.
 #
+#   5. Speed lines. A 96-streak radial overlay drawn in 2D ortho after the
+#      3D scene. Streaks animate outward at a rate proportional to
+#      (vis_boost_norm - SPEED_LINE_THRESHOLD), so they're invisible at
+#      cruise, fade in past 50% top speed, and stream aggressively at
+#      boost. Per-streak alpha follows a sin(pi*r) curve so they peak in
+#      the mid-radius band and don't pop at the screen edge.
+#
 # All other geometry / physics / surface dispatch is verbatim from stage 14.
 # See the stage 14 file for the full obstacle layout (~3.9 km circuit:
 # ramp, loop, hills, halfpipe, corkscrew, walls, sphere finale).
@@ -113,6 +120,22 @@ const TRAIL_BUF_BYTES:int = 1728         # TRAIL_LEN * TRAIL_STRIDE
 const TRAIL_HALF_W:int = 49152           # 0.75 m peak ribbon half-width
 const TRAIL_OFFSET_BACK:int = 131072     # 2 m behind craft (matches mesh tail)
 const TRAIL_OFFSET_UP:int = 13107        # 0.2 m up (matches glow plate)
+
+# Speed lines. A fixed set of N radial streaks rendered as a 2D ortho
+# overlay after the 3D scene. Each streak's angle and phase seed are
+# derived from its index (golden-angle distribution); the radial position
+# animates outward at SPEED_LINE_RATE * (boost_norm - threshold), looping
+# back to the inner radius. They only show above SPEED_LINE_THRESHOLD
+# (so cruising stays clean and the lines kick in as you push for boost).
+const SPEED_LINES_N:int = 80
+const SPEED_LINE_RATE_Q:int = 4915        # 0.075 / frame at full intensity (1 / lifetime)
+const SPEED_LINE_THRESHOLD:int = 32768    # 0.50  speed_norm where lines begin
+const SPEED_LINE_PEAK_ALPHA_Q:int = 52428 # 0.80 alpha at full boost intensity
+const SPEED_LINE_SHAKE_PX:int = 4         # peak per-frame line jitter in pixels
+const SPEED_LINE_OVERSHOOT_PX:int = 24    # extend lines past the edge so they truly exit
+# Per-streak state: { phase_q, angle_idx, start_r_q } as three int64 fields.
+const SPEED_LINE_STRIDE:int = 24
+const SPEED_LINE_STATE_BYTES:int = 1920   # SPEED_LINES_N * SPEED_LINE_STRIDE
 
 const MIN_CAM_CLEAR:int = 131072         # 2 m  minimum cam clearance over surface
 
@@ -392,6 +415,20 @@ let prev_fz:int = -65536
 
 # Current visual roll angle (raw angle units, lerped toward bank_target).
 let bank:int = 0
+
+# Speed published by update_chase for the visual layer (HUD, speed lines).
+# vis_speed is the raw |cv| in Q16 m/frame; vis_speed_norm is that divided
+# by TOP_SPEED, clamped to FP_ONE; vis_boost_norm is the same but allowed
+# to exceed FP_ONE while boosting (capped by BOOST_BONUS overhead).
+let vis_speed:int = 0
+let vis_speed_norm:int = 0
+let vis_boost_norm:int = 0
+
+# Per-streak state for the speed-line animation. Each entry holds an
+# independent (phase_q, angle_idx, start_r_q) triple. Initialized once at
+# startup from the xorshift+ stream so every streak has its own random
+# angle, origin, and lifetime offset -- no shared phase, no pinwheel.
+const SPEED_LINE_STATE:int = __static_alloca__(SPEED_LINE_STATE_BYTES)
 
 # Engine trail ring buffer state. trail_buf is a static block of TRAIL_LEN
 # samples; trail_head is the next write slot; trail_count saturates at
@@ -1080,7 +1117,11 @@ let update_chase = ():>void => {
     let yaw_rate_q:int = fp_mul(dfx rx) + fp_mul(dfy ry) + fp_mul(dfz rz)
 
     # speed_norm clamped to 0..FP_ONE for bank scaling (no boost-overdrive).
+    # Also publish raw speed and an unclamped boost-norm for the HUD and
+    # speed lines (which want to see the boost overhead).
     let speed:int = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    vis_speed = speed
+    vis_boost_norm = (speed << 16) // (TOP_SPEED + BOOST_BONUS)
     let sn:int = 0
     if TOP_SPEED >? 0 {
         sn = (speed << 16) // TOP_SPEED
@@ -1088,6 +1129,7 @@ let update_chase = ():>void => {
     if sn >? FP_ONE {
         sn = FP_ONE
     }
+    vis_speed_norm = sn
 
     # yaw_rate_q is Q16 radians (sin(theta) for small angles). Convert to
     # raw angle units (1024 = 360 deg) by *RAW_PER_RAD then >> FP_SHIFT.
@@ -1922,6 +1964,167 @@ let draw_trail = ():>void => {
     return 0
 }
 
+# Seed the xorshift+ stream and populate every speed-line slot with an
+# independent random phase / angle / origin. Called once at startup so
+# streaks are already scattered the first frame they're visible.
+let speed_lines_init = ():>void => {
+    xs_seed(0xC0FFEE)
+    let i:int = 0
+    loop i <? SPEED_LINES_N {
+        let slot:int = SPEED_LINE_STATE + (i * SPEED_LINE_STRIDE)
+        __store__(xs_range(FP_ONE) slot)
+        __store__(xs_range(ANG_TURN) (slot + 8))
+        __store__(xs_range(FP_ONE) (slot + 16))
+        i += 1
+    }
+    return 0
+}
+
+# Screen-space radial speed lines drawn over the 3D scene as a 2D ortho
+# overlay. Each streak owns its phase, angle, and start radius (see
+# speed_lines_init). At lifetime wrap we draw fresh values from the
+# xorshift+ stream so successive lifetimes are uncorrelated -- no spokes,
+# no pinwheel, just continuous random streaks.
+let draw_speed_lines = (sw:int sh:int):>void => {
+    if vis_boost_norm <=? SPEED_LINE_THRESHOLD {
+        return 0
+    }
+    let above:int = vis_boost_norm - SPEED_LINE_THRESHOLD
+    let intensity:int = (above << 16) // (FP_ONE - SPEED_LINE_THRESHOLD)
+    if intensity >? FP_ONE {
+        intensity = FP_ONE
+    }
+
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    GL_Ortho(q16_to_f64(0) q16_to_f64(sw * FP_ONE) q16_to_f64(sh * FP_ONE) q16_to_f64(0) q16_to_f64(0 - FP_ONE) q16_to_f64(FP_ONE))
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA)
+    GL_LineWidth(GL_F32_FromInt(2))
+
+    let cx_px:int = sw // 2
+    let cy_px:int = sh // 2
+    # fp_sqrt is just an integer sqrt; pass plain pixel^2 (no Q16 shift)
+    # so the result is also in pixels. Without this, max_r_px collapsed
+    # to ~2 px and every streak clustered at the screen center.
+    let max_r_px:int = fp_sqrt((cx_px * cx_px) + (cy_px * cy_px))
+
+    # Speed and per-streak brightness are constant -- we don't slow streaks
+    # down at lower intensity, we just have fewer of them alive. Density
+    # follows a squared curve so it ramps up slowly at first then fills in
+    # quickly toward top boost (closer to "exponential" feel than linear).
+    let rate:int = SPEED_LINE_RATE_Q
+    let peak_a:int = SPEED_LINE_PEAK_ALPHA_Q
+    let density:int = fp_mul(intensity intensity)
+    let active_count:int = (SPEED_LINES_N * density) // FP_ONE
+
+    # Per-frame jitter amplitude in raw pixels, still scaled by intensity
+    # so the shake reads as "going faster" rather than constant noise.
+    let shake_px:int = (SPEED_LINE_SHAKE_PX * intensity) // FP_ONE
+
+    glBegin(GL_LINES)
+    let i:int = 0
+    loop i <? SPEED_LINES_N {
+        let slot:int = SPEED_LINE_STATE + (i * SPEED_LINE_STRIDE)
+        let phase:int = __load__(slot) + rate
+        let angle_idx:int = __load__(slot + 8)
+        let r_seed:int = __load__(slot + 16)
+        # Lifetime wrap: respawn at a fresh random angle and origin. Roll
+        # over phase via subtraction so the spawn moment isn't quantized.
+        if phase >=? FP_ONE {
+            phase -= FP_ONE
+            angle_idx = xs_range(ANG_TURN)
+            r_seed = xs_range(FP_ONE)
+        }
+        __store__(phase slot)
+        __store__(angle_idx (slot + 8))
+        __store__(r_seed (slot + 16))
+
+        # Inactive slots still tick their state so when density grows they
+        # don't pop in mid-pulse -- they're already cycling through respawns.
+        if i >=? active_count {
+            i += 1
+            continue
+        }
+
+        let cos_a:int = cos_fp(angle_idx)
+        let sin_a:int = sin_fp(angle_idx)
+
+        # Distance in pixels from screen center to where this ray exits the
+        # screen rectangle: min(cx/|cos|, cy/|sin|).
+        let abs_cos:int = cos_a
+        if abs_cos <? 0 {
+            abs_cos = 0 - abs_cos
+        }
+        let abs_sin:int = sin_a
+        if abs_sin <? 0 {
+            abs_sin = 0 - abs_sin
+        }
+        let edge_r:int = max_r_px
+        if abs_cos >? 1024 {
+            let d:int = (cx_px * FP_ONE) // abs_cos
+            if d <? edge_r {
+                edge_r = d
+            }
+        }
+        if abs_sin >? 1024 {
+            let d:int = (cy_px * FP_ONE) // abs_sin
+            if d <? edge_r {
+                edge_r = d
+            }
+        }
+
+        # Origin sits anywhere along the ray (random per lifetime); end
+        # sits a little past the edge so the line truly exits the screen.
+        let start_r:int = (r_seed * edge_r) // FP_ONE
+        let end_r:int = edge_r + SPEED_LINE_OVERSHOOT_PX
+
+        let dx0:int = __signed_shr__(start_r * cos_a FP_SHIFT)
+        let dy0:int = __signed_shr__(start_r * sin_a FP_SHIFT)
+        let dx1:int = __signed_shr__(end_r * cos_a FP_SHIFT)
+        let dy1:int = __signed_shr__(end_r * sin_a FP_SHIFT)
+
+        # Per-streak per-frame translational jitter. Two independent sin
+        # phases give an apparently chaotic 2D wobble; both endpoints share
+        # the offset so the line translates without changing length.
+        let jx_phase:int = ((frame_count * 71) + (i * 197)) % ANG_TURN
+        let jy_phase:int = ((frame_count * 53) + (i * 311)) % ANG_TURN
+        let jx_q:int = sin_fp(jx_phase)
+        let jy_q:int = sin_fp(jy_phase)
+        let jx_px:int = __signed_shr__(jx_q * shake_px FP_SHIFT)
+        let jy_px:int = __signed_shr__(jy_q * shake_px FP_SHIFT)
+
+        # sin(pi * phase) -> alpha rises from 0, peaks mid-cycle, fades to 0.
+        let fade_q:int = sin_fp((phase * ANG_HALF_TURN) // FP_ONE)
+        let alpha_q:int = fp_mul(peak_a fade_q)
+        let alpha_f32:int = q16_to_f32(alpha_q)
+
+        # Trailing end (origin side) is transparent, leading end (screen
+        # edge side) carries the full alpha -- gives each streak a comet
+        # tail that reads as outward motion.
+        GL_Color4f(F32_ONE F32_ONE F32_ONE F32_ZERO)
+        GL_Vertex3f(GL_F32_FromInt(cx_px + dx0 + jx_px) GL_F32_FromInt(cy_px + dy0 + jy_px) F32_ZERO)
+        GL_Color4f(F32_ONE F32_ONE F32_ONE alpha_f32)
+        GL_Vertex3f(GL_F32_FromInt(cx_px + dx1 + jx_px) GL_F32_FromInt(cy_px + dy1 + jy_px) F32_ZERO)
+        i += 1
+    }
+    glEnd()
+
+    glDisable(GL_BLEND)
+    glEnable(GL_DEPTH_TEST)
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+    glPopMatrix()
+    return 0
+}
+
 # Hover bob offset along the surface up vector (visual only; physics and
 # camera ignore it). Recomputed once per draw_craft via update_bob() and
 # baked into bob_off_x/y/z so every craft_emit call shares the same offset.
@@ -2047,6 +2250,7 @@ let render_scene = (sw:int sh:int):>void => {
     draw_sphere()
     draw_craft()
     draw_trail()
+    draw_speed_lines(sw sh)
     return 0
 }
 
@@ -2108,6 +2312,7 @@ let main = ():>int => {
     glDisable(GL_CULL_FACE)
 
     reset_craft()
+    speed_lines_init()
 
     loop running not=? 0 {
         let has_event:int = SDL_PollEvent(event)

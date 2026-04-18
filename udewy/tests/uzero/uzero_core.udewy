@@ -176,6 +176,48 @@ let atan2_fp = (y:int x:int):>int => {
     return (lo + hi) // 2
 }
 
+# ---------- xorshift128+ PRNG ------------------------------------------------
+# Vigna's xorshift128+ (https://prng.di.unimi.it/xorshift128plus.c).
+# Single global stream with a 2^128 - 1 period. Call xs_seed() once at
+# startup; xs_next() returns a 64-bit pseudo-random value. The seed is
+# expanded into the two state words via a SplitMix64 step so a small/zero
+# input still produces well-distributed state.
+let xs_state0:int = 0x9E3779B97F4A7C15
+let xs_state1:int = 0xBF58476D1CE4E5B9
+
+let xs_seed = (seed:int):>void => {
+    let z:int = seed + 0x9E3779B97F4A7C15
+    z = (z xor (z >> 30)) * 0xBF58476D1CE4E5B9
+    z = (z xor (z >> 27)) * 0x94D049BB133111EB
+    xs_state0 = z xor (z >> 31)
+    if xs_state0 =? 0 {
+        xs_state0 = 1
+    }
+    z = xs_state0 + 0x9E3779B97F4A7C15
+    z = (z xor (z >> 30)) * 0xBF58476D1CE4E5B9
+    z = (z xor (z >> 27)) * 0x94D049BB133111EB
+    xs_state1 = z xor (z >> 31)
+    if xs_state1 =? 0 {
+        xs_state1 = 1
+    }
+    return 0
+}
+
+let xs_next = ():>int => {
+    let x:int = xs_state0
+    let y:int = xs_state1
+    xs_state0 = y
+    x = x xor (x << 23)
+    xs_state1 = x xor y xor (x >> 17) xor (y >> 26)
+    return xs_state1 + y
+}
+
+# Pseudo-random int in [0, n). Caller supplies n > 0.
+let xs_range = (n:int):>int => {
+    let r:int = xs_next() >> 1   # drop sign bit so r is non-negative
+    return r % n
+}
+
 # ---------- vec3 helpers (Q16 components) ------------------------------------
 
 let vec3_mag = (x:int y:int z:int):>int => {
