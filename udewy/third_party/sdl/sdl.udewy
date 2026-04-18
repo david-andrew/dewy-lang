@@ -43,8 +43,17 @@ const GL_LEQUAL:int = 0x0203
 const GL_MODELVIEW:int = 0x1700
 const GL_PROJECTION:int = 0x1701
 const GL_LINES:int = 0x0001
+const GL_LINE_STRIP:int = 0x0003
 const GL_TRIANGLES:int = 0x0004
+const GL_TRIANGLE_STRIP:int = 0x0005
 const GL_QUADS:int = 0x0007
+const GL_QUAD_STRIP:int = 0x0008
+const GL_BLEND:int = 0x0BE2
+const GL_SRC_ALPHA:int = 0x0302
+const GL_ONE_MINUS_SRC_ALPHA:int = 0x0303
+const GL_ONE:int = 0x0001
+const GL_ZERO:int = 0x0000
+const GL_LINE_SMOOTH:int = 0x0B20
 
 let SDL_Init = (flags:int):>int => extern
 let SDL_SetMainReady = ():>void => extern
@@ -105,9 +114,14 @@ let glTranslatef = (x:int y:int z:int):>void => extern
 let glRotatef = (angle:int x:int y:int z:int):>void => extern
 let glScalef = (x:int y:int z:int):>void => extern
 let glColor3f = (r:int g:int b:int):>void => extern
+let glColor4f = (r:int g:int b:int a:int):>void => extern
 let glVertex3f = (x:int y:int z:int):>void => extern
 let glLoadMatrixf = (m:int):>void => extern
 let glMultMatrixf = (m:int):>void => extern
+let glBlendFunc = (sfactor:int dfactor:int):>void => extern
+let glDepthMask = (flag:int):>void => extern
+let glLineWidth = (width:int):>void => extern
+let glPointSize = (size:int):>void => extern
 
 let sdl_icon_endian_mode:int = 0
 
@@ -242,7 +256,22 @@ let GL_Color3f = (r:int g:int b:int):>void => {
     return 0
 }
 
+let GL_Color4f = (r:int g:int b:int a:int):>void => {
+    __call_extern_xmm_mixed_4__(glColor4f 1 r 1 g 1 b 1 a)
+    return 0
+}
+
 let GL_Vertex3f = (x:int y:int z:int):>void => {
     __call_extern_xmm_mixed_3__(glVertex3f 1 x 1 y 1 z)
+    return 0
+}
+
+let GL_LineWidth = (width:int):>void => {
+    __call_extern_xmm_mixed_1__(glLineWidth 1 width)
+    return 0
+}
+
+let GL_PointSize = (size:int):>void => {
+    __call_extern_xmm_mixed_1__(glPointSize 1 size)
     return 0
 }
