@@ -55,6 +55,18 @@ const GL_ONE:int = 0x0001
 const GL_ZERO:int = 0x0000
 const GL_LINE_SMOOTH:int = 0x0B20
 
+const GL_TEXTURE_2D:int = 0x0DE1
+const GL_TEXTURE_MIN_FILTER:int = 0x2801
+const GL_TEXTURE_MAG_FILTER:int = 0x2800
+const GL_TEXTURE_WRAP_S:int = 0x2802
+const GL_TEXTURE_WRAP_T:int = 0x2803
+const GL_NEAREST:int = 0x2600
+const GL_LINEAR:int = 0x2601
+const GL_REPEAT:int = 0x2901
+const GL_RGB:int = 0x1907
+const GL_RGBA:int = 0x1908
+const GL_UNSIGNED_BYTE:int = 0x1401
+
 let SDL_Init = (flags:int):>int => extern
 let SDL_SetMainReady = ():>void => extern
 let SDL_Quit = ():>void => extern
@@ -122,6 +134,12 @@ let glBlendFunc = (sfactor:int dfactor:int):>void => extern
 let glDepthMask = (flag:int):>void => extern
 let glLineWidth = (width:int):>void => extern
 let glPointSize = (size:int):>void => extern
+let glGenTextures = (n:int textures:int):>void => extern
+let glBindTexture = (target:int texture:int):>void => extern
+let glTexImage2D = (target:int level:int internalformat:int width:int height:int border:int format:int type:int pixels:int):>void => extern
+let glTexParameteri = (target:int pname:int param:int):>void => extern
+let glTexCoord2f = (s:int t:int):>void => extern
+let glPixelStorei = (pname:int param:int):>void => extern
 
 let sdl_icon_endian_mode:int = 0
 
@@ -273,5 +291,10 @@ let GL_LineWidth = (width:int):>void => {
 
 let GL_PointSize = (size:int):>void => {
     __call_extern_xmm_mixed_1__(glPointSize 1 size)
+    return 0
+}
+
+let GL_TexCoord2f = (s:int t:int):>void => {
+    __call_extern_xmm_mixed_2__(glTexCoord2f 1 s 1 t)
     return 0
 }

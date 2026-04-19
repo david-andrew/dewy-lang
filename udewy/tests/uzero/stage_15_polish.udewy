@@ -48,9 +48,9 @@ const SDL_SCANCODE_R:int = 21
 # ---------- Physics ---------------------------------------------------------
 
 const HOVER_HEIGHT:int = 98304           # 1.5 m above the surface
-const TOP_SPEED:int = 229376             # 3.5 m/frame (= old boost ceiling)
-const BOOST_BONUS:int = 98304            # +1.5 m/frame -> 5.0 m/frame boost ceiling
-const THRUST_ACCEL:int = 1638
+const TOP_SPEED:int = 500000 #229376             # 3.5 m/frame (= old boost ceiling)
+const BOOST_BONUS:int = 400000 #98304            # +1.5 m/frame -> 5.0 m/frame boost ceiling
+const THRUST_ACCEL:int = 4000
 const BRAKE_DECEL:int = 3277
 const STRAFE_RATE:int = 32768
 
@@ -186,6 +186,21 @@ const MIN_CAM_CLEAR:int = 131072         # 2 m  minimum cam clearance over surfa
 # visible mesh stops cleanly at the inner wall face instead of clipping.
 const CRAFT_HALF_W:int = 163840          # 2.5 m (matches draw_craft wing_x)
 
+# ---------- Checker tiling --------------------------------------------------
+# Every track surface is tessellated so that one checker cell measures
+# roughly CHECKER_TILE_M metres along the surface, so the apparent rate of
+# tiles streaming past the camera is independent of which obstacle you're
+# on. The per-surface *_Z_SEGMENTS / *_W_SEGMENTS / *_THETA_SEGMENTS
+# below are all chosen as length / CHECKER_TILE rounded to an integer
+# (arc length for the curved ones). The flat ground uses the same 5 m
+# tile size but renders as a single huge GL_REPEAT-textured quad rather
+# than per-tile quads (see GROUND_TEX_PIXELS / draw_ground).
+const CHECKER_TILE:int = 327680          # 5 m -- target tile edge for course surfaces
+# Sphere is a special case: at R=300 m one full longitude is 1.9 km, so
+# a 5 m tile would mean ~377 lon bands. Use a 4x coarser tile (~20 m) so
+# the existing 48 lat / 96 lon bands stay both performant and visually
+# consistent with each other.
+
 # ---------- Ramp (z in [-50, -80]) ------------------------------------------
 
 const Z_RAMP_NEAR:int = -3276800         # -50 m
@@ -196,8 +211,8 @@ const RAMP_HALF_W:int = 983040           # 15 m
 const RAMP_TAN:int = 32768               # 0.5  (15/30)
 const RAMP_SIN:int = 29314               # sin(atan(0.5)) = 0.4472
 const RAMP_COS:int = 58622               # cos(atan(0.5)) = 0.8944
-const RAMP_Z_SEGMENTS:int = 12
-const RAMP_W_SEGMENTS:int = 6
+const RAMP_Z_SEGMENTS:int = 6            # 30 m / 5 m
+const RAMP_W_SEGMENTS:int = 6            # 30 m / 5 m
 
 # ---------- Loop (z in [-200, -260]) ----------------------------------------
 
@@ -207,8 +222,8 @@ const LOOP_ZC:int = -15073280            # -230 m loop center z (between seams)
 const LOOP_W:int = 2621440               # 40 m  track width and corkscrew offset per revolution
 const LOOP_HALF_W:int = 1310720          # 20 m
 const LOOP_MARGIN:int = 196608           # 3 m   how close to R counts as "on loop"
-const LOOP_PHI_SEGMENTS:int = 64
-const LOOP_W_SEGMENTS:int = 8
+const LOOP_PHI_SEGMENTS:int = 75         # 2*pi*60 m arc / 5 m ~= 75
+const LOOP_W_SEGMENTS:int = 8            # 40 m / 5 m
 
 # ---------- Hills (z in [-400, -880]) ---------------------------------------
 
@@ -220,8 +235,8 @@ const Z_HILL_START:int = -26214400       # -400 m near seam
 const Z_HILL_END:int = -57671680         # -880 m far seam (8 wavelengths)
 const HILL_LENGTH:int = 31457280         # 480 m
 const HILL_HALF_W:int = 6553600          # 100 m  lateral half-width
-const HILL_Z_SEGMENTS:int = 128
-const HILL_W_SEGMENTS:int = 20
+const HILL_Z_SEGMENTS:int = 96           # 480 m / 5 m
+const HILL_W_SEGMENTS:int = 40           # 200 m / 5 m
 
 # ---------- Halfpipe (z in [-1000, -1300]) ----------------------------------
 
@@ -230,8 +245,8 @@ const Z_PIPE_START:int = -65536000       # -1000 m near seam
 const Z_PIPE_END:int = -85196800         # -1300 m far seam
 const PIPE_LEN:int = 19660800            # 300 m
 const PIPE_MARGIN:int = 196608           # 3 m
-const PIPE_Z_SEGMENTS:int = 60
-const PIPE_THETA_SEGMENTS:int = 32
+const PIPE_Z_SEGMENTS:int = 60           # 300 m / 5 m
+const PIPE_THETA_SEGMENTS:int = 19       # pi*30 m arc / 5 m ~= 19
 
 # ---------- Corkscrew (z in [-1450, -2250]) ---------------------------------
 
@@ -242,8 +257,20 @@ const CORK_Z_START:int = -95027200       # -1450 m
 const CORK_Z_END:int = -147456000        # -2250 m
 const CORK_LEN:int = 52428800            # 800 m
 const CORK_Y_PEAK:int = 6553600          # 100 m centerline rise at theta = pi
-const CORK_Z_SEGMENTS:int = 256
-const CORK_W_SEGMENTS:int = 16
+const CORK_Z_SEGMENTS:int = 160          # 800 m / 5 m
+const CORK_W_SEGMENTS:int = 20           # 100 m / 5 m
+
+# Perpendicular reach for surface_corkscrew. The strip is a rotating ribbon,
+# so a craft sitting "next to" or "above" the strip can fall inside the
+# strip's (z, w) projection without being anywhere near its surface plane.
+# Without a perp gate the magnet snap will yank the craft tens of metres
+# back to the strip. Claim the position only when its signed distance
+# along the surface normal lies in [-CORK_REACH, HOVER_HEIGHT + CORK_REACH]:
+# slightly behind the strip is OK (snap recovery, slight bounce), and we
+# extend a bit past the airborne threshold so the airborne -> grounded
+# transition can re-grab smoothly. Beyond that the corkscrew releases the
+# craft and surface_flat (or whatever else is in range) takes over.
+const CORK_REACH:int = 393216            # 6 m
 
 # ---------- Walls (z in [-2400, -2700]) -------------------------------------
 
@@ -253,7 +280,7 @@ const WALL_THICKNESS:int = 65536         #  1 m  visual slab thickness
 const Z_WALL_START:int = -157286400      # -2400 m
 const Z_WALL_END:int = -176947200        # -2700 m
 const WALL_LENGTH:int = 19660800         # 300 m
-const WALL_Z_SEGMENTS:int = 30
+const WALL_Z_SEGMENTS:int = 60           # 300 m / 5 m
 
 # Tangent friction while in contact: cvz *= (1 - WALL_FRICTION) per frame.
 const WALL_FRICTION:int = 2621           # 0.04 (Q16)
@@ -268,8 +295,8 @@ const SPHERE_CZ:int = -235929600         # -3600 m
 const SPHERE_R:int = 19660800            # 300 m
 const SPHERE_REACH:int = 1966080         # 30 m  shell-proximity gate for surface query (scaled)
 const SPHERE_HOLE_COS:int = 46341        # cos(45 deg) -- direction-z above this is in the hole
-const SPHERE_LAT_BANDS:int = 48          # ~3.75 deg / ~20 m of arc per band
-const SPHERE_LON_BANDS:int = 96
+const SPHERE_LAT_BANDS:int = 48          # pi*300 m arc / 20 m -- 4 * CHECKER_TILE
+const SPHERE_LON_BANDS:int = 96          # 2*pi*300 m equator arc / 20 m
 
 # ---------- Sphere inner-access ramp (centered x=0, leads INTO the hole) ----
 # Lip lands exactly at the sphere's +Z polar point (0, 310, -3300), which is
@@ -283,8 +310,8 @@ const INNER_RAMP_HALF_W:int = 983040     # 15 m
 const INNER_RAMP_TAN:int = 33861         # 310/600 = 0.5167
 const INNER_RAMP_SIN:int = 30084         # sin(atan(0.5167)) ~ 0.459
 const INNER_RAMP_COS:int = 58238         # cos(atan(0.5167)) ~ 0.889
-const INNER_RAMP_Z_SEGMENTS:int = 80
-const INNER_RAMP_W_SEGMENTS:int = 6
+const INNER_RAMP_Z_SEGMENTS:int = 120    # 600 m / 5 m
+const INNER_RAMP_W_SEGMENTS:int = 6      # 30 m / 5 m
 
 # ---------- Sphere outer-access ramp (centered x=+40, lands on upper +Z face)
 # Lip at (40, 531, -3401) sits on the sphere upper hemisphere; the sphere's
@@ -306,8 +333,8 @@ const OUTER_RAMP_HALF_W:int = 983040     # 15 m
 const OUTER_RAMP_TAN:int = 58982         # 0.900   (= tan(42 deg) approx 0.9004)
 const OUTER_RAMP_SIN:int = 43837         # sin(atan(0.9)) = 0.6687
 const OUTER_RAMP_COS:int = 48706         # cos(atan(0.9)) = 0.7431
-const OUTER_RAMP_Z_SEGMENTS:int = 80
-const OUTER_RAMP_W_SEGMENTS:int = 6
+const OUTER_RAMP_Z_SEGMENTS:int = 120    # 600 m / 5 m
+const OUTER_RAMP_W_SEGMENTS:int = 6      # 30 m / 5 m
 
 # ---------- Obstacle colours ------------------------------------------------
 
@@ -402,8 +429,13 @@ const COL_SPHERE_RIM_B:int = 6553
 
 # ---------- Ground -----------------------------------------------------------
 
-const TILE_SIZE:int = 3276800            # 50 m  (coarser than per-stage to keep tri count sane on a ~3.9 km course)
-const HALF_TILES:int = 100               # +/- 5000 m -> 200x200 = 40000 quads, covers full course + 3x sphere
+# Ground is a single huge textured quad rather than a per-tile mesh: a 2x2
+# RGBA texture in GL_NEAREST + GL_REPEAT mode renders the whole +/-5 km
+# checker plane as 4 vertices. tex_coord units of 1 = 2 texels = 2 tiles
+# = 2 * CHECKER_TILE; so tex_uv_per_metre = 1 / (2 * 5 m) = 0.1 / m.
+const GROUND_HALF_EXTENT:int = 327680000 # +/- 5000 m
+const GROUND_TEX_UV_DIVISOR:int = 10     # world metres per tex_uv unit (1 uv = 2 tiles)
+const GROUND_TEX_BYTES:int = 16          # 2x2 RGBA8
 const GROUND_Y:int = 0
 
 const COL_TILE_A_R:int = 8519
@@ -486,6 +518,11 @@ let was_airborne:int = 1
 const TRAIL_BUF:int = __static_alloca__(TRAIL_BUF_BYTES)
 let trail_head:int = 0
 let trail_count:int = 0
+
+# Ground checker texture. Static 2x2 RGBA pixel block + 8-byte slot for
+# the GL texture id (written by glGenTextures, only the low 32 bits used).
+const GROUND_TEX_PIXELS:int = __static_alloca__(GROUND_TEX_BYTES)
+const GROUND_TEX_ID_SLOT:int = __static_alloca__(8)
 
 # Camera basis (further smoothed, used to build the view matrix).
 let cam_x:int = 0
@@ -644,8 +681,15 @@ let surface_corkscrew = (x:int y:int z:int):>int => {
         let y_centerline:int = (CORK_Y_PEAK - fp_mul(CORK_Y_PEAK cth)) // 2
         let rel_x:int = x - CORK_X_CENTER
         let rel_y:int = y - y_centerline
+        # Decompose rel into the strip basis: w along the strip tangent
+        # (cth, sth), perp along the strip normal (-sth, cth). The (z, w)
+        # gate alone would claim any height since the strip rotates -- a
+        # craft 50 m above (or beside) the strip can still project to a
+        # valid w. The perp gate ensures the craft is actually near the
+        # strip's surface plane before we let the magnet snap to it.
         let w:int = fp_mul(rel_x cth) + fp_mul(rel_y sth)
-        if (w >=? (0 - CORK_HALF_W)) and (w <=? CORK_HALF_W) {
+        let perp:int = fp_mul(rel_y cth) - fp_mul(rel_x sth)
+        if (w >=? (0 - CORK_HALF_W)) and (w <=? CORK_HALF_W) and (perp >=? (0 - CORK_REACH)) and (perp <=? (HOVER_HEIGHT + CORK_REACH)) {
             surf_x = CORK_X_CENTER + fp_mul(w cth)
             surf_y = y_centerline + fp_mul(w sth)
             surf_z = z
@@ -1384,35 +1428,74 @@ let apply_camera = ():>void => {
     return 0
 }
 
+# Convert a Q16 color channel in [0, FP_ONE] to an 8-bit byte in [0, 255]
+# for the texture upload. Saturates outside the unit range.
+let q16_to_u8 = (q:int):>int => {
+    let b:int = (q * 255) >> FP_SHIFT
+    if b <? 0 { b = 0 }
+    if b >? 255 { b = 255 }
+    return b
+}
+
+let ground_tex_write_pixel = (offset:int r:int g:int b:int):>void => {
+    __store_u8__(q16_to_u8(r) GROUND_TEX_PIXELS + offset)
+    __store_u8__(q16_to_u8(g) GROUND_TEX_PIXELS + offset + 1)
+    __store_u8__(q16_to_u8(b) GROUND_TEX_PIXELS + offset + 2)
+    __store_u8__(255 GROUND_TEX_PIXELS + offset + 3)
+    return 0
+}
+
+# One-time GL setup for the ground texture. Builds the 2x2 RGBA checker
+# from the existing COL_TILE_A/B constants, uploads it with NEAREST/REPEAT
+# so it tiles infinitely with no filtering blur, and stashes the texture
+# id in GROUND_TEX_ID_SLOT for draw_ground to bind every frame.
+# Pixel layout (row-major): (B, A) / (A, B) so that world-tile (i, j) with
+# (i + j) even shows COL_TILE_B (matches the prior per-quad pattern).
+let ground_texture_init = ():>void => {
+    ground_tex_write_pixel(0  COL_TILE_B_R COL_TILE_B_G COL_TILE_B_B)
+    ground_tex_write_pixel(4  COL_TILE_A_R COL_TILE_A_G COL_TILE_A_B)
+    ground_tex_write_pixel(8  COL_TILE_A_R COL_TILE_A_G COL_TILE_A_B)
+    ground_tex_write_pixel(12 COL_TILE_B_R COL_TILE_B_G COL_TILE_B_B)
+    glPixelStorei(0x0CF5 1)  # GL_UNPACK_ALIGNMENT = 1 (defensive; RGBA rows are 8 bytes anyway)
+    glGenTextures(1 GROUND_TEX_ID_SLOT)
+    let tex_id:int = __load_u32__(GROUND_TEX_ID_SLOT)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_WRAP_S GL_REPEAT)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_WRAP_T GL_REPEAT)
+    glTexImage2D(GL_TEXTURE_2D 0 GL_RGBA 2 2 0 GL_RGBA GL_UNSIGNED_BYTE GROUND_TEX_PIXELS)
+    return 0
+}
+
+# One textured quad covering the full +/-5 km ground plane. Tex coords
+# scale with world position so each 5 m of world maps to half a tex_uv
+# unit (one texel under GL_NEAREST), giving 5 m checker cells regardless
+# of the quad size.
 let draw_ground = ():>void => {
-    let i:int = 0 - HALF_TILES
-    loop i <? HALF_TILES {
-        let j:int = 0 - HALF_TILES
-        loop j <? HALF_TILES {
-            let x0:int = i * TILE_SIZE
-            let x1:int = (i + 1) * TILE_SIZE
-            let z0:int = j * TILE_SIZE
-            let z1:int = (j + 1) * TILE_SIZE
-            let dark:int = (i + j) and 1
-            let r:int = COL_TILE_A_R
-            let g:int = COL_TILE_A_G
-            let b:int = COL_TILE_A_B
-            if dark =? 0 {
-                r = COL_TILE_B_R
-                g = COL_TILE_B_G
-                b = COL_TILE_B_B
-            }
-            glBegin(GL_QUADS)
-            GL_Color3f(q16_to_f32(r) q16_to_f32(g) q16_to_f32(b))
-            world_v3(x0 GROUND_Y z0)
-            world_v3(x1 GROUND_Y z0)
-            world_v3(x1 GROUND_Y z1)
-            world_v3(x0 GROUND_Y z1)
-            glEnd()
-            j += 1
-        }
-        i += 1
-    }
+    let half_q16:int = GROUND_HALF_EXTENT
+    let tex_q16:int = half_q16 // GROUND_TEX_UV_DIVISOR
+    let pos_xyz:int = q16_to_f32(half_q16)
+    let neg_xyz:int = q16_to_f32(0 - half_q16)
+    let pos_uv:int = q16_to_f32(tex_q16)
+    let neg_uv:int = q16_to_f32(0 - tex_q16)
+    let y:int = q16_to_f32(GROUND_Y)
+    let tex_id:int = __load_u32__(GROUND_TEX_ID_SLOT)
+
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    glBegin(GL_QUADS)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
+    GL_TexCoord2f(neg_uv neg_uv)
+    GL_Vertex3f(neg_xyz y neg_xyz)
+    GL_TexCoord2f(pos_uv neg_uv)
+    GL_Vertex3f(pos_xyz y neg_xyz)
+    GL_TexCoord2f(pos_uv pos_uv)
+    GL_Vertex3f(pos_xyz y pos_xyz)
+    GL_TexCoord2f(neg_uv pos_uv)
+    GL_Vertex3f(neg_xyz y pos_xyz)
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
     return 0
 }
 
@@ -2794,6 +2877,7 @@ let main = ():>int => {
     glEnable(GL_DEPTH_TEST)
     glDepthFunc(GL_LEQUAL)
     glDisable(GL_CULL_FACE)
+    ground_texture_init()
 
     reset_craft()
     speed_lines_init()
