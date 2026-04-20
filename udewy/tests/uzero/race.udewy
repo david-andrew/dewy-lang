@@ -1,0 +1,3651 @@
+import p"./uzero_core.udewy"
+
+# ============================================================================
+# uZero Race: a complete one-race game.
+#
+# Title screen -> single race on a closed circuit -> results / game over.
+# Player + 30 AI competitors. Boost is finite (refilled only on recharge
+# strips); wall hits dock the shared meter; running into a wall at zero
+# meter explodes the player and triggers game over.
+#
+# Controls: WASD/arrows + Q/E strafe, Space = boost (in race) or start
+# (in title/results), R = restart (game over) / respawn-mid-race,
+# F = toggle fps counter, Esc = quit.
+# ============================================================================
+
+const SDL_SCANCODE_E:int = 8
+const SDL_SCANCODE_F:int = 9
+const SDL_SCANCODE_Q:int = 20
+const SDL_SCANCODE_R:int = 21
+
+# ---------- Game state ------------------------------------------------------
+
+const STATE_TITLE:int = 0
+const STATE_RACE:int = 1
+const STATE_RESULTS:int = 2
+const STATE_GAMEOVER:int = 3
+
+const TOTAL_LAPS:int = 3
+
+# ---------- Physics constants -----------------------------------------------
+
+const HOVER_HEIGHT:int = 98304           # 1.5 m above the surface
+const TOP_SPEED:int = 500000             # 7.6 m/frame
+const BOOST_BONUS:int = 400000           # 6.1 m/frame extra cap during boost
+const THRUST_ACCEL:int = 4000
+const BRAKE_DECEL:int = 3277
+const STRAFE_RATE:int = 32768
+
+const BOOST_IMPULSE:int = 65536
+const BOOST_DURATION:int = 90
+const ENERGY_FULL:int = 65536            # FP_ONE
+const BOOST_COST_Q:int = 8192            # 0.125 of bar (1/8) per boost
+
+# Boost overcap reservoir bleed rates (matches stage 15 polish feel).
+const BOOST_OVERCAP_TURN_DECAY:int = 4500
+const BOOST_OVERCAP_STRAIGHT_DECAY:int = 800
+
+const STEER_BASE:int = 12
+const STEER_MIN:int = 8
+
+const LATERAL_GRIP:int = 9830
+const DRAG_COAST:int = 100
+const DRAG_THRUST:int = 327
+
+const SNAP_ALPHA:int = 39322             # 0.60
+const AIR_GAP:int = 262144               # 4 m above hover target = airborne
+const GRAVITY:int = 6000
+const SLOPE_GRAVITY:int = 300
+const UP_ALPHA_AIR:int = 6553
+
+# ---------- Energy / damage rules -------------------------------------------
+
+const WALL_HIT_INITIAL:int = 1311        # ~0.02 of bar on the frame contact begins
+const WALL_DRAIN:int = 327               # ~0.005 of bar per frame while still scraping
+const RECHARGE_RATE:int = 656            # ~0.01 per frame on recharge strip
+const PAD_BOOST_OVERCAP:int = 200000     # bonus overcap when crossing a boost pad
+const PAD_IMPULSE:int = 32768            # forward impulse per frame on pad
+
+# Wall-hit detection: lateral distance past the half_width (Q16 m) before
+# the slab clamp fires. The clamp pushes the car back to the lateral edge
+# and zeros its outward velocity component (analogous to stage_15
+# wall_collide). Below the threshold, scraping the wall costs nothing.
+const WALL_SCRAPE_THRESHOLD:int = 0      # any penetration counts
+
+# ---------- Camera ----------------------------------------------------------
+
+const CAM_BACK:int = 983040              # 15 m behind craft
+const CAM_LIFT:int = 262144              # 4 m above craft
+const POS_ALPHA:int = 7864               # 0.12
+const ORIENT_ALPHA:int = 6553            # 0.10
+const FOV_PUNCH:int = 26214
+
+const MIN_CAM_CLEAR:int = 131072         # 2 m
+const CRAFT_HALF_W:int = 163840          # 2.5 m
+
+# ---------- Visual polish ---------------------------------------------------
+
+const RAW_PER_RAD:int = 163
+const BANK_GAIN:int = 10
+const BANK_MAX:int = 60
+const BANK_ALPHA:int = 11796
+
+const BOB_AMP:int = 19660
+const BOB_FREQ_NUM:int = 24
+const BOB_FREQ_DEN:int = 1
+
+const TRAIL_LEN:int = 36
+const TRAIL_STRIDE:int = 56
+const TRAIL_BUF_BYTES:int = 2016
+const TRAIL_HALF_W:int = 49152
+const TRAIL_OFFSET_BACK:int = 131072
+const TRAIL_OFFSET_UP:int = 13107
+
+const SPARK_MAX:int = 192
+const SPARK_STRIDE:int = 56
+const SPARK_BUF_BYTES:int = 10752
+const SPARK_LIFE_DECAY:int = 2185
+const SPARK_BASE_SPEED:int = 65536
+const SPARK_SPEED_VAR:int = 65536
+const SPARK_JITTER:int = 19660
+const SPARK_UP_BIAS:int = 9830
+const SPARK_GRAVITY:int = 1310
+const SPARK_TAIL_Q:int = 49152
+const SPARK_IMPULSE_THRESHOLD:int = 6553
+const SPARK_IMPULSE_PER_PARTICLE:int = 16384
+const SPARK_MAX_BURST:int = 24
+
+# ---------- Speed lines -----------------------------------------------------
+
+const SPEED_LINES_N:int = 0x100
+const SPEED_LINE_RATE_Q:int = 4915        # 0.075 / frame at full intensity (1 / lifetime)
+const SPEED_LINE_THRESHOLD:int = 25000    # 0.50 boost_norm where lines begin
+const SPEED_LINE_PEAK_ALPHA_Q:int = 52428 # 0.80 alpha at full intensity
+const SPEED_LINE_SHAKE_PX:int = 4
+const SPEED_LINE_OVERSHOOT_PX:int = 24
+
+const SPEED_LINE_STRIDE:int = 0x18
+const SPEED_LINE_STATE_BYTES:int = 0x1E00 # SPEED_LINES_N * SPEED_LINE_STRIDE
+
+# ---------- HUD -------------------------------------------------------------
+
+const HUD_MARGIN_PX:int = 20
+const HUD_BAR_W_PX:int = 220
+const HUD_BAR_H_PX:int = 18
+const HUD_BAR_BORDER_PX:int = 2
+const HUD_DIGIT_W_PX:int = 30
+const HUD_DIGIT_H_PX:int = 54
+const HUD_DIGIT_GAP_PX:int = 6
+const HUD_SEG_THICK_PX:int = 6
+const HUD_KMH_PER_FRAME:int = 216
+
+# Lap counter (top-center) -- bigger than the speedo so it reads at a glance.
+const HUD_LAP_DIGIT_W_PX:int = 36
+const HUD_LAP_DIGIT_H_PX:int = 64
+const HUD_LAP_DIGIT_GAP_PX:int = 8
+const HUD_LAP_SEG_THICK_PX:int = 7
+
+# Position counter (top-left, above FPS).
+const HUD_POS_DIGIT_W_PX:int = 18
+const HUD_POS_DIGIT_H_PX:int = 30
+const HUD_POS_DIGIT_GAP_PX:int = 4
+const HUD_POS_SEG_THICK_PX:int = 4
+
+const SHOW_FPS_DEFAULT:int = 1
+const HUD_FPS_DIGIT_W_PX:int = 14
+const HUD_FPS_DIGIT_H_PX:int = 24
+const HUD_FPS_DIGIT_GAP_PX:int = 3
+const HUD_FPS_SEG_THICK_PX:int = 3
+const HUD_FPS_SAMPLE_FRAMES:int = 30
+
+# ---------- Sky / colors ----------------------------------------------------
+
+const COL_SKY_R:int = 4915
+const COL_SKY_G:int = 7864
+const COL_SKY_B:int = 13107
+
+const COL_GROUND_A_R:int = 6553
+const COL_GROUND_A_G:int = 9830
+const COL_GROUND_A_B:int = 13107
+const COL_GROUND_B_R:int = 9830
+const COL_GROUND_B_G:int = 13107
+const COL_GROUND_B_B:int = 19660
+
+const COL_TRACK_A_R:int = 16384
+const COL_TRACK_A_G:int = 19660
+const COL_TRACK_A_B:int = 26214
+const COL_TRACK_B_R:int = 26214
+const COL_TRACK_B_G:int = 32768
+const COL_TRACK_B_B:int = 39321
+
+const COL_BOOST_A_R:int = 65535
+const COL_BOOST_A_G:int = 32768
+const COL_BOOST_A_B:int = 6553
+const COL_BOOST_B_R:int = 65535
+const COL_BOOST_B_G:int = 13107
+const COL_BOOST_B_B:int = 0
+
+const COL_RECHARGE_A_R:int = 13107
+const COL_RECHARGE_A_G:int = 58982
+const COL_RECHARGE_A_B:int = 19660
+const COL_RECHARGE_B_R:int = 6553
+const COL_RECHARGE_B_G:int = 39321
+const COL_RECHARGE_B_B:int = 13107
+
+const COL_WALL_A_R:int = 39321
+const COL_WALL_A_G:int = 13107
+const COL_WALL_A_B:int = 13107
+const COL_WALL_B_R:int = 52428
+const COL_WALL_B_G:int = 19660
+const COL_WALL_B_B:int = 19660
+
+const COL_GRID_A_R:int = 60293
+const COL_GRID_A_G:int = 60293
+const COL_GRID_A_B:int = 60293
+const COL_GRID_B_R:int = 13107
+const COL_GRID_B_G:int = 13107
+const COL_GRID_B_B:int = 13107
+
+# Per-feature surface tints. Same checker tile size as SURF_NORMAL but
+# distinct colors so the player can read which feature they're on at a
+# glance.
+const COL_LOOP_A_R:int = 26214           # purple
+const COL_LOOP_A_G:int = 13107
+const COL_LOOP_A_B:int = 39321
+const COL_LOOP_B_R:int = 39321
+const COL_LOOP_B_G:int = 19660
+const COL_LOOP_B_B:int = 52428
+
+const COL_CORK_A_R:int = 52428           # pink / magenta
+const COL_CORK_A_G:int = 19660
+const COL_CORK_A_B:int = 26214
+const COL_CORK_B_R:int = 58982
+const COL_CORK_B_G:int = 32768
+const COL_CORK_B_B:int = 39321
+
+const COL_RAMP_A_R:int = 58982           # warm yellow / amber
+const COL_RAMP_A_G:int = 39321
+const COL_RAMP_A_B:int = 6553
+const COL_RAMP_B_R:int = 39321
+const COL_RAMP_B_G:int = 26214
+const COL_RAMP_B_B:int = 3276
+
+# ---------- Track -----------------------------------------------------------
+
+# Surface kind tags. Used both for surface lookup (recharge / boost effects)
+# and to pick the texture binding at draw time. Kinds 4..6 only affect the
+# visual texture binding; their physics behavior is identical to SURF_NORMAL.
+const SURF_NORMAL:int = 0
+const SURF_BOOST:int = 1
+const SURF_RECHARGE:int = 2
+const SURF_GRID:int = 3                  # start/finish grid stripe
+const SURF_LOOP:int = 4                  # vertical loop tint (purple)
+const SURF_CORK:int = 5                  # corkscrew tint (pink)
+const SURF_RAMP:int = 6                  # ramps / hills tint (amber)
+const SURF_WALL_HEIGHT:int = 196608      # 3 m -- visible side wall along track edges
+
+# Lateral bailout: any probe more than this far off the side of the track
+# (beyond surf_half_w) is treated as "fully off the surface" -- physics
+# skips the wall push-back, damage, and downward snap so the craft can
+# fly free in space rather than being yanked sideways onto the ribbon.
+const OFF_TRACK_LAT:int = 1966080        # 30 m
+
+const NUM_WAYPOINTS:int = 512            # ring buffer of track waypoints
+const WP_STRIDE:int = 96                 # 12 q16 fields per waypoint
+const WP_BUF_BYTES:int = 49152
+
+const CHECKER_TILE:int = 327680          # 5 m target tile edge
+const GROUND_HALF_EXTENT:int = 327680000 # +/- 5000 m
+const GROUND_TEX_UV_DIVISOR:int = 10
+const GROUND_TEX_BYTES:int = 16
+const GROUND_Y:int = -32768000           # -500 m: well below any track geometry,
+                                         # acts as a distant horizon plane only
+
+# Horizon color: a darker, desaturated tint of the sky so the meeting line
+# is visible without competing with the actual track surface.
+const COL_HORIZON_R:int = 1638           # ~0.025
+const COL_HORIZON_G:int = 2621           # ~0.040
+const COL_HORIZON_B:int = 5243           # ~0.080
+
+# Visual ribbon: per-segment lateral subdivisions stay coarse since the
+# checker repeats via texture UV. Two quads (one per lateral side of the
+# centerline) per (waypoint, next-waypoint) pair = ~720 quads for the
+# track surface alone.
+const TRACK_LAT_SEGS:int = 2
+
+# ---------- Cars ------------------------------------------------------------
+
+const MAX_CARS:int = 31
+const CAR_STRIDE:int = 320
+const CAR_BUF_BYTES:int = 9920           # MAX_CARS * CAR_STRIDE
+
+# Per-car fields (offsets in bytes within the car slot).
+const CARF_CX:int = 0
+const CARF_CY:int = 8
+const CARF_CZ:int = 16
+const CARF_CVX:int = 24
+const CARF_CVY:int = 32
+const CARF_CVZ:int = 40
+const CARF_FX:int = 48
+const CARF_FY:int = 56
+const CARF_FZ:int = 64
+const CARF_UX:int = 72
+const CARF_UY:int = 80
+const CARF_UZ:int = 88
+const CARF_RX:int = 96
+const CARF_RY:int = 104
+const CARF_RZ:int = 112
+const CARF_ENERGY:int = 120
+const CARF_OVERCAP:int = 128
+const CARF_BOOST_FRAMES:int = 136
+const CARF_WP:int = 144                  # current_wp index
+const CARF_LAP:int = 152
+const CARF_PROGRESS:int = 160            # lap * NUM_WAYPOINTS + current_wp
+const CARF_STATUS:int = 168              # 0=alive 1=exploded 2=finished
+const CARF_PREV_FX:int = 176
+const CARF_PREV_FY:int = 184
+const CARF_PREV_FZ:int = 192
+const CARF_BANK:int = 200
+const CARF_HUE:int = 208                 # Q16 in [0, FP_ONE), per-car body hue
+const CARF_AIRBORNE:int = 216            # was_airborne tracker
+const CARF_WALL_CONTACT:int = 224        # 1 = was scraping a wall last frame
+const CARF_BOOST_PREV:int = 232          # per-car edge state for boost button
+const CARF_TOP_SPEED_MULT:int = 240      # Q16 -- per-car ceiling scale [.85, 1.05]
+const CARF_AI_AIM:int = 248              # signed Q16 metres -- AI lateral aim offset
+const CARF_AI_AIM_TIMER:int = 256        # frames until AI re-rolls aim
+const CARF_AI_BOOST_THRESH:int = 264     # Q16 cos threshold for AI boost trigger
+
+# ---------- Audio -----------------------------------------------------------
+
+const AUDIO_SAMPLE_RATE:int = 44100
+const AUDIO_FRAME_SAMPLES:int = 800      # ~18 ms (matches game frame)
+const AUDIO_FRAME_BYTES:int = 1600       # AUDIO_FRAME_SAMPLES * 2 (S16LE mono)
+const AUDIO_QUEUE_HIGH_BYTES:int = 6400  # ~4 frames -> skip a fill
+const MUSIC_LOOP_SAMPLES:int = 88200     # 2 seconds @ 44100
+const MUSIC_LOOP_BYTES:int = 176400
+
+# SFX voice slots. Each holds (active_flag, sample_pos, len, kind, vol_q).
+const SFX_SLOTS:int = 8
+const SFX_SLOT_STRIDE:int = 40
+const SFX_BUF_BYTES:int = 320
+
+const SFX_KIND_BOOST:int = 0
+const SFX_KIND_WALL:int = 1
+const SFX_KIND_RECHARGE:int = 2
+const SFX_KIND_LAP:int = 3
+const SFX_KIND_EXPLODE:int = 4
+const SFX_KIND_COUNT:int = 5
+
+# Per-SFX precomputed S16 buffer length (frames). 8820 = 0.2s, 17640 = 0.4s.
+const SFX_LEN_BOOST:int = 13230          # 0.3 s
+const SFX_LEN_WALL:int = 6615            # 0.15 s
+const SFX_LEN_RECHARGE:int = 17640       # 0.4 s
+const SFX_LEN_LAP:int = 22050            # 0.5 s
+const SFX_LEN_EXPLODE:int = 35280        # 0.8 s
+
+# Big enough static buffer to hold the longest SFX for each of 5 kinds.
+const SFX_MAX_LEN:int = 35280
+const SFX_TABLE_BYTES:int = 352800       # 5 * SFX_MAX_LEN * 2
+
+# ---------- Globals ---------------------------------------------------------
+
+let running:int = 1
+let frame_count:int = 0
+let game_state:int = STATE_TITLE
+let race_start_frame:int = 0
+let title_blink_phase:int = 0
+let game_over_frames:int = 0
+let results_camera_frames:int = 0
+
+# Camera basis lives outside any one car so it can lerp smoothly across
+# state transitions (e.g. results screen flies up off the player car).
+let cam_x:int = 0
+let cam_y:int = 360448
+let cam_z:int = 983040
+let cam_fx:int = 0
+let cam_fy:int = 0
+let cam_fz:int = -65536
+let cam_ux:int = 0
+let cam_uy:int = 65536
+let cam_uz:int = 0
+let cur_fov_top_q16:int = 131072
+
+# Player visual basis (rolled by `bank` for turn lean). Updated every frame
+# from the player car's physics basis.
+let vfx:int = 0
+let vfy:int = 0
+let vfz:int = -65536
+let vrx:int = 65536
+let vry:int = 0
+let vrz:int = 0
+let vux:int = 0
+let vuy:int = 65536
+let vuz:int = 0
+
+# Surface-query result.
+let surf_x:int = 0
+let surf_y:int = 65536
+let surf_z:int = 0
+let surf_nx:int = 0
+let surf_ny:int = 65536
+let surf_nz:int = 0
+let surf_kind:int = 0
+let surf_t:int = 0                       # signed lateral offset of probe
+let surf_half_w:int = 0
+let surf_wp:int = 0                      # waypoint index that won the query
+
+# Player-only "scratch" globals. We load car 0's state into these every
+# frame, run the rich physics_step, then write back. AI cars use the same
+# globals (different load/store) so all cars share one physics path.
+let cx:int = 0
+let cy:int = 98304
+let cz:int = 0
+let cvx:int = 0
+let cvy:int = 0
+let cvz:int = 0
+let fx:int = 0
+let fy:int = 0
+let fz:int = -65536
+let rx:int = 65536
+let ry:int = 0
+let rz:int = 0
+let ux:int = 0
+let uy:int = 65536
+let uz:int = 0
+let energy:int = 65536
+let speed_overcap:int = 0
+let boost_active_frames:int = 0
+let cur_wp:int = 0
+let cur_lap:int = 0
+let cur_status:int = 0
+let prev_fx:int = 0
+let prev_fy:int = 0
+let prev_fz:int = -65536
+let bank:int = 0
+let was_airborne:int = 1
+let wall_contact:int = 0
+let top_speed_mult:int = 65536           # default = 1.0 (player baseline)
+let ai_aim:int = 0                       # signed Q16 metres lateral offset
+let ai_aim_timer:int = 0                 # countdown to next aim re-roll
+let ai_boost_thresh:int = 62259          # default = 0.95 (matches former hardcode)
+
+# Visual-only HUD readouts published by update_chase.
+let vis_speed:int = 0
+let vis_speed_norm:int = 0
+let vis_boost_norm:int = 0
+
+# Player position in race standings (1 = leader). Recomputed each frame.
+let player_position:int = 1
+let player_finish_frame:int = 0
+
+# Static buffers.
+const WAYPOINT_BUF:int = __static_alloca__(WP_BUF_BYTES)
+const CAR_BUF:int = __static_alloca__(CAR_BUF_BYTES)
+const TRAIL_BUF:int = __static_alloca__(TRAIL_BUF_BYTES)
+let trail_head:int = 0
+let trail_count:int = 0
+const SPARK_BUF:int = __static_alloca__(SPARK_BUF_BYTES)
+let spark_head:int = 0
+const SPEED_LINE_STATE:int = __static_alloca__(SPEED_LINE_STATE_BYTES)
+
+# Texture pixels and ids -- one per surface kind, plus ground.
+const CHECKER_PIXELS_GROUND:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_TRACK:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_BOOST:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_RECHARGE:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_GRID:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_WALL:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_LOOP:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_CORK:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_RAMP:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_TEXID_GROUND:int = __static_alloca__(8)
+const CHECKER_TEXID_TRACK:int = __static_alloca__(8)
+const CHECKER_TEXID_BOOST:int = __static_alloca__(8)
+const CHECKER_TEXID_RECHARGE:int = __static_alloca__(8)
+const CHECKER_TEXID_GRID:int = __static_alloca__(8)
+const CHECKER_TEXID_WALL:int = __static_alloca__(8)
+const CHECKER_TEXID_LOOP:int = __static_alloca__(8)
+const CHECKER_TEXID_CORK:int = __static_alloca__(8)
+const CHECKER_TEXID_RAMP:int = __static_alloca__(8)
+
+# Audio buffers.
+const AUDIO_MIX_BUF:int = __static_alloca__(AUDIO_FRAME_BYTES)
+const AUDIO_MUSIC_BUF:int = __static_alloca__(MUSIC_LOOP_BYTES)
+const SFX_TABLE_BUF:int = __static_alloca__(SFX_TABLE_BYTES)
+const SFX_VOICES:int = __static_alloca__(SFX_BUF_BYTES)
+let audio_stream:int = 0
+let audio_enabled:int = 0
+let music_play_pos:int = 0
+let engine_phase:int = 0
+
+# ---------- Input -----------------------------------------------------------
+
+let in_thrust:int = 0
+let in_brake:int = 0
+let in_steer_l:int = 0
+let in_steer_r:int = 0
+let in_strafe_l:int = 0
+let in_strafe_r:int = 0
+let in_boost:int = 0
+let in_boost_prev:int = 0
+let in_respawn:int = 0
+let in_respawn_prev:int = 0
+let in_quit:int = 0
+let in_fps_toggle:int = 0
+let in_fps_toggle_prev:int = 0
+let in_start:int = 0                     # space/enter for state transitions
+let in_start_prev:int = 0
+let in_restart:int = 0                   # R for game over restart
+let in_restart_prev:int = 0
+
+# FPS counter.
+let show_fps:int = SHOW_FPS_DEFAULT
+let fps_last_ticks:int = 0
+let fps_sample_count:int = 0
+let fps_value:int = 0
+
+# ---------- Track waypoints -------------------------------------------------
+# Each waypoint stores 12 q16 fields:
+#   0  cx          centerline X
+#   8  cy          centerline Y
+#  16  cz          centerline Z
+#  24  fx fy fz    track-forward unit vector (tangent to centerline)
+#  48  ux uy uz    track-up unit vector (banked surface normal)
+#  72  half_w      lateral half-width (centerline +/- half_w = wall edges)
+#  80  surf_kind   SURF_NORMAL / SURF_BOOST / SURF_RECHARGE / SURF_GRID
+#  88  step_dist   linear distance to the next waypoint (Q16 m); used by
+#                  the surface query and AI lookahead
+
+let wp_get_cx = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 0) }
+let wp_get_cy = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 8) }
+let wp_get_cz = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 16) }
+let wp_get_fx = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 24) }
+let wp_get_fy = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 32) }
+let wp_get_fz = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 40) }
+let wp_get_ux = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 48) }
+let wp_get_uy = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 56) }
+let wp_get_uz = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 64) }
+let wp_get_half_w = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 72) }
+let wp_get_kind = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 80) }
+let wp_get_cumarc = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 88) }
+
+let wp_set = (i:int cx_q:int cy_q:int cz_q:int fx_q:int fy_q:int fz_q:int ux_q:int uy_q:int uz_q:int half_w:int kind:int):>void => {
+    let o:int = WAYPOINT_BUF + (i * WP_STRIDE)
+    __store__(cx_q o)
+    __store__(cy_q (o + 8))
+    __store__(cz_q (o + 16))
+    __store__(fx_q (o + 24))
+    __store__(fy_q (o + 32))
+    __store__(fz_q (o + 40))
+    __store__(ux_q (o + 48))
+    __store__(uy_q (o + 56))
+    __store__(uz_q (o + 64))
+    __store__(half_w (o + 72))
+    __store__(kind (o + 80))
+    __store__(0 (o + 88))
+    return 0
+}
+
+# Track-builder state. Walks segment by segment, emitting waypoints as
+# the heading + position evolve. Heading is in raw angle units (1024 = 1
+# turn); fwd = (sin(h), 0, -cos(h)), right = (cos(h), 0, sin(h)).
+let bld_x:int = 0
+let bld_y:int = 0
+let bld_z:int = 0
+let bld_h:int = 0
+let bld_idx:int = 0
+let track_total_wp:int = 0
+
+# The actual count of waypoints used by the track. Bounded by NUM_WAYPOINTS.
+
+let put_wp_xz = (cx_q:int cy_q:int cz_q:int h:int half_w:int kind:int bank_raw:int):>void => {
+    # Build a banked frame from heading h and a roll bank_raw about fwd.
+    # Forward = (sin(h), 0, -cos(h))
+    # Right (flat) = (cos(h), 0, sin(h))
+    # Up (flat) = (0, 1, 0)
+    # Apply bank around fwd: new_up = up*cos(b) + right*sin(b),
+    # new_right = right*cos(b) - up*sin(b). (Same as stage_15 visual roll.)
+    let fxv:int = sin_fp(h)
+    let fzv:int = 0 - cos_fp(h)
+    let rxv_flat:int = cos_fp(h)
+    let rzv_flat:int = sin_fp(h)
+    let cb:int = cos_fp(bank_raw)
+    let sb:int = sin_fp(bank_raw)
+    let uxv:int = fp_mul(rxv_flat sb)
+    let uyv:int = cb
+    let uzv:int = fp_mul(rzv_flat sb)
+    if bld_idx <? NUM_WAYPOINTS {
+        wp_set(bld_idx cx_q cy_q cz_q fxv 0 fzv uxv uyv uzv half_w kind)
+        bld_idx += 1
+    }
+    return 0
+}
+
+# Append `count` waypoints stepping from the current build state along a
+# straight of total length len_q with elevation change dy_q. Heading does
+# not change. Each step emits one waypoint at the sub-step end.
+let gen_straight = (len_q:int dy_q:int count:int half_w:int kind:int bank_raw:int):>void => {
+    let fxv:int = sin_fp(bld_h)
+    let fzv:int = 0 - cos_fp(bld_h)
+    let i:int = 0
+    loop i <? count {
+        let frac:int = ((i + 1) * FP_ONE) // count
+        let t_x:int = bld_x + fp_mul(fxv fp_mul(len_q frac))
+        let t_z:int = bld_z + fp_mul(fzv fp_mul(len_q frac))
+        let t_y:int = bld_y + fp_mul(dy_q frac)
+        put_wp_xz(t_x t_y t_z bld_h half_w kind bank_raw)
+        i += 1
+    }
+    bld_x += fp_mul(fxv len_q)
+    bld_z += fp_mul(fzv len_q)
+    bld_y += dy_q
+    return 0
+}
+
+# Banked horizontal turn. sweep_raw > 0 -> right turn, < 0 -> left turn.
+# bank_max is the peak roll angle (raw units) reached at mid-arc, eased
+# in/out so entry and exit aren't snap-rolled.
+let gen_turn = (radius_q:int sweep_raw:int bank_max:int dy_q:int count:int half_w:int kind:int):>void => {
+    if sweep_raw =? 0 { return 0 }
+    let dir_sign:int = 1
+    if sweep_raw <? 0 { dir_sign = 0 - 1 }
+    let abs_sweep:int = sweep_raw
+    if abs_sweep <? 0 { abs_sweep = 0 - abs_sweep }
+
+    # Center sits perpendicular to fwd, on the inside of the turn.
+    let rxv:int = cos_fp(bld_h)
+    let rzv:int = sin_fp(bld_h)
+    let cx_arc:int = bld_x + (dir_sign * fp_mul(rxv radius_q))
+    let cz_arc:int = bld_z + (dir_sign * fp_mul(rzv radius_q))
+    let h0:int = bld_h
+    let y0:int = bld_y
+
+    let i:int = 0
+    loop i <? count {
+        let frac:int = ((i + 1) * FP_ONE) // count
+        let h_q:int = h0 + ((sweep_raw * (i + 1)) // count)
+        let r_at_x:int = cos_fp(h_q)
+        let r_at_z:int = sin_fp(h_q)
+        let p_x:int = cx_arc - (dir_sign * fp_mul(r_at_x radius_q))
+        let p_z:int = cz_arc - (dir_sign * fp_mul(r_at_z radius_q))
+        let p_y:int = y0 + fp_mul(dy_q frac)
+        # Bank ramps up as 4 * frac * (1 - frac) so it peaks at mid-arc.
+        let ease:int = fp_mul(4 * frac (FP_ONE - frac))
+        let bank_here:int = (bank_max * dir_sign * ease) // FP_ONE
+        put_wp_xz(p_x p_y p_z h_q half_w kind bank_here)
+        i += 1
+    }
+    bld_h = h0 + sweep_raw
+    let r_end_x:int = cos_fp(bld_h)
+    let r_end_z:int = sin_fp(bld_h)
+    bld_x = cx_arc - (dir_sign * fp_mul(r_end_x radius_q))
+    bld_z = cz_arc - (dir_sign * fp_mul(r_end_z radius_q))
+    bld_y = y0 + dy_q
+    return 0
+}
+
+# Vertical loop. Track curls up and back over in the (fwd, up) plane;
+# horizontal position does NOT advance (entry == exit). Up vector rotates
+# with the loop angle so the player's frame stays attached to the surface.
+let gen_loop = (radius_q:int count:int half_w:int kind:int lateral_q:int):>void => {
+    let fxv:int = sin_fp(bld_h)
+    let fzv:int = 0 - cos_fp(bld_h)
+    # Right axis (flat, horizontal). At heading 0 right = +X; positive
+    # lateral_q therefore shifts the loop toward the heading's right side.
+    let rxv:int = cos_fp(bld_h)
+    let rzv:int = sin_fp(bld_h)
+    # Center is r above entry.
+    let cx_l:int = bld_x
+    let cy_l:int = bld_y + radius_q
+    let cz_l:int = bld_z
+
+    let i:int = 0
+    loop i <? count {
+        # Loop angle theta in [0, 1024) raw units. theta=0 at entry (bottom),
+        # theta=512 at top, theta=1024=0 at exit (= entry in YZ).
+        let theta:int = ((i + 1) * ANG_TURN) // count
+        let cth:int = cos_fp(theta)
+        let sth:int = sin_fp(theta)
+        let frac:int = ((i + 1) * FP_ONE) // count
+        let lat_here:int = fp_mul(lateral_q frac)
+        # pos = center + r * (sin(th)*fwd - cos(th)*up_world) + lat*right
+        let p_x:int = cx_l + fp_mul(radius_q fp_mul(fxv sth)) + fp_mul(rxv lat_here)
+        let p_y:int = cy_l - fp_mul(radius_q cth)
+        let p_z:int = cz_l + fp_mul(radius_q fp_mul(fzv sth)) + fp_mul(rzv lat_here)
+        # Track-forward = cos(th)*fwd + sin(th)*up_world (heading unchanged)
+        let tfx:int = fp_mul(cth fxv)
+        let tfy:int = sth
+        let tfz:int = fp_mul(cth fzv)
+        # Track-up = -sin(th)*fwd + cos(th)*up_world (points to center)
+        let tux:int = 0 - fp_mul(sth fxv)
+        let tuy:int = cth
+        let tuz:int = 0 - fp_mul(sth fzv)
+        let o:int = WAYPOINT_BUF + (bld_idx * WP_STRIDE)
+        if bld_idx <? NUM_WAYPOINTS {
+            __store__(p_x o)
+            __store__(p_y (o + 8))
+            __store__(p_z (o + 16))
+            __store__(tfx (o + 24))
+            __store__(tfy (o + 32))
+            __store__(tfz (o + 40))
+            __store__(tux (o + 48))
+            __store__(tuy (o + 56))
+            __store__(tuz (o + 64))
+            __store__(half_w (o + 72))
+            __store__(kind (o + 80))
+            __store__(0 (o + 88))
+            bld_idx += 1
+        }
+        i += 1
+    }
+    # Loop exits at the same heading and elevation as entry, but offset
+    # laterally by `lateral_q` so the entry/exit no longer overlap when
+    # viewed from above.
+    bld_x += fp_mul(rxv lateral_q)
+    bld_z += fp_mul(rzv lateral_q)
+    return 0
+}
+
+# Corkscrew: a straight that rolls the up vector by `twist_raw` (positive
+# = rolls right) over `len_q` of horizontal travel. lateral_q lets the
+# barrel-roll also drift sideways over its length -- handy for cancelling
+# the loop's lateral offset so the back-stretch closure stays put.
+let gen_cork = (len_q:int dy_q:int twist_raw:int count:int half_w:int kind:int lateral_q:int):>void => {
+    let fxv:int = sin_fp(bld_h)
+    let fzv:int = 0 - cos_fp(bld_h)
+    let rxv_flat:int = cos_fp(bld_h)
+    let rzv_flat:int = sin_fp(bld_h)
+    let i:int = 0
+    loop i <? count {
+        let frac:int = ((i + 1) * FP_ONE) // count
+        let lat_here:int = fp_mul(lateral_q frac)
+        let p_x:int = bld_x + fp_mul(fxv fp_mul(len_q frac)) + fp_mul(rxv_flat lat_here)
+        let p_z:int = bld_z + fp_mul(fzv fp_mul(len_q frac)) + fp_mul(rzv_flat lat_here)
+        let p_y:int = bld_y + fp_mul(dy_q frac)
+        let roll:int = (twist_raw * (i + 1)) // count
+        let cb:int = cos_fp(roll)
+        let sb:int = sin_fp(roll)
+        let tux:int = fp_mul(rxv_flat sb)
+        let tuy:int = cb
+        let tuz:int = fp_mul(rzv_flat sb)
+        let o:int = WAYPOINT_BUF + (bld_idx * WP_STRIDE)
+        if bld_idx <? NUM_WAYPOINTS {
+            __store__(p_x o)
+            __store__(p_y (o + 8))
+            __store__(p_z (o + 16))
+            __store__(fxv o + 24)
+            __store__(0 o + 32)
+            __store__(fzv o + 40)
+            __store__(tux (o + 48))
+            __store__(tuy (o + 56))
+            __store__(tuz (o + 64))
+            __store__(half_w (o + 72))
+            __store__(kind (o + 80))
+            __store__(0 (o + 88))
+            bld_idx += 1
+        }
+        i += 1
+    }
+    bld_x += fp_mul(fxv len_q) + fp_mul(rxv_flat lateral_q)
+    bld_z += fp_mul(fzv len_q) + fp_mul(rzv_flat lateral_q)
+    bld_y += dy_q
+    return 0
+}
+
+let track_total_arc:int = 0
+
+# Walk the ring and stash cumulative arc length up to each waypoint
+# (Q16 m). Used for V tex-coord scaling on the track ribbon and for
+# AI position estimation along the track.
+let track_compute_steps = ():>void => {
+    let acc:int = 0
+    let i:int = 0
+    loop i <? track_total_wp {
+        let o:int = WAYPOINT_BUF + (i * WP_STRIDE) + 88
+        __store__(acc o)
+        let ni:int = (i + 1) % track_total_wp
+        let dx:int = wp_get_cx(ni) - wp_get_cx(i)
+        let dy:int = wp_get_cy(ni) - wp_get_cy(i)
+        let dz:int = wp_get_cz(ni) - wp_get_cz(i)
+        let d:int = fp_sqrt((dx * dx) + (dy * dy) + (dz * dz))
+        acc += d
+        i += 1
+    }
+    track_total_arc = acc
+    return 0
+}
+
+# Build the closed circuit. Paperclip: two same-direction U-turns linked
+# by a long back-stretch loaded with features. Closure is guaranteed by
+# matching the back-stretch lateral drift (the loop's 160m sideways
+# offset) with a smaller second-turn radius (270m vs 350m), and matching
+# the forward distance with a longer final straight.
+#
+# Track layout (heading = 0 -> +Z forward, paperclip):
+#   start grid 60m + start straight 440m  (L1 = 500m, last 60m grid stripe)
+#   right U-turn r=350m, bank=30deg                       (lateral +700m)
+#   back-stretch (heading pi, fwd = -Z):
+#     200m straight
+#     200m boost pad strip
+#     150m straight
+#     150m amber ramp up   (+30m)
+#     150m amber ramp down (-30m)
+#     100m straight
+#     vertical loop r=110m, exits 160m to the right       (lateral -160m)
+#     100m straight
+#     800m corkscrew (1 full twist, no lateral drift)
+#     200m straight
+#   right U-turn r=270m, bank=30deg, recharge strip middle 60%  (lateral +540m)
+#   final straight 1490m + closing grid 60m  (L3 = 1550m)
+let build_track = ():>void => {
+    bld_x = 0
+    bld_y = 0
+    bld_z = 0
+    bld_h = 0
+    bld_idx = 0
+    let half_w:int = 5242880    # 80 m half-width (4x the original 20 m)
+
+    # Start grid + start straight (L1=500m). First 60m flagged as SURF_GRID
+    # so the start line is visually obvious and the AI gets a known
+    # straight to spawn on.
+    gen_straight(3932160 0 3 half_w SURF_GRID 0)        # 60 m grid
+    gen_straight(28835840 0 18 half_w SURF_NORMAL 0)    # 440 m straight
+
+    # First right U-turn (180 deg, r=350 m, bank=+30 raw units)
+    gen_turn(22937600 ANG_HALF_TURN 30 0 48 half_w SURF_NORMAL)
+
+    # Back-stretch sub-segments (heading = pi, fwd = +Z).
+    gen_straight(13107200 0 8 half_w SURF_NORMAL 0)             # 200 m
+    gen_straight(13107200 0 8 half_w SURF_BOOST 0)              # 200 m boost pad
+    gen_straight(9830400 0 6 half_w SURF_NORMAL 0)              # 150 m
+    gen_straight(9830400 1966080 10 half_w SURF_RAMP 0)         # 150 m ramp up (+30m)
+    gen_straight(9830400 (0 - 1966080) 10 half_w SURF_RAMP 0)   # 150 m ramp down (-30m)
+    gen_straight(6553600 0 4 half_w SURF_NORMAL 0)              # 100 m
+    # Loop r=110 m, exits one full track width (2 * half_w = 160 m) to
+    # the right of the entrance so entry/exit don't visually overlap.
+    gen_loop(7208960 48 half_w SURF_LOOP (2 * half_w))
+    gen_straight(6553600 0 4 half_w SURF_NORMAL 0)              # 100 m
+    # Corkscrew: 800m of pure barrel-roll continuing in line with the
+    # loop's exit (no lateral drift), so flying off the loop lands you
+    # on the cork rather than getting yanked sideways onto a curving
+    # ribbon. The loop's 160m lateral offset is absorbed downstream by
+    # giving the second U-turn a smaller radius (270m vs the first 350m).
+    gen_cork(52428800 0 ANG_TURN 64 half_w SURF_CORK 0)
+    gen_straight(13107200 0 8 half_w SURF_NORMAL 0)             # 200 m
+
+    # Second right U-turn with recharge strip in the middle 60% of the arc.
+    # Radius 270m (half_w_offset_compensation = (350 - 270) * 2 = 160m).
+    # Split the arc into entry / recharge / exit so the kind flag tags
+    # only the inner segment.
+    gen_turn(17694720 ((ANG_HALF_TURN * 20) // 100) 30 0 12 half_w SURF_NORMAL)
+    gen_turn(17694720 ((ANG_HALF_TURN * 60) // 100) 30 0 28 half_w SURF_RECHARGE)
+    gen_turn(17694720 ((ANG_HALF_TURN * 20) // 100) 30 0 12 half_w SURF_NORMAL)
+
+    # Final straight closes the ring. Back-stretch forward sum (heading
+    # pi, loop contributes 0) = 200+200+150+150+150+100+100+800+200 =
+    # 2050m, so the back stretch ends at z = 500 - 2050 = -1550m. The
+    # second U-turn brings us back to x=0 and the final straight runs
+    # 1550m forward (+Z) to close at the origin. The last 60m is tagged
+    # SURF_GRID so the approach reads as the same start/finish stripe.
+    gen_straight(97648640 0 60 half_w SURF_NORMAL 0)             # 1490 m
+    gen_straight(3932160 0 3 half_w SURF_GRID 0)                 # 60 m grid
+
+    track_total_wp = bld_idx
+    track_compute_steps()
+    return 0
+}
+
+# ---------- Track surface query --------------------------------------------
+# Returns the closest-on-track surface point for a probe (px, py, pz) by
+# scanning a small window around hint_wp. Sets surf_*, surf_kind, surf_t
+# (signed lateral offset), surf_half_w, surf_wp.
+let track_surface_query = (px:int py:int pz:int hint_wp:int):>void => {
+    let best_wp:int = hint_wp
+    let best_d2:int = 0x7FFFFFFFFFFFFFFF
+    # Scan +/- WIN around the hint. WIN=8 covers up to ~80m of track in
+    # either direction so a fast craft never outruns the window.
+    let win:int = 8
+    let i:int = 0 - win
+    loop i <=? win {
+        let wi:int = ((hint_wp + i) % track_total_wp + track_total_wp) % track_total_wp
+        let dx:int = px - wp_get_cx(wi)
+        let dy:int = py - wp_get_cy(wi)
+        let dz:int = pz - wp_get_cz(wi)
+        let d2:int = (dx * dx) + (dy * dy) + (dz * dz)
+        if d2 <? best_d2 {
+            best_d2 = d2
+            best_wp = wi
+        }
+        i += 1
+    }
+
+    # Project probe onto the line from best_wp toward best_wp+1.
+    let ni:int = (best_wp + 1) % track_total_wp
+    let ax:int = wp_get_cx(best_wp)
+    let ay:int = wp_get_cy(best_wp)
+    let az:int = wp_get_cz(best_wp)
+    let bx:int = wp_get_cx(ni)
+    let by:int = wp_get_cy(ni)
+    let bz:int = wp_get_cz(ni)
+    let segx:int = bx - ax
+    let segy:int = by - ay
+    let segz:int = bz - az
+    let seg_len2_q32:int = (segx * segx) + (segy * segy) + (segz * segz)
+    let pax:int = px - ax
+    let pay:int = py - ay
+    let paz:int = pz - az
+    let dot_q32:int = (pax * segx) + (pay * segy) + (paz * segz)
+    let t_q:int = 0
+    if seg_len2_q32 >? 0 {
+        # t in Q16, where 0 = at A, FP_ONE = at B.
+        t_q = (dot_q32 << 16) // seg_len2_q32
+    }
+    if t_q <? 0 { t_q = 0 }
+    if t_q >? FP_ONE { t_q = FP_ONE }
+
+    # Interpolate frame and centerline along the segment.
+    let cx_lerp:int = ax + fp_mul(segx t_q)
+    let cy_lerp:int = ay + fp_mul(segy t_q)
+    let cz_lerp:int = az + fp_mul(segz t_q)
+    let fxa:int = wp_get_fx(best_wp)
+    let fya:int = wp_get_fy(best_wp)
+    let fza:int = wp_get_fz(best_wp)
+    let fxb:int = wp_get_fx(ni)
+    let fyb:int = wp_get_fy(ni)
+    let fzb:int = wp_get_fz(ni)
+    let fxv:int = fxa + fp_mul(fxb - fxa t_q)
+    let fyv:int = fya + fp_mul(fyb - fya t_q)
+    let fzv:int = fza + fp_mul(fzb - fza t_q)
+    let fmag:int = fp_sqrt((fxv * fxv) + (fyv * fyv) + (fzv * fzv))
+    if fmag >? 1024 {
+        fxv = fp_div(fxv fmag)
+        fyv = fp_div(fyv fmag)
+        fzv = fp_div(fzv fmag)
+    }
+    let uxa:int = wp_get_ux(best_wp)
+    let uya:int = wp_get_uy(best_wp)
+    let uza:int = wp_get_uz(best_wp)
+    let uxb:int = wp_get_ux(ni)
+    let uyb:int = wp_get_uy(ni)
+    let uzb:int = wp_get_uz(ni)
+    let uxv:int = uxa + fp_mul(uxb - uxa t_q)
+    let uyv:int = uya + fp_mul(uyb - uya t_q)
+    let uzv:int = uza + fp_mul(uzb - uza t_q)
+    let umag:int = fp_sqrt((uxv * uxv) + (uyv * uyv) + (uzv * uzv))
+    if umag >? 1024 {
+        uxv = fp_div(uxv umag)
+        uyv = fp_div(uyv umag)
+        uzv = fp_div(uzv umag)
+    }
+    # Re-orthogonalise: project up out of forward.
+    let f_dot_u:int = fp_mul(fxv uxv) + fp_mul(fyv uyv) + fp_mul(fzv uzv)
+    uxv -= fp_mul(fxv f_dot_u)
+    uyv -= fp_mul(fyv f_dot_u)
+    uzv -= fp_mul(fzv f_dot_u)
+    umag = fp_sqrt((uxv * uxv) + (uyv * uyv) + (uzv * uzv))
+    if umag >? 1024 {
+        uxv = fp_div(uxv umag)
+        uyv = fp_div(uyv umag)
+        uzv = fp_div(uzv umag)
+    }
+    # Right = forward x up
+    let rxv:int = fp_mul(fyv uzv) - fp_mul(fzv uyv)
+    let ryv:int = fp_mul(fzv uxv) - fp_mul(fxv uzv)
+    let rzv:int = fp_mul(fxv uyv) - fp_mul(fyv uxv)
+
+    # Lateral offset of probe.
+    let pcx:int = px - cx_lerp
+    let pcy:int = py - cy_lerp
+    let pcz:int = pz - cz_lerp
+    let t_lat:int = fp_mul(pcx rxv) + fp_mul(pcy ryv) + fp_mul(pcz rzv)
+
+    # Surface point = centerline + lateral * right (centered laterally).
+    surf_x = cx_lerp + fp_mul(rxv t_lat)
+    surf_y = cy_lerp + fp_mul(ryv t_lat)
+    surf_z = cz_lerp + fp_mul(rzv t_lat)
+    surf_nx = uxv
+    surf_ny = uyv
+    surf_nz = uzv
+    surf_t = t_lat
+    surf_kind = wp_get_kind(best_wp)
+    surf_half_w = wp_get_half_w(best_wp)
+    surf_wp = best_wp
+    return 0
+}
+
+# ---------- Camera / projection --------------------------------------------
+
+let set_perspective = (sw:int sh:int):>void => {
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    let aspect_q16:int = (sw << 16) // sh
+    let top_q16:int = cur_fov_top_q16
+    let right_q16:int = fp_mul(top_q16 aspect_q16)
+    GL_Frustum(q16_to_f64(0 - right_q16) q16_to_f64(right_q16) q16_to_f64(0 - top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    return 0
+}
+
+let apply_camera = ():>void => {
+    let crx:int = fp_mul(cam_fy cam_uz) - fp_mul(cam_fz cam_uy)
+    let cry:int = fp_mul(cam_fz cam_ux) - fp_mul(cam_fx cam_uz)
+    let crz:int = fp_mul(cam_fx cam_uy) - fp_mul(cam_fy cam_ux)
+    let neg_dot_r:int = 0 - (fp_mul(crx cam_x) + fp_mul(cry cam_y) + fp_mul(crz cam_z))
+    let neg_dot_u:int = 0 - (fp_mul(cam_ux cam_x) + fp_mul(cam_uy cam_y) + fp_mul(cam_uz cam_z))
+    let dot_f:int = fp_mul(cam_fx cam_x) + fp_mul(cam_fy cam_y) + fp_mul(cam_fz cam_z)
+    let mat:int = __static_alloca__(64)
+    __store_u32__(q16_to_f32(crx) mat + 0)
+    __store_u32__(q16_to_f32(cam_ux) mat + 4)
+    __store_u32__(q16_to_f32(0 - cam_fx) mat + 8)
+    __store_u32__(0 mat + 12)
+    __store_u32__(q16_to_f32(cry) mat + 16)
+    __store_u32__(q16_to_f32(cam_uy) mat + 20)
+    __store_u32__(q16_to_f32(0 - cam_fy) mat + 24)
+    __store_u32__(0 mat + 28)
+    __store_u32__(q16_to_f32(crz) mat + 32)
+    __store_u32__(q16_to_f32(cam_uz) mat + 36)
+    __store_u32__(q16_to_f32(0 - cam_fz) mat + 40)
+    __store_u32__(0 mat + 44)
+    __store_u32__(q16_to_f32(neg_dot_r) mat + 48)
+    __store_u32__(q16_to_f32(neg_dot_u) mat + 52)
+    __store_u32__(q16_to_f32(dot_f) mat + 56)
+    __store_u32__(F32_ONE mat + 60)
+    glLoadMatrixf(mat)
+    return 0
+}
+
+# ---------- Texture init (one 2x2 RGBA per surface kind) -------------------
+
+let q16_to_u8 = (q:int):>int => {
+    let b:int = (q * 255) >> FP_SHIFT
+    if b <? 0 { b = 0 }
+    if b >? 255 { b = 255 }
+    return b
+}
+
+let checker_write_pixel = (pixels:int offset:int r:int g:int b:int):>void => {
+    __store_u8__(q16_to_u8(r) pixels + offset)
+    __store_u8__(q16_to_u8(g) pixels + offset + 1)
+    __store_u8__(q16_to_u8(b) pixels + offset + 2)
+    __store_u8__(255 pixels + offset + 3)
+    return 0
+}
+
+let build_checker_tex = (pixels:int id_slot:int
+                         a_r:int a_g:int a_b:int
+                         b_r:int b_g:int b_b:int):>void => {
+    checker_write_pixel(pixels 0  b_r b_g b_b)
+    checker_write_pixel(pixels 4  a_r a_g a_b)
+    checker_write_pixel(pixels 8  a_r a_g a_b)
+    checker_write_pixel(pixels 12 b_r b_g b_b)
+    glGenTextures(1 id_slot)
+    let tex_id:int = __load_u32__(id_slot)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_WRAP_S GL_REPEAT)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_WRAP_T GL_REPEAT)
+    glTexImage2D(GL_TEXTURE_2D 0 GL_RGBA 2 2 0 GL_RGBA GL_UNSIGNED_BYTE pixels)
+    return 0
+}
+
+let init_checker_textures = ():>void => {
+    glPixelStorei(0x0CF5 1)
+    build_checker_tex(CHECKER_PIXELS_GROUND CHECKER_TEXID_GROUND
+                      COL_GROUND_A_R COL_GROUND_A_G COL_GROUND_A_B
+                      COL_GROUND_B_R COL_GROUND_B_G COL_GROUND_B_B)
+    build_checker_tex(CHECKER_PIXELS_TRACK CHECKER_TEXID_TRACK
+                      COL_TRACK_A_R COL_TRACK_A_G COL_TRACK_A_B
+                      COL_TRACK_B_R COL_TRACK_B_G COL_TRACK_B_B)
+    build_checker_tex(CHECKER_PIXELS_BOOST CHECKER_TEXID_BOOST
+                      COL_BOOST_A_R COL_BOOST_A_G COL_BOOST_A_B
+                      COL_BOOST_B_R COL_BOOST_B_G COL_BOOST_B_B)
+    build_checker_tex(CHECKER_PIXELS_RECHARGE CHECKER_TEXID_RECHARGE
+                      COL_RECHARGE_A_R COL_RECHARGE_A_G COL_RECHARGE_A_B
+                      COL_RECHARGE_B_R COL_RECHARGE_B_G COL_RECHARGE_B_B)
+    build_checker_tex(CHECKER_PIXELS_GRID CHECKER_TEXID_GRID
+                      COL_GRID_A_R COL_GRID_A_G COL_GRID_A_B
+                      COL_GRID_B_R COL_GRID_B_G COL_GRID_B_B)
+    build_checker_tex(CHECKER_PIXELS_WALL CHECKER_TEXID_WALL
+                      COL_WALL_A_R COL_WALL_A_G COL_WALL_A_B
+                      COL_WALL_B_R COL_WALL_B_G COL_WALL_B_B)
+    build_checker_tex(CHECKER_PIXELS_LOOP CHECKER_TEXID_LOOP
+                      COL_LOOP_A_R COL_LOOP_A_G COL_LOOP_A_B
+                      COL_LOOP_B_R COL_LOOP_B_G COL_LOOP_B_B)
+    build_checker_tex(CHECKER_PIXELS_CORK CHECKER_TEXID_CORK
+                      COL_CORK_A_R COL_CORK_A_G COL_CORK_A_B
+                      COL_CORK_B_R COL_CORK_B_G COL_CORK_B_B)
+    build_checker_tex(CHECKER_PIXELS_RAMP CHECKER_TEXID_RAMP
+                      COL_RAMP_A_R COL_RAMP_A_G COL_RAMP_A_B
+                      COL_RAMP_B_R COL_RAMP_B_G COL_RAMP_B_B)
+    return 0
+}
+
+# ---------- Drawing: ground / track / walls --------------------------------
+
+let kind_texid = (kind:int):>int => {
+    if kind =? SURF_BOOST { return __load_u32__(CHECKER_TEXID_BOOST) }
+    if kind =? SURF_RECHARGE { return __load_u32__(CHECKER_TEXID_RECHARGE) }
+    if kind =? SURF_GRID { return __load_u32__(CHECKER_TEXID_GRID) }
+    if kind =? SURF_LOOP { return __load_u32__(CHECKER_TEXID_LOOP) }
+    if kind =? SURF_CORK { return __load_u32__(CHECKER_TEXID_CORK) }
+    if kind =? SURF_RAMP { return __load_u32__(CHECKER_TEXID_RAMP) }
+    return __load_u32__(CHECKER_TEXID_TRACK)
+}
+
+# A single flat untextured quad far below the track. Acts purely as a
+# horizon plane: where it meets the sky clear-color the eye reads it as
+# the horizon line. No checker, no detail -- the track itself is the
+# whole "world".
+let draw_ground = ():>void => {
+    let half_q16:int = GROUND_HALF_EXTENT
+    let pos_xyz:int = q16_to_f32(half_q16)
+    let neg_xyz:int = q16_to_f32(0 - half_q16)
+    let y:int = q16_to_f32(GROUND_Y)
+    glDisable(GL_TEXTURE_2D)
+    glBegin(GL_QUADS)
+    GL_Color3f(q16_to_f32(COL_HORIZON_R) q16_to_f32(COL_HORIZON_G) q16_to_f32(COL_HORIZON_B))
+    GL_Vertex3f(neg_xyz y neg_xyz)
+    GL_Vertex3f(pos_xyz y neg_xyz)
+    GL_Vertex3f(pos_xyz y pos_xyz)
+    GL_Vertex3f(neg_xyz y pos_xyz)
+    glEnd()
+    return 0
+}
+
+# Emit one textured ribbon quad between waypoint i and i+1. uv_v_a and
+# uv_v_b are the longitudinal tex coords (in tile units / 2) at i and i+1.
+let emit_track_quad = (i:int ni:int v_a:int v_b:int u_a:int u_b:int):>void => {
+    let cxa:int = wp_get_cx(i)
+    let cya:int = wp_get_cy(i)
+    let cza:int = wp_get_cz(i)
+    let cxb:int = wp_get_cx(ni)
+    let cyb:int = wp_get_cy(ni)
+    let czb:int = wp_get_cz(ni)
+    # right_a = cross(forward_a, up_a)
+    let fxa:int = wp_get_fx(i)
+    let fya:int = wp_get_fy(i)
+    let fza:int = wp_get_fz(i)
+    let uxa:int = wp_get_ux(i)
+    let uya:int = wp_get_uy(i)
+    let uza:int = wp_get_uz(i)
+    let rxa:int = fp_mul(fya uza) - fp_mul(fza uya)
+    let rya:int = fp_mul(fza uxa) - fp_mul(fxa uza)
+    let rza:int = fp_mul(fxa uya) - fp_mul(fya uxa)
+
+    let fxb_:int = wp_get_fx(ni)
+    let fyb_:int = wp_get_fy(ni)
+    let fzb_:int = wp_get_fz(ni)
+    let uxb:int = wp_get_ux(ni)
+    let uyb:int = wp_get_uy(ni)
+    let uzb:int = wp_get_uz(ni)
+    let rxb:int = fp_mul(fyb_ uzb) - fp_mul(fzb_ uyb)
+    let ryb:int = fp_mul(fzb_ uxb) - fp_mul(fxb_ uzb)
+    let rzb:int = fp_mul(fxb_ uyb) - fp_mul(fyb_ uxb)
+
+    let hw:int = wp_get_half_w(i)
+    let lat_l:int = 0 - hw
+    let lat_r:int = hw
+
+    # Four corners (lateral, longitudinal) -> world.
+    world_vt3(cxa + fp_mul(rxa lat_l) cya + fp_mul(rya lat_l) cza + fp_mul(rza lat_l) u_a v_a)
+    world_vt3(cxb + fp_mul(rxb lat_l) cyb + fp_mul(ryb lat_l) czb + fp_mul(rzb lat_l) u_a v_b)
+    world_vt3(cxb + fp_mul(rxb lat_r) cyb + fp_mul(ryb lat_r) czb + fp_mul(rzb lat_r) u_b v_b)
+    world_vt3(cxa + fp_mul(rxa lat_r) cya + fp_mul(rya lat_r) cza + fp_mul(rza lat_r) u_b v_a)
+    return 0
+}
+
+let draw_track = ():>void => {
+    glEnable(GL_TEXTURE_2D)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
+    let i:int = 0
+    let cur_kind:int = -1
+    loop i <? track_total_wp {
+        let ni:int = (i + 1) % track_total_wp
+        let kind:int = wp_get_kind(i)
+        if kind not=? cur_kind {
+            if cur_kind not=? -1 {
+                glEnd()
+            }
+            glBindTexture(GL_TEXTURE_2D kind_texid(kind))
+            glBegin(GL_QUADS)
+            cur_kind = kind
+        }
+        let hw:int = wp_get_half_w(i)
+        # UVs are Q16 fractions of a full 2x2 texture wrap; one wrap = 2
+        # CHECKER_TILE = 10 m. So UV-per-metre = 0.1 and UV_q16 =
+        # length_q16 << 16 / (CHECKER_TILE * 2). Lateral spans -hw..+hw.
+        let u_q:int = (hw << 16) // (CHECKER_TILE * 2)
+        let arc_a:int = wp_get_cumarc(i)
+        let arc_b:int = wp_get_cumarc(ni)
+        if arc_b <=? arc_a {
+            arc_b = arc_a + wp_get_cumarc(1)   # safety: zero / wrap
+        }
+        let v_a:int = (arc_a << 16) // (CHECKER_TILE * 2)
+        let v_b:int = (arc_b << 16) // (CHECKER_TILE * 2)
+        emit_track_quad(i ni v_a v_b (0 - u_q) u_q)
+        i += 1
+    }
+    if cur_kind not=? -1 {
+        glEnd()
+    }
+    glDisable(GL_TEXTURE_2D)
+    return 0
+}
+
+# Side walls: vertical strips of SURF_WALL_HEIGHT extruded from each
+# waypoint segment edge. One quad per side per segment.
+let draw_walls = ():>void => {
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D __load_u32__(CHECKER_TEXID_WALL))
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
+    glBegin(GL_QUADS)
+    let i:int = 0
+    let wh:int = SURF_WALL_HEIGHT
+    loop i <? track_total_wp {
+        let ni:int = (i + 1) % track_total_wp
+        let cxa:int = wp_get_cx(i)
+        let cya:int = wp_get_cy(i)
+        let cza:int = wp_get_cz(i)
+        let cxb:int = wp_get_cx(ni)
+        let cyb:int = wp_get_cy(ni)
+        let czb:int = wp_get_cz(ni)
+        let fxa:int = wp_get_fx(i)
+        let fya:int = wp_get_fy(i)
+        let fza:int = wp_get_fz(i)
+        let uxa:int = wp_get_ux(i)
+        let uya:int = wp_get_uy(i)
+        let uza:int = wp_get_uz(i)
+        let rxa:int = fp_mul(fya uza) - fp_mul(fza uya)
+        let rya:int = fp_mul(fza uxa) - fp_mul(fxa uza)
+        let rza:int = fp_mul(fxa uya) - fp_mul(fya uxa)
+        let fxb_:int = wp_get_fx(ni)
+        let fyb_:int = wp_get_fy(ni)
+        let fzb_:int = wp_get_fz(ni)
+        let uxb:int = wp_get_ux(ni)
+        let uyb:int = wp_get_uy(ni)
+        let uzb:int = wp_get_uz(ni)
+        let rxb:int = fp_mul(fyb_ uzb) - fp_mul(fzb_ uyb)
+        let ryb:int = fp_mul(fzb_ uxb) - fp_mul(fxb_ uzb)
+        let rzb:int = fp_mul(fxb_ uyb) - fp_mul(fyb_ uxb)
+        let hw:int = wp_get_half_w(i)
+        let arc_a:int = wp_get_cumarc(i)
+        let arc_b:int = wp_get_cumarc(ni)
+        if arc_b <=? arc_a {
+            arc_b = arc_a + 1638400
+        }
+        # Same UV-as-Q16 convention as draw_track.
+        let v_a:int = (arc_a << 16) // (CHECKER_TILE * 2)
+        let v_b:int = (arc_b << 16) // (CHECKER_TILE * 2)
+        let v_top:int = (wh << 16) // (CHECKER_TILE * 2)
+
+        # Right wall: edge at +hw, extrude up by uxa*wh etc.
+        let exr_a_x:int = cxa + fp_mul(rxa hw)
+        let exr_a_y:int = cya + fp_mul(rya hw)
+        let exr_a_z:int = cza + fp_mul(rza hw)
+        let exr_b_x:int = cxb + fp_mul(rxb hw)
+        let exr_b_y:int = cyb + fp_mul(ryb hw)
+        let exr_b_z:int = czb + fp_mul(rzb hw)
+        let exr_a_top_x:int = exr_a_x + fp_mul(uxa wh)
+        let exr_a_top_y:int = exr_a_y + fp_mul(uya wh)
+        let exr_a_top_z:int = exr_a_z + fp_mul(uza wh)
+        let exr_b_top_x:int = exr_b_x + fp_mul(uxb wh)
+        let exr_b_top_y:int = exr_b_y + fp_mul(uyb wh)
+        let exr_b_top_z:int = exr_b_z + fp_mul(uzb wh)
+        world_vt3(exr_a_x exr_a_y exr_a_z 0 v_a)
+        world_vt3(exr_b_x exr_b_y exr_b_z 0 v_b)
+        world_vt3(exr_b_top_x exr_b_top_y exr_b_top_z v_top v_b)
+        world_vt3(exr_a_top_x exr_a_top_y exr_a_top_z v_top v_a)
+
+        # Left wall: edge at -hw.
+        let exl_a_x:int = cxa - fp_mul(rxa hw)
+        let exl_a_y:int = cya - fp_mul(rya hw)
+        let exl_a_z:int = cza - fp_mul(rza hw)
+        let exl_b_x:int = cxb - fp_mul(rxb hw)
+        let exl_b_y:int = cyb - fp_mul(ryb hw)
+        let exl_b_z:int = czb - fp_mul(rzb hw)
+        let exl_a_top_x:int = exl_a_x + fp_mul(uxa wh)
+        let exl_a_top_y:int = exl_a_y + fp_mul(uya wh)
+        let exl_a_top_z:int = exl_a_z + fp_mul(uza wh)
+        let exl_b_top_x:int = exl_b_x + fp_mul(uxb wh)
+        let exl_b_top_y:int = exl_b_y + fp_mul(uyb wh)
+        let exl_b_top_z:int = exl_b_z + fp_mul(uzb wh)
+        world_vt3(exl_a_x exl_a_y exl_a_z 0 v_a)
+        world_vt3(exl_a_top_x exl_a_top_y exl_a_top_z v_top v_a)
+        world_vt3(exl_b_top_x exl_b_top_y exl_b_top_z v_top v_b)
+        world_vt3(exl_b_x exl_b_y exl_b_z 0 v_b)
+        i += 1
+    }
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
+    return 0
+}
+
+# ---------- Cars: load/store + grid init -----------------------------------
+# Per-frame, car_load(idx) pulls everything into the global "scratch"
+# variables, the unified physics_step / ai_compute_input runs against
+# those, then car_store(idx) writes the new state back. This mirrors the
+# stride-packed pattern in demo_sdl_gl_fzero.
+
+let car_load = (idx:int):>void => {
+    let o:int = CAR_BUF + (idx * CAR_STRIDE)
+    cx = __load__(o + CARF_CX)
+    cy = __load__(o + CARF_CY)
+    cz = __load__(o + CARF_CZ)
+    cvx = __load__(o + CARF_CVX)
+    cvy = __load__(o + CARF_CVY)
+    cvz = __load__(o + CARF_CVZ)
+    fx = __load__(o + CARF_FX)
+    fy = __load__(o + CARF_FY)
+    fz = __load__(o + CARF_FZ)
+    ux = __load__(o + CARF_UX)
+    uy = __load__(o + CARF_UY)
+    uz = __load__(o + CARF_UZ)
+    rx = __load__(o + CARF_RX)
+    ry = __load__(o + CARF_RY)
+    rz = __load__(o + CARF_RZ)
+    energy = __load__(o + CARF_ENERGY)
+    speed_overcap = __load__(o + CARF_OVERCAP)
+    boost_active_frames = __load__(o + CARF_BOOST_FRAMES)
+    cur_wp = __load__(o + CARF_WP)
+    cur_lap = __load__(o + CARF_LAP)
+    cur_status = __load__(o + CARF_STATUS)
+    prev_fx = __load__(o + CARF_PREV_FX)
+    prev_fy = __load__(o + CARF_PREV_FY)
+    prev_fz = __load__(o + CARF_PREV_FZ)
+    bank = __load__(o + CARF_BANK)
+    was_airborne = __load__(o + CARF_AIRBORNE)
+    wall_contact = __load__(o + CARF_WALL_CONTACT)
+    in_boost_prev = __load__(o + CARF_BOOST_PREV)
+    top_speed_mult = __load__(o + CARF_TOP_SPEED_MULT)
+    ai_aim = __load__(o + CARF_AI_AIM)
+    ai_aim_timer = __load__(o + CARF_AI_AIM_TIMER)
+    ai_boost_thresh = __load__(o + CARF_AI_BOOST_THRESH)
+    return 0
+}
+
+let car_store = (idx:int):>void => {
+    let o:int = CAR_BUF + (idx * CAR_STRIDE)
+    __store__(cx (o + CARF_CX))
+    __store__(cy (o + CARF_CY))
+    __store__(cz (o + CARF_CZ))
+    __store__(cvx (o + CARF_CVX))
+    __store__(cvy (o + CARF_CVY))
+    __store__(cvz (o + CARF_CVZ))
+    __store__(fx (o + CARF_FX))
+    __store__(fy (o + CARF_FY))
+    __store__(fz (o + CARF_FZ))
+    __store__(ux (o + CARF_UX))
+    __store__(uy (o + CARF_UY))
+    __store__(uz (o + CARF_UZ))
+    __store__(rx (o + CARF_RX))
+    __store__(ry (o + CARF_RY))
+    __store__(rz (o + CARF_RZ))
+    __store__(energy (o + CARF_ENERGY))
+    __store__(speed_overcap (o + CARF_OVERCAP))
+    __store__(boost_active_frames (o + CARF_BOOST_FRAMES))
+    __store__(cur_wp (o + CARF_WP))
+    __store__(cur_lap (o + CARF_LAP))
+    __store__(cur_status (o + CARF_STATUS))
+    __store__(prev_fx (o + CARF_PREV_FX))
+    __store__(prev_fy (o + CARF_PREV_FY))
+    __store__(prev_fz (o + CARF_PREV_FZ))
+    __store__(bank (o + CARF_BANK))
+    __store__(was_airborne (o + CARF_AIRBORNE))
+    __store__(wall_contact (o + CARF_WALL_CONTACT))
+    __store__(in_boost_prev (o + CARF_BOOST_PREV))
+    __store__(top_speed_mult (o + CARF_TOP_SPEED_MULT))
+    __store__(ai_aim (o + CARF_AI_AIM))
+    __store__(ai_aim_timer (o + CARF_AI_AIM_TIMER))
+    __store__(ai_boost_thresh (o + CARF_AI_BOOST_THRESH))
+    let progress:int = (cur_lap * track_total_wp) + cur_wp
+    __store__(progress (o + CARF_PROGRESS))
+    return 0
+}
+
+let car_get_progress = (idx:int):>int => {
+    return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_PROGRESS)
+}
+let car_get_status = (idx:int):>int => {
+    return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_STATUS)
+}
+let car_get_lap = (idx:int):>int => {
+    return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_LAP)
+}
+let car_get_hue = (idx:int):>int => {
+    return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_HUE)
+}
+let car_get_cx = (idx:int):>int => {
+    return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_CX)
+}
+let car_get_cy = (idx:int):>int => {
+    return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_CY)
+}
+let car_get_cz = (idx:int):>int => {
+    return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_CZ)
+}
+
+# Initialise all 31 cars onto the start grid stripe. 8 rows of 4 cars
+# (last row only 3) staggered 7 m apart along -fwd, lateral spread of
+# +/-9 m. Player at idx 0 = front-left.
+let init_cars = ():>void => {
+    xs_seed(0xA17D00D5)
+    # Grid cars sit on the start straight (heading=0, fwd=-Z), so their
+    # starting (x, z) is just (col_offset, row_offset).
+    let i:int = 0
+    loop i <? MAX_CARS {
+        let row:int = i // 4
+        let col:int = i % 4
+        let lateral_q:int = ((col * 393216) - 589824)   # -9, -3, +3, +9 m
+        # Row 0 is closest to the start line; further-back cars get
+        # increasing +Z offset (since fwd is -Z, +Z = behind).
+        let behind_q:int = row * 524288                 # 8 m per row -> 56m total
+        let o:int = CAR_BUF + (i * CAR_STRIDE)
+        __store__(lateral_q (o + CARF_CX))
+        __store__(HOVER_HEIGHT (o + CARF_CY))
+        __store__(behind_q (o + CARF_CZ))
+        __store__(0 (o + CARF_CVX))
+        __store__(0 (o + CARF_CVY))
+        __store__(0 (o + CARF_CVZ))
+        __store__(0 (o + CARF_FX))
+        __store__(0 (o + CARF_FY))
+        __store__(0 - FP_ONE (o + CARF_FZ))
+        __store__(0 (o + CARF_UX))
+        __store__(FP_ONE (o + CARF_UY))
+        __store__(0 (o + CARF_UZ))
+        __store__(FP_ONE (o + CARF_RX))
+        __store__(0 (o + CARF_RY))
+        __store__(0 (o + CARF_RZ))
+        __store__(ENERGY_FULL (o + CARF_ENERGY))
+        __store__(0 (o + CARF_OVERCAP))
+        __store__(0 (o + CARF_BOOST_FRAMES))
+        __store__(0 (o + CARF_WP))
+        __store__(0 (o + CARF_LAP))
+        __store__(0 (o + CARF_PROGRESS))
+        __store__(0 (o + CARF_STATUS))
+        __store__(0 (o + CARF_PREV_FX))
+        __store__(0 (o + CARF_PREV_FY))
+        __store__(0 - FP_ONE (o + CARF_PREV_FZ))
+        __store__(0 (o + CARF_BANK))
+        # Hue: spread evenly across the wheel; player gets a fixed
+        # signature blue (hue ~0.62). Other cars get hue = i / MAX_CARS.
+        let hue:int = (i * FP_ONE) // MAX_CARS
+        if i =? 0 {
+            hue = 40632
+        }
+        __store__(hue (o + CARF_HUE))
+        __store__(1 (o + CARF_AIRBORNE))
+        __store__(0 (o + CARF_WALL_CONTACT))
+        __store__(0 (o + CARF_BOOST_PREV))
+        # Player keeps the baseline 1.0 ceiling and matches the original
+        # AI hardcodes. Each AI rolls its own traits so they spread out:
+        #   top_speed_mult   in [0.85, 1.05]   -- some wall-fast, some pokey
+        #   aim_offset       in [-8m, +8m]     -- aimed slightly off-center
+        #   aim_timer        in [60, 240]      -- frames until next re-roll
+        #   boost_thresh     in [0.85, 0.97]   -- looser AIs boost more often
+        if i =? 0 {
+            __store__(FP_ONE (o + CARF_TOP_SPEED_MULT))
+            __store__(0 (o + CARF_AI_AIM))
+            __store__(0 (o + CARF_AI_AIM_TIMER))
+            __store__(62259 (o + CARF_AI_BOOST_THRESH))
+        } else {
+            let mult:int = 55706 + xs_range(13108)               # 0.85 .. 1.05
+            let aim_q:int = (0 - 524288) + xs_range(1048576)     # -8 .. +8 m
+            let timer:int = 60 + xs_range(180)
+            let bthr:int = 55706 + xs_range(7864)                # 0.85 .. 0.97
+            __store__(mult (o + CARF_TOP_SPEED_MULT))
+            __store__(aim_q (o + CARF_AI_AIM))
+            __store__(timer (o + CARF_AI_AIM_TIMER))
+            __store__(bthr (o + CARF_AI_BOOST_THRESH))
+        }
+        i += 1
+    }
+    return 0
+}
+
+# ---------- Audio triggers (forward used by physics_step) ------------------
+# Implementation comes later; declare here as a simple flag so physics_step
+# can request a one-shot SFX even before the audio voices are wired up.
+let pending_sfx:int = -1
+let pending_explode_player:int = 0
+let current_car_is_player:int = 0
+
+let trigger_sfx = (kind:int):>void => {
+    pending_sfx = kind
+    return 0
+}
+
+# ---------- Orientation helpers --------------------------------------------
+
+let reortho_forward = ():>void => {
+    let f_dot_u:int = fp_mul(fx ux) + fp_mul(fy uy) + fp_mul(fz uz)
+    fx -= fp_mul(ux f_dot_u)
+    fy -= fp_mul(uy f_dot_u)
+    fz -= fp_mul(uz f_dot_u)
+    let m:int = fp_sqrt((fx * fx) + (fy * fy) + (fz * fz))
+    if m >? 1024 {
+        fx = fp_div(fx m)
+        fy = fp_div(fy m)
+        fz = fp_div(fz m)
+    }
+    return 0
+}
+
+let update_right = ():>void => {
+    rx = fp_mul(fy uz) - fp_mul(fz uy)
+    ry = fp_mul(fz ux) - fp_mul(fx uz)
+    rz = fp_mul(fx uy) - fp_mul(fy ux)
+    return 0
+}
+
+let rotate_forward = (angle:int):>void => {
+    let c:int = cos_fp(angle)
+    let s:int = sin_fp(angle)
+    let nfx:int = fp_mul(fx c) + fp_mul(rx s)
+    let nfy:int = fp_mul(fy c) + fp_mul(ry s)
+    let nfz:int = fp_mul(fz c) + fp_mul(rz s)
+    fx = nfx
+    fy = nfy
+    fz = nfz
+    update_right()
+    return 0
+}
+
+let normal_gap = (px:int py:int pz:int):>int => {
+    let target_x:int = surf_x + fp_mul(HOVER_HEIGHT surf_nx)
+    let target_y:int = surf_y + fp_mul(HOVER_HEIGHT surf_ny)
+    let target_z:int = surf_z + fp_mul(HOVER_HEIGHT surf_nz)
+    return fp_mul(px - target_x surf_nx) + fp_mul(py - target_y surf_ny) + fp_mul(pz - target_z surf_nz)
+}
+
+# ---------- Sparks ---------------------------------------------------------
+
+let spark_emit = (px:int py:int pz:int nx:int ny:int nz:int count:int):>void => {
+    let i:int = 0
+    loop i <? count {
+        let slot:int = SPARK_BUF + (spark_head * SPARK_STRIDE)
+        spark_head = (spark_head + 1) % SPARK_MAX
+        let speed:int = SPARK_BASE_SPEED + xs_range(SPARK_SPEED_VAR) - (SPARK_SPEED_VAR // 2)
+        let jx:int = xs_range(SPARK_JITTER * 2) - SPARK_JITTER
+        let jy:int = xs_range(SPARK_JITTER * 2) - SPARK_JITTER
+        let jz:int = xs_range(SPARK_JITTER * 2) - SPARK_JITTER
+        let vx:int = fp_mul(nx speed) + jx
+        let vy:int = fp_mul(ny speed) + jy + SPARK_UP_BIAS
+        let vz:int = fp_mul(nz speed) + jz
+        __store__(px slot)
+        __store__(py (slot + 8))
+        __store__(pz (slot + 16))
+        __store__(vx (slot + 24))
+        __store__(vy (slot + 32))
+        __store__(vz (slot + 40))
+        __store__(FP_ONE (slot + 48))
+        i += 1
+    }
+    return 0
+}
+
+let spark_step = ():>void => {
+    let i:int = 0
+    loop i <? SPARK_MAX {
+        let slot:int = SPARK_BUF + (i * SPARK_STRIDE)
+        let life:int = __load__(slot + 48)
+        if life >? 0 {
+            let x:int = __load__(slot)
+            let y:int = __load__(slot + 8)
+            let z:int = __load__(slot + 16)
+            let vx:int = __load__(slot + 24)
+            let vy:int = __load__(slot + 32)
+            let vz:int = __load__(slot + 40)
+            x += vx
+            y += vy
+            z += vz
+            vy -= SPARK_GRAVITY
+            life -= SPARK_LIFE_DECAY
+            if life <? 0 { life = 0 }
+            __store__(x slot)
+            __store__(y (slot + 8))
+            __store__(z (slot + 16))
+            __store__(vy (slot + 32))
+            __store__(life (slot + 48))
+        }
+        i += 1
+    }
+    return 0
+}
+
+let draw_sparks = ():>void => {
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA GL_ONE)
+    glDepthMask(0)
+    GL_LineWidth(GL_F32_FromInt(2))
+    glBegin(GL_LINES)
+    let i:int = 0
+    loop i <? SPARK_MAX {
+        let slot:int = SPARK_BUF + (i * SPARK_STRIDE)
+        let life:int = __load__(slot + 48)
+        if life >? 0 {
+            let x:int = __load__(slot)
+            let y:int = __load__(slot + 8)
+            let z:int = __load__(slot + 16)
+            let vx:int = __load__(slot + 24)
+            let vy:int = __load__(slot + 32)
+            let vz:int = __load__(slot + 40)
+            let tx:int = x - fp_mul(vx SPARK_TAIL_Q)
+            let ty:int = y - fp_mul(vy SPARK_TAIL_Q)
+            let tz:int = z - fp_mul(vz SPARK_TAIL_Q)
+            let g_q:int = fp_mul(life FP_ONE)
+            let b_q:int = fp_mul(life 19660)
+            let a_q:int = life
+            GL_Color4f(F32_ONE q16_to_f32(g_q) q16_to_f32(b_q) q16_to_f32(a_q))
+            world_v3(x y z)
+            GL_Color4f(F32_ONE q16_to_f32(g_q) q16_to_f32(b_q) F32_ZERO)
+            world_v3(tx ty tz)
+        }
+        i += 1
+    }
+    glEnd()
+    glDepthMask(1)
+    glDisable(GL_BLEND)
+    return 0
+}
+
+# ---------- Screen-space speed lines ---------------------------------------
+# Radial 2D streaks emanating from screen center, fade in above a boost-
+# norm threshold. State is per-streak (phase/angle/origin) so they don't
+# pinwheel; lifetimes wrap independently.
+
+let speed_lines_init = ():>void => {
+    xs_seed(0xC0FFEE)
+    let i:int = 0
+    loop i <? SPEED_LINES_N {
+        let slot:int = SPEED_LINE_STATE + (i * SPEED_LINE_STRIDE)
+        __store__(xs_range(FP_ONE) slot)
+        __store__(xs_range(ANG_TURN) (slot + 8))
+        __store__(xs_range(FP_ONE) (slot + 16))
+        i += 1
+    }
+    return 0
+}
+
+let draw_speed_lines = (sw:int sh:int):>void => {
+    if vis_boost_norm <=? SPEED_LINE_THRESHOLD {
+        return 0
+    }
+    let above:int = vis_boost_norm - SPEED_LINE_THRESHOLD
+    let intensity:int = (above << 16) // (FP_ONE - SPEED_LINE_THRESHOLD)
+    if intensity >? FP_ONE { intensity = FP_ONE }
+
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    GL_Ortho(q16_to_f64(0) q16_to_f64(sw * FP_ONE) q16_to_f64(sh * FP_ONE) q16_to_f64(0) q16_to_f64(0 - FP_ONE) q16_to_f64(FP_ONE))
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA)
+    GL_LineWidth(GL_F32_FromInt(2))
+
+    let cx_px:int = sw // 2
+    let cy_px:int = sh // 2
+    let max_r_px:int = fp_sqrt((cx_px * cx_px) + (cy_px * cy_px))
+
+    let rate:int = SPEED_LINE_RATE_Q
+    let peak_a:int = SPEED_LINE_PEAK_ALPHA_Q
+    let density:int = fp_mul(intensity intensity)
+    let active_count:int = (SPEED_LINES_N * density) // FP_ONE
+    let shake_px:int = (SPEED_LINE_SHAKE_PX * intensity) // FP_ONE
+
+    glBegin(GL_LINES)
+    let i:int = 0
+    loop i <? SPEED_LINES_N {
+        let slot:int = SPEED_LINE_STATE + (i * SPEED_LINE_STRIDE)
+        let phase:int = __load__(slot) + rate
+        let angle_idx:int = __load__(slot + 8)
+        let r_seed:int = __load__(slot + 16)
+        if phase >=? FP_ONE {
+            phase -= FP_ONE
+            angle_idx = xs_range(ANG_TURN)
+            r_seed = xs_range(FP_ONE)
+        }
+        __store__(phase slot)
+        __store__(angle_idx (slot + 8))
+        __store__(r_seed (slot + 16))
+
+        if i >=? active_count {
+            i += 1
+            continue
+        }
+
+        let cos_a:int = cos_fp(angle_idx)
+        let sin_a:int = sin_fp(angle_idx)
+
+        let abs_cos:int = cos_a
+        if abs_cos <? 0 { abs_cos = 0 - abs_cos }
+        let abs_sin:int = sin_a
+        if abs_sin <? 0 { abs_sin = 0 - abs_sin }
+        let edge_r:int = max_r_px
+        if abs_cos >? 1024 {
+            let d:int = (cx_px * FP_ONE) // abs_cos
+            if d <? edge_r { edge_r = d }
+        }
+        if abs_sin >? 1024 {
+            let d:int = (cy_px * FP_ONE) // abs_sin
+            if d <? edge_r { edge_r = d }
+        }
+
+        let start_r:int = (r_seed * edge_r) // FP_ONE
+        let end_r:int = edge_r + SPEED_LINE_OVERSHOOT_PX
+
+        let dx0:int = __signed_shr__(start_r * cos_a FP_SHIFT)
+        let dy0:int = __signed_shr__(start_r * sin_a FP_SHIFT)
+        let dx1:int = __signed_shr__(end_r * cos_a FP_SHIFT)
+        let dy1:int = __signed_shr__(end_r * sin_a FP_SHIFT)
+
+        let jx_phase:int = ((frame_count * 71) + (i * 197)) % ANG_TURN
+        let jy_phase:int = ((frame_count * 53) + (i * 311)) % ANG_TURN
+        let jx_q:int = sin_fp(jx_phase)
+        let jy_q:int = sin_fp(jy_phase)
+        let jx_px:int = __signed_shr__(jx_q * shake_px FP_SHIFT)
+        let jy_px:int = __signed_shr__(jy_q * shake_px FP_SHIFT)
+
+        let fade_q:int = sin_fp((phase * ANG_HALF_TURN) // FP_ONE)
+        let alpha_q:int = fp_mul(peak_a fade_q)
+        let alpha_f32:int = q16_to_f32(alpha_q)
+
+        GL_Color4f(F32_ONE F32_ONE F32_ONE F32_ZERO)
+        GL_Vertex3f(GL_F32_FromInt(cx_px + dx0 + jx_px) GL_F32_FromInt(cy_px + dy0 + jy_px) F32_ZERO)
+        GL_Color4f(F32_ONE F32_ONE F32_ONE alpha_f32)
+        GL_Vertex3f(GL_F32_FromInt(cx_px + dx1 + jx_px) GL_F32_FromInt(cy_px + dy1 + jy_px) F32_ZERO)
+        i += 1
+    }
+    glEnd()
+
+    glDisable(GL_BLEND)
+    glEnable(GL_DEPTH_TEST)
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+    glPopMatrix()
+    return 0
+}
+
+# ---------- Per-car AI input ------------------------------------------------
+# Compute synthetic in_thrust / in_steer_l/r / in_boost values for an AI
+# car. The AI looks 3 waypoints ahead, steers toward the projected target
+# and holds thrust. Boosts greedily when energy is high and the next two
+# segments form a straight stretch.
+let ai_lookahead:int = 3
+let ai_boost_energy_q:int = 26214      # 0.40
+
+let ai_compute_input = (idx:int):>void => {
+    # Re-roll the aim offset every aim_timer frames so each AI weaves a
+    # bit instead of glueing to the same lateral position. Use the raw
+    # half-width at the lookahead waypoint so the offset stays in-bounds.
+    ai_aim_timer -= 1
+    if ai_aim_timer <=? 0 {
+        let hw_q:int = wp_get_half_w((cur_wp + ai_lookahead) % track_total_wp)
+        let span:int = (hw_q * 12) // 10                  # +/- 60% of half-width
+        if span <? FP_ONE { span = FP_ONE }
+        ai_aim = xs_range(span * 2) - span
+        ai_aim_timer = 60 + xs_range(180)
+    }
+
+    let target_wp:int = (cur_wp + ai_lookahead) % track_total_wp
+    let tx:int = wp_get_cx(target_wp)
+    let ty:int = wp_get_cy(target_wp)
+    let tz:int = wp_get_cz(target_wp)
+    # Apply the per-car lateral aim offset along the lookahead waypoint's
+    # right axis. This is what gives each AI a slightly different racing
+    # line, refreshed every couple of seconds.
+    let tfx:int = wp_get_fx(target_wp)
+    let tfy:int = wp_get_fy(target_wp)
+    let tfz:int = wp_get_fz(target_wp)
+    let tux:int = wp_get_ux(target_wp)
+    let tuy:int = wp_get_uy(target_wp)
+    let tuz:int = wp_get_uz(target_wp)
+    let trx:int = fp_mul(tfy tuz) - fp_mul(tfz tuy)
+    let try_:int = fp_mul(tfz tux) - fp_mul(tfx tuz)
+    let trz:int = fp_mul(tfx tuy) - fp_mul(tfy tux)
+    tx += fp_mul(trx ai_aim)
+    ty += fp_mul(try_ ai_aim)
+    tz += fp_mul(trz ai_aim)
+
+    let dx:int = tx - cx
+    let dy:int = ty - cy
+    let dz:int = tz - cz
+    let dm:int = fp_sqrt((dx * dx) + (dy * dy) + (dz * dz))
+    if dm <? 1024 {
+        in_thrust = 1
+        in_steer_l = 0
+        in_steer_r = 0
+        in_boost = 0
+        in_brake = 0
+        in_strafe_l = 0
+        in_strafe_r = 0
+        in_respawn = 0
+        return 0
+    }
+    let dnx:int = fp_div(dx dm)
+    let dny:int = fp_div(dy dm)
+    let dnz:int = fp_div(dz dm)
+    # Steer toward the target: signed component along right axis.
+    let side:int = fp_mul(dnx rx) + fp_mul(dny ry) + fp_mul(dnz rz)
+    let steer_thresh:int = 1311           # 0.02 -- dead zone so the AI
+                                          # doesn't oscillate on dead-aim.
+    in_steer_l = 0
+    in_steer_r = 0
+    if side >? steer_thresh {
+        in_steer_r = 1
+    }
+    if side <? (0 - steer_thresh) {
+        in_steer_l = 1
+    }
+    in_thrust = 1
+    in_brake = 0
+    in_strafe_l = 0
+    in_strafe_r = 0
+    in_respawn = 0
+
+    # Boost decision: greedy, but each AI has its own straightness
+    # threshold so they don't all fire at the same moment.
+    in_boost = 0
+    if cur_status =? 0 {
+        if energy >? ai_boost_energy_q {
+            let aw:int = (cur_wp + 2) % track_total_wp
+            let afx:int = wp_get_fx(aw)
+            let afy:int = wp_get_fy(aw)
+            let afz:int = wp_get_fz(aw)
+            let fdot:int = fp_mul(fx afx) + fp_mul(fy afy) + fp_mul(fz afz)
+            if fdot >? ai_boost_thresh {
+                if speed_overcap =? 0 {
+                    in_boost = 1
+                }
+            }
+        }
+    }
+    return 0
+}
+
+# ---------- Physics step ---------------------------------------------------
+# Single shared per-car physics body. Reads in_* / cx / cy / cz / etc from
+# globals, runs surface/grip/thrust/boost/snap, and updates everything in
+# place. Track surface query uses cur_wp as a hint and may reassign it.
+
+let physics_step = ():>void => {
+    if cur_status not=? 0 {
+        # Exploded / finished: drift + decay.
+        cvx -= cvx // 64
+        cvy -= GRAVITY
+        cvz -= cvz // 64
+        cx += cvx
+        cy += cvy
+        cz += cvz
+        if cy <? GROUND_Y {
+            cy = GROUND_Y
+            cvy = 0
+        }
+        return 0
+    }
+
+    track_surface_query(cx cy cz cur_wp)
+    let gap_now:int = normal_gap(cx cy cz)
+    let pre_abs_t:int = surf_t
+    if pre_abs_t <? 0 { pre_abs_t = 0 - pre_abs_t }
+    let airborne:int = 0
+    if gap_now >? AIR_GAP { airborne = 1 }
+    if pre_abs_t >? (surf_half_w + OFF_TRACK_LAT) { airborne = 1 }
+
+    if (was_airborne not=? 0) and (airborne =? 0) {
+        let speed_xy:int = fp_sqrt((cvx * cvx) + (cvz * cvz))
+        let burst:int = 6 + (speed_xy // 32768)
+        if burst >? SPARK_MAX_BURST { burst = SPARK_MAX_BURST }
+        spark_emit(cx cy cz surf_nx surf_ny surf_nz burst)
+    }
+    was_airborne = airborne
+
+    if airborne =? 0 {
+        ux = surf_nx
+        uy = surf_ny
+        uz = surf_nz
+    } else {
+        let any_input:int = in_thrust or in_brake or in_steer_l or in_steer_r or in_strafe_l or in_strafe_r or in_boost
+        if any_input not=? 0 {
+            if uy <? -58982 {
+                if (ux >? -6553) and (ux <? 6553) {
+                    ux += 6553
+                }
+            }
+            ux += fp_mul((0 - ux) UP_ALPHA_AIR)
+            uy += fp_mul(FP_ONE - uy UP_ALPHA_AIR)
+            uz += fp_mul((0 - uz) UP_ALPHA_AIR)
+            let um:int = fp_sqrt((ux * ux) + (uy * uy) + (uz * uz))
+            if um >? 1024 {
+                ux = fp_div(ux um)
+                uy = fp_div(uy um)
+                uz = fp_div(uz um)
+            }
+        }
+    }
+    reortho_forward()
+    update_right()
+
+    let speed_xyz:int = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    let speed_norm:int = 0
+    if TOP_SPEED >? 0 {
+        speed_norm = (speed_xyz << 16) // (TOP_SPEED + 1)
+    }
+    if speed_norm >? FP_ONE { speed_norm = FP_ONE }
+    if speed_norm <? 0 { speed_norm = 0 }
+
+    let steer_in:int = 0
+    if in_steer_l not=? 0 { steer_in -= 1 }
+    if in_steer_r not=? 0 { steer_in += 1 }
+    let steer_rate:int = STEER_BASE - fp_mul((STEER_BASE - STEER_MIN) speed_norm)
+    if steer_in not=? 0 {
+        rotate_forward(steer_in * steer_rate)
+    }
+
+    let thrust_active:int = 0
+    if in_thrust not=? 0 {
+        cvx += fp_mul(fx THRUST_ACCEL)
+        cvy += fp_mul(fy THRUST_ACCEL)
+        cvz += fp_mul(fz THRUST_ACCEL)
+        thrust_active = 1
+    }
+
+    # Boost-fire rule. The player needs a fresh edge so holding the
+    # button doesn't spam boosts, but AI cars hold in_boost continuously,
+    # so for them we just gate on "no boost currently active". Either way
+    # the boost can't restack on itself. Pad surface gives a free impulse
+    # (no energy cost) every frame on it; recharge surface refills.
+    let player_edge:int = (in_boost not=? 0) and (in_boost_prev =? 0)
+    let ai_ready:int = (current_car_is_player =? 0) and (in_boost not=? 0) and (boost_active_frames =? 0)
+    let boost_pressed:int = player_edge or ai_ready
+    in_boost_prev = in_boost
+    if (boost_pressed not=? 0) and (energy >=? BOOST_COST_Q) and (boost_active_frames =? 0) {
+        cvx += fp_mul(fx BOOST_IMPULSE)
+        cvy += fp_mul(fy BOOST_IMPULSE)
+        cvz += fp_mul(fz BOOST_IMPULSE)
+        boost_active_frames = BOOST_DURATION
+        speed_overcap = BOOST_BONUS
+        energy -= BOOST_COST_Q
+        trigger_sfx(SFX_KIND_BOOST)
+    }
+    if boost_active_frames >? 0 {
+        boost_active_frames -= 1
+    }
+
+    if surf_kind =? SURF_BOOST {
+        cvx += fp_mul(fx PAD_IMPULSE)
+        cvy += fp_mul(fy PAD_IMPULSE)
+        cvz += fp_mul(fz PAD_IMPULSE)
+        if speed_overcap <? PAD_BOOST_OVERCAP {
+            speed_overcap = PAD_BOOST_OVERCAP
+        }
+    }
+    if surf_kind =? SURF_RECHARGE {
+        if energy <? ENERGY_FULL {
+            energy += RECHARGE_RATE
+            if energy >? ENERGY_FULL { energy = ENERGY_FULL }
+        }
+    }
+
+    if speed_overcap >? 0 {
+        let overcap_decay:int = BOOST_OVERCAP_STRAIGHT_DECAY
+        if steer_in not=? 0 { overcap_decay = BOOST_OVERCAP_TURN_DECAY }
+        speed_overcap -= overcap_decay
+        if speed_overcap <? 0 { speed_overcap = 0 }
+    }
+
+    if in_brake not=? 0 {
+        let fwd_speed:int = fp_mul(cvx fx) + fp_mul(cvy fy) + fp_mul(cvz fz)
+        if fwd_speed >? 0 {
+            let brake:int = BRAKE_DECEL
+            if brake >? fwd_speed { brake = fwd_speed }
+            cvx -= fp_mul(fx brake)
+            cvy -= fp_mul(fy brake)
+            cvz -= fp_mul(fz brake)
+        }
+    }
+
+    let strafe:int = 0
+    if in_strafe_l not=? 0 { strafe -= STRAFE_RATE }
+    if in_strafe_r not=? 0 { strafe += STRAFE_RATE }
+    if strafe not=? 0 {
+        cx += fp_mul(rx strafe)
+        cy += fp_mul(ry strafe)
+        cz += fp_mul(rz strafe)
+    }
+
+    if airborne =? 0 {
+        let side_dot:int = fp_mul(cvx rx) + fp_mul(cvy ry) + fp_mul(cvz rz)
+        let fwd_dot:int = fp_mul(cvx fx) + fp_mul(cvy fy) + fp_mul(cvz fz)
+        let new_side:int = side_dot - fp_mul(side_dot LATERAL_GRIP)
+        let plane_sq:int = (fwd_dot * fwd_dot) + (side_dot * side_dot)
+        let new_fwd_sq:int = plane_sq - (new_side * new_side)
+        let new_fwd:int = fwd_dot
+        if new_fwd_sq >? 0 {
+            new_fwd = fp_sqrt(new_fwd_sq)
+            if fwd_dot <? 0 { new_fwd = 0 - new_fwd }
+        }
+        let dfwd:int = new_fwd - fwd_dot
+        let dside:int = new_side - side_dot
+        cvx += fp_mul(fx dfwd) + fp_mul(rx dside)
+        cvy += fp_mul(fy dfwd) + fp_mul(ry dside)
+        cvz += fp_mul(fz dfwd) + fp_mul(rz dside)
+
+        let drag:int = DRAG_COAST
+        if thrust_active not=? 0 { drag = DRAG_THRUST }
+        let drag_force:int = fp_mul(new_fwd drag)
+        cvx -= fp_mul(fx drag_force)
+        cvy -= fp_mul(fy drag_force)
+        cvz -= fp_mul(fz drag_force)
+    }
+
+    let max_speed:int = fp_mul(TOP_SPEED top_speed_mult) + speed_overcap
+    let cur_speed:int = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    if cur_speed >? max_speed {
+        cvx = fp_div(fp_mul(cvx max_speed) cur_speed)
+        cvy = fp_div(fp_mul(cvy max_speed) cur_speed)
+        cvz = fp_div(fp_mul(cvz max_speed) cur_speed)
+    }
+
+    if airborne not=? 0 {
+        cvy -= GRAVITY
+    } else {
+        let cv_dot_n:int = fp_mul(cvx surf_nx) + fp_mul(cvy surf_ny) + fp_mul(cvz surf_nz)
+        cvx -= fp_mul(surf_nx cv_dot_n)
+        cvy -= fp_mul(surf_ny cv_dot_n)
+        cvz -= fp_mul(surf_nz cv_dot_n)
+        let proj:int = fp_mul(SLOPE_GRAVITY surf_ny)
+        cvx += fp_mul(surf_nx proj)
+        cvy += fp_mul(surf_ny proj) - SLOPE_GRAVITY
+        cvz += fp_mul(surf_nz proj)
+    }
+
+    cx += cvx
+    cy += cvy
+    cz += cvz
+
+    # Lateral wall clamp. After integration, re-query the surface; if the
+    # signed lateral exceeds half_w we slammed a wall: push back to the
+    # wall edge, kill the lateral velocity component, dock energy, spawn
+    # sparks. If energy drops to zero on this hit, the player explodes.
+    let pre_cvx:int = cvx
+    let pre_cvy:int = cvy
+    let pre_cvz:int = cvz
+    track_surface_query(cx cy cz cur_wp)
+    let abs_t:int = surf_t
+    if abs_t <? 0 { abs_t = 0 - abs_t }
+    let limit:int = surf_half_w - CRAFT_HALF_W
+    # If the craft is far past the side of the ribbon (e.g. flung off a
+    # loop into open space) treat it as fully airborne / off-track: no
+    # wall pushback, no damage, no scrape SFX, no down-snap. Gravity will
+    # bring it back -- usually onto something further along the track.
+    let off_track:int = abs_t >? (surf_half_w + OFF_TRACK_LAT)
+    if off_track not=? 0 {
+        wall_contact = 0
+    }
+    if (off_track =? 0) and (abs_t >? limit) {
+        # Right-axis at this point.
+        let q_rx:int = fp_mul(fy surf_nz) - fp_mul(fz surf_ny)
+        let q_ry:int = fp_mul(fz surf_nx) - fp_mul(fx surf_nz)
+        let q_rz:int = fp_mul(fx surf_ny) - fp_mul(fy surf_nx)
+        let dir:int = 1
+        if surf_t <? 0 { dir = 0 - 1 }
+        let push:int = abs_t - limit
+        cx -= dir * fp_mul(q_rx push)
+        cy -= dir * fp_mul(q_ry push)
+        cz -= dir * fp_mul(q_rz push)
+        let lat_v:int = fp_mul(cvx q_rx) + fp_mul(cvy q_ry) + fp_mul(cvz q_rz)
+        if (dir >? 0) and (lat_v >? 0) {
+            cvx -= fp_mul(q_rx lat_v)
+            cvy -= fp_mul(q_ry lat_v)
+            cvz -= fp_mul(q_rz lat_v)
+        }
+        if (dir <? 0) and (lat_v <? 0) {
+            cvx -= fp_mul(q_rx lat_v)
+            cvy -= fp_mul(q_ry lat_v)
+            cvz -= fp_mul(q_rz lat_v)
+        }
+        # Damage: a small chunk on the frame contact starts, then a much
+        # smaller drain per frame for the duration of the scrape. Hitting
+        # the wall while already empty triggers the explosion.
+        let was_zero:int = energy <=? 0
+        let cost:int = WALL_DRAIN
+        if wall_contact =? 0 {
+            cost = WALL_HIT_INITIAL
+            trigger_sfx(SFX_KIND_WALL)
+        }
+        energy -= cost
+        if energy <? 0 { energy = 0 }
+        wall_contact = 1
+        if was_zero not=? 0 {
+            cur_status = 1
+            if current_car_is_player not=? 0 {
+                pending_explode_player = 1
+            }
+            spark_emit(cx cy cz q_rx q_ry q_rz SPARK_MAX_BURST)
+        }
+    } else {
+        wall_contact = 0
+    }
+
+    let dvx:int = cvx - pre_cvx
+    let dvy:int = cvy - pre_cvy
+    let dvz:int = cvz - pre_cvz
+    let imp_mag:int = fp_sqrt((dvx * dvx) + (dvy * dvy) + (dvz * dvz))
+    if imp_mag >? SPARK_IMPULSE_THRESHOLD {
+        let burst:int = (imp_mag - SPARK_IMPULSE_THRESHOLD) // SPARK_IMPULSE_PER_PARTICLE + 1
+        if burst >? SPARK_MAX_BURST { burst = SPARK_MAX_BURST }
+        let nx:int = fp_div(dvx imp_mag)
+        let ny:int = fp_div(dvy imp_mag)
+        let nz:int = fp_div(dvz imp_mag)
+        spark_emit(cx cy cz nx ny nz burst)
+    }
+
+    track_surface_query(cx cy cz cur_wp)
+    let post_abs_t:int = surf_t
+    if post_abs_t <? 0 { post_abs_t = 0 - post_abs_t }
+    let post_off_track:int = post_abs_t >? (surf_half_w + OFF_TRACK_LAT)
+    let post_gap:int = normal_gap(cx cy cz)
+    if (post_off_track =? 0) and (post_gap <=? AIR_GAP) {
+        let snap_amt:int = fp_mul(0 - post_gap SNAP_ALPHA)
+        cx += fp_mul(snap_amt surf_nx)
+        cy += fp_mul(snap_amt surf_ny)
+        cz += fp_mul(snap_amt surf_nz)
+    }
+
+    # Lap counting: detect a forward wrap from a high wp to a low wp.
+    let new_wp:int = surf_wp
+    if (cur_wp >? ((3 * track_total_wp) // 4)) and (new_wp <? (track_total_wp // 4)) {
+        cur_lap += 1
+        trigger_sfx(SFX_KIND_LAP)
+    }
+    if (new_wp >? ((3 * track_total_wp) // 4)) and (cur_wp <? (track_total_wp // 4)) {
+        # Backward wrap (reversed direction); dock the lap.
+        cur_lap -= 1
+    }
+    cur_wp = new_wp
+
+    return 0
+}
+
+# ---------- Player chase camera --------------------------------------------
+
+let update_chase = ():>void => {
+    let dfx:int = fx - prev_fx
+    let dfy:int = fy - prev_fy
+    let dfz:int = fz - prev_fz
+    let yaw_rate_q:int = fp_mul(dfx rx) + fp_mul(dfy ry) + fp_mul(dfz rz)
+
+    let speed:int = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    vis_speed = speed
+    vis_boost_norm = (speed << 16) // (TOP_SPEED + BOOST_BONUS)
+    let sn:int = 0
+    if TOP_SPEED >? 0 {
+        sn = (speed << 16) // TOP_SPEED
+    }
+    if sn >? FP_ONE { sn = FP_ONE }
+    vis_speed_norm = sn
+
+    let yaw_rate:int = __signed_shr__(yaw_rate_q * RAW_PER_RAD FP_SHIFT)
+    let bank_target:int = fp_mul(yaw_rate * BANK_GAIN sn)
+    if bank_target >? BANK_MAX { bank_target = BANK_MAX }
+    if bank_target <? (0 - BANK_MAX) { bank_target = 0 - BANK_MAX }
+    bank += fp_mul(bank_target - bank BANK_ALPHA)
+
+    let cos_b:int = cos_fp(bank)
+    let sin_b:int = sin_fp(bank)
+    vfx = fx
+    vfy = fy
+    vfz = fz
+    vrx = fp_mul(rx cos_b) - fp_mul(ux sin_b)
+    vry = fp_mul(ry cos_b) - fp_mul(uy sin_b)
+    vrz = fp_mul(rz cos_b) - fp_mul(uz sin_b)
+    vux = fp_mul(ux cos_b) + fp_mul(rx sin_b)
+    vuy = fp_mul(uy cos_b) + fp_mul(ry sin_b)
+    vuz = fp_mul(uz cos_b) + fp_mul(rz sin_b)
+
+    prev_fx = fx
+    prev_fy = fy
+    prev_fz = fz
+
+    cam_fx += fp_mul(fx - cam_fx ORIENT_ALPHA)
+    cam_fy += fp_mul(fy - cam_fy ORIENT_ALPHA)
+    cam_fz += fp_mul(fz - cam_fz ORIENT_ALPHA)
+    cam_ux += fp_mul(ux - cam_ux ORIENT_ALPHA)
+    cam_uy += fp_mul(uy - cam_uy ORIENT_ALPHA)
+    cam_uz += fp_mul(uz - cam_uz ORIENT_ALPHA)
+    let cum:int = fp_sqrt((cam_ux * cam_ux) + (cam_uy * cam_uy) + (cam_uz * cam_uz))
+    if cum >? 1024 {
+        cam_ux = fp_div(cam_ux cum)
+        cam_uy = fp_div(cam_uy cum)
+        cam_uz = fp_div(cam_uz cum)
+    }
+    let cf_dot_cu:int = fp_mul(cam_fx cam_ux) + fp_mul(cam_fy cam_uy) + fp_mul(cam_fz cam_uz)
+    cam_fx -= fp_mul(cam_ux cf_dot_cu)
+    cam_fy -= fp_mul(cam_uy cf_dot_cu)
+    cam_fz -= fp_mul(cam_uz cf_dot_cu)
+    let cfm:int = fp_sqrt((cam_fx * cam_fx) + (cam_fy * cam_fy) + (cam_fz * cam_fz))
+    if cfm >? 1024 {
+        cam_fx = fp_div(cam_fx cfm)
+        cam_fy = fp_div(cam_fy cfm)
+        cam_fz = fp_div(cam_fz cfm)
+    }
+
+    let target_cam_x:int = cx - fp_mul(CAM_BACK cam_fx) + fp_mul(CAM_LIFT cam_ux)
+    let target_cam_y:int = cy - fp_mul(CAM_BACK cam_fy) + fp_mul(CAM_LIFT cam_uy)
+    let target_cam_z:int = cz - fp_mul(CAM_BACK cam_fz) + fp_mul(CAM_LIFT cam_uz)
+    cam_x += fp_mul(target_cam_x - cam_x POS_ALPHA)
+    cam_y += fp_mul(target_cam_y - cam_y POS_ALPHA)
+    cam_z += fp_mul(target_cam_z - cam_z POS_ALPHA)
+
+    let scale:int = FP_ONE + fp_mul(sn FOV_PUNCH)
+    cur_fov_top_q16 = fp_mul(131072 scale)
+    return 0
+}
+
+# ---------- Engine trail (player only) -------------------------------------
+# Ring buffer of recent exhaust positions + right vectors. Trail samples
+# come from the physics frame (not the visual bob/lean) so the ribbon
+# tracks the real path. Only the player feeds the trail; AI cars don't.
+
+let trail_push = ():>void => {
+    let ex:int = cx + fp_mul(ux TRAIL_OFFSET_UP) - fp_mul(fx TRAIL_OFFSET_BACK)
+    let ey:int = cy + fp_mul(uy TRAIL_OFFSET_UP) - fp_mul(fy TRAIL_OFFSET_BACK)
+    let ez:int = cz + fp_mul(uz TRAIL_OFFSET_UP) - fp_mul(fz TRAIL_OFFSET_BACK)
+    let boost_q:int = 0
+    if boost_active_frames >? 0 {
+        boost_q = (boost_active_frames * FP_ONE) // BOOST_DURATION
+    }
+    let o:int = TRAIL_BUF + (trail_head * TRAIL_STRIDE)
+    __store__(ex o)
+    __store__(ey (o + 8))
+    __store__(ez (o + 16))
+    __store__(rx (o + 24))
+    __store__(ry (o + 32))
+    __store__(rz (o + 40))
+    __store__(boost_q (o + 48))
+    trail_head = (trail_head + 1) % TRAIL_LEN
+    if trail_count <? TRAIL_LEN {
+        trail_count += 1
+    }
+    return 0
+}
+
+let draw_trail = ():>void => {
+    if trail_count <? 2 {
+        return 0
+    }
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA)
+    glDepthMask(0)
+
+    let oldest:int = 0
+    if trail_count =? TRAIL_LEN {
+        oldest = trail_head
+    }
+
+    glBegin(GL_QUAD_STRIP)
+    let i:int = 0
+    let denom:int = trail_count - 1
+    loop i <? trail_count {
+        let idx:int = (oldest + i) % TRAIL_LEN
+        let o:int = TRAIL_BUF + (idx * TRAIL_STRIDE)
+        let px:int = __load__(o)
+        let py:int = __load__((o + 8))
+        let pz:int = __load__((o + 16))
+        let drx:int = __load__((o + 24))
+        let dry:int = __load__((o + 32))
+        let drz:int = __load__((o + 40))
+        let boost_q:int = __load__(o + 48)
+
+        let age_q:int = (i * FP_ONE) // denom
+        let w_scale:int = FP_QUARTER + ((age_q * 3) // 4)
+        let w_boost:int = FP_ONE + fp_mul(boost_q 98304)
+        let w:int = fp_mul(TRAIL_HALF_W fp_mul(w_scale w_boost))
+        let wx:int = fp_mul(drx w)
+        let wy:int = fp_mul(dry w)
+        let wz:int = fp_mul(drz w)
+
+        let a_q:int = fp_mul(fp_mul(age_q age_q) age_q)
+        a_q = fp_mul(a_q 55705)
+        let a_boost_floor:int = fp_mul(boost_q 45875)
+        if a_q <? a_boost_floor {
+            a_q = a_boost_floor
+        }
+        let af:int = q16_to_f32(a_q)
+
+        let r_base:int = 39321 + ((age_q * 26214) // FP_ONE)
+        let g_base:int = 6553 + ((age_q * 39322) // FP_ONE)
+        let b_base:int = (age_q * 13107) // FP_ONE
+
+        let r_aft:int = 26214 + ((age_q * 39322) // FP_ONE)
+        let g_aft:int = 45875 + ((age_q * 19661) // FP_ONE)
+        let b_aft:int = FP_ONE
+
+        let r_q:int = r_base + fp_mul(boost_q (r_aft - r_base))
+        let g_q:int = g_base + fp_mul(boost_q (g_aft - g_base))
+        let b_q:int = b_base + fp_mul(boost_q (b_aft - b_base))
+        GL_Color4f(q16_to_f32(r_q) q16_to_f32(g_q) q16_to_f32(b_q) af)
+
+        world_v3(px - wx py - wy pz - wz)
+        world_v3(px + wx py + wy pz + wz)
+        i += 1
+    }
+    glEnd()
+
+    glDepthMask(1)
+    glDisable(GL_BLEND)
+    return 0
+}
+
+# ---------- Hover bob + craft drawing --------------------------------------
+
+let bob_off_x:int = 0
+let bob_off_y:int = 0
+let bob_off_z:int = 0
+
+let update_bob = ():>void => {
+    let phase:int = (frame_count * BOB_FREQ_NUM) // BOB_FREQ_DEN
+    phase = phase % ANG_TURN
+    if phase <? 0 { phase += ANG_TURN }
+    let s:int = sin_fp(phase)
+    let amp:int = fp_mul(BOB_AMP s)
+    bob_off_x = fp_mul(ux amp)
+    bob_off_y = fp_mul(uy amp)
+    bob_off_z = fp_mul(uz amp)
+    return 0
+}
+
+let craft_emit = (lx:int ly:int lz:int):>void => {
+    let wx:int = cx + bob_off_x + fp_mul(vrx lx) + fp_mul(vux ly) + fp_mul(vfx lz)
+    let wy:int = cy + bob_off_y + fp_mul(vry lx) + fp_mul(vuy ly) + fp_mul(vfy lz)
+    let wz:int = cz + bob_off_z + fp_mul(vrz lx) + fp_mul(vuz ly) + fp_mul(vfz lz)
+    world_v3(wx wy wz)
+    return 0
+}
+
+# HSV -> RGB at full saturation, returning Q16 channels via globals.
+let car_col_r:int = 0
+let car_col_g:int = 0
+let car_col_b:int = 0
+
+let hsv_to_rgb = (h_q:int):>void => {
+    let h:int = h_q
+    if h <? 0 { h = 0 }
+    if h >=? FP_ONE { h = h % FP_ONE }
+    let h6:int = h * 6
+    let sector:int = h6 // FP_ONE
+    let f:int = h6 - (sector * FP_ONE)
+    let v:int = FP_ONE
+    let s:int = 49152                        # 0.75 sat
+    let p:int = fp_mul(v FP_ONE - s)
+    let q:int = fp_mul(v FP_ONE - fp_mul(s f))
+    let t:int = fp_mul(v FP_ONE - fp_mul(s FP_ONE - f))
+    if sector =? 0 { car_col_r = v   car_col_g = t   car_col_b = p }
+    if sector =? 1 { car_col_r = q   car_col_g = v   car_col_b = p }
+    if sector =? 2 { car_col_r = p   car_col_g = v   car_col_b = t }
+    if sector =? 3 { car_col_r = p   car_col_g = q   car_col_b = v }
+    if sector =? 4 { car_col_r = t   car_col_g = p   car_col_b = v }
+    if sector >=? 5 { car_col_r = v   car_col_g = p   car_col_b = q }
+    return 0
+}
+
+# Draw the craft using the current scratch globals (cx/cy/cz + vfx/vrx/vux).
+# body_hue_q is the team color the body / nozzle base color is derived from.
+let draw_craft = (body_hue_q:int boost_q:int):>void => {
+    update_bob()
+    let nose_z:int = 229376
+    let tail_z:int = 0 - 131072
+    let wing_x:int = 163840
+    let body_y_top:int = 39321
+    let body_y_bot:int = 0 - 13107
+    let canopy_z:int = 65536
+    let canopy_y:int = 78643
+
+    hsv_to_rgb(body_hue_q)
+    let body_r_q:int = car_col_r
+    let body_g_q:int = car_col_g
+    let body_b_q:int = car_col_b
+    let belly_r_q:int = (body_r_q * 4) // 10
+    let belly_g_q:int = (body_g_q * 4) // 10
+    let belly_b_q:int = (body_b_q * 4) // 10
+    let side_r_q:int = (body_r_q * 7) // 10
+    let side_g_q:int = (body_g_q * 7) // 10
+    let side_b_q:int = (body_b_q * 7) // 10
+
+    let body_r:int = q16_to_f32(body_r_q)
+    let body_g:int = q16_to_f32(body_g_q)
+    let body_b:int = q16_to_f32(body_b_q)
+    let belly_r:int = q16_to_f32(belly_r_q)
+    let belly_g:int = q16_to_f32(belly_g_q)
+    let belly_b:int = q16_to_f32(belly_b_q)
+    let side_r:int = q16_to_f32(side_r_q)
+    let side_g:int = q16_to_f32(side_g_q)
+    let side_b:int = q16_to_f32(side_b_q)
+    let canopy_r:int = q16_to_f32(58982)
+    let canopy_g:int = q16_to_f32(58982)
+    let canopy_b:int = F32_ONE
+
+    let aft_r:int = 58982
+    let aft_g:int = FP_ONE
+    let aft_b:int = FP_ONE
+    let glow_r_q:int = body_r_q + fp_mul(boost_q (aft_r - body_r_q))
+    let glow_g_q:int = body_g_q + fp_mul(boost_q (aft_g - body_g_q))
+    let glow_b_q:int = body_b_q + fp_mul(boost_q (aft_b - body_b_q))
+    let glow_r:int = q16_to_f32(glow_r_q)
+    let glow_g:int = q16_to_f32(glow_g_q)
+    let glow_b:int = q16_to_f32(glow_b_q)
+
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(body_r body_g body_b)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(wing_x body_y_top tail_z)
+    glEnd()
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(belly_r belly_g belly_b)
+    craft_emit(0 body_y_bot nose_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    glEnd()
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(side_r side_g side_b)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 body_y_bot nose_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    glEnd()
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(side_r side_g side_b)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(wing_x body_y_top tail_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 body_y_bot nose_z)
+    glEnd()
+    glBegin(GL_TRIANGLES)
+    GL_Color3f(canopy_r canopy_g canopy_b)
+    craft_emit(0 canopy_y canopy_z)
+    craft_emit(0 - 26214 body_y_top 0)
+    craft_emit(26214 body_y_top 0)
+    glEnd()
+    let glow_scale:int = FP_ONE + fp_mul(boost_q 45875)
+    let glow_x:int = fp_mul(65536 glow_scale)
+    let glow_y_bot:int = 0
+    let glow_y_top:int = fp_mul(26214 glow_scale)
+    glBegin(GL_QUADS)
+    GL_Color3f(glow_r glow_g glow_b)
+    craft_emit(0 - glow_x glow_y_bot tail_z)
+    craft_emit(glow_x glow_y_bot tail_z)
+    craft_emit(glow_x glow_y_top tail_z)
+    craft_emit(0 - glow_x glow_y_top tail_z)
+    glEnd()
+    return 0
+}
+
+# Draw all 31 cars. Player (idx 0) uses the visual basis populated by
+# update_chase (banked roll + bob). AI cars use their physics basis with
+# zero bank.
+let draw_all_cars = ():>void => {
+    let saved_cx:int = cx
+    let saved_cy:int = cy
+    let saved_cz:int = cz
+    let saved_vfx:int = vfx
+    let saved_vfy:int = vfy
+    let saved_vfz:int = vfz
+    let saved_vrx:int = vrx
+    let saved_vry:int = vry
+    let saved_vrz:int = vrz
+    let saved_vux:int = vux
+    let saved_vuy:int = vuy
+    let saved_vuz:int = vuz
+
+    # Player first (uses the chase-basis already in v* globals).
+    car_load(0)
+    let player_boost_q:int = 0
+    if boost_active_frames >? 0 {
+        player_boost_q = (boost_active_frames * FP_ONE) // BOOST_DURATION
+    }
+    let player_hue:int = car_get_hue(0)
+    if cur_status =? 0 {
+        draw_craft(player_hue player_boost_q)
+    }
+
+    # AI cars: draw using their own physics basis (no bank lean for AI).
+    let i:int = 1
+    loop i <? MAX_CARS {
+        car_load(i)
+        if cur_status =? 0 {
+            vfx = fx
+            vfy = fy
+            vfz = fz
+            vrx = rx
+            vry = ry
+            vrz = rz
+            vux = ux
+            vuy = uy
+            vuz = uz
+            let bq:int = 0
+            if boost_active_frames >? 0 {
+                bq = (boost_active_frames * FP_ONE) // BOOST_DURATION
+            }
+            draw_craft(car_get_hue(i) bq)
+        }
+        i += 1
+    }
+
+    cx = saved_cx
+    cy = saved_cy
+    cz = saved_cz
+    vfx = saved_vfx
+    vfy = saved_vfy
+    vfz = saved_vfz
+    vrx = saved_vrx
+    vry = saved_vry
+    vrz = saved_vrz
+    vux = saved_vux
+    vuy = saved_vuy
+    vuz = saved_vuz
+    car_load(0)
+    return 0
+}
+
+# ---------- HUD: 7-segment glyphs + composers -----------------------------
+
+let hud_quad = (x0:int y0:int x1:int y1:int):>void => {
+    GL_Vertex3f(GL_F32_FromInt(x0) GL_F32_FromInt(y0) F32_ZERO)
+    GL_Vertex3f(GL_F32_FromInt(x0) GL_F32_FromInt(y1) F32_ZERO)
+    GL_Vertex3f(GL_F32_FromInt(x1) GL_F32_FromInt(y1) F32_ZERO)
+    GL_Vertex3f(GL_F32_FromInt(x1) GL_F32_FromInt(y0) F32_ZERO)
+    return 0
+}
+
+# 7-seg bits: T=1 TL=2 TR=4 M=8 BL=16 BR=32 B=64
+let digit_mask = (d:int):>int => {
+    if d =? 0 { return 119 }
+    if d =? 1 { return 36 }
+    if d =? 2 { return 93 }
+    if d =? 3 { return 109 }
+    if d =? 4 { return 46 }
+    if d =? 5 { return 107 }
+    if d =? 6 { return 123 }
+    if d =? 7 { return 37 }
+    if d =? 8 { return 127 }
+    if d =? 9 { return 111 }
+    return 0
+}
+
+# 7-seg masks for the small set of letters we render in the menus / HUD.
+# Approximated where needed (M/W/V/X/K/Z fall back to similar shapes).
+let letter_mask = (c:int):>int => {
+    if c =? 65 { return 63 }    # A: T,TL,TR,M,BL,BR
+    if c =? 66 { return 122 }   # b: TL,M,BL,BR,B
+    if c =? 67 { return 83 }    # C: T,TL,BL,B
+    if c =? 68 { return 124 }   # d: TR,M,BL,BR,B
+    if c =? 69 { return 91 }    # E: T,TL,M,BL,B
+    if c =? 70 { return 27 }    # F: T,TL,M,BL
+    if c =? 71 { return 115 }   # G: T,TL,BL,BR,B
+    if c =? 72 { return 62 }    # H: TL,TR,M,BL,BR
+    if c =? 73 { return 18 }    # I: TL,BL
+    if c =? 74 { return 116 }   # J: TR,BL,BR,B
+    if c =? 76 { return 82 }    # L: TL,BL,B
+    if c =? 77 { return 39 }    # M: T,TL,TR,BL (approx)
+    if c =? 78 { return 56 }    # n: M,BL,BR
+    if c =? 79 { return 119 }   # O: full ring
+    if c =? 80 { return 31 }    # P: T,TL,TR,M,BL
+    if c =? 81 { return 47 }    # q: T,TL,TR,M,BR
+    if c =? 82 { return 24 }    # r: M,BL
+    if c =? 83 { return 107 }   # S: T,TL,M,BR,B
+    if c =? 84 { return 90 }    # t: TL,M,BL,B
+    if c =? 85 { return 118 }   # U: TL,TR,BL,BR,B
+    if c =? 86 { return 116 }   # V (approx as J)
+    if c =? 89 { return 110 }   # y: TL,TR,M,BR,B
+    if c =? 90 { return 93 }    # Z (= 2)
+    return 0
+}
+
+let draw_glyph_mask = (x:int y:int mask:int w:int h:int t:int):>void => {
+    let half_t:int = t // 2
+    let mid:int = y + (h // 2)
+    if (mask and 1) not=? 0 {
+        hud_quad(x + t y x + w - t y + t)
+    }
+    if (mask and 2) not=? 0 {
+        hud_quad(x y + t x + t mid - half_t)
+    }
+    if (mask and 4) not=? 0 {
+        hud_quad(x + w - t y + t x + w mid - half_t)
+    }
+    if (mask and 8) not=? 0 {
+        hud_quad(x + t mid - half_t x + w - t mid + half_t)
+    }
+    if (mask and 16) not=? 0 {
+        hud_quad(x mid + half_t x + t y + h - t)
+    }
+    if (mask and 32) not=? 0 {
+        hud_quad(x + w - t mid + half_t x + w y + h - t)
+    }
+    if (mask and 64) not=? 0 {
+        hud_quad(x + t y + h - t x + w - t y + h)
+    }
+    return 0
+}
+
+let draw_digit = (x:int y:int d:int w:int h:int t:int):>void => {
+    draw_glyph_mask(x y digit_mask(d) w h t)
+    return 0
+}
+
+let draw_number_right = (right_x:int y:int value:int max_digits:int w:int h:int t:int gap:int):>void => {
+    if value <? 0 { value = 0 }
+    let v:int = value
+    let i:int = 0
+    loop i <? max_digits {
+        let d:int = v % 10
+        v = v // 10
+        let dx:int = right_x - w - (i * (w + gap))
+        draw_digit(dx y d w h t)
+        i += 1
+        if v =? 0 { return 0 }
+    }
+    return 0
+}
+
+# Render a null-terminated ASCII string starting at (x, y). Spaces (32)
+# advance without drawing. Anything not in our glyph table renders as
+# a single horizontal dash (mid bar).
+let draw_text_left = (x:int y:int s:int w:int h:int t:int gap:int):>void => {
+    let i:int = 0
+    let cur_x:int = x
+    loop __load_u8__(s + i) not=? 0 {
+        let c:int = __load_u8__(s + i)
+        if c =? 32 {
+            cur_x += (w + gap)
+        } else {
+            let m:int = 0
+            if (c >=? 48) and (c <=? 57) {
+                m = digit_mask(c - 48)
+            } else {
+                m = letter_mask(c)
+                if m =? 0 { m = 8 }              # placeholder dash
+            }
+            draw_glyph_mask(cur_x y m w h t)
+            cur_x += (w + gap)
+        }
+        i += 1
+    }
+    return 0
+}
+
+let text_width_px = (s:int w:int gap:int):>int => {
+    let i:int = 0
+    let n:int = 0
+    loop __load_u8__(s + i) not=? 0 {
+        n += 1
+        i += 1
+    }
+    if n =? 0 { return 0 }
+    return (n * w) + ((n - 1) * gap)
+}
+
+let draw_text_centered = (cx_px:int y:int s:int w:int h:int t:int gap:int):>void => {
+    let tw:int = text_width_px(s w gap)
+    draw_text_left(cx_px - (tw // 2) y s w h t gap)
+    return 0
+}
+
+let draw_energy_bar = (sw:int sh:int):>void => {
+    let bar_x:int = sw - HUD_MARGIN_PX - HUD_BAR_W_PX
+    let bar_y:int = HUD_MARGIN_PX
+    let bw:int = HUD_BAR_W_PX
+    let bh:int = HUD_BAR_H_PX
+    let bdr:int = HUD_BAR_BORDER_PX
+
+    GL_Color4f(F32_ZERO F32_ZERO F32_ZERO q16_to_f32(45875))
+    glBegin(GL_QUADS)
+    hud_quad(bar_x - bdr bar_y - bdr bar_x + bw + bdr bar_y + bh + bdr)
+    glEnd()
+
+    let fill_w:int = (bw * energy) // ENERGY_FULL
+    if fill_w >? 0 {
+        let r_right:int = FP_ONE
+        let g_right:int = 0
+        if energy >=? FP_HALF {
+            r_right = FP_ONE - ((energy - FP_HALF) << 1)
+            if r_right <? 0 { r_right = 0 }
+            g_right = FP_ONE
+        } else {
+            r_right = FP_ONE
+            g_right = energy << 1
+            if g_right >? FP_ONE { g_right = FP_ONE }
+        }
+
+        let alpha_q:int = 60293
+        if boost_active_frames >? 0 {
+            let phase:int = (boost_active_frames * 64) % ANG_TURN
+            let s:int = sin_fp(phase)
+            alpha_q = 52428 + (s // 8)
+            if alpha_q >? FP_ONE { alpha_q = FP_ONE }
+            if alpha_q <? 0 { alpha_q = 0 }
+        }
+
+        glBegin(GL_QUADS)
+        GL_Color4f(F32_ONE F32_ZERO F32_ZERO q16_to_f32(alpha_q))
+        GL_Vertex3f(GL_F32_FromInt(bar_x) GL_F32_FromInt(bar_y) F32_ZERO)
+        GL_Vertex3f(GL_F32_FromInt(bar_x) GL_F32_FromInt(bar_y + bh) F32_ZERO)
+        GL_Color4f(q16_to_f32(r_right) q16_to_f32(g_right) F32_ZERO q16_to_f32(alpha_q))
+        GL_Vertex3f(GL_F32_FromInt(bar_x + fill_w) GL_F32_FromInt(bar_y + bh) F32_ZERO)
+        GL_Vertex3f(GL_F32_FromInt(bar_x + fill_w) GL_F32_FromInt(bar_y) F32_ZERO)
+        glEnd()
+    }
+
+    GL_Color4f(F32_ONE F32_ONE F32_ONE q16_to_f32(45875))
+    glBegin(GL_QUADS)
+    hud_quad(bar_x - bdr bar_y - bdr bar_x + bw + bdr bar_y)
+    hud_quad(bar_x - bdr bar_y + bh bar_x + bw + bdr bar_y + bh + bdr)
+    hud_quad(bar_x - bdr bar_y bar_x bar_y + bh)
+    hud_quad(bar_x + bw bar_y bar_x + bw + bdr bar_y + bh)
+    glEnd()
+    return 0
+}
+
+let draw_fps = (sw:int sh:int):>void => {
+    let w:int = HUD_FPS_DIGIT_W_PX
+    let h:int = HUD_FPS_DIGIT_H_PX
+    let gap:int = HUD_FPS_DIGIT_GAP_PX
+    let t:int = HUD_FPS_SEG_THICK_PX
+    let right_x:int = HUD_MARGIN_PX + (3 * (w + gap))
+    let y:int = HUD_MARGIN_PX
+    let r:int = F32_ONE
+    let g:int = F32_ONE
+    let b:int = F32_ONE
+    if fps_value <? 50 {
+        g = q16_to_f32(39321)
+        b = q16_to_f32(39321)
+        if fps_value <? 30 {
+            g = q16_to_f32(13107)
+            b = q16_to_f32(13107)
+        }
+    }
+    GL_Color4f(r g b q16_to_f32(60293))
+    glBegin(GL_QUADS)
+    draw_number_right(right_x y fps_value 3 w h t gap)
+    glEnd()
+    return 0
+}
+
+let draw_speedometer = (sw:int sh:int):>void => {
+    let kmh:int = (vis_speed * HUD_KMH_PER_FRAME) // FP_ONE
+    let right_x:int = sw - HUD_MARGIN_PX
+    let y:int = sh - HUD_MARGIN_PX - HUD_DIGIT_H_PX
+    let r:int = F32_ONE
+    let g:int = F32_ONE
+    let b:int = F32_ONE
+    if boost_active_frames >? 0 {
+        g = q16_to_f32(45875)
+        b = q16_to_f32(13107)
+    }
+    GL_Color4f(r g b q16_to_f32(60293))
+    glBegin(GL_QUADS)
+    draw_number_right(right_x y kmh 4 HUD_DIGIT_W_PX HUD_DIGIT_H_PX HUD_SEG_THICK_PX HUD_DIGIT_GAP_PX)
+    glEnd()
+    return 0
+}
+
+# Lap counter centered along the top edge: "LAP n" using the lap glyph
+# size.
+const HUD_LAP_LABEL:int = "LAP\0"
+
+let draw_lap = (sw:int sh:int):>void => {
+    let w:int = HUD_LAP_DIGIT_W_PX
+    let h:int = HUD_LAP_DIGIT_H_PX
+    let gap:int = HUD_LAP_DIGIT_GAP_PX
+    let t:int = HUD_LAP_SEG_THICK_PX
+    # Compute total width: "LAP" (3 glyphs) + gap-of-glyph + "n/N"
+    let label_w:int = 3 * (w + gap)
+    let lap_show:int = cur_lap + 1
+    if lap_show >? TOTAL_LAPS { lap_show = TOTAL_LAPS }
+    let value_w:int = (w + gap) + (w + gap) + w   # "n/N"
+    let total_w:int = label_w + gap + value_w
+    let x0:int = (sw - total_w) // 2
+    let y:int = HUD_MARGIN_PX
+    GL_Color4f(F32_ONE F32_ONE F32_ONE q16_to_f32(60293))
+    glBegin(GL_QUADS)
+    draw_text_left(x0 y HUD_LAP_LABEL w h t gap)
+    let val_x:int = x0 + label_w + gap
+    draw_digit(val_x y lap_show w h t)
+    draw_glyph_mask(val_x + (w + gap) y 8 w h t)   # mid-bar slash
+    draw_digit(val_x + (2 * (w + gap)) y TOTAL_LAPS w h t)
+    glEnd()
+    return 0
+}
+
+let draw_position = (sw:int sh:int):>void => {
+    let w:int = HUD_POS_DIGIT_W_PX
+    let h:int = HUD_POS_DIGIT_H_PX
+    let gap:int = HUD_POS_DIGIT_GAP_PX
+    let t:int = HUD_POS_SEG_THICK_PX
+    let y:int = HUD_MARGIN_PX + HUD_FPS_DIGIT_H_PX + 8
+    GL_Color4f(F32_ONE F32_ONE F32_ONE q16_to_f32(60293))
+    glBegin(GL_QUADS)
+    let right_x:int = HUD_MARGIN_PX + (3 * (w + gap))
+    draw_number_right(right_x y player_position 3 w h t gap)
+    # "/N" suffix
+    let suffix_x:int = right_x + gap
+    draw_glyph_mask(suffix_x y 8 w h t)
+    draw_number_right((suffix_x + (w + gap)) + (2 * (w + gap)) y MAX_CARS 2 w h t gap)
+    glEnd()
+    return 0
+}
+
+let setup_2d = (sw:int sh:int):>void => {
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    GL_Ortho(q16_to_f64(0) q16_to_f64(sw * FP_ONE) q16_to_f64(sh * FP_ONE) q16_to_f64(0) q16_to_f64(0 - FP_ONE) q16_to_f64(FP_ONE))
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA)
+    return 0
+}
+
+let teardown_2d = ():>void => {
+    glDisable(GL_BLEND)
+    glEnable(GL_DEPTH_TEST)
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+    glPopMatrix()
+    return 0
+}
+
+let draw_race_hud = (sw:int sh:int):>void => {
+    setup_2d(sw sh)
+    draw_energy_bar(sw sh)
+    draw_speedometer(sw sh)
+    draw_lap(sw sh)
+    draw_position(sw sh)
+    if show_fps not=? 0 {
+        draw_fps(sw sh)
+    }
+    teardown_2d()
+    return 0
+}
+
+# ---------- Race standings: rank by progress (lap-major) ------------------
+
+let recompute_player_position = ():>void => {
+    let my_progress:int = car_get_progress(0)
+    let pos:int = 1
+    let i:int = 1
+    loop i <? MAX_CARS {
+        let p:int = car_get_progress(i)
+        if p >? my_progress {
+            pos += 1
+        }
+        i += 1
+    }
+    player_position = pos
+    return 0
+}
+
+# ---------- Audio ----------------------------------------------------------
+# Mono S16LE stream. Each game frame, audio_step() generates one
+# AUDIO_FRAME_SAMPLES chunk: music loop sample + active SFX one-shots +
+# engine drone whose frequency tracks the player speed. The mixer is
+# pre-allocated in AUDIO_MIX_BUF.
+#
+# SFX_VOICES holds up to SFX_SLOTS concurrent oneshots: each slot stores
+# (active, sample_pos, len, kind, vol_q) at SFX_SLOT_STRIDE byte stride.
+
+let sfx_kind_len = (k:int):>int => {
+    if k =? SFX_KIND_BOOST { return SFX_LEN_BOOST }
+    if k =? SFX_KIND_WALL { return SFX_LEN_WALL }
+    if k =? SFX_KIND_RECHARGE { return SFX_LEN_RECHARGE }
+    if k =? SFX_KIND_LAP { return SFX_LEN_LAP }
+    if k =? SFX_KIND_EXPLODE { return SFX_LEN_EXPLODE }
+    return 0
+}
+
+let sfx_kind_offset = (k:int):>int => {
+    return k * SFX_MAX_LEN * 2
+}
+
+# Bake one SFX into the table at slot k. shape selects the overall envelope:
+#   0 = ascending sweep (boost)
+#   1 = noise burst (wall)
+#   2 = bright chord (recharge)
+#   3 = chime (lap)
+#   4 = white noise + decay (explode)
+let build_sfx = (k:int shape:int base_freq:int):>void => {
+    let len:int = sfx_kind_len(k)
+    let buf:int = SFX_TABLE_BUF + sfx_kind_offset(k)
+    let i:int = 0
+    let rng_state:int = 0x9E3779B97F4A7C15 + (k * 1234567)
+    loop i <? len {
+        let env:int = (FP_ONE * (len - i)) // len           # linear decay
+        let s:int = 0
+        if shape =? 0 {
+            let f:int = base_freq + ((i * 80) // len)
+            let phase:int = (i * f * ANG_TURN) // AUDIO_SAMPLE_RATE
+            s = sin_fp(phase % ANG_TURN)
+            let phase2:int = (i * (f + 100) * ANG_TURN) // AUDIO_SAMPLE_RATE
+            s = (s + sin_fp(phase2 % ANG_TURN)) // 2
+        }
+        if shape =? 1 {
+            rng_state = rng_state * 6364136223846793005 + 1442695040888963407
+            s = (rng_state >> 49) and 0xFFFF
+            s = s - 32768
+            let env2:int = (env * env) // FP_ONE
+            s = (s * env2) // FP_ONE
+        }
+        if shape =? 2 {
+            let p1:int = (i * base_freq * ANG_TURN) // AUDIO_SAMPLE_RATE
+            let p2:int = (i * (base_freq * 5 // 4) * ANG_TURN) // AUDIO_SAMPLE_RATE
+            let p3:int = (i * (base_freq * 3 // 2) * ANG_TURN) // AUDIO_SAMPLE_RATE
+            s = (sin_fp(p1 % ANG_TURN) + sin_fp(p2 % ANG_TURN) + sin_fp(p3 % ANG_TURN)) // 3
+        }
+        if shape =? 3 {
+            let p1:int = (i * base_freq * ANG_TURN) // AUDIO_SAMPLE_RATE
+            let p2:int = (i * (base_freq * 2) * ANG_TURN) // AUDIO_SAMPLE_RATE
+            s = ((sin_fp(p1 % ANG_TURN) * 7) + (sin_fp(p2 % ANG_TURN) * 3)) // 10
+        }
+        if shape =? 4 {
+            rng_state = rng_state * 6364136223846793005 + 1442695040888963407
+            let n:int = (rng_state >> 49) and 0xFFFF
+            n = n - 32768
+            let p1:int = (i * 80 * ANG_TURN) // AUDIO_SAMPLE_RATE
+            s = (n + (sin_fp(p1 % ANG_TURN) * 2)) // 3
+        }
+        # FP_ONE (sin output) is 65536 max amplitude; scale to ~28000.
+        let sample:int = (s * env * 28000) // (FP_ONE * FP_ONE)
+        if sample >? 32767 { sample = 32767 }
+        if sample <? -32768 { sample = -32768 }
+        __store_u16__(sample (buf + (i * 2)))
+        i += 1
+    }
+    return 0
+}
+
+let build_all_sfx = ():>void => {
+    build_sfx(SFX_KIND_BOOST 0 220)
+    build_sfx(SFX_KIND_WALL 1 0)
+    build_sfx(SFX_KIND_RECHARGE 2 440)
+    build_sfx(SFX_KIND_LAP 3 660)
+    build_sfx(SFX_KIND_EXPLODE 4 110)
+    return 0
+}
+
+# 2-second music loop: simple arpeggio of three notes over a bass drone.
+let build_music_loop = ():>void => {
+    let i:int = 0
+    let bass_freq:int = 80
+    loop i <? MUSIC_LOOP_SAMPLES {
+        # Step a 4-step pattern every half second.
+        let beat:int = (i * 4) // MUSIC_LOOP_SAMPLES
+        let mel_freq:int = 220
+        if beat =? 0 { mel_freq = 220 }
+        if beat =? 1 { mel_freq = 277 }
+        if beat =? 2 { mel_freq = 330 }
+        if beat =? 3 { mel_freq = 247 }
+        let pm:int = (i * mel_freq * ANG_TURN) // AUDIO_SAMPLE_RATE
+        let pb:int = (i * bass_freq * ANG_TURN) // AUDIO_SAMPLE_RATE
+        let beat_pos:int = i % (MUSIC_LOOP_SAMPLES // 4)
+        let beat_env:int = (FP_ONE * (MUSIC_LOOP_SAMPLES // 4 - beat_pos)) // (MUSIC_LOOP_SAMPLES // 4)
+        let mel:int = sin_fp(pm % ANG_TURN)
+        mel = (mel * beat_env) // FP_ONE
+        let bass:int = sin_fp(pb % ANG_TURN)
+        let mix:int = ((mel * 6) + (bass * 4)) // 10
+        let sample:int = (mix * 14000) // FP_ONE
+        if sample >? 32767 { sample = 32767 }
+        if sample <? -32768 { sample = -32768 }
+        __store_u16__(sample (AUDIO_MUSIC_BUF + (i * 2)))
+        i += 1
+    }
+    return 0
+}
+
+# Allocate an SFX voice slot for the given kind. Overwrites the oldest
+# active slot if all are busy.
+let sfx_voice_alloc = (k:int):>int => {
+    let i:int = 0
+    loop i <? SFX_SLOTS {
+        let slot:int = SFX_VOICES + (i * SFX_SLOT_STRIDE)
+        if __load__(slot) =? 0 {
+            return slot
+        }
+        i += 1
+    }
+    return SFX_VOICES   # fallback: stomp slot 0
+}
+
+let sfx_play = (k:int vol_q:int):>void => {
+    if audio_enabled =? 0 { return 0 }
+    let slot:int = sfx_voice_alloc(k)
+    __store__(1 slot)
+    __store__(0 (slot + 8))               # sample_pos
+    __store__(sfx_kind_len(k) (slot + 16))
+    __store__(k (slot + 24))
+    __store__(vol_q (slot + 32))
+    return 0
+}
+
+let audio_init = ():>void => {
+    let spec:int = __static_alloca__(SDL_AUDIO_SPEC_SIZE)
+    SDL_SetAudioSpec(spec SDL_AUDIO_S16LE 1 AUDIO_SAMPLE_RATE)
+    audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK spec 0 0)
+    if audio_stream =? 0 {
+        audio_enabled = 0
+        return 0
+    }
+    SDL_ResumeAudioStreamDevice(audio_stream)
+    audio_enabled = 1
+    build_all_sfx()
+    build_music_loop()
+    return 0
+}
+
+# Mix one frame: music (always) + engine drone (race only) + active SFX
+# voices. music_volume_q and engine_volume_q control balance per state.
+let audio_step = (music_volume_q:int engine_volume_q:int):>void => {
+    if audio_enabled =? 0 { return 0 }
+    let queued:int = SDL_GetAudioStreamQueued(audio_stream)
+    if queued >? AUDIO_QUEUE_HIGH_BYTES { return 0 }
+
+    # Engine frequency: 60Hz at idle, 360Hz at top speed.
+    let speed_n:int = vis_speed_norm
+    if speed_n <? 0 { speed_n = 0 }
+    if speed_n >? FP_ONE { speed_n = FP_ONE }
+    let engine_freq:int = 60 + ((300 * speed_n) // FP_ONE)
+
+    let i:int = 0
+    loop i <? AUDIO_FRAME_SAMPLES {
+        # Music sample.
+        let mpos:int = (music_play_pos + i) % MUSIC_LOOP_SAMPLES
+        let mraw:int = __load_u16__(AUDIO_MUSIC_BUF + (mpos * 2))
+        if mraw >=? 32768 { mraw = mraw - 65536 }
+        let m_part:int = (mraw * music_volume_q) // FP_ONE
+
+        # Engine drone.
+        let phase:int = ((engine_phase + (i * engine_freq)) * ANG_TURN) // AUDIO_SAMPLE_RATE
+        let e_raw:int = sin_fp(phase % ANG_TURN)
+        let e_part:int = (((e_raw * 12000) // FP_ONE) * engine_volume_q) // FP_ONE
+
+        # Sum SFX voices.
+        let sfx_part:int = 0
+        let v:int = 0
+        loop v <? SFX_SLOTS {
+            let slot:int = SFX_VOICES + (v * SFX_SLOT_STRIDE)
+            if __load__(slot) not=? 0 {
+                let pos:int = __load__(slot + 8) + i
+                let len:int = __load__(slot + 16)
+                if pos <? len {
+                    let kind:int = __load__(slot + 24)
+                    let vol:int = __load__(slot + 32)
+                    let sraw:int = __load_u16__(SFX_TABLE_BUF + sfx_kind_offset(kind) + (pos * 2))
+                    if sraw >=? 32768 { sraw = sraw - 65536 }
+                    sfx_part += (sraw * vol) // FP_ONE
+                }
+            }
+            v += 1
+        }
+
+        let total:int = m_part + e_part + sfx_part
+        if total >? 32767 { total = 32767 }
+        if total <? -32768 { total = -32768 }
+        __store_u16__(total (AUDIO_MIX_BUF + (i * 2)))
+        i += 1
+    }
+
+    # Advance per-voice positions and retire any that finished.
+    music_play_pos = (music_play_pos + AUDIO_FRAME_SAMPLES) % MUSIC_LOOP_SAMPLES
+    engine_phase = (engine_phase + (AUDIO_FRAME_SAMPLES * engine_freq)) % AUDIO_SAMPLE_RATE
+    let v:int = 0
+    loop v <? SFX_SLOTS {
+        let slot:int = SFX_VOICES + (v * SFX_SLOT_STRIDE)
+        if __load__(slot) not=? 0 {
+            let pos:int = __load__(slot + 8) + AUDIO_FRAME_SAMPLES
+            let len:int = __load__(slot + 16)
+            if pos >=? len {
+                __store__(0 slot)
+            } else {
+                __store__(pos (slot + 8))
+            }
+        }
+        v += 1
+    }
+
+    SDL_PutAudioStreamData(audio_stream AUDIO_MIX_BUF AUDIO_FRAME_BYTES)
+    return 0
+}
+
+# Drain the pending_sfx slot set by trigger_sfx during physics. Each
+# game frame at most one SFX is queued (the most-recent kind wins). For
+# car-vs-track effects the player and AI cars both run physics, so this
+# function is called inside the per-car loop after each car_store.
+let drain_pending_sfx = (vol_q:int):>void => {
+    if pending_sfx >=? 0 {
+        sfx_play(pending_sfx vol_q)
+        pending_sfx = -1
+    }
+    return 0
+}
+
+# ---------- Per-frame race driver ------------------------------------------
+# Process every car: run input/AI -> physics -> store. Player audio is
+# drained at full volume; AI audio is drained at a quieter mix.
+let step_all_cars = (keyboard:int):>void => {
+    car_load(0)
+    current_car_is_player = 1
+    update_input(keyboard)
+    physics_step()
+    if cur_status =? 0 {
+        trail_push()
+    }
+    car_store(0)
+    drain_pending_sfx(FP_ONE)
+
+    current_car_is_player = 0
+    let i:int = 1
+    loop i <? MAX_CARS {
+        car_load(i)
+        ai_compute_input(i)
+        physics_step()
+        car_store(i)
+        # AI-triggered audio is much quieter (positional approximation).
+        drain_pending_sfx(13107)            # 0.20 vol
+        i += 1
+    }
+    car_load(0)
+    update_chase()
+    return 0
+}
+
+# ---------- Game flow helpers ----------------------------------------------
+
+let reset_game = ():>void => {
+    init_cars()
+    trail_head = 0
+    trail_count = 0
+    spark_head = 0
+    let i:int = 0
+    loop i <? SPARK_MAX {
+        __store__(0 (SPARK_BUF + (i * SPARK_STRIDE) + 48))
+        i += 1
+    }
+    let v:int = 0
+    loop v <? SFX_SLOTS {
+        __store__(0 (SFX_VOICES + (v * SFX_SLOT_STRIDE)))
+        v += 1
+    }
+    pending_sfx = -1
+    pending_explode_player = 0
+    player_position = 1
+    player_finish_frame = 0
+    title_blink_phase = 0
+    game_over_frames = 0
+    results_camera_frames = 0
+    race_start_frame = frame_count
+    car_load(0)
+    update_chase()
+    car_store(0)
+    return 0
+}
+
+# ---------- Title screen camera --------------------------------------------
+# Slow orbit around the geometric centre of the track. Computes the
+# centre lazily once (centroid of all waypoints) and rotates around it
+# once every ~10 seconds.
+let title_centroid_x:int = 0
+let title_centroid_y:int = 0
+let title_centroid_z:int = 0
+let title_centroid_set:int = 0
+let title_radius:int = 0
+
+let compute_title_centroid = ():>void => {
+    let i:int = 0
+    let sx:int = 0
+    let sy:int = 0
+    let sz:int = 0
+    loop i <? track_total_wp {
+        sx += wp_get_cx(i)
+        sy += wp_get_cy(i)
+        sz += wp_get_cz(i)
+        i += 1
+    }
+    title_centroid_x = sx // track_total_wp
+    title_centroid_y = sy // track_total_wp
+    title_centroid_z = sz // track_total_wp
+    # Find an upper bound for the orbit radius.
+    let max_d:int = 0
+    let j:int = 0
+    loop j <? track_total_wp {
+        let dx:int = wp_get_cx(j) - title_centroid_x
+        let dz:int = wp_get_cz(j) - title_centroid_z
+        let d:int = fp_sqrt((dx * dx) + (dz * dz))
+        if d >? max_d { max_d = d }
+        j += 1
+    }
+    title_radius = max_d + 13107200          # +200 m breathing room
+    title_centroid_set = 1
+    return 0
+}
+
+let position_title_camera = ():>void => {
+    if title_centroid_set =? 0 { compute_title_centroid() }
+    let theta:int = (title_blink_phase * ANG_TURN) // 600
+    theta = theta % ANG_TURN
+    let s:int = sin_fp(theta)
+    let c:int = cos_fp(theta)
+    cam_x = title_centroid_x + fp_mul(title_radius s)
+    cam_y = title_centroid_y + 19660800     # +300 m
+    cam_z = title_centroid_z + fp_mul(title_radius c)
+    let fx_t:int = title_centroid_x - cam_x
+    let fy_t:int = title_centroid_y - cam_y
+    let fz_t:int = title_centroid_z - cam_z
+    let m:int = fp_sqrt((fx_t * fx_t) + (fy_t * fy_t) + (fz_t * fz_t))
+    if m >? 1024 {
+        cam_fx = fp_div(fx_t m)
+        cam_fy = fp_div(fy_t m)
+        cam_fz = fp_div(fz_t m)
+    }
+    cam_ux = 0
+    cam_uy = FP_ONE
+    cam_uz = 0
+    cur_fov_top_q16 = 131072
+    return 0
+}
+
+# ---------- Forward declarations not needed; udewy is single-pass ----------
+
+let update_input = (keyboard:int):>void => {
+    in_thrust = SDL_ScancodeDown(keyboard SDL_SCANCODE_W) or SDL_ScancodeDown(keyboard SDL_SCANCODE_UP)
+    in_brake = SDL_ScancodeDown(keyboard SDL_SCANCODE_S) or SDL_ScancodeDown(keyboard SDL_SCANCODE_DOWN)
+    in_steer_l = SDL_ScancodeDown(keyboard SDL_SCANCODE_A) or SDL_ScancodeDown(keyboard SDL_SCANCODE_LEFT)
+    in_steer_r = SDL_ScancodeDown(keyboard SDL_SCANCODE_D) or SDL_ScancodeDown(keyboard SDL_SCANCODE_RIGHT)
+    in_strafe_l = SDL_ScancodeDown(keyboard SDL_SCANCODE_Q)
+    in_strafe_r = SDL_ScancodeDown(keyboard SDL_SCANCODE_E)
+    in_boost = SDL_ScancodeDown(keyboard SDL_SCANCODE_SPACE)
+
+    let r_now:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_R)
+    in_respawn = (r_now not=? 0) and (in_respawn_prev =? 0)
+    in_restart = in_respawn
+    in_respawn_prev = r_now
+
+    let f_now:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_F)
+    in_fps_toggle = (f_now not=? 0) and (in_fps_toggle_prev =? 0)
+    in_fps_toggle_prev = f_now
+
+    let s_now:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_SPACE) or SDL_ScancodeDown(keyboard SDL_SCANCODE_RETURN)
+    in_start = (s_now not=? 0) and (in_start_prev =? 0)
+    in_start_prev = s_now
+
+    in_quit = SDL_ScancodeDown(keyboard SDL_SCANCODE_ESCAPE)
+    return 0
+}
+
+# ---------- Title screen ----------------------------------------------------
+
+const TITLE_TEXT:int = "UZERO\0"
+const TITLE_PROMPT:int = "PRESS SPACE\0"
+const TITLE_SUBTITLE:int = "RACE\0"
+
+let update_title = ():>void => {
+    title_blink_phase = (title_blink_phase + 1) % 120
+    position_title_camera()
+    if in_start not=? 0 {
+        reset_game()
+        game_state = STATE_RACE
+    }
+    return 0
+}
+
+let render_title = (sw:int sh:int):>void => {
+    glViewport(0 0 sw sh)
+    GL_ClearColor(q16_to_f32(COL_SKY_R) q16_to_f32(COL_SKY_G) q16_to_f32(COL_SKY_B) F32_ONE)
+    glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    set_perspective(sw sh)
+    apply_camera()
+    draw_ground()
+    draw_track()
+    draw_walls()
+
+    setup_2d(sw sh)
+    let title_w:int = 80
+    let title_h:int = 140
+    let title_t:int = 14
+    let title_gap:int = 18
+    GL_Color4f(F32_ONE q16_to_f32(58982) q16_to_f32(13107) F32_ONE)
+    glBegin(GL_QUADS)
+    draw_text_centered(sw // 2 (sh // 2 - 110) TITLE_TEXT title_w title_h title_t title_gap)
+    glEnd()
+
+    let sub_w:int = 36
+    let sub_h:int = 60
+    let sub_t:int = 6
+    let sub_gap:int = 8
+    GL_Color4f(q16_to_f32(45875) q16_to_f32(45875) F32_ONE F32_ONE)
+    glBegin(GL_QUADS)
+    draw_text_centered(sw // 2 (sh // 2 + 60) TITLE_SUBTITLE sub_w sub_h sub_t sub_gap)
+    glEnd()
+
+    if title_blink_phase <? 80 {
+        let pw:int = 22
+        let ph:int = 38
+        let pt:int = 4
+        let pg:int = 5
+        GL_Color4f(F32_ONE F32_ONE F32_ONE q16_to_f32(60293))
+        glBegin(GL_QUADS)
+        draw_text_centered(sw // 2 (sh - 80) TITLE_PROMPT pw ph pt pg)
+        glEnd()
+    }
+    teardown_2d()
+    return 0
+}
+
+# ---------- Race -----------------------------------------------------------
+
+let update_race = ():>void => {
+    return 0
+}
+
+let render_race = (sw:int sh:int):>void => {
+    glViewport(0 0 sw sh)
+    GL_ClearColor(q16_to_f32(COL_SKY_R) q16_to_f32(COL_SKY_G) q16_to_f32(COL_SKY_B) F32_ONE)
+    glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    set_perspective(sw sh)
+    apply_camera()
+    draw_ground()
+    draw_track()
+    draw_walls()
+    draw_all_cars()
+    draw_trail()
+    draw_sparks()
+    draw_race_hud(sw sh)
+    draw_speed_lines(sw sh)
+    return 0
+}
+
+# ---------- Results --------------------------------------------------------
+# Sort the cars by progress (descending) and display the top 8 finishers.
+
+const RESULTS_HEADER:int = "FINAL\0"
+const RESULTS_PROMPT:int = "PRESS SPACE\0"
+
+const RESULTS_SORTED_BYTES:int = 248
+const results_sorted_idx:int = __static_alloca__(RESULTS_SORTED_BYTES)
+
+let sort_cars_by_progress = ():>void => {
+    let i:int = 0
+    loop i <? MAX_CARS {
+        __store__(i (results_sorted_idx + (i * 8)))
+        i += 1
+    }
+    # Insertion sort by descending progress.
+    let j:int = 1
+    loop j <? MAX_CARS {
+        let key:int = __load__(results_sorted_idx + (j * 8))
+        let key_p:int = car_get_progress(key)
+        let k:int = j - 1
+        loop k >=? 0 {
+            let other:int = __load__(results_sorted_idx + (k * 8))
+            if car_get_progress(other) <? key_p {
+                __store__(other (results_sorted_idx + ((k + 1) * 8)))
+                k -= 1
+            } else {
+                k = -1
+            }
+        }
+        __store__(key (results_sorted_idx + ((k + 1) * 8)))
+        j += 1
+    }
+    return 0
+}
+
+let update_results = ():>void => {
+    results_camera_frames += 1
+    position_title_camera()
+    if in_start not=? 0 {
+        game_state = STATE_TITLE
+    }
+    return 0
+}
+
+let render_results = (sw:int sh:int):>void => {
+    glViewport(0 0 sw sh)
+    GL_ClearColor(q16_to_f32(COL_SKY_R) q16_to_f32(COL_SKY_G) q16_to_f32(COL_SKY_B) F32_ONE)
+    glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+    glEnable(GL_DEPTH_TEST)
+    set_perspective(sw sh)
+    apply_camera()
+    draw_ground()
+    draw_track()
+    draw_walls()
+
+    setup_2d(sw sh)
+    GL_Color4f(F32_ZERO F32_ZERO F32_ZERO q16_to_f32(45875))
+    glBegin(GL_QUADS)
+    hud_quad(sw // 4 80 (3 * sw) // 4 sh - 80)
+    glEnd()
+
+    GL_Color4f(F32_ONE q16_to_f32(58982) q16_to_f32(13107) F32_ONE)
+    glBegin(GL_QUADS)
+    draw_text_centered(sw // 2 110 RESULTS_HEADER 50 80 8 12)
+    glEnd()
+
+    # Top 8 finishers: row of "RANK IDX" rendered as digits.
+    let row_w:int = 22
+    let row_h:int = 36
+    let row_t:int = 5
+    let row_gap:int = 5
+    GL_Color4f(F32_ONE F32_ONE F32_ONE F32_ONE)
+    glBegin(GL_QUADS)
+    let rank:int = 0
+    loop rank <? 8 {
+        let car_idx:int = __load__(results_sorted_idx + (rank * 8))
+        let row_y:int = 220 + (rank * (row_h + 14))
+        # Rank digit
+        draw_number_right(sw // 2 - 200 row_y rank + 1 2 row_w row_h row_t row_gap)
+        # Car id
+        draw_number_right(sw // 2 row_y car_idx + 1 3 row_w row_h row_t row_gap)
+        # Lap count completed
+        draw_number_right(sw // 2 + 200 row_y car_get_lap(car_idx) + 1 2 row_w row_h row_t row_gap)
+        rank += 1
+    }
+    glEnd()
+
+    if (results_camera_frames % 120) <? 80 {
+        GL_Color4f(F32_ONE F32_ONE F32_ONE q16_to_f32(60293))
+        glBegin(GL_QUADS)
+        draw_text_centered(sw // 2 (sh - 110) RESULTS_PROMPT 18 30 4 4)
+        glEnd()
+    }
+    teardown_2d()
+    return 0
+}
+
+# ---------- Game Over ------------------------------------------------------
+
+const GAMEOVER_TEXT:int = "GAME OVER\0"
+const GAMEOVER_PROMPT:int = "PRESS R\0"
+
+let update_gameover = ():>void => {
+    game_over_frames += 1
+    # Keep stepping cars so the wreck physics tumble continues.
+    let i:int = 0
+    loop i <? MAX_CARS {
+        car_load(i)
+        if i =? 0 {
+            in_thrust = 0
+            in_brake = 0
+            in_steer_l = 0
+            in_steer_r = 0
+            in_strafe_l = 0
+            in_strafe_r = 0
+            in_boost = 0
+        } else {
+            ai_compute_input(i)
+        }
+        physics_step()
+        car_store(i)
+        i += 1
+    }
+    car_load(0)
+    update_chase()
+    if in_restart not=? 0 {
+        reset_game()
+        game_state = STATE_RACE
+    }
+    return 0
+}
+
+let render_gameover = (sw:int sh:int):>void => {
+    glViewport(0 0 sw sh)
+    GL_ClearColor(q16_to_f32(COL_SKY_R // 4) q16_to_f32(COL_SKY_G // 4) q16_to_f32(COL_SKY_B // 4) F32_ONE)
+    glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+    glEnable(GL_DEPTH_TEST)
+    set_perspective(sw sh)
+    apply_camera()
+    draw_ground()
+    draw_track()
+    draw_walls()
+    draw_all_cars()
+    draw_sparks()
+
+    setup_2d(sw sh)
+    GL_Color4f(F32_ZERO F32_ZERO F32_ZERO q16_to_f32(45875))
+    glBegin(GL_QUADS)
+    hud_quad(0 0 sw sh)
+    glEnd()
+    GL_Color4f(F32_ONE q16_to_f32(13107) q16_to_f32(13107) F32_ONE)
+    glBegin(GL_QUADS)
+    draw_text_centered(sw // 2 (sh // 2 - 80) GAMEOVER_TEXT 50 80 8 10)
+    glEnd()
+    if (game_over_frames % 120) <? 80 {
+        GL_Color4f(F32_ONE F32_ONE F32_ONE q16_to_f32(60293))
+        glBegin(GL_QUADS)
+        draw_text_centered(sw // 2 (sh // 2 + 60) GAMEOVER_PROMPT 26 42 5 6)
+        glEnd()
+    }
+    teardown_2d()
+    return 0
+}
+
+# ---------- Main loop -------------------------------------------------------
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO + SDL_INIT_AUDIO) =? 0 {
+        return 1
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1) =? 0 {
+        SDL_Quit()
+        return 2
+    }
+    if SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE 24) =? 0 {
+        SDL_Quit()
+        return 3
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION 2) =? 0 {
+        SDL_Quit()
+        return 4
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION 1) =? 0 {
+        SDL_Quit()
+        return 5
+    }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK SDL_GL_CONTEXT_PROFILE_COMPATIBILITY) =? 0 {
+        SDL_Quit()
+        return 6
+    }
+
+    let title:int = "uZero Race\0"
+    let window:int = SDL_CreateWindow(title 1280 720 SDL_WINDOW_OPENGL + SDL_WINDOW_RESIZABLE)
+    if window =? 0 {
+        SDL_Quit()
+        return 7
+    }
+    SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)
+
+    let gl_context:int = SDL_GL_CreateContext(window)
+    if gl_context =? 0 {
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 8
+    }
+    if SDL_GL_MakeCurrent(window gl_context) =? 0 {
+        SDL_GL_DestroyContext(gl_context)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 9
+    }
+    SDL_GL_SetSwapInterval(1)
+
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let size:int = __static_alloca__(8)
+
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDisable(GL_CULL_FACE)
+    init_checker_textures()
+    build_track()
+    init_cars()
+    speed_lines_init()
+    audio_init()
+    fps_last_ticks = SDL_GetTicks()
+
+    loop running not=? 0 {
+        let has_event:int = SDL_PollEvent(event)
+        loop has_event not=? 0 {
+            if SDL_EventType(event) =? SDL_EVENT_QUIT {
+                running = 0
+            }
+            has_event = SDL_PollEvent(event)
+        }
+
+        let keyboard:int = SDL_GetKeyboardState(0)
+        # Edge inputs (toggles + start + restart). Per-car physics will
+        # reuse the keyboard for car 0.
+        update_input(keyboard)
+        if in_quit not=? 0 {
+            running = 0
+        }
+        if in_fps_toggle not=? 0 {
+            show_fps = 1 - show_fps
+        }
+
+        SDL_GetWindowSizeInPixels(window size size + 4)
+        let sw:int = __load_u32__(size)
+        let sh:int = __load_u32__(size + 4)
+
+        if game_state =? STATE_TITLE {
+            update_title()
+            audio_step(FP_ONE 0)
+            render_title(sw sh)
+        } else {
+            if game_state =? STATE_RACE {
+                step_all_cars(keyboard)
+                spark_step()
+                recompute_player_position()
+                # Race-end check: 3 laps wins, explosion ends.
+                if pending_explode_player not=? 0 {
+                    game_state = STATE_GAMEOVER
+                    sfx_play(SFX_KIND_EXPLODE FP_ONE)
+                }
+                if car_get_lap(0) >=? TOTAL_LAPS {
+                    sort_cars_by_progress()
+                    game_state = STATE_RESULTS
+                }
+                audio_step(32768 49152)        # 0.5 music, 0.75 engine
+                render_race(sw sh)
+            } else {
+                if game_state =? STATE_RESULTS {
+                    update_results()
+                    audio_step(FP_ONE 0)
+                    render_results(sw sh)
+                } else {
+                    update_gameover()
+                    audio_step(26214 13107)
+                    render_gameover(sw sh)
+                }
+            }
+        }
+
+        SDL_GL_SwapWindow(window)
+        SDL_Delay(16)
+        frame_count += 1
+
+        fps_sample_count += 1
+        if fps_sample_count >=? HUD_FPS_SAMPLE_FRAMES {
+            let now_ticks:int = SDL_GetTicks()
+            let elapsed_ms:int = now_ticks - fps_last_ticks
+            if elapsed_ms >? 0 {
+                fps_value = (fps_sample_count * 1000) // elapsed_ms
+            }
+            fps_last_ticks = now_ticks
+            fps_sample_count = 0
+        }
+    }
+
+    SDL_GL_DestroyContext(gl_context)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}
