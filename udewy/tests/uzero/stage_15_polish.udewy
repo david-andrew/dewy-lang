@@ -199,10 +199,11 @@ const CRAFT_HALF_W:int = 163840          # 2.5 m (matches draw_craft wing_x)
 # checker pattern identical to the old per-tile coloring but reduces the
 # per-frame quad count from tens of thousands to a few hundred.
 const CHECKER_TILE:int = 327680          # 5 m -- target tile edge for course surfaces
-# Sphere is a special case: at R=300 m one full longitude is 1.9 km, so
-# a 5 m tile would mean ~377 lon bands. Use a 4x coarser tile (~20 m) so
-# the existing 48 lat / 96 lon bands stay both performant and visually
-# consistent with each other.
+# Sphere matches the same 5 m equator tile via SPHERE_U_MAX/V_MAX rather
+# than by scaling tessellation -- the lat/lon mesh stays coarse (24x48)
+# and UV is computed independently of band count. Tiles necessarily
+# foreshorten toward the poles since the parameterisation isn't
+# equal-area, but they read as 5 m at the equator.
 
 # ---------- Ramp (z in [-50, -80]) ------------------------------------------
 
@@ -298,8 +299,16 @@ const SPHERE_CZ:int = -235929600         # -3600 m
 const SPHERE_R:int = 19660800            # 300 m
 const SPHERE_REACH:int = 1966080         # 30 m  shell-proximity gate for surface query (scaled)
 const SPHERE_HOLE_COS:int = 46341        # cos(45 deg) -- direction-z above this is in the hole
-const SPHERE_LAT_BANDS:int = 48          # pi*300 m arc / 20 m -- 4 * CHECKER_TILE
-const SPHERE_LON_BANDS:int = 96          # 2*pi*300 m equator arc / 20 m
+const SPHERE_LAT_BANDS:int = 24          # 7.5 deg per band; pure tessellation knob now
+const SPHERE_LON_BANDS:int = 48          # 7.5 deg per band; UV is decoupled from band count
+# Cells-per-unit-arc target along the equator: pi*R / CHECKER_TILE = 60*pi
+# wraps along u, half that along v. Rounded to the nearest even integer
+# (188) so the GL_REPEAT seam at lon=0 lands cleanly back on a tile edge,
+# giving a continuous checker around the equator. Cell width at the
+# equator works out to 2*pi*R / (2*SPHERE_U_MAX) = ~5.013 m. Cells
+# stretch toward the poles as expected from the lat/lon parameterisation.
+const SPHERE_U_MAX:int = 12320768        # 188 * FP_ONE
+const SPHERE_V_MAX:int = 6160384         #  94 * FP_ONE  (= U_MAX / 2)
 
 # ---------- Sphere inner-access ramp (centered x=0, leads INTO the hole) ----
 # Lip lands exactly at the sphere's +Z polar point (0, 310, -3300), which is
@@ -1871,9 +1880,10 @@ let draw_sphere = ():>void => {
     let rim_lat:int = (hole_lat * SPHERE_LAT_BANDS) // ANG_HALF_TURN
 
     # Pass 1: textured surface (all bands past the rim, except rim_lat
-    # itself). Tessellation kept at LAT_BANDS * LON_BANDS for shape;
-    # checker tiles come from the texture (UV step = 0.5 per band -> one
-    # texel under GL_NEAREST/REPEAT, matching the old (lat+lon)&1 cell).
+    # itself). UV is parameterised in (lon, lat) only and uses the global
+    # SPHERE_U_MAX / SPHERE_V_MAX, so cell size is ~CHECKER_TILE (5 m) at
+    # the equator no matter what tessellation we pick -- bumping/dropping
+    # band counts changes the silhouette only.
     let tex_id:int = __load_u32__(CHECKER_TEXID_SPHERE)
     glEnable(GL_TEXTURE_2D)
     glBindTexture(GL_TEXTURE_2D tex_id)
@@ -1884,8 +1894,8 @@ let draw_sphere = ():>void => {
         let phi0:int = (lat * ANG_HALF_TURN) // SPHERE_LAT_BANDS
         let phi1:int = ((lat + 1) * ANG_HALF_TURN) // SPHERE_LAT_BANDS
         if (phi1 >? hole_lat) and (lat not=? rim_lat) {
-            let v0:int = (lat * FP_ONE) // 2
-            let v1:int = ((lat + 1) * FP_ONE) // 2
+            let v0:int = (lat * SPHERE_V_MAX) // SPHERE_LAT_BANDS
+            let v1:int = ((lat + 1) * SPHERE_V_MAX) // SPHERE_LAT_BANDS
             let cphi0:int = cos_fp(phi0)
             let sphi0:int = sin_fp(phi0)
             let cphi1:int = cos_fp(phi1)
@@ -1894,8 +1904,8 @@ let draw_sphere = ():>void => {
             let z1:int = SPHERE_CZ + fp_mul(SPHERE_R cphi1)
             let lon:int = 0
             loop lon <? SPHERE_LON_BANDS {
-                let u0:int = (lon * FP_ONE) // 2
-                let u1:int = ((lon + 1) * FP_ONE) // 2
+                let u0:int = (lon * SPHERE_U_MAX) // SPHERE_LON_BANDS
+                let u1:int = ((lon + 1) * SPHERE_U_MAX) // SPHERE_LON_BANDS
                 let theta0:int = (lon * ANG_TURN) // SPHERE_LON_BANDS
                 let theta1:int = ((lon + 1) * ANG_TURN) // SPHERE_LON_BANDS
                 let cth0:int = cos_fp(theta0)
