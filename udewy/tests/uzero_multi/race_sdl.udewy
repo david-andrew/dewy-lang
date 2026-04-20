@@ -1,0 +1,26 @@
+# ============================================================================
+# uZero race: SDL3 + OpenGL 2.1 entry point.
+#
+# The whole game (state machine + rendering + audio + physics) is shared
+# with the WASM target; only this file and `backend_sdl.udewy` are
+# SDL-specific.
+# ============================================================================
+
+import p"./backend_sdl.udewy"
+import p"./race_game.udewy"
+
+let main = ():>int => {
+    let title:int = "uZero Race\0"
+    let rc:int = backend_init(1280 720 title)
+    if rc not=? 0 {
+        return rc
+    }
+    game_init()
+
+    loop running not=? 0 {
+        frame_step(16)
+    }
+
+    backend_shutdown()
+    return 0
+}

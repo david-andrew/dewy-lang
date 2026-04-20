@@ -1,0 +1,291 @@
+# ============================================================================
+# uZero race: top-level game state machine.
+#
+# Backend-agnostic. Every per-frame transition is driven through the
+# input_*/time_* surface from the active backend (backend_sdl.udewy or
+# backend_wasm.udewy). The entry point owns picking which backend to import.
+# ============================================================================
+
+import p"./uzero_math.udewy"
+import p"./race_state.udewy"
+import p"./race_track.udewy"
+import p"./race_physics.udewy"
+import p"./race_ai.udewy"
+import p"./race_audio.udewy"
+import p"./race_render.udewy"
+
+# ---------- Input bridging --------------------------------------------------
+# Pull the latest backend input state into the in_* globals consumed by
+# physics_step. backend_poll() must have been called this frame before this.
+
+let update_input_from_backend = ():>void => {
+    in_thrust = input_thrust()
+    in_brake = input_brake()
+    in_steer_l = input_steer_l()
+    in_steer_r = input_steer_r()
+    in_strafe_l = input_strafe_l()
+    in_strafe_r = input_strafe_r()
+    in_boost = input_boost()
+    in_respawn = input_restart_pressed()
+    in_restart = in_respawn
+    in_fps_toggle = input_fps_pressed()
+    in_start = input_action_pressed()
+    in_quit = input_quit_requested()
+    return 0
+}
+
+# ---------- Per-frame race driver ------------------------------------------
+# Process every car: run input/AI -> physics -> store. Player audio is
+# drained at full volume; AI audio is drained at a quieter mix.
+
+let step_all_cars = ():>void => {
+    car_load(0)
+    current_car_is_player = 1
+    update_input_from_backend()
+    physics_step()
+    if cur_status =? 0 {
+        trail_push()
+    }
+    car_store(0)
+    drain_pending_sfx(FP_ONE)
+
+    current_car_is_player = 0
+    let i:int = 1
+    loop i <? MAX_CARS {
+        car_load(i)
+        ai_compute_input(i)
+        physics_step()
+        car_store(i)
+        drain_pending_sfx(13107)
+        i += 1
+    }
+    car_load(0)
+    update_chase()
+    return 0
+}
+
+# ---------- Game flow helpers ----------------------------------------------
+
+let reset_game = ():>void => {
+    init_cars()
+    trail_head = 0
+    trail_count = 0
+    spark_head = 0
+    let i:int = 0
+    loop i <? SPARK_MAX {
+        __store__(0 (SPARK_BUF + (i * SPARK_STRIDE) + 48))
+        i += 1
+    }
+    let v:int = 0
+    loop v <? SFX_SLOTS {
+        __store__(0 (SFX_VOICES + (v * SFX_SLOT_STRIDE)))
+        v += 1
+    }
+    pending_sfx = -1
+    pending_explode_player = 0
+    player_position = 1
+    player_finish_frame = 0
+    title_blink_phase = 0
+    game_over_frames = 0
+    results_camera_frames = 0
+    race_start_frame = frame_count
+    car_load(0)
+    update_chase()
+    car_store(0)
+    return 0
+}
+
+# ---------- Title screen camera --------------------------------------------
+
+let title_centroid_x:int = 0
+let title_centroid_y:int = 0
+let title_centroid_z:int = 0
+let title_centroid_set:int = 0
+let title_radius:int = 0
+
+let compute_title_centroid = ():>void => {
+    let i:int = 0
+    let sx:int = 0
+    let sy:int = 0
+    let sz:int = 0
+    loop i <? track_total_wp {
+        sx += wp_get_cx(i)
+        sy += wp_get_cy(i)
+        sz += wp_get_cz(i)
+        i += 1
+    }
+    title_centroid_x = sx // track_total_wp
+    title_centroid_y = sy // track_total_wp
+    title_centroid_z = sz // track_total_wp
+    let max_d:int = 0
+    let j:int = 0
+    loop j <? track_total_wp {
+        let dx:int = wp_get_cx(j) - title_centroid_x
+        let dz:int = wp_get_cz(j) - title_centroid_z
+        let d:int = fp_sqrt((dx * dx) + (dz * dz))
+        if d >? max_d { max_d = d }
+        j += 1
+    }
+    title_radius = max_d + 13107200
+    title_centroid_set = 1
+    return 0
+}
+
+let position_title_camera = ():>void => {
+    if title_centroid_set =? 0 { compute_title_centroid() }
+    let theta:int = (title_blink_phase * ANG_TURN) // 600
+    theta = theta % ANG_TURN
+    let s:int = sin_fp(theta)
+    let c:int = cos_fp(theta)
+    cam_x = title_centroid_x + fp_mul(title_radius s)
+    cam_y = title_centroid_y + 19660800
+    cam_z = title_centroid_z + fp_mul(title_radius c)
+    let fx_t:int = title_centroid_x - cam_x
+    let fy_t:int = title_centroid_y - cam_y
+    let fz_t:int = title_centroid_z - cam_z
+    let m:int = fp_sqrt((fx_t * fx_t) + (fy_t * fy_t) + (fz_t * fz_t))
+    if m >? 1024 {
+        cam_fx = fp_div(fx_t m)
+        cam_fy = fp_div(fy_t m)
+        cam_fz = fp_div(fz_t m)
+    }
+    cam_ux = 0
+    cam_uy = FP_ONE
+    cam_uz = 0
+    cur_fov_top_q16 = 131072
+    return 0
+}
+
+# ---------- Per-state update routines --------------------------------------
+
+let update_title = ():>void => {
+    title_blink_phase = (title_blink_phase + 1) % 120
+    position_title_camera()
+    if in_start not=? 0 {
+        reset_game()
+        game_state = STATE_RACE
+    }
+    return 0
+}
+
+let update_race = ():>void => {
+    return 0
+}
+
+let update_results = ():>void => {
+    results_camera_frames += 1
+    position_title_camera()
+    if in_start not=? 0 {
+        game_state = STATE_TITLE
+    }
+    return 0
+}
+
+let update_gameover = ():>void => {
+    game_over_frames += 1
+    let i:int = 0
+    loop i <? MAX_CARS {
+        car_load(i)
+        if i =? 0 {
+            in_thrust = 0
+            in_brake = 0
+            in_steer_l = 0
+            in_steer_r = 0
+            in_strafe_l = 0
+            in_strafe_r = 0
+            in_boost = 0
+        } else {
+            ai_compute_input(i)
+        }
+        physics_step()
+        car_store(i)
+        i += 1
+    }
+    car_load(0)
+    update_chase()
+    if in_restart not=? 0 {
+        reset_game()
+        game_state = STATE_RACE
+    }
+    return 0
+}
+
+# ---------- One-time initialisation ----------------------------------------
+
+let game_init = ():>void => {
+    init_checker_textures()
+    build_track()
+    init_cars()
+    speed_lines_init()
+    audio_engine_init()
+    fps_last_ticks = time_ms()
+    return 0
+}
+
+# ---------- Per-frame entry point ------------------------------------------
+# Called once per frame by the backend's run loop. Returns 0 to keep
+# running, 1 to request shutdown.
+
+let frame_step = (dt_ms:int):>int => {
+    backend_poll()
+    update_input_from_backend()
+    if in_quit not=? 0 {
+        running = 0
+        return 1
+    }
+    if in_fps_toggle not=? 0 {
+        show_fps = 1 - show_fps
+    }
+
+    let size_buf:int = __static_alloca__(8)
+    backend_get_size(size_buf size_buf + 4)
+    let sw:int = __load_u32__(size_buf)
+    let sh:int = __load_u32__(size_buf + 4)
+
+    if game_state =? STATE_TITLE {
+        update_title()
+        audio_step(FP_ONE 0)
+        render_title(sw sh)
+    } else {
+        if game_state =? STATE_RACE {
+            step_all_cars()
+            spark_step()
+            recompute_player_position()
+            if pending_explode_player not=? 0 {
+                game_state = STATE_GAMEOVER
+                sfx_play(SFX_KIND_EXPLODE FP_ONE)
+            }
+            if car_get_lap(0) >=? TOTAL_LAPS {
+                sort_cars_by_progress()
+                game_state = STATE_RESULTS
+            }
+            audio_step(32768 49152)
+            render_race(sw sh)
+        } else {
+            if game_state =? STATE_RESULTS {
+                update_results()
+                audio_step(FP_ONE 0)
+                render_results(sw sh)
+            } else {
+                update_gameover()
+                audio_step(26214 13107)
+                render_gameover(sw sh)
+            }
+        }
+    }
+
+    backend_present()
+    frame_count += 1
+
+    fps_sample_count += 1
+    if fps_sample_count >=? HUD_FPS_SAMPLE_FRAMES {
+        let now_ticks:int = time_ms()
+        let elapsed_ms:int = now_ticks - fps_last_ticks
+        if elapsed_ms >? 0 {
+            fps_value = (fps_sample_count * 1000) // elapsed_ms
+        }
+        fps_last_ticks = now_ticks
+        fps_sample_count = 0
+    }
+    return 0
+}

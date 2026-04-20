@@ -1,0 +1,23 @@
+import p"./backend_wasm.udewy"
+import p"./race_game.udewy"
+
+# WebAssembly entry point. The host's animationLoop calls
+# wasmInstance.exports.main() once per requestAnimationFrame, AND once at
+# startup. We guard the heavy initialisation with a one-shot flag so the
+# first call boots the engine and every subsequent call drives one game
+# frame.
+
+const WASM_TITLE:int = "uZero Race\0"
+let bk_initialised:int = 0
+
+let main = ():>int => {
+    if bk_initialised =? 0 {
+        let rc:int = backend_init(1280 720 WASM_TITLE)
+        if rc not=? 0 { return rc }
+        game_init()
+        bk_initialised = 1
+        return 0
+    }
+    frame_step(16)
+    return 0
+}

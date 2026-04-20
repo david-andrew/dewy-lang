@@ -1,0 +1,387 @@
+# ============================================================================
+# uZero race: track waypoints, generation, and surface query.
+# Backend-agnostic. Pure math; no GL or SDL calls.
+# ============================================================================
+
+import p"./uzero_math.udewy"
+import p"./race_state.udewy"
+
+# Each waypoint stores 12 q16 fields:
+#   0  cx          centerline X
+#   8  cy          centerline Y
+#  16  cz          centerline Z
+#  24  fx fy fz    track-forward unit vector (tangent to centerline)
+#  48  ux uy uz    track-up unit vector (banked surface normal)
+#  72  half_w      lateral half-width (centerline +/- half_w = wall edges)
+#  80  surf_kind   SURF_NORMAL / SURF_BOOST / SURF_RECHARGE / SURF_GRID / ...
+#  88  cumarc      cumulative arc length up to this waypoint (Q16 m)
+
+let wp_get_cx = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 0) }
+let wp_get_cy = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 8) }
+let wp_get_cz = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 16) }
+let wp_get_fx = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 24) }
+let wp_get_fy = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 32) }
+let wp_get_fz = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 40) }
+let wp_get_ux = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 48) }
+let wp_get_uy = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 56) }
+let wp_get_uz = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 64) }
+let wp_get_half_w = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 72) }
+let wp_get_kind = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 80) }
+let wp_get_cumarc = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 88) }
+
+let wp_set = (i:int cx_q:int cy_q:int cz_q:int fx_q:int fy_q:int fz_q:int ux_q:int uy_q:int uz_q:int half_w:int kind:int):>void => {
+    let o:int = WAYPOINT_BUF + (i * WP_STRIDE)
+    __store__(cx_q o)
+    __store__(cy_q (o + 8))
+    __store__(cz_q (o + 16))
+    __store__(fx_q (o + 24))
+    __store__(fy_q (o + 32))
+    __store__(fz_q (o + 40))
+    __store__(ux_q (o + 48))
+    __store__(uy_q (o + 56))
+    __store__(uz_q (o + 64))
+    __store__(half_w (o + 72))
+    __store__(kind (o + 80))
+    __store__(0 (o + 88))
+    return 0
+}
+
+# Track-builder state. Heading in raw angle units (1024 = 1 turn);
+# fwd = (sin(h), 0, -cos(h)), right = (cos(h), 0, sin(h)).
+let bld_x:int = 0
+let bld_y:int = 0
+let bld_z:int = 0
+let bld_h:int = 0
+let bld_idx:int = 0
+let track_total_wp:int = 0
+let track_total_arc:int = 0
+
+let put_wp_xz = (cx_q:int cy_q:int cz_q:int h:int half_w:int kind:int bank_raw:int):>void => {
+    let fxv:int = sin_fp(h)
+    let fzv:int = 0 - cos_fp(h)
+    let rxv_flat:int = cos_fp(h)
+    let rzv_flat:int = sin_fp(h)
+    let cb:int = cos_fp(bank_raw)
+    let sb:int = sin_fp(bank_raw)
+    let uxv:int = fp_mul(rxv_flat sb)
+    let uyv:int = cb
+    let uzv:int = fp_mul(rzv_flat sb)
+    if bld_idx <? NUM_WAYPOINTS {
+        wp_set(bld_idx cx_q cy_q cz_q fxv 0 fzv uxv uyv uzv half_w kind)
+        bld_idx += 1
+    }
+    return 0
+}
+
+let gen_straight = (len_q:int dy_q:int count:int half_w:int kind:int bank_raw:int):>void => {
+    let fxv:int = sin_fp(bld_h)
+    let fzv:int = 0 - cos_fp(bld_h)
+    let i:int = 0
+    loop i <? count {
+        let frac:int = ((i + 1) * FP_ONE) // count
+        let t_x:int = bld_x + fp_mul(fxv fp_mul(len_q frac))
+        let t_z:int = bld_z + fp_mul(fzv fp_mul(len_q frac))
+        let t_y:int = bld_y + fp_mul(dy_q frac)
+        put_wp_xz(t_x t_y t_z bld_h half_w kind bank_raw)
+        i += 1
+    }
+    bld_x += fp_mul(fxv len_q)
+    bld_z += fp_mul(fzv len_q)
+    bld_y += dy_q
+    return 0
+}
+
+let gen_turn = (radius_q:int sweep_raw:int bank_max:int dy_q:int count:int half_w:int kind:int):>void => {
+    if sweep_raw =? 0 { return 0 }
+    let dir_sign:int = 1
+    if sweep_raw <? 0 { dir_sign = 0 - 1 }
+    let abs_sweep:int = sweep_raw
+    if abs_sweep <? 0 { abs_sweep = 0 - abs_sweep }
+
+    let rxv:int = cos_fp(bld_h)
+    let rzv:int = sin_fp(bld_h)
+    let cx_arc:int = bld_x + (dir_sign * fp_mul(rxv radius_q))
+    let cz_arc:int = bld_z + (dir_sign * fp_mul(rzv radius_q))
+    let h0:int = bld_h
+    let y0:int = bld_y
+
+    let i:int = 0
+    loop i <? count {
+        let frac:int = ((i + 1) * FP_ONE) // count
+        let h_q:int = h0 + ((sweep_raw * (i + 1)) // count)
+        let r_at_x:int = cos_fp(h_q)
+        let r_at_z:int = sin_fp(h_q)
+        let p_x:int = cx_arc - (dir_sign * fp_mul(r_at_x radius_q))
+        let p_z:int = cz_arc - (dir_sign * fp_mul(r_at_z radius_q))
+        let p_y:int = y0 + fp_mul(dy_q frac)
+        let ease:int = fp_mul(4 * frac (FP_ONE - frac))
+        let bank_here:int = (bank_max * dir_sign * ease) // FP_ONE
+        put_wp_xz(p_x p_y p_z h_q half_w kind bank_here)
+        i += 1
+    }
+    bld_h = h0 + sweep_raw
+    let r_end_x:int = cos_fp(bld_h)
+    let r_end_z:int = sin_fp(bld_h)
+    bld_x = cx_arc - (dir_sign * fp_mul(r_end_x radius_q))
+    bld_z = cz_arc - (dir_sign * fp_mul(r_end_z radius_q))
+    bld_y = y0 + dy_q
+    return 0
+}
+
+let gen_loop = (radius_q:int count:int half_w:int kind:int lateral_q:int):>void => {
+    let fxv:int = sin_fp(bld_h)
+    let fzv:int = 0 - cos_fp(bld_h)
+    let rxv:int = cos_fp(bld_h)
+    let rzv:int = sin_fp(bld_h)
+    let cx_l:int = bld_x
+    let cy_l:int = bld_y + radius_q
+    let cz_l:int = bld_z
+
+    let i:int = 0
+    loop i <? count {
+        let theta:int = ((i + 1) * ANG_TURN) // count
+        let cth:int = cos_fp(theta)
+        let sth:int = sin_fp(theta)
+        let frac:int = ((i + 1) * FP_ONE) // count
+        let lat_here:int = fp_mul(lateral_q frac)
+        let p_x:int = cx_l + fp_mul(radius_q fp_mul(fxv sth)) + fp_mul(rxv lat_here)
+        let p_y:int = cy_l - fp_mul(radius_q cth)
+        let p_z:int = cz_l + fp_mul(radius_q fp_mul(fzv sth)) + fp_mul(rzv lat_here)
+        let tfx:int = fp_mul(cth fxv)
+        let tfy:int = sth
+        let tfz:int = fp_mul(cth fzv)
+        let tux:int = 0 - fp_mul(sth fxv)
+        let tuy:int = cth
+        let tuz:int = 0 - fp_mul(sth fzv)
+        let o:int = WAYPOINT_BUF + (bld_idx * WP_STRIDE)
+        if bld_idx <? NUM_WAYPOINTS {
+            __store__(p_x o)
+            __store__(p_y (o + 8))
+            __store__(p_z (o + 16))
+            __store__(tfx (o + 24))
+            __store__(tfy (o + 32))
+            __store__(tfz (o + 40))
+            __store__(tux (o + 48))
+            __store__(tuy (o + 56))
+            __store__(tuz (o + 64))
+            __store__(half_w (o + 72))
+            __store__(kind (o + 80))
+            __store__(0 (o + 88))
+            bld_idx += 1
+        }
+        i += 1
+    }
+    bld_x += fp_mul(rxv lateral_q)
+    bld_z += fp_mul(rzv lateral_q)
+    return 0
+}
+
+let gen_cork = (len_q:int dy_q:int twist_raw:int count:int half_w:int kind:int lateral_q:int):>void => {
+    let fxv:int = sin_fp(bld_h)
+    let fzv:int = 0 - cos_fp(bld_h)
+    let rxv_flat:int = cos_fp(bld_h)
+    let rzv_flat:int = sin_fp(bld_h)
+    let i:int = 0
+    loop i <? count {
+        let frac:int = ((i + 1) * FP_ONE) // count
+        let lat_here:int = fp_mul(lateral_q frac)
+        let p_x:int = bld_x + fp_mul(fxv fp_mul(len_q frac)) + fp_mul(rxv_flat lat_here)
+        let p_z:int = bld_z + fp_mul(fzv fp_mul(len_q frac)) + fp_mul(rzv_flat lat_here)
+        let p_y:int = bld_y + fp_mul(dy_q frac)
+        let roll:int = (twist_raw * (i + 1)) // count
+        let cb:int = cos_fp(roll)
+        let sb:int = sin_fp(roll)
+        let tux:int = fp_mul(rxv_flat sb)
+        let tuy:int = cb
+        let tuz:int = fp_mul(rzv_flat sb)
+        let o:int = WAYPOINT_BUF + (bld_idx * WP_STRIDE)
+        if bld_idx <? NUM_WAYPOINTS {
+            __store__(p_x o)
+            __store__(p_y (o + 8))
+            __store__(p_z (o + 16))
+            __store__(fxv o + 24)
+            __store__(0 o + 32)
+            __store__(fzv o + 40)
+            __store__(tux (o + 48))
+            __store__(tuy (o + 56))
+            __store__(tuz (o + 64))
+            __store__(half_w (o + 72))
+            __store__(kind (o + 80))
+            __store__(0 (o + 88))
+            bld_idx += 1
+        }
+        i += 1
+    }
+    bld_x += fp_mul(fxv len_q) + fp_mul(rxv_flat lateral_q)
+    bld_z += fp_mul(fzv len_q) + fp_mul(rzv_flat lateral_q)
+    bld_y += dy_q
+    return 0
+}
+
+let track_compute_steps = ():>void => {
+    let acc:int = 0
+    let i:int = 0
+    loop i <? track_total_wp {
+        let o:int = WAYPOINT_BUF + (i * WP_STRIDE) + 88
+        __store__(acc o)
+        let ni:int = (i + 1) % track_total_wp
+        let dx:int = wp_get_cx(ni) - wp_get_cx(i)
+        let dy:int = wp_get_cy(ni) - wp_get_cy(i)
+        let dz:int = wp_get_cz(ni) - wp_get_cz(i)
+        let d:int = fp_sqrt((dx * dx) + (dy * dy) + (dz * dz))
+        acc += d
+        i += 1
+    }
+    track_total_arc = acc
+    return 0
+}
+
+# Closed paperclip circuit. See design notes in race.udewy build_track().
+let build_track = ():>void => {
+    bld_x = 0
+    bld_y = 0
+    bld_z = 0
+    bld_h = 0
+    bld_idx = 0
+    let half_w:int = 5242880    # 80 m half-width
+
+    gen_straight(3932160 0 3 half_w SURF_GRID 0)
+    gen_straight(28835840 0 18 half_w SURF_NORMAL 0)
+    gen_turn(22937600 ANG_HALF_TURN 30 0 48 half_w SURF_NORMAL)
+
+    gen_straight(13107200 0 8 half_w SURF_NORMAL 0)
+    gen_straight(13107200 0 8 half_w SURF_BOOST 0)
+    gen_straight(9830400 0 6 half_w SURF_NORMAL 0)
+    gen_straight(9830400 1966080 10 half_w SURF_RAMP 0)
+    gen_straight(9830400 (0 - 1966080) 10 half_w SURF_RAMP 0)
+    gen_straight(6553600 0 4 half_w SURF_NORMAL 0)
+    gen_loop(7208960 48 half_w SURF_LOOP (2 * half_w))
+    gen_straight(6553600 0 4 half_w SURF_NORMAL 0)
+    gen_cork(52428800 0 ANG_TURN 64 half_w SURF_CORK 0)
+    gen_straight(13107200 0 8 half_w SURF_NORMAL 0)
+
+    gen_turn(17694720 ((ANG_HALF_TURN * 20) // 100) 30 0 12 half_w SURF_NORMAL)
+    gen_turn(17694720 ((ANG_HALF_TURN * 60) // 100) 30 0 28 half_w SURF_RECHARGE)
+    gen_turn(17694720 ((ANG_HALF_TURN * 20) // 100) 30 0 12 half_w SURF_NORMAL)
+
+    gen_straight(97648640 0 60 half_w SURF_NORMAL 0)
+    gen_straight(3932160 0 3 half_w SURF_GRID 0)
+
+    track_total_wp = bld_idx
+    track_compute_steps()
+    return 0
+}
+
+# Closest-point-on-track surface query. Sets surf_*, surf_kind, surf_t,
+# surf_half_w, surf_wp.
+let track_surface_query = (px:int py:int pz:int hint_wp:int):>void => {
+    let best_wp:int = hint_wp
+    let best_d2:int = 0x7FFFFFFFFFFFFFFF
+    let win:int = 8
+    let i:int = 0 - win
+    loop i <=? win {
+        let wi:int = ((hint_wp + i) % track_total_wp + track_total_wp) % track_total_wp
+        let dx:int = px - wp_get_cx(wi)
+        let dy:int = py - wp_get_cy(wi)
+        let dz:int = pz - wp_get_cz(wi)
+        let d2:int = (dx * dx) + (dy * dy) + (dz * dz)
+        if d2 <? best_d2 {
+            best_d2 = d2
+            best_wp = wi
+        }
+        i += 1
+    }
+
+    let ni:int = (best_wp + 1) % track_total_wp
+    let ax:int = wp_get_cx(best_wp)
+    let ay:int = wp_get_cy(best_wp)
+    let az:int = wp_get_cz(best_wp)
+    let bx:int = wp_get_cx(ni)
+    let by:int = wp_get_cy(ni)
+    let bz:int = wp_get_cz(ni)
+    let segx:int = bx - ax
+    let segy:int = by - ay
+    let segz:int = bz - az
+    let seg_len2_q32:int = (segx * segx) + (segy * segy) + (segz * segz)
+    let pax:int = px - ax
+    let pay:int = py - ay
+    let paz:int = pz - az
+    let dot_q32:int = (pax * segx) + (pay * segy) + (paz * segz)
+    let t_q:int = 0
+    if seg_len2_q32 >? 0 {
+        t_q = (dot_q32 << 16) // seg_len2_q32
+    }
+    if t_q <? 0 { t_q = 0 }
+    if t_q >? FP_ONE { t_q = FP_ONE }
+
+    let cx_lerp:int = ax + fp_mul(segx t_q)
+    let cy_lerp:int = ay + fp_mul(segy t_q)
+    let cz_lerp:int = az + fp_mul(segz t_q)
+    let fxa:int = wp_get_fx(best_wp)
+    let fya:int = wp_get_fy(best_wp)
+    let fza:int = wp_get_fz(best_wp)
+    let fxb:int = wp_get_fx(ni)
+    let fyb:int = wp_get_fy(ni)
+    let fzb:int = wp_get_fz(ni)
+    let fxv:int = fxa + fp_mul(fxb - fxa t_q)
+    let fyv:int = fya + fp_mul(fyb - fya t_q)
+    let fzv:int = fza + fp_mul(fzb - fza t_q)
+    let fmag:int = fp_sqrt((fxv * fxv) + (fyv * fyv) + (fzv * fzv))
+    if fmag >? 1024 {
+        fxv = fp_div(fxv fmag)
+        fyv = fp_div(fyv fmag)
+        fzv = fp_div(fzv fmag)
+    }
+    let uxa:int = wp_get_ux(best_wp)
+    let uya:int = wp_get_uy(best_wp)
+    let uza:int = wp_get_uz(best_wp)
+    let uxb:int = wp_get_ux(ni)
+    let uyb:int = wp_get_uy(ni)
+    let uzb:int = wp_get_uz(ni)
+    let uxv:int = uxa + fp_mul(uxb - uxa t_q)
+    let uyv:int = uya + fp_mul(uyb - uya t_q)
+    let uzv:int = uza + fp_mul(uzb - uza t_q)
+    let umag:int = fp_sqrt((uxv * uxv) + (uyv * uyv) + (uzv * uzv))
+    if umag >? 1024 {
+        uxv = fp_div(uxv umag)
+        uyv = fp_div(uyv umag)
+        uzv = fp_div(uzv umag)
+    }
+    let f_dot_u:int = fp_mul(fxv uxv) + fp_mul(fyv uyv) + fp_mul(fzv uzv)
+    uxv -= fp_mul(fxv f_dot_u)
+    uyv -= fp_mul(fyv f_dot_u)
+    uzv -= fp_mul(fzv f_dot_u)
+    umag = fp_sqrt((uxv * uxv) + (uyv * uyv) + (uzv * uzv))
+    if umag >? 1024 {
+        uxv = fp_div(uxv umag)
+        uyv = fp_div(uyv umag)
+        uzv = fp_div(uzv umag)
+    }
+    let rxv:int = fp_mul(fyv uzv) - fp_mul(fzv uyv)
+    let ryv:int = fp_mul(fzv uxv) - fp_mul(fxv uzv)
+    let rzv:int = fp_mul(fxv uyv) - fp_mul(fyv uxv)
+
+    let pcx:int = px - cx_lerp
+    let pcy:int = py - cy_lerp
+    let pcz:int = pz - cz_lerp
+    let t_lat:int = fp_mul(pcx rxv) + fp_mul(pcy ryv) + fp_mul(pcz rzv)
+
+    surf_x = cx_lerp + fp_mul(rxv t_lat)
+    surf_y = cy_lerp + fp_mul(ryv t_lat)
+    surf_z = cz_lerp + fp_mul(rzv t_lat)
+    surf_nx = uxv
+    surf_ny = uyv
+    surf_nz = uzv
+    surf_t = t_lat
+    surf_kind = wp_get_kind(best_wp)
+    surf_half_w = wp_get_half_w(best_wp)
+    surf_wp = best_wp
+    return 0
+}
+
+let normal_gap = (px:int py:int pz:int):>int => {
+    let target_x:int = surf_x + fp_mul(HOVER_HEIGHT surf_nx)
+    let target_y:int = surf_y + fp_mul(HOVER_HEIGHT surf_ny)
+    let target_z:int = surf_z + fp_mul(HOVER_HEIGHT surf_nz)
+    return fp_mul(px - target_x surf_nx) + fp_mul(py - target_y surf_ny) + fp_mul(pz - target_z surf_nz)
+}

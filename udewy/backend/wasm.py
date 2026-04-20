@@ -128,6 +128,28 @@ class Wasm32Backend(Backend):
             '(import "env" "host_webgl_uniform1iv" (func $host_webgl_uniform1iv (param i64 i64 i64 i64) (result i64)))',
             '(import "env" "host_webgl_uniform2iv" (func $host_webgl_uniform2iv (param i64 i64 i64 i64) (result i64)))',
             '(import "env" "host_webgl_render" (func $host_webgl_render (result i64)))',
+            # General-purpose 3D GPU surface (textured + vertex-colored, batched)
+            '(import "env" "host_gpu_init" (func $host_gpu_init (param i64 i64) (result i64)))',
+            '(import "env" "host_gpu_set_viewport" (func $host_gpu_set_viewport (param i64 i64) (result i64)))',
+            '(import "env" "host_gpu_clear" (func $host_gpu_clear (param i64 i64 i64) (result i64)))',
+            '(import "env" "host_gpu_set_perspective_frustum" (func $host_gpu_set_perspective_frustum (param i64 i64 i64 i64 i64 i64) (result i64)))',
+            '(import "env" "host_gpu_set_view_matrix" (func $host_gpu_set_view_matrix (param i64) (result i64)))',
+            '(import "env" "host_gpu_set_texture" (func $host_gpu_set_texture (param i64) (result i64)))',
+            '(import "env" "host_gpu_set_blend" (func $host_gpu_set_blend (param i64) (result i64)))',
+            '(import "env" "host_gpu_set_depth_test" (func $host_gpu_set_depth_test (param i64) (result i64)))',
+            '(import "env" "host_gpu_set_depth_write" (func $host_gpu_set_depth_write (param i64) (result i64)))',
+            '(import "env" "host_gpu_set_line_width" (func $host_gpu_set_line_width (param i64) (result i64)))',
+            '(import "env" "host_gpu_submit" (func $host_gpu_submit (param i64 i64 i64) (result i64)))',
+            '(import "env" "host_gpu_overlay_begin" (func $host_gpu_overlay_begin (param i64 i64) (result i64)))',
+            '(import "env" "host_gpu_overlay_end" (func $host_gpu_overlay_end (result i64)))',
+            '(import "env" "host_gpu_create_texture" (func $host_gpu_create_texture (param i64 i64 i64 i64 i64) (result i64)))',
+            '(import "env" "host_gpu_present" (func $host_gpu_present (result i64)))',
+            '(import "env" "host_gpu_window_width" (func $host_gpu_window_width (result i64)))',
+            '(import "env" "host_gpu_window_height" (func $host_gpu_window_height (result i64)))',
+            # Audio queue (general-purpose ring buffer pushed from WASM)
+            '(import "env" "host_audio_queue_init" (func $host_audio_queue_init (param i64 i64) (result i64)))',
+            '(import "env" "host_audio_queue_push" (func $host_audio_queue_push (param i64 i64) (result i64)))',
+            '(import "env" "host_audio_queue_size" (func $host_audio_queue_size (result i64)))',
         ]
         self._imports.extend(host_imports)
     
@@ -210,9 +232,10 @@ class Wasm32Backend(Backend):
         output = []
         output.append("(module")
         
-        # Memory import (for JS interop) - must come first
-        # 16 pages = 1MB, enough for reasonable canvas sizes
-        output.append('  (import "env" "memory" (memory 16))')
+        # Memory import (for JS interop) - must come first.
+        # 32 pages = 2MB; large enough for a streaming vertex scratch buffer
+        # plus a few hundred KB of game-side static_alloca.
+        output.append('  (import "env" "memory" (memory 32))')
         
         # Host function imports - must come before any definitions
         for imp in self._imports:
@@ -223,7 +246,7 @@ class Wasm32Backend(Backend):
             output.append(f"  (type {self._fn_type_name(arity)} (func {params} (result i64)))")
         
         # Global definitions - after imports, before functions
-        output.append('  (global $stack_ptr (mut i32) (i32.const 131072))')
+        output.append('  (global $stack_ptr (mut i32) (i32.const 2097152))')
         if self._module_init_name is not None:
             output.append('  (global $__udewy_module_init_done (mut i32) (i32.const 0))')
 
@@ -338,11 +361,18 @@ class Wasm32Backend(Backend):
         raise RuntimeError("extern globals are not supported on the wasm32 backend")
 
     def intern_static(self, size: int) -> int:
-        """Add a zero-initialized static storage block to the data section."""
+        """Reserve a static storage block. WebAssembly linear memory is
+        zero-initialised on instantiation, so we just bump the bump-allocator
+        without emitting a data segment full of zero bytes.
+        """
         label_id = self._next_label
         self._next_label += 1
 
-        offset = self._alloc_data(b"\x00" * size)
+        offset = self._data_offset
+        self._data_offset += size
+        if self._data_offset % 8 != 0:
+            self._data_offset += 8 - (self._data_offset % 8)
+
         self._static_offsets[label_id] = offset
         self._static_labels[label_id] = f".static{label_id}"
 
@@ -641,6 +671,17 @@ class Wasm32Backend(Backend):
         """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
         self._emit("i64.shr_s")
 
+    def i64_to_f32_bits(self) -> None:
+        """Convert i64 to f32 then return its IEEE-754 bit pattern (zero-extended to i64)."""
+        self._emit("f32.convert_i64_s")
+        self._emit("i32.reinterpret_f32")
+        self._emit("i64.extend_i32_u")
+
+    def i64_to_f64_bits(self) -> None:
+        """Convert i64 to f64 then return its IEEE-754 bit pattern (i64)."""
+        self._emit("f64.convert_i64_s")
+        self._emit("i64.reinterpret_f64")
+
     def alloca(self) -> None:
         """Allocate temporary linear-memory storage and return its address."""
         self._emit("i32.wrap_i64")
@@ -862,6 +903,66 @@ class Wasm32Backend(Backend):
     def emit_webgl_render(self) -> None:
         """Emit a call to host_webgl_render(). Stack: [] -> [0]"""
         self._emit("call $host_webgl_render")
+
+    def emit_gpu_init(self) -> None:
+        self._emit("call $host_gpu_init")
+
+    def emit_gpu_set_viewport(self) -> None:
+        self._emit("call $host_gpu_set_viewport")
+
+    def emit_gpu_clear(self) -> None:
+        self._emit("call $host_gpu_clear")
+
+    def emit_gpu_set_perspective_frustum(self) -> None:
+        self._emit("call $host_gpu_set_perspective_frustum")
+
+    def emit_gpu_set_view_matrix(self) -> None:
+        self._emit("call $host_gpu_set_view_matrix")
+
+    def emit_gpu_set_texture(self) -> None:
+        self._emit("call $host_gpu_set_texture")
+
+    def emit_gpu_set_blend(self) -> None:
+        self._emit("call $host_gpu_set_blend")
+
+    def emit_gpu_set_depth_test(self) -> None:
+        self._emit("call $host_gpu_set_depth_test")
+
+    def emit_gpu_set_depth_write(self) -> None:
+        self._emit("call $host_gpu_set_depth_write")
+
+    def emit_gpu_set_line_width(self) -> None:
+        self._emit("call $host_gpu_set_line_width")
+
+    def emit_gpu_submit(self) -> None:
+        self._emit("call $host_gpu_submit")
+
+    def emit_gpu_overlay_begin(self) -> None:
+        self._emit("call $host_gpu_overlay_begin")
+
+    def emit_gpu_overlay_end(self) -> None:
+        self._emit("call $host_gpu_overlay_end")
+
+    def emit_gpu_create_texture(self) -> None:
+        self._emit("call $host_gpu_create_texture")
+
+    def emit_gpu_present(self) -> None:
+        self._emit("call $host_gpu_present")
+
+    def emit_gpu_window_width(self) -> None:
+        self._emit("call $host_gpu_window_width")
+
+    def emit_gpu_window_height(self) -> None:
+        self._emit("call $host_gpu_window_height")
+
+    def emit_audio_queue_init(self) -> None:
+        self._emit("call $host_audio_queue_init")
+
+    def emit_audio_queue_push(self) -> None:
+        self._emit("call $host_audio_queue_push")
+
+    def emit_audio_queue_size(self) -> None:
+        self._emit("call $host_audio_queue_size")
     
     # ========================================================================
     # Control flow
@@ -965,6 +1066,28 @@ class Wasm32Backend(Backend):
         "__webgl_uniform1iv__": 4,
         "__webgl_uniform2iv__": 4,
         "__webgl_render__": 0,
+        "__gpu_init__": 2,
+        "__gpu_set_viewport__": 2,
+        "__gpu_clear__": 3,
+        "__gpu_set_perspective_frustum__": 6,
+        "__gpu_set_view_matrix__": 1,
+        "__gpu_set_texture__": 1,
+        "__gpu_set_blend__": 1,
+        "__gpu_set_depth_test__": 1,
+        "__gpu_set_depth_write__": 1,
+        "__gpu_set_line_width__": 1,
+        "__gpu_submit__": 3,
+        "__gpu_overlay_begin__": 2,
+        "__gpu_overlay_end__": 0,
+        "__gpu_create_texture__": 5,
+        "__gpu_present__": 0,
+        "__gpu_window_width__": 0,
+        "__gpu_window_height__": 0,
+        "__audio_queue_init__": 2,
+        "__audio_queue_push__": 2,
+        "__audio_queue_size__": 0,
+        "__i64_to_f32_bits__": 1,
+        "__i64_to_f64_bits__": 1,
     }
     _INTRINSIC_ARITIES = CORE_INTRINSIC_ARITIES | _PLATFORM_INTRINSIC_ARITIES
     
@@ -1098,6 +1221,50 @@ class Wasm32Backend(Backend):
             self.emit_webgl_uniform2iv()
         elif name == "__webgl_render__":
             self.emit_webgl_render()
+        elif name == "__gpu_init__":
+            self.emit_gpu_init()
+        elif name == "__gpu_set_viewport__":
+            self.emit_gpu_set_viewport()
+        elif name == "__gpu_clear__":
+            self.emit_gpu_clear()
+        elif name == "__gpu_set_perspective_frustum__":
+            self.emit_gpu_set_perspective_frustum()
+        elif name == "__gpu_set_view_matrix__":
+            self.emit_gpu_set_view_matrix()
+        elif name == "__gpu_set_texture__":
+            self.emit_gpu_set_texture()
+        elif name == "__gpu_set_blend__":
+            self.emit_gpu_set_blend()
+        elif name == "__gpu_set_depth_test__":
+            self.emit_gpu_set_depth_test()
+        elif name == "__gpu_set_depth_write__":
+            self.emit_gpu_set_depth_write()
+        elif name == "__gpu_set_line_width__":
+            self.emit_gpu_set_line_width()
+        elif name == "__gpu_submit__":
+            self.emit_gpu_submit()
+        elif name == "__gpu_overlay_begin__":
+            self.emit_gpu_overlay_begin()
+        elif name == "__gpu_overlay_end__":
+            self.emit_gpu_overlay_end()
+        elif name == "__gpu_create_texture__":
+            self.emit_gpu_create_texture()
+        elif name == "__gpu_present__":
+            self.emit_gpu_present()
+        elif name == "__gpu_window_width__":
+            self.emit_gpu_window_width()
+        elif name == "__gpu_window_height__":
+            self.emit_gpu_window_height()
+        elif name == "__audio_queue_init__":
+            self.emit_audio_queue_init()
+        elif name == "__audio_queue_push__":
+            self.emit_audio_queue_push()
+        elif name == "__audio_queue_size__":
+            self.emit_audio_queue_size()
+        elif name == "__i64_to_f32_bits__":
+            self.i64_to_f32_bits()
+        elif name == "__i64_to_f64_bits__":
+            self.i64_to_f64_bits()
     
     def get_builtin_constants(self) -> dict[str, int]:
         """WASM browser backend has no built-in constants."""
@@ -1279,7 +1446,7 @@ class Wasm32Backend(Backend):
     def _get_host_functions_js(self) -> str:
         """Return JavaScript code implementing WASM host functions."""
         return '''
-const memory = new WebAssembly.Memory({ initial: 16 });
+const memory = new WebAssembly.Memory({ initial: 32 });
 let outputElement = null;
 
 // Canvas state
@@ -1326,6 +1493,71 @@ const keysReleasedFrame = new Set();
 let audioStreamBufferSize = 0;
 let audioStreamStarted = false;
 let audioScriptNode = null;
+
+// General-purpose audio queue (ring of Int16 samples) driven from WASM.
+// Reuses the global `audioCtx` so the existing `requestAudioUnlock()` user-
+// gesture path also unlocks queued playback.
+let audioQueueRate = 44100;
+let audioQueueChannels = 1;
+let audioQueueRing = null;
+let audioQueueRead = 0;
+let audioQueueWrite = 0;
+let audioQueueCount = 0;
+let audioQueueCapacity = 0;
+let audioQueueNode = null;
+let audioQueueMode = false;
+const AUDIO_QUEUE_BLOCK = 2048;
+
+function audioQueueEnsureContext() {
+    if (audioQueueNode) return;
+    if (!audioCtx) {
+        audioCtx = new AudioContext({ sampleRate: audioQueueRate });
+    }
+    audioQueueNode = audioCtx.createScriptProcessor(AUDIO_QUEUE_BLOCK, 0, audioQueueChannels);
+    audioQueueNode.onaudioprocess = (e) => {
+        const ch = e.outputBuffer.getChannelData(0);
+        for (let i = 0; i < AUDIO_QUEUE_BLOCK; i++) {
+            if (audioQueueCount > 0) {
+                const s = audioQueueRing[audioQueueRead];
+                audioQueueRead = (audioQueueRead + 1) % audioQueueCapacity;
+                audioQueueCount--;
+                ch[i] = s / 32768.0;
+            } else {
+                ch[i] = 0;
+            }
+        }
+    };
+    audioQueueNode.connect(audioCtx.destination);
+    requestAudioUnlock();
+}
+
+// General-purpose 3D GPU state (WebGL1, batched textured+vertex-color)
+let gpuMode = false;
+let gpuCanvas = null;
+let gpuGL = null;
+let gpuProgram = null;
+let gpuVbo = null;
+let gpuQuadIbo = null;
+let gpuQuadIboCount = 0;
+let gpuStripIbo = null;
+let gpuStripIboCount = 0;
+let gpuTextures = [null];  // 1-indexed; index 0 reserved
+let gpuWhiteTex = null;
+let gpuCurrentTex = 0;
+let gpuOverlayActive = false;
+let gpuSavedDepthTest = true;
+let gpuSavedDepthWrite = true;
+let gpuLocPos = -1;
+let gpuLocUV = -1;
+let gpuLocColor = -1;
+let gpuLocProj = null;
+let gpuLocView = null;
+let gpuLocSampler = null;
+let gpuLocUseTex = null;
+let gpuProj = new Float32Array(16);
+let gpuView = new Float32Array(16);
+let gpuOrthoProj = new Float32Array(16);
+let gpuIdentity = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
 
 // Double-buffer for audio: WASM writes to one, audio reads from other
 let audioWriteBuffer = 0;  // 0 or 1
@@ -1652,6 +1884,144 @@ void main() {
         throw new Error(info);
     }
     return program;
+}
+
+function q16ToF32(v) {
+    return Number(v) / 65536.0;
+}
+
+function gpuEnsureQuadIndices(quadCount) {
+    if (gpuQuadIboCount >= quadCount) return;
+    const cap = Math.max(quadCount * 2, 64);
+    const indices = new Uint16Array(cap * 6);
+    for (let i = 0; i < cap; i++) {
+        const v = i * 4;
+        const o = i * 6;
+        indices[o] = v;
+        indices[o + 1] = v + 1;
+        indices[o + 2] = v + 2;
+        indices[o + 3] = v;
+        indices[o + 4] = v + 2;
+        indices[o + 5] = v + 3;
+    }
+    if (!gpuQuadIbo) gpuQuadIbo = gpuGL.createBuffer();
+    gpuGL.bindBuffer(gpuGL.ELEMENT_ARRAY_BUFFER, gpuQuadIbo);
+    gpuGL.bufferData(gpuGL.ELEMENT_ARRAY_BUFFER, indices, gpuGL.STATIC_DRAW);
+    gpuQuadIboCount = cap;
+}
+
+function gpuEnsureStripIndices(vertCount) {
+    if (gpuStripIboCount >= vertCount) return;
+    const cap = Math.max(vertCount * 2, 64);
+    const triCount = (cap - 2);
+    const indices = new Uint16Array(Math.max(triCount, 0) * 3);
+    let o = 0;
+    for (let i = 0; i + 2 < cap; i++) {
+        if ((i & 1) === 0) {
+            indices[o++] = i;
+            indices[o++] = i + 1;
+            indices[o++] = i + 2;
+        } else {
+            indices[o++] = i + 1;
+            indices[o++] = i;
+            indices[o++] = i + 2;
+        }
+    }
+    if (!gpuStripIbo) gpuStripIbo = gpuGL.createBuffer();
+    gpuGL.bindBuffer(gpuGL.ELEMENT_ARRAY_BUFFER, gpuStripIbo);
+    gpuGL.bufferData(gpuGL.ELEMENT_ARRAY_BUFFER, indices, gpuGL.STATIC_DRAW);
+    gpuStripIboCount = cap;
+}
+
+function gpuMakeFrustum(out, l, r, b, t, n, f) {
+    const rl = r - l, tb = t - b, fn = f - n;
+    out[0] = (2 * n) / rl;
+    out[1] = 0; out[2] = 0; out[3] = 0;
+    out[4] = 0;
+    out[5] = (2 * n) / tb;
+    out[6] = 0; out[7] = 0;
+    out[8] = (r + l) / rl;
+    out[9] = (t + b) / tb;
+    out[10] = -(f + n) / fn;
+    out[11] = -1;
+    out[12] = 0; out[13] = 0;
+    out[14] = -(2 * f * n) / fn;
+    out[15] = 0;
+}
+
+function gpuMakeOrtho(out, l, r, b, t, n, f) {
+    const rl = r - l, tb = t - b, fn = f - n;
+    out[0] = 2 / rl;
+    out[1] = 0; out[2] = 0; out[3] = 0;
+    out[4] = 0;
+    out[5] = 2 / tb;
+    out[6] = 0; out[7] = 0;
+    out[8] = 0; out[9] = 0;
+    out[10] = -2 / fn;
+    out[11] = 0;
+    out[12] = -(r + l) / rl;
+    out[13] = -(t + b) / tb;
+    out[14] = -(f + n) / fn;
+    out[15] = 1;
+}
+
+function gpuCreateProgram(gl) {
+    const vs = `
+attribute vec3 a_pos;
+attribute vec2 a_uv;
+attribute vec4 a_color;
+uniform mat4 u_proj;
+uniform mat4 u_view;
+varying vec2 v_uv;
+varying vec4 v_color;
+void main() {
+    gl_Position = u_proj * u_view * vec4(a_pos, 1.0);
+    v_uv = a_uv;
+    v_color = a_color;
+}
+`;
+    const fs = `
+precision mediump float;
+varying vec2 v_uv;
+varying vec4 v_color;
+uniform sampler2D u_tex;
+uniform float u_use_tex;
+void main() {
+    vec4 tex = texture2D(u_tex, v_uv);
+    vec4 textured = v_color * tex;
+    gl_FragColor = mix(v_color, textured, u_use_tex);
+}
+`;
+    const vsh = compileWebglShader(gl, gl.VERTEX_SHADER, vs);
+    const fsh = compileWebglShader(gl, gl.FRAGMENT_SHADER, fs);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vsh);
+    gl.attachShader(prog, fsh);
+    gl.linkProgram(prog);
+    gl.deleteShader(vsh);
+    gl.deleteShader(fsh);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        const info = gl.getProgramInfoLog(prog) || 'gpu program link error';
+        gl.deleteProgram(prog);
+        throw new Error(info);
+    }
+    return prog;
+}
+
+function gpuBindTextureSlot(slot) {
+    const gl = gpuGL;
+    let tex;
+    if (slot === 0 || !gpuTextures[slot]) {
+        tex = gpuWhiteTex;
+        gl.uniform1f(gpuLocUseTex, 0.0);
+    } else {
+        tex = gpuTextures[slot];
+        gl.uniform1f(gpuLocUseTex, 1.0);
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(gpuLocSampler, 0);
+    gpuCurrentTex = slot;
 }
 
 const imports = {
@@ -2004,11 +2374,251 @@ const imports = {
             webglContext.drawArrays(webglContext.TRIANGLES, 0, 3);
             return 0n;
         },
+        // General-purpose batched 3D GPU surface
+        host_gpu_init: (width, height) => {
+            if (gpuMode) return 0n;
+            const w = Number(width);
+            const h = Number(height);
+            gpuCanvas = document.getElementById('canvas');
+            if (!gpuCanvas) {
+                gpuCanvas = document.createElement('canvas');
+                gpuCanvas.id = 'canvas';
+                document.body.insertBefore(gpuCanvas, document.body.firstChild);
+            }
+            gpuCanvas.width = w;
+            gpuCanvas.height = h;
+            gpuCanvas.style.display = 'block';
+            webglCanvas = gpuCanvas;
+            webglMode = true;
+            updateCanvasLayout();
+            ensurePointerHandlers();
+            ensureKeyboardHandlers();
+
+            gpuGL = gpuCanvas.getContext('webgl', { antialias: true, depth: true, alpha: false, preserveDrawingBuffer: false });
+            if (!gpuGL) {
+                console.error('WebGL not supported');
+                return -1n;
+            }
+            try {
+                gpuProgram = gpuCreateProgram(gpuGL);
+            } catch (err) {
+                console.error('GPU shader setup failed:', err);
+                return -1n;
+            }
+            gpuGL.useProgram(gpuProgram);
+            gpuLocPos = gpuGL.getAttribLocation(gpuProgram, 'a_pos');
+            gpuLocUV = gpuGL.getAttribLocation(gpuProgram, 'a_uv');
+            gpuLocColor = gpuGL.getAttribLocation(gpuProgram, 'a_color');
+            gpuLocProj = gpuGL.getUniformLocation(gpuProgram, 'u_proj');
+            gpuLocView = gpuGL.getUniformLocation(gpuProgram, 'u_view');
+            gpuLocSampler = gpuGL.getUniformLocation(gpuProgram, 'u_tex');
+            gpuLocUseTex = gpuGL.getUniformLocation(gpuProgram, 'u_use_tex');
+
+            gpuVbo = gpuGL.createBuffer();
+            gpuWhiteTex = gpuGL.createTexture();
+            gpuGL.bindTexture(gpuGL.TEXTURE_2D, gpuWhiteTex);
+            gpuGL.texImage2D(gpuGL.TEXTURE_2D, 0, gpuGL.RGBA, 1, 1, 0, gpuGL.RGBA, gpuGL.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
+            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_MIN_FILTER, gpuGL.NEAREST);
+            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_MAG_FILTER, gpuGL.NEAREST);
+            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_WRAP_S, gpuGL.CLAMP_TO_EDGE);
+            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_WRAP_T, gpuGL.CLAMP_TO_EDGE);
+
+            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuIdentity);
+            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuIdentity);
+            gpuBindTextureSlot(0);
+
+            gpuGL.enable(gpuGL.DEPTH_TEST);
+            gpuGL.depthFunc(gpuGL.LEQUAL);
+            gpuGL.disable(gpuGL.BLEND);
+
+            if (outputElement) outputElement.style.display = 'none';
+            gpuMode = true;
+            startTime = performance.now();
+            updateCanvasLayout();
+            return 0n;
+        },
+        host_gpu_set_viewport: (w, h) => {
+            if (!gpuMode) return 0n;
+            gpuGL.viewport(0, 0, Number(w), Number(h));
+            return 0n;
+        },
+        host_gpu_clear: (r_q, g_q, b_q) => {
+            if (!gpuMode) return 0n;
+            gpuGL.clearColor(q16ToF32(r_q), q16ToF32(g_q), q16ToF32(b_q), 1.0);
+            gpuGL.clear(gpuGL.COLOR_BUFFER_BIT | gpuGL.DEPTH_BUFFER_BIT);
+            return 0n;
+        },
+        host_gpu_set_perspective_frustum: (l_q, r_q, b_q, t_q, n_q, f_q) => {
+            if (!gpuMode) return 0n;
+            gpuMakeFrustum(gpuProj, q16ToF32(l_q), q16ToF32(r_q), q16ToF32(b_q), q16ToF32(t_q), q16ToF32(n_q), q16ToF32(f_q));
+            gpuGL.useProgram(gpuProgram);
+            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuProj);
+            return 0n;
+        },
+        host_gpu_set_view_matrix: (matPtr) => {
+            if (!gpuMode) return 0n;
+            const view = new Float32Array(memory.buffer, Number(matPtr), 16);
+            for (let i = 0; i < 16; i++) gpuView[i] = view[i];
+            gpuGL.useProgram(gpuProgram);
+            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuView);
+            return 0n;
+        },
+        host_gpu_set_texture: (texId) => {
+            if (!gpuMode) return 0n;
+            gpuGL.useProgram(gpuProgram);
+            gpuBindTextureSlot(Number(texId));
+            return 0n;
+        },
+        host_gpu_set_blend: (mode) => {
+            if (!gpuMode) return 0n;
+            const m = Number(mode);
+            if (m === 0) {
+                gpuGL.disable(gpuGL.BLEND);
+            } else if (m === 1) {
+                gpuGL.enable(gpuGL.BLEND);
+                gpuGL.blendFunc(gpuGL.SRC_ALPHA, gpuGL.ONE_MINUS_SRC_ALPHA);
+            } else {
+                gpuGL.enable(gpuGL.BLEND);
+                gpuGL.blendFunc(gpuGL.SRC_ALPHA, gpuGL.ONE);
+            }
+            return 0n;
+        },
+        host_gpu_set_depth_test: (on) => {
+            if (!gpuMode) return 0n;
+            if (Number(on) !== 0) gpuGL.enable(gpuGL.DEPTH_TEST);
+            else gpuGL.disable(gpuGL.DEPTH_TEST);
+            return 0n;
+        },
+        host_gpu_set_depth_write: (on) => {
+            if (!gpuMode) return 0n;
+            gpuGL.depthMask(Number(on) !== 0);
+            return 0n;
+        },
+        host_gpu_set_line_width: (w_q) => {
+            if (!gpuMode) return 0n;
+            gpuGL.lineWidth(q16ToF32(w_q));
+            return 0n;
+        },
+        host_gpu_submit: (kind, ptr, count) => {
+            if (!gpuMode) return 0n;
+            const k = Number(kind);
+            const n = Number(count);
+            if (n <= 0) return 0n;
+            const gl = gpuGL;
+            const stride = 9 * 4;
+            const verts = new Float32Array(memory.buffer, Number(ptr), n * 9);
+            gl.useProgram(gpuProgram);
+            gl.bindBuffer(gl.ARRAY_BUFFER, gpuVbo);
+            gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STREAM_DRAW);
+            gl.enableVertexAttribArray(gpuLocPos);
+            gl.vertexAttribPointer(gpuLocPos, 3, gl.FLOAT, false, stride, 0);
+            if (gpuLocUV >= 0) {
+                gl.enableVertexAttribArray(gpuLocUV);
+                gl.vertexAttribPointer(gpuLocUV, 2, gl.FLOAT, false, stride, 12);
+            }
+            if (gpuLocColor >= 0) {
+                gl.enableVertexAttribArray(gpuLocColor);
+                gl.vertexAttribPointer(gpuLocColor, 4, gl.FLOAT, false, stride, 20);
+            }
+            if (k === 0) {
+                const quads = (n / 4) | 0;
+                gpuEnsureQuadIndices(quads);
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gpuQuadIbo);
+                gl.drawElements(gl.TRIANGLES, quads * 6, gl.UNSIGNED_SHORT, 0);
+            } else if (k === 1) {
+                gpuEnsureStripIndices(n);
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gpuStripIbo);
+                gl.drawElements(gl.TRIANGLES, Math.max(n - 2, 0) * 3, gl.UNSIGNED_SHORT, 0);
+            } else if (k === 2) {
+                gl.drawArrays(gl.TRIANGLES, 0, n);
+            } else if (k === 3) {
+                gl.drawArrays(gl.LINES, 0, n);
+            }
+            return 0n;
+        },
+        host_gpu_overlay_begin: (sw, sh) => {
+            if (!gpuMode) return 0n;
+            const w = Number(sw);
+            const h = Number(sh);
+            gpuMakeOrtho(gpuOrthoProj, 0, w, h, 0, -1, 1);
+            gpuGL.useProgram(gpuProgram);
+            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuOrthoProj);
+            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuIdentity);
+            gpuSavedDepthTest = gpuGL.getParameter(gpuGL.DEPTH_TEST);
+            gpuSavedDepthWrite = gpuGL.getParameter(gpuGL.DEPTH_WRITEMASK);
+            gpuGL.disable(gpuGL.DEPTH_TEST);
+            gpuGL.depthMask(false);
+            gpuOverlayActive = true;
+            return 0n;
+        },
+        host_gpu_overlay_end: () => {
+            if (!gpuMode) return 0n;
+            gpuGL.useProgram(gpuProgram);
+            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuProj);
+            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuView);
+            if (gpuSavedDepthTest) gpuGL.enable(gpuGL.DEPTH_TEST);
+            gpuGL.depthMask(!!gpuSavedDepthWrite);
+            gpuOverlayActive = false;
+            return 0n;
+        },
+        host_gpu_create_texture: (width, height, pixelsPtr, repeat, nearest) => {
+            if (!gpuMode) return 0n;
+            const gl = gpuGL;
+            const w = Number(width);
+            const h = Number(height);
+            const pixels = new Uint8Array(memory.buffer, Number(pixelsPtr), w * h * 4);
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(pixels));
+            const filter = (Number(nearest) !== 0) ? gl.NEAREST : gl.LINEAR;
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+            const wrap = (Number(repeat) !== 0) ? gl.REPEAT : gl.CLAMP_TO_EDGE;
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+            gpuTextures.push(tex);
+            return BigInt(gpuTextures.length - 1);
+        },
+        host_gpu_present: () => {
+            return 0n;
+        },
+        host_gpu_window_width: () => BigInt(gpuCanvas ? gpuCanvas.width : 0),
+        host_gpu_window_height: () => BigInt(gpuCanvas ? gpuCanvas.height : 0),
+        host_audio_queue_init: (sampleRate, channels) => {
+            audioQueueRate = Number(sampleRate);
+            audioQueueChannels = Number(channels);
+            audioQueueCapacity = audioQueueRate * 2;  // ~2 s of buffer
+            audioQueueRing = new Int16Array(audioQueueCapacity);
+            audioQueueRead = 0;
+            audioQueueWrite = 0;
+            audioQueueCount = 0;
+            try {
+                audioQueueEnsureContext();
+            } catch (err) {
+                console.error('Audio queue init failed:', err);
+                return -1n;
+            }
+            return 0n;
+        },
+        host_audio_queue_push: (ptr, nBytes) => {
+            if (!audioQueueRing) return 0n;
+            const samples = Number(nBytes) >> 1;
+            const view = new Int16Array(memory.buffer, Number(ptr), samples);
+            for (let i = 0; i < samples; i++) {
+                if (audioQueueCount >= audioQueueCapacity) break;
+                audioQueueRing[audioQueueWrite] = view[i];
+                audioQueueWrite = (audioQueueWrite + 1) % audioQueueCapacity;
+                audioQueueCount++;
+            }
+            return BigInt(samples * 2);
+        },
+        host_audio_queue_size: () => BigInt(audioQueueCount * 2),
     }
 };
 
 function animationLoop() {
-    if ((!canvasMode && !audioStreamMode && !webglMode) || !wasmInstance) return;
+    if ((!canvasMode && !audioStreamMode && !webglMode && !gpuMode) || !wasmInstance) return;
 
     frameCount++;
     wasmInstance.exports.main();
@@ -2073,7 +2683,7 @@ async function run() {{
         wasmInstance = instance;
         const result = instance.exports.main();
         console.log('Exit code:', result);
-        if (canvasMode || webglMode) {{
+        if (canvasMode || webglMode || gpuMode) {{
             document.body.classList.add('canvas-mode');
             requestAnimationFrame(animationLoop);
         }} else if (audioStreamMode) {{
@@ -2131,7 +2741,7 @@ async function run() {{
         wasmInstance = instance;
         const result = instance.exports.main();
         console.log('Exit code:', result);
-        if (canvasMode || webglMode) {{
+        if (canvasMode || webglMode || gpuMode) {{
             document.body.classList.add('canvas-mode');
             requestAnimationFrame(animationLoop);
         }} else if (audioStreamMode) {{

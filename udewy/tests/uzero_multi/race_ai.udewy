@@ -1,0 +1,89 @@
+# ============================================================================
+# uZero race: AI input synthesis.
+# ============================================================================
+
+import p"./uzero_math.udewy"
+import p"./race_state.udewy"
+import p"./race_track.udewy"
+
+let ai_lookahead:int = 3
+let ai_boost_energy_q:int = 26214      # 0.40
+
+let ai_compute_input = (idx:int):>void => {
+    ai_aim_timer -= 1
+    if ai_aim_timer <=? 0 {
+        let hw_q:int = wp_get_half_w((cur_wp + ai_lookahead) % track_total_wp)
+        let span:int = (hw_q * 12) // 10
+        if span <? FP_ONE { span = FP_ONE }
+        ai_aim = xs_range(span * 2) - span
+        ai_aim_timer = 60 + xs_range(180)
+    }
+
+    let target_wp:int = (cur_wp + ai_lookahead) % track_total_wp
+    let tx:int = wp_get_cx(target_wp)
+    let ty:int = wp_get_cy(target_wp)
+    let tz:int = wp_get_cz(target_wp)
+    let tfx:int = wp_get_fx(target_wp)
+    let tfy:int = wp_get_fy(target_wp)
+    let tfz:int = wp_get_fz(target_wp)
+    let tux:int = wp_get_ux(target_wp)
+    let tuy:int = wp_get_uy(target_wp)
+    let tuz:int = wp_get_uz(target_wp)
+    let trx:int = fp_mul(tfy tuz) - fp_mul(tfz tuy)
+    let try_:int = fp_mul(tfz tux) - fp_mul(tfx tuz)
+    let trz:int = fp_mul(tfx tuy) - fp_mul(tfy tux)
+    tx += fp_mul(trx ai_aim)
+    ty += fp_mul(try_ ai_aim)
+    tz += fp_mul(trz ai_aim)
+
+    let dx:int = tx - cx
+    let dy:int = ty - cy
+    let dz:int = tz - cz
+    let dm:int = fp_sqrt((dx * dx) + (dy * dy) + (dz * dz))
+    if dm <? 1024 {
+        in_thrust = 1
+        in_steer_l = 0
+        in_steer_r = 0
+        in_boost = 0
+        in_brake = 0
+        in_strafe_l = 0
+        in_strafe_r = 0
+        in_respawn = 0
+        return 0
+    }
+    let dnx:int = fp_div(dx dm)
+    let dny:int = fp_div(dy dm)
+    let dnz:int = fp_div(dz dm)
+    let side:int = fp_mul(dnx rx) + fp_mul(dny ry) + fp_mul(dnz rz)
+    let steer_thresh:int = 1311
+    in_steer_l = 0
+    in_steer_r = 0
+    if side >? steer_thresh {
+        in_steer_r = 1
+    }
+    if side <? (0 - steer_thresh) {
+        in_steer_l = 1
+    }
+    in_thrust = 1
+    in_brake = 0
+    in_strafe_l = 0
+    in_strafe_r = 0
+    in_respawn = 0
+
+    in_boost = 0
+    if cur_status =? 0 {
+        if energy >? ai_boost_energy_q {
+            let aw:int = (cur_wp + 2) % track_total_wp
+            let afx:int = wp_get_fx(aw)
+            let afy:int = wp_get_fy(aw)
+            let afz:int = wp_get_fz(aw)
+            let fdot:int = fp_mul(fx afx) + fp_mul(fy afy) + fp_mul(fz afz)
+            if fdot >? ai_boost_thresh {
+                if speed_overcap =? 0 {
+                    in_boost = 1
+                }
+            }
+        }
+    }
+    return 0
+}

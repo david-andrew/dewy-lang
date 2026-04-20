@@ -1,0 +1,164 @@
+# ============================================================================
+# uZero race: mutable global state. Backend-agnostic.
+#
+# Pulled verbatim from udewy/tests/uzero/race.udewy. Depends on the constants
+# in race_constants.udewy (TRAIL_BUF_BYTES, CAR_BUF_BYTES, ...).
+# ============================================================================
+
+import p"./race_constants.udewy"
+
+# ---------- Game state ------------------------------------------------------
+
+let running:int = 1
+let frame_count:int = 0
+let game_state:int = STATE_TITLE
+let race_start_frame:int = 0
+let title_blink_phase:int = 0
+let game_over_frames:int = 0
+let results_camera_frames:int = 0
+
+# Camera basis lives outside any one car so it can lerp smoothly across
+# state transitions (e.g. results screen flies up off the player car).
+let cam_x:int = 0
+let cam_y:int = 360448
+let cam_z:int = 983040
+let cam_fx:int = 0
+let cam_fy:int = 0
+let cam_fz:int = -65536
+let cam_ux:int = 0
+let cam_uy:int = 65536
+let cam_uz:int = 0
+let cur_fov_top_q16:int = 131072
+
+# Player visual basis (rolled by `bank` for turn lean). Updated every frame
+# from the player car's physics basis.
+let vfx:int = 0
+let vfy:int = 0
+let vfz:int = -65536
+let vrx:int = 65536
+let vry:int = 0
+let vrz:int = 0
+let vux:int = 0
+let vuy:int = 65536
+let vuz:int = 0
+
+# Surface-query result.
+let surf_x:int = 0
+let surf_y:int = 65536
+let surf_z:int = 0
+let surf_nx:int = 0
+let surf_ny:int = 65536
+let surf_nz:int = 0
+let surf_kind:int = 0
+let surf_t:int = 0                       # signed lateral offset of probe
+let surf_half_w:int = 0
+let surf_wp:int = 0                      # waypoint index that won the query
+
+# Per-car "scratch" globals. We load a car's state into these every frame,
+# run the rich physics_step, then write back. AI cars use the same globals
+# (different load/store) so all cars share one physics path.
+let cx:int = 0
+let cy:int = 98304
+let cz:int = 0
+let cvx:int = 0
+let cvy:int = 0
+let cvz:int = 0
+let fx:int = 0
+let fy:int = 0
+let fz:int = -65536
+let rx:int = 65536
+let ry:int = 0
+let rz:int = 0
+let ux:int = 0
+let uy:int = 65536
+let uz:int = 0
+let energy:int = 65536
+let speed_overcap:int = 0
+let boost_active_frames:int = 0
+let cur_wp:int = 0
+let cur_lap:int = 0
+let cur_status:int = 0
+let prev_fx:int = 0
+let prev_fy:int = 0
+let prev_fz:int = -65536
+let bank:int = 0
+let was_airborne:int = 1
+let wall_contact:int = 0
+let top_speed_mult:int = 65536           # default = 1.0 (player baseline)
+let ai_aim:int = 0                       # signed Q16 metres lateral offset
+let ai_aim_timer:int = 0                 # countdown to next aim re-roll
+let ai_boost_thresh:int = 62259          # default = 0.95 (matches former hardcode)
+
+# Visual-only HUD readouts published by update_chase.
+let vis_speed:int = 0
+let vis_speed_norm:int = 0
+let vis_boost_norm:int = 0
+
+# Player position in race standings (1 = leader). Recomputed each frame.
+let player_position:int = 1
+let player_finish_frame:int = 0
+
+# Static buffers.
+const WAYPOINT_BUF:int = __static_alloca__(WP_BUF_BYTES)
+const CAR_BUF:int = __static_alloca__(CAR_BUF_BYTES)
+const TRAIL_BUF:int = __static_alloca__(TRAIL_BUF_BYTES)
+let trail_head:int = 0
+let trail_count:int = 0
+const SPARK_BUF:int = __static_alloca__(SPARK_BUF_BYTES)
+let spark_head:int = 0
+const SPEED_LINE_STATE:int = __static_alloca__(SPEED_LINE_STATE_BYTES)
+
+# Texture pixels and ids -- one per surface kind, plus ground.
+const CHECKER_PIXELS_GROUND:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_TRACK:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_BOOST:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_RECHARGE:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_GRID:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_WALL:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_LOOP:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_CORK:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_RAMP:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_TEXID_GROUND:int = __static_alloca__(8)
+const CHECKER_TEXID_TRACK:int = __static_alloca__(8)
+const CHECKER_TEXID_BOOST:int = __static_alloca__(8)
+const CHECKER_TEXID_RECHARGE:int = __static_alloca__(8)
+const CHECKER_TEXID_GRID:int = __static_alloca__(8)
+const CHECKER_TEXID_WALL:int = __static_alloca__(8)
+const CHECKER_TEXID_LOOP:int = __static_alloca__(8)
+const CHECKER_TEXID_CORK:int = __static_alloca__(8)
+const CHECKER_TEXID_RAMP:int = __static_alloca__(8)
+
+# Audio buffers.
+const AUDIO_MIX_BUF:int = __static_alloca__(AUDIO_FRAME_BYTES)
+const AUDIO_MUSIC_BUF:int = __static_alloca__(MUSIC_LOOP_BYTES)
+const SFX_TABLE_BUF:int = __static_alloca__(SFX_TABLE_BYTES)
+const SFX_VOICES:int = __static_alloca__(SFX_BUF_BYTES)
+let audio_enabled:int = 0
+let music_play_pos:int = 0
+let engine_phase:int = 0
+
+# Per-frame "computed input" state. Both the player input pump and the AI
+# fill these; physics_step reads them to drive cars uniformly.
+let in_thrust:int = 0
+let in_brake:int = 0
+let in_steer_l:int = 0
+let in_steer_r:int = 0
+let in_strafe_l:int = 0
+let in_strafe_r:int = 0
+let in_boost:int = 0
+let in_boost_prev:int = 0
+let in_respawn:int = 0
+let in_respawn_prev:int = 0
+let in_quit:int = 0
+let in_fps_toggle:int = 0
+let in_fps_toggle_prev:int = 0
+let in_start:int = 0
+let in_start_prev:int = 0
+let in_restart:int = 0
+let in_restart_prev:int = 0
+
+# FPS counter.
+let show_fps:int = SHOW_FPS_DEFAULT
+let fps_last_ticks:int = 0
+let fps_sample_count:int = 0
+let fps_value:int = 0

@@ -1,0 +1,329 @@
+import p"./uzero_math.udewy"
+
+# ============================================================================
+# uZero WebAssembly / WebGL backend
+#
+# Implements the same gpu_* / input_* / audio_* / time_* surface that
+# backend_sdl.udewy exposes, but on top of the WASM host intrinsics provided
+# by udewy/backend/wasm.py:
+#   - __gpu_*__         -> WebGL1 batched textured + vertex-coloured renderer
+#   - __key_down__/etc  -> KeyboardEvent.code lookup
+#   - __audio_queue_*__ -> Int16 ring buffer fed into a ScriptProcessorNode
+#   - __host_time__     -> Date.now() in ms
+#
+# All numeric arguments are Q16 (1 m / 1 unit) unless suffixed _px.
+# ============================================================================
+
+# ---------- Vertex scratch buffer ------------------------------------------
+# We batch immediate-mode style emissions between gpu_*_begin / gpu_end and
+# flush them with a single __gpu_submit__ call. 9 f32 per vertex (x,y,z,
+# u,v,r,g,b,a) = 36 bytes. 8192 verts = ~290 KB of scratch.
+const GPU_VERT_STRIDE:int = 36
+const GPU_MAX_VERTS:int = 8192
+const GPU_SCRATCH_BYTES:int = 294912     # 8192 * 36
+let GPU_SCRATCH:int = __static_alloca__(GPU_SCRATCH_BYTES)
+
+# Current primitive kind (matches host enum):
+#   0 = QUADS, 1 = QUAD_STRIP, 2 = TRIS, 3 = LINES
+let bk_prim_kind:int = 0
+let bk_vert_count:int = 0
+let bk_cur_r:int = 65536
+let bk_cur_g:int = 65536
+let bk_cur_b:int = 65536
+let bk_cur_a:int = 65536
+
+# Window/input state. We keep edge mirrors here for action_pressed-style
+# helpers, mirroring backend_sdl.
+let bk_quit:int = 0
+let bk_start_now:int = 0
+let bk_start_prev:int = 0
+let bk_restart_now:int = 0
+let bk_restart_prev:int = 0
+let bk_fps_now:int = 0
+let bk_fps_prev:int = 0
+
+# Output buffer for backend_get_size (two i32 cells).
+let bk_size_buf:int = __static_alloca__(8)
+
+# ---------- Key name string literals ---------------------------------------
+# Keys are matched against KeyboardEvent.code on the JS side. We have to
+# turn each name into a (ptr, len) pair; udewy string literals already
+# carry a trailing 0 so we use a manual length count.
+
+const KEY_W:int      = "KeyW\0"
+const KEY_A:int      = "KeyA\0"
+const KEY_S:int      = "KeyS\0"
+const KEY_D:int      = "KeyD\0"
+const KEY_Q:int      = "KeyQ\0"
+const KEY_E:int      = "KeyE\0"
+const KEY_R:int      = "KeyR\0"
+const KEY_F:int      = "KeyF\0"
+const KEY_UP:int     = "ArrowUp\0"
+const KEY_DOWN:int   = "ArrowDown\0"
+const KEY_LEFT:int   = "ArrowLeft\0"
+const KEY_RIGHT:int  = "ArrowRight\0"
+const KEY_SPACE:int  = "Space\0"
+const KEY_ENTER:int  = "Enter\0"
+const KEY_ESC:int    = "Escape\0"
+
+let str_len = (s:int):>int => {
+    let n:int = 0
+    loop __load_u8__(s + n) not=? 0 {
+        n += 1
+    }
+    return n
+}
+
+let key_held = (s:int):>int => {
+    return __key_down__(s str_len(s))
+}
+
+# ---------- Lifecycle -------------------------------------------------------
+
+let backend_init = (width:int height:int title_ptr:int):>int => {
+    return __gpu_init__(width height)
+}
+
+let backend_shutdown = ():>void => {
+    return 0
+}
+
+let backend_poll = ():>void => {
+    if key_held(KEY_ESC) not=? 0 { bk_quit = 1 }
+
+    let s_now:int = key_held(KEY_SPACE) or key_held(KEY_ENTER)
+    bk_start_now = (s_now not=? 0) and (bk_start_prev =? 0)
+    bk_start_prev = s_now
+
+    let r_now:int = key_held(KEY_R)
+    bk_restart_now = (r_now not=? 0) and (bk_restart_prev =? 0)
+    bk_restart_prev = r_now
+
+    let f_now:int = key_held(KEY_F)
+    bk_fps_now = (f_now not=? 0) and (bk_fps_prev =? 0)
+    bk_fps_prev = f_now
+    return 0
+}
+
+let backend_present = ():>void => {
+    __gpu_present__()
+    return 0
+}
+
+let backend_get_size = (out_w_ptr:int out_h_ptr:int):>void => {
+    __store_u32__(__gpu_window_width__() out_w_ptr)
+    __store_u32__(__gpu_window_height__() out_h_ptr)
+    return 0
+}
+
+# ---------- Time ------------------------------------------------------------
+
+let time_ms = ():>int => {
+    return __host_time__()
+}
+
+# ---------- Input -----------------------------------------------------------
+
+let input_thrust = ():>int => {
+    return key_held(KEY_W) or key_held(KEY_UP)
+}
+let input_brake = ():>int => {
+    return key_held(KEY_S) or key_held(KEY_DOWN)
+}
+let input_steer_l = ():>int => {
+    return key_held(KEY_A) or key_held(KEY_LEFT)
+}
+let input_steer_r = ():>int => {
+    return key_held(KEY_D) or key_held(KEY_RIGHT)
+}
+let input_strafe_l = ():>int => {
+    return key_held(KEY_Q)
+}
+let input_strafe_r = ():>int => {
+    return key_held(KEY_E)
+}
+let input_boost = ():>int => {
+    return key_held(KEY_SPACE)
+}
+let input_action_pressed = ():>int => { return bk_start_now }
+let input_restart_pressed = ():>int => { return bk_restart_now }
+let input_fps_pressed = ():>int => { return bk_fps_now }
+let input_quit_requested = ():>int => { return bk_quit }
+
+# ---------- GPU: per-frame state -------------------------------------------
+
+let gpu_set_viewport = (w:int h:int):>void => {
+    __gpu_set_viewport__(w h)
+    return 0
+}
+
+let gpu_clear = (r_q:int g_q:int b_q:int):>void => {
+    __gpu_clear__(r_q g_q b_q)
+    return 0
+}
+
+# ---------- GPU: camera / projection ---------------------------------------
+
+let gpu_set_perspective_frustum = (l_q:int r_q:int b_q:int t_q:int near_q:int far_q:int):>void => {
+    __gpu_set_perspective_frustum__(l_q r_q b_q t_q near_q far_q)
+    return 0
+}
+
+# Loads a column-major 4x4 view matrix (16 f32 packed in a 64-byte buffer).
+let gpu_set_view_matrix = (mat_ptr:int):>void => {
+    __gpu_set_view_matrix__(mat_ptr)
+    return 0
+}
+
+# ---------- GPU: render state ----------------------------------------------
+
+let gpu_set_texture = (tex_id:int):>void => {
+    __gpu_set_texture__(tex_id)
+    return 0
+}
+
+let gpu_set_color3 = (r_q:int g_q:int b_q:int):>void => {
+    bk_cur_r = r_q
+    bk_cur_g = g_q
+    bk_cur_b = b_q
+    bk_cur_a = 65536
+    return 0
+}
+
+let gpu_set_color4 = (r_q:int g_q:int b_q:int a_q:int):>void => {
+    bk_cur_r = r_q
+    bk_cur_g = g_q
+    bk_cur_b = b_q
+    bk_cur_a = a_q
+    return 0
+}
+
+let gpu_enable_depth_test = (on:int):>void => {
+    __gpu_set_depth_test__(on)
+    return 0
+}
+
+let gpu_enable_depth_write = (on:int):>void => {
+    __gpu_set_depth_write__(on)
+    return 0
+}
+
+let gpu_enable_blend_alpha = (on:int):>void => {
+    if on not=? 0 { __gpu_set_blend__(1) } else { __gpu_set_blend__(0) }
+    return 0
+}
+
+let gpu_enable_blend_additive = (on:int):>void => {
+    if on not=? 0 { __gpu_set_blend__(2) } else { __gpu_set_blend__(0) }
+    return 0
+}
+
+# ---------- GPU: geometry submission ----------------------------------------
+
+let gpu_quads_begin = ():>void => {
+    bk_prim_kind = 0
+    bk_vert_count = 0
+    return 0
+}
+
+let gpu_quad_strip_begin = ():>void => {
+    bk_prim_kind = 1
+    bk_vert_count = 0
+    return 0
+}
+
+let gpu_tris_begin = ():>void => {
+    bk_prim_kind = 2
+    bk_vert_count = 0
+    return 0
+}
+
+let gpu_lines_begin = (width_q:int):>void => {
+    __gpu_set_line_width__(width_q)
+    bk_prim_kind = 3
+    bk_vert_count = 0
+    return 0
+}
+
+let gpu_end = ():>void => {
+    if bk_vert_count >? 0 {
+        __gpu_submit__(bk_prim_kind GPU_SCRATCH bk_vert_count)
+    }
+    bk_vert_count = 0
+    return 0
+}
+
+# Append a vertex (already-converted f32 bits for x,y,z,u,v,r,g,b,a) to
+# the scratch buffer.
+let emit_vert = (x_b:int y_b:int z_b:int u_b:int v_b:int):>void => {
+    let off:int = GPU_SCRATCH + (bk_vert_count * GPU_VERT_STRIDE)
+    __store_u32__(x_b off)
+    __store_u32__(y_b (off + 4))
+    __store_u32__(z_b (off + 8))
+    __store_u32__(u_b (off + 12))
+    __store_u32__(v_b (off + 16))
+    __store_u32__(q16_to_f32(bk_cur_r) (off + 20))
+    __store_u32__(q16_to_f32(bk_cur_g) (off + 24))
+    __store_u32__(q16_to_f32(bk_cur_b) (off + 28))
+    __store_u32__(q16_to_f32(bk_cur_a) (off + 32))
+    bk_vert_count += 1
+    return 0
+}
+
+let gpu_vertex3 = (x_q:int y_q:int z_q:int):>void => {
+    emit_vert(q16_to_f32(x_q) q16_to_f32(y_q) q16_to_f32(z_q) 0 0)
+    return 0
+}
+
+let gpu_vertex3_uv = (x_q:int y_q:int z_q:int u_q:int v_q:int):>void => {
+    emit_vert(q16_to_f32(x_q) q16_to_f32(y_q) q16_to_f32(z_q) q16_to_f32(u_q) q16_to_f32(v_q))
+    return 0
+}
+
+# ---------- GPU: 2D HUD overlay --------------------------------------------
+
+let gpu_overlay_begin = (sw_px:int sh_px:int):>void => {
+    __gpu_overlay_begin__(sw_px sh_px)
+    return 0
+}
+
+let gpu_overlay_end = ():>void => {
+    __gpu_overlay_end__()
+    return 0
+}
+
+# Pixel-space vertex emitted inside an overlay batch. z = 0.
+let gpu_vertex_px = (x_px:int y_px:int):>void => {
+    let xf:int = __i64_to_f32_bits__(x_px)
+    let yf:int = __i64_to_f32_bits__(y_px)
+    let zf:int = __i64_to_f32_bits__(0)
+    emit_vert(xf yf zf 0 0)
+    return 0
+}
+
+# ---------- GPU: textures ---------------------------------------------------
+# Allocate a texture from RGBA8 pixel data and write the resulting host-side
+# id into tex_slot_ptr (an i32 cell). tex id 0 is reserved for "no texture".
+
+let gpu_texture_create = (tex_slot_ptr:int w:int h:int pixels_ptr:int repeat:int nearest:int):>void => {
+    let id:int = __gpu_create_texture__(w h pixels_ptr repeat nearest)
+    __store_u32__(id tex_slot_ptr)
+    return 0
+}
+
+# ---------- Audio -----------------------------------------------------------
+
+let audio_init = (sample_rate:int channels:int):>int => {
+    let rc:int = __audio_queue_init__(sample_rate channels)
+    if rc =? 0 { return 1 }
+    return 0
+}
+
+let audio_push_pcm_s16 = (buf_ptr:int n_bytes:int):>void => {
+    __audio_queue_push__(buf_ptr n_bytes)
+    return 0
+}
+
+let audio_queued_bytes = ():>int => {
+    return __audio_queue_size__()
+}

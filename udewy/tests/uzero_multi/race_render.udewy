@@ -1,0 +1,1156 @@
+# ============================================================================
+# uZero race: rendering.
+#
+# Backend-agnostic. Issues all geometry and HUD draws via the gpu_*
+# primitives exposed by backend_sdl.udewy or backend_wasm.udewy. The entry
+# point owns the responsibility of importing one of those.
+# ============================================================================
+
+import p"./uzero_math.udewy"
+import p"./race_state.udewy"
+import p"./race_track.udewy"
+import p"./race_physics.udewy"
+
+# ---------- Texture init (one 2x2 RGBA per surface kind) -------------------
+
+let q16_to_u8 = (q:int):>int => {
+    let b:int = (q * 255) >> FP_SHIFT
+    if b <? 0 { b = 0 }
+    if b >? 255 { b = 255 }
+    return b
+}
+
+let checker_write_pixel = (pixels:int offset:int r:int g:int b:int):>void => {
+    __store_u8__(q16_to_u8(r) pixels + offset)
+    __store_u8__(q16_to_u8(g) pixels + offset + 1)
+    __store_u8__(q16_to_u8(b) pixels + offset + 2)
+    __store_u8__(255 pixels + offset + 3)
+    return 0
+}
+
+let build_checker_tex = (pixels:int id_slot:int
+                         a_r:int a_g:int a_b:int
+                         b_r:int b_g:int b_b:int):>void => {
+    checker_write_pixel(pixels 0  b_r b_g b_b)
+    checker_write_pixel(pixels 4  a_r a_g a_b)
+    checker_write_pixel(pixels 8  a_r a_g a_b)
+    checker_write_pixel(pixels 12 b_r b_g b_b)
+    gpu_texture_create(id_slot 2 2 pixels 1 1)
+    return 0
+}
+
+let init_checker_textures = ():>void => {
+    build_checker_tex(CHECKER_PIXELS_GROUND CHECKER_TEXID_GROUND
+                      COL_GROUND_A_R COL_GROUND_A_G COL_GROUND_A_B
+                      COL_GROUND_B_R COL_GROUND_B_G COL_GROUND_B_B)
+    build_checker_tex(CHECKER_PIXELS_TRACK CHECKER_TEXID_TRACK
+                      COL_TRACK_A_R COL_TRACK_A_G COL_TRACK_A_B
+                      COL_TRACK_B_R COL_TRACK_B_G COL_TRACK_B_B)
+    build_checker_tex(CHECKER_PIXELS_BOOST CHECKER_TEXID_BOOST
+                      COL_BOOST_A_R COL_BOOST_A_G COL_BOOST_A_B
+                      COL_BOOST_B_R COL_BOOST_B_G COL_BOOST_B_B)
+    build_checker_tex(CHECKER_PIXELS_RECHARGE CHECKER_TEXID_RECHARGE
+                      COL_RECHARGE_A_R COL_RECHARGE_A_G COL_RECHARGE_A_B
+                      COL_RECHARGE_B_R COL_RECHARGE_B_G COL_RECHARGE_B_B)
+    build_checker_tex(CHECKER_PIXELS_GRID CHECKER_TEXID_GRID
+                      COL_GRID_A_R COL_GRID_A_G COL_GRID_A_B
+                      COL_GRID_B_R COL_GRID_B_G COL_GRID_B_B)
+    build_checker_tex(CHECKER_PIXELS_WALL CHECKER_TEXID_WALL
+                      COL_WALL_A_R COL_WALL_A_G COL_WALL_A_B
+                      COL_WALL_B_R COL_WALL_B_G COL_WALL_B_B)
+    build_checker_tex(CHECKER_PIXELS_LOOP CHECKER_TEXID_LOOP
+                      COL_LOOP_A_R COL_LOOP_A_G COL_LOOP_A_B
+                      COL_LOOP_B_R COL_LOOP_B_G COL_LOOP_B_B)
+    build_checker_tex(CHECKER_PIXELS_CORK CHECKER_TEXID_CORK
+                      COL_CORK_A_R COL_CORK_A_G COL_CORK_A_B
+                      COL_CORK_B_R COL_CORK_B_G COL_CORK_B_B)
+    build_checker_tex(CHECKER_PIXELS_RAMP CHECKER_TEXID_RAMP
+                      COL_RAMP_A_R COL_RAMP_A_G COL_RAMP_A_B
+                      COL_RAMP_B_R COL_RAMP_B_G COL_RAMP_B_B)
+    return 0
+}
+
+let kind_texid = (kind:int):>int => {
+    if kind =? SURF_BOOST { return __load_u32__(CHECKER_TEXID_BOOST) }
+    if kind =? SURF_RECHARGE { return __load_u32__(CHECKER_TEXID_RECHARGE) }
+    if kind =? SURF_GRID { return __load_u32__(CHECKER_TEXID_GRID) }
+    if kind =? SURF_LOOP { return __load_u32__(CHECKER_TEXID_LOOP) }
+    if kind =? SURF_CORK { return __load_u32__(CHECKER_TEXID_CORK) }
+    if kind =? SURF_RAMP { return __load_u32__(CHECKER_TEXID_RAMP) }
+    return __load_u32__(CHECKER_TEXID_TRACK)
+}
+
+# ---------- Camera / projection --------------------------------------------
+
+let set_perspective = (sw:int sh:int):>void => {
+    let aspect_q16:int = (sw << 16) // sh
+    let top_q16:int = cur_fov_top_q16
+    let right_q16:int = fp_mul(top_q16 aspect_q16)
+    let near_q:int = 131072              # 2 m  (matches FRUSTUM_NEAR in race.udewy: top/near = 1 -> 90deg vfov)
+    let far_q:int = 262144000            # 4000 m (matches FRUSTUM_FAR)
+    gpu_set_perspective_frustum(0 - right_q16 right_q16 0 - top_q16 top_q16 near_q far_q)
+    return 0
+}
+
+let apply_camera = ():>void => {
+    let crx:int = fp_mul(cam_fy cam_uz) - fp_mul(cam_fz cam_uy)
+    let cry:int = fp_mul(cam_fz cam_ux) - fp_mul(cam_fx cam_uz)
+    let crz:int = fp_mul(cam_fx cam_uy) - fp_mul(cam_fy cam_ux)
+    let neg_dot_r:int = 0 - (fp_mul(crx cam_x) + fp_mul(cry cam_y) + fp_mul(crz cam_z))
+    let neg_dot_u:int = 0 - (fp_mul(cam_ux cam_x) + fp_mul(cam_uy cam_y) + fp_mul(cam_uz cam_z))
+    let dot_f:int = fp_mul(cam_fx cam_x) + fp_mul(cam_fy cam_y) + fp_mul(cam_fz cam_z)
+    let mat:int = __static_alloca__(64)
+    __store_u32__(q16_to_f32(crx) mat + 0)
+    __store_u32__(q16_to_f32(cam_ux) mat + 4)
+    __store_u32__(q16_to_f32(0 - cam_fx) mat + 8)
+    __store_u32__(0 mat + 12)
+    __store_u32__(q16_to_f32(cry) mat + 16)
+    __store_u32__(q16_to_f32(cam_uy) mat + 20)
+    __store_u32__(q16_to_f32(0 - cam_fy) mat + 24)
+    __store_u32__(0 mat + 28)
+    __store_u32__(q16_to_f32(crz) mat + 32)
+    __store_u32__(q16_to_f32(cam_uz) mat + 36)
+    __store_u32__(q16_to_f32(0 - cam_fz) mat + 40)
+    __store_u32__(0 mat + 44)
+    __store_u32__(q16_to_f32(neg_dot_r) mat + 48)
+    __store_u32__(q16_to_f32(neg_dot_u) mat + 52)
+    __store_u32__(q16_to_f32(dot_f) mat + 56)
+    __store_u32__(f32_from_int(1) mat + 60)
+    gpu_set_view_matrix(mat)
+    return 0
+}
+
+# ---------- Drawing: ground / track / walls --------------------------------
+
+let draw_ground = ():>void => {
+    let half_q:int = GROUND_HALF_EXTENT
+    let neg_q:int = 0 - half_q
+    let y_q:int = GROUND_Y
+    gpu_set_texture(0)
+    gpu_set_color3(COL_HORIZON_R COL_HORIZON_G COL_HORIZON_B)
+    gpu_quads_begin()
+    gpu_vertex3(neg_q y_q neg_q)
+    gpu_vertex3(half_q y_q neg_q)
+    gpu_vertex3(half_q y_q half_q)
+    gpu_vertex3(neg_q y_q half_q)
+    gpu_end()
+    return 0
+}
+
+# Emit one textured ribbon quad between waypoint i and i+1.
+let emit_track_quad = (i:int ni:int v_a:int v_b:int u_a:int u_b:int):>void => {
+    let cxa:int = wp_get_cx(i)
+    let cya:int = wp_get_cy(i)
+    let cza:int = wp_get_cz(i)
+    let cxb:int = wp_get_cx(ni)
+    let cyb:int = wp_get_cy(ni)
+    let czb:int = wp_get_cz(ni)
+    let fxa:int = wp_get_fx(i)
+    let fya:int = wp_get_fy(i)
+    let fza:int = wp_get_fz(i)
+    let uxa:int = wp_get_ux(i)
+    let uya:int = wp_get_uy(i)
+    let uza:int = wp_get_uz(i)
+    let rxa:int = fp_mul(fya uza) - fp_mul(fza uya)
+    let rya:int = fp_mul(fza uxa) - fp_mul(fxa uza)
+    let rza:int = fp_mul(fxa uya) - fp_mul(fya uxa)
+
+    let fxb_:int = wp_get_fx(ni)
+    let fyb_:int = wp_get_fy(ni)
+    let fzb_:int = wp_get_fz(ni)
+    let uxb:int = wp_get_ux(ni)
+    let uyb:int = wp_get_uy(ni)
+    let uzb:int = wp_get_uz(ni)
+    let rxb:int = fp_mul(fyb_ uzb) - fp_mul(fzb_ uyb)
+    let ryb:int = fp_mul(fzb_ uxb) - fp_mul(fxb_ uzb)
+    let rzb:int = fp_mul(fxb_ uyb) - fp_mul(fyb_ uxb)
+
+    let hw:int = wp_get_half_w(i)
+    let lat_l:int = 0 - hw
+    let lat_r:int = hw
+
+    gpu_vertex3_uv(cxa + fp_mul(rxa lat_l) cya + fp_mul(rya lat_l) cza + fp_mul(rza lat_l) u_a v_a)
+    gpu_vertex3_uv(cxb + fp_mul(rxb lat_l) cyb + fp_mul(ryb lat_l) czb + fp_mul(rzb lat_l) u_a v_b)
+    gpu_vertex3_uv(cxb + fp_mul(rxb lat_r) cyb + fp_mul(ryb lat_r) czb + fp_mul(rzb lat_r) u_b v_b)
+    gpu_vertex3_uv(cxa + fp_mul(rxa lat_r) cya + fp_mul(rya lat_r) cza + fp_mul(rza lat_r) u_b v_a)
+    return 0
+}
+
+let draw_track = ():>void => {
+    gpu_set_color3(FP_ONE FP_ONE FP_ONE)
+    let i:int = 0
+    let cur_kind:int = -1
+    loop i <? track_total_wp {
+        let ni:int = (i + 1) % track_total_wp
+        let kind:int = wp_get_kind(i)
+        if kind not=? cur_kind {
+            if cur_kind not=? -1 {
+                gpu_end()
+            }
+            gpu_set_texture(kind_texid(kind))
+            gpu_quads_begin()
+            cur_kind = kind
+        }
+        let hw:int = wp_get_half_w(i)
+        let u_q:int = (hw << 16) // (CHECKER_TILE * 2)
+        let arc_a:int = wp_get_cumarc(i)
+        let arc_b:int = wp_get_cumarc(ni)
+        if arc_b <=? arc_a {
+            arc_b = arc_a + wp_get_cumarc(1)
+        }
+        let v_a:int = (arc_a << 16) // (CHECKER_TILE * 2)
+        let v_b:int = (arc_b << 16) // (CHECKER_TILE * 2)
+        emit_track_quad(i ni v_a v_b (0 - u_q) u_q)
+        i += 1
+    }
+    if cur_kind not=? -1 {
+        gpu_end()
+    }
+    gpu_set_texture(0)
+    return 0
+}
+
+let draw_walls = ():>void => {
+    gpu_set_texture(__load_u32__(CHECKER_TEXID_WALL))
+    gpu_set_color3(FP_ONE FP_ONE FP_ONE)
+    gpu_quads_begin()
+    let i:int = 0
+    let wh:int = SURF_WALL_HEIGHT
+    loop i <? track_total_wp {
+        let ni:int = (i + 1) % track_total_wp
+        let cxa:int = wp_get_cx(i)
+        let cya:int = wp_get_cy(i)
+        let cza:int = wp_get_cz(i)
+        let cxb:int = wp_get_cx(ni)
+        let cyb:int = wp_get_cy(ni)
+        let czb:int = wp_get_cz(ni)
+        let fxa:int = wp_get_fx(i)
+        let fya:int = wp_get_fy(i)
+        let fza:int = wp_get_fz(i)
+        let uxa:int = wp_get_ux(i)
+        let uya:int = wp_get_uy(i)
+        let uza:int = wp_get_uz(i)
+        let rxa:int = fp_mul(fya uza) - fp_mul(fza uya)
+        let rya:int = fp_mul(fza uxa) - fp_mul(fxa uza)
+        let rza:int = fp_mul(fxa uya) - fp_mul(fya uxa)
+        let fxb_:int = wp_get_fx(ni)
+        let fyb_:int = wp_get_fy(ni)
+        let fzb_:int = wp_get_fz(ni)
+        let uxb:int = wp_get_ux(ni)
+        let uyb:int = wp_get_uy(ni)
+        let uzb:int = wp_get_uz(ni)
+        let rxb:int = fp_mul(fyb_ uzb) - fp_mul(fzb_ uyb)
+        let ryb:int = fp_mul(fzb_ uxb) - fp_mul(fxb_ uzb)
+        let rzb:int = fp_mul(fxb_ uyb) - fp_mul(fyb_ uxb)
+        let hw:int = wp_get_half_w(i)
+        let arc_a:int = wp_get_cumarc(i)
+        let arc_b:int = wp_get_cumarc(ni)
+        if arc_b <=? arc_a {
+            arc_b = arc_a + 1638400
+        }
+        let v_a:int = (arc_a << 16) // (CHECKER_TILE * 2)
+        let v_b:int = (arc_b << 16) // (CHECKER_TILE * 2)
+        let v_top:int = (wh << 16) // (CHECKER_TILE * 2)
+
+        let exr_a_x:int = cxa + fp_mul(rxa hw)
+        let exr_a_y:int = cya + fp_mul(rya hw)
+        let exr_a_z:int = cza + fp_mul(rza hw)
+        let exr_b_x:int = cxb + fp_mul(rxb hw)
+        let exr_b_y:int = cyb + fp_mul(ryb hw)
+        let exr_b_z:int = czb + fp_mul(rzb hw)
+        let exr_a_top_x:int = exr_a_x + fp_mul(uxa wh)
+        let exr_a_top_y:int = exr_a_y + fp_mul(uya wh)
+        let exr_a_top_z:int = exr_a_z + fp_mul(uza wh)
+        let exr_b_top_x:int = exr_b_x + fp_mul(uxb wh)
+        let exr_b_top_y:int = exr_b_y + fp_mul(uyb wh)
+        let exr_b_top_z:int = exr_b_z + fp_mul(uzb wh)
+        gpu_vertex3_uv(exr_a_x exr_a_y exr_a_z 0 v_a)
+        gpu_vertex3_uv(exr_b_x exr_b_y exr_b_z 0 v_b)
+        gpu_vertex3_uv(exr_b_top_x exr_b_top_y exr_b_top_z v_top v_b)
+        gpu_vertex3_uv(exr_a_top_x exr_a_top_y exr_a_top_z v_top v_a)
+
+        let exl_a_x:int = cxa - fp_mul(rxa hw)
+        let exl_a_y:int = cya - fp_mul(rya hw)
+        let exl_a_z:int = cza - fp_mul(rza hw)
+        let exl_b_x:int = cxb - fp_mul(rxb hw)
+        let exl_b_y:int = cyb - fp_mul(ryb hw)
+        let exl_b_z:int = czb - fp_mul(rzb hw)
+        let exl_a_top_x:int = exl_a_x + fp_mul(uxa wh)
+        let exl_a_top_y:int = exl_a_y + fp_mul(uya wh)
+        let exl_a_top_z:int = exl_a_z + fp_mul(uza wh)
+        let exl_b_top_x:int = exl_b_x + fp_mul(uxb wh)
+        let exl_b_top_y:int = exl_b_y + fp_mul(uyb wh)
+        let exl_b_top_z:int = exl_b_z + fp_mul(uzb wh)
+        gpu_vertex3_uv(exl_a_x exl_a_y exl_a_z 0 v_a)
+        gpu_vertex3_uv(exl_a_top_x exl_a_top_y exl_a_top_z v_top v_a)
+        gpu_vertex3_uv(exl_b_top_x exl_b_top_y exl_b_top_z v_top v_b)
+        gpu_vertex3_uv(exl_b_x exl_b_y exl_b_z 0 v_b)
+        i += 1
+    }
+    gpu_end()
+    gpu_set_texture(0)
+    return 0
+}
+
+# ---------- Sparks ---------------------------------------------------------
+
+let draw_sparks = ():>void => {
+    gpu_enable_blend_additive(1)
+    gpu_enable_depth_write(0)
+    gpu_lines_begin(FP_ONE * 2)
+    let i:int = 0
+    loop i <? SPARK_MAX {
+        let slot:int = SPARK_BUF + (i * SPARK_STRIDE)
+        let life:int = __load__(slot + 48)
+        if life >? 0 {
+            let x:int = __load__(slot)
+            let y:int = __load__(slot + 8)
+            let z:int = __load__(slot + 16)
+            let vx:int = __load__(slot + 24)
+            let vy:int = __load__(slot + 32)
+            let vz:int = __load__(slot + 40)
+            let tx:int = x - fp_mul(vx SPARK_TAIL_Q)
+            let ty:int = y - fp_mul(vy SPARK_TAIL_Q)
+            let tz:int = z - fp_mul(vz SPARK_TAIL_Q)
+            let g_q:int = fp_mul(life FP_ONE)
+            let b_q:int = fp_mul(life 19660)
+            let a_q:int = life
+            gpu_set_color4(FP_ONE g_q b_q a_q)
+            gpu_vertex3(x y z)
+            gpu_set_color4(FP_ONE g_q b_q 0)
+            gpu_vertex3(tx ty tz)
+        }
+        i += 1
+    }
+    gpu_end()
+    gpu_enable_depth_write(1)
+    gpu_enable_blend_additive(0)
+    return 0
+}
+
+# ---------- Screen-space speed lines ---------------------------------------
+
+let speed_lines_init = ():>void => {
+    xs_seed(0xC0FFEE)
+    let i:int = 0
+    loop i <? SPEED_LINES_N {
+        let slot:int = SPEED_LINE_STATE + (i * SPEED_LINE_STRIDE)
+        __store__(xs_range(FP_ONE) slot)
+        __store__(xs_range(ANG_TURN) (slot + 8))
+        __store__(xs_range(FP_ONE) (slot + 16))
+        i += 1
+    }
+    return 0
+}
+
+let draw_speed_lines = (sw:int sh:int):>void => {
+    if vis_boost_norm <=? SPEED_LINE_THRESHOLD {
+        return 0
+    }
+    let above:int = vis_boost_norm - SPEED_LINE_THRESHOLD
+    let intensity:int = (above << 16) // (FP_ONE - SPEED_LINE_THRESHOLD)
+    if intensity >? FP_ONE { intensity = FP_ONE }
+
+    gpu_overlay_begin(sw sh)
+    gpu_lines_begin(FP_ONE * 2)
+
+    let cx_px:int = sw // 2
+    let cy_px:int = sh // 2
+    let max_r_px:int = fp_sqrt((cx_px * cx_px) + (cy_px * cy_px))
+
+    let rate:int = SPEED_LINE_RATE_Q
+    let peak_a:int = SPEED_LINE_PEAK_ALPHA_Q
+    let density:int = fp_mul(intensity intensity)
+    let active_count:int = (SPEED_LINES_N * density) // FP_ONE
+    let shake_px:int = (SPEED_LINE_SHAKE_PX * intensity) // FP_ONE
+
+    let i:int = 0
+    loop i <? SPEED_LINES_N {
+        let slot:int = SPEED_LINE_STATE + (i * SPEED_LINE_STRIDE)
+        let phase:int = __load__(slot) + rate
+        let angle_idx:int = __load__(slot + 8)
+        let r_seed:int = __load__(slot + 16)
+        if phase >=? FP_ONE {
+            phase -= FP_ONE
+            angle_idx = xs_range(ANG_TURN)
+            r_seed = xs_range(FP_ONE)
+        }
+        __store__(phase slot)
+        __store__(angle_idx (slot + 8))
+        __store__(r_seed (slot + 16))
+
+        if i >=? active_count {
+            i += 1
+            continue
+        }
+
+        let cos_a:int = cos_fp(angle_idx)
+        let sin_a:int = sin_fp(angle_idx)
+
+        let abs_cos:int = cos_a
+        if abs_cos <? 0 { abs_cos = 0 - abs_cos }
+        let abs_sin:int = sin_a
+        if abs_sin <? 0 { abs_sin = 0 - abs_sin }
+        let edge_r:int = max_r_px
+        if abs_cos >? 1024 {
+            let d:int = (cx_px * FP_ONE) // abs_cos
+            if d <? edge_r { edge_r = d }
+        }
+        if abs_sin >? 1024 {
+            let d:int = (cy_px * FP_ONE) // abs_sin
+            if d <? edge_r { edge_r = d }
+        }
+
+        let start_r:int = (r_seed * edge_r) // FP_ONE
+        let end_r:int = edge_r + SPEED_LINE_OVERSHOOT_PX
+
+        let dx0:int = __signed_shr__(start_r * cos_a FP_SHIFT)
+        let dy0:int = __signed_shr__(start_r * sin_a FP_SHIFT)
+        let dx1:int = __signed_shr__(end_r * cos_a FP_SHIFT)
+        let dy1:int = __signed_shr__(end_r * sin_a FP_SHIFT)
+
+        let jx_phase:int = ((frame_count * 71) + (i * 197)) % ANG_TURN
+        let jy_phase:int = ((frame_count * 53) + (i * 311)) % ANG_TURN
+        let jx_q:int = sin_fp(jx_phase)
+        let jy_q:int = sin_fp(jy_phase)
+        let jx_px:int = __signed_shr__(jx_q * shake_px FP_SHIFT)
+        let jy_px:int = __signed_shr__(jy_q * shake_px FP_SHIFT)
+
+        let fade_q:int = sin_fp((phase * ANG_HALF_TURN) // FP_ONE)
+        let alpha_q:int = fp_mul(peak_a fade_q)
+
+        gpu_set_color4(FP_ONE FP_ONE FP_ONE 0)
+        gpu_vertex_px(cx_px + dx0 + jx_px cy_px + dy0 + jy_px)
+        gpu_set_color4(FP_ONE FP_ONE FP_ONE alpha_q)
+        gpu_vertex_px(cx_px + dx1 + jx_px cy_px + dy1 + jy_px)
+        i += 1
+    }
+    gpu_end()
+    gpu_overlay_end()
+    return 0
+}
+
+# ---------- Engine trail (player only) -------------------------------------
+
+let draw_trail = ():>void => {
+    if trail_count <? 2 {
+        return 0
+    }
+    gpu_enable_blend_alpha(1)
+    gpu_enable_depth_write(0)
+
+    let oldest:int = 0
+    if trail_count =? TRAIL_LEN {
+        oldest = trail_head
+    }
+
+    gpu_quad_strip_begin()
+    let i:int = 0
+    let denom:int = trail_count - 1
+    loop i <? trail_count {
+        let idx:int = (oldest + i) % TRAIL_LEN
+        let o:int = TRAIL_BUF + (idx * TRAIL_STRIDE)
+        let px:int = __load__(o)
+        let py:int = __load__((o + 8))
+        let pz:int = __load__((o + 16))
+        let drx:int = __load__((o + 24))
+        let dry:int = __load__((o + 32))
+        let drz:int = __load__((o + 40))
+        let boost_q:int = __load__(o + 48)
+
+        let age_q:int = (i * FP_ONE) // denom
+        let w_scale:int = FP_QUARTER + ((age_q * 3) // 4)
+        let w_boost:int = FP_ONE + fp_mul(boost_q 98304)
+        let w:int = fp_mul(TRAIL_HALF_W fp_mul(w_scale w_boost))
+        let wx:int = fp_mul(drx w)
+        let wy:int = fp_mul(dry w)
+        let wz:int = fp_mul(drz w)
+
+        let a_q:int = fp_mul(fp_mul(age_q age_q) age_q)
+        a_q = fp_mul(a_q 55705)
+        let a_boost_floor:int = fp_mul(boost_q 45875)
+        if a_q <? a_boost_floor {
+            a_q = a_boost_floor
+        }
+
+        let r_base:int = 39321 + ((age_q * 26214) // FP_ONE)
+        let g_base:int = 6553 + ((age_q * 39322) // FP_ONE)
+        let b_base:int = (age_q * 13107) // FP_ONE
+
+        let r_aft:int = 26214 + ((age_q * 39322) // FP_ONE)
+        let g_aft:int = 45875 + ((age_q * 19661) // FP_ONE)
+        let b_aft:int = FP_ONE
+
+        let r_q:int = r_base + fp_mul(boost_q (r_aft - r_base))
+        let g_q:int = g_base + fp_mul(boost_q (g_aft - g_base))
+        let b_q:int = b_base + fp_mul(boost_q (b_aft - b_base))
+        gpu_set_color4(r_q g_q b_q a_q)
+
+        gpu_vertex3(px - wx py - wy pz - wz)
+        gpu_vertex3(px + wx py + wy pz + wz)
+        i += 1
+    }
+    gpu_end()
+
+    gpu_enable_depth_write(1)
+    gpu_enable_blend_alpha(0)
+    return 0
+}
+
+# ---------- Craft drawing --------------------------------------------------
+
+let craft_emit = (lx:int ly:int lz:int):>void => {
+    let wx:int = cx + bob_off_x + fp_mul(vrx lx) + fp_mul(vux ly) + fp_mul(vfx lz)
+    let wy:int = cy + bob_off_y + fp_mul(vry lx) + fp_mul(vuy ly) + fp_mul(vfy lz)
+    let wz:int = cz + bob_off_z + fp_mul(vrz lx) + fp_mul(vuz ly) + fp_mul(vfz lz)
+    gpu_vertex3(wx wy wz)
+    return 0
+}
+
+let car_col_r:int = 0
+let car_col_g:int = 0
+let car_col_b:int = 0
+
+let hsv_to_rgb = (h_q:int):>void => {
+    let h:int = h_q
+    if h <? 0 { h = 0 }
+    if h >=? FP_ONE { h = h % FP_ONE }
+    let h6:int = h * 6
+    let sector:int = h6 // FP_ONE
+    let f:int = h6 - (sector * FP_ONE)
+    let v:int = FP_ONE
+    let s:int = 49152
+    let p:int = fp_mul(v FP_ONE - s)
+    let q:int = fp_mul(v FP_ONE - fp_mul(s f))
+    let t:int = fp_mul(v FP_ONE - fp_mul(s FP_ONE - f))
+    if sector =? 0 { car_col_r = v   car_col_g = t   car_col_b = p }
+    if sector =? 1 { car_col_r = q   car_col_g = v   car_col_b = p }
+    if sector =? 2 { car_col_r = p   car_col_g = v   car_col_b = t }
+    if sector =? 3 { car_col_r = p   car_col_g = q   car_col_b = v }
+    if sector =? 4 { car_col_r = t   car_col_g = p   car_col_b = v }
+    if sector >=? 5 { car_col_r = v   car_col_g = p   car_col_b = q }
+    return 0
+}
+
+let draw_craft = (body_hue_q:int boost_q:int):>void => {
+    update_bob()
+    let nose_z:int = 229376
+    let tail_z:int = 0 - 131072
+    let wing_x:int = 163840
+    let body_y_top:int = 39321
+    let body_y_bot:int = 0 - 13107
+    let canopy_z:int = 65536
+    let canopy_y:int = 78643
+
+    hsv_to_rgb(body_hue_q)
+    let body_r_q:int = car_col_r
+    let body_g_q:int = car_col_g
+    let body_b_q:int = car_col_b
+    let belly_r_q:int = (body_r_q * 4) // 10
+    let belly_g_q:int = (body_g_q * 4) // 10
+    let belly_b_q:int = (body_b_q * 4) // 10
+    let side_r_q:int = (body_r_q * 7) // 10
+    let side_g_q:int = (body_g_q * 7) // 10
+    let side_b_q:int = (body_b_q * 7) // 10
+
+    let canopy_r:int = 58982
+    let canopy_g:int = 58982
+    let canopy_b:int = FP_ONE
+
+    let aft_r:int = 58982
+    let aft_g:int = FP_ONE
+    let aft_b:int = FP_ONE
+    let glow_r_q:int = body_r_q + fp_mul(boost_q (aft_r - body_r_q))
+    let glow_g_q:int = body_g_q + fp_mul(boost_q (aft_g - body_g_q))
+    let glow_b_q:int = body_b_q + fp_mul(boost_q (aft_b - body_b_q))
+
+    gpu_tris_begin()
+    gpu_set_color3(body_r_q body_g_q body_b_q)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(wing_x body_y_top tail_z)
+    gpu_end()
+    gpu_tris_begin()
+    gpu_set_color3(belly_r_q belly_g_q belly_b_q)
+    craft_emit(0 body_y_bot nose_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    gpu_end()
+    gpu_tris_begin()
+    gpu_set_color3(side_r_q side_g_q side_b_q)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(0 body_y_bot nose_z)
+    craft_emit(0 - wing_x body_y_bot tail_z)
+    gpu_end()
+    gpu_tris_begin()
+    gpu_set_color3(side_r_q side_g_q side_b_q)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(wing_x body_y_top tail_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 body_y_top nose_z)
+    craft_emit(wing_x body_y_bot tail_z)
+    craft_emit(0 body_y_bot nose_z)
+    gpu_end()
+    gpu_tris_begin()
+    gpu_set_color3(canopy_r canopy_g canopy_b)
+    craft_emit(0 canopy_y canopy_z)
+    craft_emit(0 - 26214 body_y_top 0)
+    craft_emit(26214 body_y_top 0)
+    gpu_end()
+    let glow_scale:int = FP_ONE + fp_mul(boost_q 45875)
+    let glow_x:int = fp_mul(65536 glow_scale)
+    let glow_y_bot:int = 0
+    let glow_y_top:int = fp_mul(26214 glow_scale)
+    gpu_quads_begin()
+    gpu_set_color3(glow_r_q glow_g_q glow_b_q)
+    craft_emit(0 - glow_x glow_y_bot tail_z)
+    craft_emit(glow_x glow_y_bot tail_z)
+    craft_emit(glow_x glow_y_top tail_z)
+    craft_emit(0 - glow_x glow_y_top tail_z)
+    gpu_end()
+    return 0
+}
+
+let draw_all_cars = ():>void => {
+    let saved_cx:int = cx
+    let saved_cy:int = cy
+    let saved_cz:int = cz
+    let saved_vfx:int = vfx
+    let saved_vfy:int = vfy
+    let saved_vfz:int = vfz
+    let saved_vrx:int = vrx
+    let saved_vry:int = vry
+    let saved_vrz:int = vrz
+    let saved_vux:int = vux
+    let saved_vuy:int = vuy
+    let saved_vuz:int = vuz
+
+    car_load(0)
+    let player_boost_q:int = 0
+    if boost_active_frames >? 0 {
+        player_boost_q = (boost_active_frames * FP_ONE) // BOOST_DURATION
+    }
+    let player_hue:int = car_get_hue(0)
+    if cur_status =? 0 {
+        draw_craft(player_hue player_boost_q)
+    }
+
+    let i:int = 1
+    loop i <? MAX_CARS {
+        car_load(i)
+        if cur_status =? 0 {
+            vfx = fx
+            vfy = fy
+            vfz = fz
+            vrx = rx
+            vry = ry
+            vrz = rz
+            vux = ux
+            vuy = uy
+            vuz = uz
+            let bq:int = 0
+            if boost_active_frames >? 0 {
+                bq = (boost_active_frames * FP_ONE) // BOOST_DURATION
+            }
+            draw_craft(car_get_hue(i) bq)
+        }
+        i += 1
+    }
+
+    cx = saved_cx
+    cy = saved_cy
+    cz = saved_cz
+    vfx = saved_vfx
+    vfy = saved_vfy
+    vfz = saved_vfz
+    vrx = saved_vrx
+    vry = saved_vry
+    vrz = saved_vrz
+    vux = saved_vux
+    vuy = saved_vuy
+    vuz = saved_vuz
+    car_load(0)
+    return 0
+}
+
+# ---------- HUD: 7-segment glyphs + composers ------------------------------
+
+let hud_quad = (x0:int y0:int x1:int y1:int):>void => {
+    gpu_vertex_px(x0 y0)
+    gpu_vertex_px(x0 y1)
+    gpu_vertex_px(x1 y1)
+    gpu_vertex_px(x1 y0)
+    return 0
+}
+
+let digit_mask = (d:int):>int => {
+    if d =? 0 { return 119 }
+    if d =? 1 { return 36 }
+    if d =? 2 { return 93 }
+    if d =? 3 { return 109 }
+    if d =? 4 { return 46 }
+    if d =? 5 { return 107 }
+    if d =? 6 { return 123 }
+    if d =? 7 { return 37 }
+    if d =? 8 { return 127 }
+    if d =? 9 { return 111 }
+    return 0
+}
+
+let letter_mask = (c:int):>int => {
+    if c =? 65 { return 63 }
+    if c =? 66 { return 122 }
+    if c =? 67 { return 83 }
+    if c =? 68 { return 124 }
+    if c =? 69 { return 91 }
+    if c =? 70 { return 27 }
+    if c =? 71 { return 115 }
+    if c =? 72 { return 62 }
+    if c =? 73 { return 18 }
+    if c =? 74 { return 116 }
+    if c =? 76 { return 82 }
+    if c =? 77 { return 39 }
+    if c =? 78 { return 56 }
+    if c =? 79 { return 119 }
+    if c =? 80 { return 31 }
+    if c =? 81 { return 47 }
+    if c =? 82 { return 24 }
+    if c =? 83 { return 107 }
+    if c =? 84 { return 90 }
+    if c =? 85 { return 118 }
+    if c =? 86 { return 116 }
+    if c =? 89 { return 110 }
+    if c =? 90 { return 93 }
+    return 0
+}
+
+let draw_glyph_mask = (x:int y:int mask:int w:int h:int t:int):>void => {
+    let half_t:int = t // 2
+    let mid:int = y + (h // 2)
+    if (mask and 1) not=? 0 {
+        hud_quad(x + t y x + w - t y + t)
+    }
+    if (mask and 2) not=? 0 {
+        hud_quad(x y + t x + t mid - half_t)
+    }
+    if (mask and 4) not=? 0 {
+        hud_quad(x + w - t y + t x + w mid - half_t)
+    }
+    if (mask and 8) not=? 0 {
+        hud_quad(x + t mid - half_t x + w - t mid + half_t)
+    }
+    if (mask and 16) not=? 0 {
+        hud_quad(x mid + half_t x + t y + h - t)
+    }
+    if (mask and 32) not=? 0 {
+        hud_quad(x + w - t mid + half_t x + w y + h - t)
+    }
+    if (mask and 64) not=? 0 {
+        hud_quad(x + t y + h - t x + w - t y + h)
+    }
+    return 0
+}
+
+let draw_digit = (x:int y:int d:int w:int h:int t:int):>void => {
+    draw_glyph_mask(x y digit_mask(d) w h t)
+    return 0
+}
+
+let draw_number_right = (right_x:int y:int value:int max_digits:int w:int h:int t:int gap:int):>void => {
+    if value <? 0 { value = 0 }
+    let v:int = value
+    let i:int = 0
+    loop i <? max_digits {
+        let d:int = v % 10
+        v = v // 10
+        let dx:int = right_x - w - (i * (w + gap))
+        draw_digit(dx y d w h t)
+        i += 1
+        if v =? 0 { return 0 }
+    }
+    return 0
+}
+
+let draw_text_left = (x:int y:int s:int w:int h:int t:int gap:int):>void => {
+    let i:int = 0
+    let cur_x:int = x
+    loop __load_u8__(s + i) not=? 0 {
+        let c:int = __load_u8__(s + i)
+        if c =? 32 {
+            cur_x += (w + gap)
+        } else {
+            let m:int = 0
+            if (c >=? 48) and (c <=? 57) {
+                m = digit_mask(c - 48)
+            } else {
+                m = letter_mask(c)
+                if m =? 0 { m = 8 }
+            }
+            draw_glyph_mask(cur_x y m w h t)
+            cur_x += (w + gap)
+        }
+        i += 1
+    }
+    return 0
+}
+
+let text_width_px = (s:int w:int gap:int):>int => {
+    let i:int = 0
+    let n:int = 0
+    loop __load_u8__(s + i) not=? 0 {
+        n += 1
+        i += 1
+    }
+    if n =? 0 { return 0 }
+    return (n * w) + ((n - 1) * gap)
+}
+
+let draw_text_centered = (cx_px:int y:int s:int w:int h:int t:int gap:int):>void => {
+    let tw:int = text_width_px(s w gap)
+    draw_text_left(cx_px - (tw // 2) y s w h t gap)
+    return 0
+}
+
+# ---------- HUD widgets ----------------------------------------------------
+
+let draw_energy_bar = (sw:int sh:int):>void => {
+    let bar_x:int = sw - HUD_MARGIN_PX - HUD_BAR_W_PX
+    let bar_y:int = HUD_MARGIN_PX
+    let bw:int = HUD_BAR_W_PX
+    let bh:int = HUD_BAR_H_PX
+    let bdr:int = HUD_BAR_BORDER_PX
+
+    gpu_set_color4(0 0 0 45875)
+    gpu_quads_begin()
+    hud_quad(bar_x - bdr bar_y - bdr bar_x + bw + bdr bar_y + bh + bdr)
+    gpu_end()
+
+    let fill_w:int = (bw * energy) // ENERGY_FULL
+    if fill_w >? 0 {
+        let r_right:int = FP_ONE
+        let g_right:int = 0
+        if energy >=? FP_HALF {
+            r_right = FP_ONE - ((energy - FP_HALF) << 1)
+            if r_right <? 0 { r_right = 0 }
+            g_right = FP_ONE
+        } else {
+            r_right = FP_ONE
+            g_right = energy << 1
+            if g_right >? FP_ONE { g_right = FP_ONE }
+        }
+
+        let alpha_q:int = 60293
+        if boost_active_frames >? 0 {
+            let phase:int = (boost_active_frames * 64) % ANG_TURN
+            let s:int = sin_fp(phase)
+            alpha_q = 52428 + (s // 8)
+            if alpha_q >? FP_ONE { alpha_q = FP_ONE }
+            if alpha_q <? 0 { alpha_q = 0 }
+        }
+
+        gpu_quads_begin()
+        gpu_set_color4(FP_ONE 0 0 alpha_q)
+        gpu_vertex_px(bar_x bar_y)
+        gpu_vertex_px(bar_x bar_y + bh)
+        gpu_set_color4(r_right g_right 0 alpha_q)
+        gpu_vertex_px(bar_x + fill_w bar_y + bh)
+        gpu_vertex_px(bar_x + fill_w bar_y)
+        gpu_end()
+    }
+
+    gpu_set_color4(FP_ONE FP_ONE FP_ONE 45875)
+    gpu_quads_begin()
+    hud_quad(bar_x - bdr bar_y - bdr bar_x + bw + bdr bar_y)
+    hud_quad(bar_x - bdr bar_y + bh bar_x + bw + bdr bar_y + bh + bdr)
+    hud_quad(bar_x - bdr bar_y bar_x bar_y + bh)
+    hud_quad(bar_x + bw bar_y bar_x + bw + bdr bar_y + bh)
+    gpu_end()
+    return 0
+}
+
+let draw_fps = (sw:int sh:int):>void => {
+    let w:int = HUD_FPS_DIGIT_W_PX
+    let h:int = HUD_FPS_DIGIT_H_PX
+    let gap:int = HUD_FPS_DIGIT_GAP_PX
+    let t:int = HUD_FPS_SEG_THICK_PX
+    let right_x:int = HUD_MARGIN_PX + (3 * (w + gap))
+    let y:int = HUD_MARGIN_PX
+    let r:int = FP_ONE
+    let g:int = FP_ONE
+    let b:int = FP_ONE
+    if fps_value <? 50 {
+        g = 39321
+        b = 39321
+        if fps_value <? 30 {
+            g = 13107
+            b = 13107
+        }
+    }
+    gpu_set_color4(r g b 60293)
+    gpu_quads_begin()
+    draw_number_right(right_x y fps_value 3 w h t gap)
+    gpu_end()
+    return 0
+}
+
+let draw_speedometer = (sw:int sh:int):>void => {
+    let kmh:int = (vis_speed * HUD_KMH_PER_FRAME) // FP_ONE
+    let right_x:int = sw - HUD_MARGIN_PX
+    let y:int = sh - HUD_MARGIN_PX - HUD_DIGIT_H_PX
+    let r:int = FP_ONE
+    let g:int = FP_ONE
+    let b:int = FP_ONE
+    if boost_active_frames >? 0 {
+        g = 45875
+        b = 13107
+    }
+    gpu_set_color4(r g b 60293)
+    gpu_quads_begin()
+    draw_number_right(right_x y kmh 4 HUD_DIGIT_W_PX HUD_DIGIT_H_PX HUD_SEG_THICK_PX HUD_DIGIT_GAP_PX)
+    gpu_end()
+    return 0
+}
+
+const HUD_LAP_LABEL:int = "LAP\0"
+
+let draw_lap = (sw:int sh:int):>void => {
+    let w:int = HUD_LAP_DIGIT_W_PX
+    let h:int = HUD_LAP_DIGIT_H_PX
+    let gap:int = HUD_LAP_DIGIT_GAP_PX
+    let t:int = HUD_LAP_SEG_THICK_PX
+    let label_w:int = 3 * (w + gap)
+    let lap_show:int = cur_lap + 1
+    if lap_show >? TOTAL_LAPS { lap_show = TOTAL_LAPS }
+    let value_w:int = (w + gap) + (w + gap) + w
+    let total_w:int = label_w + gap + value_w
+    let x0:int = (sw - total_w) // 2
+    let y:int = HUD_MARGIN_PX
+    gpu_set_color4(FP_ONE FP_ONE FP_ONE 60293)
+    gpu_quads_begin()
+    draw_text_left(x0 y HUD_LAP_LABEL w h t gap)
+    let val_x:int = x0 + label_w + gap
+    draw_digit(val_x y lap_show w h t)
+    draw_glyph_mask(val_x + (w + gap) y 8 w h t)
+    draw_digit(val_x + (2 * (w + gap)) y TOTAL_LAPS w h t)
+    gpu_end()
+    return 0
+}
+
+let draw_position = (sw:int sh:int):>void => {
+    let w:int = HUD_POS_DIGIT_W_PX
+    let h:int = HUD_POS_DIGIT_H_PX
+    let gap:int = HUD_POS_DIGIT_GAP_PX
+    let t:int = HUD_POS_SEG_THICK_PX
+    let y:int = HUD_MARGIN_PX + HUD_FPS_DIGIT_H_PX + 8
+    gpu_set_color4(FP_ONE FP_ONE FP_ONE 60293)
+    gpu_quads_begin()
+    let right_x:int = HUD_MARGIN_PX + (3 * (w + gap))
+    draw_number_right(right_x y player_position 3 w h t gap)
+    let suffix_x:int = right_x + gap
+    draw_glyph_mask(suffix_x y 8 w h t)
+    draw_number_right((suffix_x + (w + gap)) + (2 * (w + gap)) y MAX_CARS 2 w h t gap)
+    gpu_end()
+    return 0
+}
+
+let draw_race_hud = (sw:int sh:int):>void => {
+    gpu_overlay_begin(sw sh)
+    draw_energy_bar(sw sh)
+    draw_speedometer(sw sh)
+    draw_lap(sw sh)
+    draw_position(sw sh)
+    if show_fps not=? 0 {
+        draw_fps(sw sh)
+    }
+    gpu_overlay_end()
+    return 0
+}
+
+# ---------- Race standings: rank by progress (lap-major) -------------------
+
+let recompute_player_position = ():>void => {
+    let my_progress:int = car_get_progress(0)
+    let pos:int = 1
+    let i:int = 1
+    loop i <? MAX_CARS {
+        let p:int = car_get_progress(i)
+        if p >? my_progress {
+            pos += 1
+        }
+        i += 1
+    }
+    player_position = pos
+    return 0
+}
+
+# ---------- Top-level render entry points ----------------------------------
+
+const TITLE_TEXT:int = "UZERO\0"
+const TITLE_PROMPT:int = "PRESS SPACE\0"
+const TITLE_SUBTITLE:int = "RACE\0"
+const RESULTS_HEADER:int = "FINAL\0"
+const RESULTS_PROMPT:int = "PRESS SPACE\0"
+const GAMEOVER_TEXT:int = "GAME OVER\0"
+const GAMEOVER_PROMPT:int = "PRESS R\0"
+
+const RESULTS_SORTED_BYTES:int = 248
+const results_sorted_idx:int = __static_alloca__(RESULTS_SORTED_BYTES)
+
+let sort_cars_by_progress = ():>void => {
+    let i:int = 0
+    loop i <? MAX_CARS {
+        __store__(i (results_sorted_idx + (i * 8)))
+        i += 1
+    }
+    let j:int = 1
+    loop j <? MAX_CARS {
+        let key:int = __load__(results_sorted_idx + (j * 8))
+        let key_p:int = car_get_progress(key)
+        let k:int = j - 1
+        loop k >=? 0 {
+            let other:int = __load__(results_sorted_idx + (k * 8))
+            if car_get_progress(other) <? key_p {
+                __store__(other (results_sorted_idx + ((k + 1) * 8)))
+                k -= 1
+            } else {
+                k = -1
+            }
+        }
+        __store__(key (results_sorted_idx + ((k + 1) * 8)))
+        j += 1
+    }
+    return 0
+}
+
+let render_world_common = (sw:int sh:int):>void => {
+    gpu_set_viewport(sw sh)
+    gpu_clear(COL_SKY_R COL_SKY_G COL_SKY_B)
+    gpu_enable_depth_test(1)
+    set_perspective(sw sh)
+    apply_camera()
+    draw_ground()
+    draw_track()
+    draw_walls()
+    return 0
+}
+
+let render_title = (sw:int sh:int):>void => {
+    render_world_common(sw sh)
+
+    gpu_overlay_begin(sw sh)
+    let title_w:int = 80
+    let title_h:int = 140
+    let title_t:int = 14
+    let title_gap:int = 18
+    gpu_set_color4(FP_ONE 58982 13107 FP_ONE)
+    gpu_quads_begin()
+    draw_text_centered(sw // 2 (sh // 2 - 110) TITLE_TEXT title_w title_h title_t title_gap)
+    gpu_end()
+
+    let sub_w:int = 36
+    let sub_h:int = 60
+    let sub_t:int = 6
+    let sub_gap:int = 8
+    gpu_set_color4(45875 45875 FP_ONE FP_ONE)
+    gpu_quads_begin()
+    draw_text_centered(sw // 2 (sh // 2 + 60) TITLE_SUBTITLE sub_w sub_h sub_t sub_gap)
+    gpu_end()
+
+    if title_blink_phase <? 80 {
+        let pw:int = 22
+        let ph:int = 38
+        let pt:int = 4
+        let pg:int = 5
+        gpu_set_color4(FP_ONE FP_ONE FP_ONE 60293)
+        gpu_quads_begin()
+        draw_text_centered(sw // 2 (sh - 80) TITLE_PROMPT pw ph pt pg)
+        gpu_end()
+    }
+    gpu_overlay_end()
+    return 0
+}
+
+let render_race = (sw:int sh:int):>void => {
+    render_world_common(sw sh)
+    draw_all_cars()
+    draw_trail()
+    draw_sparks()
+    draw_race_hud(sw sh)
+    draw_speed_lines(sw sh)
+    return 0
+}
+
+let render_results = (sw:int sh:int):>void => {
+    render_world_common(sw sh)
+
+    gpu_overlay_begin(sw sh)
+    gpu_set_color4(0 0 0 45875)
+    gpu_quads_begin()
+    hud_quad(sw // 4 80 (3 * sw) // 4 sh - 80)
+    gpu_end()
+
+    gpu_set_color4(FP_ONE 58982 13107 FP_ONE)
+    gpu_quads_begin()
+    draw_text_centered(sw // 2 110 RESULTS_HEADER 50 80 8 12)
+    gpu_end()
+
+    let row_w:int = 22
+    let row_h:int = 36
+    let row_t:int = 5
+    let row_gap:int = 5
+    gpu_set_color4(FP_ONE FP_ONE FP_ONE FP_ONE)
+    gpu_quads_begin()
+    let rank:int = 0
+    loop rank <? 8 {
+        let car_idx:int = __load__(results_sorted_idx + (rank * 8))
+        let row_y:int = 220 + (rank * (row_h + 14))
+        draw_number_right(sw // 2 - 200 row_y rank + 1 2 row_w row_h row_t row_gap)
+        draw_number_right(sw // 2 row_y car_idx + 1 3 row_w row_h row_t row_gap)
+        draw_number_right(sw // 2 + 200 row_y car_get_lap(car_idx) + 1 2 row_w row_h row_t row_gap)
+        rank += 1
+    }
+    gpu_end()
+
+    if (results_camera_frames % 120) <? 80 {
+        gpu_set_color4(FP_ONE FP_ONE FP_ONE 60293)
+        gpu_quads_begin()
+        draw_text_centered(sw // 2 (sh - 110) RESULTS_PROMPT 18 30 4 4)
+        gpu_end()
+    }
+    gpu_overlay_end()
+    return 0
+}
+
+let render_gameover = (sw:int sh:int):>void => {
+    gpu_set_viewport(sw sh)
+    gpu_clear(COL_SKY_R // 4 COL_SKY_G // 4 COL_SKY_B // 4)
+    gpu_enable_depth_test(1)
+    set_perspective(sw sh)
+    apply_camera()
+    draw_ground()
+    draw_track()
+    draw_walls()
+    draw_all_cars()
+    draw_sparks()
+
+    gpu_overlay_begin(sw sh)
+    gpu_set_color4(0 0 0 45875)
+    gpu_quads_begin()
+    hud_quad(0 0 sw sh)
+    gpu_end()
+    gpu_set_color4(FP_ONE 13107 13107 FP_ONE)
+    gpu_quads_begin()
+    draw_text_centered(sw // 2 (sh // 2 - 80) GAMEOVER_TEXT 50 80 8 10)
+    gpu_end()
+    if (game_over_frames % 120) <? 80 {
+        gpu_set_color4(FP_ONE FP_ONE FP_ONE 60293)
+        gpu_quads_begin()
+        draw_text_centered(sw // 2 (sh // 2 + 60) GAMEOVER_PROMPT 26 42 5 6)
+        gpu_end()
+    }
+    gpu_overlay_end()
+    return 0
+}

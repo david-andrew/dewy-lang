@@ -1,0 +1,350 @@
+import p"./uzero_math.udewy"
+import p"../../third_party/sdl/sdl.udewy"
+
+# ============================================================================
+# uZero SDL backend
+#
+# Implements the gpu_* / input_* / audio_* / time_* abstraction layer used by
+# the backend-agnostic race code, mapping each call onto the same SDL3 +
+# OpenGL 2.1 immediate-mode primitives that race.udewy already uses. All
+# numeric arguments are Q16 (1 m / 1 unit) unless suffixed _px.
+#
+# Designed to be paired with `race_sdl.udewy` which calls
+# backend_init/backend_shutdown and drives the per-frame loop.
+# ============================================================================
+
+# ---------- Backend state ---------------------------------------------------
+
+let bk_window:int = 0
+let bk_gl_context:int = 0
+let bk_audio_stream:int = 0
+let bk_keyboard:int = 0
+let bk_size_buf:int = __static_alloca__(8)
+
+# Edge-tracker state (for input_*_pressed). Race code only needs to ask each
+# kind once per frame; we update prev mirrors at backend_poll() time.
+let bk_in_quit:int = 0
+let bk_in_start_now:int = 0
+let bk_in_start_prev:int = 0
+let bk_in_restart_now:int = 0
+let bk_in_restart_prev:int = 0
+let bk_in_fps_now:int = 0
+let bk_in_fps_prev:int = 0
+
+# ---------- Lifecycle -------------------------------------------------------
+
+let backend_init = (width:int height:int title_ptr:int):>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO + SDL_INIT_AUDIO) =? 0 { return 1 }
+    if SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1) =? 0 { SDL_Quit() return 2 }
+    if SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE 24) =? 0 { SDL_Quit() return 3 }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION 2) =? 0 { SDL_Quit() return 4 }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION 1) =? 0 { SDL_Quit() return 5 }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK SDL_GL_CONTEXT_PROFILE_COMPATIBILITY) =? 0 {
+        SDL_Quit()
+        return 6
+    }
+
+    bk_window = SDL_CreateWindow(title_ptr width height SDL_WINDOW_OPENGL + SDL_WINDOW_RESIZABLE)
+    if bk_window =? 0 { SDL_Quit() return 7 }
+    SDL_SetWindowIconFromUdewyData(bk_window SDL_DEFAULT_WINDOW_ICON_DATA)
+
+    bk_gl_context = SDL_GL_CreateContext(bk_window)
+    if bk_gl_context =? 0 { SDL_DestroyWindow(bk_window) SDL_Quit() return 8 }
+    if SDL_GL_MakeCurrent(bk_window bk_gl_context) =? 0 {
+        SDL_GL_DestroyContext(bk_gl_context)
+        SDL_DestroyWindow(bk_window)
+        SDL_Quit()
+        return 9
+    }
+    SDL_GL_SetSwapInterval(1)
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDisable(GL_CULL_FACE)
+    return 0
+}
+
+let backend_shutdown = ():>void => {
+    if bk_audio_stream not=? 0 {
+        SDL_DestroyAudioStream(bk_audio_stream)
+        bk_audio_stream = 0
+    }
+    if bk_gl_context not=? 0 {
+        SDL_GL_DestroyContext(bk_gl_context)
+        bk_gl_context = 0
+    }
+    if bk_window not=? 0 {
+        SDL_DestroyWindow(bk_window)
+        bk_window = 0
+    }
+    SDL_Quit()
+    return 0
+}
+
+# Poll OS events and refresh the keyboard pointer + edge mirrors. Call once
+# per frame, before any input_* getters.
+let backend_poll = ():>void => {
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let has_event:int = SDL_PollEvent(event)
+    loop has_event not=? 0 {
+        if SDL_EventType(event) =? SDL_EVENT_QUIT {
+            bk_in_quit = 1
+        }
+        has_event = SDL_PollEvent(event)
+    }
+    bk_keyboard = SDL_GetKeyboardState(0)
+    if SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_ESCAPE) not=? 0 {
+        bk_in_quit = 1
+    }
+
+    let s_now:int = SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_SPACE) or SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_RETURN)
+    bk_in_start_now = (s_now not=? 0) and (bk_in_start_prev =? 0)
+    bk_in_start_prev = s_now
+
+    let r_now:int = SDL_ScancodeDown(bk_keyboard 21)             # SDL_SCANCODE_R
+    bk_in_restart_now = (r_now not=? 0) and (bk_in_restart_prev =? 0)
+    bk_in_restart_prev = r_now
+
+    let f_now:int = SDL_ScancodeDown(bk_keyboard 9)              # SDL_SCANCODE_F
+    bk_in_fps_now = (f_now not=? 0) and (bk_in_fps_prev =? 0)
+    bk_in_fps_prev = f_now
+    return 0
+}
+
+let backend_present = ():>void => {
+    SDL_GL_SwapWindow(bk_window)
+    SDL_Delay(16)
+    return 0
+}
+
+let backend_get_size = (out_w_ptr:int out_h_ptr:int):>void => {
+    SDL_GetWindowSizeInPixels(bk_window out_w_ptr out_h_ptr)
+    return 0
+}
+
+# ---------- Time ------------------------------------------------------------
+
+let time_ms = ():>int => {
+    return SDL_GetTicks()
+}
+
+# ---------- Input -----------------------------------------------------------
+
+let input_thrust = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_W) or SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_UP)
+}
+let input_brake = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_S) or SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_DOWN)
+}
+let input_steer_l = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_A) or SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_LEFT)
+}
+let input_steer_r = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_D) or SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_RIGHT)
+}
+let input_strafe_l = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard 20)            # SDL_SCANCODE_Q
+}
+let input_strafe_r = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard 8)             # SDL_SCANCODE_E
+}
+let input_boost = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_SPACE)
+}
+let input_action_pressed = ():>int => { return bk_in_start_now }
+let input_restart_pressed = ():>int => { return bk_in_restart_now }
+let input_fps_pressed = ():>int => { return bk_in_fps_now }
+let input_quit_requested = ():>int => { return bk_in_quit }
+
+# ---------- GPU: per-frame state -------------------------------------------
+
+let gpu_set_viewport = (w:int h:int):>void => {
+    glViewport(0 0 w h)
+    return 0
+}
+
+let gpu_clear = (r_q:int g_q:int b_q:int):>void => {
+    GL_ClearColor(q16_to_f32(r_q) q16_to_f32(g_q) q16_to_f32(b_q) F32_ONE)
+    glClear(GL_COLOR_BUFFER_BIT + GL_DEPTH_BUFFER_BIT)
+    return 0
+}
+
+# ---------- GPU: camera / projection ---------------------------------------
+
+let gpu_set_perspective_frustum = (l_q:int r_q:int b_q:int t_q:int near_q:int far_q:int):>void => {
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    GL_Frustum(q16_to_f64(l_q) q16_to_f64(r_q) q16_to_f64(b_q) q16_to_f64(t_q) q16_to_f64(near_q) q16_to_f64(far_q))
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    return 0
+}
+
+# Load a column-major 4x4 view matrix (16 f32 packed in a 64-byte buffer).
+let gpu_set_view_matrix = (mat_ptr:int):>void => {
+    glLoadMatrixf(mat_ptr)
+    return 0
+}
+
+# ---------- GPU: render state ----------------------------------------------
+
+let gpu_set_texture = (tex_id:int):>void => {
+    if tex_id =? 0 {
+        glDisable(GL_TEXTURE_2D)
+    } else {
+        glEnable(GL_TEXTURE_2D)
+        glBindTexture(GL_TEXTURE_2D tex_id)
+    }
+    return 0
+}
+
+let gpu_set_color3 = (r_q:int g_q:int b_q:int):>void => {
+    GL_Color3f(q16_to_f32(r_q) q16_to_f32(g_q) q16_to_f32(b_q))
+    return 0
+}
+
+let gpu_set_color4 = (r_q:int g_q:int b_q:int a_q:int):>void => {
+    GL_Color4f(q16_to_f32(r_q) q16_to_f32(g_q) q16_to_f32(b_q) q16_to_f32(a_q))
+    return 0
+}
+
+let gpu_enable_depth_test = (on:int):>void => {
+    if on not=? 0 { glEnable(GL_DEPTH_TEST) glDepthFunc(GL_LEQUAL) }
+    else { glDisable(GL_DEPTH_TEST) }
+    return 0
+}
+
+let gpu_enable_depth_write = (on:int):>void => {
+    glDepthMask(on)
+    return 0
+}
+
+let gpu_enable_blend_alpha = (on:int):>void => {
+    if on not=? 0 {
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA)
+    } else {
+        glDisable(GL_BLEND)
+    }
+    return 0
+}
+
+let gpu_enable_blend_additive = (on:int):>void => {
+    if on not=? 0 {
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA GL_ONE)
+    } else {
+        glDisable(GL_BLEND)
+    }
+    return 0
+}
+
+# ---------- GPU: geometry submission ----------------------------------------
+
+let gpu_quads_begin = ():>void => { glBegin(GL_QUADS) return 0 }
+let gpu_quad_strip_begin = ():>void => { glBegin(GL_QUAD_STRIP) return 0 }
+let gpu_tris_begin = ():>void => { glBegin(GL_TRIANGLES) return 0 }
+let gpu_end = ():>void => { glEnd() return 0 }
+
+# Width is Q16 metres of the screen pixel size; SDL passes through directly
+# (GL line width is in pixels but we want it integer for stable look).
+let gpu_lines_begin = (width_q:int):>void => {
+    GL_LineWidth(GL_F32_FromInt(width_q >> FP_SHIFT))
+    glBegin(GL_LINES)
+    return 0
+}
+
+# Plain Q16 vertex (no UV).
+let gpu_vertex3 = (x_q:int y_q:int z_q:int):>void => {
+    GL_Vertex3f(q16_to_f32(x_q) q16_to_f32(y_q) q16_to_f32(z_q))
+    return 0
+}
+
+# Textured Q16 vertex. UV is in Q16 fractions of one full texture wrap (so
+# a Q16 value of 1.0 = the whole 2x2 checker tile = 10 m).
+let gpu_vertex3_uv = (x_q:int y_q:int z_q:int u_q:int v_q:int):>void => {
+    GL_TexCoord2f(q16_to_f32(u_q) q16_to_f32(v_q))
+    GL_Vertex3f(q16_to_f32(x_q) q16_to_f32(y_q) q16_to_f32(z_q))
+    return 0
+}
+
+# ---------- GPU: 2D HUD overlay --------------------------------------------
+# Sets up an orthographic projection where (0,0) is top-left and
+# (sw_px, sh_px) is bottom-right, in pixel coordinates. Disables depth and
+# enables alpha blend. gpu_overlay_end() restores the previous state.
+
+let gpu_overlay_begin = (sw_px:int sh_px:int):>void => {
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    GL_Ortho(q16_to_f64(0) q16_to_f64(sw_px * FP_ONE) q16_to_f64(sh_px * FP_ONE) q16_to_f64(0) q16_to_f64(0 - FP_ONE) q16_to_f64(FP_ONE))
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA)
+    return 0
+}
+
+let gpu_overlay_end = ():>void => {
+    glDisable(GL_BLEND)
+    glEnable(GL_DEPTH_TEST)
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+    glPopMatrix()
+    return 0
+}
+
+# Pixel-space vertex emitted inside an overlay batch.
+let gpu_vertex_px = (x_px:int y_px:int):>void => {
+    GL_Vertex3f(GL_F32_FromInt(x_px) GL_F32_FromInt(y_px) F32_ZERO)
+    return 0
+}
+
+# ---------- GPU: textures ---------------------------------------------------
+
+# Create a 2D texture from RGBA8 pixel data. tex_slot_ptr receives the
+# backend-specific texture id (an i32 handle on SDL/GL). repeat = 1 sets
+# WRAP_S/T to GL_REPEAT (else CLAMP_TO_EDGE). nearest = 1 picks GL_NEAREST
+# filtering, else GL_LINEAR.
+let gpu_texture_create = (tex_slot_ptr:int w:int h:int pixels_ptr:int repeat:int nearest:int):>void => {
+    glPixelStorei(0x0CF5 1)
+    glGenTextures(1 tex_slot_ptr)
+    let tex_id:int = __load_u32__(tex_slot_ptr)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    let filt:int = GL_LINEAR
+    if nearest not=? 0 { filt = GL_NEAREST }
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER filt)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER filt)
+    let wrap:int = 0x812F     # GL_CLAMP_TO_EDGE
+    if repeat not=? 0 { wrap = GL_REPEAT }
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_WRAP_S wrap)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_WRAP_T wrap)
+    glTexImage2D(GL_TEXTURE_2D 0 GL_RGBA w h 0 GL_RGBA GL_UNSIGNED_BYTE pixels_ptr)
+    return 0
+}
+
+# ---------- Audio -----------------------------------------------------------
+
+let audio_init = (sample_rate:int channels:int):>int => {
+    let spec:int = __static_alloca__(SDL_AUDIO_SPEC_SIZE)
+    SDL_SetAudioSpec(spec SDL_AUDIO_S16LE channels sample_rate)
+    bk_audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK spec 0 0)
+    if bk_audio_stream =? 0 { return 0 }
+    SDL_ResumeAudioStreamDevice(bk_audio_stream)
+    return 1
+}
+
+let audio_push_pcm_s16 = (buf_ptr:int n_bytes:int):>void => {
+    if bk_audio_stream not=? 0 {
+        SDL_PutAudioStreamData(bk_audio_stream buf_ptr n_bytes)
+    }
+    return 0
+}
+
+let audio_queued_bytes = ():>int => {
+    if bk_audio_stream =? 0 { return 0 }
+    return SDL_GetAudioStreamQueued(bk_audio_stream)
+}

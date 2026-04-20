@@ -1,0 +1,333 @@
+# ============================================================================
+# uZero race: tunable constants. Backend-agnostic. Pulled verbatim from
+# udewy/tests/uzero/race.udewy.
+# ============================================================================
+
+# ---------- Game state ------------------------------------------------------
+
+const STATE_TITLE:int = 0
+const STATE_RACE:int = 1
+const STATE_RESULTS:int = 2
+const STATE_GAMEOVER:int = 3
+
+const TOTAL_LAPS:int = 3
+
+# ---------- Physics constants -----------------------------------------------
+
+const HOVER_HEIGHT:int = 98304           # 1.5 m above the surface
+const TOP_SPEED:int = 500000             # 7.6 m/frame
+const BOOST_BONUS:int = 400000           # 6.1 m/frame extra cap during boost
+const THRUST_ACCEL:int = 4000
+const BRAKE_DECEL:int = 3277
+const STRAFE_RATE:int = 32768
+
+const BOOST_IMPULSE:int = 65536
+const BOOST_DURATION:int = 90
+const ENERGY_FULL:int = 65536            # FP_ONE
+const BOOST_COST_Q:int = 8192            # 0.125 of bar (1/8) per boost
+
+# Boost overcap reservoir bleed rates (matches stage 15 polish feel).
+const BOOST_OVERCAP_TURN_DECAY:int = 4500
+const BOOST_OVERCAP_STRAIGHT_DECAY:int = 800
+
+const STEER_BASE:int = 12
+const STEER_MIN:int = 8
+
+const LATERAL_GRIP:int = 9830
+const DRAG_COAST:int = 100
+const DRAG_THRUST:int = 327
+
+const SNAP_ALPHA:int = 39322             # 0.60
+const AIR_GAP:int = 262144               # 4 m above hover target = airborne
+const GRAVITY:int = 6000
+const SLOPE_GRAVITY:int = 300
+const UP_ALPHA_AIR:int = 6553
+
+# ---------- Energy / damage rules -------------------------------------------
+
+const WALL_HIT_INITIAL:int = 1311        # ~0.02 of bar on the frame contact begins
+const WALL_DRAIN:int = 327               # ~0.005 of bar per frame while still scraping
+const RECHARGE_RATE:int = 656            # ~0.01 per frame on recharge strip
+const PAD_BOOST_OVERCAP:int = 200000     # bonus overcap when crossing a boost pad
+const PAD_IMPULSE:int = 32768            # forward impulse per frame on pad
+
+# Wall-hit detection: lateral distance past the half_width (Q16 m) before
+# the slab clamp fires. The clamp pushes the car back to the lateral edge
+# and zeros its outward velocity component (analogous to stage_15
+# wall_collide). Below the threshold, scraping the wall costs nothing.
+const WALL_SCRAPE_THRESHOLD:int = 0      # any penetration counts
+
+# ---------- Camera ----------------------------------------------------------
+
+const CAM_BACK:int = 983040              # 15 m behind craft
+const CAM_LIFT:int = 262144              # 4 m above craft
+const POS_ALPHA:int = 7864               # 0.12
+const ORIENT_ALPHA:int = 6553            # 0.10
+const FOV_PUNCH:int = 26214
+
+const MIN_CAM_CLEAR:int = 131072         # 2 m
+const CRAFT_HALF_W:int = 163840          # 2.5 m
+
+# ---------- Visual polish ---------------------------------------------------
+
+const RAW_PER_RAD:int = 163
+const BANK_GAIN:int = 10
+const BANK_MAX:int = 60
+const BANK_ALPHA:int = 11796
+
+const BOB_AMP:int = 19660
+const BOB_FREQ_NUM:int = 24
+const BOB_FREQ_DEN:int = 1
+
+const TRAIL_LEN:int = 36
+const TRAIL_STRIDE:int = 56
+const TRAIL_BUF_BYTES:int = 2016
+const TRAIL_HALF_W:int = 49152
+const TRAIL_OFFSET_BACK:int = 131072
+const TRAIL_OFFSET_UP:int = 13107
+
+const SPARK_MAX:int = 192
+const SPARK_STRIDE:int = 56
+const SPARK_BUF_BYTES:int = 10752
+const SPARK_LIFE_DECAY:int = 2185
+const SPARK_BASE_SPEED:int = 65536
+const SPARK_SPEED_VAR:int = 65536
+const SPARK_JITTER:int = 19660
+const SPARK_UP_BIAS:int = 9830
+const SPARK_GRAVITY:int = 1310
+const SPARK_TAIL_Q:int = 49152
+const SPARK_IMPULSE_THRESHOLD:int = 6553
+const SPARK_IMPULSE_PER_PARTICLE:int = 16384
+const SPARK_MAX_BURST:int = 24
+
+# ---------- Speed lines -----------------------------------------------------
+
+const SPEED_LINES_N:int = 0x100
+const SPEED_LINE_RATE_Q:int = 4915        # 0.075 / frame at full intensity (1 / lifetime)
+const SPEED_LINE_THRESHOLD:int = 25000    # 0.50 boost_norm where lines begin
+const SPEED_LINE_PEAK_ALPHA_Q:int = 52428 # 0.80 alpha at full intensity
+const SPEED_LINE_SHAKE_PX:int = 4
+const SPEED_LINE_OVERSHOOT_PX:int = 24
+
+const SPEED_LINE_STRIDE:int = 0x18
+const SPEED_LINE_STATE_BYTES:int = 0x1E00 # SPEED_LINES_N * SPEED_LINE_STRIDE
+
+# ---------- HUD -------------------------------------------------------------
+
+const HUD_MARGIN_PX:int = 20
+const HUD_BAR_W_PX:int = 220
+const HUD_BAR_H_PX:int = 18
+const HUD_BAR_BORDER_PX:int = 2
+const HUD_DIGIT_W_PX:int = 30
+const HUD_DIGIT_H_PX:int = 54
+const HUD_DIGIT_GAP_PX:int = 6
+const HUD_SEG_THICK_PX:int = 6
+const HUD_KMH_PER_FRAME:int = 216
+
+# Lap counter (top-center) -- bigger than the speedo so it reads at a glance.
+const HUD_LAP_DIGIT_W_PX:int = 36
+const HUD_LAP_DIGIT_H_PX:int = 64
+const HUD_LAP_DIGIT_GAP_PX:int = 8
+const HUD_LAP_SEG_THICK_PX:int = 7
+
+# Position counter (top-left, above FPS).
+const HUD_POS_DIGIT_W_PX:int = 18
+const HUD_POS_DIGIT_H_PX:int = 30
+const HUD_POS_DIGIT_GAP_PX:int = 4
+const HUD_POS_SEG_THICK_PX:int = 4
+
+const SHOW_FPS_DEFAULT:int = 1
+const HUD_FPS_DIGIT_W_PX:int = 14
+const HUD_FPS_DIGIT_H_PX:int = 24
+const HUD_FPS_DIGIT_GAP_PX:int = 3
+const HUD_FPS_SEG_THICK_PX:int = 3
+const HUD_FPS_SAMPLE_FRAMES:int = 30
+
+# ---------- Sky / colors ----------------------------------------------------
+
+const COL_SKY_R:int = 4915
+const COL_SKY_G:int = 7864
+const COL_SKY_B:int = 13107
+
+const COL_GROUND_A_R:int = 6553
+const COL_GROUND_A_G:int = 9830
+const COL_GROUND_A_B:int = 13107
+const COL_GROUND_B_R:int = 9830
+const COL_GROUND_B_G:int = 13107
+const COL_GROUND_B_B:int = 19660
+
+const COL_TRACK_A_R:int = 16384
+const COL_TRACK_A_G:int = 19660
+const COL_TRACK_A_B:int = 26214
+const COL_TRACK_B_R:int = 26214
+const COL_TRACK_B_G:int = 32768
+const COL_TRACK_B_B:int = 39321
+
+const COL_BOOST_A_R:int = 65535
+const COL_BOOST_A_G:int = 32768
+const COL_BOOST_A_B:int = 6553
+const COL_BOOST_B_R:int = 65535
+const COL_BOOST_B_G:int = 13107
+const COL_BOOST_B_B:int = 0
+
+const COL_RECHARGE_A_R:int = 13107
+const COL_RECHARGE_A_G:int = 58982
+const COL_RECHARGE_A_B:int = 19660
+const COL_RECHARGE_B_R:int = 6553
+const COL_RECHARGE_B_G:int = 39321
+const COL_RECHARGE_B_B:int = 13107
+
+const COL_WALL_A_R:int = 39321
+const COL_WALL_A_G:int = 13107
+const COL_WALL_A_B:int = 13107
+const COL_WALL_B_R:int = 52428
+const COL_WALL_B_G:int = 19660
+const COL_WALL_B_B:int = 19660
+
+const COL_GRID_A_R:int = 60293
+const COL_GRID_A_G:int = 60293
+const COL_GRID_A_B:int = 60293
+const COL_GRID_B_R:int = 13107
+const COL_GRID_B_G:int = 13107
+const COL_GRID_B_B:int = 13107
+
+# Per-feature surface tints. Same checker tile size as SURF_NORMAL but
+# distinct colors so the player can read which feature they're on at a
+# glance.
+const COL_LOOP_A_R:int = 26214           # purple
+const COL_LOOP_A_G:int = 13107
+const COL_LOOP_A_B:int = 39321
+const COL_LOOP_B_R:int = 39321
+const COL_LOOP_B_G:int = 19660
+const COL_LOOP_B_B:int = 52428
+
+const COL_CORK_A_R:int = 52428           # pink / magenta
+const COL_CORK_A_G:int = 19660
+const COL_CORK_A_B:int = 26214
+const COL_CORK_B_R:int = 58982
+const COL_CORK_B_G:int = 32768
+const COL_CORK_B_B:int = 39321
+
+const COL_RAMP_A_R:int = 58982           # warm yellow / amber
+const COL_RAMP_A_G:int = 39321
+const COL_RAMP_A_B:int = 6553
+const COL_RAMP_B_R:int = 39321
+const COL_RAMP_B_G:int = 26214
+const COL_RAMP_B_B:int = 3276
+
+# ---------- Track -----------------------------------------------------------
+
+# Surface kind tags. Used both for surface lookup (recharge / boost effects)
+# and to pick the texture binding at draw time. Kinds 4..6 only affect the
+# visual texture binding; their physics behavior is identical to SURF_NORMAL.
+const SURF_NORMAL:int = 0
+const SURF_BOOST:int = 1
+const SURF_RECHARGE:int = 2
+const SURF_GRID:int = 3                  # start/finish grid stripe
+const SURF_LOOP:int = 4                  # vertical loop tint (purple)
+const SURF_CORK:int = 5                  # corkscrew tint (pink)
+const SURF_RAMP:int = 6                  # ramps / hills tint (amber)
+const SURF_WALL_HEIGHT:int = 196608      # 3 m -- visible side wall along track edges
+
+# Lateral bailout: any probe more than this far off the side of the track
+# (beyond surf_half_w) is treated as "fully off the surface" -- physics
+# skips the wall push-back, damage, and downward snap so the craft can
+# fly free in space rather than being yanked sideways onto the ribbon.
+const OFF_TRACK_LAT:int = 1966080        # 30 m
+
+const NUM_WAYPOINTS:int = 512            # ring buffer of track waypoints
+const WP_STRIDE:int = 96                 # 12 q16 fields per waypoint
+const WP_BUF_BYTES:int = 49152
+
+const CHECKER_TILE:int = 327680          # 5 m target tile edge
+const GROUND_HALF_EXTENT:int = 327680000 # +/- 5000 m
+const GROUND_TEX_UV_DIVISOR:int = 10
+const GROUND_TEX_BYTES:int = 16
+const GROUND_Y:int = -32768000           # -500 m: well below any track geometry,
+                                         # acts as a distant horizon plane only
+
+# Horizon color: a darker, desaturated tint of the sky so the meeting line
+# is visible without competing with the actual track surface.
+const COL_HORIZON_R:int = 1638           # ~0.025
+const COL_HORIZON_G:int = 2621           # ~0.040
+const COL_HORIZON_B:int = 5243           # ~0.080
+
+# Visual ribbon: per-segment lateral subdivisions stay coarse since the
+# checker repeats via texture UV. Two quads (one per lateral side of the
+# centerline) per (waypoint, next-waypoint) pair = ~720 quads for the
+# track surface alone.
+const TRACK_LAT_SEGS:int = 2
+
+# ---------- Cars ------------------------------------------------------------
+
+const MAX_CARS:int = 31
+const CAR_STRIDE:int = 320
+const CAR_BUF_BYTES:int = 9920           # MAX_CARS * CAR_STRIDE
+
+# Per-car fields (offsets in bytes within the car slot).
+const CARF_CX:int = 0
+const CARF_CY:int = 8
+const CARF_CZ:int = 16
+const CARF_CVX:int = 24
+const CARF_CVY:int = 32
+const CARF_CVZ:int = 40
+const CARF_FX:int = 48
+const CARF_FY:int = 56
+const CARF_FZ:int = 64
+const CARF_UX:int = 72
+const CARF_UY:int = 80
+const CARF_UZ:int = 88
+const CARF_RX:int = 96
+const CARF_RY:int = 104
+const CARF_RZ:int = 112
+const CARF_ENERGY:int = 120
+const CARF_OVERCAP:int = 128
+const CARF_BOOST_FRAMES:int = 136
+const CARF_WP:int = 144                  # current_wp index
+const CARF_LAP:int = 152
+const CARF_PROGRESS:int = 160            # lap * NUM_WAYPOINTS + current_wp
+const CARF_STATUS:int = 168              # 0=alive 1=exploded 2=finished
+const CARF_PREV_FX:int = 176
+const CARF_PREV_FY:int = 184
+const CARF_PREV_FZ:int = 192
+const CARF_BANK:int = 200
+const CARF_HUE:int = 208                 # Q16 in [0, FP_ONE), per-car body hue
+const CARF_AIRBORNE:int = 216            # was_airborne tracker
+const CARF_WALL_CONTACT:int = 224        # 1 = was scraping a wall last frame
+const CARF_BOOST_PREV:int = 232          # per-car edge state for boost button
+const CARF_TOP_SPEED_MULT:int = 240      # Q16 -- per-car ceiling scale [.85, 1.05]
+const CARF_AI_AIM:int = 248              # signed Q16 metres -- AI lateral aim offset
+const CARF_AI_AIM_TIMER:int = 256        # frames until AI re-rolls aim
+const CARF_AI_BOOST_THRESH:int = 264     # Q16 cos threshold for AI boost trigger
+
+# ---------- Audio -----------------------------------------------------------
+
+const AUDIO_SAMPLE_RATE:int = 44100
+const AUDIO_FRAME_SAMPLES:int = 800      # ~18 ms (matches game frame)
+const AUDIO_FRAME_BYTES:int = 1600       # AUDIO_FRAME_SAMPLES * 2 (S16LE mono)
+const AUDIO_QUEUE_HIGH_BYTES:int = 6400  # ~4 frames -> skip a fill
+const MUSIC_LOOP_SAMPLES:int = 88200     # 2 seconds @ 44100
+const MUSIC_LOOP_BYTES:int = 176400
+
+# SFX voice slots. Each holds (active_flag, sample_pos, len, kind, vol_q).
+const SFX_SLOTS:int = 8
+const SFX_SLOT_STRIDE:int = 40
+const SFX_BUF_BYTES:int = 320
+
+const SFX_KIND_BOOST:int = 0
+const SFX_KIND_WALL:int = 1
+const SFX_KIND_RECHARGE:int = 2
+const SFX_KIND_LAP:int = 3
+const SFX_KIND_EXPLODE:int = 4
+const SFX_KIND_COUNT:int = 5
+
+# Per-SFX precomputed S16 buffer length (frames). 8820 = 0.2s, 17640 = 0.4s.
+const SFX_LEN_BOOST:int = 13230          # 0.3 s
+const SFX_LEN_WALL:int = 6615            # 0.15 s
+const SFX_LEN_RECHARGE:int = 17640       # 0.4 s
+const SFX_LEN_LAP:int = 22050            # 0.5 s
+const SFX_LEN_EXPLODE:int = 35280        # 0.8 s
+
+# Big enough static buffer to hold the longest SFX for each of 5 kinds.
+const SFX_MAX_LEN:int = 35280
+const SFX_TABLE_BYTES:int = 352800       # 5 * SFX_MAX_LEN * 2
