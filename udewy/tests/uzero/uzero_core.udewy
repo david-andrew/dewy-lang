@@ -253,3 +253,12 @@ let world_v3 = (x:int y:int z:int):>void => {
     GL_Vertex3f(q16_to_f32(x) q16_to_f32(y) q16_to_f32(z))
     return 0
 }
+
+# Emit a textured GL vertex: u/v are Q16 fractions of a full texture wrap
+# (so Q16 0.5 = one texel under a 2-pixel REPEAT layout). glTexCoord2f
+# must precede glVertex3f so the coord binds to this vertex.
+let world_vt3 = (x:int y:int z:int u:int v:int):>void => {
+    GL_TexCoord2f(q16_to_f32(u) q16_to_f32(v))
+    GL_Vertex3f(q16_to_f32(x) q16_to_f32(y) q16_to_f32(z))
+    return 0
+}

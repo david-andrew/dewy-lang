@@ -187,14 +187,17 @@ const MIN_CAM_CLEAR:int = 131072         # 2 m  minimum cam clearance over surfa
 const CRAFT_HALF_W:int = 163840          # 2.5 m (matches draw_craft wing_x)
 
 # ---------- Checker tiling --------------------------------------------------
-# Every track surface is tessellated so that one checker cell measures
-# roughly CHECKER_TILE_M metres along the surface, so the apparent rate of
-# tiles streaming past the camera is independent of which obstacle you're
-# on. The per-surface *_Z_SEGMENTS / *_W_SEGMENTS / *_THETA_SEGMENTS
-# below are all chosen as length / CHECKER_TILE rounded to an integer
-# (arc length for the curved ones). The flat ground uses the same 5 m
-# tile size but renders as a single huge GL_REPEAT-textured quad rather
-# than per-tile quads (see GROUND_TEX_PIXELS / draw_ground).
+# Every track surface uses the same CHECKER_TILE_M target tile edge so the
+# apparent rate of tiles streaming past the camera is constant regardless
+# of which obstacle you're on. The per-surface *_Z_SEGMENTS /
+# *_W_SEGMENTS / *_THETA_SEGMENTS below are sized as length / CHECKER_TILE
+# (arc length for curved surfaces) so each parametric segment-step covers
+# one tile. Coloring is done with a per-surface 2x2 GL_REPEAT texture (see
+# init_checker_textures): each draw_* binds its texture and emits one
+# textured quad per shape segment, with vertex UVs scaled so each segment
+# spans 0.5 uv units (= one texel under GL_NEAREST). This keeps the
+# checker pattern identical to the old per-tile coloring but reduces the
+# per-frame quad count from tens of thousands to a few hundred.
 const CHECKER_TILE:int = 327680          # 5 m -- target tile edge for course surfaces
 # Sphere is a special case: at R=300 m one full longitude is 1.9 km, so
 # a 5 m tile would mean ~377 lon bands. Use a 4x coarser tile (~20 m) so
@@ -222,7 +225,7 @@ const LOOP_ZC:int = -15073280            # -230 m loop center z (between seams)
 const LOOP_W:int = 2621440               # 40 m  track width and corkscrew offset per revolution
 const LOOP_HALF_W:int = 1310720          # 20 m
 const LOOP_MARGIN:int = 196608           # 3 m   how close to R counts as "on loop"
-const LOOP_PHI_SEGMENTS:int = 75         # 2*pi*60 m arc / 5 m ~= 75
+const LOOP_PHI_SEGMENTS:int = 76         # 2*pi*60 m arc / 5 m ~= 75; +1 to make it even so the checker pattern wraps cleanly at the seam
 const LOOP_W_SEGMENTS:int = 8            # 40 m / 5 m
 
 # ---------- Hills (z in [-400, -880]) ---------------------------------------
@@ -257,8 +260,8 @@ const CORK_Z_START:int = -95027200       # -1450 m
 const CORK_Z_END:int = -147456000        # -2250 m
 const CORK_LEN:int = 52428800            # 800 m
 const CORK_Y_PEAK:int = 6553600          # 100 m centerline rise at theta = pi
-const CORK_Z_SEGMENTS:int = 160          # 800 m / 5 m
-const CORK_W_SEGMENTS:int = 20           # 100 m / 5 m
+const CORK_Z_SEGMENTS:int = 320          # 2.5 m per render segment -- twice as fine as the checker tile to smooth the rotating-strip silhouette (one full revolution over 800 m means each step still rotates ~1.1 deg, edge moves ~1 m per step)
+const CORK_W_SEGMENTS:int = 20           # 100 m / 5 m -- only used for tile scaling now (draw collapses to 1 quad per z-step, see draw_corkscrew)
 
 # Perpendicular reach for surface_corkscrew. The strip is a rotating ribbon,
 # so a craft sitting "next to" or "above" the strip can fall inside the
@@ -519,10 +522,31 @@ const TRAIL_BUF:int = __static_alloca__(TRAIL_BUF_BYTES)
 let trail_head:int = 0
 let trail_count:int = 0
 
-# Ground checker texture. Static 2x2 RGBA pixel block + 8-byte slot for
-# the GL texture id (written by glGenTextures, only the low 32 bits used).
-const GROUND_TEX_PIXELS:int = __static_alloca__(GROUND_TEX_BYTES)
-const GROUND_TEX_ID_SLOT:int = __static_alloca__(8)
+# Checker textures. One 2x2 RGBA8 texture per surface (built from the
+# COL_*_A/B constants in init_checker_textures); the GL texture id is
+# stashed in the corresponding *_TEXID_SLOT for draw_* to bind. This lets
+# every surface render its checker by interpolating UVs across a small
+# number of large quads instead of emitting one quad per checker cell.
+const CHECKER_PIXELS_GROUND:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_RAMP:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_LOOP:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_HILL:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_PIPE:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_CORK:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_WALL:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_INNER_RAMP:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_OUTER_RAMP:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_PIXELS_SPHERE:int = __static_alloca__(GROUND_TEX_BYTES)
+const CHECKER_TEXID_GROUND:int = __static_alloca__(8)
+const CHECKER_TEXID_RAMP:int = __static_alloca__(8)
+const CHECKER_TEXID_LOOP:int = __static_alloca__(8)
+const CHECKER_TEXID_HILL:int = __static_alloca__(8)
+const CHECKER_TEXID_PIPE:int = __static_alloca__(8)
+const CHECKER_TEXID_CORK:int = __static_alloca__(8)
+const CHECKER_TEXID_WALL:int = __static_alloca__(8)
+const CHECKER_TEXID_INNER_RAMP:int = __static_alloca__(8)
+const CHECKER_TEXID_OUTER_RAMP:int = __static_alloca__(8)
+const CHECKER_TEXID_SPHERE:int = __static_alloca__(8)
 
 # Camera basis (further smoothed, used to build the view matrix).
 let cam_x:int = 0
@@ -1158,20 +1182,41 @@ let physics_step = ():>void => {
         cz += fp_mul(rz strafe)
     }
 
-    # Grip + drag (only when grounded).
+    # Grip + drag (only when grounded). Lateral grip ROTATES velocity
+    # toward the forward axis instead of just deleting the off-axis
+    # component: the (fwd, side) plane magnitude is preserved while side
+    # is shrunk by LATERAL_GRIP, so a turn redirects speed rather than
+    # bleeding it. Drag (which still proportionally reduces forward speed
+    # every frame) is what naturally trims the top end. This is the
+    # arcade-racer feel where leaning into a corner doesn't just kill
+    # your kinetic energy.
     if airborne =? 0 {
         let side_dot:int = fp_mul(cvx rx) + fp_mul(cvy ry) + fp_mul(cvz rz)
-        let side_kill:int = fp_mul(side_dot LATERAL_GRIP)
-        cvx -= fp_mul(rx side_kill)
-        cvy -= fp_mul(ry side_kill)
-        cvz -= fp_mul(rz side_kill)
+        let fwd_dot:int = fp_mul(cvx fx) + fp_mul(cvy fy) + fp_mul(cvz fz)
+        let new_side:int = side_dot - fp_mul(side_dot LATERAL_GRIP)
+        # Squares are raw (Q16 * Q16) without the fp_mul shift-back, since
+        # fp_sqrt expects the unshifted Q32-scaled value (matches the
+        # speed-magnitude calc above).
+        let plane_sq:int = (fwd_dot * fwd_dot) + (side_dot * side_dot)
+        let new_fwd_sq:int = plane_sq - (new_side * new_side)
+        let new_fwd:int = fwd_dot
+        if new_fwd_sq >? 0 {
+            new_fwd = fp_sqrt(new_fwd_sq)
+            if fwd_dot <? 0 {
+                new_fwd = 0 - new_fwd
+            }
+        }
+        let dfwd:int = new_fwd - fwd_dot
+        let dside:int = new_side - side_dot
+        cvx += fp_mul(fx dfwd) + fp_mul(rx dside)
+        cvy += fp_mul(fy dfwd) + fp_mul(ry dside)
+        cvz += fp_mul(fz dfwd) + fp_mul(rz dside)
 
         let drag:int = DRAG_COAST
         if thrust_active not=? 0 {
             drag = DRAG_THRUST
         }
-        let fwd_dot:int = fp_mul(cvx fx) + fp_mul(cvy fy) + fp_mul(cvz fz)
-        let drag_force:int = fp_mul(fwd_dot drag)
+        let drag_force:int = fp_mul(new_fwd drag)
         cvx -= fp_mul(fx drag_force)
         cvy -= fp_mul(fy drag_force)
         cvz -= fp_mul(fz drag_force)
@@ -1437,34 +1482,75 @@ let q16_to_u8 = (q:int):>int => {
     return b
 }
 
-let ground_tex_write_pixel = (offset:int r:int g:int b:int):>void => {
-    __store_u8__(q16_to_u8(r) GROUND_TEX_PIXELS + offset)
-    __store_u8__(q16_to_u8(g) GROUND_TEX_PIXELS + offset + 1)
-    __store_u8__(q16_to_u8(b) GROUND_TEX_PIXELS + offset + 2)
-    __store_u8__(255 GROUND_TEX_PIXELS + offset + 3)
+let checker_write_pixel = (pixels:int offset:int r:int g:int b:int):>void => {
+    __store_u8__(q16_to_u8(r) pixels + offset)
+    __store_u8__(q16_to_u8(g) pixels + offset + 1)
+    __store_u8__(q16_to_u8(b) pixels + offset + 2)
+    __store_u8__(255 pixels + offset + 3)
     return 0
 }
 
-# One-time GL setup for the ground texture. Builds the 2x2 RGBA checker
-# from the existing COL_TILE_A/B constants, uploads it with NEAREST/REPEAT
-# so it tiles infinitely with no filtering blur, and stashes the texture
-# id in GROUND_TEX_ID_SLOT for draw_ground to bind every frame.
-# Pixel layout (row-major): (B, A) / (A, B) so that world-tile (i, j) with
-# (i + j) even shows COL_TILE_B (matches the prior per-quad pattern).
-let ground_texture_init = ():>void => {
-    ground_tex_write_pixel(0  COL_TILE_B_R COL_TILE_B_G COL_TILE_B_B)
-    ground_tex_write_pixel(4  COL_TILE_A_R COL_TILE_A_G COL_TILE_A_B)
-    ground_tex_write_pixel(8  COL_TILE_A_R COL_TILE_A_G COL_TILE_A_B)
-    ground_tex_write_pixel(12 COL_TILE_B_R COL_TILE_B_G COL_TILE_B_B)
-    glPixelStorei(0x0CF5 1)  # GL_UNPACK_ALIGNMENT = 1 (defensive; RGBA rows are 8 bytes anyway)
-    glGenTextures(1 GROUND_TEX_ID_SLOT)
-    let tex_id:int = __load_u32__(GROUND_TEX_ID_SLOT)
+# Build a single 2x2 RGBA checker texture from two Q16 colors and stash
+# its GL id in id_slot. Pixel layout (row-major): (B, A) / (A, B) so that
+# world-tile (i, j) with (i + j) even samples color B -- matches the
+# `(i + j) & 1 == 0 -> B` convention every per-quad checker used.
+# NEAREST + REPEAT gives crisp, infinitely-tiling cells.
+let build_checker_tex = (pixels:int id_slot:int
+                         a_r:int a_g:int a_b:int
+                         b_r:int b_g:int b_b:int):>void => {
+    checker_write_pixel(pixels 0  b_r b_g b_b)
+    checker_write_pixel(pixels 4  a_r a_g a_b)
+    checker_write_pixel(pixels 8  a_r a_g a_b)
+    checker_write_pixel(pixels 12 b_r b_g b_b)
+    glGenTextures(1 id_slot)
+    let tex_id:int = __load_u32__(id_slot)
     glBindTexture(GL_TEXTURE_2D tex_id)
     glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_NEAREST)
     glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_NEAREST)
     glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_WRAP_S GL_REPEAT)
     glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_WRAP_T GL_REPEAT)
-    glTexImage2D(GL_TEXTURE_2D 0 GL_RGBA 2 2 0 GL_RGBA GL_UNSIGNED_BYTE GROUND_TEX_PIXELS)
+    glTexImage2D(GL_TEXTURE_2D 0 GL_RGBA 2 2 0 GL_RGBA GL_UNSIGNED_BYTE pixels)
+    return 0
+}
+
+# One-time GL setup: build a 2x2 checker texture for every surface from
+# its existing COL_*_A/B constants. Each draw_* binds the matching
+# CHECKER_TEXID_* and emits one quad per geometry segment with UVs scaled
+# so each parametric segment-step maps to half a uv unit (one texel under
+# GL_NEAREST), reproducing the same per-tile checker pattern the old
+# per-quad coloring drew but with orders of magnitude fewer quads.
+let init_checker_textures = ():>void => {
+    glPixelStorei(0x0CF5 1)  # GL_UNPACK_ALIGNMENT = 1 (defensive; RGBA rows are 8 bytes anyway)
+    build_checker_tex(CHECKER_PIXELS_GROUND CHECKER_TEXID_GROUND
+                      COL_TILE_A_R COL_TILE_A_G COL_TILE_A_B
+                      COL_TILE_B_R COL_TILE_B_G COL_TILE_B_B)
+    build_checker_tex(CHECKER_PIXELS_RAMP CHECKER_TEXID_RAMP
+                      COL_RAMP_A_R COL_RAMP_A_G COL_RAMP_A_B
+                      COL_RAMP_B_R COL_RAMP_B_G COL_RAMP_B_B)
+    build_checker_tex(CHECKER_PIXELS_LOOP CHECKER_TEXID_LOOP
+                      COL_LOOP_A_R COL_LOOP_A_G COL_LOOP_A_B
+                      COL_LOOP_B_R COL_LOOP_B_G COL_LOOP_B_B)
+    build_checker_tex(CHECKER_PIXELS_HILL CHECKER_TEXID_HILL
+                      COL_HILL_A_R COL_HILL_A_G COL_HILL_A_B
+                      COL_HILL_B_R COL_HILL_B_G COL_HILL_B_B)
+    build_checker_tex(CHECKER_PIXELS_PIPE CHECKER_TEXID_PIPE
+                      COL_PIPE_A_R COL_PIPE_A_G COL_PIPE_A_B
+                      COL_PIPE_B_R COL_PIPE_B_G COL_PIPE_B_B)
+    build_checker_tex(CHECKER_PIXELS_CORK CHECKER_TEXID_CORK
+                      COL_CORK_A_R COL_CORK_A_G COL_CORK_A_B
+                      COL_CORK_B_R COL_CORK_B_G COL_CORK_B_B)
+    build_checker_tex(CHECKER_PIXELS_WALL CHECKER_TEXID_WALL
+                      COL_WALL_A_R COL_WALL_A_G COL_WALL_A_B
+                      COL_WALL_B_R COL_WALL_B_G COL_WALL_B_B)
+    build_checker_tex(CHECKER_PIXELS_INNER_RAMP CHECKER_TEXID_INNER_RAMP
+                      COL_INNER_RAMP_A_R COL_INNER_RAMP_A_G COL_INNER_RAMP_A_B
+                      COL_INNER_RAMP_B_R COL_INNER_RAMP_B_G COL_INNER_RAMP_B_B)
+    build_checker_tex(CHECKER_PIXELS_OUTER_RAMP CHECKER_TEXID_OUTER_RAMP
+                      COL_OUTER_RAMP_A_R COL_OUTER_RAMP_A_G COL_OUTER_RAMP_A_B
+                      COL_OUTER_RAMP_B_R COL_OUTER_RAMP_B_G COL_OUTER_RAMP_B_B)
+    build_checker_tex(CHECKER_PIXELS_SPHERE CHECKER_TEXID_SPHERE
+                      COL_SPHERE_OUT_A_R COL_SPHERE_OUT_A_G COL_SPHERE_OUT_A_B
+                      COL_SPHERE_OUT_B_R COL_SPHERE_OUT_B_G COL_SPHERE_OUT_B_B)
     return 0
 }
 
@@ -1480,7 +1566,7 @@ let draw_ground = ():>void => {
     let pos_uv:int = q16_to_f32(tex_q16)
     let neg_uv:int = q16_to_f32(0 - tex_q16)
     let y:int = q16_to_f32(GROUND_Y)
-    let tex_id:int = __load_u32__(GROUND_TEX_ID_SLOT)
+    let tex_id:int = __load_u32__(CHECKER_TEXID_GROUND)
 
     glEnable(GL_TEXTURE_2D)
     glBindTexture(GL_TEXTURE_2D tex_id)
@@ -1501,45 +1587,27 @@ let draw_ground = ():>void => {
 
 # ---- Ramp ----
 let draw_ramp = ():>void => {
-    let r_a:int = q16_to_f32(COL_RAMP_A_R)
-    let g_a:int = q16_to_f32(COL_RAMP_A_G)
-    let b_a:int = q16_to_f32(COL_RAMP_A_B)
-    let r_b:int = q16_to_f32(COL_RAMP_B_R)
-    let g_b:int = q16_to_f32(COL_RAMP_B_G)
-    let b_b:int = q16_to_f32(COL_RAMP_B_B)
     let r_s:int = q16_to_f32(COL_RAMP_SIDE_R)
     let g_s:int = q16_to_f32(COL_RAMP_SIDE_G)
     let b_s:int = q16_to_f32(COL_RAMP_SIDE_B)
-    let zi:int = 0
-    loop zi <? RAMP_Z_SEGMENTS {
-        let z0:int = Z_RAMP_NEAR - ((zi * RAMP_LENGTH) // RAMP_Z_SEGMENTS)
-        let z1:int = Z_RAMP_NEAR - (((zi + 1) * RAMP_LENGTH) // RAMP_Z_SEGMENTS)
-        let y0:int = fp_mul(Z_RAMP_NEAR - z0 RAMP_TAN)
-        let y1:int = fp_mul(Z_RAMP_NEAR - z1 RAMP_TAN)
-        let wi:int = 0
-        loop wi <? RAMP_W_SEGMENTS {
-            let x0:int = (0 - RAMP_HALF_W) + ((wi * (2 * RAMP_HALF_W)) // RAMP_W_SEGMENTS)
-            let x1:int = (0 - RAMP_HALF_W) + (((wi + 1) * (2 * RAMP_HALF_W)) // RAMP_W_SEGMENTS)
-            let cell:int = (zi + wi) and 1
-            let rr:int = r_a
-            let gg:int = g_a
-            let bb:int = b_a
-            if cell =? 0 {
-                rr = r_b
-                gg = g_b
-                bb = b_b
-            }
-            glBegin(GL_QUADS)
-            GL_Color3f(rr gg bb)
-            world_v3(x0 y0 z0)
-            world_v3(x1 y0 z0)
-            world_v3(x1 y1 z1)
-            world_v3(x0 y1 z1)
-            glEnd()
-            wi += 1
-        }
-        zi += 1
-    }
+    # Slope surface: 1 textured quad covers what was RAMP_Z_SEGMENTS *
+    # RAMP_W_SEGMENTS coloured quads. Each parametric segment-step maps
+    # to half a uv unit (= one texel under GL_NEAREST/REPEAT), so the
+    # checker cell size matches the old per-quad pattern exactly.
+    let tex_id:int = __load_u32__(CHECKER_TEXID_RAMP)
+    let u_max:int = (RAMP_W_SEGMENTS * FP_ONE) // 2
+    let v_max:int = (RAMP_Z_SEGMENTS * FP_ONE) // 2
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    glBegin(GL_QUADS)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
+    world_vt3(0 - RAMP_HALF_W 0 Z_RAMP_NEAR 0 0)
+    world_vt3(RAMP_HALF_W 0 Z_RAMP_NEAR u_max 0)
+    world_vt3(RAMP_HALF_W RAMP_HEIGHT Z_RAMP_FAR u_max v_max)
+    world_vt3(0 - RAMP_HALF_W RAMP_HEIGHT Z_RAMP_FAR 0 v_max)
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
+    # Side triangles + back face (untextured solid colour).
     glBegin(GL_TRIANGLES)
     GL_Color3f(r_s g_s b_s)
     world_v3(0 - RAMP_HALF_W 0 Z_RAMP_NEAR)
@@ -1561,14 +1629,20 @@ let draw_ramp = ():>void => {
 
 # ---- Loop ----
 let draw_loop = ():>void => {
-    let r_a:int = q16_to_f32(COL_LOOP_A_R)
-    let g_a:int = q16_to_f32(COL_LOOP_A_G)
-    let b_a:int = q16_to_f32(COL_LOOP_A_B)
-    let r_b:int = q16_to_f32(COL_LOOP_B_R)
-    let g_b:int = q16_to_f32(COL_LOOP_B_G)
-    let b_b:int = q16_to_f32(COL_LOOP_B_B)
+    # One textured quad per phi segment (full LOOP_W_SEGMENTS width). UV.v
+    # advances by 0.5 per phi step (one texel under GL_NEAREST/REPEAT).
+    # Going from 600 quads to LOOP_PHI_SEGMENTS quads, all batched in a
+    # single GL_QUADS so there's exactly one glBegin/glEnd for the loop.
+    let tex_id:int = __load_u32__(CHECKER_TEXID_LOOP)
+    let u_max:int = (LOOP_W_SEGMENTS * FP_ONE) // 2
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    glBegin(GL_QUADS)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
     let pi:int = 0
     loop pi <? LOOP_PHI_SEGMENTS {
+        let v0:int = (pi * FP_ONE) // 2
+        let v1:int = ((pi + 1) * FP_ONE) // 2
         let phi0:int = (pi * ANG_TURN) // LOOP_PHI_SEGMENTS
         let phi1:int = ((pi + 1) * ANG_TURN) // LOOP_PHI_SEGMENTS
         let xc0:int = (phi0 * LOOP_W) // ANG_TURN
@@ -1581,139 +1655,110 @@ let draw_loop = ():>void => {
         let z0:int = LOOP_ZC - fp_mul(LOOP_R sphi0)
         let y1:int = LOOP_YC - fp_mul(LOOP_R cphi1)
         let z1:int = LOOP_ZC - fp_mul(LOOP_R sphi1)
-        let wi:int = 0
-        loop wi <? LOOP_W_SEGMENTS {
-            let w0:int = (0 - LOOP_HALF_W) + ((wi * LOOP_W) // LOOP_W_SEGMENTS)
-            let w1:int = (0 - LOOP_HALF_W) + (((wi + 1) * LOOP_W) // LOOP_W_SEGMENTS)
-            let x00:int = xc0 + w0
-            let x01:int = xc0 + w1
-            let x10:int = xc1 + w0
-            let x11:int = xc1 + w1
-            let cell:int = (pi + wi) and 1
-            let rr:int = r_a
-            let gg:int = g_a
-            let bb:int = b_a
-            if cell =? 0 {
-                rr = r_b
-                gg = g_b
-                bb = b_b
-            }
-            glBegin(GL_QUADS)
-            GL_Color3f(rr gg bb)
-            world_v3(x00 y0 z0)
-            world_v3(x01 y0 z0)
-            world_v3(x11 y1 z1)
-            world_v3(x10 y1 z1)
-            glEnd()
-            wi += 1
-        }
+        world_vt3(xc0 - LOOP_HALF_W y0 z0 0 v0)
+        world_vt3(xc0 + LOOP_HALF_W y0 z0 u_max v0)
+        world_vt3(xc1 + LOOP_HALF_W y1 z1 u_max v1)
+        world_vt3(xc1 - LOOP_HALF_W y1 z1 0 v1)
         pi += 1
     }
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
     return 0
 }
 
 # ---- Hills ----
 let draw_hills = ():>void => {
-    let r_a:int = q16_to_f32(COL_HILL_A_R)
-    let g_a:int = q16_to_f32(COL_HILL_A_G)
-    let b_a:int = q16_to_f32(COL_HILL_A_B)
-    let r_b:int = q16_to_f32(COL_HILL_B_R)
-    let g_b:int = q16_to_f32(COL_HILL_B_G)
-    let b_b:int = q16_to_f32(COL_HILL_B_B)
-    let w_span:int = 2 * HILL_HALF_W
+    # One full-width textured quad per z segment (96 quads instead of
+    # 96 * 40 = 3840). Lateral checker tiles come from the texture.
+    let tex_id:int = __load_u32__(CHECKER_TEXID_HILL)
+    let u_max:int = (HILL_W_SEGMENTS * FP_ONE) // 2
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    glBegin(GL_QUADS)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
     let zi:int = 0
     loop zi <? HILL_Z_SEGMENTS {
+        let v0:int = (zi * FP_ONE) // 2
+        let v1:int = ((zi + 1) * FP_ONE) // 2
         let z0:int = Z_HILL_START - ((zi * HILL_LENGTH) // HILL_Z_SEGMENTS)
         let z1:int = Z_HILL_START - (((zi + 1) * HILL_LENGTH) // HILL_Z_SEGMENTS)
         let phase0:int = ((Z_HILL_START - z0) * ANG_TURN) // HILL_WAVELENGTH
         let phase1:int = ((Z_HILL_START - z1) * ANG_TURN) // HILL_WAVELENGTH
         let y0:int = fp_mul(HILL_AMP_HALF FP_ONE - cos_fp(phase0))
         let y1:int = fp_mul(HILL_AMP_HALF FP_ONE - cos_fp(phase1))
-        let wi:int = 0
-        loop wi <? HILL_W_SEGMENTS {
-            let x0:int = (0 - HILL_HALF_W) + ((wi * w_span) // HILL_W_SEGMENTS)
-            let x1:int = (0 - HILL_HALF_W) + (((wi + 1) * w_span) // HILL_W_SEGMENTS)
-            let cell:int = (zi + wi) and 1
-            let rr:int = r_a
-            let gg:int = g_a
-            let bb:int = b_a
-            if cell =? 0 {
-                rr = r_b
-                gg = g_b
-                bb = b_b
-            }
-            glBegin(GL_QUADS)
-            GL_Color3f(rr gg bb)
-            world_v3(x0 y0 z0)
-            world_v3(x1 y0 z0)
-            world_v3(x1 y1 z1)
-            world_v3(x0 y1 z1)
-            glEnd()
-            wi += 1
-        }
+        world_vt3(0 - HILL_HALF_W y0 z0 0 v0)
+        world_vt3(HILL_HALF_W y0 z0 u_max v0)
+        world_vt3(HILL_HALF_W y1 z1 u_max v1)
+        world_vt3(0 - HILL_HALF_W y1 z1 0 v1)
         zi += 1
     }
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
     return 0
 }
 
 # ---- Halfpipe ----
 let draw_halfpipe = ():>void => {
-    let r_a:int = q16_to_f32(COL_PIPE_A_R)
-    let g_a:int = q16_to_f32(COL_PIPE_A_G)
-    let b_a:int = q16_to_f32(COL_PIPE_A_B)
-    let r_b:int = q16_to_f32(COL_PIPE_B_R)
-    let g_b:int = q16_to_f32(COL_PIPE_B_G)
-    let b_b:int = q16_to_f32(COL_PIPE_B_B)
+    # Pipe is straight along Z, so each theta band is a flat ribbon. One
+    # full-length quad per theta segment (PIPE_THETA_SEGMENTS quads,
+    # was PIPE_Z_SEGMENTS * PIPE_THETA_SEGMENTS = 1140). Z-direction
+    # checker tiles come from the texture's v axis.
+    let tex_id:int = __load_u32__(CHECKER_TEXID_PIPE)
+    let v_max:int = (PIPE_Z_SEGMENTS * FP_ONE) // 2
     let theta_span:int = 2 * ANG_QTR
-    let zi:int = 0
-    loop zi <? PIPE_Z_SEGMENTS {
-        let z0:int = Z_PIPE_START - ((zi * PIPE_LEN) // PIPE_Z_SEGMENTS)
-        let z1:int = Z_PIPE_START - (((zi + 1) * PIPE_LEN) // PIPE_Z_SEGMENTS)
-        let ti:int = 0
-        loop ti <? PIPE_THETA_SEGMENTS {
-            let theta0:int = (0 - ANG_QTR) + ((ti * theta_span) // PIPE_THETA_SEGMENTS)
-            let theta1:int = (0 - ANG_QTR) + (((ti + 1) * theta_span) // PIPE_THETA_SEGMENTS)
-            let cth0:int = cos_fp(theta0)
-            let sth0:int = sin_fp(theta0)
-            let cth1:int = cos_fp(theta1)
-            let sth1:int = sin_fp(theta1)
-            let x0:int = fp_mul(PIPE_R sth0)
-            let y0:int = PIPE_R - fp_mul(PIPE_R cth0)
-            let x1:int = fp_mul(PIPE_R sth1)
-            let y1:int = PIPE_R - fp_mul(PIPE_R cth1)
-            let cell:int = (zi + ti) and 1
-            let rr:int = r_a
-            let gg:int = g_a
-            let bb:int = b_a
-            if cell =? 0 {
-                rr = r_b
-                gg = g_b
-                bb = b_b
-            }
-            glBegin(GL_QUADS)
-            GL_Color3f(rr gg bb)
-            world_v3(x0 y0 z0)
-            world_v3(x1 y1 z0)
-            world_v3(x1 y1 z1)
-            world_v3(x0 y0 z1)
-            glEnd()
-            ti += 1
-        }
-        zi += 1
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    glBegin(GL_QUADS)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
+    let ti:int = 0
+    loop ti <? PIPE_THETA_SEGMENTS {
+        let u0:int = (ti * FP_ONE) // 2
+        let u1:int = ((ti + 1) * FP_ONE) // 2
+        let theta0:int = (0 - ANG_QTR) + ((ti * theta_span) // PIPE_THETA_SEGMENTS)
+        let theta1:int = (0 - ANG_QTR) + (((ti + 1) * theta_span) // PIPE_THETA_SEGMENTS)
+        let cth0:int = cos_fp(theta0)
+        let sth0:int = sin_fp(theta0)
+        let cth1:int = cos_fp(theta1)
+        let sth1:int = sin_fp(theta1)
+        let x0:int = fp_mul(PIPE_R sth0)
+        let y0:int = PIPE_R - fp_mul(PIPE_R cth0)
+        let x1:int = fp_mul(PIPE_R sth1)
+        let y1:int = PIPE_R - fp_mul(PIPE_R cth1)
+        world_vt3(x0 y0 Z_PIPE_START u0 0)
+        world_vt3(x1 y1 Z_PIPE_START u1 0)
+        world_vt3(x1 y1 Z_PIPE_END u1 v_max)
+        world_vt3(x0 y0 Z_PIPE_END u0 v_max)
+        ti += 1
     }
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
     return 0
 }
 
 # ---- Corkscrew ----
 let draw_corkscrew = ():>void => {
-    let r_a:int = q16_to_f32(COL_CORK_A_R)
-    let g_a:int = q16_to_f32(COL_CORK_A_G)
-    let b_a:int = q16_to_f32(COL_CORK_A_B)
-    let r_b:int = q16_to_f32(COL_CORK_B_R)
-    let g_b:int = q16_to_f32(COL_CORK_B_G)
-    let b_b:int = q16_to_f32(COL_CORK_B_B)
+    # Strip rotates with z, so we keep CORK_Z_SEGMENTS for shape but
+    # collapse the width (CORK_W_SEGMENTS) to a single textured quad per
+    # z step. Drops 3200 quads down to CORK_Z_SEGMENTS = 160. Each
+    # strip-end is rotated by the local theta, yielding the same twisted
+    # ribbon geometry as before -- only the lateral checker tiles move
+    # from per-quad colour into a tex_u sweep.
+    let tex_id:int = __load_u32__(CHECKER_TEXID_CORK)
+    let u_max:int = (CORK_W_SEGMENTS * FP_ONE) // 2
+    # v_max is fixed by the checker tile size, NOT by the geometry segment
+    # count. CORK_LEN / CHECKER_TILE = number of 5 m tiles along z; halve
+    # it (since 1 uv = 2 tiles under the 2x2 GL_REPEAT layout) to get the
+    # final v at z = CORK_Z_END. This lets us crank CORK_Z_SEGMENTS for
+    # smoother geometry without resizing the checker.
+    let v_max:int = (CORK_LEN * FP_ONE) // (2 * CHECKER_TILE)
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    glBegin(GL_QUADS)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
     let zi:int = 0
     loop zi <? CORK_Z_SEGMENTS {
+        let v0:int = (zi * v_max) // CORK_Z_SEGMENTS
+        let v1:int = ((zi + 1) * v_max) // CORK_Z_SEGMENTS
         let z0:int = CORK_Z_START - ((zi * CORK_LEN) // CORK_Z_SEGMENTS)
         let z1:int = CORK_Z_START - (((zi + 1) * CORK_LEN) // CORK_Z_SEGMENTS)
         let theta0:int = ((CORK_Z_START - z0) * ANG_TURN) // CORK_LEN
@@ -1724,82 +1769,45 @@ let draw_corkscrew = ():>void => {
         let sth1:int = sin_fp(theta1)
         let yc0:int = (CORK_Y_PEAK - fp_mul(CORK_Y_PEAK cth0)) // 2
         let yc1:int = (CORK_Y_PEAK - fp_mul(CORK_Y_PEAK cth1)) // 2
-        let wi:int = 0
-        loop wi <? CORK_W_SEGMENTS {
-            let w0:int = (0 - CORK_HALF_W) + ((wi * CORK_W) // CORK_W_SEGMENTS)
-            let w1:int = (0 - CORK_HALF_W) + (((wi + 1) * CORK_W) // CORK_W_SEGMENTS)
-            let x00:int = CORK_X_CENTER + fp_mul(w0 cth0)
-            let y00:int = yc0 + fp_mul(w0 sth0)
-            let x01:int = CORK_X_CENTER + fp_mul(w1 cth0)
-            let y01:int = yc0 + fp_mul(w1 sth0)
-            let x10:int = CORK_X_CENTER + fp_mul(w0 cth1)
-            let y10:int = yc1 + fp_mul(w0 sth1)
-            let x11:int = CORK_X_CENTER + fp_mul(w1 cth1)
-            let y11:int = yc1 + fp_mul(w1 sth1)
-            let cell:int = (zi + wi) and 1
-            let rr:int = r_a
-            let gg:int = g_a
-            let bb:int = b_a
-            if cell =? 0 {
-                rr = r_b
-                gg = g_b
-                bb = b_b
-            }
-            glBegin(GL_QUADS)
-            GL_Color3f(rr gg bb)
-            world_v3(x00 y00 z0)
-            world_v3(x01 y01 z0)
-            world_v3(x11 y11 z1)
-            world_v3(x10 y10 z1)
-            glEnd()
-            wi += 1
-        }
+        let xL0:int = CORK_X_CENTER + fp_mul(0 - CORK_HALF_W cth0)
+        let yL0:int = yc0 + fp_mul(0 - CORK_HALF_W sth0)
+        let xR0:int = CORK_X_CENTER + fp_mul(CORK_HALF_W cth0)
+        let yR0:int = yc0 + fp_mul(CORK_HALF_W sth0)
+        let xL1:int = CORK_X_CENTER + fp_mul(0 - CORK_HALF_W cth1)
+        let yL1:int = yc1 + fp_mul(0 - CORK_HALF_W sth1)
+        let xR1:int = CORK_X_CENTER + fp_mul(CORK_HALF_W cth1)
+        let yR1:int = yc1 + fp_mul(CORK_HALF_W sth1)
+        world_vt3(xL0 yL0 z0 0 v0)
+        world_vt3(xR0 yR0 z0 u_max v0)
+        world_vt3(xR1 yR1 z1 u_max v1)
+        world_vt3(xL1 yL1 z1 0 v1)
         zi += 1
     }
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
     return 0
 }
 
 # ---- Sphere inner-access ramp (centered x=0) ----
 let draw_inner_ramp = ():>void => {
-    let r_a:int = q16_to_f32(COL_INNER_RAMP_A_R)
-    let g_a:int = q16_to_f32(COL_INNER_RAMP_A_G)
-    let b_a:int = q16_to_f32(COL_INNER_RAMP_A_B)
-    let r_b:int = q16_to_f32(COL_INNER_RAMP_B_R)
-    let g_b:int = q16_to_f32(COL_INNER_RAMP_B_G)
-    let b_b:int = q16_to_f32(COL_INNER_RAMP_B_B)
     let r_s:int = q16_to_f32(COL_INNER_RAMP_SIDE_R)
     let g_s:int = q16_to_f32(COL_INNER_RAMP_SIDE_G)
     let b_s:int = q16_to_f32(COL_INNER_RAMP_SIDE_B)
-    let zi:int = 0
-    loop zi <? INNER_RAMP_Z_SEGMENTS {
-        let z0:int = Z_INNER_NEAR - ((zi * INNER_RAMP_LENGTH) // INNER_RAMP_Z_SEGMENTS)
-        let z1:int = Z_INNER_NEAR - (((zi + 1) * INNER_RAMP_LENGTH) // INNER_RAMP_Z_SEGMENTS)
-        let y0:int = fp_mul(Z_INNER_NEAR - z0 INNER_RAMP_TAN)
-        let y1:int = fp_mul(Z_INNER_NEAR - z1 INNER_RAMP_TAN)
-        let wi:int = 0
-        loop wi <? INNER_RAMP_W_SEGMENTS {
-            let x0:int = (0 - INNER_RAMP_HALF_W) + ((wi * (2 * INNER_RAMP_HALF_W)) // INNER_RAMP_W_SEGMENTS)
-            let x1:int = (0 - INNER_RAMP_HALF_W) + (((wi + 1) * (2 * INNER_RAMP_HALF_W)) // INNER_RAMP_W_SEGMENTS)
-            let cell:int = (zi + wi) and 1
-            let rr:int = r_a
-            let gg:int = g_a
-            let bb:int = b_a
-            if cell =? 0 {
-                rr = r_b
-                gg = g_b
-                bb = b_b
-            }
-            glBegin(GL_QUADS)
-            GL_Color3f(rr gg bb)
-            world_v3(x0 y0 z0)
-            world_v3(x1 y0 z0)
-            world_v3(x1 y1 z1)
-            world_v3(x0 y1 z1)
-            glEnd()
-            wi += 1
-        }
-        zi += 1
-    }
+    # Slope surface: 1 textured quad replaces INNER_RAMP_Z_SEGMENTS *
+    # INNER_RAMP_W_SEGMENTS = 720 coloured quads.
+    let tex_id:int = __load_u32__(CHECKER_TEXID_INNER_RAMP)
+    let u_max:int = (INNER_RAMP_W_SEGMENTS * FP_ONE) // 2
+    let v_max:int = (INNER_RAMP_Z_SEGMENTS * FP_ONE) // 2
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    glBegin(GL_QUADS)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
+    world_vt3(0 - INNER_RAMP_HALF_W 0 Z_INNER_NEAR 0 0)
+    world_vt3(INNER_RAMP_HALF_W 0 Z_INNER_NEAR u_max 0)
+    world_vt3(INNER_RAMP_HALF_W INNER_RAMP_HEIGHT Z_INNER_FAR u_max v_max)
+    world_vt3(0 - INNER_RAMP_HALF_W INNER_RAMP_HEIGHT Z_INNER_FAR 0 v_max)
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
     glBegin(GL_TRIANGLES)
     GL_Color3f(r_s g_s b_s)
     world_v3(0 - INNER_RAMP_HALF_W 0 Z_INNER_NEAR)
@@ -1814,46 +1822,24 @@ let draw_inner_ramp = ():>void => {
 
 # ---- Sphere outer-access ramp (centered x=+30, slope ~42 deg) ----
 let draw_outer_ramp = ():>void => {
-    let r_a:int = q16_to_f32(COL_OUTER_RAMP_A_R)
-    let g_a:int = q16_to_f32(COL_OUTER_RAMP_A_G)
-    let b_a:int = q16_to_f32(COL_OUTER_RAMP_A_B)
-    let r_b:int = q16_to_f32(COL_OUTER_RAMP_B_R)
-    let g_b:int = q16_to_f32(COL_OUTER_RAMP_B_G)
-    let b_b:int = q16_to_f32(COL_OUTER_RAMP_B_B)
     let r_s:int = q16_to_f32(COL_OUTER_RAMP_SIDE_R)
     let g_s:int = q16_to_f32(COL_OUTER_RAMP_SIDE_G)
     let b_s:int = q16_to_f32(COL_OUTER_RAMP_SIDE_B)
     let xc:int = OUTER_RAMP_X_CENTER
-    let zi:int = 0
-    loop zi <? OUTER_RAMP_Z_SEGMENTS {
-        let z0:int = Z_OUTER_NEAR - ((zi * OUTER_RAMP_LENGTH) // OUTER_RAMP_Z_SEGMENTS)
-        let z1:int = Z_OUTER_NEAR - (((zi + 1) * OUTER_RAMP_LENGTH) // OUTER_RAMP_Z_SEGMENTS)
-        let y0:int = fp_mul(Z_OUTER_NEAR - z0 OUTER_RAMP_TAN)
-        let y1:int = fp_mul(Z_OUTER_NEAR - z1 OUTER_RAMP_TAN)
-        let wi:int = 0
-        loop wi <? OUTER_RAMP_W_SEGMENTS {
-            let x0:int = xc + (0 - OUTER_RAMP_HALF_W) + ((wi * (2 * OUTER_RAMP_HALF_W)) // OUTER_RAMP_W_SEGMENTS)
-            let x1:int = xc + (0 - OUTER_RAMP_HALF_W) + (((wi + 1) * (2 * OUTER_RAMP_HALF_W)) // OUTER_RAMP_W_SEGMENTS)
-            let cell:int = (zi + wi) and 1
-            let rr:int = r_a
-            let gg:int = g_a
-            let bb:int = b_a
-            if cell =? 0 {
-                rr = r_b
-                gg = g_b
-                bb = b_b
-            }
-            glBegin(GL_QUADS)
-            GL_Color3f(rr gg bb)
-            world_v3(x0 y0 z0)
-            world_v3(x1 y0 z0)
-            world_v3(x1 y1 z1)
-            world_v3(x0 y1 z1)
-            glEnd()
-            wi += 1
-        }
-        zi += 1
-    }
+    # Slope surface: 1 textured quad replaces 720 coloured quads.
+    let tex_id:int = __load_u32__(CHECKER_TEXID_OUTER_RAMP)
+    let u_max:int = (OUTER_RAMP_W_SEGMENTS * FP_ONE) // 2
+    let v_max:int = (OUTER_RAMP_Z_SEGMENTS * FP_ONE) // 2
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    glBegin(GL_QUADS)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
+    world_vt3(xc - OUTER_RAMP_HALF_W 0 Z_OUTER_NEAR 0 0)
+    world_vt3(xc + OUTER_RAMP_HALF_W 0 Z_OUTER_NEAR u_max 0)
+    world_vt3(xc + OUTER_RAMP_HALF_W OUTER_RAMP_HEIGHT Z_OUTER_FAR u_max v_max)
+    world_vt3(xc - OUTER_RAMP_HALF_W OUTER_RAMP_HEIGHT Z_OUTER_FAR 0 v_max)
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
     glBegin(GL_TRIANGLES)
     GL_Color3f(r_s g_s b_s)
     world_v3(xc - OUTER_RAMP_HALF_W 0 Z_OUTER_NEAR)
@@ -1875,89 +1861,93 @@ let draw_outer_ramp = ():>void => {
 # udewy default) each quad is visible from both inside and outside, so
 # the inner cavity is naturally lit.
 let draw_sphere = ():>void => {
-    let r_oa:int = q16_to_f32(COL_SPHERE_OUT_A_R)
-    let g_oa:int = q16_to_f32(COL_SPHERE_OUT_A_G)
-    let b_oa:int = q16_to_f32(COL_SPHERE_OUT_A_B)
-    let r_ob:int = q16_to_f32(COL_SPHERE_OUT_B_R)
-    let g_ob:int = q16_to_f32(COL_SPHERE_OUT_B_G)
-    let b_ob:int = q16_to_f32(COL_SPHERE_OUT_B_B)
     let r_rim:int = q16_to_f32(COL_SPHERE_RIM_R)
     let g_rim:int = q16_to_f32(COL_SPHERE_RIM_G)
     let b_rim:int = q16_to_f32(COL_SPHERE_RIM_B)
 
     # Hole cap: polar angle from +Z axis < 45 deg (half-turn-units).
-    let hole_lat:int = ANG_HALF_TURN // 4    # 45 deg in (0..ANG_HALF_TURN) lat space
+    # rim_lat is the single lat band whose near edge straddles the hole.
+    let hole_lat:int = ANG_HALF_TURN // 4
+    let rim_lat:int = (hole_lat * SPHERE_LAT_BANDS) // ANG_HALF_TURN
 
+    # Pass 1: textured surface (all bands past the rim, except rim_lat
+    # itself). Tessellation kept at LAT_BANDS * LON_BANDS for shape;
+    # checker tiles come from the texture (UV step = 0.5 per band -> one
+    # texel under GL_NEAREST/REPEAT, matching the old (lat+lon)&1 cell).
+    let tex_id:int = __load_u32__(CHECKER_TEXID_SPHERE)
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    glBegin(GL_QUADS)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
     let lat:int = 0
     loop lat <? SPHERE_LAT_BANDS {
         let phi0:int = (lat * ANG_HALF_TURN) // SPHERE_LAT_BANDS
         let phi1:int = ((lat + 1) * ANG_HALF_TURN) // SPHERE_LAT_BANDS
-        if phi1 >? hole_lat {
+        if (phi1 >? hole_lat) and (lat not=? rim_lat) {
+            let v0:int = (lat * FP_ONE) // 2
+            let v1:int = ((lat + 1) * FP_ONE) // 2
             let cphi0:int = cos_fp(phi0)
             let sphi0:int = sin_fp(phi0)
             let cphi1:int = cos_fp(phi1)
             let sphi1:int = sin_fp(phi1)
-
-            # Rim band (the one whose near edge straddles the hole): paint
-            # gold so the hole reads visually.
-            let is_rim:int = 0
-            if (phi0 <=? hole_lat) and (phi1 >? hole_lat) {
-                is_rim = 1
-            }
-
+            let z0:int = SPHERE_CZ + fp_mul(SPHERE_R cphi0)
+            let z1:int = SPHERE_CZ + fp_mul(SPHERE_R cphi1)
             let lon:int = 0
             loop lon <? SPHERE_LON_BANDS {
+                let u0:int = (lon * FP_ONE) // 2
+                let u1:int = ((lon + 1) * FP_ONE) // 2
                 let theta0:int = (lon * ANG_TURN) // SPHERE_LON_BANDS
                 let theta1:int = ((lon + 1) * ANG_TURN) // SPHERE_LON_BANDS
                 let cth0:int = cos_fp(theta0)
                 let sth0:int = sin_fp(theta0)
                 let cth1:int = cos_fp(theta1)
                 let sth1:int = sin_fp(theta1)
-
-                let cell:int = (lat + lon) and 1
-                let rr:int = r_oa
-                let gg:int = g_oa
-                let bb:int = b_oa
-                if cell =? 0 {
-                    rr = r_ob
-                    gg = g_ob
-                    bb = b_ob
-                }
-                if is_rim not=? 0 {
-                    rr = r_rim
-                    gg = g_rim
-                    bb = b_rim
-                }
-
-                # Vertex (sphere-local, +Z polar axis):
-                #   x = R * sin(phi) * cos(theta)
-                #   y = R * sin(phi) * sin(theta)
-                #   z = R * cos(phi)
                 let x00:int = SPHERE_CX + fp_mul(SPHERE_R fp_mul(sphi0 cth0))
                 let y00:int = SPHERE_CY + fp_mul(SPHERE_R fp_mul(sphi0 sth0))
-                let z00:int = SPHERE_CZ + fp_mul(SPHERE_R cphi0)
                 let x01:int = SPHERE_CX + fp_mul(SPHERE_R fp_mul(sphi0 cth1))
                 let y01:int = SPHERE_CY + fp_mul(SPHERE_R fp_mul(sphi0 sth1))
-                let z01:int = SPHERE_CZ + fp_mul(SPHERE_R cphi0)
                 let x11:int = SPHERE_CX + fp_mul(SPHERE_R fp_mul(sphi1 cth1))
                 let y11:int = SPHERE_CY + fp_mul(SPHERE_R fp_mul(sphi1 sth1))
-                let z11:int = SPHERE_CZ + fp_mul(SPHERE_R cphi1)
                 let x10:int = SPHERE_CX + fp_mul(SPHERE_R fp_mul(sphi1 cth0))
                 let y10:int = SPHERE_CY + fp_mul(SPHERE_R fp_mul(sphi1 sth0))
-                let z10:int = SPHERE_CZ + fp_mul(SPHERE_R cphi1)
-
-                glBegin(GL_QUADS)
-                GL_Color3f(rr gg bb)
-                world_v3(x00 y00 z00)
-                world_v3(x01 y01 z01)
-                world_v3(x11 y11 z11)
-                world_v3(x10 y10 z10)
-                glEnd()
+                world_vt3(x00 y00 z0 u0 v0)
+                world_vt3(x01 y01 z0 u1 v0)
+                world_vt3(x11 y11 z1 u1 v1)
+                world_vt3(x10 y10 z1 u0 v1)
                 lon += 1
             }
         }
         lat += 1
     }
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
+
+    # Pass 2: rim band (untextured, solid gold).
+    let phi0:int = (rim_lat * ANG_HALF_TURN) // SPHERE_LAT_BANDS
+    let phi1:int = ((rim_lat + 1) * ANG_HALF_TURN) // SPHERE_LAT_BANDS
+    let cphi0:int = cos_fp(phi0)
+    let sphi0:int = sin_fp(phi0)
+    let cphi1:int = cos_fp(phi1)
+    let sphi1:int = sin_fp(phi1)
+    let z0:int = SPHERE_CZ + fp_mul(SPHERE_R cphi0)
+    let z1:int = SPHERE_CZ + fp_mul(SPHERE_R cphi1)
+    glBegin(GL_QUADS)
+    GL_Color3f(r_rim g_rim b_rim)
+    let lon:int = 0
+    loop lon <? SPHERE_LON_BANDS {
+        let theta0:int = (lon * ANG_TURN) // SPHERE_LON_BANDS
+        let theta1:int = ((lon + 1) * ANG_TURN) // SPHERE_LON_BANDS
+        let cth0:int = cos_fp(theta0)
+        let sth0:int = sin_fp(theta0)
+        let cth1:int = cos_fp(theta1)
+        let sth1:int = sin_fp(theta1)
+        world_v3(SPHERE_CX + fp_mul(SPHERE_R fp_mul(sphi0 cth0)) SPHERE_CY + fp_mul(SPHERE_R fp_mul(sphi0 sth0)) z0)
+        world_v3(SPHERE_CX + fp_mul(SPHERE_R fp_mul(sphi0 cth1)) SPHERE_CY + fp_mul(SPHERE_R fp_mul(sphi0 sth1)) z0)
+        world_v3(SPHERE_CX + fp_mul(SPHERE_R fp_mul(sphi1 cth1)) SPHERE_CY + fp_mul(SPHERE_R fp_mul(sphi1 sth1)) z1)
+        world_v3(SPHERE_CX + fp_mul(SPHERE_R fp_mul(sphi1 cth0)) SPHERE_CY + fp_mul(SPHERE_R fp_mul(sphi1 sth0)) z1)
+        lon += 1
+    }
+    glEnd()
     return 0
 }
 
@@ -1965,12 +1955,6 @@ let draw_sphere = ():>void => {
 # checkered along z for motion cues; tops and outer faces flat-shaded.
 # End caps closed at both Z seams so the slabs read as solid blocks.
 let draw_walls = ():>void => {
-    let r_a:int = q16_to_f32(COL_WALL_A_R)
-    let g_a:int = q16_to_f32(COL_WALL_A_G)
-    let b_a:int = q16_to_f32(COL_WALL_A_B)
-    let r_b:int = q16_to_f32(COL_WALL_B_R)
-    let g_b:int = q16_to_f32(COL_WALL_B_G)
-    let b_b:int = q16_to_f32(COL_WALL_B_B)
     let r_top:int = q16_to_f32(COL_WALL_TOP_R)
     let g_top:int = q16_to_f32(COL_WALL_TOP_G)
     let b_top:int = q16_to_f32(COL_WALL_TOP_B)
@@ -1983,88 +1967,61 @@ let draw_walls = ():>void => {
     let xL_in:int = 0 - CORRIDOR_HALF_W
     let xL_out:int = (0 - CORRIDOR_HALF_W) - WALL_THICKNESS
 
-    let zi:int = 0
-    loop zi <? WALL_Z_SEGMENTS {
-        let z0:int = Z_WALL_START - ((zi * WALL_LENGTH) // WALL_Z_SEGMENTS)
-        let z1:int = Z_WALL_START - (((zi + 1) * WALL_LENGTH) // WALL_Z_SEGMENTS)
+    # Inner faces: the old per-zi pattern was 1D (alternating along z, full
+    # wall height). One full-length textured quad per wall (2 quads total)
+    # gives the same stripes by sweeping u along z and pinning v=0 across
+    # the height so only row 0 of the texture is sampled (B/A/B/A...).
+    let tex_id:int = __load_u32__(CHECKER_TEXID_WALL)
+    let u_max:int = (WALL_Z_SEGMENTS * FP_ONE) // 2
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D tex_id)
+    glBegin(GL_QUADS)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
+    # Right wall inner (faces -x).
+    world_vt3(xR_in 0 Z_WALL_START 0 0)
+    world_vt3(xR_in WALL_HEIGHT Z_WALL_START 0 0)
+    world_vt3(xR_in WALL_HEIGHT Z_WALL_END u_max 0)
+    world_vt3(xR_in 0 Z_WALL_END u_max 0)
+    # Left wall inner (faces +x).
+    world_vt3(xL_in 0 Z_WALL_START 0 0)
+    world_vt3(xL_in 0 Z_WALL_END u_max 0)
+    world_vt3(xL_in WALL_HEIGHT Z_WALL_END u_max 0)
+    world_vt3(xL_in WALL_HEIGHT Z_WALL_START 0 0)
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
 
-        let cell:int = zi and 1
-        let rr:int = r_a
-        let gg:int = g_a
-        let bb:int = b_a
-        if cell =? 0 {
-            rr = r_b
-            gg = g_b
-            bb = b_b
-        }
+    # Tops (solid color, one quad per wall).
+    glBegin(GL_QUADS)
+    GL_Color3f(r_top g_top b_top)
+    world_v3(xR_in WALL_HEIGHT Z_WALL_START)
+    world_v3(xR_out WALL_HEIGHT Z_WALL_START)
+    world_v3(xR_out WALL_HEIGHT Z_WALL_END)
+    world_v3(xR_in WALL_HEIGHT Z_WALL_END)
+    world_v3(xL_in WALL_HEIGHT Z_WALL_START)
+    world_v3(xL_in WALL_HEIGHT Z_WALL_END)
+    world_v3(xL_out WALL_HEIGHT Z_WALL_END)
+    world_v3(xL_out WALL_HEIGHT Z_WALL_START)
+    glEnd()
 
-        # Right wall inner face (faces -x).
-        glBegin(GL_QUADS)
-        GL_Color3f(rr gg bb)
-        world_v3(xR_in 0 z0)
-        world_v3(xR_in WALL_HEIGHT z0)
-        world_v3(xR_in WALL_HEIGHT z1)
-        world_v3(xR_in 0 z1)
-        glEnd()
-
-        # Right wall top.
-        glBegin(GL_QUADS)
-        GL_Color3f(r_top g_top b_top)
-        world_v3(xR_in WALL_HEIGHT z0)
-        world_v3(xR_out WALL_HEIGHT z0)
-        world_v3(xR_out WALL_HEIGHT z1)
-        world_v3(xR_in WALL_HEIGHT z1)
-        glEnd()
-
-        # Right wall outer face (faces +x).
-        glBegin(GL_QUADS)
-        GL_Color3f(r_out g_out b_out)
-        world_v3(xR_out WALL_HEIGHT z0)
-        world_v3(xR_out 0 z0)
-        world_v3(xR_out 0 z1)
-        world_v3(xR_out WALL_HEIGHT z1)
-        glEnd()
-
-        # Left wall inner face (faces +x).
-        glBegin(GL_QUADS)
-        GL_Color3f(rr gg bb)
-        world_v3(xL_in 0 z0)
-        world_v3(xL_in 0 z1)
-        world_v3(xL_in WALL_HEIGHT z1)
-        world_v3(xL_in WALL_HEIGHT z0)
-        glEnd()
-
-        # Left wall top.
-        glBegin(GL_QUADS)
-        GL_Color3f(r_top g_top b_top)
-        world_v3(xL_in WALL_HEIGHT z0)
-        world_v3(xL_in WALL_HEIGHT z1)
-        world_v3(xL_out WALL_HEIGHT z1)
-        world_v3(xL_out WALL_HEIGHT z0)
-        glEnd()
-
-        # Left wall outer face (faces -x).
-        glBegin(GL_QUADS)
-        GL_Color3f(r_out g_out b_out)
-        world_v3(xL_out 0 z0)
-        world_v3(xL_out 0 z1)
-        world_v3(xL_out WALL_HEIGHT z1)
-        world_v3(xL_out WALL_HEIGHT z0)
-        glEnd()
-
-        zi += 1
-    }
-
-    # End caps at both Z seams so the slabs read as solid blocks rather
-    # than open shells when viewed from off-axis.
+    # Outer faces + end caps (solid color, batched).
     glBegin(GL_QUADS)
     GL_Color3f(r_out g_out b_out)
-    # Right wall, near end (z = Z_WALL_START), face normal +z.
+    # Right wall outer (faces +x).
+    world_v3(xR_out WALL_HEIGHT Z_WALL_START)
+    world_v3(xR_out 0 Z_WALL_START)
+    world_v3(xR_out 0 Z_WALL_END)
+    world_v3(xR_out WALL_HEIGHT Z_WALL_END)
+    # Left wall outer (faces -x).
+    world_v3(xL_out 0 Z_WALL_START)
+    world_v3(xL_out 0 Z_WALL_END)
+    world_v3(xL_out WALL_HEIGHT Z_WALL_END)
+    world_v3(xL_out WALL_HEIGHT Z_WALL_START)
+    # Right wall, near end (face normal +z).
     world_v3(xR_in 0 Z_WALL_START)
     world_v3(xR_in WALL_HEIGHT Z_WALL_START)
     world_v3(xR_out WALL_HEIGHT Z_WALL_START)
     world_v3(xR_out 0 Z_WALL_START)
-    # Right wall, far end (z = Z_WALL_END), face normal -z.
+    # Right wall, far end (face normal -z).
     world_v3(xR_out 0 Z_WALL_END)
     world_v3(xR_out WALL_HEIGHT Z_WALL_END)
     world_v3(xR_in WALL_HEIGHT Z_WALL_END)
@@ -2877,7 +2834,7 @@ let main = ():>int => {
     glEnable(GL_DEPTH_TEST)
     glDepthFunc(GL_LEQUAL)
     glDisable(GL_CULL_FACE)
-    ground_texture_init()
+    init_checker_textures()
 
     reset_craft()
     speed_lines_init()
