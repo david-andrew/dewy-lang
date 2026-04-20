@@ -38,10 +38,12 @@ import p"./uzero_core.udewy"
 # See the stage 14 file for the full obstacle layout (~3.9 km circuit:
 # ramp, loop, hills, halfpipe, corkscrew, walls, sphere finale).
 #
-# Controls: WASD/arrows + Q/E strafe, Space = boost, R = respawn, Esc = quit.
+# Controls: WASD/arrows + Q/E strafe, Space = boost, R = respawn,
+# F = toggle fps counter, Esc = quit.
 # ============================================================================
 
 const SDL_SCANCODE_E:int = 8
+const SDL_SCANCODE_F:int = 9
 const SDL_SCANCODE_Q:int = 20
 const SDL_SCANCODE_R:int = 21
 
@@ -60,10 +62,19 @@ const STRAFE_RATE:int = 32768
 # frames so drag/grip don't immediately scrub the kick. Holding does
 # nothing; you have to release and re-press to fire again.
 const BOOST_IMPULSE:int = 65536          # 1.0 m/frame instant velocity bump
-const BOOST_DURATION:int = 30            # frames the elevated speed cap holds
+const BOOST_DURATION:int = 90            # frames the afterburner visual flare holds
 const ENERGY_FULL:int = 65536            # FP_ONE -- full bar
 const BOOST_COST_Q:int = 19660           # 0.30 of bar per boost (-> 3 boosts when full)
 const ENERGY_REGEN_Q:int = 328           # ~0.005 / frame -> ~3.3 s to refill from empty
+
+# Boost speed-cap reservoir: a press grants BOOST_BONUS extra m/frame above
+# TOP_SPEED. Instead of snapping back when the burn ends, the reservoir
+# bleeds smoothly. While steering it bleeds fast (cornering scrubs the
+# extra speed); while going straight it bleeds slowly so a clean line
+# preserves the boost. Drag still pulls actual velocity down toward
+# whatever the cap currently is.
+const BOOST_OVERCAP_TURN_DECAY:int = 4500    # full BOOST_BONUS bled in ~90 frames of steady steer
+const BOOST_OVERCAP_STRAIGHT_DECAY:int = 800 # full BOOST_BONUS bled in ~500 frames of straight cruise
 
 const STEER_BASE:int = 12
 const STEER_MIN:int = 8
@@ -137,15 +148,15 @@ const TRAIL_OFFSET_UP:int = 13107        # 0.2 m up (matches glow plate)
 # animates outward at SPEED_LINE_RATE * (boost_norm - threshold), looping
 # back to the inner radius. They only show above SPEED_LINE_THRESHOLD
 # (so cruising stays clean and the lines kick in as you push for boost).
-const SPEED_LINES_N:int = 80
+const SPEED_LINES_N:int = 0x100
 const SPEED_LINE_RATE_Q:int = 4915        # 0.075 / frame at full intensity (1 / lifetime)
-const SPEED_LINE_THRESHOLD:int = 32768    # 0.50  speed_norm where lines begin
+const SPEED_LINE_THRESHOLD:int = 25000    # 0.50  speed_norm where lines begin
 const SPEED_LINE_PEAK_ALPHA_Q:int = 52428 # 0.80 alpha at full boost intensity
 const SPEED_LINE_SHAKE_PX:int = 4         # peak per-frame line jitter in pixels
 const SPEED_LINE_OVERSHOOT_PX:int = 24    # extend lines past the edge so they truly exit
 # Per-streak state: { phase_q, angle_idx, start_r_q } as three int64 fields.
-const SPEED_LINE_STRIDE:int = 24
-const SPEED_LINE_STATE_BYTES:int = 1920   # SPEED_LINES_N * SPEED_LINE_STRIDE
+const SPEED_LINE_STRIDE:int = 0x18
+const SPEED_LINE_STATE_BYTES:int = 0x1E00   # SPEED_LINES_N * SPEED_LINE_STRIDE
 
 # Sparks. A fixed-size pool of short-lived 3D particles emitted whenever
 # wall_collide / ramp_side_collide produce a non-trivial impulse. New sparks
@@ -179,6 +190,15 @@ const HUD_DIGIT_H_PX:int = 54
 const HUD_DIGIT_GAP_PX:int = 6
 const HUD_SEG_THICK_PX:int = 6
 const HUD_KMH_PER_FRAME:int = 216        # 60 fps * 3.6 -> Q16 m/frame * this // FP_ONE = km/h
+
+# FPS counter (top-left). Hardcoded default visibility; F toggles at runtime.
+# Smaller digits than the speedometer so it doesn't dominate the corner.
+const SHOW_FPS_DEFAULT:int = 1
+const HUD_FPS_DIGIT_W_PX:int = 14
+const HUD_FPS_DIGIT_H_PX:int = 24
+const HUD_FPS_DIGIT_GAP_PX:int = 3
+const HUD_FPS_SEG_THICK_PX:int = 3
+const HUD_FPS_SAMPLE_FRAMES:int = 30     # rolling window for averaging (frames)
 
 const MIN_CAM_CLEAR:int = 131072         # 2 m  minimum cam clearance over surface
 
@@ -590,11 +610,25 @@ let in_boost_prev:int = 0
 let in_respawn:int = 0
 let in_respawn_prev:int = 0
 let in_quit:int = 0
+let in_fps_toggle:int = 0
+let in_fps_toggle_prev:int = 0
 
 # Boost / shared energy bar state. energy is Q16 in [0, ENERGY_FULL];
-# boost_active_frames counts down while the speed cap is lifted post-press.
+# boost_active_frames counts down while the afterburner visual flare lasts.
+# speed_overcap (Q16 m/frame) is the extra speed allowed above TOP_SPEED;
+# it's bumped to BOOST_BONUS by a press and bled per the OVERCAP_* decays.
 let energy:int = 65536                   # start full
 let boost_active_frames:int = 0
+let speed_overcap:int = 0
+
+# FPS counter state. show_fps is the runtime toggle (initialised from
+# SHOW_FPS_DEFAULT); fps_last_ticks is the wall-clock ms at the last
+# sample, fps_value is the current displayed integer FPS, refreshed once
+# per HUD_FPS_SAMPLE_FRAMES frames.
+let show_fps:int = SHOW_FPS_DEFAULT
+let fps_last_ticks:int = 0
+let fps_sample_count:int = 0
+let fps_value:int = 0
 
 let update_input = (keyboard:int):>void => {
     in_thrust = SDL_ScancodeDown(keyboard SDL_SCANCODE_W) or SDL_ScancodeDown(keyboard SDL_SCANCODE_UP)
@@ -607,6 +641,9 @@ let update_input = (keyboard:int):>void => {
     let r_now:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_R)
     in_respawn = (r_now not=? 0) and (in_respawn_prev =? 0)
     in_respawn_prev = r_now
+    let f_now:int = SDL_ScancodeDown(keyboard SDL_SCANCODE_F)
+    in_fps_toggle = (f_now not=? 0) and (in_fps_toggle_prev =? 0)
+    in_fps_toggle_prev = f_now
     in_quit = SDL_ScancodeDown(keyboard SDL_SCANCODE_ESCAPE)
     return 0
 }
@@ -1048,6 +1085,7 @@ let reset_craft = ():>void => {
     trail_count = 0
     energy = ENERGY_FULL
     boost_active_frames = 0
+    speed_overcap = 0
     return 0
 }
 
@@ -1143,9 +1181,9 @@ let physics_step = ():>void => {
     }
 
     # Edge-triggered boost: fire only on the press transition, only if
-    # there's enough energy. Adds an instant forward impulse and lifts the
-    # speed cap for BOOST_DURATION frames so the kick can settle before
-    # drag/grip eat it.
+    # there's enough energy. Adds an instant forward impulse, lights the
+    # afterburner visual flare for BOOST_DURATION frames, and refills the
+    # speed-overcap reservoir so the speed cap is lifted by BOOST_BONUS.
     let boost_pressed:int = (in_boost not=? 0) and (in_boost_prev =? 0)
     in_boost_prev = in_boost
     if (boost_pressed not=? 0) and (energy >=? BOOST_COST_Q) {
@@ -1153,10 +1191,24 @@ let physics_step = ():>void => {
         cvy += fp_mul(fy BOOST_IMPULSE)
         cvz += fp_mul(fz BOOST_IMPULSE)
         boost_active_frames = BOOST_DURATION
+        speed_overcap = BOOST_BONUS
         energy -= BOOST_COST_Q
     }
     if boost_active_frames >? 0 {
         boost_active_frames -= 1
+    }
+    # Bleed the overcap reservoir. Steering scrubs it fast (cornering eats
+    # boost speed); a clean straight cruise barely touches it. Any input
+    # to in_steer_l/r counts as steering for this purpose.
+    if speed_overcap >? 0 {
+        let overcap_decay:int = BOOST_OVERCAP_STRAIGHT_DECAY
+        if steer_in not=? 0 {
+            overcap_decay = BOOST_OVERCAP_TURN_DECAY
+        }
+        speed_overcap -= overcap_decay
+        if speed_overcap <? 0 {
+            speed_overcap = 0
+        }
     }
     energy += ENERGY_REGEN_Q
     if energy >? ENERGY_FULL {
@@ -1231,13 +1283,12 @@ let physics_step = ():>void => {
         cvz -= fp_mul(fz drag_force)
     }
 
-    # Top speed clamp. The boost cap stays elevated for the full
-    # boost_active_frames window after the press, then snaps back so drag
-    # gradually pulls speed down to the normal ceiling.
-    let max_speed:int = TOP_SPEED
-    if boost_active_frames >? 0 {
-        max_speed = TOP_SPEED + BOOST_BONUS
-    }
+    # Top speed clamp. The cap = TOP_SPEED + speed_overcap, where the
+    # reservoir is filled by a boost press and bled per the OVERCAP_*
+    # decays above. Going straight you keep most of the boost; turning
+    # eats it quickly. Drag still works against current speed inside
+    # the lifted cap.
+    let max_speed:int = TOP_SPEED + speed_overcap
     let cur_speed:int = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
     if cur_speed >? max_speed {
         cvx = fp_div(fp_mul(cvx max_speed) cur_speed)
@@ -2715,6 +2766,37 @@ let draw_energy_bar = (sw:int sh:int):>void => {
     return 0
 }
 
+# FPS readout in the top-left. Right-anchored at (margin + 3 digit cells)
+# so single/double-digit values still sit flush against the left margin.
+# Color shifts toward red as fps drops below 60 to make stutter visible.
+let draw_fps = (sw:int sh:int):>void => {
+    let w:int = HUD_FPS_DIGIT_W_PX
+    let h:int = HUD_FPS_DIGIT_H_PX
+    let gap:int = HUD_FPS_DIGIT_GAP_PX
+    let t:int = HUD_FPS_SEG_THICK_PX
+    let right_x:int = HUD_MARGIN_PX + (3 * (w + gap))
+    let y:int = HUD_MARGIN_PX
+
+    let r:int = F32_ONE
+    let g:int = F32_ONE
+    let b:int = F32_ONE
+    if fps_value <? 50 {
+        # Tint red below 50 fps; full red below 30.
+        g = q16_to_f32(39321)  # 0.6
+        b = q16_to_f32(39321)
+        if fps_value <? 30 {
+            g = q16_to_f32(13107)  # 0.2
+            b = q16_to_f32(13107)
+        }
+    }
+    GL_Color4f(r g b q16_to_f32(60293))
+
+    glBegin(GL_QUADS)
+    draw_number_right(right_x y fps_value 3 w h t gap)
+    glEnd()
+    return 0
+}
+
 let draw_speedometer = (sw:int sh:int):>void => {
     let kmh:int = (vis_speed * HUD_KMH_PER_FRAME) // FP_ONE
     let right_x:int = sw - HUD_MARGIN_PX
@@ -2751,6 +2833,9 @@ let draw_hud = (sw:int sh:int):>void => {
 
     draw_energy_bar(sw sh)
     draw_speedometer(sw sh)
+    if show_fps not=? 0 {
+        draw_fps(sw sh)
+    }
 
     glDisable(GL_BLEND)
     glEnable(GL_DEPTH_TEST)
@@ -2848,6 +2933,7 @@ let main = ():>int => {
 
     reset_craft()
     speed_lines_init()
+    fps_last_ticks = SDL_GetTicks()
 
     loop running not=? 0 {
         let has_event:int = SDL_PollEvent(event)
@@ -2863,6 +2949,9 @@ let main = ():>int => {
         if in_quit not=? 0 {
             running = 0
         }
+        if in_fps_toggle not=? 0 {
+            show_fps = 1 - show_fps
+        }
 
         physics_step()
         update_chase()
@@ -2874,6 +2963,20 @@ let main = ():>int => {
         SDL_GL_SwapWindow(window)
         SDL_Delay(16)
         frame_count += 1
+
+        # FPS sample: every HUD_FPS_SAMPLE_FRAMES frames, divide the
+        # window's frame count by the elapsed wall-clock seconds. This
+        # is the *display* FPS, capped by SDL_Delay(16) + vsync to ~60.
+        fps_sample_count += 1
+        if fps_sample_count >=? HUD_FPS_SAMPLE_FRAMES {
+            let now_ticks:int = SDL_GetTicks()
+            let elapsed_ms:int = now_ticks - fps_last_ticks
+            if elapsed_ms >? 0 {
+                fps_value = (fps_sample_count * 1000) // elapsed_ms
+            }
+            fps_last_ticks = now_ticks
+            fps_sample_count = 0
+        }
     }
 
     SDL_GL_DestroyContext(gl_context)
