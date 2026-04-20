@@ -37,7 +37,9 @@ class RiscvBackend(Backend):
     _MAX_STACK_ADJUST_IMM = 2032
     
     def __init__(self) -> None:
-        self._code: list[str] = []
+        self._function_code: list[tuple[int, list[str]]] = []
+        self._current_fn_code: list[str] | None = None
+        self._reachable_fn_label_ids: set[int] | None = None
         self._data: list[str] = []
         self._next_label: int = 0
         self._extern_symbols: set[str] = set()
@@ -65,11 +67,13 @@ class RiscvBackend(Backend):
     
     def _emit(self, instr: str) -> None:
         """Emit an instruction."""
-        self._code.append("    " + instr)
+        assert self._current_fn_code is not None
+        self._current_fn_code.append("    " + instr)
     
     def _emit_label(self, label: str) -> None:
         """Emit a label."""
-        self._code.append(label + ":")
+        assert self._current_fn_code is not None
+        self._current_fn_code.append(label + ":")
     
     def _emit_data(self, directive: str) -> None:
         """Emit to data section."""
@@ -198,6 +202,9 @@ class RiscvBackend(Backend):
 
     def set_module_init(self, name: str | None) -> None:
         self._module_init_name = name
+
+    def set_reachable_functions(self, label_ids: set[int]) -> None:
+        self._reachable_fn_label_ids = label_ids
     
     def finish_module(self) -> str:
         """Finalize and return the generated assembly."""
@@ -225,7 +232,10 @@ class RiscvBackend(Backend):
         output.append("    ecall")
         output.append("")
         
-        output.extend(self._code)
+        for label_id, lines in self._function_code:
+            if self._reachable_fn_label_ids is not None and label_id not in self._reachable_fn_label_ids:
+                continue
+            output.extend(lines)
         output.append("")
         output.append(".data")
         output.append(".hidden __dso_handle")
@@ -248,6 +258,7 @@ class RiscvBackend(Backend):
         label = self._new_label("str")
         self._string_labels[label_id] = label
         
+        self._emit_data(f".section .data.{label},\"aw\",@progbits")
         self._emit_data_label(label)
         self._emit_data(f"    .dword {len(content)}")
         if len(content) > 0:
@@ -262,6 +273,7 @@ class RiscvBackend(Backend):
         label = self._new_label("arr")
         self._array_labels[label_id] = label
         
+        self._emit_data(f".section .data.{label},\"aw\",@progbits")
         self._emit_data_label(label)
         self._emit_data(f"    .dword {len(elements)}")
         for elem in elements:
@@ -279,6 +291,7 @@ class RiscvBackend(Backend):
             self._next_label += 1
         self._global_labels[label_id] = label
         
+        self._emit_data(f".section .data.{label},\"aw\",@progbits")
         self._emit_data_label(label)
         self._emit_data(f"    .dword {value}")
         
@@ -298,6 +311,7 @@ class RiscvBackend(Backend):
         label = self._new_label("static")
         self._static_labels[label_id] = label
 
+        self._emit_data(f".section .bss.{label},\"aw\",@nobits")
         self._emit_data_label(label)
         if size > 0:
             self._emit_data(f"    .zero {size}")
@@ -381,11 +395,15 @@ class RiscvBackend(Backend):
         self._spilled_depth = 0
         self._min_slot_offset = 0
         
+        self._current_fn_code = []
+        self._function_code.append((label_id, self._current_fn_code))
+        
+        self._current_fn_code.append(f".section .text.{label},\"ax\",@progbits")
         if is_main:
             self._emit_label("__main__")
         self._emit_label(label)
         
-        self._frame_setup_index = len(self._code)
+        self._frame_setup_index = len(self._current_fn_code)
         self._emit("    # frame setup")
         
         # Set up parameters - copy from arg registers to stack
@@ -411,8 +429,9 @@ class RiscvBackend(Backend):
     
     def end_function(self) -> None:
         """End function definition."""
+        assert self._current_fn_code is not None
         frame_bytes = self._frame_bytes()
-        self._code[self._frame_setup_index:self._frame_setup_index + 1] = (
+        self._current_fn_code[self._frame_setup_index:self._frame_setup_index + 1] = (
             self._sp_adjust_instrs(-frame_bytes)
             + ["    mv t0, s0"]
             + self._set_frame_pointer_instrs(frame_bytes)
@@ -451,6 +470,7 @@ class RiscvBackend(Backend):
         self._emit("mv sp, s0")
         self._emit("mv s0, t0")
         self._emit("ret")
+        self._current_fn_code = None
     
     def load_param(self, index: int) -> None:
         """Push parameter value onto the value stack."""
@@ -928,7 +948,7 @@ class RiscvBackend(Backend):
         for prefix in ["riscv64-linux-gnu-", "riscv64-elf-", "riscv64-unknown-elf-"]:
             try:
                 subprocess.run([f"{prefix}as", str(asm_path), "-o", str(obj_path)], check=True)
-                subprocess.run([f"{prefix}ld", str(obj_path), *link_artifacts, "-o", str(exe_path)], check=True)
+                subprocess.run([f"{prefix}ld", "--gc-sections", "-e", "_start", str(obj_path), *link_artifacts, "-o", str(exe_path)], check=True)
                 return exe_path
             except FileNotFoundError:
                 continue

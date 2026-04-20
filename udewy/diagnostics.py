@@ -1,3 +1,4 @@
+import sys
 from typing import NoReturn
 
 
@@ -70,3 +71,18 @@ def error(src: str, location: int, message: str) -> NoReturn:
     context pointing at `location`.
     """
     raise SyntaxError(format_source_context(src, location, message))
+
+
+def warning(message: str, src: str | None = None, location: int | None = None) -> None:
+    """
+    Emit a non-fatal diagnostic to stderr.
+
+    If both `src` and `location` are provided, the warning is rendered with the
+    same source-context block used by `error`. Otherwise it is printed as a
+    plain `warning: ...` line.
+    """
+    if src is not None and location is not None:
+        body = format_source_context(src, location, f"warning: {message}")
+    else:
+        body = f"warning: {message}"
+    print(body, file=sys.stderr)

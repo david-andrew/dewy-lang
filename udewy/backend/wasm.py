@@ -34,8 +34,10 @@ class Wasm32Backend(Backend):
     
     def __init__(self) -> None:
         self._imports: list[str] = []
-        self._functions: list[str] = []
+        self._functions: dict[int, str] = {}
         self._current_fn: list[str] = []
+        self._current_fn_label_id: int = -1
+        self._reachable_fn_label_ids: set[int] | None = None
         self._data_segments: list[tuple[int, bytes]] = []
         self._next_label: int = 0
         self._data_offset: int = 1024  # Start data after initial memory
@@ -199,6 +201,9 @@ class Wasm32Backend(Backend):
 
     def set_module_init(self, name: str | None) -> None:
         self._module_init_name = name
+
+    def set_reachable_functions(self, label_ids: set[int]) -> None:
+        self._reachable_fn_label_ids = label_ids
     
     def finish_module(self) -> str:
         """Finalize and return the generated WAT."""
@@ -225,9 +230,17 @@ class Wasm32Backend(Backend):
         if self._fn_table_ids:
             output.append(f"  (table {len(self._fn_table_ids)} funcref)")
         
-        # Functions
-        for fn in self._functions:
-            output.append(fn)
+        # Functions: emit in declaration order so table indices stay correct.
+        # Unreachable functions become tiny stubs so the function-table layout
+        # is preserved while the heavy body is dropped.
+        for label_id in self._fn_table_ids:
+            if self._reachable_fn_label_ids is not None and label_id not in self._reachable_fn_label_ids:
+                fn_name = self._fn_labels[label_id]
+                param_count = self._fn_param_counts[label_id]
+                params = " ".join("(param i64)" for _ in range(param_count))
+                output.append(f"  (func {fn_name} {params} (result i64) i64.const 0)")
+            else:
+                output.append(self._functions[label_id])
 
         output.append("  (func $main (result i64)")
         if self._module_init_name is not None:
@@ -419,6 +432,7 @@ class Wasm32Backend(Backend):
         
         self._current_fn_name = fn_name
         self._current_fn = []
+        self._current_fn_label_id = label_id
         self._param_count = param_count
         self._local_count = 0
         self._block_depth = 0
@@ -447,7 +461,7 @@ class Wasm32Backend(Backend):
         self._emit("i64.const 0")
         self._emit("return")
         self._current_fn.append("  )")
-        self._functions.append("\n".join(self._current_fn))
+        self._functions[self._current_fn_label_id] = "\n".join(self._current_fn)
     
     def load_param(self, index: int) -> None:
         """Push parameter value onto the value stack."""

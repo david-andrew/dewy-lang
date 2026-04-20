@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import cast
 from . import t0
-from .errors import error
+from .diagnostics import error
 
 
 # some basic type aliases

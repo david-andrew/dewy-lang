@@ -10,7 +10,7 @@ from typing import Literal
 
 from . import t1
 from .backend import Backend
-from .errors import error
+from .diagnostics import error, warning
 
 
 
@@ -75,6 +75,21 @@ class ParseState:
     ctx: ParseContext
     global_init_label_ids: list[int] = field(default_factory=list)
     next_global_init_index: int = 0
+    current_fn_label_id: int | None = None
+    fn_references: dict[int, set[int]] = field(default_factory=dict)
+    top_level_fn_refs: set[int] = field(default_factory=set)
+
+
+def note_fn_use(state: "ParseState", target_label_id: int) -> None:
+    if state.current_fn_label_id is None:
+        state.top_level_fn_refs.add(target_label_id)
+    else:
+        state.fn_references.setdefault(state.current_fn_label_id, set()).add(target_label_id)
+
+
+def note_stable_value_use(state: "ParseState", sv: "StableValue") -> None:
+    if sv.kind == "function":
+        note_fn_use(state, sv.value)
 
 
 _GLOBALS_INIT_NAME = "__udewy_globals_init__"
@@ -280,6 +295,7 @@ def try_parse_stable_expr(
             state.scope_stack, state.global_table, name, state.ctx.builtin_consts
         )
         if resolved_stable_value is not None:
+            note_stable_value_use(state, resolved_stable_value)
             if emit_runtime:
                 push_stable_value(backend, resolved_stable_value)
             return idx + 1, resolved_stable_value
@@ -288,6 +304,7 @@ def try_parse_stable_expr(
             return None
 
         entry = note_function_reference(backend, state.fn_table, name, None, toks[idx].location, state.src)
+        note_fn_use(state, entry.label_id)
         stable_value = StableValue("function", entry.label_id)
         if emit_runtime:
             push_stable_value(backend, stable_value)
@@ -329,12 +346,14 @@ def try_parse_stable_expr(
 def parse_const_only_ident(name: str, loc: int, state: ParseState) -> int | str | None:
     stable_value = lookup_stable_value(state.scope_stack, state.global_table, name, state.ctx.builtin_consts)
     if stable_value is not None:
+        note_stable_value_use(state, stable_value)
         return stable_value_to_directive(state.backend, stable_value)
 
     if var_lookup(state.scope_stack, name) is not None or global_lookup(state.global_table, name) is not None:
         return None
 
     entry = note_function_reference(state.backend, state.fn_table, name, None, loc, state.src)
+    note_fn_use(state, entry.label_id)
     return state.backend.function_ref(entry.label_id)
 
 
@@ -676,6 +695,7 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
                 backend.load_global(global_entry.label_id)
             else:
                 assert global_entry.const_value is not None
+                note_stable_value_use(state, global_entry.const_value)
                 push_stable_value(backend, global_entry.const_value)
             return idx + 1
 
@@ -686,10 +706,12 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
 
         entry = fn_lookup(state.fn_table, name)
         if entry is not None:
+            note_fn_use(state, entry.label_id)
             backend.push_fn_ref(entry.label_id)
             return idx + 1
 
         entry = note_function_reference(backend, state.fn_table, name, None, toks[idx].location, state.src)
+        note_fn_use(state, entry.label_id)
         backend.push_fn_ref(entry.label_id)
         return idx + 1
 
@@ -732,6 +754,7 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
             idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
             validate_call_arity(backend, arg_count, call_loc, state.src)
             entry = note_function_reference(backend, state.fn_table, name, arg_count, call_loc, state.src)
+            note_fn_use(state, entry.label_id)
             backend.call_direct(entry.label_id, arg_count)
 
         return idx
@@ -951,6 +974,7 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     
     is_main = fn_name == "main"
     backend.begin_function(label_id, fn_name, len(params), is_main)
+    state.current_fn_label_id = label_id
     
     push_scope(state.scope_stack)
     
@@ -967,6 +991,7 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
         error(state.src, toks[idx - 1].location, f"Function {fn_name!r} must explicitly return")
     
     backend.end_function()
+    state.current_fn_label_id = None
     pop_scope(state.scope_stack)
     
     return idx
@@ -1213,11 +1238,13 @@ def parse_program(toks: list[t1.Token], state: ParseState) -> None:
                 init_label_id = backend.declare_function(init_name, 0)
                 state.global_init_label_ids.append(init_label_id)
                 backend.begin_function(init_label_id, init_name, 0, False)
+                state.current_fn_label_id = init_label_id
                 idx = parse_expr(toks, idx, state, 0)
                 backend.store_global(label_id)
                 backend.push_void()
                 backend.emit_return()
                 backend.end_function()
+                state.current_fn_label_id = None
 
             global_declare(
                 state.global_table,
@@ -1256,24 +1283,65 @@ def parse(toks: list[t1.Token], src: str, backend: Backend) -> str:
     
     parse_program(toks, state)
 
+    globals_init_label_id: int | None = None
     if state.global_init_label_ids:
         backend.set_module_init(_GLOBALS_INIT_NAME)
-        init_label_id = backend.declare_function(_GLOBALS_INIT_NAME, 0)
-        backend.begin_function(init_label_id, _GLOBALS_INIT_NAME, 0, False)
+        globals_init_label_id = backend.declare_function(_GLOBALS_INIT_NAME, 0)
+        backend.begin_function(globals_init_label_id, _GLOBALS_INIT_NAME, 0, False)
+        state.current_fn_label_id = globals_init_label_id
         for label_id in state.global_init_label_ids:
+            note_fn_use(state, label_id)
             backend.call_direct(label_id, 0)
             backend.pop_value()
         backend.push_void()
         backend.emit_return()
         backend.end_function()
+        state.current_fn_label_id = None
     else:
         backend.set_module_init(None)
     
     for name, entry in fn_table.items():
         if not entry.is_defined:
             raise SyntaxError(f"Undefined function: {name}")
-    
+
+    reachable = compute_reachable_functions(state, globals_init_label_id)
+    backend.set_reachable_functions(reachable)
+
+    unused_externs = sorted(
+        name for name, entry in state.fn_table.items()
+        if entry.is_extern and entry.label_id not in reachable
+    )
+    if unused_externs:
+        warning(f"{len(unused_externs)} unused extern declarations: {', '.join(unused_externs)}")
+
     return backend.finish_module()
+
+
+def compute_reachable_functions(state: ParseState, globals_init_label_id: int | None) -> set[int]:
+    roots: set[int] = set()
+
+    main_entry = state.fn_table.get("main")
+    if main_entry is not None:
+        roots.add(main_entry.label_id)
+
+    if globals_init_label_id is not None:
+        roots.add(globals_init_label_id)
+    roots.update(state.global_init_label_ids)
+
+    roots.update(state.top_level_fn_refs)
+
+    reachable: set[int] = set()
+    work = list(roots)
+    while work:
+        label_id = work.pop()
+        if label_id in reachable:
+            continue
+        reachable.add(label_id)
+        for callee in state.fn_references.get(label_id, ()):
+            if callee not in reachable:
+                work.append(callee)
+
+    return reachable
 
 
 

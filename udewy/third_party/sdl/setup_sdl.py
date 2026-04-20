@@ -35,6 +35,11 @@ DEFAULT_ICON_SYMBOL_NAME = "SDL_DEFAULT_WINDOW_ICON_DATA"
 CMAKE_FLAGS = (
     "-DCMAKE_BUILD_TYPE=Release",
     "-DCMAKE_C_COMPILER=clang",
+    # Per-symbol sections so `ld --gc-sections` (used in the udewy native
+    # backends) can drop unreferenced SDL functions and data items at the
+    # function/variable level instead of only at the .o-archive-member level.
+    "-DCMAKE_C_FLAGS=-ffunction-sections -fdata-sections",
+    "-DCMAKE_CXX_FLAGS=-ffunction-sections -fdata-sections",
     "-DSDL_SHARED=OFF",
     "-DSDL_STATIC=ON",
     "-DSDL_TEST_LIBRARY=OFF",

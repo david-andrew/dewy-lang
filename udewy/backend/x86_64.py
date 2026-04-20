@@ -32,7 +32,9 @@ class X86_64Backend(Backend):
     _XMM_ARG_REGS = [f"%xmm{i}" for i in range(8)]
     
     def __init__(self) -> None:
-        self._code: list[str] = []
+        self._function_code: list[tuple[int, list[str]]] = []
+        self._current_fn_code: list[str] | None = None
+        self._reachable_fn_label_ids: set[int] | None = None
         self._data: list[str] = []
         self._next_label: int = 0
         self._extern_symbols: set[str] = set()
@@ -60,11 +62,13 @@ class X86_64Backend(Backend):
     
     def _emit(self, instr: str) -> None:
         """Emit an instruction."""
-        self._code.append("    " + instr)
+        assert self._current_fn_code is not None
+        self._current_fn_code.append("    " + instr)
     
     def _emit_label(self, label: str) -> None:
         """Emit a label."""
-        self._code.append(label + ":")
+        assert self._current_fn_code is not None
+        self._current_fn_code.append(label + ":")
     
     def _emit_data(self, directive: str) -> None:
         """Emit to data section."""
@@ -165,6 +169,9 @@ class X86_64Backend(Backend):
 
     def set_module_init(self, name: str | None) -> None:
         self._module_init_name = name
+
+    def set_reachable_functions(self, label_ids: set[int]) -> None:
+        self._reachable_fn_label_ids = label_ids
     
     def finish_module(self) -> str:
         """Finalize and return the generated assembly."""
@@ -189,7 +196,10 @@ class X86_64Backend(Backend):
         output.append("    syscall")
         output.append("")
         
-        output.extend(self._code)
+        for label_id, lines in self._function_code:
+            if self._reachable_fn_label_ids is not None and label_id not in self._reachable_fn_label_ids:
+                continue
+            output.extend(lines)
         output.append("")
         output.append(".data")
         output.append(".hidden __dso_handle")
@@ -212,6 +222,7 @@ class X86_64Backend(Backend):
         label = self._new_label("str")
         self._string_labels[label_id] = label
         
+        self._emit_data(f".section .data.{label},\"aw\",@progbits")
         self._emit_data_label(label)
         self._emit_data(f"    .quad {len(content)}")
         if len(content) > 0:
@@ -226,6 +237,7 @@ class X86_64Backend(Backend):
         label = self._new_label("arr")
         self._array_labels[label_id] = label
         
+        self._emit_data(f".section .data.{label},\"aw\",@progbits")
         self._emit_data_label(label)
         self._emit_data(f"    .quad {len(elements)}")
         for elem in elements:
@@ -243,6 +255,7 @@ class X86_64Backend(Backend):
             self._next_label += 1
         self._global_labels[label_id] = label
         
+        self._emit_data(f".section .data.{label},\"aw\",@progbits")
         self._emit_data_label(label)
         self._emit_data(f"    .quad {value}")
         
@@ -262,6 +275,7 @@ class X86_64Backend(Backend):
         label = self._new_label("static")
         self._static_labels[label_id] = label
 
+        self._emit_data(f".section .bss.{label},\"aw\",@nobits")
         self._emit_data_label(label)
         if size > 0:
             self._emit_data(f"    .zero {size}")
@@ -341,6 +355,10 @@ class X86_64Backend(Backend):
         self._spilled_depth = 0
         self._min_slot_offset = 0
         
+        self._current_fn_code = []
+        self._function_code.append((label_id, self._current_fn_code))
+        
+        self._current_fn_code.append(f".section .text.{label},\"ax\",@progbits")
         if is_main:
             self._emit_label("__main__")
         self._emit_label(label)
@@ -348,7 +366,7 @@ class X86_64Backend(Backend):
         # Prologue
         self._emit("pushq %rbp")
         self._emit("movq %rsp, %rbp")
-        self._frame_subtract_index = len(self._code)
+        self._frame_subtract_index = len(self._current_fn_code)
         self._emit("    # frame setup")
         
         # Save callee-saved registers
@@ -380,8 +398,9 @@ class X86_64Backend(Backend):
     
     def end_function(self) -> None:
         """End function definition."""
+        assert self._current_fn_code is not None
         frame_bytes = self._frame_bytes()
-        self._code[self._frame_subtract_index] = f"    subq ${frame_bytes}, %rsp"
+        self._current_fn_code[self._frame_subtract_index] = f"    subq ${frame_bytes}, %rsp"
         self._emit_label(self._current_fn_epilogue)
         
         # Restore callee-saved registers
@@ -393,6 +412,7 @@ class X86_64Backend(Backend):
         self._emit("movq %rbp, %rsp")
         self._emit("popq %rbp")
         self._emit("ret")
+        self._current_fn_code = None
     
     def load_param(self, index: int) -> None:
         """Push parameter value onto the value stack."""
@@ -974,12 +994,12 @@ class X86_64Backend(Backend):
             if dynamic_linker is None:
                 raise RuntimeError("Could not find the x86_64 Linux dynamic linker for shared-library linking")
 
-            command = ["ld", "-e", "_start", "--dynamic-linker", str(dynamic_linker), str(obj_path)]
+            command = ["ld", "-e", "_start", "--gc-sections", "--dynamic-linker", str(dynamic_linker), str(obj_path)]
             if static_artifacts:
                 command.extend(["--start-group", *static_artifacts, "--end-group"])
             command.extend(shared_artifacts)
         else:
-            command = ["ld", "-static", "-e", "_start", str(obj_path)]
+            command = ["ld", "-static", "-e", "_start", "--gc-sections", str(obj_path)]
             if static_artifacts:
                 command.extend(["--start-group", *static_artifacts, "--end-group"])
         command.extend(["-o", str(exe_path)])

@@ -223,6 +223,17 @@ class Backend(ABC):
         
         Emits the function epilogue.
         """
+
+    @abstractmethod
+    def set_reachable_functions(self, label_ids: set[int]) -> None:
+        """
+        Restrict emitted function bodies in finish_module to this set.
+
+        The parser computes the transitive closure of function references reachable
+        from program entry points (main, global initializers, top-level data
+        references, externs) and calls this before finish_module so the backend
+        can drop unreachable bodies from its output.
+        """
     
     @abstractmethod
     def load_param(self, index: int) -> None:

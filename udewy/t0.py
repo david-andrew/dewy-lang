@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
 
-from .errors import error
+from .diagnostics import error
 
 # ============================================================================
 # Import preprocessing
