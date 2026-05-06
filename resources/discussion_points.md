@@ -2110,6 +2110,18 @@ Logical errors that we can help with:
     - basically I think the OS should know what things are trusted vs untrusted, and then perhaps there are libraries that when interacting with the OS (e.g. getting environment variables) that hooks into the security model for the language, and you would get a compile time security error if you tried to do something like use environment variables in a context marked as privileged. note that the security checker would probably be compile-time running code
     - I think in general, having a good model of trusted vs untrusted side effects (inputs), and a good security model in the language where you can mark sections as privileged. For example I think the type system will already have a good notion of what is internal vs external (e.g. for being able to determine what can be precomputed vs what touches non-deterministic/external input). So I think having hooks into that kind of internal vs external source information should be a solid part of the security structure
 
+
+### Idea: Untrusted type, and canonical sanitizers
+this github bug example: https://www.youtube.com/watch?v=m5t08CREHcE
+basically it was a vulnerability where unsanitized code was added into an HTTP header, and was allowed to escape early.
+
+For Dewy handling this kind of issue, I'm imagining something like
+- `UnsafeContent` type for representing string/code content that came in externally
+- `HttpHeaderSanitizer` that is the canonical interface for sanitizing http header content, produces `SanitizedHttpHeaderContent`
+- `HTTPHeader` object wants correctly sanitized content, rather than just being manually constructed from strings
+
+Basically the idea is that for all the various places that could receive extrenally sourced content, they want `Sanitized` versions of that input, which could be enforced from a type system level. This github hack example is just for http headers, but I think ideally Dewy would provide handlers for all the major interfaces used on the internet, especially focusing on the ones most commonly exploited for attacks (e.g. sql injection, etc.)
+
 ### High Level features targeted at security
 > as much as possible of this stuff should happen at compiletime. Being hard to figure out isn't a good excuse to not. Only things that are physically impossible to determine at compiletime (e.g. tracking resource usage of some running program) would be reasonable for non-compiletime safety overhead.
 
