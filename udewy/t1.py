@@ -148,6 +148,37 @@ class Token:
     kind: Kind
 
 
+def bracketed_type_end(src: str, start: int) -> int:
+    if src[start] != '[':
+        raise ValueError("bracketed_type_end expects '['")
+
+    closers = {')': '(', ']': '[', '}': '{', '>': '<'}
+    stack = ['[']
+    i = start + 1
+
+    while i < len(src) and stack:
+        if src[i] == '#':
+            error(src, i, "udewy doesn't support comments inside bracketed type annotations")
+        if src[i] == '"':
+            i = t0.string_end(src, i)
+            continue
+        if src[i] in '([{<':
+            stack.append(src[i])
+            i += 1
+            continue
+        if src[i] in closers:
+            if stack[-1] != closers[src[i]]:
+                error(src, i, "mismatched delimiter inside bracketed type annotation")
+            stack.pop()
+            i += 1
+            continue
+        i += 1
+
+    if stack:
+        error(src, start, "unterminated bracketed type annotation")
+    return i
+
+
 def tokenize(src:str)->list[Token]:
     n = len(src)
     i = 0
@@ -241,6 +272,13 @@ def tokenize(src:str)->list[Token]:
             start = i
             i = t0.string_end(src, start)
             toks.append(Token(i - start, start, Kind.TK_STRING))
+            continue
+
+        if src[i] == '[' and toks and toks[-1].kind == Kind._TK_COLON:
+            start = i
+            i = bracketed_type_end(src, start)
+            toks.pop()
+            toks.append(Token(i - start, start, Kind.TK_TYPE))
             continue
         
         # multi-character tokens

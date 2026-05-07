@@ -64,6 +64,8 @@ FunctionTable = dict[str, FunctionEntry]
 GlobalTable = dict[str, GlobalEntry]
 Scope = dict[str, LocalEntry]
 ScopeStack = list[Scope]
+TypeDeclScope = set[str]
+TypeDeclStack = list[TypeDeclScope]
 
 @dataclass
 class ParseState:
@@ -72,6 +74,7 @@ class ParseState:
     fn_table: FunctionTable
     global_table: GlobalTable
     scope_stack: ScopeStack
+    type_decl_stack: TypeDeclStack
     ctx: ParseContext
     global_init_label_ids: list[int] = field(default_factory=list)
     next_global_init_index: int = 0
@@ -168,6 +171,17 @@ def var_lookup(scope_stack: ScopeStack, name: str) -> LocalEntry | None:
 def var_declare(scope_stack: ScopeStack, name: str, entry: LocalEntry) -> LocalEntry:
     scope_stack[-1][name] = entry
     return entry
+
+
+def type_decl_lookup(type_decl_stack: TypeDeclStack, name: str) -> bool:
+    for scope in reversed(type_decl_stack):
+        if name in scope:
+            return True
+    return False
+
+
+def type_decl_declare(type_decl_stack: TypeDeclStack, name: str) -> None:
+    type_decl_stack[-1].add(name)
 
 
 def global_lookup(global_table: GlobalTable, name: str) -> GlobalEntry | None:
@@ -303,6 +317,9 @@ def try_parse_stable_expr(
         if var_lookup(state.scope_stack, name) is not None or global_lookup(state.global_table, name) is not None:
             return None
 
+        if type_decl_lookup(state.type_decl_stack, name):
+            error_type_decl_runtime_use(state, name, toks[idx].location)
+
         entry = note_function_reference(backend, state.fn_table, name, None, toks[idx].location, state.src)
         note_fn_use(state, entry.label_id)
         stable_value = StableValue("function", entry.label_id)
@@ -352,6 +369,9 @@ def parse_const_only_ident(name: str, loc: int, state: ParseState) -> int | str 
     if var_lookup(state.scope_stack, name) is not None or global_lookup(state.global_table, name) is not None:
         return None
 
+    if type_decl_lookup(state.type_decl_stack, name):
+        error_type_decl_runtime_use(state, name, loc)
+
     entry = note_function_reference(state.backend, state.fn_table, name, None, loc, state.src)
     note_fn_use(state, entry.label_id)
     return state.backend.function_ref(entry.label_id)
@@ -399,6 +419,29 @@ def push_scope(scope_stack: ScopeStack) -> None:
 
 def pop_scope(scope_stack: ScopeStack) -> None:
     scope_stack.pop()
+
+
+def push_parse_scope(state: ParseState) -> None:
+    push_scope(state.scope_stack)
+    state.type_decl_stack.append(set())
+
+
+def pop_parse_scope(state: ParseState) -> None:
+    pop_scope(state.scope_stack)
+    state.type_decl_stack.pop()
+
+
+def error_type_decl_runtime_use(state: ParseState, name: str, loc: int) -> None:
+    error(state.src, loc, f"Type declaration {name!r} cannot be used as a runtime value in udewy")
+
+
+def is_literal_type_decl_annotation(toks: list[t1.Token], idx: int, state: ParseState) -> bool:
+    return (
+        idx < len(toks)
+        and toks[idx].kind == t1.Kind.TK_TYPE
+        and get_token_name(toks, idx, state.src) == "type"
+        and (idx + 1 >= len(toks) or toks[idx + 1].kind != t1.Kind.TK_TYPE_PARAM)
+    )
 
 
 def tok_name_start(toks: list[t1.Token], idx: int) -> int:
@@ -641,6 +684,8 @@ def parse_static_alloca_size(toks: list[t1.Token], idx: int, state: ParseState) 
         name = get_token_name(toks, idx, state.src)
         size = lookup_stable_int(state.scope_stack, state.global_table, name, state.ctx.builtin_consts)
         if size is None:
+            if type_decl_lookup(state.type_decl_stack, name):
+                error_type_decl_runtime_use(state, name, toks[idx].location)
             error(state.src, toks[idx].location, "__static_alloca__ size must be a compile-time constant")
         idx = idx + 1
     else:
@@ -709,6 +754,9 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
             note_fn_use(state, entry.label_id)
             backend.push_fn_ref(entry.label_id)
             return idx + 1
+
+        if type_decl_lookup(state.type_decl_stack, name):
+            error_type_decl_runtime_use(state, name, toks[idx].location)
 
         entry = note_function_reference(backend, state.fn_table, name, None, toks[idx].location, state.src)
         note_fn_use(state, entry.label_id)
@@ -890,7 +938,193 @@ def skip_cast_annotation(toks: list[t1.Token], idx: int) -> int:
     return idx
 
 
+def ignored_type_decl_name_idx(toks: list[t1.Token], idx: int, state: ParseState) -> int | None:
+    if idx >= len(toks):
+        return None
+
+    if toks[idx].kind in (t1.Kind.TK_LET, t1.Kind.TK_CONST):
+        name_idx = idx + 1
+        annot_idx = idx + 2
+        assign_idx = idx + 3
+    else:
+        name_idx = idx
+        annot_idx = idx + 1
+        assign_idx = idx + 2
+
+    if assign_idx >= len(toks):
+        return None
+    if toks[name_idx].kind != t1.Kind.TK_IDENT:
+        return None
+    if not is_literal_type_decl_annotation(toks, annot_idx, state):
+        return None
+    if toks[assign_idx].kind != t1.Kind.TK_ASSIGN:
+        return None
+    return name_idx
+
+
+def looks_like_ignored_type_decl(toks: list[t1.Token], idx: int, state: ParseState) -> bool:
+    return ignored_type_decl_name_idx(toks, idx, state) is not None
+
+
+def is_ignored_decl_statement_start(toks: list[t1.Token], idx: int, state: ParseState) -> bool:
+    if idx >= len(toks):
+        return False
+
+    kind = toks[idx].kind
+    if kind in (
+        t1.Kind.TK_LET,
+        t1.Kind.TK_CONST,
+        t1.Kind.TK_IF,
+        t1.Kind.TK_LOOP,
+        t1.Kind.TK_RETURN,
+        t1.Kind.TK_BREAK,
+        t1.Kind.TK_CONTINUE,
+        t1.Kind.TK_ELSE,
+        t1.Kind.TK_RIGHT_BRACE,
+    ):
+        return True
+
+    if kind in (
+        t1.Kind.TK_IDENT,
+        t1.Kind.TK_IDENT_CALL,
+        t1.Kind.TK_NUMBER,
+        t1.Kind.TK_STRING,
+        t1.Kind.TK_VOID,
+        t1.Kind.TK_LEFT_PAREN,
+        t1.Kind.TK_LEFT_BRACKET,
+        t1.Kind.TK_LEFT_BRACE,
+        t1.Kind.TK_MINUS,
+        t1.Kind.TK_NOT,
+    ):
+        return True
+
+    return False
+
+
+def skip_ignored_type_suffix(toks: list[t1.Token], idx: int) -> int:
+    while idx < len(toks):
+        kind = toks[idx].kind
+        if kind == t1.Kind.TK_TYPE:
+            idx = idx + 1
+            if idx < len(toks) and toks[idx].kind == t1.Kind.TK_TYPE_PARAM:
+                idx = idx + 1
+            continue
+        if kind == t1.Kind.TK_TYPE_PARAM:
+            idx = idx + 1
+            continue
+        break
+    return idx
+
+
+def skip_ignored_group(
+    toks: list[t1.Token],
+    idx: int,
+    state: ParseState,
+    closing_kind: t1.Kind,
+) -> int:
+    while idx < len(toks) and toks[idx].kind != closing_kind:
+        idx = skip_ignored_expr(toks, idx, state, stop_at_statement_boundary=False)
+    return expect(toks, idx, closing_kind, state)
+
+
+def skip_ignored_atom(toks: list[t1.Token], idx: int, state: ParseState) -> int:
+    if idx >= len(toks):
+        error(state.src, len(state.src), "Expected expression in ignored type declaration")
+
+    kind = toks[idx].kind
+
+    if kind in (
+        t1.Kind.TK_IDENT,
+        t1.Kind.TK_TYPE,
+        t1.Kind.TK_TYPE_PARAM,
+        t1.Kind.TK_NUMBER,
+        t1.Kind.TK_STRING,
+        t1.Kind.TK_VOID,
+    ):
+        return skip_ignored_type_suffix(toks, idx + 1)
+
+    if kind == t1.Kind.TK_IDENT_CALL:
+        idx = idx + 1
+        idx = skip_ignored_group(toks, idx, state, t1.Kind.TK_RIGHT_PAREN)
+        return skip_ignored_type_suffix(toks, idx)
+
+    if kind == t1.Kind.TK_LEFT_PAREN:
+        idx = idx + 1
+        idx = skip_ignored_group(toks, idx, state, t1.Kind.TK_RIGHT_PAREN)
+        while idx < len(toks) and toks[idx].kind == t1.Kind.TK_EXPR_CALL:
+            idx = idx + 1
+            idx = skip_ignored_group(toks, idx, state, t1.Kind.TK_RIGHT_PAREN)
+        return skip_ignored_type_suffix(toks, idx)
+
+    if kind == t1.Kind.TK_LEFT_BRACKET:
+        idx = idx + 1
+        idx = skip_ignored_group(toks, idx, state, t1.Kind.TK_RIGHT_BRACKET)
+        return skip_ignored_type_suffix(toks, idx)
+
+    if kind == t1.Kind.TK_LEFT_BRACE:
+        idx = idx + 1
+        idx = skip_ignored_group(toks, idx, state, t1.Kind.TK_RIGHT_BRACE)
+        return skip_ignored_type_suffix(toks, idx)
+
+    if kind in (t1.Kind.TK_NOT, t1.Kind.TK_MINUS):
+        return skip_ignored_atom(toks, idx + 1, state)
+
+    error(state.src, toks[idx].location, "Expected expression in ignored type declaration")
+
+
+def skip_ignored_expr(
+    toks: list[t1.Token],
+    idx: int,
+    state: ParseState,
+    *,
+    stop_at_statement_boundary: bool,
+) -> int:
+    idx = skip_ignored_atom(toks, idx, state)
+
+    while idx < len(toks):
+        kind = toks[idx].kind
+
+        if kind == t1.Kind.TK_TRANSMUTE:
+            idx = skip_ignored_atom(toks, idx + 1, state)
+            continue
+
+        if kind == t1.Kind.TK_EXPR_CALL:
+            idx = idx + 1
+            idx = skip_ignored_group(toks, idx, state, t1.Kind.TK_RIGHT_PAREN)
+            continue
+
+        if kind == t1.Kind.TK_PIPE or is_binop(kind):
+            idx = skip_ignored_atom(toks, idx + 1, state)
+            continue
+
+        if stop_at_statement_boundary and is_ignored_decl_statement_start(toks, idx, state):
+            break
+
+        break
+
+    return idx
+
+
+def parse_ignored_type_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
+    if toks[idx].kind in (t1.Kind.TK_LET, t1.Kind.TK_CONST):
+        idx = idx + 1
+
+    name_idx = ignored_type_decl_name_idx(toks, idx, state)
+    assert name_idx is not None
+
+    name = get_token_name(toks, name_idx, state.src)
+    idx = name_idx + 1
+    idx = idx + 1
+    idx = expect(toks, idx, t1.Kind.TK_ASSIGN, state)
+    idx = skip_ignored_expr(toks, idx, state, stop_at_statement_boundary=True)
+    type_decl_declare(state.type_decl_stack, name)
+    return idx
+
+
 def parse_var_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
+    if looks_like_ignored_type_decl(toks, idx, state):
+        return parse_ignored_type_decl(toks, idx, state)
+
     backend = state.backend
     decl_kind = toks[idx].kind
     is_const = decl_kind == t1.Kind.TK_CONST
@@ -976,7 +1210,7 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     backend.begin_function(label_id, fn_name, len(params), is_main)
     state.current_fn_label_id = label_id
     
-    push_scope(state.scope_stack)
+    push_parse_scope(state)
     
     for i, param_name in enumerate(params):
         slot = backend.alloc_local()
@@ -992,7 +1226,7 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     
     backend.end_function()
     state.current_fn_label_id = None
-    pop_scope(state.scope_stack)
+    pop_parse_scope(state)
     
     return idx
 
@@ -1005,10 +1239,10 @@ def parse_if_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[i
     backend.begin_if()
     
     idx = expect(toks, idx, t1.Kind.TK_LEFT_BRACE, state)
-    push_scope(state.scope_stack)
+    push_parse_scope(state)
     idx, all_branches_return = parse_block(toks, idx, state)
     idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACE, state)
-    pop_scope(state.scope_stack)
+    pop_parse_scope(state)
 
     nested_if_count = 1
     saw_final_else = False
@@ -1025,19 +1259,19 @@ def parse_if_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[i
             nested_if_count = nested_if_count + 1
             
             idx = expect(toks, idx, t1.Kind.TK_LEFT_BRACE, state)
-            push_scope(state.scope_stack)
+            push_parse_scope(state)
             idx, branch_returns = parse_block(toks, idx, state)
             idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACE, state)
-            pop_scope(state.scope_stack)
+            pop_parse_scope(state)
             all_branches_return = all_branches_return and branch_returns
         else:
             saw_final_else = True
             backend.begin_else()
             idx = expect(toks, idx, t1.Kind.TK_LEFT_BRACE, state)
-            push_scope(state.scope_stack)
+            push_parse_scope(state)
             idx, else_returns = parse_block(toks, idx, state)
             idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACE, state)
-            pop_scope(state.scope_stack)
+            pop_parse_scope(state)
             
             for _ in range(nested_if_count):
                 backend.end_if()
@@ -1058,12 +1292,12 @@ def parse_loop_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     backend.begin_loop_body()
     
     idx = expect(toks, idx, t1.Kind.TK_LEFT_BRACE, state)
-    push_scope(state.scope_stack)
+    push_parse_scope(state)
     state.ctx.loop_depth = state.ctx.loop_depth + 1
     idx, _ = parse_block(toks, idx, state)
     state.ctx.loop_depth = state.ctx.loop_depth - 1
     idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACE, state)
-    pop_scope(state.scope_stack)
+    pop_parse_scope(state)
     
     backend.end_loop()
     return idx
@@ -1095,6 +1329,9 @@ def parse_continue_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> i
 
 def parse_assign_or_expr(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     backend = state.backend
+    if looks_like_ignored_type_decl(toks, idx, state):
+        return parse_ignored_type_decl(toks, idx, state)
+
     if toks[idx].kind == t1.Kind.TK_IDENT:
         if idx + 1 < len(toks):
             next_kind = toks[idx + 1].kind
@@ -1118,6 +1355,8 @@ def parse_assign_or_expr(toks: list[t1.Token], idx: int, state: ParseState) -> i
                         assert global_entry.label_id is not None
                         backend.store_global(global_entry.label_id)
                     else:
+                        if type_decl_lookup(state.type_decl_stack, name):
+                            error(state.src, toks[idx - 2].location, f"Cannot assign to type declaration {name!r}")
                         error(state.src, toks[idx - 2].location, f"Undefined variable {name!r}")
                 
                 return idx
@@ -1140,6 +1379,8 @@ def parse_assign_or_expr(toks: list[t1.Token], idx: int, state: ParseState) -> i
                 else:
                     global_entry = global_lookup(state.global_table, name)
                     if global_entry is None:
+                        if type_decl_lookup(state.type_decl_stack, name):
+                            error(state.src, toks[idx - 2].location, f"Cannot assign to type declaration {name!r}")
                         error(state.src, toks[idx - 2].location, f"Undefined variable {name!r}")
                     if global_entry.is_const:
                         error(state.src, toks[idx - 2].location, f"Cannot assign to constant {name!r}")
@@ -1198,6 +1439,10 @@ def parse_program(toks: list[t1.Token], state: ParseState) -> None:
     
     while idx < len(toks):
         kind = toks[idx].kind
+
+        if looks_like_ignored_type_decl(toks, idx, state):
+            idx = parse_ignored_type_decl(toks, idx, state)
+            continue
         
         if is_decl_kind(kind):
             if looks_like_fn_decl(toks, idx):
@@ -1271,6 +1516,7 @@ def parse(toks: list[t1.Token], src: str, backend: Backend) -> str:
     fn_table: FunctionTable = {}
     global_table: GlobalTable = {}
     scope_stack: ScopeStack = [{}]
+    type_decl_stack: TypeDeclStack = [set()]
     ctx = ParseContext(builtin_consts=backend.get_builtin_constants())
     state = ParseState(
         src=src,
@@ -1278,6 +1524,7 @@ def parse(toks: list[t1.Token], src: str, backend: Backend) -> str:
         fn_table=fn_table,
         global_table=global_table,
         scope_stack=scope_stack,
+        type_decl_stack=type_decl_stack,
         ctx=ctx,
     )
     

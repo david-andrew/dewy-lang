@@ -145,6 +145,23 @@
     "type-annotation": {
       "patterns": [
         {
+          "match": "\\b(let|const)\\b(\\s+)([A-Za-z_][A-Za-z0-9_]*)(\\s*)(:)(\\s*)(type)\\b",
+          "captures": {
+            "1": { "name": "keyword.declaration.udewy" },
+            "3": { "name": "entity.name.type.udewy" },
+            "5": { "name": "punctuation.separator.type.udewy" },
+            "7": { "name": "entity.name.type.udewy" }
+          }
+        },
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(\\s*)(:)(\\s*)(type)\\b",
+          "captures": {
+            "1": { "name": "entity.name.type.udewy" },
+            "3": { "name": "punctuation.separator.type.udewy" },
+            "5": { "name": "entity.name.type.udewy" }
+          }
+        },
+        {
           "match": "(:>)\\s*([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "punctuation.separator.return-type.udewy" },
@@ -152,7 +169,7 @@
           }
         },
         {
-          "match": "(:)([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "(:)\\s*([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "punctuation.separator.type.udewy" },
             "2": { "name": "entity.name.type.udewy" }

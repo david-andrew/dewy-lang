@@ -249,6 +249,23 @@ expr transmute array<int>
 expr transmute <T|U>
 ```
 
+### Ignored Type Declarations
+
+udewy also accepts a narrow Dewy-compatibility declaration form:
+
+```udewy
+Point:type = [x:int y:int]
+let Point:type = [x:int y:int]
+Line:type = [start:Point end:Point]
+```
+
+This form is recognized only when the annotation is the literal `type`. In udewy, it is treated like an ignored type-level declaration:
+- the entire right-hand side is consumed syntactically and ignored
+- no runtime code is generated
+- no local or global value binding is created
+
+This allows shared udewy/Dewy source to include named type or struct declarations for the full Dewy compiler without affecting udewy execution.
+
 ---
 
 ## 1.3 Expressions
@@ -425,6 +442,23 @@ let data<array<int>> = [1 2 3]
 `let` declares a mutable binding. `const` declares an immutable binding and cannot be assigned after its initializer.
 
 At local scope, the initializer must be a normal expression. `extern` initializers are not allowed inside function bodies.
+
+### Ignored Type Declarations
+
+Anywhere a statement or top-level declaration may appear, udewy accepts type declarations of the form `<IDENT>:type = <EXPR>`, `let <IDENT>:type = <EXPR>`, or `const <IDENT>:type = <EXPR>`, e.g.
+
+```udewy
+Point:type = [x:int y:int]
+let Point:type = [x:int y:int]
+const Line:type = [start:Point end:Point]
+```
+
+Semantics:
+- The type annotation must exactly be the literal `type`
+- The declaration is parsed and ignored.
+- The right-hand side is not evaluated.
+- The declared name may still appear inside type annotations or other ignored type declarations.
+- The declared name may not be used as a runtime value; doing so is a compile-time error.
 
 ### Assignment
 
@@ -682,7 +716,9 @@ When an identifier is referenced, it is resolved by searching:
 3. Function parameters
 4. Global scope (top-level constants, globals, and functions)
 
-If not found in any scope, it is treated as a forward reference to a function.
+Ignored type declarations participate only in type annotations and other ignored type declarations. If a name resolves to an ignored type declaration and is used as a runtime value, compilation fails.
+
+If not found in any runtime scope, it is treated as a forward reference to a function.
 
 ### Global Scope
 
@@ -891,7 +927,7 @@ Available backends are documented in the addendums. New backends can be added by
 
 ## 4.5 Forward References
 
-Unknown identifiers during parsing are assumed to be forward references to functions. At the end of compilation, all references must be resolved or an error is reported.
+Unknown identifiers during parsing are assumed to be forward references to functions unless they resolve to an ignored type declaration. At the end of compilation, all remaining forward references must be resolved or an error is reported.
 
 ---
 
@@ -907,6 +943,7 @@ program         ::= top_level_stmt*
 
 top_level_stmt  ::= fn_decl
                   | const_decl
+                  | ignored_type_decl
 
 fn_decl         ::= ('let' | 'const') IDENT '=' '(' param_list ')' fn_type_annot '=>' (block | 'extern')
 
@@ -923,6 +960,7 @@ type_param      ::= '<' type_content '>'
 block           ::= '{' statement* '}'
 
 statement       ::= var_decl
+                  | ignored_type_decl
                   | assign_stmt
                   | if_stmt
                   | loop_stmt
@@ -932,6 +970,9 @@ statement       ::= var_decl
                   | expr
 
 var_decl        ::= ('let' | 'const') IDENT type_annot '=' expr
+
+ignored_type_decl ::= IDENT ':type' '=' ignored_expr
+                    | ('let' | 'const') IDENT ':type' '=' ignored_expr
 
 assign_stmt     ::= IDENT '=' expr
                   | IDENT compound_op expr
@@ -967,6 +1008,9 @@ arg_list        ::= expr*
 array_elem      ::= NUMBER | STRING | IDENT  # IDENT must resolve to a compile-time stable value or function
 
 cast_annot      ::= 'transmute' (IDENT type_param? | type_param)
+
+ignored_expr    ::= a Dewy-compatible type expression or struct/type literal
+                  # udewy consumes this syntax but does not evaluate it
 
 binop           ::= '+' | '-' | '*' | '//' | '%'
                   | '<<' | '>>'
