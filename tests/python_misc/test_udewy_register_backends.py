@@ -114,9 +114,9 @@ ALLOCA_ALIGNMENT_RESULTS = {
 }
 
 MANY_LOCALS_EXPECTATIONS = {
-    "x86_64": [f"subq $1648, %rsp", f"movq %rax, -1640(%rbp)", f"movq -1640(%rbp), %rax"],
-    "riscv": [f"addi sp, sp, -1712", f"sd a0, -1704(s0)", f"ld a0, -1704(s0)"],
-    "arm": [f"sub sp, sp, #1616", f"sub x9, x9, #1608", f"str x0, [x9]", f"ldr x0, [x9]"],
+    "x86_64": ["subq $1648, %rsp", "movq %rax, -1640(%rbp)", "movq -1640(%rbp), %rax"],
+    "riscv": ["addi sp, sp, -1712", "sd a0, -1704(s0)", "ld a0, -1704(s0)"],
+    "arm": ["sub sp, sp, #1616", "sub x9, x9, #1608", "str x0, [x9]", "ldr x0, [x9]"],
 }
 
 
