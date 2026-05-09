@@ -8,7 +8,8 @@ from os import PathLike
 from pathlib import Path
 
 from .. import t1
-from .common import Backend, CORE_INTRINSIC_ARITIES, LINUX_SYSCALL_INTRINSIC_ARITIES, RunOptions
+from .common import Backend, CORE_INTRINSIC_ARITIES, RunOptions
+from .linux import LINUX_SYSCALL_INTRINSIC_ARITIES, linux_builtin_constants
 from . import sdl_desktop
 
 class X86_64Backend(Backend):
@@ -698,8 +699,8 @@ class X86_64Backend(Backend):
             self._pop_saved_into("%rax")
             self._emit("syscall")
 
-    def _mixed_intrinsic_arg_slots(self, name: str) -> int | None:
-        prefix = "__call_extern_xmm_mixed_"
+    def _mixed_extern_arg_slots(self, name: str) -> int | None:
+        prefix = "__call_extern_mixed_"
         suffix = "__"
         if not name.startswith(prefix) or not name.endswith(suffix):
             return None
@@ -756,6 +757,24 @@ class X86_64Backend(Backend):
 
         self._pop_saved_into("%r11")
         self._emit("call *%r11")
+
+    def _mixed_extern_type_tags(self, name: str, intrinsic_data: object | None) -> list[int]:
+        mixed_args = self._mixed_extern_arg_slots(name)
+        if mixed_args is None:
+            raise RuntimeError(f"unsupported intrinsic {name!r}")
+        if not isinstance(intrinsic_data, dict) or "static_args" not in intrinsic_data:
+            raise RuntimeError(f"missing static arguments for intrinsic {name!r}")
+        static_args = intrinsic_data["static_args"]
+        if not isinstance(static_args, dict):
+            raise RuntimeError(f"invalid static arguments for intrinsic {name!r}")
+
+        type_tags: list[int] = []
+        for arg_index in range(1, 1 + mixed_args * 2, 2):
+            tag = static_args.get(arg_index)
+            if not isinstance(tag, int) or tag not in (0, 1, 2):
+                raise RuntimeError(f"mixed extern intrinsic {name!r} requires type tags 0, 1, or 2")
+            type_tags.append(tag)
+        return type_tags
     
     # ========================================================================
     # Control flow
@@ -832,14 +851,20 @@ class X86_64Backend(Backend):
     
     def is_intrinsic(self, name: str) -> bool:
         """Check if name is an intrinsic supported by this backend."""
-        return name in self._INTRINSIC_ARITIES or self._mixed_intrinsic_arg_slots(name) is not None
+        return name in self._INTRINSIC_ARITIES or self._mixed_extern_arg_slots(name) is not None
 
     def intrinsic_arity(self, name: str) -> int | None:
         """Return the expected arity for a supported intrinsic."""
-        mixed_args = self._mixed_intrinsic_arg_slots(name)
+        mixed_args = self._mixed_extern_arg_slots(name)
         if mixed_args is not None:
             return 1 + (mixed_args * 2)
         return self._INTRINSIC_ARITIES.get(name)
+
+    def intrinsic_static_arg_indices(self, name: str) -> set[int]:
+        mixed_args = self._mixed_extern_arg_slots(name)
+        if mixed_args is None:
+            return set()
+        return set(range(1, 1 + mixed_args * 2, 2))
     
     def emit_intrinsic(self, name: str, num_args: int, intrinsic_data: object | None = None) -> None:
         """Emit code for an intrinsic call."""
@@ -900,73 +925,11 @@ class X86_64Backend(Backend):
         elif name.startswith("__syscall"):
             self.syscall(num_args)
         else:
-            mixed_args = self._mixed_intrinsic_arg_slots(name)
-            if mixed_args is None:
-                raise RuntimeError(f"unsupported intrinsic {name!r}")
-            if not isinstance(intrinsic_data, dict) or "type_tags" not in intrinsic_data:
-                raise RuntimeError(f"missing type tags for intrinsic {name!r}")
-            type_tags = intrinsic_data["type_tags"]
-            if not isinstance(type_tags, list) or len(type_tags) != mixed_args:
-                raise RuntimeError(f"invalid type tags for intrinsic {name!r}")
-            self._call_extern_xmm_mixed(type_tags)
+            self._call_extern_xmm_mixed(self._mixed_extern_type_tags(name, intrinsic_data))
     
     def get_builtin_constants(self) -> dict[str, int]:
         """Return x86_64 Linux syscall numbers and common constants."""
-        return {
-            # File descriptors
-            "STDIN": 0,
-            "STDOUT": 1,
-            "STDERR": 2,
-            # Syscall numbers (x86_64 Linux)
-            "SYS_READ": 0,
-            "SYS_WRITE": 1,
-            "SYS_OPEN": 2,
-            "SYS_CLOSE": 3,
-            "SYS_STAT": 4,
-            "SYS_FSTAT": 5,
-            "SYS_LSEEK": 8,
-            "SYS_MMAP": 9,
-            "SYS_MUNMAP": 11,
-            "SYS_BRK": 12,
-            "SYS_IOCTL": 16,
-            "SYS_PIPE": 22,
-            "SYS_DUP": 32,
-            "SYS_DUP2": 33,
-            "SYS_GETPID": 39,
-            "SYS_FORK": 57,
-            "SYS_EXECVE": 59,
-            "SYS_EXIT": 60,
-            "SYS_WAIT4": 61,
-            "SYS_KILL": 62,
-            "SYS_GETCWD": 79,
-            "SYS_CHDIR": 80,
-            "SYS_MKDIR": 83,
-            "SYS_RMDIR": 84,
-            "SYS_CREAT": 85,
-            "SYS_UNLINK": 87,
-            "SYS_GETUID": 102,
-            "SYS_GETGID": 104,
-            "SYS_GETEUID": 107,
-            "SYS_GETEGID": 108,
-            "SYS_CLOCK_GETTIME": 228,
-            "SYS_EXIT_GROUP": 231,
-            # Open flags
-            "O_RDONLY": 0,
-            "O_WRONLY": 1,
-            "O_RDWR": 2,
-            "O_CREAT": 64,
-            "O_TRUNC": 512,
-            "O_APPEND": 1024,
-            # mmap flags
-            "PROT_NONE": 0,
-            "PROT_READ": 1,
-            "PROT_WRITE": 2,
-            "PROT_EXEC": 4,
-            "MAP_SHARED": 1,
-            "MAP_PRIVATE": 2,
-            "MAP_ANONYMOUS": 32,
-            "MAP_FIXED": 16,
-        }
+        return linux_builtin_constants("x86_64")
 
     def compile_and_link(self, code: str, input_name: str, cache_dir: Path, **options) -> Path:
         """Compile and link x86_64 assembly to ELF executable."""

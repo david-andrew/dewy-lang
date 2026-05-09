@@ -8,7 +8,8 @@ from os import PathLike
 from pathlib import Path
 
 from .. import t1
-from .common import Backend, CORE_INTRINSIC_ARITIES, LINUX_SYSCALL_INTRINSIC_ARITIES, RunOptions
+from .common import Backend, CORE_INTRINSIC_ARITIES, RunOptions
+from .linux import LINUX_SYSCALL_INTRINSIC_ARITIES, linux_builtin_constants
 
 class ArmBackend(Backend):
     """
@@ -773,8 +774,8 @@ class ArmBackend(Backend):
             self._pop_saved_into("x8")
             self._emit("svc #0")
 
-    def _mixed_intrinsic_arg_slots(self, name: str) -> int | None:
-        prefix = "__call_extern_xmm_mixed_"
+    def _mixed_extern_arg_slots(self, name: str) -> int | None:
+        prefix = "__call_extern_mixed_"
         suffix = "__"
         if not name.startswith(prefix) or not name.endswith(suffix):
             return None
@@ -833,6 +834,24 @@ class ArmBackend(Backend):
 
         self._pop_saved_into("x9")
         self._emit("blr x9")
+
+    def _mixed_extern_type_tags(self, name: str, intrinsic_data: object | None) -> list[int]:
+        mixed_args = self._mixed_extern_arg_slots(name)
+        if mixed_args is None:
+            raise RuntimeError(f"unsupported intrinsic {name!r}")
+        if not isinstance(intrinsic_data, dict) or "static_args" not in intrinsic_data:
+            raise RuntimeError(f"missing static arguments for intrinsic {name!r}")
+        static_args = intrinsic_data["static_args"]
+        if not isinstance(static_args, dict):
+            raise RuntimeError(f"invalid static arguments for intrinsic {name!r}")
+
+        type_tags: list[int] = []
+        for arg_index in range(1, 1 + mixed_args * 2, 2):
+            tag = static_args.get(arg_index)
+            if not isinstance(tag, int) or tag not in (0, 1, 2):
+                raise RuntimeError(f"mixed extern intrinsic {name!r} requires type tags 0, 1, or 2")
+            type_tags.append(tag)
+        return type_tags
     
     # ========================================================================
     # Control flow
@@ -907,14 +926,20 @@ class ArmBackend(Backend):
     
     def is_intrinsic(self, name: str) -> bool:
         """Check if name is an intrinsic supported by this backend."""
-        return name in self._INTRINSIC_ARITIES or self._mixed_intrinsic_arg_slots(name) is not None
+        return name in self._INTRINSIC_ARITIES or self._mixed_extern_arg_slots(name) is not None
 
     def intrinsic_arity(self, name: str) -> int | None:
         """Return the expected arity for a supported intrinsic."""
-        mixed_args = self._mixed_intrinsic_arg_slots(name)
+        mixed_args = self._mixed_extern_arg_slots(name)
         if mixed_args is not None:
             return 1 + (mixed_args * 2)
         return self._INTRINSIC_ARITIES.get(name)
+
+    def intrinsic_static_arg_indices(self, name: str) -> set[int]:
+        mixed_args = self._mixed_extern_arg_slots(name)
+        if mixed_args is None:
+            return set()
+        return set(range(1, 1 + mixed_args * 2, 2))
     
     def emit_intrinsic(self, name: str, num_args: int, intrinsic_data: object | None = None) -> None:
         """Emit code for an intrinsic call."""
@@ -975,76 +1000,11 @@ class ArmBackend(Backend):
         elif name.startswith("__syscall"):
             self.syscall(num_args)
         else:
-            mixed_args = self._mixed_intrinsic_arg_slots(name)
-            if mixed_args is None:
-                raise RuntimeError(f"unsupported intrinsic {name!r}")
-            if not isinstance(intrinsic_data, dict) or "type_tags" not in intrinsic_data:
-                raise RuntimeError(f"missing type tags for intrinsic {name!r}")
-            type_tags = intrinsic_data["type_tags"]
-            if not isinstance(type_tags, list) or len(type_tags) != mixed_args:
-                raise RuntimeError(f"invalid type tags for intrinsic {name!r}")
-            self._call_extern_fp_mixed(type_tags)
+            self._call_extern_fp_mixed(self._mixed_extern_type_tags(name, intrinsic_data))
     
     def get_builtin_constants(self) -> dict[str, int]:
         """Return AArch64 Linux syscall numbers and common constants."""
-        # AArch64 Linux uses the same syscall numbers as RISC-V Linux
-        return {
-            # File descriptors
-            "STDIN": 0,
-            "STDOUT": 1,
-            "STDERR": 2,
-            # Syscall numbers (AArch64 Linux - same as RISC-V)
-            "SYS_GETCWD": 17,
-            "SYS_DUP": 23,
-            "SYS_DUP3": 24,
-            "SYS_IOCTL": 29,
-            "SYS_MKDIRAT": 34,
-            "SYS_UNLINKAT": 35,
-            "SYS_FTRUNCATE": 46,
-            "SYS_FACCESSAT": 48,
-            "SYS_CHDIR": 49,
-            "SYS_OPENAT": 56,
-            "SYS_CLOSE": 57,
-            "SYS_PIPE2": 59,
-            "SYS_LSEEK": 62,
-            "SYS_READ": 63,
-            "SYS_WRITE": 64,
-            "SYS_READV": 65,
-            "SYS_WRITEV": 66,
-            "SYS_FSTAT": 80,
-            "SYS_EXIT": 93,
-            "SYS_EXIT_GROUP": 94,
-            "SYS_KILL": 129,
-            "SYS_GETPID": 172,
-            "SYS_GETUID": 174,
-            "SYS_GETEUID": 175,
-            "SYS_GETGID": 176,
-            "SYS_GETEGID": 177,
-            "SYS_BRK": 214,
-            "SYS_MUNMAP": 215,
-            "SYS_CLONE": 220,
-            "SYS_EXECVE": 221,
-            "SYS_MMAP": 222,
-            "SYS_WAIT4": 260,
-            # Open flags
-            "O_RDONLY": 0,
-            "O_WRONLY": 1,
-            "O_RDWR": 2,
-            "O_CREAT": 64,
-            "O_TRUNC": 512,
-            "O_APPEND": 1024,
-            # mmap flags
-            "PROT_NONE": 0,
-            "PROT_READ": 1,
-            "PROT_WRITE": 2,
-            "PROT_EXEC": 4,
-            "MAP_SHARED": 1,
-            "MAP_PRIVATE": 2,
-            "MAP_ANONYMOUS": 32,
-            "MAP_FIXED": 16,
-            # AT_FDCWD for *at syscalls
-            "AT_FDCWD": -100,
-        }
+        return linux_builtin_constants("newstyle")
     
     def compile_and_link(self, code: str, input_name: str, cache_dir: Path, **options) -> Path:
         """Compile and link AArch64 assembly to executable."""

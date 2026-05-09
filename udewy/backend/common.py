@@ -49,10 +49,6 @@ CORE_INTRINSIC_ARITIES: dict[str, int] = {
     "__unsigned_gte__": 2,
 }
 
-LINUX_SYSCALL_INTRINSIC_ARITIES: dict[str, int] = {
-    f"__syscall{i}__": i + 1 for i in range(7)
-}
-
 
 @dataclass
 class RunOptions:
@@ -397,15 +393,6 @@ class Backend(ABC):
         generation layer.
         """
 
-    @abstractmethod    
-    def syscall(self, num_args: int) -> None:
-        """
-        Invoke a syscall.
-        
-        Stack: [... syscall_num arg1 arg2 ... argN] -> [... result]
-        Syscall number was pushed first, then args.
-        """
-    
     # ========================================================================
     # Control flow
     # ========================================================================
@@ -487,6 +474,13 @@ class Backend(ABC):
 
         Return None when the intrinsic is not supported by this backend.
         """
+
+    def intrinsic_static_arg_indices(self, name: str) -> set[int]:
+        """
+        Return zero-based intrinsic argument indices that must be compile-time
+        integer constants and should not be emitted as runtime arguments.
+        """
+        return set()
     
     @abstractmethod
     def emit_intrinsic(self, name: str, num_args: int, intrinsic_data: object | None = None) -> None:

@@ -530,52 +530,21 @@ def validate_intrinsic_arity(backend: Backend, name: str, arg_count: int, loc: i
         error(src, loc, f"Intrinsic {name!r} expects {expected} {expected_label}, got {arg_count} {actual_label}")
 
 
-def mixed_xmm_intrinsic_arg_slots(name: str) -> int | None:
-    prefix = "__call_extern_xmm_mixed_"
-    suffix = "__"
-    if not name.startswith(prefix) or not name.endswith(suffix):
-        return None
-    value = name[len(prefix) : -len(suffix)]
-    if not value.isdigit():
-        return None
-    arg_slots = int(value)
-    if arg_slots < 1 or arg_slots > 8:
-        return None
-    return arg_slots
-
-
-def parse_mixed_xmm_intrinsic_call(
+def parse_static_intrinsic_int_arg(
     name: str,
     toks: list[t1.Token],
     idx: int,
     state: ParseState,
+    arg_index: int,
     call_loc: int,
-) -> tuple[int, int, list[int]]:
-    arg_slots = mixed_xmm_intrinsic_arg_slots(name)
-    if arg_slots is None:
-        error(state.src, call_loc, f"Unsupported mixed intrinsic {name!r}")
-
-    idx = parse_expr(toks, idx, state, 0)
-    state.backend.save_value()
-    arg_count = 1
-    type_tags: list[int] = []
-
-    for _ in range(arg_slots):
-        parsed = try_parse_stable_expr(toks, idx, state, emit_runtime=False)
-        if parsed is None:
-            error(state.src, call_loc, f"Expected compile-time type tag for intrinsic {name!r}")
-        idx, stable_type = parsed
-        arg_count = arg_count + 1
-        if stable_type.kind != "int" or stable_type.value not in (0, 1, 2):
-            error(state.src, call_loc, f"Mixed XMM intrinsic {name!r} requires type tags 0, 1, or 2")
-        type_tags.append(stable_type.value)
-
-        idx = parse_expr(toks, idx, state, 0)
-        state.backend.save_value()
-        arg_count = arg_count + 1
-
-    idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
-    return idx, arg_count, type_tags
+) -> tuple[int, int]:
+    parsed = try_parse_stable_expr(toks, idx, state, emit_runtime=False)
+    if parsed is None:
+        error(state.src, call_loc, f"Intrinsic {name!r} argument {arg_index} must be a compile-time integer")
+    new_idx, stable_value = parsed
+    if stable_value.kind != "int":
+        error(state.src, call_loc, f"Intrinsic {name!r} argument {arg_index} must be a compile-time integer")
+    return new_idx, stable_value.value
 
 
 def note_function_reference(
@@ -775,21 +744,29 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
             return idx
 
         if backend.is_intrinsic(name):
-            intrinsic_data: object | None = None
-            if mixed_xmm_intrinsic_arg_slots(name) is not None:
-                idx, arg_count, type_tags = parse_mixed_xmm_intrinsic_call(name, toks, idx, state, call_loc)
-                intrinsic_data = {"type_tags": type_tags}
-            else:
-                arg_count = 0
-                while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
+            static_arg_indices = backend.intrinsic_static_arg_indices(name)
+            static_args: dict[int, int] = {}
+            arg_count = 0
+            runtime_arg_count = 0
+
+            while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
+                if arg_count in static_arg_indices:
+                    idx, static_value = parse_static_intrinsic_int_arg(name, toks, idx, state, arg_count, call_loc)
+                    static_args[arg_count] = static_value
+                else:
                     idx = parse_expr(toks, idx, state, 0)
                     backend.save_value()
-                    arg_count = arg_count + 1
+                    runtime_arg_count = runtime_arg_count + 1
+                arg_count = arg_count + 1
 
-                idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
+            idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
+            if static_args:
+                intrinsic_data: object | None = {"static_args": static_args}
+            else:
+                intrinsic_data = None
 
             validate_intrinsic_arity(backend, name, arg_count, call_loc, state.src)
-            if arg_count > 0:
+            if runtime_arg_count > 0:
                 backend.restore_value()
             backend.emit_intrinsic(name, arg_count, intrinsic_data)
         else:

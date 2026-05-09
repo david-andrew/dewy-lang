@@ -1144,10 +1144,10 @@ The x86_64 backend still follows udewy's logical value-stack model, but it does 
 The x86_64 backend supports mixed integer/pointer and floating-point extern calls through the intrinsic family:
 
 ```udewy
-__call_extern_xmm_mixed_1__(fn type0 value0)
-__call_extern_xmm_mixed_2__(fn type0 value0 type1 value1)
+__call_extern_mixed_1__(fn type0 value0)
+__call_extern_mixed_2__(fn type0 value0 type1 value1)
 ...
-__call_extern_xmm_mixed_8__(fn type0 value0 ... type7 value7)
+__call_extern_mixed_8__(fn type0 value0 ... type7 value7)
 ```
 
 Rules:
@@ -1289,6 +1289,33 @@ The RISC-V backend uses the same basic strategy as x86_64: it preserves udewy's 
 - Successive small allocations therefore advance in 16-byte units on this backend.
 - This stronger alignment matches the backend's stack-alignment requirements.
 
+## B.2.3 Mixed GP / FP Extern Intrinsics
+
+The RISC-V backend supports the same mixed integer/pointer and floating-point extern call intrinsic family as the other native Linux backends:
+
+```udewy
+__call_extern_mixed_1__(fn type0 value0)
+__call_extern_mixed_2__(fn type0 value0 type1 value1)
+...
+__call_extern_mixed_8__(fn type0 value0 ... type7 value7)
+```
+
+Rules:
+- `fn` is an extern function reference
+- each `typeN` must be a compile-time integer literal
+- `0` means pass `valueN` through the normal integer/pointer calling convention in `a0`-`a7`
+- `1` means treat the low 32 bits of `valueN` as raw `f32` bits and pass them in the next floating-point argument register (`fa0`-`fa7`)
+- `2` means treat all 64 bits of `valueN` as raw `f64` bits and pass them in the next floating-point argument register (`fa0`-`fa7`)
+
+This backend also provides:
+
+```udewy
+__i64_to_f32_bits__(value)
+__i64_to_f64_bits__(value)
+```
+
+Integer-only udewy programs keep the backend's ordinary minimal RISC-V target assumptions. Using these FP conversion or mixed GP / FP extern intrinsics makes the generated artifact require a hard-float-capable RISC-V ABI/toolchain (LP64D-compatible). This is a whole-artifact requirement, not a per-call ABI switch.
+
 ## B.3 Syscall Intrinsics
 
 Same syntax as x86_64:
@@ -1387,10 +1414,10 @@ The AArch64 backend also keeps the parser-visible stack model, but uses register
 The AArch64 backend supports the same mixed extern intrinsic family as x86_64:
 
 ```udewy
-__call_extern_xmm_mixed_1__(fn type0 value0)
-__call_extern_xmm_mixed_2__(fn type0 value0 type1 value1)
+__call_extern_mixed_1__(fn type0 value0)
+__call_extern_mixed_2__(fn type0 value0 type1 value1)
 ...
-__call_extern_xmm_mixed_8__(fn type0 value0 ... type7 value7)
+__call_extern_mixed_8__(fn type0 value0 ... type7 value7)
 ```
 
 Rules:
