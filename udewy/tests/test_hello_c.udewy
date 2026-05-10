@@ -1,0 +1,20 @@
+# Hello world for the hosted C backend.
+# This stays within core udewy semantics and calls the C library via `extern`.
+
+import p"../third_party/c/stdio.udewy"
+
+let print_bytes = (ptr:int len:int):>int => {
+    let i:int = 0
+    loop i <? len {
+        putchar(__load_u8__(ptr + i))
+        i += 1
+    }
+    return 0
+}
+
+let main = ():>int => {
+    let msg:int = "Hello from udewy via C!\n"
+    let len:int = __load__(msg - 8)
+    print_bytes(msg len)
+    return 0
+}

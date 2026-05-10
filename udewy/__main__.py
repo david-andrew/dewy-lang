@@ -15,7 +15,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python -m udewy [-c] [--target TARGET] [--split-wasm] [--serve-wasm] <file.udewy> [args...]")
         print("  -c              Compile only, don't run")
-        print("  --target TARGET Target backend (x86_64, wasm32, riscv, arm)")
+        print("  --target TARGET Target backend (x86_64, wasm32, riscv, arm, c)")
         print("  --split-wasm    For wasm32: output separate .wasm file instead of embedded HTML")
         print("  --serve-wasm    For wasm32: serve the generated HTML over HTTP")
         sys.exit(1)
@@ -52,6 +52,7 @@ if __name__ == "__main__":
     
     backend = get_backend(target)
     loaded = t0.load_program(input_file)
+    backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
     src = loaded.source
     try:
         toks = t1.tokenize(src)
@@ -71,6 +72,7 @@ if __name__ == "__main__":
             cache_dir,
             split_wasm=split_wasm,
             link_artifacts=loaded.link_artifacts,
+            imported_sources=loaded.imported_sources,
         )
     except RuntimeError as e:
         print(f"Error: {e}")

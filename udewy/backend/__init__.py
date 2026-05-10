@@ -3,15 +3,17 @@ from .x86_64 import X86_64Backend
 from .wasm import Wasm32Backend
 from .riscv import RiscvBackend
 from .arm import ArmBackend
+from .c import CBackend
 from typing import Literal
 
-BackendName = Literal["x86_64", "wasm32", "riscv", "arm"]
+BackendName = Literal["x86_64", "wasm32", "riscv", "arm", "c"]
 
 BACKEND_MAP: dict[BackendName, type[Backend]] = {
     "x86_64": X86_64Backend,
     "wasm32": Wasm32Backend,
     "riscv": RiscvBackend,
     "arm": ArmBackend,
+    "c": CBackend,
 }
 
 def get_backend(name: BackendName) -> Backend:

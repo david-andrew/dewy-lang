@@ -564,6 +564,8 @@ import p"../third_party/libfoo.a"
 - After preprocessing, import directives are removed from the source before tokenization and parsing
 - `import` remains a reserved word; if it reaches tokenization, the tokenizer reports an error
 
+The import preprocessor records the resolved paths of imported udewy source files as generic provenance. It does not interpret those paths beyond source loading and duplicate suppression; concrete backends may use that provenance to recognize their own library modules.
+
 ---
 
 ## 1.5 Functions
@@ -852,7 +854,14 @@ The parser (`p0.py`) is responsible for parsing udewy source and translating the
 
 Concrete backends are responsible for responding to those abstract operations in whatever way is appropriate for their target. They may differ in calling conventions, instruction selection, intrinsic support, output format, and runtime environment, but those differences should be expressed through the `Backend` protocol rather than through extra coupling with the parser.
 
-In general, the parser and the concrete backends should only know about each other through what is described by `Backend` in `backend/common.py`. Changes to `Backend` should therefore be relatively rare and made only when they provide a clear architectural benefit, such as substantially simplifying the parser/backend relationship, removing complexity, or enabling an important capability that cleanly belongs in the shared abstraction.
+In general, the parser, tokenizer/import preprocessor, and concrete backends should only know about each other through what is described by `Backend` in `backend/common.py` and the generic import outputs in `t0.py`. Changes to these shared surfaces should therefore be relatively rare and made only when they provide a clear architectural benefit, such as substantially simplifying the parser/backend relationship, removing complexity, or enabling an important capability that cleanly belongs in the shared abstraction.
+
+When editing udewy, avoid adding concrete backend names, target ABI rules, syscall tables, host-library conventions, file-layout assumptions, or intrinsic families directly to the parser or import preprocessor. Prefer one of these shapes instead:
+
+- If every backend must implement the behavior, add a small generic method or hook to `Backend`.
+- If only some targets support the behavior, keep the names, validation rules, lowering, constants, and diagnostics inside those backends.
+- If source imports need to carry backend-specific configuration, pass generic import provenance through the `Backend` protocol and let the selected backend interpret its own library modules.
+- If a backend needs platform constants or syscall tables, keep them in backend-owned modules rather than in `p0.py`, `t0.py`, or `backend/common.py`.
 
 udewy-native programs that do not rely on `extern` declarations use udewy's own entry point and do not require C runtime startup code. When `extern` declarations are used, the final link additionally depends on whatever artifacts are provided to satisfy those extern symbols.
 
@@ -863,11 +872,12 @@ Each backend implements the parser protocol and provides:
 1. **Code generation** - Emit target-specific instructions
 2. **Calling convention** - How functions pass arguments and return values
 3. **Platform intrinsics** - OS-specific operations (syscalls, host functions, etc.)
-4. **Memory model** - Address space layout and constraints
+4. **Imported source provenance** - Optional recognition of backend-owned library modules
+5. **Memory model** - Address space layout and constraints
 
 ### Intrinsic Categories
 
-Intrinsics fall into two categories:
+Intrinsics and backend-provided names fall into these categories:
 
 1. **Core intrinsics** - Implemented by all backends (memory operations, `__signed_shr__`, unsigned arithmetic/comparison intrinsics)
 2. **Platform intrinsics** - Provided by specific backends for their target environment
@@ -914,6 +924,8 @@ program.udewy          # main program using platform API
 ├── platform_wasm.udewy          # Browser WASM implementation
 └── platform_windows.udewy       # (future) Windows implementation
 ```
+
+For the hosted `c` backend, "portable" usually means keeping direct operations within core udewy semantics and treating libc or OS APIs as explicit `extern` boundaries. The backend itself does not provide syscall intrinsics or builtin constants; if a program binds to `calloc`, `printf`, `syscall`, or a platform SDK symbol, that portability boundary is owned by the program.
 
 ## 4.4 Backend Selection
 
@@ -1706,6 +1718,102 @@ For the `python -m udewy path/to/program.udewy` workflow on GNOME/Wayland, udewy
 
 ---
 
+# Addendum F: C Backend
+
+## F.1 Target Description
+
+- **Architecture:** C99 implementation with 64-bit `uintptr_t` / `uint64_t`
+- **Environment:** Any system with a C compiler that can build the generated program
+- **Output Format:** C source compiled to the host platform's native executable format
+- **Memory Model:** Native target process memory, using udewy's usual length-prefixed string/array layout
+
+This backend is intended as a portable code-generation target, not as a promise that every udewy program is portable. Programs remain portable only to the extent that their `extern` bindings, imported C capabilities, and imported native artifacts are portable.
+
+## F.2 Value Representation
+
+- All runtime values are emitted as `udewy_word`, a generated C typedef for `uint64_t`
+- Signed operations explicitly cast to `int64_t` where udewy semantics require signed interpretation
+- udewy booleans still use `true = 0xFFFF_FFFF_FFFF_FFFF` and `false = 0`
+- Strings and arrays keep the normal udewy layout: one 8-byte length word immediately before the data pointer
+
+The generated C helper layer uses direct `unsigned char *` access for `u8` loads/stores and bytewise helpers for wider loads/stores. Wider operations use the target's native byte order, detected by the generated C at compile time. This matches the native-backend model: raw memory is target memory, not a fixed little-endian serialization format.
+
+## F.2.1 Function Body Lowering
+
+The C backend lowers udewy's parser-driven value-stack events into ordinary C locals and statements. Generated function bodies use readable names such as `arg0`, `local0`, and `t0` rather than a runtime `_ud_v` / `_ud_saved` stack. Values are still materialized into temporaries at sequencing boundaries, especially function-call arguments, so udewy's left-to-right evaluation order does not depend on C's argument evaluation order.
+
+Internal udewy functions use readable mangled C names such as `udewy_fn_print_bytes_2`, while real extern symbols preserve their linked C names. Generated helper and wrapper symbols keep the `udewy_` prefix.
+
+Because generated function-local names are intentionally concise, imported C headers that define macros named `t0`, `local0`, `arg0`, and so on could conflict during preprocessing. Avoid importing headers with macros that use those exact names, or add a backend-specific wrapper if such a header must be used.
+
+## F.2.2 `__alloca__` Alignment
+
+- `__alloca__` rounds requested sizes up to 8 bytes
+- dynamic `__alloca__` lowers to the host compiler's `alloca` facility (or builtin equivalent)
+- if the selected C compiler does not expose an `alloca` facility, compilation fails by default
+
+`__static_alloca__` remains shared writable static storage and does not depend on `alloca`.
+
+## F.3 Platform Surface
+
+With no C capability imports, the C backend implements only the **core intrinsics**. It does **not** provide:
+
+- Linux `__syscall0__` through `__syscall6__`
+- browser/DOM/canvas intrinsics
+- backend-provided builtin constants such as `SYS_WRITE` or `STDOUT`
+
+Use importable C capability modules for common hosted C APIs:
+
+```udewy
+import p"../third_party/c/stdlib.udewy"
+
+let main = ():>int => {
+    let buf:int = calloc(4 8)
+    return buf =? 0
+}
+```
+
+The checked-in C capability modules live under `udewy/third_party/c/`. The C backend recognizes imports of these ordinary udewy source modules and maps them to its private capability names:
+
+- `hosted.udewy`: marks that the program targets ordinary hosted C
+- `stdio.udewy`: imports `hosted.udewy`, declares minimal stdio externs, and lets the C backend include `<stdio.h>`
+- `stdlib.udewy`: imports `hosted.udewy`, declares minimal stdlib externs, and lets the C backend include `<stdlib.h>`
+- `math.udewy`: imports `hosted.udewy`, lets the C backend include `<math.h>`, and links the host math library
+
+This keeps the portability boundary explicit in source. Importing no C capability modules leaves the program in the minimal/freestanding-oriented profile.
+
+## F.4 Extern Calls
+
+Extern calls on the C backend follow udewy's usual 64-bit integer/pointer model:
+
+- arguments are passed as raw 64-bit values
+- return values are observed as raw 64-bit values
+- pointers are passed by their bit pattern
+
+This is a good match for ordinary integer/pointer C APIs such as allocators, memory functions, or platform handles. It is not intended to automatically model richer C type information, variadic formatting conventions, or mixed integer/floating-point ABI details.
+
+Indirect function calls also pass through the same integer/pointer representation. As with the native assembly backends, this assumes a conventional hosted platform ABI where function pointers can be used in this manner.
+
+For known externs from `udewy/third_party/c/`, the C backend can emit small typed C wrappers. These avoid conflicting libc declarations and keep user code on the normal udewy integer/pointer calling convention.
+
+## F.4.1 Mixed Integer/Floating-Point Extern Calls
+
+The C backend supports the same low-level `__call_extern_mixed_N__` intrinsic family used by the native backends. The static tag arguments are:
+
+- `0`: pass the value as `udewy_word`
+- `1`: reinterpret the value's low 32 bits as `float`
+- `2`: reinterpret the value as `double`
+
+This is the correct path for C APIs that take floating-point arguments, such as OpenGL functions. The SDL/OpenGL wrapper in `udewy/third_party/sdl/sdl.udewy` uses this pattern so that the same wrapper can target native Linux backends and the C backend.
+
+The C backend also supports `__i64_to_f32_bits__` and `__i64_to_f64_bits__`, which convert signed integer values into IEEE-754 bit patterns for use with mixed extern calls.
+
+## F.5 Generated Helper Emission
+
+The C backend emits runtime helpers on demand. For example, a program that does not use `__alloca__` will not emit the `alloca` prelude, and a program that only uses `__load_u8__` will not emit the target-endian wide-load helpers. This keeps the default generated C close to the minimal profile.
+
+---
+
 # Misc
 ## Pronunciation
 
@@ -1729,6 +1837,7 @@ All are equally correct.
   - `x86_64.py` - x86_64 Linux
   - `riscv.py` - RISC-V 64 Linux
   - `arm.py` - AArch64 Linux
+  - `c.py` - C backend
   - `wasm.py` - WebAssembly browser
   - `common.py` - Backend protocol definition
 - `tests/` - Test programs

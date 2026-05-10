@@ -1533,7 +1533,9 @@ def parse(toks: list[t1.Token], src: str, backend: Backend) -> str:
 
     unused_externs = sorted(
         name for name, entry in state.fn_table.items()
-        if entry.is_extern and entry.label_id not in reachable
+        if entry.is_extern
+        and entry.label_id not in reachable
+        and state.backend.should_warn_unused_extern(name)
     )
     if unused_externs:
         warning(f"{len(unused_externs)} unused extern declarations: {', '.join(unused_externs)}")
@@ -1589,11 +1591,14 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("Usage: python -m udewy.p0 [--target TARGET] <file.udewy>")
+        print("Targets: x86_64, wasm32, riscv, arm, c")
         sys.exit(1)
     
     source_path = Path(sys.argv[1])
     backend = get_backend(target)
-    source = t0.load_program_source(source_path)
+    loaded = t0.load_program(source_path)
+    backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
+    source = loaded.source
     toks = t1.tokenize(source)
     asm = parse(toks, source, backend)
     

@@ -1,0 +1,10 @@
+import p"hosted.udewy"
+
+# Minimal stdlib bindings for the hosted C backend.
+# Importing this module lets the C backend include <stdlib.h> and route these
+# symbols through typed wrappers instead of the generic raw extern fallback.
+
+let malloc = (size:int):>int => extern
+let calloc = (count:int size:int):>int => extern
+let free = (ptr:int):>void => extern
+let exit = (code:int):>void => extern

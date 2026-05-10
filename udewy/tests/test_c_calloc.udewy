@@ -1,0 +1,30 @@
+# Simple hosted-C example using a libc allocator through `extern`.
+
+import p"../third_party/c/stdlib.udewy"
+
+let main = ():>int => {
+    let buf:int = calloc(2 8)
+    if buf =? 0 {
+        return 1
+    }
+
+    # calloc should zero-initialize the allocated bytes.
+    if __load__(buf) not=? 0 {
+        return 2
+    }
+    if __load__(buf + 8) not=? 0 {
+        return 3
+    }
+
+    __store__(123 buf)
+    __store__(456 buf + 8)
+
+    if __load__(buf) not=? 123 {
+        return 4
+    }
+    if __load__(buf + 8) not=? 456 {
+        return 5
+    }
+
+    return 0
+}

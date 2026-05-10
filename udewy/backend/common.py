@@ -89,6 +89,16 @@ class Backend(ABC):
         Backends should run this initializer exactly once before user-visible entry
         points when a name is provided.
         """
+
+    def set_imported_sources(self, paths: list[Path]) -> None:
+        """
+        Receive the resolved udewy source paths imported by the entrypoint.
+
+        The import preprocessor does not interpret these paths beyond recording
+        provenance. Backends may use them to recognize target-specific library
+        modules without adding backend knowledge to the core loader.
+        """
+        pass
     
     # ========================================================================
     # Data section - strings, arrays, globals
@@ -203,6 +213,15 @@ class Backend(ABC):
 
         Returns a function label_id.
         """
+
+    def should_warn_unused_extern(self, name: str) -> bool:
+        """
+        Return whether an unreachable extern declaration should be reported.
+
+        Most backends should warn. Backends with source-level capability modules
+        can suppress warnings for intentionally imported optional declarations.
+        """
+        return True
     
     @abstractmethod
     def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
@@ -521,7 +540,8 @@ class Backend(ABC):
             input_name: Name of the input file (without extension)
             cache_dir: Directory to write output files
             **options: Backend-specific options (e.g., split_wasm for WASM,
-                link_artifacts for native targets)
+                link_artifacts for native targets, imported_sources for source
+                import provenance)
         
         Returns:
             Path to the primary output file

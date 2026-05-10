@@ -87,6 +87,7 @@ def string_end(src: str, start: int) -> int:
 class LoadedProgram:
     source: str
     link_artifacts: list[str]
+    imported_sources: list[str]
 
 
 @dataclass
@@ -143,24 +144,32 @@ def _load_imported_path(
         raise FileNotFoundError(f"Import file not found: {import_path}")
 
     if import_path.suffix == ".udewy":
-        return _load_program(import_path, state)
+        if import_path in state.imported_sources:
+            return LoadedProgram("", [], [])
+        loaded = _load_program(import_path, state)
+        return LoadedProgram(
+            loaded.source,
+            loaded.link_artifacts,
+            [str(import_path), *loaded.imported_sources],
+        )
 
     if import_path in state.imported_artifacts:
-        return LoadedProgram("", [])
+        return LoadedProgram("", [], [])
 
     state.imported_artifacts.add(import_path)
-    return LoadedProgram("", [str(import_path)])
+    return LoadedProgram("", [str(import_path)], [])
 
 
 def _load_program(source_path: Path, state: _LoadState) -> LoadedProgram:
     source_path = source_path.resolve()
     if source_path in state.imported_sources:
-        return LoadedProgram("", [])
+        return LoadedProgram("", [], [])
     state.imported_sources.add(source_path)
 
     source = source_path.read_text()
     source_dir = source_path.parent
-    imported_sources: list[str] = []
+    imported_source_parts: list[str] = []
+    imported_source_paths: list[str] = []
     link_artifacts: list[str] = []
     body_parts: list[str] = []
 
@@ -180,14 +189,15 @@ def _load_program(source_path: Path, state: _LoadState) -> LoadedProgram:
         import_path, idx = parsed_import
         loaded = _load_imported_path(import_path, source_dir, state)
         if loaded.source:
-            imported_sources.append(loaded.source)
+            imported_source_parts.append(loaded.source)
         link_artifacts.extend(loaded.link_artifacts)
+        imported_source_paths.extend(loaded.imported_sources)
 
         body_cursor = idx
 
     body_parts.append(source[body_cursor:])
-    combined_source = "\n".join([*imported_sources, "".join(body_parts)])
-    return LoadedProgram(combined_source, link_artifacts)
+    combined_source = "\n".join([*imported_source_parts, "".join(body_parts)])
+    return LoadedProgram(combined_source, link_artifacts, imported_source_paths)
 
 
 def load_program(

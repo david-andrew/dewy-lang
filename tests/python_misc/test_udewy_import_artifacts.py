@@ -31,6 +31,7 @@ let main = ():>int => {
     assert "const VALUE:int = 41" in loaded.source
     assert "import p\"libnative.a\"" not in loaded.source
     assert loaded.link_artifacts == [str(artifact.resolve())]
+    assert loaded.imported_sources == [str(library.resolve())]
 
 
 def test_duplicate_imported_artifact_is_only_linked_once(tmp_path: Path) -> None:
@@ -69,3 +70,26 @@ let main = ():>int => {
 
     assert "const VALUE:int = 7" in loaded.source
     assert loaded.link_artifacts == [str(artifact.resolve())]
+    assert loaded.imported_sources == [str(library.resolve()), str(inner.resolve())]
+
+
+def test_duplicate_imported_source_is_only_recorded_once(tmp_path: Path) -> None:
+    library = tmp_path / "lib.udewy"
+    library.write_text("const VALUE:int = 1\n")
+
+    program = tmp_path / "main.udewy"
+    program.write_text(
+        """
+import p"lib.udewy"
+import p"lib.udewy"
+
+let main = ():>int => {
+    return VALUE
+}
+"""
+    )
+
+    loaded = t0.load_program(program)
+
+    assert loaded.link_artifacts == []
+    assert loaded.imported_sources == [str(library.resolve())]
