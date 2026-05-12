@@ -272,7 +272,9 @@ This allows shared udewy/Dewy source to include named type or struct declaration
 
 ### Operator Precedence
 
-udewy parses expressions **left-to-right** with a precedence violation check. If a higher-precedence operator follows a lower-precedence one without explicit parentheses, the compiler will error.
+udewy parses expressions using the precedence table below. Binary operators are left-associative within a precedence level, and parentheses can be used to override the default grouping.
+
+Operand evaluation remains left-to-right, even when precedence groups the expression differently. For example, `a + b * c` evaluates `a`, then `b`, then `c`, and groups as `a + (b * c)`.
 
 Precedence levels (highest to lowest):
 
@@ -289,14 +291,13 @@ Precedence levels (highest to lowest):
 
 **Examples:**
 ```udewy
-# Error: precedence violation (+ before *)
-let bad:int = a + b * c
+# OK: multiplicative operators bind before additive operators
+let product_sum:int = a + b * c
 
 # OK: explicit grouping
-let ok:int = a + (b * c)
+let grouped:int = (a + b) * c
 
-# OK: left-to-right, same or decreasing precedence
-let also_ok:int = a * b + c
+# OK: left-associative within the same precedence level
 let chain:int = a + b + c
 ```
 
@@ -815,7 +816,7 @@ To write well-formed udewy:
 2. **Avoid relying on short-circuit evaluation** - side effects in `and`/`or` operands will always occur
 3. **Implement content comparison functions** for string/array equality
 4. **Use unsigned intrinsics explicitly** when raw unsigned interpretation matters
-5. **Use parentheses liberally** to make precedence explicit
+5. **Use parentheses when helpful** to make complex grouping explicit
 6. **Test with increasing compiler strictness** as the Dewy compiler matures
 
 ---

@@ -61,14 +61,14 @@ let print_int = (x:int):>void => {
     let digits:array<int> = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
     let n:int = 0
     loop x >? 0 {
-        __store__((x % 10) + CH_0 digits + (n * 8))
+        __store__(x % 10 + CH_0 digits + n * 8)
         x = x // 10
         n = n + 1
     }
 
     n = n - 1
     loop n >=? 0 {
-        out_char(__load__(digits + (n * 8)))
+        out_char(__load__(digits + n * 8))
         n = n - 1
     }
     return void

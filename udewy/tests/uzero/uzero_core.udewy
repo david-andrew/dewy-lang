@@ -81,7 +81,7 @@ let fp_sqrt = (n:int):>int => {
         if x =? 0 {
             return 0
         }
-        let y:int = (x + (n // x)) >> 1
+        let y:int = x + n // x >> 1
         if y >=? x {
             return x
         }
@@ -123,7 +123,7 @@ let atan2_fp = (y:int x:int):>int => {
     if (x =? 0) and (y =? 0) {
         return 0
     }
-    let r:int = fp_sqrt((x * x) + (y * y))
+    let r:int = fp_sqrt(x * x + y * y)
     if r =? 0 {
         return 0
     }

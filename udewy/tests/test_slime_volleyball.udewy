@@ -307,7 +307,7 @@ let toggle_aspect_lock = ():>int => {
 }
 
 let arr_get = (arr:int idx:int):>int => {
-    return __load__(arr + (idx * 8))
+    return __load__(arr + idx * 8)
 }
 
 let key_down = (code:int):>int => {
@@ -353,7 +353,7 @@ let fill_circle = (cx:int cy:int radius:int r:int g:int b:int):>int => {
         loop xx <=? (cx + radius) {
             let dx:int = xx - cx
             let dy:int = yy - cy
-            if ((dx * dx) + (dy * dy)) <=? rr {
+            if dx * dx + dy * dy <=? rr {
                 set_pixel(xx yy r g b)
             }
             xx = xx + 1
@@ -371,7 +371,7 @@ let fill_slime = (cx:int cy:int radius:int body_r:int body_g:int body_b:int eye_
         loop xx <=? (cx + radius) {
             let dx:int = xx - cx
             let dy:int = yy - cy
-            if ((dx * dx) + (dy * dy)) <=? rr {
+            if dx * dx + dy * dy <=? rr {
                 set_pixel(xx yy body_r body_g body_b)
             }
             xx = xx + 1
@@ -414,7 +414,7 @@ let draw_char = (code:int x:int y:int scale:int r:int g:int b:int):>int => {
         loop col <? 3 {
             let mask:int = 1 << (2 - col)
             if pattern and mask {
-                fill_rect((x + (col * scale)) (y + (row * scale)) scale scale r g b)
+                fill_rect((x + col * scale) (y + row * scale) scale scale r g b)
             }
             col = col + 1
         }
@@ -429,7 +429,7 @@ let draw_text = (text:int x:int y:int scale:int r:int g:int b:int):>int => {
     let len:int = str_len(text)
     loop i <? len {
         let code:int = __load_u8__(text + i)
-        draw_char(code (x + (i * advance)) y scale r g b)
+        draw_char(code (x + i * advance) y scale r g b)
         i = i + 1
     }
     return 0
@@ -491,13 +491,13 @@ let play_sound = (kind:int):>int => {
     let i:int = 0
     loop i <? num_samples {
         let env:int = ((num_samples - i) * volume) // num_samples
-        let cur_freq:int = freq + ((slide * i) // 32)
+        let cur_freq:int = freq + (slide * i) // 32
         if cur_freq <? 80 {
             cur_freq = 80
         }
-        phase = (phase + ((cur_freq * 1024) // sample_rate)) % 1024
+        phase = (phase + (cur_freq * 1024) // sample_rate) % 1024
         let sample:int = (sin256(phase) * env) // 2
-        __store_u16__(sample (audio_buf + (i * 2)))
+        __store_u16__(sample (audio_buf + i * 2))
         i = i + 1
     }
     __audio_play__()
@@ -615,7 +615,7 @@ let update_left_player = ():>int => {
         }
     }
 
-    left_x = left_x + (left_move_dir * SLIME_SPEED)
+    left_x = left_x + left_move_dir * SLIME_SPEED
     if left_x <? SLIME_R {
         left_x = SLIME_R
     }
@@ -667,7 +667,7 @@ let update_left_ai = ():>int => {
         }
     }
 
-    left_x = left_x + (left_move_dir * SLIME_SPEED)
+    left_x = left_x + left_move_dir * SLIME_SPEED
     if left_x <? SLIME_R {
         left_x = SLIME_R
     }
@@ -719,7 +719,7 @@ let update_right_ai = ():>int => {
         }
     }
 
-    right_x = right_x + (right_move_dir * SLIME_SPEED)
+    right_x = right_x + right_move_dir * SLIME_SPEED
     if right_x <? (NET_X + NET_HALF_W + SLIME_R) {
         right_x = NET_X + NET_HALF_W + SLIME_R
     }
@@ -755,7 +755,7 @@ let update_right_player = ():>int => {
         }
     }
 
-    right_x = right_x + (right_move_dir * SLIME_SPEED)
+    right_x = right_x + right_move_dir * SLIME_SPEED
     if right_x <? (NET_X + NET_HALF_W + SLIME_R) {
         right_x = NET_X + NET_HALF_W + SLIME_R
     }
@@ -794,7 +794,7 @@ let collide_ball_with_slime = (slime_x:int slime_y:int slime_push:int slime_side
     let total_r:int = SLIME_R + BALL_R
     let keep_serve_bounce:int = false
     if ball_y <=? slime_y {
-        if ((dx * dx) + (dy * dy)) <=? (total_r * total_r) {
+        if dx * dx + dy * dy <=? total_r * total_r {
             ball_y = slime_y - total_r
             ball_y_fp = to_fp(ball_y)
             ball_vx = (dx // 3) + slime_push
@@ -1115,7 +1115,7 @@ let draw_title = ():>int => {
     draw_background(selected_stage)
     let t:int = __frame_time__() // 6
     let preview_x:int = (WIDTH // 2) + (sin256(t) // 12)
-    let preview_y:int = 84 + (sin256((t * 2)) // 28)
+    let preview_y:int = 84 + sin256(t * 2) // 28
     fill_slime(88 GROUND_Y SLIME_R 78 188 106 1)
     fill_slime(232 GROUND_Y SLIME_R 252 112 106 (0 - 1))
     fill_circle(preview_x preview_y BALL_R 250 250 250)

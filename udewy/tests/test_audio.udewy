@@ -53,7 +53,7 @@ let gen_tone = (buf:int freq:int duration_ms:int sample_rate:int amplitude:int):
         let sample:int = (sine * amplitude)
         
         # Store as i16 (2 bytes)
-        let addr:int = buf + (i * 2)
+        let addr:int = buf + i * 2
         __store_u16__(sample addr)
         
         i = i + 1
@@ -66,7 +66,7 @@ let gen_tone = (buf:int freq:int duration_ms:int sample_rate:int amplitude:int):
 let apply_decay = (buf:int num_samples:int):>int => {
     let i:int = 0
     loop i <? num_samples {
-        let addr:int = buf + (i * 2)
+        let addr:int = buf + i * 2
         let sample:int = __load_i16__(addr)
         
         # Decay factor: starts at 256, decreases linearly
@@ -109,23 +109,23 @@ let main = ():>int => {
     
     gen_tone(buf + offset note_c note_dur sample_rate 100)
     apply_decay(buf + offset samples_per_note)
-    offset = offset + (samples_per_note * 2)
+    offset = offset + samples_per_note * 2
     
     gen_tone(buf + offset note_d note_dur sample_rate 100)
     apply_decay(buf + offset samples_per_note)
-    offset = offset + (samples_per_note * 2)
+    offset = offset + samples_per_note * 2
     
     gen_tone(buf + offset note_e note_dur sample_rate 100)
     apply_decay(buf + offset samples_per_note)
-    offset = offset + (samples_per_note * 2)
+    offset = offset + samples_per_note * 2
     
     gen_tone(buf + offset note_f note_dur sample_rate 100)
     apply_decay(buf + offset samples_per_note)
-    offset = offset + (samples_per_note * 2)
+    offset = offset + samples_per_note * 2
     
     gen_tone(buf + offset note_g note_dur sample_rate 100)
     apply_decay(buf + offset samples_per_note)
-    offset = offset + (samples_per_note * 2)
+    offset = offset + samples_per_note * 2
     
     gen_tone(buf + offset note_a note_dur sample_rate 100)
     apply_decay(buf + offset samples_per_note)

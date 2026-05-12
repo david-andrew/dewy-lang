@@ -77,7 +77,7 @@ let generate_audio = ():>int => {
         let sample:int = mixed * 80
         
         # Store to audio buffer
-        __store_u16__(sample audio_buf + (i * 2))
+        __store_u16__(sample audio_buf + i * 2)
         
         # Advance phases
         phase1 = (phase1 + phase_inc1) % 1024

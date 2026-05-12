@@ -596,14 +596,14 @@ def declare_extern_function(
 # Operator precedence
 # ============================================================================
 
-PREC_OR = 1
-PREC_XOR = 2
-PREC_AND = 3
-PREC_CMP = 4
-PREC_SHIFT = 5
-PREC_ADD = 6
-PREC_MUL = 7
-PREC_PIPE = 8
+PREC_PIPE = 1
+PREC_OR = 2
+PREC_XOR = 3
+PREC_AND = 4
+PREC_CMP = 5
+PREC_SHIFT = 6
+PREC_ADD = 7
+PREC_MUL = 8
 
 
 def get_precedence(kind: t1.Kind) -> int:
@@ -850,25 +850,20 @@ def parse_expr(toks: list[t1.Token], idx: int, state: ParseState, min_prec: int)
         
         if not is_binop(kind):
             break
-        
+
         prec = get_precedence(kind)
-        
-        if prec > min_prec and min_prec > 0:
-            error(state.src, toks[idx].location, "Operator precedence violation")
+        if prec < min_prec:
+            break
         
         idx = idx + 1
         backend.save_value()
         
         if kind == t1.Kind.TK_PIPE:
-            idx = parse_prefix(toks, idx, state)
-            idx = skip_cast_annotation(toks, idx)
+            idx = parse_expr(toks, idx, state, prec + 1)
             backend.pipe_call()
         else:
-            idx = parse_prefix(toks, idx, state)
-            idx = skip_cast_annotation(toks, idx)
+            idx = parse_expr(toks, idx, state, prec + 1)
             backend.binary_op(kind)
-        
-        min_prec = prec
     
     return idx
 

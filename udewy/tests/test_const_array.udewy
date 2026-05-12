@@ -14,7 +14,7 @@ let main = ():>int => {
     let sum:int = 0
     let i:int = 0
     loop i <? len {
-        let elem:int = __load__(ptr + (i * 8))
+        let elem:int = __load__(ptr + i * 8)
         if elem not=? 0 {
             sum = sum + 1
         }

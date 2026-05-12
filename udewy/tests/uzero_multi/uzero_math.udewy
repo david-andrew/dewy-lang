@@ -79,7 +79,7 @@ let fp_sqrt = (n:int):>int => {
         if x =? 0 {
             return 0
         }
-        let y:int = (x + (n // x)) >> 1
+        let y:int = x + n // x >> 1
         if y >=? x {
             return x
         }
@@ -150,7 +150,7 @@ let xs_range = (n:int):>int => {
 # ---------- vec3 helpers (Q16 components) ------------------------------------
 
 let vec3_mag = (x:int y:int z:int):>int => {
-    return fp_sqrt((x * x) + (y * y) + (z * z))
+    return fp_sqrt(x * x + y * y + z * z)
 }
 
 let vec3_dot = (ax:int ay:int az:int bx:int by:int bz:int):>int => {

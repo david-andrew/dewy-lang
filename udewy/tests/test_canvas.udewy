@@ -83,7 +83,7 @@ let render_frame = ():>int => {
             let arg1:int = (x * 4) + t
             let v1:int = sin256(arg1)
             
-            let arg2:int = (y * 4) + (t * 2)
+            let arg2:int = y * 4 + t * 2
             let v2:int = sin256(arg2)
             
             let arg3:int = ((x + y) * 3) + t
@@ -97,11 +97,11 @@ let render_frame = ():>int => {
             let combined:int = v1 + v2 + v3 + v4
             
             # Map to colors (each wave contributes -256 to 256, so combined is -1024 to 1024)
-            let r:int = clamp255(128 + (combined // 8))
+            let r:int = clamp255(128 + combined // 8)
             let gpart:int = (v1 - v2) + v3
-            let g:int = clamp255(128 + (gpart // 6))
+            let g:int = clamp255(128 + gpart // 6)
             let bpart:int = v2 + v4
-            let b:int = clamp255(128 + (bpart // 4))
+            let b:int = clamp255(128 + bpart // 4)
             
             set_pixel(x y r g b)
             

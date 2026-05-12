@@ -256,7 +256,7 @@ let gpu_end = ():>void => {
 # Append a vertex (already-converted f32 bits for x,y,z,u,v,r,g,b,a) to
 # the scratch buffer.
 let emit_vert = (x_b:int y_b:int z_b:int u_b:int v_b:int):>void => {
-    let off:int = GPU_SCRATCH + (bk_vert_count * GPU_VERT_STRIDE)
+    let off:int = GPU_SCRATCH + bk_vert_count * GPU_VERT_STRIDE
     __store_u32__(x_b off)
     __store_u32__(y_b (off + 4))
     __store_u32__(z_b (off + 8))

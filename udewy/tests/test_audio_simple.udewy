@@ -60,7 +60,7 @@ let main = ():>int => {
         let sample:int = sine * 64
         
         # Store as i16 (2 bytes per sample)
-        let addr:int = buf + (i * 2)
+        let addr:int = buf + i * 2
         __store_u16__(sample addr)
         
         i = i + 1

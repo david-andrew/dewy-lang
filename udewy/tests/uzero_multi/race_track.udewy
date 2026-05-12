@@ -16,21 +16,21 @@ import p"./race_state.udewy"
 #  80  surf_kind   SURF_NORMAL / SURF_BOOST / SURF_RECHARGE / SURF_GRID / ...
 #  88  cumarc      cumulative arc length up to this waypoint (Q16 m)
 
-let wp_get_cx = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 0) }
-let wp_get_cy = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 8) }
-let wp_get_cz = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 16) }
-let wp_get_fx = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 24) }
-let wp_get_fy = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 32) }
-let wp_get_fz = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 40) }
-let wp_get_ux = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 48) }
-let wp_get_uy = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 56) }
-let wp_get_uz = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 64) }
-let wp_get_half_w = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 72) }
-let wp_get_kind = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 80) }
-let wp_get_cumarc = (i:int):>int => { return __load__(WAYPOINT_BUF + (i * WP_STRIDE) + 88) }
+let wp_get_cx = (i:int):>int => { return __load__(WAYPOINT_BUF + i * WP_STRIDE + 0) }
+let wp_get_cy = (i:int):>int => { return __load__(WAYPOINT_BUF + i * WP_STRIDE + 8) }
+let wp_get_cz = (i:int):>int => { return __load__(WAYPOINT_BUF + i * WP_STRIDE + 16) }
+let wp_get_fx = (i:int):>int => { return __load__(WAYPOINT_BUF + i * WP_STRIDE + 24) }
+let wp_get_fy = (i:int):>int => { return __load__(WAYPOINT_BUF + i * WP_STRIDE + 32) }
+let wp_get_fz = (i:int):>int => { return __load__(WAYPOINT_BUF + i * WP_STRIDE + 40) }
+let wp_get_ux = (i:int):>int => { return __load__(WAYPOINT_BUF + i * WP_STRIDE + 48) }
+let wp_get_uy = (i:int):>int => { return __load__(WAYPOINT_BUF + i * WP_STRIDE + 56) }
+let wp_get_uz = (i:int):>int => { return __load__(WAYPOINT_BUF + i * WP_STRIDE + 64) }
+let wp_get_half_w = (i:int):>int => { return __load__(WAYPOINT_BUF + i * WP_STRIDE + 72) }
+let wp_get_kind = (i:int):>int => { return __load__(WAYPOINT_BUF + i * WP_STRIDE + 80) }
+let wp_get_cumarc = (i:int):>int => { return __load__(WAYPOINT_BUF + i * WP_STRIDE + 88) }
 
 let wp_set = (i:int cx_q:int cy_q:int cz_q:int fx_q:int fy_q:int fz_q:int ux_q:int uy_q:int uz_q:int half_w:int kind:int):>void => {
-    let o:int = WAYPOINT_BUF + (i * WP_STRIDE)
+    let o:int = WAYPOINT_BUF + i * WP_STRIDE
     __store__(cx_q o)
     __store__(cy_q (o + 8))
     __store__(cz_q (o + 16))
@@ -100,19 +100,19 @@ let gen_turn = (radius_q:int sweep_raw:int bank_max:int dy_q:int count:int half_
 
     let rxv:int = cos_fp(bld_h)
     let rzv:int = sin_fp(bld_h)
-    let cx_arc:int = bld_x + (dir_sign * fp_mul(rxv radius_q))
-    let cz_arc:int = bld_z + (dir_sign * fp_mul(rzv radius_q))
+    let cx_arc:int = bld_x + dir_sign * fp_mul(rxv radius_q)
+    let cz_arc:int = bld_z + dir_sign * fp_mul(rzv radius_q)
     let h0:int = bld_h
     let y0:int = bld_y
 
     let i:int = 0
     loop i <? count {
         let frac:int = ((i + 1) * FP_ONE) // count
-        let h_q:int = h0 + ((sweep_raw * (i + 1)) // count)
+        let h_q:int = h0 + (sweep_raw * (i + 1)) // count
         let r_at_x:int = cos_fp(h_q)
         let r_at_z:int = sin_fp(h_q)
-        let p_x:int = cx_arc - (dir_sign * fp_mul(r_at_x radius_q))
-        let p_z:int = cz_arc - (dir_sign * fp_mul(r_at_z radius_q))
+        let p_x:int = cx_arc - dir_sign * fp_mul(r_at_x radius_q)
+        let p_z:int = cz_arc - dir_sign * fp_mul(r_at_z radius_q)
         let p_y:int = y0 + fp_mul(dy_q frac)
         let ease:int = fp_mul(4 * frac (FP_ONE - frac))
         let bank_here:int = (bank_max * dir_sign * ease) // FP_ONE
@@ -122,8 +122,8 @@ let gen_turn = (radius_q:int sweep_raw:int bank_max:int dy_q:int count:int half_
     bld_h = h0 + sweep_raw
     let r_end_x:int = cos_fp(bld_h)
     let r_end_z:int = sin_fp(bld_h)
-    bld_x = cx_arc - (dir_sign * fp_mul(r_end_x radius_q))
-    bld_z = cz_arc - (dir_sign * fp_mul(r_end_z radius_q))
+    bld_x = cx_arc - dir_sign * fp_mul(r_end_x radius_q)
+    bld_z = cz_arc - dir_sign * fp_mul(r_end_z radius_q)
     bld_y = y0 + dy_q
     return 0
 }
@@ -153,7 +153,7 @@ let gen_loop = (radius_q:int count:int half_w:int kind:int lateral_q:int):>void 
         let tux:int = 0 - fp_mul(sth fxv)
         let tuy:int = cth
         let tuz:int = 0 - fp_mul(sth fzv)
-        let o:int = WAYPOINT_BUF + (bld_idx * WP_STRIDE)
+        let o:int = WAYPOINT_BUF + bld_idx * WP_STRIDE
         if bld_idx <? NUM_WAYPOINTS {
             __store__(p_x o)
             __store__(p_y (o + 8))
@@ -194,7 +194,7 @@ let gen_cork = (len_q:int dy_q:int twist_raw:int count:int half_w:int kind:int l
         let tux:int = fp_mul(rxv_flat sb)
         let tuy:int = cb
         let tuz:int = fp_mul(rzv_flat sb)
-        let o:int = WAYPOINT_BUF + (bld_idx * WP_STRIDE)
+        let o:int = WAYPOINT_BUF + bld_idx * WP_STRIDE
         if bld_idx <? NUM_WAYPOINTS {
             __store__(p_x o)
             __store__(p_y (o + 8))
@@ -222,13 +222,13 @@ let track_compute_steps = ():>void => {
     let acc:int = 0
     let i:int = 0
     loop i <? track_total_wp {
-        let o:int = WAYPOINT_BUF + (i * WP_STRIDE) + 88
+        let o:int = WAYPOINT_BUF + i * WP_STRIDE + 88
         __store__(acc o)
         let ni:int = (i + 1) % track_total_wp
         let dx:int = wp_get_cx(ni) - wp_get_cx(i)
         let dy:int = wp_get_cy(ni) - wp_get_cy(i)
         let dz:int = wp_get_cz(ni) - wp_get_cz(i)
-        let d:int = fp_sqrt((dx * dx) + (dy * dy) + (dz * dz))
+        let d:int = fp_sqrt(dx * dx + dy * dy + dz * dz)
         acc += d
         i += 1
     }

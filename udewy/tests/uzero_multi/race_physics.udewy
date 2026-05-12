@@ -11,7 +11,7 @@ import p"./race_track.udewy"
 # ---------- Car load/store/grid init ---------------------------------------
 
 let car_load = (idx:int):>void => {
-    let o:int = CAR_BUF + (idx * CAR_STRIDE)
+    let o:int = CAR_BUF + idx * CAR_STRIDE
     cx = __load__(o + CARF_CX)
     cy = __load__(o + CARF_CY)
     cz = __load__(o + CARF_CZ)
@@ -48,7 +48,7 @@ let car_load = (idx:int):>void => {
 }
 
 let car_store = (idx:int):>void => {
-    let o:int = CAR_BUF + (idx * CAR_STRIDE)
+    let o:int = CAR_BUF + idx * CAR_STRIDE
     __store__(cx (o + CARF_CX))
     __store__(cy (o + CARF_CY))
     __store__(cz (o + CARF_CZ))
@@ -81,18 +81,18 @@ let car_store = (idx:int):>void => {
     __store__(ai_aim (o + CARF_AI_AIM))
     __store__(ai_aim_timer (o + CARF_AI_AIM_TIMER))
     __store__(ai_boost_thresh (o + CARF_AI_BOOST_THRESH))
-    let progress:int = (cur_lap * track_total_wp) + cur_wp
+    let progress:int = cur_lap * track_total_wp + cur_wp
     __store__(progress (o + CARF_PROGRESS))
     return 0
 }
 
-let car_get_progress = (idx:int):>int => { return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_PROGRESS) }
-let car_get_status = (idx:int):>int => { return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_STATUS) }
-let car_get_lap = (idx:int):>int => { return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_LAP) }
-let car_get_hue = (idx:int):>int => { return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_HUE) }
-let car_get_cx = (idx:int):>int => { return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_CX) }
-let car_get_cy = (idx:int):>int => { return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_CY) }
-let car_get_cz = (idx:int):>int => { return __load__(CAR_BUF + (idx * CAR_STRIDE) + CARF_CZ) }
+let car_get_progress = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_PROGRESS) }
+let car_get_status = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_STATUS) }
+let car_get_lap = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_LAP) }
+let car_get_hue = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_HUE) }
+let car_get_cx = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_CX) }
+let car_get_cy = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_CY) }
+let car_get_cz = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_CZ) }
 
 let init_cars = ():>void => {
     xs_seed(0xA17D00D5)
@@ -102,7 +102,7 @@ let init_cars = ():>void => {
         let col:int = i % 4
         let lateral_q:int = ((col * 393216) - 589824)
         let behind_q:int = row * 524288
-        let o:int = CAR_BUF + (i * CAR_STRIDE)
+        let o:int = CAR_BUF + i * CAR_STRIDE
         __store__(lateral_q (o + CARF_CX))
         __store__(HOVER_HEIGHT (o + CARF_CY))
         __store__(behind_q (o + CARF_CZ))

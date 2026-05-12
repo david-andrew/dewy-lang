@@ -105,12 +105,12 @@ let abs_int = (v:int):>int => {
 }
 
 let array_set = (arr:int idx:int value:int):>int => {
-    __store__(value arr + (idx * 8))
+    __store__(value arr + idx * 8)
     return 0
 }
 
 let array_get = (arr:int idx:int):>int => {
-    return __load__(arr + (idx * 8))
+    return __load__(arr + idx * 8)
 }
 
 let release_finished_ripples = (time_ms:int):>int => {
@@ -180,7 +180,7 @@ let main = ():>int => {
     if move_amount >? 10 {
         let elapsed:int = time_ms - last_emit_time_ms
         if elapsed >? 28 {
-            let strength:int = 50 + (move_amount * 7)
+            let strength:int = 50 + move_amount * 7
             if mouse_down {
                 strength = strength + 70
             }
