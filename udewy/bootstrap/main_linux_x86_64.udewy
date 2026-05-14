@@ -1,0 +1,29 @@
+# main_linux_x86_64.udewy
+# Entry point for x86_64 Linux
+
+import p"platform_linux_x86_64.udewy"
+import p"compiler.udewy"
+
+let main = (argc:int argv:int):>int => {
+    let input_path:int = "test.udewy\0"
+    let output_path:int = "output.s\0"
+    let target:int = "x86_64\0"
+
+    let i:int = 1
+    loop i <? argc {
+        let arg:int = __load__(argv + (i * 8))
+        if cstr_eq_lit(arg "-o" 2) {
+            i = i + 1
+            output_path = __load__(argv + (i * 8))
+        } else if cstr_eq_lit(arg "--target" 8) {
+            i = i + 1
+            target = __load__(argv + (i * 8))
+        } else {
+            input_path = arg
+        }
+        i = i + 1
+    }
+
+    run_compiler(input_path output_path target)
+    return 0
+}

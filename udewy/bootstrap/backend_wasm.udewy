@@ -1,0 +1,63 @@
+# backend_wasm.udewy
+# Minimal wasm32 backend for the bootstrap compiler.
+
+import p"backend.udewy"
+import p"strings.udewy"
+
+let wasm_last_return:int = 0
+let wasm_next_label:int = 0
+let wasm_next_local:int = 0
+
+let wasm_begin_module = ():>void => { wasm_last_return = 0 wasm_next_label = 0 wasm_next_local = 0 return void }
+let wasm_set_module_init = (name:int):>void => { return void }
+let wasm_set_imported_sources = (paths:int):>void => { return void }
+let wasm_declare_function = (name:int num_params:int):>int => { let label:int = wasm_next_label wasm_next_label = wasm_next_label + 1 return label }
+let wasm_declare_extern_function = (name:int num_params:int):>int => { return wasm_declare_function(name num_params) }
+let wasm_begin_function = (label_id:int name:int param_count:int is_main:bool):>void => { wasm_next_local = 0 return void }
+let wasm_end_function = ():>void => { return void }
+let wasm_set_reachable_functions = (label_ids:int):>void => { return void }
+let wasm_load_param = (index:int):>void => { return void }
+let wasm_alloc_local = ():>int => { let slot:int = wasm_next_local wasm_next_local = wasm_next_local + 1 return slot }
+let wasm_load_local = (slot:int):>void => { return void }
+let wasm_store_local = (slot:int):>void => { return void }
+let wasm_push_const_i64 = (value:int):>void => { wasm_last_return = value return void }
+let wasm_push_void = ():>void => { wasm_last_return = 0 return void }
+let wasm_pop_value = ():>void => { return void }
+let wasm_save_value = ():>void => { return void }
+let wasm_restore_value = ():>void => { return void }
+let wasm_emit_return = ():>void => { return void }
+let wasm_is_intrinsic = (name:int):>bool => { return false }
+let wasm_intrinsic_arity = (name:int):>int => { return 0 }
+let wasm_intrinsic_static_arg_indices = (name:int):>int => { return 0 }
+let wasm_max_call_args = ():>int => { return 8 }
+let wasm_get_builtin_constants = ():>int => { return map_new(4) }
+let wasm_finish_module = ():>int => { return str_concat(str_concat("(module\n  (func (export \"main\") (result i64)\n    i64.const " int_to_str(wasm_last_return)) "\n  )\n)\n") }
+
+let init_backend_wasm = (vtable:int):>void => {
+    backend_fill_default_vtable(vtable)
+    __store__(wasm_begin_module vtable + B_BEGIN_MODULE)
+    __store__(wasm_finish_module vtable + B_FINISH_MODULE)
+    __store__(wasm_set_module_init vtable + B_SET_MODULE_INIT)
+    __store__(wasm_set_imported_sources vtable + B_SET_IMPORTED_SOURCES)
+    __store__(wasm_declare_function vtable + B_DECLARE_FUNCTION)
+    __store__(wasm_declare_extern_function vtable + B_DECLARE_EXTERN_FUNCTION)
+    __store__(wasm_begin_function vtable + B_BEGIN_FUNCTION)
+    __store__(wasm_end_function vtable + B_END_FUNCTION)
+    __store__(wasm_set_reachable_functions vtable + B_SET_REACHABLE_FUNCTIONS)
+    __store__(wasm_load_param vtable + B_LOAD_PARAM)
+    __store__(wasm_alloc_local vtable + B_ALLOC_LOCAL)
+    __store__(wasm_load_local vtable + B_LOAD_LOCAL)
+    __store__(wasm_store_local vtable + B_STORE_LOCAL)
+    __store__(wasm_push_const_i64 vtable + B_PUSH_CONST_I64)
+    __store__(wasm_push_void vtable + B_PUSH_VOID)
+    __store__(wasm_pop_value vtable + B_POP_VALUE)
+    __store__(wasm_save_value vtable + B_SAVE_VALUE)
+    __store__(wasm_restore_value vtable + B_RESTORE_VALUE)
+    __store__(wasm_emit_return vtable + B_EMIT_RETURN)
+    __store__(wasm_is_intrinsic vtable + B_IS_INTRINSIC)
+    __store__(wasm_intrinsic_arity vtable + B_INTRINSIC_ARITY)
+    __store__(wasm_intrinsic_static_arg_indices vtable + B_INTRINSIC_STATIC_ARG_INDICES)
+    __store__(wasm_max_call_args vtable + B_MAX_CALL_ARGS)
+    __store__(wasm_get_builtin_constants vtable + B_GET_BUILTIN_CONSTANTS)
+    return void
+}

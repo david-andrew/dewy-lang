@@ -1,6 +1,6 @@
 from pathlib import Path
 from . import t0, t1, p0
-from .backend import BackendName, get_backend
+from .backend import BACKEND_NAMES, BackendName, get_backend
 from .backend.common import RunOptions
 from typing import cast
 
@@ -21,7 +21,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     compile_only = False
-    target: BackendName = "x86_64"
+    requested_target: BackendName | None = None
     split_wasm = False
     serve_wasm = False
     arg_idx = 1
@@ -32,7 +32,7 @@ if __name__ == "__main__":
             arg_idx += 1
         elif sys.argv[arg_idx] == "--target":
             arg_idx += 1
-            target = cast(BackendName, sys.argv[arg_idx])
+            requested_target = cast(BackendName, sys.argv[arg_idx])
             arg_idx += 1
         elif sys.argv[arg_idx] == "--split-wasm":
             split_wasm = True
@@ -50,15 +50,19 @@ if __name__ == "__main__":
     input_file = Path(sys.argv[arg_idx])
     script_args = sys.argv[arg_idx + 1:]
     
-    backend = get_backend(target)
-    loaded = t0.load_program(input_file)
-    backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
-    src = loaded.source
     try:
+        loaded = t0.load_program(
+            input_file,
+            requested_backend=requested_target,
+            known_backends=BACKEND_NAMES,
+        )
+        backend = get_backend(cast(BackendName, loaded.selected_backend))
+        backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
+        src = loaded.source
         toks = t1.tokenize(src)
         asm = p0.parse(toks, src, backend)
-    except SyntaxError as e:
-        print(f"SyntaxError: {e}")
+    except (SyntaxError, ValueError) as e:
+        print(f"Error: {e}")
         sys.exit(1)
     
     cache_dir = Path("__dewycache__")

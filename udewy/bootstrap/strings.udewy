@@ -1,125 +1,107 @@
-# String utilities for the bootstrap compiler
+# strings.udewy
+# String manipulation and formatting
 
-import p"prelude.udewy"
-import p"memory.udewy"
-
-# ============================================================================
-# String comparison
-# ============================================================================
-
-let str_eq_len = (s1:int len1:int s2:int len2:int):>int => {
-    if len1 not=? len2 { return FALSE }
+# Creates a new udewy string from a buffer
+let str_new = (buf:int len:int):>int => {
+    let ptr:int = arena_alloc(len + 8)
+    __store__(len ptr)
+    let str:int = ptr + 8
     let i:int = 0
-    loop i <? len1 {
-        let c1:int = __load_u8__(s1 + i)
-        let c2:int = __load_u8__(s2 + i)
-        if c1 not=? c2 { return FALSE }
+    loop i <? len {
+        __store_u8__(__load_u8__(buf + i) str + i)
         i = i + 1
     }
-    return TRUE
+    return str
 }
 
-let str_eq = (s1:int s2:int):>int => {
+let str_concat = (s1:int s2:int):>int => {
     let len1:int = __load__(s1 - 8)
     let len2:int = __load__(s2 - 8)
-    return str_eq_len(s1 len1 s2 len2)
-}
-
-let str_match = (s:int start:int len:int target:int):>int => {
-    let target_len:int = __load__(target - 8)
-    return str_eq_len(s + start len target target_len)
-}
-
-# ============================================================================
-# String prefix checking
-# ============================================================================
-
-let str_prefix = (s:int pos:int target:int):>int => {
-    let target_len:int = __load__(target - 8)
+    let new_len:int = len1 + len2
+    let ptr:int = arena_alloc(new_len + 8)
+    __store__(new_len ptr)
+    let str:int = ptr + 8
+    
     let i:int = 0
-    loop i <? target_len {
-        let c1:int = __load_u8__(s + pos + i)
-        let c2:int = __load_u8__(target + i)
-        if c1 not=? c2 { return FALSE }
+    loop i <? len1 {
+        __store_u8__(__load_u8__(s1 + i) str + i)
         i = i + 1
     }
-    return TRUE
+    
+    i = 0
+    loop i <? len2 {
+        __store_u8__(__load_u8__(s2 + i) str + len1 + i)
+        i = i + 1
+    }
+    
+    return str
 }
 
-# ============================================================================
-# String length of null-terminated strings
-# ============================================================================
-
-let str_len_cstr = (s:int):>int => {
+let str_from_cstr = (cstr:int):>int => {
     let len:int = 0
-    loop __load_u8__(s + len) not=? 0 {
+    loop true {
+        if __load_u8__(cstr + len) =? 0 {
+            break
+        }
         len = len + 1
     }
-    return len
+    return str_new(cstr len)
 }
 
-# ============================================================================
-# Integer to string conversion
-# ============================================================================
-
-let int_to_str = (n:int buf:int):>int => {
-    let neg:int = FALSE
-    if n <? 0 {
-        neg = TRUE
-        n = 0 - n
+let str_to_cstr = (str:int):>int => {
+    let len:int = __load__(str - 8)
+    let ptr:int = arena_alloc(len + 1)
+    let i:int = 0
+    loop i <? len {
+        __store_u8__(__load_u8__(str + i) ptr + i)
+        i = i + 1
     }
-    let tmp = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
-    let len:int = 0
-    if n =? 0 {
-        __store_u8__(CH_0 tmp)
-        len = 1
-    } else {
-        loop n >? 0 {
-            let digit:int = n % 10
-            __store_u8__(CH_0 + digit tmp + len)
-            len = len + 1
-            n = n // 10
-        }
-    }
-    let pos:int = 0
-    if neg {
-        __store_u8__(CH_MINUS buf)
-        pos = 1
-    }
-    let i:int = len - 1
-    loop i >=? 0 {
-        __store_u8__(__load_u8__(tmp + i) buf + pos)
-        pos = pos + 1
-        i = i - 1
-    }
-    return pos
+    __store_u8__(0 ptr + len)
+    return ptr
 }
 
-# ============================================================================
-# Hex to string conversion
-# ============================================================================
-
-let int_to_hex = (n:int buf:int):>int => {
-    let digits:int = "0123456789abcdef"
-    let tmp = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
-    let len:int = 0
-    if n =? 0 {
-        __store_u8__(CH_0 tmp)
-        len = 1
-    } else {
-        loop n >? 0 {
-            let digit:int = n and 15
-            __store_u8__(__load_u8__(digits + digit) tmp + len)
-            len = len + 1
-            n = n >> 4
+let cstr_eq_lit = (cstr:int lit:int len:int):>bool => {
+    let i:int = 0
+    loop i <? len {
+        if __load_u8__(cstr + i) not=? __load_u8__(lit + i) {
+            return false
         }
+        i = i + 1
     }
-    let pos:int = 0
-    let i:int = len - 1
-    loop i >=? 0 {
-        __store_u8__(__load_u8__(tmp + i) buf + pos)
-        pos = pos + 1
+    return __load_u8__(cstr + len) =? 0
+}
+
+# Convert an integer to a string (base 10)
+let int_to_str = (val:int):>int => {
+    if val =? 0 {
+        return str_new("0" 1)
+    }
+    
+    let is_neg:bool = false
+    if val <? 0 {
+        is_neg = true
+        val = 0 - val
+    }
+    
+    let buf:int = arena_alloc(32)
+    let i:int = 31
+    
+    loop true {
+        if val =? 0 {
+            break
+        }
+        let digit:int = __unsigned_mod__(val 10)
+        __store_u8__(48 + digit buf + i)
+        i = i - 1
+        val = __unsigned_idiv__(val 10)
+    }
+    
+    if is_neg {
+        __store_u8__(45 buf + i) # '-'
         i = i - 1
     }
-    return pos
+    
+    let start:int = i + 1
+    let len:int = 31 - i
+    return str_new(buf + start len)
 }

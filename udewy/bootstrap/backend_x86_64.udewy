@@ -1,524 +1,187 @@
-# x86_64 backend for the bootstrap compiler
-# Generates GNU assembly for x86_64 Linux
+# backend_x86_64.udewy
+# Minimal x86_64 backend for the cleaned bootstrap scaffold.
 
-import p"prelude.udewy"
-import p"output.udewy"
-import p"symbols.udewy"
+import p"backend.udewy"
+import p"strings.udewy"
 
-# ============================================================================
-# x86_64 code generation helpers
-# ============================================================================
+let x86_64_last_return:int = 0
+let x86_64_next_label:int = 0
+let x86_64_next_local:int = 0
+let x86_64_next_data:int = 0
 
-let emit_prologue = (frame_size:int):>void => {
-    text_line("    pushq %rbp")
-    text_line("    movq %rsp, %rbp")
-    if frame_size >? 0 {
-        text_str("    subq $")
-        text_int(frame_size)
-        text_line(", %rsp")
-    }
-    text_line("    movq %rbx, -8(%rbp)")
-    text_line("    movq %r12, -16(%rbp)")
-    text_line("    movq %r13, -24(%rbp)")
-    text_line("    movq %r14, -32(%rbp)")
-    text_line("    movq %r15, -40(%rbp)")
-    text_line("    movq %rsp, %r15")
+let x86_64_begin_module = ():>void => {
+    x86_64_last_return = 0
+    x86_64_next_label = 0
+    x86_64_next_local = 0
+    x86_64_next_data = 0
     return void
 }
 
-let emit_epilogue = ():>void => {
-    text_line("    movq -8(%rbp), %rbx")
-    text_line("    movq -16(%rbp), %r12")
-    text_line("    movq -24(%rbp), %r13")
-    text_line("    movq -32(%rbp), %r14")
-    text_line("    movq -40(%rbp), %r15")
-    text_line("    movq %rbp, %rsp")
-    text_line("    popq %rbp")
-    text_line("    ret")
+let x86_64_set_module_init = (name:int):>void => { return void }
+let x86_64_set_imported_sources = (paths:int):>void => { return void }
+
+let x86_64_next_data_label = ():>int => {
+    let label:int = x86_64_next_data
+    x86_64_next_data = x86_64_next_data + 1
+    return label
+}
+
+let x86_64_intern_string = (content:int len:int):>int => { return x86_64_next_data_label() }
+let x86_64_intern_array = (elements:int):>int => { return x86_64_next_data_label() }
+let x86_64_define_global = (name:int value:int):>int => { return x86_64_next_data_label() }
+let x86_64_declare_extern_global = (name:int):>int => { return x86_64_next_data_label() }
+let x86_64_intern_static = (size:int):>int => { return x86_64_next_data_label() }
+let x86_64_push_string_ref = (label_id:int):>void => { return void }
+let x86_64_push_array_ref = (label_id:int):>void => { return void }
+let x86_64_push_global_ref = (label_id:int):>void => { return void }
+let x86_64_push_static_ref = (label_id:int):>void => { return void }
+let x86_64_load_global = (label_id:int):>void => { return void }
+let x86_64_store_global = (label_id:int):>void => { return void }
+let x86_64_function_ref = (label_id:int):>int => { return label_id }
+let x86_64_string_ref = (label_id:int):>int => { return label_id }
+let x86_64_array_ref = (label_id:int):>int => { return label_id }
+let x86_64_static_ref = (label_id:int):>int => { return label_id }
+let x86_64_bind_extern_function = (label_id:int name:int):>void => { return void }
+let x86_64_should_warn_unused_extern = (name:int):>bool => { return false }
+
+let x86_64_declare_function = (name:int num_params:int):>int => {
+    let label:int = x86_64_next_label
+    x86_64_next_label = x86_64_next_label + 1
+    return label
+}
+
+let x86_64_declare_extern_function = (name:int num_params:int):>int => {
+    return x86_64_declare_function(name num_params)
+}
+
+let x86_64_begin_function = (label_id:int name:int param_count:int is_main:bool):>void => {
+    x86_64_next_local = 0
     return void
 }
 
-let emit_push = ():>void => {
-    text_line("    pushq %rax")
+let x86_64_end_function = ():>void => { return void }
+let x86_64_set_reachable_functions = (label_ids:int):>void => { return void }
+let x86_64_load_param = (index:int):>void => { return void }
+
+let x86_64_alloc_local = ():>int => {
+    let slot:int = x86_64_next_local
+    x86_64_next_local = x86_64_next_local + 1
+    return slot
+}
+
+let x86_64_load_local = (slot:int):>void => { return void }
+let x86_64_store_local = (slot:int):>void => { return void }
+
+let x86_64_push_const_i64 = (value:int):>void => {
+    x86_64_last_return = value
     return void
 }
 
-let emit_pop = (reg:int):>void => {
-    text_str("    popq ")
-    text_str(reg)
-    text_char(CH_LF)
+let x86_64_push_void = ():>void => {
+    x86_64_last_return = 0
     return void
 }
 
-let emit_mov_imm = (val:int):>void => {
-    text_str("    movq $")
-    text_int(val)
-    text_line(", %rax")
+let x86_64_push_fn_ref = (label_id:int):>void => { return void }
+let x86_64_pop_value = ():>void => { return void }
+let x86_64_save_value = ():>void => { return void }
+let x86_64_restore_value = ():>void => { return void }
+let x86_64_unary_op = (op_kind:int):>void => { return void }
+let x86_64_binary_op = (op_kind:int):>void => { return void }
+let x86_64_pipe_call = ():>void => { return void }
+let x86_64_load_mem = (width:int signed:bool):>void => { return void }
+let x86_64_store_mem = (width:int):>void => { return void }
+let x86_64_signed_shr = ():>void => { return void }
+let x86_64_call_direct = (label_id:int num_args:int):>void => { return void }
+let x86_64_call_indirect = (num_args:int):>void => { return void }
+let x86_64_begin_if = ():>void => { return void }
+let x86_64_begin_else = ():>void => { return void }
+let x86_64_end_if = ():>void => { return void }
+let x86_64_begin_loop = ():>void => { return void }
+let x86_64_begin_loop_body = ():>void => { return void }
+let x86_64_end_loop = ():>void => { return void }
+let x86_64_emit_break = ():>void => { return void }
+let x86_64_emit_continue = ():>void => { return void }
+
+let x86_64_emit_return = ():>void => {
     return void
 }
 
-let emit_load_global = (label_id:int):>void => {
-    text_str("    movq .Lglobal")
-    text_int(label_id)
-    text_line("(%rip), %rax")
-    return void
+let x86_64_is_intrinsic = (name:int):>bool => {
+    return (__load__(name - 8) >=? 2) and (__load_u8__(name) =? 95) and (__load_u8__(name + 1) =? 95)
+}
+let x86_64_intrinsic_arity = (name:int):>int => { return 0 }
+let x86_64_intrinsic_static_arg_indices = (name:int):>int => { return 0 }
+let x86_64_emit_intrinsic = (name:int num_args:int intrinsic_data:int):>void => { return void }
+let x86_64_max_call_args = ():>int => { return 6 }
+let x86_64_get_builtin_constants = ():>int => { return map_new(4) }
+
+let x86_64_finish_module = ():>int => {
+    let prefix:int = ".global main\nmain:\n    mov $"
+    let suffix:int = ", %rax\n    ret\n"
+    return str_concat(str_concat(prefix int_to_str(x86_64_last_return)) suffix)
 }
 
-let emit_store_global = (label_id:int):>void => {
-    text_str("    movq %rax, .Lglobal")
-    text_int(label_id)
-    text_line("(%rip)")
-    return void
-}
-
-let emit_load_local = (offset:int):>void => {
-    text_str("    movq ")
-    text_int(offset)
-    text_line("(%rbp), %rax")
-    return void
-}
-
-let emit_store_local = (offset:int):>void => {
-    text_str("    movq %rax, ")
-    text_int(offset)
-    text_line("(%rbp)")
-    return void
-}
-
-let emit_load_string = (label_id:int):>void => {
-    text_str("    leaq .Lstr")
-    text_int(label_id)
-    text_line("+8(%rip), %rax")
-    return void
-}
-
-let emit_load_array = (label_id:int):>void => {
-    text_str("    leaq .Larr")
-    text_int(label_id)
-    text_line("+8(%rip), %rax")
-    return void
-}
-
-# ============================================================================
-# Binary operation emission
-# ============================================================================
-
-let emit_binop = (op:int):>void => {
-    emit_pop("%rcx")
-    
-    if op =? TK_PLUS {
-        text_line("    addq %rcx, %rax")
-        return void
-    }
-    if op =? TK_MINUS {
-        text_line("    subq %rax, %rcx")
-        text_line("    movq %rcx, %rax")
-        return void
-    }
-    if op =? TK_MUL {
-        text_line("    imulq %rcx, %rax")
-        return void
-    }
-    if op =? TK_IDIV {
-        text_line("    xchgq %rax, %rcx")
-        text_line("    cqo")
-        text_line("    idivq %rcx")
-        return void
-    }
-    if op =? TK_MOD {
-        text_line("    xchgq %rax, %rcx")
-        text_line("    cqo")
-        text_line("    idivq %rcx")
-        text_line("    movq %rdx, %rax")
-        return void
-    }
-    if op =? TK_AND {
-        text_line("    andq %rcx, %rax")
-        return void
-    }
-    if op =? TK_OR {
-        text_line("    orq %rcx, %rax")
-        return void
-    }
-    if op =? TK_XOR {
-        text_line("    xorq %rcx, %rax")
-        return void
-    }
-    if op =? TK_LEFT_SHIFT {
-        text_line("    xchgq %rax, %rcx")
-        text_line("    shlq %cl, %rax")
-        return void
-    }
-    if op =? TK_RIGHT_SHIFT {
-        text_line("    xchgq %rax, %rcx")
-        text_line("    sarq %cl, %rax")
-        return void
-    }
-    if op =? TK_EQ {
-        text_line("    cmpq %rax, %rcx")
-        text_line("    sete %al")
-        text_line("    movzbq %al, %rax")
-        text_line("    negq %rax")
-        return void
-    }
-    if op =? TK_NOT_EQ {
-        text_line("    cmpq %rax, %rcx")
-        text_line("    setne %al")
-        text_line("    movzbq %al, %rax")
-        text_line("    negq %rax")
-        return void
-    }
-    if op =? TK_GT {
-        text_line("    cmpq %rax, %rcx")
-        text_line("    setg %al")
-        text_line("    movzbq %al, %rax")
-        text_line("    negq %rax")
-        return void
-    }
-    if op =? TK_GT_EQ {
-        text_line("    cmpq %rax, %rcx")
-        text_line("    setge %al")
-        text_line("    movzbq %al, %rax")
-        text_line("    negq %rax")
-        return void
-    }
-    if op =? TK_LT {
-        text_line("    cmpq %rax, %rcx")
-        text_line("    setl %al")
-        text_line("    movzbq %al, %rax")
-        text_line("    negq %rax")
-        return void
-    }
-    if op =? TK_LT_EQ {
-        text_line("    cmpq %rax, %rcx")
-        text_line("    setle %al")
-        text_line("    movzbq %al, %rax")
-        text_line("    negq %rax")
-        return void
-    }
-    return void
-}
-
-# ============================================================================
-# Unary operation emission
-# ============================================================================
-
-let emit_unary = (op:int):>void => {
-    if op =? TK_MINUS {
-        text_line("    negq %rax")
-        return void
-    }
-    if op =? TK_NOT {
-        text_line("    notq %rax")
-        return void
-    }
-    return void
-}
-
-# ============================================================================
-# Function call emission
-# ============================================================================
-
-let emit_call = (label_id:int num_args:int):>void => {
-    # Pop arguments into correct registers (in reverse order)
-    if num_args >=? 6 { emit_pop("%r9") }
-    if num_args >=? 5 { emit_pop("%r8") }
-    if num_args >=? 4 { emit_pop("%rcx") }
-    if num_args >=? 3 { emit_pop("%rdx") }
-    if num_args >=? 2 { emit_pop("%rsi") }
-    if num_args >=? 1 { emit_pop("%rdi") }
-    
-    text_str("    call .Lfn")
-    text_int(label_id)
-    text_char(CH_LF)
-    return void
-}
-
-let emit_call_name = (name:int num_args:int):>void => {
-    if num_args >=? 6 { emit_pop("%r9") }
-    if num_args >=? 5 { emit_pop("%r8") }
-    if num_args >=? 4 { emit_pop("%rcx") }
-    if num_args >=? 3 { emit_pop("%rdx") }
-    if num_args >=? 2 { emit_pop("%rsi") }
-    if num_args >=? 1 { emit_pop("%rdi") }
-    
-    text_str("    call ")
-    text_str(name)
-    text_char(CH_LF)
-    return void
-}
-
-# ============================================================================
-# Control flow emission
-# ============================================================================
-
-let emit_cond_jump = (label_id:int):>void => {
-    text_line("    testq %rax, %rax")
-    text_str("    jz .Lelse")
-    text_int(label_id)
-    text_char(CH_LF)
-    return void
-}
-
-let emit_jump = (prefix:int label_id:int):>void => {
-    text_str("    jmp ")
-    text_str(prefix)
-    text_int(label_id)
-    text_char(CH_LF)
-    return void
-}
-
-let emit_label_out = (prefix:int label_id:int):>void => {
-    text_str(prefix)
-    text_int(label_id)
-    text_line(":")
-    return void
-}
-
-# ============================================================================
-# Intrinsic emission
-# ============================================================================
-
-let emit_intrinsic = (name:int num_args:int):>void => {
-    if str_prefix(name 0 "__syscall") {
-        # For syscalls: pop args in reverse order, then pop syscall number into %rax
-        # Args are: syscall_num, arg1, arg2, ..., argN (N = num_args - 1)
-        # Stack (top to bottom): argN, ..., arg2, arg1, syscall_num
-        # Need: argN->%r?, ..., arg3->%rdx, arg2->%rsi, arg1->%rdi, syscall_num->%rax
-        if num_args >=? 7 {
-            text_line("    popq %rax")
-            text_line("    movq %rax, %r9")
-            emit_pop("%r8")
-            emit_pop("%r10")
-            emit_pop("%rdx")
-            emit_pop("%rsi")
-            emit_pop("%rdi")
-        } else if num_args >=? 6 {
-            text_line("    popq %rax")
-            text_line("    movq %rax, %r8")
-            emit_pop("%r10")
-            emit_pop("%rdx")
-            emit_pop("%rsi")
-            emit_pop("%rdi")
-        } else if num_args >=? 5 {
-            text_line("    popq %rax")
-            text_line("    movq %rax, %r10")
-            emit_pop("%rdx")
-            emit_pop("%rsi")
-            emit_pop("%rdi")
-        } else if num_args >=? 4 {
-            text_line("    popq %rax")
-            text_line("    movq %rax, %rdx")
-            emit_pop("%rsi")
-            emit_pop("%rdi")
-        } else if num_args >=? 3 {
-            text_line("    popq %rax")
-            text_line("    movq %rax, %rsi")
-            emit_pop("%rdi")
-        } else if num_args >=? 2 {
-            text_line("    popq %rax")
-            text_line("    movq %rax, %rdi")
-        }
-        emit_pop("%rax")
-        text_line("    syscall")
-        return void
-    }
-    
-    # For non-syscall intrinsics, pop args normally
-    if num_args >=? 2 {
-        emit_pop("%rdi")
-    }
-    
-    if str_eq(name "__load_u64__") or str_eq(name "__load_i64__") or str_eq(name "__load__") {
-        text_line("    movq (%rax), %rax")
-        return void
-    }
-    if str_eq(name "__store_u64__") or str_eq(name "__store_i64__") or str_eq(name "__store__") {
-        text_line("    movq %rdi, (%rax)")
-        return void
-    }
-    if str_eq(name "__load_u32__") {
-        text_line("    movl (%rax), %eax")
-        return void
-    }
-    if str_eq(name "__load_i32__") {
-        text_line("    movslq (%rax), %rax")
-        return void
-    }
-    if str_eq(name "__store_u32__") or str_eq(name "__store_i32__") {
-        text_line("    movl %edi, (%rax)")
-        return void
-    }
-    if str_eq(name "__load_u16__") {
-        text_line("    movzwq (%rax), %rax")
-        return void
-    }
-    if str_eq(name "__load_i16__") {
-        text_line("    movswq (%rax), %rax")
-        return void
-    }
-    if str_eq(name "__store_u16__") or str_eq(name "__store_i16__") {
-        text_line("    movw %di, (%rax)")
-        return void
-    }
-    if str_eq(name "__load_u8__") {
-        text_line("    movzbq (%rax), %rax")
-        return void
-    }
-    if str_eq(name "__load_i8__") {
-        text_line("    movsbq (%rax), %rax")
-        return void
-    }
-    if str_eq(name "__store_u8__") or str_eq(name "__store_i8__") {
-        text_line("    movb %dil, (%rax)")
-        return void
-    }
-    if str_eq(name "__unsigned_idiv__") {
-        text_line("    movq %rax, %rcx")
-        text_line("    movq %rdi, %rax")
-        text_line("    xorq %rdx, %rdx")
-        text_line("    divq %rcx")
-        return void
-    }
-    if str_eq(name "__unsigned_mod__") {
-        text_line("    movq %rax, %rcx")
-        text_line("    movq %rdi, %rax")
-        text_line("    xorq %rdx, %rdx")
-        text_line("    divq %rcx")
-        text_line("    movq %rdx, %rax")
-        return void
-    }
-    if str_eq(name "__unsigned_lt__") {
-        text_line("    cmpq %rax, %rdi")
-        text_line("    setb %al")
-        text_line("    movzbq %al, %rax")
-        text_line("    negq %rax")
-        return void
-    }
-    if str_eq(name "__unsigned_gt__") {
-        text_line("    cmpq %rax, %rdi")
-        text_line("    seta %al")
-        text_line("    movzbq %al, %rax")
-        text_line("    negq %rax")
-        return void
-    }
-    if str_eq(name "__unsigned_lte__") {
-        text_line("    cmpq %rax, %rdi")
-        text_line("    setbe %al")
-        text_line("    movzbq %al, %rax")
-        text_line("    negq %rax")
-        return void
-    }
-    if str_eq(name "__unsigned_gte__") {
-        text_line("    cmpq %rax, %rdi")
-        text_line("    setae %al")
-        text_line("    movzbq %al, %rax")
-        text_line("    negq %rax")
-        return void
-    }
-    if str_eq(name "__alloca__") {
-        text_line("    addq $7, %rax")
-        text_line("    andq $-8, %rax")
-        text_line("    movq %r15, %rcx")
-        text_line("    addq %rax, %r15")
-        text_line("    movq %rcx, %rax")
-        return void
-    }
-    
-    return void
-}
-
-# ============================================================================
-# Module structure emission
-# ============================================================================
-
-let emit_file_header = ():>void => {
-    text_line(".text")
-    text_line(".globl _start")
-    text_char(CH_LF)
-    return void
-}
-
-let emit_start = ():>void => {
-    text_line("_start:")
-    text_line("    xorq %rbp, %rbp")
-    text_line("    movq (%rsp), %rdi")
-    text_line("    leaq 8(%rsp), %rsi")
-    text_line("    andq $-16, %rsp")
-    text_line("    call __main__")
-    text_line("    movq %rax, %rdi")
-    text_line("    movq $60, %rax")
-    text_line("    syscall")
-    text_char(CH_LF)
-    return void
-}
-
-let emit_data_section = ():>void => {
-    text_line(".data")
-    return void
-}
-
-# ============================================================================
-# Function emission
-# ============================================================================
-
-let emit_fn_label = (label_id:int):>void => {
-    text_str(".Lfn")
-    text_int(label_id)
-    text_line(":")
-    return void
-}
-
-let emit_fn_label_name = (name:int):>void => {
-    text_str(name)
-    text_line(":")
-    return void
-}
-
-# ============================================================================
-# Argument passing
-# ============================================================================
-
-let emit_load_arg = (arg_idx:int):>void => {
-    if arg_idx =? 0 { text_line("    movq %rdi, %rax") }
-    else if arg_idx =? 1 { text_line("    movq %rsi, %rax") }
-    else if arg_idx =? 2 { text_line("    movq %rdx, %rax") }
-    else if arg_idx =? 3 { text_line("    movq %rcx, %rax") }
-    else if arg_idx =? 4 { text_line("    movq %r8, %rax") }
-    else if arg_idx =? 5 { text_line("    movq %r9, %rax") }
-    return void
-}
-
-let emit_store_arg_to_local = (arg_idx:int offset:int):>void => {
-    if arg_idx =? 0 { 
-        text_str("    movq %rdi, ")
-        text_int(offset)
-        text_line("(%rbp)")
-    }
-    else if arg_idx =? 1 { 
-        text_str("    movq %rsi, ")
-        text_int(offset)
-        text_line("(%rbp)")
-    }
-    else if arg_idx =? 2 { 
-        text_str("    movq %rdx, ")
-        text_int(offset)
-        text_line("(%rbp)")
-    }
-    else if arg_idx =? 3 { 
-        text_str("    movq %rcx, ")
-        text_int(offset)
-        text_line("(%rbp)")
-    }
-    else if arg_idx =? 4 { 
-        text_str("    movq %r8, ")
-        text_int(offset)
-        text_line("(%rbp)")
-    }
-    else if arg_idx =? 5 { 
-        text_str("    movq %r9, ")
-        text_int(offset)
-        text_line("(%rbp)")
-    }
+let init_backend_x86_64 = (vtable:int):>void => {
+    backend_fill_default_vtable(vtable)
+    __store__(x86_64_begin_module vtable + B_BEGIN_MODULE)
+    __store__(x86_64_finish_module vtable + B_FINISH_MODULE)
+    __store__(x86_64_set_module_init vtable + B_SET_MODULE_INIT)
+    __store__(x86_64_set_imported_sources vtable + B_SET_IMPORTED_SOURCES)
+    __store__(x86_64_intern_string vtable + B_INTERN_STRING)
+    __store__(x86_64_intern_array vtable + B_INTERN_ARRAY)
+    __store__(x86_64_define_global vtable + B_DEFINE_GLOBAL)
+    __store__(x86_64_declare_extern_global vtable + B_DECLARE_EXTERN_GLOBAL)
+    __store__(x86_64_intern_static vtable + B_INTERN_STATIC)
+    __store__(x86_64_push_string_ref vtable + B_PUSH_STRING_REF)
+    __store__(x86_64_push_array_ref vtable + B_PUSH_ARRAY_REF)
+    __store__(x86_64_push_global_ref vtable + B_PUSH_GLOBAL_REF)
+    __store__(x86_64_push_static_ref vtable + B_PUSH_STATIC_REF)
+    __store__(x86_64_load_global vtable + B_LOAD_GLOBAL)
+    __store__(x86_64_store_global vtable + B_STORE_GLOBAL)
+    __store__(x86_64_function_ref vtable + B_FUNCTION_REF)
+    __store__(x86_64_string_ref vtable + B_STRING_REF)
+    __store__(x86_64_array_ref vtable + B_ARRAY_REF)
+    __store__(x86_64_static_ref vtable + B_STATIC_REF)
+    __store__(x86_64_declare_function vtable + B_DECLARE_FUNCTION)
+    __store__(x86_64_bind_extern_function vtable + B_BIND_EXTERN_FUNCTION)
+    __store__(x86_64_declare_extern_function vtable + B_DECLARE_EXTERN_FUNCTION)
+    __store__(x86_64_should_warn_unused_extern vtable + B_SHOULD_WARN_UNUSED_EXTERN)
+    __store__(x86_64_begin_function vtable + B_BEGIN_FUNCTION)
+    __store__(x86_64_end_function vtable + B_END_FUNCTION)
+    __store__(x86_64_set_reachable_functions vtable + B_SET_REACHABLE_FUNCTIONS)
+    __store__(x86_64_load_param vtable + B_LOAD_PARAM)
+    __store__(x86_64_alloc_local vtable + B_ALLOC_LOCAL)
+    __store__(x86_64_load_local vtable + B_LOAD_LOCAL)
+    __store__(x86_64_store_local vtable + B_STORE_LOCAL)
+    __store__(x86_64_push_const_i64 vtable + B_PUSH_CONST_I64)
+    __store__(x86_64_push_void vtable + B_PUSH_VOID)
+    __store__(x86_64_push_fn_ref vtable + B_PUSH_FN_REF)
+    __store__(x86_64_pop_value vtable + B_POP_VALUE)
+    __store__(x86_64_save_value vtable + B_SAVE_VALUE)
+    __store__(x86_64_restore_value vtable + B_RESTORE_VALUE)
+    __store__(x86_64_unary_op vtable + B_UNARY_OP)
+    __store__(x86_64_binary_op vtable + B_BINARY_OP)
+    __store__(x86_64_pipe_call vtable + B_PIPE_CALL)
+    __store__(x86_64_load_mem vtable + B_LOAD_MEM)
+    __store__(x86_64_store_mem vtable + B_STORE_MEM)
+    __store__(x86_64_signed_shr vtable + B_SIGNED_SHR)
+    __store__(x86_64_call_direct vtable + B_CALL_DIRECT)
+    __store__(x86_64_call_indirect vtable + B_CALL_INDIRECT)
+    __store__(x86_64_begin_if vtable + B_BEGIN_IF)
+    __store__(x86_64_begin_else vtable + B_BEGIN_ELSE)
+    __store__(x86_64_end_if vtable + B_END_IF)
+    __store__(x86_64_begin_loop vtable + B_BEGIN_LOOP)
+    __store__(x86_64_begin_loop_body vtable + B_BEGIN_LOOP_BODY)
+    __store__(x86_64_end_loop vtable + B_END_LOOP)
+    __store__(x86_64_emit_break vtable + B_EMIT_BREAK)
+    __store__(x86_64_emit_continue vtable + B_EMIT_CONTINUE)
+    __store__(x86_64_emit_return vtable + B_EMIT_RETURN)
+    __store__(x86_64_is_intrinsic vtable + B_IS_INTRINSIC)
+    __store__(x86_64_intrinsic_arity vtable + B_INTRINSIC_ARITY)
+    __store__(x86_64_intrinsic_static_arg_indices vtable + B_INTRINSIC_STATIC_ARG_INDICES)
+    __store__(x86_64_emit_intrinsic vtable + B_EMIT_INTRINSIC)
+    __store__(x86_64_max_call_args vtable + B_MAX_CALL_ARGS)
+    __store__(x86_64_get_builtin_constants vtable + B_GET_BUILTIN_CONSTANTS)
     return void
 }

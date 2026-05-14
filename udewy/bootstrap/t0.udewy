@@ -1,0 +1,770 @@
+import p"allocator.udewy"
+import p"strings.udewy"
+import p"utils.udewy"
+import p"tokens.udewy"
+
+# ============================================================================
+# Diagnostics
+# ============================================================================
+
+let error = (src:int src_len:int idx:int msg:int msg_len:int):>void => {
+    let line:int = 1
+    let col:int = 1
+    let i:int = 0
+    loop i <? idx {
+        if __load_u8__(src + i) =? 10 { # '\n'
+            line = line + 1
+            col = 1
+        } else {
+            col = col + 1
+        }
+        i = i + 1
+    }
+
+    let err_msg:int = "Error at line "
+    sys_eprint(err_msg __load__(err_msg - 8))
+    let line_str:int = int_to_str(line)
+    sys_eprint(line_str __load__(line_str - 8))
+    let col_msg:int = ", column "
+    sys_eprint(col_msg __load__(col_msg - 8))
+    let col_str:int = int_to_str(col)
+    sys_eprint(col_str __load__(col_str - 8))
+    let colon_msg:int = ": "
+    sys_eprint(colon_msg __load__(colon_msg - 8))
+    sys_eprint(msg msg_len)
+    let newline:int = "\n"
+    sys_eprint(newline 1)
+    sys_exit(1)
+    return void
+}
+
+# ============================================================================
+# Import preprocessing
+# ============================================================================
+
+let is_horizontal_whitespace = (c:int):>bool => {
+    return (c =? 32) or (c =? 9) # ' ' or '\t'
+}
+
+let is_vertical_whitespace = (c:int):>bool => {
+    return (c =? 10) or (c =? 13) # '\n' or '\r'
+}
+
+let is_whitespace = (c:int):>bool => {
+    return is_horizontal_whitespace(c) or is_vertical_whitespace(c)
+}
+
+let is_alpha = (c:int):>bool => {
+    return ((c >=? 65) and (c <=? 90)) or ((c >=? 97) and (c <=? 122)) # 'A'-'Z' or 'a'-'z'
+}
+
+let is_digit = (c:int):>bool => {
+    return (c >=? 48) and (c <=? 57) # '0'-'9'
+}
+
+let is_ident_start = (c:int):>bool => {
+    return is_alpha(c) or (c =? 95) # '_'
+}
+
+let is_ident = (c:int):>bool => {
+    return is_ident_start(c) or is_digit(c)
+}
+
+let is_hex = (c:int):>bool => {
+    return is_digit(c) or ((c >=? 65) and (c <=? 70)) or ((c >=? 97) and (c <=? 102)) # 'A'-'F' or 'a'-'f'
+}
+
+let hex_value = (c:int):>int => {
+    if (c >=? 48) and (c <=? 57) {
+        return c - 48
+    }
+    if (c >=? 65) and (c <=? 70) {
+        return c - 65 + 10
+    }
+    if (c >=? 97) and (c <=? 102) {
+        return c - 97 + 10
+    }
+    # Should not happen if is_hex was checked
+    sys_exit(1)
+    return 0
+}
+
+let skip_whitespace = (src:int src_len:int idx:int):>int => {
+    loop idx <? src_len {
+        if not is_whitespace(__load_u8__(src + idx)) {
+            break
+        }
+        idx = idx + 1
+    }
+    return idx
+}
+
+let skip_comment = (src:int src_len:int idx:int):>int => {
+    if idx <? src_len {
+        if __load_u8__(src + idx) =? 35 { # '#'
+            idx = idx + 1
+            loop idx <? src_len {
+                if __load_u8__(src + idx) =? 10 { # '\n'
+                    break
+                }
+                idx = idx + 1
+            }
+        }
+    }
+    return idx
+}
+
+let skip_trivia = (src:int src_len:int idx:int):>int => {
+    loop idx <? src_len {
+        let next_idx:int = skip_comment(src src_len skip_whitespace(src src_len idx))
+        if next_idx =? idx {
+            return idx
+        }
+        idx = next_idx
+    }
+    return idx
+}
+
+let string_end = (src:int src_len:int start:int):>int => {
+    if __load_u8__(src + start) not=? 34 { # '"'
+        let msg:int = "INTERNAL ERROR: Expected string"
+        error(src src_len start msg __load__(msg - 8))
+    }
+
+    let idx:int = start + 1
+    loop idx <? src_len {
+        let c:int = __load_u8__(src + idx)
+        if c =? 34 { # '"'
+            break
+        }
+        if (c =? 123) or (c =? 125) { # '{' or '}'
+            let msg:int = "interpolation not supported in udewy strings"
+            error(src src_len idx msg __load__(msg - 8))
+        }
+        if c =? 92 { # '\\'
+            idx = idx + 1
+            if idx >=? src_len {
+                let msg:int = "unterminated string"
+                error(src src_len idx msg __load__(msg - 8))
+            }
+        }
+        idx = idx + 1
+    }
+    if (idx >=? src_len) or (__load_u8__(src + idx) not=? 34) {
+        let msg:int = "unterminated string"
+        error(src src_len idx msg __load__(msg - 8))
+    }
+    return idx + 1
+}
+
+# LoadedProgram struct
+const LOADED_PROG_SOURCE:int = 0
+const LOADED_PROG_LINK_ARTIFACTS:int = 8
+const LOADED_PROG_IMPORTED_SOURCES:int = 16
+const LOADED_PROG_SIZE:int = 24
+
+let loaded_program_new = (source:int link_artifacts:int imported_sources:int):>int => {
+    let lp:int = arena_alloc(LOADED_PROG_SIZE)
+    __store__(source lp + LOADED_PROG_SOURCE)
+    __store__(link_artifacts lp + LOADED_PROG_LINK_ARTIFACTS)
+    __store__(imported_sources lp + LOADED_PROG_IMPORTED_SOURCES)
+    return lp
+}
+
+# LoadState struct
+const LOAD_STATE_IMPORTED_SOURCES:int = 0
+const LOAD_STATE_IMPORTED_ARTIFACTS:int = 8
+const LOAD_STATE_SIZE:int = 16
+
+let load_state_new = ():>int => {
+    let ls:int = arena_alloc(LOAD_STATE_SIZE)
+    __store__(map_new(16) ls + LOAD_STATE_IMPORTED_SOURCES)
+    __store__(map_new(16) ls + LOAD_STATE_IMPORTED_ARTIFACTS)
+    return ls
+}
+
+let consume_directive_line_end = (src:int src_len:int idx:int context:int context_len:int):>int => {
+    loop idx <? src_len {
+        if not is_horizontal_whitespace(__load_u8__(src + idx)) {
+            break
+        }
+        idx = idx + 1
+    }
+    idx = skip_comment(src src_len idx)
+    if idx <? src_len {
+        if not is_vertical_whitespace(__load_u8__(src + idx)) {
+            let msg:int = "Unexpected trailing content after directive"
+            error(src src_len idx msg __load__(msg - 8))
+        }
+    }
+    return skip_whitespace(src src_len idx)
+}
+
+# Returns 0 if no import, else returns a pointer to a struct with path and next_idx
+const PARSED_IMPORT_PATH:int = 0
+const PARSED_IMPORT_NEXT_IDX:int = 8
+const PARSED_IMPORT_SIZE:int = 16
+
+let parse_import_directive = (src:int src_len:int idx:int):>int => {
+    let import_str:int = "import"
+    let import_len:int = 6
+    if idx + import_len >? src_len {
+        return 0
+    }
+    if not str_eq(src + idx import_len import_str import_len) {
+        return 0
+    }
+
+    let end_kw:int = idx + 6
+    if end_kw <? src_len {
+        if is_ident(__load_u8__(src + end_kw)) {
+            return 0
+        }
+    }
+
+    idx = end_kw
+    loop idx <? src_len {
+        if not is_horizontal_whitespace(__load_u8__(src + idx)) {
+            break
+        }
+        idx = idx + 1
+    }
+
+    if (idx >=? src_len) or (__load_u8__(src + idx) not=? 112) or (idx + 1 >=? src_len) or (__load_u8__(src + idx + 1) not=? 34) {
+        let msg:int = "Expected path string after import"
+        error(src src_len end_kw msg __load__(msg - 8))
+    }
+
+    let string_start:int = idx + 1
+    let end_idx:int = string_end(src src_len string_start)
+    let import_path:int = str_new(src + string_start + 1 end_idx - string_start - 2)
+    let context:int = "import"
+    let next_idx:int = consume_directive_line_end(src src_len end_idx context __load__(context - 8))
+    
+    let res:int = arena_alloc(PARSED_IMPORT_SIZE)
+    __store__(import_path res + PARSED_IMPORT_PATH)
+    __store__(next_idx res + PARSED_IMPORT_NEXT_IDX)
+    return res
+}
+
+# Forward declaration
+# let load_program_internal = (source_path:int state:int):>int => extern
+
+let path_suffix_is_udewy = (path:int path_len:int):>bool => {
+    let suffix:int = ".udewy"
+    let suffix_len:int = 6
+    if path_len <? suffix_len {
+        return false
+    }
+    return str_eq(path + path_len - suffix_len suffix_len suffix suffix_len)
+}
+
+# We need a way to resolve paths. For now, we just assume the import path is relative to the current working directory,
+# or we just use the import path as is, since we don't have full path resolution in udewy yet.
+# In a real compiler we'd join source_dir and import_path.
+let resolve_path = (source_dir:int import_path:int):>int => {
+    # Simplification: just return import_path for now, or concatenate if source_dir is not empty
+    # If source_dir is empty, return import_path
+    let dir_len:int = __load__(source_dir - 8)
+    if dir_len =? 0 {
+        return import_path
+    }
+    let sep:int = "/"
+    let tmp:int = str_concat(source_dir sep)
+    return str_concat(tmp import_path)
+}
+
+let get_parent_dir = (path:int):>int => {
+    let len:int = __load__(path - 8)
+    let i:int = len - 1
+    loop i >=? 0 {
+        if __load_u8__(path + i) =? 47 { # '/'
+            return str_new(path i)
+        }
+        i = i - 1
+    }
+    return str_new("" 0)
+}
+
+let load_imported_path = (import_path_str:int source_dir:int state:int):>int => {
+    let import_path:int = resolve_path(source_dir import_path_str)
+    let import_path_len:int = __load__(import_path - 8)
+    
+    if path_suffix_is_udewy(import_path import_path_len) {
+        let imported_sources_map:int = __load__(state + LOAD_STATE_IMPORTED_SOURCES)
+        if map_get(imported_sources_map import_path import_path_len 0) {
+            return loaded_program_new(str_new("" 0) vec_new(0) vec_new(0))
+        }
+        let loaded:int = load_program_internal(import_path state)
+        
+        let new_imported_sources:int = vec_new(1)
+        vec_push(new_imported_sources import_path)
+        let old_imported_sources:int = __load__(loaded + LOADED_PROG_IMPORTED_SOURCES)
+        let old_len:int = vec_len(old_imported_sources)
+        let i:int = 0
+        loop i <? old_len {
+            vec_push(new_imported_sources vec_get(old_imported_sources i))
+            i = i + 1
+        }
+        
+        return loaded_program_new(
+            __load__(loaded + LOADED_PROG_SOURCE)
+            __load__(loaded + LOADED_PROG_LINK_ARTIFACTS)
+            new_imported_sources
+        )
+    }
+    
+    let imported_artifacts_map:int = __load__(state + LOAD_STATE_IMPORTED_ARTIFACTS)
+    if map_get(imported_artifacts_map import_path import_path_len 0) {
+        return loaded_program_new(str_new("" 0) vec_new(0) vec_new(0))
+    }
+    
+    map_set(imported_artifacts_map import_path import_path_len 1)
+    let link_artifacts:int = vec_new(1)
+    vec_push(link_artifacts import_path)
+    return loaded_program_new(str_new("" 0) link_artifacts vec_new(0))
+}
+
+let load_program_internal = (source_path:int state:int):>int => {
+    let source_path_len:int = __load__(source_path - 8)
+    let imported_sources_map:int = __load__(state + LOAD_STATE_IMPORTED_SOURCES)
+    if map_get(imported_sources_map source_path source_path_len 0) {
+        return loaded_program_new(str_new("" 0) vec_new(0) vec_new(0))
+    }
+    map_set(imported_sources_map source_path source_path_len 1)
+
+    let cstr_path:int = str_to_cstr(source_path)
+    let src_len_ptr:int = arena_alloc(8)
+    let src_buf:int = sys_read_file(cstr_path src_len_ptr)
+    if src_buf =? 0 {
+        let msg:int = "Error: File not found: "
+        sys_eprint(msg __load__(msg - 8))
+        sys_eprint(source_path source_path_len)
+        let nl:int = "\n"
+        sys_eprint(nl 1)
+        sys_exit(1)
+    }
+    let src_len:int = __load__(src_len_ptr)
+    
+    let source:int = str_new(src_buf src_len)
+    let source_dir:int = get_parent_dir(source_path)
+    
+    let imported_source_parts:int = vec_new(4)
+    let imported_source_paths:int = vec_new(4)
+    let link_artifacts:int = vec_new(4)
+    let body_parts:int = vec_new(4)
+    
+    let idx:int = 0
+    let body_cursor:int = 0
+    
+    loop true {
+        idx = skip_trivia(source src_len idx)
+        if idx >=? src_len {
+            break
+        }
+        
+        let parsed_import:int = parse_import_directive(source src_len idx)
+        if parsed_import =? 0 {
+            break
+        }
+        
+        let part:int = str_new(source + body_cursor idx - body_cursor)
+        vec_push(body_parts part)
+        
+        let import_path:int = __load__(parsed_import + PARSED_IMPORT_PATH)
+        idx = __load__(parsed_import + PARSED_IMPORT_NEXT_IDX)
+        
+        let loaded:int = load_imported_path(import_path source_dir state)
+        let loaded_src:int = __load__(loaded + LOADED_PROG_SOURCE)
+        if __load__(loaded_src - 8) >? 0 {
+            vec_push(imported_source_parts loaded_src)
+        }
+        
+        let loaded_links:int = __load__(loaded + LOADED_PROG_LINK_ARTIFACTS)
+        let links_len:int = vec_len(loaded_links)
+        let i:int = 0
+        loop i <? links_len {
+            vec_push(link_artifacts vec_get(loaded_links i))
+            i = i + 1
+        }
+        
+        let loaded_paths:int = __load__(loaded + LOADED_PROG_IMPORTED_SOURCES)
+        let paths_len:int = vec_len(loaded_paths)
+        let j:int = 0
+        loop j <? paths_len {
+            vec_push(imported_source_paths vec_get(loaded_paths j))
+            j = j + 1
+        }
+        
+        body_cursor = idx
+    }
+    
+    let final_part:int = str_new(source + body_cursor src_len - body_cursor)
+    vec_push(body_parts final_part)
+    
+    let combined_source:int = str_new("" 0)
+    let nl:int = "\n"
+    
+    let parts_len:int = vec_len(imported_source_parts)
+    let i:int = 0
+    loop i <? parts_len {
+        combined_source = str_concat(combined_source vec_get(imported_source_parts i))
+        combined_source = str_concat(combined_source nl)
+        i = i + 1
+    }
+    
+    let body_len:int = vec_len(body_parts)
+    let j:int = 0
+    loop j <? body_len {
+        combined_source = str_concat(combined_source vec_get(body_parts j))
+        j = j + 1
+    }
+    
+    return loaded_program_new(combined_source link_artifacts imported_source_paths)
+}
+
+let load_program_source = (source_path:int):>int => {
+    let state:int = load_state_new()
+    let loaded:int = load_program_internal(source_path state)
+    return __load__(loaded + LOADED_PROG_SOURCE)
+}
+
+# ============================================================================
+# Tokenizer
+# ============================================================================
+
+let bracketed_type_end = (src:int src_len:int start:int):>int => {
+    if __load_u8__(src + start) not=? 91 { # '['
+        let msg:int = "bracketed_type_end expects '['"
+        error(src src_len start msg __load__(msg - 8))
+    }
+
+    let stack:int = vec_new(4)
+    vec_push(stack 91) # '['
+    let i:int = start + 1
+
+    loop i <? src_len {
+        let stack_len:int = vec_len(stack)
+        if stack_len =? 0 {
+            break
+        }
+
+        let c:int = __load_u8__(src + i)
+        if c =? 35 { # '#'
+            let msg:int = "udewy doesn't support comments inside bracketed type annotations"
+            error(src src_len i msg __load__(msg - 8))
+        }
+        if c =? 34 { # '"'
+            i = string_end(src src_len i)
+            continue
+        }
+        if (c =? 40) or (c =? 91) or (c =? 123) or (c =? 60) { # '(', '[', '{', '<'
+            vec_push(stack c)
+            i = i + 1
+            continue
+        }
+        if (c =? 41) or (c =? 93) or (c =? 125) or (c =? 62) { # ')', ']', '}', '>'
+            let last_c:int = vec_get(stack stack_len - 1)
+            let expected:int = 0
+            if c =? 41 { expected = 40 }
+            if c =? 93 { expected = 91 }
+            if c =? 125 { expected = 123 }
+            if c =? 62 { expected = 60 }
+            
+            if last_c not=? expected {
+                let msg:int = "mismatched delimiter inside bracketed type annotation"
+                error(src src_len i msg __load__(msg - 8))
+            }
+            
+            # pop
+            __store__(stack_len - 1 stack + VEC_LENGTH)
+            i = i + 1
+            continue
+        }
+        i = i + 1
+    }
+
+    if vec_len(stack) >? 0 {
+        let msg:int = "unterminated bracketed type annotation"
+        error(src src_len start msg __load__(msg - 8))
+    }
+    return i
+}
+
+let is_possible_in_place_op = (kind:int):>bool => {
+    if kind =? TK_PLUS { return true }
+    if kind =? TK_MINUS { return true }
+    if kind =? TK_MUL { return true }
+    if kind =? TK_IDIV { return true }
+    if kind =? TK_MOD { return true }
+    if kind =? TK_EQ { return true }
+    if kind =? TK_NOT_EQ { return true }
+    if kind =? TK_GT { return true }
+    if kind =? TK_GT_EQ { return true }
+    if kind =? TK_LT { return true }
+    if kind =? TK_LT_EQ { return true }
+    if kind =? TK_AND { return true }
+    if kind =? TK_OR { return true }
+    if kind =? TK_XOR { return true }
+    if kind =? TK_NOT { return true }
+    if kind =? TK_LEFT_SHIFT { return true }
+    if kind =? TK_RIGHT_SHIFT { return true }
+    return false
+}
+
+let tokenize = (src:int src_len:int):>int => {
+    let i:int = 0
+    let toks:int = vec_new(64)
+    
+    # Pre-build keyword map
+    let keywords:int = map_new(32)
+    map_set(keywords "let" 3 TK_LET)
+    map_set(keywords "const" 5 TK_CONST)
+    map_set(keywords "and" 3 TK_AND)
+    map_set(keywords "or" 2 TK_OR)
+    map_set(keywords "xor" 3 TK_XOR)
+    map_set(keywords "not" 3 TK_NOT)
+    map_set(keywords "true" 4 TK_NUMBER)
+    map_set(keywords "false" 5 TK_NUMBER)
+    map_set(keywords "if" 2 TK_IF)
+    map_set(keywords "loop" 4 TK_LOOP)
+    map_set(keywords "else" 4 TK_ELSE)
+    map_set(keywords "return" 6 TK_RETURN)
+    map_set(keywords "break" 5 TK_BREAK)
+    map_set(keywords "continue" 8 TK_CONTINUE)
+    map_set(keywords "extern" 6 TK_EXTERN)
+    map_set(keywords "transmute" 9 TK_TRANSMUTE)
+    
+    let true_val:int = 0xFFFFFFFFFFFFFFFF
+    let false_val:int = 0
+
+    loop i <? src_len {
+        let toks_len:int = vec_len(toks)
+        if toks_len >? 1 {
+            let prev_tok:int = vec_get(toks toks_len - 2)
+            let prev_kind:int = __load__(prev_tok + TOK_KIND)
+            if (prev_kind =? _TK_COLON) or (prev_kind =? _TK_FN_COLON) {
+                let msg:int = "colon must be followed by a type annotation"
+                error(src src_len i msg __load__(msg - 8))
+            }
+        }
+        
+        let c:int = __load_u8__(src + i)
+        
+        if is_whitespace(c) {
+            i = i + 1
+            continue
+        }
+        
+        if c =? 35 { # '#'
+            i = i + 1
+            loop i <? src_len {
+                if __load_u8__(src + i) =? 10 { # '\n'
+                    break
+                }
+                i = i + 1
+            }
+            continue
+        }
+        
+        if is_ident_start(c) {
+            let start:int = i
+            i = i + 1
+            loop i <? src_len {
+                if not is_ident(__load_u8__(src + i)) {
+                    break
+                }
+                i = i + 1
+            }
+            let text_len:int = i - start
+            let text:int = src + start
+            
+            let kw_kind_ptr:int = arena_alloc(8)
+            if map_get(keywords text text_len kw_kind_ptr) {
+                let kw_kind:int = __load__(kw_kind_ptr)
+                let val:int = 0
+                if kw_kind =? TK_NUMBER {
+                    if str_eq(text text_len "true" 4) {
+                        val = true_val
+                    } else {
+                        val = false_val
+                    }
+                }
+                vec_push(toks tok_new(kw_kind val start))
+            } else if str_eq(text text_len "import" 6) {
+                let msg:int = "`import` is a preprocessing directive and may only appear in the leading import prelude"
+                error(src src_len start msg __load__(msg - 8))
+            } else if (i <? src_len) and (__load_u8__(src + i) =? 40) { # '('
+                vec_push(toks tok_new(TK_IDENT_CALL i - start start))
+                i = i + 1
+            } else if (toks_len >? 0) and (__load__(vec_get(toks toks_len - 1) + TOK_KIND) =? _TK_COLON) {
+                __store__(toks_len - 1 toks + VEC_LENGTH) # pop
+                vec_push(toks tok_new(TK_TYPE i - start start))
+            } else if (toks_len >? 0) and (__load__(vec_get(toks toks_len - 1) + TOK_KIND) =? _TK_FN_COLON) {
+                __store__(toks_len - 1 toks + VEC_LENGTH) # pop
+                vec_push(toks tok_new(TK_FN_TYPE i - start start))
+            } else if str_eq(text text_len "void" 4) {
+                vec_push(toks tok_new(TK_VOID 0 start))
+            } else {
+                vec_push(toks tok_new(TK_IDENT i - start start))
+            }
+            continue
+        }
+        
+        if (src_len - i >=? 2) and (__load_u8__(src + i) =? 48) and (__load_u8__(src + i + 1) =? 120) { # '0x'
+            let start:int = i
+            i = i + 2
+            let val:int = 0
+            loop i <? src_len {
+                let hc:int = __load_u8__(src + i)
+                if is_hex(hc) or (hc =? 95) { # '_'
+                    if hc not=? 95 {
+                        val = (val * 16) + hex_value(hc)
+                    }
+                    i = i + 1
+                } else {
+                    break
+                }
+            }
+            vec_push(toks tok_new(TK_NUMBER val start))
+            continue
+        }
+        
+        if (src_len - i >=? 2) and (__load_u8__(src + i) =? 48) and (__load_u8__(src + i + 1) =? 98) { # '0b'
+            let start:int = i
+            i = i + 2
+            let val:int = 0
+            loop i <? src_len {
+                let bc:int = __load_u8__(src + i)
+                if (bc =? 48) or (bc =? 49) or (bc =? 95) { # '0', '1', '_'
+                    if bc not=? 95 {
+                        val = (val * 2) + (bc - 48)
+                    }
+                    i = i + 1
+                } else {
+                    break
+                }
+            }
+            vec_push(toks tok_new(TK_NUMBER val start))
+            continue
+        }
+        
+        if is_digit(c) {
+            let start:int = i
+            let val:int = 0
+            loop i <? src_len {
+                let dc:int = __load_u8__(src + i)
+                if is_digit(dc) or (dc =? 95) { # '_'
+                    if dc not=? 95 {
+                        val = (val * 10) + (dc - 48)
+                    }
+                    i = i + 1
+                } else {
+                    break
+                }
+            }
+            vec_push(toks tok_new(TK_NUMBER val start))
+            continue
+        }
+        
+        if c =? 34 { # '"'
+            let start:int = i
+            i = string_end(src src_len start)
+            vec_push(toks tok_new(TK_STRING i - start start))
+            continue
+        }
+        
+        if (c =? 91) and (toks_len >? 0) and (__load__(vec_get(toks toks_len - 1) + TOK_KIND) =? _TK_COLON) { # '['
+            let start:int = i
+            i = bracketed_type_end(src src_len start)
+            __store__(toks_len - 1 toks + VEC_LENGTH) # pop
+            vec_push(toks tok_new(TK_TYPE i - start start))
+            continue
+        }
+        
+        if (src_len - i >=? 2) and (__load_u8__(src + i) =? 41) and (__load_u8__(src + i + 1) =? 40) { # ')('
+            vec_push(toks tok_new(TK_RIGHT_PAREN 0 i))
+            vec_push(toks tok_new(TK_EXPR_CALL 0 i))
+            i = i + 2
+            continue
+        }
+        
+        if (src_len - i >=? 2) and (__load_u8__(src + i) =? 61) and (__load_u8__(src + i + 1) =? 63) { # '=?'
+            if (toks_len >? 0) and (__load__(vec_get(toks toks_len - 1) + TOK_KIND) =? TK_NOT) {
+                __store__(toks_len - 1 toks + VEC_LENGTH) # pop
+                vec_push(toks tok_new(TK_NOT_EQ 0 i))
+                i = i + 2
+                continue
+            }
+        }
+        
+        if (c =? 61) and (toks_len >? 0) { # '='
+            let prev_tok:int = vec_get(toks toks_len - 1)
+            let prev_kind:int = __load__(prev_tok + TOK_KIND)
+            if is_possible_in_place_op(prev_kind) {
+                __store__(toks_len - 1 toks + VEC_LENGTH) # pop
+                vec_push(toks tok_new(TK_UPDATE_ASSIGN prev_kind i))
+                i = i + 1
+                continue
+            }
+        }
+        
+        let matched_symbol:bool = false
+        
+        # >=?
+        if (src_len - i >=? 3) and str_eq(src + i 3 ">=?" 3) { vec_push(toks tok_new(TK_GT_EQ 0 i)) i = i + 3 matched_symbol = true }
+        else if (src_len - i >=? 3) and str_eq(src + i 3 "<=?" 3) { vec_push(toks tok_new(TK_LT_EQ 0 i)) i = i + 3 matched_symbol = true }
+        else if (src_len - i >=? 2) and str_eq(src + i 2 "//" 2) { vec_push(toks tok_new(TK_IDIV 0 i)) i = i + 2 matched_symbol = true }
+        else if (src_len - i >=? 2) and str_eq(src + i 2 "=?" 2) { vec_push(toks tok_new(TK_EQ 0 i)) i = i + 2 matched_symbol = true }
+        else if (src_len - i >=? 2) and str_eq(src + i 2 ">?" 2) { vec_push(toks tok_new(TK_GT 0 i)) i = i + 2 matched_symbol = true }
+        else if (src_len - i >=? 2) and str_eq(src + i 2 "<?" 2) { vec_push(toks tok_new(TK_LT 0 i)) i = i + 2 matched_symbol = true }
+        else if (src_len - i >=? 2) and str_eq(src + i 2 ":>" 2) { vec_push(toks tok_new(_TK_FN_COLON 0 i)) i = i + 2 matched_symbol = true }
+        else if (src_len - i >=? 2) and str_eq(src + i 2 "=>" 2) { vec_push(toks tok_new(TK_FN_ARROW 0 i)) i = i + 2 matched_symbol = true }
+        else if (src_len - i >=? 2) and str_eq(src + i 2 "|>" 2) { vec_push(toks tok_new(TK_PIPE 0 i)) i = i + 2 matched_symbol = true }
+        else if (src_len - i >=? 2) and str_eq(src + i 2 "<<" 2) { vec_push(toks tok_new(TK_LEFT_SHIFT 0 i)) i = i + 2 matched_symbol = true }
+        else if (src_len - i >=? 2) and str_eq(src + i 2 ">>" 2) { vec_push(toks tok_new(TK_RIGHT_SHIFT 0 i)) i = i + 2 matched_symbol = true }
+        else if c =? 43 { vec_push(toks tok_new(TK_PLUS 0 i)) i = i + 1 matched_symbol = true } # '+'
+        else if c =? 45 { vec_push(toks tok_new(TK_MINUS 0 i)) i = i + 1 matched_symbol = true } # '-'
+        else if c =? 42 { vec_push(toks tok_new(TK_MUL 0 i)) i = i + 1 matched_symbol = true } # '*'
+        else if c =? 37 { vec_push(toks tok_new(TK_MOD 0 i)) i = i + 1 matched_symbol = true } # '%'
+        else if c =? 40 { vec_push(toks tok_new(TK_LEFT_PAREN 0 i)) i = i + 1 matched_symbol = true } # '('
+        else if c =? 41 { vec_push(toks tok_new(TK_RIGHT_PAREN 0 i)) i = i + 1 matched_symbol = true } # ')'
+        else if c =? 123 { vec_push(toks tok_new(TK_LEFT_BRACE 0 i)) i = i + 1 matched_symbol = true } # '\{'
+        else if c =? 125 { vec_push(toks tok_new(TK_RIGHT_BRACE 0 i)) i = i + 1 matched_symbol = true } # '\}'
+        else if c =? 91 { vec_push(toks tok_new(TK_LEFT_BRACKET 0 i)) i = i + 1 matched_symbol = true } # '['
+        else if c =? 93 { vec_push(toks tok_new(TK_RIGHT_BRACKET 0 i)) i = i + 1 matched_symbol = true } # ']'
+        else if c =? 58 { vec_push(toks tok_new(_TK_COLON 0 i)) i = i + 1 matched_symbol = true } # ':'
+        else if c =? 61 { vec_push(toks tok_new(TK_ASSIGN 0 i)) i = i + 1 matched_symbol = true } # '='
+        
+        if matched_symbol {
+            continue
+        }
+        
+        if c =? 60 { # '<'
+            let stack:int = 1
+            let start:int = i
+            i = i + 1
+            loop (i <? src_len) and (stack >? 0) {
+                let tc:int = __load_u8__(src + i)
+                if tc =? 35 { # '#'
+                    let msg:int = "udewy doesn't support comments inside type parameters"
+                    error(src src_len i msg __load__(msg - 8))
+                }
+                if tc =? 60 { stack = stack + 1 }
+                if tc =? 62 { stack = stack - 1 }
+                i = i + 1
+            }
+            if stack not=? 0 {
+                let msg:int = "unterminated type parameter"
+                error(src src_len start msg __load__(msg - 8))
+            }
+            vec_push(toks tok_new(TK_TYPE_PARAM i - start start))
+            continue
+        }
+        
+        let msg:int = "Unrecognized token"
+        error(src src_len i msg __load__(msg - 8))
+    }
+    
+    return toks
+}

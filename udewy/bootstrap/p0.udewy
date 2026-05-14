@@ -1,0 +1,681 @@
+# p0.udewy
+# Direct parser/codegen baseline for the bootstrap compiler.
+
+import p"tokens.udewy"
+import p"backend.udewy"
+import p"utils.udewy"
+import p"strings.udewy"
+
+const LOCAL_SLOT:int = 0
+const LOCAL_IS_CONST:int = 8
+const LOCAL_SIZE:int = 16
+
+const FN_LABEL:int = 0
+const FN_ARITY:int = 8
+const FN_DEFINED:int = 16
+const FN_REFS:int = 24
+const FN_SIZE:int = 32
+
+const GLOBAL_LABEL:int = 0
+const GLOBAL_IS_CONST:int = 8
+const GLOBAL_SIZE:int = 16
+
+let p_toks:int = 0
+let p_src:int = 0
+let p_idx:int = 0
+let p_len:int = 0
+let p_scopes:int = 0
+let p_fn_table:int = 0
+let p_fn_entries:int = 0
+let p_global_table:int = 0
+let p_current_fn:int = 0
+let p_loop_depth:int = 0
+
+let p_fail = (msg:int):>void => {
+    sys_eprint(msg __load__(msg - 8))
+    sys_eprint("\n" 1)
+    sys_exit(1)
+    return void
+}
+
+let p_tok = (idx:int):>int => {
+    if idx >=? p_len { return 0 }
+    return vec_get(p_toks idx)
+}
+
+let p_peek_kind = ():>int => {
+    let t:int = p_tok(p_idx)
+    if t =? 0 { return 0 - 1 }
+    return __load__(t + TOK_KIND)
+}
+
+let p_next = ():>int => {
+    let t:int = p_tok(p_idx)
+    if t =? 0 {
+        p_fail("Error: unexpected EOF")
+    }
+    p_idx = p_idx + 1
+    return t
+}
+
+let p_expect = (kind:int):>int => {
+    let t:int = p_next()
+    if __load__(t + TOK_KIND) not=? kind {
+        sys_eprint("Error: expected token " 22)
+        let expected:int = int_to_str(kind)
+        sys_eprint(expected __load__(expected - 8))
+        sys_eprint(", got " 6)
+        let got:int = int_to_str(__load__(t + TOK_KIND))
+        sys_eprint(got __load__(got - 8))
+        sys_eprint("\n" 1)
+        sys_exit(1)
+    }
+    return t
+}
+
+let p_tok_text = (tok:int):>int => {
+    return p_src + __load__(tok + TOK_START)
+}
+
+let p_tok_len = (tok:int):>int => {
+    return __load__(tok + TOK_VALUE)
+}
+
+let p_tok_string = (tok:int):>int => {
+    return str_new(p_tok_text(tok) p_tok_len(tok))
+}
+
+let p_is_main = (name:int name_len:int):>bool => {
+    return str_eq(name name_len "main" 4)
+}
+
+let p_push_scope = ():>void => {
+    vec_push(p_scopes map_new(32))
+    return void
+}
+
+let p_pop_scope = ():>void => {
+    let len:int = vec_len(p_scopes)
+    __store__(len - 1 p_scopes + VEC_LENGTH)
+    return void
+}
+
+let p_current_scope = ():>int => {
+    return vec_get(p_scopes vec_len(p_scopes) - 1)
+}
+
+let p_local_new = (slot:int is_const:bool):>int => {
+    let entry:int = arena_alloc(LOCAL_SIZE)
+    __store__(slot entry + LOCAL_SLOT)
+    __store__(is_const entry + LOCAL_IS_CONST)
+    return entry
+}
+
+let p_local_declare = (tok:int slot:int is_const:bool):>void => {
+    let name:int = p_tok_string(tok)
+    map_set(p_current_scope() name __load__(name - 8) p_local_new(slot is_const))
+    return void
+}
+
+let p_local_lookup = (name:int name_len:int):>int => {
+    let i:int = vec_len(p_scopes)
+    loop i >? 0 {
+        i = i - 1
+        let out:int = arena_alloc(8)
+        if map_get(vec_get(p_scopes i) name name_len out) {
+            return __load__(out)
+        }
+    }
+    return 0
+}
+
+let p_global_new = (label_id:int is_const:bool):>int => {
+    let entry:int = arena_alloc(GLOBAL_SIZE)
+    __store__(label_id entry + GLOBAL_LABEL)
+    __store__(is_const entry + GLOBAL_IS_CONST)
+    return entry
+}
+
+let p_global_declare = (tok:int label_id:int is_const:bool):>void => {
+    let name:int = p_tok_string(tok)
+    map_set(p_global_table name __load__(name - 8) p_global_new(label_id is_const))
+    return void
+}
+
+let p_global_lookup = (name:int name_len:int):>int => {
+    let out:int = arena_alloc(8)
+    if map_get(p_global_table name name_len out) {
+        return __load__(out)
+    }
+    return 0
+}
+
+let p_fn_new = (label_id:int arity:int is_defined:bool):>int => {
+    let entry:int = arena_alloc(FN_SIZE)
+    __store__(label_id entry + FN_LABEL)
+    __store__(arity entry + FN_ARITY)
+    __store__(is_defined entry + FN_DEFINED)
+    __store__(vec_new(4) entry + FN_REFS)
+    vec_push(p_fn_entries entry)
+    return entry
+}
+
+let p_fn_lookup = (name:int name_len:int):>int => {
+    let out:int = arena_alloc(8)
+    if map_get(p_fn_table name name_len out) {
+        return __load__(out)
+    }
+    return 0
+}
+
+let p_note_fn_ref = (name:int name_len:int arity:int):>int => {
+    let entry:int = p_fn_lookup(name name_len)
+    if entry =? 0 {
+        let copied:int = str_new(name name_len)
+        let label_id:int = backend_declare_function(copied arity)
+        entry = p_fn_new(label_id arity false)
+        map_set(p_fn_table copied name_len entry)
+    } else if __load__(entry + FN_ARITY) =? (0 - 1) {
+        if arity not=? (0 - 1) {
+            __store__(arity entry + FN_ARITY)
+        }
+    } else if (arity not=? (0 - 1)) and (__load__(entry + FN_ARITY) not=? arity) {
+        p_fail("Error: function used with conflicting arity")
+    }
+    if p_current_fn not=? 0 {
+        vec_push(__load__(p_current_fn + FN_REFS) __load__(entry + FN_LABEL))
+    }
+    return entry
+}
+
+let p_define_fn = (tok:int arity:int):>int => {
+    let name:int = p_tok_text(tok)
+    let name_len:int = p_tok_len(tok)
+    let entry:int = p_fn_lookup(name name_len)
+    if entry =? 0 {
+        let copied:int = str_new(name name_len)
+        let label_id:int = backend_declare_function(copied arity)
+        entry = p_fn_new(label_id arity true)
+        map_set(p_fn_table copied name_len entry)
+    } else {
+        if __load__(entry + FN_DEFINED) {
+            p_fail("Error: function already defined")
+        }
+        if __load__(entry + FN_ARITY) not=? arity {
+            p_fail("Error: function defined with conflicting arity")
+        }
+        __store__(true entry + FN_DEFINED)
+    }
+    return entry
+}
+
+let p_skip_type_annotation = ():>void => {
+    let kind:int = p_peek_kind()
+    if (kind =? TK_TYPE) or (kind =? TK_FN_TYPE) {
+        p_next()
+        if p_peek_kind() =? TK_TYPE_PARAM {
+            p_next()
+        }
+        return void
+    }
+    p_fail("Error: expected type annotation")
+    return void
+}
+
+let p_skip_cast_annotation = ():>void => {
+    if p_peek_kind() =? TK_IDENT {
+        p_next()
+        if p_peek_kind() =? TK_TYPE_PARAM {
+            p_next()
+        }
+        return void
+    }
+    if p_peek_kind() =? TK_TYPE_PARAM {
+        p_next()
+        return void
+    }
+    p_fail("Error: expected transmute type")
+    return void
+}
+
+let p_precedence = (kind:int):>int => {
+    if kind =? TK_PIPE { return 1 }
+    if kind =? TK_OR { return 2 }
+    if kind =? TK_XOR { return 3 }
+    if kind =? TK_AND { return 4 }
+    if (kind =? TK_EQ) or (kind =? TK_NOT_EQ) or (kind =? TK_GT) or (kind =? TK_GT_EQ) or (kind =? TK_LT) or (kind =? TK_LT_EQ) { return 5 }
+    if (kind =? TK_LEFT_SHIFT) or (kind =? TK_RIGHT_SHIFT) { return 6 }
+    if (kind =? TK_PLUS) or (kind =? TK_MINUS) { return 7 }
+    if (kind =? TK_MUL) or (kind =? TK_IDIV) or (kind =? TK_MOD) { return 8 }
+    return 0
+}
+
+let parse_expr = (min_prec:int):>void => {
+    parse_prefix()
+    loop true {
+        let kind:int = p_peek_kind()
+        if kind =? TK_TRANSMUTE {
+            p_next()
+            p_skip_cast_annotation()
+            continue
+        }
+        if kind =? TK_EXPR_CALL {
+            p_next()
+            let arg_count:int = parse_args()
+            backend_call_indirect(arg_count)
+            continue
+        }
+        let prec:int = p_precedence(kind)
+        if (prec =? 0) or (prec <? min_prec) {
+            break
+        }
+        p_next()
+        parse_expr(prec + 1)
+        if kind =? TK_PIPE {
+            backend_pipe_call()
+        } else {
+            backend_binary_op(kind)
+        }
+    }
+    return void
+}
+
+let parse_args = ():>int => {
+    let count:int = 0
+    loop p_peek_kind() not=? TK_RIGHT_PAREN {
+        parse_expr(0)
+        backend_save_value()
+        count = count + 1
+    }
+    p_expect(TK_RIGHT_PAREN)
+    return count
+}
+
+let parse_ident_value = (tok:int):>void => {
+    let name:int = p_tok_text(tok)
+    let name_len:int = p_tok_len(tok)
+    let local:int = p_local_lookup(name name_len)
+    if local not=? 0 {
+        backend_load_local(__load__(local + LOCAL_SLOT))
+        return void
+    }
+    let global:int = p_global_lookup(name name_len)
+    if global not=? 0 {
+        backend_load_global(__load__(global + GLOBAL_LABEL))
+        return void
+    }
+    let first:int = __load_u8__(name)
+    if (first >=? 65) and (first <=? 90) {
+        backend_push_const_i64(0)
+        return void
+    }
+    let fn_entry:int = p_note_fn_ref(name name_len (0 - 1))
+    backend_push_fn_ref(__load__(fn_entry + FN_LABEL))
+    return void
+}
+
+let parse_call = (tok:int):>void => {
+    let name:int = p_tok_text(tok)
+    let name_len:int = p_tok_len(tok)
+    let arg_count:int = parse_args()
+    if backend_is_intrinsic(str_new(name name_len)) {
+        backend_emit_intrinsic(str_new(name name_len) arg_count 0)
+        return void
+    }
+    let fn_entry:int = p_note_fn_ref(name name_len arg_count)
+    backend_call_direct(__load__(fn_entry + FN_LABEL) arg_count)
+    return void
+}
+
+let parse_string_literal = (tok:int):>void => {
+    let len:int = p_tok_len(tok)
+    let start:int = __load__(tok + TOK_START)
+    let label_id:int = backend_intern_string(p_src + start + 1 len - 2)
+    backend_push_string_ref(label_id)
+    return void
+}
+
+let parse_array_literal = ():>void => {
+    let values:int = vec_new(8)
+    loop p_peek_kind() not=? TK_RIGHT_BRACKET {
+        let tok:int = p_next()
+        let kind:int = __load__(tok + TOK_KIND)
+        if kind =? TK_NUMBER {
+            vec_push(values __load__(tok + TOK_VALUE))
+        } else if kind =? TK_STRING {
+            let len:int = p_tok_len(tok)
+            let start:int = __load__(tok + TOK_START)
+            vec_push(values backend_string_ref(backend_intern_string(p_src + start + 1 len - 2)))
+        } else {
+            p_fail("Error: array literals require stable elements")
+        }
+    }
+    p_expect(TK_RIGHT_BRACKET)
+    backend_push_array_ref(backend_intern_array(values))
+    return void
+}
+
+let parse_prefix = ():>void => {
+    let kind:int = p_peek_kind()
+    if kind =? TK_MINUS {
+        p_next()
+        parse_prefix()
+        backend_unary_op(TK_MINUS)
+        return void
+    }
+    if kind =? TK_NOT {
+        p_next()
+        parse_prefix()
+        backend_unary_op(TK_NOT)
+        return void
+    }
+    parse_atom()
+    return void
+}
+
+let parse_atom = ():>void => {
+    let tok:int = p_next()
+    let kind:int = __load__(tok + TOK_KIND)
+    if kind =? TK_NUMBER {
+        backend_push_const_i64(__load__(tok + TOK_VALUE))
+        return void
+    }
+    if kind =? TK_VOID {
+        backend_push_void()
+        return void
+    }
+    if kind =? TK_STRING {
+        parse_string_literal(tok)
+        return void
+    }
+    if kind =? TK_IDENT {
+        parse_ident_value(tok)
+        return void
+    }
+    if kind =? TK_IDENT_CALL {
+        parse_call(tok)
+        return void
+    }
+    if kind =? TK_LEFT_PAREN {
+        parse_expr(0)
+        p_expect(TK_RIGHT_PAREN)
+        return void
+    }
+    if kind =? TK_LEFT_BRACKET {
+        parse_array_literal()
+        return void
+    }
+    p_fail("Error: unexpected token in expression")
+    return void
+}
+
+let parse_var_decl = (is_const:bool):>void => {
+    let name_tok:int = p_expect(TK_IDENT)
+    p_skip_type_annotation()
+    p_expect(TK_ASSIGN)
+    parse_expr(0)
+    let slot:int = backend_alloc_local()
+    p_local_declare(name_tok slot is_const)
+    backend_store_local(slot)
+    return void
+}
+
+let parse_assignment_or_expr = ():>void => {
+    let first:int = p_tok(p_idx)
+    if (first not=? 0) and (__load__(first + TOK_KIND) =? TK_IDENT) {
+        let next:int = p_tok(p_idx + 1)
+        if next not=? 0 {
+            let next_kind:int = __load__(next + TOK_KIND)
+            if (next_kind =? TK_ASSIGN) or (next_kind =? TK_UPDATE_ASSIGN) {
+                p_next()
+                p_next()
+                let name:int = p_tok_text(first)
+                let name_len:int = p_tok_len(first)
+                let local:int = p_local_lookup(name name_len)
+                let global:int = p_global_lookup(name name_len)
+                if next_kind =? TK_UPDATE_ASSIGN {
+                    if local not=? 0 {
+                        backend_load_local(__load__(local + LOCAL_SLOT))
+                    } else if global not=? 0 {
+                        backend_load_global(__load__(global + GLOBAL_LABEL))
+                    } else {
+                        p_fail("Error: unknown assignment target")
+                    }
+                    parse_expr(0)
+                    backend_binary_op(__load__(next + TOK_VALUE))
+                } else {
+                    parse_expr(0)
+                }
+                if local not=? 0 {
+                    backend_store_local(__load__(local + LOCAL_SLOT))
+                    return void
+                }
+                if global not=? 0 {
+                    backend_store_global(__load__(global + GLOBAL_LABEL))
+                    return void
+                }
+                p_fail("Error: unknown assignment target")
+            }
+        }
+    }
+    parse_expr(0)
+    backend_pop_value()
+    return void
+}
+
+let parse_return_statement = ():>bool => {
+    p_expect(TK_RETURN)
+    parse_expr(0)
+    backend_emit_return()
+    return true
+}
+
+let parse_if_statement = ():>bool => {
+    p_expect(TK_IF)
+    parse_expr(0)
+    backend_begin_if()
+    p_expect(TK_LEFT_BRACE)
+    p_push_scope()
+    let then_returns:bool = parse_block()
+    p_pop_scope()
+    let else_returns:bool = false
+    if p_peek_kind() =? TK_ELSE {
+        p_next()
+        backend_begin_else()
+        if p_peek_kind() =? TK_IF {
+            else_returns = parse_if_statement()
+        } else {
+            p_expect(TK_LEFT_BRACE)
+            p_push_scope()
+            else_returns = parse_block()
+            p_pop_scope()
+        }
+    }
+    backend_end_if()
+    return then_returns and else_returns
+}
+
+let parse_loop_statement = ():>bool => {
+    p_expect(TK_LOOP)
+    backend_begin_loop()
+    parse_expr(0)
+    backend_begin_loop_body()
+    p_expect(TK_LEFT_BRACE)
+    p_loop_depth = p_loop_depth + 1
+    p_push_scope()
+    parse_block()
+    p_pop_scope()
+    p_loop_depth = p_loop_depth - 1
+    backend_end_loop()
+    return false
+}
+
+let parse_statement = ():>bool => {
+    let kind:int = p_peek_kind()
+    if kind =? TK_LET {
+        p_next()
+        parse_var_decl(false)
+        return false
+    }
+    if kind =? TK_CONST {
+        p_next()
+        parse_var_decl(true)
+        return false
+    }
+    if kind =? TK_IF {
+        return parse_if_statement()
+    }
+    if kind =? TK_LOOP {
+        return parse_loop_statement()
+    }
+    if kind =? TK_RETURN {
+        return parse_return_statement()
+    }
+    if kind =? TK_BREAK {
+        if p_loop_depth =? 0 { p_fail("Error: break outside loop") }
+        p_next()
+        backend_emit_break()
+        return false
+    }
+    if kind =? TK_CONTINUE {
+        if p_loop_depth =? 0 { p_fail("Error: continue outside loop") }
+        p_next()
+        backend_emit_continue()
+        return false
+    }
+    parse_assignment_or_expr()
+    return false
+}
+
+let parse_block = ():>bool => {
+    let block_returns:bool = false
+    loop p_peek_kind() not=? TK_RIGHT_BRACE {
+        if p_idx >=? p_len {
+            p_fail("Error: unterminated block")
+        }
+        let statement_returns:bool = parse_statement()
+        if statement_returns {
+            block_returns = true
+        }
+    }
+    p_expect(TK_RIGHT_BRACE)
+    return block_returns
+}
+
+let parse_function_decl = (name_tok:int is_extern:bool):>void => {
+    p_expect(TK_LEFT_PAREN)
+    let params:int = vec_new(8)
+    loop p_peek_kind() not=? TK_RIGHT_PAREN {
+        let param_tok:int = p_expect(TK_IDENT)
+        vec_push(params param_tok)
+        p_skip_type_annotation()
+    }
+    p_expect(TK_RIGHT_PAREN)
+    p_skip_type_annotation()
+    p_expect(TK_FN_ARROW)
+    let arity:int = vec_len(params)
+    let fn_name:int = p_tok_string(name_tok)
+    if is_extern or (p_peek_kind() =? TK_EXTERN) {
+        if p_peek_kind() =? TK_EXTERN { p_next() }
+        let label_id:int = backend_declare_extern_function(fn_name arity)
+        let entry:int = p_fn_new(label_id arity true)
+        map_set(p_fn_table fn_name __load__(fn_name - 8) entry)
+        return void
+    }
+    let entry:int = p_define_fn(name_tok arity)
+    p_expect(TK_LEFT_BRACE)
+    p_push_scope()
+    let old_fn:int = p_current_fn
+    p_current_fn = entry
+    let i:int = 0
+    loop i <? arity {
+        let slot:int = backend_alloc_local()
+        p_local_declare(vec_get(params i) slot false)
+        backend_load_param(i)
+        backend_store_local(slot)
+        i = i + 1
+    }
+    backend_begin_function(__load__(entry + FN_LABEL) fn_name arity p_is_main(p_tok_text(name_tok) p_tok_len(name_tok)))
+    let body_returns:bool = parse_block()
+    backend_end_function()
+    p_current_fn = old_fn
+    p_pop_scope()
+    if not body_returns {
+        p_fail("Error: function must explicitly return")
+    }
+    return void
+}
+
+let parse_top_level_decl = ():>void => {
+    let kind:int = p_peek_kind()
+    if (kind not=? TK_LET) and (kind not=? TK_CONST) {
+        p_fail("Error: only declarations allowed at top level")
+    }
+    let is_const:bool = kind =? TK_CONST
+    p_next()
+    let name_tok:int = p_expect(TK_IDENT)
+    if p_peek_kind() =? TK_ASSIGN {
+        p_next()
+        parse_function_decl(name_tok false)
+        return void
+    }
+    p_skip_type_annotation()
+    p_expect(TK_ASSIGN)
+    if p_peek_kind() =? TK_EXTERN {
+        p_next()
+        p_global_declare(name_tok backend_declare_extern_global(p_tok_string(name_tok)) is_const)
+        return void
+    }
+    parse_expr(0)
+    let label_id:int = backend_define_global(p_tok_string(name_tok) 0)
+    p_global_declare(name_tok label_id is_const)
+    backend_store_global(label_id)
+    return void
+}
+
+let p_validate_functions = ():>void => {
+    let i:int = 0
+    let n:int = vec_len(p_fn_entries)
+    loop i <? n {
+        let entry:int = vec_get(p_fn_entries i)
+        if not __load__(entry + FN_DEFINED) {
+            p_fail("Error: undefined function")
+        }
+        i = i + 1
+    }
+    return void
+}
+
+let p_mark_all_functions_reachable = ():>void => {
+    let reachable:int = vec_new(vec_len(p_fn_entries))
+    let i:int = 0
+    loop i <? vec_len(p_fn_entries) {
+        vec_push(reachable __load__(vec_get(p_fn_entries i) + FN_LABEL))
+        i = i + 1
+    }
+    backend_set_reachable_functions(reachable)
+    return void
+}
+
+let parse = (toks:int source:int):>int => {
+    p_toks = toks
+    p_src = source
+    p_idx = 0
+    p_len = vec_len(toks)
+    p_scopes = vec_new(8)
+    p_fn_table = map_new(128)
+    p_fn_entries = vec_new(64)
+    p_global_table = map_new(128)
+    p_current_fn = 0
+    p_loop_depth = 0
+
+    backend_begin_module()
+    p_push_scope()
+    loop p_idx <? p_len {
+        parse_top_level_decl()
+    }
+    p_pop_scope()
+    p_validate_functions()
+    p_mark_all_functions_reachable()
+    return backend_finish_module()
+}

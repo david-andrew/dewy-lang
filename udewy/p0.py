@@ -1572,17 +1572,17 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
     from . import t0, t1
-    from .backend import get_backend, BackendName
+    from .backend import BACKEND_NAMES, get_backend, BackendName
     from typing import cast
     
     # get target from command line arguments
     if '--target' in sys.argv:
         target_idx = sys.argv.index('--target')
-        target = cast(BackendName, sys.argv[target_idx + 1])
+        requested_target = cast(BackendName, sys.argv[target_idx + 1])
         sys.argv.pop(target_idx)
         sys.argv.pop(target_idx)
     else:
-        target = "x86_64"
+        requested_target = None
 
     if len(sys.argv) < 2:
         print("Usage: python -m udewy.p0 [--target TARGET] <file.udewy>")
@@ -1590,8 +1590,12 @@ if __name__ == "__main__":
         sys.exit(1)
     
     source_path = Path(sys.argv[1])
-    backend = get_backend(target)
-    loaded = t0.load_program(source_path)
+    loaded = t0.load_program(
+        source_path,
+        requested_backend=requested_target,
+        known_backends=BACKEND_NAMES,
+    )
+    backend = get_backend(cast(BackendName, loaded.selected_backend))
     backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
     source = loaded.source
     toks = t1.tokenize(source)

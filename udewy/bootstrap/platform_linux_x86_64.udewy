@@ -1,0 +1,82 @@
+# platform_linux_x86_64.udewy
+# Platform implementation for x86_64 Linux
+
+let sys_print = (buf:int len:int):>void => {
+    __syscall3__(SYS_WRITE STDOUT buf len)
+    return void
+}
+
+let sys_eprint = (buf:int len:int):>void => {
+    __syscall3__(SYS_WRITE STDERR buf len)
+    return void
+}
+
+let sys_exit = (code:int):>void => {
+    __syscall1__(SYS_EXIT code)
+    return void
+}
+
+let sys_alloc_pages = (size:int):>int => {
+    let ptr:int = __syscall6__(SYS_MMAP 0 size (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) (0 - 1) 0)
+    # If mmap fails, it returns a value between -4095 and -1. We can check if it's > -4096 in unsigned math.
+    # For simplicity, if ptr is > 0xFFFF_FFFF_FFFF_F000, it's an error.
+    if __unsigned_gt__(ptr 0xFFFFFFFFFFFFF000) {
+        return 0
+    }
+    return ptr
+}
+
+let sys_free_pages = (ptr:int size:int):>void => {
+    __syscall2__(SYS_MUNMAP ptr size)
+    return void
+}
+
+let sys_read_file = (path:int out_len:int):>int => {
+    let fd:int = __syscall3__(SYS_OPEN path O_RDONLY 0)
+    if __unsigned_gt__(fd 0xFFFFFFFFFFFFF000) {
+        return 0
+    }
+
+    # Use lseek to get file size
+    let size:int = __syscall3__(SYS_LSEEK fd 0 2) # SEEK_END = 2
+    __syscall3__(SYS_LSEEK fd 0 0) # SEEK_SET = 0
+
+    if size =? 0 {
+        __syscall1__(SYS_CLOSE fd)
+        __store__(0 out_len)
+        return 0
+    }
+
+    let buf:int = sys_alloc_pages(size)
+    if buf =? 0 {
+        __syscall1__(SYS_CLOSE fd)
+        return 0
+    }
+
+    let bytes_read:int = __syscall3__(SYS_READ fd buf size)
+    __syscall1__(SYS_CLOSE fd)
+
+    if bytes_read not=? size {
+        sys_free_pages(buf size)
+        return 0
+    }
+
+    __store__(size out_len)
+    return buf
+}
+
+let sys_write_file = (path:int buf:int len:int):>int => {
+    let fd:int = __syscall3__(SYS_OPEN path (O_WRONLY or O_CREAT or O_TRUNC) 420) # 420 = 0o644
+    if __unsigned_gt__(fd 0xFFFFFFFFFFFFF000) {
+        return 1
+    }
+
+    let bytes_written:int = __syscall3__(SYS_WRITE fd buf len)
+    __syscall1__(SYS_CLOSE fd)
+
+    if bytes_written not=? len {
+        return 1
+    }
+
+    return 0
+}

@@ -1,0 +1,74 @@
+# compiler.udewy
+# Main compiler driver logic
+
+import p"allocator.udewy"
+import p"utils.udewy"
+import p"strings.udewy"
+import p"t0.udewy"
+import p"p0.udewy"
+import p"backend.udewy"
+import p"backend_x86_64.udewy"
+import p"backend_riscv.udewy"
+import p"backend_arm.udewy"
+import p"backend_wasm.udewy"
+import p"backend_c.udewy"
+
+# Since we don't have command line arguments easily accessible in udewy without
+# platform-specific code (argc/argv are passed differently), we will just hardcode
+# the input file and target for this skeleton, or assume they are provided via globals.
+
+let run_compiler = (input_path:int output_path:int target:int):>void => {
+    sys_print("Starting compiler\n" 18)
+    # Initialize allocator (16MB)
+    arena_init(0x1000000)
+    sys_print("Arena initialized\n" 18)
+
+    let input_path_str:int = str_from_cstr(input_path)
+    let output_path_str:int = str_from_cstr(output_path)
+    let target_str:int = str_from_cstr(target)
+    
+    # Initialize backend vtable
+    let vtable:int = arena_alloc(B_VTABLE_SIZE)
+    sys_print("Vtable allocated\n" 17)
+
+    
+    if str_eq(target_str __load__(target_str - 8) "x86_64" 6) {
+        init_backend_x86_64(vtable)
+    } else if str_eq(target_str __load__(target_str - 8) "riscv" 5) {
+        init_backend_riscv(vtable)
+    } else if str_eq(target_str __load__(target_str - 8) "arm" 3) {
+        init_backend_arm(vtable)
+    } else if str_eq(target_str __load__(target_str - 8) "wasm32" 6) {
+        init_backend_wasm(vtable)
+    } else if str_eq(target_str __load__(target_str - 8) "c" 1) {
+        init_backend_c(vtable)
+    } else {
+        sys_eprint("Error: unknown target\n" 22)
+        sys_exit(1)
+    }
+    
+    backend_set_vtable(vtable)
+    
+    # Load and tokenize
+    sys_print("Loading source\n" 15)
+    let source:int = load_program_source(input_path_str)
+    sys_print("Tokenizing\n" 11)
+    let toks:int = tokenize(source __load__(source - 8))
+    
+    # Parse and generate code
+    sys_print("Parsing\n" 8)
+    let output:int = parse(toks source)
+    
+    sys_print("Writing output\n" 15)
+    let output_len:int = __load__(output - 8)
+    
+    # Write output file
+    if sys_write_file(str_to_cstr(output_path_str) output output_len) not=? 0 {
+        sys_eprint("Error: failed to write output file\n" 35)
+        sys_exit(1)
+    }
+    
+    # Cleanup
+    arena_free_all()
+    return void
+}

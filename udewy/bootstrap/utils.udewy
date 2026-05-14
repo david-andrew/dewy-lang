@@ -1,0 +1,210 @@
+# utils.udewy
+# Dynamic arrays (vectors) and Hash Maps
+
+# ============================================================================
+# Vector
+# ============================================================================
+
+const VEC_CAPACITY:int = 0
+const VEC_LENGTH:int = 8
+const VEC_DATA:int = 16
+const VEC_SIZE:int = 24
+
+let vec_new = (initial_capacity:int):>int => {
+    if initial_capacity <? 4 {
+        initial_capacity = 4
+    }
+    let vec:int = arena_alloc(VEC_SIZE)
+    __store__(initial_capacity vec + VEC_CAPACITY)
+    __store__(0 vec + VEC_LENGTH)
+    let data:int = arena_alloc(initial_capacity * 8)
+    __store__(data vec + VEC_DATA)
+    return vec
+}
+
+let vec_push = (vec:int val:int):>void => {
+    let cap:int = __load__(vec + VEC_CAPACITY)
+    let len:int = __load__(vec + VEC_LENGTH)
+    let data:int = __load__(vec + VEC_DATA)
+    
+    if len =? cap {
+        let new_cap:int = cap * 2
+        let new_data:int = arena_alloc(new_cap * 8)
+        
+        # copy old data
+        let i:int = 0
+        loop i <? len {
+            __store__(__load__(data + (i * 8)) new_data + (i * 8))
+            i = i + 1
+        }
+        
+        data = new_data
+        __store__(new_cap vec + VEC_CAPACITY)
+        __store__(data vec + VEC_DATA)
+    }
+    
+    __store__(val data + (len * 8))
+    __store__(len + 1 vec + VEC_LENGTH)
+    return void
+}
+
+let vec_get = (vec:int index:int):>int => {
+    let data:int = __load__(vec + VEC_DATA)
+    return __load__(data + (index * 8))
+}
+
+let vec_set = (vec:int index:int val:int):>void => {
+    let data:int = __load__(vec + VEC_DATA)
+    __store__(val data + (index * 8))
+    return void
+}
+
+let vec_len = (vec:int):>int => {
+    return __load__(vec + VEC_LENGTH)
+}
+
+# ============================================================================
+# Hash Map (String -> int)
+# ============================================================================
+
+# Map layout:
+# +0: capacity (must be power of 2)
+# +8: length
+# +16: keys array pointer (pointers to strings)
+# +24: values array pointer (ints)
+const MAP_CAPACITY:int = 0
+const MAP_LENGTH:int = 8
+const MAP_KEYS:int = 16
+const MAP_VALUES:int = 24
+const MAP_SIZE:int = 32
+
+let map_new = (initial_capacity:int):>int => {
+    if initial_capacity <? 16 {
+        initial_capacity = 16
+    }
+    let map:int = arena_alloc(MAP_SIZE)
+    __store__(initial_capacity map + MAP_CAPACITY)
+    __store__(0 map + MAP_LENGTH)
+    
+    let keys:int = arena_alloc(initial_capacity * 8)
+    let values:int = arena_alloc(initial_capacity * 8)
+    __store__(keys map + MAP_KEYS)
+    __store__(values map + MAP_VALUES)
+    
+    return map
+}
+
+let str_hash = (str:int len:int):>int => {
+    # FNV-1a hash
+    let hash:int = 0xcbf29ce484222325
+    let i:int = 0
+    loop i <? len {
+        let b:int = __load_u8__(str + i)
+        hash = hash xor b
+        hash = hash * 0x100000001b3
+        i = i + 1
+    }
+    return hash
+}
+
+let str_eq = (str1:int len1:int str2:int len2:int):>bool => {
+    if len1 not=? len2 {
+        return false
+    }
+    let i:int = 0
+    loop i <? len1 {
+        if __load_u8__(str1 + i) not=? __load_u8__(str2 + i) {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+let map_get = (map:int key:int key_len:int out_val:int):>bool => {
+    let cap:int = __load__(map + MAP_CAPACITY)
+    let keys:int = __load__(map + MAP_KEYS)
+    let values:int = __load__(map + MAP_VALUES)
+    
+    let hash:int = str_hash(key key_len)
+    let mask:int = cap - 1
+    let idx:int = hash and mask
+    
+    loop true {
+        let k:int = __load__(keys + (idx * 8))
+        if k =? 0 {
+            return false
+        }
+        let k_len:int = __load__(k - 8)
+        if str_eq(key key_len k k_len) {
+            if out_val not=? 0 {
+                __store__(__load__(values + (idx * 8)) out_val)
+            }
+            return true
+        }
+        idx = (idx + 1) and mask
+    }
+    return false
+}
+
+let map_set = (map:int key:int key_len:int val:int):>void => {
+    let cap:int = __load__(map + MAP_CAPACITY)
+    let len:int = __load__(map + MAP_LENGTH)
+    
+    # Resize if load factor > 0.5
+    if len * 2 >=? cap {
+        let new_cap:int = cap * 2
+        let new_keys:int = arena_alloc(new_cap * 8)
+        let new_values:int = arena_alloc(new_cap * 8)
+        let old_keys:int = __load__(map + MAP_KEYS)
+        let old_values:int = __load__(map + MAP_VALUES)
+        
+        let mask:int = new_cap - 1
+        let i:int = 0
+        loop i <? cap {
+            let k:int = __load__(old_keys + (i * 8))
+            if k not=? 0 {
+                let k_len:int = __load__(k - 8)
+                let hash:int = str_hash(k k_len)
+                let idx:int = hash and mask
+                loop true {
+                    if __load__(new_keys + (idx * 8)) =? 0 {
+                        __store__(k new_keys + (idx * 8))
+                        __store__(__load__(old_values + (i * 8)) new_values + (idx * 8))
+                        break
+                    }
+                    idx = (idx + 1) and mask
+                }
+            }
+            i = i + 1
+        }
+        
+        __store__(new_cap map + MAP_CAPACITY)
+        __store__(new_keys map + MAP_KEYS)
+        __store__(new_values map + MAP_VALUES)
+        cap = new_cap
+    }
+    
+    let keys:int = __load__(map + MAP_KEYS)
+    let values:int = __load__(map + MAP_VALUES)
+    let mask:int = cap - 1
+    let hash:int = str_hash(key key_len)
+    let idx:int = hash and mask
+    
+    loop true {
+        let k:int = __load__(keys + (idx * 8))
+        if k =? 0 {
+            __store__(key keys + (idx * 8))
+            __store__(val values + (idx * 8))
+            __store__(len + 1 map + MAP_LENGTH)
+            return void
+        }
+        let k_len:int = __load__(k - 8)
+        if str_eq(key key_len k k_len) {
+            __store__(val values + (idx * 8))
+            return void
+        }
+        idx = (idx + 1) and mask
+    }
+    return void
+}

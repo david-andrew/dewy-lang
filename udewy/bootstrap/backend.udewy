@@ -1,355 +1,494 @@
-# Backend abstraction for the bootstrap compiler
-# Routes code generation calls to the selected backend
+# backend.udewy
+# Defines the Backend vtable interface and dispatch wrappers
 
-import p"prelude.udewy"
-import p"output.udewy"
-import p"symbols.udewy"
-import p"backend_x86_64.udewy"
-import p"backend_riscv.udewy"
-import p"backend_arm.udewy"
+# Vtable offsets (each is 8 bytes)
+const B_BEGIN_MODULE:int = 0
+const B_FINISH_MODULE:int = 8
+const B_SET_MODULE_INIT:int = 16
+const B_SET_IMPORTED_SOURCES:int = 24
+const B_INTERN_STRING:int = 32
+const B_INTERN_ARRAY:int = 40
+const B_DEFINE_GLOBAL:int = 48
+const B_DECLARE_EXTERN_GLOBAL:int = 56
+const B_INTERN_STATIC:int = 64
+const B_PUSH_STRING_REF:int = 72
+const B_PUSH_ARRAY_REF:int = 80
+const B_PUSH_GLOBAL_REF:int = 88
+const B_PUSH_STATIC_REF:int = 96
+const B_LOAD_GLOBAL:int = 104
+const B_STORE_GLOBAL:int = 112
+const B_FUNCTION_REF:int = 120
+const B_STRING_REF:int = 128
+const B_ARRAY_REF:int = 136
+const B_STATIC_REF:int = 144
+const B_DECLARE_FUNCTION:int = 152
+const B_BIND_EXTERN_FUNCTION:int = 160
+const B_DECLARE_EXTERN_FUNCTION:int = 168
+const B_SHOULD_WARN_UNUSED_EXTERN:int = 176
+const B_BEGIN_FUNCTION:int = 184
+const B_END_FUNCTION:int = 192
+const B_SET_REACHABLE_FUNCTIONS:int = 200
+const B_LOAD_PARAM:int = 208
+const B_ALLOC_LOCAL:int = 216
+const B_LOAD_LOCAL:int = 224
+const B_STORE_LOCAL:int = 232
+const B_PUSH_CONST_I64:int = 240
+const B_PUSH_VOID:int = 248
+const B_PUSH_FN_REF:int = 256
+const B_POP_VALUE:int = 264
+const B_SAVE_VALUE:int = 272
+const B_RESTORE_VALUE:int = 280
+const B_UNARY_OP:int = 288
+const B_BINARY_OP:int = 296
+const B_PIPE_CALL:int = 304
+const B_LOAD_MEM:int = 312
+const B_STORE_MEM:int = 320
+const B_SIGNED_SHR:int = 328
+const B_CALL_DIRECT:int = 336
+const B_CALL_INDIRECT:int = 344
+const B_MAX_CALL_ARGS:int = 352
+const B_BEGIN_IF:int = 360
+const B_BEGIN_ELSE:int = 368
+const B_END_IF:int = 376
+const B_BEGIN_LOOP:int = 384
+const B_BEGIN_LOOP_BODY:int = 392
+const B_END_LOOP:int = 400
+const B_EMIT_BREAK:int = 408
+const B_EMIT_CONTINUE:int = 416
+const B_EMIT_RETURN:int = 424
+const B_IS_INTRINSIC:int = 432
+const B_INTRINSIC_ARITY:int = 440
+const B_INTRINSIC_STATIC_ARG_INDICES:int = 448
+const B_EMIT_INTRINSIC:int = 456
+const B_GET_BUILTIN_CONSTANTS:int = 464
 
-# ============================================================================
-# Backend selection
-# ============================================================================
+const B_VTABLE_SIZE:int = 472
 
-const BACKEND_X86_64:int = 0
-const BACKEND_RISCV:int = 1
-const BACKEND_ARM:int = 2
+let current_backend_vtable:int = 0
 
-let current_backend:int = 0
-
-let backend_set = (backend:int):>void => {
-    current_backend = backend
+# Default backend stubs make missing backend work fail explicitly instead of
+# silently compiling incorrect output.
+let backend_missing = ():>void => {
+    sys_eprint("Error: backend operation not implemented\n" 41)
+    sys_exit(1)
     return void
 }
 
-# ============================================================================
-# Dispatched backend operations
-# ============================================================================
+let backend_missing_void0 = ():>void => { backend_missing() return void }
+let backend_missing_void1 = (a:int):>void => { backend_missing() return void }
+let backend_missing_void2 = (a:int b:int):>void => { backend_missing() return void }
+let backend_missing_void3 = (a:int b:int c:int):>void => { backend_missing() return void }
+let backend_missing_void4 = (a:int b:int c:int d:bool):>void => { backend_missing() return void }
+let backend_missing_int0 = ():>int => { backend_missing() return 0 }
+let backend_missing_int1 = (a:int):>int => { backend_missing() return 0 }
+let backend_missing_int2 = (a:int b:int):>int => { backend_missing() return 0 }
+let backend_missing_bool1 = (a:int):>bool => { backend_missing() return false }
 
-let backend_emit_prologue = (frame_size:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_prologue(frame_size)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_prologue(frame_size)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_prologue(frame_size)
-    }
+let backend_missing_finish_module = ():>int => {
+    backend_missing()
+    return ""
+}
+
+let backend_fill_default_vtable = (vtable:int):>void => {
+    __store__(backend_missing_void0 vtable + B_BEGIN_MODULE)
+    __store__(backend_missing_finish_module vtable + B_FINISH_MODULE)
+    __store__(backend_missing_void1 vtable + B_SET_MODULE_INIT)
+    __store__(backend_missing_void1 vtable + B_SET_IMPORTED_SOURCES)
+    __store__(backend_missing_int2 vtable + B_INTERN_STRING)
+    __store__(backend_missing_int1 vtable + B_INTERN_ARRAY)
+    __store__(backend_missing_int2 vtable + B_DEFINE_GLOBAL)
+    __store__(backend_missing_int1 vtable + B_DECLARE_EXTERN_GLOBAL)
+    __store__(backend_missing_int1 vtable + B_INTERN_STATIC)
+    __store__(backend_missing_void1 vtable + B_PUSH_STRING_REF)
+    __store__(backend_missing_void1 vtable + B_PUSH_ARRAY_REF)
+    __store__(backend_missing_void1 vtable + B_PUSH_GLOBAL_REF)
+    __store__(backend_missing_void1 vtable + B_PUSH_STATIC_REF)
+    __store__(backend_missing_void1 vtable + B_LOAD_GLOBAL)
+    __store__(backend_missing_void1 vtable + B_STORE_GLOBAL)
+    __store__(backend_missing_int1 vtable + B_FUNCTION_REF)
+    __store__(backend_missing_int1 vtable + B_STRING_REF)
+    __store__(backend_missing_int1 vtable + B_ARRAY_REF)
+    __store__(backend_missing_int1 vtable + B_STATIC_REF)
+    __store__(backend_missing_int2 vtable + B_DECLARE_FUNCTION)
+    __store__(backend_missing_void2 vtable + B_BIND_EXTERN_FUNCTION)
+    __store__(backend_missing_int2 vtable + B_DECLARE_EXTERN_FUNCTION)
+    __store__(backend_missing_bool1 vtable + B_SHOULD_WARN_UNUSED_EXTERN)
+    __store__(backend_missing_void4 vtable + B_BEGIN_FUNCTION)
+    __store__(backend_missing_void0 vtable + B_END_FUNCTION)
+    __store__(backend_missing_void1 vtable + B_SET_REACHABLE_FUNCTIONS)
+    __store__(backend_missing_void1 vtable + B_LOAD_PARAM)
+    __store__(backend_missing_int0 vtable + B_ALLOC_LOCAL)
+    __store__(backend_missing_void1 vtable + B_LOAD_LOCAL)
+    __store__(backend_missing_void1 vtable + B_STORE_LOCAL)
+    __store__(backend_missing_void1 vtable + B_PUSH_CONST_I64)
+    __store__(backend_missing_void0 vtable + B_PUSH_VOID)
+    __store__(backend_missing_void1 vtable + B_PUSH_FN_REF)
+    __store__(backend_missing_void0 vtable + B_POP_VALUE)
+    __store__(backend_missing_void0 vtable + B_SAVE_VALUE)
+    __store__(backend_missing_void0 vtable + B_RESTORE_VALUE)
+    __store__(backend_missing_void1 vtable + B_UNARY_OP)
+    __store__(backend_missing_void1 vtable + B_BINARY_OP)
+    __store__(backend_missing_void0 vtable + B_PIPE_CALL)
+    __store__(backend_missing_void2 vtable + B_LOAD_MEM)
+    __store__(backend_missing_void1 vtable + B_STORE_MEM)
+    __store__(backend_missing_void0 vtable + B_SIGNED_SHR)
+    __store__(backend_missing_void2 vtable + B_CALL_DIRECT)
+    __store__(backend_missing_void1 vtable + B_CALL_INDIRECT)
+    __store__(backend_missing_int0 vtable + B_MAX_CALL_ARGS)
+    __store__(backend_missing_void0 vtable + B_BEGIN_IF)
+    __store__(backend_missing_void0 vtable + B_BEGIN_ELSE)
+    __store__(backend_missing_void0 vtable + B_END_IF)
+    __store__(backend_missing_void0 vtable + B_BEGIN_LOOP)
+    __store__(backend_missing_void0 vtable + B_BEGIN_LOOP_BODY)
+    __store__(backend_missing_void0 vtable + B_END_LOOP)
+    __store__(backend_missing_void0 vtable + B_EMIT_BREAK)
+    __store__(backend_missing_void0 vtable + B_EMIT_CONTINUE)
+    __store__(backend_missing_void0 vtable + B_EMIT_RETURN)
+    __store__(backend_missing_bool1 vtable + B_IS_INTRINSIC)
+    __store__(backend_missing_int1 vtable + B_INTRINSIC_ARITY)
+    __store__(backend_missing_int1 vtable + B_INTRINSIC_STATIC_ARG_INDICES)
+    __store__(backend_missing_void3 vtable + B_EMIT_INTRINSIC)
+    __store__(backend_missing_int0 vtable + B_GET_BUILTIN_CONSTANTS)
     return void
 }
 
-let backend_emit_epilogue = (frame_size:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_epilogue()
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_epilogue(frame_size)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_epilogue(frame_size)
-    }
+let backend_set_vtable = (vtable:int):>void => {
+    current_backend_vtable = vtable
     return void
 }
 
-let backend_emit_push = ():>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_push()
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_push()
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_push()
-    }
+# Dispatch wrappers
+let backend_begin_module = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_BEGIN_MODULE)
+    (fn_ptr)()
     return void
 }
 
-let backend_emit_mov_imm = (val:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_mov_imm(val)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_mov_imm(val)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_mov_imm(val)
-    }
+let backend_finish_module = ():>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_FINISH_MODULE)
+    return (fn_ptr)()
+}
+
+let backend_set_module_init = (name:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_SET_MODULE_INIT)
+    (fn_ptr)(name)
     return void
 }
 
-let backend_emit_load_global = (label_id:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_load_global(label_id)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_load_global(label_id)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_load_global(label_id)
-    }
+let backend_set_imported_sources = (paths:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_SET_IMPORTED_SOURCES)
+    (fn_ptr)(paths)
     return void
 }
 
-let backend_emit_store_global = (label_id:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_store_global(label_id)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_store_global(label_id)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_store_global(label_id)
-    }
+let backend_intern_string = (content:int len:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_INTERN_STRING)
+    return (fn_ptr)(content len)
+}
+
+let backend_intern_array = (elements:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_INTERN_ARRAY)
+    return (fn_ptr)(elements)
+}
+
+let backend_define_global = (name:int value:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_DEFINE_GLOBAL)
+    return (fn_ptr)(name value)
+}
+
+let backend_declare_extern_global = (name:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_DECLARE_EXTERN_GLOBAL)
+    return (fn_ptr)(name)
+}
+
+let backend_intern_static = (size:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_INTERN_STATIC)
+    return (fn_ptr)(size)
+}
+
+let backend_push_string_ref = (label_id:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_PUSH_STRING_REF)
+    (fn_ptr)(label_id)
     return void
 }
 
-let backend_emit_load_local = (offset:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_load_local(offset)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_load_local(offset)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_load_local(offset)
-    }
+let backend_push_array_ref = (label_id:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_PUSH_ARRAY_REF)
+    (fn_ptr)(label_id)
     return void
 }
 
-let backend_emit_store_local = (offset:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_store_local(offset)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_store_local(offset)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_store_local(offset)
-    }
+let backend_push_global_ref = (label_id:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_PUSH_GLOBAL_REF)
+    (fn_ptr)(label_id)
     return void
 }
 
-let backend_emit_load_string = (label_id:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_load_string(label_id)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_load_string(label_id)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_load_string(label_id)
-    }
+let backend_push_static_ref = (label_id:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_PUSH_STATIC_REF)
+    (fn_ptr)(label_id)
     return void
 }
 
-let backend_emit_load_array = (label_id:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_load_array(label_id)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_load_array(label_id)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_load_array(label_id)
-    }
+let backend_load_global = (label_id:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_LOAD_GLOBAL)
+    (fn_ptr)(label_id)
     return void
 }
 
-let backend_emit_binop = (op:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_binop(op)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_binop(op)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_binop(op)
-    }
+let backend_store_global = (label_id:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_STORE_GLOBAL)
+    (fn_ptr)(label_id)
     return void
 }
 
-let backend_emit_unary = (op:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_unary(op)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_unary(op)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_unary(op)
-    }
+let backend_function_ref = (label_id:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_FUNCTION_REF)
+    return (fn_ptr)(label_id)
+}
+
+let backend_string_ref = (label_id:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_STRING_REF)
+    return (fn_ptr)(label_id)
+}
+
+let backend_array_ref = (label_id:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_ARRAY_REF)
+    return (fn_ptr)(label_id)
+}
+
+let backend_static_ref = (label_id:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_STATIC_REF)
+    return (fn_ptr)(label_id)
+}
+
+let backend_declare_function = (name:int num_params:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_DECLARE_FUNCTION)
+    return (fn_ptr)(name num_params)
+}
+
+let backend_bind_extern_function = (label_id:int name:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_BIND_EXTERN_FUNCTION)
+    (fn_ptr)(label_id name)
     return void
 }
 
-let backend_emit_call = (label_id:int num_args:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_call(label_id num_args)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_call(label_id num_args)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_call(label_id num_args)
-    }
+let backend_declare_extern_function = (name:int num_params:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_DECLARE_EXTERN_FUNCTION)
+    return (fn_ptr)(name num_params)
+}
+
+let backend_should_warn_unused_extern = (name:int):>bool => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_SHOULD_WARN_UNUSED_EXTERN)
+    return (fn_ptr)(name)
+}
+
+let backend_begin_function = (label_id:int name:int param_count:int is_main:bool):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_BEGIN_FUNCTION)
+    (fn_ptr)(label_id name param_count is_main)
     return void
 }
 
-let backend_emit_call_name = (name:int num_args:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_call_name(name num_args)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_call_name(name num_args)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_call_name(name num_args)
-    }
+let backend_end_function = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_END_FUNCTION)
+    (fn_ptr)()
     return void
 }
 
-let backend_emit_cond_jump = (label_id:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_cond_jump(label_id)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_cond_jump(label_id)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_cond_jump(label_id)
-    }
+let backend_set_reachable_functions = (label_ids:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_SET_REACHABLE_FUNCTIONS)
+    (fn_ptr)(label_ids)
     return void
 }
 
-let backend_emit_jump = (prefix:int label_id:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_jump(prefix label_id)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_jump(prefix label_id)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_jump(prefix label_id)
-    }
+let backend_load_param = (index:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_LOAD_PARAM)
+    (fn_ptr)(index)
     return void
 }
 
-let backend_emit_label_out = (prefix:int label_id:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_label_out(prefix label_id)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_label_out(prefix label_id)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_label_out(prefix label_id)
-    }
+let backend_alloc_local = ():>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_ALLOC_LOCAL)
+    return (fn_ptr)()
+}
+
+let backend_load_local = (slot:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_LOAD_LOCAL)
+    (fn_ptr)(slot)
     return void
 }
 
-let backend_emit_intrinsic = (name:int num_args:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_intrinsic(name num_args)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_intrinsic(name num_args)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_intrinsic(name num_args)
-    }
+let backend_store_local = (slot:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_STORE_LOCAL)
+    (fn_ptr)(slot)
     return void
 }
 
-let backend_emit_file_header = ():>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_file_header()
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_file_header()
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_file_header()
-    }
+let backend_push_const_i64 = (value:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_PUSH_CONST_I64)
+    (fn_ptr)(value)
     return void
 }
 
-let backend_emit_start = ():>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_start()
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_start()
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_start()
-    }
+let backend_push_void = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_PUSH_VOID)
+    (fn_ptr)()
     return void
 }
 
-let backend_emit_data_section = ():>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_data_section()
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_data_section()
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_data_section()
-    }
+let backend_push_fn_ref = (label_id:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_PUSH_FN_REF)
+    (fn_ptr)(label_id)
     return void
 }
 
-let backend_emit_fn_label = (label_id:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_fn_label(label_id)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_fn_label(label_id)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_fn_label(label_id)
-    }
+let backend_pop_value = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_POP_VALUE)
+    (fn_ptr)()
     return void
 }
 
-let backend_emit_fn_label_name = (name:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_fn_label_name(name)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_fn_label_name(name)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_fn_label_name(name)
-    }
+let backend_save_value = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_SAVE_VALUE)
+    (fn_ptr)()
     return void
 }
 
-let backend_emit_store_arg_to_local = (arg_idx:int offset:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        emit_store_arg_to_local(arg_idx offset)
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_store_arg_to_local(arg_idx offset)
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_store_arg_to_local(arg_idx offset)
-    }
+let backend_restore_value = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_RESTORE_VALUE)
+    (fn_ptr)()
     return void
 }
 
-let backend_emit_load_fn_ref = (label_id:int):>void => {
-    if current_backend =? BACKEND_X86_64 {
-        text_str("    leaq .Lfn")
-        text_int(label_id)
-        text_line("(%rip), %rax")
-    } else if current_backend =? BACKEND_RISCV {
-        text_str("    la a0, .Lfn")
-        text_int(label_id)
-        text_char(CH_LF)
-    } else if current_backend =? BACKEND_ARM {
-        text_str("    adrp x0, .Lfn")
-        text_int(label_id)
-        text_char(CH_LF)
-        text_str("    add x0, x0, :lo12:.Lfn")
-        text_int(label_id)
-        text_char(CH_LF)
-    }
+let backend_unary_op = (op_kind:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_UNARY_OP)
+    (fn_ptr)(op_kind)
     return void
 }
 
-let backend_emit_indexed_store = ():>void => {
-    # Expects address on stack, value in result register
-    # Stores value to address
-    if current_backend =? BACKEND_X86_64 {
-        emit_pop("%rcx")
-        text_line("    movq %rax, (%rcx)")
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_pop("t0")
-        text_line("    sd a0, 0(t0)")
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_pop("x1")
-        text_line("    str x0, [x1]")
-    }
+let backend_binary_op = (op_kind:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_BINARY_OP)
+    (fn_ptr)(op_kind)
     return void
 }
 
-let backend_emit_index_calc = ():>void => {
-    # Calculate index * 8, expects index in result register
-    if current_backend =? BACKEND_X86_64 {
-        text_line("    shlq $3, %rax")
-    } else if current_backend =? BACKEND_RISCV {
-        text_line("    slli a0, a0, 3")
-    } else if current_backend =? BACKEND_ARM {
-        text_line("    lsl x0, x0, #3")
-    }
+let backend_pipe_call = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_PIPE_CALL)
+    (fn_ptr)()
     return void
 }
 
-let backend_emit_add_to_saved = ():>void => {
-    # Add result register to top of stack, result in result register
-    if current_backend =? BACKEND_X86_64 {
-        emit_pop("%rcx")
-        text_line("    addq %rcx, %rax")
-    } else if current_backend =? BACKEND_RISCV {
-        riscv_emit_pop("t0")
-        text_line("    add a0, a0, t0")
-    } else if current_backend =? BACKEND_ARM {
-        arm_emit_pop("x1")
-        text_line("    add x0, x0, x1")
-    }
+let backend_load_mem = (width:int signed:bool):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_LOAD_MEM)
+    (fn_ptr)(width signed)
     return void
+}
+
+let backend_store_mem = (width:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_STORE_MEM)
+    (fn_ptr)(width)
+    return void
+}
+
+let backend_signed_shr = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_SIGNED_SHR)
+    (fn_ptr)()
+    return void
+}
+
+let backend_call_direct = (label_id:int num_args:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_CALL_DIRECT)
+    (fn_ptr)(label_id num_args)
+    return void
+}
+
+let backend_call_indirect = (num_args:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_CALL_INDIRECT)
+    (fn_ptr)(num_args)
+    return void
+}
+
+let backend_max_call_args = ():>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_MAX_CALL_ARGS)
+    return (fn_ptr)()
+}
+
+let backend_begin_if = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_BEGIN_IF)
+    (fn_ptr)()
+    return void
+}
+
+let backend_begin_else = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_BEGIN_ELSE)
+    (fn_ptr)()
+    return void
+}
+
+let backend_end_if = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_END_IF)
+    (fn_ptr)()
+    return void
+}
+
+let backend_begin_loop = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_BEGIN_LOOP)
+    (fn_ptr)()
+    return void
+}
+
+let backend_begin_loop_body = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_BEGIN_LOOP_BODY)
+    (fn_ptr)()
+    return void
+}
+
+let backend_end_loop = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_END_LOOP)
+    (fn_ptr)()
+    return void
+}
+
+let backend_emit_break = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_EMIT_BREAK)
+    (fn_ptr)()
+    return void
+}
+
+let backend_emit_continue = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_EMIT_CONTINUE)
+    (fn_ptr)()
+    return void
+}
+
+let backend_emit_return = ():>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_EMIT_RETURN)
+    (fn_ptr)()
+    return void
+}
+
+let backend_is_intrinsic = (name:int):>bool => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_IS_INTRINSIC)
+    return (fn_ptr)(name)
+}
+
+let backend_intrinsic_arity = (name:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_INTRINSIC_ARITY)
+    return (fn_ptr)(name)
+}
+
+let backend_intrinsic_static_arg_indices = (name:int):>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_INTRINSIC_STATIC_ARG_INDICES)
+    return (fn_ptr)(name)
+}
+
+let backend_emit_intrinsic = (name:int num_args:int intrinsic_data:int):>void => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_EMIT_INTRINSIC)
+    (fn_ptr)(name num_args intrinsic_data)
+    return void
+}
+
+let backend_get_builtin_constants = ():>int => {
+    let fn_ptr:int = __load__(current_backend_vtable + B_GET_BUILTIN_CONSTANTS)
+    return (fn_ptr)()
 }

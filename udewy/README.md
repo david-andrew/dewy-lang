@@ -567,6 +567,47 @@ import p"../third_party/libfoo.a"
 
 The import preprocessor records the resolved paths of imported udewy source files as generic provenance. It does not interpret those paths beyond source loading and duplicate suppression; concrete backends may use that provenance to recognize their own library modules.
 
+### Backend Metatag Directives
+
+udewy supports a small set of source-level metatag directives in the leading prelude. These directives are consumed before tokenization and do not appear in the ordinary parser input.
+
+`$allowed_backends` declares which backend targets may compile a source file:
+
+```udewy
+$allowed_backends = "c"
+$allowed_backends = ["c" "wasm32"]
+```
+
+A missing `$allowed_backends` behaves as if the file allowed every backend known to the compiler, currently:
+
+```udewy
+$allowed_backends = ["x86_64" "wasm32" "riscv" "arm" "c"]
+```
+
+The exact implicit set comes from the compiler's registered backends, so newly added backends become allowed by default unless a file narrows the set explicitly. If the entrypoint has no command-line `--target`, the compiler selects the first allowed backend. If `--target` is provided, it must be present in the entrypoint's allowed set. Every imported source file that declares `$allowed_backends` must also allow the selected backend.
+
+If present, `$allowed_backends` must appear before any import directive or conditional import block in the file.
+
+`$selected_backend` is read-only compiler metadata. It may be used in conditional import blocks but cannot be assigned by source code.
+
+Conditional import blocks are also prelude-only. Their condition must use one of the explicitly supported metatag shapes, and their body may contain only import directives:
+
+```udewy
+if $selected_backend =? "wasm32" {
+    import p"platform_wasm.udewy"
+}
+
+if $selected_backend in? ["c" "x86_64"] {
+    import p"platform_native.udewy"
+}
+
+if "x86_64" in? $allowed_backends {
+    import p"platform_has_x86_64.udewy"
+}
+```
+
+If the condition is false, imports in the body are skipped entirely. Conditional import blocks are only recognized after any `$allowed_backends` directive and before ordinary program content begins; if they appear after ordinary program content begins, they are rejected.
+
 ---
 
 ## 1.5 Functions
@@ -831,15 +872,17 @@ The udewy compiler is a **single-pass compiler** with:
 3. Parsing with direct code emission
 4. Backend-specific assembly/output generation
 
-## 4.2 Import Processing
+## 4.2 Prelude Processing
 
-Before tokenization, leading import directives are processed:
+Before tokenization, leading prelude directives are processed:
 
-1. Parse the leading import prelude at the beginning of the file
-2. For each import, recursively process the imported file
-3. Prepend imported content to the main source
-4. Remove import directives from the source being compiled
-5. Track imported files to prevent duplicate inclusion
+1. Parse an optional initial `$allowed_backends` declaration and resolve the selected backend for the entrypoint
+2. Parse the remaining leading prelude at the beginning of each file
+3. Evaluate imports and conditional import blocks using `$selected_backend` and `$allowed_backends`
+4. For each active import, recursively process the imported file
+5. Prepend imported content to the main source
+6. Remove import and metatag directives from the source being compiled
+7. Track imported files to prevent duplicate inclusion
 
 ## 4.3 Backend Architecture
 
@@ -930,11 +973,13 @@ For the hosted `c` backend, "portable" usually means keeping direct operations w
 
 ## 4.4 Backend Selection
 
-The target backend is selected at compile time via the `--target` flag:
+The target backend is selected at compile time from the entrypoint's backend metatag directives and the optional `--target` flag:
 
 ```bash
 python -m udewy.p0 --target <backend> program.udewy
 ```
+
+If `--target` is provided, it must be one of the entrypoint's `$allowed_backends`. If `--target` is omitted and the entrypoint declares `$allowed_backends`, the first listed backend is selected. If the entrypoint does not declare `$allowed_backends`, the allowed set defaults to every backend known to the compiler and the first registered backend is selected.
 
 Available backends are documented in the addendums. New backends can be added by implementing the backend protocol defined in `backend/common.py`.
 
@@ -947,10 +992,17 @@ Unknown identifiers during parsing are assumed to be forward references to funct
 # Part 5: Formal Grammar
 
 ```
-source_file     ::= import_directive* program
+source_file     ::= backend_metatag? import_prelude program
 
+import_prelude  ::= (import_directive | conditional_import)*
 import_directive ::= 'import' path_string
 path_string     ::= 'p' STRING
+backend_metatag ::= '$allowed_backends' '=' backend_set
+backend_set     ::= STRING | '[' STRING+ ']'
+conditional_import ::= 'if' metatag_condition '{' import_directive* '}'
+metatag_condition ::= '$selected_backend' '=?' STRING
+                    | '$selected_backend' 'in?' '[' STRING* ']'
+                    | STRING 'in?' '$allowed_backends'
 
 program         ::= top_level_stmt*
 
@@ -1044,7 +1096,7 @@ string_char     ::= <any char except '"' or '\'>
                   | '\' <any char>
 ```
 
-> NOTE: `import_directive` and `path_string` are consumed during preprocessing and do not appear in the token stream seen by the parser. The word `import` remains reserved, so any surviving `import` is rejected during tokenization.
+> NOTE: `backend_metatag`, `import_directive`, `path_string`, and conditional imports are consumed during preprocessing and do not appear in the token stream seen by the parser. The word `import` remains reserved, so any surviving `import` is rejected during tokenization.
 
 ---
 

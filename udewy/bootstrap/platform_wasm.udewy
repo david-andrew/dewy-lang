@@ -1,0 +1,49 @@
+# platform_wasm.udewy
+# Platform implementation for WASM32 Browser
+
+let sys_print = (buf:int len:int):>void => {
+    __host_log__(buf len)
+    return void
+}
+
+let sys_eprint = (buf:int len:int):>void => {
+    __host_log__(buf len)
+    return void
+}
+
+let sys_exit = (code:int):>void => {
+    __host_exit__(code)
+    return void
+}
+
+# WASM linear memory grows via the memory.grow instruction, but udewy doesn't expose it directly.
+# However, the WASM backend might not have a way to dynamically allocate pages from udewy code
+# unless we use a static buffer. Let's allocate a massive static buffer for the arena.
+const WASM_ARENA_SIZE:int = 0x1000000 # 16 MB
+let wasm_arena:int = __static_alloca__(16777216)
+let wasm_arena_used:int = 0
+
+let sys_alloc_pages = (size:int):>int => {
+    if __unsigned_gt__(wasm_arena_used + size WASM_ARENA_SIZE) {
+        return 0
+    }
+    let ptr:int = wasm_arena + wasm_arena_used
+    wasm_arena_used = wasm_arena_used + size
+    return ptr
+}
+
+let sys_free_pages = (ptr:int size:int):>void => {
+    # Bump allocator doesn't free
+    return void
+}
+
+let sys_read_file = (path:int out_len:int):>int => {
+    # Not supported in browser WASM
+    __store__(0 out_len)
+    return 0
+}
+
+let sys_write_file = (path:int buf:int len:int):>int => {
+    # Not supported in browser WASM
+    return 1
+}

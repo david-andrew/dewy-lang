@@ -15,6 +15,7 @@ BACKEND_MAP: dict[BackendName, type[Backend]] = {
     "arm": ArmBackend,
     "c": CBackend,
 }
+BACKEND_NAMES: tuple[BackendName, ...] = tuple(BACKEND_MAP)
 
 def get_backend(name: BackendName) -> Backend:
     try:

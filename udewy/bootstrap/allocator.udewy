@@ -1,0 +1,52 @@
+# allocator.udewy
+# A simple bump allocator
+
+let arena_base:int = 0
+let arena_offset:int = 0
+let arena_capacity:int = 0
+
+let arena_init = (capacity:int):>void => {
+    arena_base = sys_alloc_pages(capacity)
+    if arena_base =? 0 {
+        let msg:int = "Error: Failed to allocate arena\n"
+        sys_eprint(msg __load__(msg - 8))
+        sys_exit(1)
+    }
+    arena_capacity = capacity
+    arena_offset = 0
+    return void
+}
+
+let arena_alloc = (size:int):>int => {
+    # Align to 8 bytes
+    let align_mask:int = 8 - 1
+    let aligned_size:int = (size + align_mask) and (not align_mask)
+    
+    if __unsigned_gt__(arena_offset + aligned_size arena_capacity) {
+        let msg:int = "Error: Arena out of memory\n"
+        sys_eprint(msg __load__(msg - 8))
+        sys_exit(1)
+    }
+    
+    let ptr:int = arena_base + arena_offset
+    arena_offset = arena_offset + aligned_size
+    
+    # zero initialize
+    let i:int = 0
+    loop i <? aligned_size {
+        __store_u8__(0 ptr + i)
+        i = i + 1
+    }
+    
+    return ptr
+}
+
+let arena_free_all = ():>void => {
+    if arena_base not=? 0 {
+        sys_free_pages(arena_base arena_capacity)
+        arena_base = 0
+        arena_capacity = 0
+        arena_offset = 0
+    }
+    return void
+}
