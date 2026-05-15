@@ -65,7 +65,7 @@ udewy source files are encoded in ASCII. UTF-8 is compatible in contexts where e
 Valid ASCII characters:
 - Letters: `A-Z`, `a-z`
 - Digits: `0-9`
-- Symbols: `! " # % & ' ( ) * + , - . / : ; < = > ? @ [ \ ] ^ _ { | } ~`
+- Symbols: `! " # $ % & ' ( ) * + , - . / : ; < = > ? @ [ \ ] ^ _ { | } ~`
 - Whitespace: space (0x20), tab (0x09), carriage return (0x0D), newline (0x0A)
 
 ### Whitespace
@@ -544,7 +544,14 @@ return void      # return from a void function
 
 The return expression is **mandatory**. Use `return void` for functions that don't return a meaningful value.
 
-### Import Directives
+### Prelude Directives
+
+Prelude directives are preprocessing-only forms recognized before tokenization.
+They may appear only in the leading prelude at the top of a file or inside
+active preprocessor target blocks in that prelude. They are removed before the
+normal udewy parser sees the source.
+
+#### Import Directives
 
 Import directives bring definitions from other udewy files into scope:
 
@@ -566,6 +573,48 @@ import p"../third_party/libfoo.a"
 - `import` remains a reserved word; if it reaches tokenization, the tokenizer reports an error
 
 The import preprocessor records the resolved paths of imported udewy source files as generic provenance. It does not interpret those paths beyond source loading and duplicate suppression; concrete backends may use that provenance to recognize their own library modules.
+
+#### Target Support Metadata
+
+Any source file may declare the targets it supports:
+
+```udewy
+$supported_targets = ["c" "wasm32" "x86_64"]
+```
+
+If the selected compile target is not present, preprocessing stops with a
+diagnostic for that file. Target names are the same names accepted by the
+compiler's `--target` flag.
+
+#### Target-Conditional Prelude Blocks
+
+Target-conditional blocks choose which prelude directives are active:
+
+```udewy
+if $target =? "wasm32" {
+    import p"./backend_wasm.udewy"
+}
+
+if $target not=? "c" {
+    import p"./native_only.udewy"
+}
+```
+
+Only the exact `$target =? "..."` and `$target not=? "..."` conditions are
+supported. The block body may contain only prelude directives. Inactive blocks
+are skipped without resolving their imports or emitting their diagnostics.
+
+#### Diagnostic Directives
+
+Source files may emit preprocessor diagnostics:
+
+```udewy
+$warning("wasm32 has limited support")
+$error("this target needs a custom backend module")
+```
+
+Both forms accept exactly one string literal. `$warning` prints a source-context
+warning and continues. `$error` stops preprocessing with the provided message.
 
 ---
 
@@ -831,15 +880,18 @@ The udewy compiler is a **single-pass compiler** with:
 3. Parsing with direct code emission
 4. Backend-specific assembly/output generation
 
-## 4.2 Import Processing
+## 4.2 Prelude Processing
 
-Before tokenization, leading import directives are processed:
+Before tokenization, leading prelude directives are processed:
 
-1. Parse the leading import prelude at the beginning of the file
-2. For each import, recursively process the imported file
-3. Prepend imported content to the main source
-4. Remove import directives from the source being compiled
-5. Track imported files to prevent duplicate inclusion
+1. Parse the leading prelude at the beginning of the file
+2. Check any `$supported_targets` declaration against the selected compile target
+3. Evaluate narrow `if $target ...` blocks and skip inactive block bodies
+4. Emit any active `$warning` or `$error` diagnostics
+5. For each active import, recursively process the imported file
+6. Prepend imported content to the main source
+7. Remove prelude directives from the source being compiled
+8. Track imported files to prevent duplicate inclusion
 
 ## 4.3 Backend Architecture
 
@@ -947,10 +999,22 @@ Unknown identifiers during parsing are assumed to be forward references to funct
 # Part 5: Formal Grammar
 
 ```
-source_file     ::= import_directive* program
+source_file     ::= prelude_directive* program
+
+prelude_directive ::= import_directive
+                    | supported_targets
+                    | target_if
+                    | meta_diagnostic
 
 import_directive ::= 'import' path_string
 path_string     ::= 'p' STRING
+
+supported_targets ::= '$supported_targets' '=' '[' STRING* ']'
+
+target_if       ::= 'if' target_condition '{' prelude_directive* '}'
+target_condition ::= '$target' ('=?' | 'not=?') STRING
+
+meta_diagnostic ::= ('$warning' | '$error') '(' STRING ')'
 
 program         ::= top_level_stmt*
 
@@ -1044,7 +1108,7 @@ string_char     ::= <any char except '"' or '\'>
                   | '\' <any char>
 ```
 
-> NOTE: `import_directive` and `path_string` are consumed during preprocessing and do not appear in the token stream seen by the parser. The word `import` remains reserved, so any surviving `import` is rejected during tokenization.
+> NOTE: `prelude_directive` forms are consumed during preprocessing and do not appear in the token stream seen by the parser. The word `import` remains reserved, so any surviving `import` is rejected during tokenization.
 
 ---
 

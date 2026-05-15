@@ -1591,7 +1591,7 @@ if __name__ == "__main__":
     
     source_path = Path(sys.argv[1])
     backend = get_backend(target)
-    loaded = t0.load_program(source_path)
+    loaded = t0.load_program(source_path, target_backend=target)
     backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
     source = loaded.source
     toks = t1.tokenize(source)

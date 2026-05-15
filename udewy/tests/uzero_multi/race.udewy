@@ -1,0 +1,13 @@
+$supported_targets = ["x86_64" "c" "wasm32"]
+
+# Unified uZero race entry point. Native Linux and hosted C use the SDL/OpenGL
+# entry module; wasm32 uses the browser animation-frame entry module.
+if $target =? "x86_64" {
+    import p"./race_sdl.udewy"
+}
+if $target =? "c" {
+    import p"./race_sdl.udewy"
+}
+if $target =? "wasm32" {
+    import p"./race_wasm.udewy"
+}

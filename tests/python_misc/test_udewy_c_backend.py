@@ -296,9 +296,9 @@ let main = ():>int => {
 
 
 def test_c_backend_parses_sdl_wrapper_without_source_changes() -> None:
-    source_path = Path("udewy/tests/uzero_multi/race_sdl.udewy")
+    source_path = Path("udewy/tests/uzero_multi/race.udewy")
     backend = get_backend("c")
-    loaded = t0.load_program(source_path)
+    loaded = t0.load_program(source_path, target_backend="c")
     backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
     code = parse_udewy(loaded.source, backend)
 
@@ -309,8 +309,8 @@ def test_c_backend_parses_sdl_wrapper_without_source_changes() -> None:
 
 @pytest.mark.skipif(not cc_available(), reason="cc not available")
 def test_c_backend_builds_sdl_demo_when_artifacts_are_available() -> None:
-    source_path = Path("udewy/tests/uzero_multi/race_sdl.udewy")
-    loaded = t0.load_program(source_path)
+    source_path = Path("udewy/tests/uzero_multi/race.udewy")
+    loaded = t0.load_program(source_path, target_backend="c")
     missing = [path for path in loaded.link_artifacts if not Path(path).exists()]
     if missing:
         pytest.skip("SDL link artifacts unavailable")
@@ -322,10 +322,10 @@ def test_c_backend_builds_sdl_demo_when_artifacts_are_available() -> None:
     with TemporaryDirectory() as tmp_dir_name:
         output_path = backend.compile_and_link(
             code,
-            "race_sdl_c",
+            "race_c",
             Path(tmp_dir_name),
             link_artifacts=loaded.link_artifacts,
             imported_sources=loaded.imported_sources,
         )
 
-    assert output_path.name == "race_sdl_c"
+    assert output_path.name == "race_c"

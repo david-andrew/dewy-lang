@@ -51,10 +51,10 @@ if __name__ == "__main__":
     script_args = sys.argv[arg_idx + 1:]
     
     backend = get_backend(target)
-    loaded = t0.load_program(input_file)
-    backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
-    src = loaded.source
     try:
+        loaded = t0.load_program(input_file, target_backend=target)
+        backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
+        src = loaded.source
         toks = t1.tokenize(src)
         asm = p0.parse(toks, src, backend)
     except SyntaxError as e:
