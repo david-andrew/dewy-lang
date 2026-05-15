@@ -846,6 +846,8 @@ class X86_64Backend(Backend):
         | {
             "__i64_to_f32_bits__": 1,
             "__i64_to_f64_bits__": 1,
+            "__f32_bits_to_i64__": 1,
+            "__f64_bits_to_i64__": 1,
         }
     )
     
@@ -922,6 +924,12 @@ class X86_64Backend(Backend):
         elif name == "__i64_to_f64_bits__":
             self._emit("cvtsi2sd %rax, %xmm0")
             self._emit("movq %xmm0, %rax")
+        elif name == "__f32_bits_to_i64__":
+            self._emit("movd %eax, %xmm0")
+            self._emit("cvttss2si %xmm0, %rax")
+        elif name == "__f64_bits_to_i64__":
+            self._emit("movq %rax, %xmm0")
+            self._emit("cvttsd2si %xmm0, %rax")
         elif name.startswith("__syscall"):
             self.syscall(num_args)
         else:

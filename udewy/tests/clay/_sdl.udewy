@@ -121,7 +121,7 @@ let main = ():>int => {
     let event:int = __static_alloca__(SDL_EVENT_SIZE)
     let rect:int = __static_alloca__(SDL_FRECT_SIZE)
     let size:int = __static_alloca__(8)
-    let mouse:int = __static_alloca__(16)
+    let mouse:int = __static_alloca__(8)
     let running:int = 1
     loop running not=? 0 {
         loop SDL_PollEvent(event) not=? 0 {
@@ -134,12 +134,12 @@ let main = ():>int => {
             width = __load_i32__(size)
             height = __load_i32__(size + 4)
         }
-        let buttons:int = SDL_GetMouseStateInt(mouse mouse + 8)
+        let buttons:int = SDL_GetMouseState(mouse mouse + 4)
         let mouse_down:int = 0
         if (buttons and SDL_BUTTON_LMASK) not=? 0 {
             mouse_down = 1
         }
-        clay_demo_set_input(__load_u64__(mouse) __load_u64__(mouse + 8) mouse_down)
+        clay_demo_set_input(__f32_bits_to_i64__(__load_u32__(mouse)) __f32_bits_to_i64__(__load_u32__(mouse + 4)) mouse_down)
         clay_demo_layout(width height)
         SDL_SetRenderDrawColor(renderer 8 10 16 255)
         SDL_RenderClear(renderer)

@@ -921,6 +921,8 @@ class ArmBackend(Backend):
         | {
             "__i64_to_f32_bits__": 1,
             "__i64_to_f64_bits__": 1,
+            "__f32_bits_to_i64__": 1,
+            "__f64_bits_to_i64__": 1,
         }
     )
     
@@ -997,6 +999,12 @@ class ArmBackend(Backend):
         elif name == "__i64_to_f64_bits__":
             self._emit("scvtf d0, x0")
             self._emit("fmov x0, d0")
+        elif name == "__f32_bits_to_i64__":
+            self._emit("fmov s0, w0")
+            self._emit("fcvtzs x0, s0")
+        elif name == "__f64_bits_to_i64__":
+            self._emit("fmov d0, x0")
+            self._emit("fcvtzs x0, d0")
         elif name.startswith("__syscall"):
             self.syscall(num_args)
         else:

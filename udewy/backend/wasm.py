@@ -696,6 +696,17 @@ class Wasm32Backend(Backend):
         self._emit("f64.convert_i64_s")
         self._emit("i64.reinterpret_f64")
 
+    def f32_bits_to_i64(self) -> None:
+        """Interpret low 32 bits as f32 and convert to signed i64."""
+        self._emit("i32.wrap_i64")
+        self._emit("f32.reinterpret_i32")
+        self._emit("i64.trunc_f32_s")
+
+    def f64_bits_to_i64(self) -> None:
+        """Interpret all 64 bits as f64 and convert to signed i64."""
+        self._emit("f64.reinterpret_i64")
+        self._emit("i64.trunc_f64_s")
+
     def alloca(self) -> None:
         """Allocate temporary linear-memory storage and return its address."""
         self._emit("i32.wrap_i64")
@@ -1102,6 +1113,8 @@ class Wasm32Backend(Backend):
         "__audio_queue_size__": 0,
         "__i64_to_f32_bits__": 1,
         "__i64_to_f64_bits__": 1,
+        "__f32_bits_to_i64__": 1,
+        "__f64_bits_to_i64__": 1,
     }
     _INTRINSIC_ARITIES = CORE_INTRINSIC_ARITIES | _PLATFORM_INTRINSIC_ARITIES
     
@@ -1279,6 +1292,10 @@ class Wasm32Backend(Backend):
             self.i64_to_f32_bits()
         elif name == "__i64_to_f64_bits__":
             self.i64_to_f64_bits()
+        elif name == "__f32_bits_to_i64__":
+            self.f32_bits_to_i64()
+        elif name == "__f64_bits_to_i64__":
+            self.f64_bits_to_i64()
     
     def get_builtin_constants(self) -> dict[str, int]:
         """WASM browser backend has no built-in constants."""

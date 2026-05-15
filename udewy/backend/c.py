@@ -40,6 +40,8 @@ _HELPER_DEPS: dict[str, set[str]] = {
 _PLATFORM_INTRINSIC_ARITIES = {
     "__i64_to_f32_bits__": 1,
     "__i64_to_f64_bits__": 1,
+    "__f32_bits_to_i64__": 1,
+    "__f64_bits_to_i64__": 1,
 }
 
 _ENDIAN_HELPERS = {
@@ -388,6 +390,20 @@ class CBackend(Backend):
                 "    return bits.u;",
                 "}",
             ],
+            "f32_bits_to_i64": [
+                "static udewy_word udewy_f32_bits_to_i64(udewy_word value) {",
+                "    union { uint32_t u; float f; } bits;",
+                "    bits.u = (uint32_t)value;",
+                "    return (udewy_word)(int64_t)bits.f;",
+                "}",
+            ],
+            "f64_bits_to_i64": [
+                "static udewy_word udewy_f64_bits_to_i64(udewy_word value) {",
+                "    union { uint64_t u; double f; } bits;",
+                "    bits.u = (uint64_t)value;",
+                "    return (udewy_word)(int64_t)bits.f;",
+                "}",
+            ],
             "f32_from_bits": [
                 "static float udewy_f32_from_bits(udewy_word value) {",
                 "    union { uint32_t u; float f; } bits;",
@@ -530,6 +546,8 @@ class CBackend(Backend):
             "signed_shr",
             "i64_to_f32_bits",
             "i64_to_f64_bits",
+            "f32_bits_to_i64",
+            "f64_bits_to_i64",
             "f32_from_bits",
             "f64_from_bits",
             "load_u8",
@@ -1289,6 +1307,12 @@ class CBackend(Backend):
         elif name == "__i64_to_f64_bits__":
             self._require_helper("i64_to_f64_bits")
             self._set_current(self._emit_temp(f"udewy_i64_to_f64_bits({self._current_expr()})"))
+        elif name == "__f32_bits_to_i64__":
+            self._require_helper("f32_bits_to_i64")
+            self._set_current(self._emit_temp(f"udewy_f32_bits_to_i64({self._current_expr()})"))
+        elif name == "__f64_bits_to_i64__":
+            self._require_helper("f64_bits_to_i64")
+            self._set_current(self._emit_temp(f"udewy_f64_bits_to_i64({self._current_expr()})"))
         else:
             self._call_extern_mixed(self._mixed_extern_type_tags(name, intrinsic_data))
 

@@ -203,6 +203,38 @@ let main = ():>int => {
     assert "float, float, float, float" in code
 
 
+def test_c_backend_supports_f32_bits_to_i64_intrinsic() -> None:
+    backend = get_backend("c")
+    code = parse_udewy(
+        """
+let main = ():>int => {
+    return __f32_bits_to_i64__(__i64_to_f32_bits__(7))
+}
+""",
+        backend,
+    )
+
+    assert "static udewy_word udewy_i64_to_f32_bits(udewy_word value)" in code
+    assert "static udewy_word udewy_f32_bits_to_i64(udewy_word value)" in code
+    assert "udewy_f32_bits_to_i64" in code
+
+
+def test_c_backend_supports_f64_bits_to_i64_intrinsic() -> None:
+    backend = get_backend("c")
+    code = parse_udewy(
+        """
+let main = ():>int => {
+    return __f64_bits_to_i64__(__i64_to_f64_bits__(7))
+}
+""",
+        backend,
+    )
+
+    assert "static udewy_word udewy_i64_to_f64_bits(udewy_word value)" in code
+    assert "static udewy_word udewy_f64_bits_to_i64(udewy_word value)" in code
+    assert "udewy_f64_bits_to_i64" in code
+
+
 def test_c_backend_direct_extern_calls_use_raw_prototypes() -> None:
     backend = get_backend("c")
     code = parse_udewy(

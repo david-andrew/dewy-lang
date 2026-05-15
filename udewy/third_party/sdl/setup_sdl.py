@@ -32,7 +32,6 @@ BUNDLE_DIR_NAME = "artifacts"
 BUNDLE_LINK_NAME = "link.udewy"
 DEFAULT_ICON_MODULE_NAME = "default_window_icon.udewy"
 DEFAULT_ICON_SYMBOL_NAME = "SDL_DEFAULT_WINDOW_ICON_DATA"
-UDEWY_SDL_OBJECT_NAME = "udewy_sdl.o"
 CMAKE_FLAGS = (
     "-DCMAKE_BUILD_TYPE=Release",
     "-DCMAKE_C_COMPILER=clang",
@@ -408,23 +407,6 @@ def write_default_icon_module(bundle_dir: Path, root_dir: Path) -> Path:
     )
 
 
-def compile_udewy_sdl_helper(helper_source: Path, helper_object: Path) -> Path:
-    run(
-        [
-            "clang",
-            "-std=c99",
-            "-O2",
-            "-ffunction-sections",
-            "-fdata-sections",
-            "-c",
-            str(helper_source),
-            "-o",
-            str(helper_object),
-        ]
-    )
-    return helper_object
-
-
 def main() -> None:
     here = Path(__file__).resolve().parent
     root_dir = here.parent.parent.parent
@@ -432,7 +414,6 @@ def main() -> None:
     install_dir = here / "SDL3-install-wayland-render"
     bundle_dir = here / BUNDLE_DIR_NAME
     bundle_link = bundle_dir / BUNDLE_LINK_NAME
-    udewy_sdl_helper = here / "udewy_sdl.c"
 
     require_tools()
     configure_pkg_config_path()
@@ -475,10 +456,6 @@ def main() -> None:
         bundle_dir,
         install_dir,
         collect_link_artifacts(install_dir),
-    )
-    staged_link_artifacts.insert(
-        0,
-        compile_udewy_sdl_helper(udewy_sdl_helper, bundle_dir / UDEWY_SDL_OBJECT_NAME),
     )
     write_default_icon_module(bundle_dir, root_dir)
     write_link_bundle(bundle_link, staged_link_artifacts)

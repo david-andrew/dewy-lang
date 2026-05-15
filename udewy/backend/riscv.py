@@ -686,6 +686,18 @@ class RiscvBackend(Backend):
         self._requires_hard_float_abi = True
         self._emit("fcvt.d.l ft0, a0")
         self._emit("fmv.x.d a0, ft0")
+
+    def f32_bits_to_i64(self) -> None:
+        """Interpret low 32 bits of a0 as f32 and convert to signed i64."""
+        self._requires_hard_float_abi = True
+        self._emit("fmv.w.x ft0, a0")
+        self._emit("fcvt.l.s a0, ft0, rtz")
+
+    def f64_bits_to_i64(self) -> None:
+        """Interpret a0 as f64 bits and convert to signed i64."""
+        self._requires_hard_float_abi = True
+        self._emit("fmv.d.x ft0, a0")
+        self._emit("fcvt.l.d a0, ft0, rtz")
     
     # ========================================================================
     # Calls
@@ -911,6 +923,8 @@ class RiscvBackend(Backend):
         | {
             "__i64_to_f32_bits__": 1,
             "__i64_to_f64_bits__": 1,
+            "__f32_bits_to_i64__": 1,
+            "__f64_bits_to_i64__": 1,
         }
     )
     
@@ -985,6 +999,10 @@ class RiscvBackend(Backend):
             self.i64_to_f32_bits()
         elif name == "__i64_to_f64_bits__":
             self.i64_to_f64_bits()
+        elif name == "__f32_bits_to_i64__":
+            self.f32_bits_to_i64()
+        elif name == "__f64_bits_to_i64__":
+            self.f64_bits_to_i64()
         elif name.startswith("__syscall"):
             self.syscall(num_args)
         else:

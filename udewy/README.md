@@ -1239,9 +1239,11 @@ This backend also provides:
 ```udewy
 __i64_to_f32_bits__(value)
 __i64_to_f64_bits__(value)
+__f32_bits_to_i64__(value)
+__f64_bits_to_i64__(value)
 ```
 
-These convert a signed integer value into IEEE-754 `f32` / `f64` bit patterns, returned as ordinary udewy integers.
+These convert a signed integer value into IEEE-754 `f32` / `f64` bit patterns, returned as ordinary udewy integers. `__f32_bits_to_i64__` and `__f64_bits_to_i64__` perform the reverse direction for values containing `f32` / `f64` bit patterns.
 
 ## A.3 Syscall Intrinsics
 
@@ -1389,6 +1391,8 @@ This backend also provides:
 ```udewy
 __i64_to_f32_bits__(value)
 __i64_to_f64_bits__(value)
+__f32_bits_to_i64__(value)
+__f64_bits_to_i64__(value)
 ```
 
 Integer-only udewy programs keep the backend's ordinary minimal RISC-V target assumptions. Using these FP conversion or mixed GP / FP extern intrinsics makes the generated artifact require a hard-float-capable RISC-V ABI/toolchain (LP64D-compatible). This is a whole-artifact requirement, not a per-call ABI switch.
@@ -1507,9 +1511,11 @@ This backend also provides:
 ```udewy
 __i64_to_f32_bits__(value)
 __i64_to_f64_bits__(value)
+__f32_bits_to_i64__(value)
+__f64_bits_to_i64__(value)
 ```
 
-These convert signed integers to `f32` / `f64` bit patterns while keeping udewy's runtime representation as integers.
+These convert signed integers to `f32` / `f64` bit patterns while keeping udewy's runtime representation as integers. `__f32_bits_to_i64__` and `__f64_bits_to_i64__` convert float bit patterns back to signed integers.
 
 ## C.3 Syscall Intrinsics
 
@@ -1914,7 +1920,7 @@ The C backend supports the same low-level `__call_extern_mixed_N__` intrinsic fa
 
 This is the correct path for C APIs that take floating-point arguments, such as OpenGL functions. The SDL/OpenGL wrapper in `udewy/third_party/sdl/sdl.udewy` uses this pattern so that the same wrapper can target native Linux backends and the C backend.
 
-The C backend also supports `__i64_to_f32_bits__` and `__i64_to_f64_bits__`, which convert signed integer values into IEEE-754 bit patterns for use with mixed extern calls.
+The C backend also supports `__i64_to_f32_bits__`, `__i64_to_f64_bits__`, `__f32_bits_to_i64__`, and `__f64_bits_to_i64__`, which convert signed integer values into IEEE-754 bit patterns for use with mixed extern calls and convert returned/stored float bit patterns back to integers.
 
 ## F.5 Generated Helper Emission
 

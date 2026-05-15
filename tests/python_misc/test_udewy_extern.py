@@ -261,6 +261,46 @@ let main = ():>int => {
         assert "fmv.d.x fa" in code
 
 
+@pytest.mark.parametrize("target", NATIVE_TARGETS)
+def test_f32_bits_to_i64_intrinsic_codegen(target: BackendName) -> None:
+    backend = get_backend(target)
+    code = parse_udewy(
+        """
+let main = ():>int => {
+    return __f32_bits_to_i64__(__i64_to_f32_bits__(7))
+}
+""",
+        backend,
+    )
+
+    if target == "x86_64":
+        assert "cvttss2si" in code
+    elif target == "riscv":
+        assert "fcvt.l.s" in code
+    else:
+        assert "fcvtzs" in code
+
+
+@pytest.mark.parametrize("target", NATIVE_TARGETS)
+def test_f64_bits_to_i64_intrinsic_codegen(target: BackendName) -> None:
+    backend = get_backend(target)
+    code = parse_udewy(
+        """
+let main = ():>int => {
+    return __f64_bits_to_i64__(__i64_to_f64_bits__(7))
+}
+""",
+        backend,
+    )
+
+    if target == "x86_64":
+        assert "cvttsd2si" in code
+    elif target == "riscv":
+        assert "fcvt.l.d" in code
+    else:
+        assert "fcvtzs x0, d0" in code
+
+
 def test_mixed_extern_type_tags_must_be_compile_time_ints() -> None:
     src = """
 let mix_value = (a:int):>int => extern
