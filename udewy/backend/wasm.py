@@ -63,6 +63,7 @@ class Wasm32Backend(Backend):
         self._fn_param_counts: dict[int, int] = {}
         self._fn_table_ids: list[int] = []
         self._indirect_arities: set[int] = set()
+        self._extern_fn_label_ids: set[int] = set()
         self._global_offsets: dict[int, int] = {}
         self._global_labels: dict[int, str] = {}
         self._string_offsets: dict[int, int] = {}
@@ -448,10 +449,21 @@ class Wasm32Backend(Backend):
         return label_id
 
     def bind_extern_function(self, label_id: int, name: str) -> None:
-        raise RuntimeError("extern functions are not supported on the wasm32 backend")
+        fn_name = f"${name}"
+        self._fn_labels[label_id] = fn_name
+        self._extern_fn_label_ids.add(label_id)
+        param_count = self._fn_param_counts[label_id]
+        params = " ".join("(param i64)" for _ in range(param_count))
+        import_line = f'(import "env" "{name}" (func {fn_name} {params} (result i64)))'
+        if import_line not in self._imports:
+            self._imports.append(import_line)
 
     def declare_extern_function(self, name: str, num_params: int) -> int:
-        raise RuntimeError("extern functions are not supported on the wasm32 backend")
+        label_id = self._next_label
+        self._next_label += 1
+        self._fn_param_counts[label_id] = num_params
+        self.bind_extern_function(label_id, name)
+        return label_id
     
     def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
         """Begin function definition."""
@@ -535,6 +547,8 @@ class Wasm32Backend(Backend):
     
     def push_fn_ref(self, label_id: int) -> None:
         """Push function table index onto the value stack."""
+        if label_id in self._extern_fn_label_ids:
+            raise RuntimeError("extern function references are not supported on the wasm32 backend")
         fn_idx = self._fn_indices[label_id]
         self._emit(f"i64.const {fn_idx}")
     
@@ -1274,8 +1288,10 @@ class Wasm32Backend(Backend):
         """Compile WAT to WASM and generate HTML wrapper."""
         import subprocess
         import base64
+        import shutil
         
         split_wasm = options.get('split_wasm', False)
+        link_artifacts = [Path(path) for path in options.get("link_artifacts", [])]
         
         wat_path = cache_dir / f"{input_name}.wat"
         wasm_path = cache_dir / f"{input_name}.wasm"
@@ -1292,8 +1308,19 @@ class Wasm32Backend(Backend):
                 f"WAT file generated at: {wat_path}"
             )
         
+        browser_link_js: list[str] = []
+        for artifact in link_artifacts:
+            if artifact.suffix == ".js":
+                browser_link_js.append(artifact.read_text())
+            elif artifact.suffix == ".wasm":
+                shutil.copy2(artifact, cache_dir / artifact.name)
+            else:
+                raise RuntimeError(f"Unsupported wasm32 link artifact: {artifact}")
+
         # Generate HTML with JS host functions
         host_functions_js = self._get_host_functions_js()
+        if browser_link_js:
+            host_functions_js = host_functions_js + "\n" + "\n".join(browser_link_js)
         
         if split_wasm:
             html_content = self._get_split_html_template(input_name, wasm_path.name, host_functions_js)
@@ -2679,6 +2706,9 @@ async function run() {{
     try {{
         const response = await fetch('{wasm_filename}');
         const bytes = await response.arrayBuffer();
+        if (typeof beforeUdewyInstantiate === 'function') {{
+            await beforeUdewyInstantiate(imports);
+        }}
         const {{ instance }} = await WebAssembly.instantiate(bytes, imports);
         wasmInstance = instance;
         const result = instance.exports.main();
@@ -2737,6 +2767,9 @@ async function run() {{
     outputElement = document.getElementById('output');
     setupServerLifecycle();
     try {{
+        if (typeof beforeUdewyInstantiate === 'function') {{
+            await beforeUdewyInstantiate(imports);
+        }}
         const {{ instance }} = await loadEmbeddedWasm();
         wasmInstance = instance;
         const result = instance.exports.main();

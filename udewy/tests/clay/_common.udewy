@@ -1,0 +1,23 @@
+import p"../../third_party/clay/clay.udewy"
+
+let clay_demo_layout = (width:int height:int):>int => {
+    ud_clay_set_layout_dimensions(width height)
+    Clay_BeginLayout()
+
+    Clay_OpenBox(1 width height CLAY_TOP_TO_BOTTOM 18 14 24 28 38 255)
+
+    Clay_OpenBox(2 width - 36 52 CLAY_LEFT_TO_RIGHT 12 8 226 122 63 255)
+    Clay_Close()
+
+    Clay_OpenBox(3 width - 36 height - 102 CLAY_LEFT_TO_RIGHT 14 12 42 50 68 255)
+    Clay_OpenBox(4 86 height - 130 CLAY_TOP_TO_BOTTOM 10 8 105 135 219 255)
+    Clay_Close()
+    Clay_OpenBox(5 124 height - 130 CLAY_TOP_TO_BOTTOM 10 8 83 190 142 255)
+    Clay_Close()
+    Clay_OpenBox(6 78 height - 130 CLAY_TOP_TO_BOTTOM 10 8 224 196 91 255)
+    Clay_Close()
+    Clay_Close()
+
+    Clay_Close()
+    return Clay_EndLayout(16)
+}

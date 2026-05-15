@@ -1,0 +1,67 @@
+if $target =? "x86_64" {
+    import p"artifacts/link_native.udewy"
+}
+if $target =? "c" {
+    import p"artifacts/link_native.udewy"
+}
+if $target =? "wasm32" {
+    import p"artifacts/link_wasm.udewy"
+}
+
+# Minimal Clay bindings for udewy.
+# These declarations target the shim artifacts produced by setup_clay.py.
+
+const CLAY_LEFT_TO_RIGHT:int = 0
+const CLAY_TOP_TO_BOTTOM:int = 1
+
+const CLAY_RENDER_COMMAND_TYPE_NONE:int = 0
+const CLAY_RENDER_COMMAND_TYPE_RECTANGLE:int = 1
+const CLAY_RENDER_COMMAND_TYPE_BORDER:int = 2
+const CLAY_RENDER_COMMAND_TYPE_TEXT:int = 3
+const CLAY_RENDER_COMMAND_TYPE_IMAGE:int = 4
+const CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:int = 5
+const CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:int = 6
+const CLAY_RENDER_COMMAND_TYPE_OVERLAY_COLOR_START:int = 7
+const CLAY_RENDER_COMMAND_TYPE_OVERLAY_COLOR_END:int = 8
+const CLAY_RENDER_COMMAND_TYPE_CUSTOM:int = 9
+
+let ud_clay_min_memory = ():>int => extern
+let ud_clay_init = (width:int height:int):>int => extern
+let ud_clay_set_layout_dimensions = (width:int height:int):>int => extern
+let ud_clay_begin_layout = ():>int => extern
+let ud_clay_end_layout = (delta_ms:int):>int => extern
+let ud_clay_open_box = (id:int width:int height:int direction:int padding:int gap:int r:int g:int b:int a:int):>int => extern
+let ud_clay_close = ():>int => extern
+let ud_clay_render_count = ():>int => extern
+let ud_clay_render_type = (index:int):>int => extern
+let ud_clay_render_x = (index:int):>int => extern
+let ud_clay_render_y = (index:int):>int => extern
+let ud_clay_render_width = (index:int):>int => extern
+let ud_clay_render_height = (index:int):>int => extern
+let ud_clay_render_rect_r = (index:int):>int => extern
+let ud_clay_render_rect_g = (index:int):>int => extern
+let ud_clay_render_rect_b = (index:int):>int => extern
+let ud_clay_render_rect_a = (index:int):>int => extern
+
+let Clay_Init = (width:int height:int):>int => {
+    return ud_clay_init(width height)
+}
+
+let Clay_BeginLayout = ():>void => {
+    ud_clay_begin_layout()
+    return 0
+}
+
+let Clay_EndLayout = (delta_ms:int):>int => {
+    return ud_clay_end_layout(delta_ms)
+}
+
+let Clay_OpenBox = (id:int width:int height:int direction:int padding:int gap:int r:int g:int b:int a:int):>void => {
+    ud_clay_open_box(id width height direction padding gap r g b a)
+    return 0
+}
+
+let Clay_Close = ():>void => {
+    ud_clay_close()
+    return 0
+}

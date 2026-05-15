@@ -1781,6 +1781,49 @@ For the `python -m udewy path/to/program.udewy` workflow on GNOME/Wayland, udewy
 - the `Icon=` entry points at an absolute PNG path
 - udewy sets `SDL_APP_ID` before launching the compiled binary so GNOME can match the running window to that desktop entry
 
+## E.2 Clay
+
+The Clay integration lives under `udewy/third_party/clay/`.
+
+Clay is a single-header C layout library. The udewy integration keeps `clay.h` behind a small C ABI adapter (`udewy_clay.c`) because Clay's public API uses C structs, macros, callbacks, and floating-point values that do not map cleanly to udewy's raw integer/pointer extern boundary.
+
+**Current backend support:**
+
+- Supported today: `x86_64`, `c`, `wasm32`
+- Desktop drawing is provided by the existing SDL wrapper in the demo
+- Browser drawing currently uses udewy's canvas host functions
+
+Build the local Clay artifacts like this:
+
+```bash
+python udewy/third_party/clay/setup_clay.py
+```
+
+The setup script downloads `clay.h` when needed, builds a native shim object, and writes target-specific link bundles under `udewy/third_party/clay/artifacts/`.
+
+For `wasm32`, the setup script also attempts to compile the Clay shim to a side `.wasm` module. That requires a clang WebAssembly linker such as `wasm-ld`. If the linker is not available, the generated browser host falls back to a small JavaScript rectangle-layout implementation so the browser demo still runs, but that fallback is only a demo stand-in for the real Clay side module.
+
+Import Clay from a udewy program:
+
+```udewy
+import p"../third_party/clay/clay.udewy"
+```
+
+The wrapper exposes a small scalar shim surface: initialize Clay, begin/end a layout, open/close simple colored boxes, and iterate rectangle render commands. The first demo keeps the rendering surface intentionally small:
+
+```bash
+# Desktop SDL demo
+python -m udewy --target x86_64 udewy/tests/clay/demo_clay.udewy
+
+# Hosted C backend
+python -m udewy --target c udewy/tests/clay/demo_clay.udewy
+
+# Browser demo; serving is recommended when wasm side artifacts are involved
+python -m udewy --target wasm32 --serve-wasm udewy/tests/clay/demo_clay.udewy
+```
+
+The browser route is an app-style canvas renderer, not an HTML/DOM renderer. It is useful for games, tools, and custom UI surfaces. A future Clay-to-DOM renderer would be the better direction for web pages that should preserve native browser behavior such as accessibility, text selection, forms, and find-in-page.
+
 ---
 
 # Addendum F: C Backend

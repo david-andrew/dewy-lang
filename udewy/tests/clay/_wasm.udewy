@@ -1,0 +1,64 @@
+$supported_targets = ["wasm32"]
+
+import p"./_common.udewy"
+
+let canvas_width:int = 320
+let canvas_height:int = 240
+let canvas_buffer:int = 0
+let initialized:int = 0
+
+let draw_rect = (x:int y:int width:int height:int r:int g:int b:int a:int):>void => {
+    let end_y:int = y + height
+    let row:int = y
+    loop row <? end_y {
+        let end_x:int = x + width
+        let col:int = x
+        loop col <? end_x {
+            let addr:int = canvas_buffer + (((row * canvas_width) + col) * 4)
+            __store_u8__(r addr)
+            __store_u8__(g addr + 1)
+            __store_u8__(b addr + 2)
+            __store_u8__(a addr + 3)
+            col += 1
+        }
+        row += 1
+    }
+    return 0
+}
+
+let render_clay_to_canvas = ():>void => {
+    let count:int = ud_clay_render_count()
+    let i:int = 0
+    loop i <? count {
+        if ud_clay_render_type(i) =? CLAY_RENDER_COMMAND_TYPE_RECTANGLE {
+            draw_rect(
+                ud_clay_render_x(i)
+                ud_clay_render_y(i)
+                ud_clay_render_width(i)
+                ud_clay_render_height(i)
+                ud_clay_render_rect_r(i)
+                ud_clay_render_rect_g(i)
+                ud_clay_render_rect_b(i)
+                ud_clay_render_rect_a(i)
+            )
+        }
+        i += 1
+    }
+    return 0
+}
+
+let main = ():>int => {
+    if initialized =? 0 {
+        canvas_buffer = __canvas_init__(canvas_width canvas_height)
+        __canvas_set_aspect_lock__(1)
+        if Clay_Init(canvas_width canvas_height) =? 0 {
+            return 1
+        }
+        initialized = 1
+    }
+
+    clay_demo_layout(canvas_width canvas_height)
+    render_clay_to_canvas()
+    __canvas_present__()
+    return 0
+}

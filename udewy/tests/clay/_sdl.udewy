@@ -1,0 +1,96 @@
+$supported_targets = ["x86_64" "c"]
+
+import p"../../third_party/sdl/sdl.udewy"
+import p"./_common.udewy"
+
+const SDL_FRECT_SIZE:int = 16
+
+let write_frect = (rect:int x:int y:int width:int height:int):>void => {
+    __store_u32__(__i64_to_f32_bits__(x) rect)
+    __store_u32__(__i64_to_f32_bits__(y) rect + 4)
+    __store_u32__(__i64_to_f32_bits__(width) rect + 8)
+    __store_u32__(__i64_to_f32_bits__(height) rect + 12)
+    return 0
+}
+
+let render_clay = (renderer:int rect:int):>void => {
+    let count:int = ud_clay_render_count()
+    let i:int = 0
+    loop i <? count {
+        if ud_clay_render_type(i) =? CLAY_RENDER_COMMAND_TYPE_RECTANGLE {
+            SDL_SetRenderDrawColor(
+                renderer
+                ud_clay_render_rect_r(i)
+                ud_clay_render_rect_g(i)
+                ud_clay_render_rect_b(i)
+                ud_clay_render_rect_a(i)
+            )
+            write_frect(
+                rect
+                ud_clay_render_x(i)
+                ud_clay_render_y(i)
+                ud_clay_render_width(i)
+                ud_clay_render_height(i)
+            )
+            SDL_RenderFillRect(renderer rect)
+        }
+        i += 1
+    }
+    return 0
+}
+
+let main = ():>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO) =? 0 {
+        return 1
+    }
+
+    let title:int = "udewy clay demo\0"
+    let width:int = 360
+    let height:int = 240
+    let window:int = SDL_CreateWindow(title width height SDL_WINDOW_RESIZABLE)
+    if window =? 0 {
+        SDL_Quit()
+        return 2
+    }
+
+    let renderer:int = SDL_CreateRenderer(window 0)
+    if renderer =? 0 {
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 3
+    }
+
+    SDL_ShowWindow(window)
+    SDL_SetDefaultWindowIcon(window)
+
+    if Clay_Init(width height) =? 0 {
+        SDL_DestroyRenderer(renderer)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return 4
+    }
+
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let rect:int = __static_alloca__(SDL_FRECT_SIZE)
+    let running:int = 1
+    loop running not=? 0 {
+        loop SDL_PollEvent(event) not=? 0 {
+            if SDL_EventType(event) =? SDL_EVENT_QUIT {
+                running = 0
+            }
+        }
+
+        clay_demo_layout(width height)
+        SDL_SetRenderDrawColor(renderer 8 10 16 255)
+        SDL_RenderClear(renderer)
+        render_clay(renderer rect)
+        SDL_RenderPresent(renderer)
+        SDL_Delay(16)
+    }
+
+    SDL_DestroyRenderer(renderer)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    return 0
+}
