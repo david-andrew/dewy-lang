@@ -1,20 +1,387 @@
 import p"../../third_party/clay/clay.udewy"
 
+const TXT_BRAND:int = "DEWY UI\0"
+const TXT_HOME:int = "HOME\0"
+const TXT_DOCS:int = "DOCS\0"
+const TXT_DEMO:int = "DEMO\0"
+const TXT_START:int = "START\0"
+const TXT_DASH:int = "DASHBOARD\0"
+const TXT_LAYOUT:int = "LAYOUT\0"
+const TXT_RENDER:int = "RENDER\0"
+const TXT_THEMES:int = "THEMES\0"
+const TXT_SHIP:int = "SHIP\0"
+const TXT_HERO:int = "CLAY RESPONSIVE UI\0"
+const TXT_SUB:int = "NATIVE AND WASM\0"
+const TXT_CARD1:int = "LAYOUT\0"
+const TXT_CARD2:int = "STYLE\0"
+const TXT_CARD3:int = "STATE\0"
+const TXT_PANEL:int = "PROJECT SETTINGS\0"
+const TXT_FIELD:int = "COMPONENT NAME\0"
+const TXT_SAVE:int = "SAVE\0"
+const TXT_STATS:int = "STATS\0"
+const TXT_FAST:int = "FAST\0"
+const TXT_SMALL:int = "SMALL\0"
+const TXT_PORT:int = "PORTABLE\0"
+const TXT_FOOT:int = "CLAY DEMO\0"
+const TXT_HELP:int = "RESIZE WINDOW\0"
+
+let glyph_row = (ch:int row:int):>int => {
+    if ch =? 32 { return 0 }
+    if ch =? 65 { if row =? 0 { return 14 } if row =? 1 { return 17 } if row =? 2 { return 17 } if row =? 3 { return 31 } if row =? 4 { return 17 } if row =? 5 { return 17 } return 17 }
+    if ch =? 66 { if row =? 0 { return 30 } if row =? 1 { return 17 } if row =? 2 { return 17 } if row =? 3 { return 30 } if row =? 4 { return 17 } if row =? 5 { return 17 } return 30 }
+    if ch =? 67 { if row =? 0 { return 14 } if row =? 1 { return 17 } if row =? 2 { return 16 } if row =? 3 { return 16 } if row =? 4 { return 16 } if row =? 5 { return 17 } return 14 }
+    if ch =? 68 { if row =? 0 { return 30 } if row =? 1 { return 17 } if row =? 2 { return 17 } if row =? 3 { return 17 } if row =? 4 { return 17 } if row =? 5 { return 17 } return 30 }
+    if ch =? 69 { if row =? 0 { return 31 } if row =? 1 { return 16 } if row =? 2 { return 16 } if row =? 3 { return 30 } if row =? 4 { return 16 } if row =? 5 { return 16 } return 31 }
+    if ch =? 70 { if row =? 0 { return 31 } if row =? 1 { return 16 } if row =? 2 { return 16 } if row =? 3 { return 30 } if row =? 4 { return 16 } if row =? 5 { return 16 } return 16 }
+    if ch =? 71 { if row =? 0 { return 14 } if row =? 1 { return 17 } if row =? 2 { return 16 } if row =? 3 { return 23 } if row =? 4 { return 17 } if row =? 5 { return 17 } return 14 }
+    if ch =? 72 { if row =? 0 { return 17 } if row =? 1 { return 17 } if row =? 2 { return 17 } if row =? 3 { return 31 } if row =? 4 { return 17 } if row =? 5 { return 17 } return 17 }
+    if ch =? 73 { if row =? 0 { return 14 } if row =? 1 { return 4 } if row =? 2 { return 4 } if row =? 3 { return 4 } if row =? 4 { return 4 } if row =? 5 { return 4 } return 14 }
+    if ch =? 74 { if row =? 0 { return 7 } if row =? 1 { return 2 } if row =? 2 { return 2 } if row =? 3 { return 2 } if row =? 4 { return 2 } if row =? 5 { return 18 } return 12 }
+    if ch =? 75 { if row =? 0 { return 17 } if row =? 1 { return 18 } if row =? 2 { return 20 } if row =? 3 { return 24 } if row =? 4 { return 20 } if row =? 5 { return 18 } return 17 }
+    if ch =? 76 { if row =? 0 { return 16 } if row =? 1 { return 16 } if row =? 2 { return 16 } if row =? 3 { return 16 } if row =? 4 { return 16 } if row =? 5 { return 16 } return 31 }
+    if ch =? 77 { if row =? 0 { return 17 } if row =? 1 { return 27 } if row =? 2 { return 21 } if row =? 3 { return 21 } if row =? 4 { return 17 } if row =? 5 { return 17 } return 17 }
+    if ch =? 78 { if row =? 0 { return 17 } if row =? 1 { return 25 } if row =? 2 { return 21 } if row =? 3 { return 19 } if row =? 4 { return 17 } if row =? 5 { return 17 } return 17 }
+    if ch =? 79 { if row =? 0 { return 14 } if row =? 1 { return 17 } if row =? 2 { return 17 } if row =? 3 { return 17 } if row =? 4 { return 17 } if row =? 5 { return 17 } return 14 }
+    if ch =? 80 { if row =? 0 { return 30 } if row =? 1 { return 17 } if row =? 2 { return 17 } if row =? 3 { return 30 } if row =? 4 { return 16 } if row =? 5 { return 16 } return 16 }
+    if ch =? 81 { if row =? 0 { return 14 } if row =? 1 { return 17 } if row =? 2 { return 17 } if row =? 3 { return 17 } if row =? 4 { return 21 } if row =? 5 { return 18 } return 13 }
+    if ch =? 82 { if row =? 0 { return 30 } if row =? 1 { return 17 } if row =? 2 { return 17 } if row =? 3 { return 30 } if row =? 4 { return 20 } if row =? 5 { return 18 } return 17 }
+    if ch =? 83 { if row =? 0 { return 15 } if row =? 1 { return 16 } if row =? 2 { return 16 } if row =? 3 { return 14 } if row =? 4 { return 1 } if row =? 5 { return 1 } return 30 }
+    if ch =? 84 { if row =? 0 { return 31 } if row =? 1 { return 4 } if row =? 2 { return 4 } if row =? 3 { return 4 } if row =? 4 { return 4 } if row =? 5 { return 4 } return 4 }
+    if ch =? 85 { if row =? 0 { return 17 } if row =? 1 { return 17 } if row =? 2 { return 17 } if row =? 3 { return 17 } if row =? 4 { return 17 } if row =? 5 { return 17 } return 14 }
+    if ch =? 86 { if row =? 0 { return 17 } if row =? 1 { return 17 } if row =? 2 { return 17 } if row =? 3 { return 17 } if row =? 4 { return 17 } if row =? 5 { return 10 } return 4 }
+    if ch =? 87 { if row =? 0 { return 17 } if row =? 1 { return 17 } if row =? 2 { return 17 } if row =? 3 { return 21 } if row =? 4 { return 21 } if row =? 5 { return 21 } return 10 }
+    if ch =? 88 { if row =? 0 { return 17 } if row =? 1 { return 17 } if row =? 2 { return 10 } if row =? 3 { return 4 } if row =? 4 { return 10 } if row =? 5 { return 17 } return 17 }
+    if ch =? 89 { if row =? 0 { return 17 } if row =? 1 { return 17 } if row =? 2 { return 10 } if row =? 3 { return 4 } if row =? 4 { return 4 } if row =? 5 { return 4 } return 4 }
+    if ch =? 90 { if row =? 0 { return 31 } if row =? 1 { return 1 } if row =? 2 { return 2 } if row =? 3 { return 4 } if row =? 4 { return 8 } if row =? 5 { return 16 } return 31 }
+    return 31
+}
+
+let demo_mouse_down:int = 0
+let demo_pressed:int = 0
+let demo_prev_mouse_x:int = 0
+let demo_prev_mouse_y:int = 0
+let demo_motion:int = 0
+let demo_accent:int = 0
+
+let demo_abs = (value:int):>int => {
+    if value <? 0 {
+        return 0 - value
+    }
+    return value
+}
+
+let clay_demo_set_input = (x:int y:int down:int):>void => {
+    Clay_SetPointerState(x y down)
+    demo_motion = demo_abs(x - demo_prev_mouse_x) + demo_abs(y - demo_prev_mouse_y)
+    demo_pressed = 0
+    if down not=? 0 {
+        if demo_mouse_down =? 0 {
+            demo_pressed = 1
+        }
+    }
+    demo_mouse_down = down
+    demo_prev_mouse_x = x
+    demo_prev_mouse_y = y
+    return 0
+}
+
 let clay_demo_layout = (width:int height:int):>int => {
     ud_clay_set_layout_dimensions(width height)
+
+    let hot_start:int = Clay_PointerOver(8) or Clay_PointerOver(21)
+    let hot_save:int = Clay_PointerOver(40)
+    let hot_card1:int = Clay_PointerOver(23) or Clay_PointerOver(46)
+    let hot_card2:int = Clay_PointerOver(27) or Clay_PointerOver(47)
+    let hot_card3:int = Clay_PointerOver(31) or Clay_PointerOver(48)
+    let hot_side:int = Clay_PointerOver(11) or Clay_PointerOver(12) or Clay_PointerOver(13) or Clay_PointerOver(14) or Clay_PointerOver(16)
+
+    if demo_pressed not=? 0 {
+        if hot_start or hot_save or hot_card1 or hot_card2 or hot_card3 or hot_side {
+            demo_accent += 1
+            if demo_accent >? 2 {
+                demo_accent = 0
+            }
+        }
+    }
+
+    let accent_r:int = 230
+    let accent_g:int = 118
+    let accent_b:int = 72
+    if demo_accent =? 1 {
+        accent_r = 83
+        accent_g = 190
+        accent_b = 142
+    }
+    if demo_accent =? 2 {
+        accent_r = 105
+        accent_g = 135
+        accent_b = 219
+    }
+
     Clay_BeginLayout()
 
-    Clay_OpenBox(1 width height CLAY_TOP_TO_BOTTOM 18 14 24 28 38 255)
+    let margin:int = 18
+    let gap:int = 14
+    let header_h:int = 64
+    let footer_h:int = 34
+    let body_w:int = width - (margin * 2)
+    let body_h:int = height - (margin * 2) - header_h - footer_h - (gap * 2)
+    let side_w:int = 116
+    let aside_w:int = 132
+    if width <? 680 {
+        side_w = 92
+        aside_w = 104
+    }
+    let main_w:int = body_w - side_w - aside_w - (gap * 2)
+    if main_w <? 220 {
+        main_w = 220
+    }
 
-    Clay_OpenBox(2 width - 36 52 CLAY_LEFT_TO_RIGHT 12 8 226 122 63 255)
+    let hero_h:int = 108
+    let cards_h:int = 104
+    let panel_h:int = body_h - hero_h - cards_h - (gap * 2)
+    if panel_h <? 80 {
+        panel_h = 80
+    }
+    let card_w:int = (main_w - (gap * 2)) // 3
+
+    Clay_OpenBoxEx(1 width height CLAY_SIZE_FIXED CLAY_SIZE_FIXED CLAY_TOP_TO_BOTTOM margin gap 18 22 32 255)
+
+    Clay_OpenBox(2 body_w header_h CLAY_LEFT_TO_RIGHT 14 10 accent_r accent_g accent_b 255)
+    Clay_OpenBox(3 62 36 CLAY_LEFT_TO_RIGHT 7 0 249 206 101 255)
+    Clay_Text(TXT_BRAND 7 12 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(4 92 36 CLAY_LEFT_TO_RIGHT 7 0 255 232 194 255)
+    Clay_Text(TXT_HOME 4 12 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(5 96 36 CLAY_LEFT_TO_RIGHT 7 0 255 232 194 255)
+    Clay_Text(TXT_DOCS 4 12 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(6 78 36 CLAY_LEFT_TO_RIGHT 7 0 255 232 194 255)
+    Clay_Text(TXT_DEMO 4 12 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(7 body_w - 506 36 CLAY_LEFT_TO_RIGHT 0 0 accent_r accent_g accent_b 255)
+    Clay_Close()
+    let start_r:int = 75
+    let start_g:int = 88
+    let start_b:int = 140
+    if hot_start {
+        start_r = 105
+        start_g = 135
+        start_b = 219
+    }
+    if hot_start and (demo_mouse_down not=? 0) {
+        start_r = 83
+        start_g = 190
+        start_b = 142
+    }
+    Clay_OpenBox(8 112 36 CLAY_LEFT_TO_RIGHT 7 0 start_r start_g start_b 255)
+    Clay_Text(TXT_START 5 12 239 246 255 255)
+    Clay_Close()
     Clay_Close()
 
-    Clay_OpenBox(3 width - 36 height - 102 CLAY_LEFT_TO_RIGHT 14 12 42 50 68 255)
-    Clay_OpenBox(4 86 height - 130 CLAY_TOP_TO_BOTTOM 10 8 105 135 219 255)
+    Clay_OpenBox(9 body_w body_h CLAY_LEFT_TO_RIGHT 0 gap 18 22 32 255)
+
+    Clay_OpenBox(10 side_w body_h CLAY_TOP_TO_BOTTOM 10 8 35 43 62 255)
+    let dash_r:int = 92
+    let dash_g:int = 132
+    let dash_b:int = 219
+    if Clay_PointerOver(11) {
+        dash_r = 118
+        dash_g = 150
+        dash_b = 232
+    }
+    Clay_OpenBox(11 side_w - 20 40 CLAY_LEFT_TO_RIGHT 7 0 dash_r dash_g dash_b 255)
+    Clay_Text(TXT_DASH 9 10 239 246 255 255)
     Clay_Close()
-    Clay_OpenBox(5 124 height - 130 CLAY_TOP_TO_BOTTOM 10 8 83 190 142 255)
+    let nav_r:int = 51
+    let nav_g:int = 63
+    let nav_b:int = 91
+    if Clay_PointerOver(12) or Clay_PointerOver(13) or Clay_PointerOver(14) {
+        nav_r = 68
+        nav_g = 92
+        nav_b = 142
+    }
+    Clay_OpenBox(12 side_w - 20 40 CLAY_LEFT_TO_RIGHT 7 0 nav_r nav_g nav_b 255)
+    Clay_Text(TXT_LAYOUT 6 10 176 196 225 255)
     Clay_Close()
-    Clay_OpenBox(6 78 height - 130 CLAY_TOP_TO_BOTTOM 10 8 224 196 91 255)
+    Clay_OpenBox(13 side_w - 20 40 CLAY_LEFT_TO_RIGHT 7 0 nav_r nav_g nav_b 255)
+    Clay_Text(TXT_RENDER 6 10 176 196 225 255)
+    Clay_Close()
+    Clay_OpenBox(14 side_w - 20 40 CLAY_LEFT_TO_RIGHT 7 0 nav_r nav_g nav_b 255)
+    Clay_Text(TXT_THEMES 6 10 176 196 225 255)
+    Clay_Close()
+    Clay_OpenBox(15 side_w - 20 body_h - 244 CLAY_LEFT_TO_RIGHT 0 0 35 43 62 255)
+    Clay_Close()
+    let ship_r:int = 224
+    let ship_g:int = 196
+    let ship_b:int = 91
+    if Clay_PointerOver(16) {
+        ship_r = 249
+        ship_g = 206
+        ship_b = 101
+    }
+    Clay_OpenBox(16 side_w - 20 52 CLAY_LEFT_TO_RIGHT 7 0 ship_r ship_g ship_b 255)
+    Clay_Text(TXT_SHIP 4 11 42 50 68 255)
+    Clay_Close()
+    Clay_Close()
+
+    Clay_OpenBox(17 main_w body_h CLAY_TOP_TO_BOTTOM 0 gap 18 22 32 255)
+    Clay_OpenBox(18 main_w hero_h CLAY_TOP_TO_BOTTOM 16 10 68 92 142 255)
+    Clay_OpenBox(19 main_w - 32 28 CLAY_LEFT_TO_RIGHT 4 0 239 246 255 255)
+    Clay_Text(TXT_HERO 18 16 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(20 main_w - 32 22 CLAY_LEFT_TO_RIGHT 5 0 176 196 225 255)
+    Clay_Text(TXT_SUB 15 11 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(21 130 28 CLAY_LEFT_TO_RIGHT 6 0 start_r start_g start_b 255)
+    Clay_Text(TXT_START 5 11 239 246 255 255)
+    Clay_Close()
+    Clay_Close()
+
+    Clay_OpenBox(22 main_w cards_h CLAY_LEFT_TO_RIGHT 0 gap 18 22 32 255)
+    let card1_r:int = 69
+    let card1_g:int = 91
+    let card1_b:int = 124
+    if hot_card1 {
+        card1_r = 82
+        card1_g = 111
+        card1_b = 153
+    }
+    Clay_OpenBox(23 card_w cards_h CLAY_TOP_TO_BOTTOM 12 8 card1_r card1_g card1_b 255)
+    Clay_OpenBox(24 card_w - 24 20 CLAY_LEFT_TO_RIGHT 5 0 239 246 255 255)
+    Clay_Text(TXT_CARD1 6 10 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(25 card_w - 24 12 CLAY_LEFT_TO_RIGHT 0 0 144 166 198 255)
+    Clay_Close()
+    Clay_OpenBox(26 card_w - 24 40 CLAY_LEFT_TO_RIGHT 0 0 83 190 142 255)
+    Clay_Close()
+    Clay_Close()
+    let card2_r:int = 69
+    let card2_g:int = 91
+    let card2_b:int = 124
+    if hot_card2 {
+        card2_r = 82
+        card2_g = 111
+        card2_b = 153
+    }
+    Clay_OpenBox(27 card_w cards_h CLAY_TOP_TO_BOTTOM 12 8 card2_r card2_g card2_b 255)
+    Clay_OpenBox(28 card_w - 24 20 CLAY_LEFT_TO_RIGHT 5 0 239 246 255 255)
+    Clay_Text(TXT_CARD2 5 10 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(29 card_w - 24 12 CLAY_LEFT_TO_RIGHT 0 0 144 166 198 255)
+    Clay_Close()
+    Clay_OpenBox(30 card_w - 24 40 CLAY_LEFT_TO_RIGHT 0 0 224 196 91 255)
+    Clay_Close()
+    Clay_Close()
+    let card3_r:int = 69
+    let card3_g:int = 91
+    let card3_b:int = 124
+    if hot_card3 {
+        card3_r = 82
+        card3_g = 111
+        card3_b = 153
+    }
+    Clay_OpenBox(31 card_w cards_h CLAY_TOP_TO_BOTTOM 12 8 card3_r card3_g card3_b 255)
+    Clay_OpenBox(32 card_w - 24 20 CLAY_LEFT_TO_RIGHT 5 0 239 246 255 255)
+    Clay_Text(TXT_CARD3 5 10 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(33 card_w - 24 12 CLAY_LEFT_TO_RIGHT 0 0 144 166 198 255)
+    Clay_Close()
+    Clay_OpenBox(34 card_w - 24 40 CLAY_LEFT_TO_RIGHT 0 0 201 106 145 255)
+    Clay_Close()
+    Clay_Close()
+    Clay_Close()
+
+    Clay_OpenBox(35 main_w panel_h CLAY_LEFT_TO_RIGHT 0 gap 18 22 32 255)
+    Clay_OpenBox(36 main_w - 146 panel_h CLAY_TOP_TO_BOTTOM 14 10 244 247 251 255)
+    Clay_OpenBox(37 main_w - 174 24 CLAY_LEFT_TO_RIGHT 5 0 42 50 68 255)
+    Clay_Text(TXT_PANEL 16 12 239 246 255 255)
+    Clay_Close()
+    Clay_OpenBox(38 main_w - 174 20 CLAY_LEFT_TO_RIGHT 5 0 176 196 225 255)
+    Clay_Text(TXT_FIELD 14 10 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(39 main_w - 174 26 CLAY_LEFT_TO_RIGHT 0 0 226 232 241 255)
+    Clay_Close()
+    let save_r:int = 83
+    let save_g:int = 190
+    let save_b:int = 142
+    if hot_save {
+        save_r = 105
+        save_g = 212
+        save_b = 164
+    }
+    if hot_save and (demo_mouse_down not=? 0) {
+        save_r = accent_r
+        save_g = accent_g
+        save_b = accent_b
+    }
+    Clay_OpenBox(40 130 32 CLAY_LEFT_TO_RIGHT 7 0 save_r save_g save_b 255)
+    Clay_Text(TXT_SAVE 4 11 239 246 255 255)
+    Clay_Close()
+    Clay_Close()
+    Clay_OpenBox(41 132 panel_h CLAY_TOP_TO_BOTTOM 12 8 35 43 62 255)
+    Clay_OpenBox(42 108 32 CLAY_LEFT_TO_RIGHT 7 0 105 135 219 255)
+    Clay_Text(TXT_STATS 5 10 239 246 255 255)
+    Clay_Close()
+    Clay_OpenBox(43 108 32 CLAY_LEFT_TO_RIGHT 0 0 83 190 142 255)
+    Clay_Close()
+    Clay_OpenBox(44 108 32 CLAY_LEFT_TO_RIGHT 0 0 224 196 91 255)
+    Clay_Close()
+    Clay_Close()
+    Clay_Close()
+    Clay_Close()
+
+    Clay_OpenBox(45 aside_w body_h CLAY_TOP_TO_BOTTOM 12 10 35 43 62 255)
+    let fast_r:int = 105
+    let fast_g:int = 135
+    let fast_b:int = 219
+    if Clay_PointerOver(46) {
+        fast_r = 118
+        fast_g = 150
+        fast_b = 232
+    }
+    Clay_OpenBox(46 aside_w - 24 66 CLAY_LEFT_TO_RIGHT 7 0 fast_r fast_g fast_b 255)
+    Clay_Text(TXT_FAST 4 11 239 246 255 255)
+    Clay_Close()
+    let small_r:int = 83
+    let small_g:int = 190
+    let small_b:int = 142
+    if Clay_PointerOver(47) {
+        small_r = 105
+        small_g = 212
+        small_b = 164
+    }
+    Clay_OpenBox(47 aside_w - 24 66 CLAY_LEFT_TO_RIGHT 7 0 small_r small_g small_b 255)
+    Clay_Text(TXT_SMALL 5 11 239 246 255 255)
+    Clay_Close()
+    let port_r:int = 224
+    let port_g:int = 196
+    let port_b:int = 91
+    if Clay_PointerOver(48) {
+        port_r = 249
+        port_g = 206
+        port_b = 101
+    }
+    Clay_OpenBox(48 aside_w - 24 66 CLAY_LEFT_TO_RIGHT 7 0 port_r port_g port_b 255)
+    Clay_Text(TXT_PORT 8 11 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(49 aside_w - 24 body_h - 258 CLAY_LEFT_TO_RIGHT 0 0 35 43 62 255)
+    Clay_Close()
+    Clay_OpenBox(50 aside_w - 24 54 CLAY_LEFT_TO_RIGHT 0 0 accent_r accent_g accent_b 255)
+    Clay_Close()
+    Clay_Close()
+
+    Clay_Close()
+
+    Clay_OpenBox(51 body_w footer_h CLAY_LEFT_TO_RIGHT 10 8 42 50 68 255)
+    Clay_OpenBox(52 110 18 CLAY_LEFT_TO_RIGHT 4 0 144 166 198 255)
+    Clay_Text(TXT_FOOT 9 9 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(53 body_w - 256 18 CLAY_LEFT_TO_RIGHT 0 0 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBox(54 110 18 CLAY_LEFT_TO_RIGHT 4 0 144 166 198 255)
+    Clay_Text(TXT_HELP 13 9 42 50 68 255)
     Clay_Close()
     Clay_Close()
 

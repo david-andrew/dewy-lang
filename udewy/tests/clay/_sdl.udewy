@@ -13,6 +13,50 @@ let write_frect = (rect:int x:int y:int width:int height:int):>void => {
     return 0
 }
 
+let draw_text_block = (renderer:int rect:int x:int y:int size:int):>void => {
+    write_frect(rect x y size size)
+    SDL_RenderFillRect(renderer rect)
+    return 0
+}
+
+let render_clay_text = (renderer:int rect:int cmd_idx:int):>void => {
+    let font_size:int = ud_clay_render_text_size(cmd_idx)
+    let scale:int = font_size // 8
+    if scale <? 1 {
+        scale = 1
+    }
+    let x0:int = ud_clay_render_x(cmd_idx)
+    let y0:int = ud_clay_render_y(cmd_idx)
+    SDL_SetRenderDrawColor(
+        renderer
+        ud_clay_render_text_r(cmd_idx)
+        ud_clay_render_text_g(cmd_idx)
+        ud_clay_render_text_b(cmd_idx)
+        ud_clay_render_text_a(cmd_idx)
+    )
+
+    let char_idx:int = 0
+    let char_count:int = ud_clay_render_text_len(cmd_idx)
+    loop char_idx <? char_count {
+        let ch:int = ud_clay_render_text_char(cmd_idx char_idx)
+        let row:int = 0
+        loop row <? 7 {
+            let bits:int = glyph_row(ch row)
+            let col:int = 0
+            loop col <? 5 {
+                let mask:int = 1 << (4 - col)
+                if (bits and mask) not=? 0 {
+                    draw_text_block(renderer rect x0 + (char_idx * 6 * scale) + (col * scale) y0 + (row * scale) scale)
+                }
+                col += 1
+            }
+            row += 1
+        }
+        char_idx += 1
+    }
+    return 0
+}
+
 let render_clay = (renderer:int rect:int):>void => {
     let count:int = ud_clay_render_count()
     let i:int = 0
@@ -34,6 +78,9 @@ let render_clay = (renderer:int rect:int):>void => {
             )
             SDL_RenderFillRect(renderer rect)
         }
+        if ud_clay_render_type(i) =? CLAY_RENDER_COMMAND_TYPE_TEXT {
+            render_clay_text(renderer rect i)
+        }
         i += 1
     }
     return 0
@@ -46,8 +93,8 @@ let main = ():>int => {
     }
 
     let title:int = "udewy clay demo\0"
-    let width:int = 360
-    let height:int = 240
+    let width:int = 720
+    let height:int = 480
     let window:int = SDL_CreateWindow(title width height SDL_WINDOW_RESIZABLE)
     if window =? 0 {
         SDL_Quit()
@@ -73,6 +120,8 @@ let main = ():>int => {
 
     let event:int = __static_alloca__(SDL_EVENT_SIZE)
     let rect:int = __static_alloca__(SDL_FRECT_SIZE)
+    let size:int = __static_alloca__(8)
+    let mouse:int = __static_alloca__(16)
     let running:int = 1
     loop running not=? 0 {
         loop SDL_PollEvent(event) not=? 0 {
@@ -81,6 +130,16 @@ let main = ():>int => {
             }
         }
 
+        if SDL_GetWindowSizeInPixels(window size size + 4) not=? 0 {
+            width = __load_i32__(size)
+            height = __load_i32__(size + 4)
+        }
+        let buttons:int = SDL_GetMouseStateInt(mouse mouse + 8)
+        let mouse_down:int = 0
+        if (buttons and SDL_BUTTON_LMASK) not=? 0 {
+            mouse_down = 1
+        }
+        clay_demo_set_input(__load_u64__(mouse) __load_u64__(mouse + 8) mouse_down)
         clay_demo_layout(width height)
         SDL_SetRenderDrawColor(renderer 8 10 16 255)
         SDL_RenderClear(renderer)

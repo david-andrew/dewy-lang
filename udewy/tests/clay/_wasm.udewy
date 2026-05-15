@@ -2,8 +2,8 @@ $supported_targets = ["wasm32"]
 
 import p"./_common.udewy"
 
-let canvas_width:int = 320
-let canvas_height:int = 240
+let canvas_width:int = 720
+let canvas_height:int = 480
 let canvas_buffer:int = 0
 let initialized:int = 0
 
@@ -26,6 +26,46 @@ let draw_rect = (x:int y:int width:int height:int r:int g:int b:int a:int):>void
     return 0
 }
 
+let draw_text_block = (x:int y:int size:int r:int g:int b:int a:int):>void => {
+    draw_rect(x y size size r g b a)
+    return 0
+}
+
+let render_clay_text_to_canvas = (cmd_idx:int):>void => {
+    let font_size:int = ud_clay_render_text_size(cmd_idx)
+    let scale:int = font_size // 8
+    if scale <? 1 {
+        scale = 1
+    }
+    let x0:int = ud_clay_render_x(cmd_idx)
+    let y0:int = ud_clay_render_y(cmd_idx)
+    let r:int = ud_clay_render_text_r(cmd_idx)
+    let g:int = ud_clay_render_text_g(cmd_idx)
+    let b:int = ud_clay_render_text_b(cmd_idx)
+    let a:int = ud_clay_render_text_a(cmd_idx)
+
+    let char_idx:int = 0
+    let char_count:int = ud_clay_render_text_len(cmd_idx)
+    loop char_idx <? char_count {
+        let ch:int = ud_clay_render_text_char(cmd_idx char_idx)
+        let row:int = 0
+        loop row <? 7 {
+            let bits:int = glyph_row(ch row)
+            let col:int = 0
+            loop col <? 5 {
+                let mask:int = 1 << (4 - col)
+                if (bits and mask) not=? 0 {
+                    draw_text_block(x0 + (char_idx * 6 * scale) + (col * scale) y0 + (row * scale) scale r g b a)
+                }
+                col += 1
+            }
+            row += 1
+        }
+        char_idx += 1
+    }
+    return 0
+}
+
 let render_clay_to_canvas = ():>void => {
     let count:int = ud_clay_render_count()
     let i:int = 0
@@ -42,6 +82,9 @@ let render_clay_to_canvas = ():>void => {
                 ud_clay_render_rect_a(i)
             )
         }
+        if ud_clay_render_type(i) =? CLAY_RENDER_COMMAND_TYPE_TEXT {
+            render_clay_text_to_canvas(i)
+        }
         i += 1
     }
     return 0
@@ -57,6 +100,7 @@ let main = ():>int => {
         initialized = 1
     }
 
+    clay_demo_set_input(__pointer_x__() __pointer_y__() __pointer_down__())
     clay_demo_layout(canvas_width canvas_height)
     render_clay_to_canvas()
     __canvas_present__()

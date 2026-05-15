@@ -1809,7 +1809,7 @@ Import Clay from a udewy program:
 import p"../third_party/clay/clay.udewy"
 ```
 
-The wrapper exposes a small scalar shim surface: initialize Clay, begin/end a layout, open/close simple colored boxes, and iterate rectangle render commands. The first demo keeps the rendering surface intentionally small:
+The wrapper exposes a small scalar shim surface: initialize Clay, set pointer state for hover/click hit testing, begin/end a layout, open/close simple colored boxes and text elements, and iterate rectangle/text render commands. Clay measures text through a callback and emits text render commands, but it does not rasterize fonts itself. The demo uses a tiny built-in bitmap font renderer so it stays dependency-free across SDL and browser canvas targets.
 
 ```bash
 # Desktop SDL demo

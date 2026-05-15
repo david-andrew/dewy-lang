@@ -13,6 +13,9 @@ if $target =? "wasm32" {
 
 const CLAY_LEFT_TO_RIGHT:int = 0
 const CLAY_TOP_TO_BOTTOM:int = 1
+const CLAY_SIZE_FIXED:int = 0
+const CLAY_SIZE_GROW:int = 1
+const CLAY_SIZE_FIT:int = 2
 
 const CLAY_RENDER_COMMAND_TYPE_NONE:int = 0
 const CLAY_RENDER_COMMAND_TYPE_RECTANGLE:int = 1
@@ -28,9 +31,14 @@ const CLAY_RENDER_COMMAND_TYPE_CUSTOM:int = 9
 let ud_clay_min_memory = ():>int => extern
 let ud_clay_init = (width:int height:int):>int => extern
 let ud_clay_set_layout_dimensions = (width:int height:int):>int => extern
+let ud_clay_set_pointer_state = (x:int y:int down:int):>int => extern
+let ud_clay_pointer_over = (id:int):>int => extern
 let ud_clay_begin_layout = ():>int => extern
 let ud_clay_end_layout = (delta_ms:int):>int => extern
 let ud_clay_open_box = (id:int width:int height:int direction:int padding:int gap:int r:int g:int b:int a:int):>int => extern
+let ud_clay_open_box_ex = (id:int width:int height:int width_mode:int height_mode:int direction:int padding:int gap:int r:int g:int b:int a:int):>int => extern
+let ud_clay_text_reserve = (len:int):>int => extern
+let ud_clay_text = (chars:int len:int font_size:int r:int g:int b:int a:int):>int => extern
 let ud_clay_close = ():>int => extern
 let ud_clay_render_count = ():>int => extern
 let ud_clay_render_type = (index:int):>int => extern
@@ -42,9 +50,25 @@ let ud_clay_render_rect_r = (index:int):>int => extern
 let ud_clay_render_rect_g = (index:int):>int => extern
 let ud_clay_render_rect_b = (index:int):>int => extern
 let ud_clay_render_rect_a = (index:int):>int => extern
+let ud_clay_render_text_len = (index:int):>int => extern
+let ud_clay_render_text_char = (index:int char_index:int):>int => extern
+let ud_clay_render_text_size = (index:int):>int => extern
+let ud_clay_render_text_r = (index:int):>int => extern
+let ud_clay_render_text_g = (index:int):>int => extern
+let ud_clay_render_text_b = (index:int):>int => extern
+let ud_clay_render_text_a = (index:int):>int => extern
 
 let Clay_Init = (width:int height:int):>int => {
     return ud_clay_init(width height)
+}
+
+let Clay_SetPointerState = (x:int y:int down:int):>void => {
+    ud_clay_set_pointer_state(x y down)
+    return 0
+}
+
+let Clay_PointerOver = (id:int):>int => {
+    return ud_clay_pointer_over(id)
 }
 
 let Clay_BeginLayout = ():>void => {
@@ -58,6 +82,16 @@ let Clay_EndLayout = (delta_ms:int):>int => {
 
 let Clay_OpenBox = (id:int width:int height:int direction:int padding:int gap:int r:int g:int b:int a:int):>void => {
     ud_clay_open_box(id width height direction padding gap r g b a)
+    return 0
+}
+
+let Clay_OpenBoxEx = (id:int width:int height:int width_mode:int height_mode:int direction:int padding:int gap:int r:int g:int b:int a:int):>void => {
+    ud_clay_open_box_ex(id width height width_mode height_mode direction padding gap r g b a)
+    return 0
+}
+
+let Clay_Text = (chars:int len:int font_size:int r:int g:int b:int a:int):>void => {
+    ud_clay_text(chars len font_size r g b a)
     return 0
 }
 
