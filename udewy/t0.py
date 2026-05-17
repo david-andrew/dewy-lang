@@ -131,7 +131,7 @@ def _starts_with_name(src: str, idx: int, name: str) -> bool:
 def _consume_directive_line_end(src: str, idx: int, context: str) -> int:
     idx = skip_horizontal_whitespace(src, idx)
     idx = skip_comment(src, idx)
-    if idx < len(src) and src[idx] not in vertical_whitespace:
+    if idx < len(src) and src[idx] not in vertical_whitespace and src[idx] != "}":  # allowing '}' is so that conditional imports can be written on a single line. slightly muddies error messages for things like `import p"something" }` but keeping anyways to simplify the implementation.
         error(src, idx, f"Unexpected trailing content after {context}")
     return skip_whitespace(src, idx)
 

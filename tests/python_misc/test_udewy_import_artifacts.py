@@ -130,6 +130,35 @@ let main = ():>int => {
     assert wasm_loaded.imported_sources == [str(wasm_library.resolve())]
 
 
+def test_target_conditional_imports_allow_single_line_blocks(tmp_path: Path) -> None:
+    c_library = tmp_path / "backend_c.udewy"
+    c_library.write_text("const SELECTED:int = 7\n")
+    wasm_library = tmp_path / "backend_wasm.udewy"
+    wasm_library.write_text("const SELECTED:int = 9\n")
+
+    program = tmp_path / "main.udewy"
+    program.write_text(
+        """
+if $target =? "c" { import p"backend_c.udewy" }
+if $target =? "wasm32" { import p"backend_wasm.udewy" }
+
+let main = ():>int => {
+    return SELECTED
+}
+"""
+    )
+
+    c_loaded = t0.load_program(program, target_backend="c")
+    wasm_loaded = t0.load_program(program, target_backend="wasm32")
+
+    assert "const SELECTED:int = 7" in c_loaded.source
+    assert "const SELECTED:int = 9" not in c_loaded.source
+    assert c_loaded.imported_sources == [str(c_library.resolve())]
+    assert "const SELECTED:int = 9" in wasm_loaded.source
+    assert "const SELECTED:int = 7" not in wasm_loaded.source
+    assert wasm_loaded.imported_sources == [str(wasm_library.resolve())]
+
+
 def test_supported_targets_rejects_unsupported_imported_file(tmp_path: Path) -> None:
     library = tmp_path / "wasm_only.udewy"
     library.write_text(
