@@ -8,6 +8,27 @@ let canvas_buffer:int = 0
 let initialized:int = 0
 
 let draw_rect = (x:int y:int width:int height:int r:int g:int b:int a:int):>void => {
+    if x <? 0 {
+        width += x
+        x = 0
+    }
+    if y <? 0 {
+        height += y
+        y = 0
+    }
+    if x + width >? canvas_width {
+        width = canvas_width - x
+    }
+    if y + height >? canvas_height {
+        height = canvas_height - y
+    }
+    if width <=? 0 {
+        return 0
+    }
+    if height <=? 0 {
+        return 0
+    }
+
     let end_y:int = y + height
     let row:int = y
     loop row <? end_y {
@@ -92,12 +113,22 @@ let render_clay_to_canvas = ():>void => {
 
 let main = ():>int => {
     if initialized =? 0 {
+        canvas_width = __window_width__()
+        canvas_height = __window_height__()
         canvas_buffer = __canvas_init__(canvas_width canvas_height)
-        __canvas_set_aspect_lock__(1)
+        __canvas_set_aspect_lock__(0)
         if Clay_Init(canvas_width canvas_height) =? 0 {
             return 1
         }
         initialized = 1
+    }
+
+    let window_width:int = __window_width__()
+    let window_height:int = __window_height__()
+    if (window_width not=? canvas_width) or (window_height not=? canvas_height) {
+        canvas_width = window_width
+        canvas_height = window_height
+        canvas_buffer = __canvas_init__(canvas_width canvas_height)
     }
 
     clay_demo_set_input(__pointer_x__() __pointer_y__() __pointer_down__())

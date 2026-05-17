@@ -5,6 +5,7 @@ function createUdewyClayFallback() {
         width: 0,
         height: 0,
         commands: [],
+        lastCommands: [],
         stack: [],
         pointerX: 0,
         pointerY: 0,
@@ -83,7 +84,7 @@ function createUdewyClayFallback() {
         },
         ud_clay_pointer_over: (id) => {
             const target = num(id);
-            const hit = state.commands.some((command) => (
+            const hit = state.lastCommands.some((command) => (
                 command.id === target &&
                 state.pointerX >= command.x &&
                 state.pointerY >= command.y &&
@@ -93,11 +94,15 @@ function createUdewyClayFallback() {
             return hit ? 1n : 0n;
         },
         ud_clay_begin_layout: () => {
+            state.lastCommands = state.commands;
             state.commands = [];
             state.stack = [];
             return 0n;
         },
-        ud_clay_end_layout: () => word(state.commands.length),
+        ud_clay_end_layout: () => {
+            state.lastCommands = state.commands;
+            return word(state.commands.length);
+        },
         ud_clay_text_reserve: () => 0n,
         ud_clay_text: (ptr, len, fontSize, r, g, b, a) => {
             const text = decodeString(ptr, len);

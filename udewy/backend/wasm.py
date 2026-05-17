@@ -1687,6 +1687,16 @@ function unlockCanvasAspect() {
     updateCanvasLayout();
 }
 
+function ensureCanvasMemory(width, height) {
+    const requiredBytes = canvasBufferPtr + (width * height * 4);
+    if (requiredBytes <= memory.buffer.byteLength) {
+        return;
+    }
+    const pageSize = 65536;
+    const pages = Math.ceil((requiredBytes - memory.buffer.byteLength) / pageSize);
+    memory.grow(pages);
+}
+
 function hideAudioPrompt() {
     if (audioPromptTimer !== null) {
         clearTimeout(audioPromptTimer);
@@ -2116,15 +2126,12 @@ const imports = {
         },
         // Canvas graphics
         host_canvas_init: (width, height) => {
-            // Only initialize once - subsequent calls return existing buffer
-            if (canvas && canvasMode) {
-                return BigInt(canvasBufferPtr);
-            }
-            
             canvasWidth = Number(width);
             canvasHeight = Number(height);
             canvasMode = true;
-            startTime = performance.now();
+            if (!canvas) {
+                startTime = performance.now();
+            }
             
             // Create or resize canvas
             canvas = document.getElementById('canvas');
@@ -2148,6 +2155,7 @@ const imports = {
             // Allocate buffer in WASM memory (RGBA: 4 bytes per pixel)
             // Use a fixed location after the stack (at 256KB)
             canvasBufferPtr = 262144;
+            ensureCanvasMemory(canvasWidth, canvasHeight);
             
             return BigInt(canvasBufferPtr);
         },

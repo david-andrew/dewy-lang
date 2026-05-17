@@ -94,6 +94,12 @@ let clay_demo_layout = (width:int height:int):>int => {
     let hot_card2:int = Clay_PointerOver(27) or Clay_PointerOver(47)
     let hot_card3:int = Clay_PointerOver(31) or Clay_PointerOver(48)
     let hot_side:int = Clay_PointerOver(11) or Clay_PointerOver(12) or Clay_PointerOver(13) or Clay_PointerOver(14) or Clay_PointerOver(16)
+    let hot_dash:int = Clay_PointerOver(11)
+    let hot_nav:int = Clay_PointerOver(12) or Clay_PointerOver(13) or Clay_PointerOver(14)
+    let hot_ship:int = Clay_PointerOver(16)
+    let hot_fast:int = Clay_PointerOver(46)
+    let hot_small:int = Clay_PointerOver(47)
+    let hot_port:int = Clay_PointerOver(48)
 
     if demo_pressed not=? 0 {
         if hot_start or hot_save or hot_card1 or hot_card2 or hot_card3 or hot_side {
@@ -186,7 +192,7 @@ let clay_demo_layout = (width:int height:int):>int => {
     let dash_r:int = 92
     let dash_g:int = 132
     let dash_b:int = 219
-    if Clay_PointerOver(11) {
+    if hot_dash {
         dash_r = 118
         dash_g = 150
         dash_b = 232
@@ -197,7 +203,7 @@ let clay_demo_layout = (width:int height:int):>int => {
     let nav_r:int = 51
     let nav_g:int = 63
     let nav_b:int = 91
-    if Clay_PointerOver(12) or Clay_PointerOver(13) or Clay_PointerOver(14) {
+    if hot_nav {
         nav_r = 68
         nav_g = 92
         nav_b = 142
@@ -211,12 +217,16 @@ let clay_demo_layout = (width:int height:int):>int => {
     Clay_OpenBox(14 side_w - 20 40 CLAY_LEFT_TO_RIGHT 7 0 nav_r nav_g nav_b 255)
     Clay_Text(TXT_THEMES 6 10 176 196 225 255)
     Clay_Close()
-    Clay_OpenBox(15 side_w - 20 body_h - 244 CLAY_LEFT_TO_RIGHT 0 0 35 43 62 255)
+    let side_spacer_h:int = body_h - 262
+    if side_spacer_h <? 0 {
+        side_spacer_h = 0
+    }
+    Clay_OpenBox(15 side_w - 20 side_spacer_h CLAY_LEFT_TO_RIGHT 0 0 35 43 62 255)
     Clay_Close()
     let ship_r:int = 224
     let ship_g:int = 196
     let ship_b:int = 91
-    if Clay_PointerOver(16) {
+    if hot_ship {
         ship_r = 249
         ship_g = 206
         ship_b = 101
@@ -227,7 +237,7 @@ let clay_demo_layout = (width:int height:int):>int => {
     Clay_Close()
 
     Clay_OpenBox(17 main_w body_h CLAY_TOP_TO_BOTTOM 0 gap 18 22 32 255)
-    Clay_OpenBox(18 main_w hero_h CLAY_TOP_TO_BOTTOM 16 10 68 92 142 255)
+    Clay_OpenBox(18 main_w hero_h CLAY_TOP_TO_BOTTOM 9 6 68 92 142 255)
     Clay_OpenBox(19 main_w - 32 28 CLAY_LEFT_TO_RIGHT 4 0 239 246 255 255)
     Clay_Text(TXT_HERO 18 16 42 50 68 255)
     Clay_Close()
@@ -301,7 +311,11 @@ let clay_demo_layout = (width:int height:int):>int => {
     Clay_OpenBox(38 main_w - 174 20 CLAY_LEFT_TO_RIGHT 5 0 176 196 225 255)
     Clay_Text(TXT_FIELD 14 10 42 50 68 255)
     Clay_Close()
-    Clay_OpenBox(39 main_w - 174 26 CLAY_LEFT_TO_RIGHT 0 0 226 232 241 255)
+    let field_spacer_h:int = panel_h - 120
+    if field_spacer_h <? 0 {
+        field_spacer_h = 0
+    }
+    Clay_OpenBox(39 main_w - 174 field_spacer_h CLAY_LEFT_TO_RIGHT 0 0 226 232 241 255)
     Clay_Close()
     let save_r:int = 83
     let save_g:int = 190
@@ -316,9 +330,11 @@ let clay_demo_layout = (width:int height:int):>int => {
         save_g = accent_g
         save_b = accent_b
     }
-    Clay_OpenBox(40 130 32 CLAY_LEFT_TO_RIGHT 7 0 save_r save_g save_b 255)
-    Clay_Text(TXT_SAVE 4 11 239 246 255 255)
-    Clay_Close()
+    if panel_h >? 118 {
+        Clay_OpenBox(40 130 32 CLAY_LEFT_TO_RIGHT 7 0 save_r save_g save_b 255)
+        Clay_Text(TXT_SAVE 4 11 239 246 255 255)
+        Clay_Close()
+    }
     Clay_Close()
     Clay_OpenBox(41 132 panel_h CLAY_TOP_TO_BOTTOM 12 8 35 43 62 255)
     Clay_OpenBox(42 108 32 CLAY_LEFT_TO_RIGHT 7 0 105 135 219 255)
@@ -336,7 +352,7 @@ let clay_demo_layout = (width:int height:int):>int => {
     let fast_r:int = 105
     let fast_g:int = 135
     let fast_b:int = 219
-    if Clay_PointerOver(46) {
+    if hot_fast {
         fast_r = 118
         fast_g = 150
         fast_b = 232
@@ -347,7 +363,7 @@ let clay_demo_layout = (width:int height:int):>int => {
     let small_r:int = 83
     let small_g:int = 190
     let small_b:int = 142
-    if Clay_PointerOver(47) {
+    if hot_small {
         small_r = 105
         small_g = 212
         small_b = 164
@@ -358,7 +374,7 @@ let clay_demo_layout = (width:int height:int):>int => {
     let port_r:int = 224
     let port_g:int = 196
     let port_b:int = 91
-    if Clay_PointerOver(48) {
+    if hot_port {
         port_r = 249
         port_g = 206
         port_b = 101
@@ -366,7 +382,11 @@ let clay_demo_layout = (width:int height:int):>int => {
     Clay_OpenBox(48 aside_w - 24 66 CLAY_LEFT_TO_RIGHT 7 0 port_r port_g port_b 255)
     Clay_Text(TXT_PORT 8 11 42 50 68 255)
     Clay_Close()
-    Clay_OpenBox(49 aside_w - 24 body_h - 258 CLAY_LEFT_TO_RIGHT 0 0 35 43 62 255)
+    let aside_spacer_h:int = body_h - 304
+    if aside_spacer_h <? 0 {
+        aside_spacer_h = 0
+    }
+    Clay_OpenBox(49 aside_w - 24 aside_spacer_h CLAY_LEFT_TO_RIGHT 0 0 35 43 62 255)
     Clay_Close()
     Clay_OpenBox(50 aside_w - 24 54 CLAY_LEFT_TO_RIGHT 0 0 accent_r accent_g accent_b 255)
     Clay_Close()
