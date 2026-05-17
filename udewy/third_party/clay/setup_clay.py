@@ -70,32 +70,27 @@ def main() -> None:
         ]
     )
 
-    wasm_artifacts: list[str] = [WASM_HOST_ARTIFACT_NAME]
     wasm_module = artifacts_dir / WASM_MODULE_NAME
-    try:
-        run(
-            [
-                "clang",
-                "--target=wasm32",
-                "-std=c99",
-                "-Oz",
-                "-nostdlib",
-                "-ffunction-sections",
-                "-fdata-sections",
-                str(shim_path),
-                "-Wl,--no-entry",
-                "-Wl,--export-all",
-                "-o",
-                str(wasm_module),
-            ]
-        )
-        wasm_artifacts.append(WASM_MODULE_NAME)
-    except subprocess.CalledProcessError:
-        print("Could not build the Clay wasm side module; wasm demos will use the JS rectangle-layout fallback.")
+    run(
+        [
+            "clang",
+            "--target=wasm32",
+            "-std=c99",
+            "-Oz",
+            "-nostdlib",
+            "-ffunction-sections",
+            "-fdata-sections",
+            str(shim_path),
+            "-Wl,--no-entry",
+            "-Wl,--export-all",
+            "-o",
+            str(wasm_module),
+        ]
+    )
 
     shutil.copy2(here / WASM_HOST_SOURCE_NAME, artifacts_dir / WASM_HOST_ARTIFACT_NAME)
     write_link_bundle(artifacts_dir / LINK_NATIVE_NAME, [NATIVE_OBJECT_NAME])
-    write_link_bundle(artifacts_dir / LINK_WASM_NAME, wasm_artifacts)
+    write_link_bundle(artifacts_dir / LINK_WASM_NAME, [WASM_HOST_ARTIFACT_NAME, WASM_MODULE_NAME])
 
     print(f"Wrote Clay artifacts to {artifacts_dir}")
 

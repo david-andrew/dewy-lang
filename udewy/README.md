@@ -1807,7 +1807,7 @@ python udewy/third_party/clay/setup_clay.py
 
 The setup script downloads `clay.h` when needed, builds a native shim object, and writes target-specific link bundles under `udewy/third_party/clay/artifacts/`.
 
-For `wasm32`, the setup script also attempts to compile the Clay shim to a side `.wasm` module. That requires a clang WebAssembly linker such as `wasm-ld`. If the linker is not available, the generated browser host falls back to a small JavaScript rectangle-layout implementation so the browser demo still runs, but that fallback is only a demo stand-in for the real Clay side module.
+For `wasm32`, the setup script also compiles the Clay shim to a side `.wasm` module. That requires a clang WebAssembly linker such as `wasm-ld`; the browser demo uses that side module for Clay layout.
 
 Import Clay from a udewy program:
 

@@ -62,6 +62,26 @@ let demo_prev_mouse_x:int = 0
 let demo_prev_mouse_y:int = 0
 let demo_motion:int = 0
 let demo_accent:int = 0
+let demo_layout_width:int = 0
+let demo_layout_height:int = 0
+let demo_hot_start:int = 0
+let demo_hot_save:int = 0
+let demo_hot_card1:int = 0
+let demo_hot_card2:int = 0
+let demo_hot_card3:int = 0
+let demo_hot_side:int = 0
+let demo_hot_dash:int = 0
+let demo_hot_nav:int = 0
+let demo_hot_ship:int = 0
+let demo_hot_fast:int = 0
+let demo_hot_small:int = 0
+let demo_hot_port:int = 0
+let demo_accent_r:int = 230
+let demo_accent_g:int = 118
+let demo_accent_b:int = 72
+let demo_start_r:int = 75
+let demo_start_g:int = 88
+let demo_start_b:int = 140
 
 let demo_abs = (value:int):>int => {
     if value <? 0 {
@@ -85,24 +105,25 @@ let clay_demo_set_input = (x:int y:int down:int):>void => {
     return 0
 }
 
-let clay_demo_layout = (width:int height:int):>int => {
-    ud_clay_set_layout_dimensions(width height)
+let clay_demo_update_hot_state = ():>void => {
+    demo_hot_start = Clay_PointerOver(8) or Clay_PointerOver(21)
+    demo_hot_save = Clay_PointerOver(40)
+    demo_hot_card1 = Clay_PointerOver(23) or Clay_PointerOver(46)
+    demo_hot_card2 = Clay_PointerOver(27) or Clay_PointerOver(47)
+    demo_hot_card3 = Clay_PointerOver(31) or Clay_PointerOver(48)
+    demo_hot_side = Clay_PointerOver(11) or Clay_PointerOver(12) or Clay_PointerOver(13) or Clay_PointerOver(14) or Clay_PointerOver(16)
+    demo_hot_dash = Clay_PointerOver(11)
+    demo_hot_nav = Clay_PointerOver(12) or Clay_PointerOver(13) or Clay_PointerOver(14)
+    demo_hot_ship = Clay_PointerOver(16)
+    demo_hot_fast = Clay_PointerOver(46)
+    demo_hot_small = Clay_PointerOver(47)
+    demo_hot_port = Clay_PointerOver(48)
+    return 0
+}
 
-    let hot_start:int = Clay_PointerOver(8) or Clay_PointerOver(21)
-    let hot_save:int = Clay_PointerOver(40)
-    let hot_card1:int = Clay_PointerOver(23) or Clay_PointerOver(46)
-    let hot_card2:int = Clay_PointerOver(27) or Clay_PointerOver(47)
-    let hot_card3:int = Clay_PointerOver(31) or Clay_PointerOver(48)
-    let hot_side:int = Clay_PointerOver(11) or Clay_PointerOver(12) or Clay_PointerOver(13) or Clay_PointerOver(14) or Clay_PointerOver(16)
-    let hot_dash:int = Clay_PointerOver(11)
-    let hot_nav:int = Clay_PointerOver(12) or Clay_PointerOver(13) or Clay_PointerOver(14)
-    let hot_ship:int = Clay_PointerOver(16)
-    let hot_fast:int = Clay_PointerOver(46)
-    let hot_small:int = Clay_PointerOver(47)
-    let hot_port:int = Clay_PointerOver(48)
-
+let clay_demo_update_palette = ():>void => {
     if demo_pressed not=? 0 {
-        if hot_start or hot_save or hot_card1 or hot_card2 or hot_card3 or hot_side {
+        if demo_hot_start or demo_hot_save or demo_hot_card1 or demo_hot_card2 or demo_hot_card3 or demo_hot_side {
             demo_accent += 1
             if demo_accent >? 2 {
                 demo_accent = 0
@@ -110,301 +131,270 @@ let clay_demo_layout = (width:int height:int):>int => {
         }
     }
 
-    let accent_r:int = 230
-    let accent_g:int = 118
-    let accent_b:int = 72
+    demo_accent_r = 230
+    demo_accent_g = 118
+    demo_accent_b = 72
     if demo_accent =? 1 {
-        accent_r = 83
-        accent_g = 190
-        accent_b = 142
+        demo_accent_r = 83
+        demo_accent_g = 190
+        demo_accent_b = 142
     }
     if demo_accent =? 2 {
-        accent_r = 105
-        accent_g = 135
-        accent_b = 219
+        demo_accent_r = 105
+        demo_accent_g = 135
+        demo_accent_b = 219
     }
 
-    Clay_BeginLayout()
-
-    let margin:int = 18
-    let gap:int = 14
-    let header_h:int = 64
-    let footer_h:int = 34
-    let body_w:int = width - (margin * 2)
-    let body_h:int = height - (margin * 2) - header_h - footer_h - (gap * 2)
-    let side_w:int = 116
-    let aside_w:int = 132
-    if width <? 680 {
-        side_w = 92
-        aside_w = 104
+    demo_start_r = 75
+    demo_start_g = 88
+    demo_start_b = 140
+    if demo_hot_start {
+        demo_start_r = 105
+        demo_start_g = 135
+        demo_start_b = 219
     }
-    let main_w:int = body_w - side_w - aside_w - (gap * 2)
-    if main_w <? 220 {
-        main_w = 220
+    if demo_hot_start and (demo_mouse_down not=? 0) {
+        demo_start_r = 83
+        demo_start_g = 190
+        demo_start_b = 142
     }
+    return 0
+}
 
-    let hero_h:int = 108
-    let cards_h:int = 104
-    let panel_h:int = body_h - hero_h - cards_h - (gap * 2)
-    if panel_h <? 80 {
-        panel_h = 80
-    }
-    let card_w:int = (main_w - (gap * 2)) // 3
+let start_demo_root = ():>void => {
+    Clay_OpenBoxEx(1 demo_layout_width demo_layout_height CLAY_SIZE_FIXED CLAY_SIZE_FIXED CLAY_TOP_TO_BOTTOM 18 14 18 22 32 255)
+    return 0
+}
 
-    Clay_OpenBoxEx(1 width height CLAY_SIZE_FIXED CLAY_SIZE_FIXED CLAY_TOP_TO_BOTTOM margin gap 18 22 32 255)
+let end_demo_root = ():>void => {
+    Clay_Close()
+    return 0
+}
 
-    Clay_OpenBox(2 body_w header_h CLAY_LEFT_TO_RIGHT 14 10 accent_r accent_g accent_b 255)
+let render_header_link = (id:int text:int len:int width:int):>void => {
+    Clay_OpenBox(id width 36 CLAY_LEFT_TO_RIGHT 7 0 255 232 194 255)
+    Clay_Text(text len 12 42 50 68 255)
+    Clay_Close()
+    return 0
+}
+
+let render_start_button = (id:int height:int font_size:int):>void => {
+    Clay_OpenBox(id 112 height CLAY_LEFT_TO_RIGHT 7 0 demo_start_r demo_start_g demo_start_b 255)
+    Clay_Text(TXT_START 5 font_size 239 246 255 255)
+    Clay_Close()
+    return 0
+}
+
+let render_header = ():>void => {
+    Clay_OpenBoxEx(2 0 64 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 14 10 demo_accent_r demo_accent_g demo_accent_b 255)
     Clay_OpenBox(3 62 36 CLAY_LEFT_TO_RIGHT 7 0 249 206 101 255)
     Clay_Text(TXT_BRAND 7 12 42 50 68 255)
     Clay_Close()
-    Clay_OpenBox(4 92 36 CLAY_LEFT_TO_RIGHT 7 0 255 232 194 255)
-    Clay_Text(TXT_HOME 4 12 42 50 68 255)
+    render_header_link(4 TXT_HOME 4 92)
+    render_header_link(5 TXT_DOCS 4 96)
+    render_header_link(6 TXT_DEMO 4 78)
+    Clay_OpenBoxEx(7 0 36 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 0 0 demo_accent_r demo_accent_g demo_accent_b 255)
     Clay_Close()
-    Clay_OpenBox(5 96 36 CLAY_LEFT_TO_RIGHT 7 0 255 232 194 255)
-    Clay_Text(TXT_DOCS 4 12 42 50 68 255)
+    render_start_button(8 36 12)
     Clay_Close()
-    Clay_OpenBox(6 78 36 CLAY_LEFT_TO_RIGHT 7 0 255 232 194 255)
-    Clay_Text(TXT_DEMO 4 12 42 50 68 255)
-    Clay_Close()
-    Clay_OpenBox(7 body_w - 506 36 CLAY_LEFT_TO_RIGHT 0 0 accent_r accent_g accent_b 255)
-    Clay_Close()
-    let start_r:int = 75
-    let start_g:int = 88
-    let start_b:int = 140
-    if hot_start {
-        start_r = 105
-        start_g = 135
-        start_b = 219
-    }
-    if hot_start and (demo_mouse_down not=? 0) {
-        start_r = 83
-        start_g = 190
-        start_b = 142
-    }
-    Clay_OpenBox(8 112 36 CLAY_LEFT_TO_RIGHT 7 0 start_r start_g start_b 255)
-    Clay_Text(TXT_START 5 12 239 246 255 255)
-    Clay_Close()
-    Clay_Close()
+    return 0
+}
 
-    Clay_OpenBox(9 body_w body_h CLAY_LEFT_TO_RIGHT 0 gap 18 22 32 255)
+let render_nav_item = (id:int text:int len:int hot:int r:int g:int b:int text_r:int text_g:int text_b:int):>void => {
+    if hot {
+        r += 17
+        g += 29
+        b += 51
+    }
+    Clay_OpenBoxEx(id 0 40 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 7 0 r g b 255)
+    Clay_Text(text len 10 text_r text_g text_b 255)
+    Clay_Close()
+    return 0
+}
 
-    Clay_OpenBox(10 side_w body_h CLAY_TOP_TO_BOTTOM 10 8 35 43 62 255)
-    let dash_r:int = 92
-    let dash_g:int = 132
-    let dash_b:int = 219
-    if hot_dash {
-        dash_r = 118
-        dash_g = 150
-        dash_b = 232
-    }
-    Clay_OpenBox(11 side_w - 20 40 CLAY_LEFT_TO_RIGHT 7 0 dash_r dash_g dash_b 255)
-    Clay_Text(TXT_DASH 9 10 239 246 255 255)
+let render_sidebar = ():>void => {
+    Clay_OpenBoxEx(10 116 0 CLAY_SIZE_FIXED CLAY_SIZE_GROW CLAY_TOP_TO_BOTTOM 10 8 35 43 62 255)
+    render_nav_item(11 TXT_DASH 9 demo_hot_dash 92 132 219 239 246 255)
+    render_nav_item(12 TXT_LAYOUT 6 demo_hot_nav 51 63 91 176 196 225)
+    render_nav_item(13 TXT_RENDER 6 demo_hot_nav 51 63 91 176 196 225)
+    render_nav_item(14 TXT_THEMES 6 demo_hot_nav 51 63 91 176 196 225)
+    Clay_OpenBoxEx(15 0 0 CLAY_SIZE_GROW CLAY_SIZE_GROW CLAY_LEFT_TO_RIGHT 0 0 35 43 62 255)
     Clay_Close()
-    let nav_r:int = 51
-    let nav_g:int = 63
-    let nav_b:int = 91
-    if hot_nav {
-        nav_r = 68
-        nav_g = 92
-        nav_b = 142
-    }
-    Clay_OpenBox(12 side_w - 20 40 CLAY_LEFT_TO_RIGHT 7 0 nav_r nav_g nav_b 255)
-    Clay_Text(TXT_LAYOUT 6 10 176 196 225 255)
+    render_nav_item(16 TXT_SHIP 4 demo_hot_ship 224 196 91 42 50 68)
     Clay_Close()
-    Clay_OpenBox(13 side_w - 20 40 CLAY_LEFT_TO_RIGHT 7 0 nav_r nav_g nav_b 255)
-    Clay_Text(TXT_RENDER 6 10 176 196 225 255)
-    Clay_Close()
-    Clay_OpenBox(14 side_w - 20 40 CLAY_LEFT_TO_RIGHT 7 0 nav_r nav_g nav_b 255)
-    Clay_Text(TXT_THEMES 6 10 176 196 225 255)
-    Clay_Close()
-    let side_spacer_h:int = body_h - 262
-    if side_spacer_h <? 0 {
-        side_spacer_h = 0
-    }
-    Clay_OpenBox(15 side_w - 20 side_spacer_h CLAY_LEFT_TO_RIGHT 0 0 35 43 62 255)
-    Clay_Close()
-    let ship_r:int = 224
-    let ship_g:int = 196
-    let ship_b:int = 91
-    if hot_ship {
-        ship_r = 249
-        ship_g = 206
-        ship_b = 101
-    }
-    Clay_OpenBox(16 side_w - 20 52 CLAY_LEFT_TO_RIGHT 7 0 ship_r ship_g ship_b 255)
-    Clay_Text(TXT_SHIP 4 11 42 50 68 255)
-    Clay_Close()
-    Clay_Close()
+    return 0
+}
 
-    Clay_OpenBox(17 main_w body_h CLAY_TOP_TO_BOTTOM 0 gap 18 22 32 255)
-    Clay_OpenBox(18 main_w hero_h CLAY_TOP_TO_BOTTOM 9 6 68 92 142 255)
-    Clay_OpenBox(19 main_w - 32 28 CLAY_LEFT_TO_RIGHT 4 0 239 246 255 255)
+let render_hero = ():>void => {
+    Clay_OpenBoxEx(18 0 0 CLAY_SIZE_GROW CLAY_SIZE_FIT CLAY_TOP_TO_BOTTOM 9 6 68 92 142 255)
+    Clay_OpenBoxEx(19 0 28 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 4 0 239 246 255 255)
     Clay_Text(TXT_HERO 18 16 42 50 68 255)
     Clay_Close()
-    Clay_OpenBox(20 main_w - 32 22 CLAY_LEFT_TO_RIGHT 5 0 176 196 225 255)
+    Clay_OpenBoxEx(20 0 22 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 5 0 176 196 225 255)
     Clay_Text(TXT_SUB 15 11 42 50 68 255)
     Clay_Close()
-    Clay_OpenBox(21 130 28 CLAY_LEFT_TO_RIGHT 6 0 start_r start_g start_b 255)
+    Clay_OpenBox(21 130 28 CLAY_LEFT_TO_RIGHT 6 0 demo_start_r demo_start_g demo_start_b 255)
     Clay_Text(TXT_START 5 11 239 246 255 255)
     Clay_Close()
     Clay_Close()
+    return 0
+}
 
-    Clay_OpenBox(22 main_w cards_h CLAY_LEFT_TO_RIGHT 0 gap 18 22 32 255)
-    let card1_r:int = 69
-    let card1_g:int = 91
-    let card1_b:int = 124
-    if hot_card1 {
-        card1_r = 82
-        card1_g = 111
-        card1_b = 153
+let render_feature_card = (id:int title_box_id:int line_id:int fill_id:int title:int len:int hot:int fill_r:int fill_g:int fill_b:int):>void => {
+    let card_r:int = 69
+    let card_g:int = 91
+    let card_b:int = 124
+    if hot {
+        card_r = 82
+        card_g = 111
+        card_b = 153
     }
-    Clay_OpenBox(23 card_w cards_h CLAY_TOP_TO_BOTTOM 12 8 card1_r card1_g card1_b 255)
-    Clay_OpenBox(24 card_w - 24 20 CLAY_LEFT_TO_RIGHT 5 0 239 246 255 255)
-    Clay_Text(TXT_CARD1 6 10 42 50 68 255)
+    Clay_OpenBoxEx(id 0 0 CLAY_SIZE_GROW CLAY_SIZE_FIT CLAY_TOP_TO_BOTTOM 12 8 card_r card_g card_b 255)
+    Clay_OpenBoxEx(title_box_id 0 20 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 5 0 239 246 255 255)
+    Clay_Text(title len 10 42 50 68 255)
     Clay_Close()
-    Clay_OpenBox(25 card_w - 24 12 CLAY_LEFT_TO_RIGHT 0 0 144 166 198 255)
+    Clay_OpenBoxEx(line_id 0 12 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 0 0 144 166 198 255)
     Clay_Close()
-    Clay_OpenBox(26 card_w - 24 40 CLAY_LEFT_TO_RIGHT 0 0 83 190 142 255)
-    Clay_Close()
-    Clay_Close()
-    let card2_r:int = 69
-    let card2_g:int = 91
-    let card2_b:int = 124
-    if hot_card2 {
-        card2_r = 82
-        card2_g = 111
-        card2_b = 153
-    }
-    Clay_OpenBox(27 card_w cards_h CLAY_TOP_TO_BOTTOM 12 8 card2_r card2_g card2_b 255)
-    Clay_OpenBox(28 card_w - 24 20 CLAY_LEFT_TO_RIGHT 5 0 239 246 255 255)
-    Clay_Text(TXT_CARD2 5 10 42 50 68 255)
-    Clay_Close()
-    Clay_OpenBox(29 card_w - 24 12 CLAY_LEFT_TO_RIGHT 0 0 144 166 198 255)
-    Clay_Close()
-    Clay_OpenBox(30 card_w - 24 40 CLAY_LEFT_TO_RIGHT 0 0 224 196 91 255)
+    Clay_OpenBoxEx(fill_id 0 40 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 0 0 fill_r fill_g fill_b 255)
     Clay_Close()
     Clay_Close()
-    let card3_r:int = 69
-    let card3_g:int = 91
-    let card3_b:int = 124
-    if hot_card3 {
-        card3_r = 82
-        card3_g = 111
-        card3_b = 153
-    }
-    Clay_OpenBox(31 card_w cards_h CLAY_TOP_TO_BOTTOM 12 8 card3_r card3_g card3_b 255)
-    Clay_OpenBox(32 card_w - 24 20 CLAY_LEFT_TO_RIGHT 5 0 239 246 255 255)
-    Clay_Text(TXT_CARD3 5 10 42 50 68 255)
-    Clay_Close()
-    Clay_OpenBox(33 card_w - 24 12 CLAY_LEFT_TO_RIGHT 0 0 144 166 198 255)
-    Clay_Close()
-    Clay_OpenBox(34 card_w - 24 40 CLAY_LEFT_TO_RIGHT 0 0 201 106 145 255)
-    Clay_Close()
-    Clay_Close()
-    Clay_Close()
+    return 0
+}
 
-    Clay_OpenBox(35 main_w panel_h CLAY_LEFT_TO_RIGHT 0 gap 18 22 32 255)
-    Clay_OpenBox(36 main_w - 146 panel_h CLAY_TOP_TO_BOTTOM 14 10 244 247 251 255)
-    Clay_OpenBox(37 main_w - 174 24 CLAY_LEFT_TO_RIGHT 5 0 42 50 68 255)
-    Clay_Text(TXT_PANEL 16 12 239 246 255 255)
+let render_card_grid = ():>void => {
+    Clay_OpenBoxEx(22 0 0 CLAY_SIZE_GROW CLAY_SIZE_FIT CLAY_LEFT_TO_RIGHT 0 14 18 22 32 255)
+    render_feature_card(23 24 25 26 TXT_CARD1 6 demo_hot_card1 83 190 142)
+    render_feature_card(27 28 29 30 TXT_CARD2 5 demo_hot_card2 224 196 91)
+    render_feature_card(31 32 33 34 TXT_CARD3 5 demo_hot_card3 201 106 145)
     Clay_Close()
-    Clay_OpenBox(38 main_w - 174 20 CLAY_LEFT_TO_RIGHT 5 0 176 196 225 255)
-    Clay_Text(TXT_FIELD 14 10 42 50 68 255)
-    Clay_Close()
-    let field_spacer_h:int = panel_h - 120
-    if field_spacer_h <? 0 {
-        field_spacer_h = 0
-    }
-    Clay_OpenBox(39 main_w - 174 field_spacer_h CLAY_LEFT_TO_RIGHT 0 0 226 232 241 255)
-    Clay_Close()
+    return 0
+}
+
+let render_save_button = ():>void => {
     let save_r:int = 83
     let save_g:int = 190
     let save_b:int = 142
-    if hot_save {
+    if demo_hot_save {
         save_r = 105
         save_g = 212
         save_b = 164
     }
-    if hot_save and (demo_mouse_down not=? 0) {
-        save_r = accent_r
-        save_g = accent_g
-        save_b = accent_b
+    if demo_hot_save and (demo_mouse_down not=? 0) {
+        save_r = demo_accent_r
+        save_g = demo_accent_g
+        save_b = demo_accent_b
     }
-    if panel_h >? 118 {
-        Clay_OpenBox(40 130 32 CLAY_LEFT_TO_RIGHT 7 0 save_r save_g save_b 255)
-        Clay_Text(TXT_SAVE 4 11 239 246 255 255)
-        Clay_Close()
-    }
+    Clay_OpenBox(40 130 32 CLAY_LEFT_TO_RIGHT 7 0 save_r save_g save_b 255)
+    Clay_Text(TXT_SAVE 4 11 239 246 255 255)
     Clay_Close()
-    Clay_OpenBox(41 132 panel_h CLAY_TOP_TO_BOTTOM 12 8 35 43 62 255)
-    Clay_OpenBox(42 108 32 CLAY_LEFT_TO_RIGHT 7 0 105 135 219 255)
+    return 0
+}
+
+let render_settings_panel = ():>void => {
+    Clay_OpenBoxEx(36 0 0 CLAY_SIZE_GROW CLAY_SIZE_GROW CLAY_TOP_TO_BOTTOM 14 10 244 247 251 255)
+    Clay_OpenBoxEx(37 0 24 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 5 0 42 50 68 255)
+    Clay_Text(TXT_PANEL 16 12 239 246 255 255)
+    Clay_Close()
+    Clay_OpenBoxEx(38 0 20 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 5 0 176 196 225 255)
+    Clay_Text(TXT_FIELD 14 10 42 50 68 255)
+    Clay_Close()
+    Clay_OpenBoxEx(39 0 0 CLAY_SIZE_GROW CLAY_SIZE_GROW CLAY_LEFT_TO_RIGHT 0 0 226 232 241 255)
+    Clay_Close()
+    render_save_button()
+    Clay_Close()
+    return 0
+}
+
+let render_stats_panel = ():>void => {
+    Clay_OpenBoxEx(41 132 0 CLAY_SIZE_FIXED CLAY_SIZE_GROW CLAY_TOP_TO_BOTTOM 12 8 35 43 62 255)
+    Clay_OpenBoxEx(42 0 32 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 7 0 105 135 219 255)
     Clay_Text(TXT_STATS 5 10 239 246 255 255)
     Clay_Close()
-    Clay_OpenBox(43 108 32 CLAY_LEFT_TO_RIGHT 0 0 83 190 142 255)
+    Clay_OpenBoxEx(43 0 32 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 0 0 83 190 142 255)
     Clay_Close()
-    Clay_OpenBox(44 108 32 CLAY_LEFT_TO_RIGHT 0 0 224 196 91 255)
-    Clay_Close()
-    Clay_Close()
+    Clay_OpenBoxEx(44 0 32 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 0 0 224 196 91 255)
     Clay_Close()
     Clay_Close()
+    return 0
+}
 
-    Clay_OpenBox(45 aside_w body_h CLAY_TOP_TO_BOTTOM 12 10 35 43 62 255)
-    let fast_r:int = 105
-    let fast_g:int = 135
-    let fast_b:int = 219
-    if hot_fast {
-        fast_r = 118
-        fast_g = 150
-        fast_b = 232
-    }
-    Clay_OpenBox(46 aside_w - 24 66 CLAY_LEFT_TO_RIGHT 7 0 fast_r fast_g fast_b 255)
-    Clay_Text(TXT_FAST 4 11 239 246 255 255)
+let render_main_panel = ():>void => {
+    Clay_OpenBoxEx(35 0 0 CLAY_SIZE_GROW CLAY_SIZE_GROW CLAY_LEFT_TO_RIGHT 0 14 18 22 32 255)
+    render_settings_panel()
+    render_stats_panel()
     Clay_Close()
-    let small_r:int = 83
-    let small_g:int = 190
-    let small_b:int = 142
-    if hot_small {
-        small_r = 105
-        small_g = 212
-        small_b = 164
-    }
-    Clay_OpenBox(47 aside_w - 24 66 CLAY_LEFT_TO_RIGHT 7 0 small_r small_g small_b 255)
-    Clay_Text(TXT_SMALL 5 11 239 246 255 255)
-    Clay_Close()
-    let port_r:int = 224
-    let port_g:int = 196
-    let port_b:int = 91
-    if hot_port {
-        port_r = 249
-        port_g = 206
-        port_b = 101
-    }
-    Clay_OpenBox(48 aside_w - 24 66 CLAY_LEFT_TO_RIGHT 7 0 port_r port_g port_b 255)
-    Clay_Text(TXT_PORT 8 11 42 50 68 255)
-    Clay_Close()
-    let aside_spacer_h:int = body_h - 304
-    if aside_spacer_h <? 0 {
-        aside_spacer_h = 0
-    }
-    Clay_OpenBox(49 aside_w - 24 aside_spacer_h CLAY_LEFT_TO_RIGHT 0 0 35 43 62 255)
-    Clay_Close()
-    Clay_OpenBox(50 aside_w - 24 54 CLAY_LEFT_TO_RIGHT 0 0 accent_r accent_g accent_b 255)
-    Clay_Close()
-    Clay_Close()
+    return 0
+}
 
+let render_main_content = ():>void => {
+    Clay_OpenBoxEx(17 0 0 CLAY_SIZE_GROW CLAY_SIZE_GROW CLAY_TOP_TO_BOTTOM 0 14 18 22 32 255)
+    render_hero()
+    render_card_grid()
+    render_main_panel()
     Clay_Close()
+    return 0
+}
 
-    Clay_OpenBox(51 body_w footer_h CLAY_LEFT_TO_RIGHT 10 8 42 50 68 255)
+let render_metric_tile = (id:int text:int len:int hot:int r:int g:int b:int text_r:int text_g:int text_b:int):>void => {
+    if hot {
+        r += 13
+        g += 22
+        b += 23
+    }
+    Clay_OpenBoxEx(id 0 66 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 7 0 r g b 255)
+    Clay_Text(text len 11 text_r text_g text_b 255)
+    Clay_Close()
+    return 0
+}
+
+let render_aside = ():>void => {
+    Clay_OpenBoxEx(45 132 0 CLAY_SIZE_FIXED CLAY_SIZE_GROW CLAY_TOP_TO_BOTTOM 12 10 35 43 62 255)
+    render_metric_tile(46 TXT_FAST 4 demo_hot_fast 105 135 219 239 246 255)
+    render_metric_tile(47 TXT_SMALL 5 demo_hot_small 83 190 142 239 246 255)
+    render_metric_tile(48 TXT_PORT 8 demo_hot_port 224 196 91 42 50 68)
+    Clay_OpenBoxEx(49 0 0 CLAY_SIZE_GROW CLAY_SIZE_GROW CLAY_LEFT_TO_RIGHT 0 0 35 43 62 255)
+    Clay_Close()
+    Clay_OpenBoxEx(50 0 54 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 0 0 demo_accent_r demo_accent_g demo_accent_b 255)
+    Clay_Close()
+    Clay_Close()
+    return 0
+}
+
+let render_body = ():>void => {
+    Clay_OpenBoxEx(9 0 0 CLAY_SIZE_GROW CLAY_SIZE_GROW CLAY_LEFT_TO_RIGHT 0 14 18 22 32 255)
+    render_sidebar()
+    render_main_content()
+    render_aside()
+    Clay_Close()
+    return 0
+}
+
+let render_footer = ():>void => {
+    Clay_OpenBoxEx(51 0 34 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 10 8 42 50 68 255)
     Clay_OpenBox(52 110 18 CLAY_LEFT_TO_RIGHT 4 0 144 166 198 255)
     Clay_Text(TXT_FOOT 9 9 42 50 68 255)
     Clay_Close()
-    Clay_OpenBox(53 body_w - 256 18 CLAY_LEFT_TO_RIGHT 0 0 42 50 68 255)
+    Clay_OpenBoxEx(53 0 18 CLAY_SIZE_GROW CLAY_SIZE_FIXED CLAY_LEFT_TO_RIGHT 0 0 42 50 68 255)
     Clay_Close()
     Clay_OpenBox(54 110 18 CLAY_LEFT_TO_RIGHT 4 0 144 166 198 255)
     Clay_Text(TXT_HELP 13 9 42 50 68 255)
     Clay_Close()
     Clay_Close()
+    return 0
+}
 
-    Clay_Close()
+let clay_demo_layout = (width:int height:int):>int => {
+    demo_layout_width = width
+    demo_layout_height = height
+    ud_clay_set_layout_dimensions(width height)
+    clay_demo_update_hot_state()
+    clay_demo_update_palette()
+
+    Clay_BeginLayout()
+    start_demo_root()
+        render_header()
+        render_body()
+        render_footer()
+    end_demo_root()
     return Clay_EndLayout(16)
 }

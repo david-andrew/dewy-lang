@@ -1326,11 +1326,15 @@ class Wasm32Backend(Backend):
             )
         
         browser_link_js: list[str] = []
+        browser_link_wasm: dict[str, str] = {}
         for artifact in link_artifacts:
             if artifact.suffix == ".js":
                 browser_link_js.append(artifact.read_text())
             elif artifact.suffix == ".wasm":
-                shutil.copy2(artifact, cache_dir / artifact.name)
+                if split_wasm:
+                    shutil.copy2(artifact, cache_dir / artifact.name)
+                else:
+                    browser_link_wasm[artifact.name] = base64.b64encode(artifact.read_bytes()).decode('ascii')
             else:
                 raise RuntimeError(f"Unsupported wasm32 link artifact: {artifact}")
 
@@ -1344,7 +1348,7 @@ class Wasm32Backend(Backend):
         else:
             wasm_bytes = wasm_path.read_bytes()
             wasm_b64 = base64.b64encode(wasm_bytes).decode('ascii')
-            html_content = self._get_embedded_html_template(input_name, wasm_b64, host_functions_js)
+            html_content = self._get_embedded_html_template(input_name, wasm_b64, host_functions_js, browser_link_wasm)
         
         html_path.write_text(html_content)
         
@@ -2755,8 +2759,14 @@ run();
 </html>
 '''
     
-    def _get_embedded_html_template(self, title: str, wasm_b64: str, host_js: str) -> str:
+    def _get_embedded_html_template(self, title: str, wasm_b64: str, host_js: str, linked_wasm: dict[str, str]) -> str:
         """Return HTML template with embedded base64 WASM."""
+        linked_wasm_scripts = "\n".join(
+            f'''    <script data-wasm-artifact="{name}" type="application/wasm-b64">
+{wasm_b64}
+    </script>'''
+            for name, wasm_b64 in linked_wasm.items()
+        )
         return f'''<!DOCTYPE html>
 <html>
 <head>
@@ -2777,15 +2787,32 @@ run();
     <script id="wasm-module" type="application/wasm-b64">
 {wasm_b64}
     </script>
+{linked_wasm_scripts}
 
     <script>
 {host_js}
 {self._get_server_lifecycle_js()}
 
+function decodeWasmBase64(b64) {{
+    return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+}}
+
 async function loadEmbeddedWasm() {{
     const b64 = document.getElementById('wasm-module').textContent.trim();
-    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const bytes = decodeWasmBase64(b64);
     return WebAssembly.instantiate(bytes, imports);
+}}
+
+async function loadLinkedWasm(name, imports) {{
+    const script = document.querySelector(`script[data-wasm-artifact="${{name}}"]`);
+    if (script) {{
+        return WebAssembly.instantiate(decodeWasmBase64(script.textContent.trim()), imports);
+    }}
+    const response = await fetch(name);
+    if (!response.ok) {{
+        throw new Error(`Failed to load ${{name}}: HTTP ${{response.status}}`);
+    }}
+    return WebAssembly.instantiate(await response.arrayBuffer(), imports);
 }}
 
 async function run() {{
