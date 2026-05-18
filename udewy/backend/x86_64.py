@@ -491,12 +491,9 @@ class X86_64Backend(Backend):
         elif op_kind == t1.Kind.TK_MUL:
             self._emit("imulq %rcx, %rax")
         elif op_kind == t1.Kind.TK_IDIV:
-            self._emit("cqto")
-            self._emit("idivq %rcx")
+            self._emit_signed_idiv()
         elif op_kind == t1.Kind.TK_MOD:
-            self._emit("cqto")
-            self._emit("idivq %rcx")
-            self._emit("movq %rdx, %rax")
+            self._emit_signed_mod()
         elif op_kind == t1.Kind.TK_LEFT_SHIFT:
             self._emit("shlq %cl, %rax")
         elif op_kind == t1.Kind.TK_RIGHT_SHIFT:
@@ -591,20 +588,90 @@ class X86_64Backend(Backend):
         self._pop_saved_into("%rax")
         self._emit("sarq %cl, %rax")
 
+    def _emit_signed_idiv(self) -> None:
+        """rax=lhs, rcx=rhs -> rax = lhs // rhs (RISC-V div semantics)."""
+        div_zero = self._new_label("div_zero")
+        done = self._new_label("div_done")
+        do_idiv = self._new_label("div_idiv")
+        self._emit("testq %rcx, %rcx")
+        self._emit(f"jz {div_zero}")
+        self._emit("movabsq $0x8000000000000000, %rdx")
+        self._emit("cmpq %rdx, %rax")
+        self._emit(f"jne {do_idiv}")
+        self._emit("cmpq $-1, %rcx")
+        self._emit(f"jne {do_idiv}")
+        self._emit(f"jmp {done}")
+        self._emit(f"{do_idiv}:")
+        self._emit("cqto")
+        self._emit("idivq %rcx")
+        self._emit(f"jmp {done}")
+        self._emit(f"{div_zero}:")
+        self._emit("movq $-1, %rax")
+        self._emit(f"{done}:")
+
+    def _emit_signed_mod(self) -> None:
+        """rax=lhs, rcx=rhs -> rax = lhs % rhs (RISC-V rem semantics)."""
+        mod_zero = self._new_label("mod_zero")
+        done = self._new_label("mod_done")
+        do_idiv = self._new_label("mod_idiv")
+        self._emit("testq %rcx, %rcx")
+        self._emit(f"jz {mod_zero}")
+        self._emit("movabsq $0x8000000000000000, %rdx")
+        self._emit("cmpq %rdx, %rax")
+        self._emit(f"jne {do_idiv}")
+        self._emit("cmpq $-1, %rcx")
+        self._emit(f"jne {do_idiv}")
+        self._emit("xorq %rax, %rax")
+        self._emit(f"jmp {done}")
+        self._emit(f"{do_idiv}:")
+        self._emit("cqto")
+        self._emit("idivq %rcx")
+        self._emit("movq %rdx, %rax")
+        self._emit(f"jmp {done}")
+        self._emit(f"{mod_zero}:")
+        self._emit(f"{done}:")
+
+    def _emit_unsigned_idiv(self) -> None:
+        """rax=lhs, rcx=rhs -> unsigned quotient (RISC-V divu semantics)."""
+        div_zero = self._new_label("udiv_zero")
+        done = self._new_label("udiv_done")
+        do_div = self._new_label("udiv_div")
+        self._emit("testq %rcx, %rcx")
+        self._emit(f"jz {div_zero}")
+        self._emit(f"{do_div}:")
+        self._emit("xorq %rdx, %rdx")
+        self._emit("divq %rcx")
+        self._emit(f"jmp {done}")
+        self._emit(f"{div_zero}:")
+        self._emit("movq $-1, %rax")
+        self._emit(f"{done}:")
+
+    def _emit_unsigned_mod(self) -> None:
+        """rax=lhs, rcx=rhs -> unsigned remainder (RISC-V remu semantics)."""
+        mod_zero = self._new_label("umod_zero")
+        done = self._new_label("umod_done")
+        do_div = self._new_label("umod_div")
+        self._emit("testq %rcx, %rcx")
+        self._emit(f"jz {mod_zero}")
+        self._emit(f"{do_div}:")
+        self._emit("xorq %rdx, %rdx")
+        self._emit("divq %rcx")
+        self._emit("movq %rdx, %rax")
+        self._emit(f"jmp {done}")
+        self._emit(f"{mod_zero}:")
+        self._emit(f"{done}:")
+
     def unsigned_idiv(self) -> None:
         """Unsigned division. Stack: [left right] -> quotient."""
         self._emit("movq %rax, %rcx")
         self._pop_saved_into("%rax")
-        self._emit("xorq %rdx, %rdx")
-        self._emit("divq %rcx")
+        self._emit_unsigned_idiv()
 
     def unsigned_mod(self) -> None:
         """Unsigned remainder. Stack: [left right] -> remainder."""
         self._emit("movq %rax, %rcx")
         self._pop_saved_into("%rax")
-        self._emit("xorq %rdx, %rdx")
-        self._emit("divq %rcx")
-        self._emit("movq %rdx, %rax")
+        self._emit_unsigned_mod()
 
     def unsigned_cmp(self, kind: str) -> None:
         """Unsigned comparison returning udewy booleans."""
@@ -815,6 +882,28 @@ class X86_64Backend(Backend):
         _, end_label = self._loop_stack[-1]
         self._emit("testq %rax, %rax")
         self._emit(f"jz {end_label}")
+
+    def cond_and_split(self) -> str:
+        false_label = self._new_label("cond_and_false")
+        self._emit("testq %rax, %rax")
+        self._emit(f"jz {false_label}")
+        return false_label
+
+    def cond_and_join(self, false_label: str) -> None:
+        done_label = self._new_label("cond_and_done")
+        self._emit(f"jmp {done_label}")
+        self._emit_label(false_label)
+        self._emit("xorq %rax, %rax")
+        self._emit_label(done_label)
+
+    def cond_or_split(self) -> str:
+        done_label = self._new_label("cond_or_done")
+        self._emit("testq %rax, %rax")
+        self._emit(f"jnz {done_label}")
+        return done_label
+
+    def cond_or_join(self, done_label: str) -> None:
+        self._emit_label(done_label)
     
     def end_loop(self) -> None:
         """End a loop."""

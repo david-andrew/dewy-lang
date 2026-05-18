@@ -119,6 +119,7 @@ class CBackend(Backend):
         self._reachable_fn_label_ids: set[int] | None = None
         self._c_capabilities: set[str] = set()
         self._required_helpers: set[str] = set()
+        self._cond_lhs_stack: list[str] = []
 
         self._fn_names: dict[int, str] = {}
         self._fn_source_names: dict[int, str] = {}
@@ -349,6 +350,9 @@ class CBackend(Backend):
             ],
             "signed_div": [
                 "static udewy_word udewy_signed_div(udewy_word lhs, udewy_word rhs) {",
+                "    if (rhs == 0) {",
+                "        return UINT64_C(0xFFFFFFFFFFFFFFFF);",
+                "    }",
                 "    if (lhs == UINT64_C(0x8000000000000000) && rhs == UINT64_C(0xFFFFFFFFFFFFFFFF)) {",
                 "        return lhs;",
                 "    }",
@@ -357,10 +361,29 @@ class CBackend(Backend):
             ],
             "signed_mod": [
                 "static udewy_word udewy_signed_mod(udewy_word lhs, udewy_word rhs) {",
+                "    if (rhs == 0) {",
+                "        return lhs;",
+                "    }",
                 "    if (lhs == UINT64_C(0x8000000000000000) && rhs == UINT64_C(0xFFFFFFFFFFFFFFFF)) {",
                 "        return UINT64_C(0);",
                 "    }",
                 "    return (udewy_word)(((int64_t)lhs) % ((int64_t)rhs));",
+                "}",
+            ],
+            "unsigned_div": [
+                "static udewy_word udewy_unsigned_div(udewy_word lhs, udewy_word rhs) {",
+                "    if (rhs == 0) {",
+                "        return UINT64_C(0xFFFFFFFFFFFFFFFF);",
+                "    }",
+                "    return lhs / rhs;",
+                "}",
+            ],
+            "unsigned_mod": [
+                "static udewy_word udewy_unsigned_mod(udewy_word lhs, udewy_word rhs) {",
+                "    if (rhs == 0) {",
+                "        return lhs;",
+                "    }",
+                "    return lhs % rhs;",
                 "}",
             ],
             "signed_shr": [
@@ -543,6 +566,8 @@ class CBackend(Backend):
             "bool",
             "signed_div",
             "signed_mod",
+            "unsigned_div",
+            "unsigned_mod",
             "signed_shr",
             "i64_to_f32_bits",
             "i64_to_f64_bits",
@@ -1120,6 +1145,24 @@ class CBackend(Backend):
         fn.indent -= 1
         self._emit("}")
 
+    def cond_and_split(self) -> str:
+        self._cond_lhs_stack.append(self._current_expr())
+        return ""
+
+    def cond_and_join(self, false_label: str) -> None:
+        rhs = self._current_expr()
+        lhs = self._cond_lhs_stack.pop()
+        self._set_current(f"(({lhs}) ? ({rhs}) : UINT64_C(0))")
+
+    def cond_or_split(self) -> str:
+        self._cond_lhs_stack.append(self._current_expr())
+        return ""
+
+    def cond_or_join(self, done_label: str) -> None:
+        rhs = self._current_expr()
+        lhs = self._cond_lhs_stack.pop()
+        self._set_current(f"(({lhs}) ? ({lhs}) : ({rhs}))")
+
     def begin_loop(self) -> None:
         fn = self._current()
         self._emit("for (;;) {")
@@ -1274,13 +1317,15 @@ class CBackend(Backend):
         elif name == "__signed_shr__":
             self.signed_shr()
         elif name == "__unsigned_idiv__":
+            self._require_helper("unsigned_div")
             rhs = self._current_expr()
             lhs = self._pop_saved()
-            self._set_current(self._emit_temp(f"{lhs} / {rhs}"))
+            self._set_current(self._emit_temp(f"udewy_unsigned_div({lhs}, {rhs})"))
         elif name == "__unsigned_mod__":
+            self._require_helper("unsigned_mod")
             rhs = self._current_expr()
             lhs = self._pop_saved()
-            self._set_current(self._emit_temp(f"{lhs} % {rhs}"))
+            self._set_current(self._emit_temp(f"udewy_unsigned_mod({lhs}, {rhs})"))
         elif name == "__unsigned_lt__":
             self._require_helper("bool")
             rhs = self._current_expr()

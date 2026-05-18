@@ -1,0 +1,13 @@
+# udewy standard library entry point
+# import with: import p"../stdlib/stdlib.udewy"  (adjust path as needed)
+
+import p"./core.udewy"
+
+if $target =? "x86_64" { import p"./capabilities/host_io_x86_64.udewy" }
+if $target =? "riscv"  { import p"./capabilities/host_io_riscv.udewy" }
+if $target =? "arm"    { import p"./capabilities/host_io_arm.udewy" }
+if $target =? "wasm32" { import p"./capabilities/host_io_wasm32.udewy" }
+if $target =? "c"      { import p"./capabilities/host_io_c.udewy" }
+
+import p"./mem/arena.udewy"
+import p"./io.udewy"

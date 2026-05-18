@@ -486,6 +486,9 @@ class Wasm32Backend(Backend):
         # Pre-allocate scratch locals for swap operations
         self._current_fn.append("    (local $swap0 i64)")
         self._current_fn.append("    (local $swap1 i32)")
+        self._current_fn.append("    (local $div_lhs i64)")
+        self._current_fn.append("    (local $div_rhs i64)")
+        self._current_fn.append("    (local $sc_tmp i64)")
         self._current_fn.append(f"    (local {self._stack_local} i32)")
         self._current_fn.append(f"    (local {self._alloc_size_local} i32)")
         self._current_fn.append(f"    (local {self._alloc_ptr_local} i32)")
@@ -586,9 +589,9 @@ class Wasm32Backend(Backend):
         elif op_kind == t1.Kind.TK_MUL:
             self._emit("i64.mul")
         elif op_kind == t1.Kind.TK_IDIV:
-            self._emit("i64.div_s")
+            self._emit_signed_idiv()
         elif op_kind == t1.Kind.TK_MOD:
-            self._emit("i64.rem_s")
+            self._emit_signed_mod()
         elif op_kind == t1.Kind.TK_LEFT_SHIFT:
             self._emit("i64.shl")
         elif op_kind == t1.Kind.TK_RIGHT_SHIFT:
@@ -723,13 +726,101 @@ class Wasm32Backend(Backend):
         self._emit(f"local.get {self._alloc_ptr_local}")
         self._emit("i64.extend_i32_u")
 
+    def _emit_signed_idiv(self) -> None:
+        """Stack: lhs, rhs (rhs on top). Emit udewy signed division semantics."""
+        self._emit("local.set $div_rhs")
+        self._emit("local.set $div_lhs")
+        self._emit("local.get $div_rhs")
+        self._emit("i64.eqz")
+        self._emit("if (result i64)")
+        self._emit("  i64.const -1")
+        self._emit("else")
+        self._emit("  local.get $div_lhs")
+        self._emit("  i64.const 0x8000000000000000")
+        self._emit("  i64.eq")
+        self._emit("  if (result i64)")
+        self._emit("    local.get $div_rhs")
+        self._emit("    i64.const -1")
+        self._emit("    i64.eq")
+        self._emit("    if (result i64)")
+        self._emit("      local.get $div_lhs")
+        self._emit("    else")
+        self._emit("      local.get $div_lhs")
+        self._emit("      local.get $div_rhs")
+        self._emit("      i64.div_s")
+        self._emit("    end")
+        self._emit("  else")
+        self._emit("    local.get $div_lhs")
+        self._emit("    local.get $div_rhs")
+        self._emit("    i64.div_s")
+        self._emit("  end")
+        self._emit("end")
+
+    def _emit_signed_mod(self) -> None:
+        """Stack: lhs, rhs (rhs on top). Emit udewy signed remainder semantics."""
+        self._emit("local.set $div_rhs")
+        self._emit("local.set $div_lhs")
+        self._emit("local.get $div_rhs")
+        self._emit("i64.eqz")
+        self._emit("if (result i64)")
+        self._emit("  local.get $div_lhs")
+        self._emit("else")
+        self._emit("  local.get $div_lhs")
+        self._emit("  i64.const 0x8000000000000000")
+        self._emit("  i64.eq")
+        self._emit("  if (result i64)")
+        self._emit("    local.get $div_rhs")
+        self._emit("    i64.const -1")
+        self._emit("    i64.eq")
+        self._emit("    if (result i64)")
+        self._emit("      i64.const 0")
+        self._emit("    else")
+        self._emit("      local.get $div_lhs")
+        self._emit("      local.get $div_rhs")
+        self._emit("      i64.rem_s")
+        self._emit("    end")
+        self._emit("  else")
+        self._emit("    local.get $div_lhs")
+        self._emit("    local.get $div_rhs")
+        self._emit("    i64.rem_s")
+        self._emit("  end")
+        self._emit("end")
+
+    def _emit_unsigned_idiv(self) -> None:
+        """Stack: lhs, rhs (rhs on top). Emit udewy unsigned division semantics."""
+        self._emit("local.set $div_rhs")
+        self._emit("local.set $div_lhs")
+        self._emit("local.get $div_rhs")
+        self._emit("i64.eqz")
+        self._emit("if (result i64)")
+        self._emit("  i64.const -1")
+        self._emit("else")
+        self._emit("  local.get $div_lhs")
+        self._emit("  local.get $div_rhs")
+        self._emit("  i64.div_u")
+        self._emit("end")
+
+    def _emit_unsigned_mod(self) -> None:
+        """Stack: lhs, rhs (rhs on top). Emit udewy unsigned remainder semantics."""
+        self._emit("local.set $div_rhs")
+        self._emit("local.set $div_lhs")
+        self._emit("local.get $div_rhs")
+        self._emit("i64.eqz")
+        self._emit("if (result i64)")
+        self._emit("  local.get $div_lhs")
+        self._emit("else")
+        self._emit("  local.get $div_lhs")
+        self._emit("  local.get $div_rhs")
+        self._emit("  i64.rem_u")
+        self._emit("end")
+
     def unsigned_idiv(self) -> None:
         """Unsigned division. Stack: [left right] -> quotient."""
-        self._emit("i64.div_u")
+        self._emit_unsigned_idiv()
 
     def unsigned_mod(self) -> None:
         """Unsigned remainder. Stack: [left right] -> remainder."""
-        self._emit("i64.rem_u")
+        self._emit_unsigned_mod()
 
     def unsigned_cmp(self, kind: str) -> None:
         """Unsigned comparison returning udewy booleans."""
@@ -1025,6 +1116,30 @@ class Wasm32Backend(Backend):
         _, block_label = self._loop_stack[-1]
         self._emit("i64.eqz")
         self._emit(f"br_if {block_label}")
+
+    def cond_and_split(self) -> str:
+        self._emit("local.set $sc_tmp")
+        self._emit("local.get $sc_tmp")
+        self._emit("i64.eqz")
+        self._emit("if (result i64)")
+        self._emit("  i64.const 0")
+        self._emit("else")
+        return ""
+
+    def cond_and_join(self, false_label: str) -> None:
+        self._emit("end")
+
+    def cond_or_split(self) -> str:
+        self._emit("local.set $sc_tmp")
+        self._emit("local.get $sc_tmp")
+        self._emit("i64.eqz")
+        self._emit("if (result i64)")
+        return ""
+
+    def cond_or_join(self, done_label: str) -> None:
+        self._emit("else")
+        self._emit("  local.get $sc_tmp")
+        self._emit("end")
     
     def end_loop(self) -> None:
         """End a loop."""

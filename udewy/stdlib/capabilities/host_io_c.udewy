@@ -1,0 +1,24 @@
+import p"../../third_party/c/stdio.udewy"
+import p"../../third_party/c/stdlib.udewy"
+
+const STDIN:int = 0
+const STDOUT:int = 1
+const STDERR:int = 2
+
+let host_write = (fd:int buf:int len:int):>int => {
+    let i:int = 0
+    loop i <? len {
+        putchar(__load_u8__(buf + i))
+        i = i + 1
+    }
+    return len
+}
+
+let host_exit = (code:int):>void => {
+    exit(code)
+    return void
+}
+
+let host_mmap_rw = (size:int):>int => {
+    return malloc(size)
+}

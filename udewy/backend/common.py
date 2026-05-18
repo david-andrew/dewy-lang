@@ -464,6 +464,22 @@ class Backend(ABC):
     @abstractmethod
     def emit_continue(self) -> None:
         """Emit a continue statement (jump to start of current loop)."""
+
+    @abstractmethod
+    def cond_and_split(self) -> str:
+        """After logical-AND left operand is visible. Branch to returned label if zero."""
+
+    @abstractmethod
+    def cond_and_join(self, false_label: str) -> None:
+        """Complete logical-AND after right operand is visible."""
+
+    @abstractmethod
+    def cond_or_split(self) -> str:
+        """After logical-OR left operand is visible. Branch to returned label if non-zero."""
+
+    @abstractmethod
+    def cond_or_join(self, done_label: str) -> None:
+        """Complete logical-OR after optional right operand is visible."""
     
     @abstractmethod
     def emit_return(self) -> None:

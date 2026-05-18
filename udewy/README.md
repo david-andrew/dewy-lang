@@ -324,7 +324,14 @@ let y:int = not flags
 | `//` | Integer division | Signed 64-bit division, truncated toward zero |
 | `%` | Modulo | Signed 64-bit remainder |
 
-Division and modulo use **signed** interpretation. Division by zero behavior is backend-dependent (typically causes a fault).
+Division and modulo use **signed** interpretation (RISC-V `div` / `rem` semantics on all targets):
+
+| Case | `a // b` | `a % b` |
+|------|----------|---------|
+| `b = 0` | `-1` (`0xFFFF_FFFF_FFFF_FFFF`) | `a` |
+| `INT_MIN // -1` | `INT_MIN` | `0` |
+
+All other cases use truncating signed division toward zero.
 
 ### Shift Operators
 
@@ -362,7 +369,7 @@ All comparison operators return `true` (`0xFFFF_FFFF_FFFF_FFFF`) or `false` (`0x
 
 Due to the boolean representation (`true` = all 1s, `false` = all 0s), these operators work correctly as both bitwise and logical operators.
 
-**Important:** There is **no short-circuit evaluation**. Both operands of `and` and `or` are always evaluated. This is a significant divergence from full Dewy, which short-circuits.
+**Important:** In ordinary expressions, `and` and `or` are **bitwise** and both operands are always evaluated. In `if` and `loop` conditions only, `and` and `or` use **logical short-circuit** evaluation (compatible with Dewy bool conditions): the right-hand side is skipped when the result is already determined.
 
 ### Pipe Operator
 
@@ -820,8 +827,14 @@ Signed and unsigned 64-bit loads/stores are identical at runtime; both spellings
 | Intrinsic | Description |
 |-----------|-------------|
 | `__signed_shr__(val bits)` | Arithmetic (signed) right shift; fills vacated bits with the sign bit |
-| `__unsigned_idiv__(lhs rhs)` | Unsigned 64-bit division |
+| `__unsigned_idiv__(lhs rhs)` | Unsigned 64-bit division (RISC-V `divu` / `remu` semantics) |
 | `__unsigned_mod__(lhs rhs)` | Unsigned 64-bit remainder |
+
+| Case | `__unsigned_idiv__(a, b)` | `__unsigned_mod__(a, b)` |
+|------|---------------------------|--------------------------|
+| `b = 0` | `UINT64_MAX` (`0xFFFF_FFFF_FFFF_FFFF`) | `a` |
+
+Divide-by-zero quotients use the same bit pattern as signed `-1`; only the interpretation differs.
 | `__unsigned_lt__(lhs rhs)` | Unsigned less-than comparison |
 | `__unsigned_gt__(lhs rhs)` | Unsigned greater-than comparison |
 | `__unsigned_lte__(lhs rhs)` | Unsigned less-than-or-equal comparison |
@@ -862,7 +875,7 @@ These patterns compile in both udewy and Dewy but may behave differently:
 To write well-formed udewy:
 
 1. **Use `__signed_shr__`** when arithmetic shift is needed for signed values
-2. **Avoid relying on short-circuit evaluation** - side effects in `and`/`or` operands will always occur
+2. **Short-circuit only in conditions** - side effects in `and`/`or` operands still always occur in ordinary expressions; only `if`/`loop` conditions short-circuit
 3. **Implement content comparison functions** for string/array equality
 4. **Use unsigned intrinsics explicitly** when raw unsigned interpretation matters
 5. **Use parentheses when helpful** to make complex grouping explicit
@@ -1121,7 +1134,7 @@ udewy deliberately omits features to keep the compiler simple and auditable:
 - **No string interpolation**: Strings are simple byte sequences
 - **No closures or nested functions**: Functions only at top level
 - **No function overloading**: Each function name has exactly one definition
-- **No short-circuit evaluation**: Both sides of `and`/`or` are always evaluated
+- **Expression `and`/`or` are bitwise**: Both sides are always evaluated; only `if`/`loop` conditions short-circuit
 - **No floating-point**: Everything is 64-bit integers
 - **No garbage collection**: Manual memory management via syscalls
 

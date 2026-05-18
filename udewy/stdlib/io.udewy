@@ -1,0 +1,53 @@
+let write_str = (fd:int s:int):>int => {
+    return host_write(fd s str_len(s))
+}
+
+let print = (s:int):>int => {
+    return write_str(STDOUT s)
+}
+
+let printl = (s:int):>int => {
+    let rc:int = print(s)
+    host_write(STDOUT "\n" 1)
+    return rc
+}
+
+let eprint = (s:int):>int => {
+    return write_str(STDERR s)
+}
+
+let eprintl = (s:int):>int => {
+    let rc:int = eprint(s)
+    host_write(STDERR "\n" 1)
+    return rc
+}
+
+let print_int = (n:int):>void => {
+    if n =? 0 {
+        host_write(STDOUT "0" 1)
+        return void
+    }
+
+    let buf:int = arena_alloc(24)
+    let start:int = 24
+    let neg:int = FALSE_VAL
+
+    if n <? 0 {
+        n = 0 - n
+        neg = TRUE_VAL
+    }
+
+    loop n >? 0 {
+        start = start - 1
+        __store_u8__((n % 10) + CH_0 buf + start)
+        n = n // 10
+    }
+
+    if neg {
+        start = start - 1
+        __store_u8__(CH_MINUS buf + start)
+    }
+
+    host_write(STDOUT buf + start 24 - start)
+    return void
+}

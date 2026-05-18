@@ -1,0 +1,47 @@
+# Division and modulo semantics (RISC-V rules)
+
+const INT_MIN:int = 0x8000_0000_0000_0000
+const ALL_ONES:int = 0xFFFF_FFFF_FFFF_FFFF
+
+let main = ():>int => {
+    if (10 // 3) not=? 3 {
+        return 1
+    }
+    if (10 % 3) not=? 1 {
+        return 2
+    }
+    if ((-7) // 3) not=? (0 - 2) {
+        return 3
+    }
+    if ((-7) % 3) not=? (0 - 1) {
+        return 4
+    }
+
+    if (42 // 0) not=? ALL_ONES {
+        return 5
+    }
+    if (42 % 0) not=? 42 {
+        return 6
+    }
+    if (INT_MIN // (0 - 1)) not=? INT_MIN {
+        return 7
+    }
+    if (INT_MIN % (0 - 1)) not=? 0 {
+        return 8
+    }
+
+    if __unsigned_idiv__(0xFFFF_FFFF_FFFF_FFFF 2) not=? 0x7FFF_FFFF_FFFF_FFFF {
+        return 9
+    }
+    if __unsigned_mod__(0xFFFF_FFFF_FFFF_FFFF 2) not=? 1 {
+        return 10
+    }
+    if __unsigned_idiv__(42 0) not=? ALL_ONES {
+        return 11
+    }
+    if __unsigned_mod__(42 0) not=? 42 {
+        return 12
+    }
+
+    return 0
+}

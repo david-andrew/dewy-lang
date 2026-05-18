@@ -82,13 +82,8 @@ let is_digit = (c:int):>int => {
 }
 
 let skip_ws = ():>void => {
-    loop pos <? src_len {
-        let c:int = __load_u8__(src_ptr + pos)
-        if (c =? CH_SPACE) or (c =? CH_TAB) or (c =? CH_LF) or (c =? CH_CR) {
-            pos = pos + 1
-            continue
-        }
-        break
+    loop (pos <? src_len) and ((__load_u8__(src_ptr + pos) =? CH_SPACE) or (__load_u8__(src_ptr + pos) =? CH_TAB) or (__load_u8__(src_ptr + pos) =? CH_LF) or (__load_u8__(src_ptr + pos) =? CH_CR)) {
+        pos = pos + 1
     }
     return void
 }
@@ -214,11 +209,7 @@ let main = ():>int => {
         let chunk_pos:int = 0
         loop chunk_pos <? read_len {
             let line_start:int = chunk_pos
-            loop chunk_pos <? read_len {
-                let c:int = __load_u8__(buf_ptr + chunk_pos)
-                if (c =? CH_LF) or (c =? CH_CR) {
-                    break
-                }
+            loop (chunk_pos <? read_len) and (__load_u8__(buf_ptr + chunk_pos) not=? CH_LF) and (__load_u8__(buf_ptr + chunk_pos) not=? CH_CR) {
                 chunk_pos = chunk_pos + 1
             }
 

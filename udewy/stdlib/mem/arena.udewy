@@ -1,0 +1,24 @@
+const ARENA_SIZE:int = 0x100000
+
+let g_arena:int = 0
+let g_arena_ptr:int = 0
+
+let arena_init = ():>void => {
+    g_arena = host_mmap_rw(ARENA_SIZE)
+    g_arena_ptr = g_arena
+    return void
+}
+
+let arena_alloc = (size:int):>int => {
+    let ptr:int = g_arena_ptr
+    g_arena_ptr = g_arena_ptr + size
+    return ptr
+}
+
+let str_to_cstr = (s:int):>int => {
+    let slen:int = str_len(s)
+    let buf:int = arena_alloc(slen + 1)
+    copy_bytes(buf s slen)
+    __store_u8__(CH_NUL buf + slen)
+    return buf
+}

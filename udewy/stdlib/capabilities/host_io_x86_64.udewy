@@ -1,0 +1,28 @@
+const STDIN:int = 0
+const STDOUT:int = 1
+const STDERR:int = 2
+
+const SYS_READ:int = 0
+const SYS_WRITE:int = 1
+const SYS_OPEN:int = 2
+const SYS_CLOSE:int = 3
+const SYS_MMAP:int = 9
+const SYS_EXIT:int = 60
+
+const PROT_READ:int = 1
+const PROT_WRITE:int = 2
+const MAP_PRIVATE:int = 2
+const MAP_ANONYMOUS:int = 32
+
+let host_write = (fd:int buf:int len:int):>int => {
+    return __syscall3__(SYS_WRITE fd buf len)
+}
+
+let host_exit = (code:int):>void => {
+    __syscall1__(SYS_EXIT code)
+    return void
+}
+
+let host_mmap_rw = (size:int):>int => {
+    return __syscall6__(SYS_MMAP 0 size (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) (0 - 1) 0)
+}

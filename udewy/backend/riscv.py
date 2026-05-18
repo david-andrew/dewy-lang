@@ -892,6 +892,26 @@ class RiscvBackend(Backend):
         """Begin the loop body after condition check."""
         _, end_label = self._loop_stack[-1]
         self._emit(f"beqz a0, {end_label}")
+
+    def cond_and_split(self) -> str:
+        false_label = self._new_label("cond_and_false")
+        self._emit(f"beqz a0, {false_label}")
+        return false_label
+
+    def cond_and_join(self, false_label: str) -> None:
+        done_label = self._new_label("cond_and_done")
+        self._emit(f"j {done_label}")
+        self._emit_label(false_label)
+        self._emit("li a0, 0")
+        self._emit_label(done_label)
+
+    def cond_or_split(self) -> str:
+        done_label = self._new_label("cond_or_done")
+        self._emit(f"bnez a0, {done_label}")
+        return done_label
+
+    def cond_or_join(self, done_label: str) -> None:
+        self._emit_label(done_label)
     
     def end_loop(self) -> None:
         """End a loop."""

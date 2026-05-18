@@ -1,0 +1,54 @@
+let g_rhs_ran:int = 0
+
+let rhs_effect = ():>int => {
+    g_rhs_ran = g_rhs_ran + 1
+    return true
+}
+
+let main = ():>int => {
+    g_rhs_ran = 0
+    if false and rhs_effect() {
+        return 1
+    }
+    if g_rhs_ran not=? 0 {
+        return 2
+    }
+
+    g_rhs_ran = 0
+    let saw_or:int = 0
+    if true or rhs_effect() {
+        saw_or = 1
+    } else {
+        return 3
+    }
+    if saw_or not=? 1 {
+        return 4
+    }
+    if g_rhs_ran not=? 0 {
+        return 5
+    }
+
+    g_rhs_ran = 0
+    let saw_nested:int = 0
+    if (false and rhs_effect()) or (true and rhs_effect()) {
+        saw_nested = 1
+    } else {
+        return 6
+    }
+    if saw_nested not=? 1 {
+        return 7
+    }
+    if g_rhs_ran not=? 1 {
+        return 8
+    }
+
+    let mask:int = 8
+    if (mask and 1) not=? 0 {
+        return 9
+    }
+    if (mask and 8) =? 0 {
+        return 10
+    }
+
+    return 0
+}

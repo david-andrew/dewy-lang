@@ -579,10 +579,9 @@ class ArmBackend(Backend):
         elif op_kind == t1.Kind.TK_MUL:
             self._emit("mul x0, x0, x9")
         elif op_kind == t1.Kind.TK_IDIV:
-            self._emit("sdiv x0, x0, x9")
+            self._emit_signed_sdiv()
         elif op_kind == t1.Kind.TK_MOD:
-            self._emit("sdiv x10, x0, x9")
-            self._emit("msub x0, x10, x9, x0")
+            self._emit_signed_mod()
         elif op_kind == t1.Kind.TK_LEFT_SHIFT:
             self._emit("lsl x0, x0, x9")
         elif op_kind == t1.Kind.TK_RIGHT_SHIFT:
@@ -661,18 +660,88 @@ class ArmBackend(Backend):
         self._pop_saved_into("x0")
         self._emit("asr x0, x0, x9")
 
+    def _emit_signed_sdiv(self) -> None:
+        """x0=lhs, x9=rhs -> lhs // rhs (RISC-V div semantics)."""
+        div_zero = self._new_label("div_zero")
+        done = self._new_label("div_done")
+        do_sdiv = self._new_label("div_sdiv")
+        self._emit("cmp x9, #0")
+        self._emit(f"beq {div_zero}")
+        self._emit("ldr x10, =0x8000000000000000")
+        self._emit("cmp x0, x10")
+        self._emit(f"bne {do_sdiv}")
+        self._emit("mov x10, #-1")
+        self._emit("cmp x9, x10")
+        self._emit(f"bne {do_sdiv}")
+        self._emit(f"b {done}")
+        self._emit(f"{do_sdiv}:")
+        self._emit("sdiv x0, x0, x9")
+        self._emit(f"b {done}")
+        self._emit(f"{div_zero}:")
+        self._emit("mov x0, #-1")
+        self._emit(f"{done}:")
+
+    def _emit_signed_mod(self) -> None:
+        """x0=lhs, x9=rhs -> lhs % rhs (RISC-V rem semantics)."""
+        mod_zero = self._new_label("mod_zero")
+        done = self._new_label("mod_done")
+        do_sdiv = self._new_label("mod_sdiv")
+        self._emit("cmp x9, #0")
+        self._emit(f"beq {mod_zero}")
+        self._emit("ldr x10, =0x8000000000000000")
+        self._emit("cmp x0, x10")
+        self._emit(f"bne {do_sdiv}")
+        self._emit("mov x10, #-1")
+        self._emit("cmp x9, x10")
+        self._emit(f"bne {do_sdiv}")
+        self._emit("mov x0, #0")
+        self._emit(f"b {done}")
+        self._emit(f"{do_sdiv}:")
+        self._emit("sdiv x10, x0, x9")
+        self._emit("msub x0, x10, x9, x0")
+        self._emit(f"b {done}")
+        self._emit(f"{mod_zero}:")
+        self._emit(f"{done}:")
+
+    def _emit_unsigned_udiv(self) -> None:
+        """x0=lhs, x9=rhs -> unsigned quotient (RISC-V divu semantics)."""
+        div_zero = self._new_label("udiv_zero")
+        done = self._new_label("udiv_done")
+        do_udiv = self._new_label("udiv_div")
+        self._emit("cmp x9, #0")
+        self._emit(f"beq {div_zero}")
+        self._emit(f"{do_udiv}:")
+        self._emit("udiv x0, x0, x9")
+        self._emit(f"b {done}")
+        self._emit(f"{div_zero}:")
+        self._emit("mov x0, #-1")
+        self._emit(f"{done}:")
+
+    def _emit_unsigned_mod(self) -> None:
+        """x0=lhs, x9=rhs -> unsigned remainder (RISC-V remu semantics)."""
+        mod_zero = self._new_label("umod_zero")
+        done = self._new_label("umod_done")
+        do_udiv = self._new_label("umod_div")
+        self._emit("cmp x9, #0")
+        self._emit(f"beq {mod_zero}")
+        self._emit(f"{do_udiv}:")
+        self._emit("udiv x10, x0, x9")
+        self._emit("msub x0, x10, x9, x0")
+        self._emit(f"b {done}")
+        self._emit(f"{mod_zero}:")
+        self._emit(f"{done}:")
+
     def unsigned_idiv(self) -> None:
         """Unsigned division. Stack: [left right] -> quotient."""
         self._emit("mov x9, x0")
         self._pop_saved_into("x0")
-        self._emit("udiv x0, x0, x9")
+        self._emit_unsigned_udiv()
 
     def unsigned_mod(self) -> None:
         """Unsigned remainder. Stack: [left right] -> remainder."""
         self._emit("mov x9, x0")
         self._pop_saved_into("x0")
-        self._emit("udiv x10, x0, x9")
-        self._emit("msub x0, x10, x9, x0")
+        self._emit_unsigned_mod()
 
     def unsigned_cmp(self, kind: str) -> None:
         """Unsigned comparison returning udewy booleans."""
@@ -890,6 +959,26 @@ class ArmBackend(Backend):
         """Begin the loop body after condition check."""
         _, end_label = self._loop_stack[-1]
         self._emit(f"cbz x0, {end_label}")
+
+    def cond_and_split(self) -> str:
+        false_label = self._new_label("cond_and_false")
+        self._emit(f"cbz x0, {false_label}")
+        return false_label
+
+    def cond_and_join(self, false_label: str) -> None:
+        done_label = self._new_label("cond_and_done")
+        self._emit(f"b {done_label}")
+        self._emit_label(false_label)
+        self._emit("mov x0, #0")
+        self._emit_label(done_label)
+
+    def cond_or_split(self) -> str:
+        done_label = self._new_label("cond_or_done")
+        self._emit(f"cbnz x0, {done_label}")
+        return done_label
+
+    def cond_or_join(self, done_label: str) -> None:
+        self._emit_label(done_label)
     
     def end_loop(self) -> None:
         """End a loop."""

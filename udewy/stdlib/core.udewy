@@ -1,0 +1,116 @@
+# Portable udewy stdlib (no host I/O)
+
+const FALSE_VAL:int = false
+const TRUE_VAL:int = true
+
+const CH_NUL:int = 0
+const CH_TAB:int = 9
+const CH_LF:int = 10
+const CH_CR:int = 13
+const CH_SPACE:int = 32
+const CH_MINUS:int = 45
+const CH_0:int = 48
+
+let len_of = (ptr:int):>int => {
+    return __load__(ptr - 8)
+}
+
+let load_i64 = (ptr:int idx:int):>int => {
+    return __load__(ptr + (idx << 3))
+}
+
+let store_i64 = (ptr:int idx:int val:int):>void => {
+    __store__(val ptr + (idx << 3))
+    return void
+}
+
+let load_u8 = (ptr:int idx:int):>int => {
+    return __load_u8__(ptr + idx)
+}
+
+let store_u8 = (ptr:int idx:int val:int):>void => {
+    __store_u8__(val ptr + idx)
+    return void
+}
+
+let copy_bytes = (dst:int src:int len:int):>void => {
+    let i:int = 0
+    loop i <? len {
+        __store_u8__(__load_u8__(src + i) dst + i)
+        i = i + 1
+    }
+    return void
+}
+
+let zero_bytes = (dst:int len:int):>void => {
+    let i:int = 0
+    loop i <? len {
+        __store_u8__(0 dst + i)
+        i = i + 1
+    }
+    return void
+}
+
+let str_len = (s:int):>int => {
+    return len_of(s)
+}
+
+let str_eq_len = (s1:int len1:int s2:int len2:int):>int => {
+    if len1 not=? len2 {
+        return FALSE_VAL
+    }
+    let i:int = 0
+    loop i <? len1 {
+        if __load_u8__(s1 + i) not=? __load_u8__(s2 + i) {
+            return FALSE_VAL
+        }
+        i = i + 1
+    }
+    return TRUE_VAL
+}
+
+let str_eq = (s1:int s2:int):>int => {
+    return str_eq_len(s1 str_len(s1) s2 str_len(s2))
+}
+
+let str_prefix = (s:int prefix:int):>int => {
+    let prefix_len:int = str_len(prefix)
+    let i:int = 0
+    loop i <? prefix_len {
+        if __load_u8__(s + i) not=? __load_u8__(prefix + i) {
+            return FALSE_VAL
+        }
+        i = i + 1
+    }
+    return TRUE_VAL
+}
+
+let str_copy = (dst:int s:int):>int => {
+    let slen:int = str_len(s)
+    copy_bytes(dst s slen)
+    return slen
+}
+
+let cstr_len = (s:int):>int => {
+    let i:int = 0
+    loop __load_u8__(s + i) not=? CH_NUL {
+        i = i + 1
+    }
+    return i
+}
+
+let cstr_eq = (a:int b:int):>int => {
+    let i:int = 0
+    loop true {
+        let ca:int = __load_u8__(a + i)
+        let cb:int = __load_u8__(b + i)
+        if ca not=? cb {
+            return FALSE_VAL
+        }
+        if ca =? CH_NUL {
+            return TRUE_VAL
+        }
+        i = i + 1
+    }
+    return FALSE_VAL
+}

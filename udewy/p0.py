@@ -58,6 +58,7 @@ class GlobalEntry:
 class ParseContext:
     builtin_consts: dict[str, int]
     loop_depth: int = 0
+    in_condition: bool = False
 
 
 FunctionTable = dict[str, FunctionEntry]
@@ -488,6 +489,29 @@ def expect(toks: list[t1.Token], idx: int, kind: t1.Kind, state: ParseState) -> 
     return idx + 1
 
 
+def matching_right_paren_idx(toks: list[t1.Token], idx: int) -> int:
+    depth = 1
+    scan = idx + 1
+    while scan < len(toks):
+        kind = toks[scan].kind
+        if kind == t1.Kind.TK_LEFT_PAREN:
+            depth = depth + 1
+        elif kind == t1.Kind.TK_RIGHT_PAREN:
+            depth = depth - 1
+            if depth == 0:
+                return scan
+        scan = scan + 1
+    return len(toks)
+
+
+def paren_in_condition_is_value_expr(toks: list[t1.Token], idx: int) -> bool:
+    right_idx = matching_right_paren_idx(toks, idx)
+    if right_idx + 1 >= len(toks):
+        return False
+    kind = toks[right_idx + 1].kind
+    return is_binop(kind) and kind != t1.Kind.TK_AND and kind != t1.Kind.TK_OR
+
+
 def looks_like_fn_decl(toks: list[t1.Token], idx: int) -> bool:
     if idx + 3 >= len(toks):
         return False
@@ -812,7 +836,10 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
 
     if kind == t1.Kind.TK_LEFT_PAREN:
         idx = idx + 1
-        idx = parse_expr(toks, idx, state, 0)
+        if state.ctx.in_condition and not paren_in_condition_is_value_expr(toks, idx - 1):
+            idx = parse_condition_expr(toks, idx, state, 0)
+        else:
+            idx = parse_expr(toks, idx, state, 0)
         idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
         return idx
 
@@ -852,7 +879,24 @@ def parse_prefix( toks: list[t1.Token], idx: int, state: ParseState) -> int:
 
 
 def parse_expr(toks: list[t1.Token], idx: int, state: ParseState, min_prec: int) -> int:
+    return _parse_expr(toks, idx, state, min_prec, condition=False)
+
+
+def parse_condition_expr(toks: list[t1.Token], idx: int, state: ParseState, min_prec: int) -> int:
+    return _parse_expr(toks, idx, state, min_prec, condition=True)
+
+
+def _parse_expr(
+    toks: list[t1.Token],
+    idx: int,
+    state: ParseState,
+    min_prec: int,
+    *,
+    condition: bool,
+) -> int:
     backend = state.backend
+    prev_in_condition = state.ctx.in_condition
+    state.ctx.in_condition = condition
     idx = parse_prefix(toks, idx, state)
     idx = skip_cast_annotation(toks, idx)
     
@@ -882,15 +926,25 @@ def parse_expr(toks: list[t1.Token], idx: int, state: ParseState, min_prec: int)
             break
         
         idx = idx + 1
-        backend.save_value()
-        
+
         if kind == t1.Kind.TK_PIPE:
-            idx = parse_expr(toks, idx, state, prec + 1)
+            backend.save_value()
+            idx = _parse_expr(toks, idx, state, prec + 1, condition=condition)
             backend.pipe_call()
+        elif condition and kind == t1.Kind.TK_AND:
+            false_label = backend.cond_and_split()
+            idx = _parse_expr(toks, idx, state, prec + 1, condition=True)
+            backend.cond_and_join(false_label)
+        elif condition and kind == t1.Kind.TK_OR:
+            done_label = backend.cond_or_split()
+            idx = _parse_expr(toks, idx, state, prec + 1, condition=True)
+            backend.cond_or_join(done_label)
         else:
-            idx = parse_expr(toks, idx, state, prec + 1)
+            backend.save_value()
+            idx = _parse_expr(toks, idx, state, prec + 1, condition=False)
             backend.binary_op(kind)
     
+    state.ctx.in_condition = prev_in_condition
     return idx
 
 
@@ -1247,7 +1301,7 @@ def parse_if_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[i
     backend = state.backend
     idx = idx + 1
     
-    idx = parse_expr(toks, idx, state, 0)
+    idx = parse_condition_expr(toks, idx, state, 0)
     backend.begin_if()
     
     idx = expect(toks, idx, t1.Kind.TK_LEFT_BRACE, state)
@@ -1266,7 +1320,7 @@ def parse_if_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[i
             backend.begin_else()
             idx = idx + 1
             
-            idx = parse_expr(toks, idx, state, 0)
+            idx = parse_condition_expr(toks, idx, state, 0)
             backend.begin_if()
             nested_if_count = nested_if_count + 1
             
@@ -1300,7 +1354,7 @@ def parse_loop_stmnt(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     
     backend.begin_loop()
     
-    idx = parse_expr(toks, idx, state, 0)
+    idx = parse_condition_expr(toks, idx, state, 0)
     backend.begin_loop_body()
     
     idx = expect(toks, idx, t1.Kind.TK_LEFT_BRACE, state)

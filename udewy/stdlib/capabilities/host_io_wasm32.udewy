@@ -1,0 +1,17 @@
+const STDIN:int = 0
+const STDOUT:int = 1
+const STDERR:int = 2
+
+# wasm32: host_write logs to the browser console (fd is ignored)
+let host_write = (fd:int buf:int len:int):>int => {
+    __host_log__(buf len)
+    return len
+}
+
+let host_exit = (code:int):>void => {
+    return void
+}
+
+let host_mmap_rw = (size:int):>int => {
+    return 0
+}
