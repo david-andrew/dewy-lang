@@ -156,6 +156,14 @@ def fn_declare(
     return entry
 
 
+def error_redeclaration(src: str, loc: int, name: str) -> None:
+    error(src, loc, f"Name {name!r} is already declared")
+
+
+def error_non_function_forward_ref(src: str, loc: int, name: str) -> None:
+    error(src, loc, f"Name {name!r} was used before declaration, but only functions may be forward-referenced")
+
+
 def is_decl_kind(kind: t1.Kind) -> bool:
     return kind in (t1.Kind.TK_LET, t1.Kind.TK_CONST)
 
@@ -168,8 +176,11 @@ def var_lookup(scope_stack: ScopeStack, name: str) -> LocalEntry | None:
     return None
 
 
-def var_declare(scope_stack: ScopeStack, name: str, entry: LocalEntry) -> LocalEntry:
-    scope_stack[-1][name] = entry
+def var_declare(scope_stack: ScopeStack, name: str, entry: LocalEntry, src: str, loc: int) -> LocalEntry:
+    scope = scope_stack[-1]
+    if name in scope:
+        error_redeclaration(src, loc, name)
+    scope[name] = entry
     return entry
 
 
@@ -180,17 +191,32 @@ def type_decl_lookup(type_decl_stack: TypeDeclStack, name: str) -> bool:
     return False
 
 
-def type_decl_declare(type_decl_stack: TypeDeclStack, name: str) -> None:
-    type_decl_stack[-1].add(name)
+def type_decl_declare(type_decl_stack: TypeDeclStack, name: str, src: str, loc: int) -> None:
+    scope = type_decl_stack[-1]
+    if name in scope:
+        error_redeclaration(src, loc, name)
+    scope.add(name)
 
 
 def global_lookup(global_table: GlobalTable, name: str) -> GlobalEntry | None:
     return global_table.get(name)
 
 
-def global_declare(global_table: GlobalTable, name: str, entry: GlobalEntry) -> GlobalEntry:
+def global_declare(global_table: GlobalTable, name: str, entry: GlobalEntry, src: str, loc: int) -> GlobalEntry:
+    if name in global_table:
+        error_redeclaration(src, loc, name)
     global_table[name] = entry
     return entry
+
+
+def check_top_level_value_name(state: "ParseState", name: str, loc: int) -> None:
+    fn_entry = fn_lookup(state.fn_table, name)
+    if fn_entry is not None:
+        if fn_entry.is_defined:
+            error_redeclaration(state.src, loc, name)
+        error_non_function_forward_ref(state.src, loc, name)
+    if global_lookup(state.global_table, name) is not None:
+        error_redeclaration(state.src, loc, name)
 
 
 def stable_value_to_directive(backend: Backend, stable_value: StableValue) -> int | str:
@@ -1089,7 +1115,10 @@ def parse_ignored_type_decl(toks: list[t1.Token], idx: int, state: ParseState) -
     idx = idx + 1
     idx = expect(toks, idx, t1.Kind.TK_ASSIGN, state)
     idx = skip_ignored_expr(toks, idx, state, stop_at_statement_boundary=True)
-    type_decl_declare(state.type_decl_stack, name)
+    entry = fn_lookup(state.fn_table, name)
+    if len(state.type_decl_stack) == 1 and entry is not None and not entry.is_defined:
+        error_non_function_forward_ref(state.src, toks[name_idx].location, name)
+    type_decl_declare(state.type_decl_stack, name, state.src, toks[name_idx].location)
     return idx
 
 
@@ -1105,6 +1134,7 @@ def parse_var_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     if toks[idx].kind != t1.Kind.TK_IDENT:
         error(state.src, toks[idx].location, "Expected identifier after declaration keyword")
     
+    name_loc = toks[idx].location
     name = get_token_name(toks, idx, state.src)
     idx = idx + 1
     
@@ -1129,7 +1159,7 @@ def parse_var_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
         idx = parse_expr(toks, idx, state, 0)
 
     slot = backend.alloc_local()
-    var_declare(state.scope_stack, name, LocalEntry(slot=slot, is_const=is_const, const_value=const_value))
+    var_declare(state.scope_stack, name, LocalEntry(slot=slot, is_const=is_const, const_value=const_value), state.src, name_loc)
     backend.store_local(slot)
     
     return idx
@@ -1139,18 +1169,28 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     backend = state.backend
     idx = idx + 1
     
+    fn_name_loc = toks[idx].location
     fn_name = get_token_name(toks, idx, state.src)
+    if global_lookup(state.global_table, fn_name) is not None:
+        error_redeclaration(state.src, fn_name_loc, fn_name)
     idx = idx + 1
     
     idx = expect(toks, idx, t1.Kind.TK_ASSIGN, state)
     idx = expect(toks, idx, t1.Kind.TK_LEFT_PAREN, state)
     
     params: list[str] = []
+    param_locs: list[int] = []
+    param_names: set[str] = set()
     while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
         if toks[idx].kind != t1.Kind.TK_IDENT:
             error(state.src, toks[idx].location, "Expected parameter name")
+        param_loc = toks[idx].location
         param_name = get_token_name(toks, idx, state.src)
+        if param_name in param_names:
+            error_redeclaration(state.src, param_loc, param_name)
+        param_names.add(param_name)
         params.append(param_name)
+        param_locs.append(param_loc)
         idx = idx + 1
         idx = require_type_annotation(toks, idx, f"parameter {param_name!r}", state)
     
@@ -1188,7 +1228,7 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
         slot = backend.alloc_local()
         backend.load_param(i)
         backend.store_local(slot)
-        var_declare(state.scope_stack, param_name, LocalEntry(slot=slot, is_const=False))
+        var_declare(state.scope_stack, param_name, LocalEntry(slot=slot, is_const=False), state.src, param_locs[i])
     
     idx, body_returns = parse_block(toks, idx, state)
     
@@ -1424,12 +1464,14 @@ def parse_program(toks: list[t1.Token], state: ParseState) -> None:
             is_const = kind == t1.Kind.TK_CONST
             idx = idx + 1
             
+            name_loc = toks[idx].location
             name = get_token_name(toks, idx, state.src)
             idx = idx + 1
             
             subject = "constant" if is_const else "variable"
             idx = require_type_annotation(toks, idx, f"{subject} {name!r}", state)
             idx = expect(toks, idx, t1.Kind.TK_ASSIGN, state)
+            check_top_level_value_name(state, name, name_loc)
 
             if idx < len(toks) and toks[idx].kind == t1.Kind.TK_EXTERN:
                 label_id = backend.declare_extern_global(name)
@@ -1437,6 +1479,8 @@ def parse_program(toks: list[t1.Token], state: ParseState) -> None:
                     state.global_table,
                     name,
                     GlobalEntry(label_id=label_id, is_const=is_const, is_extern=True),
+                    state.src,
+                    name_loc,
                 )
                 idx = idx + 1
                 continue
@@ -1467,6 +1511,8 @@ def parse_program(toks: list[t1.Token], state: ParseState) -> None:
                 state.global_table,
                 name,
                 GlobalEntry(label_id=label_id, is_const=is_const, const_value=const_value),
+                state.src,
+                name_loc,
             )
         else:
             error(state.src, toks[idx].location, f"Only declarations allowed at top level, got {t1.dump_token(toks[idx], state.src)}")

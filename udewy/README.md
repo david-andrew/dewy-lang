@@ -662,7 +662,7 @@ Extern declarations use the same syntax as ordinary top-level declarations, but 
 
 ### Forward References
 
-Functions can be called before they are defined. Unknown identifiers during parsing are treated as forward function references and resolved at the end of compilation. If a forward reference remains undefined, compilation fails.
+Functions can be called before they are defined. Unknown identifiers during parsing are treated as forward function references and resolved at the end of compilation. If a forward reference remains undefined, compilation fails. Only functions may be forward-referenced; globals, constants, and ignored type declarations must be declared before use.
 
 ### Calling Convention
 

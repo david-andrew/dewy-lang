@@ -87,7 +87,8 @@ POSSIBLE_IN_PLACE_OPS: set[Kind] = {
 }
 
 # placeholder for tokens that don't have a value
-TRUE_VALUE: Value = 0xFFFF_FFFF_FFFF_FFFF
+MAX_U64: Value = 0xFFFF_FFFF_FFFF_FFFF
+TRUE_VALUE: Value = MAX_U64
 FALSE_VALUE: Value = 0x0000_0000_0000_0000
 
 KEYWORD_TOKENS: dict[str, tuple[Value | None, Kind]] = {
@@ -146,6 +147,13 @@ class Token:
     value: Value | Kind | None
     location: Location
     kind: Kind
+
+
+def validate_number_literal(src: str, start: int, value: int, saw_digit: bool) -> None:
+    if not saw_digit:
+        error(src, start, "number literal must contain at least one digit")
+    if value > MAX_U64:
+        error(src, start, "number literal must fit within 64 bits")
 
 
 def bracketed_type_end(src: str, start: int) -> int:
@@ -237,10 +245,13 @@ def tokenize(src:str)->list[Token]:
             start = i
             i += 2
             val = 0
+            saw_digit = False
             while i < n and (t0.is_hex(src[i]) or src[i] == '_'):
                 if src[i] != '_':
+                    saw_digit = True
                     val = val << 4 | t0.hex_value(src[i])
                 i += 1
+            validate_number_literal(src, start, val, saw_digit)
             toks.append(Token(val, start, Kind.TK_NUMBER))
             continue
         
@@ -249,10 +260,13 @@ def tokenize(src:str)->list[Token]:
             start = i
             i += 2
             val = 0
+            saw_digit = False
             while i < n and src[i] in '01_':
                 if src[i] != '_':
+                    saw_digit = True
                     val = val << 1 | (ord(src[i]) - ord('0'))
                 i += 1
+            validate_number_literal(src, start, val, saw_digit)
             toks.append(Token(val, start, Kind.TK_NUMBER))
             continue
 
@@ -260,10 +274,13 @@ def tokenize(src:str)->list[Token]:
         if t0.is_digit(src[i]):
             start = i
             val = 0
+            saw_digit = False
             while i < n and (t0.is_digit(src[i]) or src[i] == '_'):
                 if src[i] != '_':
+                    saw_digit = True
                     val = val * 10 + (ord(src[i]) - ord('0'))
                 i += 1
+            validate_number_literal(src, start, val, saw_digit)
             toks.append(Token(val, start, Kind.TK_NUMBER))
             continue
         
