@@ -33,6 +33,60 @@ let append_paragraph = (parent:int text:int):>int => {
     return paragraph
 }
 
+let append_code_token = (parent:int text:int color:int):>void => {
+    let token:int = Web_AppendTextElement(parent "span" text)
+    Web_SetStyle(token "color" color)
+    return 0
+}
+
+let append_hello_source = (code:int):>void => {
+    append_code_token(code "import" "#c586c0")
+    Web_AppendText(code " ")
+    append_code_token(code "p" "#dcdcaa")
+    append_code_token(code "\"../../third_party/web/dom.udewy\"" "#ce9178")
+    Web_AppendText(code "\n\n")
+    append_code_token(code "let" "#569cd6")
+    Web_AppendText(code " ")
+    append_code_token(code "main" "#9cdcfe")
+    Web_AppendText(code " ")
+    append_code_token(code "=" "#d4d4d4")
+    Web_AppendText(code " ")
+    append_code_token(code "()" "#c586c0")
+    append_code_token(code ":>" "#d4d4d4")
+    append_code_token(code "int" "#4ec9b0")
+    Web_AppendText(code " ")
+    append_code_token(code "=>" "#d4d4d4")
+    Web_AppendText(code " ")
+    append_code_token(code "\{" "#ffd700")
+    Web_AppendText(code "\n    ")
+    append_code_token(code "let" "#569cd6")
+    Web_AppendText(code " ")
+    append_code_token(code "root" "#9cdcfe")
+    append_code_token(code ":" "#d4d4d4")
+    append_code_token(code "int" "#4ec9b0")
+    Web_AppendText(code " ")
+    append_code_token(code "=" "#d4d4d4")
+    Web_AppendText(code " ")
+    append_code_token(code "Web_Root" "#dcdcaa")
+    append_code_token(code "()" "#c586c0")
+    Web_AppendText(code "\n    ")
+    append_code_token(code "Web_AppendTextElement" "#dcdcaa")
+    append_code_token(code "(" "#c586c0")
+    append_code_token(code "root" "#9cdcfe")
+    Web_AppendText(code " ")
+    append_code_token(code "\"p\"" "#ce9178")
+    Web_AppendText(code " ")
+    append_code_token(code "\"Hello from udewy\"" "#ce9178")
+    append_code_token(code ")" "#c586c0")
+    Web_AppendText(code "\n    ")
+    append_code_token(code "return" "#c586c0")
+    Web_AppendText(code " ")
+    append_code_token(code "0" "#b5cea8")
+    Web_AppendText(code "\n")
+    append_code_token(code "\}" "#ffd700")
+    return 0
+}
+
 let main = ():>int => {
     Web_SetTitle("udewy DOM publishing demo")
     Web_SetFaviconSvg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='#f6f2eb'/><circle cx='46' cy='18' r='7' fill='#d9822b'/><text x='32' y='42' text-anchor='middle' font-family='ui-sans-serif, system-ui' font-size='24' font-weight='800' fill='#232734'>&#x03BC;D</text></svg>")
@@ -87,14 +141,8 @@ let main = ():>int => {
     append_paragraph(scroll_box "A blog generator could build headings, paragraphs, links, code blocks, images, and navigation with these same primitives.")
     append_paragraph(scroll_box "Clay still fits app-style surfaces. This DOM path is for document-style pages where native browser behavior is the feature.")
 
-    let code:int = Web_AppendTextElement(article "pre" 
-"import p\"../../third_party/web/dom.udewy\"
-
-let main = ():>int => \{
-    let root:int = Web_Root()
-    Web_AppendTextElement(root \"p\" \"Hello from udewy\")
-    return 0
-\}")
+    let code:int = Web_AppendElement(article "pre")
+    append_hello_source(code)
     Web_SetStyle(code "overflow" "auto")
     Web_SetStyle(code "padding" "1rem")
     Web_SetStyle(code "border-radius" "14px")
