@@ -1,0 +1,105 @@
+$supported_targets = ["wasm32"]
+
+import p"../../third_party/web/dom.udewy"
+
+let append_card = (parent:int title:int body:int accent:int):>int => {
+    let card:int = Web_AppendElement(parent "section")
+    Web_FlexColumn(card 8)
+    Web_SetStyle(card "flex" "1 1 180px")
+    Web_SetStyle(card "padding" "1rem")
+    Web_SetStyle(card "border-radius" "18px")
+    Web_SetStyle(card "background" "#ffffff")
+    Web_SetStyle(card "box-shadow" "0 12px 30px rgba(31, 35, 46, 0.10)")
+
+    let marker:int = Web_AppendElement(card "div")
+    Web_SetStyle(marker "width" "44px")
+    Web_SetStyle(marker "height" "6px")
+    Web_SetStyle(marker "border-radius" "999px")
+    Web_SetStyle(marker "background" accent)
+
+    let heading:int = Web_AppendTextElement(card "h3" title)
+    Web_SetStyle(heading "margin" "0")
+    Web_SetStyle(heading "font-size" "1.05rem")
+
+    let paragraph:int = Web_AppendTextElement(card "p" body)
+    Web_SetStyle(paragraph "margin" "0")
+    Web_SetStyle(paragraph "color" "#596171")
+    return card
+}
+
+let append_paragraph = (parent:int text:int):>int => {
+    let paragraph:int = Web_AppendTextElement(parent "p" text)
+    Web_SetStyle(paragraph "margin" "0 0 1rem")
+    return paragraph
+}
+
+let main = ():>int => {
+    Web_SetTitle("udewy DOM publishing demo")
+    Web_SetFaviconSvg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='#f6f2eb'/><circle cx='46' cy='18' r='7' fill='#d9822b'/><text x='32' y='42' text-anchor='middle' font-family='ui-sans-serif, system-ui' font-size='24' font-weight='800' fill='#232734'>uD</text></svg>")
+
+    let root:int = Web_Root()
+    Web_Clear(root)
+    Web_SetStyle(root "background" "#f6f2eb")
+    Web_SetStyle(root "color" "#232734")
+    Web_SetStyle(root "font-family" "Inter, ui-sans-serif, system-ui, sans-serif")
+    Web_SetStyle(root "padding" "4rem 1.25rem")
+
+    let article:int = Web_AppendElement(root "article")
+    Web_FlexColumn(article 24)
+    Web_SetStyle(article "max-width" "900px")
+    Web_SetStyle(article "margin" "0 auto")
+    Web_SetStyle(article "line-height" "1.65")
+    Web_SetStyle(article "font-size" "18px")
+
+    let kicker:int = Web_AppendTextElement(article "p" "udewy wasm DOM demo")
+    Web_SetStyle(kicker "margin" "0")
+    Web_SetStyle(kicker "color" "#8f5f2f")
+    Web_SetStyle(kicker "font-weight" "700")
+    Web_SetStyle(kicker "letter-spacing" "0.08em")
+    Web_SetStyle(kicker "text-transform" "uppercase")
+
+    let title:int = Web_AppendTextElement(article "h1" "Publishing real web pages from udewy")
+    Web_SetStyle(title "margin" "0")
+    Web_SetStyle(title "font-size" "clamp(2.3rem, 8vw, 5rem)")
+    Web_SetStyle(title "line-height" "0.95")
+    Web_SetStyle(title "letter-spacing" "-0.06em")
+
+    append_paragraph(article "This page is built by a udewy program running on the wasm target, but the output is ordinary DOM. Try selecting this sentence, copying it, using browser find, or scrolling the page normally.")
+    append_paragraph(article "The library intentionally starts small: element creation, text nodes, attributes, styles, and a flexbox helper. That is enough for article pages, docs, simple landing pages, and app chrome.")
+
+    let cards:int = Web_AppendElement(article "section")
+    Web_FlexRow(cards 16)
+    append_card(cards "Selectable text" "Text is browser text, not pixels in a canvas." "#d9822b")
+    append_card(cards "Native scrolling" "Use page scrolling or overflow panels directly." "#4c8f6a")
+    append_card(cards "Flex layout" "Rows and columns map onto CSS flexbox." "#5867d8")
+
+    let scroll_box:int = Web_AppendElement(article "section")
+    Web_FlexColumn(scroll_box 8)
+    Web_SetStyle(scroll_box "max-height" "190px")
+    Web_SetStyle(scroll_box "overflow" "auto")
+    Web_SetStyle(scroll_box "padding" "1rem")
+    Web_SetStyle(scroll_box "border" "1px solid rgba(35, 39, 52, 0.18)")
+    Web_SetStyle(scroll_box "border-radius" "16px")
+    Web_SetStyle(scroll_box "background" "rgba(255, 255, 255, 0.7)")
+
+    Web_AppendTextElement(scroll_box "strong" "Scrollable notes")
+    append_paragraph(scroll_box "This panel uses normal CSS overflow. Trackpads, mouse wheels, touch scrolling, text selection, and copy all stay with the browser.")
+    append_paragraph(scroll_box "A blog generator could build headings, paragraphs, links, code blocks, images, and navigation with these same primitives.")
+    append_paragraph(scroll_box "Clay still fits app-style surfaces. This DOM path is for document-style pages where native browser behavior is the feature.")
+
+    let code:int = Web_AppendTextElement(article "pre" "import p\"../../third_party/web/dom.udewy\"\n\nlet root:int = Web_Root()\nWeb_AppendTextElement(root \"p\" \"Hello from udewy\")")
+    Web_SetStyle(code "overflow" "auto")
+    Web_SetStyle(code "padding" "1rem")
+    Web_SetStyle(code "border-radius" "14px")
+    Web_SetStyle(code "background" "#232734")
+    Web_SetStyle(code "color" "#f8f3e8")
+    Web_SetStyle(code "font-size" "0.9rem")
+
+    let footer:int = Web_AppendElement(article "footer")
+    Web_FlexRow(footer 8)
+    Web_SetStyle(footer "align-items" "center")
+    Web_AppendText(footer "Built with ")
+    Web_Link(footer "https://github.com/nicbarker/clay" "Clay-inspired layout goals")
+    Web_AppendText(footer " and direct DOM output.")
+    return 0
+}

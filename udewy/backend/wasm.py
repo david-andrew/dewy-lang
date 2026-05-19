@@ -1611,6 +1611,10 @@ class Wasm32Backend(Backend):
         return '''
 const memory = new WebAssembly.Memory({ initial: 32 });
 let outputElement = null;
+let domNextHandle = 1;
+let domRootHandle = 0;
+const domNodes = new Map();
+const domHandles = new WeakMap();
 
 // Canvas state
 let canvas = null;
@@ -1735,6 +1739,77 @@ function decodeString(ptr, len) {
     const view = new Uint8Array(memory.buffer);
     const bytes = view.slice(Number(ptr), Number(ptr) + Number(len));
     return new TextDecoder().decode(bytes);
+}
+
+function domRegister(node) {
+    const existing = domHandles.get(node);
+    if (existing !== undefined) {
+        return existing;
+    }
+    const handle = domNextHandle++;
+    domHandles.set(node, handle);
+    domNodes.set(handle, node);
+    return handle;
+}
+
+function domGet(handle) {
+    return domNodes.get(Number(handle));
+}
+
+function domFlexAlign(value) {
+    switch (Number(value)) {
+        case 1: return 'center';
+        case 2: return 'flex-end';
+        case 3: return 'stretch';
+        default: return 'flex-start';
+    }
+}
+
+function domFlexJustify(value) {
+    switch (Number(value)) {
+        case 1: return 'center';
+        case 2: return 'flex-end';
+        case 3: return 'space-between';
+        case 4: return 'space-around';
+        case 5: return 'space-evenly';
+        default: return 'flex-start';
+    }
+}
+
+function ensureDomRoot() {
+    let root = document.getElementById('udewy-dom-root');
+    if (!root) {
+        root = document.createElement('main');
+        root.id = 'udewy-dom-root';
+        document.body.insertBefore(root, outputElement || document.body.firstChild);
+    }
+    document.body.classList.add('dom-mode');
+    if (outputElement) {
+        outputElement.style.display = 'none';
+    }
+    domRootHandle = domRegister(root);
+    return domRootHandle;
+}
+
+function domBytesToBase64(ptr, len) {
+    const bytes = new Uint8Array(memory.buffer, Number(ptr), Number(len));
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary);
+}
+
+function domSetFavicon(mime, ptr, len) {
+    let link = document.querySelector('link[data-udewy-favicon]');
+    if (!link) {
+        link = document.createElement('link');
+        link.dataset.udewyFavicon = 'true';
+        document.head.appendChild(link);
+    }
+    link.rel = 'icon';
+    link.type = mime;
+    link.href = `data:${mime};base64,${domBytesToBase64(ptr, len)}`;
 }
 
 function decodeI64Array(ptr, count) {
@@ -2242,6 +2317,56 @@ const imports = {
         host_log_int: (value) => {
             console.log(String(value));
             return value;
+        },
+        ud_dom_set_title: (titlePtr, titleLen) => {
+            document.title = decodeString(titlePtr, titleLen);
+            return 0n;
+        },
+        ud_dom_set_favicon: (mimePtr, mimeLen, dataPtr, dataLen) => {
+            domSetFavicon(decodeString(mimePtr, mimeLen), dataPtr, dataLen);
+            return 0n;
+        },
+        ud_dom_root: () => BigInt(ensureDomRoot()),
+        ud_dom_body: () => BigInt(domRegister(document.body)),
+        ud_dom_clear: (handle) => {
+            domGet(handle).replaceChildren();
+            return 0n;
+        },
+        ud_dom_create_element: (tagPtr, tagLen) => {
+            return BigInt(domRegister(document.createElement(decodeString(tagPtr, tagLen))));
+        },
+        ud_dom_create_text: (textPtr, textLen) => {
+            return BigInt(domRegister(document.createTextNode(decodeString(textPtr, textLen))));
+        },
+        ud_dom_append: (parentHandle, childHandle) => {
+            domGet(parentHandle).appendChild(domGet(childHandle));
+            return childHandle;
+        },
+        ud_dom_set_text: (handle, textPtr, textLen) => {
+            domGet(handle).textContent = decodeString(textPtr, textLen);
+            return 0n;
+        },
+        ud_dom_set_attr: (handle, namePtr, nameLen, valuePtr, valueLen) => {
+            domGet(handle).setAttribute(decodeString(namePtr, nameLen), decodeString(valuePtr, valueLen));
+            return 0n;
+        },
+        ud_dom_add_class: (handle, classPtr, classLen) => {
+            domGet(handle).classList.add(decodeString(classPtr, classLen));
+            return 0n;
+        },
+        ud_dom_set_style: (handle, propertyPtr, propertyLen, valuePtr, valueLen) => {
+            domGet(handle).style.setProperty(decodeString(propertyPtr, propertyLen), decodeString(valuePtr, valueLen));
+            return 0n;
+        },
+        ud_dom_set_flex: (handle, direction, gap, align, justify, wrap) => {
+            const style = domGet(handle).style;
+            style.display = 'flex';
+            style.flexDirection = Number(direction) === 1 ? 'column' : 'row';
+            style.gap = `${Number(gap)}px`;
+            style.alignItems = domFlexAlign(align);
+            style.justifyContent = domFlexJustify(justify);
+            style.flexWrap = Number(wrap) !== 0 ? 'wrap' : 'nowrap';
+            return 0n;
         },
         // Canvas graphics
         host_canvas_init: (width, height) => {
@@ -2831,6 +2956,8 @@ function setupServerLifecycle() {
     <title>{title}</title>
     <style>
         body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }}
+        body.dom-mode {{ max-width: none; margin: 0; padding: 0; }}
+        #udewy-dom-root {{ min-height: 100vh; }}
         body.canvas-mode {{ max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; }}
         #output {{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; }}
         #output:empty {{ display: none; }}
@@ -2889,6 +3016,8 @@ run();
     <title>{title}</title>
     <style>
         body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }}
+        body.dom-mode {{ max-width: none; margin: 0; padding: 0; }}
+        #udewy-dom-root {{ min-height: 100vh; }}
         body.canvas-mode {{ max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; }}
         #output {{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; }}
         #output:empty {{ display: none; }}

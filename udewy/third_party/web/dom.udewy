@@ -1,0 +1,138 @@
+$supported_targets = ["wasm32"]
+
+const WEB_FLEX_ROW:int = 0
+const WEB_FLEX_COLUMN:int = 1
+const WEB_NOWRAP:int = 0
+const WEB_WRAP:int = 1
+
+const WEB_ALIGN_START:int = 0
+const WEB_ALIGN_CENTER:int = 1
+const WEB_ALIGN_END:int = 2
+const WEB_ALIGN_STRETCH:int = 3
+
+const WEB_JUSTIFY_START:int = 0
+const WEB_JUSTIFY_CENTER:int = 1
+const WEB_JUSTIFY_END:int = 2
+const WEB_JUSTIFY_BETWEEN:int = 3
+const WEB_JUSTIFY_AROUND:int = 4
+const WEB_JUSTIFY_EVENLY:int = 5
+
+let ud_dom_set_title = (title:int title_len:int):>int => extern
+let ud_dom_set_favicon = (mime:int mime_len:int data:int data_len:int):>int => extern
+let ud_dom_root = ():>int => extern
+let ud_dom_body = ():>int => extern
+let ud_dom_clear = (node:int):>int => extern
+let ud_dom_create_element = (tag:int tag_len:int):>int => extern
+let ud_dom_create_text = (text:int text_len:int):>int => extern
+let ud_dom_append = (parent:int child:int):>int => extern
+let ud_dom_set_text = (node:int text:int text_len:int):>int => extern
+let ud_dom_set_attr = (node:int name:int name_len:int value:int value_len:int):>int => extern
+let ud_dom_add_class = (node:int class_name:int class_len:int):>int => extern
+let ud_dom_set_style = (node:int property:int property_len:int value:int value_len:int):>int => extern
+let ud_dom_set_flex = (node:int direction:int gap:int align:int justify:int wrap:int):>int => extern
+
+let Web_SetTitle = (title:int):>void => {
+    ud_dom_set_title(title __load__(title - 8))
+    return 0
+}
+
+let Web_SetFavicon = (mime:int data:int):>void => {
+    ud_dom_set_favicon(mime __load__(mime - 8) data __load__(data - 8))
+    return 0
+}
+
+let Web_SetFaviconSvg = (svg:int):>void => {
+    Web_SetFavicon("image/svg+xml" svg)
+    return 0
+}
+
+let Web_Root = ():>int => {
+    return ud_dom_root()
+}
+
+let Web_Body = ():>int => {
+    return ud_dom_body()
+}
+
+let Web_Clear = (node:int):>void => {
+    ud_dom_clear(node)
+    return 0
+}
+
+let Web_CreateElement = (tag:int):>int => {
+    return ud_dom_create_element(tag __load__(tag - 8))
+}
+
+let Web_CreateText = (text:int):>int => {
+    return ud_dom_create_text(text __load__(text - 8))
+}
+
+let Web_AppendChild = (parent:int child:int):>int => {
+    return ud_dom_append(parent child)
+}
+
+let Web_AppendText = (parent:int text:int):>int => {
+    let node:int = Web_CreateText(text)
+    Web_AppendChild(parent node)
+    return node
+}
+
+let Web_SetText = (node:int text:int):>void => {
+    ud_dom_set_text(node text __load__(text - 8))
+    return 0
+}
+
+let Web_SetAttr = (node:int name:int value:int):>void => {
+    ud_dom_set_attr(node name __load__(name - 8) value __load__(value - 8))
+    return 0
+}
+
+let Web_AddClass = (node:int class_name:int):>void => {
+    ud_dom_add_class(node class_name __load__(class_name - 8))
+    return 0
+}
+
+let Web_SetStyle = (node:int property:int value:int):>void => {
+    ud_dom_set_style(node property __load__(property - 8) value __load__(value - 8))
+    return 0
+}
+
+let Web_SetFlex = (node:int direction:int gap:int align:int justify:int wrap:int):>void => {
+    ud_dom_set_flex(node direction gap align justify wrap)
+    return 0
+}
+
+let Web_FlexRow = (node:int gap:int):>void => {
+    Web_SetFlex(node WEB_FLEX_ROW gap WEB_ALIGN_STRETCH WEB_JUSTIFY_START WEB_WRAP)
+    return 0
+}
+
+let Web_FlexColumn = (node:int gap:int):>void => {
+    Web_SetFlex(node WEB_FLEX_COLUMN gap WEB_ALIGN_STRETCH WEB_JUSTIFY_START WEB_NOWRAP)
+    return 0
+}
+
+let Web_AppendElement = (parent:int tag:int):>int => {
+    let element:int = Web_CreateElement(tag)
+    Web_AppendChild(parent element)
+    return element
+}
+
+let Web_AppendTextElement = (parent:int tag:int text:int):>int => {
+    let element:int = Web_AppendElement(parent tag)
+    Web_SetText(element text)
+    return element
+}
+
+let Web_Link = (parent:int href:int text:int):>int => {
+    let link:int = Web_AppendTextElement(parent "a" text)
+    Web_SetAttr(link "href" href)
+    return link
+}
+
+let Web_Image = (parent:int src:int alt:int):>int => {
+    let image:int = Web_AppendElement(parent "img")
+    Web_SetAttr(image "src" src)
+    Web_SetAttr(image "alt" alt)
+    return image
+}
