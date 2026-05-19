@@ -35,7 +35,7 @@ let append_paragraph = (parent:int text:int):>int => {
 
 let main = ():>int => {
     Web_SetTitle("udewy DOM publishing demo")
-    Web_SetFaviconSvg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='#f6f2eb'/><circle cx='46' cy='18' r='7' fill='#d9822b'/><text x='32' y='42' text-anchor='middle' font-family='ui-sans-serif, system-ui' font-size='24' font-weight='800' fill='#232734'>uD</text></svg>")
+    Web_SetFaviconSvg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='#f6f2eb'/><circle cx='46' cy='18' r='7' fill='#d9822b'/><text x='32' y='42' text-anchor='middle' font-family='ui-sans-serif, system-ui' font-size='24' font-weight='800' fill='#232734'>&#x03BC;D</text></svg>")
 
     let root:int = Web_Root()
     Web_Clear(root)
@@ -87,13 +87,32 @@ let main = ():>int => {
     append_paragraph(scroll_box "A blog generator could build headings, paragraphs, links, code blocks, images, and navigation with these same primitives.")
     append_paragraph(scroll_box "Clay still fits app-style surfaces. This DOM path is for document-style pages where native browser behavior is the feature.")
 
-    let code:int = Web_AppendTextElement(article "pre" "import p\"../../third_party/web/dom.udewy\"\n\nlet root:int = Web_Root()\nWeb_AppendTextElement(root \"p\" \"Hello from udewy\")")
+    let code:int = Web_AppendTextElement(article "pre" 
+"import p\"../../third_party/web/dom.udewy\"
+
+let main = ():>int => \{
+    let root:int = Web_Root()
+    Web_AppendTextElement(root \"p\" \"Hello from udewy\")
+    return 0
+\}")
     Web_SetStyle(code "overflow" "auto")
     Web_SetStyle(code "padding" "1rem")
     Web_SetStyle(code "border-radius" "14px")
     Web_SetStyle(code "background" "#232734")
     Web_SetStyle(code "color" "#f8f3e8")
     Web_SetStyle(code "font-size" "0.9rem")
+    Web_SetStyle(code "margin" "0")
+
+    let run_label:int = Web_AppendTextElement(article "p" "Run it with:")
+    Web_SetStyle(run_label "margin" "0")
+    let run_command:int = Web_AppendTextElement(article "pre" "python -m udewy --target wasm32 hello.udewy")
+    Web_SetStyle(run_command "overflow" "auto")
+    Web_SetStyle(run_command "padding" "1rem")
+    Web_SetStyle(run_command "border-radius" "14px")
+    Web_SetStyle(run_command "background" "#232734")
+    Web_SetStyle(run_command "color" "#f8f3e8")
+    Web_SetStyle(run_command "font-size" "0.9rem")
+    Web_SetStyle(run_command "margin" "-0.75rem 0 0")
 
     let footer:int = Web_AppendElement(article "footer")
     Web_FlexRow(footer 8)
