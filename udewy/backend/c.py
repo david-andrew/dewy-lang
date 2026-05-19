@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 
 from .. import t1
-from . import sdl_desktop
+from ..third_party.sdl import desktop_launch
 from .common import Backend, CORE_INTRINSIC_ARITIES, RunOptions
 
 
@@ -1387,7 +1387,7 @@ class CBackend(Backend):
         output = Path(output_path)
         if options is None:
             options = RunOptions()
-        env = sdl_desktop.apply_run_hook(
+        env = desktop_launch.apply_run_hook(
             input_file=options.input_file,
             output_path=output,
             link_artifacts=options.link_artifacts,

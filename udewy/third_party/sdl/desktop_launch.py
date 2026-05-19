@@ -39,7 +39,7 @@ def derive_sdl_app_id(input_file: Path) -> str:
 
 
 def default_sdl_icon_source() -> Path:
-    return Path(__file__).resolve().parent.parent.parent / "assets" / "udewy_logo_128x128.png"
+    return Path(__file__).resolve().parents[3] / "assets" / "udewy_logo_128x128.png"
 
 
 def prepare_sdl_desktop_launch(input_file: Path, output_path: Path) -> SdlDesktopLaunchInfo:

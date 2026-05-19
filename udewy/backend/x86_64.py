@@ -8,9 +8,9 @@ from os import PathLike
 from pathlib import Path
 
 from .. import t1
+from ..third_party.sdl import desktop_launch
 from .common import Backend, CORE_INTRINSIC_ARITIES, RunOptions
 from .linux import LINUX_SYSCALL_INTRINSIC_ARITIES, linux_builtin_constants
-from . import sdl_desktop
 
 class X86_64Backend(Backend):
     """
@@ -1073,7 +1073,7 @@ class X86_64Backend(Backend):
         output_path = Path(output_path)
         if options is None:
             options = RunOptions()
-        env = sdl_desktop.apply_run_hook(
+        env = desktop_launch.apply_run_hook(
             input_file=options.input_file,
             output_path=output_path,
             link_artifacts=options.link_artifacts,
