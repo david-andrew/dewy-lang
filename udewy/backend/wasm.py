@@ -86,71 +86,71 @@ class Wasm32Backend(Backend):
         """Setup JS host function imports for browser functionality."""
         host_imports = [
             # Direct browser APIs
-            '(import "env" "host_log" (func $host_log (param i64 i64) (result i64)))',
-            '(import "env" "host_exit" (func $host_exit (param i64) (result i64)))',
-            '(import "env" "host_time" (func $host_time (result i64)))',
-            '(import "env" "host_random" (func $host_random (result i64)))',
+            '(import "env" "host_log" (func $__host_log__ (param i64 i64) (result i64)))',
+            '(import "env" "host_exit" (func $__host_exit__ (param i64) (result i64)))',
+            '(import "env" "host_time" (func $__host_time__ (result i64)))',
+            '(import "env" "host_random" (func $__host_random__ (result i64)))',
             # DOM manipulation
-            '(import "env" "host_dom_set_text" (func $host_dom_set_text (param i64 i64) (result i64)))',
-            '(import "env" "host_dom_append" (func $host_dom_append (param i64 i64) (result i64)))',
-            '(import "env" "host_dom_clear" (func $host_dom_clear (result i64)))',
-            '(import "env" "host_dom_append_int" (func $host_dom_append_int (param i64) (result i64)))',
-            '(import "env" "host_log_int" (func $host_log_int (param i64) (result i64)))',
+            '(import "env" "host_dom_set_text" (func $__host_dom_set_text__ (param i64 i64) (result i64)))',
+            '(import "env" "host_dom_append" (func $__host_dom_append__ (param i64 i64) (result i64)))',
+            '(import "env" "host_dom_clear" (func $__host_dom_clear__ (result i64)))',
+            '(import "env" "host_dom_append_int" (func $__host_dom_append_int__ (param i64) (result i64)))',
+            '(import "env" "host_log_int" (func $__host_log_int__ (param i64) (result i64)))',
             # Canvas graphics
-            '(import "env" "host_canvas_init" (func $host_canvas_init (param i64 i64) (result i64)))',
-            '(import "env" "host_canvas_width" (func $host_canvas_width (result i64)))',
-            '(import "env" "host_canvas_height" (func $host_canvas_height (result i64)))',
-            '(import "env" "host_canvas_present" (func $host_canvas_present (result i64)))',
-            '(import "env" "host_canvas_set_aspect_lock" (func $host_canvas_set_aspect_lock (param i64) (result i64)))',
-            '(import "env" "host_frame_count" (func $host_frame_count (result i64)))',
-            '(import "env" "host_frame_time" (func $host_frame_time (result i64)))',
-            '(import "env" "host_window_width" (func $host_window_width (result i64)))',
-            '(import "env" "host_window_height" (func $host_window_height (result i64)))',
+            '(import "env" "host_canvas_init" (func $__host_canvas_init__ (param i64 i64) (result i64)))',
+            '(import "env" "host_canvas_width" (func $__host_canvas_width__ (result i64)))',
+            '(import "env" "host_canvas_height" (func $__host_canvas_height__ (result i64)))',
+            '(import "env" "host_canvas_present" (func $__host_canvas_present__ (result i64)))',
+            '(import "env" "host_canvas_set_aspect_lock" (func $__host_canvas_set_aspect_lock__ (param i64) (result i64)))',
+            '(import "env" "host_frame_count" (func $__host_frame_count__ (result i64)))',
+            '(import "env" "host_frame_time" (func $__host_frame_time__ (result i64)))',
+            '(import "env" "host_window_width" (func $__host_window_width__ (result i64)))',
+            '(import "env" "host_window_height" (func $__host_window_height__ (result i64)))',
             # Pointer input
-            '(import "env" "host_pointer_x" (func $host_pointer_x (result i64)))',
-            '(import "env" "host_pointer_y" (func $host_pointer_y (result i64)))',
-            '(import "env" "host_pointer_down" (func $host_pointer_down (result i64)))',
+            '(import "env" "host_pointer_x" (func $__host_pointer_x__ (result i64)))',
+            '(import "env" "host_pointer_y" (func $__host_pointer_y__ (result i64)))',
+            '(import "env" "host_pointer_down" (func $__host_pointer_down__ (result i64)))',
             # Keyboard input
-            '(import "env" "host_key_down" (func $host_key_down (param i64 i64) (result i64)))',
-            '(import "env" "host_key_pressed" (func $host_key_pressed (param i64 i64) (result i64)))',
-            '(import "env" "host_key_released" (func $host_key_released (param i64 i64) (result i64)))',
+            '(import "env" "host_key_down" (func $__host_key_down__ (param i64 i64) (result i64)))',
+            '(import "env" "host_key_pressed" (func $__host_key_pressed__ (param i64 i64) (result i64)))',
+            '(import "env" "host_key_released" (func $__host_key_released__ (param i64 i64) (result i64)))',
             # Audio (one-shot)
-            '(import "env" "host_audio_init" (func $host_audio_init (param i64 i64 i64) (result i64)))',
-            '(import "env" "host_audio_play" (func $host_audio_play (result i64)))',
-            '(import "env" "host_audio_sample_rate" (func $host_audio_sample_rate (result i64)))',
+            '(import "env" "host_audio_init" (func $__host_audio_init__ (param i64 i64 i64) (result i64)))',
+            '(import "env" "host_audio_play" (func $__host_audio_play__ (result i64)))',
+            '(import "env" "host_audio_sample_rate" (func $__host_audio_sample_rate__ (result i64)))',
             # Audio (streaming)
-            '(import "env" "host_audio_stream_init" (func $host_audio_stream_init (param i64 i64) (result i64)))',
-            '(import "env" "host_audio_stream_write" (func $host_audio_stream_write (result i64)))',
-            '(import "env" "host_audio_stream_needs_samples" (func $host_audio_stream_needs_samples (result i64)))',
+            '(import "env" "host_audio_stream_init" (func $__host_audio_stream_init__ (param i64 i64) (result i64)))',
+            '(import "env" "host_audio_stream_write" (func $__host_audio_stream_write__ (result i64)))',
+            '(import "env" "host_audio_stream_needs_samples" (func $__host_audio_stream_needs_samples__ (result i64)))',
             # WebGL fullscreen shader
-            '(import "env" "host_webgl_init" (func $host_webgl_init (param i64 i64 i64 i64) (result i64)))',
-            '(import "env" "host_webgl_uniform1i" (func $host_webgl_uniform1i (param i64 i64 i64) (result i64)))',
-            '(import "env" "host_webgl_uniform2i" (func $host_webgl_uniform2i (param i64 i64 i64 i64) (result i64)))',
-            '(import "env" "host_webgl_uniform1iv" (func $host_webgl_uniform1iv (param i64 i64 i64 i64) (result i64)))',
-            '(import "env" "host_webgl_uniform2iv" (func $host_webgl_uniform2iv (param i64 i64 i64 i64) (result i64)))',
-            '(import "env" "host_webgl_render" (func $host_webgl_render (result i64)))',
+            '(import "env" "host_webgl_init" (func $__host_webgl_init__ (param i64 i64 i64 i64) (result i64)))',
+            '(import "env" "host_webgl_uniform1i" (func $__host_webgl_uniform1i__ (param i64 i64 i64) (result i64)))',
+            '(import "env" "host_webgl_uniform2i" (func $__host_webgl_uniform2i__ (param i64 i64 i64 i64) (result i64)))',
+            '(import "env" "host_webgl_uniform1iv" (func $__host_webgl_uniform1iv__ (param i64 i64 i64 i64) (result i64)))',
+            '(import "env" "host_webgl_uniform2iv" (func $__host_webgl_uniform2iv__ (param i64 i64 i64 i64) (result i64)))',
+            '(import "env" "host_webgl_render" (func $__host_webgl_render__ (result i64)))',
             # General-purpose 3D GPU surface (textured + vertex-colored, batched)
-            '(import "env" "host_gpu_init" (func $host_gpu_init (param i64 i64) (result i64)))',
-            '(import "env" "host_gpu_set_viewport" (func $host_gpu_set_viewport (param i64 i64) (result i64)))',
-            '(import "env" "host_gpu_clear" (func $host_gpu_clear (param i64 i64 i64) (result i64)))',
-            '(import "env" "host_gpu_set_perspective_frustum" (func $host_gpu_set_perspective_frustum (param i64 i64 i64 i64 i64 i64) (result i64)))',
-            '(import "env" "host_gpu_set_view_matrix" (func $host_gpu_set_view_matrix (param i64) (result i64)))',
-            '(import "env" "host_gpu_set_texture" (func $host_gpu_set_texture (param i64) (result i64)))',
-            '(import "env" "host_gpu_set_blend" (func $host_gpu_set_blend (param i64) (result i64)))',
-            '(import "env" "host_gpu_set_depth_test" (func $host_gpu_set_depth_test (param i64) (result i64)))',
-            '(import "env" "host_gpu_set_depth_write" (func $host_gpu_set_depth_write (param i64) (result i64)))',
-            '(import "env" "host_gpu_set_line_width" (func $host_gpu_set_line_width (param i64) (result i64)))',
-            '(import "env" "host_gpu_submit" (func $host_gpu_submit (param i64 i64 i64) (result i64)))',
-            '(import "env" "host_gpu_overlay_begin" (func $host_gpu_overlay_begin (param i64 i64) (result i64)))',
-            '(import "env" "host_gpu_overlay_end" (func $host_gpu_overlay_end (result i64)))',
-            '(import "env" "host_gpu_create_texture" (func $host_gpu_create_texture (param i64 i64 i64 i64 i64) (result i64)))',
-            '(import "env" "host_gpu_present" (func $host_gpu_present (result i64)))',
-            '(import "env" "host_gpu_window_width" (func $host_gpu_window_width (result i64)))',
-            '(import "env" "host_gpu_window_height" (func $host_gpu_window_height (result i64)))',
+            '(import "env" "host_gpu_init" (func $__host_gpu_init__ (param i64 i64) (result i64)))',
+            '(import "env" "host_gpu_set_viewport" (func $__host_gpu_set_viewport__ (param i64 i64) (result i64)))',
+            '(import "env" "host_gpu_clear" (func $__host_gpu_clear__ (param i64 i64 i64) (result i64)))',
+            '(import "env" "host_gpu_set_perspective_frustum" (func $__host_gpu_set_perspective_frustum__ (param i64 i64 i64 i64 i64 i64) (result i64)))',
+            '(import "env" "host_gpu_set_view_matrix" (func $__host_gpu_set_view_matrix__ (param i64) (result i64)))',
+            '(import "env" "host_gpu_set_texture" (func $__host_gpu_set_texture__ (param i64) (result i64)))',
+            '(import "env" "host_gpu_set_blend" (func $__host_gpu_set_blend__ (param i64) (result i64)))',
+            '(import "env" "host_gpu_set_depth_test" (func $__host_gpu_set_depth_test__ (param i64) (result i64)))',
+            '(import "env" "host_gpu_set_depth_write" (func $__host_gpu_set_depth_write__ (param i64) (result i64)))',
+            '(import "env" "host_gpu_set_line_width" (func $__host_gpu_set_line_width__ (param i64) (result i64)))',
+            '(import "env" "host_gpu_submit" (func $__host_gpu_submit__ (param i64 i64 i64) (result i64)))',
+            '(import "env" "host_gpu_overlay_begin" (func $__host_gpu_overlay_begin__ (param i64 i64) (result i64)))',
+            '(import "env" "host_gpu_overlay_end" (func $__host_gpu_overlay_end__ (result i64)))',
+            '(import "env" "host_gpu_create_texture" (func $__host_gpu_create_texture__ (param i64 i64 i64 i64 i64) (result i64)))',
+            '(import "env" "host_gpu_present" (func $__host_gpu_present__ (result i64)))',
+            '(import "env" "host_gpu_window_width" (func $__host_gpu_window_width__ (result i64)))',
+            '(import "env" "host_gpu_window_height" (func $__host_gpu_window_height__ (result i64)))',
             # Audio queue (general-purpose ring buffer pushed from WASM)
-            '(import "env" "host_audio_queue_init" (func $host_audio_queue_init (param i64 i64) (result i64)))',
-            '(import "env" "host_audio_queue_push" (func $host_audio_queue_push (param i64 i64) (result i64)))',
-            '(import "env" "host_audio_queue_size" (func $host_audio_queue_size (result i64)))',
+            '(import "env" "host_audio_queue_init" (func $__host_audio_queue_init__ (param i64 i64) (result i64)))',
+            '(import "env" "host_audio_queue_push" (func $__host_audio_queue_push__ (param i64 i64) (result i64)))',
+            '(import "env" "host_audio_queue_size" (func $__host_audio_queue_size__ (result i64)))',
         ]
         self._imports.extend(host_imports)
     
@@ -233,18 +233,21 @@ class Wasm32Backend(Backend):
         output = []
         output.append("(module")
         
-        # Memory import (for JS interop) - must come first.
-        # 32 pages = 2MB; large enough for a streaming vertex scratch buffer
-        # plus a few hundred KB of game-side static_alloca.
-        output.append('  (import "env" "memory" (memory 32))')
-        
-        # Host function imports - must come before any definitions
-        for imp in self._imports:
-            output.append(f"  {imp}")
-
+        # Function type declarations must come before imports so the implicit
+        # type entries created by inline import signatures don't collide with
+        # our named $type_fnN entries.
         for arity in sorted(self._indirect_arities):
             params = " ".join("(param i64)" for _ in range(arity))
             output.append(f"  (type {self._fn_type_name(arity)} (func {params} (result i64)))")
+
+        # Memory import (for JS interop).
+        # 32 pages = 2MB; large enough for a streaming vertex scratch buffer
+        # plus a few hundred KB of game-side static_alloca.
+        output.append('  (import "env" "memory" (memory 32))')
+
+        # Host function imports - must come before any definitions.
+        for imp in self._imports:
+            output.append(f"  {imp}")
         
         # Global definitions - after imports, before functions
         output.append('  (global $stack_ptr (mut i32) (i32.const 2097152))')
@@ -885,207 +888,207 @@ class Wasm32Backend(Backend):
     
     def emit_host_log(self) -> None:
         """Emit a call to host_log(ptr, len). Stack: [ptr len] -> [bytes_written]"""
-        self._emit("call $host_log")
+        self._emit("call $__host_log__")
     
     def emit_host_exit(self) -> None:
         """Emit a call to host_exit(code). Stack: [code] -> [code]"""
-        self._emit("call $host_exit")
+        self._emit("call $__host_exit__")
     
     def emit_host_time(self) -> None:
         """Emit a call to host_time(). Stack: [] -> [timestamp_ms]"""
-        self._emit("call $host_time")
+        self._emit("call $__host_time__")
     
     def emit_host_random(self) -> None:
         """Emit a call to host_random(). Stack: [] -> [random_i64]"""
-        self._emit("call $host_random")
+        self._emit("call $__host_random__")
     
     def emit_host_dom_set_text(self) -> None:
         """Emit a call to host_dom_set_text(ptr, len). Stack: [ptr len] -> [0]"""
-        self._emit("call $host_dom_set_text")
+        self._emit("call $__host_dom_set_text__")
     
     def emit_host_dom_append(self) -> None:
         """Emit a call to host_dom_append(ptr, len). Stack: [ptr len] -> [len]"""
-        self._emit("call $host_dom_append")
+        self._emit("call $__host_dom_append__")
     
     def emit_host_dom_clear(self) -> None:
         """Emit a call to host_dom_clear(). Stack: [] -> [0]"""
-        self._emit("call $host_dom_clear")
+        self._emit("call $__host_dom_clear__")
     
     def emit_host_dom_append_int(self) -> None:
         """Emit a call to host_dom_append_int(value). Stack: [value] -> [value]"""
-        self._emit("call $host_dom_append_int")
+        self._emit("call $__host_dom_append_int__")
     
     def emit_host_log_int(self) -> None:
         """Emit a call to host_log_int(value). Stack: [value] -> [value]"""
-        self._emit("call $host_log_int")
+        self._emit("call $__host_log_int__")
     
     def emit_canvas_init(self) -> None:
         """Emit a call to host_canvas_init(width, height). Stack: [width height] -> [buffer_ptr]"""
-        self._emit("call $host_canvas_init")
+        self._emit("call $__host_canvas_init__")
     
     def emit_canvas_width(self) -> None:
         """Emit a call to host_canvas_width(). Stack: [] -> [width]"""
-        self._emit("call $host_canvas_width")
+        self._emit("call $__host_canvas_width__")
     
     def emit_canvas_height(self) -> None:
         """Emit a call to host_canvas_height(). Stack: [] -> [height]"""
-        self._emit("call $host_canvas_height")
+        self._emit("call $__host_canvas_height__")
     
     def emit_canvas_present(self) -> None:
         """Emit a call to host_canvas_present(). Stack: [] -> [0]"""
-        self._emit("call $host_canvas_present")
+        self._emit("call $__host_canvas_present__")
 
     def emit_canvas_set_aspect_lock(self) -> None:
         """Emit a call to host_canvas_set_aspect_lock(enabled). Stack: [enabled] -> [0]"""
-        self._emit("call $host_canvas_set_aspect_lock")
+        self._emit("call $__host_canvas_set_aspect_lock__")
     
     def emit_frame_count(self) -> None:
         """Emit a call to host_frame_count(). Stack: [] -> [frame_number]"""
-        self._emit("call $host_frame_count")
+        self._emit("call $__host_frame_count__")
     
     def emit_frame_time(self) -> None:
         """Emit a call to host_frame_time(). Stack: [] -> [ms_since_start]"""
-        self._emit("call $host_frame_time")
+        self._emit("call $__host_frame_time__")
     
     def emit_window_width(self) -> None:
         """Emit a call to host_window_width(). Stack: [] -> [width]"""
-        self._emit("call $host_window_width")
+        self._emit("call $__host_window_width__")
     
     def emit_window_height(self) -> None:
         """Emit a call to host_window_height(). Stack: [] -> [height]"""
-        self._emit("call $host_window_height")
+        self._emit("call $__host_window_height__")
     
     def emit_pointer_x(self) -> None:
         """Emit a call to host_pointer_x(). Stack: [] -> [x]"""
-        self._emit("call $host_pointer_x")
+        self._emit("call $__host_pointer_x__")
     
     def emit_pointer_y(self) -> None:
         """Emit a call to host_pointer_y(). Stack: [] -> [y]"""
-        self._emit("call $host_pointer_y")
+        self._emit("call $__host_pointer_y__")
     
     def emit_pointer_down(self) -> None:
         """Emit a call to host_pointer_down(). Stack: [] -> [down]"""
-        self._emit("call $host_pointer_down")
+        self._emit("call $__host_pointer_down__")
     
     def emit_key_down(self) -> None:
         """Emit a call to host_key_down(code_ptr, code_len). Stack: [ptr len] -> [down]"""
-        self._emit("call $host_key_down")
+        self._emit("call $__host_key_down__")
     
     def emit_key_pressed(self) -> None:
         """Emit a call to host_key_pressed(code_ptr, code_len). Stack: [ptr len] -> [pressed]"""
-        self._emit("call $host_key_pressed")
+        self._emit("call $__host_key_pressed__")
     
     def emit_key_released(self) -> None:
         """Emit a call to host_key_released(code_ptr, code_len). Stack: [ptr len] -> [released]"""
-        self._emit("call $host_key_released")
+        self._emit("call $__host_key_released__")
     
     def emit_audio_init(self) -> None:
         """Emit a call to host_audio_init(sample_rate, num_samples, channels). Stack: [sr ns ch] -> [buffer_ptr]"""
-        self._emit("call $host_audio_init")
+        self._emit("call $__host_audio_init__")
     
     def emit_audio_play(self) -> None:
         """Emit a call to host_audio_play(). Stack: [] -> [0]"""
-        self._emit("call $host_audio_play")
+        self._emit("call $__host_audio_play__")
     
     def emit_audio_sample_rate(self) -> None:
         """Emit a call to host_audio_sample_rate(). Stack: [] -> [sample_rate]"""
-        self._emit("call $host_audio_sample_rate")
+        self._emit("call $__host_audio_sample_rate__")
     
     def emit_audio_stream_init(self) -> None:
         """Emit a call to host_audio_stream_init(sample_rate, buffer_size). Stack: [sr bs] -> [buffer_ptr]"""
-        self._emit("call $host_audio_stream_init")
+        self._emit("call $__host_audio_stream_init__")
     
     def emit_audio_stream_write(self) -> None:
         """Emit a call to host_audio_stream_write(). Stack: [] -> [next_buffer_ptr]"""
-        self._emit("call $host_audio_stream_write")
+        self._emit("call $__host_audio_stream_write__")
     
     def emit_audio_stream_needs_samples(self) -> None:
         """Emit a call to host_audio_stream_needs_samples(). Stack: [] -> [bool]"""
-        self._emit("call $host_audio_stream_needs_samples")
+        self._emit("call $__host_audio_stream_needs_samples__")
     
     def emit_webgl_init(self) -> None:
         """Emit a call to host_webgl_init(shader_ptr, shader_len, width, height). Stack: [ptr len w h] -> [0]"""
-        self._emit("call $host_webgl_init")
+        self._emit("call $__host_webgl_init__")
     
     def emit_webgl_uniform1i(self) -> None:
         """Emit a call to host_webgl_uniform1i(name_ptr, name_len, value). Stack: [ptr len value] -> [0]"""
-        self._emit("call $host_webgl_uniform1i")
+        self._emit("call $__host_webgl_uniform1i__")
     
     def emit_webgl_uniform2i(self) -> None:
         """Emit a call to host_webgl_uniform2i(name_ptr, name_len, x, y). Stack: [ptr len x y] -> [0]"""
-        self._emit("call $host_webgl_uniform2i")
+        self._emit("call $__host_webgl_uniform2i__")
     
     def emit_webgl_uniform1iv(self) -> None:
         """Emit a call to host_webgl_uniform1iv(name_ptr, name_len, values_ptr, count). Stack: [ptr len values count] -> [0]"""
-        self._emit("call $host_webgl_uniform1iv")
+        self._emit("call $__host_webgl_uniform1iv__")
     
     def emit_webgl_uniform2iv(self) -> None:
         """Emit a call to host_webgl_uniform2iv(name_ptr, name_len, values_ptr, count). Stack: [ptr len values count] -> [0]"""
-        self._emit("call $host_webgl_uniform2iv")
+        self._emit("call $__host_webgl_uniform2iv__")
     
     def emit_webgl_render(self) -> None:
         """Emit a call to host_webgl_render(). Stack: [] -> [0]"""
-        self._emit("call $host_webgl_render")
+        self._emit("call $__host_webgl_render__")
 
     def emit_gpu_init(self) -> None:
-        self._emit("call $host_gpu_init")
+        self._emit("call $__host_gpu_init__")
 
     def emit_gpu_set_viewport(self) -> None:
-        self._emit("call $host_gpu_set_viewport")
+        self._emit("call $__host_gpu_set_viewport__")
 
     def emit_gpu_clear(self) -> None:
-        self._emit("call $host_gpu_clear")
+        self._emit("call $__host_gpu_clear__")
 
     def emit_gpu_set_perspective_frustum(self) -> None:
-        self._emit("call $host_gpu_set_perspective_frustum")
+        self._emit("call $__host_gpu_set_perspective_frustum__")
 
     def emit_gpu_set_view_matrix(self) -> None:
-        self._emit("call $host_gpu_set_view_matrix")
+        self._emit("call $__host_gpu_set_view_matrix__")
 
     def emit_gpu_set_texture(self) -> None:
-        self._emit("call $host_gpu_set_texture")
+        self._emit("call $__host_gpu_set_texture__")
 
     def emit_gpu_set_blend(self) -> None:
-        self._emit("call $host_gpu_set_blend")
+        self._emit("call $__host_gpu_set_blend__")
 
     def emit_gpu_set_depth_test(self) -> None:
-        self._emit("call $host_gpu_set_depth_test")
+        self._emit("call $__host_gpu_set_depth_test__")
 
     def emit_gpu_set_depth_write(self) -> None:
-        self._emit("call $host_gpu_set_depth_write")
+        self._emit("call $__host_gpu_set_depth_write__")
 
     def emit_gpu_set_line_width(self) -> None:
-        self._emit("call $host_gpu_set_line_width")
+        self._emit("call $__host_gpu_set_line_width__")
 
     def emit_gpu_submit(self) -> None:
-        self._emit("call $host_gpu_submit")
+        self._emit("call $__host_gpu_submit__")
 
     def emit_gpu_overlay_begin(self) -> None:
-        self._emit("call $host_gpu_overlay_begin")
+        self._emit("call $__host_gpu_overlay_begin__")
 
     def emit_gpu_overlay_end(self) -> None:
-        self._emit("call $host_gpu_overlay_end")
+        self._emit("call $__host_gpu_overlay_end__")
 
     def emit_gpu_create_texture(self) -> None:
-        self._emit("call $host_gpu_create_texture")
+        self._emit("call $__host_gpu_create_texture__")
 
     def emit_gpu_present(self) -> None:
-        self._emit("call $host_gpu_present")
+        self._emit("call $__host_gpu_present__")
 
     def emit_gpu_window_width(self) -> None:
-        self._emit("call $host_gpu_window_width")
+        self._emit("call $__host_gpu_window_width__")
 
     def emit_gpu_window_height(self) -> None:
-        self._emit("call $host_gpu_window_height")
+        self._emit("call $__host_gpu_window_height__")
 
     def emit_audio_queue_init(self) -> None:
-        self._emit("call $host_audio_queue_init")
+        self._emit("call $__host_audio_queue_init__")
 
     def emit_audio_queue_push(self) -> None:
-        self._emit("call $host_audio_queue_push")
+        self._emit("call $__host_audio_queue_push__")
 
     def emit_audio_queue_size(self) -> None:
-        self._emit("call $host_audio_queue_size")
+        self._emit("call $__host_audio_queue_size__")
     
     # ========================================================================
     # Control flow

@@ -96,62 +96,62 @@ let w_add_import_line = (line:int):>void => {
 
 # Add all browser host imports. Mirrors python's _setup_imports().
 let w_add_host_imports = ():>void => {
-    w_add_import_line("(import \"env\" \"host_log\" (func $host_log (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_exit\" (func $host_exit (param i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_time\" (func $host_time (result i64)))")
-    w_add_import_line("(import \"env\" \"host_random\" (func $host_random (result i64)))")
-    w_add_import_line("(import \"env\" \"host_dom_set_text\" (func $host_dom_set_text (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_dom_append\" (func $host_dom_append (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_dom_clear\" (func $host_dom_clear (result i64)))")
-    w_add_import_line("(import \"env\" \"host_dom_append_int\" (func $host_dom_append_int (param i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_log_int\" (func $host_log_int (param i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_canvas_init\" (func $host_canvas_init (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_canvas_width\" (func $host_canvas_width (result i64)))")
-    w_add_import_line("(import \"env\" \"host_canvas_height\" (func $host_canvas_height (result i64)))")
-    w_add_import_line("(import \"env\" \"host_canvas_present\" (func $host_canvas_present (result i64)))")
-    w_add_import_line("(import \"env\" \"host_canvas_set_aspect_lock\" (func $host_canvas_set_aspect_lock (param i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_frame_count\" (func $host_frame_count (result i64)))")
-    w_add_import_line("(import \"env\" \"host_frame_time\" (func $host_frame_time (result i64)))")
-    w_add_import_line("(import \"env\" \"host_window_width\" (func $host_window_width (result i64)))")
-    w_add_import_line("(import \"env\" \"host_window_height\" (func $host_window_height (result i64)))")
-    w_add_import_line("(import \"env\" \"host_pointer_x\" (func $host_pointer_x (result i64)))")
-    w_add_import_line("(import \"env\" \"host_pointer_y\" (func $host_pointer_y (result i64)))")
-    w_add_import_line("(import \"env\" \"host_pointer_down\" (func $host_pointer_down (result i64)))")
-    w_add_import_line("(import \"env\" \"host_key_down\" (func $host_key_down (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_key_pressed\" (func $host_key_pressed (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_key_released\" (func $host_key_released (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_audio_init\" (func $host_audio_init (param i64 i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_audio_play\" (func $host_audio_play (result i64)))")
-    w_add_import_line("(import \"env\" \"host_audio_sample_rate\" (func $host_audio_sample_rate (result i64)))")
-    w_add_import_line("(import \"env\" \"host_audio_stream_init\" (func $host_audio_stream_init (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_audio_stream_write\" (func $host_audio_stream_write (result i64)))")
-    w_add_import_line("(import \"env\" \"host_audio_stream_needs_samples\" (func $host_audio_stream_needs_samples (result i64)))")
-    w_add_import_line("(import \"env\" \"host_webgl_init\" (func $host_webgl_init (param i64 i64 i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_webgl_uniform1i\" (func $host_webgl_uniform1i (param i64 i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_webgl_uniform2i\" (func $host_webgl_uniform2i (param i64 i64 i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_webgl_uniform1iv\" (func $host_webgl_uniform1iv (param i64 i64 i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_webgl_uniform2iv\" (func $host_webgl_uniform2iv (param i64 i64 i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_webgl_render\" (func $host_webgl_render (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_init\" (func $host_gpu_init (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_set_viewport\" (func $host_gpu_set_viewport (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_clear\" (func $host_gpu_clear (param i64 i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_set_perspective_frustum\" (func $host_gpu_set_perspective_frustum (param i64 i64 i64 i64 i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_set_view_matrix\" (func $host_gpu_set_view_matrix (param i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_set_texture\" (func $host_gpu_set_texture (param i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_set_blend\" (func $host_gpu_set_blend (param i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_set_depth_test\" (func $host_gpu_set_depth_test (param i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_set_depth_write\" (func $host_gpu_set_depth_write (param i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_set_line_width\" (func $host_gpu_set_line_width (param i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_submit\" (func $host_gpu_submit (param i64 i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_overlay_begin\" (func $host_gpu_overlay_begin (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_overlay_end\" (func $host_gpu_overlay_end (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_create_texture\" (func $host_gpu_create_texture (param i64 i64 i64 i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_present\" (func $host_gpu_present (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_window_width\" (func $host_gpu_window_width (result i64)))")
-    w_add_import_line("(import \"env\" \"host_gpu_window_height\" (func $host_gpu_window_height (result i64)))")
-    w_add_import_line("(import \"env\" \"host_audio_queue_init\" (func $host_audio_queue_init (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_audio_queue_push\" (func $host_audio_queue_push (param i64 i64) (result i64)))")
-    w_add_import_line("(import \"env\" \"host_audio_queue_size\" (func $host_audio_queue_size (result i64)))")
+    w_add_import_line("(import \"env\" \"host_log\" (func $__host_log__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_exit\" (func $__host_exit__ (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_time\" (func $__host_time__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_random\" (func $__host_random__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_dom_set_text\" (func $__host_dom_set_text__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_dom_append\" (func $__host_dom_append__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_dom_clear\" (func $__host_dom_clear__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_dom_append_int\" (func $__host_dom_append_int__ (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_log_int\" (func $__host_log_int__ (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_canvas_init\" (func $__host_canvas_init__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_canvas_width\" (func $__host_canvas_width__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_canvas_height\" (func $__host_canvas_height__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_canvas_present\" (func $__host_canvas_present__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_canvas_set_aspect_lock\" (func $__host_canvas_set_aspect_lock__ (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_frame_count\" (func $__host_frame_count__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_frame_time\" (func $__host_frame_time__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_window_width\" (func $__host_window_width__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_window_height\" (func $__host_window_height__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_pointer_x\" (func $__host_pointer_x__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_pointer_y\" (func $__host_pointer_y__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_pointer_down\" (func $__host_pointer_down__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_key_down\" (func $__host_key_down__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_key_pressed\" (func $__host_key_pressed__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_key_released\" (func $__host_key_released__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_init\" (func $__host_audio_init__ (param i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_play\" (func $__host_audio_play__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_sample_rate\" (func $__host_audio_sample_rate__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_stream_init\" (func $__host_audio_stream_init__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_stream_write\" (func $__host_audio_stream_write__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_stream_needs_samples\" (func $__host_audio_stream_needs_samples__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_webgl_init\" (func $__host_webgl_init__ (param i64 i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_webgl_uniform1i\" (func $__host_webgl_uniform1i__ (param i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_webgl_uniform2i\" (func $__host_webgl_uniform2i__ (param i64 i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_webgl_uniform1iv\" (func $__host_webgl_uniform1iv__ (param i64 i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_webgl_uniform2iv\" (func $__host_webgl_uniform2iv__ (param i64 i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_webgl_render\" (func $__host_webgl_render__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_init\" (func $__host_gpu_init__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_viewport\" (func $__host_gpu_set_viewport__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_clear\" (func $__host_gpu_clear__ (param i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_perspective_frustum\" (func $__host_gpu_set_perspective_frustum__ (param i64 i64 i64 i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_view_matrix\" (func $__host_gpu_set_view_matrix__ (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_texture\" (func $__host_gpu_set_texture__ (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_blend\" (func $__host_gpu_set_blend__ (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_depth_test\" (func $__host_gpu_set_depth_test__ (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_depth_write\" (func $__host_gpu_set_depth_write__ (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_line_width\" (func $__host_gpu_set_line_width__ (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_submit\" (func $__host_gpu_submit__ (param i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_overlay_begin\" (func $__host_gpu_overlay_begin__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_overlay_end\" (func $__host_gpu_overlay_end__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_create_texture\" (func $__host_gpu_create_texture__ (param i64 i64 i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_present\" (func $__host_gpu_present__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_window_width\" (func $__host_gpu_window_width__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_window_height\" (func $__host_gpu_window_height__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_queue_init\" (func $__host_audio_queue_init__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_queue_push\" (func $__host_audio_queue_push__ (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_queue_size\" (func $__host_audio_queue_size__ (result i64)))")
     return void
 }
 
@@ -1006,62 +1006,62 @@ let w_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
     } else if str_eq(name "__f64_bits_to_i64__") {
         w_emit("f64.reinterpret_i64")
         w_emit("i64.trunc_f64_s")
-    } else if str_eq(name "__host_log__") { w_emit_host_call(name "$host_log") }
-    else if str_eq(name "__host_exit__") { w_emit_host_call(name "$host_exit") }
-    else if str_eq(name "__host_time__") { w_emit_host_call(name "$host_time") }
-    else if str_eq(name "__host_random__") { w_emit_host_call(name "$host_random") }
-    else if str_eq(name "__dom_set_text__") { w_emit_host_call(name "$host_dom_set_text") }
-    else if str_eq(name "__dom_append__") { w_emit_host_call(name "$host_dom_append") }
-    else if str_eq(name "__dom_clear__") { w_emit_host_call(name "$host_dom_clear") }
-    else if str_eq(name "__dom_append_int__") { w_emit_host_call(name "$host_dom_append_int") }
-    else if str_eq(name "__log_int__") { w_emit_host_call(name "$host_log_int") }
-    else if str_eq(name "__canvas_init__") { w_emit_host_call(name "$host_canvas_init") }
-    else if str_eq(name "__canvas_width__") { w_emit_host_call(name "$host_canvas_width") }
-    else if str_eq(name "__canvas_height__") { w_emit_host_call(name "$host_canvas_height") }
-    else if str_eq(name "__canvas_present__") { w_emit_host_call(name "$host_canvas_present") }
-    else if str_eq(name "__canvas_set_aspect_lock__") { w_emit_host_call(name "$host_canvas_set_aspect_lock") }
-    else if str_eq(name "__frame_count__") { w_emit_host_call(name "$host_frame_count") }
-    else if str_eq(name "__frame_time__") { w_emit_host_call(name "$host_frame_time") }
-    else if str_eq(name "__window_width__") { w_emit_host_call(name "$host_window_width") }
-    else if str_eq(name "__window_height__") { w_emit_host_call(name "$host_window_height") }
-    else if str_eq(name "__pointer_x__") { w_emit_host_call(name "$host_pointer_x") }
-    else if str_eq(name "__pointer_y__") { w_emit_host_call(name "$host_pointer_y") }
-    else if str_eq(name "__pointer_down__") { w_emit_host_call(name "$host_pointer_down") }
-    else if str_eq(name "__key_down__") { w_emit_host_call(name "$host_key_down") }
-    else if str_eq(name "__key_pressed__") { w_emit_host_call(name "$host_key_pressed") }
-    else if str_eq(name "__key_released__") { w_emit_host_call(name "$host_key_released") }
-    else if str_eq(name "__audio_init__") { w_emit_host_call(name "$host_audio_init") }
-    else if str_eq(name "__audio_play__") { w_emit_host_call(name "$host_audio_play") }
-    else if str_eq(name "__audio_sample_rate__") { w_emit_host_call(name "$host_audio_sample_rate") }
-    else if str_eq(name "__audio_stream_init__") { w_emit_host_call(name "$host_audio_stream_init") }
-    else if str_eq(name "__audio_stream_write__") { w_emit_host_call(name "$host_audio_stream_write") }
-    else if str_eq(name "__audio_stream_needs_samples__") { w_emit_host_call(name "$host_audio_stream_needs_samples") }
-    else if str_eq(name "__webgl_init__") { w_emit_host_call(name "$host_webgl_init") }
-    else if str_eq(name "__webgl_uniform1i__") { w_emit_host_call(name "$host_webgl_uniform1i") }
-    else if str_eq(name "__webgl_uniform2i__") { w_emit_host_call(name "$host_webgl_uniform2i") }
-    else if str_eq(name "__webgl_uniform1iv__") { w_emit_host_call(name "$host_webgl_uniform1iv") }
-    else if str_eq(name "__webgl_uniform2iv__") { w_emit_host_call(name "$host_webgl_uniform2iv") }
-    else if str_eq(name "__webgl_render__") { w_emit_host_call(name "$host_webgl_render") }
-    else if str_eq(name "__gpu_init__") { w_emit_host_call(name "$host_gpu_init") }
-    else if str_eq(name "__gpu_set_viewport__") { w_emit_host_call(name "$host_gpu_set_viewport") }
-    else if str_eq(name "__gpu_clear__") { w_emit_host_call(name "$host_gpu_clear") }
-    else if str_eq(name "__gpu_set_perspective_frustum__") { w_emit_host_call(name "$host_gpu_set_perspective_frustum") }
-    else if str_eq(name "__gpu_set_view_matrix__") { w_emit_host_call(name "$host_gpu_set_view_matrix") }
-    else if str_eq(name "__gpu_set_texture__") { w_emit_host_call(name "$host_gpu_set_texture") }
-    else if str_eq(name "__gpu_set_blend__") { w_emit_host_call(name "$host_gpu_set_blend") }
-    else if str_eq(name "__gpu_set_depth_test__") { w_emit_host_call(name "$host_gpu_set_depth_test") }
-    else if str_eq(name "__gpu_set_depth_write__") { w_emit_host_call(name "$host_gpu_set_depth_write") }
-    else if str_eq(name "__gpu_set_line_width__") { w_emit_host_call(name "$host_gpu_set_line_width") }
-    else if str_eq(name "__gpu_submit__") { w_emit_host_call(name "$host_gpu_submit") }
-    else if str_eq(name "__gpu_overlay_begin__") { w_emit_host_call(name "$host_gpu_overlay_begin") }
-    else if str_eq(name "__gpu_overlay_end__") { w_emit_host_call(name "$host_gpu_overlay_end") }
-    else if str_eq(name "__gpu_create_texture__") { w_emit_host_call(name "$host_gpu_create_texture") }
-    else if str_eq(name "__gpu_present__") { w_emit_host_call(name "$host_gpu_present") }
-    else if str_eq(name "__gpu_window_width__") { w_emit_host_call(name "$host_gpu_window_width") }
-    else if str_eq(name "__gpu_window_height__") { w_emit_host_call(name "$host_gpu_window_height") }
-    else if str_eq(name "__audio_queue_init__") { w_emit_host_call(name "$host_audio_queue_init") }
-    else if str_eq(name "__audio_queue_push__") { w_emit_host_call(name "$host_audio_queue_push") }
-    else if str_eq(name "__audio_queue_size__") { w_emit_host_call(name "$host_audio_queue_size") }
+    } else if str_eq(name "__host_log__") { w_emit_host_call(name "$__host_log__") }
+    else if str_eq(name "__host_exit__") { w_emit_host_call(name "$__host_exit__") }
+    else if str_eq(name "__host_time__") { w_emit_host_call(name "$__host_time__") }
+    else if str_eq(name "__host_random__") { w_emit_host_call(name "$__host_random__") }
+    else if str_eq(name "__dom_set_text__") { w_emit_host_call(name "$__host_dom_set_text__") }
+    else if str_eq(name "__dom_append__") { w_emit_host_call(name "$__host_dom_append__") }
+    else if str_eq(name "__dom_clear__") { w_emit_host_call(name "$__host_dom_clear__") }
+    else if str_eq(name "__dom_append_int__") { w_emit_host_call(name "$__host_dom_append_int__") }
+    else if str_eq(name "__log_int__") { w_emit_host_call(name "$__host_log_int__") }
+    else if str_eq(name "__canvas_init__") { w_emit_host_call(name "$__host_canvas_init__") }
+    else if str_eq(name "__canvas_width__") { w_emit_host_call(name "$__host_canvas_width__") }
+    else if str_eq(name "__canvas_height__") { w_emit_host_call(name "$__host_canvas_height__") }
+    else if str_eq(name "__canvas_present__") { w_emit_host_call(name "$__host_canvas_present__") }
+    else if str_eq(name "__canvas_set_aspect_lock__") { w_emit_host_call(name "$__host_canvas_set_aspect_lock__") }
+    else if str_eq(name "__frame_count__") { w_emit_host_call(name "$__host_frame_count__") }
+    else if str_eq(name "__frame_time__") { w_emit_host_call(name "$__host_frame_time__") }
+    else if str_eq(name "__window_width__") { w_emit_host_call(name "$__host_window_width__") }
+    else if str_eq(name "__window_height__") { w_emit_host_call(name "$__host_window_height__") }
+    else if str_eq(name "__pointer_x__") { w_emit_host_call(name "$__host_pointer_x__") }
+    else if str_eq(name "__pointer_y__") { w_emit_host_call(name "$__host_pointer_y__") }
+    else if str_eq(name "__pointer_down__") { w_emit_host_call(name "$__host_pointer_down__") }
+    else if str_eq(name "__key_down__") { w_emit_host_call(name "$__host_key_down__") }
+    else if str_eq(name "__key_pressed__") { w_emit_host_call(name "$__host_key_pressed__") }
+    else if str_eq(name "__key_released__") { w_emit_host_call(name "$__host_key_released__") }
+    else if str_eq(name "__audio_init__") { w_emit_host_call(name "$__host_audio_init__") }
+    else if str_eq(name "__audio_play__") { w_emit_host_call(name "$__host_audio_play__") }
+    else if str_eq(name "__audio_sample_rate__") { w_emit_host_call(name "$__host_audio_sample_rate__") }
+    else if str_eq(name "__audio_stream_init__") { w_emit_host_call(name "$__host_audio_stream_init__") }
+    else if str_eq(name "__audio_stream_write__") { w_emit_host_call(name "$__host_audio_stream_write__") }
+    else if str_eq(name "__audio_stream_needs_samples__") { w_emit_host_call(name "$__host_audio_stream_needs_samples__") }
+    else if str_eq(name "__webgl_init__") { w_emit_host_call(name "$__host_webgl_init__") }
+    else if str_eq(name "__webgl_uniform1i__") { w_emit_host_call(name "$__host_webgl_uniform1i__") }
+    else if str_eq(name "__webgl_uniform2i__") { w_emit_host_call(name "$__host_webgl_uniform2i__") }
+    else if str_eq(name "__webgl_uniform1iv__") { w_emit_host_call(name "$__host_webgl_uniform1iv__") }
+    else if str_eq(name "__webgl_uniform2iv__") { w_emit_host_call(name "$__host_webgl_uniform2iv__") }
+    else if str_eq(name "__webgl_render__") { w_emit_host_call(name "$__host_webgl_render__") }
+    else if str_eq(name "__gpu_init__") { w_emit_host_call(name "$__host_gpu_init__") }
+    else if str_eq(name "__gpu_set_viewport__") { w_emit_host_call(name "$__host_gpu_set_viewport__") }
+    else if str_eq(name "__gpu_clear__") { w_emit_host_call(name "$__host_gpu_clear__") }
+    else if str_eq(name "__gpu_set_perspective_frustum__") { w_emit_host_call(name "$__host_gpu_set_perspective_frustum__") }
+    else if str_eq(name "__gpu_set_view_matrix__") { w_emit_host_call(name "$__host_gpu_set_view_matrix__") }
+    else if str_eq(name "__gpu_set_texture__") { w_emit_host_call(name "$__host_gpu_set_texture__") }
+    else if str_eq(name "__gpu_set_blend__") { w_emit_host_call(name "$__host_gpu_set_blend__") }
+    else if str_eq(name "__gpu_set_depth_test__") { w_emit_host_call(name "$__host_gpu_set_depth_test__") }
+    else if str_eq(name "__gpu_set_depth_write__") { w_emit_host_call(name "$__host_gpu_set_depth_write__") }
+    else if str_eq(name "__gpu_set_line_width__") { w_emit_host_call(name "$__host_gpu_set_line_width__") }
+    else if str_eq(name "__gpu_submit__") { w_emit_host_call(name "$__host_gpu_submit__") }
+    else if str_eq(name "__gpu_overlay_begin__") { w_emit_host_call(name "$__host_gpu_overlay_begin__") }
+    else if str_eq(name "__gpu_overlay_end__") { w_emit_host_call(name "$__host_gpu_overlay_end__") }
+    else if str_eq(name "__gpu_create_texture__") { w_emit_host_call(name "$__host_gpu_create_texture__") }
+    else if str_eq(name "__gpu_present__") { w_emit_host_call(name "$__host_gpu_present__") }
+    else if str_eq(name "__gpu_window_width__") { w_emit_host_call(name "$__host_gpu_window_width__") }
+    else if str_eq(name "__gpu_window_height__") { w_emit_host_call(name "$__host_gpu_window_height__") }
+    else if str_eq(name "__audio_queue_init__") { w_emit_host_call(name "$__host_audio_queue_init__") }
+    else if str_eq(name "__audio_queue_push__") { w_emit_host_call(name "$__host_audio_queue_push__") }
+    else if str_eq(name "__audio_queue_size__") { w_emit_host_call(name "$__host_audio_queue_size__") }
     return void
 }
 
@@ -1095,24 +1095,17 @@ let w_emit_data_segment = (out:int offset:int data_str:int):>void => {
 let w_finish_module = ():>int => {
     let out:int = bb_new(8192)
     bb_push_str(out "(module\n")
-    bb_push_str(out "  (import \"env\" \"memory\" (memory 32))\n")
 
-    let imp_n:int = vec_len(w_imports)
-    let imp_i:int = 0
-    loop imp_i <? imp_n {
-        bb_push_str(out "  ")
-        bb_push_str(out vec_get(w_imports imp_i))
-        bb_push_byte(out 10)
-        imp_i = imp_i + 1
-    }
-
-    # Function types for indirect calls.
-    let cap_ia:int = map_cap(w_indirect_arities)
-    let slots_ia:int = map_slots(w_indirect_arities)
+    # Function types for indirect calls. Emitted BEFORE imports so the
+    # implicit type entries created by inline import signatures don't
+    # collide with our named $type_fnN entries.
+    # w_indirect_arities is an intset (intmap-backed), slot size 24.
+    let cap_ia:int = intmap_cap(w_indirect_arities)
+    let slots_ia:int = intmap_slots(w_indirect_arities)
     let arities:int = vec_new(8)
     let k:int = 0
     loop k <? cap_ia {
-        let slot:int = slots_ia + (k * 32)
+        let slot:int = slots_ia + (k * 24)
         if __load__(slot) =? 1 {
             vec_push(arities __load__(slot + 8))
         }
@@ -1145,6 +1138,17 @@ let w_finish_module = ():>int => {
         }
         bb_push_str(out " (result i64)))\n")
         ai = ai + 1
+    }
+
+    bb_push_str(out "  (import \"env\" \"memory\" (memory 32))\n")
+
+    let imp_n:int = vec_len(w_imports)
+    let imp_i:int = 0
+    loop imp_i <? imp_n {
+        bb_push_str(out "  ")
+        bb_push_str(out vec_get(w_imports imp_i))
+        bb_push_byte(out 10)
+        imp_i = imp_i + 1
     }
 
     bb_push_str(out "  (global $stack_ptr (mut i32) (i32.const 2097152))\n")
