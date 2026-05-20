@@ -1,0 +1,47 @@
+# Base64 (RFC 4648) encoder. Output is a length-prefixed udewy string of
+# ASCII characters from the standard alphabet [A-Za-z0-9+/], padded with '='.
+
+# Map a 6-bit value (0..63) to its base64 alphabet character.
+let b64_char_for = (v:int):>int => {
+    if v <? 26 { return v + 65 }       # 'A'..'Z'
+    if v <? 52 { return v - 26 + 97 }  # 'a'..'z'
+    if v <? 62 { return v - 52 + 48 }  # '0'..'9'
+    if v =? 62 { return 43 }           # '+'
+    return 47                          # '/'
+}
+
+# Encode `len` bytes starting at `data` into a base64 string.
+let b64_encode = (data:int len:int):>int => {
+    let out_len:int = ((len + 2) // 3) * 4
+    let bb:int = bb_new(out_len + 1)
+
+    let i:int = 0
+    loop i + 3 <=? len {
+        let b0:int = __load_u8__(data + i)
+        let b1:int = __load_u8__(data + i + 1)
+        let b2:int = __load_u8__(data + i + 2)
+        bb_push_byte(bb b64_char_for(b0 >> 2))
+        bb_push_byte(bb b64_char_for(((b0 and 3) << 4) or (b1 >> 4)))
+        bb_push_byte(bb b64_char_for(((b1 and 0xf) << 2) or (b2 >> 6)))
+        bb_push_byte(bb b64_char_for(b2 and 0x3f))
+        i = i + 3
+    }
+
+    let rem:int = len - i
+    if rem =? 1 {
+        let b0:int = __load_u8__(data + i)
+        bb_push_byte(bb b64_char_for(b0 >> 2))
+        bb_push_byte(bb b64_char_for((b0 and 3) << 4))
+        bb_push_byte(bb 61)
+        bb_push_byte(bb 61)
+    } else if rem =? 2 {
+        let b0:int = __load_u8__(data + i)
+        let b1:int = __load_u8__(data + i + 1)
+        bb_push_byte(bb b64_char_for(b0 >> 2))
+        bb_push_byte(bb b64_char_for(((b0 and 3) << 4) or (b1 >> 4)))
+        bb_push_byte(bb b64_char_for((b1 and 0xf) << 2))
+        bb_push_byte(bb 61)
+    }
+
+    return bb_finalize_as_string(bb)
+}

@@ -6,10 +6,22 @@ const SYS_READ:int = 0
 const SYS_WRITE:int = 1
 const SYS_OPEN:int = 2
 const SYS_CLOSE:int = 3
+const SYS_POLL:int = 7
 const SYS_LSEEK:int = 8
 const SYS_MMAP:int = 9
 const SYS_BRK:int = 12
 const SYS_DUP2:int = 33
+const SYS_NANOSLEEP:int = 35
+const SYS_SOCKET:int = 41
+const SYS_CONNECT:int = 42
+const SYS_ACCEPT:int = 43
+const SYS_SENDTO:int = 44
+const SYS_RECVFROM:int = 45
+const SYS_SHUTDOWN:int = 48
+const SYS_BIND:int = 49
+const SYS_LISTEN:int = 50
+const SYS_GETSOCKNAME:int = 51
+const SYS_SETSOCKOPT:int = 54
 const SYS_FORK:int = 57
 const SYS_EXECVE:int = 59
 const SYS_EXIT:int = 60
@@ -17,6 +29,7 @@ const SYS_WAIT4:int = 61
 const SYS_MKDIR:int = 83
 const SYS_UNLINK:int = 87
 const SYS_CHDIR:int = 80
+const SYS_CLOCK_GETTIME:int = 228
 
 const O_RDONLY:int = 0
 const O_WRONLY:int = 1
@@ -85,4 +98,44 @@ let host_unlink = (path_cstr:int):>int => {
 
 let host_chdir = (path_cstr:int):>int => {
     return __syscall1__(SYS_CHDIR path_cstr)
+}
+
+let host_socket = (domain:int type_:int protocol:int):>int => {
+    return __syscall3__(SYS_SOCKET domain type_ protocol)
+}
+
+let host_bind = (sockfd:int addr:int addrlen:int):>int => {
+    return __syscall3__(SYS_BIND sockfd addr addrlen)
+}
+
+let host_listen = (sockfd:int backlog:int):>int => {
+    return __syscall2__(SYS_LISTEN sockfd backlog)
+}
+
+let host_accept = (sockfd:int addr:int addrlen_ptr:int):>int => {
+    return __syscall3__(SYS_ACCEPT sockfd addr addrlen_ptr)
+}
+
+let host_setsockopt = (sockfd:int level:int optname:int optval:int optlen:int):>int => {
+    return __syscall5__(SYS_SETSOCKOPT sockfd level optname optval optlen)
+}
+
+let host_getsockname = (sockfd:int addr:int addrlen_ptr:int):>int => {
+    return __syscall3__(SYS_GETSOCKNAME sockfd addr addrlen_ptr)
+}
+
+let host_shutdown = (sockfd:int how:int):>int => {
+    return __syscall2__(SYS_SHUTDOWN sockfd how)
+}
+
+let host_poll = (fds:int nfds:int timeout_ms:int):>int => {
+    return __syscall3__(SYS_POLL fds nfds timeout_ms)
+}
+
+let host_clock_gettime = (clk_id:int tp:int):>int => {
+    return __syscall2__(SYS_CLOCK_GETTIME clk_id tp)
+}
+
+let host_nanosleep = (req:int rem:int):>int => {
+    return __syscall2__(SYS_NANOSLEEP req rem)
 }

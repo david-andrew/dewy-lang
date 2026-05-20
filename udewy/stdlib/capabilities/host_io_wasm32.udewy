@@ -73,3 +73,17 @@ let host_unlink = (path_cstr:int):>int => {
 let host_chdir = (path_cstr:int):>int => {
     return 0 - 1
 }
+
+# Stubs for the networking / time helpers used by the wasm backend's serve
+# mode. These can never actually run on the wasm target (the wasm-built
+# bootstrap has no host filesystem either), so they just fail.
+let host_socket = (domain:int type_:int protocol:int):>int => { return 0 - 1 }
+let host_bind = (sockfd:int addr:int addrlen:int):>int => { return 0 - 1 }
+let host_listen = (sockfd:int backlog:int):>int => { return 0 - 1 }
+let host_accept = (sockfd:int addr:int addrlen_ptr:int):>int => { return 0 - 1 }
+let host_setsockopt = (sockfd:int level:int optname:int optval:int optlen:int):>int => { return 0 - 1 }
+let host_getsockname = (sockfd:int addr:int addrlen_ptr:int):>int => { return 0 - 1 }
+let host_shutdown = (sockfd:int how:int):>int => { return 0 - 1 }
+let host_poll = (fds:int nfds:int timeout_ms:int):>int => { return 0 - 1 }
+let host_clock_gettime = (clk_id:int tp:int):>int => { return 0 - 1 }
+let host_nanosleep = (req:int rem:int):>int => { return 0 - 1 }

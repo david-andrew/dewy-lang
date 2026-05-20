@@ -1,0 +1,331 @@
+# Minimal HTTP/1.1 server.
+#
+# The bootstrap wasm backend uses this to host the generated HTML + sidecar
+# wasm files. Single-threaded, blocking accept loop with a poll-based timeout
+# so the watchdog can shut the server down when the browser tab closes.
+
+const HTTP_BUF_SIZE:int = 8192
+const HTTP_METHOD_GET:int = 1
+const HTTP_METHOD_POST:int = 2
+const HTTP_METHOD_OTHER:int = 0
+
+# Globals (single-server-per-process). Set by the launcher.
+let http_listen_fd:int = 0
+let http_listen_port:int = 0
+let http_cache_dir:int = 0      # length-prefixed udewy path string
+let http_html_filename:int = 0  # length-prefixed udewy string (e.g. "race.html")
+let http_state:int = 0          # pointer to HSTATE_* struct (see below)
+
+# Server state struct laid out at http_state:
+#   +0   page_loaded         (bool)
+#   +8   shutdown_requested  (bool)
+#   +16  last_seen_ms        (int64 monotonic ms)
+#   +24  started_ms          (int64 monotonic ms)
+const HS_PAGE_LOADED:int = 0
+const HS_SHUTDOWN_REQUESTED:int = 8
+const HS_LAST_SEEN:int = 16
+const HS_STARTED:int = 24
+const HS_SIZE:int = 32
+
+let http_state_new = ():>int => {
+    let s:int = arena_alloc(HS_SIZE)
+    __store__(FALSE_VAL s + HS_PAGE_LOADED)
+    __store__(FALSE_VAL s + HS_SHUTDOWN_REQUESTED)
+    let now:int = time_monotonic_ms()
+    __store__(now s + HS_LAST_SEEN)
+    __store__(now s + HS_STARTED)
+    return s
+}
+
+let http_state_mark_loaded = (s:int):>void => {
+    __store__(TRUE_VAL s + HS_PAGE_LOADED)
+    __store__(time_monotonic_ms() s + HS_LAST_SEEN)
+    return void
+}
+
+let http_state_request_shutdown = (s:int):>void => {
+    __store__(TRUE_VAL s + HS_SHUTDOWN_REQUESTED)
+    return void
+}
+
+let http_state_is_shutdown_requested = (s:int):>int => {
+    return __load__(s + HS_SHUTDOWN_REQUESTED)
+}
+
+let http_state_is_page_loaded = (s:int):>int => {
+    return __load__(s + HS_PAGE_LOADED)
+}
+
+let http_state_last_seen = (s:int):>int => {
+    return __load__(s + HS_LAST_SEEN)
+}
+
+let http_state_started = (s:int):>int => {
+    return __load__(s + HS_STARTED)
+}
+
+# Read up to HTTP_BUF_SIZE bytes from `client_fd` into `buf`. We assume the
+# request fits in one read (browsers send small request headers; the bootstrap
+# server doesn't accept request bodies of any size). Returns the number of
+# bytes read, or 0 on EOF / error.
+let http_read_request = (client_fd:int buf:int):>int => {
+    let n:int = host_read(client_fd buf HTTP_BUF_SIZE)
+    if n <? 0 { return 0 }
+    return n
+}
+
+# Find the first occurrence of a single byte `c` in [buf, buf+n). Returns the
+# offset or -1.
+let http_find_byte = (buf:int n:int c:int):>int => {
+    let i:int = 0
+    loop i <? n {
+        if __load_u8__(buf + i) =? c { return i }
+        i = i + 1
+    }
+    return 0 - 1
+}
+
+# Parse the request line "METHOD SP PATH SP HTTP/X.Y CRLF". Returns the method
+# enum and writes the path's start offset and length into the output slots.
+# Returns HTTP_METHOD_OTHER if malformed.
+let http_parse_request_line = (buf:int n:int path_off_out:int path_len_out:int):>int => {
+    let sp1:int = http_find_byte(buf n 32)
+    if sp1 <? 0 { return HTTP_METHOD_OTHER }
+
+    let method:int = HTTP_METHOD_OTHER
+    if (sp1 =? 3) and (__load_u8__(buf) =? 71) and (__load_u8__(buf + 1) =? 69) and (__load_u8__(buf + 2) =? 84) {
+        method = HTTP_METHOD_GET
+    }
+    if (sp1 =? 4) and (__load_u8__(buf) =? 80) and (__load_u8__(buf + 1) =? 79) and (__load_u8__(buf + 2) =? 83) and (__load_u8__(buf + 3) =? 84) {
+        method = HTTP_METHOD_POST
+    }
+
+    let path_start:int = sp1 + 1
+    let rest_start:int = buf + path_start
+    let rest_len:int = n - path_start
+    let sp2:int = http_find_byte(rest_start rest_len 32)
+    if sp2 <? 0 { return HTTP_METHOD_OTHER }
+
+    __store__(path_start path_off_out)
+    __store__(sp2 path_len_out)
+    return method
+}
+
+# Compare a path slice (in buf) against a literal cstring `lit`.
+let http_path_eq_lit = (buf:int off:int len:int lit:int):>int => {
+    let lit_n:int = str_len(lit)
+    if len not=? lit_n { return FALSE_VAL }
+    return str_eq_len(buf + off len lit lit_n)
+}
+
+# Write a complete HTTP response (status line + headers + body) to `fd`. Body
+# may be 0 with body_len=0 for empty responses.
+let http_write_response = (fd:int status:int status_text:int content_type:int body:int body_len:int):>int => {
+    let bb:int = bb_new(256 + body_len)
+    bb_push_str(bb "HTTP/1.1 ")
+    bb_push_int(bb status)
+    bb_push_byte(bb 32)
+    bb_push_str(bb status_text)
+    bb_push_str(bb "\r\n")
+    if content_type not=? 0 {
+        bb_push_str(bb "Content-Type: ")
+        bb_push_str(bb content_type)
+        bb_push_str(bb "\r\n")
+    }
+    bb_push_str(bb "Content-Length: ")
+    bb_push_int(bb body_len)
+    bb_push_str(bb "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n")
+    if body_len >? 0 {
+        bb_push_bytes(bb body body_len)
+    }
+    let out:int = bb_finalize_as_string(bb)
+    return sock_write_all(fd out str_len(out))
+}
+
+let http_send_204 = (fd:int):>void => {
+    let bb:int = bb_new(96)
+    bb_push_str(bb "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n")
+    let out:int = bb_finalize_as_string(bb)
+    sock_write_all(fd out str_len(out))
+    return void
+}
+
+let http_send_404 = (fd:int):>void => {
+    let bb:int = bb_new(96)
+    bb_push_str(bb "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n")
+    let out:int = bb_finalize_as_string(bb)
+    sock_write_all(fd out str_len(out))
+    return void
+}
+
+# Choose a Content-Type for a path based on extension. Returns 0 for unknown.
+let http_content_type_for = (path:int off:int len:int):>int => {
+    if len >=? 5 {
+        let p:int = path + off + len - 5
+        if (__load_u8__(p) =? 46) and (__load_u8__(p + 1) =? 104) and (__load_u8__(p + 2) =? 116) and (__load_u8__(p + 3) =? 109) and (__load_u8__(p + 4) =? 108) {
+            return "text/html; charset=utf-8"
+        }
+    }
+    if len >=? 5 {
+        let p:int = path + off + len - 5
+        if (__load_u8__(p) =? 46) and (__load_u8__(p + 1) =? 119) and (__load_u8__(p + 2) =? 97) and (__load_u8__(p + 3) =? 115) and (__load_u8__(p + 4) =? 109) {
+            return "application/wasm"
+        }
+    }
+    if len >=? 3 {
+        let p:int = path + off + len - 3
+        if (__load_u8__(p) =? 46) and (__load_u8__(p + 1) =? 106) and (__load_u8__(p + 2) =? 115) {
+            return "application/javascript"
+        }
+    }
+    return "application/octet-stream"
+}
+
+# Resolve a request path to a filesystem path under http_cache_dir. The leading
+# '/' is dropped; if the result is empty, the default html_filename is used.
+# Returns a length-prefixed udewy path or 0 if the path looks unsafe.
+let http_resolve_path = (buf:int off:int len:int):>int => {
+    if len =? 0 { return 0 }
+    if __load_u8__(buf + off) not=? 47 { return 0 }
+
+    let name_off:int = off + 1
+    let name_len:int = len - 1
+    if name_len =? 0 {
+        name_len = str_len(http_html_filename)
+        let bb0:int = bb_new(str_len(http_cache_dir) + name_len + 2)
+        bb_push_str(bb0 http_cache_dir)
+        bb_push_byte(bb0 47)
+        bb_push_str(bb0 http_html_filename)
+        return bb_finalize_as_string(bb0)
+    }
+
+    # Reject paths containing '/' or '..' to keep things safe.
+    let i:int = 0
+    loop i <? name_len {
+        let c:int = __load_u8__(buf + name_off + i)
+        if c =? 47 { return 0 }
+        if (c =? 46) and (i + 1 <? name_len) and (__load_u8__(buf + name_off + i + 1) =? 46) { return 0 }
+        i = i + 1
+    }
+
+    let bb:int = bb_new(str_len(http_cache_dir) + name_len + 2)
+    bb_push_str(bb http_cache_dir)
+    bb_push_byte(bb 47)
+    bb_push_bytes(bb buf + name_off name_len)
+    return bb_finalize_as_string(bb)
+}
+
+# Handle one client connection: read a request, route, respond, close.
+let http_handle_client = (client_fd:int):>void => {
+    let buf:int = arena_alloc(HTTP_BUF_SIZE)
+    let n:int = http_read_request(client_fd buf)
+    if n <=? 0 {
+        host_close(client_fd)
+        return void
+    }
+
+    let path_off:int = __static_alloca__(8)
+    let path_len:int = __static_alloca__(8)
+    let method:int = http_parse_request_line(buf n path_off path_len)
+    let off:int = __load__(path_off)
+    let len:int = __load__(path_len)
+
+    if http_path_eq_lit(buf off len "/__udewy_heartbeat__") {
+        http_state_mark_loaded(http_state)
+        http_send_204(client_fd)
+        host_close(client_fd)
+        return void
+    }
+
+    if http_path_eq_lit(buf off len "/__udewy_close__") {
+        http_state_request_shutdown(http_state)
+        http_send_204(client_fd)
+        host_close(client_fd)
+        return void
+    }
+
+    if method not=? HTTP_METHOD_GET {
+        http_send_404(client_fd)
+        host_close(client_fd)
+        return void
+    }
+
+    # Mark page loaded on any other GET (matches Python's _serve_html behavior).
+    http_state_mark_loaded(http_state)
+
+    let fs_path:int = http_resolve_path(buf off len)
+    if fs_path =? 0 {
+        http_send_404(client_fd)
+        host_close(client_fd)
+        return void
+    }
+    let data:int = fs_read_file(path_to_cstr(fs_path))
+    if data =? 0 {
+        http_send_404(client_fd)
+        host_close(client_fd)
+        return void
+    }
+
+    let ct:int = http_content_type_for(buf off len)
+    http_write_response(client_fd 200 "OK" ct data str_len(data))
+    host_close(client_fd)
+    return void
+}
+
+# Initialize and bind. Returns the listening port, or negative on error.
+let http_server_start = (cache_dir:int html_filename:int):>int => {
+    http_cache_dir = cache_dir
+    http_html_filename = html_filename
+    http_state = http_state_new()
+
+    let info:int = __static_alloca__(16)
+    let fd:int = tcp_listen_loopback(0 16 info)
+    if fd <? 0 { return fd }
+    http_listen_fd = __load__(info)
+    http_listen_port = __load__(info + 8)
+    return http_listen_port
+}
+
+# Main loop. Polls the listening fd with 500ms timeout, accepts one connection
+# at a time, then checks the watchdog timers. Returns when the server should
+# stop.
+let http_server_serve = (startup_timeout_ms:int heartbeat_timeout_ms:int):>void => {
+    loop true {
+        let r:int = poll_readable(http_listen_fd 500)
+        if r >? 0 {
+            let addr:int = __static_alloca__(SOCKADDR_IN_SIZE)
+            let addrlen:int = __static_alloca__(8)
+            __store__(SOCKADDR_IN_SIZE addrlen)
+            let client_fd:int = host_accept(http_listen_fd addr addrlen)
+            if client_fd >=? 0 {
+                http_handle_client(client_fd)
+            }
+        }
+
+        if http_state_is_shutdown_requested(http_state) {
+            printl("Stopped WASM server")
+            return void
+        }
+        let now:int = time_monotonic_ms()
+        if http_state_is_page_loaded(http_state) {
+            if now - http_state_last_seen(http_state) >? heartbeat_timeout_ms {
+                printl("Stopped WASM server after browser disconnect")
+                return void
+            }
+        } else {
+            if now - http_state_started(http_state) >? startup_timeout_ms {
+                printl("Stopped WASM server after waiting for the browser")
+                return void
+            }
+        }
+    }
+    return void
+}
+
+let http_server_close = ():>void => {
+    if http_listen_fd >? 0 {
+        host_close(http_listen_fd)
+        http_listen_fd = 0
+    }
+    return void
+}

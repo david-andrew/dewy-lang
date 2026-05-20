@@ -1,0 +1,135 @@
+# Linux socket helpers: TCP sockets via the raw host_socket / host_bind /
+# host_listen / host_accept / host_setsockopt syscall wrappers.
+#
+# All address structures are sockaddr_in (AF_INET), 16 bytes:
+#   +0  family (2 bytes, little-endian: AF_INET=2)
+#   +2  port   (2 bytes, big-endian / network byte order)
+#   +4  addr   (4 bytes, big-endian / network byte order)
+#   +8  pad    (8 zero bytes)
+
+const AF_INET:int = 2
+const SOCK_STREAM:int = 1
+const SOCK_DGRAM:int = 2
+const IPPROTO_TCP:int = 6
+const IPPROTO_UDP:int = 17
+
+const SOL_SOCKET:int = 1
+const SO_REUSEADDR:int = 2
+const SO_RCVTIMEO:int = 20
+
+const SHUT_RD:int = 0
+const SHUT_WR:int = 1
+const SHUT_RDWR:int = 2
+
+const POLLIN:int = 1
+const POLLOUT:int = 4
+
+const SOCKADDR_IN_SIZE:int = 16
+
+const CLOCK_MONOTONIC:int = 1
+const CLOCK_REALTIME:int = 0
+
+# Write a sockaddr_in struct (16 bytes) into `out`. `addr` is the IPv4
+# address packed as a single big-endian 32-bit int (e.g. 127.0.0.1 ->
+# 0x7f000001). `port` is in host byte order (0..65535).
+let sockaddr_in_init = (out:int addr:int port:int):>void => {
+    zero_bytes(out SOCKADDR_IN_SIZE)
+    __store_u8__(AF_INET out + 0)
+    __store_u8__(0 out + 1)
+    # port: big-endian
+    __store_u8__((port >> 8) and 0xff out + 2)
+    __store_u8__(port and 0xff out + 3)
+    # addr: big-endian
+    __store_u8__((addr >> 24) and 0xff out + 4)
+    __store_u8__((addr >> 16) and 0xff out + 5)
+    __store_u8__((addr >> 8) and 0xff out + 6)
+    __store_u8__(addr and 0xff out + 7)
+    return void
+}
+
+# Read the port (host byte order) from a sockaddr_in struct.
+let sockaddr_in_port = (addr_ptr:int):>int => {
+    let hi:int = __load_u8__(addr_ptr + 2)
+    let lo:int = __load_u8__(addr_ptr + 3)
+    return (hi << 8) or lo
+}
+
+# Open a TCP socket bound to 127.0.0.1 with SO_REUSEADDR. Returns the
+# (fd, port) pair encoded as a pointer to an 8-byte struct {fd:i32, port:i32}.
+# On failure, fd is negative.
+let tcp_listen_loopback = (port:int backlog:int out:int):>int => {
+    let fd:int = host_socket(AF_INET SOCK_STREAM IPPROTO_TCP)
+    if fd <? 0 {
+        __store__(fd out)
+        return fd
+    }
+
+    let one:int = __static_alloca__(8)
+    __store__(1 one)
+    host_setsockopt(fd SOL_SOCKET SO_REUSEADDR one 4)
+
+    let addr:int = __static_alloca__(SOCKADDR_IN_SIZE)
+    sockaddr_in_init(addr 0x7f000001 port)
+    let rc:int = host_bind(fd addr SOCKADDR_IN_SIZE)
+    if rc <? 0 {
+        host_close(fd)
+        __store__(rc out)
+        return rc
+    }
+
+    rc = host_listen(fd backlog)
+    if rc <? 0 {
+        host_close(fd)
+        __store__(rc out)
+        return rc
+    }
+
+    let addrlen:int = __static_alloca__(8)
+    __store__(SOCKADDR_IN_SIZE addrlen)
+    host_getsockname(fd addr addrlen)
+    let actual_port:int = sockaddr_in_port(addr)
+
+    __store__(fd out)
+    __store__(actual_port out + 8)
+    return fd
+}
+
+# Poll a single fd for POLLIN with the given timeout in milliseconds.
+# Returns 1 if readable, 0 on timeout, negative on error.
+let poll_readable = (fd:int timeout_ms:int):>int => {
+    let pfd:int = __static_alloca__(8)
+    __store__(0 pfd)
+    __store_u32__(fd pfd)
+    __store_u16__(POLLIN pfd + 4)
+    __store_u16__(0 pfd + 6)
+    let rc:int = host_poll(pfd 1 timeout_ms)
+    return rc
+}
+
+# Read up to `cap` bytes from `fd` into `buf`. Returns bytes read or
+# 0 on EOF or negative on error.
+let sock_read_once = (fd:int buf:int cap:int):>int => {
+    return host_read(fd buf cap)
+}
+
+# Write all `len` bytes from `buf` to `fd`. Returns 0 on success, negative
+# on error (after writing as many as possible).
+let sock_write_all = (fd:int buf:int len:int):>int => {
+    let written:int = 0
+    loop written <? len {
+        let n:int = host_write(fd buf + written len - written)
+        if n <=? 0 { return 0 - 1 }
+        written = written + n
+    }
+    return 0
+}
+
+# Time helpers used by the HTTP server watchdog. Returns monotonic
+# milliseconds since an unspecified epoch.
+let time_monotonic_ms = ():>int => {
+    let tp:int = __static_alloca__(16)
+    host_clock_gettime(CLOCK_MONOTONIC tp)
+    let secs:int = __load__(tp)
+    let nanos:int = __load__(tp + 8)
+    return secs * 1000 + nanos // 1000000
+}

@@ -1,0 +1,31 @@
+$supported_targets = ["x86_64"]
+
+import p"../stdlib/stdlib.udewy"
+import p"../stdlib/ds/ds.udewy"
+import p"../stdlib/net/socket.udewy"
+
+# Smoke test for the socket helpers. Bind to 127.0.0.1:0, get the port,
+# print it, close. Verifies bind/listen/getsockname/close don't error.
+
+let main = ():>int => {
+    arena_init()
+
+    let info:int = __static_alloca__(16)
+    let fd:int = tcp_listen_loopback(0 16 info)
+    if fd <? 0 {
+        eprint("tcp_listen_loopback failed: ")
+        print_int(fd)
+        eprintl("")
+        return 1
+    }
+    let port:int = __load__(info + 8)
+    if (port <? 1) or (port >? 65535) {
+        eprint("port out of range: ")
+        print_int(port)
+        eprintl("")
+        return 1
+    }
+    host_close(fd)
+    printl("socket ok")
+    return 0
+}

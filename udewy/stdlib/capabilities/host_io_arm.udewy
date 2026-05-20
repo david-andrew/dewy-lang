@@ -89,3 +89,17 @@ let host_unlink = (path_cstr:int):>int => {
 let host_chdir = (path_cstr:int):>int => {
     return __syscall1__(SYS_CHDIR path_cstr)
 }
+
+# Stubs for networking / time helpers used by the wasm backend's serve mode.
+# The aarch64 bootstrap does not need to host the local dev server, so these
+# fail rather than wire up the aarch64 socket syscall ABI.
+let host_socket = (domain:int type_:int protocol:int):>int => { return 0 - 1 }
+let host_bind = (sockfd:int addr:int addrlen:int):>int => { return 0 - 1 }
+let host_listen = (sockfd:int backlog:int):>int => { return 0 - 1 }
+let host_accept = (sockfd:int addr:int addrlen_ptr:int):>int => { return 0 - 1 }
+let host_setsockopt = (sockfd:int level:int optname:int optval:int optlen:int):>int => { return 0 - 1 }
+let host_getsockname = (sockfd:int addr:int addrlen_ptr:int):>int => { return 0 - 1 }
+let host_shutdown = (sockfd:int how:int):>int => { return 0 - 1 }
+let host_poll = (fds:int nfds:int timeout_ms:int):>int => { return 0 - 1 }
+let host_clock_gettime = (clk_id:int tp:int):>int => { return 0 - 1 }
+let host_nanosleep = (req:int rem:int):>int => { return 0 - 1 }

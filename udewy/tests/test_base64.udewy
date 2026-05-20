@@ -1,0 +1,34 @@
+$supported_targets = ["x86_64" "c"]
+
+import p"../stdlib/stdlib.udewy"
+import p"../stdlib/ds/ds.udewy"
+import p"../stdlib/encoding/base64.udewy"
+
+let test_encode = (input:int expected:int):>void => {
+    let got:int = b64_encode(input str_len(input))
+    if not str_eq(got expected) {
+        eprint("FAIL: input=\"")
+        eprint(input)
+        eprint("\" got=\"")
+        eprint(got)
+        eprint("\" expected=\"")
+        eprint(expected)
+        eprintl("\"")
+        host_exit(1)
+    }
+    return void
+}
+
+let main = ():>int => {
+    arena_init()
+    test_encode("" "")
+    test_encode("f" "Zg==")
+    test_encode("fo" "Zm8=")
+    test_encode("foo" "Zm9v")
+    test_encode("foob" "Zm9vYg==")
+    test_encode("fooba" "Zm9vYmE=")
+    test_encode("foobar" "Zm9vYmFy")
+    test_encode("Hello, World!" "SGVsbG8sIFdvcmxkIQ==")
+    printl("base64 ok")
+    return 0
+}

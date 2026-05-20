@@ -15,12 +15,59 @@ let proc_init_environ = (argc:int argv:int):>void => {
     return void
 }
 
-# Standard PATH directories to search when prog has no '/'.
+# Directories to search when prog has no '/'. Populated from the parent
+# process's PATH (via envp) on first use, with a small built-in fallback.
 let proc_search_dirs:int = 0
+
+# Parse PATH out of the captured envp table (NULL-terminated array of
+# "KEY=VALUE" cstrings). Returns 0 if PATH is missing.
+let proc_find_path_env = ():>int => {
+    if g_envp =? 0 { return 0 }
+    let i:int = 0
+    loop true {
+        let entry:int = __load__(g_envp + (i << 3))
+        if entry =? 0 { return 0 }
+        if (__load_u8__(entry) =? 80) and
+           (__load_u8__(entry + 1) =? 65) and
+           (__load_u8__(entry + 2) =? 84) and
+           (__load_u8__(entry + 3) =? 72) and
+           (__load_u8__(entry + 4) =? 61) {
+            return entry + 5
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+# Split a colon-separated PATH cstring into individual directory strings.
+let proc_split_path = (path_cstr:int):>void => {
+    let i:int = 0
+    let start:int = 0
+    loop true {
+        let c:int = __load_u8__(path_cstr + i)
+        if (c =? 0) or (c =? 58) {
+            let seg_len:int = i - start
+            if seg_len >? 0 {
+                let bb:int = bb_new(seg_len + 1)
+                bb_push_bytes(bb path_cstr + start seg_len)
+                vec_push(proc_search_dirs bb_finalize_as_string(bb))
+            }
+            if c =? 0 { return void }
+            start = i + 1
+        }
+        i = i + 1
+    }
+    return void
+}
 
 let proc_init_search_dirs = ():>void => {
     if proc_search_dirs not=? 0 { return void }
-    proc_search_dirs = vec_new(4)
+    proc_search_dirs = vec_new(8)
+    let env_path:int = proc_find_path_env()
+    if env_path not=? 0 {
+        proc_split_path(env_path)
+    }
+    # Always keep these on the tail as a fallback.
     vec_push(proc_search_dirs "/usr/local/bin")
     vec_push(proc_search_dirs "/usr/bin")
     vec_push(proc_search_dirs "/bin")
