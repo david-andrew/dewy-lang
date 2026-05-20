@@ -1,6 +1,19 @@
 # Subprocess helpers built on host_fork/host_execve/host_waitpid.
 # `argv` is a Vec of length-prefixed udewy strings.
-# `envp` is currently always passed as the empty environment.
+#
+# Children inherit the parent's environment via g_envp, captured at startup
+# from the Linux process image (envp lives just past the argv NULL terminator).
+
+# Pointer to the parent's envp table (NULL-terminated array of C strings).
+# 0 means "no environment captured / fall back to empty".
+let g_envp:int = 0
+
+# Capture the parent's envp from the (argc, argv) passed to main. Linux lays
+# out the stack as: argv[0..argc-1], NULL, envp[0..N-1], NULL, auxv.
+let proc_init_environ = (argc:int argv:int):>void => {
+    g_envp = argv + (argc + 1) * 8
+    return void
+}
 
 # Standard PATH directories to search when prog has no '/'.
 let proc_search_dirs:int = 0
@@ -58,8 +71,11 @@ let proc_run = (argv:int):>int => {
     let prog:int = vec_get(argv 0)
     let prog_cstr:int = path_to_cstr(prog)
     let argv_table:int = proc_build_cstr_argv(argv)
-    let envp_table:int = arena_alloc(8)
-    __store__(0 envp_table)
+    let envp_table:int = g_envp
+    if envp_table =? 0 {
+        envp_table = arena_alloc(8)
+        __store__(0 envp_table)
+    }
 
     let pid:int = host_fork()
     if pid <? 0 { return pid }

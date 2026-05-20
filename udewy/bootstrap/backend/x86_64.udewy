@@ -1478,17 +1478,76 @@ let x86_compile_and_link = (code:int input_name:int cache_dir:int options:int):>
     vec_push(argv1 obj_path)
     proc_run_or_die(argv1 "assembler failed")
 
-    let argv2:int = vec_new(16)
+    # Partition link artifacts into static (.a/.o) vs shared (.so*).
+    let artifacts:int = be_opt_link_artifacts(options)
+    let static_arts:int = vec_new(4)
+    let shared_arts:int = vec_new(4)
+    if artifacts not=? 0 {
+        let ai:int = 0
+        loop ai <? vec_len(artifacts) {
+            let p:int = vec_get(artifacts ai)
+            if be_artifact_is_shared(p) =? TRUE_VAL { vec_push(shared_arts p) }
+            else { vec_push(static_arts p) }
+            ai = ai + 1
+        }
+    }
+
+    let argv2:int = vec_new(32)
     vec_push(argv2 x86_str("ld"))
-    vec_push(argv2 x86_str("-static"))
-    vec_push(argv2 x86_str("-e"))
-    vec_push(argv2 x86_str("_start"))
-    vec_push(argv2 x86_str("--gc-sections"))
-    vec_push(argv2 obj_path)
+    if vec_len(shared_arts) >? 0 {
+        # Dynamic link: need to point at the platform dynamic linker.
+        let dyn_linker:int = x86_find_dynamic_linker()
+        vec_push(argv2 x86_str("-e"))
+        vec_push(argv2 x86_str("_start"))
+        vec_push(argv2 x86_str("--gc-sections"))
+        vec_push(argv2 x86_str("--dynamic-linker"))
+        vec_push(argv2 dyn_linker)
+        vec_push(argv2 obj_path)
+        if vec_len(static_arts) >? 0 {
+            vec_push(argv2 x86_str("--start-group"))
+            let si:int = 0
+            loop si <? vec_len(static_arts) {
+                vec_push(argv2 vec_get(static_arts si))
+                si = si + 1
+            }
+            vec_push(argv2 x86_str("--end-group"))
+        }
+        let hi:int = 0
+        loop hi <? vec_len(shared_arts) {
+            vec_push(argv2 vec_get(shared_arts hi))
+            hi = hi + 1
+        }
+    } else {
+        vec_push(argv2 x86_str("-static"))
+        vec_push(argv2 x86_str("-e"))
+        vec_push(argv2 x86_str("_start"))
+        vec_push(argv2 x86_str("--gc-sections"))
+        vec_push(argv2 obj_path)
+        if vec_len(static_arts) >? 0 {
+            vec_push(argv2 x86_str("--start-group"))
+            let si:int = 0
+            loop si <? vec_len(static_arts) {
+                vec_push(argv2 vec_get(static_arts si))
+                si = si + 1
+            }
+            vec_push(argv2 x86_str("--end-group"))
+        }
+    }
     vec_push(argv2 x86_str("-o"))
     vec_push(argv2 exe_path)
     proc_run_or_die(argv2 "linker failed")
     return exe_path
+}
+
+# Locate the x86_64 Linux dynamic linker. Matches udewy/backend/x86_64.py.
+let x86_find_dynamic_linker = ():>int => {
+    let c1:int = x86_str("/usr/lib64/ld-linux-x86-64.so.2")
+    if fs_exists(path_to_cstr(c1)) { return c1 }
+    let c2:int = x86_str("/lib64/ld-linux-x86-64.so.2")
+    if fs_exists(path_to_cstr(c2)) { return c2 }
+    eprintl("error: could not find the x86_64 Linux dynamic linker for shared-library linking")
+    host_exit(1)
+    return 0
 }
 
 let x86_run = (output_path:int args:int options:int):>int => {

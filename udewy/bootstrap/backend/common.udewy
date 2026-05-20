@@ -132,6 +132,77 @@ let be_compile_and_link:int = 0       # fn (code:int input_name:int cache_dir:in
 let be_run:int = 0                    # fn (output_path:int args:int options:int):>int
 let be_get_compile_message:int = 0    # fn (output_path:int options:int):>int
 
+# ----------------------------------------------------------------------------
+# CompileOptions struct (analogous to udewy.backend.common.RunOptions + kwargs).
+# Backends accept a pointer to this struct in compile_and_link / run; 0 means
+# "no options, all defaults". Accessors below tolerate a 0 pointer.
+# ----------------------------------------------------------------------------
+#
+# +0   link_artifacts:Vec<str>     (0 if none)
+# +8   split_wasm:int (bool)
+# +16  serve_wasm:int (bool)
+# +24  input_file:str               (0 if none; resolved source path)
+const BO_LINK_ARTIFACTS:int = 0
+const BO_SPLIT_WASM:int = 8
+const BO_SERVE_WASM:int = 16
+const BO_INPUT_FILE:int = 24
+const BO_SIZE:int = 32
+
+let be_options_new = ():>int => {
+    let opts:int = arena_alloc(BO_SIZE)
+    __store__(0 opts + BO_LINK_ARTIFACTS)
+    __store__(FALSE_VAL opts + BO_SPLIT_WASM)
+    __store__(FALSE_VAL opts + BO_SERVE_WASM)
+    __store__(0 opts + BO_INPUT_FILE)
+    return opts
+}
+
+let be_opt_link_artifacts = (opts:int):>int => {
+    if opts =? 0 { return 0 }
+    return __load__(opts + BO_LINK_ARTIFACTS)
+}
+
+let be_opt_split_wasm = (opts:int):>int => {
+    if opts =? 0 { return FALSE_VAL }
+    return __load__(opts + BO_SPLIT_WASM)
+}
+
+let be_opt_serve_wasm = (opts:int):>int => {
+    if opts =? 0 { return FALSE_VAL }
+    return __load__(opts + BO_SERVE_WASM)
+}
+
+let be_opt_input_file = (opts:int):>int => {
+    if opts =? 0 { return 0 }
+    return __load__(opts + BO_INPUT_FILE)
+}
+
+let be_opt_set_link_artifacts = (opts:int v:int):>void => { __store__(v opts + BO_LINK_ARTIFACTS)  return void }
+let be_opt_set_split_wasm     = (opts:int v:int):>void => { __store__(v opts + BO_SPLIT_WASM)     return void }
+let be_opt_set_serve_wasm     = (opts:int v:int):>void => { __store__(v opts + BO_SERVE_WASM)     return void }
+let be_opt_set_input_file     = (opts:int v:int):>void => { __store__(v opts + BO_INPUT_FILE)     return void }
+
+# Convenience: classify a link-artifact path as shared (.so or .so.N) vs static
+# (everything else: .a, .o, .js, .wasm, ...). Returns TRUE_VAL for shared.
+let be_artifact_is_shared = (path:int):>int => {
+    let n:int = str_len(path)
+    let i:int = 0
+    loop i <? n - 2 {
+        # Look for ".so" followed by end-of-string or "." (e.g. .so.0.25.0).
+        if __load_u8__(path + i) =? 46 {
+            if __load_u8__(path + i + 1) =? 115 {
+                if __load_u8__(path + i + 2) =? 111 {
+                    let after:int = i + 3
+                    if after =? n { return TRUE_VAL }
+                    if __load_u8__(path + after) =? 46 { return TRUE_VAL }
+                }
+            }
+        }
+        i = i + 1
+    }
+    return FALSE_VAL
+}
+
 # Default for backends without source-level capability modules.
 let be_default_should_warn_unused_extern = (name:int):>int => {
     return TRUE_VAL

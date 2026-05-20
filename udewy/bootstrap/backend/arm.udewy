@@ -1538,6 +1538,14 @@ let arm_compile_and_link = (code:int input_name:int cache_dir:int options:int):>
     vec_push(av2 arm_str("-e"))
     vec_push(av2 arm_str("_start"))
     vec_push(av2 obj_path)
+    let arts_arm:int = be_opt_link_artifacts(options)
+    if arts_arm not=? 0 {
+        let ai:int = 0
+        loop ai <? vec_len(arts_arm) {
+            vec_push(av2 vec_get(arts_arm ai))
+            ai = ai + 1
+        }
+    }
     vec_push(av2 arm_str("-o"))
     vec_push(av2 exe_path)
     proc_run_or_die(av2 "aarch64 linker failed")

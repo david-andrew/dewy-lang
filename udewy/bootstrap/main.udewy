@@ -104,6 +104,7 @@ let select_backend = (target:int):>void => {
 
 let main = (argc:int argv:int):>int => {
     arena_init()
+    proc_init_environ(argc argv)
     parse_args(argc argv)
 
     let input_cstr:int = path_to_cstr(g_input_path)
@@ -127,10 +128,16 @@ let main = (argc:int argv:int):>int => {
     let toks:int = t1_tokenize(combined)
     let asm:int = parse_run(toks combined)
 
-    # Write the assembly to a file and link it.
+    # Build CompileOptions threaded through compile_and_link and run.
+    let opts:int = be_options_new()
+    be_opt_set_link_artifacts(opts loaded_artifacts(loaded))
+    be_opt_set_split_wasm(opts g_split_wasm)
+    be_opt_set_serve_wasm(opts g_serve_wasm)
+    be_opt_set_input_file(opts g_input_path)
+
     let cache_dir:int = x86_str("__dewycache__")
     let input_stem:int = path_stem(path_basename(g_input_path))
-    let exe_path:int = (be_compile_and_link)(asm input_stem cache_dir 0)
+    let exe_path:int = (be_compile_and_link)(asm input_stem cache_dir opts)
 
     if g_compile_only {
         eprint("Compiled: ")
@@ -138,5 +145,5 @@ let main = (argc:int argv:int):>int => {
         return 0
     }
 
-    return (be_run)(exe_path g_script_args 0)
+    return (be_run)(exe_path g_script_args opts)
 }

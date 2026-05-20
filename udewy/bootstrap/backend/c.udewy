@@ -1710,12 +1710,20 @@ let c_compile_and_link = (code:int input_name:int cache_dir:int options:int):>in
 
     fs_write_file(path_to_cstr(c_path) code str_len(code))
 
-    let argv:int = vec_new(8)
+    let argv:int = vec_new(16)
     vec_push(argv c_str("cc"))
     vec_push(argv c_str("-std=c99"))
     vec_push(argv c_str("-o"))
     vec_push(argv exe_path)
     vec_push(argv c_path)
+    let arts_c:int = be_opt_link_artifacts(options)
+    if arts_c not=? 0 {
+        let ai:int = 0
+        loop ai <? vec_len(arts_c) {
+            vec_push(argv vec_get(arts_c ai))
+            ai = ai + 1
+        }
+    }
     if c_has_capability(CAP_MATH) { vec_push(argv c_str("-lm")) }
     proc_run_or_die(argv "C compiler failed")
     return exe_path
