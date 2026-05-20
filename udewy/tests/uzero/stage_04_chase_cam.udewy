@@ -196,7 +196,7 @@ let physics_step = ():>void => {
     }
 
     let prop_fx:int = sin_fp(proposed_yaw)
-    let prop_fz:int = 0 - cos_fp(proposed_yaw)
+    let prop_fz:int = -cos_fp(proposed_yaw)
 
     let accept:int = 1
     if speed >? HEADING_CAP_SPEED {
@@ -247,12 +247,12 @@ let physics_step = ():>void => {
     }
     if strafe not=? 0 {
         # right (no roll) = (-fz, 0, fx)
-        cx += fp_mul(0 - fz strafe)
+        cx += fp_mul(-fz strafe)
         cz += fp_mul(fx strafe)
     }
 
     # Lateral grip
-    let rx0:int = 0 - fz
+    let rx0:int = -fz
     let rz0:int = fx
     let side_dot:int = fp_mul(cvx rx0) + fp_mul(cvz rz0)
     let side_kill:int = fp_mul(side_dot LATERAL_GRIP)
@@ -309,7 +309,7 @@ let update_chase = ():>void => {
     if dy_q >? half_q {
         dy_q -= turn_q
     }
-    if dy_q <? (0 - half_q) {
+    if dy_q <? (-half_q) {
         dy_q += turn_q
     }
     chase_yaw_q += fp_mul(dy_q YAW_ALPHA)
@@ -319,7 +319,7 @@ let update_chase = ():>void => {
     }
     let chase_yaw:int = __signed_shr__(chase_yaw_q FP_SHIFT)
     let chase_fx:int = sin_fp(chase_yaw)
-    let chase_fz:int = 0 - cos_fp(chase_yaw)
+    let chase_fz:int = -cos_fp(chase_yaw)
 
     # Position lerp.
     let target_x:int = cx - fp_mul(chase_fx CAM_BACK)
@@ -338,26 +338,26 @@ let update_chase = ():>void => {
     if dyaw >? ANG_HALF_TURN {
         dyaw -= ANG_TURN
     }
-    if dyaw <? (0 - ANG_HALF_TURN) {
+    if dyaw <? (-ANG_HALF_TURN) {
         dyaw += ANG_TURN
     }
     let bank_target:int = fp_mul((dyaw * BANK_GAIN) sn_clamp)
     if bank_target >? BANK_MAX {
         bank_target = BANK_MAX
     }
-    if bank_target <? (0 - BANK_MAX) {
-        bank_target = 0 - BANK_MAX
+    if bank_target <? (-BANK_MAX) {
+        bank_target = -BANK_MAX
     }
     bank += fp_mul(bank_target - bank BANK_ALPHA)
 
     # Build visual basis with roll.
     let cos_r:int = cos_fp(bank)
     let sin_r:int = sin_fp(bank)
-    let R0x:int = 0 - fz
+    let R0x:int = -fz
     let R0z:int = fx
     # new_R = R*cos_r - U*sin_r ; new_U = U*cos_r + R*sin_r ; F unchanged
     vrx = fp_mul(R0x cos_r)
-    vry = 0 - sin_r
+    vry = -sin_r
     vrz = fp_mul(R0z cos_r)
     vux = fp_mul(R0x sin_r)
     vuy = cos_r
@@ -374,7 +374,7 @@ let set_perspective = (screen_w:int screen_h:int):>void => {
     let near_q16:int = 2 * FP_ONE
     let top_q16:int = cur_fov_top_q16
     let right_q16:int = fp_mul(top_q16 aspect_q16)
-    GL_Frustum(q16_to_f64(0 - right_q16) q16_to_f64(right_q16) q16_to_f64(0 - top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
+    GL_Frustum(q16_to_f64(-right_q16) q16_to_f64(right_q16) q16_to_f64(-top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
     return 0
@@ -384,16 +384,16 @@ let apply_camera = ():>void => {
     let chase_yaw:int = __signed_shr__(chase_yaw_q FP_SHIFT)
     let yaw_deg:int = (chase_yaw * 360) // ANG_TURN
     let pitch_deg:int = (CAM_PITCH_UNITS * 360) // ANG_TURN
-    GL_Rotatef(__i64_to_f32_bits__(0 - pitch_deg) F32_ONE F32_ZERO F32_ZERO)
+    GL_Rotatef(__i64_to_f32_bits__(-pitch_deg) F32_ONE F32_ZERO F32_ZERO)
     GL_Rotatef(__i64_to_f32_bits__(yaw_deg) F32_ZERO F32_ONE F32_ZERO)
-    GL_Translatef(q16_to_f32(0 - cam_x) q16_to_f32(0 - cam_y) q16_to_f32(0 - cam_z))
+    GL_Translatef(q16_to_f32(-cam_x) q16_to_f32(-cam_y) q16_to_f32(-cam_z))
     return 0
 }
 
 let draw_ground = ():>void => {
-    let i:int = 0 - HALF_TILES
+    let i:int = -HALF_TILES
     loop i <? HALF_TILES {
-        let j:int = 0 - HALF_TILES
+        let j:int = -HALF_TILES
         loop j <? HALF_TILES {
             let x0:int = i * TILE_SIZE
             let x1:int = (i + 1) * TILE_SIZE
@@ -432,10 +432,10 @@ let craft_emit = (lx:int ly:int lz:int):>void => {
 
 let draw_craft = ():>void => {
     let nose_z:int = 229376
-    let tail_z:int = 0 - 131072
+    let tail_z:int = -131072
     let wing_x:int = 163840
     let body_y_top:int = 39321
-    let body_y_bot:int = 0 - 13107
+    let body_y_bot:int = -13107
     let canopy_z:int = 65536
     let canopy_y:int = 78643
 
@@ -458,23 +458,23 @@ let draw_craft = ():>void => {
     glBegin(GL_TRIANGLES)
     GL_Color3f(body_r body_g body_b)
     craft_emit(0 body_y_top nose_z)
-    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(-wing_x body_y_top tail_z)
     craft_emit(wing_x body_y_top tail_z)
     glEnd()
     glBegin(GL_TRIANGLES)
     GL_Color3f(belly_r belly_g belly_b)
     craft_emit(0 body_y_bot nose_z)
     craft_emit(wing_x body_y_bot tail_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
     glEnd()
     glBegin(GL_TRIANGLES)
     GL_Color3f(side_r side_g side_b)
     craft_emit(0 body_y_top nose_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
-    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_top tail_z)
     craft_emit(0 body_y_top nose_z)
     craft_emit(0 body_y_bot nose_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
     glEnd()
     glBegin(GL_TRIANGLES)
     GL_Color3f(side_r side_g side_b)
@@ -488,7 +488,7 @@ let draw_craft = ():>void => {
     glBegin(GL_TRIANGLES)
     GL_Color3f(canopy_r canopy_g canopy_b)
     craft_emit(0 canopy_y canopy_z)
-    craft_emit(0 - 26214 body_y_top 0)
+    craft_emit(-26214 body_y_top 0)
     craft_emit(26214 body_y_top 0)
     glEnd()
     let glow_x:int = 65536
@@ -496,10 +496,10 @@ let draw_craft = ():>void => {
     let glow_y_top:int = 26214
     glBegin(GL_QUADS)
     GL_Color3f(glow_r glow_g glow_b)
-    craft_emit(0 - glow_x glow_y_bot tail_z)
+    craft_emit(-glow_x glow_y_bot tail_z)
     craft_emit(glow_x glow_y_bot tail_z)
     craft_emit(glow_x glow_y_top tail_z)
-    craft_emit(0 - glow_x glow_y_top tail_z)
+    craft_emit(-glow_x glow_y_top tail_z)
     glEnd()
     return 0
 }

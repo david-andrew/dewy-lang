@@ -39,7 +39,7 @@ const ANG_MASK:int = 1023
 
 let abs_i = (v:int):>int => {
     if v <? 0 {
-        return 0 - v
+        return -v
     }
     return v
 }
@@ -103,7 +103,7 @@ let sin_fp = (angle:int):>int => {
     let sign:int = 1
     if a >=? ANG_HALF_TURN {
         a -= ANG_HALF_TURN
-        sign = 0 - 1
+        sign = -1
     }
     let u:int = a * (ANG_HALF_TURN - a)
     let num:int = (16 * u) * FP_ONE

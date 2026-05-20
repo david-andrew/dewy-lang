@@ -666,7 +666,7 @@ let surface_flat = (x:int z:int):>void => {
 
 let surface_ramp = (x:int y:int z:int):>int => {
     if (z <=? Z_RAMP_NEAR) and (z >=? Z_RAMP_FAR) {
-        if (x >=? (0 - RAMP_HALF_W)) and (x <=? RAMP_HALF_W) {
+        if (x >=? (-RAMP_HALF_W)) and (x <=? RAMP_HALF_W) {
             surf_x = x
             surf_y = fp_mul(Z_RAMP_NEAR - z RAMP_TAN)
             surf_z = z
@@ -684,10 +684,10 @@ let surface_loop = (x:int y:int z:int):>int => {
     let rel_z:int = z - LOOP_ZC
     let dist_to_axis:int = fp_sqrt((rel_y * rel_y) + (rel_z * rel_z))
     if (dist_to_axis <? (LOOP_R + LOOP_MARGIN)) and (dist_to_axis >? 0) {
-        let phi:int = atan2_fp(0 - rel_z 0 - rel_y)
+        let phi:int = atan2_fp(-rel_z (-rel_y))
         let x_center:int = (phi * LOOP_W) // ANG_TURN
         let w:int = x - x_center
-        if (w >=? (0 - LOOP_HALF_W)) and (w <=? LOOP_HALF_W) {
+        if (w >=? (-LOOP_HALF_W)) and (w <=? LOOP_HALF_W) {
             let cphi:int = cos_fp(phi)
             let sphi:int = sin_fp(phi)
             surf_x = x
@@ -704,7 +704,7 @@ let surface_loop = (x:int y:int z:int):>int => {
 
 let surface_hills = (x:int z:int):>int => {
     if (z <=? Z_HILL_START) and (z >=? Z_HILL_END) {
-        if (x >=? (0 - HILL_HALF_W)) and (x <=? HILL_HALF_W) {
+        if (x >=? (-HILL_HALF_W)) and (x <=? HILL_HALF_W) {
             let phase:int = ((Z_HILL_START - z) * ANG_TURN) // HILL_WAVELENGTH
             let s:int = sin_fp(phase)
             let c:int = cos_fp(phase)
@@ -729,11 +729,11 @@ let surface_halfpipe = (x:int y:int z:int):>int => {
             let d:int = fp_sqrt((x * x) + (rel_y * rel_y))
             if (d <=? (PIPE_R + PIPE_MARGIN)) and (d >? 1024) {
                 let sth:int = fp_div(x d)
-                let cth:int = fp_div(0 - rel_y d)
+                let cth:int = fp_div(-rel_y d)
                 surf_x = fp_mul(PIPE_R sth)
                 surf_y = PIPE_R - fp_mul(PIPE_R cth)
                 surf_z = z
-                surf_nx = 0 - sth
+                surf_nx = -sth
                 surf_ny = cth
                 surf_nz = 0
                 return 1
@@ -759,11 +759,11 @@ let surface_corkscrew = (x:int y:int z:int):>int => {
         # strip's surface plane before we let the magnet snap to it.
         let w:int = fp_mul(rel_x cth) + fp_mul(rel_y sth)
         let perp:int = fp_mul(rel_y cth) - fp_mul(rel_x sth)
-        if (w >=? (0 - CORK_HALF_W)) and (w <=? CORK_HALF_W) and (perp >=? (0 - CORK_REACH)) and (perp <=? (HOVER_HEIGHT + CORK_REACH)) {
+        if (w >=? (-CORK_HALF_W)) and (w <=? CORK_HALF_W) and (perp >=? (-CORK_REACH)) and (perp <=? (HOVER_HEIGHT + CORK_REACH)) {
             surf_x = CORK_X_CENTER + fp_mul(w cth)
             surf_y = y_centerline + fp_mul(w sth)
             surf_z = z
-            surf_nx = 0 - sth
+            surf_nx = -sth
             surf_ny = cth
             surf_nz = 0
             return 1
@@ -774,7 +774,7 @@ let surface_corkscrew = (x:int y:int z:int):>int => {
 
 let surface_inner_ramp = (x:int z:int):>int => {
     if (z <=? Z_INNER_NEAR) and (z >=? Z_INNER_FAR) {
-        if (x >=? (0 - INNER_RAMP_HALF_W)) and (x <=? INNER_RAMP_HALF_W) {
+        if (x >=? (-INNER_RAMP_HALF_W)) and (x <=? INNER_RAMP_HALF_W) {
             surf_x = x
             surf_y = fp_mul(Z_INNER_NEAR - z INNER_RAMP_TAN)
             surf_z = z
@@ -790,7 +790,7 @@ let surface_inner_ramp = (x:int z:int):>int => {
 let surface_outer_ramp = (x:int z:int):>int => {
     if (z <=? Z_OUTER_NEAR) and (z >=? Z_OUTER_FAR) {
         let dx:int = x - OUTER_RAMP_X_CENTER
-        if (dx >=? (0 - OUTER_RAMP_HALF_W)) and (dx <=? OUTER_RAMP_HALF_W) {
+        if (dx >=? (-OUTER_RAMP_HALF_W)) and (dx <=? OUTER_RAMP_HALF_W) {
             surf_x = x
             surf_y = fp_mul(Z_OUTER_NEAR - z OUTER_RAMP_TAN)
             surf_z = z
@@ -839,9 +839,9 @@ let surface_sphere = (x:int y:int z:int):>int => {
     surf_y = SPHERE_CY + fp_mul(SPHERE_R dy)
     surf_z = SPHERE_CZ + fp_mul(SPHERE_R dz)
     if dist <? SPHERE_R {
-        surf_nx = 0 - dx
-        surf_ny = 0 - dy
-        surf_nz = 0 - dz
+        surf_nx = -dx
+        surf_ny = -dy
+        surf_nz = -dz
     } else {
         surf_nx = dx
         surf_ny = dy
@@ -904,9 +904,9 @@ let wall_collide = ():>void => {
         }
 
         # Left wall slab: inner face at -CORRIDOR_HALF_W, outer at -CORRIDOR_HALF_W - WALL_THICKNESS.
-        let l_in:int = (0 - CORRIDOR_HALF_W) + CRAFT_HALF_W
-        let l_out:int = (0 - CORRIDOR_HALF_W) - WALL_THICKNESS - CRAFT_HALF_W
-        let l_mid:int = (0 - CORRIDOR_HALF_W) - (WALL_THICKNESS // 2)
+        let l_in:int = (-CORRIDOR_HALF_W) + CRAFT_HALF_W
+        let l_out:int = (-CORRIDOR_HALF_W) - WALL_THICKNESS - CRAFT_HALF_W
+        let l_mid:int = (-CORRIDOR_HALF_W) - (WALL_THICKNESS // 2)
         if (cx <? l_in) and (cx >? l_out) {
             if cx >? l_mid {
                 cx = l_in
@@ -1052,7 +1052,7 @@ let reset_craft = ():>void => {
     cvz = 0
     fx = 0
     fy = 0
-    fz = 0 - FP_ONE
+    fz = -FP_ONE
     ux = 0
     uy = FP_ONE
     uz = 0
@@ -1129,9 +1129,9 @@ let physics_step = ():>void => {
                     ux += 6553
                 }
             }
-            ux += fp_mul((0 - ux) UP_ALPHA_AIR)
+            ux += fp_mul((-ux) UP_ALPHA_AIR)
             uy += fp_mul(FP_ONE - uy UP_ALPHA_AIR)
-            uz += fp_mul((0 - uz) UP_ALPHA_AIR)
+            uz += fp_mul((-uz) UP_ALPHA_AIR)
             let um:int = fp_sqrt((ux * ux) + (uy * uy) + (uz * uz))
             if um >? 1024 {
                 ux = fp_div(ux um)
@@ -1264,7 +1264,7 @@ let physics_step = ():>void => {
         if new_fwd_sq >? 0 {
             new_fwd = fp_sqrt(new_fwd_sq)
             if fwd_dot <? 0 {
-                new_fwd = 0 - new_fwd
+                new_fwd = -new_fwd
             }
         }
         let dfwd:int = new_fwd - fwd_dot
@@ -1352,7 +1352,7 @@ let physics_step = ():>void => {
     query_surface(cx cy cz)
     let post_gap:int = normal_gap(cx cy cz)
     if post_gap <=? AIR_GAP {
-        let snap_amt:int = fp_mul(0 - post_gap SNAP_ALPHA)
+        let snap_amt:int = fp_mul(-post_gap SNAP_ALPHA)
         cx += fp_mul(snap_amt surf_nx)
         cy += fp_mul(snap_amt surf_ny)
         cz += fp_mul(snap_amt surf_nz)
@@ -1405,8 +1405,8 @@ let update_chase = ():>void => {
     if bank_target >? BANK_MAX {
         bank_target = BANK_MAX
     }
-    if bank_target <? (0 - BANK_MAX) {
-        bank_target = 0 - BANK_MAX
+    if bank_target <? (-BANK_MAX) {
+        bank_target = -BANK_MAX
     }
     bank += fp_mul(bank_target - bank BANK_ALPHA)
 
@@ -1485,7 +1485,7 @@ let set_perspective = (screen_w:int screen_h:int):>void => {
     let aspect_q16:int = (screen_w << 16) // screen_h
     let top_q16:int = cur_fov_top_q16
     let right_q16:int = fp_mul(top_q16 aspect_q16)
-    GL_Frustum(q16_to_f64(0 - right_q16) q16_to_f64(right_q16) q16_to_f64(0 - top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
+    GL_Frustum(q16_to_f64(-right_q16) q16_to_f64(right_q16) q16_to_f64(-top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
     return 0
@@ -1504,24 +1504,24 @@ let apply_camera = ():>void => {
     let cry:int = fp_mul(cam_fz cam_ux) - fp_mul(cam_fx cam_uz)
     let crz:int = fp_mul(cam_fx cam_uy) - fp_mul(cam_fy cam_ux)
 
-    let neg_dot_r:int = 0 - (fp_mul(crx cam_x) + fp_mul(cry cam_y) + fp_mul(crz cam_z))
-    let neg_dot_u:int = 0 - (fp_mul(cam_ux cam_x) + fp_mul(cam_uy cam_y) + fp_mul(cam_uz cam_z))
+    let neg_dot_r:int = -(fp_mul(crx cam_x) + fp_mul(cry cam_y) + fp_mul(crz cam_z))
+    let neg_dot_u:int = -(fp_mul(cam_ux cam_x) + fp_mul(cam_uy cam_y) + fp_mul(cam_uz cam_z))
     let dot_f:int = fp_mul(cam_fx cam_x) + fp_mul(cam_fy cam_y) + fp_mul(cam_fz cam_z)
 
     let mat:int = __static_alloca__(64)
     __store_u32__(q16_to_f32(crx) mat + 0)
     __store_u32__(q16_to_f32(cam_ux) mat + 4)
-    __store_u32__(q16_to_f32(0 - cam_fx) mat + 8)
+    __store_u32__(q16_to_f32(-cam_fx) mat + 8)
     __store_u32__(0 mat + 12)
 
     __store_u32__(q16_to_f32(cry) mat + 16)
     __store_u32__(q16_to_f32(cam_uy) mat + 20)
-    __store_u32__(q16_to_f32(0 - cam_fy) mat + 24)
+    __store_u32__(q16_to_f32(-cam_fy) mat + 24)
     __store_u32__(0 mat + 28)
 
     __store_u32__(q16_to_f32(crz) mat + 32)
     __store_u32__(q16_to_f32(cam_uz) mat + 36)
-    __store_u32__(q16_to_f32(0 - cam_fz) mat + 40)
+    __store_u32__(q16_to_f32(-cam_fz) mat + 40)
     __store_u32__(0 mat + 44)
 
     __store_u32__(q16_to_f32(neg_dot_r) mat + 48)
@@ -1622,9 +1622,9 @@ let draw_ground = ():>void => {
     let half_q16:int = GROUND_HALF_EXTENT
     let tex_q16:int = half_q16 // GROUND_TEX_UV_DIVISOR
     let pos_xyz:int = q16_to_f32(half_q16)
-    let neg_xyz:int = q16_to_f32(0 - half_q16)
+    let neg_xyz:int = q16_to_f32(-half_q16)
     let pos_uv:int = q16_to_f32(tex_q16)
-    let neg_uv:int = q16_to_f32(0 - tex_q16)
+    let neg_uv:int = q16_to_f32(-tex_q16)
     let y:int = q16_to_f32(GROUND_Y)
     let tex_id:int = __load_u32__(CHECKER_TEXID_GROUND)
 
@@ -1661,28 +1661,28 @@ let draw_ramp = ():>void => {
     glBindTexture(GL_TEXTURE_2D tex_id)
     glBegin(GL_QUADS)
     GL_Color3f(F32_ONE F32_ONE F32_ONE)
-    world_vt3(0 - RAMP_HALF_W 0 Z_RAMP_NEAR 0 0)
+    world_vt3(-RAMP_HALF_W 0 Z_RAMP_NEAR 0 0)
     world_vt3(RAMP_HALF_W 0 Z_RAMP_NEAR u_max 0)
     world_vt3(RAMP_HALF_W RAMP_HEIGHT Z_RAMP_FAR u_max v_max)
-    world_vt3(0 - RAMP_HALF_W RAMP_HEIGHT Z_RAMP_FAR 0 v_max)
+    world_vt3(-RAMP_HALF_W RAMP_HEIGHT Z_RAMP_FAR 0 v_max)
     glEnd()
     glDisable(GL_TEXTURE_2D)
     # Side triangles + back face (untextured solid colour).
     glBegin(GL_TRIANGLES)
     GL_Color3f(r_s g_s b_s)
-    world_v3(0 - RAMP_HALF_W 0 Z_RAMP_NEAR)
-    world_v3(0 - RAMP_HALF_W 0 Z_RAMP_FAR)
-    world_v3(0 - RAMP_HALF_W RAMP_HEIGHT Z_RAMP_FAR)
+    world_v3(-RAMP_HALF_W 0 Z_RAMP_NEAR)
+    world_v3(-RAMP_HALF_W 0 Z_RAMP_FAR)
+    world_v3(-RAMP_HALF_W RAMP_HEIGHT Z_RAMP_FAR)
     world_v3(RAMP_HALF_W 0 Z_RAMP_NEAR)
     world_v3(RAMP_HALF_W RAMP_HEIGHT Z_RAMP_FAR)
     world_v3(RAMP_HALF_W 0 Z_RAMP_FAR)
     glEnd()
     glBegin(GL_QUADS)
     GL_Color3f(r_s g_s b_s)
-    world_v3(0 - RAMP_HALF_W 0 Z_RAMP_FAR)
+    world_v3(-RAMP_HALF_W 0 Z_RAMP_FAR)
     world_v3(RAMP_HALF_W 0 Z_RAMP_FAR)
     world_v3(RAMP_HALF_W RAMP_HEIGHT Z_RAMP_FAR)
-    world_v3(0 - RAMP_HALF_W RAMP_HEIGHT Z_RAMP_FAR)
+    world_v3(-RAMP_HALF_W RAMP_HEIGHT Z_RAMP_FAR)
     glEnd()
     return 0
 }
@@ -1746,10 +1746,10 @@ let draw_hills = ():>void => {
         let phase1:int = ((Z_HILL_START - z1) * ANG_TURN) // HILL_WAVELENGTH
         let y0:int = fp_mul(HILL_AMP_HALF FP_ONE - cos_fp(phase0))
         let y1:int = fp_mul(HILL_AMP_HALF FP_ONE - cos_fp(phase1))
-        world_vt3(0 - HILL_HALF_W y0 z0 0 v0)
+        world_vt3(-HILL_HALF_W y0 z0 0 v0)
         world_vt3(HILL_HALF_W y0 z0 u_max v0)
         world_vt3(HILL_HALF_W y1 z1 u_max v1)
-        world_vt3(0 - HILL_HALF_W y1 z1 0 v1)
+        world_vt3(-HILL_HALF_W y1 z1 0 v1)
         zi += 1
     }
     glEnd()
@@ -1774,8 +1774,8 @@ let draw_halfpipe = ():>void => {
     loop ti <? PIPE_THETA_SEGMENTS {
         let u0:int = (ti * FP_ONE) // 2
         let u1:int = ((ti + 1) * FP_ONE) // 2
-        let theta0:int = (0 - ANG_QTR) + ((ti * theta_span) // PIPE_THETA_SEGMENTS)
-        let theta1:int = (0 - ANG_QTR) + (((ti + 1) * theta_span) // PIPE_THETA_SEGMENTS)
+        let theta0:int = (-ANG_QTR) + ((ti * theta_span) // PIPE_THETA_SEGMENTS)
+        let theta1:int = (-ANG_QTR) + (((ti + 1) * theta_span) // PIPE_THETA_SEGMENTS)
         let cth0:int = cos_fp(theta0)
         let sth0:int = sin_fp(theta0)
         let cth1:int = cos_fp(theta1)
@@ -1829,12 +1829,12 @@ let draw_corkscrew = ():>void => {
         let sth1:int = sin_fp(theta1)
         let yc0:int = (CORK_Y_PEAK - fp_mul(CORK_Y_PEAK cth0)) // 2
         let yc1:int = (CORK_Y_PEAK - fp_mul(CORK_Y_PEAK cth1)) // 2
-        let xL0:int = CORK_X_CENTER + fp_mul(0 - CORK_HALF_W cth0)
-        let yL0:int = yc0 + fp_mul(0 - CORK_HALF_W sth0)
+        let xL0:int = CORK_X_CENTER + fp_mul(-CORK_HALF_W cth0)
+        let yL0:int = yc0 + fp_mul(-CORK_HALF_W sth0)
         let xR0:int = CORK_X_CENTER + fp_mul(CORK_HALF_W cth0)
         let yR0:int = yc0 + fp_mul(CORK_HALF_W sth0)
-        let xL1:int = CORK_X_CENTER + fp_mul(0 - CORK_HALF_W cth1)
-        let yL1:int = yc1 + fp_mul(0 - CORK_HALF_W sth1)
+        let xL1:int = CORK_X_CENTER + fp_mul(-CORK_HALF_W cth1)
+        let yL1:int = yc1 + fp_mul(-CORK_HALF_W sth1)
         let xR1:int = CORK_X_CENTER + fp_mul(CORK_HALF_W cth1)
         let yR1:int = yc1 + fp_mul(CORK_HALF_W sth1)
         world_vt3(xL0 yL0 z0 0 v0)
@@ -1862,17 +1862,17 @@ let draw_inner_ramp = ():>void => {
     glBindTexture(GL_TEXTURE_2D tex_id)
     glBegin(GL_QUADS)
     GL_Color3f(F32_ONE F32_ONE F32_ONE)
-    world_vt3(0 - INNER_RAMP_HALF_W 0 Z_INNER_NEAR 0 0)
+    world_vt3(-INNER_RAMP_HALF_W 0 Z_INNER_NEAR 0 0)
     world_vt3(INNER_RAMP_HALF_W 0 Z_INNER_NEAR u_max 0)
     world_vt3(INNER_RAMP_HALF_W INNER_RAMP_HEIGHT Z_INNER_FAR u_max v_max)
-    world_vt3(0 - INNER_RAMP_HALF_W INNER_RAMP_HEIGHT Z_INNER_FAR 0 v_max)
+    world_vt3(-INNER_RAMP_HALF_W INNER_RAMP_HEIGHT Z_INNER_FAR 0 v_max)
     glEnd()
     glDisable(GL_TEXTURE_2D)
     glBegin(GL_TRIANGLES)
     GL_Color3f(r_s g_s b_s)
-    world_v3(0 - INNER_RAMP_HALF_W 0 Z_INNER_NEAR)
-    world_v3(0 - INNER_RAMP_HALF_W 0 Z_INNER_FAR)
-    world_v3(0 - INNER_RAMP_HALF_W INNER_RAMP_HEIGHT Z_INNER_FAR)
+    world_v3(-INNER_RAMP_HALF_W 0 Z_INNER_NEAR)
+    world_v3(-INNER_RAMP_HALF_W 0 Z_INNER_FAR)
+    world_v3(-INNER_RAMP_HALF_W INNER_RAMP_HEIGHT Z_INNER_FAR)
     world_v3(INNER_RAMP_HALF_W 0 Z_INNER_NEAR)
     world_v3(INNER_RAMP_HALF_W INNER_RAMP_HEIGHT Z_INNER_FAR)
     world_v3(INNER_RAMP_HALF_W 0 Z_INNER_FAR)
@@ -2025,8 +2025,8 @@ let draw_walls = ():>void => {
 
     let xR_in:int = CORRIDOR_HALF_W
     let xR_out:int = CORRIDOR_HALF_W + WALL_THICKNESS
-    let xL_in:int = 0 - CORRIDOR_HALF_W
-    let xL_out:int = (0 - CORRIDOR_HALF_W) - WALL_THICKNESS
+    let xL_in:int = -CORRIDOR_HALF_W
+    let xL_out:int = (-CORRIDOR_HALF_W) - WALL_THICKNESS
 
     # Inner faces: the old per-zi pattern was 1D (alternating along z, full
     # wall height). One full-length textured quad per wall (2 quads total)
@@ -2350,7 +2350,7 @@ let draw_speed_lines = (sw:int sh:int):>void => {
     glMatrixMode(GL_PROJECTION)
     glPushMatrix()
     glLoadIdentity()
-    GL_Ortho(q16_to_f64(0) q16_to_f64(sw * FP_ONE) q16_to_f64(sh * FP_ONE) q16_to_f64(0) q16_to_f64(0 - FP_ONE) q16_to_f64(FP_ONE))
+    GL_Ortho(q16_to_f64(0) q16_to_f64(sw * FP_ONE) q16_to_f64(sh * FP_ONE) q16_to_f64(0) q16_to_f64(-FP_ONE) q16_to_f64(FP_ONE))
     glMatrixMode(GL_MODELVIEW)
     glPushMatrix()
     glLoadIdentity()
@@ -2412,11 +2412,11 @@ let draw_speed_lines = (sw:int sh:int):>void => {
         # screen rectangle: min(cx/|cos|, cy/|sin|).
         let abs_cos:int = cos_a
         if abs_cos <? 0 {
-            abs_cos = 0 - abs_cos
+            abs_cos = -abs_cos
         }
         let abs_sin:int = sin_a
         if abs_sin <? 0 {
-            abs_sin = 0 - abs_sin
+            abs_sin = -abs_sin
         }
         let edge_r:int = max_r_px
         if abs_cos >? 1024 {
@@ -2509,10 +2509,10 @@ let craft_emit = (lx:int ly:int lz:int):>void => {
 let draw_craft = ():>void => {
     update_bob()
     let nose_z:int = 229376
-    let tail_z:int = 0 - 131072
+    let tail_z:int = -131072
     let wing_x:int = 163840
     let body_y_top:int = 39321
-    let body_y_bot:int = 0 - 13107
+    let body_y_bot:int = -13107
     let canopy_z:int = 65536
     let canopy_y:int = 78643
 
@@ -2550,23 +2550,23 @@ let draw_craft = ():>void => {
     glBegin(GL_TRIANGLES)
     GL_Color3f(body_r body_g body_b)
     craft_emit(0 body_y_top nose_z)
-    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(-wing_x body_y_top tail_z)
     craft_emit(wing_x body_y_top tail_z)
     glEnd()
     glBegin(GL_TRIANGLES)
     GL_Color3f(belly_r belly_g belly_b)
     craft_emit(0 body_y_bot nose_z)
     craft_emit(wing_x body_y_bot tail_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
     glEnd()
     glBegin(GL_TRIANGLES)
     GL_Color3f(side_r side_g side_b)
     craft_emit(0 body_y_top nose_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
-    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_top tail_z)
     craft_emit(0 body_y_top nose_z)
     craft_emit(0 body_y_bot nose_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
     glEnd()
     glBegin(GL_TRIANGLES)
     GL_Color3f(side_r side_g side_b)
@@ -2580,7 +2580,7 @@ let draw_craft = ():>void => {
     glBegin(GL_TRIANGLES)
     GL_Color3f(canopy_r canopy_g canopy_b)
     craft_emit(0 canopy_y canopy_z)
-    craft_emit(0 - 26214 body_y_top 0)
+    craft_emit(-26214 body_y_top 0)
     craft_emit(26214 body_y_top 0)
     glEnd()
     # Base nozzle quad, scaled up to ~1.7x while boosting.
@@ -2590,10 +2590,10 @@ let draw_craft = ():>void => {
     let glow_y_top:int = fp_mul(26214 glow_scale)
     glBegin(GL_QUADS)
     GL_Color3f(glow_r glow_g glow_b)
-    craft_emit(0 - glow_x glow_y_bot tail_z)
+    craft_emit(-glow_x glow_y_bot tail_z)
     craft_emit(glow_x glow_y_bot tail_z)
     craft_emit(glow_x glow_y_top tail_z)
-    craft_emit(0 - glow_x glow_y_top tail_z)
+    craft_emit(-glow_x glow_y_top tail_z)
     glEnd()
 
     # Afterburner flare: an additively blended halo that streaks behind
@@ -2608,16 +2608,16 @@ let draw_craft = ():>void => {
         halo_x = (halo_x // FP_ONE) + glow_x
         let halo_y_top:int = fp_mul(glow_y_top 26214)
         halo_y_top = (halo_y_top // FP_ONE) + glow_y_top
-        let halo_y_bot:int = 0 - (halo_y_top // 3)
+        let halo_y_bot:int = -(halo_y_top // 3)
         let halo_z:int = tail_z - fp_mul(boost_q 65536)         # up to 1 m back
         let halo_a:int = q16_to_f32(fp_mul(boost_q 52428))      # peaks ~0.8
 
         glBegin(GL_QUADS)
         GL_Color4f(glow_r glow_g glow_b halo_a)
-        craft_emit(0 - halo_x halo_y_bot halo_z)
+        craft_emit(-halo_x halo_y_bot halo_z)
         craft_emit(halo_x halo_y_bot halo_z)
         craft_emit(halo_x halo_y_top halo_z)
-        craft_emit(0 - halo_x halo_y_top halo_z)
+        craft_emit(-halo_x halo_y_top halo_z)
         glEnd()
 
         glDepthMask(1)
@@ -2822,7 +2822,7 @@ let draw_hud = (sw:int sh:int):>void => {
     glMatrixMode(GL_PROJECTION)
     glPushMatrix()
     glLoadIdentity()
-    GL_Ortho(q16_to_f64(0) q16_to_f64(sw * FP_ONE) q16_to_f64(sh * FP_ONE) q16_to_f64(0) q16_to_f64(0 - FP_ONE) q16_to_f64(FP_ONE))
+    GL_Ortho(q16_to_f64(0) q16_to_f64(sw * FP_ONE) q16_to_f64(sh * FP_ONE) q16_to_f64(0) q16_to_f64(-FP_ONE) q16_to_f64(FP_ONE))
     glMatrixMode(GL_MODELVIEW)
     glPushMatrix()
     glLoadIdentity()

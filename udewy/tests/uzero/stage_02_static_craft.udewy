@@ -121,8 +121,8 @@ let camera_step = ():>void => {
     if cam_pitch >? PITCH_LIMIT {
         cam_pitch = PITCH_LIMIT
     }
-    if cam_pitch <? (0 - PITCH_LIMIT) {
-        cam_pitch = 0 - PITCH_LIMIT
+    if cam_pitch <? (-PITCH_LIMIT) {
+        cam_pitch = -PITCH_LIMIT
     }
     cam_yaw = cam_yaw % ANG_TURN
     if cam_yaw <? 0 {
@@ -141,7 +141,7 @@ let camera_step = ():>void => {
 
     let fwd_x:int = fp_mul(sy cp)
     let fwd_y:int = sp
-    let fwd_z:int = 0 - fp_mul(cy_ cp)
+    let fwd_z:int = -fp_mul(cy_ cp)
 
     let right_x:int = cy_
     let right_z:int = sy
@@ -183,7 +183,7 @@ let set_perspective = (screen_w:int screen_h:int):>void => {
     let near_q16:int = 2 * FP_ONE
     let top_q16:int = near_q16
     let right_q16:int = fp_mul(top_q16 aspect_q16)
-    GL_Frustum(q16_to_f64(0 - right_q16) q16_to_f64(right_q16) q16_to_f64(0 - top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
+    GL_Frustum(q16_to_f64(-right_q16) q16_to_f64(right_q16) q16_to_f64(-top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
     return 0
@@ -192,16 +192,16 @@ let set_perspective = (screen_w:int screen_h:int):>void => {
 let apply_camera = ():>void => {
     let yaw_deg:int = (cam_yaw * 360) // ANG_TURN
     let pitch_deg:int = (cam_pitch * 360) // ANG_TURN
-    GL_Rotatef(__i64_to_f32_bits__(0 - pitch_deg) F32_ONE F32_ZERO F32_ZERO)
+    GL_Rotatef(__i64_to_f32_bits__(-pitch_deg) F32_ONE F32_ZERO F32_ZERO)
     GL_Rotatef(__i64_to_f32_bits__(yaw_deg) F32_ZERO F32_ONE F32_ZERO)
-    GL_Translatef(q16_to_f32(0 - cam_x) q16_to_f32(0 - cam_y) q16_to_f32(0 - cam_z))
+    GL_Translatef(q16_to_f32(-cam_x) q16_to_f32(-cam_y) q16_to_f32(-cam_z))
     return 0
 }
 
 let draw_ground = ():>void => {
-    let i:int = 0 - HALF_TILES
+    let i:int = -HALF_TILES
     loop i <? HALF_TILES {
-        let j:int = 0 - HALF_TILES
+        let j:int = -HALF_TILES
         loop j <? HALF_TILES {
             let x0:int = i * TILE_SIZE
             let x1:int = (i + 1) * TILE_SIZE
@@ -248,10 +248,10 @@ let craft_emit = (lx:int ly:int lz:int):>void => {
 #   canopy z = +1.0 m, y = +1.2 m
 let draw_craft = ():>void => {
     let nose_z:int = 229376
-    let tail_z:int = 0 - 131072
+    let tail_z:int = -131072
     let wing_x:int = 163840
     let body_y_top:int = 39321
-    let body_y_bot:int = 0 - 13107
+    let body_y_bot:int = -13107
     let canopy_z:int = 65536
     let canopy_y:int = 78643
 
@@ -275,7 +275,7 @@ let draw_craft = ():>void => {
     glBegin(GL_TRIANGLES)
     GL_Color3f(body_r body_g body_b)
     craft_emit(0 body_y_top nose_z)
-    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(-wing_x body_y_top tail_z)
     craft_emit(wing_x body_y_top tail_z)
     glEnd()
     # Bottom hull (CCW seen from below)
@@ -283,17 +283,17 @@ let draw_craft = ():>void => {
     GL_Color3f(belly_r belly_g belly_b)
     craft_emit(0 body_y_bot nose_z)
     craft_emit(wing_x body_y_bot tail_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
     glEnd()
     # Left side (two tris filling the gap between top + bottom along the left edge)
     glBegin(GL_TRIANGLES)
     GL_Color3f(side_r side_g side_b)
     craft_emit(0 body_y_top nose_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
-    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_top tail_z)
     craft_emit(0 body_y_top nose_z)
     craft_emit(0 body_y_bot nose_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
     glEnd()
     # Right side
     glBegin(GL_TRIANGLES)
@@ -309,7 +309,7 @@ let draw_craft = ():>void => {
     glBegin(GL_TRIANGLES)
     GL_Color3f(canopy_r canopy_g canopy_b)
     craft_emit(0 canopy_y canopy_z)
-    craft_emit(0 - 26214 body_y_top 0)
+    craft_emit(-26214 body_y_top 0)
     craft_emit(26214 body_y_top 0)
     glEnd()
     # Tail engine glow: a clearly-visible rectangle inset on the back face.
@@ -318,10 +318,10 @@ let draw_craft = ():>void => {
     let glow_y_top:int = 26214       # 0.4 m, just below the canopy line
     glBegin(GL_QUADS)
     GL_Color3f(glow_r glow_g glow_b)
-    craft_emit(0 - glow_x glow_y_bot tail_z)
+    craft_emit(-glow_x glow_y_bot tail_z)
     craft_emit(glow_x glow_y_bot tail_z)
     craft_emit(glow_x glow_y_top tail_z)
-    craft_emit(0 - glow_x glow_y_top tail_z)
+    craft_emit(-glow_x glow_y_top tail_z)
     glEnd()
     return 0
 }

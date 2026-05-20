@@ -72,7 +72,7 @@ let host_chdir = (path_cstr:int):>int => {
 
 let host_getcwd = (buf:int cap:int):>int => {
     if getcwd(buf cap) =? 0 {
-        return 0 - 1
+        return -1
     }
     let n:int = 0
     loop n <? cap {
@@ -89,13 +89,13 @@ let host_setsid = ():>int => {
 # Stubs for networking / time helpers used by the wasm backend's serve mode.
 # The C-target bootstrap currently does not wire serve mode up through libc;
 # these stubs let the rest of the runtime compile.
-let host_socket = (domain:int type_:int protocol:int):>int => { return 0 - 1 }
-let host_bind = (sockfd:int addr:int addrlen:int):>int => { return 0 - 1 }
-let host_listen = (sockfd:int backlog:int):>int => { return 0 - 1 }
-let host_accept = (sockfd:int addr:int addrlen_ptr:int):>int => { return 0 - 1 }
-let host_setsockopt = (sockfd:int level:int optname:int optval:int optlen:int):>int => { return 0 - 1 }
-let host_getsockname = (sockfd:int addr:int addrlen_ptr:int):>int => { return 0 - 1 }
-let host_shutdown = (sockfd:int how:int):>int => { return 0 - 1 }
-let host_poll = (fds:int nfds:int timeout_ms:int):>int => { return 0 - 1 }
-let host_clock_gettime = (clk_id:int tp:int):>int => { return 0 - 1 }
-let host_nanosleep = (req:int rem:int):>int => { return 0 - 1 }
+let host_socket = (domain:int type_:int protocol:int):>int => { return -1 }
+let host_bind = (sockfd:int addr:int addrlen:int):>int => { return -1 }
+let host_listen = (sockfd:int backlog:int):>int => { return -1 }
+let host_accept = (sockfd:int addr:int addrlen_ptr:int):>int => { return -1 }
+let host_setsockopt = (sockfd:int level:int optname:int optval:int optlen:int):>int => { return -1 }
+let host_getsockname = (sockfd:int addr:int addrlen_ptr:int):>int => { return -1 }
+let host_shutdown = (sockfd:int how:int):>int => { return -1 }
+let host_poll = (fds:int nfds:int timeout_ms:int):>int => { return -1 }
+let host_clock_gettime = (clk_id:int tp:int):>int => { return -1 }
+let host_nanosleep = (req:int rem:int):>int => { return -1 }

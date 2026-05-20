@@ -158,7 +158,7 @@ let ps_new = (src:int toks:int):>int => {
     __store__(false s + PS_IN_CONDITION)
     __store__(vec_new(4) s + PS_GLOBAL_INIT_LABELS)
     __store__(0 s + PS_NEXT_GLOBAL_INIT)
-    __store__(0 - 1 s + PS_CURRENT_FN)
+    __store__(-1 s + PS_CURRENT_FN)
     __store__(intmap_new() s + PS_FN_REFERENCES)
     __store__(intset_new() s + PS_TOP_LEVEL_FN_REFS)
     return s
@@ -170,7 +170,7 @@ let ps_new = (src:int toks:int):>int => {
 
 let note_fn_use = (state:int target_label_id:int):>void => {
     let cur:int = ps_current_fn(state)
-    if cur =? 0 - 1 {
+    if cur =? -1 {
         intset_add(ps_top_level_fn_refs(state) target_label_id)
         return void
     }
@@ -234,7 +234,7 @@ let token_name_raw = (state:int idx:int loc_out:int len_out:int):>void => {
 
 let escape_code_to_value = (c:int):>int => {
     if c =? 110 { return 10 }   # n
-    if c =? CH_LF { return 0 - 1 }
+    if c =? CH_LF { return -1 }
     if c =? 116 { return 9 }    # t
     if c =? 114 { return 13 }   # r
     if c =? 48 { return 0 }     # 0
@@ -253,7 +253,7 @@ let decode_string_literal = (src:int start:int length:int):>int => {
         let c:int = __load_u8__(src + content_start + i)
         if (c =? 92) and (i + 1 <? content_len) {
             let val:int = escape_code_to_value(__load_u8__(src + content_start + i + 1))
-            if val not=? 0 - 1 {
+            if val not=? -1 {
                 bb_push_byte(bb val)
             }
             i = i + 2
@@ -456,8 +456,8 @@ let lookup_stable_value = (state:int name:int):>int => {
 
 let lookup_stable_int = (state:int name:int):>int => {
     let sv:int = lookup_stable_value(state name)
-    if sv =? 0 { return 0 - 1 }
-    if sv_kind(sv) not=? SV_INT { return 0 - 1 }
+    if sv =? 0 { return -1 }
+    if sv_kind(sv) not=? SV_INT { return -1 }
     # WARNING: -1 collides with the actual int value -1. Callers handle this
     # by ensuring callsites use sensible non-negative defaults.
     return sv_value(sv)
@@ -485,12 +485,12 @@ let note_function_reference = (state:int name:int num_args:int loc:int):>int => 
     let entry:int = fn_lookup(state name)
     if entry =? 0 {
         let na:int = 0
-        if num_args not=? 0 - 1 { na = num_args }
+        if num_args not=? -1 { na = num_args }
         let label_id:int = (be_declare_function)(name na)
         return fn_declare(state name label_id num_args false false)
     }
-    if num_args not=? 0 - 1 {
-        if fe_num_args(entry) =? 0 - 1 {
+    if num_args not=? -1 {
+        if fe_num_args(entry) =? -1 {
             fe_set_num_args(entry num_args)
         } else if fe_num_args(entry) not=? num_args {
             eprint("Function '")
@@ -520,7 +520,7 @@ let declare_extern_function = (state:int name:int num_args:int loc:int):>int => 
         eprint(name)
         diag_error(loc "' is already declared")
     }
-    if (fe_num_args(entry) not=? 0 - 1) and (fe_num_args(entry) not=? num_args) {
+    if (fe_num_args(entry) not=? -1) and (fe_num_args(entry) not=? num_args) {
         diag_error(loc "extern declaration arity mismatch")
     }
     fe_set_num_args(entry num_args)
@@ -704,7 +704,7 @@ let skip_cast_annotation = (state:int idx:int):>int => {
 
 let validate_call_arity = (state:int arg_count:int loc:int):>void => {
     let max:int = (be_max_call_args)()
-    if (max not=? 0 - 1) and (arg_count >? max) {
+    if (max not=? -1) and (arg_count >? max) {
         diag_error(loc "Calls exceed backend argument limit")
     }
     return void
@@ -712,7 +712,7 @@ let validate_call_arity = (state:int arg_count:int loc:int):>void => {
 
 let validate_intrinsic_arity = (state:int name:int arg_count:int loc:int):>void => {
     let expected:int = (be_intrinsic_arity)(name)
-    if expected =? 0 - 1 {
+    if expected =? -1 {
         eprint("Unsupported intrinsic '")
         eprint(name)
         diag_error(loc "'")
@@ -742,7 +742,7 @@ let validate_intrinsic_arity = (state:int name:int arg_count:int loc:int):>void 
 
 let try_parse_stable_expr = (state:int idx:int emit_runtime:int sv_out:int):>int => {
     let n:int = tok_count(state)
-    if idx >=? n { return 0 - 1 }
+    if idx >=? n { return -1 }
     let k:int = tok_kind(state idx)
 
     if k =? TK_NUMBER {
@@ -753,7 +753,7 @@ let try_parse_stable_expr = (state:int idx:int emit_runtime:int sv_out:int):>int
         return idx + 1
     }
     if (k =? TK_MINUS) and (idx + 1 <? n) and (tok_kind(state idx + 1) =? TK_NUMBER) {
-        let v:int = 0 - tok_value(state idx + 1)
+        let v:int = -tok_value(state idx + 1)
         let sv:int = sv_new(SV_INT v)
         if emit_runtime { push_stable_value(sv) }
         __store__(sv sv_out)
@@ -779,12 +779,12 @@ let try_parse_stable_expr = (state:int idx:int emit_runtime:int sv_out:int):>int
             return idx + 1
         }
         if (var_lookup(state name) not=? 0) or (global_lookup(state name) not=? 0) {
-            return 0 - 1
+            return -1
         }
         if type_decl_lookup(state name) {
             error_type_decl_runtime_use(state name tok_location(state idx))
         }
-        let entry:int = note_function_reference(state name 0 - 1 tok_location(state idx))
+        let entry:int = note_function_reference(state name (-1) tok_location(state idx))
         note_fn_use(state fe_label(entry))
         let sv:int = sv_new(SV_FN fe_label(entry))
         if emit_runtime { push_stable_value(sv) }
@@ -794,9 +794,9 @@ let try_parse_stable_expr = (state:int idx:int emit_runtime:int sv_out:int):>int
     if k =? TK_LEFT_PAREN {
         let inner_out:int = __static_alloca__(8)
         let new_idx:int = try_parse_stable_expr(state idx + 1 emit_runtime inner_out)
-        if new_idx =? 0 - 1 { return 0 - 1 }
+        if new_idx =? -1 { return -1 }
         if (new_idx >=? n) or (tok_kind(state new_idx) not=? TK_RIGHT_PAREN) {
-            return 0 - 1
+            return -1
         }
         __store__(__load__(inner_out) sv_out)
         return new_idx + 1
@@ -815,7 +815,7 @@ let try_parse_stable_expr = (state:int idx:int emit_runtime:int sv_out:int):>int
     if k =? TK_IDENT_CALL {
         let name:int = get_token_name(state idx)
         if not str_eq(name "__static_alloca__") {
-            return 0 - 1
+            return -1
         }
         let size_out:int = __static_alloca__(8)
         let new_idx:int = parse_static_alloca_size(state idx + 1 size_out)
@@ -825,7 +825,7 @@ let try_parse_stable_expr = (state:int idx:int emit_runtime:int sv_out:int):>int
         __store__(sv sv_out)
         return new_idx
     }
-    return 0 - 1
+    return -1
 }
 
 # ----------------------------------------------------------------------------
@@ -846,7 +846,7 @@ let parse_const_only_ident_directive = (state:int name:int loc:int kind_out:int 
     if type_decl_lookup(state name) {
         error_type_decl_runtime_use(state name loc)
     }
-    let entry:int = note_function_reference(state name 0 - 1 loc)
+    let entry:int = note_function_reference(state name (-1) loc)
     note_fn_use(state fe_label(entry))
     __store__(SV_FN kind_out)
     __store__((be_function_ref)(fe_label(entry)) value_out)
@@ -930,7 +930,7 @@ let parse_static_alloca_size = (state:int idx:int size_out:int):>int => {
 let parse_static_intrinsic_int_arg = (state:int name:int idx:int arg_index:int call_loc:int size_out:int):>int => {
     let sv_out:int = __static_alloca__(8)
     let new_idx:int = try_parse_stable_expr(state idx false sv_out)
-    if new_idx =? 0 - 1 {
+    if new_idx =? -1 {
         diag_error(call_loc "Intrinsic argument must be a compile-time integer")
     }
     let sv:int = __load__(sv_out)
@@ -972,7 +972,7 @@ let parse_atom = (state:int idx:int):>int => {
         }
         let ge:int = global_lookup(state name)
         if ge not=? 0 {
-            if ge_label(ge) not=? 0 - 1 {
+            if ge_label(ge) not=? -1 {
                 (be_load_global)(ge_label(ge))
             } else {
                 let cv:int = ge_const_value(ge)
@@ -998,7 +998,7 @@ let parse_atom = (state:int idx:int):>int => {
         if type_decl_lookup(state name) {
             error_type_decl_runtime_use(state name tok_location(state idx))
         }
-        let new_entry:int = note_function_reference(state name 0 - 1 tok_location(state idx))
+        let new_entry:int = note_function_reference(state name (-1) tok_location(state idx))
         note_fn_use(state fe_label(new_entry))
         (be_push_fn_ref)(fe_label(new_entry))
         return idx + 1
@@ -1093,7 +1093,7 @@ let parse_prefix = (state:int idx:int):>int => {
     if k =? TK_MINUS {
         idx = idx + 1
         if tok_kind(state idx) =? TK_NUMBER {
-            (be_push_const_i64)(0 - tok_value(state idx))
+            (be_push_const_i64)(-tok_value(state idx))
             return idx + 1
         }
         idx = parse_prefix(state idx)
@@ -1175,7 +1175,7 @@ let is_literal_type_decl_annotation = (state:int idx:int):>int => {
 
 let ignored_type_decl_name_idx = (state:int idx:int):>int => {
     let n:int = tok_count(state)
-    if idx >=? n { return 0 - 1 }
+    if idx >=? n { return -1 }
     let name_idx:int = idx
     let annot_idx:int = idx + 1
     let assign_idx:int = idx + 2
@@ -1185,15 +1185,15 @@ let ignored_type_decl_name_idx = (state:int idx:int):>int => {
         annot_idx = idx + 2
         assign_idx = idx + 3
     }
-    if assign_idx >=? n { return 0 - 1 }
-    if tok_kind(state name_idx) not=? TK_IDENT { return 0 - 1 }
-    if not is_literal_type_decl_annotation(state annot_idx) { return 0 - 1 }
-    if tok_kind(state assign_idx) not=? TK_ASSIGN { return 0 - 1 }
+    if assign_idx >=? n { return -1 }
+    if tok_kind(state name_idx) not=? TK_IDENT { return -1 }
+    if not is_literal_type_decl_annotation(state annot_idx) { return -1 }
+    if tok_kind(state assign_idx) not=? TK_ASSIGN { return -1 }
     return name_idx
 }
 
 let looks_like_ignored_type_decl = (state:int idx:int):>int => {
-    if ignored_type_decl_name_idx(state idx) =? 0 - 1 { return false }
+    if ignored_type_decl_name_idx(state idx) =? -1 { return false }
     return true
 }
 
@@ -1357,7 +1357,7 @@ let parse_var_decl = (state:int idx:int):>int => {
     if is_const {
         let sv_out:int = __static_alloca__(8)
         let new_idx:int = try_parse_stable_expr(state idx true sv_out)
-        if new_idx not=? 0 - 1 {
+        if new_idx not=? -1 {
             idx = new_idx
             const_value = __load__(sv_out)
         } else {
@@ -1422,7 +1422,7 @@ let parse_fn_decl = (state:int idx:int):>int => {
             eprint(fn_name)
             diag_error(tok_location(state idx - 1) "' is already defined")
         }
-        if (fe_num_args(entry) not=? 0 - 1) and (fe_num_args(entry) not=? pc) {
+        if (fe_num_args(entry) not=? -1) and (fe_num_args(entry) not=? pc) {
             diag_error(tok_location(state idx - 1) "function arity mismatch")
         }
         fe_set_num_args(entry pc)
@@ -1454,7 +1454,7 @@ let parse_fn_decl = (state:int idx:int):>int => {
         diag_error(tok_location(state idx - 1) "' must explicitly return")
     }
     (be_end_function)()
-    ps_set_current_fn(state 0 - 1)
+    ps_set_current_fn(state (-1))
     pop_parse_scope(state)
     return idx
 }
@@ -1715,7 +1715,7 @@ let parse_program = (state:int):>void => {
             }
             let sv_out:int = __static_alloca__(8)
             let new_idx:int = try_parse_stable_expr(state idx false sv_out)
-            if new_idx not=? 0 - 1 {
+            if new_idx not=? -1 {
                 idx = new_idx
                 let sv:int = __load__(sv_out)
                 let dkind:int = stable_value_to_directive_kind(sv)
@@ -1736,7 +1736,7 @@ let parse_program = (state:int):>void => {
                 (be_push_void)()
                 (be_emit_return)()
                 (be_end_function)()
-                ps_set_current_fn(state 0 - 1)
+                ps_set_current_fn(state (-1))
                 global_declare(state name ge_new(label_id is_const 0 false) name_loc)
             }
         } else {
@@ -1755,7 +1755,7 @@ let compute_reachable_functions = (state:int globals_init_label_id:int):>int => 
     let roots:int = intset_new()
     let main_entry:int = fn_lookup(state "main")
     if main_entry not=? 0 { intset_add(roots fe_label(main_entry)) }
-    if globals_init_label_id not=? 0 - 1 { intset_add(roots globals_init_label_id) }
+    if globals_init_label_id not=? -1 { intset_add(roots globals_init_label_id) }
     let inits:int = ps_global_init_labels(state)
     let i:int = 0
     loop i <? vec_len(inits) {
@@ -1826,7 +1826,7 @@ let parse_run = (toks:int src:int):>int => {
     (be_begin_module)()
     parse_program(state)
 
-    let globals_init_label:int = 0 - 1
+    let globals_init_label:int = -1
     if vec_len(ps_global_init_labels(state)) >? 0 {
         (be_set_module_init)("__udewy_globals_init__")
         globals_init_label = (be_declare_function)("__udewy_globals_init__" 0)
@@ -1844,7 +1844,7 @@ let parse_run = (toks:int src:int):>int => {
         (be_push_void)()
         (be_emit_return)()
         (be_end_function)()
-        ps_set_current_fn(state 0 - 1)
+        ps_set_current_fn(state (-1))
     } else {
         (be_set_module_init)(0)
     }

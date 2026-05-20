@@ -6,12 +6,12 @@ let double = (x:int):>int => {
 
 let main = ():>int => {
     let neg:int = -(1 + 2 * 3)
-    if neg not=? (0 - 7) {
+    if neg not=? (-7) {
         return 1
     }
 
     let neg_call:int = -double(5)
-    if neg_call not=? (0 - 10) {
+    if neg_call not=? (-10) {
         return 2
     }
 
@@ -36,7 +36,7 @@ let main = ():>int => {
     }
 
     __store_u8__(0xFF buf)
-    if __load_i8__(buf) not=? (0 - 1) {
+    if __load_i8__(buf) not=? (-1) {
         return 7
     }
 

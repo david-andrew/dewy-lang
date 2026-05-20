@@ -576,7 +576,7 @@ let t0_process_prelude_item = (pc:int idx:int):>int => {
         return __load__(next_out2)
     }
 
-    return 0 - 1
+    return -1
 }
 
 # Process the body of an active `if $target ...` block, returning the offset
@@ -593,7 +593,7 @@ let t0_process_prelude_block = (pc:int idx:int):>int => {
             return idx + 1
         }
         let next_idx:int = t0_process_prelude_item(pc idx)
-        if next_idx =? 0 - 1 {
+        if next_idx =? -1 {
             diag_error(idx "Expected preprocessor directive or '\}' in preprocessor if block")
         }
         idx = next_idx
@@ -628,7 +628,7 @@ let t0_load_program_full = (source_path:int target:int state:int):>int => {
         idx = t0_skip_trivia(source n idx)
         if idx >=? n { break }
         let next_idx:int = t0_process_prelude_item(pc idx)
-        if next_idx =? 0 - 1 { break }
+        if next_idx =? -1 { break }
         # capture body bytes between body_cursor and idx
         let span_len:int = idx - body_cursor
         if span_len >? 0 {

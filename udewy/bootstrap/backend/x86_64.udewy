@@ -171,8 +171,8 @@ let x86_max_2 = (a:int b:int):>int => {
 }
 
 let x86_frame_bytes = ():>int => {
-    let required:int = x86_max_2(X86_FIXED_FRAME_BYTES 0 - x86_min_slot_offset)
-    return (required + 15) and (0 - 16)
+    let required:int = x86_max_2(X86_FIXED_FRAME_BYTES (-x86_min_slot_offset))
+    return (required + 15) and (-16)
 }
 
 # Push a 1-arg instruction: "    <op> <reg>"
@@ -305,7 +305,7 @@ let x86_prepare_call_args = (num_args:int fn_reg:int):>int => {
     let reg_count:int = num_args
     if reg_count >? 6 { reg_count = 6 }
     let stack_count:int = num_args - reg_count
-    let stack_bytes:int = ((stack_count * 8) + 15) and (0 - 16)
+    let stack_bytes:int = ((stack_count * 8) + 15) and (-16)
     let consumed:int = num_args
     if fn_reg not=? 0 { consumed = consumed + 1 }
 
@@ -733,7 +733,7 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
     x86_emit_indented("movq %r15, -40(%rbp)")
 
     vec_set_len(x86_param_slots 0)
-    x86_stack_offset = 0 - 48
+    x86_stack_offset = -48
 
     let i:int = 0
     loop i <? param_count {
@@ -1072,7 +1072,7 @@ let x86_call_indirect = (num_args:int):>void => {
 }
 
 let x86_max_call_args = ():>int => {
-    return 0 - 1
+    return -1
 }
 
 let x86_syscall = (num_args:int):>void => {
@@ -1124,22 +1124,22 @@ let x86_syscall = (num_args:int):>void => {
 # Mixed extern intrinsic helpers.
 # Name "__call_extern_mixed_N__" -> N (1..8), or -1 if not a match.
 let x86_mixed_extern_arg_slots = (name:int):>int => {
-    if not str_prefix(name "__call_extern_mixed_") { return 0 - 1 }
+    if not str_prefix(name "__call_extern_mixed_") { return -1 }
     let n:int = str_len(name)
-    if n <? 23 { return 0 - 1 }
-    if __load_u8__(name + n - 2) not=? 95 { return 0 - 1 }  # underscore
-    if __load_u8__(name + n - 1) not=? 95 { return 0 - 1 }
+    if n <? 23 { return -1 }
+    if __load_u8__(name + n - 2) not=? 95 { return -1 }  # underscore
+    if __load_u8__(name + n - 1) not=? 95 { return -1 }
     let mid_len:int = n - 22       # length of digit section
-    if mid_len <? 1 { return 0 - 1 }
+    if mid_len <? 1 { return -1 }
     let v:int = 0
     let i:int = 0
     loop i <? mid_len {
         let c:int = __load_u8__(name + 20 + i)
-        if (c <? 48) or (c >? 57) { return 0 - 1 }
+        if (c <? 48) or (c >? 57) { return -1 }
         v = v * 10 + (c - 48)
         i = i + 1
     }
-    if (v <? 1) or (v >? 8) { return 0 - 1 }
+    if (v <? 1) or (v >? 8) { return -1 }
     return v
 }
 
@@ -1164,10 +1164,10 @@ let x86_call_extern_xmm_mixed = (tags:int):>void => {
         let k:int = vec_get(tags i)
         if k =? 0 {
             vec_push(gp_slots gp_count)
-            vec_push(xmm_slots 0 - 1)
+            vec_push(xmm_slots (-1))
             gp_count = gp_count + 1
         } else {
-            vec_push(gp_slots 0 - 1)
+            vec_push(gp_slots (-1))
             vec_push(xmm_slots xmm_count)
             xmm_count = xmm_count + 1
         }
@@ -1365,7 +1365,7 @@ let x86_intrinsic_arity = (name:int):>int => {
     if map_has_str(g_x86_intrinsics name) {
         return map_get_str(g_x86_intrinsics name)
     }
-    return 0 - 1
+    return -1
 }
 
 # Returns a bitmask of arg indices that must be compile-time int constants.

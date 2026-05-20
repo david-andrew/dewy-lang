@@ -114,7 +114,7 @@ let proc_build_cstr_argv = (argv:int):>int => {
 # Run a subprocess and wait for it. Returns the exit status (positive integer)
 # or a negative error code on fork/exec failure. argv[0] is also the program.
 let proc_run = (argv:int):>int => {
-    if vec_len(argv) =? 0 { return 0 - 1 }
+    if vec_len(argv) =? 0 { return -1 }
     let prog:int = vec_get(argv 0)
     let prog_cstr:int = path_to_cstr(prog)
     let argv_table:int = proc_build_cstr_argv(argv)

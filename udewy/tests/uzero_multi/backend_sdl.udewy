@@ -277,7 +277,7 @@ let gpu_overlay_begin = (sw_px:int sh_px:int):>void => {
     glMatrixMode(GL_PROJECTION)
     glPushMatrix()
     glLoadIdentity()
-    GL_Ortho(q16_to_f64(0) q16_to_f64(sw_px * FP_ONE) q16_to_f64(sh_px * FP_ONE) q16_to_f64(0) q16_to_f64(0 - FP_ONE) q16_to_f64(FP_ONE))
+    GL_Ortho(q16_to_f64(0) q16_to_f64(sw_px * FP_ONE) q16_to_f64(sh_px * FP_ONE) q16_to_f64(0) q16_to_f64(-FP_ONE) q16_to_f64(FP_ONE))
     glMatrixMode(GL_MODELVIEW)
     glPushMatrix()
     glLoadIdentity()

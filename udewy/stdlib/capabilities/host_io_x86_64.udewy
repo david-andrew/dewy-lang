@@ -71,7 +71,7 @@ let host_exit = (code:int):>void => {
 }
 
 let host_mmap_rw = (size:int):>int => {
-    return __syscall6__(SYS_MMAP 0 size (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) (0 - 1) 0)
+    return __syscall6__(SYS_MMAP 0 size (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) (-1) 0)
 }
 
 let host_fork = ():>int => {

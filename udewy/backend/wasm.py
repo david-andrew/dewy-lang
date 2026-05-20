@@ -240,10 +240,15 @@ class Wasm32Backend(Backend):
             params = " ".join("(param i64)" for _ in range(arity))
             output.append(f"  (type {self._fn_type_name(arity)} (func {params} (result i64)))")
 
-        # Memory import (for JS interop).
-        # 32 pages = 2MB; large enough for a streaming vertex scratch buffer
-        # plus a few hundred KB of game-side static_alloca.
-        output.append('  (import "env" "memory" (memory 32))')
+        # Memory import (for JS interop). Size is whatever is needed to fit the
+        # statics block (which includes any __static_alloca__ reservations) plus
+        # the trailing string/data pool, rounded up to 64K pages, with a small
+        # extra cushion for the heap/stack and runtime scratch.
+        page_size = 65536
+        required = self._data_offset + 2 * page_size
+        pages = max(32, (required + page_size - 1) // page_size)
+        self._memory_pages = pages
+        output.append(f'  (import "env" "memory" (memory {pages}))')
 
         # Host function imports - must come before any definitions.
         for imp in self._imports:
@@ -1618,8 +1623,11 @@ class Wasm32Backend(Backend):
     
     def _get_host_functions_js(self) -> str:
         """Return JavaScript code implementing WASM host functions."""
-        return '''
-const memory = new WebAssembly.Memory({ initial: 32 });
+        pages = getattr(self, "_memory_pages", 32)
+        return self._HOST_FUNCTIONS_JS_TEMPLATE.replace("__MEMORY_PAGES__", str(pages))
+
+    _HOST_FUNCTIONS_JS_TEMPLATE = '''
+const memory = new WebAssembly.Memory({ initial: __MEMORY_PAGES__ });
 let outputElement = null;
 let domNextHandle = 1;
 let domRootHandle = 0;

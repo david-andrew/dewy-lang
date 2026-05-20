@@ -205,7 +205,7 @@ let g_arena:int = 0
 let g_arena_ptr:int = 0
 
 let arena_init = ():>void => {
-    g_arena = __syscall6__(SYS_MMAP 0 ARENA_SIZE (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) 0 - 1 0)
+    g_arena = __syscall6__(SYS_MMAP 0 ARENA_SIZE (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) (-1) 0)
     g_arena_ptr = g_arena
     return void
 }
@@ -236,7 +236,7 @@ let out_char = (c:int):>void => {
 }
 
 let out_str = (s:int):>void => {
-    let len:int = __load__(s + 0 - 8)
+    let len:int = __load__(s + -8)
     let i:int = 0
     loop i <? len {
         let c:int = __load_u8__(s + i)
@@ -249,7 +249,7 @@ let out_str = (s:int):>void => {
 let out_int = (n:int):>void => {
     if n <? 0 {
         out_char(45)
-        n = 0 - n
+        n = -n
     }
     if n =? 0 {
         out_char(48)
@@ -337,12 +337,12 @@ let str_eq_len = (s1:int len1:int s2:int len2:int):>int => {
 }
 
 let str_match = (s:int start:int len:int target:int):>int => {
-    let tlen:int = __load__(target + 0 - 8)
+    let tlen:int = __load__(target + -8)
     return str_eq_len(s + start len target tlen)
 }
 
 let str_prefix = (s:int pos:int target:int):>int => {
-    let tlen:int = __load__(target + 0 - 8)
+    let tlen:int = __load__(target + -8)
     let i:int = 0
     loop i <? tlen {
         if __load_u8__(s + pos + i) not=? __load_u8__(target + i) {
@@ -355,7 +355,7 @@ let str_prefix = (s:int pos:int target:int):>int => {
 
 let escape_char = (c:int):>int => {
     if c =? CH_n { return CH_LF }
-    if c =? CH_LF { return 0 - 1 }
+    if c =? CH_LF { return -1 }
     if c =? CH_t { return CH_TAB }
     if c =? CH_r { return CH_CR }
     if c =? CH_0 { return CH_NUL }
@@ -709,7 +709,7 @@ let fn_lookup = (name_start:int name_len:int):>int => {
         }
         i = i + 1
     }
-    return 0 - 1
+    return -1
 }
 
 let fn_add = (name_start:int name_len:int label_id:int num_args:int is_def:int):>int => {
@@ -760,7 +760,7 @@ let glob_lookup = (name_start:int name_len:int):>int => {
         }
         i = i + 1
     }
-    return 0 - 1
+    return -1
 }
 
 let glob_add = (name_start:int name_len:int label_id:int):>int => {
@@ -798,7 +798,7 @@ let const_lookup = (name_start:int name_len:int):>int => {
         }
         i = i + 1
     }
-    return 0 - 1
+    return -1
 }
 
 let const_add = (name_start:int name_len:int value:int):>int => {
@@ -914,7 +914,7 @@ let is_binop = (kind:int):>int => {
 }
 
 let name_eq_intrinsic = (start:int len:int target:int):>int => {
-    let tlen:int = __load__(target + 0 - 8)
+    let tlen:int = __load__(target + -8)
     return str_eq_len(src_ptr + start len target tlen)
 }
 
@@ -957,7 +957,7 @@ let data_char = (c:int):>void => {
 }
 
 let data_str = (s:int):>void => {
-    let len:int = __load__(s + 0 - 8)
+    let len:int = __load__(s + -8)
     let i:int = 0
     loop i <? len {
         data_char(__load_u8__(s + i))
@@ -969,7 +969,7 @@ let data_str = (s:int):>void => {
 let data_int = (n:int):>void => {
     if n <? 0 {
         data_char(45)
-        n = 0 - n
+        n = -n
     }
     if n =? 0 {
         data_char(48)
@@ -1139,7 +1139,7 @@ let parse_atom = ():>void => {
             if c =? CH_BACKSLASH {
                 si = si + 1
                 c = escape_char(__load_u8__(src_ptr + si))
-                if c =? (0 - 1) {
+                if c =? (-1) {
                     si = si + 1
                     continue
                 }
@@ -1327,7 +1327,7 @@ let parse_atom = ():>void => {
                     if c =? CH_BACKSLASH {
                         si = si + 1
                         c = escape_char(__load_u8__(src_ptr + si))
-                        if c =? (0 - 1) {
+                        if c =? (-1) {
                             si = si + 1
                             continue
                         }
@@ -1407,7 +1407,7 @@ let parse_prefix = ():>void => {
         if tok_kind(cur_tok) =? TK_NUMBER {
             let val:int = tok_value(cur_tok)
             out_str("    movq $")
-            out_int(0 - val)
+            out_int(-val)
             out_str(", %rax\n")
             cur_tok = cur_tok + 1
         } else {
@@ -1602,7 +1602,7 @@ let parse_var_decl = ():>void => {
     stack_offset = stack_offset - 8
     
     # Check for stack overflow (1024 bytes allocated)
-    if off <? (0 - 1024) {
+    if off <? (-1024) {
         out_str("Error: too many local variables (stack overflow)\n")
         out_flush()
         __syscall1__(SYS_EXIT 1)
@@ -1671,7 +1671,7 @@ let parse_fn_decl = ():>void => {
     scope_push()
     
     let saved_offset:int = stack_offset
-    stack_offset = 0 - 48
+    stack_offset = -48
     
     let saved_loop_start:int = loop_start_label
     let saved_loop_end:int = loop_end_label
@@ -1716,7 +1716,7 @@ let parse_fn_decl = ():>void => {
         stack_offset = stack_offset - 8
         
         # Check for stack overflow
-        if stack_offset <? (0 - 1024) {
+        if stack_offset <? (-1024) {
             out_str("Error: too many parameters (stack overflow)\n")
             out_flush()
             __syscall1__(SYS_EXIT 1)
@@ -2097,7 +2097,7 @@ let parse_global_var = ():>void => {
             if c =? CH_BACKSLASH {
                 si = si + 1
                 c = escape_char(__load_u8__(src_ptr + si))
-                if c =? (0 - 1) {
+                if c =? (-1) {
                     si = si + 1
                     continue
                 }
@@ -2200,7 +2200,7 @@ let parse_global_var = ():>void => {
                     if c =? CH_BACKSLASH {
                         si = si + 1
                         c = escape_char(__load_u8__(src_ptr + si))
-                        if c =? (0 - 1) {
+                        if c =? (-1) {
                             si = si + 1
                             continue
                         }
@@ -2349,7 +2349,7 @@ let get_dir_from_path = (path:int):>int => {
         plen = plen + 1
     }
     
-    let last_slash:int = 0 - 1
+    let last_slash:int = -1
     let i:int = 0
     loop i <? plen {
         if __load_u8__(path + i) =? CH_SLASH {
@@ -2580,7 +2580,7 @@ let write_file = (path:int content:int len:int):>int => {
 }
 
 let str_copy = (dst:int s:int):>int => {
-    let slen:int = __load__(s + 0 - 8)
+    let slen:int = __load__(s + -8)
     let i:int = 0
     loop i <? slen {
         __store_u8__(__load_u8__(s + i) dst + i)
@@ -2614,7 +2614,7 @@ let get_basename = (path:int):>int => {
         plen = plen + 1
     }
     
-    let last_slash:int = 0 - 1
+    let last_slash:int = -1
     let i:int = 0
     loop i <? plen {
         if __load_u8__(path + i) =? CH_SLASH {
@@ -2707,7 +2707,7 @@ let main = (argc:int argv:int):>int => {
     
     cur_tok = 0
     next_label = 0
-    stack_offset = 0 - 8
+    stack_offset = -8
     loop_start_label = 0
     loop_end_label = 0
     fn_epilogue_label = 0

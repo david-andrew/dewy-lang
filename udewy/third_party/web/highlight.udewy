@@ -1,0 +1,524 @@
+# Runtime syntax highlighter for udewy source code.
+#
+# Tokenizes a source string with the bootstrap tokenizer (t0/t1) and emits
+# the result as colored DOM spans, mirroring the offline generator in
+# udewy/third_party/web/generate_highlighted_udewy.py.
+#
+# Note: t0/t1 call diag_error(loc msg) -> host_exit(1) on syntax errors, so
+# the embedded source is expected to be valid. Graceful in-browser editor
+# error handling is a separate future task.
+
+$supported_targets = ["wasm32"]
+
+import p"./dom.udewy"
+import p"../../bootstrap/t1.udewy"
+
+# ----------------------------------------------------------------------------
+# Default theme. Matches DEFAULT_THEME in generate_highlighted_udewy.py.
+# ----------------------------------------------------------------------------
+
+const HL_DECLARATION:int = "#569cd6"
+const HL_KEYWORD:int = "#c586c0"
+const HL_FUNCTION:int = "#dcdcaa"
+const HL_TYPE:int = "#4ec9b0"
+const HL_STRING:int = "#ce9178"
+const HL_NUMBER:int = "#b5cea8"
+const HL_COMMENT:int = "#6a9955"
+const HL_META:int = "#569cd6"
+const HL_PUNCTUATION:int = "#c586c0"
+const HL_BRACE:int = "#ffd700"
+const HL_IDENT:int = "#9cdcfe"
+const HL_OPERATOR:int = "#d4d4d4"
+
+const HL_NO_MATCH:int = -1
+
+# ----------------------------------------------------------------------------
+# DOM emitter primitives
+# ----------------------------------------------------------------------------
+
+# Materialize src[start..start+len] as a fresh length-prefixed udewy string.
+let hl_make_str = (src:int start:int len:int):>int => {
+    let bb:int = bb_new(len + 1)
+    bb_push_bytes(bb src + start len)
+    return bb_finalize_as_string(bb)
+}
+
+# Append unstyled text from src[start..end_idx] under `parent`.
+let hl_emit_plain = (parent:int src:int start:int end_idx:int):>void => {
+    if start >=? end_idx { return void }
+    Web_AppendText(parent hl_make_str(src start end_idx - start))
+    return void
+}
+
+# Append a <span style="color:..."> from src[start..end_idx].
+let hl_emit_color = (parent:int src:int start:int end_idx:int color:int):>void => {
+    if start >=? end_idx { return void }
+    let text:int = hl_make_str(src start end_idx - start)
+    let node:int = Web_AppendTextElement(parent "span" text)
+    Web_SetStyle(node "color" color)
+    return void
+}
+
+# Emit a comment-aware plain run: anywhere we see '#', the comment up to LF
+# is colored, the rest is plain. Mirrors _highlight_plain in the Python.
+let hl_emit_plain_run = (parent:int src:int n:int start:int end_idx:int):>void => {
+    let cursor:int = start
+    loop cursor <? end_idx {
+        let i:int = cursor
+        loop (i <? end_idx) and (__load_u8__(src + i) not=? T0_CH_HASH) {
+            i = i + 1
+        }
+        if i >=? end_idx {
+            hl_emit_plain(parent src cursor end_idx)
+            return void
+        }
+        if cursor <? i { hl_emit_plain(parent src cursor i) }
+        let ce:int = t0_skip_comment(src n i)
+        if ce >? end_idx { ce = end_idx }
+        hl_emit_color(parent src i ce HL_COMMENT)
+        cursor = ce
+    }
+    return void
+}
+
+# Skip trivia (whitespace + comments) emitting comment-colored spans, return
+# the new cursor.
+let hl_emit_trivia = (parent:int src:int n:int start:int):>int => {
+    let end_idx:int = t0_skip_trivia(src n start)
+    hl_emit_plain_run(parent src n start end_idx)
+    return end_idx
+}
+
+# Emit a '"..."' string literal starting at `start` (must point at the opening
+# quote). Returns the cursor one past the closing quote.
+let hl_emit_string_at = (parent:int src:int n:int start:int):>int => {
+    let end_idx:int = t0_string_end(src n start)
+    hl_emit_color(parent src start end_idx HL_STRING)
+    return end_idx
+}
+
+# Emit a metatag `$name` as '$' (operator) + 'name' (meta). `name_len` is the
+# full length including the leading '$'.
+let hl_emit_metatag = (parent:int src:int loc:int name_len:int):>void => {
+    hl_emit_color(parent src loc loc + 1 HL_OPERATOR)
+    hl_emit_color(parent src loc + 1 loc + name_len HL_META)
+    return void
+}
+
+# Emit horizontal-ws + optional comment + final newline after a directive,
+# returning the cursor that ended the line. Mirrors _highlight_suffix.
+let hl_emit_suffix = (parent:int src:int n:int start:int):>int => {
+    let idx:int = t0_skip_horizontal_ws(src n start)
+    if start <? idx { hl_emit_plain(parent src start idx) }
+    if (idx <? n) and (__load_u8__(src + idx) =? T0_CH_HASH) {
+        let ce:int = t0_skip_comment(src n idx)
+        hl_emit_color(parent src idx ce HL_COMMENT)
+        idx = ce
+    }
+    if (idx <? n) and t0_is_vertical_ws(__load_u8__(src + idx)) {
+        let line_end:int = idx + 1
+        if (__load_u8__(src + idx) =? T0_CH_CR) and (line_end <? n) and (__load_u8__(src + line_end) =? T0_CH_LF) {
+            line_end = line_end + 1
+        }
+        hl_emit_plain(parent src idx line_end)
+        idx = line_end
+    }
+    return idx
+}
+
+# ----------------------------------------------------------------------------
+# Prelude directive scanners. Each takes (parent, src, n, idx) and returns the
+# new cursor on a successful match, or HL_NO_MATCH otherwise. We pre-validate
+# enough to commit before emitting, so a no-match never leaves orphaned spans.
+# ----------------------------------------------------------------------------
+
+# `import p"..."`
+let hl_import_directive = (parent:int src:int n:int idx:int):>int => {
+    if not t0_starts_with_name(src n idx "import") { return HL_NO_MATCH }
+    hl_emit_color(parent src idx idx + 6 HL_KEYWORD)
+    let i:int = idx + 6
+    let after_ws:int = t0_skip_horizontal_ws(src n i)
+    if i <? after_ws { hl_emit_plain(parent src i after_ws) }
+    i = after_ws
+    if (i + 1 <? n) and (__load_u8__(src + i) =? T0_CH_p) and (__load_u8__(src + i + 1) =? T0_CH_DQUOTE) {
+        hl_emit_color(parent src i i + 1 HL_FUNCTION)
+        i = hl_emit_string_at(parent src n i + 1)
+    }
+    return hl_emit_suffix(parent src n i)
+}
+
+# `$supported_targets = ["x" "y" ...]`
+let hl_supported_targets_directive = (parent:int src:int n:int idx:int):>int => {
+    if not t0_starts_with_name(src n idx "$supported_targets") { return HL_NO_MATCH }
+    let name_len:int = 18
+    hl_emit_metatag(parent src idx name_len)
+    let i:int = idx + name_len
+    loop i <? n {
+        let next_idx:int = t0_skip_horizontal_ws(src n i)
+        if i <? next_idx { hl_emit_plain(parent src i next_idx) }
+        i = next_idx
+        if i >=? n { break }
+        let c:int = __load_u8__(src + i)
+        if c =? T0_CH_EQ {
+            hl_emit_color(parent src i i + 1 HL_OPERATOR)
+            i = i + 1
+            continue
+        }
+        if (c =? T0_CH_LBRACKET) or (c =? T0_CH_RBRACKET) {
+            hl_emit_color(parent src i i + 1 HL_BRACE)
+            i = i + 1
+            if c =? T0_CH_RBRACKET { break }
+            continue
+        }
+        if c =? T0_CH_DQUOTE {
+            i = hl_emit_string_at(parent src n i)
+            continue
+        }
+        break
+    }
+    return hl_emit_suffix(parent src n i)
+}
+
+# `$warning("msg")` / `$error("msg")`
+let hl_diagnostic_directive = (parent:int src:int n:int idx:int):>int => {
+    let name_len:int = 0
+    if t0_starts_with_name(src n idx "$warning") {
+        name_len = 8
+    } else if t0_starts_with_name(src n idx "$error") {
+        name_len = 6
+    } else {
+        return HL_NO_MATCH
+    }
+    hl_emit_metatag(parent src idx name_len)
+    let i:int = idx + name_len
+    let after_ws:int = t0_skip_horizontal_ws(src n i)
+    if i <? after_ws { hl_emit_plain(parent src i after_ws) }
+    i = after_ws
+    if (i <? n) and (__load_u8__(src + i) =? T0_CH_LPAREN) {
+        hl_emit_color(parent src i i + 1 HL_PUNCTUATION)
+        i = i + 1
+    }
+    let after_ws2:int = t0_skip_horizontal_ws(src n i)
+    if i <? after_ws2 { hl_emit_plain(parent src i after_ws2) }
+    i = after_ws2
+    if (i <? n) and (__load_u8__(src + i) =? T0_CH_DQUOTE) {
+        i = hl_emit_string_at(parent src n i)
+    }
+    let after_ws3:int = t0_skip_horizontal_ws(src n i)
+    if i <? after_ws3 { hl_emit_plain(parent src i after_ws3) }
+    i = after_ws3
+    if (i <? n) and (__load_u8__(src + i) =? T0_CH_RPAREN) {
+        hl_emit_color(parent src i i + 1 HL_PUNCTUATION)
+        i = i + 1
+    }
+    return hl_emit_suffix(parent src n i)
+}
+
+# `if $target (=?|not=?) "x" { <prelude block> }`. Pre-validates the head so
+# we never partially emit on a no-match.
+let hl_target_if_directive = (parent:int src:int n:int idx:int):>int => {
+    if not t0_starts_with_name(src n idx "if") { return HL_NO_MATCH }
+    let i:int = idx + 2
+    i = t0_skip_trivia(src n i)
+    if not t0_starts_with_name(src n i "$target") { return HL_NO_MATCH }
+    let j:int = i + 7
+    j = t0_skip_trivia(src n j)
+    let negate:int = false
+    let op_len:int = 0
+    if (j + 1 <? n) and (__load_u8__(src + j) =? T0_CH_EQ) and (__load_u8__(src + j + 1) =? T0_CH_QUESTION) {
+        op_len = 2
+    } else if (j + 4 <? n) and (__load_u8__(src + j) =? 110) and (__load_u8__(src + j + 1) =? 111) and (__load_u8__(src + j + 2) =? 116) and (__load_u8__(src + j + 3) =? T0_CH_EQ) and (__load_u8__(src + j + 4) =? T0_CH_QUESTION) {
+        negate = true
+        op_len = 5
+    } else {
+        return HL_NO_MATCH
+    }
+
+    hl_emit_color(parent src idx idx + 2 HL_KEYWORD)
+    let c:int = idx + 2
+    c = hl_emit_trivia(parent src n c)
+    hl_emit_metatag(parent src c 7)
+    c = c + 7
+    c = hl_emit_trivia(parent src n c)
+    if negate {
+        hl_emit_color(parent src c c + 3 HL_DECLARATION)
+        hl_emit_color(parent src c + 3 c + 5 HL_OPERATOR)
+    } else {
+        hl_emit_color(parent src c c + 2 HL_OPERATOR)
+    }
+    c = c + op_len
+    c = hl_emit_trivia(parent src n c)
+    if (c <? n) and (__load_u8__(src + c) =? T0_CH_DQUOTE) {
+        c = hl_emit_string_at(parent src n c)
+    }
+    c = hl_emit_trivia(parent src n c)
+    if (c <? n) and (__load_u8__(src + c) =? T0_CH_LBRACE) {
+        hl_emit_color(parent src c c + 1 HL_BRACE)
+        c = c + 1
+        c = hl_prelude_block(parent src n c)
+    }
+    return hl_emit_suffix(parent src n c)
+}
+
+# Try every prelude directive in turn.
+let hl_prelude_item = (parent:int src:int n:int idx:int):>int => {
+    let r:int = hl_import_directive(parent src n idx)
+    if r not=? HL_NO_MATCH { return r }
+    r = hl_supported_targets_directive(parent src n idx)
+    if r not=? HL_NO_MATCH { return r }
+    r = hl_target_if_directive(parent src n idx)
+    if r not=? HL_NO_MATCH { return r }
+    return hl_diagnostic_directive(parent src n idx)
+}
+
+# Walk a `{...}` prelude block until a matching `}` or non-directive content.
+let hl_prelude_block = (parent:int src:int n:int idx:int):>int => {
+    let cursor:int = idx
+    loop cursor <? n {
+        cursor = hl_emit_trivia(parent src n cursor)
+        if cursor >=? n { return cursor }
+        if __load_u8__(src + cursor) =? T0_CH_RBRACE {
+            hl_emit_color(parent src cursor cursor + 1 HL_BRACE)
+            return cursor + 1
+        }
+        let next_idx:int = hl_prelude_item(parent src n cursor)
+        if next_idx =? HL_NO_MATCH { return cursor }
+        cursor = next_idx
+    }
+    return cursor
+}
+
+# Top-level prelude scan. Returns the cursor where the prelude ends.
+let hl_prelude = (parent:int src:int n:int):>int => {
+    let cursor:int = 0
+    loop cursor <? n {
+        cursor = hl_emit_trivia(parent src n cursor)
+        if cursor >=? n { return cursor }
+        let next_idx:int = hl_prelude_item(parent src n cursor)
+        if next_idx =? HL_NO_MATCH { return cursor }
+        cursor = next_idx
+    }
+    return cursor
+}
+
+# ----------------------------------------------------------------------------
+# T1 token walker
+# ----------------------------------------------------------------------------
+
+# Map a t1 kind to a color string (or 0 = plain).
+let hl_token_color = (kind:int):>int => {
+    if kind =? TK_LET { return HL_DECLARATION }
+    if kind =? TK_CONST { return HL_DECLARATION }
+    if kind =? TK_IF { return HL_KEYWORD }
+    if kind =? TK_LOOP { return HL_KEYWORD }
+    if kind =? TK_ELSE { return HL_KEYWORD }
+    if kind =? TK_RETURN { return HL_KEYWORD }
+    if kind =? TK_BREAK { return HL_KEYWORD }
+    if kind =? TK_CONTINUE { return HL_KEYWORD }
+    if kind =? TK_EXTERN { return HL_KEYWORD }
+    if kind =? TK_TRANSMUTE { return HL_KEYWORD }
+    if kind =? TK_VOID { return HL_KEYWORD }
+    if kind =? TK_AND { return HL_KEYWORD }
+    if kind =? TK_OR { return HL_KEYWORD }
+    if kind =? TK_XOR { return HL_KEYWORD }
+    if kind =? TK_NOT { return HL_KEYWORD }
+    if kind =? TK_IDENT_CALL { return HL_FUNCTION }
+    if kind =? TK_TYPE { return HL_TYPE }
+    if kind =? TK_FN_TYPE { return HL_TYPE }
+    if kind =? TK_TYPE_PARAM { return HL_TYPE }
+    if kind =? TK_STRING { return HL_STRING }
+    if kind =? TK_NUMBER { return HL_NUMBER }
+    if kind =? TK_LEFT_BRACE { return HL_BRACE }
+    if kind =? TK_RIGHT_BRACE { return HL_BRACE }
+    if kind =? TK_LEFT_PAREN { return HL_PUNCTUATION }
+    if kind =? TK_RIGHT_PAREN { return HL_PUNCTUATION }
+    if kind =? TK_LEFT_BRACKET { return HL_PUNCTUATION }
+    if kind =? TK_RIGHT_BRACKET { return HL_PUNCTUATION }
+    if kind =? TK_EXPR_CALL { return HL_PUNCTUATION }
+    if kind =? TK_PLUS { return HL_OPERATOR }
+    if kind =? TK_MINUS { return HL_OPERATOR }
+    if kind =? TK_MUL { return HL_OPERATOR }
+    if kind =? TK_IDIV { return HL_OPERATOR }
+    if kind =? TK_MOD { return HL_OPERATOR }
+    if kind =? TK_EQ { return HL_OPERATOR }
+    if kind =? TK_NOT_EQ { return HL_OPERATOR }
+    if kind =? TK_GT { return HL_OPERATOR }
+    if kind =? TK_GT_EQ { return HL_OPERATOR }
+    if kind =? TK_LT { return HL_OPERATOR }
+    if kind =? TK_LT_EQ { return HL_OPERATOR }
+    if kind =? TK_LEFT_SHIFT { return HL_OPERATOR }
+    if kind =? TK_RIGHT_SHIFT { return HL_OPERATOR }
+    if kind =? TK_ASSIGN { return HL_OPERATOR }
+    if kind =? TK_UPDATE_ASSIGN { return HL_OPERATOR }
+    if kind =? TK_FN_ARROW { return HL_OPERATOR }
+    if kind =? TK_PIPE { return HL_OPERATOR }
+    if kind =? TK_IDENT { return HL_IDENT }
+    return 0
+}
+
+# Compute the end offset (exclusive) of a token, given the kind/value/location
+# from the TokenStream and the source it was tokenized from. Mirrors
+# _token_end in the Python.
+let hl_token_end = (src:int n:int loc:int val:int kind:int):>int => {
+    if kind =? TK_IDENT { return loc + val }
+    if kind =? TK_TYPE { return loc + val }
+    if kind =? TK_FN_TYPE { return loc + val }
+    if kind =? TK_TYPE_PARAM { return loc + val }
+    if kind =? TK_STRING { return loc + val }
+    if kind =? TK_IDENT_CALL { return loc + val + 1 }
+    if kind =? TK_NUMBER {
+        if (loc + 4 <=? n) and str_eq_len(src + loc 4 "true" 4) { return loc + 4 }
+        if (loc + 5 <=? n) and str_eq_len(src + loc 5 "false" 5) { return loc + 5 }
+        if (loc + 2 <=? n) and (__load_u8__(src + loc) =? 48) and (__load_u8__(src + loc + 1) =? 120) {
+            let i:int = loc + 2
+            loop i <? n {
+                let c:int = __load_u8__(src + i)
+                if (not t1_is_hex_digit(c)) and (c not=? T1_CH_UNDERSCORE) { break }
+                i = i + 1
+            }
+            return i
+        }
+        if (loc + 2 <=? n) and (__load_u8__(src + loc) =? 48) and (__load_u8__(src + loc + 1) =? 98) {
+            let i:int = loc + 2
+            loop i <? n {
+                let c:int = __load_u8__(src + i)
+                if (c not=? 48) and (c not=? 49) and (c not=? T1_CH_UNDERSCORE) { break }
+                i = i + 1
+            }
+            return i
+        }
+        let i:int = loc
+        loop i <? n {
+            let c:int = __load_u8__(src + i)
+            if (not t0_is_digit(c)) and (c not=? T1_CH_UNDERSCORE) { break }
+            i = i + 1
+        }
+        return i
+    }
+    # single-char punctuation/operators
+    if kind =? TK_LEFT_PAREN { return loc + 1 }
+    if kind =? TK_RIGHT_PAREN { return loc + 1 }
+    if kind =? TK_LEFT_BRACE { return loc + 1 }
+    if kind =? TK_RIGHT_BRACE { return loc + 1 }
+    if kind =? TK_LEFT_BRACKET { return loc + 1 }
+    if kind =? TK_RIGHT_BRACKET { return loc + 1 }
+    if kind =? TK_EXPR_CALL { return loc + 1 }
+    if kind =? TK_PLUS { return loc + 1 }
+    if kind =? TK_MINUS { return loc + 1 }
+    if kind =? TK_MUL { return loc + 1 }
+    if kind =? TK_MOD { return loc + 1 }
+    if kind =? TK_ASSIGN { return loc + 1 }
+    if kind =? TK_UPDATE_ASSIGN { return loc + 1 }
+    # 2-char operators
+    if kind =? TK_IDIV { return loc + 2 }
+    if kind =? TK_EQ { return loc + 2 }
+    if kind =? TK_NOT_EQ { return loc + 2 }
+    if kind =? TK_GT { return loc + 2 }
+    if kind =? TK_LT { return loc + 2 }
+    if kind =? TK_LEFT_SHIFT { return loc + 2 }
+    if kind =? TK_RIGHT_SHIFT { return loc + 2 }
+    if kind =? TK_FN_ARROW { return loc + 2 }
+    if kind =? TK_PIPE { return loc + 2 }
+    if kind =? TK_GT_EQ { return loc + 3 }
+    if kind =? TK_LT_EQ { return loc + 3 }
+    # keywords
+    if kind =? TK_LET { return loc + 3 }
+    if kind =? TK_CONST { return loc + 5 }
+    if kind =? TK_IF { return loc + 2 }
+    if kind =? TK_LOOP { return loc + 4 }
+    if kind =? TK_ELSE { return loc + 4 }
+    if kind =? TK_RETURN { return loc + 6 }
+    if kind =? TK_BREAK { return loc + 5 }
+    if kind =? TK_CONTINUE { return loc + 8 }
+    if kind =? TK_EXTERN { return loc + 6 }
+    if kind =? TK_TRANSMUTE { return loc + 9 }
+    if kind =? TK_VOID { return loc + 4 }
+    if kind =? TK_AND { return loc + 3 }
+    if kind =? TK_OR { return loc + 2 }
+    if kind =? TK_XOR { return loc + 3 }
+    if kind =? TK_NOT { return loc + 3 }
+    return loc + 1
+}
+
+# Tokenize the (post-prelude) `src` slice and emit colored spans for every
+# token plus comment-aware plain runs in the gaps between them.
+let hl_emit_t1 = (parent:int src:int n:int):>void => {
+    let ts:int = t1_tokenize(src)
+    let count:int = ts_count(ts)
+    let i:int = 0
+    let cursor:int = 0
+    loop i <? count {
+        let kind:int = ts_kind(ts i)
+        let val:int = ts_value(ts i)
+        let loc:int = ts_location(ts i)
+        let span_start:int = loc
+
+        # Reach back for the operator that the t1 tokenizer dropped on the
+        # floor for TYPE (`:`), FN_TYPE (`:>`), and NOT_EQ (`not`).
+        let merged_type:int = false
+        let merged_fn_type:int = false
+        let merged_not_eq:int = false
+        if (kind =? TK_TYPE) and (loc >? 0) and (__load_u8__(src + loc - 1) =? T1_CH_COLON) {
+            span_start = loc - 1
+            merged_type = true
+        } else if (kind =? TK_FN_TYPE) and (loc >=? 2) and (__load_u8__(src + loc - 2) =? T1_CH_COLON) and (__load_u8__(src + loc - 1) =? T1_CH_RANGLE) {
+            span_start = loc - 2
+            merged_fn_type = true
+        } else if (kind =? TK_NOT_EQ) and (loc >=? 3) and (__load_u8__(src + loc - 3) =? 110) and (__load_u8__(src + loc - 2) =? 111) and (__load_u8__(src + loc - 1) =? 116) {
+            span_start = loc - 3
+            merged_not_eq = true
+        }
+
+        if cursor <? span_start {
+            hl_emit_plain_run(parent src n cursor span_start)
+        }
+
+        let end_idx:int = hl_token_end(src n loc val kind)
+
+        if kind =? TK_IDENT_CALL {
+            let name_end:int = loc + val
+            hl_emit_color(parent src loc name_end HL_FUNCTION)
+            hl_emit_color(parent src name_end end_idx HL_PUNCTUATION)
+        } else if merged_type {
+            hl_emit_color(parent src loc - 1 loc HL_OPERATOR)
+            hl_emit_color(parent src loc end_idx HL_TYPE)
+        } else if merged_fn_type {
+            hl_emit_color(parent src loc - 2 loc HL_OPERATOR)
+            hl_emit_color(parent src loc end_idx HL_TYPE)
+        } else if merged_not_eq {
+            hl_emit_color(parent src loc - 3 loc HL_DECLARATION)
+            hl_emit_color(parent src loc end_idx HL_OPERATOR)
+        } else {
+            let color:int = hl_token_color(kind)
+            if color =? 0 {
+                hl_emit_plain(parent src loc end_idx)
+            } else {
+                hl_emit_color(parent src loc end_idx color)
+            }
+        }
+        cursor = end_idx
+        i = i + 1
+    }
+    if cursor <? n {
+        hl_emit_plain_run(parent src n cursor n)
+    }
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Public entry point
+# ----------------------------------------------------------------------------
+
+# Append syntax-highlighted udewy source code under `parent`. Runs the prelude
+# scanner first to consume directives that t1 can't tokenize, then tokenizes
+# the remainder and emits colored spans for each token (with comment-aware
+# plain runs in the gaps).
+let Web_AppendHighlightedSource = (parent:int src:int):>void => {
+    if g_arena =? 0 { arena_init() }
+    let n:int = str_len(src)
+    let prelude_end:int = hl_prelude(parent src n)
+    if prelude_end >=? n { return void }
+    let tail:int = hl_make_str(src prelude_end n - prelude_end)
+    hl_emit_t1(parent tail n - prelude_end)
+    return void
+}

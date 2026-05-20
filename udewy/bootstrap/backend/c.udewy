@@ -88,7 +88,7 @@ let c_alloc_state = ():>void => {
     c_fn_source_names = intmap_new()
     c_fn_param_counts = intmap_new()
     c_extern_fn = intset_new()
-    c_main_label_id = 0 - 1
+    c_main_label_id = -1
     c_global_names = intmap_new()
     c_global_initializers = intmap_new()
     c_global_init_is_str = intset_new()
@@ -102,7 +102,7 @@ let c_alloc_state = ():>void => {
     c_function_lines = intmap_new()
     c_function_locals = intmap_new()
     c_function_param_counts = intmap_new()
-    c_current_fn = 0 - 1
+    c_current_fn = -1
     c_current_indent = 1
     c_current_expr = 0
     c_current_saved = vec_new(8)
@@ -330,7 +330,7 @@ let c_capability_from_path = (path:int):>int => {
     let marker:int = "third_party/c/"
     let mn:int = str_len(marker)
     let idx:int = 0
-    let found:int = 0 - 1
+    let found:int = -1
     loop idx <=? pn - mn {
         let m:int = 1
         let i:int = 0
@@ -674,7 +674,7 @@ let c_begin_function = (label_id:int name:int param_count:int is_main:int):>void
     return void
 }
 
-let c_end_function = ():>void => { c_current_fn = 0 - 1  return void }
+let c_end_function = ():>void => { c_current_fn = -1  return void }
 
 let c_load_param = (index:int):>void => {
     let bb:int = bb_new(16)
@@ -895,7 +895,7 @@ let c_call_indirect = (num_args:int):>void => {
     return void
 }
 
-let c_max_call_args = ():>int => { return 0 - 1 }
+let c_max_call_args = ():>int => { return -1 }
 
 let c_begin_if = ():>void => {
     let bb:int = bb_new(32 + str_len(c_current_expr))
@@ -1024,18 +1024,18 @@ let c_init_intrinsics = ():>void => {
 }
 
 let c_mixed_extern_arg_slots = (name:int):>int => {
-    if not str_prefix(name "__call_extern_mixed_") { return 0 - 1 }
+    if not str_prefix(name "__call_extern_mixed_") { return -1 }
     let n:int = str_len(name)
-    if n <? 23 { return 0 - 1 }
-    if __load_u8__(name + n - 2) not=? 95 { return 0 - 1 }
-    if __load_u8__(name + n - 1) not=? 95 { return 0 - 1 }
+    if n <? 23 { return -1 }
+    if __load_u8__(name + n - 2) not=? 95 { return -1 }
+    if __load_u8__(name + n - 1) not=? 95 { return -1 }
     let mid_len:int = n - 22
-    if mid_len <? 1 { return 0 - 1 }
+    if mid_len <? 1 { return -1 }
     let v:int = 0
     let i:int = 0
     loop i <? mid_len {
         let ch:int = __load_u8__(name + 20 + i)
-        if (ch <? 48) or (ch >? 57) { return 0 - 1 }
+        if (ch <? 48) or (ch >? 57) { return -1 }
         v = v * 10 + (ch - 48)
         i = i + 1
     }
@@ -1054,7 +1054,7 @@ let c_intrinsic_arity = (name:int):>int => {
     let m:int = c_mixed_extern_arg_slots(name)
     if m >=? 0 { return 1 + m * 2 }
     if map_has_str(g_c_intrinsics name) { return map_get_str(g_c_intrinsics name) }
-    return 0 - 1
+    return -1
 }
 
 let c_intrinsic_static_arg_indices = (name:int):>int => {

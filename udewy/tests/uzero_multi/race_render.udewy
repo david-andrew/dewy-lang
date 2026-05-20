@@ -88,7 +88,7 @@ let set_perspective = (sw:int sh:int):>void => {
     let right_q16:int = fp_mul(top_q16 aspect_q16)
     let near_q:int = 131072              # 2 m  (matches FRUSTUM_NEAR in race.udewy: top/near = 1 -> 90deg vfov)
     let far_q:int = 262144000            # 4000 m (matches FRUSTUM_FAR)
-    gpu_set_perspective_frustum(0 - right_q16 right_q16 0 - top_q16 top_q16 near_q far_q)
+    gpu_set_perspective_frustum(-right_q16 right_q16 (-top_q16) top_q16 near_q far_q)
     return 0
 }
 
@@ -96,21 +96,21 @@ let apply_camera = ():>void => {
     let crx:int = fp_mul(cam_fy cam_uz) - fp_mul(cam_fz cam_uy)
     let cry:int = fp_mul(cam_fz cam_ux) - fp_mul(cam_fx cam_uz)
     let crz:int = fp_mul(cam_fx cam_uy) - fp_mul(cam_fy cam_ux)
-    let neg_dot_r:int = 0 - (fp_mul(crx cam_x) + fp_mul(cry cam_y) + fp_mul(crz cam_z))
-    let neg_dot_u:int = 0 - (fp_mul(cam_ux cam_x) + fp_mul(cam_uy cam_y) + fp_mul(cam_uz cam_z))
+    let neg_dot_r:int = -(fp_mul(crx cam_x) + fp_mul(cry cam_y) + fp_mul(crz cam_z))
+    let neg_dot_u:int = -(fp_mul(cam_ux cam_x) + fp_mul(cam_uy cam_y) + fp_mul(cam_uz cam_z))
     let dot_f:int = fp_mul(cam_fx cam_x) + fp_mul(cam_fy cam_y) + fp_mul(cam_fz cam_z)
     let mat:int = __static_alloca__(64)
     __store_u32__(q16_to_f32(crx) mat + 0)
     __store_u32__(q16_to_f32(cam_ux) mat + 4)
-    __store_u32__(q16_to_f32(0 - cam_fx) mat + 8)
+    __store_u32__(q16_to_f32(-cam_fx) mat + 8)
     __store_u32__(0 mat + 12)
     __store_u32__(q16_to_f32(cry) mat + 16)
     __store_u32__(q16_to_f32(cam_uy) mat + 20)
-    __store_u32__(q16_to_f32(0 - cam_fy) mat + 24)
+    __store_u32__(q16_to_f32(-cam_fy) mat + 24)
     __store_u32__(0 mat + 28)
     __store_u32__(q16_to_f32(crz) mat + 32)
     __store_u32__(q16_to_f32(cam_uz) mat + 36)
-    __store_u32__(q16_to_f32(0 - cam_fz) mat + 40)
+    __store_u32__(q16_to_f32(-cam_fz) mat + 40)
     __store_u32__(0 mat + 44)
     __store_u32__(q16_to_f32(neg_dot_r) mat + 48)
     __store_u32__(q16_to_f32(neg_dot_u) mat + 52)
@@ -124,7 +124,7 @@ let apply_camera = ():>void => {
 
 let draw_ground = ():>void => {
     let half_q:int = GROUND_HALF_EXTENT
-    let neg_q:int = 0 - half_q
+    let neg_q:int = -half_q
     let y_q:int = GROUND_Y
     gpu_set_texture(0)
     gpu_set_color3(COL_HORIZON_R COL_HORIZON_G COL_HORIZON_B)
@@ -166,7 +166,7 @@ let emit_track_quad = (i:int ni:int v_a:int v_b:int u_a:int u_b:int):>void => {
     let rzb:int = fp_mul(fxb_ uyb) - fp_mul(fyb_ uxb)
 
     let hw:int = wp_get_half_w(i)
-    let lat_l:int = 0 - hw
+    let lat_l:int = -hw
     let lat_r:int = hw
 
     gpu_vertex3_uv(cxa + fp_mul(rxa lat_l) cya + fp_mul(rya lat_l) cza + fp_mul(rza lat_l) u_a v_a)
@@ -200,7 +200,7 @@ let draw_track = ():>void => {
         }
         let v_a:int = (arc_a << 16) // (CHECKER_TILE * 2)
         let v_b:int = (arc_b << 16) // (CHECKER_TILE * 2)
-        emit_track_quad(i ni v_a v_b (0 - u_q) u_q)
+        emit_track_quad(i ni v_a v_b (-u_q) u_q)
         i += 1
     }
     if cur_kind not=? -1 {
@@ -388,9 +388,9 @@ let draw_speed_lines = (sw:int sh:int):>void => {
         let sin_a:int = sin_fp(angle_idx)
 
         let abs_cos:int = cos_a
-        if abs_cos <? 0 { abs_cos = 0 - abs_cos }
+        if abs_cos <? 0 { abs_cos = -abs_cos }
         let abs_sin:int = sin_a
-        if abs_sin <? 0 { abs_sin = 0 - abs_sin }
+        if abs_sin <? 0 { abs_sin = -abs_sin }
         let edge_r:int = max_r_px
         if abs_cos >? 1024 {
             let d:int = (cx_px * FP_ONE) // abs_cos
@@ -535,10 +535,10 @@ let hsv_to_rgb = (h_q:int):>void => {
 let draw_craft = (body_hue_q:int boost_q:int):>void => {
     update_bob()
     let nose_z:int = 229376
-    let tail_z:int = 0 - 131072
+    let tail_z:int = -131072
     let wing_x:int = 163840
     let body_y_top:int = 39321
-    let body_y_bot:int = 0 - 13107
+    let body_y_bot:int = -13107
     let canopy_z:int = 65536
     let canopy_y:int = 78643
 
@@ -567,23 +567,23 @@ let draw_craft = (body_hue_q:int boost_q:int):>void => {
     gpu_tris_begin()
     gpu_set_color3(body_r_q body_g_q body_b_q)
     craft_emit(0 body_y_top nose_z)
-    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(-wing_x body_y_top tail_z)
     craft_emit(wing_x body_y_top tail_z)
     gpu_end()
     gpu_tris_begin()
     gpu_set_color3(belly_r_q belly_g_q belly_b_q)
     craft_emit(0 body_y_bot nose_z)
     craft_emit(wing_x body_y_bot tail_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
     gpu_end()
     gpu_tris_begin()
     gpu_set_color3(side_r_q side_g_q side_b_q)
     craft_emit(0 body_y_top nose_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
-    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_top tail_z)
     craft_emit(0 body_y_top nose_z)
     craft_emit(0 body_y_bot nose_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
     gpu_end()
     gpu_tris_begin()
     gpu_set_color3(side_r_q side_g_q side_b_q)
@@ -597,7 +597,7 @@ let draw_craft = (body_hue_q:int boost_q:int):>void => {
     gpu_tris_begin()
     gpu_set_color3(canopy_r canopy_g canopy_b)
     craft_emit(0 canopy_y canopy_z)
-    craft_emit(0 - 26214 body_y_top 0)
+    craft_emit(-26214 body_y_top 0)
     craft_emit(26214 body_y_top 0)
     gpu_end()
     let glow_scale:int = FP_ONE + fp_mul(boost_q 45875)
@@ -606,10 +606,10 @@ let draw_craft = (body_hue_q:int boost_q:int):>void => {
     let glow_y_top:int = fp_mul(26214 glow_scale)
     gpu_quads_begin()
     gpu_set_color3(glow_r_q glow_g_q glow_b_q)
-    craft_emit(0 - glow_x glow_y_bot tail_z)
+    craft_emit(-glow_x glow_y_bot tail_z)
     craft_emit(glow_x glow_y_bot tail_z)
     craft_emit(glow_x glow_y_top tail_z)
-    craft_emit(0 - glow_x glow_y_top tail_z)
+    craft_emit(-glow_x glow_y_top tail_z)
     gpu_end()
     return 0
 }

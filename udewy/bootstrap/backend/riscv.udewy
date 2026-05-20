@@ -135,8 +135,8 @@ let rv_note_slot = (slot:int):>void => {
 
 let rv_frame_bytes = ():>int => {
     let required:int = RV_SAVE_AREA_BYTES
-    if 0 - rv_min_slot_offset >? required { required = 0 - rv_min_slot_offset }
-    return (required + 15) and (0 - 16)
+    if -rv_min_slot_offset >? required { required = -rv_min_slot_offset }
+    return (required + 15) and (-16)
 }
 
 # Compose "    <s1> <s2>"
@@ -215,17 +215,17 @@ let rv_emit_sp_adjust = (amount:int):>void => {
         loop remaining >? 0 {
             let chunk:int = remaining
             if chunk >? RV_MAX_STACK_ADJUST_IMM { chunk = RV_MAX_STACK_ADJUST_IMM }
-            chunk = chunk and (0 - 16)
+            chunk = chunk and (-16)
             if chunk =? 0 { chunk = remaining }
             rv_emit_3op("addi" "sp" "sp" int_to_str(chunk))
             remaining = remaining - chunk
         }
     } else {
-        let remaining:int = 0 - amount
+        let remaining:int = -amount
         loop remaining >? 0 {
             let chunk:int = remaining
             if chunk >? RV_MAX_STACK_ADJUST_IMM { chunk = RV_MAX_STACK_ADJUST_IMM }
-            chunk = chunk and (0 - 16)
+            chunk = chunk and (-16)
             if chunk =? 0 { chunk = remaining }
             let bb:int = bb_new(32)
             bb_push_str(bb "    addi sp, sp, -")
@@ -297,7 +297,7 @@ let rv_prepare_call_args = (num_args:int fn_reg:int):>int => {
     let reg_count:int = num_args
     if reg_count >? 8 { reg_count = 8 }
     let stack_count:int = num_args - reg_count
-    let stack_bytes:int = ((stack_count * 8) + 15) and (0 - 16)
+    let stack_bytes:int = ((stack_count * 8) + 15) and (-16)
     let consumed:int = num_args
     if fn_reg not=? 0 { consumed = consumed + 1 }
 
@@ -668,7 +668,7 @@ let rv_begin_function = (label_id:int name:int param_count:int is_main:int):>voi
     rv_emit_indented("# frame setup")
 
     vec_set_len(rv_param_slots 0)
-    rv_stack_offset = 0 - RV_SAVE_AREA_BYTES
+    rv_stack_offset = -RV_SAVE_AREA_BYTES
     let i:int = 0
     loop i <? param_count {
         let slot:int = rv_stack_offset
@@ -698,7 +698,7 @@ let rv_end_function = ():>void => {
     let saved:int = rv_current_fn_code
     let prologue:int = vec_new(32)
     rv_current_fn_code = prologue
-    rv_emit_sp_adjust(0 - fb)
+    rv_emit_sp_adjust(-fb)
     rv_emit_indented("mv t0, s0")
     rv_set_frame_pointer(fb)
     rv_emit_indented("sd ra, -8(s0)")
@@ -932,7 +932,7 @@ let rv_call_indirect = (num_args:int):>void => {
     return void
 }
 
-let rv_max_call_args = ():>int => { return 0 - 1 }
+let rv_max_call_args = ():>int => { return -1 }
 
 let rv_syscall = (num_args:int):>void => {
     if num_args =? 1 {
@@ -983,22 +983,22 @@ let rv_syscall = (num_args:int):>void => {
 }
 
 let rv_mixed_extern_arg_slots = (name:int):>int => {
-    if not str_prefix(name "__call_extern_mixed_") { return 0 - 1 }
+    if not str_prefix(name "__call_extern_mixed_") { return -1 }
     let n:int = str_len(name)
-    if n <? 23 { return 0 - 1 }
-    if __load_u8__(name + n - 2) not=? 95 { return 0 - 1 }
-    if __load_u8__(name + n - 1) not=? 95 { return 0 - 1 }
+    if n <? 23 { return -1 }
+    if __load_u8__(name + n - 2) not=? 95 { return -1 }
+    if __load_u8__(name + n - 1) not=? 95 { return -1 }
     let mid_len:int = n - 22
-    if mid_len <? 1 { return 0 - 1 }
+    if mid_len <? 1 { return -1 }
     let v:int = 0
     let i:int = 0
     loop i <? mid_len {
         let c:int = __load_u8__(name + 20 + i)
-        if (c <? 48) or (c >? 57) { return 0 - 1 }
+        if (c <? 48) or (c >? 57) { return -1 }
         v = v * 10 + (c - 48)
         i = i + 1
     }
-    if (v <? 1) or (v >? 8) { return 0 - 1 }
+    if (v <? 1) or (v >? 8) { return -1 }
     return v
 }
 
@@ -1014,10 +1014,10 @@ let rv_call_extern_fp_mixed = (tags:int):>void => {
         let k:int = vec_get(tags i)
         if k =? 0 {
             vec_push(gp_slots gp_count)
-            vec_push(fp_slots 0 - 1)
+            vec_push(fp_slots (-1))
             gp_count = gp_count + 1
         } else {
-            vec_push(gp_slots 0 - 1)
+            vec_push(gp_slots (-1))
             vec_push(fp_slots fp_count)
             fp_count = fp_count + 1
         }
@@ -1229,7 +1229,7 @@ let rv_intrinsic_arity = (name:int):>int => {
     let m:int = rv_mixed_extern_arg_slots(name)
     if m >=? 0 { return 1 + m * 2 }
     if map_has_str(g_rv_intrinsics name) { return map_get_str(g_rv_intrinsics name) }
-    return 0 - 1
+    return -1
 }
 
 let rv_intrinsic_static_arg_indices = (name:int):>int => {

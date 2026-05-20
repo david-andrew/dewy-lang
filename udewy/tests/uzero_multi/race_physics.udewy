@@ -111,7 +111,7 @@ let init_cars = ():>void => {
         __store__(0 (o + CARF_CVZ))
         __store__(0 (o + CARF_FX))
         __store__(0 (o + CARF_FY))
-        __store__(0 - FP_ONE (o + CARF_FZ))
+        __store__(-FP_ONE (o + CARF_FZ))
         __store__(0 (o + CARF_UX))
         __store__(FP_ONE (o + CARF_UY))
         __store__(0 (o + CARF_UZ))
@@ -127,7 +127,7 @@ let init_cars = ():>void => {
         __store__(0 (o + CARF_STATUS))
         __store__(0 (o + CARF_PREV_FX))
         __store__(0 (o + CARF_PREV_FY))
-        __store__(0 - FP_ONE (o + CARF_PREV_FZ))
+        __store__(-FP_ONE (o + CARF_PREV_FZ))
         __store__(0 (o + CARF_BANK))
         let hue:int = (i * FP_ONE) // MAX_CARS
         if i =? 0 {
@@ -144,7 +144,7 @@ let init_cars = ():>void => {
             __store__(62259 (o + CARF_AI_BOOST_THRESH))
         } else {
             let mult:int = 55706 + xs_range(13108)
-            let aim_q:int = (0 - 524288) + xs_range(1048576)
+            let aim_q:int = (-524288) + xs_range(1048576)
             let timer:int = 60 + xs_range(180)
             let bthr:int = 55706 + xs_range(7864)
             __store__(mult (o + CARF_TOP_SPEED_MULT))
@@ -279,7 +279,7 @@ let physics_step = ():>void => {
     track_surface_query(cx cy cz cur_wp)
     let gap_now:int = normal_gap(cx cy cz)
     let pre_abs_t:int = surf_t
-    if pre_abs_t <? 0 { pre_abs_t = 0 - pre_abs_t }
+    if pre_abs_t <? 0 { pre_abs_t = -pre_abs_t }
     let airborne:int = 0
     if gap_now >? AIR_GAP { airborne = 1 }
     if pre_abs_t >? (surf_half_w + OFF_TRACK_LAT) { airborne = 1 }
@@ -304,9 +304,9 @@ let physics_step = ():>void => {
                     ux += 6553
                 }
             }
-            ux += fp_mul((0 - ux) UP_ALPHA_AIR)
+            ux += fp_mul((-ux) UP_ALPHA_AIR)
             uy += fp_mul(FP_ONE - uy UP_ALPHA_AIR)
-            uz += fp_mul((0 - uz) UP_ALPHA_AIR)
+            uz += fp_mul((-uz) UP_ALPHA_AIR)
             let um:int = fp_sqrt((ux * ux) + (uy * uy) + (uz * uz))
             if um >? 1024 {
                 ux = fp_div(ux um)
@@ -410,7 +410,7 @@ let physics_step = ():>void => {
         let new_fwd:int = fwd_dot
         if new_fwd_sq >? 0 {
             new_fwd = fp_sqrt(new_fwd_sq)
-            if fwd_dot <? 0 { new_fwd = 0 - new_fwd }
+            if fwd_dot <? 0 { new_fwd = -new_fwd }
         }
         let dfwd:int = new_fwd - fwd_dot
         let dside:int = new_side - side_dot
@@ -456,7 +456,7 @@ let physics_step = ():>void => {
     let pre_cvz:int = cvz
     track_surface_query(cx cy cz cur_wp)
     let abs_t:int = surf_t
-    if abs_t <? 0 { abs_t = 0 - abs_t }
+    if abs_t <? 0 { abs_t = -abs_t }
     let limit:int = surf_half_w - CRAFT_HALF_W
     let off_track:int = abs_t >? (surf_half_w + OFF_TRACK_LAT)
     if off_track not=? 0 {
@@ -467,7 +467,7 @@ let physics_step = ():>void => {
         let q_ry:int = fp_mul(fz surf_nx) - fp_mul(fx surf_nz)
         let q_rz:int = fp_mul(fx surf_ny) - fp_mul(fy surf_nx)
         let dir:int = 1
-        if surf_t <? 0 { dir = 0 - 1 }
+        if surf_t <? 0 { dir = -1 }
         let push:int = abs_t - limit
         cx -= dir * fp_mul(q_rx push)
         cy -= dir * fp_mul(q_ry push)
@@ -518,11 +518,11 @@ let physics_step = ():>void => {
 
     track_surface_query(cx cy cz cur_wp)
     let post_abs_t:int = surf_t
-    if post_abs_t <? 0 { post_abs_t = 0 - post_abs_t }
+    if post_abs_t <? 0 { post_abs_t = -post_abs_t }
     let post_off_track:int = post_abs_t >? (surf_half_w + OFF_TRACK_LAT)
     let post_gap:int = normal_gap(cx cy cz)
     if (post_off_track =? 0) and (post_gap <=? AIR_GAP) {
-        let snap_amt:int = fp_mul(0 - post_gap SNAP_ALPHA)
+        let snap_amt:int = fp_mul(-post_gap SNAP_ALPHA)
         cx += fp_mul(snap_amt surf_nx)
         cy += fp_mul(snap_amt surf_ny)
         cz += fp_mul(snap_amt surf_nz)
@@ -562,7 +562,7 @@ let update_chase = ():>void => {
     let yaw_rate:int = __signed_shr__(yaw_rate_q * RAW_PER_RAD FP_SHIFT)
     let bank_target:int = fp_mul(yaw_rate * BANK_GAIN sn)
     if bank_target >? BANK_MAX { bank_target = BANK_MAX }
-    if bank_target <? (0 - BANK_MAX) { bank_target = 0 - BANK_MAX }
+    if bank_target <? (-BANK_MAX) { bank_target = -BANK_MAX }
     bank += fp_mul(bank_target - bank BANK_ALPHA)
 
     let cos_b:int = cos_fp(bank)

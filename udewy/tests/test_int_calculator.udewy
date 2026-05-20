@@ -50,7 +50,7 @@ let out_char = (c:int):>void => {
 let print_int = (x:int):>void => {
     if x <? 0 {
         out_char(CH_MINUS)
-        x = 0 - x
+        x = -x
     }
 
     if x =? 0 {
@@ -168,7 +168,7 @@ let parse_number = ():>int => {
     skip_ws()
     let sign:int = 1
     if consume(CH_MINUS) {
-        sign = 0 - 1
+        sign = -1
     }
 
     skip_ws()
@@ -198,7 +198,7 @@ let parse_factor = ():>int => {
 }
 
 let main = ():>int => {
-    let buf_ptr:int = __syscall6__(SYS_MMAP 0 4096 (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) 0 - 1 0)
+    let buf_ptr:int = __syscall6__(SYS_MMAP 0 4096 (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) (-1) 0)
     loop 1 {
         write(">>> ")
         let read_len:int = __syscall3__(SYS_READ STDIN buf_ptr 4095)

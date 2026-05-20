@@ -58,7 +58,7 @@ let track_total_arc:int = 0
 
 let put_wp_xz = (cx_q:int cy_q:int cz_q:int h:int half_w:int kind:int bank_raw:int):>void => {
     let fxv:int = sin_fp(h)
-    let fzv:int = 0 - cos_fp(h)
+    let fzv:int = -cos_fp(h)
     let rxv_flat:int = cos_fp(h)
     let rzv_flat:int = sin_fp(h)
     let cb:int = cos_fp(bank_raw)
@@ -75,7 +75,7 @@ let put_wp_xz = (cx_q:int cy_q:int cz_q:int h:int half_w:int kind:int bank_raw:i
 
 let gen_straight = (len_q:int dy_q:int count:int half_w:int kind:int bank_raw:int):>void => {
     let fxv:int = sin_fp(bld_h)
-    let fzv:int = 0 - cos_fp(bld_h)
+    let fzv:int = -cos_fp(bld_h)
     let i:int = 0
     loop i <? count {
         let frac:int = ((i + 1) * FP_ONE) // count
@@ -94,9 +94,9 @@ let gen_straight = (len_q:int dy_q:int count:int half_w:int kind:int bank_raw:in
 let gen_turn = (radius_q:int sweep_raw:int bank_max:int dy_q:int count:int half_w:int kind:int):>void => {
     if sweep_raw =? 0 { return 0 }
     let dir_sign:int = 1
-    if sweep_raw <? 0 { dir_sign = 0 - 1 }
+    if sweep_raw <? 0 { dir_sign = -1 }
     let abs_sweep:int = sweep_raw
-    if abs_sweep <? 0 { abs_sweep = 0 - abs_sweep }
+    if abs_sweep <? 0 { abs_sweep = -abs_sweep }
 
     let rxv:int = cos_fp(bld_h)
     let rzv:int = sin_fp(bld_h)
@@ -130,7 +130,7 @@ let gen_turn = (radius_q:int sweep_raw:int bank_max:int dy_q:int count:int half_
 
 let gen_loop = (radius_q:int count:int half_w:int kind:int lateral_q:int):>void => {
     let fxv:int = sin_fp(bld_h)
-    let fzv:int = 0 - cos_fp(bld_h)
+    let fzv:int = -cos_fp(bld_h)
     let rxv:int = cos_fp(bld_h)
     let rzv:int = sin_fp(bld_h)
     let cx_l:int = bld_x
@@ -150,9 +150,9 @@ let gen_loop = (radius_q:int count:int half_w:int kind:int lateral_q:int):>void 
         let tfx:int = fp_mul(cth fxv)
         let tfy:int = sth
         let tfz:int = fp_mul(cth fzv)
-        let tux:int = 0 - fp_mul(sth fxv)
+        let tux:int = -fp_mul(sth fxv)
         let tuy:int = cth
-        let tuz:int = 0 - fp_mul(sth fzv)
+        let tuz:int = -fp_mul(sth fzv)
         let o:int = WAYPOINT_BUF + bld_idx * WP_STRIDE
         if bld_idx <? NUM_WAYPOINTS {
             __store__(p_x o)
@@ -178,7 +178,7 @@ let gen_loop = (radius_q:int count:int half_w:int kind:int lateral_q:int):>void 
 
 let gen_cork = (len_q:int dy_q:int twist_raw:int count:int half_w:int kind:int lateral_q:int):>void => {
     let fxv:int = sin_fp(bld_h)
-    let fzv:int = 0 - cos_fp(bld_h)
+    let fzv:int = -cos_fp(bld_h)
     let rxv_flat:int = cos_fp(bld_h)
     let rzv_flat:int = sin_fp(bld_h)
     let i:int = 0
@@ -253,7 +253,7 @@ let build_track = ():>void => {
     gen_straight(13107200 0 8 half_w SURF_BOOST 0)
     gen_straight(9830400 0 6 half_w SURF_NORMAL 0)
     gen_straight(9830400 1966080 10 half_w SURF_RAMP 0)
-    gen_straight(9830400 (0 - 1966080) 10 half_w SURF_RAMP 0)
+    gen_straight(9830400 (-1966080) 10 half_w SURF_RAMP 0)
     gen_straight(6553600 0 4 half_w SURF_NORMAL 0)
     gen_loop(7208960 48 half_w SURF_LOOP (2 * half_w))
     gen_straight(6553600 0 4 half_w SURF_NORMAL 0)
@@ -278,7 +278,7 @@ let track_surface_query = (px:int py:int pz:int hint_wp:int):>void => {
     let best_wp:int = hint_wp
     let best_d2:int = 0x7FFFFFFFFFFFFFFF
     let win:int = 8
-    let i:int = 0 - win
+    let i:int = -win
     loop i <=? win {
         let wi:int = ((hint_wp + i) % track_total_wp + track_total_wp) % track_total_wp
         let dx:int = px - wp_get_cx(wi)

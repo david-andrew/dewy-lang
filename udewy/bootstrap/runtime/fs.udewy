@@ -31,7 +31,7 @@ let fs_write_file = (path_cstr:int data:int len:int):>int => {
         let n:int = host_write(fd data + written len - written)
         if n <=? 0 {
             host_close(fd)
-            return 0 - 1
+            return -1
         }
         written = written + n
     }

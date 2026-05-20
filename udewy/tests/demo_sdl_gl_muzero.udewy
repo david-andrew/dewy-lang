@@ -143,7 +143,7 @@ let camera_z:int = 0
 
 let abs_i = (value:int):>int => {
     if value <? 0 {
-        return 0 - value
+        return -value
     }
     return value
 }
@@ -191,9 +191,9 @@ let sin256 = (angle:int):>int => {
         return ((256 - x) * (256 + x)) // 256
     }
     if quad =? 2 {
-        return 0 - ((x * (512 - x)) // 256)
+        return -((x * (512 - x)) // 256)
     }
-    return 0 - (((256 - x) * (256 + x)) // 256)
+    return -(((256 - x) * (256 + x)) // 256)
 }
 
 let cos256 = (angle:int):>int => {
@@ -210,11 +210,11 @@ let isqrt = (n:int):>int => {
 
 let dir_yaw_units = (dx:int dz:int):>int => {
     let best_angle:int = 0
-    let best_score:int = 0 - 9_999_999
+    let best_score:int = -9_999_999
     let angle:int = 0
     loop angle <? 1024 {
-        let vx:int = 0 - sin256(angle)
-        let vz:int = 0 - cos256(angle)
+        let vx:int = -sin256(angle)
+        let vz:int = -cos256(angle)
         let score:int = (dx * vx) + (dz * vz)
         if score >? best_score {
             best_score = score
@@ -227,8 +227,8 @@ let dir_yaw_units = (dx:int dz:int):>int => {
 
 let dir_pitch_units = (horizontal:int dy:int):>int => {
     let best_angle:int = 0
-    let best_score:int = 0 - 9_999_999
-    let angle:int = 0 - 128
+    let best_score:int = -9_999_999
+    let angle:int = -128
     loop angle <=? 128 {
         let score:int = (horizontal * cos256(angle)) + (dy * sin256(angle))
         if score >? best_score {
@@ -524,11 +524,11 @@ let init_track = ():>void => {
         store_arr(track_cy i y)
         store_arr(track_cz i z)
         # Mirror the track cross-section so the visible road surface stays upright on screen.
-        store_arr(track_rx i (0 - ((radial_x * roll_c) // 256)))
-        store_arr(track_ry i (0 - roll_s))
-        store_arr(track_rz i (0 - ((radial_z * roll_c) // 256)))
+        store_arr(track_rx i (-((radial_x * roll_c) // 256)))
+        store_arr(track_ry i (-roll_s))
+        store_arr(track_rz i (-((radial_z * roll_c) // 256)))
         store_arr(track_ux i ((radial_x * roll_s) // 256))
-        store_arr(track_uy i (0 - roll_c))
+        store_arr(track_uy i (-roll_c))
         store_arr(track_uz i ((radial_z * roll_s) // 256))
         store_arr(track_roll i roll)
         i += 1
@@ -607,9 +607,9 @@ let update_cpus = ():>void => {
         let lane_target:int = (sin256(phase) * 110) // 256
         lane_vel += (lane_target - lane) // 18
         lane_vel -= lane_vel // 7
-        lane_vel = clamp_i(lane_vel (0 - 48) 48)
+        lane_vel = clamp_i(lane_vel (-48) 48)
         lane += lane_vel // 5
-        lane = clamp_i(lane (0 - 124) 124)
+        lane = clamp_i(lane (-124) 124)
         let target_speed:int = 126 + (i * 9) + ((sin256(phase + 200) * 12) // 256)
         if start_timer >? 0 {
             target_speed = 0
@@ -670,7 +670,7 @@ let update_player = ():>void => {
     player_lane_vel += curve_pull
     player_lane_vel -= player_lane_vel // 12
     player_lane += player_lane_vel // 6
-    player_lane = clamp_i(player_lane (0 - 200) 200)
+    player_lane = clamp_i(player_lane (-200) 200)
     player_roll_bias -= player_roll_bias // 7
     let grip_drag:int = abs_i(player_lane_vel) // 18
     let target_max:int = 182 - grip_drag
@@ -796,7 +796,7 @@ let draw_track = ():>void => {
 }
 
 let draw_craft = (progress:int lane:int lift:int body_r:int body_g:int body_b:int glow_r:int glow_g:int glow_b:int):>void => {
-    sample_track_point(progress lane (0 - lift) scratch_a)
+    sample_track_point(progress lane (-lift) scratch_a)
     sample_forward(progress scratch_b)
     let fx:int = __load__(scratch_b + 0)
     let fy:int = __load__(scratch_b + 8)
@@ -804,9 +804,9 @@ let draw_craft = (progress:int lane:int lift:int body_r:int body_g:int body_b:in
     let rx:int = interp_track(track_rx progress)
     let ry:int = interp_track(track_ry progress)
     let rz:int = interp_track(track_rz progress)
-    let ux:int = 0 - interp_track(track_ux progress)
-    let uy:int = 0 - interp_track(track_uy progress)
-    let uz:int = 0 - interp_track(track_uz progress)
+    let ux:int = -interp_track(track_ux progress)
+    let uy:int = -interp_track(track_uy progress)
+    let uz:int = -interp_track(track_uz progress)
     let cx:int = __load__(scratch_a + 0)
     let cy:int = __load__(scratch_a + 8)
     let cz:int = __load__(scratch_a + 16)
@@ -958,7 +958,7 @@ let set_overlay = (screen_w:int screen_h:int):>void => {
 }
 
 let apply_camera = (progress:int lane:int):>void => {
-    sample_track_point(progress lane (0 - HOVER_HEIGHT) scratch_c)
+    sample_track_point(progress lane (-HOVER_HEIGHT) scratch_c)
     sample_forward(progress scratch_d)
     let focus_x:int = __load__(scratch_c + 0)
     let focus_y:int = __load__(scratch_c + 8)
@@ -991,10 +991,10 @@ let apply_camera = (progress:int lane:int):>void => {
     let yaw_deg:int = (yaw_units * 360) // 1024
     let pitch_deg:int = (pitch_units * 360) // 1024
     let roll_deg:int = player_roll_bias // 18
-    GL_Rotatef(GL_F32_FromInt(0 - roll_deg) F32_ZERO F32_ZERO F32_ONE)
-    GL_Rotatef(GL_F32_FromInt(0 - pitch_deg) F32_ONE F32_ZERO F32_ZERO)
-    GL_Rotatef(GL_F32_FromInt(0 - yaw_deg) F32_ZERO F32_ONE F32_ZERO)
-    GL_Translatef(GL_F32_FromInt(0 - camera_x) GL_F32_FromInt(0 - camera_y) GL_F32_FromInt(0 - camera_z))
+    GL_Rotatef(GL_F32_FromInt(-roll_deg) F32_ZERO F32_ZERO F32_ONE)
+    GL_Rotatef(GL_F32_FromInt(-pitch_deg) F32_ONE F32_ZERO F32_ZERO)
+    GL_Rotatef(GL_F32_FromInt(-yaw_deg) F32_ZERO F32_ONE F32_ZERO)
+    GL_Translatef(GL_F32_FromInt(-camera_x) GL_F32_FromInt(-camera_y) GL_F32_FromInt(-camera_z))
     return 0
 }
 

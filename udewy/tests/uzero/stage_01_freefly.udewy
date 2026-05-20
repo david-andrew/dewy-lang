@@ -129,8 +129,8 @@ let camera_step = ():>void => {
     if cam_pitch >? PITCH_LIMIT {
         cam_pitch = PITCH_LIMIT
     }
-    if cam_pitch <? (0 - PITCH_LIMIT) {
-        cam_pitch = 0 - PITCH_LIMIT
+    if cam_pitch <? (-PITCH_LIMIT) {
+        cam_pitch = -PITCH_LIMIT
     }
     cam_yaw = cam_yaw % ANG_TURN
     if cam_yaw <? 0 {
@@ -149,7 +149,7 @@ let camera_step = ():>void => {
 
     let fwd_x:int = fp_mul(sy cp)
     let fwd_y:int = sp
-    let fwd_z:int = 0 - fp_mul(cy cp)
+    let fwd_z:int = -fp_mul(cy cp)
 
     let right_x:int = cy
     let right_z:int = sy
@@ -191,7 +191,7 @@ let set_perspective = (screen_w:int screen_h:int):>void => {
     let near_q16:int = 2 * FP_ONE
     let top_q16:int = near_q16
     let right_q16:int = fp_mul(top_q16 aspect_q16)
-    GL_Frustum(q16_to_f64(0 - right_q16) q16_to_f64(right_q16) q16_to_f64(0 - top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
+    GL_Frustum(q16_to_f64(-right_q16) q16_to_f64(right_q16) q16_to_f64(-top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
     return 0
@@ -203,17 +203,17 @@ let set_perspective = (screen_w:int screen_h:int):>void => {
 let apply_camera = ():>void => {
     let yaw_deg:int = (cam_yaw * 360) // ANG_TURN
     let pitch_deg:int = (cam_pitch * 360) // ANG_TURN
-    GL_Rotatef(__i64_to_f32_bits__(0 - pitch_deg) F32_ONE F32_ZERO F32_ZERO)
+    GL_Rotatef(__i64_to_f32_bits__(-pitch_deg) F32_ONE F32_ZERO F32_ZERO)
     GL_Rotatef(__i64_to_f32_bits__(yaw_deg) F32_ZERO F32_ONE F32_ZERO)
-    GL_Translatef(q16_to_f32(0 - cam_x) q16_to_f32(0 - cam_y) q16_to_f32(0 - cam_z))
+    GL_Translatef(q16_to_f32(-cam_x) q16_to_f32(-cam_y) q16_to_f32(-cam_z))
     return 0
 }
 
 # Checkered ground spanning [-HALF_TILES*TILE_SIZE, +HALF_TILES*TILE_SIZE]^2.
 let draw_ground = ():>void => {
-    let i:int = 0 - HALF_TILES
+    let i:int = -HALF_TILES
     loop i <? HALF_TILES {
-        let j:int = 0 - HALF_TILES
+        let j:int = -HALF_TILES
         loop j <? HALF_TILES {
             let x0:int = i * TILE_SIZE
             let x1:int = (i + 1) * TILE_SIZE
@@ -243,15 +243,15 @@ let draw_ground = ():>void => {
     let arm:int = 655360
     glBegin(GL_QUADS)
     GL_Color3f(F32_ONE q16_to_f32(13107) q16_to_f32(13107))
-    world_v3(0 - arm 6553 0 - 13107)
-    world_v3(arm 6553 0 - 13107)
+    world_v3(-arm 6553 (-13107))
+    world_v3(arm 6553 (-13107))
     world_v3(arm 6553 13107)
-    world_v3(0 - arm 6553 13107)
+    world_v3(-arm 6553 13107)
     GL_Color3f(q16_to_f32(13107) q16_to_f32(58982) q16_to_f32(13107))
-    world_v3(0 - 13107 6553 0 - arm)
-    world_v3(13107 6553 0 - arm)
+    world_v3(-13107 6553 (-arm))
+    world_v3(13107 6553 (-arm))
     world_v3(13107 6553 arm)
-    world_v3(0 - 13107 6553 arm)
+    world_v3(-13107 6553 arm)
     glEnd()
     return 0
 }

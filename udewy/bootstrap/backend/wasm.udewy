@@ -27,6 +27,7 @@ let w_current_locals_extra:int = 0  # vec of strings, additional local decls
 
 let w_next_label:int = 0
 let w_data_offset:int = 1024
+let w_memory_pages:int = 32
 let w_data_segments:int = 0    # vec of pairs encoded as alternating: offset, data-string
 
 let w_module_init_name:int = 0
@@ -746,7 +747,7 @@ let w_call_indirect = (num_args:int):>void => {
     return void
 }
 
-let w_max_call_args = ():>int => { return 0 - 1 }
+let w_max_call_args = ():>int => { return -1 }
 
 let w_emit_break = ():>void => {
     let top:int = vec_len(w_loop_labels) - 2
@@ -952,7 +953,7 @@ let w_is_intrinsic = (name:int):>int => {
 let w_intrinsic_arity = (name:int):>int => {
     w_init_intrinsics()
     if map_has_str(g_w_intrinsics name) { return map_get_str(g_w_intrinsics name) }
-    return 0 - 1
+    return -1
 }
 
 let w_intrinsic_static_arg_indices = (name:int):>int => { return 0 }
@@ -1140,7 +1141,14 @@ let w_finish_module = ():>int => {
         ai = ai + 1
     }
 
-    bb_push_str(out "  (import \"env\" \"memory\" (memory 32))\n")
+    let page_size:int = 65536
+    let mem_required:int = w_data_offset + (2 * page_size)
+    let mem_pages:int = (mem_required + page_size - 1) // page_size
+    if mem_pages <? 32 { mem_pages = 32 }
+    w_memory_pages = mem_pages
+    bb_push_str(out "  (import \"env\" \"memory\" (memory ")
+    bb_push_int(out mem_pages)
+    bb_push_str(out "))\n")
 
     let imp_n:int = vec_len(w_imports)
     let imp_i:int = 0
@@ -1315,7 +1323,9 @@ let w_finish_module = ():>int => {
 
 let w_emit_host_js = (out:int):>void => {
     bb_push_str(out "
-const memory = new WebAssembly.Memory(\{ initial: 32 \});
+const memory = new WebAssembly.Memory(\{ initial: ")
+    bb_push_int(out w_memory_pages)
+    bb_push_str(out " \});
 let outputElement = null;
 let domNextHandle = 1;
 let domRootHandle = 0;

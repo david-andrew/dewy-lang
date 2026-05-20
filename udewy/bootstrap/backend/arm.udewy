@@ -127,8 +127,8 @@ let arm_note_slot = (slot:int):>void => {
 
 let arm_local_area_bytes = ():>int => {
     let required:int = 0
-    if 0 - arm_min_slot_offset >? 0 { required = 0 - arm_min_slot_offset }
-    return (required + 15) and (0 - 16)
+    if -arm_min_slot_offset >? 0 { required = -arm_min_slot_offset }
+    return (required + 15) and (-16)
 }
 
 let arm_int_to_str = (n:int):>int => {
@@ -143,7 +143,7 @@ let arm_emit_sp_adjust = (op:int amount:int):>void => {
     loop remaining >? 0 {
         let chunk:int = remaining
         if chunk >? ARM_MAX_STACK_ADJUST_IMM { chunk = ARM_MAX_STACK_ADJUST_IMM }
-        chunk = chunk and (0 - 16)
+        chunk = chunk and (-16)
         if chunk =? 0 { chunk = remaining }
         let bb:int = bb_new(40)
         bb_push_str(bb "    ")
@@ -174,7 +174,7 @@ let arm_emit_fp_setup = (local_bytes:int):>void => {
 
 # Returns 1 if `slot` fits in a [x29, #imm] addressing mode, else 0.
 let arm_slot_in_range = (slot:int):>int => {
-    if (slot >=? 0 - 256) and (slot <=? 255) { return 1 }
+    if (slot >=? -256) and (slot <=? 255) { return 1 }
     if (slot >=? 0) and ((slot and 7) =? 0) and (slot <=? 32760) { return 1 }
     return 0
 }
@@ -215,7 +215,7 @@ let arm_materialize_frame_addr = (reg:int slot:int):>void => {
     bb_push_str(bb1 reg)
     bb_push_str(bb1 ", x29")
     vec_push(arm_current_fn_code bb_finalize_as_string(bb1))
-    let remaining2:int = 0 - slot
+    let remaining2:int = -slot
     loop remaining2 >? 0 {
         let chunk:int = remaining2
         if chunk >? 4095 { chunk = 4095 }
@@ -338,7 +338,7 @@ let arm_prepare_call_args = (num_args:int fn_reg:int):>int => {
     let reg_count:int = num_args
     if reg_count >? 8 { reg_count = 8 }
     let stack_count:int = num_args - reg_count
-    let stack_bytes:int = ((stack_count * 8) + 15) and (0 - 16)
+    let stack_bytes:int = ((stack_count * 8) + 15) and (-16)
     let consumed:int = num_args
     if fn_reg not=? 0 { consumed = consumed + 1 }
 
@@ -754,7 +754,7 @@ let arm_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
     arm_emit_indented("# local frame setup")
 
     vec_set_len(arm_param_slots 0)
-    arm_stack_offset = 0 - 16
+    arm_stack_offset = -16
     let i:int = 0
     loop i <? param_count {
         let slot:int = arm_stack_offset
@@ -842,7 +842,7 @@ let arm_push_const_i64 = (value:int):>void => {
         bb_push_str(bb "    mov x0, #")
         bb_push_int(bb value)
         vec_push(arm_current_fn_code bb_finalize_as_string(bb))
-    } else if (value >=? 0 - 65536) and (value <? 0) {
+    } else if (value >=? -65536) and (value <? 0) {
         let bb:int = bb_new(24)
         bb_push_str(bb "    mov x0, #")
         bb_push_int(bb value)
@@ -1117,7 +1117,7 @@ let arm_call_indirect = (num_args:int):>void => {
     return void
 }
 
-let arm_max_call_args = ():>int => { return 0 - 1 }
+let arm_max_call_args = ():>int => { return -1 }
 
 let arm_syscall = (num_args:int):>void => {
     if num_args =? 1 {
@@ -1168,22 +1168,22 @@ let arm_syscall = (num_args:int):>void => {
 }
 
 let arm_mixed_extern_arg_slots = (name:int):>int => {
-    if not str_prefix(name "__call_extern_mixed_") { return 0 - 1 }
+    if not str_prefix(name "__call_extern_mixed_") { return -1 }
     let n:int = str_len(name)
-    if n <? 23 { return 0 - 1 }
-    if __load_u8__(name + n - 2) not=? 95 { return 0 - 1 }
-    if __load_u8__(name + n - 1) not=? 95 { return 0 - 1 }
+    if n <? 23 { return -1 }
+    if __load_u8__(name + n - 2) not=? 95 { return -1 }
+    if __load_u8__(name + n - 1) not=? 95 { return -1 }
     let mid_len:int = n - 22
-    if mid_len <? 1 { return 0 - 1 }
+    if mid_len <? 1 { return -1 }
     let v:int = 0
     let i:int = 0
     loop i <? mid_len {
         let c:int = __load_u8__(name + 20 + i)
-        if (c <? 48) or (c >? 57) { return 0 - 1 }
+        if (c <? 48) or (c >? 57) { return -1 }
         v = v * 10 + (c - 48)
         i = i + 1
     }
-    if (v <? 1) or (v >? 8) { return 0 - 1 }
+    if (v <? 1) or (v >? 8) { return -1 }
     return v
 }
 
@@ -1206,10 +1206,10 @@ let arm_call_extern_fp_mixed = (tags:int):>void => {
         let k:int = vec_get(tags i)
         if k =? 0 {
             vec_push(gp_slots gp_count)
-            vec_push(fp_slots 0 - 1)
+            vec_push(fp_slots (-1))
             gp_count = gp_count + 1
         } else {
-            vec_push(gp_slots 0 - 1)
+            vec_push(gp_slots (-1))
             vec_push(fp_slots fp_count)
             fp_count = fp_count + 1
         }
@@ -1433,7 +1433,7 @@ let arm_intrinsic_arity = (name:int):>int => {
     let m:int = arm_mixed_extern_arg_slots(name)
     if m >=? 0 { return 1 + m * 2 }
     if map_has_str(g_arm_intrinsics name) { return map_get_str(g_arm_intrinsics name) }
-    return 0 - 1
+    return -1
 }
 
 let arm_intrinsic_static_arg_indices = (name:int):>int => {

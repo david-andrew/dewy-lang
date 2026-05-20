@@ -352,7 +352,7 @@ let t1_match_keyword = (src:int start:int len:int val_out:int):>int => {
         if str_eq_len(src + start 4 "loop" 4) { __store__(TK_NO_VALUE val_out)  return TK_LOOP }
         if str_eq_len(src + start 4 "else" 4) { __store__(TK_NO_VALUE val_out)  return TK_ELSE }
         if str_eq_len(src + start 4 "true" 4) {
-            __store__(0 - 1 val_out)
+            __store__(-1 val_out)
             return TK_NUMBER
         }
         return 0
@@ -370,8 +370,8 @@ let t1_match_keyword = (src:int start:int len:int val_out:int):>int => {
         if str_eq_len(src + start 6 "return" 6) { __store__(TK_NO_VALUE val_out)  return TK_RETURN }
         if str_eq_len(src + start 6 "extern" 6) { __store__(TK_NO_VALUE val_out)  return TK_EXTERN }
         if str_eq_len(src + start 6 "import" 6) {
-            __store__(0 - 2 val_out)   # signal "import keyword found"
-            return 0 - 1
+            __store__(-2 val_out)   # signal "import keyword found"
+            return -1
         }
         return 0
     }
@@ -442,7 +442,7 @@ let t1_tokenize = (src:int):>int => {
             let ident_len:int = i - start
             let val_out:int = __static_alloca__(8)
             let kind:int = t1_match_keyword(src start ident_len val_out)
-            if kind =? 0 - 1 {
+            if kind =? -1 {
                 # import keyword: error
                 diag_error(start "`import` is a preprocessing directive and may only appear in the leading import prelude")
             }

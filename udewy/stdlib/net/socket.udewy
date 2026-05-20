@@ -118,7 +118,7 @@ let sock_write_all = (fd:int buf:int len:int):>int => {
     let written:int = 0
     loop written <? len {
         let n:int = host_write(fd buf + written len - written)
-        if n <=? 0 { return 0 - 1 }
+        if n <=? 0 { return -1 }
         written = written + n
     }
     return 0

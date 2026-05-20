@@ -194,12 +194,12 @@ let sin256 = (angle:int):>int => {
     }
     if quad =? 2 {
         term = 0x200 - x
-        y = 0 - ((x * term) >> 8)
+        y = -((x * term) >> 8)
     }
     if quad =? 3 {
         x = 0x100 - x
         term = 0x200 - x
-        y = 0 - ((x * term) >> 8)
+        y = -((x * term) >> 8)
     }
     return y
 }
@@ -210,7 +210,7 @@ let str_len = (s:int):>int => {
 
 let abs_int = (v:int):>int => {
     if v <? 0 {
-        return 0 - v
+        return -v
     }
     return v
 }
@@ -473,7 +473,7 @@ let play_sound = (kind:int):>int => {
     }
     if kind =? 2 {
         freq = 860
-        slide = 0 - 3
+        slide = -3
         volume = 112
     }
     if kind =? 3 {
@@ -529,7 +529,7 @@ let set_round_positions = ():>int => {
     ball_prev_x = ball_x
     ball_prev_y = ball_y
     ball_prev_y_fp = ball_y_fp
-    ball_vy_fp = 0 - SERVE_BALL_VY_FP
+    ball_vy_fp = -SERVE_BALL_VY_FP
     impact_timer = 0
     point_flash_timer = 12
     left_jump_buffer = 0
@@ -602,14 +602,14 @@ let update_left_player = ():>int => {
     let ground_fp:int = to_fp(GROUND_Y)
     left_move_dir = 0
     if key_down(key_a) {
-        left_move_dir = 0 - 1
+        left_move_dir = -1
     }
     if key_down(key_d) {
         left_move_dir = 1
     }
     if left_y =? GROUND_Y {
         if left_jump_buffer >? 0 {
-            left_vy_fp = 0 - jump_velocity_fp
+            left_vy_fp = -jump_velocity_fp
             left_jump_buffer = 0
             play_sound(1)
         }
@@ -651,7 +651,7 @@ let update_left_ai = ():>int => {
         left_move_dir = 1
     }
     if left_x >? (target_x + 2) {
-        left_move_dir = 0 - 1
+        left_move_dir = -1
     }
 
     if left_y =? GROUND_Y {
@@ -659,7 +659,7 @@ let update_left_ai = ():>int => {
             if abs_int(ball_x - left_x) <? 26 {
                 if ball_y <? (left_y - 8) {
                     if ball_vy_fp >? 0 {
-                        left_vy_fp = 0 - jump_velocity_fp
+                        left_vy_fp = -jump_velocity_fp
                         play_sound(1)
                     }
                 }
@@ -703,7 +703,7 @@ let update_right_ai = ():>int => {
         right_move_dir = 1
     }
     if right_x >? (target_x + 2) {
-        right_move_dir = 0 - 1
+        right_move_dir = -1
     }
 
     if right_y =? GROUND_Y {
@@ -711,7 +711,7 @@ let update_right_ai = ():>int => {
             if abs_int(ball_x - right_x) <? 26 {
                 if ball_y <? (right_y - 8) {
                     if ball_vy_fp >? 0 {
-                        right_vy_fp = 0 - jump_velocity_fp
+                        right_vy_fp = -jump_velocity_fp
                         play_sound(1)
                     }
                 }
@@ -742,14 +742,14 @@ let update_right_player = ():>int => {
     let ground_fp:int = to_fp(GROUND_Y)
     right_move_dir = 0
     if key_down(key_left) {
-        right_move_dir = 0 - 1
+        right_move_dir = -1
     }
     if key_down(key_right) {
         right_move_dir = 1
     }
     if right_y =? GROUND_Y {
         if right_jump_buffer >? 0 {
-            right_vy_fp = 0 - jump_velocity_fp
+            right_vy_fp = -jump_velocity_fp
             right_jump_buffer = 0
             play_sound(1)
         }
@@ -814,13 +814,13 @@ let collide_ball_with_slime = (slime_x:int slime_y:int slime_push:int slime_side
                     ball_vx = 0
                 } else if ball_vx =? 0 {
                     if dx <? 0 {
-                        ball_vx = 0 - 1
+                        ball_vx = -1
                     } else {
                         ball_vx = 1
                     }
                 }
             }
-            ball_vy_fp = 0 - ((7 + (abs_int(dx) // 4)) * PHYS_SCALE)
+            ball_vy_fp = -((7 + (abs_int(dx) // 4)) * PHYS_SCALE)
             if game_state =? STATE_SERVE {
                 if slime_side =? serve_side {
                     if slime_push not=? 0 {
@@ -855,14 +855,14 @@ let update_ball = ():>int => {
     if ball_x <? BALL_R {
         ball_x = BALL_R
         if ball_vx <? 0 {
-            ball_vx = 0 - ball_vx
+            ball_vx = -ball_vx
             play_sound(2)
         }
     }
     if ball_x >? (WIDTH - BALL_R) {
         ball_x = WIDTH - BALL_R
         if ball_vx >? 0 {
-            ball_vx = 0 - ball_vx
+            ball_vx = -ball_vx
             play_sound(2)
         }
     }
@@ -870,7 +870,7 @@ let update_ball = ():>int => {
         ball_y_fp = to_fp(BALL_R)
         ball_y = BALL_R
         if ball_vy_fp <? 0 {
-            ball_vy_fp = 0 - ball_vy_fp
+            ball_vy_fp = -ball_vy_fp
             play_sound(2)
         }
     }
@@ -886,18 +886,18 @@ let update_ball = ():>int => {
                         ball_y_fp = to_fp(net_top - BALL_R)
                         ball_y = net_top - BALL_R
                         if ball_vy_fp >? 0 {
-                            ball_vy_fp = 0 - ball_vy_fp
+                            ball_vy_fp = -ball_vy_fp
                         }
                     } else {
                         if ball_x <? NET_X {
                             ball_x = net_left - BALL_R
                             if ball_vx >? 0 {
-                                ball_vx = 0 - ball_vx
+                                ball_vx = -ball_vx
                             }
                         } else {
                             ball_x = net_right + BALL_R
                             if ball_vx <? 0 {
-                                ball_vx = 0 - ball_vx
+                                ball_vx = -ball_vx
                             }
                         }
                     }
@@ -1092,13 +1092,13 @@ let draw_match_scene = ():>int => {
     let left_eye_dir:int = 0
     let right_eye_dir:int = 0
     if ball_x <? left_x {
-        left_eye_dir = 0 - 1
+        left_eye_dir = -1
     }
     if ball_x >? left_x {
         left_eye_dir = 1
     }
     if ball_x <? right_x {
-        right_eye_dir = 0 - 1
+        right_eye_dir = -1
     }
     if ball_x >? right_x {
         right_eye_dir = 1
@@ -1117,7 +1117,7 @@ let draw_title = ():>int => {
     let preview_x:int = (WIDTH // 2) + (sin256(t) // 12)
     let preview_y:int = 84 + sin256(t * 2) // 28
     fill_slime(88 GROUND_Y SLIME_R 78 188 106 1)
-    fill_slime(232 GROUND_Y SLIME_R 252 112 106 (0 - 1))
+    fill_slime(232 GROUND_Y SLIME_R 252 112 106 (-1))
     fill_circle(preview_x preview_y BALL_R 250 250 250)
 
     draw_text_center(text_title_1 18 6 255 255 255)

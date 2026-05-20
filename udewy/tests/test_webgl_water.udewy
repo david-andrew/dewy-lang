@@ -38,8 +38,8 @@ void main() \{
             float age = max(0.0, float(u_time_ms - u_ripple_time_ms[i])) * 0.001;
             float strength = float(strength_i) / 255.0;
             float radius = age * (0.22 + strength * 0.28);
-            float fade = exp(-age * (1.15 + (1.0 - strength) * 0.9));
-            float primary = ring(uv, ripple_pos, radius, 96.0 - strength * 24.0) * fade * strength;
+            float fade = exp(-age * (1.15 + (1.-strength) * 0.9));
+            float primary = ring(uv, ripple_pos, radius, 96.-strength * 24.0) * fade * strength;
             float secondary = ring(uv, ripple_pos, radius * 0.58, 80.0) * fade * strength * 0.45;
             ripple_sum += primary + secondary;
             glow += primary * 1.25 + secondary * 0.7;
@@ -49,7 +49,7 @@ void main() \{
     float hold_wave = ring(uv, mouse, 0.016 + 0.005 * sin(t * 8.0), 120.0) * float(u_mouse_down) * 0.22;
 
     float base = sin((uv.x + uv.y) * 18.0 + t * 1.5);
-    base += sin(uv.x * 24.0 - t * 1.1);
+    base += sin(uv.x * 24.-t * 1.1);
     base += sin(uv.y * 20.0 + t * 1.3);
 
     float waves = base * 0.045;
@@ -59,7 +59,7 @@ void main() \{
     vec2 flow = vec2(waves * 0.42, waves * 0.23);
     vec2 displaced = uv + flow;
     float caustic = sin(displaced.x * 31.0 + t * 1.9);
-    caustic += sin(displaced.y * 25.0 - t * 1.3);
+    caustic += sin(displaced.y * 25.-t * 1.3);
     caustic += sin((displaced.x + displaced.y) * 22.0 + t * 1.2);
 
     vec3 deep = vec3(0.03, 0.16, 0.30);
@@ -99,7 +99,7 @@ let str_len = (s:int):>int => {
 
 let abs_int = (v:int):>int => {
     if v <? 0 {
-        return 0 - v
+        return -v
     }
     return v
 }
@@ -136,7 +136,7 @@ let find_free_ripple_slot = ():>int => {
         }
         i = i + 1
     }
-    return 0 - 1
+    return -1
 }
 
 let emit_ripple = (x:int y:int strength:int time_ms:int):>int => {

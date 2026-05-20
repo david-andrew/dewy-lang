@@ -1,6 +1,16 @@
 $supported_targets = ["wasm32"]
 
 import p"../../third_party/web/dom.udewy"
+import p"../../third_party/web/highlight.udewy"
+
+const HELLO_SOURCE:int = 
+"import p\"../../third_party/web/dom.udewy\"
+
+let main = ():>int => \{
+    let root:int = Web_Root()
+    Web_AppendTextElement(root \"p\" \"Hello from udewy\")
+    return 0
+\}"
 
 let append_card = (parent:int title:int body:int accent:int):>int => {
     let card:int = Web_AppendElement(parent "section")
@@ -31,60 +41,6 @@ let append_paragraph = (parent:int text:int):>int => {
     let paragraph:int = Web_AppendTextElement(parent "p" text)
     Web_SetStyle(paragraph "margin" "0 0 1rem")
     return paragraph
-}
-
-let append_code_token = (parent:int text:int color:int):>void => {
-    let token:int = Web_AppendTextElement(parent "span" text)
-    Web_SetStyle(token "color" color)
-    return 0
-}
-
-let append_hello_source = (code:int):>void => {
-    append_code_token(code "import" "#c586c0")
-    Web_AppendText(code " ")
-    append_code_token(code "p" "#dcdcaa")
-    append_code_token(code "\"../../third_party/web/dom.udewy\"" "#ce9178")
-    Web_AppendText(code "\n\n")
-    append_code_token(code "let" "#569cd6")
-    Web_AppendText(code " ")
-    append_code_token(code "main" "#9cdcfe")
-    Web_AppendText(code " ")
-    append_code_token(code "=" "#d4d4d4")
-    Web_AppendText(code " ")
-    append_code_token(code "()" "#c586c0")
-    append_code_token(code ":>" "#d4d4d4")
-    append_code_token(code "int" "#4ec9b0")
-    Web_AppendText(code " ")
-    append_code_token(code "=>" "#d4d4d4")
-    Web_AppendText(code " ")
-    append_code_token(code "\{" "#ffd700")
-    Web_AppendText(code "\n    ")
-    append_code_token(code "let" "#569cd6")
-    Web_AppendText(code " ")
-    append_code_token(code "root" "#9cdcfe")
-    append_code_token(code ":" "#d4d4d4")
-    append_code_token(code "int" "#4ec9b0")
-    Web_AppendText(code " ")
-    append_code_token(code "=" "#d4d4d4")
-    Web_AppendText(code " ")
-    append_code_token(code "Web_Root" "#dcdcaa")
-    append_code_token(code "()" "#c586c0")
-    Web_AppendText(code "\n    ")
-    append_code_token(code "Web_AppendTextElement" "#dcdcaa")
-    append_code_token(code "(" "#c586c0")
-    append_code_token(code "root" "#9cdcfe")
-    Web_AppendText(code " ")
-    append_code_token(code "\"p\"" "#ce9178")
-    Web_AppendText(code " ")
-    append_code_token(code "\"Hello from udewy\"" "#ce9178")
-    append_code_token(code ")" "#c586c0")
-    Web_AppendText(code "\n    ")
-    append_code_token(code "return" "#c586c0")
-    Web_AppendText(code " ")
-    append_code_token(code "0" "#b5cea8")
-    Web_AppendText(code "\n")
-    append_code_token(code "\}" "#ffd700")
-    return 0
 }
 
 let main = ():>int => {
@@ -142,7 +98,7 @@ let main = ():>int => {
     append_paragraph(scroll_box "Clay still fits app-style surfaces. This DOM path is for document-style pages where native browser behavior is the feature.")
 
     let code:int = Web_AppendElement(article "pre")
-    append_hello_source(code)
+    Web_AppendHighlightedSource(code HELLO_SOURCE)
     Web_SetStyle(code "overflow" "auto")
     Web_SetStyle(code "padding" "1rem")
     Web_SetStyle(code "border-radius" "14px")

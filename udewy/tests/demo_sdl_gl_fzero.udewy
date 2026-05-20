@@ -284,7 +284,7 @@ let point_tri_closest = (p:int v0:int v1:int v2:int out_q:int n_out:int):>void =
 }
 
 let find_best_tri = (p:int tri_base:int tan_base:int tri_count:int out_q:int out_n:int out_tan:int out_index:int):>void => {
-    let best:int = 0 - 1
+    let best:int = -1
     let best_d:int = 0x7FFF_FFFF_FFFF_FFFF
     let nb:int = __alloca__(24)
     let pos_snap:int = __alloca__(24)
@@ -311,7 +311,7 @@ let find_best_tri = (p:int tri_base:int tan_base:int tri_count:int out_q:int out
         }
         ti = ti + 1
     }
-    if best >? (0 - 1) {
+    if best >? (-1) {
         vec3_copy(out_n nb)
     }
     __store__(best out_index)
@@ -320,9 +320,9 @@ let find_best_tri = (p:int tri_base:int tan_base:int tri_count:int out_q:int out
 
 let orient_normal_up = (n:int):>void => {
     if __load__(n + 8) <? 0 {
-        __store__((0 - __load__(n)) n)
-        __store__((0 - __load__((n + 8))) (n + 8))
-        __store__((0 - __load__((n + 16))) (n + 16))
+        __store__((-__load__(n)) n)
+        __store__((-__load__((n + 8))) (n + 8))
+        __store__((-__load__((n + 16))) (n + 16))
     }
     return 0
 }
@@ -384,7 +384,7 @@ let sphere_wall_resolve = (p:int v:int f:int rad:int walls:int wall_count:int):>
                 let vn:int = fix_mul(vx nx) + fix_mul(vy ny) + fix_mul(vz nz)
                 if vn <? 0 {
                     # Bounce with some damping (e.g. 1.5x reflection impulse instead of 2.0x to lose speed)
-                    let imp:int = 0 - fix_mul(vn (FIX_ONE + (FIX_ONE // 2)))
+                    let imp:int = -fix_mul(vn (FIX_ONE + (FIX_ONE // 2)))
                     __store__((vx + fix_mul(nx imp)) v)
                     __store__((vy + fix_mul(ny imp)) (v + 8))
                     __store__((vz + fix_mul(nz imp)) (v + 16))
@@ -397,7 +397,7 @@ let sphere_wall_resolve = (p:int v:int f:int rad:int walls:int wall_count:int):>
                 let fz:int = __load__(f + 16)
                 let fn:int = fix_mul(fx nx) + fix_mul(fy ny) + fix_mul(fz nz)
                 if fn <? 0 {
-                    let imp:int = 0 - fix_mul(fn (FIX_ONE * 2))
+                    let imp:int = -fix_mul(fn (FIX_ONE * 2))
                     __store__((fx + fix_mul(nx imp)) f)
                     __store__((fy + fix_mul(ny imp)) (f + 8))
                     __store__((fz + fix_mul(nz imp)) (f + 16))
@@ -480,7 +480,7 @@ let set_camera = (p:int f:int n:int):>void => {
     let chase_up:int = 0x180000000   # 1.5
     let look_ahead:int = 0xa00000000 # 10.0
     vec3_copy(cam_pos p)
-    vec3_mad(cam_pos cam_pos f (0 - chase_back))
+    vec3_mad(cam_pos cam_pos f (-chase_back))
     vec3_mad(cam_pos cam_pos n chase_up)
 
     vec3_copy(cam_forward p)
@@ -501,7 +501,7 @@ let cam_vertex = (wx:int wy:int wz:int):>void => {
     let rz:int = wz - __load__(cam_pos + 16)
     let vx:int = fix_dot3(rx ry rz __load__(cam_right) __load__(cam_right + 8) __load__(cam_right + 16))
     let vy:int = fix_dot3(rx ry rz __load__(cam_up) __load__(cam_up + 8) __load__(cam_up + 16))
-    let vz:int = 0 - fix_dot3(rx ry rz __load__(cam_forward) __load__(cam_forward + 8) __load__(cam_forward + 16))
+    let vz:int = -fix_dot3(rx ry rz __load__(cam_forward) __load__(cam_forward + 8) __load__(cam_forward + 16))
     GL_Vertex3f(fix_to_gl(vx) fix_to_gl(vy) fix_to_gl(vz))
     return 0
 }
@@ -785,7 +785,7 @@ let sim_car = (idx:int is_player:int steer:int throttle:int brake:int):>void => 
     let nz:int = __load__(scratch_e + 16)
     let vn:int = vec3_dot3(scratch_b scratch_e)
     let kvn:int = FIX_ONE - (FIX_ONE // 256)
-    let dampn:int = 0 - fix_mul(vn kvn)
+    let dampn:int = -fix_mul(vn kvn)
     vec3_mad(scratch_b scratch_b scratch_e dampn)
     if is_player not=? 0 {
         let st:int = fix_mul(STEER_MAG steer)
@@ -811,10 +811,10 @@ let sim_car = (idx:int is_player:int steer:int throttle:int brake:int):>void => 
     }
     let acc:int = fix_mul(THR th)
     if brake not=? 0 {
-        acc = 0 - fix_mul(BRK brake)
+        acc = -fix_mul(BRK brake)
     }
     vec3_mad(scratch_b scratch_b scratch_c fix_mul(acc DT))
-    let drag_s:int = 0 - fix_mul(DRAG DT)
+    let drag_s:int = -fix_mul(DRAG DT)
     vec3_mad(scratch_b scratch_b scratch_b drag_s)
     vec3_mad(scratch_a scratch_a scratch_b DT)
     let qx:int = __load__(scratch_closest)
@@ -954,7 +954,7 @@ let main = ():>int => {
         } else {
             let st:int = 0
             if key_a not=? 0 {
-                st = 0 - FIX_ONE
+                st = -FIX_ONE
             }
             if key_d not=? 0 {
                 st = FIX_ONE

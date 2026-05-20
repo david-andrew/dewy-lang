@@ -227,12 +227,12 @@ let query_surface = (x:int y:int z:int):>void => {
         let rel_y:int = y - y_centerline
         # Project (rel_x, rel_y) onto strip lateral direction r = (cth, sth, 0).
         let w:int = fp_mul(rel_x cth) + fp_mul(rel_y sth)
-        if (w >=? (0 - CORK_HALF_W)) and (w <=? CORK_HALF_W) {
+        if (w >=? (-CORK_HALF_W)) and (w <=? CORK_HALF_W) {
             on_cork = 1
             surf_x = CORK_X_CENTER + fp_mul(w cth)
             surf_y = y_centerline + fp_mul(w sth)
             surf_z = z
-            surf_nx = 0 - sth
+            surf_nx = -sth
             surf_ny = cth
             surf_nz = 0
         }
@@ -310,7 +310,7 @@ let reset_craft = ():>void => {
     cvz = 0
     fx = 0
     fy = 0
-    fz = 0 - FP_ONE
+    fz = -FP_ONE
     ux = 0
     uy = FP_ONE
     uz = 0
@@ -364,9 +364,9 @@ let physics_step = ():>void => {
                     ux += 6553
                 }
             }
-            ux += fp_mul((0 - ux) UP_ALPHA_AIR)
+            ux += fp_mul((-ux) UP_ALPHA_AIR)
             uy += fp_mul(FP_ONE - uy UP_ALPHA_AIR)
-            uz += fp_mul((0 - uz) UP_ALPHA_AIR)
+            uz += fp_mul((-uz) UP_ALPHA_AIR)
             let um:int = fp_sqrt((ux * ux) + (uy * uy) + (uz * uz))
             if um >? 1024 {
                 ux = fp_div(ux um)
@@ -502,7 +502,7 @@ let physics_step = ():>void => {
     query_surface(cx cy cz)
     let post_gap:int = normal_gap(cx cy cz)
     if post_gap <=? AIR_GAP {
-        let snap_amt:int = fp_mul(0 - post_gap SNAP_ALPHA)
+        let snap_amt:int = fp_mul(-post_gap SNAP_ALPHA)
         cx += fp_mul(snap_amt surf_nx)
         cy += fp_mul(snap_amt surf_ny)
         cz += fp_mul(snap_amt surf_nz)
@@ -592,7 +592,7 @@ let set_perspective = (screen_w:int screen_h:int):>void => {
     let aspect_q16:int = (screen_w << 16) // screen_h
     let top_q16:int = cur_fov_top_q16
     let right_q16:int = fp_mul(top_q16 aspect_q16)
-    GL_Frustum(q16_to_f64(0 - right_q16) q16_to_f64(right_q16) q16_to_f64(0 - top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
+    GL_Frustum(q16_to_f64(-right_q16) q16_to_f64(right_q16) q16_to_f64(-top_q16) q16_to_f64(top_q16) F64_NEAR F64_FAR)
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
     return 0
@@ -611,24 +611,24 @@ let apply_camera = ():>void => {
     let cry:int = fp_mul(cam_fz cam_ux) - fp_mul(cam_fx cam_uz)
     let crz:int = fp_mul(cam_fx cam_uy) - fp_mul(cam_fy cam_ux)
 
-    let neg_dot_r:int = 0 - (fp_mul(crx cam_x) + fp_mul(cry cam_y) + fp_mul(crz cam_z))
-    let neg_dot_u:int = 0 - (fp_mul(cam_ux cam_x) + fp_mul(cam_uy cam_y) + fp_mul(cam_uz cam_z))
+    let neg_dot_r:int = -(fp_mul(crx cam_x) + fp_mul(cry cam_y) + fp_mul(crz cam_z))
+    let neg_dot_u:int = -(fp_mul(cam_ux cam_x) + fp_mul(cam_uy cam_y) + fp_mul(cam_uz cam_z))
     let dot_f:int = fp_mul(cam_fx cam_x) + fp_mul(cam_fy cam_y) + fp_mul(cam_fz cam_z)
 
     let mat:int = __static_alloca__(64)
     __store_u32__(q16_to_f32(crx) mat + 0)
     __store_u32__(q16_to_f32(cam_ux) mat + 4)
-    __store_u32__(q16_to_f32(0 - cam_fx) mat + 8)
+    __store_u32__(q16_to_f32(-cam_fx) mat + 8)
     __store_u32__(0 mat + 12)
 
     __store_u32__(q16_to_f32(cry) mat + 16)
     __store_u32__(q16_to_f32(cam_uy) mat + 20)
-    __store_u32__(q16_to_f32(0 - cam_fy) mat + 24)
+    __store_u32__(q16_to_f32(-cam_fy) mat + 24)
     __store_u32__(0 mat + 28)
 
     __store_u32__(q16_to_f32(crz) mat + 32)
     __store_u32__(q16_to_f32(cam_uz) mat + 36)
-    __store_u32__(q16_to_f32(0 - cam_fz) mat + 40)
+    __store_u32__(q16_to_f32(-cam_fz) mat + 40)
     __store_u32__(0 mat + 44)
 
     __store_u32__(q16_to_f32(neg_dot_r) mat + 48)
@@ -641,9 +641,9 @@ let apply_camera = ():>void => {
 }
 
 let draw_ground = ():>void => {
-    let i:int = 0 - HALF_TILES
+    let i:int = -HALF_TILES
     loop i <? HALF_TILES {
-        let j:int = 0 - HALF_TILES
+        let j:int = -HALF_TILES
         loop j <? HALF_TILES {
             let x0:int = i * TILE_SIZE
             let x1:int = (i + 1) * TILE_SIZE
@@ -698,8 +698,8 @@ let draw_corkscrew = ():>void => {
 
         let wi:int = 0
         loop wi <? CORK_W_SEGMENTS {
-            let w0:int = (0 - CORK_HALF_W) + ((wi * CORK_W) // CORK_W_SEGMENTS)
-            let w1:int = (0 - CORK_HALF_W) + (((wi + 1) * CORK_W) // CORK_W_SEGMENTS)
+            let w0:int = (-CORK_HALF_W) + ((wi * CORK_W) // CORK_W_SEGMENTS)
+            let w1:int = (-CORK_HALF_W) + (((wi + 1) * CORK_W) // CORK_W_SEGMENTS)
 
             let x00:int = CORK_X_CENTER + fp_mul(w0 cth0)
             let y00:int = yc0 + fp_mul(w0 sth0)
@@ -743,10 +743,10 @@ let craft_emit = (lx:int ly:int lz:int):>void => {
 
 let draw_craft = ():>void => {
     let nose_z:int = 229376
-    let tail_z:int = 0 - 131072
+    let tail_z:int = -131072
     let wing_x:int = 163840
     let body_y_top:int = 39321
-    let body_y_bot:int = 0 - 13107
+    let body_y_bot:int = -13107
     let canopy_z:int = 65536
     let canopy_y:int = 78643
 
@@ -769,23 +769,23 @@ let draw_craft = ():>void => {
     glBegin(GL_TRIANGLES)
     GL_Color3f(body_r body_g body_b)
     craft_emit(0 body_y_top nose_z)
-    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(-wing_x body_y_top tail_z)
     craft_emit(wing_x body_y_top tail_z)
     glEnd()
     glBegin(GL_TRIANGLES)
     GL_Color3f(belly_r belly_g belly_b)
     craft_emit(0 body_y_bot nose_z)
     craft_emit(wing_x body_y_bot tail_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
     glEnd()
     glBegin(GL_TRIANGLES)
     GL_Color3f(side_r side_g side_b)
     craft_emit(0 body_y_top nose_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
-    craft_emit(0 - wing_x body_y_top tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_top tail_z)
     craft_emit(0 body_y_top nose_z)
     craft_emit(0 body_y_bot nose_z)
-    craft_emit(0 - wing_x body_y_bot tail_z)
+    craft_emit(-wing_x body_y_bot tail_z)
     glEnd()
     glBegin(GL_TRIANGLES)
     GL_Color3f(side_r side_g side_b)
@@ -799,7 +799,7 @@ let draw_craft = ():>void => {
     glBegin(GL_TRIANGLES)
     GL_Color3f(canopy_r canopy_g canopy_b)
     craft_emit(0 canopy_y canopy_z)
-    craft_emit(0 - 26214 body_y_top 0)
+    craft_emit(-26214 body_y_top 0)
     craft_emit(26214 body_y_top 0)
     glEnd()
     let glow_x:int = 65536
@@ -807,10 +807,10 @@ let draw_craft = ():>void => {
     let glow_y_top:int = 26214
     glBegin(GL_QUADS)
     GL_Color3f(glow_r glow_g glow_b)
-    craft_emit(0 - glow_x glow_y_bot tail_z)
+    craft_emit(-glow_x glow_y_bot tail_z)
     craft_emit(glow_x glow_y_bot tail_z)
     craft_emit(glow_x glow_y_top tail_z)
-    craft_emit(0 - glow_x glow_y_top tail_z)
+    craft_emit(-glow_x glow_y_top tail_z)
     glEnd()
     return 0
 }
