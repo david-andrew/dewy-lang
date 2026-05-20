@@ -146,8 +146,12 @@ let bb_push_hex = (bb:int n:int):>void => {
 # making sure the bb is not modified after this call.
 let bb_finalize_as_string = (bb:int):>int => {
     let len:int = bb_len(bb)
-    let out:int = arena_alloc(len + 8)
+    # Allocate length-prefix (8) + data + trailing NUL (1). The NUL is not part
+    # of the string's value (str_len reads from out - 8) but lets arena strings
+    # double as cstrings, which makes interop with syscalls/libc safer.
+    let out:int = arena_alloc(len + 9)
     __store__(len out)
     copy_bytes(out + 8 bb_data(bb) len)
+    __store_u8__(0 out + 8 + len)
     return out + 8
 }
