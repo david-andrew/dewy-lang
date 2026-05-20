@@ -148,31 +148,31 @@ let ts_set_kind = (ts:int idx:int kind:int):>void => {
 
 # Character class for in-place ops (=? prefix combos like +=, -=, ==?, etc.)
 let t1_is_in_place_op_kind = (kind:int):>int => {
-    if kind =? TK_PLUS { return TRUE_VAL }
-    if kind =? TK_MINUS { return TRUE_VAL }
-    if kind =? TK_MUL { return TRUE_VAL }
-    if kind =? TK_IDIV { return TRUE_VAL }
-    if kind =? TK_MOD { return TRUE_VAL }
-    if kind =? TK_EQ { return TRUE_VAL }
-    if kind =? TK_NOT_EQ { return TRUE_VAL }
-    if kind =? TK_GT { return TRUE_VAL }
-    if kind =? TK_GT_EQ { return TRUE_VAL }
-    if kind =? TK_LT { return TRUE_VAL }
-    if kind =? TK_LT_EQ { return TRUE_VAL }
-    if kind =? TK_AND { return TRUE_VAL }
-    if kind =? TK_OR { return TRUE_VAL }
-    if kind =? TK_XOR { return TRUE_VAL }
-    if kind =? TK_NOT { return TRUE_VAL }
-    if kind =? TK_LEFT_SHIFT { return TRUE_VAL }
-    if kind =? TK_RIGHT_SHIFT { return TRUE_VAL }
-    return FALSE_VAL
+    if kind =? TK_PLUS { return true }
+    if kind =? TK_MINUS { return true }
+    if kind =? TK_MUL { return true }
+    if kind =? TK_IDIV { return true }
+    if kind =? TK_MOD { return true }
+    if kind =? TK_EQ { return true }
+    if kind =? TK_NOT_EQ { return true }
+    if kind =? TK_GT { return true }
+    if kind =? TK_GT_EQ { return true }
+    if kind =? TK_LT { return true }
+    if kind =? TK_LT_EQ { return true }
+    if kind =? TK_AND { return true }
+    if kind =? TK_OR { return true }
+    if kind =? TK_XOR { return true }
+    if kind =? TK_NOT { return true }
+    if kind =? TK_LEFT_SHIFT { return true }
+    if kind =? TK_RIGHT_SHIFT { return true }
+    return false
 }
 
 let t1_is_hex_digit = (c:int):>int => {
-    if (c >=? 48) and (c <=? 57) { return TRUE_VAL }
-    if (c >=? 97) and (c <=? 102) { return TRUE_VAL }
-    if (c >=? 65) and (c <=? 70) { return TRUE_VAL }
-    return FALSE_VAL
+    if (c >=? 48) and (c <=? 57) { return true }
+    if (c >=? 97) and (c <=? 102) { return true }
+    if (c >=? 65) and (c <=? 70) { return true }
+    return false
 }
 
 let t1_hex_value = (c:int):>int => {
@@ -485,7 +485,7 @@ let t1_tokenize = (src:int):>int => {
                 let hex_start:int = i
                 i = i + 2
                 let hex_val:int = 0
-                let hex_saw:int = FALSE_VAL
+                let hex_saw:int = false
                 loop i <? n {
                     let hc:int = __load_u8__(src + i)
                     if hc =? T1_CH_UNDERSCORE {
@@ -493,7 +493,7 @@ let t1_tokenize = (src:int):>int => {
                         continue
                     }
                     if not t1_is_hex_digit(hc) { break }
-                    hex_saw = TRUE_VAL
+                    hex_saw = true
                     hex_val = (hex_val << 4) or t1_hex_value(hc)
                     i = i + 1
                 }
@@ -507,7 +507,7 @@ let t1_tokenize = (src:int):>int => {
                 let bin_start:int = i
                 i = i + 2
                 let bin_val:int = 0
-                let bin_saw:int = FALSE_VAL
+                let bin_saw:int = false
                 loop i <? n {
                     let bc:int = __load_u8__(src + i)
                     if bc =? T1_CH_UNDERSCORE {
@@ -515,7 +515,7 @@ let t1_tokenize = (src:int):>int => {
                         continue
                     }
                     if (bc not=? 48) and (bc not=? 49) { break }
-                    bin_saw = TRUE_VAL
+                    bin_saw = true
                     bin_val = (bin_val << 1) or (bc - 48)
                     i = i + 1
                 }
@@ -531,7 +531,7 @@ let t1_tokenize = (src:int):>int => {
         if t1_is_digit(c) {
             let dec_start:int = i
             let dec_val:int = 0
-            let dec_saw:int = FALSE_VAL
+            let dec_saw:int = false
             loop i <? n {
                 let dc:int = __load_u8__(src + i)
                 if dc =? T1_CH_UNDERSCORE {
@@ -539,7 +539,7 @@ let t1_tokenize = (src:int):>int => {
                     continue
                 }
                 if not t1_is_digit(dc) { break }
-                dec_saw = TRUE_VAL
+                dec_saw = true
                 dec_val = dec_val * 10 + (dc - 48)
                 i = i + 1
             }

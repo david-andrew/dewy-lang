@@ -2,10 +2,12 @@ const STDIN:int = 0
 const STDOUT:int = 1
 const STDERR:int = 2
 
+const SYS_GETCWD:int = 17
 const SYS_DUP3:int = 24
 const SYS_MKDIRAT:int = 34
 const SYS_UNLINKAT:int = 35
 const SYS_CHDIR:int = 49
+const SYS_SETSID:int = 157
 const SYS_OPENAT:int = 56
 const SYS_CLOSE:int = 57
 const SYS_LSEEK:int = 62
@@ -89,6 +91,14 @@ let host_unlink = (path_cstr:int):>int => {
 
 let host_chdir = (path_cstr:int):>int => {
     return __syscall1__(SYS_CHDIR path_cstr)
+}
+
+let host_getcwd = (buf:int cap:int):>int => {
+    return __syscall2__(SYS_GETCWD buf cap)
+}
+
+let host_setsid = ():>int => {
+    return __syscall0__(SYS_SETSID)
 }
 
 # Stubs for networking / time helpers used by the wasm backend's serve mode.

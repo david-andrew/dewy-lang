@@ -154,8 +154,8 @@ let intmap_get = (m:int key:int):>int => {
 
 let intmap_has = (m:int key:int):>int => {
     let slot:int = intmap_probe(m key)
-    if __load__(slot + IM_SLOT_STATE) =? IM_OCCUPIED { return TRUE_VAL }
-    return FALSE_VAL
+    if __load__(slot + IM_SLOT_STATE) =? IM_OCCUPIED { return true }
+    return false
 }
 
 let intmap_remove = (m:int key:int):>int => {
@@ -164,7 +164,7 @@ let intmap_remove = (m:int key:int):>int => {
         __store__(IM_TOMBSTONE slot + IM_SLOT_STATE)
         __store__(intmap_size(m) - 1 m + IM_OFF_SIZE)
         __store__(__load__(m + IM_OFF_TOMB) + 1 m + IM_OFF_TOMB)
-        return TRUE_VAL
+        return true
     }
-    return FALSE_VAL
+    return false
 }

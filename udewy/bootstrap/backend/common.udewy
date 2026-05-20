@@ -151,8 +151,8 @@ const BO_SIZE:int = 32
 let be_options_new = ():>int => {
     let opts:int = arena_alloc(BO_SIZE)
     __store__(0 opts + BO_LINK_ARTIFACTS)
-    __store__(FALSE_VAL opts + BO_SPLIT_WASM)
-    __store__(FALSE_VAL opts + BO_SERVE_WASM)
+    __store__(false opts + BO_SPLIT_WASM)
+    __store__(false opts + BO_SERVE_WASM)
     __store__(0 opts + BO_INPUT_FILE)
     return opts
 }
@@ -163,12 +163,12 @@ let be_opt_link_artifacts = (opts:int):>int => {
 }
 
 let be_opt_split_wasm = (opts:int):>int => {
-    if opts =? 0 { return FALSE_VAL }
+    if opts =? 0 { return false }
     return __load__(opts + BO_SPLIT_WASM)
 }
 
 let be_opt_serve_wasm = (opts:int):>int => {
-    if opts =? 0 { return FALSE_VAL }
+    if opts =? 0 { return false }
     return __load__(opts + BO_SERVE_WASM)
 }
 
@@ -183,7 +183,7 @@ let be_opt_set_serve_wasm     = (opts:int v:int):>void => { __store__(v opts + B
 let be_opt_set_input_file     = (opts:int v:int):>void => { __store__(v opts + BO_INPUT_FILE)     return void }
 
 # Convenience: classify a link-artifact path as shared (.so or .so.N) vs static
-# (everything else: .a, .o, .js, .wasm, ...). Returns TRUE_VAL for shared.
+# (everything else: .a, .o, .js, .wasm, ...). Returns true for shared.
 let be_artifact_is_shared = (path:int):>int => {
     let n:int = str_len(path)
     let i:int = 0
@@ -193,19 +193,19 @@ let be_artifact_is_shared = (path:int):>int => {
             if __load_u8__(path + i + 1) =? 115 {
                 if __load_u8__(path + i + 2) =? 111 {
                     let after:int = i + 3
-                    if after =? n { return TRUE_VAL }
-                    if __load_u8__(path + after) =? 46 { return TRUE_VAL }
+                    if after =? n { return true }
+                    if __load_u8__(path + after) =? 46 { return true }
                 }
             }
         }
         i = i + 1
     }
-    return FALSE_VAL
+    return false
 }
 
 # Default for backends without source-level capability modules.
 let be_default_should_warn_unused_extern = (name:int):>int => {
-    return TRUE_VAL
+    return true
 }
 
 let be_default_set_imported_sources = (paths_vec:int):>void => {

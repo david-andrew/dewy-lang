@@ -1,7 +1,5 @@
 # Portable udewy stdlib (no host I/O)
 
-const FALSE_VAL:int = false
-const TRUE_VAL:int = true
 
 const CH_NUL:int = 0
 const CH_TAB:int = 9
@@ -57,16 +55,16 @@ let str_len = (s:int):>int => {
 
 let str_eq_len = (s1:int len1:int s2:int len2:int):>int => {
     if len1 not=? len2 {
-        return FALSE_VAL
+        return false
     }
     let i:int = 0
     loop i <? len1 {
         if __load_u8__(s1 + i) not=? __load_u8__(s2 + i) {
-            return FALSE_VAL
+            return false
         }
         i = i + 1
     }
-    return TRUE_VAL
+    return true
 }
 
 let str_eq = (s1:int s2:int):>int => {
@@ -96,11 +94,11 @@ let str_prefix = (s:int prefix:int):>int => {
     let i:int = 0
     loop i <? prefix_len {
         if __load_u8__(s + i) not=? __load_u8__(prefix + i) {
-            return FALSE_VAL
+            return false
         }
         i = i + 1
     }
-    return TRUE_VAL
+    return true
 }
 
 let str_copy = (dst:int s:int):>int => {
@@ -123,12 +121,12 @@ let cstr_eq = (a:int b:int):>int => {
         let ca:int = __load_u8__(a + i)
         let cb:int = __load_u8__(b + i)
         if ca not=? cb {
-            return FALSE_VAL
+            return false
         }
         if ca =? CH_NUL {
-            return TRUE_VAL
+            return true
         }
         i = i + 1
     }
-    return FALSE_VAL
+    return false
 }

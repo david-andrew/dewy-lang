@@ -81,11 +81,11 @@ let proc_cstr_has_slash = (s:int):>int => {
     let i:int = 0
     loop true {
         let c:int = __load_u8__(s + i)
-        if c =? 0 { return FALSE_VAL }
-        if c =? 47 { return TRUE_VAL }
+        if c =? 0 { return false }
+        if c =? 47 { return true }
         i = i + 1
     }
-    return FALSE_VAL
+    return false
 }
 
 # Returns a length-prefixed udewy string "<dir>/<name>".

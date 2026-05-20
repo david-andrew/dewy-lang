@@ -53,7 +53,7 @@ let fs_mkdir_p = (path_cstr:int):>int => {
 # Probe whether a path exists by trying to open it for reading.
 let fs_exists = (path_cstr:int):>int => {
     let fd:int = host_open(path_cstr O_RDONLY 0)
-    if fd <? 0 { return FALSE_VAL }
+    if fd <? 0 { return false }
     host_close(fd)
-    return TRUE_VAL
+    return true
 }

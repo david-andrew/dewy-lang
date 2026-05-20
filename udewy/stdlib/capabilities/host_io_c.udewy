@@ -70,6 +70,22 @@ let host_chdir = (path_cstr:int):>int => {
     return chdir(path_cstr)
 }
 
+let host_getcwd = (buf:int cap:int):>int => {
+    if getcwd(buf cap) =? 0 {
+        return 0 - 1
+    }
+    let n:int = 0
+    loop n <? cap {
+        if __load_u8__(buf + n) =? 0 { return n }
+        n = n + 1
+    }
+    return n
+}
+
+let host_setsid = ():>int => {
+    return setsid()
+}
+
 # Stubs for networking / time helpers used by the wasm backend's serve mode.
 # The C-target bootstrap currently does not wire serve mode up through libc;
 # these stubs let the rest of the runtime compile.

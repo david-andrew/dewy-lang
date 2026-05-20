@@ -29,8 +29,8 @@ const HS_SIZE:int = 32
 
 let http_state_new = ():>int => {
     let s:int = arena_alloc(HS_SIZE)
-    __store__(FALSE_VAL s + HS_PAGE_LOADED)
-    __store__(FALSE_VAL s + HS_SHUTDOWN_REQUESTED)
+    __store__(false s + HS_PAGE_LOADED)
+    __store__(false s + HS_SHUTDOWN_REQUESTED)
     let now:int = time_monotonic_ms()
     __store__(now s + HS_LAST_SEEN)
     __store__(now s + HS_STARTED)
@@ -38,13 +38,13 @@ let http_state_new = ():>int => {
 }
 
 let http_state_mark_loaded = (s:int):>void => {
-    __store__(TRUE_VAL s + HS_PAGE_LOADED)
+    __store__(true s + HS_PAGE_LOADED)
     __store__(time_monotonic_ms() s + HS_LAST_SEEN)
     return void
 }
 
 let http_state_request_shutdown = (s:int):>void => {
-    __store__(TRUE_VAL s + HS_SHUTDOWN_REQUESTED)
+    __store__(true s + HS_SHUTDOWN_REQUESTED)
     return void
 }
 
@@ -114,7 +114,7 @@ let http_parse_request_line = (buf:int n:int path_off_out:int path_len_out:int):
 # Compare a path slice (in buf) against a literal cstring `lit`.
 let http_path_eq_lit = (buf:int off:int len:int lit:int):>int => {
     let lit_n:int = str_len(lit)
-    if len not=? lit_n { return FALSE_VAL }
+    if len not=? lit_n { return false }
     return str_eq_len(buf + off len lit lit_n)
 }
 

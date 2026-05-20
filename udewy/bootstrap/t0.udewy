@@ -32,44 +32,44 @@ const T0_CH_p:int = 112
 const T0_CH_DOLLAR:int = 36
 
 let t0_is_horizontal_ws = (c:int):>int => {
-    if c =? T0_CH_SP { return TRUE_VAL }
-    if c =? T0_CH_TAB { return TRUE_VAL }
-    return FALSE_VAL
+    if c =? T0_CH_SP { return true }
+    if c =? T0_CH_TAB { return true }
+    return false
 }
 
 let t0_is_vertical_ws = (c:int):>int => {
-    if c =? T0_CH_LF { return TRUE_VAL }
-    if c =? T0_CH_CR { return TRUE_VAL }
-    return FALSE_VAL
+    if c =? T0_CH_LF { return true }
+    if c =? T0_CH_CR { return true }
+    return false
 }
 
 let t0_is_ws = (c:int):>int => {
-    if t0_is_horizontal_ws(c) { return TRUE_VAL }
-    if t0_is_vertical_ws(c) { return TRUE_VAL }
-    return FALSE_VAL
+    if t0_is_horizontal_ws(c) { return true }
+    if t0_is_vertical_ws(c) { return true }
+    return false
 }
 
 let t0_is_alpha = (c:int):>int => {
-    if (c >=? 65) and (c <=? 90) { return TRUE_VAL }
-    if (c >=? 97) and (c <=? 122) { return TRUE_VAL }
-    return FALSE_VAL
+    if (c >=? 65) and (c <=? 90) { return true }
+    if (c >=? 97) and (c <=? 122) { return true }
+    return false
 }
 
 let t0_is_digit = (c:int):>int => {
-    if (c >=? 48) and (c <=? 57) { return TRUE_VAL }
-    return FALSE_VAL
+    if (c >=? 48) and (c <=? 57) { return true }
+    return false
 }
 
 let t0_is_ident_start = (c:int):>int => {
-    if t0_is_alpha(c) { return TRUE_VAL }
-    if c =? 95 { return TRUE_VAL }
-    return FALSE_VAL
+    if t0_is_alpha(c) { return true }
+    if c =? 95 { return true }
+    return false
 }
 
 let t0_is_ident = (c:int):>int => {
-    if t0_is_ident_start(c) { return TRUE_VAL }
-    if t0_is_digit(c) { return TRUE_VAL }
-    return FALSE_VAL
+    if t0_is_ident_start(c) { return true }
+    if t0_is_digit(c) { return true }
+    return false
 }
 
 # ----------------------------------------------------------------------------
@@ -143,12 +143,12 @@ let t0_string_end = (src:int n:int idx:int):>int => {
 # by a non-ident character?
 let t0_starts_with_name = (src:int n:int idx:int name:int):>int => {
     let name_len:int = str_len(name)
-    if idx + name_len >? n { return FALSE_VAL }
-    if not str_eq_len(src + idx name_len name name_len) { return FALSE_VAL }
+    if idx + name_len >? n { return false }
+    if not str_eq_len(src + idx name_len name name_len) { return false }
     let end_idx:int = idx + name_len
-    if end_idx >=? n { return TRUE_VAL }
-    if t0_is_ident(__load_u8__(src + end_idx)) { return FALSE_VAL }
-    return TRUE_VAL
+    if end_idx >=? n { return true }
+    if t0_is_ident(__load_u8__(src + end_idx)) { return false }
+    return true
 }
 
 # After a directive's final token, advance past trailing horizontal whitespace,
@@ -280,9 +280,9 @@ let t0_parse_import_directive = (src:int n:int idx:int next_idx_out:int):>int =>
 }
 
 # Parse `$supported_targets = ["a" "b" ...]`. On match writes to next_idx_out,
-# stores a Set of strings in targets_out, and returns TRUE_VAL.
+# stores a Set of strings in targets_out, and returns true.
 let t0_parse_supported_targets = (src:int n:int idx:int targets_out:int next_idx_out:int):>int => {
-    if not t0_starts_with_name(src n idx "$supported_targets") { return FALSE_VAL }
+    if not t0_starts_with_name(src n idx "$supported_targets") { return false }
     let i:int = idx + 18
     i = t0_skip_horizontal_ws(src n i)
     if (i >=? n) or (__load_u8__(src + i) not=? T0_CH_EQ) {
@@ -317,25 +317,25 @@ let t0_parse_supported_targets = (src:int n:int idx:int targets_out:int next_idx
     let next_idx:int = t0_consume_directive_eol(src n i "$supported_targets")
     __store__(targets targets_out)
     __store__(next_idx next_idx_out)
-    return TRUE_VAL
+    return true
 }
 
 # Parse `if $target (=?|not=?) "x" {` returning the "active" boolean and the
 # block-start offset (just past the '{'). next_idx_out is unused for this
-# return; we return TRUE_VAL/FALSE_VAL via active_out and block_start_out.
+# return; we return true/false via active_out and block_start_out.
 let t0_parse_if_target_condition = (src:int n:int idx:int target:int active_out:int block_start_out:int):>int => {
-    if not t0_starts_with_name(src n idx "if") { return FALSE_VAL }
+    if not t0_starts_with_name(src n idx "if") { return false }
     let i:int = t0_skip_trivia(src n idx + 2)
     if not t0_starts_with_name(src n i "$target") {
         diag_error(i "Expected $target in preprocessor if")
     }
     i = i + 7
     i = t0_skip_trivia(src n i)
-    let negate:int = FALSE_VAL
+    let negate:int = false
     if (i + 1 <? n) and (__load_u8__(src + i) =? T0_CH_EQ) and (__load_u8__(src + i + 1) =? T0_CH_QUESTION) {
         i = i + 2
     } else if (i + 4 <? n) and (__load_u8__(src + i) =? 110) and (__load_u8__(src + i + 1) =? 111) and (__load_u8__(src + i + 2) =? 116) and (__load_u8__(src + i + 3) =? T0_CH_EQ) and (__load_u8__(src + i + 4) =? T0_CH_QUESTION) {
-        negate = TRUE_VAL
+        negate = true
         i = i + 5
     } else {
         diag_error(i "Expected =? or not=? in preprocessor if")
@@ -347,10 +347,10 @@ let t0_parse_if_target_condition = (src:int n:int idx:int target:int active_out:
     let str_start:int = i + 1
     let end_idx:int = t0_string_end(src n i)
     let tlen:int = end_idx - str_start - 1
-    let active:int = FALSE_VAL
-    if str_eq_len(src + str_start tlen target str_len(target)) { active = TRUE_VAL }
+    let active:int = false
+    if str_eq_len(src + str_start tlen target str_len(target)) { active = true }
     if negate {
-        if active { active = FALSE_VAL } else { active = TRUE_VAL }
+        if active { active = false } else { active = true }
     }
     i = t0_skip_trivia(src n end_idx)
     if (i >=? n) or (__load_u8__(src + i) not=? T0_CH_LBRACE) {
@@ -358,7 +358,7 @@ let t0_parse_if_target_condition = (src:int n:int idx:int target:int active_out:
     }
     __store__(active active_out)
     __store__(i + 1 block_start_out)
-    return TRUE_VAL
+    return true
 }
 
 # Skip from the inside of a `{...}` preprocessor block to one past the matching
@@ -390,7 +390,7 @@ let t0_skip_preprocessor_block = (src:int n:int idx:int):>int => {
 
 # Parse `\$warning("msg")` or `\$error("msg")`. On match writes the start
 # location, message string, kind (0=warning 1=error) and next idx; returns
-# TRUE_VAL.
+# true.
 let t0_parse_meta_diagnostic = (src:int n:int idx:int kind_out:int msg_out:int start_out:int next_idx_out:int):>int => {
     let start:int = idx
     let kind:int = 0
@@ -402,7 +402,7 @@ let t0_parse_meta_diagnostic = (src:int n:int idx:int kind_out:int msg_out:int s
         kind = 1
         i = idx + 6
     } else {
-        return FALSE_VAL
+        return false
     }
     i = t0_skip_horizontal_ws(src n i)
     if (i >=? n) or (__load_u8__(src + i) not=? T0_CH_LPAREN) {
@@ -441,7 +441,7 @@ let t0_parse_meta_diagnostic = (src:int n:int idx:int kind_out:int msg_out:int s
     __store__(msg msg_out)
     __store__(start start_out)
     __store__(after_eol next_idx_out)
-    return TRUE_VAL
+    return true
 }
 
 # ----------------------------------------------------------------------------
@@ -451,10 +451,10 @@ let t0_parse_meta_diagnostic = (src:int n:int idx:int kind_out:int msg_out:int s
 # Determine whether a path string ends with ".udewy".
 let t0_path_is_udewy = (path:int):>int => {
     let n:int = str_len(path)
-    if n <? 6 { return FALSE_VAL }
+    if n <? 6 { return false }
     let want:int = ".udewy"
-    if str_eq_len(path + n - 6 6 want 6) { return TRUE_VAL }
-    return FALSE_VAL
+    if str_eq_len(path + n - 6 6 want 6) { return true }
+    return false
 }
 
 # Resolve and load an import path. Returns a LoadedProgram pointer with

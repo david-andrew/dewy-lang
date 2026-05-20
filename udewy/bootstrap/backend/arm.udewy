@@ -424,7 +424,7 @@ let arm_begin_module = ():>void => { return void }
 let arm_set_module_init = (name:int):>void => { arm_module_init_name = name  return void }
 let arm_set_reachable_functions = (s:int):>void => {
     arm_reachable = s
-    arm_have_reachable = TRUE_VAL
+    arm_have_reachable = true
     return void
 }
 
@@ -488,7 +488,7 @@ let arm_finish_module = ():>int => {
     let fi:int = 0
     loop fi <? nf {
         let lid:int = vec_get(arm_function_ids fi)
-        if (arm_have_reachable =? FALSE_VAL) or intset_has(arm_reachable lid) {
+        if (not arm_have_reachable) or intset_has(arm_reachable lid) {
             let lines:int = vec_get(arm_function_codes fi)
             let ll:int = vec_len(lines)
             let li:int = 0
@@ -1267,7 +1267,7 @@ let arm_begin_if = ():>void => {
     let en:int = arm_new_label("if_end")
     vec_push(arm_if_else_labels el)
     vec_push(arm_if_end_labels en)
-    vec_push(arm_if_else_emitted FALSE_VAL)
+    vec_push(arm_if_else_emitted false)
     let bb:int = bb_new(32)
     bb_push_str(bb "    cbz x0, ")
     bb_push_str(bb el)
@@ -1279,7 +1279,7 @@ let arm_begin_else = ():>void => {
     let top:int = vec_len(arm_if_else_labels) - 1
     let el:int = vec_get(arm_if_else_labels top)
     let en:int = vec_get(arm_if_end_labels top)
-    vec_set(arm_if_else_emitted top TRUE_VAL)
+    vec_set(arm_if_else_emitted top true)
     let bb:int = bb_new(16)
     bb_push_str(bb "    b ")
     bb_push_str(bb en)
@@ -1296,7 +1296,7 @@ let arm_end_if = ():>void => {
     vec_pop(arm_if_else_labels)
     vec_pop(arm_if_end_labels)
     vec_pop(arm_if_else_emitted)
-    if emit =? FALSE_VAL { arm_emit_label_str(el) }
+    if not emit { arm_emit_label_str(el) }
     arm_emit_label_str(en)
     return void
 }
@@ -1423,9 +1423,9 @@ let arm_init_intrinsics = ():>void => {
 
 let arm_is_intrinsic = (name:int):>int => {
     arm_init_intrinsics()
-    if map_has_str(g_arm_intrinsics name) { return TRUE_VAL }
-    if arm_mixed_extern_arg_slots(name) >=? 0 { return TRUE_VAL }
-    return FALSE_VAL
+    if map_has_str(g_arm_intrinsics name) { return true }
+    if arm_mixed_extern_arg_slots(name) >=? 0 { return true }
+    return false
 }
 
 let arm_intrinsic_arity = (name:int):>int => {

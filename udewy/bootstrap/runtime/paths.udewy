@@ -103,19 +103,19 @@ let path_resolve = (base_dir:int relative:int):>int => {
 
 # Test whether the segment at seg_ptr/seg_len equals "..".
 let path_is_dotdot = (seg_ptr:int seg_len:int):>int => {
-    if seg_len not=? 2 { return FALSE_VAL }
-    if __load_u8__(seg_ptr) not=? CH_DOT { return FALSE_VAL }
-    if __load_u8__(seg_ptr + 1) not=? CH_DOT { return FALSE_VAL }
-    return TRUE_VAL
+    if seg_len not=? 2 { return false }
+    if __load_u8__(seg_ptr) not=? CH_DOT { return false }
+    if __load_u8__(seg_ptr + 1) not=? CH_DOT { return false }
+    return true
 }
 
 # Normalize a path lexically: collapse runs of '/', remove "." segments, and
 # resolve ".." segments where possible.
 let path_normalize = (p:int):>int => {
     let n:int = str_len(p)
-    let absolute:int = FALSE_VAL
+    let absolute:int = false
     if n >? 0 {
-        if __load_u8__(p) =? CH_SLASH { absolute = TRUE_VAL }
+        if __load_u8__(p) =? CH_SLASH { absolute = true }
     }
 
     # Parallel vectors of segment pointers and lengths.

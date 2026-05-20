@@ -13,10 +13,10 @@ import p"./backend/arm.udewy"
 import p"./backend/c.udewy"
 import p"./backend/wasm.udewy"
 
-let g_compile_only:int = FALSE_VAL
+let g_compile_only:int = false
 let g_target:int = 0
-let g_split_wasm:int = FALSE_VAL
-let g_serve_wasm:int = FALSE_VAL
+let g_split_wasm:int = false
+let g_serve_wasm:int = false
 let g_input_path:int = 0
 let g_script_args:int = 0
 
@@ -27,7 +27,7 @@ let argv_load = (argv:int idx:int):>int => {
 let str_eq_cstr_lit = (cstr:int lit:int):>int => {
     let cstr_n:int = cstr_len(cstr)
     let lit_n:int = str_len(lit)
-    if cstr_n not=? lit_n { return FALSE_VAL }
+    if cstr_n not=? lit_n { return false }
     return str_eq_len(cstr cstr_n lit lit_n)
 }
 
@@ -40,12 +40,12 @@ let usage_exit = ():>void => {
 let parse_args = (argc:int argv:int):>void => {
     g_script_args = vec_new(4)
     let i:int = 1
-    let saw_input:int = FALSE_VAL
+    let saw_input:int = false
     loop i <? argc {
         let cur:int = argv_load(argv i)
         if not saw_input {
             if str_eq_cstr_lit(cur "-c") {
-                g_compile_only = TRUE_VAL
+                g_compile_only = true
                 i = i + 1
                 continue
             }
@@ -57,17 +57,17 @@ let parse_args = (argc:int argv:int):>void => {
                 continue
             }
             if str_eq_cstr_lit(cur "--split-wasm") {
-                g_split_wasm = TRUE_VAL
+                g_split_wasm = true
                 i = i + 1
                 continue
             }
             if str_eq_cstr_lit(cur "--serve-wasm") {
-                g_serve_wasm = TRUE_VAL
+                g_serve_wasm = true
                 i = i + 1
                 continue
             }
             g_input_path = path_from_cstr(cur)
-            saw_input = TRUE_VAL
+            saw_input = true
             i = i + 1
             continue
         }

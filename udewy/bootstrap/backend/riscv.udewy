@@ -359,7 +359,7 @@ let rv_begin_module = ():>void => { return void }
 let rv_set_module_init = (name:int):>void => { rv_module_init_name = name  return void }
 let rv_set_reachable_functions = (s:int):>void => {
     rv_reachable = s
-    rv_have_reachable = TRUE_VAL
+    rv_have_reachable = true
     return void
 }
 
@@ -425,7 +425,7 @@ let rv_finish_module = ():>int => {
     let fi:int = 0
     loop fi <? nf {
         let lid:int = vec_get(rv_function_ids fi)
-        if (rv_have_reachable =? FALSE_VAL) or intset_has(rv_reachable lid) {
+        if (not rv_have_reachable) or intset_has(rv_reachable lid) {
             let lines:int = vec_get(rv_function_codes fi)
             let ll:int = vec_len(lines)
             let li:int = 0
@@ -1003,7 +1003,7 @@ let rv_mixed_extern_arg_slots = (name:int):>int => {
 }
 
 let rv_call_extern_fp_mixed = (tags:int):>void => {
-    rv_requires_hard_float = TRUE_VAL
+    rv_requires_hard_float = true
     let n:int = vec_len(tags)
     let gp_slots:int = vec_new(n)
     let fp_slots:int = vec_new(n)
@@ -1063,7 +1063,7 @@ let rv_begin_if = ():>void => {
     let en:int = rv_new_label("if_end")
     vec_push(rv_if_else_labels el)
     vec_push(rv_if_end_labels en)
-    vec_push(rv_if_else_emitted FALSE_VAL)
+    vec_push(rv_if_else_emitted false)
     let bb:int = bb_new(32)
     bb_push_str(bb "    beqz a0, ")
     bb_push_str(bb el)
@@ -1075,7 +1075,7 @@ let rv_begin_else = ():>void => {
     let top:int = vec_len(rv_if_else_labels) - 1
     let el:int = vec_get(rv_if_else_labels top)
     let en:int = vec_get(rv_if_end_labels top)
-    vec_set(rv_if_else_emitted top TRUE_VAL)
+    vec_set(rv_if_else_emitted top true)
     let bb:int = bb_new(16)
     bb_push_str(bb "    j ")
     bb_push_str(bb en)
@@ -1092,7 +1092,7 @@ let rv_end_if = ():>void => {
     vec_pop(rv_if_else_labels)
     vec_pop(rv_if_end_labels)
     vec_pop(rv_if_else_emitted)
-    if emit =? FALSE_VAL { rv_emit_label_str(el) }
+    if not emit { rv_emit_label_str(el) }
     rv_emit_label_str(en)
     return void
 }
@@ -1219,9 +1219,9 @@ let rv_init_intrinsics = ():>void => {
 
 let rv_is_intrinsic = (name:int):>int => {
     rv_init_intrinsics()
-    if map_has_str(g_rv_intrinsics name) { return TRUE_VAL }
-    if rv_mixed_extern_arg_slots(name) >=? 0 { return TRUE_VAL }
-    return FALSE_VAL
+    if map_has_str(g_rv_intrinsics name) { return true }
+    if rv_mixed_extern_arg_slots(name) >=? 0 { return true }
+    return false
 }
 
 let rv_intrinsic_arity = (name:int):>int => {
@@ -1272,24 +1272,24 @@ let rv_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
     else if str_eq(name "__unsigned_gte__")  { rv_unsigned_cmp(2) }
     else if str_eq(name "__alloca__")        { rv_alloca() }
     else if str_eq(name "__i64_to_f32_bits__") {
-        rv_requires_hard_float = TRUE_VAL
+        rv_requires_hard_float = true
         rv_emit_indented("fcvt.s.l ft0, a0")
         rv_emit_indented("fmv.x.w a0, ft0")
         rv_emit_indented("slli a0, a0, 32")
         rv_emit_indented("srli a0, a0, 32")
     }
     else if str_eq(name "__i64_to_f64_bits__") {
-        rv_requires_hard_float = TRUE_VAL
+        rv_requires_hard_float = true
         rv_emit_indented("fcvt.d.l ft0, a0")
         rv_emit_indented("fmv.x.d a0, ft0")
     }
     else if str_eq(name "__f32_bits_to_i64__") {
-        rv_requires_hard_float = TRUE_VAL
+        rv_requires_hard_float = true
         rv_emit_indented("fmv.w.x ft0, a0")
         rv_emit_indented("fcvt.l.s a0, ft0, rtz")
     }
     else if str_eq(name "__f64_bits_to_i64__") {
-        rv_requires_hard_float = TRUE_VAL
+        rv_requires_hard_float = true
         rv_emit_indented("fmv.d.x ft0, a0")
         rv_emit_indented("fcvt.l.d a0, ft0, rtz")
     }
@@ -1339,7 +1339,7 @@ let rv_compile_and_link = (code:int input_name:int cache_dir:int options:int):>i
 
     let av1:int = vec_new(8)
     vec_push(av1 rv_str("riscv64-linux-gnu-as"))
-    if rv_requires_hard_float =? TRUE_VAL {
+    if rv_requires_hard_float {
         vec_push(av1 rv_str("-march=rv64gc"))
         vec_push(av1 rv_str("-mabi=lp64d"))
     }

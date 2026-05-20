@@ -13,6 +13,8 @@ let dup2 = (oldfd:int newfd:int):>int => extern
 let mkdir = (path:int mode:int):>int => extern
 let unlink = (path:int):>int => extern
 let chdir = (path:int):>int => extern
+let getcwd = (buf:int cap:int):>int => extern
+let setsid = ():>int => extern
 let fork = ():>int => extern
 let execve = (path:int argv:int envp:int):>int => extern
 let waitpid = (pid:int status_ptr:int flags:int):>int => extern

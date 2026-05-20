@@ -29,6 +29,8 @@ const SYS_WAIT4:int = 61
 const SYS_MKDIR:int = 83
 const SYS_UNLINK:int = 87
 const SYS_CHDIR:int = 80
+const SYS_GETCWD:int = 79
+const SYS_SETSID:int = 112
 const SYS_CLOCK_GETTIME:int = 228
 
 const O_RDONLY:int = 0
@@ -98,6 +100,14 @@ let host_unlink = (path_cstr:int):>int => {
 
 let host_chdir = (path_cstr:int):>int => {
     return __syscall1__(SYS_CHDIR path_cstr)
+}
+
+let host_getcwd = (buf:int cap:int):>int => {
+    return __syscall2__(SYS_GETCWD buf cap)
+}
+
+let host_setsid = ():>int => {
+    return __syscall0__(SYS_SETSID)
 }
 
 let host_socket = (domain:int type_:int protocol:int):>int => {

@@ -3,11 +3,10 @@
 # wasm, and wraps the result in a standalone HTML driver (embedded base64,
 # split sidecar, or local HTTP serve mode) -- matching udewy/backend/wasm.py.
 #
-# The large JS/HTML host blobs are currently a verbatim copy of the Python
-# backend's strings (Phase 2 will extract them to canonical reference files
-# kept in sync by a pre-commit hook). Regenerate via
-#     python scripts/_oneoff_python_string_to_udewy_pushes.py host_js
-# (and likewise for server_js, split_html, embedded_html).
+# The large JS/HTML host blobs in w_emit_host_js, w_emit_server_lifecycle_js,
+# w_emit_split_html, and w_emit_embedded_html are kept in sync with
+# udewy/backend/wasm.py manually. tests/python_misc/test_udewy_bootstrap_parity.py
+# diffs the generated HTML to catch drift.
 
 import p"./common.udewy"
 import p"../t1.udewy"
@@ -203,7 +202,7 @@ let w_begin_module = ():>void => { return void }
 let w_set_module_init = (name:int):>void => { w_module_init_name = name  return void }
 let w_set_reachable_functions = (s:int):>void => {
     w_reachable = s
-    w_have_reachable = TRUE_VAL
+    w_have_reachable = true
     return void
 }
 
@@ -212,10 +211,10 @@ let w_set_reachable_functions = (s:int):>void => {
 let w_resolve_data_ref = (value:int):>int => {
     # Detect "+8" suffix.
     let vlen:int = str_len(value)
-    let has_plus8:int = FALSE_VAL
+    let has_plus8:int = false
     if vlen >=? 2 {
         if (__load_u8__(value + vlen - 2) =? 43) and (__load_u8__(value + vlen - 1) =? 56) {
-            has_plus8 = TRUE_VAL
+            has_plus8 = true
         }
     }
     let prefix_len:int = vlen
@@ -946,8 +945,8 @@ let w_init_intrinsics = ():>void => {
 
 let w_is_intrinsic = (name:int):>int => {
     w_init_intrinsics()
-    if map_has_str(g_w_intrinsics name) { return TRUE_VAL }
-    return FALSE_VAL
+    if map_has_str(g_w_intrinsics name) { return true }
+    return false
 }
 
 let w_intrinsic_arity = (name:int):>int => {
@@ -1166,7 +1165,7 @@ let w_finish_module = ():>int => {
         let lid:int = vec_get(w_function_ids fi)
         let fn_name:int = intmap_get(w_fn_labels lid)
         let pc:int = intmap_get(w_fn_param_counts lid)
-        if (w_have_reachable not=? FALSE_VAL) and (not intset_has(w_reachable lid)) {
+        if w_have_reachable and (not intset_has(w_reachable lid)) {
             # Stub reachable-but-unused: keep table layout intact.
             bb_push_str(out "  (func ")
             bb_push_str(out fn_name)
@@ -1311,1349 +1310,1350 @@ let w_finish_module = ():>int => {
 }
 
 let w_emit_host_js = (out:int):>void => {
-    bb_push_str(out "\n")
-    bb_push_str(out "const memory = new WebAssembly.Memory(\{ initial: 32 \});\n")
-    bb_push_str(out "let outputElement = null;\n")
-    bb_push_str(out "let domNextHandle = 1;\n")
-    bb_push_str(out "let domRootHandle = 0;\n")
-    bb_push_str(out "const domNodes = new Map();\n")
-    bb_push_str(out "const domHandles = new WeakMap();\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "// Canvas state\n")
-    bb_push_str(out "let canvas = null;\n")
-    bb_push_str(out "let ctx = null;\n")
-    bb_push_str(out "let canvasBuffer = null;\n")
-    bb_push_str(out "let canvasBufferPtr = 0;\n")
-    bb_push_str(out "let canvasWidth = 0;\n")
-    bb_push_str(out "let canvasHeight = 0;\n")
-    bb_push_str(out "let frameCount = 0;\n")
-    bb_push_str(out "let startTime = 0;\n")
-    bb_push_str(out "let canvasMode = false;\n")
-    bb_push_str(out "let wasmInstance = null;\n")
-    bb_push_str(out "let canvasAspectWidth = 0;\n")
-    bb_push_str(out "let canvasAspectHeight = 0;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "// Audio state (one-shot mode)\n")
-    bb_push_str(out "let audioCtx = null;\n")
-    bb_push_str(out "let audioSampleRate = 44100;\n")
-    bb_push_str(out "let audioNumSamples = 0;\n")
-    bb_push_str(out "let audioChannels = 1;\n")
-    bb_push_str(out "let audioBufferPtr = 0;\n")
-    bb_push_str(out "let audioPendingPlay = false;\n")
-    bb_push_str(out "let audioResumePending = false;\n")
-    bb_push_str(out "let audioPromptTimer = null;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "// Audio streaming state\n")
-    bb_push_str(out "let audioStreamMode = false;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "// WebGL fullscreen shader state\n")
-    bb_push_str(out "let webglCanvas = null;\n")
-    bb_push_str(out "let webglContext = null;\n")
-    bb_push_str(out "let webglProgram = null;\n")
-    bb_push_str(out "let webglPositionBuffer = null;\n")
-    bb_push_str(out "let webglMode = false;\n")
-    bb_push_str(out "let pointerInstalled = false;\n")
-    bb_push_str(out "let keyboardInstalled = false;\n")
-    bb_push_str(out "let pointerX = 0;\n")
-    bb_push_str(out "let pointerY = 0;\n")
-    bb_push_str(out "let pointerDown = false;\n")
-    bb_push_str(out "const keysDown = new Set();\n")
-    bb_push_str(out "const keysPressedFrame = new Set();\n")
-    bb_push_str(out "const keysReleasedFrame = new Set();\n")
-    bb_push_str(out "let audioStreamBufferSize = 0;\n")
-    bb_push_str(out "let audioStreamStarted = false;\n")
-    bb_push_str(out "let audioScriptNode = null;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "// General-purpose audio queue (ring of Int16 samples) driven from WASM.\n")
-    bb_push_str(out "// Reuses the global `audioCtx` so the existing `requestAudioUnlock()` user-\n")
-    bb_push_str(out "// gesture path also unlocks queued playback.\n")
-    bb_push_str(out "let audioQueueRate = 44100;\n")
-    bb_push_str(out "let audioQueueChannels = 1;\n")
-    bb_push_str(out "let audioQueueRing = null;\n")
-    bb_push_str(out "let audioQueueRead = 0;\n")
-    bb_push_str(out "let audioQueueWrite = 0;\n")
-    bb_push_str(out "let audioQueueCount = 0;\n")
-    bb_push_str(out "let audioQueueCapacity = 0;\n")
-    bb_push_str(out "let audioQueueNode = null;\n")
-    bb_push_str(out "let audioQueueMode = false;\n")
-    bb_push_str(out "const AUDIO_QUEUE_BLOCK = 2048;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function audioQueueEnsureContext() \{\n")
-    bb_push_str(out "    if (audioQueueNode) return;\n")
-    bb_push_str(out "    if (!audioCtx) \{\n")
-    bb_push_str(out "        audioCtx = new AudioContext(\{ sampleRate: audioQueueRate \});\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    audioQueueNode = audioCtx.createScriptProcessor(AUDIO_QUEUE_BLOCK, 0, audioQueueChannels);\n")
-    bb_push_str(out "    audioQueueNode.onaudioprocess = (e) => \{\n")
-    bb_push_str(out "        const ch = e.outputBuffer.getChannelData(0);\n")
-    bb_push_str(out "        for (let i = 0; i < AUDIO_QUEUE_BLOCK; i++) \{\n")
-    bb_push_str(out "            if (audioQueueCount > 0) \{\n")
-    bb_push_str(out "                const s = audioQueueRing[audioQueueRead];\n")
-    bb_push_str(out "                audioQueueRead = (audioQueueRead + 1) % audioQueueCapacity;\n")
-    bb_push_str(out "                audioQueueCount--;\n")
-    bb_push_str(out "                ch[i] = s / 32768.0;\n")
-    bb_push_str(out "            \} else \{\n")
-    bb_push_str(out "                ch[i] = 0;\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "    \};\n")
-    bb_push_str(out "    audioQueueNode.connect(audioCtx.destination);\n")
-    bb_push_str(out "    requestAudioUnlock();\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "// General-purpose 3D GPU state (WebGL1, batched textured+vertex-color)\n")
-    bb_push_str(out "let gpuMode = false;\n")
-    bb_push_str(out "let gpuCanvas = null;\n")
-    bb_push_str(out "let gpuGL = null;\n")
-    bb_push_str(out "let gpuProgram = null;\n")
-    bb_push_str(out "let gpuVbo = null;\n")
-    bb_push_str(out "let gpuQuadIbo = null;\n")
-    bb_push_str(out "let gpuQuadIboCount = 0;\n")
-    bb_push_str(out "let gpuStripIbo = null;\n")
-    bb_push_str(out "let gpuStripIboCount = 0;\n")
-    bb_push_str(out "let gpuTextures = [null];  // 1-indexed; index 0 reserved\n")
-    bb_push_str(out "let gpuWhiteTex = null;\n")
-    bb_push_str(out "let gpuCurrentTex = 0;\n")
-    bb_push_str(out "let gpuOverlayActive = false;\n")
-    bb_push_str(out "let gpuSavedDepthTest = true;\n")
-    bb_push_str(out "let gpuSavedDepthWrite = true;\n")
-    bb_push_str(out "let gpuLocPos = -1;\n")
-    bb_push_str(out "let gpuLocUV = -1;\n")
-    bb_push_str(out "let gpuLocColor = -1;\n")
-    bb_push_str(out "let gpuLocProj = null;\n")
-    bb_push_str(out "let gpuLocView = null;\n")
-    bb_push_str(out "let gpuLocSampler = null;\n")
-    bb_push_str(out "let gpuLocUseTex = null;\n")
-    bb_push_str(out "let gpuProj = new Float32Array(16);\n")
-    bb_push_str(out "let gpuView = new Float32Array(16);\n")
-    bb_push_str(out "let gpuOrthoProj = new Float32Array(16);\n")
-    bb_push_str(out "let gpuIdentity = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "// Double-buffer for audio: WASM writes to one, audio reads from other\n")
-    bb_push_str(out "let audioWriteBuffer = 0;  // 0 or 1\n")
-    bb_push_str(out "let audioReadBuffer = 0;\n")
-    bb_push_str(out "let audioBuffer0Ready = false;\n")
-    bb_push_str(out "let audioBuffer1Ready = false;\n")
-    bb_push_str(out "const AUDIO_SCRIPT_BUFFER_SIZE = 8192;  // Larger buffer for less crackling\n")
-    bb_push_str(out "const AUDIO_BUFFER_0_OFFSET = 786432;\n")
-    bb_push_str(out "const AUDIO_BUFFER_1_OFFSET = 786432 + (AUDIO_SCRIPT_BUFFER_SIZE * 2);  // samples * 2 bytes\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function decodeString(ptr, len) \{\n")
-    bb_push_str(out "    const view = new Uint8Array(memory.buffer);\n")
-    bb_push_str(out "    const bytes = view.slice(Number(ptr), Number(ptr) + Number(len));\n")
-    bb_push_str(out "    return new TextDecoder().decode(bytes);\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function domRegister(node) \{\n")
-    bb_push_str(out "    const existing = domHandles.get(node);\n")
-    bb_push_str(out "    if (existing !== undefined) \{\n")
-    bb_push_str(out "        return existing;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    const handle = domNextHandle++;\n")
-    bb_push_str(out "    domHandles.set(node, handle);\n")
-    bb_push_str(out "    domNodes.set(handle, node);\n")
-    bb_push_str(out "    return handle;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function domGet(handle) \{\n")
-    bb_push_str(out "    return domNodes.get(Number(handle));\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function domFlexAlign(value) \{\n")
-    bb_push_str(out "    switch (Number(value)) \{\n")
-    bb_push_str(out "        case 1: return 'center';\n")
-    bb_push_str(out "        case 2: return 'flex-end';\n")
-    bb_push_str(out "        case 3: return 'stretch';\n")
-    bb_push_str(out "        default: return 'flex-start';\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function domFlexJustify(value) \{\n")
-    bb_push_str(out "    switch (Number(value)) \{\n")
-    bb_push_str(out "        case 1: return 'center';\n")
-    bb_push_str(out "        case 2: return 'flex-end';\n")
-    bb_push_str(out "        case 3: return 'space-between';\n")
-    bb_push_str(out "        case 4: return 'space-around';\n")
-    bb_push_str(out "        case 5: return 'space-evenly';\n")
-    bb_push_str(out "        default: return 'flex-start';\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function ensureDomRoot() \{\n")
-    bb_push_str(out "    let root = document.getElementById('udewy-dom-root');\n")
-    bb_push_str(out "    if (!root) \{\n")
-    bb_push_str(out "        root = document.createElement('main');\n")
-    bb_push_str(out "        root.id = 'udewy-dom-root';\n")
-    bb_push_str(out "        document.body.insertBefore(root, outputElement || document.body.firstChild);\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    document.body.classList.add('dom-mode');\n")
-    bb_push_str(out "    if (outputElement) \{\n")
-    bb_push_str(out "        outputElement.style.display = 'none';\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    domRootHandle = domRegister(root);\n")
-    bb_push_str(out "    return domRootHandle;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function domBytesToBase64(ptr, len) \{\n")
-    bb_push_str(out "    const bytes = new Uint8Array(memory.buffer, Number(ptr), Number(len));\n")
-    bb_push_str(out "    let binary = '';\n")
-    bb_push_str(out "    for (let i = 0; i < bytes.length; i += 0x8000) \{\n")
-    bb_push_str(out "        binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    return btoa(binary);\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function domSetFavicon(mime, ptr, len) \{\n")
-    bb_push_str(out "    let link = document.querySelector('link[data-udewy-favicon]');\n")
-    bb_push_str(out "    if (!link) \{\n")
-    bb_push_str(out "        link = document.createElement('link');\n")
-    bb_push_str(out "        link.dataset.udewyFavicon = 'true';\n")
-    bb_push_str(out "        document.head.appendChild(link);\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    link.rel = 'icon';\n")
-    bb_push_str(out "    link.type = mime;\n")
-    bb_push_str(out "    link.href = `data:$\{mime\};base64,$\{domBytesToBase64(ptr, len)\}`;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function decodeI64Array(ptr, count) \{\n")
-    bb_push_str(out "    const values = new Int32Array(Number(count));\n")
-    bb_push_str(out "    const view = new DataView(memory.buffer);\n")
-    bb_push_str(out "    const base = Number(ptr);\n")
-    bb_push_str(out "    for (let i = 0; i < Number(count); i++) \{\n")
-    bb_push_str(out "        values[i] = Number(view.getBigInt64(base + (i * 8), true));\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    return values;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function appendOutput(text) \{\n")
-    bb_push_str(out "    console.log(text);\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function getDisplayCanvas() \{\n")
-    bb_push_str(out "    return webglCanvas || canvas;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function updateCanvasLayout() \{\n")
-    bb_push_str(out "    const displayCanvas = getDisplayCanvas();\n")
-    bb_push_str(out "    if (!displayCanvas || (!canvasMode && !webglMode)) \{\n")
-    bb_push_str(out "        return;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    if (canvasAspectWidth > 0 && canvasAspectHeight > 0) \{\n")
-    bb_push_str(out "        const targetAspect = canvasAspectWidth / canvasAspectHeight;\n")
-    bb_push_str(out "        let displayWidth = window.innerWidth;\n")
-    bb_push_str(out "        let displayHeight = Math.floor(displayWidth / targetAspect);\n")
-    bb_push_str(out "        if (displayHeight > window.innerHeight) \{\n")
-    bb_push_str(out "            displayHeight = window.innerHeight;\n")
-    bb_push_str(out "            displayWidth = Math.floor(displayHeight * targetAspect);\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "        displayCanvas.style.position = 'fixed';\n")
-    bb_push_str(out "        displayCanvas.style.left = '50%';\n")
-    bb_push_str(out "        displayCanvas.style.top = '50%';\n")
-    bb_push_str(out "        displayCanvas.style.transform = 'translate(-50%, -50%)';\n")
-    bb_push_str(out "        displayCanvas.style.width = `$\{displayWidth\}px`;\n")
-    bb_push_str(out "        displayCanvas.style.height = `$\{displayHeight\}px`;\n")
-    bb_push_str(out "    \} else \{\n")
-    bb_push_str(out "        displayCanvas.style.position = 'fixed';\n")
-    bb_push_str(out "        displayCanvas.style.left = '0';\n")
-    bb_push_str(out "        displayCanvas.style.top = '0';\n")
-    bb_push_str(out "        displayCanvas.style.transform = 'none';\n")
-    bb_push_str(out "        displayCanvas.style.width = '100vw';\n")
-    bb_push_str(out "        displayCanvas.style.height = '100vh';\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "window.addEventListener('resize', updateCanvasLayout);\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function lockCanvasAspect() \{\n")
-    bb_push_str(out "    const displayCanvas = getDisplayCanvas();\n")
-    bb_push_str(out "    if (displayCanvas) \{\n")
-    bb_push_str(out "        canvasAspectWidth = displayCanvas.width;\n")
-    bb_push_str(out "        canvasAspectHeight = displayCanvas.height;\n")
-    bb_push_str(out "    \} else if (canvasWidth > 0 && canvasHeight > 0) \{\n")
-    bb_push_str(out "        canvasAspectWidth = canvasWidth;\n")
-    bb_push_str(out "        canvasAspectHeight = canvasHeight;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    updateCanvasLayout();\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function unlockCanvasAspect() \{\n")
-    bb_push_str(out "    canvasAspectWidth = 0;\n")
-    bb_push_str(out "    canvasAspectHeight = 0;\n")
-    bb_push_str(out "    updateCanvasLayout();\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function ensureCanvasMemory(width, height) \{\n")
-    bb_push_str(out "    const requiredBytes = canvasBufferPtr + (width * height * 4);\n")
-    bb_push_str(out "    if (requiredBytes <= memory.buffer.byteLength) \{\n")
-    bb_push_str(out "        return;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    const pageSize = 65536;\n")
-    bb_push_str(out "    const pages = Math.ceil((requiredBytes - memory.buffer.byteLength) / pageSize);\n")
-    bb_push_str(out "    memory.grow(pages);\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function hideAudioPrompt() \{\n")
-    bb_push_str(out "    if (audioPromptTimer !== null) \{\n")
-    bb_push_str(out "        clearTimeout(audioPromptTimer);\n")
-    bb_push_str(out "        audioPromptTimer = null;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    const overlay = document.getElementById('audio-play-overlay');\n")
-    bb_push_str(out "    if (overlay) \{\n")
-    bb_push_str(out "        overlay.remove();\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function showAudioPrompt() \{\n")
-    bb_push_str(out "    let overlay = document.getElementById('audio-play-overlay');\n")
-    bb_push_str(out "    if (!overlay) \{\n")
-    bb_push_str(out "        overlay = document.createElement('div');\n")
-    bb_push_str(out "        overlay.id = 'audio-play-overlay';\n")
-    bb_push_str(out "        overlay.style.cssText = 'position:fixed; top:16px; left:16px; z-index:9999; pointer-events:none;';\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "        const button = document.createElement('button');\n")
-    bb_push_str(out "        button.id = 'audio-play-btn';\n")
-    bb_push_str(out "        button.textContent = 'Click to Enable Audio';\n")
-    bb_push_str(out "        button.style.cssText = 'pointer-events:auto; font-size:1em; padding:0.75em 1em; cursor:pointer; background:rgba(24,24,24,0.92); color:white; border:1px solid rgba(255,255,255,0.18); border-radius:999px; box-shadow:0 4px 16px rgba(0,0,0,0.35);';\n")
-    bb_push_str(out "        button.onclick = () => \{\n")
-    bb_push_str(out "            requestAudioUnlock(true);\n")
-    bb_push_str(out "        \};\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "        overlay.appendChild(button);\n")
-    bb_push_str(out "        document.body.appendChild(overlay);\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function playAudioBuffer() \{\n")
-    bb_push_str(out "    const buffer = audioCtx.createBuffer(audioChannels, audioNumSamples, audioSampleRate);\n")
-    bb_push_str(out "    const view = new Int16Array(memory.buffer, audioBufferPtr, audioNumSamples * audioChannels);\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    for (let ch = 0; ch < audioChannels; ch++) \{\n")
-    bb_push_str(out "        const channelData = buffer.getChannelData(ch);\n")
-    bb_push_str(out "        for (let i = 0; i < audioNumSamples; i++) \{\n")
-    bb_push_str(out "            const idx = audioChannels > 1 ? i * audioChannels + ch : i;\n")
-    bb_push_str(out "            channelData[i] = view[idx] / 32768.0;\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    const source = audioCtx.createBufferSource();\n")
-    bb_push_str(out "    source.buffer = buffer;\n")
-    bb_push_str(out "    source.connect(audioCtx.destination);\n")
-    bb_push_str(out "    source.start();\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function flushPendingAudio() \{\n")
-    bb_push_str(out "    if (!audioCtx || audioCtx.state !== 'running') \{\n")
-    bb_push_str(out "        return;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    hideAudioPrompt();\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    if (audioPendingPlay) \{\n")
-    bb_push_str(out "        audioPendingPlay = false;\n")
-    bb_push_str(out "        playAudioBuffer();\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    if (audioStreamMode && !audioStreamStarted && audioScriptNode) \{\n")
-    bb_push_str(out "        audioScriptNode.connect(audioCtx.destination);\n")
-    bb_push_str(out "        audioStreamStarted = true;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function scheduleAudioPrompt() \{\n")
-    bb_push_str(out "    if (audioPromptTimer !== null) \{\n")
-    bb_push_str(out "        return;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    audioPromptTimer = window.setTimeout(() => \{\n")
-    bb_push_str(out "        audioPromptTimer = null;\n")
-    bb_push_str(out "        if (audioCtx && audioCtx.state !== 'running') \{\n")
-    bb_push_str(out "            showAudioPrompt();\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "    \}, 150);\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function requestAudioUnlock(forceRetry=false) \{\n")
-    bb_push_str(out "    if (!audioCtx) \{\n")
-    bb_push_str(out "        return;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    if (audioCtx.state === 'running') \{\n")
-    bb_push_str(out "        flushPendingAudio();\n")
-    bb_push_str(out "        return;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    scheduleAudioPrompt();\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    if (audioResumePending && !forceRetry) \{\n")
-    bb_push_str(out "        return;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    audioResumePending = true;\n")
-    bb_push_str(out "    Promise.resolve(audioCtx.resume())\n")
-    bb_push_str(out "        .catch(() => null)\n")
-    bb_push_str(out "        .then(() => \{\n")
-    bb_push_str(out "            audioResumePending = false;\n")
-    bb_push_str(out "            if (audioCtx && audioCtx.state === 'running') \{\n")
-    bb_push_str(out "                flushPendingAudio();\n")
-    bb_push_str(out "            \} else \{\n")
-    bb_push_str(out "                showAudioPrompt();\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "        \});\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function getInputCanvas() \{\n")
-    bb_push_str(out "    return getDisplayCanvas();\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function clampPointer(value, limit) \{\n")
-    bb_push_str(out "    if (limit <= 0) return 0;\n")
-    bb_push_str(out "    if (value < 0) return 0;\n")
-    bb_push_str(out "    if (value >= limit) return limit - 1;\n")
-    bb_push_str(out "    return value;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function updatePointerFromEvent(event) \{\n")
-    bb_push_str(out "    const targetCanvas = getInputCanvas();\n")
-    bb_push_str(out "    if (!targetCanvas) \{\n")
-    bb_push_str(out "        pointerX = Math.floor(event.clientX);\n")
-    bb_push_str(out "        pointerY = Math.floor(event.clientY);\n")
-    bb_push_str(out "        return;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    const rect = targetCanvas.getBoundingClientRect();\n")
-    bb_push_str(out "    const scaleX = rect.width ? targetCanvas.width / rect.width : 1;\n")
-    bb_push_str(out "    const scaleY = rect.height ? targetCanvas.height / rect.height : 1;\n")
-    bb_push_str(out "    const localX = Math.floor((event.clientX - rect.left) * scaleX);\n")
-    bb_push_str(out "    const localY = Math.floor((event.clientY - rect.top) * scaleY);\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    pointerX = clampPointer(localX, targetCanvas.width);\n")
-    bb_push_str(out "    pointerY = clampPointer(localY, targetCanvas.height);\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function ensurePointerHandlers() \{\n")
-    bb_push_str(out "    if (pointerInstalled) return;\n")
-    bb_push_str(out "    pointerInstalled = true;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    window.addEventListener('pointermove', (event) => \{\n")
-    bb_push_str(out "        updatePointerFromEvent(event);\n")
-    bb_push_str(out "    \});\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    window.addEventListener('pointerdown', (event) => \{\n")
-    bb_push_str(out "        pointerDown = true;\n")
-    bb_push_str(out "        updatePointerFromEvent(event);\n")
-    bb_push_str(out "        requestAudioUnlock(true);\n")
-    bb_push_str(out "    \});\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    window.addEventListener('pointerup', (event) => \{\n")
-    bb_push_str(out "        pointerDown = false;\n")
-    bb_push_str(out "        updatePointerFromEvent(event);\n")
-    bb_push_str(out "    \});\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    window.addEventListener('pointercancel', () => \{\n")
-    bb_push_str(out "        pointerDown = false;\n")
-    bb_push_str(out "    \});\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function clearKeyboardFrameState() \{\n")
-    bb_push_str(out "    keysPressedFrame.clear();\n")
-    bb_push_str(out "    keysReleasedFrame.clear();\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function releaseAllKeys() \{\n")
-    bb_push_str(out "    keysDown.clear();\n")
-    bb_push_str(out "    clearKeyboardFrameState();\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function ensureKeyboardHandlers() \{\n")
-    bb_push_str(out "    if (keyboardInstalled) return;\n")
-    bb_push_str(out "    keyboardInstalled = true;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    window.addEventListener('keydown', (event) => \{\n")
-    bb_push_str(out "        const code = event.code || event.key;\n")
-    bb_push_str(out "        if (canvasMode || webglMode) \{\n")
-    bb_push_str(out "            event.preventDefault();\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "        if (!keysDown.has(code)) \{\n")
-    bb_push_str(out "            keysPressedFrame.add(code);\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "        keysDown.add(code);\n")
-    bb_push_str(out "        requestAudioUnlock(true);\n")
-    bb_push_str(out "    \});\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    window.addEventListener('keyup', (event) => \{\n")
-    bb_push_str(out "        const code = event.code || event.key;\n")
-    bb_push_str(out "        if (canvasMode || webglMode) \{\n")
-    bb_push_str(out "            event.preventDefault();\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "        if (keysDown.has(code)) \{\n")
-    bb_push_str(out "            keysReleasedFrame.add(code);\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "        keysDown.delete(code);\n")
-    bb_push_str(out "    \});\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    window.addEventListener('blur', releaseAllKeys);\n")
-    bb_push_str(out "    document.addEventListener('visibilitychange', () => \{\n")
-    bb_push_str(out "        if (document.hidden) \{\n")
-    bb_push_str(out "            releaseAllKeys();\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "    \});\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function compileWebglShader(gl, type, source) \{\n")
-    bb_push_str(out "    const shader = gl.createShader(type);\n")
-    bb_push_str(out "    gl.shaderSource(shader, source);\n")
-    bb_push_str(out "    gl.compileShader(shader);\n")
-    bb_push_str(out "    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) \{\n")
-    bb_push_str(out "        const info = gl.getShaderInfoLog(shader) || 'unknown shader compile error';\n")
-    bb_push_str(out "        gl.deleteShader(shader);\n")
-    bb_push_str(out "        throw new Error(info);\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    return shader;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function createWebglProgram(gl, fragmentSource) \{\n")
-    bb_push_str(out "    const vertexSource = `\n")
-    bb_push_str(out "attribute vec2 a_position;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "void main() \{\n")
-    bb_push_str(out "    gl_Position = vec4(a_position, 0.0, 1.0);\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "`;\n")
-    bb_push_str(out "    const vertexShader = compileWebglShader(gl, gl.VERTEX_SHADER, vertexSource);\n")
-    bb_push_str(out "    const fragmentShader = compileWebglShader(gl, gl.FRAGMENT_SHADER, fragmentSource);\n")
-    bb_push_str(out "    const program = gl.createProgram();\n")
-    bb_push_str(out "    gl.attachShader(program, vertexShader);\n")
-    bb_push_str(out "    gl.attachShader(program, fragmentShader);\n")
-    bb_push_str(out "    gl.linkProgram(program);\n")
-    bb_push_str(out "    gl.deleteShader(vertexShader);\n")
-    bb_push_str(out "    gl.deleteShader(fragmentShader);\n")
-    bb_push_str(out "    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) \{\n")
-    bb_push_str(out "        const info = gl.getProgramInfoLog(program) || 'unknown program link error';\n")
-    bb_push_str(out "        gl.deleteProgram(program);\n")
-    bb_push_str(out "        throw new Error(info);\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    return program;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function q16ToF32(v) \{\n")
-    bb_push_str(out "    return Number(v) / 65536.0;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function gpuEnsureQuadIndices(quadCount) \{\n")
-    bb_push_str(out "    if (gpuQuadIboCount >= quadCount) return;\n")
-    bb_push_str(out "    const cap = Math.max(quadCount * 2, 64);\n")
-    bb_push_str(out "    const indices = new Uint16Array(cap * 6);\n")
-    bb_push_str(out "    for (let i = 0; i < cap; i++) \{\n")
-    bb_push_str(out "        const v = i * 4;\n")
-    bb_push_str(out "        const o = i * 6;\n")
-    bb_push_str(out "        indices[o] = v;\n")
-    bb_push_str(out "        indices[o + 1] = v + 1;\n")
-    bb_push_str(out "        indices[o + 2] = v + 2;\n")
-    bb_push_str(out "        indices[o + 3] = v;\n")
-    bb_push_str(out "        indices[o + 4] = v + 2;\n")
-    bb_push_str(out "        indices[o + 5] = v + 3;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    if (!gpuQuadIbo) gpuQuadIbo = gpuGL.createBuffer();\n")
-    bb_push_str(out "    gpuGL.bindBuffer(gpuGL.ELEMENT_ARRAY_BUFFER, gpuQuadIbo);\n")
-    bb_push_str(out "    gpuGL.bufferData(gpuGL.ELEMENT_ARRAY_BUFFER, indices, gpuGL.STATIC_DRAW);\n")
-    bb_push_str(out "    gpuQuadIboCount = cap;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function gpuEnsureStripIndices(vertCount) \{\n")
-    bb_push_str(out "    if (gpuStripIboCount >= vertCount) return;\n")
-    bb_push_str(out "    const cap = Math.max(vertCount * 2, 64);\n")
-    bb_push_str(out "    const triCount = (cap - 2);\n")
-    bb_push_str(out "    const indices = new Uint16Array(Math.max(triCount, 0) * 3);\n")
-    bb_push_str(out "    let o = 0;\n")
-    bb_push_str(out "    for (let i = 0; i + 2 < cap; i++) \{\n")
-    bb_push_str(out "        if ((i & 1) === 0) \{\n")
-    bb_push_str(out "            indices[o++] = i;\n")
-    bb_push_str(out "            indices[o++] = i + 1;\n")
-    bb_push_str(out "            indices[o++] = i + 2;\n")
-    bb_push_str(out "        \} else \{\n")
-    bb_push_str(out "            indices[o++] = i + 1;\n")
-    bb_push_str(out "            indices[o++] = i;\n")
-    bb_push_str(out "            indices[o++] = i + 2;\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    if (!gpuStripIbo) gpuStripIbo = gpuGL.createBuffer();\n")
-    bb_push_str(out "    gpuGL.bindBuffer(gpuGL.ELEMENT_ARRAY_BUFFER, gpuStripIbo);\n")
-    bb_push_str(out "    gpuGL.bufferData(gpuGL.ELEMENT_ARRAY_BUFFER, indices, gpuGL.STATIC_DRAW);\n")
-    bb_push_str(out "    gpuStripIboCount = cap;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function gpuMakeFrustum(out, l, r, b, t, n, f) \{\n")
-    bb_push_str(out "    const rl = r - l, tb = t - b, fn = f - n;\n")
-    bb_push_str(out "    out[0] = (2 * n) / rl;\n")
-    bb_push_str(out "    out[1] = 0; out[2] = 0; out[3] = 0;\n")
-    bb_push_str(out "    out[4] = 0;\n")
-    bb_push_str(out "    out[5] = (2 * n) / tb;\n")
-    bb_push_str(out "    out[6] = 0; out[7] = 0;\n")
-    bb_push_str(out "    out[8] = (r + l) / rl;\n")
-    bb_push_str(out "    out[9] = (t + b) / tb;\n")
-    bb_push_str(out "    out[10] = -(f + n) / fn;\n")
-    bb_push_str(out "    out[11] = -1;\n")
-    bb_push_str(out "    out[12] = 0; out[13] = 0;\n")
-    bb_push_str(out "    out[14] = -(2 * f * n) / fn;\n")
-    bb_push_str(out "    out[15] = 0;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function gpuMakeOrtho(out, l, r, b, t, n, f) \{\n")
-    bb_push_str(out "    const rl = r - l, tb = t - b, fn = f - n;\n")
-    bb_push_str(out "    out[0] = 2 / rl;\n")
-    bb_push_str(out "    out[1] = 0; out[2] = 0; out[3] = 0;\n")
-    bb_push_str(out "    out[4] = 0;\n")
-    bb_push_str(out "    out[5] = 2 / tb;\n")
-    bb_push_str(out "    out[6] = 0; out[7] = 0;\n")
-    bb_push_str(out "    out[8] = 0; out[9] = 0;\n")
-    bb_push_str(out "    out[10] = -2 / fn;\n")
-    bb_push_str(out "    out[11] = 0;\n")
-    bb_push_str(out "    out[12] = -(r + l) / rl;\n")
-    bb_push_str(out "    out[13] = -(t + b) / tb;\n")
-    bb_push_str(out "    out[14] = -(f + n) / fn;\n")
-    bb_push_str(out "    out[15] = 1;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function gpuCreateProgram(gl) \{\n")
-    bb_push_str(out "    const vs = `\n")
-    bb_push_str(out "attribute vec3 a_pos;\n")
-    bb_push_str(out "attribute vec2 a_uv;\n")
-    bb_push_str(out "attribute vec4 a_color;\n")
-    bb_push_str(out "uniform mat4 u_proj;\n")
-    bb_push_str(out "uniform mat4 u_view;\n")
-    bb_push_str(out "varying vec2 v_uv;\n")
-    bb_push_str(out "varying vec4 v_color;\n")
-    bb_push_str(out "void main() \{\n")
-    bb_push_str(out "    gl_Position = u_proj * u_view * vec4(a_pos, 1.0);\n")
-    bb_push_str(out "    v_uv = a_uv;\n")
-    bb_push_str(out "    v_color = a_color;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "`;\n")
-    bb_push_str(out "    const fs = `\n")
-    bb_push_str(out "precision mediump float;\n")
-    bb_push_str(out "varying vec2 v_uv;\n")
-    bb_push_str(out "varying vec4 v_color;\n")
-    bb_push_str(out "uniform sampler2D u_tex;\n")
-    bb_push_str(out "uniform float u_use_tex;\n")
-    bb_push_str(out "void main() \{\n")
-    bb_push_str(out "    vec4 tex = texture2D(u_tex, v_uv);\n")
-    bb_push_str(out "    vec4 textured = v_color * tex;\n")
-    bb_push_str(out "    gl_FragColor = mix(v_color, textured, u_use_tex);\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "`;\n")
-    bb_push_str(out "    const vsh = compileWebglShader(gl, gl.VERTEX_SHADER, vs);\n")
-    bb_push_str(out "    const fsh = compileWebglShader(gl, gl.FRAGMENT_SHADER, fs);\n")
-    bb_push_str(out "    const prog = gl.createProgram();\n")
-    bb_push_str(out "    gl.attachShader(prog, vsh);\n")
-    bb_push_str(out "    gl.attachShader(prog, fsh);\n")
-    bb_push_str(out "    gl.linkProgram(prog);\n")
-    bb_push_str(out "    gl.deleteShader(vsh);\n")
-    bb_push_str(out "    gl.deleteShader(fsh);\n")
-    bb_push_str(out "    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) \{\n")
-    bb_push_str(out "        const info = gl.getProgramInfoLog(prog) || 'gpu program link error';\n")
-    bb_push_str(out "        gl.deleteProgram(prog);\n")
-    bb_push_str(out "        throw new Error(info);\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    return prog;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function gpuBindTextureSlot(slot) \{\n")
-    bb_push_str(out "    const gl = gpuGL;\n")
-    bb_push_str(out "    let tex;\n")
-    bb_push_str(out "    if (slot === 0 || !gpuTextures[slot]) \{\n")
-    bb_push_str(out "        tex = gpuWhiteTex;\n")
-    bb_push_str(out "        gl.uniform1f(gpuLocUseTex, 0.0);\n")
-    bb_push_str(out "    \} else \{\n")
-    bb_push_str(out "        tex = gpuTextures[slot];\n")
-    bb_push_str(out "        gl.uniform1f(gpuLocUseTex, 1.0);\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    gl.activeTexture(gl.TEXTURE0);\n")
-    bb_push_str(out "    gl.bindTexture(gl.TEXTURE_2D, tex);\n")
-    bb_push_str(out "    gl.uniform1i(gpuLocSampler, 0);\n")
-    bb_push_str(out "    gpuCurrentTex = slot;\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "const imports = \{\n")
-    bb_push_str(out "    env: \{\n")
-    bb_push_str(out "        memory: memory,\n")
-    bb_push_str(out "        // Direct browser APIs\n")
-    bb_push_str(out "        host_log: (ptr, len) => \{\n")
-    bb_push_str(out "            const text = decodeString(ptr, len);\n")
-    bb_push_str(out "            console.log(text);\n")
-    bb_push_str(out "            return len;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_exit: (code) => \{\n")
-    bb_push_str(out "            appendOutput(`\\nExit code: $\{code\}\\n`);\n")
-    bb_push_str(out "            return code;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_time: () => BigInt(Date.now()),\n")
-    bb_push_str(out "        host_random: () => BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),\n")
-    bb_push_str(out "        // DOM manipulation\n")
-    bb_push_str(out "        host_dom_set_text: (ptr, len) => \{\n")
-    bb_push_str(out "            const text = decodeString(ptr, len);\n")
-    bb_push_str(out "            if (outputElement) \{\n")
-    bb_push_str(out "                outputElement.textContent = text;\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_dom_append: (ptr, len) => \{\n")
-    bb_push_str(out "            const text = decodeString(ptr, len);\n")
-    bb_push_str(out "            if (outputElement) \{\n")
-    bb_push_str(out "                outputElement.textContent += text;\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            return len;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_dom_clear: () => \{\n")
-    bb_push_str(out "            if (outputElement) \{\n")
-    bb_push_str(out "                outputElement.textContent = '';\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_dom_append_int: (value) => \{\n")
-    bb_push_str(out "            if (outputElement) \{\n")
-    bb_push_str(out "                outputElement.textContent += String(value);\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            return value;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_log_int: (value) => \{\n")
-    bb_push_str(out "            console.log(String(value));\n")
-    bb_push_str(out "            return value;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        ud_dom_set_title: (titlePtr, titleLen) => \{\n")
-    bb_push_str(out "            document.title = decodeString(titlePtr, titleLen);\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        ud_dom_set_favicon: (mimePtr, mimeLen, dataPtr, dataLen) => \{\n")
-    bb_push_str(out "            domSetFavicon(decodeString(mimePtr, mimeLen), dataPtr, dataLen);\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        ud_dom_root: () => BigInt(ensureDomRoot()),\n")
-    bb_push_str(out "        ud_dom_body: () => BigInt(domRegister(document.body)),\n")
-    bb_push_str(out "        ud_dom_clear: (handle) => \{\n")
-    bb_push_str(out "            domGet(handle).replaceChildren();\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        ud_dom_create_element: (tagPtr, tagLen) => \{\n")
-    bb_push_str(out "            return BigInt(domRegister(document.createElement(decodeString(tagPtr, tagLen))));\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        ud_dom_create_text: (textPtr, textLen) => \{\n")
-    bb_push_str(out "            return BigInt(domRegister(document.createTextNode(decodeString(textPtr, textLen))));\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        ud_dom_append: (parentHandle, childHandle) => \{\n")
-    bb_push_str(out "            domGet(parentHandle).appendChild(domGet(childHandle));\n")
-    bb_push_str(out "            return childHandle;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        ud_dom_set_text: (handle, textPtr, textLen) => \{\n")
-    bb_push_str(out "            domGet(handle).textContent = decodeString(textPtr, textLen);\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        ud_dom_set_attr: (handle, namePtr, nameLen, valuePtr, valueLen) => \{\n")
-    bb_push_str(out "            domGet(handle).setAttribute(decodeString(namePtr, nameLen), decodeString(valuePtr, valueLen));\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        ud_dom_add_class: (handle, classPtr, classLen) => \{\n")
-    bb_push_str(out "            domGet(handle).classList.add(decodeString(classPtr, classLen));\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        ud_dom_set_style: (handle, propertyPtr, propertyLen, valuePtr, valueLen) => \{\n")
-    bb_push_str(out "            domGet(handle).style.setProperty(decodeString(propertyPtr, propertyLen), decodeString(valuePtr, valueLen));\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        ud_dom_set_flex: (handle, direction, gap, align, justify, wrap) => \{\n")
-    bb_push_str(out "            const style = domGet(handle).style;\n")
-    bb_push_str(out "            style.display = 'flex';\n")
-    bb_push_str(out "            style.flexDirection = Number(direction) === 1 ? 'column' : 'row';\n")
-    bb_push_str(out "            style.gap = `$\{Number(gap)\}px`;\n")
-    bb_push_str(out "            style.alignItems = domFlexAlign(align);\n")
-    bb_push_str(out "            style.justifyContent = domFlexJustify(justify);\n")
-    bb_push_str(out "            style.flexWrap = Number(wrap) !== 0 ? 'wrap' : 'nowrap';\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        // Canvas graphics\n")
-    bb_push_str(out "        host_canvas_init: (width, height) => \{\n")
-    bb_push_str(out "            canvasWidth = Number(width);\n")
-    bb_push_str(out "            canvasHeight = Number(height);\n")
-    bb_push_str(out "            canvasMode = true;\n")
-    bb_push_str(out "            if (!canvas) \{\n")
-    bb_push_str(out "                startTime = performance.now();\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            \n")
-    bb_push_str(out "            // Create or resize canvas\n")
-    bb_push_str(out "            canvas = document.getElementById('canvas');\n")
-    bb_push_str(out "            if (!canvas) \{\n")
-    bb_push_str(out "                canvas = document.createElement('canvas');\n")
-    bb_push_str(out "                canvas.id = 'canvas';\n")
-    bb_push_str(out "                document.body.insertBefore(canvas, document.body.firstChild);\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            canvas.width = canvasWidth;\n")
-    bb_push_str(out "            canvas.height = canvasHeight;\n")
-    bb_push_str(out "            canvas.style.display = 'block';\n")
-    bb_push_str(out "            updateCanvasLayout();\n")
-    bb_push_str(out "            ensurePointerHandlers();\n")
-    bb_push_str(out "            ctx = canvas.getContext('2d');\n")
-    bb_push_str(out "            \n")
-    bb_push_str(out "            // Hide text output in canvas mode\n")
-    bb_push_str(out "            if (outputElement) \{\n")
-    bb_push_str(out "                outputElement.style.display = 'none';\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            \n")
-    bb_push_str(out "            // Allocate buffer in WASM memory (RGBA: 4 bytes per pixel)\n")
-    bb_push_str(out "            // Use a fixed location after the stack (at 256KB)\n")
-    bb_push_str(out "            canvasBufferPtr = 262144;\n")
-    bb_push_str(out "            ensureCanvasMemory(canvasWidth, canvasHeight);\n")
-    bb_push_str(out "            \n")
-    bb_push_str(out "            return BigInt(canvasBufferPtr);\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_canvas_width: () => BigInt(canvasWidth),\n")
-    bb_push_str(out "        host_canvas_height: () => BigInt(canvasHeight),\n")
-    bb_push_str(out "        host_canvas_present: () => \{\n")
-    bb_push_str(out "            if (!ctx || !canvas) return 0n;\n")
-    bb_push_str(out "            \n")
-    bb_push_str(out "            // Read pixel data from WASM memory\n")
-    bb_push_str(out "            const view = new Uint8ClampedArray(memory.buffer, canvasBufferPtr, canvasWidth * canvasHeight * 4);\n")
-    bb_push_str(out "            const imageData = new ImageData(view, canvasWidth, canvasHeight);\n")
-    bb_push_str(out "            ctx.putImageData(imageData, 0, 0);\n")
-    bb_push_str(out "            \n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_canvas_set_aspect_lock: (enabled) => \{\n")
-    bb_push_str(out "            if (Number(enabled) !== 0) \{\n")
-    bb_push_str(out "                lockCanvasAspect();\n")
-    bb_push_str(out "            \} else \{\n")
-    bb_push_str(out "                unlockCanvasAspect();\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_frame_count: () => BigInt(frameCount),\n")
-    bb_push_str(out "        host_frame_time: () => BigInt(Math.floor(performance.now() - startTime)),\n")
-    bb_push_str(out "        host_window_width: () => BigInt(window.innerWidth),\n")
-    bb_push_str(out "        host_window_height: () => BigInt(window.innerHeight),\n")
-    bb_push_str(out "        host_pointer_x: () => BigInt(pointerX),\n")
-    bb_push_str(out "        host_pointer_y: () => BigInt(pointerY),\n")
-    bb_push_str(out "        host_pointer_down: () => (pointerDown ? 1n : 0n),\n")
-    bb_push_str(out "        host_key_down: (ptr, len) => \{\n")
-    bb_push_str(out "            ensureKeyboardHandlers();\n")
-    bb_push_str(out "            return keysDown.has(decodeString(ptr, len)) ? 1n : 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_key_pressed: (ptr, len) => \{\n")
-    bb_push_str(out "            ensureKeyboardHandlers();\n")
-    bb_push_str(out "            return keysPressedFrame.has(decodeString(ptr, len)) ? 1n : 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_key_released: (ptr, len) => \{\n")
-    bb_push_str(out "            ensureKeyboardHandlers();\n")
-    bb_push_str(out "            return keysReleasedFrame.has(decodeString(ptr, len)) ? 1n : 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        // Audio\n")
-    bb_push_str(out "        host_audio_init: (sampleRate, numSamples, channels) => \{\n")
-    bb_push_str(out "            audioSampleRate = Number(sampleRate);\n")
-    bb_push_str(out "            audioNumSamples = Number(numSamples);\n")
-    bb_push_str(out "            audioChannels = Number(channels);\n")
-    bb_push_str(out "            // Allocate buffer after canvas buffer (at 768KB)\n")
-    bb_push_str(out "            // Each sample is i16 (2 bytes), per channel\n")
-    bb_push_str(out "            audioBufferPtr = 786432;\n")
-    bb_push_str(out "            return BigInt(audioBufferPtr);\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_audio_play: () => \{\n")
-    bb_push_str(out "            if (!audioCtx) \{\n")
-    bb_push_str(out "                audioCtx = new AudioContext(\{ sampleRate: audioSampleRate \});\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            audioPendingPlay = true;\n")
-    bb_push_str(out "            requestAudioUnlock();\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_audio_sample_rate: () => BigInt(audioSampleRate),\n")
-    bb_push_str(out "        // Audio streaming using ScriptProcessorNode with double-buffering\n")
-    bb_push_str(out "        host_audio_stream_init: (sampleRate, bufferSize) => \{\n")
-    bb_push_str(out "            audioSampleRate = Number(sampleRate);\n")
-    bb_push_str(out "            audioStreamBufferSize = AUDIO_SCRIPT_BUFFER_SIZE;\n")
-    bb_push_str(out "            audioChannels = 1;\n")
-    bb_push_str(out "            audioStreamMode = true;\n")
-    bb_push_str(out "            audioStreamStarted = false;\n")
-    bb_push_str(out "            audioWriteBuffer = 0;\n")
-    bb_push_str(out "            audioReadBuffer = 0;\n")
-    bb_push_str(out "            audioBuffer0Ready = false;\n")
-    bb_push_str(out "            audioBuffer1Ready = false;\n")
-    bb_push_str(out "            \n")
-    bb_push_str(out "            if (!audioCtx) \{\n")
-    bb_push_str(out "                audioCtx = new AudioContext(\{ sampleRate: audioSampleRate \});\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            \n")
-    bb_push_str(out "            // Create ScriptProcessorNode with larger buffer\n")
-    bb_push_str(out "            audioScriptNode = audioCtx.createScriptProcessor(AUDIO_SCRIPT_BUFFER_SIZE, 0, 1);\n")
-    bb_push_str(out "            \n")
-    bb_push_str(out "            audioScriptNode.onaudioprocess = (e) => \{\n")
-    bb_push_str(out "                const output = e.outputBuffer.getChannelData(0);\n")
-    bb_push_str(out "                const bufSize = AUDIO_SCRIPT_BUFFER_SIZE;\n")
-    bb_push_str(out "                \n")
-    bb_push_str(out "                // Read from the ready buffer\n")
-    bb_push_str(out "                let bufferOffset, hasData;\n")
-    bb_push_str(out "                if (audioReadBuffer === 0 && audioBuffer0Ready) \{\n")
-    bb_push_str(out "                    bufferOffset = AUDIO_BUFFER_0_OFFSET;\n")
-    bb_push_str(out "                    hasData = true;\n")
-    bb_push_str(out "                    audioBuffer0Ready = false;\n")
-    bb_push_str(out "                    audioReadBuffer = 1;\n")
-    bb_push_str(out "                \} else if (audioReadBuffer === 1 && audioBuffer1Ready) \{\n")
-    bb_push_str(out "                    bufferOffset = AUDIO_BUFFER_1_OFFSET;\n")
-    bb_push_str(out "                    hasData = true;\n")
-    bb_push_str(out "                    audioBuffer1Ready = false;\n")
-    bb_push_str(out "                    audioReadBuffer = 0;\n")
-    bb_push_str(out "                \} else if (audioBuffer0Ready) \{\n")
-    bb_push_str(out "                    bufferOffset = AUDIO_BUFFER_0_OFFSET;\n")
-    bb_push_str(out "                    hasData = true;\n")
-    bb_push_str(out "                    audioBuffer0Ready = false;\n")
-    bb_push_str(out "                    audioReadBuffer = 1;\n")
-    bb_push_str(out "                \} else if (audioBuffer1Ready) \{\n")
-    bb_push_str(out "                    bufferOffset = AUDIO_BUFFER_1_OFFSET;\n")
-    bb_push_str(out "                    hasData = true;\n")
-    bb_push_str(out "                    audioBuffer1Ready = false;\n")
-    bb_push_str(out "                    audioReadBuffer = 0;\n")
-    bb_push_str(out "                \} else \{\n")
-    bb_push_str(out "                    hasData = false;\n")
-    bb_push_str(out "                \}\n")
-    bb_push_str(out "                \n")
-    bb_push_str(out "                if (hasData) \{\n")
-    bb_push_str(out "                    const view = new Int16Array(memory.buffer, bufferOffset, bufSize);\n")
-    bb_push_str(out "                    for (let i = 0; i < bufSize; i++) \{\n")
-    bb_push_str(out "                        output[i] = view[i] / 32768.0;\n")
-    bb_push_str(out "                    \}\n")
-    bb_push_str(out "                \} else \{\n")
-    bb_push_str(out "                    // Silence if no buffer ready\n")
-    bb_push_str(out "                    for (let i = 0; i < bufSize; i++) \{\n")
-    bb_push_str(out "                        output[i] = 0;\n")
-    bb_push_str(out "                    \}\n")
-    bb_push_str(out "                \}\n")
-    bb_push_str(out "            \};\n")
-    bb_push_str(out "            \n")
-    bb_push_str(out "            // Return pointer to write buffer 0\n")
-    bb_push_str(out "            audioBufferPtr = AUDIO_BUFFER_0_OFFSET;\n")
-    bb_push_str(out "            return BigInt(audioBufferPtr);\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_audio_stream_write: () => \{\n")
-    bb_push_str(out "            if (!audioStreamMode || !audioCtx) return 0n;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            requestAudioUnlock();\n")
-    bb_push_str(out "            \n")
-    bb_push_str(out "            // Mark current write buffer as ready and switch to other buffer\n")
-    bb_push_str(out "            if (audioWriteBuffer === 0) \{\n")
-    bb_push_str(out "                audioBuffer0Ready = true;\n")
-    bb_push_str(out "                audioWriteBuffer = 1;\n")
-    bb_push_str(out "                audioBufferPtr = AUDIO_BUFFER_1_OFFSET;\n")
-    bb_push_str(out "            \} else \{\n")
-    bb_push_str(out "                audioBuffer1Ready = true;\n")
-    bb_push_str(out "                audioWriteBuffer = 0;\n")
-    bb_push_str(out "                audioBufferPtr = AUDIO_BUFFER_0_OFFSET;\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            \n")
-    bb_push_str(out "            // Return next buffer pointer for WASM to write to\n")
-    bb_push_str(out "            return BigInt(audioBufferPtr);\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_audio_stream_needs_samples: () => \{\n")
-    bb_push_str(out "            // Returns true (-1) if we need more samples, false (0) if buffers are full\n")
-    bb_push_str(out "            if (!audioStreamMode) return 0n;\n")
-    bb_push_str(out "            // Need samples if the current write buffer is not marked ready\n")
-    bb_push_str(out "            if (audioWriteBuffer === 0 && !audioBuffer0Ready) return -1n;\n")
-    bb_push_str(out "            if (audioWriteBuffer === 1 && !audioBuffer1Ready) return -1n;\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        // WebGL fullscreen fragment shader\n")
-    bb_push_str(out "        host_webgl_init: (shaderPtr, shaderLen, width, height) => \{\n")
-    bb_push_str(out "            if (webglMode) return 0n;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            const w = Number(width);\n")
-    bb_push_str(out "            const h = Number(height);\n")
-    bb_push_str(out "            const fragmentSource = decodeString(shaderPtr, shaderLen);\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            webglCanvas = document.getElementById('canvas');\n")
-    bb_push_str(out "            if (!webglCanvas) \{\n")
-    bb_push_str(out "                webglCanvas = document.createElement('canvas');\n")
-    bb_push_str(out "                webglCanvas.id = 'canvas';\n")
-    bb_push_str(out "                document.body.insertBefore(webglCanvas, document.body.firstChild);\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            webglCanvas.width = w;\n")
-    bb_push_str(out "            webglCanvas.height = h;\n")
-    bb_push_str(out "            webglCanvas.style.display = 'block';\n")
-    bb_push_str(out "            updateCanvasLayout();\n")
-    bb_push_str(out "            ensurePointerHandlers();\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            webglContext = webglCanvas.getContext('webgl');\n")
-    bb_push_str(out "            if (!webglContext) \{\n")
-    bb_push_str(out "                console.error('WebGL not supported');\n")
-    bb_push_str(out "                if (outputElement) \{\n")
-    bb_push_str(out "                    outputElement.textContent = 'WebGL not supported in this browser';\n")
-    bb_push_str(out "                \}\n")
-    bb_push_str(out "                return -1n;\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            try \{\n")
-    bb_push_str(out "                webglProgram = createWebglProgram(webglContext, fragmentSource);\n")
-    bb_push_str(out "            \} catch (err) \{\n")
-    bb_push_str(out "                console.error('WebGL shader setup failed:', err);\n")
-    bb_push_str(out "                if (outputElement) \{\n")
-    bb_push_str(out "                    outputElement.textContent = `WebGL shader setup failed:\n")
-    bb_push_str(out "$\{String(err)\}`;\n")
-    bb_push_str(out "                \}\n")
-    bb_push_str(out "                return -1n;\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            webglPositionBuffer = webglContext.createBuffer();\n")
-    bb_push_str(out "            webglContext.bindBuffer(webglContext.ARRAY_BUFFER, webglPositionBuffer);\n")
-    bb_push_str(out "            webglContext.bufferData(\n")
-    bb_push_str(out "                webglContext.ARRAY_BUFFER,\n")
-    bb_push_str(out "                new Float32Array([\n")
-    bb_push_str(out "                    -1.0, -1.0,\n")
-    bb_push_str(out "                    3.0, -1.0,\n")
-    bb_push_str(out "                    -1.0, 3.0,\n")
-    bb_push_str(out "                ]),\n")
-    bb_push_str(out "                webglContext.STATIC_DRAW,\n")
-    bb_push_str(out "            );\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            webglContext.useProgram(webglProgram);\n")
-    bb_push_str(out "            const positionLocation = webglContext.getAttribLocation(webglProgram, 'a_position');\n")
-    bb_push_str(out "            if (positionLocation >= 0) \{\n")
-    bb_push_str(out "                webglContext.enableVertexAttribArray(positionLocation);\n")
-    bb_push_str(out "                webglContext.vertexAttribPointer(positionLocation, 2, webglContext.FLOAT, false, 0, 0);\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            if (outputElement) \{\n")
-    bb_push_str(out "                outputElement.style.display = 'none';\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            webglMode = true;\n")
-    bb_push_str(out "            startTime = performance.now();\n")
-    bb_push_str(out "            updateCanvasLayout();\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_webgl_uniform1i: (namePtr, nameLen, value) => \{\n")
-    bb_push_str(out "            if (!webglMode || !webglContext || !webglProgram) return 0n;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            const name = decodeString(namePtr, nameLen);\n")
-    bb_push_str(out "            const location = webglContext.getUniformLocation(webglProgram, name);\n")
-    bb_push_str(out "            if (location === null) return -1n;\n")
-    bb_push_str(out "            webglContext.useProgram(webglProgram);\n")
-    bb_push_str(out "            webglContext.uniform1i(location, Number(value));\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_webgl_uniform2i: (namePtr, nameLen, x, y) => \{\n")
-    bb_push_str(out "            if (!webglMode || !webglContext || !webglProgram) return 0n;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            const name = decodeString(namePtr, nameLen);\n")
-    bb_push_str(out "            const location = webglContext.getUniformLocation(webglProgram, name);\n")
-    bb_push_str(out "            if (location === null) return -1n;\n")
-    bb_push_str(out "            webglContext.useProgram(webglProgram);\n")
-    bb_push_str(out "            webglContext.uniform2i(location, Number(x), Number(y));\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_webgl_uniform1iv: (namePtr, nameLen, valuesPtr, count) => \{\n")
-    bb_push_str(out "            if (!webglMode || !webglContext || !webglProgram) return 0n;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            const name = decodeString(namePtr, nameLen);\n")
-    bb_push_str(out "            const location = webglContext.getUniformLocation(webglProgram, name);\n")
-    bb_push_str(out "            if (location === null) return -1n;\n")
-    bb_push_str(out "            webglContext.useProgram(webglProgram);\n")
-    bb_push_str(out "            webglContext.uniform1iv(location, decodeI64Array(valuesPtr, count));\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_webgl_uniform2iv: (namePtr, nameLen, valuesPtr, count) => \{\n")
-    bb_push_str(out "            if (!webglMode || !webglContext || !webglProgram) return 0n;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            const name = decodeString(namePtr, nameLen);\n")
-    bb_push_str(out "            const location = webglContext.getUniformLocation(webglProgram, name);\n")
-    bb_push_str(out "            if (location === null) return -1n;\n")
-    bb_push_str(out "            webglContext.useProgram(webglProgram);\n")
-    bb_push_str(out "            webglContext.uniform2iv(location, decodeI64Array(valuesPtr, Number(count) * 2));\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_webgl_render: () => \{\n")
-    bb_push_str(out "            if (!webglMode || !webglContext || !webglProgram) return 0n;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            webglContext.viewport(0, 0, webglCanvas.width, webglCanvas.height);\n")
-    bb_push_str(out "            webglContext.useProgram(webglProgram);\n")
-    bb_push_str(out "            webglContext.drawArrays(webglContext.TRIANGLES, 0, 3);\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        // General-purpose batched 3D GPU surface\n")
-    bb_push_str(out "        host_gpu_init: (width, height) => \{\n")
-    bb_push_str(out "            if (gpuMode) return 0n;\n")
-    bb_push_str(out "            const w = Number(width);\n")
-    bb_push_str(out "            const h = Number(height);\n")
-    bb_push_str(out "            gpuCanvas = document.getElementById('canvas');\n")
-    bb_push_str(out "            if (!gpuCanvas) \{\n")
-    bb_push_str(out "                gpuCanvas = document.createElement('canvas');\n")
-    bb_push_str(out "                gpuCanvas.id = 'canvas';\n")
-    bb_push_str(out "                document.body.insertBefore(gpuCanvas, document.body.firstChild);\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            gpuCanvas.width = w;\n")
-    bb_push_str(out "            gpuCanvas.height = h;\n")
-    bb_push_str(out "            gpuCanvas.style.display = 'block';\n")
-    bb_push_str(out "            webglCanvas = gpuCanvas;\n")
-    bb_push_str(out "            webglMode = true;\n")
-    bb_push_str(out "            updateCanvasLayout();\n")
-    bb_push_str(out "            ensurePointerHandlers();\n")
-    bb_push_str(out "            ensureKeyboardHandlers();\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            gpuGL = gpuCanvas.getContext('webgl', \{ antialias: true, depth: true, alpha: false, preserveDrawingBuffer: false \});\n")
-    bb_push_str(out "            if (!gpuGL) \{\n")
-    bb_push_str(out "                console.error('WebGL not supported');\n")
-    bb_push_str(out "                return -1n;\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            try \{\n")
-    bb_push_str(out "                gpuProgram = gpuCreateProgram(gpuGL);\n")
-    bb_push_str(out "            \} catch (err) \{\n")
-    bb_push_str(out "                console.error('GPU shader setup failed:', err);\n")
-    bb_push_str(out "                return -1n;\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            gpuGL.useProgram(gpuProgram);\n")
-    bb_push_str(out "            gpuLocPos = gpuGL.getAttribLocation(gpuProgram, 'a_pos');\n")
-    bb_push_str(out "            gpuLocUV = gpuGL.getAttribLocation(gpuProgram, 'a_uv');\n")
-    bb_push_str(out "            gpuLocColor = gpuGL.getAttribLocation(gpuProgram, 'a_color');\n")
-    bb_push_str(out "            gpuLocProj = gpuGL.getUniformLocation(gpuProgram, 'u_proj');\n")
-    bb_push_str(out "            gpuLocView = gpuGL.getUniformLocation(gpuProgram, 'u_view');\n")
-    bb_push_str(out "            gpuLocSampler = gpuGL.getUniformLocation(gpuProgram, 'u_tex');\n")
-    bb_push_str(out "            gpuLocUseTex = gpuGL.getUniformLocation(gpuProgram, 'u_use_tex');\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            gpuVbo = gpuGL.createBuffer();\n")
-    bb_push_str(out "            gpuWhiteTex = gpuGL.createTexture();\n")
-    bb_push_str(out "            gpuGL.bindTexture(gpuGL.TEXTURE_2D, gpuWhiteTex);\n")
-    bb_push_str(out "            gpuGL.texImage2D(gpuGL.TEXTURE_2D, 0, gpuGL.RGBA, 1, 1, 0, gpuGL.RGBA, gpuGL.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));\n")
-    bb_push_str(out "            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_MIN_FILTER, gpuGL.NEAREST);\n")
-    bb_push_str(out "            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_MAG_FILTER, gpuGL.NEAREST);\n")
-    bb_push_str(out "            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_WRAP_S, gpuGL.CLAMP_TO_EDGE);\n")
-    bb_push_str(out "            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_WRAP_T, gpuGL.CLAMP_TO_EDGE);\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuIdentity);\n")
-    bb_push_str(out "            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuIdentity);\n")
-    bb_push_str(out "            gpuBindTextureSlot(0);\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            gpuGL.enable(gpuGL.DEPTH_TEST);\n")
-    bb_push_str(out "            gpuGL.depthFunc(gpuGL.LEQUAL);\n")
-    bb_push_str(out "            gpuGL.disable(gpuGL.BLEND);\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "            if (outputElement) outputElement.style.display = 'none';\n")
-    bb_push_str(out "            gpuMode = true;\n")
-    bb_push_str(out "            startTime = performance.now();\n")
-    bb_push_str(out "            updateCanvasLayout();\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_set_viewport: (w, h) => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            gpuGL.viewport(0, 0, Number(w), Number(h));\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_clear: (r_q, g_q, b_q) => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            gpuGL.clearColor(q16ToF32(r_q), q16ToF32(g_q), q16ToF32(b_q), 1.0);\n")
-    bb_push_str(out "            gpuGL.clear(gpuGL.COLOR_BUFFER_BIT | gpuGL.DEPTH_BUFFER_BIT);\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_set_perspective_frustum: (l_q, r_q, b_q, t_q, n_q, f_q) => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            gpuMakeFrustum(gpuProj, q16ToF32(l_q), q16ToF32(r_q), q16ToF32(b_q), q16ToF32(t_q), q16ToF32(n_q), q16ToF32(f_q));\n")
-    bb_push_str(out "            gpuGL.useProgram(gpuProgram);\n")
-    bb_push_str(out "            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuProj);\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_set_view_matrix: (matPtr) => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            const view = new Float32Array(memory.buffer, Number(matPtr), 16);\n")
-    bb_push_str(out "            for (let i = 0; i < 16; i++) gpuView[i] = view[i];\n")
-    bb_push_str(out "            gpuGL.useProgram(gpuProgram);\n")
-    bb_push_str(out "            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuView);\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_set_texture: (texId) => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            gpuGL.useProgram(gpuProgram);\n")
-    bb_push_str(out "            gpuBindTextureSlot(Number(texId));\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_set_blend: (mode) => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            const m = Number(mode);\n")
-    bb_push_str(out "            if (m === 0) \{\n")
-    bb_push_str(out "                gpuGL.disable(gpuGL.BLEND);\n")
-    bb_push_str(out "            \} else if (m === 1) \{\n")
-    bb_push_str(out "                gpuGL.enable(gpuGL.BLEND);\n")
-    bb_push_str(out "                gpuGL.blendFunc(gpuGL.SRC_ALPHA, gpuGL.ONE_MINUS_SRC_ALPHA);\n")
-    bb_push_str(out "            \} else \{\n")
-    bb_push_str(out "                gpuGL.enable(gpuGL.BLEND);\n")
-    bb_push_str(out "                gpuGL.blendFunc(gpuGL.SRC_ALPHA, gpuGL.ONE);\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_set_depth_test: (on) => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            if (Number(on) !== 0) gpuGL.enable(gpuGL.DEPTH_TEST);\n")
-    bb_push_str(out "            else gpuGL.disable(gpuGL.DEPTH_TEST);\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_set_depth_write: (on) => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            gpuGL.depthMask(Number(on) !== 0);\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_set_line_width: (w_q) => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            gpuGL.lineWidth(q16ToF32(w_q));\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_submit: (kind, ptr, count) => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            const k = Number(kind);\n")
-    bb_push_str(out "            const n = Number(count);\n")
-    bb_push_str(out "            if (n <= 0) return 0n;\n")
-    bb_push_str(out "            const gl = gpuGL;\n")
-    bb_push_str(out "            const stride = 9 * 4;\n")
-    bb_push_str(out "            const verts = new Float32Array(memory.buffer, Number(ptr), n * 9);\n")
-    bb_push_str(out "            gl.useProgram(gpuProgram);\n")
-    bb_push_str(out "            gl.bindBuffer(gl.ARRAY_BUFFER, gpuVbo);\n")
-    bb_push_str(out "            gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STREAM_DRAW);\n")
-    bb_push_str(out "            gl.enableVertexAttribArray(gpuLocPos);\n")
-    bb_push_str(out "            gl.vertexAttribPointer(gpuLocPos, 3, gl.FLOAT, false, stride, 0);\n")
-    bb_push_str(out "            if (gpuLocUV >= 0) \{\n")
-    bb_push_str(out "                gl.enableVertexAttribArray(gpuLocUV);\n")
-    bb_push_str(out "                gl.vertexAttribPointer(gpuLocUV, 2, gl.FLOAT, false, stride, 12);\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            if (gpuLocColor >= 0) \{\n")
-    bb_push_str(out "                gl.enableVertexAttribArray(gpuLocColor);\n")
-    bb_push_str(out "                gl.vertexAttribPointer(gpuLocColor, 4, gl.FLOAT, false, stride, 20);\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            if (k === 0) \{\n")
-    bb_push_str(out "                const quads = (n / 4) | 0;\n")
-    bb_push_str(out "                gpuEnsureQuadIndices(quads);\n")
-    bb_push_str(out "                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gpuQuadIbo);\n")
-    bb_push_str(out "                gl.drawElements(gl.TRIANGLES, quads * 6, gl.UNSIGNED_SHORT, 0);\n")
-    bb_push_str(out "            \} else if (k === 1) \{\n")
-    bb_push_str(out "                gpuEnsureStripIndices(n);\n")
-    bb_push_str(out "                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gpuStripIbo);\n")
-    bb_push_str(out "                gl.drawElements(gl.TRIANGLES, Math.max(n - 2, 0) * 3, gl.UNSIGNED_SHORT, 0);\n")
-    bb_push_str(out "            \} else if (k === 2) \{\n")
-    bb_push_str(out "                gl.drawArrays(gl.TRIANGLES, 0, n);\n")
-    bb_push_str(out "            \} else if (k === 3) \{\n")
-    bb_push_str(out "                gl.drawArrays(gl.LINES, 0, n);\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_overlay_begin: (sw, sh) => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            const w = Number(sw);\n")
-    bb_push_str(out "            const h = Number(sh);\n")
-    bb_push_str(out "            gpuMakeOrtho(gpuOrthoProj, 0, w, h, 0, -1, 1);\n")
-    bb_push_str(out "            gpuGL.useProgram(gpuProgram);\n")
-    bb_push_str(out "            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuOrthoProj);\n")
-    bb_push_str(out "            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuIdentity);\n")
-    bb_push_str(out "            gpuSavedDepthTest = gpuGL.getParameter(gpuGL.DEPTH_TEST);\n")
-    bb_push_str(out "            gpuSavedDepthWrite = gpuGL.getParameter(gpuGL.DEPTH_WRITEMASK);\n")
-    bb_push_str(out "            gpuGL.disable(gpuGL.DEPTH_TEST);\n")
-    bb_push_str(out "            gpuGL.depthMask(false);\n")
-    bb_push_str(out "            gpuOverlayActive = true;\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_overlay_end: () => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            gpuGL.useProgram(gpuProgram);\n")
-    bb_push_str(out "            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuProj);\n")
-    bb_push_str(out "            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuView);\n")
-    bb_push_str(out "            if (gpuSavedDepthTest) gpuGL.enable(gpuGL.DEPTH_TEST);\n")
-    bb_push_str(out "            gpuGL.depthMask(!!gpuSavedDepthWrite);\n")
-    bb_push_str(out "            gpuOverlayActive = false;\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_create_texture: (width, height, pixelsPtr, repeat, nearest) => \{\n")
-    bb_push_str(out "            if (!gpuMode) return 0n;\n")
-    bb_push_str(out "            const gl = gpuGL;\n")
-    bb_push_str(out "            const w = Number(width);\n")
-    bb_push_str(out "            const h = Number(height);\n")
-    bb_push_str(out "            const pixels = new Uint8Array(memory.buffer, Number(pixelsPtr), w * h * 4);\n")
-    bb_push_str(out "            const tex = gl.createTexture();\n")
-    bb_push_str(out "            gl.bindTexture(gl.TEXTURE_2D, tex);\n")
-    bb_push_str(out "            gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);\n")
-    bb_push_str(out "            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(pixels));\n")
-    bb_push_str(out "            const filter = (Number(nearest) !== 0) ? gl.NEAREST : gl.LINEAR;\n")
-    bb_push_str(out "            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);\n")
-    bb_push_str(out "            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);\n")
-    bb_push_str(out "            const wrap = (Number(repeat) !== 0) ? gl.REPEAT : gl.CLAMP_TO_EDGE;\n")
-    bb_push_str(out "            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);\n")
-    bb_push_str(out "            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);\n")
-    bb_push_str(out "            gpuTextures.push(tex);\n")
-    bb_push_str(out "            return BigInt(gpuTextures.length - 1);\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_present: () => \{\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_gpu_window_width: () => BigInt(gpuCanvas ? gpuCanvas.width : 0),\n")
-    bb_push_str(out "        host_gpu_window_height: () => BigInt(gpuCanvas ? gpuCanvas.height : 0),\n")
-    bb_push_str(out "        host_audio_queue_init: (sampleRate, channels) => \{\n")
-    bb_push_str(out "            audioQueueRate = Number(sampleRate);\n")
-    bb_push_str(out "            audioQueueChannels = Number(channels);\n")
-    bb_push_str(out "            audioQueueCapacity = audioQueueRate * 2;  // ~2 s of buffer\n")
-    bb_push_str(out "            audioQueueRing = new Int16Array(audioQueueCapacity);\n")
-    bb_push_str(out "            audioQueueRead = 0;\n")
-    bb_push_str(out "            audioQueueWrite = 0;\n")
-    bb_push_str(out "            audioQueueCount = 0;\n")
-    bb_push_str(out "            try \{\n")
-    bb_push_str(out "                audioQueueEnsureContext();\n")
-    bb_push_str(out "            \} catch (err) \{\n")
-    bb_push_str(out "                console.error('Audio queue init failed:', err);\n")
-    bb_push_str(out "                return -1n;\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            return 0n;\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_audio_queue_push: (ptr, nBytes) => \{\n")
-    bb_push_str(out "            if (!audioQueueRing) return 0n;\n")
-    bb_push_str(out "            const samples = Number(nBytes) >> 1;\n")
-    bb_push_str(out "            const view = new Int16Array(memory.buffer, Number(ptr), samples);\n")
-    bb_push_str(out "            for (let i = 0; i < samples; i++) \{\n")
-    bb_push_str(out "                if (audioQueueCount >= audioQueueCapacity) break;\n")
-    bb_push_str(out "                audioQueueRing[audioQueueWrite] = view[i];\n")
-    bb_push_str(out "                audioQueueWrite = (audioQueueWrite + 1) % audioQueueCapacity;\n")
-    bb_push_str(out "                audioQueueCount++;\n")
-    bb_push_str(out "            \}\n")
-    bb_push_str(out "            return BigInt(samples * 2);\n")
-    bb_push_str(out "        \},\n")
-    bb_push_str(out "        host_audio_queue_size: () => BigInt(audioQueueCount * 2),\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\};\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function animationLoop() \{\n")
-    bb_push_str(out "    if ((!canvasMode && !audioStreamMode && !webglMode && !gpuMode) || !wasmInstance) return;\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    frameCount++;\n")
-    bb_push_str(out "    wasmInstance.exports.main();\n")
-    bb_push_str(out "    clearKeyboardFrameState();\n")
-    bb_push_str(out "    requestAnimationFrame(animationLoop);\n")
-    bb_push_str(out "\}\n")
+    bb_push_str(out "
+const memory = new WebAssembly.Memory(\{ initial: 32 \});
+let outputElement = null;
+let domNextHandle = 1;
+let domRootHandle = 0;
+const domNodes = new Map();
+const domHandles = new WeakMap();
+
+// Canvas state
+let canvas = null;
+let ctx = null;
+let canvasBuffer = null;
+let canvasBufferPtr = 0;
+let canvasWidth = 0;
+let canvasHeight = 0;
+let frameCount = 0;
+let startTime = 0;
+let canvasMode = false;
+let wasmInstance = null;
+let canvasAspectWidth = 0;
+let canvasAspectHeight = 0;
+
+// Audio state (one-shot mode)
+let audioCtx = null;
+let audioSampleRate = 44100;
+let audioNumSamples = 0;
+let audioChannels = 1;
+let audioBufferPtr = 0;
+let audioPendingPlay = false;
+let audioResumePending = false;
+let audioPromptTimer = null;
+
+// Audio streaming state
+let audioStreamMode = false;
+
+// WebGL fullscreen shader state
+let webglCanvas = null;
+let webglContext = null;
+let webglProgram = null;
+let webglPositionBuffer = null;
+let webglMode = false;
+let pointerInstalled = false;
+let keyboardInstalled = false;
+let pointerX = 0;
+let pointerY = 0;
+let pointerDown = false;
+const keysDown = new Set();
+const keysPressedFrame = new Set();
+const keysReleasedFrame = new Set();
+let audioStreamBufferSize = 0;
+let audioStreamStarted = false;
+let audioScriptNode = null;
+
+// General-purpose audio queue (ring of Int16 samples) driven from WASM.
+// Reuses the global `audioCtx` so the existing `requestAudioUnlock()` user-
+// gesture path also unlocks queued playback.
+let audioQueueRate = 44100;
+let audioQueueChannels = 1;
+let audioQueueRing = null;
+let audioQueueRead = 0;
+let audioQueueWrite = 0;
+let audioQueueCount = 0;
+let audioQueueCapacity = 0;
+let audioQueueNode = null;
+let audioQueueMode = false;
+const AUDIO_QUEUE_BLOCK = 2048;
+
+function audioQueueEnsureContext() \{
+    if (audioQueueNode) return;
+    if (!audioCtx) \{
+        audioCtx = new AudioContext(\{ sampleRate: audioQueueRate \});
+    \}
+    audioQueueNode = audioCtx.createScriptProcessor(AUDIO_QUEUE_BLOCK, 0, audioQueueChannels);
+    audioQueueNode.onaudioprocess = (e) => \{
+        const ch = e.outputBuffer.getChannelData(0);
+        for (let i = 0; i < AUDIO_QUEUE_BLOCK; i++) \{
+            if (audioQueueCount > 0) \{
+                const s = audioQueueRing[audioQueueRead];
+                audioQueueRead = (audioQueueRead + 1) % audioQueueCapacity;
+                audioQueueCount--;
+                ch[i] = s / 32768.0;
+            \} else \{
+                ch[i] = 0;
+            \}
+        \}
+    \};
+    audioQueueNode.connect(audioCtx.destination);
+    requestAudioUnlock();
+\}
+
+// General-purpose 3D GPU state (WebGL1, batched textured+vertex-color)
+let gpuMode = false;
+let gpuCanvas = null;
+let gpuGL = null;
+let gpuProgram = null;
+let gpuVbo = null;
+let gpuQuadIbo = null;
+let gpuQuadIboCount = 0;
+let gpuStripIbo = null;
+let gpuStripIboCount = 0;
+let gpuTextures = [null];  // 1-indexed; index 0 reserved
+let gpuWhiteTex = null;
+let gpuCurrentTex = 0;
+let gpuOverlayActive = false;
+let gpuSavedDepthTest = true;
+let gpuSavedDepthWrite = true;
+let gpuLocPos = -1;
+let gpuLocUV = -1;
+let gpuLocColor = -1;
+let gpuLocProj = null;
+let gpuLocView = null;
+let gpuLocSampler = null;
+let gpuLocUseTex = null;
+let gpuProj = new Float32Array(16);
+let gpuView = new Float32Array(16);
+let gpuOrthoProj = new Float32Array(16);
+let gpuIdentity = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+
+// Double-buffer for audio: WASM writes to one, audio reads from other
+let audioWriteBuffer = 0;  // 0 or 1
+let audioReadBuffer = 0;
+let audioBuffer0Ready = false;
+let audioBuffer1Ready = false;
+const AUDIO_SCRIPT_BUFFER_SIZE = 8192;  // Larger buffer for less crackling
+const AUDIO_BUFFER_0_OFFSET = 786432;
+const AUDIO_BUFFER_1_OFFSET = 786432 + (AUDIO_SCRIPT_BUFFER_SIZE * 2);  // samples * 2 bytes
+
+function decodeString(ptr, len) \{
+    const view = new Uint8Array(memory.buffer);
+    const bytes = view.slice(Number(ptr), Number(ptr) + Number(len));
+    return new TextDecoder().decode(bytes);
+\}
+
+function domRegister(node) \{
+    const existing = domHandles.get(node);
+    if (existing !== undefined) \{
+        return existing;
+    \}
+    const handle = domNextHandle++;
+    domHandles.set(node, handle);
+    domNodes.set(handle, node);
+    return handle;
+\}
+
+function domGet(handle) \{
+    return domNodes.get(Number(handle));
+\}
+
+function domFlexAlign(value) \{
+    switch (Number(value)) \{
+        case 1: return 'center';
+        case 2: return 'flex-end';
+        case 3: return 'stretch';
+        default: return 'flex-start';
+    \}
+\}
+
+function domFlexJustify(value) \{
+    switch (Number(value)) \{
+        case 1: return 'center';
+        case 2: return 'flex-end';
+        case 3: return 'space-between';
+        case 4: return 'space-around';
+        case 5: return 'space-evenly';
+        default: return 'flex-start';
+    \}
+\}
+
+function ensureDomRoot() \{
+    let root = document.getElementById('udewy-dom-root');
+    if (!root) \{
+        root = document.createElement('main');
+        root.id = 'udewy-dom-root';
+        document.body.insertBefore(root, outputElement || document.body.firstChild);
+    \}
+    document.body.classList.add('dom-mode');
+    if (outputElement) \{
+        outputElement.style.display = 'none';
+    \}
+    domRootHandle = domRegister(root);
+    return domRootHandle;
+\}
+
+function domBytesToBase64(ptr, len) \{
+    const bytes = new Uint8Array(memory.buffer, Number(ptr), Number(len));
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) \{
+        binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    \}
+    return btoa(binary);
+\}
+
+function domSetFavicon(mime, ptr, len) \{
+    let link = document.querySelector('link[data-udewy-favicon]');
+    if (!link) \{
+        link = document.createElement('link');
+        link.dataset.udewyFavicon = 'true';
+        document.head.appendChild(link);
+    \}
+    link.rel = 'icon';
+    link.type = mime;
+    link.href = `data:$\{mime\};base64,$\{domBytesToBase64(ptr, len)\}`;
+\}
+
+function decodeI64Array(ptr, count) \{
+    const values = new Int32Array(Number(count));
+    const view = new DataView(memory.buffer);
+    const base = Number(ptr);
+    for (let i = 0; i < Number(count); i++) \{
+        values[i] = Number(view.getBigInt64(base + (i * 8), true));
+    \}
+    return values;
+\}
+
+function appendOutput(text) \{
+    console.log(text);
+\}
+
+function getDisplayCanvas() \{
+    return webglCanvas || canvas;
+\}
+
+function updateCanvasLayout() \{
+    const displayCanvas = getDisplayCanvas();
+    if (!displayCanvas || (!canvasMode && !webglMode)) \{
+        return;
+    \}
+
+    if (canvasAspectWidth > 0 && canvasAspectHeight > 0) \{
+        const targetAspect = canvasAspectWidth / canvasAspectHeight;
+        let displayWidth = window.innerWidth;
+        let displayHeight = Math.floor(displayWidth / targetAspect);
+        if (displayHeight > window.innerHeight) \{
+            displayHeight = window.innerHeight;
+            displayWidth = Math.floor(displayHeight * targetAspect);
+        \}
+
+        displayCanvas.style.position = 'fixed';
+        displayCanvas.style.left = '50%';
+        displayCanvas.style.top = '50%';
+        displayCanvas.style.transform = 'translate(-50%, -50%)';
+        displayCanvas.style.width = `$\{displayWidth\}px`;
+        displayCanvas.style.height = `$\{displayHeight\}px`;
+    \} else \{
+        displayCanvas.style.position = 'fixed';
+        displayCanvas.style.left = '0';
+        displayCanvas.style.top = '0';
+        displayCanvas.style.transform = 'none';
+        displayCanvas.style.width = '100vw';
+        displayCanvas.style.height = '100vh';
+    \}
+\}
+
+window.addEventListener('resize', updateCanvasLayout);
+
+function lockCanvasAspect() \{
+    const displayCanvas = getDisplayCanvas();
+    if (displayCanvas) \{
+        canvasAspectWidth = displayCanvas.width;
+        canvasAspectHeight = displayCanvas.height;
+    \} else if (canvasWidth > 0 && canvasHeight > 0) \{
+        canvasAspectWidth = canvasWidth;
+        canvasAspectHeight = canvasHeight;
+    \}
+    updateCanvasLayout();
+\}
+
+function unlockCanvasAspect() \{
+    canvasAspectWidth = 0;
+    canvasAspectHeight = 0;
+    updateCanvasLayout();
+\}
+
+function ensureCanvasMemory(width, height) \{
+    const requiredBytes = canvasBufferPtr + (width * height * 4);
+    if (requiredBytes <= memory.buffer.byteLength) \{
+        return;
+    \}
+    const pageSize = 65536;
+    const pages = Math.ceil((requiredBytes - memory.buffer.byteLength) / pageSize);
+    memory.grow(pages);
+\}
+
+function hideAudioPrompt() \{
+    if (audioPromptTimer !== null) \{
+        clearTimeout(audioPromptTimer);
+        audioPromptTimer = null;
+    \}
+    const overlay = document.getElementById('audio-play-overlay');
+    if (overlay) \{
+        overlay.remove();
+    \}
+\}
+
+function showAudioPrompt() \{
+    let overlay = document.getElementById('audio-play-overlay');
+    if (!overlay) \{
+        overlay = document.createElement('div');
+        overlay.id = 'audio-play-overlay';
+        overlay.style.cssText = 'position:fixed; top:16px; left:16px; z-index:9999; pointer-events:none;';
+
+        const button = document.createElement('button');
+        button.id = 'audio-play-btn';
+        button.textContent = 'Click to Enable Audio';
+        button.style.cssText = 'pointer-events:auto; font-size:1em; padding:0.75em 1em; cursor:pointer; background:rgba(24,24,24,0.92); color:white; border:1px solid rgba(255,255,255,0.18); border-radius:999px; box-shadow:0 4px 16px rgba(0,0,0,0.35);';
+        button.onclick = () => \{
+            requestAudioUnlock(true);
+        \};
+
+        overlay.appendChild(button);
+        document.body.appendChild(overlay);
+    \}
+\}
+
+function playAudioBuffer() \{
+    const buffer = audioCtx.createBuffer(audioChannels, audioNumSamples, audioSampleRate);
+    const view = new Int16Array(memory.buffer, audioBufferPtr, audioNumSamples * audioChannels);
+
+    for (let ch = 0; ch < audioChannels; ch++) \{
+        const channelData = buffer.getChannelData(ch);
+        for (let i = 0; i < audioNumSamples; i++) \{
+            const idx = audioChannels > 1 ? i * audioChannels + ch : i;
+            channelData[i] = view[idx] / 32768.0;
+        \}
+    \}
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioCtx.destination);
+    source.start();
+\}
+
+function flushPendingAudio() \{
+    if (!audioCtx || audioCtx.state !== 'running') \{
+        return;
+    \}
+
+    hideAudioPrompt();
+
+    if (audioPendingPlay) \{
+        audioPendingPlay = false;
+        playAudioBuffer();
+    \}
+
+    if (audioStreamMode && !audioStreamStarted && audioScriptNode) \{
+        audioScriptNode.connect(audioCtx.destination);
+        audioStreamStarted = true;
+    \}
+\}
+
+function scheduleAudioPrompt() \{
+    if (audioPromptTimer !== null) \{
+        return;
+    \}
+
+    audioPromptTimer = window.setTimeout(() => \{
+        audioPromptTimer = null;
+        if (audioCtx && audioCtx.state !== 'running') \{
+            showAudioPrompt();
+        \}
+    \}, 150);
+\}
+
+function requestAudioUnlock(forceRetry=false) \{
+    if (!audioCtx) \{
+        return;
+    \}
+
+    if (audioCtx.state === 'running') \{
+        flushPendingAudio();
+        return;
+    \}
+
+    scheduleAudioPrompt();
+
+    if (audioResumePending && !forceRetry) \{
+        return;
+    \}
+
+    audioResumePending = true;
+    Promise.resolve(audioCtx.resume())
+        .catch(() => null)
+        .then(() => \{
+            audioResumePending = false;
+            if (audioCtx && audioCtx.state === 'running') \{
+                flushPendingAudio();
+            \} else \{
+                showAudioPrompt();
+            \}
+        \});
+\}
+
+function getInputCanvas() \{
+    return getDisplayCanvas();
+\}
+
+function clampPointer(value, limit) \{
+    if (limit <= 0) return 0;
+    if (value < 0) return 0;
+    if (value >= limit) return limit - 1;
+    return value;
+\}
+
+function updatePointerFromEvent(event) \{
+    const targetCanvas = getInputCanvas();
+    if (!targetCanvas) \{
+        pointerX = Math.floor(event.clientX);
+        pointerY = Math.floor(event.clientY);
+        return;
+    \}
+
+    const rect = targetCanvas.getBoundingClientRect();
+    const scaleX = rect.width ? targetCanvas.width / rect.width : 1;
+    const scaleY = rect.height ? targetCanvas.height / rect.height : 1;
+    const localX = Math.floor((event.clientX - rect.left) * scaleX);
+    const localY = Math.floor((event.clientY - rect.top) * scaleY);
+
+    pointerX = clampPointer(localX, targetCanvas.width);
+    pointerY = clampPointer(localY, targetCanvas.height);
+\}
+
+function ensurePointerHandlers() \{
+    if (pointerInstalled) return;
+    pointerInstalled = true;
+
+    window.addEventListener('pointermove', (event) => \{
+        updatePointerFromEvent(event);
+    \});
+
+    window.addEventListener('pointerdown', (event) => \{
+        pointerDown = true;
+        updatePointerFromEvent(event);
+        requestAudioUnlock(true);
+    \});
+
+    window.addEventListener('pointerup', (event) => \{
+        pointerDown = false;
+        updatePointerFromEvent(event);
+    \});
+
+    window.addEventListener('pointercancel', () => \{
+        pointerDown = false;
+    \});
+\}
+
+function clearKeyboardFrameState() \{
+    keysPressedFrame.clear();
+    keysReleasedFrame.clear();
+\}
+
+function releaseAllKeys() \{
+    keysDown.clear();
+    clearKeyboardFrameState();
+\}
+
+function ensureKeyboardHandlers() \{
+    if (keyboardInstalled) return;
+    keyboardInstalled = true;
+
+    window.addEventListener('keydown', (event) => \{
+        const code = event.code || event.key;
+        if (canvasMode || webglMode) \{
+            event.preventDefault();
+        \}
+        if (!keysDown.has(code)) \{
+            keysPressedFrame.add(code);
+        \}
+        keysDown.add(code);
+        requestAudioUnlock(true);
+    \});
+
+    window.addEventListener('keyup', (event) => \{
+        const code = event.code || event.key;
+        if (canvasMode || webglMode) \{
+            event.preventDefault();
+        \}
+        if (keysDown.has(code)) \{
+            keysReleasedFrame.add(code);
+        \}
+        keysDown.delete(code);
+    \});
+
+    window.addEventListener('blur', releaseAllKeys);
+    document.addEventListener('visibilitychange', () => \{
+        if (document.hidden) \{
+            releaseAllKeys();
+        \}
+    \});
+\}
+
+function compileWebglShader(gl, type, source) \{
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) \{
+        const info = gl.getShaderInfoLog(shader) || 'unknown shader compile error';
+        gl.deleteShader(shader);
+        throw new Error(info);
+    \}
+    return shader;
+\}
+
+function createWebglProgram(gl, fragmentSource) \{
+    const vertexSource = `
+attribute vec2 a_position;
+
+void main() \{
+    gl_Position = vec4(a_position, 0.0, 1.0);
+\}
+`;
+    const vertexShader = compileWebglShader(gl, gl.VERTEX_SHADER, vertexSource);
+    const fragmentShader = compileWebglShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) \{
+        const info = gl.getProgramInfoLog(program) || 'unknown program link error';
+        gl.deleteProgram(program);
+        throw new Error(info);
+    \}
+    return program;
+\}
+
+function q16ToF32(v) \{
+    return Number(v) / 65536.0;
+\}
+
+function gpuEnsureQuadIndices(quadCount) \{
+    if (gpuQuadIboCount >= quadCount) return;
+    const cap = Math.max(quadCount * 2, 64);
+    const indices = new Uint16Array(cap * 6);
+    for (let i = 0; i < cap; i++) \{
+        const v = i * 4;
+        const o = i * 6;
+        indices[o] = v;
+        indices[o + 1] = v + 1;
+        indices[o + 2] = v + 2;
+        indices[o + 3] = v;
+        indices[o + 4] = v + 2;
+        indices[o + 5] = v + 3;
+    \}
+    if (!gpuQuadIbo) gpuQuadIbo = gpuGL.createBuffer();
+    gpuGL.bindBuffer(gpuGL.ELEMENT_ARRAY_BUFFER, gpuQuadIbo);
+    gpuGL.bufferData(gpuGL.ELEMENT_ARRAY_BUFFER, indices, gpuGL.STATIC_DRAW);
+    gpuQuadIboCount = cap;
+\}
+
+function gpuEnsureStripIndices(vertCount) \{
+    if (gpuStripIboCount >= vertCount) return;
+    const cap = Math.max(vertCount * 2, 64);
+    const triCount = (cap - 2);
+    const indices = new Uint16Array(Math.max(triCount, 0) * 3);
+    let o = 0;
+    for (let i = 0; i + 2 < cap; i++) \{
+        if ((i & 1) === 0) \{
+            indices[o++] = i;
+            indices[o++] = i + 1;
+            indices[o++] = i + 2;
+        \} else \{
+            indices[o++] = i + 1;
+            indices[o++] = i;
+            indices[o++] = i + 2;
+        \}
+    \}
+    if (!gpuStripIbo) gpuStripIbo = gpuGL.createBuffer();
+    gpuGL.bindBuffer(gpuGL.ELEMENT_ARRAY_BUFFER, gpuStripIbo);
+    gpuGL.bufferData(gpuGL.ELEMENT_ARRAY_BUFFER, indices, gpuGL.STATIC_DRAW);
+    gpuStripIboCount = cap;
+\}
+
+function gpuMakeFrustum(out, l, r, b, t, n, f) \{
+    const rl = r - l, tb = t - b, fn = f - n;
+    out[0] = (2 * n) / rl;
+    out[1] = 0; out[2] = 0; out[3] = 0;
+    out[4] = 0;
+    out[5] = (2 * n) / tb;
+    out[6] = 0; out[7] = 0;
+    out[8] = (r + l) / rl;
+    out[9] = (t + b) / tb;
+    out[10] = -(f + n) / fn;
+    out[11] = -1;
+    out[12] = 0; out[13] = 0;
+    out[14] = -(2 * f * n) / fn;
+    out[15] = 0;
+\}
+
+function gpuMakeOrtho(out, l, r, b, t, n, f) \{
+    const rl = r - l, tb = t - b, fn = f - n;
+    out[0] = 2 / rl;
+    out[1] = 0; out[2] = 0; out[3] = 0;
+    out[4] = 0;
+    out[5] = 2 / tb;
+    out[6] = 0; out[7] = 0;
+    out[8] = 0; out[9] = 0;
+    out[10] = -2 / fn;
+    out[11] = 0;
+    out[12] = -(r + l) / rl;
+    out[13] = -(t + b) / tb;
+    out[14] = -(f + n) / fn;
+    out[15] = 1;
+\}
+
+function gpuCreateProgram(gl) \{
+    const vs = `
+attribute vec3 a_pos;
+attribute vec2 a_uv;
+attribute vec4 a_color;
+uniform mat4 u_proj;
+uniform mat4 u_view;
+varying vec2 v_uv;
+varying vec4 v_color;
+void main() \{
+    gl_Position = u_proj * u_view * vec4(a_pos, 1.0);
+    v_uv = a_uv;
+    v_color = a_color;
+\}
+`;
+    const fs = `
+precision mediump float;
+varying vec2 v_uv;
+varying vec4 v_color;
+uniform sampler2D u_tex;
+uniform float u_use_tex;
+void main() \{
+    vec4 tex = texture2D(u_tex, v_uv);
+    vec4 textured = v_color * tex;
+    gl_FragColor = mix(v_color, textured, u_use_tex);
+\}
+`;
+    const vsh = compileWebglShader(gl, gl.VERTEX_SHADER, vs);
+    const fsh = compileWebglShader(gl, gl.FRAGMENT_SHADER, fs);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vsh);
+    gl.attachShader(prog, fsh);
+    gl.linkProgram(prog);
+    gl.deleteShader(vsh);
+    gl.deleteShader(fsh);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) \{
+        const info = gl.getProgramInfoLog(prog) || 'gpu program link error';
+        gl.deleteProgram(prog);
+        throw new Error(info);
+    \}
+    return prog;
+\}
+
+function gpuBindTextureSlot(slot) \{
+    const gl = gpuGL;
+    let tex;
+    if (slot === 0 || !gpuTextures[slot]) \{
+        tex = gpuWhiteTex;
+        gl.uniform1f(gpuLocUseTex, 0.0);
+    \} else \{
+        tex = gpuTextures[slot];
+        gl.uniform1f(gpuLocUseTex, 1.0);
+    \}
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(gpuLocSampler, 0);
+    gpuCurrentTex = slot;
+\}
+
+const imports = \{
+    env: \{
+        memory: memory,
+        // Direct browser APIs
+        host_log: (ptr, len) => \{
+            const text = decodeString(ptr, len);
+            console.log(text);
+            return len;
+        \},
+        host_exit: (code) => \{
+            appendOutput(`\\nExit code: $\{code\}\\n`);
+            return code;
+        \},
+        host_time: () => BigInt(Date.now()),
+        host_random: () => BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
+        // DOM manipulation
+        host_dom_set_text: (ptr, len) => \{
+            const text = decodeString(ptr, len);
+            if (outputElement) \{
+                outputElement.textContent = text;
+            \}
+            return 0n;
+        \},
+        host_dom_append: (ptr, len) => \{
+            const text = decodeString(ptr, len);
+            if (outputElement) \{
+                outputElement.textContent += text;
+            \}
+            return len;
+        \},
+        host_dom_clear: () => \{
+            if (outputElement) \{
+                outputElement.textContent = '';
+            \}
+            return 0n;
+        \},
+        host_dom_append_int: (value) => \{
+            if (outputElement) \{
+                outputElement.textContent += String(value);
+            \}
+            return value;
+        \},
+        host_log_int: (value) => \{
+            console.log(String(value));
+            return value;
+        \},
+        ud_dom_set_title: (titlePtr, titleLen) => \{
+            document.title = decodeString(titlePtr, titleLen);
+            return 0n;
+        \},
+        ud_dom_set_favicon: (mimePtr, mimeLen, dataPtr, dataLen) => \{
+            domSetFavicon(decodeString(mimePtr, mimeLen), dataPtr, dataLen);
+            return 0n;
+        \},
+        ud_dom_root: () => BigInt(ensureDomRoot()),
+        ud_dom_body: () => BigInt(domRegister(document.body)),
+        ud_dom_clear: (handle) => \{
+            domGet(handle).replaceChildren();
+            return 0n;
+        \},
+        ud_dom_create_element: (tagPtr, tagLen) => \{
+            return BigInt(domRegister(document.createElement(decodeString(tagPtr, tagLen))));
+        \},
+        ud_dom_create_text: (textPtr, textLen) => \{
+            return BigInt(domRegister(document.createTextNode(decodeString(textPtr, textLen))));
+        \},
+        ud_dom_append: (parentHandle, childHandle) => \{
+            domGet(parentHandle).appendChild(domGet(childHandle));
+            return childHandle;
+        \},
+        ud_dom_set_text: (handle, textPtr, textLen) => \{
+            domGet(handle).textContent = decodeString(textPtr, textLen);
+            return 0n;
+        \},
+        ud_dom_set_attr: (handle, namePtr, nameLen, valuePtr, valueLen) => \{
+            domGet(handle).setAttribute(decodeString(namePtr, nameLen), decodeString(valuePtr, valueLen));
+            return 0n;
+        \},
+        ud_dom_add_class: (handle, classPtr, classLen) => \{
+            domGet(handle).classList.add(decodeString(classPtr, classLen));
+            return 0n;
+        \},
+        ud_dom_set_style: (handle, propertyPtr, propertyLen, valuePtr, valueLen) => \{
+            domGet(handle).style.setProperty(decodeString(propertyPtr, propertyLen), decodeString(valuePtr, valueLen));
+            return 0n;
+        \},
+        ud_dom_set_flex: (handle, direction, gap, align, justify, wrap) => \{
+            const style = domGet(handle).style;
+            style.display = 'flex';
+            style.flexDirection = Number(direction) === 1 ? 'column' : 'row';
+            style.gap = `$\{Number(gap)\}px`;
+            style.alignItems = domFlexAlign(align);
+            style.justifyContent = domFlexJustify(justify);
+            style.flexWrap = Number(wrap) !== 0 ? 'wrap' : 'nowrap';
+            return 0n;
+        \},
+        // Canvas graphics
+        host_canvas_init: (width, height) => \{
+            canvasWidth = Number(width);
+            canvasHeight = Number(height);
+            canvasMode = true;
+            if (!canvas) \{
+                startTime = performance.now();
+            \}
+            
+            // Create or resize canvas
+            canvas = document.getElementById('canvas');
+            if (!canvas) \{
+                canvas = document.createElement('canvas');
+                canvas.id = 'canvas';
+                document.body.insertBefore(canvas, document.body.firstChild);
+            \}
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            canvas.style.display = 'block';
+            updateCanvasLayout();
+            ensurePointerHandlers();
+            ctx = canvas.getContext('2d');
+            
+            // Hide text output in canvas mode
+            if (outputElement) \{
+                outputElement.style.display = 'none';
+            \}
+            
+            // Allocate buffer in WASM memory (RGBA: 4 bytes per pixel)
+            // Use a fixed location after the stack (at 256KB)
+            canvasBufferPtr = 262144;
+            ensureCanvasMemory(canvasWidth, canvasHeight);
+            
+            return BigInt(canvasBufferPtr);
+        \},
+        host_canvas_width: () => BigInt(canvasWidth),
+        host_canvas_height: () => BigInt(canvasHeight),
+        host_canvas_present: () => \{
+            if (!ctx || !canvas) return 0n;
+            
+            // Read pixel data from WASM memory
+            const view = new Uint8ClampedArray(memory.buffer, canvasBufferPtr, canvasWidth * canvasHeight * 4);
+            const imageData = new ImageData(view, canvasWidth, canvasHeight);
+            ctx.putImageData(imageData, 0, 0);
+            
+            return 0n;
+        \},
+        host_canvas_set_aspect_lock: (enabled) => \{
+            if (Number(enabled) !== 0) \{
+                lockCanvasAspect();
+            \} else \{
+                unlockCanvasAspect();
+            \}
+            return 0n;
+        \},
+        host_frame_count: () => BigInt(frameCount),
+        host_frame_time: () => BigInt(Math.floor(performance.now() - startTime)),
+        host_window_width: () => BigInt(window.innerWidth),
+        host_window_height: () => BigInt(window.innerHeight),
+        host_pointer_x: () => BigInt(pointerX),
+        host_pointer_y: () => BigInt(pointerY),
+        host_pointer_down: () => (pointerDown ? 1n : 0n),
+        host_key_down: (ptr, len) => \{
+            ensureKeyboardHandlers();
+            return keysDown.has(decodeString(ptr, len)) ? 1n : 0n;
+        \},
+        host_key_pressed: (ptr, len) => \{
+            ensureKeyboardHandlers();
+            return keysPressedFrame.has(decodeString(ptr, len)) ? 1n : 0n;
+        \},
+        host_key_released: (ptr, len) => \{
+            ensureKeyboardHandlers();
+            return keysReleasedFrame.has(decodeString(ptr, len)) ? 1n : 0n;
+        \},
+        // Audio
+        host_audio_init: (sampleRate, numSamples, channels) => \{
+            audioSampleRate = Number(sampleRate);
+            audioNumSamples = Number(numSamples);
+            audioChannels = Number(channels);
+            // Allocate buffer after canvas buffer (at 768KB)
+            // Each sample is i16 (2 bytes), per channel
+            audioBufferPtr = 786432;
+            return BigInt(audioBufferPtr);
+        \},
+        host_audio_play: () => \{
+            if (!audioCtx) \{
+                audioCtx = new AudioContext(\{ sampleRate: audioSampleRate \});
+            \}
+
+            audioPendingPlay = true;
+            requestAudioUnlock();
+            return 0n;
+        \},
+        host_audio_sample_rate: () => BigInt(audioSampleRate),
+        // Audio streaming using ScriptProcessorNode with double-buffering
+        host_audio_stream_init: (sampleRate, bufferSize) => \{
+            audioSampleRate = Number(sampleRate);
+            audioStreamBufferSize = AUDIO_SCRIPT_BUFFER_SIZE;
+            audioChannels = 1;
+            audioStreamMode = true;
+            audioStreamStarted = false;
+            audioWriteBuffer = 0;
+            audioReadBuffer = 0;
+            audioBuffer0Ready = false;
+            audioBuffer1Ready = false;
+            
+            if (!audioCtx) \{
+                audioCtx = new AudioContext(\{ sampleRate: audioSampleRate \});
+            \}
+            
+            // Create ScriptProcessorNode with larger buffer
+            audioScriptNode = audioCtx.createScriptProcessor(AUDIO_SCRIPT_BUFFER_SIZE, 0, 1);
+            
+            audioScriptNode.onaudioprocess = (e) => \{
+                const output = e.outputBuffer.getChannelData(0);
+                const bufSize = AUDIO_SCRIPT_BUFFER_SIZE;
+                
+                // Read from the ready buffer
+                let bufferOffset, hasData;
+                if (audioReadBuffer === 0 && audioBuffer0Ready) \{
+                    bufferOffset = AUDIO_BUFFER_0_OFFSET;
+                    hasData = true;
+                    audioBuffer0Ready = false;
+                    audioReadBuffer = 1;
+                \} else if (audioReadBuffer === 1 && audioBuffer1Ready) \{
+                    bufferOffset = AUDIO_BUFFER_1_OFFSET;
+                    hasData = true;
+                    audioBuffer1Ready = false;
+                    audioReadBuffer = 0;
+                \} else if (audioBuffer0Ready) \{
+                    bufferOffset = AUDIO_BUFFER_0_OFFSET;
+                    hasData = true;
+                    audioBuffer0Ready = false;
+                    audioReadBuffer = 1;
+                \} else if (audioBuffer1Ready) \{
+                    bufferOffset = AUDIO_BUFFER_1_OFFSET;
+                    hasData = true;
+                    audioBuffer1Ready = false;
+                    audioReadBuffer = 0;
+                \} else \{
+                    hasData = false;
+                \}
+                
+                if (hasData) \{
+                    const view = new Int16Array(memory.buffer, bufferOffset, bufSize);
+                    for (let i = 0; i < bufSize; i++) \{
+                        output[i] = view[i] / 32768.0;
+                    \}
+                \} else \{
+                    // Silence if no buffer ready
+                    for (let i = 0; i < bufSize; i++) \{
+                        output[i] = 0;
+                    \}
+                \}
+            \};
+            
+            // Return pointer to write buffer 0
+            audioBufferPtr = AUDIO_BUFFER_0_OFFSET;
+            return BigInt(audioBufferPtr);
+        \},
+        host_audio_stream_write: () => \{
+            if (!audioStreamMode || !audioCtx) return 0n;
+
+            requestAudioUnlock();
+            
+            // Mark current write buffer as ready and switch to other buffer
+            if (audioWriteBuffer === 0) \{
+                audioBuffer0Ready = true;
+                audioWriteBuffer = 1;
+                audioBufferPtr = AUDIO_BUFFER_1_OFFSET;
+            \} else \{
+                audioBuffer1Ready = true;
+                audioWriteBuffer = 0;
+                audioBufferPtr = AUDIO_BUFFER_0_OFFSET;
+            \}
+            
+            // Return next buffer pointer for WASM to write to
+            return BigInt(audioBufferPtr);
+        \},
+        host_audio_stream_needs_samples: () => \{
+            // Returns true (-1) if we need more samples, false (0) if buffers are full
+            if (!audioStreamMode) return 0n;
+            // Need samples if the current write buffer is not marked ready
+            if (audioWriteBuffer === 0 && !audioBuffer0Ready) return -1n;
+            if (audioWriteBuffer === 1 && !audioBuffer1Ready) return -1n;
+            return 0n;
+        \},
+        // WebGL fullscreen fragment shader
+        host_webgl_init: (shaderPtr, shaderLen, width, height) => \{
+            if (webglMode) return 0n;
+
+            const w = Number(width);
+            const h = Number(height);
+            const fragmentSource = decodeString(shaderPtr, shaderLen);
+
+            webglCanvas = document.getElementById('canvas');
+            if (!webglCanvas) \{
+                webglCanvas = document.createElement('canvas');
+                webglCanvas.id = 'canvas';
+                document.body.insertBefore(webglCanvas, document.body.firstChild);
+            \}
+            webglCanvas.width = w;
+            webglCanvas.height = h;
+            webglCanvas.style.display = 'block';
+            updateCanvasLayout();
+            ensurePointerHandlers();
+
+            webglContext = webglCanvas.getContext('webgl');
+            if (!webglContext) \{
+                console.error('WebGL not supported');
+                if (outputElement) \{
+                    outputElement.textContent = 'WebGL not supported in this browser';
+                \}
+                return -1n;
+            \}
+
+            try \{
+                webglProgram = createWebglProgram(webglContext, fragmentSource);
+            \} catch (err) \{
+                console.error('WebGL shader setup failed:', err);
+                if (outputElement) \{
+                    outputElement.textContent = `WebGL shader setup failed:
+$\{String(err)\}`;
+                \}
+                return -1n;
+            \}
+
+            webglPositionBuffer = webglContext.createBuffer();
+            webglContext.bindBuffer(webglContext.ARRAY_BUFFER, webglPositionBuffer);
+            webglContext.bufferData(
+                webglContext.ARRAY_BUFFER,
+                new Float32Array([
+                    -1.0, -1.0,
+                    3.0, -1.0,
+                    -1.0, 3.0,
+                ]),
+                webglContext.STATIC_DRAW,
+            );
+
+            webglContext.useProgram(webglProgram);
+            const positionLocation = webglContext.getAttribLocation(webglProgram, 'a_position');
+            if (positionLocation >= 0) \{
+                webglContext.enableVertexAttribArray(positionLocation);
+                webglContext.vertexAttribPointer(positionLocation, 2, webglContext.FLOAT, false, 0, 0);
+            \}
+
+            if (outputElement) \{
+                outputElement.style.display = 'none';
+            \}
+
+            webglMode = true;
+            startTime = performance.now();
+            updateCanvasLayout();
+            return 0n;
+        \},
+        host_webgl_uniform1i: (namePtr, nameLen, value) => \{
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            const name = decodeString(namePtr, nameLen);
+            const location = webglContext.getUniformLocation(webglProgram, name);
+            if (location === null) return -1n;
+            webglContext.useProgram(webglProgram);
+            webglContext.uniform1i(location, Number(value));
+            return 0n;
+        \},
+        host_webgl_uniform2i: (namePtr, nameLen, x, y) => \{
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            const name = decodeString(namePtr, nameLen);
+            const location = webglContext.getUniformLocation(webglProgram, name);
+            if (location === null) return -1n;
+            webglContext.useProgram(webglProgram);
+            webglContext.uniform2i(location, Number(x), Number(y));
+            return 0n;
+        \},
+        host_webgl_uniform1iv: (namePtr, nameLen, valuesPtr, count) => \{
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            const name = decodeString(namePtr, nameLen);
+            const location = webglContext.getUniformLocation(webglProgram, name);
+            if (location === null) return -1n;
+            webglContext.useProgram(webglProgram);
+            webglContext.uniform1iv(location, decodeI64Array(valuesPtr, count));
+            return 0n;
+        \},
+        host_webgl_uniform2iv: (namePtr, nameLen, valuesPtr, count) => \{
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            const name = decodeString(namePtr, nameLen);
+            const location = webglContext.getUniformLocation(webglProgram, name);
+            if (location === null) return -1n;
+            webglContext.useProgram(webglProgram);
+            webglContext.uniform2iv(location, decodeI64Array(valuesPtr, Number(count) * 2));
+            return 0n;
+        \},
+        host_webgl_render: () => \{
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            webglContext.viewport(0, 0, webglCanvas.width, webglCanvas.height);
+            webglContext.useProgram(webglProgram);
+            webglContext.drawArrays(webglContext.TRIANGLES, 0, 3);
+            return 0n;
+        \},
+        // General-purpose batched 3D GPU surface
+        host_gpu_init: (width, height) => \{
+            if (gpuMode) return 0n;
+            const w = Number(width);
+            const h = Number(height);
+            gpuCanvas = document.getElementById('canvas');
+            if (!gpuCanvas) \{
+                gpuCanvas = document.createElement('canvas');
+                gpuCanvas.id = 'canvas';
+                document.body.insertBefore(gpuCanvas, document.body.firstChild);
+            \}
+            gpuCanvas.width = w;
+            gpuCanvas.height = h;
+            gpuCanvas.style.display = 'block';
+            webglCanvas = gpuCanvas;
+            webglMode = true;
+            updateCanvasLayout();
+            ensurePointerHandlers();
+            ensureKeyboardHandlers();
+
+            gpuGL = gpuCanvas.getContext('webgl', \{ antialias: true, depth: true, alpha: false, preserveDrawingBuffer: false \});
+            if (!gpuGL) \{
+                console.error('WebGL not supported');
+                return -1n;
+            \}
+            try \{
+                gpuProgram = gpuCreateProgram(gpuGL);
+            \} catch (err) \{
+                console.error('GPU shader setup failed:', err);
+                return -1n;
+            \}
+            gpuGL.useProgram(gpuProgram);
+            gpuLocPos = gpuGL.getAttribLocation(gpuProgram, 'a_pos');
+            gpuLocUV = gpuGL.getAttribLocation(gpuProgram, 'a_uv');
+            gpuLocColor = gpuGL.getAttribLocation(gpuProgram, 'a_color');
+            gpuLocProj = gpuGL.getUniformLocation(gpuProgram, 'u_proj');
+            gpuLocView = gpuGL.getUniformLocation(gpuProgram, 'u_view');
+            gpuLocSampler = gpuGL.getUniformLocation(gpuProgram, 'u_tex');
+            gpuLocUseTex = gpuGL.getUniformLocation(gpuProgram, 'u_use_tex');
+
+            gpuVbo = gpuGL.createBuffer();
+            gpuWhiteTex = gpuGL.createTexture();
+            gpuGL.bindTexture(gpuGL.TEXTURE_2D, gpuWhiteTex);
+            gpuGL.texImage2D(gpuGL.TEXTURE_2D, 0, gpuGL.RGBA, 1, 1, 0, gpuGL.RGBA, gpuGL.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
+            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_MIN_FILTER, gpuGL.NEAREST);
+            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_MAG_FILTER, gpuGL.NEAREST);
+            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_WRAP_S, gpuGL.CLAMP_TO_EDGE);
+            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_WRAP_T, gpuGL.CLAMP_TO_EDGE);
+
+            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuIdentity);
+            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuIdentity);
+            gpuBindTextureSlot(0);
+
+            gpuGL.enable(gpuGL.DEPTH_TEST);
+            gpuGL.depthFunc(gpuGL.LEQUAL);
+            gpuGL.disable(gpuGL.BLEND);
+
+            if (outputElement) outputElement.style.display = 'none';
+            gpuMode = true;
+            startTime = performance.now();
+            updateCanvasLayout();
+            return 0n;
+        \},
+        host_gpu_set_viewport: (w, h) => \{
+            if (!gpuMode) return 0n;
+            gpuGL.viewport(0, 0, Number(w), Number(h));
+            return 0n;
+        \},
+        host_gpu_clear: (r_q, g_q, b_q) => \{
+            if (!gpuMode) return 0n;
+            gpuGL.clearColor(q16ToF32(r_q), q16ToF32(g_q), q16ToF32(b_q), 1.0);
+            gpuGL.clear(gpuGL.COLOR_BUFFER_BIT | gpuGL.DEPTH_BUFFER_BIT);
+            return 0n;
+        \},
+        host_gpu_set_perspective_frustum: (l_q, r_q, b_q, t_q, n_q, f_q) => \{
+            if (!gpuMode) return 0n;
+            gpuMakeFrustum(gpuProj, q16ToF32(l_q), q16ToF32(r_q), q16ToF32(b_q), q16ToF32(t_q), q16ToF32(n_q), q16ToF32(f_q));
+            gpuGL.useProgram(gpuProgram);
+            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuProj);
+            return 0n;
+        \},
+        host_gpu_set_view_matrix: (matPtr) => \{
+            if (!gpuMode) return 0n;
+            const view = new Float32Array(memory.buffer, Number(matPtr), 16);
+            for (let i = 0; i < 16; i++) gpuView[i] = view[i];
+            gpuGL.useProgram(gpuProgram);
+            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuView);
+            return 0n;
+        \},
+        host_gpu_set_texture: (texId) => \{
+            if (!gpuMode) return 0n;
+            gpuGL.useProgram(gpuProgram);
+            gpuBindTextureSlot(Number(texId));
+            return 0n;
+        \},
+        host_gpu_set_blend: (mode) => \{
+            if (!gpuMode) return 0n;
+            const m = Number(mode);
+            if (m === 0) \{
+                gpuGL.disable(gpuGL.BLEND);
+            \} else if (m === 1) \{
+                gpuGL.enable(gpuGL.BLEND);
+                gpuGL.blendFunc(gpuGL.SRC_ALPHA, gpuGL.ONE_MINUS_SRC_ALPHA);
+            \} else \{
+                gpuGL.enable(gpuGL.BLEND);
+                gpuGL.blendFunc(gpuGL.SRC_ALPHA, gpuGL.ONE);
+            \}
+            return 0n;
+        \},
+        host_gpu_set_depth_test: (on) => \{
+            if (!gpuMode) return 0n;
+            if (Number(on) !== 0) gpuGL.enable(gpuGL.DEPTH_TEST);
+            else gpuGL.disable(gpuGL.DEPTH_TEST);
+            return 0n;
+        \},
+        host_gpu_set_depth_write: (on) => \{
+            if (!gpuMode) return 0n;
+            gpuGL.depthMask(Number(on) !== 0);
+            return 0n;
+        \},
+        host_gpu_set_line_width: (w_q) => \{
+            if (!gpuMode) return 0n;
+            gpuGL.lineWidth(q16ToF32(w_q));
+            return 0n;
+        \},
+        host_gpu_submit: (kind, ptr, count) => \{
+            if (!gpuMode) return 0n;
+            const k = Number(kind);
+            const n = Number(count);
+            if (n <= 0) return 0n;
+            const gl = gpuGL;
+            const stride = 9 * 4;
+            const verts = new Float32Array(memory.buffer, Number(ptr), n * 9);
+            gl.useProgram(gpuProgram);
+            gl.bindBuffer(gl.ARRAY_BUFFER, gpuVbo);
+            gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STREAM_DRAW);
+            gl.enableVertexAttribArray(gpuLocPos);
+            gl.vertexAttribPointer(gpuLocPos, 3, gl.FLOAT, false, stride, 0);
+            if (gpuLocUV >= 0) \{
+                gl.enableVertexAttribArray(gpuLocUV);
+                gl.vertexAttribPointer(gpuLocUV, 2, gl.FLOAT, false, stride, 12);
+            \}
+            if (gpuLocColor >= 0) \{
+                gl.enableVertexAttribArray(gpuLocColor);
+                gl.vertexAttribPointer(gpuLocColor, 4, gl.FLOAT, false, stride, 20);
+            \}
+            if (k === 0) \{
+                const quads = (n / 4) | 0;
+                gpuEnsureQuadIndices(quads);
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gpuQuadIbo);
+                gl.drawElements(gl.TRIANGLES, quads * 6, gl.UNSIGNED_SHORT, 0);
+            \} else if (k === 1) \{
+                gpuEnsureStripIndices(n);
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gpuStripIbo);
+                gl.drawElements(gl.TRIANGLES, Math.max(n - 2, 0) * 3, gl.UNSIGNED_SHORT, 0);
+            \} else if (k === 2) \{
+                gl.drawArrays(gl.TRIANGLES, 0, n);
+            \} else if (k === 3) \{
+                gl.drawArrays(gl.LINES, 0, n);
+            \}
+            return 0n;
+        \},
+        host_gpu_overlay_begin: (sw, sh) => \{
+            if (!gpuMode) return 0n;
+            const w = Number(sw);
+            const h = Number(sh);
+            gpuMakeOrtho(gpuOrthoProj, 0, w, h, 0, -1, 1);
+            gpuGL.useProgram(gpuProgram);
+            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuOrthoProj);
+            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuIdentity);
+            gpuSavedDepthTest = gpuGL.getParameter(gpuGL.DEPTH_TEST);
+            gpuSavedDepthWrite = gpuGL.getParameter(gpuGL.DEPTH_WRITEMASK);
+            gpuGL.disable(gpuGL.DEPTH_TEST);
+            gpuGL.depthMask(false);
+            gpuOverlayActive = true;
+            return 0n;
+        \},
+        host_gpu_overlay_end: () => \{
+            if (!gpuMode) return 0n;
+            gpuGL.useProgram(gpuProgram);
+            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuProj);
+            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuView);
+            if (gpuSavedDepthTest) gpuGL.enable(gpuGL.DEPTH_TEST);
+            gpuGL.depthMask(!!gpuSavedDepthWrite);
+            gpuOverlayActive = false;
+            return 0n;
+        \},
+        host_gpu_create_texture: (width, height, pixelsPtr, repeat, nearest) => \{
+            if (!gpuMode) return 0n;
+            const gl = gpuGL;
+            const w = Number(width);
+            const h = Number(height);
+            const pixels = new Uint8Array(memory.buffer, Number(pixelsPtr), w * h * 4);
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(pixels));
+            const filter = (Number(nearest) !== 0) ? gl.NEAREST : gl.LINEAR;
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+            const wrap = (Number(repeat) !== 0) ? gl.REPEAT : gl.CLAMP_TO_EDGE;
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+            gpuTextures.push(tex);
+            return BigInt(gpuTextures.length - 1);
+        \},
+        host_gpu_present: () => \{
+            return 0n;
+        \},
+        host_gpu_window_width: () => BigInt(gpuCanvas ? gpuCanvas.width : 0),
+        host_gpu_window_height: () => BigInt(gpuCanvas ? gpuCanvas.height : 0),
+        host_audio_queue_init: (sampleRate, channels) => \{
+            audioQueueRate = Number(sampleRate);
+            audioQueueChannels = Number(channels);
+            audioQueueCapacity = audioQueueRate * 2;  // ~2 s of buffer
+            audioQueueRing = new Int16Array(audioQueueCapacity);
+            audioQueueRead = 0;
+            audioQueueWrite = 0;
+            audioQueueCount = 0;
+            try \{
+                audioQueueEnsureContext();
+            \} catch (err) \{
+                console.error('Audio queue init failed:', err);
+                return -1n;
+            \}
+            return 0n;
+        \},
+        host_audio_queue_push: (ptr, nBytes) => \{
+            if (!audioQueueRing) return 0n;
+            const samples = Number(nBytes) >> 1;
+            const view = new Int16Array(memory.buffer, Number(ptr), samples);
+            for (let i = 0; i < samples; i++) \{
+                if (audioQueueCount >= audioQueueCapacity) break;
+                audioQueueRing[audioQueueWrite] = view[i];
+                audioQueueWrite = (audioQueueWrite + 1) % audioQueueCapacity;
+                audioQueueCount++;
+            \}
+            return BigInt(samples * 2);
+        \},
+        host_audio_queue_size: () => BigInt(audioQueueCount * 2),
+    \}
+\};
+
+function animationLoop() \{
+    if ((!canvasMode && !audioStreamMode && !webglMode && !gpuMode) || !wasmInstance) return;
+
+    frameCount++;
+    wasmInstance.exports.main();
+    clearKeyboardFrameState();
+    requestAnimationFrame(animationLoop);
+\}
+")
     return void
 }
 
 let w_emit_server_lifecycle_js = (out:int):>void => {
-    bb_push_str(out "\n")
-    bb_push_str(out "function setupServerLifecycle() \{\n")
-    bb_push_str(out "    if (window.location.protocol !== 'http:' && window.location.protocol !== 'https:') \{\n")
-    bb_push_str(out "        return;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    const heartbeat = () => \{\n")
-    bb_push_str(out "        fetch('/__udewy_heartbeat__', \{ cache: 'no-store' \}).catch(() => \{\});\n")
-    bb_push_str(out "    \};\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    heartbeat();\n")
-    bb_push_str(out "    const timer = setInterval(heartbeat, 2000);\n")
-    bb_push_str(out "    const notifyClose = () => \{\n")
-    bb_push_str(out "        clearInterval(timer);\n")
-    bb_push_str(out "        navigator.sendBeacon('/__udewy_close__', '');\n")
-    bb_push_str(out "    \};\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    window.addEventListener('pagehide', notifyClose, \{ once: true \});\n")
-    bb_push_str(out "    window.addEventListener('beforeunload', notifyClose, \{ once: true \});\n")
-    bb_push_str(out "\}\n")
+    bb_push_str(out "
+function setupServerLifecycle() \{
+    if (window.location.protocol !== 'http:' && window.location.protocol !== 'https:') \{
+        return;
+    \}
+
+    const heartbeat = () => \{
+        fetch('/__udewy_heartbeat__', \{ cache: 'no-store' \}).catch(() => \{\});
+    \};
+
+    heartbeat();
+    const timer = setInterval(heartbeat, 2000);
+    const notifyClose = () => \{
+        clearInterval(timer);
+        navigator.sendBeacon('/__udewy_close__', '');
+    \};
+
+    window.addEventListener('pagehide', notifyClose, \{ once: true \});
+    window.addEventListener('beforeunload', notifyClose, \{ once: true \});
+\}
+")
     return void
 }
 
-# Append extra JS link artifacts (Vec of length-prefixed strings) after the
-# main host JS, mirroring python `_get_host_functions_js() + browser_link_js`.
+
 let w_emit_extra_js = (out:int extra_js:int):>void => {
     if extra_js =? 0 { return void }
     let n:int = vec_len(extra_js)
@@ -2663,6 +2663,14 @@ let w_emit_extra_js = (out:int extra_js:int):>void => {
         bb_push_str(out vec_get(extra_js i))
         i = i + 1
     }
+    return void
+}
+
+# Single placeholder substitution for {host_js}: emit verbatim host JS, then
+# any extra JS link artifacts.
+let w_emit_full_host_js = (out:int extra_js:int):>void => {
+    w_emit_host_js(out)
+    w_emit_extra_js(out extra_js)
     return void
 }
 
@@ -2684,190 +2692,159 @@ let w_emit_linked_wasm_scripts = (out:int linked:int):>void => {
 }
 
 let w_emit_split_html = (out:int title:int wasm_filename:int extra_js:int):>void => {
-    bb_push_str(out "<!DOCTYPE html>\n")
-    bb_push_str(out "<html>\n")
-    bb_push_str(out "<head>\n")
-    bb_push_str(out "    <meta charset=\"utf-8\">\n")
-    bb_push_str(out "    <title>")
+    bb_push_str(out "<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=\"utf-8\">
+    <title>")
     bb_push_str(out title)
-    bb_push_str(out "</title>\n")
-    bb_push_str(out "    <style>\n")
-    bb_push_str(out "        body \{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; \}\n")
-    bb_push_str(out "        body.dom-mode \{ max-width: none; margin: 0; padding: 0; \}\n")
-    bb_push_str(out "        #udewy-dom-root \{ min-height: 100vh; \}\n")
-    bb_push_str(out "        body.canvas-mode \{ max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; \}\n")
-    bb_push_str(out "        #output \{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; \}\n")
-    bb_push_str(out "        #output:empty \{ display: none; \}\n")
-    bb_push_str(out "        #canvas \{ display: none; image-rendering: pixelated; \}\n")
-    bb_push_str(out "        body.canvas-mode #canvas \{ display: block; width: 100vw; height: 100vh; \}\n")
-    bb_push_str(out "    </style>\n")
-    bb_push_str(out "</head>\n")
-    bb_push_str(out "<body>\n")
-    bb_push_str(out "    <pre id=\"output\"></pre>\n")
-    bb_push_str(out "    <script>\n")
-    w_emit_host_js(out)
-    w_emit_extra_js(out extra_js)
-    bb_push_str(out "\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function setupServerLifecycle() \{\n")
-    bb_push_str(out "    if (window.location.protocol !== 'http:' && window.location.protocol !== 'https:') \{\n")
-    bb_push_str(out "        return;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    const heartbeat = () => \{\n")
-    bb_push_str(out "        fetch('/__udewy_heartbeat__', \{ cache: 'no-store' \}).catch(() => \{\});\n")
-    bb_push_str(out "    \};\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    heartbeat();\n")
-    bb_push_str(out "    const timer = setInterval(heartbeat, 2000);\n")
-    bb_push_str(out "    const notifyClose = () => \{\n")
-    bb_push_str(out "        clearInterval(timer);\n")
-    bb_push_str(out "        navigator.sendBeacon('/__udewy_close__', '');\n")
-    bb_push_str(out "    \};\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    window.addEventListener('pagehide', notifyClose, \{ once: true \});\n")
-    bb_push_str(out "    window.addEventListener('beforeunload', notifyClose, \{ once: true \});\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "async function run() \{\n")
-    bb_push_str(out "    outputElement = document.getElementById('output');\n")
-    bb_push_str(out "    setupServerLifecycle();\n")
-    bb_push_str(out "    try \{\n")
-    bb_push_str(out "        const response = await fetch('")
+    bb_push_str(out "</title>
+    <style>
+        body \{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; \}
+        body.dom-mode \{ max-width: none; margin: 0; padding: 0; \}
+        #udewy-dom-root \{ min-height: 100vh; \}
+        body.canvas-mode \{ max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; \}
+        #output \{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; \}
+        #output:empty \{ display: none; \}
+        #canvas \{ display: none; image-rendering: pixelated; \}
+        body.canvas-mode #canvas \{ display: block; width: 100vw; height: 100vh; \}
+    </style>
+</head>
+<body>
+    <pre id=\"output\"></pre>
+    <script>
+")
+    w_emit_full_host_js(out extra_js)
+    bb_push_str(out "
+")
+    w_emit_server_lifecycle_js(out)
+    bb_push_str(out "
+
+async function run() \{
+    outputElement = document.getElementById('output');
+    setupServerLifecycle();
+    try \{
+        const response = await fetch('")
     bb_push_str(out wasm_filename)
-    bb_push_str(out "');\n")
-    bb_push_str(out "        const bytes = await response.arrayBuffer();\n")
-    bb_push_str(out "        if (typeof beforeUdewyInstantiate === 'function') \{\n")
-    bb_push_str(out "            await beforeUdewyInstantiate(imports);\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "        const \{ instance \} = await WebAssembly.instantiate(bytes, imports);\n")
-    bb_push_str(out "        wasmInstance = instance;\n")
-    bb_push_str(out "        const result = instance.exports.main();\n")
-    bb_push_str(out "        console.log('Exit code:', result);\n")
-    bb_push_str(out "        if (canvasMode || webglMode || gpuMode) \{\n")
-    bb_push_str(out "            document.body.classList.add('canvas-mode');\n")
-    bb_push_str(out "            requestAnimationFrame(animationLoop);\n")
-    bb_push_str(out "        \} else if (audioStreamMode) \{\n")
-    bb_push_str(out "            requestAnimationFrame(animationLoop);\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "    \} catch (err) \{\n")
-    bb_push_str(out "        console.error('Error:', err);\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "run();\n")
-    bb_push_str(out "    </script>\n")
-    bb_push_str(out "</body>\n")
-    bb_push_str(out "</html>\n")
+    bb_push_str(out "');
+        const bytes = await response.arrayBuffer();
+        if (typeof beforeUdewyInstantiate === 'function') \{
+            await beforeUdewyInstantiate(imports);
+        \}
+        const \{ instance \} = await WebAssembly.instantiate(bytes, imports);
+        wasmInstance = instance;
+        const result = instance.exports.main();
+        console.log('Exit code:', result);
+        if (canvasMode || webglMode || gpuMode) \{
+            document.body.classList.add('canvas-mode');
+            requestAnimationFrame(animationLoop);
+        \} else if (audioStreamMode) \{
+            requestAnimationFrame(animationLoop);
+        \}
+    \} catch (err) \{
+        console.error('Error:', err);
+    \}
+\}
+
+run();
+    </script>
+</body>
+</html>
+")
     return void
 }
 
 let w_emit_embedded_html = (out:int title:int wasm_b64:int linked:int extra_js:int):>void => {
-    bb_push_str(out "<!DOCTYPE html>\n")
-    bb_push_str(out "<html>\n")
-    bb_push_str(out "<head>\n")
-    bb_push_str(out "    <meta charset=\"utf-8\">\n")
-    bb_push_str(out "    <title>")
+    bb_push_str(out "<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=\"utf-8\">
+    <title>")
     bb_push_str(out title)
-    bb_push_str(out "</title>\n")
-    bb_push_str(out "    <style>\n")
-    bb_push_str(out "        body \{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; \}\n")
-    bb_push_str(out "        body.dom-mode \{ max-width: none; margin: 0; padding: 0; \}\n")
-    bb_push_str(out "        #udewy-dom-root \{ min-height: 100vh; \}\n")
-    bb_push_str(out "        body.canvas-mode \{ max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; \}\n")
-    bb_push_str(out "        #output \{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; \}\n")
-    bb_push_str(out "        #output:empty \{ display: none; \}\n")
-    bb_push_str(out "        #canvas \{ display: none; image-rendering: pixelated; \}\n")
-    bb_push_str(out "        body.canvas-mode #canvas \{ display: block; width: 100vw; height: 100vh; \}\n")
-    bb_push_str(out "    </style>\n")
-    bb_push_str(out "</head>\n")
-    bb_push_str(out "<body>\n")
-    bb_push_str(out "    <pre id=\"output\"></pre>\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    <script id=\"wasm-module\" type=\"application/wasm-b64\">\n")
+    bb_push_str(out "</title>
+    <style>
+        body \{ font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; \}
+        body.dom-mode \{ max-width: none; margin: 0; padding: 0; \}
+        #udewy-dom-root \{ min-height: 100vh; \}
+        body.canvas-mode \{ max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; \}
+        #output \{ background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; \}
+        #output:empty \{ display: none; \}
+        #canvas \{ display: none; image-rendering: pixelated; \}
+        body.canvas-mode #canvas \{ display: block; width: 100vw; height: 100vh; \}
+    </style>
+</head>
+<body>
+    <pre id=\"output\"></pre>
+
+    <script id=\"wasm-module\" type=\"application/wasm-b64\">
+")
     bb_push_str(out wasm_b64)
-    bb_push_str(out "\n")
-    bb_push_str(out "    </script>\n")
+    bb_push_str(out "
+    </script>
+")
     w_emit_linked_wasm_scripts(out linked)
-    bb_push_str(out "\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    <script>\n")
-    w_emit_host_js(out)
-    w_emit_extra_js(out extra_js)
-    bb_push_str(out "\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function setupServerLifecycle() \{\n")
-    bb_push_str(out "    if (window.location.protocol !== 'http:' && window.location.protocol !== 'https:') \{\n")
-    bb_push_str(out "        return;\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    const heartbeat = () => \{\n")
-    bb_push_str(out "        fetch('/__udewy_heartbeat__', \{ cache: 'no-store' \}).catch(() => \{\});\n")
-    bb_push_str(out "    \};\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    heartbeat();\n")
-    bb_push_str(out "    const timer = setInterval(heartbeat, 2000);\n")
-    bb_push_str(out "    const notifyClose = () => \{\n")
-    bb_push_str(out "        clearInterval(timer);\n")
-    bb_push_str(out "        navigator.sendBeacon('/__udewy_close__', '');\n")
-    bb_push_str(out "    \};\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "    window.addEventListener('pagehide', notifyClose, \{ once: true \});\n")
-    bb_push_str(out "    window.addEventListener('beforeunload', notifyClose, \{ once: true \});\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "function decodeWasmBase64(b64) \{\n")
-    bb_push_str(out "    return Uint8Array.from(atob(b64), c => c.charCodeAt(0));\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "async function loadEmbeddedWasm() \{\n")
-    bb_push_str(out "    const b64 = document.getElementById('wasm-module').textContent.trim();\n")
-    bb_push_str(out "    const bytes = decodeWasmBase64(b64);\n")
-    bb_push_str(out "    return WebAssembly.instantiate(bytes, imports);\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "async function loadLinkedWasm(name, imports) \{\n")
-    bb_push_str(out "    const script = document.querySelector(`script[data-wasm-artifact=\"$\{name\}\"]`);\n")
-    bb_push_str(out "    if (script) \{\n")
-    bb_push_str(out "        return WebAssembly.instantiate(decodeWasmBase64(script.textContent.trim()), imports);\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    const response = await fetch(name);\n")
-    bb_push_str(out "    if (!response.ok) \{\n")
-    bb_push_str(out "        throw new Error(`Failed to load $\{name\}: HTTP $\{response.status\}`);\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "    return WebAssembly.instantiate(await response.arrayBuffer(), imports);\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "async function run() \{\n")
-    bb_push_str(out "    outputElement = document.getElementById('output');\n")
-    bb_push_str(out "    setupServerLifecycle();\n")
-    bb_push_str(out "    try \{\n")
-    bb_push_str(out "        if (typeof beforeUdewyInstantiate === 'function') \{\n")
-    bb_push_str(out "            await beforeUdewyInstantiate(imports);\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "        const \{ instance \} = await loadEmbeddedWasm();\n")
-    bb_push_str(out "        wasmInstance = instance;\n")
-    bb_push_str(out "        const result = instance.exports.main();\n")
-    bb_push_str(out "        console.log('Exit code:', result);\n")
-    bb_push_str(out "        if (canvasMode || webglMode || gpuMode) \{\n")
-    bb_push_str(out "            document.body.classList.add('canvas-mode');\n")
-    bb_push_str(out "            requestAnimationFrame(animationLoop);\n")
-    bb_push_str(out "        \} else if (audioStreamMode) \{\n")
-    bb_push_str(out "            requestAnimationFrame(animationLoop);\n")
-    bb_push_str(out "        \}\n")
-    bb_push_str(out "    \} catch (err) \{\n")
-    bb_push_str(out "        console.error('Error:', err);\n")
-    bb_push_str(out "    \}\n")
-    bb_push_str(out "\}\n")
-    bb_push_str(out "\n")
-    bb_push_str(out "run();\n")
-    bb_push_str(out "    </script>\n")
-    bb_push_str(out "</body>\n")
-    bb_push_str(out "</html>\n")
+    bb_push_str(out "
+
+    <script>
+")
+    w_emit_full_host_js(out extra_js)
+    bb_push_str(out "
+")
+    w_emit_server_lifecycle_js(out)
+    bb_push_str(out "
+
+function decodeWasmBase64(b64) \{
+    return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+\}
+
+async function loadEmbeddedWasm() \{
+    const b64 = document.getElementById('wasm-module').textContent.trim();
+    const bytes = decodeWasmBase64(b64);
+    return WebAssembly.instantiate(bytes, imports);
+\}
+
+async function loadLinkedWasm(name, imports) \{
+    const script = document.querySelector(`script[data-wasm-artifact=\"$\{name\}\"]`);
+    if (script) \{
+        return WebAssembly.instantiate(decodeWasmBase64(script.textContent.trim()), imports);
+    \}
+    const response = await fetch(name);
+    if (!response.ok) \{
+        throw new Error(`Failed to load $\{name\}: HTTP $\{response.status\}`);
+    \}
+    return WebAssembly.instantiate(await response.arrayBuffer(), imports);
+\}
+
+async function run() \{
+    outputElement = document.getElementById('output');
+    setupServerLifecycle();
+    try \{
+        if (typeof beforeUdewyInstantiate === 'function') \{
+            await beforeUdewyInstantiate(imports);
+        \}
+        const \{ instance \} = await loadEmbeddedWasm();
+        wasmInstance = instance;
+        const result = instance.exports.main();
+        console.log('Exit code:', result);
+        if (canvasMode || webglMode || gpuMode) \{
+            document.body.classList.add('canvas-mode');
+            requestAnimationFrame(animationLoop);
+        \} else if (audioStreamMode) \{
+            requestAnimationFrame(animationLoop);
+        \}
+    \} catch (err) \{
+        console.error('Error:', err);
+    \}
+\}
+
+run();
+    </script>
+</body>
+</html>
+")
     return void
 }
+
 
 # --- compile_and_link / run ---
 
@@ -2875,7 +2852,7 @@ let w_emit_embedded_html = (out:int title:int wasm_b64:int linked:int extra_js:i
 let w_str_ends_with = (s:int suffix:int):>int => {
     let sn:int = str_len(s)
     let xn:int = str_len(suffix)
-    if xn >? sn { return FALSE_VAL }
+    if xn >? sn { return false }
     return str_eq_len(s + sn - xn xn suffix xn)
 }
 
@@ -2900,8 +2877,10 @@ let w_read_or_die = (path:int what:int):>int => {
     return data
 }
 
-# Spawn xdg-open <url> without waiting. Mirrors python's _open_browser. Falls
-# back to PATH search for xdg-open (handles minimal /bin envs).
+# Spawn xdg-open <url> without waiting. Mirrors python's _open_browser:
+# detaches into a new session and redirects stdin/stdout/stderr to /dev/null
+# so the launched browser's diagnostic chatter doesn't bleed into our shell.
+# Falls back to PATH search for xdg-open (handles minimal /bin envs).
 let w_open_browser = (url:int):>void => {
     let argv:int = vec_new(2)
     vec_push(argv w_str("xdg-open"))
@@ -2909,6 +2888,14 @@ let w_open_browser = (url:int):>void => {
     let pid:int = host_fork()
     if pid <? 0 { return void }
     if pid =? 0 {
+        host_setsid()
+        let devnull:int = host_open(path_to_cstr("/dev/null") O_RDWR 0)
+        if devnull >=? 0 {
+            host_dup2(devnull STDIN)
+            host_dup2(devnull STDOUT)
+            host_dup2(devnull STDERR)
+            if devnull >? 2 { host_close(devnull) }
+        }
         let argv_table:int = proc_build_cstr_argv(argv)
         let envp:int = g_envp
         if envp =? 0 {
@@ -3003,11 +2990,28 @@ let w_html_path_for = (output_path:int):>int => {
     return w_path_with(dir stem ".html")
 }
 
-# Build a `file://...` URL from a path.
-let w_to_file_uri = (p:int):>int => {
-    let bb:int = bb_new(str_len(p) + 8)
-    bb_push_str(bb "file://")
+# Resolve a path to absolute via getcwd if it's relative.
+let w_resolve_abs = (p:int):>int => {
+    if str_len(p) >? 0 {
+        if __load_u8__(p) =? 47 { return p }    # '/'
+    }
+    let cwd_buf:int = host_mmap_rw(4096)
+    let n:int = host_getcwd(cwd_buf 4096)
+    if n <=? 0 { return p }
+    let bb:int = bb_new(cstr_len(cwd_buf) + str_len(p) + 2)
+    bb_push_cstr(bb cwd_buf)
+    bb_push_str(bb "/")
     bb_push_str(bb p)
+    return bb_finalize_as_string(bb)
+}
+
+# Build a `file://...` URL from a path. Path is resolved to absolute first
+# because xdg-open / gio require an absolute path in the URI.
+let w_to_file_uri = (p:int):>int => {
+    let abs:int = w_resolve_abs(p)
+    let bb:int = bb_new(str_len(abs) + 8)
+    bb_push_str(bb "file://")
+    bb_push_str(bb abs)
     return bb_finalize_as_string(bb)
 }
 

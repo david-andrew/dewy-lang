@@ -31,6 +31,12 @@ const CH_STORE_U32:int        = 4194304
 const CH_STORE_U64:int        = 8388608
 const CH_ALLOCA:int           = 16777216
 
+# Helpers whose body depends on the target byte order. If any of these are
+# requested, we emit the endian-detection prelude before the helpers.
+# Mask = CH_LOAD_U16 | CH_LOAD_I16 | CH_LOAD_U32 | CH_LOAD_I32 | CH_LOAD_U64
+#      | CH_LOAD_I64 | CH_STORE_U16 | CH_STORE_U32 | CH_STORE_U64
+const CH_ENDIAN_MASK:int = 15712256
+
 # Capability flags.
 const CAP_STDIO:int  = 1
 const CAP_STDLIB:int = 2
@@ -364,8 +370,8 @@ let c_set_imported_sources = (paths:int):>void => {
 }
 
 let c_has_capability = (cap:int):>int => {
-    if (c_capabilities and cap) =? 0 { return FALSE_VAL }
-    return TRUE_VAL
+    if (c_capabilities and cap) =? 0 { return false }
+    return true
 }
 
 # Known extern -> capability map. Returns 0 if not known.
@@ -411,9 +417,9 @@ let c_known_extern_wrapper = (name:int):>int => {
 
 let c_should_warn_unused_extern = (name:int):>int => {
     let cap:int = c_known_extern_capability(name)
-    if cap =? 0 { return TRUE_VAL }
-    if not c_has_capability(cap) { return TRUE_VAL }
-    return FALSE_VAL
+    if cap =? 0 { return true }
+    if not c_has_capability(cap) { return true }
+    return false
 }
 
 # --- Expression helpers ---
@@ -523,7 +529,7 @@ let c_set_module_init = (name:int):>void => {
 
 let c_set_reachable_functions = (s:int):>void => {
     c_reachable = s
-    c_have_reachable = TRUE_VAL
+    c_have_reachable = true
     return void
 }
 
@@ -1038,9 +1044,9 @@ let c_mixed_extern_arg_slots = (name:int):>int => {
 
 let c_is_intrinsic = (name:int):>int => {
     c_init_intrinsics()
-    if map_has_str(g_c_intrinsics name) { return TRUE_VAL }
-    if c_mixed_extern_arg_slots(name) >=? 0 { return TRUE_VAL }
-    return FALSE_VAL
+    if map_has_str(g_c_intrinsics name) { return true }
+    if c_mixed_extern_arg_slots(name) >=? 0 { return true }
+    return false
 }
 
 let c_intrinsic_arity = (name:int):>int => {
@@ -1275,25 +1281,25 @@ let c_render_helper = (out:int flag:int):>void => {
     } else if flag =? CH_LOAD_I8 {
         bb_push_str(out "static udewy_word udewy_load_i8(udewy_word addr) \{ return (udewy_word)(int64_t)(int8_t)(*(const unsigned char *)(uintptr_t)addr); \}\n\n")
     } else if flag =? CH_LOAD_U16 {
-        bb_push_str(out "static udewy_word udewy_load_u16(udewy_word addr) \{\n    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;\n    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8);\n\}\n\n")
+        bb_push_str(out "static udewy_word udewy_load_u16(udewy_word addr) \{\n    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;\n#if defined(UDEWY_LITTLE_ENDIAN)\n    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8);\n#else\n    return ((udewy_word)p[0] << 8) | ((udewy_word)p[1]);\n#endif\n\}\n\n")
     } else if flag =? CH_LOAD_I16 {
         bb_push_str(out "static udewy_word udewy_load_i16(udewy_word addr) \{ return (udewy_word)(int64_t)(int16_t)udewy_load_u16(addr); \}\n\n")
     } else if flag =? CH_LOAD_U32 {
-        bb_push_str(out "static udewy_word udewy_load_u32(udewy_word addr) \{\n    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;\n    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8) | ((udewy_word)p[2] << 16) | ((udewy_word)p[3] << 24);\n\}\n\n")
+        bb_push_str(out "static udewy_word udewy_load_u32(udewy_word addr) \{\n    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;\n#if defined(UDEWY_LITTLE_ENDIAN)\n    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8) | ((udewy_word)p[2] << 16) | ((udewy_word)p[3] << 24);\n#else\n    return ((udewy_word)p[0] << 24) | ((udewy_word)p[1] << 16) | ((udewy_word)p[2] << 8) | ((udewy_word)p[3]);\n#endif\n\}\n\n")
     } else if flag =? CH_LOAD_I32 {
         bb_push_str(out "static udewy_word udewy_load_i32(udewy_word addr) \{ return (udewy_word)(int64_t)(int32_t)udewy_load_u32(addr); \}\n\n")
     } else if flag =? CH_LOAD_U64 {
-        bb_push_str(out "static udewy_word udewy_load_u64(udewy_word addr) \{\n    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;\n    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8) | ((udewy_word)p[2] << 16) | ((udewy_word)p[3] << 24) | ((udewy_word)p[4] << 32) | ((udewy_word)p[5] << 40) | ((udewy_word)p[6] << 48) | ((udewy_word)p[7] << 56);\n\}\n\n")
+        bb_push_str(out "static udewy_word udewy_load_u64(udewy_word addr) \{\n    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;\n#if defined(UDEWY_LITTLE_ENDIAN)\n    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8) | ((udewy_word)p[2] << 16) | ((udewy_word)p[3] << 24) | ((udewy_word)p[4] << 32) | ((udewy_word)p[5] << 40) | ((udewy_word)p[6] << 48) | ((udewy_word)p[7] << 56);\n#else\n    return ((udewy_word)p[0] << 56) | ((udewy_word)p[1] << 48) | ((udewy_word)p[2] << 40) | ((udewy_word)p[3] << 32) | ((udewy_word)p[4] << 24) | ((udewy_word)p[5] << 16) | ((udewy_word)p[6] << 8) | ((udewy_word)p[7]);\n#endif\n\}\n\n")
     } else if flag =? CH_LOAD_I64 {
         bb_push_str(out "static udewy_word udewy_load_i64(udewy_word addr) \{ return udewy_load_u64(addr); \}\n\n")
     } else if flag =? CH_STORE_U8 {
         bb_push_str(out "static udewy_word udewy_store_u8(udewy_word value, udewy_word addr) \{ *(unsigned char *)(uintptr_t)addr = (unsigned char)value; return UINT64_C(0); \}\n\n")
     } else if flag =? CH_STORE_U16 {
-        bb_push_str(out "static udewy_word udewy_store_u16(udewy_word value, udewy_word addr) \{\n    unsigned char *p = (unsigned char *)(uintptr_t)addr;\n    p[0] = (unsigned char)(value >> 0); p[1] = (unsigned char)(value >> 8);\n    return UINT64_C(0);\n\}\n\n")
+        bb_push_str(out "static udewy_word udewy_store_u16(udewy_word value, udewy_word addr) \{\n    unsigned char *p = (unsigned char *)(uintptr_t)addr;\n#if defined(UDEWY_LITTLE_ENDIAN)\n    p[0] = (unsigned char)(value >> 0); p[1] = (unsigned char)(value >> 8);\n#else\n    p[0] = (unsigned char)(value >> 8); p[1] = (unsigned char)(value >> 0);\n#endif\n    return UINT64_C(0);\n\}\n\n")
     } else if flag =? CH_STORE_U32 {
-        bb_push_str(out "static udewy_word udewy_store_u32(udewy_word value, udewy_word addr) \{\n    unsigned char *p = (unsigned char *)(uintptr_t)addr;\n    p[0] = (unsigned char)(value >> 0); p[1] = (unsigned char)(value >> 8); p[2] = (unsigned char)(value >> 16); p[3] = (unsigned char)(value >> 24);\n    return UINT64_C(0);\n\}\n\n")
+        bb_push_str(out "static udewy_word udewy_store_u32(udewy_word value, udewy_word addr) \{\n    unsigned char *p = (unsigned char *)(uintptr_t)addr;\n#if defined(UDEWY_LITTLE_ENDIAN)\n    p[0] = (unsigned char)(value >> 0); p[1] = (unsigned char)(value >> 8); p[2] = (unsigned char)(value >> 16); p[3] = (unsigned char)(value >> 24);\n#else\n    p[0] = (unsigned char)(value >> 24); p[1] = (unsigned char)(value >> 16); p[2] = (unsigned char)(value >> 8); p[3] = (unsigned char)(value >> 0);\n#endif\n    return UINT64_C(0);\n\}\n\n")
     } else if flag =? CH_STORE_U64 {
-        bb_push_str(out "static udewy_word udewy_store_u64(udewy_word value, udewy_word addr) \{\n    unsigned char *p = (unsigned char *)(uintptr_t)addr;\n    p[0] = (unsigned char)(value >> 0); p[1] = (unsigned char)(value >> 8); p[2] = (unsigned char)(value >> 16); p[3] = (unsigned char)(value >> 24);\n    p[4] = (unsigned char)(value >> 32); p[5] = (unsigned char)(value >> 40); p[6] = (unsigned char)(value >> 48); p[7] = (unsigned char)(value >> 56);\n    return UINT64_C(0);\n\}\n\n")
+        bb_push_str(out "static udewy_word udewy_store_u64(udewy_word value, udewy_word addr) \{\n    unsigned char *p = (unsigned char *)(uintptr_t)addr;\n#if defined(UDEWY_LITTLE_ENDIAN)\n    p[0] = (unsigned char)(value >> 0); p[1] = (unsigned char)(value >> 8); p[2] = (unsigned char)(value >> 16); p[3] = (unsigned char)(value >> 24);\n    p[4] = (unsigned char)(value >> 32); p[5] = (unsigned char)(value >> 40); p[6] = (unsigned char)(value >> 48); p[7] = (unsigned char)(value >> 56);\n#else\n    p[0] = (unsigned char)(value >> 56); p[1] = (unsigned char)(value >> 48); p[2] = (unsigned char)(value >> 40); p[3] = (unsigned char)(value >> 32);\n    p[4] = (unsigned char)(value >> 24); p[5] = (unsigned char)(value >> 16); p[6] = (unsigned char)(value >> 8); p[7] = (unsigned char)(value >> 0);\n#endif\n    return UINT64_C(0);\n\}\n\n")
     }
     return void
 }
@@ -1374,7 +1380,10 @@ let c_finish_module = ():>int => {
     bb_push_str(out "#define UDEWY_TRUE (~UINT64_C(0))\n\n")
 
     if (c_helpers and CH_ALLOCA) not=? 0 {
-        bb_push_str(out "#if defined(__GNUC__) || defined(__clang__)\n#define UDEWY_ALLOCA(size) __builtin_alloca(size)\n#elif defined(__has_include)\n#if __has_include(<alloca.h>)\n#include <alloca.h>\n#define UDEWY_ALLOCA(size) alloca(size)\n#endif\n#endif\n#ifndef UDEWY_ALLOCA\n#error \"udewy C backend requires alloca support\"\n#endif\n\n")
+        bb_push_str(out "#if defined(__GNUC__) || defined(__clang__)\n#define UDEWY_ALLOCA(size) __builtin_alloca(size)\n#elif defined(_MSC_VER)\n#include <malloc.h>\n#define UDEWY_ALLOCA(size) _alloca(size)\n#elif defined(__has_include)\n#if __has_include(<alloca.h>)\n#include <alloca.h>\n#define UDEWY_ALLOCA(size) alloca(size)\n#endif\n#endif\n#ifndef UDEWY_ALLOCA\n#error \"udewy C backend requires alloca support from the selected C compiler\"\n#endif\n\n")
+    }
+    if (c_helpers and CH_ENDIAN_MASK) not=? 0 {
+        bb_push_str(out "#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && defined(__ORDER_BIG_ENDIAN__)\n#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__\n#define UDEWY_LITTLE_ENDIAN 1\n#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__\n#define UDEWY_BIG_ENDIAN 1\n#else\n#error \"unsupported target byte order for udewy C backend\"\n#endif\n#elif defined(_MSC_VER)\n#define UDEWY_LITTLE_ENDIAN 1\n#elif defined(__LITTLE_ENDIAN__) && !defined(__BIG_ENDIAN__)\n#define UDEWY_LITTLE_ENDIAN 1\n#elif defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__)\n#define UDEWY_BIG_ENDIAN 1\n#else\n#error \"cannot determine target byte order for udewy C backend\"\n#endif\n\n")
     }
     c_render_helper(out CH_BOOL)
     c_render_helper(out CH_SIGNED_DIV)
@@ -1513,7 +1522,7 @@ let c_finish_module = ():>int => {
     loop pi <? order_n {
         let lid:int = vec_get(c_function_order pi)
         if not intset_has(c_extern_fn lid) {
-            if (c_have_reachable =? FALSE_VAL) or intset_has(c_reachable lid) {
+            if (not c_have_reachable) or intset_has(c_reachable lid) {
                 bb_push_str(out "static udewy_word ")
                 bb_push_str(out intmap_get(c_fn_names lid))
                 bb_push_byte(out 40)
@@ -1529,7 +1538,7 @@ let c_finish_module = ():>int => {
             let name:int = intmap_get(c_fn_names ei)
             let wrapper:int = c_known_extern_wrapper(name)
             if wrapper =? 0 {
-                if (c_have_reachable =? FALSE_VAL) or intset_has(c_reachable ei) {
+                if (not c_have_reachable) or intset_has(c_reachable ei) {
                     bb_push_str(out "extern udewy_word ")
                     bb_push_str(out name)
                     bb_push_byte(out 40)
@@ -1537,7 +1546,7 @@ let c_finish_module = ():>int => {
                     bb_push_str(out ");\n")
                 }
             } else {
-                if (c_have_reachable =? FALSE_VAL) or intset_has(c_reachable ei) {
+                if (not c_have_reachable) or intset_has(c_reachable ei) {
                     bb_push_str(out "static udewy_word ")
                     bb_push_str(out wrapper)
                     bb_push_byte(out 40)
@@ -1554,7 +1563,7 @@ let c_finish_module = ():>int => {
     let wi:int = 0
     loop wi <? c_next_label {
         if intset_has(c_extern_fn wi) {
-            if (c_have_reachable =? FALSE_VAL) or intset_has(c_reachable wi) {
+            if (not c_have_reachable) or intset_has(c_reachable wi) {
                 let name:int = intmap_get(c_fn_names wi)
                 let wrapper:int = c_known_extern_wrapper(name)
                 if wrapper not=? 0 {
@@ -1606,9 +1615,9 @@ let c_finish_module = ():>int => {
         }
         g2 = g2 + 1
     }
-    let need_init:int = FALSE_VAL
+    let need_init:int = false
     if vec_len(init_lines) >? 0 {
-        need_init = TRUE_VAL
+        need_init = true
         bb_push_str(out "static void udewy_backend_init(void) \{\n")
         let li:int = 0
         loop li <? vec_len(init_lines) {
@@ -1624,7 +1633,7 @@ let c_finish_module = ():>int => {
     loop fi <? order_n {
         let lid:int = vec_get(c_function_order fi)
         if not intset_has(c_extern_fn lid) {
-            if (c_have_reachable =? FALSE_VAL) or intset_has(c_reachable lid) {
+            if (not c_have_reachable) or intset_has(c_reachable lid) {
                 bb_push_str(out "static udewy_word ")
                 bb_push_str(out intmap_get(c_fn_names lid))
                 bb_push_byte(out 40)
@@ -1658,13 +1667,13 @@ let c_finish_module = ():>int => {
     if c_module_init_name not=? 0 {
         bb_push_str(out "    ")
         # Find which fn matches module_init_name source.
-        let found:int = 0
+        let found:int = false
         let mi:int = 0
         loop mi <? c_next_label {
             if intmap_has(c_fn_source_names mi) {
                 if str_eq(intmap_get(c_fn_source_names mi) c_module_init_name) {
                     bb_push_str(out intmap_get(c_fn_names mi))
-                    found = 1
+                    found = true
                     break
                 }
             }

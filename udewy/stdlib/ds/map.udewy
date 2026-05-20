@@ -91,15 +91,15 @@ let map_slot_value = (slot:int):>int => {
 }
 
 let map_keys_equal = (key_a:int len_a:int key_b:int len_b:int):>int => {
-    if len_a not=? len_b { return FALSE_VAL }
+    if len_a not=? len_b { return false }
     let i:int = 0
     loop i <? len_a {
         if __load_u8__(key_a + i) not=? __load_u8__(key_b + i) {
-            return FALSE_VAL
+            return false
         }
         i = i + 1
     }
-    return TRUE_VAL
+    return true
 }
 
 # Find the slot for the given key. Returns the slot address.
@@ -221,8 +221,8 @@ let map_get_cstr = (m:int key:int):>int => {
 
 let map_has = (m:int key:int keylen:int):>int => {
     let slot:int = map_probe(m key keylen)
-    if map_slot_state(slot) =? MAP_OCCUPIED { return TRUE_VAL }
-    return FALSE_VAL
+    if map_slot_state(slot) =? MAP_OCCUPIED { return true }
+    return false
 }
 
 let map_has_str = (m:int key:int):>int => {
@@ -235,7 +235,7 @@ let map_remove = (m:int key:int keylen:int):>int => {
         __store__(MAP_TOMBSTONE slot + MAP_SLOT_STATE)
         __store__(map_size(m) - 1 m + MAP_OFF_SIZE)
         __store__(__load__(m + MAP_OFF_TOMB) + 1 m + MAP_OFF_TOMB)
-        return TRUE_VAL
+        return true
     }
-    return FALSE_VAL
+    return false
 }

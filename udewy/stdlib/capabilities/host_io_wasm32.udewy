@@ -74,6 +74,14 @@ let host_chdir = (path_cstr:int):>int => {
     return 0 - 1
 }
 
+let host_getcwd = (buf:int cap:int):>int => {
+    return 0 - 1
+}
+
+let host_setsid = ():>int => {
+    return 0 - 1
+}
+
 # Stubs for the networking / time helpers used by the wasm backend's serve
 # mode. These can never actually run on the wasm target (the wasm-built
 # bootstrap has no host filesystem either), so they just fail.

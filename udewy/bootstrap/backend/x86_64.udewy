@@ -370,7 +370,7 @@ let x86_set_module_init = (name:int):>void => {
 
 let x86_set_reachable_functions = (label_ids:int):>void => {
     x86_reachable_fn_label_ids = label_ids
-    x86_have_reachable = TRUE_VAL
+    x86_have_reachable = true
     return void
 }
 
@@ -1217,7 +1217,7 @@ let x86_begin_if = ():>void => {
     let end_label:int = x86_new_label("if_end")
     vec_push(x86_if_else_labels else_label)
     vec_push(x86_if_end_labels end_label)
-    vec_push(x86_if_else_emitted FALSE_VAL)
+    vec_push(x86_if_else_emitted false)
     x86_emit_indented("testq %rax, %rax")
     x86_emit_jmp("jz" else_label)
     return void
@@ -1227,7 +1227,7 @@ let x86_begin_else = ():>void => {
     let top:int = vec_len(x86_if_else_labels) - 1
     let else_label:int = vec_get(x86_if_else_labels top)
     let end_label:int = vec_get(x86_if_end_labels top)
-    vec_set(x86_if_else_emitted top TRUE_VAL)
+    vec_set(x86_if_else_emitted top true)
     x86_emit_jmp("jmp" end_label)
     x86_emit_label_str(else_label)
     return void
@@ -1241,7 +1241,7 @@ let x86_end_if = ():>void => {
     vec_pop(x86_if_else_labels)
     vec_pop(x86_if_end_labels)
     vec_pop(x86_if_else_emitted)
-    if emitted =? FALSE_VAL { x86_emit_label_str(else_label) }
+    if not emitted { x86_emit_label_str(else_label) }
     x86_emit_label_str(end_label)
     return void
 }
@@ -1353,9 +1353,9 @@ let x86_init_intrinsics = ():>void => {
 
 let x86_is_intrinsic = (name:int):>int => {
     x86_init_intrinsics()
-    if map_has_str(g_x86_intrinsics name) { return TRUE_VAL }
-    if x86_mixed_extern_arg_slots(name) >=? 0 { return TRUE_VAL }
-    return FALSE_VAL
+    if map_has_str(g_x86_intrinsics name) { return true }
+    if x86_mixed_extern_arg_slots(name) >=? 0 { return true }
+    return false
 }
 
 let x86_intrinsic_arity = (name:int):>int => {
@@ -1486,7 +1486,7 @@ let x86_compile_and_link = (code:int input_name:int cache_dir:int options:int):>
         let ai:int = 0
         loop ai <? vec_len(artifacts) {
             let p:int = vec_get(artifacts ai)
-            if be_artifact_is_shared(p) =? TRUE_VAL { vec_push(shared_arts p) }
+            if be_artifact_is_shared(p) { vec_push(shared_arts p) }
             else { vec_push(static_arts p) }
             ai = ai + 1
         }

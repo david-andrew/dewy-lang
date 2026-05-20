@@ -155,7 +155,7 @@ let ps_new = (src:int toks:int):>int => {
     __store__(tds s + PS_TYPE_DECL_STACK)
     __store__(0 s + PS_BUILTIN_CONSTS)
     __store__(0 s + PS_LOOP_DEPTH)
-    __store__(FALSE_VAL s + PS_IN_CONDITION)
+    __store__(false s + PS_IN_CONDITION)
     __store__(vec_new(4) s + PS_GLOBAL_INIT_LABELS)
     __store__(0 s + PS_NEXT_GLOBAL_INIT)
     __store__(0 - 1 s + PS_CURRENT_FN)
@@ -296,9 +296,9 @@ let error_non_function_forward_ref = (state:int loc:int name:int):>void => {
 }
 
 let is_decl_kind = (kind:int):>int => {
-    if kind =? TK_LET { return TRUE_VAL }
-    if kind =? TK_CONST { return TRUE_VAL }
-    return FALSE_VAL
+    if kind =? TK_LET { return true }
+    if kind =? TK_CONST { return true }
+    return false
 }
 
 let var_lookup = (state:int name:int):>int => {
@@ -328,10 +328,10 @@ let type_decl_lookup = (state:int name:int):>int => {
     let i:int = vec_len(tds) - 1
     loop i >=? 0 {
         let scope:int = vec_get(tds i)
-        if set_has_str(scope name) { return TRUE_VAL }
+        if set_has_str(scope name) { return true }
         i = i - 1
     }
-    return FALSE_VAL
+    return false
 }
 
 let type_decl_declare = (state:int name:int loc:int):>void => {
@@ -466,14 +466,14 @@ let lookup_stable_int = (state:int name:int):>int => {
 let lookup_stable_int_with_found = (state:int name:int found_out:int):>int => {
     let sv:int = lookup_stable_value(state name)
     if sv =? 0 {
-        __store__(FALSE_VAL found_out)
+        __store__(false found_out)
         return 0
     }
     if sv_kind(sv) not=? SV_INT {
-        __store__(FALSE_VAL found_out)
+        __store__(false found_out)
         return 0
     }
-    __store__(TRUE_VAL found_out)
+    __store__(true found_out)
     return sv_value(sv)
 }
 
@@ -487,7 +487,7 @@ let note_function_reference = (state:int name:int num_args:int loc:int):>int => 
         let na:int = 0
         if num_args not=? 0 - 1 { na = num_args }
         let label_id:int = (be_declare_function)(name na)
-        return fn_declare(state name label_id num_args FALSE_VAL FALSE_VAL)
+        return fn_declare(state name label_id num_args false false)
     }
     if num_args not=? 0 - 1 {
         if fe_num_args(entry) =? 0 - 1 {
@@ -513,7 +513,7 @@ let declare_extern_function = (state:int name:int num_args:int loc:int):>int => 
     let entry:int = fn_lookup(state name)
     if entry =? 0 {
         let label_id:int = (be_declare_extern_function)(name num_args)
-        return fn_declare(state name label_id num_args TRUE_VAL TRUE_VAL)
+        return fn_declare(state name label_id num_args true true)
     }
     if fe_is_defined(entry) {
         eprint("Function '")
@@ -524,8 +524,8 @@ let declare_extern_function = (state:int name:int num_args:int loc:int):>int => 
         diag_error(loc "extern declaration arity mismatch")
     }
     fe_set_num_args(entry num_args)
-    fe_set_is_defined(entry TRUE_VAL)
-    fe_set_is_extern(entry TRUE_VAL)
+    fe_set_is_defined(entry true)
+    fe_set_is_extern(entry true)
     (be_bind_extern_function)(fe_label(entry) name)
     return entry
 }
@@ -565,8 +565,8 @@ let get_precedence = (kind:int):>int => {
 }
 
 let is_binop = (kind:int):>int => {
-    if get_precedence(kind) >? 0 { return TRUE_VAL }
-    return FALSE_VAL
+    if get_precedence(kind) >? 0 { return true }
+    return false
 }
 
 # ----------------------------------------------------------------------------
@@ -602,19 +602,19 @@ let matching_right_paren_idx = (state:int idx:int):>int => {
 
 let paren_in_condition_is_value_expr = (state:int idx:int):>int => {
     let right_idx:int = matching_right_paren_idx(state idx)
-    if right_idx + 1 >=? tok_count(state) { return FALSE_VAL }
+    if right_idx + 1 >=? tok_count(state) { return false }
     let k:int = tok_kind(state right_idx + 1)
-    if not is_binop(k) { return FALSE_VAL }
-    if k =? TK_AND { return FALSE_VAL }
-    if k =? TK_OR { return FALSE_VAL }
-    return TRUE_VAL
+    if not is_binop(k) { return false }
+    if k =? TK_AND { return false }
+    if k =? TK_OR { return false }
+    return true
 }
 
 let looks_like_fn_decl = (state:int idx:int):>int => {
     let n:int = tok_count(state)
-    if idx + 3 >=? n { return FALSE_VAL }
-    if tok_kind(state idx + 2) not=? TK_ASSIGN { return FALSE_VAL }
-    if tok_kind(state idx + 3) not=? TK_LEFT_PAREN { return FALSE_VAL }
+    if idx + 3 >=? n { return false }
+    if tok_kind(state idx + 2) not=? TK_ASSIGN { return false }
+    if tok_kind(state idx + 3) not=? TK_LEFT_PAREN { return false }
     let depth:int = 1
     let scan:int = idx + 4
     loop (scan <? n) and (depth >? 0) {
@@ -623,14 +623,14 @@ let looks_like_fn_decl = (state:int idx:int):>int => {
         else if k =? TK_RIGHT_PAREN { depth = depth - 1 }
         scan = scan + 1
     }
-    if depth not=? 0 { return FALSE_VAL }
-    if scan >=? n { return FALSE_VAL }
-    if tok_kind(state scan) not=? TK_FN_TYPE { return FALSE_VAL }
+    if depth not=? 0 { return false }
+    if scan >=? n { return false }
+    if tok_kind(state scan) not=? TK_FN_TYPE { return false }
     scan = scan + 1
     if (scan <? n) and (tok_kind(state scan) =? TK_TYPE_PARAM) { scan = scan + 1 }
-    if scan >=? n { return FALSE_VAL }
-    if tok_kind(state scan) =? TK_FN_ARROW { return TRUE_VAL }
-    return FALSE_VAL
+    if scan >=? n { return false }
+    if tok_kind(state scan) =? TK_FN_ARROW { return true }
+    return false
 }
 
 let require_type_annotation = (state:int idx:int):>int => {
@@ -838,10 +838,10 @@ let parse_const_only_ident_directive = (state:int name:int loc:int kind_out:int 
         note_stable_value_use(state sv)
         __store__(sv_kind(sv) kind_out)
         __store__(stable_value_to_directive_value(sv) value_out)
-        return TRUE_VAL
+        return true
     }
     if (var_lookup(state name) not=? 0) or (global_lookup(state name) not=? 0) {
-        return FALSE_VAL
+        return false
     }
     if type_decl_lookup(state name) {
         error_type_decl_runtime_use(state name loc)
@@ -850,7 +850,7 @@ let parse_const_only_ident_directive = (state:int name:int loc:int kind_out:int 
     note_fn_use(state fe_label(entry))
     __store__(SV_FN kind_out)
     __store__((be_function_ref)(fe_label(entry)) value_out)
-    return TRUE_VAL
+    return true
 }
 
 let parse_array_elements = (state:int idx:int kinds:int elems:int idx_out:int):>void => {
@@ -929,7 +929,7 @@ let parse_static_alloca_size = (state:int idx:int size_out:int):>int => {
 
 let parse_static_intrinsic_int_arg = (state:int name:int idx:int arg_index:int call_loc:int size_out:int):>int => {
     let sv_out:int = __static_alloca__(8)
-    let new_idx:int = try_parse_stable_expr(state idx FALSE_VAL sv_out)
+    let new_idx:int = try_parse_stable_expr(state idx false sv_out)
     if new_idx =? 0 - 1 {
         diag_error(call_loc "Intrinsic argument must be a compile-time integer")
     }
@@ -1023,8 +1023,8 @@ let parse_atom = (state:int idx:int):>int => {
             let runtime_arg_count:int = 0
 
             loop (idx <? n) and (tok_kind(state idx) not=? TK_RIGHT_PAREN) {
-                let is_static:int = FALSE_VAL
-                if ((static_indices_mask >> arg_count) and 1) =? 1 { is_static = TRUE_VAL }
+                let is_static:int = false
+                if ((static_indices_mask >> arg_count) and 1) =? 1 { is_static = true }
                 if is_static {
                     let size_out:int = __static_alloca__(8)
                     idx = parse_static_intrinsic_int_arg(state name idx arg_count call_loc size_out)
@@ -1135,15 +1135,15 @@ let parse_expr_inner = (state:int idx:int min_prec:int is_condition:int):>int =>
             (be_pipe_call)()
         } else if is_condition and (k =? TK_AND) {
             let label:int = (be_cond_and_split)()
-            idx = parse_expr_inner(state idx prec + 1 TRUE_VAL)
+            idx = parse_expr_inner(state idx prec + 1 true)
             (be_cond_and_join)(label)
         } else if is_condition and (k =? TK_OR) {
             let label:int = (be_cond_or_split)()
-            idx = parse_expr_inner(state idx prec + 1 TRUE_VAL)
+            idx = parse_expr_inner(state idx prec + 1 true)
             (be_cond_or_join)(label)
         } else {
             (be_save_value)()
-            idx = parse_expr_inner(state idx prec + 1 FALSE_VAL)
+            idx = parse_expr_inner(state idx prec + 1 false)
             (be_binary_op)(k)
         }
     }
@@ -1152,11 +1152,11 @@ let parse_expr_inner = (state:int idx:int min_prec:int is_condition:int):>int =>
 }
 
 let parse_expr = (state:int idx:int min_prec:int):>int => {
-    return parse_expr_inner(state idx min_prec FALSE_VAL)
+    return parse_expr_inner(state idx min_prec false)
 }
 
 let parse_condition_expr = (state:int idx:int min_prec:int):>int => {
-    return parse_expr_inner(state idx min_prec TRUE_VAL)
+    return parse_expr_inner(state idx min_prec true)
 }
 
 # ----------------------------------------------------------------------------
@@ -1165,12 +1165,12 @@ let parse_condition_expr = (state:int idx:int min_prec:int):>int => {
 
 let is_literal_type_decl_annotation = (state:int idx:int):>int => {
     let n:int = tok_count(state)
-    if idx >=? n { return FALSE_VAL }
-    if tok_kind(state idx) not=? TK_TYPE { return FALSE_VAL }
+    if idx >=? n { return false }
+    if tok_kind(state idx) not=? TK_TYPE { return false }
     let name:int = get_token_name(state idx)
-    if not str_eq(name "type") { return FALSE_VAL }
-    if (idx + 1 >=? n) or (tok_kind(state idx + 1) not=? TK_TYPE_PARAM) { return TRUE_VAL }
-    return FALSE_VAL
+    if not str_eq(name "type") { return false }
+    if (idx + 1 >=? n) or (tok_kind(state idx + 1) not=? TK_TYPE_PARAM) { return true }
+    return false
 }
 
 let ignored_type_decl_name_idx = (state:int idx:int):>int => {
@@ -1193,34 +1193,34 @@ let ignored_type_decl_name_idx = (state:int idx:int):>int => {
 }
 
 let looks_like_ignored_type_decl = (state:int idx:int):>int => {
-    if ignored_type_decl_name_idx(state idx) =? 0 - 1 { return FALSE_VAL }
-    return TRUE_VAL
+    if ignored_type_decl_name_idx(state idx) =? 0 - 1 { return false }
+    return true
 }
 
 let is_ignored_decl_statement_start = (state:int idx:int):>int => {
     let n:int = tok_count(state)
-    if idx >=? n { return FALSE_VAL }
+    if idx >=? n { return false }
     let k:int = tok_kind(state idx)
-    if k =? TK_LET { return TRUE_VAL }
-    if k =? TK_CONST { return TRUE_VAL }
-    if k =? TK_IF { return TRUE_VAL }
-    if k =? TK_LOOP { return TRUE_VAL }
-    if k =? TK_RETURN { return TRUE_VAL }
-    if k =? TK_BREAK { return TRUE_VAL }
-    if k =? TK_CONTINUE { return TRUE_VAL }
-    if k =? TK_ELSE { return TRUE_VAL }
-    if k =? TK_RIGHT_BRACE { return TRUE_VAL }
-    if k =? TK_IDENT { return TRUE_VAL }
-    if k =? TK_IDENT_CALL { return TRUE_VAL }
-    if k =? TK_NUMBER { return TRUE_VAL }
-    if k =? TK_STRING { return TRUE_VAL }
-    if k =? TK_VOID { return TRUE_VAL }
-    if k =? TK_LEFT_PAREN { return TRUE_VAL }
-    if k =? TK_LEFT_BRACKET { return TRUE_VAL }
-    if k =? TK_LEFT_BRACE { return TRUE_VAL }
-    if k =? TK_MINUS { return TRUE_VAL }
-    if k =? TK_NOT { return TRUE_VAL }
-    return FALSE_VAL
+    if k =? TK_LET { return true }
+    if k =? TK_CONST { return true }
+    if k =? TK_IF { return true }
+    if k =? TK_LOOP { return true }
+    if k =? TK_RETURN { return true }
+    if k =? TK_BREAK { return true }
+    if k =? TK_CONTINUE { return true }
+    if k =? TK_ELSE { return true }
+    if k =? TK_RIGHT_BRACE { return true }
+    if k =? TK_IDENT { return true }
+    if k =? TK_IDENT_CALL { return true }
+    if k =? TK_NUMBER { return true }
+    if k =? TK_STRING { return true }
+    if k =? TK_VOID { return true }
+    if k =? TK_LEFT_PAREN { return true }
+    if k =? TK_LEFT_BRACKET { return true }
+    if k =? TK_LEFT_BRACE { return true }
+    if k =? TK_MINUS { return true }
+    if k =? TK_NOT { return true }
+    return false
 }
 
 let skip_ignored_type_suffix = (state:int idx:int):>int => {
@@ -1244,7 +1244,7 @@ let skip_ignored_type_suffix = (state:int idx:int):>int => {
 let skip_ignored_group = (state:int idx:int closing:int):>int => {
     let n:int = tok_count(state)
     loop (idx <? n) and (tok_kind(state idx) not=? closing) {
-        idx = skip_ignored_expr(state idx FALSE_VAL)
+        idx = skip_ignored_expr(state idx false)
     }
     return expect(state idx closing)
 }
@@ -1317,7 +1317,7 @@ let parse_ignored_type_decl = (state:int idx:int):>int => {
     idx = name_idx + 1
     idx = idx + 1  # skip the :type annotation
     idx = expect(state idx TK_ASSIGN)
-    idx = skip_ignored_expr(state idx TRUE_VAL)
+    idx = skip_ignored_expr(state idx true)
     let entry:int = fn_lookup(state name)
     if (vec_len(ps_type_decl_stack(state)) =? 1) and (entry not=? 0) and not fe_is_defined(entry) {
         error_non_function_forward_ref(state tok_location(state name_idx) name)
@@ -1336,8 +1336,8 @@ let parse_var_decl = (state:int idx:int):>int => {
     }
     let n:int = tok_count(state)
     let decl_kind:int = tok_kind(state idx)
-    let is_const:int = FALSE_VAL
-    if decl_kind =? TK_CONST { is_const = TRUE_VAL }
+    let is_const:int = false
+    if decl_kind =? TK_CONST { is_const = true }
     idx = idx + 1
     if tok_kind(state idx) not=? TK_IDENT {
         diag_error(tok_location(state idx) "Expected identifier after declaration keyword")
@@ -1356,7 +1356,7 @@ let parse_var_decl = (state:int idx:int):>int => {
     let const_value:int = 0
     if is_const {
         let sv_out:int = __static_alloca__(8)
-        let new_idx:int = try_parse_stable_expr(state idx TRUE_VAL sv_out)
+        let new_idx:int = try_parse_stable_expr(state idx true sv_out)
         if new_idx not=? 0 - 1 {
             idx = new_idx
             const_value = __load__(sv_out)
@@ -1426,14 +1426,14 @@ let parse_fn_decl = (state:int idx:int):>int => {
             diag_error(tok_location(state idx - 1) "function arity mismatch")
         }
         fe_set_num_args(entry pc)
-        fe_set_is_defined(entry TRUE_VAL)
+        fe_set_is_defined(entry true)
         label_id = fe_label(entry)
     } else {
         label_id = (be_declare_function)(fn_name pc)
-        fn_declare(state fn_name label_id pc TRUE_VAL FALSE_VAL)
+        fn_declare(state fn_name label_id pc true false)
     }
-    let is_main:int = FALSE_VAL
-    if str_eq(fn_name "main") { is_main = TRUE_VAL }
+    let is_main:int = false
+    if str_eq(fn_name "main") { is_main = true }
     (be_begin_function)(label_id fn_name pc is_main)
     ps_set_current_fn(state label_id)
     push_parse_scope(state)
@@ -1442,7 +1442,7 @@ let parse_fn_decl = (state:int idx:int):>int => {
         let slot:int = (be_alloc_local)()
         (be_load_param)(i)
         (be_store_local)(slot)
-        var_declare(state vec_get(param_names i) le_new(slot FALSE_VAL 0) vec_get(param_locs i))
+        var_declare(state vec_get(param_names i) le_new(slot false 0) vec_get(param_locs i))
         i = i + 1
     }
     let returns_out:int = __static_alloca__(8)
@@ -1476,7 +1476,7 @@ let parse_if_stmnt = (state:int idx:int returns_out:int):>int => {
     pop_parse_scope(state)
     let all_return:int = __load__(branch_returns)
     let nested:int = 1
-    let saw_final_else:int = FALSE_VAL
+    let saw_final_else:int = false
     loop (idx <? n) and (tok_kind(state idx) =? TK_ELSE) {
         idx = idx + 1
         if (idx <? n) and (tok_kind(state idx) =? TK_IF) {
@@ -1490,16 +1490,16 @@ let parse_if_stmnt = (state:int idx:int returns_out:int):>int => {
             idx = parse_block(state idx branch_returns)
             idx = expect(state idx TK_RIGHT_BRACE)
             pop_parse_scope(state)
-            if not __load__(branch_returns) { all_return = FALSE_VAL }
+            if not __load__(branch_returns) { all_return = false }
         } else {
-            saw_final_else = TRUE_VAL
+            saw_final_else = true
             (be_begin_else)()
             idx = expect(state idx TK_LEFT_BRACE)
             push_parse_scope(state)
             idx = parse_block(state idx branch_returns)
             idx = expect(state idx TK_RIGHT_BRACE)
             pop_parse_scope(state)
-            if not __load__(branch_returns) { all_return = FALSE_VAL }
+            if not __load__(branch_returns) { all_return = false }
             let i:int = 0
             loop i <? nested {
                 (be_end_if)()
@@ -1642,39 +1642,39 @@ let parse_statement = (state:int idx:int returns_out:int):>int => {
         if looks_like_fn_decl(state idx) {
             diag_error(tok_location(state idx) "Functions may only be declared at top level")
         }
-        __store__(FALSE_VAL returns_out)
+        __store__(false returns_out)
         return parse_var_decl(state idx)
     }
     if k =? TK_IF {
         return parse_if_stmnt(state idx returns_out)
     }
     if k =? TK_LOOP {
-        __store__(FALSE_VAL returns_out)
+        __store__(false returns_out)
         return parse_loop_stmnt(state idx)
     }
     if k =? TK_RETURN {
-        __store__(TRUE_VAL returns_out)
+        __store__(true returns_out)
         return parse_return_stmnt(state idx)
     }
     if k =? TK_BREAK {
-        __store__(FALSE_VAL returns_out)
+        __store__(false returns_out)
         return parse_break_stmnt(state idx)
     }
     if k =? TK_CONTINUE {
-        __store__(FALSE_VAL returns_out)
+        __store__(false returns_out)
         return parse_continue_stmnt(state idx)
     }
-    __store__(FALSE_VAL returns_out)
+    __store__(false returns_out)
     return parse_assign_or_expr(state idx)
 }
 
 let parse_block = (state:int idx:int returns_out:int):>int => {
-    let block_returns:int = FALSE_VAL
+    let block_returns:int = false
     let n:int = tok_count(state)
     let stmt_returns:int = __static_alloca__(8)
     loop (idx <? n) and (tok_kind(state idx) not=? TK_RIGHT_BRACE) {
         idx = parse_statement(state idx stmt_returns)
-        if __load__(stmt_returns) { block_returns = TRUE_VAL }
+        if __load__(stmt_returns) { block_returns = true }
     }
     __store__(block_returns returns_out)
     return idx
@@ -1698,8 +1698,8 @@ let parse_program = (state:int):>void => {
                 idx = parse_fn_decl(state idx)
                 continue
             }
-            let is_const:int = FALSE_VAL
-            if k =? TK_CONST { is_const = TRUE_VAL }
+            let is_const:int = false
+            if k =? TK_CONST { is_const = true }
             idx = idx + 1
             let name_loc:int = tok_location(state idx)
             let name:int = get_token_name(state idx)
@@ -1709,12 +1709,12 @@ let parse_program = (state:int):>void => {
             check_top_level_value_name(state name name_loc)
             if (idx <? n) and (tok_kind(state idx) =? TK_EXTERN) {
                 let label_id:int = (be_declare_extern_global)(name)
-                global_declare(state name ge_new(label_id is_const 0 TRUE_VAL) name_loc)
+                global_declare(state name ge_new(label_id is_const 0 true) name_loc)
                 idx = idx + 1
                 continue
             }
             let sv_out:int = __static_alloca__(8)
-            let new_idx:int = try_parse_stable_expr(state idx FALSE_VAL sv_out)
+            let new_idx:int = try_parse_stable_expr(state idx false sv_out)
             if new_idx not=? 0 - 1 {
                 idx = new_idx
                 let sv:int = __load__(sv_out)
@@ -1723,13 +1723,13 @@ let parse_program = (state:int):>void => {
                 let label_id:int = (be_define_global)(0 dkind dvalue)
                 let cv:int = 0
                 if is_const { cv = sv }
-                global_declare(state name ge_new(label_id is_const cv FALSE_VAL) name_loc)
+                global_declare(state name ge_new(label_id is_const cv false) name_loc)
             } else {
                 let label_id:int = (be_define_global)(0 SV_INT 0)
                 let init_name:int = next_global_init_name(state)
                 let init_label_id:int = (be_declare_function)(init_name 0)
                 vec_push(ps_global_init_labels(state) init_label_id)
-                (be_begin_function)(init_label_id init_name 0 FALSE_VAL)
+                (be_begin_function)(init_label_id init_name 0 false)
                 ps_set_current_fn(state init_label_id)
                 idx = parse_expr(state idx 0)
                 (be_store_global)(label_id)
@@ -1737,7 +1737,7 @@ let parse_program = (state:int):>void => {
                 (be_emit_return)()
                 (be_end_function)()
                 ps_set_current_fn(state 0 - 1)
-                global_declare(state name ge_new(label_id is_const 0 FALSE_VAL) name_loc)
+                global_declare(state name ge_new(label_id is_const 0 false) name_loc)
             }
         } else {
             diag_error(tok_location(state idx) "Only declarations allowed at top level")
@@ -1830,7 +1830,7 @@ let parse_run = (toks:int src:int):>int => {
     if vec_len(ps_global_init_labels(state)) >? 0 {
         (be_set_module_init)("__udewy_globals_init__")
         globals_init_label = (be_declare_function)("__udewy_globals_init__" 0)
-        (be_begin_function)(globals_init_label "__udewy_globals_init__" 0 FALSE_VAL)
+        (be_begin_function)(globals_init_label "__udewy_globals_init__" 0 false)
         ps_set_current_fn(state globals_init_label)
         let inits:int = ps_global_init_labels(state)
         let i:int = 0
